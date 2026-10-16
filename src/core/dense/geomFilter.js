@@ -147,18 +147,19 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
   const params = maps.map(camParams)
   const centres = maps.map((m) => cameraCenter(m))
   const masks = maps.map((m) => new Uint8Array(m.width * m.height)) // 1 = drop
-  const totals = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0 }
+  const totals = emptyFilterTotals()
   let nCand = 0
   for (let mi = 0; mi < nMaps; mi++) {
     const m = maps[mi]
     const label = m.name ?? m.uuid?.slice(0, 8) ?? ''
     onProgress?.(mi, nMaps, label)
-    const { cand, lists } = referencePlan(m, mi, maps, centres, cfg, checkViews)
+    const { cand, lists, need } = referencePlan(m, mi, maps, centres, cfg, checkViews)
     nCand += cand.length
+    if (need < cfg.minConsistent) totals.clampedMaps++
     const depths = new Array(nMaps)
     for (const ci of cand) depths[ci] = maps[ci].depth
     const tMap = Date.now()
-    m.filterStats = judgeReference(mi, m, cand, lists, maps, params, centres, cfg, checkViews, depths,
+    m.filterStats = judgeReference(mi, m, cand, lists, maps, params, centres, cfg, need, checkViews, depths,
       masks[mi], totals, (frac) => onProgress?.(mi + frac, nMaps, label))
     logReference(onLog, m.filterStats, label, mi, nMaps, cand.length, cfg, tMap)
   }
@@ -230,7 +231,7 @@ export async function filterDepthMapsGeometricStreamed(metas, io, opts = {}, onL
     return plane
   }
   const masks = new Array(nMaps), stats = new Array(nMaps)
-  const totals = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0 }
+  const totals = emptyFilterTotals()
   let nCand = 0
   const refs = opts.refs ?? Array.from({ length: nMaps }, (_, i) => i)
   for (let k = 0; k < refs.length; k++) {
@@ -240,13 +241,14 @@ export async function filterDepthMapsGeometricStreamed(metas, io, opts = {}, onL
     onProgress?.(k, refs.length, label)
     const { depth, cost } = await io.loadReference(mi)
     const ref = { ...meta, depth, cost }
-    const { cand, lists } = referencePlan(ref, mi, metas, centres, cfg, checkViews)
+    const { cand, lists, need } = referencePlan(ref, mi, metas, centres, cfg, checkViews)
     nCand += cand.length
+    if (need < cfg.minConsistent) totals.clampedMaps++
     const depths = new Array(nMaps), keep = new Set(cand)
     for (const ci of cand) depths[ci] = await depthOf(ci, keep)
     const mask = new Uint8Array(meta.width * meta.height)
     const tMap = Date.now()
-    stats[mi] = judgeReference(mi, ref, cand, lists, metas, params, centres, cfg, checkViews, depths,
+    stats[mi] = judgeReference(mi, ref, cand, lists, metas, params, centres, cfg, need, checkViews, depths,
       mask, totals, (frac) => onProgress?.(k + frac, refs.length, label))
     logReference(onLog, stats[mi], label, mi, nMaps, cand.length, cfg, tMap)
     masks[mi] = packBits(mask)
@@ -297,22 +299,45 @@ export function filterConfig(opts = {}) {
     angleOn: minGeomAngleDeg > 0, cosMinAngle: Math.cos(minGeomAngleDeg * Math.PI / 180) }
 }
 
-// Which views a reference is checked against, map level and per 64 px block. A lone
-// map has no cross-view evidence — the test is meaningless, not "everything fails".
+// The filter's run totals, zeroed (`clampedMaps`: references whose required view
+// count was lowered by requiredConsistentViews). Summed key by key when a split run
+// is merged.
+export function emptyFilterTotals() {
+  return { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0, clampedMaps: 0 }
+}
+
+// How many agreeing views one reference needs: `minConsistent`, but never more than
+// the other views that overlap it at all (its frustum-cull candidates). Otherwise a
+// two-image project — or an image at the survey's edge that overlaps one neighbour —
+// has at most 1 possible witness, every pixel fails the default 2 and the depth maps
+// come out empty. Clamped per reference, not per pixel or block, so a reference with
+// many overlapping views keeps the full requirement everywhere (an edge strip only one
+// of them sees is still dropped). Floor 1: a reference nothing overlaps keeps failing
+// rather than passing unchecked. 0 stays 0 (the check is off).
+export function requiredConsistentViews(minConsistent, nOverlapping) {
+  if (!(minConsistent > 0)) return minConsistent
+  return Math.min(minConsistent, Math.max(1, nOverlapping))
+}
+
+// Which views a reference is checked against, map level and per 64 px block, and how
+// many of them must agree (`need`). A lone map has no cross-view evidence — the test
+// is meaningless, not "everything fails". `need` is taken from the culled candidate
+// count also when the cull is off, so the cull still never changes a verdict.
 function referencePlan(ref, mi, others, centres, cfg, checkViews) {
-  if (!checkViews) return { cand: [], lists: null }
-  if (!cfg.cull) return { cand: others.map((_, ci) => ci).filter((ci) => ci !== mi), lists: null }
-  const cand = referenceCandidates(ref, mi, others, centres)
-  return { cand, lists: blockCandidates(ref, others, cand) }
+  if (!checkViews) return { cand: [], lists: null, need: cfg.minConsistent }
+  const culled = referenceCandidates(ref, mi, others, centres)
+  const need = requiredConsistentViews(cfg.minConsistent, culled.length)
+  if (!cfg.cull) return { cand: others.map((_, ci) => ci).filter((ci) => ci !== mi), lists: null, need }
+  return { cand: culled, lists: blockCandidates(ref, others, culled), need }
 }
 
 // The per-pixel verdict for one reference map (the filter's whole kernel, shared by
 // the in-memory and the streamed filter). `depths[ci]` is candidate ci's UNFILTERED
 // depth plane; `others[ci]` its camera and size. Writes 1 = drop into `mask`,
 // accumulates `totals`, returns the map's own counts.
-function judgeReference(mi, ref, cand, plan, others, params, centres, cfg, checkViews, depths, mask, totals, onTick) {
+function judgeReference(mi, ref, cand, plan, others, params, centres, cfg, minConsistent, checkViews, depths, mask, totals, onTick) {
   const { width: w, height: h, depth, cost } = ref
-  const { maxCostGate, maxGeomCost, minConsistent, angleOn, cosMinAngle } = cfg
+  const { maxCostGate, maxGeomCost, angleOn, cosMinAngle } = cfg
   const bw = plan ? plan.bw : 1
   const lists = plan ? plan.lists : null
   const flatList = lists ? null : Int32Array.from(cand)
@@ -415,6 +440,10 @@ export function logFilterTotals(onLog, t, nMaps, cfg) {
   const pct = (n) => (100 * n / Math.max(1, t.considered)).toFixed(1)
   if (nMaps < 2) {
     onLog(`Depth filter: only ${nMaps} map — cross-view check skipped, NCC floor only`, 'warn', 'Dense')
+  }
+  if (t.clampedMaps > 0) {
+    onLog(`Depth filter: ${t.clampedMaps} of ${nMaps} map(s) overlap fewer than ${cfg.minConsistent} other views — `
+      + 'Consistent views lowered to the number they overlap (at least 1) for those maps', 'info', 'Dense')
   }
   onLog(`Depth filter: ${t.considered} px with depth → ${t.kept} kept (${pct(t.kept)}%); dropped `
     + `${t.lowNcc} NCC<${cfg.minNcc} (${pct(t.lowNcc)}%), `

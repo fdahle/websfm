@@ -31,7 +31,7 @@ export {
 } from './depthMap.js'
 export {
   filterCandidates, geomFilterLoopShare, filterDepthMapsGeometric, filterDepthMapsGeometricStreamed, logFilterCache,
-  applyPackedMask, filterSettings, filterConfig, logFilterTotals,
+  applyPackedMask, filterSettings, filterConfig, logFilterTotals, requiredConsistentViews, emptyFilterTotals,
 } from './geomFilter.js'
 export { mergePointsSpatial, createVoxelAccumulator } from './voxelAccumulator.js'
 export { fusionCostStats, planFusionSlabs, fusionGates } from './fusionPlan.js'

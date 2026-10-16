@@ -3,7 +3,7 @@ import {
   filterDepthMap, depthMapForImage, qualityToMaxDim, fitDepthQuality, autoBestK, fusionCostStats,
   fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric, filterCandidates, geomFilterLoopShare,
   filterDepthMapsGeometricStreamed, applyPackedMask, fuseDepthMapsStreamed, fusionGates, filterConfig, filterSettings,
-  depthMapSettings, streamedEligible,
+  depthMapSettings, streamedEligible, requiredConsistentViews,
 } from './mvs.js'
 import { packSparseForDense } from './sparseInput.js'
 import { DENSE_TUNING } from '../tuning.js'
@@ -632,7 +632,7 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     // Split over workers (disjoint contiguous reference chunks, as the store does):
     // the merged masks, stats and totals are the single run's.
     const chunks = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9, 10], [11, 12, 13, 14, 15, 16, 17]]
-    const merged = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0 }
+    const merged = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0, clampedMaps: 0 }
     for (const refs of chunks) {
       const p = await filterDepthMapsGeometricStreamed(metas, io, { minConsistent: 2, cacheBytes: S * S * 4, refs, summaryLogs: false }, () => {})
       for (const k of Object.keys(merged)) merged[k] += p.totals[k]
@@ -683,12 +683,63 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     expect(s.inconsistent).toBe(0)
   })
 
+  it('lowers the required views to what a reference overlaps (two-image project)', async () => {
+    // Regression: the default minConsistent 2 against a pair (≤1 other view) dropped
+    // every pixel, leaving empty depth maps and an empty dense cloud.
+    const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
+    maps[0].depth[CENTER] = 2 // a flyer: the one other view must still refute it
+    const logs = []
+    const s = filterDepthMapsGeometric(maps, { minConsistent: 2 }, (m) => logs.push(m))
+    expect(maps[0].depth[at(10, 16)]).toBeGreaterThan(0)
+    expect(maps[0].depth[CENTER]).toBe(0)
+    expect(s.kept).toBeGreaterThan(0)
+    expect(s.clampedMaps).toBe(2)
+    expect(logs.filter((m) => m.includes('overlap fewer than 2 other views'))).toHaveLength(1)
+
+    // The streamed filter reaches the same verdict and counts the same clamp.
+    const fresh = [mkPlane('a', 0), mkPlane('b', -0.1)]
+    fresh[0].depth[CENTER] = 2
+    const metas = fresh.map(({ depth, cost, rgb, ...meta }) => meta)
+    const io = { loadReference: async (i) => ({ depth: fresh[i].depth, cost: fresh[i].cost }), loadDepth: async (i) => fresh[i].depth }
+    const st = await filterDepthMapsGeometricStreamed(metas, io, { minConsistent: 2 }, () => {})
+    expect(st.totals).toEqual(s)
+  })
+
+  it('keeps the full requirement for a reference with enough overlapping views', () => {
+    // a overlaps b and c, so it still needs 2: a pixel only b supports (c has no depth
+    // there) is dropped, while one both support stays. No clamp is reported for a.
+    const maps = [mkPlane('a', 0), mkPlane('b', -0.1), mkPlane('c', 0.1)]
+    // a's pixel (16,16) lands at u=26 in c (t.x = +0.1 shifts +10 px): blank it there.
+    maps[2].depth[at(26, 16)] = 0
+    const logs = []
+    const s = filterDepthMapsGeometric(maps, { minConsistent: 2 }, (m) => logs.push(m))
+    expect(maps[0].depth[CENTER]).toBe(0)
+    expect(maps[0].depth[at(20, 10)]).toBeGreaterThan(0)
+    expect(s.clampedMaps).toBe(0)
+    expect(logs.some((m) => m.includes('overlap fewer than'))).toBe(false)
+  })
+
   it('is disabled by minConsistent 0 (NCC floor only)', () => {
     const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
     maps[0].depth[CENTER] = 2 // a flyer that the cross-view check would drop
     const s = filterDepthMapsGeometric(maps, { minConsistent: 0 }, () => {})
     expect(maps[0].depth[CENTER]).toBe(2)
     expect(s.inconsistent).toBe(0)
+  })
+})
+
+describe('requiredConsistentViews', () => {
+  it('never asks for more views than overlap the reference', () => {
+    expect(requiredConsistentViews(2, 1)).toBe(1)
+    expect(requiredConsistentViews(3, 2)).toBe(2)
+  })
+  it('keeps minConsistent when enough views overlap', () => {
+    expect(requiredConsistentViews(2, 2)).toBe(2)
+    expect(requiredConsistentViews(2, 17)).toBe(2)
+  })
+  it('floors at 1 so a reference nothing overlaps still fails, and leaves 0 (off) alone', () => {
+    expect(requiredConsistentViews(2, 0)).toBe(1)
+    expect(requiredConsistentViews(0, 5)).toBe(0)
   })
 })
 
