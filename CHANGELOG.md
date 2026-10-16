@@ -131,6 +131,14 @@ Notable changes to websfm. The format follows
 - Oblique drone captures are levelled, so DEMs and orthophotos are no longer tilted.
 - Datasets that start with near-stationary bursts now reconstruct fully (one
   dataset: 7 → 127 of 127 cameras).
+- Images without a focal length in their metadata (no EXIF) reconstructed on a guessed
+  field of view that could be far off, which broke scenes or left most cameras out.
+  The focal length is now estimated from the matched image pairs first (ETH3D
+  playground and terrace: from broken to 34 of 38 and 23 of 23 cameras).
+- A camera could be registered in the wrong place and stay there. After the
+  reconstruction, each camera is now checked against the matches with its strongest
+  partner images; cameras that disagree are taken out and registered again, or left
+  out if they still disagree.
 - 16-bit TIFFs had low contrast and gave few keypoints. Large TIFF batches used
   excessive memory.
 - Tiled detection created duplicate keypoints, which cost matches.
