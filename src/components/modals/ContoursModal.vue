@@ -4,6 +4,7 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { CONTOUR_DEFAULTS } from '../../core/defaults.user.js'
 import { contourLevels, MAX_CONTOUR_LEVELS } from '../../core/products/contours.js'
 import { checkNumberFields } from '../../utils/numberFields.js'
@@ -60,8 +61,9 @@ function run() {
           :hint="`0 = auto (${autoInterval} ${unit}). Heights run ${dem.zMin.toPrecision(5)} – ${dem.zMax.toPrecision(5)} ${unit}.`">
           <input id="ct-int" v-model.number="settings.interval" :aria-invalid="numbers.bad.interval" type="number" min="0" step="any" class="field-input" />
         </SettingsField>
-        <SettingsField label="Index contour every" label-for="ct-index" unit="lines"
+        <SettingsField label-for="ct-index" unit="lines"
           hint="Index contours go on their own layer (drawn heavier in GIS/CAD).">
+          <template #label><GlossaryTerm id="contour-lines">Index contour</GlossaryTerm> every</template>
           <input id="ct-index" v-model.number="settings.indexEvery" :aria-invalid="numbers.bad.indexEvery" type="number" min="1" step="1" class="field-input" />
         </SettingsField>
       </SettingsGroup>

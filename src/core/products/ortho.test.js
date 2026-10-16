@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { fillOrthoGaps, sampleOrtho, orthorectify, orthorectifyStreamed, affineToSfm, NO_LABEL } from './ortho.js'
+import { fillOrthoGaps, sampleOrtho, orthorectify, orthorectifyStreamed, affineToSfm, orthoCostCeiling, NO_LABEL } from './ortho.js'
+import { filterDepthMapsGeometric } from '../dense/geomFilter.js'
 import { makeSampleMap } from '../sfm/displayFrame.js'
 import { scaleK } from '../sfm/geometry.js'
 import { frameFromSimilarity } from './georef.js'
@@ -195,5 +196,31 @@ describe('affineToSfm', () => {
 
   it('refuses a non-affine transform so the caller falls back to direct calls', () => {
     expect(affineToSfm(([x, y, z]) => [x * x, y, z], [0, 0, 0], [10, 10, 10])).toBeNull()
+  })
+})
+
+describe('orthoCostCeiling', () => {
+  it('is 1 − minNcc when the run applied the cross-view filter, else unknown', () => {
+    expect(orthoCostCeiling({ geomConsistency: true, minNcc: 0.1 })).toBeCloseTo(0.9, 12)
+    expect(orthoCostCeiling({ geomConsistency: true, minNcc: 0.4 })).toBeCloseTo(0.6, 12)
+    expect(orthoCostCeiling({ geomConsistency: false, minNcc: null })).toBeNull()
+    expect(orthoCostCeiling({ geomConsistency: true })).toBeNull()
+    expect(orthoCostCeiling(null)).toBeNull()
+  })
+
+  it('matches the filter: a maxCost at the ceiling removes nothing the filter left', () => {
+    const m = nadirMap({ cx: 0, cy: 0 })
+    m.cost.fill(0.95) // every pixel above 1 − 0.1
+    for (let i = 0; i < m.cost.length; i += 2) m.cost[i] = 0.5
+    filterDepthMapsGeometric([m], { minNcc: 0.1 })
+    const ceiling = orthoCostCeiling({ geomConsistency: true, minNcc: 0.1 })
+    for (let i = 0; i < m.cost.length; i++) {
+      if (m.depth[i] > 0) expect(m.cost[i]).toBeLessThanOrEqual(ceiling)
+    }
+    const pts = [[0, 0, 0], [1, 1, 0], [-2, 3, 0], [3.3, -1.7, 0], [0.05, 0, 0], [1.05, 1, 0]]
+    expect(pts.filter((P) => sampleOrtho(P, [m], { maxCost: Infinity })).length).toBeGreaterThan(0)
+    for (const P of pts) {
+      expect(sampleOrtho(P, [m], { maxCost: ceiling })).toEqual(sampleOrtho(P, [m], { maxCost: Infinity }))
+    }
   })
 })

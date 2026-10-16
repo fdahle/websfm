@@ -41,11 +41,17 @@ Choose the mark **family** (Generic, Right angle, 45° cut, or Frame for the fil
 edge corner), the **positions** the camera uses (corners, sides, or both), and a
 **tolerance** (lower is stricter). Under Advanced, **Polarity** fixes whether marks
 are darker or lighter than the film, and **Generate background masks** masks the
-scanner background outside the detected film frame.
+scanner background outside the detected film frame (merged with an existing
+[mask](guide:masks) unless **Overwrite existing detections** is on). For a frame
+that sits in the same place on every scan, **Auto mask** can mask a fixed border
+instead.
 
 Each scan is searched on a small preview and every hit is then refined on the
 full-resolution scan. Large scans are processed one at a time so the browser does
-not run out of memory; the log reports how many run in parallel.
+not run out of memory; the log reports how many run in parallel. A scan over 30,000
+pixels on a side (a native KH-9 frame) is stored as a tiled pyramid at import (see
+[Getting Started](guide:getting-started)); detection reads its small windows from the
+full-resolution tiles, but marks cannot be placed by hand in its image view.
 
 Two independent checks guard against a confident hit on the wrong feature — for
 example a mark-shaped blob in the data strip:

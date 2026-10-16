@@ -4,6 +4,7 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { estimateBatchFiducialLayout, validateFiducialCalibration } from '../../core/sfm/fiducialCalibration.js'
 import { useSensorsStore } from '../../stores/useSensorsStore.js'
 import { nextMarkId, duplicateMarkIds } from '../../utils/fiducialMarks.js'
@@ -58,9 +59,9 @@ const blockReason=computed(()=>dupIds.value.length?`Certificate mark ids must be
    <SettingsField v-if="source==='batch'" label="Scan resolution" label-for="scanPitch" unit="mm/px" hint="Required to fix the metric scale of the estimated layout."><input id="scanPitch" v-model.number="scanPitchMm" type="number" step="any" min="0" class="field-input" /></SettingsField>
   </SettingsGroup>
   <SettingsGroup title="Camera calibration">
-   <SettingsField label="Focal length" label-for="calFocal" unit="mm"><input id="calFocal" v-model.number="focalMm" type="number" step="any" class="field-input" /></SettingsField>
-   <SettingsField label="Principal point X" label-for="calPpx" unit="mm"><input id="calPpx" v-model.number="ppxMm" type="number" step="any" class="field-input" /></SettingsField>
-   <SettingsField label="Principal point Y" label-for="calPpy" unit="mm"><input id="calPpy" v-model.number="ppyMm" type="number" step="any" class="field-input" /></SettingsField>
+   <SettingsField label-for="calFocal" unit="mm"><template #label><GlossaryTerm id="focal-length">Focal length</GlossaryTerm></template><input id="calFocal" v-model.number="focalMm" type="number" step="any" class="field-input" /></SettingsField>
+   <SettingsField label-for="calPpx" unit="mm"><template #label><GlossaryTerm id="principal-point">Principal point</GlossaryTerm> X</template><input id="calPpx" v-model.number="ppxMm" type="number" step="any" class="field-input" /></SettingsField>
+   <SettingsField label-for="calPpy" unit="mm"><template #label><GlossaryTerm id="principal-point">Principal point</GlossaryTerm> Y</template><input id="calPpy" v-model.number="ppyMm" type="number" step="any" class="field-input" /></SettingsField>
   </SettingsGroup>
   <SettingsGroup v-if="source==='certificate'" title="Certificate marks and slot mapping">
    <table class="cal-table"><thead><tr><th>Certificate mark</th><th>X (mm)</th><th>Y (mm)</th></tr></thead><tbody>

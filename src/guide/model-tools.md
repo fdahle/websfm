@@ -27,7 +27,7 @@ blown white.
   change the pipeline.
 - **Remove flagged…** removes them from the project, after the usual confirmation.
 
-Rescore after changing masks. A frame that is sharp only in one corner (shallow depth
+Rescore after changing [masks](guide:masks). A frame that is sharp only in one corner (shallow depth
 of field) may still be flagged; check it before removing it.
 
 ## Region

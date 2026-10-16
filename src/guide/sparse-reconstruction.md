@@ -18,20 +18,22 @@ missing overlap.
 
 ## Min correspondences
 <!-- param: minMatchesForRegistration default: 20 -->
-The minimum 3D–2D evidence needed to attempt registering another camera. Lowering it
+The minimum 3D–2D evidence needed to attempt registering another camera with PnP. Lowering it
 may admit weak cameras but makes pose estimation less stable. If only a few images fail,
 check their matches and sharpness before relaxing this gate.
 
 ## Reprojection threshold
 <!-- param: reprjThreshold default: 4.0 -->
-The inlier tolerance for camera-pose estimation and track filtering. It is expressed in
+The [reprojection error](help:reprojection-error) a match may have and still count as an
+inlier, both in camera-pose estimation and in track filtering. It is expressed in
 **detection pixels** and automatically scaled to native resolution. Lower is stricter;
 raise it cautiously for imprecisely localized features or heavily downscaled detection.
 
 ## Bundle adjustment iterations
 <!-- param: baIterations default: 30 -->
-More iterations can improve convergence at a time cost. A large residual that does not
-improve with more iterations usually points to bad matches, a poor camera model, weak
+Solver iterations per bundle adjustment pass. More iterations can improve convergence
+at a time cost. A large residual that does not
+improve with more iterations usually points to bad matches, poorly fitting intrinsics, weak
 geometry, or incorrect control—not an iteration shortage.
 
 ## Self-calibration
@@ -63,10 +65,9 @@ continuing to depth maps.
 Near the end of a run the log reports **track completion**: once the cameras are final,
 every verified match that links an existing point to a keypoint in another image adds
 that observation if it agrees with the point. This turns many two-view points into
-points seen by three or more images; the delivered model keeps only those (two-view
-points are dropped when the model has a strong multi-view core). The line also says how
-many observations came through pairs the match-consistency filter set aside — those
-pairs only lengthen existing points and never create new ones.
+points seen by three or more images. Once the model has a strong multi-view core, the
+delivered model drops the remaining two-view points, except where one is the only
+coverage of its part of an image, so thin-overlap areas of a block are not left empty.
 
 It then reports **guided track extension**. Each point is projected into the
 registered images that do not yet see it, and a keypoint with a matching descriptor is

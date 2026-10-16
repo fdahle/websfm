@@ -5,7 +5,8 @@ summary: Understand autosave, browser storage, folder-backed projects, and porta
 category: Start here
 order: 2
 ---
-websfm persists projects locally as you work; there is no upload or remote account.
+websfm persists projects locally as you work; there is no upload or remote account,
+so projects open and save without a connection (see [Working Offline](guide:offline)).
 The storage location matters because browser-private data and portable project files
 have different backup behaviour.
 

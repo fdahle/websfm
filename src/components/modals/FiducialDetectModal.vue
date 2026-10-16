@@ -172,8 +172,8 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
     </SettingsField>
 
     <SettingsGroup title="Search">
-      <SettingsField label="Fiducial positions"
-        hint="Where marks are expected relative to the detected film frame.">
+      <SettingsField hint="Where marks are expected relative to the detected film frame.">
+        <template #label>Fiducial positions</template>
         <SegmentedControl v-model="settings.positions" :options="POSITION_OPTIONS" />
       </SettingsField>
       <SettingsField label="Tolerance" label-for="fidTolerance"

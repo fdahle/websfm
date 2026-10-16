@@ -15,8 +15,8 @@ mechanism is $O(N^2)$ in the keypoint count $N$, so it cannot simply be handed
 every keypoint of a high-resolution image. WebSfM exposes the trade as two modes:
 
 - **Fast** caps each image at a fixed keypoint budget (a few thousand) and runs
-  one matching pass. The cap is applied by [descriptor](help:descriptor) strength,
-  so the strongest features survive — enough to register most datasets quickly.
+  one matching pass. It keeps the keypoints with the highest detector score, so
+  the strongest features survive — enough to register most datasets quickly.
 - **Full (tiled)** matches coarsely first, then splits each image into a grid of
   tiles and matches the tiles within the attention budget, recovering
   correspondences the flat cap would have thrown away. It is slower but denser,

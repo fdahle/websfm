@@ -5,6 +5,7 @@ import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
 import SourcePicker from './ui/SourcePicker.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useSourcePick, referenceOptionLabel } from '../../composables/useSourcePick.js'
 import { DISTANCE_DEFAULTS } from '../../core/defaults.user.js'
 
@@ -52,7 +53,7 @@ function run() {
         <SettingsField
           :hint="signable ? 'Positive above the reference surface, negative below — what change detection needs.'
             : 'Unsigned: the reference cloud has no normals. Estimate normals on it, or use a mesh, for a signed distance.'">
-          <label class="checkbox-row"><input v-model="settings.signed" type="checkbox" class="checkbox" :disabled="!signable" /> Signed (above / below)</label>
+          <label class="checkbox-row"><input v-model="settings.signed" type="checkbox" class="checkbox" :disabled="!signable" /> <GlossaryTerm id="cloud-distance">Signed</GlossaryTerm> (above / below)</label>
         </SettingsField>
         <SettingsField label="Ignore beyond" label-for="dist-max" :unit="unitLabel" hint="Farther points get no value (shown grey). 0 = no limit.">
           <input id="dist-max" v-model.number="settings.maxDistance" type="number" min="0" step="any" class="field-input" />

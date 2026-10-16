@@ -2,7 +2,7 @@
 id: cycle-consistency
 title: Cycle Consistency
 aliases: cycle consistency filter, rotation cycle, rotation-cycle filter, loop consistency
-summary: A check that relative rotations around any loop of three images compose back to the identity — used to catch false matches that pass geometric verification but are still wrong.
+summary: A check that relative rotations around any loop of three images compose back to the identity. WebSfM once used it to catch false pairs that pass geometric verification; it was removed because it dropped mostly true pairs.
 ---
 **Cycle consistency** exploits a fact about closed loops: if you compose the
 relative orientations around a cycle of cameras and return to where you started,

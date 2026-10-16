@@ -5,7 +5,7 @@ import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
-import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
 import { DEPTHMAP_DEFAULTS, DEPTHMAP_QUALITY_META } from '../../core/defaults.user.js'
@@ -100,58 +100,63 @@ function run() {
       <SettingsGroup title="Filtering">
         <SettingsField
           hint="Cleans per-image depth noise (drops flying pixels, smooths to the local median) before fusion.">
-          <template #label>Speckle / median filter</template>
+          <template #label><FieldHelp op="depth-maps" param="speckleFilter" :value="settings.speckleFilter" :default-value="DEPTHMAP_DEFAULTS.speckleFilter">Speckle / median filter</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.speckleFilter" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
-        <SettingsField v-if="settings.speckleFilter" label="Speckle tolerance" label-for="filterRelTol" unit="%"
+        <SettingsField v-if="settings.speckleFilter" label-for="filterRelTol" unit="%"
           hint="Drop a pixel whose depth differs from its 3×3 median by more than this. Lower = more aggressive.">
+          <template #label><FieldHelp op="depth-maps" param="filterRelTol" :value="settings.filterRelTol" :default-value="DEPTHMAP_DEFAULTS.filterRelTol">Speckle tolerance</FieldHelp></template>
           <input id="filterRelTol" v-model.number="settings.filterRelTol" :aria-invalid="numbers.bad.filterRelTol" type="number" min="1" max="50" step="1" class="field-input" />
         </SettingsField>
 
         <SettingsField
           hint="Keeps only pixels whose depth other views independently agree with. Removes sky and vegetation, which no photometric gate can catch.">
-          <template #label><GlossaryTerm id="depth-map">Cross-view consistency</GlossaryTerm></template>
+          <template #label><FieldHelp op="depth-maps" param="geomConsistency" :value="settings.geomConsistency" :default-value="DEPTHMAP_DEFAULTS.geomConsistency">Cross-view consistency</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.geomConsistency" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
-        <SettingsField v-if="settings.geomConsistency" label="Agreement tolerance" label-for="maxGeomCost" unit="px"
+        <SettingsField v-if="settings.geomConsistency" label-for="maxGeomCost" unit="px"
           hint="How closely another view's own depth must round-trip back to this pixel. Lower = stricter.">
+          <template #label><FieldHelp op="depth-maps" param="maxGeomCost" :value="settings.maxGeomCost" :default-value="DEPTHMAP_DEFAULTS.maxGeomCost">Agreement tolerance</FieldHelp></template>
           <input id="maxGeomCost" v-model.number="settings.maxGeomCost" :aria-invalid="numbers.bad.maxGeomCost" type="number" min="0.1" max="10" step="0.1" class="field-input" />
         </SettingsField>
 
-        <SettingsField v-if="settings.geomConsistency" label="Consistent views" label-for="minConsistent"
+        <SettingsField v-if="settings.geomConsistency" label-for="minConsistent"
           hint="Minimum other views that must agree. Raise for cleaner but sparser clouds.">
+          <template #label><FieldHelp op="depth-maps" param="minConsistent" :value="settings.minConsistent" :default-value="DEPTHMAP_DEFAULTS.minConsistent">Consistent views</FieldHelp></template>
           <input id="minConsistent" v-model.number="settings.minConsistent" :aria-invalid="numbers.bad.minConsistent" type="number" min="1" max="8" step="1" class="field-input" />
         </SettingsField>
 
-        <SettingsField v-if="settings.geomConsistency" label="Minimum parallax" label-for="minGeomAngleDeg" unit="°"
+        <SettingsField v-if="settings.geomConsistency" label-for="minGeomAngleDeg" unit="°"
           hint="A view only counts if it sees the point from at least this angle apart. 0 disables.">
+          <template #label><FieldHelp op="depth-maps" param="minGeomAngleDeg" :value="settings.minGeomAngleDeg" :default-value="DEPTHMAP_DEFAULTS.minGeomAngleDeg">Minimum parallax</FieldHelp></template>
           <input id="minGeomAngleDeg" v-model.number="settings.minGeomAngleDeg" :aria-invalid="numbers.bad.minGeomAngleDeg" type="number" min="0" max="20" step="0.5" class="field-input" />
         </SettingsField>
 
         <SettingsField v-if="settings.geomConsistency" label-for="minNcc"
-          hint="Absolute photometric floor per pixel (0–1). Unlike the fusion gate this does not adapt to the data.">
-          <template #label>
-            Minimum <GlossaryTerm id="photometric-consistency">NCC</GlossaryTerm>
-          </template>
+          hint="Absolute photometric floor per pixel (0–1). The dense cloud's cost gate is only a loose backstop above it.">
+          <template #label><FieldHelp op="depth-maps" param="minNcc" :value="settings.minNcc" :default-value="DEPTHMAP_DEFAULTS.minNcc">Minimum NCC</FieldHelp></template>
           <input id="minNcc" v-model.number="settings.minNcc" :aria-invalid="numbers.bad.minNcc" type="number" min="0" max="0.9" step="0.05" class="field-input" />
         </SettingsField>
       </SettingsGroup>
 
       <SettingsGroup title="Resolution & sources">
-        <SettingsField label="Working resolution override" label-for="maxDim" unit="px"
+        <SettingsField label-for="maxDim" unit="px"
           hint="Leave blank to derive from Quality. A memory pre-flight guards very large values.">
+          <template #label><FieldHelp op="depth-maps" param="maxDim" :value="settings.maxDim || 'auto'" :default-value="DEPTHMAP_DEFAULTS.maxDim || 'auto'">Working resolution override</FieldHelp></template>
           <input id="maxDim" v-model.number="settings.maxDim" :aria-invalid="numbers.bad.maxDim" type="number" min="200" step="100" placeholder="auto" class="field-input" />
         </SettingsField>
 
-        <SettingsField label="Source views per image" label-for="maxSources"
+        <SettingsField label-for="maxSources"
           hint="Neighbouring images compared against each reference (chosen by shared tie-points).">
+          <template #label><FieldHelp op="depth-maps" param="maxSources" :value="settings.maxSources" :default-value="DEPTHMAP_DEFAULTS.maxSources">Source views per image</FieldHelp></template>
           <input id="maxSources" v-model.number="settings.maxSources" :aria-invalid="numbers.bad.maxSources" type="number" min="1" max="16" step="1" class="field-input" />
         </SettingsField>
 
-        <SettingsField label="Sources aggregated (best-K)" label-for="bestK"
+        <SettingsField label-for="bestK"
           hint="Average the K best-matching sources per pixel. Blank = auto (≈half the sources, 1–4).">
+          <template #label><FieldHelp op="depth-maps" param="bestK" :value="settings.bestK || 'auto'" :default-value="DEPTHMAP_DEFAULTS.bestK || 'auto'">Sources aggregated (best-K)</FieldHelp></template>
           <input id="bestK" v-model.number="settings.bestK" :aria-invalid="numbers.bad.bestK" type="number" min="1" max="16" step="1" placeholder="auto" class="field-input" />
         </SettingsField>
       </SettingsGroup>
@@ -160,13 +165,14 @@ function run() {
         <SettingsField label-for="window" unit="px"
           hint="Half-size of the correlation window (1–5 ⇒ 3×3…11×11). Larger helps low-texture surfaces.">
           <template #label>
-            <GlossaryTerm id="patchmatch">Patch window radius</GlossaryTerm>
+            <FieldHelp op="depth-maps" param="window" :value="settings.window" :default-value="DEPTHMAP_DEFAULTS.window">Patch window radius</FieldHelp>
           </template>
           <input id="window" v-model.number="settings.window" :aria-invalid="numbers.bad.window" type="number" min="1" max="5" step="1" class="field-input" />
         </SettingsField>
 
-        <SettingsField label="Iterations (per level)" label-for="iterations"
+        <SettingsField label-for="iterations"
           hint="Propagation/refinement sweeps at the finest pyramid level (coarser levels get more).">
+          <template #label><FieldHelp op="depth-maps" param="iterations" :value="settings.iterations" :default-value="DEPTHMAP_DEFAULTS.iterations">Iterations (per level)</FieldHelp></template>
           <input id="iterations" v-model.number="settings.iterations" :aria-invalid="numbers.bad.iterations" type="number" min="1" max="8" step="1" class="field-input" />
         </SettingsField>
       </SettingsGroup>

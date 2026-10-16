@@ -24,14 +24,14 @@ so a few stray points no longer coarsen the whole mesh.
 
 ## Quality and octree depth
 <!-- param: depth default: 8 -->
-Depth is the main detail, time, and memory control. Each level roughly quadruples
-the work. Use Coarse for a preview and Balanced first for real work. If the
+Depth is the octree depth of the screened Poisson solve, and the main detail, time,
+and memory control. Each level roughly quadruples the work. Use Coarse for a preview and Balanced first for real work. If the
 cloud is too sparse for the depth you choose, the depth is lowered automatically
 and the log says why. A depth that is high relative to the point count mostly
 creates empty detail, and the modal warns you.
 
 ## Surface trimming
-<!-- param: trim default: gentle -->
+<!-- param: trim default: Gentle -->
 **Gentle** removes surface that no points support: the hull Poisson extrapolates
 past the data, and the shells around stray specks. **Strong** also removes thinly
 observed surface, which can open holes where coverage is sparse. **Off** keeps the
@@ -52,11 +52,21 @@ main surface's support) is measured in points explained, not in area. If a real
 separate object disappears, lower the threshold or switch this off. If clutter
 remains, it is supported by many points; remove it from the cloud instead.
 
+## Floating piece size
+<!-- param: minPiecePct default: 1 % -->
+The threshold for Remove floating pieces: a disconnected piece is dropped when it
+explains less than this share of the points the best-supported piece explains.
+Support counts the points lying on a piece, not its area. Poisson inflates a small
+speck into a closed ball that can look sizeable, yet only a handful of points rest on
+it; a piece no point lies near, such as an extrapolated sheet, has no support and
+always goes. Raise the value to clear larger clutter; lower it when a real, separate,
+thinly covered object disappears.
+
 ## Screening weight
 <!-- param: screening default: 4 -->
 Higher values pull the surface more tightly toward samples; lower values favour
 smoothness. Excessive screening can reproduce noise, while too little can round edges
-and erase small features.
+and erase small details.
 
 ## Distance trim
 <!-- param: distanceTrim default: 0 -->
@@ -64,10 +74,15 @@ An optional extra trim: triangles farther than this many sample spacings from an
 point are cut. Surface trimming already covers most cases. Use this only to cut
 smooth extrapolated sheets that Gentle keeps.
 
-## Colour
-Colour transfer assigns each mesh vertex the colour of its nearest dense point. It is
-useful for viewing, but is not a texture atlas; close inspection may show blurred or
-stretched colour where mesh vertices are sparse.
+## Transfer colour from the dense cloud
+<!-- param: colorize default: on -->
+Gives each mesh vertex the colour of its nearest point in the dense point cloud. It
+reads the full cloud, not the thinned copy the solve uses, so colour is as sharp as the vertices
+allow. It is useful for viewing, but is not a texture atlas; close inspection may show
+blurred or stretched colour where mesh vertices are sparse. A vertex with no dense
+point nearby, such as one in a filled hole, falls back to grey. Switch it off for
+geometry-only uses such as STL export; a cloud without colour leaves the mesh
+uncoloured either way.
 
 ## Export choice
 OBJ preserves vertex colour only in applications that support the extension; STL is

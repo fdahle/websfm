@@ -34,7 +34,10 @@ that has no effect, such as tiling when the resized image already fits in one ti
 shown greyed with the reason.
 
 ## Detector
-**SIFT** is the dependable default and works entirely in WASM. **DISK** and
+<!-- param: detector  default: SIFT -->
+The detector decides which [keypoint](help:keypoint)s are found in each image and how
+each one's surroundings are encoded as a [descriptor](help:descriptor), which is what
+matching compares. **SIFT** is the dependable default and works entirely in WASM. **DISK** and
 **SuperPoint** are learned detectors meant to be paired with LightGlue matching; each
 has its own LightGlue, and websfm picks the right one automatically. Do not mix
 detectors in one project—use **Overwrite** when switching detector.
@@ -56,10 +59,27 @@ keypoint limits increase the cost of the following matching stage, often more th
 the cost of detection itself.
 
 ## Resolution rule
+<!-- param: maxDimMode  default: Fixed for all images -->
 **Fixed for all images** gives every image the same longest-side detection size.
 **Scale with image size** preserves more detail in unusually large or mixed-resolution
-sets while keeping the selected value as a floor. Keypoints are always mapped back to
+sets while keeping the selected value as a floor. For SIFT it also raises the keypoint
+limit with the detected area (see *Max keypoints*). Keypoints are always mapped back to
 native image coordinates.
+
+## Detection resolution
+<!-- param: maxDim  default: 2400 px (SIFT) · 1600 px (SuperPoint) · 1024 px (DISK) -->
+The long side, in pixels, that each image is reduced to before detection (step 1
+above); smaller images are never enlarged. A higher value finds finer texture and more
+keypoints on large scans, but detection cost grows with the pixel count, and the extra
+keypoints make matching slower again. Raise it for film scans or aerial frames whose fine
+texture is lost at the default; lower it for a quick first pass. DISK starts lower than
+SuperPoint because it needs far more memory per pixel.
+
+With **Scale with image size** the field is called *Minimum resolution*: each image is
+detected at a fraction of its own long side (40 % with Balanced SIFT), never below this
+value and never above a ceiling set by the quality preset (4000 px with Balanced SIFT).
+Matching's [RANSAC](help:ransac) threshold is measured in detection pixels, so it follows
+whatever resolution you choose here.
 
 ## Contrast threshold
 <!-- param: contrastThreshold default: 0.01 -->
@@ -79,6 +99,11 @@ building set detected at full resolution). Raise the limit when useful detail is
 underrepresented. SuperPoint and DISK keep their highest-scoring points and stay lower, because
 LightGlue's attention cost grows quickly with the number of keypoints.
 
+With **Scale with image size**, the SIFT limit grows with the detected area: the
+limit × (detected pixels ÷ 2400 × 1600), never below the configured limit and at
+most 4× it (40,000 at the default). A 4000 × 2667 px detection gets about 28,000.
+Each image's effective limit is logged. The learned detectors keep their fixed limit.
+
 If many images report exactly the limit in the console, the limit is cutting off
 usable features: raising it added about 10 % reconstructed points on a 128-image
 building set. Each SIFT keypoint has one orientation; a feature is not duplicated for
@@ -86,6 +111,7 @@ a second, weaker orientation, because on real data that cost matching time witho
 adding points.
 
 ## Tiling
+<!-- param: tiling  default: Off -->
 Tiling detects overlapping pieces of the **resized** image (step 2 above), so it only
 does something when the detection resolution is larger than one tile. Each piece keeps
 only the features in its own central region, so every feature is found exactly once and
@@ -95,12 +121,27 @@ memory. For SIFT, tiling gives the same keypoints
 and matches as an untiled run (99.5 % identical on a building pair) and uses less
 memory, so it is safe to turn on for large images.
 
-**Max tile size** is an upper limit: websfm uses the fewest tiles that fit, shrunk to the
-smallest size that still keeps the requested overlap. **Overlap** sets how far a kept
-feature sits from a cut (half the overlap). The default 64 px is enough for SIFT on
-photos; raise it only if a tiled run matches noticeably worse than an untiled one.
+**Auto** picks the tile size for you: 1536 px for SIFT, and for SuperPoint or DISK the
+largest tile that fits the GPU's memory. **Manual** uses the *Max tile size* you enter.
 
-## Append or overwrite
+## Max tile size
+<!-- param: tileSize  default: 1024 -->
+Shown with **Manual** tiling. It is an upper limit: websfm uses the fewest tiles that fit
+the resized image, shrunk to the smallest size that still keeps the requested overlap.
+Smaller tiles use less memory per pass but mean more passes and more overlap work; lower
+it only if a learned detector still runs out of GPU memory at the Auto size.
+
+## Tile overlap
+<!-- param: overlap  default: 64 -->
+How far neighbouring tiles overlap, in pixels of the resized image. Each tile keeps only
+the features at least half the overlap away from a cut, so a feature whose
+neighbourhood is cut by a tile edge is found in the neighbouring tile instead. The
+default 64 px is enough for SIFT on photos; raise it only if a tiled run matches
+noticeably worse than an untiled one. A larger overlap costs a little more detection
+time.
+
+## Mode
+<!-- param: overwrite  default: Append -->
 **Append** skips images that already have completed detection. **Overwrite** replaces
 all keypoints and invalidates results that depend on them. Use Overwrite after changing
 detector, or when you need a clean comparison of detection settings.

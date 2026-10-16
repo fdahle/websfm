@@ -31,6 +31,16 @@ function projectInto(m, P) {
   return { u: K.fx * (xc / zc) + K.cx, v: K.fy * (yc / zc) + K.cy, depth: zc }
 }
 
+// The highest matching cost left in the depth maps, given the settings of the run that
+// built them (the Stage A summary's `settings`). The cross-view filter's Minimum NCC
+// floor zeroes the depth wherever cost > 1 − minNcc (dense/geomFilter.js filterConfig),
+// and a pixel without depth never sees a cell, so an ortho `maxCost` at or above this
+// ceiling removes nothing. null when the run skipped the filter or is not known.
+export function orthoCostCeiling(depthSettings) {
+  if (!depthSettings?.geomConsistency || !Number.isFinite(depthSettings.minNcc)) return null
+  return 1 - depthSettings.minNcc
+}
+
 // Sample the colour for one ground point P (SfM world coords) by reprojecting it
 // into every map, testing occlusion against each map's depth plane, and combining
 // the visible views.

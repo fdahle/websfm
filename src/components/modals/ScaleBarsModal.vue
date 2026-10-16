@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { LENGTH_UNITS, fromMetres } from '../../core/products/scale.js'
 import { useScaleBarsStore } from '../../stores/useScaleBarsStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
@@ -238,7 +239,7 @@ const statusLine = computed(() => {
     </div>
 
     <section class="workflow" aria-label="Scale setup steps">
-      <div class="workflow-title">Set up a known distance</div>
+      <div class="workflow-title">Set up a <GlossaryTerm id="scale-bar">known distance</GlossaryTerm></div>
       <div class="workflow-steps">
         <div class="workflow-step" :class="{ done: endpointReady(setupBar?.a), current: !endpointReady(setupBar?.a) }">
           <span class="step-number">1</span>

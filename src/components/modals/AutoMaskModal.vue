@@ -5,6 +5,7 @@ import { buildBorderMask } from '../../core/mask.js'
 import ImageThumb from '../controls/ImageThumb.vue'
 import ModalShell from './ui/ModalShell.vue'
 import { maskGroups } from '../../utils/maskGroups.js'
+import FieldHelp from '../guide/FieldHelp.vue'
 
 // Auto-Mask: generate masks from a rule rather than a painted/imported file.
 // v1 has a single strategy — exclude the outer N pixels on each side (the film
@@ -17,12 +18,23 @@ const emit = defineEmits(['close'])
 const imagesStore = useImagesStore()
 const { updateMask } = imagesStore
 
-const sides = reactive({ top: 40, right: 40, bottom: 40, left: 40 })
-const linked = ref(true)              // edit one side → fill all four
-const existing = ref('merge')         // 'merge' | 'replace' for images that already have a mask
+// Documented in src/guide/masks.md (border / linked / existing).
+const AUTO_MASK_DEFAULTS = { border: 40, linked: true, existing: 'merge' }
+
+const sides = reactive({ top: AUTO_MASK_DEFAULTS.border, right: AUTO_MASK_DEFAULTS.border,
+  bottom: AUTO_MASK_DEFAULTS.border, left: AUTO_MASK_DEFAULTS.border })
+const linked = ref(AUTO_MASK_DEFAULTS.linked)     // edit one side → fill all four
+const existing = ref(AUTO_MASK_DEFAULTS.existing) // 'merge' | 'replace' for images that already have a mask
 const busy = ref(false)
 
 const SIDE_KEYS = ['top', 'right', 'bottom', 'left']
+
+// The four margins as the help popup's "Current" value: one number while all sides
+// agree, else each side (top, right, bottom, left).
+const borderText = computed(() => {
+  const v = SIDE_KEYS.map((k) => sides[k])
+  return v.every((x) => x === v[0]) ? `${v[0]} px` : `${v.join(' / ')} px`
+})
 
 function onSideInput(key, e) {
   const v = Math.max(0, Math.round(Number(e.target.value) || 0))
@@ -72,7 +84,7 @@ async function applyToAll() {
   <ModalShell class="auto-mask" title="Auto Mask" width="620px" flush :scroll="false" @close="emit('close')">
     <!-- Strategy controls. v1 = border only; future strategies add sections here. -->
     <div class="controls">
-      <div class="section-title">Mask border (exclude outer pixels)</div>
+      <div class="section-title"><FieldHelp op="masks" param="border" :value="borderText" :default-value="`${AUTO_MASK_DEFAULTS.border} px`">Mask border</FieldHelp> (exclude outer pixels)</div>
       <div class="sides">
         <label v-for="k in SIDE_KEYS" :key="k" class="side">
           <span class="side-label">{{ k }}</span>
@@ -88,9 +100,9 @@ async function applyToAll() {
         </label>
       </div>
       <div class="opts">
-        <label class="opt"><input v-model="linked" type="checkbox" /> Link all sides</label>
+        <label class="opt"><input v-model="linked" type="checkbox" /> <FieldHelp op="masks" param="linked" :value="linked" :default-value="AUTO_MASK_DEFAULTS.linked">Link all sides</FieldHelp></label>
         <span class="sep">·</span>
-        <span class="opt-label">If a mask exists:</span>
+        <span class="opt-label"><FieldHelp op="masks" param="existing">If a mask exists</FieldHelp>:</span>
         <label class="opt"><input v-model="existing" type="radio" value="merge" /> Merge</label>
         <label class="opt"><input v-model="existing" type="radio" value="replace" /> Replace</label>
       </div>

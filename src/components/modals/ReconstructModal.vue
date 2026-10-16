@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
@@ -91,7 +91,7 @@ function run() {
         <SettingsField label-for="minMatches" unit="pts"
           hint="Minimum 3D–2D pairs required to register a new camera via PnP.">
           <template #label>
-            <GlossaryTerm id="pnp">Min correspondences</GlossaryTerm>
+            <FieldHelp op="sparse-reconstruction" param="minMatchesForRegistration" :value="settings.minMatchesForRegistration" :default-value="RECONSTRUCT_DEFAULTS.minMatchesForRegistration">Min correspondences</FieldHelp>
           </template>
           <input
             id="minMatches"
@@ -106,7 +106,7 @@ function run() {
           hint="Inlier threshold for camera-pose RANSAC. Lower = stricter. Measured at
                 the detection resolution, so it scales automatically on downscaled images.">
           <template #label>
-            <GlossaryTerm id="reprojection-error">Reprojection threshold</GlossaryTerm>
+            <FieldHelp op="sparse-reconstruction" param="reprjThreshold" :value="settings.reprjThreshold" :default-value="RECONSTRUCT_DEFAULTS.reprjThreshold">Reprojection threshold</FieldHelp>
           </template>
           <input
             id="reprj"
@@ -122,7 +122,7 @@ function run() {
         <SettingsField label-for="baIter"
           hint="Bundle-adjustment iterations per pass. 0 skips bundle adjustment — and with it self-calibration.">
           <template #label>
-            <GlossaryTerm id="bundle-adjustment">Bundle adjustment</GlossaryTerm> iterations
+            <FieldHelp op="sparse-reconstruction" param="baIterations" :value="settings.baIterations" :default-value="RECONSTRUCT_DEFAULTS.baIterations">Bundle adjustment iterations</FieldHelp>
           </template>
           <input
             id="baIter"
@@ -137,7 +137,7 @@ function run() {
       <SettingsGroup title="Calibration">
         <SettingsField label-for="refineIntr">
           <template #label>
-            <GlossaryTerm id="self-calibration">Self-calibration</GlossaryTerm>
+            <FieldHelp op="sparse-reconstruction" param="refineIntrinsics">Self-calibration</FieldHelp>
           </template>
           <!-- Self-calibration happens inside bundle adjustment; with 0 iterations it never runs. -->
           <select id="refineIntr" v-model="settings.refineIntrinsics" class="field-input field-select"

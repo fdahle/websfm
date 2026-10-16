@@ -1,7 +1,7 @@
 ---
 id: coordinate-reference-system
 title: Coordinate Reference System
-aliases: CRS, coordinate reference systems, projection, EPSG, projected CRS, vertical datum
+aliases: CRS, coordinate reference systems, map projection, EPSG, projected CRS, vertical datum
 summary: The definition that gives coordinates meaning — which model of the Earth they refer to and how it was flattened onto a plane.
 ---
 A **Coordinate Reference System (CRS)** states what a triple of numbers actually

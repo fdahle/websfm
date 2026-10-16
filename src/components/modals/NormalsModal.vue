@@ -5,6 +5,7 @@ import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import NoSourceWarn from './ui/NoSourceWarn.vue'
 import SourcePicker from './ui/SourcePicker.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useSourcePick, cloudOptionLabel } from '../../composables/useSourcePick.js'
 import { NORMALS_DEFAULTS } from '../../core/defaults.user.js'
 import { cameraCenter } from '../../core/sfm/geometry.js'
@@ -66,10 +67,11 @@ function run() {
           hint="Points in each local plane fit. More is smoother and slower; fewer keeps sharp edges.">
           <input id="nrm-k" v-model.number="settings.k" type="number" min="6" max="64" step="1" class="field-input" />
         </SettingsField>
-        <SettingsField label="Point normals" label-for="nrm-orient"
+        <SettingsField label-for="nrm-orient"
           :hint="resolvedOrient === 'cameras' ? 'Each normal faces the nearest camera — right for walls and overhangs.'
             : resolvedOrient === 'up' ? 'Each normal faces upward (+Z) — right for terrain from above.'
             : 'Keeps the side the existing normals face, re-estimating only their direction.'">
+          <template #label><GlossaryTerm id="surface-normal">Point normals</GlossaryTerm></template>
           <select id="nrm-orient" v-model="settings.orient" class="field-select">
             <option value="auto">Automatic</option>
             <option value="cameras" :disabled="!hasCameras">Towards the cameras</option>

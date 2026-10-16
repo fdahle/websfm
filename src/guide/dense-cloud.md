@@ -18,21 +18,67 @@ unless you are diagnosing a specific completeness-versus-noise tradeoff. If the 
 warns of a "weak cost distribution", most pixels match poorly: check the camera
 calibration and the depth-map resolution before tightening fusion.
 
+## Min consistent views
+<!-- param: minViews  default: 2 -->
+Shown when **Auto thresholds** is off. A depth-map pixel becomes a point only if this
+many *other* depth maps see a surface at the same depth there, within the **Depth
+agreement tolerance**. Auto uses 2, or 1 when there are only two depth maps. Raise it
+for a cleaner, sparser cloud from heavily overlapping images; lower it to 1 to keep
+areas that only two photos cover, such as the edges of a block, at the cost of more
+noise there.
+
 ## Depth agreement tolerance
 <!-- param: depthTolPct default: 1.0% -->
 How closely reprojected depths must agree. Lower values make a cleaner, sparser cloud;
 higher values retain more surface but can thicken edges and duplicate layers.
 
+## Max matching cost
+<!-- param: maxCost  default: 0.8 -->
+Shown when **Auto thresholds** is off. Pixels whose PatchMatch
+[matching cost](help:photometric-consistency) (1 − NCC: 0 is a perfect match, 2 none)
+is above this are skipped before the consistency check. Auto uses the same 0.8. The
+depth maps' **Minimum NCC** floor has already vetted the photometry, so this gate is
+deliberately loose: lowering it mostly removes real but weakly textured surface and
+leaves holes. Tighten it only to test whether noise comes from poorly matched pixels.
+
 ## Point density
 <!-- param: step default: 1 px -->
 Emit one point every N depth-map pixels. `1` keeps full available density. A larger
-step is a direct, predictable way to make a smaller cloud for preview or export.
+step is a direct, predictable way to make a smaller point cloud for preview or export. If
+the cloud would not fit the memory budget, fusion raises the step on its own (up to
+4 px) and says so in the log.
 
 ## Geometric outlier filters
-Minimum triangulation angle removes near-parallel evidence such as sky and distant
-haze. Maximum incidence angle removes surfaces seen almost edge-on. Isolated-point
-cleanup targets unsupported fusion flyers. Keep the defaults unless they remove a
-real thin structure you care about.
+These three filters run during fusion, after the consistency check, and remove
+points that agree for the wrong reasons. Keep the defaults unless they remove a real
+thin structure you care about.
+
+## Min triangulation angle
+<!-- param: minTriAngleDeg  default: 2° -->
+A point is kept only if at least one agreeing depth map sees it from this angle or
+more away from the reference image. Views from nearly the same spot agree with any
+depth, so sky and distant haze pass the consistency check at almost zero
+[baseline](help:baseline); this gate removes them. It repeats, more loosely, the
+depth maps' **Minimum parallax** filter. Set 0 to disable it, for example for a
+video sweep with very short baselines, and check that the background does not
+return.
+
+## Max surface incidence angle
+<!-- param: maxIncidenceDeg  default: 80° -->
+Drops points whose [surface normal](help:surface-normal) is turned more than this
+angle away from the viewing ray, that is, surfaces seen almost edge-on. Depth is least
+reliable there, and edge-on views produce the fuzzy shells around thin vegetation and
+silhouettes. Lowering it cleans these more strongly but also removes steep surfaces
+such as walls in nadir aerial images; 0 or 90 disables it. Points from depth maps
+cached without normals are not affected.
+
+## Remove isolated points
+<!-- param: removeIsolated  default: on -->
+After merging, drops points that are backed by only one or two depth-map pixels and
+have fewer than two other points in the 3×3×3 block of merge cells around them. These are typically lone flyers from
+sky or vegetation that slipped through the other gates. Well-supported points are
+never tested, so the filter rarely touches real surface; turn it off only if a sparse,
+thin structure (a wire or mast) loses points.
 
 ## Cleaning the cloud
 Use the 3D viewer to inspect floating clusters, edge shells, holes, and over-smoothed
@@ -81,10 +127,11 @@ in one piece would exceed the memory budget (Settings ▸ Compute), fusion build
 slabs along the scene's longest axis instead ("fusing in N slabs"), keeping only one
 slab's working memory at a time. The cloud is identical either way; the slabs only
 cost extra reading time, because a depth map that reaches two slabs is read for both.
-Only when the finished cloud itself cannot fit (it is held twice while the slabs are
-joined) does fusion stop there, and nothing is lost. To get
-under the budget: raise **Point density (sample step)** to 2, which reads a quarter of
-the pixels; set a Region around the subject (Tools ▸ Model); or build the depth maps
-at a lower Quality. Raise the budget only if the machine really has that much free
+If the finished cloud itself cannot fit (it is held twice while the slabs are
+joined), fusion re-plans at double the sample step, a quarter of the pixels, and
+warns in the log; it tries again up to a step of 4 px. Only if that still does not fit
+does fusion stop, and nothing is lost. To get under the budget yourself: raise
+**Point density (sample step)**; set a Region around the subject (Tools ▸ Model); or
+build the depth maps at a lower Quality. Raise the budget only if the machine really has that much free
 memory. After fusion, a second log line compares the real point count with the
 measured limit.

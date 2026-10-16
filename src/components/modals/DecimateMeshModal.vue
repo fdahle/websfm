@@ -6,6 +6,7 @@ import SettingsGroup from './ui/SettingsGroup.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import NoSourceWarn from './ui/NoSourceWarn.vue'
 import SourcePicker from './ui/SourcePicker.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useSourcePick, meshOptionLabel } from '../../composables/useSourcePick.js'
 import { DECIMATE_MESH_DEFAULTS } from '../../core/defaults.user.js'
 
@@ -53,7 +54,8 @@ function run() {
           hint="The result is a new mesh; this one is left untouched." />
       </SettingsGroup>
       <SettingsGroup title="Target">
-        <SettingsField label="Reduce to">
+        <SettingsField>
+          <template #label><GlossaryTerm id="mesh-decimation">Reduce to</GlossaryTerm></template>
           <SegmentedControl v-model="settings.targetMode" :options="MODES" />
         </SettingsField>
         <SettingsField v-if="settings.targetMode === 'ratio'" label="Share of triangles" label-for="dec-ratio" unit="× source">

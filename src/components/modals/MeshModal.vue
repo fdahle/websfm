@@ -10,7 +10,7 @@ import WarnBox from './ui/WarnBox.vue'
 import SourcePicker from './ui/SourcePicker.vue'
 import { useSourcePick } from '../../composables/useSourcePick.js'
 import { usePresetSettings } from '../../composables/usePresetSettings.js'
-import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 import { MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META } from '../../core/defaults.user.js'
 import { recommendMeshDepth } from '../../core/products/mesh.js'
 import { checkNumberFields } from '../../utils/numberFields.js'
@@ -93,17 +93,17 @@ function run() {
 
     <SettingsGroup title="Cleanup">
       <SettingsField :hint="trimHint">
-        <template #label>Surface trimming</template>
+        <template #label><FieldHelp op="mesh" param="trim">Surface trimming</FieldHelp></template>
         <SegmentedControl v-model="settings.trim" :options="TRIM_OPTIONS" />
       </SettingsField>
       <SettingsField v-if="settings.trim !== 'off'"
         hint="Close small holes the trimming opened, where the surrounding surface is solid.">
-        <template #label>Fill small holes</template>
+        <template #label><FieldHelp op="mesh" param="fillHoles" :value="settings.fillHoles" :default-value="MESH_DEFAULTS.fillHoles">Fill small holes</FieldHelp></template>
         <label class="checkbox-row"><input v-model="settings.fillHoles" type="checkbox" class="checkbox" /> Enabled</label>
       </SettingsField>
       <SettingsField
         hint="Drop disconnected pieces that explain only a few of the cloud's points — stray specks and leftover clutter.">
-        <template #label>Remove floating pieces</template>
+        <template #label><FieldHelp op="mesh" param="removeFloaters" :value="settings.removeFloaters" :default-value="MESH_DEFAULTS.removeFloaters">Remove floating pieces</FieldHelp></template>
         <label class="checkbox-row"><input v-model="settings.removeFloaters" type="checkbox" class="checkbox" /> Enabled</label>
       </SettingsField>
     </SettingsGroup>
@@ -113,7 +113,7 @@ function run() {
         <SettingsField label-for="mesh-depth" unit="levels"
           hint="Detail limit. Lowered automatically when the cloud is too sparse to use it.">
           <template #label>
-            <GlossaryTerm id="mesh">Octree depth</GlossaryTerm>
+            <FieldHelp op="mesh" param="depth" :value="settings.depth" :default-value="MESH_DEFAULTS.depth">Octree depth</FieldHelp>
           </template>
           <input id="mesh-depth" v-model.number="settings.depth" :aria-invalid="numbers.bad.depth" type="number" min="4" max="12" step="1" class="field-input" />
         </SettingsField>
@@ -122,23 +122,25 @@ function run() {
           (recommended ≤ {{ recommendedDepth }}). The Poisson solve may be slow and
           memory-hungry with little extra detail — consider lowering it.
         </WarnBox>
-        <SettingsField label="Screening weight" label-for="mesh-screen"
+        <SettingsField label-for="mesh-screen"
           hint="How tightly the surface fits the points. 0 = smoothest/fastest; higher hugs the data.">
+          <template #label><FieldHelp op="mesh" param="screening" :value="settings.screening" :default-value="MESH_DEFAULTS.screening">Screening weight</FieldHelp></template>
           <input id="mesh-screen" v-model.number="settings.screening" :aria-invalid="numbers.bad.screening" type="number" min="0" max="16" step="0.5" class="field-input" />
         </SettingsField>
-        <SettingsField v-if="settings.removeFloaters" label="Floating piece size" label-for="mesh-minpiece" unit="%"
+        <SettingsField v-if="settings.removeFloaters" label-for="mesh-minpiece" unit="%"
           hint="Pieces supported by less than this share of the main surface's points are removed.">
+          <template #label><FieldHelp op="mesh" param="minPiecePct" :value="settings.minPiecePct" :default-value="MESH_DEFAULTS.minPiecePct">Floating piece size</FieldHelp></template>
           <input id="mesh-minpiece" v-model.number="settings.minPiecePct" :aria-invalid="numbers.bad.minPiecePct" type="number" min="0" max="50" step="0.5" class="field-input" />
         </SettingsField>
-        <SettingsField label="Distance trim" label-for="mesh-dist" unit="× spacing"
+        <SettingsField label-for="mesh-dist" unit="× spacing"
           hint="Also cut triangles farther than this many sample spacings from any point. 0 = off.">
+          <template #label><FieldHelp op="mesh" param="distanceTrim" :value="settings.distanceTrim" :default-value="MESH_DEFAULTS.distanceTrim">Distance trim</FieldHelp></template>
           <input id="mesh-dist" v-model.number="settings.distanceTrim" :aria-invalid="numbers.bad.distanceTrim" type="number" min="0" max="32" step="1" class="field-input" />
         </SettingsField>
       </SettingsGroup>
       <SettingsGroup title="Colour">
         <SettingsField hint="Colour each mesh vertex from the nearest dense point.">
-          <template #label>Transfer colour from the
-            <GlossaryTerm id="point-cloud">dense cloud</GlossaryTerm></template>
+          <template #label><FieldHelp op="mesh" param="colorize" :value="settings.colorize" :default-value="MESH_DEFAULTS.colorize">Transfer colour from the dense cloud</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.colorize" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
       </SettingsGroup>

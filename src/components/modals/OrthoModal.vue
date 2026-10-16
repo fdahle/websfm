@@ -5,8 +5,9 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import WarnBox from './ui/WarnBox.vue'
 import FrameCrsField from './ui/FrameCrsField.vue'
-import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 import { ORTHO_DEFAULTS } from '../../core/defaults.user.js'
+import { orthoCostCeiling } from '../../core/products/ortho.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { checkNumberFields } from '../../utils/numberFields.js'
 
@@ -28,6 +29,9 @@ const props = defineProps({
   // geographic CRS, the projected one the camera positions suggest (store getters).
   georeferenceBlocker: { type: String, default: null },
   crsSuggestion: { type: Object, default: null },
+  // Settings of the depth-map run the ortho will sample (the store's depthSummary
+  // .settings), or null when unknown — they set the Max match cost's effective ceiling.
+  depthSettings: { type: Object, default: null },
 })
 
 const emit = defineEmits(['close', 'run', 'apply-crs-suggestion'])
@@ -52,6 +56,13 @@ const outputUnit = computed(() => {
   return settings.value.crs === 'project' ? `${linearCrsUnit(props.projectCrs)}/px`
     : props.hasScale ? 'm/px' : 'model units/px'
 })
+
+// The depth maps' own Minimum NCC floor already removed every pixel above this cost, so
+// a Max match cost at or above it gates nothing (null = no floor applied, or unknown).
+const costCeiling = computed(() => orthoCostCeiling(props.depthSettings))
+const costIneffective = computed(() => costCeiling.value != null
+  && settings.value.maxCost > 0 && settings.value.maxCost >= costCeiling.value)
+const fmtCost = (v) => String(+v.toFixed(3))
 
 const blendHint = computed(() => ({
   mosaic: 'Each area comes from the photo looking most straight down on it; seams are then evened out.',
@@ -94,8 +105,9 @@ function run() {
 
 <template>
   <ModalShell title="Build Orthophoto" @close="emit('close')">
-    <SettingsField label="Surface" label-for="ortho-surface"
+    <SettingsField label-for="ortho-surface"
       :hint="chosen?.hint ?? 'The height per ground cell that each pixel is reprojected onto.'">
+      <template #label><FieldHelp op="orthophoto" param="surface">Surface</FieldHelp></template>
       <select id="ortho-surface" v-model="settings.surface" class="field-input field-select">
         <option v-for="s in surfaces" :key="s.id" :value="s.id" :disabled="!s.available">
           {{ s.label }}{{ s.detail ? ` — ${s.detail}` : '' }}{{ s.available ? '' : ' — unavailable' }}
@@ -118,7 +130,7 @@ function run() {
          they need the same choice Build DEM offers. v-show, not v-if: the field
          keeps the frame valid (and remembers an applied CRS suggestion) while a
          DEM surface hides it. -->
-    <FrameCrsField v-show="framePicked" id="ortho-crs" v-model="settings.crs"
+    <FrameCrsField v-show="framePicked" id="ortho-crs" v-model="settings.crs" help-op="orthophoto"
       :can-georeference="canGeoreference" :has-scale="hasScale" :project-crs="projectCrs"
       :georeference-blocker="georeferenceBlocker" :crs-suggestion="crsSuggestion"
       @apply-crs-suggestion="(s) => emit('apply-crs-suggestion', s)" />
@@ -126,8 +138,9 @@ function run() {
     <!-- The raw min/max lets far background (an oblique capture sees almost to the
          horizon) set the raster size; the dense core keeps the site. The run logs
          how many points the core leaves out. -->
-    <SettingsField v-if="framePicked" label="Extent" label-for="ortho-extent"
+    <SettingsField v-if="framePicked" label-for="ortho-extent"
       hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent.">
+      <template #label><FieldHelp op="orthophoto" param="extent">Extent</FieldHelp></template>
       <select id="ortho-extent" v-model="settings.extent" class="field-input field-select">
         <option value="core">Dense core of the surface</option>
         <option value="all">All points</option>
@@ -138,12 +151,13 @@ function run() {
       :unit="outputUnit"
       hint="Ortho cell size. 0 = the surface's own resolution. Finer than the surface is fine — down to the photos' own GSD. The stored GeoTIFF holds at most 4 GiB (~28,000 px square); the log says when a GSD was coarsened.">
       <template #label>
-        <GlossaryTerm id="ground-sample-distance">Ground sample distance</GlossaryTerm>
+        <FieldHelp op="orthophoto" param="gsd" :value="settings.gsd || 'Auto'" :default-value="ORTHO_DEFAULTS.gsd || 'Auto'">Ground sample distance</FieldHelp>
       </template>
       <input id="ortho-gsd" v-model.number="settings.gsd" :aria-invalid="numbers.bad.gsd" type="number" min="0" step="0.01" class="field-input" />
     </SettingsField>
 
-    <SettingsField label="View blending" label-for="ortho-blend" :hint="blendHint">
+    <SettingsField label-for="ortho-blend" :hint="blendHint">
+      <template #label><FieldHelp op="orthophoto" param="blend">View blending</FieldHelp></template>
       <select id="ortho-blend" v-model="settings.blend" class="field-input field-select">
         <option value="mosaic">Mosaic (most nadir view, balanced seams)</option>
         <option value="best">Best match (lowest matching cost per pixel)</option>
@@ -153,14 +167,16 @@ function run() {
 
     <!-- Both act only on a mosaic: best/average have no regions to balance or feather. -->
     <template v-if="settings.blend === 'mosaic'">
-      <SettingsField label="Colour balance" label-for="ortho-balance"
+      <SettingsField label-for="ortho-balance"
         hint="Evens out exposure between photos with one brightness gain per photo and colour, fitted where photos overlap.">
+        <template #label><FieldHelp op="orthophoto" param="colourBalance" :value="settings.colourBalance" :default-value="ORTHO_DEFAULTS.colourBalance">Colour balance</FieldHelp></template>
         <label class="checkbox-row">
           <input id="ortho-balance" v-model="settings.colourBalance" type="checkbox" class="checkbox" /> Enabled
         </label>
       </SettingsField>
-      <SettingsField label="Seam blending width" label-for="ortho-seam" unit="%"
+      <SettingsField label-for="ortho-seam" unit="%"
         hint="Width of the cross-fade at each seam, as a % of the orthophoto's shorter side (at most 128 px). 0 = hard seams.">
+        <template #label><FieldHelp op="orthophoto" param="seamWidth" :value="settings.seamWidth" :default-value="ORTHO_DEFAULTS.seamWidth">Seam blending width</FieldHelp></template>
         <input id="ortho-seam" v-model.number="settings.seamWidth" :aria-invalid="numbers.bad.seamWidth" type="number" min="0" max="5" step="0.25" class="field-input" />
       </SettingsField>
     </template>
@@ -168,7 +184,7 @@ function run() {
     <SettingsField label-for="ortho-tol" unit="%"
       hint="How closely a cell's depth must match a view's depth map to count as visible.">
       <template #label>
-        <GlossaryTerm id="depth-map">Occlusion tolerance</GlossaryTerm>
+        <FieldHelp op="orthophoto" param="depthTolRel" :value="settings.depthTolRel" :default-value="ORTHO_DEFAULTS.depthTolRel">Occlusion tolerance</FieldHelp>
       </template>
       <input id="ortho-tol" v-model.number="settings.depthTolRel" :aria-invalid="numbers.bad.depthTolRel" type="number" min="0.5" max="10" step="0.5" class="field-input" />
     </SettingsField>
@@ -176,13 +192,20 @@ function run() {
     <SettingsField label-for="ortho-cost"
       hint="Never take colour where the depth map matched poorly (high cost), in every blending mode. 0 = keep all.">
       <template #label>
-        Max <GlossaryTerm id="photometric-consistency">match cost</GlossaryTerm>
+        <FieldHelp op="orthophoto" param="maxCost" :value="settings.maxCost || 'Off'" :default-value="ORTHO_DEFAULTS.maxCost || 'Off'">Max match cost</FieldHelp>
       </template>
       <input id="ortho-cost" v-model.number="settings.maxCost" :aria-invalid="numbers.bad.maxCost" type="number" min="0" max="2" step="0.1" class="field-input" />
     </SettingsField>
 
-    <SettingsField label="Colour gap interpolation" label-for="ortho-fill-method"
+    <WarnBox v-if="costIneffective">
+      No effect: the depth maps were built with Cross-view consistency at Minimum NCC
+      {{ fmtCost(depthSettings.minNcc) }}, which already removed every pixel with a cost above
+      {{ fmtCost(costCeiling) }}. Set a value below {{ fmtCost(costCeiling) }} to drop more.
+    </WarnBox>
+
+    <SettingsField label-for="ortho-fill-method"
       hint="Fills small transparent pixels from nearby successfully projected colours, but never outside the selected surface.">
+      <template #label><FieldHelp op="orthophoto" param="fillMethod">Colour gap interpolation</FieldHelp></template>
       <select id="ortho-fill-method" v-model="settings.fillMethod" class="field-input field-select">
         <option value="idw">Inverse distance (smooth)</option>
         <option value="nearest">Nearest neighbour</option>
@@ -190,8 +213,9 @@ function run() {
       </select>
     </SettingsField>
 
-    <SettingsField v-if="settings.fillMethod !== 'none'" label="Colour fill radius" label-for="ortho-fill" unit="px"
+    <SettingsField v-if="settings.fillMethod !== 'none'" label-for="ortho-fill" unit="px"
       hint="Maximum distance to an originally sampled colour. Small values close speckles without bridging large unseen areas.">
+      <template #label><FieldHelp op="orthophoto" param="fillRadius" :value="settings.fillRadius" :default-value="ORTHO_DEFAULTS.fillRadius">Colour fill radius</FieldHelp></template>
       <input id="ortho-fill" v-model.number="settings.fillRadius" :aria-invalid="numbers.bad.fillRadius" type="number" min="1" max="16" step="1" class="field-input" />
     </SettingsField>
 

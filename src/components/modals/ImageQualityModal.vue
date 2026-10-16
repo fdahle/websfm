@@ -5,6 +5,7 @@ import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
 import DataTable from './ui/DataTable.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { IMAGE_QUALITY_DEFAULTS } from '../../core/defaults.user.js'
 import { qualityVerdicts } from '../../core/features/imageQuality.js'
 
@@ -72,8 +73,9 @@ function groupFlagged() {
             {{ scored.length ? 'Rescore all images' : 'Score all images' }}
           </button>
         </SettingsField>
-        <SettingsField label="Blurry below" label-for="iq-min" unit="× median sharpness"
+        <SettingsField label-for="iq-min" unit="× median sharpness"
           hint="Relative to this batch: 0.5 flags images half as sharp as the typical one.">
+          <template #label><GlossaryTerm id="image-sharpness">Blurry below</GlossaryTerm></template>
           <input id="iq-min" v-model.number="minRelative" type="number" min="0.05" max="1" step="0.05" class="field-input" />
         </SettingsField>
       </SettingsGroup>

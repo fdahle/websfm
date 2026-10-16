@@ -4,6 +4,7 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { TERRAIN_DEFAULTS } from '../../core/defaults.user.js'
 import { checkNumberFields } from '../../utils/numberFields.js'
 
@@ -53,7 +54,7 @@ function run() {
       <SettingsGroup title="Rasters">
         <SettingsField hint="Each is a separate GeoTIFF on the DEM's grid and CRS.">
           <label v-for="p in PRODUCTS" :key="p.id" class="checkbox-row">
-            <input type="checkbox" class="checkbox" :checked="has(p.id)" @change="toggle(p.id)" /> {{ p.label }}
+            <input type="checkbox" class="checkbox" :checked="has(p.id)" @change="toggle(p.id)" /> <GlossaryTerm id="terrain-derivatives">{{ p.label }}</GlossaryTerm>
           </label>
         </SettingsField>
       </SettingsGroup>

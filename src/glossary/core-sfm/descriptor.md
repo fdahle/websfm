@@ -19,8 +19,9 @@ Euclidean distance: small distance, similar appearance.
 
 <!-- TODO(image): assets/sift-descriptor.svg - one keypoint patch rotated to its dominant orientation, the 4x4 cell grid over it, and one cell expanded into its 8-bin gradient histogram, with the 4x4x8 = 128 arithmetic called out. -->
 
-**Descriptor width is per-detector, not a universal constant.** WebSfM ships two
-detectors: SIFT at 128 dimensions and SuperPoint (a learned detector) at 256.
+**Descriptor width is per-detector, not a universal constant.** WebSfM ships three
+detectors: SIFT and DISK at 128 dimensions, and SuperPoint at 256 (DISK and
+SuperPoint are learned detectors).
 The width travels with the descriptors through matching, because slicing a flat
 descriptor buffer at the wrong width silently produces nonsense rows rather than
 an error.

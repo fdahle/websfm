@@ -7,7 +7,7 @@ import SettingsStep from './ui/SettingsStep.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
-import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
 import { useRecommendedPreset } from '../../composables/useRecommendedPreset.js'
 import { usePresetSettings, presetOwnedKeys } from '../../composables/usePresetSettings.js'
@@ -279,16 +279,15 @@ function onShellClose() {
   <ModalShell title="Detect Features" @close="onShellClose">
     <SettingsField label-for="detector-sel"
       hint="SIFT works on any image; SuperPoint and DISK (learned) pair with LightGlue matching.">
-      <template #label>
-        <GlossaryTerm id="sift">Detector</GlossaryTerm>
-      </template>
+      <template #label><FieldHelp op="detect-features" param="detector">Detector</FieldHelp></template>
       <select id="detector-sel" v-model="detector" class="field-input field-select">
         <option v-for="d in detectors" :key="d.id" :value="d.id" :disabled="d.disabled">{{ d.label }}</option>
       </select>
     </SettingsField>
 
-    <SettingsField label="Mode"
+    <SettingsField
       :hint="overwrite ? 'Re-detect all images, replacing existing keypoints.' : 'Skip images that already have keypoints.'">
+      <template #label><FieldHelp op="detect-features" param="overwrite">Mode</FieldHelp></template>
       <SegmentedControl v-model="overwrite" :options="modeOptions" />
     </SettingsField>
 
@@ -355,42 +354,46 @@ function onShellClose() {
 
     <AdvancedDisclosure label="Advanced settings">
       <SettingsStep step="1" title="Resize to detection resolution" :effect="resizeEffect">
-        <SettingsField label="Resolution rule" label-for="maxDimMode"
+        <SettingsField label-for="maxDimMode"
           :hint="maxDimMode === 'auto'
             ? 'Each image is detected at a fraction of its own size, never below the value below. Best for mixed or very large images such as film scans.'
             : 'Every image is reduced to the same long side, whatever its native size. Smaller images are never enlarged.'">
+          <template #label><FieldHelp op="detect-features" param="maxDimMode">Resolution rule</FieldHelp></template>
           <select id="maxDimMode" v-model="maxDimMode" class="field-input field-select">
             <option value="absolute">Fixed for all images</option>
             <option value="auto">Scale with image size</option>
           </select>
         </SettingsField>
 
-        <SettingsField :label="maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
-          label-for="maxDim" unit="px"
+        <SettingsField label-for="maxDim" unit="px"
           :hint="maxDimMode === 'auto'
             ? 'Floor for the scaled resolution — larger images get proportionally more, up to a per-preset ceiling.'
             : 'Long side the detector works at. Keypoints are mapped back to native pixels afterwards.'">
+          <template #label><FieldHelp op="detect-features" param="maxDim" :value="activeSettings.maxDim" :default-value="presetBase.maxDim">{{ maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution' }}</FieldHelp></template>
           <input id="maxDim" v-model.number="activeSettings.maxDim" :aria-invalid="numbers.bad.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
         </SettingsField>
       </SettingsStep>
 
       <SettingsStep step="2" title="Split into tiles" :effect="tileEffect" :inactive="!tilingOn || tilingIdle">
-        <SettingsField label="Tiling" label-for="tiling"
+        <SettingsField label-for="tiling"
           :hint="isLearned
             ? 'Processes the resized image in overlapping pieces that fit GPU memory, then merges them.'
             : 'Processes the resized image in overlapping pieces, then merges them. Same keypoints, less memory.'">
+          <template #label><FieldHelp op="detect-features" param="tiling">Tiling</FieldHelp></template>
           <select id="tiling" v-model="activeSettings.tiling" class="field-input field-select">
             <option value="off">Off</option>
             <option value="auto">{{ isLearned ? 'Auto (fit GPU memory)' : 'Auto (fit tile size)' }}</option>
             <option value="manual">Manual</option>
           </select>
         </SettingsField>
-        <SettingsField v-if="activeSettings.tiling === 'manual'" label="Max tile size" label-for="tileSize" unit="px"
+        <SettingsField v-if="activeSettings.tiling === 'manual'" label-for="tileSize" unit="px"
           hint="Upper limit; websfm uses the fewest tiles that fit.">
+          <template #label><FieldHelp op="detect-features" param="tileSize" :value="activeSettings.tileSize" :default-value="presetBase.tileSize">Max tile size</FieldHelp></template>
           <input id="tileSize" v-model.number="activeSettings.tileSize" :aria-invalid="numbers.bad.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
         </SettingsField>
-        <SettingsField v-if="tilingOn" label="Tile overlap" label-for="overlap" unit="px"
+        <SettingsField v-if="tilingOn" label-for="overlap" unit="px"
           hint="Each tile keeps only features at least half this far from a cut.">
+          <template #label><FieldHelp op="detect-features" param="overlap" :value="activeSettings.overlap" :default-value="presetBase.overlap">Tile overlap</FieldHelp></template>
           <input id="overlap" v-model.number="activeSettings.overlap" :aria-invalid="numbers.bad.overlap" type="number" min="0" max="512" step="16" class="field-input" />
         </SettingsField>
         <WarnBox v-if="oversizedSpImages.length">
@@ -404,20 +407,21 @@ function onShellClose() {
         <SettingsField v-if="!isLearned" label-for="contrast"
           hint="Higher = fewer but more distinctive keypoints.">
           <template #label>
-            <GlossaryTerm id="keypoint">Contrast threshold</GlossaryTerm>
+            <FieldHelp op="detect-features" param="contrastThreshold" :value="siftSettings.contrastThreshold" :default-value="DETECT_SIFT_DEFAULTS.contrastThreshold">Contrast threshold</FieldHelp>
           </template>
           <input id="contrast" v-model.number="siftSettings.contrastThreshold" :aria-invalid="numbers.bad.contrastThreshold" type="number" min="0.001" max="0.5" step="0.0001" class="field-input" />
         </SettingsField>
       </SettingsStep>
 
       <SettingsStep step="4" title="Keep the strongest" :effect="keepEffect">
-        <SettingsField v-if="!isLearned" label="Max keypoints" label-for="maxKp">
+        <SettingsField v-if="!isLearned" label-for="maxKp">
+          <template #label><FieldHelp op="detect-features" param="maxKeypoints" :value="siftSettings.maxKeypoints" :default-value="DETECT_SIFT_DEFAULTS.maxKeypoints">Max keypoints</FieldHelp></template>
           <input id="maxKp" v-model.number="siftSettings.maxKeypoints" :aria-invalid="numbers.bad.maxKeypoints" type="number" min="100" max="50000" step="100" class="field-input" />
         </SettingsField>
         <SettingsField v-else label-for="sp-maxKp"
           hint="LightGlue matching cost grows with the square of this.">
           <template #label>
-            Max <GlossaryTerm id="descriptor">keypoints</GlossaryTerm>
+            <FieldHelp op="detect-features" param="maxKeypoints" :value="lp.maxKeypoints" :default-value="presetBase.maxKeypoints">Max keypoints</FieldHelp>
           </template>
           <input id="sp-maxKp" v-model.number="lp.maxKeypoints" :aria-invalid="numbers.bad.maxKeypoints" type="number" min="128" max="8192" step="128" class="field-input" />
         </SettingsField>

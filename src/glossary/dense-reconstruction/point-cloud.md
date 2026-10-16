@@ -34,9 +34,10 @@ Fusion needs one more step than "keep everything". A surface seen by $k$ cameras
 produces $k$ near-coincident copies of itself — a shell — so kept pixels are
 accumulated into world-space voxel cells and averaged to one point per cell. The
 cell size is chosen at the median [GSD](help:ground-sample-distance), so that one
-ground pixel becomes roughly one point. **Density is controlled by that cell
-size, not by how many input pixels are sampled**; sub-sampling the input is a
-speed lever that trades evidence for time.
+ground pixel becomes roughly one point. **That cell size sets the finest
+spacing the cloud can have.** Sampling fewer input pixels (a larger sample step)
+does not change the cell, but it leaves more cells empty, so the cloud is thinner
+as well as faster to build: a step of 2 reads a quarter of the pixels.
 
 Clouds can also be **imported** (PLY, LAS, XYZ) as reference data — lidar, or an
 earlier survey. Imported clouds land verbatim in the current frame with no

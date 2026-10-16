@@ -6,6 +6,7 @@ import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import NoSourceWarn from './ui/NoSourceWarn.vue'
 import SourcePicker from './ui/SourcePicker.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useSourcePick, meshOptionLabel } from '../../composables/useSourcePick.js'
 import { SMOOTH_MESH_DEFAULTS } from '../../core/defaults.user.js'
 
@@ -52,7 +53,8 @@ function run() {
       </SettingsGroup>
       <AdvancedDisclosure label="Advanced settings">
         <SettingsGroup title="Taubin weights">
-          <SettingsField label="λ (smooth)" label-for="smooth-l">
+          <SettingsField label-for="smooth-l">
+            <template #label><GlossaryTerm id="mesh-smoothing">λ (smooth)</GlossaryTerm></template>
             <input id="smooth-l" v-model.number="settings.lambda" type="number" min="0.01" max="1" step="0.01" class="field-input" />
           </SettingsField>
           <SettingsField label="μ (inflate)" label-for="smooth-m" hint="Must be more negative than −λ, or the mesh shrinks.">

@@ -17,13 +17,14 @@ appropriate to the site before importing control data.
 
 Browser storage is automatic and private to this browser profile. On Chromium you
 can instead keep the project in a normal folder. See [Projects & storage](guide:projects-storage)
-before clearing browser data or moving machines.
+before clearing browser data or moving machines. websfm also starts without a
+connection once it has been opened online; see [Working Offline](guide:offline).
 
 ## 2 · Import good images
 Import a set with strong overlap, consistent focus and exposure, and viewpoints that
 move around the subject. Avoid long runs of almost identical frames, motion blur,
-featureless sky, and reflective or moving surfaces. Mask irrelevant regions when
-they dominate the image.
+featureless sky, and reflective or moving surfaces. [Mask](guide:masks) irrelevant
+regions when they dominate the image.
 
 For an aerial block, roughly **70–80% forward overlap** and **60–70% side overlap**
 is a useful starting point. Object captures need continuous coverage around the
@@ -37,6 +38,21 @@ and feature detection by stretching each image between its darkest and brightest
 contrast. The log records each image's stretch. For a multi-band camera such as a
 MicaSense, import one band (the panchromatic band where there is one); each band file
 is treated as a separate image. Remove frames taken on the ground before takeoff.
+
+**Very large scans.** A TIFF more than 30,000 pixels on a side, or over 200
+megapixels (a full-resolution KH-9 mapping-camera scan is about 65,700 × 32,900), is
+larger than the browser can hold as one picture. websfm then reads the file in strips
+and stores it as a *tiled pyramid*: tiles at full resolution plus successive halvings.
+The log notes *Large TIFF … building a tiled pyramid* and then the number of levels
+and tiles. Such scans are imported one at a time and take a while; the pyramid is
+saved with the project, or rebuilt from the original when it is missing (for example
+from a `.websfm` saved without derived data). Detection, depth maps and fiducial
+detection then read only the level and the part of the scan they need. The image view
+shows a reduced copy, at most 8,192 pixels wide. Painting masks and placing GCP or
+fiducial marks by hand are not available on these images yet, and the view says so.
+Masks still work: [Auto mask](guide:masks), mask import, Invert and **Generate
+background masks** store the mask at 8,192 pixels on the long side, and detection
+and depth maps scale it up to the scan.
 
 **Organising a large set.** Right-click images in the sidebar and choose **New group
 from selection** to put them in a named, collapsible group (for example per flight or

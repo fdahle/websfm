@@ -4,7 +4,7 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
-import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { DENSE_FUSE_DEFAULTS } from '../../core/defaults.user.js'
 import { checkNumberFields } from '../../utils/numberFields.js'
@@ -52,25 +52,25 @@ function run() {
   <ModalShell title="Build Dense Cloud" @close="emit('close')">
     <SettingsGroup title="Consistency">
       <SettingsField hint="Min-views from the image count, the default cost gate. Turn off to set them by hand.">
-        <template #label>Auto thresholds (recommended)</template>
+        <template #label><FieldHelp op="dense-cloud" param="auto" :value="settings.auto" :default-value="DENSE_FUSE_DEFAULTS.auto">Auto thresholds</FieldHelp> (recommended)</template>
         <label class="checkbox-row"><input v-model="settings.auto" type="checkbox" class="checkbox" /> Enabled</label>
       </SettingsField>
 
-      <SettingsField v-if="!settings.auto" label="Min consistent views" label-for="minViews"
+      <SettingsField v-if="!settings.auto" label-for="minViews"
         hint="A point is kept only if this many other depth maps agree on it. Higher = cleaner, sparser.">
+        <template #label><FieldHelp op="dense-cloud" param="minViews" :value="settings.minViews" :default-value="DENSE_FUSE_DEFAULTS.minViews">Min consistent views</FieldHelp></template>
         <input id="minViews" v-model.number="settings.minViews" :aria-invalid="numbers.bad.minViews" type="number" min="1" max="8" step="1" class="field-input" />
       </SettingsField>
 
-      <SettingsField label="Depth agreement tolerance" label-for="depthTol" unit="%"
+      <SettingsField label-for="depthTol" unit="%"
         hint="How closely a reprojected depth must match to count as agreement.">
+        <template #label><FieldHelp op="dense-cloud" param="depthTolPct" :value="settings.depthTolPct" :default-value="DENSE_FUSE_DEFAULTS.depthTolPct">Depth agreement tolerance</FieldHelp></template>
         <input id="depthTol" v-model.number="settings.depthTolPct" :aria-invalid="numbers.bad.depthTolPct" type="number" min="0.1" max="10" step="0.1" class="field-input" />
       </SettingsField>
 
       <SettingsField v-if="!settings.auto" label-for="maxCost"
         hint="Discard pixels whose PatchMatch cost exceeds this (0 = perfect … 2 = none). Lower = stricter.">
-        <template #label>
-          Max <GlossaryTerm id="photometric-consistency">matching cost</GlossaryTerm>
-        </template>
+        <template #label><FieldHelp op="dense-cloud" param="maxCost" :value="settings.maxCost" :default-value="DENSE_FUSE_DEFAULTS.maxCost">Max matching cost</FieldHelp></template>
         <input id="maxCost" v-model.number="settings.maxCost" :aria-invalid="numbers.bad.maxCost" type="number" min="0.1" max="2" step="0.1" class="field-input" />
       </SettingsField>
     </SettingsGroup>
@@ -79,7 +79,7 @@ function run() {
       <SettingsField label-for="step" unit="px"
         hint="Emit one point every N pixels. 1 = densest (largest cloud); higher = decimated.">
         <template #label>
-          <GlossaryTerm id="point-cloud">Point density (sample step)</GlossaryTerm>
+          <FieldHelp op="dense-cloud" param="step" :value="settings.step" :default-value="DENSE_FUSE_DEFAULTS.step">Point density (sample step)</FieldHelp>
         </template>
         <input id="step" v-model.number="settings.step" :aria-invalid="numbers.bad.step" type="number" min="1" max="8" step="1" class="field-input" />
       </SettingsField>
@@ -89,19 +89,18 @@ function run() {
       <SettingsGroup title="Outlier removal">
         <SettingsField label-for="minTriAngle" unit="°"
           hint="Drop points whose agreeing views are near-parallel (sky, distant haze). 0 disables.">
-          <template #label>
-            Min <GlossaryTerm id="baseline">triangulation angle</GlossaryTerm>
-          </template>
+          <template #label><FieldHelp op="dense-cloud" param="minTriAngleDeg" :value="settings.minTriAngleDeg" :default-value="DENSE_FUSE_DEFAULTS.minTriAngleDeg">Min triangulation angle</FieldHelp></template>
           <input id="minTriAngle" v-model.number="settings.minTriAngleDeg" :aria-invalid="numbers.bad.minTriAngleDeg" type="number" min="0" max="20" step="0.5" class="field-input" />
         </SettingsField>
 
-        <SettingsField label="Max surface incidence angle" label-for="maxIncidence" unit="°"
+        <SettingsField label-for="maxIncidence" unit="°"
           hint="Drop points seen edge-on (thin vegetation, silhouettes). 0 or 90 disables.">
+          <template #label><FieldHelp op="dense-cloud" param="maxIncidenceDeg" :value="settings.maxIncidenceDeg" :default-value="DENSE_FUSE_DEFAULTS.maxIncidenceDeg">Max surface incidence angle</FieldHelp></template>
           <input id="maxIncidence" v-model.number="settings.maxIncidenceDeg" :aria-invalid="numbers.bad.maxIncidenceDeg" type="number" min="0" max="90" step="5" class="field-input" />
         </SettingsField>
 
         <SettingsField hint="Drop lone low-support cells with too few neighbours (fusion flyers).">
-          <template #label>Remove isolated points</template>
+          <template #label><FieldHelp op="dense-cloud" param="removeIsolated" :value="settings.removeIsolated" :default-value="DENSE_FUSE_DEFAULTS.removeIsolated">Remove isolated points</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.removeIsolated" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
       </SettingsGroup>

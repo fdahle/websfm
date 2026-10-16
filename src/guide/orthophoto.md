@@ -21,41 +21,49 @@ Use a **DEM** for terrain and overhead mapping, a **mesh** for complex or vertic
 shape, and a **plane** only when the scene is truly flat. Surface errors become image
 displacement, double edges, or holes in the orthophoto.
 
-## Coordinate frame and resolution
-When a DEM is selected, the orthophoto inherits its frame. For mesh or plane, choose
-Local or Project CRS; once the project has a georeference, Project CRS is preselected,
-so the orthophoto lands on the map's CRS view with the basemap and GCPs.
-Local levels the model from the cameras. When the camera positions share one height
-(a drone flight plan) and the photos are oblique, that level plane sets the vertical;
-a nadir survey uses its viewing direction. The log names which one was used. With a mesh or plane surface, **Extent** works as in Build DEM: the dense
-core by default, or all points. Project CRS needs a projected CRS; in a geographic one (WGS 84)
-the field suggests one from the camera positions (see Build DEM). Auto resolution
-follows the surface; a smaller pixel size than the imagery and surface support does
-not add real detail. The orthophoto's pixel size is independent of the surface's: a
-4,096-pixel DEM or mesh is enough to build an orthophoto at the photos' own ground
-resolution, tens of thousands of pixels across. It is stored as a tiled GeoTIFF of at
-most 4 GiB uncompressed (about 28,000 pixels square); a pixel size that would exceed
-that over the surface's area is coarsened to fit, and the log says so. To go finer,
-limit the area with Region and rebuild the surface.
+## Coordinate frame
+<!-- param: crs default: Local -->
+With a **DEM** surface this field is hidden: the orthophoto inherits the DEM's frame
+and grid, so rebuild the DEM to change it. For a **mesh** or **plane** surface,
+choose the frame here, as in [Build DEM](guide:dem). **Local** uses the model
+orientation and its best available scale; **Project CRS** requires a georeference
+fit and produces real-world coordinates. Once the project has a georeference,
+Project CRS is preselected, so the orthophoto lands on the map's CRS view with the
+basemap and GCPs. Local levels the model from the cameras: when the camera positions
+share one height (a drone flight plan) and the photos are oblique, that level plane
+sets the vertical; a nadir survey uses its viewing direction, and the log names which
+one was used. Project CRS needs a projected CRS; in a geographic one (WGS 84) the
+field suggests one from the camera positions.
 
-## Blending
+## Extent
+<!-- param: extent default: Dense core -->
+Mesh or plane surface only; a DEM surface keeps the DEM's grid and extent. **Dense
+core** (default) covers only the area where the surface's points (the mesh's
+vertices, or the cloud the plane is fitted to) are dense, as in Build DEM. Oblique
+photos reach far past the site, and those thin distant points would otherwise make the
+orthophoto huge and mostly empty. The log says how many points the core leaves out.
+Choose **All points** to cover the full extent.
+
+## Ground sample distance
+<!-- param: gsd default: Auto -->
+The orthophoto's pixel size on the ground
+([ground sample distance](help:ground-sample-distance)), in the frame's units per
+pixel. **0** (Auto) uses the surface's own cell size. The orthophoto's pixel size is
+otherwise independent of the surface's: colour comes from the full-resolution photos,
+so a 4,096-pixel DEM or mesh is enough for an orthophoto at the photos' own ground
+resolution, tens of thousands of pixels across. A pixel finer than the photos' own
+GSD adds file size and build time, not detail. The orthophoto is stored as a tiled
+GeoTIFF of at most 4 GiB uncompressed (about 28,000 pixels square); a pixel size that
+would exceed that over the surface's area is coarsened to fit, and the log says so.
+To go finer, limit the area with Region and rebuild the surface.
+
+## View blending
 <!-- param: blend default: Mosaic -->
 **Mosaic** (the default) builds the orthophoto the way mapping software does. Each
 area comes from the photo that looks most straight down on it, at the finest ground
 resolution, so on a regular flight the orthophoto is a patchwork of regions around
 each photo's centre. Isolated single pixels are folded into the surrounding region.
-Two options then hide the seams:
-<!-- param: colourBalance default: on -->
-- **Colour balance** evens out exposure: each photo gets one brightness gain per
-  colour, fitted so overlapping photos agree. The log lists the smallest, median and
-  largest gain. A gain far from 1 points at a photo with very different exposure; a
-  gain that hits the 0.5–2 limit is reported as a warning. The fit reads every photo
-  once more at low resolution, which adds a short pass before the blocks.
-<!-- param: seamWidth default: 1 % -->
-- **Seam blending width** cross-fades neighbouring photos over a band at each seam,
-  given as a % of the orthophoto's shorter side (at most 128 pixels). Wider bands hide
-  exposure and colour steps better, but small misalignments show as a soft double image
-  inside the band. **0** gives hard seams.
+Two options then hide the [seams](help:seamline): **Colour balance** and **Seam blending width**.
 
 **Best match** takes each pixel from the view whose depth matched best. It can switch
 source from one pixel to the next, which shows as speckled seams on uneven exposure.
@@ -68,16 +76,68 @@ across seams compared with the step inside one photo (×1 means seams do not sho
 colour), and how many seam pairs there are per 100 pixels (a speckled source choice
 scores high).
 
-## Occlusion and cost gates
-Depth tolerance controls how closely an image observation must agree with the surface.
-Too tight creates holes; too loose can paint hidden surfaces. The optional matching-cost
-gate can reject weak depth evidence but is normally best left disabled initially.
+## Colour balance
+<!-- param: colourBalance default: on -->
+Mosaic only. Evens out exposure: each photo gets one brightness gain per colour,
+fitted so overlapping photos agree. The log lists the smallest, median and largest
+gain. A gain far from 1 points at a photo with very different exposure; a gain that
+hits the 0.5–2 limit is reported as a warning. The fit reads every photo once more at
+low resolution, which adds a short pass before the blocks.
 
-## Fill gaps
-Colour interpolation fills unsampled pixels inside the selected surface. Keep the
-radius small: interpolation is cosmetic and cannot recover imagery hidden from every
-camera. Large holes usually indicate missing coverage, a bad surface, or over-strict
-visibility checks.
+## Seam blending width
+<!-- param: seamWidth default: 1 % -->
+Mosaic only. Cross-fades neighbouring photos over a band at each
+[seam](help:seamline), given as a % of
+the orthophoto's shorter side (at most 128 pixels). Wider bands hide exposure and
+colour steps better, but small misalignments show as a soft double image inside the
+band. **0** gives hard seams.
+
+## Occlusion tolerance
+<!-- param: depthTolRel default: 2 % -->
+Decides whether a photo really sees a surface cell, using that photo's
+[depth map](help:depth-map) as a z-buffer: the cell's distance from the camera must
+agree with the depth map at that pixel to within this percentage of the distance (2 %
+of 100 m is 2 m). A cell hidden behind something nearer, such as the ground behind a
+wall, fails the test, so the photo cannot paint the wall's colour onto it. Too tight,
+and errors in the surface or the depth maps make cells fail for every photo, which
+leaves holes; too loose, and hidden surface takes the colour of whatever stands in
+front of it, which shows as doubled edges beside tall objects. A pixel where the depth
+map has no depth never counts as seeing a cell, whatever the tolerance.
+
+## Max match cost
+<!-- param: maxCost default: 0 (off) -->
+An optional second gate: a photo's colour is not used where its depth map matched
+poorly, that is where the depth map's matching cost (1 − NCC, from 0 for a perfect
+match to 2) is above this value. It applies in every blending mode. **0** (the
+default) turns the gate off, which is normally the right start: with Cross-view
+consistency on, the depth maps' **Minimum NCC** filter has already removed every pixel
+with a cost above 1 − Minimum NCC (0.9 at the default 0.1). A value at or above that
+ceiling therefore changes nothing, and the dialog says so, naming the ceiling of the
+depth maps you built. Set a value below it, such as 0.6, when weakly matched areas
+(water, blank walls, moving objects) paint wrong colour. Lower values open holes where
+the only views of a cell matched weakly.
+
+## Colour gap interpolation
+<!-- param: fillMethod default: Inverse distance -->
+Fills pixels that no photo could colour (every view failed the occlusion or cost test,
+or no photo covered them) from sampled pixels nearby
+([gap interpolation](help:gap-interpolation)). It works only inside the surface: where
+the surface itself has no height, such as a DEM hole, the pixel stays transparent.
+**Inverse distance** blends the sampled colours within the Colour fill radius;
+**Nearest neighbour** copies the closest one, which keeps edges crisp but looks
+blocky; **None** keeps unsampled pixels transparent, which shows exactly where imagery
+is missing. Interpolation is cosmetic: it cannot recover imagery hidden from every
+camera.
+
+## Colour fill radius
+<!-- param: fillRadius default: 2 px -->
+How far, in orthophoto pixels, an unsampled pixel may be from an originally sampled
+colour and still be filled. Filled pixels never seed further fills, so a hole wider
+than twice the radius keeps a transparent core. Keep it small: 1–3 closes speckles,
+while a large radius smears colour across ground no camera saw. Large holes usually
+mean missing coverage, a bad surface, or an Occlusion tolerance that is too tight.
+Because it counts pixels, the same radius covers less ground at a finer ground sample
+distance.
 
 ## Export
 The orthophoto is stored as a Cloud-Optimized GeoTIFF (tiled, with overviews and

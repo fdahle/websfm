@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { focalPx } from '../../core/footprint.js'
 import { isGeographic } from '../../core/crs.js'
 import { useFootprintsStore } from '../../stores/useFootprintsStore.js'
@@ -109,7 +110,8 @@ function run() {
       </div>
     </SettingsField>
 
-    <SettingsField label="Camera intrinsics (for poses with no calibrated sensor)">
+    <SettingsField>
+      <template #label><GlossaryTerm id="camera-intrinsics">Camera intrinsics</GlossaryTerm> (for poses with no calibrated sensor)</template>
       <label class="checkbox-row"><input type="checkbox" v-model="ov.enabled" class="checkbox" /> Provide a manual fallback</label>
       <div v-if="ov.enabled" class="override">
         <div class="ov-row">

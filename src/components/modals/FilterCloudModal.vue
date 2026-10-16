@@ -109,7 +109,8 @@ function run() {
         <SettingsField hint="Enabled filters run top to bottom, each on the previous one's output.">
           <label v-for="m in METHODS" :key="m.id" class="checkbox-row">
             <input type="checkbox" class="checkbox" :checked="has(m.id)" @change="toggle(m.id)" />
-            {{ m.label }}
+            <GlossaryTerm v-if="m.id === 'sor'" id="statistical-outlier-removal">{{ m.label }}</GlossaryTerm>
+            <template v-else>{{ m.label }}</template>
           </label>
         </SettingsField>
       </SettingsGroup>
@@ -120,8 +121,9 @@ function run() {
             hint="How many nearest neighbours the per-point mean distance averages over.">
             <input id="filter-sor-k" v-model.number="settings.sorK" type="number" min="3" max="64" step="1" class="field-input" />
           </SettingsField>
-          <SettingsField label="Std-dev ratio" label-for="filter-sor-std" unit="σ"
+          <SettingsField label-for="filter-sor-std" unit="σ"
             hint="Drop points above mean + ratio × σ. Lower is more aggressive.">
+            <template #label><GlossaryTerm id="statistical-outlier-removal">Std-dev ratio</GlossaryTerm></template>
             <input id="filter-sor-std" v-model.number="settings.sorStdRatio" type="number" min="0.1" max="10" step="0.1" class="field-input" />
           </SettingsField>
         </SettingsGroup>
@@ -132,7 +134,7 @@ function run() {
               ? `0 = auto (the dense run's merge cell, ${mergeCell.toPrecision(3)})`
               : '0 = auto (about one point spacing)'">
             <template #label>
-              One averaged <GlossaryTerm id="point-cloud">point</GlossaryTerm> per cell
+              One averaged point per cell
             </template>
             <input id="filter-voxel" v-model.number="settings.voxelCell" type="number" min="0" step="any" class="field-input" />
           </SettingsField>

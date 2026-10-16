@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
@@ -141,7 +142,7 @@ function closeup(point) { return `${point[0] - 32} ${point[1] - 32} 64 64` }
           </svg>
         </figure>
       </div>
-      <label>Role <select v-model="active.role"><option value="control">Control point</option><option value="check">Checkpoint (excluded from fit)</option></select></label>
+      <label><GlossaryTerm id="ground-control-point">Role</GlossaryTerm> <select v-model="active.role"><option value="control">Control point</option><option value="check">Checkpoint (excluded from fit)</option></select></label>
       <label>Elevation <input v-model.number="active.z" type="number" step="any" placeholder="Unknown" /></label>
       <label v-for="axis in ['X', 'Y', 'Z']" :key="axis">σ {{ axis }} (project units, 1σ) <input v-model.number="active['accuracy' + axis]" type="number" min="0" step="any" placeholder="Unknown" /></label>
       <label>Vertical datum <input v-model="active.verticalDatum" /></label>

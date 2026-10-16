@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 
 const props = defineProps({
   canAdjustWithGcps: { type: Boolean, default: false },
@@ -22,7 +23,7 @@ const canRun = computed(() => mode.value === 'adjust'
 <template>
   <ModalShell title="Georeference" @close="emit('close')">
     <p class="intro">
-      Place the relative reconstruction in <b>{{ projectCrs || 'the project CRS' }}</b>
+      Place the relative reconstruction in <b><GlossaryTerm id="coordinate-reference-system">{{ projectCrs || 'the project CRS' }}</GlossaryTerm></b>
       using existing ground control or registered camera positions.
     </p>
 
@@ -30,7 +31,7 @@ const canRun = computed(() => mode.value === 'adjust'
       <label class="mode-card" :class="{ active: mode === 'adjust', disabled: !canAdjustWithGcps || !hasMatches }">
         <input v-model="mode" type="radio" value="adjust" :disabled="!canAdjustWithGcps || !hasMatches" />
         <span>
-          <b>Adjust reconstruction with GCPs</b>
+          <b>Adjust reconstruction with <GlossaryTerm id="ground-control-point">GCPs</GlossaryTerm></b>
           <small>Rebuild the sparse model with GCP-constrained bundle adjustment, then fit it to the project CRS. Recommended after adding control.</small>
         </span>
       </label>

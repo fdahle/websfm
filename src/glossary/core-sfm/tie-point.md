@@ -1,7 +1,7 @@
 ---
 id: tie-point
 title: Tie Point
-aliases: tie points, sparse point, 3D point
+aliases: tie points, sparse point
 summary: A 3D point in the sparse cloud, triangulated from the same physical feature seen in two or more images.
 ---
 A **tie point** is a 3D coordinate produced during the sparse phase of

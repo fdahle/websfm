@@ -6,6 +6,7 @@ import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import WarnBox from './ui/WarnBox.vue'
 import SourcePicker from './ui/SourcePicker.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useSourcePick, referenceOptionLabel } from '../../composables/useSourcePick.js'
 import { ICP_DEFAULTS } from '../../core/defaults.user.js'
 import { cloudBounds, estimateSpacing } from '../../core/products/cloudEdit.js'
@@ -83,7 +84,7 @@ function run() {
             <input id="icp-n" v-model.number="settings.sampleCount" :aria-invalid="numbers.bad.sampleCount" type="number" min="1000" step="10000" class="field-input" />
           </SettingsField>
           <SettingsField>
-            <label class="checkbox-row"><input v-model="settings.pointToPlane" type="checkbox" class="checkbox" /> Point-to-plane (when the reference has normals)</label>
+            <label class="checkbox-row"><input v-model="settings.pointToPlane" type="checkbox" class="checkbox" /> <GlossaryTerm id="icp">Point-to-plane</GlossaryTerm> (when the reference has normals)</label>
           </SettingsField>
         </SettingsGroup>
       </AdvancedDisclosure>

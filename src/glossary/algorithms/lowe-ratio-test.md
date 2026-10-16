@@ -23,11 +23,12 @@ options is a coin flip.
 The threshold $\tau$ is the main quality/quantity dial in matching:
 
 - **Lower (≈0.6–0.7)** — strict. Fewer matches, but a much higher proportion
-  correct. The right default, and the right direction to move when a
+  correct. The direction to move on repetitive structure, or when a
   reconstruction is contaminated by false pairs.
-- **Higher (≈0.8–0.9)** — permissive. More matches on repetitive or low-texture
-  surfaces, at the cost of letting ambiguous ones through for
-  [RANSAC](help:ransac) to sort out. Worth trying when the
+- **Higher (≈0.8–0.9)** — permissive. More matches on low-texture surfaces, at
+  the cost of letting ambiguous ones through for [RANSAC](help:ransac) to sort
+  out. WebSfM defaults to 0.8 (COLMAP's value), relying on geometric
+  verification to remove the extras; go higher when the
   [match graph](help:match-graph) is too sparse to connect.
 
 A complementary filter is **cross-check** (mutual nearest neighbour): keep a
