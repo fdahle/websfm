@@ -9,7 +9,7 @@ import { LOD_MIN_POINTS } from '../../core/lod/build.js'
 // its metadata as `cloud.lod` (persisted with the cloud), the viewer reads its nodes
 // on demand. An octree belongs to the cloud object it was built from: every edit makes
 // a new cloud, which has none until it is built again.
-export function createCloudLod({ clouds, log, save, projectId }) {
+export function createCloudLod({ clouds, log, save, projectId, makeCloudId, selectedCloudId }) {
   const building = new Set() // octree names being written (kept by pruning)
 
   async function prune() {
@@ -53,6 +53,44 @@ export function createCloudLod({ clouds, log, save, projectId }) {
     }
   }
 
+  // A LAS/LAZ too large to hold in memory, imported straight into an octree (a
+  // *streamed* cloud, core/lod/streamed.js): the file is read in batches in the worker
+  // and never held whole, here or there. → the new cloud, or null.
+  async function importStreamedCloud(file, onProgress) {
+    const pid = projectId()
+    if (!pid) {
+      log(`Cloud import: ${file.name} is too large to hold in memory, and streaming it needs a saved project`, 'error', 'Import')
+      return null
+    }
+    const id = makeCloudId()
+    const name = `${id}-${Date.now().toString(36)}`
+    building.add(name)
+    try {
+      const dir = await opfs.lodDir(pid)
+      log(`Cloud import: ${file.name} is too large to hold in memory — streaming it into a level-of-detail octree`, 'info', 'Import')
+      const meta = await workerBuildLod({ file, dir, name },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
+      const cloud = {
+        id, name: `Imported (${file.name})`, kind: 'dense', createdAt: Date.now(), imported: true,
+        cameras: markRaw(new Map()), count: meta.points, pos: null, col: null, lod: markRaw(meta),
+        // A survey without colour reads best by height (a single colour shows no relief).
+        ...(meta.layout.colour ? {} : { style: { field: 'elevation' } }),
+      }
+      clouds.value.push(cloud)
+      selectedCloudId.value = cloud.id
+      log(`Cloud import: added "${cloud.name}" — ${meta.points.toLocaleString()} points, streamed`
+        + `${meta.layout.colour ? ', colour' : ''}`, 'success', 'Import')
+      await save()
+      return cloud
+    } catch (err) {
+      log(`Cloud import: ${file.name}: ${err?.message ?? err}`, 'error', 'Import')
+      return null
+    } finally {
+      building.delete(name)
+      await prune().catch(() => {})
+    }
+  }
+
   // A reader of the cloud's octree (core/lod/reader.js), or null when it has none or
   // its files are gone.
   async function openCloudLod(cloud) {
@@ -89,5 +127,5 @@ export function createCloudLod({ clouds, log, save, projectId }) {
   }
   watch(() => clouds.value.map((c) => c.lod ? null : c.count), () => { buildMissing() })
 
-  return { buildCloudLod, openCloudLod, pruneLod: prune }
+  return { buildCloudLod, openCloudLod, importStreamedCloud, pruneLod: prune }
 }

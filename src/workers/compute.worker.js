@@ -95,7 +95,7 @@ const ops = {
   ...makeReferenceGcpOps({ rasterize }),
   ...makeExportOps({ lazCodec }),
   ...makeUndistortOps({ rasterize }),
-  ...makeLodOps(),
+  ...makeLodOps({ lazCodec }),
 }
 
 self.onmessage = async (e) => {

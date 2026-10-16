@@ -102,7 +102,7 @@ export function createLodLayer(cloud, { open, material, onChange }) {
   function colourise(e) {
     if (!e.object || !style) return
     const { pts } = e
-    const visual = buildCloudStyle({ kind: 'dense', count: pts.count, pos: pts.pos, col: pts.col, attributes: pts.attributes, style: cloud.style },
+    const visual = buildCloudStyle({ kind: 'dense', count: pts.count, pos: pts.pos, col: pts.col, attributes: pts.attributes, style: style.input },
       style.input, style.opts)
     const g = e.object.geometry
     if (visual.colors) g.setAttribute('color', new THREE.BufferAttribute(visual.colors, 3, true))
@@ -193,8 +193,9 @@ export function createLodLayer(cloud, { open, material, onChange }) {
   layer.restyle = (c, elevationRange) => {
     cloud = c
     layer.source = c
+    const input = c.style || {} // a restored cloud's style may be null
     const proxy = {
-      kind: 'dense', count: 0, style: c.style, col: lod.layout.colour ? new Uint8Array(0) : null,
+      kind: 'dense', count: 0, style: input, col: lod.layout.colour ? new Uint8Array(0) : null,
       attributes: Object.fromEntries(lod.layout.attributes.map((a) => [a.name, new Float32Array(0)])),
     }
     const resolved = resolveCloudStyle(proxy)
@@ -202,8 +203,8 @@ export function createLodLayer(cloud, { open, material, onChange }) {
     const range = axis != null ? { min: lod.bounds.min[axis], max: lod.bounds.max[axis] }
       : resolved.field.startsWith('attribute:') ? lod.stats?.ranges?.[resolved.field.slice(10)] ?? null : null
     const opts = { elevationRange, origin: offset, range, classCounts: lod.stats?.classes ?? null }
-    const visual = buildCloudStyle(proxy, c.style, opts)
-    style = { input: c.style, opts }
+    const visual = buildCloudStyle(proxy, input, opts)
+    style = { input, opts }
     for (const e of cache.values()) colourise(e)
     material.vertexColors = visual.style.field !== 'single'
     material.color.set(visual.style.field !== 'single' ? 0xffffff : visual.style.colour)

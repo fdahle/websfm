@@ -547,7 +547,7 @@ function createCloudLayer(cloud) {
   if (usesLod(cloud)) return createLodCloudLayer(cloud)
   const isMesh = cloud.kind === 'mesh'
   const count = isMesh ? cloud.nVerts : (cloud.count ?? cloud.points?.length ?? 0)
-  if (!count) return null
+  if (!count || (!cloud.pos && !cloud.points)) return null
   let positions = cloud.pos
   if (!positions) {
     positions = new Float64Array(count * 3)

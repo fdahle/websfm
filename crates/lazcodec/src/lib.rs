@@ -19,6 +19,7 @@
 use std::io::Cursor;
 
 use laz::las::laszip::{LasZipCompressor, LasZipDecompressor, LazItemRecordBuilder, LazItemType, LazVlr};
+use laz::laszip::{ChunkTable, ChunkTableEntry};
 use wasm_bindgen::prelude::*;
 
 /// Build the LASzip item record for a LAS point format. Only the formats
@@ -230,6 +231,125 @@ fn decompress_points_impl(
     Ok(out)
 }
 
+/// Streaming decoder: a LAZ file's points a run of chunks at a time, so a file larger
+/// than memory can be read (plan-lod ▸ L4). JS reads the chunk table's bytes from the
+/// file and asks for each chunk's point and byte counts; it then slices a run of whole
+/// chunks out of the file and decodes them here. Each LASzip chunk restarts the
+/// arithmetic coder, so a chunk decodes on its own: each is wrapped as a small stream
+/// (chunk-table offset, the chunk, a one-entry chunk table) and handed to the same
+/// decompressor a whole file goes through.
+#[wasm_bindgen]
+pub struct LazDecoder {
+    vlr: LazVlr,
+    entries: Vec<ChunkTableEntry>,
+}
+
+#[wasm_bindgen]
+impl LazDecoder {
+    /// `chunk_table`: the file's bytes from the chunk table's offset on (trailing bytes
+    /// such as EVLRs are ignored). Fixed-size chunks get the VLR's chunk size as their
+    /// point count; the last one may hold fewer, which the caller knows from the header.
+    #[wasm_bindgen(constructor)]
+    pub fn new(vlr_data: &[u8], chunk_table: &[u8]) -> Result<LazDecoder, JsError> {
+        LazDecoder::create(vlr_data, chunk_table).map_err(|e| JsError::new(&e))
+    }
+
+    pub fn chunk_count(&self) -> u32 {
+        self.entries.len() as u32
+    }
+
+    /// Points in chunk `i` (fixed-size chunks: the nominal size).
+    pub fn chunk_points(&self, i: u32) -> f64 {
+        self.entries.get(i as usize).map_or(0.0, |e| e.point_count as f64)
+    }
+
+    /// Compressed bytes of chunk `i`.
+    pub fn chunk_bytes(&self, i: u32) -> f64 {
+        self.entries.get(i as usize).map_or(0.0, |e| e.byte_count as f64)
+    }
+
+    pub fn point_size(&self) -> u16 {
+        self.vlr.items_size() as u16
+    }
+
+    /// Decode `num_points` points from the chunks `first .. first + count`, whose
+    /// compressed bytes are `compressed` (back to back, as in the file).
+    pub fn decode(&self, compressed: &[u8], first: u32, count: u32, num_points: u32) -> Result<Vec<u8>, JsError> {
+        self.decode_impl(compressed, first, count, num_points).map_err(|e| JsError::new(&e))
+    }
+}
+
+impl LazDecoder {
+    fn create(vlr_data: &[u8], chunk_table: &[u8]) -> Result<LazDecoder, String> {
+        let vlr = LazVlr::read_from(Cursor::new(vlr_data)).map_err(|e| format!("lazcodec: vlr parse: {e}"))?;
+        // The VLR payload starts with the compressor type: 1 = one unchunked stream.
+        if vlr_data.len() >= 2 && u16::from_le_bytes([vlr_data[0], vlr_data[1]]) == 1 {
+            return Err("lazcodec: this LAZ file is not chunked, so it cannot be read in parts".to_string());
+        }
+        let variable = vlr.uses_variable_size_chunks();
+        let table = ChunkTable::read(&mut Cursor::new(chunk_table), variable)
+            .map_err(|e| format!("lazcodec: chunk table: {e}"))?;
+        let entries = table
+            .as_ref()
+            .iter()
+            .map(|e| ChunkTableEntry {
+                point_count: if variable { e.point_count } else { u64::from(vlr.chunk_size()) },
+                byte_count: e.byte_count,
+            })
+            .collect();
+        Ok(LazDecoder { vlr, entries })
+    }
+
+    fn decode_impl(&self, compressed: &[u8], first: u32, count: u32, num_points: u32) -> Result<Vec<u8>, String> {
+        let (first, count) = (first as usize, count as usize);
+        let run = self
+            .entries
+            .get(first..first + count)
+            .ok_or_else(|| "lazcodec: chunk range outside the table".to_string())?;
+        let bytes: u64 = run.iter().map(|e| e.byte_count).sum();
+        if bytes != compressed.len() as u64 {
+            return Err(format!("lazcodec: expected {bytes} compressed bytes, got {}", compressed.len()));
+        }
+        let point_size = self.vlr.items_size() as usize;
+        let size = (num_points as usize)
+            .checked_mul(point_size)
+            .filter(|&n| n <= 512 * 1024 * 1024)
+            .ok_or_else(|| "lazcodec: decoded records exceed the 512 MiB limit".to_string())?;
+        let mut out = Vec::new();
+        out.try_reserve_exact(size).map_err(|_| "lazcodec: insufficient memory".to_string())?;
+        out.resize(size, 0u8);
+        // One decompressor per chunk, each started at its own bytes: decoding several
+        // chunks in sequence assumes each ends exactly where the next begins, and not
+        // every writer's chunks do (the table, not the coder, says where they start).
+        let (mut at, mut done) = (0usize, 0usize);
+        for e in run {
+            let n = (e.point_count as usize).min(num_points as usize - done);
+            if n == 0 {
+                break;
+            }
+            let bytes = &compressed[at..at + e.byte_count as usize];
+            // [i64 offset of the table][the chunk][a table of just this chunk]
+            let mut stream = Vec::with_capacity(8 + bytes.len() + 32);
+            stream.extend_from_slice(&((8 + bytes.len()) as i64).to_le_bytes());
+            stream.extend_from_slice(bytes);
+            let mut table = ChunkTable::with_capacity(1);
+            table.push(*e);
+            table.write_to(&mut stream, &self.vlr).map_err(|e| format!("lazcodec: chunk table: {e}"))?;
+            let mut decompressor = LasZipDecompressor::new(Cursor::new(stream), self.vlr.clone())
+                .map_err(|e| format!("lazcodec: decompressor: {e}"))?;
+            decompressor
+                .decompress_many(&mut out[done * point_size..(done + n) * point_size])
+                .map_err(|e| format!("lazcodec: decompress: {e}"))?;
+            at += e.byte_count as usize;
+            done += n;
+        }
+        if done != num_points as usize {
+            return Err(format!("lazcodec: the chunks hold {done} points, not {num_points}"));
+        }
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +387,80 @@ mod tests {
         let decoded = decompress_points_impl(&packed.vlr, &packed.data, 120_003, 26).unwrap();
         assert_eq!(decoded, points);
         assert!(encoder.finish_impl().is_err());
+    }
+
+    // A file's points decoded a run of chunks at a time equal the whole decode.
+    #[test]
+    fn streaming_decoder_reads_runs_of_chunks() {
+        let n = 230_017usize; // 5 chunks of 50 000, the last partial
+        let points = make_points(n);
+        let packed = compress_points_impl(&points, 2, 26).unwrap();
+        let data = &packed.data;
+        let table_at = i64::from_le_bytes(data[0..8].try_into().unwrap()) as usize;
+        let decoder = LazDecoder::create(&packed.vlr, &data[table_at..]).unwrap();
+        assert_eq!(decoder.chunk_count(), 5);
+        let mut at = 8usize;
+        let mut decoded = Vec::new();
+        let mut first = 0u32;
+        for run in [2u32, 1, 2] {
+            let bytes: usize = (first..first + run).map(|i| decoder.chunk_bytes(i) as usize).sum();
+            let points_in: usize = (first..first + run)
+                .map(|i| (decoder.chunk_points(i) as usize).min(n - 50_000 * i as usize))
+                .sum();
+            decoded.extend(decoder.decode_impl(&data[at..at + bytes], first, run, points_in as u32).unwrap());
+            at += bytes;
+            first += run;
+        }
+        assert_eq!(decoded, points);
+        assert!(decoder.decode_impl(&data[8..9], 0, 1, 1).is_err());
+    }
+
+    // Against a real file (LAZ_FILE=path): chunk-wise decoding equals the library's
+    // own sequential decoding of the whole point block.
+    #[test]
+    #[ignore]
+    fn streaming_matches_sequential_on_a_real_file() {
+        use std::io::{Read, Seek, SeekFrom};
+        let path = std::env::var("LAZ_FILE").expect("LAZ_FILE");
+        let mut f = std::fs::File::open(&path).unwrap();
+        let mut head = vec![0u8; 4096];
+        f.read_exact(&mut head).unwrap();
+        let offset_to_points = u32::from_le_bytes(head[96..100].try_into().unwrap()) as u64;
+        let header_size = u16::from_le_bytes(head[94..96].try_into().unwrap()) as usize;
+        let n_vlrs = u32::from_le_bytes(head[100..104].try_into().unwrap());
+        let mut vp = header_size;
+        let mut vlr_data = Vec::new();
+        for _ in 0..n_vlrs {
+            let rid = u16::from_le_bytes(head[vp + 18..vp + 20].try_into().unwrap());
+            let len = u16::from_le_bytes(head[vp + 20..vp + 22].try_into().unwrap()) as usize;
+            if rid == 22204 { vlr_data = head[vp + 54..vp + 54 + len].to_vec(); }
+            vp += 54 + len;
+        }
+        let vlr = LazVlr::read_from(Cursor::new(&vlr_data)).unwrap();
+        let ps = vlr.items_size() as usize;
+        let n = 150_000usize;
+        f.seek(SeekFrom::Start(offset_to_points)).unwrap();
+        let mut seq = vec![0u8; n * ps];
+        LasZipDecompressor::new(&mut f, vlr.clone()).unwrap().decompress_many(&mut seq).unwrap();
+        let mut ptr = [0u8; 8];
+        f.seek(SeekFrom::Start(offset_to_points)).unwrap();
+        f.read_exact(&mut ptr).unwrap();
+        let table_at = i64::from_le_bytes(ptr) as u64;
+        let mut table = Vec::new();
+        f.seek(SeekFrom::Start(table_at)).unwrap();
+        f.read_to_end(&mut table).unwrap();
+        let d = LazDecoder::create(&vlr_data, &table).unwrap();
+        let bytes: usize = (0..3).map(|i| d.chunk_bytes(i) as usize).sum();
+        let mut comp = vec![0u8; bytes];
+        f.seek(SeekFrom::Start(offset_to_points + 8)).unwrap();
+        f.read_exact(&mut comp).unwrap();
+        let ours = d.decode_impl(&comp, 0, 3, n as u32).unwrap();
+        let first = (0..n * ps).find(|&i| ours[i] != seq[i]);
+        assert_eq!(first, None, "first difference at byte {first:?} (record {:?})", first.map(|b| b / ps));
+        // A chunk decoded alone equals the same chunk in sequence.
+        let (b0, b1) = (d.chunk_bytes(0) as usize, d.chunk_bytes(1) as usize);
+        let alone = d.decode_impl(&comp[b0..b0 + b1], 1, 1, 50_000).unwrap();
+        assert_eq!(&alone[..], &seq[50_000 * ps..100_000 * ps]);
     }
 
     #[test]

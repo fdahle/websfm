@@ -9,7 +9,8 @@ import { parseFiducialMarks } from '../core/io/fiducialMarks.js'
 import { sniffCloudFormat, looksLikeXyzText } from '../core/io/cloudImport.js'
 import { looksLikeZipHead, isProjectArchiveName } from '../core/io/projectArchive.js'
 import { applyImportTransform } from '../core/io/cloudImport.js'
-import { parseCloudFile as parseCloudFileWorker } from '../workers/computeClient.js'
+import { parseCloudFile as parseCloudFileWorker, terminateAll } from '../workers/computeClient.js'
+import { lasNeedsStreaming } from '../core/io/lasStream.js'
 import { unzipStore } from '../utils/zip.js'
 import { peekArchiveManifest } from '../utils/projectFile.js'
 import { isTiff, isGeoreferencedTiff, probeTiffGeoTags } from '../utils/tiff.js'
@@ -23,7 +24,7 @@ import { showToast } from './useToasts.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, importSensors, addPoses, addFiducialObs, addFiducialMarks, importColmap, openSfmProject, importCloud, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
+export function useImportRouting({ addGcps, addFootprints, importSensors, addPoses, addFiducialObs, addFiducialMarks, importColmap, openSfmProject, importCloud, importStreamedCloud = null, progress = null, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
@@ -258,6 +259,15 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
   // holds its bytes; the parsed buffers are transferred back.
   async function openCloudImport(file) {
     if (!file || !importCloud) return
+    // A LAS/LAZ too large to hold in memory is streamed into a level-of-detail octree
+    // instead (core/io/lasStream.js); the dialog's transforms need resident points.
+    if (importStreamedCloud && await streamsAsLod(file)) {
+      progress?.open('Importing point cloud', 100, () => terminateAll('import cancelled'))
+      const cloud = await importStreamedCloud(file, progress?.report)
+      await progress?.close()
+      if (cloud) activateTab('viewer')
+      return
+    }
     try {
       const { parsed, stats } = await parseCloudFileWorker(file, {
         onLog: (m, l, c) => log(m, l, c),
@@ -267,6 +277,15 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     } catch (err) {
       log(`Cloud import: ${err?.message ?? err}`, 'error', 'Import')
     }
+  }
+
+  async function streamsAsLod(file) {
+    const head = new Uint8Array(await file.slice(0, Math.min(file.size, 1 << 16)).arrayBuffer())
+    if (head.length < 100 || String.fromCharCode(head[0], head[1], head[2], head[3]) !== 'LASF') return false
+    const offsetToPoints = new DataView(head.buffer).getUint32(96, true)
+    const full = offsetToPoints > head.length
+      ? new Uint8Array(await file.slice(0, Math.min(file.size, offsetToPoints)).arrayBuffer()) : head
+    return lasNeedsStreaming(full, file.size) === true
   }
 
   // User confirmed the cloud-import settings: apply the transform + commit.

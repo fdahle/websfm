@@ -102,6 +102,11 @@ function fromMenu(fn) { const cloud = cloudCtx.value.cloud; closeMenu(); fn(clou
         class="imported-badge"
         title="Imported — the pipeline never overwrites this cloud"
       >imported</span>
+      <span
+        v-if="cloud.kind === 'dense' && cloud.lod && !cloud.pos"
+        class="imported-badge"
+        title="Streamed — too large to hold in memory, drawn from its level-of-detail octree; tools that need every point in memory leave it out"
+      >streamed</span>
       <!-- Only sparse clouds carry cameras; dense/mesh hold an empty Map, so the
            badge would read a permanent, meaningless 0. -->
       <span

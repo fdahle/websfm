@@ -86,7 +86,8 @@ export function useWorkspaceState() {
   // What the crop/filter/merge tools can act on: every non-empty dense cloud, computed
   // or imported. Sparse clouds are excluded on purpose — their points carry the
   // view-tracks dense/ortho/COLMAP-export read (see core/products/cloudEdit.js).
-  const editableClouds = computed(() => clouds.value.filter((c) => c.kind === 'dense' && c.count > 0))
+  // Resident dense clouds only: a streamed one (core/lod/streamed.js) has no points in memory.
+  const editableClouds = computed(() => clouds.value.filter((c) => c.kind === 'dense' && c.count > 0 && !!c.pos))
   // What the Mesh ▾ tools act on: every non-empty mesh (computed, imported or edited).
   const meshClouds = computed(() => clouds.value.filter((c) => c.kind === 'mesh' && c.count > 0))
 

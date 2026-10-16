@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import init, { LazEncoder, decompress_points } from '../src/wasm/lazcodec/lazcodec.js'
+import init, { LazEncoder, LazDecoder, decompress_points } from '../src/wasm/lazcodec/lazcodec.js'
 import { cloudToLaz, parseLaz } from '../src/core/io/laz.js'
 import { readLasHeader } from '../src/core/io/las.js'
 import { parseCloudFile, cloudStats } from '../src/core/io/cloudImport.js'
+import { openLasStream } from '../src/core/io/lasStream.js'
 await init({ module_or_path: await readFile(new URL('../src/wasm/lazcodec/lazcodec_bg.wasm', import.meta.url)) })
 const count = 100_003
 const pos = new Float64Array(count * 3)
@@ -28,6 +29,23 @@ assert.equal(chunks, 3)
 assert.equal(cloud.count, count)
 for (let i = 0; i < pos.length; i++) assert.ok(Math.abs(pos[i] - cloud.pos[i]) < 0.000051)
 console.log(`Built LAZ WASM round-trip: ${count} survey-coordinate points, ${chunks} bounded input chunks`)
+
+// The streaming decoder (a run of chunks per call, core/io/lasStream.js) reads the
+// same points as the whole-file decoder, in bounded batches.
+const createLazDecoder = (vlr, table) => {
+  const d = new LazDecoder(vlr, table)
+  return { chunkCount: () => d.chunk_count(), chunkPoints: (i) => d.chunk_points(i), chunkBytes: (i) => d.chunk_bytes(i),
+    pointSize: () => d.point_size(), decode: (b, first, n, points) => d.decode(b, first, n, points) }
+}
+const stream = await openLasStream({ size: bytes.length, read: async (a, b) => bytes.slice(a, b) }, { createLazDecoder, batchPoints: 60_000 })
+let streamed = 0, batches = 0
+for await (const b of stream.batches()) {
+  assert.ok(b.count <= 60_000)
+  for (let k = 0; k < b.count; k++) for (let a = 0; a < 3; a++) assert.equal(b.pos[3 * k + a], cloud.pos[3 * (streamed + k) + a])
+  streamed += b.count; batches++
+}
+assert.equal(streamed, count)
+console.log(`Streamed LAZ: ${streamed} points in ${batches} batches, identical to the whole-file decode`)
 
 // Optional external LAZ/COPC files exercise the same dispatch and codec used
 // by cloud import without committing large or private survey data as fixtures.

@@ -265,7 +265,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // imported COLMAP model, and the fastest orientation/scale sanity check before
   // committing to dense) — the modal warns, it does not gate.
   const demSource = computed(() => {
-    const dense = clouds.value.find((c) => c.kind === 'dense')
+    // A resident dense cloud: a streamed one has no points in memory to grid (yet).
+    const dense = clouds.value.find((c) => c.kind === 'dense' && c.pos)
     if (dense?.count) return { cloud: dense, kind: 'dense', count: dense.count, name: dense.name ?? null }
     const sparse = mainSparseCloud.value
     const n = sparse?.points?.length ?? 0
@@ -721,8 +722,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   })
 
   // Level-of-detail octrees of big clouds (reconstruction/cloudLod.js).
-  const { buildCloudLod, openCloudLod, pruneLod } = createCloudLod({
-    clouds, log, save, projectId: () => (isPersisting() ? projects.currentProjectId : null),
+  const { buildCloudLod, openCloudLod, importStreamedCloud, pruneLod } = createCloudLod({
+    clouds, log, save, projectId: () => (isPersisting() ? projects.currentProjectId : null), makeCloudId, selectedCloudId,
   })
 
   // DEM and orthophoto generation (reconstruction/productRuns.js).
@@ -989,7 +990,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     reconstruct,
     importColmapModel, importInteropModel,
     importCloud,
-    editClouds, textureMesh, buildCloudLod, openCloudLod,
+    editClouds, textureMesh, buildCloudLod, openCloudLod, importStreamedCloud,
     // Tools ▸ Model ▾ ▸ Region (core/products/region.js).
     region, regionState, setRegion, clearRegion,
     // Tools ▸ Model ▾ ▸ Orient model (core/products/orientation.js).

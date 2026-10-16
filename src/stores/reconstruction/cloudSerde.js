@@ -33,6 +33,14 @@ import { makePackedPoints } from '../../core/sfm/resultCodec.js'
 // nothing — the save path for a cloud whose sidecars are reused (savedCloudFiles.js).
 export function serializeDenseCloud(c, { buffers = true } = {}) {
   const N = c.count || 0
+  // A streamed cloud (core/lod/streamed.js): its points live only in its octree.
+  if (!c.pos && c.lod) {
+    return {
+      id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt, streamed: true, posType: 'f64',
+      imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
+      cameras: [], pointCount: N, hasColor: false, hasNormals: false, viewUuids: [], buffers: null,
+    }
+  }
   const meta = {
     id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt,
     posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
@@ -191,6 +199,12 @@ function deserializeCloudData(c, makeCloudId) {
   const b = c.buffers || {}
   // Dense clouds restore into the flat shape with their original position precision.
   // Retain Float64 precision in memory, including imported projected coordinates.
+  if (c.kind === 'dense' && c.streamed) {
+    return {
+      id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense', createdAt: c.createdAt ?? Date.now(),
+      cameras: markRaw(new Map()), ...(c.imported ? { imported: true } : {}), count: N, pos: null, col: null,
+    }
+  }
   if (c.kind === 'dense') {
     const posF = posArray(c, b.pos, N)
     const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
@@ -298,7 +312,8 @@ export function deserializeCloud(c, makeCloudId) {
   } catch (err) {
     attributeError = err?.message ?? String(err)
   }
-  const lod = c.kind === 'dense' && c.lod?.points === (c.pointCount ?? 0) ? markRaw(c.lod) : null
+  // A streamed cloud's octree is all it has, so it is kept as it is.
+  const lod = c.kind === 'dense' && c.lod && (c.streamed || c.lod.points === (c.pointCount ?? 0)) ? markRaw(c.lod) : null
   return { ...cloud, visible: c.visible !== false, style: c.style ?? null,
     ...(lod ? { lod } : {}),
     ...(Object.keys(attributes).length ? { attributes: markRaw(attributes) } : {}),

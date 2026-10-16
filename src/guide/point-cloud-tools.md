@@ -108,3 +108,17 @@ so the app stays responsive and size is not limited by the format: an ASCII PLY 
 XYZ of tens of millions of points works the same as a binary one, only larger.
 Importing works the same way: XYZ, ASCII PLY and LAS files are read in pieces, so a
 multi-gigabyte text cloud does not have to fit in memory as text.
+
+## Very large LAS and LAZ files
+A LAS or LAZ file too large to hold in memory (from about 10 million points) is
+**streamed** instead: it is read a million points at a time straight into a
+[level-of-detail](help:level-of-detail) octree in the project, and never held whole.
+A 200-million-point LAZ takes a few minutes and 16 to 20 bytes per point of project
+storage. The import dialog is skipped, since its unit and axis options would need every
+point in memory; LAS surveys are in their own coordinates already.
+
+A streamed cloud is marked **streamed** in the sidebar. It keeps positions, colour,
+intensity, classification and the return number and count; a file without colour
+starts coloured by height. It is drawn like any big cloud, and you can style and
+measure on it. Tools that need every point in memory (cropping and filtering,
+selection, export, DEM gridding) leave it out for now, and say so when asked.

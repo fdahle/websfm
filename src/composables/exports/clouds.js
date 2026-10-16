@@ -1,3 +1,4 @@
+import { isStreamed, streamedRefusal } from '../../core/lod/streamed.js'
 import { exportCloudFile, exportMeshFile } from '../../workers/computeClient.js'
 import { downloadBlob } from '../../utils/download.js'
 import { buildTransformsJson } from '../../core/io/transforms.js'
@@ -26,7 +27,8 @@ export function createCloudExports({
   // Point cloud (selected, else the first non-empty) → PLY / LAS / LAZ / XYZ, with an
   // optional georeference transform (the stored Horn fit → project CRS) and an
   // optional voxel downsample (cell in target-frame units, applied after georef).
-  const cloudHasPoints = (c) => c && (c.kind === 'dense' ? c.count > 0 : c.points?.length > 0)
+  // A streamed cloud (core/lod/streamed.js) has no points in memory to write (yet).
+  const cloudHasPoints = (c) => c && (c.kind === 'dense' ? c.count > 0 && !!c.pos : c.points?.length > 0)
   // Normalize either cloud shape to flat Float64 positions + colours (the 3D Tiles
   // export's input; its glb is built on this thread).
   function toFlatCloud(src) {
@@ -105,6 +107,7 @@ export function createCloudExports({
     const cloud = target ?? (cloudHasPoints(selectedCloud.value)
       ? selectedCloud.value
       : clouds.value.find(cloudHasPoints))
+    if (cloud && isStreamed(cloud)) { log(streamedRefusal(cloud, 'Export'), 'warn', 'Export'); return }
     if (!cloud) return
     // Attributes (a computed distance, imported intensity/classification) ride along:
     // PLY and LAS write them, LAZ its standard LAS fields only (see core/io/laz.js).

@@ -1,4 +1,4 @@
-import init, { compress_points, decompress_points, LazEncoder } from '../../wasm/lazcodec/lazcodec.js'
+import init, { compress_points, decompress_points, LazEncoder, LazDecoder } from '../../wasm/lazcodec/lazcodec.js'
 
 // LAZ codec ownership (lazy wasm init, like workers/ops/mesh.js gates the mesh
 // module). Two consumers share one instance: the cloud export op
@@ -37,5 +37,14 @@ export function makeLazCodec() {
       free: () => encoder.free(),
     }
   }
-  return { ensure, compress, decompress, createCompressor }
+  // The streaming decoder's contract (core/io/lasStream.js): a run of chunks per call.
+  const createDecoder = (vlrData, chunkTable) => {
+    const d = new LazDecoder(vlrData, chunkTable)
+    return {
+      chunkCount: () => d.chunk_count(), chunkPoints: (i) => d.chunk_points(i), chunkBytes: (i) => d.chunk_bytes(i),
+      pointSize: () => d.point_size(), decode: (bytes, first, count, n) => d.decode(bytes, first, count, n),
+      free: () => d.free(),
+    }
+  }
+  return { ensure, compress, decompress, createCompressor, createDecoder }
 }

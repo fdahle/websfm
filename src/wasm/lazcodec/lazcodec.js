@@ -48,6 +48,101 @@ export class CompressedPoints {
 if (Symbol.dispose) CompressedPoints.prototype[Symbol.dispose] = CompressedPoints.prototype.free;
 
 /**
+ * Streaming decoder: a LAZ file's points a run of chunks at a time, so a file larger
+ * than memory can be read (plan-lod ▸ L4). JS reads the chunk table's bytes from the
+ * file and asks for each chunk's point and byte counts; it then slices a run of whole
+ * chunks out of the file and decodes them here. Each LASzip chunk restarts the
+ * arithmetic coder, so a chunk decodes on its own: each is wrapped as a small stream
+ * (chunk-table offset, the chunk, a one-entry chunk table) and handed to the same
+ * decompressor a whole file goes through.
+ */
+export class LazDecoder {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        LazDecoderFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_lazdecoder_free(ptr, 0);
+    }
+    /**
+     * Compressed bytes of chunk `i`.
+     * @param {number} i
+     * @returns {number}
+     */
+    chunk_bytes(i) {
+        const ret = wasm.lazdecoder_chunk_bytes(this.__wbg_ptr, i);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    chunk_count() {
+        const ret = wasm.lazdecoder_chunk_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Points in chunk `i` (fixed-size chunks: the nominal size).
+     * @param {number} i
+     * @returns {number}
+     */
+    chunk_points(i) {
+        const ret = wasm.lazdecoder_chunk_points(this.__wbg_ptr, i);
+        return ret;
+    }
+    /**
+     * Decode `num_points` points from the chunks `first .. first + count`, whose
+     * compressed bytes are `compressed` (back to back, as in the file).
+     * @param {Uint8Array} compressed
+     * @param {number} first
+     * @param {number} count
+     * @param {number} num_points
+     * @returns {Uint8Array}
+     */
+    decode(compressed, first, count, num_points) {
+        const ptr0 = passArray8ToWasm0(compressed, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.lazdecoder_decode(this.__wbg_ptr, ptr0, len0, first, count, num_points);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * `chunk_table`: the file's bytes from the chunk table's offset on (trailing bytes
+     * such as EVLRs are ignored). Fixed-size chunks get the VLR's chunk size as their
+     * point count; the last one may hold fewer, which the caller knows from the header.
+     * @param {Uint8Array} vlr_data
+     * @param {Uint8Array} chunk_table
+     */
+    constructor(vlr_data, chunk_table) {
+        const ptr0 = passArray8ToWasm0(vlr_data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(chunk_table, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.lazdecoder_new(ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        LazDecoderFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @returns {number}
+     */
+    point_size() {
+        const ret = wasm.lazdecoder_point_size(this.__wbg_ptr);
+        return ret;
+    }
+}
+if (Symbol.dispose) LazDecoder.prototype[Symbol.dispose] = LazDecoder.prototype.free;
+
+/**
  * Incremental encoder: owns one continuous LASzip stream across JS chunks.
  */
 export class LazEncoder {
@@ -174,6 +269,9 @@ function __wbg_get_imports() {
 const CompressedPointsFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_compressedpoints_free(ptr, 1));
+const LazDecoderFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_lazdecoder_free(ptr, 1));
 const LazEncoderFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_lazencoder_free(ptr, 1));

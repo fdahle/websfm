@@ -1,5 +1,7 @@
 import { buildLod as runBuild } from '../../core/lod/build.js'
 import { typeName } from '../../core/lod/nodeCodec.js'
+import { openLasStream } from '../../core/io/lasStream.js'
+import { blobSource } from '../../utils/blobParts.js'
 
 // Level-of-detail octree build (dev/planning/plan-lod.md ▸ L2). The core
 // (core/lod/build.js) is pure; this side supplies the files:
@@ -101,19 +103,30 @@ function arraySource(cloud, batch = 1 << 20) {
   }
 }
 
-export function makeLodOps() {
-  // input { cloud: { count, pos, col?, attributes?, bounds? }, dir: FileSystemDirectoryHandle,
-  //         name, layout?: { offset, scale } }
-  // → { name, dataFile, hierarchyFile, root, layout, spacing, nodeCount, dataBytes, points, levels }
+export function makeLodOps({ lazCodec = null } = {}) {
+  // input { cloud: { count, pos, col?, attributes?, bounds? } | file: File (a LAS/LAZ,
+  //         streamed: never held whole), dir: FileSystemDirectoryHandle, name }
+  // → { name, dataFile, hierarchyFile, root, layout, spacing, nodeCount, dataBytes, points,
+  //     levels, bounds, stats, file?: { version, format, laz } }
   async function buildLod([input], { emit }) {
-    const { cloud, dir, name } = input
+    const { cloud, file, dir, name } = input
     const t0 = performance.now()
+    const log = (m, l, c) => emit('log', [m, l, c])
+    let source, layout = input.layout, fileInfo = null
+    if (file) {
+      const src = blobSource(file, file.name)
+      await lazCodec?.ensure() // a LAZ is told by its header bit or its VLR: load it either way
+      source = await openLasStream(src, { createLazDecoder: lazCodec?.createDecoder ?? null, onLog: log })
+      layout = source.layout
+      const h = source.header
+      fileInfo = { version: `${h.versionMajor}.${h.versionMinor}`, format: h.format, laz: h.isLaz }
+    } else source = arraySource(cloud)
     const tmp = await tmpStore(`lod-${name}`)
     const dataFile = `${name}.lod`, hierarchyFile = `${name}.hier`
     const out = await dataWriter(dir, dataFile)
     try {
-      const res = await runBuild(arraySource(cloud), tmp, out, {
-        layout: input.layout,
+      const res = await runBuild(source, tmp, out, {
+        layout,
         onProgress: (done, total, label) => emit('progress', [done, total, label, done / total]),
       })
       await out.close()
@@ -123,7 +136,7 @@ export function makeLodOps() {
       const { hierarchy, ...meta } = res
       emit('log', [`Level of detail: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, `
         + `${meta.levels} levels, ${((performance.now() - t0) / 1000).toFixed(1)} s`, 'info', 'Products'])
-      return { result: { ...meta, name, dataFile, hierarchyFile, hierarchyBytes: hierarchy.length } }
+      return { result: { ...meta, name, dataFile, hierarchyFile, hierarchyBytes: hierarchy.length, ...(fileInfo ? { file: fileInfo } : {}) } }
     } catch (err) {
       await out.abort()
       await dir.removeEntry(dataFile).catch(() => {})

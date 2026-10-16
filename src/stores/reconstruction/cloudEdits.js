@@ -1,3 +1,4 @@
+import { isStreamed, streamedRefusal } from '../../core/lod/streamed.js'
 import { markRaw } from 'vue'
 import { rawTexture } from './meshTexture.js'
 import { facePages, regroupByPage } from '../../core/products/texture/carry.js'
@@ -240,10 +241,15 @@ export function createCloudEdits({
     // dense-only (a sparse cloud's points carry view-tracks — never edited here).
     const meshSource = MESH_EDIT_MODES.has(mode)
     const resolved = sourceIds.map((id) => clouds.value.find((c) => c.id === id) ?? null)
-    const okKind = (c, slot) => c && c.count > 0 && (
+    const okKind = (c, slot) => c && c.count > 0 && !isStreamed(c) && (
       slot === 0 ? (meshSource ? c.kind === 'mesh' : c.kind === 'dense')
         : (REFERENCE_MODES.has(mode) ? (c.kind === 'dense' || c.kind === 'mesh') : c.kind === 'dense'))
     const sources = resolved.filter((c, slot) => okKind(c, slot))
+    const streamed = resolved.find(isStreamed)
+    if (streamed) {
+      log(streamedRefusal(streamed, 'Cloud edit'), 'warn', 'Products')
+      return null
+    }
     if (!sources.length || sources.length !== resolved.length) {
       log(`Cloud edit: no usable ${meshSource ? 'mesh' : 'dense cloud'} for this tool`, 'warn', 'Products')
       return null

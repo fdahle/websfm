@@ -1290,6 +1290,8 @@ export async function loadReconstruction(projectId) {
       // point, Float64 = 24; cloudSerde posArray); a sparse pos is always Float64.
       const posBytes = buffers.pos?.byteLength ?? 0
       const posOk = posBytes === n * 24 || (c.kind !== 'sparse' && c.kind != null && posBytes === n * 12)
+        // A streamed cloud's points are only in its octree (lod/), never here.
+        || (c.kind === 'dense' && c.streamed && c.lod && posBytes === 0)
       if (!Number.isSafeInteger(n) || n < 0 || !posOk
           || (c.hasColor && buffers.col?.byteLength !== n * 3)
           || (c.hasNormals && buffers.nrm?.byteLength !== n * 12)

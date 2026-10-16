@@ -22,6 +22,41 @@ export class CompressedPoints {
 }
 
 /**
+ * Streaming decoder: a LAZ file's points a run of chunks at a time, so a file larger
+ * than memory can be read (plan-lod ▸ L4). JS reads the chunk table's bytes from the
+ * file and asks for each chunk's point and byte counts; it then slices a run of whole
+ * chunks out of the file and decodes them here. Each LASzip chunk restarts the
+ * arithmetic coder, so a chunk decodes on its own: each is wrapped as a small stream
+ * (chunk-table offset, the chunk, a one-entry chunk table) and handed to the same
+ * decompressor a whole file goes through.
+ */
+export class LazDecoder {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Compressed bytes of chunk `i`.
+     */
+    chunk_bytes(i: number): number;
+    chunk_count(): number;
+    /**
+     * Points in chunk `i` (fixed-size chunks: the nominal size).
+     */
+    chunk_points(i: number): number;
+    /**
+     * Decode `num_points` points from the chunks `first .. first + count`, whose
+     * compressed bytes are `compressed` (back to back, as in the file).
+     */
+    decode(compressed: Uint8Array, first: number, count: number, num_points: number): Uint8Array;
+    /**
+     * `chunk_table`: the file's bytes from the chunk table's offset on (trailing bytes
+     * such as EVLRs are ignored). Fixed-size chunks get the VLR's chunk size as their
+     * point count; the last one may hold fewer, which the caller knows from the header.
+     */
+    constructor(vlr_data: Uint8Array, chunk_table: Uint8Array);
+    point_size(): number;
+}
+
+/**
  * Incremental encoder: owns one continuous LASzip stream across JS chunks.
  */
 export class LazEncoder {
@@ -56,11 +91,18 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_compressedpoints_free: (a: number, b: number) => void;
+    readonly __wbg_lazdecoder_free: (a: number, b: number) => void;
     readonly __wbg_lazencoder_free: (a: number, b: number) => void;
     readonly compress_points: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly compressedpoints_data: (a: number) => [number, number];
     readonly compressedpoints_vlr: (a: number) => [number, number];
     readonly decompress_points: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly lazdecoder_chunk_bytes: (a: number, b: number) => number;
+    readonly lazdecoder_chunk_count: (a: number) => number;
+    readonly lazdecoder_chunk_points: (a: number, b: number) => number;
+    readonly lazdecoder_decode: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly lazdecoder_new: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly lazdecoder_point_size: (a: number) => number;
     readonly lazencoder_finish: (a: number) => [number, number, number];
     readonly lazencoder_new: (a: number, b: number) => [number, number, number];
     readonly lazencoder_push: (a: number, b: number, c: number) => [number, number];

@@ -11,6 +11,10 @@ Notable changes to websfm. The format follows
   draws only a point budget's worth of it, the part in front of the camera in most
   detail, loading the rest as you move. The budget (5 million by default) is in
   Settings ▸ Map & 3D. Selection tools still see every point.
+- **Streamed LAS/LAZ import**: a LAS or LAZ file too large to hold in memory is read
+  in batches straight into its octree, so a 200-million-point survey imports (in a few
+  minutes) and displays; LAZ is decoded a run of chunks at a time. Such a cloud is
+  marked *streamed*; tools that need all of its points in memory leave it out for now.
 - **Measure in 3D**: Tools ▸ Measure ▸ Measure in 3D measures distance, polylines and
   areas directly in the 3D view, picked on the surface of a mesh or on cloud points.
   Lengths are split into horizontal and height change, areas into surface area and

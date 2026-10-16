@@ -456,9 +456,14 @@ export function readLasHeader(bytes) {
   if (scale.some(v => !Number.isFinite(v) || v <= 0) || offset.some(v => !Number.isFinite(v))) {
     throw new Error('Invalid LAS coordinate scale or offset')
   }
+  // The header's extent (max then min per axis); some writers leave it zero.
+  const bounds = {
+    min: [dv.getFloat64(187, true), dv.getFloat64(203, true), dv.getFloat64(219, true)],
+    max: [dv.getFloat64(179, true), dv.getFloat64(195, true), dv.getFloat64(211, true)],
+  }
   return {
     versionMajor, versionMinor, headerSize, offsetToPoints, formatRaw, format, recordLength,
-    count, isLaz, vlrs, extraBytes: parseExtraBytes(vlrs),
+    count, isLaz, vlrs, extraBytes: parseExtraBytes(vlrs), bounds,
     scale: [dv.getFloat64(131, true), dv.getFloat64(139, true), dv.getFloat64(147, true)],
     offset: [dv.getFloat64(155, true), dv.getFloat64(163, true), dv.getFloat64(171, true)],
   }
@@ -481,8 +486,10 @@ export function decodeLasPoints(pointBytes, count, recordLength, format, scale, 
 
 // decodeLasPoints split so the records can arrive in chunks (parseLasSource reads
 // a file slice by slice): decode(bytes, start, n) fills points [start, start+n)
-// from `bytes` (n whole records), finish() returns the cloud.
-export function createLasDecoder(count, recordLength, format, scale, offset, extraBytes = []) {
+// from `bytes` (n whole records), finish() returns the cloud. `rgbBits` (8 | 16)
+// fixes the colour depth when the decoder sees only part of the file (a streamed
+// import decides it for the whole file from a sample); otherwise it is detected.
+export function createLasDecoder(count, recordLength, format, scale, offset, extraBytes = [], { rgbBits = null } = {}) {
   if (!SUPPORTED_FORMATS.has(format) || recordLength < RECORD_MIN[format]) {
     throw new Error('Truncated or invalid LAS point records')
   }
@@ -560,7 +567,7 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
       }
       p += recordLength
     }
-    if (low && rgbMax > 255) low = null
+    if (low && rgbMax > 255 && rgbBits !== 8) low = null
     for (const x of extras) {
       for (let i = start, q = x.at; i < start + n; i++, q += recordLength) {
         const raw = x.big ? Number(dv[x.getter](q, true)) : dv[x.getter](q, true)
@@ -573,7 +580,8 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
     // The spec says 16-bit colour, but many writers store 0–255 in those fields;
     // the >> 8 above would turn such a cloud black. A file whose colours never
     // exceed 255 is 8-bit: use the colour words unshifted.
-    const outCol = col && rgbMax > 0 && rgbMax <= 255 ? low : col
+    const eightBit = rgbBits ? rgbBits === 8 : rgbMax > 0 && rgbMax <= 255
+    const outCol = col && eightBit ? low : col
     return { count, pos, ...(outCol ? { col: outCol } : {}), attributes }
   }
 

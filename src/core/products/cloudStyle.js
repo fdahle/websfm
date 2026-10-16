@@ -18,7 +18,11 @@ const CLASSES = {
   21: ['Snow', '#d9ecf2'], 22: ['Temporal exclusion', '#ce9aab'],
 }
 export const countOf = cloud => cloud?.nVerts ?? cloud?.count ?? cloud?.points?.length ?? 0
-export const hasRgb = cloud => !!cloud?.col || !!cloud?.points?.some(p => p.color)
+// A cloud whose points are only in its level-of-detail octree (core/lod/streamed.js):
+// its fields, ranges and classes come from the octree's build statistics.
+const lodOnly = cloud => !!cloud?.lod && !cloud.pos && !cloud.points
+export const hasRgb = cloud => !!cloud?.col || !!cloud?.points?.some(p => p.color) || (lodOnly(cloud) && !!cloud.lod.layout?.colour)
+const attributeNames = cloud => (lodOnly(cloud) ? (cloud.lod.layout?.attributes ?? []).map(a => a.name) : Object.keys(cloud?.attributes || {}))
 export const hasTexture = cloud => !!(cloud?.uv && cloud?.texture?.pages?.length)
 export function styleFields(cloud) {
   return [
@@ -26,7 +30,7 @@ export function styleFields(cloud) {
     ...(hasRgb(cloud) ? [{ value: 'rgb', label: 'RGB' }] : []),
     { value: 'single', label: 'Single colour' },
     { value: 'elevation', label: 'Elevation (Z)' }, { value: 'x', label: 'X coordinate' }, { value: 'y', label: 'Y coordinate' },
-    ...Object.keys(cloud?.attributes || {}).map(name => ({ value: `attribute:${name}`, label: LABELS[name] || name })),
+    ...attributeNames(cloud).map(name => ({ value: `attribute:${name}`, label: LABELS[name] || name })),
   ]
 }
 export function resolveCloudStyle(cloud, input = cloud?.style || {}) {
@@ -50,6 +54,11 @@ export function scalarAt(cloud, field, origin = null) {
   return cloud.pos ? i => cloud.pos[i * 3 + axis] + o : i => cloud.points[i][key]
 }
 export function scalarRange(cloud, field) {
+  if (lodOnly(cloud)) {
+    const axis = { x: 0, y: 1, elevation: 2 }[field]
+    if (axis != null) return { min: cloud.lod.bounds.min[axis], max: cloud.lod.bounds.max[axis] }
+    return cloud.lod.stats?.ranges?.[field.replace(/^attribute:/, '')] ?? { min: 0, max: 1 }
+  }
   const at = scalarAt(cloud, field)
   let min = Infinity, max = -Infinity
   for (let i = 0, n = countOf(cloud); i < n; i++) {
@@ -76,6 +85,7 @@ export function sharedElevationRange(clouds, rangeFor = scalarRange) {
 // level-of-detail node styled with its whole cloud's legend).
 export function classEntries(cloud, style = {}, classCounts = null) {
   const counts = new Map()
+  if (!classCounts && lodOnly(cloud)) classCounts = cloud.lod.stats?.classes ?? {}
   if (classCounts) for (const [value, count] of Object.entries(classCounts)) counts.set(Number(value), count)
   else for (const value of cloud.attributes?.classification || []) {
     if (Number.isFinite(value)) counts.set(value, (counts.get(value) || 0) + 1)
