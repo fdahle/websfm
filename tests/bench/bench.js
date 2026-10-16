@@ -278,6 +278,31 @@ window.bench = {
     return { settings, seconds: (performance.now() - t0) / 1000, source: src?.name ?? null,
       sourceTriangles: src?.count ?? 0, summary: cloud?.textureSummary ?? null }
   },
+  // Export the newest textured mesh through the worker's own mesh export (as the Export
+  // dialog does) in each format; the runner reads the files back in chunks.
+  async meshexport({ formats = ['glb', 'obj'] } = {}) {
+    const { exportMeshFile } = await import('/src/workers/computeClient.js')
+    const c = [...recon.clouds].reverse().find((x) => x.texture)
+    if (!c) return { files: [] }
+    window.__benchExports = []
+    const files = []
+    for (const format of formats) {
+      const t0 = performance.now()
+      const mesh = { nVerts: c.nVerts, count: c.count, pos: c.pos.slice(), idx: c.idx.slice(), uv: c.uv.slice(),
+        ...(c.col ? { col: c.col.slice() } : {}) }
+      const texture = { data: c.texture.data.slice(), pages: c.texture.pages.map((p) => ({ ...p })), groups: c.texture.groups.map((g) => ({ ...g })) }
+      const { blob, ext } = await exportMeshFile({ mesh, format, texture, name: 'textured' })
+      window.__benchExports.push(blob)
+      files.push({ format, ext, size: blob.size, seconds: (performance.now() - t0) / 1000 })
+    }
+    return { files }
+  },
+  async meshexportChunk(i, start, n) {
+    const u8 = new Uint8Array(await window.__benchExports[i].slice(start, start + n).arrayBuffer())
+    let s = ''
+    for (let k = 0; k < u8.length; k += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(k, k + 0x8000))
+    return btoa(s)
+  },
   // The textured mesh's atlas pages (JPEG), base64 in chunks for the runner.
   texturePages() {
     const c = [...recon.clouds].reverse().find((x) => x.texture)

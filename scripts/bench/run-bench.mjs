@@ -269,7 +269,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', ortho: 'ortho' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', ortho: 'ortho' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
@@ -526,6 +526,18 @@ try {
       if (stage === 'dense' && lidarCfg) await denseLidarCheck(entry)
       if (stage === 'ortho') await exportOrtho(tag)
       if (stage === 'texture') await exportTexturePages(tag)
+      if (stage === 'meshexport') {
+        const files = result.stages[entry]?.files ?? []
+        for (let i = 0; i < files.length; i++) {
+          const file = `${outPrefix}${tag ? `.${tag}` : ''}.export-${files[i].format}.${files[i].ext}`
+          const parts = []
+          for (let s = 0; s < files[i].size; s += 8 << 20) {
+            parts.push(Buffer.from(await page.evaluate(([k, a, n]) => window.bench.meshexportChunk(k, a, n), [i, s, 8 << 20]), 'base64'))
+          }
+          await writeFile(file, Buffer.concat(parts))
+          console.log(`== meshexport: ${files[i].format} ${(files[i].size / 1024 ** 2).toFixed(1)} MiB → ${file}`)
+        }
+      }
       if (stage === 'dem' && (cfg.exportDem || cfg.hist?.refDem)) await exportDem(tag)
     }
   }
