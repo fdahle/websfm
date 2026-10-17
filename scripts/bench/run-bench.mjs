@@ -23,7 +23,7 @@ import { chromium } from 'playwright'
 import { startWorkerHeapSampler } from './workerHeap.mjs'
 import { loadReference } from './reference.mjs'
 import { spawn } from 'node:child_process'
-import { readFile, readdir, writeFile, mkdir, rm } from 'node:fs/promises'
+import { readFile, readdir, writeFile, mkdir, rm, stat } from 'node:fs/promises'
 import { createWriteStream, createReadStream } from 'node:fs'
 import { join, dirname, extname, resolve, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -48,7 +48,7 @@ const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = { ...(args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}) }
-for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'exportCloudsProject', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
+for (const k of ['name', 'images', 'include', 'openProject', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'exportCloudsProject', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
 for (const k of ['detect', 'match', 'recon']) cfg[k] = { ...(cfg[k] ?? {}), ...(args[k] ? json(args[k]) : {}) }
 if (!cfg.images) throw new Error('--images <folder> (or "images" in --config) is required')
 const name = cfg.name ?? 'bench'
@@ -86,7 +86,7 @@ if (cfg.minGpsAlt != null) {
   files = kept
 }
 if (cfg.limit) files = files.slice(0, Number(cfg.limit))
-if (!files.length) throw new Error(`no images in ${cfg.images}`)
+if (!files.length && !cfg.openProject) throw new Error(`no images in ${cfg.images}`) // openproject brings its own
 
 // ── app server ──
 // Default: build a snapshot (scripts/bench/vite.bench.config.mjs) and serve it
@@ -164,6 +164,7 @@ const browser = await chromium.launchPersistentContext(profileDir, {
   // WebGPU; `"headed": true, "chromeArgs": ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist"]`
   // reaches the real GPU (scripts/bench/README.md ▸ Linux).
   args: ['--enable-precise-memory-info', `--js-flags=${jsFlags.join(' ')}`, ...(cfg.chromeArgs ?? [])],
+  acceptDownloads: true, // the export:<tag> stage saves the app's downloads
 })
 const result = { name, config: cfg, files: files.length, startedAt: new Date().toISOString(), stages: {} }
 let heap = null // worker heap sampler (workerHeap.mjs), started with the page
@@ -269,7 +270,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho', modeledit: 'modelEdit', scalebar: 'scaleBar' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
@@ -301,6 +302,48 @@ try {
   // then restore through the app's own sequence — what a user's reopen costs.
   // `colmap: "<dir with cameras.txt, images.txt, points3D.txt>"`: import that model as the
   // main sparse cloud (stage "colmap", instead of "recon").
+  // `export:<tag>`: one export through the app's dialog dispatch (window.bench.exportRun),
+  // config key `export:<tag>` = { kind, settings, cloud? }. Every download the export
+  // triggers is saved as <prefix>.<tag>.<file name>.
+  const exportStage = async (entry) => {
+    const spec = cfg[entry]
+    if (!spec?.kind) throw new Error(`${entry}: config needs { kind, settings }`)
+    const tag = entry.slice(7), saves = []
+    const onDownload = (d) => { const f = `${outPrefix}.${tag}.${d.suggestedFilename()}`; saves.push(d.saveAs(f).then(() => f)) }
+    page.on('download', onDownload)
+    try {
+      const r = await page.evaluate((x) => window.bench.exportRun(x), spec)
+      await page.waitForTimeout(2000) // a download event can trail the click
+      const saved = await Promise.all(saves)
+      const files = await Promise.all(saved.map(async (f) => ({ file: f, bytes: (await stat(f)).size })))
+      result.stages[entry] = { ...r, files }
+      console.log(`== ${entry}: ${r.seconds.toFixed(1)} s, ${files.map((f) => `${f.file.split('/').pop()} (${(f.bytes / 1024 ** 2).toFixed(2)} MiB)`).join(', ') || 'no file'}`)
+    } finally { page.off('download', onDownload) }
+    await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+  }
+  // `openproject`: open the .websfm at cfg.openProject as a new project (fresh profile:
+  // nothing of the saving run is here) and restore it; logs the inventory like reopen.
+  const openProject = async () => {
+    if (!cfg.openProject) throw new Error('openproject: set "openProject" to a .websfm path')
+    await page.evaluate(() => {
+      const el = Object.assign(document.createElement('input'), { type: 'file', id: 'bench-project-file' })
+      document.body.appendChild(el)
+    })
+    await page.setInputFiles('#bench-project-file', cfg.openProject)
+    lastLogAt = Date.now()
+    let r
+    try {
+      r = await Promise.race([page.evaluate(() => window.bench.openProjectFile()), watchdog()])
+    } finally {
+      for (const t of watchdog.timers.splice(0)) clearInterval(t)
+    }
+    const { inventory: inv, ...numbers } = r
+    result.stages.openproject = numbers
+    ;(result.inventory ??= {}).openproject = inv
+    console.log(`== openproject: ${JSON.stringify(numbers)}`)
+    console.log(`== inventory openproject: ${invLine(inv)}`)
+    await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+  }
   const importColmap = async () => {
     const files = Object.fromEntries(await Promise.all(['cameras.txt', 'images.txt', 'points3D.txt']
       .map(async (f) => [f, await readFile(join(cfg.colmap, f), 'utf8')])))
@@ -518,6 +561,18 @@ try {
     for (const entry of stages) {
       if (entry === 'reopen') { await reopen(); continue }
       if (entry === 'colmap') { await importColmap(); continue }
+      if (entry.startsWith('export:')) { await exportStage(entry); continue }
+      if (entry === 'openproject') { await openProject(); continue }
+      if (entry.startsWith('quota:')) {
+        // `quota:<MB>`: cap the site's storage at what it uses now plus <MB>, so the next
+        // stage runs out of space (Chrome DevTools Storage.overrideQuotaForOrigin).
+        const cdp = await page.context().newCDPSession(page)
+        const { usage } = await page.evaluate(() => navigator.storage.estimate())
+        const quotaSize = usage + Number(entry.slice(6)) * 1024 ** 2
+        await cdp.send('Storage.overrideQuotaForOrigin', { origin: base, quotaSize })
+        console.log(`== ${entry}: storage quota ${(quotaSize / 1024 ** 2).toFixed(0)} MB (usage ${(usage / 1024 ** 2).toFixed(0)} MB)`)
+        continue
+      }
       const [stage, tag] = entry.split(':')
       if (!run[stage]) throw new Error(`unknown stage ${stage}`)
       await runStage(stage, cfg[entry] ?? cfg[stage], entry)

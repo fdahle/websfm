@@ -204,6 +204,79 @@ window.bench = {
       inventory: await window.bench.inventory() }
   },
 
+  // A Tools ▸ Model ▾ edit of the main sparse model ('optimize' = Optimize cameras,
+  // 'sparse' = gradual selection), as the dialog submits it. Reports the focal and the
+  // camera-centre fit to the reference / EXIF positions before and after.
+  async modelEdit({ mode = 'optimize', settings = {} } = {}) {
+    const fit = (cloud) => {
+      const positions = reference?.positions
+        ? new Map(images.images.filter((i) => reference.positions[stem(i.name)]).map((i) => [i.uuid, reference.positions[stem(i.name)]]))
+        : new Map(images.images
+          .filter((i) => Number.isFinite(i.meta?.gpsLat) && Number.isFinite(i.meta?.gpsLon) && Number.isFinite(i.meta?.gpsAlt))
+          .map((i) => [i.uuid, { lat: i.meta.gpsLat, lon: i.meta.gpsLon, alt: i.meta.gpsAlt }]))
+      const pc = cameraPositionCheck(cloud.cameras, positions, { leverArm: reference?.leverArm ?? null })
+      return pc && { count: pc.count, rmsH: pc.rmsH, rmsV: pc.rmsV, rms3d: pc.rms3d }
+    }
+    const before = recon.mainSparseCloud
+    if (!before) throw new Error('modelEdit: no sparse model')
+    const fx = (c) => [...new Set([...c.cameras.values()].map((cam) => +cam.K.fx.toFixed(2)))]
+    const was = { fx: fx(before), points: before.points.length, positions: fit(before) }
+    const t0 = performance.now()
+    const r = await recon.editClouds({ mode, sourceIds: [before.id], settings: { ...settings, createdAt: before.createdAt } })
+    const after = recon.mainSparseCloud
+    return { seconds: (performance.now() - t0) / 1000, ok: !!r, replaced: after !== before,
+      before: was, after: { fx: fx(after), points: after.points.length, positions: fit(after) } }
+  },
+
+  // A scale bar between two markers placed on real tie points: the two ≥4-view points
+  // nearest opposite corners of the model, marked in every image that saw them (their
+  // BA-frame pixels mapped to the click convention as Find GCPs does). The bar is
+  // `factor` × their model distance, so the fitted scale is known: `factor`.
+  async scaleBar({ factor = 2.5, unit = 'm' } = {}) {
+    const { useScaleBarsStore } = await import('/src/stores/useScaleBarsStore.js')
+    const { makePinholeToMark } = await import('/src/core/sfm/displayFrame.js')
+    const bars = useScaleBarsStore()
+    const cloud = recon.mainSparseCloud, pts = cloud.points
+    const frameModel = makeFrameModelResolver({ summary: recon.summary, sensors: sensorsStore.sensors })
+    let lo = -1, hi = -1, loS = Infinity, hiS = -Infinity
+    for (let i = 0; i < pts.length; i++) {
+      if (pts.pixelCount(i) < 4) continue
+      const s = pts.x(i) + pts.y(i) + pts.z(i)
+      if (s < loS) { loS = s; lo = i }
+      if (s > hiS) { hiS = s; hi = i }
+    }
+    if (lo < 0 || hi === lo) throw new Error('scaleBar: no two ≥4-view points')
+    const byUuid = new Map(images.images.map((im) => [im.uuid, im]))
+    const mark = (i, name) => {
+      const id = gcpsStore.addPoint({ role: 'marker', name })
+      pts.forEachPixel(i, (uuid, px, py) => {
+        const im = byUuid.get(uuid), cam = cloud.cameras.get(uuid)
+        if (!im || !cam) return
+        const { dist, selfCal, fiducial } = frameModel(im)
+        const q = makePinholeToMark({ K: cam.K, dist, selfCal, fiducial })(px, py)
+        gcpsStore.setObservation(id, im.id, im.name, q.x, q.y)
+      })
+      return id
+    }
+    const a = mark(lo, 'Bar end A'), b = mark(hi, 'Bar end B')
+    const model = Math.hypot(...[0, 1, 2].map((k) => pts.xyz(hi)[k] - pts.xyz(lo)[k]))
+    bars.addBar({ a: { kind: 'marker', id: a }, b: { kind: 'marker', id: b }, knownDistance: model * factor, unit, name: 'Bench bar' })
+    const fit = await recon.fitScaleBars()
+    return { modelDistance: model, knownDistance: model * factor, views: [pts.pixelCount(lo), pts.pixelCount(hi)],
+      scale: fit?.scale ?? null, fit: fit && { ...fit, bars: undefined } }
+  },
+
+  // Open a .websfm (the runner put it on the #bench-project-file input) as a NEW
+  // project, the way Project ▸ Open project file does, then restore it as reopen does.
+  async openProjectFile() {
+    const file = document.getElementById('bench-project-file')?.files?.[0]
+    if (!file) throw new Error('openProjectFile: no file on #bench-project-file')
+    const t0 = performance.now()
+    const id = await projects.importProject(file, { onLog: (m, l, c) => useLog().log(m, l, c) })
+    const importSeconds = (performance.now() - t0) / 1000
+    return { importSeconds, bytes: file.size, ...(await window.bench.reopen(id)) }
+  },
+
   // Dense Stage A, settings resolved exactly as DepthMapsModal.run() does.
   async depth({ ...overrides } = {}) {
     const { memBudgetBytes } = useComputeSettings()
@@ -351,7 +424,9 @@ window.bench = {
   // Orthophoto, settings resolved exactly as OrthoModal.run() does; returns the
   // ortho's own quality figures (its `stats` run record, core/eval/orthoStats.js).
   async ortho({ ...overrides } = {}) {
-    const { depthTolRel, maxCost, gsd, ...rest } = { ...ORTHO_DEFAULTS, ...overrides }
+    const { depthTolRel, maxCost, gsd: gsdIn, ...rest } = { ...ORTHO_DEFAULTS, ...overrides }
+    // gsd "dem": the built DEM's cell size, so two surfaces can be compared at one GSD.
+    const gsd = gsdIn === 'dem' ? recon.dem?.gsd ?? 0 : gsdIn
     const settings = { ...rest, gsd: gsd > 0 ? gsd : 0, depthTolRel: depthTolRel / 100, maxCost: maxCost > 0 ? maxCost : Infinity }
     const t0 = performance.now()
     await recon.generateOrtho(settings, report)
@@ -369,6 +444,46 @@ window.bench = {
     let s = ''
     for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
     return btoa(s)
+  },
+
+  // One export through the app's own dialog dispatch (useExports, wired from the stores
+  // as App.vue wires it). The files arrive as browser downloads; the runner saves them.
+  //   kind: 'cloud' | 'mesh' | 'model' | 'colmap' | 'undistorted' | 'tiles3d' | 'dem' | 'ortho'
+  //   cloud: 'sparse' | 'dense' | 'mesh' — aim a cloud/mesh export at that cloud
+  async exportRun({ kind, settings = {}, cloud = null }) {
+    const { storeToRefs } = await import('pinia')
+    const { useExports } = await import('/src/composables/useExports.js')
+    const recon = useReconstructionStore(), projects = useProjectsStore()
+    const { clouds, selectedCloud, mainSparseCloud, dem, ortho, georef, summary } = storeToRefs(recon)
+    const { currentProjectName, currentCrs } = storeToRefs(projects)
+    const ex = useExports({
+      poses: storeToRefs(usePosesStore()).poses, sensors: storeToRefs(useSensorsStore()).sensors,
+      images: storeToRefs(useImagesStore()).images, matchStore: storeToRefs(useMatchesStore()).matchStore,
+      clouds, selectedCloud, mainSparseCloud, dem, ortho, georef, currentProjectName, currentCrs, summary,
+      progress: null, effectiveFrameSpec: recon.effectiveFrameSpec,
+    })
+    if (kind === 'project') {
+      // Save as .websfm. Without showSaveFilePicker (removed here, as on Firefox and
+      // Safari) the archive goes out as a buffered download, which the runner keeps.
+      const had = Object.getOwnPropertyDescriptor(window, 'showSaveFilePicker')
+      Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true, writable: true })
+      const t0 = performance.now()
+      try {
+        const r = await projects.exportProject(projects.currentProjectId, {
+          includeDerived: settings.includeDerived ?? true, onLog: (m, l, c) => useLog().log(m, l, c) })
+        return { seconds: (performance.now() - t0) / 1000, ...r }
+      } finally {
+        if (had) Object.defineProperty(window, 'showSaveFilePicker', had)
+        else delete window.showSaveFilePicker
+      }
+    }
+    const target = cloud ? recon.clouds.find((c) => c.kind === cloud && !c.imported && !c.derived) : null
+    if (cloud && !target) throw new Error(`exportRun: no ${cloud} cloud`)
+    if (target) ex.openCloudExport(target.id)
+    else ex.exportKind.value = kind
+    const t0 = performance.now()
+    await ex.onExportRun(settings)
+    return { seconds: (performance.now() - t0) / 1000 }
   },
 
   // A COLMAP text model as the main sparse cloud, through the app's own import (the
