@@ -107,7 +107,9 @@ Cloud and mesh files are written in the background and streamed into the downloa
 so the app stays responsive and size is not limited by the format: an ASCII PLY or
 XYZ of tens of millions of points works the same as a binary one, only larger.
 Importing works the same way: XYZ, ASCII PLY and LAS files are read in pieces, so a
-multi-gigabyte text cloud does not have to fit in memory as text.
+multi-gigabyte text cloud does not have to fit in memory as text. A LAS field that is
+zero for every point (no intensity, never classified, no GPS time) is not kept, so it
+takes no memory and is not offered for styling; exporting writes 0 there, as the file had.
 
 ## Very large LAS and LAZ files
 A LAS or LAZ file too large to hold in memory (from about 10 million points) is

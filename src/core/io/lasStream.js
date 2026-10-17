@@ -120,7 +120,9 @@ export async function openLasStream(source, { createLazDecoder = null, batchPoin
       const c = dec.finish()
       yield {
         count: n, pos: c.pos, col: colour ? c.col ?? null : null,
-        attributes: Object.fromEntries(STREAM_ATTRIBUTES.map((a) => [a.name, c.attributes[a.name]])),
+        // The decoder leaves out a field that is zero throughout; the octree keeps all four.
+        attributes: Object.fromEntries(STREAM_ATTRIBUTES.map((a) => [a.name,
+          c.attributes[a.name] ?? new (a.type === 'uint16' ? Uint16Array : Uint8Array)(n)])),
       }
     }
   }
