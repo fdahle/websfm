@@ -302,6 +302,27 @@ window.bench = {
     } finally { clearInterval(sample) }
   },
 
+  // Model ▾ ▸ Region: the box spanning the middle `fraction` of the sparse cloud on each
+  // axis (the vertical axis whole), as the toolbox's fitted-and-shrunk box. After the
+  // dense stage, `regionCheck` counts the dense points outside it.
+  setRegion({ fraction = 0.5 } = {}) {
+    const p = recon.mainSparseCloud.points, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    for (let i = 0; i < p.length; i++) for (let k = 0; k < 3; k++) { const v = p.pos[3 * i + k]; if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v }
+    const min = [0, 1, 2].map((k) => (k === 2 ? lo[k] : lo[k] + (hi[k] - lo[k]) * (1 - fraction) / 2))
+    const max = [0, 1, 2].map((k) => (k === 2 ? hi[k] : hi[k] - (hi[k] - lo[k]) * (1 - fraction) / 2))
+    return { ok: recon.setRegion({ min, max }), min, max }
+  },
+  regionCheck() {
+    const r = recon.region, d = recon.clouds.find((c) => c.kind === 'dense')
+    if (!r || !d) return { error: 'no region or dense cloud' }
+    let outside = 0
+    for (let i = 0; i < d.count; i++) {
+      const x = d.pos[3 * i], y = d.pos[3 * i + 1], z = d.pos[3 * i + 2]
+      if (x < r.min[0] || x > r.max[0] || y < r.min[1] || y > r.max[1] || z < r.min[2] || z > r.max[2]) outside++
+    }
+    return { points: d.count, outside }
+  },
+
   // The main sparse model's Quality Report numbers (core/eval/sparseStats.js): the
   // reprojection distribution over every stored observation, cameras, points.
   async modelStats() {
