@@ -67,18 +67,52 @@ async function withFileLock(key, fn) {
  */
 async function writeFileIn(dir, filename, data, { append = false } = {}) {
   return withFileLock(`${dir.name}/${filename}`, async () => {
-    const fh = await dir.getFileHandle(filename, { create: true })
-    const size = append ? (await fh.getFile()).size : 0
-    const writable = await fh.createWritable(append ? { keepExistingData: true } : undefined)
     try {
-      if (append) await writable.seek(size)
-      if (data != null) await writable.write(data)
-      await writable.close()
+      const fh = await dir.getFileHandle(filename, { create: true })
+      const size = append ? (await fh.getFile()).size : 0
+      const writable = await fh.createWritable(append ? { keepExistingData: true } : undefined)
+      try {
+        if (append) await writable.seek(size)
+        if (data != null) await writable.write(data)
+        await writable.close()
+      } catch (error) {
+        await writable.abort?.().catch(() => {})
+        throw error
+      }
     } catch (error) {
-      await writable.abort?.().catch(() => {})
-      throw error
+      throw isStorageFull(error) || await outOfSpace(data) ? storageFullError(filename, error) : error
     }
   })
+}
+
+// Out of space: the browser's quota for this site (OPFS), or the disk under it or
+// under a folder-backed project. The raw errors do not say what to do, so a write
+// that fails this way says it here, once. Chromium names a plain over-quota write
+// QuotaExceededError, but a write that runs out part-way (depth planes, 2026-10-17,
+// both under a capped site quota and on a full filesystem) fails as AbortError
+// "Failed to write data to data pipe": the bytes could not be put on disk. Neither
+// case shows in navigator.storage.estimate(), so the space left is only a third test.
+const PIPE_WRITE_FAILED = /failed to write data to data pipe/i
+export const isStorageFull = (error) => error?.name === 'QuotaExceededError' || error?.storageFull === true
+  || (error?.name === 'AbortError' && PIPE_WRITE_FAILED.test(error?.message ?? ''))
+async function outOfSpace(data) {
+  try {
+    const { usage, quota } = await navigator.storage.estimate()
+    const bytes = data?.byteLength ?? data?.size ?? (typeof data === 'string' ? data.length : 0)
+    return Number.isFinite(quota) && quota - usage < Math.max(bytes, 1 << 20)
+  } catch {
+    return false
+  }
+}
+function storageFullError(filename, cause) {
+  if (cause?.storageFull) return cause
+  const err = new Error('Storage is full: the browser or the disk refused to save project data. Free space (delete '
+    + 'projects you no longer need, or Project settings… ▸ Clear derived data), or move this project to a folder on '
+    + `disk, then run the step again. (${filename})`)
+  err.name = 'QuotaExceededError'
+  err.storageFull = true
+  err.cause = cause
+  return err
 }
 
 async function writeJson(dir, filename, data) {
