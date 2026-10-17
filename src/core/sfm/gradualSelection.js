@@ -3,16 +3,19 @@ import { buildCameraPriorConstraints, qualifyingGcps, buildGcpAnchors } from './
 import { SFM_TUNING } from '../tuning.js'
 import { distortPixel, undistortPixel } from './distortion.js'
 
-// points: SparsePoints. One { error, track, angle } per point.
+// points: SparsePoints. Per point, as columns (transferable, no object per point):
+//   error  RMS reprojection error in px (NaN: no stored observation; Infinity: behind a camera)
+//   track  views in the model's cameras;   angle  largest triangulation angle, degrees
 export function sparsePointMetrics(cameras, points) {
   const centers = new Map([...cameras].map(([id, camera]) => [id, cameraCenter(camera)]))
-  const out = new Array(points.length)
+  const n = points.length
+  const error = new Float32Array(n), track = new Uint16Array(n), angle = new Float32Array(n)
   const seen = [], p = { x: 0, y: 0, z: 0 }
-  for (let i = 0; i < points.length; i++) {
+  for (let i = 0; i < n; i++) {
     p.x = points.x(i); p.y = points.y(i); p.z = points.z(i)
     seen.length = 0
     points.forEachView(i, (id) => { if (cameras.has(id)) seen.push(centers.get(id)) })
-    let squared = 0, observations = 0, angle = 0
+    let squared = 0, observations = 0, best = 0
     points.forEachPixel(i, (id, px, py) => {
       const camera = cameras.get(id)
       if (!camera || !Number.isFinite(py)) return
@@ -22,19 +25,23 @@ export function sparsePointMetrics(cameras, points) {
       observations++
     })
     for (let a = 0; a < seen.length; a++) for (let b = 0; b < a; b++)
-      angle = Math.max(angle, triangulationAngle(seen[a], seen[b], p))
-    out[i] = { error: observations ? Math.sqrt(squared / observations) : null, track: seen.length, angle }
+      best = Math.max(best, triangulationAngle(seen[a], seen[b], p))
+    error[i] = observations ? Math.sqrt(squared / observations) : NaN
+    track[i] = Math.min(seen.length, 65535)
+    angle[i] = best
   }
-  return out
+  return { count: n, error, track, angle }
 }
 
 export function selectedSparseIndices(metrics, { metric, threshold }) {
   if (!['error', 'track', 'angle'].includes(metric) || !Number.isFinite(threshold) || threshold < 0)
     throw new Error('Invalid gradual-selection threshold')
-  const indices = []
-  metrics.forEach((value, i) => {
-    if (value[metric] != null && (metric === 'error' ? value[metric] > threshold : value[metric] < threshold)) indices.push(i)
-  })
+  const values = metrics[metric], indices = []
+  for (let i = 0; i < metrics.count; i++) {
+    const v = values[i]
+    if (Number.isNaN(v)) continue
+    if (metric === 'error' ? v > threshold : v < threshold) indices.push(i)
+  }
   return indices
 }
 

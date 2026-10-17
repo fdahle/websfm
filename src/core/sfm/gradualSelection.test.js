@@ -17,10 +17,20 @@ const points = () => SparsePoints.fromRecords(records())
 const viewsOf = (pts, i) => { const out = []; pts.forEachView(i, (u, kp, px, py) => out.push([u, kp, px, py])); return out }
 it('computes RMS, track length and maximum camera-ray angle', () => {
   const metrics = sparsePointMetrics(cameras, points())
-  expect(metrics[0].error).toBe(0)
-  expect(metrics[0].track).toBe(2)
-  expect(metrics[0].angle).toBeCloseTo(5.71059)
+  expect(metrics.count).toBe(8)
+  expect(metrics.error).toBeInstanceOf(Float32Array)
+  expect(metrics.error[0]).toBe(0)
+  expect(metrics.track[0]).toBe(2)
+  expect(metrics.angle[0]).toBeCloseTo(5.71059, 4)
   expect(selectedSparseIndices(metrics, { metric: 'error', threshold: 3 })).toEqual([7])
+  expect(selectedSparseIndices(metrics, { metric: 'track', threshold: 3 })).toHaveLength(8)
+})
+it('leaves a point without stored pixels out of an error selection', () => {
+  const pts = SparsePoints.fromRecords([...Array.from({ length: 3 }, (_, i) => ({ x: i, y: 0, z: 10, views: [['a', i], ['b', i]] }))])
+  const metrics = sparsePointMetrics(cameras, pts)
+  expect(Number.isNaN(metrics.error[0])).toBe(true)
+  expect(selectedSparseIndices(metrics, { metric: 'error', threshold: 0 })).toEqual([])
+  expect(selectedSparseIndices(metrics, { metric: 'angle', threshold: 90 })).toEqual([0, 1, 2])
 })
 it('preserves tracks/colors, remaps BA observations and keeps the input untouched', async () => {
   const input = points()
