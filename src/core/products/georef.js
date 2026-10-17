@@ -198,6 +198,67 @@ function refineAnisotropicSimilarity(pairs, seed) {
 
 const matVec3 = (m, v) => m.map((row) => dot(row, v))
 
+// The similarity's Jacobian at one source point, in refineAnisotropicSimilarity's
+// parameters (left rotation ω, log-scale, translation): 3 × 7.
+function similarityJacobian(fit, src) {
+  const sv = matVec3(fit.R, src).map((x) => fit.scale * x), S = skew3(sv)
+  return [0, 1, 2].map((row) => [-S[row][0], -S[row][1], -S[row][2], sv[row],
+    row === 0 ? 1 : 0, row === 1 ? 1 : 0, row === 2 ? 1 : 0])
+}
+
+function invertSym(N) {
+  const n = N.length, cols = []
+  for (let j = 0; j < n; j++) {
+    const col = solveLinear(N, Array.from({ length: n }, (_, i) => (i === j ? 1 : 0)))
+    if (!col) return null
+    cols.push(col)
+  }
+  return cols[0].map((_, i) => cols.map((c) => c[i]))
+}
+
+/**
+ * How well the fitted similarity is known, from the pairs it was fitted to with
+ * their precisions taken as known (a-priori σ₀ = 1, the declared accuracies):
+ *   predicted(src)        covariance of the transformed point, J Q Jᵀ (3 × 3)
+ *   predictedWithout(i, src)  the same for the fit without pair i (leave-one-out)
+ * Q = (Σ Jᵢᵀ Pᵢ Jᵢ)⁻¹. Covariances are in the pairs' target units (grid units for
+ * a fit in a local metric frame, mapped back with the frame's scale factor).
+ * A pair without a precision matrix counts with its scalar `weight` (default 1).
+ * → null when the normal matrix is singular.
+ */
+export function similarityPrecision(pairs, fit) {
+  const local = fit.local ?? null
+  const D = local ? [local.k, local.k, 1] : [1, 1, 1]
+  const precisionOf = (p) => {
+    const m = validM3(p.precision) ? p.precision : [[p.weight ?? 1, 0, 0], [0, p.weight ?? 1, 0], [0, 0, p.weight ?? 1]]
+    return local ? precisionToLocal(m, local) : m
+  }
+  const terms = pairs.map((p) => {
+    const J = similarityJacobian(fit, p.src), P = precisionOf(p)
+    const JtPJ = Array.from({ length: 7 }, (_, a) => Array.from({ length: 7 }, (_, b) => {
+      let v = 0
+      for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) v += J[i][a] * P[i][k] * J[k][b]
+      return v
+    }))
+    return JtPJ
+  })
+  const N = Array.from({ length: 7 }, (_, a) => Array.from({ length: 7 }, (_, b) => terms.reduce((s, T) => s + T[a][b], 0)))
+  const Q = invertSym(N)
+  if (!Q) return null
+  const propagate = (Qm, src) => {
+    const J = similarityJacobian(fit, src)
+    const JQ = J.map((row) => Qm[0].map((_, b) => row.reduce((s, v, a) => s + v * Qm[a][b], 0)))
+    return JQ.map((row, i) => J.map((col, k) => D[i] * row.reduce((s, v, a) => s + v * col[a], 0) * D[k]))
+  }
+  return {
+    predicted: (src) => propagate(Q, src),
+    predictedWithout(i, src) {
+      const Qi = invertSym(N.map((row, a) => row.map((v, b) => v - terms[i][a][b])))
+      return Qi ? propagate(Qi, src) : null
+    },
+  }
+}
+
 const finiteVec3 = (v) => Array.isArray(v) && v.length >= 3
   && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])
 
