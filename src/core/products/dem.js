@@ -9,6 +9,7 @@
 // empty cells are filled by inverse-distance weighting within a small radius and
 // otherwise left as NaN (nodata).
 
+import { MAX_FLOAT64_XYZ_POINTS, tooManyPointsMessage } from '../bufferLimit.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes } from '../dense/memBudget.js'
 
 // Grid coordinates for a cell centre: pixel (col,row) → frame (x,y).
@@ -53,6 +54,10 @@ export function stageDemPoints(cloud, { inside = null, budgetBytes = DEFAULT_BUD
     for (let i = 0; i < total; i++) { read(i); if (inside(xyz[0], xyz[1], xyz[2], i)) count++ }
   }
   const bytes = count * DEM_STAGE_BYTES_PER_POINT
+  if (count > MAX_FLOAT64_XYZ_POINTS) {
+    throw new Error(`${tooManyPointsMessage('The DEM input', count)} A cloud this size builds its DEM from `
+      + 'its level-of-detail octree once that exists; or limit the area with Region.')
+  }
   if (bytes > budgetBytes) {
     throw new Error(`DEM point staging needs ${formatBytes(bytes)} for ${count.toLocaleString()} points, `
       + `over the ${formatBytes(budgetBytes)} memory budget (Settings ▸ Compute); `

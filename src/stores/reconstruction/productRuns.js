@@ -55,27 +55,36 @@ export function createProductRuns({
       const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
       const r = src.imported ? null : activeRegion()
       const streamed = isStreamed(src)
-      const cls = groundOnly && !streamed ? src.attributes.classification : null
+      // A resident cloud whose full copy would be large reads its octree too, when it has
+      // one: the grid needs no finer level than half its cell, and a 95 M-point copy
+      // (2.3 GB) failed to allocate next to the cloud itself (quarry, 2026-10-17).
+      const octreeHasClasses = src.lod?.layout?.attributes?.some((a) => a.name === 'classification')
+      const fromOctree = streamed || (!!src.lod && !!extractCloudPoints && src.kind === 'dense'
+        && src.count * DEM_STAGE_BYTES_PER_POINT > Math.min(budgetBytes / 4, 2 ** 30)
+        && (!groundOnly || octreeHasClasses))
+      const cls = groundOnly && !fromOctree ? src.attributes.classification : null
       const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
       const inside = cls
         ? (x, y, z, i) => cls[i] === 2 && (!inRegion || inRegion(x, y, z))
         : inRegion
       let staged
-      if (streamed) {
-        // A streamed cloud (core/lod/streamed.js) is read from its octree: down to
-        // half the cell size when one is set (finer levels add nothing to a cell),
-        // within half the budget (the grid gets the rest), the ground class for a DTM.
+      if (fromOctree) {
+        // From the octree (core/lod): down to half the cell size when one is set (finer
+        // levels add nothing to a cell), within half the budget (the grid gets the
+        // rest), the ground class for a DTM, the region as the read box.
         const maxPoints = Math.floor(budgetBytes / 2 / DEM_STAGE_BYTES_PER_POINT)
         const { cloud: flat, plan } = await extractCloudPoints(src, {
           classes: groundOnly ? [2] : null, fields: 'xyz', maxPoints, minSpacing: settings.gsd > 0 ? settings.gsd / 2 : 0,
+          ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}),
         }, (d, t, lbl, f) => onProgress?.(d, t, 'Reading the octree', f))
         staged = { pos: flat.pos, count: flat.count, total: src.count }
-        log(`${groundOnly ? 'DTM' : 'DEM'}: read ${flat.count.toLocaleString()} ${groundOnly ? 'ground ' : ''}points of the streamed cloud `
+        log(`${groundOnly ? 'DTM' : 'DEM'}: read ${flat.count.toLocaleString()} ${groundOnly ? 'ground ' : ''}points `
+          + `of ${streamed ? 'the streamed cloud' : `the cloud's octree (${src.count.toLocaleString()} points)`} `
           + (plan.complete ? '(every level of its octree)' : `down to ${plan.spacing.toPrecision(3)}-unit spacing`), 'info', 'Products')
-        if (!flat.count) throw new Error(groundOnly ? 'the cloud has no ground points' : 'the cloud has no points')
+        if (!flat.count) throw new Error(groundOnly ? 'the cloud has no ground points' : (r ? 'no point of the source lies inside the region' : 'the cloud has no points'))
       } else staged = stageDemPoints(src.kind === 'dense' ? src : { count: src.points.length, pos: src.points.pos }, { budgetBytes, inside })
       if (cls) log(`DTM: ${staged.count.toLocaleString()} ground points of ${staged.total.toLocaleString()}`, 'info', 'Products')
-      else if (r) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
+      else if (r && !fromOctree) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
       if (cls && !staged.count) throw new Error(r ? 'no ground point lies inside the region' : 'the cloud has no ground points')
       if (r && !staged.count) throw new Error('no point of the source lies inside the region')
       const points = { pos: staged.pos, count: staged.count }

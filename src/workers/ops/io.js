@@ -4,6 +4,7 @@ import { GeoTIFF, fromArrayBuffer, fromBlob } from 'geotiff'
 import { rasterWindow } from '../../core/io/rasterWindow.js'
 import { edgeOriginFromTags } from '../../core/io/rasterSample.js'
 import { parseCloudSource, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
+import { isBufferAllocationFailure, tooManyPointsMessage } from '../../core/bufferLimit.js'
 import { blobSource } from '../../utils/blobParts.js'
 import { classifyRasterKind } from '../../core/io/rasterKind.js'
 import { hillshadeRgba } from '../../core/products/colormap.js'
@@ -54,10 +55,17 @@ export function makeIoOps({ lazCodec = null } = {}) {
     if (lazCodec && sniffCloudFormat(await source.read(0, Math.min(256, file.size)), name) === 'laz') {
       await lazCodec.ensure()
     }
-    const parsed = await parseCloudSource(source, {
-      onLog: (m, l, c) => emit('log', [m, l, c]),
-      lazDecompress: lazCodec?.decompress ?? null,
-    })
+    let parsed
+    try {
+      parsed = await parseCloudSource(source, {
+        onLog: (m, l, c) => emit('log', [m, l, c]),
+        lazDecompress: lazCodec?.decompress ?? null,
+      })
+    } catch (err) {
+      if (!isBufferAllocationFailure(err)) throw err
+      throw new Error(`${tooManyPointsMessage(name || 'This file')} Import it as LAS or LAZ, which streams `
+        + 'into a level-of-detail octree, or thin it first.')
+    }
     const stats = cloudStats(parsed)
     emit('log', [`Parsed ${name}: ${stats.points.toLocaleString()} points`
       + `${stats.faces ? `, ${stats.faces.toLocaleString()} faces` : ''}`
