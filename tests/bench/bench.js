@@ -266,6 +266,42 @@ window.bench = {
       scale: fit?.scale ?? null, fit: fit && { ...fit, bars: undefined } }
   },
 
+  // Import ▸ point cloud / mesh with the dialog's defaults, from the file the runner put
+  // on #bench-import-file: parsed in the worker (parseCloudFile), committed as
+  // onCloudImport does. Samples the page's JS heap during the parse, which must stay
+  // far below the file size (the text is read in slices in the worker).
+  async importCloudFile() {
+    const { parseCloudFile } = await import('/src/workers/computeClient.js')
+    const { applyImportTransform } = await import('/src/core/io/cloudImport.js')
+    const file = document.getElementById('bench-import-file')?.files?.[0]
+    if (!file) throw new Error('importCloudFile: no file on #bench-import-file')
+    // A LAS/LAZ too large to hold streams into an octree, as openCloudImport decides.
+    const { lasNeedsStreaming } = await import('/src/core/io/lasStream.js')
+    const head = new Uint8Array(await file.slice(0, Math.min(file.size, 1 << 16)).arrayBuffer())
+    if (head.length >= 100 && String.fromCharCode(...head.subarray(0, 4)) === 'LASF') {
+      const off = new DataView(head.buffer).getUint32(96, true)
+      const full = off > head.length ? new Uint8Array(await file.slice(0, off).arrayBuffer()) : head
+      if (lasNeedsStreaming(full, file.size) === true) {
+        const t0 = performance.now()
+        const c = await recon.importStreamedCloud(file, report)
+        return { ok: !!c, streamed: true, parseSeconds: (performance.now() - t0) / 1000, bytes: file.size,
+          count: c?.count ?? 0, hasColor: !!c?.lod?.layout?.colour, attributes: (c?.lod?.layout?.attributes ?? []).map((a) => a.name) }
+      }
+    }
+    let heapPeak = performance.memory?.usedJSHeapSize ?? 0
+    const sample = setInterval(() => { heapPeak = Math.max(heapPeak, performance.memory?.usedJSHeapSize ?? 0) }, 100)
+    const t0 = performance.now()
+    try {
+      const { parsed, stats } = await parseCloudFile(file, { onLog: (m, l, c) => useLog().log(m, l, c) })
+      const parseSeconds = (performance.now() - t0) / 1000
+      const ok = recon.importCloud(applyImportTransform(parsed, { onLog: (m, l, c) => useLog().log(m, l, c) }), file.name)
+      const c = recon.clouds[recon.clouds.length - 1]
+      return { ok, parseSeconds, bytes: file.size, heapPeakBytes: heapPeak, stats,
+        count: c?.count ?? 0, nVerts: c?.nVerts ?? null, hasColor: !!c?.col,
+        attributes: Object.keys(c?.attributes ?? {}) }
+    } finally { clearInterval(sample) }
+  },
+
   // Open a .websfm (the runner put it on the #bench-project-file input) as a NEW
   // project, the way Project ▸ Open project file does, then restore it as reopen does.
   async openProjectFile() {

@@ -86,7 +86,7 @@ if (cfg.minGpsAlt != null) {
   files = kept
 }
 if (cfg.limit) files = files.slice(0, Number(cfg.limit))
-if (!files.length && !cfg.openProject) throw new Error(`no images in ${cfg.images}`) // openproject brings its own
+if (!files.length && stages.includes('detect')) throw new Error(`no images in ${cfg.images}`) // open / import runs need none
 
 // ── app server ──
 // Default: build a snapshot (scripts/bench/vite.bench.config.mjs) and serve it
@@ -165,6 +165,9 @@ const browser = await chromium.launchPersistentContext(profileDir, {
   // reaches the real GPU (scripts/bench/README.md ▸ Linux).
   args: ['--enable-precise-memory-info', `--js-flags=${jsFlags.join(' ')}`, ...(cfg.chromeArgs ?? [])],
   acceptDownloads: true, // the export:<tag> stage saves the app's downloads
+  // Playwright stages downloads in a temp folder before saveAs copies them: keep that on
+  // the run's disk (multi-GB exports, and /tmp may be a quota-limited tmpfs).
+  downloadsPath: `${outPrefix}.downloads`,
 })
 const result = { name, config: cfg, files: files.length, startedAt: new Date().toISOString(), stages: {} }
 let heap = null // worker heap sampler (workerHeap.mjs), started with the page
@@ -309,15 +312,21 @@ try {
     const spec = cfg[entry]
     if (!spec?.kind) throw new Error(`${entry}: config needs { kind, settings }`)
     const tag = entry.slice(7), saves = []
-    const onDownload = (d) => { const f = `${outPrefix}.${tag}.${d.suggestedFilename()}`; saves.push(d.saveAs(f).then(() => f)) }
+    const onDownload = (d) => {
+      const f = `${outPrefix}.${tag}.${saves.length ? `${saves.length}.` : ''}${d.suggestedFilename()}`
+      saves.push(d.saveAs(f).then(async () => ({ file: f, bytes: (await stat(f)).size }), (err) => ({ file: f, error: String(err?.message ?? err) })))
+    }
     page.on('download', onDownload)
     try {
       const r = await page.evaluate((x) => window.bench.exportRun(x), spec)
-      await page.waitForTimeout(2000) // a download event can trail the click
-      const saved = await Promise.all(saves)
-      const files = await Promise.all(saved.map(async (f) => ({ file: f, bytes: (await stat(f)).size })))
+      // The download starts after the click; a multi-GB blob can take a while to begin.
+      // Wait for the first one (an export that writes nothing has logged why), then a
+      // short quiet period for any further files.
+      for (let t = 0; t < (spec.expectFiles === 0 ? 2 : 300) && !saves.length; t++) await page.waitForTimeout(1000)
+      for (let n = -1; n !== saves.length;) { n = saves.length; await page.waitForTimeout(3000) }
+      const files = await Promise.all(saves)
       result.stages[entry] = { ...r, files }
-      console.log(`== ${entry}: ${r.seconds.toFixed(1)} s, ${files.map((f) => `${f.file.split('/').pop()} (${(f.bytes / 1024 ** 2).toFixed(2)} MiB)`).join(', ') || 'no file'}`)
+      console.log(`== ${entry}: ${r.seconds.toFixed(1)} s, ${files.map((f) => `${f.file.split('/').pop()} (${f.error ?? `${(f.bytes / 1024 ** 2).toFixed(2)} MiB`})`).join(', ') || 'no file'}`)
     } finally { page.off('download', onDownload) }
     await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
   }
@@ -563,6 +572,27 @@ try {
       if (entry === 'colmap') { await importColmap(); continue }
       if (entry.startsWith('export:')) { await exportStage(entry); continue }
       if (entry === 'openproject') { await openProject(); continue }
+      if (entry.startsWith('importfile:')) {
+        // `importfile:<tag>`: Import ▸ point cloud / mesh of the file at cfg[entry].path.
+        const path = cfg[entry]?.path
+        if (!path) throw new Error(`${entry}: config needs { path }`)
+        await page.evaluate(() => {
+          document.getElementById('bench-import-file')?.remove()
+          document.body.appendChild(Object.assign(document.createElement('input'), { type: 'file', id: 'bench-import-file' }))
+        })
+        await page.setInputFiles('#bench-import-file', path)
+        lastLogAt = Date.now()
+        let r
+        try {
+          r = await Promise.race([page.evaluate(() => window.bench.importCloudFile()), watchdog()])
+        } finally {
+          for (const t of watchdog.timers.splice(0)) clearInterval(t)
+        }
+        result.stages[entry] = r
+        console.log(`== ${entry}: ${JSON.stringify({ ...r, stats: undefined })}`)
+        await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+        continue
+      }
       if (entry.startsWith('quota:')) {
         // `quota:<MB>`: cap the site's storage at what it uses now plus <MB>, so the next
         // stage runs out of space (Chrome DevTools Storage.overrideQuotaForOrigin).
@@ -615,6 +645,7 @@ try {
   await heap?.stop()
   await browser.close()
   await rm(profileDir, { recursive: true, force: true }).catch(() => {})
+  await rm(`${outPrefix}.downloads`, { recursive: true, force: true }).catch(() => {})
   logOut.end()
   vite?.kill()
   server?.close()
