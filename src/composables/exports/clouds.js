@@ -41,9 +41,12 @@ export function createCloudExports({
       const attributes = src.attributes && Object.keys(src.attributes).length
         ? Object.fromEntries(Object.entries(src.attributes).map(([k, v]) => [k, v.slice(0, count)]))
         : null
+      // A cloud prepared past the buffer wall is relative to `origin` (flatAxes.js).
+      const pos = new Float64Array(src.pos.subarray(0, count * 3))
+      if (src.origin) for (let i = 0; i < pos.length; i++) pos[i] += src.origin[i % 3]
       return {
         count,
-        pos: new Float64Array(src.pos.subarray(0, count * 3)),
+        pos,
         col: src.col ? new Uint8Array(src.col.subarray(0, count * 3)) : null,
         ...(attributes ? { attributes } : {}),
       }

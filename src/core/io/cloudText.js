@@ -4,6 +4,7 @@
 // text line by line (whole, or as decoded byte chunks) into growable typed arrays,
 // so a multi-GB .xyz never becomes one string.
 
+import { flatAxes } from '../products/flatAxes.js'
 import { sniffDelimiter, splitRow } from './gcp.js'
 import { PART_CHARS, lineParts } from './parts.js'
 
@@ -13,9 +14,7 @@ import { PART_CHARS, lineParts } from './parts.js'
 export function* cloudToXyzParts(points, { color = true, partChars = PART_CHARS } = {}) {
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
-  const getX = flat ? (i) => flat.pos[i * 3] : (i) => points[i].x
-  const getY = flat ? (i) => flat.pos[i * 3 + 1] : (i) => points[i].y
-  const getZ = flat ? (i) => flat.pos[i * 3 + 2] : (i) => points[i].z
+  const [getX, getY, getZ] = flat ? flatAxes(flat) : [(i) => points[i].x, (i) => points[i].y, (i) => points[i].z]
   const getC = flat
     ? (flat.col ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]] : () => null)
     : (i) => points[i].color
