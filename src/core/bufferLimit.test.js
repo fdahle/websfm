@@ -11,7 +11,7 @@ describe('the 2 GiB buffer wall', () => {
   })
 
   it('says how large is too large', () => {
-    expect(MAX_FLOAT64_XYZ_POINTS).toBe(89478485)
+    expect(MAX_FLOAT64_XYZ_POINTS).toBe(89391104)
     expect(tooManyPointsMessage('This file', 95561841)).toMatch(/^This file \(95,561,841 points\) is too large to hold at once: .* about 89 million points/)
   })
 

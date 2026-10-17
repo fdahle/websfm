@@ -4,6 +4,7 @@
 // text line by line (whole, or as decoded byte chunks) into growable typed arrays,
 // so a multi-GB .xyz never becomes one string.
 
+import { MAX_BUFFER_BYTES } from '../bufferLimit.js'
 import { flatAxes } from '../products/flatAxes.js'
 import { sniffDelimiter, splitRow } from './gcp.js'
 import { PART_CHARS, lineParts } from './parts.js'
@@ -58,7 +59,9 @@ export async function parseXyzChunks(chunks, { onLog } = {}) {
 
 // Incremental reader: push(text) any number of times, then finish().
 export function createXyzParser({ onLog } = {}) {
-  const xs = growable(Float64Array), cols = growable(Float64Array), intensities = growable(Float64Array)
+  // Positions in full precision; colour (0–1, 0–255 or 0–65535) and intensity need no
+  // more than Float32 — half the memory of the cloud's largest companions.
+  const xs = growable(Float64Array), cols = growable(Float32Array), intensities = growable(Float32Array)
   let carry = '', delim = null, skipped = 0, colMax = 0, anyIntensity = false
 
   function row(raw) {
@@ -115,12 +118,19 @@ export function createXyzParser({ onLog } = {}) {
   }
 }
 
-// A typed array that doubles as it fills; take() returns an exact-length copy.
+// A typed array that doubles as it fills; take() returns an exact-length copy. It never
+// grows past the browser's buffer wall (core/bufferLimit.js): doubling a 1.1 GB buffer
+// would ask for 2.2 GB although the data fits in less. Full at the wall, it throws the
+// engine's own RangeError, which the import turns into its "too large" message.
 export function growable(Type, initial = 1024) {
+  const maxLength = Math.floor(MAX_BUFFER_BYTES / Type.BYTES_PER_ELEMENT)
   let buf = new Type(initial), len = 0
   return {
     push(v) {
-      if (len === buf.length) { const next = new Type(buf.length * 2); next.set(buf); buf = next }
+      if (len === buf.length) {
+        if (len >= maxLength) throw new RangeError('Array buffer allocation failed')
+        const next = new Type(Math.min(buf.length * 2, maxLength)); next.set(buf); buf = next
+      }
       buf[len++] = v
     },
     get length() { return len },
