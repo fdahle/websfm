@@ -533,6 +533,19 @@ window.bench = {
     return { seconds: (performance.now() - t0) / 1000 }
   },
 
+  // A COLMAP model from the files the runner put on #bench-colmap-files, read as bytes
+  // as Import ▸ SfM project does (useSfmInterop): no file is ever one JS string.
+  async importColmapFiles() {
+    const list = [...(document.getElementById('bench-colmap-files')?.files ?? [])]
+    const files = {}
+    for (const f of list) files[f.name] = new Uint8Array(await f.arrayBuffer())
+    const t0 = performance.now()
+    const ok = recon.importColmapModel(files)
+    const cloud = recon.mainSparseCloud
+    return { ok, seconds: (performance.now() - t0) / 1000, bytes: list.reduce((n, f) => n + f.size, 0),
+      cameras: cloud?.cameras?.size ?? 0, points: cloud?.points?.length ?? 0 }
+  },
+
   // A COLMAP text model as the main sparse cloud, through the app's own import (the
   // runner reads the files): dense then runs on known poses, e.g. ETH3D's ground truth.
   async importColmap({ files }) {

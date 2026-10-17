@@ -48,7 +48,7 @@ const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = { ...(args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}) }
-for (const k of ['name', 'images', 'include', 'openProject', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'exportCloudsProject', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
+for (const k of ['name', 'images', 'include', 'openProject', 'colmapFiles', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'exportCloudsProject', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
 for (const k of ['detect', 'match', 'recon']) cfg[k] = { ...(cfg[k] ?? {}), ...(args[k] ? json(args[k]) : {}) }
 if (!cfg.images) throw new Error('--images <folder> (or "images" in --config) is required')
 const name = cfg.name ?? 'bench'
@@ -574,6 +574,17 @@ try {
       if (entry === 'colmap') { await importColmap(); continue }
       if (entry.startsWith('export:')) { await exportStage(entry); continue }
       if (entry === 'openproject') { await openProject(); continue }
+      if (entry === 'colmapfiles') {
+        // `colmapfiles`: the COLMAP model in cfg.colmapFiles (a folder) through a file input.
+        const dir = cfg.colmapFiles
+        const names = (await readdir(dir)).filter((f) => /\.(txt|bin)$/.test(f))
+        await page.evaluate(() => document.body.appendChild(Object.assign(document.createElement('input'), { type: 'file', multiple: true, id: 'bench-colmap-files' })))
+        await page.setInputFiles('#bench-colmap-files', names.map((f) => join(dir, f)))
+        const r = await page.evaluate(() => window.bench.importColmapFiles())
+        result.stages[entry] = r
+        console.log(`== ${entry}: ${JSON.stringify(r)}`)
+        continue
+      }
       if (entry.startsWith('importfile:')) {
         // `importfile:<tag>`: Import ▸ point cloud / mesh of the file at cfg[entry].path.
         const path = cfg[entry]?.path
