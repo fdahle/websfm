@@ -302,6 +302,17 @@ window.bench = {
     } finally { clearInterval(sample) }
   },
 
+  // The main sparse model's Quality Report numbers (core/eval/sparseStats.js): the
+  // reprojection distribution over every stored observation, cameras, points.
+  async modelStats() {
+    const { sparseModelStats } = await import('/src/core/eval/sparseStats.js')
+    const c = recon.mainSparseCloud
+    if (!c) throw new Error('modelStats: no sparse model')
+    const st = sparseModelStats(c.cameras, c.points)
+    return { cameras: c.cameras.size, points: c.points.length, observations: c.points.viewTotal,
+      imported: !!c.imported, reproj: st.reproj }
+  },
+
   // Open a .websfm (the runner put it on the #bench-project-file input) as a NEW
   // project, the way Project ▸ Open project file does, then restore it as reopen does.
   async openProjectFile() {

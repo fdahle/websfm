@@ -56,6 +56,8 @@ const stages = String(cfg.stages ?? 'detect,match,recon').split(',').map((s) => 
 const port = Number(cfg.port ?? 4180)
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
 const outPrefix = resolve(repo, cfg.out ?? join('bench-out', `${name}-${stamp}`))
+// The run writes <out>.json: never over the config that started it (out = the config's own path minus .json).
+if (args.config && resolve(`${outPrefix}.json`) === resolve(args.config)) throw new Error(`out "${cfg.out}" would overwrite the config ${args.config} with the run summary — choose another out`)
 await mkdir(dirname(outPrefix), { recursive: true })
 
 // ── dataset ──
@@ -273,7 +275,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho', modeledit: 'modelEdit', scalebar: 'scaleBar' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho', modeledit: 'modelEdit', scalebar: 'scaleBar', stats: 'modelStats' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
