@@ -95,91 +95,25 @@ export function serializeMeshCloud(c, { buffers = true } = {}) {
 function serializeCloudData(c, opts) {
   if (c.kind === 'dense') return serializeDenseCloud(c, opts)
   if (c.kind === 'mesh') return serializeMeshCloud(c, opts)
+  // A sparse cloud's points are already the columns the disk format stores
+  // (SparsePoints): write them as they are (the save does not transfer them).
   const pts = c.points
-  const N = pts.length
-  const pos = new Float64Array(N * 3)
-  const hasColor = pts.some((p) => p.color)
-  const col = hasColor ? new Uint8Array(N * 3) : null
-  const colorMask = hasColor ? new Uint8Array(N) : null
-
-  const camIndex = new Map()
-  const viewUuids = []
-  for (const uuid of c.cameras.keys()) { camIndex.set(uuid, viewUuids.length); viewUuids.push(uuid) }
-
-  const packedTracks = pts.packedTracks ?? null
-  if (packedTracks) {
-    // Reconstructed/restored clouds already own the exact CSR representation the
-    // disk format expects. Reuse it rather than iterating millions of observations
-    // and allocating a second set of buffers immediately after reconstruction.
-    for (let i = 0; i < N; i++) {
-      const p = pts[i]
-      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z
-      if (col && p.color) {
-        col[i * 3] = p.color[0]; col[i * 3 + 1] = p.color[1]; col[i * 3 + 2] = p.color[2]
-        colorMask[i] = 1
-      }
-    }
-    return {
-      id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
-      imported: !!c.imported, secondary: !!c.secondary,
-      cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
-      pointCount: N, hasColor, viewUuids: packedTracks.viewUuids,
-      buffers: {
-        pos: pos.buffer,
-        col: col ? col.buffer : null,
-        colorMask: colorMask ? colorMask.buffer : null,
-        vcount: packedTracks.vcount.buffer,
-        vcam: packedTracks.vcam.buffer,
-        vkp: packedTracks.vkp.buffer,
-        vx: packedTracks.vx?.buffer ?? null,
-        vy: packedTracks.vy?.buffer ?? null,
-      },
-    }
-  }
-  let totalViews = 0
-  const vcount = new Uint32Array(N)
-  for (const p of pts) totalViews += p.views ? p.views.size : 0
-  const vcam = new Uint32Array(totalViews)
-  const vkp = new Uint32Array(totalViews)
-  // Per-view BA-frame pixel (COLMAP export). Only allocated when some point carries
-  // it (sparse clouds from a real reconstruct); NaN marks a view without a pixel.
-  const hasViewPx = pts.some((p) => p.viewsPx && p.viewsPx.size)
-  const vx = hasViewPx ? new Float32Array(totalViews).fill(NaN) : null
-  const vy = hasViewPx ? new Float32Array(totalViews).fill(NaN) : null
-
-  let vi = 0
-  for (let i = 0; i < N; i++) {
-    const p = pts[i]
-    pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z
-    if (col && p.color) {
-      col[i * 3] = p.color[0]; col[i * 3 + 1] = p.color[1]; col[i * 3 + 2] = p.color[2]
-      colorMask[i] = 1
-    }
-    if (p.views && p.views.size) {
-      vcount[i] = p.views.size
-      for (const [uuid, kp] of p.views) {
-        let ci = camIndex.get(uuid)
-        if (ci === undefined) { ci = viewUuids.length; camIndex.set(uuid, ci); viewUuids.push(uuid) }
-        vcam[vi] = ci; vkp[vi] = kp
-        if (vx) { const px = p.viewsPx?.get(uuid); if (px) { vx[vi] = px[0]; vy[vi] = px[1] } }
-        vi++
-      }
-    }
-  }
+  const own = (a) => (a.byteOffset !== 0 || a.byteLength !== a.buffer.byteLength ? a.slice() : a)
+  const { pos, col, colorMask, viewUuids, vcount, vcam, vkp, vx, vy } = pts.columns()
   return {
     id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
     imported: !!c.imported, secondary: !!c.secondary,
     cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
-    pointCount: N, hasColor, viewUuids,
+    pointCount: pts.length, hasColor: pts.hasColor, viewUuids: [...viewUuids],
     buffers: {
-      pos: pos.buffer,
-      col: col ? col.buffer : null,
-      colorMask: colorMask ? colorMask.buffer : null,
-      vcount: vcount.buffer,
-      vcam: vcam.buffer,
-      vkp: vkp.buffer,
-      vx: vx ? vx.buffer : null,
-      vy: vy ? vy.buffer : null,
+      pos: own(pos).buffer,
+      col: col ? own(col).buffer : null,
+      colorMask: col && colorMask ? own(colorMask).buffer : null,
+      vcount: own(vcount).buffer,
+      vcam: own(vcam).buffer,
+      vkp: own(vkp).buffer,
+      vx: vx ? own(vx).buffer : null,
+      vy: vy ? own(vy).buffer : null,
     },
   }
 }
@@ -257,15 +191,9 @@ function deserializeCloudData(c, makeCloudId) {
   const cameras = new Map()
   for (const cam of c.cameras || []) { const { uuid, R, t, K } = cam; cameras.set(uuid, { R, t, K }) }
 
-  const points = vcount && vcam && vkp
-    ? makePackedPoints({ pos, col, colorMask, viewUuids, vcount, vcam, vkp, vx, vy,
-        missingColorIsUndefined: true })
-    : new Array(N).fill(null).map((_, i) => ({
-        x: pos[i * 3], y: pos[i * 3 + 1], z: pos[i * 3 + 2],
-        color: col && (!colorMask || colorMask[i])
-          ? [col[i * 3], col[i * 3 + 1], col[i * 3 + 2]] : undefined,
-        views: new Map(),
-      }))
+  // A cloud saved without tracks (none in practice) restores with no views.
+  const points = makePackedPoints({ pos, col, colorMask, viewUuids, vx, vy,
+    vcount: vcount ?? new Uint32Array(N), vcam: vcam ?? new Uint32Array(0), vkp: vkp ?? new Uint32Array(0) })
   return {
     id: c.id ?? makeCloudId(),
     name: c.name ?? 'Sparse cloud',

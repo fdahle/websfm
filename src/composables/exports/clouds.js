@@ -46,15 +46,9 @@ export function createCloudExports({
         ...(attributes ? { attributes } : {}),
       }
     }
-    const n = src.length
-    const pos = new Float64Array(n * 3)
-    const col = new Uint8Array(n * 3)
-    for (let i = 0; i < n; i++) {
-      pos[i * 3] = src[i].x; pos[i * 3 + 1] = src[i].y; pos[i * 3 + 2] = src[i].z
-      const c = src[i].color || [200, 200, 200]
-      col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2]
-    }
-    return { count: n, pos, col }
+    // A sparse cloud (SparsePoints): colourless points at the writers' 200 grey.
+    const flat = src.flatCopy()
+    return { ...flat, col: flat.col ?? new Uint8Array(flat.count * 3).fill(200) }
   }
 
   // A cloud as the flat shape the export worker takes, every array a COPY (the
@@ -62,9 +56,8 @@ export function createCloudExports({
   // one extra buffer during an export the user asked for). Unlike toFlatCloud this
   // keeps everything a writer could emit — normals, attributes, the source array
   // types — so the file is byte-identical to writing the store cloud directly. A
-  // sparse cloud gets a colour plane when any point is coloured (the rest at the
-  // writers' 200 grey) and a normal plane when its first point has one (the
-  // writers' own test).
+  // sparse cloud gets a colour plane when it has colour (colourless points at the
+  // writers' 200 grey); it has no normals.
   function exportCloudCopy(cloud) {
     if (cloud.kind === 'dense') {
       const n = cloud.count
@@ -77,18 +70,7 @@ export function createCloudExports({
         ...(attributes ? { attributes } : {}),
       }
     }
-    const pts = cloud.points, n = pts.length
-    const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
-    const pos = new Float64Array(n * 3)
-    const col = pts.some((p) => p.color) ? new Uint8Array(n * 3) : null
-    const nrm = n && pts[0]?.normal ? new Float64Array(n * 3) : null
-    for (let i = 0; i < n; i++) {
-      const p = pts[i]
-      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z
-      if (col) { const c = p.color || [200, 200, 200]; col[i * 3] = byte(c[0]); col[i * 3 + 1] = byte(c[1]); col[i * 3 + 2] = byte(c[2]) }
-      if (nrm && p.normal) { nrm[i * 3] = p.normal[0]; nrm[i * 3 + 1] = p.normal[1]; nrm[i * 3 + 2] = p.normal[2] }
-    }
-    return { count: n, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
+    return cloud.points.flatCopy()
   }
 
   function logExportFrame(what, frame) {
@@ -133,7 +115,7 @@ export function createCloudExports({
     // A sparse cloud whose FIRST point has no colour: the writers decide "has colour"
     // from that point in two places (XYZ, and the georeference / downsample pass)
     // and per point everywhere else. Keep both rules.
-    if (cloud.kind !== 'dense' && copy.col && !cloud.points[0]?.color) {
+    if (cloud.kind !== 'dense' && copy.col && !cloud.points.hasColorAt(0)) {
       if (frame.sim || cell) delete copy.col
       else if (format === 'xyz') color = false
     }
@@ -195,10 +177,10 @@ export function createCloudExports({
   // Sparse model → COLMAP text model (cameras/images/points3D.txt) zipped into
   // one download. One PINHOLE camera per image. The exported K/R/t are in the
   // BA (pinhole) frame, so the 2D observations MUST be too: prefer the cloud's
-  // `viewsPx` (uuid→[x,y] BA-frame pixels the SfM run baked in — undistorted /
+  // view pixels (the BA-frame pixels the SfM run baked in — undistorted /
   // fiducial-canonical / self-cal-folded), and fall back to the store keypoints
-  // only when it's absent (pure pinhole with no self-cal, where the two frames are
-  // identical, or a legacy cloud persisted before viewsPx existed — which we warn
+  // only when they're absent (pure pinhole with no self-cal, where the two frames are
+  // identical, or a legacy cloud persisted before they existed — which we warn
   // about, since a distorted/film/self-cal project would export inconsistently).
   // Only cameras with a matching loaded image + resolved K are exported (COLMAP
   // needs width/height/name). Output is in the local SfM frame.
@@ -250,7 +232,7 @@ export function createCloudExports({
 
     const raw = cloud.kind === 'dense'
       ? { count: cloud.count, pos: cloud.pos, col: cloud.col }
-      : cloud.points
+      : cloud.points.flatCopy()
     // Georeference first: a tileset is only placeable in the project CRS.
     const src = toFlatCloud(prepareCloudForExport(raw, { sim: g?.sim ?? null, cell: 0, onLog: log }))
 

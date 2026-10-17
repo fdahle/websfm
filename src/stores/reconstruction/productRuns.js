@@ -73,7 +73,7 @@ export function createProductRuns({
         log(`${groundOnly ? 'DTM' : 'DEM'}: read ${flat.count.toLocaleString()} ${groundOnly ? 'ground ' : ''}points of the streamed cloud `
           + (plan.complete ? '(every level of its octree)' : `down to ${plan.spacing.toPrecision(3)}-unit spacing`), 'info', 'Products')
         if (!flat.count) throw new Error(groundOnly ? 'the cloud has no ground points' : 'the cloud has no points')
-      } else staged = stageDemPoints(src.kind === 'dense' ? src : { points: src.points }, { budgetBytes, inside })
+      } else staged = stageDemPoints(src.kind === 'dense' ? src : { count: src.points.length, pos: src.points.pos }, { budgetBytes, inside })
       if (cls) log(`DTM: ${staged.count.toLocaleString()} ground points of ${staged.total.toLocaleString()}`, 'info', 'Products')
       else if (r) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
       if (cls && !staged.count) throw new Error(r ? 'no ground point lies inside the region' : 'the cloud has no ground points')
@@ -162,13 +162,9 @@ export function createProductRuns({
     const stride = Math.max(1, Math.ceil(total / MAX_FIT))
     const n = total ? Math.ceil(total / stride) : 0
     const pos = new Float64Array(n * 3)
+    const srcPos = cloud.kind === 'dense' ? cloud.pos : cloud.points.pos
     for (let i = 0, k = 0; i < total; i += stride, k++) {
-      if (cloud.kind === 'dense') {
-        pos[k * 3] = cloud.pos[i * 3]; pos[k * 3 + 1] = cloud.pos[i * 3 + 1]; pos[k * 3 + 2] = cloud.pos[i * 3 + 2]
-      } else {
-        const p = cloud.points[i]
-        pos[k * 3] = p.x; pos[k * 3 + 1] = p.y; pos[k * 3 + 2] = p.z
-      }
+      pos[k * 3] = srcPos[i * 3]; pos[k * 3 + 1] = srcPos[i * 3 + 1]; pos[k * 3 + 2] = srcPos[i * 3 + 2]
     }
     const cameras = [...sparseCameras.value.entries()].map(([uuid, cam]) => ({
       uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },

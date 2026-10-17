@@ -21,7 +21,7 @@ export const countOf = cloud => cloud?.nVerts ?? cloud?.count ?? cloud?.points?.
 // A cloud whose points are only in its level-of-detail octree (core/lod/streamed.js):
 // its fields, ranges and classes come from the octree's build statistics.
 const lodOnly = cloud => !!cloud?.lod && !cloud.pos && !cloud.points
-export const hasRgb = cloud => !!cloud?.col || !!cloud?.points?.some(p => p.color) || (lodOnly(cloud) && !!cloud.lod.layout?.colour)
+export const hasRgb = cloud => !!cloud?.col || !!cloud?.points?.hasColor || (lodOnly(cloud) && !!cloud.lod.layout?.colour)
 const attributeNames = cloud => (lodOnly(cloud) ? (cloud.lod.layout?.attributes ?? []).map(a => a.name) : Object.keys(cloud?.attributes || {}))
 export const hasTexture = cloud => !!(cloud?.uv && cloud?.texture?.pages?.length)
 export function styleFields(cloud) {
@@ -49,9 +49,10 @@ export function scalarAt(cloud, field, origin = null) {
     return i => values?.[i] ?? NaN
   }
   const axis = field === 'x' ? 0 : field === 'y' ? 1 : 2
-  const key = ['x', 'y', 'z'][axis]
   const o = origin?.[axis] ?? 0
-  return cloud.pos ? i => cloud.pos[i * 3 + axis] + o : i => cloud.points[i][key]
+  // A level-of-detail proxy may carry neither until a node lands: no value then.
+  const pos = cloud.pos ?? cloud.points?.pos
+  return pos ? i => pos[i * 3 + axis] + o : () => NaN
 }
 export function scalarRange(cloud, field) {
   if (lodOnly(cloud)) {
@@ -119,8 +120,10 @@ export function buildCloudStyle(cloud, input, { elevationRange = null, origin = 
   if (style.field === 'rgb') {
     let colors = cloud.col
     if (!colors) {
-      colors = new Uint8Array(n * 3)
-      for (let i = 0; i < n; i++) colors.set(cloud.points[i].color || [68, 170, 255], i * 3)
+      // A sparse cloud: its colours, the viewer's blue where a point has none.
+      const pts = cloud.points
+      colors = pts.col ? pts.col.slice(0, n * 3) : new Uint8Array(n * 3)
+      for (let i = 0; i < n; i++) if (!pts.hasColorAt(i)) colors.set([68, 170, 255], i * 3)
     }
     return { style, colors, indices: null, legend }
   }

@@ -46,8 +46,8 @@ export function createSfmProjectExports({
 
     // Warn if we're about to fall back to raw store keypoints for a project whose BA
     // frame differs from scan/distorted space (distortion, film, or self-cal) but no
-    // viewsPx is present — those observations won't match the exported cameras.
-    const anyViewsPx = cloud.points.some((p) => p.viewsPx && p.viewsPx.size)
+    // view pixels are present — those observations won't match the exported cameras.
+    const anyViewsPx = cloud.points.hasPixels
     if (!anyViewsPx) {
       const risky = exportImages.some(({ uuid }) => {
         const im = imgByUuid.get(uuid)
@@ -61,21 +61,17 @@ export function createSfmProjectExports({
     }
 
     const keypointsByUuid = new Map(exportImages.map((im) => [im.uuid, im.keypoints]))
-    const points = cloud.points.map((p) => ({
-      xyz: [p.x, p.y, p.z],
-      color: p.color,
-      views: p.views
-        ? [...p.views.entries()]
-            .map(([uuid, kpIdx]) => {
-              if (!exported.has(uuid)) return null
-              const px = p.viewsPx?.get(uuid)
-              if (px) return { uuid, x: px[0], y: px[1], featureIdx: kpIdx }
-              const kps = keypointsByUuid.get(uuid)
-              return kps && kpIdx < kps.length ? { uuid, x: kps.x(kpIdx), y: kps.y(kpIdx), featureIdx: kpIdx } : null
-            })
-            .filter(Boolean)
-        : [],
-    }))
+    const sp = cloud.points
+    const points = Array.from({ length: sp.length }, (_, i) => {
+      const views = []
+      sp.forEachView(i, (uuid, kpIdx, px, py) => {
+        if (!exported.has(uuid)) return
+        if (Number.isFinite(px)) { views.push({ uuid, x: px, y: py, featureIdx: kpIdx }); return }
+        const kps = keypointsByUuid.get(uuid)
+        if (kps && kpIdx < kps.length) views.push({ uuid, x: kps.x(kpIdx), y: kps.y(kpIdx), featureIdx: kpIdx })
+      })
+      return { xyz: sp.xyz(i), color: sp.colorAt(i) ?? undefined, views }
+    })
 
     const model = buildColmapModel({ images: exportImages, points })
     // Adapters share the deterministic COLMAP-like model so image, feature and
@@ -195,11 +191,10 @@ export function createSfmProjectExports({
 
     // The observations must be in the BA (pinhole) frame — that is the only frame
     // the undistorted pixels are in. Raw store keypoints are in scan/distorted
-    // space, so a legacy model without viewsPx would write marks that don't sit on
-    // the images it ships beside them.
-    const anyViewsPx = cloud.points.some((p) => p.viewsPx && p.viewsPx.size)
-    if (!anyViewsPx && cloud.points.length) {
-      throw new Error('This model has no BA-frame observations (viewsPx). Re-run reconstruction '
+    // space, so a legacy model without view pixels would write marks that don't sit
+    // on the images it ships beside them.
+    if (!cloud.points.hasPixels && cloud.points.length) {
+      throw new Error('This model has no BA-frame observations. Re-run reconstruction '
         + 'before exporting undistorted images.')
     }
 
@@ -265,25 +260,22 @@ export function createSfmProjectExports({
       // and then cropped, so the same affine applies to both.
       const gridByUuid = new Map(outImages.map((o) => [o.uuid, o]))
       const kept = new Set(outImages.map((o) => o.uuid))
-      const points = cloud.points.map((p) => ({
-        xyz: [p.x, p.y, p.z],
-        color: p.color,
-        views: p.views
-          ? [...p.views.entries()].map(([u, kpIdx]) => {
-            if (!kept.has(u)) return null
-            const px = p.viewsPx?.get(u)
-            if (!px) return null
-            const g = gridByUuid.get(u)
-            // Centre-aligned like the resample and scaleK (geometry.js toScaledPx).
-            const x = toScaledPx(px[0], g.outScale) - g.rect.x
-            const y = toScaledPx(px[1], g.outScale) - g.rect.y
-            // A mark that the crop cut away is no longer observable in the
-            // exported image; dropping it keeps the model self-consistent.
-            if (x < 0 || y < 0 || x > g.width - 1 || y > g.height - 1) return null
-            return { uuid: u, x, y }
-          }).filter(Boolean)
-          : [],
-      }))
+      const sp = cloud.points
+      const points = Array.from({ length: sp.length }, (_, i) => {
+        const views = []
+        sp.forEachPixel(i, (u, px, py) => {
+          if (!kept.has(u)) return
+          const g = gridByUuid.get(u)
+          // Centre-aligned like the resample and scaleK (geometry.js toScaledPx).
+          const x = toScaledPx(px, g.outScale) - g.rect.x
+          const y = toScaledPx(py, g.outScale) - g.rect.y
+          // A mark that the crop cut away is no longer observable in the
+          // exported image; dropping it keeps the model self-consistent.
+          if (x < 0 || y < 0 || x > g.width - 1 || y > g.height - 1) return
+          views.push({ uuid: u, x, y })
+        })
+        return { xyz: sp.xyz(i), color: sp.colorAt(i) ?? undefined, views }
+      })
 
       // No `keypoints` — the store's are in scan space, and the compact
       // observed-points form is what a sparse-only consumer wants anyway.

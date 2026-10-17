@@ -432,10 +432,10 @@ window.bench = {
     const out = new Float64Array(width * Math.ceil(n / stride))
     let k = 0
     for (let i = 0; i < n; i += stride) {
-      const p = kind === 'sparse' ? c.points[i] : null
-      const q = frame.fromSfm(p ? [p.x, p.y, p.z] : [c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2]])
+      const sp = kind === 'sparse' ? c.points : null
+      const q = frame.fromSfm(sp ? sp.xyz(i) : [c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2]])
       out[k++] = q[0]; out[k++] = q[1]; out[k++] = q[2]
-      if (p) out[k++] = p.views?.length ?? p.views?.size ?? 0
+      if (sp) out[k++] = sp.viewCount(i)
     }
     const u8 = new Uint8Array(out.buffer, 0, 8 * k)
     let s = ''
@@ -689,9 +689,9 @@ window.bench = {
     const t0 = performance.now()
     await recon.reconstruct(settings, report)
     const cloud = recon.mainSparseCloud
-    const points = cloud?.points ?? []
+    const points = cloud?.points ?? null
     let ge3 = 0, obs = 0
-    for (const p of points) { const n = p.views?.size ?? 0; obs += n; if (n >= 3) ge3++ }
+    for (let i = 0; i < (points?.length ?? 0); i++) { const n = points.viewCount(i); obs += n; if (n >= 3) ge3++ }
     const s = recon.summary
     // Independent shape check when the images carry GNSS the solve never used (EXIF;
     // the bench imports no poses, so there are no camera priors): see positionCheck.js.
@@ -716,7 +716,7 @@ window.bench = {
     // The ≥3-view points in the positionCheck ENU frame, for a node-side comparison
     // with a reference surface (scripts/bench/lidar.mjs); centimetre-rounded.
     const pointsEnu = pc && exportPoints
-      ? points.filter((p) => (p.views?.size ?? 0) >= 3).map((p) => applySimilarity(pc.sim, [p.x, p.y, p.z]).map((v) => Math.round(v * 100) / 100))
+      ? Array.from(points.indicesWhere((i) => points.viewCount(i) >= 3), (i) => applySimilarity(pc.sim, points.xyz(i)).map((v) => Math.round(v * 100) / 100))
       : null
     const nameOf = new Map(images.images.map((i) => [i.uuid, i.name]))
     const r4 = (v) => (v == null ? null : Math.round(v * 1e4) / 1e4)
@@ -732,7 +732,7 @@ window.bench = {
     return {
       settings, seconds: (performance.now() - t0) / 1000,
       cameras: cloud?.cameras?.size ?? 0, images: images.images.length,
-      points: points.length, pointsGe3: ge3, observations: obs,
+      points: points?.length ?? 0, pointsGe3: ge3, observations: obs,
       reprojection: s?.reprojection ?? s?.finalReprojection ?? null,
       // BA linear-solver totals + stage wall clock: the PCG-vs-Cholesky comparison
       // (TODO ▸ MEM ▸ PCG) reads these; set recon.baSolver per variant to compare.

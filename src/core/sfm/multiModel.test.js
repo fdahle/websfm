@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { secondaryJobs, alignSecondary, mergeAligned } from './multiModel.js'
 import { applySimilarity } from '../products/georef.js'
+import { SparsePoints } from './sparsePoints.js'
 
 const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 const rotZ = (a) => [[Math.cos(a), -Math.sin(a), 0], [Math.sin(a), Math.cos(a), 0], [0, 0, 1]]
@@ -40,10 +41,10 @@ describe('alignSecondary', () => {
     return { uuid: `c${i}`, R, t, K: { fx: 1000 } }
   })
   secondaryCams.push(camAt('new', [1, 1, 1], sim.R))
-  const primary = { status: 'done', cameras: primaryCams, points: [], summary: { selfCalDistortion: [] } }
+  const primary = { status: 'done', cameras: primaryCams, points: SparsePoints.empty(), summary: { selfCalDistortion: [] } }
   const secondary = {
     status: 'done', cameras: secondaryCams,
-    points: [{ x: 1, y: 2, z: 3, views: [['new', 0]] }], summary: { selfCalDistortion: [] },
+    points: SparsePoints.fromRecords([{ x: 1, y: 2, z: 3, views: [['new', 0]] }]), summary: { selfCalDistortion: [] },
   }
 
   it('aligns and merges a secondary model supported by shared cameras', () => {

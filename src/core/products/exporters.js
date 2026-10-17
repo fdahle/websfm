@@ -522,8 +522,8 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
 }
 
 // ── Reconstruction → JSON (cameras + tracks) ─────────────────────────────────
-// cameras: [{ uuid, R, t, K? }], points: [{ x, y, z, color?, views? }] — `views`
-// an array of [uuid, kpIdx] or a Map uuid → kpIdx. Camera centres (C = −Rᵀt) are
+// cameras: [{ uuid, R, t, K? }], points: SparsePoints — each point's views written
+// as [[uuid, kpIdx], …]. Camera centres (C = −Rᵀt) are
 // precomputed for convenience. Returns the document with `points` as a lazyArray
 // (core/io/parts.js): serialize it with `jsonParts`, which writes one point at a
 // time instead of materializing a copy of the cloud. `tracks: false` writes every
@@ -541,12 +541,9 @@ export function reconstructionToJson(cameras, points, crs = 'local', { tracks = 
       center: cameraCenter(c.R, c.t),
     })),
     points: lazyArray(points.length, (i) => {
-      const p = points[i]
-      return {
-        x: p.x, y: p.y, z: p.z,
-        color: p.color ?? null,
-        views: !tracks || !p.views ? [] : p.views instanceof Map ? [...p.views.entries()] : p.views,
-      }
+      const views = []
+      if (tracks) points.forEachView(i, (uuid, kp) => { views.push([uuid, kp]) })
+      return { x: points.x(i), y: points.y(i), z: points.z(i), color: points.colorAt(i), views }
     }),
   }
 }

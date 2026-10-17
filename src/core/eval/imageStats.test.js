@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { perImageResiduals, unregisteredReason, imageResidualVectors } from './imageStats.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
 const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
 const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K }
@@ -8,10 +9,10 @@ describe('perImageResiduals', () => {
   it('computes rms/median/max per camera', () => {
     const cameras = new Map([['a', cam], ['b', cam]])
     // Point at (0,0,10) projects to (500,400) in an identity camera.
-    const pts = [
+    const pts = SparsePoints.fromRecords([
       { x: 0, y: 0, z: 10, viewsPx: new Map([['a', [503, 404]], ['b', [500, 400]]]) }, // a:5px b:0
       { x: 0, y: 0, z: 10, viewsPx: new Map([['a', [500, 400]]]) },                     // a:0px
-    ]
+    ])
     const rows = perImageResiduals(cameras, pts)
     const a = rows.find((r) => r.uuid === 'a')
     const b = rows.find((r) => r.uuid === 'b')
@@ -24,7 +25,7 @@ describe('perImageResiduals', () => {
 
   it('includes registered cameras with zero observations as null-stat rows', () => {
     const cameras = new Map([['a', cam], ['lonely', cam]])
-    const pts = [{ x: 0, y: 0, z: 10, viewsPx: new Map([['a', [500, 400]]]) }]
+    const pts = SparsePoints.fromRecords([{ x: 0, y: 0, z: 10, viewsPx: new Map([['a', [500, 400]]]) }])
     const rows = perImageResiduals(cameras, pts)
     const lonely = rows.find((r) => r.uuid === 'lonely')
     expect(lonely).toEqual({ uuid: 'lonely', nObs: 0, rmsPx: null, medianPx: null, maxPx: null })
@@ -50,7 +51,7 @@ describe('imageResidualVectors', () => {
     const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
     const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K }
     // Point at (0,0,10) projects to (500,400); observed at (503,404) → vector (3,4).
-    const pts = [{ x: 0, y: 0, z: 10, viewsPx: new Map([['a', [503, 404]]]) }]
+    const pts = SparsePoints.fromRecords([{ x: 0, y: 0, z: 10, viewsPx: new Map([['a', [503, 404]]]) }])
     const v = imageResidualVectors(cam, pts, 'a')
     expect(v).toHaveLength(1)
     expect(v[0].px).toBe(503)
@@ -61,7 +62,7 @@ describe('imageResidualVectors', () => {
   it('maps both endpoints through toScan and keeps mag in the pinhole frame', () => {
     const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
     const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K }
-    const pts = [{ x: 0, y: 0, z: 10, viewsPx: new Map([['a', [503, 404]]]) }]
+    const pts = SparsePoints.fromRecords([{ x: 0, y: 0, z: 10, viewsPx: new Map([['a', [503, 404]]]) }])
     // A scale+offset stand-in for the scan→canonical affine: it stretches the vector,
     // which is exactly why the tail can't be mapped alone.
     const toScan = (x, y) => ({ x: 2 * x + 10, y: 3 * y - 5 })
@@ -76,7 +77,7 @@ describe('imageResidualVectors', () => {
 
   it('skips points not seen in the image; empty when no cam', () => {
     const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: { fx: 1, fy: 1, cx: 0, cy: 0 } }
-    expect(imageResidualVectors(cam, [{ x: 0, y: 0, z: 1, viewsPx: new Map([['b', [0, 0]]]) }], 'a')).toEqual([])
-    expect(imageResidualVectors(null, [], 'a')).toEqual([])
+    expect(imageResidualVectors(cam, SparsePoints.fromRecords([{ x: 0, y: 0, z: 1, viewsPx: new Map([['b', [0, 0]]]) }]), 'a')).toEqual([])
+    expect(imageResidualVectors(null, SparsePoints.empty(), 'a')).toEqual([])
   })
 })

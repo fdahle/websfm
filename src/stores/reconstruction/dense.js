@@ -33,7 +33,7 @@ export function createDense({
       log('Dense: need a sparse cloud with ≥2 cameras first', 'warn', 'Dense')
       return
     }
-    const hasTracks = cloud.points.some((p) => p.views.size > 0)
+    const hasTracks = cloud.points.viewTotal > 0
     if (!hasTracks) {
       log('Dense: sparse cloud has no view-tracks (rebuild the sparse model first)', 'warn', 'Dense')
       return

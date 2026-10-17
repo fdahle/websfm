@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest'
 import { referenceGcpCandidates } from './referenceGcps.js'
+import { SparsePoints } from './sparsePoints.js'
 function fixture() {
   return {
-    points: [{ x: 20.5, y: 69.5, z: 0, viewsPx: new Map([['a',[11,12]],['b',[13,14]]]) }],
+    points: SparsePoints.fromRecords([{ x: 20.5, y: 69.5, z: 0, viewsPx: new Map([['a',[11,12]],['b',[13,14]]]) }]),
     images: [{ uuid: 'a', name: 'a.jpg', toScan: (x,y) => ({ x:x+100, y:y+200 }) }, { uuid: 'b', name: 'b.jpg' }],
     ortho: { width: 100, height: 100, originX: 0, originY: 100, gsd: 1, frame: { kind: 'local', origin: [0,0,0], east:[1,0,0], north:[0,1,0], up:[0,0,1] } },
     reference: { geoTransform: { originX: 1000, originY: 2000, scaleX: 2, scaleY: -2 } },

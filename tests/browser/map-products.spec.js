@@ -109,7 +109,8 @@ test('without CRS content the map shows the model frame, and a local DEM is plac
     const cameras = new Map([0, 1, 2].map((i) => [`cam${i}`, { R, t: [-i, 0, 10], K }]))
     const points = Array.from({ length: 50 }, (_, i) => ({ x: i % 5, y: Math.floor(i / 5) / 5, z: 0,
       color: [200, 200, 200], views: new Map(), viewsPx: new Map() }))
-    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points })
+    const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
+    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points: SparsePoints.fromRecords(points) })
     s.mainSparseId = 'sparse-1'
     // The DEM's frame: same cameras, other points ⇒ same axes, shifted origin.
     const other = points.map((p) => ({ x: p.x + 7, y: p.y - 3, z: p.z }))

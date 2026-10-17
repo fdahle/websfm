@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { packSparseForDense, viewIndex, positionsInRegion } from './sparseInput.js'
 import { selectSourceViews } from './mvs.js'
 import { makePackedPoints } from '../sfm/resultCodec.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
-const points = [
+const points = SparsePoints.fromRecords([
   { x: 0, y: 0, z: 5, views: new Map([['a', 1], ['b', 2]]) },
   { x: 1, y: 0, z: 5, views: new Map([['b', 3], ['c', 4]]) },
   { x: 0, y: 1, z: 5, views: new Map([['a', 5], ['c', 6], ['b', 7]]) },
-]
+])
 
 describe('packSparseForDense', () => {
   it('packs positions and per-point viewers', () => {
@@ -30,7 +31,7 @@ describe('packSparseForDense', () => {
     expect([...s.vstart]).toEqual([0, 2, 4, 7])
     expect([...s.vcam].map((c) => s.viewUuids[c])).toEqual(['a', 'b', 'b', 'c', 'a', 'c', 'b'])
     // A copy: transferring it must not detach the cloud's own tracks.
-    expect(s.vcam.buffer).not.toBe(packed.packedTracks.vcam.buffer)
+    expect(s.vcam.buffer).not.toBe(packed.vcam.buffer)
   })
 
   it('keeps only the positions inside a region', () => {

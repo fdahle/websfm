@@ -40,15 +40,13 @@ export const DEM_STAGE_BYTES_PER_POINT = 24
 // survivors: a count pass runs first, so a region costs no full-cloud copy. All
 // of it is ArrayBuffer memory, so it is checked against the device budget, not
 // the V8 heap.
-//   cloud: a dense cloud ({ count, pos }) or a sparse one ({ points: [{x,y,z}] })
+//   cloud: { count, pos } — a dense cloud, or a sparse one's SparsePoints pos column
 // Returns { pos: Float64Array(3·count), count, total }.
 export function stageDemPoints(cloud, { inside = null, budgetBytes = DEFAULT_BUDGET_BYTES } = {}) {
-  const src = cloud.pos ?? null, pts = cloud.points
-  const total = src ? cloud.count : pts.length
+  const src = cloud.pos
+  const total = cloud.count
   const xyz = [0, 0, 0]
-  const read = src
-    ? (i) => { xyz[0] = src[i * 3]; xyz[1] = src[i * 3 + 1]; xyz[2] = src[i * 3 + 2] }
-    : (i) => { const p = pts[i]; xyz[0] = p.x; xyz[1] = p.y; xyz[2] = p.z }
+  const read = (i) => { xyz[0] = src[i * 3]; xyz[1] = src[i * 3 + 1]; xyz[2] = src[i * 3 + 2] }
   let count = total
   if (inside) {
     count = 0
