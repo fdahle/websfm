@@ -8,6 +8,8 @@ import { partsToBlob } from '../../utils/blobParts.js'
 import { cloudCentroid, ecefTransformFromProbes, cloudToGlbPoints, localBounds, buildTileset, boundingBox } from '../../core/products/tiles3d.js'
 import { ensureProjection, transformAsync, metresPerCrsUnit } from '../../core/crs.js'
 import { zipParts } from '../../utils/zip.js'
+import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
+import { hasDistortion } from '../../core/sfm/distortion.js'
 
 // Point cloud, mesh, model JSON and 3D Tiles exports, split out of useExports. A
 // cloud is written in the frame THE resolver gives it (exportSimilarity): the CRS
@@ -16,7 +18,7 @@ import { zipParts } from '../../utils/zip.js'
 // Deps are useExports' injected refs and shared helpers.
 export function createCloudExports({
   cloudFileBase, clouds, currentCrs, effectiveFrameSpec, exportSimilarity, images, log,
-  mainSparseCloud, projectBase, saveJson, selectedCloud,
+  mainSparseCloud, projectBase, saveJson, selectedCloud, sensors = null, summary = null,
 }) {
   // The main sparse cloud (what downstream stages consume — MC), or the selected
   // cloud if it carries cameras. Shared by the two model exporters.
@@ -155,14 +157,28 @@ export function createCloudExports({
     if (!cloud) return
     if (format === 'transforms') {
       const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+      // transforms.json pairs each photo with a pinhole K. A lens with distortion, a
+      // self-calibrated radial term or a film scan's fiducial frame means the photos
+      // are NOT that pinhole image: the poses would be right and every pixel wrong.
+      // Those projects get transforms.json from Export ▸ Undistorted images instead.
+      const frameModel = makeFrameModelResolver({ summary: summary?.value ?? null, sensors: sensors?.value ?? [] })
+      let warped = 0
       const transformImages = [...cloud.cameras.entries()]
         .map(([uuid, cam]) => {
           const im = imgByUuid.get(uuid)
           if (!im || !cam.K || !im.meta?.width || !im.meta?.height) return null
+          const f = frameModel(im)
+          if (hasDistortion(f.dist) || f.selfCal || f.fiducial || f.filmMissing) warped++
           return { name: im.name, R: cam.R, t: cam.t, K: cam.K, width: im.meta.width, height: im.meta.height }
         })
         .filter(Boolean)
       if (!transformImages.length) return
+      if (warped) {
+        log(`transforms.json export: ${warped} of ${transformImages.length} image(s) are not pinhole images (lens `
+          + 'distortion, self-calibrated radial terms or a film scan), so their pixels would not match the cameras. '
+          + 'Use Export ▸ Undistorted images, which writes the undistorted images with their own transforms.json.', 'error', 'Export')
+        return
+      }
       saveJson(buildTransformsJson({ images: transformImages }), `${projectBase()}-transforms.json`)
       log(`transforms.json export: ${transformImages.length} camera(s)`, 'success', 'Export')
       return

@@ -250,7 +250,8 @@ function run() {
     <template v-else-if="kind === 'undistorted'">
       <p class="field-hint">
         Pinhole images + a PINHOLE sparse model, the handoff COLMAP's
-        <code>image_undistorter</code> produces — for OpenMVS, MVE and MVS-Texturing.
+        <code>image_undistorter</code> produces — for OpenMVS, MVE and MVS-Texturing —
+        and a <code>transforms.json</code> for NeRF / 3D Gaussian Splatting tools.
         Lens distortion and film-scan geometry are already folded out of the model,
         so only the pixels are resampled.
       </p>

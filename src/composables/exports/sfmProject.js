@@ -10,6 +10,7 @@ import * as opfs from '../../utils/opfs.js'
 import { imageIdsToPairId } from '../../core/io/colmapDatabase.js'
 import { exportColmapDatabase } from '../../workers/colmapDbClient.js'
 import { zipParts, crc32 } from '../../utils/zip.js'
+import { buildTransformsJson } from '../../core/io/transforms.js'
 import { undistortImage } from '../../workers/computeClient.js'
 import { toScaledPx } from '../../core/sfm/geometry.js'
 
@@ -282,6 +283,10 @@ export function createSfmProjectExports({
       const model = buildColmapModel({ images: outImages, points })
       const files = serializeColmapModelBinParts(model)
       for (const [n, data] of Object.entries(files)) entries.push({ name: `sparse/${n}`, data })
+      // The same cameras for NeRF / 3DGS tools: these images ARE pinhole, with this K.
+      entries.push({ name: 'transforms.json', data: new Blob([JSON.stringify(buildTransformsJson({
+        images: outImages.map((o) => ({ name: `images/${o.name}`, R: o.R, t: o.t, K: o.K, width: o.width, height: o.height })),
+      }), null, 2)], { type: 'application/json' }) })
 
       downloadBlob(`${projectBase()}-undistorted.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
       const cropped = outImages.filter((o) => o.rect.x || o.rect.y).length
