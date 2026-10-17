@@ -312,7 +312,7 @@ export async function deleteOpfsProjectTree(projectId) {
 // future, copied between storage backends — without either of them knowing what
 // any individual file means.
 //
-// `walkProjectFiles` yields `{ relPath, file }` depth-first, `relPath` always
+// `walkProjectFiles` yields `{ relPath, file, handle }` depth-first, `relPath` always
 // '/'-joined and relative to the project dir. `skip(relPath, kind)` is consulted
 // for both files and directories, so skipping a directory prunes the subtree
 // (that is what makes "exclude derived data" cheap rather than a per-file test).
@@ -322,7 +322,7 @@ async function* walkDir(dir, prefix, skip) {
     const relPath = prefix ? `${prefix}/${name}` : name
     if (skip?.(relPath, handle.kind)) continue
     if (handle.kind === 'directory') yield* walkDir(handle, relPath, skip)
-    else yield { relPath, file: await handle.getFile() }
+    else yield { relPath, file: await handle.getFile(), handle }
   }
 }
 

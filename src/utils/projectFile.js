@@ -72,15 +72,18 @@ async function openArchiveSink(suggestedName) {
 // Collect the entry list first (File handles are lazy — `size` costs no read).
 // Two passes buy an exact total for the size pre-flight and for progress, and a
 // pruned walk when derived data is excluded.
+// Archived files up to this size are read into memory once (see the export loop).
+const SNAPSHOT_IN_MEMORY_BYTES = 64 * 1024 * 1024
+
 async function collectEntries(projectId, includeDerived) {
   const skip = includeDerived
     ? null
     : (relPath, kind) => kind === 'directory' && ARCHIVE_DERIVED_DIRS.includes(relPath)
   const entries = []
   let totalBytes = 0
-  for await (const { relPath, file } of opfs.walkProjectFiles(projectId, { skip })) {
+  for await (const { relPath, file, handle } of opfs.walkProjectFiles(projectId, { skip })) {
     if (!shouldArchivePath(relPath, { includeDerived })) continue
-    entries.push({ relPath, file, size: file.size })
+    entries.push({ relPath, file, handle, size: file.size })
     totalBytes += file.size
   }
   entries.sort((a, b) => a.relPath.localeCompare(b.relPath))
@@ -158,12 +161,29 @@ export async function exportProjectArchive({
     // reading only its first few kilobytes.
     await addEntry(MANIFEST_NAME, new TextEncoder().encode(JSON.stringify(manifest, null, 2)))
 
-    let done = 0
-    for (const { relPath, file } of entries) {
-      await addEntry(relPath, file)
+    // A File is a snapshot: one taken at the walk is unreadable once the project
+    // writes that file again (the log, a save) — and a large save takes minutes
+    // (quarry, 18 GB, 2026-10-17: NotReadableError). Take each file's snapshot when
+    // it is archived; read one that fits in memory once, so its checksum and its
+    // bytes come from the same version. A file gone by then was superseded (an old
+    // save generation); it is left out and said so.
+    let done = 0, skipped = 0
+    for (const { relPath, file, handle } of entries) {
+      let current = file
+      if (handle) {
+        try { current = await handle.getFile() } catch (err) {
+          if (err?.name !== 'NotFoundError') throw err
+          skipped++
+          log(`  ${relPath} was removed while saving (superseded) — left out`, 'debug')
+          continue
+        }
+      }
+      await addEntry(relPath, current.size <= SNAPSHOT_IN_MEMORY_BYTES && archiveCompression(relPath) !== 8
+        ? new Uint8Array(await current.arrayBuffer()) : current)
       done++
       onProgress?.({ done, total: entries.length, label: relPath })
     }
+    if (skipped) log(`Saving project: ${skipped} file(s) were replaced while saving and are left out`, 'info')
     const cdOffset = archiveBytes
     let cdSize = 0
     for (const h of central) { await write(h); cdSize += h.length }
