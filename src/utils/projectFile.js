@@ -49,13 +49,22 @@ async function openArchiveSink(suggestedName) {
       }
     }
   }
-  const chunks = []
+  // No save dialog (Firefox, Safari): the archive is gathered into a Blob 64 MB at a
+  // time, which the browser may keep on disk, rather than as copies held in the page —
+  // an 18 GB project held as ArrayBuffers ran the page out of memory ~11 GB in, and
+  // the next file read failed with NotReadableError (quarry, 2026-10-17).
+  let blob = new Blob([]), batch = [], batchBytes = 0
+  const seal = () => { if (batch.length) { blob = new Blob([blob, ...batch]); batch = []; batchBytes = 0 } }
   return {
     streaming: false,
     // Copy: a stream reader may hand out views of a buffer it reuses.
-    write: (chunk) => { chunks.push(chunk.slice()) },
+    write: (chunk) => {
+      batch.push(chunk.slice()); batchBytes += chunk.byteLength
+      if (batchBytes >= 64 * 1024 * 1024) seal()
+    },
     close: async () => {
-      const blob = new Blob(chunks, { type: 'application/zip' })
+      seal()
+      blob = new Blob([blob], { type: 'application/zip' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -63,7 +72,7 @@ async function openArchiveSink(suggestedName) {
       a.click()
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
     },
-    abort: () => { chunks.length = 0 },
+    abort: () => { blob = new Blob([]); batch = []; batchBytes = 0 },
   }
 }
 
@@ -162,11 +171,10 @@ export async function exportProjectArchive({
     await addEntry(MANIFEST_NAME, new TextEncoder().encode(JSON.stringify(manifest, null, 2)))
 
     // A File is a snapshot: one taken at the walk is unreadable once the project
-    // writes that file again (the log, a save) — and a large save takes minutes
-    // (quarry, 18 GB, 2026-10-17: NotReadableError). Take each file's snapshot when
-    // it is archived; read one that fits in memory once, so its checksum and its
-    // bytes come from the same version. A file gone by then was superseded (an old
-    // save generation); it is left out and said so.
+    // writes that file again (a save, a cloud generation) — and a large save takes
+    // minutes. Take each file's snapshot when it is archived; read one that fits in
+    // memory once, so its checksum and its bytes come from the same version. A file
+    // gone by then was superseded (an old save generation); it is left out and said so.
     let done = 0, skipped = 0
     for (const { relPath, file, handle } of entries) {
       let current = file
@@ -178,8 +186,16 @@ export async function exportProjectArchive({
           continue
         }
       }
-      await addEntry(relPath, current.size <= SNAPSHOT_IN_MEMORY_BYTES && archiveCompression(relPath) !== 8
-        ? new Uint8Array(await current.arrayBuffer()) : current)
+      try {
+        await addEntry(relPath, current.size <= SNAPSHOT_IN_MEMORY_BYTES && archiveCompression(relPath) !== 8
+          ? new Uint8Array(await current.arrayBuffer()) : current)
+      } catch (err) {
+        // Name the file: "could not be read" alone says nothing about where.
+        const named = new Error(`${relPath} (${(current.size / 1024 ** 2).toFixed(1)} MB): ${err?.message ?? err}`)
+        named.name = err?.name ?? 'Error'
+        named.cause = err
+        throw named
+      }
       done++
       onProgress?.({ done, total: entries.length, label: relPath })
     }
@@ -204,7 +220,7 @@ export async function exportProjectArchive({
 const DEFAULT_IMPORT_LIMITS = Object.freeze({
   maxEntries: 100_000,
   maxDeflatedEntryBytes: 1024 * 1024 * 1024, // a deflated entry is decompressed whole
-  maxTotalBytes: Infinity,                   // bounded by the browser's storage below
+  maxTotalBytes: Infinity,                   // storage is checked by the writes themselves (see importProjectArchive)
   maxCompressionRatio: 1000,
   maxManifestBytes: 1024 * 1024,
 })
@@ -258,17 +274,24 @@ export async function importProjectArchive({
 }) {
   const log = (m, level = 'info') => onLog?.(m, level, 'Project')
 
-  // Within the browser's currently available storage. A folder project remains the
-  // escape hatch for projects larger than the browser will store.
-  let available = Infinity
+  // The browser's storage estimate is not a ceiling: Chrome reports quota = usage +
+  // 10 GiB and raises it as the site writes (measured 2026-10-17: 12.9 GB written →
+  // 23.6 GB quota), so refusing an archive larger than quota − usage refused a 14 GB
+  // project the same browser had just stored. Say so when the project looks larger;
+  // a write that really runs out of space fails with the storage-full message
+  // (opfs.js) and the caller removes the half-written project.
+  const maxTotalBytes = limits.maxTotalBytes ?? DEFAULT_IMPORT_LIMITS.maxTotalBytes
+  const { entries } = await archiveIndex(file, { ...limits, maxTotalBytes })
   try {
     const estimate = await opfs.getQuota?.()
-    if (Number.isFinite(estimate?.quota)) available = Math.max(0, estimate.quota - (estimate.usage || 0))
-  } catch {}
-  const maxTotalBytes = Math.min(limits.maxTotalBytes ?? DEFAULT_IMPORT_LIMITS.maxTotalBytes,
-    Number.isFinite(available) ? Math.floor(available * 0.9) : Infinity)
-  if (maxTotalBytes <= 0) throw new Error('browser storage has no space available for this project')
-  const { entries } = await archiveIndex(file, { ...limits, maxTotalBytes })
+    const expanded = entries.reduce((n, e) => n + (e.size ?? 0), 0)
+    const available = Number.isFinite(estimate?.quota) ? Math.max(0, estimate.quota - (estimate.usage || 0)) : Infinity
+    if (expanded > available) {
+      log(`Opening project: it expands to ${formatBytes(expanded)}, more than the ${formatBytes(available)} the browser `
+        + 'reports free; continuing (the browser usually grants more as the project is written). If storage runs out, '
+        + 'the open stops and nothing is left behind.', 'warn')
+    }
+  } catch { /* no estimate: nothing to say */ }
 
   const manifest = await readManifest(file, entries)
   if (!manifest) throw new Error('not a websfm project file (no manifest.json)')
