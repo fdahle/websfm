@@ -113,8 +113,11 @@ Importing works the same way: XYZ, ASCII PLY and LAS files are read in pieces, s
 multi-gigabyte text cloud does not have to fit in memory as text. Its points do: the
 browser holds at most about 89 million points of a PLY or XYZ at full precision (it caps
 one buffer at 2 GiB), so import a larger cloud as LAS or LAZ, which streams (below). A LAS field that is
-zero for every point (no intensity, never classified, no GPS time) is not kept, so it
-takes no memory and is not offered for styling; exporting writes 0 there, as the file had.
+zero for every point (no intensity, never classified, no GPS time), or return numbers that
+are all "1 of 1", is not kept, so it takes no memory and is not offered for styling.
+Exporting writes the same value back, as the file had.
+**Export ▸ 3D Tiles…** writes one tile, so it takes at most the same 89 million points.
+Subsample a larger cloud first, or export it as LAS or LAZ.
 
 ## Very large LAS and LAZ files
 A LAS or LAZ file too large to hold in memory (from about 10 million points) is
@@ -123,6 +126,10 @@ A LAS or LAZ file too large to hold in memory (from about 10 million points) is
 A 200-million-point LAZ takes a few minutes and 16 to 20 bytes per point of project
 storage. The import dialog is skipped, since its unit and axis options would need every
 point in memory; LAS surveys are in their own coordinates already.
+
+If the file's header gives a wrong extent, the log says how many points lie outside
+it: they are kept, but the view and box reads (crop, DEM) can miss them, so fix the
+header and import again.
 
 A streamed cloud is marked **streamed** in the sidebar. It keeps positions, colour,
 intensity, classification and the return number and count; a file without colour
@@ -140,10 +147,16 @@ measure on it. Tools read it from its octree:
   at full detail, into a new streamed cloud (a selection of an edited one refines it).
 - **Filter** and **Classify ground** run tile by tile: each tile is read at full
   detail with a margin around it, so points near a tile's edge still see their
-  neighbours, and the result is a new streamed cloud. The ground filter's margin is 40
+  neighbours, and the result is a new streamed cloud. Tiles are sized from where the
+  points are (the octree's node counts), so a corridor or a survey with far outliers
+  gets small tiles over its points and no crowded ones. The filter's margin holds what
+  every chosen filter looks at (its voxel, two isolated-filter cells, the outlier
+  filter's neighbour reach), and an automatic cell size is the whole cloud's, so where
+  the tile edges fall does not change the result. The ground filter's margin is 40
   times the cloth resolution (at least 30 m). The outlier filter reads the cloud twice:
   first for the whole cloud's neighbour-distance statistics, then to filter every tile
-  against them, so the result is the one the whole cloud would give.
+  against them. A place too dense to read as one tile stops the run with a message
+  rather than writing a thinned result; crop that part out first.
 - **Export** writes LAS, LAZ, PLY or XYZ node by node. LAS and LAZ keep the file's own
   coordinate quantisation and its projection records; the points come in a different
   order than in the source file.

@@ -10,6 +10,7 @@ import { ensureProjection, transformAsync, metresPerCrsUnit } from '../../core/c
 import { zipParts } from '../../utils/zip.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
+import { MAX_FLOAT64_XYZ_POINTS, tooManyPointsMessage } from '../../core/bufferLimit.js'
 
 // Point cloud, mesh, model JSON and 3D Tiles exports, split out of useExports. A
 // cloud is written in the frame THE resolver gives it (exportSimilarity): the CRS
@@ -41,7 +42,11 @@ export function createCloudExports({
       const attributes = src.attributes && Object.keys(src.attributes).length
         ? Object.fromEntries(Object.entries(src.attributes).map(([k, v]) => [k, v.slice(0, count)]))
         : null
-      // A cloud prepared past the buffer wall is relative to `origin` (flatAxes.js).
+      // The result is one Float64 xyz plane, so it holds at most the buffer wall's
+      // worth of points (core/bufferLimit.js): refuse a larger cloud with the reason
+      // rather than fail on the allocation.
+      if (count > MAX_FLOAT64_XYZ_POINTS) throw new Error(tooManyPointsMessage('This cloud', count))
+      // A cloud prepared relative to `origin` (flatAxes.js) is made absolute again.
       const pos = new Float64Array(src.pos.subarray(0, count * 3))
       if (src.origin) for (let i = 0; i < pos.length; i++) pos[i] += src.origin[i % 3]
       return {
@@ -248,6 +253,14 @@ export function createCloudExports({
       : clouds.value.find(cloudHasPoints)
     if (!cloud) return
     if (isStreamed(cloud)) { log(streamedRefusal(cloud, '3D Tiles export'), 'warn', 'Export'); return }
+    // The export is one tile whose positions are one Float64 plane and one GLB buffer:
+    // past the browser's buffer wall it cannot be built (core/bufferLimit.js).
+    const points = cloud.kind === 'dense' ? cloud.count : cloud.points.length
+    if (points > MAX_FLOAT64_XYZ_POINTS) {
+      log(`3D Tiles export: ${tooManyPointsMessage(`"${cloud.name}"`, points)} A 3D Tiles export is one tile, so `
+        + 'thin the cloud first (Point Cloud ▾ ▸ Subsample…), or export it as LAS or LAZ.', 'error', 'Export')
+      return
+    }
 
     const raw = cloud.kind === 'dense'
       ? { count: cloud.count, pos: cloud.pos, col: cloud.col }

@@ -8,7 +8,7 @@
 // A streamed cloud keeps positions, colour and the attributes most surveys are
 // styled by (STREAM_ATTRIBUTES); the rest of a record is not stored.
 
-import { readLasHeader, createLasDecoder, validateLasAllocation } from './las.js'
+import { readLasHeader, createLasDecoder, validateLasAllocation, LAS_FIELD_DEFAULTS } from './las.js'
 import { LASZIP_VLR_USER_ID, LASZIP_VLR_RECORD_ID } from './laz.js'
 
 export const STREAM_ATTRIBUTES = [
@@ -120,9 +120,10 @@ export async function openLasStream(source, { createLazDecoder = null, batchPoin
       const c = dec.finish()
       yield {
         count: n, pos: c.pos, col: colour ? c.col ?? null : null,
-        // The decoder leaves out a field that is zero throughout; the octree keeps all four.
+        // The decoder leaves out a field at its default throughout (LAS_FIELD_DEFAULTS:
+        // 0, single returns 1); the octree keeps all four.
         attributes: Object.fromEntries(STREAM_ATTRIBUTES.map((a) => [a.name,
-          c.attributes[a.name] ?? new (a.type === 'uint16' ? Uint16Array : Uint8Array)(n)])),
+          c.attributes[a.name] ?? new (a.type === 'uint16' ? Uint16Array : Uint8Array)(n).fill(LAS_FIELD_DEFAULTS[a.name] ?? 0)])),
       }
     }
   }

@@ -241,8 +241,13 @@ export function deserializeCloud(c, makeCloudId) {
   } catch (err) {
     attributeError = err?.message ?? String(err)
   }
-  // A streamed cloud's octree is all it has, so it is kept as it is.
-  const lod = c.kind === 'dense' && c.lod && (c.streamed || c.lod.points === (c.pointCount ?? 0)) ? markRaw(c.lod) : null
+  // A streamed cloud's octree is all it has, so it is kept as it is. A resident
+  // cloud's is kept only when it was built from these very points: the same
+  // generation (`createdAt`, which every edit renews; reconstruction/cloudLod.js
+  // stamps it) and count. An edit that keeps the count (a reclassify) must not bring
+  // the old octree back.
+  const lod = c.kind === 'dense' && c.lod && (c.streamed || (c.lod.points === (c.pointCount ?? 0)
+    && c.lod.cloudCreatedAt != null && c.lod.cloudCreatedAt === c.createdAt)) ? markRaw(c.lod) : null
   return { ...cloud, visible: c.visible !== false, style: c.style ?? null,
     ...(lod ? { lod } : {}),
     ...(Object.keys(attributes).length ? { attributes: markRaw(attributes) } : {}),

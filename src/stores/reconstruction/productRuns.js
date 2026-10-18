@@ -164,16 +164,46 @@ export function createProductRuns({
     // Point sample from the densest cloud: the plane's fit input, and the local
     // frame's origin/PCA fallback. Subsampled — a plane needs spread, not every
     // point, and 25 M boxed {x,y,z} in the worker is the OOM we avoid everywhere.
+    // A streamed cloud has no positions in memory (pos: null): its sample is read
+    // from the octree's coarse levels instead.
     const src = demSource.value
-    const cloud = src?.cloud
+    const cloud = src?.cloud ?? null
     const total = src?.count ?? 0
     const MAX_FIT = 200_000
-    const stride = Math.max(1, Math.ceil(total / MAX_FIT))
-    const n = total ? Math.ceil(total / stride) : 0
-    const pos = new Float64Array(n * 3)
-    const srcPos = cloud.kind === 'dense' ? cloud.pos : cloud.points.pos
-    for (let i = 0, k = 0; i < total; i += stride, k++) {
-      pos[k * 3] = srcPos[i * 3]; pos[k * 3 + 1] = srcPos[i * 3 + 1]; pos[k * 3 + 2] = srcPos[i * 3 + 2]
+    const strided = (srcPos, count) => {
+      const stride = Math.max(1, Math.ceil(count / MAX_FIT))
+      const m = count ? Math.ceil(count / stride) : 0
+      const out = new Float64Array(m * 3)
+      for (let i = 0, k = 0; i < count; i += stride, k++) {
+        out[k * 3] = srcPos[i * 3]; out[k * 3 + 1] = srcPos[i * 3 + 1]; out[k * 3 + 2] = srcPos[i * 3 + 2]
+      }
+      return { pos: out, n: m }
+    }
+    let pos = new Float64Array(0), n = 0
+    if (cloud && isStreamed(cloud)) {
+      if (!extractCloudPoints) {
+        log('Ortho: the point cloud is streamed from its octree and cannot be sampled here', 'warn', 'Products')
+        return null
+      }
+      try {
+        const { cloud: flat } = await extractCloudPoints(cloud, { fields: 'xyz', maxPoints: MAX_FIT })
+        ;({ pos, n } = strided(flat.pos, flat.count))
+      } catch (err) {
+        log(`Ortho: reading a sample of the streamed cloud failed — ${err?.message ?? err}`, 'error', 'Products')
+        return null
+      }
+    } else if (cloud) {
+      const srcPos = cloud.kind === 'dense' ? cloud.pos : cloud.points?.pos
+      if (srcPos) ({ pos, n } = strided(srcPos, total))
+    }
+    // A mesh surface with no cloud to sample: its own vertices place the frame.
+    if (!n && id === 'mesh' && meshCloud.value?.pos) {
+      const m = meshCloud.value
+      ;({ pos, n } = strided(m.pos, m.nVerts ?? Math.floor(m.pos.length / 3)))
+    }
+    if (id !== 'mesh' && n < 3) {
+      log('Ortho: a plane surface needs a point cloud to fit — build or import one first', 'warn', 'Products')
+      return null
     }
     const cameras = [...sparseCameras.value.entries()].map(([uuid, cam]) => ({
       uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
@@ -190,7 +220,7 @@ export function createProductRuns({
     }
 
     log(`Ortho: surface is a plane fitted to the ${src.kind} cloud `
-      + `(${n.toLocaleString()} of ${total.toLocaleString()} points)`, 'info', 'Products')
+      + `(${n.toLocaleString()} of ${total.toLocaleString()} points${isStreamed(cloud) ? ', from its octree' : ''})`, 'info', 'Products')
     // The plane's fit points double as the local frame's — one sample, one array.
     return {
       kind: 'plane', frame: frameSpec, cameras, framePoints: pos, framePointCount: n,

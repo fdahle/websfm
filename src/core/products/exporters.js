@@ -6,6 +6,7 @@
 import { flatAxes } from './flatAxes.js'
 import { MAX_FLOAT64_XYZ_POINTS } from '../bufferLimit.js'
 import { writeGeoTiff, writeCogDeflate, geoKeysForEpsg } from './geotiff.js'
+import { bigSet } from '../bigCollections.js'
 import { applySimilarity } from './georef.js'
 import { createVoxelAccumulator } from '../dense/voxelAccumulator.js'
 import { PART_BYTES, PART_CHARS, lineParts, recordParts, lazyArray } from '../io/parts.js'
@@ -114,7 +115,7 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
 function firstPointPerCell({ n, at, hasCol, getC, attrs, cell, min, max, onLog }) {
   const dims = [0, 1, 2].map((a) => Math.floor((max[a] - min[a]) / cell) + 1)
   const packed = dims[0] * dims[1] * dims[2] <= Number.MAX_SAFE_INTEGER
-  const seen = new Set()
+  const seen = bigSet(n) // one key per occupied cell: past 2²⁴ a plain Set throws
   const keep = new Uint32Array(n)
   let m = 0
   for (let i = 0; i < n; i++) {

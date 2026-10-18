@@ -21,6 +21,13 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
     return opfs.pruneLodFiles(pid, keep, { building: building.size > 0 })
   }
 
+  // An octree written for a project that is no longer the open one (closed or switched
+  // while the worker ran): no cloud of that project names it, so its files go now
+  // rather than at that project's next open.
+  async function discard(dir, meta) {
+    for (const f of [meta?.dataFile, meta?.hierarchyFile]) if (f) await dir.removeEntry(f).catch(() => {})
+  }
+
   // → the cloud's new `lod` metadata, or null (refused, failed).
   async function buildCloudLod(cloudId, onProgress) {
     const cloud = clouds.value.find((c) => c.id === cloudId)
@@ -38,10 +45,13 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
         { cloud: { count: cloud.count, pos, col, attributes }, dir, name },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
-      // The cloud may have been replaced or removed meanwhile: then the files go.
-      const live = clouds.value.find((c) => c.id === cloudId)
-      if (live !== cloud) return null
-      cloud.lod = markRaw(meta)
+      // The cloud may have been replaced or removed meanwhile, or its project closed:
+      // then the files go.
+      const live = projectId() === pid ? clouds.value.find((c) => c.id === cloudId) : null
+      if (live !== cloud) { await discard(dir, meta); return null }
+      // Stamped with the generation it was built from: a reopen keeps it only for the
+      // same points (cloudSerde.js), as an edit renews `createdAt`.
+      cloud.lod = markRaw({ ...meta, cloudCreatedAt: cloud.createdAt ?? null })
       await save()
       return meta
     } catch (err) {
@@ -70,6 +80,11 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
       log(`Cloud import: ${file.name} is too large to hold in memory — streaming it into a level-of-detail octree`, 'info', 'Import')
       const meta = await workerBuildLod({ file, dir, name },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
+      if (projectId() !== pid) {
+        await discard(dir, meta)
+        log(`Cloud import: ${file.name} was not added — its project was closed while it streamed`, 'warn', 'Import')
+        return null
+      }
       const cloud = {
         id, name: `Imported (${file.name})`, kind: 'dense', createdAt: Date.now(), imported: true,
         cameras: markRaw(new Map()), count: meta.points, pos: null, col: null, lod: markRaw(meta),
@@ -101,7 +116,16 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
         opfs.loadLodFile(pid, cloud.lod.dataFile), opfs.loadLodFile(pid, cloud.lod.hierarchyFile),
       ])
       return await openLodReader(cloud.lod, { data, hierarchy })
-    } catch {
+    } catch (err) {
+      // A cloud whose points are in memory does not need its octree: drop the
+      // unreadable one (a new object, so the viewer draws it whole and the
+      // background build makes a fresh octree). A streamed cloud has nothing else.
+      const idx = projectId() === pid ? clouds.value.findIndex((c) => c === cloud || c.id === cloud.id) : -1
+      if (idx >= 0 && clouds.value[idx].pos && clouds.value[idx].lod === cloud.lod) {
+        const { lod: _lod, ...rest } = clouds.value[idx]
+        clouds.value.splice(idx, 1, rest)
+        log(`Level of detail: the octree of "${cloud.name}" could not be read (${err?.message ?? err}); drawing it whole and building it again`, 'warn', 'Products')
+      }
       return null
     }
   }
@@ -169,6 +193,11 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
       const meta = await workerTransformLod({ lod: JSON.parse(JSON.stringify(source.lod)), data, hierarchy, dir, name: fileName, mode,
         settings: JSON.parse(JSON.stringify(settings)) },
       { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
+      if (projectId() !== pid) {
+        await discard(dir, meta)
+        log(`Cloud edit: "${name}" was not added — its project was closed while the edit ran`, 'warn', 'Products')
+        return null
+      }
       const cloud = {
         id, name, kind: 'dense', createdAt: Date.now(), derived: true, ...(source.imported ? { imported: true } : {}),
         cameras: markRaw(new Map()), count: meta.points, pos: null, col: null, lod: markRaw(meta),

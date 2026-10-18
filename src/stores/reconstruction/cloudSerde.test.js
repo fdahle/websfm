@@ -176,12 +176,16 @@ describe('dense cloud round trip', () => {
   })
 
   it('carries its level-of-detail octree, unless it describes other points', () => {
-    const lod = { dataFile: 'd1-x.lod', hierarchyFile: 'd1-x.hier', points: 2, nodeCount: 1, root: { min: [1, 2, 3], size: 3 } }
+    const lod = { dataFile: 'd1-x.lod', hierarchyFile: 'd1-x.hier', points: 2, nodeCount: 1, root: { min: [1, 2, 3], size: 3 }, cloudCreatedAt: 2000 }
     const out = roundTrip(dense({ lod }))
     expect(out.lod).toEqual(lod)
     expect(serializeCloud(dense({ lod }), { reuse: { pos: { name: 'p', bytes: 24 } } }).lod).toEqual(lod)
     expect('lod' in roundTrip(dense())).toBe(false)
     expect('lod' in roundTrip(dense({ lod: { ...lod, points: 5 } }))).toBe(false)
+    // Same count, another generation (a reclassify renews createdAt): not its octree.
+    expect('lod' in roundTrip(dense({ createdAt: 2001, lod }))).toBe(false)
+    const { cloudCreatedAt: _g, ...unstamped } = lod
+    expect('lod' in roundTrip(dense({ lod: unstamped }))).toBe(false)
   })
 
   it('ignores buffer tail beyond count', () => {

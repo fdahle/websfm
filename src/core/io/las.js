@@ -488,6 +488,10 @@ export function decodeLasPoints(pointBytes, count, recordLength, format, scale, 
 // from `bytes` (n whole records), finish() returns the cloud. `rgbBits` (8 | 16)
 // fixes the colour depth when the decoder sees only part of the file (a streamed
 // import decides it for the whole file from a sample); otherwise it is detected.
+// The value a writer (encodeLasPoints) puts in a standard field the cloud does not
+// carry; the decoder leaves out a field that holds it for every point. Not listed: 0.
+export const LAS_FIELD_DEFAULTS = Object.freeze({ returnNumber: 1, numberOfReturns: 1 })
+
 export function createLasDecoder(count, recordLength, format, scale, offset, extraBytes = [], { rgbBits = null } = {}) {
   if (!SUPPORTED_FORMATS.has(format) || recordLength < RECORD_MIN[format]) {
     throw new Error('Truncated or invalid LAS point records')
@@ -500,9 +504,12 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
   // (see finish()).
   let low = hasRgb ? new Uint8Array(count * 3) : null
   const modern = format >= 6
-  // Standard fields, each allocated at its first non-zero value: a field that is zero
-  // throughout (no intensity, never classified, no GPS time — every cloud websfm writes)
-  // carries nothing and was ~29 B/point of arrays. The writers emit 0 for a missing field.
+  // Standard fields, each allocated at its first value other than the one the writers
+  // emit when the field is missing (LAS_FIELD_DEFAULTS: 0, but "return 1 of 1"): a field
+  // at that value throughout (no intensity, never classified, no GPS time, single
+  // returns — every cloud websfm writes) carries nothing and was ~29 B/point of arrays,
+  // and leaving it out still writes the same records back. A file whose return numbers
+  // are all 0 keeps them, so it is written with 0 again.
   const std = {
     intensity: null, classification: null, returnNumber: null, numberOfReturns: null,
     scanAngle: null, pointSourceId: null, userData: null, synthetic: null, keyPoint: null,
@@ -513,6 +520,7 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
   }
   const U8 = (k) => (std[k] ??= new Uint8Array(count))
   const U16 = (k) => (std[k] ??= new Uint16Array(count))
+  const R = (k) => (std[k] ??= new Uint8Array(count).fill(LAS_FIELD_DEFAULTS[k]))
   // Extra bytes start after the standard record. A field that would run past the
   // record (a descriptor list longer than the records it describes) is ignored.
   const extraAttributes = {}
@@ -541,8 +549,8 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
       if (v) U16('intensity')[i] = v
       const returns = dv.getUint8(p + 14)
       const flags = dv.getUint8(p + 15)
-      if ((v = returns & (modern ? 15 : 7))) U8('returnNumber')[i] = v
-      if ((v = (returns >> (modern ? 4 : 3)) & (modern ? 15 : 7))) U8('numberOfReturns')[i] = v
+      if ((v = returns & (modern ? 15 : 7)) !== 1) R('returnNumber')[i] = v
+      if ((v = (returns >> (modern ? 4 : 3)) & (modern ? 15 : 7)) !== 1) R('numberOfReturns')[i] = v
       if ((v = modern ? dv.getUint8(p + 16) : flags & 31)) U8('classification')[i] = v
       const classFlags = modern ? flags : flags >> 5
       if (classFlags & 1) U8('synthetic')[i] = 1
