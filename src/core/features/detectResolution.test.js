@@ -4,6 +4,7 @@ import {
   DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS,
   DETECT_SUPERPOINT_DEFAULTS, DETECT_SUPERPOINT_PRESETS,
   DETECT_DISK_DEFAULTS, DETECT_DISK_PRESETS,
+  DETECT_ALIKED_DEFAULTS, DETECT_ALIKED_PRESETS,
 } from '../defaults.user.js'
 import { DETECT_TUNING } from '../tuning.js'
 
@@ -116,6 +117,7 @@ describe('auto is never worse than absolute', () => {
     ['sift', DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS],
     ['superpoint', DETECT_SUPERPOINT_DEFAULTS, DETECT_SUPERPOINT_PRESETS],
     ['disk', DETECT_DISK_DEFAULTS, DETECT_DISK_PRESETS],
+    ['aliked', DETECT_ALIKED_DEFAULTS, DETECT_ALIKED_PRESETS],
   ]
 
   it('pins each band floor to that preset\'s absolute default', () => {
@@ -145,11 +147,13 @@ describe('auto is never worse than absolute', () => {
   })
 })
 
-describe('DISK bands', () => {
+describe('DISK and ALIKED bands', () => {
   it('stay inside the untiled single-pass ceiling at every preset (4:3 frame)', () => {
-    for (const preset of ['low', 'medium', 'high']) {
-      const ceil = DETECT_RESOLUTION_BANDS.disk[preset].ceilPx
-      expect(ceil * Math.round(ceil * 0.75)).toBeLessThanOrEqual(DETECT_TUNING.diskMaxUntiledInputPx)
+    for (const [detector, limit] of [['disk', DETECT_TUNING.diskMaxUntiledInputPx], ['aliked', DETECT_TUNING.alikedMaxUntiledInputPx]]) {
+      for (const preset of ['low', 'medium', 'high']) {
+        const ceil = DETECT_RESOLUTION_BANDS[detector][preset].ceilPx
+        expect(ceil * Math.round(ceil * 0.75)).toBeLessThanOrEqual(limit)
+      }
     }
   })
 })

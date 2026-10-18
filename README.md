@@ -26,7 +26,7 @@ control are first-class throughout.
 
 A full photogrammetry pipeline, stage by stage:
 
-1. **Detect** – SIFT (Rust/WASM) or the learned SuperPoint detector.
+1. **Detect** – SIFT (Rust/WASM) or a learned detector (ALIKED, DISK, SuperPoint).
 2. **Match** – brute-force descriptor matching or the learned LightGlue matcher,
    with fundamental-matrix RANSAC verification.
 3. **Sparse SfM** – incremental reconstruction with P3P resection, LM bundle
@@ -46,7 +46,7 @@ COLMAP / PLY / LAS / GeoTIFF import & export.
   uses [OPFS](https://developer.mozilla.org/docs/Web/API/File_System_API/Origin_private_file_system)
   for local project storage; folder-backed projects and WebGPU acceleration are
   Chromium-only. Firefox and Safari work with reduced acceleration.
-- The learned backends (SuperPoint, LightGlue, Smart Select) download their model
+- The learned backends (ALIKED, DISK, SuperPoint, LightGlue, Smart Select) download their model
   weights on first use — you'll be asked to confirm, and each file is cached
   locally afterwards (see [Model files](#model-files)).
 
@@ -204,11 +204,15 @@ directly; the host must serve its own copy. The files are:
 | `disk.onnx` | DISK detector | 4 MB | [LightGlue-ONNX v1.0.0](https://github.com/fabio-sim/LightGlue-ONNX/releases/tag/v1.0.0) `disk.onnx` |
 | `lightglue_disk.onnx` | LightGlue for DISK | 46 MB | same release, `disk_lightglue_fused_cpu.onnx` |
 | `lightglue.onnx` | LightGlue for SuperPoint | 46 MB | same release, `superpoint_lightglue_fused_cpu.onnx` |
+| `aliked.onnx` | ALIKED detector | 3 MB | exported by `scripts/models/export-aliked.py` from [cvg/LightGlue](https://github.com/cvg/LightGlue)'s ALIKED (aliked-n16) |
+| `lightglue_aliked.onnx` | LightGlue for ALIKED | 46 MB | same script, cvg/LightGlue `aliked_lightglue` weights |
 | `sam2_encoder.onnx` | Smart Select (SAM2) | 134 MB | [onnx-community/sam2-hiera-tiny](https://huggingface.co/onnx-community/sam2-hiera-tiny) `onnx/vision_encoder.onnx` |
 | `sam2_decoder.onnx` | Smart Select (SAM2) | 21 MB | same repo, `onnx/prompt_encoder_mask_decoder.onnx` |
 
 The two SAM2 files need their internal `value_info` entries removed before ONNX
-Runtime accepts them (see `src/core/segment/README.md`).
+Runtime accepts them (see `src/core/segment/README.md`). The two ALIKED files are
+websfm's own export (fabio-sim ships ALIKED only fused with its matcher); the script's
+header says how to reproduce them and checks them against the PyTorch models.
 
 **SuperPoint is not distributed.** Its pretrained weights carry Magic Leap's
 academic / non-commercial research license, so do not host `superpoint.onnx`: users

@@ -1,4 +1,4 @@
-// Learned (ONNX) detector runner — SuperPoint and DISK, the learned alternatives
+// Learned (ONNX) detector runner — SuperPoint, DISK and ALIKED, the learned alternatives
 // to detect_sift. Wraps an ONNX model via core/features/ort.js, mirroring how
 // core/features/bruteforce.js wraps its wasm (lazy, cached, plain-data in / out).
 // Which detectors exist, and their descriptor width / input channels, is
@@ -6,7 +6,7 @@
 //
 // Contract (matches the SIFT path so the worker's detect() can branch cleanly):
 //   in : pixels Float32Array, normalised [0,1], planar CHW (channels × h × w) with
-//        `spec.channels` planes — 1 = luma (SuperPoint), 3 = RGB (DISK); w,h in the
+//        `spec.channels` planes — 1 = luma (SuperPoint), 3 = RGB (DISK, ALIKED); w,h in the
 //        rasterised (network-input) pixel space the caller already produced.
 //   out: { keypoints: [{x,y,score}], descriptors: Float32Array(N*dim, row-major),
 //          dim }, coords in that same network-input space (the worker maps them
@@ -15,8 +15,9 @@
 // Output tensors are identified by SHAPE, not name — ONNX exports disagree on
 // output names and descriptor orientation ([1,D,N] channels-first vs [1,N,D]). We
 // locate: keypoints = the last-dim-2 tensor, descriptors = the tensor of N·D
-// elements with a D axis, scores = the remaining N-element tensor. Both shipped
-// exports (fabio-sim LightGlue-ONNX v1.0.0) emit keypoints as (x, y); an export
+// elements with a D axis, scores = the remaining N-element tensor. The fabio-sim
+// exports (LightGlue-ONNX v1.0.0) emit int64 (x, y) keypoints; websfm's own ALIKED
+// export (scripts/models/export-aliked.py) emits float (x, y), sub-pixel. An export
 // that orders them (y, x) is the one thing to flip here.
 
 import { createSession, tensor, resolveBackend } from './ort.js'

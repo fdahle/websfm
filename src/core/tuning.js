@@ -42,6 +42,9 @@ export const DETECT_TUNING = {
   // byte math overflows near 2³¹ / 512 ≈ 4.2 MP. Derived, not yet observed; the
   // worker's overflow rethrow is the backstop either way.
   diskMaxUntiledInputPx: 4_000_000,
+  // ALIKED: the same 128 full-resolution channels (its concatenated feature map),
+  // so the same derived ceiling.
+  alikedMaxUntiledInputPx: 4_000_000,
 }
 
 // Sparse SfM knobs read directly in core/sfm/sfm.js (PnP registration + interleaved

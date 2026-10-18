@@ -105,7 +105,7 @@ all its pairs, and with fewer than two footprints the run matches exhaustively.
 **Brute-force** compares [descriptor](help:descriptor)s directly, keeps each match that
 passes the [ratio test](help:lowe-ratio-test), and works with every detector.
 **LightGlue** is a learned matcher. It needs every image detected with the same
-learned detector (SuperPoint or DISK), and websfm loads the LightGlue weights trained
+learned detector (ALIKED, DISK or SuperPoint), and websfm loads the LightGlue weights trained
 for that detector, downloading them on first use. If some images were detected with
 another detector, matching stops and names them; re-detect those images with
 **Overwrite**. Both are followed by the same geometric verification.

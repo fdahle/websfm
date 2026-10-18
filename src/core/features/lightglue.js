@@ -63,7 +63,8 @@ const GPU_WARMUP_TIMEOUT_MS = 30000
 
 // LightGlue weights are trained per detector, so the caller names the model
 // (core/features/learnedDetectors.js matcherModelId: 'lightglue' for SuperPoint,
-// 'lightglue_disk' for DISK). Downloaded on demand and served from Cache Storage
+// 'lightglue_disk' for DISK, 'lightglue_aliked' for ALIKED — websfm's own export with
+// the same I/O, scripts/models/export-aliked.py). Downloaded on demand and served from Cache Storage
 // (see core/models/); getSession resolves the URL to bytes before createSession.
 // The model id doubles as the session-cache key, so both can be warm at once.
 function resolveModel(args) {

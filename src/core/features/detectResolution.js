@@ -51,7 +51,7 @@
 // Conventions). Bands are per detection preset, since the compute ceiling is the
 // thing a preset is really choosing.
 // INVARIANT: each `floorPx` equals that preset's absolute `maxDim` in
-// defaults.user.js (DETECT_SIFT_DEFAULTS / _PRESETS and the SuperPoint and DISK pairs).
+// defaults.user.js (DETECT_SIFT_DEFAULTS / _PRESETS and the SuperPoint, DISK and ALIKED pairs).
 // That is what guarantees auto ≥ absolute at every image size; a test pins it.
 export const DETECT_RESOLUTION_BANDS = {
   // SIFT: the ceiling is set by matching cost at the next stage, not detection.
@@ -72,6 +72,12 @@ export const DETECT_RESOLUTION_BANDS = {
   // DISK: tighter still — 128 full-resolution channels make memory, not the
   // keypoint budget, the binding limit (DETECT_TUNING.diskMaxUntiledInputPx).
   disk: {
+    low:    { fraction: 0.10, floorPx: 768,  ceilPx: 1024 },
+    medium: { fraction: 0.15, floorPx: 1024, ceilPx: 1600 },
+    high:   { fraction: 0.25, floorPx: 1600, ceilPx: 2000 },
+  },
+  // ALIKED: DISK's memory profile (DETECT_TUNING.alikedMaxUntiledInputPx), DISK's bands.
+  aliked: {
     low:    { fraction: 0.10, floorPx: 768,  ceilPx: 1024 },
     medium: { fraction: 0.15, floorPx: 1024, ceilPx: 1600 },
     high:   { fraction: 0.25, floorPx: 1600, ceilPx: 2000 },

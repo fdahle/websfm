@@ -1,6 +1,6 @@
 // Central registry of the learned-model weights the app can fetch on demand.
 //
-// The ONNX weights (SuperPoint, LightGlue, SAM2 encoder/decoder) are NOT committed
+// The ONNX weights (SuperPoint, DISK, ALIKED, LightGlue, SAM2 encoder/decoder) are NOT committed
 // to the repo — they are large (the SAM2 encoder alone is ~128 MB, over GitHub's
 // 100 MB per-file limit) and only a subset of users touch the learned backends. So
 // they live at a hostable URL and are downloaded **on first use**, with user
@@ -50,6 +50,19 @@ export const MODELS = {
     file: 'lightglue_disk.onnx', label: 'LightGlue matcher (for DISK)', approxBytes: 45_800_000,
     license: 'Apache-2.0', licenseUrl: 'https://github.com/cvg/LightGlue/blob/main/LICENSE',
     source: 'fabio-sim/LightGlue-ONNX v1.0.0 disk_lightglue_fused_cpu.onnx',
+  },
+  // ALIKED and its LightGlue are websfm's own exports (scripts/models/export-aliked.py):
+  // fabio-sim ships ALIKED only fused with the matcher, which does not fit the
+  // per-image keypoint stage. Same tensor layout as the DISK pair above.
+  aliked: {
+    file: 'aliked.onnx', label: 'ALIKED feature detector', approxBytes: 2_800_000,
+    license: 'BSD-3-Clause', licenseUrl: 'https://github.com/Shiaoming/ALIKED/blob/main/LICENSE',
+    source: 'scripts/models/export-aliked.py: cvg/LightGlue ALIKED (aliked-n16, Shiaoming/ALIKED weights)',
+  },
+  lightglue_aliked: {
+    file: 'lightglue_aliked.onnx', label: 'LightGlue matcher (for ALIKED)', approxBytes: 45_600_000,
+    license: 'Apache-2.0', licenseUrl: 'https://github.com/cvg/LightGlue/blob/main/LICENSE',
+    source: 'scripts/models/export-aliked.py: cvg/LightGlue v0.1_arxiv aliked_lightglue weights',
   },
   sam2_encoder: {
     file: 'sam2_encoder.onnx', label: 'SAM2 image encoder', approxBytes: 134_000_000,

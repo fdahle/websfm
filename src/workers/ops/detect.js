@@ -20,7 +20,7 @@ import {
   refineDetectionSpot, nativeRefinePlan,
 } from '../../core/sfm/fiducialDetection.js'
 
-// Detection ops (SIFT / learned: SuperPoint, DISK). `rasterize` (OffscreenCanvas pixel decode)
+// Detection ops (SIFT / learned: SuperPoint, DISK, ALIKED). `rasterize` (OffscreenCanvas pixel decode)
 // stays in the worker and is injected; the STRIDE parse + shared feature-bundle
 // shape live here next to the two detector runners.
 export function makeDetectOps({ rasterize }) {
@@ -90,11 +90,11 @@ export function makeDetectOps({ rasterize }) {
   }
 
   // Learned detector (ONNX via core/features/learnedDetect.js) → the same feature
-  // bundle. Descriptor width is the spec's (SuperPoint 256, DISK 128) — carried
+  // bundle. Descriptor width is the spec's (SuperPoint 256, DISK and ALIKED 128) — carried
   // through as descLen so persistence and matching read the width off the buffer
   // rather than a hardcoded const.
   async function runLearned(spec, data, width, height, { maxKeypoints, onLog }) {
-    // Planar float [0,1]: luma for SuperPoint, RGB for DISK.
+    // Planar float [0,1]: luma for SuperPoint, RGB for DISK and ALIKED.
     const pixels = rgbaToPlanar(data, width, height, spec.channels)
     const t0 = performance.now()
     const { keypoints, descriptors, dim } = await detectLearned(spec, pixels, width, height, { maxKeypoints, onLog })

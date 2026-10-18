@@ -534,7 +534,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const [wB, hB] = imageDims(srcB, kpsB)
         const res = await matchLightGlue({
           kpsA, descA, wA, hA, kpsB, descB, wB, hB,
-          // LightGlue weights are trained per detector (SuperPoint ≠ DISK).
+          // LightGlue weights are trained per detector (SuperPoint ≠ DISK ≠ ALIKED).
           modelId: learnedDetector(srcA.detector).matcherModelId,
           minConf: settings.lgMinConf,
           maxKeypoints: settings.lgMaxKeypoints,
@@ -768,8 +768,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     const ready = images.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
     const strategy = settings.strategy ?? 'exhaustive'
 
-    // LightGlue's weights are trained per learned detector (SuperPoint 256-d, DISK
-    // 128-d) — refuse SIFT features or a mix, which would silently produce garbage.
+    // LightGlue's weights are trained per learned detector (SuperPoint 256-d, DISK and
+    // ALIKED 128-d) — refuse SIFT features or a mix, which would silently produce garbage.
     if (settings.matcher === 'lightglue') {
       const lg = lightGlueModelFor(ready)
       if (!lg.ok) {

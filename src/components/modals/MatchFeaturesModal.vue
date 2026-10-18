@@ -77,7 +77,7 @@ function selectStrategy(value) {
 }
 
 // Matcher: brute-force NN + Lowe ratio (works on any descriptor) or LightGlue
-// (learned; requires one learned detector — SuperPoint or DISK — on every image;
+// (learned; requires one learned detector — SuperPoint, DISK or ALIKED — on every image;
 // the store picks the matching weights and guards mismatches).
 const matcher = ref('bruteforce')
 const matchers = [
@@ -274,7 +274,7 @@ function run() {
     <SettingsStep step="2" title="Match descriptors" :effect="descriptorEffect">
       <SettingsField
         :hint="matcher === 'lightglue'
-          ? 'Learned joint matcher — requires every image detected with the same learned detector (SuperPoint or DISK).'
+          ? 'Learned joint matcher — requires every image detected with the same learned detector (ALIKED, DISK or SuperPoint).'
           : 'Nearest-neighbour descriptor matching with Lowe\'s ratio test. Works with any detector.'">
         <template #label><FieldHelp op="match-features" param="matcher">Matcher</FieldHelp></template>
         <SegmentedControl v-model="matcher" :options="matchers" />

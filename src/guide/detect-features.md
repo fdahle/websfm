@@ -37,10 +37,17 @@ shown greyed with the reason.
 <!-- param: detector  default: SIFT -->
 The detector decides which [keypoint](help:keypoint)s are found in each image and how
 each one's surroundings are encoded as a [descriptor](help:descriptor), which is what
-matching compares. **SIFT** is the dependable default and works entirely in WASM. **DISK** and
-**SuperPoint** are learned detectors meant to be paired with LightGlue matching; each
-has its own LightGlue, and websfm picks the right one automatically. Do not mix
-detectors in one project—use **Overwrite** when switching detector.
+matching compares. **SIFT** is the dependable default and works entirely in WASM.
+**ALIKED**, **DISK** and **SuperPoint** are learned detectors meant to be paired with
+LightGlue matching; each has its own LightGlue, and websfm picks the right one
+automatically. Do not mix detectors in one project—use **Overwrite** when switching
+detector.
+
+**ALIKED** is freely licensed (BSD-3-Clause; its LightGlue is Apache-2.0). It places
+keypoints with sub-pixel precision and describes each one by sampling the image at
+learned offsets around it. Its model is downloaded once with your permission, like
+DISK's. Like DISK, it detects at 1024 px by default, because it needs much more memory
+per pixel than SuperPoint.
 
 **DISK** is freely licensed (Apache-2.0). Its model is downloaded once with your
 permission and cached in the browser. It detects at a lower resolution than
@@ -50,7 +57,7 @@ SuperPoint (1024 px by default), because it needs much more memory per pixel.
 so websfm does not ship them. The first time you run it, the download dialog shows the
 license and a direct link: download `superpoint.onnx` from its publisher, then choose
 or drop that file in the dialog. It is cached like any other model, and detection
-continues on its own. Use DISK if your work is commercial.
+continues on its own. Use ALIKED or DISK if your work is commercial.
 
 ## Quality preset
 Start with **Balanced**. Choose **Detailed** for high-resolution aerial or film scans
@@ -67,13 +74,13 @@ limit with the detected area (see *Max keypoints*). Keypoints are always mapped 
 native image coordinates.
 
 ## Detection resolution
-<!-- param: maxDim  default: 2400 px (SIFT) · 1600 px (SuperPoint) · 1024 px (DISK) -->
+<!-- param: maxDim  default: 2400 px (SIFT) · 1600 px (SuperPoint) · 1024 px (DISK, ALIKED) -->
 The long side, in pixels, that each image is reduced to before detection (step 1
 above); smaller images are never enlarged. A higher value finds finer texture and more
 keypoints on large scans, but detection cost grows with the pixel count, and the extra
 keypoints make matching slower again. Raise it for film scans or aerial frames whose fine
-texture is lost at the default; lower it for a quick first pass. DISK starts lower than
-SuperPoint because it needs far more memory per pixel.
+texture is lost at the default; lower it for a quick first pass. DISK and ALIKED start
+lower than SuperPoint because they need far more memory per pixel.
 
 With **Scale with image size** the field is called *Minimum resolution*: each image is
 detected at a fraction of its own long side (40 % with Balanced SIFT), never below this
@@ -90,14 +97,15 @@ aerial frames detected at reduced resolution) it decides how many features exist
 raising the keypoint cap changes nothing, the contrast threshold is the limiting gate.
 
 ## Max keypoints
-<!-- param: maxKeypoints default: 10000 (SIFT) · 2048 (SuperPoint, DISK) -->
+<!-- param: maxKeypoints default: 10000 (SIFT) · 2048 (SuperPoint, DISK, ALIKED) -->
 The per-image keypoint limit. When SIFT finds more than this, it keeps the
 **largest-scale** features first and drops the finest ones, the same rule COLMAP uses.
 Large features survive changes of viewpoint better than fine texture, so at a fixed
 limit this gives more points that appear in three or more images (about 10 % more on a
 building set detected at full resolution). Raise the limit when useful detail is visibly
-underrepresented. SuperPoint and DISK keep their highest-scoring points and stay lower, because
-LightGlue's attention cost grows quickly with the number of keypoints.
+underrepresented. The learned detectors keep their highest-scoring points and stay lower,
+because LightGlue's attention cost grows quickly with the number of keypoints. ALIKED
+finds at most 8,192 keypoints per image or tile, the highest limit the dialog allows.
 
 With **Scale with image size**, the SIFT limit grows with the detected area: the
 limit × (detected pixels ÷ 2400 × 1600), never below the configured limit and at
@@ -115,13 +123,13 @@ adding points.
 Tiling detects overlapping pieces of the **resized** image (step 2 above), so it only
 does something when the detection resolution is larger than one tile. Each piece keeps
 only the features in its own central region, so every feature is found exactly once and
-never right at a cut. Use **Auto** for SuperPoint or DISK inputs that exceed the
+never right at a cut. Use **Auto** for learned-detector inputs that exceed the
 single-pass limit, or when a high detection resolution makes one pass too large for
 memory. For SIFT, tiling gives the same keypoints
 and matches as an untiled run (99.5 % identical on a building pair) and uses less
 memory, so it is safe to turn on for large images.
 
-**Auto** picks the tile size for you: 1536 px for SIFT, and for SuperPoint or DISK the
+**Auto** picks the tile size for you: 1536 px for SIFT, and for a learned detector the
 largest tile that fits the GPU's memory. **Manual** uses the *Max tile size* you enter.
 
 ## Max tile size
@@ -150,6 +158,6 @@ detector, or when you need a clean comparison of detection settings.
 SIFT batches use up to four workers, bounded by your configured worker count and
 a conservative estimate of image decode and pyramid memory, which together must fit
 the memory budget in Settings ▸ Compute (the same one dense reconstruction uses).
-Large scans or images with unknown dimensions run one at a time. SuperPoint and DISK stay serial to share
-their model session. The console reports concurrency and batch wall time; Cancel stops
+Large scans or images with unknown dimensions run one at a time. The learned detectors stay
+serial to share their model session. The console reports concurrency and batch wall time; Cancel stops
 new work and discards unfinished results.

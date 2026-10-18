@@ -107,6 +107,7 @@ export const THIRD_PARTY = [
       { name: 'SuperPoint (user-supplied, not distributed)', license: 'Magic Leap academic / non-commercial research license',
         url: 'https://github.com/magicleap/SuperPointPretrainedNetwork' },
       { name: 'DISK',      license: 'Apache-2.0', url: 'https://github.com/cvlab-epfl/disk' },
+      { name: 'ALIKED',    license: 'BSD-3-Clause', url: 'https://github.com/Shiaoming/ALIKED' },
       { name: 'LightGlue', license: 'Apache-2.0', url: 'https://github.com/cvg/LightGlue' },
       { name: 'LightGlue-ONNX (ONNX exports)', license: 'Apache-2.0', url: 'https://github.com/fabio-sim/LightGlue-ONNX' },
       { name: 'SAM 2',     license: 'Apache-2.0', url: 'https://github.com/facebookresearch/sam2' },
