@@ -17,6 +17,7 @@
 import { sniffDelimiter, parseRows } from './gcp.js'
 import { fiducialColumns } from './fiducialColumns.js'
 import { IMAGE_COLUMN, makeNameResolver } from './nameMatch.js'
+import { observationsToDetections } from '../sfm/fiducialModel.js'
 
 const PATTERNS = {
   image:    IMAGE_COLUMN,
@@ -106,10 +107,18 @@ function parseWide(body, { image, columns }) {
 }
 
 // Preview of an image-fiducial import: the parsed rows grouped by file name, each
-// with the project image it matches (the importer's own name rule) and how many of
-// its existing marks it would replace (a mark named by slot replaces that slot).
-// Returns [{ fileName, imageId, imageName, marks: [{ fidId, px, py }], replaces }]
-// in file order; imageId is null for a name the project lacks.
+// with the project image it matches (the importer's own name rule), the slot each
+// mark lands in and how many of the image's existing marks it would replace. Slots
+// come from observationsToDetections over all of an image's rows together, exactly
+// as the import assigns them (stores/images/fiducials.js): a slot-named mark keeps
+// its slot, any other id ("1", "F2") is placed by position, and replaces whatever
+// mark already sits there. Several file names can match one image; their rows are
+// placed together, as the import does.
+// Returns [{ fileName, imageId, imageName, marks: [{ fidId, px, py, slot }],
+//   replaces, shared }] in file order; imageId (and every mark's slot) is null for a
+// name the project lacks. `replaces` counts existing slots the group overwrites;
+// `shared` counts its marks that land in a slot another mark of the same image also
+// takes (the last one in the file is kept).
 export function previewFiducialObs(rows, images) {
   const resolve = makeNameResolver(images)
   const byId = new Map(images.map((img) => [img.id, img]))
@@ -117,12 +126,37 @@ export function previewFiducialObs(rows, images) {
   for (const r of rows || []) {
     if (!groups.has(r.imageName)) {
       const img = byId.get(resolve(r.imageName)) ?? null
-      groups.set(r.imageName, { fileName: r.imageName, imageId: img?.id ?? null, imageName: img?.name ?? null, marks: [], replaces: 0, img })
+      groups.set(r.imageName, { fileName: r.imageName, imageId: img?.id ?? null, imageName: img?.name ?? null, marks: [], img })
     }
-    groups.get(r.imageName).marks.push({ fidId: r.fidId, px: r.px, py: r.py })
+    groups.get(r.imageName).marks.push({ fidId: r.fidId, px: r.px, py: r.py, slot: null })
   }
+
+  // Place every matched image's marks in one pass, as the import does.
+  const marksByImage = new Map()
+  for (const g of groups.values()) {
+    if (!g.img) continue
+    if (!marksByImage.has(g.img)) marksByImage.set(g.img, [])
+    marksByImage.get(g.img).push(...g.marks)
+  }
+  const slotUse = new Map() // image → slot → number of marks placed there
+  for (const [img, marks] of marksByImage) {
+    const detections = observationsToDetections(marks, img.meta?.width, img.meta?.height)
+    const use = new Map()
+    marks.forEach((m, i) => {
+      m.slot = detections[i].slot
+      use.set(m.slot, (use.get(m.slot) ?? 0) + 1)
+    })
+    slotUse.set(img, use)
+  }
+
   return [...groups.values()].map(({ img, ...g }) => {
-    const existing = new Set((img?.fiducialDetections ?? []).map((d) => d.slot))
-    return { ...g, replaces: g.marks.filter((m) => existing.has(m.fidId)).length }
+    if (!img) return { ...g, replaces: 0, shared: 0 }
+    const existing = new Set((img.fiducialDetections ?? []).map((d) => d.slot))
+    const use = slotUse.get(img)
+    return {
+      ...g,
+      replaces: new Set(g.marks.map((m) => m.slot).filter((slot) => existing.has(slot))).size,
+      shared: g.marks.filter((m) => use.get(m.slot) > 1).length,
+    }
   })
 }

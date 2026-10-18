@@ -6,6 +6,9 @@ import ImageThumb from '../controls/ImageThumb.vue'
 import ModalShell from './ui/ModalShell.vue'
 import { maskGroups } from '../../utils/maskGroups.js'
 import FieldHelp from '../guide/FieldHelp.vue'
+import { AUTO_MASK_DEFAULTS } from '../../core/defaults.user.js'
+import { useLog } from '../../composables/useLog.js'
+import { showToast } from '../../composables/useToasts.js'
 
 // Auto-Mask: generate masks from a rule rather than a painted/imported file.
 // v1 has a single strategy — exclude the outer N pixels on each side (the film
@@ -17,9 +20,7 @@ const emit = defineEmits(['close'])
 
 const imagesStore = useImagesStore()
 const { updateMask } = imagesStore
-
-// Documented in src/guide/masks.md (border / linked / existing).
-const AUTO_MASK_DEFAULTS = { border: 40, linked: true, existing: 'merge' }
+const { log } = useLog()
 
 const sides = reactive({ top: AUTO_MASK_DEFAULTS.border, right: AUTO_MASK_DEFAULTS.border,
   bottom: AUTO_MASK_DEFAULTS.border, left: AUTO_MASK_DEFAULTS.border })
@@ -35,6 +36,9 @@ const borderText = computed(() => {
   const v = SIDE_KEYS.map((k) => sides[k])
   return v.every((x) => x === v[0]) ? `${v[0]} px` : `${v.join(' / ')} px`
 })
+// A zero border excludes nothing: Replace then clears the masks (as erasing the last
+// pixel does in the mask editor) rather than storing an empty PNG; Merge leaves them.
+const noBorder = computed(() => SIDE_KEYS.every((k) => !sides[k]))
 
 function onSideInput(key, e) {
   const v = Math.max(0, Math.round(Number(e.target.value) || 0))
@@ -54,29 +58,43 @@ function previewInset(g) {
   return `${pct(sides.top, g.h)} ${pct(sides.right, g.w)} ${pct(sides.bottom, g.h)} ${pct(sides.left, g.w)}`
 }
 
-async function applyToGroup(g) {
-  if (!g.w || !g.h || busy.value) return
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+// Apply the border to every image of `groups` (sized groups only). A failure stops
+// the run and says which image failed and how many were done before it; the masks
+// already written stay.
+async function applyToGroups(groups) {
+  if (busy.value) return
+  const jobs = groups.filter((g) => g.w && g.h).flatMap((g) => g.images.map((img) => ({ img, g })))
+  if (!jobs.length) return
   busy.value = true
+  const merge = existing.value === 'merge'
+  let done = 0, current = null
   try {
-    for (const img of g.images) {
-      const base = existing.value === 'merge' && img.mask ? img.mask.blob : null
-      updateMask(img.id, await buildBorderMask(g.w, g.h, { ...sides }, base))
+    for (const { img, g } of jobs) {
+      current = img
+      if (noBorder.value) {
+        if (!merge && img.mask) updateMask(img.id, null)
+      } else {
+        const base = merge && img.mask ? img.mask.blob : null
+        updateMask(img.id, await buildBorderMask(g.w, g.h, { ...sides }, base))
+      }
+      done++
     }
+    const what = noBorder.value ? (merge ? 'nothing to add (zero border)' : 'masks cleared (zero border)') : `border ${borderText.value}`
+    log(`Auto Mask: ${plural(done, 'image')}, ${what}`, 'success', 'Images')
+  } catch (err) {
+    const why = err?.message ?? String(err)
+    log(`Auto Mask failed on ${current?.name ?? 'an image'} after ${done} of ${plural(jobs.length, 'image')}: ${why}`, 'error', 'Images')
+    showToast('Auto Mask failed', {
+      detail: `${done} of ${plural(jobs.length, 'image')} masked before ${current?.name ?? 'an image'} failed: ${why}`,
+      kind: 'error', ms: 6000,
+    })
   } finally { busy.value = false }
 }
 
-async function applyToAll() {
-  if (busy.value) return
-  busy.value = true
-  try {
-    for (const g of grouping.value.sizedGroups) {
-      for (const img of g.images) {
-        const base = existing.value === 'merge' && img.mask ? img.mask.blob : null
-        updateMask(img.id, await buildBorderMask(g.w, g.h, { ...sides }, base))
-      }
-    }
-  } finally { busy.value = false }
-}
+const applyToGroup = (g) => applyToGroups([g])
+const applyToAll = () => applyToGroups(grouping.value.sizedGroups)
 </script>
 
 <template>

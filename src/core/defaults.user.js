@@ -531,3 +531,11 @@ export const FIDUCIAL_SPOT_DEFAULTS = {
   generateMasks: false,
   maskDarkPixels: false,
 }
+
+// Auto Mask's border rule (AutoMaskModal.vue; src/guide/masks.md border / linked /
+// existing): the outer pixels excluded on each side of an image.
+export const AUTO_MASK_DEFAULTS = {
+  border: 40,          // px excluded on each side
+  linked: true,        // editing one side sets all four
+  existing: 'merge',   // 'merge' (union with the image's mask) | 'replace'
+}
