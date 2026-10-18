@@ -5,7 +5,7 @@
 // their own full projection pass. Here one pass over the observations yields both,
 // and the result is memoised on the model's identity.
 //
-// Pure: no Vue/Pinia/DOM. Identity: a sparse cloud's `points` array and `cameras`
+// Pure: no Vue/Pinia/DOM. Identity: a sparse cloud's `points` (SparsePoints) and `cameras`
 // Map are replaced, never mutated, when the model changes (useReconstructionStore
 // upsertSparseCloud builds a new cloud object), so (points, cameras) — plus the
 // point count as a cheap guard — names one model.
@@ -18,6 +18,7 @@
 import { projectPoint, cameraCenter } from '../sfm/geometry.js'
 import { trackLengthHistogram } from './reconStats.js'
 import { coverageGrid } from './coverage.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
 // One projection per observation → the global distribution and the per-camera rows.
 // → { reproj: { n, mean, median, p95, max }, perImage: [{ uuid, nObs, rmsPx, medianPx, maxPx }] }
@@ -27,22 +28,23 @@ export function sparseResidualStats(cameras, points) {
   let cap = 1024, n = 0
   let res = new Float64Array(cap)
   let owner = new Int32Array(cap)
-  for (const p of points || []) {
-    if (!p.viewsPx || !p.viewsPx.size) continue
-    for (const [uuid, px] of p.viewsPx) {
+  const pts = points ?? SparsePoints.empty()
+  for (let i = 0; i < pts.length; i++) {
+    const x = pts.x(i), y = pts.y(i), z = pts.z(i)
+    pts.forEachPixel(i, (uuid, px, py) => {
       const cam = cameras.get(uuid)
-      if (!cam) continue                     // observation of an image not in this model
-      const proj = projectPoint(cam, p.x, p.y, p.z)
-      if (!proj) continue
+      if (!cam) return                       // observation of an image not in this model
+      const proj = projectPoint(cam, x, y, z)
+      if (!proj) return
       if (n === cap) {
         cap *= 2
         const r2 = new Float64Array(cap); r2.set(res); res = r2
         const o2 = new Int32Array(cap); o2.set(owner); owner = o2
       }
-      res[n] = Math.hypot(proj.u - px[0], proj.v - px[1])
+      res[n] = Math.hypot(proj.u - px, proj.v - py)
       owner[n] = camIndex.get(uuid)
       n++
-    }
+    })
   }
 
   // Per camera: a stable counting sort groups each camera's residuals (in observation
@@ -91,7 +93,7 @@ const memo = new WeakMap() // points → { cameras, count, stats }
 // The memoised stats object for (cameras, points). Each field is computed on first
 // read and kept: { reproj, perImage, histogram, coverage }.
 export function sparseModelStats(cameras, points) {
-  const pts = points || []
+  const pts = points ?? SparsePoints.empty()
   const cams = cameras || new Map()
   const hit = memo.get(pts)
   if (hit && hit.cameras === cams && hit.count === pts.length) return hit.stats

@@ -1,8 +1,13 @@
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
 import { buildLod } from './build.js'
 import { openLodReader } from './reader.js'
 import { lodToLas, lodToText, lasPlanFor } from './exportStream.js'
 import { parseLas } from '../io/las.js'
+import { parseLaz } from '../io/laz.js'
+import initLaz from '../../wasm/lazcodec/lazcodec.js'
+import { makeLazCodec } from '../../workers/ops/laz.js'
 
 async function lodOf({ n, classMax = 6 }) {
   const pos = new Float64Array(3 * n), col = new Uint8Array(3 * n)
@@ -68,6 +73,21 @@ describe('streamed cloud export', () => {
     const parts = []
     for await (const p of las.parts) parts.push(p)
     const back = parseLas(new Uint8Array(await new Blob([las.header(), ...parts]).arrayBuffer()))
+    expect(Math.max(...back.attributes.classification)).toBe(40)
+  })
+
+  it('keeps that extra-bytes class in a LAZ too', async () => {
+    await initLaz({ module_or_path: await readFile(fileURLToPath(new URL('../../wasm/lazcodec/lazcodec_bg.wasm', import.meta.url))) })
+    const codec = makeLazCodec()
+    const { lod, reader } = await lodOf({ n: 3000, classMax: 40 })
+    const compressor = codec.createCompressor(2, lasPlanFor(lod).recordLength)
+    const laz = lodToLas(reader, lod, { compressor })
+    expect(laz.dropped).toEqual([])
+    const parts = []
+    for await (const p of laz.parts) parts.push(p)
+    const { header, first, tail } = laz.lazEnds()
+    const back = parseLaz(new Uint8Array(await new Blob([header, first, ...parts, tail]).arrayBuffer()), { decompress: codec.decompress })
+    expect(back.count).toBe(3000)
     expect(Math.max(...back.attributes.classification)).toBe(40)
   })
 

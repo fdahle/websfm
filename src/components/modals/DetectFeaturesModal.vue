@@ -312,6 +312,8 @@ function onShellClose() {
       <strong>Chrome or Edge</strong> for GPU speed.
     </WarnBox>
 
+    <!-- Cards, not a select: no value/default on the FieldHelp (the Guide marker's default shows). -->
+    <div class="field-label"><FieldHelp op="detect-features" param="preset">Quality preset</FieldHelp></div>
     <PresetCards
       :model-value="activePreset"
       :base-id="baseId"

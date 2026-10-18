@@ -31,7 +31,8 @@ const fmt = (v) => Number(v.toPrecision(6))
 <template>
   <FloatingToolbox id="region" title="Region" :width="300" close-title="Close the region tool (Esc)" @close="emit('close')">
     <div class="tb-hint">
-      Depth maps, fusion, mesh and DEM use only what lies inside the box.
+      Depth maps, fusion, mesh and DEM use only what lies inside the box. Drag a coloured
+      square in the 3D view to move a face, or the orange centre one to move the box.
       <template v-if="savedState === 'stale'"> The saved box was drawn on an older model and is ignored until reapplied.</template>
     </div>
     <div class="grid">

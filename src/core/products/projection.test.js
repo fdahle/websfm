@@ -3,6 +3,7 @@ import {
   estimateUpFromViewingDirs, estimateUpFromCloud, buildLocalFrame, makeFrame,
   aerialUpRotation, rotateReconstruction, frameFromScaledLocal,
 } from './projection.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
 // A nadir camera at height `h` looking straight down: for a world-down viewing
 // direction of [0,0,-1] (camera looks toward −Z, i.e. ground below), the world
@@ -113,10 +114,10 @@ describe('aerial Z-up orientation', () => {
       ['b', upsideDownCam(5, 0, -10)],
       ['c', upsideDownCam(2, 4, -10)],
     ])
-    const pts = [
+    const pts = SparsePoints.fromRecords([
       { x: 0, y: 0, z: 0, color: [1, 2, 3], views: new Map([['a', 7]]) },
       { x: 4, y: 1, z: 0 }, { x: 1, y: 3, z: 0 },
-    ]
+    ])
     // Before: cameras sit below the points (z = -10 < 0).
     for (const c of cams.values()) expect(centre(c)[2]).toBeLessThan(0)
 
@@ -125,28 +126,32 @@ describe('aerial Z-up orientation', () => {
     const out = rotateReconstruction(cams, pts, R)
 
     // After: every camera is above the mean ground height.
-    const groundZ = out.points.reduce((s, p) => s + p.z, 0) / out.points.length
+    let groundZ = 0
+    for (const p of out.points) groundZ += p.z
+    groundZ /= out.points.length
     for (const c of out.cameras.values()) expect(centre(c)[2]).toBeGreaterThan(groundZ)
   })
 
   it('preserves intrinsics, colour and view-tracks', () => {
     const cams = new Map([['a', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 10], K: { fx: 900 } }]])
-    const pts = [{ x: 1, y: 2, z: 3, color: [10, 20, 30], views: new Map([['a', 5]]) }]
+    const pts = SparsePoints.fromRecords([{ x: 1, y: 2, z: 3, color: [10, 20, 30], views: new Map([['a', 5]]) }])
     const R = [[0, -1, 0], [1, 0, 0], [0, 0, 1]] // 90° about Z
     const out = rotateReconstruction(cams, pts, R)
     expect(out.cameras.get('a').K).toEqual({ fx: 900 })
-    expect(out.points[0].color).toEqual([10, 20, 30])
-    expect(out.points[0].views.get('a')).toBe(5)
+    expect(out.points.colorAt(0)).toEqual([10, 20, 30])
+    expect(out.points.kpOf(0, 'a')).toBe(5)
     // p'=R·p: (1,2,3) → (-2,1,3)
-    expect([out.points[0].x, out.points[0].y, out.points[0].z]).toEqual([-2, 1, 3])
+    expect(out.points.xyz(0)).toEqual([-2, 1, 3])
   })
 
   it('can rotate an owned result without allocating a second point array', () => {
     const cams = new Map([['a', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: {} }]])
-    const pts = [{ x: 1, y: 2, z: 3 }]
+    const pts = SparsePoints.fromRecords([{ x: 1, y: 2, z: 3 }])
+    const pos = pts.pos
     const out = rotateReconstruction(cams, pts, [[0, -1, 0], [1, 0, 0], [0, 0, 1]], { inPlace: true })
     expect(out.points).toBe(pts)
-    expect(pts[0]).toEqual({ x: -2, y: 1, z: 3 })
+    expect(pts.pos).toBe(pos)
+    expect([...pos]).toEqual([-2, 1, 3])
   })
 
   it('returns null for a convergent rig (no coherent up)', () => {

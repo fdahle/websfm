@@ -36,6 +36,13 @@ archive is built in memory before it is downloaded, so there a large project is 
 saved without derived data, or kept as a folder-backed project. Opening a project
 file needs as much free browser storage as the files it holds.
 
+You can save while a step is running. The model, the matches and each DEM or
+orthophoto go into the file as they were at one save, never half of one save and half
+of the next: a save of one of them waits while the file takes its copy. Some files
+are rewritten in place, such as a depth map during its filter pass. If one of those
+changes after part of it is already in the file, the save stops and says so. Save
+again when the step has finished.
+
 ## Open and switch projects
 Opening an archive imports it into local project storage; it does not work directly
 inside the downloaded file. Let current writes finish before closing the tab. The

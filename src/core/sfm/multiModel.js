@@ -8,6 +8,7 @@
 
 import { cameraCenter } from './geometry.js'
 import { fitSimilarity, applySimilarity } from '../products/georef.js'
+import { SparsePoints } from './sparsePoints.js'
 
 const transpose = (R) => [[R[0][0], R[1][0], R[2][0]], [R[0][1], R[1][1], R[2][1]], [R[0][2], R[1][2], R[2][2]]]
 const mul = (A, B) => Array.from({ length: 3 }, (_, i) => Array.from({ length: 3 }, (_, j) =>
@@ -128,12 +129,15 @@ export function alignSecondary(primary, secondary, componentIds, opts = {}) {
     return { ...cam, R, t: cam.t.map((v, i) => sim.scale * v - Rd[i]) }
   })
   const component = new Set(componentIds)
-  const transformedPoints = (secondary.points || [])
-    .filter((p) => (p.views || []).some((v) => component.has(v[0])))
-    .map((p) => {
-      const q = applySimilarity(sim, [p.x, p.y, p.z])
-      return { ...p, x: q[0], y: q[1], z: q[2] }
-    })
+  const src = secondary.points ?? SparsePoints.empty()
+  const keep = src.indicesWhere((i) => {
+    let hit = false
+    src.forEachView(i, (uuid) => { hit ||= component.has(uuid) })
+    return hit
+  })
+  const pos = new Float64Array(3 * keep.length)
+  keep.forEach((i, j) => pos.set(applySimilarity(sim, src.xyz(i)), 3 * j))
+  const transformedPoints = src.select(keep, { pos })
   return { accepted: true, transformedCameras, transformedPoints, ...diagnostics }
 }
 
@@ -141,8 +145,9 @@ export function mergeAligned(primary, aligned) {
   const cameraMap = new Map((primary.cameras || []).map((c) => [c.uuid, c]))
   let addedCameras = 0
   for (const c of aligned.transformedCameras) if (!cameraMap.has(c.uuid)) { cameraMap.set(c.uuid, c); addedCameras++ }
-  const points = [...(primary.points || []), ...aligned.transformedPoints]
-  const n3 = points.reduce((n, p) => n + ((p.views?.length || 0) >= 3 ? 1 : 0), 0)
+  const points = SparsePoints.concat([primary.points, aligned.transformedPoints])
+  let n3 = 0
+  for (let i = 0; i < points.length; i++) if (points.viewCount(i) >= 3) n3++
   return {
     ...primary,
     cameras: [...cameraMap.values()],

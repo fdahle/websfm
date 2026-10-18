@@ -22,17 +22,17 @@ export function referenceGcpCandidates({ points, images, ortho, reference, match
   const sx = localWidth / ortho.width, sy = localHeight / ortho.height
   const bins = new Map(), cell = maxDistance
   const key = (x, y) => `${Math.floor(x / cell)},${Math.floor(y / cell)}`
-  points.forEach((point, index) => {
-    const [x, y] = frame.fromSfm(point)
+  for (let index = 0; index < points.length; index++) {
+    const [x, y] = frame.fromSfm(points.xyz(index))
     // GeoTIFF transforms address pixel edges; SIFT addresses sample centres
     // (index zero). Apply the half-pixel after resizing into the working grid.
     const u = (x - ortho.originX) / ortho.gsd * sx - 0.5
     const v = (ortho.originY - y) / ortho.gsd * sy - 0.5
-    if (u < 0 || v < 0 || u >= localWidth || v >= localHeight) return
+    if (u < 0 || v < 0 || u >= localWidth || v >= localHeight) continue
     const k = key(u, v)
     if (!bins.has(k)) bins.set(k, [])
-    bins.get(k).push({ point, index, u, v })
-  })
+    bins.get(k).push({ index, u, v })
+  }
   const candidates = [], used = new Set()
   for (const match of matches) {
     let nearest = null, best = maxDistance ** 2
@@ -44,16 +44,17 @@ export function referenceGcpCandidates({ points, images, ortho, reference, match
     }
     if (!nearest || candidates.some(c => Math.hypot(c.local[0] - nearest.u, c.local[1] - nearest.v) < 24)) continue
     const observations = []
-    for (const [uuid, measured] of nearest.point.viewsPx || []) {
+    points.forEachPixel(nearest.index, (uuid, mx, my) => {
       const image = imageByUuid.get(uuid)
-      if (!image || !measured?.every(Number.isFinite)) continue
+      if (!image || !Number.isFinite(my)) return
+      const measured = [mx, my]
       // A candidate becomes a mark: back to the click convention (displayFrame.js
       // makePinholeToMark; without a mapper, just the half-pixel shift).
       const pixel = image.toScan ? image.toScan(...measured)
         : { x: centreToMarkPx(measured[0]), y: centreToMarkPx(measured[1]) }
-      if (!Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) continue
+      if (!Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) return
       observations.push({ imageName: image.name, px: pixel.x, py: pixel.y })
-    }
+    })
     if (observations.length < 2) continue
     const mapped = applyHomography(H, nearest.u, nearest.v), base = applyHomography(H, ...match.a)
     // Anchor the local differential to the actual matched reference feature.

@@ -11,6 +11,7 @@ import { buildCloudStyle, scalarRange, sharedElevationRange, resolveCloudStyle }
 import { viewerClipping } from '../../core/products/viewerClipping.js'
 import { screenSelectMask, maskIndices } from '../../core/products/screenSelect.js'
 import { pickNearestPoint } from '../../core/products/screenPick.js'
+import { regionHandles, pickHandle, createRegionDrag } from '../../core/products/regionGizmo.js'
 import { settleEditLatch } from '../../core/products/editFraming.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
@@ -39,8 +40,11 @@ const props = defineProps({
   // The reconstruction region box to draw ({ min, max } in model coordinates) —
   // the live draft while the Region toolbox is open, else the saved region. null ⇒ none.
   regionBox: { type: Object, default: null },
-  // Drawn dashed and dim when the saved region no longer matches the model.
+  // Drawn grey and dim when the saved region no longer matches the model.
   regionStale: { type: Boolean, default: false },
+  // The Region toolbox is open: the box gets drag handles, and a drag emits
+  // `region-change` with the new { min, max } (the draft; Apply stores it).
+  regionEdit: { type: Boolean, default: false },
   // Point picking for a running tool (point-pair alignment, orient model):
   // { cloudIds?: string[] } restricts which clouds a click can pick. null ⇒ off.
   pickMode: { type: Object, default: null },
@@ -55,7 +59,7 @@ const props = defineProps({
 // apply through the store's non-destructive cloud-edit path. `select-tool` reports
 // the active selection tool (null | 'rect' | 'lasso') so the ribbon's View ▸ Select
 // toggles can show it — the same up-reporting raster measuring uses.
-const emit = defineEmits(['command', 'edit-selection', 'select-tool', 'pick', 'measure-tool'])
+const emit = defineEmits(['command', 'edit-selection', 'select-tool', 'pick', 'measure-tool', 'region-change'])
 
 const container = ref(null)
 // Set when WebGL is unavailable (headless/sandboxed/GPU-disabled). We degrade to an
@@ -548,14 +552,8 @@ function createCloudLayer(cloud) {
   const isMesh = cloud.kind === 'mesh'
   const count = isMesh ? cloud.nVerts : (cloud.count ?? cloud.points?.length ?? 0)
   if (!count || (!cloud.pos && !cloud.points)) return null
-  let positions = cloud.pos
-  if (!positions) {
-    positions = new Float64Array(count * 3)
-    for (let i = 0; i < count; i++) {
-      const p = cloud.points[i]
-      positions[i * 3] = p.x; positions[i * 3 + 1] = p.y; positions[i * 3 + 2] = p.z
-    }
-  }
+  // A sparse cloud's positions are its SparsePoints pos column (read, never written).
+  const positions = cloud.pos ?? cloud.points.pos
   const geometry = new THREE.BufferGeometry()
   const { origin, relative } = relativePositions(positions)
   geometry.setAttribute('position', new THREE.BufferAttribute(relative, 3))
@@ -1022,6 +1020,15 @@ const assignClass = ref(2)
 function onSelectKey(e) {
   if (!container.value?.offsetParent) return // tab hidden (v-show)
   if (!viewerMayHandleKey(e)) return
+  if (e.key === 'Escape' && regionDrag) {
+    // Abort the drag: the box goes back; the pointerup that follows finds nothing.
+    e.preventDefault()
+    const { start, pointerId } = regionDrag
+    regionDrag = null
+    container.value.releasePointerCapture?.(pointerId)
+    emit('region-change', start)
+    return
+  }
   if (measureTool.value) {
     if (e.key === 'Escape') { e.preventDefault(); if (measurePts.value.length) clearMeasure(); else exitMeasure(); return }
     if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); undoMeasure(); return }
@@ -1212,9 +1219,10 @@ watch(() => props.sceneUp, (u) => {
 // ── Region box ────────────────────────────────────────────────────────────────
 // A wireframe of the reconstruction region (Tools ▸ Model ▾ ▸ Region), in the
 // scene's own (model) coordinates. Drawn on top so it reads through the cloud.
-let regionHelper = null
+let regionHelper = null, regionHandleObj = null
 function updateRegionBox(b) {
   if (regionHelper) { scene?.remove(regionHelper); disposeObject(regionHelper); regionHelper = null }
+  if (regionHandleObj) { scene?.remove(regionHandleObj); disposeObject(regionHandleObj); regionHandleObj = null }
   requestRender()
   if (!scene || !b?.min || !b?.max) return
   const box = new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max))
@@ -1225,8 +1233,95 @@ function updateRegionBox(b) {
   regionHelper.material.opacity = props.regionStale ? 0.5 : 0.95
   regionHelper.renderOrder = 11
   scene.add(regionHelper)
+  if (props.regionEdit) drawRegionHandles(b)
 }
-watch([() => props.regionBox, () => props.regionStale], ([b]) => updateRegionBox(b), { deep: true })
+watch([() => props.regionBox, () => props.regionStale, () => props.regionEdit], ([b]) => updateRegionBox(b), { deep: true })
+
+// Drag handles while the Region toolbox is open (core/products/regionGizmo.js): a
+// square on each face centre moves that face along its axis (red x, green y, blue z),
+// the orange one at the centre moves the box in the plane facing the camera. A drag
+// only edits the draft, like the number fields: Esc during a drag puts the box back,
+// and closing the toolbox without Apply discards the draft.
+const REGION_HANDLE_PX = 9
+const REGION_AXIS_COLOURS = [0xff5555, 0x55dd55, 0x5599ff]
+const regionHover = ref(null)    // id of the handle under the pointer, or being dragged
+let regionDrag = null            // { drag, start, pointerId }
+function drawRegionHandles(b) {
+  const hs = regionHandles(b)
+  const pos = new Float32Array(hs.length * 3), col = new Float32Array(hs.length * 3)
+  const c = new THREE.Color(), white = new THREE.Color(0xffffff)
+  hs.forEach((h, i) => {
+    pos.set(h.pos, i * 3)
+    c.setHex(h.axis === null ? 0xffb020 : REGION_AXIS_COLOURS[h.axis])
+    if (h.id === regionHover.value) c.lerp(white, 0.6)
+    col.set([c.r, c.g, c.b], i * 3)
+  })
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(col, 3))
+  regionHandleObj = new THREE.Points(geometry, new THREE.PointsMaterial({
+    size: 2 * REGION_HANDLE_PX - 6, sizeAttenuation: false, vertexColors: true, depthTest: false, transparent: true,
+  }))
+  regionHandleObj.renderOrder = 12
+  regionHandleObj.frustumCulled = false
+  scene.add(regionHandleObj)
+}
+watch(regionHover, () => updateRegionBox(props.regionBox))
+
+function regionRay(e) {
+  const [px, py] = pointerPx(e)
+  const w = container.value.clientWidth, h = container.value.clientHeight
+  camera.updateMatrixWorld()
+  raycaster.setFromCamera(new THREE.Vector2((px / w) * 2 - 1, 1 - (py / h) * 2), camera)
+  const { origin: o, direction: d } = raycaster.ray
+  return { origin: [o.x, o.y, o.z], dir: [d.x, d.y, d.z] }
+}
+function regionHandleAt(e) {
+  const b = props.regionBox
+  if (!props.regionEdit || !b?.min || !b?.max || !camera || !container.value) return null
+  const [px, py] = pointerPx(e)
+  const w = container.value.clientWidth, h = container.value.clientHeight
+  camera.updateMatrixWorld()
+  const v = new THREE.Vector3()
+  const project = (p) => {
+    v.set(p[0], p[1], p[2]).project(camera)
+    return v.z > 1 || v.z < -1 ? null : [(v.x + 1) / 2 * w, (1 - v.y) / 2 * h]
+  }
+  return pickHandle(regionHandles(b), project, px, py, REGION_HANDLE_PX)
+}
+// Capture phase, before OrbitControls: a press on a handle drags it, anywhere else orbits.
+function onRegionPointerDown(e) {
+  if (!props.regionEdit || e.button !== 0 || !renderer || e.target !== renderer.domElement || regionDrag) return
+  if (selectTool.value || measureTool.value || props.pickMode) return
+  const handle = regionHandleAt(e)
+  if (!handle) return
+  e.stopPropagation()
+  e.preventDefault()
+  const start = { min: [...props.regionBox.min], max: [...props.regionBox.max] }
+  const forward = new THREE.Vector3()
+  camera.getWorldDirection(forward)
+  const drag = createRegionDrag(start, handle, [forward.x, forward.y, forward.z])
+  drag.begin(regionRay(e))
+  regionDrag = { drag, start, pointerId: e.pointerId }
+  regionHover.value = handle.id
+  container.value.setPointerCapture?.(e.pointerId)
+}
+function onRegionPointerMove(e) {
+  if (regionDrag) {
+    const box = regionDrag.drag.move(regionRay(e))
+    if (box) emit('region-change', box)
+    return
+  }
+  // Hover only with no button held (not during an orbit or pan).
+  if (props.regionEdit && !e.buttons) regionHover.value = regionHandleAt(e)?.id ?? null
+}
+function onRegionPointerUp(e) {
+  if (!regionDrag) return
+  regionDrag = null
+  container.value?.releasePointerCapture?.(e.pointerId)
+  regionHover.value = regionHandleAt(e)?.id ?? null
+}
+watch(() => props.regionEdit, (on) => { if (!on) { regionDrag = null; regionHover.value = null } })
 
 // ── Point picking (tool-driven) ───────────────────────────────────────────────
 // While `pickMode` is set, a click WITHOUT a drag (a drag still orbits) picks the
@@ -1515,10 +1610,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="viewer" :class="{ selecting: !!selectTool || !!pickMode || !!measureTool }" @contextmenu.prevent
+  <div ref="container" class="viewer" :class="{ selecting: !!selectTool || !!pickMode || !!measureTool, 'region-handle': !!regionHover }" @contextmenu.prevent
     @dblclick="measureTool && finishMeasure()"
-    @pointerdown.capture="(e) => { onPickPointerDown(e); onSelectPointerDown(e) }" @pointermove="onSelectPointerMove"
-    @pointerup="(e) => { onSelectPointerUp(e); onPickPointerUp(e) }" @pointercancel="onSelectPointerUp">
+    @pointerdown.capture="(e) => { onRegionPointerDown(e); onPickPointerDown(e); onSelectPointerDown(e) }"
+    @pointermove="(e) => { onRegionPointerMove(e); onSelectPointerMove(e) }"
+    @pointerup="(e) => { onRegionPointerUp(e); onSelectPointerUp(e); onPickPointerUp(e) }"
+    @pointercancel="(e) => { onRegionPointerUp(e); onSelectPointerUp(e) }">
     <!-- WebGL unavailable: degrade gracefully instead of crashing app mount. -->
     <div v-if="glError" class="gl-error">
       <div class="gl-error-box">{{ glError }}</div>
@@ -1656,6 +1753,9 @@ onBeforeUnmount(() => {
 
 .viewer.selecting :deep(canvas) {
   cursor: crosshair;
+}
+.viewer.region-handle :deep(canvas) {
+  cursor: move;
 }
 
 .select-shape {

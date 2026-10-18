@@ -16,7 +16,9 @@ it('decodes legacy LAS flags independently of classification, with signed scan a
   expect(a.classification[0]).toBe(6)
   expect(a.intensity[0]).toBe(45678)
   expect([a.returnNumber[0], a.numberOfReturns[0], a.scanAngle[0], a.userData[0], a.pointSourceId[0]]).toEqual([2, 3, -17, 43, 1024])
-  expect([a.synthetic[0], a.keyPoint[0], a.withheld[0], a.scanDirection[0], a.edgeOfFlightLine[0]]).toEqual([1, 0, 1, 1, 1])
+  expect([a.synthetic[0], a.withheld[0], a.scanDirection[0], a.edgeOfFlightLine[0]]).toEqual([1, 1, 1, 1])
+  // A field that is zero for every point is left out (the writers emit 0 for it).
+  expect(a.keyPoint).toBeUndefined()
   expect(a.gpsTime[0]).toBe(123456789.123)
   expect(a.overlap).toBeUndefined()
 })

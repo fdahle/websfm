@@ -69,7 +69,10 @@ scan-pixel positions matched to images by file name, either one row per mark
 slot its columns name; other columns, such as a measured principal point, are ignored.
 Before anything changes, a preview lists each file name with the project image it
 matches, how many marks it brings and how many existing marks it replaces. Names not in
-the project are skipped.
+the project are skipped. The preview also shows the slot each mark goes to: a mark
+named by its slot keeps it, and any other id (`1`, `F2`) is placed by its position on
+the scan. When two marks of one image land in the same slot, it says so; the last one
+in the file is kept.
 
 ## Review uncertain marks
 Marks that were weak, ambiguous, or rejected by a check are listed under **Needs

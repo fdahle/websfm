@@ -80,7 +80,8 @@ test('Optimize cameras recovers a wrong focal length in place', async ({ page })
       }))
       return { x: w[0], y: w[1], z: w[2], color: [200, 200, 200], views: new Map([...cameras.keys()].map((id) => [id, k])), viewsPx }
     })
-    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points })
+    const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
+    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points: SparsePoints.fromRecords(points) })
     s.mainSparseId = 'sparse-1'
   })
   await openTool(page, 'Model', /Optimize cameras/)

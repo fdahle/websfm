@@ -18,7 +18,7 @@ import { toScaledPx } from '../../sfm/geometry.js'
 import { fitGains, gainSampleClipped, growable, srgbToLinear } from '../colourGains.js'
 import { sampleRgbaBilinear } from '../undistort.js'
 import { faceAdjacency } from './meshGraph.js'
-import { weldVertices } from '../meshEdit.js'
+import { weldVertices, coincidentVertices } from '../meshEdit.js'
 import { meshGeometry, faceCandidates, localCamera, NO_VIEW } from './visibility.js'
 import { selectViews, mergeSmallCharts } from './labeling.js'
 import { buildCharts, cornerPixels, chartPieces } from './charts.js'
@@ -150,7 +150,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
   if (o.levelColours && o.seamLevelling) {
     const t0 = Date.now()
     seamLevel = levelSeams(labels, idx, geom.nVerts, cut, px, layout, baked.pages,
-      { smoothWeight: o.seamSmoothWeight, delta: o.seamDelta, chromaWeight: o.seamChromaWeight, maxOffset: o.seamMaxOffset, padding: o.padding })
+      { smoothWeight: o.seamSmoothWeight, delta: o.seamDelta, chromaWeight: o.seamChromaWeight, maxOffset: o.seamMaxOffset, padding: o.padding, adj })
     log(`Texture: seam levelling over ${seamLevel.seamVertices.toLocaleString()} seam vertices `
       + `(${seamLevel.unknowns.toLocaleString()} offsets, ${seamLevel.iterations} CG iterations, `
       + `largest offset ${seamLevel.maxOffset.toFixed(0)} levels) in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
@@ -181,9 +181,14 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
 
 // An unwelded mesh (an STL, some exporters: every face its own three corners) has no
 // adjacency, so every face would become a chart. Weld it first when most edges are open.
+//
+// First, vertices at exactly one position are joined: an already textured mesh has one
+// copy of a vertex per atlas piece, and left split, the old pieces' outlines would stay
+// cuts that no new chart can cross (re-texturing gave 8× the charts of the original).
 function weldIfOpen(mesh, share, log) {
   const F = mesh.idx.length / 3
   if (!F) return mesh
+  mesh = joinCoincident(mesh, log)
   const { adj } = faceAdjacency(mesh.idx, mesh.pos.length / 3)
   let open = 0
   for (let i = 0; i < adj.length; i++) if (adj[i] < 0) open++
@@ -192,6 +197,26 @@ function weldIfOpen(mesh, share, log) {
   log(`Texture: ${(100 * open / adj.length).toFixed(0)} % of edges were open, so the mesh was welded first `
     + `(${r.merged.toLocaleString()} corners joined)`)
   return r.mesh
+}
+
+// Vertices at exactly the same position → one (meshEdit.js coincidentVertices).
+function joinCoincident(mesh, log) {
+  const { pos, idx, col = null } = mesh
+  const nV = pos.length / 3
+  const { id, first, m } = coincidentVertices(pos, nV)
+  if (m === nV) return mesh
+  const P = new (pos instanceof Float64Array ? Float64Array : Float32Array)(3 * m)
+  const C = col ? new Uint8Array(3 * m) : null
+  for (let r = 0; r < m; r++) {
+    for (let c = 0; c < 3; c++) {
+      P[3 * r + c] = pos[3 * first[r] + c]
+      if (C) C[3 * r + c] = col[3 * first[r] + c]
+    }
+  }
+  const I = new Uint32Array(idx.length)
+  for (let i = 0; i < idx.length; i++) I[i] = id[idx[i]]
+  log(`Texture: ${(nV - m).toLocaleString()} vertex copies at the same position joined first (an earlier texture's seams, or an unwelded import)`)
+  return { pos: P, idx: I, col: C }
 }
 
 // Unseen faces → palette cells of one flat colour each (the face's mean vertex colour,

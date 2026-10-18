@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { rasterizeDem, suggestGsd, cellCenter, stageDemPoints, coreExtent, fillEnclosedGaps } from './dem.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
 describe('suggestGsd', () => {
   it('scales as √(area/n)', () => {
@@ -136,8 +137,9 @@ describe('stageDemPoints', () => {
     expect(s).toMatchObject({ count: 2, total: 3 })
   })
 
-  it('stages sparse point objects', () => {
-    const s = stageDemPoints({ points: [{ x: 1, y: 2, z: 3 }] })
+  it('stages a sparse cloud through its pos column', () => {
+    const points = SparsePoints.fromRecords([{ x: 1, y: 2, z: 3 }])
+    const s = stageDemPoints({ count: points.length, pos: points.pos })
     expect([...s.pos]).toEqual([1, 2, 3])
   })
 
