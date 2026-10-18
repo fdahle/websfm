@@ -34,8 +34,10 @@ sample point with its exact nearest neighbour in the reference. Pairs farther ap
 than the **search radius** are ignored (auto: ten point spacings, so it must exceed
 the current misalignment), and of the rest only the closest 90 % are used, so an
 area that changed between the clouds, or appears in only one of them, does not drag
-the fit. A mesh reference uses its vertices with area-weighted vertex normals; a
-reference cloud without normals falls back to point-to-point, and the log says so.
+the fit. Against a mesh reference each sample point is paired with the exact closest
+point on the mesh surface and that triangle's normal, so the result does not depend on
+how far apart the vertices are; a reference cloud without normals falls back to
+point-to-point, and the log says so.
 **Also fit scale** adds a scale factor, for clouds from different instruments or
 reconstructions. The solve stops when the sample no longer moves, or after 100
 iterations; the log reports the RMS distance, the rotation and the shift, and the

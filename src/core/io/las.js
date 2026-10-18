@@ -265,9 +265,9 @@ function extraName(name, used) {
  * `{ format, recordLength, native: { field: values }, extra: [{ name, source, values,
  *   dataType, size, offset }], dropped: [names] }` — `offset` is from the end of the
  * standard record. Format 3 is chosen exactly when a GPS time fits natively.
- * opts.extraBytes:false (the LAZ codec cannot carry them) lists the rest as dropped.
+ * Attributes no extra-bytes type can hold (or past the VLR's 341 fields) are dropped.
  */
-export function planLasAttributes(attributes, n, { extraBytes = true, onLog } = {}) {
+export function planLasAttributes(attributes, n, { onLog } = {}) {
   const native = {}, extra = [], dropped = []
   const used = new Set()
   let offset = 0
@@ -279,7 +279,7 @@ export function planLasAttributes(attributes, n, { extraBytes = true, onLog } = 
     }
     const dataType = EXTRA_TYPE_OF[values.constructor?.name]
     // A VLR payload is at most 65535 bytes: 341 descriptors.
-    if (!extraBytes || !dataType || extra.length >= MAX_EXTRA_FIELDS) { dropped.push(name); continue }
+    if (!dataType || extra.length >= MAX_EXTRA_FIELDS) { dropped.push(name); continue }
     const size = EXTRA_TYPES[dataType][0]
     extra.push({ name: extraName(name, used), source: name, values, dataType, size, offset })
     offset += size

@@ -277,7 +277,7 @@ describe('icpAlign', () => {
     expect(res.rms).toBeLessThan(3 * SIGMA)
   })
 
-  it('works against a mesh reference (vertex normals from faces)', () => {
+  it('works against a mesh reference (closest surface points, face normals)', () => {
     const G = 101
     const pos = new Float64Array(G * G * 3)
     for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
@@ -296,6 +296,63 @@ describe('icpAlign', () => {
     // curvature, not by sampling.
     expect(rotErrDeg(res.transform.R, truth.R)).toBeLessThan(0.005)
     expect(shiftErr(res.transform)).toBeLessThan(0.01)
+  })
+
+  // A coarse mesh (10 m facets) and a cloud sampled on its SURFACE, moved by a known
+  // rigid transform: matched to the facets the error is the noise; matched to the
+  // vertices it stalled at 0.3–0.6 m and 0.05–0.26° (rms 3.4 m, the vertex spacing).
+  describe('against a coarse mesh', () => {
+    const G = 11, STEP = 10
+    const mpos = new Float64Array(G * G * 3)
+    for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
+      const k = (j * G + i) * 3
+      mpos[k] = OX + i * STEP; mpos[k + 1] = OY + j * STEP; mpos[k + 2] = OZ + 1.6 * height(i * STEP, j * STEP)
+    }
+    const midx = []
+    for (let j = 0; j < G - 1; j++) for (let i = 0; i < G - 1; i++) {
+      const a = j * G + i
+      midx.push(a, a + 1, a + G + 1, a, a + G + 1, a + G)
+    }
+    const coarse = { nVerts: G * G, count: midx.length / 3, pos: mpos, idx: Uint32Array.from(midx) }
+    // Uniform on the surface: a facet by area, then a uniform barycentric point.
+    const n = 40000, r = rng(31), spos = new Float64Array(n * 3)
+    const T = midx.length / 3, area = new Float64Array(T)
+    let total = 0
+    const P = (v, k) => mpos[midx[v] * 3 + k]
+    for (let f = 0; f < T; f++) {
+      const u = [0, 1, 2].map((k) => P(3 * f + 1, k) - P(3 * f, k)), v = [0, 1, 2].map((k) => P(3 * f + 2, k) - P(3 * f, k))
+      total += 0.5 * Math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+      area[f] = total
+    }
+    for (let i = 0; i < n; i++) {
+      const pickA = r() * total
+      let lo = 0, hi = T - 1
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (area[mid] < pickA) lo = mid + 1; else hi = mid }
+      let a = r(), b = r()
+      if (a + b > 1) { a = 1 - a; b = 1 - b }
+      for (let k = 0; k < 3; k++) spos[i * 3 + k] = P(3 * lo, k) + a * (P(3 * lo + 1, k) - P(3 * lo, k)) + b * (P(3 * lo + 2, k) - P(3 * lo, k))
+    }
+    const SIG = 0.005
+    const truthC = moveAbout(axisAngle([0.3, 0.1, 1], 2), centre, [0.6, -0.4, 0.25])
+    const src = transformCloud(withNoise({ count: n, pos: spos }, SIG, 32), inverseOf(truthC))
+    const errs = (tf) => {
+      // Worst displacement over the mesh's extent, not just at the centre.
+      let worst = 0
+      for (const p of [[OX, OY, OZ], [OX + 100, OY, OZ], [OX, OY + 100, OZ], [OX + 100, OY + 100, OZ + 10], centre]) {
+        const a = applyTransform(tf, p), b = applyTransform(truthC, p)
+        worst = Math.max(worst, Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]))
+      }
+      return { rot: rotErrDeg(tf.R, truthC.R), shift: worst }
+    }
+
+    it.each([true, false])('recovers the transform far below the vertex spacing (point-to-plane %s)', (pointToPlane) => {
+      const res = icpAlign(src, coarse, { maxDistance: 5, pointToPlane, maxIterations: 100, sampleCount: 10000 })
+      const e = errs(res.transform)
+      expect(res.method).toBe(pointToPlane ? 'point-to-plane' : 'point-to-point')
+      expect(e.rot).toBeLessThan(0.005)
+      expect(e.shift).toBeLessThan(0.01) // 1/1000 of the 10 m vertex spacing
+      expect(res.rms).toBeLessThan(3 * SIG)
+    })
   })
 
   it('rejects beyond maxDistance on a partial overlap', () => {

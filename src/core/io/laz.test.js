@@ -122,32 +122,32 @@ describe('cloudToLaz — point attributes', () => {
     },
   }
 
-  it('writes standard fields (format 3 for GPS time) and drops extra bytes with a warning', () => {
+  it('writes standard fields (format 3 for GPS time) and the rest as extra bytes', () => {
     const codec = fakeCodec({ format: 3 })
     const logs = []
     const bytes = cloudToLaz(withAttrs, { compress: codec.compress, onLog: (m, l) => logs.push([m, l]) })
     const h = readLasHeader(bytes)
     expect(h.formatRaw).toBe(3 | 0x80)
-    // The codec's LASzip items (Point10 + GpsTime + RGB12) are exactly 34 bytes; it
-    // rejects any longer record, so no extra bytes and no extra-bytes VLR.
-    expect(h.recordLength).toBe(34)
-    expect(h.vlrs.some((v) => v.userId === 'LASF_Spec')).toBe(false)
-    expect(logs.some(([m, l]) => l === 'warn' && /distance not written/.test(m))).toBe(true)
+    // Point10 + GpsTime + RGB12 (34 bytes) + the f32 distance, with its descriptor.
+    expect(h.recordLength).toBe(38)
+    expect(h.vlrs.some((v) => v.userId === 'LASF_Spec' && v.recordId === 4)).toBe(true)
+    expect(h.extraBytes.map((e) => e.name)).toEqual(['distance'])
+    expect(logs.some(([, l]) => l === 'warn')).toBe(false)
     const back = parseLaz(bytes, { decompress: codec.decompress })
-    for (const k of ['intensity', 'classification', 'gpsTime']) {
+    for (const k of ['intensity', 'classification', 'gpsTime', 'distance']) {
       expect([...back.attributes[k]]).toEqual([...withAttrs.attributes[k]])
     }
-    expect(back.attributes.distance).toBeUndefined()
   })
 
-  it('writes the same standard-field records as the LAS writer, chunk by chunk', () => {
+  it('writes the same records as the LAS writer, extra bytes included, chunk by chunk', () => {
     const n = 120_000
     const big = { count: n, pos: new Float64Array(n * 3), col: new Uint8Array(n * 3),
-      attributes: { intensity: new Uint16Array(n), classification: new Uint8Array(n) } }
+      attributes: { intensity: new Uint16Array(n), classification: new Uint8Array(n), distance: new Float32Array(n) } }
     for (let i = 0; i < n; i++) {
       big.pos[i * 3] = i * 0.01
       big.attributes.intensity[i] = i & 0xffff
       big.attributes.classification[i] = i % 32
+      big.attributes.distance[i] = Math.sin(i) * 3
     }
     const codec = fakeCodec()
     const laz = cloudToLaz(big, { compress: codec.compress })

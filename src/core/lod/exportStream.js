@@ -22,11 +22,11 @@ const EXTRA_SIZE = { 1: 1, 2: 1, 3: 2, 4: 2, 5: 4, 6: 4, 9: 4, 10: 8 }
 const fromBase64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 
 /**
- * The LAS record plan from the octree's attribute layout and value ranges.
- * `extraBytes: false` (LAZ: the codec carries standard fields only) lists what would
- * need extra bytes as `dropped`.
+ * The LAS record plan from the octree's attribute layout and value ranges, for LAS
+ * and LAZ alike (the codec carries extra bytes as a LASzip BYTE item). An attribute
+ * with no extra-bytes type is listed as `dropped`.
  */
-export function lasPlanFor(lod, { extraBytes = true } = {}) {
+export function lasPlanFor(lod) {
   const native = [], extra = [], dropped = []
   let offset = 0
   for (const a of lod.layout.attributes) {
@@ -36,7 +36,7 @@ export function lasPlanFor(lod, { extraBytes = true } = {}) {
       continue
     }
     const dataType = EXTRA_TYPE[a.type]
-    if (!dataType || !extraBytes) { dropped.push(a.name); continue }
+    if (!dataType) { dropped.push(a.name); continue }
     extra.push({ name: a.name, source: a.name, dataType, size: EXTRA_SIZE[dataType], offset })
     offset += EXTRA_SIZE[dataType]
   }
@@ -55,7 +55,7 @@ async function* nodes(reader) {
  * filled in once `parts` is exhausted (call `header()` then).
  */
 export function lodToLas(reader, lod, { onProgress, compressor = null } = {}) {
-  const plan = lasPlanFor(lod, { extraBytes: !compressor })
+  const plan = lasPlanFor(lod)
   const { scale, offset } = lod.layout
   const byReturn = [0, 0, 0, 0, 0]
   let written = 0

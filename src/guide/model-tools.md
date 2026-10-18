@@ -39,10 +39,14 @@ of field) may still be flagged; check it before removing it.
 - **Mesh** and **DEM** only use the points inside the box.
 
 The toolbox opens with the saved box, or a box fitted around the sparse points. Use
-**Fit to sparse** or **Fit to dense** (both ignore the farthest 2 % of points), or type
-the bounds, then **Apply**. The box is drawn in orange in the 3D view. Nothing already
-computed is cut: the region shapes the *next* run. **Remove region** goes back to
-unbounded runs.
+**Fit to sparse** or **Fit to dense** (both ignore the farthest 2 % of points), type
+the bounds, or drag the box in the 3D view, then **Apply**. The box is drawn in orange.
+While the toolbox is open it has handles: drag a coloured square on a face (red for X,
+green for Y, blue for Z) to move that face, or the orange square in the middle to move
+the whole box across the screen. The numbers follow as you drag. Press Esc during a drag
+to put the box back; closing the toolbox without **Apply** keeps the saved box. Nothing
+already computed is cut: the region shapes the *next* run. **Remove region** goes back
+to unbounded runs.
 
 A region belongs to the sparse model it was drawn on. After a new reconstruction it is
 drawn grey and ignored, and the dense log says so, until you fit and apply it again.

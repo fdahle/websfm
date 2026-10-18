@@ -76,9 +76,9 @@ export class LazEncoder {
  * Compress raw LAS point records.
  *
  * `points` is `num_points × point_size` interleaved bytes, exactly the on-disk
- * layout. `point_size` must match the format's record length (the caller may add
- * "extra bytes", which LASzip carries verbatim — but we reject a size *smaller*
- * than the format requires, which would mean the caller mis-sized its records).
+ * layout. `point_size` is the format's record length plus any "extra bytes", which
+ * go into a LASzip BYTE item; a size *smaller* than the format requires is
+ * rejected (the caller mis-sized its records).
  */
 export function compress_points(points: Uint8Array, point_format: number, point_size: number): CompressedPoints;
 

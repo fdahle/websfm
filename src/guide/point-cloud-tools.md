@@ -46,9 +46,11 @@ imported one. The dialogs show what that means for the current project.
   (point pairs, Transform or georeferencing). With a reference that has normals (a
   mesh, or a cloud after *Estimate normals*) it uses point-to-plane matching, which
   needs far fewer iterations than point-to-point: a few tens on a dense photogrammetry
-  cloud, against a hundred or more. It stops when the cloud no longer moves, or after
-  100 iterations; the log reports the RMS, the rotation and the shift, and warns when
-  the limit was reached first.
+  cloud, against a hundred or more. Against a mesh each point is paired with the
+  closest point on its surface, not with a vertex, so a coarse mesh still aligns to the
+  cloud's noise level. It stops when the cloud no longer moves, or after 100
+  iterations; the log reports the RMS, the rotation and the shift, and warns when the
+  limit was reached first.
 
 ## Measure
 These are in **Tools → Measure ▾**, with the raster and mesh measurements.
@@ -98,8 +100,8 @@ file brought (intensity, classification, GPS time, PLY scalar fields).
   a fractional intensity) is written as an *extra bytes* field under its own name,
   which PDAL, CloudCompare and LAStools read. Programs that don't support extra bytes
   ignore those fields.
-- **LAZ** keeps the standard fields only. Extra-bytes attributes are left out and the
-  log says which ones, so export LAS or PLY to keep a distance.
+- **LAZ** holds the same records as LAS, compressed, so the standard fields and the
+  extra bytes fields both come through.
 - **XYZ** has coordinates and colour only.
 
 A **voxel downsample** in the export dialog keeps one real point per cell, with its

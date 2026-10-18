@@ -17,7 +17,7 @@
 import { flatAxes } from '../products/flatAxes.js'
 import {
   validateLasAllocation, encodeLasPoints, writeLasHeader, readLasHeader, decodeLasPoints, planLasAttributes,
-  pointsByReturn,
+  sliceLasPlan, extraBytesVlr, pointsByReturn,
 } from './las.js'
 import { geoKeysForEpsg } from '../products/geotiff.js'
 
@@ -39,12 +39,11 @@ export const LAZ_CHUNK_POINTS = 50_000
 // several compressor instances would produce several independent LAZ blocks, not
 // one file. The chunking this module does is only in how the records are *built*.
 //
-// Point attributes: the ones that fit a standard LAS field (intensity,
-// classification, GPS time → format 3, …) are written exactly as cloudToLasParts writes
-// them. Extra-bytes attributes (a computed `distance`, PLY scalars) are NOT: the
-// codec (crates/lazcodec) builds its LASzip item list from the point format alone
-// — Point10 [+ GpsTime] + RGB12, no BYTE item — and rejects a record longer than
-// those items. They are dropped with a warning; LAS and PLY carry them.
+// Point attributes are planned exactly as cloudToLasParts plans them: standard LAS
+// fields (intensity, classification, GPS time → format 3, …) where the values fit,
+// the rest (a computed `distance`, PLY scalars) as extra bytes with their
+// LASF_Spec/4 VLR. The codec (crates/lazcodec) codes the bytes past the standard
+// record as a LASzip BYTE item, so the records are the LAS writer's, byte for byte.
 //
 // Returns a Uint8Array, or with `parts: true` [header, points] for a Blob (no
 // concatenated copy). Throws if no compressor was supplied — silently writing an
@@ -61,12 +60,8 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, attribu
     : (i) => points[i].color
 
   const { scale, offset, bbox } = quantization(n, getX, getY, getZ)
-  const { format, recordLength, native, dropped } = planLasAttributes(
-    attributes && flat ? flat.attributes : null, n, { extraBytes: false, onLog })
-  if (dropped.length) {
-    onLog?.(`LAZ export: ${dropped.join(', ')} not written — LAZ here carries standard LAS fields only; `
-      + 'export LAS or PLY to keep them', 'warn', 'Export')
-  }
+  const plan = planLasAttributes(attributes && flat ? flat.attributes : null, n, { onLog })
+  const { format, recordLength } = plan
 
   // The browser codec keeps one encoder alive across bounded chunks. The
   // whole-buffer adapter remains for small callers with an injected legacy codec.
@@ -79,12 +74,9 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, attribu
     const pointBytes = encoder ? null : new Uint8Array(n * recordLength)
     for (let start = 0; start < n; start += LAZ_CHUNK_POINTS) {
       const len = Math.min(LAZ_CHUNK_POINTS, n - start)
-      // Attribute VIEWS onto this chunk, so encodeLasPoints indexes from 0 like getX.
-      const chunkNative = {}
-      for (const [name, values] of Object.entries(native)) chunkNative[name] = values.subarray(start, start + len)
       const chunk = encodeLasPoints({ n: len,
         getX: i => getX(start + i), getY: i => getY(start + i), getZ: i => getZ(start + i),
-        getC: i => getC(start + i), scale, offset, format, recordLength, native: chunkNative })
+        getC: i => getC(start + i), scale, offset, ...sliceLasPlan(plan, start, len) })
       if (encoder) encoder.push(chunk)
       else pointBytes.set(chunk, start * recordLength)
     }
@@ -93,6 +85,7 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, attribu
 
   const vlrs = []
   if (crsCode) vlrs.push({ userId: 'LASF_Projection', recordId: 34735, description: 'GeoKeyDirectory', data: geoKeyBytes(crsCode, geographic) })
+  if (plan.extra.length) vlrs.push(extraBytesVlr(plan.extra))
   // The LASzip VLR must be present for any reader to know how the points were
   // coded — the point format's high bit alone says only *that* they were.
   vlrs.push({
@@ -101,7 +94,7 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, attribu
   })
 
   const header = writeLasHeader({ n, vlrs, scale, offset, bbox, compressed: true, format, recordLength,
-    pointsByReturn: pointsByReturn(native, n) })
+    pointsByReturn: pointsByReturn(plan.native, n) })
   // The codec writes a standalone point block; LASzip files store absolute
   // chunk-table offsets, so account for the header and VLRs when embedding it.
   relocateChunkTable(packed.data, packed.vlr, header.length)

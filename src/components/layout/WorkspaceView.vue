@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
 
   <div class="content">
     <Viewer3D :ref="setViewer" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" :frame-signature="reconstructionStore.currentFrameSignature" @command="handleCommand" @edit-selection="onEditSelection" @select-tool="(t) => { selectTool3d = t }"
-      :region-box="viewerRegionBox" :region-stale="viewerRegionStale"
+      :region-box="viewerRegionBox" :region-stale="viewerRegionStale" :region-edit="regionEdit" @region-change="(b) => { regionDraft = b }"
       :pick-mode="viewerPickMode" :markers="viewerMarkers" @pick="onViewerPick">
       <template #toolbox>
         <RegionToolbox v-if="regionEdit" v-model="regionDraft" :saved-state="reconstructionStore.regionState.active ? 'active' : (reconstructionStore.region ? 'stale' : 'none')"
