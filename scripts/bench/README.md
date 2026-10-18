@@ -166,6 +166,20 @@ stage again with config key `dense:loose`.
 - `togglepair`: exclude one accepted pair, then include it again, as the match list
   does. Reports the project's `matches/` files after each save; a toggle should only
   replace the `flags.bin`.
+- An export spec may name the cloud: `{ kind, cloud, cloudName }` exports the cloud of
+  that kind with that exact name (a derived or edited copy) instead of the computed one.
+- `georef`: Georeferencing ▸ Georeference, from GCPs or the camera positions, into the
+  project CRS (top-level `crs`). Then `dem: { "crs": "project" }` builds in that CRS.
+- `meshtools`: TOOL-03 on the computed mesh: Clean → Decimate 25 % → Smooth 10 → Clean
+  with every hole closed → Area & volume. Each step is a named copy (`TOOL03 cleaned`,
+  `… decimated`, `… smoothed`, `… closed`) for `cloudName` exports.
+- `importraster:<tag>`: Import ▸ Reference raster of `cfg[tag].path`, then the
+  background display conversion. `rastersample:<tag>` samples the last reference DEM at
+  `points` given in the project CRS (reports the raster-CRS point, z, and whether its
+  plane was resident); `rasterstyle[:tag]` restyles the last raster with a new stretch.
+- `aligncheck`: moves the computed dense cloud by a known transform, puts it back by
+  3 point pairs (with pick offsets) and ICP onto the imported dense reference, then
+  Distance to reference; reports the residual left per point.
 - `pool:<n>`: set the compute worker pool to n workers (Settings ▸ worker count; 0 =
   the default). It applies at once only while the pool is idle (`ok`); it is also
   stored, so `pool:1,reopen,depth:one,dense:one` repeats a run on one worker.
