@@ -354,7 +354,7 @@ function onFootprintFromPoses(settings) {
 const {
   exportKind, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials, exportKeypoints, exportMatches, onExportRun,
   exportTargetCloud, openCloudExport, downloadRasterOriginal, downloadImageOriginal, downloadShapefile,
-  exportContours, exportTerrain, exportClipped,
+  exportContours, exportTerrain, exportClipped, exportMeasurementScope, openMeasurementExport, measurementExportCrs,
 } = useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
   georef, currentProjectName, currentCrs, summary: reconSummary, progress: exportProgress,
@@ -441,7 +441,7 @@ const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useComma
   tools: { openRegionTool, openOrientTool, openAlignPairs, openFiducialDetect, openFiducialCalibrate, refreshGcpReport, openQuality },
   exports: {
     exportKind, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials,
-    exportKeypoints, exportMatches, downloadRasterOriginal,
+    exportKeypoints, exportMatches, downloadRasterOriginal, openMeasurementExport,
   },
   removals: { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages },
   imports: {
@@ -464,14 +464,14 @@ provideAppContext({
   closeTab, closeTabsToLeft, closeTabsToRight, closeWorkflowBuilder, commitSfmImport,
   confirmRemoveGcp, confirmRemoveGcpObservation, confirmRemoveImages, confirmRemoveSensor,
   deleteMessage, detectedImageCount, detectedMaxKeypoints, editMask, editableClouds, exitGcpEdit,
-  exportClipped, exportContours, exportKind, exportTargetCloud, exportTerrain,
+  exportClipped, exportContours, exportKind, exportMeasurementScope, exportTargetCloud, exportTerrain,
   fiducialCalibrateImages, fiducialCalibrateSensor, fiducialDetectImages, fiducialDetectSensor,
   fiducialDisplayForImage, fillGcpZFromReferenceDem, fitRegionDraft, folderPrompt,
   folderPromptProject, footprintImageCount, gcpReport, georeferenceAfterReconstruct,
   handleCancelNewProject, handleCommand, handleCreateProject, handleDeleteProject, handleSetCrs,
   handleSwitchProject, hasSparse, imageViewerRefs, jumpToImage, mapFrame, mapGcpEdit, mapLayers,
   mapMeasureTarget, mapNotes, mapViewerRef, markDisplayedFiducial, matchNodePositions,
-  matchSummaries, meshClouds, modelCameras, modelMarkers, moveCurrentProjectToBrowser,
+  matchSummaries, measurementExportCrs, meshClouds, modelCameras, modelMarkers, moveCurrentProjectToBrowser,
   moveCurrentProjectToFolder, moveTab, onCameraImport, onCloudImport, onCropCloudRun, onDemRun,
   onDenseRun, onDepthMapsRun, onDetectRun, onEditSelection, onExportRun, onFilterCloudRun,
   onFiducialImport, onFolderConnect, onFolderRepick, onFootprintFromPoses, onFootprintImport, onGcpImport,

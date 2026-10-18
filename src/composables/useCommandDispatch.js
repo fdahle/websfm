@@ -40,7 +40,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   } = tools
   const {
     exportKind, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials,
-    exportKeypoints, exportMatches, downloadRasterOriginal,
+    exportKeypoints, exportMatches, downloadRasterOriginal, openMeasurementExport,
   } = exports
   const { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages } = removals
   const {
@@ -151,7 +151,8 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     viewerRef.value?.toggleSelectTool(kind)
   }
 
-  // `value` is set only by a ribbon stepper (the new display value).
+  // `value` is set by a ribbon stepper (the new display value), and by the callers of
+  // the few commands that take an argument (export-measurements' list scope).
   function handleCommand(id, value) {
     // A deep link's starting method must not leak into a plain "Filter…" (Escape
     // closes the dialog without passing through its @close handler).
@@ -210,6 +211,8 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'export-ortho':         exportKind.value = 'ortho'; break
       case 'export-keypoints':     exportKeypoints(); break
       case 'export-matches':       exportMatches(); break
+      // `value` from a saved-measurements list: { ids, label } exports just its records.
+      case 'export-measurements':  openMeasurementExport(value); break
       case 'view-viewer':          activateTab('viewer'); break
       case 'view-map':             activateTab('map'); break
       case 'reset-view':           viewerRef.value?.resetView(); break

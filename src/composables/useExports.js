@@ -3,6 +3,7 @@ import { createRasterExports } from './exports/rasters.js'
 import { createSfmProjectExports } from './exports/sfmProject.js'
 import { createCloudExports } from './exports/clouds.js'
 import { createTabularExports } from './exports/tabular.js'
+import { createMeasurementExports } from './exports/measurements.js'
 import { crsTagInfo } from '../core/products/geotiff.js'
 import { useLog } from './useLog.js'
 import { downloadBlob } from '../utils/download.js'
@@ -14,6 +15,7 @@ import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { polygonSetToGeoJson } from '../core/io/geojson.js'
+import { similarityForExport } from '../core/products/exportFrame.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
 // (which export dialog is open); the Ribbon command dispatch sets it and the
@@ -53,41 +55,10 @@ export function useExports({
   // code (else the geotransform is still written, without a CRS).
   const crsInfo = crsTagInfo
 
-  // The similarity a cloud/mesh export should apply, from THE resolver:
-  //   georeference  → the full CRS similarity (scale + rotation + translation)
-  //   scale bars    → a pure scale, no rotation, no origin shift
-  //   neither       → null (raw SfM coordinates, up to scale)
-  //
-  // The scale case is deliberately scale-ONLY rather than the whole scaled local
-  // frame. The orientation half of that frame is a *product* convention — DEM and
-  // ortho need a vertical axis, so buildLocalFrame guesses one (camera viewing
-  // dirs, else cloud PCA). For an object scan that guess is a PCA axis, and
-  // silently re-orienting an exported cloud by it would change more than the unit
-  // the user asked for. Metres in the model's own frame is the honest answer, and
-  // it is the answer with NO CRS attached (see D9 / WS0.4).
+  // The similarity a cloud/mesh/measurement export applies, from THE resolver
+  // (core/products/exportFrame.js holds the rule).
   async function exportSimilarity() {
-    const resolved = await effectiveFrameSpec?.()
-    if (resolved?.source === 'georef') {
-      return { sim: { scale: resolved.frameSpec.scale, R: resolved.frameSpec.R, t: resolved.frameSpec.t, local: resolved.frameSpec.local ?? null }, unit: resolved.unit, crs: resolved.crs, source: 'georef' }
-    }
-    // A user orientation (Tools ▸ Model ▾ ▸ Orient model) rides on the local frame
-    // spec as an explicit basis: export = s·R·(p − origin), rows of R = east/north/up.
-    const f = resolved?.frameSpec
-    const oriented = f?.east && f?.north && f?.up && f?.origin
-    const s = resolved?.source === 'scalebars' ? resolved.scale : 1
-    if (oriented) {
-      const R = [f.east, f.north, f.up]
-      const t = R.map((row) => -s * (row[0] * f.origin[0] + row[1] * f.origin[1] + row[2] * f.origin[2]))
-      return { sim: { scale: s, R, t }, unit: resolved.source === 'scalebars' ? 'm' : 'model', crs: null,
-        source: resolved.source === 'scalebars' ? 'scalebars' : 'orientation' }
-    }
-    if (resolved?.source === 'scalebars') {
-      return {
-        sim: { scale: resolved.scale, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] },
-        unit: 'm', crs: null, source: 'scalebars',
-      }
-    }
-    return { sim: null, unit: 'model', crs: null, source: null }
+    return similarityForExport(await effectiveFrameSpec?.())
   }
   // Poses, sensors, fiducials, keypoints, matches (exports/tabular.js).
   const {
@@ -99,7 +70,7 @@ export function useExports({
   })
 
   // Which export dialog is open ('cloud' | 'model' | 'colmap' | 'undistorted' | 'dem' |
-  // 'ortho'), or null.
+  // 'ortho' | 'measurements' …), or null.
   const exportKind = ref(null)
   // The cloud a sidebar "Download…" opened the dialog for (its id), or null for the
   // ribbon's "the selected cloud, else the first". Cleared whenever the dialog closes,
@@ -107,6 +78,14 @@ export function useExports({
   const exportTarget = ref(null)
   watch(exportKind, (kind) => { if (!kind) exportTarget.value = null })
   const exportTargetCloud = computed(() => clouds.value.find((c) => c.id === exportTarget.value) ?? null)
+  // Export ▸ Measurements from a saved-measurements list: that list's records
+  // ({ ids, label }), or null for every saved measurement. Cleared with the dialog too.
+  const exportMeasurementScope = ref(null)
+  watch(exportKind, (kind) => { if (kind !== 'measurements') exportMeasurementScope.value = null })
+  function openMeasurementExport(scope = null) {
+    exportKind.value = 'measurements'
+    exportMeasurementScope.value = scope?.ids ? { ids: [...scope.ids], label: scope.label ?? '' } : null
+  }
 
   // Sidebar ▸ right-click ▸ Download… on a cloud or mesh: the same dialog as the
   // ribbon, aimed at that one cloud.
@@ -151,6 +130,7 @@ export function useExports({
 
   async function onExportRun(settings) {
     const kind = exportKind.value, target = exportTargetCloud.value
+    const measurementIds = exportMeasurementScope.value?.ids ?? null
     exportKind.value = null
     try {
       if (kind === 'cloud') await doExportCloud(settings, target)
@@ -161,6 +141,7 @@ export function useExports({
       else if (kind === 'tiles3d') await doExportTiles3d(settings)
       else if (kind === 'dem') await doExportDem(settings)
       else if (kind === 'ortho') await doExportOrtho(settings)
+      else if (kind === 'measurements') await doExportMeasurements({ ...settings, ids: measurementIds })
     } catch (err) {
       const detail = String(err?.message ?? err)
       log(`Export failed: ${detail}`, 'error', 'Export')
@@ -191,8 +172,13 @@ export function useExports({
     crsInfo, dem, log, ortho, projectBase,
   })
 
+  // Saved measurements as CSV / GeoJSON (exports/measurements.js).
+  const { doExportMeasurements, exportCrsFor: measurementExportCrs } = createMeasurementExports({
+    currentCrs, effectiveFrameSpec, exportSimilarity, log, projectBase,
+  })
+
   return {
-    exportKind, exportTargetCloud, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials, exportKeypoints, exportMatches, onExportRun,
+    exportKind, exportTargetCloud, exportMeasurementScope, openMeasurementExport, measurementExportCrs, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials, exportKeypoints, exportMatches, onExportRun,
     openCloudExport, downloadRasterOriginal, downloadImageOriginal, downloadShapefile,
     exportContours, exportTerrain, exportClipped,
   }

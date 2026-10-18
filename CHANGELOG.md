@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Measurement export**: Export ▸ Measurements… writes every saved measurement
+  (rulers, areas, elevation profiles, volumes and 3D measurements) as CSV, one row
+  each with its units in columns, or as GeoJSON lines and polygons with their values.
+  GeoJSON is in the project CRS (heights kept) or in WGS 84 per RFC 7946; a
+  measurement without a CRS is labelled with its frame and never placed on the map.
+  Each saved-measurements list has its own Export… for just its records.
 - **Level-of-detail point clouds**: a dense cloud of 4 million points or more gets an
   octree in the background (saved with the project, built once), and the 3D view then
   draws only a point budget's worth of it, the part in front of the camera in most

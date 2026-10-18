@@ -157,7 +157,8 @@ The result card shows the value with its details (perimeter for an area, elevati
 range and relief for a profile, cut/fill/coverage for a volume). Type a name and
 choose **Save measurement** to keep it with the project. **Saved measurements** in
 the menu opens the list of this raster's saved measurements. Click one to reopen it, then
-rename or delete it from its card. Rebuilding the raster or changing its coordinate
+rename or delete it from its card; **Export…** in the list's header writes the list as
+CSV or GeoJSON (see *Export measurements* below). Rebuilding the raster or changing its coordinate
 frame marks older measurements **stale**. Their saved results remain readable;
 draw a new measurement on the current source to replace them.
 
@@ -167,8 +168,8 @@ areas and volumes are reported as **ground** values: the map projection's scale
 factor k at the raster centre (0.98 at 80°S in Antarctic Polar Stereographic) is
 divided out, and the result card shows the k it used. Heights are not scaled. Area
 is the horizontal footprint, not terrain surface area. Measurements are unavailable for geographic
-coordinates or a stale computed frame. Profiles require a loaded DEM, preserve
-nodata gaps, and can be downloaded with **Export profile CSV**. The profile uses
+coordinates or a stale computed frame. An [elevation profile](help:elevation-profile)
+requires a loaded DEM, preserves nodata gaps, and can be downloaded with **Export profile CSV**. The profile uses
 approximately one-cell spacing, coarsened for very long paths.
 
 ## Measure a volume
@@ -207,6 +208,40 @@ Below 100%, the volume is an underestimate of the area you drew, so fill holes
 before measuring or redraw the polygon around them. The units are the DEM's
 horizontal unit squared times its vertical unit, e.g. m³, or model units³ before
 the project has a scale.
+
+## Export measurements
+<!-- param: measurementCoords default: Project CRS -->
+**Export ▸ Measurements…** writes every saved measurement of the project (rulers,
+areas, profiles, volumes and the 3D measurements) to one file; the **Export…** button
+of a saved-measurements list writes just that list. **CSV** has one row per
+measurement. Each value column has its unit in a `*_unit` column next to its group
+(`length_unit` for the lengths and the perimeter, `area_unit`, `elevation_unit`,
+`volume_unit`), so a number never travels without its unit. The geometry is in a
+`geometry_wkt` column, in the frame named by `coordinate_frame`. Profiles are
+summarised (length, lowest and highest point, relief); their samples are in the
+GeoJSON or the per-profile CSV. Stale measurements are included, marked `stale`.
+
+**GeoJSON** writes each measurement as a line or a polygon carrying the same values
+as properties, and a profile its samples. **Coordinates** chooses where they are
+placed when the measurements have a CRS:
+- **Project CRS** (the default) keeps the exact project coordinates and, for 3D
+  measurements, their heights as a third coordinate. The CRS is named in the file's
+  `crs` member, as the contour and polygon exports do; QGIS and GDAL read it, and so
+  does this app's GeoJSON import.
+- **WGS 84 (RFC 7946)** is the strict standard that web maps expect: longitude and
+  latitude on WGS 84, no `crs` member. RFC 7946 makes a third coordinate a height
+  above the WGS 84 ellipsoid, which a project height is not, so these geometries are
+  2D; the measured coordinates, heights included, are kept in each feature's
+  `frame_coordinates`.
+
+A measurement whose frame has no CRS (a DEM built in the local frame, a project
+without a georeference, an imported cloud's own file coordinates) is never placed on
+the map: in a georeferenced file its geometry is empty and its coordinates are kept
+in `frame_coordinates`, labelled with their frame and unit. When none of the
+measurements has a CRS, the file is written in the frames they were measured in,
+marked `"georeferenced": false`, and the Coordinates choice is not offered. 3D
+measurements are recomputed in the project's current unit (metres once there is a
+georeference or scale bars) and written in the same frame as a point-cloud export.
 
 ## Contours, slope and clipping
 The **Tools → Products ▾** menu derives files from the DEM and orthophoto. None of

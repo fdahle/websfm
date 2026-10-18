@@ -64,8 +64,8 @@ const {
 } = storeToRefs(useModalsStore())
 const {
   applyCrsSuggestion, closeReconstructModal, detectedImageCount, detectedMaxKeypoints, editableClouds,
-  exportClipped, exportContours, exportKind, exportTargetCloud, exportTerrain,
-  footprintImageCount, georeferenceAfterReconstruct, matchSummaries, meshClouds, onCropCloudRun,
+  exportClipped, exportContours, exportKind, exportMeasurementScope, exportTargetCloud, exportTerrain,
+  footprintImageCount, georeferenceAfterReconstruct, matchSummaries, measurementExportCrs, meshClouds, onCropCloudRun,
   onDemRun, onDenseRun, onDepthMapsRun, onDetectRun, onExportRun,
   onFilterCloudRun, onGeoreferenceRun, onGradualSelectionRun, onImageQualityEstimate, onImageQualityGroup,
   onImageQualityRemove, onMatchRun, onMergeCloudsRun, onMeshRun, onOptimizeCamerasRun,
@@ -169,8 +169,9 @@ const measurementsStore = useMeasurementsStore()
       :has-scale="scaleFitValid || georef?.crs === currentCrs"
       :has-orientation="reconstructionStore.orientationState.active"
       :ortho-cells="reconstructionStore.ortho ? reconstructionStore.ortho.width * reconstructionStore.ortho.height : 0"
-      :subject="exportTargetCloud?.name ?? ''"
+      :subject="exportTargetCloud?.name ?? exportMeasurementScope?.label ?? ''"
       :textured="!!exportMeshCloud?.texture"
+      :measurement-crs="exportKind === 'measurements' ? measurementExportCrs(exportMeasurementScope?.ids ?? null, georef?.crs === currentCrs) ?? '' : ''"
       @close="exportKind = null"
       @run="onExportRun"
     />

@@ -445,6 +445,8 @@ export const TABS = [
         commands: [
           EXPORT_DEM,
           EXPORT_ORTHO,
+          // Saved ruler / area / profile / volume / 3D measurements as CSV or GeoJSON.
+          { id: 'export-measurements', label: 'Measure-\nments…', icon: 'ruler', needs: ['measurements'] },
         ],
       },
       {

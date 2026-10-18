@@ -622,7 +622,7 @@ defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints, measureStat
       <RasterMeasurements v-if="measureTarget" :key="measureTarget.layer.id" ref="measurements"
         :product="measureTarget.product" :source="measureTarget.source" :descriptor="measureDesc"
         :frame-status="measureTarget.frameStatus" :kind="measureTarget.kind" :view="measureView"
-        pan-hint="drag pans" />
+        pan-hint="drag pans" @command="(...a) => emit('command', ...a)" />
 
       <GcpToolbar
         v-if="editMode"

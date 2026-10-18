@@ -42,6 +42,8 @@ const props = defineProps({
   // product. Absent/false ⇒ no banner.
   frameStatus: { type: Object, default: null },
 })
+// A command from the measuring layer (its saved list's Export…), for App's dispatch.
+const emit = defineEmits(['command'])
 // The canvas only reports readiness from its own load(); when it unmounts (the CRS
 // became unresolved) nothing would un-hide the preview, leaving a blank viewer.
 watch(() => !!gpuCapable.value, (capable) => { if (!capable) gpuReady.value = false })
@@ -369,7 +371,7 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
       </div>
 
       <RasterMeasurements ref="measurements" :product="product" :source="toolSource" :descriptor="desc"
-        :frame-status="frameStatus" :kind="kind" :view="view" />
+        :frame-status="frameStatus" :kind="kind" :view="view" @command="(...a) => emit('command', ...a)" />
     </div>
 
     <!-- Layout mirrors the image view: live cursor readout on the left, static
