@@ -4,7 +4,7 @@ import { GeoTIFF, fromArrayBuffer, fromBlob } from 'geotiff'
 import { rasterWindow } from '../../core/io/rasterWindow.js'
 import { edgeOriginFromTags } from '../../core/io/rasterSample.js'
 import { parseCloudSource, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
-import { isBufferAllocationFailure, tooManyPointsMessage } from '../../core/bufferLimit.js'
+import { MAX_BUFFER_BYTES, isBufferAllocationFailure, rasterTooLargeMessage, tooManyPointsMessage } from '../../core/bufferLimit.js'
 import { blobSource } from '../../utils/blobParts.js'
 import { classifyRasterKind } from '../../core/io/rasterKind.js'
 import { hillshadeRgba } from '../../core/products/colormap.js'
@@ -128,6 +128,12 @@ export function makeIoOps({ lazCodec = null } = {}) {
       + `${sampleFormat === 3 ? 'float' : 'int'}${bitsPerSample}, CRS ${crs || 'unknown'}`
       + `, origin ${geoTransform.originX.toPrecision(8)}/${geoTransform.originY.toPrecision(8)}`
       + `, scale ${geoTransform.scaleX}/${geoTransform.scaleY}`)
+
+    // Every path but the ortho preview builds one full-resolution plane of 4 bytes a cell
+    // (Float32 elevations or RGBA): refuse before reading rather than fail on the buffer.
+    if (!(kind === 'ortho' && previewOnly) && width * height * 4 > MAX_BUFFER_BYTES) {
+      throw new Error(rasterTooLargeMessage(name, width, height, 4))
+    }
 
     let plane, zMin = null, zMax = null, previewDataUrl = null, dtype
     // The style actually used, echoed back on the meta so the Style modal opens

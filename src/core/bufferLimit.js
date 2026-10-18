@@ -17,3 +17,14 @@ export function tooManyPointsMessage(what, points = null) {
   return `${what}${points ? ` (${points.toLocaleString()} points)` : ''} is too large to hold at once: the browser `
     + `caps one buffer at 2 GiB, about ${Math.floor(MAX_FLOAT64_XYZ_POINTS / 1e6)} million points at full precision.`
 }
+
+/** The user-facing refusal for a raster whose full plane (`bytesPerCell` per cell) would
+ *  not fit in one buffer: what it would need, and what to import instead. */
+export function rasterTooLargeMessage(name, width, height, bytesPerCell = 4) {
+  const gb = (width * height * bytesPerCell) / 1e9
+  const side = Math.floor(Math.sqrt(MAX_BUFFER_BYTES / bytesPerCell))
+  return `${name} is ${width.toLocaleString()} × ${height.toLocaleString()} cells: its full-resolution plane needs `
+    + `${gb.toFixed(2)} GB in one buffer, and the browser caps one buffer at 2 GiB (about ${side.toLocaleString()} × `
+    + `${side.toLocaleString()} cells). Import a coarser or cropped copy, e.g. gdal_translate -tr with twice the cell `
+    + 'size, or -projwin around your area.'
+}
