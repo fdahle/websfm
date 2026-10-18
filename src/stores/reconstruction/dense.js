@@ -3,7 +3,7 @@ import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { qualityToMaxDim, fitDepthQuality, filterConfig, filterSettings, logFilterCache, logFilterTotals, emptyFilterTotals, mergeFusionCounters, logFusionStream, finishFusion } from '../../core/dense/mvs.js'
 import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
-import { computeDepthMaps as workerComputeDepthMaps, POOL_SIZE, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
+import { computeDepthMaps as workerComputeDepthMaps, POOL_SIZE, terminateAll, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
@@ -33,12 +33,13 @@ export function createDense({
       log('Dense: need a sparse cloud with ≥2 cameras first', 'warn', 'Dense')
       return
     }
-    const hasTracks = cloud.points.some((p) => p.views.size > 0)
+    const hasTracks = cloud.points.viewTotal > 0
     if (!hasTracks) {
       log('Dense: sparse cloud has no view-tracks (rebuild the sparse model first)', 'warn', 'Dense')
       return
     }
     reconStatus.value = 'running'
+    let writeFailure = null // the first depth map that could not be saved (see beginStreamedDepthMaps)
     try {
       // Rebuild every value as plain arrays/objects: cloud cameras + points are
       // reactive Pinia state, and Vue's Proxy wrappers can't be structured-cloned
@@ -134,7 +135,11 @@ export function createDense({
       // written and released at once, and the cross-view filter runs as its own pass
       // over the saved files. Holding every map to the end (the in-memory path, kept
       // for a project that cannot save) made the preflight refuse ~100+ images.
-      const run = await beginStreamedDepthMaps()
+      // A map that cannot be saved (storage full) stops the run: the rest could not
+      // be kept either, and the worker would spend minutes computing them.
+      const run = await beginStreamedDepthMaps({
+        onWriteFailure: (err) => { writeFailure = err; terminateAll(err.message) },
+      })
       // Resolve a quality preset → working maxDim from the largest native image
       // dimension (Step 3), unless the user set an explicit maxDim in Advanced. A
       // quality whose projected peak exceeds the memory budget steps down (High →
@@ -187,7 +192,7 @@ export function createDense({
       // when the project cannot save, which is why this path exists).
       if (!run) await persistDepthMaps(maps, settings)
     } catch (err) {
-      log(`Depth-map error: ${err?.message ?? err}`, 'error', 'Dense')
+      log(`Depth-map error: ${(writeFailure ?? err)?.message ?? err}`, 'error', 'Dense')
       reconStatus.value = 'error'
     }
   }
@@ -201,12 +206,19 @@ export function createDense({
     const nameByUuid = new Map(images.value.map((im) => [im.uuid, im.name]))
     const entries = (await opfs.loadDepthFiles(run.projectId, run.metas))
       .map((e) => ({ ...e, name: nameByUuid.get(e.uuid) }))
+    // Each rewrite is handled as it is queued (see beginStreamedDepthMaps): the first
+    // that fails (storage full) stops the workers and fails the stage with its message.
     const writes = []
+    let writeFailure = null
     const onEvent = (ev, [f]) => {
       if (ev !== 'filtered') return
       const meta = metaByUuid.get(f.uuid)
       if (meta) Object.assign(meta, f.coverage)
-      writes.push(opfs.saveDepthPlane(run.projectId, f.uuid, { depth: f.depth }))
+      writes.push(opfs.saveDepthPlane(run.projectId, f.uuid, { depth: f.depth }).catch((err) => {
+        if (writeFailure) return
+        writeFailure = err
+        terminateAll(err.message)
+      }))
     }
     // References are judged independently against the unfiltered planes, so the maps
     // split over the pool in contiguous chunks (neighbouring captures share candidate
@@ -259,6 +271,7 @@ export function createDense({
       onProgress?.(n, n, 'Depth maps complete', 1)
     }
     await Promise.all(writes)
+    if (writeFailure) throw writeFailure
     const kept = stats.map((s) => s.keptPct)
     const sorted = [...kept].sort((a, b) => a - b)
     return stageSummary && {

@@ -14,6 +14,7 @@
 // second full copy alive. That is the same invariant prepareCloudForExport keeps
 // on the way in.
 
+import { flatAxes } from '../products/flatAxes.js'
 import {
   validateLasAllocation, encodeLasPoints, writeLasHeader, readLasHeader, decodeLasPoints, planLasAttributes,
   pointsByReturn,
@@ -54,9 +55,7 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, attribu
   }
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
-  const getX = flat ? (i) => flat.pos[i * 3] : (i) => points[i].x
-  const getY = flat ? (i) => flat.pos[i * 3 + 1] : (i) => points[i].y
-  const getZ = flat ? (i) => flat.pos[i * 3 + 2] : (i) => points[i].z
+  const [getX, getY, getZ] = flat ? flatAxes(flat) : [(i) => points[i].x, (i) => points[i].y, (i) => points[i].z]
   const getC = flat
     ? (flat.col ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]] : () => null)
     : (i) => points[i].color

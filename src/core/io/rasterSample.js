@@ -46,10 +46,24 @@ export function cellValue(desc, x, y) {
 // Bilinear when all four neighbours are valid; else the nearest valid cell; else
 // null. Returning null (rather than 0) is load-bearing — a nodata hole reported
 // as an elevation of 0 is an error you only notice after it has poisoned a fit.
-export function sampleRaster(desc, x, y) {
+//
+// opts.strict: no borrowing. A point whose own cell (the one containing it) is
+// nodata or off the raster reads null, even when a neighbour has a height; a valid
+// cell beside a hole reads its own value. For area statistics that must count a
+// reference's holes and edges as unmeasured (DEM of difference volumes), where the
+// nearest-valid fallback would invent a ring of heights around every hole.
+export function sampleRaster(desc, x, y, { strict = false } = {}) {
   if (!desc) return null
   const { originX, originY, scaleX, scaleY } = desc.geoTransform || {}
   if (!scaleX || !scaleY) return null
+  if (strict) {
+    const own = valueAt(desc, Math.floor((x - originX) / scaleX), Math.floor((y - originY) / scaleY))
+    if (own == null) return null
+    const v = sampleRaster(desc, x, y)
+    // Bilinear needs all four neighbours; otherwise the fallback may have picked a
+    // neighbour's height, so keep the cell's own.
+    return bilinearComplete(desc, x, y) ? v : own
+  }
 
   // Fractional cell coordinates (cell centre c sits at fc = c).
   const fc = (x - originX) / scaleX - 0.5
@@ -78,6 +92,48 @@ export function sampleRaster(desc, x, y) {
   if (near != null) return near
   for (const v of [v00, v10, v01, v11]) if (v != null) return v
   return null
+}
+
+// Are all four bilinear neighbours of world (x, y) valid?
+function bilinearComplete(desc, x, y) {
+  const { originX, originY, scaleX, scaleY } = desc.geoTransform
+  const c0 = Math.floor((x - originX) / scaleX - 0.5), r0 = Math.floor((y - originY) / scaleY - 0.5)
+  return valueAt(desc, c0, r0) != null && valueAt(desc, c0 + 1, r0) != null
+    && valueAt(desc, c0, r0 + 1) != null && valueAt(desc, c0 + 1, r0 + 1) != null
+}
+
+/**
+ * The GDAL_NODATA value as the band's own sample type stores it. The tag is ASCII
+ * ("-9999.9", "-3.4e+38") and parses to a double, but a Float32 band holds the
+ * nearest float32, which is a different number unless the value happens to be
+ * representable (−9999.9 is not; neither is the 15-digit −3.40282346638529e+38 GDAL
+ * writes for −FLT_MAX). Comparing the band's values with the double then never
+ * matches and every nodata cell passes as an elevation. Float32 (and float16) round
+ * it like the band does; doubles and integers are unchanged (a non-integer value
+ * for an integer band matches nothing, as in GDAL).
+ *   sampleFormat — TIFF SampleFormat (1 uint, 2 int, 3 float); bitsPerSample per band
+ */
+export function nodataForSampleType(nodata, sampleFormat = 1, bitsPerSample = 8) {
+  if (nodata == null || !Number.isFinite(nodata)) return nodata ?? null
+  if (sampleFormat === 3 && bitsPerSample === 32) return Math.fround(nodata)
+  if (sampleFormat === 3 && bitsPerSample === 16) return f16round(nodata)
+  return nodata
+}
+
+// Round to the nearest IEEE half (geotiff reads float16 bands as float32 values of
+// halves). Math.f16round where the runtime has it.
+function f16round(v) {
+  if (typeof Math.f16round === 'function') return Math.f16round(v)
+  if (v === 0 || !Number.isFinite(v)) return v
+  const a = Math.abs(v)
+  if (a >= 65520) return Math.sign(v) * Infinity
+  // Spacing of halves at this magnitude: 2^(e−10), subnormals 2^−24.
+  const e = Math.max(-14, Math.floor(Math.log2(a)))
+  const q = 2 ** (e - 10)
+  let r = a / q
+  const f = Math.floor(r), d = r - f
+  r = d > 0.5 || (d === 0.5 && f % 2 === 1) ? f + 1 : f // ties to even
+  return Math.sign(v) * r * q
 }
 
 // World coordinate → fractional pixel coordinate (no clamping, no sampling).

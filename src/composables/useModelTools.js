@@ -32,9 +32,8 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
         ?? editableClouds.value.find((c) => !c.imported)
       positions = dense ? dense.pos.subarray(0, dense.count * 3) : null
     } else {
-      const pts = reconstructionStore.mainSparseCloud?.points ?? []
-      positions = new Float64Array(pts.length * 3)
-      pts.forEach((p, i) => { positions[i * 3] = p.x; positions[i * 3 + 1] = p.y; positions[i * 3 + 2] = p.z })
+      const pts = reconstructionStore.mainSparseCloud?.points
+      positions = pts?.length ? pts.pos.subarray(0, pts.length * 3) : new Float64Array(0)
     }
     const box = positions ? regionFromPositions(positions) : null
     if (box) regionDraft.value = box
@@ -59,8 +58,8 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
   const orientPicking = ref(null)        // null | 'plane' | 'origin'
   const orientPlanePicks = ref([])       // up to 3 picked positions
   const sparseCentre = () => {
-    const pts = reconstructionStore.mainSparseCloud?.points ?? []
-    if (!pts.length) return [0, 0, 0]
+    const pts = reconstructionStore.mainSparseCloud?.points
+    if (!pts?.length) return [0, 0, 0]
     let x = 0, y = 0, z = 0
     for (const p of pts) { x += p.x; y += p.y; z += p.z }
     return [x / pts.length, y / pts.length, z / pts.length]

@@ -72,8 +72,9 @@ test('the Texture dialog runs the texture through the pipeline', async ({ page }
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
     const { useModalsStore } = await import('/src/stores/useModalsStore.js')
     const store = useReconstructionStore()
+    const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
     store.clouds.push({
-      id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: Date.now(), points: [{ x: 0, y: 0, z: 5 }],
+      id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: Date.now(), points: SparsePoints.fromRecords([{ x: 0, y: 0, z: 5 }]),
       cameras: new Map([['cam-1', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: { fx: 100, fy: 100, cx: 50, cy: 50 } }]]),
     })
     store.setMainSparse?.('sparse-1')

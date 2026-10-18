@@ -101,6 +101,24 @@ describe('filterRange', () => {
 })
 
 describe('voxelDownsample', () => {
+  it('keeps the first real point of each cell when the cloud has attributes', () => {
+    let s = 7
+    const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647)
+    const n = 4000, pos = new Float64Array(n * 3), cls = new Uint8Array(n)
+    for (let i = 0; i < n * 3; i++) pos[i] = rnd() * 20 - 7   // negative and positive cells
+    for (let i = 0; i < n; i++) cls[i] = i % 7
+    const out = voxelDownsample({ count: n, pos, attributes: { classification: cls } }, { cell: 1.3 })
+    // The reference rule: floor(pos / cell) per axis, the first point of each key wins.
+    const seen = new Set(), kept = []
+    for (let i = 0; i < n; i++) {
+      const key = [0, 1, 2].map((a) => Math.floor(pos[i * 3 + a] / 1.3)).join(',')
+      if (!seen.has(key)) { seen.add(key); kept.push(i) }
+    }
+    expect(out.count).toBe(kept.length)
+    expect(Array.from(out.attributes.classification)).toEqual(kept.map((i) => cls[i]))
+    expect(Array.from(out.pos.subarray(0, 6))).toEqual(Array.from(pos.subarray(kept[0] * 3, kept[0] * 3 + 3)).concat(Array.from(pos.subarray(kept[1] * 3, kept[1] * 3 + 3))))
+  })
+
   it('collapses coincident points into one averaged point', () => {
     const cloud = makeCloud([[0, 0, 0], [0.1, 0, 0], [0.2, 0, 0], [10, 0, 0]])
     const out = voxelDownsample(cloud, { cell: 1 })

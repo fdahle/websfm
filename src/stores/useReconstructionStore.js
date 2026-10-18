@@ -20,6 +20,7 @@ import { normalizeOrientation, orientationStatus, orientationBasis } from '../co
 import { formatBytes } from '../core/dense/memBudget.js'
 import { depthMapBytes } from '../core/dense/depthMapCodec.js'
 import { serializeCloud, deserializeCloud } from './reconstruction/cloudSerde.js'
+import { SparsePoints } from '../core/sfm/sparsePoints.js'
 import { createSavedCloudFiles } from './reconstruction/savedCloudFiles.js'
 import { createDepthMapCache } from './reconstruction/depthMapCache.js'
 import { createGeoreferencing } from './reconstruction/georeferencing.js'
@@ -513,8 +514,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     if (asMain || !mainSparseCloud.value) mainSparseId.value = cloud.id
   }
 
-  // A sparse rerun replaces the current main model. Keeping that model's hundreds of
-  // thousands of Map-backed tracks resident while constructing the worker input can
+  // A sparse rerun replaces the current main model. Keeping that model's tracks
+  // (hundreds of MB at millions of points) resident while constructing the worker input can
   // make the memory preflight reject a run that fits comfortably from a clean state.
   // Replace it with a lightweight placeholder only when headroom is insufficient.
   // Nothing is persisted here: if the new solve fails, reloading restores the previous
@@ -533,7 +534,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         return []
       }
       if (cloud.id !== replaceId || cloud.kind !== 'sparse') return [cloud]
-      return [{ ...cloud, cameras: markRaw(new Map()), points: markRaw([]), count: 0 }]
+      return [{ ...cloud, cameras: markRaw(new Map()), points: markRaw(SparsePoints.empty()), count: 0 }]
     })
     clearDepthMaps()
     dem.value = null

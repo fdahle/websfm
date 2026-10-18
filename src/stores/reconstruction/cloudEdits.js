@@ -54,7 +54,7 @@ export function createCloudEdits({
       count: flat.count,
       pos: markRaw(flat.pos),
       ...(flat.attributes ? { attributes: markRaw(flat.attributes) } : {}),
-      col: markRaw(flat.col || null),
+      col: flat.col ? markRaw(flat.col) : null, // markRaw(null) throws (Vue 3.5)
       ...(flat.nrm ? { nrm: markRaw(flat.nrm) } : {}),
     }
     clouds.value.push(cloud)
@@ -77,7 +77,7 @@ export function createCloudEdits({
       nVerts: flat.nVerts,
       pos: markRaw(flat.pos),
       idx: markRaw(flat.idx),
-      col: markRaw(flat.col || null),
+      col: flat.col ? markRaw(flat.col) : null, // markRaw(null) throws (Vue 3.5)
       // A textured mesh (reconstruction/meshTexture.js): per-vertex UVs + atlas pages.
       ...(flat.uv && flat.texture ? { uv: markRaw(flat.uv), texture: rawTexture(flat.texture) } : {}),
     }
@@ -110,14 +110,17 @@ export function createCloudEdits({
     // meanwhile must survive while a removal must not resurrect the cloud.
     const idx = clouds.value.findIndex((c) => c.id === snapshot.id)
     if (idx < 0) return null
-    const { attributes: _a, nrm: _n, ...rest } = clouds.value[idx]
+    // The octree (`lod`) described the old points: the new ones get their own, built
+    // again in the background (reconstruction/cloudLod.js), and the old files are
+    // pruned once no cloud names them.
+    const { attributes: _a, nrm: _n, lod: _l, ...rest } = clouds.value[idx]
     const cloud = {
       ...rest,
       createdAt: Date.now(),
       count: flat.count,
       pos: markRaw(flat.pos),
       ...(flat.attributes ? { attributes: markRaw(flat.attributes) } : {}),
-      col: markRaw(flat.col || null),
+      col: flat.col ? markRaw(flat.col) : null, // markRaw(null) throws (Vue 3.5)
       ...(flat.nrm ? { nrm: markRaw(flat.nrm) } : {}),
     }
     clouds.value.splice(idx, 1, cloud)
@@ -226,10 +229,18 @@ export function createCloudEdits({
   // out of its octree as a new, resident cloud that every tool can use. Past the
   // budget the copy is thinned evenly (finer octree levels left out), never cut.
   async function cropStreamed(source, settings, name, onProgress) {
+    const statusBefore = reconStatus.value
     reconStatus.value = 'running'
     try {
       const box = { min: settings.min ?? [], max: settings.max ?? [] }
+      const projectId = projects.currentProjectId
       const { cloud: flat, plan } = await extractCloudPoints(source, { box, maxPoints: STREAMED_CROP_MAX_POINTS }, onProgress)
+      // A project closed or switched while the octree was read: the crop is not its.
+      if (projects.currentProjectId !== projectId) {
+        log('Crop: not added — its project was closed while the points were read', 'warn', 'Products')
+        if (reconStatus.value === 'running') reconStatus.value = statusBefore
+        return null
+      }
       if (!flat.count) {
         log('Crop: no point of the cloud lies inside the box', 'warn', 'Products')
         reconStatus.value = 'done'
@@ -295,7 +306,8 @@ export function createCloudEdits({
         const label = { crop: 'cropped', mask: 'edited', classify: 'reclassified', filter: 'filtered', 'classify-ground': 'ground' }[mode]
         const selection = mode === 'mask' || mode === 'classify'
         // A selection edit of a derived cloud refines it (as for a resident cloud): the
-        // new one takes its place, and the old octree's files are pruned.
+        // new one takes its place, and the old octree's files are pruned once no cloud
+        // names them (the next octree build, or the project's next open).
         const refine = selection && streamed.derived
         const cloud = await editStreamedCloud(streamed, { mode, settings, name: refine ? streamed.name : (name || `${streamed.name} (${label})`) }, onProgress)
         if (cloud && mode === 'classify-ground') cloud.style = { field: 'attribute:classification' }

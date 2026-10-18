@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sampleRaster, worldToPixel, pixelToWorld, rasterBounds, edgeOriginFromTags } from './rasterSample.js'
+import { sampleRaster, worldToPixel, pixelToWorld, rasterBounds, edgeOriginFromTags, nodataForSampleType } from './rasterSample.js'
 
 // A 4×3 north-up raster at origin (100, 200), 10-unit cells. Row 0 is the
 // NORTHERN edge, so scaleY is negative — the GeoTIFF convention.
@@ -105,6 +105,53 @@ describe('sampleRaster', () => {
 
   it('returns null for a missing descriptor', () => {
     expect(sampleRaster(null, 0, 0)).toBeNull()
+  })
+})
+
+describe('sampleRaster strict (no borrowing)', () => {
+  it('reads null in a hole and off the raster, where the default borrows a neighbour', () => {
+    const data = Float32Array.from(ramp)
+    data[5] = NaN // cell (1,1)
+    const d = makeDesc(data)
+    // Inside cell (1,1): the default falls back to a neighbour, strict does not.
+    expect(sampleRaster(d, 115, 185)).not.toBeNull()
+    expect(sampleRaster(d, 115, 185, { strict: true })).toBeNull()
+    // A quarter cell west of the raster: the default reads cell (0,0)'s row.
+    expect(sampleRaster(d, 97.5, 195)).not.toBeNull()
+    expect(sampleRaster(d, 97.5, 195, { strict: true })).toBeNull()
+  })
+
+  it('reads a valid cell beside a hole as its own value, and bilinear where complete', () => {
+    const data = Float32Array.from(ramp)
+    data[5] = NaN
+    const d = makeDesc(data)
+    // In cell (0,0), towards the hole: its own value, not the fallback's pick.
+    expect(sampleRaster(d, 108, 192, { strict: true })).toBe(0)
+    // Between cells (2,0),(3,0),(2,1),(3,1), all valid: as the default.
+    expect(sampleRaster(d, 130, 190, { strict: true })).toBeCloseTo(sampleRaster(d, 130, 190))
+  })
+})
+
+describe('nodataForSampleType', () => {
+  it('rounds a Float32 band\'s nodata the way the band stores it', () => {
+    for (const v of [-3.4e38, -9999.9, -3.40282346638529e+38]) {
+      const band = Float32Array.of(v)
+      expect(band[0] === v).toBe(false) // the double never matches the band
+      expect(band[0] === nodataForSampleType(v, 3, 32)).toBe(true)
+    }
+    expect(nodataForSampleType(-9999, 3, 32)).toBe(-9999)
+  })
+
+  it('leaves doubles and integer bands unchanged, and null as null', () => {
+    expect(nodataForSampleType(-9999.9, 3, 64)).toBe(-9999.9)
+    expect(nodataForSampleType(-32768, 2, 16)).toBe(-32768)
+    expect(nodataForSampleType(null, 3, 32)).toBeNull()
+  })
+
+  it('rounds to a half for a float16 band', () => {
+    // −9999.9 as a half is −10000 (spacing 8 at that magnitude); 0.1 → 0.0999755859375.
+    expect(nodataForSampleType(-9999.9, 3, 16)).toBe(-10000)
+    expect(nodataForSampleType(0.1, 3, 16)).toBe(0.0999755859375)
   })
 })
 

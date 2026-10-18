@@ -1,12 +1,12 @@
 import { computed, watch } from 'vue'
-import { fitGeoreference, applySimilarity } from '../../core/products/georef.js'
+import { fitGeoreference, applySimilarity, similarityPrecision } from '../../core/products/georef.js'
 import { buildMetricFrame } from '../../core/products/localFrame.js'
 import { cameraCenter } from '../../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../../core/sfm/gcpTriangulation.js'
 import { gcpGuidesForImage, gcpEstimateForImage } from '../../core/sfm/gcpGuides.js'
 import { gcpsInPinholeFrame, guideToScan, makePinholeToMark } from '../../core/sfm/displayFrame.js'
 import { isGeographic, ensureProjection, transform, metresPerCrsUnit } from '../../core/crs.js'
-import { normalizedGroundResidual, precisionFromGcp } from '../../core/gcpAccuracy.js'
+import { normalizedGroundResidual, precisionFromGcp, covarianceFromGcp, normalizedWithCovariance, addCovariance, subCovariance } from '../../core/gcpAccuracy.js'
 import { isGroundControl } from '../../core/io/gcp.js'
 import { suggestProjectedCrs, formatLatLon } from '../../core/crsSuggest.js'
 
@@ -104,7 +104,12 @@ export function createGeoreferencing({
       if (!im) continue
       const cam = cams.get(im.uuid)
       if (!cam) continue
-      pairs.push({ src: cameraCenter(cam), dst: [p.x, p.y, p.z], weight: inverseVariance3d(p) })
+      // Per-axis σ when the pose has them (RTK: horizontal ≪ vertical), not only a
+      // scalar weight: the fit is then held hardest where the positions are best.
+      const sig = [p.accuracyX, p.accuracyY, p.accuracyZ]
+      const precision = sig.every((v) => Number.isFinite(v) && v > 0)
+        ? [[1 / sig[0] ** 2, 0, 0], [0, 1 / sig[1] ** 2, 0], [0, 0, 1 / sig[2] ** 2]] : null
+      pairs.push({ src: cameraCenter(cam), dst: [p.x, p.y, p.z], weight: inverseVariance3d(p), ...(precision ? { precision } : {}) })
     }
     return pairs
   }
@@ -243,7 +248,7 @@ export function createGeoreferencing({
       crs: currentCrs(), rms: fit.rms, count: fit.count, method: usingGcps ? 'gcps' : 'poses',
     }
     log(`Georeference: ${fit.count} ${usingGcps ? 'GCPs' : 'poses'} → ${currentCrs()}, `
-      + `scale ${fit.scale.toPrecision(4)}, RMS ${fit.rms.toPrecision(3)}`
+      + `scale ${fit.scale.toPrecision(4)}, weighted RMS ${fit.rms.toPrecision(3)}`
       + (local ? ` (fitted in a local metric frame: grid scale factor k=${local.k.toFixed(6)}, `
         + `curvature restored; ground units)` : ''), 'success', 'Products')
     healthDirty.value++   // GCP prune / refit → the hub overview must recompute
@@ -292,6 +297,28 @@ export function createGeoreferencing({
     const enabled = gcps().filter((g) => g.enabled !== false)
     if (!enabled.length) return []
     const results = await triangulateAllGcps(inPinhole(enabled), sparseCameras.value, imagesById())
+    // How well the fit itself is known (core/products/georef.js similarityPrecision),
+    // from the pairs it was fitted to: the control GCPs, or the camera poses.
+    const controls = results.filter(({ gcp, tri }) => tri && groundControl(gcp))
+    const fitPairs = validGeoref.value?.method === 'poses'
+      ? georefPairs()
+      : controls.map(({ gcp, tri }) => ({ src: [tri.x, tri.y, tri.z], dst: [gcp.x, gcp.y, gcp.z],
+        weight: inverseVariance3d(gcp), precision: precisionFromGcp(gcp) }))
+    const fitPrecision = sim && fitPairs.length >= 3 ? similarityPrecision(fitPairs, sim) : null
+    const inFit = (gcp) => validGeoref.value?.method !== 'poses' && groundControl(gcp)
+    // A residual's normalisation: a point the fit was made to sits closer to the fit
+    // than its own σ says (Σ − Σŷ, Baarda's redundancy); an independent point carries
+    // the fit's uncertainty on top of its own (Σ + Σŷ). Falls back to Σ alone when the
+    // fit's precision is unknown or the difference is not positive definite.
+    const normalizeResidual = (gcp, src, residual, predictedCov) => {
+      const own = covarianceFromGcp(gcp)
+      if (own && predictedCov) {
+        const nr = normalizedWithCovariance(residual,
+          predictedCov.inFit ? subCovariance(own, predictedCov.cov) : addCovariance(own, predictedCov.cov))
+        if (nr) return nr
+      }
+      return normalizedGroundResidual(gcp, residual)
+    }
     const rows = results.map(({ gcp, tri }) => {
       if (!tri) {
         return { gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: 0,
@@ -303,7 +330,9 @@ export function createGeoreferencing({
         const p = applySimilarity(sim, [tri.x, tri.y, tri.z])
         dx = p[0] - gcp.x; dy = p[1] - gcp.y; dz = p[2] - gcp.z
         dTotal = Math.hypot(dx, dy, dz)
-        const nr = normalizedGroundResidual(gcp, [dx, dy, dz])
+        const src = [tri.x, tri.y, tri.z]
+        const nr = normalizeResidual(gcp, src, [dx, dy, dz],
+          fitPrecision ? { cov: fitPrecision.predicted(src), inFit: inFit(gcp) } : null)
         normalized = nr?.normalized ?? null
         normalizedAxes = nr?.axes ?? null
         chi2 = nr?.chi2 ?? null
@@ -322,7 +351,6 @@ export function createGeoreferencing({
     })
     // When no checkpoints exist, leave-one-control-out prediction is the next
     // best validation: fit without one control and predict that withheld point.
-    const controls = results.filter(({ gcp, tri }) => tri && groundControl(gcp))
     if (controls.length >= 4) {
       const local = sim?.local ?? await metricFrameFor(controls.map(({ gcp }) => [gcp.x, gcp.y, gcp.z]))
       for (const withheld of controls) {
@@ -333,7 +361,11 @@ export function createGeoreferencing({
         if (!fit) continue
         const predicted = applySimilarity(fit, [withheld.tri.x, withheld.tri.y, withheld.tri.z])
         const residual = predicted.map((v, i) => v - [withheld.gcp.x, withheld.gcp.y, withheld.gcp.z][i])
-        const nr = normalizedGroundResidual(withheld.gcp, residual)
+        // The prediction carries the uncertainty of a fit made without this point.
+        const src = [withheld.tri.x, withheld.tri.y, withheld.tri.z]
+        const k = validGeoref.value?.method === 'poses' ? -1 : controls.indexOf(withheld)
+        const without = fitPrecision && k >= 0 ? fitPrecision.predictedWithout(k, src) : null
+        const nr = normalizeResidual(withheld.gcp, src, residual, without ? { cov: without, inFit: false } : null)
         const row = rows.find((r) => r.gcpId === withheld.gcp.id)
         if (row) {
           row.looDx = residual[0]; row.looDy = residual[1]; row.looDz = residual[2]

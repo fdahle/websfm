@@ -7,6 +7,7 @@
 // which is the whole cloud thinned evenly, never a cut-off part of it. A tool that
 // needs no more than a given spacing (a DEM of a given cell size) stops there too.
 
+import { MAX_FLOAT64_XYZ_POINTS } from '../bufferLimit.js'
 import { nodeCube } from './octree.js'
 
 const intersects = (cube, box) => [0, 1, 2].every((k) =>
@@ -20,6 +21,9 @@ const intersects = (cube, box) => [0, 1, 2].every((k) =>
  * complete (every level read) }
  */
 export function planExtract(nodes, lod, { box = null, maxPoints = Infinity, minSpacing = 0 } = {}) {
+  // The read lands in one Float64 xyz buffer: never plan past the browser's buffer wall
+  // (core/bufferLimit.js), whatever budget the caller derived maxPoints from.
+  maxPoints = Math.min(maxPoints, MAX_FLOAT64_XYZ_POINTS)
   const hits = [], perLevel = []
   for (const n of nodes.values()) {
     if (box && !intersects(nodeCube(lod.root, n.key), box)) continue

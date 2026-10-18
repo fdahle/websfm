@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { planimetricArea, polylineLength, sampleProfile, polygonVolume, fitBasePlane, groundVolume, polyline3d, polygon3d } from './measure.js'
+import { sampleRaster } from '../io/rasterSample.js'
 
 describe('raster measurements', () => {
   it('measures a polyline and a concave polygon at large survey coordinates', () => {
@@ -105,6 +106,45 @@ describe('polygonVolume against a second surface', () => {
     expect(v.fill).toBeCloseTo(6 * 1)
     expect(v.net).toBeCloseTo(6)
     expect(polygonVolume(grid, square, { base: 'surface' }).error).toBe('base')
+  })
+
+  it('estimates from a sub-grid above the sample cap, scaled to the whole polygon', () => {
+    const W = 300, H = 300
+    const data = Float32Array.from({ length: W * H }, (_, i) => 10 + Math.sin((i % W) / 17) + Math.cos(Math.floor(i / W) / 23))
+    const grid = { width: W, height: H, geoTransform: { originX: 0, originY: H, scaleX: 1, scaleY: -1 }, data }
+    const poly = [{ x: 10, y: 10 }, { x: 290, y: 20 }, { x: 280, y: 290 }, { x: 15, y: 270 }]
+    // Reference: 10 except a hole in the west third.
+    let calls = 0
+    const surface = { sample: (x) => { calls++; return x < 100 ? null : 10 } }
+    const exact = polygonVolume(grid, poly, { base: 'surface', surface, maxSurfaceSamples: 0 })
+    const exactCalls = calls
+    calls = 0
+    const est = polygonVolume(grid, poly, { base: 'surface', surface, maxSurfaceSamples: 5000 })
+    expect(exact.sampleStep).toBe(1)
+    expect(est.sampleStep).toBeGreaterThan(1)
+    expect(calls).toBeLessThanOrEqual(5000)
+    expect(calls).toBeLessThan(exactCalls / 4)
+    expect(est.insideCells).toBe(exact.insideCells)
+    expect(Math.abs(est.coverage - exact.coverage)).toBeLessThan(0.02)
+    expect(Math.abs(est.validCells - exact.validCells) / exact.validCells).toBeLessThan(0.02)
+    for (const k of ['cut', 'fill', 'net']) expect(Math.abs(est[k] - exact[k])).toBeLessThan(0.03 * exact.cut)
+  })
+
+  it('a strictly sampled reference counts its holes and edges unmeasured', () => {
+    const grid = { width: 4, height: 4, geoTransform: { originX: 0, originY: 4, scaleX: 1, scaleY: -1 },
+      data: new Float32Array(16).fill(10) }
+    const square = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }]
+    // Reference: 2-unit cells covering x 0…4, y 0…2 (the DEM's south half), all 9
+    // except a hole at its south-west cell.
+    const ref = { width: 2, height: 1, data: Float32Array.of(NaN, 9),
+      geoTransform: { originX: 0, originY: 2, scaleX: 2, scaleY: -2 } }
+    const loose = polygonVolume(grid, square, { base: 'surface', surface: { sample: (x, y) => sampleRaster(ref, x, y) } })
+    const strict = polygonVolume(grid, square, { base: 'surface', surface: { sample: (x, y) => sampleRaster(ref, x, y, { strict: true }) } })
+    // The default borrows the hole's neighbour (and half a cell past the north edge).
+    expect(loose.validCells).toBeGreaterThan(4)
+    // Strict: only the 4 DEM cells over the reference's valid cell.
+    expect(strict.validCells).toBe(4)
+    expect(strict.cut).toBeCloseTo(4)
   })
 })
 

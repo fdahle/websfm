@@ -4,6 +4,7 @@ import { reprojectionStats, trackLengthHistogram } from './reconStats.js'
 import { perImageResiduals } from './imageStats.js'
 import { coverageGrid } from './coverage.js'
 import { cameraCenter } from '../sfm/geometry.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
 // Deterministic pseudo-random model: cameras looking down +z at a point slab, with
 // noisy observations, an observation of an image outside the model, a point behind
@@ -35,7 +36,7 @@ function model() {
     if (i % 50 === 0) { views.set('not-loaded', 0); viewsPx.set('not-loaded', [1, 2]) }
     points.push({ x, y, z: i === 3 ? -50 : z, views, viewsPx: i === 5 ? undefined : viewsPx })
   }
-  return { cameras, points }
+  return { cameras, points: SparsePoints.fromRecords(points) }
 }
 
 describe('sparseResidualStats', () => {
@@ -50,9 +51,10 @@ describe('sparseResidualStats', () => {
 
   it('handles an empty model', () => {
     const cameras = new Map([['a', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: { fx: 1, fy: 1, cx: 0, cy: 0 } }]])
-    expect(sparseResidualStats(cameras, [])).toEqual({
-      reproj: reprojectionStats(cameras, []),
-      perImage: perImageResiduals(cameras, []),
+    const empty = SparsePoints.empty()
+    expect(sparseResidualStats(cameras, empty)).toEqual({
+      reproj: reprojectionStats(cameras, empty),
+      perImage: perImageResiduals(cameras, empty),
     })
   })
 })
@@ -80,8 +82,11 @@ describe('sparseModelStats', () => {
     const { cameras, points } = model()
     const a = sparseModelStats(cameras, points)
     expect(sparseModelStats(new Map(cameras), points)).not.toBe(a)
-    expect(sparseModelStats(cameras, points.slice())).not.toBe(a)
-    points.push({ x: 0, y: 0, z: 0, views: new Map(), viewsPx: new Map() })
+    expect(sparseModelStats(cameras, points.withPositions(points.pos.slice()))).not.toBe(a)
+    // Grow the same instance by one point (clouds are immutable by contract; this
+    // forces it to exercise the guard).
+    Object.assign(points, SparsePoints.concat([points, SparsePoints.fromRecords([{ x: 0, y: 0, z: 0 }])]))
+    expect(points.length).toBe(401)
     expect(sparseModelStats(cameras, points)).not.toBe(a) // count guard
   })
 })

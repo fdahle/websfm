@@ -34,9 +34,17 @@
 // added to that weight: they must stay `boundaryWeight` times more expensive than a
 // surface deviation, and folding them into the denominator would cancel exactly that.
 //
+// A textured mesh (core/products/texture/) holds one copy of a vertex per atlas piece
+// it lies in. Collapsing edges moves vertices and merges triangles, so its UVs (each a
+// projection into one photo) cannot follow: the copies are joined first (meshEdit.js
+// coincidentVertices) and the SURFACE is decimated, untextured. Left split, every piece
+// outline counted as a boundary: frozen with `preserveBoundary`, cracked open without.
+//
 // Survey coordinates (~1e6) are handled by working relative to the bbox centre:
 // quadric coefficients square the coordinates, and at 1e6 the plane offsets alone
 // would eat 12 of float64's 16 digits. The origin is added back at the end.
+
+import { coincidentVertices } from './meshEdit.js'
 
 /**
  * @typedef {Object} DecimateOptions
@@ -107,6 +115,8 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   if (hasCount === hasRatio) {
     throw new Error('decimateMesh: give exactly one of targetTriangles / targetRatio')
   }
+
+  if (mesh?.uv) mesh = joinTextureCopies(mesh, onLog)
 
   const nT = mesh?.idx ? Math.floor(mesh.idx.length / 3) : 0
   const nV = mesh?.pos ? Math.floor(mesh.pos.length / 3) : 0
@@ -618,6 +628,27 @@ export function decimateMesh(mesh, opts = {}, onLog) {
     mesh: { nVerts: outVerts, count: outTris, pos, idx, col },
     stats: { before, after: outTris, collapses, maxError: maxErr },
   }
+}
+
+// A textured mesh's surface: its per-piece vertex copies joined, no uv / page.
+function joinTextureCopies(mesh, onLog) {
+  const nV = Math.floor(mesh.pos.length / 3)
+  const { id, first, m } = coincidentVertices(mesh.pos, nV)
+  const pos = new Float64Array(m * 3)
+  const col = mesh.col ? new Uint8Array(m * 3) : null
+  for (let r = 0; r < m; r++) {
+    for (let c = 0; c < 3; c++) {
+      pos[r * 3 + c] = mesh.pos[first[r] * 3 + c]
+      if (col) col[r * 3 + c] = mesh.col[first[r] * 3 + c]
+    }
+  }
+  const idx = new Uint32Array(mesh.idx.length)
+  for (let i = 0; i < idx.length; i++) { const v = mesh.idx[i]; idx[i] = v < nV ? id[v] : m + (v - nV) }
+  if (m < nV) {
+    onLog?.(`Decimate: textured mesh, ${(nV - m).toLocaleString()} per-chart vertex copies joined first; `
+      + 'the result has no texture', 'info', 'Products')
+  }
+  return { nVerts: m, count: mesh.count ?? idx.length / 3, pos, idx, col }
 }
 
 // vᵀAv for the homogeneous v = (x,y,z,1) and the symmetric 4×4 in upper-triangle form.

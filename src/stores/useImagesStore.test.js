@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as opfs from '../utils/opfs.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
+import { useLog } from '../composables/useLog.js'
 
 describe('image project restore readiness', () => {
   beforeEach(() => {
@@ -205,5 +206,50 @@ describe('image groups', () => {
     const doc = write.mock.calls.at(-1)[1]
     expect(doc.imageGroups.map((g) => g.name)).toEqual(['First', 'North'])
     expect(doc.images.map((i) => i.groupId)).toEqual([null, group.id, null])
+  })
+})
+
+describe('saving a mask', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.restoreAllMocks()
+  })
+
+  async function storeWithImage() {
+    const projects = useProjectsStore()
+    projects.persistenceAvailable = false
+    projects.projects = [{ id: 'project-1', name: 'test', sceneType: 'object' }]
+    projects.currentProjectId = 'project-1'
+    vi.spyOn(opfs, 'loadImageBlob').mockResolvedValue(new Blob(['pixels'], { type: 'image/jpeg' }))
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mask')
+    vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined)
+    const store = useImagesStore()
+    await store.restoreImages([{ id: 'image-1', uuid: 'uuid-1', name: 'photo.jpg', meta: { width: 100, height: 80 },
+      kpStatus: 'idle', kpCount: 0 }], 'project-1')
+    projects.persistenceAvailable = true
+    vi.spyOn(opfs, 'writeProject').mockResolvedValue(undefined)
+    vi.spyOn(opfs, 'updateProject').mockResolvedValue(undefined)
+    return store
+  }
+  const lines = () => useLog().entries.value.filter((e) => e.source === 'Images').map((e) => [e.level, e.message])
+
+  it('a write that fails says so, with the reason, and never "Mask saved"', async () => {
+    const store = await storeWithImage()
+    const full = Object.assign(new Error('Storage is full: free space, then run the step again. (uuid-1.png)'),
+      { name: 'QuotaExceededError', storageFull: true })
+    vi.spyOn(opfs, 'saveMask').mockRejectedValue(full)
+    useLog().clear()
+    store.updateMask('image-1', new Blob(['png'], { type: 'image/png' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(lines()).toEqual([['error', 'Mask not saved: photo.jpg: Storage is full: free space, then run the step again. (uuid-1.png)']])
+  })
+
+  it('a write that lands is logged once it has', async () => {
+    const store = await storeWithImage()
+    vi.spyOn(opfs, 'saveMask').mockResolvedValue(undefined)
+    useLog().clear()
+    store.updateMask('image-1', new Blob(['png'], { type: 'image/png' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(lines()).toEqual([['info', 'Mask saved: photo.jpg']])
   })
 })

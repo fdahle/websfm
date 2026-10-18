@@ -6,6 +6,7 @@ import {
   depthMapSettings, streamedEligible, requiredConsistentViews,
 } from './mvs.js'
 import { packSparseForDense } from './sparseInput.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 import { DENSE_TUNING } from '../tuning.js'
 import { DENSE_FUSE_DEFAULTS, DEPTHMAP_DEFAULTS } from '../defaults.user.js'
 
@@ -57,10 +58,10 @@ describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
   const K = { fx: 40, fy: 40, cx: 20, cy: 20 }
   const W = 40, H = 40
   // Sparse points spread across depth 5..9, near the image centre (project in front).
-  const points = [
+  const points = SparsePoints.fromRecords([
     { x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 6 }, { x: 0, y: 0.1, z: 7 },
     { x: 0.1, y: 0.1, z: 8 }, { x: -0.1, y: 0, z: 9 }, { x: 0, y: -0.1, z: 6.5 },
-  ]
+  ])
   const ref = { gray: new Uint8Array(W * H), width: W, height: H, K, cam: { R: I, t: [0, 0, 0] } }
   const sources = [{ gray: new Uint8Array(W * H), w: W, h: H, K, cam: { R: I, t: [-1, 0, 0] } }]
 
@@ -960,7 +961,7 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
     const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], K = { fx: 40, fy: 40, cx: 20, cy: 20 }
     const ref = { gray: new Uint8Array(1600), width: 40, height: 40, K, cam: { R: I, t: [0, 0, 0] } }
     const src = [{ gray: new Uint8Array(1600), w: 40, h: 40, K, cam: { R: I, t: [-1, 0, 0] } }]
-    const pos = packSparseForDense([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 7 }, { x: 0, y: 0.1, z: 9 }]).pos
+    const pos = packSparseForDense(SparsePoints.fromRecords([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 7 }, { x: 0, y: 0.1, z: 9 }])).pos
     const seen = []
     const fn = async (g, w, h, k, srcs, opts) => {
       seen.push(opts)
@@ -986,7 +987,7 @@ describe('depthMapForImage — odd-sized pyramid levels', () => {
   const W = 41, H = 40
   const ref = { gray: new Uint8Array(W * H), width: W, height: H, K, cam: { R: I, t: [0, 0, 0] } }
   const sources = [{ gray: new Uint8Array(W * H), w: W, h: H, K, cam: { R: I, t: [-1, 0, 0] } }]
-  const pos = packSparseForDense([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 6 }, { x: 0, y: 0.1, z: 7 }, { x: -0.1, y: 0, z: 8 }]).pos
+  const pos = packSparseForDense(SparsePoints.fromRecords([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 6 }, { x: 0, y: 0.1, z: 7 }, { x: -0.1, y: 0, z: 8 }])).pos
 
   it('projects a point onto the coarse pixel the box filter put its fine pixel in', async () => {
     const calls = []
@@ -1027,7 +1028,7 @@ describe('depthMapForImage — Region seeding', () => {
   it('seeds only from the sparse points inside the Region', async () => {
     // Two points inside the Region (depth 5–5.5) and one behind it on the same ray as
     // the first — listed last, so it used to overwrite the good seed at the centre pixel.
-    const pos = packSparseForDense([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 5.5 }, { x: 0, y: 0, z: 9 }]).pos
+    const pos = packSparseForDense(SparsePoints.fromRecords([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 5.5 }, { x: 0, y: 0, z: 9 }])).pos
     const region = { min: [-1, -1, 4], max: [1, 1, 6] }
     let seed = null, range = null
     const fn = async (g, w, h, k, srcs, opts) => {

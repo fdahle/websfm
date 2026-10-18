@@ -22,7 +22,7 @@ Installing is optional; a tab works offline just as well.
 
 ## Updates
 websfm checks for a new version when it starts and then once an hour, and downloads
-it in the background. It never switches by itself: a box at the bottom left says
+it in the background. It never switches until you ask: a box at the bottom left says
 *A new version of websfm is available*.
 
 - **Reload** switches to the new version now. While a task is running (a pipeline
@@ -31,6 +31,11 @@ it in the background. It never switches by itself: a box at the bottom left says
   run short.
 - **Later** hides the box for this session. The new version is used the next time
   websfm starts after all its tabs and windows were closed.
+
+With websfm open in several tabs, **Reload** in one switches all of them: an idle
+tab reloads at once, and a tab still running a task keeps the box up and reloads by
+itself once the task has finished. Once another tab has switched, **Later** is no
+longer offered, since that tab's old code no longer matches the new version.
 
 ## What needs a connection
 - **Learned models** (ALIKED, DISK, LightGlue, and the Smart Select model for

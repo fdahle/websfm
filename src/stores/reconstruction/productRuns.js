@@ -55,27 +55,36 @@ export function createProductRuns({
       const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
       const r = src.imported ? null : activeRegion()
       const streamed = isStreamed(src)
-      const cls = groundOnly && !streamed ? src.attributes.classification : null
+      // A resident cloud whose full copy would be large reads its octree too, when it has
+      // one: the grid needs no finer level than half its cell, and a 95 M-point copy
+      // (2.3 GB) failed to allocate next to the cloud itself (quarry, 2026-10-17).
+      const octreeHasClasses = src.lod?.layout?.attributes?.some((a) => a.name === 'classification')
+      const fromOctree = streamed || (!!src.lod && !!extractCloudPoints && src.kind === 'dense'
+        && src.count * DEM_STAGE_BYTES_PER_POINT > Math.min(budgetBytes / 4, 2 ** 30)
+        && (!groundOnly || octreeHasClasses))
+      const cls = groundOnly && !fromOctree ? src.attributes.classification : null
       const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
       const inside = cls
         ? (x, y, z, i) => cls[i] === 2 && (!inRegion || inRegion(x, y, z))
         : inRegion
       let staged
-      if (streamed) {
-        // A streamed cloud (core/lod/streamed.js) is read from its octree: down to
-        // half the cell size when one is set (finer levels add nothing to a cell),
-        // within half the budget (the grid gets the rest), the ground class for a DTM.
+      if (fromOctree) {
+        // From the octree (core/lod): down to half the cell size when one is set (finer
+        // levels add nothing to a cell), within half the budget (the grid gets the
+        // rest), the ground class for a DTM, the region as the read box.
         const maxPoints = Math.floor(budgetBytes / 2 / DEM_STAGE_BYTES_PER_POINT)
         const { cloud: flat, plan } = await extractCloudPoints(src, {
           classes: groundOnly ? [2] : null, fields: 'xyz', maxPoints, minSpacing: settings.gsd > 0 ? settings.gsd / 2 : 0,
+          ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}),
         }, (d, t, lbl, f) => onProgress?.(d, t, 'Reading the octree', f))
         staged = { pos: flat.pos, count: flat.count, total: src.count }
-        log(`${groundOnly ? 'DTM' : 'DEM'}: read ${flat.count.toLocaleString()} ${groundOnly ? 'ground ' : ''}points of the streamed cloud `
+        log(`${groundOnly ? 'DTM' : 'DEM'}: read ${flat.count.toLocaleString()} ${groundOnly ? 'ground ' : ''}points `
+          + `of ${streamed ? 'the streamed cloud' : `the cloud's octree (${src.count.toLocaleString()} points)`} `
           + (plan.complete ? '(every level of its octree)' : `down to ${plan.spacing.toPrecision(3)}-unit spacing`), 'info', 'Products')
-        if (!flat.count) throw new Error(groundOnly ? 'the cloud has no ground points' : 'the cloud has no points')
-      } else staged = stageDemPoints(src.kind === 'dense' ? src : { points: src.points }, { budgetBytes, inside })
+        if (!flat.count) throw new Error(groundOnly ? 'the cloud has no ground points' : (r ? 'no point of the source lies inside the region' : 'the cloud has no points'))
+      } else staged = stageDemPoints(src.kind === 'dense' ? src : { count: src.points.length, pos: src.points.pos }, { budgetBytes, inside })
       if (cls) log(`DTM: ${staged.count.toLocaleString()} ground points of ${staged.total.toLocaleString()}`, 'info', 'Products')
-      else if (r) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
+      else if (r && !fromOctree) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
       if (cls && !staged.count) throw new Error(r ? 'no ground point lies inside the region' : 'the cloud has no ground points')
       if (r && !staged.count) throw new Error('no point of the source lies inside the region')
       const points = { pos: staged.pos, count: staged.count }
@@ -155,20 +164,46 @@ export function createProductRuns({
     // Point sample from the densest cloud: the plane's fit input, and the local
     // frame's origin/PCA fallback. Subsampled — a plane needs spread, not every
     // point, and 25 M boxed {x,y,z} in the worker is the OOM we avoid everywhere.
+    // A streamed cloud has no positions in memory (pos: null): its sample is read
+    // from the octree's coarse levels instead.
     const src = demSource.value
-    const cloud = src?.cloud
+    const cloud = src?.cloud ?? null
     const total = src?.count ?? 0
     const MAX_FIT = 200_000
-    const stride = Math.max(1, Math.ceil(total / MAX_FIT))
-    const n = total ? Math.ceil(total / stride) : 0
-    const pos = new Float64Array(n * 3)
-    for (let i = 0, k = 0; i < total; i += stride, k++) {
-      if (cloud.kind === 'dense') {
-        pos[k * 3] = cloud.pos[i * 3]; pos[k * 3 + 1] = cloud.pos[i * 3 + 1]; pos[k * 3 + 2] = cloud.pos[i * 3 + 2]
-      } else {
-        const p = cloud.points[i]
-        pos[k * 3] = p.x; pos[k * 3 + 1] = p.y; pos[k * 3 + 2] = p.z
+    const strided = (srcPos, count) => {
+      const stride = Math.max(1, Math.ceil(count / MAX_FIT))
+      const m = count ? Math.ceil(count / stride) : 0
+      const out = new Float64Array(m * 3)
+      for (let i = 0, k = 0; i < count; i += stride, k++) {
+        out[k * 3] = srcPos[i * 3]; out[k * 3 + 1] = srcPos[i * 3 + 1]; out[k * 3 + 2] = srcPos[i * 3 + 2]
       }
+      return { pos: out, n: m }
+    }
+    let pos = new Float64Array(0), n = 0
+    if (cloud && isStreamed(cloud)) {
+      if (!extractCloudPoints) {
+        log('Ortho: the point cloud is streamed from its octree and cannot be sampled here', 'warn', 'Products')
+        return null
+      }
+      try {
+        const { cloud: flat } = await extractCloudPoints(cloud, { fields: 'xyz', maxPoints: MAX_FIT })
+        ;({ pos, n } = strided(flat.pos, flat.count))
+      } catch (err) {
+        log(`Ortho: reading a sample of the streamed cloud failed — ${err?.message ?? err}`, 'error', 'Products')
+        return null
+      }
+    } else if (cloud) {
+      const srcPos = cloud.kind === 'dense' ? cloud.pos : cloud.points?.pos
+      if (srcPos) ({ pos, n } = strided(srcPos, total))
+    }
+    // A mesh surface with no cloud to sample: its own vertices place the frame.
+    if (!n && id === 'mesh' && meshCloud.value?.pos) {
+      const m = meshCloud.value
+      ;({ pos, n } = strided(m.pos, m.nVerts ?? Math.floor(m.pos.length / 3)))
+    }
+    if (id !== 'mesh' && n < 3) {
+      log('Ortho: a plane surface needs a point cloud to fit — build or import one first', 'warn', 'Products')
+      return null
     }
     const cameras = [...sparseCameras.value.entries()].map(([uuid, cam]) => ({
       uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
@@ -185,7 +220,7 @@ export function createProductRuns({
     }
 
     log(`Ortho: surface is a plane fitted to the ${src.kind} cloud `
-      + `(${n.toLocaleString()} of ${total.toLocaleString()} points)`, 'info', 'Products')
+      + `(${n.toLocaleString()} of ${total.toLocaleString()} points${isStreamed(cloud) ? ', from its octree' : ''})`, 'info', 'Products')
     // The plane's fit points double as the local frame's — one sample, one array.
     return {
       kind: 'plane', frame: frameSpec, cameras, framePoints: pos, framePointCount: n,

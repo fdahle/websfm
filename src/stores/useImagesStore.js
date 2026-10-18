@@ -385,13 +385,20 @@ export const useImagesStore = defineStore('images', () => {
     releasePreview(img.mask)
     img.mask = previewOf(source)
     if (!persist) return
-    log(img.mask ? `Mask saved: ${img.name}` : `Mask cleared: ${img.name}`, 'info', 'Images')
-    if (isPersisting()) {
-      const pid = projects.currentProjectId
-      if (img.mask) opfs.saveMask(pid, img.uuid, img.mask.blob).catch(() => {})
-      else opfs.deleteMask(pid, img.uuid).catch(() => {})
-      save()
+    const set = !!img.mask
+    if (!isPersisting()) {
+      log(set ? `Mask set: ${img.name}` : `Mask cleared: ${img.name}`, 'info', 'Images')
+      return
     }
+    // Said once the write has landed, or why it did not (a full disk says so: opfs.js
+    // storageFullError); the failure also stays on the unsaved-changes banner.
+    const pid = projects.currentProjectId
+    const write = set ? opfs.saveMask(pid, img.uuid, img.mask.blob) : opfs.deleteMask(pid, img.uuid)
+    write.then(
+      () => log(set ? `Mask saved: ${img.name}` : `Mask cleared: ${img.name}`, 'info', 'Images'),
+      (err) => log(`Mask ${set ? 'not saved' : 'not cleared'}: ${img.name}: ${err?.message ?? err}`, 'error', 'Images'),
+    )
+    save()
   }
 
   // `{ quiet, persistSync }`: a depth run updates hundreds of images at once, so it
