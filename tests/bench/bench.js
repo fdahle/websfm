@@ -810,6 +810,58 @@ window.bench = {
 
   setReference(r) { reference = r; return { positions: Object.keys(r?.positions ?? {}).length, gcps: r?.gcps?.length ?? 0, leverArm: r?.leverArm } },
 
+  // Tools ▸ Align: the computed dense cloud is moved by a known rigid transform, put
+  // back by 3 point pairs (the same three points of the moved and the unmoved cloud, as a
+  // user would click one feature in each), refined by ICP onto the imported reference,
+  // then Distance to reference. Points keep their order through every edit, so the final
+  // positions against the unmoved ones measure how well the transform was undone.
+  async alignCheck({ rotateDeg = [2, -1.5, 3], translateFrac = [0.05, -0.03, 0.02], pickNoiseFrac = 0.005, icp = {}, distance = {}, sample = 200_000 } = {}) {
+    const { transformFromEuler, matrixFromTransform, fitPointPairs, rotationAngle } = await import('/src/core/products/cloudAlign.js')
+    const { ICP_DEFAULTS, DISTANCE_DEFAULTS } = await import('/src/core/defaults.user.js')
+    const ref = recon.clouds.find((c) => c.kind === 'dense' && c.imported)
+    const src = recon.clouds.find((c) => c.kind === 'dense' && !c.imported && !c.derived)
+    if (!ref || !src) throw new Error('alignCheck: needs an imported dense reference and a computed dense cloud')
+    const n = src.count, P = src.pos
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], c0 = [0, 0, 0]
+    for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) { const v = P[i * 3 + k]; lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v); c0[k] += v / n }
+    const diag = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+    const lines = (from) => useLog().entries.value.slice(from).map((e) => e.message)
+    const t0 = performance.now()
+    const tf = transformFromEuler({ translate: translateFrac.map((f) => f * diag), rotateDeg, scale: 1, pivot: c0 })
+    const moved = await recon.editClouds({ mode: 'transform', sourceIds: [src.id], settings: { matrix: matrixFromTransform(tf) }, name: 'moved' })
+    // Three well-spread points: the extremes along x and y, and the one farthest from both.
+    let ia = 0, ib = 0
+    for (let i = 0; i < n; i++) { if (P[i * 3] < P[ia * 3]) ia = i; if (P[i * 3] > P[ib * 3]) ib = i }
+    const d2 = (i, j) => (P[i * 3] - P[j * 3]) ** 2 + (P[i * 3 + 1] - P[j * 3 + 1]) ** 2 + (P[i * 3 + 2] - P[j * 3 + 2]) ** 2
+    let ic = 0, best = -1
+    for (let i = 0; i < n; i += 97) { const v = Math.min(d2(i, ia), d2(i, ib)); if (v > best) { best = v; ic = i } }
+    const at = (c, i) => [c.pos[i * 3], c.pos[i * 3 + 1], c.pos[i * 3 + 2]]
+    // A click lands near the feature, not on it: a fixed offset of pickNoiseFrac × the
+    // scene size per pair (alternating signs), so ICP has a real residual to remove.
+    const noise = [[1, -1, 0.5], [-0.5, 1, -1], [1, 0.5, 1]].map((v) => v.map((x) => x * pickNoiseFrac * diag))
+    const fit = fitPointPairs([ia, ib, ic].map((i, k) => ({ src: at(moved, i), dst: at(src, i).map((v, j) => v + noise[k][j]) })), { scale: false })
+    const paired = await recon.editClouds({ mode: 'transform', sourceIds: [moved.id], settings: { matrix: matrixFromTransform(fit.transform) }, name: 'paired' })
+    const nIcp = useLog().entries.value.length
+    const icpSettings = { ...ICP_DEFAULTS, ...icp }
+    const aligned = await recon.editClouds({ mode: 'icp', sourceIds: [paired.id, ref.id], settings: icpSettings, name: 'aligned' })
+    const icpLog = lines(nIcp).filter((m) => m.startsWith('ICP'))
+    const nDist = useLog().entries.value.length
+    await recon.editClouds({ mode: 'distance', sourceIds: [aligned.id, ref.id], settings: { ...DISTANCE_DEFAULTS, ...distance }, name: 'distance' })
+    const distLog = lines(nDist).filter((m) => m.startsWith('Distance'))
+    // Residual of the whole round trip, per point (sampled).
+    const step = Math.max(1, Math.floor(n / sample))
+    function d2i(A, B, i) { return (A[i * 3] - B[i * 3]) ** 2 + (A[i * 3 + 1] - B[i * 3 + 1]) ** 2 + (A[i * 3 + 2] - B[i * 3 + 2]) ** 2 }
+    const residuals = (A) => { const r = []; for (let i = 0; i < n; i += step) r.push(Math.sqrt(d2i(A, P, i))); return r.sort((a, b) => a - b) }
+    const res = residuals(aligned.pos), resPaired = residuals(paired.pos)
+    const pairRes = [ia, ib, ic].map((i) => Math.sqrt(d2i(paired.pos, P, i)))
+    return { seconds: (performance.now() - t0) / 1000, srcPoints: n, refPoints: ref.count, diag,
+      perturb: { pickNoise: pickNoiseFrac * diag, rotateDeg, rotationDeg: +(rotationAngle(tf.R) * 180 / Math.PI).toFixed(3), translate: translateFrac.map((f) => f * diag) },
+      pairFit: { rms: fit.rms, rotationDeg: +(rotationAngle(fit.transform.R) * 180 / Math.PI).toFixed(3), residualAtPairs: pairRes },
+      afterPairs: { median: resPaired[resPaired.length >> 1], p95: resPaired[Math.floor(resPaired.length * 0.95)] },
+      roundTrip: { median: res[res.length >> 1], p95: res[Math.floor(res.length * 0.95)], max: res[res.length - 1], relMedian: res[res.length >> 1] / diag },
+      icpSettings, icpLog, distLog }
+  },
+
   // Settings ▸ worker count, as the preference applies it: now if the pool is idle,
   // and stored, so a `reopen` after this stage starts with that pool in any case.
   async setPoolSize(n) {

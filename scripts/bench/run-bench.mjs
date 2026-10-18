@@ -275,7 +275,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho', modeledit: 'modelEdit', scalebar: 'scaleBar', stats: 'modelStats', region: 'setRegion', regioncheck: 'regionCheck', togglepair: 'togglePair' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho', modeledit: 'modelEdit', scalebar: 'scaleBar', stats: 'modelStats', region: 'setRegion', regioncheck: 'regionCheck', togglepair: 'togglePair', aligncheck: 'alignCheck' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
