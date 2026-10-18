@@ -94,7 +94,9 @@ choosing a format.
 ## Cleaning, simplifying and measuring
 The **Tools → Mesh ▾** menu works on any mesh, built or imported. Like the point-cloud
 tools, each adds a new mesh and leaves the source alone; a later **Build Mesh** never
-replaces these copies.
+replaces these copies. Clean, Smooth and Decimate are also
+[Workflow Builder](guide:workflow-builder) blocks, to replay a cleanup chain after
+every run.
 
 - **Clean mesh…** runs, in order: weld duplicate vertices, remove small pieces (by
   share of the largest piece), remove long-edge bridges (triangles Poisson stretched

@@ -1,10 +1,14 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 import {
-  WORKFLOW_BLOCK_BY_ID, WORKFLOW_BLOCKS, WORKFLOW_CATEGORIES,
-  blockOutputValid, createWorkflowBlock, updateWorkflowSetting, workflowPreflight, workflowRecipeText,
+  WORKFLOW_BLOCK_BY_ID, WORKFLOW_BLOCKS, WORKFLOW_CATEGORIES, BLOCK_NAME_RE,
+  blockOutputValid, blockTargets, createWorkflowBlock, renameWorkflowBlock, suggestBlockName,
+  updateWorkflowSetting, workflowPreflight,
 } from '../../core/workflow.js'
+import { END_TARGET, GATE_METRIC_BY_ID, formatGateNumber, gateDefaults } from '../../core/workflowGate.js'
+import { parseWorkflowRecipe, workflowRecipeText } from '../../core/workflowRecipe.js'
 
 const props = defineProps({
   workflows: { type: Array, default: () => [] },
@@ -31,9 +35,12 @@ const draggedId = ref(null)
 const workflow = computed(() => props.workflows.find((w) => w.id === props.activeId) ?? props.workflows[0] ?? null)
 const activeBlock = computed(() => workflow.value?.blocks.find((b) => b.id === activeBlockId.value) ?? null)
 const activeSpec = computed(() => activeBlock.value ? WORKFLOW_BLOCK_BY_ID.get(activeBlock.value.type) : null)
+// Control blocks show every field: a gate without its threshold or failure action
+// is not a gate. `when` hides a field that does not apply (the fail target unless
+// the gate branches).
 const inspectorFields = computed(() => {
-  const fields = activeSpec.value?.fields ?? []
-  return workflow.value?.displayLevel === 'guided' ? fields.slice(0, 2) : fields
+  const fields = (activeSpec.value?.fields ?? []).filter((f) => !f.when || f.when(activeBlock.value.settings))
+  return workflow.value?.displayLevel === 'guided' && !activeSpec.value?.control ? fields.slice(0, 2) : fields
 })
 const checks = computed(() => workflow.value ? workflowPreflight(workflow.value, props.state) : [])
 const errors = computed(() => checks.value.filter((x) => x.level === 'error'))
@@ -42,6 +49,31 @@ const visiblePalette = computed(() => WORKFLOW_BLOCKS.filter((b) => {
   return !q || b.label.toLowerCase().includes(q) || b.category.toLowerCase().includes(q)
 }))
 const recipeText = computed(() => workflow.value ? workflowRecipeText(workflow.value) : '')
+// The editable recipe: a draft that follows the blocks until it is edited, then
+// waits for Apply (or Revert). Apply parses it back into the same block graph and
+// refuses, with line numbers, anything it cannot read exactly.
+const recipeDraft = ref('')
+const recipeDirty = ref(false)
+const recipeErrors = ref([])
+watch(recipeText, (text) => { if (!recipeDirty.value) recipeDraft.value = text }, { immediate: true })
+watch(() => workflow.value?.id, () => revertRecipe())
+function editRecipe(text) {
+  recipeDraft.value = text
+  recipeDirty.value = true
+}
+function revertRecipe() {
+  recipeDirty.value = false
+  recipeErrors.value = []
+  recipeDraft.value = recipeText.value
+}
+function applyRecipe() {
+  const { workflow: parsed, errors: problems } = parseWorkflowRecipe(recipeDraft.value, workflow.value)
+  recipeErrors.value = problems
+  if (!parsed) return
+  patchWorkflow({ name: parsed.name, displayLevel: parsed.displayLevel, defaults: parsed.defaults, blocks: parsed.blocks })
+  recipeDirty.value = false
+  recipeDraft.value = workflowRecipeText(parsed)
+}
 const hasEnabledBlocks = computed(() => workflow.value?.blocks.some((block) => block.enabled) ?? false)
 
 watch(workflow, (next) => {
@@ -64,6 +96,88 @@ function patchSetting(key, raw, type) {
   const settings = updateWorkflowSetting(activeBlock.value.settings, key, value)
   patchBlock(activeBlock.value.id, { settings })
 }
+// A multi-choice setting keeps its options' order, which is the run order.
+function toggleMulti(field, option, on) {
+  const current = activeBlock.value.settings[field.key] ?? []
+  const values = optionValues(field).filter((o) => (o === option ? on : current.includes(o)))
+  patchSetting(field.key, values, 'multi')
+}
+const optionValue = (o) => (o && typeof o === 'object' ? o.value : o)
+const optionLabel = (o) => (o && typeof o === 'object' ? o.label : String(o))
+const optionValues = (field) => (field.options ?? []).map(optionValue)
+
+// ── Names and jumps ──────────────────────────────────────────────────────────
+const nameError = ref('')
+function renameBlock(raw) {
+  const name = raw.trim()
+  const taken = workflow.value.blocks.some((b) => b.id !== activeBlock.value.id && b.name === name)
+  if (name && (!BLOCK_NAME_RE.test(name) || name === END_TARGET || taken)) {
+    nameError.value = taken ? `Another block is named “${name}”.` : 'Use letters, digits, - and _ (not “end”).'
+    return
+  }
+  nameError.value = ''
+  patchWorkflow({ blocks: renameWorkflowBlock(workflow.value, activeBlock.value.id, name) })
+}
+watch(activeBlockId, () => { nameError.value = '' })
+// The blocks a jump from the selected block may go to: those below it.
+const jumpChoices = computed(() => {
+  const index = workflow.value?.blocks.findIndex((b) => b.id === activeBlockId.value) ?? -1
+  return (workflow.value?.blocks ?? []).map((block, i) => ({ block, i })).filter((x) => x.i > index)
+    .map(({ block, i }) => ({ id: block.id, label: `${i + 1}. ${blockTitle(block)}` }))
+})
+function targetSelectValue(target) {
+  if (!target || target === END_TARGET) return target || ''
+  return workflow.value.blocks.find((b) => b.name === target)?.id ?? `missing:${target}`
+}
+// Pointing a jump at an unnamed block names it: the name is what the jump stores,
+// and what the recipe text writes.
+function setTarget(key, value) {
+  let blocks = workflow.value.blocks
+  let target = value
+  if (value && value !== END_TARGET) {
+    const block = blocks.find((b) => b.id === value)
+    if (!block) return
+    target = block.name || suggestBlockName(workflow.value, block.type)
+    if (!block.name) blocks = blocks.map((b) => (b.id === value ? { ...b, name: target } : b))
+  }
+  const id = activeBlock.value.id
+  blocks = blocks.map((b) => (b.id === id ? { ...b, settings: updateWorkflowSetting(b.settings, key, target) } : b))
+  patchWorkflow({ blocks })
+}
+function blockTitle(block) {
+  const label = WORKFLOW_BLOCK_BY_ID.get(block.type)?.label ?? block.type
+  return block.name ? `${label} · ${block.name}` : label
+}
+// The jumps drawn on the lane: on the jumping block, and as an incoming mark on the
+// target, so a branch reads in both directions.
+function jumpsOf(block) {
+  return blockTargets(block).filter((t) => t.target).map((t) => ({
+    ...t, text: `${t.role === 'goto' ? '→' : t.role === 'pass' ? 'pass →' : 'fail →'} ${t.target}`,
+  }))
+}
+const incoming = computed(() => {
+  const map = new Map()
+  for (const b of workflow.value?.blocks ?? []) {
+    for (const t of jumpsOf(b)) {
+      if (t.target === END_TARGET) continue
+      const from = `${t.role === 'goto' ? 'from' : `${t.role} of`} ${b.name || WORKFLOW_BLOCK_BY_ID.get(b.type)?.label}`
+      map.set(t.target, [...(map.get(t.target) ?? []), from])
+    }
+  }
+  return map
+})
+const blockIntro = computed(() => {
+  const spec = activeSpec.value
+  if (activeBlock.value?.type === 'gate') return 'Measures a Quality Report metric and decides how the run continues.'
+  if (activeBlock.value?.type === 'goto') return 'Continues the run at a block further down, or ends it.'
+  if (spec?.tool) return `Runs automatically on the ${spec.tool.kind} the previous step made, and adds a new one.`
+  return spec?.automated ? 'Runs automatically.' : 'Opens the existing command and waits for you to finish.'
+})
+function fieldDefault(field) {
+  if (field.key === 'threshold' && activeBlock.value?.type === 'gate') return gateDefaults(activeBlock.value.settings.metric).threshold
+  const v = activeSpec.value?.settings?.[field.key]
+  return typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' ? v : null
+}
 function addBlock(type) {
   const block = createWorkflowBlock(type)
   patchWorkflow({ blocks: [...workflow.value.blocks, block] })
@@ -76,6 +190,7 @@ function duplicateBlock(id) {
   const index = workflow.value.blocks.findIndex((b) => b.id === id)
   if (index < 0) return
   const source = workflow.value.blocks[index]
+  // The copy is unnamed: names are unique, and jumps keep pointing at the original.
   const copy = createWorkflowBlock(source.type)
   copy.enabled = source.enabled
   copy.settings = JSON.parse(JSON.stringify(source.settings))
@@ -106,6 +221,13 @@ function onDrop(id) {
 }
 function summary(block) {
   const spec = WORKFLOW_BLOCK_BY_ID.get(block.type)
+  if (block.type === 'gate') {
+    const s = block.settings
+    const m = GATE_METRIC_BY_ID.get(s.metric)
+    const fail = s.onFail === 'branch' ? `go to ${s.failTarget || '?'}` : s.onFail
+    return `${m?.label ?? s.metric} ${s.op} ${formatGateNumber(s.threshold)}${m?.unit ? ` ${m.unit}` : ''} · else ${fail}`
+  }
+  if (block.type === 'goto') return `Continue at ${block.settings.target || '?'}`
   const fields = spec?.fields?.slice(0, workflow.value.displayLevel === 'guided' ? 2 : 4) ?? []
   const values = fields.map((f) => `${f.label}: ${formatValue(block.settings[f.key])}`)
   return values.join(' · ') || (spec?.automated ? 'Default settings' : 'Pauses for user input')
@@ -113,6 +235,8 @@ function summary(block) {
 function plannedStatus(block) {
   const spec = WORKFLOW_BLOCK_BY_ID.get(block.type)
   if (!block.enabled) return 'Disabled'
+  if (block.type === 'gate') return 'Check'
+  if (block.type === 'goto') return 'Jump'
   if (!spec?.automated) return 'Pause'
   if (!blockOutputValid(block.type, props.state)) return 'Run'
   const reuse = block.reusePolicy === 'inherit' ? workflow.value.defaults.reusePolicy : block.reusePolicy
@@ -121,11 +245,19 @@ function plannedStatus(block) {
 function formatValue(value) {
   if (value === true) return 'On'
   if (value === false) return 'Off'
+  if (Array.isArray(value)) return value.join(', ') || 'None'
   if (value == null || value === '') return 'Auto'
   return String(value)
 }
 async function copyRecipe() {
-  await navigator.clipboard?.writeText(recipeText.value)
+  await navigator.clipboard?.writeText(recipeDraft.value)
+}
+// A finished run's gates, for the Recent runs list.
+function gateSummary(run) {
+  return (run.gates ?? []).map((g) => {
+    const m = GATE_METRIC_BY_ID.get(g.metric)
+    return `${m?.label ?? g.metric} ${formatGateNumber(g.value)}${m?.unit ? ` ${m.unit}` : ''}: ${g.outcome}`
+  }).join(' · ')
 }
 </script>
 
@@ -169,9 +301,18 @@ async function copyRecipe() {
       </header>
 
       <div v-if="view === 'recipe'" class="recipe-pane">
-        <span class="field-hint">Read-only preview of the blocks and settings in this workflow.</span>
-        <textarea class="field-input" :value="recipeText" readonly spellcheck="false"></textarea>
-        <button type="button" class="btn copy-button" @click="copyRecipe">Copy recipe</button>
+        <span class="field-hint">One block per line, top to bottom. Edit the text and choose <strong>Apply recipe</strong> to rebuild the blocks.</span>
+        <textarea class="field-input" aria-label="Recipe text" :value="recipeDraft" :readonly="running" spellcheck="false"
+          @input="editRecipe($event.target.value)"></textarea>
+        <ul v-if="recipeErrors.length" class="recipe-errors" role="alert">
+          <li v-for="(item, index) in recipeErrors" :key="index">Line {{ item.line }}: {{ item.message }}</li>
+        </ul>
+        <div class="recipe-actions">
+          <span v-if="recipeDirty" class="field-hint">Edited — not applied yet.</span>
+          <button type="button" class="btn" @click="copyRecipe">Copy recipe</button>
+          <button type="button" class="btn" :disabled="!recipeDirty" @click="revertRecipe">Revert</button>
+          <button type="button" class="btn btn-primary" :disabled="!recipeDirty || running" @click="applyRecipe">Apply recipe</button>
+        </div>
       </div>
 
       <div v-else class="builder-grid">
@@ -184,7 +325,7 @@ async function copyRecipe() {
               <h4>{{ category }}</h4>
               <button v-for="block in visiblePalette.filter((b) => b.category === category)" :key="block.id"
                 type="button" class="block-option" :disabled="running" @click="addBlock(block.id)">
-                <span>{{ block.label }}</span><small>{{ block.automated ? 'Automatic' : 'Interactive' }}</small>
+                <span>{{ block.label }}</span><small>{{ block.control ? 'Control' : block.automated ? 'Automatic' : 'Interactive' }}</small>
               </button>
             </section>
           </template>
@@ -198,9 +339,10 @@ async function copyRecipe() {
           </section>
           <section v-if="runs.length" class="runs">
             <h4>Recent runs</h4>
-            <div v-for="run in runs.slice(0, 5)" :key="run.id" class="run-row">
+            <div v-for="run in runs.slice(0, 5)" :key="run.id" class="run-row" :title="gateSummary(run) || undefined">
               <span>{{ run.workflow?.name || 'Workflow' }}</span>
               <small :class="run.outcome">{{ run.outcome }}</small>
+              <small v-if="run.gates?.length" class="run-gates">{{ gateSummary(run) }}</small>
             </div>
           </section>
         </aside>
@@ -237,8 +379,12 @@ async function copyRecipe() {
             <span class="drag" title="Drag to reorder">⠿</span>
             <span class="step">{{ index + 1 }}</span>
             <div class="block-copy">
-              <strong>{{ WORKFLOW_BLOCK_BY_ID.get(block.type)?.label }}</strong>
-              <small>{{ summary(block) }}</small>
+              <strong>{{ WORKFLOW_BLOCK_BY_ID.get(block.type)?.label }}<span v-if="block.name" class="block-name">{{ block.name }}</span></strong>
+              <small>{{ statuses[block.id]?.gate ? statuses[block.id].detail : summary(block) }}</small>
+              <span v-if="jumpsOf(block).length || incoming.get(block.name)" class="jumps">
+                <span v-for="jump in jumpsOf(block)" :key="jump.key" class="jump" :class="jump.role">{{ jump.text }}</span>
+                <span v-for="from in incoming.get(block.name) ?? []" :key="from" class="jump incoming">← {{ from }}</span>
+              </span>
             </div>
             <span v-if="!WORKFLOW_BLOCK_BY_ID.get(block.type)?.automated" class="badge">Interactive</span>
             <span class="status">{{ statuses[block.id]?.status || plannedStatus(block) }}</span>
@@ -263,20 +409,52 @@ async function copyRecipe() {
         <aside class="inspector">
           <template v-if="activeBlock && activeSpec">
             <h3>{{ activeSpec.label }}</h3>
-            <p>{{ activeSpec.automated ? 'Runs automatically.' : 'Opens the existing command and waits for you to finish.' }}</p>
+            <p>{{ blockIntro }}</p>
+            <label class="field">
+              <span class="field-label"><FieldHelp op="workflow-builder" param="name">Name</FieldHelp></span>
+              <input class="field-input" :value="activeBlock.name" :disabled="running" placeholder="Optional — what jumps go to"
+                aria-label="Block name" @change="renameBlock($event.target.value)" />
+              <small v-if="nameError" class="field-error">{{ nameError }}</small>
+            </label>
             <template v-if="activeSpec.fields.length">
-              <label v-for="field in inspectorFields" :key="field.key" class="field">
-                <span class="field-label">{{ field.label }}</span>
-                <select v-if="field.type === 'select'" class="field-input field-select" :disabled="running" :value="activeBlock.settings[field.key]"
-                  @change="patchSetting(field.key, $event.target.value, field.type)">
-                  <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
-                </select>
-                <input v-else-if="field.type === 'number'" class="field-input" type="number" :disabled="running" :min="field.min" :max="field.max"
-                  :value="activeBlock.settings[field.key]" @change="patchSetting(field.key, $event.target.value, field.type)" />
-                <input v-else class="checkbox" type="checkbox" :disabled="running" :checked="activeBlock.settings[field.key]"
-                  @change="patchSetting(field.key, $event.target.checked, field.type)" />
-              </label>
+              <template v-for="field in inspectorFields" :key="field.key">
+                <fieldset v-if="field.type === 'multi'" class="field multi" :disabled="running">
+                  <legend class="field-label">{{ field.label }}</legend>
+                  <label v-for="option in optionValues(field)" :key="option" class="multi-option">
+                    <input type="checkbox" :checked="(activeBlock.settings[field.key] ?? []).includes(option)"
+                      @change="toggleMulti(field, option, $event.target.checked)" />
+                    <span>{{ option }}</span>
+                  </label>
+                </fieldset>
+                <label v-else class="field">
+                  <span class="field-label">
+                    <FieldHelp v-if="field.help && field.type === 'number'" op="workflow-builder" :param="field.key"
+                      :value="activeBlock.settings[field.key]" :default-value="fieldDefault(field)">{{ field.label }}</FieldHelp>
+                    <FieldHelp v-else-if="field.help" op="workflow-builder" :param="field.key">{{ field.label }}</FieldHelp>
+                    <template v-else>{{ field.label }}</template>
+                  </span>
+                  <select v-if="field.type === 'select'" class="field-input field-select" :disabled="running" :value="activeBlock.settings[field.key]"
+                    @change="patchSetting(field.key, $event.target.value, field.type)">
+                    <option v-for="option in field.options" :key="optionValue(option)" :value="optionValue(option)">{{ optionLabel(option) }}</option>
+                  </select>
+                  <select v-else-if="field.type === 'target'" class="field-input field-select" :disabled="running"
+                    :value="targetSelectValue(activeBlock.settings[field.key])" @change="setTarget(field.key, $event.target.value)">
+                    <option value="">{{ field.key === 'passTarget' ? 'Next block' : 'Choose a block…' }}</option>
+                    <option v-for="choice in jumpChoices" :key="choice.id" :value="choice.id">{{ choice.label }}</option>
+                    <option value="end">End of workflow</option>
+                    <option v-if="targetSelectValue(activeBlock.settings[field.key]).startsWith('missing:')"
+                      :value="targetSelectValue(activeBlock.settings[field.key])" disabled>Missing: {{ activeBlock.settings[field.key] }}</option>
+                  </select>
+                  <input v-else-if="field.type === 'number'" class="field-input" type="number" :disabled="running" :min="field.min" :max="field.max"
+                    :value="activeBlock.settings[field.key]" @change="patchSetting(field.key, $event.target.value, field.type)" />
+                  <input v-else-if="field.type === 'text'" class="field-input" type="text" :disabled="running"
+                    :value="activeBlock.settings[field.key]" @change="patchSetting(field.key, $event.target.value, field.type)" />
+                  <input v-else class="checkbox" type="checkbox" :disabled="running" :checked="activeBlock.settings[field.key]"
+                    @change="patchSetting(field.key, $event.target.checked, field.type)" />
+                </label>
+              </template>
             </template>
+            <template v-if="!activeSpec.control">
             <label class="field"><span class="field-label">Existing output</span>
               <select class="field-input field-select" :value="activeBlock.reusePolicy" :disabled="running" @change="patchBlock(activeBlock.id, { reusePolicy: $event.target.value })">
                 <option value="inherit">Workflow default</option><option value="valid">Reuse</option>
@@ -289,6 +467,7 @@ async function copyRecipe() {
                 <option value="continue">Continue</option><option value="stop">Stop</option>
               </select>
             </label>
+            </template>
             <details v-if="workflow.displayLevel === 'expert'">
               <summary>All settings</summary>
               <pre>{{ JSON.stringify(activeBlock.settings, null, 2) }}</pre>
@@ -299,7 +478,8 @@ async function copyRecipe() {
       </div>
 
       <div v-if="pause" class="pause-banner" :class="pause.kind">
-        <strong>{{ pause.kind === 'interactive' ? 'Waiting for you' : pause.kind === 'reuse' ? 'Reuse existing output?' : 'Workflow paused' }}</strong>
+        <strong>{{ pause.kind === 'interactive' ? 'Waiting for you' : pause.kind === 'reuse' ? 'Reuse existing output?'
+          : pause.kind === 'gate' ? 'Quality gate failed' : 'Workflow paused' }}</strong>
         <span>{{ pause.message }}</span>
         <template v-if="pause.kind === 'reuse'">
           <button type="button" class="btn" @click="emit('respond', 'reuse')">Reuse</button>
@@ -310,7 +490,7 @@ async function copyRecipe() {
           <button type="button" class="btn btn-primary" @click="emit('respond', 'continue')">Mark complete &amp; continue</button>
           <button type="button" class="btn" @click="emit('respond', 'stop')">Stop</button>
         </template>
-        <template v-else-if="pause.kind === 'warning'">
+        <template v-else-if="pause.kind === 'warning' || pause.kind === 'gate'">
           <button type="button" class="btn btn-primary" @click="emit('respond', 'continue')">Continue</button>
           <button type="button" class="btn" @click="emit('respond', 'stop')">Stop</button>
         </template>
@@ -371,6 +551,8 @@ h4 { margin: 16px 0 6px; color: var(--text-dim); font-size: 10px; text-transform
 .run-row { display: flex; justify-content: space-between; gap: 6px; padding: 4px 2px; }
 .run-row small.completed { color: #36a269; }
 .run-row small.failed { color: #d35353; }
+.run-row { flex-wrap: wrap; }
+.run-row .run-gates { flex-basis: 100%; color: var(--text-dim); }
 .workflow-lane { overflow: auto; padding: 14px 18px 40px; background: var(--bg); }
 .policy-row { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 12px; margin-bottom: 12px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 7px; }
 .policy-row .field-select { min-width: 0; }
@@ -382,6 +564,14 @@ h4 { margin: 16px 0 6px; color: var(--text-dim); font-size: 10px; text-transform
 .workflow-block.running { border-color: var(--accent); }
 .workflow-block.completed, .workflow-block.reused { border-left: 4px solid #36a269; }
 .workflow-block.failed { border-left: 4px solid #d35353; }
+.workflow-block.passed { border-left: 4px solid #36a269; }
+.workflow-block.skipped { opacity: .55; border-left: 4px dashed var(--panel-border); }
+.block-name { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: var(--hover-bg); font: 400 11px ui-monospace, monospace; }
+.jumps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.jump { font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--panel-border); color: var(--text-dim); }
+.jump.fail { border-color: #d35353; color: #d35353; }
+.jump.pass { border-color: #36a269; color: #36a269; }
+.jump.incoming { border-style: dashed; }
 .drag { cursor: grab; color: var(--text-dim); }
 .step { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: var(--hover-bg); font-size: 11px; }
 .block-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -404,7 +594,11 @@ h4 { margin: 16px 0 6px; color: var(--text-dim); font-size: 10px; text-transform
 .pause-banner span { flex: 1; }
 .recipe-pane { flex: 1; min-height: 0; padding: 18px; display: flex; flex-direction: column; gap: 10px; background: var(--bg); }
 .recipe-pane textarea { width: 100%; box-sizing: border-box; flex: 1; resize: none; font-family: ui-monospace, monospace; }
-.copy-button { align-self: flex-end; }
+.recipe-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.recipe-errors { margin: 0; padding: 8px 8px 8px 24px; max-height: 120px; overflow: auto; border: 1px solid #d35353; border-radius: 5px; color: #d35353; font-size: 12px; }
+.inspector .field-error { color: #d35353; }
+.inspector fieldset.multi { border: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.inspector .multi-option { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .empty-lane { padding: 48px 24px; text-align: center; color: var(--text-dim); background: var(--panel); border: 1px dashed var(--panel-border); border-radius: 7px; }
 .empty-lane h3 { color: var(--text); font-size: 17px; }
 .empty-lane p { line-height: 1.5; }
