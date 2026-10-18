@@ -53,6 +53,7 @@ or drop that file in the dialog. It is cached like any other model, and detectio
 continues on its own. Use DISK if your work is commercial.
 
 ## Quality preset
+<!-- param: preset  default: Balanced -->
 Start with **Balanced**. Choose **Detailed** for high-resolution aerial or film scans
 when small texture matters, and **Fast** for a first-pass check. Higher resolution and
 keypoint limits increase the cost of the following matching stage, often more than
