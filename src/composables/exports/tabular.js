@@ -3,6 +3,7 @@ import { downloadBlob } from '../../utils/download.js'
 import { partsToBlob } from '../../utils/blobParts.js'
 import { jsonParts, jsonArrayItemParts, jsonArrayEnd, lazyArray } from '../../core/io/parts.js'
 import { asPairList } from '../../core/sfm/matchCodec.js'
+import { isPersistedMatchEntry } from '../../core/features/matchStorage.js'
 
 // The tabular exports, split out of useExports: camera poses, sensors and both
 // fiducial tables as CSV, and keypoints / matches as JSON streamed from disk.
@@ -83,7 +84,9 @@ export function createTabularExports({
       const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
       const byUuid = Object.fromEntries(images.value.map(img => [img.uuid, img.name]))
       const out = jsonArrayWriter()
-      const done = [...matchStore.value.values()].filter((entry) => entry.status === 'done')
+      // The pairs the project keeps (a rejected pair has no matches and is not saved),
+      // so the file is the same before and after a reopen.
+      const done = [...matchStore.value.values()].filter(isPersistedMatchEntry)
       // In the store's order, which after a reopen is the document's: a few large reads.
       await matchesStore.streamPairMatches(done, (entry, m) => out.add({
         imageA: byUuid[entry.idA] ?? entry.idA,
