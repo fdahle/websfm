@@ -60,10 +60,10 @@ To go finer, limit the area with Region and rebuild the surface.
 ## View blending
 <!-- param: blend default: Mosaic -->
 **Mosaic** (the default) builds the orthophoto the way mapping software does. Each
-area comes from the photo that looks most straight down on it, at the finest ground
-resolution, so on a regular flight the orthophoto is a patchwork of regions around
-each photo's centre. Isolated single pixels are folded into the surrounding region.
-Two options then hide the [seams](help:seamline): **Colour balance** and **Seam blending width**.
+area comes from one photo, mostly the one that looks most straight down on it, so on
+a regular flight the orthophoto is a patchwork of regions around each photo's centre.
+**Seamlines** decides where the borders between those regions, the
+[seams](help:seamline), run; **Colour balance** and **Seam blending** then hide them.
 
 **Best match** takes each pixel from the view whose depth matched best. It can switch
 source from one pixel to the next, which shows as speckled seams on uneven exposure.
@@ -76,17 +76,57 @@ across seams compared with the step inside one photo (×1 means seams do not sho
 colour), and how many seam pairs there are per 100 pixels (a speckled source choice
 scores high).
 
+## Seamlines
+<!-- param: seamline default: Graph cut -->
+Mosaic only. Where the [seams](help:seamline) between photos run. A seam through a
+building shows the roof leaning one way on one side and the other way on the other,
+and a seam through a tree cuts it into two shapes, because tall objects look
+different from each photo.
+
+**Graph cut** (the default) places the seams where neighbouring photos agree: along
+open ground and roads, around buildings and trees. It finds the labelling with the
+lowest total cost ([graph cut](help:graph-cut)): every pixel costs a little more the
+less straight down its photo looks, and every pixel of seam costs the colour
+difference between the two photos there. The seams are placed once for the whole
+orthophoto on a coarse grid of about a million cells, before the blocks; on a large
+orthophoto one grid cell spans several pixels, so seams run in small steps that the
+seam blending hides. It reads every photo once more at low resolution (shared with
+Colour balance), and the log reports how many cells moved off their most nadir photo.
+
+**Most nadir photo** gives each area to the photo that looks most straight down on
+it, at the finest ground resolution, whatever lies there: the seams run halfway
+between neighbouring photos' centres, like the cells of a Voronoi diagram. Isolated
+single pixels are folded into the surrounding region.
+
 ## Colour balance
 <!-- param: colourBalance default: on -->
 Mosaic only. Evens out exposure: each photo gets one brightness gain per colour,
 fitted so overlapping photos agree. The log lists the smallest, median and largest
-gain. A gain far from 1 points at a photo with very different exposure; a gain that
-hits the 0.5–2 limit is reported as a warning. The fit reads every photo once more at
-low resolution, which adds a short pass before the blocks.
+gain. A gain far from 1 points at a photo with very different exposure, such as a
+camera that changed its aperture during the flight; a gain that hits the 0.25–4 limit
+(two stops either way) is reported as a warning. The fit reads every photo once more
+at low resolution, which adds a short pass before the blocks.
+
+## Seam blending
+<!-- param: seamBlend default: Multiband -->
+Mosaic only. How the two photos at a seam are mixed.
+
+**Multiband** (the default, [multiband blending](help:multiband-blending)) splits
+each photo into frequency bands and mixes each band over its own width: fine detail
+switches from one photo to the other within a pixel or two, so a small misalignment
+does not show as a double image, while brightness and colour fade over about a
+hundred pixels, so no step shows either. Away from the seams every pixel keeps its
+own photo's colour. Each block is computed with a border of about 200 pixels, so a
+multiband orthophoto takes more time and memory than a feathered one; the log reports
+both.
+
+**Feather** cross-fades the two photos over a band of **Seam blending width**: hides
+exposure steps with a wide band, but anything that does not line up shows as a soft
+double image inside it.
 
 ## Seam blending width
 <!-- param: seamWidth default: 1 % -->
-Mosaic only. Cross-fades neighbouring photos over a band at each
+Feather only. Cross-fades neighbouring photos over a band at each
 [seam](help:seamline), given as a % of
 the orthophoto's shorter side (at most 128 pixels). Wider bands hide exposure and
 colour steps better, but small misalignments show as a soft double image inside the

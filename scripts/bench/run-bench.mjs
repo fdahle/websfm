@@ -48,7 +48,7 @@ const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = { ...(args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}) }
-for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'exportCloudsProject', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
+for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'exportCloudsProject', 'crs', 'profile', 'project', 'exportOrthoCog']) if (args[k] !== undefined) cfg[k] = args[k]
 for (const k of ['detect', 'match', 'recon']) cfg[k] = { ...(cfg[k] ?? {}), ...(args[k] ? json(args[k]) : {}) }
 if (!cfg.images) throw new Error('--images <folder> (or "images" in --config) is required')
 const name = cfg.name ?? 'bench'
@@ -150,7 +150,11 @@ const quiet = /^Matched: |^SIFT (start|done): |^Added image: |^Metadata /
 // A persistent profile on disk, deleted afterwards: an incognito context keeps OPFS and
 // blobs in memory, which a 2.9 GB dataset (quarry) exhausts — and the user's browser
 // stores them on disk too.
-const profileDir = `${outPrefix}.profile`
+// `profile: "<dir>"` uses (and keeps) that profile instead: a first run builds the
+// project there, later runs start with `reopen` and repeat only the stages they name
+// (e.g. `reopen,ortho:a,ortho:b` on one set of depth maps), on the project named
+// `project` (default: the newest). Such a run skips ingest. Delete the profile by hand.
+const profileDir = cfg.profile ? resolve(repo, cfg.profile) : `${outPrefix}.profile`
 // Precise heap readings + a callable gc(), so the `== memory` lines below report live
 // bytes rather than quantised numbers that include uncollected garbage.
 // `maxOldSpaceMb` raises V8's heap ceiling for the page AND its workers (one renderer
@@ -218,7 +222,8 @@ try {
   await page.waitForFunction(() => window.benchReady === true, null, { timeout: 120_000 })
 
   const t0 = Date.now()
-  await page.evaluate((o) => window.bench.start(o), { name, sceneType: cfg.sceneType ?? 'object', crs: cfg.crs })
+  const reuse = !!cfg.profile && stages[0] === 'reopen'
+  if (!reuse) await page.evaluate((o) => window.bench.start(o), { name, sceneType: cfg.sceneType ?? 'object', crs: cfg.crs })
   if (cfg.reference) console.log('== reference:', JSON.stringify(await page.evaluate((r) => window.bench.setReference(r), await loadReference(cfg.reference))))
   // In batches, so the page never holds the whole dataset as blobs at once.
   let added = 0
@@ -226,7 +231,7 @@ try {
   // Under the same crash/stall watchdog as the stages: a renderer that dies mid-ingest
   // (Iceland 1980, 125 × 130 MP scans under a memory cap) left the run waiting forever.
   try {
-    for (let i = 0; i < list.length; i += 32) {
+    for (let i = 0; i < (reuse ? 0 : list.length); i += 32) {
       lastLogAt = Date.now()
       added = await Promise.race([page.evaluate((l) => window.bench.addImages(l), list.slice(i, i + 32)), watchdog()])
     }
@@ -364,6 +369,18 @@ try {
     }
     await new Promise((res) => out.end(res))
     console.log(`== exportOrtho: ${(size / 1024 ** 2).toFixed(1)} MiB → ${file}`)
+    // `exportOrthoCog: true`: the full-resolution ortho too (its stored COG), for crops.
+    if (cfg.exportOrthoCog) {
+      const n = await page.evaluate(() => window.bench.orthoCogSize())
+      const tif = `${outPrefix}${tag ? `.${tag}` : ''}.ortho.tif`
+      const w = createWriteStream(tif)
+      for (let s = 0; s < n; s += 8 << 20) {
+        const b64 = await page.evaluate(([a, k]) => window.bench.orthoCogChunk(a, k), [s, 8 << 20])
+        await new Promise((res, rej) => w.write(Buffer.from(b64, 'base64'), (e) => (e ? rej(e) : res())))
+      }
+      await new Promise((res) => w.end(res))
+      console.log(`== exportOrtho: COG ${(n / 1024 ** 2).toFixed(1)} MiB → ${tif}`)
+    }
   }
   // After the texture stage: its atlas pages as <out>.texture-<n>.jpg.
   const exportTexturePages = async (tag) => {
@@ -400,7 +417,8 @@ try {
     }
   }
   const reopen = async () => {
-    const id = await page.evaluate(() => window.bench.currentProject())
+    // A kept profile (`profile`) opened in a new run has no current project yet: its newest.
+    const id = await page.evaluate(() => window.bench.currentProject()) ?? await page.evaluate((n) => window.bench.latestProject(n), cfg.project ?? null)
     lastLogAt = Date.now()
     await page.reload()
     await page.waitForFunction(() => window.benchReady === true, null, { timeout: 120_000 })
@@ -483,8 +501,8 @@ try {
       await download.saveAs(file)
       console.log(`== ${key}: SfM input dump ${(bytes / 1024 ** 2).toFixed(1)} MiB → ${file}`)
     }
-    if (stage === 'recon') {
-      heap.mark('(tail)')
+    if (stage === 'recon' || stage === 'ortho') {
+      heap.mark(stage === 'ortho' ? '(ortho)' : '(tail)')
       const h = heap.take()
       r.workerHeap = h
       const gb = (v) => `${(v / 1024 ** 3).toFixed(2)} GB`
@@ -559,7 +577,7 @@ try {
   // The sampler's poll timer would otherwise keep node alive after the browser closes.
   await heap?.stop()
   await browser.close()
-  await rm(profileDir, { recursive: true, force: true }).catch(() => {})
+  if (!cfg.profile) await rm(profileDir, { recursive: true, force: true }).catch(() => {})
   logOut.end()
   vite?.kill()
   server?.close()

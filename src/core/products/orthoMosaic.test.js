@@ -118,7 +118,7 @@ describe('mosaic orthophoto', () => {
     const best = await run(s, maps, { blend: 'best', blockSize: 7 })
     expect(mosaic.stats.seamDensity).toBeLessThan(best.stats.seamDensity / 5)
     expect(mosaic.covered).toBe(s.width * s.height)
-    expect(mosaic.mosaic).toEqual({ seamCells: 0, smoothPasses: 2, balance: null })
+    expect(mosaic.mosaic).toEqual({ seamline: 'nadir', seamBlend: 'feather', seamCells: 0, smoothPasses: 2, levels: 0, seamCut: null, balance: null })
   })
 
   it('a hard seam reproduces the source colours exactly; feathering ramps across the seam', async () => {
@@ -202,5 +202,65 @@ describe('mosaic orthophoto', () => {
     for (let i = 0; i < s.width * s.height; i++) if (res.rgba[i * 4 + 2] === 255) blue.push(res.labels[i])
     expect(blue.length).toBeGreaterThan(0)
     expect(blue.every((l) => l === 1)).toBe(true)
+  })
+})
+
+describe('graph-cut seamlines and multiband blending', () => {
+  // A "building" on the nadir seam (x = 0): ground x ∈ [−0.75, 0.75], y ∈ [−1, 1]. Map 0
+  // shows it grey like the ground around it, map 1 shows it red (its relief lean).
+  const B = { x0: -0.75, x1: 0.75, y0: -1, y1: 1 }
+  const photo = (mi, m) => {
+    const data = new Uint8ClampedArray(m.width * m.height * 4).fill(128)
+    if (mi === 1) {
+      // Map 1 (camera at x = 2): u = 2(x − 2) + 32, v = 32 − 2y.
+      for (let v = 0; v < m.height; v++) for (let u = 0; u < m.width; u++) {
+        const x = (u - 32) / 2 + 2, y = (32 - v) / 2
+        if (x >= B.x0 && x <= B.x1 && y >= B.y0 && y <= B.y1) data.set([255, 0, 0, 255], 4 * (v * m.width + u))
+      }
+    }
+    return { width: m.width, height: m.height, map: null, data }
+  }
+  const inBuilding = (s, c, r) => {
+    const x = cellX(s, c), y = s.originY - (r + 0.5) * s.gsd
+    return x > B.x0 && x < B.x1 && y > B.y0 && y < B.y1
+  }
+  it('routes the seam around a building the photos disagree on; nadir cuts through it', async () => {
+    const s = plane(40, 20, 0.25)
+    const maps = [nadirMap(-2, [0, 0, 0]), nadirMap(2, [0, 0, 0])]
+    const sources = async (opts) => {
+      const res = await run(s, maps, { blend: 'mosaic', seamWidth: 0, ...opts }, { loadImage: async (mi, m) => photo(mi, m) })
+      const set = new Set()
+      for (let r = 0; r < s.height; r++) for (let c = 0; c < s.width; c++) if (inBuilding(s, c, r)) set.add(res.labels[r * s.width + c])
+      return { res, set }
+    }
+    const nadir = await sources({ seamline: 'nadir' })
+    expect(nadir.set.size).toBe(2)
+    const cut = await sources({ seamline: 'graphcut', blockSize: 7 })
+    expect(cut.set.size).toBe(1)
+    const sc = cut.res.mosaic.seamCut
+    expect(sc.factor).toBe(1)
+    expect(sc.energy).toBeLessThan(sc.energyNadir)
+    expect(sc.changedCells).toBeGreaterThan(0)
+    expect(cut.res.mosaic.smoothPasses).toBe(0)
+    // Far from the building the nearest-nadir partition stands.
+    for (let c = 0; c < s.width; c++) if (Math.abs(cellX(s, c)) > 1.5) expect(cut.res.labels[c]).toBe(cellX(s, c) < 0 ? 0 : 1)
+  })
+
+  it('multiband hides an exposure step, and leaves the photos alone away from the seam', async () => {
+    const s = plane(80, 12, 0.125)
+    const maps = [nadirMap(-2, [0, 0, 0]), nadirMap(2, [0, 0, 0])]
+    const loadImage = async (mi, m) => ({ width: m.width, height: m.height, map: null,
+      data: new Uint8ClampedArray(m.width * m.height * 4).fill(mi ? 90 : 170) })
+    const hard = await run(s, maps, { blend: 'mosaic', seamWidth: 0 }, { loadImage })
+    const mb = await run(s, maps, { blend: 'mosaic', seamBlend: 'multiband', blendLevels: 2, blockSize: 11 }, { loadImage })
+    expect(mb.mosaic.levels).toBe(2)
+    expect(mb.mosaic.seamBlend).toBe('multiband')
+    expect(mb.stats.seamStep).toBeLessThan(hard.stats.seamStep / 4)
+    const row = 6, red = (res, c) => res.rgba[(row * s.width + c) * 4]
+    expect(red(mb, 0)).toBe(170)
+    expect(red(mb, s.width - 1)).toBe(90)
+    for (let c = 1; c < s.width; c++) expect(red(mb, c)).toBeLessThanOrEqual(red(mb, c - 1))
+    // Labels are the hard partition; the blend only changes colours.
+    expect([...mb.labels]).toEqual([...hard.labels])
   })
 })

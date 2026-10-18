@@ -20,6 +20,8 @@ import { sampleRgbaBilinear } from './undistort.js'
 import { srgbToLinear, linearToSrgb, fitGains, gainSampleClipped, growable } from './colourGains.js'
 import { sampleSurfaceWindow } from './surface.js'
 import { createOrthoStats } from '../eval/orthoStats.js'
+import { seamGrid, seamSampleCol, createSeamSurvey, addSeamCandidate, solveSeams, SEAM_CUT_CELLS, SEAM_CANDIDATES } from './seamCut.js'
+import { MULTIBAND_LEVELS, MULTIBAND_BYTES_PER_CELL, multibandReach, createMultiband, multibandBegin, multibandAdd, multibandFinish } from './multiband.js'
 
 // Project a world point into a map, requiring it in front of the camera.
 // Returns { u, v, depth } (u,v continuous px) or null.
@@ -413,12 +415,21 @@ export const ORTHO_BLOCK = 2048
 //       (chamfer distance of the label map). seamCells 0 = hard seams.
 // Pass 2 colours a window image by image, only the cells each image owns or feathers
 // into. A cell whose smoothed label cannot see it falls back to its pass-1 label.
+// Two alternatives, chosen by opts.seamline / opts.seamBlend:
+//   O5  seamline 'graphcut' (seamCut.js): the labels come from a min-cut over colour
+//       difference + nadir cost, solved once on a coarse grid of the whole ortho
+//       during the gain pass; pass 1 then only supplies the fallback labels.
+//   O4b seamBlend 'multiband' (multiband.js): pass 2 builds the hard-seam mosaic,
+//       then a third pass adds each image's Laplacian-pyramid correction over a ring
+//       around its region (MULTIBAND_LEVELS bands), instead of the linear ramp.
 //
 // Exactness (pinned in streamedProducts.test.js: small blocks ≡ one block): pass-1
 // labels are per cell; a smoothed label reads raw labels up to MOSAIC_SMOOTH_PASSES
-// cells away, a feathering weight reads smoothed labels up to seamCells away, and the
-// gap fill + stats read colours fillRadius + 1 away, so the block halo is the sum
-// (orthoHalo). The chamfer weights are integers (3/4) and the gains are grid-global,
+// cells away (a graph-cut label reads only the grid-global coarse labels), a
+// feathering weight reads labels up to seamCells away (a multiband correction up to
+// multibandReach().halo, on windows aligned to its pyramid lattice), and the gap fill +
+// stats read colours fillRadius + 1 away, so the block halo is the sum (orthoHalo). The
+// chamfer weights are integers (3/4) and the gains and coarse labels are grid-global,
 // so nothing depends on the block layout.
 export const MOSAIC_SMOOTH_PASSES = 2
 export const MAX_SEAM_CELLS = 128
@@ -431,9 +442,20 @@ export function mosaicSeamCells(width, height, seamWidthPct = 0) {
 }
 
 // How far beyond its core a block must be computed for its core cells to be exact.
-export function orthoHalo({ width, height, blend = 'best', fillRadius = 2, seamWidth = 0 }) {
+export function orthoHalo({ width, height, blend = 'best', fillRadius = 2, seamWidth = 0, seamline = 'nadir', seamBlend = 'feather', blendLevels = MULTIBAND_LEVELS }) {
   const fill = Math.max(0, Math.floor(fillRadius)) + 1
-  return blend === 'mosaic' ? fill + mosaicSeamCells(width, height, seamWidth) + MOSAIC_SMOOTH_PASSES : fill
+  if (blend !== 'mosaic') return fill
+  const band = seamBlend === 'multiband' ? multibandReach(blendLevels).halo : mosaicSeamCells(width, height, seamWidth)
+  return fill + band + (seamline === 'graphcut' ? 0 : MOSAIC_SMOOTH_PASSES)
+}
+
+// A mosaic's seam options, resolved (core defaults: the O2–O4a nearest-nadir partition
+// with feathering; the app's defaults are in defaults.user.js ORTHO_DEFAULTS).
+function mosaicMode(opts) {
+  const mosaic = opts.blend === 'mosaic'
+  const graphcut = mosaic && opts.seamline === 'graphcut', multiband = mosaic && opts.seamBlend === 'multiband'
+  const levels = opts.blendLevels ?? MULTIBAND_LEVELS
+  return { mosaic, graphcut, multiband, levels, align: multiband ? 1 << levels : 1 }
 }
 
 // sRGB ↔ linear light: core/products/colourGains.js (re-exported for existing callers).
@@ -645,32 +667,78 @@ function finishMosaicWindow(win) {
   }
 }
 
-// O3: per-image, per-channel gains (colourGains.js fitGains, which explains the model and
-// its guards), from a lattice of every k-th cell. Each map is read once with its photo
-// decoded at ~2 px per LATTICE spacing; every lattice cell a map sees gets that map's
-// colour in linear light, unless a channel is clipped.
-async function mosaicGains(surface, geom, metas, loadMap, loadImage, toSfm, gp, opts, tick) {
+// O3 + O5: the mosaic's one read of every photo before the blocks. Each map is read
+// once with its photo decoded coarse, at ~2 px per sampling step:
+//   - gains (colourBalance) per image and channel (colourGains.js fitGains, which
+//     explains the model and its guards), from a lattice of every k-th cell: every
+//     lattice cell a map sees gets that map's colour in linear light, unless a channel
+//     is clipped;
+//   - graph-cut seams (seamline 'graphcut', seamCut.js): every coarse cell of the seam
+//     grid keeps its most nadir views with their footprint and colour, and after the
+//     gains the coarse labels are solved. The cells are culled per map in tiles of
+//     SURVEY_TILE² coarse cells by the same exact box test as the blocks.
+const SURVEY_TILE = 32
+async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toSfm, gp, opts, tick, { gainsOn, cut }) {
   const { width: W, height: H } = geom, n = metas.length
   const { depthTolRel = 0.02, maxCost = Infinity } = opts
   const k = Math.max(4, Math.ceil(Math.sqrt((W * H) / GAIN_LATTICE_CELLS)))
   const pts = growable(Float64Array)
   const rowData = new Float32Array(W), rowMask = new Uint8Array(W), P = [0, 0, 0]
-  for (let row = k >> 1; row < H; row += k) {
-    sampleSurfaceWindow(surface, geom, 0, row, W, 1, rowData, rowMask)
-    for (let col = k >> 1; col < W; col += k) {
-      if (!rowMask[col]) continue
-      cellToSfm(geom, gp.affine, toSfm, col, row, rowData[col], P)
-      pts.push(P[0]); pts.push(P[1]); pts.push(P[2])
+  if (gainsOn) {
+    for (let row = k >> 1; row < H; row += k) {
+      sampleSurfaceWindow(surface, geom, 0, row, W, 1, rowData, rowMask)
+      for (let col = k >> 1; col < W; col += k) {
+        if (!rowMask[col]) continue
+        cellToSfm(geom, gp.affine, toSfm, col, row, rowData[col], P)
+        pts.push(P[0]); pts.push(P[1]); pts.push(P[2])
+      }
     }
   }
   const L = pts.length / 3, xyz = pts.array
+  // The seam grid: each coarse cell's height at its sample cell, and per tile the
+  // height range and frame box for the cull.
+  let sg = null, sv = null, cz = null, cm = null, tiles = null
+  if (cut) {
+    sg = seamGrid(W, H, opts.seamCutCells ?? SEAM_CUT_CELLS)
+    sv = createSeamSurvey(sg)
+    const { cw, ch } = sg
+    cz = new Float32Array(cw * ch); cm = new Uint8Array(cw * ch)
+    for (let j = 0; j < ch; j++) {
+      sampleSurfaceWindow(surface, geom, 0, seamSampleCol(sg, j, H), W, 1, rowData, rowMask)
+      for (let i = 0; i < cw; i++) {
+        const col = seamSampleCol(sg, i, W)
+        if (rowMask[col]) { cz[j * cw + i] = rowData[col]; cm[j * cw + i] = 1 }
+      }
+    }
+    const tx = Math.ceil(cw / SURVEY_TILE), ty = Math.ceil(ch / SURVEY_TILE)
+    tiles = []
+    for (let b = 0; b < ty; b++) for (let a = 0; a < tx; a++) {
+      const i0 = a * SURVEY_TILE, j0 = b * SURVEY_TILE, i1 = Math.min(cw, i0 + SURVEY_TILE), j1 = Math.min(ch, j0 + SURVEY_TILE)
+      let lo = Infinity, hi = -Infinity
+      for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
+        const p = j * cw + i
+        if (cm[p]) { if (cz[p] < lo) lo = cz[p]; if (cz[p] > hi) hi = cz[p] }
+      }
+      if (!(lo <= hi)) continue
+      const c0 = seamSampleCol(sg, i0, W), c1 = seamSampleCol(sg, i1 - 1, W)
+      const r0 = seamSampleCol(sg, j0, H), r1 = seamSampleCol(sg, j1 - 1, H)
+      const box = [geom.originX + (c0 + 0.5) * geom.gsd, geom.originX + (c1 + 0.5) * geom.gsd,
+        geom.originY - (r1 + 0.5) * geom.gsd, geom.originY - (r0 + 0.5) * geom.gsd, lo, hi]
+      tiles.push({ i0, j0, i1, j1, box })
+    }
+  }
   const obsPt = growable(Int32Array), obsImg = growable(Int32Array), obsRgb = growable(Float32Array)
   const g = {}, px = new Float32Array(4)
-  let clippedObs = 0
+  let clippedObs = 0, readMs = 0
+  const t0 = performance.now()
+  // Photo decode: ~2 px per step of the finer of the two samplings.
+  const stepCells = Math.min(gainsOn ? k : Infinity, cut ? sg.f : Infinity)
   for (let mi = 0; mi < n; mi++) {
+    const tr = performance.now()
     const m = await loadMap(mi)
     const per = gp.mapPxPerCell(m)
-    const photo = loadImage ? await loadImage(mi, m, per > 0 ? per * k : null) : null
+    const photo = loadImage ? await loadImage(mi, m, per > 0 ? per * stepCells : null) : null
+    readMs += performance.now() - tr
     const C = cameraCentre(m)
     for (let p = 0; p < L; p++) {
       P[0] = xyz[3 * p]; P[1] = xyz[3 * p + 1]; P[2] = xyz[3 * p + 2]
@@ -679,31 +747,82 @@ async function mosaicGains(surface, geom, metas, loadMap, loadImage, toSfm, gp, 
       obsPt.push(p); obsImg.push(mi)
       obsRgb.push(srgbToLinear(px[0])); obsRgb.push(srgbToLinear(px[1])); obsRgb.push(srgbToLinear(px[2]))
     }
+    if (cut) {
+      const { cw } = sg, fx = m.K.fx
+      for (const t of tiles) {
+        if (gp.affine && !boxReachesMap(m, gp.affine, t.box)) continue
+        for (let j = t.j0; j < t.j1; j++) {
+          const row = seamSampleCol(sg, j, H)
+          for (let i = t.i0; i < t.i1; i++) {
+            const p = j * cw + i
+            if (!cm[p]) continue
+            cellToSfm(geom, gp.affine, toSfm, seamSampleCol(sg, i, W), row, cz[p], P)
+            if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, photo, g, px)) continue
+            addSeamCandidate(sv, p, mi, g.depth / (fx * g.cos * g.cos), Math.round(px[0]), Math.round(px[1]), Math.round(px[2]))
+          }
+        }
+      }
+    }
     tick()
   }
-  const { gains, summary } = fitGains({ nImages: n, nPoints: L, obsPt: obsPt.array, obsImg: obsImg.array, obsRgb: obsRgb.array })
-  return { gains, summary: { latticeStep: k, latticeCells: L, clippedObservations: clippedObs, ...summary } }
+  let balance = null
+  if (gainsOn) {
+    const { gains, summary } = fitGains({ nImages: n, nPoints: L, obsPt: obsPt.array, obsImg: obsImg.array, obsRgb: obsRgb.array })
+    balance = { gains, summary: { latticeStep: k, latticeCells: L, clippedObservations: clippedObs, ...summary } }
+  }
+  const t1 = performance.now()
+  let seams = null
+  if (cut) {
+    const res = solveSeams(sv, balance?.gains ?? null, opts.seamCutWeights)
+    // Where the time went: reading maps + decoding photos, sampling, the min cuts.
+    seams = { ...res, grid: sg, ms: { read: Math.round(readMs), sample: Math.round(t1 - t0 - readMs), solve: Math.round(performance.now() - t1) } }
+  }
+  return { balance, seams }
+}
+
+// The largest block window: core + halo on both sides, plus up to align − 1 cells per
+// side where a multiband window rounds out to its pyramid lattice.
+function maxWindow(W, H, B, halo, align) {
+  const ext = B + 2 * halo + 2 * (align - 1)
+  return { ew: Math.min(W, ext), eh: Math.min(H, ext) }
 }
 
 // The block layout and per-cell working bytes of a tiled run, for the caller's preflight.
 // Per extended-window cell: height 4 + mask 1 + rgba 4 + label 2 + the gap fill's sample
 // flags 1 + the stats' luma 4, plus the blend's state: 8 'best' / 32 'average' / for
-// 'mosaic' raw + smoothing labels 4, score 8, sums 16, fallback 12, flags 1, distance 2.
-// Per core cell the handed-out copies, rgba 4 + label 2.
-export function orthoTiledWorkingBytes({ width, height, blend = 'best', fillRadius = 2, seamWidth = 0, blockSize = ORTHO_BLOCK }) {
-  const halo = orthoHalo({ width, height, blend, fillRadius, seamWidth })
-  const ew = Math.min(width, blockSize + 2 * halo), eh = Math.min(height, blockSize + 2 * halo)
+// 'mosaic' raw + smoothing labels 4, score 8, sums 16, fallback 12, flags 1, distance 2,
+// and for multiband its pyramids (multiband.js). Per core cell the handed-out copies,
+// rgba 4 + label 2. A graph-cut mosaic holds its coarse labels (2 B per coarse cell)
+// throughout, and before the blocks its survey of the candidates (orthoSeamSurveyBytes),
+// whichever is larger.
+export function orthoTiledWorkingBytes({ width, height, blend = 'best', fillRadius = 2, seamWidth = 0, seamline = 'nadir', seamBlend = 'feather', blendLevels = MULTIBAND_LEVELS, blockSize = ORTHO_BLOCK }) {
+  const mode = mosaicMode({ blend, seamline, seamBlend, blendLevels })
+  const halo = orthoHalo({ width, height, blend, fillRadius, seamWidth, seamline, seamBlend, blendLevels })
+  const { ew, eh } = maxWindow(width, height, blockSize, halo, mode.align)
   const core = Math.min(width, blockSize) * Math.min(height, blockSize)
   const state = blend === 'average' ? 32 : blend === 'mosaic' ? 4 + 8 + 16 + 12 + 1 + 2 : 8
-  return ew * eh * (4 + 1 + 4 + state + 2 + 1 + 4) + core * 6
+  const pyramids = mode.multiband ? MULTIBAND_BYTES_PER_CELL : 0
+  const block = ew * eh * (4 + 1 + 4 + state + pyramids + 2 + 1 + 4) + core * 6
+  if (!mode.graphcut) return block
+  const { cw, ch } = seamGrid(width, height)
+  return Math.max(block + 2 * cw * ch, orthoSeamSurveyBytes(width, height))
+}
+
+// The graph-cut survey before the blocks: per coarse cell its height + mask, the
+// candidates (image 2, footprint 4, colour 3, data cost 4 each) and the solver's labels
+// and flags (~8), plus a min-cut graph over at most the whole coarse grid (~60 B/node).
+export function orthoSeamSurveyBytes(width, height) {
+  const { cw, ch } = seamGrid(width, height)
+  return cw * ch * (5 + SEAM_CANDIDATES * 13 + 8 + 60)
 }
 
 // surface: the height grid ({ width, height, gsd, originX, originY, data, mask });
 // geom: the ortho grid over it (surface.js resampledGeometry — any size).
 // metas[i]: each map's geometry { width, height, K, R, t } (no planes needed);
 // loadMap(i) → the map with planes. toSfm, opts: as orthorectifyStreamed, plus
-//   opts.blend 'mosaic' with opts.colourBalance (O3 gains) and opts.seamWidth (% of the
-//   short side, O4a feathering; 0 = hard seams), opts.blockSize (default ORTHO_BLOCK),
+//   opts.blend 'mosaic' with opts.colourBalance (O3 gains), opts.seamline ('nadir' |
+//   'graphcut', O5), opts.seamBlend ('feather' | 'multiband', O4b) and opts.seamWidth
+//   (% of the short side, O4a feathering; 0 = hard seams), opts.blockSize (default ORTHO_BLOCK),
 //   opts.cacheBytes (map + photo cache budget, default 1 GiB), opts.mapsResident (the
 //   maps are already in memory, so only decoded photos count against the cache).
 // hooks: { loadImage (as orthorectifyStreamed's), loadStatsImage (the gain pass's
@@ -717,10 +836,11 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   const { width: W, height: H } = geom
   const B = opts.blockSize ?? ORTHO_BLOCK
   const fillRadius = opts.fillRadius ?? 2, fillMethod = opts.fillMethod ?? 'idw'
-  const mosaic = opts.blend === 'mosaic'
+  const mode = mosaicMode(opts), { mosaic, graphcut, multiband, align } = mode
   if (mosaic && metas.length >= NO_LABEL) throw new Error(`a mosaic labels cells with a 16-bit image index; ${metas.length} depth maps is too many`)
-  const seamCells = mosaic ? mosaicSeamCells(W, H, opts.seamWidth ?? 0) : 0
-  const halo = orthoHalo({ width: W, height: H, blend: opts.blend, fillRadius, seamWidth: opts.seamWidth ?? 0 })
+  const seamCells = mosaic && !multiband ? mosaicSeamCells(W, H, opts.seamWidth ?? 0) : 0
+  const halo = orthoHalo({ width: W, height: H, blend: opts.blend, fillRadius, seamWidth: opts.seamWidth ?? 0,
+    seamline: opts.seamline, seamBlend: opts.seamBlend, blendLevels: mode.levels })
   if (!(B >= 1)) throw new Error(`orthorectifyTiled: block size ${B} must be positive`)
   const nbx = Math.ceil(W / B), nby = Math.ceil(H / B), nBlocks = nbx * nby
 
@@ -746,15 +866,15 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   const gp = gridProjection(geom, toSfm, zLo, zHi, zMid)
   const { affine, mapPxPerCell } = gp
 
-  // Block windows (core + halo, clipped to the grid) and the maps that can see each.
-  // The halo reaches at most `reach` blocks over, so those blocks' core ranges bound
-  // every height in the window.
-  const reach = Math.ceil(halo / B)
+  // Block windows (core + halo, clipped to the grid; a multiband window rounded out to
+  // its pyramid lattice) and the maps that can see each. The window reaches at most
+  // `reach` blocks over, so those blocks' core ranges bound every height in it.
+  const reach = Math.ceil((halo + align - 1) / B)
   const blocks = []
   for (let by = 0; by < nby; by++) for (let bx = 0; bx < nbx; bx++) {
     const col0 = bx * B, row0 = by * B, bw = Math.min(B, W - col0), bh = Math.min(B, H - row0)
-    const ex0 = Math.max(0, col0 - halo), ey0 = Math.max(0, row0 - halo)
-    const ex1 = Math.min(W, col0 + bw + halo), ey1 = Math.min(H, row0 + bh + halo)
+    const ex0 = Math.max(0, Math.floor((col0 - halo) / align) * align), ey0 = Math.max(0, Math.floor((row0 - halo) / align) * align)
+    const ex1 = Math.min(W, Math.ceil((col0 + bw + halo) / align) * align), ey1 = Math.min(H, Math.ceil((row0 + bh + halo) / align) * align)
     let lo = Infinity, hi = -Infinity
     for (let ny = Math.max(0, by - reach); ny <= Math.min(nby - 1, by + reach); ny++) {
       for (let nx = Math.max(0, bx - reach); nx <= Math.min(nbx - 1, bx + reach); nx++) {
@@ -771,13 +891,12 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   }
 
   // The visit sequence, and for each visit when its map is wanted next (Belady). A
-  // mosaic visits a block's maps twice — labels, then colour — and its second pass
-  // skips the maps that own no cells there, which only makes the plan pessimistic.
+  // mosaic visits a block's maps twice — labels, then colour — and a multiband one a
+  // third time for the corrections; the colour passes skip the maps that own no cells
+  // there, which only makes the plan pessimistic.
   const sequence = []
-  for (const b of blocks) {
-    for (const mi of b.maps) sequence.push(mi)
-    if (mosaic) for (const mi of b.maps) sequence.push(mi)
-  }
+  const passes = !mosaic ? 1 : multiband ? 3 : 2
+  for (const b of blocks) for (let k = 0; k < passes; k++) for (const mi of b.maps) sequence.push(mi)
   const nextUse = new Float64Array(sequence.length)
   {
     const seen = new Map()
@@ -813,7 +932,8 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     return e
   }
   let pos = 0, ticks = 0
-  const total = (mosaic && opts.colourBalance ? metas.length : 0) + sequence.length
+  const survey = mosaic && (opts.colourBalance || graphcut)
+  const total = (survey ? metas.length : 0) + sequence.length
   const tick = () => onProgress(++ticks, total)
   const visited = (mi, e) => {
     const p = pos++
@@ -823,14 +943,15 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     tick()
   }
 
-  // O3: the gains, once for the whole grid, before any block.
-  let balance = null
-  if (mosaic && opts.colourBalance) {
-    balance = await mosaicGains(surface, geom, metas, loadMap, hooks.loadStatsImage ?? loadImage, toSfm, gp, opts, tick)
+  // O3 + O5: the gains and the graph-cut labels, once for the whole grid, before any block.
+  let balance = null, seams = null
+  if (survey) {
+    ({ balance, seams } = await mosaicSurvey(surface, geom, metas, loadMap, hooks.loadStatsImage ?? loadImage, toSfm, gp, opts, tick,
+      { gainsOn: !!opts.colourBalance, cut: graphcut }))
   }
 
   // Window buffers, sized once for the largest window.
-  const maxCells = Math.min(W, B + 2 * halo) * Math.min(H, B + 2 * halo)
+  const win0 = maxWindow(W, H, B, halo, align), maxCells = win0.ew * win0.eh
   const average = opts.blend === 'average'
   const buf = {
     data: new Float32Array(maxCells), mask: new Uint8Array(maxCells), rgba: new Uint8ClampedArray(maxCells * 4),
@@ -841,6 +962,7 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     raw: new Uint16Array(maxCells), label: new Uint16Array(maxCells), tmp: new Uint16Array(maxCells),
     score: new Float64Array(maxCells), sums: new Float32Array(maxCells * 4), fallback: new Float32Array(maxCells * 3),
     flags: new Uint8Array(maxCells), dist: new Uint16Array(maxCells),
+    pyr: multiband ? createMultiband(win0.ew, win0.eh, mode.levels) : null,
   } : null
   const slot = mosaic ? new Int32Array(metas.length).fill(-1) : null
   const stats = createOrthoStats(W, H, !!buf.labels)
@@ -889,12 +1011,18 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     labelled: !!buf.labels, stats: stats.finish(), blocks: nBlocks,
     visits: blocks.reduce((v, b) => v + b.maps.length, 0),
     mapLoads, photoLoads, cacheHits,
-    ...(mosaic ? { mosaic: { seamCells, smoothPasses: MOSAIC_SMOOTH_PASSES, balance: balance?.summary ?? null } } : {}),
+    ...(mosaic ? { mosaic: {
+      seamline: graphcut ? 'graphcut' : 'nadir', seamBlend: multiband ? 'multiband' : 'feather',
+      seamCells, smoothPasses: graphcut ? 0 : MOSAIC_SMOOTH_PASSES, levels: multiband ? mode.levels : 0,
+      seamCut: seams?.summary ?? null, balance: balance?.summary ?? null,
+    } } : {}),
+    // Where the graph-cut survey's time went (ms): map + photo reads, sampling, min cuts.
+    ...(seams ? { seamCutMs: seams.ms } : {}),
     // Per image the R, G, B gains (3 per map, map order), for the caller's audit log.
     ...(balance ? { gains: balance.gains } : {}),
   }
 
-  // The mosaic's two passes over one block window (see the section comment above).
+  // The mosaic's passes over one block window (see the section comment above).
   async function mosaicBlock(b, win, n) {
     const { ew, eh } = b
     Object.assign(win, {
@@ -907,14 +1035,24 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       labelFromMap(win, geom, e.m, mi, gp, toSfm, opts, scratch)
       visited(mi, e)
     }
-    smoothLabels(win.raw, win.label, mb.tmp.subarray(0, n), ew, eh)
-    // Each map's box: its smoothed region grown by the seam band, joined with the
-    // cells it holds as the pass-1 fallback.
-    const k = b.maps.length, own = new Int32Array(4 * k), fb = new Int32Array(4 * k)
-    for (let j = 0; j < k; j++) {
-      slot[b.maps[j]] = j
-      own.set([ew, eh, -1, -1], 4 * j); fb.set([ew, eh, -1, -1], 4 * j)
-    }
+    const k = b.maps.length
+    for (let j = 0; j < k; j++) slot[b.maps[j]] = j
+    if (seams) {
+      // O5: the coarse graph-cut label of each cell; its pass-1 label where the coarse
+      // cell has none, or names a map that sees nothing of this window (culled).
+      const { labels: cut, grid: { f, cw } } = seams
+      for (let r = 0, i = 0; r < eh; r++) {
+        const crow = Math.floor((b.ey0 + r) / f) * cw
+        for (let c = 0; c < ew; c++, i++) {
+          const l = cut[crow + Math.floor((b.ex0 + c) / f)]
+          win.label[i] = l !== NO_LABEL && slot[l] >= 0 ? l : win.raw[i]
+        }
+      }
+    } else smoothLabels(win.raw, win.label, mb.tmp.subarray(0, n), ew, eh)
+    // Each map's box: its region grown by the seam band, joined with the cells it
+    // holds as the pass-1 fallback.
+    const own = new Int32Array(4 * k), fb = new Int32Array(4 * k)
+    for (let j = 0; j < k; j++) { own.set([ew, eh, -1, -1], 4 * j); fb.set([ew, eh, -1, -1], 4 * j) }
     const grow = (arr, s, c, r) => {
       if (c < arr[s]) arr[s] = c
       if (r < arr[s + 1]) arr[s + 1] = r
@@ -927,15 +1065,16 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       if (rl !== NO_LABEL && rl !== l) grow(fb, 4 * slot[rl], c, r)
     }
     const step = { ...scratch, P: [0, 0, 0] }
-    const seam3 = 3 * seamCells, viewWin = { ...win, sums: win.msums }
+    const band = multiband ? 0 : seamCells, seam3 = 3 * band, viewWin = { ...win, sums: win.msums }
+    const gains = balance?.gains ?? null
     for (let j = 0; j < k; j++) {
       const mi = b.maps[j], s = 4 * j
       const hasOwn = own[s + 2] >= 0, hasFb = fb[s + 2] >= 0
       if (!hasOwn && !hasFb) { visited(mi, null); continue }
       let x0 = ew, y0 = eh, x1 = 0, y1 = 0
       if (hasOwn) {
-        x0 = Math.max(0, own[s] - seamCells); y0 = Math.max(0, own[s + 1] - seamCells)
-        x1 = Math.min(ew, own[s + 2] + 1 + seamCells); y1 = Math.min(eh, own[s + 3] + 1 + seamCells)
+        x0 = Math.max(0, own[s] - band); y0 = Math.max(0, own[s + 1] - band)
+        x1 = Math.min(ew, own[s + 2] + 1 + band); y1 = Math.min(eh, own[s + 3] + 1 + band)
       }
       if (hasFb) {
         x0 = Math.min(x0, fb[s]); y0 = Math.min(y0, fb[s + 1]); x1 = Math.max(x1, fb[s + 2] + 1); y1 = Math.max(y1, fb[s + 3] + 1)
@@ -943,11 +1082,77 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       if (seam3 && hasOwn) chamferTo(win.label, ew, x0, y0, x1, y1, mi, win.dist)
       else if (seam3) for (let r = y0; r < y1; r++) win.dist.fill(0xffff, r * ew + x0, r * ew + x1)
       const e = await fetch(mi, true)
-      blendFromMap(viewWin, geom, e.m, e.photo, mi, gp, toSfm, opts, step, [x0, y0, x1, y1], seam3, balance?.gains ?? null)
+      blendFromMap(viewWin, geom, e.m, e.photo, mi, gp, toSfm, opts, step, [x0, y0, x1, y1], seam3, gains)
       visited(mi, e)
     }
+    if (multiband) await multibandPass(b, win, n, step, gains)
+    else finishMosaicWindow({ ...win, sums: win.msums })
     for (const mi of b.maps) slot[mi] = -1
-    finishMosaicWindow({ ...win, sums: win.msums })
+  }
+
+  // O4b: the hard-seam mosaic of pass 2 is the base; each map then adds its pyramid
+  // correction over the ring around its effective region (multiband.js).
+  async function multibandPass(b, win, n, step, gains) {
+    const { ew, eh } = b
+    const { mask, label, raw, msums, fallback, flags } = win
+    const eff = mb.tmp.subarray(0, n)
+    // The effective label and its colour: the label where it saw the cell, else the
+    // pass-1 fallback (as finishMosaicWindow), in linear light, gains applied.
+    for (let i = 0; i < n; i++) {
+      const f = flags[i], o = 4 * i
+      eff[i] = NO_LABEL
+      if (!mask[i]) continue
+      if (f & 1) eff[i] = label[i]
+      else if (f & 2) { eff[i] = raw[i]; msums[o] = fallback[3 * i]; msums[o + 1] = fallback[3 * i + 1]; msums[o + 2] = fallback[3 * i + 2] }
+    }
+    const pyr = mb.pyr, { ring, margin } = multibandReach(mode.levels), ring3 = 3 * ring
+    multibandBegin(pyr, ew, eh, eff, NO_LABEL)
+    const k = b.maps.length, box = new Int32Array(4 * k)
+    for (let j = 0; j < k; j++) box.set([ew, eh, -1, -1], 4 * j)
+    for (let r = 0, i = 0; r < eh; r++) for (let c = 0; c < ew; c++, i++) {
+      const l = eff[i]
+      if (l === NO_LABEL) continue
+      const s = 4 * slot[l]
+      if (c < box[s]) box[s] = c
+      if (r < box[s + 1]) box[s + 1] = r
+      if (c > box[s + 2]) box[s + 2] = c
+      if (r > box[s + 3]) box[s + 3] = r
+    }
+    const d = fallback // free now: the box's colour differences, 3 per cell
+    const { depthTolRel = 0.02, maxCost = Infinity } = opts
+    const { P, g, px } = step
+    for (let j = 0; j < k; j++) {
+      const mi = b.maps[j], s = 4 * j
+      if (box[s + 2] < 0) { visited(mi, null); continue }
+      // The box on the window's pyramid lattice (the window's origin is on the grid's).
+      const x0 = Math.max(0, Math.floor((box[s] - margin) / align) * align), y0 = Math.max(0, Math.floor((box[s + 1] - margin) / align) * align)
+      const x1 = Math.min(ew, box[s + 2] + 1 + margin), y1 = Math.min(eh, box[s + 3] + 1 + margin)
+      const bw = x1 - x0, bh = y1 - y0
+      chamferTo(eff, ew, x0, y0, x1, y1, mi, win.dist)
+      const e = await fetch(mi, true), m = e.m, C = cameraCentre(m)
+      const g0 = gains ? gains[mi * 3] : 1, g1 = gains ? gains[mi * 3 + 1] : 1, g2 = gains ? gains[mi * 3 + 2] : 1
+      d.fill(0, 0, 3 * bw * bh)
+      for (let r = 0; r < bh; r++) for (let c = 0; c < bw; c++) {
+        const wi = (y0 + r) * ew + x0 + c, dd = win.dist[wi]
+        if (dd === 0 || dd > ring3 || eff[wi] === NO_LABEL) continue
+        cellToSfm(geom, gp.affine, toSfm, b.ex0 + x0 + c, b.ey0 + y0 + r, win.data[wi], P)
+        if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, e.photo, g, px)) continue
+        const o = 3 * (r * bw + c), wo = 4 * wi
+        d[o] = g0 * srgbToLinear(px[0]) - msums[wo]
+        d[o + 1] = g1 * srgbToLinear(px[1]) - msums[wo + 1]
+        d[o + 2] = g2 * srgbToLinear(px[2]) - msums[wo + 2]
+      }
+      multibandAdd(pyr, x0, y0, bw, bh, d, eff, mi)
+      visited(mi, e)
+    }
+    multibandFinish(pyr, msums)
+    const { rgba, labels } = win
+    for (let i = 0; i < n; i++) {
+      const l = eff[i], o = 4 * i
+      labels[i] = l
+      if (l === NO_LABEL) continue
+      rgba[o] = linearToSrgb(msums[o]); rgba[o + 1] = linearToSrgb(msums[o + 1]); rgba[o + 2] = linearToSrgb(msums[o + 2]); rgba[o + 3] = 255
+    }
   }
 }
 
