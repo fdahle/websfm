@@ -50,12 +50,13 @@ const { baseId, activePreset, selectPreset } = usePresetSettings({
 // Self-calibration: short <option> labels + a hint that explains the selected mode
 // (the long prose lives here, one selection at a time, instead of overflowing the option).
 const SELF_CAL_HINTS = {
-  auto: 'Stages focal + radial k1 → k2 / cx,cy / k3 as the model grows — unless a sensor already carries a calibrated distortion model. Best for EXIF-only cameras and film scans.',
+  auto: 'Stages focal + radial k1 → k2 / cx,cy / k3 (then k4 on a four-term fisheye) as the model grows — unless a sensor already carries a calibrated distortion model. Best for EXIF-only cameras and film scans.',
   none: 'Trust the sensor table as-is; bundle adjustment does not touch intrinsics.',
   f: 'Solve one shared focal length per sensor.',
   'f,cxcy': 'Solve focal length and principal point per sensor.',
   'f,k1': 'Solve focal length and the first radial distortion coefficient.',
   'f,cxcy,k1,k2,k3': 'Solve focal, principal point and all three radial coefficients (needs many well-spread views).',
+  'f,cxcy,k1,k2,k3,k4': 'Solve focal, principal point and all four fisheye terms of a Fisheye (k1–k4) lens; on any other lens the same as k1,k2,k3.',
 }
 // U2 derives nothing to override here — `auto` already resolves per project inside
 // core/sfm/sfm.js — but it does know WHICH branch this project will take. That is
@@ -148,6 +149,7 @@ function run() {
             <option value="f,cxcy">Focal + principal point</option>
             <option value="f,k1">Focal + radial k1</option>
             <option value="f,cxcy,k1,k2,k3">Focal + principal point + k1,k2,k3</option>
+            <option value="f,cxcy,k1,k2,k3,k4">Focal + principal point + k1–k4 (fisheye)</option>
           </select>
           <template #hint>{{ settings.baIterations > 0 ? selfCalHint
             : 'Not used: bundle adjustment is off (0 iterations), and self-calibration runs inside it.' }}</template>

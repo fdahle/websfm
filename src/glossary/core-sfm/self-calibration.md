@@ -31,7 +31,8 @@ the "dome" or "bowl" artefact, a flat surface reconstructed as curved.
 WebSfM's default is therefore a **staged schedule** rather than all-parameters-at-once:
 refine $f, k_1$ during registration, then escalate to $k_2$, then the principal
 point, then $k_3$ — each unlocked only once the camera and observation counts
-justify it. When a sensor already carries a calibrated distortion model,
+justify it. A four-term fisheye's $k_4$ comes last, on the pass after $k_3$ was
+first refined. When a sensor already carries a calibrated distortion model,
 self-calibration of those terms is switched off instead: the distortion was
 removed at ingest, and refitting it would correct the same effect twice. A
 [fisheye](help:fisheye-lens) sensor is the exception to the folding below: bundle

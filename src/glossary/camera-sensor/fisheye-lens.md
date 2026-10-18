@@ -46,5 +46,6 @@ at ingest so the rest of the pipeline stays pinhole. That has consequences:
   re-derived from the recorded pixels with the new lens, and dense products use the
   refined lens. A sensor that starts equidistant (all $k$ zero) is treated as
   uncalibrated, so **Auto** refines it; one with calibrated $k$ terms is left alone.
-  Automatic and preset self-calibration refine up to $k_3$; a four-term lens keeps its
-  $k_4$.
+  Auto refines a four-term lens's $k_4$ last, on the pass after the one that first
+  refined $k_3$, once the model is large enough for $k_3$; the preset
+  *Focal + principal point + k1–k4* refines all four from the start.

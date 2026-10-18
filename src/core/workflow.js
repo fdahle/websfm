@@ -44,7 +44,7 @@ export const WORKFLOW_BLOCKS = [
   automated('reconstruct', 'Sparse Model', 'Reconstruction', ['matches'], ['sparse'],
     { preset: 'medium', ...RECONSTRUCT_DEFAULTS }, [
       { key: 'preset', label: 'Preset', type: 'select', options: ['low', 'medium', 'high', 'custom'] },
-      { key: 'refineIntrinsics', label: 'Self-calibration', type: 'select', options: ['auto', 'none', 'f', 'f,cxcy', 'f,k1'] },
+      { key: 'refineIntrinsics', label: 'Self-calibration', type: 'select', options: ['auto', 'none', 'f', 'f,cxcy', 'f,k1', 'f,cxcy,k1,k2,k3', 'f,cxcy,k1,k2,k3,k4'] },
       { key: 'baIterations', label: 'BA iterations', type: 'number', min: 1 },
     ]),
   automated('compute-depth', 'Depth Maps', 'Reconstruction', ['sparse'], ['depthMaps'],

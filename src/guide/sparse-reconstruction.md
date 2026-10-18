@@ -41,7 +41,8 @@ geometry, or incorrect control—not an iteration shortage.
 **Auto** solves focal length and radial distortion for EXIF-only cameras, but preserves
 an existing calibrated distortion model. A [fisheye](help:fisheye-lens) sensor with all
 coefficients zero counts as uncalibrated: Auto refines its focal length, principal point
-and its own fisheye terms (up to k3) in the pixels the lens recorded. Turn calibration off only when the sensor
+and its own fisheye terms in the pixels the lens recorded, k4 of a four-term lens last,
+once k1–k3 have been refined. Turn calibration off only when the sensor
 parameters are trustworthy. Solving many parameters needs many well-distributed views;
 on a weak network it can absorb scene error into implausible intrinsics. Self-calibration
 runs inside bundle adjustment, so it is unavailable when bundle adjustment iterations are

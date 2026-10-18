@@ -10,6 +10,7 @@
 //   cfg, images, imgs, cameras, tracks, ids, keypointsAt, donePairs, refreshTracks,
 //   modelResiduals, runBundleAdjust (bundleSession.js), selfCalRecord, intrinsicsRecord,
 //   imageByUuid, defaultKCount, log, report, memoryMark,
+//   selfCalLensTerms,  // most self-calibratable k terms of any camera's lens (4 ⇒ k4 can stage)
 // }
 
 import { triangulateDlt } from './reconstruction.js'
@@ -34,7 +35,7 @@ export async function refineModel(ctx) {
   const {
     cfg, images, imgs, cameras, tracks, ids, keypointsAt, donePairs, refreshTracks,
     modelResiduals, runBundleAdjust, lastSolve = () => null, selfCalRecord, intrinsicsRecord, imageByUuid,
-    defaultKCount, log, report, memoryMark,
+    defaultKCount, log, report, memoryMark, selfCalLensTerms = 0,
   } = ctx
   // Defaults + rationale for these live in defaults.user.js (baIterations,
   // refineIntrinsics) and tuning.js (the rest); `cfg` already merged them.
@@ -244,14 +245,16 @@ export async function refineModel(ctx) {
       log(`track filter pass ${round} (≤${thr.px.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — `
         + `removed ${obsRemoved} obs + ${ptsRemoved} points; ${tracks.liveCount()} points remain`, 'info', 'Reconstruction')
       // Staged self-cal (WS2): under 'auto' the post-filter passes escalate the refined
-      // terms (k2 / cx,cy / k3) as the camera + observation counts clear each gate; an
+      // terms (k2 / cx,cy / k3, then k4 on a four-term fisheye) as the camera + observation counts clear each gate; an
       // explicit user refine string is used verbatim (selfCalStaged is false).
       let refineMode = refineIntrinsics
       let reducedReason = null
       if (cfg.selfCalStaged) {
         let nObs = 0
         tracks.forEachPoint((p) => { nObs += tracks.viewCount(p) })
-        const counts = { nCams: cameras.size, nObs }
+        // k4 (four-term fisheye only) waits for a pass that has already refined k3.
+        const k3Settled = selfCalRecord.passes.some((p) => !p.skipped && /(^|,)k3(,|$)/.test(p.mode))
+        const counts = { nCams: cameras.size, nObs, lensTerms: selfCalLensTerms, k3Settled }
         refineMode = stagedSelfCalTerms(counts)
         const deferred = stagedSelfCalDeferred(counts)
         log(`post-filter pass ${round} self-cal terms '${refineMode}'`
