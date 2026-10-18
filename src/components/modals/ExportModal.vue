@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 import { EXPORT_DEFAULTS } from '../../core/defaults.user.js'
 import { MAX_ORTHO_IMAGE_CELLS } from '../../core/products/exporters.js'
 
@@ -28,6 +29,9 @@ const props = defineProps({
   // The mesh this export writes is textured (Tools ▸ Mesh ▸ Texture): GLB and OBJ can
   // carry the texture; for 3D Tiles, the tile is that mesh.
   textured: { type: Boolean, default: false },
+  // Measurements: the CRS a georeferenced GeoJSON would be in, or '' when none of
+  // the measurements has one (they are then written in their own frames).
+  measurementCrs: { type: String, default: '' },
 })
 
 const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
@@ -99,6 +103,13 @@ const CONFIG = {
       { value: 'cog',     label: 'Cloud-Optimized GeoTIFF — tiled + overviews' },
       { value: 'asc',     label: 'ESRI ASCII grid (.asc)' },
       { value: 'png',     label: 'Hillshade PNG + world file' },
+    ],
+  },
+  measurements: {
+    title: 'Export Measurements',
+    formats: [
+      { value: 'csv',     label: 'CSV — one row per measurement, units in columns' },
+      { value: 'geojson', label: 'GeoJSON — lines and polygons with their values' },
     ],
   },
   ortho: {
@@ -290,6 +301,25 @@ function run() {
           <option value="deflate">DEFLATE (lossless)</option>
         </select>
       </SettingsField>
+    </template>
+
+    <!-- Saved measurements -->
+    <template v-else-if="kind === 'measurements'">
+      <SettingsField v-if="settings.format === 'geojson' && measurementCrs" label-for="mcoords">
+        <template #label><FieldHelp op="dem" param="measurementCoords">Coordinates</FieldHelp></template>
+        <select id="mcoords" v-model="settings.measurementCoords" class="field-input field-select">
+          <option value="project">Project CRS ({{ measurementCrs }}), heights kept</option>
+          <option value="wgs84">WGS 84 longitude/latitude (RFC 7946), 2D</option>
+        </select>
+      </SettingsField>
+      <p v-if="settings.format === 'geojson' && !measurementCrs" class="field-hint">
+        No measurement here has a coordinate system, so the file is written in the frames
+        they were measured in and marked as not georeferenced.
+      </p>
+      <p class="field-hint">
+        Every value has its unit beside it. Measurements whose raster, layer or frame has
+        changed since are included and marked stale.
+      </p>
     </template>
 
     <!-- Ortho -->

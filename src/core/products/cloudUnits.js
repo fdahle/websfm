@@ -31,11 +31,15 @@ export function fromCoordLength(value, units) {
   return Number.isFinite(value) ? value * units.scale : value
 }
 
+/** The unit of a length (power 1), area (2) or volume (3): `m²`, `model units³`. */
+export function measureUnitLabel(units, power = 1) {
+  const exp = power === 1 ? '' : power === 2 ? '²' : '³'
+  return units.unit === 'm' ? `m${exp}` : `${units.label}${exp}`
+}
+
 /** Format a length/area/volume with its unit; never a bare number. */
 export function formatMeasure(value, units, power = 1, digits = 3) {
   if (!Number.isFinite(value)) return '—'
   const v = value * units.scale ** power
-  const suffix = units.unit === 'm' ? (power === 1 ? 'm' : power === 2 ? 'm²' : 'm³')
-    : `${units.label}${power === 1 ? '' : power === 2 ? '²' : '³'}`
-  return `${v.toLocaleString(undefined, { maximumFractionDigits: digits })} ${suffix}`
+  return `${v.toLocaleString(undefined, { maximumFractionDigits: digits })} ${measureUnitLabel(units, power)}`
 }

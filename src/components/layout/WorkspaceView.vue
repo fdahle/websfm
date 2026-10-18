@@ -240,6 +240,7 @@ onBeforeUnmount(() => {
         :kind="tab.productKind"
         :product="tab.productKind === 'ortho' ? ortho : dem"
         :frame-status="reconstructionStore.productFrameStatus(tab.productKind === 'ortho' ? ortho : dem)"
+        @command="handleCommand"
       />
       <!-- Same viewer, imported raster instead of a computed product. -->
       <ProductViewer
@@ -249,6 +250,7 @@ onBeforeUnmount(() => {
         :kind="rasterById(tab.rasterId)?.kind ?? 'dem'"
         :product="rasterById(tab.rasterId)"
         :source="rasterSources.get(tab.rasterId) ?? null"
+        @command="handleCommand"
       />
     </template>
 

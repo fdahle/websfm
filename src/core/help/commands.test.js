@@ -13,6 +13,8 @@ import {
   consoleReason,
   ribbonCommandFor,
   AERIAL_ONLY_REASON,
+  KEY_COLLISIONS,
+  CONSOLE_NAMES,
 } from './commands.js'
 
 // A state where every prerequisite is satisfied — start here and knock one out.
@@ -108,12 +110,28 @@ describe('commonPrefix', () => {
 })
 
 describe('help', () => {
-  it('lists every command under a group header', () => {
-    const lines = helpLines()
+  it('lists every command under a group header with "help all"', () => {
+    const lines = helpLines('all')
     for (const cmd of COMMANDS) {
-      expect(lines.some((l) => l.includes(cmd.name))).toBe(true)
+      expect(lines.some((l) => l.includes(cmd.name)), cmd.name).toBe(true)
     }
     expect(lines.some((l) => l.startsWith('— '))).toBe(true)
+  })
+
+  it('keeps the plain overview to the verbs and the named commands, and points at the rest', () => {
+    const lines = helpLines()
+    expect(lines.some((l) => l.startsWith('  run'))).toBe(true)
+    expect(lines.some((l) => l.startsWith('  decimate'))).toBe(true)
+    expect(lines.some((l) => l.startsWith('  raster zoom in'))).toBe(false)
+    expect(lines.at(-1)).toMatch(/more ribbon commands: "help <tab>"/)
+    expect(helpLines('tools').some((l) => l.startsWith('  crop mesh'))).toBe(true)
+    expect(helpLines('nonsense')).toBeNull()
+  })
+
+  it('shows a verb\'s usage and a ribbon command\'s location', () => {
+    expect(helpFor('set').join('\n')).toContain('usage: set <group>.<key> <value>')
+    expect(helpFor('crop mesh').join('\n')).toContain('ribbon: Tools ▸ Mesh ▸ Crop…')
+    expect(helpFor('point size').join('\n')).toContain('usage: point size <value>   (1 – 8)')
   })
 
   it('gives per-command detail including requirements', () => {
@@ -137,11 +155,26 @@ describe('registry integrity', () => {
     }
   })
 
-  it('every command has a dispatch id and getCommand round-trips', () => {
+  it('every command has a dispatch id or is a verb, and getCommand round-trips', () => {
     for (const cmd of COMMANDS) {
-      expect(cmd.dispatch, `${cmd.name} missing dispatch`).toBeTruthy()
+      expect(cmd.dispatch || cmd.verb, `${cmd.name} missing dispatch`).toBeTruthy()
       expect(getCommand(cmd.name)).toBe(cmd)
     }
+    expect(KEY_COLLISIONS).toEqual([])
+  })
+
+  it('names only ribbon commands in the short-name table', () => {
+    for (const id of Object.keys(CONSOLE_NAMES)) expect(ribbonCommandFor({ dispatch: id }), id).not.toBeNull()
+  })
+
+  it('derives commands from the ribbon: by id, by id as words, and new rows for free', () => {
+    expect(resolveCommand('crop-mesh').cmd.dispatch).toBe('crop-mesh')
+    expect(resolveCommand('crop mesh').cmd.dispatch).toBe('crop-mesh')
+    expect(resolveCommand('export camera fiducials').cmd.dispatch).toBe('export-camera-fiducials')
+    expect(resolveCommand('export measurements').cmd.dispatch).toBe('export-measurements')
+    expect(resolveCommand('basemap satellite').cmd.dispatch).toBe('map-basemap:satellite')
+    // A coming-soon row is not a command.
+    expect(getCommand('map-toggle-poses')).toBeNull()
   })
 })
 

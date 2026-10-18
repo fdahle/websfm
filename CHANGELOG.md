@@ -6,6 +6,20 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Command console**: every ribbon command can be typed (by a short name, its id, or
+  its id as words), taken from the ribbon itself, with per-command usage (`help
+  <command>`, `help <tab>`). New commands: `run detect match sparse` and `run workflow
+  <name>` through the workflow runner (`continue` / `reuse` / `stop` answer it),
+  `stats` and `stats matches`, `set sfm.minPnpInlierRatio 0.5` for session-only tuning
+  overrides (old → new echoed, key and type checked), `pair disable|enable <A> <B>` and
+  `select <image>`. Ctrl+K (⌘K) opens the console with the cursor in the prompt; Tab
+  also completes setting keys, stages and image names.
+- **Measurement export**: Export ▸ Measurements… writes every saved measurement
+  (rulers, areas, elevation profiles, volumes and 3D measurements) as CSV, one row
+  each with its units in columns, or as GeoJSON lines and polygons with their values.
+  GeoJSON is in the project CRS (heights kept) or in WGS 84 per RFC 7946; a
+  measurement without a CRS is labelled with its frame and never placed on the map.
+  Each saved-measurements list has its own Export… for just its records.
 - **Level-of-detail point clouds**: a dense cloud of 4 million points or more gets an
   octree in the background (saved with the project, built once), and the 3D view then
   draws only a point budget's worth of it, the part in front of the camera in most

@@ -32,6 +32,8 @@ const props = defineProps({
   // How this host pans while a tool is active (the hint line names it).
   panHint: { type: String, default: 'Shift-drag pans' },
 })
+// 'command' (id, value): the saved list's Export… opens Export ▸ Measurements for it.
+const emit = defineEmits(['command'])
 
 const TOOLS = {
   length: { label: 'Ruler', icon: 'ruler', min: 2 },
@@ -244,6 +246,8 @@ function saveMeasurement() {
     // `world` is what reopening reads.
     vertices: vertices.value.map(p => { const c = worldToPixel(props.descriptor, p.x, p.y); return { x: c.col, y: c.row } }),
     world: vertices.value.map(p => ({ x: p.x, y: p.y })), distance: distance.value, area: area.value,
+    // The frame `world` is in, and what it was measured on, for the export.
+    crs: props.product?.crs ?? 'local', sourceName: props.product?.name ?? null,
     unit: unit.value, verticalUnit: verticalUnit.value, groundScale: gridScale.value,
     profile: tool.value === 'profile' ? profile.value : null,
     volume: tool.value === 'volume' ? volume.value : null })
@@ -267,6 +271,12 @@ function recordValue(r) {
     return `${r.volume.net.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${v}`
   }
   return `${num(r.distance)} ${u}`
+}
+// The list's Export…: Export ▸ Measurements, for this raster's records only.
+function exportSaved() {
+  const n = records.value.length
+  emit('command', 'export-measurements', { ids: records.value.map(r => r.id),
+    label: `${n} measurement${n === 1 ? '' : 's'} on ${props.product?.name ?? (props.kind === 'ortho' ? 'the orthophoto' : 'the DEM')}` })
 }
 function exportProfile() {
   const csv = `distance (${selected.value?.unit || unit.value}),elevation (${verticalUnit.value})\n`
@@ -347,6 +357,7 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
     <aside v-if="showSaved" class="measure-panel saved-panel" aria-label="Saved measurements" @mousedown.stop @dblclick.stop>
       <header class="mp-head">
         <span class="mp-title">Saved measurements</span>
+        <button v-if="records.length" class="mb-btn" title="Export these measurements as CSV or GeoJSON" @click="exportSaved">Export…</button>
         <button class="mb-btn mb-close" aria-label="Close saved measurements" @click="showSaved = false"><Icon name="x" class="mb-icon" /></button>
       </header>
       <p v-if="!records.length" class="mp-empty">Nothing saved on this raster yet.</p>

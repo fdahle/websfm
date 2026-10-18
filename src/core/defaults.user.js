@@ -298,6 +298,9 @@ export const EXPORT_DEFAULTS = {
   applyGeoref: true,    // cloud: transform into the project CRS when a georef fit exists
   downsampleCell: 0,    // cloud: voxel downsample cell in world units; 0 = off
   jpegQuality: 0.9,     // ortho JPEG quality (0–1)
+  // Saved measurements as GeoJSON (core/products/measurementExport.js): 'project' =
+  // the project CRS in the legacy `crs` member, heights kept; 'wgs84' = RFC 7946.
+  measurementCoords: 'project',
   // Undistorted images (COLMAP image_undistorter parity).
   // `mode` 'crop' keeps only the region every output pixel of which samples inside
   // the source — the alternative leaves a clamped-edge smear a downstream matcher

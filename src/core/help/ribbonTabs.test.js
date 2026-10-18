@@ -138,7 +138,15 @@ describe('console parity', () => {
     const ribbonIds = new Set(leaves.map((c) => c.id))
     // Verbs App.vue handles that are not ribbon buttons.
     const appOnly = new Set(['view-viewer', 'view-map', 'toggle-theme'])
-    for (const cmd of COMMANDS) expect(ribbonIds.has(cmd.dispatch) || appOnly.has(cmd.dispatch), cmd.dispatch).toBe(true)
+    for (const cmd of COMMANDS) {
+      if (!cmd.verb) expect(ribbonIds.has(cmd.dispatch) || appOnly.has(cmd.dispatch), cmd.dispatch).toBe(true)
+    }
+  })
+
+  it('makes every enabled ribbon command typeable, by its id at least', async () => {
+    const { getCommand } = await import('./commands.js')
+    const missing = leaves.filter((c) => !c.disabled && !c.id.startsWith('measure-target:') && getCommand(c.id)?.dispatch !== c.id)
+    expect(missing.map((c) => c.id)).toEqual([])
   })
 })
 

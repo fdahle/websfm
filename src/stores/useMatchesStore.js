@@ -28,6 +28,7 @@ import { swapMatchRoles, transposeF } from '../core/sfm/matchCodec.js'
 import { learnedDetector, lightGlueModelFor } from '../core/features/learnedDetectors.js'
 import { MATCH_DEFAULTS } from '../core/defaults.user.js'
 import { MATCH_TUNING, RESIDENT_TUNING } from '../core/tuning.js'
+import { applyTuningOverrides } from './tuningOverrides.js'
 import { pairScaleContext, buildScaleContext, describeScaleContext, resolveScaledPx } from '../core/scaleContext.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -368,8 +369,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
 
   async function matchPairOnce(imgA, imgB, settings = {}, onDone, descCache = null, gpuRun = null) {
     // Resolve every knob from the single source of truth (defaults.user.js +
-    // tuning.js), caller's `settings` winning. Downstream reads `settings.X` directly.
-    settings = { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings }
+    // tuning.js), caller's `settings` winning, then the console's session overrides
+    // (stores/tuningOverrides.js). Downstream reads `settings.X` directly.
+    settings = applyTuningOverrides('match', { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings })
     const [idA, idB] = [imgA.uuid, imgB.uuid].sort()
     const pid = pairId(idA, idB)
 
@@ -763,7 +765,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     restoreGeneration++
     // Same merge as matchPair so this function's own settings reads (and its
     // matchPair calls) all draw from the single source of truth.
-    settings = { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings }
+    settings = applyTuningOverrides('match', { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings },
+      (msg) => log(msg, 'warn', 'Matching'))
     // The COUNT gates, never resident keypoints (they load per pair on demand).
     const ready = images.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
     const strategy = settings.strategy ?? 'exhaustive'

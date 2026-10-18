@@ -1495,6 +1495,8 @@ function saveMeasure() {
     name: `${kind === 'area3d' ? 'Area' : measureTool.value === 'distance' ? 'Distance' : 'Polyline'} ${n} (3D)`,
     kind, source: `cloud:${first.cloudId}`, cloudName: cloud?.name ?? null, cloudStamp: cloud?.createdAt ?? null,
     vertices: [], points3d: measurePts.value.map((p) => p.pos), unitSnapshot: r.units,
+    // The scene's up at the time: the export splits lengths along it, as the toolbox did.
+    up: upVector(),
   })
 }
 
@@ -1664,7 +1666,10 @@ onBeforeUnmount(() => {
         <button class="tb-textbtn" title="Start again (Esc)" @click="clearMeasure">Clear</button>
       </div>
       <template v-if="saved3d.length">
-        <div class="tb-hint">Saved</div>
+        <div class="tb-hint tb-row">Saved
+          <button class="tb-textbtn" title="Export these measurements as CSV or GeoJSON"
+            @click="emit('command', 'export-measurements', { ids: saved3d.map((r) => r.id), label: `${saved3d.length} 3D measurement${saved3d.length === 1 ? '' : 's'}` })">Export…</button>
+        </div>
         <div v-for="r in saved3d" :key="r.id" class="tb-line saved-measure">
           <span :title="r.cloudName ? `Measured on ${r.cloudName}` : ''">{{ r.name }}</span>
           <span>{{ savedValue(r) }}<template v-if="savedStale(r)"> · layer changed</template></span>

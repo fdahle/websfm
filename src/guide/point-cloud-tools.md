@@ -69,7 +69,9 @@ These are in **Tools → Measure ▾**, with the raster and mesh measurements.
   points are far from lying in one plane. Results are in metres once the project has
   a georeference or scale bars, otherwise in model units, and in the file's own units
   on an imported layer. **Save** keeps a measurement with the project; saved ones are
-  drawn while the tool is open and listed in its toolbox.
+  drawn while the tool is open and listed in its toolbox, whose **Export…** writes
+  them as CSV or GeoJSON (see [Build a DEM ▸ Export measurements](guide:dem)).
+  **Export ▸ Measurements…** writes them together with the raster measurements.
 - **Distance to reference…** gives every point its distance to another cloud (to its
   nearest point) or to a mesh (exactly, to the surface). With a mesh, or a reference
   cloud with normals, the distance is **signed**: positive above the reference,

@@ -9,6 +9,7 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useImageViewSettings } from './useImageViewSettings.js'
+import { useMeasurementsStore } from '../stores/useMeasurementsStore.js'
 
 // The state the ribbon renders from, lifted out of App.vue: `commandState`, the
 // fields the one shared prerequisite table reads (core/help/commands.js NEED_CHECKS
@@ -34,6 +35,7 @@ export function useRibbonState({ tabs, workspace, filmSensors, sensorForImage, a
   const { sensors } = storeToRefs(useSensorsStore())
   const { depthMapCount } = storeToRefs(useReconstructionStore())
   const { hasReferenceDem } = storeToRefs(useExternalStore())
+  const { records: measurementRecords } = storeToRefs(useMeasurementsStore())
   const { imageViewPrefs, showKeypointsFor } = useImageViewSettings()
 
   // Guard state for BOTH the ribbon and the DevConsole command line: the fields the
@@ -54,6 +56,7 @@ export function useRibbonState({ tabs, workspace, filmSensors, sensorForImage, a
     matchCount:    usableMatchCount.value,
     gcpCount:      gcps.value.length,
     poseCount:     poses.value.length,
+    measurementCount: measurementRecords.value.length,
     footprintCount: footprintCount.value,
     sensorCount:   sensors.value.length,
     filmSensorCount: filmSensors.value.length,

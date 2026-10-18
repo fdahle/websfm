@@ -5,6 +5,7 @@ import { surveyFrameFor, gcpToSurveyFrame, normalizeLeverArm, buildCameraPriors 
 import { gcpsInPinholeFrame } from '../../core/sfm/displayFrame.js'
 import { formatBytes, deviceBudget } from '../../core/dense/memBudget.js'
 import { SFM_TUNING } from '../../core/tuning.js'
+import { applyTuningOverrides } from '../tuningOverrides.js'
 import { projectSparsePeakBreakdownBytes, sparseMemoryDecision, planSparseRun, WASM_SOLVER_LIMIT_BYTES, SPARSE_HEAP_FRACTION } from '../../core/sfm/memBudget.js'
 import { terminateAll, reconstruct as workerReconstruct } from '../../workers/computeClient.js'
 import { keypointSetFrom, keypointSetTransfer } from '../../core/sfm/keypointSet.js'
@@ -94,6 +95,8 @@ export function createSparseRun({
   // persists it. (The model now lands all at once at the end rather than building
   // up live in the viewer — a fair trade for never freezing the UI.)
   async function reconstruct(settings = {}, onProgress) {
+    // The console's session overrides of SFM_TUNING knobs (stores/tuningOverrides.js).
+    settings = applyTuningOverrides('sfm', settings, (msg) => log(msg, 'warn', 'Reconstruction'))
     supersedeRestore()
     reconStatus.value = 'running'
     let stopMemoryWatchdog = () => {}

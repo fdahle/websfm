@@ -1,6 +1,6 @@
 <script setup>
 import { pendingPersistence, persistenceFailures, retryPersistence } from './utils/persistence.js'
-import { ref, computed, reactive, watch, onMounted, defineAsyncComponent } from 'vue'
+import { ref, computed, reactive, watch, onMounted, nextTick, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import Ribbon from './components/layout/Ribbon.vue'
 import Sidebar from './components/layout/Sidebar.vue'
@@ -43,6 +43,7 @@ import { useDialogRuns } from './composables/useDialogRuns.js'
 import { useViewState } from './composables/useViewState.js'
 import { useCommandDispatch } from './composables/useCommandDispatch.js'
 import { useRibbonState } from './composables/useRibbonState.js'
+import { useConsoleEnv } from './composables/useConsoleEnv.js'
 import { useSidebarActions } from './composables/useSidebarActions.js'
 import { useBeforeUnload } from './composables/useBeforeUnload.js'
 import { useReconstructionStore } from './stores/useReconstructionStore.js'
@@ -273,6 +274,12 @@ const {
 
 const consoleOpen = ref(localStorage.getItem('consoleOpen') === 'true')
 watch(consoleOpen, (v) => localStorage.setItem('consoleOpen', v))
+const devConsoleRef = ref(null)
+// Cmd/Ctrl-K: open the console (if closed) and put the cursor in its prompt.
+function focusConsole() {
+  consoleOpen.value = true
+  nextTick(() => devConsoleRef.value?.focusPrompt())
+}
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 onMounted(async () => {
@@ -283,6 +290,9 @@ onMounted(async () => {
     if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       consoleOpen.value = !consoleOpen.value
+    } else if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+      e.preventDefault()
+      focusConsole()
     } else if (e.key === 'Escape') {
       if (!closeTopModal()) {
         // Nothing modal to dismiss — Escape exits mask/GCP-edit mode on the active tab.
@@ -354,7 +364,7 @@ function onFootprintFromPoses(settings) {
 const {
   exportKind, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials, exportKeypoints, exportMatches, onExportRun,
   exportTargetCloud, openCloudExport, downloadRasterOriginal, downloadImageOriginal, downloadShapefile,
-  exportContours, exportTerrain, exportClipped,
+  exportContours, exportTerrain, exportClipped, exportMeasurementScope, openMeasurementExport, measurementExportCrs,
 } = useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
   georef, currentProjectName, currentCrs, summary: reconSummary, progress: exportProgress,
@@ -441,7 +451,7 @@ const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useComma
   tools: { openRegionTool, openOrientTool, openAlignPairs, openFiducialDetect, openFiducialCalibrate, refreshGcpReport, openQuality },
   exports: {
     exportKind, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials,
-    exportKeypoints, exportMatches, downloadRasterOriginal,
+    exportKeypoints, exportMatches, downloadRasterOriginal, openMeasurementExport,
   },
   removals: { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages },
   imports: {
@@ -450,6 +460,11 @@ const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useComma
   },
   consoleOpen,
 })
+
+// The console's command line acts through this: the same dispatch and guard state as
+// the ribbon, plus the workflow runner and the stores its verbs read (run, stats, set,
+// pair, select).
+const consoleEnv = useConsoleEnv({ dispatch: handleCommand, commandState, workflowRunner, matchStats })
 
 // ── Dialog hosts ──────────────────────────────────────────────────────────────
 // WorkspaceView and the dialog hosts (ProjectModals / PipelineModals / DataModals)
@@ -464,14 +479,14 @@ provideAppContext({
   closeTab, closeTabsToLeft, closeTabsToRight, closeWorkflowBuilder, commitSfmImport,
   confirmRemoveGcp, confirmRemoveGcpObservation, confirmRemoveImages, confirmRemoveSensor,
   deleteMessage, detectedImageCount, detectedMaxKeypoints, editMask, editableClouds, exitGcpEdit,
-  exportClipped, exportContours, exportKind, exportTargetCloud, exportTerrain,
+  exportClipped, exportContours, exportKind, exportMeasurementScope, exportTargetCloud, exportTerrain,
   fiducialCalibrateImages, fiducialCalibrateSensor, fiducialDetectImages, fiducialDetectSensor,
   fiducialDisplayForImage, fillGcpZFromReferenceDem, fitRegionDraft, folderPrompt,
   folderPromptProject, footprintImageCount, gcpReport, georeferenceAfterReconstruct,
   handleCancelNewProject, handleCommand, handleCreateProject, handleDeleteProject, handleSetCrs,
   handleSwitchProject, hasSparse, imageViewerRefs, jumpToImage, mapFrame, mapGcpEdit, mapLayers,
   mapMeasureTarget, mapNotes, mapViewerRef, markDisplayedFiducial, matchNodePositions,
-  matchSummaries, meshClouds, modelCameras, modelMarkers, moveCurrentProjectToBrowser,
+  matchSummaries, measurementExportCrs, meshClouds, modelCameras, modelMarkers, moveCurrentProjectToBrowser,
   moveCurrentProjectToFolder, moveTab, onCameraImport, onCloudImport, onCropCloudRun, onDemRun,
   onDenseRun, onDepthMapsRun, onDetectRun, onEditSelection, onExportRun, onFilterCloudRun,
   onFiducialImport, onFolderConnect, onFolderRepick, onFootprintFromPoses, onFootprintImport, onGcpImport,
@@ -577,7 +592,7 @@ provideSidebar(sidebarContext)
       </svg>
     </a>
 
-    <DevConsole v-if="consoleOpen" :dispatch="handleCommand" :command-state="commandState" />
+    <DevConsole v-if="consoleOpen" ref="devConsoleRef" :env="consoleEnv" />
   </div>
 </template>
 
