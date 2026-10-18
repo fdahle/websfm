@@ -606,6 +606,13 @@ try {
         await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
         continue
       }
+      if (entry.startsWith('pool:')) {
+        // `pool:<n>`: set the compute worker pool to n workers (0 = the default).
+        const r = await page.evaluate((n) => window.bench.setPoolSize(n), Number(entry.slice(5)))
+        result.stages[entry] = r
+        console.log(`== ${entry}: ${JSON.stringify(r)}`)
+        continue
+      }
       if (entry.startsWith('quota:')) {
         // `quota:<MB>`: cap the site's storage at what it uses now plus <MB>, so the next
         // stage runs out of space (Chrome DevTools Storage.overrideQuotaForOrigin).

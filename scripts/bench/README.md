@@ -166,6 +166,9 @@ stage again with config key `dense:loose`.
 - `togglepair`: exclude one accepted pair, then include it again, as the match list
   does. Reports the project's `matches/` files after each save; a toggle should only
   replace the `flags.bin`.
+- `pool:<n>`: set the compute worker pool to n workers (Settings ▸ worker count; 0 =
+  the default). It applies at once only while the pool is idle (`ok`); it is also
+  stored, so `pool:1,reopen,depth:one,dense:one` repeats a run on one worker.
 - `stallMinutes` (default 30): abort the run when no log line arrives for this long,
   or at once if the page crashes. A worker that dies of memory otherwise leaves the
   bench waiting forever. Each stage also logs the renderer heap before/after a GC.

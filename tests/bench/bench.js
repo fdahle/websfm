@@ -810,6 +810,16 @@ window.bench = {
 
   setReference(r) { reference = r; return { positions: Object.keys(r?.positions ?? {}).length, gcps: r?.gcps?.length ?? 0, leverArm: r?.leverArm } },
 
+  // Settings ▸ worker count, as the preference applies it: now if the pool is idle,
+  // and stored, so a `reopen` after this stage starts with that pool in any case.
+  async setPoolSize(n) {
+    const c = await import('/src/workers/computeClient.js')
+    if (n > 0) localStorage.setItem('websfm.compute.workerCount', String(n))
+    else localStorage.removeItem('websfm.compute.workerCount')
+    const ok = c.configureWorkerPoolSize(n)
+    return { ok, poolSize: c.POOL_SIZE, max: c.MAX_POOL_SIZE }
+  },
+
   async start({ name = 'bench', sceneType = 'object', crs = undefined } = {}) {
     await projects.loadIndex()
     await projects.createProject(name, sceneType, crs)
