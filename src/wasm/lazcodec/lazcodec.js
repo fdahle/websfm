@@ -211,9 +211,9 @@ if (Symbol.dispose) LazEncoder.prototype[Symbol.dispose] = LazEncoder.prototype.
  * Compress raw LAS point records.
  *
  * `points` is `num_points × point_size` interleaved bytes, exactly the on-disk
- * layout. `point_size` must match the format's record length (the caller may add
- * "extra bytes", which LASzip carries verbatim — but we reject a size *smaller*
- * than the format requires, which would mean the caller mis-sized its records).
+ * layout. `point_size` is the format's record length plus any "extra bytes", which
+ * go into a LASzip BYTE item; a size *smaller* than the format requires is
+ * rejected (the caller mis-sized its records).
  * @param {Uint8Array} points
  * @param {number} point_format
  * @param {number} point_size

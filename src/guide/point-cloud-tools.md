@@ -95,8 +95,8 @@ file brought (intensity, classification, GPS time, PLY scalar fields).
   a fractional intensity) is written as an *extra bytes* field under its own name,
   which PDAL, CloudCompare and LAStools read. Programs that don't support extra bytes
   ignore those fields.
-- **LAZ** keeps the standard fields only. Extra-bytes attributes are left out and the
-  log says which ones, so export LAS or PLY to keep a distance.
+- **LAZ** holds the same records as LAS, compressed, so the standard fields and the
+  extra bytes fields both come through.
 - **XYZ** has coordinates and colour only.
 
 A **voxel downsample** in the export dialog keeps one real point per cell, with its

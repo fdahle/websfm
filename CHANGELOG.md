@@ -117,6 +117,9 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **LAZ export keeps every point attribute**: a distance, a PLY scalar or a class
+  above 31 is written as an extra-bytes field in LAZ as it already was in LAS, instead
+  of being left out. Streamed clouds exported as LAZ keep them too.
 - **Project files past 4 GB**: a `.websfm` file is written as ZIP64 when it needs to
   be, so large projects can be saved and reopened whole. Opening a project file no
   longer reads each stored file into memory.

@@ -22,35 +22,45 @@ use laz::las::laszip::{LasZipCompressor, LasZipDecompressor, LazItemRecordBuilde
 use laz::laszip::{ChunkTable, ChunkTableEntry};
 use wasm_bindgen::prelude::*;
 
-/// Build the LASzip item record for a LAS point format. Only the formats
-/// `core/io/las.js` can produce or read are accepted; anything else is an error
-/// rather than a silent mis-decode.
-fn vlr_for_format(point_format: u8) -> Result<LazVlr, String> {
-    let mut items = LazItemRecordBuilder::new();
+/// The standard record length of a LAS point format, before any extra bytes.
+fn base_size(point_format: u8) -> Option<u16> {
     match point_format {
-        0 => {
-            items.add_item(LazItemType::Point10);
-        }
-        1 => {
-            items.add_item(LazItemType::Point10);
-            items.add_item(LazItemType::GpsTime);
-        }
-        2 => {
-            items.add_item(LazItemType::Point10);
-            items.add_item(LazItemType::RGB12);
-        }
-        3 => {
-            items.add_item(LazItemType::Point10);
-            items.add_item(LazItemType::GpsTime);
-            items.add_item(LazItemType::RGB12);
-        }
-        _ => {
-            return Err(format!(
-                "lazcodec: unsupported LAS point format {point_format} (0-3 only)"
-            ))
-        }
+        0 => Some(20),
+        1 => Some(28),
+        2 => Some(26),
+        3 => Some(34),
+        _ => None,
     }
-    Ok(LazVlr::from_laz_items(items.build()))
+}
+
+/// Build the LASzip item record for a LAS point format whose records are
+/// `point_size` bytes. Bytes past the format's standard record are LAS "extra
+/// bytes" (core/io/las.js writes its non-standard attributes there); LASzip codes
+/// them as one BYTE item, as laszip itself does. Only the formats `core/io/las.js`
+/// can produce or read are accepted, and a record shorter than its format is an
+/// error rather than a silent mis-decode.
+fn vlr_for_format(point_format: u8, point_size: u16) -> Result<LazVlr, String> {
+    let base = base_size(point_format)
+        .ok_or_else(|| format!("lazcodec: unsupported LAS point format {point_format} (0-3 only)"))?;
+    if point_size < base {
+        return Err(format!(
+            "lazcodec: point_size {point_size} is shorter than format {point_format} (at least {base})"
+        ));
+    }
+    let mut items = LazItemRecordBuilder::new();
+    items.add_item(LazItemType::Point10);
+    if point_format == 1 || point_format == 3 {
+        items.add_item(LazItemType::GpsTime);
+    }
+    if point_format == 2 || point_format == 3 {
+        items.add_item(LazItemType::RGB12);
+    }
+    if point_size > base {
+        items.add_item(LazItemType::Byte(point_size - base));
+    }
+    let vlr = LazVlr::from_laz_items(items.build());
+    debug_assert_eq!(vlr.items_size(), u64::from(point_size));
+    Ok(vlr)
 }
 
 /// Compressed points plus the LASzip VLR payload that describes them. Both are
@@ -178,10 +188,7 @@ impl LazEncoder {
 
 impl LazEncoder {
     fn create(point_format: u8, point_size: u16) -> Result<Self, String> {
-        let vlr = vlr_for_format(point_format)?;
-        if point_size == 0 || u64::from(point_size) != vlr.items_size() {
-            return Err("lazcodec: point size does not match format".into());
-        }
+        let vlr = vlr_for_format(point_format, point_size)?;
         let mut bytes = Vec::new();
         vlr.write_to(&mut bytes).map_err(|e| e.to_string())?;
         let compressor = LasZipCompressor::new(DrainSink::new(), vlr)
@@ -207,9 +214,9 @@ impl LazEncoder {
 /// Compress raw LAS point records.
 ///
 /// `points` is `num_points × point_size` interleaved bytes, exactly the on-disk
-/// layout. `point_size` must match the format's record length (the caller may add
-/// "extra bytes", which LASzip carries verbatim — but we reject a size *smaller*
-/// than the format requires, which would mean the caller mis-sized its records).
+/// layout. `point_size` is the format's record length plus any "extra bytes", which
+/// go into a LASzip BYTE item; a size *smaller* than the format requires is
+/// rejected (the caller mis-sized its records).
 #[wasm_bindgen]
 pub fn compress_points(
     points: &[u8],
@@ -224,13 +231,7 @@ fn compress_points_impl(
     point_format: u8,
     point_size: u16,
 ) -> Result<CompressedPoints, String> {
-    let vlr = vlr_for_format(point_format)?;
-    let expected = vlr.items_size() as u16;
-    if point_size != expected {
-        return Err(format!(
-            "lazcodec: point_size {point_size} does not match format {point_format} (expected {expected})"
-        ));
-    }
+    let vlr = vlr_for_format(point_format, point_size)?;
     if points.len() % point_size as usize != 0 {
         return Err(format!(
             "lazcodec: point buffer {} is not a multiple of the {point_size}-byte record",
@@ -594,6 +595,67 @@ mod tests {
     fn rejects_a_mismatched_record_size() {
         let points = make_points(10);
         assert!(compress_points_impl(&points, 2, 20).is_err());
+        assert!(LazEncoder::create(2, 25).is_err());
+    }
+
+    // Records of `base` bytes from make_points-like data with `extra` bytes appended
+    // (an f32 and odd bytes, so the BYTE item sees both smooth and noisy values).
+    fn with_extra_bytes(n: usize, extra: usize) -> Vec<u8> {
+        let base = make_points(n);
+        let mut v = Vec::with_capacity(n * (26 + extra));
+        for i in 0..n {
+            v.extend_from_slice(&base[i * 26..(i + 1) * 26]);
+            let f = (i as f32 * 0.37).sin().to_le_bytes();
+            for k in 0..extra {
+                v.push(if k < 4 { f[k] } else { (i * 31 + k * 7) as u8 });
+            }
+        }
+        v
+    }
+
+    // Extra bytes ride along as a BYTE item: whole, incremental and chunk-wise decoding
+    // all give the records back, and the VLR's item list says so.
+    #[test]
+    fn round_trips_extra_bytes() {
+        for extra in [1usize, 6, 13] {
+            let size = (26 + extra) as u16;
+            let points = with_extra_bytes(120_007, extra);
+            let packed = compress_points_impl(&points, 2, size).unwrap();
+            let vlr = LazVlr::read_from(Cursor::new(&packed.vlr)).unwrap();
+            assert_eq!(vlr.items_size(), u64::from(size));
+            assert!(vlr.items().iter().any(|it| it.item_type() == LazItemType::Byte(extra as u16)));
+            let back = decompress_points_impl(&packed.vlr, &packed.data, 120_007, size).unwrap();
+            assert_eq!(back, points, "whole decode, {extra} extra bytes");
+
+            let mut encoder = LazEncoder::create(2, size).unwrap();
+            for chunk in points.chunks(size as usize * 40_000) { encoder.push_impl(chunk).unwrap(); }
+            let inc = encoder.finish_impl().unwrap();
+            assert_eq!(inc.data, packed.data);
+
+            let table_at = i64::from_le_bytes(packed.data[0..8].try_into().unwrap()) as usize;
+            let decoder = LazDecoder::create(&packed.vlr, &packed.data[table_at..]).unwrap();
+            assert_eq!(decoder.point_size(), size);
+            let bytes: usize = (0..decoder.chunk_count()).map(|i| decoder.chunk_bytes(i) as usize).sum();
+            let streamed = decoder.decode_impl(&packed.data[8..8 + bytes], 0, decoder.chunk_count(), 120_007).unwrap();
+            assert_eq!(streamed, points, "chunk-wise decode, {extra} extra bytes");
+        }
+    }
+
+    // Format 3 (GPS time) with extra bytes after the RGB.
+    #[test]
+    fn round_trips_format_3_with_extra_bytes() {
+        let n = 5_000;
+        let base = make_points(n); // Point10 + RGB, split around the GPS time
+        let mut points = Vec::with_capacity(n * 38);
+        for i in 0..n {
+            let r = &base[i * 26..(i + 1) * 26];
+            points.extend_from_slice(&r[..20]);
+            points.extend_from_slice(&(i as f64 * 0.01).to_le_bytes());
+            points.extend_from_slice(&r[20..26]);
+            points.extend_from_slice(&(i as u32).to_le_bytes());
+        }
+        let packed = compress_points_impl(&points, 3, 38).unwrap();
+        assert_eq!(decompress_points_impl(&packed.vlr, &packed.data, n as u32, 38).unwrap(), points);
     }
 
     #[test]
