@@ -45,7 +45,9 @@ imported one. The dialogs show what that means for the current project.
   the clouds must already overlap within the **search radius**, so align roughly first
   (point pairs, Transform or georeferencing). With a reference that has normals (a
   mesh, or a cloud after *Estimate normals*) it uses point-to-plane matching, which
-  converges in a few iterations. The log reports the RMS, the rotation and the shift.
+  converges in a few iterations. Against a mesh each point is paired with the closest
+  point on its surface, not with a vertex, so a coarse mesh still aligns to the
+  cloud's noise level. The log reports the RMS, the rotation and the shift.
 
 ## Measure
 These are in **Tools → Measure ▾**, with the raster and mesh measurements.

@@ -120,6 +120,9 @@ Notable changes to websfm. The format follows
 - **LAZ export keeps every point attribute**: a distance, a PLY scalar or a class
   above 31 is written as an extra-bytes field in LAZ as it already was in LAS, instead
   of being left out. Streamed clouds exported as LAZ keep them too.
+- **ICP to a mesh matches the surface**: Align to reference pairs each point with the
+  closest point on the mesh's triangles instead of the nearest vertex, so a coarse
+  mesh aligns to the cloud's noise level (a 10 m mesh: 0.4 mm instead of 0.5 m).
 - **Project files past 4 GB**: a `.websfm` file is written as ZIP64 when it needs to
   be, so large projects can be saved and reopened whole. Opening a project file no
   longer reads each stored file into memory.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cloudToCloudDistance, cloudToMeshDistance, distanceStats } from './cloudDistance.js'
+import { cloudToCloudDistance, cloudToMeshDistance, distanceStats, buildMeshClosest } from './cloudDistance.js'
 
 function rng(seed) {
   let s = seed >>> 0
@@ -182,6 +182,37 @@ describe('cloudToMeshDistance', () => {
       expect(d).toBeLessThanOrEqual(best + 1e-6) // Float32 output
       expect(best - d).toBeLessThan(0.03)
     }
+  })
+
+  it('buildMeshClosest returns the closest point on the closest triangle, with or without a hint', () => {
+    const G = 12, pos = [], idx = []
+    for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) pos.push(OX + 3 * i, OY + 3 * j, OZ + Math.sin(i) * Math.cos(j / 2) * 2)
+    for (let j = 0; j < G - 1; j++) for (let i = 0; i < G - 1; i++) {
+      const a = j * G + i
+      idx.push(a, a + 1, a + G + 1, a, a + G + 1, a + G)
+    }
+    const mesh = { nVerts: G * G, count: idx.length / 3, pos: Float64Array.from(pos), idx: Uint32Array.from(idx) }
+    const search = buildMeshClosest(mesh)
+    const r = rng(12), cp = new Float64Array(3), n = new Float64Array(3)
+    let prev = -1
+    for (let k = 0; k < 300; k++) {
+      const q = [OX - 5 + 43 * r(), OY - 5 + 43 * r(), OZ - 6 + 12 * r()]
+      const f = search.closest(...q, Infinity, k % 2 ? prev : -1, cp)
+      expect(f).toBeGreaterThanOrEqual(0)
+      const tri = [0, 1, 2].map((v) => [...mesh.pos.subarray(mesh.idx[f * 3 + v] * 3, mesh.idx[f * 3 + v] * 3 + 3)])
+      let best = Infinity
+      for (let g = 0; g < mesh.count; g++) {
+        const [a, b, c] = [0, 1, 2].map((v) => [...mesh.pos.subarray(mesh.idx[g * 3 + v] * 3, mesh.idx[g * 3 + v] * 3 + 3)])
+        best = Math.min(best, refTriDist(q, a, b, c))
+      }
+      expect(search.distance).toBeCloseTo(best, 9)
+      expect(Math.hypot(cp[0] - q[0], cp[1] - q[1], cp[2] - q[2])).toBeCloseTo(best, 9)
+      expect(refTriDist([...cp], ...tri)).toBeLessThan(1e-9) // cp lies on triangle f
+      search.faceNormal(f, n)
+      expect(Math.hypot(...n)).toBeCloseTo(1, 12)
+      prev = f
+    }
+    expect(search.closest(OX, OY, OZ + 50, 10, -1, cp)).toBe(-1) // nothing within the limit
   })
 })
 

@@ -25,14 +25,18 @@
 // scale) least squares about the correspondence centroid; point-to-point solves
 // Horn's closed form each iteration. Point-to-plane needs reference normals; their
 // estimation is NOT done here (core/products/cloudNormals.js) — without them it
-// falls back to point-to-point and says so. A mesh reference uses its vertices,
-// with area-weighted vertex normals averaged from the incident faces.
+// falls back to point-to-point and says so. A mesh reference is matched on its
+// SURFACE: each sample's correspondence is the exact closest point on the mesh
+// (core/products/cloudDistance.js ▸ buildMeshClosest, the C2M search) with that
+// triangle's face normal, so a coarse mesh aligns to the noise level, not to its
+// vertex spacing.
 //
 // Dense-scale invariant: typed arrays only for per-point data; inputs are never
 // mutated.
 
 import { fitSimilarity } from './georef.js'
 import { buildKnnIndex, knnQuery } from './knn.js'
+import { buildMeshClosest } from './cloudDistance.js'
 
 // ── Small linear-algebra helpers (3×3 row-major arrays) ──────────────────────
 
@@ -540,23 +544,12 @@ function referenceGeometry(reference) {
   for (let i = 0; i < m; i++) {
     pos[i * 3] = src[i * 3] - c[0]; pos[i * 3 + 1] = src[i * 3 + 1] - c[1]; pos[i * 3 + 2] = src[i * 3 + 2] - c[2]
   }
-  let nrm = null
   if (isMesh) {
-    const acc = new Float64Array(m * 3), idx = reference.idx
-    const tris = Math.min(reference.count ?? Infinity, Math.floor(idx.length / 3))
-    for (let f = 0; f < tris; f++) {
-      const a = idx[f * 3], b = idx[f * 3 + 1], d = idx[f * 3 + 2]
-      if (a >= m || b >= m || d >= m) continue
-      const ux = pos[b * 3] - pos[a * 3], uy = pos[b * 3 + 1] - pos[a * 3 + 1], uz = pos[b * 3 + 2] - pos[a * 3 + 2]
-      const vx = pos[d * 3] - pos[a * 3], vy = pos[d * 3 + 1] - pos[a * 3 + 1], vz = pos[d * 3 + 2] - pos[a * 3 + 2]
-      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx
-      if (!Number.isFinite(nx + ny + nz)) continue
-      for (const v of [a, b, d]) { acc[v * 3] += nx; acc[v * 3 + 1] += ny; acc[v * 3 + 2] += nz }
-    }
-    nrm = acc
-  } else if (reference.nrm && reference.nrm.length >= m * 3) {
-    nrm = reference.nrm
+    // The closest-point search over the local-frame triangles; normals are per face.
+    const surface = buildMeshClosest({ nVerts: m, count: reference.count, pos, idx: reference.idx })
+    return surface.nValid ? { c, pos, nrm: null, count: m, isMesh, surface } : null
   }
+  const nrm = reference.nrm && reference.nrm.length >= m * 3 ? reference.nrm : null
   let unitN = null
   if (nrm) {
     unitN = new Float64Array(m * 3)
@@ -615,13 +608,13 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
   if (!ref) throw new Error('ICP: the reference is empty.')
   const trimFrac = Math.min(1, Math.max(0.05, Number(trim) || 0.9))
   let usePlane = !!pointToPlane
-  if (usePlane && !ref.nrm) {
+  if (usePlane && !ref.nrm && !ref.isMesh) {
     usePlane = false
     log('ICP: the reference has no normals — using point-to-point (estimate normals first for point-to-plane)', 'warn')
   }
   const method = usePlane ? 'point-to-plane' : 'point-to-point'
   const t0 = Date.now()
-  const index = buildKnnIndex({ count: ref.count, pos: ref.pos })
+  const index = ref.isMesh ? null : buildKnnIndex({ count: ref.count, pos: ref.pos })
 
   // Sample in the local frame; non-finite source points are dropped.
   const pick = sampleIndices(nSrc, Math.max(1, Math.floor(sampleCount)), seed)
@@ -643,13 +636,19 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
   let t = [0, 1, 2].map((i) => s * Rc[i] + init.t[i] - c[i])
 
   log(`ICP: ${nSrc.toLocaleString()} source pts → sample ${m.toLocaleString()} (seed ${seed}) · ` +
-    `reference ${ref.count.toLocaleString()} ${ref.isMesh ? 'mesh vertices' : 'pts'} · ${method} · ` +
+    `reference ${ref.isMesh ? `${ref.surface.nValid.toLocaleString()} mesh triangles (closest surface point)` : `${ref.count.toLocaleString()} pts`} · ${method} · ` +
     `maxDistance ${maxDistance} · trim ${Math.round(trimFrac * 100)}% · scale ${estimateScale ? 'estimated' : 'fixed'} · ` +
     `≤ ${maxIterations} iterations, tolerance ${tolerance}`)
 
   const q = new Float64Array(m * 3), prevQ = new Float64Array(m * 3)
-  const pairSrc = new Int32Array(m), pairRef = new Int32Array(m), pairD2 = new Float64Array(m)
+  const pairSrc = new Int32Array(m), pairD2 = new Float64Array(m)
+  // Each sample's current match: the reference point (cloud) or the closest point on
+  // the surface (mesh), and its unit normal for point-to-plane.
+  const tp = new Float64Array(m * 3), tn = usePlane ? new Float64Array(m * 3) : null
   const nnI = new Int32Array(1), nnD = new Float64Array(1)
+  // Mesh: each sample's last triangle, tested first next time (a tight bound, still exact).
+  const hint = ref.isMesh ? new Int32Array(m).fill(-1) : null
+  const cp = new Float64Array(3), fn = new Float64Array(3)
   const maxD2 = maxDistance * maxDistance
   const minPairs = usePlane ? 6 + (estimateScale ? 1 : 0) : 3
   let radius = 0
@@ -664,8 +663,18 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
       const qy = s * (R1[0] * x + R1[1] * y + R1[2] * z) + t[1]
       const qz = s * (R2[0] * x + R2[1] * y + R2[2] * z) + t[2]
       q[k * 3] = qx; q[k * 3 + 1] = qy; q[k * 3 + 2] = qz
-      if (knnQuery(index, qx, qy, qz, 1, nnI, nnD, -1, maxD2)) {
-        pairSrc[found] = k; pairRef[found] = nnI[0]; pairD2[found] = nnD[0]; found++
+      if (ref.isMesh) {
+        const f = ref.surface.closest(qx, qy, qz, maxDistance, hint[k], cp)
+        if (f < 0) continue
+        hint[k] = f
+        tp[k * 3] = cp[0]; tp[k * 3 + 1] = cp[1]; tp[k * 3 + 2] = cp[2]
+        if (tn) { ref.surface.faceNormal(f, fn); tn[k * 3] = fn[0]; tn[k * 3 + 1] = fn[1]; tn[k * 3 + 2] = fn[2] }
+        pairSrc[found] = k; pairD2[found] = ref.surface.distance ** 2; found++
+      } else if (knnQuery(index, qx, qy, qz, 1, nnI, nnD, -1, maxD2)) {
+        const r = nnI[0] * 3
+        tp[k * 3] = ref.pos[r]; tp[k * 3 + 1] = ref.pos[r + 1]; tp[k * 3 + 2] = ref.pos[r + 2]
+        if (tn) { tn[k * 3] = ref.nrm[r]; tn[k * 3 + 1] = ref.nrm[r + 1]; tn[k * 3 + 2] = ref.nrm[r + 2] }
+        pairSrc[found] = k; pairD2[found] = nnD[0]; found++
       }
     }
     let kept = found
@@ -675,7 +684,7 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
       cut = sorted[Math.max(0, Math.ceil(trimFrac * found) - 1)]
       kept = 0
       for (let j = 0; j < found; j++) {
-        if (pairD2[j] <= cut) { pairSrc[kept] = pairSrc[j]; pairRef[kept] = pairRef[j]; pairD2[kept] = pairD2[j]; kept++ }
+        if (pairD2[j] <= cut) { pairSrc[kept] = pairSrc[j]; pairD2[kept] = pairD2[j]; kept++ }
       }
     }
     let sse = 0
@@ -716,17 +725,16 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
       for (let j = 0; j < ev.kept; j++) { const k = pairSrc[j] * 3; cx += q[k]; cy += q[k + 1]; cz += q[k + 2] }
       cx /= ev.kept; cy /= ev.kept; cz /= ev.kept
       H.fill(0); g.fill(0)
-      const N = ref.nrm, P = ref.pos
       for (let j = 0; j < ev.kept; j++) {
-        const k = pairSrc[j] * 3, r = pairRef[j] * 3
-        const nx = N[r], ny = N[r + 1], nz = N[r + 2]
+        const k = pairSrc[j] * 3
+        const nx = tn[k], ny = tn[k + 1], nz = tn[k + 2]
         if (nx === 0 && ny === 0 && nz === 0) continue
         const ux = q[k] - cx, uy = q[k + 1] - cy, uz = q[k + 2] - cz
         // residual(δ) = (q − p)·n + ω·(u × n) + tδ·n + σ·(u·n)
         row[0] = uy * nz - uz * ny; row[1] = uz * nx - ux * nz; row[2] = ux * ny - uy * nx
         row[3] = nx; row[4] = ny; row[5] = nz
         if (dim === 7) row[6] = ux * nx + uy * ny + uz * nz
-        const r0 = (q[k] - P[r]) * nx + (q[k + 1] - P[r + 1]) * ny + (q[k + 2] - P[r + 2]) * nz
+        const r0 = (q[k] - tp[k]) * nx + (q[k + 1] - tp[k + 1]) * ny + (q[k + 2] - tp[k + 2]) * nz
         for (let a = 0; a < dim; a++) {
           g[a] += row[a] * r0
           for (let b = a; b < dim; b++) H[a * dim + b] += row[a] * row[b]
@@ -756,9 +764,9 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
       // Full Horn re-solve from the ORIGINAL sample points to their matches.
       const a = new Float64Array(ev.kept * 3), b = new Float64Array(ev.kept * 3)
       for (let j = 0; j < ev.kept; j++) {
-        const k = pairSrc[j] * 3, r = pairRef[j] * 3
+        const k = pairSrc[j] * 3
         a[j * 3] = sp[k]; a[j * 3 + 1] = sp[k + 1]; a[j * 3 + 2] = sp[k + 2]
-        b[j * 3] = ref.pos[r]; b[j * 3 + 1] = ref.pos[r + 1]; b[j * 3 + 2] = ref.pos[r + 2]
+        b[j * 3] = tp[k]; b[j * 3 + 1] = tp[k + 1]; b[j * 3 + 2] = tp[k + 2]
       }
       const fit = hornArrays(a, b, ev.kept, estimateScale)
       if (fit) next = { s: fit.scale, R: fit.R, t: fit.t }
