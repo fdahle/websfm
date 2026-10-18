@@ -128,8 +128,9 @@ function groupByCube(pts, root, level) {
 /**
  * Build the octree of `source` into `out` (data) using `tmp` (chunk files).
  * opts { chunkMax, leafMax, grid, layout: { offset, scale } (LAS), onProgress(done, total, label) }
- * → { root, layout, spacing, hierarchy: Uint8Array, bounds, stats: { ranges: { attribute: { min,
- *   max } }, classes: { value: count } }, nodeCount, dataBytes, points, levels }
+ * → { root, layout, spacing, hierarchy: Uint8Array, bounds (of the points written), stats: {
+ *   ranges: { attribute: { min, max } }, classes: { value: count } }, nodeCount, dataBytes,
+ *   points, levels, outside? (points beyond `source.bounds`' cube, kept in its edge nodes) }
  */
 export async function buildLod(source, tmp, out, opts = {}) {
   const { chunkMax = CHUNK_MAX, grid = GRID, onProgress = () => {} } = opts
@@ -145,6 +146,12 @@ export async function buildLod(source, tmp, out, opts = {}) {
   // Whole-cloud statistics for styling nodes alike (ranges, class counts).
   const ranges = Object.fromEntries(layout.attributes.map((a) => [a.name, { min: Infinity, max: -Infinity }]))
   const classes = {}
+  // The extent of the points as written (an edit's output is not its source's extent,
+  // a LAS header's is often rounded or stale), and how many fall outside the root cube
+  // the build was planned in (a wrong header: stored, but in edge nodes).
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+  const cubeHi = [0, 1, 2].map((k) => root.min[k] + root.size)
+  let outside = 0
   let done = 0
   for await (const b of source.batches()) {
     for (const [name, r] of Object.entries(ranges)) {
@@ -159,9 +166,16 @@ export async function buildLod(source, tmp, out, opts = {}) {
     }
     const q = { count: b.count, pos: new Float64Array(3 * b.count), col: b.col, attributes: b.attributes }
     for (let i = 0; i < b.count; i++) {
-      q.pos[3 * i] = Math.round((b.pos[3 * i] - ox) / sx) * sx + ox
-      q.pos[3 * i + 1] = Math.round((b.pos[3 * i + 1] - oy) / sy) * sy + oy
-      q.pos[3 * i + 2] = Math.round((b.pos[3 * i + 2] - oz) / sz) * sz + oz
+      const x = q.pos[3 * i] = Math.round((b.pos[3 * i] - ox) / sx) * sx + ox
+      const y = q.pos[3 * i + 1] = Math.round((b.pos[3 * i + 1] - oy) / sy) * sy + oy
+      const z = q.pos[3 * i + 2] = Math.round((b.pos[3 * i + 2] - oz) / sz) * sz + oz
+      if (x < lo[0]) lo[0] = x
+      if (x > hi[0]) hi[0] = x
+      if (y < lo[1]) lo[1] = y
+      if (y > hi[1]) hi[1] = y
+      if (z < lo[2]) lo[2] = z
+      if (z > hi[2]) hi[2] = z
+      if (x < root.min[0] || y < root.min[1] || z < root.min[2] || x > cubeHi[0] || y > cubeHi[1] || z > cubeHi[2]) outside++
     }
     for (const g of groupByCube(q, root, level0)) {
       const name = chunkName(g.key)
@@ -232,9 +246,10 @@ export async function buildLod(source, tmp, out, opts = {}) {
   let dataBytes = 0, points = 0, levels = 0
   for (const e of entries) { dataBytes += e.length; points += e.count; levels = Math.max(levels, e.key[0] + 1) }
   for (const r of Object.values(ranges)) if (r.min > r.max) { r.min = 0; r.max = 1 }
+  const bounds = points ? { min: lo, max: hi } : { min: [...source.bounds.min], max: [...source.bounds.max] }
   return {
     root, layout, spacing: root.size / grid, hierarchy: encodeHierarchy(entries),
-    bounds: { min: [...source.bounds.min], max: [...source.bounds.max] }, stats: { ranges, classes },
-    nodeCount: entries.length, dataBytes, points, levels,
+    bounds, stats: { ranges, classes }, nodeCount: entries.length, dataBytes, points, levels,
+    ...(outside ? { outside } : {}),
   }
 }

@@ -17,6 +17,7 @@
 // voxel paths stream into `createVoxelAccumulator` exactly as fusion does.
 
 import { createVoxelAccumulator } from '../dense/voxelAccumulator.js'
+import { bigSet, bigMap } from '../bigCollections.js'
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -116,7 +117,7 @@ export function buildSpatialGrid(cloud, bounds, cell) {
   const clamp = (i, hi) => (i < 0 ? 0 : (i >= hi ? hi - 1 : i))
   const keyAt = (ix, iy, iz) => (clamp(ix - bx, nx) * ny + clamp(iy - by, ny)) * nz + clamp(iz - bz, nz)
 
-  const idOfKey = new Map()
+  const idOfKey = bigMap(n) // one key per occupied cell: past 2²⁴ a plain Map throws
   const cellOf = new Int32Array(n)
   const ix = new Int32Array(n), iy = new Int32Array(n), iz = new Int32Array(n)
   let cellCount = 0
@@ -477,10 +478,18 @@ export function voxelDownsample(cloud, { cell = 0 } = {}, onLog) {
   // Keep an actual observation per cell when scalar fields are present. Averaging
   // class ids, return flags or timestamps would invent invalid observations.
   if (Object.keys(cloud.attributes || {}).length) {
-    const seen = new Set()
+    // The first point of each cell, the cell named by one integer (the grid's own
+    // indices; the same cells as floor(pos / c) per axis), not a string per point.
+    const { pos } = cloud
+    const x0 = Math.floor(b.minX / c), y0 = Math.floor(b.minY / c), z0 = Math.floor(b.minZ / c)
+    const ny = Math.floor(b.maxY / c) - y0 + 1, nz = Math.floor(b.maxZ / c) - z0 + 1
+    const nx = Math.floor(b.maxX / c) - x0 + 1
+    const exact = nx * ny * nz <= Number.MAX_SAFE_INTEGER
+    const seen = bigSet(n) // one key per occupied cell: past 2²⁴ a plain Set throws
     const keep = new Uint8Array(n)
     for (let i = 0; i < n; i++) {
-      const key = [0, 1, 2].map(axis => Math.floor(cloud.pos[i * 3 + axis] / c)).join(',')
+      const ix = Math.floor(pos[i * 3] / c), iy = Math.floor(pos[i * 3 + 1] / c), iz = Math.floor(pos[i * 3 + 2] / c)
+      const key = exact ? ((ix - x0) * ny + (iy - y0)) * nz + (iz - z0) : `${ix},${iy},${iz}`
       if (!seen.has(key)) { seen.add(key); keep[i] = 1 }
     }
     onLog?.(`Subsample: retained ${seen.size.toLocaleString()} representative points with their attributes`, 'info', 'Products')

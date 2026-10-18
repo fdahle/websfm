@@ -221,8 +221,8 @@ export function aerialUpRotation(cameras) {
 // p' = R·p; a camera pose (x_cam = R_c·x_world + t) becomes R_c' = R_c·Rᵀ with t
 // unchanged (the image the camera sees is invariant — we only re-express the
 // world). Intrinsics, view-tracks and colour pass through. Returns fresh
-// { cameras: Map, points: [] }; inputs are not mutated.
-//   cameras: Map<uuid, { R, t, K }>   points: [{ x, y, z, ... }]
+// { cameras: Map, points: SparsePoints }; inputs are not mutated unless `inPlace`.
+//   cameras: Map<uuid, { R, t, K }>   points: SparsePoints
 export function rotateReconstruction(cameras, points, R, { inPlace = false } = {}) {
   const Rt = [
     [R[0][0], R[1][0], R[2][0]],
@@ -239,25 +239,18 @@ export function rotateReconstruction(cameras, points, R, { inPlace = false } = {
   for (const [uuid, cam] of cameras) {
     newCams.set(uuid, { R: mul(cam.R, Rt), t: [...cam.t], K: cam.K })
   }
-  const rotatePoint = (p) => {
-    const x = R[0][0] * p.x + R[0][1] * p.y + R[0][2] * p.z
-    const y = R[1][0] * p.x + R[1][1] * p.y + R[1][2] * p.z
-    const z = R[2][0] * p.x + R[2][1] * p.y + R[2][2] * p.z
-    if (inPlace) { p.x = x; p.y = y; p.z = z; return p }
-    return { ...p, x, y, z }
+  // A SparsePoints cloud rotates its pos column; tracks and colour are shared.
+  const src = points.pos
+  const pos = inPlace ? src : new Float64Array(src.length)
+  for (let i = 0; i < src.length; i += 3) {
+    const x = src[i], y = src[i + 1], z = src[i + 2]
+    pos[i] = R[0][0] * x + R[0][1] * y + R[0][2] * z
+    pos[i + 1] = R[1][0] * x + R[1][1] * y + R[1][2] * z
+    pos[i + 2] = R[2][0] * x + R[2][1] * y + R[2][2] * z
   }
   // The reconstruction store owns a freshly returned cloud and opts into the
-  // in-place path to avoid duplicating hundreds of thousands of point objects at
-  // finalisation. Other callers retain the pure/fresh-array default.
-  const newPts = inPlace ? points : points.map(rotatePoint)
-  if (inPlace) for (const p of newPts) rotatePoint(p)
-  // Compact sparse clouds keep immutable observation tracks on their points array.
-  // Rotation changes geometry only, so preserve that shared CSR backing store.
-  if (!inPlace && points?.packedTracks) {
-    Object.defineProperty(newPts, 'packedTracks', {
-      value: points.packedTracks, configurable: true, enumerable: false, writable: false,
-    })
-  }
+  // in-place path; other callers get a new cloud sharing the tracks.
+  const newPts = inPlace ? points : points.withPositions(pos)
   return { cameras: newCams, points: newPts }
 }
 

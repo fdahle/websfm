@@ -96,8 +96,9 @@ export function createFlatRasterSource(meta, data, { rgba = null, previewDataUrl
     // *project* CRS must reproject first (useExternalStore.sampleReferenceDem
     // does) — this deliberately knows nothing about the project CRS, so the
     // raster never has to be warped.
-    sampleAt(x, y) {
-      return sampleRaster(desc, x, y)
+    // opts.strict: no neighbour borrowing at holes and edges (rasterSample.js).
+    sampleAt(x, y, opts) {
+      return sampleRaster(desc, x, y, opts)
     },
     // The value of the cell containing (x, y), or null on nodata — never a
     // neighbour's. For cursor readouts (rasterSample.js cellValue).

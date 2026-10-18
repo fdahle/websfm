@@ -45,3 +45,34 @@ test('a project file round-trips through save and open', async ({ page }) => {
   expect(r.binSame).toBe(true)
   expect(errors).toEqual([])
 })
+
+test('a file the project rewrites while it is being saved is archived as it is then', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  const r = await page.evaluate(async () => {
+    const opfs = await import('/src/utils/opfs.js')
+    const { exportProjectArchive, importProjectArchive } = await import('/src/utils/projectFile.js')
+    const { buildManifest } = await import('/src/core/io/projectArchive.js')
+    const src = 'pf-busy-' + Date.now(), dst = 'pf-busy-dst-' + Date.now()
+    await opfs.writeProjectFile(src, 'project.json', new Blob([JSON.stringify({ id: src, name: 'Busy' })]))
+    await opfs.writeProjectFile(src, 'recon/pos.bin', new Blob([new Uint8Array(4096).fill(1)]))
+    // The first write (the manifest) lands after the walk took its snapshots: rewrite
+    // a file then, as a save or a log flush would during a long archive.
+    const chunks = []
+    let rewritten = false
+    const sink = () => ({ streaming: false, close: async () => {}, abort: () => {},
+      write: async (c) => {
+        chunks.push(c.slice())
+        if (!rewritten) { rewritten = true; await opfs.writeProjectFile(src, 'recon/pos.bin', new Blob([new Uint8Array(6000).fill(2)])) }
+      } })
+    const manifest = buildManifest({ project: { name: 'Busy', sceneType: 'object', crs: 'local', createdAt: new Date().toISOString() } })
+    const out = await exportProjectArchive({ projectId: src, manifest, fileName: 'busy.websfm', openSink: sink })
+    await importProjectArchive({ file: new Blob(chunks), projectId: dst })
+    const files = {}
+    for await (const { relPath, file } of opfs.walkProjectFiles(dst)) files[relPath] = file
+    const bytes = new Uint8Array(await files['recon/pos.bin'].arrayBuffer())
+    return { cancelled: !!out.cancelled, size: bytes.length, first: bytes[0], last: bytes[bytes.length - 1] }
+  })
+  expect(r).toEqual({ cancelled: false, size: 6000, first: 2, last: 2 })
+})

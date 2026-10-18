@@ -25,7 +25,8 @@ project's storage in the background, so the view sharpens from coarse to fine. N
 already loaded stay on the graphics card until it needs the room for others.
 
 Dense clouds of 4 million points or more get their octree automatically when they are
-made or imported. It is saved with the project, so it is built only once. A LAS or LAZ
+made or imported. It is saved with the project, so it is built only once; an edit
+that changes the points (a selection deleted or reclassified) builds it again. A LAS or LAZ
 file too large to hold in memory goes straight into an octree as it is read: a
 *streamed* cloud, whose points exist only there (see
 [Point Cloud Tools](guide:point-cloud-tools)).

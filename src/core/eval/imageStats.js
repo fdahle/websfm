@@ -7,22 +7,21 @@ import { projectPoint } from '../sfm/geometry.js'
 // One entry per camera in `cameras`, including registered cameras with zero
 // surviving observations (nObs 0, rms/median/max null — do not drop them, "this
 // image registered but has no tracks" is itself a signal). For each observation
-// (`point.viewsPx`) of a camera, projects the point and measures the pixel residual.
+// (a view with a pixel) of a camera, projects the point and measures the pixel residual.
 // Sorting the result by rmsPx desc names the cameras poisoning the reconstruction —
 // the whole point of the view.
 export function perImageResiduals(cameras, points) {
   const acc = new Map()   // uuid → number[]
   for (const uuid of cameras.keys()) acc.set(uuid, [])
 
-  for (const p of points || []) {
-    if (!p.viewsPx || !p.viewsPx.size) continue
-    for (const [uuid, px] of p.viewsPx) {
+  for (let i = 0, n = points?.length ?? 0; i < n; i++) {
+    const x = points.x(i), y = points.y(i), z = points.z(i)
+    points.forEachPixel(i, (uuid, px, py) => {
       const cam = cameras.get(uuid)
-      if (!cam) continue                       // observation of an image not in this model
-      const proj = projectPoint(cam, p.x, p.y, p.z)
-      if (!proj) continue
-      acc.get(uuid).push(Math.hypot(proj.u - px[0], proj.v - px[1]))
-    }
+      if (!cam) return                         // observation of an image not in this model
+      const proj = projectPoint(cam, x, y, z)
+      if (proj) acc.get(uuid).push(Math.hypot(proj.u - px, proj.v - py))
+    })
   }
 
   const out = []
@@ -66,23 +65,27 @@ export function unregisteredReason({ kpCount, degree, componentIndex } = {}) {
 export function imageResidualVectors(cam, points, uuid, toScan = null) {
   if (!cam) return []
   const out = []
-  for (const p of points || []) {
-    const px = p.viewsPx?.get?.(uuid)
-    if (!px) continue
-    const proj = projectPoint(cam, p.x, p.y, p.z)
-    if (!proj) continue
-    const du = px[0] - proj.u
-    const dv = px[1] - proj.v
+  if (!points?.length) return out
+  // The camera's own views via the per-camera index, not a scan of every track.
+  const { vx, vy } = points
+  if (!vx) return out
+  points.forEachPointOf(uuid, (i, k) => {
+    const ox = vx[k], oy = vy[k]
+    if (!Number.isFinite(ox)) return
+    const proj = projectPoint(cam, points.x(i), points.y(i), points.z(i))
+    if (!proj) return
+    const du = ox - proj.u
+    const dv = oy - proj.v
     const mag = Math.hypot(du, dv)
     if (!toScan) {
-      out.push({ px: px[0], py: px[1], du, dv, mag })
-      continue
+      out.push({ px: ox, py: oy, du, dv, mag })
+      return
     }
     // Map both endpoints, then re-derive the vector: the transform is not a pure
     // translation, so mapping the tail and reusing (du,dv) would skew the arrow.
-    const a = toScan(px[0], px[1])
+    const a = toScan(ox, oy)
     const b = toScan(proj.u, proj.v)
     out.push({ px: a.x, py: a.y, du: a.x - b.x, dv: a.y - b.y, mag })
-  }
+  })
   return out
 }

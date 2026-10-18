@@ -122,7 +122,8 @@ every run.
   with normals and colour, so the point-cloud tools and the DEM can use a mesh.
 - **Texture…** paints the mesh with the photos themselves, as a new textured mesh.
   See [Texture a Mesh](guide:texture-mesh), which also says which of these tools keep
-  a texture.
+  a texture. On a textured mesh these tools find the same pieces, holes and open edges
+  as on the mesh before texturing.
 - **Mesh area & volume…** (in **Tools → Measure ▾**, with the other measurements)
   reports the surface area and, when the mesh is closed and
   consistently wound, its volume. An open mesh reports how many open edges it has

@@ -29,6 +29,9 @@ const preview = computed(() => (props.data.kind === 'image' ? previewFiducialObs
 const matched = computed(() => preview.value.filter((g) => g.imageId != null))
 const matchedMarks = computed(() => matched.value.reduce((n, g) => n + g.marks.length, 0))
 const replaced = computed(() => matched.value.reduce((n, g) => n + g.replaces, 0))
+const shared = computed(() => matched.value.reduce((n, g) => n + g.shared, 0))
+// The slot a mark lands in, with the file's own id when it differs ("1 → corner-tl").
+const slotText = (m) => (m.slot == null || m.slot === m.fidId ? m.fidId : `${m.fidId} → ${m.slot}`)
 const unmatched = computed(() => preview.value.filter((g) => g.imageId == null))
 
 // Marks are drawn and used only on a film sensor's images; say so before importing.
@@ -77,7 +80,8 @@ function doImport() {
       <template v-if="data.kind === 'image'">
         <p class="kind-note">
           Fiducial positions in scan pixels, {{ data.layout === 'wide' ? 'one row per image' : 'one row per mark' }}.
-          Files are matched to project images by name; a mark replaces the image's mark in the same slot.
+          Files are matched to project images by name. A mark named by its slot keeps it; any other id is placed
+          by its position on the scan. It replaces the image's mark in the same slot.
         </p>
         <div class="table-wrap">
           <table class="preview">
@@ -87,7 +91,7 @@ function doImport() {
                 <td class="mono">{{ g.fileName }}</td>
                 <td>{{ g.imageName ?? 'not in the project' }}</td>
                 <td class="num">{{ g.marks.length }}<span v-if="g.replaces" class="dim"> ({{ g.replaces }} replaced)</span></td>
-                <td class="slots">{{ g.marks.map((m) => m.fidId).join(', ') }}</td>
+                <td class="slots">{{ g.marks.map(slotText).join(', ') }}</td>
               </tr>
             </tbody>
           </table>
@@ -99,6 +103,10 @@ function doImport() {
           <span v-else class="warn">No file name matches an image in the project.</span>
           <span v-if="unmatched.length" class="warn"> · {{ plural(unmatched.length, 'image') }} not in the project (skipped)</span>
         </div>
+        <p v-if="shared" class="kind-note warn-note">
+          {{ plural(shared, 'mark') }} land in a slot another mark of the same image also takes; the last one in the
+          file is kept.
+        </p>
         <p v-if="notFilm" class="kind-note warn-note">
           {{ plural(notFilm, 'image') }} {{ notFilm === 1 ? 'is' : 'are' }} not on a film sensor: the marks are kept,
           but drawn and used only once the sensor's kind is Film (sensor table, or Import ▸ Calibration).

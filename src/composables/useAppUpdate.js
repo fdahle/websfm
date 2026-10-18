@@ -8,35 +8,93 @@ import { showToast } from './useToasts.js'
 // reloading on its own would kill a running reconstruction, so the switch happens
 // only when the user clicks Reload in <UpdatePrompt />.
 //
-// Module-level singleton, like useToasts: main.js registers once, the prompt reads it.
-
-export const updateReady = ref(false)
-
-let applyUpdate = null
+// Several tabs share one worker. Reload in one tab activates the new worker for
+// all of them, and every other tab then runs old code against the new worker's
+// caches (the old precache is cleaned up, so its lazy chunks can no longer load).
+// The plugin's default reaction is an immediate `location.reload()` in each such
+// tab, which would cut a run short in a busy one. `onNeedReload` replaces it: a tab
+// reloads at once only while no work is in flight; a busy tab keeps the prompt up
+// (now saying the new version is already active) and reloads when its work ends.
+//
+// Module-level singleton, like useToasts: main.js registers once, the prompt reads
+// it and reports the tab's busy state (setUpdateBusy).
 
 // Long sessions are normal here (a dense run takes hours), so look for a new
 // deploy periodically rather than only at page load.
 const UPDATE_CHECK_MS = 60 * 60 * 1000
 
+/**
+ * The update state machine, without the service worker or the page: `reload`
+ * reloads the page. Exported for tests; the app uses the singleton below.
+ */
+export function createAppUpdate({ reload = () => window.location.reload() } = {}) {
+  // The prompt is shown: a new version is waiting, or already active (below).
+  const updateReady = ref(false)
+  // The new worker already controls this tab (another tab switched): this tab runs
+  // old code and has to reload as soon as it can.
+  const updateActive = ref(false)
+  let busy = false
+  let reloading = false
+  let applyUpdate = null
+
+  function reloadIfIdle() {
+    if (!updateActive.value || busy || reloading) return
+    reloading = true
+    reload()
+  }
+
+  return {
+    updateReady,
+    updateActive,
+    /** Hand over the plugin's `updateServiceWorker` (sends SKIP_WAITING). */
+    setApplyUpdate(fn) { applyUpdate = fn },
+    /** A new version is installed and waiting. */
+    onNeedRefresh() { updateReady.value = true },
+    /** The new worker took control of this tab (this tab's Reload, or another tab's). */
+    onNeedReload() {
+      updateActive.value = true
+      updateReady.value = true
+      reloadIfIdle()
+    },
+    /** The tab's work-in-flight state; going idle completes a deferred reload. */
+    setBusy(value) {
+      busy = !!value
+      reloadIfIdle()
+    },
+    /** Reload pressed: activate the waiting worker (onNeedReload then reloads). */
+    reloadIntoUpdate() {
+      if (busy) return
+      if (updateActive.value) reloadIfIdle()
+      else applyUpdate?.(true)
+    },
+    /** Hide the prompt for this session; the update still applies on the next load. */
+    postponeUpdate() {
+      // An active update cannot wait for the next start: this tab's old code no
+      // longer matches the worker's caches, so it reloads once idle regardless.
+      if (!updateActive.value) updateReady.value = false
+    },
+  }
+}
+
+const app = createAppUpdate()
+
+export const updateReady = app.updateReady
+export const updateActive = app.updateActive
+export const reloadIntoUpdate = app.reloadIntoUpdate
+export const postponeUpdate = app.postponeUpdate
+export const setUpdateBusy = app.setBusy
+
 export async function registerServiceWorker() {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
   // A no-op stub in dev (vite-plugin-pwa only emits a worker for builds).
   const { registerSW } = await import('virtual:pwa-register')
-  applyUpdate = registerSW({
-    onNeedRefresh() { updateReady.value = true },
+  app.setApplyUpdate(registerSW({
+    onNeedRefresh: app.onNeedRefresh,
+    // Replaces the plugin's unconditional reload when the new worker takes control.
+    onNeedReload: app.onNeedReload,
     onOfflineReady() { showToast('websfm is ready to work offline', { ms: 5000 }) },
     onRegisteredSW(_url, registration) {
       if (registration) setInterval(() => { registration.update().catch(() => {}) }, UPDATE_CHECK_MS)
     },
-  })
-}
-
-/** Activate the waiting worker and reload into the new version. */
-export function reloadIntoUpdate() {
-  applyUpdate?.(true)
-}
-
-/** Hide the prompt for this session; the update still applies on the next load. */
-export function postponeUpdate() {
-  updateReady.value = false
+  }))
 }

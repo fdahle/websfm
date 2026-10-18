@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { cloudToPlyParts, meshToPlyParts, meshToGlbParts, meshToObjParts, meshToStlParts, reconstructionToJson, demToAsciiGridParts, rasterWorldFile, prepareCloudForExport, prepareMeshForExport, objMaterialLibrary } from './exporters.js'
 import { joinParts, jsonParts } from '../io/parts.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
 // The writers yield bounded parts (core/io/parts.js); these join them for small fixtures.
 const cloudToPly = (...a) => joinParts(cloudToPlyParts(...a))
@@ -153,7 +154,7 @@ describe('cloudToPly', () => {
 describe('reconstructionToJson', () => {
   it('emits cameras with centres (C = −Rᵀt) + tracks + crs', () => {
     const cameras = [{ uuid: 'a', R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [1, 2, 3], K: { fx: 100, fy: 100, cx: 50, cy: 40, extra: 9 } }]
-    const points = [{ x: 1, y: 2, z: 3, color: [10, 20, 30], views: [['a', 5]] }]
+    const points = SparsePoints.fromRecords([{ x: 1, y: 2, z: 3, color: [10, 20, 30], views: [['a', 5]] }])
     // points is a lazyArray: read the document the way the export writes it.
     const j = JSON.parse(joinParts(jsonParts(reconstructionToJson(cameras, points, 'EPSG:3031'))))
     expect(j.crs).toBe('EPSG:3031')

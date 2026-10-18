@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { usedKeysForPair, usedPairCounts } from './usedMatches.js'
 import { makePackedPoints } from '../sfm/resultCodec.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
 // The reference the counts replace: one Set of "kpA:kpB" keys per pair.
 function referenceSets(points) {
@@ -56,11 +57,11 @@ function pack(points, uuids) {
 }
 
 describe('usedPairCounts', () => {
-  it('equals the per-pair distinct key-set sizes, for Map and packed points', () => {
+  it('equals the per-pair distinct key-set sizes, for record-built and packed points', () => {
     for (const seed of [1, 7, 42]) {
       const { uuids, points } = randomModel(seed)
       const ref = new Map([...referenceSets(points)].map(([pid, set]) => [pid, set.size]))
-      expect(new Map([...usedPairCounts(points)].sort())).toEqual(new Map([...ref].sort()))
+      expect(new Map([...usedPairCounts(SparsePoints.fromRecords(points))].sort())).toEqual(new Map([...ref].sort()))
       expect(new Map([...usedPairCounts(pack(points, uuids))].sort())).toEqual(new Map([...ref].sort()))
     }
   })
@@ -76,10 +77,11 @@ describe('usedKeysForPair', () => {
     const { uuids, points } = randomModel(3)
     const ref = referenceSets(points)
     const packed = pack(points, uuids)
+    const built = SparsePoints.fromRecords(points)
     for (const [pid, set] of ref) {
-      expect(usedKeysForPair(points, pid)).toEqual(set)
+      expect(usedKeysForPair(built, pid)).toEqual(set)
       expect(usedKeysForPair(packed, pid)).toEqual(set)
     }
-    expect(usedKeysForPair(points, 'nope').size).toBe(0)
+    expect(usedKeysForPair(built, 'nope').size).toBe(0)
   })
 })
