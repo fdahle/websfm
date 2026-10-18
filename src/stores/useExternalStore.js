@@ -438,7 +438,10 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // change. A raster with no declared CRS is read in `fromCrs`, as in
   // `toRasterCoords`. Throws with a user-facing reason when it cannot sample.
   // → { meta, sample(x, y) → z | null }
-  async function referenceDemSampler(rasterId, fromCrs) {
+  //   opts.strict — the cell containing a point must have a height: a reference
+  //                 hole, or a point off the raster, reads null instead of a
+  //                 neighbour's value (DEM of difference volumes count it unmeasured)
+  async function referenceDemSampler(rasterId, fromCrs, { strict = false } = {}) {
     const meta = rasterById(rasterId)
     if (!meta || meta.kind !== 'dem') throw new Error('The reference DEM is no longer in the project')
     if (meta.crsUnresolved && !(await resolveRasterCrs(meta))) {
@@ -455,12 +458,13 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     const source = await ensureRasterLoaded(meta.id)
     if (!source) throw new Error(`The pixel data of "${meta.name}" is unavailable — re-import it`)
     const vOffset = meta.vOffset || 0
+    const sampleOpts = strict ? { strict: true } : undefined
     return {
       meta,
       sample(x, y) {
         let rx, ry
         try { [rx, ry] = toRaster(x, y) } catch { return null }
-        const raw = source.sampleAt(rx, ry)
+        const raw = source.sampleAt(rx, ry, sampleOpts)
         return raw == null ? null : raw + vOffset
       },
     }

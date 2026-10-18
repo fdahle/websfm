@@ -2,7 +2,7 @@ import { assembleCog, geoKeysForEpsg } from '../../core/products/geotiff.js'
 import { attributeBuffers } from '../../core/io/cloudAttributes.js'
 import { GeoTIFF, fromArrayBuffer, fromBlob } from 'geotiff'
 import { rasterWindow } from '../../core/io/rasterWindow.js'
-import { edgeOriginFromTags } from '../../core/io/rasterSample.js'
+import { edgeOriginFromTags, nodataForSampleType } from '../../core/io/rasterSample.js'
 import { parseCloudSource, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
 import { MAX_BUFFER_BYTES, isBufferAllocationFailure, rasterTooLargeMessage, tooManyPointsMessage } from '../../core/bufferLimit.js'
 import { blobSource } from '../../utils/blobParts.js'
@@ -39,7 +39,8 @@ export function makeIoOps({ lazCodec = null } = {}) {
     const image = await tiff.getImage()
     const layout = rasterWindow({ width: image.getWidth(), height: image.getHeight(), bands: image.getSamplesPerPixel() }, rect, maxDim, bands)
     const channels = await image.readRasters({ window: layout.window, width: layout.width, height: layout.height, samples: bands, interleave: false })
-    const nodata = parseNodata(await readTiffTag(image.getFileDirectory(), 'GDAL_NODATA'))
+    const fd = image.getFileDirectory()
+    const nodata = await bandNodata(image, fd)
     return { result: { ...layout, bands, data: channels[0], channels: Array.from(channels), nodata }, transfer: [...new Set(Array.from(channels, c => c.buffer))] }
   }
   // args: [{ file: File|Blob, name: string }] → { parsed, stats }
@@ -108,7 +109,8 @@ export function makeIoOps({ lazCodec = null } = {}) {
     // "int8, no nodata" defaults and feeding the classifier garbage.
     const sampleFormat = (await readTiffTag(fd, 'SampleFormat'))?.[0] ?? 1
     const bitsPerSample = image.getBitsPerSample?.() ?? (await readTiffTag(fd, 'BitsPerSample'))?.[0] ?? 8
-    const nodata = parseNodata(await readTiffTag(fd, 'GDAL_NODATA'))
+    // As the band stores it (a Float32 band holds fround(−9999.9), not −9999.9).
+    const nodata = nodataForSampleType(parseNodata(await readTiffTag(fd, 'GDAL_NODATA')), sampleFormat, bitsPerSample)
 
     const geoTransform = await readGeoTransform(image, fd)
     if (!geoTransform) throw new Error(`${name} carries no geotransform — not a georeferenced raster`)
@@ -130,9 +132,11 @@ export function makeIoOps({ lazCodec = null } = {}) {
       + `, scale ${geoTransform.scaleX}/${geoTransform.scaleY}`)
 
     // Every path but the ortho preview builds one full-resolution plane of 4 bytes a cell
-    // (Float32 elevations or RGBA): refuse before reading rather than fail on the buffer.
-    if (!(kind === 'ortho' && previewOnly) && width * height * 4 > MAX_BUFFER_BYTES) {
-      throw new Error(rasterTooLargeMessage(name, width, height, 4))
+    // (Float32 elevations or RGBA), and first reads each band whole in its native type
+    // (a Float64 DEM: 8 bytes a cell). Refuse before reading rather than fail on the buffer.
+    const cellBytes = Math.max(4, sampleBytes(bitsPerSample))
+    if (!(kind === 'ortho' && previewOnly) && width * height * cellBytes > MAX_BUFFER_BYTES) {
+      throw new Error(rasterTooLargeMessage(name, width, height, cellBytes))
     }
 
     let plane, zMin = null, zMax = null, previewDataUrl = null, dtype
@@ -280,7 +284,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
     const bands = image.getSamplesPerPixel()
     const sampleFormat = (await readTiffTag(fd, 'SampleFormat'))?.[0] ?? 1
     const bitsPerSample = image.getBitsPerSample?.() ?? (await readTiffTag(fd, 'BitsPerSample'))?.[0] ?? 8
-    const nodata = parseNodata(await readTiffTag(fd, 'GDAL_NODATA'))
+    const nodata = nodataForSampleType(parseNodata(await readTiffTag(fd, 'GDAL_NODATA')), sampleFormat, bitsPerSample)
 
     const resolvedStyle = resolveRasterStyle(style, { bands, bitsPerSample, sampleFormat })
     const used = bandsUsedBy(resolvedStyle)
@@ -388,6 +392,20 @@ function parseNodata(raw) {
   if (raw == null) return null
   const v = parseFloat(String(raw).trim())
   return Number.isFinite(v) ? v : null
+}
+
+// GDAL_NODATA of band 0 as that band's sample type holds it (rasterSample.js
+// nodataForSampleType), for comparisons with the values readRasters returns.
+async function bandNodata(image, fd) {
+  const sampleFormat = (await readTiffTag(fd, 'SampleFormat'))?.[0] ?? 1
+  const bitsPerSample = image.getBitsPerSample?.() ?? (await readTiffTag(fd, 'BitsPerSample'))?.[0] ?? 8
+  return nodataForSampleType(parseNodata(await readTiffTag(fd, 'GDAL_NODATA')), sampleFormat, bitsPerSample)
+}
+
+// Bytes a decoded sample takes (geotiff's typed array for the bit depth).
+export function sampleBytes(bitsPerSample) {
+  const b = Number(bitsPerSample) || 8
+  return b <= 8 ? 1 : b <= 16 ? 2 : b <= 32 ? 4 : 8
 }
 
 // ModelTiepoint + ModelPixelScale, or an axis-aligned ModelTransformation.

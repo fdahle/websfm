@@ -67,7 +67,13 @@ export async function buildPyramidFromTiff(file, {
   }
   const toChannels = (raw, rows) => {
     const n = W * rows, out = new Uint8Array(n * channels)
-    if (!plain) { out.set(raw.subarray ? raw.subarray(0, n * 3) : raw); return out } // readRGB: RGB already
+    if (!plain) {
+      // readRGB: always 3 channels. A gray scan that is not 8/16-bit (1/4/12-bit,
+      // float) comes back with R = G = B, so it keeps one channel: its R.
+      if (channels === 3) { out.set(raw.subarray ? raw.subarray(0, n * 3) : Array.prototype.slice.call(raw, 0, n * 3)); return out }
+      for (let i = 0; i < n; i++) out[i] = raw[i * 3]
+      return out
+    }
     const lo = range?.lo ?? 0, span = range ? Math.max(1, range.hi - range.lo) : 1
     const invert = gray && photometric === 0
     for (let i = 0; i < n; i++) {

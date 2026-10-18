@@ -151,7 +151,8 @@ export function useQualityReport() {
       meta.vOffset || 0, meta.planeStyleStamp ?? ''].join('|')
     if (demRefCache?.key === key) return demRefCache.promise
     const promise = (async () => {
-      const { sample } = await external.referenceDemSampler(meta.id, dem.crs ?? null)
+      // Strict: a reference hole is missing coverage, not a neighbour's height.
+      const { sample } = await external.referenceDemSampler(meta.id, dem.crs ?? null, { strict: true })
       const cmp = await compareDemToReference(dem, sample)
       const demUnit = rasterUnits(dem).vertical
       const refUnit = rasterUnits(meta).vertical

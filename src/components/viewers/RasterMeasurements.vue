@@ -6,7 +6,7 @@ import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { measurementSource, measurementStamp, measurementStale } from '../../core/products/measurementRecord.js'
 import { pixelToWorld, worldToPixel } from '../../core/io/rasterSample.js'
-import { polylineLength, planimetricArea, sampleProfile, polygonVolume, groundVolume } from '../../core/products/measure.js'
+import { polylineLength, planimetricArea, sampleProfile, polygonVolume, groundVolume, SURFACE_VOLUME_MAX_SAMPLES } from '../../core/products/measure.js'
 import { isGeographic } from '../../core/crs.js'
 import { rasterGroundScale, rasterUnits, volumeUnitLabel } from '../../core/products/rasterUnits.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
@@ -104,7 +104,9 @@ watch([baseKind, () => props.product?.crs], async ([kind, crs]) => {
   refSampler.value = null; refError.value = ''
   if (!kind.startsWith('ref:')) return
   try {
-    const s = await external.referenceDemSampler(kind.slice(4), crs)
+    // Strict: a reference hole, or a cell centre off the reference, is unmeasured;
+    // never a neighbour's height borrowed across the hole's edge.
+    const s = await external.referenceDemSampler(kind.slice(4), crs, { strict: true })
     if (baseKind.value === kind) refSampler.value = { name: s.meta.name, sample: s.sample }
   } catch (err) { refError.value = err?.message ?? String(err) }
 })
@@ -116,7 +118,10 @@ const volume = computed(() => {
   if (baseKind.value.startsWith('ref:')) {
     if (refError.value) return { error: 'reference' }
     if (!refSampler.value) return null
-    return groundVolume(polygonVolume(grid.value, world.value, { base: 'surface', surface: refSampler.value }), gridScale.value)
+    // Each compared cell reprojects into the reference: a sub-grid of at most 64 k
+    // cells while the polygon is drawn (this reruns per vertex), 262 k once closed.
+    return groundVolume(polygonVolume(grid.value, world.value, { base: 'surface', surface: refSampler.value,
+      maxSurfaceSamples: finished.value ? SURFACE_VOLUME_MAX_SAMPLES : 65536 }), gridScale.value)
   }
   const h = baseHeight.value
   return groundVolume(polygonVolume(grid.value, world.value, { base: baseKind.value, height: h === '' || h == null ? null : Number(h) }), gridScale.value)
@@ -187,7 +192,8 @@ const baseResult = computed(() => {
       rows: [[diff ? 'Gain (above the reference)' : 'Cut (above base)', fmtVolume(v.cut)],
         [diff ? 'Loss (below the reference)' : 'Fill (below base)', fmtVolume(v.fill)], ['Base', base],
         ['Area', `${num(area.value ?? 0)} ${unit.value}²`],
-        ['DEM coverage', `${(v.coverage * 100).toFixed(1)}% of ${v.insideCells.toLocaleString()} cells`]],
+        ['DEM coverage', `${(v.coverage * 100).toFixed(1)}% of ${v.insideCells.toLocaleString()} cells`],
+        ...(v.sampleStep > 1 ? [['Sampled', `1 cell in ${v.sampleStep}×${v.sampleStep} (an estimate)`]] : [])],
       warn: [v.coverage < 1 ? (diff ? 'Holes in either DEM and parts outside the reference are excluded, not interpolated.'
         : 'Holes and off-raster parts are excluded, not interpolated.') : '',
       diff ? 'Both DEMs must use the same vertical datum; a reference\'s declared offset is applied.' : ''].filter(Boolean).join(' ') }
