@@ -19,6 +19,14 @@ Notable changes to websfm. The format follows
   ordinary cloud; Export writes LAS, LAZ, PLY or XYZ node by node. Selection (delete,
   keep only, assign class), an inverted crop, Filter and Classify ground run on it as
   it is, node by node or tile by tile, into a new streamed cloud.
+- **3D Tiles with level of detail**: Export ▸ 3D Tiles can write a hierarchy of tiles
+  that CesiumJS and other viewers stream in as the camera comes closer (the default from
+  1 million points or 250,000 triangles). A point cloud is tiled by its octree, one tile
+  per node with colour, classification and intensity, read node by node, so a streamed
+  cloud of any size exports; a streamed LAS is placed in the CRS its file names. A mesh
+  is split into a quadtree (terrain) or octree (object) of tiles and decimated per
+  level, with tile borders kept so neighbours always meet; a textured mesh keeps its
+  texture in the finest tiles.
 - **Measure in 3D**: Tools ▸ Measure ▸ Measure in 3D measures distance, polylines and
   areas directly in the 3D view, picked on the surface of a mesh or on cloud points.
   Lengths are split into horizontal and height change, areas into surface area and
