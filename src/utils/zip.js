@@ -64,6 +64,31 @@ export async function zipParts(entries) {
   return out
 }
 
+// A zip made one entry at a time, for an export whose entries are produced one by one
+// and must never all be held (a 3D Tiles tileset of thousands of tiles): `add` returns
+// the entry's parts (local header + data) for the caller to fold into a Blob as it
+// goes, `finish` the central directory and end records. Same records as zipParts.
+export function zipStream() {
+  const enc = new TextEncoder()
+  const central = []
+  let off = 0, cdSize = 0
+  return {
+    add(name, data) {
+      const bytes = typeof data === 'string' ? enc.encode(data) : data
+      const nameBytes = enc.encode(name)
+      const crc = crc32(bytes)
+      const lh = zipLocalHeader(nameBytes, { crc, size: bytes.length })
+      const ch = zipCentralHeader(nameBytes, { crc, size: bytes.length, offset: off })
+      central.push(ch)
+      cdSize += ch.length
+      off += lh.length + bytes.length
+      return [lh, bytes]
+    },
+    finish: () => [...central, zipEndRecords(central.length, off, cdSize)],
+    get entries() { return central.length },
+  }
+}
+
 function byteParts(data, enc) {
   if (data instanceof Uint8Array) return [data]
   if (typeof data === 'string') return [enc.encode(data)]

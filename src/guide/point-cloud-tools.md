@@ -116,8 +116,9 @@ one buffer at 2 GiB), so import a larger cloud as LAS or LAZ, which streams (bel
 zero for every point (no intensity, never classified, no GPS time), or return numbers that
 are all "1 of 1", is not kept, so it takes no memory and is not offered for styling.
 Exporting writes the same value back, as the file had.
-**Export ▸ 3D Tiles…** writes one tile, so it takes at most the same 89 million points.
-Subsample a larger cloud first, or export it as LAS or LAZ.
+**Export ▸ 3D Tiles…** as a single tile takes at most the same 89 million points; a
+larger cloud is written as a hierarchy of tiles from its level-of-detail octree (see
+[Export 3D Tiles](guide:export-3d-tiles)).
 
 ## Very large LAS and LAZ files
 A LAS or LAZ file too large to hold in memory (from about 10 million points) is
@@ -159,6 +160,7 @@ measure on it. Tools read it from its octree:
   rather than writing a thinned result; crop that part out first.
 - **Export** writes LAS, LAZ, PLY or XYZ node by node. LAS and LAZ keep the file's own
   coordinate quantisation and its projection records; the points come in a different
-  order than in the source file.
+  order than in the source file. **Export ▸ 3D Tiles…** writes one tile per octree
+  node, placed in the CRS the file names (see [Export 3D Tiles](guide:export-3d-tiles)).
 
 Other edits (normals, transform, alignment, distances, merge) work on a crop of it.

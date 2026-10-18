@@ -4,6 +4,8 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import { EXPORT_DEFAULTS } from '../../core/defaults.user.js'
 import { MAX_ORTHO_IMAGE_CELLS } from '../../core/products/exporters.js'
+import { defaultTiling, singleTileFits } from '../../core/products/tiles3d.js'
+import FieldHelp from '../guide/FieldHelp.vue'
 
 // One reusable export dialog, parameterised by `kind`. It collects a format + a
 // few settings and emits them on run; App.vue maps the result to the right
@@ -28,6 +30,9 @@ const props = defineProps({
   // The mesh this export writes is textured (Tools ▸ Mesh ▸ Texture): GLB and OBJ can
   // carry the texture; for 3D Tiles, the tile is that mesh.
   textured: { type: Boolean, default: false },
+  // What a 3D Tiles export writes (core/products/tiles3d.js tilesSubject): { kind:
+  // 'mesh' | 'cloud', count, streamed, textured }, or null. Sets the tiling default.
+  tilesSubject: { type: Object, default: null },
 })
 
 const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
@@ -82,7 +87,7 @@ const CONFIG = {
   tiles3d: {
     title: 'Export 3D Tiles',
     formats: [
-      { value: 'tileset', label: 'Cesium 3D Tiles 1.1 — tileset.json + .glb' },
+      { value: 'tileset', label: 'Cesium 3D Tiles 1.1 — tileset.json + glTF tiles (.zip)' },
     ],
   },
   undistorted: {
@@ -127,7 +132,12 @@ const settings = ref({
   includeImages: false,
   includeTexture: true,
   ...EXPORT_DEFAULTS,
+  // 3D Tiles: a hierarchy for a big model, one tile for a small one (defaultTiling).
+  tiling: EXPORT_DEFAULTS.tiling ?? defaultTiling(props.tilesSubject),
 })
+const tilesMesh = computed(() => props.tilesSubject?.kind === 'mesh')
+// One tile cannot hold a streamed cloud or one past the buffer wall.
+const singleTileOk = computed(() => !props.tilesSubject || singleTileFits(props.tilesSubject))
 const textureFormat = computed(() => settings.value.format === 'glb' || settings.value.format === 'obj')
 
 // The compression selector applies to both TIFF flavours. A COG defaults to
@@ -233,14 +243,37 @@ function run() {
     <!-- 3D Tiles -->
     <template v-else-if="kind === 'tiles3d'">
       <p class="field-hint">
-        A single tile for globe viewers (Cesium, and anything else reading 3D
-        Tiles 1.1). The model is placed by a transform measured from the project
-        CRS, so it lands correctly even at polar latitudes. Level-of-detail tiling
-        is not included — this is the whole model in one tile.
+        For globe viewers (Cesium, and anything else reading 3D Tiles 1.1). The model
+        is placed by a transform measured from the project CRS, so it lands correctly
+        even at polar latitudes.
       </p>
-      <p v-if="textured" class="field-hint">The tile is the selected textured mesh, with its photo texture.</p>
-      <label v-else class="checkbox-row"><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label>
-      <p v-if="!hasGeoref" class="field-hint warn-hint">
+      <SettingsField label-for="tiling"
+        :hint="settings.tiling === 'lod'
+          ? (tilesMesh ? 'The mesh split into tiles and decimated per level; viewers load detail where the camera is.'
+            : 'One tile per node of the cloud\'s level-of-detail octree; viewers load detail where the camera is.')
+          : 'The whole model in one tile, loaded at once.'">
+        <template #label><FieldHelp op="export-3d-tiles" param="tiling">Tiling</FieldHelp></template>
+        <select id="tiling" v-model="settings.tiling" class="field-input field-select">
+          <option value="lod">Level of detail (hierarchy of tiles)</option>
+          <option value="single" :disabled="!singleTileOk">Single tile{{ singleTileOk ? '' : ' — too large for one tile' }}</option>
+        </select>
+      </SettingsField>
+      <SettingsField v-if="tilesMesh && settings.tiling === 'lod'" label-for="tiletris">
+        <template #label>
+          <FieldHelp op="export-3d-tiles" param="tileTriangles" :value="settings.tileTriangles" :default-value="EXPORT_DEFAULTS.tileTriangles">Triangles per tile</FieldHelp>
+        </template>
+        <input id="tiletris" v-model.number="settings.tileTriangles" type="number" min="1000" step="1024" class="field-input" />
+      </SettingsField>
+      <p v-if="textured" class="field-hint">
+        {{ settings.tiling === 'lod' ? 'The finest tiles keep the photo texture; the coarser, decimated ones have vertex colours.'
+          : 'The tile is the selected textured mesh, with its photo texture.' }}
+      </p>
+      <label v-if="!textured || settings.tiling === 'lod'" class="checkbox-row"><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label>
+      <p v-if="tilesSubject?.streamed" class="field-hint">
+        A streamed cloud is written in its own coordinates and placed in the CRS its file
+        names, else the project CRS.
+      </p>
+      <p v-else-if="!hasGeoref" class="field-hint warn-hint">
         This project has no georeference, so the tileset will have no position on
         the globe. Georeference the model first.
       </p>

@@ -298,6 +298,13 @@ export const EXPORT_DEFAULTS = {
   applyGeoref: true,    // cloud: transform into the project CRS when a georef fit exists
   downsampleCell: 0,    // cloud: voxel downsample cell in world units; 0 = off
   jpegQuality: 0.9,     // ortho JPEG quality (0–1)
+  // 3D Tiles (core/products/tiles3d.js). `tiling` null = by size: a hierarchy of
+  // tiles ('lod') from these sizes up, else one tile ('single'). A mesh's tiles hold
+  // up to `tileTriangles` triangles each (about 1–2 MB of glTF).
+  tiling: null,
+  tilesLodMinPoints: 1_000_000,
+  tilesLodMinTriangles: 250_000,
+  tileTriangles: 65_536,
   // Undistorted images (COLMAP image_undistorter parity).
   // `mode` 'crop' keeps only the region every output pixel of which samples inside
   // the source — the alternative leaves a clamped-edge smear a downstream matcher

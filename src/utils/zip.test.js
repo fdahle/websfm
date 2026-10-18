@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { zipStore, zipParts, unzipStore, crc32, readZipIndex, zipEntryBlob, zipLocalHeader, zipCentralHeader, zipEndRecords } from './zip.js'
+import { zipStore, zipParts, unzipStore, crc32, readZipIndex, zipEntryBlob, zipLocalHeader, zipCentralHeader, zipEndRecords, zipStream } from './zip.js'
 
 // Parse zipStore's own output structurally: signatures at the recorded offsets, name
 // round-trip, CRC of known bytes, and the EOCD's central-directory size/offset. A
@@ -177,5 +177,18 @@ describe('ZIP64 records and the index reader', () => {
     const index = await readZipIndex(blob)
     expect(index.map((e) => e.name)).toEqual(['x/y.bin', 'z.txt'])
     expect([...new Uint8Array(await (await zipEntryBlob(blob, index[0])).arrayBuffer())]).toEqual([1, 2, 3])
+  })
+})
+
+describe('zipStream — one entry at a time', () => {
+  it('is byte-identical to zipStore', () => {
+    const entries = [{ name: 'tileset.json', data: enc.encode('{"a":1}') }, { name: 'tiles/0-0-0-0.glb', data: new Uint8Array([1, 2, 3, 4, 5]) }]
+    const z = zipStream()
+    const parts = [...z.add(entries[0].name, '{"a":1}'), ...z.add(entries[1].name, entries[1].data), ...z.finish()]
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+    let o = 0
+    for (const p of parts) { out.set(p, o); o += p.length }
+    expect(out).toEqual(zipStore(entries))
+    expect(z.entries).toBe(2)
   })
 })

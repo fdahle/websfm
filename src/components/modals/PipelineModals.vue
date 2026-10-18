@@ -10,6 +10,7 @@ import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useModalsStore } from '../../stores/useModalsStore.js'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { useAppContext } from '../../appContext.js'
+import { tilesSubject } from '../../core/products/tiles3d.js'
 import AlignIcpModal from '../modals/AlignIcpModal.vue'
 import CleanMeshModal from '../modals/CleanMeshModal.vue'
 import ClipRasterModal from '../modals/ClipRasterModal.vue'
@@ -85,6 +86,12 @@ const exportMeshCloud = computed(() => {
   if (target) return target.kind === 'mesh' ? target : null
   if (sel?.kind === 'mesh') return sel
   return exportKind.value === 'mesh' ? reconstructionStore.clouds.find((c) => c.kind === 'mesh' && c.count > 0) ?? null : null
+})
+// What a 3D Tiles export writes, with its size (exports/clouds.js picks it the same way).
+const exportTilesSubject = computed(() => {
+  if (exportKind.value !== 'tiles3d') return null
+  const s = tilesSubject(reconstructionStore.selectedCloud, reconstructionStore.clouds)
+  return s ? { kind: s.kind, count: s.count, streamed: s.streamed, textured: s.textured } : null
 })
 const measurementsStore = useMeasurementsStore()
 </script>
@@ -171,6 +178,7 @@ const measurementsStore = useMeasurementsStore()
       :ortho-cells="reconstructionStore.ortho ? reconstructionStore.ortho.width * reconstructionStore.ortho.height : 0"
       :subject="exportTargetCloud?.name ?? ''"
       :textured="!!exportMeshCloud?.texture"
+      :tiles-subject="exportTilesSubject"
       @close="exportKind = null"
       @run="onExportRun"
     />

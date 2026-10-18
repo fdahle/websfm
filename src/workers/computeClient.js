@@ -355,6 +355,13 @@ export const extractLod = streamingOp('extractLod')
 // (core/lod/exportStream.js): { lod, data, hierarchy, format, color } → { blob, count }.
 export const exportLod = streamingOp('exportLod')
 
+// Hierarchical 3D Tiles (workers/ops/tiles3d.js) → { blob (the zip), tiles, … }.
+// Points: { lod, data, hierarchy } (an octree's files) or { cloud } (a COPY, built
+// into an octree in the worker), plus { sim, origin, transform, color }. Mesh: { mesh,
+// texture?, sim, origin, transform, color, tileTriangles } (copies, transferred).
+export const exportPointTiles = streamingOp('exportPointTiles')
+export const exportMeshTiles = streamingOp('exportMeshTiles')
+
 // An edit of a streamed cloud into a new octree (core/lod/transform.js):
 // { lod, data, hierarchy, dir, name, mode, settings } → the new octree's metadata.
 export const transformLod = streamingOp('transformLod')

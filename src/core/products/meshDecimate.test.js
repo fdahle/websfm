@@ -391,3 +391,36 @@ describe('decimateMesh on a textured mesh', () => {
     }
   })
 })
+
+describe('decimateMesh with locked vertices', () => {
+  // A wavy grid: collapses there move vertices, so a lock has something to stop.
+  function wavy(n) {
+    const g = grid(n)
+    for (let v = 0; v < g.nVerts; v++) g.pos[v * 3 + 2] = Math.sin(g.pos[v * 3] * 0.7) * Math.cos(g.pos[v * 3 + 1] * 0.5)
+    return g
+  }
+
+  it('keeps every locked vertex where it is and names each output vertex\'s source', () => {
+    const n = 24, g = wavy(n)
+    const locked = new Uint8Array(g.nVerts)
+    for (let v = 0; v < g.nVerts; v++) if (g.pos[v * 3] === n / 2 || g.pos[v * 3 + 1] === 0) locked[v] = 1
+    const { mesh, sourceVertex } = decimateMesh(g, { targetRatio: 0.2, locked })
+    checkShape(mesh)
+    expect(sourceVertex.length).toBe(mesh.nVerts)
+    const kept = new Set()
+    for (let r = 0; r < mesh.nVerts; r++) {
+      const v = sourceVertex[r]
+      if (!locked[v]) continue
+      kept.add(v)
+      for (let k = 0; k < 3; k++) expect(mesh.pos[r * 3 + k]).toBeCloseTo(g.pos[v * 3 + k], 9)
+    }
+    expect(kept.size).toBe(locked.reduce((s, x) => s + x, 0))
+    expect(mesh.count).toBeLessThan(g.count * 0.5)
+  })
+
+  it('refuses a textured mesh with locks', () => {
+    const g = grid(4)
+    expect(() => decimateMesh({ ...g, uv: new Float32Array(g.nVerts * 2) }, { targetRatio: 0.5, locked: new Uint8Array(g.nVerts) }))
+      .toThrow(/locked/)
+  })
+})

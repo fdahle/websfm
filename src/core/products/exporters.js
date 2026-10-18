@@ -412,10 +412,13 @@ export function* meshToStlParts(mesh, { partBytes = PART_BYTES } = {}) {
 // the texture, darkening it by the vertex colours.
 //
 // `origin` is subtracted from every position (a 3D Tiles payload is tile-local);
-// `yUp` turns Z-up into glTF's Y-up (x, z, −y), which 3D Tiles content expects.
+// `yUp` turns Z-up into glTF's Y-up (x, z, −y), which 3D Tiles content expects;
+// `translation` (Z-up, like `origin`) becomes the node's translation, so a tile of a
+// hierarchy stores Float32 positions around its own centre (see tiles3d.js).
 // Yields Uint8Array parts: the container header + JSON chunk + BIN chunk header,
 // then the BIN sections.
-export function* meshToGlbParts(mesh, { color = true, texture = null, origin = null, yUp = false, partBytes = PART_BYTES } = {}) {
+export function* meshToGlbParts(mesh, { color = true, texture = null, origin = null, yUp = false, translation = null,
+  partBytes = PART_BYTES } = {}) {
   const nV = mesh.nVerts ?? (mesh.pos.length / 3)
   const nIdx = mesh.idx.length
   const textured = !!(texture?.pages?.length && texture.groups?.length && mesh.uv)
@@ -447,7 +450,9 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
   const colOff = hasCol ? section(nV * 4) : 0
   const uvOff = textured ? section(nV * 8) : 0
   const idxOff = section(nIdx * 4)
-  const imgOffs = textured ? texture.pages.map((p) => section(p.bytes.length)) : []
+  // A page with a `uri` instead of `bytes` stays a file beside the .glb (3D Tiles tiles
+  // share one set of atlas pages).
+  const imgOffs = textured ? texture.pages.map((p) => (p.uri ? -1 : section(p.bytes.length))) : []
 
   const accessors = [{ bufferView: 0, componentType: 5126, count: nV, type: 'VEC3', min, max }]
   const bufferViews = [{ buffer: 0, byteOffset: posOff, byteLength: nV * 12, target: 34962 }]
@@ -468,7 +473,7 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
     asset: { version: '2.0', generator: 'websfm' },
     scene: 0,
     scenes: [{ nodes: [0] }],
-    nodes: [{ mesh: 0 }],
+    nodes: [translation ? { mesh: 0, translation: yUp ? [translation[0], translation[2], -translation[1]] : [...translation] } : { mesh: 0 }],
     meshes: [{ primitives: [] }],
     accessors,
     bufferViews,
@@ -481,6 +486,7 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
     gltf.extensionsUsed = ['KHR_materials_unlit']
     gltf.samplers = [{ magFilter: 9729, minFilter: 9987, wrapS: 33071, wrapT: 33071 }] // linear, trilinear, clamp
     gltf.images = texture.pages.map((p, k) => {
+      if (p.uri) return { uri: p.uri }
       bufferViews.push({ buffer: 0, byteOffset: imgOffs[k], byteLength: p.bytes.length })
       return { bufferView: bufferViews.length - 1, mimeType: p.type ?? 'image/jpeg' }
     })
@@ -536,7 +542,7 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
   yield* recordParts(nIdx, 4, (bv, o, i) => bv.setUint32(o, mesh.idx[i], true), partBytes)
   yield* pad(nIdx * 4)
   if (textured) {
-    for (const p of texture.pages) { yield p.bytes; yield* pad(p.bytes.length) }
+    for (const p of texture.pages) if (!p.uri) { yield p.bytes; yield* pad(p.bytes.length) }
   }
 }
 
