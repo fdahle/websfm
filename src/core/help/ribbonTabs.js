@@ -680,6 +680,48 @@ export function allGroups() {
   ]
 }
 
+/** A ribbon label as one line of text: 'Geo-\nreference' → 'Georeference'. */
+export function labelText(cmd) {
+  const label = cmd.label ?? cmd.labelFn?.(null) ?? cmd.id
+  return label.replace(/-\n/g, '').replace(/\n/g, ' ')
+}
+
+/**
+ * Every leaf command with where it lives, for the console's command list (core/help/
+ * commands.js derives its verbs from this, so a new ribbon command is typeable without
+ * a second table). → [{ cmd, tab, path }] in ribbon order, first occurrence of each id;
+ * `path` is 'Tab ▸ Group' (▸ Menu for a menu row), the contextual groups under the
+ * tab they appear in. Dynamic rows (`measure-target:` — the map's layers) are left out.
+ */
+export function ribbonEntries() {
+  const sources = [
+    ...TABS.map((t) => ({ tab: t.label, groups: t.id === 'view' ? [...t.groups, CAMERA_GROUP, SCENE_GROUP, MAP_GROUP] : t.groups })),
+    { tab: PICTURE_TAB.label, groups: PICTURE_TAB.groups },
+    { tab: 'DEM / Orthophoto', groups: rasterTab({ kind: 'dem', imported: false }).groups },
+    { tab: 'Reference raster', groups: rasterTab({ kind: 'dem', imported: true }).groups },
+  ]
+  const out = [], seen = new Set()
+  const add = (cmd, tab, path) => {
+    if (!cmd.id || seen.has(cmd.id) || cmd.id.startsWith('measure-target:')) return
+    seen.add(cmd.id)
+    out.push({ cmd, tab, path })
+  }
+  for (const { tab, groups } of sources) {
+    for (const g of groups) {
+      for (const c of g.commands) {
+        if (c.pair) for (const p of c.pair) add(p, tab, `${tab} ▸ ${g.label}`)
+        else if (c.menu) {
+          // 'Tools ▸ Mesh ▸ Mesh' reads as 'Tools ▸ Mesh' when the menu is its group.
+          const menuPath = labelText(c) === g.label ? `${tab} ▸ ${g.label}` : `${tab} ▸ ${g.label} ▸ ${labelText(c)}`
+          for (const m of c.menu) if (!m.section) add(m, tab, menuPath)
+        }
+        else add(c, tab, `${tab} ▸ ${g.label}`)
+      }
+    }
+  }
+  return out
+}
+
 /** A menu's own disabled reason: '' while any row is usable, else the first row's. */
 export function menuReason(menu, rowReason) {
   const rows = menu.filter((m) => !m.section)

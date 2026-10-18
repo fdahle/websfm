@@ -1,18 +1,25 @@
 // Pure command registry for the DevConsole command line (power-user front end).
 //
-// This is a text front end over the SAME command dispatch the ribbon uses
-// (`handleCommand(id)` in App.vue): every entry here maps a typed command name
-// to a ribbon command `dispatch` id. No Vue / Pinia / DOM here — plain data in,
-// plain data out — so it stays unit-testable and matches the "core is pure" rule
-// in CLAUDE.md. The impure binding (calling handleCommand, reading store state,
-// echoing to the log) lives in `composables/useCommands.js`.
+// A text front end over the SAME command dispatch the ribbon uses (`handleCommand(id)`
+// in App.vue). The command list is DERIVED from the ribbon tables (ribbonTabs.js
+// `ribbonEntries`): every ribbon command is typeable by its id ("crop-mesh"), its id
+// as words ("crop mesh") and, for the common ones, a short name from CONSOLE_NAMES
+// below ("decimate"). A new ribbon button is a console command the moment it exists;
+// only its short name is hand-made. Help text is the ribbon's own location and blurb,
+// so the two front ends cannot drift.
+//
+// Console-only VERBS (run, stats, set, pair, select …) take arguments; they are
+// executed by core/help/console.js against an injected environment. No Vue / Pinia /
+// DOM here — plain data in, plain data out — so it stays unit-testable ("core is
+// pure", CLAUDE.md). The impure binding lives in composables/useCommands.js and
+// composables/useConsoleEnv.js.
 //
 // Guard parity: a console command that dispatches a ribbon command takes that
 // command's prerequisites (`needs`, `aerialOnly`, `disabled`) straight from the
 // ribbon table (`consoleReason`), so the two front ends cannot drift — copies of
 // the needs here once did. Only console-only verbs carry their own `needs`.
 
-import { allGroups, leafCommands } from './ribbonTabs.js'
+import { allGroups, leafCommands, ribbonEntries, labelText } from './ribbonTabs.js'
 
 // Prerequisite checks: the ONE table behind both gates, the ribbon's greyed
 // buttons/menu rows (Ribbon.vue `needs: [...]`) and this command line, so the two
@@ -87,104 +94,164 @@ export function consoleReason(cmd, state) {
   return commandReason(ribbonCommandFor(cmd) ?? cmd, state)
 }
 
-// The command catalogue. `group` only drives help layout. `dispatch` is the
-// ribbon command id emitted to App.vue's handleCommand(). Names/aliases are the
-// tokens a user types (case-insensitive). Multi-word names (e.g. "export cloud")
-// are resolved before single-word ones so `export` + subcommand works.
-export const COMMANDS = [
-  // --- Pipeline ---
-  { name: 'workflow', aliases: ['workflow-builder', 'recipe'], dispatch: 'workflow-builder', group: 'Pipeline', help: 'Open the visual workflow builder' },
-  { name: 'detect',   aliases: ['detect-features'], dispatch: 'detect-features', group: 'Pipeline', help: 'Open the feature-detection dialog' },
-  { name: 'match',    aliases: ['match-features'],  dispatch: 'match-features',  group: 'Pipeline', help: 'Open the feature-matching dialog' },
-  { name: 'sparse',   aliases: ['reconstruct'],     dispatch: 'reconstruct',     group: 'Pipeline', help: 'Open the sparse reconstruction dialog' },
-  { name: 'depth',    aliases: ['depthmaps'],       dispatch: 'compute-depth',   group: 'Pipeline', help: 'Open the depth-map dialog' },
-  { name: 'dense',    aliases: [],                  dispatch: 'dense',           group: 'Pipeline', help: 'Open the dense reconstruction dialog' },
-  { name: 'dem',      aliases: [],                  dispatch: 'gen-dem',         group: 'Pipeline', help: 'Open the DEM generation dialog' },
-  { name: 'ortho',    aliases: [],                  dispatch: 'gen-ortho',       group: 'Pipeline', help: 'Open the orthophoto dialog' },
-  { name: 'mesh',     aliases: [],                  dispatch: 'gen-mesh',        group: 'Pipeline', help: 'Open the mesh dialog' },
-
-  // --- Tools ---
-  { name: 'find gcps', aliases: ['auto-gcps'],       dispatch: 'find-gcps',          group: 'Tools', help: 'Find and review reference-ortho control candidates' },
-  { name: 'georeference', aliases: ['georef'],       dispatch: 'georeference',       group: 'Tools', help: 'Adjust with GCPs or transform the current model to the project CRS' },
-  { name: 'scale bars', aliases: ['scalebars'],      dispatch: 'scale-bars',         group: 'Tools', help: 'Scale the model with known distances' },
-  { name: 'edit gcps', aliases: ['mark gcps'],       dispatch: 'edit-gcps',          group: 'Tools', help: 'Toggle GCP editing on the image or map in front' },
-  { name: 'automask',     aliases: ['auto-mask'],   dispatch: 'auto-mask',          group: 'Tools', help: 'Open the auto-mask dialog' },
-  { name: 'edit mask',    aliases: ['mask edit'],   dispatch: 'img-mask-edit',      group: 'Tools', help: 'Toggle mask painting on the image in front' },
-  { name: 'footprints',   aliases: [],              dispatch: 'footprints-from-poses', group: 'Tools', help: 'Build footprints from poses' },
-  { name: 'fiducials',    aliases: ['detect-fiducials'], dispatch: 'detect-fiducials', group: 'Tools', help: 'Auto-detect fiducial marks on film scans' },
-  { name: 'calibrate-fiducials', aliases: ['fiducial-calibration'], dispatch: 'calibrate-fiducials', group: 'Tools', help: 'Calibrate detected film fiducials' },
-  { name: 'image quality', aliases: ['blur', 'sharpness'], dispatch: 'image-quality', group: 'Tools', help: 'Score image sharpness and exposure' },
-  { name: 'optimize',     aliases: ['optimize cameras'], dispatch: 'optimize-cameras', group: 'Tools', help: 'Re-run bundle adjustment with the focal length free' },
-  { name: 'gradual',      aliases: ['gradual selection'], dispatch: 'gradual-selection', group: 'Tools', help: 'Remove weak tie points from the sparse model' },
-  { name: 'region',       aliases: [],               dispatch: 'set-region',          group: 'Tools', help: 'Set the box that bounds depth maps, fusion, mesh and DEM' },
-  { name: 'orient',       aliases: ['orient model', 'level'], dispatch: 'orient-model', group: 'Tools', help: 'Set up, origin and heading of the local frame' },
-  { name: 'select',       aliases: ['lasso'],        dispatch: 'view-select-lasso',   group: 'Tools', help: 'Lasso-select dense points in the 3D view' },
-  { name: 'normals',      aliases: ['estimate normals'], dispatch: 'estimate-normals', group: 'Tools', help: 'Estimate per-point normals on a dense cloud' },
-  { name: 'ground',       aliases: ['classify ground', 'dtm'], dispatch: 'classify-ground', group: 'Tools', help: 'Classify the ground points of a dense cloud (for a DTM)' },
-  { name: 'transform',    aliases: [],               dispatch: 'transform-cloud',     group: 'Tools', help: 'Move, rotate, scale or matrix-transform a cloud' },
-  { name: 'align pairs',  aliases: ['align points'], dispatch: 'align-points',        group: 'Tools', help: 'Align a cloud by picking point pairs' },
-  { name: 'icp',          aliases: ['align'],        dispatch: 'align-icp',           group: 'Tools', help: 'Refine an alignment to a reference cloud or mesh' },
-  { name: 'clean mesh',   aliases: ['clean'],        dispatch: 'clean-mesh',          group: 'Tools', help: 'Remove specks and bridges, fill holes' },
-  { name: 'texture',      aliases: ['texture-mesh'], dispatch: 'texture-mesh',        group: 'Tools', help: 'Texture a mesh from the registered photos' },
-  { name: 'decimate',     aliases: ['simplify'],     dispatch: 'decimate-mesh',       group: 'Tools', help: 'Reduce a mesh to a target triangle count' },
-  { name: 'smooth',       aliases: [],               dispatch: 'smooth-mesh',         group: 'Tools', help: 'Taubin-smooth a mesh' },
-  { name: 'contours',     aliases: [],               dispatch: 'dem-contours',        group: 'Tools', help: 'Export contour lines from the DEM' },
-  { name: 'terrain',      aliases: ['slope', 'hillshade', 'aspect'], dispatch: 'dem-derivatives', group: 'Tools', help: 'Export slope, aspect and hillshade rasters' },
-  { name: 'clip',         aliases: [],               dispatch: 'clip-raster',         group: 'Tools', help: 'Export the DEM or ortho clipped to a polygon' },
-
-  // --- Measure (Tools ▸ Measure ▾) ---
-  { name: 'ruler',        aliases: ['length'],       dispatch: 'measure-length',      group: 'Measure', help: 'Measure a distance on the DEM / orthophoto in front' },
-  { name: 'area',         aliases: [],               dispatch: 'measure-area',        group: 'Measure', help: 'Measure an area on the DEM / orthophoto in front' },
-  { name: 'profile',      aliases: [],               dispatch: 'measure-profile',     group: 'Measure', help: 'Draw an elevation profile on the DEM in front' },
-  { name: 'volume',       aliases: ['cut fill'],     dispatch: 'measure-volume',      group: 'Measure', help: 'Measure a cut/fill volume on the DEM in front' },
-  { name: 'cloud distance', aliases: ['c2c', 'c2m'], dispatch: 'cloud-distance',      group: 'Measure', help: 'Per-point distance to another cloud or a mesh' },
-  { name: 'section',      aliases: ['slice'],        dispatch: 'cloud-section',       group: 'Measure', help: 'Cut a vertical slice of a cloud and export its profile' },
-  { name: 'mesh area',    aliases: ['mesh volume'],  dispatch: 'mesh-measure',        group: 'Measure', help: 'Surface area and enclosed volume of a mesh' },
-
-  // --- Tables / views ---
-  { name: 'images',   aliases: ['image-table'],     dispatch: 'open-image-table',  group: 'View', help: 'Open the image table' },
-  { name: 'masks',    aliases: ['mask-manager'],    dispatch: 'open-mask-manager', group: 'View', help: 'Open the mask manager' },
-  { name: 'sensors',  aliases: ['sensor-table'],    dispatch: 'open-sensor-table', group: 'View', help: 'Open the sensor table' },
-  { name: 'gcps',     aliases: ['gcp-table'],       dispatch: 'open-gcp-table',    group: 'View', help: 'Open the GCP table' },
-  { name: 'matchlist', aliases: ['match-list'],     dispatch: 'open-match-list',   group: 'View', help: 'Open the match list' },
-  { name: 'viewer',   aliases: ['3d'],              dispatch: 'view-viewer',       group: 'View', help: 'Switch to the 3D viewer' },
-  { name: 'map',      aliases: ['2d'],              dispatch: 'view-map',          group: 'View', help: 'Switch to the map view' },
-
-  // --- Import ---
-  { name: 'import',   aliases: ['import-images'],   dispatch: 'import-images',     group: 'Import', help: 'Import images' },
-  { name: 'import colmap', aliases: ['colmap-import'], dispatch: 'import-colmap',  group: 'Import', help: 'Import an SfM project (COLMAP and others)' },
-
-  // --- Export (multi-word: "export <what>") ---
-  { name: 'export cloud',     dispatch: 'export-cloud',     group: 'Export', help: 'Export the point cloud' },
-  { name: 'export mesh',      dispatch: 'export-mesh',      group: 'Export', help: 'Export the mesh' },
-  { name: 'export model',     dispatch: 'export-model',     group: 'Export', help: 'Export the model JSON' },
-  { name: 'export dem',       dispatch: 'export-dem',       group: 'Export', help: 'Export the DEM' },
-  { name: 'export ortho',     dispatch: 'export-ortho',     group: 'Export', help: 'Export the orthophoto' },
-  { name: 'export cameras',   dispatch: 'export-cameras',   group: 'Export', help: 'Export camera poses' },
-  { name: 'export sensors',   dispatch: 'export-sensors',   group: 'Export', help: 'Export sensors' },
-  { name: 'export camera fiducials', dispatch: 'export-camera-fiducials', group: 'Export', help: 'Export camera fiducial marks (mm)' },
-  { name: 'export image fiducials',  dispatch: 'export-image-fiducials',  group: 'Export', help: 'Export image fiducial positions (pixels)' },
-  { name: 'export keypoints', dispatch: 'export-keypoints', group: 'Export', help: 'Export keypoints' },
-  { name: 'export matches',   dispatch: 'export-matches',   group: 'Export', help: 'Export matches' },
-
-  // --- App ---
-  { name: 'project settings', aliases: ['project properties'], dispatch: 'open-project-settings', group: 'App', help: 'Open settings for the current project' },
-  { name: 'settings', aliases: [],                  dispatch: 'open-settings', group: 'App', help: 'Open settings' },
-  { name: 'theme',    aliases: ['dark mode', 'light mode'], dispatch: 'toggle-theme', group: 'App', help: 'Cycle appearance: system / light / dark' },
-  { name: 'glossary', aliases: [],                  dispatch: 'open-glossary', group: 'App', help: 'Open the glossary' },
-  { name: 'about',    aliases: [],                  dispatch: 'open-about',    group: 'App', help: 'Open the about dialog' },
-  { name: 'system info', aliases: ['diagnostics'],  dispatch: 'open-system-info', group: 'App', help: 'Open system / hardware diagnostics' },
-]
-
-// name/alias (lowercased) -> command. Built once at module load.
-const BY_NAME = new Map()
-for (const cmd of COMMANDS) {
-  BY_NAME.set(cmd.name.toLowerCase(), cmd)
-  for (const a of cmd.aliases ?? []) BY_NAME.set(a.toLowerCase(), cmd)
+// Short names for ribbon commands, keyed by ribbon id: [name, ...aliases]. The id and
+// the id as words are always aliases too, so this table only adds convenience — a
+// command missing here is still reachable. A test pins every key to a ribbon id.
+export const CONSOLE_NAMES = {
+  'workflow-builder':  ['workflow', 'recipe'],
+  'detect-features':   ['detect'],
+  'match-features':    ['match'],
+  'reconstruct':       ['sparse'],
+  'compute-depth':     ['depth', 'depthmaps'],
+  'dense':             ['dense'],
+  'gen-dem':           ['dem'],
+  'gen-ortho':         ['ortho'],
+  'gen-mesh':          ['mesh'],
+  'find-gcps':         ['find gcps', 'auto-gcps'],
+  'georeference':      ['georeference', 'georef'],
+  'scale-bars':        ['scale bars', 'scalebars'],
+  'edit-gcps':         ['edit gcps', 'mark gcps'],
+  'auto-mask':         ['automask'],
+  'img-mask-edit':     ['edit mask', 'mask edit'],
+  'footprints-from-poses': ['footprints'],
+  'detect-fiducials':  ['fiducials'],
+  'calibrate-fiducials': ['calibrate fiducials', 'fiducial-calibration'],
+  'image-quality':     ['image quality', 'blur', 'sharpness'],
+  'optimize-cameras':  ['optimize'],
+  'gradual-selection': ['gradual'],
+  'set-region':        ['region'],
+  'orient-model':      ['orient', 'level'],
+  'view-select-lasso': ['lasso'],
+  'view-select-rect':  ['rectangle'],
+  'estimate-normals':  ['normals'],
+  'classify-ground':   ['ground', 'dtm'],
+  'transform-cloud':   ['transform'],
+  'align-points':      ['align pairs'],
+  'align-icp':         ['icp', 'align'],
+  'filter-cloud':      ['filter'],
+  'crop-cloud':        ['crop'],
+  'merge-clouds':      ['merge'],
+  'clean-mesh':        ['clean'],
+  'texture-mesh':      ['texture'],
+  'decimate-mesh':     ['decimate', 'simplify'],
+  'smooth-mesh':       ['smooth'],
+  'dem-contours':      ['contours'],
+  'dem-derivatives':   ['terrain', 'slope', 'hillshade', 'aspect'],
+  'clip-raster':       ['clip'],
+  'measure-length':    ['ruler', 'length'],
+  'measure-area':      ['area'],
+  'measure-profile':   ['profile'],
+  'measure-volume':    ['volume', 'cut fill'],
+  'measure-3d':        ['measure 3d'],
+  'cloud-distance':    ['cloud distance', 'c2c', 'c2m'],
+  'cloud-section':     ['section', 'slice'],
+  'mesh-measure':      ['mesh area', 'mesh volume'],
+  'open-image-table':  ['images', 'image-table'],
+  'open-mask-manager': ['masks', 'mask-manager'],
+  'open-sensor-table': ['sensors', 'sensor-table'],
+  'open-pose-table':   ['poses'],
+  'open-gcp-table':    ['gcps', 'gcp-table'],
+  'open-match-list':   ['matchlist', 'match-list'],
+  'view-point-size':   ['point size'],
+  'view-camera-scale': ['camera size'],
+  'import-images':     ['import'],
+  'import-colmap':     ['import colmap', 'colmap-import'],
+  'eval-overview':     ['report', 'quality'],
+  'open-project-settings': ['project settings', 'project properties'],
+  'save-project-file': ['save copy'],
+  'toggle-console':    ['console'],
+  'open-settings':     ['settings'],
+  'open-glossary':     ['glossary'],
+  'open-guide':        ['guide'],
+  'open-about':        ['about'],
+  'open-system-info':  ['system info', 'diagnostics'],
 }
 
-// Longest invocation is 2 tokens ("export cloud"); resolver tries 2 then 1.
-const MAX_NAME_TOKENS = 2
+// Dispatch ids the console reaches that have no ribbon button of their own.
+const CONSOLE_ONLY_DISPATCH = [
+  { dispatch: 'view-viewer', names: ['viewer', '3d'], help: 'Switch to the 3D viewer' },
+  { dispatch: 'view-map', names: ['map', '2d'], help: 'Switch to the map view' },
+  { dispatch: 'toggle-theme', names: ['theme', 'dark mode', 'light mode'], help: 'Cycle appearance: system / light / dark' },
+]
+
+// The stages `run` chains, by the word typed → workflow block id (core/workflow.js).
+export const RUN_STAGES = {
+  detect: 'detect-features', match: 'match-features', sparse: 'reconstruct', reconstruct: 'reconstruct',
+  depth: 'compute-depth', dense: 'dense', dem: 'gen-dem', ortho: 'gen-ortho', mesh: 'gen-mesh', texture: 'texture-mesh',
+}
+
+// Console-only verbs: they take arguments and act through the console environment
+// (core/help/console.js), not a ribbon command. `usage` lines are what `help <verb>`
+// and a malformed call print.
+export const VERBS = [
+  { verb: 'help', names: ['help', '?'], usage: ['help', 'help <command>', 'help <tab>   (e.g. help tools)', 'help all'],
+    help: 'List commands, or show one command\'s usage' },
+  { verb: 'clear', names: ['clear', 'cls'], usage: ['clear'], help: 'Clear the console' },
+  { verb: 'run', names: ['run'], needs: ['project'],
+    usage: [`run <stage> [<stage> …]   stages: ${[...new Set(Object.keys(RUN_STAGES))].join(' ')}`, 'run workflow <name>'],
+    help: 'Run pipeline stages (default settings) or a saved workflow through the workflow runner' },
+  { verb: 'continue', names: ['continue'], usage: ['continue'], help: 'Continue a paused workflow' },
+  { verb: 'reuse', names: ['reuse'], usage: ['reuse'], help: 'Keep the existing output a paused workflow asks about' },
+  { verb: 'stop', names: ['stop'], usage: ['stop'], help: 'Stop the running workflow' },
+  { verb: 'stats', names: ['stats', 'status'], needs: ['project'], usage: ['stats', 'stats matches'],
+    help: 'Project counts; "stats matches" for the match graph' },
+  { verb: 'set', names: ['set'], usage: ['set', 'set <group>   (sfm, match: list the keys)', 'set <group>.<key> <value>',
+    'set <group>.<key> default'], help: 'Override an internal tuning value for this session' },
+  { verb: 'pair', names: ['pair'], needs: ['matches'], usage: ['pair disable <imageA> <imageB>', 'pair enable <imageA> <imageB>'],
+    help: 'Exclude a verified pair from reconstruction, or restore it' },
+  { verb: 'select', names: ['select'], needs: ['images'], usage: ['select <image name>'],
+    help: 'Select an image (a unique start of its name is enough)' },
+]
+
+const idWords = (id) => id.replace(/[-:]/g, ' ')
+
+// The command catalogue: verbs, then every ribbon command (ribbon order), then the
+// console-only dispatches. Each: { name, aliases, group, help, where?, dispatch?,
+// verb?, usage?, needs?, stepper?, short? }. `name` is what help shows; `aliases` are
+// the other typeable spellings (lower case); `short` marks a hand-named command (the
+// `help` overview lists those). Ribbon `disabled` ("coming soon") rows are left out.
+function buildCommands() {
+  const out = []
+  for (const v of VERBS) {
+    out.push({ name: v.names[0], aliases: v.names.slice(1), verb: v.verb, group: 'Console', help: v.help,
+      usage: v.usage, ...(v.needs ? { needs: v.needs } : {}) })
+  }
+  for (const { cmd, tab, path } of ribbonEntries()) {
+    if (cmd.disabled) continue
+    const short = CONSOLE_NAMES[cmd.id] ?? []
+    const basemap = cmd.id.startsWith('map-basemap:') ? [`basemap ${cmd.id.slice('map-basemap:'.length)}`] : []
+    const keys = [...new Set([...short, ...basemap, idWords(cmd.id), cmd.id].map((k) => k.toLowerCase()))]
+    const where = `${path} ▸ ${labelText(cmd)}`
+    out.push({
+      name: keys[0], aliases: keys.slice(1), dispatch: cmd.id, group: tab, where,
+      // The Export tab's ids already read as commands ("export cloud"), so they list too.
+      help: cmd.blurb ?? where, short: short.length > 0 || cmd.id.startsWith('export-'),
+      ...(cmd.stepper ? { stepper: { min: cmd.min, max: cmd.max, step: cmd.step },
+        usage: [`${keys[0]} <value>   (${cmd.min} – ${cmd.max})`] } : {}),
+    })
+  }
+  for (const c of CONSOLE_ONLY_DISPATCH) {
+    out.push({ name: c.names[0], aliases: c.names.slice(1), dispatch: c.dispatch, group: 'View', help: c.help, short: true })
+  }
+  return out
+}
+export const COMMANDS = buildCommands()
+
+// name/alias (lowercased) -> command. Built once at module load; a key claimed by two
+// commands keeps the first and is listed in KEY_COLLISIONS (a test keeps that empty).
+const BY_NAME = new Map()
+export const KEY_COLLISIONS = []
+for (const cmd of COMMANDS) {
+  for (const key of [cmd.name, ...cmd.aliases]) {
+    const k = key.toLowerCase()
+    if (BY_NAME.has(k) && BY_NAME.get(k) !== cmd) KEY_COLLISIONS.push(k)
+    else BY_NAME.set(k, cmd)
+  }
+}
+
+// The longest invocation in tokens ("export camera fiducials" is 3); the resolver
+// tries that many, then fewer.
+const MAX_NAME_TOKENS = Math.max(...[...BY_NAME.keys()].map((k) => k.split(' ').length))
 
 /** Split a raw line into whitespace-delimited tokens (empties dropped). */
 export function tokenize(line) {
@@ -211,7 +278,7 @@ export function resolveCommand(line) {
 
 /** Look up a command by exact name/alias (for `help <cmd>`). */
 export function getCommand(name) {
-  return BY_NAME.get(String(name ?? '').trim().toLowerCase()) ?? null
+  return BY_NAME.get(String(name ?? '').trim().toLowerCase().replace(/\s+/g, ' ')) ?? null
 }
 
 /**
@@ -226,14 +293,24 @@ export function guardReason(needs, state) {
   return ''
 }
 
-/** All invocation strings (names + aliases) starting with `prefix`, sorted. */
-export function completions(prefix) {
+/**
+ * All invocation strings (names + aliases) starting with `prefix`, sorted. With
+ * `argCompletions` ({ verb: (argPrefix) → [argument strings] }), a verb's arguments
+ * complete too once the verb itself is typed.
+ */
+export function completions(prefix, argCompletions = null) {
   const p = String(prefix ?? '').trimStart().toLowerCase()
   const out = []
   for (const key of BY_NAME.keys()) {
     if (key.startsWith(p)) out.push(key)
   }
-  return out.sort()
+  const res = argCompletions && /\s/.test(p) ? resolveCommand(p) : null
+  const complete = res?.cmd?.verb && argCompletions[res.cmd.verb]
+  if (complete) {
+    const rest = p.slice(res.name.length).trimStart()
+    for (const arg of complete(rest)) if (arg.toLowerCase().startsWith(rest)) out.push(`${res.name} ${arg}`)
+  }
+  return [...new Set(out)].sort()
 }
 
 /** Longest common prefix of a list of strings ('' if none / no shared prefix). */
@@ -247,12 +324,13 @@ export function commonPrefix(strings) {
   return prefix
 }
 
-// Close-enough unknown-command suggestions: shared prefix or small edit distance.
+// Close-enough unknown-command suggestions: shared prefix or small edit distance,
+// the verbs and hand-named commands first.
 function suggestFor(name) {
   const scored = []
   for (const cmd of COMMANDS) {
     const d = editDistance(name, cmd.name.toLowerCase())
-    if (cmd.name.toLowerCase().startsWith(name) || d <= 2) scored.push({ name: cmd.name, d })
+    if (cmd.name.toLowerCase().startsWith(name) || d <= 2) scored.push({ name: cmd.name, d: d + (cmd.short || cmd.verb ? 0 : 0.5) })
   }
   scored.sort((a, b) => a.d - b.d)
   return scored.slice(0, 3).map((s) => s.name)
@@ -271,27 +349,45 @@ function editDistance(a, b) {
   return dp[m][n]
 }
 
-/** One "name — help" line per command, grouped, for the `help` overview. */
-export function helpLines() {
+// One overview line: the name, the hand-made aliases (not the id spellings), and
+// where the command lives in the ribbon.
+function overviewLine(cmd) {
+  const aliases = cmd.aliases.filter((a) => a !== cmd.dispatch && a !== idWords(cmd.dispatch ?? ''))
+  return `  ${cmd.name}${aliases.length ? `  (${aliases.join(', ')})` : ''} — ${cmd.where ?? cmd.help}`
+}
+
+/**
+ * The `help` overview. No topic: the verbs and every hand-named command, grouped by
+ * ribbon tab, plus how to see the rest. 'all': every command. A tab name ('tools',
+ * 'export', 'dem' …): that tab's commands. → lines, or null for an unknown topic.
+ */
+export function helpLines(topic = '') {
+  const t = String(topic ?? '').trim().toLowerCase()
+  const groups = [...new Set(COMMANDS.map((c) => c.group))]
+  const pick = !t || t === 'all' ? groups : groups.filter((g) => g.toLowerCase() === t || g.toLowerCase().startsWith(t))
+  if (!pick.length) return null
   const lines = []
-  let lastGroup = null
-  for (const cmd of COMMANDS) {
-    if (cmd.group !== lastGroup) {
-      lines.push(`— ${cmd.group ?? 'Other'} —`)
-      lastGroup = cmd.group
-    }
-    const aliases = (cmd.aliases ?? []).length ? `  (${cmd.aliases.join(', ')})` : ''
-    lines.push(`  ${cmd.name}${aliases} — ${cmd.help}`)
+  let hidden = 0
+  for (const g of pick) {
+    const rows = COMMANDS.filter((c) => c.group === g)
+    const shown = t ? rows : rows.filter((c) => c.short || c.verb)
+    hidden += rows.length - shown.length
+    if (!shown.length) continue
+    lines.push(`— ${g} —`)
+    for (const c of shown) lines.push(overviewLine(c))
   }
+  if (hidden) lines.push(`${hidden} more ribbon commands: "help <tab>" (e.g. help tools) or "help all".`)
   return lines
 }
 
-/** Detailed help for one command, or null if unknown. */
+/** Detailed help for one command (usage, ribbon location, aliases, requires), or null. */
 export function helpFor(name) {
   const cmd = getCommand(name)
   if (!cmd) return null
   const lines = [`${cmd.name} — ${cmd.help}`]
-  if ((cmd.aliases ?? []).length) lines.push(`  aliases: ${cmd.aliases.join(', ')}`)
+  for (const u of cmd.usage ?? []) lines.push(`  usage: ${u}`)
+  if (cmd.where && cmd.where !== cmd.help) lines.push(`  ribbon: ${cmd.where}`)
+  if (cmd.aliases.length) lines.push(`  also: ${cmd.aliases.join(', ')}`)
   const needs = (ribbonCommandFor(cmd) ?? cmd).needs ?? []
   if (needs.length) lines.push(`  requires: ${needs.join(', ')}`)
   return lines

@@ -4,13 +4,12 @@ import { useLog, stripSourcePrefix } from '../../composables/useLog.js'
 import { useLogStore } from '../../stores/useLogStore.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useCommands } from '../../composables/useCommands.js'
-import { completions, commonPrefix } from '../../core/help/commands.js'
+import { commonPrefix } from '../../core/help/commands.js'
 
-// The command prompt drives App.vue's handleCommand (same registry as the
-// ribbon); commandState carries the guard flags (counts / ready-booleans).
+// The command prompt runs through the console environment App builds (useConsoleEnv:
+// the ribbon's dispatch and guard state, the workflow runner, the stores the verbs use).
 const props = defineProps({
-  dispatch: { type: Function, default: null },
-  commandState: { type: Object, default: () => ({}) },
+  env: { type: Object, default: null },
 })
 
 const { entries, log } = useLog()
@@ -206,10 +205,7 @@ function sourceStyle(source) {
 }
 
 // --- Command prompt -------------------------------------------------------
-const { runLine } = useCommands(
-  (id) => props.dispatch?.(id),
-  () => props.commandState,
-)
+const { runLine, complete } = useCommands(() => props.env)
 
 const promptInput = ref(null)
 const command = ref('')
@@ -254,7 +250,7 @@ function recallHistory(delta) {
 // Tab: complete to the single match, or to the longest shared prefix and list
 // the candidates in the log so the user can see where it forked.
 function completeCommand() {
-  const matches = completions(command.value)
+  const matches = complete(command.value)
   if (matches.length === 0) return
   if (matches.length === 1) { command.value = matches[0]; return }
   const shared = commonPrefix(matches)
