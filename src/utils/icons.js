@@ -72,6 +72,10 @@ export const icons = {
     <rect x="3" y="4" width="18" height="16" rx="2" />
     <circle cx="8.5" cy="9.5" r="1.5" />
     <path d="M21 16l-5-5L5 20" />`,
+  // A video camera: body + lens cone.
+  video: `
+    <rect x="3" y="6" width="12.5" height="12" rx="2" />
+    <path d="M15.5 10.5l5-3v9l-5-3z" />`,
   camera: `
     <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
     <circle cx="12" cy="12.5" r="3.5" />`,

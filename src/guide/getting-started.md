@@ -26,6 +26,11 @@ move around the subject. Avoid long runs of almost identical frames, motion blur
 featureless sky, and reflective or moving surfaces. [Mask](guide:masks) irrelevant
 regions when they dominate the image.
 
+**From a video.** **Import → Video** (or dropping a video on the sidebar) extracts
+overlapping, sharp frames from a video and adds them as images; a slow phone video
+around an object or along a façade is an easy way to start. See
+[Import Video](guide:video-import).
+
 For an aerial block, roughly **70–80% forward overlap** and **60–70% side overlap**
 is a useful starting point. Object captures need continuous coverage around the
 subject plus some height variation. **Tools → Images ▾ → Image quality** ranks the

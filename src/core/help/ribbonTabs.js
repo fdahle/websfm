@@ -111,6 +111,9 @@ export const TABS = [
         label: 'Images',
         commands: [
           { id: 'import-images', label: 'Images', icon: 'image' },
+          // Frames of a video become images (keyframes by motion and sharpness, or a
+          // fixed interval) — the dialog plans them before anything is written.
+          { id: 'import-video', label: 'Video', icon: 'video' },
           // Scan-pixel mark positions per image (a row per mark, or a row per image
           // with x/y columns per position); rows match images by name, so
           // (unlike GCPs) the images must be there first.

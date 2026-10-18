@@ -118,10 +118,18 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
   const droneHit = makes.some((mk) => DRONE_MAKES.some((d) => mk.includes(d))) || models.some((md) => DRONE_MODEL_RE.test(md))
   const phoneHit = makes.some((mk) => PHONE_MAKES.some((p) => mk.includes(p)))
 
+  // Frames extracted from a video (Import ▸ Video) carry their source in meta. They
+  // have no EXIF either, so this must be decided before the "no EXIF ⇒ film" guess.
+  const videoFrames = images.filter((i) => i.meta?.videoSource).length
+  const fromVideo = nImages >= 2 && videoFrames >= 0.8 * nImages
+
   let kind = 'unknown'
   if (filmSensor) {
     kind = 'film'
     notes.push('Classified film: a sensor is kind:"film" (scanned imagery, fiducial interior orientation).')
+  } else if (fromVideo) {
+    kind = 'video'
+    notes.push(`Classified video: ${videoFrames} of ${nImages} image(s) are frames extracted from a video, in capture order.`)
   } else if (!anyExif && nImages >= 2) {
     // No make/model/focal anywhere is the signature of scanned aerial film — the
     // scanner strips EXIF. Only a hint (a bare-EXIF digital set looks the same),
@@ -152,6 +160,7 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
     hasPoses,
     hasCalibratedDistortion,
     sequentialNames,
+    videoFrames,
     scale,
     notes,
   }

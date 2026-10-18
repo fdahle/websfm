@@ -23,6 +23,7 @@ export function pickFiles({ accept = '', multiple = false, directory = false } =
 // a chooser (the SfM source dialog, the project picker) agree on the filters.
 export const FILE_PICKERS = {
   images:          { accept: 'image/*', multiple: true },
+  video:           { accept: 'video/*,.mp4,.m4v,.mov,.webm,.mkv,.ogv,.avi' },
   gcps:            { accept: '.csv,.txt,.tsv,.gcp,.pts,.geojson,.json,application/geo+json,text/*' },
   cameras:         { accept: '.csv,.txt,.tsv,.cam,text/*' },
   imageFiducials:  { accept: '.csv,.txt,.tsv,text/*' },

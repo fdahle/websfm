@@ -155,6 +155,7 @@ export const CONSOLE_NAMES = {
   'view-point-size':   ['point size'],
   'view-camera-scale': ['camera size'],
   'import-images':     ['import'],
+  'import-video':      ['import video', 'video'],
   'import-colmap':     ['import colmap', 'colmap-import'],
   'eval-overview':     ['report', 'quality'],
   'open-project-settings': ['project settings', 'project properties'],

@@ -27,6 +27,7 @@ import ImageTableModal from '../modals/ImageTableModal.vue'
 import ImportCloudModal from '../modals/ImportCloudModal.vue'
 import ImportKindModal from '../modals/ImportKindModal.vue'
 import ImportRasterModal from '../modals/ImportRasterModal.vue'
+import ImportVideoModal from '../modals/ImportVideoModal.vue'
 import InteropImportModal from '../modals/InteropImportModal.vue'
 import InteropSourceModal from '../modals/InteropSourceModal.vue'
 import MaskManagerModal from '../modals/MaskManagerModal.vue'
@@ -59,7 +60,7 @@ const {
   fiducialCalibrateSensorId, fiducialDetectOpen, fiducialDetectSensorId, fiducialImportData, footprintFromPosesOpen, footprintImportData, footprintImportOpen,
   gcpImportCrs, gcpImportGeojson, gcpImportName, gcpImportOpen, gcpImportText, gcpTableOpen,
   imageTableOpen, importCloudData, importCloudOpen, importKindDeclared, importKindFile, importKindOpen,
-  importRasterData, importRasterOpen, infoImageId, maskManagerOpen, matchListOpen, poseTableOpen,
+  importRasterData, importRasterOpen, importVideoFile, infoImageId, maskManagerOpen, matchListOpen, poseTableOpen,
   qualityOpen, qualitySection, rasterStyleId, sensorTableOpen, sfmSourceOpen, symbologyCloudId,
   symbologyProductKind,
 } = storeToRefs(useModalsStore())
@@ -69,7 +70,7 @@ const {
   fiducialDetectImages, fiducialDetectSensor, fillGcpZFromReferenceDem, gcpReport, hasSparse,
   matchNodePositions, matchSummaries, onCameraImport, onCloudImport, onFootprintFromPoses,
   onFiducialImport, onFootprintImport, onGcpImport, onImportKindChosen, onImportSwitchKind, onRasterImportAsImage,
-  onRasterStyleApply, openImageTab, openImageWithResiduals, pickSfmFiles, pickSfmFolder,
+  onRasterStyleApply, onVideoImport, openImageTab, openImageWithResiduals, pickSfmFiles, pickSfmFolder,
   rasterBeingStyled, refreshGcpReport, selectGcp, selectedGcpId, sfmImportSession,
   usedKeysOf,
 } = useAppContext()
@@ -146,6 +147,17 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :data="importCloudData"
       @close="importCloudOpen = false; importCloudData = null"
       @run="onCloudImport"
+    />
+  </Teleport>
+
+
+  <Teleport to="body">
+    <ImportVideoModal
+      v-if="importVideoFile"
+      :key="importVideoFile.name + importVideoFile.size + importVideoFile.lastModified"
+      :file="importVideoFile"
+      @close="importVideoFile = null"
+      @run="onVideoImport"
     />
   </Teleport>
 

@@ -14,6 +14,8 @@ import { lasNeedsStreaming } from '../core/io/lasStream.js'
 import { unzipStore } from '../utils/zip.js'
 import { peekArchiveManifest } from '../utils/projectFile.js'
 import { isTiff, isGeoreferencedTiff, probeTiffGeoTags } from '../utils/tiff.js'
+import { isVideoFile } from '../core/io/videoFrames.js'
+import { extractVideoFrames } from '../utils/videoSource.js'
 import { useLog } from './useLog.js'
 import { showToast } from './useToasts.js'
 
@@ -31,7 +33,7 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
     importKindDeclared, importKindOpen, importKindFile, fiducialImportData,
     importCloudOpen, importCloudData,
-    importRasterOpen, importRasterData,
+    importRasterOpen, importRasterData, importVideoFile,
   } = storeToRefs(useModalsStore())
   const { log } = useLog()
 
@@ -99,6 +101,8 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
   // and anything ambiguous (a bare name + X/Y/Z list) → a small chooser.
   async function openDroppedImport(file) {
     if (!file) return
+    // A video becomes images (Import ▸ Video's frame selection), never text or a cloud.
+    if (isVideoFile(file)) { openVideoImport(file); return }
     // A `.websfm` project file is a whole *project*, not data to merge into the
     // open one, so it is checked first and short-circuits every other route. The
     // gate is magic bytes + a manifest peek, never the extension alone: a COLMAP
@@ -250,6 +254,53 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     const file = event.target.files?.[0]
     if (file) openRasterImport(file)
     event.target.value = ''
+  }
+
+  // ── Import (video → frames as images) ───────────────────────────────────────
+  // The dialog (ImportVideoModal) opens the video, scans it in the automatic mode and
+  // plans the frame times; Extract lands here. Frames are encoded one at a time and
+  // written to the project in small batches (utils/videoSource.js), so a long video
+  // never holds its frames in memory.
+  function openVideoImport(file) {
+    if (!file || !addImages) return
+    importVideoFile.value = file
+  }
+
+  function onVideoPick(event) {
+    openVideoImport(event.target.files?.[0])
+    event.target.value = ''
+  }
+
+  async function onVideoImport({ file, times, duration, fps, settings }) {
+    importVideoFile.value = null
+    if (!file || !times?.length || !addImages) return
+    const how = settings.mode === 'auto'
+      ? `automatic: ${settings.overlap} % overlap, at most ${settings.maxFrames}, blurry below ${settings.minSharpness} × nearby median`
+      : `every ${settings.every} ${settings.unit}${settings.unit === 'frames' ? ` at ${fps ?? '30 (assumed)'} fps` : ''}`
+    log(`Video import: ${file.name} — extracting ${times.length} frame(s) (${how}) as `
+      + `${settings.format === 'png' ? 'PNG' : `JPEG q${settings.jpegQuality}`}`
+      + `${settings.maxDim > 0 ? `, long side ≤ ${settings.maxDim} px` : ', full size'}`, 'info', 'Import')
+    progress?.open('Extracting video frames', times.length, null, { unit: 'frames' })
+    let result = null
+    try {
+      result = await extractVideoFrames({
+        file, times, duration, fps, settings, addImages,
+        onProgress: (done, total, name) => progress?.report(done, total, name),
+        shouldCancel: () => !!progress?.aborted?.value,
+      })
+    } catch (err) {
+      readFailed('the video', file, err)
+    } finally {
+      await progress?.close()
+    }
+    if (!result) return
+    log(`Video import: ${result.added} of ${times.length} frame(s) from ${file.name} added`
+      + `${result.cancelled ? ' (cancelled)' : ''}`, result.cancelled ? 'warn' : 'success', 'Import')
+    if (result.added) {
+      showToast(`Added ${result.added} frame${result.added === 1 ? '' : 's'} from ${file.name}`, {
+        detail: 'Match Features starts on Sequential pairing for video frames.',
+      })
+    }
   }
 
   // ── Import (point cloud / mesh) ─────────────────────────────────────────────
@@ -482,6 +533,7 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     openFiducialObsImport, openFiducialMarksImport, openColmapImport,
     openCloudImport, onCloudImport, onCloudPick,
     openRasterImport, onRasterPick, forkGeoreferencedRasters, addImagesRouted,
+    openVideoImport, onVideoPick, onVideoImport,
     onImportKindChosen, onImportSwitchKind,
     openCameraImport, onCameraImport, onGcpImport, onFootprintImport, onFiducialImport,
     onGcpPick, onCameraPick, onColmapPick, onFiducialObsPick, onFiducialMarksPick,

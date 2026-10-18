@@ -17,6 +17,13 @@ describe('recommendSettings', () => {
     expect(initialMatchStrategy(2)).toBe('preselect')
   })
 
+  it('starts video frames on sequential matching, unless positions exist', () => {
+    expect(initialMatchStrategy(0, { video: true })).toBe('sequential')
+    expect(initialMatchStrategy(5, { video: true })).toBe('preselect')
+    expect(recommendSettings(profile({ kind: 'video', scale: 'small' })).match.strategy.value).toBe('sequential')
+    expect(recommendSettings(profile({ kind: 'video', hasPoses: true })).match.strategy.value).toBe('preselect')
+  })
+
   it('returns all five stages even for a null profile', () => {
     const r = recommendSettings(null)
     expect(Object.keys(r)).toEqual(['detect', 'match', 'sfm', 'depthmap', 'fuse'])

@@ -221,7 +221,7 @@ export interface DatasetProfile {
   maxDim: number | null
   /** Median megapixels across images (null when no dimensions are known). */
   medianMP: number | null
-  kind: 'film' | 'drone' | 'phone' | 'unknown'
+  kind: 'film' | 'video' | 'drone' | 'phone' | 'unknown'
   /** Any image carries EXIF GPS lat/lon. */
   hasGps: boolean
   /** Any imported camera poses are present. */
@@ -230,6 +230,8 @@ export interface DatasetProfile {
   hasCalibratedDistortion: boolean
   /** Image names form a capture sequence (trailing-integer, mostly contiguous). */
   sequentialNames: boolean
+  /** Images that are frames extracted from a video (Import ▸ Video). */
+  videoFrames: number
   /** Coarse size bucket for budget decisions: <20 / 20–200 / >200 images. */
   scale: 'small' | 'medium' | 'large'
   /** Human-readable rationale for each derived value (auditable, like onLog). */

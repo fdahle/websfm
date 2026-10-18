@@ -13,7 +13,9 @@
 //   <prefix>.log   every log line, in the dev console's export format
 //   <prefix>.json  settings + per-stage numbers (keypoints, pairs, points ≥3 views, …)
 //
-// Config keys (JSON file and/or flags; flags win): name, images (folder), include (regex
+// Config keys (JSON file and/or flags; flags win): name, images (folder) or video (one
+// video file, its frames extracted as Import ▸ Video does; `videoImport` = the dialog's
+// settings), include (regex
 // on file names), limit (first N after sorting), sceneType, stages ("detect,match,recon";
 // also depth, dense, dem, ortho, and reopen = reload the page and restore the project),
 // detect / match / recon (settings objects; `preset` selects a preset delta), port, headed,
@@ -30,7 +32,8 @@ import { fileURLToPath } from 'node:url'
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.tif', '.tiff'])
-const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.tif': 'image/tiff', '.tiff': 'image/tiff' }
+const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.tif': 'image/tiff', '.tiff': 'image/tiff',
+  '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm' }
 
 function parseArgs(argv) {
   const out = {}
@@ -48,9 +51,11 @@ const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = { ...(args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}) }
-for (const k of ['name', 'images', 'include', 'openProject', 'colmapFiles', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'exportCloudsProject', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
-for (const k of ['detect', 'match', 'recon']) cfg[k] = { ...(cfg[k] ?? {}), ...(args[k] ? json(args[k]) : {}) }
-if (!cfg.images) throw new Error('--images <folder> (or "images" in --config) is required')
+for (const k of ['name', 'images', 'video', 'include', 'openProject', 'colmapFiles', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'exportCloudsProject', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
+for (const k of ['detect', 'match', 'recon', 'videoImport']) cfg[k] = { ...(cfg[k] ?? {}), ...(args[k] ? json(args[k]) : {}) }
+// A video is served from its folder like a dataset of one file.
+if (cfg.video) cfg.images = dirname(resolve(cfg.video))
+if (!cfg.images) throw new Error('--images <folder> or --video <file> (or either in --config) is required')
 const name = cfg.name ?? 'bench'
 const stages = String(cfg.stages ?? 'detect,match,recon').split(',').map((s) => s.trim())
 const port = Number(cfg.port ?? 4180)
@@ -73,7 +78,8 @@ const listImages = async (dir, prefix = '') => {
   return out
 }
 const baseName = (f) => f.slice(f.lastIndexOf('/') + 1)
-let files = (await listImages(cfg.images)).sort((a, b) => baseName(a).localeCompare(baseName(b)))
+let files = cfg.video ? [basename(cfg.video)]
+  : (await listImages(cfg.images)).sort((a, b) => baseName(a).localeCompare(baseName(b)))
 if (cfg.include) { const re = new RegExp(cfg.include, 'i'); files = files.filter((f) => re.test(baseName(f))) }
 // `minGpsAlt` (metres, EXIF GPS altitude): drop captures taken on the ground before
 // takeoff / after landing, which a camera that records from power-on produces.
@@ -231,15 +237,22 @@ try {
   const list = files.map((f) => ({ url: `${base}/__bench_data/${encodeURIComponent(f)}`, name: baseName(f) }))
   // Under the same crash/stall watchdog as the stages: a renderer that dies mid-ingest
   // (Iceland 1980, 125 × 130 MP scans under a memory cap) left the run waiting forever.
+  let video = null
   try {
-    for (let i = 0; i < list.length; i += 32) {
+    if (cfg.video) {
+      video = await Promise.race([page.evaluate((v) => window.bench.addVideo(v),
+        { url: list[0].url, name: list[0].name, settings: cfg.videoImport }), watchdog()])
+      added = video.images
+      console.log(`== video: ${JSON.stringify(video)}`)
+    }
+    for (let i = 0; !cfg.video && i < list.length; i += 32) {
       lastLogAt = Date.now()
       added = await Promise.race([page.evaluate((l) => window.bench.addImages(l), list.slice(i, i + 32)), watchdog()])
     }
   } finally {
     for (const t of watchdog.timers.splice(0)) clearInterval(t)
   }
-  result.stages.ingest = { images: added, seconds: (Date.now() - t0) / 1000 }
+  result.stages.ingest = { images: added, seconds: (Date.now() - t0) / 1000, ...(video ? { video } : {}) }
   // `hist` (scripts/bench/hist/README.md): a historical block's certificate focal +
   // scan pitch on one sensor, a static mask, and the surveyed GCPs (gcp.csv).
   if (cfg.hist) {

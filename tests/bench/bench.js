@@ -42,7 +42,9 @@ import { demToGeoTiff } from '/src/core/products/exporters.js'
 import { crsTagInfo } from '/src/core/products/geotiff.js'
 import { emptyFiducialCalibration } from '/src/core/sfm/fiducialModel.js'
 import { buildBorderMask } from '/src/core/mask.js'
-import { FIDUCIAL_SPOT_DEFAULTS } from '/src/core/defaults.user.js'
+import { FIDUCIAL_SPOT_DEFAULTS, VIDEO_IMPORT_DEFAULTS } from '/src/core/defaults.user.js'
+import { analysisTimes, intervalTimes, selectKeyframes } from '/src/core/io/videoFrames.js'
+import { openVideoSource, analyzeVideo, extractVideoFrames } from '/src/utils/videoSource.js'
 
 // SfM input capture (config `dumpSfmInput`): the next `reconstruct` op posted to a
 // worker is encoded before it is sent (its match buffers are transferred, so they
@@ -62,7 +64,7 @@ Worker.prototype.postMessage = function (message, ...rest) {
 }
 
 setActivePinia(createPinia())
-const { onLog, takePending } = useLog()
+const { onLog, takePending, log } = useLog()
 onLog(() => { for (const e of takePending()) console.log('@@LOG ' + JSON.stringify(e)) })
 
 const projects = useProjectsStore()
@@ -972,6 +974,42 @@ window.bench = {
     await images.addImages(objs)
     await until(() => images.images.length >= before + objs.length && images.images.every((i) => i.meta || i.previewFailed))
     return images.images.length
+  },
+
+  // Config `video`: the frames of one video, planned and extracted exactly as
+  // Import ▸ Video does (the dialog's plan, then the importer's extraction), with
+  // `settings` over VIDEO_IMPORT_DEFAULTS.
+  async addVideo({ url, name, settings = {} }) {
+    const blob = await fetchRetry(url)
+    const file = new File([blob], name, { type: blob.type, lastModified: 0 })
+    const s = { ...VIDEO_IMPORT_DEFAULTS, ...settings }
+    const src = await openVideoSource(file)
+    const info = { duration: src.duration, width: src.width, height: src.height, fps: src.fps }
+    let times, plan = null
+    const t0 = performance.now()
+    try {
+      if (s.mode === 'auto') {
+        const { step, times: at } = analysisTimes(src.duration, src.fps)
+        const samples = await analyzeVideo(src, at)
+        const sel = selectKeyframes(samples, s)
+        times = sel.times
+        plan = { samples: samples.length, step, overlap: sel.overlap, blurry: sel.blurry, blurryKept: sel.blurryKept,
+          gaps: sel.gaps, travel: Number(sel.travel.toFixed(3)), lost: samples.filter((x) => x.lost).length,
+          fast: samples.filter((x) => x.fast).length }
+      } else {
+        times = intervalTimes(src.duration, { every: s.every, unit: s.unit, fps: src.fps })
+      }
+    } finally {
+      src.close()
+    }
+    const scanSeconds = (performance.now() - t0) / 1000
+    log(`Bench video: ${name} ${info.width}×${info.height} ${info.duration.toFixed(1)} s ${info.fps ?? '?'} fps — `
+      + `${times.length} frame(s) planned (${s.mode}) in ${scanSeconds.toFixed(1)} s${plan ? ` ${JSON.stringify(plan)}` : ''}`, 'info', 'Import')
+    const t1 = performance.now()
+    const r = await extractVideoFrames({ file, times, duration: info.duration, fps: info.fps, settings: s, addImages: images.addImages })
+    await until(() => images.images.every((i) => i.meta || i.previewFailed))
+    return { images: images.images.length, frames: r.added, ...info, plan, scanSeconds,
+      extractSeconds: (performance.now() - t1) / 1000 }
   },
 
   async detect({ preset = null, ...overrides } = {}) {

@@ -45,7 +45,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   const { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages } = removals
   const {
     cameraPickMode, addImagesRouted, onGcpPick, onCameraPick, onFiducialObsPick, onFiducialMarksPick,
-    onColmapPick, onCloudPick, onRasterPick, onProjectFilePick,
+    onColmapPick, onCloudPick, onRasterPick, onVideoPick, onProjectFilePick,
   } = imports
   const {
     saveProjectOpen, workflowBuilderOpen, imageTableOpen, poseTableOpen, maskManagerOpen, autoMaskOpen,
@@ -189,6 +189,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
 
     switch (id) {
       case 'import-images':        pickFiles(FILE_PICKERS.images, onRibbonPick); break
+      case 'import-video':         pickFiles(FILE_PICKERS.video, onVideoPick); break
       case 'import-gcps':          pickFiles(FILE_PICKERS.gcps, onGcpPick); break
       case 'import-camera-list':   cameraPickMode.value = 'pose';   pickFiles(FILE_PICKERS.cameras, onCameraPick); break
       case 'import-calib':         cameraPickMode.value = 'sensor'; pickFiles(FILE_PICKERS.cameras, onCameraPick); break

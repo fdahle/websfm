@@ -38,4 +38,6 @@ WebSfM auto-groups images into sensors from EXIF (camera make, model, focal
 length, image dimensions), which is right for most digital projects. It has to
 be corrected by hand when EXIF is absent or misleading — scanned film, a zoom
 lens used at different settings, or two physically different cameras that report
-the same model string.
+the same model string. Frames extracted from a video carry no EXIF; they get one
+sensor per video (named after it), since all frames of a video come from one
+camera.

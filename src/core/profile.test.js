@@ -19,6 +19,18 @@ describe('profileDataset', () => {
     expect(p.notes.some((n) => /tentative/i.test(n))).toBe(true)
   })
 
+  it('classifies video frames as video, not as EXIF-less film', () => {
+    const images = Array.from({ length: 30 }, (_, i) => img(`walk_00m${String(i).padStart(2, '0')}.500s.jpg`,
+      { width: 1920, height: 1080, videoSource: 'walk.mp4', videoTime: i + 0.5 }))
+    const p = profileDataset({ images })
+    expect(p.kind).toBe('video')
+    expect(p.videoFrames).toBe(30)
+    expect(p.notes.some((n) => /tentative/i.test(n))).toBe(false)
+    // A few photos added to the frames keep it a video set; mostly photos do not.
+    expect(profileDataset({ images: [...images, img('a.jpg'), img('b.jpg')] }).kind).toBe('video')
+    expect(profileDataset({ images: [...images.slice(0, 2), ...seq('p', 10, { width: 10 })] }).kind).toBe('film')
+  })
+
   it('prefers a declared film sensor over the EXIF heuristic (not tentative)', () => {
     // Images carry EXIF (so the "no EXIF" path would NOT fire), but the sensor is film.
     const images = seq('scan_', 5, { width: 8000, height: 8000, make: 'Zeiss', model: 'RMK' })
