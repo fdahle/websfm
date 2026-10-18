@@ -10,9 +10,13 @@ import { projectVertices, rasterizeDepth } from '../../core/products/texture/vis
 import { createTextureDepthGpu, compareDepth } from '../gpu/textureDepthGpu.js'
 import { formatBytes } from '../../core/dense/memBudget.js'
 
-// GPU vs CPU depth on the first view: below this share of agreeing pixels the run
-// falls back to the CPU pass (rasterisers differ by a pixel along occluder edges).
-const GPU_AGREE_MIN = 0.98
+// GPU vs CPU depth on the first view the mesh covers enough of to judge (at least
+// GPU_CHECK_COVERAGE of its grid): below GPU_AGREE_MIN of the covered pixels agreeing,
+// the run falls back to the CPU pass. Rasterisers differ by a pixel along occluder
+// edges, which weigh more among covered pixels than among all of them. A view that
+// covers less is not judged: it takes the CPU pass, and the next view is checked.
+const GPU_AGREE_MIN = 0.95
+const GPU_CHECK_COVERAGE = 0.02
 
 // Mesh texture op (plan-texture T2). The core (core/products/texture/) is pure; this
 // worker side supplies what needs the browser: each photo decoded at the scale the
@@ -130,7 +134,7 @@ export function makeTextureOps({ rasterize } = {}) {
     }
 
     // The z-buffer on the GPU when asked for and available, checked against the CPU
-    // pass on the first view (workers/gpu/README ▸ Invariants).
+    // pass on the first view that covers enough to judge (workers/gpu/README ▸ Invariants).
     let gpu = null, gpuState = settings.useGpu ? 'pending' : 'off'
     async function renderDepth(vi, grid, cam, geom, idx) {
       if (gpuState === 'off') return null
@@ -146,13 +150,14 @@ export function makeTextureOps({ rasterize } = {}) {
         if (!depth) return null
         if (gpuState === 'check') {
           const cpu = rasterizeDepth(projectVertices(geom.P, cam, grid), idx, grid.width, grid.height)
-          const { agree } = compareDepth(depth, cpu)
+          const { agree, coverage } = compareDepth(depth, cpu)
+          if (coverage < GPU_CHECK_COVERAGE) return cpu // too little of the mesh in view to judge
           if (agree < GPU_AGREE_MIN) {
-            log(`Texture: GPU validate failed — ${(100 * agree).toFixed(2)} % of pixels agree with the CPU pass; using the CPU`, 'warn')
+            log(`Texture: GPU validate failed — ${(100 * agree).toFixed(2)} % of covered pixels agree with the CPU pass; using the CPU`, 'warn')
             gpu.destroy(); gpu = null; gpuState = 'off'
-            return null
+            return cpu
           }
-          log(`Texture: GPU validate ok — ${(100 * agree).toFixed(2)} % of pixels agree with the CPU pass`)
+          log(`Texture: GPU validate ok — ${(100 * agree).toFixed(2)} % of covered pixels agree with the CPU pass`)
           gpuState = 'on'
         }
         return depth

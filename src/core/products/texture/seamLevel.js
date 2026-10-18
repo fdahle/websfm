@@ -23,6 +23,7 @@
 import { toScaledPx } from '../../sfm/geometry.js'
 import { sampleRgbaBilinear } from '../undistort.js'
 import { TEXTURE_TUNING } from '../../tuning.js'
+import { faceAdjacency } from './meshGraph.js'
 
 
 // labels, idx: per face; cut: chartPieces output; px: cornerPixels; layout + pages:
@@ -90,15 +91,9 @@ export function levelSeams(labels, idx, nVerts, cut, px, layout, pages, opts = {
 
   // System: smoothness edges within a label + seam pairs between labels at a vertex.
   const ea = [], eb = [], ew = []
-  for (let f = 0; f < F; f++) {
-    const l = labels[f]
-    if (l < 0) continue
-    for (let k = 0; k < 3; k++) {
-      // Each edge once: a consistently wound mesh walks a shared edge both ways.
-      const v0 = idx[3 * f + k], v1 = idx[3 * f + (k + 1) % 3]
-      if (v0 > v1) continue
-      ea.push(unknown(v0, l, false)); eb.push(unknown(v1, l, false)); ew.push(smoothWeight)
-    }
+  const sm = smoothingEdges(labels, idx, opts.adj ?? faceAdjacency(idx, nVerts).adj)
+  for (let e = 0; e < sm.length; e += 3) {
+    ea.push(unknown(sm[e], sm[e + 2], false)); eb.push(unknown(sm[e + 1], sm[e + 2], false)); ew.push(smoothWeight)
   }
   const nSmooth = ea.length
   // Seam pairs: every two unknowns of one vertex.
@@ -186,6 +181,25 @@ export function levelSeams(labels, idx, nVerts, cut, px, layout, pages, opts = {
     }
   }
   return { seamVertices: byVertex.size, unknowns: n, iterations, maxOffset: largest }
+}
+
+// The smoothness edges: every mesh edge once per label on it, as [v0, v1, label]
+// triples. An edge inside a chart is one edge; a seam edge is one per side (each side
+// smooths its own offsets along the seam); a boundary edge counts too. Taking only the
+// edges walked low → high vertex instead lost every boundary edge walked the other way
+// and one side of every seam.
+export function smoothingEdges(labels, idx, adj) {
+  const out = []
+  for (let f = 0; f < labels.length; f++) {
+    const l = labels[f]
+    if (l < 0) continue
+    for (let k = 0; k < 3; k++) {
+      const g = adj[3 * f + k]
+      if (g >= 0 && labels[g] === l && g < f) continue // the neighbour has it
+      out.push(idx[3 * f + k], idx[3 * f + (k + 1) % 3], l)
+    }
+  }
+  return out
 }
 
 // Jacobi-preconditioned CG on A = diag + Σ_e w_e (e_a − e_b)(e_a − e_b)ᵀ (the edge

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   serializeCloud, deserializeCloud,
 } from './cloudSerde.js'
+import { SparsePoints } from '../../core/sfm/sparsePoints.js'
 
 let seq = 0
 const makeCloudId = () => `minted-${seq++}`
@@ -10,21 +11,28 @@ const makeCloudId = () => `minted-${seq++}`
 // re-wrap them exactly as the reader does.
 const roundTrip = (cloud) => deserializeCloud(serializeCloud(cloud), makeCloudId)
 
-function sparseCloud(overrides = {}) {
+// Point records, wrapped into a SparsePoints by sparseCloud (tests may edit them first).
+const sparseRecords = () => [
+  { x: 1, y: 2, z: 3, color: [10, 20, 30], views: new Map([['ua', 7], ['ub', 9]]), viewsPx: new Map([['ua', [1.5, 2.5]], ['ub', [3.5, 4.5]]]) },
+  { x: -4, y: 5, z: 6, color: [40, 50, 60], views: new Map([['ua', 2]]), viewsPx: new Map() },
+  { x: 0, y: 0, z: 0, color: [0, 0, 0], views: new Map(), viewsPx: new Map() },
+]
+
+function sparseCloud(overrides = {}, records = sparseRecords()) {
   return {
     id: 'c1', name: 'Sparse cloud', kind: 'sparse', createdAt: 1000,
     cameras: new Map([
       ['ua', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: { fx: 100, fy: 100, cx: 50, cy: 40 } }],
       ['ub', { R: [[0, 1, 0], [-1, 0, 0], [0, 0, 1]], t: [1, 2, 3], K: { fx: 110, fy: 110, cx: 50, cy: 40 } }],
     ]),
-    points: [
-      { x: 1, y: 2, z: 3, color: [10, 20, 30], views: new Map([['ua', 7], ['ub', 9]]), viewsPx: new Map([['ua', [1.5, 2.5]], ['ub', [3.5, 4.5]]]) },
-      { x: -4, y: 5, z: 6, color: [40, 50, 60], views: new Map([['ua', 2]]), viewsPx: new Map() },
-      { x: 0, y: 0, z: 0, color: [0, 0, 0], views: new Map(), viewsPx: new Map() },
-    ],
+    points: SparsePoints.fromRecords(records),
     ...overrides,
   }
 }
+
+const xyzs = (pts) => Array.from({ length: pts.length }, (_, i) => pts.xyz(i))
+const colors = (pts) => Array.from({ length: pts.length }, (_, i) => pts.colorAt(i))
+const viewsOf = (pts, i) => { const out = []; pts.forEachView(i, (u, kp) => out.push([u, kp])); return out }
 
 describe('sparse cloud round trip', () => {
   it('preserves metadata, cameras, positions and colours', () => {
@@ -37,40 +45,43 @@ describe('sparse cloud round trip', () => {
     expect(out.cameras.get('ub')).toEqual({
       R: [[0, 1, 0], [-1, 0, 0], [0, 0, 1]], t: [1, 2, 3], K: { fx: 110, fy: 110, cx: 50, cy: 40 },
     })
-    expect(out.points.map((p) => [p.x, p.y, p.z])).toEqual([[1, 2, 3], [-4, 5, 6], [0, 0, 0]])
-    expect(out.points.map((p) => p.color)).toEqual([[10, 20, 30], [40, 50, 60], [0, 0, 0]])
+    expect(xyzs(out.points)).toEqual([[1, 2, 3], [-4, 5, 6], [0, 0, 0]])
+    expect(colors(out.points)).toEqual([[10, 20, 30], [40, 50, 60], [0, 0, 0]])
   })
 
   // The CSR layout (vcount + flattened vcam/vkp) is the part most likely to drift.
   it('preserves per-point view tracks across the CSR layout', () => {
     const out = roundTrip(sparseCloud())
-    expect([...out.points[0].views.entries()].sort()).toEqual([['ua', 7], ['ub', 9]])
-    expect([...out.points[1].views.entries()]).toEqual([['ua', 2]])
-    expect(out.points[2].views.size).toBe(0)
+    expect(viewsOf(out.points, 0).sort()).toEqual([['ua', 7], ['ub', 9]])
+    expect(viewsOf(out.points, 1)).toEqual([['ua', 2]])
+    expect(out.points.viewCount(2)).toBe(0)
   })
 
   it('preserves per-view pixels, and leaves them absent where unrecorded', () => {
     const out = roundTrip(sparseCloud())
-    expect(out.points[0].viewsPx.get('ua')).toEqual([1.5, 2.5])
-    expect(out.points[0].viewsPx.get('ub')).toEqual([3.5, 4.5])
+    expect(out.points.pixelOf(0, 'ua')).toEqual([1.5, 2.5])
+    expect(out.points.pixelOf(0, 'ub')).toEqual([3.5, 4.5])
     // Point 1 has a view but no pixel for it — NaN marks that, so nothing is set.
-    expect(out.points[1].viewsPx).toBeUndefined()
+    expect(out.points.pixelCount(1)).toBe(0)
+    expect(out.points.pixelOf(1, 'ua')).toBeUndefined()
   })
 
   it('omits the pixel buffers entirely when no point carries one', () => {
-    const c = sparseCloud()
-    for (const p of c.points) p.viewsPx = new Map()
-    const ser = serializeCloud(c)
+    const records = sparseRecords()
+    for (const p of records) p.viewsPx = new Map()
+    const ser = serializeCloud(sparseCloud({}, records))
     expect(ser.buffers.vx).toBe(null)
     expect(ser.buffers.vy).toBe(null)
-    expect(deserializeCloud(ser, makeCloudId).points[0].viewsPx).toBeUndefined()
+    const back = deserializeCloud(ser, makeCloudId).points
+    expect(back.hasPixels).toBe(false)
+    expect(back.pixelCount(0)).toBe(0)
   })
 
   it('dictionary-encodes a view uuid that is not among the cameras', () => {
-    const c = sparseCloud()
-    c.points[0].views.set('stray', 5)
-    const out = roundTrip(c)
-    expect(out.points[0].views.get('stray')).toBe(5)
+    const records = sparseRecords()
+    records[0].views.set('stray', 5)
+    const out = roundTrip(sparseCloud({}, records))
+    expect(out.points.kpOf(0, 'stray')).toBe(5)
   })
 
   it('carries the imported and secondary flags, and omits them otherwise', () => {
@@ -83,37 +94,38 @@ describe('sparse cloud round trip', () => {
   })
 
   it('drops colour when no point has any', () => {
-    const c = sparseCloud()
-    for (const p of c.points) delete p.color
-    const ser = serializeCloud(c)
+    const records = sparseRecords()
+    for (const p of records) delete p.color
+    const ser = serializeCloud(sparseCloud({}, records))
     expect(ser.hasColor).toBe(false)
-    expect(deserializeCloud(ser, makeCloudId).points[0].color).toBeUndefined()
+    expect(deserializeCloud(ser, makeCloudId).points.colorAt(0)).toBeNull()
   })
 
   it('preserves missing colour separately from true black', () => {
-    const c = sparseCloud()
-    delete c.points[1].color
-    const once = roundTrip(c)
-    expect(once.points.map((p) => p.color)).toEqual([[10, 20, 30], undefined, [0, 0, 0]])
-    // The second save takes the packed-track fast path used by restored projects.
+    const records = sparseRecords()
+    delete records[1].color
+    const once = roundTrip(sparseCloud({}, records))
+    expect(colors(once.points)).toEqual([[10, 20, 30], null, [0, 0, 0]])
+    // The second save writes a restored cloud's own columns back out.
     const twice = roundTrip(once)
-    expect(twice.points.map((p) => p.color)).toEqual([[10, 20, 30], undefined, [0, 0, 0]])
+    expect(colors(twice.points)).toEqual([[10, 20, 30], null, [0, 0, 0]])
   })
 
   it('handles an empty cloud', () => {
-    const out = roundTrip({ id: 'e', name: 'E', kind: 'sparse', createdAt: 1, cameras: new Map(), points: [] })
-    expect(out.points).toEqual([])
+    const out = roundTrip({ id: 'e', name: 'E', kind: 'sparse', createdAt: 1, cameras: new Map(), points: SparsePoints.empty() })
+    expect(out.points.length).toBe(0)
     expect(out.cameras.size).toBe(0)
   })
 
   it('reuses restored CSR tracks while serializing updated point positions', () => {
     const restored = roundTrip(sparseCloud())
-    expect(restored.points.packedTracks).toBeTruthy()
-    restored.points[0].x = 99
-    const ser = serializeCloud(restored)
+    const pos = restored.points.pos.slice()
+    pos[0] = 99
+    const moved = { ...restored, points: restored.points.withPositions(pos) }
+    const ser = serializeCloud(moved)
     expect(new Float64Array(ser.buffers.pos)[0]).toBe(99)
-    expect(ser.buffers.vcam).toBe(restored.points.packedTracks.vcam.buffer)
-    expect([...deserializeCloud(ser, makeCloudId).points[0].views.entries()])
+    expect(ser.buffers.vcam).toBe(restored.points.vcam.buffer)
+    expect(viewsOf(deserializeCloud(ser, makeCloudId).points, 0))
       .toEqual([['ua', 7], ['ub', 9]])
   })
 })
@@ -164,12 +176,16 @@ describe('dense cloud round trip', () => {
   })
 
   it('carries its level-of-detail octree, unless it describes other points', () => {
-    const lod = { dataFile: 'd1-x.lod', hierarchyFile: 'd1-x.hier', points: 2, nodeCount: 1, root: { min: [1, 2, 3], size: 3 } }
+    const lod = { dataFile: 'd1-x.lod', hierarchyFile: 'd1-x.hier', points: 2, nodeCount: 1, root: { min: [1, 2, 3], size: 3 }, cloudCreatedAt: 2000 }
     const out = roundTrip(dense({ lod }))
     expect(out.lod).toEqual(lod)
     expect(serializeCloud(dense({ lod }), { reuse: { pos: { name: 'p', bytes: 24 } } }).lod).toEqual(lod)
     expect('lod' in roundTrip(dense())).toBe(false)
     expect('lod' in roundTrip(dense({ lod: { ...lod, points: 5 } }))).toBe(false)
+    // Same count, another generation (a reclassify renews createdAt): not its octree.
+    expect('lod' in roundTrip(dense({ createdAt: 2001, lod }))).toBe(false)
+    const { cloudCreatedAt: _g, ...unstamped } = lod
+    expect('lod' in roundTrip(dense({ lod: unstamped }))).toBe(false)
   })
 
   it('ignores buffer tail beyond count', () => {

@@ -12,29 +12,85 @@ import { screenSelectMask } from '../products/screenSelect.js'
 import { filterCloud, sorNeighbourMeans, estimateSpacing } from '../products/cloudEdit.js'
 import { classifyCloudGround } from '../products/groundFilter.js'
 import { planExtract, extractPoints } from './extract.js'
+import { nodeCube } from './octree.js'
 
 /**
- * Square tiles over the cloud's XY extent, each with about `tilePoints` points in
- * its tile + margin (from the mean density: 2.5D survey data). `align` (> 0) makes
- * the side a multiple of it (a voxel filter's cell, so no voxel spans two tiles).
- * → [{ core: { min: [x, y], max: [x, y] } (open outer edges: ±Infinity), box }]
+ * Tiles over the cloud's XY extent, each with about `tilePoints` points in its tile +
+ * margin (`halo`). The extent is split in halves, the longer side first, until a
+ * tile's count fits: counted from the octree's `nodes` (a decoded hierarchy: every
+ * node's points spread over its cube's footprint), so a corridor or a cloud with far
+ * outliers gets small tiles where its points are and large ones where it has none.
+ * Without `nodes` the points are taken as spread evenly over the extent. `align` (> 0)
+ * puts every inner edge on a multiple of it (a voxel filter's cell, so no voxel spans
+ * two tiles). A tile is never split below max(halo, align, extent / 4096).
+ * → [{ core: { min: [x, y], max: [x, y] } (open outer edges: ±Infinity), box, estimate }]
  */
-export function planTiles(lod, { tilePoints = 6_000_000, halo = 0, align = 0 } = {}) {
+export function planTiles(lod, { tilePoints = 6_000_000, halo = 0, align = 0, nodes = null } = {}) {
   const [x0, y0] = lod.bounds.min, [x1, y1] = lod.bounds.max
   const w = Math.max(x1 - x0, 1e-9), h = Math.max(y1 - y0, 1e-9)
-  const density = lod.points / (w * h)
-  let side = Math.sqrt(tilePoints / Math.max(density, 1e-12)) - 2 * halo
-  side = Math.max(side, halo, Math.max(w, h) / 4096)
-  if (align > 0) side = Math.max(align, Math.floor(side / align) * align)
-  const nx = Math.max(1, Math.ceil(w / side)), ny = Math.max(1, Math.ceil(h / side))
-  // Aligned tiles start on a multiple of `align` from the origin, as the voxel grid does.
-  const ox = align > 0 ? Math.floor(x0 / align) * align : x0, oy = align > 0 ? Math.floor(y0 / align) * align : y0
+  const minSide = Math.max(halo, align, Math.max(w, h) / 4096)
+  // Footprints: [minX, minY, size, count] per non-empty node (or the extent itself).
+  const feet = []
+  if (nodes) {
+    for (const n of nodes.values()) {
+      if (!n.count) continue
+      const c = nodeCube(lod.root, n.key)
+      feet.push([c.min[0], c.min[1], c.size, c.size, n.count])
+    }
+  } else feet.push([x0, y0, w, h, lod.points])
+  // Points of the footprints `idx` inside [ax, bx] × [ay, by], in proportion to overlap.
+  const count = (idx, ax, ay, bx, by) => {
+    let sum = 0
+    const hit = []
+    for (const i of idx) {
+      const [fx, fy, fw, fh, n] = feet[i]
+      const ox = Math.min(bx, fx + fw) - Math.max(ax, fx), oy = Math.min(by, fy + fh) - Math.max(ay, fy)
+      if (ox < 0 || oy < 0) continue
+      hit.push(i)
+      sum += n * (fw > 0 ? Math.min(1, ox / fw) : 1) * (fh > 0 ? Math.min(1, oy / fh) : 1)
+    }
+    return { sum, hit }
+  }
+  // Where a side may be cut: its middle, on a multiple of `align`; null if a half
+  // would be narrower than minSide.
+  const cut = (a, b) => {
+    let m = (a + b) / 2
+    if (align > 0) m = Math.round(m / align) * align
+    return m - a >= minSide && b - m >= minSide ? m : null
+  }
   const tiles = []
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
-    const min = [i === 0 ? -Infinity : ox + i * side, j === 0 ? -Infinity : oy + j * side]
-    const max = [i === nx - 1 ? Infinity : ox + (i + 1) * side, j === ny - 1 ? Infinity : oy + (j + 1) * side]
-    const lo = [ox + i * side - halo, oy + j * side - halo], hi = [ox + (i + 1) * side + halo, oy + (j + 1) * side + halo]
-    tiles.push({ core: { min, max }, box: { min: [i === 0 ? null : lo[0], j === 0 ? null : lo[1], null], max: [i === nx - 1 ? null : hi[0], j === ny - 1 ? null : hi[1], null] } })
+  const stack = [{ min: [x0, y0], max: [x1, y1], idx: feet.map((_, i) => i) }]
+  while (stack.length) {
+    const r = stack.pop()
+    const { sum, hit } = count(r.idx, r.min[0] - halo, r.min[1] - halo, r.max[0] + halo, r.max[1] + halo)
+    let split = null
+    if (sum > tilePoints) {
+      const order = r.max[0] - r.min[0] >= r.max[1] - r.min[1] ? [0, 1] : [1, 0]
+      for (const a of order) {
+        const m = cut(r.min[a], r.max[a])
+        if (m != null) { split = [a, m]; break }
+      }
+    }
+    if (split) {
+      const [a, m] = split
+      const lo = { min: [...r.min], max: [...r.max], idx: hit }, hi = { min: [...r.min], max: [...r.max], idx: hit }
+      lo.max[a] = m; hi.min[a] = m
+      stack.push(hi, lo)
+      continue
+    }
+    // Outer edges stay open: a point just past the extent still has one tile.
+    const outerLo = [r.min[0] <= x0, r.min[1] <= y0], outerHi = [r.max[0] >= x1, r.max[1] >= y1]
+    tiles.push({
+      core: {
+        min: [outerLo[0] ? -Infinity : r.min[0], outerLo[1] ? -Infinity : r.min[1]],
+        max: [outerHi[0] ? Infinity : r.max[0], outerHi[1] ? Infinity : r.max[1]],
+      },
+      box: {
+        min: [outerLo[0] ? null : r.min[0] - halo, outerLo[1] ? null : r.min[1] - halo, null],
+        max: [outerHi[0] ? null : r.max[0] + halo, outerHi[1] ? null : r.max[1] + halo, null],
+      },
+      estimate: Math.round(sum),
+    })
   }
   return tiles
 }
@@ -156,25 +212,49 @@ export function streamedEditSource(reader, lod, mode, settings = {}, { log = () 
   }
 
   async function* tiled() {
+    const b = lod.bounds
+    const box3 = { minX: b.min[0], minY: b.min[1], minZ: b.min[2], maxX: b.max[0], maxY: b.max[1], maxZ: b.max[2] }
     // The mean point spacing of a 2.5D cloud, for the filters' margin.
-    const spacing = Math.sqrt((lod.bounds.max[0] - lod.bounds.min[0]) * (lod.bounds.max[1] - lod.bounds.min[1]) / Math.max(1, lod.points))
-    const voxel = mode === 'filter' && settings.methods?.includes('voxel') ? settings.voxel?.cell ?? 0 : 0
+    const spacing = Math.sqrt((b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) / Math.max(1, lod.points))
+    const methods = mode === 'filter' ? settings.methods ?? [] : []
+    // What each filter sees around a point, from the WHOLE cloud, so every tile filters
+    // alike and a point's result does not depend on where the tile edges fall:
+    //   voxel     its cell (the tiles' inner edges sit on its grid);
+    //   isolated  the cell's neighbours, up to 2 cells off (an automatic cell is the
+    //             whole cloud's 4× spacing, not each tile's own);
+    //   outlier   neighbours within `reach` (4× the whole cloud's spacing, as a
+    //             resident run's own bounds give it).
+    // The margin holds them all one after another (a filter's input near the margin's
+    // edge is what the one before it left).
+    const voxel = methods.includes('voxel') ? settings.voxel?.cell ?? 0 : 0
+    const isoCell = methods.includes('isolated')
+      ? (settings.isolated?.cell > 0 ? settings.isolated.cell : Math.max(4 * estimateSpacing(box3, lod.points), 1e-9)) : 0
+    const reach = methods.includes('sor') ? 4 * estimateSpacing(box3, lod.points) : 0
     const halo = mode === 'classify-ground'
       ? Math.max(30, 40 * (settings.clothResolution ?? 1)) / (settings.metresPerUnit ?? 1)
-      : Math.max(20 * spacing, 3 * (settings.isolated?.cell ?? 0), 3 * (settings.sor?.cell ?? 0), voxel)
-    const tiles = planTiles(lod, { tilePoints: settings.tilePoints ?? 6_000_000, halo, align: voxel })
-    log(`${mode === 'filter' ? 'Filter' : 'Ground filter'}: ${tiles.length} tile(s) with a ${halo.toPrecision(3)}-unit margin`)
+      : Math.max(20 * spacing, voxel + 3 * isoCell + Math.max(reach, 3 * (settings.sor?.cell ?? 0)))
+    let run = isoCell ? { ...settings, isolated: { ...settings.isolated, cell: isoCell } } : settings
+    const label = mode === 'filter' ? 'Filter' : 'Ground filter'
+    const tiles = planTiles(lod, { tilePoints: settings.tilePoints ?? 6_000_000, halo, align: voxel, nodes: reader.nodes })
+    log(`${label}: ${tiles.length} tile(s) with a ${halo.toPrecision(3)}-unit margin`)
     const quiet = () => {}
-    const readTile = async (tile) => withClass(await extractPoints(reader, planExtract(reader.nodes, lod, { box: tile.box }), lod, { box: tile.box }))
+    // A tile is read whole: every level of the octree. One too dense to split further
+    // would come back thinned (the read stops at a coarser level to stay within one
+    // buffer), and so would the edit's output, silently. Refuse instead.
+    const readTile = async (tile) => {
+      const plan = planExtract(reader.nodes, lod, { box: tile.box })
+      if (!plan.complete) {
+        throw new Error(`${label}: one tile holds about ${(plan.estimate / 1e6).toFixed(0)} M points at its finest level read `
+          + `(of ${(tile.estimate / 1e6).toFixed(0)} M estimated), more than one read can hold; the cloud is too dense in one place `
+          + 'to edit tile by tile — crop that part out first')
+      }
+      return withClass(await extractPoints(reader, plan, lod, { box: tile.box }))
+    }
     // The outlier filter compares each point with the WHOLE cloud's statistics: a
     // first pass gathers them over every tile's own points (with the filters before it
     // applied), and the reach comes from the whole cloud, so the tiles filter alike.
-    let run = settings
-    const methods = settings.methods ?? []
-    if (mode === 'filter' && methods.includes('sor')) {
-      const b = lod.bounds
-      const reach = 4 * estimateSpacing({ minX: b.min[0], minY: b.min[1], minZ: b.min[2], maxX: b.max[0], maxY: b.max[1], maxZ: b.max[2] }, lod.points)
-      const before = { ...settings, methods: methods.slice(0, methods.indexOf('sor')) }
+    if (methods.includes('sor')) {
+      const before = { ...run, methods: methods.slice(0, methods.indexOf('sor')) }
       let cnt = 0, s1 = 0, s2 = 0
       for (const tile of tiles) {
         const cloud = await readTile(tile)
@@ -191,7 +271,7 @@ export function streamedEditSource(reader, lod, mode, settings = {}, { log = () 
       const mu = cnt ? s1 / cnt : 0, sigma = cnt ? Math.sqrt(Math.max(s2 / cnt - mu * mu, 0)) : 0
       const limit = mu + (settings.sor?.stdRatio ?? 1.5) * sigma
       log(`Filter (outlier): mean neighbour distance ${mu.toFixed(4)} ±${sigma.toFixed(4)} over the whole cloud, limit ${limit.toFixed(4)}`)
-      run = { ...settings, sor: { ...settings.sor, reach, limit } }
+      run = { ...run, sor: { ...settings.sor, reach, limit } }
     }
     let ground = 0
     for (const tile of tiles) {
@@ -207,7 +287,7 @@ export function streamedEditSource(reader, lod, mode, settings = {}, { log = () 
         if (mode === 'classify-ground') for (const c of kept.attributes.classification) if (c === 2) ground++
         yield kept
       }
-      step(1, run !== settings ? 2 * tiles.length : tiles.length, mode === 'filter' ? 'Filtering tiles' : 'Classifying tiles')
+      step(1, methods.includes('sor') ? 2 * tiles.length : tiles.length, mode === 'filter' ? 'Filtering tiles' : 'Classifying tiles')
     }
     if (mode === 'classify-ground') log(`Ground filter: ${ground.toLocaleString()} ground points`)
   }

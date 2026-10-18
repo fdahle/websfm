@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test'
-// PW_PORT: the dev server's port, so parallel checkouts can run their suites side by side.
-const port = Number(process.env.PW_PORT) || 4179
+// PW_PORT gives each checkout its own dev server: with the default reuse, two worktrees
+// on one port would test whichever server started first.
+const port = Number(process.env.PW_PORT || 4179)
 export default defineConfig({
   testDir: './tests/browser',
   fullyParallel: false,

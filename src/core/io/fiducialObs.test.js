@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseFiducialObs, guessMapping, previewFiducialObs } from './fiducialObs.js'
+import { observationsToDetections } from '../sfm/fiducialModel.js'
 
 describe('parseFiducialObs', () => {
   it('parses a headered CSV', () => {
@@ -78,5 +79,39 @@ describe('previewFiducialObs', () => {
     expect(p.map((g) => [g.fileName, g.imageId, g.marks.length, g.replaces])).toEqual([
       ['scan_01.tif', 1, 2, 1], ['SCAN_02.jpg', 2, 1, 0], ['other.tif', null, 1, 0],
     ])
+  })
+
+  // Ids that name no slot are placed by position on import (observationsToDetections);
+  // the preview has to see the same slots, or it misses the marks they overwrite.
+  it('places non-slot ids by position, as the import does, and counts what they replace', () => {
+    const reviewed = ['corner-tl', 'corner-tr', 'corner-br', 'corner-bl'].map((slot) => ({ slot, reviewed: true }))
+    const imgs = [{ id: 1, name: 'scan.tif', meta: { width: 1000, height: 1000 }, fiducialDetections: reviewed }]
+    const numbered = [
+      { imageName: 'scan.tif', fidId: '1', px: 20, py: 20 },
+      { imageName: 'scan.tif', fidId: '2', px: 980, py: 20 },
+      { imageName: 'scan.tif', fidId: '3', px: 980, py: 980 },
+      { imageName: 'scan.tif', fidId: '4', px: 20, py: 980 },
+    ]
+    const [g] = previewFiducialObs(numbered, imgs)
+    expect(g.marks.map((m) => m.slot)).toEqual(['corner-tl', 'corner-tr', 'corner-br', 'corner-bl'])
+    expect(g.replaces).toBe(4)
+    expect(g.shared).toBe(0)
+    // The import, for the same rows, produces exactly these slots.
+    expect(observationsToDetections(numbered, 1000, 1000).map((d) => d.slot)).toEqual(g.marks.map((m) => m.slot))
+  })
+
+  it('places all rows of one image together, across file names, and flags shared slots', () => {
+    const imgs = [{ id: 1, name: 'scan.tif', meta: { width: 1000, height: 1000 } }]
+    const p = previewFiducialObs([
+      { imageName: 'scan.tif', fidId: 'A', px: 10, py: 10 },
+      { imageName: 'SCAN.jpg', fidId: 'B', px: 30, py: 30 },
+    ], imgs)
+    expect(p.map((g) => [g.imageId, g.marks[0].slot, g.shared])).toEqual([[1, 'corner-tl', 1], [1, 'corner-tl', 1]])
+  })
+
+  it('leaves the slot open for an image the project lacks', () => {
+    const [g] = previewFiducialObs([{ imageName: 'x.tif', fidId: '1', px: 1, py: 1 }], [])
+    expect(g).toMatchObject({ imageId: null, replaces: 0, shared: 0 })
+    expect(g.marks[0].slot).toBeNull()
   })
 })

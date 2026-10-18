@@ -9,6 +9,7 @@
 // empty cells are filled by inverse-distance weighting within a small radius and
 // otherwise left as NaN (nodata).
 
+import { MAX_FLOAT64_XYZ_POINTS, tooManyPointsMessage } from '../bufferLimit.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes } from '../dense/memBudget.js'
 
 // Grid coordinates for a cell centre: pixel (col,row) → frame (x,y).
@@ -40,21 +41,23 @@ export const DEM_STAGE_BYTES_PER_POINT = 24
 // survivors: a count pass runs first, so a region costs no full-cloud copy. All
 // of it is ArrayBuffer memory, so it is checked against the device budget, not
 // the V8 heap.
-//   cloud: a dense cloud ({ count, pos }) or a sparse one ({ points: [{x,y,z}] })
+//   cloud: { count, pos } — a dense cloud, or a sparse one's SparsePoints pos column
 // Returns { pos: Float64Array(3·count), count, total }.
 export function stageDemPoints(cloud, { inside = null, budgetBytes = DEFAULT_BUDGET_BYTES } = {}) {
-  const src = cloud.pos ?? null, pts = cloud.points
-  const total = src ? cloud.count : pts.length
+  const src = cloud.pos
+  const total = cloud.count
   const xyz = [0, 0, 0]
-  const read = src
-    ? (i) => { xyz[0] = src[i * 3]; xyz[1] = src[i * 3 + 1]; xyz[2] = src[i * 3 + 2] }
-    : (i) => { const p = pts[i]; xyz[0] = p.x; xyz[1] = p.y; xyz[2] = p.z }
+  const read = (i) => { xyz[0] = src[i * 3]; xyz[1] = src[i * 3 + 1]; xyz[2] = src[i * 3 + 2] }
   let count = total
   if (inside) {
     count = 0
     for (let i = 0; i < total; i++) { read(i); if (inside(xyz[0], xyz[1], xyz[2], i)) count++ }
   }
   const bytes = count * DEM_STAGE_BYTES_PER_POINT
+  if (count > MAX_FLOAT64_XYZ_POINTS) {
+    throw new Error(`${tooManyPointsMessage('The DEM input', count)} A cloud this size builds its DEM from `
+      + 'its level-of-detail octree once that exists; or limit the area with Region.')
+  }
   if (bytes > budgetBytes) {
     throw new Error(`DEM point staging needs ${formatBytes(bytes)} for ${count.toLocaleString()} points, `
       + `over the ${formatBytes(budgetBytes)} memory budget (Settings ▸ Compute); `

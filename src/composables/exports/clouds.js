@@ -8,6 +8,9 @@ import { partsToBlob } from '../../utils/blobParts.js'
 import { cloudCentroid, ecefTransformFromProbes, cloudToGlbPoints, localBounds, buildTileset, boundingBox } from '../../core/products/tiles3d.js'
 import { ensureProjection, transformAsync, metresPerCrsUnit } from '../../core/crs.js'
 import { zipParts } from '../../utils/zip.js'
+import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
+import { hasDistortion } from '../../core/sfm/distortion.js'
+import { MAX_FLOAT64_XYZ_POINTS, tooManyPointsMessage } from '../../core/bufferLimit.js'
 
 // Point cloud, mesh, model JSON and 3D Tiles exports, split out of useExports. A
 // cloud is written in the frame THE resolver gives it (exportSimilarity): the CRS
@@ -16,7 +19,7 @@ import { zipParts } from '../../utils/zip.js'
 // Deps are useExports' injected refs and shared helpers.
 export function createCloudExports({
   cloudFileBase, clouds, currentCrs, effectiveFrameSpec, exportSimilarity, images, log,
-  mainSparseCloud, projectBase, saveJson, selectedCloud,
+  mainSparseCloud, projectBase, saveJson, selectedCloud, sensors = null, summary = null,
 }) {
   // The main sparse cloud (what downstream stages consume — MC), or the selected
   // cloud if it carries cameras. Shared by the two model exporters.
@@ -39,22 +42,23 @@ export function createCloudExports({
       const attributes = src.attributes && Object.keys(src.attributes).length
         ? Object.fromEntries(Object.entries(src.attributes).map(([k, v]) => [k, v.slice(0, count)]))
         : null
+      // The result is one Float64 xyz plane, so it holds at most the buffer wall's
+      // worth of points (core/bufferLimit.js): refuse a larger cloud with the reason
+      // rather than fail on the allocation.
+      if (count > MAX_FLOAT64_XYZ_POINTS) throw new Error(tooManyPointsMessage('This cloud', count))
+      // A cloud prepared relative to `origin` (flatAxes.js) is made absolute again.
+      const pos = new Float64Array(src.pos.subarray(0, count * 3))
+      if (src.origin) for (let i = 0; i < pos.length; i++) pos[i] += src.origin[i % 3]
       return {
         count,
-        pos: new Float64Array(src.pos.subarray(0, count * 3)),
+        pos,
         col: src.col ? new Uint8Array(src.col.subarray(0, count * 3)) : null,
         ...(attributes ? { attributes } : {}),
       }
     }
-    const n = src.length
-    const pos = new Float64Array(n * 3)
-    const col = new Uint8Array(n * 3)
-    for (let i = 0; i < n; i++) {
-      pos[i * 3] = src[i].x; pos[i * 3 + 1] = src[i].y; pos[i * 3 + 2] = src[i].z
-      const c = src[i].color || [200, 200, 200]
-      col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2]
-    }
-    return { count: n, pos, col }
+    // A sparse cloud (SparsePoints): colourless points at the writers' 200 grey.
+    const flat = src.flatCopy()
+    return { ...flat, col: flat.col ?? new Uint8Array(flat.count * 3).fill(200) }
   }
 
   // A cloud as the flat shape the export worker takes, every array a COPY (the
@@ -62,9 +66,8 @@ export function createCloudExports({
   // one extra buffer during an export the user asked for). Unlike toFlatCloud this
   // keeps everything a writer could emit — normals, attributes, the source array
   // types — so the file is byte-identical to writing the store cloud directly. A
-  // sparse cloud gets a colour plane when any point is coloured (the rest at the
-  // writers' 200 grey) and a normal plane when its first point has one (the
-  // writers' own test).
+  // sparse cloud gets a colour plane when it has colour (colourless points at the
+  // writers' 200 grey); it has no normals.
   function exportCloudCopy(cloud) {
     if (cloud.kind === 'dense') {
       const n = cloud.count
@@ -77,18 +80,7 @@ export function createCloudExports({
         ...(attributes ? { attributes } : {}),
       }
     }
-    const pts = cloud.points, n = pts.length
-    const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
-    const pos = new Float64Array(n * 3)
-    const col = pts.some((p) => p.color) ? new Uint8Array(n * 3) : null
-    const nrm = n && pts[0]?.normal ? new Float64Array(n * 3) : null
-    for (let i = 0; i < n; i++) {
-      const p = pts[i]
-      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z
-      if (col) { const c = p.color || [200, 200, 200]; col[i * 3] = byte(c[0]); col[i * 3 + 1] = byte(c[1]); col[i * 3 + 2] = byte(c[2]) }
-      if (nrm && p.normal) { nrm[i * 3] = p.normal[0]; nrm[i * 3 + 1] = p.normal[1]; nrm[i * 3 + 2] = p.normal[2] }
-    }
-    return { count: n, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
+    return cloud.points.flatCopy()
   }
 
   function logExportFrame(what, frame) {
@@ -133,7 +125,7 @@ export function createCloudExports({
     // A sparse cloud whose FIRST point has no colour: the writers decide "has colour"
     // from that point in two places (XYZ, and the georeference / downsample pass)
     // and per point everywhere else. Keep both rules.
-    if (cloud.kind !== 'dense' && copy.col && !cloud.points[0]?.color) {
+    if (cloud.kind !== 'dense' && copy.col && !cloud.points.hasColorAt(0)) {
       if (frame.sim || cell) delete copy.col
       else if (format === 'xyz') color = false
     }
@@ -173,14 +165,28 @@ export function createCloudExports({
     if (!cloud) return
     if (format === 'transforms') {
       const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+      // transforms.json pairs each photo with a pinhole K. A lens with distortion, a
+      // self-calibrated radial term or a film scan's fiducial frame means the photos
+      // are NOT that pinhole image: the poses would be right and every pixel wrong.
+      // Those projects get transforms.json from Export ▸ Undistorted images instead.
+      const frameModel = makeFrameModelResolver({ summary: summary?.value ?? null, sensors: sensors?.value ?? [] })
+      let warped = 0
       const transformImages = [...cloud.cameras.entries()]
         .map(([uuid, cam]) => {
           const im = imgByUuid.get(uuid)
           if (!im || !cam.K || !im.meta?.width || !im.meta?.height) return null
+          const f = frameModel(im)
+          if (hasDistortion(f.dist) || f.selfCal || f.fiducial || f.filmMissing) warped++
           return { name: im.name, R: cam.R, t: cam.t, K: cam.K, width: im.meta.width, height: im.meta.height }
         })
         .filter(Boolean)
       if (!transformImages.length) return
+      if (warped) {
+        log(`transforms.json export: ${warped} of ${transformImages.length} image(s) are not pinhole images (lens `
+          + 'distortion, self-calibrated radial terms or a film scan), so their pixels would not match the cameras. '
+          + 'Use Export ▸ Undistorted images, which writes the undistorted images with their own transforms.json.', 'error', 'Export')
+        return
+      }
       saveJson(buildTransformsJson({ images: transformImages }), `${projectBase()}-transforms.json`)
       log(`transforms.json export: ${transformImages.length} camera(s)`, 'success', 'Export')
       return
@@ -195,10 +201,10 @@ export function createCloudExports({
   // Sparse model → COLMAP text model (cameras/images/points3D.txt) zipped into
   // one download. One PINHOLE camera per image. The exported K/R/t are in the
   // BA (pinhole) frame, so the 2D observations MUST be too: prefer the cloud's
-  // `viewsPx` (uuid→[x,y] BA-frame pixels the SfM run baked in — undistorted /
+  // view pixels (the BA-frame pixels the SfM run baked in — undistorted /
   // fiducial-canonical / self-cal-folded), and fall back to the store keypoints
-  // only when it's absent (pure pinhole with no self-cal, where the two frames are
-  // identical, or a legacy cloud persisted before viewsPx existed — which we warn
+  // only when they're absent (pure pinhole with no self-cal, where the two frames are
+  // identical, or a legacy cloud persisted before they existed — which we warn
   // about, since a distorted/film/self-cal project would export inconsistently).
   // Only cameras with a matching loaded image + resolved K are exported (COLMAP
   // needs width/height/name). Output is in the local SfM frame.
@@ -247,10 +253,18 @@ export function createCloudExports({
       : clouds.value.find(cloudHasPoints)
     if (!cloud) return
     if (isStreamed(cloud)) { log(streamedRefusal(cloud, '3D Tiles export'), 'warn', 'Export'); return }
+    // The export is one tile whose positions are one Float64 plane and one GLB buffer:
+    // past the browser's buffer wall it cannot be built (core/bufferLimit.js).
+    const points = cloud.kind === 'dense' ? cloud.count : cloud.points.length
+    if (points > MAX_FLOAT64_XYZ_POINTS) {
+      log(`3D Tiles export: ${tooManyPointsMessage(`"${cloud.name}"`, points)} A 3D Tiles export is one tile, so `
+        + 'thin the cloud first (Point Cloud ▾ ▸ Subsample…), or export it as LAS or LAZ.', 'error', 'Export')
+      return
+    }
 
     const raw = cloud.kind === 'dense'
       ? { count: cloud.count, pos: cloud.pos, col: cloud.col }
-      : cloud.points
+      : cloud.points.flatCopy()
     // Georeference first: a tileset is only placeable in the project CRS.
     const src = toFlatCloud(prepareCloudForExport(raw, { sim: g?.sim ?? null, cell: 0, onLog: log }))
 

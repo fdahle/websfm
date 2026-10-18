@@ -111,6 +111,65 @@ describe('editing a streamed cloud', () => {
     }
   })
 
+  it('sizes tiles from where the points are, not from the extent', async () => {
+    // A diagonal corridor 2 km long and 20 m wide: most of its bounding box is empty,
+    // so tiles sized from the box's mean density would each hold many times the target.
+    const n = 200_000, pos = new Float64Array(3 * n)
+    let s = 3
+    const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647
+    for (let i = 0; i < n; i++) {
+      const t = rnd() * 2000, off = (rnd() - 0.5) * 20
+      pos[3 * i] = t + off * 0.7; pos[3 * i + 1] = t - off * 0.7; pos[3 * i + 2] = rnd()
+    }
+    const c = { count: n, pos, attributes: {} }
+    const { lod, reader } = await build({ count: n, bounds: boundsOf(c), colour: false, attributes: [], async *batches() { yield c } })
+    const target = 10_000, halo = 5
+    const inBox = (t) => {
+      let k = 0
+      for (let i = 0; i < n; i++) {
+        const x = pos[3 * i], y = pos[3 * i + 1]
+        if ((t.box.min[0] == null || x >= t.box.min[0]) && (t.box.max[0] == null || x <= t.box.max[0])
+          && (t.box.min[1] == null || y >= t.box.min[1]) && (t.box.max[1] == null || y <= t.box.max[1])) k++
+      }
+      return k
+    }
+    const even = planTiles(lod, { tilePoints: target, halo })
+    const fromNodes = planTiles(lod, { tilePoints: target, halo, nodes: reader.nodes })
+    expect(Math.max(...even.map(inBox))).toBeGreaterThan(2 * target)
+    expect(Math.max(...fromNodes.map(inBox))).toBeLessThan(1.5 * target)
+    for (let i = 0; i < n; i += 97) expect(fromNodes.filter((t) => inCore(t, pos[3 * i], pos[3 * i + 1])).length).toBe(1)
+    // Voxel-aligned: every inner edge on the cell's grid.
+    for (const t of planTiles(lod, { tilePoints: target, halo, align: 2.5, nodes: reader.nodes })) {
+      for (const v of [...t.core.min, ...t.core.max]) if (Number.isFinite(v)) expect(Math.abs(v / 2.5 - Math.round(v / 2.5))).toBeLessThan(1e-9)
+    }
+  })
+
+  it('refuses a tile it could only read thinned', async () => {
+    // An octree whose finest level is past one read's buffer: never read, refused.
+    const nodes = new Map([['0-0-0-0', { key: [0, 0, 0, 0], count: 10, offset: 0, length: 0 }],
+      ['1-0-0-0', { key: [1, 0, 0, 0], count: 200_000_000, offset: 0, length: 0 }]])
+    const reader = { nodes, read: async () => { throw new Error('not reached') } }
+    const lod = {
+      bounds: { min: [0, 0, 0], max: [1, 1, 1] }, root: { min: [0, 0, 0], size: 1 }, spacing: 1 / 128, points: 200_000_010,
+      layout: { offset: [0, 0, 0], scale: [1e-6, 1e-6, 1e-6], colour: false, attributes: [] },
+    }
+    const source = streamedEditSource(reader, lod, 'filter', { methods: ['range'], range: {}, tilePoints: 1e12 })
+    await expect((async () => { for await (const _ of source.batches()); })()).rejects.toThrow(/too dense in one place/)
+  })
+
+  it('gives an edited cloud the extent of its own points', async () => {
+    const { c, lod, reader } = await sceneLod()
+    const r = await edited(reader, lod, 'crop', { min: [null, 2100, null], max: [null, null, null] })
+    const kept = { count: 0, pos: [] }
+    for (let i = 0; i < c.count; i++) if (c.pos[3 * i + 1] < 2100) { kept.pos.push(c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2]); kept.count++ }
+    const want = boundsOf(kept)
+    for (let k = 0; k < 3; k++) {
+      expect(r.lod.bounds.min[k]).toBeCloseTo(want.min[k], 2)
+      expect(r.lod.bounds.max[k]).toBeCloseTo(want.max[k], 2)
+    }
+    expect(r.lod.bounds.max[1]).toBeLessThan(lod.bounds.max[1] - 90)
+  })
+
   it('classifies the ground tile by tile as the whole cloud does', async () => {
     const { c, lod, reader } = await sceneLod()
     const settings = { clothResolution: 1, rigidness: 2, classThreshold: 0.5, slopeSmoothing: true }
@@ -136,8 +195,13 @@ describe('editing a streamed cloud', () => {
     const settings = { methods: ['sor'], sor: { k: 12, stdRatio: 2 } }
     const whole = filterCloud(c, settings).count
     // Small tiles; the whole cloud's statistics apply to every one (a first pass).
+    // The margin holds the filter's whole reach, so the tile edges change nothing.
     const r = await edited(reader, lod, 'filter', { ...settings, tilePoints: 60_000 })
-    expect(Math.abs(r.lod.points - whole) / whole).toBeLessThan(0.0005)
+    expect(r.lod.points).toBe(whole)
     expect(r.lod.points).toBeLessThanOrEqual(c.count - 30) // the floating points went
+    // With the isolated-cell filter first: its automatic cell is the whole cloud's.
+    const chain = { methods: ['isolated', 'sor'], isolated: {}, sor: { k: 12, stdRatio: 2 } }
+    const r2 = await edited(reader, lod, 'filter', { ...chain, tilePoints: 60_000 })
+    expect(r2.lod.points).toBe(filterCloud(c, chain).count)
   }, 60_000)
 })

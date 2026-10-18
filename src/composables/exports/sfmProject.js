@@ -10,6 +10,7 @@ import * as opfs from '../../utils/opfs.js'
 import { imageIdsToPairId } from '../../core/io/colmapDatabase.js'
 import { exportColmapDatabase } from '../../workers/colmapDbClient.js'
 import { zipParts, crc32 } from '../../utils/zip.js'
+import { buildTransformsJson } from '../../core/io/transforms.js'
 import { undistortImage } from '../../workers/computeClient.js'
 import { toScaledPx } from '../../core/sfm/geometry.js'
 
@@ -46,8 +47,8 @@ export function createSfmProjectExports({
 
     // Warn if we're about to fall back to raw store keypoints for a project whose BA
     // frame differs from scan/distorted space (distortion, film, or self-cal) but no
-    // viewsPx is present — those observations won't match the exported cameras.
-    const anyViewsPx = cloud.points.some((p) => p.viewsPx && p.viewsPx.size)
+    // view pixels are present — those observations won't match the exported cameras.
+    const anyViewsPx = cloud.points.hasPixels
     if (!anyViewsPx) {
       const risky = exportImages.some(({ uuid }) => {
         const im = imgByUuid.get(uuid)
@@ -61,21 +62,17 @@ export function createSfmProjectExports({
     }
 
     const keypointsByUuid = new Map(exportImages.map((im) => [im.uuid, im.keypoints]))
-    const points = cloud.points.map((p) => ({
-      xyz: [p.x, p.y, p.z],
-      color: p.color,
-      views: p.views
-        ? [...p.views.entries()]
-            .map(([uuid, kpIdx]) => {
-              if (!exported.has(uuid)) return null
-              const px = p.viewsPx?.get(uuid)
-              if (px) return { uuid, x: px[0], y: px[1], featureIdx: kpIdx }
-              const kps = keypointsByUuid.get(uuid)
-              return kps && kpIdx < kps.length ? { uuid, x: kps.x(kpIdx), y: kps.y(kpIdx), featureIdx: kpIdx } : null
-            })
-            .filter(Boolean)
-        : [],
-    }))
+    const sp = cloud.points
+    const points = Array.from({ length: sp.length }, (_, i) => {
+      const views = []
+      sp.forEachView(i, (uuid, kpIdx, px, py) => {
+        if (!exported.has(uuid)) return
+        if (Number.isFinite(px)) { views.push({ uuid, x: px, y: py, featureIdx: kpIdx }); return }
+        const kps = keypointsByUuid.get(uuid)
+        if (kps && kpIdx < kps.length) views.push({ uuid, x: kps.x(kpIdx), y: kps.y(kpIdx), featureIdx: kpIdx })
+      })
+      return { xyz: sp.xyz(i), color: sp.colorAt(i) ?? undefined, views }
+    })
 
     const model = buildColmapModel({ images: exportImages, points })
     // Adapters share the deterministic COLMAP-like model so image, feature and
@@ -195,11 +192,10 @@ export function createSfmProjectExports({
 
     // The observations must be in the BA (pinhole) frame — that is the only frame
     // the undistorted pixels are in. Raw store keypoints are in scan/distorted
-    // space, so a legacy model without viewsPx would write marks that don't sit on
-    // the images it ships beside them.
-    const anyViewsPx = cloud.points.some((p) => p.viewsPx && p.viewsPx.size)
-    if (!anyViewsPx && cloud.points.length) {
-      throw new Error('This model has no BA-frame observations (viewsPx). Re-run reconstruction '
+    // space, so a legacy model without view pixels would write marks that don't sit
+    // on the images it ships beside them.
+    if (!cloud.points.hasPixels && cloud.points.length) {
+      throw new Error('This model has no BA-frame observations. Re-run reconstruction '
         + 'before exporting undistorted images.')
     }
 
@@ -239,13 +235,7 @@ export function createSfmProjectExports({
         const name = `${im.name.replace(/\.[^.]+$/, '')}.${ext}`
         const data = new Uint8Array(res.bytes)
         bytesTotal += data.length
-        // Plain ZIP has a hard 4 GB ceiling (no ZIP64 writer — the same limit
-        // .websfm export pre-flights). Stop with an actionable message rather
-        // than emitting a file that unzips corrupt.
-        if (bytesTotal > 4 * 1024 ** 3) {
-          throw new Error('Undistorted images exceed the 4 GB ZIP limit. Lower the output '
-            + 'resolution or the JPEG quality, or export in batches.')
-        }
+        // No size ceiling: past 4 GB zipParts writes the ZIP64 form (utils/zip.js).
         // Held as a Blob (browser blob storage, not the JS heap) with its CRC taken
         // now, while the bytes are in hand, so the zip never re-reads it.
         entries.push({ name: `images/${name}`, data: new Blob([data]), crc: crc32(data) })
@@ -265,31 +255,32 @@ export function createSfmProjectExports({
       // and then cropped, so the same affine applies to both.
       const gridByUuid = new Map(outImages.map((o) => [o.uuid, o]))
       const kept = new Set(outImages.map((o) => o.uuid))
-      const points = cloud.points.map((p) => ({
-        xyz: [p.x, p.y, p.z],
-        color: p.color,
-        views: p.views
-          ? [...p.views.entries()].map(([u, kpIdx]) => {
-            if (!kept.has(u)) return null
-            const px = p.viewsPx?.get(u)
-            if (!px) return null
-            const g = gridByUuid.get(u)
-            // Centre-aligned like the resample and scaleK (geometry.js toScaledPx).
-            const x = toScaledPx(px[0], g.outScale) - g.rect.x
-            const y = toScaledPx(px[1], g.outScale) - g.rect.y
-            // A mark that the crop cut away is no longer observable in the
-            // exported image; dropping it keeps the model self-consistent.
-            if (x < 0 || y < 0 || x > g.width - 1 || y > g.height - 1) return null
-            return { uuid: u, x, y }
-          }).filter(Boolean)
-          : [],
-      }))
+      const sp = cloud.points
+      const points = Array.from({ length: sp.length }, (_, i) => {
+        const views = []
+        sp.forEachPixel(i, (u, px, py) => {
+          if (!kept.has(u)) return
+          const g = gridByUuid.get(u)
+          // Centre-aligned like the resample and scaleK (geometry.js toScaledPx).
+          const x = toScaledPx(px, g.outScale) - g.rect.x
+          const y = toScaledPx(py, g.outScale) - g.rect.y
+          // A mark that the crop cut away is no longer observable in the
+          // exported image; dropping it keeps the model self-consistent.
+          if (x < 0 || y < 0 || x > g.width - 1 || y > g.height - 1) return
+          views.push({ uuid: u, x, y })
+        })
+        return { xyz: sp.xyz(i), color: sp.colorAt(i) ?? undefined, views }
+      })
 
       // No `keypoints` — the store's are in scan space, and the compact
       // observed-points form is what a sparse-only consumer wants anyway.
       const model = buildColmapModel({ images: outImages, points })
       const files = serializeColmapModelBinParts(model)
       for (const [n, data] of Object.entries(files)) entries.push({ name: `sparse/${n}`, data })
+      // The same cameras for NeRF / 3DGS tools: these images ARE pinhole, with this K.
+      entries.push({ name: 'transforms.json', data: new Blob([JSON.stringify(buildTransformsJson({
+        images: outImages.map((o) => ({ name: `images/${o.name}`, R: o.R, t: o.t, K: o.K, width: o.width, height: o.height })),
+      }), null, 2)], { type: 'application/json' }) })
 
       downloadBlob(`${projectBase()}-undistorted.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
       const cropped = outImages.filter((o) => o.rect.x || o.rect.y).length

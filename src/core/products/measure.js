@@ -103,13 +103,21 @@ export function fitBasePlane(points) {
  *   'surface' — a second surface, `surface.sample(x, y) → z | null` in the grid's
  *              own frame: the DEM of difference against a reference DEM (another
  *              epoch, a lidar survey). A cell the base has no height for counts as
- *              unmeasured, like a hole in the DEM.
+ *              unmeasured, like a hole in the DEM. Sampling the base costs a
+ *              reprojection per cell, so above `maxSurfaceSamples` inside cells
+ *              only every `sampleStep`-th cell of every `sampleStep`-th row is
+ *              compared, each standing for sampleStep² cells: the sums are scaled
+ *              to the whole polygon (insideCells / sampled cells), and `sampleStep`
+ *              is reported so the caller can say the result is an estimate.
  *
  * Units: horizontal² × vertical, exactly as the grid records them; no scaling.
- * Returns { cut, fill, net, cellArea, insideCells, validCells, coverage, base }
- * or { error } ('polygon' | 'self-intersecting' | 'base' | 'no-data').
+ * Returns { cut, fill, net, cellArea, insideCells, validCells, coverage, base,
+ * sampleStep } or { error } ('polygon' | 'self-intersecting' | 'base' | 'no-data').
  */
-export function polygonVolume(grid, points, { base = 'plane', height = null, surface = null } = {}) {
+export const SURFACE_VOLUME_MAX_SAMPLES = 262144 // 512², as the DEM-vs-reference check
+
+export function polygonVolume(grid, points, { base = 'plane', height = null, surface = null,
+  maxSurfaceSamples = SURFACE_VOLUME_MAX_SAMPLES } = {}) {
   if (points.length < 3) return { error: 'polygon' }
   if (planimetricArea(points) == null) return { error: 'self-intersecting' }
   const { scaleX, scaleY } = grid.geoTransform
@@ -149,24 +157,39 @@ export function polygonVolume(grid, points, { base = 'plane', height = null, sur
   // inside-but-unmeasured, so a polygon hanging off the edge lowers coverage.
   const ring = points.map(p => { const px = worldToPixel(grid, p.x, p.y); return [px.col, px.row] })
   const cellArea = Math.abs(scaleX * scaleY)
-  let cut = 0, fill = 0, insideCells = 0, validCells = 0
+  // A second surface is the costly base (a reprojected sample per cell): above the
+  // cap, a regular sub-grid of the inside cells. The planes stay exact.
+  let step = 1
+  if (base === 'surface' && maxSurfaceSamples > 0) {
+    let n = 0
+    polygonSpans([ring], (r, c0, c1) => { n += c1 - c0 + 1 })
+    if (n > maxSurfaceSamples) step = Math.ceil(Math.sqrt(n / maxSurfaceSamples))
+  }
+  let cut = 0, fill = 0, insideCells = 0, sampled = 0, validSampled = 0
   polygonSpans([ring], (r, c0, c1) => {
+    insideCells += c1 - c0 + 1
+    if (step > 1 && r % step) return
     const y = grid.geoTransform.originY + (r + 0.5) * scaleY
-    for (let c = c0; c <= c1; c++) {
-      insideCells++
+    for (let c = step > 1 ? c0 + ((step - (c0 % step)) % step) : c0; c <= c1; c += step) {
+      sampled++
       if (!validCell(grid, c, r)) continue
       const x = grid.geoTransform.originX + (c + 0.5) * scaleX
       const b = baseAt(x, y)
       if (b == null || !Number.isFinite(b)) continue
-      validCells++
+      validSampled++
       const dz = grid.data[r * grid.width + c] + zOffset - b
       if (dz > 0) cut += dz * cellArea
       else fill -= dz * cellArea
     }
   })
-  if (!validCells) return { error: 'no-data', insideCells }
+  if (!validSampled) return { error: 'no-data', insideCells }
+  // Each sampled cell stands for insideCells / sampled of the polygon (exactly 1
+  // without a sub-grid).
+  const scale = step > 1 ? insideCells / sampled : 1
+  cut *= scale; fill *= scale
+  const validCells = step > 1 ? Math.round(validSampled * scale) : validSampled
   return { cut, fill, net: cut - fill, cellArea, insideCells, validCells,
-    coverage: validCells / insideCells, base: baseInfo }
+    coverage: validSampled / sampled, base: baseInfo, sampleStep: step }
 }
 
 /**

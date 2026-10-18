@@ -1,10 +1,23 @@
 <script setup>
-import { updateReady, reloadIntoUpdate, postponeUpdate } from '../../composables/useAppUpdate.js'
+import { computed, watch } from 'vue'
+import {
+  updateReady, updateActive, reloadIntoUpdate, postponeUpdate, setUpdateBusy,
+} from '../../composables/useAppUpdate.js'
 
 // "A new version is available": shown once a newly deployed service worker is
 // installed and waiting. Reloading is disabled while work is in flight (the same
 // condition that guards closing the tab), so an update never cuts a run short.
-defineProps({ busy: { type: Boolean, default: false } })
+// When another tab already switched to the new version, this tab reloads by itself
+// once its work has finished (composables/useAppUpdate.js), and says so.
+const props = defineProps({ busy: { type: Boolean, default: false } })
+
+// The tab's busy state drives the deferred reload, so report it even while hidden.
+watch(() => props.busy, (busy) => setUpdateBusy(busy), { immediate: true })
+
+const detail = computed(() => {
+  if (updateActive.value) return 'It is already active in another tab, so this tab reloads once the current task has finished.'
+  return props.busy ? 'You can reload once the current task has finished.' : 'Reload to switch to it.'
+})
 </script>
 
 <template>
@@ -15,10 +28,10 @@ defineProps({ busy: { type: Boolean, default: false } })
   <div v-if="updateReady" class="update-prompt" role="status" data-modal-exempt>
     <div class="up-text">
       <span class="up-title">A new version of websfm is available</span>
-      <span class="up-detail">{{ busy ? 'You can reload once the current task has finished.' : 'Reload to switch to it.' }}</span>
+      <span class="up-detail">{{ detail }}</span>
     </div>
     <div class="up-actions">
-      <button class="up-later" @click="postponeUpdate">Later</button>
+      <button v-if="!updateActive" class="up-later" @click="postponeUpdate">Later</button>
       <button class="up-reload" :disabled="busy" @click="reloadIntoUpdate">Reload</button>
     </div>
   </div>

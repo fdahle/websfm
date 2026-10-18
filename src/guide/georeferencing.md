@@ -98,6 +98,13 @@ Imported GeoTIFFs are placed the way GDAL reads them, including point-registered
 before 3 October 2026 keeps the position it was imported with. If a point-registered
 DEM looks shifted by half a cell, remove it and import it again.
 
+A reference DEM is held at full resolution in one buffer of 4 bytes per cell, and the
+browser caps one buffer at 2 GiB: about 23,000 × 23,000 cells. A 64-bit (Float64) DEM
+is first read at 8 bytes per cell, so its limit is about 16,000 × 16,000. A larger DEM
+(a REMA 2 m tile is 25,100 × 25,100) is refused with its size. Import a coarser copy (for
+example `gdal_translate -tr 4 4`) or crop it to your area with `-projwin`. Orthophotos
+are drawn as tiles and have no such limit for display.
+
 ## Find candidate GCPs from a reference orthophoto
 Build an orthophoto, import a georeferenced reference raster, then open **Tools →
 Find GCPs**. Choose a reference band and select **Find candidates**. The matcher
