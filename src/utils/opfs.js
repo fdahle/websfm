@@ -336,6 +336,57 @@ export async function* walkProjectFiles(projectId, { skip = null } = {}) {
   yield* walkDir(dir, '', skip)
 }
 
+// ── Binary documents as one unit (the .websfm save, utils/projectFile.js) ─────
+// A binary document (binaryDocument.js) is a metadata file plus the generation files
+// it names, and a save replaces the metadata and then collects the old generation.
+// A walk taken minutes earlier can therefore pair one save's metadata with another's
+// files. The project file archives each document as a unit instead: under the lock
+// its readers and writers hold (so no save commits or collects meanwhile), it reads
+// the metadata and the files that metadata names.
+//
+// `binaryDocumentLockKey(projectId, relPath)` → the lock of the document whose metadata
+// is at `relPath`, or null when `relPath` is not one. `binaryDocumentOf(relPath)` → the
+// metadata path a generation file (`<doc>.<generation>.<key>.bin`) belongs to, or null.
+const BINARY_DOCUMENTS = [
+  { re: /^reconstruction\.json$/, lock: (id) => `reconstruction:${id}` },
+  { re: /^matches\/matches\.json$/, lock: (id) => `matches:${id}` },
+  { re: /^products\/([^/]+)\.json$/, lock: (id, m) => `product:${id}:${m[1]}` },
+]
+
+export function binaryDocumentLockKey(projectId, relPath) {
+  for (const { re, lock } of BINARY_DOCUMENTS) {
+    const m = re.exec(String(relPath))
+    if (m) return lock(projectId, m)
+  }
+  return null
+}
+
+export function binaryDocumentOf(relPath) {
+  const m = /^(.+?\.json)\.[^/]+\.bin$/.exec(String(relPath))
+  return m && binaryDocumentLockKey('', m[1]) ? m[1] : null
+}
+
+/** Run `work` under the lock of the binary document at `relPath` (see above). */
+export function withBinaryDocumentLock(projectId, relPath, work) {
+  const key = binaryDocumentLockKey(projectId, relPath)
+  if (!key) throw new Error(`not a binary document: ${relPath}`)
+  return persistenceLock(key, work)
+}
+
+/** The project file at `relPath` ('/'-joined) as a File snapshot, or null when absent. */
+export async function getProjectFile(projectId, relPath) {
+  const parts = String(relPath).split('/')
+  if (parts.some((p) => !p || p === '.' || p === '..')) throw new Error(`unsafe project path "${relPath}"`)
+  try {
+    let dir = await getProjectDir(projectId)
+    for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part)
+    return await (await dir.getFileHandle(parts[parts.length - 1])).getFile()
+  } catch (error) {
+    if (error?.name === 'NotFoundError' || error?.name === 'TypeMismatchError') return null
+    throw error
+  }
+}
+
 // Remove only artifacts that are safe to regenerate. Source images,
 // keypoints/matches, masks, sparse/dense clouds, GCPs, and imports are retained.
 // This is also the exact set omitted by "exclude cached/derived data" archives.

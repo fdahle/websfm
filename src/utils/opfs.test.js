@@ -182,3 +182,23 @@ describe('write serialization', () => {
     expect(await opfs.loadWorkflows('p6')).toBeNull()
   })
 })
+
+// The .websfm save archives each binary document under the lock its saves hold.
+describe('binary documents as one unit', () => {
+  it('names each document by its metadata path and its saves\' lock', () => {
+    expect(opfs.binaryDocumentLockKey('p', 'reconstruction.json')).toBe('reconstruction:p')
+    expect(opfs.binaryDocumentLockKey('p', 'matches/matches.json')).toBe('matches:p')
+    expect(opfs.binaryDocumentLockKey('p', 'products/ortho.json')).toBe('product:p:ortho')
+    expect(opfs.binaryDocumentLockKey('p', 'project.json')).toBeNull()
+    expect(opfs.binaryDocumentLockKey('p', 'depthmaps/index.json')).toBeNull()
+  })
+
+  it('maps a generation file to its document, and nothing else', () => {
+    expect(opfs.binaryDocumentOf('reconstruction.json.0f3a.cloud.1.pos.bin')).toBe('reconstruction.json')
+    expect(opfs.binaryDocumentOf('matches/matches.json.0f3a.matches.bin')).toBe('matches/matches.json')
+    expect(opfs.binaryDocumentOf('products/dem.json.0f3a.data.bin')).toBe('products/dem.json')
+    expect(opfs.binaryDocumentOf('products/dem_data.bin')).toBeNull()
+    expect(opfs.binaryDocumentOf('depthmaps/abc.depth.bin')).toBeNull()
+    expect(opfs.binaryDocumentOf('reconstruction.json')).toBeNull()
+  })
+})

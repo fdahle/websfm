@@ -235,13 +235,7 @@ export function createSfmProjectExports({
         const name = `${im.name.replace(/\.[^.]+$/, '')}.${ext}`
         const data = new Uint8Array(res.bytes)
         bytesTotal += data.length
-        // Plain ZIP has a hard 4 GB ceiling (no ZIP64 writer — the same limit
-        // .websfm export pre-flights). Stop with an actionable message rather
-        // than emitting a file that unzips corrupt.
-        if (bytesTotal > 4 * 1024 ** 3) {
-          throw new Error('Undistorted images exceed the 4 GB ZIP limit. Lower the output '
-            + 'resolution or the JPEG quality, or export in batches.')
-        }
+        // No size ceiling: past 4 GB zipParts writes the ZIP64 form (utils/zip.js).
         // Held as a Blob (browser blob storage, not the JS heap) with its CRC taken
         // now, while the bytes are in hand, so the zip never re-reads it.
         entries.push({ name: `images/${name}`, data: new Blob([data]), crc: crc32(data) })

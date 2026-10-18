@@ -267,7 +267,7 @@ function run() {
         <input id="uq" v-model.number="settings.undistortQuality" type="range" min="0.5" max="1" step="0.01" class="field-input range" />
       </SettingsField>
       <SettingsField label="Maximum dimension" label-for="umax"
-        hint="Longest output side in pixels; 0 = native resolution. Lower it if the ZIP would exceed 4 GB.">
+        hint="Longest output side in pixels; 0 = native resolution. Lower it for a smaller ZIP.">
         <input id="umax" v-model.number="settings.undistortMaxDim" type="number" min="0" step="1" class="field-input" />
       </SettingsField>
     </template>
