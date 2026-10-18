@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fitSimilarity, applySimilarity, frameFromSimilarity } from './georef.js'
+import { fitSimilarity, applySimilarity, frameFromSimilarity, similarityPrecision } from './georef.js'
 
 const close = (a, b, eps = 1e-4) => expect(Math.abs(a - b)).toBeLessThan(eps)
 
@@ -137,5 +137,50 @@ describe('frameFromSimilarity', () => {
     close(crs[0], expected[0]); close(crs[1], expected[1]); close(crs[2], expected[2])
     const back = frame.toSfm(crs)
     close(back[0], p[0]); close(back[1], p[1]); close(back[2], p[2])
+  })
+})
+
+describe('similarityPrecision', () => {
+  // Four controls with anisotropic σ (good horizontal, poor vertical) under a known
+  // similarity; noise drawn many times. The analytic covariances must match the
+  // empirical ones of: a control's residual (Σ − Σŷ), a checkpoint's prediction error
+  // (Σŷ), and a withheld control's leave-one-out prediction error (Σŷ without it).
+  it('matches the Monte-Carlo covariance of residuals and predictions', () => {
+    let s = 11
+    const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647)
+    const gauss = () => Math.sqrt(-2 * Math.log(rnd() || 1e-12)) * Math.cos(2 * Math.PI * rnd())
+    const truth = { scale: 2.5, R: [[0, -1, 0], [1, 0, 0], [0, 0, 1]], t: [100, 200, 30] }
+    const src = [[0, 0, 0], [10, 0, 1], [0, 12, -1], [11, 9, 2]]
+    const sigma = [0.02, 0.03, 0.08]
+    const P = [[1 / sigma[0] ** 2, 0, 0], [0, 1 / sigma[1] ** 2, 0], [0, 0, 1 / sigma[2] ** 2]]
+    const check = [5, 5, 0]
+    const trials = 3000
+    const res0 = [], pred = [], loo = []
+    for (let k = 0; k < trials; k++) {
+      const pairs = src.map((p) => {
+        const d = applySimilarity(truth, p).map((v, i) => v + sigma[i] * gauss())
+        return { src: p, dst: d, precision: P }
+      })
+      const fit = fitSimilarity(pairs)
+      res0.push(applySimilarity(fit, src[0]).map((v, i) => v - pairs[0].dst[i]))
+      pred.push(applySimilarity(fit, check).map((v, i) => v - applySimilarity(truth, check)[i]))
+      const fit3 = fitSimilarity(pairs.slice(1))
+      loo.push(applySimilarity(fit3, src[0]).map((v, i) => v - applySimilarity(truth, src[0])[i]))
+    }
+    const variance = (xs) => [0, 1, 2].map((i) => xs.reduce((a, x) => a + x[i] * x[i], 0) / xs.length)
+    const exactPairs = src.map((p) => ({ src: p, dst: applySimilarity(truth, p), precision: P }))
+    const sp = similarityPrecision(exactPairs, truth)
+    const own = sigma.map((v) => v * v)
+    const cases = [
+      ['control residual', variance(res0), own.map((v, i) => v - sp.predicted(src[0])[i][i])],
+      ['checkpoint prediction', variance(pred), [0, 1, 2].map((i) => sp.predicted(check)[i][i])],
+      ['leave-one-out prediction', variance(loo), [0, 1, 2].map((i) => sp.predictedWithout(0, src[0])[i][i])],
+    ]
+    for (const [, empirical, analytic] of cases) {
+      for (let i = 0; i < 3; i++) expect(empirical[i] / analytic[i]).toBeGreaterThan(0.88)
+      for (let i = 0; i < 3; i++) expect(empirical[i] / analytic[i]).toBeLessThan(1.12)
+    }
+    // Baarda's point: a control's residual is smaller than its own σ says.
+    for (let i = 0; i < 3; i++) expect(cases[0][2][i]).toBeLessThan(own[i])
   })
 })

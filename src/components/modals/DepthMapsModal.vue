@@ -88,6 +88,8 @@ function run() {
 
 <template>
   <ModalShell title="Build Depth Maps" @close="emit('close')">
+    <!-- Cards, not a select: no value/default on the FieldHelp (the Guide marker's default shows). -->
+    <div class="field-label"><FieldHelp op="depth-maps" param="quality">Quality</FieldHelp></div>
     <PresetCards
       :model-value="settings.quality"
       :base-id="settings.quality"

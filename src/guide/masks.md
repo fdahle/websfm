@@ -42,7 +42,8 @@ the same thing on images of the same width and height. Each group's thumbnail sh
 the masked band in red, in proportion. **Apply to group** masks that group,
 **Apply to all groups** every group. Images whose size is not known yet sit in an
 *Unknown size* group that cannot be masked from here; open them and paint their
-masks instead.
+masks instead. If an image cannot be masked (for example, its existing mask cannot be
+read), the run stops there and says how many images were masked before it.
 
 A margin is capped at half the image's height (top, bottom) or width (left, right).
 For film, **Generate background masks** in [Detect Fiducials](guide:film-fiducials)
@@ -60,6 +61,9 @@ What Auto mask does with an image that already has a mask:
 
 - **Merge** keeps the existing mask and adds the border to it.
 - **Replace** discards the existing mask and stores only the border.
+
+With all four margins at 0 there is no border: **Replace** then removes the images'
+masks, and **Merge** leaves them as they are.
 
 ## Paint a mask
 Open an image and choose **Tools → Images ▾ → Edit mask** (or **Edit** next to an

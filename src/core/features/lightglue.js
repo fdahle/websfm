@@ -90,7 +90,7 @@ function getSession(model, modelKey, backend, onLog) {
           : ' (CPU WASM)'}; loading model…`)
       const bytes = await loadModelBytes(model, onLog, 'LightGlue')
       const session = await createSession(bytes, {}, onLog, backend)
-      onLog?.(`LightGlue: runtime ready (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`)
+      onLog?.(`LightGlue: runtime ready — weights ${modelKey} (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`)
       return session
     })())
   }

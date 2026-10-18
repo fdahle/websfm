@@ -186,15 +186,16 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     // pipeline ⇒ sub-pixel residuals.
     const camByUuid = new Map(out.cameras.map((c) => [c.uuid, c]))
     const residuals = []
-    for (const pt of out.points) {
-      for (const [uuid, kpIdx] of pt.views) {
+    for (let i = 0; i < out.points.length; i++) {
+      const X = out.points.xyz(i)
+      out.points.forEachView(i, (uuid, kpIdx) => {
         const cam = camByUuid.get(uuid)
-        const c = mv(cam.R, [pt.x, pt.y, pt.z]).map((v, i) => v + cam.t[i])
+        const c = mv(cam.R, X).map((v, i) => v + cam.t[i])
         const u = Kobj.fx * (c[0] / c[2]) + Kobj.cx
         const v = Kobj.fy * (c[1] / c[2]) + Kobj.cy
         const kp = images.find((im) => im.uuid === uuid).keypoints[kpIdx]
         residuals.push(Math.hypot(u - kp.x, v - kp.y))
-      }
+      })
     }
     residuals.sort((a, b) => a - b)
     const median = residuals[residuals.length >> 1]
@@ -205,10 +206,11 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     // 2-view duplicates (which is what the pre-merge pipeline produced, ~2× the
     // point count). Guards both the extension step and the no-duplicate invariant.
     expect(out.points.length).toBeLessThanOrEqual(N)
-    const threePlus = out.points.filter((pt) => pt.views.length >= 3).length
+    const threePlus = out.points.indicesWhere((i) => out.points.viewCount(i) >= 3).length
     expect(threePlus).toBeGreaterThan(30)
-    for (const pt of out.points) {
-      const seen = pt.views.map(([u]) => u)
+    for (let i = 0; i < out.points.length; i++) {
+      const seen = []
+      out.points.forEachView(i, (u) => seen.push(u))
       expect(new Set(seen).size).toBe(seen.length)   // no camera twice in a track
       expect(seen.length).toBeLessThanOrEqual(3)      // never more views than cameras
     }
@@ -473,14 +475,14 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     // Each observation the model holds is the recorded keypoint undistorted about the
     // camera's FINAL K and the refined lens — what dense pairs them with.
     let worst = 0, n = 0
-    for (const pt of out.points) {
-      for (const [uuid, px] of pt.viewsPx) {
-        const kpIdx = new Map(pt.views).get(uuid)
+    for (let i = 0; i < out.points.length; i++) {
+      out.points.forEachPixel(i, (uuid, px, py) => {
+        const kpIdx = out.points.kpOf(i, uuid)
         const raw = recorded[uuids.indexOf(uuid)][kpIdx]
         const p = undistortPixel(raw.x, raw.y, camByUuid.get(uuid).K, refinedLens)
-        worst = Math.max(worst, Math.hypot(p.x - px[0], p.y - px[1]))
+        worst = Math.max(worst, Math.hypot(p.x - px, p.y - py))
         n++
-      }
+      })
     }
     expect(n).toBeGreaterThan(300)
     expect(worst).toBeLessThan(0.01)
@@ -633,15 +635,16 @@ describe('reconstruct — GCP-anchored bundle adjustment (F2)', () => {
     // Reconstruction quality is unaffected (still sub-pixel median reprojection).
     const camByUuid = new Map(out.cameras.map((c) => [c.uuid, c]))
     const residuals = []
-    for (const pt of out.points) {
-      for (const [uuid, kpIdx] of pt.views) {
+    for (let i = 0; i < out.points.length; i++) {
+      const X = out.points.xyz(i)
+      out.points.forEachView(i, (uuid, kpIdx) => {
         const cam = camByUuid.get(uuid)
-        const c = mv(cam.R, [pt.x, pt.y, pt.z]).map((v, i) => v + cam.t[i])
+        const c = mv(cam.R, X).map((v, i) => v + cam.t[i])
         const u = Kobj.fx * (c[0] / c[2]) + Kobj.cx
         const v = Kobj.fy * (c[1] / c[2]) + Kobj.cy
         const kp = images.find((im) => im.uuid === uuid).keypoints[kpIdx]
         residuals.push(Math.hypot(u - kp.x, v - kp.y))
-      }
+      })
     }
     residuals.sort((a, b) => a - b)
     expect(residuals[residuals.length >> 1]).toBeLessThan(1.0)
@@ -1029,15 +1032,16 @@ describe('reconstruct (film scans, fiducial interior orientation)', () => {
     // removed exactly at ingest.
     const camByUuid = new Map(out.cameras.map((c) => [c.uuid, c]))
     const residuals = []
-    for (const pt of out.points) {
-      for (const [uuid, kpIdx] of pt.views) {
+    for (let i = 0; i < out.points.length; i++) {
+      const X = out.points.xyz(i)
+      out.points.forEachView(i, (uuid, kpIdx) => {
         const cam = camByUuid.get(uuid)
-        const c = mv(cam.R, [pt.x, pt.y, pt.z]).map((v, i) => v + cam.t[i])
+        const c = mv(cam.R, X).map((v, i) => v + cam.t[i])
         const u = cK.fx * (c[0] / c[2]) + cK.cx
         const v = cK.fy * (c[1] / c[2]) + cK.cy
         const kpCanon = projC(Rs[uuids.indexOf(uuid)], ts[uuids.indexOf(uuid)], world[kpIdx])
         residuals.push(Math.hypot(u - kpCanon.x, v - kpCanon.y))
-      }
+      })
     }
     residuals.sort((a, b) => a - b)
     expect(residuals[residuals.length >> 1]).toBeLessThan(1.0)
@@ -1052,14 +1056,15 @@ describe('reconstruct (film scans, fiducial interior orientation)', () => {
 // Every observation of a result as { uuid, kp, x, y, X }: the keypoint index, the
 // (folded) pixel the model was fitted to, and the point it belongs to.
 function resultObservations(out) {
-  const { viewUuids, vcount, vcam, vkp, vx, vy } = out.points.packedTracks
+  const { pos, viewUuids, vcount, vcam, vkp, vx, vy } = out.points.columns()
   const obs = []
   let j = 0
-  out.points.forEach((pt, i) => {
+  for (let i = 0; i < out.points.length; i++) {
+    const X = { x: pos[3 * i], y: pos[3 * i + 1], z: pos[3 * i + 2] }
     for (const end = j + vcount[i]; j < end; j++) {
-      obs.push({ uuid: viewUuids[vcam[j]], kp: vkp[j], x: vx[j], y: vy[j], X: pt })
+      obs.push({ uuid: viewUuids[vcam[j]], kp: vkp[j], x: vx[j], y: vy[j], X })
     }
-  })
+  }
   return obs
 }
 

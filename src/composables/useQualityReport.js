@@ -151,7 +151,8 @@ export function useQualityReport() {
       meta.vOffset || 0, meta.planeStyleStamp ?? ''].join('|')
     if (demRefCache?.key === key) return demRefCache.promise
     const promise = (async () => {
-      const { sample } = await external.referenceDemSampler(meta.id, dem.crs ?? null)
+      // Strict: a reference hole is missing coverage, not a neighbour's height.
+      const { sample } = await external.referenceDemSampler(meta.id, dem.crs ?? null, { strict: true })
       const cmp = await compareDemToReference(dem, sample)
       const demUnit = rasterUnits(dem).vertical
       const refUnit = rasterUnits(meta).vertical
@@ -263,7 +264,7 @@ export function useQualityReport() {
         rows: gcpReport.map((g) => ({ name: g.name, role: ROLE_LABEL[g.role] ?? 'Control', views: g.viewCount,
           dTotal: f2(g.dTotal, 3), normalized: g.normalized == null ? '—' : `${g.normalized.toFixed(2)}σ`,
           loo: f2(g.looTotal, 3) })),
-        note: `Checkpoints are independent; leave-one-out (LOO) predicts each control from the others. Normalized residuals use declared covariance (${crsUnit.value}).`,
+        note: `Checkpoints are independent; leave-one-out (LOO) predicts each control from the others. Normalized residuals divide by the residual's own uncertainty (${crsUnit.value}): a control's declared covariance less what the fit absorbs, a checkpoint's or a LOO prediction's declared covariance plus the fit's own.`,
       })
     }
 

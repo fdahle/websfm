@@ -26,12 +26,13 @@ test('Region and Orient model store frame data from their toolboxes', async ({ p
   page.on('pageerror', (e) => errors.push(e.message))
   await createProject(page)
   // A small sparse model: 3 cameras looking down at 200 points.
-  await store(page, (s) => {
+  await store(page, async (s) => {
     const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]], K = { fx: 500, fy: 500, cx: 250, cy: 250 }
     const cameras = new Map([0, 1, 2].map((i) => [`cam${i}`, { R, t: [-i, 0, 10], K }]))
     const points = Array.from({ length: 200 }, (_, i) => ({ x: (i % 20) / 2, y: Math.floor(i / 20) / 2, z: (i % 7) / 10,
       color: [200, 200, 200], views: new Map(), viewsPx: new Map() }))
-    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points })
+    const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
+    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points: SparsePoints.fromRecords(points) })
     s.mainSparseId = 'sparse-1'
   })
 

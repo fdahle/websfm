@@ -261,7 +261,8 @@ function run() {
     <template v-else-if="kind === 'undistorted'">
       <p class="field-hint">
         Pinhole images + a PINHOLE sparse model, the handoff COLMAP's
-        <code>image_undistorter</code> produces — for OpenMVS, MVE and MVS-Texturing.
+        <code>image_undistorter</code> produces — for OpenMVS, MVE and MVS-Texturing —
+        and a <code>transforms.json</code> for NeRF / 3D Gaussian Splatting tools.
         Lens distortion and film-scan geometry are already folded out of the model,
         so only the pixels are resampled.
       </p>
@@ -277,7 +278,7 @@ function run() {
         <input id="uq" v-model.number="settings.undistortQuality" type="range" min="0.5" max="1" step="0.01" class="field-input range" />
       </SettingsField>
       <SettingsField label="Maximum dimension" label-for="umax"
-        hint="Longest output side in pixels; 0 = native resolution. Lower it if the ZIP would exceed 4 GB.">
+        hint="Longest output side in pixels; 0 = native resolution. Lower it for a smaller ZIP.">
         <input id="umax" v-model.number="settings.undistortMaxDim" type="number" min="0" step="1" class="field-input" />
       </SettingsField>
     </template>

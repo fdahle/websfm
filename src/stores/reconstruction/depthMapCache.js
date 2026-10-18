@@ -53,24 +53,37 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
   //   run.add(map)            per finished map (planes written, then released)
   //   await run.settled()     all writes landed; run.metas = index entries in order
   //   await run.commit(settings)
-  async function beginStreamedDepthMaps() {
+  // `onWriteFailure(err)`: called once, at the first map that could not be saved (a
+  // full disk), so the caller can stop computing maps it cannot keep. Every write is
+  // handled as it is queued: a failure must not surface as an unhandled rejection
+  // minutes before `settled()` is awaited.
+  async function beginStreamedDepthMaps({ onWriteFailure = null } = {}) {
     if (!isPersisting()) return null
     const projectId = currentProjectId()
     await opfs.beginDepthPlanes(projectId)
     depthMaps.value = new Map()
     depthMapsMeta.value = []   // the old set is gone; the new one is advertised on commit
     const metas = [], writes = []
+    let failure = null
+    const settled = async () => {
+      await Promise.all(writes)
+      if (failure) throw failure
+    }
     return {
       projectId,
       metas,
       add(m) {
         const { meta, buffers } = serializeDepthMap(m)
         metas.push(meta)
-        writes.push(opfs.saveDepthPlane(projectId, m.uuid, buffers))
+        writes.push(opfs.saveDepthPlane(projectId, m.uuid, buffers).catch((err) => {
+          if (failure) return
+          failure = err
+          onWriteFailure?.(err)
+        }))
       },
-      settled: () => Promise.all(writes),
+      settled,
       async commit(settings) {
-        await Promise.all(writes)
+        await settled()
         const index = { ...buildDepthIndex([], { sparseCloud: mainSparseCloud(), settings }), maps: metas }
         await opfs.commitDepthIndex(projectId, index)
         if (currentProjectId() === projectId) depthMapsMeta.value = metas

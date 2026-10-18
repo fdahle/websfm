@@ -548,14 +548,8 @@ function createCloudLayer(cloud) {
   const isMesh = cloud.kind === 'mesh'
   const count = isMesh ? cloud.nVerts : (cloud.count ?? cloud.points?.length ?? 0)
   if (!count || (!cloud.pos && !cloud.points)) return null
-  let positions = cloud.pos
-  if (!positions) {
-    positions = new Float64Array(count * 3)
-    for (let i = 0; i < count; i++) {
-      const p = cloud.points[i]
-      positions[i * 3] = p.x; positions[i * 3 + 1] = p.y; positions[i * 3 + 2] = p.z
-    }
-  }
+  // A sparse cloud's positions are its SparsePoints pos column (read, never written).
+  const positions = cloud.pos ?? cloud.points.pos
   const geometry = new THREE.BufferGeometry()
   const { origin, relative } = relativePositions(positions)
   geometry.setAttribute('position', new THREE.BufferAttribute(relative, 3))

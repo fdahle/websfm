@@ -4,10 +4,15 @@ import { packAtlas } from './packing.js'
 import { meshGeometry, projectVertices, rasterizeDepth, viewGrid, localCamera, faceCandidates } from './visibility.js'
 import { selectViews, mergeSmallCharts } from './labeling.js'
 import { buildCharts } from './charts.js'
+import { smoothingEdges } from './seamLevel.js'
 import { textureMesh } from './texture.js'
 import { makeSampleMap } from '../../sfm/displayFrame.js'
 import { undistortPixel } from '../../sfm/distortion.js'
 import { sampleRgbaBilinear } from '../undistort.js'
+import { cleanMesh, taubinSmooth, meshMeasure } from '../meshEdit.js'
+import { facePages, regroupByPage } from './carry.js'
+import { CLEAN_MESH_DEFAULTS } from '../../defaults.user.js'
+import { decimateMesh } from '../meshDecimate.js'
 
 // ── Synthetic scene ──────────────────────────────────────────────────────────
 // Ground z = 0 over [−L, L]², a box [−B, B]² × [0, BH] standing on it, a smooth
@@ -455,12 +460,31 @@ describe('textureMesh', () => {
     // Every face its own three corners, as in an STL.
     const soup = new Float64Array(idx.length * 3), soupIdx = new Uint32Array(idx.length)
     for (let i = 0; i < idx.length; i++) { soup.set(pos.subarray(3 * idx[i], 3 * idx[i] + 3), 3 * i); soupIdx[i] = i }
+    // Corners a rounding apart (as an exporter writes them), not bit-identical: the
+    // ε weld joins them, not the exact join of an earlier texture's copies.
+    for (let i = 0; i < soup.length; i++) soup[i] += ((i * 7919) % 13) * 1e-9
     const { views, photos } = sceneViews(8)
     const logs = []
     const out = await textureMesh({ pos: soup, idx: soupIdx }, views, { pageSize: 1024, maxPages: 4 },
       { loadPhoto: photoLoader(photos), onLog: (m) => logs.push(m) })
     expect(logs.some((m) => /welded first/.test(m))).toBe(true)
     expect(out.summary.charts).toBeLessThan(out.summary.faces / 10)
+  })
+
+  it('re-textures a textured mesh as its surface, not along the old pieces', async () => {
+    const mesh = sceneMesh(0.2)
+    const first = sceneViews(8), again = sceneViews(5)
+    const textured = await textureMesh(mesh, first.views, { pageSize: 1024, maxPages: 4 }, { loadPhoto: photoLoader(first.photos) })
+    expect(textured.nVerts).toBeGreaterThan(mesh.pos.length / 3) // split: one copy per piece
+    const logs = []
+    const re = await textureMesh({ pos: textured.pos, idx: textured.idx }, again.views, { pageSize: 1024, maxPages: 4 },
+      { loadPhoto: photoLoader(again.photos), onLog: (m) => logs.push(m) })
+    const fresh = await textureMesh(mesh, again.views, { pageSize: 1024, maxPages: 4 }, { loadPhoto: photoLoader(again.photos) })
+    expect(logs.some((m) => /joined first/.test(m))).toBe(true)
+    // Before the join: 99 charts / 118 pieces against 13 / 13.
+    expect(re.summary.charts).toBeLessThanOrEqual(fresh.summary.charts + 2)
+    expect(re.summary.pieces).toBeLessThanOrEqual(fresh.summary.pieces + 2)
+    expect(re.summary.seams.seams).toBeGreaterThan(0.8 * fresh.summary.seams.seams)
   })
 
   it('lowers the texel scale until the atlas fits the page cap', async () => {
@@ -503,3 +527,152 @@ function seamStep(out) {
   }
   return sum / n
 }
+
+describe('smoothingEdges (seam levelling)', () => {
+  const key = (e, i) => `${Math.min(e[i], e[i + 1])}-${Math.max(e[i], e[i + 1])}@${e[i + 2]}`
+  const keys = (e) => Array.from({ length: e.length / 3 }, (_, i) => key(e, 3 * i)).sort()
+
+  it('keeps a boundary edge walked high → low vertex', () => {
+    const idx = Uint32Array.of(0, 1, 2) // edge 2 → 0 runs high to low
+    const { adj } = faceAdjacency(idx, 3)
+    expect(keys(smoothingEdges(Int32Array.of(0), idx, adj))).toEqual(['0-1@0', '0-2@0', '1-2@0'])
+  })
+
+  it('gives a seam edge to both sides, an edge inside a chart once', () => {
+    // Faces 0 and 1 share edge 1–2 (a seam: labels 0 and 1); faces 1 and 2 share 2–3
+    // (both label 1). Before: label 1 had no smoothing edge along the seam.
+    const idx = Uint32Array.of(0, 1, 2, 2, 1, 3, 2, 3, 4)
+    const { adj } = faceAdjacency(idx, 5)
+    const e = keys(smoothingEdges(Int32Array.of(0, 1, 1), idx, adj))
+    expect(e).toContain('1-2@0')
+    expect(e).toContain('1-2@1')
+    expect(e.filter((k) => k === '2-3@1')).toHaveLength(1)
+    expect(e).toHaveLength(8) // face 0: 3; face 1: 1-2, 1-3, 2-3; face 2: 3-4, 2-4 (2-3 is face 1's)
+  })
+})
+
+// ── Mesh tools on a textured mesh ─────────────────────────────────────────────
+// A textured mesh has one copy of a vertex per atlas piece. Clean, Smooth and Measure
+// must read its surface, so each must give what the same geometry gives untextured.
+
+// The box alone, closed by its bottom (normal −z): watertight, so it has a volume.
+function closedBox(step = 0.25) {
+  const pos = [], idx = [], at = new Map()
+  const vert = (p) => {
+    const k = p.map((x) => x.toFixed(6)).join(',')
+    if (!at.has(k)) { at.set(k, pos.length / 3); pos.push(...p) }
+    return at.get(k)
+  }
+  const quad = (a, b, c, d) => { const [i, j, k, l] = [a, b, c, d].map(vert); idx.push(i, j, k, i, k, l) }
+  const m = Math.round((2 * B) / step), k = Math.round(BH / step)
+  for (let j = 0; j < m; j++) {
+    for (let i = 0; i < m; i++) {
+      const x0 = -B + i * step, y0 = -B + j * step, x1 = x0 + step, y1 = y0 + step
+      quad([x0, y0, BH], [x1, y0, BH], [x1, y1, BH], [x0, y1, BH])
+      quad([x0, y0, 0], [x0, y1, 0], [x1, y1, 0], [x1, y0, 0])
+    }
+  }
+  for (let j = 0; j < k; j++) {
+    const z0 = j * BH / k, z1 = (j + 1) * BH / k
+    for (let i = 0; i < m; i++) {
+      const a = -B + i * step, b = a + step
+      quad([a, -B, z0], [b, -B, z0], [b, -B, z1], [a, -B, z1])
+      quad([b, B, z0], [a, B, z0], [a, B, z1], [b, B, z1])
+      quad([-B, b, z0], [-B, a, z0], [-B, a, z1], [-B, b, z1])
+      quad([B, a, z0], [B, b, z0], [B, b, z1], [B, a, z1])
+    }
+  }
+  return { pos: Float64Array.from(pos), idx: Uint32Array.from(idx) }
+}
+
+// The mesh-tool form of a mesh (and of a textured result: uv + a page per face).
+const asMesh = ({ pos, idx }) => ({ pos, idx, col: null, nVerts: pos.length / 3, count: idx.length / 3 })
+const asTextured = (out) => ({ ...asMesh(out), uv: out.uv, page: facePages(out.groups, out.count) })
+// Each vertex of `split` → the vertex of `src` at its position.
+function sourceVertexOf(split, src) {
+  const key = (p, v) => `${p[3 * v]},${p[3 * v + 1]},${p[3 * v + 2]}`
+  const at = new Map()
+  for (let v = 0; v < src.pos.length / 3; v++) at.set(key(src.pos, v), v)
+  return Int32Array.from({ length: split.pos.length / 3 }, (_, v) => at.get(key(split.pos, v)))
+}
+
+describe('mesh tools on a textured mesh', () => {
+  const textureOf = async (mesh) => {
+    const { views, photos } = sceneViews(8)
+    return textureMesh(mesh, views, { pageSize: 1024, maxPages: 4 }, { loadPhoto: photoLoader(photos) })
+  }
+
+  it('cleans it as its surface: no atlas piece removed, no piece outline filled', async () => {
+    const plain = asMesh(sceneMesh(0.2))
+    const out = await textureOf(plain)
+    const tex = asTextured(out)
+    expect(out.summary.pieces).toBeGreaterThan(20) // so the atlas pieces would be "components"
+    const a = cleanMesh(plain, CLEAN_MESH_DEFAULTS), b = cleanMesh(tex, CLEAN_MESH_DEFAULTS)
+    expect(b.stats.components.removedTriangles).toBe(a.stats.components.removedTriangles) // was 370 vs 0
+    expect(b.stats.holes.filled).toBe(a.stats.holes.filled) // was 9 vs 0
+    expect(b.mesh.count).toBe(a.mesh.count)
+    expect(regroupByPage(b.mesh)).not.toBeNull() // still textured
+  })
+
+  it('fills a real hole once, with the caps on the surface and no page', async () => {
+    const src = sceneMesh(0.2)
+    // Punch a hole: drop the two triangles of one ground quad (row 5, column 5).
+    const keep = Array.from({ length: src.idx.length / 3 }, (_, t) => t !== 410 && t !== 411)
+    const holed = asMesh({ pos: src.pos, idx: Uint32Array.from(src.idx.filter((_, i) => keep[(i / 3) | 0])) })
+    const out = await textureOf(holed)
+    const a = cleanMesh(holed, CLEAN_MESH_DEFAULTS), b = cleanMesh(asTextured(out), CLEAN_MESH_DEFAULTS)
+    expect(a.stats.holes.filled).toBe(1)
+    expect(b.stats.holes.filled).toBe(1)
+    expect(b.stats.holes.addedTriangles).toBe(a.stats.holes.addedTriangles)
+    expect(regroupByPage(b.mesh)).toBeNull() // the cap has no photo: the texture is dropped
+    expect(meshMeasure(b.mesh).boundaryEdges).toBe(meshMeasure(a.mesh).boundaryEdges)
+  })
+
+  it('measures it as its surface', async () => {
+    const plain = asMesh(sceneMesh(0.2))
+    const tex = asTextured(await textureOf(plain))
+    const a = meshMeasure(plain), b = meshMeasure(tex)
+    expect(b.components).toBe(a.components) // was 48 vs 1
+    expect(b.boundaryEdges).toBe(a.boundaryEdges) // was 1690 vs 160
+    expect(b.area).toBeCloseTo(a.area, 9)
+    const box = asMesh(closedBox())
+    const ma = meshMeasure(box), mb = meshMeasure(asTextured(await textureOf(box)))
+    expect(ma.watertight).toBe(true)
+    expect(mb.watertight).toBe(true)
+    expect(mb.volume).toBeCloseTo(ma.volume, 9)
+  })
+
+  it('smooths it as its surface: copies move together, seams are no boundary', async () => {
+    const plain = asMesh(sceneMesh(0.2))
+    const out = await textureOf(plain)
+    const tex = asTextured(out), src = sourceVertexOf(tex, plain)
+    for (const fixBoundary of [true, false]) {
+      const a = taubinSmooth(plain, { iterations: 10, fixBoundary }), b = taubinSmooth(tex, { iterations: 10, fixBoundary })
+      let worst = 0
+      for (let v = 0; v < tex.nVerts; v++) {
+        for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(b.pos[3 * v + c] - a.pos[3 * src[v] + c]))
+      }
+      expect(worst).toBeLessThan(1e-9) // was 0.33 apart (fixBoundary off), or 59 % frozen (on)
+      expect(b.uv).toEqual(tex.uv)
+    }
+  })
+
+  it('decimates it as its surface, and the result drops the texture cleanly', async () => {
+    const plain = asMesh(sceneMesh(0.2))
+    const tex = asTextured(await textureOf(plain))
+    for (const preserveBoundary of [true, false]) {
+      const opts = { targetRatio: 0.25, preserveBoundary }
+      const a = decimateMesh(plain, opts).mesh, b = decimateMesh(tex, opts).mesh
+      const ma = meshMeasure(a, { weld: false }), mb = meshMeasure(b, { weld: false })
+      // Same reach and the same rim (exact ties may break differently: vertex order).
+      // Before: the piece outlines stayed boundaries, 48–52 pieces and, welded, 276
+      // (preserved) or 710 (not) open edges against the surface's 80.
+      expect(Math.abs(b.count - a.count)).toBeLessThanOrEqual(0.01 * a.count)
+      expect(Math.abs(mb.boundaryEdges - ma.boundaryEdges)).toBeLessThanOrEqual(4)
+      expect(mb.components).toBe(1)
+      expect(meshMeasure(b).boundaryEdges).toBe(mb.boundaryEdges) // no cracks a weld would close
+      expect(b.uv).toBeUndefined() // UVs cannot follow a collapse: no texture, no stale page
+      expect(b.page).toBeUndefined()
+    }
+  })
+})

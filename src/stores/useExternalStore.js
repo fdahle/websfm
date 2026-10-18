@@ -306,7 +306,8 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // safe. Returns the RasterSource, or null when the sidecar is gone.
   //
   // A plane whose stamp no longer matches the raster's style is **stale**, not
-  // corrupt: `setRasterStyle` repaints the preview immediately and defers the
+  // corrupt (an RGBA plane only: a DEM's plane holds raw elevations, which no
+  // style changes, so it never goes stale): `setRasterStyle` repaints the preview immediately and defers the
   // expensive full-res compose to here. In that case the sidecar is bypassed and
   // the original file re-decoded — the one place the seconds get spent, paid by
   // the sampler that actually needs exact pixels. A raster with no recorded stamp
@@ -333,7 +334,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     }
 
     const wanted = styleStamp(meta.style)
-    if ((meta.planeStyleStamp ?? wanted) !== wanted) {
+    if (meta.kind !== 'dem' && (meta.planeStyleStamp ?? wanted) !== wanted) {
       const p = redecodePlane(meta).finally(() => loading.delete(id))
       loading.set(id, p)
       return p
@@ -384,7 +385,8 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
       const buffer = await file.arrayBuffer()
       const { plane } = await parseRasterFile(buffer, meta.name, {
         forceKind: meta.kind,
-        style: meta.style,
+        // A plain copy: the record is reactive, and a proxy cannot be posted to the worker.
+        style: JSON.parse(JSON.stringify(meta.style ?? null)),
         onLog: (m, l, c) => log(m, l, c),
       })
       const source = buildSource(meta, plane)
@@ -436,7 +438,10 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // change. A raster with no declared CRS is read in `fromCrs`, as in
   // `toRasterCoords`. Throws with a user-facing reason when it cannot sample.
   // → { meta, sample(x, y) → z | null }
-  async function referenceDemSampler(rasterId, fromCrs) {
+  //   opts.strict — the cell containing a point must have a height: a reference
+  //                 hole, or a point off the raster, reads null instead of a
+  //                 neighbour's value (DEM of difference volumes count it unmeasured)
+  async function referenceDemSampler(rasterId, fromCrs, { strict = false } = {}) {
     const meta = rasterById(rasterId)
     if (!meta || meta.kind !== 'dem') throw new Error('The reference DEM is no longer in the project')
     if (meta.crsUnresolved && !(await resolveRasterCrs(meta))) {
@@ -453,12 +458,13 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     const source = await ensureRasterLoaded(meta.id)
     if (!source) throw new Error(`The pixel data of "${meta.name}" is unavailable — re-import it`)
     const vOffset = meta.vOffset || 0
+    const sampleOpts = strict ? { strict: true } : undefined
     return {
       meta,
       sample(x, y) {
         let rx, ry
         try { [rx, ry] = toRaster(x, y) } catch { return null }
-        const raw = source.sampleAt(rx, ry)
+        const raw = source.sampleAt(rx, ry, sampleOpts)
         return raw == null ? null : raw + vOffset
       },
     }
@@ -652,7 +658,8 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
 
     // Drop the hydrated plane: it was composed with the old style, and serving it
     // to a sampler now would return colours that no longer match what is drawn.
-    if (sources.value.has(id)) {
+    // A DEM's plane is the raw elevations, which no style touches: it stays.
+    if (meta.kind !== 'dem' && sources.value.has(id)) {
       const next = new Map(sources.value)
       next.delete(id)
       sources.value = next

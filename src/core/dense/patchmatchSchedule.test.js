@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { depthMapForImage } from './mvs.js'
 import { packSparseForDense } from './sparseInput.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 import { refineScale, levelPerturbStarts } from './refineSchedule.js'
 
 // End-to-end yardstick for the PatchMatch refinement schedule: the real WASM kernel,
@@ -57,7 +58,7 @@ function planeScene(nVec = [0, -0.8, -0.6], D = -1.5) {
   }
   return {
     ref: { gray: ref.gray, width: W, height: H, K, cam: { R: I, t: [0, 0, 0] } },
-    sources, points, gt: ref.depth, W, H,
+    sources, points: SparsePoints.fromRecords(points), gt: ref.depth, W, H,
   }
 }
 

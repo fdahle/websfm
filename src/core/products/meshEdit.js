@@ -16,10 +16,14 @@
 // Map keyed by edge.
 //
 // A textured mesh (core/products/texture/) also carries `uv` (Float32, 2 per vertex)
-// and `page` (Uint16, the atlas page per triangle). Steps that keep or drop triangles
-// and vertices carry both along; a triangle a step creates (a filled hole) gets page
+// and `page` (Uint16, the atlas page per triangle). Its vertices are split: one copy
+// per atlas piece a vertex lies in. Steps that keep or drop triangles and vertices
+// carry uv and page along; a triangle a step creates (a filled hole) gets page
 // UNTEXTURED, which tells the caller the texture no longer covers the mesh. A weld
-// joins only corners with the same UV, or it would erase the chart seams.
+// joins only corners with the same UV, or it would erase the chart seams. Everything
+// that reads the SURFACE (pieces, holes, boundaries, smoothing, measuring) reads it with
+// the copies joined (geometricMesh), so a textured mesh cleans, smooths and measures
+// exactly as the same geometry untextured.
 //
 // Precision: survey coordinates are ~1e6 (UTM / polar stereographic). Lengths,
 // areas and volumes are computed from coordinate DIFFERENCES or relative to a local
@@ -76,6 +80,64 @@ function selectTriangles(mesh, keep, kept) {
 function textureOf(mesh, nV, page) {
   if (!mesh.uv) return {}
   return { uv: mesh.uv.slice(0, nV * 2), ...(page ? { page } : {}) }
+}
+
+/**
+ * Vertices at exactly the same position → one id each. A textured mesh has one copy
+ * of a vertex per atlas piece it lies in (its UV differs per piece), bit-identical in
+ * position. Hashed on the coordinates' bits, typed arrays only — O(n). NaN positions
+ * join nothing. → { id: Int32Array(nV), first: Int32Array(m) (a vertex of each id), m }
+ */
+export function coincidentVertices(pos, nV = Math.floor(pos.length / 3)) {
+  let size = 1
+  while (size < nV * 2) size <<= 1
+  const mask = size - 1
+  const head = new Int32Array(size).fill(-1), next = new Int32Array(nV)
+  const id = new Int32Array(nV), first = new Int32Array(nV)
+  const f64 = new Float64Array(1), u32 = new Uint32Array(f64.buffer)
+  const bits = (x) => { f64[0] = x === 0 ? 0 : x; return u32[0] ^ Math.imul(u32[1], 0x9e3779b1) } // −0 ≡ 0
+  let m = 0
+  for (let v = 0; v < nV; v++) {
+    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2]
+    const h = (bits(x) ^ Math.imul(bits(y), 73856093) ^ Math.imul(bits(z), 19349663)) & mask
+    let found = -1
+    for (let r = head[h]; r >= 0; r = next[r]) {
+      const o = first[r] * 3
+      if (pos[o] === x && pos[o + 1] === y && pos[o + 2] === z) { found = r; break }
+    }
+    if (found >= 0) { id[v] = found; continue }
+    id[v] = m; first[m] = v
+    next[m] = head[h]; head[h] = m
+    m++
+  }
+  return { id, first: first.subarray(0, m), m }
+}
+
+/**
+ * The geometry of a textured mesh as one surface: its UV copies joined
+ * (coincidentVertices), so topology — pieces, boundaries, holes, a vertex's
+ * neighbours — is the surface's own and not the atlas layout's. Same triangles in the
+ * same order. Null for an untextured mesh or one without copies.
+ * → { mesh: { nVerts, count, pos: Float64Array, idx, col }, id, first }
+ */
+function geometricMesh(mesh) {
+  if (!mesh.uv) return null
+  const nV = meshVertexCount(mesh), nT = meshTriangleCount(mesh)
+  const { id, first, m } = coincidentVertices(mesh.pos, nV)
+  if (m === nV) return null
+  const pos = new Float64Array(m * 3)
+  const col = mesh.col ? new Uint8Array(m * 3) : null
+  for (let r = 0; r < m; r++) {
+    const o = first[r] * 3
+    pos[r * 3] = mesh.pos[o]; pos[r * 3 + 1] = mesh.pos[o + 1]; pos[r * 3 + 2] = mesh.pos[o + 2]
+    if (col) { col[r * 3] = mesh.col[o]; col[r * 3 + 1] = mesh.col[o + 1]; col[r * 3 + 2] = mesh.col[o + 2] }
+  }
+  const idx = new Uint32Array(nT * 3)
+  for (let i = 0; i < nT * 3; i++) {
+    const v = mesh.idx[i]
+    idx[i] = v < nV ? id[v] : m + (v - nV) // out of range stays out of range
+  }
+  return { mesh: { nVerts: m, count: nT, pos, idx, col }, id, first }
 }
 
 /** A triangle whose corner indices repeat or fall outside the vertex array. */
@@ -459,7 +521,8 @@ export function compactMesh(mesh, onLog) {
 function componentsStep(mesh, { minTriangles = 0, minFraction = 0 } = {}) {
   const nT = meshTriangleCount(mesh)
   if (!nT) return { mesh: selectTriangles(mesh, new Uint8Array(0), 0), components: 0, removedComponents: 0, removedTriangles: 0, threshold: 0 }
-  const { compOfTri, compTris, nComp } = triangleComponents(mesh)
+  // A textured mesh's pieces are atlas pieces, not surface pieces: join its UV copies.
+  const { compOfTri, compTris, nComp } = triangleComponents(geometricMesh(mesh)?.mesh ?? mesh)
   let largest = 0
   for (let c = 0; c < nComp; c++) if (compTris[c] > largest) largest = compTris[c]
   const threshold = Math.max(Number(minTriangles) || 0, (Number(minFraction) || 0) * largest)
@@ -536,7 +599,41 @@ export function removeLongEdges(mesh, opts = {}, onLog) {
 
 // ── Hole filling ─────────────────────────────────────────────────────────────
 
-function holesStep(mesh, { maxHoleEdges = 64 } = {}) {
+// Holes of the surface. A textured mesh's piece outlines are boundaries only in the
+// atlas: the loops are found with its UV copies joined, and the caps then reference
+// one copy of each loop vertex (any copy: they share the position).
+function holesStep(mesh, opts = {}) {
+  const g = geometricMesh(mesh)
+  if (!g) return holesOnSurface(mesh, opts)
+  const r = holesOnSurface(g.mesh, opts)
+  const nV = meshVertexCount(mesh), nT = meshTriangleCount(mesh), m = g.mesh.nVerts
+  if (!r.addedTriangles) return { ...r, mesh: selectTriangles(mesh, new Uint8Array(nT).fill(1), nT) } // a copy, never the input
+  const nAddV = r.addedVertices, nAddT = r.addedTriangles
+  const pos = new Float64Array((nV + nAddV) * 3)
+  pos.set(mesh.pos.subarray(0, nV * 3))
+  pos.set(r.mesh.pos.subarray(m * 3), nV * 3)
+  let col = null
+  if (mesh.col) {
+    col = new Uint8Array((nV + nAddV) * 3)
+    col.set(mesh.col.subarray(0, nV * 3))
+    col.set(r.mesh.col.subarray(m * 3), nV * 3)
+  }
+  const idx = new Uint32Array((nT + nAddT) * 3)
+  idx.set(mesh.idx.subarray(0, nT * 3))
+  const add = r.mesh.idx.subarray(nT * 3)
+  for (let i = 0; i < add.length; i++) idx[nT * 3 + i] = add[i] < m ? g.first[add[i]] : nV + (add[i] - m)
+  // The caps' centre vertices get UV 0 and their triangles no page.
+  const uv = new Float32Array((nV + nAddV) * 2)
+  uv.set(mesh.uv.subarray(0, nV * 2))
+  let page = null
+  if (mesh.page) {
+    page = new Uint16Array(nT + nAddT).fill(UNTEXTURED)
+    page.set(mesh.page.subarray(0, nT))
+  }
+  return { ...r, mesh: { nVerts: nV + nAddV, count: nT + nAddT, pos, idx, col, uv, ...(page ? { page } : {}) } }
+}
+
+function holesOnSurface(mesh, { maxHoleEdges = 64 } = {}) {
   const nV = meshVertexCount(mesh), nT = meshTriangleCount(mesh)
   const { pos, idx } = mesh
   const limit = Number.isFinite(maxHoleEdges) && maxHoleEdges > 0 ? maxHoleEdges : Infinity
@@ -763,14 +860,26 @@ export function cleanMesh(mesh, opts = {}, onLog) {
  * The Laplacian is the uniform umbrella operator over the vertex one-ring (CSR from
  * the unique edges). With `fixBoundary`, every vertex on a boundary or non-manifold
  * edge stays put, so an open terrain mesh keeps its rim. Topology and colour unchanged.
+ * A textured mesh is smoothed as its surface (geometricMesh): every UV copy of a vertex
+ * moves the same way, so the chart seams neither open nor count as boundary.
  *
  * opts: { iterations = 10, lambda = 0.5, mu = -0.53, fixBoundary = true }
  */
-export function taubinSmooth(mesh, { iterations = 10, lambda = 0.5, mu = -0.53, fixBoundary = true } = {}, onLog) {
+export function taubinSmooth(mesh, opts = {}, onLog) {
+  const { iterations = 10, lambda = 0.5, mu = -0.53, fixBoundary = true } = opts
   const nV = meshVertexCount(mesh), nT = meshTriangleCount(mesh)
   const out = selectTriangles(mesh, new Uint8Array(nT).fill(1), nT)
   const iters = Math.max(0, Math.floor(iterations) || 0)
   if (!nV || !nT || !iters) return out
+  const g = geometricMesh(mesh)
+  if (g) {
+    const s = taubinSmooth(g.mesh, opts, onLog)
+    for (let v = 0; v < nV; v++) {
+      const o = g.id[v] * 3
+      out.pos[v * 3] = s.pos[o]; out.pos[v * 3 + 1] = s.pos[o + 1]; out.pos[v * 3 + 2] = s.pos[o + 2]
+    }
+    return out
+  }
   const topo = meshTopology(mesh)
   const { edges: E, edgeLo, edgeHi, incidence } = topo
   const start = new Uint32Array(nV + 1)
@@ -971,7 +1080,8 @@ export function meshMeasure(source, { weld = true } = {}) {
   // Topology on a welded copy, so an unwelded import (STL) is not "all boundary". The
   // weld keeps representatives' own positions, so area and volume move only by the
   // ε-sized slivers it collapses.
-  const welded = weld ? weldStep(source) : null
+  // Positions only: a textured mesh's UV copies of a vertex are one surface vertex.
+  const welded = weld ? weldStep(source.uv ? { ...source, uv: null, page: null } : source) : null
   const mesh = welded ? welded.mesh : source
   const nV = meshVertexCount(mesh), nT = meshTriangleCount(mesh)
   const topo = meshTopology(mesh)

@@ -3,38 +3,51 @@ import { buildCameraPriorConstraints, qualifyingGcps, buildGcpAnchors } from './
 import { SFM_TUNING } from '../tuning.js'
 import { distortPixel, undistortPixel } from './distortion.js'
 
+// points: SparsePoints. Per point, as columns (transferable, no object per point):
+//   error  RMS reprojection error in px (NaN: no stored observation; Infinity: behind a camera)
+//   track  views in the model's cameras;   angle  largest triangulation angle, degrees
 export function sparsePointMetrics(cameras, points) {
   const centers = new Map([...cameras].map(([id, camera]) => [id, cameraCenter(camera)]))
-  return points.map(point => {
-    const views = [...(point.views || [])].filter(([id]) => cameras.has(id))
-    let squared = 0, observations = 0, angle = 0
-    for (const [id, pixel] of point.viewsPx || []) {
+  const n = points.length
+  const error = new Float32Array(n), track = new Uint16Array(n), angle = new Float32Array(n)
+  const seen = [], p = { x: 0, y: 0, z: 0 }
+  for (let i = 0; i < n; i++) {
+    p.x = points.x(i); p.y = points.y(i); p.z = points.z(i)
+    seen.length = 0
+    points.forEachView(i, (id) => { if (cameras.has(id)) seen.push(centers.get(id)) })
+    let squared = 0, observations = 0, best = 0
+    points.forEachPixel(i, (id, px, py) => {
       const camera = cameras.get(id)
-      if (!camera || !pixel?.every(Number.isFinite)) continue
-      const projected = projectWithDepth(camera, point.x, point.y, point.z)
-      if (!projected) { squared = Infinity; observations++; continue }
-      squared += (projected.u - pixel[0]) ** 2 + (projected.v - pixel[1]) ** 2
+      if (!camera || !Number.isFinite(py)) return
+      const projected = projectWithDepth(camera, p.x, p.y, p.z)
+      if (!projected) { squared = Infinity; observations++; return }
+      squared += (projected.u - px) ** 2 + (projected.v - py) ** 2
       observations++
-    }
-    for (let i = 0; i < views.length; i++) for (let j = 0; j < i; j++)
-      angle = Math.max(angle, triangulationAngle(centers.get(views[i][0]), centers.get(views[j][0]), point))
-    return { error: observations ? Math.sqrt(squared / observations) : null, track: views.length, angle }
-  })
+    })
+    for (let a = 0; a < seen.length; a++) for (let b = 0; b < a; b++)
+      best = Math.max(best, triangulationAngle(seen[a], seen[b], p))
+    error[i] = observations ? Math.sqrt(squared / observations) : NaN
+    track[i] = Math.min(seen.length, 65535)
+    angle[i] = best
+  }
+  return { count: n, error, track, angle }
 }
 
 export function selectedSparseIndices(metrics, { metric, threshold }) {
   if (!['error', 'track', 'angle'].includes(metric) || !Number.isFinite(threshold) || threshold < 0)
     throw new Error('Invalid gradual-selection threshold')
-  const indices = []
-  metrics.forEach((value, i) => {
-    if (value[metric] != null && (metric === 'error' ? value[metric] > threshold : value[metric] < threshold)) indices.push(i)
-  })
+  const values = metrics[metric], indices = []
+  for (let i = 0; i < metrics.count; i++) {
+    const v = values[i]
+    if (Number.isNaN(v)) continue
+    if (metric === 'error' ? v > threshold : v < threshold) indices.push(i)
+  }
   return indices
 }
 
 // One constrained bundle adjustment over a disposable copy of the model — the
 // solve gradual selection and Optimize cameras share. Builds the observations from
-// the stored (canonical, pinhole-frame) `viewsPx`, refuses a camera left without
+// the stored (canonical, pinhole-frame) view pixels, refuses a camera left without
 // support or a network that falls apart, holds the solve to the survey evidence,
 // and accepts it only under the cost rule. `subject` words the refusals for the
 // calling tool ("Selection would…" / "The model has…").
@@ -50,23 +63,28 @@ export function selectedSparseIndices(metrics, { metric, threshold }) {
 async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { subject, baOpts = {}, lensOf = null }) {
   const entries = [...cameras], cameraIndices = new Map(entries.map(([id], i) => [id, i]))
   const observations = [], support = new Uint32Array(entries.length)
-  kept.forEach((p, ptIdx) => {
+  for (let ptIdx = 0; ptIdx < kept.length; ptIdx++) {
     let n = 0
-    for (const [id, pixel] of p.viewsPx || []) {
+    kept.forEachPixel(ptIdx, (id, x, y) => {
       const camIdx = cameraIndices.get(id)
-      if (camIdx == null || !pixel?.every(Number.isFinite)) continue
-      observations.push({ camIdx, ptIdx, x: pixel[0], y: pixel[1] }); support[camIdx]++; n++
-    }
+      if (camIdx == null || !Number.isFinite(y)) return
+      observations.push({ camIdx, ptIdx, x, y }); support[camIdx]++; n++
+    })
     if (n < 2) throw new Error('Every surviving point needs stored observations in at least two cameras')
-  })
+  }
   if (support.some(n => n < 6)) throw new Error(`${subject.would} leave a camera with fewer than six observations`)
   // A disconnected observation graph has independent gauges; do not silently
   // refine it as one model.
   const parent = entries.map((_, i) => i)
   const root = i => parent[i] === i ? i : (parent[i] = root(parent[i]))
-  for (const p of kept) {
-    const ids = [...p.viewsPx.keys()].map(id => cameraIndices.get(id)).filter(i => i != null)
-    for (let i = 1; i < ids.length; i++) parent[root(ids[i])] = root(ids[0])
+  for (let i = 0; i < kept.length; i++) {
+    let first = -1
+    kept.forEachPixel(i, (id) => {
+      const c = cameraIndices.get(id)
+      if (c == null) return
+      if (first < 0) first = c
+      else parent[root(c)] = root(first)
+    })
   }
   if (new Set(parent.map((_, i) => root(i))).size > 1) throw new Error(`${subject.would} disconnect the camera network`)
   const uuidList = entries.map(([id]) => id)
@@ -93,10 +111,15 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
     return { ...o, x: p.x, y: p.y }
   }
   const allObs = anchorSetup ? [...observations, ...anchorSetup.observations] : observations
-  const result = await bundleAdjust(entries.map(([, c]) => c), Ks,
-    anchorSetup ? [...kept, ...anchorSetup.anchorPts] : kept,
+  let pos = kept.pos
+  if (anchorSetup) {
+    pos = new Float64Array(kept.pos.length + 3 * anchorSetup.anchorPts.length)
+    pos.set(kept.pos)
+    anchorSetup.anchorPts.forEach((a, j) => pos.set([a.x, a.y, a.z], kept.pos.length + 3 * j))
+  }
+  const result = await bundleAdjust(entries.map(([, c]) => c), Ks, pos,
     lenses.some(Boolean) ? allObs.map(toLensFrame) : allObs,
-    { maxIters: 30, refineIntrinsics: 'none', ...baOpts,
+    { maxIters: 30, refineIntrinsics: 'none', ...baOpts, flatPoints: true,
       ...(anchorSetup ? { gcpAnchors: anchorSetup.anchors } : {}),
       ...(priorSet ? { cameraPriors: priorSet.priors } : {}) })
   // An unconstrained re-solve must not raise the residual. A constrained one may,
@@ -105,9 +128,9 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
     ? Math.max(SFM_TUNING.cameraPriorMaxReprojIncreasePx, (result?.costBefore ?? 0) * SFM_TUNING.cameraPriorMaxReprojIncreaseFrac)
     : (result?.costBefore ?? 0) * 0.001
   if (!result || !Number.isFinite(result.costAfter) || result.costAfter > result.costBefore + allowance
-      || result.points3d.length !== kept.length + (anchorSetup?.anchorPts.length ?? 0)
+      || result.pos?.length !== 3 * (kept.length + (anchorSetup?.anchorPts.length ?? 0))
       || result.cameras.length !== entries.length
-      || result.points3d.some(p => ![p.x, p.y, p.z].every(Number.isFinite))
+      || !result.pos.every(Number.isFinite)
       || result.cameras.some(c => ![...c.R.flat(), ...c.t].every(Number.isFinite)))
     throw new Error('Refinement failed or increased the residual; the original model is unchanged')
   return {
@@ -117,12 +140,12 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
   }
 }
 
-// Work on a disposable worker copy. Keep calibration fixed: viewsPx already
-// contains the canonical observations from the completed reconstruction.
+// Work on a disposable worker copy. Keep calibration fixed: the view pixels already
+// contain the canonical observations from the completed reconstruction.
 export async function refineSparseSelection(cameras, points, settings, bundleAdjust, constraints = {}) {
   const removed = new Set(selectedSparseIndices(sparsePointMetrics(cameras, points), settings))
   if (!removed.size) throw new Error('No points selected')
-  const kept = points.filter((_, i) => !removed.has(i))
+  const kept = points.select(points.indicesWhere((i) => !removed.has(i)))
   if (kept.length < 6) throw new Error('Selection must leave at least six points')
   const { result, entries, constraints: held } = await constrainedRefine(cameras, kept, bundleAdjust, constraints,
     { subject: { would: 'Selection would' } })
@@ -131,7 +154,7 @@ export async function refineSparseSelection(cameras, points, settings, bundleAdj
     constraints: held,
     cameras: new Map(entries.map(([id, c], i) => [id, { ...c, ...result.cameras[i] }])),
     // Only the real points: anchor points were scratch space for this solve.
-    points: kept.map((p, i) => ({ ...p, ...result.points3d[i] })),
+    points: kept.withPositions(result.pos.slice(0, 3 * kept.length)),
   }
 }
 
@@ -142,7 +165,7 @@ export async function refineSparseSelection(cameras, points, settings, bundleAdj
 // Deliberately NOT the radial terms. The model is pinhole by invariant (CLAUDE.md
 // ▸ Pipelines ▸ 3): radial distortion is folded out of the observations and the
 // composed bag recorded in summary.selfCalDistortion for dense to reproduce. A
-// refined k1 here would have to be folded into viewsPx and recomposed into that
+// refined k1 here would have to be folded into the view pixels and recomposed into that
 // record, or dense would warp with a lens the sparse model no longer has.
 //
 // settings: { refine: 'f' | 'f,cxcy', sensorOfUuid: { [uuid]: int } }
@@ -154,7 +177,8 @@ export const OPTIMIZE_MAX_FOCAL_CHANGE = 0.2
 export async function optimizeCameras(cameras, points, settings, bundleAdjust, constraints = {}) {
   const refine = settings.refine ?? 'f'
   if (!OPTIMIZE_REFINE_MODES.includes(refine)) throw new Error(`Unsupported refinement "${refine}"`)
-  const kept = points.filter(p => (p.viewsPx?.size ?? 0) >= 2)
+  const keptIdx = points.indicesWhere((i) => points.pixelCount(i) >= 2)
+  const kept = points.select(keptIdx)
   if (kept.length < 6) throw new Error('The model needs at least six points with two or more observations')
   const sensorOf = settings.sensorOfUuid || {}
   const sensorOfCam = [...cameras.keys()].map(id => (Number.isInteger(sensorOf[id]) ? sensorOf[id] : -1))
@@ -178,16 +202,12 @@ export async function optimizeCameras(cameras, points, settings, bundleAdjust, c
   // A fisheye camera's stored observations are its recorded pixels undistorted about
   // its K; dense pairs the lens with the camera's K, so a moved focal / principal
   // point re-derives them (old K → recorded pixel → new K), as selfCalFold.js does.
-  const remapViews = (p) => {
-    let moved = null
-    for (const [id, px] of p.viewsPx) {
-      const lens = lensOf(id), K0 = cameras.get(id)?.K
-      if (!lens || !K0 || !px?.every(Number.isFinite)) continue
-      const raw = distortPixel(px[0], px[1], K0, lens)
-      const q = undistortPixel(raw.x, raw.y, newK.get(id), lens)
-      ;(moved ??= new Map(p.viewsPx)).set(id, [q.x, q.y])
-    }
-    return moved ? { viewsPx: moved } : null
+  const remapPixel = (id, x, y) => {
+    const lens = lensOf(id), K0 = cameras.get(id)?.K
+    if (!lens || !K0) return null
+    const raw = distortPixel(x, y, K0, lens)
+    const q = undistortPixel(raw.x, raw.y, newK.get(id), lens)
+    return [q.x, q.y]
   }
   return {
     status: 'done', costBefore: result.costBefore, costAfter: result.costAfter, constraints: held,
@@ -200,7 +220,7 @@ export async function optimizeCameras(cameras, points, settings, bundleAdjust, c
     }])),
     // Points the solve could not see (< 2 stored observations) would sit stale
     // against the moved cameras, so they are dropped and counted, not kept.
-    points: kept.map((p, i) => ({ ...p, ...result.points3d[i], ...remapViews(p) })),
+    points: points.select(keptIdx, { pos: result.pos.slice(0, 3 * kept.length), pixel: remapPixel }),
     dropped: points.length - kept.length,
   }
 }

@@ -144,6 +144,12 @@ export function makeLodOps({ lazCodec = null } = {}) {
       const { hierarchy, ...meta } = res
       emit('log', [`Level of detail: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, `
         + `${meta.levels} levels, ${((performance.now() - t0) / 1000).toFixed(1)} s`, 'info', 'Products'])
+      if (meta.outside) {
+        // The octree's cube came from the file header's extent, before any point was read.
+        emit('log', [`Level of detail: ${meta.outside.toLocaleString()} points lie outside the extent ${file ? 'the file header gives' : 'measured'} `
+          + '— they are kept, but the view and box reads (crop, DEM) can miss them; fix the header (e.g. pdal translate / lasinfo -repair) and import again',
+        'warn', file ? 'Import' : 'Products'])
+      }
       return { result: { ...meta, name, dataFile, hierarchyFile, hierarchyBytes: hierarchy.length, ...(fileInfo ? { file: fileInfo } : {}) } }
     } catch (err) {
       await out.abort()

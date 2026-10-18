@@ -70,3 +70,20 @@ describe('extract from an octree', () => {
     expect(coarse.level).toBe(0)
   })
 })
+
+describe('planExtract and the buffer wall', () => {
+  it('stops at the last level that fits one Float64 xyz buffer, whatever maxPoints says', () => {
+    // Three levels of 1 M, 60 M and 60 M points: all three (121 M) would pass a 6 GB
+    // budget but not the 2 GiB buffer (89 M points); the plan keeps the first two.
+    const lod = { root: { min: [0, 0, 0], size: 8 }, spacing: 1 }
+    const nodes = new Map([
+      ['0-0-0-0', { key: [0, 0, 0, 0], count: 1e6 }],
+      ['1-0-0-0', { key: [1, 0, 0, 0], count: 60e6 }],
+      ['2-0-0-0', { key: [2, 0, 0, 0], count: 60e6 }],
+    ])
+    const plan = planExtract(nodes, lod, { maxPoints: 125e6 })
+    expect(plan.level).toBe(1)
+    expect(plan.estimate).toBe(61e6)
+    expect(plan.complete).toBe(false)
+  })
+})
