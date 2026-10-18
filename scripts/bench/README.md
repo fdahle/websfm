@@ -158,6 +158,14 @@ stage again with config key `dense:loose`.
 - `dumpSfmInput: true`: save each recon's exact SfM worker payload as
   `<out>.<stage>.sfminput` (`tests/bench/sfmInputDump.js`). Node replays it bit for bit
   as a real-data golden scene (`WEBSFM_SFM_GOLDEN_INPUTS`, `src/core/sfm/sfmGolden.test.js`).
+- `export:<tag>` stages run one export through the app's dialog dispatch, with config
+  key `export:<tag>` = `{ kind, settings, cloud? }`. Each download is saved as
+  `<out>.<tag>.<file>`. Besides the dialog kinds (`cloud`, `mesh`, `colmap`, `dem`,
+  `ortho`, …), `keypoints` and `matches` produce the sidebar's JSON downloads, so two
+  tags around a `reopen` can be compared with `cmp`.
+- `togglepair`: exclude one accepted pair, then include it again, as the match list
+  does. Reports the project's `matches/` files after each save; a toggle should only
+  replace the `flags.bin`.
 - `stallMinutes` (default 30): abort the run when no log line arrives for this long,
   or at once if the page crashes. A worker that dies of memory otherwise leaves the
   bench waiting forever. Each stage also logs the renderer heap before/after a GC.

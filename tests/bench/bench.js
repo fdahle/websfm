@@ -176,6 +176,39 @@ window.bench = {
 
   currentProject() { return projects.currentProjectId },
 
+  // Exclude one accepted pair, then include it again, as the match list's toggle does;
+  // lists the project's matches folder after each save, so a run can check that a
+  // toggle writes only a new flags file.
+  async togglePair() {
+    const dir = await opfs.getOpfsProjectDir(projects.currentProjectId)
+    const list = async () => {
+      const m = await dir.getDirectoryHandle('matches')
+      const out = {}
+      for await (const [name, h] of m.entries()) if (h.kind === 'file') { const f = await h.getFile(); out[name] = f.size }
+      return out
+    }
+    const settle = async (prev) => {
+      for (let t = 0; t < 40; t++) {
+        await new Promise((r) => setTimeout(r, 250))
+        const now = await list()
+        if (JSON.stringify(now) !== JSON.stringify(prev)) { await new Promise((r) => setTimeout(r, 1000)); return list() }
+      }
+      return list()
+    }
+    const pid = [...matches.matchStore.entries()].find(([, e]) => e.status === 'done' && !e.weak && e.enabled !== false)?.[0]
+    if (!pid) throw new Error('togglePair: no accepted pair')
+    const before = await list()
+    const t0 = performance.now()
+    matches.setPairEnabled(pid, false)
+    const excluded = await settle(before)
+    const excludeMs = performance.now() - t0
+    matches.setPairEnabled(pid, true)
+    const restored = await settle(excluded)
+    const diff = (a, b) => ({ added: Object.keys(b).filter((k) => !(k in a)), removed: Object.keys(a).filter((k) => !(k in b)) })
+    return { pair: pid, excludeMs: Math.round(excludeMs), before, excluded, restored,
+      onExclude: diff(before, excluded), onRestore: diff(excluded, restored) }
+  },
+
   // Reopen a project in a FRESH page (the runner reloads first), through the same
   // sequence useProjectLifecycle.openProject runs: switch → sensors → images ∥ stores.
   async reopen(id) {
@@ -544,6 +577,12 @@ window.bench = {
         if (had) Object.defineProperty(window, 'showSaveFilePicker', had)
         else delete window.showSaveFilePicker
       }
+    }
+    if (kind === 'keypoints' || kind === 'matches') {
+      // The sidebar's Keypoints / Matches JSON downloads (exports/tabular.js).
+      const t0 = performance.now()
+      await (kind === 'keypoints' ? ex.exportKeypoints() : ex.exportMatches())
+      return { seconds: (performance.now() - t0) / 1000 }
     }
     const target = cloud ? recon.clouds.find((c) => c.kind === cloud && !c.imported && !c.derived) : null
     if (cloud && !target) throw new Error(`exportRun: no ${cloud} cloud`)
