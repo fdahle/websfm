@@ -222,7 +222,7 @@ test('COG display renders in EPSG:3031 and GPU style changes preserve raw values
 })
 
 
-test('a restyled reference DEM still samples: the stale plane re-decodes from the original', async ({ page }) => {
+test('a restyled reference DEM still samples, from the plane it already holds', async ({ page }) => {
   await page.goto(harness)
   const result = await page.evaluate(async () => {
     const { writeGeoTiff, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
@@ -239,11 +239,17 @@ test('a restyled reference DEM still samples: the stale plane re-decodes from th
     // A stretch change re-reads the ranges and leaves the full-resolution plane stale.
     const meta = external.rasterById(r.id)
     await external.setRasterStyle(r.id, { ...meta.style, loPct: 5, hiPct: 95 })
+    // Elevations do not depend on the display style: the plane stays resident.
+    const kept = external.sources.has(r.id)
     const after = (await at(20))?.z
     const { useLog } = await import('/src/composables/useLog.js')
-    return { before, after, errors: useLog().entries.value.filter((e) => e.level === 'error').map((e) => e.message) }
+    const lines = useLog().entries.value
+    return { before, after, kept, rebuilt: lines.some((e) => /rebuilding full-resolution/.test(e.message)),
+      errors: lines.filter((e) => e.level === 'error').map((e) => e.message) }
   })
   expect(result.errors).toEqual([])
+  expect(result.kept).toBe(true)
+  expect(result.rebuilt).toBe(false)
   expect(result.before).toBeCloseTo(120, 3)
   expect(result.after).toBeCloseTo(120, 3)
 })
