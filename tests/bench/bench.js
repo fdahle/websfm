@@ -551,7 +551,7 @@ window.bench = {
   // as App.vue wires it). The files arrive as browser downloads; the runner saves them.
   //   kind: 'cloud' | 'mesh' | 'model' | 'colmap' | 'undistorted' | 'tiles3d' | 'dem' | 'ortho'
   //   cloud: 'sparse' | 'dense' | 'mesh' — aim a cloud/mesh export at that cloud
-  async exportRun({ kind, settings = {}, cloud = null }) {
+  async exportRun({ kind, settings = {}, cloud = null, cloudName = null }) {
     const { storeToRefs } = await import('pinia')
     const { useExports } = await import('/src/composables/useExports.js')
     const recon = useReconstructionStore(), projects = useProjectsStore()
@@ -584,7 +584,7 @@ window.bench = {
       await (kind === 'keypoints' ? ex.exportKeypoints() : ex.exportMatches())
       return { seconds: (performance.now() - t0) / 1000 }
     }
-    const target = cloud ? recon.clouds.find((c) => c.kind === cloud && !c.imported && !c.derived) : null
+    const target = cloud ? recon.clouds.find((c) => c.kind === cloud && (cloudName ? c.name === cloudName : !c.imported && !c.derived)) : null
     if (cloud && !target) throw new Error(`exportRun: no ${cloud} cloud`)
     if (target) ex.openCloudExport(target.id)
     else ex.exportKind.value = kind
@@ -860,6 +860,89 @@ window.bench = {
       afterPairs: { median: resPaired[resPaired.length >> 1], p95: resPaired[Math.floor(resPaired.length * 0.95)] },
       roundTrip: { median: res[res.length >> 1], p95: res[Math.floor(res.length * 0.95)], max: res[res.length - 1], relMedian: res[res.length >> 1] / diag },
       icpSettings, icpLog, distLog }
+  },
+
+  // Import ▸ Reference raster of the file on #bench-raster-file, as the import modal
+  // does, then the background display conversion (flushPendingWork).
+  async importRasterFile() {
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const ext = useExternalStore()
+    const file = document.getElementById('bench-raster-file')?.files?.[0]
+    if (!file) throw new Error('importRasterFile: no file on #bench-raster-file')
+    const t0 = performance.now()
+    const rec = await ext.importRaster(file)
+    const t1 = performance.now()
+    await ext.flushPendingWork()
+    const t2 = performance.now()
+    const meta = rec && ext.rasterById(rec.id)
+    return { ok: !!rec, bytes: file.size, importSeconds: (t1 - t0) / 1000, conversionSeconds: (t2 - t1) / 1000,
+      raster: meta ? { id: meta.id, name: meta.name, kind: meta.kind, width: meta.width, height: meta.height,
+        crs: meta.crs ?? null, gpuReady: !!meta.gpuReady } : null, projectCrs: projects.currentCrs }
+  },
+
+  // Sample the (last) reference DEM at points given in the project CRS, as Quality Report
+  // and the GCP Z fill do. `residentBefore`: whether its plane was in memory already.
+  async rasterSample({ points = [] } = {}) {
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const ext = useExternalStore()
+    const meta = ext.demRasters.at(-1)
+    if (!meta) throw new Error('rasterSample: no reference DEM')
+    const residentBefore = ext.sources.has(meta.id)
+    const out = []
+    const t0 = performance.now()
+    for (const [x, y] of points) {
+      const t = performance.now()
+      const r = await ext.sampleReferenceDem(x, y, { rasterId: meta.id })
+      out.push({ x, y, rasterXY: ext.toRasterCoords(meta, x, y), z: r?.z ?? null, ms: Math.round(performance.now() - t) })
+    }
+    return { raster: meta.name, crs: meta.crs, projectCrs: projects.currentCrs, residentBefore,
+      seconds: (performance.now() - t0) / 1000, samples: out }
+  },
+
+  // Restyle the last reference raster with a different stretch (a full re-read).
+  async rasterRestyle({ loPct = 5, hiPct = 95 } = {}) {
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const ext = useExternalStore()
+    const meta = ext.rasters.at(-1)
+    const t0 = performance.now()
+    const ok = await ext.setRasterStyle(meta.id, { ...meta.style, loPct, hiPct })
+    await ext.flushPendingWork()
+    return { ok, seconds: (performance.now() - t0) / 1000 }
+  },
+
+  // Tools ▸ Mesh ▾ on the computed mesh, as TOOL-03 runs it: Clean (defaults) →
+  // Decimate to 25 % → Smooth 10 → Clean with every hole closed → Area & volume.
+  // Each step makes a named copy (export them with `cloudName`).
+  async meshTools() {
+    const { CLEAN_MESH_DEFAULTS, SMOOTH_MESH_DEFAULTS, DECIMATE_MESH_DEFAULTS } = await import('/src/core/defaults.user.js')
+    const { meshMeasure } = await import('/src/core/products/meshEdit.js')
+    const src = recon.clouds.find((c) => c.kind === 'mesh' && !c.imported && !c.derived)
+    if (!src) throw new Error('meshTools: no computed mesh')
+    const steps = []
+    const run = async (label, mode, from, settings) => {
+      const t0 = performance.now()
+      const out = await recon.editClouds({ mode, sourceIds: [from.id], settings, name: label }, report)
+      steps.push({ label, mode, seconds: (performance.now() - t0) / 1000, triangles: out?.count ?? 0, vertices: out?.nVerts ?? null })
+      return out
+    }
+    const tris = src.count
+    const cleaned = await run('TOOL03 cleaned', 'mesh-clean', src, { ...CLEAN_MESH_DEFAULTS })
+    const decimated = await run('TOOL03 decimated', 'mesh-decimate', cleaned, { targetRatio: DECIMATE_MESH_DEFAULTS.targetRatio, preserveBoundary: DECIMATE_MESH_DEFAULTS.preserveBoundary })
+    const smoothed = await run('TOOL03 smoothed', 'mesh-smooth', decimated, { ...SMOOTH_MESH_DEFAULTS })
+    const closed = await run('TOOL03 closed', 'mesh-clean', cleaned, { ...CLEAN_MESH_DEFAULTS, maxHoleEdges: 0 })
+    const t0 = performance.now()
+    const m = meshMeasure(closed)
+    const measureSeconds = (performance.now() - t0) / 1000
+    return { source: { name: src.name, triangles: tris, vertices: src.nVerts }, steps, measure: { ...m, seconds: measureSeconds } }
+  },
+
+  // Georeferencing ▸ Georeference: the SfM → project-CRS similarity from GCPs, else the
+  // camera positions (EXIF GNSS / imported poses).
+  async georef() {
+    const t0 = performance.now()
+    const g = await recon.georeference()
+    return { seconds: (performance.now() - t0) / 1000, ok: !!g, crs: projects.currentCrs ?? null,
+      method: g?.method ?? null, count: g?.count ?? 0, rms: g?.rms ?? null, scale: g?.scale ?? null }
   },
 
   // Settings ▸ worker count, as the preference applies it: now if the pool is idle,

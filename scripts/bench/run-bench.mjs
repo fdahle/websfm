@@ -275,7 +275,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho', modeledit: 'modelEdit', scalebar: 'scaleBar', stats: 'modelStats', region: 'setRegion', regioncheck: 'regionCheck', togglepair: 'togglePair', aligncheck: 'alignCheck' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho', modeledit: 'modelEdit', scalebar: 'scaleBar', stats: 'modelStats', region: 'setRegion', regioncheck: 'regionCheck', togglepair: 'togglePair', aligncheck: 'alignCheck', georef: 'georef', rastersample: 'rasterSample', rasterstyle: 'rasterRestyle', meshtools: 'meshTools' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
@@ -603,6 +603,27 @@ try {
         }
         result.stages[entry] = r
         console.log(`== ${entry}: ${JSON.stringify({ ...r, stats: undefined })}`)
+        await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+        continue
+      }
+      if (entry.startsWith('importraster:')) {
+        // `importraster:<tag>`: Import ▸ Reference raster of cfg[entry].path.
+        const path = cfg[entry]?.path
+        if (!path) throw new Error(`${entry}: config needs { path }`)
+        await page.evaluate(() => {
+          document.getElementById('bench-raster-file')?.remove()
+          document.body.appendChild(Object.assign(document.createElement('input'), { type: 'file', id: 'bench-raster-file' }))
+        })
+        await page.setInputFiles('#bench-raster-file', path)
+        lastLogAt = Date.now()
+        let r
+        try {
+          r = await Promise.race([page.evaluate(() => window.bench.importRasterFile()), watchdog()])
+        } finally {
+          for (const t of watchdog.timers.splice(0)) clearInterval(t)
+        }
+        result.stages[entry] = r
+        console.log(`== ${entry}: ${JSON.stringify(r)}`)
         await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
         continue
       }
