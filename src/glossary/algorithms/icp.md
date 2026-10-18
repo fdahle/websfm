@@ -21,8 +21,9 @@ between paired points. But two scans sample a surface at different spots, so eve
 perfectly aligned clouds leave a residual of about one point spacing, and the solve
 keeps tugging the cloud along the surface. **Point-to-plane** measures each pair's
 distance along the reference's [surface normal](help:surface-normal) instead:
-sliding along a flat wall costs nothing, only moving off it does. It typically
-converges in a few iterations where point-to-point needs dozens, but it needs
+sliding along a flat wall costs nothing, only moving off it does. It needs
+far fewer iterations than point-to-point, often a few where point-to-point needs
+dozens (on a noisy dense cloud, a few tens against a hundred or more), but it needs
 normals on the reference.
 
 <!-- TODO(image): assets/icp-point-to-plane.svg - two offset, differently sampled copies of one curved surface; left, point-to-point pairs pulling sideways along the surface; right, point-to-plane residuals measured along the reference normals; below, the moving cloud over three iterations. -->
@@ -36,7 +37,7 @@ area that changed between the clouds, or appears in only one of them, does not d
 the fit. A mesh reference uses its vertices with area-weighted vertex normals; a
 reference cloud without normals falls back to point-to-point, and the log says so.
 **Also fit scale** adds a scale factor, for clouds from different instruments or
-reconstructions. The solve stops when the sample no longer moves, or after 30
+reconstructions. The solve stops when the sample no longer moves, or after 100
 iterations; the log reports the RMS distance, the rotation and the shift, and the
 aligned copy is added as a new cloud. See
 [Point Cloud Tools](guide:point-cloud-tools).

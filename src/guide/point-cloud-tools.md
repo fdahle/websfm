@@ -45,7 +45,10 @@ imported one. The dialogs show what that means for the current project.
   the clouds must already overlap within the **search radius**, so align roughly first
   (point pairs, Transform or georeferencing). With a reference that has normals (a
   mesh, or a cloud after *Estimate normals*) it uses point-to-plane matching, which
-  converges in a few iterations. The log reports the RMS, the rotation and the shift.
+  needs far fewer iterations than point-to-point: a few tens on a dense photogrammetry
+  cloud, against a hundred or more. It stops when the cloud no longer moves, or after
+  100 iterations; the log reports the RMS, the rotation and the shift, and warns when
+  the limit was reached first.
 
 ## Measure
 These are in **Tools → Measure ▾**, with the raster and mesh measurements.

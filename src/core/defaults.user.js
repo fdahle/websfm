@@ -469,7 +469,9 @@ export const GROUND_DEFAULTS = {
   extent: 'core',        // 'core' = the DEM's dense core (outside → class 0) | 'all'
 }
 export const ICP_DEFAULTS = {
-  maxIterations: 30,
+  // A real dense cloud (noisy normals) needs tens: South Building, 2° start, 40–71 in
+  // point-to-plane; at 30 it stopped 1.9 cm off. A converged run stops early.
+  maxIterations: 100,
   // Correspondence rejection radius, in the clouds' units. 0 ⇒ auto (10× the
   // source's point spacing) — ICP only refines; it needs a rough alignment first.
   maxDistance: 0,
