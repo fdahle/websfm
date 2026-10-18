@@ -20,6 +20,7 @@
 //     offset = bbox min and scale = max(span/2³¹·1.01, 1e-4) per axis, so survey
 //     coordinates keep ~mm precision; a round-trip is exact to the scale quantum.
 
+import { flatAxes } from '../products/flatAxes.js'
 import { geoKeysForEpsg } from '../products/geotiff.js'
 import { PART_BYTES } from './parts.js'
 
@@ -47,9 +48,7 @@ export function* cloudToLasParts(points, { crsCode = null, geographic = false, a
   partBytes = PART_BYTES } = {}) {
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
-  const getX = flat ? (i) => flat.pos[i * 3] : (i) => points[i].x
-  const getY = flat ? (i) => flat.pos[i * 3 + 1] : (i) => points[i].y
-  const getZ = flat ? (i) => flat.pos[i * 3 + 2] : (i) => points[i].z
+  const [getX, getY, getZ] = flat ? flatAxes(flat) : [(i) => points[i].x, (i) => points[i].y, (i) => points[i].z]
   const getC = flat
     ? (flat.col ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]] : () => null)
     : (i) => points[i].color
@@ -489,6 +488,10 @@ export function decodeLasPoints(pointBytes, count, recordLength, format, scale, 
 // from `bytes` (n whole records), finish() returns the cloud. `rgbBits` (8 | 16)
 // fixes the colour depth when the decoder sees only part of the file (a streamed
 // import decides it for the whole file from a sample); otherwise it is detected.
+// The value a writer (encodeLasPoints) puts in a standard field the cloud does not
+// carry; the decoder leaves out a field that holds it for every point. Not listed: 0.
+export const LAS_FIELD_DEFAULTS = Object.freeze({ returnNumber: 1, numberOfReturns: 1 })
+
 export function createLasDecoder(count, recordLength, format, scale, offset, extraBytes = [], { rgbBits = null } = {}) {
   if (!SUPPORTED_FORMATS.has(format) || recordLength < RECORD_MIN[format]) {
     throw new Error('Truncated or invalid LAS point records')
@@ -501,22 +504,26 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
   // (see finish()).
   let low = hasRgb ? new Uint8Array(count * 3) : null
   const modern = format >= 6
-  const attributes = {
-    intensity: new Uint16Array(count), classification: new Uint8Array(count),
-    returnNumber: new Uint8Array(count), numberOfReturns: new Uint8Array(count),
-    scanAngle: new Float32Array(count), pointSourceId: new Uint16Array(count),
-    userData: new Uint8Array(count), synthetic: new Uint8Array(count),
-    keyPoint: new Uint8Array(count), withheld: new Uint8Array(count),
-    scanDirection: new Uint8Array(count), edgeOfFlightLine: new Uint8Array(count),
+  // Standard fields, each allocated at its first value other than the one the writers
+  // emit when the field is missing (LAS_FIELD_DEFAULTS: 0, but "return 1 of 1"): a field
+  // at that value throughout (no intensity, never classified, no GPS time, single
+  // returns — every cloud websfm writes) carries nothing and was ~29 B/point of arrays,
+  // and leaving it out still writes the same records back. A file whose return numbers
+  // are all 0 keeps them, so it is written with 0 again.
+  const std = {
+    intensity: null, classification: null, returnNumber: null, numberOfReturns: null,
+    scanAngle: null, pointSourceId: null, userData: null, synthetic: null, keyPoint: null,
+    withheld: null, scanDirection: null, edgeOfFlightLine: null,
+    ...(modern || format === 1 || format === 3 ? { gpsTime: null } : {}),
+    ...(modern ? { overlap: null, scannerChannel: null } : {}),
+    ...(format === 8 ? { nir: null } : {}),
   }
-  if (modern || format === 1 || format === 3) attributes.gpsTime = new Float64Array(count)
-  if (modern) {
-    attributes.overlap = new Uint8Array(count)
-    attributes.scannerChannel = new Uint8Array(count)
-  }
-  if (format === 8) attributes.nir = new Uint16Array(count)
+  const U8 = (k) => (std[k] ??= new Uint8Array(count))
+  const U16 = (k) => (std[k] ??= new Uint16Array(count))
+  const R = (k) => (std[k] ??= new Uint8Array(count).fill(LAS_FIELD_DEFAULTS[k]))
   // Extra bytes start after the standard record. A field that would run past the
   // record (a descriptor list longer than the records it describes) is ignored.
+  const extraAttributes = {}
   const base = RECORD_MIN[format]
   const extras = []
   for (const e of extraBytes || []) {
@@ -527,7 +534,7 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
     const values = new (transform ? Float64Array : ArrayType)(count)
     extras.push({ at, getter, big: getter.startsWith('getBig'), transform, k: e.scale ?? 1, add: e.add ?? 0, values })
     // Own data property even for a hostile name like "__proto__".
-    Object.defineProperty(attributes, e.name, { value: values, enumerable: true, writable: true, configurable: true })
+    Object.defineProperty(extraAttributes, e.name, { value: values, enumerable: true, writable: true, configurable: true })
   }
   let rgbMax = 0
 
@@ -538,27 +545,28 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
       pos[i * 3] = dv.getInt32(p, true) * scale[0] + offset[0]
       pos[i * 3 + 1] = dv.getInt32(p + 4, true) * scale[1] + offset[1]
       pos[i * 3 + 2] = dv.getInt32(p + 8, true) * scale[2] + offset[2]
-      attributes.intensity[i] = dv.getUint16(p + 12, true)
+      let v = dv.getUint16(p + 12, true)
+      if (v) U16('intensity')[i] = v
       const returns = dv.getUint8(p + 14)
       const flags = dv.getUint8(p + 15)
-      attributes.returnNumber[i] = returns & (modern ? 15 : 7)
-      attributes.numberOfReturns[i] = (returns >> (modern ? 4 : 3)) & (modern ? 15 : 7)
-      attributes.classification[i] = modern ? dv.getUint8(p + 16) : flags & 31
+      if ((v = returns & (modern ? 15 : 7)) !== 1) R('returnNumber')[i] = v
+      if ((v = (returns >> (modern ? 4 : 3)) & (modern ? 15 : 7)) !== 1) R('numberOfReturns')[i] = v
+      if ((v = modern ? dv.getUint8(p + 16) : flags & 31)) U8('classification')[i] = v
       const classFlags = modern ? flags : flags >> 5
-      attributes.synthetic[i] = classFlags & 1
-      attributes.keyPoint[i] = (classFlags >> 1) & 1
-      attributes.withheld[i] = (classFlags >> 2) & 1
-      attributes.scanDirection[i] = ((modern ? flags : returns) >> 6) & 1
-      attributes.edgeOfFlightLine[i] = ((modern ? flags : returns) >> 7) & 1
-      attributes.scanAngle[i] = modern ? dv.getInt16(p + 18, true) * 0.006 : dv.getInt8(p + 16)
-      attributes.userData[i] = dv.getUint8(p + 17)
-      attributes.pointSourceId[i] = dv.getUint16(p + (modern ? 20 : 18), true)
-      if (attributes.gpsTime) attributes.gpsTime[i] = dv.getFloat64(p + (modern ? 22 : 20), true)
+      if (classFlags & 1) U8('synthetic')[i] = 1
+      if ((classFlags >> 1) & 1) U8('keyPoint')[i] = 1
+      if ((classFlags >> 2) & 1) U8('withheld')[i] = 1
+      if (((modern ? flags : returns) >> 6) & 1) U8('scanDirection')[i] = 1
+      if (((modern ? flags : returns) >> 7) & 1) U8('edgeOfFlightLine')[i] = 1
+      if ((v = modern ? dv.getInt16(p + 18, true) * 0.006 : dv.getInt8(p + 16))) (std.scanAngle ??= new Float32Array(count))[i] = v
+      if ((v = dv.getUint8(p + 17))) U8('userData')[i] = v
+      if ((v = dv.getUint16(p + (modern ? 20 : 18), true))) U16('pointSourceId')[i] = v
+      if ('gpsTime' in std && (v = dv.getFloat64(p + (modern ? 22 : 20), true))) (std.gpsTime ??= new Float64Array(count))[i] = v
       if (modern) {
-        attributes.overlap[i] = (flags >> 3) & 1
-        attributes.scannerChannel[i] = (flags >> 4) & 3
+        if ((flags >> 3) & 1) U8('overlap')[i] = 1
+        if ((v = (flags >> 4) & 3)) U8('scannerChannel')[i] = v
       }
-      if (attributes.nir) attributes.nir[i] = dv.getUint16(p + 36, true)
+      if ('nir' in std && (v = dv.getUint16(p + 36, true))) U16('nir')[i] = v
       if (col) {
         const r = dv.getUint16(p + rgbOff, true), g = dv.getUint16(p + rgbOff + 2, true), b = dv.getUint16(p + rgbOff + 4, true)
         if (r > rgbMax) rgbMax = r; if (g > rgbMax) rgbMax = g; if (b > rgbMax) rgbMax = b
@@ -582,6 +590,8 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
     // exceed 255 is 8-bit: use the colour words unshifted.
     const eightBit = rgbBits ? rgbBits === 8 : rgbMax > 0 && rgbMax <= 255
     const outCol = col && eightBit ? low : col
+    const attributes = Object.assign(
+      Object.fromEntries(Object.entries(std).filter(([, values]) => values)), extraAttributes)
     return { count, pos, ...(outCol ? { col: outCol } : {}), attributes }
   }
 

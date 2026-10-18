@@ -67,18 +67,52 @@ async function withFileLock(key, fn) {
  */
 async function writeFileIn(dir, filename, data, { append = false } = {}) {
   return withFileLock(`${dir.name}/${filename}`, async () => {
-    const fh = await dir.getFileHandle(filename, { create: true })
-    const size = append ? (await fh.getFile()).size : 0
-    const writable = await fh.createWritable(append ? { keepExistingData: true } : undefined)
     try {
-      if (append) await writable.seek(size)
-      if (data != null) await writable.write(data)
-      await writable.close()
+      const fh = await dir.getFileHandle(filename, { create: true })
+      const size = append ? (await fh.getFile()).size : 0
+      const writable = await fh.createWritable(append ? { keepExistingData: true } : undefined)
+      try {
+        if (append) await writable.seek(size)
+        if (data != null) await writable.write(data)
+        await writable.close()
+      } catch (error) {
+        await writable.abort?.().catch(() => {})
+        throw error
+      }
     } catch (error) {
-      await writable.abort?.().catch(() => {})
-      throw error
+      throw isStorageFull(error) || await outOfSpace(data) ? storageFullError(filename, error) : error
     }
   })
+}
+
+// Out of space: the browser's quota for this site (OPFS), or the disk under it or
+// under a folder-backed project. The raw errors do not say what to do, so a write
+// that fails this way says it here, once. Chromium names a plain over-quota write
+// QuotaExceededError, but a write that runs out part-way (depth planes, 2026-10-17,
+// both under a capped site quota and on a full filesystem) fails as AbortError
+// "Failed to write data to data pipe": the bytes could not be put on disk. Neither
+// case shows in navigator.storage.estimate(), so the space left is only a third test.
+const PIPE_WRITE_FAILED = /failed to write data to data pipe/i
+export const isStorageFull = (error) => error?.name === 'QuotaExceededError' || error?.storageFull === true
+  || (error?.name === 'AbortError' && PIPE_WRITE_FAILED.test(error?.message ?? ''))
+async function outOfSpace(data) {
+  try {
+    const { usage, quota } = await navigator.storage.estimate()
+    const bytes = data?.byteLength ?? data?.size ?? (typeof data === 'string' ? data.length : 0)
+    return Number.isFinite(quota) && quota - usage < Math.max(bytes, 1 << 20)
+  } catch {
+    return false
+  }
+}
+function storageFullError(filename, cause) {
+  if (cause?.storageFull) return cause
+  const err = new Error('Storage is full: the browser or the disk refused to save project data. Free space (delete '
+    + 'projects you no longer need, or Project settings… ▸ Clear derived data), or move this project to a folder on '
+    + `disk, then run the step again. (${filename})`)
+  err.name = 'QuotaExceededError'
+  err.storageFull = true
+  err.cause = cause
+  return err
 }
 
 async function writeJson(dir, filename, data) {
@@ -278,7 +312,7 @@ export async function deleteOpfsProjectTree(projectId) {
 // future, copied between storage backends — without either of them knowing what
 // any individual file means.
 //
-// `walkProjectFiles` yields `{ relPath, file }` depth-first, `relPath` always
+// `walkProjectFiles` yields `{ relPath, file, handle }` depth-first, `relPath` always
 // '/'-joined and relative to the project dir. `skip(relPath, kind)` is consulted
 // for both files and directories, so skipping a directory prunes the subtree
 // (that is what makes "exclude derived data" cheap rather than a per-file test).
@@ -288,7 +322,7 @@ async function* walkDir(dir, prefix, skip) {
     const relPath = prefix ? `${prefix}/${name}` : name
     if (skip?.(relPath, handle.kind)) continue
     if (handle.kind === 'directory') yield* walkDir(handle, relPath, skip)
-    else yield { relPath, file: await handle.getFile() }
+    else yield { relPath, file: await handle.getFile(), handle }
   }
 }
 
@@ -300,6 +334,57 @@ export async function* walkProjectFiles(projectId, { skip = null } = {}) {
     return   // no such project — an empty walk, matching the "absence is empty" convention
   }
   yield* walkDir(dir, '', skip)
+}
+
+// ── Binary documents as one unit (the .websfm save, utils/projectFile.js) ─────
+// A binary document (binaryDocument.js) is a metadata file plus the generation files
+// it names, and a save replaces the metadata and then collects the old generation.
+// A walk taken minutes earlier can therefore pair one save's metadata with another's
+// files. The project file archives each document as a unit instead: under the lock
+// its readers and writers hold (so no save commits or collects meanwhile), it reads
+// the metadata and the files that metadata names.
+//
+// `binaryDocumentLockKey(projectId, relPath)` → the lock of the document whose metadata
+// is at `relPath`, or null when `relPath` is not one. `binaryDocumentOf(relPath)` → the
+// metadata path a generation file (`<doc>.<generation>.<key>.bin`) belongs to, or null.
+const BINARY_DOCUMENTS = [
+  { re: /^reconstruction\.json$/, lock: (id) => `reconstruction:${id}` },
+  { re: /^matches\/matches\.json$/, lock: (id) => `matches:${id}` },
+  { re: /^products\/([^/]+)\.json$/, lock: (id, m) => `product:${id}:${m[1]}` },
+]
+
+export function binaryDocumentLockKey(projectId, relPath) {
+  for (const { re, lock } of BINARY_DOCUMENTS) {
+    const m = re.exec(String(relPath))
+    if (m) return lock(projectId, m)
+  }
+  return null
+}
+
+export function binaryDocumentOf(relPath) {
+  const m = /^(.+?\.json)\.[^/]+\.bin$/.exec(String(relPath))
+  return m && binaryDocumentLockKey('', m[1]) ? m[1] : null
+}
+
+/** Run `work` under the lock of the binary document at `relPath` (see above). */
+export function withBinaryDocumentLock(projectId, relPath, work) {
+  const key = binaryDocumentLockKey(projectId, relPath)
+  if (!key) throw new Error(`not a binary document: ${relPath}`)
+  return persistenceLock(key, work)
+}
+
+/** The project file at `relPath` ('/'-joined) as a File snapshot, or null when absent. */
+export async function getProjectFile(projectId, relPath) {
+  const parts = String(relPath).split('/')
+  if (parts.some((p) => !p || p === '.' || p === '..')) throw new Error(`unsafe project path "${relPath}"`)
+  try {
+    let dir = await getProjectDir(projectId)
+    for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part)
+    return await (await dir.getFileHandle(parts[parts.length - 1])).getFile()
+  } catch (error) {
+    if (error?.name === 'NotFoundError' || error?.name === 'TypeMismatchError') return null
+    throw error
+  }
 }
 
 // Remove only artifacts that are safe to regenerate. Source images,

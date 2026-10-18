@@ -26,6 +26,7 @@
 import { asKeypoints } from '../features/keypoints.js'
 import { makeNameResolver as makeIdResolver } from './nameMatch.js'
 import { PART_BYTES, PART_CHARS, lineParts, chunkedByteWriter } from './parts.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
 // ── Rotation ↔ quaternion (Hamilton, world-to-cam) ───────────────────────────
 
@@ -593,11 +594,10 @@ export function makeNameResolver(loaded) {
 // images are dropped, as are points left with no matched view.
 //
 // Imported points carry no websfm keypoint indices (there are no store keypoints
-// behind them), so `views` gets a synthetic per-image running index — dense only
-// reads the view *uuids* (`mvs.js` `pt.views.map(([u])=>u)`), never the index — while
-// the real pixel rides in `viewsPx`, the frame COLMAP re-export reads.
-//   → { cameras: Map<uuid,{R,t,K}>,
-//       points: [{ x, y, z, color, error, views: Map<uuid,idx>, viewsPx: Map<uuid,[x,y]> }],
+// behind them), so each view gets a synthetic per-image running index — dense only
+// reads the view *uuids*, never the index — while the real pixel rides in the view's
+// vx/vy, the frame COLMAP re-export reads.
+//   → { cameras: Map<uuid,{R,t,K}>, points: SparsePoints,
 //       matched: [{ name, uuid }], unmatched: [name] }
 export function colmapToSparse({ images, points }, resolveUuid) {
   const uuidByImageId = new Map()
@@ -615,23 +615,34 @@ export function colmapToSparse({ images, points }, resolveUuid) {
     matched.push({ name: im.name, uuid })
   }
 
-  const outPoints = []
+  // Straight into columns: an import can be millions of points.
+  const viewUuids = [...cameras.keys()]
+  const camIdx = new Map(viewUuids.map((u, i) => [u, i]))
+  const pos = [], col = [], mask = [], vcount = [], vcam = [], vkp = [], vx = [], vy = []
+  let anyColor = false
+  const seen = new Set()
   for (const p of points) {
-    const views = new Map()
-    const viewsPx = new Map()
+    seen.clear()
+    const n0 = vcam.length
     for (const v of p.views) {
       const uuid = uuidByImageId.get(v.imageId)
-      if (!uuid || views.has(uuid)) continue // unmatched image, or a repeat obs
+      if (!uuid || seen.has(uuid)) continue // unmatched image, or a repeat obs
+      seen.add(uuid)
       const idx = kpNext.get(uuid); kpNext.set(uuid, idx + 1)
-      views.set(uuid, idx)
-      viewsPx.set(uuid, [v.x, v.y])
+      vcam.push(camIdx.get(uuid)); vkp.push(idx); vx.push(v.x); vy.push(v.y)
     }
-    if (!views.size) continue // observed only in unmatched images
-    outPoints.push({
-      x: p.xyz[0], y: p.xyz[1], z: p.xyz[2],
-      color: p.color, error: p.error, views, viewsPx,
-    })
+    if (vcam.length === n0) continue // observed only in unmatched images
+    vcount.push(vcam.length - n0)
+    pos.push(p.xyz[0], p.xyz[1], p.xyz[2])
+    if (p.color) { anyColor = true; col.push(p.color[0], p.color[1], p.color[2]); mask.push(1) }
+    else { col.push(0, 0, 0); mask.push(0) }
   }
+  const outPoints = new SparsePoints({
+    pos: Float64Array.from(pos), viewUuids,
+    col: anyColor ? Uint8Array.from(col) : null, colorMask: anyColor ? Uint8Array.from(mask) : null,
+    vcount: Uint32Array.from(vcount), vcam: Uint32Array.from(vcam), vkp: Uint32Array.from(vkp),
+    vx: Float32Array.from(vx), vy: Float32Array.from(vy),
+  })
 
   return { cameras, points: outPoints, matched, unmatched }
 }

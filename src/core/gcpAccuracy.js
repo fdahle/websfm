@@ -117,3 +117,18 @@ export function normalizedGroundResidual(gcp, residual) {
   return { chi2, normalized: Math.sqrt(Math.max(0, chi2)),
     axes: residual.map((value, i) => value / gcp[['accuracyX','accuracyY','accuracyZ'][i]]) }
 }
+
+// √(rᵀ Σ⁻¹ r) for a 3-D residual and its covariance (null when Σ is not positive
+// definite) — the normalised residual, with `axes` the per-axis rᵢ / √Σᵢᵢ.
+export function normalizedWithCovariance(residual, covariance) {
+  if (!covariance || !residual?.every(Number.isFinite)) return null
+  if (!(covariance[0][0] > 0 && covariance[1][1] > 0 && covariance[2][2] > 0)) return null
+  const P = invert3(covariance)
+  if (!P) return null
+  const chi2 = residual.reduce((s, ri, i) => s + ri * P[i].reduce((t, v, j) => t + v * residual[j], 0), 0)
+  if (!(chi2 >= 0)) return null
+  return { chi2, normalized: Math.sqrt(chi2), axes: residual.map((v, i) => v / Math.sqrt(covariance[i][i])) }
+}
+
+export const addCovariance = (a, b) => a.map((row, i) => row.map((v, j) => v + b[i][j]))
+export const subCovariance = (a, b) => a.map((row, i) => row.map((v, j) => v - b[i][j]))

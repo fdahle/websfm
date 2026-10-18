@@ -9,30 +9,12 @@
 // viewUuids[vcam[k]] for k in [vstart[i], vstart[i+1]) — what source-view selection
 // scores. Positions are what Stage A projects, so they stay Float64.
 
-/** Pack sparse points ({ x, y, z, views } with views a Map / PackedViewSlice / [[uuid, kp]]). */
+/** Pack a SparsePoints cloud: copies of its positions and camera tracks (transferred). */
 export function packSparseForDense(points) {
   const n = points?.length ?? 0
-  const pos = new Float64Array(3 * n)
-  for (let i = 0; i < n; i++) { const p = points[i]; pos[3 * i] = p.x; pos[3 * i + 1] = p.y; pos[3 * i + 2] = p.z }
-  const tracks = points?.packedTracks
-  if (tracks && tracks.vcount?.length === n) {
-    // A restored / freshly computed cloud already holds its tracks as CSR.
-    const vstart = new Uint32Array(n + 1)
-    for (let i = 0; i < n; i++) vstart[i + 1] = vstart[i] + tracks.vcount[i]
-    return { n, pos, vstart, vcam: tracks.vcam.slice(0, vstart[n]), viewUuids: [...tracks.viewUuids] }
-  }
-  const index = new Map(), viewUuids = []
-  const vstart = new Uint32Array(n + 1)
-  for (let i = 0; i < n; i++) vstart[i + 1] = vstart[i] + (points[i].views?.size ?? points[i].views?.length ?? 0)
-  const vcam = new Uint32Array(vstart[n])
-  for (let i = 0, k = 0; i < n; i++) {
-    for (const [uuid] of points[i].views ?? []) {
-      let c = index.get(uuid)
-      if (c === undefined) { c = viewUuids.length; index.set(uuid, c); viewUuids.push(uuid) }
-      vcam[k++] = c
-    }
-  }
-  return { n, pos, vstart, vcam, viewUuids }
+  if (!n) return { n: 0, pos: new Float64Array(0), vstart: new Uint32Array(1), vcam: new Uint32Array(0), viewUuids: [] }
+  return { n, pos: points.pos.slice(0, 3 * n), vstart: points.vstart.slice(), vcam: points.vcam.slice(0, points.viewTotal),
+    viewUuids: [...points.viewUuids] }
 }
 
 /** The buffers to transfer. */

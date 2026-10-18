@@ -39,6 +39,27 @@ describe('buildPyramidFromTiff → readLevelRect', () => {
     for (let i = 0; i < w * h; i += 97) expect(L2.data[i * 4]).toBe(want[i])
   })
 
+  it('builds a one-channel pyramid from a gray scan that is not 8/16-bit (readRGB path)', async () => {
+    const W = 90, H = 50
+    for (const [bps, fmt, Arr, at] of [[32, 3, Float32Array, (i) => (i % 97) / 97], [4, 1, Uint8Array, (i) => i % 16]]) {
+      const px = Arr.from({ length: W * H }, (_, i) => at(i))
+      const buf = writeArrayBuffer(px, {
+        width: W, height: H, SamplesPerPixel: 1, BitsPerSample: [bps], SampleFormat: [fmt],
+        PhotometricInterpretation: 1, PlanarConfiguration: 1,
+      })
+      const desc = await buildPyramidFromTiff(new Blob([buf]), { tileSize: 32, minLong: 20, previews: false })
+      expect(desc.index.channels).toBe(1)
+      const src = await openPyramid(desc)
+      const r = readNativeRect(src, { x0: 0, y0: 0, x1: W, y1: H })
+      expect([r.width, r.height]).toEqual([W, H])
+      // Gray in R = G = B, opaque.
+      for (const i of [0, 33, W * H - 1]) {
+        expect(r.data[i * 4]).toBe(r.data[i * 4 + 1])
+        expect(r.data[i * 4 + 3]).toBe(255)
+      }
+    }
+  })
+
   it('keeps RGB channels and clips a rect at the image edge', async () => {
     const W = 130, H = 70
     const { px, blob } = testImage(W, H, 3)

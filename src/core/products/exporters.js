@@ -3,7 +3,10 @@
 // cells are generators of bounded PARTS (core/io/parts.js); the caller folds them
 // into a Blob (utils/blobParts.js partsToBlob) and triggers the download.
 
+import { flatAxes } from './flatAxes.js'
+import { MAX_FLOAT64_XYZ_POINTS } from '../bufferLimit.js'
 import { writeGeoTiff, writeCogDeflate, geoKeysForEpsg } from './geotiff.js'
+import { bigSet } from '../bigCollections.js'
 import { applySimilarity } from './georef.js'
 import { createVoxelAccumulator } from '../dense/voxelAccumulator.js'
 import { PART_BYTES, PART_CHARS, lineParts, recordParts, lazyArray } from '../io/parts.js'
@@ -43,25 +46,38 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
   if (hadNormals) onLog?.('Export: normals dropped (georeference/downsample applied)', 'info', 'Export')
   const attrs = flat && flat.attributes && Object.keys(flat.attributes).length ? flat.attributes : null
 
-  // Pass 1: transformed coordinates + bbox. Held as one Float64Array (flat).
-  const xyz = new Float64Array(n * 3)
+  // Pass 1: the transformed bbox. No copy of the cloud: `at(i)` transforms one point
+  // whenever it is needed, so a 95 M-point export does not build a 2.3 GB Float64
+  // plane next to the cloud (the browser refuses one past 2 GiB, core/bufferLimit.js).
+  const at = sim ? (i) => applySimilarity(sim, getP(i)) : getP
   let minX = Infinity, minY = Infinity, minZ = Infinity
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
   for (let i = 0; i < n; i++) {
-    const p = sim ? applySimilarity(sim, getP(i)) : getP(i)
-    xyz[i * 3] = p[0]; xyz[i * 3 + 1] = p[1]; xyz[i * 3 + 2] = p[2]
+    const p = at(i)
     if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0]
     if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1]
     if (p[2] < minZ) minZ = p[2]; if (p[2] > maxZ) maxZ = p[2]
   }
   if (!down) {
+    // Every point is written, so its transformed position is a full plane: Float64 as
+    // before when it fits one buffer, else Float32 relative to the bbox centre with
+    // `origin` (core/products/flatAxes.js; sub-millimetre over a kilometre-sized survey).
+    const relative = n > MAX_FLOAT64_XYZ_POINTS
+    const origin = relative ? [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2] : null
+    const xyz = relative ? new Float32Array(n * 3) : new Float64Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      const p = at(i)
+      if (relative) { xyz[i * 3] = p[0] - origin[0]; xyz[i * 3 + 1] = p[1] - origin[1]; xyz[i * 3 + 2] = p[2] - origin[2] }
+      else { xyz[i * 3] = p[0]; xyz[i * 3 + 1] = p[1]; xyz[i * 3 + 2] = p[2] }
+    }
+    if (relative) onLog?.(`Export: ${n.toLocaleString()} points written relative to an origin (one Float64 plane would pass the 2 GiB buffer limit)`, 'debug', 'Export')
     const col = hasCol ? new Uint8Array(n * 3) : null
     if (col) for (let i = 0; i < n; i++) { const c = getC(i) || [200, 200, 200]; col.set(c.map(byte), i * 3) }
     // Shared, not copied: nothing downstream writes into them.
     const attributes = attrs ? Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, v.subarray(0, n)])) : null
-    return { count: n, pos: xyz, ...(col ? { col } : {}), ...(attributes ? { attributes } : {}) }
+    return { count: n, pos: xyz, ...(origin ? { origin } : {}), ...(col ? { col } : {}), ...(attributes ? { attributes } : {}) }
   }
-  if (attrs) return firstPointPerCell({ n, xyz, hasCol, getC, attrs, cell, min: [minX, minY, minZ], onLog })
+  if (attrs) return firstPointPerCell({ n, at, hasCol, getC, attrs, cell, min: [minX, minY, minZ], max: [maxX, maxY, maxZ], onLog })
 
   // Pass 2: voxel downsample. Shift the frame to a cell-aligned origin near the
   // bbox so the accumulator's Float32 finalize keeps precision on CRS-sized
@@ -73,57 +89,62 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
   })
   for (let i = 0; i < n; i++) {
     const c = (hasCol && getC(i)) || [200, 200, 200]
-    acc.add(xyz[i * 3] - shift[0], xyz[i * 3 + 1] - shift[1], xyz[i * 3 + 2] - shift[2], byte(c[0]), byte(c[1]), byte(c[2]))
+    const p = at(i)
+    acc.add(p[0] - shift[0], p[1] - shift[1], p[2] - shift[2], byte(c[0]), byte(c[1]), byte(c[2]))
   }
   const merged = acc.finalizeFlat() // [x,y,z,r,g,b] per cell
   const m = merged.length / 6
-  const pos = new Float64Array(m * 3)
+  // Past the buffer wall the cells stay relative to `shift` (their Float32 frame already).
+  const relative = m > MAX_FLOAT64_XYZ_POINTS
+  const pos = relative ? new Float32Array(m * 3) : new Float64Array(m * 3)
   const col = hasCol ? new Uint8Array(m * 3) : null
   for (let i = 0; i < m; i++) {
     const s = i * 6, d = i * 3
-    pos[d] = merged[s] + shift[0]; pos[d + 1] = merged[s + 1] + shift[1]; pos[d + 2] = merged[s + 2] + shift[2]
+    if (relative) { pos[d] = merged[s]; pos[d + 1] = merged[s + 1]; pos[d + 2] = merged[s + 2] }
+    else { pos[d] = merged[s] + shift[0]; pos[d + 1] = merged[s + 1] + shift[1]; pos[d + 2] = merged[s + 2] + shift[2] }
     if (col) { col[d] = merged[s + 3]; col[d + 1] = merged[s + 4]; col[d + 2] = merged[s + 5] }
   }
   onLog?.(`Export: voxel downsample ${cell} → ${m.toLocaleString()} of ${n.toLocaleString()} points kept`, 'info', 'Export')
-  return { count: m, pos, ...(col ? { col } : {}) }
+  return { count: m, pos, ...(relative ? { origin: shift } : {}), ...(col ? { col } : {}) }
 }
 
 // Voxel downsample that keeps the first point of each cell, whole: its (already
 // transformed) position, colour and every attribute. Cell ids are packed into one
 // number when the grid fits 2⁵³ cells (the usual case), else a string key — never a
 // per-point object.
-function firstPointPerCell({ n, xyz, hasCol, getC, attrs, cell, min, onLog }) {
-  const dims = [0, 1, 2].map((a) => {
-    let max = -Infinity
-    for (let i = 0; i < n; i++) if (xyz[i * 3 + a] > max) max = xyz[i * 3 + a]
-    return Math.floor((max - min[a]) / cell) + 1
-  })
+function firstPointPerCell({ n, at, hasCol, getC, attrs, cell, min, max, onLog }) {
+  const dims = [0, 1, 2].map((a) => Math.floor((max[a] - min[a]) / cell) + 1)
   const packed = dims[0] * dims[1] * dims[2] <= Number.MAX_SAFE_INTEGER
-  const seen = new Set()
+  const seen = bigSet(n) // one key per occupied cell: past 2²⁴ a plain Set throws
   const keep = new Uint32Array(n)
   let m = 0
   for (let i = 0; i < n; i++) {
-    const ix = Math.floor((xyz[i * 3] - min[0]) / cell)
-    const iy = Math.floor((xyz[i * 3 + 1] - min[1]) / cell)
-    const iz = Math.floor((xyz[i * 3 + 2] - min[2]) / cell)
+    const p = at(i)
+    const ix = Math.floor((p[0] - min[0]) / cell)
+    const iy = Math.floor((p[1] - min[1]) / cell)
+    const iz = Math.floor((p[2] - min[2]) / cell)
     const key = packed ? ix + dims[0] * (iy + dims[1] * iz) : `${ix},${iy},${iz}`
     if (seen.has(key)) continue
     seen.add(key)
     keep[m++] = i
   }
-  const pos = new Float64Array(m * 3)
+  // Past the buffer wall the kept points are stored relative to the grid's corner.
+  const origin = m > MAX_FLOAT64_XYZ_POINTS ? min : null
+  const pos = origin ? new Float32Array(m * 3) : new Float64Array(m * 3)
   const col = hasCol ? new Uint8Array(m * 3) : null
   const attributes = Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, new v.constructor(m)]))
   const lists = Object.entries(attrs).map(([k, v]) => [v, attributes[k]])
   for (let j = 0; j < m; j++) {
     const i = keep[j]
-    pos[j * 3] = xyz[i * 3]; pos[j * 3 + 1] = xyz[i * 3 + 1]; pos[j * 3 + 2] = xyz[i * 3 + 2]
+    const p = at(i)
+    if (origin) { pos[j * 3] = p[0] - origin[0]; pos[j * 3 + 1] = p[1] - origin[1]; pos[j * 3 + 2] = p[2] - origin[2] }
+    else { pos[j * 3] = p[0]; pos[j * 3 + 1] = p[1]; pos[j * 3 + 2] = p[2] }
     if (col) { const c = getC(i) || [200, 200, 200]; col[j * 3] = byte(c[0]); col[j * 3 + 1] = byte(c[1]); col[j * 3 + 2] = byte(c[2]) }
     for (const [src, dst] of lists) dst[j] = src[i]
   }
   onLog?.(`Export: voxel downsample ${cell} → ${m.toLocaleString()} of ${n.toLocaleString()} points kept `
     + `(one real point per cell, so its attributes ${Object.keys(attrs).join(', ')} stay observed values)`, 'info', 'Export')
-  return { count: m, pos, ...(col ? { col } : {}), attributes }
+  return { count: m, pos, ...(origin ? { origin } : {}), ...(col ? { col } : {}), attributes }
 }
 
 // Apply the same optional target-frame similarity to an indexed mesh while
@@ -158,9 +179,7 @@ export function* cloudToPlyParts(points, { binary = true, color = true, normals 
   partBytes = PART_BYTES, partChars = PART_CHARS } = {}) {
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
-  const getX = flat ? (i) => flat.pos[i*3]   : (i) => points[i].x
-  const getY = flat ? (i) => flat.pos[i*3+1] : (i) => points[i].y
-  const getZ = flat ? (i) => flat.pos[i*3+2] : (i) => points[i].z
+  const [getX, getY, getZ] = flat ? flatAxes(flat) : [(i) => points[i].x, (i) => points[i].y, (i) => points[i].z]
   const getC = flat
     ? (flat.col ? (i) => [flat.col[i*3], flat.col[i*3+1], flat.col[i*3+2]] : () => null)
     : (i) => points[i].color
@@ -522,8 +541,8 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
 }
 
 // ── Reconstruction → JSON (cameras + tracks) ─────────────────────────────────
-// cameras: [{ uuid, R, t, K? }], points: [{ x, y, z, color?, views? }] — `views`
-// an array of [uuid, kpIdx] or a Map uuid → kpIdx. Camera centres (C = −Rᵀt) are
+// cameras: [{ uuid, R, t, K? }], points: SparsePoints — each point's views written
+// as [[uuid, kpIdx], …]. Camera centres (C = −Rᵀt) are
 // precomputed for convenience. Returns the document with `points` as a lazyArray
 // (core/io/parts.js): serialize it with `jsonParts`, which writes one point at a
 // time instead of materializing a copy of the cloud. `tracks: false` writes every
@@ -541,12 +560,9 @@ export function reconstructionToJson(cameras, points, crs = 'local', { tracks = 
       center: cameraCenter(c.R, c.t),
     })),
     points: lazyArray(points.length, (i) => {
-      const p = points[i]
-      return {
-        x: p.x, y: p.y, z: p.z,
-        color: p.color ?? null,
-        views: !tracks || !p.views ? [] : p.views instanceof Map ? [...p.views.entries()] : p.views,
-      }
+      const views = []
+      if (tracks) points.forEachView(i, (uuid, kp) => { views.push([uuid, kp]) })
+      return { x: points.x(i), y: points.y(i), z: points.z(i), color: points.colorAt(i), views }
     }),
   }
 }

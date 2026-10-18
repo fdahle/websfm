@@ -173,7 +173,7 @@ export function useExports({
     sparseCloud, doExportCloud, doExportMesh, doExportModel, doExportTiles3d,
   } = createCloudExports({
     cloudFileBase, clouds, currentCrs, effectiveFrameSpec, exportSimilarity, images, log,
-    mainSparseCloud, projectBase, saveJson, selectedCloud,
+    mainSparseCloud, projectBase, saveJson, selectedCloud, sensors, summary,
   })
 
   // COLMAP / interchange projects and undistorted images (exports/sfmProject.js).

@@ -142,19 +142,22 @@ export async function createTextureDepthGpu(P, idx) {
   return { render, destroy, adapter: gpu.info }
 }
 
-// The A/B check (workers/gpu/README ▸ Invariants): the share of grid pixels where the
-// two passes agree — both empty, or both covered with depths within `rel`. Edges of
-// occluders differ by a pixel between rasterisers, and at grazing angles the vertex
-// points sit up to half a pixel from the centre they write, so the bar is a share, not
-// all. Measured on Dawn/Vulkan (Turing), 1 M faces: 98.8–99.99 % at 0.5 %; a broken
-// depth mapping (1 − near/z, saturating to 1.0 in float32) scored 85 %.
+// The A/B check (workers/gpu/README ▸ Invariants): among the grid pixels either pass
+// covers, the share where both are covered with depths within `rel`. Empty-vs-empty
+// pixels say nothing and are left out: counted, a GPU pass that drew nothing scored
+// 99 % on a view the mesh covers 1 % of. Edges of occluders differ by a pixel between
+// rasterisers, and at grazing angles the vertex points sit up to half a pixel from the
+// centre they write, so the bar is a share, not all. Measured over ALL pixels on
+// Dawn/Vulkan (Turing), 1 M faces: 98.8–99.99 % at 0.5 %; a broken depth mapping
+// (1 − near/z, saturating to 1.0 in float32) scored 85 %.
+// → { agree (share of covered pixels; 0 when none), covered (pixels), coverage (share of the grid) }
 export function compareDepth(a, b, rel = 5e-3) {
   let agree = 0, covered = 0
   for (let i = 0; i < a.length; i++) {
     const fa = Number.isFinite(a[i]), fb = Number.isFinite(b[i])
-    if (fa || fb) covered++
-    if (!fa && !fb) agree++
-    else if (fa && fb && Math.abs(a[i] - b[i]) <= rel * Math.max(a[i], b[i])) agree++
+    if (!fa && !fb) continue
+    covered++
+    if (fa && fb && Math.abs(a[i] - b[i]) <= rel * Math.max(a[i], b[i])) agree++
   }
-  return { agree: agree / a.length, covered }
+  return { agree: covered ? agree / covered : 0, covered, coverage: a.length ? covered / a.length : 0 }
 }

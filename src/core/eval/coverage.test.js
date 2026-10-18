@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { coverageGrid } from './coverage.js'
+import { SparsePoints } from '../sfm/sparsePoints.js'
 
-const mv = (n) => ({ size: n })   // stand-in for a `views` Map with n entries
+const mv = (n) => Array.from({ length: n }, (_, k) => [`c${k}`, k])   // n views
 
 describe('coverageGrid', () => {
   it('handles the empty case without dividing by zero', () => {
-    const g = coverageGrid([], [{ x: 1, y: 2 }])
+    const g = coverageGrid(SparsePoints.empty(), [{ x: 1, y: 2 }])
     expect(g.cols).toBe(0)
     expect(g.rows).toBe(0)
     expect(g.maxCount).toBe(0)
@@ -14,11 +15,11 @@ describe('coverageGrid', () => {
 
   it('bins points into a grid and tracks count + max views per cell', () => {
     // A 2-cell strip: cluster near x=0 and near x=10.
-    const pts = [
-      { x: 0, y: 0, views: mv(2) },
-      { x: 0.1, y: 0.1, views: mv(4) },
-      { x: 10, y: 0, views: mv(3) },
-    ]
+    const pts = SparsePoints.fromRecords([
+      { x: 0, y: 0, z: 0, views: mv(2) },
+      { x: 0.1, y: 0.1, z: 0, views: mv(4) },
+      { x: 10, y: 0, z: 0, views: mv(3) },
+    ])
     const g = coverageGrid(pts, [{ x: 5, y: 0 }], { targetCells: 10 })
     expect(g.cols).toBeGreaterThan(1)
     // Total binned points == input count.
@@ -32,7 +33,7 @@ describe('coverageGrid', () => {
   })
 
   it('clamps edge points into the last cell (no out-of-range index)', () => {
-    const g = coverageGrid([{ x: 0, y: 0 }, { x: 1, y: 1 }], [], { targetCells: 4 })
+    const g = coverageGrid(SparsePoints.fromRecords([{ x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 0 }]), [], { targetCells: 4 })
     let total = 0
     for (const c of g.count) total += c
     expect(total).toBe(2)

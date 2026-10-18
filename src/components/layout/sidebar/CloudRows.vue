@@ -27,13 +27,15 @@ const cloudKindLabel = (kind) => (kind === 'dense' ? 'Dense' : kind === 'mesh' ?
 // Tie-points = sparse points carrying at least one view-track. (Dense/mesh clouds
 // have no tracks, so this is only shown for sparse clouds.)
 function tiePointCount(cloud) {
-  // Only sparse clouds carry tracks; dense/mesh clouds are flat (no per-point objects).
-  return (cloud.kind === 'dense' || cloud.kind === 'mesh')
-    ? 0 : cloud.points.reduce((n, p) => n + (p.views?.size > 0 ? 1 : 0), 0)
+  if (cloud.kind === 'dense' || cloud.kind === 'mesh') return 0
+  const pts = cloud.points
+  let n = 0
+  for (let i = 0; i < pts.length; i++) if (pts.vcount[i] > 0) n++
+  return n
 }
 
-// Primary count across shapes: triangles for a mesh, points otherwise (sparse array
-// vs dense flat { count }). Mesh `count` is the triangle count (nVerts is separate).
+// Primary count across shapes: triangles for a mesh, points otherwise (sparse
+// SparsePoints vs dense flat { count }). Mesh `count` is the triangle count (nVerts is separate).
 function pointCount(cloud) {
   if (cloud.kind === 'mesh') return cloud.count ?? 0
   return cloud.kind === 'dense' ? (cloud.count ?? 0) : cloud.points.length

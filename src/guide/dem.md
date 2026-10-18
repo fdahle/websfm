@@ -186,9 +186,15 @@ the feature's toe, then choose the **Base** in the measuring toolbox:
   into a [DEM of difference](help:dem-of-difference) between two epochs. It is
   offered for the computed DEM in a CRS; **Tools ▸ Measure ▸ DEM of difference** opens
   the tool with it chosen. The result reads as **Gain** (the DEM above the reference)
-  and **Loss** (below it). Cells the reference does not cover count as unmeasured, so
-  **DEM coverage** shows the overlap. Both DEMs must use the same vertical datum; the
-  reference's declared offset is applied.
+  and **Loss** (below it). The reference is read at each DEM cell centre, bilinearly
+  where its four surrounding cells have heights. A centre over a reference hole, or
+  off the reference, counts as unmeasured and never borrows a neighbouring height, so
+  **DEM coverage** shows the true overlap. Over a polygon of more than 262,144 cells
+  (65,536 while you are still drawing it) the comparison uses a regular sub-grid of
+  that many cells, scaled to the whole polygon, and the toolbox shows **Sampled: 1
+  cell in n×n**. Only the reference base is sampled this way; the plane bases use
+  every cell. Both DEMs must use the same vertical datum; the reference's declared
+  offset is applied.
 
 On an imported reference DEM, heights, profiles and volumes include the raster's
 declared **vertical offset** (Reference Data ▸ vertical info), the same correction

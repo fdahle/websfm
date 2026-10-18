@@ -176,6 +176,39 @@ window.bench = {
 
   currentProject() { return projects.currentProjectId },
 
+  // Exclude one accepted pair, then include it again, as the match list's toggle does;
+  // lists the project's matches folder after each save, so a run can check that a
+  // toggle writes only a new flags file.
+  async togglePair() {
+    const dir = await opfs.getOpfsProjectDir(projects.currentProjectId)
+    const list = async () => {
+      const m = await dir.getDirectoryHandle('matches')
+      const out = {}
+      for await (const [name, h] of m.entries()) if (h.kind === 'file') { const f = await h.getFile(); out[name] = f.size }
+      return out
+    }
+    const settle = async (prev) => {
+      for (let t = 0; t < 40; t++) {
+        await new Promise((r) => setTimeout(r, 250))
+        const now = await list()
+        if (JSON.stringify(now) !== JSON.stringify(prev)) { await new Promise((r) => setTimeout(r, 1000)); return list() }
+      }
+      return list()
+    }
+    const pid = [...matches.matchStore.entries()].find(([, e]) => e.status === 'done' && !e.weak && e.enabled !== false)?.[0]
+    if (!pid) throw new Error('togglePair: no accepted pair')
+    const before = await list()
+    const t0 = performance.now()
+    matches.setPairEnabled(pid, false)
+    const excluded = await settle(before)
+    const excludeMs = performance.now() - t0
+    matches.setPairEnabled(pid, true)
+    const restored = await settle(excluded)
+    const diff = (a, b) => ({ added: Object.keys(b).filter((k) => !(k in a)), removed: Object.keys(a).filter((k) => !(k in b)) })
+    return { pair: pid, excludeMs: Math.round(excludeMs), before, excluded, restored,
+      onExclude: diff(before, excluded), onRestore: diff(excluded, restored) }
+  },
+
   // Reopen a project in a FRESH page (the runner reloads first), through the same
   // sequence useProjectLifecycle.openProject runs: switch → sensors → images ∥ stores.
   async reopen(id) {
@@ -202,6 +235,147 @@ window.bench = {
         indexMs: Math.round(indexMs), switchMs: Math.round(switchMs), sensorsMs: Math.round(sensorsMs) },
       stores: Object.fromEntries(storeTimings.map(({ store, ms }) => [store, Math.round(ms)])),
       inventory: await window.bench.inventory() }
+  },
+
+  // A Tools ▸ Model ▾ edit of the main sparse model ('optimize' = Optimize cameras,
+  // 'sparse' = gradual selection), as the dialog submits it. Reports the focal and the
+  // camera-centre fit to the reference / EXIF positions before and after.
+  async modelEdit({ mode = 'optimize', settings = {} } = {}) {
+    const fit = (cloud) => {
+      const positions = reference?.positions
+        ? new Map(images.images.filter((i) => reference.positions[stem(i.name)]).map((i) => [i.uuid, reference.positions[stem(i.name)]]))
+        : new Map(images.images
+          .filter((i) => Number.isFinite(i.meta?.gpsLat) && Number.isFinite(i.meta?.gpsLon) && Number.isFinite(i.meta?.gpsAlt))
+          .map((i) => [i.uuid, { lat: i.meta.gpsLat, lon: i.meta.gpsLon, alt: i.meta.gpsAlt }]))
+      const pc = cameraPositionCheck(cloud.cameras, positions, { leverArm: reference?.leverArm ?? null })
+      return pc && { count: pc.count, rmsH: pc.rmsH, rmsV: pc.rmsV, rms3d: pc.rms3d }
+    }
+    const before = recon.mainSparseCloud
+    if (!before) throw new Error('modelEdit: no sparse model')
+    const fx = (c) => [...new Set([...c.cameras.values()].map((cam) => +cam.K.fx.toFixed(2)))]
+    const was = { fx: fx(before), points: before.points.length, positions: fit(before) }
+    const t0 = performance.now()
+    const r = await recon.editClouds({ mode, sourceIds: [before.id], settings: { ...settings, createdAt: before.createdAt } })
+    const after = recon.mainSparseCloud
+    return { seconds: (performance.now() - t0) / 1000, ok: !!r, replaced: after !== before,
+      before: was, after: { fx: fx(after), points: after.points.length, positions: fit(after) } }
+  },
+
+  // A scale bar between two markers placed on real tie points: the two ≥4-view points
+  // nearest opposite corners of the model, marked in every image that saw them (their
+  // BA-frame pixels mapped to the click convention as Find GCPs does). The bar is
+  // `factor` × their model distance, so the fitted scale is known: `factor`.
+  async scaleBar({ factor = 2.5, unit = 'm' } = {}) {
+    const { useScaleBarsStore } = await import('/src/stores/useScaleBarsStore.js')
+    const { makePinholeToMark } = await import('/src/core/sfm/displayFrame.js')
+    const bars = useScaleBarsStore()
+    const cloud = recon.mainSparseCloud, pts = cloud.points
+    const frameModel = makeFrameModelResolver({ summary: recon.summary, sensors: sensorsStore.sensors })
+    let lo = -1, hi = -1, loS = Infinity, hiS = -Infinity
+    for (let i = 0; i < pts.length; i++) {
+      if (pts.pixelCount(i) < 4) continue
+      const s = pts.x(i) + pts.y(i) + pts.z(i)
+      if (s < loS) { loS = s; lo = i }
+      if (s > hiS) { hiS = s; hi = i }
+    }
+    if (lo < 0 || hi === lo) throw new Error('scaleBar: no two ≥4-view points')
+    const byUuid = new Map(images.images.map((im) => [im.uuid, im]))
+    const mark = (i, name) => {
+      const id = gcpsStore.addPoint({ role: 'marker', name })
+      pts.forEachPixel(i, (uuid, px, py) => {
+        const im = byUuid.get(uuid), cam = cloud.cameras.get(uuid)
+        if (!im || !cam) return
+        const { dist, selfCal, fiducial } = frameModel(im)
+        const q = makePinholeToMark({ K: cam.K, dist, selfCal, fiducial })(px, py)
+        gcpsStore.setObservation(id, im.id, im.name, q.x, q.y)
+      })
+      return id
+    }
+    const a = mark(lo, 'Bar end A'), b = mark(hi, 'Bar end B')
+    const model = Math.hypot(...[0, 1, 2].map((k) => pts.xyz(hi)[k] - pts.xyz(lo)[k]))
+    bars.addBar({ a: { kind: 'marker', id: a }, b: { kind: 'marker', id: b }, knownDistance: model * factor, unit, name: 'Bench bar' })
+    const fit = await recon.fitScaleBars()
+    return { modelDistance: model, knownDistance: model * factor, views: [pts.pixelCount(lo), pts.pixelCount(hi)],
+      scale: fit?.scale ?? null, fit: fit && { ...fit, bars: undefined } }
+  },
+
+  // Import ▸ point cloud / mesh with the dialog's defaults, from the file the runner put
+  // on #bench-import-file: parsed in the worker (parseCloudFile), committed as
+  // onCloudImport does. Samples the page's JS heap during the parse, which must stay
+  // far below the file size (the text is read in slices in the worker).
+  async importCloudFile() {
+    const { parseCloudFile } = await import('/src/workers/computeClient.js')
+    const { applyImportTransform } = await import('/src/core/io/cloudImport.js')
+    const file = document.getElementById('bench-import-file')?.files?.[0]
+    if (!file) throw new Error('importCloudFile: no file on #bench-import-file')
+    // A LAS/LAZ too large to hold streams into an octree, as openCloudImport decides.
+    const { lasNeedsStreaming } = await import('/src/core/io/lasStream.js')
+    const head = new Uint8Array(await file.slice(0, Math.min(file.size, 1 << 16)).arrayBuffer())
+    if (head.length >= 100 && String.fromCharCode(...head.subarray(0, 4)) === 'LASF') {
+      const off = new DataView(head.buffer).getUint32(96, true)
+      const full = off > head.length ? new Uint8Array(await file.slice(0, off).arrayBuffer()) : head
+      if (lasNeedsStreaming(full, file.size) === true) {
+        const t0 = performance.now()
+        const c = await recon.importStreamedCloud(file, report)
+        return { ok: !!c, streamed: true, parseSeconds: (performance.now() - t0) / 1000, bytes: file.size,
+          count: c?.count ?? 0, hasColor: !!c?.lod?.layout?.colour, attributes: (c?.lod?.layout?.attributes ?? []).map((a) => a.name) }
+      }
+    }
+    let heapPeak = performance.memory?.usedJSHeapSize ?? 0
+    const sample = setInterval(() => { heapPeak = Math.max(heapPeak, performance.memory?.usedJSHeapSize ?? 0) }, 100)
+    const t0 = performance.now()
+    try {
+      const { parsed, stats } = await parseCloudFile(file, { onLog: (m, l, c) => useLog().log(m, l, c) })
+      const parseSeconds = (performance.now() - t0) / 1000
+      const ok = recon.importCloud(applyImportTransform(parsed, { onLog: (m, l, c) => useLog().log(m, l, c) }), file.name)
+      const c = recon.clouds[recon.clouds.length - 1]
+      return { ok, parseSeconds, bytes: file.size, heapPeakBytes: heapPeak, stats,
+        count: c?.count ?? 0, nVerts: c?.nVerts ?? null, hasColor: !!c?.col,
+        attributes: Object.keys(c?.attributes ?? {}) }
+    } finally { clearInterval(sample) }
+  },
+
+  // Model ▾ ▸ Region: the box spanning the middle `fraction` of the sparse cloud on each
+  // axis (the vertical axis whole), as the toolbox's fitted-and-shrunk box. After the
+  // dense stage, `regionCheck` counts the dense points outside it.
+  setRegion({ fraction = 0.5 } = {}) {
+    const p = recon.mainSparseCloud.points, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    for (let i = 0; i < p.length; i++) for (let k = 0; k < 3; k++) { const v = p.pos[3 * i + k]; if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v }
+    const min = [0, 1, 2].map((k) => (k === 2 ? lo[k] : lo[k] + (hi[k] - lo[k]) * (1 - fraction) / 2))
+    const max = [0, 1, 2].map((k) => (k === 2 ? hi[k] : hi[k] - (hi[k] - lo[k]) * (1 - fraction) / 2))
+    return { ok: recon.setRegion({ min, max }), min, max }
+  },
+  regionCheck() {
+    const r = recon.region, d = recon.clouds.find((c) => c.kind === 'dense')
+    if (!r || !d) return { error: 'no region or dense cloud' }
+    let outside = 0
+    for (let i = 0; i < d.count; i++) {
+      const x = d.pos[3 * i], y = d.pos[3 * i + 1], z = d.pos[3 * i + 2]
+      if (x < r.min[0] || x > r.max[0] || y < r.min[1] || y > r.max[1] || z < r.min[2] || z > r.max[2]) outside++
+    }
+    return { points: d.count, outside }
+  },
+
+  // The main sparse model's Quality Report numbers (core/eval/sparseStats.js): the
+  // reprojection distribution over every stored observation, cameras, points.
+  async modelStats() {
+    const { sparseModelStats } = await import('/src/core/eval/sparseStats.js')
+    const c = recon.mainSparseCloud
+    if (!c) throw new Error('modelStats: no sparse model')
+    const st = sparseModelStats(c.cameras, c.points)
+    return { cameras: c.cameras.size, points: c.points.length, observations: c.points.viewTotal,
+      imported: !!c.imported, reproj: st.reproj }
+  },
+
+  // Open a .websfm (the runner put it on the #bench-project-file input) as a NEW
+  // project, the way Project ▸ Open project file does, then restore it as reopen does.
+  async openProjectFile() {
+    const file = document.getElementById('bench-project-file')?.files?.[0]
+    if (!file) throw new Error('openProjectFile: no file on #bench-project-file')
+    const t0 = performance.now()
+    const id = await projects.importProject(file, { onLog: (m, l, c) => useLog().log(m, l, c) })
+    const importSeconds = (performance.now() - t0) / 1000
+    return { importSeconds, bytes: file.size, ...(await window.bench.reopen(id)) }
   },
 
   // Dense Stage A, settings resolved exactly as DepthMapsModal.run() does.
@@ -351,7 +525,9 @@ window.bench = {
   // Orthophoto, settings resolved exactly as OrthoModal.run() does; returns the
   // ortho's own quality figures (its `stats` run record, core/eval/orthoStats.js).
   async ortho({ ...overrides } = {}) {
-    const { depthTolRel, maxCost, gsd, ...rest } = { ...ORTHO_DEFAULTS, ...overrides }
+    const { depthTolRel, maxCost, gsd: gsdIn, ...rest } = { ...ORTHO_DEFAULTS, ...overrides }
+    // gsd "dem": the built DEM's cell size, so two surfaces can be compared at one GSD.
+    const gsd = gsdIn === 'dem' ? recon.dem?.gsd ?? 0 : gsdIn
     const settings = { ...rest, gsd: gsd > 0 ? gsd : 0, depthTolRel: depthTolRel / 100, maxCost: maxCost > 0 ? maxCost : Infinity }
     const t0 = performance.now()
     await recon.generateOrtho(settings, report)
@@ -369,6 +545,65 @@ window.bench = {
     let s = ''
     for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
     return btoa(s)
+  },
+
+  // One export through the app's own dialog dispatch (useExports, wired from the stores
+  // as App.vue wires it). The files arrive as browser downloads; the runner saves them.
+  //   kind: 'cloud' | 'mesh' | 'model' | 'colmap' | 'undistorted' | 'tiles3d' | 'dem' | 'ortho'
+  //   cloud: 'sparse' | 'dense' | 'mesh' — aim a cloud/mesh export at that cloud
+  async exportRun({ kind, settings = {}, cloud = null, cloudName = null }) {
+    const { storeToRefs } = await import('pinia')
+    const { useExports } = await import('/src/composables/useExports.js')
+    const recon = useReconstructionStore(), projects = useProjectsStore()
+    const { clouds, selectedCloud, mainSparseCloud, dem, ortho, georef, summary } = storeToRefs(recon)
+    const { currentProjectName, currentCrs } = storeToRefs(projects)
+    const ex = useExports({
+      poses: storeToRefs(usePosesStore()).poses, sensors: storeToRefs(useSensorsStore()).sensors,
+      images: storeToRefs(useImagesStore()).images, matchStore: storeToRefs(useMatchesStore()).matchStore,
+      clouds, selectedCloud, mainSparseCloud, dem, ortho, georef, currentProjectName, currentCrs, summary,
+      progress: null, effectiveFrameSpec: recon.effectiveFrameSpec,
+    })
+    if (kind === 'project') {
+      // Save as .websfm. Without showSaveFilePicker (removed here, as on Firefox and
+      // Safari) the archive goes out as a buffered download, which the runner keeps.
+      const had = Object.getOwnPropertyDescriptor(window, 'showSaveFilePicker')
+      Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true, writable: true })
+      const t0 = performance.now()
+      try {
+        const r = await projects.exportProject(projects.currentProjectId, {
+          includeDerived: settings.includeDerived ?? true, onLog: (m, l, c) => useLog().log(m, l, c) })
+        return { seconds: (performance.now() - t0) / 1000, ...r }
+      } finally {
+        if (had) Object.defineProperty(window, 'showSaveFilePicker', had)
+        else delete window.showSaveFilePicker
+      }
+    }
+    if (kind === 'keypoints' || kind === 'matches') {
+      // The sidebar's Keypoints / Matches JSON downloads (exports/tabular.js).
+      const t0 = performance.now()
+      await (kind === 'keypoints' ? ex.exportKeypoints() : ex.exportMatches())
+      return { seconds: (performance.now() - t0) / 1000 }
+    }
+    const target = cloud ? recon.clouds.find((c) => c.kind === cloud && (cloudName ? c.name === cloudName : !c.imported && !c.derived)) : null
+    if (cloud && !target) throw new Error(`exportRun: no ${cloud} cloud`)
+    if (target) ex.openCloudExport(target.id)
+    else ex.exportKind.value = kind
+    const t0 = performance.now()
+    await ex.onExportRun(settings)
+    return { seconds: (performance.now() - t0) / 1000 }
+  },
+
+  // A COLMAP model from the files the runner put on #bench-colmap-files, read as bytes
+  // as Import ▸ SfM project does (useSfmInterop): no file is ever one JS string.
+  async importColmapFiles() {
+    const list = [...(document.getElementById('bench-colmap-files')?.files ?? [])]
+    const files = {}
+    for (const f of list) files[f.name] = new Uint8Array(await f.arrayBuffer())
+    const t0 = performance.now()
+    const ok = recon.importColmapModel(files)
+    const cloud = recon.mainSparseCloud
+    return { ok, seconds: (performance.now() - t0) / 1000, bytes: list.reduce((n, f) => n + f.size, 0),
+      cameras: cloud?.cameras?.size ?? 0, points: cloud?.points?.length ?? 0 }
   },
 
   // A COLMAP text model as the main sparse cloud, through the app's own import (the
@@ -432,10 +667,10 @@ window.bench = {
     const out = new Float64Array(width * Math.ceil(n / stride))
     let k = 0
     for (let i = 0; i < n; i += stride) {
-      const p = kind === 'sparse' ? c.points[i] : null
-      const q = frame.fromSfm(p ? [p.x, p.y, p.z] : [c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2]])
+      const sp = kind === 'sparse' ? c.points : null
+      const q = frame.fromSfm(sp ? sp.xyz(i) : [c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2]])
       out[k++] = q[0]; out[k++] = q[1]; out[k++] = q[2]
-      if (p) out[k++] = p.views?.length ?? p.views?.size ?? 0
+      if (sp) out[k++] = sp.viewCount(i)
     }
     const u8 = new Uint8Array(out.buffer, 0, 8 * k)
     let s = ''
@@ -575,6 +810,151 @@ window.bench = {
 
   setReference(r) { reference = r; return { positions: Object.keys(r?.positions ?? {}).length, gcps: r?.gcps?.length ?? 0, leverArm: r?.leverArm } },
 
+  // Tools ▸ Align: the computed dense cloud is moved by a known rigid transform, put
+  // back by 3 point pairs (the same three points of the moved and the unmoved cloud, as a
+  // user would click one feature in each), refined by ICP onto the imported reference,
+  // then Distance to reference. Points keep their order through every edit, so the final
+  // positions against the unmoved ones measure how well the transform was undone.
+  async alignCheck({ rotateDeg = [2, -1.5, 3], translateFrac = [0.05, -0.03, 0.02], pickNoiseFrac = 0.005, icp = {}, distance = {}, sample = 200_000 } = {}) {
+    const { transformFromEuler, matrixFromTransform, fitPointPairs, rotationAngle } = await import('/src/core/products/cloudAlign.js')
+    const { ICP_DEFAULTS, DISTANCE_DEFAULTS } = await import('/src/core/defaults.user.js')
+    const ref = recon.clouds.find((c) => c.kind === 'dense' && c.imported)
+    const src = recon.clouds.find((c) => c.kind === 'dense' && !c.imported && !c.derived)
+    if (!ref || !src) throw new Error('alignCheck: needs an imported dense reference and a computed dense cloud')
+    const n = src.count, P = src.pos
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], c0 = [0, 0, 0]
+    for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) { const v = P[i * 3 + k]; lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v); c0[k] += v / n }
+    const diag = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+    const lines = (from) => useLog().entries.value.slice(from).map((e) => e.message)
+    const t0 = performance.now()
+    const tf = transformFromEuler({ translate: translateFrac.map((f) => f * diag), rotateDeg, scale: 1, pivot: c0 })
+    const moved = await recon.editClouds({ mode: 'transform', sourceIds: [src.id], settings: { matrix: matrixFromTransform(tf) }, name: 'moved' })
+    // Three well-spread points: the extremes along x and y, and the one farthest from both.
+    let ia = 0, ib = 0
+    for (let i = 0; i < n; i++) { if (P[i * 3] < P[ia * 3]) ia = i; if (P[i * 3] > P[ib * 3]) ib = i }
+    const d2 = (i, j) => (P[i * 3] - P[j * 3]) ** 2 + (P[i * 3 + 1] - P[j * 3 + 1]) ** 2 + (P[i * 3 + 2] - P[j * 3 + 2]) ** 2
+    let ic = 0, best = -1
+    for (let i = 0; i < n; i += 97) { const v = Math.min(d2(i, ia), d2(i, ib)); if (v > best) { best = v; ic = i } }
+    const at = (c, i) => [c.pos[i * 3], c.pos[i * 3 + 1], c.pos[i * 3 + 2]]
+    // A click lands near the feature, not on it: a fixed offset of pickNoiseFrac × the
+    // scene size per pair (alternating signs), so ICP has a real residual to remove.
+    const noise = [[1, -1, 0.5], [-0.5, 1, -1], [1, 0.5, 1]].map((v) => v.map((x) => x * pickNoiseFrac * diag))
+    const fit = fitPointPairs([ia, ib, ic].map((i, k) => ({ src: at(moved, i), dst: at(src, i).map((v, j) => v + noise[k][j]) })), { scale: false })
+    const paired = await recon.editClouds({ mode: 'transform', sourceIds: [moved.id], settings: { matrix: matrixFromTransform(fit.transform) }, name: 'paired' })
+    const nIcp = useLog().entries.value.length
+    const icpSettings = { ...ICP_DEFAULTS, ...icp }
+    const aligned = await recon.editClouds({ mode: 'icp', sourceIds: [paired.id, ref.id], settings: icpSettings, name: 'aligned' })
+    const icpLog = lines(nIcp).filter((m) => m.startsWith('ICP'))
+    const nDist = useLog().entries.value.length
+    await recon.editClouds({ mode: 'distance', sourceIds: [aligned.id, ref.id], settings: { ...DISTANCE_DEFAULTS, ...distance }, name: 'distance' })
+    const distLog = lines(nDist).filter((m) => m.startsWith('Distance'))
+    // Residual of the whole round trip, per point (sampled).
+    const step = Math.max(1, Math.floor(n / sample))
+    function d2i(A, B, i) { return (A[i * 3] - B[i * 3]) ** 2 + (A[i * 3 + 1] - B[i * 3 + 1]) ** 2 + (A[i * 3 + 2] - B[i * 3 + 2]) ** 2 }
+    const residuals = (A) => { const r = []; for (let i = 0; i < n; i += step) r.push(Math.sqrt(d2i(A, P, i))); return r.sort((a, b) => a - b) }
+    const res = residuals(aligned.pos), resPaired = residuals(paired.pos)
+    const pairRes = [ia, ib, ic].map((i) => Math.sqrt(d2i(paired.pos, P, i)))
+    return { seconds: (performance.now() - t0) / 1000, srcPoints: n, refPoints: ref.count, diag,
+      perturb: { pickNoise: pickNoiseFrac * diag, rotateDeg, rotationDeg: +(rotationAngle(tf.R) * 180 / Math.PI).toFixed(3), translate: translateFrac.map((f) => f * diag) },
+      pairFit: { rms: fit.rms, rotationDeg: +(rotationAngle(fit.transform.R) * 180 / Math.PI).toFixed(3), residualAtPairs: pairRes },
+      afterPairs: { median: resPaired[resPaired.length >> 1], p95: resPaired[Math.floor(resPaired.length * 0.95)] },
+      roundTrip: { median: res[res.length >> 1], p95: res[Math.floor(res.length * 0.95)], max: res[res.length - 1], relMedian: res[res.length >> 1] / diag },
+      icpSettings, icpLog, distLog }
+  },
+
+  // Import ▸ Reference raster of the file on #bench-raster-file, as the import modal
+  // does, then the background display conversion (flushPendingWork).
+  async importRasterFile() {
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const ext = useExternalStore()
+    const file = document.getElementById('bench-raster-file')?.files?.[0]
+    if (!file) throw new Error('importRasterFile: no file on #bench-raster-file')
+    const t0 = performance.now()
+    const rec = await ext.importRaster(file)
+    const t1 = performance.now()
+    await ext.flushPendingWork()
+    const t2 = performance.now()
+    const meta = rec && ext.rasterById(rec.id)
+    return { ok: !!rec, bytes: file.size, importSeconds: (t1 - t0) / 1000, conversionSeconds: (t2 - t1) / 1000,
+      raster: meta ? { id: meta.id, name: meta.name, kind: meta.kind, width: meta.width, height: meta.height,
+        crs: meta.crs ?? null, gpuReady: !!meta.gpuReady } : null, projectCrs: projects.currentCrs }
+  },
+
+  // Sample the (last) reference DEM at points given in the project CRS, as Quality Report
+  // and the GCP Z fill do. `residentBefore`: whether its plane was in memory already.
+  async rasterSample({ points = [] } = {}) {
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const ext = useExternalStore()
+    const meta = ext.demRasters.at(-1)
+    if (!meta) throw new Error('rasterSample: no reference DEM')
+    const residentBefore = ext.sources.has(meta.id)
+    const out = []
+    const t0 = performance.now()
+    for (const [x, y] of points) {
+      const t = performance.now()
+      const r = await ext.sampleReferenceDem(x, y, { rasterId: meta.id })
+      out.push({ x, y, rasterXY: ext.toRasterCoords(meta, x, y), z: r?.z ?? null, ms: Math.round(performance.now() - t) })
+    }
+    return { raster: meta.name, crs: meta.crs, projectCrs: projects.currentCrs, residentBefore,
+      seconds: (performance.now() - t0) / 1000, samples: out }
+  },
+
+  // Restyle the last reference raster with a different stretch (a full re-read).
+  async rasterRestyle({ loPct = 5, hiPct = 95 } = {}) {
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const ext = useExternalStore()
+    const meta = ext.rasters.at(-1)
+    const t0 = performance.now()
+    const ok = await ext.setRasterStyle(meta.id, { ...meta.style, loPct, hiPct })
+    await ext.flushPendingWork()
+    return { ok, seconds: (performance.now() - t0) / 1000 }
+  },
+
+  // Tools ▸ Mesh ▾ on the computed mesh, as TOOL-03 runs it: Clean (defaults) →
+  // Decimate to 25 % → Smooth 10 → Clean with every hole closed → Area & volume.
+  // Each step makes a named copy (export them with `cloudName`).
+  async meshTools() {
+    const { CLEAN_MESH_DEFAULTS, SMOOTH_MESH_DEFAULTS, DECIMATE_MESH_DEFAULTS } = await import('/src/core/defaults.user.js')
+    const { meshMeasure } = await import('/src/core/products/meshEdit.js')
+    const src = recon.clouds.find((c) => c.kind === 'mesh' && !c.imported && !c.derived)
+    if (!src) throw new Error('meshTools: no computed mesh')
+    const steps = []
+    const run = async (label, mode, from, settings) => {
+      const t0 = performance.now()
+      const out = await recon.editClouds({ mode, sourceIds: [from.id], settings, name: label }, report)
+      steps.push({ label, mode, seconds: (performance.now() - t0) / 1000, triangles: out?.count ?? 0, vertices: out?.nVerts ?? null })
+      return out
+    }
+    const tris = src.count
+    const cleaned = await run('TOOL03 cleaned', 'mesh-clean', src, { ...CLEAN_MESH_DEFAULTS })
+    const decimated = await run('TOOL03 decimated', 'mesh-decimate', cleaned, { targetRatio: DECIMATE_MESH_DEFAULTS.targetRatio, preserveBoundary: DECIMATE_MESH_DEFAULTS.preserveBoundary })
+    const smoothed = await run('TOOL03 smoothed', 'mesh-smooth', decimated, { ...SMOOTH_MESH_DEFAULTS })
+    const closed = await run('TOOL03 closed', 'mesh-clean', cleaned, { ...CLEAN_MESH_DEFAULTS, maxHoleEdges: 0 })
+    const t0 = performance.now()
+    const m = meshMeasure(closed)
+    const measureSeconds = (performance.now() - t0) / 1000
+    return { source: { name: src.name, triangles: tris, vertices: src.nVerts }, steps, measure: { ...m, seconds: measureSeconds } }
+  },
+
+  // Georeferencing ▸ Georeference: the SfM → project-CRS similarity from GCPs, else the
+  // camera positions (EXIF GNSS / imported poses).
+  async georef() {
+    const t0 = performance.now()
+    const g = await recon.georeference()
+    return { seconds: (performance.now() - t0) / 1000, ok: !!g, crs: projects.currentCrs ?? null,
+      method: g?.method ?? null, count: g?.count ?? 0, rms: g?.rms ?? null, scale: g?.scale ?? null }
+  },
+
+  // Settings ▸ worker count, as the preference applies it: now if the pool is idle,
+  // and stored, so a `reopen` after this stage starts with that pool in any case.
+  async setPoolSize(n) {
+    const c = await import('/src/workers/computeClient.js')
+    if (n > 0) localStorage.setItem('websfm.compute.workerCount', String(n))
+    else localStorage.removeItem('websfm.compute.workerCount')
+    const ok = c.configureWorkerPoolSize(n)
+    return { ok, poolSize: c.POOL_SIZE, max: c.MAX_POOL_SIZE }
+  },
+
   async start({ name = 'bench', sceneType = 'object', crs = undefined } = {}) {
     await projects.loadIndex()
     await projects.createProject(name, sceneType, crs)
@@ -689,9 +1069,9 @@ window.bench = {
     const t0 = performance.now()
     await recon.reconstruct(settings, report)
     const cloud = recon.mainSparseCloud
-    const points = cloud?.points ?? []
+    const points = cloud?.points ?? null
     let ge3 = 0, obs = 0
-    for (const p of points) { const n = p.views?.size ?? 0; obs += n; if (n >= 3) ge3++ }
+    for (let i = 0; i < (points?.length ?? 0); i++) { const n = points.viewCount(i); obs += n; if (n >= 3) ge3++ }
     const s = recon.summary
     // Independent shape check when the images carry GNSS the solve never used (EXIF;
     // the bench imports no poses, so there are no camera priors): see positionCheck.js.
@@ -716,7 +1096,7 @@ window.bench = {
     // The ≥3-view points in the positionCheck ENU frame, for a node-side comparison
     // with a reference surface (scripts/bench/lidar.mjs); centimetre-rounded.
     const pointsEnu = pc && exportPoints
-      ? points.filter((p) => (p.views?.size ?? 0) >= 3).map((p) => applySimilarity(pc.sim, [p.x, p.y, p.z]).map((v) => Math.round(v * 100) / 100))
+      ? Array.from(points.indicesWhere((i) => points.viewCount(i) >= 3), (i) => applySimilarity(pc.sim, points.xyz(i)).map((v) => Math.round(v * 100) / 100))
       : null
     const nameOf = new Map(images.images.map((i) => [i.uuid, i.name]))
     const r4 = (v) => (v == null ? null : Math.round(v * 1e4) / 1e4)
@@ -732,7 +1112,7 @@ window.bench = {
     return {
       settings, seconds: (performance.now() - t0) / 1000,
       cameras: cloud?.cameras?.size ?? 0, images: images.images.length,
-      points: points.length, pointsGe3: ge3, observations: obs,
+      points: points?.length ?? 0, pointsGe3: ge3, observations: obs,
       reprojection: s?.reprojection ?? s?.finalReprojection ?? null,
       // BA linear-solver totals + stage wall clock: the PCG-vs-Cholesky comparison
       // (TODO ▸ MEM ▸ PCG) reads these; set recon.baSolver per variant to compare.

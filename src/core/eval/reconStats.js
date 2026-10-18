@@ -1,13 +1,12 @@
 // Pure reconstruction statistics for the Evaluate ▸ Recon Report view
 // (PLAN-eval-views step 2). No Vue/Pinia/DOM — sparse cameras + points in, plain
 // stats out. The central rule of the eval tab: DERIVE from the cloud, don't extend
-// the run summary. Everything here recomputes from `views` / `viewsPx` + cameras,
+// the run summary. Everything here recomputes from the tracks (SparsePoints) + cameras,
 // so it also works for an imported COLMAP cloud that has no summary at all.
 
 import { projectPoint } from '../sfm/geometry.js'
 
-// Track length = how many registered views observe a point (`point.views` is a
-// Map uuid→kpIdx). Histogram bins 2..7 individually, then an '8+' catch-all.
+// Track length = how many registered views observe a point. Histogram bins 2..7 individually, then an '8+' catch-all.
 // Returns [{ views, count, pct }] including empty bins, so the chart has a stable
 // x-axis. `views` is the numeric bin (2..7) or the string '8+' for the last.
 // Points with fewer than 2 views (untracked) are ignored — they aren't tie points.
@@ -16,8 +15,8 @@ export function trackLengthHistogram(points) {
   for (let v = 2; v <= 7; v++) bins.set(v, 0)
   bins.set('8+', 0)
   let total = 0
-  for (const p of points || []) {
-    const n = p.views ? p.views.size : 0
+  for (let i = 0, N = points?.length ?? 0; i < N; i++) {
+    const n = points.viewCount(i)
     if (n < 2) continue
     const key = n >= 8 ? '8+' : n
     bins.set(key, bins.get(key) + 1)
@@ -32,23 +31,22 @@ export function trackLengthHistogram(points) {
 
 // Reprojection residual stats over every observation of every point. For each
 // point, projects its 3D position with each viewing camera and measures the pixel
-// distance to the stored observation (`viewsPx`, the BA pinhole-frame pixel — the
+// distance to the stored observation (the view pixel, the BA pinhole-frame pixel — the
 // same frame the cameras are in, so residuals stay coherent on film-scan / self-cal
 // projects). Observations whose uuid is absent from `cameras` are skipped (an
-// imported model may reference images not loaded); points lacking `viewsPx` are
-// skipped whole (legacy clouds). `n` reports how many residuals were measured so
+// imported model may reference images not loaded); views without a pixel are
+// skipped. `n` reports how many residuals were measured so
 // the caller can say what it covered rather than silently reporting a subset.
 export function reprojectionStats(cameras, points) {
   const res = []
-  for (const p of points || []) {
-    if (!p.viewsPx || !p.viewsPx.size) continue
-    for (const [uuid, px] of p.viewsPx) {
+  for (let i = 0, N = points?.length ?? 0; i < N; i++) {
+    const x = points.x(i), y = points.y(i), z = points.z(i)
+    points.forEachPixel(i, (uuid, px, py) => {
       const cam = cameras.get(uuid)
-      if (!cam) continue
-      const proj = projectPoint(cam, p.x, p.y, p.z)
-      if (!proj) continue
-      res.push(Math.hypot(proj.u - px[0], proj.v - px[1]))
-    }
+      if (!cam) return
+      const proj = projectPoint(cam, x, y, z)
+      if (proj) res.push(Math.hypot(proj.u - px, proj.v - py))
+    })
   }
   const n = res.length
   if (!n) return { n: 0, mean: null, median: null, p95: null, max: null }

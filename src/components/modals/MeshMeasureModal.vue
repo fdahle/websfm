@@ -61,7 +61,8 @@ const whyNoVolume = computed(() => {
         No volume: the surface is not closed — {{ whyNoVolume }}. <strong>Mesh ▸ Clean mesh</strong> with
         “Close all holes” makes it watertight.
       </WarnBox>
-      <p v-if="result?.weldedVertices" class="field-hint">
+      <!-- A textured mesh's joined vertices are its per-piece UV copies: nothing to clean. -->
+      <p v-if="result?.weldedVertices && !source?.uv" class="field-hint">
         {{ result.weldedVertices.toLocaleString() }} duplicate vertices were joined to read the topology
         (each triangle carried its own corners). <strong>Mesh ▸ Clean mesh</strong> welds them in a new mesh.
       </p>

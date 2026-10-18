@@ -85,12 +85,13 @@ test('raw uint16 GeoTIFF windows survive styling and cached restyles avoid band 
 
 test('sparse gradual selection refines through real WASM and invalidates derived products', async ({ page }) => {
   await page.goto(harness)
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
+    const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
     const R = [[1,0,0],[0,1,0],[0,0,1]], K = { fx:100,fy:100,cx:0,cy:0 }
     const cameras = new Map([['a',{R,t:[0,0,0],K}],['b',{R,t:[-1,0,0],K}]])
     const points = Array.from({length:30},(_,i) => { const x=(i%5)/5,y=Math.floor(i/5)/5,z=10+i%3; return {x,y,z,views:new Map([['a',i],['b',i]]),viewsPx:new Map([['a',[100*x/z,100*y/z+(i===29?30:0)]],['b',[100*(x-1)/z,100*y/z]]])} })
     const recon = window.workflowTools.recon
-    recon.clouds = [{id:'s',kind:'sparse',name:'Sparse',createdAt:1,cameras,points}]; recon.mainSparseId = 's'
+    recon.clouds = [{id:'s',kind:'sparse',name:'Sparse',createdAt:1,cameras,points:SparsePoints.fromRecords(points)}]; recon.mainSparseId = 's'
     recon.dem = {width:1,height:1,data:new Float32Array([1]),unit:'model'}
     recon.summary = {selfCalDistortion:[{sensorId:'sensor',k1:.01}],fiducialTransforms:[]}
   })
@@ -121,7 +122,8 @@ test('Find GCPs matches real pixels and imports only explicitly reviewed candida
     const cameras=new Map([['a',{R,t:[0,0,0],K}],['b',{R,t:[-1,0,0],K}]])
     const kps=asKeypoints(detected.keypoints) // typed (core/features/keypoints.js)
     const points=Array.from({length:kps.length},(_,i)=>{const p={x:kps.x(i),y:kps.y(i)};return {x:p.x+0.5,y:700-p.y-0.5,z:10,views:new Map([['a',i],['b',i]]),viewsPx:new Map([['a',[p.x,p.y]],['b',[p.x+1,p.y]]])}})
-    recon.clouds=[{id:'s',kind:'sparse',name:'Sparse',createdAt:1,cameras,points}];recon.mainSparseId='s'
+    const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
+    recon.clouds=[{id:'s',kind:'sparse',name:'Sparse',createdAt:1,cameras,points:SparsePoints.fromRecords(points)}];recon.mainSparseId='s'
     recon.ortho={width:700,height:700,originX:0,originY:700,gsd:1,previewUrl:url,frame:{kind:'local',origin:[0,0,0],east:[1,0,0],north:[0,1,0],up:[0,0,1]}}
     const bytes=writeGeoTiff({width:700,height:700,samples:[{bits:8,format:1}],photometric:1,data,pixelScale:[2,2,0],tiepoint:[0,0,0,1000,2000,0],geoKeys:geoKeysForEpsg(3031,false)})
     const imported = await external.importRaster(new File([bytes],'reference.tif'),{forceKind:'ortho'})
@@ -220,6 +222,38 @@ test('COG display renders in EPSG:3031 and GPU style changes preserve raw values
 })
 
 
+test('a restyled reference DEM still samples, from the plane it already holds', async ({ page }) => {
+  await page.goto(harness)
+  const result = await page.evaluate(async () => {
+    const { writeGeoTiff, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
+    const W = 64, data = new Float32Array(W * W)
+    for (let i = 0; i < data.length; i++) data[i] = 100 + (i % W)
+    const bytes = writeGeoTiff({ width: W, height: W, samples: [{ bits: 32, format: 3 }], photometric: 1,
+      data: new Uint8Array(data.buffer), pixelScale: [2, 2, 0], tiepoint: [0, 0, 0, 1000, 2000, 0], geoKeys: geoKeysForEpsg(3031, false) })
+    const { external, projects } = window.workflowTools
+    const { transform } = await import('/src/core/crs.js')
+    const r = await external.importRaster(new File([bytes], 'dem.tif'), { forceKind: 'dem' })
+    // Cell (col, row 10)'s centre, asked in the project CRS as every caller does.
+    const at = (col) => external.sampleReferenceDem(...transform([1000 + 2 * col + 1, 2000 - 2 * 10 - 1], 'EPSG:3031', projects.currentCrs), { rasterId: r.id })
+    const before = (await at(20))?.z
+    // A stretch change re-reads the ranges and leaves the full-resolution plane stale.
+    const meta = external.rasterById(r.id)
+    await external.setRasterStyle(r.id, { ...meta.style, loPct: 5, hiPct: 95 })
+    // Elevations do not depend on the display style: the plane stays resident.
+    const kept = external.sources.has(r.id)
+    const after = (await at(20))?.z
+    const { useLog } = await import('/src/composables/useLog.js')
+    const lines = useLog().entries.value
+    return { before, after, kept, rebuilt: lines.some((e) => /rebuilding full-resolution/.test(e.message)),
+      errors: lines.filter((e) => e.level === 'error').map((e) => e.message) }
+  })
+  expect(result.errors).toEqual([])
+  expect(result.kept).toBe(true)
+  expect(result.rebuilt).toBe(false)
+  expect(result.before).toBeCloseTo(120, 3)
+  expect(result.after).toBeCloseTo(120, 3)
+})
+
 test('matching records worker stages separately from descriptor serialization', async ({ page }) => {
   await page.goto(harness)
   const timings = await page.evaluate(async () => {
@@ -254,7 +288,7 @@ test('saved depth maps fuse through file handles without hydrating the full set'
     const R=[[1,0,0],[0,-1,0],[0,0,-1]], K={fx:30,fy:30,cx:16,cy:16}
     const maps=Array.from({length:3},(_,j)=>({uuid:`depth-${j}`,width:32,height:32,K,R,t:[-j/4,0,10],
       depth:new Float32Array(1024).fill(10),cost:new Float32Array(1024).fill(.1),rgb:new Uint8Array(3072).fill(120)}))
-    const sparse={id:'s',kind:'sparse',createdAt:1,points:[],cameras:new Map(maps.map(m=>[m.uuid,{K,R,t:m.t}]))}
+    const sparse={id:'s',kind:'sparse',createdAt:1,points:(await import('/src/core/sfm/sparsePoints.js')).SparsePoints.empty(),cameras:new Map(maps.map(m=>[m.uuid,{K,R,t:m.t}]))}
     recon.clouds=[sparse]; recon.mainSparseId='s'
     const index=buildDepthIndex(maps,{sparseCloud:sparse})
     await opfs.saveDepthPlanes(projects.currentProjectId,index,maps.map(m=>({uuid:m.uuid,buffers:serializeDepthMap(m).buffers})))

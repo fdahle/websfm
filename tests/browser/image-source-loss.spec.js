@@ -1,0 +1,98 @@
+import { test, expect } from '@playwright/test'
+import { mkdtemp, writeFile, rename, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+// Images imported from disk files whose originals then move (VERIFICATION PRJ-10,
+// PRJ-11). The blob: URL of an in-session image is a handle to the user's file, so a
+// moved original fails the <img>; the app heals from the OPFS copy written at
+// ingest, and only an image with no usable copy is flagged as lost.
+
+const store = (page, src) => page.evaluate(async (s) => {
+  const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+  const { useLog } = await import('/src/composables/useLog.js')
+  const opfs = await import('/src/utils/opfs.js')
+  const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+  return new Function('images', 'log', 'opfs', 'projects', `return (${s})(images, log, opfs, projects)`)(
+    useImagesStore(), useLog(), opfs, useProjectsStore())
+}, src.toString())
+const logLines = (page, re) => store(page, `(images, log) => log.entries.value.map((e) => e.level + ' ' + e.message).filter((m) => ${re}.test(m))`)
+
+test('moved originals heal from project storage; an image with no copy is flagged once', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+
+  // Three JPEGs on disk, picked through a file input: Files backed by those paths.
+  const dir = await mkdtemp(join(tmpdir(), 'websfm-srcloss-'))
+  const names = ['a.jpg', 'b.jpg', 'c.jpg']
+  const jpegs = await page.evaluate(async (n) => Promise.all(n.map(async (_, k) => {
+    const canvas = new OffscreenCanvas(320, 240)
+    const ctx = canvas.getContext('2d')
+    for (let y = 0; y < 240; y += 8) for (let x = 0; x < 320; x += 8) {
+      ctx.fillStyle = `rgb(${(x * 5 + k * 70) % 256}, ${(y * 3 + k * 40) % 256}, ${(x + y) % 256})`
+      ctx.fillRect(x, y, 8, 8)
+    }
+    const bytes = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 })).arrayBuffer())
+    let s = ''
+    for (const b of bytes) s += String.fromCharCode(b)
+    return btoa(s)
+  })), names)
+  const paths = names.map((n) => join(dir, n))
+  await Promise.all(paths.map((p, k) => writeFile(p, Buffer.from(jpegs[k], 'base64'))))
+  try {
+    await page.evaluate(() => document.body.appendChild(Object.assign(document.createElement('input'), { type: 'file', multiple: true, id: 'pick' })))
+    await page.setInputFiles('#pick', paths)
+    await page.evaluate(async () => {
+      const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+      await useImagesStore().addImages([...document.getElementById('pick').files])
+    })
+    await expect.poll(() => store(page, '(images) => images.images.filter((i) => !i.loading && i.meta?.width === 320).length')).toBe(3)
+    await page.evaluate(async () => (await import('/src/utils/persistence.js')).flushPersistence())
+
+    // Move every original away; c.jpg also loses its project-storage copy (PRJ-11).
+    await Promise.all(paths.map((p) => rename(p, `${p}.moved`)))
+    await store(page, `async (images, log, opfs, projects) => {
+      const c = images.images.find((i) => i.name === 'c.jpg')
+      await opfs.deleteImage(projects.currentProjectId, c.uuid)
+      await opfs.deleteImageDerived(projects.currentProjectId, c.uuid)
+    }`)
+
+    // Chrome keeps the images decoded at ingest in its memory cache, so a viewer would
+    // still show them without reading the moved file; drop it so the views must read.
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Network.clearBrowserCache')
+    await cdp.send('Network.setCacheDisabled', { cacheDisabled: true })
+
+    // PRJ-10: the image tab and the metadata table render a.jpg from the OPFS copy.
+    await page.locator('.sidebar').getByRole('button', { name: /Images/ }).first().click()
+    await page.locator('.list-item').filter({ hasText: 'a.jpg' }).dblclick()
+    const img = page.locator('.image-viewer img.image')
+    await expect(img).toBeVisible()
+    await expect.poll(() => img.evaluate((el) => el.complete && el.naturalWidth)).toBe(320)
+    await page.evaluate(async () => (await import('/src/composables/useTabs.js')).useTabs().openMetadataTab())
+    await expect.poll(() => logLines(page, '/^warn Image source recovered from project storage: a\\.jpg/')).toHaveLength(1)
+    await page.locator('.list-item').filter({ hasText: 'b.jpg' }).dblclick()
+    await expect.poll(() => logLines(page, '/^warn Image source recovered from project storage: b\\.jpg/')).toHaveLength(1)
+    expect(await logLines(page, '/^warn Image source recovered from project storage: a\\.jpg/')).toHaveLength(1)
+
+    // PRJ-11: c.jpg has nothing to heal from — flagged in the sidebar and the viewer, one error.
+    await page.locator('.list-item').filter({ hasText: 'c.jpg' }).dblclick()
+    await expect(page.getByText('Image file no longer available').first()).toBeVisible()
+    await expect.poll(() => logLines(page, '/^error Image unavailable: c\\.jpg/')).toHaveLength(1)
+    await expect(page.locator('.list-item').filter({ hasText: 'c.jpg' }).locator('.failed-tag'))
+      .toHaveAttribute('title', 'image file no longer available — re-add the file')
+    await expect(page.locator('.list-item').filter({ hasText: 'a.jpg' }).locator('.failed-tag')).toHaveCount(0)
+    expect(await store(page, `(images) => images.images.filter((i) => i.previewFailed).map((i) => i.name)`)).toEqual(['c.jpg'])
+    // The rest of the app stays usable: a healed image still opens.
+    await page.locator('.list-item').filter({ hasText: 'a.jpg' }).dblclick()
+    const shown = page.locator('.image-viewer img.image:visible')
+    await expect(shown).toHaveCount(1)
+    await expect.poll(() => shown.evaluate((el) => el.complete && el.naturalWidth)).toBe(320)
+    expect(errors).toEqual([])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

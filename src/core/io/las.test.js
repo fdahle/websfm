@@ -356,3 +356,44 @@ describe('cloudToLasParts / parseLasSource — chunked both ways', () => {
     await expect(parseLasSource(memSource(b))).rejects.toThrow(/LAZ/)
   })
 })
+
+// The decoder leaves out a field at the writers' value for a missing one (0, or return
+// 1 of 1), so the records written back are the records read — whatever the returns held.
+describe('LAS return numbers round trip', () => {
+  const cloud = (attributes) => ({
+    count: 3, pos: Float64Array.from([0, 0, 0, 1, 1, 1, 2, 2, 2]),
+    col: Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9]), ...(attributes ? { attributes } : {}),
+  })
+  const records = (las) => [...las.subarray(new DataView(las.buffer, las.byteOffset).getUint32(96, true))]
+  const byReturn = (las) => { const dv = new DataView(las.buffer, las.byteOffset); return [0, 1, 2, 3, 4].map((k) => dv.getUint32(111 + 4 * k, true)) }
+
+  it('a file whose returns are all 0 keeps them, and writes 0 again', () => {
+    const first = cloudToLas(cloud({ returnNumber: new Uint8Array(3), numberOfReturns: new Uint8Array(3), intensity: Uint16Array.from([5, 6, 7]) }))
+    expect(first[227 + 14]).toBe(0)
+    expect(byReturn(first)).toEqual([0, 0, 0, 0, 0])
+    const read = parseLas(first)
+    expect([...read.attributes.returnNumber]).toEqual([0, 0, 0])
+    expect([...read.attributes.numberOfReturns]).toEqual([0, 0, 0])
+    const again = cloudToLas({ ...read, count: read.count })
+    expect(records(again)).toEqual(records(first))
+    expect(byReturn(again)).toEqual(byReturn(first))
+  })
+
+  it('single returns (every cloud websfm writes) are left out, and written as 1 of 1 again', () => {
+    const first = cloudToLas(cloud())
+    expect(first[227 + 14]).toBe(1 | (1 << 3))
+    const read = parseLas(first)
+    expect(read.attributes.returnNumber).toBeUndefined()
+    expect(read.attributes.numberOfReturns).toBeUndefined()
+    const again = cloudToLas({ ...read, count: read.count })
+    expect(records(again)).toEqual(records(first))
+    expect(byReturn(again)).toEqual([3, 0, 0, 0, 0])
+  })
+
+  it('mixed returns read back exactly, the leading single returns included', () => {
+    const returnNumber = Uint8Array.from([1, 2, 0]), numberOfReturns = Uint8Array.from([1, 2, 3])
+    const read = parseLas(cloudToLas(cloud({ returnNumber, numberOfReturns })))
+    expect([...read.attributes.returnNumber]).toEqual([1, 2, 0])
+    expect([...read.attributes.numberOfReturns]).toEqual([1, 2, 3])
+  })
+})

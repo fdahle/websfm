@@ -310,11 +310,13 @@ describe('colmapToSparse', () => {
   it('recovers points with view uuids + BA-frame pixels in viewsPx', () => {
     const { points: pts } = colmapToSparse(read, resolve)
     expect(pts).toHaveLength(2)
-    expect([...pts[0].views.keys()].sort()).toEqual(['ua', 'ub'])
-    expect(pts[0].viewsPx.get('ua')).toEqual([100, 200])
-    expect(pts[0].viewsPx.get('ub')).toEqual([110, 210])
-    expect(pts[0].color).toEqual([10, 20, 30])
-    expect(pts[1].views.size).toBe(1)
+    const uuids = []
+    pts.forEachView(0, (uuid) => uuids.push(uuid))
+    expect(uuids.sort()).toEqual(['ua', 'ub'])
+    expect(pts.pixelOf(0, 'ua')).toEqual([100, 200])
+    expect(pts.pixelOf(0, 'ub')).toEqual([110, 210])
+    expect(pts.colorAt(0)).toEqual([10, 20, 30])
+    expect(pts.viewCount(1)).toBe(1)
   })
 
   it('drops unmatched images, their observations, and now-empty points', () => {
