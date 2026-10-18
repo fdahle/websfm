@@ -151,6 +151,7 @@ export const COMMANDS = [
 
   // --- Import ---
   { name: 'import',   aliases: ['import-images'],   dispatch: 'import-images',     group: 'Import', help: 'Import images' },
+  { name: 'import video', aliases: ['video'],       dispatch: 'import-video',      group: 'Import', help: 'Import frames of a video as images' },
   { name: 'import colmap', aliases: ['colmap-import'], dispatch: 'import-colmap',  group: 'Import', help: 'Import an SfM project (COLMAP and others)' },
 
   // --- Export (multi-word: "export <what>") ---

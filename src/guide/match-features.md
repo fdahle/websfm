@@ -45,14 +45,15 @@ Fields that would be ignored by the current choices are either hidden or greyed 
 the reason, so every visible number is one that changes the run.
 
 ## Pairing
-<!-- param: strategy  default: Preselect when images have camera positions, otherwise Exhaustive -->
+<!-- param: strategy  default: Preselect when images have camera positions, Sequential for video frames, otherwise Exhaustive -->
 Decides which image pairs are matched at all. **Exhaustive** matches every pair, which
 is safe for any unordered set but grows as $O(N^2)$. **Sequential** matches each image
 to the next few in capture order and needs no metadata: use it for video, orbits and
 single flight strips. **Preselect** uses camera positions or image footprints to match
 only the pairs likely to overlap; see [pair preselection](help:preselection).
 
-The dialog starts on Preselect when at least two matched images have positions and on
+The dialog starts on Preselect when at least two matched images have positions, on
+Sequential when most images are frames from [Import Video](guide:video-import), and on
 Exhaustive otherwise, and suggests a strategy for the dataset under the control. Fewer
 pairs make matching faster, but a pair that is never matched can never connect two
 images: if part of the block stays unregistered, widen the window or match exhaustively.
@@ -63,7 +64,7 @@ Used by the **Sequential** strategy when GPS or imported camera positions are no
 available. Each image is matched to the next N images in capture order, retaining
 overlapping views while reducing exhaustive $O(N^2)$ matching to approximately
 $O(N \cdot w)$ for a window of $w$ images. Ten is a good starting point for a smoothly captured orbit.
-This assumes the image list follows capture order (normally filename/EXIF order).
+This assumes the image list follows capture order (normally filename/EXIF order; for video frames, their time in the video).
 
 ## Close capture loop
 <!-- param: sequentialLoopClosure  default: off -->

@@ -225,6 +225,8 @@ export const FIELD_DEFS = [
   { key: 'iso', label: 'ISO', format: (m) => m.iso },
   { key: 'orientation', label: 'Orientation', format: (m) => m.orientation },
   { key: 'dateTime', label: 'Taken', format: (m) => formatDate(m.dateTime) },
+  // A frame extracted by Import ▸ Video: which video, and where in it.
+  { key: 'video', label: 'Video frame', format: (m) => (m.videoSource ? `${m.videoSource} at ${Number(m.videoTime ?? 0).toFixed(3)} s` : null) },
   {
     key: 'gps',
     label: 'GPS',

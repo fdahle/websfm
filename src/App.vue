@@ -327,6 +327,7 @@ const {
   openRasterImport, onRasterPick, addImagesRouted,
   onCameraImport, onGcpImport, onFootprintImport, onFiducialImport,
   onGcpPick, onCameraPick, onColmapPick, onFiducialObsPick, onFiducialMarksPick,
+  onVideoPick, onVideoImport,
 } = useImportRouting({
   addGcps, addFootprints, importSensors, addPoses, addFiducialObs: addFiducialObservations, addFiducialMarks: importFiducialMarks,
   importColmap: importColmapModel, importCloud,
@@ -446,7 +447,7 @@ const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useComma
   removals: { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages },
   imports: {
     cameraPickMode, addImagesRouted, onGcpPick, onCameraPick, onFiducialObsPick, onFiducialMarksPick,
-    onColmapPick, onCloudPick, onRasterPick, onProjectFilePick,
+    onColmapPick, onCloudPick, onRasterPick, onVideoPick, onProjectFilePick,
   },
   consoleOpen,
 })
@@ -478,7 +479,7 @@ provideAppContext({
   onGeoreferenceRun, onGradualSelectionRun, onImageQualityEstimate, onImageQualityGroup,
   onImageQualityRemove, onImportKindChosen, onImportSwitchKind, onMatchRun, onMergeCloudsRun,
   onMeshRun, onOptimizeCamerasRun, onOrthoRun, onProductToolRun, onRasterImportAsImage,
-  onRasterStyleApply, onReconstructRun, onSaveProject, onSectionRun, onToolEditRun, onViewerPick,
+  onRasterStyleApply, onReconstructRun, onSaveProject, onSectionRun, onToolEditRun, onVideoImport, onViewerPick,
   onWorkflowRun, onWorkflowUpdate, openImageTab, openImageWithResiduals, openProjectFolder,
   orientAutoUp, orientCentreOrigin, orientDraft, orientEdit, orientPicking, orientPlanePicks,
   pendingConfirm, pendingImageDelete, pickProjectFile, pickSfmFiles, pickSfmFolder,

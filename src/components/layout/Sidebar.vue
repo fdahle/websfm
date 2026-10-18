@@ -100,7 +100,7 @@ watch(() => pendingRasters.value.length, (count, previous) => {
     @drop="onDrop"
   >
     <!-- Drop overlay -->
-    <div v-if="isDragging" class="drop-overlay">Drop images or data files to import</div>
+    <div v-if="isDragging" class="drop-overlay">Drop images, a video or data files to import</div>
 
     <ImagesSection :open="open.images" @toggle="toggle('images')" />
     <SensorsSection :open="open.sensors" @toggle="toggle('sensors')" />

@@ -6,6 +6,13 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Video import**: Import ▸ Video (or dropping a video on the sidebar) extracts
+  frames as images. The automatic mode scans the video and spaces the frames by how
+  far the view moves, keeping the sharpest frame in each step and skipping blurry
+  ones, up to a frame cap; a fixed interval (every N seconds or frames) is the
+  alternative. The dialog shows how many frames it will extract before writing any.
+  Frames are named `<video>_<time>.jpg`, share one sensor per video, and Match
+  Features starts on Sequential pairing for them.
 - **Level-of-detail point clouds**: a dense cloud of 4 million points or more gets an
   octree in the background (saved with the project, built once), and the 3D view then
   draws only a point budget's worth of it, the part in front of the camera in most

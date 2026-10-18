@@ -76,7 +76,7 @@ function areaTaps(nSrc, nDst) {
  * Separable area downscale of a single-channel plane into a Float32Array,
  * multiplying every value by `gain` (used to normalise to 0..1).
  */
-function resampleArea(src, w, h, outW, outH, gain) {
+export function resampleArea(src, w, h, outW, outH, gain) {
   const out = new Float32Array(outW * outH)
   if (outW === w && outH === h) {
     for (let i = 0; i < w * h; i++) out[i] = src[i] * gain

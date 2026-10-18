@@ -110,6 +110,13 @@ describe('exifSignature', () => {
   it('omits dimensions unless both width and height are present', () => {
     expect(exifSignature({ make: 'X', width: 100 })).toBe('X')
   })
+
+  it('gives each video its own sensor, shared by its frames', () => {
+    const a = exifSignature({ width: 1920, height: 1080, videoSource: 'walk.mp4' })
+    expect(a).toBe('1920x1080|video:walk.mp4')
+    expect(exifSignature({ width: 1920, height: 1080, videoSource: 'orbit.mov' })).not.toBe(a)
+    expect(exifLabel({ width: 1920, height: 1080, videoSource: 'walk.mp4' })).toBe('Video walk.mp4')
+  })
 })
 
 describe('exifLabel', () => {

@@ -76,6 +76,8 @@ export const useModalsStore = defineStore('modals', () => {
   // editable on the sidebar row, which is what makes that defensible).
   const importRasterOpen    = ref(false)
   const importRasterData    = ref(null)   // { raster: RasterMeta, fileName }
+  // Import ▸ Video: the video File whose frame-selection dialog is open, or null.
+  const importVideoFile     = ref(null)
   // Band math / stretch for a multi-band raster. Holds the raster id, not the
   // record — the record is replaced wholesale by a restyle's re-decode.
   const rasterStyleId       = ref(null)
@@ -151,6 +153,7 @@ export const useModalsStore = defineStore('modals', () => {
     importCloudData,
     importRasterOpen,
     importRasterData,
+    importVideoFile,
     rasterStyleId,
     symbologyProductKind,
     symbologyCloudId,

@@ -55,6 +55,13 @@ project:
 
 - `images`: the dataset folder. `include` is a filename regex. `limit` keeps the first
   N files after sorting.
+- `video`: one video file instead of `images`. Its frames are planned and extracted as
+  **Import ▸ Video** does, with `videoImport` (the dialog's settings, over
+  `VIDEO_IMPORT_DEFAULTS`: `mode`, `every`/`unit`, `overlap`, `maxFrames`,
+  `minSharpness`, `format`, `jpegQuality`, `maxDim`). The `ingest` stage then reports
+  the video's size, length and frame rate, the scan (samples, travel, blurry samples,
+  gaps) and the frames extracted. Use H.264, VP9 or AV1: the bench runs Chrome.
+  Pair it with `"match": { "strategy": "sequential" }`, the dialog's start for frames.
 - `sceneType`: `object` or `aerial`.
 - `detect`, `match`, `recon`: settings layered over the app's defaults, exactly as the
   modals do it. `preset` selects a preset delta (`low` / `high`).

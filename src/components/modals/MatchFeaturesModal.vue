@@ -32,7 +32,7 @@ const emit = defineEmits(['close', 'run'])
 
 // GPU is a machine-level preference now (Settings ▸ Compute), injected on run.
 const { useGpu } = useComputeSettings()
-const { recommendations } = useDatasetRecommendations()
+const { recommendations, profile } = useDatasetRecommendations()
 const { log } = useLog()
 
 // Preselect needs ≥2 images carrying the relevant evidence to prune anything.
@@ -40,7 +40,9 @@ const hasPoses = computed(() => props.posedImageCount >= 2)
 const hasFootprints = computed(() => props.footprintImageCount >= 2)
 const preselectAvailable = computed(() => hasPoses.value || hasFootprints.value)
 
-const strategy = ref(initialMatchStrategy(props.posedImageCount))
+// Video frames start on Sequential: they are in capture order (an initial value —
+// any choice the user makes stands).
+const strategy = ref(initialMatchStrategy(props.posedImageCount, { video: profile.value.kind === 'video' }))
 const strategyTouched = ref(false)
 const strategies = computed(() => [
   { id: 'exhaustive', label: 'Exhaustive' },

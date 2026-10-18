@@ -37,8 +37,9 @@ A full photogrammetry pipeline, stage by stage:
 6. **Georeferencing** – ground control points, camera poses, and reference DEMs,
    with reprojection into any project CRS (proj4).
 
-There's also an in-app glossary, a quality-report hub, point-cloud editing, and
-COLMAP / PLY / LAS / GeoTIFF import & export.
+There's also an in-app glossary, a quality-report hub, point-cloud editing, video
+import (frames picked by camera motion and sharpness), and COLMAP / PLY / LAS /
+GeoTIFF import & export.
 
 ## Browser requirements
 

@@ -24,7 +24,8 @@ each needs:
 - **By capture order.** With no poses at all, a set whose filenames form a
   sequence (a flight strip, video frames) can match each image only to the next
   few in order, optionally closing the loop back to the start. This is the
-  no-metadata fallback.
+  no-metadata fallback, and the starting choice for frames imported from a video
+  (see [keyframe selection](help:keyframe-selection)).
 
 <!-- TODO(image): assets/preselection.svg - a grid of image thumbnails with the full N-by-N pair matrix faded in the background, and the sparse subset of actually-matched pairs highlighted: a narrow band near the diagonal for sequential, plus a few off-diagonal cells for loop closures. -->
 

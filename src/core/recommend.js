@@ -24,8 +24,11 @@ const rec = (value, reason) => ({ value, reason })
 // Matching can safely select proximity by default only when at least two loaded
 // images have usable camera positions. Kept pure so the modal's automatic initial
 // state and its availability gate share a directly testable rule.
-export function initialMatchStrategy(positionCount) {
-  return Number(positionCount) >= 2 ? 'preselect' : 'exhaustive'
+// A set of video frames (profile kind 'video') starts on Sequential instead of
+// Exhaustive: the frames are in capture order, and each overlaps its neighbours.
+export function initialMatchStrategy(positionCount, { video = false } = {}) {
+  if (Number(positionCount) >= 2) return 'preselect'
+  return video ? 'sequential' : 'exhaustive'
 }
 
 // ── detect ──────────────────────────────────────────────────────────────────
@@ -65,6 +68,10 @@ function recommendMatch(p) {
   if (p.hasPoses) {
     out.strategy = rec('preselect', 'Camera positions present — preselect by proximity instead of matching all pairs.')
     out.preselectMethod = rec('position', 'Nearest-camera preselection from the available positions.')
+  } else if (p.kind === 'video') {
+    // Frames extracted from a video are in capture order by construction, and the
+    // keyframe selection spaced them so neighbours overlap — no naming guesswork.
+    out.strategy = rec('sequential', 'Frames extracted from a video, in capture order — match each to the next few; enable loop closure if the video returns to where it started.')
   } else if (p.sequentialNames && p.scale === 'large') {
     // Contiguous filenames alone don't prove a strip — cameras number files
     // sequentially for any shoot — so sequential matching is only recommended

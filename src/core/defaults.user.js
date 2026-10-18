@@ -316,6 +316,23 @@ export const IMPORT_CLOUD_DEFAULTS = {
   subsampleCell: 0,  // voxel subsample cell in world units after scaling; 0 = off
 }
 
+// Video import (ImportVideoModal.vue → core/io/videoFrames.js): which frames of a
+// video become images, and how they are stored.
+export const VIDEO_IMPORT_DEFAULTS = {
+  mode: 'auto',        // 'auto' (spaced by motion, sharpest kept) | 'interval'
+  every: 1,            // interval: one frame every `every` `unit`
+  unit: 'seconds',     // interval: 'seconds' | 'frames'
+  // Auto: consecutive frames share about this much of the view (% of the frame
+  // width). 80 % keeps every point in ~5 frames, plenty for sequential matching
+  // with its 10-image window.
+  overlap: 80,
+  maxFrames: 200,      // auto: the spacing widens until the count fits
+  minSharpness: 0.5,   // auto: blurry below this × the median sharpness of nearby moments
+  format: 'jpeg',      // 'jpeg' | 'png' (lossless, ~5× larger)
+  jpegQuality: 0.95,   // the frames are already compressed once; keep the second pass light
+  maxDim: 0,           // long side of the saved frames in px; 0 = the video's own size
+}
+
 // Mesh (screened Poisson, core/products/mesh.js + crates/mesh). Mirrored by
 // MeshModal.vue. `screening` is the Poisson point-fitting weight (the vendored
 // library's quality lever; the classic PoissonRecon "samples per node" knob is not

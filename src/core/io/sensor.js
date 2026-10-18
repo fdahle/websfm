@@ -244,6 +244,9 @@ export function exifSignature(meta) {
     meta.model || '',
     meta.focalLength != null ? `f${meta.focalLength}` : '',
     meta.width != null && meta.height != null ? `${meta.width}x${meta.height}` : '',
+    // Frames of one video share one camera, and only that camera: another video of
+    // the same size may come from a different phone or zoom setting.
+    meta.videoSource ? `video:${meta.videoSource}` : '',
   ]
   const sig = parts.filter(Boolean).join('|')
   return sig || null
@@ -253,7 +256,7 @@ export function exifSignature(meta) {
 export function exifLabel(meta) {
   const cam = [meta?.make, meta?.model].filter(Boolean).join(' ')
   const fl = meta?.focalLength != null ? `${meta.focalLength}mm` : null
-  return [cam || 'Unknown camera', fl].filter(Boolean).join(' · ')
+  return [cam || (meta?.videoSource ? `Video ${meta.videoSource}` : 'Unknown camera'), fl].filter(Boolean).join(' · ')
 }
 
 // Seed a sensor object from an image's EXIF. Focal length stays in millimetres

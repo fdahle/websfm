@@ -41,15 +41,18 @@ export function createIngest({
   activeImports, images, isPersisting, log, markComputePending, pendingWorkCount, projects,
   rejectComputeReady, resolveComputeReady, save, thumbnails, trackWrite,
 }) {
-  function extractMetadataFor(item, file, projectId, presetDims) {
+  // `extraMeta`: fields the file itself cannot carry (a video frame's source and
+  // time), merged over what EXIF gave.
+  function extractMetadataFor(item, file, projectId, presetDims, extraMeta = null) {
     return extractMetadata(file, item.url, presetDims)
       .then((meta) => {
         const found = projects.currentProjectId === projectId
           ? images.value.find((img) => img.uuid === item.uuid) : null
         if (found) {
-          found.meta = meta
+          found.meta = extraMeta ? { ...meta, ...extraMeta } : meta
           found.loading = false
-          const cam = [meta.make, meta.model].filter(Boolean).join(' ') || 'unknown camera'
+          const cam = [meta.make, meta.model].filter(Boolean).join(' ')
+            || (extraMeta?.videoSource ? `frame of ${extraMeta.videoSource} at ${Number(extraMeta.videoTime ?? 0).toFixed(3)} s` : 'unknown camera')
           const dim = meta.width && meta.height ? ` ${meta.width}×${meta.height}` : ''
           log(`Metadata: ${file.name} — ${cam}${dim}`, 'success', 'Metadata')
           if (isPersisting()) save(projectId)
@@ -64,8 +67,14 @@ export function createIngest({
       })
   }
 
-  async function addImages(files, onProgress) {
-    const task = addImagesNow(files, onProgress)
+  // `options` (both optional), for files made in the browser rather than picked:
+  //   extras: Map<File, { meta, dims, thumb }> — metadata to merge over EXIF, the
+  //     known pixel size (skips the <img> probe) and a ready list thumbnail;
+  //   fromStorage: once a file is written to the project, the record reads it back
+  //     from there, so the in-memory original can be freed (video frames: a long
+  //     video must not hold every extracted frame in memory).
+  async function addImages(files, onProgress, options = {}) {
+    const task = addImagesNow(files, onProgress, options)
     activeImports.add(task)
     pendingWorkCount.value++
     try { return await task } finally {
@@ -74,9 +83,10 @@ export function createIngest({
     }
   }
 
-  async function addImagesNow(files, onProgress) {
+  async function addImagesNow(files, onProgress, { extras = null, fromStorage = false } = {}) {
     const projectId = projects.currentProjectId
     const persistImport = !!projectId && isPersisting()
+    const stored = []
     let added = 0
     const tiffItems = []
     const metadataTasks = []
@@ -103,8 +113,10 @@ export function createIngest({
 
       if (persistImport) {
         batchWrites.push(trackWrite(opfs.saveImage(projectId, item.uuid, file)
+          .then(() => { if (fromStorage) stored.push(item.uuid) })
           .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
       }
+      const extra = extras?.get(file) ?? null
 
       // Browsers (bar Safari) can't decode TIFF natively, so createImage's blob
       // URL renders blank until transcoded. Batch the transcode below — off the
@@ -124,10 +136,10 @@ export function createIngest({
           .then((dims) => extractMetadataFor(item, file, projectId, dims))
           .catch(() => extractMetadataFor(item, file, projectId)))
       } else {
-        metadataTasks.push(extractMetadataFor(item, file, projectId))
+        metadataTasks.push(extractMetadataFor(item, file, projectId, extra?.dims ?? null, extra?.meta ?? null))
         // The list thumbnail, from the File itself — background, behind any row in
         // view. Not awaited: a 5,000-image drop must not wait on 5,000 decodes.
-        thumbnails.requestThumbnail(item, { source: file })
+        thumbnails.requestThumbnail(item, { source: extra?.thumb ?? file })
       }
     }
 
@@ -269,6 +281,7 @@ export function createIngest({
 
     await Promise.allSettled(metadataTasks)
     await Promise.allSettled(batchWrites)
+    if (stored.length) await readBackFromStorage(projectId, stored)
     if (added > 1) log(`Added ${added} images`, 'success', 'Images')
     if (persistImport) await save(projectId)
   }
@@ -308,6 +321,21 @@ export function createIngest({
         .catch((err) => log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
       batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'pyramid', pyr.blob)
         .catch((err) => log(`OPFS derived save failed (pyramid): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
+    }
+  }
+
+  // Point the records at their stored copies (File-backed, read on demand — what a
+  // restore gives them) and drop the in-memory originals they were made from. After
+  // the metadata read, which still decodes the original's `url` when it has no dims.
+  async function readBackFromStorage(projectId, uuids) {
+    for (const uuid of uuids) {
+      if (projects.currentProjectId !== projectId) return
+      const file = await opfs.loadImageBlob(projectId, uuid).catch(() => null)
+      const found = images.value.find((img) => img.uuid === uuid)
+      if (!found || !(file?.size > 0)) continue
+      URL.revokeObjectURL(found.url)
+      found.url = URL.createObjectURL(file)
+      found.file = file
     }
   }
 

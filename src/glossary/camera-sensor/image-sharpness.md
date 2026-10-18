@@ -35,3 +35,7 @@ are images with more than a quarter of their pixels crushed black or blown white
 Flagged images can be put in a group for review or removed. A photo sharp in only one
 corner (shallow depth of field) may still be flagged, so check it before removing it.
 See [Image Quality, Region and Orientation](guide:model-tools).
+
+**Import → Video** uses the same score to avoid blurry frames, measured at 512 px
+and compared with the median of the nearby moments in the video rather than of a
+whole batch (see [Import Video](guide:video-import)).
