@@ -301,6 +301,13 @@ export const EXPORT_DEFAULTS = {
   // Saved measurements as GeoJSON (core/products/measurementExport.js): 'project' =
   // the project CRS in the legacy `crs` member, heights kept; 'wgs84' = RFC 7946.
   measurementCoords: 'project',
+  // 3D Tiles (core/products/tiles3d.js). `tiling` null = by size: a hierarchy of
+  // tiles ('lod') from these sizes up, else one tile ('single'). A mesh's tiles hold
+  // up to `tileTriangles` triangles each (about 1–2 MB of glTF).
+  tiling: null,
+  tilesLodMinPoints: 1_000_000,
+  tilesLodMinTriangles: 250_000,
+  tileTriangles: 65_536,
   // Undistorted images (COLMAP image_undistorter parity).
   // `mode` 'crop' keeps only the region every output pixel of which samples inside
   // the source — the alternative leaves a clamped-edge smear a downstream matcher

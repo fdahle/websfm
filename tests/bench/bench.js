@@ -588,7 +588,9 @@ window.bench = {
     }
     const target = cloud ? recon.clouds.find((c) => c.kind === cloud && (cloudName ? c.name === cloudName : !c.imported && !c.derived)) : null
     if (cloud && !target) throw new Error(`exportRun: no ${cloud} cloud`)
-    if (target) ex.openCloudExport(target.id)
+    // 3D Tiles writes the selected mesh or cloud: the named one is selected first.
+    if (target && kind === 'tiles3d') { recon.selectedCloudId = target.id; ex.exportKind.value = kind }
+    else if (target) ex.openCloudExport(target.id)
     else ex.exportKind.value = kind
     const t0 = performance.now()
     await ex.onExportRun(settings)

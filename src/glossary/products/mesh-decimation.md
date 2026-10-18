@@ -32,3 +32,7 @@ make an edge shared by more than two triangles is refused. **Preserve the bounda
 (on by default) makes collapses along an open edge expensive, so a terrain outline
 or a cut is not eaten away. The merged vertex takes the colour interpolated along
 the collapsed edge, and the result is a new mesh. See [Build a Mesh](guide:mesh).
+
+**Export ▸ 3D Tiles…** decimates too, to build the coarser levels of a
+[3D Tiles](help:3d-tiles) tileset: there the vertices on a tile's border are locked,
+never moved or removed, so neighbouring tiles decimated apart still meet.

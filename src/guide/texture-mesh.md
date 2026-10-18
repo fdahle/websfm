@@ -121,7 +121,9 @@ symbology; RGB still shows the vertex colours).
   since OBJ and MTL cannot name a file with a space in it.
 
 PLY and STL write the geometry only. **Export ▸ 3D Tiles…** with the textured mesh
-selected writes the mesh, with its texture, as the tile.
+selected writes the mesh, with its texture, as one tile, or as a hierarchy of tiles
+whose finest level keeps the texture and whose coarser, decimated levels have vertex
+colours (see [Export 3D Tiles](guide:export-3d-tiles)).
 
 ## Mesh tools on a textured mesh
 A textured mesh stores each corner on a chart seam once per chart, since its texture

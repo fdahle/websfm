@@ -1,6 +1,7 @@
 import { markRaw, watch } from 'vue'
 import * as opfs from '../../utils/opfs.js'
-import { buildLod as workerBuildLod, extractLod as workerExtractLod, exportLod as workerExportLod, transformLod as workerTransformLod } from '../../workers/computeClient.js'
+import { buildLod as workerBuildLod, extractLod as workerExtractLod, exportLod as workerExportLod, transformLod as workerTransformLod,
+  exportPointTiles as workerExportPointTiles } from '../../workers/computeClient.js'
 import { openLodReader } from '../../core/lod/reader.js'
 import { LOD_MIN_POINTS } from '../../core/lod/build.js'
 
@@ -176,6 +177,18 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
       { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
   }
 
+  // A cloud's octree as a 3D Tiles tileset (core/lod/tiles3d.js), one tile per node:
+  // placement { sim, origin, transform } from the caller. → { blob, tiles, contentTiles, points, levels }
+  async function exportCloudTiles(cloud, { sim = null, origin, transform = null, color = true } = {}, onProgress) {
+    const pid = projectId()
+    if (!cloud?.lod || !pid) throw new Error('the cloud has no octree')
+    const [data, hierarchy] = await Promise.all([
+      opfs.loadLodFile(pid, cloud.lod.dataFile), opfs.loadLodFile(pid, cloud.lod.hierarchyFile),
+    ])
+    return workerExportPointTiles({ lod: JSON.parse(JSON.stringify(cloud.lod)), data, hierarchy, sim, origin, transform, color },
+      { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
+  }
+
   // An edit of a streamed cloud (core/lod/transform.js): its points go through the
   // edit into a new octree, and so a NEW streamed cloud, as every edit is non-destructive.
   // mode 'crop' (invert) | 'mask' | 'classify' | 'filter' | 'classify-ground'. → the cloud, or null
@@ -213,5 +226,5 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
     }
   }
 
-  return { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, editStreamedCloud, pruneLod: prune }
+  return { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, exportCloudTiles, editStreamedCloud, pruneLod: prune }
 }

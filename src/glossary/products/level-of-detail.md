@@ -30,3 +30,7 @@ that changes the points (a selection deleted or reclassified) builds it again. A
 file too large to hold in memory goes straight into an octree as it is read: a
 *streamed* cloud, whose points exist only there (see
 [Point Cloud Tools](guide:point-cloud-tools)).
+
+The same octree is what **Export ▸ 3D Tiles…** writes for a globe viewer, one
+[3D Tiles](help:3d-tiles) tile per node, so CesiumJS streams the cloud the way the
+3D view does (see [Export 3D Tiles](guide:export-3d-tiles)).

@@ -59,6 +59,12 @@ import { coincidentVertices } from './meshEdit.js'
  *   would move the surface by more than this (RMS distance, model units).
  * @property {boolean} [preventFlips=true] reject collapses that turn a surviving
  *   triangle's normal by more than ~78° (dot < 0.2).
+ * @property {Uint8Array|null} [locked=null] per input vertex, 1 = never moved or
+ *   removed: an edge with one locked end collapses INTO that end (the other end
+ *   joins it where it stands), an edge with two never collapses. A 3D Tiles tile's
+ *   border (core/products/tiles3dMesh.js) is locked so neighbouring tiles, decimated
+ *   apart, still meet vertex for vertex. Not with a textured mesh (its vertices are
+ *   renumbered when the texture copies are joined).
  */
 
 // A surviving triangle whose normal turns past this cosine is a fold: dot < 0.2 is
@@ -84,7 +90,8 @@ const T_SNAP = 1e-12
  * `idx: Uint32Array`, `col: Uint8Array|null`, compacted (no unreferenced vertices,
  * no repeated-index triangles; vertices keep their original relative order), and
  * `stats = { before, after, collapses, maxError }` — `maxError` is the largest
- * accepted collapse error (RMS distance, model units).
+ * accepted collapse error (RMS distance, model units). `sourceVertex[r]` is the input
+ * vertex output vertex r is the survivor of (a locked vertex keeps its position).
  *
  * Vertex colour: the survivor takes the colour interpolated along the collapsed edge
  * at the new position's projection onto it (clamped to the edge). A plain "closer
@@ -101,14 +108,15 @@ const T_SNAP = 1e-12
  * @param {DecimateOptions} opts
  * @param {(msg:string, level?:string, source?:string)=>void} [onLog]
  * @returns {{ mesh: { nVerts:number, count:number, pos:Float64Array, idx:Uint32Array, col:Uint8Array|null },
- *            stats: { before:number, after:number, collapses:number, maxError:number } }}
+ *            stats: { before:number, after:number, collapses:number, maxError:number },
+ *            sourceVertex: Uint32Array }}
  */
 export function decimateMesh(mesh, opts = {}, onLog) {
   const t0 = nowMs()
   const {
     targetTriangles, targetRatio,
     preserveBoundary = true, boundaryWeight = 1000,
-    maxError = Infinity, preventFlips = true,
+    maxError = Infinity, preventFlips = true, locked = null,
   } = opts
   const hasCount = targetTriangles != null
   const hasRatio = targetRatio != null
@@ -116,7 +124,10 @@ export function decimateMesh(mesh, opts = {}, onLog) {
     throw new Error('decimateMesh: give exactly one of targetTriangles / targetRatio')
   }
 
-  if (mesh?.uv) mesh = joinTextureCopies(mesh, onLog)
+  if (mesh?.uv) {
+    if (locked) throw new Error('decimateMesh: `locked` needs an untextured mesh (joining the texture copies renumbers it)')
+    mesh = joinTextureCopies(mesh, onLog)
+  }
 
   const nT = mesh?.idx ? Math.floor(mesh.idx.length / 3) : 0
   const nV = mesh?.pos ? Math.floor(mesh.pos.length / 3) : 0
@@ -266,7 +277,12 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   // straight-border regions the 3×3 is singular and the segment placement keeps the
   // vertex exactly on the plane / border line.
   let candX = 0, candY = 0, candZ = 0, candT = 0, candL2 = 0
+  // A locked end: the collapse can only go into it, so it is priced there (the main
+  // loop then collapses the other end into the locked one). Two locked ends: never.
+  let candKeepB = false
   const evaluate = (a, b) => {
+    candKeepB = false
+    if (locked && (locked[a] || locked[b])) return evaluateLocked(a, b)
     const oa = a * 10, ob = b * 10
     const a11 = Q[oa] + Q[ob], a12 = Q[oa + 1] + Q[ob + 1], a13 = Q[oa + 2] + Q[ob + 2]
     const a14 = Q[oa + 3] + Q[ob + 3], a22 = Q[oa + 4] + Q[ob + 4], a23 = Q[oa + 5] + Q[ob + 5]
@@ -332,6 +348,45 @@ export function decimateMesh(mesh, opts = {}, onLog) {
     candX = x; candY = y; candZ = z; candT = t; candL2 = ex * ex + ey * ey + ez * ez
     if (!(err > 0)) err = 0 // rounding can push a PSD form slightly negative
     return W > 0 ? err / W : err
+  }
+
+  // The error of `evaluate`'s locked case: the merged quadric at the locked end.
+  const evaluateLocked = (a, b) => {
+    const ia = a * 3, ib = b * 3
+    const ex = P[ib] - P[ia], ey = P[ib + 1] - P[ia + 1], ez = P[ib + 2] - P[ia + 2]
+    candL2 = ex * ex + ey * ey + ez * ez
+    if (locked[a] && locked[b]) { candX = P[ia]; candY = P[ia + 1]; candZ = P[ia + 2]; candT = 0; return Infinity }
+    const keep = locked[a] ? a : b
+    candKeepB = keep === b
+    const ik = keep * 3
+    candX = P[ik]; candY = P[ik + 1]; candZ = P[ik + 2]; candT = keep === b ? 1 : 0
+    const oa = a * 10, ob = b * 10
+    let err = quadricValue(Q[oa] + Q[ob], Q[oa + 1] + Q[ob + 1], Q[oa + 2] + Q[ob + 2], Q[oa + 3] + Q[ob + 3],
+      Q[oa + 4] + Q[ob + 4], Q[oa + 5] + Q[ob + 5], Q[oa + 6] + Q[ob + 6], Q[oa + 7] + Q[ob + 7], Q[oa + 8] + Q[ob + 8],
+      Q[oa + 9] + Q[ob + 9], candX, candY, candZ)
+    if (!(err > 0)) err = 0
+    const W = Wt[a] + Wt[b]
+    return W > 0 ? err / W : err
+  }
+
+  // A collapse kills the triangles holding both ends; a locked vertex whose only
+  // triangle that is would drop out of the mesh (a border corner with one triangle).
+  const orphansLocked = (a, b) => {
+    for (let c = head[b]; c >= 0; c = next[c]) {
+      const t = (c / 3) | 0
+      if (dead[t] || !triHas(t, a)) continue
+      for (let k = 0; k < 3; k++) {
+        const w = tri[t * 3 + k]
+        if (w === a || w === b || !locked[w]) continue
+        let others = 0
+        for (let cw = head[w]; cw >= 0 && !others; cw = next[cw]) {
+          const tw = (cw / 3) | 0
+          if (!dead[tw] && tw !== t && !(triHas(tw, a) && triHas(tw, b))) others++
+        }
+        if (!others) return true
+      }
+    }
+    return false
   }
 
   // ── Topology: link condition + valence ──────────────────────────────────────
@@ -569,11 +624,14 @@ export function decimateMesh(mesh, opts = {}, onLog) {
       pop()
       const a = popA, b = popB
       if (alive[a] !== 1 || alive[b] !== 1 || modTime[a] > popT || modTime[b] > popT) continue
+      if (popK === Infinity) break // only edges between two locked vertices are left
       if (popK > maxErr2) { stoppedByError = true; break }
       evaluate(a, b)
       const x = candX, y = candY, z = candZ, t = candT
-      if (!linkOk(a, b) || !geometryOk(a, b, x, y, z)) { rejected++; continue }
-      collapse(a, b, x, y, z, t)
+      if (!linkOk(a, b) || !geometryOk(a, b, x, y, z) || (locked && orphansLocked(a, b))) { rejected++; continue }
+      // A locked `b` survives: `a` joins it (same edge, same placement, colour from b's side).
+      if (candKeepB) collapse(b, a, x, y, z, 1 - t)
+      else collapse(a, b, x, y, z, t)
       if (popK > worstErr2) worstErr2 = popK
       collapses++; passCollapses++
     }
@@ -594,9 +652,11 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   for (let v = 0; v < nV; v++) if (remap[v] === 0) remap[v] = outVerts++
   const pos = new Float64Array(outVerts * 3)
   const col = C ? new Uint8Array(outVerts * 3) : null
+  const sourceVertex = new Uint32Array(outVerts)
   for (let v = 0; v < nV; v++) {
     const r = remap[v]
     if (r < 0) continue
+    sourceVertex[r] = v
     pos[r * 3] = P[v * 3] + ox; pos[r * 3 + 1] = P[v * 3 + 1] + oy; pos[r * 3 + 2] = P[v * 3 + 2] + oz
     if (col) { col[r * 3] = C[v * 3]; col[r * 3 + 1] = C[v * 3 + 1]; col[r * 3 + 2] = C[v * 3 + 2] }
   }
@@ -627,6 +687,7 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   return {
     mesh: { nVerts: outVerts, count: outTris, pos, idx, col },
     stats: { before, after: outTris, collapses, maxError: maxErr },
+    sourceVertex,
   }
 }
 

@@ -28,6 +28,7 @@ import { makeUndistortOps } from './ops/undistort.js'
 import { makeLazCodec } from './ops/laz.js'
 import { makeExportOps } from './ops/export.js'
 import { makeLodOps } from './ops/lod.js'
+import { makeTiles3dOps } from './ops/tiles3d.js'
 import { isPyramid, openPyramid, rasterizePyramid } from './rasterSource.js'
 
 // Decode an image URL (blob: URLs work in a worker) and draw it into an
@@ -96,6 +97,7 @@ const ops = {
   ...makeExportOps({ lazCodec }),
   ...makeUndistortOps({ rasterize }),
   ...makeLodOps({ lazCodec }),
+  ...makeTiles3dOps(),
 }
 
 self.onmessage = async (e) => {

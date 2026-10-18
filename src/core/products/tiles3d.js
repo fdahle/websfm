@@ -2,10 +2,10 @@
 // proj4, no DOM. The caller supplies the geodetic probe points (it owns the CRS
 // registry); everything here is ellipsoid maths, glTF packing and JSON.
 //
-// Scope: **one tile**. That already covers "put my model on the globe", which is
-// what the format is usually wanted for. LOD tiling — a quadtree with per-tile
-// decimation — is a much larger job and needs a mesh simplifier websfm does not
-// have; it is deliberately not started here.
+// Two layouts: **one tile** (buildTileset), which covers "put my model on the globe",
+// and a **hierarchy** of tiles (buildTileTree) for a model too big to draw at once: a
+// cloud's level-of-detail octree (core/lod/tiles3d.js) or a mesh split and decimated
+// per level (core/products/tiles3dMesh.js). Both share the placement below.
 //
 // Two conventions are load-bearing and are the whole reason this module exists
 // rather than a few lines in the caller:
@@ -23,6 +23,10 @@
 //     projected ≈ ENU is a common shortcut that is fine in mid-latitudes and badly
 //     wrong near the poles, where convergence approaches the longitude difference
 //     itself. Measuring absorbs both exactly at the origin.
+
+import { isStreamed } from '../lod/streamed.js'
+import { MAX_FLOAT64_XYZ_POINTS } from '../bufferLimit.js'
+import { EXPORT_DEFAULTS } from '../defaults.user.js'
 
 // WGS84 ellipsoid.
 const WGS84_A = 6378137.0
@@ -97,6 +101,31 @@ export function boundingBox(min, max) {
 // A single-tile tileset. `geometricError` is the screen-space error budget above
 // which the tile is drawn; for one tile the value only decides how early it
 // loads, so it is derived from the model's own size rather than guessed.
+// The model an Export ▸ 3D Tiles writes: the selected mesh, else the selected cloud
+// with points, else the first cloud with points; with its size. → { cloud, kind:
+// 'mesh' | 'cloud', count (triangles or points), streamed, textured } or null
+export function tilesSubject(selected, clouds = []) {
+  const hasPoints = (c) => c && (c.kind === 'dense' ? c.count > 0 : c.kind !== 'mesh' && c.points?.length > 0)
+  const cloud = selected?.kind === 'mesh' && selected.count > 0 ? selected
+    : hasPoints(selected) ? selected : clouds.find(hasPoints)
+  if (!cloud) return null
+  if (cloud.kind === 'mesh') return { cloud, kind: 'mesh', count: cloud.count, streamed: false, textured: !!(cloud.uv && cloud.texture) }
+  return { cloud, kind: 'cloud', count: cloud.kind === 'dense' ? cloud.count : cloud.points.length, streamed: isStreamed(cloud), textured: false }
+}
+
+// One tile or a hierarchy, when the dialog leaves it to the size: a hierarchy from
+// EXPORT_DEFAULTS' sizes up, and always for a cloud one tile cannot hold (streamed, or
+// past the buffer wall: core/bufferLimit.js). → 'lod' | 'single'
+export function defaultTiling(subject, { tilesLodMinPoints, tilesLodMinTriangles } = EXPORT_DEFAULTS) {
+  if (!subject) return 'single'
+  if (subject.kind === 'mesh') return subject.count >= tilesLodMinTriangles ? 'lod' : 'single'
+  if (!singleTileFits(subject)) return 'lod'
+  return subject.count >= tilesLodMinPoints ? 'lod' : 'single'
+}
+
+/** Whether one tile can hold the subject (a single tile is one Float64 plane and one GLB). */
+export const singleTileFits = (subject) => subject?.kind === 'mesh' || (!subject?.streamed && subject?.count <= MAX_FLOAT64_XYZ_POINTS)
+
 export function buildTileset({ transform, box, contentUri, geometricError }) {
   const err = geometricError ?? Math.max(box[3], box[7], box[11]) * 2
   return {
@@ -112,21 +141,101 @@ export function buildTileset({ transform, box, contentUri, geometricError }) {
   }
 }
 
-// Flat cloud { count, pos, col? } → a glTF-binary POINTS primitive.
+// ── A hierarchy of tiles ─────────────────────────────────────────────────────
+// `root` is a tree of { id, min, max (tile frame, Z-up), geometricError, content:
+// bool, children: [...] }. A tile's box is its own content's bounds joined with its
+// children's, so a child always lies inside its parent (viewers cull by the parent's
+// box first), and its error is at least its children's. Content is `tiles/<id>.glb`.
+//
+// Past `externalAbove` tiles, every `externalEvery`-th level starts an external
+// tileset (`tiles/<id>.json`, referenced by a content-less tile in its parent file):
+// a viewer then reads the hierarchy as it descends instead of one JSON of every
+// tile, which for a 200 M-point cloud's ten thousand nodes is several megabytes.
+// → { tileset, external: [{ name, json }], tiles }
+export function buildTileTree(root, { transform = null, refine = 'ADD', externalEvery = 5, externalAbove = 2000 } = {}) {
+  let tiles = 0
+  const finish = (t) => {
+    tiles++
+    const min = [...(t.min ?? [Infinity, Infinity, Infinity])], max = [...(t.max ?? [-Infinity, -Infinity, -Infinity])]
+    let err = t.geometricError ?? 0
+    for (const c of t.children ?? []) {
+      finish(c)
+      for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], c.box.min[k]); max[k] = Math.max(max[k], c.box.max[k]) }
+      err = Math.max(err, c.err)
+    }
+    if (!Number.isFinite(min[0])) { min.fill(0); max.fill(0) }
+    t.box = { min, max }
+    t.err = err
+  }
+  finish(root)
+  const split = tiles > externalAbove && externalEvery > 0
+  const external = []
+  // A tile's JSON; `dir` is the path from the file being written to tiles/.
+  const json = (t, depth, dir) => {
+    const out = { boundingVolume: { box: boundingBox(t.box.min, t.box.max) }, geometricError: t.err }
+    if (split && depth > 0 && depth % externalEvery === 0 && t.children?.length) {
+      external.push({ name: `tiles/${t.id}.json`, json: {
+        asset: { version: '1.1', tilesetVersion: 'websfm' }, geometricError: t.err,
+        root: { ...json(t, 0, ''), refine },
+      } })
+      out.content = { uri: `${dir}${t.id}.json` }
+      return out
+    }
+    if (t.content) out.content = { uri: `${dir}${t.id}.glb` }
+    if (t.children?.length) out.children = t.children.map((c) => json(c, depth + 1, dir))
+    return out
+  }
+  const rootJson = { ...json(root, 0, 'tiles/'), refine, ...(transform ? { transform } : {}) }
+  // The error of drawing nothing at all: at least the root's, and on the order of the
+  // model's size, so a viewer loads the root once the model is a few pixels across.
+  const size = Math.max(...[0, 1, 2].map((k) => root.box.max[k] - root.box.min[k]))
+  return {
+    tileset: { asset: { version: '1.1', tilesetVersion: 'websfm' }, geometricError: Math.max(root.err * 2, size / 8), root: rootJson },
+    external, tiles,
+  }
+}
+
+// The point attributes a tile carries as glTF metadata (EXT_structural_metadata
+// property attributes), by the cloud's attribute name: what a viewer styles a survey
+// by. Others (return numbers, GPS time) stay in the LAS/LAZ export.
+export const POINT_PROPERTIES = { classification: '_CLASSIFICATION', intensity: '_INTENSITY' }
+// Typed array → [glTF accessor componentType, metadata componentType]; anything a
+// vertex attribute cannot hold (32-bit integers, Float64) is written as FLOAT32.
+const PROPERTY_TYPES = [
+  [Uint8Array, 5121, 'UINT8'], [Int8Array, 5120, 'INT8'], [Uint16Array, 5123, 'UINT16'],
+  [Int16Array, 5122, 'INT16'], [Float32Array, 5126, 'FLOAT32'],
+]
+const PROPERTY_SETTER = { 5121: 'setUint8', 5120: 'setInt8', 5123: 'setUint16', 5122: 'setInt16', 5126: 'setFloat32' }
+
+// Flat cloud { count, pos, col?, attributes? } → a glTF-binary POINTS primitive.
 //
 // `origin` is subtracted first: ECEF-scale coordinates in float32 would quantize
 // to metres, and even project-CRS eastings (6–7 digits) lose sub-centimetre
-// precision. Local coordinates are small, so float32 is ample.
+// precision. Local coordinates are small, so float32 is ample. `translation` (in the
+// same Z-up frame as `origin`) puts them back as the glTF node's translation, which
+// is a double: a tile of a hierarchy keeps its points relative to its own centre and
+// still lands in the tileset's frame.
 // `yUp` applies the 3D Tiles content convention (see the header).
-export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color = true } = {}) {
+// `properties` names attributes of `cloud.attributes` to carry (POINT_PROPERTIES);
+// each becomes a vertex attribute described by EXT_structural_metadata, so CesiumJS
+// can style by it (`${classification}`).
+export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color = true, translation = null, properties = [] } = {}) {
   const n = cloud.count ?? cloud.pos.length / 3
   const hasCol = color && !!cloud.col
   const align4 = (v) => (v + 3) & ~3
+  const props = properties.filter((name) => POINT_PROPERTIES[name] && cloud.attributes?.[name]).map((name) => {
+    const arr = cloud.attributes[name]
+    const [, componentType, metaType] = PROPERTY_TYPES.find(([T]) => arr instanceof T) ?? [Float32Array, 5126, 'FLOAT32']
+    return { name, arr, componentType, metaType, off: 0 }
+  })
   const posBytes = n * 12
   const colBytes = hasCol ? n * 4 : 0
   const posOff = 0
   const colOff = align4(posBytes)
-  const binLen = colOff + align4(colBytes)
+  // A vertex attribute's elements start on 4-byte boundaries: a 1- or 2-byte property
+  // takes a 4-byte stride.
+  let binLen = colOff + align4(colBytes)
+  for (const p of props) { p.off = binLen; binLen += n * 4 }
   const bin = new Uint8Array(binLen)
   const bv = new DataView(bin.buffer)
 
@@ -154,6 +263,11 @@ export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color 
     }
   }
 
+  for (const p of props) {
+    const set = PROPERTY_SETTER[p.componentType]
+    for (let i = 0; i < n; i++) bv[set](p.off + i * 4, p.arr[i], true)
+  }
+
   const accessors = [{
     bufferView: 0, componentType: 5126, count: n, type: 'VEC3',
     min: [minX, minY, minZ], max: [maxX, maxY, maxZ],
@@ -165,17 +279,34 @@ export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color 
     accessors.push({ bufferView: bufferViews.length, componentType: 5121, normalized: true, count: n, type: 'VEC4' })
     bufferViews.push({ buffer: 0, byteOffset: colOff, byteLength: colBytes, target: 34962 })
   }
-
-  return packGlb({
+  for (const p of props) {
+    attributes[POINT_PROPERTIES[p.name]] = accessors.length
+    accessors.push({ bufferView: bufferViews.length, componentType: p.componentType, count: n, type: 'SCALAR' })
+    bufferViews.push({ buffer: 0, byteOffset: p.off, byteLength: n * 4, byteStride: 4, target: 34962 })
+  }
+  const primitive = { attributes, mode: 0 } // mode 0 = POINTS
+  const node = { mesh: 0 }
+  if (translation) node.translation = yUp ? [translation[0], translation[2], -translation[1]] : [...translation]
+  const gltf = {
     asset: { version: '2.0', generator: 'websfm' },
     scene: 0,
     scenes: [{ nodes: [0] }],
-    nodes: [{ mesh: 0 }],
-    meshes: [{ primitives: [{ attributes, mode: 0 }] }],   // mode 0 = POINTS
+    nodes: [node],
+    meshes: [{ primitives: [primitive] }],
     accessors,
     bufferViews,
     buffers: [{ byteLength: binLen }],
-  }, bin)
+  }
+  if (props.length) {
+    const each = (f) => Object.fromEntries(props.map((p) => [p.name, f(p)]))
+    gltf.extensionsUsed = ['EXT_structural_metadata']
+    gltf.extensions = { EXT_structural_metadata: {
+      schema: { id: 'websfm', classes: { point: { properties: each((p) => ({ type: 'SCALAR', componentType: p.metaType })) } } },
+      propertyAttributes: [{ class: 'point', properties: each((p) => ({ attribute: POINT_PROPERTIES[p.name] })) }],
+    } }
+    primitive.extensions = { EXT_structural_metadata: { propertyAttributes: [0] } }
+  }
+  return packGlb(gltf, bin)
 }
 
 // glTF JSON + BIN → a .glb container. Shared shape with meshToGlbParts' tail; kept
