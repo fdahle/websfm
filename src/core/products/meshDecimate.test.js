@@ -350,3 +350,44 @@ describe('decimateMesh — performance', () => {
     }
   }, 600000)
 })
+
+describe('decimateMesh on a textured mesh', () => {
+  // A grid textured as two pieces: the right half's triangles use their own copies of
+  // its vertices (as a texture atlas splits a vertex per piece), with their own UVs.
+  function twoPieces(n) {
+    const g = grid(n)
+    const nV = g.nVerts, copyOf = new Int32Array(nV).fill(-1)
+    const pos = Array.from(g.pos), col = Array.from(g.col), uv = Array.from({ length: 2 * nV }, () => 0)
+    const idx = Uint32Array.from(g.idx)
+    for (let t = 0; t < g.count; t++) {
+      const right = [0, 1, 2].every((k) => g.pos[3 * g.idx[3 * t + k]] >= n / 2)
+      if (!right) continue
+      for (let k = 0; k < 3; k++) {
+        const v = g.idx[3 * t + k]
+        if (copyOf[v] < 0) {
+          copyOf[v] = pos.length / 3
+          pos.push(g.pos[3 * v], g.pos[3 * v + 1], g.pos[3 * v + 2]); col.push(g.col[3 * v], g.col[3 * v + 1], g.col[3 * v + 2])
+          uv.push(0.5, 0.5)
+        }
+        idx[3 * t + k] = copyOf[v]
+      }
+    }
+    return { plain: g, textured: { nVerts: pos.length / 3, count: g.count, pos: Float64Array.from(pos), idx,
+      col: Uint8Array.from(col), uv: Float32Array.from(uv), page: new Uint16Array(g.count) } }
+  }
+  const boundary = (mesh) => [...edgeUse(mesh).values()].filter((n) => n === 1).length
+
+  it('decimates the surface, not the pieces, and returns it untextured', () => {
+    const { plain, textured } = twoPieces(16)
+    for (const preserveBoundary of [true, false]) {
+      const opts = { targetRatio: 0.25, preserveBoundary }
+      const a = decimateMesh(plain, opts).mesh, b = decimateMesh(textured, opts).mesh
+      checkShape(b)
+      expect(b.uv).toBeUndefined()
+      expect(b.page).toBeUndefined()
+      expect(b.count).toBe(a.count)
+      // The seam at x = 8 is no boundary: only the outer rim is (split, it stayed open).
+      expect(boundary(b)).toBe(boundary(a))
+    }
+  })
+})

@@ -13,6 +13,9 @@ async function deflatePart(bytes) {
   return { length: part.size, part }
 }
 
+// A name OBJ/MTL can reference: letters, digits, `_`, `.` and `-` only (no spaces).
+export const objSafeName = (name) => String(name ?? '').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'mesh'
+
 // Cloud / mesh file exports off the main thread. The writers yield bounded parts
 // (core/io/parts.js) and partsToBlob folds them into a Blob a batch at a time, so
 // neither the page nor this worker ever holds an ASCII PLY of a 30 M-point cloud as
@@ -65,11 +68,14 @@ export function makeExportOps({ lazCodec = null } = {}) {
     if (format === 'glb') {
       blob = partsToBlob(meshToGlbParts(src, { color, texture: textured ? { pages, groups: texture.groups } : null }), 'model/gltf-binary')
     } else if (format === 'obj' && textured) {
-      const files = pages.map((_, k) => `${name}_atlas${k}.jpg`)
-      const obj = partsToBlob(meshToObjParts(src, { texture: { mtl: `${name}.mtl`, groups: texture.groups } }), 'text/plain;charset=utf-8')
+      // OBJ and MTL split their lines on whitespace: `mtllib My Project.mtl` names two
+      // files. The names inside the zip (and so in the .obj and .mtl) are file-safe.
+      const base = objSafeName(name)
+      const files = pages.map((_, k) => `${base}_atlas${k}.jpg`)
+      const obj = partsToBlob(meshToObjParts(src, { texture: { mtl: `${base}.mtl`, groups: texture.groups } }), 'text/plain;charset=utf-8')
       blob = new Blob(await zipParts([
-        { name: `${name}.obj`, data: obj },
-        { name: `${name}.mtl`, data: objMaterialLibrary(files) },
+        { name: `${base}.obj`, data: obj },
+        { name: `${base}.mtl`, data: objMaterialLibrary(files) },
         ...pages.map((p, k) => ({ name: files[k], data: p.bytes })),
       ]), { type: 'application/zip' })
       ext = 'zip'

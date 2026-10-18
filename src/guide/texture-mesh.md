@@ -116,20 +116,33 @@ symbology; RGB still shows the vertex colours).
   Cesium, Unity and Unreal all read it. The materials are unlit, because the photos
   already hold the light; a program that ignores that setting may shade the texture.
 - **Wavefront OBJ** downloads a .zip with the .obj, its material file (.mtl) and one
-  JPEG per page. Keep the files together: the .obj names the others.
+  JPEG per page. Keep the files together: the .obj names the others. The files inside
+  are named after the project with spaces and other unsafe characters replaced by `_`,
+  since OBJ and MTL cannot name a file with a space in it.
 
 PLY and STL write the geometry only. **Export ▸ 3D Tiles…** with the textured mesh
 selected writes the mesh, with its texture, as the tile.
 
 ## Mesh tools on a textured mesh
-The **Tools ▸ Mesh** tools keep the texture where they can:
+A textured mesh stores each corner on a chart seam once per chart, since its texture
+position differs on each side. The **Tools ▸ Mesh** tools read the surface itself, with
+those copies joined, so they find the same pieces, holes and edges as on the mesh before
+texturing. They keep the texture where they can:
 
-- **Crop** and **Clean** keep it. Clean's weld joins only corners that also share a
-  texture position, so the seams between photos stay intact. Filling holes adds patches
-  no photo covers, so a Clean that fills any returns an untextured mesh; untick **Fill
-  holes** to keep the texture.
-- **Smooth** keeps it: the triangles stay the same and move only slightly.
-- **Decimate** cannot: merging triangles leaves nothing for the texture to follow.
-  Decimate first, then texture.
+- **Crop** keeps it.
+- **Clean** keeps it unless it fills a hole. Its weld joins only corners that also share
+  a texture position, so the seams between photos stay intact, and small pieces are
+  judged by the surface, so no chart is taken for a floating piece. Filling a hole
+  adds a patch no photo covers, so a Clean that fills any returns an untextured mesh;
+  untick **Fill holes** to keep the texture.
+- **Smooth** keeps it: the triangles stay the same, every copy of a corner moves with
+  the others so the seams stay closed, and only the mesh's real rim counts as boundary.
+- **Measure** reports the surface's pieces, open edges and volume, the same as for the
+  untextured mesh.
+- **Decimate** cannot: merging triangles leaves nothing for the texture to follow. It
+  simplifies the surface as if it had never been textured, seams included, and the
+  result has no texture. Decimate first, then texture.
+- **Texture** on a textured mesh starts again from its surface: the old charts and
+  their seams do not carry over.
 - **Sample to points** takes each point's colour from the texture, so the cloud has the
   photos' detail.
