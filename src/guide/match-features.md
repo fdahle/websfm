@@ -64,6 +64,10 @@ available. Each image is matched to the next N images in capture order, retainin
 overlapping views while reducing exhaustive $O(N^2)$ matching to approximately
 $O(N \cdot w)$ for a window of $w$ images. Ten is a good starting point for a smoothly captured orbit.
 This assumes the image list follows capture order (normally filename/EXIF order).
+The window cannot reach a second pass over the same place: if the capture comes back
+to an area later (a second lap around a building, a re-flown strip), those images are
+never paired with the first pass and reconstruct as a separate model. Match such a
+set with **Exhaustive** instead.
 
 ## Close capture loop
 <!-- param: sequentialLoopClosure  default: off -->
