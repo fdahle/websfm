@@ -384,7 +384,8 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
       const buffer = await file.arrayBuffer()
       const { plane } = await parseRasterFile(buffer, meta.name, {
         forceKind: meta.kind,
-        style: meta.style,
+        // A plain copy: the record is reactive, and a proxy cannot be posted to the worker.
+        style: JSON.parse(JSON.stringify(meta.style ?? null)),
         onLog: (m, l, c) => log(m, l, c),
       })
       const source = buildSource(meta, plane)

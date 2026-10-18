@@ -222,6 +222,32 @@ test('COG display renders in EPSG:3031 and GPU style changes preserve raw values
 })
 
 
+test('a restyled reference DEM still samples: the stale plane re-decodes from the original', async ({ page }) => {
+  await page.goto(harness)
+  const result = await page.evaluate(async () => {
+    const { writeGeoTiff, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
+    const W = 64, data = new Float32Array(W * W)
+    for (let i = 0; i < data.length; i++) data[i] = 100 + (i % W)
+    const bytes = writeGeoTiff({ width: W, height: W, samples: [{ bits: 32, format: 3 }], photometric: 1,
+      data: new Uint8Array(data.buffer), pixelScale: [2, 2, 0], tiepoint: [0, 0, 0, 1000, 2000, 0], geoKeys: geoKeysForEpsg(3031, false) })
+    const { external, projects } = window.workflowTools
+    const { transform } = await import('/src/core/crs.js')
+    const r = await external.importRaster(new File([bytes], 'dem.tif'), { forceKind: 'dem' })
+    // Cell (col, row 10)'s centre, asked in the project CRS as every caller does.
+    const at = (col) => external.sampleReferenceDem(...transform([1000 + 2 * col + 1, 2000 - 2 * 10 - 1], 'EPSG:3031', projects.currentCrs), { rasterId: r.id })
+    const before = (await at(20))?.z
+    // A stretch change re-reads the ranges and leaves the full-resolution plane stale.
+    const meta = external.rasterById(r.id)
+    await external.setRasterStyle(r.id, { ...meta.style, loPct: 5, hiPct: 95 })
+    const after = (await at(20))?.z
+    const { useLog } = await import('/src/composables/useLog.js')
+    return { before, after, errors: useLog().entries.value.filter((e) => e.level === 'error').map((e) => e.message) }
+  })
+  expect(result.errors).toEqual([])
+  expect(result.before).toBeCloseTo(120, 3)
+  expect(result.after).toBeCloseTo(120, 3)
+})
+
 test('matching records worker stages separately from descriptor serialization', async ({ page }) => {
   await page.goto(harness)
   const timings = await page.evaluate(async () => {
