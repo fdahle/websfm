@@ -7,8 +7,11 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useWorkflowsStore } from '../stores/useWorkflowsStore.js'
 import { createWorkflow, resolveWorkflowSettings, WORKFLOW_BLOCK_BY_ID } from '../core/workflow.js'
+import { gateMetricValue, GATE_METRIC_BY_ID } from '../core/workflowGate.js'
+import { cameraCenter } from '../core/sfm/geometry.js'
 import { useComputeSettings } from './useComputeSettings.js'
 import { useLog } from './useLog.js'
+import { useQualityReport } from './useQualityReport.js'
 import { useWorkflowRunner } from './useWorkflowRunner.js'
 
 // Workflow execution wired to the app, lifted out of App.vue: the state the runner
@@ -28,7 +31,8 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   const { images } = storeToRefs(useImagesStore())
   const { matchRun, usableMatchCount } = storeToRefs(useMatchesStore())
   const { currentSceneType } = storeToRefs(useProjectsStore())
-  const { clouds, mainSparseCloud, depthMaps, depthMapCount, dem, ortho } = storeToRefs(useReconstructionStore())
+  const { clouds, mainSparseCloud, depthMaps, depthMapCount, dem, ortho, denseSummary, meshSources } = storeToRefs(useReconstructionStore())
+  const { computeHealth } = useQualityReport()
   const workflowsStore = useWorkflowsStore()
   const { addWorkflow, updateWorkflow, recordRun: recordWorkflowRun } = workflowsStore
   const { workflowBuilderOpen } = storeToRefs(useModalsStore())
@@ -53,11 +57,13 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     texturedMesh: clouds.value.some((c) => c.kind === 'mesh' && !!c.texture),
   }))
 
-  async function runAutomatedWorkflowBlock(type, rawSettings) {
+  async function runAutomatedWorkflowBlock(type, rawSettings, context = {}) {
     const settings = resolveWorkflowSettings(type, rawSettings, {
       useGpu: workflowUseGpu.value,
       memBudgetBytes: workflowMemBudgetBytes.value,
+      mergeCell: denseSummary.value?.mergeCell ?? 0,
     })
+    if (WORKFLOW_BLOCK_BY_ID.get(type)?.tool) return runToolBlock(type, settings, context)
     const targets = type === 'detect-features'
       ? (settings.overwrite ? [...images.value] : images.value.filter((img) => img.kpStatus !== 'done'))
       : []
@@ -73,24 +79,112 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     else if (type === 'dense') result = await runDensify(settings)
     else if (type === 'gen-dem') result = await runGenerateDem(settings)
     else if (type === 'gen-ortho') result = await runGenerateOrtho(settings)
-    else if (type === 'gen-mesh') result = await runGenerateMesh(settings)
-    else if (type === 'texture-mesh') result = await runTextureBlock(settings)
+    else if (type === 'gen-mesh') result = await runGenerateMesh(meshFromChain(settings, context))
+    else if (type === 'texture-mesh') result = await runTextureBlock(settings, context)
     else throw new Error(`Workflow block is not automated: ${type}`)
 
     if (result?.ok === false || result?.unchanged) return result
     const changed = type === 'detect-features'
       ? targets.every((img) => img.kpStatus === 'done' && (img.kpRev ?? 0) !== before.get(img.uuid))
       : workflowOutputToken(type) !== before
-    return changed
-      ? { ok: true, cancelled: false }
-      : { ok: false, cancelled: false, reason: `${WORKFLOW_BLOCK_BY_ID.get(type)?.label ?? type} did not replace its output` }
+    if (!changed) {
+      return { ok: false, cancelled: false, reason: `${WORKFLOW_BLOCK_BY_ID.get(type)?.label ?? type} did not replace its output` }
+    }
+    // A fresh dense cloud or mesh restarts the cleanup chain from it.
+    if (type === 'dense') context.cloudId = workflowOutputToken('dense')?.id ?? null
+    if (type === 'gen-mesh') context.meshId = workflowOutputToken('gen-mesh')?.id ?? null
+    return { ok: true, cancelled: false }
   }
 
-  // Texture Mesh: Build Mesh's mesh (else the newest untextured one), decimated first
-  // when asked and larger than the target.
-  async function runTextureBlock({ decimateTo, ...settings }) {
+  // The chain a run's tool blocks work along: the cloud / mesh the previous block of
+  // this run produced, else Dense Model's cloud / Build Mesh's mesh, else the newest
+  // one. Never the viewer selection, so a replayed chain does not depend on clicks.
+  function chainSource(kind, context) {
+    const list = clouds.value.filter((c) => c.kind === kind && c.count > 0)
+    const id = kind === 'mesh' ? context.meshId : context.cloudId
+    return list.find((c) => c.id === id)
+      ?? list.find((c) => !c.imported && !c.derived)
+      ?? list[list.length - 1] ?? null
+  }
+  // Build Mesh meshes the chain's cloud when a cleanup block produced one (and it
+  // still has normals); otherwise the dialog's own default source.
+  function meshFromChain(settings, context) {
+    const id = context.cloudId
+    return id && meshSources.value.some((s) => s.id === id) ? { ...settings, sourceId: id } : settings
+  }
+
+  // Tools-tab edits as blocks (core/workflow.js `tool`): the same request the dialog
+  // emits, on the chain's cloud or mesh. The new derived cloud continues the chain.
+  async function runToolBlock(type, settings, context) {
+    const spec = WORKFLOW_BLOCK_BY_ID.get(type)
+    const { kind, mode } = spec.tool
+    const source = chainSource(kind === 'mesh' ? 'mesh' : 'dense', context)
+    if (!source) return { ok: false, cancelled: false, reason: `${spec.label}: no ${kind === 'mesh' ? 'mesh' : 'dense cloud'} to work on` }
+    let request = { settings, sourceIds: [source.id] }
+    if (type === 'estimate-normals') request = { ...request, settings: normalsSettings(settings, source) }
+    if (type === 'align-icp') {
+      const { reference, ...rest } = settings
+      const matches = clouds.value.filter((c) => c.id !== source.id && (c.kind === 'dense' || c.kind === 'mesh')
+        && c.count > 0 && (c.name ?? '') === reference)
+      if (matches.length !== 1) {
+        return { ok: false, cancelled: false, reason: matches.length
+          ? `${spec.label}: ${matches.length} clouds are named “${reference}” — rename one`
+          : `${spec.label}: no cloud or mesh is named “${reference}”` }
+      }
+      request = { sourceIds: [source.id, matches[0].id], settings: { ...rest, unitLabel: source.imported ? 'file units' : 'model units' } }
+    }
+    if (type === 'decimate-mesh') {
+      const target = settings.targetTriangles ?? Math.round(source.count * settings.targetRatio)
+      if (!(target >= 4 && target < source.count)) {
+        return { ok: true, cancelled: false, detail: `Kept ${source.name ?? 'the mesh'}: already at or below the target` }
+      }
+    }
+    const suffix = { filter: 'filtered', normals: 'normals', icp: 'aligned', 'mesh-clean': 'cleaned', 'mesh-smooth': 'smoothed', 'mesh-decimate': 'decimated' }[mode]
+    const before = new Set(clouds.value.map((c) => c.id))
+    const result = await runEditClouds({ ...request, mode, name: `${source.name ?? (kind === 'mesh' ? 'Mesh' : 'Cloud')} (${suffix})` })
+    if (result?.ok === false || result?.cancelled) {
+      return result?.cancelled ? result : { ok: false, cancelled: false, reason: result?.reason || `${spec.label} produced no result (see the log)` }
+    }
+    const made = clouds.value.find((c) => !before.has(c.id) && c.kind === source.kind)
+    if (!made) return { ok: false, cancelled: false, reason: `${spec.label} produced no result (see the log)` }
+    if (kind === 'mesh') context.meshId = made.id
+    else context.cloudId = made.id
+    return { ok: true, cancelled: false, detail: `${made.name ?? 'Result'}: ${made.count.toLocaleString('en-US')} ${kind === 'mesh' ? 'triangles' : 'points'}` }
+  }
+  // Estimate Normals' "auto" orientation, as its dialog resolves it: towards the
+  // cameras for a computed cloud, up (+Z) for an imported one.
+  function normalsSettings({ k, orient }, source) {
+    const cameras = mainSparseCloud.value?.cameras ?? new Map()
+    const kind = orient === 'auto' ? (!source.imported && cameras.size ? 'cameras' : 'up') : orient
+    if (kind === 'cameras' && cameras.size) {
+      const points = new Float64Array(cameras.size * 3)
+      let i = 0
+      for (const cam of cameras.values()) points.set(cameraCenter(cam), 3 * i++)
+      return { k, orient: { kind: 'viewpoints', points } }
+    }
+    if (kind === 'existing') return { k, orient: { kind: 'existing' } }
+    return { k, orient: { kind: 'up', up: [0, 0, 1] } }
+  }
+
+  // A Quality Gate's value, from the same health snapshot the Quality Report shows.
+  // Dense points counts the chain's cloud: after a filter, the filtered one.
+  async function measureGateMetric(metric, context = {}) {
+    if (!GATE_METRIC_BY_ID.has(metric)) return null
+    const counts = {
+      sparsePoints: mainSparseCloud.value?.points?.length ?? null,
+      densePoints: chainSource('dense', context)?.count ?? null,
+    }
+    if (metric === 'sparsePoints' || metric === 'densePoints') return gateMetricValue(metric, counts)
+    const { rows } = await computeHealth()
+    return gateMetricValue(metric, { rows, ...counts })
+  }
+
+  // Texture Mesh: the chain's mesh (a cleanup block's output), else Build Mesh's mesh
+  // (else the newest untextured one), decimated first when asked and larger than the target.
+  async function runTextureBlock({ decimateTo, ...settings }, context = {}) {
     const meshes = clouds.value.filter((c) => c.kind === 'mesh' && c.count > 0 && !c.texture)
-    let source = meshes.find((c) => !c.imported && !c.derived) ?? meshes[meshes.length - 1]
+    let source = meshes.find((c) => c.id === context.meshId)
+      ?? meshes.find((c) => !c.imported && !c.derived) ?? meshes[meshes.length - 1]
     if (!source) return { ok: false, cancelled: false, reason: 'Texture Mesh: no mesh to texture' }
     if (decimateTo > 0 && source.count > decimateTo) {
       const before = new Set(clouds.value.map((c) => c.id))
@@ -117,6 +211,7 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   const workflowRunner = useWorkflowRunner({
     state: workflowState,
     runAutomated: runAutomatedWorkflowBlock,
+    measure: measureGateMetric,
     cancelAutomated: cancelRun,
     openInteractive,
     recordRun: recordWorkflowRun,

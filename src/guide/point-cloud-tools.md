@@ -15,6 +15,10 @@ toggle away in the sidebar. Sparse clouds are not editable here: their points ca
 camera observations the later stages read. Use
 [gradual selection](guide:sparse-reconstruction) for those.
 
+Filter, Estimate normals and Align to reference (ICP) are also
+[Workflow Builder](guide:workflow-builder) blocks, so a cleanup chain can be replayed
+on every new run; each block works on the previous block's result.
+
 Lengths you type are in the cloud's own coordinates: model units for a computed cloud
 (metres follow from the project's scale or georeference) and the file's units for an
 imported one. The dialogs show what that means for the current project.
