@@ -130,6 +130,10 @@ export const MATCH_DEFAULTS = {
   // a guard against the ~0.06 spurious fits while re-admitting the tail.
   minInlierRatio: 0.15,
   maxIters: 1000,              // F-RANSAC iterations
+  // Robust estimator for the F (and H-vs-F) fit: 'ransac' — inlier count + local
+  // optimisation — or 'magsac' — MAGSAC++ (σ-marginalised loss, IRLS polish;
+  // crates/matching/src/magsac.rs). Inliers are within ransacThreshPx either way.
+  verifier: 'ransac',
   preselectMethod: 'position', // preselect: 'position' (nearest cameras) | 'footprint' (ground overlap)
   maxNeighbors: 10,            // preselect (position): k-nearest cameras to consider per image
   minOverlap: 30,              // preselect (footprint): min ground-overlap % (of the smaller footprint) to keep a pair

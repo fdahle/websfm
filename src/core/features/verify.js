@@ -6,13 +6,17 @@ import init, { verify_matches_hf } from '../../wasm/matching/matching.js'
 
 let initPromise = null
 
+// verify_matches_hf's `verifier` argument.
+const VERIFIER_CODE = { ransac: 0, magsac: 1 }
+
 function ensureWasm() {
   if (!initPromise) initPromise = init()
   return initPromise
 }
 
 /**
- * RANSAC fundamental matrix estimation on a set of putative matches.
+ * Fundamental matrix estimation (RANSAC or MAGSAC++, `options.verifier`) on a set
+ * of putative matches.
  *
  * @param {Keypoints} kpsA - typed keypoints of image A (original px; core/features/keypoints.js)
  * @param {Keypoints} kpsB - typed keypoints of image B
@@ -54,13 +58,16 @@ export async function verifyPointPairs(ptsA, ptsB, options = {}) {
   // for pairs the caller will reject anyway. Pass the caller's own hard acceptance
   // floor (`minMatches`) so a skipped pair is guaranteed rejected before its label
   // is read; default 0 ⇒ never skip.
-  const { ransacThreshPx = 2.0, maxIters = 1000, hSkipBelow = 0 } = options
+  // verifier: 'ransac' (RANSAC + local optimisation) or 'magsac' (MAGSAC++,
+  // crates/matching/src/magsac.rs) — both for F and the H-vs-F homography, with the
+  // inliers taken within ransacThreshPx of the model either way.
+  const { ransacThreshPx = 2.0, maxIters = 1000, hSkipBelow = 0, verifier = 'ransac' } = options
   await ensureWasm()
 
   if (ptsA.length / 2 < 8) return null
 
   // Layout: [F00..F22, hInlierCount, inlier_0, inlier_1, …] (see verify_matches_hf).
-  const raw = verify_matches_hf(ptsA, ptsB, ransacThreshPx, maxIters, hSkipBelow)
+  const raw = verify_matches_hf(ptsA, ptsB, ransacThreshPx, maxIters, hSkipBelow, VERIFIER_CODE[verifier] ?? 0)
   if (raw.length === 0) return null
 
   const F = [

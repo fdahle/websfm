@@ -53,6 +53,10 @@ export function verify_matches(pts_a, pts_b, ransac_thresh_px, max_iters) {
  * Like `verify_matches`, but also fits a homography via RANSAC and reports its
  * inlier count so the caller can compute the H-vs-F degeneracy ratio.
  *
+ * `verifier`: 0 = RANSAC with local optimisation (the default path above), 1 =
+ * MAGSAC++ (magsac.rs) for both F and H. Either way the inliers are the points
+ * within `ransac_thresh_px` of the returned model.
+ *
  * `h_skip_below`: skip the (expensive) homography RANSAC entirely when the F
  * inlier count is below this value, reporting `h_inlier_count = 0`. The caller
  * MUST pass its own hard acceptance floor (`minMatches`): a pair below that floor
@@ -68,14 +72,15 @@ export function verify_matches(pts_a, pts_b, ransac_thresh_px, max_iters) {
  * @param {number} ransac_thresh_px
  * @param {number} max_iters
  * @param {number} h_skip_below
+ * @param {number} verifier
  * @returns {Float32Array}
  */
-export function verify_matches_hf(pts_a, pts_b, ransac_thresh_px, max_iters, h_skip_below) {
+export function verify_matches_hf(pts_a, pts_b, ransac_thresh_px, max_iters, h_skip_below, verifier) {
     const ptr0 = passArrayF32ToWasm0(pts_a, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(pts_b, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.verify_matches_hf(ptr0, len0, ptr1, len1, ransac_thresh_px, max_iters, h_skip_below);
+    const ret = wasm.verify_matches_hf(ptr0, len0, ptr1, len1, ransac_thresh_px, max_iters, h_skip_below, verifier);
     var v3 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v3;

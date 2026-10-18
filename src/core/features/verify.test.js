@@ -86,6 +86,23 @@ describe('verifyMatches (F + H-vs-F degeneracy)', () => {
     expect(viaPts.hInlierCount).toBe(viaKps.hInlierCount)
     expect(await verifyPointPairs(new Float32Array(14), new Float32Array(14), opts)).toBeNull()
   })
+
+  // verifier: 'magsac' reaches the MAGSAC++ path (crates/matching/src/magsac.rs) for F
+  // and H: same result shape, same H-vs-F labels, and its own (deterministic) model.
+  it('verifies with MAGSAC++ when asked, with the same labels', async () => {
+    const opts = { ransacThreshPx: 2.0, maxIters: 2000, verifier: 'magsac' }
+    const general = scene(false)
+    const m = await verifyMatches(K(general.kpsA), K(general.kpsB), general.matches, opts)
+    expect(m.inlierCount).toBeGreaterThan(40)
+    expect(m.hInlierCount / m.inlierCount).toBeLessThan(0.8)
+    const again = await verifyMatches(K(general.kpsA), K(general.kpsB), general.matches, opts)
+    expect(again.F).toEqual(m.F)
+    const r = await verifyMatches(K(general.kpsA), K(general.kpsB), general.matches, { ...opts, verifier: 'ransac' })
+    expect(r.F).not.toEqual(m.F)
+    const planar = scene(true)
+    const p = await verifyMatches(K(planar.kpsA), K(planar.kpsB), planar.matches, opts)
+    expect(p.hInlierCount / p.inlierCount).toBeGreaterThan(0.9)
+  })
 })
 
 describe('inlierSpread (positional degeneracy)', () => {

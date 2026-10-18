@@ -26,4 +26,6 @@ handful of bad correspondences can't skew the reconstruction. WebSfM applies
 this idea in two places: verifying pairwise matches via the fundamental matrix
 during [Epipolar Geometry](help:epipolar-geometry) checking, and estimating each
 camera's pose during registration (using MSAC, a variant that scores inliers by
-how well they fit rather than a hard in/out count).
+how well they fit rather than a hard in/out count). Pair verification can use
+[MAGSAC++](help:magsac) instead, which also drops the single hard threshold when it
+scores and refines a model.

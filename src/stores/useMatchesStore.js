@@ -611,6 +611,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const verified = await verifyPointPairs(ptsA, ptsB, {
           ransacThreshPx: ransacPx,
           maxIters: settings.maxIters,
+          verifier: settings.verifier,
           // Skip H-RANSAC on pairs below the hard acceptance floor: they're rejected
           // regardless of H, so the H/F degeneracy label is never consulted (see
           // verify_matches_hf). minMatches is the one un-overridable accept gate.
@@ -651,7 +652,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           + `${spread ? `spread ${spread.uniqueA}/${spread.uniqueB} unique, ${spread.extentA.toFixed(0)}/${spread.extentB.toFixed(0)}px` : 'spread n/a'}`
           + `${verdict.spreadDegenerate ? ' (positional collapse — REJECTED)' : ''}`
           + `${verdict.weak ? ' (WEAK — PnP bridge only)' : ''}, `
-          + `RANSAC ${ransacPx.toFixed(2)}px`
+          + `${settings.verifier === 'magsac' ? 'MAGSAC++' : 'RANSAC'} ${ransacPx.toFixed(2)}px`
           + `${scaleCtx.factor === 1 ? '' : ` (${settings.ransacThreshPx} detect-px ×${scaleCtx.factor.toFixed(2)} `
             + `for detection scale ${scaleCtx.medianScale.toFixed(3)})`}`, 'debug', 'Matching')
       } else {
@@ -1120,6 +1121,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         minInlierRatio: settings.minInlierRatio,
         ransacThreshPx: settings.ransacThreshPx,
         maxIters: settings.maxIters,
+        verifier: settings.verifier,
         subsetGate: settings.subsetGate,
         preselectMethod: strategy === 'preselect' ? settings.preselectMethod : null,
         maxNeighbors: strategy === 'preselect' ? settings.maxNeighbors : null,

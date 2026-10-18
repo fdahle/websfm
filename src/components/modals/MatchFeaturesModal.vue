@@ -364,6 +364,17 @@ function run() {
         </SettingsField>
 
         <template v-if="settings.geometricVerification">
+          <SettingsField label-for="verifier"
+            :hint="settings.verifier === 'magsac'
+              ? 'Scores each model by a loss averaged over noise levels and refines it by weighted least squares.'
+              : 'Scores each model by its inlier count and refits it on the inliers.'">
+            <template #label><FieldHelp op="match-features" param="verifier">Estimator</FieldHelp></template>
+            <select id="verifier" v-model="settings.verifier" class="field-input field-select">
+              <option value="ransac">RANSAC</option>
+              <option value="magsac">MAGSAC++</option>
+            </select>
+          </SettingsField>
+
           <SettingsField label-for="ransacThresh" unit="detection px"
             hint="Sampson distance threshold for inlier classification. Measured at the
                   detection resolution, so it scales automatically on downscaled images.">
