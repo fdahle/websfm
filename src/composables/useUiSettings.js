@@ -24,6 +24,18 @@ function applyUiPreferences() {
 const CONFIRM_REMOVE_MARK_KEY = 'websfm.ui.confirmRemoveMark'
 const confirmRemoveMark = ref(localStorage.getItem(CONFIRM_REMOVE_MARK_KEY) !== 'false') // default on
 
+// keepAwake: hold a screen wake lock while a stage or workflow runs, so the display
+// (and with it, on most systems, the machine) does not go to sleep mid-run. Default on.
+const KEEP_AWAKE_KEY = 'websfm.ui.keepAwake'
+const keepAwake = ref(localStorage.getItem(KEEP_AWAKE_KEY) !== 'false')
+
+// notifyWhenDone: a desktop notification when a long run ends while the tab is hidden.
+// Default off: it needs the browser's permission, asked when the user turns it on.
+const NOTIFY_KEY = 'websfm.ui.notifyWhenDone'
+const notifySupported = typeof Notification !== 'undefined'
+const notifyWhenDone = ref(notifySupported && localStorage.getItem(NOTIFY_KEY) === 'true'
+  && Notification.permission === 'granted')
+
 applyUiPreferences()
 
 export function useUiSettings() {
@@ -41,7 +53,27 @@ export function useUiSettings() {
     confirmRemoveMark.value = !!v
     localStorage.setItem(CONFIRM_REMOVE_MARK_KEY, String(!!v))
   }
+  function setKeepAwake(v) {
+    keepAwake.value = !!v
+    localStorage.setItem(KEEP_AWAKE_KEY, String(!!v))
+  }
+  // Turning it on asks for the permission; a refusal leaves it off. Returns the
+  // permission state, so the caller can say why it stayed off.
+  async function setNotifyWhenDone(v) {
+    let permission = notifySupported ? Notification.permission : 'unsupported'
+    if (v && permission === 'default') {
+      try { permission = await Notification.requestPermission() } catch { permission = 'denied' }
+    }
+    notifyWhenDone.value = !!v && permission === 'granted'
+    localStorage.setItem(NOTIFY_KEY, String(notifyWhenDone.value))
+    return permission
+  }
   return {
+    keepAwake,
+    setKeepAwake,
+    notifySupported,
+    notifyWhenDone,
+    setNotifyWhenDone,
     advancedSettingsExpanded: advancedExpanded,
     setAdvancedSettingsExpanded: setAdvancedExpanded,
     motion,

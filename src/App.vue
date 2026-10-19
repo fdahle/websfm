@@ -46,6 +46,7 @@ import { useRibbonState } from './composables/useRibbonState.js'
 import { useConsoleEnv } from './composables/useConsoleEnv.js'
 import { useSidebarActions } from './composables/useSidebarActions.js'
 import { useBeforeUnload } from './composables/useBeforeUnload.js'
+import { useRunAttention } from './composables/useRunAttention.js'
 import { useReconstructionStore } from './stores/useReconstructionStore.js'
 import { useExternalStore } from './stores/useExternalStore.js'
 import { useGcpsStore } from './stores/useGcpsStore.js'
@@ -196,7 +197,7 @@ const {
 const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
   progressUnit, progressFraction, progressIndeterminate, progressComplete, progressCancelling,
-  cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
+  progressPercent, lastRun, cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
   runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, progress: exportProgress,
 } = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds, textureMesh })
 
@@ -426,6 +427,14 @@ const workInFlight = computed(() => progressOpen.value || projectLoading.value
   || pendingImageWork.value > 0 || pendingRasterWork.value > 0
   || pendingPersistence.value > 0 || persistenceFailures.value.length > 0)
 useBeforeUnload(() => workInFlight.value)
+
+// A run left alone: wake lock, progress in the tab title, a notification when it ends
+// in a hidden tab, and a toast when a stage logged errors.
+useRunAttention({
+  progressOpen, progressTitle, progressPercent, progressIndeterminate, lastRun,
+  workflowRunning, workflowPause, workflowOutcome: workflowRunner.lastOutcome,
+  openConsole: () => { consoleOpen.value = true },
+})
 
 // ── ImageViewer refs (for imperative mask ops) ────────────────────────────────
 const imageViewerRefs = reactive({})

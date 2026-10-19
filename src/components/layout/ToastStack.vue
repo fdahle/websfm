@@ -1,5 +1,5 @@
 <script setup>
-import { toasts, dismissToast } from '../../composables/useToasts.js'
+import { toasts, clickToast } from '../../composables/useToasts.js'
 
 // Renders the useToasts singleton. Mounted once, in App.vue.
 </script>
@@ -14,11 +14,12 @@ import { toasts, dismissToast } from '../../composables/useToasts.js'
           class="toast"
           :class="t.kind"
           role="status"
-          title="Dismiss"
-          @click="dismissToast(t.id)"
+          :title="t.action || 'Dismiss'"
+          @click="clickToast(t.id)"
         >
           <span class="toast-title">{{ t.title }}</span>
           <span v-if="t.detail" class="toast-detail">{{ t.detail }}</span>
+          <span v-if="t.action" class="toast-action">{{ t.action }}</span>
         </div>
       </TransitionGroup>
     </div>
@@ -74,6 +75,21 @@ import { toasts, dismissToast } from '../../composables/useToasts.js'
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* An error is a sentence, not a copied value: wrap it, up to three lines. */
+.toast.error .toast-detail {
+  font-family: inherit;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.toast-action {
+  font-size: 11px;
+  color: var(--accent);
 }
 
 .toast-enter-active,

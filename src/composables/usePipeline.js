@@ -35,6 +35,14 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   const progressIndeterminate = ref(false)
   const progressComplete      = ref(false)
   const progressCancelling    = ref(false)
+  // Whole percent of the bar, written straight from `report` rather than on a frame:
+  // frames stop in a hidden tab, and a hidden tab is when its title shows progress
+  // (useRunAttention). At most 100 writes a run.
+  const progressPercent       = ref(0)
+  // How the last run ended — { title, ok, cancelled, startedAt, endedAt } — for the
+  // notification and the error toast once its modal has closed.
+  const lastRun               = ref(null)
+  let runStartedAt = 0
 
   // Cancellation. Loop-based ops (detect/match) poll `aborted` between items;
   // single-call ops (reconstruct) register a hard-cancel via `cancelImpl`.
@@ -94,6 +102,8 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     // Monotonic: a stage may legitimately re-count (per-phase totals, restarted
     // sub-runs), but the bar must never retreat — a reversal reads as a failure.
     if (raw > maxFraction) maxFraction = Math.min(1, raw)
+    const percent = Math.floor(100 * maxFraction)
+    if (percent !== progressPercent.value) progressPercent.value = percent
     // A stage that opened without a count (total 1) but then reports a real one —
     // ortho per scanline, mesh per multigrid layer, densify per map — becomes
     // determinate from here. DEM and cloud editing never do, and stay animated.
@@ -129,6 +139,8 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     progressIndeterminate.value = indeterminate
     progressComplete.value      = false
     progressCancelling.value    = false
+    progressPercent.value       = 0
+    runStartedAt          = Date.now()
     maxFraction           = 0
     lastFlush             = 0
     pendingProgress       = { current: 0, total, label: '', fraction: 0 }
@@ -140,8 +152,9 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   // Land on a filled bar, hold briefly, then close. Without the hold the modal
   // disappears mid-fill and the run never visibly finishes; with it, 100% means
   // "done" exactly once per run (the modal itself caps in-flight progress at 99%).
-  async function closeProgress() {
+  async function closeProgress(ok = true) {
     cancelScheduledFlush()
+    lastRun.value = { title: progressTitle.value, ok, cancelled: aborted.value, startedAt: runStartedAt, endedAt: Date.now() }
     // A cancelled run did not complete — don't reward it with a full bar.
     if (aborted.value) { progressOpen.value = false; return }
     pendingProgress = { ...pendingProgress, fraction: 1 }
@@ -165,7 +178,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
 
   async function finishRun(ok = true, reason = '') {
     const cancelled = aborted.value
-    await closeProgress()
+    await closeProgress(ok)
     return cancelled ? refused('Cancelled', true) : { ok, cancelled: false, ...(reason ? { reason } : {}) }
   }
 
@@ -298,6 +311,8 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     progressIndeterminate,
     progressComplete,
     progressCancelling,
+    progressPercent,
+    lastRun,
     cancelRun,
     runDetect,
     runMatch,

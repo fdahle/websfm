@@ -108,6 +108,16 @@ Clean, align, compare and measure the results with the **Tools** tab's
 [Point Cloud](guide:point-cloud-tools), Mesh and Products menus. A
 **Region** (Tools → Model ▾) keeps depth maps and fusion to the area you care about.
 
+## Leaving a long run
+Dense clouds and fine orthophotos can take hours. While a stage or a workflow runs, the
+tab's title shows the stage and its percentage, and the screen is kept on so the
+computer does not go to sleep mid-run (Settings ▸ General ▸ **Keep the screen on during
+a run**). The browser only allows this while the websfm tab is visible. In another tab
+or a minimised window, your system's sleep settings decide, so leave the tab in front
+or change those settings for a long run. Turn on **Notify when a run ends** in the same
+place to get a desktop notification when a run ends, or a workflow stops to ask you
+something, while you are working elsewhere. The browser asks for permission once.
+
 ## Where things are
 The ribbon chooses what to do: a dialog, a mode, or a display setting such as point
 and camera size (View → Scene). The pipeline steps, georeferencing included, are in
@@ -123,7 +133,8 @@ it; while one runs, its menu button stays lit. You can drag the toolbox by its t
 and close it with × or Esc.
 
 ## If something goes wrong
-Read the operation log first: it records skipped images, resolved pixel thresholds,
+When a stage logs an error, a red note at the bottom right says so; click it to open
+the console. Read the operation log first: it records skipped images, resolved pixel thresholds,
 memory decisions, and the stage that failed. Then check the Quality Report. Changing
 many advanced settings at once makes the cause harder to find; change one thing,
 rerun the earliest affected stage, and compare.

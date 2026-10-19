@@ -34,7 +34,20 @@ const {
 const {
   advancedSettingsExpanded, setAdvancedSettingsExpanded, motion, setMotion,
   confirmRemoveMark, setConfirmRemoveMark,
+  keepAwake, setKeepAwake, notifySupported, notifyWhenDone, setNotifyWhenDone,
 } = useUiSettings()
+const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
+// Why the notification switch stayed off, when the browser said no.
+const notifyRefusal = ref('')
+async function onNotifyToggle(event) {
+  const wanted = event.target.checked
+  const permission = await setNotifyWhenDone(wanted)
+  event.target.checked = notifyWhenDone.value
+  if (!wanted || notifyWhenDone.value) notifyRefusal.value = ''
+  else if (permission === 'denied') {
+    notifyRefusal.value = 'Notifications are blocked for this site. Allow them in the browser’s site settings, then turn this on.'
+  } else notifyRefusal.value = 'The browser did not grant permission to notify. Turn this on again to be asked once more.'
+}
 const { gridZ, setGridZ, background, setBackground, nearClip, setNearClip, pointBudget, setPointBudget } = useViewerSettings()
 const { basemap, setBasemap, satelliteUrl, satelliteAttribution, setSatelliteSource } = useMapSettings()
 // Satellite source drafts: saved together on Apply, so a half-typed URL never
@@ -195,6 +208,28 @@ onMounted(refreshStorage)
           </div>
           <label class="switch">
             <input type="checkbox" :checked="confirmRemoveMark" @change="setConfirmRemoveMark($event.target.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div v-if="wakeLockSupported" class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Keep the screen on during a run</span>
+            <span class="setting-desc">Stop the display, and on most systems the computer, from going to sleep while a stage or workflow runs. Applies while the websfm tab is visible.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="keepAwake" @change="setKeepAwake($event.target.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div v-if="notifySupported" class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Notify when a run ends</span>
+            <span class="setting-desc">{{ notifyRefusal || 'A desktop notification when a run of 30 seconds or more ends, or a workflow needs you, while the websfm tab is in the background.' }}</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="notifyWhenDone" @change="onNotifyToggle">
             <span class="slider"></span>
           </label>
         </div>

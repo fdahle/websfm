@@ -17,6 +17,9 @@ export function useWorkflowRunner({
   const statuses = ref({})
   const pause = ref(null)
   const startedAt = ref(null)
+  // How the last run ended — { name, outcome: 'completed'|'stopped'|'failed', error,
+  // startedAt, finishedAt } — set once it has, for whoever reports it.
+  const lastOutcome = ref(null)
   let decide = null
   let stopRequested = false
 
@@ -195,6 +198,7 @@ export function useWorkflowRunner({
     } finally {
       const finishedAt = new Date().toISOString()
       recordRun({ workflow: JSON.parse(JSON.stringify(workflow)), startedAt: startedAt.value, finishedAt, outcome, error, statuses: statuses.value, gates })
+      lastOutcome.value = { name: workflow.name, outcome, error, startedAt: startedAt.value, finishedAt }
       currentBlockId.value = null
       running.value = false
       pause.value = null
@@ -204,5 +208,5 @@ export function useWorkflowRunner({
     return outcome === 'completed'
   }
 
-  return { running, paused, pause, currentBlockId, statuses, start, respond, stop }
+  return { running, paused, pause, currentBlockId, statuses, lastOutcome, start, respond, stop }
 }
