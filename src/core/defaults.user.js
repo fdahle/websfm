@@ -570,10 +570,12 @@ export const IMAGE_QUALITY_DEFAULTS = {
 // FootprintFromPosesModal.vue's `settings` ref (the intrinsics override is seeded
 // from sensor data, not a static default).
 export const FOOTPRINT_DEFAULTS = {
-  useAgl: false,      // derive ground from above-ground-level height instead of an elevation
-  groundElev: 0,      // fixed ground elevation (when not useAgl)
-  agl: 1000,          // above-ground-level height (when useAgl)
-  assumeNadir: true,  // treat cameras as looking straight down when angles are missing
+  ground: 'dem',         // 'dem' (follow a terrain model) | 'absolute' (one plane) | 'agl' (camera Z − agl)
+  demSource: 'terrain',  // 'dem': 'terrain' (global terrain tiles) | a reference DEM's id
+  poseDatum: 'unknown',  // 'dem': vertical datum of the camera heights; 'unknown' = the DEM's
+  groundElev: 0,         // 'absolute': ground elevation
+  agl: 1000,             // 'agl': flying height above ground
+  assumeNadir: true,     // treat cameras as looking straight down when angles are missing
 }
 
 // Anonymous structural detection. Calibration has a separate modal/defaults.

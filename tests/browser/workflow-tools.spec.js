@@ -463,3 +463,60 @@ test('a synthetic three-view scene reconstructs through the store into one spars
   expect(model.points).toBeGreaterThan(700)
   expect(model.summary).toBe(true)
 })
+
+test('footprints from poses follow the terrain tiles, in the cameras\' vertical datum', async ({ page }) => {
+  await page.goto(harness)
+  // Flat Terrarium terrain at 500 m: 129·256 + 244 − 32768.
+  const png = await page.evaluate(async () => {
+    const c = new OffscreenCanvas(256, 256), ctx = c.getContext('2d')
+    ctx.fillStyle = 'rgb(129,244,0)'; ctx.fillRect(0, 0, 256, 256)
+    const bytes = new Uint8Array(await (await c.convertToBlob({ type: 'image/png' })).arrayBuffer())
+    return btoa(String.fromCharCode(...bytes))
+  })
+  let tiles = 0
+  await page.route('https://s3.amazonaws.com/elevation-tiles-prod/terrarium/**', (route) => {
+    tiles++
+    return route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(png, 'base64') })
+  })
+  const spans = await page.evaluate(async () => {
+    const { poses, footprints } = window.workflowTools
+    await poses.addPoses([{ imageName: 'a.jpg', x: 8.5, y: 50, z: 1500, omega: 0, phi: 0, kappa: 0 }], 'EPSG:4326')
+    const intrinsics = { focal: 1000, width: 1000, height: 800 }
+    const span = async (settings) => {
+      await footprints.computeFootprints({ intrinsics, ...settings })
+      const ring = footprints.sets.find((s) => s.source === 'computed').footprints[0].rings[0]
+      const xs = ring.map((p) => p[0])
+      return Math.max(...xs) - Math.min(...xs)
+    }
+    return {
+      terrain: await span({ ground: 'dem', demSource: 'terrain' }),
+      plane: await span({ ground: 'absolute', groundElev: 500 }),
+      // Ellipsoidal camera heights: the EGM96 terrain is raised by the geoid
+      // undulation there (~+48 m at 50° N 8.5° E), so the cameras sit lower above it.
+      ellipsoidal: await span({ ground: 'dem', demSource: 'terrain', poseDatum: 'ellipsoidal' }),
+      sets: footprints.sets.length,
+    }
+  })
+  expect(tiles).toBeGreaterThan(0)
+  expect(spans.terrain).toBeCloseTo(spans.plane, 9)
+  expect(spans.ellipsoidal / spans.terrain).toBeGreaterThan(0.94)
+  expect(spans.ellipsoidal / spans.terrain).toBeLessThan(0.96)
+  expect(spans.sets).toBe(1)
+
+  // The dialog: terrain is the default ground, the plane modes swap in their own field.
+  await page.getByRole('button', { name: 'Footprints', exact: true }).click()
+  await expect(page.getByRole('radio', { name: 'Terrain model' })).toBeChecked()
+  await expect(page.getByRole('combobox', { name: 'Terrain model' })).toHaveValue('terrain')
+  await page.getByRole('combobox', { name: 'Camera heights' }).selectOption('ellipsoidal')
+  await expect(page.getByText(/converted to it where the two convert/)).toBeVisible()
+  await page.getByRole('radio', { name: 'Fixed elevation' }).check()
+  await expect(page.getByRole('spinbutton', { name: 'Ground elevation' })).toHaveValue('0')
+  await page.getByRole('radio', { name: 'Terrain model' }).check()
+  // No sensor behind the pose: the manual intrinsics fallback is on and must be filled.
+  await page.getByRole('spinbutton', { name: 'Focal' }).fill('1000')
+  await page.getByRole('combobox', { name: 'Unit' }).selectOption('px')
+  await page.getByRole('spinbutton', { name: 'Image width (px)' }).fill('1000')
+  await page.getByRole('spinbutton', { name: 'Image height (px)' }).fill('800')
+  await page.getByRole('button', { name: 'Compute Footprints' }).click()
+  await expect(page.locator('#footprints')).toHaveText('1')
+})
