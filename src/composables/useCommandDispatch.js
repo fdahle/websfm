@@ -223,7 +223,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'map-fit-view':         mapViewerRef.value?.fitView(); break
       case 'map-toggle-grid': showMapGrid.value = !showMapGrid.value; break
       case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
-      // Tools ▸ Georeferencing ▸ Edit GCPs: the mode of the view in front.
+      // Tools ▸ Images ▾ ▸ Edit GCPs: the mode of the view in front.
       case 'edit-gcps':
         if (activeView.value === 'map') mapGcpEdit.value = !mapGcpEdit.value
         else handleCommand('img-gcp-edit')

@@ -176,13 +176,35 @@ export const TABS = [
           { id: 'match-features', label: 'Match\nFeatures', icon: 'link', needs: ['imagesReady', 'keypoints'] },
         ],
       },
-      // The groups are pipeline *stages*, in order: features → sparse → dense →
-      // deliverables. Dense stays a reconstruction stage rather than a product: it is
-      // still the scene geometry, and DEM/Ortho/Mesh are all derived *from* it.
+      // The groups are pipeline *stages*, in order: features → sparse →
+      // georeferencing → dense → deliverables. Dense stays a reconstruction stage
+      // rather than a product: it is still the scene geometry, and DEM/Ortho/Mesh
+      // are all derived *from* it.
       {
         label: 'Sparse',
         commands: [
           { id: 'reconstruct',   label: 'Sparse\nModel', icon: 'sparse-model', needs: ['imagesReady', 'matches'] },
+        ],
+      },
+      {
+        // Plain buttons, not a menu: a pipeline step done once per project, and the
+        // step a new user most needs to find. Between Sparse and Dense: a GCP
+        // adjustment rebuilds the sparse model and invalidates depth maps and
+        // everything after them (guide: getting-started ▸ 4).
+        // No "Project CRS" entry here: CRS is project *configuration*, set from the
+        // Settings modal (App.vue `handleSetCrs`), not a tool that transforms data.
+        // Edit GCPs is a mode, so it lives in Tools ▸ Images ▾ (ONE HOME PER TOOL).
+        label: 'Georeferencing',
+        commands: [
+          { id: 'find-gcps',      label: 'Find\nGCPs',      icon: 'map-pin', needs: ['sparse'], aerialOnly: true },
+          // One entry point for both GCP-constrained adjustment + final similarity fit
+          // and the cheap transform-only path. The modal explains/validates each mode.
+          { id: 'georeference',   label: 'Geo-\nreference', icon: 'target',  needs: ['sparse'], aerialOnly: true },
+          // Same job as Georeference — fixing the datum — for a project that has no
+          // CRS at all. Deliberately NOT aerialOnly: scale bars are the object-capture
+          // way to get metres, and an object project is exactly where there is no
+          // georeference to supply one.
+          { id: 'scale-bars',     label: 'Scale\nBars',     icon: 'scale-bar', needs: ['sparse'] },
         ],
       },
       {
@@ -207,7 +229,7 @@ export const TABS = [
     label: 'Tools',
     groups: [
       // One dropdown per OBJECT FAMILY, ordered the way the data flows: images →
-      // model → georeferencing → cloud → mesh → raster products. A new tool is one
+      // model → cloud → mesh → raster products. A new tool is one
       // more menu row, never one more ribbon button, so this tab keeps its width.
       {
         label: 'Images',
@@ -228,6 +250,10 @@ export const TABS = [
             // floating MaskToolbar over the image view.
             { id: 'img-mask-edit', label: 'Edit mask', icon: 'pencil', activeKey: 'maskEdit', needs: ['imageView'],
               blurb: 'Paint the mask of the image in front' },
+            // One mode for the view in front: on an image a click marks a GCP (the
+            // floating GcpToolbar), on the map it places/moves surveyed points.
+            { id: 'edit-gcps', label: 'Edit GCPs', icon: 'map-pin', activeKey: 'gcpEdit', needs: ['gcpView'],
+              blurb: 'Mark GCPs on the image in front, or place them on the map' },
           ] },
         ],
       },
@@ -249,27 +275,6 @@ export const TABS = [
             { id: 'footprints-from-poses', label: 'Footprints from poses…', icon: 'footprint', needs: ['poses', 'sensors'], aerialOnly: true,
               blurb: 'Project image outlines onto the ground' },
           ] },
-        ],
-      },
-      {
-        // No "Project CRS" entry here: CRS is project *configuration*, set from the
-        // Settings modal (App.vue `handleSetCrs`), not a tool that transforms data.
-        // Plain buttons, not a menu: this is a pipeline step done once per project,
-        // and the step a new user most needs to find.
-        label: 'Georeferencing',
-        commands: [
-          { id: 'find-gcps',      label: 'Find\nGCPs',      icon: 'map-pin', needs: ['sparse'], aerialOnly: true },
-          // One entry point for both GCP-constrained adjustment + final similarity fit
-          // and the cheap transform-only path. The modal explains/validates each mode.
-          { id: 'georeference',   label: 'Geo-\nreference', icon: 'target',  needs: ['sparse'], aerialOnly: true },
-          // Same job as Georeference — fixing the datum — for a project that has no
-          // CRS at all. Deliberately NOT aerialOnly: scale bars are the object-capture
-          // way to get metres, and an object project is exactly where there is no
-          // georeference to supply one.
-          { id: 'scale-bars',     label: 'Scale\nBars',     icon: 'scale-bar', needs: ['sparse'] },
-          // One mode for the view in front: on an image a click marks a GCP (the
-          // floating GcpToolbar), on the map it places/moves surveyed points.
-          { id: 'edit-gcps',      label: 'Edit\nGCPs',      icon: 'map-pin', activeKey: 'gcpEdit', needs: ['gcpView'] },
         ],
       },
       {
@@ -604,7 +609,7 @@ export const PICTURE_TAB = {
         { id: 'img-toggle-fiducials', label: 'Fiducials', icon: 'target', activeKey: 'showFiducials', filmOnly: true },
       ],
     },
-    // Edit mask / Edit GCPs are tools: Tools ▸ Images ▾ and Tools ▸ Georeferencing.
+    // Edit mask / Edit GCPs are tools: both in Tools ▸ Images ▾.
   ],
 }
 

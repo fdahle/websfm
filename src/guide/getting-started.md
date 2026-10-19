@@ -90,6 +90,7 @@ To save and repeat a sequence of commands, use the
 ## 4 · Add scale or coordinates
 Camera positions or ground control can place an aerial reconstruction in the project
 CRS. For an object, add a scale bar between two points whose real distance is known.
+Both are in the Reconstruct tab, under **Georeferencing**, between Sparse and Dense.
 Do this before creating final products, because a ground-control adjustment invalidates
 depth maps and downstream products. An object project can also be levelled and given
 an origin with **Tools → Model ▾ → Orient model**.
@@ -109,9 +110,10 @@ Clean, align, compare and measure the results with the **Tools** tab's
 
 ## Where things are
 The ribbon chooses what to do: a dialog, a mode, or a display setting such as point
-and camera size (View → Scene). **Every tool is in the Tools tab**, grouped by what
-it acts on: Images, Model, Georeferencing, Point Cloud, Mesh, Products and Measure,
-mostly as menus. The View tab and the tabs that appear for an open image or raster
+and camera size (View → Scene). The pipeline steps, georeferencing included, are in
+the Reconstruct tab. **Every tool is in the Tools tab**, grouped by what it acts on
+in a menu each: Images, Model, Point Cloud, Mesh, Products and Measure. Marking ground
+control is a tool, so **Edit GCPs** is under Images. The View tab and the tabs that appear for an open image or raster
 only show things: camera presets, overlays, zoom, styling, on-map. Every menu opens
 even before anything in it is usable, so you can see what is there: a tool whose
 prerequisite is missing stays in its menu, greyed, with the reason. Interactive tools
