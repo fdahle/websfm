@@ -47,5 +47,6 @@ at ingest so the rest of the pipeline stays pinhole. That has consequences:
   refined lens. A sensor that starts equidistant (all $k$ zero) is treated as
   uncalibrated, so **Auto** refines it; one with calibrated $k$ terms is left alone.
   Auto refines a four-term lens's $k_4$ last, on the pass after the one that first
-  refined $k_3$, once the model is large enough for $k_3$; the preset
+  refined $k_3$, once the model is large enough for $k_3$. A $k_4$ that would fold the lens
+  curve before the image corner is refused and that pass solved without it; the preset
   *Focal + principal point + k1–k4* refines all four from the start.

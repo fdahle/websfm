@@ -182,6 +182,9 @@ export async function refineModel(ctx) {
 
     // Filter → re-BA, twice: a generous pass to strip gross junk, then a tighter
     // pass once the model has settled. Each re-solve runs on the cleaned set.
+    // Set once a pass that first freed k4 was refused by the self-cal guard: k4 is then
+    // not staged again in this run (the lens behaves as a three-term one).
+    let k4Refused = false
     for (const [round, maxPx] of [[1, filterMaxReprojPx * 2], [2, filterMaxReprojPx]]) {
       report('trackFilter', round / 2,
         `Track filter + bundle adjustment (pass ${round})…`, { done: cameras.size, total: imgs.length })
@@ -254,7 +257,7 @@ export async function refineModel(ctx) {
         tracks.forEachPoint((p) => { nObs += tracks.viewCount(p) })
         // k4 (four-term fisheye only) waits for a pass that has already refined k3.
         const k3Settled = selfCalRecord.passes.some((p) => !p.skipped && /(^|,)k3(,|$)/.test(p.mode))
-        const counts = { nCams: cameras.size, nObs, lensTerms: selfCalLensTerms, k3Settled }
+        const counts = { nCams: cameras.size, nObs, lensTerms: k4Refused ? Math.min(3, selfCalLensTerms) : selfCalLensTerms, k3Settled }
         refineMode = stagedSelfCalTerms(counts)
         const deferred = stagedSelfCalDeferred(counts)
         log(`post-filter pass ${round} self-cal terms '${refineMode}'`
@@ -295,7 +298,20 @@ export async function refineModel(ctx) {
           + `which converged with the same terms ('${refineMode}')`, 'info', 'Reconstruction')
       } else {
         selfCalRecord.passes.push({ pass: round, mode: refineMode, reducedReason })
-        await runBundleAdjust(`post-filter bundle adjustment ${round}`, baIterations, refineMode, { warm: true })
+        const label = `post-filter bundle adjustment ${round}`
+        await runBundleAdjust(label, baIterations, refineMode, { warm: true })
+        // The first k4 can bend a wide fisheye's lens curve so that it folds before the
+        // image corner (selfCalGuard.js); the guard then refuses the whole pass, k1–k3
+        // with it. Solve the pass again without k4, and stage no k4 for the rest of the run.
+        const last = selfCalRecord.adjustments?.at(-1)
+        if (cfg.selfCalStaged && /(^|,)k4(,|$)/.test(refineMode) && last?.label === label && !last.accepted) {
+          k4Refused = true
+          const withoutK4 = refineMode.split(',').filter((t) => t !== 'k4').join(',')
+          log(`${label} again without k4 — the self-cal guard refused the k4 fit; k4 keeps its value for this run`,
+            'info', 'Reconstruction')
+          selfCalRecord.passes.push({ pass: round, mode: withoutK4, reducedReason: 'k4 refused by the self-cal guard' })
+          await runBundleAdjust(`${label} (without k4)`, baIterations, withoutK4, { warm: true })
+        }
       }
       memoryMark(`filter + BA ${round}`)
     }

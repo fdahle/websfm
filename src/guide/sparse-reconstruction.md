@@ -42,7 +42,9 @@ geometry, or incorrect control—not an iteration shortage.
 an existing calibrated distortion model. A [fisheye](help:fisheye-lens) sensor with all
 coefficients zero counts as uncalibrated: Auto refines its focal length, principal point
 and its own fisheye terms in the pixels the lens recorded, k4 of a four-term lens last,
-once k1–k3 have been refined. Turn calibration off only when the sensor
+once k1–k3 have been refined. If the fit with k4 would bend the lens curve back on
+itself before the image corner, that pass is solved again without k4 and k4 keeps its
+value for the rest of the run (the log says so). Turn calibration off only when the sensor
 parameters are trustworthy. Solving many parameters needs many well-distributed views;
 on a weak network it can absorb scene error into implausible intrinsics. Self-calibration
 runs inside bundle adjustment, so it is unavailable when bundle adjustment iterations are
