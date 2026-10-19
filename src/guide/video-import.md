@@ -113,5 +113,7 @@ open, the dialog says so; converting it to H.264 MP4 (for example
 The frames appear in the image list in time order, which is the capture order
 Sequential matching uses. When most images in the project are video frames,
 [Match Features](guide:match-features) starts on **Sequential** pairing and
-recommends it; any other choice you make stands. Turn on **Close capture loop** there
+recommends it; any other choice you make stands. A Match Features block in the
+[Workflow Builder](guide:workflow-builder) does the same when its Pairing is left on
+**auto**. Turn on **Close capture loop** there
 when the video returns to where it started, such as a full walk around an object.

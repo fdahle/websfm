@@ -10,6 +10,7 @@ import { createWorkflow, resolveWorkflowSettings, WORKFLOW_BLOCK_BY_ID } from '.
 import { gateMetricValue, GATE_METRIC_BY_ID } from '../core/workflowGate.js'
 import { cameraCenter } from '../core/sfm/geometry.js'
 import { useComputeSettings } from './useComputeSettings.js'
+import { useDatasetRecommendations } from './useDatasetRecommendations.js'
 import { useLog } from './useLog.js'
 import { useQualityReport } from './useQualityReport.js'
 import { useWorkflowRunner } from './useWorkflowRunner.js'
@@ -19,12 +20,15 @@ import { pluralize } from '../core/textFormat.js'
 // preflights against, how an automated block runs (and how it is judged to have
 // replaced its output), and the builder dialog's handlers.
 //
-// Injected: `ready` (useWorkspaceState's readiness flags), `pipeline` (usePipeline's
+// Injected: `ready` (useWorkspaceState's readiness flags, and `posedImageCount` for
+// the Match block's automatic pairing), `pipeline` (usePipeline's
 // runners + cancelRun), `openInteractive(id)` (the command dispatch — an interactive
 // block opens its command's own dialog).
 export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   const { log } = useLog()
-  const { kpImageCount, sparseReady, cloudReady, denseReady, meshReady, demReady, orthoReady } = ready
+  const { kpImageCount, sparseReady, cloudReady, denseReady, meshReady, demReady, orthoReady, posedImageCount } = ready
+  // Lazy: the profile is only computed when a Match block resolves 'auto' pairing.
+  const { profile: datasetProfile } = useDatasetRecommendations()
   const {
     runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
     runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, cancelRun,
@@ -70,11 +74,14 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   }
 
   async function runAutomatedWorkflowBlock(type, rawSettings, context = {}) {
+    const autoPairing = type === 'match-features' && (rawSettings.strategy ?? 'auto') === 'auto'
     const settings = resolveWorkflowSettings(type, rawSettings, {
       useGpu: workflowUseGpu.value,
       memBudgetBytes: workflowMemBudgetBytes.value,
       mergeCell: denseSummary.value?.mergeCell ?? 0,
+      ...(autoPairing ? { posedImageCount: posedImageCount?.value ?? 0, video: datasetProfile.value.kind === 'video' } : {}),
     })
+    if (autoPairing) log(`Workflow: Match Features pairing is automatic → ${settings.strategy}`, 'info', 'Workflow')
     if (WORKFLOW_BLOCK_BY_ID.get(type)?.tool) return runToolBlock(type, settings, context)
     const targets = type === 'detect-features'
       ? (settings.overwrite ? [...images.value] : images.value.filter((img) => img.kpStatus !== 'done'))

@@ -73,6 +73,16 @@ describe('workflow schema', () => {
     expect(resolveWorkflowSettings('gen-ortho', {}, { memBudgetBytes: 123 }).memBudgetBytes).toBe(123)
   })
 
+  it('resolves automatic pairing per run, as the Match Features dialog opens', () => {
+    const auto = createWorkflowBlock('match-features').settings
+    expect(auto.strategy).toBe('auto')
+    expect(resolveWorkflowSettings('match-features', auto, {}).strategy).toBe('exhaustive')
+    expect(resolveWorkflowSettings('match-features', auto, { video: true }).strategy).toBe('sequential')
+    expect(resolveWorkflowSettings('match-features', auto, { video: true, posedImageCount: 12 }).strategy).toBe('preselect')
+    // A chosen pairing stands.
+    expect(resolveWorkflowSettings('match-features', { ...auto, strategy: 'exhaustive' }, { video: true }).strategy).toBe('exhaustive')
+  })
+
   it('resets detector-specific limits when switching to SuperPoint', () => {
     const sift = createWorkflowBlock('detect-features').settings
     const superpoint = updateWorkflowSetting(sift, 'detector', 'superpoint')

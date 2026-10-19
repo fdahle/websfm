@@ -7,6 +7,7 @@ import {
   CLEAN_MESH_DEFAULTS, SMOOTH_MESH_DEFAULTS, DECIMATE_MESH_DEFAULTS,
 } from './defaults.user.js'
 import { DETECTOR_IDS } from './features/learnedDetectors.js'
+import { initialMatchStrategy } from './recommend.js'
 import {
   END_TARGET, GATE_FAIL_ACTIONS, GATE_METRIC_BY_ID, GATE_METRICS, GATE_OPS, gateDefaults,
 } from './workflowGate.js'
@@ -53,8 +54,8 @@ export const WORKFLOW_BLOCKS = [
       { key: 'overwrite', label: 'Replace existing keypoints', type: 'boolean' },
     ]),
   automated('match-features', 'Match Features', 'Features', ['keypoints'], ['matches'],
-    { strategy: 'exhaustive', matcher: 'bruteforce', preset: 'medium', overwrite: false, ...MATCH_DEFAULTS }, [
-      { key: 'strategy', label: 'Pairing', type: 'select', options: ['exhaustive', 'sequential', 'preselect'] },
+    { strategy: 'auto', matcher: 'bruteforce', preset: 'medium', overwrite: false, ...MATCH_DEFAULTS }, [
+      { key: 'strategy', label: 'Pairing', type: 'select', options: ['auto', 'exhaustive', 'sequential', 'preselect'] },
       { key: 'matcher', label: 'Matcher', type: 'select', options: ['bruteforce', 'lightglue'] },
       { key: 'preset', label: 'Preset', type: 'select', options: PRESETS },
       { key: 'sequentialOverlap', label: 'Sequential overlap', type: 'number', min: 1 },
@@ -474,7 +475,15 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
     const presets = DETECT_PRESETS_BY_DETECTOR[value.detector] ?? DETECT_SIFT_PRESETS
     return { ...base, ...value, ...(presets[value.preset] || {}), useGpu: runtime.useGpu, memBudgetBytes: runtime.memBudgetBytes }
   }
-  if (type === 'match-features') return { ...MATCH_DEFAULTS, ...value, ...(MATCH_PRESETS[value.preset] || {}), useGpu: runtime.useGpu }
+  if (type === 'match-features') {
+    // 'auto' pairing is what the Match Features dialog opens on for this project:
+    // Preselect with camera positions, Sequential for video frames, else Exhaustive.
+    // A workflow is a template, so it is decided per run, not when the block was added.
+    const strategy = value.strategy === 'auto' || value.strategy == null
+      ? initialMatchStrategy(runtime.posedImageCount ?? 0, { video: !!runtime.video })
+      : value.strategy
+    return { ...MATCH_DEFAULTS, ...value, ...(MATCH_PRESETS[value.preset] || {}), strategy, useGpu: runtime.useGpu }
+  }
   if (type === 'reconstruct') return { ...RECONSTRUCT_DEFAULTS, ...value, ...(RECONSTRUCT_PRESETS[value.preset] || {}) }
   if (type === 'compute-depth') {
     const { filterRelTol, maxDim, bestK, ...rest } = { ...DEPTHMAP_DEFAULTS, ...value }
