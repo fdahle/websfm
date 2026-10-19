@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Detect reseau (Tools ▸ Images ▾ ▸ Film scans).** For cameras that expose a grid of
+  crosses onto every frame, such as the KH-9 mapping camera, the crosses are found in
+  every scan and each scan is corrected for how it sat on the scanner and how its film
+  has stretched or warped, centimetre by centimetre. On a synthetic satellite block
+  with deformed film, checkpoint errors fell from tens of metres to under one pixel.
+  Self-calibration on Auto keeps the camera's certificate values for such a camera.
 - **DEMs finer than 4,096 cells a side.** A DEM whose chosen cell size needs a bigger
   grid (a satellite frame at its native resolution) is no longer coarsened to fit: it is
   built block by block as a full-resolution Cloud-Optimized GeoTIFF, which the GeoTIFF
