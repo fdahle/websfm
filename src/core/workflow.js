@@ -60,28 +60,30 @@ export const WORKFLOW_BLOCKS = [
       { key: 'sequentialOverlap', label: 'Sequential overlap', type: 'number', min: 1 },
       { key: 'overwrite', label: 'Replace existing matches', type: 'boolean' },
     ]),
-  automated('reconstruct', 'Sparse Model', 'Reconstruction', ['matches'], ['sparse'],
+  automated('reconstruct', 'Sparse Model', 'Sparse', ['matches'], ['sparse'],
     { preset: 'medium', ...RECONSTRUCT_DEFAULTS }, [
       { key: 'preset', label: 'Preset', type: 'select', options: PRESETS },
       { key: 'refineIntrinsics', label: 'Self-calibration', type: 'select', options: ['auto', 'none', 'f', 'f,cxcy', 'f,k1', 'f,cxcy,k1,k2,k3', 'f,cxcy,k1,k2,k3,k4'] },
       { key: 'baIterations', label: 'BA iterations', type: 'number', min: 1 },
     ]),
-  automated('compute-depth', 'Depth Maps', 'Reconstruction', ['sparse'], ['depthMaps'],
+  // Between Sparse and Dense, as in the ribbon: a GCP adjustment invalidates
+  // depth maps and everything after them.
+  interactive('scale-bars', 'Scale Bars', 'Referencing', ['sparse']),
+  interactive('georeference', 'Georeference', 'Referencing', ['sparse'], { sceneType: 'aerial' }),
+  interactive('find-gcps', 'Find GCPs', 'Referencing', ['sparse'], { sceneType: 'aerial' }),
+
+  automated('compute-depth', 'Depth Maps', 'Dense', ['sparse'], ['depthMaps'],
     { ...DEPTHMAP_DEFAULTS }, [
       { key: 'quality', label: 'Quality', type: 'select', options: ['low', 'medium', 'high', 'ultra'] },
       { key: 'maxSources', label: 'Source views', type: 'number', min: 1 },
       { key: 'geomConsistency', label: 'Geometric consistency', type: 'boolean' },
     ]),
-  automated('dense', 'Dense Model', 'Reconstruction', ['depthMaps'], ['dense'],
+  automated('dense', 'Dense Model', 'Dense', ['depthMaps'], ['dense'],
     { ...DENSE_FUSE_DEFAULTS }, [
       { key: 'auto', label: 'Automatic thresholds', type: 'boolean' },
       { key: 'minViews', label: 'Minimum views', type: 'number', min: 1 },
       { key: 'removeIsolated', label: 'Remove isolated points', type: 'boolean' },
     ]),
-
-  interactive('scale-bars', 'Scale Bars', 'Referencing', ['sparse']),
-  interactive('georeference', 'Georeference', 'Referencing', ['sparse'], { sceneType: 'aerial' }),
-  interactive('find-gcps', 'Find GCPs', 'Referencing', ['sparse'], { sceneType: 'aerial' }),
 
   automated('gen-dem', 'Build DEM', 'Products', ['cloud'], ['dem'], { ...DEM_DEFAULTS }, [
     { key: 'crs', label: 'Frame', type: 'select', options: ['local', 'project'] },
