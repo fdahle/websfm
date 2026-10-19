@@ -20,6 +20,13 @@ describe('createBlockProgress', () => {
     expect(p.label()).toBe('block 5 of 5')
   })
 
+  it('does not say "about less than a minute"', () => {
+    let t = 0
+    const p = createBlockProgress(3, { now: () => t })
+    t = 1500
+    expect(p.finished()).toMatch(/1\.5 s per block, less than a minute left$/)
+  })
+
   it('says nothing for a single block', () => {
     const p = createBlockProgress(1, { now: () => 0 })
     expect(p.finished()).toBeNull()

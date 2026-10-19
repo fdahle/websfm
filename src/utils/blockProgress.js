@@ -25,7 +25,14 @@ export function createBlockProgress(total, { prefix = '', everyMs = 30_000, now 
       const per = elapsed / done
       return `${prefix}${done} of ${pluralize(total, 'block')} done (${Math.floor(100 * done / total)}%) `
         + `in ${formatClock(elapsed)}, ${per.toFixed(per < 10 ? 1 : 0)} s per block, `
-        + `about ${formatRemaining(per * (total - done))} left`
+        + `${remainingText(per * (total - done))} left`
     },
   }
+}
+
+// "about 7 minutes", but plain "less than a minute": an estimate under a minute is
+// already a bound.
+function remainingText(secs) {
+  const t = formatRemaining(secs)
+  return t.startsWith('less than') ? t : `about ${t}`
 }
