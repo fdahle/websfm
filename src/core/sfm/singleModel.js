@@ -433,6 +433,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       cfg, images, imgs, cameras, tracks, ids, keypointsAt, donePairs, refreshTracks,
       modelResiduals, runBundleAdjust: bundles.runBundleAdjust, lastSolve: bundles.lastSolve, selfCalRecord, intrinsicsRecord,
       imageByUuid, defaultKCount, log, report, memoryMark,
+      selfCalLensTerms: imgs.reduce((m, im) => Math.max(m, selfCal.lensOf(im.uuid)?.terms ?? 0), 0),
     })
     // ── Registration plausibility (registrationCheck.js) ─────────────────────
     // A camera can register in a wrong place and stay there self-consistently (it

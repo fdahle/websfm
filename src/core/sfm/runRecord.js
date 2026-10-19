@@ -117,7 +117,7 @@ export function resolveRefineIntrinsics({ cfg, anyCalibratedDistortion, selfCalR
       cfg.refineIntrinsics = SELF_CAL_BASE_TERMS
       cfg.selfCalStaged = true
       log(`refineIntrinsics 'auto' → staged (base '${SELF_CAL_BASE_TERMS}', `
-        + 'escalating to cx,cy / k2 / k3 in post-filter passes as the model grows)',
+        + 'escalating to cx,cy / k2 / k3, then k4 on a four-term fisheye, in post-filter passes as the model grows)',
         'info', 'Reconstruction')
     }
   }

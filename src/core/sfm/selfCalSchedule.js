@@ -18,6 +18,11 @@ export const SELF_CAL_STAGE_DEFAULTS = {
   k2MinCams: 8,   k2MinObs: 10_000,   // add k2 once the model is well populated
   cxcyMinCams: 10,                    // add principal point once many cameras constrain it
   k3MinCams: 20,  k3MinObs: 30_000,   // add k3 only on a large, well-observed model
+  // k4 exists only on a four-term (Kannala–Brandt, OPENCV_FISHEYE) lens. It is the θ⁸
+  // term: at 75° (θ = 1.31) θ⁸ ≈ 8.7 against θ⁶ ≈ 5.0, so on its own it trades
+  // almost one for one with k3. It is added only on a pass AFTER one that already
+  // refined k3 (k1–k3 have settled; k4 then fits what they leave), and at the k3 gates.
+  k4MinCams: 20,  k4MinObs: 30_000,
 }
 
 // The base terms solved during registration (interim / rescue BA) and the floor the
@@ -25,16 +30,23 @@ export const SELF_CAL_STAGE_DEFAULTS = {
 export const SELF_CAL_BASE_TERMS = 'f,k1'
 
 // Resolve the refine-terms string for a post-filter BA pass under the `auto` schedule.
-// Order is fixed (f, cxcy, k1, k2, k3) but the crate's bitmask parser is order-free.
-export function stagedSelfCalTerms({ nCams, nObs }, cfg = SELF_CAL_STAGE_DEFAULTS) {
+// Order is fixed (f, cxcy, k1, k2, k3, k4) but the crate's bitmask parser is order-free.
+//   lensTerms  — the most self-calibratable k terms any camera's lens has (4 for a
+//                four-term fisheye; 0 for the pinhole + Brown residual, which has no k4)
+//   k3Settled  — an earlier pass of this run already refined k3
+export function stagedSelfCalTerms({ nCams, nObs, lensTerms = 0, k3Settled = false }, cfg = SELF_CAL_STAGE_DEFAULTS) {
   const c = { ...SELF_CAL_STAGE_DEFAULTS, ...cfg }
   const terms = ['f']
   if (nCams >= c.cxcyMinCams) terms.push('cxcy')
   terms.push('k1')
   if (nCams >= c.k2MinCams && nObs >= c.k2MinObs) terms.push('k2')
-  if (nCams >= c.k3MinCams && nObs >= c.k3MinObs) terms.push('k3')
+  const k3 = nCams >= c.k3MinCams && nObs >= c.k3MinObs
+  if (k3) terms.push('k3')
+  if (k4Applies(lensTerms) && k3 && k3Settled && nCams >= c.k4MinCams && nObs >= c.k4MinObs) terms.push('k4')
   return terms.join(',')
 }
+
+const k4Applies = (lensTerms) => lensTerms >= 4
 
 // ── Distortion identifiability ──────────────────────────────────────────────
 // Camera count is a proxy, not the condition. What actually separates a radial
@@ -83,13 +95,18 @@ export function withoutDistortionTerms(refineMode) {
 }
 
 // Human-readable note on which terms are deferred and why, for the run log.
-export function stagedSelfCalDeferred({ nCams, nObs }, cfg = SELF_CAL_STAGE_DEFAULTS) {
+export function stagedSelfCalDeferred({ nCams, nObs, lensTerms = 0, k3Settled = false }, cfg = SELF_CAL_STAGE_DEFAULTS) {
   const c = { ...SELF_CAL_STAGE_DEFAULTS, ...cfg }
   const out = []
   if (nCams < c.cxcyMinCams) out.push(`cx,cy (needs ≥${c.cxcyMinCams} cams, have ${nCams})`)
   if (!(nCams >= c.k2MinCams && nObs >= c.k2MinObs))
     out.push(`k2 (needs ≥${c.k2MinCams} cams & ≥${c.k2MinObs} obs, have ${nCams}/${nObs})`)
-  if (!(nCams >= c.k3MinCams && nObs >= c.k3MinObs))
-    out.push(`k3 (needs ≥${c.k3MinCams} cams & ≥${c.k3MinObs} obs, have ${nCams}/${nObs})`)
+  const k3 = nCams >= c.k3MinCams && nObs >= c.k3MinObs
+  if (!k3) out.push(`k3 (needs ≥${c.k3MinCams} cams & ≥${c.k3MinObs} obs, have ${nCams}/${nObs})`)
+  if (k4Applies(lensTerms)) {
+    if (!(nCams >= c.k4MinCams && nObs >= c.k4MinObs))
+      out.push(`k4 (needs ≥${c.k4MinCams} cams & ≥${c.k4MinObs} obs, have ${nCams}/${nObs})`)
+    else if (!(k3 && k3Settled)) out.push('k4 (waits for a pass that has refined k3)')
+  }
   return out
 }

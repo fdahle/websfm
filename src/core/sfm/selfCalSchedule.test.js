@@ -29,6 +29,23 @@ describe('stagedSelfCalTerms', () => {
     expect(deferred.join(' ')).toMatch(/k3/)
     expect(stagedSelfCalDeferred({ nCams: 20, nObs: 30_000 })).toHaveLength(0)
   })
+
+  it('adds k4 on a four-term fisheye only after a pass that refined k3', () => {
+    const big = { nCams: 104, nObs: 36_000 }
+    // A pinhole (Brown residual) or two-term lens has no k4: never staged or reported.
+    expect(stagedSelfCalTerms({ ...big, k3Settled: true })).toBe('f,cxcy,k1,k2,k3')
+    expect(stagedSelfCalTerms({ ...big, lensTerms: 2, k3Settled: true })).toBe('f,cxcy,k1,k2,k3')
+    expect(stagedSelfCalDeferred({ ...big, lensTerms: 2 })).toHaveLength(0)
+    // Four terms: the first pass that unlocks k3 holds k4 back …
+    expect(stagedSelfCalTerms({ ...big, lensTerms: 4 })).toBe('f,cxcy,k1,k2,k3')
+    expect(stagedSelfCalDeferred({ ...big, lensTerms: 4 }).join(' ')).toMatch(/k4 \(waits for a pass that has refined k3\)/)
+    // … the next one adds it.
+    expect(stagedSelfCalTerms({ ...big, lensTerms: 4, k3Settled: true })).toBe('f,cxcy,k1,k2,k3,k4')
+    expect(stagedSelfCalDeferred({ ...big, lensTerms: 4, k3Settled: true })).toHaveLength(0)
+    // Below the gates k4 waits with k3.
+    expect(stagedSelfCalTerms({ nCams: 15, nObs: 40_000, lensTerms: 4, k3Settled: true })).toBe('f,cxcy,k1,k2')
+    expect(stagedSelfCalDeferred({ nCams: 15, nObs: 40_000, lensTerms: 4 }).join(' ')).toMatch(/k4 \(needs ≥20 cams/)
+  })
 })
 
 describe('distortionIdentifiable', () => {
@@ -46,6 +63,7 @@ describe('distortionIdentifiable', () => {
   it('keeps refining focal when only distortion is unidentifiable', () => {
     expect(withoutDistortionTerms('f,k1')).toBe('f')
     expect(withoutDistortionTerms('f,cxcy,k1,k2,k3')).toBe('f,cxcy')
+    expect(withoutDistortionTerms('f,cxcy,k1,k2,k3,k4')).toBe('f,cxcy')
     expect(withoutDistortionTerms('k1')).toBe('none')
   })
 

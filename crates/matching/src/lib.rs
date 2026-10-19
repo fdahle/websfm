@@ -1,5 +1,8 @@
 use wasm_bindgen::prelude::*;
 
+mod magsac;
+use magsac::{magsac, Model};
+
 // ─── Descriptor matching ──────────────────────────────────────────────────────
 
 // Nearest-neighbour matching via the GEMM identity. The brute-force NN scan over
@@ -452,6 +455,13 @@ fn apply_t(t: &M3, p: (f64, f64)) -> (f64, f64) {
 }
 
 fn fundamental_8pt(pts_a: &[(f64, f64)], pts_b: &[(f64, f64)]) -> Option<M3> {
+    fundamental_8pt_w(pts_a, pts_b, None)
+}
+
+// The 8-point algorithm with an optional weight per correspondence: minimises
+// Σ wₖ·(x_bᵀ F x_a)² in the normalised frame (MAGSAC++'s IRLS step, magsac.rs).
+// `None` is the plain fit, bit for bit: wₖ = 1.0 multiplies exactly.
+pub(crate) fn fundamental_8pt_w(pts_a: &[(f64, f64)], pts_b: &[(f64, f64)], w: Option<&[f64]>) -> Option<M3> {
     let n = pts_a.len().min(pts_b.len());
     if n < 8 {
         return None;
@@ -465,9 +475,10 @@ fn fundamental_8pt(pts_a: &[(f64, f64)], pts_b: &[(f64, f64)]) -> Option<M3> {
         let (x1, y1) = apply_t(&ta, pts_a[k]);
         let (x2, y2) = apply_t(&tb, pts_b[k]);
         let row = [x2 * x1, x2 * y1, x2, y2 * x1, y2 * y1, y2, x1, y1, 1.0];
+        let wk = w.map_or(1.0, |w| w[k]);
         for i in 0..9 {
             for j in 0..9 {
-                ata[i][j] += row[i] * row[j];
+                ata[i][j] += wk * row[i] * row[j];
             }
         }
     }
@@ -701,6 +712,12 @@ fn inv_norm_matrix(t: &M3) -> M3 {
 // Homography H mapping pts_a → pts_b via the normalized DLT (2 rows/correspondence,
 // null vector of AᵀA, then denormalized H = Tb⁻¹·Ĥ·Ta). Returns None if < 4 points.
 fn homography_dlt(pts_a: &[(f64, f64)], pts_b: &[(f64, f64)]) -> Option<M3> {
+    homography_dlt_w(pts_a, pts_b, None)
+}
+
+// The DLT with an optional weight per correspondence (both of its rows), as
+// `fundamental_8pt_w`. `None` is the plain fit, bit for bit.
+pub(crate) fn homography_dlt_w(pts_a: &[(f64, f64)], pts_b: &[(f64, f64)], w: Option<&[f64]>) -> Option<M3> {
     let n = pts_a.len().min(pts_b.len());
     if n < 4 {
         return None;
@@ -714,9 +731,10 @@ fn homography_dlt(pts_a: &[(f64, f64)], pts_b: &[(f64, f64)]) -> Option<M3> {
         let (xp, yp) = apply_t(&tb, pts_b[k]);
         let row1 = [-x, -y, -1.0, 0.0, 0.0, 0.0, xp * x, xp * y, xp];
         let row2 = [0.0, 0.0, 0.0, -x, -y, -1.0, yp * x, yp * y, yp];
+        let wk = w.map_or(1.0, |w| w[k]);
         for i in 0..9 {
             for j in 0..9 {
-                ata[i][j] += row1[i] * row1[j] + row2[i] * row2[j];
+                ata[i][j] += wk * (row1[i] * row1[j] + row2[i] * row2[j]);
             }
         }
     }
@@ -826,6 +844,10 @@ pub fn verify_matches(
 /// Like `verify_matches`, but also fits a homography via RANSAC and reports its
 /// inlier count so the caller can compute the H-vs-F degeneracy ratio.
 ///
+/// `verifier`: 0 = RANSAC with local optimisation (the default path above), 1 =
+/// MAGSAC++ (magsac.rs) for both F and H. Either way the inliers are the points
+/// within `ransac_thresh_px` of the returned model.
+///
 /// `h_skip_below`: skip the (expensive) homography RANSAC entirely when the F
 /// inlier count is below this value, reporting `h_inlier_count = 0`. The caller
 /// MUST pass its own hard acceptance floor (`minMatches`): a pair below that floor
@@ -843,6 +865,7 @@ pub fn verify_matches_hf(
     ransac_thresh_px: f32,
     max_iters: u32,
     h_skip_below: u32,
+    verifier: u32,
 ) -> Vec<f32> {
     let n = pts_a.len() / 2;
     if n != pts_b.len() / 2 || n < 8 {
@@ -854,7 +877,13 @@ pub fn verify_matches_hf(
         (0..n).map(|i| (pts_b[i * 2] as f64, pts_b[i * 2 + 1] as f64)).collect();
     let thresh_sq = (ransac_thresh_px as f64).powi(2);
 
-    let Some((f, mask, _iters)) = ransac_fundamental(&pa, &pb, thresh_sq, max_iters as usize) else {
+    let use_magsac = verifier == 1;
+    let fit = if use_magsac {
+        magsac(Model::Fundamental, &pa, &pb, thresh_sq, max_iters as usize)
+    } else {
+        ransac_fundamental(&pa, &pb, thresh_sq, max_iters as usize)
+    };
+    let Some((f, mask, _iters)) = fit else {
         return vec![];
     };
     // Skip H on a pair the caller will reject anyway (F inliers below its floor):
@@ -862,6 +891,9 @@ pub fn verify_matches_hf(
     let f_inliers = mask.iter().filter(|&&x| x).count();
     let h_inliers = if (f_inliers as u32) < h_skip_below {
         0
+    } else if use_magsac {
+        magsac(Model::Homography, &pa, &pb, thresh_sq, max_iters as usize)
+            .map_or(0, |(_, m, _)| m.iter().filter(|&&x| x).count())
     } else {
         ransac_homography(&pa, &pb, thresh_sq, max_iters as usize)
     };
@@ -937,7 +969,7 @@ mod tests {
     #[test]
     fn homography_dominates_on_planar_scene() {
         let (pa, pb) = scene(true);
-        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0);
         assert!(!out.is_empty(), "verification should succeed on a planar scene");
         let h = out[9];
         let f_inliers: f32 = out[10..].iter().sum();
@@ -947,7 +979,7 @@ mod tests {
     #[test]
     fn homography_underfits_general_scene() {
         let (pa, pb) = scene(false);
-        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0);
         assert!(!out.is_empty(), "verification should succeed on a general scene");
         let h = out[9];
         let f_inliers: f32 = out[10..].iter().sum();
@@ -1020,11 +1052,20 @@ mod tests {
 
     // Noisy general-motion scene with a fraction of random outliers.
     fn noisy_scene(rng: &mut Lcg, n: usize, noise: f64, outliers: f64) -> (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<bool>) {
+        let (pa, pb, truth, _) = noisy_scene_gt(rng, n, noise, outliers);
+        (pa, pb, truth)
+    }
+
+    // `noisy_scene` plus the noise-free projections of every true correspondence
+    // (to score an estimated F against the geometry rather than against the noise).
+    #[allow(clippy::type_complexity)]
+    fn noisy_scene_gt(rng: &mut Lcg, n: usize, noise: f64, outliers: f64)
+        -> (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<bool>, Vec<((f64, f64), (f64, f64))>) {
         let rb = roty(rng.range(-0.2, 0.2));
         let tb: V3 = [rng.range(0.3, 0.8), rng.range(-0.2, 0.2), rng.range(-0.1, 0.1)];
         let id: M3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let (f, c) = (1500.0, 1000.0);
-        let (mut pa, mut pb, mut truth) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut pa, mut pb, mut truth, mut clean) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for _ in 0..n {
             let outlier = rng.f() < outliers;
             truth.push(!outlier);
@@ -1036,11 +1077,12 @@ mod tests {
             let x: V3 = [rng.range(-3.0, 3.0), rng.range(-3.0, 3.0), rng.range(4.0, 12.0)];
             let (ax, ay) = proj(&id, &[0.0, 0.0, 0.0], x, f, c);
             let (bx, by) = proj(&rb, &tb, x, f, c);
+            clean.push(((ax, ay), (bx, by)));
             let g = |rng: &mut Lcg| (rng.f() + rng.f() + rng.f() - 1.5) * 2.0 * noise;
             pa.push((ax + g(rng), ay + g(rng)));
             pb.push((bx + g(rng), by + g(rng)));
         }
-        (pa, pb, truth)
+        (pa, pb, truth, clean)
     }
 
     // The refit after RANSAC used to be accepted whatever it scored, so the
@@ -1091,6 +1133,85 @@ mod tests {
         let leak = out_kept as f64 / out_n as f64;
         assert!(recall > 0.9, "kept {:.1} % of true correspondences", recall * 100.0);
         assert!(leak < 0.1, "kept {:.1} % of outliers", leak * 100.0);
+    }
+
+    // MAGSAC++ on the same kind of scenes: it keeps the true correspondences as
+    // RANSAC does, its mask is its model's inlier set, and its F lies closer to the
+    // noise-free geometry (RMS Sampson distance of the clean projections). 60 scenes
+    // at 1 px noise and 20 / 40 / 60 % outliers, at a 3 px and a loose 5 px gate;
+    // both the mean and the median must be lower. Measured 2026-10-18 (5000
+    // samples): 3 px median 0.40 → 0.30, mean 0.80 → 0.60; 5 px median 0.40 → 0.23,
+    // mean 0.78 → 0.58 (MAGSAC++ closer on 29 and 33 of 60 scenes).
+    #[test]
+    fn magsac_is_at_least_as_accurate_as_ransac() {
+        for &thr in &[3.0f64, 5.0] {
+            let mut rng = Lcg(0x5eed);
+            let (mut true_n, mut true_kept, mut out_n, mut out_kept) = (0, 0, 0, 0);
+            let (mut er, mut em) = (Vec::new(), Vec::new());
+            for scene in 0..60 {
+                let (pa, pb, truth, clean) = noisy_scene_gt(&mut rng, 400, 1.0, [0.2, 0.4, 0.6][scene % 3]);
+                let thr_sq = thr * thr;
+                let (fr, _, _) = ransac_fundamental(&pa, &pb, thr_sq, 5000).unwrap();
+                let (fm, mask, _) = magsac(Model::Fundamental, &pa, &pb, thr_sq, 5000).unwrap();
+                assert_eq!(inliers_f(&fm, &pa, &pb, thr_sq).0, mask);
+                for (m, t) in mask.iter().zip(&truth) {
+                    if *t { true_n += 1; if *m { true_kept += 1; } } else { out_n += 1; if *m { out_kept += 1; } }
+                }
+                let rms = |f: &M3| (clean.iter().map(|&(a, b)| sampson_sq(f, a, b)).sum::<f64>() / clean.len() as f64).sqrt();
+                er.push(rms(&fr));
+                em.push(rms(&fm));
+            }
+            let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+            let median = |v: &mut Vec<f64>| { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
+            let (mean_r, mean_m) = (mean(&er), mean(&em));
+            let (med_r, med_m) = (median(&mut er), median(&mut em));
+            let recall = true_kept as f64 / true_n as f64;
+            let leak = out_kept as f64 / out_n as f64;
+            eprintln!("{thr} px: RANSAC median {med_r:.3} mean {mean_r:.3}, MAGSAC++ median {med_m:.3} mean {mean_m:.3}; \
+                recall {recall:.3}, leak {leak:.3}");
+            assert!(recall > 0.9, "kept {:.1} % of true correspondences", recall * 100.0);
+            assert!(leak < 0.1, "kept {:.1} % of outliers", leak * 100.0);
+            assert!(med_m < med_r && mean_m < mean_r, "MAGSAC++ not closer to the true geometry at {thr} px");
+        }
+    }
+
+    // Deterministic: the same putatives give the same model and mask, bit for bit.
+    #[test]
+    fn magsac_is_deterministic() {
+        let mut rng = Lcg(0xd00d);
+        let (pa, pb, _) = noisy_scene(&mut rng, 500, 1.0, 0.5);
+        let a = magsac(Model::Fundamental, &pa, &pb, 4.0, 2000).unwrap();
+        let b = magsac(Model::Fundamental, &pa, &pb, 4.0, 2000).unwrap();
+        assert_eq!(a.1, b.1);
+        assert_eq!(a.2, b.2);
+        for i in 0..3 { for j in 0..3 { assert_eq!(a.0[i][j].to_bits(), b.0[i][j].to_bits()); } }
+    }
+
+    // The H-vs-F label behaves the same under MAGSAC++: a planar pair is explained
+    // by H, a general one is not.
+    #[test]
+    fn magsac_homography_label_matches_ransac() {
+        let (pa, pb) = scene(true);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 1);
+        let f_inliers: f32 = out[10..].iter().sum();
+        assert!(out[9] / f_inliers > 0.9, "planar H/F ratio too low: {} / {f_inliers}", out[9]);
+        let (pa, pb) = scene(false);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 1);
+        let f_inliers: f32 = out[10..].iter().sum();
+        assert!(f_inliers > 40.0, "general F should fit most points: {f_inliers}");
+        assert!(out[9] / f_inliers < 0.8, "general H/F ratio too high: {} / {f_inliers}", out[9]);
+    }
+
+    // The weighted fits with unit weights are the plain fits, bit for bit (the
+    // RANSAC path calls them with None).
+    #[test]
+    fn unit_weights_reproduce_the_plain_fits() {
+        let mut rng = Lcg(0x77);
+        let (pa, pb, _) = noisy_scene(&mut rng, 60, 0.5, 0.0);
+        let ones = vec![1.0; pa.len()];
+        let bits = |m: M3| m.iter().flatten().map(|v| v.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(fundamental_8pt(&pa, &pb).unwrap()), bits(fundamental_8pt_w(&pa, &pb, Some(&ones)).unwrap()));
+        assert_eq!(bits(homography_dlt(&pa, &pb).unwrap()), bits(homography_dlt_w(&pa, &pb, Some(&ones)).unwrap()));
     }
 
     // ── Descriptor matching (GEMM kernel vs naive reference) ─────────────────
@@ -1314,18 +1435,18 @@ mod tests {
     #[test]
     fn h_skip_below_suppresses_homography_on_weak_pairs() {
         let (pa, pb) = scene(true); // planar → strong H
-        let full = verify_matches_hf(&pa, &pb, 2.0, 2000, 0);
+        let full = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0);
         let f_inliers: f32 = full[10..].iter().sum();
         assert!(full[9] > 0.0, "baseline H should be non-zero on a planar pair");
 
         // Floor just above this pair's F-inlier count ⇒ H skipped ⇒ reported 0.
-        let skipped = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32 + 1);
+        let skipped = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32 + 1, 0);
         assert_eq!(skipped[9], 0.0, "H should be skipped below the floor");
         // F side is untouched by the skip.
         assert_eq!(&skipped[10..], &full[10..], "skip must not affect F inliers");
 
         // Floor at/below the count ⇒ H still computed.
-        let kept = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32);
+        let kept = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32, 0);
         assert!(kept[9] > 0.0, "H should run when F inliers meet the floor");
     }
 }

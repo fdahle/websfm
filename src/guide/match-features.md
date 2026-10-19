@@ -226,6 +226,21 @@ than 75° off-axis are left out. Turn it off only to inspect raw matches: every 
 match is then kept, including the wrong ones, and a pair is kept on its raw match count
 alone.
 
+## Estimator
+<!-- param: verifier  default: RANSAC -->
+How the fundamental matrix, and the homography used for the planar-scene check, are
+fitted to the matches. **RANSAC** keeps the model that the most matches fit within the
+threshold, then refits it on those matches. **[MAGSAC++](help:magsac)** draws the same
+samples, but scores each model by a loss that grows smoothly with a match's distance up
+to the threshold, and refines the best one by weighted least squares, so matches close
+to the model count more than those near the threshold. Its geometry depends less on the
+exact threshold. Either way a pair keeps the matches within the threshold of the final
+model, so the inlier counts and the ratio gate mean the same.
+
+MAGSAC++ costs about a fifth more verification time. On South Building and the quarry
+set the two gave the same registered cameras and camera accuracy within run-to-run
+noise, so RANSAC stays the default.
+
 ## RANSAC threshold
 <!-- param: ransacThreshPx  default: 2.0 -->
 The Sampson-distance tolerance for calling a match an inlier during
@@ -244,11 +259,13 @@ wider in image pixels, because that is how coarsely its keypoints were measured 
 the first place. Images detected at full resolution are unaffected.
 
 `1–2 px` suits most imagery. Raise it if matching is rejecting pairs you can see
-overlap; lower it if obviously wrong pairs are being accepted.
+overlap; lower it if obviously wrong pairs are being accepted. With the MAGSAC++
+estimator it is the largest distance a match may have; matches well inside it shape the
+model more than those near it.
 
 ## RANSAC iterations
 <!-- param: maxIters  default: 1000 -->
-How many random minimal samples RANSAC draws while searching for the best
+How many random minimal samples RANSAC (or MAGSAC++) draws while searching for the best
 fundamental matrix. More iterations raise the chance of finding the correct model
 when the inlier ratio is low, at a linear cost in time. The default is ample for
 typical overlap; increase it only for hard pairs with many outliers.
