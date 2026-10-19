@@ -195,6 +195,10 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **A long orthophoto reports its progress.** The progress bar names the block being
+  built, and the log says every 30 seconds or so how many blocks are done, how long
+  each takes and roughly how long is left. A fine orthophoto can take hours, and the
+  log used to stay silent until the end.
 - **Counts read as English.** Log lines, reports and dialogs say "1 image" and
   "3 images" instead of "image(s)", and the verb agrees where it follows.
 - **Georeferencing moved to the Reconstruct tab**, between Sparse and Dense, where it
