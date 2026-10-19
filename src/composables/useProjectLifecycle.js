@@ -375,11 +375,24 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   // Migration between backends. Both directions are a verified tree copy; only the
   // OPFS source is deleted afterwards — files on the user's disk are never removed
   // by websfm, so "move into browser storage" leaves the folder in place.
+  //
+  // The open project is then reopened from its new root. Its stores hold File handles
+  // into the old one (image copies, masks, depth previews, products, LOD files,
+  // reference rasters, the match document): a move to a folder deletes the tree they
+  // point at, and a move back stops writing to it. The copies have the same names, and
+  // the open path is the one place that fetches all of them.
+  async function reopenMoved(id) {
+    if (id !== currentProjectId.value) return
+    log('Reopening the project from its new location', 'info', 'Project')
+    await openProject(id)
+  }
+
   async function moveCurrentProjectToFolder(id = currentProjectId.value) {
     if (!id || refuseWhileBusy('Move project')) return
     await flushProjectWork()
     const dirHandle = await pickDirectory()
     if (!dirHandle) return
+    let moved = false
     await withLoadingOverlay('Moving project to folder…', async () => {
       let res = await moveProjectToFolder(id, dirHandle, { onProgress: fileProgress })
       if (!res.ok && res.needsConfirm
@@ -391,8 +404,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
         res = await moveProjectToFolder(id, dirHandle, { confirmed: true })
       }
       if (res.ok) {
-        // The match document's File handle pointed into the tree that was just removed.
-        await matchesStore.rebindMatchesFile()
+        moved = true
         log(`Project moved to folder "${dirHandle.name}" (${res.files} files)`, 'info', 'Project')
         showToast('Project moved to folder', { detail: dirHandle.name })
       } else {
@@ -400,6 +412,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
         showToast('Could not move project', { detail: res.error, kind: 'error', ms: 6000 })
       }
     })
+    if (moved) await reopenMoved(id)
   }
 
   async function moveCurrentProjectToBrowser(id = currentProjectId.value) {
@@ -411,10 +424,11 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
         + 'and websfm will stop writing to it.',
       confirmLabel: 'Copy',
     }))) return
+    let moved = false
     await withLoadingOverlay('Moving project into browser storage…', async () => {
       const res = await moveProjectToBrowser(id, { onProgress: fileProgress })
       if (res.ok) {
-        await matchesStore.rebindMatchesFile() // read from the browser copy from now on
+        moved = true
         log(`Project moved into browser storage (${res.files} files)`, 'info', 'Project')
         showToast('Project moved into browser storage')
       } else {
@@ -422,6 +436,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
         showToast('Could not move project', { detail: res.error, kind: 'error', ms: 6000 })
       }
     })
+    if (moved) await reopenMoved(id)
   }
 
   // ── Project file (.websfm) ──────────────────────────────────────────────────

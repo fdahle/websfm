@@ -22,6 +22,12 @@ is the project: do not rename, move, or edit its internal files while it is open
 The browser may ask you to reconnect the folder after restart because access permission
 is not always retained.
 
+**Move to folder…** in the project list copies a project from browser storage into a
+folder you choose, checks the copy, and then removes the browser copy. **Move to
+browser storage** copies it back and leaves the folder on disk untouched. Either way, an
+open project is reopened from its new location, so everything it shows is read from
+there.
+
 ## Save project as .websfm
 A `.websfm` file is a portable archive containing source images, features, matches,
 reconstruction, and control. Including cached and derived data makes reopening faster
