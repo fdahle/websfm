@@ -196,6 +196,12 @@ export const WORKFLOW_BLOCKS = [
 export const WORKFLOW_BLOCK_BY_ID = new Map(WORKFLOW_BLOCKS.map((b) => [b.id, b]))
 export const WORKFLOW_CATEGORIES = [...new Set(WORKFLOW_BLOCKS.map((b) => b.category))]
 
+// Blocks that read image pixels, so a run containing one first checks that every
+// image's file can still be read (useImagesStore.probeImageSources).
+export const PIXEL_BLOCKS = new Set([
+  'auto-mask', 'detect-fiducials', 'detect-features', 'compute-depth', 'dense', 'gen-ortho', 'texture-mesh',
+])
+
 // The settings keys a block type accepts: its defaults, its fields, every detector's
 // schema (a detector switch swaps them) and every preset delta. Normalisation keeps
 // exactly these, so the recipe text can reject anything else instead of dropping it.
