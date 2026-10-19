@@ -16,6 +16,10 @@ with **Depth Maps**, **Dense Model**, **Build Mesh** and **Texture Mesh**; its *
 to** setting reduces the mesh first (see [Texture a Mesh](guide:texture-mesh)). Select a block to edit its
 settings in the inspector, which appears to the right or below the sequence on
 smaller windows. **Guided**, **Standard**, and **Expert** control the settings detail.
+The Match Features block's **Pairing** starts on **auto**: each run picks what the
+Match Features dialog would open on for the project then (Preselect with camera
+positions, Sequential for video frames, otherwise Exhaustive) and logs its choice, so
+one workflow suits several kinds of project.
 
 Drag blocks to reorder them, or use their **Move up** and **Move down** buttons.
 Each block can be disabled, duplicated, or removed. **Recipe** shows the same

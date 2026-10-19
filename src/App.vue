@@ -226,7 +226,7 @@ const {
   workflowState, workflowRunner, workflowRunning, workflowPause, workflowStatuses, workflowCurrentBlockId,
   addNewWorkflow, onWorkflowUpdate, closeWorkflowBuilder, onWorkflowRun,
 } = useWorkflowWiring({
-  ready: { kpImageCount, sparseReady, cloudReady, denseReady, meshReady, demReady, orthoReady },
+  ready: { kpImageCount, sparseReady, cloudReady, denseReady, meshReady, demReady, orthoReady, posedImageCount },
   pipeline: { runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify, runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, cancelRun },
   openInteractive: (id, value) => handleCommand(id, value),
 })
