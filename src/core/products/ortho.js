@@ -275,6 +275,12 @@ export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {
 // a visibility test, so the centre needn't be seen). Both are GRID quantities — a tiled
 // run computes them once for the whole ortho, never per block, which is what keeps
 // its cells bit-identical to a single pass.
+// Depth-map pixels per ortho cell for map m at height zMid — what the photo loader's
+// decode scale follows (workers/ops/products.js makePhotoLoader), for a preflight.
+export function orthoMapPxPerCell(geom, toSfm, zMid) {
+  return gridProjection(geom, toSfm, zMid + 1, zMid, zMid).mapPxPerCell
+}
+
 function gridProjection({ width, height, gsd, originX, originY }, toSfm, zLo, zHi, zMid) {
   const affine = zLo <= zHi ? affineToSfm(toSfm,
     [originX, originY - height * gsd, zLo], [originX + width * gsd, originY, zHi]) : null

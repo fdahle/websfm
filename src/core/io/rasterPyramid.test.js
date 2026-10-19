@@ -19,6 +19,12 @@ describe('planPyramid', () => {
 })
 
 describe('levelFor', () => {
+  it('with slack, takes a level a request lies just above', () => {
+    const p = planPyramid(65714, 32857)
+    expect(levelFor(p, 0.2501)).toBe(1)
+    expect(levelFor(p, 0.2501, { slack: 0.02 })).toBe(2)
+    expect(levelFor(p, 0.26, { slack: 0.02 })).toBe(1)
+  })
   const p = planPyramid(65714, 32857)
   it('picks the coarsest level still at or above the requested scale', () => {
     expect(levelFor(p, 1)).toBe(0)
