@@ -1,4 +1,5 @@
 import { linearCrsUnit } from '../core/crs.js'
+import { shiftRange } from '../core/verticalDatum.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 // Shared assembly for the Quality Report hub (PLAN-eval-quality-hub). Marshals the
 // reactive stores into the PLAIN snapshot the pure `core/eval/*` fns consume, so the
@@ -141,18 +142,20 @@ export function useQualityReport() {
   // demCompare.js), plus what the reader needs to trust the sign and the units.
   // Throws with a user-facing reason (model-frame DEM, unreadable reference).
   // → null without a DEM or that raster, else { ...comparison, demUnit, refUnit,
-  //   reference: { id, name, datum, accuracy, vOffset }, warnings: string[] }
+  //   reference: { id, name, datum, accuracy, vOffset, conversion }, warnings: string[] }
   function demReferenceComparison(rasterId) {
     const dem = recon.dem
     const meta = external.rasterById(rasterId)
     if (!dem || !meta || meta.kind !== 'dem') return Promise.resolve(null)
     demRefLastRasterId = rasterId
     const key = [dem.createdAt, dem.width, dem.height, dem.crs, meta.id, meta.crs,
-      meta.vOffset || 0, meta.planeStyleStamp ?? ''].join('|')
+      meta.vOffset || 0, meta.planeStyleStamp ?? '', dem.verticalDatum ?? '', meta.verticalDatum ?? ''].join('|')
     if (demRefCache?.key === key) return demRefCache.promise
     const promise = (async () => {
-      // Strict: a reference hole is missing coverage, not a neighbour's height.
-      const { sample } = await external.referenceDemSampler(meta.id, dem.crs ?? null, { strict: true })
+      // Strict: a reference hole is missing coverage, not a neighbour's height. In
+      // the DEM's vertical datum when the reference's converts to it.
+      const { sample, conversion } = await external.referenceDemSampler(meta.id, dem.crs ?? null,
+        { strict: true, datum: dem.verticalDatum ?? null })
       const cmp = await compareDemToReference(dem, sample)
       const demUnit = rasterUnits(dem).vertical
       const refUnit = rasterUnits(meta).vertical
@@ -163,15 +166,23 @@ export function useQualityReport() {
       if (known(demUnit) && known(refUnit) && demUnit !== refUnit) {
         warnings.push(`The DEM's heights are in ${demUnit} and the reference's in ${refUnit} — the differences mix units.`)
       }
-      if (!meta.verticalDatum || meta.verticalDatum === 'unknown') {
+      const demDatum = dem.verticalDatum ?? 'unknown', refDatum = meta.verticalDatum || 'unknown'
+      // A DEM's datum is unknown unless its control declared one (most camera-GPS
+      // fits), so only the reference's missing declaration is worth a warning.
+      if (refDatum === 'unknown') {
         warnings.push('The reference DEM declares no vertical datum: a constant bias may be a datum '
           + 'offset (ellipsoidal vs geoid heights differ by tens of metres) rather than an error.')
+      } else if (demDatum !== 'unknown' && !conversion && demDatum !== refDatum) {
+        warnings.push(`The DEM's heights are ${demDatum} and the reference's ${refDatum}, which cannot be converted: `
+          + 'a constant bias may be that datum offset.')
       }
       if (!meta.crs) warnings.push('The reference DEM declares no CRS; it is read as if it were in the DEM\'s frame.')
       return {
         ...cmp, demUnit, refUnit, warnings,
         reference: { id: meta.id, name: meta.name, datum: meta.verticalDatum || 'unknown',
-          accuracy: meta.verticalAccuracy ?? null, vOffset: meta.vOffset || 0 },
+          accuracy: meta.verticalAccuracy ?? null, vOffset: meta.vOffset || 0,
+          // { from, to, min, max }: the geoid separation added to the reference heights.
+          conversion: conversion && Number.isFinite(conversion.min) ? { ...conversion } : null },
       }
     })()
     demRefCache = { key, promise }
@@ -321,7 +332,9 @@ export function useQualityReport() {
             tiles: demReferenceTiles(cmp),
             note: ['ΔZ = DEM − reference at each compared DEM cell'
               + (cmp.step > 1 ? ` (every ${cmp.step}th cell each way)` : '')
-              + `; reference vertical datum: ${cmp.reference.datum}.`, ...cmp.warnings].join(' '),
+              + `; reference vertical datum: ${cmp.reference.datum}`
+              + (cmp.reference.conversion ? `, converted to the DEM's ${cmp.reference.conversion.to} by adding the geoid `
+                + `separation (${shiftRange(cmp.reference.conversion)})` : '') + '.', ...cmp.warnings].join(' '),
           })
         }
       } catch (err) {

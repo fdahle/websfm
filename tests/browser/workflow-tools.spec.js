@@ -255,6 +255,38 @@ test('a GCP picked off a reference ortho takes X/Y in the project CRS, σ from t
   expect(moved.z).toBeCloseTo(50 + (moved.X - 1000) / 2 - 0.5, 4)
 })
 
+test('reference DEM heights convert between geoid and ellipsoid with the shipped grids', async ({ page }) => {
+  await page.goto(harness)
+  const r = await page.evaluate(async () => {
+    const { writeGeoTiff, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
+    const { transform, ensureProjection } = await import('/src/core/crs.js')
+    const { external, projects } = window.workflowTools
+    projects.projects = [{ id: 'geoid', crs: 'EPSG:3031' }]; projects.currentProjectId = 'geoid'
+    await ensureProjection('EPSG:3031')
+    // A flat 100 m Copernicus-style (EGM2008) DEM around McMurdo, 77.85° S 166.67° E.
+    const [X, Y] = transform([166.67, -77.85], 'EPSG:4326', 'EPSG:3031')
+    const z = new Float32Array(64 * 64).fill(100)
+    const dem = await external.importRaster(new File([writeGeoTiff({ width: 64, height: 64, samples: [{ bits: 32, format: 3 }], photometric: 1,
+      data: new Uint8Array(z.buffer), pixelScale: [30, 30, 0], tiepoint: [0, 0, 0, X - 960, Y + 960, 0], geoKeys: geoKeysForEpsg(3031, false) })], 'cop30.tif'), { forceKind: 'dem' })
+    await external.setRasterAccuracy(dem.id, { verticalDatum: 'geoid:EGM2008', verticalAccuracy: 4 })
+    const as = (datum) => external.sampleReferenceDem(X, Y, { rasterId: dem.id, datum })
+    const sampler = await external.referenceDemSampler(dem.id, 'EPSG:3031', { datum: 'ellipsoidal' })
+    return { same: await as('geoid:EGM2008'), ell: await as('ellipsoidal'), egm96: await as('geoid:EGM96'), local: await as('local'),
+      batch: sampler.sample(X, Y), conversion: sampler.conversion }
+  })
+  expect(r.same).toMatchObject({ z: 100, datum: 'geoid:EGM2008' })
+  // h = H + N: N(EGM2008) = −52.47 m there (PROJ), so h ≈ 47.5 m.
+  expect(r.ell).toMatchObject({ datum: 'ellipsoidal', sourceDatum: 'geoid:EGM2008', accuracy: 4 })
+  expect(r.ell.z).toBeCloseTo(100 - 52.47, 1)
+  // EGM96 sits 0.91 m lower there than EGM2008.
+  expect(r.egm96.z).toBeCloseTo(100 - 52.47 + 53.38, 1)
+  // A local datum cannot be converted: the DEM's own height and datum come back.
+  expect(r.local).toMatchObject({ z: 100, datum: 'geoid:EGM2008' })
+  expect(r.batch).toBeCloseTo(r.ell.z, 6)
+  expect(r.conversion).toMatchObject({ from: 'geoid:EGM2008', to: 'ellipsoidal' })
+  expect(r.conversion.min).toBeCloseTo(-52.47, 1)
+})
+
 test('bounded SIFT batch preserves serial results and records throughput', async ({ page }) => {
   test.setTimeout(60000)
   await page.goto(harness)

@@ -135,14 +135,16 @@ test('Point Cloud ▾ transforms and ICP-aligns a cloud, and Measure ▾ section
   expect(errors).toEqual([])
 })
 
-test('Evaluate ▸ DEM vs Reference compares the DEM with a reference DEM in another CRS', async ({ page }) => {
+// Unknown DEM datum: compared as is. An ellipsoidal DEM (control in ellipsoidal
+// heights): the EGM2008 reference is converted to it, moving ΔZ by −N there.
+for (const demDatum of [null, 'ellipsoidal']) test(`Evaluate ▸ DEM vs Reference compares the DEM with a reference DEM in another CRS${demDatum ? `, converting to the DEM's ${demDatum} heights` : ''}`, async ({ page }) => {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await createProject(page)
   // A tilted-plane DEM in UTM 33N, and the same plane 0.5 m lower as a reference
   // DEM in EPSG:4326 covering only the DEM's western half — the comparison must
   // reproject every query into degrees and find a +0.5 m bias over ~50 % overlap.
-  await page.evaluate(async () => {
+  await page.evaluate(async (demDatum) => {
     const { ensureProjection, transform } = await import('/src/core/crs.js')
     const { createFlatRasterSource } = await import('/src/core/io/rasterSource.js')
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
@@ -153,7 +155,8 @@ test('Evaluate ▸ DEM vs Reference compares the DEM with a reference DEM in ano
     const data = new Float32Array(W * W), mask = new Uint8Array(W * W).fill(1)
     for (let r = 0; r < W; r++) for (let c = 0; c < W; c++) data[r * W + c] = plane(X0 + c + 0.5, Y0 - r - 0.5)
     useReconstructionStore().dem = { width: W, height: W, gsd: 1, originX: X0, originY: Y0, data, mask,
-      zMin: Math.min(...data), zMax: Math.max(...data), unit: 'm', crs: 'EPSG:32633', name: 'DEM', createdAt: 1 }
+      zMin: Math.min(...data), zMax: Math.max(...data), unit: 'm', crs: 'EPSG:32633', name: 'DEM', createdAt: 1,
+      ...(demDatum ? { verticalDatum: demDatum } : {}) }
 
     const [lon0, lat0] = transform([X0 - 10, Y0 - W - 10], 'EPSG:32633', 'EPSG:4326')
     const [lon1, lat1] = transform([X0 + 30, Y0 + 10], 'EPSG:32633', 'EPSG:4326')
@@ -165,18 +168,28 @@ test('Evaluate ▸ DEM vs Reference compares the DEM with a reference DEM in ano
     }
     const meta = { id: 'ext-ref', name: 'Reference', kind: 'dem', width: N, height: N, bands: 1,
       crs: 'EPSG:4326', geoTransform: { originX: lon0, originY: lat1, scaleX: sx, scaleY: -sy },
-      nodata: null, verticalDatum: 'EGM2008', verticalAccuracy: 0.2 }
+      nodata: null, verticalDatum: 'geoid:EGM2008', verticalAccuracy: 0.2 }
     const external = useExternalStore()
     external.rasters.push(meta)
     external.sources = new Map([[meta.id, createFlatRasterSource(meta, ref)]])
-  })
+  }, demDatum)
 
   await page.getByRole('button', { name: 'Evaluate', exact: true }).click()
   await page.locator('.ribbon').getByRole('button', { name: /DEM vs\s*Reference/ }).click()
   const report = page.getByRole('dialog', { name: 'Quality Report', exact: true })
   const tile = (label) => report.locator('.tile').filter({ hasText: label }).locator('.tile-value')
-  await expect(tile('Median ΔZ')).toContainText('+0.500')
-  await expect(tile('NMAD')).toContainText('0.000')
+  if (!demDatum) {
+    await expect(tile('Median ΔZ')).toContainText('+0.500')
+  } else {
+    // h = H + N, N(EGM2008) ≈ 44.9 m near 41.5° N 15° E: the reference rises by N.
+    const meta = report.locator('.ref-meta')
+    await expect(meta).toContainText('converted to ellipsoidal')
+    const shift = parseFloat((await meta.textContent()).match(/\(([+−-][\d.]+)/)[1].replace('−', '-'))
+    expect(shift).toBeGreaterThan(40); expect(shift).toBeLessThan(50)
+    const median = parseFloat((await tile('Median ΔZ').textContent()).replace('−', '-'))
+    expect(median).toBeCloseTo(0.5 - shift, 1)
+  }
+  await expect(tile('NMAD')).toContainText('0.0')
   const overlap = parseFloat(await tile('Overlap').textContent())
   expect(overlap).toBeGreaterThan(40)
   expect(overlap).toBeLessThan(60)

@@ -99,6 +99,8 @@ export function createProductRuns({
         ...grid, createdAt: Date.now(), points: groundOnly ? 'ground' : 'all',
         name: dem.value?.name || 'DEM',
         frameStamp: frameStampOf(resolved),
+        // Heights are in the georeference's vertical datum (georeferencing.js).
+        ...(resolved.source === 'georef' ? { verticalDatum: resolved.verticalDatum } : {}),
       })
       // A new DEM invalidates an ortho BUILT ON IT — but not one built over the
       // mesh/plane surface, which this run didn't touch. (An ortho with no

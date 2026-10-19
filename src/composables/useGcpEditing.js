@@ -7,6 +7,8 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useImageViewSettings } from './useImageViewSettings.js'
 import { useLog } from './useLog.js'
+import { heightShifter } from '../core/verticalDatum.js'
+import { ensureProjection, transform } from '../core/crs.js'
 
 // Ground control in the views, lifted out of App.vue: marking GCPs in an image
 // (with the model's guides and the per-mark diagnostics), placing them on the
@@ -33,7 +35,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // GCP's project-CRS position into the raster's native CRS (the raster itself is
   // never warped) and carries the raster's declared vertical accuracy back with
   // the value, so a filled Z can never claim an accuracy it doesn't have.
-  const sampleReferenceDem = (x, y) => externalStore.sampleReferenceDem(x, y)
+  const sampleReferenceDem = (x, y, opts) => externalStore.sampleReferenceDem(x, y, opts)
 
   async function fillGcpZFromReferenceDem() {
     const res = await gcpsStore.fillZFromReferenceDem(sampleReferenceDem)
@@ -42,6 +44,24 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
 
   async function checkGcpZAgainstReferenceDem() {
     await gcpsStore.checkZAgainstReferenceDem(sampleReferenceDem)
+  }
+
+  // GCP table ▸ Convert heights to…: every point's Z re-expressed in `datum`, the
+  // geoid separation taken at its own position. Heights are control, so refit.
+  async function convertGcpHeightsTo(datum) {
+    const crs = currentCrs.value
+    const shifters = new Map()
+    const res = await gcpsStore.convertGcpHeights(datum, async (g, from) => {
+      if (!shifters.has(from)) shifters.set(from, await heightShifter(from, datum))
+      const shift = shifters.get(from)
+      if (!shift || !Number.isFinite(g.x) || !Number.isFinite(g.y)) return null
+      try {
+        if (crs !== 'EPSG:4326') await ensureProjection(crs)
+        return shift(...(crs === 'EPSG:4326' ? [g.x, g.y] : transform([g.x, g.y], crs, 'EPSG:4326')))
+      } catch { return null }
+    })
+    if (res.converted && reconstructionStore.sparseCameras.size) await georeference()
+    refreshGcpReport()
   }
 
   // Per-GCP accuracy report (triangulated residual vs. surveyed position + per-
@@ -198,8 +218,10 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // or the selected one moved there (ProductViewer pick-gcp).
   async function pickGcpFromReference(rasterId, { col, row, displayFactor, gcpId = null }) {
     let pick
+    // A moved GCP keeps its declared height datum when the DEM's converts to it.
+    const datum = gcpId ? gcps.value.find((g) => g.id === gcpId)?.verticalDatum : null
     try {
-      pick = await externalStore.pickGroundControl(rasterId, col, row, { displayFactor })
+      pick = await externalStore.pickGroundControl(rasterId, col, row, { displayFactor, datum })
     } catch (err) {
       log(`GCP from reference: ${err.message}`, 'warn', 'GCP')
       return
@@ -319,7 +341,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
 
   return {
     gcpReport, refreshGcpReport, selectedGcpId, selectGcp, changeGcpRole,
-    fillGcpZFromReferenceDem, checkGcpZAgainstReferenceDem,
+    fillGcpZFromReferenceDem, checkGcpZAgainstReferenceDem, convertGcpHeightsTo,
     assignGcpObservation, addGcpAtObservation, setGcpGroundPosition, addGcpAtCoord, pickGcpFromReference,
     startMarkingPoint, exitGcpEdit, jumpToImage, openGcpView, removeGcpAndCloseTab, removeGcpObservation,
     activeImageGcps, activeImageGcpGuides, allGcpsBrief,

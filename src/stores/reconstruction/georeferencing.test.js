@@ -69,3 +69,21 @@ it('falls back to the images\' EXIF GPS when no positions are materialised yet',
   expect(api.crsSuggestion.value.code).toBe('EPSG:32734')
   scope.stop()
 })
+
+it('records the vertical datum the control shares, and unknown when it is mixed', async () => {
+  const fit = async (datums) => {
+    const scope = effectScope()
+    const poses = ref([{ imageId: 'a', x: 0, y: 0, z: 0 }, { imageId: 'b', x: 2, y: 0, z: 0 }, { imageId: 'c', x: 0, y: 2, z: 0 }]
+      .map((p, i) => ({ ...p, verticalDatum: datums[i] })))
+    const api = scope.run(() => createGeoreferencing({ sparseCameras: ref(new Map([['a', { R, t: [0,0,0] }], ['b', { R, t: [-1,0,0] }], ['c', { R, t: [0,-1,0] }]])),
+      images: ref(['a','b','c'].map(id => ({ id, uuid: id }))), georef: ref(null), healthDirty: ref(0),
+      poses: () => poses.value, gcps: () => [], currentCrs: () => 'EPSG:3031',
+      modelStamp: () => 'm', save: vi.fn(), log: vi.fn() }))
+    const g = await api.georeference()
+    scope.stop()
+    return g.verticalDatum
+  }
+  expect(await fit(['ellipsoidal', 'ellipsoidal', 'ellipsoidal'])).toBe('ellipsoidal')
+  expect(await fit(['ellipsoidal', 'geoid:EGM96', 'ellipsoidal'])).toBe('unknown')
+  expect(await fit([undefined, undefined, undefined])).toBe('unknown')
+})

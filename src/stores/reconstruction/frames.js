@@ -79,6 +79,7 @@ export function createFrameResolver({
       return {
         frameSpec: { kind: 'similarity', ...g.sim, crs: g.crs, ...georefUnits(g.crs) },
         unit: georefUnits(g.crs).unit, scale: metricScale(g), source: 'georef', crs: g.crs, stamp,
+        verticalDatum: g.verticalDatum ?? 'unknown',
       }
     }
 

@@ -50,6 +50,8 @@ longer offered, since that tab's old code no longer matches the new version.
   CRS, and EPSG codes in imported files, projects, GCPs and poses. Only a code newer
   than the catalog is looked up on epsg.io. Offline, that fails with a message; once
   looked up, it is remembered.
+  The geoid grids that convert between [vertical datums](help:vertical-datum) are
+  part of the app and work offline too.
 
 ## The 2D map offline
 Map tiles are kept only for areas you have already viewed online, and only at the

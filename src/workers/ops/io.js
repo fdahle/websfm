@@ -459,15 +459,16 @@ function readCrs(geoKeys) {
   return `EPSG:${code}`
 }
 
-// VerticalCSTypeGeoKey → a label we can warn on. The EGM codes are the ones that
-// actually show up; anything else declared is recorded verbatim.
+// VerticalCSTypeGeoKey → a datum of core/verticalDatum.js. The EGM codes are the
+// ones that actually show up; any other declared vertical CS is a national or
+// local height system: orthometric, but not one we can convert.
 function readVerticalDatum(geoKeys) {
   const v = geoKeys.VerticalCSTypeGeoKey ?? geoKeys.VerticalDatumGeoKey
   if (v == null) return 'unknown'
   if (v === 5030 || v === 4979 || v === 7030) return 'ellipsoidal'
   if (v === 5773) return 'geoid:EGM96'
   if (v === 3855) return 'geoid:EGM2008'
-  return `epsg:${v}`
+  return 'orthometric'
 }
 
 // ~10k decimated values from one band (band 0 by default) for the classifier's
