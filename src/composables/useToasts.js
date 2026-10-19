@@ -23,12 +23,20 @@ export function dismissToast(id) {
   toasts.value.splice(i, 1)
 }
 
-// kind: 'success' (default) | 'error'
-export function showToast(title, { detail = '', kind = 'success', ms = DEFAULT_MS } = {}) {
+// kind: 'success' (default) | 'error'. `onClick` runs when the toast is clicked,
+// before it is dismissed (an error toast opens the console); `action` is the text
+// that says so.
+export function showToast(title, { detail = '', kind = 'success', ms = DEFAULT_MS, onClick = null, action = '' } = {}) {
   const id = nextId++
   const timer = setTimeout(() => dismissToast(id), ms)
-  toasts.value.push({ id, title, detail, kind, timer })
+  toasts.value.push({ id, title, detail, kind, timer, onClick, action })
   return id
+}
+
+export function clickToast(id) {
+  const toast = toasts.value.find((t) => t.id === id)
+  toast?.onClick?.()
+  dismissToast(id)
 }
 
 // The one clipboard entry point. Every "Copy …" menu action goes through this so
