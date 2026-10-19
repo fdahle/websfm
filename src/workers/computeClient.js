@@ -216,7 +216,11 @@ export const refineSparse = (packed, settings, constraints = {}) => call('refine
 // Tools ▸ Model ▾ ▸ Optimize cameras (core/sfm/gradualSelection.js optimizeCameras).
 export const optimizeSparse = (packed, settings, constraints = {}) => call('optimizeSparse', [packed, settings, constraints])
 export const readRasterWindow = (file, options = {}) => call('readRasterWindow', [{ file, ...options }])
-export const findReferenceMatches = (url, reference) => call('findReferenceMatches', [url, reference])
+// Find GCPs (workers/ops/referenceGcps.js): the ortho's COG / preview and the
+// reference's original File go over as handles; the worker reads windows itself.
+export const findReferenceMatches = (request, { onLog } = {}) => call('findReferenceMatches', [request], {
+  onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+})
 
 // SAM2 smart-mask selection (F12). All three ops pin worker 0 so the heavy ORT
 // encoder/decoder sessions load once AND the per-uuid embedding cache (held in
