@@ -237,7 +237,14 @@ function updateHover(x, y) {
   const world = pixelToWorld(d, px + 0.5, py + 0.5)
   const idx = py * p.width + px
 
-  if (props.kind === 'dem') {
+  if (props.kind === 'dem' && p.cog && p.fullGsd > 0 && world) {
+    // A DEM past one plane (SAT-3): the full-resolution cell under the cursor, read
+    // from its COG — the plane is only the overview.
+    const wx = pixelToWorld(d, (x - tx.value) / scale.value, (y - ty.value) / scale.value)
+    const col = Math.floor((wx.x - p.originX) / p.fullGsd), row = Math.floor((p.originY - wx.y) / p.fullGsd)
+    if (col < 0 || row < 0 || col >= p.fullWidth || row >= p.fullHeight) { hover.value = null; return }
+    readHeight(col, row, p)
+  } else if (props.kind === 'dem') {
     // The cell's own value, never a neighbour's: a hole reads "no data". A reference
     // DEM's declared vertical offset applies here exactly as on the map readout and
     // in the measurements (useExternalStore.sampleReferenceDem), so one cell reads
@@ -253,6 +260,32 @@ function updateHover(x, y) {
     const o = idx * 4
     hover.value = { px, py, r: rgba[o + 3] > 0 ? rgba[o] : null, g: rgba[o + 1], b: rgba[o + 2] }
   }
+}
+
+// A block-built DEM's height under the cursor: a 1×1 window of its COG, read like the
+// colour below (one read in flight, the newest cell next, a stale answer dropped).
+let heightBusy = false, heightWanted = null
+function readHeight(col, row, p) {
+  if (hover.value?.px === col && hover.value?.py === row) return
+  const fx = p.originX + (col + 0.5) * p.fullGsd, fy = p.originY - (row + 0.5) * p.fullGsd
+  hover.value = { px: col, py: row, fx, fy, z: null, pending: true }
+  heightWanted = { col, row, cog: p.cog, vOffset: p.vOffset || 0 }
+  if (!heightBusy) pumpHeight()
+}
+async function pumpHeight() {
+  heightBusy = true
+  while (heightWanted) {
+    const { col, row, cog, vOffset } = heightWanted
+    heightWanted = null
+    let z = null
+    try {
+      const w = await readRasterWindow(cog, { rect: { col, row, width: 1, height: 1 }, bands: [0] })
+      const v = w?.channels?.[0]?.[0]
+      z = Number.isFinite(v) ? v + vOffset : null
+    } catch { z = null }
+    if (hover.value?.px === col && hover.value?.py === row) hover.value = { ...hover.value, z, pending: false }
+  }
+  heightBusy = false
 }
 
 // The colour under the cursor, read as a 1×1 window off the raster's file (an async
@@ -419,7 +452,7 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
           <span class="coord">Y&nbsp;{{ fmt(hover.fy, 6) }}</span>
           <span class="sep">|</span>
           <span class="value" :class="{ dim: hover.z == null }">
-            Z&nbsp;{{ hover.z == null ? 'no data' : `${fmt(hover.z, 5)} ${units.vertical}` }}
+            Z&nbsp;{{ hover.pending ? '…' : hover.z == null ? 'no data' : `${fmt(hover.z, 5)} ${units.vertical}` }}
           </span>
         </template>
         <template v-else>
@@ -437,10 +470,11 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
       <span class="spacer"></span>
 
       <template v-if="product">
-        <span class="meta">{{ product.width }}×{{ product.height }}</span>
-        <template v-if="gsdOf != null">
+        <!-- A DEM past one plane: its full grid, not the overview the view is laid out on. -->
+        <span class="meta">{{ product.fullWidth ?? product.width }}×{{ product.fullHeight ?? product.height }}</span>
+        <template v-if="(product.fullGsd ?? gsdOf) != null">
           <span class="sep">|</span>
-          <span class="meta">GSD {{ fmt(gsdOf) }} {{ units.horizontal }}/px</span>
+          <span class="meta">GSD {{ fmt(product.fullGsd ?? gsdOf) }} {{ units.horizontal }}/px</span>
         </template>
         <template v-if="product.crs">
           <span class="sep">|</span>

@@ -77,3 +77,39 @@ test('a DEM with a COG saves, reopens and re-saves without rewriting the COG', a
   })
   expect(out).toEqual({ savedBytes: 3000, sameFile: true, plane: [1, 2], full: [4, 2], name: 'Renamed', cogSize: 3000, first: 7 })
 })
+
+// SAT-3 D4 (readout): the DEM tab of a block-built DEM reads the height under the
+// cursor from the full-resolution COG, at full-resolution cells.
+test('the DEM tab reads a block-built DEM\'s full-resolution height under the cursor', async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1300, height: 850 })
+  await page.addInitScript(() => localStorage.setItem('consoleOpen', 'false'))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await page.evaluate(async () => {
+    const { makeProductsOps } = await import('/src/workers/ops/products.js')
+    const W = 5000, H = 1200, n = W * H
+    const pos = new Float64Array(3 * n)
+    let i = 0
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { pos[i++] = x; pos[i++] = y; pos[i++] = 100 + 0.01 * x - 0.02 * y }
+    const { result } = await makeProductsOps({}).generateDem([{ points: { pos, count: n }, cameras: [],
+      frame: { origin: [0, 0, 0], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1], crs: 'local', unit: 'm' },
+      settings: { gsd: 1, aggregate: 'mean', fillMethod: 'none', extent: 'all', memBudgetBytes: 2 ** 31 } }], { emit: () => {} })
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    useReconstructionStore().dem = { ...result, createdAt: 1, name: 'DEM', previewUrl: URL.createObjectURL(result.previewBlob) }
+    document.querySelector('#app').__vue_app__._instance.setupState.openProductTab('dem', 'DEM')
+  })
+  await expect(page.getByText('5000×1200')).toBeVisible()
+  const view = page.locator('.product-viewer').first()
+  const box = await view.boundingBox()
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5)
+  const readout = async () => (await page.locator('.coord, .value').allTextContents()).join(' ').replace(/\s+/g, ' ')
+  await expect.poll(readout).toMatch(/Z [\d.]+ m/)
+  const text = await readout()
+  const col = Number(text.match(/col (\d+)/)[1]), row = Number(text.match(/row (\d+)/)[1])
+  const z = Number(text.match(/Z ([\d.]+) m/)[1])
+  expect(col).toBeGreaterThan(2500) // past the 2,500-wide overview: a full-resolution index
+  // The cell's one point: x = col, y = 1199 − row (the grid's origin is the corner point).
+  expect(z).toBeCloseTo(100 + 0.01 * col - 0.02 * (1199 - row), 2)
+})
