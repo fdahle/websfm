@@ -6,6 +6,7 @@ import { rasterToPng } from '../rasterPreview.js'
 import { frameFromSpec, describeFrame } from '../../core/products/frameSpec.js'
 import { rasterizeDem, coreExtent } from '../../core/products/dem.js'
 import { orthorectifyTiled, orthoTiledWorkingBytes, ORTHO_BLOCK, MAX_SEAM_CELLS } from '../../core/products/ortho.js'
+import { GAIN_MIN, GAIN_MAX } from '../../core/products/colourGains.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import { describeOrthoStats } from '../../core/eval/orthoStats.js'
 import { meshSurface, planeSurface, resampledGeometry } from '../../core/products/surface.js'
@@ -72,6 +73,16 @@ const TIFF_LIMIT = 0xffffffff
 // A clip window is read whole and copied once (the clipped output): 8,192² RGBA is
 // 256 MB each, and the clip is written as one baseline GeoTIFF.
 const MAX_CLIP_CELLS = 8192 * 8192
+
+// Cells whose source label differs from their right or lower neighbour's, in magenta.
+function paintSeams(rgba, labels, w, h) {
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const i = r * w + c, l = labels[i]
+    if (l === 0xffff) continue
+    const right = c + 1 < w ? labels[i + 1] : l, down = r + 1 < h ? labels[i + w] : l
+    if ((right !== l && right !== 0xffff) || (down !== l && down !== 0xffff)) rgba.set([255, 0, 255, 255], 4 * i)
+  }
+}
 
 // One tile's zlib stream, kept as a Blob part (off the heap; assembleCog takes parts).
 async function deflateTile(bytes) {
@@ -289,7 +300,7 @@ export function makeProductsOps({ rasterize } = {}) {
     // the budget leaves after the first two is the map/photo cache.
     const { width, height } = geom
     const blockBytes = orthoTiledWorkingBytes({ width, height, blend: settings.blend, fillRadius: settings.fillRadius ?? 2,
-      seamWidth: settings.seamWidth ?? 0 })
+      seamWidth: settings.seamWidth ?? 0, seamline: settings.seamline, seamBlend: settings.seamBlend })
     const pyramidBytes = Math.ceil(width / 8) * Math.ceil(height / 8) * 4 + 2048 * 2048 * 4
     // A map's planes are 23 B/px (depth, cost, rgb, normals).
     const photoOf = new Map((input.images ?? []).map((im) => [im.uuid, im]))
@@ -316,16 +327,22 @@ export function makeProductsOps({ rasterize } = {}) {
     // Each map's planes and source photo are cached across the blocks that see it.
     const loadMap = streamed ? (i) => readDepthFiles(maps[i]) : async (i) => maps[i]
     const loadImage = makePhotoLoader(input.images, rasterize, emit)
-    // The mosaic's gain fit reads every photo once more, coarse (a gain needs means,
-    // not detail); its own loader keeps the decode figures below about the colour pass.
-    const loadStatsImage = settings.blend === 'mosaic' && settings.colourBalance
+    // The mosaic's gain fit and graph-cut survey read every photo once more, coarse (a
+    // gain needs means, a coarse seam grid no detail); their own loader keeps the decode
+    // figures below about the colour pass.
+    const loadStatsImage = settings.blend === 'mosaic' && (settings.colourBalance || settings.seamline === 'graphcut')
       ? makePhotoLoader(input.images, rasterize, emit) : null
     emit('progress', [0, 1, 'Orthorectifying…'])
     const res = await orthorectifyTiled(built.grid, geom, maps, loadMap, frame.toSfm,
       { ...settings, blockSize: ORTHO_BLOCK, cacheBytes, mapsResident: !streamed }, {
         loadImage, loadStatsImage,
         onProgress: (done, total) => emit('progress', [done, total, 'Orthorectifying…', 0.95 * done / total]),
-        onBlock: (b) => builder.addBlock({ col0: b.col0, row0: b.row0, width: b.width, height: b.height, data: b.rgba }),
+        onBlock: (b) => {
+          // `debugSeams` (bench only, not in the dialog): paint the seams magenta, so
+          // side-by-sides show where each variant put them.
+          if (settings.debugSeams && b.labels) paintSeams(b.rgba, b.labels, b.width, b.height)
+          return builder.addBlock({ col0: b.col0, row0: b.row0, width: b.width, height: b.height, data: b.rgba })
+        },
       })
     emit('progress', [1, 1, 'Writing the GeoTIFF…', 0.96])
     const { parts, preview } = await builder.finish()
@@ -352,20 +369,33 @@ export function makeProductsOps({ rasterize } = {}) {
     // The ortho's quality figures travel with it (its run record): sharpness, and
     // with a source label per cell, how visible the seams between images are.
     if (res.mosaic) {
-      const { seamCells, smoothPasses, balance } = res.mosaic
-      const seams = seamCells
-        ? `feathered over ${seamCells} cell(s) (${settings.seamWidth}% of the short side${seamCells === MAX_SEAM_CELLS ? ', capped' : ''})`
-        : 'hard (no feathering)'
-      emit('log', [`Ortho: mosaic — each cell from its most nadir view (finest foreshortened footprint), `
-        + `labels smoothed by ${smoothPasses} majority pass(es); seams ${seams}`, 'info', 'Products'])
+      const { seamline, seamBlend, seamCells, smoothPasses, levels, seamCut, balance } = res.mosaic
+      const seams = seamBlend === 'multiband'
+        ? `blended in ${levels} frequency bands (multiband; the coarsest fades over ~±${3 << levels} cells)`
+        : seamCells
+          ? `feathered over ${seamCells} cell(s) (${settings.seamWidth}% of the short side${seamCells === MAX_SEAM_CELLS ? ', capped' : ''})`
+          : 'hard (no feathering)'
+      const where = seamline === 'graphcut'
+        ? 'seamlines by graph cut (colour difference + nadir cost)'
+        : `each cell from its most nadir view (finest foreshortened footprint), labels smoothed by ${smoothPasses} majority pass(es)`
+      emit('log', [`Ortho: mosaic — ${where}; seams ${seams}`, 'info', 'Products'])
+      if (seamCut) {
+        const pct = (v) => (100 * v).toFixed(1)
+        emit('log', [`Ortho: graph cut on a ${seamCut.width}×${seamCut.height} grid (every ${seamCut.factor} cell(s)), `
+          + `${seamCut.cycles} expansion cycle(s), ${seamCut.accepted} accepted move(s); ${pct(seamCut.changedCells / Math.max(1, seamCut.labelled))}% `
+          + `of the cells moved off their most nadir view; energy ${seamCut.energy.toLocaleString()} (nearest-nadir ${seamCut.energyNadir.toLocaleString()}, `
+          + `−${pct(1 - seamCut.energy / Math.max(1, seamCut.energyNadir))}%)`
+          + (res.seamCutMs ? `; survey ${((res.seamCutMs.read + res.seamCutMs.sample) / 1000).toFixed(1)} s (photo reads ${(res.seamCutMs.read / 1000).toFixed(1)} s), cut ${(res.seamCutMs.solve / 1000).toFixed(1)} s` : ''),
+        'info', 'Products'])
+      }
       if (balance) {
         const f = (v) => (v == null ? '—' : v.toFixed(3))
         const decode = loadStatsImage?.decoded
-          ? `; photos decoded at ${(100 * loadStatsImage.scaleSum / loadStatsImage.decoded).toFixed(0)}% of native for the fit` : ''
+          ? `; photos decoded at ${(100 * loadStatsImage.scaleSum / loadStatsImage.decoded).toFixed(0)}% of native for the fit${seamCut ? ' and the seams' : ''}` : ''
         emit('log', [`Ortho: colour balance — gains for ${balance.images} of ${maps.length} image(s) from `
           + `${balance.pairs} overlapping pair(s) over ${balance.latticeCells.toLocaleString()} lattice cells (every `
           + `${balance.latticeStep}th; ${balance.clippedObservations.toLocaleString()} clipped sample(s) left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}`
-          + (balance.clamped ? `, ${balance.clamped} channel gain(s) clamped to 0.5–2` : '') + decode,
+          + (balance.clamped ? `, ${balance.clamped} channel gain(s) clamped to ${GAIN_MIN}–${GAIN_MAX}` : '') + decode,
         balance.clamped ? 'warn' : 'info', 'Products'])
         if (res.gains) {
           const name = (m) => photoOf.get(m.uuid)?.name ?? m.uuid
@@ -374,6 +404,7 @@ export function makeProductsOps({ rasterize } = {}) {
         }
       }
     }
+    if (res.timings) emit('log', [`Ortho: time (s) — ${Object.entries(res.timings).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`).join(', ')}`, 'debug', 'Products'])
     emit('log', [`Ortho: ${describeOrthoStats(stats)}`, 'info', 'Products'])
     emit('progress', [1, 1, 'Done'])
 

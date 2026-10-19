@@ -30,7 +30,11 @@ export function linearToSrgb(l) {
 const GAIN_SIGMA_S = 0.1         // spread of one sample's log colour ratio between two images
 const GAIN_PRIOR = 0.01          // an image's pull to gain 1, as a fraction of its own overlap weight
 const GAIN_CLIP_LO = 4, GAIN_CLIP_HI = 250 // sRGB: a sample at either end is clipped, its ratio meaningless
-const GAIN_MIN = 0.5, GAIN_MAX = 2
+// The clamp: ±2 stops. On quarry-80 the camera's auto-exposure moved the aperture from
+// f/2.8 to f/5 over the flight, and the fitted gains follow the EXIF exposure
+// (t·ISO/N²) to an rms of 15 % in log; at ±1 stop the last twelve photos sat at the clamp
+// (they need 2.1–3.3), at ±2 stops none do.
+export const GAIN_MIN = 0.25, GAIN_MAX = 4
 
 // An sRGB sample with any channel clipped says nothing about gain: a wall at 255 in one
 // photo understates its ratio to the other. Callers leave such samples out.

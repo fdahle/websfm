@@ -230,6 +230,12 @@ describe('bounded map loading', () => {
     [{ seamWidth: 10, colourBalance: true, photos: true }, 0.3, 8],
     [{ seamWidth: 20, colourBalance: true, photos: true, affine: true, fillRadius: 3, fillMethod: 'nearest' }, 0.25, 5],
     [{ seamWidth: 10, maxCost: 0.3 }, 0.45, 4],
+    // Multiband (small pyramids, so the halo stays below the grid) and graph-cut seams
+    // (a coarse grid of a few hundred cells, so its cells span several ortho cells).
+    [{ seamBlend: 'multiband', blendLevels: 2 }, 0.25, 7],
+    [{ seamBlend: 'multiband', blendLevels: 3, colourBalance: true, photos: true }, 0.3, 16],
+    [{ seamline: 'graphcut', seamCutCells: 500, seamWidth: 10 }, 0.25, 6],
+    [{ seamline: 'graphcut', seamCutCells: 300, seamBlend: 'multiband', blendLevels: 2, colourBalance: true, photos: true, affine: true, fillRadius: 3 }, 0.25, 9],
   ])('a tiled mosaic ≡ one block: %j gsd %s block %s', async ({ photos, affine, ...rest }, gsd, blockSize) => {
     const opts = { blend: 'mosaic', ...rest }
     const { ms, surface } = tiledScene(), entries = files(ms)
@@ -251,6 +257,8 @@ describe('bounded map loading', () => {
     expect(one.res.covered).toBeGreaterThan(100)
     expect(new Set(one.labels).size).toBeGreaterThan(2)
     if (rest.colourBalance) expect(one.res.mosaic.balance.pairs).toBeGreaterThan(0)
+    // The coarse cut grid spans several ortho cells, so its cells cross block edges.
+    if (rest.seamline) expect(one.res.mosaic.seamCut.factor).toBeGreaterThan(1)
     for (const cacheBytes of [0, 1 << 30]) {
       const many = await tile(blockSize, cacheBytes)
       expect(many.res.blocks).toBeGreaterThan(4)
@@ -261,7 +269,7 @@ describe('bounded map loading', () => {
       expect({ covered: many.res.covered, sampled: many.res.sampled }).toEqual({ covered: one.res.covered, sampled: one.res.sampled })
       expect(many.res.stats).toEqual(orthoStats(one.rgba, geom.width, geom.height, one.labels))
     }
-  })
+  }, 30_000) // the multiband + graph-cut case takes ~2 s alone, more in a loaded full run
   it('tiles the surface\'s own grid (gsd 0) cell for cell, holes included', async () => {
     const { ms, surface } = tiledScene()
     const geom = resampledGeometry(surface, 0)

@@ -64,8 +64,17 @@ const costIneffective = computed(() => costCeiling.value != null
   && settings.value.maxCost > 0 && settings.value.maxCost >= costCeiling.value)
 const fmtCost = (v) => String(+v.toFixed(3))
 
+const seamlineHint = computed(() => ({
+  graphcut: 'Seams follow where neighbouring photos agree, around buildings and trees, near the most straight-down view.',
+  nadir: 'Each area from the photo looking most straight down on it; seams run halfway between photo centres.',
+}[settings.value.seamline] ?? ''))
+const seamBlendHint = computed(() => ({
+  multiband: 'Blends fine detail across a seam within a pixel or two and brightness over a wide band: no steps, no ghosting.',
+  feather: 'Cross-fades the two photos over a band of the chosen width; misalignments show as a soft double image in it.',
+}[settings.value.seamBlend] ?? ''))
+
 const blendHint = computed(() => ({
-  mosaic: 'Each area comes from the photo looking most straight down on it; seams are then evened out.',
+  mosaic: 'Each area comes from one photo, chosen by viewing angle; seams are placed and then evened out.',
   best: 'Per pixel, the view whose depth matched best. Sources can switch from pixel to pixel.',
   average: 'Blends every view that sees a pixel. Smooth, but small misalignments ghost.',
 }[settings.value.blend] ?? ''))
@@ -81,7 +90,7 @@ const numbers = computed(() => {
   const s = settings.value
   return checkNumberFields(s, {
     gsd: { label: 'Ground sample distance', min: 0 },
-    seamWidth: { label: 'Seam blending width', min: 0, max: 5, when: s.blend === 'mosaic' },
+    seamWidth: { label: 'Seam blending width', min: 0, max: 5, when: s.blend === 'mosaic' && s.seamBlend === 'feather' },
     depthTolRel: { label: 'Occlusion tolerance', min: 0.5, max: 10 },
     maxCost: { label: 'Max match cost', min: 0, max: 2 },
     fillRadius: { label: 'Colour fill radius', min: 1, max: 16, integer: true, when: s.fillMethod !== 'none' },
@@ -165,8 +174,15 @@ function run() {
       </select>
     </SettingsField>
 
-    <!-- Both act only on a mosaic: best/average have no regions to balance or feather. -->
+    <!-- These act only on a mosaic: best/average have no regions to place, balance or blend. -->
     <template v-if="settings.blend === 'mosaic'">
+      <SettingsField label-for="ortho-seamline" :hint="seamlineHint">
+        <template #label><FieldHelp op="orthophoto" param="seamline">Seamlines</FieldHelp></template>
+        <select id="ortho-seamline" v-model="settings.seamline" class="field-input field-select">
+          <option value="graphcut">Graph cut (avoid buildings and trees)</option>
+          <option value="nadir">Most nadir photo</option>
+        </select>
+      </SettingsField>
       <SettingsField label-for="ortho-balance"
         hint="Evens out exposure between photos with one brightness gain per photo and colour, fitted where photos overlap.">
         <template #label><FieldHelp op="orthophoto" param="colourBalance" :value="settings.colourBalance" :default-value="ORTHO_DEFAULTS.colourBalance">Colour balance</FieldHelp></template>
@@ -174,7 +190,14 @@ function run() {
           <input id="ortho-balance" v-model="settings.colourBalance" type="checkbox" class="checkbox" /> Enabled
         </label>
       </SettingsField>
-      <SettingsField label-for="ortho-seam" unit="%"
+      <SettingsField label-for="ortho-seam-blend" :hint="seamBlendHint">
+        <template #label><FieldHelp op="orthophoto" param="seamBlend">Seam blending</FieldHelp></template>
+        <select id="ortho-seam-blend" v-model="settings.seamBlend" class="field-input field-select">
+          <option value="multiband">Multiband (by frequency)</option>
+          <option value="feather">Feather (cross-fade)</option>
+        </select>
+      </SettingsField>
+      <SettingsField v-if="settings.seamBlend === 'feather'" label-for="ortho-seam" unit="%"
         hint="Width of the cross-fade at each seam, as a % of the orthophoto's shorter side (at most 128 px). 0 = hard seams.">
         <template #label><FieldHelp op="orthophoto" param="seamWidth" :value="settings.seamWidth" :default-value="ORTHO_DEFAULTS.seamWidth">Seam blending width</FieldHelp></template>
         <input id="ortho-seam" v-model.number="settings.seamWidth" :aria-invalid="numbers.bad.seamWidth" type="number" min="0" max="5" step="0.25" class="field-input" />

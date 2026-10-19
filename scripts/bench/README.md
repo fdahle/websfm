@@ -292,3 +292,11 @@ Rays are intersected with the terrain in ECEF, so Earth curvature is in the imag
 clouds in the project CRS after recon / dense (`<out>.sparse.project.bin`, Float64), and
 `synth/score_points.py <truth_dem.tif> <bins…>` scores their heights against the truth.
 Run both with the hist_env3 interpreter.
+
+**Rerunning products on a kept project.** `profile: <dir>` keeps the browser profile (and
+so its OPFS) in that folder instead of deleting it after the run. A later config with the
+same `profile` whose `stages` start with `reopen` skips the image import and restores the
+newest project (or the one named by `project`), so ortho or DEM variants rerun without
+detection, matching or dense. Product stages take a settings suffix: `ortho:gm` reads the
+settings object under the `"ortho:gm"` key. `exportOrthoCog: true` also writes each
+ortho's full-resolution COG next to the summary (`<out>.<label>.ortho.tif`), for crops.

@@ -177,6 +177,13 @@ window.bench = {
   },
 
   currentProject() { return projects.currentProjectId },
+  // The most recently modified project of the profile (named `name`, if given): a kept
+  // profile's reopen.
+  async latestProject(name = null) {
+    await projects.loadIndex()
+    return [...projects.projects].filter((p) => !name || p.name === name)
+      .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0))[0]?.id ?? null
+  },
 
   // Exclude one accepted pair, then include it again, as the match list's toggle does;
   // lists the project's matches folder after each save, so a run can check that a
@@ -542,6 +549,13 @@ window.bench = {
   // The ortho's preview PNG (≤ 2,048 px a side; the ortho itself is its stored COG),
   // base64 in chunks for the runner.
   orthoPngSize() { return recon.ortho?.previewBlob?.size ?? 0 },
+  orthoCogSize() { return recon.ortho?.cog?.size ?? 0 },
+  async orthoCogChunk(start, n) {
+    const u8 = new Uint8Array(await recon.ortho.cog.slice(start, start + n).arrayBuffer())
+    let s = ''
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
+    return btoa(s)
+  },
   async orthoPngChunk(start, n) {
     const u8 = new Uint8Array(await recon.ortho.previewBlob.slice(start, start + n).arrayBuffer())
     let s = ''

@@ -93,6 +93,8 @@ export const WORKFLOW_BLOCKS = [
       { key: 'surface', label: 'Surface', type: 'select', options: ['dem', 'mesh', 'plane'] },
       { key: 'gsd', label: 'GSD (0 = auto)', type: 'number', min: 0 },
       { key: 'blend', label: 'Blending', type: 'select', options: ['mosaic', 'best', 'average'] },
+      { key: 'seamline', label: 'Seamlines', type: 'select', options: ['graphcut', 'nadir'] },
+      { key: 'seamBlend', label: 'Seam blending', type: 'select', options: ['multiband', 'feather'] },
     ]),
   automated('gen-mesh', 'Build Mesh', 'Products', ['dense'], ['mesh'], { preset: 'medium', ...MESH_DEFAULTS }, [
     { key: 'preset', label: 'Preset', type: 'select', options: PRESETS },
