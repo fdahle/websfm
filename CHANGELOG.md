@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Watch the sparse model grow.** During Sparse Reconstruction the 3D view draws the
+  cameras registered so far and their points, in colour, updated every couple of
+  seconds, and zooms out as the model expands. The progress bar moves to the corner so
+  the view stays visible.
 - **Long runs look after themselves.** While a stage or workflow runs, the screen is
   kept on so the computer does not sleep mid-run, and the tab's title shows the stage
   and its percentage, or "Waiting for you" when a workflow stops to ask something.
