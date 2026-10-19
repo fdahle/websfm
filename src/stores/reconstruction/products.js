@@ -73,18 +73,20 @@ export function createProducts({
     }
   }
 
-  // Persist a DEM/ortho. An ortho's record is then pointed at the committed COG
-  // file (if it is still the current ortho), so the worker's in-memory Blob can go
-  // and the next save of the same ortho reuses the file instead of rewriting it.
+  // Persist a DEM/ortho. A record with a COG (every ortho; a DEM past one plane) is
+  // then pointed at the committed file (if it is still the current product), so the
+  // worker's in-memory Blob can go and the next save reuses the file instead of
+  // rewriting it.
   // Only the LATEST save may do that: an earlier one's file is collected by the next.
   const productSaveSeq = { dem: 0, ortho: 0 }
   function saveProductRecord(kind, record) {
     if (!isPersisting()) return
     const projectId = projects.currentProjectId, seq = ++productSaveSeq[kind]
     opfs.saveProduct(projectId, kind, record).then((saved) => {
-      if (kind !== 'ortho' || !saved?.cogSaved || seq !== productSaveSeq[kind] || projectId !== projects.currentProjectId) return
-      const now = ortho.value
-      if (now && now.createdAt === record.createdAt) ortho.value = { ...now, cog: saved.cog, cogSaved: saved.cogSaved }
+      if (!saved?.cogSaved || seq !== productSaveSeq[kind] || projectId !== projects.currentProjectId) return
+      const target = kind === 'ortho' ? ortho : dem
+      const now = target.value
+      if (now && now.createdAt === record.createdAt) target.value = { ...now, cog: saved.cog, cogSaved: saved.cogSaved }
     }).catch(() => {})
   }
 

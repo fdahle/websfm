@@ -145,25 +145,15 @@ export function coreExtent(pos, count, { bins = 128, quantile = 0.001, densityFr
   return { minX, minY, maxX, maxY, inside }
 }
 
-// Rasterise `points` ({x,y,z} in the frame) into a height grid.
-//   opts:
-//     gsd        — cell size in frame units; auto (suggestGsd) when omitted
-//     aggregate  — 'max'(default DSM) | 'min' | 'mean' | 'median'
-//     fillMethod — 'none' | 'nearest' | 'idw' (default)
-//     fillRadius — cells; hole-fill search radius (0 = no fill)
-//     maxGrid    — hard cap on the longer grid side; gsd is grown to respect it
-//     memBudgetBytes — working-memory budget for the grid (+ median buffers);
-//                  the caller subtracts anything it already holds (the points)
-// Returns { width, height, gsd, originX, originY, data:Float32Array (NaN=nodata),
-//           mask:Uint8Array (1=has data, incl. filled), zMin, zMax, count, filled,
-//           holesFilled (of `filled`, the cells `fillHoles` interpolated) }.
-//     fillHoles  — after the radius fill, also interpolate every enclosed nodata
-//                  area (fillEnclosedGaps): the ground under removed buildings
-export function rasterizeDem(allPoints, opts = {}) {
-  const { aggregate = 'max', fillMethod = 'idw', fillRadius = 2, maxGrid = 4096, fillHoles = false } = opts
-  // `bounds` ({ minX, minY, maxX, maxY }, e.g. coreExtent) limits the grid; points
-  // outside are LEFT OUT — clamping them into the edge cells would pile far
-  // background onto the border. The auto GSD then reflects the points inside.
+// The grid a DEM of `allPoints` ({x,y,z} in the frame) gets: `opts.bounds` ({ minX,
+// minY, maxX, maxY }, e.g. coreExtent) limits it, and points outside are LEFT OUT —
+// clamping them into the edge cells would pile far background onto the border. The
+// auto GSD (suggestGsd) then reflects the points inside. `opts.maxGrid` (default 4,096,
+// Infinity for none) caps the longer side by growing the GSD.
+// → { points (the ones inside, iterable, with length), width, height, gsd, originX,
+//     originY, requestedGsd } | null
+export function demGeometry(allPoints, opts = {}) {
+  const { maxGrid = 4096 } = opts
   const b = opts.bounds
   let points = allPoints
   if (b) {
@@ -181,17 +171,38 @@ export function rasterizeDem(allPoints, opts = {}) {
   }
   if (!(maxX > minX) || !(maxY > minY)) return null
 
-  let gsd = opts.gsd > 0 ? opts.gsd : suggestGsd(points)
-  if (!(gsd > 0)) return null
+  const requestedGsd = opts.gsd > 0 ? opts.gsd : suggestGsd(points)
+  if (!(requestedGsd > 0)) return null
+  let gsd = requestedGsd
   // Cap the grid: grow gsd so the longer side (ceil(span/gsd)+1) stays ≤ maxGrid.
   const spanMax = Math.max(maxX - minX, maxY - minY)
   if (spanMax / gsd > maxGrid - 1) gsd = spanMax / (maxGrid - 1)
 
   const width = Math.max(1, Math.ceil((maxX - minX) / gsd) + 1)
   const height = Math.max(1, Math.ceil((maxY - minY) / gsd) + 1)
-  const originX = minX
-  const originY = maxY // top-left origin: row 0 is the max-Y edge
+  // Top-left origin: row 0 is the max-Y edge.
+  return { points, width, height, gsd, originX: minX, originY: maxY, requestedGsd }
+}
 
+// Rasterise `points` ({x,y,z} in the frame) into a height grid.
+//   opts:
+//     gsd        — cell size in frame units; auto (suggestGsd) when omitted
+//     aggregate  — 'max'(default DSM) | 'min' | 'mean' | 'median'
+//     fillMethod — 'none' | 'nearest' | 'idw' (default)
+//     fillRadius — cells; hole-fill search radius (0 = no fill)
+//     maxGrid    — hard cap on the longer grid side; gsd is grown to respect it
+//     memBudgetBytes — working-memory budget for the grid (+ median buffers);
+//                  the caller subtracts anything it already holds (the points)
+// Returns { width, height, gsd, originX, originY, data:Float32Array (NaN=nodata),
+//           mask:Uint8Array (1=has data, incl. filled), zMin, zMax, count, filled,
+//           holesFilled (of `filled`, the cells `fillHoles` interpolated) }.
+//     fillHoles  — after the radius fill, also interpolate every enclosed nodata
+//                  area (fillEnclosedGaps): the ground under removed buildings
+export function rasterizeDem(allPoints, opts = {}) {
+  const { aggregate = 'max', fillMethod = 'idw', fillRadius = 2, fillHoles = false } = opts
+  const geom = demGeometry(allPoints, opts)
+  if (!geom) return null
+  const { points, width, height, gsd, originX, originY } = geom
   const cells = width * height
   // Grid planes (data, measured, mask, the mean path's sum + count) ≈ 24 B/cell;
   // median adds a cell-offset table and one Float64 per point.
@@ -202,56 +213,9 @@ export function rasterizeDem(allPoints, opts = {}) {
     throw new Error(`DEM raster (${width}×${height}) needs ${formatBytes(need)}, over the `
       + `${formatBytes(budget)} working-memory limit; increase GSD or reduce the grid size`)
   }
-  const data = new Float32Array(cells).fill(NaN)
-
-  const colOf = (x) => Math.min(width - 1, Math.max(0, Math.floor((x - originX) / gsd)))
-  const rowOf = (y) => Math.min(height - 1, Math.max(0, Math.floor((originY - y) / gsd)))
-
-  if (aggregate === 'median') {
-    // Counting sort by cell into one typed buffer — no per-cell JS arrays or Map,
-    // so it costs ArrayBuffer memory (accounted above), not V8 heap. off[i] ends
-    // as cell i's first slot: prefix sums give each cell's end, and the scatter
-    // fills every cell from its end downwards.
-    const n = points.length
-    const off = new Uint32Array(cells + 1)
-    for (const p of points) off[rowOf(p.y) * width + colOf(p.x)]++
-    for (let i = 1; i < cells; i++) off[i] += off[i - 1]
-    off[cells] = n
-    const zs = new Float64Array(n)
-    for (const p of points) zs[--off[rowOf(p.y) * width + colOf(p.x)]] = p.z
-    for (let i = 0; i < cells; i++) {
-      const a = off[i], b = off[i + 1]
-      if (b === a) continue
-      const seg = zs.subarray(a, b).sort()
-      data[i] = seg[(b - a) >> 1]
-    }
-  } else if (aggregate === 'mean') {
-    const sum = new Float64Array(cells)
-    const cnt = new Uint32Array(cells)
-    for (const p of points) {
-      const idx = rowOf(p.y) * width + colOf(p.x)
-      sum[idx] += p.z; cnt[idx]++
-    }
-    for (let i = 0; i < cells; i++) if (cnt[i]) data[i] = sum[i] / cnt[i]
-  } else {
-    const takeMax = aggregate !== 'min'
-    for (const p of points) {
-      const idx = rowOf(p.y) * width + colOf(p.x)
-      const cur = data[idx]
-      if (Number.isNaN(cur)) data[idx] = p.z
-      else if (takeMax ? p.z > cur : p.z < cur) data[idx] = p.z
-    }
-  }
-
-  // Validity mask before filling (so IDW reads only measured cells).
-  const measured = new Uint8Array(cells)
-  let count = 0
-  for (let i = 0; i < cells; i++) if (!Number.isNaN(data[i])) { measured[i] = 1; count++ }
-
-  let filled = 0
-  if (fillMethod !== 'none' && fillRadius > 0) {
-    filled = fillNodata(data, measured, width, height, fillRadius, fillMethod)
-  }
+  const { data, count, filled: radiusFilled } = rasterizeWindow(points, { width, height, gsd, originX, originY },
+    { aggregate, fillMethod, fillRadius })
+  let filled = radiusFilled
   const holesFilled = fillHoles ? fillEnclosedGaps(data, width, height) : 0
   filled += holesFilled
 
@@ -267,6 +231,154 @@ export function rasterizeDem(allPoints, opts = {}) {
   if (zMin > zMax) { zMin = 0; zMax = 0 }
 
   return { width, height, gsd, originX, originY, data, mask, zMin, zMax, count, filled, holesFilled }
+}
+
+// Aggregate `points` into the cells of one grid window ({ width, height, gsd, originX,
+// originY }, top-left origin) and fill its holes within `fillRadius`. Points outside
+// the window are skipped. A block of a tiled DEM is a window over its core plus a halo
+// of `fillRadius` cells: aggregation is per cell and the fill reads only measured cells
+// within the radius, so the core comes out exactly as from the whole grid.
+// → { data: Float32Array (NaN = nodata), count (measured cells), filled }
+export function rasterizeWindow(points, geom, { aggregate = 'max', fillMethod = 'idw', fillRadius = 2 } = {}) {
+  const { width, height, gsd, originX, originY } = geom
+  const cells = width * height
+  const data = new Float32Array(cells).fill(NaN)
+  const cellOf = (p) => {
+    const col = Math.floor((p.x - originX) / gsd), row = Math.floor((originY - p.y) / gsd)
+    // A point on the window's far edge (x = originX + width·gsd) belongs to its last cell.
+    const c = col === width && p.x - originX <= width * gsd ? width - 1 : col
+    const r = row === height && originY - p.y <= height * gsd ? height - 1 : row
+    return c >= 0 && c < width && r >= 0 && r < height ? r * width + c : -1
+  }
+
+  if (aggregate === 'median') {
+    // Counting sort by cell into one typed buffer — no per-cell JS arrays or Map,
+    // so it costs ArrayBuffer memory (accounted by the caller), not V8 heap. off[i]
+    // ends as cell i's first slot: prefix sums give each cell's end, and the scatter
+    // fills every cell from its end downwards.
+    const off = new Uint32Array(cells + 1)
+    let n = 0
+    for (const p of points) { const i = cellOf(p); if (i >= 0) { off[i]++; n++ } }
+    for (let i = 1; i < cells; i++) off[i] += off[i - 1]
+    off[cells] = n
+    const zs = new Float64Array(n)
+    for (const p of points) { const i = cellOf(p); if (i >= 0) zs[--off[i]] = p.z }
+    for (let i = 0; i < cells; i++) {
+      const a = off[i], b = off[i + 1]
+      if (b === a) continue
+      const seg = zs.subarray(a, b).sort()
+      data[i] = seg[(b - a) >> 1]
+    }
+  } else if (aggregate === 'mean') {
+    const sum = new Float64Array(cells)
+    const cnt = new Uint32Array(cells)
+    for (const p of points) {
+      const idx = cellOf(p)
+      if (idx >= 0) { sum[idx] += p.z; cnt[idx]++ }
+    }
+    for (let i = 0; i < cells; i++) if (cnt[i]) data[i] = sum[i] / cnt[i]
+  } else {
+    const takeMax = aggregate !== 'min'
+    for (const p of points) {
+      const idx = cellOf(p)
+      if (idx < 0) continue
+      const cur = data[idx]
+      if (Number.isNaN(cur)) data[idx] = p.z
+      else if (takeMax ? p.z > cur : p.z < cur) data[idx] = p.z
+    }
+  }
+
+  // Validity mask before filling (so IDW reads only measured cells).
+  const measured = new Uint8Array(cells)
+  let count = 0
+  for (let i = 0; i < cells; i++) if (!Number.isNaN(data[i])) { measured[i] = 1; count++ }
+  const filled = fillMethod !== 'none' && fillRadius > 0
+    ? fillNodata(data, measured, width, height, fillRadius, fillMethod) : 0
+  return { data, measured, count, filled }
+}
+
+// A DEM too big for one plane (SAT-3), block by block. `pos` (Float64 xyz in the frame,
+// `count` points; those outside `opts.bounds` left out, as demGeometry does) is binned
+// by block once; each block's window is its core plus a halo
+// of `fillRadius` cells, rasterised by rasterizeWindow, and its core handed to
+// `onBlock({ col0, row0, width, height, data })` (awaited, Float32 heights, NaN =
+// nodata) in row-major block order. `geom` is demGeometry's grid (any size). Enclosed
+// gaps (fillHoles) need the whole grid and are not filled here.
+// → { width, height, gsd, originX, originY, count, filled, zMin, zMax, blocks }
+export async function rasterizeDemBlocks(pos, count, geom, opts = {}, { onBlock, onProgress = () => {} } = {}) {
+  const { aggregate = 'max', fillMethod = 'idw', fillRadius = 2, blockSize = 2048, bounds = null } = opts
+  const { width: W, height: H, gsd, originX, originY } = geom
+  const B = blockSize, halo = fillMethod !== 'none' ? Math.max(0, fillRadius) : 0
+  if (halo > B) throw new Error(`rasterizeDemBlocks: fill radius ${halo} exceeds the block size ${B}`)
+  const nbx = Math.ceil(W / B), nby = Math.ceil(H / B), nBlocks = nbx * nby
+
+  // Bin the points by the block their cell is in (counting sort; outside points dropped).
+  const blockOf = new Int32Array(count)
+  const start = new Uint32Array(nBlocks + 1)
+  for (let i = 0; i < count; i++) {
+    const x = pos[3 * i], y = pos[3 * i + 1]
+    const col = Math.floor((x - originX) / gsd), row = Math.floor((originY - y) / gsd)
+    if (!(col >= 0 && row >= 0 && col < W && row < H)
+        || (bounds && !(x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY))) {
+      blockOf[i] = -1
+      continue
+    }
+    const bi = Math.floor(row / B) * nbx + Math.floor(col / B)
+    blockOf[i] = bi
+    start[bi + 1]++
+  }
+  for (let k = 0; k < nBlocks; k++) start[k + 1] += start[k]
+  const order = new Uint32Array(start[nBlocks])
+  {
+    const next = start.slice(0, nBlocks)
+    for (let i = 0; i < count; i++) if (blockOf[i] >= 0) order[next[blockOf[i]]++] = i
+  }
+
+  let measuredCells = 0, filled = 0, zMin = Infinity, zMax = -Infinity
+  const pt = { x: 0, y: 0, z: 0 }
+  for (let by = 0; by < nby; by++) for (let bx = 0; bx < nbx; bx++) {
+    const col0 = bx * B, row0 = by * B, bw = Math.min(B, W - col0), bh = Math.min(B, H - row0)
+    const ex0 = Math.max(0, col0 - halo), ey0 = Math.max(0, row0 - halo)
+    const ew = Math.min(W, col0 + bw + halo) - ex0, eh = Math.min(H, row0 + bh + halo) - ey0
+    // The window's points: this block's and its neighbours' (the halo is ≤ one block).
+    // One reused object: rasterizeWindow reads each point before taking the next.
+    const sources = []
+    for (let ny = Math.max(0, by - 1); ny <= Math.min(nby - 1, by + 1); ny++) {
+      for (let nx = Math.max(0, bx - 1); nx <= Math.min(nbx - 1, bx + 1); nx++) {
+        const k = ny * nbx + nx
+        if (start[k + 1] > start[k]) sources.push(k)
+      }
+    }
+    const points = {
+      *[Symbol.iterator]() {
+        for (const k of sources) for (let j = start[k]; j < start[k + 1]; j++) {
+          const i = order[j]
+          pt.x = pos[3 * i]; pt.y = pos[3 * i + 1]; pt.z = pos[3 * i + 2]
+          yield pt
+        }
+      },
+    }
+    const win = rasterizeWindow(points, { width: ew, height: eh, gsd, originX: originX + ex0 * gsd, originY: originY - ey0 * gsd },
+      { aggregate, fillMethod, fillRadius })
+    const core = new Float32Array(bw * bh)
+    const cx = col0 - ex0, cy = row0 - ey0
+    for (let r = 0; r < bh; r++) {
+      const src = (cy + r) * ew + cx
+      core.set(win.data.subarray(src, src + bw), r * bw)
+      for (let c = 0; c < bw; c++) {
+        const z = core[r * bw + c]
+        if (Number.isNaN(z)) continue
+        if (win.measured[src + c]) measuredCells++
+        else filled++
+        if (z < zMin) zMin = z
+        if (z > zMax) zMax = z
+      }
+    }
+    await onBlock?.({ col0, row0, width: bw, height: bh, data: core })
+    onProgress(by * nbx + bx + 1, nBlocks)
+  }
+  if (zMin > zMax) { zMin = 0; zMax = 0 }
+  return { width: W, height: H, gsd, originX, originY, count: measuredCells, filled, zMin, zMax, blocks: nBlocks }
 }
 
 // Fill nodata cells by inverse-distance weighting over measured cells within

@@ -107,10 +107,8 @@ export function createProductRuns({
       // recorded surface predates the choice, so it was a DEM ortho.)
       const orthoWasDem = ortho.value && (ortho.value.surface ?? 'DEM') === 'DEM'
       if (orthoWasDem) ortho.value = null
-      if (isPersisting()) {
-        opfs.saveProduct(projects.currentProjectId, 'dem', dem.value).catch(() => {})
-        if (orthoWasDem) opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
-      }
+      saveProductRecord('dem', dem.value)
+      if (isPersisting() && orthoWasDem) opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
       reconStatus.value = 'done'
     } catch (err) {
       log(`DEM error: ${err?.message ?? err}`, 'error', 'Products')

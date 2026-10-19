@@ -507,6 +507,34 @@ describe('createCogBuilder (a COG from blocks)', () => {
       break
     }
   })
+  it('keeps NaN nodata out of a Float32 raster\'s overviews and pads its edge tiles with NaN', async () => {
+    // A DEM: 40×24 heights, a hole of NaN in the top-left quarter.
+    const w = 40, h = 24
+    const data = Float32Array.from({ length: w * h }, (_, i) => ((i % w) < 10 && i < w * 12 ? NaN : 100 + (i % w)))
+    const demSpec = { width: w, height: h, tileSize: 16, ArrayType: Float32Array, samples: [{ bits: 32, format: 3 }], photometric: 1,
+      pixelScale: [10, 10, 0], tiepoint: [0, 0, 0, 5e5, 4e6, 0], geoKeys: geoKeysForEpsg(32612, false), gdalNoData: 'nan' }
+    const builder = createCogBuilder(demSpec, { blockSize: 16, previewMaxDim: 20 })
+    for (let row0 = 0; row0 < h; row0 += 16) for (let col0 = 0; col0 < w; col0 += 16) {
+      const bw = Math.min(16, w - col0), bh = Math.min(16, h - row0), out = new Float32Array(bw * bh)
+      for (let r = 0; r < bh; r++) out.set(data.subarray((row0 + r) * w + col0, (row0 + r) * w + col0 + bw), r * bw)
+      await builder.addBlock({ col0, row0, width: bw, height: bh, data: out })
+    }
+    const { parts, preview } = await builder.finish()
+    // The 20×12 overview: a cell over the hole is NaN, one beside it the mean of its heights
+    // (x 10, 11 → 110.5) — never NaN-poisoned by a neighbouring hole cell.
+    expect([preview.width, preview.height]).toEqual([20, 12])
+    expect(preview.data[0]).toBeNaN()
+    expect(preview.data[5]).toBeCloseTo(110.5)
+    expect(preview.data[4]).toBeNaN()
+    const tiff = await fromArrayBuffer(toBuf(new Uint8Array(await new Blob(parts).arrayBuffer())))
+    const full = await (await tiff.getImage(0)).readRasters({ interleave: true })
+    expect(full[0]).toBeNaN()
+    expect(full[w * 13 + 39]).toBe(139)
+    // The coarsest level, halved from the accumulated one: hole still NaN, heights still means.
+    const coarse = await (await tiff.getImage(2)).readRasters({ interleave: true })
+    expect(coarse[0]).toBeNaN()
+    expect(coarse[9]).toBeCloseTo(137.5)
+  })
   it('refuses a block off the grid and a missing block', async () => {
     const b = createCogBuilder(spec(64, 64, 16), { blockSize: 32 })
     await expect(b.addBlock({ col0: 16, row0: 0, width: 32, height: 32, data: new Uint8Array(32 * 32 * 4) })).rejects.toThrow('not on the 32 grid')
