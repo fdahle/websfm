@@ -6,6 +6,14 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Long runs look after themselves.** While a stage or workflow runs, the screen is
+  kept on so the computer does not sleep mid-run, and the tab's title shows the stage
+  and its percentage, or "Waiting for you" when a workflow stops to ask something.
+  Turn on **Notify when a run ends** (Settings ▸ General) for a desktop notification
+  when a run ends, or a workflow needs you, while you work in another tab.
+- **A stage that fails says so.** When a stage logs an error, a red note names it and
+  shows the first error; click it to open the console. Before, the progress bar just
+  closed and the reason was only in the log.
 - **The Workflow Builder checks image files before a run.** When a run contains a
   block that reads pixels, every image's file is checked first. A moved, renamed or
   deleted file is restored from project storage where the project has a copy, and the
