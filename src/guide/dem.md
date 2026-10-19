@@ -35,9 +35,11 @@ interpolation across more empty cells.
 A GSD you set that needs more than 4,096 cells a side (a satellite frame at its
 native resolution, say) is built block by block as a
 [Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff) at that GSD, up to 4 GB. A GeoTIFF
-export is that full-resolution file. The view, the map, measurements, the ASCII grid
-and an orthophoto built on the DEM still use its overview, the first level of at most
-4,096 cells a side, and **Fill enclosed gaps** is applied to the overview only.
+export is that full-resolution file, and the DEM's tab and the map draw it at full
+resolution as you zoom in, coloured and hillshaded by its symbology. The value under
+the cursor, measurements, the ASCII grid and an orthophoto built on the DEM still use
+its overview, the first level of at most 4,096 cells a side, and **Fill enclosed gaps**
+is applied to the overview only.
 
 ## Extent
 <!-- param: extent default: Dense core -->
