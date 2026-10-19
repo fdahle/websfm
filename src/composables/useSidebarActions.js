@@ -32,9 +32,10 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   const footprintsStore = useFootprintsStore()
   const { sets: shapefiles } = storeToRefs(footprintsStore)
   const { renameSet, setSetVisible } = footprintsStore
-  const { setRasterKind, setRasterVisible, setRasterOpacity } = useExternalStore()
+  const { setRasterKind, setRasterVisible, setRasterOpacity, rasterById } = useExternalStore()
   const {
     infoImageId, sensorTableOpen, matchListOpen, symbologyCloudId, symbologyProductKind, rasterStyleId,
+    importRasterOpen, importRasterData,
   } = storeToRefs(useModalsStore())
 
   function renameImageFromSidebar({ id, name }) {
@@ -159,6 +160,12 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     renameRaster: renameRasterFromSidebar,
     setRasterKind: ({ id, kind }) => setRasterKind(id, kind),
     styleRaster: (id) => { rasterStyleId.value = id },
+    rasterAccuracy: (id) => {
+      const raster = rasterById(id)
+      if (!raster) return
+      importRasterData.value = { raster, fileName: raster.name, mode: 'accuracy' }
+      importRasterOpen.value = true
+    },
     setRasterVisible: ({ id, visible }) => setRasterVisible(id, visible),
     setRasterOpacity: ({ id, opacity }) => setRasterOpacity(id, opacity),
     convertRasterToImage: (id) => onRasterImportAsImage({ id }),

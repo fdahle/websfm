@@ -1,9 +1,10 @@
 import { ref, shallowRef, computed, toRaw } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
-import { ensureProjection, transform, transformer } from '../core/crs.js'
+import { ensureProjection, transform, transformer, isGeographic, metresToCrsUnits } from '../core/crs.js'
 import { createFlatRasterSource } from '../core/io/rasterSource.js'
 import { rasterBounds } from '../core/io/rasterSample.js'
+import { referencePick } from '../core/sfm/referenceGcps.js'
 import { describeStyle, styleStamp, resolveRasterStyle, bandsUsedBy } from '../core/io/rasterStyle.js'
 import { parseRasterFile, restyleRasterPreview, prepareRasterCog, readRasterWindow as workerReadRasterWindow } from '../workers/computeClient.js'
 import * as opfs from '../utils/opfs.js'
@@ -41,7 +42,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // RasterMeta[] — metadata only. Always populated after restore; the planes are not.
   //   { id, name, kind:'dem'|'ortho', width, height, bands, dtype,
   //     crs, geoTransform:{originX,originY,scaleX,scaleY},
-  //     nodata, zMin, zMax, verticalDatum, verticalAccuracy, vOffset,
+  //     nodata, zMin, zMax, horizontalAccuracy, verticalDatum, verticalAccuracy, vOffset,
   //     previewDataUrl, importedAt, classification }
   const rasters = ref([])
 
@@ -206,6 +207,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
       // Declared vertical accuracy (σ, in the raster's vertical unit). Null until
       // the user sets it — and a GCP Z filled from a raster with no declared
       // accuracy must NOT claim survey-grade σ, so the fill action refuses.
+      horizontalAccuracy: null,
       verticalAccuracy: null,
       vOffset: 0,
       // Map display (A-4). Off by default: importing a reference dataset is not the
@@ -470,6 +472,31 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     }
   }
 
+  // A GCP position read off a reference raster tab (A-5): the native pixel-edge
+  // point (col, row) of raster `id` in project coordinates, σ XY from the pixel
+  // size as drawn (core/sfm/referenceGcps.js referencePick), and the height of a
+  // reference DEM there — this raster when it is one, else the default DEM. The
+  // height comes back with its declared accuracy; without one the caller must
+  // not use it (the Fill Z rule). Throws with a user-facing reason.
+  // → { x, y, gsd, sigma, rasterName, dem: { z, accuracy, datum, rasterName } | null }
+  async function pickGroundControl(id, col, row, { displayFactor = 1 } = {}) {
+    const meta = rasterById(id)
+    if (!meta) throw new Error('The reference raster is no longer in the project')
+    if (meta.crsUnresolved && !(await resolveRasterCrs(meta))) {
+      throw new Error(`The CRS of "${meta.name}" (${meta.crs}) could not be resolved`)
+    }
+    if (meta.crs && currentCrs.value) await ensureProjection(currentCrs.value)
+    const toProject = ([x, y]) => toProjectCoords(meta, x, y) ?? [NaN, NaN]
+    const pick = referencePick(meta, col, row, { toProject, displayFactor,
+      geographic: isGeographic(currentCrs.value),
+      declared: metresToCrsUnits(meta.horizontalAccuracy, currentCrs.value) })
+    if (!Number.isFinite(pick.x) || !Number.isFinite(pick.y)) {
+      throw new Error(`That point of "${meta.name}" has no position in ${currentCrs.value}`)
+    }
+    const dem = await sampleReferenceDem(pick.x, pick.y, meta.kind === 'dem' ? { rasterId: id } : {})
+    return { ...pick, rasterName: meta.name, dem }
+  }
+
   // Synchronous point probe for the map status bar: the topmost on-map raster
   // whose extent covers this **project-CRS** point. Deliberately reads only
   // already-hydrated planes (invariant 1) — a cursor move must never kick off the
@@ -575,6 +602,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
       id: meta.id,
       name: meta.name,
       importedAt: meta.importedAt,
+      horizontalAccuracy: meta.horizontalAccuracy,
       verticalAccuracy: meta.verticalAccuracy,
       vOffset: meta.vOffset,
       // A vertical datum the *user* set survives; one merely defaulted from the
@@ -687,17 +715,22 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
       + `${err?.message ?? err}`, 'warn', 'Import'))
   }
 
-  // Declared vertical datum + accuracy (§A6). Both are user-supplied because
-  // neither is reliably in the file, and both matter: the datum bounds a
-  // systematic error, the accuracy is what a filled GCP Z claims as its σ.
-  async function setVerticalInfo(id, { verticalDatum, verticalAccuracy, vOffset } = {}) {
+  // Declared accuracy and vertical datum (§A6, A-5). All user-supplied because
+  // none is reliably in the file, and all matter: the datum bounds a systematic
+  // error, the vertical accuracy is what a filled GCP Z claims as its σ, and the
+  // horizontal accuracy (the raster's absolute geolocation, 1σ in metres) is
+  // what a position picked off it claims beyond its pixel size.
+  async function setRasterAccuracy(id, { horizontalAccuracy, verticalDatum, verticalAccuracy, vOffset } = {}) {
     const meta = rasterById(id)
     if (!meta) return false
+    if (horizontalAccuracy !== undefined) meta.horizontalAccuracy = horizontalAccuracy
     if (verticalDatum !== undefined) { meta.verticalDatum = verticalDatum; meta.verticalDatumUserSet = true }
     if (verticalAccuracy !== undefined) meta.verticalAccuracy = verticalAccuracy
     if (vOffset !== undefined) meta.vOffset = vOffset
-    log(`Reference raster "${meta.name}": vertical datum ${meta.verticalDatum}`
-      + `${meta.verticalAccuracy != null ? `, σ ${meta.verticalAccuracy}` : ''}`
+    log(`Reference raster "${meta.name}": `
+      + `${meta.horizontalAccuracy != null ? `σ horizontal ${meta.horizontalAccuracy}` : 'horizontal accuracy undeclared'}`
+      + `${meta.kind === 'dem' ? `, vertical datum ${meta.verticalDatum}` : ''}`
+      + `${meta.verticalAccuracy != null ? `, σ vertical ${meta.verticalAccuracy}` : ''}`
       + `${meta.vOffset ? `, offset ${meta.vOffset}` : ''}`, 'info', 'Import')
     await save()
     return true
@@ -832,8 +865,8 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     mapRasters,
     rasterById,
     importRaster, originalFile, displayFile, ensureRasterLoaded, sampleReferenceDem, referenceDemSampler, probeRasterAt,
-    toRasterCoords, toProjectCoords,
-    setRasterKind, setRasterStyle, setVerticalInfo, setRasterVisible, setRasterOpacity, readRasterWindow,
+    toRasterCoords, toProjectCoords, pickGroundControl,
+    setRasterKind, setRasterStyle, setRasterAccuracy, setRasterVisible, setRasterOpacity, readRasterWindow,
     renameRaster, removeRaster,
     save, restore, clear, flushPendingWork,
   }

@@ -41,9 +41,14 @@ const props = defineProps({
   // are no longer this project's metres, so it must not be mistaken for a current
   // product. Absent/false ⇒ no banner.
   frameStatus: { type: Object, default: null },
+  // An imported raster's tab: the selected GCP ({ id, name, role }), so the menu can
+  // offer to move it here (A-5). Computed products never offer GCP picking.
+  selectedGcp: { type: Object, default: null },
 })
-// A command from the measuring layer (its saved list's Export…), for App's dispatch.
-const emit = defineEmits(['command'])
+// A command from the measuring layer (its saved list's Export…), for App's dispatch;
+// pick-gcp: { col, row, displayFactor, gcpId } — a GCP position read off this
+// reference raster (useGcpEditing pickGcpFromReference).
+const emit = defineEmits(['command', 'pick-gcp'])
 // The canvas only reports readiness from its own load(); when it unmounts (the CRS
 // became unresolved) nothing would un-hide the preview, leaving a blank viewer.
 watch(() => !!gpuCapable.value, (capable) => { if (!capable) gpuReady.value = false })
@@ -130,9 +135,27 @@ function onContextMenu(e) {
   const cw = container.value.clientWidth, ch = container.value.clientHeight
   menu.value = {
     x: Math.min(x, Math.max(0, cw - 200)),
-    y: Math.min(y, Math.max(0, ch - 180)),
+    y: Math.min(y, Math.max(0, ch - 240)),
     read: hover.value,
+    // The click itself in native pixel-edge coordinates, for a GCP pick.
+    at: [(x - tx.value) / scale.value, (y - ty.value) / scale.value],
   }
+}
+
+// GCP picking (A-5) on an imported reference raster: the click is good to one
+// pixel as drawn — a native pixel when zoomed in on the tiled view, more when
+// zoomed out or when only the downsampled preview is up.
+const previewImg = ref(null)
+const canPickGcp = computed(() => !!props.product?.geoTransform && !!props.product?.id)
+function displayFactor() {
+  const natural = previewImg.value?.naturalWidth
+  const preview = gpuReady.value || !natural ? 1 : props.product.width / natural
+  return Math.max(1, 1 / scale.value, preview)
+}
+function menuPickGcp(gcpId) {
+  const at = menu.value?.at
+  if (at) emit('pick-gcp', { col: at[0], row: at[1], displayFactor: displayFactor(), gcpId })
+  closeMenu()
 }
 
 function closeMenu() { menu.value = null }
@@ -336,6 +359,7 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
            centring offset was computed for the full width/height. -->
       <img
         v-if="previewSrc"
+        ref="previewImg"
         v-show="!gpuReady"
         :src="previewSrc"
         class="raster"
@@ -365,6 +389,13 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
         <button class="ctx-item" @click="menuCopyValue">
           {{ kind === 'dem' ? 'Copy elevation (Z)' : 'Copy color (RGB)' }}
         </button>
+        <template v-if="canPickGcp">
+          <div class="ctx-sep"></div>
+          <button class="ctx-item" @click="menuPickGcp(null)">Add GCP here</button>
+          <button v-if="selectedGcp && selectedGcp.role !== 'marker'" class="ctx-item" @click="menuPickGcp(selectedGcp.id)">
+            Move {{ selectedGcp.name }} here
+          </button>
+        </template>
         <div class="ctx-sep"></div>
         <button class="ctx-item" @click="menuZoomIn">Zoom in here</button>
         <button class="ctx-item" @click="menuFit">Fit to view</button>

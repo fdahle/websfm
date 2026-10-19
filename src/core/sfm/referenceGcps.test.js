@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { referenceGcpCandidates, spreadCandidates, candidateCoverage, referenceSigma, pixelSizeAt } from './referenceGcps.js'
+import { referenceGcpCandidates, spreadCandidates, candidateCoverage, referenceSigma, pixelSizeAt, referencePick } from './referenceGcps.js'
 import { SparsePoints } from './sparsePoints.js'
 function fixture() {
   return {
@@ -48,4 +48,20 @@ it('takes planimetric accuracy from the pixel size unless the reference declares
   expect(referenceSigma({ gsd: 0 })).toBeNull()
   // A 2-unit grid into a CRS that doubles lengths: 4 project units per pixel.
   expect(pixelSizeAt(fixture().reference, 10, 10, ([x, y]) => [2 * x, 2 * y])).toBe(4)
+})
+it('reads a pick off a reference: position in project units, σ from the pixel as drawn', () => {
+  const ref = fixture().reference, toProject = ([x, y]) => [x + 100, y - 100]
+  // Pixel (10, 20)'s centre on a 2-unit grid at (1000, 2000).
+  expect(referencePick(ref, 10.5, 20.5, { toProject })).toEqual({ x: 1121, y: 1859, gsd: 2, sigma: 2 })
+  // Only a 4× downsampled preview on screen: a click is good to 4 native pixels.
+  expect(referencePick(ref, 10.5, 20.5, { toProject, displayFactor: 4 }).sigma).toBe(8)
+  // A declared 6-unit accuracy dominates and the click adds in quadrature.
+  expect(referencePick(ref, 10.5, 20.5, { toProject, displayFactor: 4, declared: 6 }).sigma).toBeCloseTo(10, 12)
+})
+it('measures σ in metres for a geographic project', () => {
+  // A 0.001° grid at 60° S: one pixel is 111.32 m north–south and half that east–west.
+  const ref = { geoTransform: { originX: 10, originY: -60, scaleX: 0.001, scaleY: -0.001 } }, toProject = (p) => p
+  const pick = referencePick(ref, 0.5, 0.5, { toProject, geographic: true })
+  expect(pick.x).toBeCloseTo(10.0005, 12)
+  expect(pick.gsd).toBeCloseTo((111.32 + 111.32 * Math.cos(-60.0005 * Math.PI / 180)) / 2, 6)
 })

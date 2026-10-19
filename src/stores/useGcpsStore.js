@@ -473,6 +473,35 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     return { filled, skippedHasZ, skippedNoData, refused }
   }
 
+  // A ground position read off a reference raster (A-5, useExternalStore
+  // pickGroundControl): X/Y and their σ from the raster's pixel size, Z and its σ
+  // from a reference DEM there — but only one with a declared vertical accuracy
+  // (the Fill Z rule above). Without one, Z is left as it was and the log says so.
+  function setGcpFromReference(id, { x, y, sigma, rasterName, dem }) {
+    const g = gcps.value.find((gg) => gg.id === id)
+    if (!g || g.role === 'marker' || !Number.isFinite(x) || !Number.isFinite(y)) return false
+    g.x = x; g.y = y
+    if (sigma > 0) { g.accuracyX = sigma; g.accuracyY = sigma }
+    const zUsable = dem?.z != null && dem.accuracy != null
+    if (zUsable) {
+      g.z = dem.z; g.accuracyZ = dem.accuracy; g.verticalDatum = dem.datum ?? 'unknown'
+    }
+    g.accuracyStatus = [g.accuracyX, g.accuracyY, g.accuracyZ].every((v) => Number.isFinite(v) && v > 0)
+      ? 'declared' : 'unknown'
+    log(`GCP ${g.name}: position (${fmtNum(x)}, ${fmtNum(y)}) σ ${fmtNum(sigma)} from "${rasterName}"`
+      + (zUsable ? `, Z ${fmtNum(dem.z)} σ ${dem.accuracy} (${dem.datum}) from "${dem.rasterName}"` : ''), 'info', 'GCP')
+    if (!zUsable) {
+      log(`GCP ${g.name}: Z ${g.z == null ? 'left empty' : 'unchanged'} — `
+        + (dem?.z != null ? `reference DEM "${dem.rasterName}" has no declared vertical accuracy`
+          : 'no reference DEM covers this point'), 'warn', 'GCP')
+    } else if (dem.datum === 'unknown') {
+      log(`GCP ${g.name}: ⚠ that DEM's vertical datum is undeclared — an ellipsoid/geoid `
+        + 'mismatch is tens of metres in polar regions.', 'warn', 'GCP')
+    }
+    save()
+    return true
+  }
+
   // Non-destructive counterpart: report DEM-minus-GCP per GCP without touching
   // anything. Feeds the Quality Report's reference-DEM section (A-6).
   // → [{ gcpId, name, x, y, gcpZ, demZ, dz, datum, rasterName }]
@@ -613,6 +642,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     removeObservation,
     removeGcp,
     fillZFromReferenceDem,
+    setGcpFromReference,
     checkZAgainstReferenceDem,
     reprojectGcps,
     // project-store contract

@@ -14,6 +14,13 @@ projects.persistenceAvailable = false
 const open = ref(''), result = ref(null), raster = ref(null), viewer = ref(null)
 const measurements = useMeasurementsStore()
 window.workflowTools = { recon, external, images, gcps, projects, measurements, showRaster: id => { raster.value = external.rasterById(id) } }
+// The raster tab's GCP pick, as useGcpEditing pickGcpFromReference runs it.
+const selectedGcp = ref(null)
+async function pickGcp(pick) {
+  const res = await external.pickGroundControl(raster.value.id, pick.col, pick.row, pick)
+  const id = pick.gcpId ?? gcps.addGcp()
+  gcps.setGcpFromReference(id, res); selectedGcp.value = id
+}
 async function edit(request) { open.value = ''; result.value = await recon.editClouds(request) }
 </script>
 <template>
@@ -23,7 +30,7 @@ async function edit(request) { open.value = ''; result.value = await recon.editC
     <button v-for="t in ['length', 'area', 'profile', 'volume']" :key="t" :aria-pressed="viewer?.measureState?.tool === t" @click="viewer?.setMeasureTool(t)">measure-{{ t }}</button>
     <button :aria-pressed="!!viewer?.measureState?.showSaved" @click="viewer?.toggleSavedMeasurements()">measure-saved</button>
   </span>
-  <div style="position:relative;width:800px;height:600px"><ProductViewer v-if="raster" ref="viewer" :kind="raster.kind" :product="raster" :source="external.sources.get(raster.id)" /><ProductViewer v-else-if="recon.dem" ref="viewer" kind="dem" :product="recon.dem" :frame-status="recon.productFrameStatus(recon.dem)" /></div>
+  <div style="position:relative;width:800px;height:600px"><ProductViewer v-if="raster" ref="viewer" :kind="raster.kind" :product="raster" :source="external.sources.get(raster.id)" :selected-gcp="gcps.gcps.find(g => g.id === selectedGcp) ?? null" @pick-gcp="pickGcp" /><ProductViewer v-else-if="recon.dem" ref="viewer" kind="dem" :product="recon.dem" :frame-status="recon.productFrameStatus(recon.dem)" /></div>
   <FindGcpsModal v-if="open === 'gcps'" :has-relative-ortho="!!recon.ortho" :reference-orthos="external.orthoRasters" @close="open = ''" />
   <GradualSelectionModal v-if="open === 'gradual' && recon.mainSparseCloud" :cloud="recon.mainSparseCloud" @close="open = ''" @run="edit" />
   <output id="edited">{{ result?.points?.length ?? '' }}</output>
