@@ -203,6 +203,10 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Workflow Match blocks pick their pairing per project.** A new Match Features block
+  starts on **auto** pairing: Preselect when images have camera positions, Sequential
+  for video frames, otherwise Exhaustive, the same as the Match Features dialog. A
+  workflow used to match a video set exhaustively.
 - **A long orthophoto reports its progress.** The progress bar names the block being
   built, and the log says every 30 seconds or so how many blocks are done, how long
   each takes and roughly how long is left. A fine orthophoto can take hours, and the
