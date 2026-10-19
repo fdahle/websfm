@@ -178,9 +178,12 @@ export function createLodLayer(cloud, { open, material, onChange }) {
       points += node.count
       wanted.add(key)
       e.lastUsed = frame
+      // A source whose nodes are sparser than ours (a COPC writer's top levels) says
+      // how much sooner its children are worth refining (core/lod/copc.js refineScale).
+      const minPixels = MIN_NODE_PIXELS * (reader.refineScale?.(node) ?? 1)
       for (const child of reader.children(node)) {
         const cw = weight(child, camera, height)
-        if (cw >= MIN_NODE_PIXELS) h.push(child, cw)
+        if (cw >= minPixels) h.push(child, cw)
       }
     }
     for (const e of cache.values()) if (e.object) e.object.visible = wanted.has(e.key)

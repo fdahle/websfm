@@ -674,8 +674,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   })
 
   // Level-of-detail octrees of big clouds (reconstruction/cloudLod.js).
-  const { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, exportCloudTiles, editStreamedCloud, pruneLod } = createCloudLod({
+  const { buildCloudLod, openCloudLod, importStreamedCloud, importCopcCloud, extractCloudPoints, exportCloudLod, exportCloudTiles, editStreamedCloud, pruneLod } = createCloudLod({
     clouds, log, save, projectId: () => (isPersisting() ? projects.currentProjectId : null), makeCloudId, selectedCloudId,
+    projectCrs: () => projects.currentCrs ?? null,
   })
 
   // Crop / filter / merge / select and the other Tools-tab edits (reconstruction/cloudEdits.js).
@@ -993,7 +994,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     reconstruct,
     importColmapModel, importInteropModel,
     importCloud,
-    editClouds, textureMesh, buildCloudLod, openCloudLod, importStreamedCloud, exportCloudLod, exportCloudTiles,
+    editClouds, textureMesh, buildCloudLod, openCloudLod, importStreamedCloud, importCopcCloud, exportCloudLod, exportCloudTiles,
     // Tools ▸ Model ▾ ▸ Region (core/products/region.js).
     region, regionState, setRegion, clearRegion,
     // Tools ▸ Model ▾ ▸ Orient model (core/products/orientation.js).

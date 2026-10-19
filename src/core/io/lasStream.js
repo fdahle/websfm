@@ -19,6 +19,16 @@ const RGB_FORMATS = new Set([2, 3, 5, 7, 8, 10])
 const SAMPLE_RUNS = 8 // runs read to decide the colour depth
 
 /**
+ * The STREAM_ATTRIBUTES of `n` decoded points (createLasDecoder's attributes). The
+ * decoder leaves out a field at its default throughout (LAS_FIELD_DEFAULTS: 0, single
+ * returns 1); a streamed cloud keeps all four.
+ */
+export function streamAttributes(attributes, n) {
+  return Object.fromEntries(STREAM_ATTRIBUTES.map((a) => [a.name,
+    attributes[a.name] ?? new (a.type === 'uint16' ? Uint16Array : Uint8Array)(n).fill(LAS_FIELD_DEFAULTS[a.name] ?? 0)]))
+}
+
+/**
  * Whether a LAS/LAZ file must be streamed: the whole-file import would pass its
  * working-memory limit (validateLasAllocation; a LAZ also holds its compressed bytes
  * twice). `head` is the file's first bytes, at least up to the point data.
@@ -119,11 +129,7 @@ export async function openLasStream(source, { createLazDecoder = null, batchPoin
       dec.decode(records, 0, n)
       const c = dec.finish()
       yield {
-        count: n, pos: c.pos, col: colour ? c.col ?? null : null,
-        // The decoder leaves out a field at its default throughout (LAS_FIELD_DEFAULTS:
-        // 0, single returns 1); the octree keeps all four.
-        attributes: Object.fromEntries(STREAM_ATTRIBUTES.map((a) => [a.name,
-          c.attributes[a.name] ?? new (a.type === 'uint16' ? Uint16Array : Uint8Array)(n).fill(LAS_FIELD_DEFAULTS[a.name] ?? 0)])),
+        count: n, pos: c.pos, col: colour ? c.col ?? null : null, attributes: streamAttributes(c.attributes, n),
       }
     }
   }

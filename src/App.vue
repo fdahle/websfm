@@ -341,7 +341,7 @@ const {
 } = useImportRouting({
   addGcps, addFootprints, importSensors, addPoses, addFiducialObs: addFiducialObservations, addFiducialMarks: importFiducialMarks,
   importColmap: importColmapModel, importCloud,
-  importStreamedCloud: reconstructionStore.importStreamedCloud, progress: exportProgress,
+  importStreamedCloud: reconstructionStore.importStreamedCloud, importCopcCloud: reconstructionStore.importCopcCloud, progress: exportProgress,
   openSfmProject: openSfmImport,
   // A dropped `.tif` arrives as `image/tiff` and would otherwise be ingested as
   // a source photo, so the image path is routed through the georeference fork.

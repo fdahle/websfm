@@ -1,4 +1,4 @@
-import { openLodReader } from '../../core/lod/reader.js'
+import { openWorkerCloudSource } from './lod.js'
 import { lodToTiles, memoryLodReader } from '../../core/lod/tiles3d.js'
 import { meshToTiles } from '../../core/products/tiles3dMesh.js'
 import { prepareMeshForExport } from '../../core/products/exporters.js'
@@ -27,9 +27,9 @@ function zipBlob() {
   }
 }
 
-export function makeTiles3dOps() {
-  // A point cloud from its octree (`lod`, `data`, `hierarchy`: a streamed cloud, or a
-  // resident one with an octree) or from its points (`cloud`, an octree built here).
+export function makeTiles3dOps({ lazCodec = null } = {}) {
+  // A point cloud from its octree (`lod`, `data`, `hierarchy`: a streamed cloud, a
+  // resident one with an octree, or a COPC file read in place) or from its points (`cloud`, an octree built here).
   // input { lod?, data?, hierarchy?, cloud?, sim, origin, transform, color }
   // → { blob, tiles, contentTiles, points, levels }
   async function exportPointTiles([input], { emit }) {
@@ -38,7 +38,7 @@ export function makeTiles3dOps() {
     let reader, lod
     if (input.lod) {
       lod = input.lod
-      reader = await openLodReader(lod, { data: input.data, hierarchy: input.hierarchy })
+      reader = await openWorkerCloudSource(lod, { data: input.data, hierarchy: input.hierarchy ?? null }, lazCodec)
     } else {
       ({ reader, lod } = memoryLodReader(input.cloud))
     }

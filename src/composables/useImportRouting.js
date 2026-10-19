@@ -11,6 +11,7 @@ import { looksLikeZipHead, isProjectArchiveName } from '../core/io/projectArchiv
 import { applyImportTransform } from '../core/io/cloudImport.js'
 import { parseCloudFile as parseCloudFileWorker, terminateAll } from '../workers/computeClient.js'
 import { lasNeedsStreaming } from '../core/io/lasStream.js'
+import { copcReadsInPlace, COPC_IN_PLACE_MIN_POINTS } from '../core/lod/copc.js'
 import { unzipStore } from '../utils/zip.js'
 import { peekArchiveManifest } from '../utils/projectFile.js'
 import { isTiff, isGeoreferencedTiff, probeTiffGeoTags } from '../utils/tiff.js'
@@ -26,7 +27,7 @@ import { showToast } from './useToasts.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, importSensors, addPoses, addFiducialObs, addFiducialMarks, importColmap, openSfmProject, importCloud, importStreamedCloud = null, progress = null, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
+export function useImportRouting({ addGcps, addFootprints, importSensors, addPoses, addFiducialObs, addFiducialMarks, importColmap, openSfmProject, importCloud, importStreamedCloud = null, importCopcCloud = null, progress = null, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
@@ -312,9 +313,12 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     if (!file || !importCloud) return
     // A LAS/LAZ too large to hold in memory is streamed into a level-of-detail octree
     // instead (core/io/lasStream.js); the dialog's transforms need resident points.
-    if (importStreamedCloud && await streamsAsLod(file)) {
+    // A large COPC file is an octree already: read in place, never decoded whole.
+    const route = (importStreamedCloud || importCopcCloud) ? await lasRoute(file) : null
+    const importer = route === 'copc' ? importCopcCloud : route === 'stream' ? importStreamedCloud : null
+    if (importer) {
       progress?.open('Importing point cloud', 100, () => terminateAll('import cancelled'))
-      const cloud = await importStreamedCloud(file, progress?.report)
+      const cloud = await importer(file, progress?.report)
       await progress?.close()
       if (cloud) activateTab('viewer')
       return
@@ -330,13 +334,16 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     }
   }
 
-  async function streamsAsLod(file) {
+  // 'copc' (read in place), 'stream' (into an octree) or null (into memory).
+  async function lasRoute(file) {
     const head = new Uint8Array(await file.slice(0, Math.min(file.size, 1 << 16)).arrayBuffer())
-    if (head.length < 100 || String.fromCharCode(head[0], head[1], head[2], head[3]) !== 'LASF') return false
+    if (head.length < 100 || String.fromCharCode(head[0], head[1], head[2], head[3]) !== 'LASF') return null
     const offsetToPoints = new DataView(head.buffer).getUint32(96, true)
     const full = offsetToPoints > head.length
       ? new Uint8Array(await file.slice(0, Math.min(file.size, offsetToPoints)).arrayBuffer()) : head
-    return lasNeedsStreaming(full, file.size) === true
+    const stream = lasNeedsStreaming(full, file.size) === true
+    if (importCopcCloud && copcReadsInPlace(full, { minPoints: stream ? 0 : COPC_IN_PLACE_MIN_POINTS })) return 'copc'
+    return stream && importStreamedCloud ? 'stream' : null
   }
 
   // User confirmed the cloud-import settings: apply the transform + commit.

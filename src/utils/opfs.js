@@ -1407,6 +1407,7 @@ export async function deleteReconstruction(projectId) {
 // ── Level-of-detail octrees (dev/planning/plan-lod.md) ──────────────────────
 // lod/{name}.lod (the nodes' points) + lod/{name}.hier (the hierarchy), one pair per
 // octree; a cloud's metadata names its pair (`cloud.lod.dataFile` / `hierarchyFile`).
+// An imported COPC file is kept as lod/{name}.copc.laz, its own octree (no .hier).
 // Kept by "exclude derived data": a streamed cloud's octree is its only copy.
 
 export async function lodDir(projectId) {
@@ -1424,7 +1425,7 @@ export async function pruneLodFiles(projectId, keepNames, { building = false } =
   return trackPersistence('pruneLodFiles:' + String(projectId), async () => {
     const dir = await getSubDir(projectId, 'lod')
     const stale = []
-    for await (const name of dir.keys()) if (/\.(lod|hier)$/.test(name) && !keepNames.has(name)) stale.push(name)
+    for await (const name of dir.keys()) if (/\.(lod|hier)$|\.copc\.laz$/.test(name) && !keepNames.has(name)) stale.push(name)
     for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
     if (!building) {
       const root = await getRoot()

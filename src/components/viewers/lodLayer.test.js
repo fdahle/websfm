@@ -70,3 +70,49 @@ describe('level-of-detail layer', () => {
     expect(layer.object.children.length).toBe(0)
   })
 })
+
+// A COPC file (core/lod/copc.js) behind the same layer: the PDAL-written fixture with
+// its (1,0,0,0) entry moved into a second hierarchy page, read when the walk reaches
+// the root.
+describe('level-of-detail layer over a COPC file', () => {
+  it('draws every node and reads the deeper hierarchy page on the way', async () => {
+    const wasm = await import('../../wasm/lazcodec/lazcodec.js')
+    const { readFileSync } = await import('node:fs')
+    await wasm.default({ module_or_path: readFileSync(new URL('../../wasm/lazcodec/lazcodec_bg.wasm', import.meta.url)) })
+    const { readCopcMeta } = await import('../../core/lod/copc.js')
+    const { openCloudSource } = await import('../../core/lod/cloudSource.js')
+    const orig = new Uint8Array(readFileSync(new URL('../../core/lod/fixtures/tiny.copc.laz', import.meta.url)))
+    const createChunkDecoder = (vlr) => {
+      const d = wasm.LazDecoder.forChunks(vlr)
+      return { decode: (b, n) => d.decode_chunk(b, n), free: () => d.free() }
+    }
+    const lod = await readCopcMeta({ size: orig.length, read: async (a, b) => orig.slice(a, b) }, { createChunkDecoder })
+    const bytes = new Uint8Array(orig.length + 32)
+    bytes.set(orig)
+    const dv = new DataView(bytes.buffer)
+    const root = lod.copc.rootPage.offset
+    let moved = -1
+    for (let o = root; o < root + lod.copc.rootPage.length; o += 32) {
+      if (dv.getInt32(o, true) === 1 && dv.getInt32(o + 4, true) === 0 && dv.getInt32(o + 8, true) === 0 && dv.getInt32(o + 12, true) === 0) moved = o
+    }
+    bytes.copyWithin(orig.length, moved, moved + 32)
+    dv.setBigUint64(moved + 16, BigInt(orig.length), true); dv.setInt32(moved + 24, 32, true); dv.setInt32(moved + 28, -1, true)
+
+    let reader = null
+    const open = async () => (reader = await openCloudSource(lod, { data: new Blob([bytes]) }, { createChunkDecoder, hierarchy: 'lazy' }))
+    const cloud = { id: 'k', count: lod.points, lod, style: null }
+    const layer = createLodLayer(cloud, { open, material: new THREE.PointsMaterial(), onChange: () => {} })
+    layer.restyle({ ...cloud, style: { field: 'attribute:classification' } }, null)
+    while (!layer.ready) await settle()
+    expect(reader.complete).toBe(false)
+    expect(reader.nodes.size).toBe(4)
+    const camera = new THREE.PerspectiveCamera(60, 1, 1, 1e5)
+    const c = lod.root.min.map((m) => m + lod.root.size / 2)
+    camera.position.set(c[0], c[1] - 30, c[2] + 60)
+    camera.lookAt(c[0], c[1], c[2])
+    for (let k = 0; k < 20; k++) { layer.update(camera, 1000, 1e6); await settle() }
+    expect(reader.complete).toBe(true)
+    expect(layer.visiblePoints).toBe(24_000)
+    layer.dispose()
+  })
+})

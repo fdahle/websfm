@@ -97,7 +97,7 @@ const ops = {
   ...makeExportOps({ lazCodec }),
   ...makeUndistortOps({ rasterize }),
   ...makeLodOps({ lazCodec }),
-  ...makeTiles3dOps(),
+  ...makeTiles3dOps({ lazCodec }),
 }
 
 self.onmessage = async (e) => {

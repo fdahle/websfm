@@ -105,7 +105,12 @@ function fromMenu(fn) { const cloud = cloudCtx.value.cloud; closeMenu(); fn(clou
         title="Imported — the pipeline never overwrites this cloud"
       >imported</span>
       <span
-        v-if="cloud.kind === 'dense' && cloud.lod && !cloud.pos"
+        v-if="cloud.kind === 'dense' && cloud.lod && !cloud.pos && cloud.lod.format === 'copc'"
+        class="imported-badge"
+        :title="`Read in place from its COPC file — the file's own level-of-detail octree, never loaded whole${cloud.lod.file?.crs ? ` (${cloud.lod.file.crs})` : ''}; tools that need every point in memory leave it out`"
+      >COPC</span>
+      <span
+        v-else-if="cloud.kind === 'dense' && cloud.lod && !cloud.pos"
         class="imported-badge"
         title="Streamed — too large to hold in memory, drawn from its level-of-detail octree; tools that need every point in memory leave it out"
       >streamed</span>
