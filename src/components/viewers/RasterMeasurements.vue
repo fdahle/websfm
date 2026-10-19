@@ -10,6 +10,9 @@ import { polylineLength, planimetricArea, sampleProfile, polygonVolume, groundVo
 import { isGeographic } from '../../core/crs.js'
 import { rasterGroundScale, rasterUnits, volumeUnitLabel } from '../../core/products/rasterUnits.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
+import { demRef } from '../../core/products/demWindow.js'
+import { productDescriptor } from '../../core/io/rasterSource.js'
+import { readDemWindow } from '../../workers/computeClient.js'
 
 // Raster measurements over the active ProductViewer. The tool is CHOSEN from the
 // Ribbon's contextual DEM/Orthophoto tab (Measure group) — this component only
@@ -59,15 +62,42 @@ const unit = computed(() => selected.value?.unit || productUnits.value.horizonta
 const verticalUnit = computed(() => selected.value?.verticalUnit || productUnits.value.vertical)
 const unavailable = computed(() => !props.descriptor || !props.view || props.frameStatus?.stale || props.product?.crsUnresolved
   || (props.product?.crs && isGeographic(props.product.crs)))
+const world = computed(() => selected.value?.world ?? vertices.value)
+// A block-built DEM (SAT-3) is measured on a window of its COG around the drawn shape,
+// at the finest level within WINDOW_CELLS — read in the worker once the shape stops
+// changing. Until it arrives (and for any other DEM) the plane is the grid.
+const WINDOW_CELLS = 16 * 1024 ** 2
+const windowGrid = shallowRef(null)
+let windowToken = 0, windowTimer = null
+// Keyed by the coordinates: drawing pushes into the same vertex array.
+watch([() => world.value.map((p) => `${p.x},${p.y}`).join(';'), () => props.product], ([, product]) => {
+  const pts = world.value
+  clearTimeout(windowTimer)
+  const token = ++windowToken
+  if (props.kind !== 'dem' || !product?.cog || !(pts?.length >= 2)) { windowGrid.value = null; return }
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y) }
+  const key = `${minX},${minY},${maxX},${maxY}`
+  if (windowGrid.value?.key === key && windowGrid.value.product === product) return
+  windowTimer = setTimeout(async () => {
+    try {
+      const g = await readDemWindow({ dem: demRef(product), rect: { minX, minY, maxX, maxY }, maxCells: WINDOW_CELLS })
+      if (token !== windowToken) return
+      windowGrid.value = g && { key, product, ...productDescriptor(g), data: g.data, mask: g.mask, nodata: null,
+        zOffset: product.vOffset || 0, level: g.level }
+    } catch { if (token === windowToken) windowGrid.value = null }
+  }, 150)
+}, { immediate: true })
+onBeforeUnmount(() => clearTimeout(windowTimer))
 const grid = computed(() => {
   if (props.kind !== 'dem' || !props.descriptor) return null
+  if (windowGrid.value?.product === props.product) return windowGrid.value
   const data = props.source?.unsafePlane()
   // zOffset: a reference DEM's declared vertical offset, the same correction
   // sampleReferenceDem applies — the measurement stamp already records it.
   return data ? { ...props.descriptor, data, mask: props.product?.mask, nodata: props.product?.nodata,
     zOffset: props.product?.vOffset || 0 } : null
 })
-const world = computed(() => selected.value?.world ?? vertices.value)
 // Point scale factor of the raster's projected CRS at its centre (rasterUnits.js):
 // every horizontal quantity below is divided back to ground. 1 for local/model
 // frames; a geographic CRS has none, and measuring is disabled for it.

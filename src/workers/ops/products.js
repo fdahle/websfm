@@ -5,7 +5,7 @@ import { demRenderOptions } from '../../core/products/productStyle.js'
 import { rasterToPng } from '../rasterPreview.js'
 import { frameFromSpec, describeFrame } from '../../core/products/frameSpec.js'
 import { rasterizeDem, coreExtent, demGeometry, rasterizeDemBlocks, fillEnclosedGaps } from '../../core/products/dem.js'
-import { orthorectifyTiled, orthoTiledWorkingBytes, ORTHO_BLOCK, MAX_SEAM_CELLS } from '../../core/products/ortho.js'
+import { orthorectifyTiled, orthoTiledWorkingBytes, orthoMapPxPerCell, ORTHO_BLOCK, MAX_SEAM_CELLS } from '../../core/products/ortho.js'
 import { GAIN_MIN, GAIN_MAX } from '../../core/products/colourGains.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import { describeOrthoStats } from '../../core/eval/orthoStats.js'
@@ -19,6 +19,8 @@ import { openRaster, readWindowBytes } from '../cogRead.js'
 import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
 import { nounFor, pluralize } from '../../core/textFormat.js'
 import { createBlockProgress } from '../../utils/blockProgress.js'
+import { planDemWindow, demCogLevels, maskFromNaN } from '../../core/products/demWindow.js'
+import { fromBlob } from 'geotiff'
 
 // The ortho's source photos (plan-ortho-mosaic O1). `images` comes from the store, one
 // per depth map: { uuid, name, url, K (the camera's full-resolution K), dist, selfCal,
@@ -97,9 +99,42 @@ async function deflateTile(bytes) {
   return { length: part.size, part }
 }
 
+// A block-built DEM (SAT-3) read back as a plain height grid: the finest COG level
+// whose window of `rect` (frame coords, null = all) holds at most `maxCells` cells
+// (core/products/demWindow.js). dem: the record's { cog, originX, originY, fullGsd,
+// fullWidth, fullHeight }. → { width, height, gsd, originX, originY, data (Float32,
+// NaN = nodata), mask, level } or null when the rectangle misses the DEM.
+export async function readDemGrid(dem, rect, maxCells) {
+  const plan = planDemWindow(dem, demCogLevels(dem.fullWidth, dem.fullHeight, dem.tileSize ?? 512), rect, maxCells)
+  if (!plan) return null
+  const tiff = await fromBlob(dem.cog)
+  const image = await tiff.getImage(plan.level)
+  const [c0, r0, c1, r1] = plan.window
+  const [data] = await image.readRasters({ window: [c0, r0, c1, r1], samples: [0], interleave: false })
+  const plane = data instanceof Float32Array ? data : Float32Array.from(data)
+  return { width: plan.width, height: plan.height, gsd: plan.gsd, originX: plan.originX, originY: plan.originY,
+    data: plane, mask: maskFromNaN(plane), level: plan.level }
+}
+
+// Cells a DEM tool may read from a COG in one piece (contours, terrain): Float32 +
+// mask + the tool's own planes stay within a few hundred MB.
+const DEM_TOOL_CELLS = 48 * 1024 ** 2
+
 // Upper bound on a source photo's decoded RGBA: its full-resolution K puts the
 // principal point near the centre, so 2·cx × 2·cy is about the native size.
-const photoBytesBound = (im) => (im?.K ? Math.ceil(2 * im.K.cx) * Math.ceil(2 * im.K.cy) * 4 : 0)
+// Upper bound on a source photo's decoded RGBA: its full-resolution K puts the
+// principal point near the centre, so 2·cx × 2·cy is about the native size. The loader
+// decodes at ~2 photo px per ortho cell (makePhotoLoader), so with the map's
+// `mapPxPerCell` the bound is the native size × that scale² — ×4 for a pyramid read
+// that lands one level finer. A satellite frame (2 GP) under a coarse ortho decodes to
+// a small fraction of its native size.
+const photoBytesBound = (im, m = null, mapPxPerCell = null) => {
+  if (!im?.K) return 0
+  const native = Math.ceil(2 * im.K.cx) * Math.ceil(2 * im.K.cy)
+  const s = m?.K ? m.K.fx / im.K.fx : 0
+  const scale = s > 0 && mapPxPerCell > 0 ? Math.min(1, (2 * s) / mapPxPerCell) : 1
+  return Math.min(native, Math.ceil(4 * native * scale * scale)) * 4
+}
 
 // Product ops (DEM + orthophoto). The frame rebuild/descriptor + raster→dataURL
 // canvas helpers live here next to the two handlers; pure compute is in
@@ -362,6 +397,17 @@ export function makeProductsOps({ rasterize } = {}) {
   // ortho — the viewer and the map draw its tiles, exports copy or stream it.
   async function generateOrtho([input], { emit }) {
     const { surface, maps, streamed = false, settings = {} } = input
+    // A block-built DEM surface (SAT-3) is read from its COG, as fine as the memory
+    // budget allows (a fifth of it for the Float32 heights + mask), not its overview.
+    if (surface?.kind === 'dem' && surface.grid?.cog) {
+      const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : 2 * 1024 ** 3
+      const g = surface.grid
+      const read = await readDemGrid(g, null, Math.floor(budget / 5 / 5))
+      emit('log', [`Ortho: DEM surface read from its GeoTIFF at ${read.width}×${read.height} @ ${read.gsd.toPrecision(3)}`
+        + `${read.level ? ` (level ${read.level}; the full ${g.fullWidth}×${g.fullHeight} grid exceeds the memory budget)` : ' (full resolution)'}`,
+      read.level ? 'warn' : 'info', 'Products'])
+      surface.grid = { ...read, frame: g.frame }
+    }
     const built = buildSurfaceGrid(surface, emit)
     const { frame, label } = built
     const unit = frameUnitName(frame.unit)
@@ -396,7 +442,10 @@ export function makeProductsOps({ rasterize } = {}) {
     const pyramidBytes = Math.ceil(width / 8) * Math.ceil(height / 8) * 4 + 2048 * 2048 * 4
     // A map's planes are 23 B/px (depth, cost, rgb, normals).
     const photoOf = new Map((input.images ?? []).map((im) => [im.uuid, im]))
-    const maxEntry = maps.reduce((n, m) => Math.max(n, m.width * m.height * 23 + photoBytesBound(photoOf.get(m.uuid))), 0)
+    let zSum = 0, zN = 0
+    for (let i = 0; i < built.grid.data.length; i += 97) { const z = built.grid.data[i]; if (Number.isFinite(z)) { zSum += z; zN++ } }
+    const pxPerCell = orthoMapPxPerCell(geom, frame.toSfm, zN ? zSum / zN : 0)
+    const maxEntry = maps.reduce((n, m) => Math.max(n, m.width * m.height * 23 + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))), 0)
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : Infinity
     const fixed = blockBytes + pyramidBytes
     if (fixed + maxEntry > budget) {
@@ -532,6 +581,17 @@ export function makeProductsOps({ rasterize } = {}) {
   async function demTool([input], { emit }) {
     const log = (m, l, c) => emit('log', [m, l, c])
     const { tool, settings = {} } = input
+    // A block-built DEM (SAT-3) arrives as its record ({ dem }), not a plane: contours
+    // and terrain read it whole at the finest level that fits DEM_TOOL_CELLS, a clip
+    // reads its polygons' window at full resolution.
+    if (input.dem && tool !== 'clip') {
+      const d = input.dem
+      input.grid = { ...(await readDemGrid(d, null, DEM_TOOL_CELLS)), crs: d.crs ?? null }
+      log(`${tool === 'contours' ? 'Contours' : 'Terrain'}: DEM read at ${input.grid.width}×${input.grid.height} @ `
+        + `${input.grid.gsd.toPrecision(3)}${input.grid.level ? ` (level ${input.grid.level} of its GeoTIFF; the full `
+          + `${d.fullWidth}×${d.fullHeight} grid is past ${DEM_TOOL_CELLS.toLocaleString()} cells)` : ' (full resolution)'}`,
+      input.grid.level ? 'warn' : 'info', 'Products')
+    }
     if (tool === 'contours') {
       const result = traceContours(input.grid, settings, log)
       const text = input.format === 'dxf'
@@ -560,6 +620,20 @@ export function makeProductsOps({ rasterize } = {}) {
         const data = await readWindowBytes(image, win.col0, win.row0, win.col0 + win.width, win.row0 + win.height)
         ortho = { ...windowGeometry(geo, win), data }
       }
+      if (input.kind === 'dem' && input.dem) {
+        const d = input.dem
+        // The polygons' window in full-resolution cells (any polygon shape), as a frame rectangle.
+        const win = polygonPixelWindow({ width: d.fullWidth, height: d.fullHeight, gsd: d.fullGsd, originX: d.originX, originY: d.originY },
+          input.polygons)
+        const rect = win && { minX: d.originX + win.col0 * d.fullGsd, maxX: d.originX + (win.col0 + win.width) * d.fullGsd,
+          maxY: d.originY - win.row0 * d.fullGsd, minY: d.originY - (win.row0 + win.height) * d.fullGsd }
+        input.grid = rect ? await readDemGrid(d, rect, MAX_CLIP_CELLS) : null
+        if (!input.grid) { log('Clip DEM: no clip polygon overlaps the DEM', 'warn', 'Products'); return { result: { raster: null } } }
+        if (input.grid.level) {
+          log(`Clip DEM: the clip area is past ${MAX_CLIP_CELLS.toLocaleString()} cells at full resolution; clipped at `
+            + `${input.grid.gsd.toPrecision(3)} (level ${input.grid.level} of its GeoTIFF)`, 'warn', 'Products')
+        }
+      }
       const raster = input.kind === 'ortho'
         ? clipOrtho(ortho, input.polygons, { onLog: log })
         : clipDem(input.grid, input.polygons, { onLog: log })
@@ -569,5 +643,35 @@ export function makeProductsOps({ rasterize } = {}) {
     throw new Error(`unknown raster tool "${tool}"`)
   }
 
-  return { generateDem, generateOrtho, demTool, demPreview }
+  // The main thread's window onto a block-built DEM (measurements, the GCP check):
+  // [{ dem, rect, maxCells }] → readDemGrid's grid, its planes transferred.
+  async function readDemWindow([{ dem, rect = null, maxCells = 16 * 1024 ** 2 }]) {
+    const grid = await readDemGrid(dem, rect, maxCells)
+    return { result: grid, transfer: grid ? [grid.data.buffer, grid.mask.buffer] : [] }
+  }
+
+  // A block-built DEM as an ESRI ASCII grid, read from its COG in row bands of level 0
+  // so no full plane exists: [{ dem, nodata }] → a Blob (text/plain).
+  async function demAscii([{ dem, nodata = -9999 }], { emit }) {
+    const tiff = await fromBlob(dem.cog)
+    const image = await tiff.getImage(0)
+    const W = dem.fullWidth, H = dem.fullHeight, BAND = 256
+    const parts = [`ncols ${W}\nnrows ${H}\nxllcorner ${dem.originX}\nyllcorner ${dem.originY - H * dem.fullGsd}\n`
+      + `cellsize ${dem.fullGsd}\nNODATA_value ${nodata}\n`]
+    const row = new Array(W)
+    for (let r0 = 0; r0 < H; r0 += BAND) {
+      const r1 = Math.min(H, r0 + BAND)
+      const [band] = await image.readRasters({ window: [0, r0, W, r1], samples: [0], interleave: false })
+      let text = ''
+      for (let r = 0; r < r1 - r0; r++) {
+        for (let c = 0; c < W; c++) { const v = band[r * W + c]; row[c] = Number.isFinite(v) ? v : nodata }
+        text += row.join(' ') + '\n'
+      }
+      parts.push(text)
+      emit('progress', [r1, H, 'Writing the ASCII grid…'])
+    }
+    return { result: new Blob(parts, { type: 'text/plain' }) }
+  }
+
+  return { generateDem, generateOrtho, demTool, demPreview, readDemWindow, demAscii }
 }

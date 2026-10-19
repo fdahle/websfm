@@ -2,10 +2,11 @@ import { epsgToWkt } from '../../core/products/wkt.js'
 import { demToCog, demToGeoTiff, rasterWorldFile, demToAsciiGridParts, orthoToGeoTiff } from '../../core/products/exporters.js'
 import { downloadBlob } from '../../utils/download.js'
 import { partsToBlob } from '../../utils/blobParts.js'
-import { exportOrthoFile, demTool as workerDemTool } from '../../workers/computeClient.js'
+import { exportOrthoFile, demTool as workerDemTool, demAscii as workerDemAscii } from '../../workers/computeClient.js'
 import { rasterGroundScale, rasterUnits } from '../../core/products/rasterUnits.js'
 import { productDescriptor } from '../../core/io/rasterSource.js'
 import { pluralize } from '../../core/textFormat.js'
+import { demRef } from '../../core/products/demWindow.js'
 
 // The raster exports, split out of useExports: DEM and orthophoto (GeoTIFF / COG,
 // ASCII grid, world files) and the Tools ▸ Products ▾ derivatives — contours,
@@ -44,9 +45,17 @@ export function createRasterExports({
         + 'GeoTIFF (DEFLATE, nodata NaN)', 'success', 'Export')
       return
     }
+    if (full && format !== 'png') {
+      // The ASCII grid of the full grid, written from the COG in row bands.
+      const blob = await workerDemAscii({ dem: demRef(dem.value), nodata }, { onLog: (m, l, c) => log(m, l, c) })
+      downloadBlob(`${projectBase()}-dem.asc`, blob, 'text/plain;charset=utf-8')
+      if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, prjText(info), 'text/plain;charset=utf-8')
+      log(`DEM export: ASCII grid of the full ${dem.value.fullWidth}×${dem.value.fullHeight} grid`, 'success', 'Export')
+      return
+    }
     if (full) {
-      log(`DEM export: ${format === 'png' ? 'the hillshade' : 'the ASCII grid'} is of the ${dem.value.width}×${dem.value.height} `
-        + `overview, not the full ${dem.value.fullWidth}×${dem.value.fullHeight} grid; export a GeoTIFF for that`, 'warn', 'Export')
+      log(`DEM export: the hillshade PNG is of the ${dem.value.width}×${dem.value.height} overview, not the full `
+        + `${dem.value.fullWidth}×${dem.value.fullHeight} grid; export a GeoTIFF for that`, 'warn', 'Export')
     }
     if (format === 'cog') {
       // COG defaults to DEFLATE: an uncompressed tiled file is strictly larger
@@ -130,16 +139,23 @@ export function createRasterExports({
     width: g.width, height: g.height, gsd: g.gsd, originX: g.originX, originY: g.originY,
     data: g.data.slice(), mask: g.mask ? g.mask.slice() : null, crs: g.crs ?? null,
   })
+  // A DEM tool's input: a block-built DEM (SAT-3) goes as its record and is read from
+  // its COG in the worker; any other as a copy of its plane (transferred).
+  const demToolInput = (g) => {
+    if (g.cog) return { input: { dem: demRef(g) }, transfer: [] }
+    const grid = gridCopy(g)
+    return { input: { grid }, transfer: [grid.data.buffer, ...(grid.mask ? [grid.mask.buffer] : [])] }
+  }
   const unitLabelOf = (g) => rasterUnits(g).vertical
 
   async function exportContours({ interval, indexEvery, smooth, minLength, format }) {
     const grid = dem.value
     if (!grid) return
-    const copy = gridCopy(grid)
+    const { input, transfer } = demToolInput(grid)
     const info = crsInfo(grid)
     const { text, lines, levels } = await workerDemTool(
-      { tool: 'contours', grid: copy, settings: { interval, indexEvery, smooth, minLength }, format, crs: info.crs },
-      { transfer: [copy.data.buffer, ...(copy.mask ? [copy.mask.buffer] : [])], onLog: (m, l, c) => log(m, l, c) },
+      { tool: 'contours', ...input, settings: { interval, indexEvery, smooth, minLength }, format, crs: info.crs },
+      { transfer, onLog: (m, l, c) => log(m, l, c) },
     )
     const dxf = format === 'dxf'
     downloadBlob(`${projectBase()}-contours.${dxf ? 'dxf' : 'geojson'}`, text,
@@ -154,10 +170,10 @@ export function createRasterExports({
     if (!grid || !products?.length) return
     const k = await gridScaleFactor(grid)
     if (k !== 1) log(`Terrain: point scale factor k = ${k.toFixed(6)} at the DEM centre — horizontal spacing is gsd/k`, 'info', 'Export')
-    const copy = gridCopy(grid)
+    const { input, transfer } = demToolInput(grid)
     const { rasters } = await workerDemTool(
-      { tool: 'terrain', grid: copy, settings: { products, units: slopeUnits, azimuth, altitude, multidirectional, k } },
-      { transfer: [copy.data.buffer, ...(copy.mask ? [copy.mask.buffer] : [])], onLog: (m, l, c) => log(m, l, c) },
+      { tool: 'terrain', ...input, settings: { products, units: slopeUnits, azimuth, altitude, multidirectional, k } },
+      { transfer, onLog: (m, l, c) => log(m, l, c) },
     )
     const info = crsInfo(grid)
     const deflate = compression === 'none' ? null : deflateBytes
@@ -182,8 +198,8 @@ export function createRasterExports({
     const input = kind === 'ortho'
       ? { tool: 'clip', kind, polygons, cog: product.cog,
           geo: { width: product.width, height: product.height, gsd: product.gsd, originX: product.originX, originY: product.originY } }
-      : { tool: 'clip', kind, polygons, grid: gridCopy(product) }
-    const buffers = kind === 'ortho' ? []
+      : { tool: 'clip', kind, polygons, ...demToolInput(product).input }
+    const buffers = kind === 'ortho' || !input.grid ? []
       : [input.grid.data.buffer, ...(input.grid.mask ? [input.grid.mask.buffer] : [])]
     const { raster } = await workerDemTool(input, { transfer: buffers, onLog: (m, l, c) => log(m, l, c) })
     if (!raster) { log('Clip: the polygon does not overlap the raster', 'warn', 'Export'); return }

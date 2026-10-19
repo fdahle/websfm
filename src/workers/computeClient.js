@@ -328,6 +328,11 @@ export const generateOrtho = streamingOp('generateOrtho')
 // ortho (see workers/ops/products.js `demTool`). A DEM plane is a copy, transferred
 // in; an ortho is clipped from a window of its COG file, read in the worker.
 export const demTool = streamingOp('demTool')
+// A window of a block-built DEM's COG as a height grid (SAT-3): ({ dem, rect, maxCells })
+// → { width, height, gsd, originX, originY, data, mask, level } | null.
+export const readDemWindow = (input) => call('readDemWindow', [input])
+// A block-built DEM as an ESRI ASCII grid Blob, streamed from its COG in row bands.
+export const demAscii = streamingOp('demAscii')
 
 // Products ▸ DEM ▸ Symbology… — { grid, style } → { previewBlob }: the DEM's preview
 // re-baked in a new style (workers/ops/products.js `demPreview`).

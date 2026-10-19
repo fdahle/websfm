@@ -138,6 +138,8 @@ export function createProductRuns({
         grid: {
           width: d.width, height: d.height, gsd: d.gsd, originX: d.originX, originY: d.originY,
           data: d.data, mask: d.mask, frame: d.frame,
+          // A DEM past one plane (SAT-3): the worker reads the surface from its COG.
+          ...(d.cog && { cog: d.cog, fullWidth: d.fullWidth, fullHeight: d.fullHeight, fullGsd: d.fullGsd, tileSize: d.tileSize }),
         },
       }
     }

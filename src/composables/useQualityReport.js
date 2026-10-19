@@ -17,7 +17,7 @@ import { useExternalStore } from '../stores/useExternalStore.js'
 import { sparseModelStats } from '../core/eval/sparseStats.js'
 import { completedMatchGraphHealth } from '../core/eval/matchGraph.js'
 import { perImageResiduals, unregisteredReason } from '../core/eval/imageStats.js'
-import { sampleDemAtGcps } from '../core/eval/demCheck.js'
+import { sampleDemAtGcpsFull } from '../utils/demCogSample.js'
 import { compareDemToReference } from '../core/eval/demCompare.js'
 import { rasterUnits } from '../core/products/rasterUnits.js'
 import { focalDelta } from '../core/eval/calibration.js'
@@ -112,7 +112,7 @@ export function useQualityReport() {
     const gcpReport = await recon.gcpAccuracyReport()
     const poseReport = recon.poseResidualReport()
     const gcps = gcpsStore.gcps.filter((g) => g.enabled !== false && g.x != null && g.y != null)
-    const demCheck = recon.dem && gcps.length ? sampleDemAtGcps(recon.dem, gcps) : null
+    const demCheck = recon.dem && gcps.length ? await sampleDemAtGcpsFull(recon.dem, gcps) : null
     return { gcpReport, poseReport, demCheck }
   }
 

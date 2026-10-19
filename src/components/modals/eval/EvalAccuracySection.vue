@@ -2,13 +2,14 @@
 import { linearCrsUnit } from '../../../core/crs.js'
 import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, shallowRef, watch } from 'vue'
 import StatTiles from '../ui/StatTiles.vue'
 import DataTable from '../ui/DataTable.vue'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useGcpsStore } from '../../../stores/useGcpsStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { sampleDemAtGcps } from '../../../core/eval/demCheck.js'
+import { sampleDemAtGcpsFull } from '../../../utils/demCogSample.js'
 import { EVAL_THRESHOLDS as T } from '../../../core/eval/health.js'
 import { useLog } from '../../../composables/useLog.js'
 import { createLatest } from '../../../utils/latestOnly.js'
@@ -229,8 +230,19 @@ const demGcps = computed(() => gcpsStore.gcps.filter((g) =>
   g.enabled !== false
   && (g.role === 'control' || g.role === 'check')
   && Number.isFinite(g.x) && Number.isFinite(g.y) && Number.isFinite(g.z)))
-const demRows = computed(() =>
-  sampleDemAtGcps(recon.dem, demGcps.value).map((r) => ({ id: r.gcpId, ...r, absDz: r.dz == null ? null : Math.abs(r.dz) })))
+// A block-built DEM (SAT-3) is sampled at full resolution from its COG; the overview's
+// rows stand in until those arrive.
+const demRowsFull = shallowRef(null)
+watch([() => recon.dem, demGcps], async ([dem, gcps], _old, onCleanup) => {
+  let stale = false
+  onCleanup(() => { stale = true })
+  demRowsFull.value = null
+  if (!dem?.cog || !gcps.length) return
+  const rows = await sampleDemAtGcpsFull(dem, gcps)
+  if (!stale) demRowsFull.value = rows
+}, { immediate: true })
+const demRows = computed(() => (demRowsFull.value ?? sampleDemAtGcps(recon.dem, demGcps.value))
+  .map((r) => ({ id: r.gcpId, ...r, absDz: r.dz == null ? null : Math.abs(r.dz) })))
 const demStats = computed(() => {
   const sampled = demRows.value.filter((r) => r.dz != null)
   const n = sampled.length

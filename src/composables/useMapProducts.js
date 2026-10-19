@@ -10,6 +10,8 @@ import { MODEL_MAP_CRS, modelMapCameras, modelMapExtent } from '../core/products
 import { frameFromSpec } from '../core/products/frameSpec.js'
 import { createProductRasterSource } from '../core/io/rasterSource.js'
 import { transform } from '../core/crs.js'
+import { demRef } from '../core/products/demWindow.js'
+import { readDemWindow } from '../workers/computeClient.js'
 
 // What the 2D map shows, in which frame (CLAUDE.md ▸ map raster layers).
 //
@@ -137,6 +139,36 @@ export function useMapProducts() {
     ortho: computed(() => (recon.ortho ? createProductRasterSource('ortho', recon.ortho) : null)),
   }
 
+  // A block-built DEM (SAT-3) answers the probe from its COG: the full-resolution cell
+  // under the cursor, read as a one-cell window in the worker. The probe stays sync —
+  // until the read lands it shows the overview's value, and `fullCell` (reactive) makes
+  // the status bar re-probe when it does. One read in flight; the newest cell next.
+  const fullCell = shallowRef(null) // { key, value }
+  let cellBusy = false, cellWanted = null
+  function fullResolutionProbe(hit, dem, x, y) {
+    const col = Math.floor((x - dem.originX) / dem.fullGsd), row = Math.floor((dem.originY - y) / dem.fullGsd)
+    const key = `${dem.createdAt}:${col}:${row}`
+    if (fullCell.value?.key === key) return { ...hit, value: fullCell.value.value }
+    cellWanted = { key, dem, x: dem.originX + (col + 0.5) * dem.fullGsd, y: dem.originY - (row + 0.5) * dem.fullGsd }
+    if (!cellBusy) queueMicrotask(pumpCell)
+    return { ...hit, pending: true }
+  }
+  async function pumpCell() {
+    if (cellBusy) return
+    cellBusy = true
+    while (cellWanted) {
+      const { key, dem, x, y } = cellWanted
+      cellWanted = null
+      let value = null
+      try {
+        const w = await readDemWindow({ dem: demRef(dem), rect: { minX: x, maxX: x, minY: y, maxY: y }, maxCells: 1 })
+        value = w && Number.isFinite(w.data[0]) ? w.data[0] : null
+      } catch { value = null }
+      fullCell.value = { key, value }
+    }
+    cellBusy = false
+  }
+
   // Sync probe for the map status bar at a point in the MAP's coordinates: the
   // topmost layer whose extent covers it — same contract as
   // useExternalStore.probeRasterAt, which it falls through to on the CRS map. A
@@ -154,8 +186,10 @@ export function useMapProducts() {
       const src = sources[layer.kind].value
       const px = src?.worldToPixel(rx, ry)
       if (!px || px.col < 0 || px.row < 0 || px.col >= layer.width || px.row >= layer.height) continue
-      return { id: layer.id, name: layer.name, kind: layer.kind, loaded: true,
+      const hit = { id: layer.id, name: layer.name, kind: layer.kind, loaded: true,
         value: layer.kind === 'dem' ? src.cellValueAt(rx, ry) : null }
+      if (layer.kind === 'dem' && recon.dem?.cog) return fullResolutionProbe(hit, recon.dem, rx, ry)
+      return hit
     }
     return mode.value === 'crs' ? external.probeRasterAt(x, y) : null
   }

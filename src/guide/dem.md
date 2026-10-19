@@ -34,13 +34,23 @@ interpolation across more empty cells.
 
 A GSD you set that needs more than 4,096 cells a side (a satellite frame at its
 native resolution, say) is built block by block as a
-[Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff) at that GSD, up to 4 GB. A GeoTIFF
-export is that full-resolution file, and the DEM's tab and the map draw it at full
-resolution as you zoom in, coloured and hillshaded by its symbology, and the tab's
-readout gives the full-resolution cell and height under the cursor. The map's readout,
-measurements, the ASCII grid and an orthophoto built on the DEM still use its overview,
-the first level of at most 4,096 cells a side, and **Fill enclosed gaps** is applied to
-the overview only.
+[Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff) at that GSD, up to 4 GB. Everything
+that reads heights reads that file:
+
+- the GeoTIFF and ASCII grid exports, at full resolution;
+- the DEM's tab and the map, which draw it as you zoom in, coloured and hillshaded by
+  its symbology, and read the full-resolution height under the cursor;
+- profiles and volumes, from a window around what you draw (up to 16 million cells,
+  coarser beyond that), and the DEM-vs-GCP check;
+- a clip, at full resolution up to 67 million cells;
+- contours and terrain derivatives, up to 48 million cells — a bigger DEM is read at
+  the finest level of its GeoTIFF that fits, and the log says which;
+- an orthophoto built on the DEM, as fine as the memory budget (Settings ▸ Compute)
+  allows.
+
+The hillshade PNG export and the comparison with a reference DEM use its overview, the
+first level of at most 4,096 cells a side, and **Fill enclosed gaps** is applied to the
+overview only.
 
 ## Extent
 <!-- param: extent default: Dense core -->
