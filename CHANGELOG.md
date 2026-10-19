@@ -6,6 +6,14 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **GCPs straight off a reference orthophoto or DEM**: right-click an imported
+  reference raster and choose Add GCP here, or move the selected GCP there. X/Y comes
+  from the click and Z from a reference DEM. The accuracy comes from the raster's
+  pixel size and its declared accuracy, so a project can be georeferenced with no
+  survey data at all.
+- **Accuracy & datum…** on each Reference Data row declares a raster's horizontal
+  accuracy and, for a DEM, its vertical datum, accuracy and offset. Before, only a
+  low-confidence import asked for these, so Fill Z could refuse with no way to fix it.
 - **Find GCPs** matches the orthophoto to a georeferenced reference coarse to fine.
   It tolerates rotation and a different resolution, finds a small block inside a
   regional reference, and starts from the photos' GPS when the orthophoto is not yet
