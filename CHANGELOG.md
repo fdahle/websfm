@@ -6,6 +6,13 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Footprints from poses follow the terrain.** Each image corner now lands where its
+  ray meets a DEM: the global terrain behind the Terrain basemap, or an imported
+  reference DEM. Before, footprints were cast onto one flat plane, so over relief they
+  were too small or too large, and so was the overlap that preselection matches by.
+  The terrain is the new default ground. The dialog asks which vertical datum the
+  camera heights are in and converts the DEM to it. The flat plane and the
+  height-above-ground plane remain.
 - **Heights convert between ellipsoid and geoid.** GCPs and reference DEMs declare
   their vertical datum: ellipsoidal (WGS 84), EGM2008, EGM96, another geoid or local.
   Filling or checking a GCP's height from a DEM, and comparing a DEM with a reference,
@@ -184,6 +191,10 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Georeferencing moved to the Reconstruct tab**, between Sparse and Dense, where it
+  belongs in the pipeline: Find GCPs, Georeference and Scale Bars. Edit GCPs is a mode,
+  so it stays a tool, now in Tools ▸ Images ▾ next to Edit mask. Every Tools group is
+  now a menu.
 - **Orthophoto seams**: the mosaic now chooses where seams run by graph cut, so they
   avoid roofs and tree crowns, and hides them by multiband blending, which keeps each
   photo's detail instead of averaging two photos across the seam band. Both are
