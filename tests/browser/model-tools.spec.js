@@ -121,12 +121,13 @@ test('Region box handles drag a face and the whole box in the 3D view', async ({
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await createProject(page)
-  await store(page, (s) => {
+  await store(page, async (s) => {
+    const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
     const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]], K = { fx: 500, fy: 500, cx: 250, cy: 250 }
     const cameras = new Map([0, 1, 2].map((i) => [`cam${i}`, { R, t: [-i, 0, 10], K }]))
     const points = Array.from({ length: 200 }, (_, i) => ({ x: (i % 20) / 2, y: Math.floor(i / 20) / 2, z: (i % 7) / 10,
       color: [200, 200, 200], views: new Map(), viewsPx: new Map() }))
-    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points })
+    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points: SparsePoints.fromRecords(points) })
     s.mainSparseId = 'sparse-1'
   })
   const viewer = page.locator('.viewer')
