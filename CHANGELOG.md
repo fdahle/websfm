@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **The Workflow Builder checks image files before a run.** When a run contains a
+  block that reads pixels, every image's file is checked first. A moved, renamed or
+  deleted file is restored from project storage where the project has a copy, and the
+  rest are named in a warning before anything starts, instead of failing mid-run.
 - **Footprints from poses follow the terrain.** Each image corner now lands where its
   ray meets a DEM: the global terrain behind the Terrain basemap, or an imported
   reference DEM. Before, footprints were cast onto one flat plane, so over relief they
