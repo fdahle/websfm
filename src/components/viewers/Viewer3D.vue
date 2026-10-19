@@ -476,8 +476,10 @@ function init() {
     // Log depth avoids the poor far-surface precision of a tiny near plane.
     renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true })
   } catch (e) {
+    // three.js has already logged the GL details to the console; this is the reader's version.
     glError.value = 'The 3D view is unavailable: this browser or environment could not '
-      + 'create a WebGL context. The rest of the app is unaffected.'
+      + 'create a WebGL context. This often happens over Remote Desktop, or when hardware '
+      + 'acceleration is turned off in the browser settings. The rest of the app is unaffected.'
     console.warn('[Viewer3D] WebGL unavailable — 3D view disabled:', e)
     return
   }
