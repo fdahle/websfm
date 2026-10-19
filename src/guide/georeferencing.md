@@ -70,10 +70,10 @@ column is read as the pixel position. Change any column it guessed before import
 A file with image marks but no coordinates adds those marks to the points of the same
 name. Names not yet in the project become markers, which are never used as control.
 
-To place marks, open an image and choose **Tools → Georeferencing → Edit GCPs**: a
+To place marks, open an image and choose **Tools → Images ▾ → Edit GCPs**: a
 click on the image then marks the GCP selected in the sidebar, or adds a new one. With
-the 2D map in front, the same button places and moves the surveyed points on the map
-instead. Click it again to leave the mode; a right-click on an image or the
+the 2D map in front, the same entry places and moves the surveyed points on the map
+instead. Choose it again to leave the mode; a right-click on an image or the
 map adds a point without entering it.
 
 ## Adjust or transform
@@ -156,7 +156,7 @@ offset added to every height. A low-confidence import asks for these straight aw
 a confident one needs this dialog.
 
 ## Find candidate GCPs from a reference orthophoto
-Build an orthophoto, import a georeferenced reference raster, then open **Tools →
+Build an orthophoto, import a georeferenced reference raster, then open **Reconstruct →
 Find GCPs**. Choose a reference band and select **Find candidates**. The matcher
 works [coarse to fine](help:coarse-to-fine):
 

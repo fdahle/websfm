@@ -300,7 +300,7 @@ const demColumns = [
     <template v-else>
       <StatTiles :tiles="scaleTiles" />
       <DataTable :columns="scaleColumns" :rows="scaleRows" sort-key="absResidual" sort-dir="desc"
-        empty-text="No scale bars — add them from Tools ▸ Georeferencing ▸ Scale Bars." />
+        empty-text="No scale bars — add them from Reconstruct ▸ Georeferencing ▸ Scale Bars." />
       <p class="eval-note">
         Every bar is reported, whether or not it defined the scale — a georeferenced project's
         bars are independent checks against the CRS fit, and a bar excluded from the fit still

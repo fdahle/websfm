@@ -129,9 +129,11 @@ test('without CRS content the map shows the model frame, and a local DEM is plac
   await page.locator('.ribbon').getByRole('button', { name: 'View', exact: true }).click()
   const ribbon = page.locator('.ribbon')
   await expect(ribbon.getByRole('button', { name: /Model\s*Frame/ })).toHaveClass(/active/)
-  // Edit GCPs (Tools ▸ Georeferencing) needs a CRS frame on the map.
+  // Edit GCPs (Tools ▸ Images ▾) needs a CRS frame on the map.
   await page.getByRole('button', { name: 'Tools', exact: true }).click()
-  await expect(ribbon.getByRole('button', { name: /Edit\s*GCPs/ })).toHaveAttribute('aria-disabled', 'true')
+  await ribbon.getByRole('button', { name: 'Images' }).click()
+  await expect(page.getByRole('menuitemcheckbox', { name: /Edit GCPs/ })).toHaveAttribute('aria-disabled', 'true')
+  await page.keyboard.press('Escape')
   await ribbon.getByRole('button', { name: 'View', exact: true }).click()
   const note = page.locator('.map-viewer .basemap-note')
   await expect(note).toContainText('Model frame (model units, no CRS)')
