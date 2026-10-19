@@ -17,8 +17,8 @@ each needs:
   available, keep only each image's $k$ nearest neighbours by camera centre. A
   short [baseline](help:baseline) is a necessary (not sufficient) condition for
   overlap, so this prunes almost all the non-overlapping pairs for free.
-- **By ground footprint.** With poses *and* a ground height, project each image's
-  footprint onto the ground and keep pairs whose footprints overlap by more than a
+- **By ground footprint.** With poses *and* a ground height or terrain model,
+  project each image's [footprint](help:image-footprint) onto the ground and keep pairs whose footprints overlap by more than a
   threshold — a tighter test than distance alone, since it accounts for where each
   camera is actually looking.
 - **By capture order.** With no poses at all, a set whose filenames form a

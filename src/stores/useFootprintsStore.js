@@ -1,8 +1,10 @@
 import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
-import { ensureProjection, transform, isGeographic, localMetricFrame } from '../core/crs.js'
-import { projectFootprint } from '../core/footprint.js'
+import { ensureProjection, transform, transformer, isGeographic, localMetricFrame } from '../core/crs.js'
+import { projectFootprint, projectFootprintOnTerrain } from '../core/footprint.js'
+import { terrainSampler, terrainZoom, TERRAIN_DATUM } from '../core/terrainHeights.js'
+import { heightShifter, datumLabel, shiftRange } from '../core/verticalDatum.js'
 import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import * as opfs from '../utils/opfs.js'
@@ -12,6 +14,7 @@ import { useImagesStore } from './useImagesStore.js'
 import { useSensorsStore } from './useSensorsStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
+import { useExternalStore } from './useExternalStore.js'
 
 // Project-scoped store: vector polygon layers ("shapefiles"), stored in the
 // project working CRS and re-projected when it changes.
@@ -162,21 +165,31 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
   }
 
   // Synthesise ONE footprint set ("footprints") from camera poses + intrinsics by
-  // projecting each image's corners onto a horizontal ground plane. Poses are
-  // already in the project CRS (so are the resulting rings). Re-running replaces
-  // the previously computed set. Settings:
-  //   groundElev   absolute ground Z (project vertical units) — used when !useAgl
-  //   useAgl       derive ground Z per image as pose.z − agl (height above ground)
-  //   agl          flying height above ground, when useAgl
+  // projecting each image's corners onto the ground. Poses are already in the
+  // project CRS (so are the resulting rings). Re-running replaces the previously
+  // computed set. Settings:
+  //   ground       'dem'      — follow a terrain model (monoplotting per corner)
+  //                'absolute' — one horizontal plane at groundElev
+  //                'agl'      — a plane per image at pose.z − agl
+  //   demSource    'terrain' (the global terrain tiles) or a reference DEM's id
+  //   poseDatum    vertical datum of the camera heights; the DEM's heights are
+  //                converted to it when both convert (core/verticalDatum.js)
+  //   groundElev   absolute ground Z (project vertical units)
+  //   agl          flying height above ground
   //   assumeNadir  treat missing omega/phi/kappa as 0 (vertical aerial)
   //   intrinsics   manual { focal(px), width, height } fallback when a pose has no
   //                calibrated sensor (e.g. poses imported without their images)
   // Returns a summary { computed, skipped, reasons:{...}, setId }.
-  function computeFootprints({ groundElev = 0, useAgl = false, agl = 0, assumeNadir = true, intrinsics = null } = {}) {
-    const reasons = { noPose: 0, noElevation: 0, noAngles: 0, noSensor: 0, belowPlane: 0, diverges: 0 }
+  async function computeFootprints({
+    ground = 'absolute', groundElev = 0, agl = 0, demSource = 'terrain', poseDatum = 'unknown',
+    assumeNadir = true, intrinsics = null,
+  } = {}) {
+    const reasons = { noPose: 0, noElevation: 0, noAngles: 0, noSensor: 0, belowPlane: 0, diverges: 0, offTerrain: 0 }
+    const none = () => ({ computed: 0, skipped: poses.value.length, reasons, setId: null })
+    const valid = poses.value.filter((p) => p.enabled !== false && p.x != null && p.y != null)
 
-    // Footprint synthesis casts camera rays onto a horizontal plane in metres. In
-    // a metric (projected) CRS we work directly in the project frame. In a
+    // Footprint synthesis casts camera rays onto the ground in metres. In a
+    // metric (projected) CRS we work directly in the project frame. In a
     // geographic (lat/lon) CRS the project units are degrees, so we instead build a
     // *local metric frame* (azimuthal-equidistant, centred on the poses), cast the
     // rays there, and map the resulting polygon corners back to the geographic CRS.
@@ -184,28 +197,35 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
     // stay valid to within a small meridian-convergence error.
     const crs = currentCrs.value
     const geographic = isGeographic(crs)
-    let toLocal = null, fromLocal = null
+    let toLocal = null, fromLocal = null, local = null
     if (geographic) {
-      const valid = poses.value.filter((p) => p.enabled !== false && p.x != null && p.y != null)
       if (!valid.length) {
         log('Footprints computed from poses: 0 (no poses with a position)', 'warn', 'Footprint')
-        return { computed: 0, skipped: poses.value.length, reasons, setId: null }
+        return none()
       }
       try {
         const cx = valid.reduce((s, p) => s + p.x, 0) / valid.length
         const cy = valid.reduce((s, p) => s + p.y, 0) / valid.length
         const [lon0, lat0] = transform([cx, cy], crs, 'EPSG:4326')   // centre in lon/lat
-        const local = localMetricFrame(lon0, lat0)
+        local = localMetricFrame(lon0, lat0)
         toLocal = (p) => transform([p.x, p.y], crs, local)            // → metres
         fromLocal = (c) => transform(c, local, crs)                   // metres → project CRS
       } catch (err) {
         log(`Cannot compute footprints — failed to build a local metric frame for ${crs} (${err?.message ?? err})`, 'error', 'Footprint')
-        return { computed: 0, skipped: poses.value.length, reasons, setId: null }
+        return none()
       }
     }
 
-    // One computed set at a time — a re-run replaces the previous one.
-    sets.value = sets.value.filter((s) => s.source !== 'computed')
+    // The terrain surface, in the frame the rays are cast in.
+    let surface = null
+    if (ground === 'dem') {
+      try {
+        surface = await groundSurface({ demSource, poseDatum, crs, local, valid })
+      } catch (err) {
+        log(`Cannot compute footprints on the terrain — ${err?.message ?? err}`, 'error', 'Footprint')
+        return none()
+      }
+    }
 
     const footprints = []
     for (const pose of poses.value) {
@@ -220,7 +240,6 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
       if (!intr) { reasons.noSensor++; continue }
       const imageId = pose.imageId ?? resolveImageId.value(pose.imageName)
 
-      const groundZ = useAgl ? pose.z - agl : groundElev
       // In a geographic CRS, ray-cast in the local metric frame, then map the ring
       // corners back to the project (geographic) CRS.
       let castPose = pose
@@ -228,8 +247,11 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
         const [lx, ly] = toLocal(pose)
         castPose = { ...pose, x: lx, y: ly }
       }
-      let fp = projectFootprint(castPose, intr, groundZ)
+      let fp = surface
+        ? await projectFootprintOnTerrain(castPose, intr, surface.heightAt)
+        : projectFootprint(castPose, intr, ground === 'agl' ? pose.z - agl : groundElev)
       if (fp.error === 'below_plane') { reasons.belowPlane++; continue }
+      if (fp.error === 'off_terrain') { reasons.offTerrain++; continue }
       if (fp.error) { reasons.diverges++; continue }
       if (geographic) fp = { rings: fp.rings.map((ring) => ring.map((c) => fromLocal(c))) }
 
@@ -241,6 +263,8 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
       })
     }
 
+    // One computed set at a time — a re-run replaces the previous one.
+    sets.value = sets.value.filter((s) => s.source !== 'computed')
     let setId = null
     if (footprints.length) {
       setId = crypto.randomUUID()
@@ -249,14 +273,79 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
 
     const REASON_LABEL = {
       noPose: 'no X/Y', noElevation: 'no elevation', noAngles: 'no angles',
-      noSensor: 'no intrinsics', belowPlane: 'camera below ground plane', diverges: 'view too oblique',
+      noSensor: 'no intrinsics', belowPlane: 'camera below the ground', diverges: 'view too oblique',
+      offTerrain: 'no terrain height',
     }
     const skipped = Object.values(reasons).reduce((a, b) => a + b, 0)
     const detail = Object.entries(reasons).filter(([, n]) => n).map(([k, n]) => `${n} ${REASON_LABEL[k]}`).join(', ')
-    log(`Footprints computed from poses: ${footprints.length}${skipped ? ` (${skipped} skipped — ${detail})` : ''}`,
+    log(`Footprints computed from poses: ${footprints.length}${skipped ? ` (${skipped} skipped — ${detail})` : ''}`
+      + (surface ? ` — ground from ${surface.describe()}` : ''),
       footprints.length ? 'success' : 'warn', 'Footprint')
+    if (surface?.error) log(`Terrain: ${surface.error}`, 'warn', 'Footprint')
+    if (reasons.belowPlane && surface) {
+      log('Cameras below the terrain usually mean their heights are in another vertical datum than '
+        + 'chosen, or are heights above take-off rather than absolute', 'warn', 'Footprint')
+    }
     save()
     return { computed: footprints.length, skipped, reasons, setId }
+  }
+
+  // A terrain surface for footprints: `heightAt(x, y)` in the frame rays are cast
+  // in (the project CRS, or the local metric frame `local` of a geographic one),
+  // heights in `poseDatum` when the DEM's datum converts to it. Throws with a
+  // user-facing reason.
+  // → { heightAt, describe() → text for the log, error: first tile failure | null }
+  async function groundSurface({ demSource, poseDatum, crs, local, valid }) {
+    if (!valid.length) throw new Error('no poses with a position')
+    const frame = local ?? crs
+    const target = poseDatum && poseDatum !== 'unknown' ? poseDatum : null
+
+    if (demSource !== 'terrain') {
+      const external = useExternalStore()
+      const s = await external.referenceDemSampler(demSource, crs, { datum: target })
+      const toProject = local ? transformer(local, crs) : (x, y) => [x, y]
+      const conv = s.conversion
+      return {
+        heightAt: (x, y) => s.sample(...toProject(x, y)),
+        describe: () => `reference DEM "${s.meta.name}"`
+          + (conv && conv.min <= conv.max ? `, ${datumLabel(conv.from)} → ${datumLabel(conv.to)} ${shiftRange(conv)}` : ''),
+        error: null,
+      }
+    }
+
+    await ensureProjection(crs)
+    const toLonLat = transformer(frame, 'EPSG:4326')
+    const lonLats = valid.map((p) => transform([p.x, p.y], crs, 'EPSG:4326'))
+    // Corners reach past the cameras by about the flying height; pad the box by
+    // a quarter of its size and at least ~2 km so the edge tiles come in at once.
+    let [w, s, e, n] = [Infinity, Infinity, -Infinity, -Infinity]
+    for (const [lon, lat] of lonLats) {
+      w = Math.min(w, lon); e = Math.max(e, lon); s = Math.min(s, lat); n = Math.max(n, lat)
+    }
+    const pad = Math.max(0.02, 0.25 * Math.max(e - w, n - s))
+    const box = [w - pad, Math.max(-85, s - pad), e + pad, Math.min(85, n + pad)]
+    const sampler = terrainSampler(terrainZoom(box))
+    await sampler.prefetch(box)
+    const shiftAt = target ? await heightShifter(TERRAIN_DATUM, target) : null
+    if (target && !shiftAt) {
+      log(`Terrain heights are ${datumLabel(TERRAIN_DATUM)}; camera heights in ${datumLabel(target)} cannot `
+        + 'be converted to it, so the terrain is used as it is', 'warn', 'Footprint')
+    }
+    const range = { min: Infinity, max: -Infinity }
+    return {
+      async heightAt(x, y) {
+        const [lon, lat] = toLonLat(x, y)
+        const h = await sampler.heightAt(lon, lat)
+        if (h == null || !shiftAt) return h
+        const shift = shiftAt(lon, lat)
+        if (shift < range.min) range.min = shift
+        if (shift > range.max) range.max = shift
+        return h + shift
+      },
+      describe: () => `the global terrain (level ${sampler.zoom}, ${sampler.tileCount} tiles)`
+        + (range.min <= range.max ? `, ${datumLabel(TERRAIN_DATUM)} → ${datumLabel(target)} ${shiftRange(range)}` : ''),
+      get error() { return sampler.error },
+    }
   }
 
   function removeSet(id) {

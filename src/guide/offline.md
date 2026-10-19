@@ -67,6 +67,8 @@ so a blurry or empty map is not mistaken for an error. When the connection retur
 the missing tiles load again by themselves.
 
 - **Streets**, **Satellite** (Esri World Imagery) and **Terrain** are kept this way.
+  [Footprints from poses](guide:footprints-from-poses) reads its ground heights from
+  the same Terrain tiles, so offline it works only where they were kept.
 - **A satellite source of your own** (Settings) is never kept, so it is unavailable
   offline.
 - **The polar layers** (NASA, for polar coordinate systems) are coarse, so every level

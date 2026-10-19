@@ -113,3 +113,77 @@ export function projectFootprint(pose, sensor, groundZ) {
   ring.push([ring[0][0], ring[0][1]])   // close the ring (GeoJSON convention)
   return { rings: [ring] }
 }
+
+// Monoplotting tolerance: a corner is placed once its ray passes within
+// TERRAIN_TOL (metres, the pose frame's vertical units) of the terrain, or after
+// TERRAIN_MAX_ITER refinements. Footprints are coverage outlines, so a decimetre
+// is far below what a terrain model resolves.
+export const TERRAIN_TOL = 0.1
+export const TERRAIN_MAX_ITER = 40
+
+// Project the four image corners onto a terrain surface instead of one plane.
+// `heightAt(x, y)` gives the ground height (sync or async, same frame and
+// vertical datum as the pose) or null off the surface. Monoplotting: along each
+// corner ray, f(s) = ray height − terrain height is positive at the camera; the
+// first guess is where the ray meets the plane through the terrain under the
+// camera, pushed farther out while the ray is still above the ground there, and
+// the crossing is then refined inside that bracket (regula falsi, Illinois
+// variant). Unlike re-reading the height at each plane hit, this cannot overshoot
+// on ground steeper than the ray. Returns projectFootprint's shapes, plus
+// { error: 'off_terrain' } when the surface has no height under the camera or
+// along a corner ray.
+export async function projectFootprintOnTerrain(pose, sensor, heightAt) {
+  if (pose.x == null || pose.y == null || pose.z == null) return { error: 'invalid' }
+  const below = await heightAt(pose.x, pose.y)
+  if (below == null || !Number.isFinite(below)) return { error: 'off_terrain' }
+  // The plane pass validates intrinsics, the camera-above-ground rule and the
+  // grazing-ray guard, so every ray below descends steeply enough.
+  const first = projectFootprint(pose, sensor, below)
+  if (first.error) return first
+
+  const { width, height, focal } = sensor
+  const cx = sensor.cx ?? width / 2, cy = sensor.cy ?? height / 2
+  const M = opkMatrix(pose.omega ?? 0, pose.phi ?? 0, pose.kappa ?? 0)
+  // Ray height above the terrain at parameter s along direction d, or null.
+  const above = async (d, s) => {
+    const h = await heightAt(pose.x + s * d[0], pose.y + s * d[1])
+    return h == null || !Number.isFinite(h) ? null : pose.z + s * d[2] - h
+  }
+
+  const ring = []
+  for (const [u, v] of [[0, 0], [width, 0], [width, height], [0, height]]) {
+    // Object-space direction Mᵀ · [u − cx, −(v − cy), −focal], as projectPixelToGround.
+    const r = [u - cx, -(v - cy), -focal]
+    const d = [0, 1, 2].map((i) => M[0][i] * r[0] + M[1][i] * r[1] + M[2][i] * r[2])
+    let s0 = 0, f0 = pose.z - below
+    let s1 = (below - pose.z) / d[2]
+    let f1 = await above(d, s1)
+    // Still above the ground at the first guess: the terrain falls away, go farther.
+    for (let k = 0; f1 != null && f1 > 0 && k < 8; k++) {
+      s0 = s1; f0 = f1
+      s1 *= 2
+      f1 = await above(d, s1)
+    }
+    if (f1 == null) return { error: 'off_terrain' }
+    if (f1 > 0) return { error: 'diverges' }
+    let side = 0
+    for (let k = 0; k < TERRAIN_MAX_ITER && Math.abs(f1) >= TERRAIN_TOL; k++) {
+      const s = s1 - f1 * (s1 - s0) / (f1 - f0)
+      const f = await above(d, s)
+      if (f == null) return { error: 'off_terrain' }
+      if (f > 0) {
+        s0 = s; f0 = f
+        if (side === 1) f1 /= 2
+        side = 1
+      } else {
+        s1 = s; f1 = f
+        if (side === -1) f0 /= 2
+        side = -1
+      }
+      if (Math.abs(f) < TERRAIN_TOL) { s1 = s; f1 = f }
+    }
+    ring.push([pose.x + s1 * d[0], pose.y + s1 * d[1]])
+  }
+  ring.push([ring[0][0], ring[0][1]])
+  return { rings: [ring] }
+}

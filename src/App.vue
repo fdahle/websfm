@@ -355,9 +355,9 @@ const {
 // Footprints from imported camera poses: build one "footprints" set, then open
 // the map and zoom to it so the result is immediately visible (and any "they
 // landed somewhere unexpected" problem is obvious).
-function onFootprintFromPoses(settings) {
+async function onFootprintFromPoses(settings) {
   footprintFromPosesOpen.value = false
-  const { computed: n, setId } = computeFootprints(settings)
+  const { computed: n, setId } = await computeFootprints(settings)
   if (n > 0 && setId) zoomToShapefile(setId)
 }
 

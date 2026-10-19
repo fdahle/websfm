@@ -4,9 +4,13 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import WarnBox from './ui/WarnBox.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 import { focalPx } from '../../core/footprint.js'
 import { isGeographic } from '../../core/crs.js'
+import { VERTICAL_DATUMS, datumLabel } from '../../core/verticalDatum.js'
+import { TERRAIN_DATUM } from '../../core/terrainHeights.js'
 import { useFootprintsStore } from '../../stores/useFootprintsStore.js'
+import { useExternalStore } from '../../stores/useExternalStore.js'
 import { FOOTPRINT_DEFAULTS } from '../../core/defaults.user.js'
 
 const props = defineProps({
@@ -25,6 +29,20 @@ const { resolveIntrinsics } = useFootprintsStore()
 
 // Defaults live in core/defaults.user.js (single source of truth).
 const settings = ref({ ...FOOTPRINT_DEFAULTS })
+
+// Terrain models: the global terrain tiles, or any imported reference DEM.
+const external = useExternalStore()
+const demOptions = computed(() => [
+  { value: 'terrain', label: 'Global terrain (online, ~30 m)', datum: TERRAIN_DATUM },
+  ...external.demRasters.map((r) => ({ value: r.id, label: r.name, datum: r.verticalDatum || 'unknown' })),
+])
+const demDatum = computed(() => demOptions.value.find((o) => o.value === settings.value.demSource)?.datum ?? 'unknown')
+const datumHint = computed(() => {
+  const dem = datumLabel(demDatum.value), cams = settings.value.poseDatum
+  if (cams === 'unknown') return `Taken to be the terrain model's datum (${dem}).`
+  if (cams === demDatum.value) return 'Same datum as the terrain model.'
+  return `The terrain model (${dem}) is converted to it where the two convert.`
+})
 
 // Manual intrinsics override, for poses with no calibrated sensor (e.g. poses
 // imported without their images). Prefilled from the first known sensor.
@@ -59,12 +77,20 @@ const breakdown = computed(() => {
     if (p.z == null) { b.noElevation++; continue }
     if (!s.assumeNadir && (p.omega == null || p.phi == null || p.kappa == null)) { b.noAngles++; continue }
     if (!resolveIntrinsics(p, fallback.value)) { b.noSensor++; continue }
-    const groundZ = s.useAgl ? p.z - s.agl : s.groundElev
-    if (groundZ >= p.z) { b.belowPlane++; continue }
+    // The terrain under a camera is only known once it is read, at run time.
+    const groundZ = s.ground === 'agl' ? p.z - s.agl : s.ground === 'absolute' ? s.groundElev : null
+    if (groundZ != null && groundZ >= p.z) { b.belowPlane++; continue }
     b.ok++
   }
   return b
 })
+
+const GROUND_HINT = {
+  dem: 'Each corner lands where its ray meets the terrain.',
+  absolute: 'One horizontal plane at this elevation, in the project vertical units.',
+  agl: 'A plane per image, this far below its camera.',
+}
+const groundHint = computed(() => GROUND_HINT[settings.value.ground])
 
 const total = computed(() => props.poses.length)
 const REASON_LABEL = {
@@ -88,26 +114,45 @@ function run() {
 <template>
   <ModalShell title="Footprints from Poses" @close="emit('close')">
     <p class="intro">
-      Project each image's corners onto a horizontal ground plane using its
-      camera position, orientation and sensor intrinsics.
+      Project each image's corners onto the ground using its camera position,
+      orientation and sensor intrinsics.
     </p>
 
-    <SettingsField label="Ground elevation"
-      :hint="settings.useAgl
-        ? 'Ground plane is each camera’s Z minus this flying height.'
-        : 'A single ground plane at this elevation, in the project vertical units.'">
+    <SettingsField :hint="groundHint">
+      <template #label><FieldHelp op="footprints-from-poses" param="ground">Ground</FieldHelp></template>
       <div class="radio-row">
-        <label class="radio"><input type="radio" :value="false" v-model="settings.useAgl" /> Absolute</label>
-        <label class="radio"><input type="radio" :value="true" v-model="settings.useAgl" /> Height above ground</label>
+        <label class="radio"><input type="radio" value="dem" v-model="settings.ground" /> Terrain model</label>
+        <label class="radio"><input type="radio" value="absolute" v-model="settings.ground" /> Fixed elevation</label>
+        <label class="radio"><input type="radio" value="agl" v-model="settings.ground" /> Height above ground</label>
       </div>
-      <div class="input-row" v-if="!settings.useAgl">
-        <input v-model.number="settings.groundElev" type="number" step="any" class="field-input" />
-        <span class="field-unit">m (project CRS)</span>
-      </div>
-      <div class="input-row" v-else>
-        <input v-model.number="settings.agl" type="number" min="1" step="any" class="field-input" />
-        <span class="field-unit">m below each camera</span>
-      </div>
+    </SettingsField>
+    <template v-if="settings.ground === 'dem'">
+      <SettingsField label-for="fp-dem">
+        <template #label><FieldHelp op="footprints-from-poses" param="demSource">Terrain model</FieldHelp></template>
+        <select id="fp-dem" v-model="settings.demSource" class="field-input field-select">
+          <option v-for="o in demOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+      </SettingsField>
+      <SettingsField label-for="fp-datum" :hint="datumHint">
+        <template #label><FieldHelp op="footprints-from-poses" param="poseDatum">Camera heights</FieldHelp></template>
+        <select id="fp-datum" v-model="settings.poseDatum" class="field-input field-select">
+          <option v-for="d in VERTICAL_DATUMS" :key="d.id" :value="d.id">{{ d.label }}</option>
+        </select>
+      </SettingsField>
+    </template>
+    <SettingsField v-else-if="settings.ground === 'absolute'" label-for="fp-elev" unit="m (project CRS)">
+      <template #label>
+        <FieldHelp op="footprints-from-poses" param="groundElev" :value="settings.groundElev"
+          :default-value="FOOTPRINT_DEFAULTS.groundElev">Ground elevation</FieldHelp>
+      </template>
+      <input id="fp-elev" v-model.number="settings.groundElev" type="number" step="any" class="field-input" />
+    </SettingsField>
+    <SettingsField v-else label-for="fp-agl" unit="m below each camera">
+      <template #label>
+        <FieldHelp op="footprints-from-poses" param="agl" :value="settings.agl"
+          :default-value="FOOTPRINT_DEFAULTS.agl">Flying height</FieldHelp>
+      </template>
+      <input id="fp-agl" v-model.number="settings.agl" type="number" min="1" step="any" class="field-input" />
     </SettingsField>
 
     <SettingsField>
@@ -140,7 +185,13 @@ function run() {
       </div>
     </SettingsField>
 
-    <label class="checkbox-row"><input type="checkbox" v-model="settings.assumeNadir" class="checkbox" /> Assume nadir for images without orientation angles</label>
+    <SettingsField>
+      <template #label>
+        <FieldHelp op="footprints-from-poses" param="assumeNadir" :value="settings.assumeNadir"
+          :default-value="FOOTPRINT_DEFAULTS.assumeNadir">Assume nadir</FieldHelp>
+      </template>
+      <label class="checkbox-row"><input type="checkbox" v-model="settings.assumeNadir" class="checkbox" /> For images without orientation angles</label>
+    </SettingsField>
     <p class="intro">Runs into one “footprints” layer under Shapefiles, replacing any previous computed one.</p>
 
     <p v-if="geographicCrs" class="intro">

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { opkMatrix, focalPx, projectFootprint, projectPixelToGround } from './footprint.js'
+import { opkMatrix, focalPx, projectFootprint, projectPixelToGround, projectFootprintOnTerrain } from './footprint.js'
 
 // A square-pixel nadir sensor: 1000×800 px, 1000 px focal, principal point centred.
 const SENSOR = { focal: 1000, cx: 500, cy: 400, width: 1000, height: 800 }
@@ -119,5 +119,60 @@ describe('projectFootprint (degenerate cases)', () => {
     expect(fp.error).toBeUndefined()
     const cy = fp.rings[0].slice(0, 4).reduce((s, p) => s + p[1], 0) / 4
     expect(Math.abs(cy)).toBeGreaterThan(100)
+  })
+})
+
+describe('projectFootprintOnTerrain', () => {
+  const nadir = { x: 0, y: 0, z: 1000, omega: 0, phi: 0, kappa: 0 }
+
+  it('matches the plane footprint on flat terrain', async () => {
+    const fp = await projectFootprintOnTerrain(nadir, SENSOR, () => 200)
+    const plane = projectFootprint(nadir, SENSOR, 200)
+    fp.rings[0].forEach((p, i) => {
+      expect(p[0]).toBeCloseTo(plane.rings[0][i][0], 6)
+      expect(p[1]).toBeCloseTo(plane.rings[0][i][1], 6)
+    })
+  })
+
+  it('lands each corner on a sloping surface', async () => {
+    // Ground rising 0.3 m per metre eastwards: the east corners meet it higher up,
+    // so closer to the camera than the plane through the nadir point would put them.
+    const heightAt = async (x) => 0.3 * x
+    const fp = await projectFootprintOnTerrain(nadir, SENSOR, heightAt)
+    expect(fp.error).toBeUndefined()
+    for (const [x, y] of fp.rings[0].slice(0, 4)) {
+      // On the ray: x = (u − cx)/f · (z_cam − h), with h the terrain under (x, y).
+      const h = 0.3 * x
+      expect(Math.abs(x)).toBeCloseTo(0.5 * (1000 - h), 0)
+      expect(Math.abs(y)).toBeCloseTo(0.4 * (1000 - h), 0)
+    }
+    const xs = fp.rings[0].map((p) => p[0])
+    expect(Math.max(...xs)).toBeLessThan(500)      // uphill: shorter
+    expect(Math.min(...xs)).toBeLessThan(-500)     // downhill: longer
+  })
+
+  it('lands on ground rising faster than an oblique ray', async () => {
+    // Tilted 40° over ground rising 1:1 towards the far edge, steeper than the far
+    // corner's ray: re-reading the height at each plane hit would overshoot past
+    // the camera there; the bracketed search still lands on the surface.
+    const tilted = { ...nadir, phi: 40 }
+    const heightAt = (x, y) => 300 + Math.abs(x) + 0.5 * y
+    const fp = await projectFootprintOnTerrain(tilted, SENSOR, heightAt)
+    expect(fp.error).toBeUndefined()
+    const Mt = (() => { const M = opkMatrix(0, 40, 0); return M[0].map((_, c) => M.map((r) => r[c])) })()
+    const corners = [[0, 0], [1000, 0], [1000, 800], [0, 800]]
+    fp.rings[0].slice(0, 4).forEach(([x, y], i) => {
+      // Re-cast the corner onto the plane at the terrain height where it landed.
+      const g = projectPixelToGround(...corners[i], {
+        Mt, center: [0, 0, 1000], focal: 1000, cx: 500, cy: 400, groundZ: heightAt(x, y),
+      })
+      expect(Math.hypot(g[0] - x, g[1] - y)).toBeLessThan(1)
+    })
+  })
+
+  it('reports a camera below the terrain and a surface with no height', async () => {
+    expect((await projectFootprintOnTerrain(nadir, SENSOR, () => 1500)).error).toBe('below_plane')
+    expect((await projectFootprintOnTerrain(nadir, SENSOR, () => null)).error).toBe('off_terrain')
+    expect((await projectFootprintOnTerrain(nadir, SENSOR, (x) => (x > 100 ? null : 0))).error).toBe('off_terrain')
   })
 })
