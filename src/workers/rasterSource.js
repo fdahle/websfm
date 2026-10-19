@@ -201,9 +201,21 @@ export function readLevelRect(src, k, rect) {
 export function rasterizePyramid(src, maxDim) {
   const { width: natW, height: natH } = src.index
   const scale = Math.min(1, maxDim / Math.max(natW, natH))
+  // Within 2 % of a level: that level as it is, no resample (and none of the canvas
+  // copies a resample makes — each the size of the result).
+  const k = levelFor(src.index, scale, { slack: LEVEL_SLACK })
+  const L = src.index.levels[k]
+  if (k > 0 && L.width >= natW * scale / (1 + LEVEL_SLACK)) {
+    const lvl = readLevelRect(src, k, { x0: 0, y0: 0, x1: L.width, y1: L.height })
+    // A level's pixel is exactly 2^k native pixels (rasterPyramid.js), whatever its
+    // last partial column.
+    const s = levelScale(k)
+    return { data: lvl.data, width: L.width, height: L.height, scale: s, scaleXY: [s, s], natW, natH }
+  }
   const r = rasterizePyramidTo(src, Math.max(1, Math.round(natW * scale)), Math.max(1, Math.round(natH * scale)))
   return { ...r, scale }
 }
+const LEVEL_SLACK = 0.02
 
 /**
  * The whole image resampled to exactly width × height: the coarsest level at or above

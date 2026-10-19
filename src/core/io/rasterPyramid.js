@@ -58,9 +58,12 @@ export const levelScale = (k) => 2 ** -k
  * The coarsest level that still holds `scale` × native: 2^-k ≥ scale. A request at
  * scale ≥ 1 reads level 0.
  */
-export function levelFor(plan, scale) {
+// `slack`: a scale up to that fraction above a level's still takes it — a request for
+// 0.2501 of a 2.2 GP scan then reads level 2 (0.25), not level 1 at 4× the pixels
+// (2.1 GB of RGBA, past the 2 GiB buffer wall).
+export function levelFor(plan, scale, { slack = 0 } = {}) {
   if (!(scale < 1)) return 0
-  const k = Math.floor(Math.log2(1 / scale) + 1e-9)
+  const k = Math.floor(Math.log2(1 / scale) + Math.log2(1 + slack) + 1e-9)
   return Math.max(0, Math.min(plan.levels.length - 1, k))
 }
 
