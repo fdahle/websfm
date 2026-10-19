@@ -1,4 +1,4 @@
-import { formatClock, formatRemaining } from '../utils/timeFormat.js'
+import { formatClock, formatRemaining } from './timeFormat.js'
 import { pluralize } from '../core/textFormat.js'
 
 // The log's record of a long loop over blocks (the tiled ortho: hundreds of blocks at

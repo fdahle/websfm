@@ -18,7 +18,7 @@ import { clipDem, clipOrtho, polygonPixelWindow, windowGeometry } from '../../co
 import { openRaster, readWindowBytes } from '../cogRead.js'
 import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
 import { nounFor, pluralize } from '../../core/textFormat.js'
-import { createBlockProgress } from '../blockProgress.js'
+import { createBlockProgress } from '../../utils/blockProgress.js'
 
 // The ortho's source photos (plan-ortho-mosaic O1). `images` comes from the store, one
 // per depth map: { uuid, name, url, K (the camera's full-resolution K), dist, selfCal,
