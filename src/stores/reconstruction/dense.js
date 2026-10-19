@@ -7,6 +7,7 @@ import { computeDepthMaps as workerComputeDepthMaps, POOL_SIZE, terminateAll, fi
 import * as opfs from '../../utils/opfs.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // The dense pipeline, split out of useReconstructionStore: Stage A depth maps
 // (PatchMatch MVS in the workers, persisted per image), the saved-map filter,
@@ -78,7 +79,7 @@ export function createDense({
             why = `its detected fiducials are not calibrated (${nMarks} metric marks, need ≥3) — `
               + `run Calibrate Fiducials, then re-run the sparse reconstruction`
           } else if (nObs < 3) {
-            why = `this image has ${nObs} accepted fiducial detection(s) (need ≥3) — `
+            why = `this image has ${pluralize(nObs, 'accepted fiducial detection')} (need ≥3) — `
               + `run Detect Fiducials or review its spots, then re-run the sparse reconstruction`
           } else {
             why = `the last sparse run produced no interior-orientation transform for it — `
@@ -186,7 +187,7 @@ export function createDense({
       }
       depthSummary.value = stageSummary
       if (previews && isPersisting()) imagesStore.save()
-      log(`Dense: ${run ? run.metas.length : maps.length} depth map(s) computed`, 'success', 'Dense')
+      log(`Dense: ${pluralize(run ? run.metas.length : maps.length, 'depth map')} computed`, 'success', 'Dense')
       reconStatus.value = 'done'
       // In memory only: save before densify can transfer the buffers away (a no-op
       // when the project cannot save, which is why this path exists).
@@ -262,7 +263,7 @@ export function createDense({
       const marginal = entries.map((e, i) => ({ e, s: stats[i] })).filter(({ s }) => s.considered > 0 && s.keptPct < 1)
       if (marginal.length) {
         const names = marginal.slice(0, 12).map(({ e, s }) => `${e.name || e.uuid} ${s.keptPct.toFixed(1)}%`).join('; ')
-        log(`Depth filter: ${marginal.length} marginal map(s) kept <1% after cross-view filtering — `
+        log(`Depth filter: ${pluralize(marginal.length, 'marginal map')} kept <1% after cross-view filtering — `
           + `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. `
           + 'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.', 'warn', 'Dense')
       }

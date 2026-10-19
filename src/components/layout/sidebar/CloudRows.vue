@@ -6,6 +6,7 @@ import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import { useInlineRename } from '../../../composables/useInlineRename.js'
 import ContextMenu from './ContextMenu.vue'
 import { useSidebar } from './sidebarContext.js'
+import { pluralize } from '../../../core/textFormat.js'
 
 // The cloud list rows, shared by the three provenance-split sections
 // (Reconstruction / Products / Reference Data). Renders a fragment of <li>s so
@@ -119,7 +120,7 @@ function fromMenu(fn) { const cloud = cloudCtx.value.cloud; closeMenu(); fn(clou
       <span
         v-if="cloud.kind === 'sparse'"
         class="obs-badge"
-        :title="`${cloud.cameras.size} camera(s)`"
+        :title="`${pluralize(cloud.cameras.size, 'camera')}`"
       >{{ cloud.cameras.size }}</span>
     </li>
     <li v-if="isCloudExpanded(cloud.id)" class="img-details" @contextmenu.stop>

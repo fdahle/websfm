@@ -45,6 +45,7 @@
 // would eat 12 of float64's 16 digits. The origin is added back at the end.
 
 import { coincidentVertices } from './meshEdit.js'
+import { pluralize } from '../textFormat.js'
 
 /**
  * @typedef {Object} DecimateOptions
@@ -681,7 +682,7 @@ export function decimateMesh(mesh, opts = {}, onLog) {
     'warn', 'Products')
   }
   onLog?.(`Decimate: ${before.toLocaleString()} → ${outTris.toLocaleString()} triangles, `
-    + `${outVerts.toLocaleString()} vertices, ${collapses.toLocaleString()} collapses in ${passes} pass(es), `
+    + `${outVerts.toLocaleString()} vertices, ${collapses.toLocaleString()} collapses in ${pluralize(passes, 'pass', 'passes')}, `
     + `max error ${maxErr.toPrecision(3)} (RMS plane distance) in ${ms} ms`, 'success', 'Products')
 
   return {

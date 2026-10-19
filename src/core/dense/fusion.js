@@ -11,6 +11,7 @@ import { cameraCenter, triangulationAngle } from '../sfm/geometry.js'
 import { project, unprojectPixel, sliceMisses } from './denseGeometry.js'
 import { createVoxelAccumulator } from './voxelAccumulator.js'
 import { runWithMaps, fusionPlanSteps } from './fusionPlan.js'
+import { nounFor, pluralize } from '../textFormat.js'
 
 // ── Stage B: fusion ──────────────────────────────────────────────────────────
 
@@ -182,7 +183,7 @@ export function streamedEligible(m, { step, maxCost, slab = null }) {
 }
 
 export function logFusionStream(onLog, { compared, culled, reads, hits, cacheBytes, workers = 1 }) {
-  onLog(`Fusion: consistency over ${compared} map pair(s) (${culled} culled as out of view); `
+  onLog(`Fusion: consistency over ${pluralize(compared, 'map pair')} (${culled} culled as out of view); `
     + `${reads} plane reads, ${hits} cache hits (≤${formatBytes(cacheBytes)} cache${workers > 1 ? ` per worker, ${workers} workers` : ''})`, 'info', 'Dense')
 }
 
@@ -434,7 +435,7 @@ export function finishFusion(plan, counters, parts = [], onLog = () => {}, hooks
   // The voxel merge already collapsed the per-source-pixel "shell" duplicates (a
   // surface seen by k views → k coincident points → one averaged cell). Report it.
   if (overflowCells) {
-    onLog(`Fusion: ${overflowCells} merged cell(s) lay outside the ${bboxStride}-px-sampled scene bounds `
+    onLog(`Fusion: ${pluralize(overflowCells, 'merged cell')} lay outside the ${bboxStride}-px-sampled scene bounds `
       + '— merged exactly in the overflow map (thin features the bounds sample missed)', 'debug', 'Dense')
   }
   if (mergedCells !== kept) {
@@ -449,7 +450,7 @@ export function finishFusion(plan, counters, parts = [], onLog = () => {}, hooks
     + `${estCells.toLocaleString()} (${(100 * mergedCells / Math.max(1, estCells)).toFixed(0)}%); `
     + `accumulator held ${formatBytes(accBytes)}${tiled ? ' (largest slab)' : ''}`, 'info', 'Dense')
   if (isolatedRemoved) {
-    onLog(`Fusion: isolated-cell removal — dropped ${isolatedRemoved} lone cell(s) `
+    onLog(`Fusion: isolated-cell removal — dropped ${pluralize(isolatedRemoved, 'lone cell')} `
       + `(${(100 * isolatedRemoved / Math.max(1, mergedCells)).toFixed(1)}% of merged)`, 'info', 'Dense')
   }
 
@@ -464,11 +465,11 @@ export function finishFusion(plan, counters, parts = [], onLog = () => {}, hooks
     flat.nrm = nrm
   }
   if (noNormalMaps) {
-    onLog(`Fusion: ${noNormalMaps}/${nMaps} map(s) had no per-pixel normals — `
+    onLog(`Fusion: ${noNormalMaps}/${nMaps} ${nounFor(nMaps, 'map')} had no per-pixel normals — `
       + `used view-direction fallback (re-run depth maps to refresh)`, 'warn', 'Dense')
   }
   if (degenerate) {
-    onLog(`Fusion: ${degenerate}/${cells} cell(s) had cancelling normals — set to (0,0,1)`, 'debug', 'Dense')
+    onLog(`Fusion: ${degenerate}/${cells} ${nounFor(cells, 'cell')} had cancelling normals — set to (0,0,1)`, 'debug', 'Dense')
   }
 
   // Q3: a small, persistable summary so successive dense runs are comparable

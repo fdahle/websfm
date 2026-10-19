@@ -8,6 +8,7 @@ import DataTable from './ui/DataTable.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { IMAGE_QUALITY_DEFAULTS } from '../../core/defaults.user.js'
 import { qualityVerdicts } from '../../core/features/imageQuality.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Image Quality (Tools ▸ Images ▾) — sharpness and exposure per image, judged
 // against THIS batch's median (an absolute Laplacian variance depends on the
@@ -84,7 +85,7 @@ function groupFlagged() {
         <template #cell-flags="{ row }"><span :class="{ bad: row.ok === false }">{{ row.flags }}</span></template>
       </DataTable>
       <p v-if="scored.length" class="field-hint">
-        {{ flagged.length }} of {{ scored.length }} scored image(s) flagged.
+        {{ flagged.length }} of {{ pluralize(scored.length, 'scored image') }} flagged.
       </p>
     </template>
     <template #footer>

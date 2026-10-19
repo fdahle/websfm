@@ -20,6 +20,7 @@ import { calibratedFiducialPairs } from './fiducialModel.js'
 import { mapPositions, kpX, kpY } from './keypointSet.js'
 import { asPairList, Uint32PairList } from './matchCodec.js'
 import { fitFiducialTransform } from './fiducialCalibration.js'
+import { pluralize } from '../textFormat.js'
 
 // ── Fiducial interior orientation (F4) ───────────────────────────────────
 // Scanned film: fit each image's scan→mm affine from its clicked fiducial
@@ -42,7 +43,7 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       const obs = calibratedFiducialPairs(img, s)
       const fit = fitFiducialTransform(obs, cal.transform || 'affine')
       if (!fit) {
-        log(`${img.name} — fiducial fit failed (${obs.length} usable mark(s), `
+        log(`${img.name} — fiducial fit failed (${pluralize(obs.length, 'usable mark')}, `
           + `need ≥3); falling back to standard intrinsics`, 'warn', 'Reconstruction')
         continue
       }
@@ -84,7 +85,7 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       const source = `fiducial interior orientation (${fiducials.focalMm}mm ÷ ${(pitchMm * 1000).toFixed(2)}µm/px)`
       log(`sensor ${sid} — canonical frame ${frame.width}×${frame.height}px, `
         + `K fx=${frame.K.fx.toFixed(1)} cx=${frame.K.cx.toFixed(1)} cy=${frame.K.cy.toFixed(1)} `
-        + `(median pitch ${(pitchMm * 1000).toFixed(2)}µm/px over ${entries.length} image(s))`,
+        + `(median pitch ${(pitchMm * 1000).toFixed(2)}µm/px over ${pluralize(entries.length, 'image')})`,
         'info', 'Reconstruction')
       for (const { img, fit } of entries) {
         const scanTransform = fit.forward ? fit : fit.A
@@ -107,7 +108,7 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
         }
       }
       if (remapped) {
-        log(`remapped ${remapped} GCP observation(s) on film images `
+        log(`remapped ${pluralize(remapped, 'GCP observation')} on film images `
           + `into the canonical frame`, 'info', 'Reconstruction')
       }
     }
@@ -222,13 +223,13 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
     undistortedUuids.add(img.uuid)
   }
   if (undistortedImgs > 0) {
-    log(`undistorted keypoints on ${undistortedImgs}/${imgs.length} image(s) `
+    log(`undistorted keypoints on ${undistortedImgs}/${pluralize(imgs.length, 'image')} `
       + `(lens distortion removed at ingest — pipeline stays pinhole; `
       + `mean shift ${(shiftSum / Math.max(1, shiftN)).toFixed(2)}px, max ${shiftMax.toFixed(2)}px)`,
       'info', 'Reconstruction')
   }
   if (dropped > 0) {
-    log(`dropped ${dropped} of ${fisheyeKps} fisheye keypoint(s) more than ${FISHEYE_MAX_RAY_DEG}° off-axis `
+    log(`dropped ${dropped} of ${pluralize(fisheyeKps, 'fisheye keypoint')} more than ${FISHEYE_MAX_RAY_DEG}° off-axis `
       + '(too stretched in the pinhole frame to measure reliably)', 'info', 'Reconstruction')
   }
   return { anyCalibratedDistortion, undistortedUuids }
@@ -281,10 +282,10 @@ export function refitMovedPairs({ donePairs, bridgePairs = [], movedUuids, image
       pending++
     }
     if (droppedMatches > 0) {
-      log(`dropped ${droppedMatches} match(es) on fisheye keypoints too far off-axis`, 'info', 'Reconstruction')
+      log(`dropped ${pluralize(droppedMatches, 'match', 'matches')} on fisheye keypoints too far off-axis`, 'info', 'Reconstruction')
     }
     if (pending > 0) {
-      log(`F of ${pending} pair(s) re-fitted on the moved keypoints when first read`
+      log(`F of ${pluralize(pending, 'pair')} re-fitted on the moved keypoints when first read`
         + `${skipped ? ` (${skipped} skipped)` : ''} (the distorted-space fit is stale)`, 'info', 'Reconstruction')
     }
   }

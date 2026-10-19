@@ -19,6 +19,7 @@ import { isVideoFile } from '../core/io/videoFrames.js'
 import { extractVideoFrames } from '../utils/videoSource.js'
 import { useLog } from './useLog.js'
 import { showToast } from './useToasts.js'
+import { pluralize } from '../core/textFormat.js'
 
 // The dropped/picked-file import funnel, lifted out of App.vue. It drives the
 // import-related modals (all state lives in useModalsStore, pulled in here) and
@@ -278,7 +279,7 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     const how = settings.mode === 'auto'
       ? `automatic: ${settings.overlap} % overlap, at most ${settings.maxFrames}, blurry below ${settings.minSharpness} × nearby median`
       : `every ${settings.every} ${settings.unit}${settings.unit === 'frames' ? ` at ${fps ?? '30 (assumed)'} fps` : ''}`
-    log(`Video import: ${file.name} — extracting ${times.length} frame(s) (${how}) as `
+    log(`Video import: ${file.name} — extracting ${pluralize(times.length, 'frame')} (${how}) as `
       + `${settings.format === 'png' ? 'PNG' : `JPEG q${settings.jpegQuality}`}`
       + `${settings.maxDim > 0 ? `, long side ≤ ${settings.maxDim} px` : ', full size'}`, 'info', 'Import')
     progress?.open('Extracting video frames', times.length, null, { unit: 'frames' })
@@ -295,7 +296,7 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
       await progress?.close()
     }
     if (!result) return
-    log(`Video import: ${result.added} of ${times.length} frame(s) from ${file.name} added`
+    log(`Video import: ${result.added} of ${pluralize(times.length, 'frame')} from ${file.name} added`
       + `${result.cancelled ? ' (cancelled)' : ''}`, result.cancelled ? 'warn' : 'success', 'Import')
     if (result.added) {
       showToast(`Added ${result.added} frame${result.added === 1 ? '' : 's'} from ${file.name}`, {

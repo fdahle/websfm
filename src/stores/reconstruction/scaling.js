@@ -3,6 +3,7 @@ import { fitScale, weightFromAccuracy, scaleEvidenceDigest } from '../../core/pr
 import { cameraCenter } from '../../core/sfm/geometry.js'
 import { triangulateGcp } from '../../core/sfm/gcpTriangulation.js'
 import { gcpsInPinholeFrame } from '../../core/sfm/displayFrame.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Scale constraints — the SfM→metres scalar fitted from known distances, and the
 // read-only residual report built on it. Split out of useReconstructionStore for
@@ -198,7 +199,7 @@ export function createScaling({
       })),
     }
     const weighted = usable.some((m) => m.bar.accuracyM != null)
-    log(`Scale: ${fit.count} bar(s) → ${fit.scale.toPrecision(6)} m per model unit, `
+    log(`Scale: ${pluralize(fit.count, 'bar')} → ${fit.scale.toPrecision(6)} m per model unit, `
       + `RMS ${fit.rms.toPrecision(3)} m (${weighted ? 'inverse-variance weighted' : 'equal weight'}); `
       + usable.map(({ bar, modelDistance }) =>
         `"${bar.name}" ${modelDistance.toPrecision(6)} u = ${bar.knownDistanceM} m`

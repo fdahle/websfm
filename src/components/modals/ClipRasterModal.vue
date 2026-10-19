@@ -6,6 +6,7 @@ import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
 import { useSourcePick } from '../../composables/useSourcePick.js'
 import { polygonsFromGeoJSON } from '../../core/products/rasterClip.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Clip to Polygon (Tools ▸ Products ▾) — export the DEM or orthophoto with every
 // pixel outside a polygon set to nodata/transparent, cropped to the polygon
@@ -42,7 +43,7 @@ async function onFile(e) {
     const { polygons, ignored } = polygonsFromGeoJSON(JSON.parse(await file.text()))
     filePolygons.value = polygons.length ? polygons : null
     fileNote.value = polygons.length
-      ? `${file.name}: ${polygons.length} polygon(s)${ignored ? `, ${ignored} other feature(s) ignored` : ''}`
+      ? `${file.name}: ${pluralize(polygons.length, 'polygon')}${ignored ? `, ${pluralize(ignored, 'other feature')} ignored` : ''}`
       : `${file.name}: no polygons found`
   } catch (err) {
     filePolygons.value = null

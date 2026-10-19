@@ -12,6 +12,7 @@ import { hasKp, kpX, kpY } from './keypointSet.js'
 import { graphHealth } from '../eval/matchGraph.js'
 import { buildScaleContext, describeScaleContext, resolveScaledPx } from '../scaleContext.js'
 import { numStats } from './modelStats.js'
+import { pluralize } from '../textFormat.js'
 
 // ── Run record (baseline bookkeeping) ────────────────────────────────────────
 // Everything below feeds `summary` so the Debug ▸ Project Summary digest can state
@@ -145,7 +146,7 @@ export function logMatchGraphHealth({ imgs, donePairs, log }) {
   const sizes = [...comps.values()].sort((a, b) => b - a)
   const med = (arr) => (arr.length ? [...arr].sort((a, b) => a - b)[arr.length >> 1] : 0)
   const isolated = [...deg.values()].filter((d) => d === 0).length
-  log(`match graph — ${sizes.length} component(s), largest ${sizes[0] ?? 0}/${imgs.length} images`
+  log(`match graph — ${pluralize(sizes.length, 'component')}, largest ${sizes[0] ?? 0}/${imgs.length} images`
     + `${isolated ? `, ${isolated} isolated` : ''}; median ${med([...deg.values()])} pairs/image, `
     + `median ${med(donePairs.map((e) => e.inlierCount))} inliers/pair`,
     (sizes[0] ?? 0) < imgs.length ? 'warn' : 'info', 'Reconstruction')
@@ -172,7 +173,7 @@ export function logPerCameraResiduals({ tracks, ids, cameras, keypointsAt, image
     .sort((a, b) => b.s.median - a.s.median)
   const flagged = rows.filter((r) => globalMed > 0 && r.s.median > 2 * globalMed)
   log(`per-camera residuals — global median ${globalMed.toFixed(2)}px; `
-    + `${flagged.length}/${rows.length} camera(s) over 2× (${(2 * globalMed).toFixed(2)}px)`,
+    + `${flagged.length}/${pluralize(rows.length, 'camera')} over 2× (${(2 * globalMed).toFixed(2)}px)`,
     flagged.length ? 'warn' : 'info', 'Reconstruction')
   for (const r of flagged) {
     log(`  ⚠ ${r.name} — median ${r.s.median.toFixed(2)}px, `
@@ -190,7 +191,7 @@ export function logRunTotals({ hist, totalMs, stageTimes, solverTotals, baSolver
     + `(${Object.entries(stageTimes).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`).join(', ')})`, 'info', 'Reconstruction')
   if (solverTotals.calls) {
     const T = solverTotals
-    log(`bundle adjustment solver — ${T.calls} BA call(s), ${(T.ms / 1000).toFixed(1)}s, largest n ${T.maxN}; `
+    log(`bundle adjustment solver — ${pluralize(T.calls, 'BA call')}, ${(T.ms / 1000).toFixed(1)}s, largest n ${T.maxN}; `
       + `${T.solves} solves: ${T.cholesky} Cholesky, PCG ${T.pcgConverged} converged / ${T.pcgPartial} partial / `
       + `${T.pcgFallback} → Cholesky / ${T.pcgNotPd} not PD (${T.pcgIters} CG it, max ${T.pcgItersMax}); `
       + `policy ${JSON.stringify(baSolver ?? {})}`, 'info', 'Reconstruction')
@@ -227,7 +228,7 @@ export function unregisteredComponents({ imgs, cameras, donePairs, imageByUuid, 
       : viable === remainingComponents.length ? 'all go to secondary-model recovery'
         : viable ? `${viable} reach the ${floor}-image floor for secondary-model recovery; the rest stay unregistered`
           : `none reaches the ${floor}-image floor for secondary-model recovery, so they stay unregistered`
-    log(`${remainingComponents.length} unregistered component(s) remain `
+    log(`${pluralize(remainingComponents.length, 'unregistered component')} ${remainingComponents.length === 1 ? 'remains' : 'remain'} `
       + `(${remainingComponents.map((c) => c.size).join(', ')} images); largest starts `
       + `${remainingComponents[0].imageNames.slice(0, 4).join(', ')}`
       + `${remainingComponents[0].size > 4 ? ', …' : ''}. ${routing[0].toUpperCase()}${routing.slice(1)}; `

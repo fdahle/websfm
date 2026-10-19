@@ -21,6 +21,7 @@ import { useReconstructionStore } from './useReconstructionStore.js'
 import { mapConcurrent } from '../utils/concurrency.js'
 import { normalizeImageGroups } from '../utils/imageGroups.js'
 import { createImageThumbnails } from './images/thumbnails.js'
+import { pluralize } from '../core/textFormat.js'
 
 // Reading one byte forces the browser to validate the file behind a blob (a File
 // handle is re-checked on every read), so a moved or deleted file shows up here.
@@ -548,7 +549,7 @@ export const useImagesStore = defineStore('images', () => {
     for (const name of missingKp.slice(0, 20)) {
       log(`Keypoints missing for ${name} — re-run feature detection`, 'warn', 'Project')
     }
-    if (missingKp.length > 20) log(`Keypoints missing for ${missingKp.length - 20} more image(s)`, 'warn', 'Project')
+    if (missingKp.length > 20) log(`Keypoints missing for ${pluralize(missingKp.length - 20, 'more image')}`, 'warn', 'Project')
 
     const total = records.length
     if (total === 0) {
@@ -687,7 +688,7 @@ export const useImagesStore = defineStore('images', () => {
     const wanted = ids ? new Set(ids) : null
     const targets = images.value.filter((img) => !wanted || wanted.has(img.id))
     if (!targets.length) return 0
-    log(`Image quality: scoring ${targets.length} image(s)`, 'info', 'Images')
+    log(`Image quality: scoring ${pluralize(targets.length, 'image')}`, 'info', 'Images')
     let done = 0, failed = 0
     await mapConcurrent(targets, Math.max(1, Math.min(4, POOL_SIZE)), async (img) => {
       try {
@@ -705,7 +706,7 @@ export const useImagesStore = defineStore('images', () => {
       }
       onProgress?.(++done, targets.length)
     })
-    log(`Image quality: scored ${targets.length - failed} of ${targets.length} image(s)`, failed ? 'warn' : 'success', 'Images')
+    log(`Image quality: scored ${targets.length - failed} of ${pluralize(targets.length, 'image')}`, failed ? 'warn' : 'success', 'Images')
     save()
     return targets.length - failed
   }

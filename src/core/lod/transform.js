@@ -13,6 +13,7 @@ import { filterCloud, sorNeighbourMeans, estimateSpacing } from '../products/clo
 import { classifyCloudGround } from '../products/groundFilter.js'
 import { planExtract, extractPoints } from './extract.js'
 import { nodeCube } from './octree.js'
+import { pluralize } from '../textFormat.js'
 
 /**
  * Tiles over the cloud's XY extent, each with about `tilePoints` points in its tile +
@@ -236,7 +237,7 @@ export function streamedEditSource(reader, lod, mode, settings = {}, { log = () 
     let run = isoCell ? { ...settings, isolated: { ...settings.isolated, cell: isoCell } } : settings
     const label = mode === 'filter' ? 'Filter' : 'Ground filter'
     const tiles = planTiles(lod, { tilePoints: settings.tilePoints ?? 6_000_000, halo, align: voxel, nodes: reader.nodes })
-    log(`${label}: ${tiles.length} tile(s) with a ${halo.toPrecision(3)}-unit margin`)
+    log(`${label}: ${pluralize(tiles.length, 'tile')} with a ${halo.toPrecision(3)}-unit margin`)
     const quiet = () => {}
     // A tile is read whole: every level of the octree. One too dense to split further
     // would come back thinned (the read stops at a coarser level to stay within one

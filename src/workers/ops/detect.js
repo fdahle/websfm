@@ -19,6 +19,7 @@ import {
   FIDUCIAL_DETECTION_TUNING, detectFiducialSpots as detectFiducialSpotsCore,
   refineDetectionSpot, nativeRefinePlan,
 } from '../../core/sfm/fiducialDetection.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Detection ops (SIFT / learned: SuperPoint, DISK, ALIKED). `rasterize` (OffscreenCanvas pixel decode)
 // stays in the worker and is injected; the STRIDE parse + shared feature-bundle
@@ -157,7 +158,7 @@ export function makeDetectOps({ rasterize }) {
     const tiles = planTiles(width, height, tileSize, overlap, { align })
     const label = detectorLabel(detector)
     const sizes = [...new Set(tiles.map((t) => `${t.w}×${t.h}`))].join(', ')
-    onLog?.(`${label}: tiling ${width}×${height} → ${tiles.length} tile(s) of ${sizes} (max ${tileSize}px, overlap ≥ ${overlap}px)`)
+    onLog?.(`${label}: tiling ${width}×${height} → ${pluralize(tiles.length, 'tile')} of ${sizes} (max ${tileSize}px, overlap ≥ ${overlap}px)`)
 
     const xs = [], ys = [], scales = [], resps = [], tileIds = [], descChunks = []
     let descLen = spec ? spec.descDim : DESC_LEN
@@ -382,7 +383,7 @@ export function makeDetectOps({ rasterize }) {
         templates.push({ fidId: o.fidId, size, data: win.data })
         transfer.push(win.data.buffer)
       }
-      emit?.('log', [`Fiducial: cut ${templates.length} template(s) @ ${size}px from the reference image (${bmp.width}×${bmp.height})`])
+      emit?.('log', [`Fiducial: cut ${pluralize(templates.length, 'template')} @ ${size}px from the reference image (${bmp.width}×${bmp.height})`])
       return { result: { templates, natW: bmp.width, natH: bmp.height }, transfer }
     } finally {
       bmp.close()
@@ -460,7 +461,7 @@ export function makeDetectOps({ rasterize }) {
         left: coarse.frame.left / gray.scale, right: coarse.frame.right / gray.scale,
         top: coarse.frame.top / gray.scale, bottom: coarse.frame.bottom / gray.scale,
       } : null
-      emit?.('log', [`Fiducial detection: ${accepted.length}/${coarse.requested} accepted, ${drafts.length} draft(s) on ${bmp.width}×${bmp.height}`])
+      emit?.('log', [`Fiducial detection: ${accepted.length}/${coarse.requested} accepted, ${pluralize(drafts.length, 'draft')} on ${bmp.width}×${bmp.height}`])
       return { result: { ...coarse, accepted, drafts, frame, natW: bmp.width, natH: bmp.height, ms: performance.now() - t0 } }
     } finally { bmp.close() }
   }

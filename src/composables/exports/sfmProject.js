@@ -13,6 +13,7 @@ import { zipParts, crc32 } from '../../utils/zip.js'
 import { buildTransformsJson } from '../../core/io/transforms.js'
 import { undistortImage } from '../../workers/computeClient.js'
 import { toScaledPx } from '../../core/sfm/geometry.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // The SfM project exports, split out of useExports: a COLMAP model (text or
 // binary, optionally with its database and images) and the other interchange
@@ -109,7 +110,7 @@ export function createSfmProjectExports({
       }))
       const withDesc = features.filter((f) => f.descriptors).length
       if (withDesc < features.length) {
-        log(`COLMAP database: descriptors for ${withDesc} of ${features.length} image(s) — the rest `
+        log(`COLMAP database: descriptors for ${withDesc} of ${pluralize(features.length, 'image')} — the rest `
           + 'are not SIFT or were not found; COLMAP will need to re-extract them', 'warn', 'Export')
       }
       const pairs = []

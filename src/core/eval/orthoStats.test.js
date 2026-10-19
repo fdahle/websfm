@@ -42,7 +42,7 @@ describe('orthoStats', () => {
     expect(s.seamStep).toBeGreaterThan(17)
     expect(s.seamRatio).toBeGreaterThan(8)
     expect(s.seamDensity).toBeCloseTo(h / (w * h), 9)
-    expect(describeOrthoStats(s)).toMatch(/2 source image\(s\)/)
+    expect(describeOrthoStats(s)).toMatch(/2 source images/)
   })
 
   it('ignores unlabelled cells and counts salt-and-pepper switching as density', () => {

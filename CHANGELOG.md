@@ -195,6 +195,8 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Counts read as English.** Log lines, reports and dialogs say "1 image" and
+  "3 images" instead of "image(s)", and the verb agrees where it follows.
 - **Georeferencing moved to the Reconstruct tab**, between Sparse and Dense, where it
   belongs in the pipeline: Find GCPs, Georeference and Scale Bars. Edit GCPs is a mode,
   so it stays a tool, now in Tools ▸ Images ▾ next to Edit mask. Every Tools group is

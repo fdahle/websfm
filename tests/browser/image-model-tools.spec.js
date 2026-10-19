@@ -52,7 +52,7 @@ test('Image quality scores sharp and blurred images and flags the blurred one', 
     return Object.fromEntries(useImagesStore().images.map((img) => [img.name, img.quality?.sharpness]))
   })
   expect(scored['blurry.png']).toBeLessThan(scored['a.png'] / 4)
-  await expect(dialog.getByText('1 of 4 scored image(s) flagged.')).toBeVisible()
+  await expect(dialog.getByText('1 of 4 scored images flagged.')).toBeVisible()
   expect(errors).toEqual([])
 })
 

@@ -1,3 +1,4 @@
+import { nounFor, pluralize } from '../../core/textFormat.js'
 // Per-run router for brute-force descriptor matching on WebGPU, with the WASM
 // matcher as the fallback. Owned by `useMatchesStore.matchAll`; one instance per
 // run, created only when the user enabled the GPU (Settings ▸ Compute) and the
@@ -152,12 +153,12 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
     let cache = null
     if (!cancelled) cache = await client.end({ runId }).catch(() => null)
     const backend = (fallbacks || disabledReason) ? 'gpu→wasm' : 'gpu'
-    const parts = [`${counts.full} full + ${counts.gate} subset-gate match(es) on GPU`]
+    const parts = [`${counts.full} full + ${counts.gate} subset-gate ${nounFor(counts.full + counts.gate, 'match', 'matches')} on GPU`]
     if (fallbacks) parts.push(`${fallbacks} fell back to WASM after a GPU error (first: ${firstError})`)
     if (disabledReason) parts.push(`run moved to WASM: ${disabledReason}`)
     if (cache) {
-      parts.push(`cache ${cache.uploads} upload(s) / ${(cache.uploadBytes / MiB).toFixed(0)} MB, `
-        + `${cache.hits} hit(s), ${cache.misses} miss(es) → ${resends} resend(s), ${cache.evictions} eviction(s), `
+      parts.push(`cache ${pluralize(cache.uploads, 'upload')} / ${(cache.uploadBytes / MiB).toFixed(0)} MB, `
+        + `${pluralize(cache.hits, 'hit')}, ${pluralize(cache.misses, 'miss', 'misses')} → ${pluralize(resends, 'resend')}, ${pluralize(cache.evictions, 'eviction')}, `
         + `peak ${(cache.peakBytes / MiB).toFixed(0)} MB`)
       parts.push(`GPU kernel+readback ${(cache.gpuMs / 1000).toFixed(2)}s, JS selection ${(cache.selectMs / 1000).toFixed(2)}s (summed)`)
     }

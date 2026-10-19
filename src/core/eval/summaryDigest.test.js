@@ -187,7 +187,7 @@ describe('digestToMarkdown — baseline record', () => {
 
   it('states the config of every stage that has one', () => {
     expect(md).toContain('## Run config')
-    expect(md).toContain('**Detect**: sift · 128 image(s)')
+    expect(md).toContain('**Detect**: sift · 128 images')
     expect(md).toContain('maxDim=2400')
     expect(md).toContain('**Match**: exhaustive · bruteforce')
   })
@@ -214,7 +214,7 @@ describe('digestToMarkdown — baseline record', () => {
   })
 
   it('reports Stage A backend, throughput and cross-view filter cost', () => {
-    expect(md).toContain('122 map(s) on gpu→wasm (1 GPU fallback(s))')
+    expect(md).toContain('122 maps on gpu→wasm (1 GPU fallback)')
     expect(md).toContain('median 40.0s/image')
     expect(md).toContain('Cross-view filter: 31.0s')
     expect(md).toContain('projected peak 1.8 GB')
@@ -319,8 +319,8 @@ describe('digest — track completion record', () => {
     const d = buildProjectDigest(withCompletion(rows))
     expect(d.diagnostics.trackCompletion).toHaveLength(2)
     const md = digestToMarkdown(d)
-    expect(md).toContain('**Track completion** (final stage): +1240 obs via verified pairs, 925 point(s) lifted to ≥3 views over 2 pass(es)')
-    expect(md).toContain('post-BA: +1200 in 3 round(s), lifted 900 (2-view 39000 → 38100)')
+    expect(md).toContain('**Track completion** (final stage): +1240 obs via verified pairs, 925 points lifted to ≥3 views over 2 passes')
+    expect(md).toContain('post-BA: +1200 in 3 rounds, lifted 900 (2-view 39000 → 38100)')
   })
 
   it('renders nothing for a run that predates the record', () => {

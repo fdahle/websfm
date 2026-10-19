@@ -5,6 +5,7 @@ import {
 } from '../../core/dense/depthMapCodec.js'
 import { formatBytes } from '../../core/dense/memBudget.js'
 import * as opfs from '../../utils/opfs.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Persist expensive Stage A maps, then evict their resident planes. Restore reads
 // only the sparse-stamped index. Consumers receive file handles and stream maps
@@ -36,7 +37,7 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
         depthMapsMeta.value = index.maps
         depthMaps.value = new Map()
       }
-      log(`Dense: ${maps.length} depth map(s) saved (${formatBytes(depthMapBytes(index.maps))}) `
+      log(`Dense: ${pluralize(maps.length, 'depth map')} saved (${formatBytes(depthMapBytes(index.maps))}) `
         + `— reopening this project will not need a Stage A re-run`, 'info', 'Dense')
     } catch (err) {
       // Non-fatal: the maps are live in memory, this run still works.
@@ -87,7 +88,7 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
         const index = { ...buildDepthIndex([], { sparseCloud: mainSparseCloud(), settings }), maps: metas }
         await opfs.commitDepthIndex(projectId, index)
         if (currentProjectId() === projectId) depthMapsMeta.value = metas
-        log(`Dense: ${metas.length} depth map(s) saved (${formatBytes(depthMapBytes(metas))}) as they finished `
+        log(`Dense: ${pluralize(metas.length, 'depth map')} saved (${formatBytes(depthMapBytes(metas))}) as they finished `
           + `— reopening this project will not need a Stage A re-run`, 'info', 'Dense')
       },
     }
@@ -119,7 +120,7 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
     if (!shouldApply()) return false
     if (!index?.maps?.length) { depthMapsMeta.value = []; return false }
     if (isDepthIndexStale(index, mainSparseCloud())) {
-      log(`Dense: discarding ${index.maps.length} saved depth map(s) — they belong to an older `
+      log(`Dense: discarding ${pluralize(index.maps.length, 'saved depth map')} — they belong to an older `
         + `sparse reconstruction and no longer match the current model; recompute them`,
         'warn', 'Dense')
       depthMapsMeta.value = []

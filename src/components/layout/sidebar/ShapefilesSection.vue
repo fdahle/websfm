@@ -6,6 +6,7 @@ import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import { useInlineRename } from '../../../composables/useInlineRename.js'
 import ContextMenu from './ContextMenu.vue'
 import { useSidebar } from './sidebarContext.js'
+import { pluralize } from '../../../core/textFormat.js'
 
 // Vector polygon layers ("shapefiles") — one row per SET (a computed footprint
 // run, or an imported polygon file). Each set is managed as a unit, like an
@@ -72,7 +73,7 @@ function fromMenu(fn) { const set = ctx.value.set; closeMenu(); fn(set) }
             class="map-flag"
             title="Shown on the map — right-click to hide"
           >◉</span>
-          <span class="obs-badge" :title="`${set.footprints.length} polygon(s)`">{{ set.footprints.length }}</span>
+          <span class="obs-badge" :title="`${pluralize(set.footprints.length, 'polygon')}`">{{ set.footprints.length }}</span>
         </li>
         <li v-if="isExpanded(set.id)" class="img-details" @contextmenu.stop>
           <div class="detail-row">

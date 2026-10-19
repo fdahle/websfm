@@ -19,6 +19,7 @@
 
 import { essentialSingularValues } from './rotations.js'
 import { hasFundamental } from './ingest.js'
+import { pluralize } from '../textFormat.js'
 
 export const FOCAL_FROM_PAIRS_DEFAULTS = {
   maxPairs: 40,       // strongest pairs used per group
@@ -101,7 +102,7 @@ export function estimateFocalsFromPairs({ imgs, Kmap, pairs, isGuess, groupOf, d
     for (const u of members) {
       const K = Kmap.get(u), d = dims(u)
       const f = est.s * Math.max(d.width, d.height)
-      Kmap.set(u, { ...K, fx: f, fy: f, source: `${K.source}, refined from ${est.n} pair(s) to ${f.toFixed(0)}px` })
+      Kmap.set(u, { ...K, fx: f, fy: f, source: `${K.source}, refined from ${pluralize(est.n, 'pair')} to ${f.toFixed(0)}px` })
     }
     out.push({ group: g, s: est.s, n: est.n, of: est.of, agreement: est.agreement, images: members.length, own: !!own })
   }

@@ -7,6 +7,7 @@ import { useContextMenu } from '../../../composables/useContextMenu.js'
 import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import ContextMenu from './ContextMenu.vue'
 import { useSidebar } from './sidebarContext.js'
+import { pluralize } from '../../../core/textFormat.js'
 
 defineProps({
   open: { type: Boolean, default: false },
@@ -71,7 +72,7 @@ function fromMenu(fn) { const sensor = sensorCtx.value.sensor; closeMenu(); fn(s
             class="unaligned-tag"
             title="No usable calibration — intrinsics fall back to a default field-of-view guess, which distorts SfM and depth maps. Set a focal length in the sensor table."
           >⚠</span>
-          <span class="obs-badge" :title="`${sidebar.sensorImageCount(sensor.id)} image(s)`">{{ sidebar.sensorImageCount(sensor.id) }}</span>
+          <span class="obs-badge" :title="`${pluralize(sidebar.sensorImageCount(sensor.id), 'image')}`">{{ sidebar.sensorImageCount(sensor.id) }}</span>
         </li>
         <li v-if="isExpanded(sensor.id)" class="img-details" @contextmenu.stop>
           <div class="detail-row">

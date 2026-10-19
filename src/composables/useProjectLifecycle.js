@@ -20,6 +20,7 @@ import { useLog } from './useLog.js'
 import { showToast } from './useToasts.js'
 import { confirmDialog } from './useConfirmations.js'
 import { rememberNewProjectDraft } from './newProjectDraft.js'
+import { pluralize } from '../core/textFormat.js'
 
 // Everything that opens, creates, switches, moves, saves or deletes a project,
 // lifted out of App.vue. Owns the blocking load overlay (`projectLoading` +
@@ -133,8 +134,8 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     for (const entry of matchesStore.matchStore.values()) matches += entry.nMatches ?? 0
     const kc = imagesStore.keypointCacheStats(), mc = matchesStore.matchCacheStats()
     const mem = globalThis.performance?.memory
-    log(`Heap inventory: ${keypoints.toLocaleString()} keypoints (${kc.entries} image(s) resident, `
-      + `${formatBytes(kc.bytes)} typed), ${matches.toLocaleString()} matches (${mc.entries} pair(s) resident, `
+    log(`Heap inventory: ${keypoints.toLocaleString()} keypoints (${pluralize(kc.entries, 'image')} resident, `
+      + `${formatBytes(kc.bytes)} typed), ${matches.toLocaleString()} matches (${pluralize(mc.entries, 'pair')} resident, `
       + `${formatBytes(mc.bytes)} typed)`
       + (mem?.usedJSHeapSize ? ` · JS memory (heap + ArrayBuffers) ${formatBytes(mem.usedJSHeapSize)}, heap limit ${formatBytes(mem.jsHeapSizeLimit)}` : ''),
     'info', 'Project')
@@ -520,7 +521,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     if (!suggestion?.code) return
     if (!(await handleSetCrs(suggestion.code))) return
     log(`Project CRS ${suggestion.code} (${suggestion.name}) was suggested from the median of `
-      + `${suggestion.count} camera position(s) at ${suggestion.lat.toFixed(4)}, ${suggestion.lon.toFixed(4)} (lat, lon)`,
+      + `${pluralize(suggestion.count, 'camera position')} at ${suggestion.lat.toFixed(4)}, ${suggestion.lon.toFixed(4)} (lat, lon)`,
     'info', 'Project')
   }
 

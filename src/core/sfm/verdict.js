@@ -20,6 +20,7 @@
 // *record*; the verdict is its *alarm*, and the two have different bars.
 
 import { EVAL_THRESHOLDS, classify } from '../eval/health.js'
+import { pluralize } from '../textFormat.js'
 
 // A long reprojection tail relative to the median is the fingerprint of uncorrected
 // lens distortion: the centre projects cleanly (low median) while the corners blow
@@ -121,7 +122,7 @@ export function buildVerdict(snapshot = {}) {
       const names = (s.unregistered || []).map((u) => u.name).filter(Boolean).slice(0, 5)
       const listed = names.length ? ` (e.g. ${names.join(', ')}${missing > names.length ? ', …' : ''})` : ''
       const secondary = s.separateSecondaryModels > 0
-        ? ` ${s.separateSecondaryModels} additional usable model(s) were reconstructed but could not be aligned to the primary.` : ''
+        ? ` ${pluralize(s.separateSecondaryModels, 'additional usable model')} ${s.separateSecondaryModels === 1 ? 'was' : 'were'} reconstructed but could not be aligned to the primary.` : ''
       add(level, 'registration',
         `Only ${reg}/${total} images registered in the primary (${pct(regPct)})${listed}.${secondary}`,
         s.graphComponents > 1

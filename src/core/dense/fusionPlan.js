@@ -12,6 +12,7 @@ import { projectDensifyPeakBytes, densifyInputBytes, formatBytes, maxFusionTileC
 import { unprojectPixel, sliceCorners } from './denseGeometry.js'
 import { mix32, clampCellForBounds } from './voxelAccumulator.js'
 import { numOpt, boolOpt } from './denseOptions.js'
+import { pluralize } from '../textFormat.js'
 
 // The valid-pixel cost distribution across all depth maps: its median (the run
 // summary) and p70 (the weak-signal warning: a genuine ZNCC match is ≥ ~0.55, cost
@@ -221,7 +222,7 @@ export function* fusionPlanSteps(maps, opts, onLog, hooks) {
       + 'Check intrinsics / window size / working resolution.', 'warn', 'Dense')
   }
 
-  onLog(`Fusion: ${maps.length} map(s), minViews ${minViews}, maxCost ${maxCost}, `
+  onLog(`Fusion: ${pluralize(maps.length, 'map')}, minViews ${minViews}, maxCost ${maxCost}, `
     + `depth tol ${(depthTolRel * 100).toFixed(1)}%, consistency ±${consistencyPx}px, step ${step}px`,
     'info', 'Dense')
 

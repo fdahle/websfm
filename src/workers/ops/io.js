@@ -13,6 +13,7 @@ import { isAxisAlignedModelTransformation, readTiffTag } from '../../utils/tiff.
 import {
   needsStyling, resolveRasterStyle, bandsUsedBy, resolveRange, composeStyledRgba, describeStyle,
 } from '../../core/io/rasterStyle.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // File-interop ops: parse a dropped/picked point-cloud, mesh or georeferenced
 // raster off the main thread (a 500 MB LAS — or a 200 MB REMA tile — parsed on
@@ -121,7 +122,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
     const kind = forceKind || guess.kind
     log(`Raster ${name}: ${kind.toUpperCase()} (${guess.confidence} confidence)`
       + `${forceKind ? ' — user-specified' : ''} — ${guess.reasons.join('; ')}`)
-    log(`Raster ${name}: ${width}×${height}, ${bands} band(s), `
+    log(`Raster ${name}: ${width}×${height}, ${pluralize(bands, 'band')}, `
       + `${sampleFormat === 3 ? 'float' : 'int'}${bitsPerSample}, CRS ${crs || 'unknown'}`
       + `, origin ${geoTransform.originX.toPrecision(8)}/${geoTransform.originY.toPrecision(8)}`
       + `, scale ${geoTransform.scaleX}/${geoTransform.scaleY}`)

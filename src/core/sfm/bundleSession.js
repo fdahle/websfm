@@ -21,6 +21,7 @@ import { buildCameraPriorConstraints as buildSurveyPriorConstraints, qualifyingG
 import { compareRobustCost, projectFullXYZ } from './baAcceptance.js'
 import { buildBaObservations, appendObservations, trackPositions, mapObservations } from './baObservations.js'
 import { fmtStats } from './modelStats.js'
+import { pluralize } from '../textFormat.js'
 
 export function createBundleSession(ctx) {
   const {
@@ -50,7 +51,7 @@ export function createBundleSession(ctx) {
     for (const k of ['solves', 'cholesky', 'pcgConverged', 'pcgPartial', 'pcgFallback', 'pcgNotPd', 'pcgIters']) T[k] += s[k]
     T.pcgItersMax = Math.max(T.pcgItersMax, s.pcgItersMax)
     const pcg = s.pcgConverged + s.pcgPartial + s.pcgFallback + s.pcgNotPd
-    log(`${label} solver — n ${s.n}, ${s.solves} solve(s): `
+    log(`${label} solver — n ${s.n}, ${pluralize(s.solves, 'solve')}: `
       + (pcg ? `PCG ${s.pcgConverged} converged / ${s.pcgPartial} partial / ${s.pcgFallback} → Cholesky / `
         + `${s.pcgNotPd} not PD, ${s.pcgIters} CG it (max ${s.pcgItersMax})` : `${s.cholesky} Cholesky`)
       + `; ${((result.ms ?? 0) / 1000).toFixed(1)}s`, 'debug', 'Reconstruction')
@@ -215,7 +216,7 @@ export function createBundleSession(ctx) {
         const top = [...byCam].sort((a, b) => b[1].n - a[1].n).slice(0, 6)
           .map(([ci, r]) => `${imageByUuid(uuidList[ci])?.name ?? ci} ${r.n} (${r.fresh} on 2-view pts, max ${r.max.toFixed(0)}px)`)
         const total = [...byCam.values()].reduce((s, r) => s + r.n, 0)
-        log(`${label} pre-solve gross residuals (>${gross.toFixed(0)}px): ${total} obs on ${byCam.size} camera(s); `
+        log(`${label} pre-solve gross residuals (>${gross.toFixed(0)}px): ${total} obs on ${pluralize(byCam.size, 'camera')}; `
           + `top: ${top.join('; ')}`, 'debug', 'Reconstruction')
       }
     }
@@ -428,7 +429,7 @@ export function createBundleSession(ctx) {
       const camList = uuidList.map((u) => cameras.get(u))
       const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
       log(`camera-prior bundle adjustment (round ${round + 1}/${cfg.cameraPriorBaRounds}) — `
-        + `${constrained.priors.length} camera(s), seed RMS ${constrained.fit.rms.toPrecision(3)} project units`,
+        + `${pluralize(constrained.priors.length, 'camera')}, seed RMS ${constrained.fit.rms.toPrecision(3)} project units`,
       'info', 'Reconstruction')
       // Experiment (cameraPriorRefineIntrinsics): let the GNSS-constrained solve re-estimate
       // focal / principal point / distortion. With fixed K a self-calibration that is
@@ -513,7 +514,7 @@ export function createBundleSession(ctx) {
       const constrainedCameras = buildCameraPriorConstraints(uuidList, { fit, frame })
 
       log(`GCP-anchored bundle adjustment (round ${round + 1}/2) — `
-        + `${anchors.length} GCP(s), seed scale ${fit.scale.toPrecision(4)}, `
+        + `${pluralize(anchors.length, 'GCP')}, seed scale ${fit.scale.toPrecision(4)}, `
         + `seed RMS ${fit.rms.toPrecision(3)}`, 'info', 'Reconstruction')
 
       // With enough control, let the anchored solve re-estimate the intrinsics, as

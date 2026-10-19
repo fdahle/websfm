@@ -253,7 +253,7 @@ export function clipDem(grid, polygons, { crop = true, allTouched = false, onLog
   const inside = polygonMask(grid, polygons, { allTouched })
   const { bounds, win } = windowOf(grid, inside, crop)
   if (!win) {
-    onLog?.('Clip DEM: no cell centre lies inside the polygon(s)', 'warn', 'Products')
+    onLog?.('Clip DEM: no cell centre lies inside a clip polygon', 'warn', 'Products')
     return null
   }
   const { width: w, data, mask } = grid
@@ -332,7 +332,7 @@ export function clipOrtho(ortho, polygons, { crop = true, allTouched = false, on
   const inside = polygonMask(ortho, polygons, { allTouched })
   const { bounds, win } = windowOf(ortho, inside, crop)
   if (!win) {
-    onLog?.('Clip ortho: no pixel centre lies inside the polygon(s)', 'warn', 'Products')
+    onLog?.('Clip ortho: no pixel centre lies inside a clip polygon', 'warn', 'Products')
     return null
   }
   const { width: w, data, mask } = ortho

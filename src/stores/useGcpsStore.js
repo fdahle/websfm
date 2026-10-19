@@ -11,6 +11,7 @@ import { createDocumentSaver } from '../utils/documentSaver.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
+import { pluralize } from '../core/textFormat.js'
 
 // Default accuracy of image observations (marker projections), in pixels.
 // Ground-coordinate accuracy has no implicit default: it must be declared.
@@ -270,9 +271,9 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       }
     }
     const obsCount = rawGcps.reduce((n, g) => n + (g.observations?.length || 0), 0)
-    log(`GCPs imported: ${added} point(s)${markers ? ` (${markers} marker(s) without coordinates)` : ''}`
-      + `${obsCount ? `, ${obsCount} observation(s)` : ''} (from ${sourceCrs})`, 'success', 'GCP')
-    if (unconstrained) log(`${unconstrained} imported GCP(s) have unknown or invalid covariance and will not constrain the solution`,
+    log(`GCPs imported: ${pluralize(added, 'point')}${markers ? ` (${pluralize(markers, 'marker')} without coordinates)` : ''}`
+      + `${obsCount ? `, ${pluralize(obsCount, 'observation')}` : ''} (from ${sourceCrs})`, 'success', 'GCP')
+    if (unconstrained) log(`${pluralize(unconstrained, 'imported GCP')} ${unconstrained === 1 ? 'has' : 'have'} unknown or invalid covariance and will not constrain the solution`,
       'warn', 'GCP')
     await save()
     return added
@@ -547,7 +548,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       // systematic and slowly varying. Worth naming, because a similarity fit
       // can't absorb it but *will* soak it into a scale/tilt error instead.
       const systematic = withDz.length >= 3 && Math.abs(mean) > 2 * sd
-      log(`Check Z against reference DEM: ${withDz.length} GCP(s), mean Δ ${fmtNum(mean)}, `
+      log(`Check Z against reference DEM: ${pluralize(withDz.length, 'GCP')}, mean Δ ${fmtNum(mean)}, `
         + `RMS ${fmtNum(rms)}, scatter ${fmtNum(sd)}`
         + `${systematic ? ' — the offset dominates the scatter, which usually means a '
           + 'vertical datum mismatch (ellipsoid vs geoid) rather than DEM error' : ''}`,
@@ -644,7 +645,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     } else {
       gcps.value = data.gcps.map(normalize)
     }
-    log(`GCPs restored: ${gcps.value.length} point(s)`, 'success', 'GCP')
+    log(`GCPs restored: ${pluralize(gcps.value.length, 'point')}`, 'success', 'GCP')
   }
 
   // Re-project all stored GCPs when the project CRS changes.

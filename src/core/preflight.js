@@ -12,6 +12,7 @@
 //   'warn'  → the stage can run but the result is likely degraded / risky.
 
 import { formatBytes } from './dense/memBudget.js'
+import { nounFor, pluralize } from './textFormat.js'
 
 /**
  * @typedef {object} PreflightState
@@ -53,7 +54,7 @@ export function preflight(state = {}) {
   // ── Blocks (hard prerequisites) ────────────────────────────────────────────
   if ((s.nImages ?? 0) < 2) {
     add('block', 'too-few-images',
-      `Only ${s.nImages ?? 0} image(s) loaded.`,
+      `Only ${pluralize(s.nImages ?? 0, 'image')} loaded.`,
       'Add at least two overlapping images before running the pipeline.')
     // With no images nothing else is meaningful — but keep going so the caller
     // still sees any sensor warnings it wants to surface; the block alone gates Run.
@@ -69,7 +70,7 @@ export function preflight(state = {}) {
   if ((s.detectedImageCount ?? 0) > 0 && s.verifiedPairCount != null && s.verifiedPairCount === 0) {
     if ((s.totalPairCount ?? 0) > 0) {
       add('block', 'all-pairs-disabled',
-        `All ${s.totalPairCount} match pair(s) are excluded or rejected.`,
+        `${s.totalPairCount === 1 ? 'The only match pair is' : `All ${s.totalPairCount} match pairs are`} excluded or rejected.`,
         'Re-enable pairs in the match list, or lower the matching gates (minMatches / inlier ratio) and re-run matching.')
     } else {
       add('block', 'no-matches',
@@ -82,14 +83,14 @@ export function preflight(state = {}) {
   const noFocal = labelList(s.sensorsMissingFocal)
   if (noFocal) {
     add('warn', 'missing-focal',
-      `No focal length on sensor(s): ${noFocal}.`,
+      `No focal length on ${nounFor(s.sensorsMissingFocal.length, 'sensor')}: ${noFocal}.`,
       'Enter the focal length or film/sensor width; self-calibration will estimate it, but a good starting value gives a cleaner solve.')
   }
 
   const noFid = labelList(s.filmSensorsMissingFiducials)
   if (noFid) {
     add('warn', 'film-no-fiducials',
-      `Film sensor(s) without calibrated fiducials: ${noFid}.`,
+      `Film ${nounFor(s.filmSensorsMissingFiducials.length, 'sensor')} without calibrated fiducials: ${noFid}.`,
       'Detect and calibrate fiducial marks so interior orientation is removed at ingest — otherwise the scan geometry biases the reconstruction.')
   }
 

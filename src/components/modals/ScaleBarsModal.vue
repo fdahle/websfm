@@ -10,6 +10,7 @@ import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { useGcpsStore } from '../../stores/useGcpsStore.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { createLatest } from '../../utils/latestOnly.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Scale Bars — declare known real-world distances so an up-to-scale model gets a
 // metric unit. This is the object-capture counterpart of georeferencing: same job
@@ -211,7 +212,7 @@ const statusLine = computed(() => {
   }
   if (resolved.value.source === 'scalebars') {
     return `Scale: ${recon.scaleFit.scale.toPrecision(6)} m per model unit `
-      + `from ${recon.scaleFit.count} bar(s), RMS ${recon.scaleFit.rms.toPrecision(3)} m.`
+      + `from ${pluralize(recon.scaleFit.count, 'bar')}, RMS ${recon.scaleFit.rms.toPrecision(3)} m.`
   }
   if (recon.scaleFit && !fitStatus.value.valid) {
     return `The fitted scale is out of date (${fitStatus.value.reason}). Measurements are `

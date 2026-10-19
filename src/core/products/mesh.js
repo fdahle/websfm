@@ -8,6 +8,7 @@ import { MESH_DEFAULTS } from '../defaults.user.js'
 import { MESH_TUNING } from '../tuning.js'
 import { removeIsolated } from './cloudEdit.js'
 import { createCellIndex } from './cellIndex.js'
+import { pluralize } from '../textFormat.js'
 
 // Parse the wasm byte buffer into typed arrays. Layout (little-endian):
 //   header [u32 nVerts, u32 nTris] + f32 positions (3·nVerts) + u32 indices (3·nTris).
@@ -509,8 +510,8 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
     onLog(`Mesh: cleanup — extracted ${stats.extractedTris.toLocaleString()} tris; trimmed `
       + `${stats.densityRemovedTris.toLocaleString()} unsupported`
       + (stats.distanceRemovedTris ? ` + ${stats.distanceRemovedTris.toLocaleString()} far` : '')
-      + `; refilled ${stats.holesFilled} hole(s) (${stats.holeTris.toLocaleString()} tris); dropped `
-      + `${stats.componentsDropped} of ${stats.components} piece(s) (${stats.componentDroppedTris.toLocaleString()} tris)`,
+      + `; refilled ${pluralize(stats.holesFilled, 'hole')} (${stats.holeTris.toLocaleString()} tris); dropped `
+      + `${stats.componentsDropped} of ${pluralize(stats.components, 'piece')} (${stats.componentDroppedTris.toLocaleString()} tris)`,
     'info', 'Products')
   }
 

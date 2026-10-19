@@ -9,6 +9,7 @@ import * as opfs from '../../utils/opfs.js'
 import { markRaw } from 'vue'
 import { useMatchesStore } from '../useMatchesStore.js'
 import { detectionConcurrency } from '../../core/features/detectConcurrency.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Feature detection on the image records, split out of useImagesStore: one image
 // or the batch (SIFT or a learned detector, in the workers), an external feature
@@ -217,10 +218,10 @@ export function createDetection({
     const concurrency = detectionConcurrency(pending, settings, POOL_SIZE, navigator.deviceMemory)
     const started = performance.now()
     const budgetNote = settings.memBudgetBytes > 0 ? ` (memory budget ${(settings.memBudgetBytes / 1024 ** 3).toFixed(1)} GB)` : ''
-    log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}, ${concurrency} concurrent${budgetNote}`
+    log(`${batchTag} batch: ${pluralize(total, 'image')} queued — ${resLabel}, ${concurrency} concurrent${budgetNote}`
       + `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`
       + `${maxDimMode === 'auto' && !learnedSpec ? ' (auto: scaled with the detected area, up to 4×)' : ''}`
-      + `${learnedSpec ? '' : `, ≤${settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations} orientation(s) per extremum`
+      + `${learnedSpec ? '' : `, ≤${pluralize(settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations, 'orientation')} per extremum`
         + `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors`}`,
       'info', 'Detection')
     let done = 0
@@ -277,7 +278,7 @@ export function createDetection({
     }
     if (writes.length) await Promise.all(writes)
     if (imported && isPersisting()) await save(pid)
-    log(`Features imported: ${imported} image(s)`, imported ? 'success' : 'warn', 'Import')
+    log(`Features imported: ${pluralize(imported, 'image')}`, imported ? 'success' : 'warn', 'Import')
     return imported
   }
 

@@ -6,6 +6,7 @@ import { filmFormatStatus, scanWidthPx } from '../../core/sfm/filmFormat.js'
 import { DISTORTION_MODELS, DISTORTION_COEFFS, coeffsForModel, isFisheyeModel } from '../../core/sfm/distortion.js'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { parseRows, sniffDelimiter } from '../../core/io/gcp.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Editable table of sensors (shared intrinsics). In 'initial' mode the numeric
 // cells are editable inputs (the source of truth); in 'estimated' mode they show
@@ -133,7 +134,7 @@ const fallbacks = computed(() => {
 
 function fallbackTitle(s) {
   const fb = fallbacks.value.get(s.id)
-  const scope = fb.hasImages ? `${fb.count} of ${fb.total} image(s)` : 'this sensor'
+  const scope = fb.hasImages ? `${fb.count} of ${pluralize(fb.total, 'image')}` : 'this sensor'
   return `No usable calibration for ${scope}: intrinsics fall back to a default ` +
     `field-of-view guess (focal ≈ image width), which distorts SfM and depth maps. ` +
     `Fix it below — set Focal in px, or Focal in mm plus either px size or film format.`

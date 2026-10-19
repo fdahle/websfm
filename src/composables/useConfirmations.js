@@ -8,6 +8,7 @@ import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useUiSettings } from './useUiSettings.js'
+import { pluralize } from '../core/textFormat.js'
 
 // Confirm-before-destroy for every irreversible user action, lifted out of App.vue.
 //
@@ -156,7 +157,7 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
     const set = shapefiles.value.find((s) => s.id === id)
     askConfirm({
       title: 'Remove shapefile?',
-      message: `Remove “${set?.name ?? 'this layer'}” and its ${set?.footprints.length ?? 0} polygon(s)? This can't be undone.`,
+      message: `Remove “${set?.name ?? 'this layer'}” and its ${pluralize(set?.footprints.length ?? 0, 'polygon')}? This can't be undone.`,
       onConfirm: () => footprintsStore.removeSet(id),
     })
   }

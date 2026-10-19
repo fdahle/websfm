@@ -8,6 +8,7 @@ import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { estimateBatchFiducialLayout, validateFiducialCalibration } from '../../core/sfm/fiducialCalibration.js'
 import { useSensorsStore } from '../../stores/useSensorsStore.js'
 import { nextMarkId, duplicateMarkIds } from '../../utils/fiducialMarks.js'
+import { pluralize } from '../../core/textFormat.js'
 
 const props=defineProps({sensor:{type:Object,required:true},images:{type:Array,default:()=>[]}})
 const emit=defineEmits(['close','detect'])
@@ -73,7 +74,7 @@ const blockReason=computed(()=>dupIds.value.length?`Certificate mark ids must be
   </SettingsGroup>
   <WarnBox v-if="blockReason">{{blockReason}}.</WarnBox>
   <WarnBox v-if="error">{{error}}</WarnBox>
-  <SettingsGroup v-if="report" title="Validation"><p class="cal-hint">{{report.imageCount}} image(s) fit, {{report.failed}} failed · RMS {{report.rmsUm==null?'—':report.rmsUm.toFixed(1)}} µm · p95 {{report.p95Um==null?'—':report.p95Um.toFixed(1)}} µm</p></SettingsGroup>
+  <SettingsGroup v-if="report" title="Validation"><p class="cal-hint">{{ pluralize(report.imageCount, 'image') }} fit, {{report.failed}} failed · RMS {{report.rmsUm==null?'—':report.rmsUm.toFixed(1)}} µm · p95 {{report.p95Um==null?'—':report.p95Um.toFixed(1)}} µm</p></SettingsGroup>
   <template #footer><button class="btn" @click="emit('close')">Cancel</button><button class="btn" :disabled="!detectedImages.length||!!blockReason" :title="blockReason" @click="validate">Validate</button><button class="btn btn-primary" :disabled="!detectedImages.length||!!blockReason" :title="blockReason" @click="apply">Apply Calibration</button></template>
  </ModalShell>
 </template>

@@ -15,6 +15,7 @@ import * as opfs from '../../utils/opfs.js'
 import { toMatchSpace } from '../../core/features/siftDescriptors.js'
 import { unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
 import { aerialUpRotation, rotateReconstruction, sceneUpFromCameras } from '../../core/products/projection.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // The sparse reconstruction run, split out of useReconstructionStore: packing the
 // keypoints, matches and survey constraints for the SfM worker, the memory
@@ -75,7 +76,7 @@ export function createSparseRun({
     const leverArmFor = (imageId) => armBySensor.get(imgById.get(imageId)?.sensorId) ?? null
     const cameraPriors = buildCameraPriors(posesStore.poses, images.value, crs, { surveyFrame, leverArmFor })
     if (isGeographic(crs) && cameraPriors.length) {
-      log(`Camera priors: ${cameraPriors.length} geographic position(s) converted to a `
+      log(`Camera priors: ${pluralize(cameraPriors.length, 'geographic position')} converted to a `
         + 'survey-centred metric frame for bundle adjustment', 'info', 'Pose')
     }
     const withArm = cameraPriors.filter((p) => p.leverArm)
@@ -119,7 +120,7 @@ export function createSparseRun({
       }
       if (descriptorBytesReleased) {
         log(`Released ${formatBytes(descriptorBytesReleased)} of persisted descriptors from `
-          + `${descriptorImagesReleased} image(s) before reconstruction`, 'info', 'Compute')
+          + `${pluralize(descriptorImagesReleased, 'image')} before reconstruction`, 'info', 'Compute')
         // Yield once so the engine can reclaim detached descriptor backing stores
         // before the live-heap reading below. Never assume it did: the decision
         // uses the observed value without subtracting bytes optimistically.
@@ -186,7 +187,7 @@ export function createSparseRun({
           terminateAll('preparing a clean sparse-reconstruction rerun')
           log(`Released the loaded reconstruction before rerun (${released.cameraCount} cameras, `
             + `${released.pointCount.toLocaleString()} points`
-            + `${released.dependentClouds ? `, ${released.dependentClouds} computed dependent cloud(s)` : ''}). `
+            + `${released.dependentClouds ? `, ${pluralize(released.dependentClouds, 'computed dependent cloud')}` : ''}). `
             + 'The saved model remains recoverable by reloading until the replacement succeeds.',
           'info', 'Compute')
           await new Promise((resolve) => setTimeout(resolve, 50))
@@ -249,7 +250,7 @@ export function createSparseRun({
         keypointSets.set(img.uuid, set)
       }
       if (missingKeypoints.length) {
-        log(`Reconstruction: ${missingKeypoints.length} image(s) left out — their keypoints could not be read `
+        log(`Reconstruction: ${pluralize(missingKeypoints.length, 'image')} left out — their keypoints could not be read `
           + `(${missingKeypoints.slice(0, 5).join(', ')}${missingKeypoints.length > 5 ? ', …' : ''})`, 'warn', 'Reconstruction')
         imgs = imgs.filter((img) => keypointSets.has(img.uuid))
       }
@@ -366,7 +367,7 @@ export function createSparseRun({
           bytes += u8.length; shipped++
         }
         if (shipped) {
-          log(`guided track extension: sending ${shipped}/${imgs.length} image(s)' descriptors `
+          log(`guided track extension: sending ${shipped}/${pluralize(imgs.length, 'image')}' descriptors `
             + `to the worker (${formatBytes(bytes)}, uint8 RootSIFT)`, 'info', 'Reconstruction')
         }
       }

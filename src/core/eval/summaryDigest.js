@@ -9,6 +9,7 @@
 // precise machine parsing — same content, the modal lets the user pick.
 
 import { formatBytes } from '../formatBytes.js'
+import { nounFor, pluralize } from '../textFormat.js'
 
 // A second, equally important use (added 2026-07-25): the **baseline record**. The
 // owed verification runs in TODO.md are all "dataset × settings → numbers", and a
@@ -279,7 +280,7 @@ function configLines(config) {
   const { detect, match, sparse, dense } = config || {}
   if (detect) {
     const { detector, images, mixed, kpCapHitPct, ...rest } = detect
-    out.push(`- **Detect**: ${detector ?? '?'}${images != null ? ` · ${images} image(s)` : ''}`
+    out.push(`- **Detect**: ${detector ?? '?'}${images != null ? ` · ${pluralize(images, 'image')}` : ''}`
       + `${kv(rest) ? ` · ${kv(rest)}` : ''}`
       // Pulled out of `kv` because a bare `kpCapHitPct=100` reads as one more knob when
       // it is a finding: at 100% the cap, not contrastThreshold, chose the keypoints.
@@ -320,7 +321,7 @@ function diagnosticsLines(d) {
     // "Was a retry needed" is the SB acceptance criterion, so it is stated even when
     // the answer is no — an absent line would be ambiguous with an absent record.
     // 1-based for the reader; the record is 0-based (attempt 0 = the first seed).
-    out.push(`- **Seed attempts**: ${attempts.retriesRun ?? 0} retry(ies) of ${attempts.retryCap ?? 0} cap`
+    out.push(`- **Seed attempts**: ${pluralize(attempts.retriesRun ?? 0, 'retry', 'retries')} of ${attempts.retryCap ?? 0} cap`
       + `, kept attempt ${(attempts.winner ?? 0) + 1}`
       + `${(attempts.retriesRun ?? 0) === 0 ? ' (first seed, no retry)' : ''}`)
     for (const s of attempts.seeds || []) {
@@ -388,14 +389,14 @@ function diagnosticsLines(d) {
   if (trackCompletion?.length) {
     const sum = (k) => trackCompletion.reduce((s, r) => s + (r[k] ?? 0), 0)
     out.push(`- **Track completion** (final stage): +${fmtNum(sum('added'))} obs via verified pairs`
-      + `, ${fmtNum(sum('lifted'))} point(s) lifted to ≥3 views over ${trackCompletion.length} pass(es)`)
+      + `, ${fmtNum(sum('lifted'))} ${nounFor(sum('lifted'), 'point')} lifted to ≥3 views over ${pluralize(trackCompletion.length, 'pass', 'passes')}`)
     for (const r of trackCompletion) {
-      out.push(`  ${r.stage}: +${r.added} in ${r.rounds} round(s), lifted ${r.lifted}`
+      out.push(`  ${r.stage}: +${r.added} in ${pluralize(r.rounds, 'round')}, lifted ${r.lifted}`
         + ` (2-view ${r.before?.t2} → ${r.after?.t2})`)
     }
   }
   if (secondaryRecovery) {
-    out.push(`- **Secondary recovery**: ${secondaryRecovery.jobs ?? 0} job(s), `
+    out.push(`- **Secondary recovery**: ${pluralize(secondaryRecovery.jobs ?? 0, 'job')}, `
       + `${secondaryRecovery.merged?.length ?? 0} merged, ${secondaryRecovery.separate?.length ?? 0} kept separate`)
     for (const m of secondaryRecovery.separate || []) {
       out.push(`  ${m.name}: ${m.cameras} cams / ${m.points} pts, ${m.sharedCameras} shared — ${m.reason}`)
@@ -492,8 +493,8 @@ export function digestToMarkdown(digest) {
         + `post-BA median ${fmtNum(sparse.postBaMedianPx)} px`)
     }
     if (depth) {
-      L.push(`Depth maps (Stage A): ${fmtNum(depth.maps)} map(s) on ${depth.backend ?? '?'}`
-        + `${depth.gpuFallbacks ? ` (${depth.gpuFallbacks} GPU fallback(s))` : ''}`
+      L.push(`Depth maps (Stage A): ${fmtNum(depth.maps)} ${nounFor(depth.maps, 'map')} on ${depth.backend ?? '?'}`
+        + `${depth.gpuFallbacks ? ` (${pluralize(depth.gpuFallbacks, 'GPU fallback')})` : ''}`
         + `, median ${((depth.medianMsPerImage ?? 0) / 1000).toFixed(1)}s/image`
         + `, total ${((depth.totalMs ?? 0) / 1000).toFixed(1)}s`
         + `; median coverage ${fmtNum(depth.medianCoveragePct, 1)}%`
@@ -503,7 +504,7 @@ export function digestToMarkdown(digest) {
         L.push(`Cross-view filter: ${(depth.geomFilterMs / 1000).toFixed(1)}s`
           + `, median kept ${fmtNum(depth.geomFilterMedianKeptPct, 1)}%`
           + `, min kept ${fmtNum(depth.geomFilterMinKeptPct, 1)}%`
-          + `, ${fmtNum(depth.geomFilterMarginalMaps)} marginal map(s) (<1%)`)
+          + `, ${fmtNum(depth.geomFilterMarginalMaps)} ${nounFor(depth.geomFilterMarginalMaps, 'marginal map')} (<1%)`)
       }
       if (depth.projectedPeakBytes != null) {
         L.push(`Memory: projected peak ${formatBytes(depth.projectedPeakBytes)}`
@@ -522,7 +523,7 @@ export function digestToMarkdown(digest) {
     }
     if (scale) {
       L.push(`Scale: ${fmtNum(scale.scale, 6)} m per model unit from ${fmtNum(scale.count)} `
-        + `${scale.method ?? 'constraint'} bar(s), RMS ${fmtNum(scale.rms, 4)} m`
+        + `${scale.method ?? 'constraint'} ${nounFor(scale.count, 'bar')}, RMS ${fmtNum(scale.rms, 4)} m`
         + (scale.worstResidualM != null ? `, worst residual ${fmtNum(scale.worstResidualM, 4)} m` : ''))
     }
     L.push('')

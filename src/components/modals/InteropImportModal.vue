@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
+import { pluralize } from '../../core/textFormat.js'
 
 const props = defineProps({ session: { type: Object, required: true } })
 const emit = defineEmits(['close', 'run'])
@@ -59,7 +60,7 @@ const canImport = computed(() => ready.value && (
 
       <fieldset v-if="session.bundledImages.length">
         <legend>Images</legend>
-        <label><input v-model="options.images" type="checkbox" /> Import {{ session.bundledImages.length }} bundled image(s) missing from this project</label>
+        <label><input v-model="options.images" type="checkbox" /> Import {{ pluralize(session.bundledImages.length, 'bundled image') }} missing from this project</label>
       </fieldset>
 
       <fieldset v-if="session.models.length">

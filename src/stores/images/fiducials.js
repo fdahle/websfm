@@ -7,6 +7,7 @@ import { fiducialBatchConsensus, fiducialShapeCheck } from '../../core/sfm/fiduc
 import { FIDUCIAL_DETECT_TUNING } from '../../core/sfm/fiducialDetect.js'
 import { detectionConfidence } from '../../core/sfm/fiducialDetection.js'
 import { buildBorderMask } from '../../core/mask.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Film-scan fiducials on the image records, split out of useImagesStore: detector
 // results and hand-placed marks per slot (F4), imported observations, and the
@@ -42,7 +43,7 @@ export function createImageFiducials({
         applied++
       }
     }
-    log(`Fiducial observations imported: ${applied}${unmatched ? `, ${unmatched} unmatched image(s)` : ''}`,
+    log(`Fiducial observations imported: ${applied}${unmatched ? `, ${pluralize(unmatched, 'unmatched image')}` : ''}`,
       applied ? 'success' : 'warn', 'Sensor')
     if (applied && isPersisting()) save()
     return applied
@@ -110,7 +111,7 @@ export function createImageFiducials({
       }
     }
     const concurrency = fiducialDetectionConcurrency(targets, POOL_SIZE, navigator.deviceMemory)
-    log(`Fiducial detection: ${targets.length} image(s), ${concurrency} at a time (full-resolution decode budget)`, 'info', 'Fiducial')
+    log(`Fiducial detection: ${pluralize(targets.length, 'image')}, ${concurrency} at a time (full-resolution decode budget)`, 'info', 'Fiducial')
     await Promise.all(Array.from({ length: concurrency }, drain))
     if (cancelled()) return abandon()
 
@@ -183,8 +184,8 @@ export function createImageFiducials({
     // hit on something else near the slot (a data-strip annotation block).
     const { consensus, shape } = suspectsOf()
     for (const s of consensus.perSlot) {
-      if (!s.checked) { log(`Batch consensus: ${s.slot} skipped — only ${s.n} image(s)`, 'debug', 'Fiducial'); continue }
-      log(`Batch consensus (${consensus.basis}-relative): ${s.slot} over ${s.n} image(s), `
+      if (!s.checked) { log(`Batch consensus: ${s.slot} skipped — only ${pluralize(s.n, 'image')}`, 'debug', 'Fiducial'); continue }
+      log(`Batch consensus (${consensus.basis}-relative): ${s.slot} over ${pluralize(s.n, 'image')}, `
         + `spread ${(s.spreadFrac * 100).toFixed(2)}% of frame width, tolerance ${(s.tolFrac * 100).toFixed(2)}%`,
         'debug', 'Fiducial')
     }

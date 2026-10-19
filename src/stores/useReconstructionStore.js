@@ -35,6 +35,7 @@ import { usePosesStore } from './usePosesStore.js'
 import { useGcpsStore } from './useGcpsStore.js'
 import { useScaleBarsStore } from './useScaleBarsStore.js'
 import { makeFrameModelResolver } from '../core/sfm/displayFrame.js'
+import { pluralize } from '../core/textFormat.js'
 
 // Project-scoped store: the sparse model (camera poses + 3D points) from
 // incremental SfM. Reads the image list and match graph from their stores;
@@ -467,7 +468,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         if (res?.files) for (const c of list) savedCloudFiles.remember(c, projectId, res.files[c.id])
         const reused = reuse?.filter(Boolean).length ?? 0
         if (reused) {
-          log(`Saved the reconstruction — ${list.length - reused} cloud(s) written, ${reused} unchanged kept`,
+          log(`Saved the reconstruction — ${pluralize(list.length - reused, 'cloud')} written, ${reused} unchanged kept`,
             'debug', 'Reconstruction')
         }
         return true
@@ -917,14 +918,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
     if (clouds.value.length) {
       const camTotal = clouds.value.reduce((n, c) => n + c.cameras.size, 0)
-      log(`Reconstruction restored: ${clouds.value.length} cloud(s), ${camTotal} cameras`, 'success', 'Reconstruction')
+      log(`Reconstruction restored: ${pluralize(clouds.value.length, 'cloud')}, ${camTotal} cameras`, 'success', 'Reconstruction')
     }
 
     // Advertise saved depth maps without loading their planes — densify / ortho
     // hydrate them on demand. Runs after ensureMainSparse() so the staleness check
     // compares against the cloud the pipeline will actually consume.
     if (await loadDepthIndexIntoMeta(projectId, isCurrentRestore, depthIndexRead) && isCurrentRestore()) {
-      log(`Dense: ${depthMapsMeta.value.length} saved depth map(s) available `
+      log(`Dense: ${pluralize(depthMapsMeta.value.length, 'saved depth map')} available `
         + `(${formatBytes(depthMapBytes(depthMapsMeta.value))}, loaded on demand)`, 'success', 'Dense')
     }
     lap('depth index')

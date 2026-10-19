@@ -25,6 +25,7 @@ import { adaptiveReprojThreshold, CLEANUP_THRESHOLD_DEFAULTS } from './cleanupTh
 import { guidedExtendTracks, auditGuidedAdditions } from './guidedExtension.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { trackHist } from './modelStats.js'
+import { pluralize } from '../textFormat.js'
 
 // Runs the bundle-adjustment + track-filtering stages. Returns the records they fill
 // for the run summary: `guidedRecord` (projection-guided track extension,
@@ -77,8 +78,8 @@ export async function refineModel(ctx) {
     })
     const total = res.added
     if (total) {
-      log(`${label} track completion +${total} observation(s) (`
-        + `${res.rounds} round(s), ≤${filterMaxReprojPx.toFixed(1)}px) — ${res.lifted} point(s) lifted to ≥3 views; `
+      log(`${label} track completion +${pluralize(total, 'observation')} (`
+        + `${pluralize(res.rounds, 'round')}, ≤${filterMaxReprojPx.toFixed(1)}px) — ${pluralize(res.lifted, 'point')} lifted to ≥3 views; `
         + `track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ${after.t2}/${after.t3}/${after.t4}`,
       'info', 'Reconstruction')
     } else {
@@ -165,15 +166,15 @@ export async function refineModel(ctx) {
       const completed = completeTracksFinal('post-BA')
       if (added || merged || completed) {
         const after = trackHist(tracks)
-        log(`retriangulation +${added} point(s), merged ${merged} split track(s)`
-          + `${lowParallax ? `, rejected ${lowParallax} low-parallax candidate(s)` : ''}; `
+        log(`retriangulation +${pluralize(added, 'point')}, merged ${pluralize(merged, 'split track')}`
+          + `${lowParallax ? `, rejected ${pluralize(lowParallax, 'low-parallax candidate')}` : ''}; `
           + `${tracks.liveCount()} points`, 'info', 'Reconstruction')
         log(`track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
           + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
         await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none', { warm: true })
       } else if (lowParallax) {
-        log(`retriangulation found no stable missed structure — rejected ${lowParallax} `
-          + `candidate point(s) below ${filterMinTriAngleDeg}° parallax`, 'info', 'Reconstruction')
+        log(`retriangulation found no stable missed structure — rejected `
+          + `${pluralize(lowParallax, 'candidate point')} below ${filterMinTriAngleDeg}° parallax`, 'info', 'Reconstruction')
       } else {
         log('retriangulation found no missed structure', 'debug', 'Reconstruction')
       }
@@ -219,10 +220,10 @@ export async function refineModel(ctx) {
         const after = trackHist(tracks)
         guidedRecord = [...(guidedRecord ?? []), { pass: round, ...g, gatePx, before, after }]
         guidedObs = g.added
-        log(`guided track extension (pass ${round}) +${g.added} observation(s) on ${g.pointsExtended} point(s) — `
+        log(`guided track extension (pass ${round}) +${pluralize(g.added, 'observation')} on ${pluralize(g.pointsExtended, 'point')} — `
           + `${g.lifted} lifted from 2 to ≥3 views (≤${gatePx.toFixed(1)}px, descriptor ≤ `
-          + `${g.tau?.toFixed(3) ?? '–'} measured from ≥3-view tracks, ratio ${cfg.guidedRatio ?? 0.8}; ${g.windows} search window(s), `
-          + `${g.proposals} proposal(s)); track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
+          + `${g.tau?.toFixed(3) ?? '–'} measured from ≥3-view tracks, ratio ${cfg.guidedRatio ?? 0.8}; ${pluralize(g.windows, 'search window')}, `
+          + `${pluralize(g.proposals, 'proposal')}); track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
           + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
         memoryMark('guided extension')
       } else if (round === 2 && cfg.guidedSkippedForMemory) {
@@ -328,7 +329,7 @@ export async function refineModel(ctx) {
       }))
       guidedRecord.at(-1).audit = audit
       const f = (v) => (v == null ? '–' : v.toFixed(2))
-      log(`guided track extension audit — ${audit.survived}/${audit.proposed} added observation(s) survived the `
+      log(`guided track extension audit — ${audit.survived}/${pluralize(audit.proposed, 'added observation')} survived the `
         + `filter and BA; their residuals median ${f(audit.medianPx)}px, p90 ${f(audit.p90Px)}px vs every other `
         + `observation's ${f(audit.restMedianPx)}px / ${f(audit.restP90Px)}px`, 'info', 'Reconstruction')
     }
@@ -358,9 +359,9 @@ export function pruneFinalTracks({ cfg, tracks, refreshTracks, keypointsAt = nul
   })
   if (finalTrackPrune.applied) {
     refreshTracks()
-    log(`final track-quality cleanup — removed ${finalTrackPrune.removed} uncorroborated `
-      + `2-view point(s); ${finalTrackPrune.supported} point(s) with ≥${finalMinTrackViews} views remain`
-      + (finalTrackPrune.keptForCoverage ? `, plus ${finalTrackPrune.keptForCoverage} 2-view point(s) kept as the only `
+    log(`final track-quality cleanup — removed `
+      + `${pluralize(finalTrackPrune.removed, 'uncorroborated 2-view point')}; ${pluralize(finalTrackPrune.supported, 'point')} with ≥${finalMinTrackViews} views remain`
+      + (finalTrackPrune.keptForCoverage ? `, plus ${pluralize(finalTrackPrune.keptForCoverage, '2-view point')} kept as the only `
         + 'coverage of their image area' : ''),
     finalTrackPrune.removed ? 'info' : 'debug', 'Reconstruction')
   } else if (finalTrackPrune.total > 0 && finalMinTrackViews > 2) {

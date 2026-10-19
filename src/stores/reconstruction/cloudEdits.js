@@ -6,6 +6,7 @@ import { isFisheyeModel } from '../../core/sfm/distortion.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
 import { refineSparse as workerRefineSparse, optimizeSparse as workerOptimizeSparse, editCloud as workerEditCloud } from '../../workers/computeClient.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // A crop of a streamed cloud becomes a resident one: at most this many points.
 const STREAMED_CROP_MAX_POINTS = 25_000_000
@@ -185,7 +186,7 @@ export function createCloudEdits({
       const held = result.constraints ?? {}
       log(`${label}: ${describe(result)}; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px`
         + (held.gcpAnchors || held.cameraPriors
-          ? ` (held to ${held.gcpAnchors || 0} GCP anchor(s), ${held.cameraPriors || 0} camera prior(s))` : ' (no survey constraints)'),
+          ? ` (held to ${pluralize(held.gcpAnchors || 0, 'GCP anchor')}, ${pluralize(held.cameraPriors || 0, 'camera prior')})` : ' (no survey constraints)'),
         'success', 'Reconstruction')
       if (held.gcpError) log(`${label}: GCP anchoring skipped — ${held.gcpError}`, 'warn', 'Reconstruction')
       return mainSparseCloud.value

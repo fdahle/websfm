@@ -6,6 +6,7 @@ import { I3, essentialSingularValues } from './rotations.js'
 import { toNorm, camToP34flat } from './tracks.js'
 import { projectPoint, medianTriangulationAngle } from './geometry.js'
 import { hasFundamental } from './ingest.js'
+import { pluralize } from '../textFormat.js'
 
 // Initial-pair selection, lifted verbatim out of reconstruct(). A two-view seed
 // is the single best predictor of how well the model grows, so we probe every
@@ -163,13 +164,13 @@ export async function selectInitPair(
   const explored = new Set(exploredInitImages)
   const fresh = explored.size ? eligible.filter((e) => !(explored.has(e.idA) && explored.has(e.idB))) : eligible
   if (explored.size && fresh.length < eligible.length) {
-    log(`${eligible.length - fresh.length} seed candidate(s) skipped — both images already registered by an `
+    log(`${pluralize(eligible.length - fresh.length, 'seed candidate')} skipped — both images already registered by an `
       + `earlier attempt${fresh.length ? '' : ' (none left, so they stay in)'}`, 'info', 'Reconstruction')
   }
   const ranked = fresh.length ? fresh : eligible
   const candidates = ranked.slice(0, initCandidates)
 
-  log(`${candidates.length} init candidate(s) of ${donePairs.length} done pairs `
+  log(`${pluralize(candidates.length, 'init candidate')} of ${donePairs.length} done pairs `
     + `(≥${minInitInliers} inliers, need ≥${minInitAngleDeg}° parallax)`, 'info', 'Reconstruction')
 
   if (candidates.length === 0) {
@@ -354,7 +355,7 @@ export async function selectInitPair(
         + `graph degree ${pairDegree(entry)} (median ${medianDegree}) `
         + `⇒ score ${init.score.toFixed(1)} (parallax ×${parallaxHealth(init.angle).toFixed(2)}, `
         + `connectivity ×${connectivityHealth(init).toFixed(2)}, `
-        + `growth ×${growthHealth(init).toFixed(2)} from ${init.growth.views} PnP-ready view(s))`,
+        + `growth ×${growthHealth(init).toFixed(2)} from ${pluralize(init.growth.views, 'PnP-ready view')})`,
         'debug', 'Reconstruction')
       viable.push(init)
     }
@@ -405,7 +406,7 @@ export async function selectInitPair(
     }
     const widest = viable.reduce((m, v) => Math.max(m, v.angle), 0)
     log(`no candidate among ${probed} probed clears ${minInitAngleDeg}° parallax (widest ${widest.toFixed(2)}°) — `
-      + `widening the search: next ${batch.length} pair(s) by inlier count`
+      + `widening the search: next ${pluralize(batch.length, 'pair')} by inlier count`
       + (skipped ? `, ${skipped} skipped as near-coincident with already-probed views` : ''),
     'info', 'Reconstruction')
     if (!batch.length) break
@@ -423,12 +424,12 @@ export async function selectInitPair(
     // is worth a second look, and neither is visible from the winner's numbers alone.
     const rest = adequate.filter((v) => v !== best)
     const second = rest.length ? rest.reduce((a, b) => (b.score > a.score ? b : a)) : null
-    log(`selected seed ${best.nameA} ↔ ${best.nameB} of ${adequate.length} `
-      + `pair(s) over ${minInitAngleDeg}° parallax (score ${best.score.toFixed(1)}: `
+    log(`selected seed ${best.nameA} ↔ ${best.nameB} of `
+      + `${pluralize(adequate.length, 'pair')} over ${minInitAngleDeg}° parallax (score ${best.score.toFixed(1)}: `
       + `${best.cheiralKept} pts, ${best.angle.toFixed(2)}° parallax, `
       + `init reproj median ${best.reproj.median.toFixed(2)}px, `
       + `connectivity ${connectivityHealth(best).toFixed(2)} at graph degree ${pairDegree(best.entry)} `
-      + `vs median ${medianDegree}, ${best.growth.views} PnP-ready view(s))`
+      + `vs median ${medianDegree}, ${pluralize(best.growth.views, 'PnP-ready view')})`
       + (second ? ` — ahead of ${second.nameA} ↔ ${second.nameB} at ${second.score.toFixed(1)}` : ''),
       'info', 'Reconstruction')
   } else if (viable.length) {

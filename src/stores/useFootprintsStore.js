@@ -15,6 +15,7 @@ import { useSensorsStore } from './useSensorsStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useExternalStore } from './useExternalStore.js'
+import { pluralize } from '../core/textFormat.js'
 
 // Project-scoped store: vector polygon layers ("shapefiles"), stored in the
 // project working CRS and re-projected when it changes.
@@ -129,7 +130,7 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
       visible: true,
       footprints,
     })
-    log(`Shapefile imported: ${footprints.length} polygon(s)${matched ? `, ${matched} matched to images` : ''} (from ${sourceCrs})`, 'success', 'Footprint')
+    log(`Shapefile imported: ${pluralize(footprints.length, 'polygon')}${matched ? `, ${matched} matched to images` : ''} (from ${sourceCrs})`, 'success', 'Footprint')
     await save()
     return footprints.length
   }
@@ -408,7 +409,7 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
     }
     resolveImageMatches()
     const polys = sets.value.reduce((n, s) => n + s.footprints.length, 0)
-    log(`Shapefiles restored: ${sets.value.length} layer(s), ${polys} polygon(s)`, 'success', 'Footprint')
+    log(`Shapefiles restored: ${pluralize(sets.value.length, 'layer')}, ${pluralize(polys, 'polygon')}`, 'success', 'Footprint')
   }
 
   // Re-project every stored polygon when the project CRS changes.

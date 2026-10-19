@@ -30,6 +30,7 @@ import { secondaryJobs, alignSecondary, mergeAligned } from './multiModel.js'
 import { wrapPackedMatches } from './matchCodec.js'
 import { keypointSetFrom } from './keypointSet.js'
 import { reconstructSingleModel } from './singleModel.js'
+import { pluralize } from '../textFormat.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
 // others that reached for these through sfm.js) keep working unchanged.
@@ -155,7 +156,7 @@ export async function reconstruct(input, hooks = {}) {
   })
   for (let attempt = 0; attempt < maxRetries && primary.cameras.length < cfg.seedRetryMinFraction * nInputImages; attempt++) {
     log(`primary registered only ${primary.cameras.length}/${nInputImages}; `
-      + `retrying with alternate seed (${attempt + 1}/${maxRetries}, ${excluded.size} prior seed(s) excluded)`,
+      + `retrying with alternate seed (${attempt + 1}/${maxRetries}, ${pluralize(excluded.size, 'prior seed')} excluded)`,
     'warn', 'Reconstruction')
     const candidate = await reconstructSingleModel({
       ...clone(input),
@@ -244,12 +245,12 @@ export async function reconstruct(input, hooks = {}) {
 
   const secondaryModels = []
   const mergeReports = []
-  log(`secondary-model recovery — ${jobs.length} viable stranded component(s)`,
+  log(`secondary-model recovery — ${pluralize(jobs.length, 'viable stranded component')}`,
     'info', 'Reconstruction')
   for (let ji = 0; ji < jobs.length; ji++) {
     const job = jobs[ji]
     log(`secondary ${ji + 1}/${jobs.length} — ${job.componentIds.length} stranded + `
-      + `${job.boundaryIds.length} primary boundary image(s), ${job.pairs.length} pair(s)`,
+      + `${pluralize(job.boundaryIds.length, 'primary boundary image')}, ${pluralize(job.pairs.length, 'pair')}`,
     'info', 'Reconstruction')
     // Clone only this job's subset: cloning the whole input and then overriding its
     // images and pairs briefly held a second copy of every keypoint and match.

@@ -9,6 +9,7 @@ import {
 import { cloudUnits } from '../../core/products/cloudUnits.js'
 import { ensureProjection, transform } from '../../core/crs.js'
 import { downloadBlob } from '../../utils/download.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Saved measurements → CSV / GeoJSON (Export ▸ Measurements, and the Export button
 // of a saved-measurements list). The pure half is core/products/measurementExport.js;
@@ -97,7 +98,7 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
     const base = `${projectBase()}-measurements`
     if (format === 'csv') {
       downloadBlob(`${base}.csv`, measurementsCsv(rows), 'text/csv')
-      log(`Exported ${rows.length} measurement(s) as CSV`, 'success', 'Export')
+      log(`Exported ${pluralize(rows.length, 'measurement')} as CSV`, 'success', 'Export')
       return
     }
     const mode = geoJsonMode(rows, measurementCoords)
@@ -110,7 +111,7 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
     const fc = measurementsGeoJson(rows, { mode, targetCrs, reproject })
     downloadBlob(`${base}.geojson`, JSON.stringify(fc), 'application/geo+json')
     const unplaced = fc.features.filter((f) => !f.geometry).length
-    log(`Exported ${rows.length} measurement(s) as GeoJSON — ${fc.coordinate_frame}`
+    log(`Exported ${pluralize(rows.length, 'measurement')} as GeoJSON — ${fc.coordinate_frame}`
       + (unplaced ? `; ${unplaced} without a CRS kept unplaced (frame_coordinates)` : ''), 'success', 'Export')
   }
 

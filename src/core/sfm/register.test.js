@@ -66,7 +66,7 @@ describe('registerImages — stalled-model rescue (WS-A)', () => {
   it('fires the rescue when the model stalls at the 2-camera seed', async () => {
     const { ctx, logs } = makeCtx()
     await registerImages(ctx)
-    expect(logs.some(([, , m]) => /registration stalled at 2 camera\(s\)/.test(m))).toBe(true)
+    expect(logs.some(([, , m]) => /registration stalled at 2 cameras/.test(m))).toBe(true)
     expect(logs.some(([, , m]) => /rescue retriangulation/.test(m))).toBe(true)
   })
 

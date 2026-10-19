@@ -16,6 +16,7 @@ import { useExternalStore } from '../stores/useExternalStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { polygonSetToGeoJson } from '../core/io/geojson.js'
 import { similarityForExport } from '../core/products/exportFrame.js'
+import { pluralize } from '../core/textFormat.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
 // (which export dialog is open); the Ribbon command dispatch sets it and the
@@ -124,7 +125,7 @@ export function useExports({
     if (!set) return
     const fc = polygonSetToGeoJson(set, { crs: currentCrs.value })
     downloadBlob(`${fileSafe(set.name) || 'polygons'}.geojson`, JSON.stringify(fc), 'application/geo+json')
-    log(`Exported ${set.footprints.length} polygon(s) of "${set.name}" as GeoJSON`, 'success', 'Export')
+    log(`Exported ${pluralize(set.footprints.length, 'polygon')} of "${set.name}" as GeoJSON`, 'success', 'Export')
   }
 
 

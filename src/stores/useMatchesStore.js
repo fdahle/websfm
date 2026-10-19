@@ -37,6 +37,7 @@ import { useFootprintsStore } from './useFootprintsStore.js'
 import { useModelsStore } from './useModelsStore.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useSensorsStore } from './useSensorsStore.js'
+import { nounFor, pluralize } from '../core/textFormat.js'
 
 const EMPTY_MATCHES = new Uint32Array(0)
 
@@ -780,8 +781,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const names = lg.bad.map((im) => `"${im.name}" (${im.detector ?? 'sift'}/${im.descDim ?? 128}-d)`)
         const shown = names.slice(0, 5).join(', ')
         const more = names.length > 5 ? `, +${names.length - 5} more` : ''
-        log(`${lg.reason}, but ${lg.bad.length} of ${ready.length} `
-          + `image(s) are not: ${shown}${more} — re-detect these (Overwrite mode), `
+        log(`${lg.reason}, but ${lg.bad.length} of `
+          + `${pluralize(ready.length, 'image')} ${lg.bad.length === 1 ? 'is' : 'are'} not: ${shown}${more} — re-detect these (Overwrite mode), `
           + 'or switch the matcher to brute-force.', 'error', 'Matching')
         return
       }
@@ -800,7 +801,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       })
       log(`Sequential pairing: each image ↔ next ${settings.sequentialOverlap} in capture order`
         + `${settings.sequentialLoopClosure ? ', with end-to-start loop closure' : ''}`
-        + ` — ${pairs.length} pair(s)`, 'info', 'Matching')
+        + ` — ${pluralize(pairs.length, 'pair')}`, 'info', 'Matching')
     } else {
       for (let i = 0; i < ready.length; i++)
         for (let j = i + 1; j < ready.length; j++)
@@ -840,7 +841,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           pairs = pairs.filter(([a, b]) =>
             (rings.has(a.uuid) && rings.has(b.uuid)) ? keep.has(pairId(a.uuid, b.uuid)) : true)
           overlapPrefiltered = true
-          log(`Preselection: ${pairs.length}/${before} pair(s) kept, ${before - pairs.length} skipped `
+          log(`Preselection: ${pairs.length}/${pluralize(before, 'pair')} kept, ${before - pairs.length} skipped `
             + `(footprint overlap ≥ ${settings.minOverlap ?? 30}%)`, 'info', 'Matching')
         }
       } else {
@@ -856,7 +857,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           pairs = pairs.filter(([a, b]) =>
             (pos.has(a.uuid) && pos.has(b.uuid)) ? keep.has(pairId(a.uuid, b.uuid)) : true)
           overlapPrefiltered = true
-          log(`Preselection: ${pairs.length}/${before} pair(s) kept, ${before - pairs.length} skipped `
+          log(`Preselection: ${pairs.length}/${pluralize(before, 'pair')} kept, ${before - pairs.length} skipped `
             + `(camera proximity, ≤${settings.maxNeighbors} neighbours)`, 'info', 'Matching')
         }
       }
@@ -884,7 +885,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         + ' the overlap prefilter', 'info', 'Matching')
     } else if (gateApplies && pairs.length < settings.subsetGateMinPairs) {
       skipSubsetGate = true
-      log(`Subset gate disabled: only ${pairs.length} pair(s) (< ${settings.subsetGateMinPairs}) `
+      log(`Subset gate disabled: only ${pluralize(pairs.length, 'pair')} (< ${settings.subsetGateMinPairs}) `
         + '— matching them in full is cheap, and a wrong veto could sever the match graph',
         'info', 'Matching')
     }
@@ -903,7 +904,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // otherwise leaves no trace in the console yet meaningfully changes putatives.
     const crossCheck = settings.crossCheck
     const lightglue = settings.matcher === 'lightglue'
-    log(`Matching: ${pairs.length} pair(s) — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}`
+    log(`Matching: ${pluralize(pairs.length, 'pair')} — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}`
       + `; matcher ${lightglue ? 'LightGlue (learned)' : 'brute-force'}`
       + `${lightglue ? '' : `, cross-check ${crossCheck ? 'on (mutual NN)' : 'off'}, ratio ${settings.ratioThreshold}`}`,
       'info', 'Matching')
@@ -1018,8 +1019,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           const nLow = new Set(rescue.flatMap(([a, b]) => [a, b]).filter((im) => low(im.uuid)).map((im) => im.uuid)).size
           const before = { matched: stats.matched, weak: stats.weak }
           stats.gated -= rescue.length // re-tallied by the rescue run
-          log(`Matching: gate rescue — ${nLow} image(s) under ${rescueDegree} accepted pair(s); re-testing their `
-            + `${rescue.length} gated pair(s) on a ${settings.subsetGateRescueScale}× larger sample`, 'info', 'Matching')
+          log(`Matching: gate rescue — ${pluralize(nLow, 'image')} under ${pluralize(rescueDegree, 'accepted pair')}; re-testing their `
+            + `${pluralize(rescue.length, 'gated pair')} on a ${settings.subsetGateRescueScale}× larger sample`, 'info', 'Matching')
           const rescueSettings = { ...settings, _gateScale: settings.subsetGateRescueScale ?? 4 }
           const rescueCache = createDescriptorCache({ pairs: rescue, budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20 })
           let rc = 0
@@ -1038,7 +1039,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           }
           await Promise.all(Array.from({ length: concurrency }, drainRescue))
           log(`Matching: gate rescue recovered ${stats.matched - before.matched} accepted`
-            + `${stats.weak - before.weak ? ` + ${stats.weak - before.weak} weak` : ''} pair(s) of ${rescue.length} re-tested`,
+            + `${stats.weak - before.weak ? ` + ${stats.weak - before.weak} weak` : ''} ${nounFor(stats.matched - before.matched + stats.weak - before.weak, 'pair')} of ${rescue.length} re-tested`,
           'info', 'Matching')
         }
       }
@@ -1050,7 +1051,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       // One save for the whole run (and for a cancelled one, so what matched survives).
       await save()
       const dc = descCache.stats()
-      log(`Matching: descriptors loaded ${dc.loads}× for ${ready.length} image(s), `
+      log(`Matching: descriptors loaded ${dc.loads}× for ${pluralize(ready.length, 'image')}, `
         + `resident peak ${(dc.peakBytes / 2 ** 20).toFixed(0)} MiB`, 'debug', 'Matching')
       // Always release the GPU-side descriptor cache, unless Cancel already
       // terminated the pool (and with it the cache).
@@ -1074,18 +1075,18 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     }
     const meanRatio = stats.ratios.length
       ? stats.ratios.reduce((s, r) => s + r, 0) / stats.ratios.length : 0
-    log(`Matching complete: ${pairs.length} pair(s) — ${stats.matched} accepted`
+    log(`Matching complete: ${pluralize(pairs.length, 'pair')} — ${stats.matched} accepted`
       + `${stats.weak ? `, ${stats.weak} weak (PnP bridges)` : ''}`
       + `, ${stats.rejected} rejected, ${stats.skipped} skipped`
       + `${stats.gated ? `, ${stats.gated} gated (subset pre-test)` : ''}`
-      + `${settings.filterStationary ? `; ${stats.stationary} stationary putative(s) dropped` : ''}`
+      + `${settings.filterStationary ? `; ${pluralize(stats.stationary, 'stationary putative')} dropped` : ''}`
       + `; ${stats.inliers} total inliers, mean inlier ratio ${meanRatio.toFixed(2)}`
-      + `${stats.matched ? `, ${stats.degenerate}/${stats.matched} accepted pair(s) H/F-degenerate `
+      + `${stats.matched ? `, ${stats.degenerate}/${pluralize(stats.matched, 'accepted pair')} H/F-degenerate `
         + `(${(100 * stats.degenerate / stats.matched).toFixed(0)}% planar / pure-rotation)` : ''}`,
       'success', 'Matching')
     if (stats.siblingMerged || stats.siblingAmbiguous) {
-      log(`SIFT orientation siblings: ${stats.siblingMerged} duplicate putative(s) merged onto their dominant `
-        + `keypoint, ${stats.siblingAmbiguous} ambiguous putative(s) dropped (one feature matched to two)`,
+      log(`SIFT orientation siblings: ${pluralize(stats.siblingMerged, 'duplicate putative')} merged onto their dominant `
+        + `keypoint, ${pluralize(stats.siblingAmbiguous, 'ambiguous putative')} dropped (one feature matched to two)`,
         'info', 'Matching')
     }
 
@@ -1153,7 +1154,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       markHeavy()
       save()
       touch()
-      log(`Matches invalidated: ${removed} pair(s) — keypoints changed, re-match these`, 'warn', 'Matching')
+      log(`Matches invalidated: ${pluralize(removed, 'pair')} — keypoints changed, re-match these`, 'warn', 'Matching')
     }
     return removed
   }
@@ -1185,7 +1186,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     }
     touch()
     if (imported) { markHeavy(); await save() }
-    log(`Matches imported: ${imported} pair(s)${skipped ? `, ${skipped} skipped` : ''}`,
+    log(`Matches imported: ${pluralize(imported, 'pair')}${skipped ? `, ${skipped} skipped` : ''}`,
       imported ? 'success' : 'warn', 'Import')
     return { imported, skipped }
   }
@@ -1243,7 +1244,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       }
     }
     matchStore.value = new Map(restored)
-    if (restored.length > 0) log(`Matches restored: ${restored.length} pair(s)`, 'success', 'Matching')
+    if (restored.length > 0) log(`Matches restored: ${pluralize(restored.length, 'pair')}`, 'success', 'Matching')
   }
 
   // Reset in-memory matches. Only purge deletes the persisted match files — a plain

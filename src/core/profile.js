@@ -1,3 +1,4 @@
+import { pluralize } from './textFormat.js'
 // Dataset profiler (usability track U1).
 //
 // Classify an image set from METADATA ONLY — no pixel reads. Everything here is
@@ -95,18 +96,18 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
   } else if (minDim != null && maxDim != null && maxDim > minDim * 1.5) {
     notes.push(`Mixed resolutions (${minDim}–${maxDim} px long edge) — a per-image detection cap may over/under-shoot some images.`)
   }
-  if (medianMP != null) notes.push(`Median ${medianMP.toFixed(1)} MP across ${nImages} image(s).`)
+  if (medianMP != null) notes.push(`Median ${medianMP.toFixed(1)} MP across ${pluralize(nImages, 'image')}.`)
 
   const hasGps = images.some((i) => isFiniteNum(i.meta?.gpsLat) && isFiniteNum(i.meta?.gpsLon))
   const hasPoses = (poses?.length ?? 0) > 0
-  if (hasPoses) notes.push(`${poses.length} camera position(s) present — proximity preselection + georef seeds available.`)
+  if (hasPoses) notes.push(`${pluralize(poses.length, 'camera position')} present — proximity preselection + georef seeds available.`)
   else if (hasGps) notes.push('EXIF GPS present — synchronizing project-CRS camera positions for proximity preselection.')
 
   const hasCalibratedDistortion = (sensors ?? []).some(sensorHasDistortion)
   if (hasCalibratedDistortion) notes.push('A sensor declares non-zero lens distortion — self-cal can start from it rather than from scratch.')
 
   const nGcps = gcps?.length ?? 0
-  if (nGcps >= 3) notes.push(`${nGcps} GCP(s) — GCP-anchored BA + georeferencing available.`)
+  if (nGcps >= 3) notes.push(`${pluralize(nGcps, 'GCP')} — GCP-anchored BA + georeferencing available.`)
 
   // ── kind classification ──────────────────────────────────────────────────
   // Sensor-declared film wins outright (fiducial interior orientation, F4).
@@ -129,7 +130,7 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
     notes.push('Classified film: a sensor is kind:"film" (scanned imagery, fiducial interior orientation).')
   } else if (fromVideo) {
     kind = 'video'
-    notes.push(`Classified video: ${videoFrames} of ${nImages} image(s) are frames extracted from a video, in capture order.`)
+    notes.push(`Classified video: ${videoFrames} of ${pluralize(nImages, 'image')} ${videoFrames === 1 ? 'is a frame' : 'are frames'} extracted from a video, in capture order.`)
   } else if (!anyExif && nImages >= 2) {
     // No make/model/focal anywhere is the signature of scanned aerial film — the
     // scanner strips EXIF. Only a hint (a bare-EXIF digital set looks the same),

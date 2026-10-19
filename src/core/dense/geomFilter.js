@@ -10,6 +10,7 @@ import { formatBytes } from './memBudget.js'
 import { cameraCenter } from '../sfm/geometry.js'
 import { sliceCorners, sliceMisses } from './denseGeometry.js'
 import { numOpt, boolOpt } from './denseOptions.js'
+import { pluralize } from '../textFormat.js'
 
 // ── Candidate views for the cross-view filter (exact cull + ordering) ────────────
 // Which other maps could vouch for a pixel, and in what order to ask them. Neither
@@ -442,7 +443,7 @@ export function logFilterTotals(onLog, t, nMaps, cfg) {
     onLog(`Depth filter: only ${nMaps} map — cross-view check skipped, NCC floor only`, 'warn', 'Dense')
   }
   if (t.clampedMaps > 0) {
-    onLog(`Depth filter: ${t.clampedMaps} of ${nMaps} map(s) overlap fewer than ${cfg.minConsistent} other views — `
+    onLog(`Depth filter: ${t.clampedMaps} of ${pluralize(nMaps, 'map')} ${t.clampedMaps === 1 ? 'overlaps' : 'overlap'} fewer than ${cfg.minConsistent} other views — `
       + 'Consistent views lowered to the number they overlap (at least 1) for those maps', 'info', 'Dense')
   }
   onLog(`Depth filter: ${t.considered} px with depth → ${t.kept} kept (${pct(t.kept)}%); dropped `

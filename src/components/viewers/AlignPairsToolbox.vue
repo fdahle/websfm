@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import FloatingToolbox from './FloatingToolbox.vue'
 import { fitPointPairs, rotationAngle } from '../../core/products/cloudAlign.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Align by Point Pairs (Tools ▸ Point Cloud ▾): click a point in the cloud to MOVE,
 // then the same feature in the REFERENCE, ≥ 3 times; the similarity (or rigid)
@@ -70,7 +71,7 @@ const summary = computed(() => {
       </li>
     </ol>
     <div class="tb-hint">
-      {{ complete.length < 3 ? `${3 - complete.length} more pair(s) needed. Pick well-spread, sharp features.`
+      {{ complete.length < 3 ? `${pluralize(3 - complete.length, 'more pair')} needed. Pick well-spread, sharp features.`
         : (fit?.error || summary) }}
     </div>
     <label class="tb-row tb-check">

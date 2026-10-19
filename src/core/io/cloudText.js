@@ -8,6 +8,7 @@ import { MAX_BUFFER_BYTES } from '../bufferLimit.js'
 import { flatAxes } from '../products/flatAxes.js'
 import { sniffDelimiter, splitRow } from './gcp.js'
 import { PART_CHARS, lineParts } from './parts.js'
+import { pluralize } from '../textFormat.js'
 
 // ── Writer: cloud → "x y z [r g b]" lines ────────────────────────────────────
 // Same dual input as cloudToPlyParts / cloudToLasParts: sparse [{ x, y, z, color? }]
@@ -111,7 +112,7 @@ export function createXyzParser({ onLog } = {}) {
       }
       onLog?.(`XYZ: read ${count.toLocaleString()} points`
         + `${col ? ` with color (${colMax <= 1.0001 ? '0–1' : '0–255'} range)` : ''}`
-        + `${skipped ? `, skipped ${skipped} non-numeric row(s)` : ''}`, 'info', 'Import')
+        + `${skipped ? `, skipped ${pluralize(skipped, 'non-numeric row')}` : ''}`, 'info', 'Import')
       return { count, pos, ...(col ? { col } : {}), skipped,
         ...(anyIntensity ? { attributes: { intensity: intensities.take() } } : {}) }
     },

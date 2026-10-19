@@ -16,6 +16,7 @@
 // run reproduces the whole-image figures bit for bit. The gradient is the only
 // rounding, at 1.5e-5 grey levels per cell.
 import { NO_LABEL } from '../products/ortho.js'
+import { pluralize } from '../textFormat.js'
 
 const GRAD_SCALE = 65536 / 8000 // sqrt(gx² + gy²) in luma thousandths → 2⁻¹⁶ grey levels, incl. Sobel's /8
 
@@ -97,7 +98,7 @@ export function orthoStats(rgba, width, height, labels = null) {
 export function describeOrthoStats(s) {
   const f = (v, d = 2) => (v == null ? '—' : v.toFixed(d))
   const seams = s.labelled
-    ? `; ${s.sources} source image(s), seams: step ${f(s.seamStep)} vs interior ${f(s.interiorStep)} `
+    ? `; ${pluralize(s.sources, 'source image')}, seams: step ${f(s.seamStep)} vs interior ${f(s.interiorStep)} `
       + `(×${f(s.seamRatio)}), ${f(100 * (s.seamDensity ?? 0), 1)} seam pairs per 100 cells`
     : ''
   return `sharpness ${f(s.sharpness)} grey levels/cell${seams}`

@@ -2,6 +2,7 @@
 // worker; this module owns the on-disk conventions so they remain unit-testable.
 
 import { parseDistortionModelName, coeffsForModel } from '../sfm/distortion.js'
+import { pluralize } from '../textFormat.js'
 
 export const COLMAP_MAX_IMAGE_ID = 2147483647
 
@@ -147,7 +148,7 @@ export function decodeColmapMatrix(blob, label = 'matrix') {
 
 export function buildColmapDatabaseManifest(summary, sourceName = 'database.db') {
   const warnings = []
-  if (summary.unsupportedCameras) warnings.push(`${summary.unsupportedCameras} unsupported camera model(s)`)
+  if (summary.unsupportedCameras) warnings.push(`${pluralize(summary.unsupportedCameras, 'unsupported camera model')}`)
   if (summary.rigs || summary.frames) warnings.push('Camera rigs/frames are inspected but websfm does not yet preserve rig constraints')
   return {
     format: 'colmap-database', version: summary.userVersion || null, sourceName,

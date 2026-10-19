@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
 import ContextMenu from './ContextMenu.vue'
 import { useSidebar } from './sidebarContext.js'
+import { pluralize } from '../../../core/textFormat.js'
 
 defineProps({
   open: { type: Boolean, default: true },
@@ -51,7 +52,7 @@ function ctxRemoveMatches() {
             :title="matchesExpanded ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">Verified pairs</span>
-          <span class="obs-badge" :title="`${sidebar.matchStats.verified} of ${sidebar.matchStats.total} pair(s)`">{{ sidebar.matchStats.verified }}</span>
+          <span class="obs-badge" :title="`${sidebar.matchStats.verified} of ${pluralize(sidebar.matchStats.total, 'pair')}`">{{ sidebar.matchStats.verified }}</span>
         </li>
         <li v-if="matchesExpanded" class="img-details">
           <div class="detail-row">

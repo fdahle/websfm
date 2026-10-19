@@ -9,6 +9,7 @@ import { parseColmapModel, parseColmapModelBin, readColmapModel } from '../core/
 import { inspectColmapDatabase, readColmapDatabase, disposeColmapDatabase } from '../workers/colmapDbClient.js'
 import { useLog } from './useLog.js'
 import { parseSfmText } from '../core/io/sfmInterop.js'
+import { pluralize } from '../core/textFormat.js'
 
 const MODEL_FILES = new Map([
   ['cameras.txt', 'cameras.txt'], ['images.txt', 'images.txt'], ['points3d.txt', 'points3D.txt'],
@@ -146,12 +147,12 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
       const externalImages = database?.images ?? []
       const matchedImages = externalImages.filter((im) => resolve(im.name)).length
       const warnings = [...(database?.warnings ?? [])]
-      if (database?.unsupportedCameras) warnings.push(`${database.unsupportedCameras} camera(s) with an unsupported lens model (FOV, thin-prism fisheye) will be skipped`)
+      if (database?.unsupportedCameras) warnings.push(`${pluralize(database.unsupportedCameras, 'camera')} with an unsupported lens model (FOV, thin-prism fisheye) will be skipped`)
       if (database?.rigs || database?.frames) warnings.push('Rig/frame records are detected but rig constraints are not imported')
-      if (database?.posePriors) warnings.push(`${database.posePriors} pose prior(s) detected; their coordinate reference is not self-describing and they will be skipped`)
+      if (database?.posePriors) warnings.push(`${pluralize(database.posePriors, 'pose prior')} detected; their coordinate reference is not self-describing and they will be skipped`)
       for (const model of models) if (!model.complete) warnings.push(`${model.name}: ${model.error || 'incomplete sparse model'}`)
       if (database && !models.length) warnings.push('A database contains feature data, but no reconstructed sparse 3D model')
-      if (!bundledImages.length && externalImages.length > matchedImages) warnings.push(`${externalImages.length - matchedImages} external image(s) are not loaded or bundled`)
+      if (!bundledImages.length && externalImages.length > matchedImages) warnings.push(`${pluralize(externalImages.length - matchedImages, 'external image')} not loaded or bundled`)
 
       importSession.value = {
         status: 'ready', format: 'COLMAP', sourceName: importSession.value.sourceName,
@@ -228,7 +229,7 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
           invalid += pair.matches.length - valid.length
           if (valid.length) pairEntries.push({ uuidA, uuidB, matches: valid, F: pair.F, verified: pair.verified, rawCount: valid.length, source: 'colmap' })
         }
-        if (invalid) log(`COLMAP import: skipped ${invalid} match(es) with invalid feature indices`, 'warn', 'Import')
+        if (invalid) log(`COLMAP import: skipped ${pluralize(invalid, 'match', 'matches')} with invalid feature indices`, 'warn', 'Import')
         await matchesStore.importMatches(pairEntries, { replace: !!options.replaceMatches })
       }
 
@@ -238,7 +239,7 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
       } else for (const model of session.models) {
         if (options.modelIds?.includes(model.externalId) && model.complete && importColmapModel(model.files)) sparseImported++
       }
-      log(`SfM project imported: ${uuidByExternal.size} image name(s) matched${sparseImported ? `, ${sparseImported} sparse model(s)` : ''}`, 'success', 'Import')
+      log(`SfM project imported: ${pluralize(uuidByExternal.size, 'image name')} matched${sparseImported ? `, ${pluralize(sparseImported, 'sparse model')}` : ''}`, 'success', 'Import')
       closeImport()
       if (sparseImported) activateTab('viewer')
     } catch (err) {

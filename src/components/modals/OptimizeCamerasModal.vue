@@ -4,6 +4,7 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
+import { pluralize } from '../../core/textFormat.js'
 
 // Optimize Cameras (Tools ▸ Model ▾) — re-run bundle adjustment on the finished
 // sparse model with the focal length (and optionally the principal point) free,
@@ -33,7 +34,7 @@ function run() {
     <WarnBox v-if="!cloud">Build the sparse model first.</WarnBox>
     <template v-else>
       <SettingsGroup title="Model">
-        <SettingsField :hint="`${cloud.cameras.size.toLocaleString()} cameras, ${(cloud.points?.length ?? 0).toLocaleString()} points${gcpCount ? ` · held to ${gcpCount} control point(s) where they qualify` : ''}.`">
+        <SettingsField :hint="`${cloud.cameras.size.toLocaleString()} cameras, ${(cloud.points?.length ?? 0).toLocaleString()} points${gcpCount ? ` · held to ${pluralize(gcpCount, 'control point')} where they qualify` : ''}.`">
           <strong>{{ cloud.name }}</strong>
         </SettingsField>
       </SettingsGroup>

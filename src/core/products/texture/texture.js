@@ -25,6 +25,7 @@ import { buildCharts, cornerPixels, chartPieces } from './charts.js'
 import { packAtlas } from './packing.js'
 import { bakeAtlas, applyGains } from './bake.js'
 import { levelSeams } from './seamLevel.js'
+import { pluralize } from '../../textFormat.js'
 
 const MIN_SCALE = 1 / 64
 
@@ -129,7 +130,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
     onPhoto: levelling?.sample,
     onProgress: (d, t) => progress(0.6 + 0.35 * d / t, 'bake'),
   }, o.grayFallback)
-  if (baked.failed.length) log(`Texture: ${baked.failed.length} photo(s) could not be read; their charts are grey`, 'warn')
+  if (baked.failed.length) log(`Texture: ${pluralize(baked.failed.length, 'photo')} could not be read; their charts are grey`, 'warn')
 
   // 6 · Colour levelling.
   let gainSummary = null
@@ -140,7 +141,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
     log(summary.images
       ? `Texture: colour levelling over ${summary.images} photos from ${summary.observations.toLocaleString()} samples; `
         + `gain median ${summary.median.toFixed(3)}, range ${summary.min.toFixed(3)}–${summary.max.toFixed(3)}`
-        + (summary.clamped ? `, ${summary.clamped} channel(s) clamped` : '')
+        + (summary.clamped ? `, ${pluralize(summary.clamped, 'channel')} clamped` : '')
         + (summary.rejected ? `; ${summary.rejected.toLocaleString()} samples left out as inconsistent between photos` : '')
       : 'Texture: colour levelling skipped (no face seen by two decoded photos)')
   }

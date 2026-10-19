@@ -29,6 +29,7 @@
 import { createSession, tensor, resolveBackend } from '../features/ort.js'
 import { modelUrl } from '../models/registry.js'
 import { loadModelBytes } from '../models/modelCache.js'
+import { pluralize } from '../textFormat.js'
 
 export const SAM2_INPUT_SIZE = 1024
 // ImageNet normalization — SAM2's SAM2Transforms resizes the image straight to
@@ -270,6 +271,6 @@ export async function decode(embeddings, points, w, h, opts = {}) {
   // nearest-scaling a 256²→enc mask up to full image size.
   const logits = maskT.data.slice(idx * plane, (idx + 1) * plane) // Float32Array copy
   const iou = iouT ? (typeof iouT.data[idx] === 'bigint' ? Number(iouT.data[idx]) : iouT.data[idx]) : 1
-  onLog?.(`SAM2: decoded ${n} point(s) → logits ${mw}×${mh}, IoU ${iou.toFixed(3)}, ${ms} ms`)
+  onLog?.(`SAM2: decoded ${pluralize(n, 'point')} → logits ${mw}×${mh}, IoU ${iou.toFixed(3)}, ${ms} ms`)
   return { logits, mw, mh, iou, ms }
 }

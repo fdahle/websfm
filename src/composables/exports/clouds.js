@@ -13,6 +13,7 @@ import { zipParts } from '../../utils/zip.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
 import { MAX_FLOAT64_XYZ_POINTS, tooManyPointsMessage } from '../../core/bufferLimit.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Point cloud, mesh, model JSON and 3D Tiles exports, split out of useExports. A
 // cloud is written in the frame THE resolver gives it (exportSimilarity): the CRS
@@ -184,13 +185,13 @@ export function createCloudExports({
         .filter(Boolean)
       if (!transformImages.length) return
       if (warped) {
-        log(`transforms.json export: ${warped} of ${transformImages.length} image(s) are not pinhole images (lens `
+        log(`transforms.json export: ${warped} of ${pluralize(transformImages.length, 'image')} ${warped === 1 ? 'is not a pinhole image' : 'are not pinhole images'} (lens `
           + 'distortion, self-calibrated radial terms or a film scan), so their pixels would not match the cameras. '
           + 'Use Export ▸ Undistorted images, which writes the undistorted images with their own transforms.json.', 'error', 'Export')
         return
       }
       saveJson(buildTransformsJson({ images: transformImages }), `${projectBase()}-transforms.json`)
-      log(`transforms.json export: ${transformImages.length} camera(s)`, 'success', 'Export')
+      log(`transforms.json export: ${pluralize(transformImages.length, 'camera')}`, 'success', 'Export')
       return
     }
     const cams = [...cloud.cameras.entries()].map(([uuid, c]) => ({ uuid, R: c.R, t: c.t, K: c.K }))

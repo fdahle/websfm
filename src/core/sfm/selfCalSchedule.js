@@ -1,3 +1,4 @@
+import { pluralize } from '../textFormat.js'
 // Staged self-calibration schedule (WS2). Which shared intrinsic terms bundle
 // adjustment is allowed to refine depends on how well the model constrains them:
 // distortion is barely observable on a thin 2–3 view model, and higher-order radial
@@ -76,7 +77,7 @@ export function distortionIdentifiable({ nCams, nTracks, nMultiViewTracks }, cfg
   const c = { ...DISTORTION_IDENT_DEFAULTS, ...cfg }
   if (nCams < c.minCams) {
     return { ok: false, scope: 'all',
-      reason: `${nCams} camera(s) cannot identify intrinsics (a 2-view model hides distortion in its points)` }
+      reason: `${pluralize(nCams, 'camera')} cannot identify intrinsics (a 2-view model hides distortion in its points)` }
   }
   const frac = nTracks > 0 ? nMultiViewTracks / nTracks : 0
   if (frac >= c.minMultiViewFrac || nMultiViewTracks >= c.minMultiViewTracks) return { ok: true, scope: null, reason: null }

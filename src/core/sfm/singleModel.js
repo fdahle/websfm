@@ -32,6 +32,7 @@ import {
   captureRunConfig, resolveGates, resolveRefineIntrinsics, logMatchGraphHealth, logPerCameraResiduals,
   logRunTotals, unregisteredComponents, finaliseIntrinsics, assembleSummary,
 } from './runRecord.js'
+import { pluralize } from '../textFormat.js'
 
 // ── Geometry helpers ────────────────────────────────────────────────────────────
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal
@@ -51,14 +52,14 @@ async function recheckRegistrations({ cfg, cameras, tracks, ids, keypointsAt, do
   const first = check()
   const record = { median: first.median, limit: first.limit, flagged: first.flagged.map((f) => ({ name: nameOf(f.uuid), px: f.px })),
     readmitted: [], dropped: [] }
-  log(`registration check — ${first.scores.size} camera(s) against their strongest verified pairs: median `
-    + `${first.median.toFixed(2)}px, limit ${first.limit.toFixed(1)}px, ${first.flagged.length} outlier(s)`,
+  log(`registration check — ${pluralize(first.scores.size, 'camera')} against their strongest verified pairs: median `
+    + `${first.median.toFixed(2)}px, limit ${first.limit.toFixed(1)}px, ${pluralize(first.flagged.length, 'outlier')}`,
   first.flagged.length ? 'warn' : 'info', 'Reconstruction')
   if (!first.flagged.length || cameras.size - first.flagged.length < 2) return record
   for (const { uuid, px } of first.flagged) {
     const gone = deregisterCamera({ uuid, cameras, registeredUuids, tracks, ids })
     log(`  ${nameOf(uuid)} disagrees with its pairs by ${px.toFixed(1)}px — taken out of the model `
-      + `(${gone} point(s) only it supported) for re-registration`, 'warn', 'Reconstruction')
+      + `(${pluralize(gone, 'point')} only it supported) for re-registration`, 'warn', 'Reconstruction')
   }
   refreshTracks()
   await reregister()
@@ -261,9 +262,9 @@ export async function reconstructSingleModel(input, hooks = {}) {
         const rec = intrinsicsRecord.get(g.group)
         const first = imgs.find((im) => (im.sensorId ?? `image:${im.uuid}`) === g.group)
         if (rec && first) { rec.fxNominal = Kmap.get(first.uuid).fx; rec.source = Kmap.get(first.uuid).source }
-        log(`focal from pair geometry — ${g.images} image(s) without a focal in their metadata`
+        log(`focal from pair geometry — ${pluralize(g.images, 'image')} without a focal in their metadata`
           + `${first?.sensor?.label ? ` (${first.sensor.label})` : ''}: f = ${g.s.toFixed(3)} × image size`
-          + ` (${first ? Kmap.get(first.uuid).fx.toFixed(0) : '?'}px), ${g.n} of ${g.of} pair(s) agree within 10 %`
+          + ` (${first ? Kmap.get(first.uuid).fx.toFixed(0) : '?'}px), ${g.n} of ${pluralize(g.of, 'pair')} agree within 10 %`
           + `${g.own ? '' : ' (pooled over all such images)'}`, 'info', 'Reconstruction')
       }
     }
@@ -273,7 +274,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
     resolveRefineIntrinsics({ cfg, anyCalibratedDistortion, selfCalRecord, log })
 
     if (defaultKCount > 0) {
-      log(`${defaultKCount}/${imgs.length} image(s) have no focal length — using a default FOV guess. `
+      log(`${pluralize(defaultKCount, 'image')} of ${imgs.length} ${defaultKCount === 1 ? 'has' : 'have'} no focal length — using a default FOV guess. `
         + `Wrong intrinsics distort the geometry and commonly prevent cameras from registering; `
         + `supply a focal length or sensor size for reliable results.`,
         defaultKCount === imgs.length ? 'warn' : 'info', 'Reconstruction')

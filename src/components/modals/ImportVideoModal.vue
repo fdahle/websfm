@@ -12,6 +12,7 @@ import { analysisTimes, intervalTimes, relativeSharpness, selectKeyframes } from
 import { openVideoSource, analyzeVideo } from '../../utils/videoSource.js'
 import { checkNumberFields } from '../../utils/numberFields.js'
 import { useLog } from '../../composables/useLog.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Import ▸ Video: choose which frames of a video become images. The video is opened
 // here to read its size, length and frame rate; the automatic mode also scans it
@@ -67,8 +68,8 @@ async function analyse() {
       const fast = result.filter((s) => s.fast).length, lost = result.filter((s) => s.lost).length
       log(`Video analysis: ${props.file.name} — ${result.length} samples every ${step.toFixed(3)} s in `
         + `${((performance.now() - t0) / 1000).toFixed(1)} s; travel ${result.at(-1)?.travel.toFixed(2) ?? 0} frame widths`
-        + `${fast ? `, ${fast} sample(s) moving faster than the tracker follows` : ''}`
-        + `${lost ? `, ${lost} cut(s) or lost view(s)` : ''}`, 'info', 'Import')
+        + `${fast ? `, ${pluralize(fast, 'sample')} moving faster than the tracker follows` : ''}`
+        + `${lost ? `, ${pluralize(pluralize(lost, 'cut'), 'or lost view')}` : ''}`, 'info', 'Import')
     }
   } catch (err) {
     analysisError.value = err?.message ?? String(err)
@@ -152,8 +153,8 @@ const notes = computed(() => {
   const out = []
   const share = sel.blurry / samples.value.length
   if (sel.blurry) out.push(`${Math.round(share * 100)} % of the scanned moments are blurry; the sharpest nearby frame is used instead.`)
-  if (sel.blurryKept) out.push(`${sel.blurryKept} blurry frame(s) kept where there was no sharp one, so the sequence stays connected.`)
-  if (sel.gaps) out.push(`${sel.gaps} place(s) where the view moved more than a frame's spacing between two scanned moments (fast motion or a cut).`)
+  if (sel.blurryKept) out.push(`${pluralize(sel.blurryKept, 'blurry frame')} kept where there was no sharp one, so the sequence stays connected.`)
+  if (sel.gaps) out.push(`${pluralize(sel.gaps, 'place')} where the view moved more than a frame's spacing between two scanned moments (fast motion or a cut).`)
   if (sel.travel < 0.3 && times.value.length < 5) out.push('The camera hardly moves in this video. A reconstruction needs viewpoints that move around the subject.')
   return out
 })

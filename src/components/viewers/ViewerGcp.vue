@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useImagesStore } from '../../stores/useImagesStore.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Multi-image GCP inspector: one panel per registered observation, each cropped
 // and zoomed to centre the GCP's marked pixel, with a crosshair marker. Opened
@@ -85,7 +86,7 @@ function fmtCoord(v) {
           X {{ fmtCoord(gcp?.x) }} · Y {{ fmtCoord(gcp?.y) }}<template v-if="gcp?.z != null"> · Z {{ fmtCoord(gcp?.z) }}</template>
         </span>
         <span class="gcp-count">{{ panels.length }} image{{ panels.length === 1 ? '' : 's' }}</span>
-        <span v-if="missingCount" class="gcp-missing" :title="`${missingCount} observation(s) reference images that aren't loaded yet`">
+        <span v-if="missingCount" class="gcp-missing" :title="`${pluralize(missingCount, 'observation')} reference images that aren't loaded yet`">
           +{{ missingCount }} not loaded
         </span>
       </div>

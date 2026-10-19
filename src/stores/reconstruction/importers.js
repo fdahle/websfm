@@ -1,5 +1,6 @@
 import { parseColmapModelBin, parseColmapModel, readColmapModel, makeNameResolver, colmapToSparse } from '../../core/io/colmapModel.js'
 import { markRaw } from 'vue'
+import { nounFor, pluralize } from '../../core/textFormat.js'
 
 // External models into the reconstruction, split out of useReconstructionStore:
 // a COLMAP / interop sparse model (added beside a computed one, never replacing it)
@@ -40,11 +41,11 @@ export function createImporters({
     log(`COLMAP import: matched ${matched.length}/${colImages.length} images by name`
       + `, ${points.length}/${colPoints.length} points`, 'info', 'Reconstruction')
     if (unmatched.length) {
-      log(`COLMAP import: ${unmatched.length} image(s) not in this project (skipped): `
+      log(`COLMAP import: ${pluralize(unmatched.length, 'image')} not in this project (skipped): `
         + unmatched.slice(0, 8).join(', ') + (unmatched.length > 8 ? '…' : ''), 'warn', 'Reconstruction')
     }
     if (droppedDistortion.length) {
-      log(`COLMAP import: dropped distortion of ${droppedDistortion.join(', ')} camera(s) `
+      log(`COLMAP import: dropped distortion of ${nounFor(droppedDistortion.length, 'camera')} ${droppedDistortion.join(', ')} `
         + '— intrinsics read as pinhole (fx/fy/cx/cy)', 'warn', 'Reconstruction')
     }
     if (cameras.size < 2) {

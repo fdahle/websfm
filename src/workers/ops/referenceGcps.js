@@ -6,6 +6,7 @@ import { homographyToNative, homographyScale, footprintRect, searchWindows, SEAR
 import { readWindowFromFile } from './io.js'
 import { windowToNative } from '../../core/io/rasterWindow.js'
 import { rasterToDataUrl, rasterToPng } from '../rasterPreview.js'
+import { pluralize } from '../../core/textFormat.js'
 
 const COARSE_DIM = 1536
 
@@ -121,9 +122,9 @@ export function makeReferenceGcpOps({ rasterize }) {
         const hit = await look(w)
         if (hit && (!coarse || hit.inliers > coarse.inliers)) coarse = hit
       }
-      if (!coarse) log(`No alignment in ${searched} search window(s) at level ${level}`)
+      if (!coarse) log(`No alignment in ${pluralize(searched, 'search window')} at level ${level}`)
     }
-    if (!coarse) throw new Error(`No reliable ortho alignment found in ${searched} search window(s)`
+    if (!coarse) throw new Error(`No reliable ortho alignment found in ${pluralize(searched, 'search window')}`
       + `${reference.region ? ' around the expected footprint' : ''}. Try another reference band or a reference covering the same area; use manual control if the scene has changed substantially.`)
     const levels = [{ rect: coarse.rect, inliers: coarse.inliers, p95: coarse.p95 }]
     for (let k = 0; k < 2; k++) {
@@ -134,7 +135,7 @@ export function makeReferenceGcpOps({ rasterize }) {
       coarse = hit
       levels.push({ rect: hit.rect, inliers: hit.inliers, p95: hit.p95 })
     }
-    log(`Coarse alignment: ${coarse.inliers} inliers, p95 ${coarse.p95.toFixed(1)} reference px, after ${levels.length} look(s)`)
+    log(`Coarse alignment: ${coarse.inliers} inliers, p95 ${coarse.p95.toFixed(1)} reference px, after ${pluralize(levels.length, 'look')}`)
 
     // Fine tiles.
     const scale = homographyScale(coarse.H, local.width / 2, local.height / 2)

@@ -5,6 +5,7 @@ import { useContextMenu } from '../../../composables/useContextMenu.js'
 import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import ContextMenu from './ContextMenu.vue'
 import { useSidebar } from './sidebarContext.js'
+import { pluralize } from '../../../core/textFormat.js'
 
 defineProps({
   open: { type: Boolean, default: true },
@@ -93,7 +94,7 @@ function reprojFor(gcpId, imageId) {
           <span
             class="obs-badge"
             :class="{ low: (gcp.observations?.length || 0) < 2 }"
-            :title="(gcp.observations?.length || 0) < 2 ? 'Needs ≥2 marked images to be usable' : `${gcp.observations.length} observation(s)`"
+            :title="(gcp.observations?.length || 0) < 2 ? 'Needs ≥2 marked images to be usable' : `${pluralize(gcp.observations.length, 'observation')}`"
           >
             {{ gcp.observations?.length || 0 }}<template v-if="(gcp.observations?.length || 0) < 2"> ⚠</template>
           </span>

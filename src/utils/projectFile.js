@@ -19,6 +19,7 @@ import {
   isSafeArchiveEntry, validateManifest, formatBytes, summarizeSections,
   ARCHIVE_DERIVED_DIRS,
 } from '../core/io/projectArchive.js'
+import { pluralize } from '../core/textFormat.js'
 
 // ── Save target ───────────────────────────────────────────────────────────────
 // `showSaveFilePicker` streams straight to disk at constant memory and is the
@@ -272,7 +273,7 @@ export async function exportProjectArchive({
       done++
       onProgress?.({ done, total: items.length, label: relPath })
     }
-    if (skipped) log(`Saving project: ${skipped} file(s) were replaced while saving and are left out`, 'info')
+    if (skipped) log(`Saving project: left out ${pluralize(skipped, 'file')} that changed while saving`, 'info')
     const cdOffset = archiveBytes
     let cdSize = 0
     for (const h of central) { await write(h); cdSize += h.length }

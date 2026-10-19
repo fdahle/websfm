@@ -19,6 +19,7 @@ import { computeDepthMapGPU } from '../gpu/depthMapGpu.js'
 import {
   createMemLedger, projectDensePeakBytes, workingPixels, formatBytes, DEFAULT_BUDGET_BYTES,
 } from '../../core/dense/memBudget.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // Dense MVS ops (Stage A depth maps + Stage B fusion). `rasterize` (OffscreenCanvas
 // pixel decode) is injected; the raster-space helpers (undistortion, RGB packing,
@@ -224,7 +225,7 @@ export function makeDenseOps({ rasterize }) {
     }
 
     const t0 = performance.now()
-    emit('log', [`Depth maps: ${images.length} image(s) — working ≤${maxDim}px, `
+    emit('log', [`Depth maps: ${pluralize(images.length, 'image')} — working ≤${maxDim}px, `
       + `≤${maxSources} sources (best-${autoBestKMode ? 'auto' : bestK}), window ${window} (${2 * window + 1}×${2 * window + 1}), `
       + `${iterations} PatchMatch iters`, 'info', 'Dense'])
 
@@ -533,7 +534,7 @@ export function makeDenseOps({ rasterize }) {
       if (marginal.length) {
         const names = marginal.slice(0, 12)
           .map((m) => `${m.name || m.uuid} ${m.filterStats.keptPct.toFixed(1)}%`).join('; ')
-        emit('log', [`Depth filter: ${marginal.length} marginal map(s) kept <1% after cross-view filtering — `
+        emit('log', [`Depth filter: ${pluralize(marginal.length, 'marginal map')} kept <1% after cross-view filtering — `
           + `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. `
           + 'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.',
         'warn', 'Dense'])
@@ -652,7 +653,7 @@ export function makeDenseOps({ rasterize }) {
     const marginal = metas.map((m, i) => ({ m, s: stats[i] })).filter(({ s }) => s.considered > 0 && s.keptPct < 1)
     if (marginal.length) {
       const names = marginal.slice(0, 12).map(({ m, s }) => `${m.name || m.uuid} ${s.keptPct.toFixed(1)}%`).join('; ')
-      emit('log', [`Depth filter: ${marginal.length} marginal map(s) kept <1% after cross-view filtering — `
+      emit('log', [`Depth filter: ${pluralize(marginal.length, 'marginal map')} kept <1% after cross-view filtering — `
         + `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. `
         + 'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.', 'warn', 'Dense'])
     }

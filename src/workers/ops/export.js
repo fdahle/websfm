@@ -7,6 +7,7 @@ import { partsToBlob } from '../../utils/blobParts.js'
 import { assembleStripTiff, geoKeysForEpsg } from '../../core/products/geotiff.js'
 import { MAX_ORTHO_IMAGE_CELLS as MAX_IMAGE_CELLS } from '../../core/products/exporters.js'
 import { openRaster, readWindowBytes, rowsPerBand } from '../cogRead.js'
+import { pluralize } from '../../core/textFormat.js'
 
 async function deflatePart(bytes) {
   const part = await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'))).blob()
@@ -129,7 +130,7 @@ export function makeExportOps({ lazCodec = null } = {}) {
         compression: deflate ? 8 : 1, rowsPerStrip: rows,
       }, strips, { parts: true })
       const blob = new Blob(parts, { type: 'image/tiff' })
-      emit('log', [`Ortho GeoTIFF: ${width}×${height} in ${n} strip(s), ${(blob.size / 1024 ** 2).toFixed(1)} MB `
+      emit('log', [`Ortho GeoTIFF: ${width}×${height} in ${pluralize(n, 'strip')}, ${(blob.size / 1024 ** 2).toFixed(1)} MB `
         + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'info', 'Export'])
       return { result: { blob, width, height } }
     }

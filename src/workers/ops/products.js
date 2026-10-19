@@ -17,6 +17,7 @@ import { terrainProducts } from '../../core/products/terrain.js'
 import { clipDem, clipOrtho, polygonPixelWindow, windowGeometry } from '../../core/products/rasterClip.js'
 import { openRaster, readWindowBytes } from '../cogRead.js'
 import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
+import { nounFor, pluralize } from '../../core/textFormat.js'
 
 // The ortho's source photos (plan-ortho-mosaic O1). `images` comes from the store, one
 // per depth map: { uuid, name, url, K (the camera's full-resolution K), dist, selfCal,
@@ -357,12 +358,12 @@ export function makeProductsOps({ rasterize } = {}) {
         + `${loadImage.fellBack ? `, ${loadImage.fellBack} from depth-map colour (photo unavailable)` : ''}`, 'info', 'Products'])
     }
     const blocksX = Math.ceil(width / ORTHO_BLOCK), blocksY = Math.ceil(height / ORTHO_BLOCK)
-    emit('log', [`Ortho: ${res.blocks} block(s) of ${ORTHO_BLOCK}² (${blocksX}×${blocksY}), ${res.visits} map visit(s) `
-      + `after culling (of ${res.blocks * maps.length}); ${res.mapLoads} map read(s), ${res.photoLoads} photo decode(s), `
-      + `${res.cacheHits} cache hit(s) in a ${Number.isFinite(cacheBytes) ? formatBytes(cacheBytes) : 'default'} cache`, 'info', 'Products'])
+    emit('log', [`Ortho: ${pluralize(res.blocks, 'block')} of ${ORTHO_BLOCK}² (${blocksX}×${blocksY}), ${pluralize(res.visits, 'map visit')} `
+      + `after culling (of ${res.blocks * maps.length}); ${pluralize(res.mapLoads, 'map read')}, ${pluralize(res.photoLoads, 'photo decode')}, `
+      + `${pluralize(res.cacheHits, 'cache hit')} in a ${Number.isFinite(cacheBytes) ? formatBytes(cacheBytes) : 'default'} cache`, 'info', 'Products'])
     const cells = width * height
     emit('log', [`Ortho: ${width}×${height}, ${covered}/${cells} cells coloured `
-      + `(${(100 * covered / cells).toFixed(0)}%) from ${maps.length} view(s) over the `
+      + `(${(100 * covered / cells).toFixed(0)}%) from ${pluralize(maps.length, 'view')} over the `
       + `${label} surface (${surfaceCells}/${cells} cells had a height) `
       + `— ${sampled} sampled + ${filled} interpolated; GeoTIFF ${formatBytes(cog.size)} `
       + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'success', 'Products'])
@@ -373,16 +374,16 @@ export function makeProductsOps({ rasterize } = {}) {
       const seams = seamBlend === 'multiband'
         ? `blended in ${levels} frequency bands (multiband; the coarsest fades over ~±${3 << levels} cells)`
         : seamCells
-          ? `feathered over ${seamCells} cell(s) (${settings.seamWidth}% of the short side${seamCells === MAX_SEAM_CELLS ? ', capped' : ''})`
+          ? `feathered over ${pluralize(seamCells, 'cell')} (${settings.seamWidth}% of the short side${seamCells === MAX_SEAM_CELLS ? ', capped' : ''})`
           : 'hard (no feathering)'
       const where = seamline === 'graphcut'
         ? 'seamlines by graph cut (colour difference + nadir cost)'
-        : `each cell from its most nadir view (finest foreshortened footprint), labels smoothed by ${smoothPasses} majority pass(es)`
+        : `each cell from its most nadir view (finest foreshortened footprint), labels smoothed by ${pluralize(smoothPasses, 'majority pass', 'majority passes')}`
       emit('log', [`Ortho: mosaic — ${where}; seams ${seams}`, 'info', 'Products'])
       if (seamCut) {
         const pct = (v) => (100 * v).toFixed(1)
-        emit('log', [`Ortho: graph cut on a ${seamCut.width}×${seamCut.height} grid (every ${seamCut.factor} cell(s)), `
-          + `${seamCut.cycles} expansion cycle(s), ${seamCut.accepted} accepted move(s); ${pct(seamCut.changedCells / Math.max(1, seamCut.labelled))}% `
+        emit('log', [`Ortho: graph cut on a ${seamCut.width}×${seamCut.height} grid (every ${pluralize(seamCut.factor, 'cell')}), `
+          + `${pluralize(seamCut.cycles, 'expansion cycle')}, ${pluralize(seamCut.accepted, 'accepted move')}; ${pct(seamCut.changedCells / Math.max(1, seamCut.labelled))}% `
           + `of the cells moved off their most nadir view; energy ${seamCut.energy.toLocaleString()} (nearest-nadir ${seamCut.energyNadir.toLocaleString()}, `
           + `−${pct(1 - seamCut.energy / Math.max(1, seamCut.energyNadir))}%)`
           + (res.seamCutMs ? `; survey ${((res.seamCutMs.read + res.seamCutMs.sample) / 1000).toFixed(1)} s (photo reads ${(res.seamCutMs.read / 1000).toFixed(1)} s), cut ${(res.seamCutMs.solve / 1000).toFixed(1)} s` : ''),
@@ -392,10 +393,10 @@ export function makeProductsOps({ rasterize } = {}) {
         const f = (v) => (v == null ? '—' : v.toFixed(3))
         const decode = loadStatsImage?.decoded
           ? `; photos decoded at ${(100 * loadStatsImage.scaleSum / loadStatsImage.decoded).toFixed(0)}% of native for the fit${seamCut ? ' and the seams' : ''}` : ''
-        emit('log', [`Ortho: colour balance — gains for ${balance.images} of ${maps.length} image(s) from `
-          + `${balance.pairs} overlapping pair(s) over ${balance.latticeCells.toLocaleString()} lattice cells (every `
-          + `${balance.latticeStep}th; ${balance.clippedObservations.toLocaleString()} clipped sample(s) left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}`
-          + (balance.clamped ? `, ${balance.clamped} channel gain(s) clamped to ${GAIN_MIN}–${GAIN_MAX}` : '') + decode,
+        emit('log', [`Ortho: colour balance — gains for ${balance.images} of ${pluralize(maps.length, 'image')} from `
+          + `${pluralize(balance.pairs, 'overlapping pair')} over ${balance.latticeCells.toLocaleString()} lattice cells (every `
+          + `${balance.latticeStep}th; ${balance.clippedObservations.toLocaleString()} ${nounFor(balance.clippedObservations, 'clipped sample')} left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}`
+          + (balance.clamped ? `, ${pluralize(balance.clamped, 'channel gain')} clamped to ${GAIN_MIN}–${GAIN_MAX}` : '') + decode,
         balance.clamped ? 'warn' : 'info', 'Products'])
         if (res.gains) {
           const name = (m) => photoOf.get(m.uuid)?.name ?? m.uuid
@@ -452,9 +453,9 @@ export function makeProductsOps({ rasterize } = {}) {
       if (input.kind === 'ortho') {
         const { geo, cog } = input
         const win = polygonPixelWindow(geo, input.polygons)
-        if (!win) { log('Clip ortho: the polygon(s) do not overlap the orthophoto', 'warn', 'Products'); return { result: { raster: null } } }
+        if (!win) { log('Clip ortho: no clip polygon overlaps the orthophoto', 'warn', 'Products'); return { result: { raster: null } } }
         if (win.width * win.height > MAX_CLIP_CELLS) {
-          throw new Error(`the polygon(s) span ${win.width.toLocaleString()}×${win.height.toLocaleString()} px of the orthophoto; `
+          throw new Error(`the clip area spans ${win.width.toLocaleString()}×${win.height.toLocaleString()} px of the orthophoto; `
             + `a clip holds at most ${MAX_CLIP_CELLS.toLocaleString()} px — clip a smaller area, or export the COG and clip it in a GIS`)
         }
         const image = await openRaster(cog)

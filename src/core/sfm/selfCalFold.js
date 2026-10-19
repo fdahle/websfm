@@ -16,6 +16,7 @@
 import { undistortPixel, distortPixel, undistortKeypoint, distortionOf, coeffsForModel } from './distortion.js'
 import { fitComposedRadialSets, radialCurveOk } from './selfCalCompose.js'
 import { mapPositions } from './keypointSet.js'
+import { pluralize } from '../textFormat.js'
 
 const xy = (p) => [p.x, p.y]
 const kChanged = (a, b) => a.fx !== b.fx || a.fy !== b.fy || a.cx !== b.cx || a.cy !== b.cy
@@ -180,11 +181,11 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
       if (foldedTermsByGroup.has(key)) composeSelfCalRecord(key, label)
     }
     if (refitFisheye > 0) {
-      log(`${label} re-mapped ${refitFisheye} fisheye image(s)' keypoints onto the refined lens / focal / principal point`,
+      log(`${label} re-mapped ${pluralize(refitFisheye, 'fisheye image')}' keypoints onto the refined lens / focal / principal point`,
         'info', 'Reconstruction')
     }
     if (foldedImgs > 0) {
-      log(`${label} folded self-calibrated distortion into ${foldedImgs} image(s)' `
+      log(`${label} folded self-calibrated distortion into ${pluralize(foldedImgs, 'image')}' `
         + `keypoints (mean shift ${(foldedShift / Math.max(1, foldedN)).toFixed(2)}px; model stays pinhole)`,
         'info', 'Reconstruction')
     }

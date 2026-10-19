@@ -12,6 +12,7 @@ import { sampleDemAtGcps } from '../../../core/eval/demCheck.js'
 import { EVAL_THRESHOLDS as T } from '../../../core/eval/health.js'
 import { useLog } from '../../../composables/useLog.js'
 import { createLatest } from '../../../utils/latestOnly.js'
+import { pluralize } from '../../../core/textFormat.js'
 
 // Quality Report ▸ Accuracy: the three georeference-accuracy views (GCP residuals,
 // pose residuals, DEM-vs-GCP vertical check) sub-tabbed — they all answer "how
@@ -119,7 +120,7 @@ const gcpTiles = computed(() => {
     { label: 'RMSE X', value: fmtM(s.rmseX), unit: crsUnit.value },
     { label: 'RMSE Y', value: fmtM(s.rmseY), unit: crsUnit.value },
     { label: 'RMSE Z', value: fmtM(s.rmseZ), unit: crsUnit.value },
-    { label: 'Controls / checks', value: `${s.controls} / ${s.checks}`, hint: `${s.total} point(s) total` },
+    { label: 'Controls / checks', value: `${s.controls} / ${s.checks}`, hint: `${pluralize(s.total, 'point')} total` },
     { label: 'Normalized RMS', value: s.normalizedRms == null ? '—' : s.normalizedRms.toFixed(2), unit: 'σ', hint: '≈1 means residuals match declared uncertainty' },
     { label: 'Any axis >2σ / >3σ', value: `${s.over2} / ${s.over3}`, tone: s.over3 ? 'bad' : (s.over2 ? 'warn' : undefined) },
   ]

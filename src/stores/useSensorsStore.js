@@ -10,6 +10,7 @@ import { emptyFiducialCalibration, isFiducialCalibrated } from '../core/sfm/fidu
 import { applyFiducialMarks, planFiducialMarkTargets } from '../core/io/fiducialMarks.js'
 import { normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { useProjectsStore } from './useProjectsStore.js'
+import { pluralize } from '../core/textFormat.js'
 
 // Sensors are shared camera intrinsics. Each image references one via
 // `image.sensorId`. Sensors arrive two ways:
@@ -152,7 +153,7 @@ export const useSensorsStore = defineStore('sensors', () => {
         if (img && img.sensorId !== s.id) { img.sensorId = s.id; assigned++ }
       }
       log(`Sensor ${s.label} ${isNew ? 'created' : 'updated'} from file: ${set.join(', ') || 'no values'}`
-        + (imageIds.length ? ` — ${imageIds.length} image(s)` : ''), 'success', 'Sensor')
+        + (imageIds.length ? ` — ${pluralize(imageIds.length, 'image')}` : ''), 'success', 'Sensor')
     }
     await save()
     if (assigned && isPersisting()) await imagesStore.save()
@@ -230,7 +231,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     }
     await save()
     if (isPersisting()) await imagesStore.save()
-    log(`Camera calibration imported: ${idByExternal.size} group(s)`, idByExternal.size ? 'success' : 'warn', 'Import')
+    log(`Camera calibration imported: ${pluralize(idByExternal.size, 'group')}`, idByExternal.size ? 'success' : 'warn', 'Import')
     return idByExternal
   }
 
@@ -359,7 +360,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     cal.marks = clean
     cal.fit = null
     if (!s.kind) s.kind = 'film'
-    log(`Sensor ${s.label}: ${clean.length} fiducial mark(s) set`, 'info', 'Sensor')
+    log(`Sensor ${s.label}: ${pluralize(clean.length, 'fiducial mark')} set`, 'info', 'Sensor')
     save()
   }
 
@@ -388,7 +389,7 @@ export const useSensorsStore = defineStore('sensors', () => {
       s.kind = 'film'
       s.fiducialCalibration = cal
       if (cal.focalMm > 0) { s.focal = cal.focalMm; s.focalUnit = 'mm' }
-      log(`Sensor ${s.label}: ${g.marks.length} fiducial mark(s) imported`
+      log(`Sensor ${s.label}: ${pluralize(g.marks.length, 'fiducial mark')} imported`
         + (isFiducialCalibrated(cal) ? ' — validate them in Calibrate fiducials' : ''), 'success', 'Sensor')
       applied++
     })

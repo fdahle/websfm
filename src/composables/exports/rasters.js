@@ -5,6 +5,7 @@ import { partsToBlob } from '../../utils/blobParts.js'
 import { exportOrthoFile, demTool as workerDemTool } from '../../workers/computeClient.js'
 import { rasterGroundScale, rasterUnits } from '../../core/products/rasterUnits.js'
 import { productDescriptor } from '../../core/io/rasterSource.js'
+import { pluralize } from '../../core/textFormat.js'
 
 // The raster exports, split out of useExports: DEM and orthophoto (GeoTIFF / COG,
 // ASCII grid, world files) and the Tools ▸ Products ▾ derivatives — contours,
@@ -179,7 +180,7 @@ export function createRasterExports({
       ? await orthoToGeoTiff({ width: raster.width, height: raster.height, rgba: raster.data }, raster, { crs: info, deflate })
       : await demToGeoTiff(raster, { crs: info, nodata: -9999, deflate })
     downloadBlob(`${projectBase()}-${kind}-clipped.tif`, tif, 'image/tiff')
-    log(`Clip: ${kind === 'ortho' ? 'orthophoto' : 'DEM'} clipped to ${polygons.length} polygon(s), ${raster.width}×${raster.height} px`, 'success', 'Export')
+    log(`Clip: ${kind === 'ortho' ? 'orthophoto' : 'DEM'} clipped to ${pluralize(polygons.length, 'polygon')}, ${raster.width}×${raster.height} px`, 'success', 'Export')
   }
 
   return {

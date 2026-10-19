@@ -1,3 +1,4 @@
+import { pluralize } from './textFormat.js'
 // Recommended settings (usability track U2).
 //
 // Turn a `DatasetProfile` (core/profile.js, U1) into derived pipeline settings —
@@ -46,7 +47,7 @@ function recommendDetect(p) {
   // SIFT keypoint budget scales inversely with set size: a few images need every
   // tie point; hundreds pay O(N²) matching, so keep the per-image cap modest.
   const kp = { small: 8000, medium: 5000, large: 4000 }[p.scale]
-  out.maxKeypoints = rec(kp, `${p.nImages} image(s) (${p.scale} set) — SIFT budget; the learned detectors keep their own ~2048 cap.`)
+  out.maxKeypoints = rec(kp, `${pluralize(p.nImages, 'image')} (${p.scale} set) — SIFT budget; the learned detectors keep their own ~2048 cap.`)
 
   // Very large scans (film) tile so a single detector pass isn't downscaled to
   // nothing — maxDim already clamped to 3200, so an 11 000 px scan would lose
