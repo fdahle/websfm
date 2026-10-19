@@ -893,6 +893,7 @@ export function orthoSeamSurveyBytes(width, height) {
 //   maps are already in memory, so only decoded photos count against the cache).
 // hooks: { loadImage (as orthorectifyStreamed's), loadStatsImage (the gain pass's
 //   photos; default loadImage), onProgress(done, total),
+//   onBlocksStart(blockCount) — once, after the mosaic survey, before the first block,
 //   onBlock({ col0, row0, width, height, rgba, labels }) — awaited, the core cells of
 //   one block in row-major order, fresh arrays the hook may keep }.
 // → { width, height, covered, sampled, filled, surfaceCells, labelled, stats, blocks,
@@ -1046,6 +1047,7 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   const scratch = { P: [0, 0, 0], px: new Float32Array(4), g: {} }
   let sampled = 0, covered = 0
 
+  hooks.onBlocksStart?.(nBlocks)
   for (const b of blocks) {
     const { col0, row0, bw, bh, ex0, ey0, ew, eh } = b
     const coreRgba = new Uint8ClampedArray(bw * bh * 4)
