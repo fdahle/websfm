@@ -6,6 +6,23 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Quality gates and editable recipes in the Workflow Builder**: a Quality Gate
+  block checks a Quality Report metric (registered images, reprojection error, track
+  length, dense coverage …) after a stage and, when it fails, pauses, stops or jumps
+  ahead to a named block; Go to jumps unconditionally. Jumps only go forward, so every
+  run ends. The recipe text can now be edited and applied: a wrong line is refused with
+  its line number and nothing changes. Point-cloud filter, normals, ICP and the mesh
+  Clean, Smooth and Decimate tools are now blocks, each working on the previous
+  block's result.
+- **ALIKED** learned detector, with its own LightGlue matcher. Freely licensed
+  (BSD-3-Clause / Apache-2.0) like DISK, and about four times faster to detect.
+- **MAGSAC++** as an alternative to RANSAC for checking each image pair (Match
+  Features ▸ Estimator). RANSAC stays the default: on the test sets both give the same
+  accuracy.
+- **COPC point clouds read in place**: a `.copc.laz` file is imported as it is and
+  read node by node from its own octree, so a 93 million-point survey opens in seconds
+  instead of minutes. The 3D view, crop, DEM, exports and 3D Tiles work on it as on any
+  other large cloud.
 - **Command console**: every ribbon command can be typed (by a short name, its id, or
   its id as words), taken from the ribbon itself, with per-command usage (`help
   <command>`, `help <tab>`). New commands: `run detect match sparse` and `run workflow
@@ -146,6 +163,16 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Orthophoto seams**: the mosaic now chooses where seams run by graph cut, so they
+  avoid roofs and tree crowns, and hides them by multiband blending, which keeps each
+  photo's detail instead of averaging two photos across the seam band. Both are
+  settings in Build Orthophoto (Seamlines, Seam blending); the old nearest-nadir seams
+  and feathering are still offered. Colour balance may now correct a photo by up to
+  ±2 stops (was ±1), for flights whose auto-exposure drifted.
+- **Fisheye lenses: k4 in Auto self-calibration**: a four-term fisheye now gets its k4
+  refined last, after k1–k3. If that fit would fold the lens curve, the pass is solved
+  again without k4 rather than discarded.
+- **Console `select`** now selects an image by name; the 3D lasso is `lasso`.
 - **Region box handles**: while the Region toolbox is open, the box has drag handles
   in the 3D view: one per face moves that face, the centre one moves the whole box.
   The number fields follow, and Apply stores it as before.

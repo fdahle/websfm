@@ -38,8 +38,8 @@ A full photogrammetry pipeline, stage by stage:
    with reprojection into any project CRS (proj4).
 
 There's also an in-app glossary, a quality-report hub, point-cloud editing, video
-import (frames picked by camera motion and sharpness), and COLMAP / PLY / LAS /
-GeoTIFF import & export.
+import (frames picked by camera motion and sharpness), COLMAP / PLY / LAS / LAZ /
+GeoTIFF import & export, COPC import and 3D Tiles export.
 
 ## Browser requirements
 
