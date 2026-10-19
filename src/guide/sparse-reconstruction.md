@@ -57,6 +57,14 @@ on a weak network it can absorb scene error into implausible intrinsics. Self-ca
 runs inside bundle adjustment, so it is unavailable when bundle adjustment iterations are
 set to 0.
 
+A short strip of wide-angle frames (a satellite frame camera, a few aerial photos) is
+such a weak network: radial distortion and a slight bowl of the whole block trade off,
+and Auto can bend the block by metres towards its ends while the checkpoints near the
+middle stay good. With a calibration certificate entered in the sensor table, compare
+the checkpoint residuals of a run with **None**: if the error grows towards the block's
+edges under Auto and not under None, keep None. On scanned film the certificate does
+not describe the film's own deformation, which Auto partly absorbs, so try both.
+
 ## Check the result
 Camera positions should follow the capture path, most useful images should register,
 and the cloud should have coherent shape.

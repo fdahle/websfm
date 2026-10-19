@@ -293,6 +293,8 @@ Rays are intersected with the terrain in ECEF, so Earth curvature is in the imag
 `exportCloudsProject: true` in a config writes the sparse (with view counts) and dense
 clouds in the project CRS after recon / dense (`<out>.sparse.project.bin`, Float64), and
 `synth/score_points.py <truth_dem.tif> <bins…>` scores their heights against the truth.
+`hist/residual_trend.py <run.json> <truth.json | gcp.csv>` fits each recon stage's GCP
+residuals against distance from the block centre (a bowl shows as dU ~ r², SAT-6).
 Run both with the hist_env3 interpreter.
 
 **Rerunning products on a kept project.** `profile: <dir>` keeps the browser profile (and
