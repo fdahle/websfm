@@ -6,6 +6,11 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **DEMs finer than 4,096 cells a side.** A DEM whose chosen cell size needs a bigger
+  grid (a satellite frame at its native resolution) is no longer coarsened to fit: it is
+  built block by block as a full-resolution Cloud-Optimized GeoTIFF, which the GeoTIFF
+  export delivers. The view, the map and measurements use its 4,096-cell overview for
+  now.
 - **Watch the sparse model grow.** During Sparse Reconstruction the 3D view draws the
   cameras registered so far and their points, in colour, updated every couple of
   seconds, and zooms out as the model expands. The progress bar moves to the corner so
@@ -336,6 +341,9 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- In a floating-point Cloud-Optimized GeoTIFF with NaN as nodata, an empty cell
+  turned the overview cells above it empty too, and partial edge tiles were padded with
+  0 instead of nodata.
 - After moving a project into a folder, its images, masks and products could no longer
   be read until it was reopened by hand. A moved project now reopens from its new
   location by itself, in both directions.
