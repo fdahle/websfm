@@ -4,7 +4,7 @@ import { hillshadeRgba } from '../../core/products/colormap.js'
 import { demRenderOptions } from '../../core/products/productStyle.js'
 import { rasterToPng } from '../rasterPreview.js'
 import { frameFromSpec, describeFrame } from '../../core/products/frameSpec.js'
-import { rasterizeDem, coreExtent } from '../../core/products/dem.js'
+import { rasterizeDem, coreExtent, demGeometry, rasterizeDemBlocks, fillEnclosedGaps } from '../../core/products/dem.js'
 import { orthorectifyTiled, orthoTiledWorkingBytes, ORTHO_BLOCK, MAX_SEAM_CELLS } from '../../core/products/ortho.js'
 import { GAIN_MIN, GAIN_MAX } from '../../core/products/colourGains.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
@@ -69,6 +69,11 @@ function makePhotoLoader(images, rasterize, emit) {
 // classic-TIFF ceiling. The side cap only bounds the grid arithmetic; the 4 GiB
 // ceiling is the real limit (~28 k px square).
 const ORTHO_TILE = 512
+// A DEM's plane stays ≤ this on a side; past it the DEM is a COG built in blocks
+// (generateDemBlocks), and the plane is its overview.
+const DEM_PLANE_MAX = 4096
+const DEM_TILE = 512
+const DEM_BLOCK = 2048
 const PREVIEW_MAX = 2048
 const MAX_ORTHO_SIDE = 65535
 const TIFF_LIMIT = 0xffffffff
@@ -163,6 +168,13 @@ export function makeProductsOps({ rasterize } = {}) {
     // A DEM of the ground class alone is the bare-earth DTM; say so in the log.
     const label = settings.points === 'ground' ? 'DTM' : 'DEM'
     const bounds = productBounds(pos, view.length, settings.extent, label, unitName, emit)
+    // Past one plane (SAT-3): a GSD the user chose that needs more than DEM_PLANE_MAX
+    // cells a side is built block by block into a Float32 COG, and the record's plane is
+    // its ≤ 4,096 overview. Auto still picks a grid that fits one plane.
+    const full = settings.gsd > 0 ? demGeometry(framed, { ...settings, bounds, maxGrid: MAX_ORTHO_SIDE }) : null
+    if (full && Math.max(full.width, full.height) > DEM_PLANE_MAX) {
+      return generateDemBlocks({ pos, count: view.length, full, frame, frameSpec, settings, bounds, label, emit })
+    }
     const grid = rasterizeDem(framed, { ...settings, bounds, memBudgetBytes: budget })
     if (!grid) throw new Error(`${label}: could not rasterise (need a denser cloud or a smaller GSD)`)
 
@@ -187,6 +199,84 @@ export function makeProductsOps({ rasterize } = {}) {
       previewBlob, ...(settings.style && { style: settings.style }),
     }
     return { result, transfer: [grid.data.buffer, grid.mask.buffer] }
+  }
+
+  // A DEM whose grid is past DEM_PLANE_MAX on a side: rasterizeDemBlocks feeds a Float32
+  // COG (NaN = nodata) block by block, so no full plane exists. The record's `data` /
+  // `mask` / `gsd` are the COG's first overview of ≤ DEM_PLANE_MAX, which every plane
+  // reader keeps using; `cog` + `fullWidth` / `fullHeight` / `fullGsd` are the DEM.
+  async function generateDemBlocks({ pos, count, full, frame, frameSpec, settings, bounds, label, emit }) {
+    const unit = frameUnitName(frame.unit)
+    let geom = full
+    // The stored COG is a classic TIFF (32-bit offsets): coarsen, never silently.
+    for (let raw; (raw = cogRawBytes({ ...geom, tileSize: DEM_TILE, bytesPerPixel: 4 })) > TIFF_LIMIT;) {
+      geom = demGeometry(pointView({ pos, count }), { ...settings, bounds, maxGrid: MAX_ORTHO_SIDE,
+        gsd: geom.gsd * Math.sqrt(raw / TIFF_LIMIT) * 1.01 })
+    }
+    if (geom.gsd > geom.requestedGsd * (1 + 1e-6)) {
+      emit('log', [`${label}: ${geom.requestedGsd.toPrecision(3)} ${unit}/px would exceed a 4 GiB GeoTIFF; `
+        + `built at ${geom.gsd.toPrecision(3)} ${unit}/px`, 'warn', 'Products'])
+    }
+    const tags = crsTagInfo({ crs: frame.crs, unit: frame.unit })
+    const builder = createCogBuilder({
+      width: geom.width, height: geom.height, tileSize: DEM_TILE, ArrayType: Float32Array,
+      samples: [{ bits: 32, format: 3 }], photometric: 1, gdalNoData: 'nan',
+      pixelScale: [geom.gsd, geom.gsd, 0], tiepoint: [0, 0, 0, geom.originX, geom.originY, 0],
+      geoKeys: geoKeysForEpsg(tags.code, tags.geographic),
+    }, { blockSize: DEM_BLOCK, compress: deflateTile, previewMaxDim: DEM_PLANE_MAX })
+    const t0 = performance.now()
+    const blockProgress = createBlockProgress(Math.ceil(geom.width / DEM_BLOCK) * Math.ceil(geom.height / DEM_BLOCK),
+      { prefix: `${label}: ` })
+    emit('progress', [0, 1, `Rasterising grid… ${blockProgress.label()}`])
+    const res = await rasterizeDemBlocks(pos, count, geom, { ...settings, bounds, blockSize: DEM_BLOCK }, {
+      onBlock: async (b) => {
+        await builder.addBlock(b)
+        const line = blockProgress.finished()
+        if (line) emit('log', [line, 'info', 'Products'])
+      },
+      onProgress: (done, total) => emit('progress', [done, total, `Rasterising grid… ${blockProgress.label()}`, 0.95 * done / total]),
+    })
+    emit('progress', [1, 1, 'Writing the GeoTIFF…', 0.96])
+    const { parts, preview, levels } = await builder.finish()
+    const cog = new Blob(parts, { type: 'image/tiff' })
+
+    // The overview plane: level k of the COG, k halvings of the grid, same origin.
+    const k = levels.findIndex((l) => l.width === preview.width && l.height === preview.height)
+    const ov = { width: preview.width, height: preview.height, gsd: geom.gsd * 2 ** k,
+      originX: geom.originX, originY: geom.originY, data: preview.data }
+    let holesFilled = 0
+    if (settings.fillHoles) {
+      holesFilled = fillEnclosedGaps(ov.data, ov.width, ov.height)
+      emit('log', [`${label}: enclosed gaps are filled in the ${ov.width}×${ov.height} overview only; `
+        + `the full-resolution grid keeps them open`, 'warn', 'Products'])
+    }
+    const mask = new Uint8Array(ov.width * ov.height)
+    let zMin = Infinity, zMax = -Infinity
+    for (let i = 0; i < mask.length; i++) {
+      const z = ov.data[i]
+      if (Number.isNaN(z)) continue
+      mask[i] = 1
+      if (z < zMin) zMin = z
+      if (z > zMax) zMax = z
+    }
+    if (zMin > zMax) { zMin = res.zMin; zMax = res.zMax }
+    const grid = { ...ov, mask, zMin, zMax }
+    const previewBlob = await demPreviewPng(grid, settings.style)
+    emit('log', [`${label}: ${geom.width}×${geom.height} @ ${geom.gsd.toPrecision(3)} ${unit}/px in `
+      + `${pluralize(res.blocks, 'block')} of ${DEM_BLOCK}², z ${res.zMin.toPrecision(4)}–${res.zMax.toPrecision(4)}, `
+      + `${res.count} measured + ${res.filled} filled cells (${frame.crs}); GeoTIFF ${formatBytes(cog.size)} `
+      + `in ${((performance.now() - t0) / 1000).toFixed(1)} s, overview ${ov.width}×${ov.height} @ `
+      + `${ov.gsd.toPrecision(3)} ${unit}/px`, 'success', 'Products'])
+    emit('progress', [1, 1, 'Done'])
+    const result = {
+      width: ov.width, height: ov.height, gsd: ov.gsd, originX: ov.originX, originY: ov.originY,
+      data: ov.data, mask, zMin: res.zMin, zMax: res.zMax,
+      count: res.count, filled: res.filled + holesFilled, holesFilled,
+      cog, fullWidth: geom.width, fullHeight: geom.height, fullGsd: geom.gsd, tileSize: DEM_TILE,
+      frame: frameDescriptor(frame, frameSpec), crs: frame.crs, unit: frame.unit,
+      previewBlob, ...(settings.style && { style: settings.style }),
+    }
+    return { result, transfer: [ov.data.buffer, mask.buffer] }
   }
 
   // Build the height grid the ortho walks, from whichever surface the user chose.

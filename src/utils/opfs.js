@@ -1439,7 +1439,9 @@ export async function pruneLodFiles(projectId, keepNames, { building = false } =
 // Recomputable but expensive, so persisted like other project data. Metadata
 // (dimensions, geotransform, CRS) goes in products/{kind}.json; the binary parts
 // are generation files of that document (binaryDocument.js), the preview PNG among
-// them. DEM: Float32 heights (`data`) + Uint8 validity (`mask`), read at open (≤ 4,096²).
+// them. DEM: Float32 heights (`data`) + Uint8 validity (`mask`), read at open (≤ 4,096²);
+// a DEM finer than that (SAT-3) also has its full grid as a Float32 COG (`cog`), kept
+// like the ortho's, and `data`/`mask` are that COG's overview.
 // Ortho: its Cloud-Optimized GeoTIFF (`cog`, RGBA, any size) — opened as a File
 // handle at load, never read: the viewer and the map pull its tiles, exports copy or
 // stream it. Its record carries `cogSaved` ({ name, bytes }, the committed file),
@@ -1466,15 +1468,16 @@ export async function saveProduct(projectId, kind, product) {
       // the JSON: a 4096² preview was ~100 MB of base64 parsed back at every open.
       const { data, mask, cog, cogSaved, previewBlob, previewUrl: _url, ...meta } = product
       // Pass views, not their underlying buffer: subarrays may have a nonzero offset.
-      const buffers = kind === 'dem' ? { data, mask } : { cog: cogSaved ? { reuse: cogSaved } : cog }
+      const cogPart = cogSaved ? { reuse: cogSaved } : cog
+      const buffers = kind === 'dem' ? { data, mask, ...(cogPart ? { cog: cogPart } : {}) } : { cog: cogPart }
       buffers.preview = previewBlob ?? null
       let res = await writeBinaryDocument(dir, `${kind}.json`, meta, buffers, { writeJson, writeBin })
       // The reused file went missing (another tab's save collected it): write it out.
       if (res.stale && cog instanceof Blob) {
         res = await writeBinaryDocument(dir, `${kind}.json`, meta, { ...buffers, cog }, { writeJson, writeBin })
       }
-      if (res.stale) throw new Error('Saved orthophoto file is missing')
-      if (kind === 'dem') return {}
+      if (res.stale) throw new Error(`Saved ${kind === 'dem' ? 'DEM' : 'orthophoto'} file is missing`)
+      if (kind === 'dem' && !cogPart) return {}
       // The committed COG as a File: the store points the record at it, so the
       // worker's in-memory Blob can go and a later save can reuse the file.
       const saved = await productFile(dir, { binaryFiles: res.files }, 'cog')
@@ -1512,8 +1515,13 @@ export async function loadProduct(projectId, kind) {
         validateProduct(kind, product)
         return previewBytes ? { ...product, previewBlob: new Blob([previewBytes], { type: 'image/png' }) } : product
       }
-      const buffers = meta.binaryFiles ? await readBinaryDocument(dir, meta, readBin) : null
+      // A full-resolution COG is opened as a handle, never read.
+      const cog = meta.binaryFiles?.cog ? await productFile(dir, meta, 'cog') : null
+      if (meta.binaryFiles?.cog && !cog) return null
+      const { cog: _cogFile, ...planeFiles } = meta.binaryFiles ?? {}
+      const buffers = meta.binaryFiles ? await readBinaryDocument(dir, { ...meta, binaryFiles: planeFiles }, readBin) : null
       delete meta.binaryFiles
+      if (cog) Object.assign(meta, { cog: cog.file, cogSaved: cog.saved })
       const product = { ...meta,
         data: new Float32Array(buffers ? buffers.data : await readBin(dir, 'dem_data.bin')),
         mask: new Uint8Array(buffers ? buffers.mask : await readBin(dir, 'dem_mask.bin')),

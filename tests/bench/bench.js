@@ -817,14 +817,18 @@ window.bench = {
       control: sum(by('control')), check: sum(by('check')), untriangulated: rows.filter((r) => r.dx == null).map((r) => r.name),
       rows: ok.map((r) => `${r.name} ${r.role}: dE ${r.dx.toFixed(2)} dN ${r.dy.toFixed(2)} dU ${r.dz.toFixed(2)} m (${r.viewCount} views)`) }
   },
-  // The DEM as a GeoTIFF (NaN → -9999), base64 in chunks for the runner.
+  // The DEM as a GeoTIFF (NaN → -9999), base64 in chunks for the runner. A DEM past one
+  // plane (SAT-3) is its stored full-resolution COG (nodata NaN), read a chunk at a time.
   async demTiffSize() {
     if (!recon.dem) return 0
+    if (recon.dem.cog) { demTiff = recon.dem.cog; return demTiff.size }
     demTiff = await demToGeoTiff(recon.dem, { crs: crsTagInfo(recon.dem), nodata: -9999 })
     return demTiff.byteLength
   },
-  demTiffChunk(start, n) {
-    const u8 = demTiff.subarray(start, start + n)
+  async demTiffChunk(start, n) {
+    const u8 = demTiff instanceof Blob
+      ? new Uint8Array(await demTiff.slice(start, start + n).arrayBuffer())
+      : demTiff.subarray(start, start + n)
     let s = ''
     for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
     return btoa(s)

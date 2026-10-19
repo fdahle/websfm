@@ -244,6 +244,15 @@ const isFloatFormat = (f) => f === 3
 // block is nodata stays nodata. Averaging (rather than subsampling) is the
 // honest choice for both elevations and reflectance — a decimated overview of a
 // noisy DEM reads as noise rather than terrain.
+// The GDAL_NODATA tag as the value cells hold: a number, NaN for a float raster
+// whose nodata is "nan" (a DEM's empty cells), or null (none). An integer raster
+// cannot hold NaN, so "nan" there means no nodata.
+function nodataValue(gdalNoData, float) {
+  if (gdalNoData == null) return null
+  const n = Number(gdalNoData)
+  return Number.isNaN(n) ? (float ? NaN : null) : n
+}
+
 function downsampleHalf(src, w, h, spp, nodata, float) {
   return downsampleTo(src, w, h, Math.max(1, w >> 1), Math.max(1, h >> 1), spp, nodata, float)
 }
@@ -267,7 +276,7 @@ function downsampleTo(src, w, h, w2, h2, spp, nodata, float) {
         for (const yy of y0 === y1 ? [y0] : [y0, y1]) {
           for (const xx of x0 === x1 ? [x0] : [x0, x1]) {
             const v = src[(yy * w + xx) * spp + s]
-            if (nodata != null && v === nodata) continue
+            if (nodata != null && (v === nodata || (nodata !== nodata && v !== v))) continue
             sum += v
             n++
           }
@@ -352,9 +361,8 @@ export function planCog(spec) {
   if (data.length !== width * height * spp)
     throw new Error(`planCog: data length ${data.length} != ${width}*${height}*${spp}`)
 
-  const nodataNum = gdalNoData == null ? null : Number(gdalNoData)
-  const nodata = nodataNum == null || Number.isNaN(nodataNum) ? null : nodataNum
   const float = isFloatFormat(format)
+  const nodata = nodataValue(gdalNoData, float)
 
   // Levels: full resolution, then halvings until one tile covers the image.
   const levels = [{ data, width, height }]
@@ -587,9 +595,8 @@ export function createCogBuilder(spec, { blockSize = 2048, compress = null, prev
   if (!(blockSize > 0) || blockSize % tileSize) throw new Error('createCogBuilder: blockSize must be a multiple of tileSize')
   const layout = planCogFromTiles({ width, height, tileSize, maxOverviews })
   const { levels, across, tileCounts } = layout
-  const nodataNum = gdalNoData == null ? null : Number(gdalNoData)
-  const nodata = nodataNum == null || Number.isNaN(nodataNum) ? null : nodataNum
   const float = isFloatFormat(format)
+  const nodata = nodataValue(gdalNoData, float)
 
   // Levels cut per block, then the accumulated level (if the pyramid goes that far).
   let blockLevels = 0

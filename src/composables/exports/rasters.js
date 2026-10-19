@@ -35,6 +35,19 @@ export function createRasterExports({
   async function doExportDem({ format, nodata, compression }) {
     if (!dem.value) return
     const info = crsInfo(dem.value)
+    // A DEM past one plane (SAT-3) is its stored COG: both TIFF formats hand that file
+    // out as it is (DEFLATE, NaN for nodata), and the other formats are its overview.
+    const full = dem.value.cog
+    if (full && (format === 'cog' || format === 'geotiff')) {
+      downloadBlob(`${projectBase()}-dem${format === 'cog' ? '-cog' : ''}.tif`, full, 'image/tiff')
+      log(`DEM export: the full ${dem.value.fullWidth}×${dem.value.fullHeight} grid as its stored Cloud-Optimized `
+        + 'GeoTIFF (DEFLATE, nodata NaN)', 'success', 'Export')
+      return
+    }
+    if (full) {
+      log(`DEM export: ${format === 'png' ? 'the hillshade' : 'the ASCII grid'} is of the ${dem.value.width}×${dem.value.height} `
+        + `overview, not the full ${dem.value.fullWidth}×${dem.value.fullHeight} grid; export a GeoTIFF for that`, 'warn', 'Export')
+    }
     if (format === 'cog') {
       // COG defaults to DEFLATE: an uncompressed tiled file is strictly larger
       // than the baseline one for no benefit, and the whole point of the format

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { rasterizeDem, suggestGsd, cellCenter, stageDemPoints, coreExtent, fillEnclosedGaps } from './dem.js'
+import { rasterizeDem, suggestGsd, cellCenter, stageDemPoints, coreExtent, fillEnclosedGaps, demGeometry, rasterizeDemBlocks } from './dem.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
 
 describe('suggestGsd', () => {
@@ -240,5 +240,56 @@ describe('stageDemPoints index filter', () => {
     const staged = stageDemPoints(cloud, { inside: (x, y, z, i) => cls[i] === 2 })
     expect(staged.count).toBe(2)
     expect(Array.from(staged.pos)).toEqual([0, 0, 0, 2, 2, 2])
+  })
+})
+
+describe('rasterizeDemBlocks (a DEM past one plane, SAT-3)', () => {
+  // Rolling terrain with sparse, uneven coverage, so the fill reaches across block edges.
+  let seed = 7
+  const random = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296 }
+  const n = 4000
+  const pos = new Float64Array(3 * n)
+  for (let i = 0; i < n; i++) {
+    const x = random() * 100, y = random() * 60
+    pos[3 * i] = x; pos[3 * i + 1] = y; pos[3 * i + 2] = 50 + 10 * Math.sin(x / 9) + 5 * Math.cos(y / 7) + random()
+  }
+  const points = Array.from({ length: n }, (_, i) => ({ x: pos[3 * i], y: pos[3 * i + 1], z: pos[3 * i + 2] }))
+
+  it.each(['max', 'mean', 'median'])('reproduces the single-plane grid exactly (%s, IDW radius 3)', async (aggregate) => {
+    const opts = { gsd: 1.3, aggregate, fillMethod: 'idw', fillRadius: 3, maxGrid: Infinity }
+    const whole = rasterizeDem(points, opts)
+    const geom = demGeometry(points, opts)
+    const out = new Float32Array(geom.width * geom.height)
+    const res = await rasterizeDemBlocks(pos, n, geom, { ...opts, blockSize: 16 }, {
+      onBlock: ({ col0, row0, width, height, data }) => {
+        for (let r = 0; r < height; r++) out.set(data.subarray(r * width, (r + 1) * width), (row0 + r) * geom.width + col0)
+      },
+    })
+    expect([res.width, res.height]).toEqual([whole.width, whole.height])
+    expect(res.blocks).toBe(Math.ceil(whole.width / 16) * Math.ceil(whole.height / 16))
+    for (let i = 0; i < out.length; i++) {
+      if (Number.isNaN(whole.data[i])) expect(out[i]).toBeNaN()
+      else expect(out[i]).toBeCloseTo(whole.data[i], 5)
+    }
+    expect(res.count).toBe(whole.count)
+    expect(res.filled).toBe(whole.filled)
+    expect(res.zMin).toBeCloseTo(whole.zMin, 5)
+    expect(res.zMax).toBeCloseTo(whole.zMax, 5)
+  })
+
+  it('leaves out points beyond the bounds rather than piling them on the edge', async () => {
+    const opts = { gsd: 2, fillMethod: 'none', maxGrid: Infinity, bounds: { minX: 10, minY: 10, maxX: 50, maxY: 40 } }
+    const whole = rasterizeDem(points, opts)
+    const geom = demGeometry(points, opts)
+    const out = new Float32Array(geom.width * geom.height)
+    await rasterizeDemBlocks(pos, n, geom, { ...opts, blockSize: 8 }, {
+      onBlock: ({ col0, row0, width, height, data }) => {
+        for (let r = 0; r < height; r++) out.set(data.subarray(r * width, (r + 1) * width), (row0 + r) * geom.width + col0)
+      },
+    })
+    for (let i = 0; i < out.length; i++) {
+      if (Number.isNaN(whole.data[i])) expect(out[i]).toBeNaN()
+      else expect(out[i]).toBeCloseTo(whole.data[i], 5)
+    }
   })
 })
