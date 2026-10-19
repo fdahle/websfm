@@ -10,8 +10,9 @@ Notable changes to websfm. The format follows
   grid (a satellite frame at its native resolution) is no longer coarsened to fit: it is
   built block by block as a full-resolution Cloud-Optimized GeoTIFF, which the GeoTIFF
   export delivers. Its tab and the map draw it at full resolution as you zoom in,
-  coloured and hillshaded, and its tab reads the full-resolution height under the
-  cursor. The map's readout and measurements use its 4,096-cell overview for now.
+  coloured and hillshaded. Readouts, profiles, volumes, the GCP check, contours,
+  terrain derivatives, clips, the ASCII export and an orthophoto built on it all read
+  the full-resolution grid (coarser only past their memory limits, which the log names).
 - **Watch the sparse model grow.** During Sparse Reconstruction the 3D view draws the
   cameras registered so far and their points, in colour, updated every couple of
   seconds, and zooms out as the model expands. The progress bar moves to the corner so
@@ -342,6 +343,9 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- An orthophoto over very large scans (satellite frames past one canvas) refused to
+  run, or fell back to depth-map colour: it reserved memory for each photo at its native
+  size, and read photos at twice the resolution it asked for.
 - In a floating-point Cloud-Optimized GeoTIFF with NaN as nodata, an empty cell
   turned the overview cells above it empty too, and partial edge tiles were padded with
   0 instead of nodata.
