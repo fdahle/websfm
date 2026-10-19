@@ -176,6 +176,8 @@ stage again with config key `dense:loose`.
 - An export spec may name the cloud: `{ kind, cloud, cloudName }` exports the cloud of
   that kind with that exact name (a derived or edited copy) instead of the computed one.
   For `kind: "tiles3d"` it selects that cloud or mesh first (3D Tiles writes the selection).
+- `sensor`: applies the config's calibration again (`hist.intrinsics`, else `sensor`),
+  e.g. after `reopen` on a project saved before the bench persisted it (2026-10-19).
 - `georef`: Georeferencing ▸ Georeference, from GCPs or the camera positions, into the
   project CRS (top-level `crs`). Then `dem: { "crs": "project" }` builds in that CRS.
 - `meshtools`: TOOL-03 on the computed mesh: Clean → Decimate 25 % → Smooth 10 → Clean
@@ -291,6 +293,8 @@ Rays are intersected with the terrain in ECEF, so Earth curvature is in the imag
 `exportCloudsProject: true` in a config writes the sparse (with view counts) and dense
 clouds in the project CRS after recon / dense (`<out>.sparse.project.bin`, Float64), and
 `synth/score_points.py <truth_dem.tif> <bins…>` scores their heights against the truth.
+`hist/residual_trend.py <run.json> <truth.json | gcp.csv>` fits each recon stage's GCP
+residuals against distance from the block centre (a bowl shows as dU ~ r², SAT-6).
 Run both with the hist_env3 interpreter.
 
 **Rerunning products on a kept project.** `profile: <dir>` keeps the browser profile (and
