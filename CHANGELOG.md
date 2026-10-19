@@ -203,6 +203,10 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Imported images stop depending on the original files.** Once an image's copy is
+  written to the project, websfm reads the copy, so moving, renaming or deleting the
+  originals afterwards (or a cloud-sync folder freeing them) no longer breaks images in
+  the open session.
 - **Workflow Match blocks pick their pairing per project.** A new Match Features block
   starts on **auto** pairing: Preselect when images have camera positions, Sequential
   for video frames, otherwise Exhaustive, the same as the Match Features dialog. A
