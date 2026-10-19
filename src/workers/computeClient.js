@@ -359,6 +359,10 @@ export const exportLod = streamingOp('exportLod')
 // { lod, data, hierarchy, dir, name, mode, settings } → the new octree's metadata.
 export const transformLod = streamingOp('transformLod')
 
+// A COPC file imported as it is (core/lod/copc.js): { file, dir, name } → the cloud's
+// `lod` metadata (format 'copc'); the file is copied into `dir` as `${name}.copc.laz`.
+export const importCopc = streamingOp('importCopc')
+
 // Cloud editing — crop / filter / merge over flat (dense) clouds. See
 // core/products/cloudEdit.js. Input { mode, clouds:[{ id, count, pos, col, nrm }],
 // settings }; the source buffers are TRANSFERRED in and round-tripped back under

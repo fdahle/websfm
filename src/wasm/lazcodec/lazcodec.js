@@ -57,6 +57,12 @@ if (Symbol.dispose) CompressedPoints.prototype[Symbol.dispose] = CompressedPoint
  * decompressor a whole file goes through.
  */
 export class LazDecoder {
+    static __wrap(ptr) {
+        const obj = Object.create(LazDecoder.prototype);
+        obj.__wbg_ptr = ptr;
+        LazDecoderFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -111,6 +117,39 @@ export class LazDecoder {
         var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v2;
+    }
+    /**
+     * Decode one whole chunk of `num_points` points from its compressed bytes.
+     * @param {Uint8Array} compressed
+     * @param {number} num_points
+     * @returns {Uint8Array}
+     */
+    decode_chunk(compressed, num_points) {
+        const ptr0 = passArray8ToWasm0(compressed, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.lazdecoder_decode_chunk(this.__wbg_ptr, ptr0, len0, num_points);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
+    }
+    /**
+     * A decoder with no chunk table, for chunks the caller locates itself: a COPC
+     * file's hierarchy gives every node's byte range and point count, and each node
+     * is one chunk (`decode_chunk`).
+     * @param {Uint8Array} vlr_data
+     * @returns {LazDecoder}
+     */
+    static forChunks(vlr_data) {
+        const ptr0 = passArray8ToWasm0(vlr_data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.lazdecoder_forChunks(ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return LazDecoder.__wrap(ret[0]);
     }
     /**
      * `chunk_table`: the file's bytes from the chunk table's offset on (trailing bytes

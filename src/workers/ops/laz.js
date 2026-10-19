@@ -49,5 +49,11 @@ export function makeLazCodec() {
       free: () => d.free(),
     }
   }
-  return { ensure, compress, decompress, createCompressor, createDecoder }
+  // One chunk at a time, located by the caller (core/lod/copc.js: a COPC node is one
+  // chunk, its bytes and point count from the hierarchy).
+  const createChunkDecoder = (vlrData) => {
+    const d = LazDecoder.forChunks(vlrData)
+    return { pointSize: () => d.point_size(), decode: (bytes, n) => d.decode_chunk(bytes, n), free: () => d.free() }
+  }
+  return { ensure, compress, decompress, createCompressor, createDecoder, createChunkDecoder }
 }

@@ -308,16 +308,20 @@ window.bench = {
     const { applyImportTransform } = await import('/src/core/io/cloudImport.js')
     const file = document.getElementById('bench-import-file')?.files?.[0]
     if (!file) throw new Error('importCloudFile: no file on #bench-import-file')
-    // A LAS/LAZ too large to hold streams into an octree, as openCloudImport decides.
+    // A LAS/LAZ too large to hold streams into an octree, and a large COPC file is read in
+    // place, as openCloudImport decides.
     const { lasNeedsStreaming } = await import('/src/core/io/lasStream.js')
+    const { copcReadsInPlace, COPC_IN_PLACE_MIN_POINTS } = await import('/src/core/lod/copc.js')
     const head = new Uint8Array(await file.slice(0, Math.min(file.size, 1 << 16)).arrayBuffer())
     if (head.length >= 100 && String.fromCharCode(...head.subarray(0, 4)) === 'LASF') {
       const off = new DataView(head.buffer).getUint32(96, true)
       const full = off > head.length ? new Uint8Array(await file.slice(0, off).arrayBuffer()) : head
-      if (lasNeedsStreaming(full, file.size) === true) {
+      const stream = lasNeedsStreaming(full, file.size) === true
+      const copc = copcReadsInPlace(full, { minPoints: stream ? 0 : COPC_IN_PLACE_MIN_POINTS })
+      if (stream || copc) {
         const t0 = performance.now()
-        const c = await recon.importStreamedCloud(file, report)
-        return { ok: !!c, streamed: true, parseSeconds: (performance.now() - t0) / 1000, bytes: file.size,
+        const c = await (copc ? recon.importCopcCloud : recon.importStreamedCloud)(file, report)
+        return { ok: !!c, streamed: true, copc, parseSeconds: (performance.now() - t0) / 1000, bytes: file.size,
           count: c?.count ?? 0, hasColor: !!c?.lod?.layout?.colour, attributes: (c?.lod?.layout?.attributes ?? []).map((a) => a.name) }
       }
     }

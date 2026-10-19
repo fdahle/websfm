@@ -352,6 +352,20 @@ impl LazDecoder {
     pub fn decode(&self, compressed: &[u8], first: u32, count: u32, num_points: u32) -> Result<Vec<u8>, JsError> {
         self.decode_impl(compressed, first, count, num_points).map_err(|e| JsError::new(&e))
     }
+
+    /// A decoder with no chunk table, for chunks the caller locates itself: a COPC
+    /// file's hierarchy gives every node's byte range and point count, and each node
+    /// is one chunk (`decode_chunk`).
+    #[wasm_bindgen(js_name = forChunks)]
+    pub fn for_chunks(vlr_data: &[u8]) -> Result<LazDecoder, JsError> {
+        let vlr = LazVlr::read_from(Cursor::new(vlr_data)).map_err(|e| JsError::new(&format!("lazcodec: vlr parse: {e}")))?;
+        Ok(LazDecoder { vlr, entries: Vec::new() })
+    }
+
+    /// Decode one whole chunk of `num_points` points from its compressed bytes.
+    pub fn decode_chunk(&self, compressed: &[u8], num_points: u32) -> Result<Vec<u8>, JsError> {
+        self.decode_chunk_impl(compressed, num_points).map_err(|e| JsError::new(&e))
+    }
 }
 
 impl LazDecoder {
@@ -386,13 +400,7 @@ impl LazDecoder {
             return Err(format!("lazcodec: expected {bytes} compressed bytes, got {}", compressed.len()));
         }
         let point_size = self.vlr.items_size() as usize;
-        let size = (num_points as usize)
-            .checked_mul(point_size)
-            .filter(|&n| n <= 512 * 1024 * 1024)
-            .ok_or_else(|| "lazcodec: decoded records exceed the 512 MiB limit".to_string())?;
-        let mut out = Vec::new();
-        out.try_reserve_exact(size).map_err(|_| "lazcodec: insufficient memory".to_string())?;
-        out.resize(size, 0u8);
+        let mut out = self.records(num_points)?;
         // One decompressor per chunk, each started at its own bytes: decoding several
         // chunks in sequence assumes each ends exactly where the next begins, and not
         // every writer's chunks do (the table, not the coder, says where they start).
@@ -403,18 +411,7 @@ impl LazDecoder {
                 break;
             }
             let bytes = &compressed[at..at + e.byte_count as usize];
-            // [i64 offset of the table][the chunk][a table of just this chunk]
-            let mut stream = Vec::with_capacity(8 + bytes.len() + 32);
-            stream.extend_from_slice(&((8 + bytes.len()) as i64).to_le_bytes());
-            stream.extend_from_slice(bytes);
-            let mut table = ChunkTable::with_capacity(1);
-            table.push(*e);
-            table.write_to(&mut stream, &self.vlr).map_err(|e| format!("lazcodec: chunk table: {e}"))?;
-            let mut decompressor = LasZipDecompressor::new(Cursor::new(stream), self.vlr.clone())
-                .map_err(|e| format!("lazcodec: decompressor: {e}"))?;
-            decompressor
-                .decompress_many(&mut out[done * point_size..(done + n) * point_size])
-                .map_err(|e| format!("lazcodec: decompress: {e}"))?;
+            self.decode_one(bytes, *e, &mut out[done * point_size..(done + n) * point_size])?;
             at += e.byte_count as usize;
             done += n;
         }
@@ -422,6 +419,42 @@ impl LazDecoder {
             return Err(format!("lazcodec: the chunks hold {done} points, not {num_points}"));
         }
         Ok(out)
+    }
+
+    fn decode_chunk_impl(&self, compressed: &[u8], num_points: u32) -> Result<Vec<u8>, String> {
+        let mut out = self.records(num_points)?;
+        if num_points > 0 {
+            let entry = ChunkTableEntry { point_count: u64::from(num_points), byte_count: compressed.len() as u64 };
+            self.decode_one(compressed, entry, &mut out)?;
+        }
+        Ok(out)
+    }
+
+    // Zeroed room for `num_points` records, within the 512 MiB limit.
+    fn records(&self, num_points: u32) -> Result<Vec<u8>, String> {
+        let size = (num_points as usize)
+            .checked_mul(self.vlr.items_size() as usize)
+            .filter(|&n| n <= 512 * 1024 * 1024)
+            .ok_or_else(|| "lazcodec: decoded records exceed the 512 MiB limit".to_string())?;
+        let mut out = Vec::new();
+        out.try_reserve_exact(size).map_err(|_| "lazcodec: insufficient memory".to_string())?;
+        out.resize(size, 0u8);
+        Ok(out)
+    }
+
+    // One chunk into `out` (whole records). Each LASzip chunk restarts the coder, so it
+    // is wrapped as a small stream ([i64 offset of the table][the chunk][a table of just
+    // this chunk]) and handed to the decompressor a whole file goes through.
+    fn decode_one(&self, bytes: &[u8], entry: ChunkTableEntry, out: &mut [u8]) -> Result<(), String> {
+        let mut stream = Vec::with_capacity(8 + bytes.len() + 32);
+        stream.extend_from_slice(&((8 + bytes.len()) as i64).to_le_bytes());
+        stream.extend_from_slice(bytes);
+        let mut table = ChunkTable::with_capacity(1);
+        table.push(entry);
+        table.write_to(&mut stream, &self.vlr).map_err(|e| format!("lazcodec: chunk table: {e}"))?;
+        let mut decompressor = LasZipDecompressor::new(Cursor::new(stream), self.vlr.clone())
+            .map_err(|e| format!("lazcodec: decompressor: {e}"))?;
+        decompressor.decompress_many(out).map_err(|e| format!("lazcodec: decompress: {e}"))
     }
 }
 
@@ -556,6 +589,60 @@ mod tests {
         let (b0, b1) = (d.chunk_bytes(0) as usize, d.chunk_bytes(1) as usize);
         let alone = d.decode_impl(&comp[b0..b0 + b1], 1, 1, 50_000).unwrap();
         assert_eq!(&alone[..], &seq[50_000 * ps..100_000 * ps]);
+    }
+
+    // COPC: every node is one chunk, located by the hierarchy rather than a table.
+    #[test]
+    fn chunk_decoder_reads_one_chunk_without_a_table() {
+        let n = 120_000usize; // chunks of 50 000, 50 000, 20 000
+        let points = make_points(n);
+        let packed = compress_points_impl(&points, 2, 26).unwrap();
+        let data = &packed.data;
+        let table_at = i64::from_le_bytes(data[0..8].try_into().unwrap()) as usize;
+        let table = LazDecoder::create(&packed.vlr, &data[table_at..]).unwrap();
+        let (b0, b1) = (table.chunk_bytes(0) as usize, table.chunk_bytes(1) as usize);
+        let chunks = LazDecoder { vlr: LazVlr::read_from(Cursor::new(&packed.vlr)).unwrap(), entries: Vec::new() };
+        let second = chunks.decode_chunk_impl(&data[8 + b0..8 + b0 + b1], 50_000).unwrap();
+        assert_eq!(&second[..], &points[50_000 * 26..100_000 * 26]);
+        let last = chunks.decode_chunk_impl(&data[8 + b0 + b1..table_at], 20_000).unwrap();
+        assert_eq!(&last[..], &points[100_000 * 26..]);
+        assert!(chunks.decode_chunk_impl(&[], 0).unwrap().is_empty());
+    }
+
+    // The LAS 1.4 layered coder (point formats 6-8, what COPC uses), variable chunks.
+    #[test]
+    fn chunk_decoder_reads_layered_point_format_7() {
+        use laz::las::laszip::LazVlrBuilder;
+        let items = LazItemRecordBuilder::default_for_point_format_id(7, 0).unwrap();
+        let vlr = LazVlrBuilder::new(items).with_variable_chunk_size().build();
+        let size = vlr.items_size() as usize;
+        assert_eq!(size, 36);
+        let mut points = vec![0u8; 3000 * size];
+        for (i, p) in points.chunks_mut(size).enumerate() {
+            p[0..4].copy_from_slice(&(i as i32 * 17).to_le_bytes());
+            p[4..8].copy_from_slice(&(i as i32 * -5).to_le_bytes());
+            p[8..12].copy_from_slice(&(i as i32 % 97).to_le_bytes());
+            p[14] = 0x11; // return 1 of 1
+            p[16] = (i % 7) as u8; // classification
+            p[30..36].copy_from_slice(&[(i % 251) as u8, 0, 7, 0, 9, 0]);
+        }
+        let mut out = Cursor::new(Vec::new());
+        let mut compressor = LasZipCompressor::new(&mut out, vlr.clone()).unwrap();
+        compressor.compress_many(&points[..1000 * size]).unwrap();
+        compressor.finish_current_chunk().unwrap();
+        compressor.compress_many(&points[1000 * size..]).unwrap();
+        compressor.done().unwrap();
+        drop(compressor);
+        let data = out.into_inner();
+        let table_at = i64::from_le_bytes(data[0..8].try_into().unwrap()) as usize;
+        let mut vlr_bytes = Vec::new();
+        vlr.write_to(&mut vlr_bytes).unwrap();
+        let table = LazDecoder::create(&vlr_bytes, &data[table_at..]).unwrap();
+        assert_eq!((table.chunk_points(0), table.chunk_points(1)), (1000.0, 2000.0));
+        let b0 = table.chunk_bytes(0) as usize;
+        let chunks = LazDecoder { vlr: LazVlr::read_from(Cursor::new(&vlr_bytes)).unwrap(), entries: Vec::new() };
+        assert_eq!(chunks.decode_chunk_impl(&data[8 + b0..table_at], 2000).unwrap(), &points[1000 * size..]);
+        assert_eq!(chunks.decode_chunk_impl(&data[8..8 + b0], 1000).unwrap(), &points[..1000 * size]);
     }
 
     #[test]

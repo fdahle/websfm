@@ -125,7 +125,8 @@ A LAS or LAZ file too large to hold in memory (from about 10 million points) is
 [level-of-detail](help:level-of-detail) octree in the project, and never held whole.
 A 200-million-point LAZ takes a few minutes and 16 to 20 bytes per point of project
 storage. The import dialog is skipped, since its unit and axis options would need every
-point in memory; LAS surveys are in their own coordinates already.
+point in memory; LAS surveys are in their own coordinates already. A COPC file is not
+streamed but read as it is (see COPC files, below).
 
 If the file's header gives a wrong extent, the log says how many points lie outside
 it: they are kept, but the view and box reads (crop, DEM) can miss them, so fix the
@@ -162,3 +163,21 @@ measure on it. Tools read it from its octree:
   order than in the source file.
 
 Other edits (normals, transform, alignment, distances, merge) work on a crop of it.
+
+## COPC files
+A [COPC](help:copc) file (`.copc.laz`) is a LAZ file whose points are already sorted
+into a level-of-detail octree. One of 4 million points or more (or one too large to hold
+in memory) is **read in place**: it is copied into the project as it is, and nothing is
+decoded but its top levels, for the colour and class statistics. A 93-million-point
+COPC file imports in about the time it takes to copy it (seconds), where the same
+points as a plain LAZ take minutes to stream into an octree. A smaller COPC file
+imports into memory like any LAZ, so every tool works on it directly.
+
+It is marked **COPC** in the sidebar and works like a streamed cloud: drawn through
+its octree (the view decodes only the nodes it shows, in the background), styled,
+measured, gridded, cropped, filtered, edited and exported with the tools above. An
+edit writes its result into a new streamed cloud; the COPC file itself never changes.
+The file's CRS (its WKT or GeoKey record) is shown in the log and on the sidebar mark,
+and goes back into a LAS or LAZ export. Its coordinates are used as they are, like any
+imported cloud: the log says when the project is in another CRS. The copy takes the
+file's size in project storage, and a `.websfm` project file includes it.

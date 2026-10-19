@@ -1,8 +1,9 @@
 import { buildLod as runBuild } from '../../core/lod/build.js'
 import { typeName } from '../../core/lod/nodeCodec.js'
 import { openLasStream } from '../../core/io/lasStream.js'
-import { blobSource } from '../../utils/blobParts.js'
-import { openLodReader } from '../../core/lod/reader.js'
+import { blobSource, blobChunks } from '../../utils/blobParts.js'
+import { openCloudSource, isCopcLod } from '../../core/lod/cloudSource.js'
+import { readCopcMeta } from '../../core/lod/copc.js'
 import { planExtract, extractPoints } from '../../core/lod/extract.js'
 import { lodToLas, lodToText, lasPlanFor } from '../../core/lod/exportStream.js'
 import { streamedEditSource } from '../../core/lod/transform.js'
@@ -108,6 +109,50 @@ function arraySource(cloud, batch = 1 << 20) {
 }
 
 export function makeLodOps({ lazCodec = null } = {}) {
+  // A cloud's octree as a source (core/lod/cloudSource.js): ours, or a COPC file read
+  // in place, whose nodes are LASzip chunks (every hierarchy page read: the tools
+  // here walk every node).
+  async function openSource(lod, files) {
+    if (!isCopcLod(lod)) return openCloudSource(lod, files)
+    if (!lazCodec) throw new Error('COPC: the lazcodec module is not available')
+    await lazCodec.ensure()
+    return openCloudSource(lod, files, { createChunkDecoder: lazCodec.createChunkDecoder, hierarchy: 'all' })
+  }
+
+  // A COPC file imported as it is (core/lod/copc.js): its octree is read from the file,
+  // which is copied into the project's lod/ folder; nothing is decoded but the top
+  // levels (styling statistics). input { file, dir, name } → the cloud's `lod` metadata
+  async function importCopc([input], { emit }) {
+    const { file, dir, name } = input
+    if (!lazCodec) throw new Error('COPC: the lazcodec module is not available')
+    const t0 = performance.now()
+    const log = (m, l, c = 'Import') => emit('log', [m, l, c])
+    await lazCodec.ensure()
+    emit('progress', [0, 1, 'Reading the COPC hierarchy', 0])
+    const meta = await readCopcMeta(blobSource(file, file.name), { createChunkDecoder: lazCodec.createChunkDecoder, onLog: log })
+    const dataFile = `${name}.copc.laz`
+    const writable = await (await dir.getFileHandle(dataFile, { create: true })).createWritable()
+    try {
+      let done = 0
+      for await (const chunk of blobChunks(file, { chunkBytes: 32 << 20 })) {
+        await writable.write(chunk)
+        done += chunk.length
+        emit('progress', [done, file.size, 'Copying the file into the project', done / Math.max(1, file.size)])
+      }
+      await writable.close()
+    } catch (err) {
+      await writable.abort?.().catch(() => {})
+      await dir.removeEntry(dataFile).catch(() => {})
+      throw err
+    }
+    log(`COPC: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, ${meta.levels} levels, `
+      + `point format ${meta.file.format}${meta.layout.colour ? ', colour' : ''}, read in place `
+      + `(${(file.size / 1024 ** 2).toFixed(1)} MB copied) in ${((performance.now() - t0) / 1000).toFixed(1)} s`, 'info')
+    log(meta.file.crs ? `COPC: CRS ${meta.file.crs}${meta.file.crsName ? ` (${meta.file.crsName})` : ''} from its ${meta.file.projection.some((v) => v.recordId === 2112) ? 'WKT' : 'GeoKey'} record`
+      : 'COPC: no CRS record (local coordinates)', 'info')
+    return { result: { ...meta, name, dataFile, hierarchyFile: null } }
+  }
+
   // input { cloud: { count, pos, col?, attributes?, bounds? } | file: File (a LAS/LAZ,
   //         streamed: never held whole), dir: FileSystemDirectoryHandle, name }
   // → { name, dataFile, hierarchyFile, root, layout, spacing, nodeCount, dataBytes, points,
@@ -165,12 +210,13 @@ export function makeLodOps({ lazCodec = null } = {}) {
   // → { cloud: { count, pos, col?, attributes }, plan: { level, deepest, spacing, complete } }
   async function extractLod([input], { emit }) {
     const { lod, data, hierarchy, box = null, maxPoints = Infinity, minSpacing = 0, classes = null, fields = 'all' } = input
-    const reader = await openLodReader(lod, { data, hierarchy })
+    const reader = await openSource(lod, { data, hierarchy })
     const plan = planExtract(reader.nodes, lod, { box, maxPoints, minSpacing })
     const cloud = await extractPoints(reader, plan, lod, {
       box, classes: classes ? new Set(classes) : null, fields,
       onProgress: (done, total) => emit('progress', [done, total, 'Reading points', done / Math.max(1, total)]),
     })
+    reader.close()
     const transfer = [cloud.pos.buffer, ...(cloud.col ? [cloud.col.buffer] : []), ...Object.values(cloud.attributes).map((a) => a.buffer)]
     const { nodes, ...summary } = plan
     return { result: { cloud, plan: { ...summary, nodes: nodes.length } }, transfer }
@@ -182,7 +228,7 @@ export function makeLodOps({ lazCodec = null } = {}) {
   async function exportLod([input], { emit }) {
     const { lod, data, hierarchy, format, color = true } = input
     const t0 = performance.now()
-    const reader = await openLodReader(lod, { data, hierarchy })
+    const reader = await openSource(lod, { data, hierarchy })
     const onProgress = (done, total) => emit('progress', [done, total, 'Writing points', done / Math.max(1, total)])
     // Parts gathered into a Blob in batches (the browser keeps large Blobs on disk).
     let blob = null, batch = [], size = 0
@@ -214,6 +260,7 @@ export function makeLodOps({ lazCodec = null } = {}) {
       for await (const p of lodToText(reader, lod, { format, color, onProgress })) add(p)
       blob = new Blob([...(blob ? [blob] : []), ...batch], { type })
     }
+    reader.close()
     emit('log', [`${format.toUpperCase()} written: ${lod.points.toLocaleString()} points from the octree, `
       + `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'info', 'Export'])
     return { result: { blob, count: lod.points } }
@@ -226,7 +273,7 @@ export function makeLodOps({ lazCodec = null } = {}) {
   async function transformLod([input], { emit }) {
     const { lod, data, hierarchy, dir, name, mode, settings = {} } = input
     const t0 = performance.now()
-    const reader = await openLodReader(lod, { data, hierarchy })
+    const reader = await openSource(lod, { data, hierarchy })
     const log = (m, l = 'info') => emit('log', [m, l, 'Products'])
     const source = streamedEditSource(reader, lod, mode, settings, {
       log, progress: (done, total, label) => emit('progress', [done, total, label, done / Math.max(1, total)]),
@@ -249,8 +296,9 @@ export function makeLodOps({ lazCodec = null } = {}) {
       throw err
     } finally {
       await tmp.dispose()
+      reader.close()
     }
   }
 
-  return { buildLod, extractLod, exportLod, transformLod }
+  return { buildLod, extractLod, exportLod, transformLod, importCopc }
 }

@@ -29,4 +29,5 @@ made or imported. It is saved with the project, so it is built only once; an edi
 that changes the points (a selection deleted or reclassified) builds it again. A LAS or LAZ
 file too large to hold in memory goes straight into an octree as it is read: a
 *streamed* cloud, whose points exist only there (see
-[Point Cloud Tools](guide:point-cloud-tools)).
+[Point Cloud Tools](guide:point-cloud-tools)). A large COPC file needs no octree of
+ours: it has its own, and is read in place.

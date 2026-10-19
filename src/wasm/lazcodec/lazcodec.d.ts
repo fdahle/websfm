@@ -48,6 +48,16 @@ export class LazDecoder {
      */
     decode(compressed: Uint8Array, first: number, count: number, num_points: number): Uint8Array;
     /**
+     * Decode one whole chunk of `num_points` points from its compressed bytes.
+     */
+    decode_chunk(compressed: Uint8Array, num_points: number): Uint8Array;
+    /**
+     * A decoder with no chunk table, for chunks the caller locates itself: a COPC
+     * file's hierarchy gives every node's byte range and point count, and each node
+     * is one chunk (`decode_chunk`).
+     */
+    static forChunks(vlr_data: Uint8Array): LazDecoder;
+    /**
      * `chunk_table`: the file's bytes from the chunk table's offset on (trailing bytes
      * such as EVLRs are ignored). Fixed-size chunks get the VLR's chunk size as their
      * point count; the last one may hold fewer, which the caller knows from the header.
@@ -106,6 +116,8 @@ export interface InitOutput {
     readonly lazdecoder_chunk_count: (a: number) => number;
     readonly lazdecoder_chunk_points: (a: number, b: number) => number;
     readonly lazdecoder_decode: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly lazdecoder_decode_chunk: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly lazdecoder_forChunks: (a: number, b: number) => [number, number, number];
     readonly lazdecoder_new: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly lazdecoder_point_size: (a: number) => number;
     readonly lazencoder_drain: (a: number) => [number, number, number, number];

@@ -1,7 +1,11 @@
 import { markRaw, watch } from 'vue'
 import * as opfs from '../../utils/opfs.js'
-import { buildLod as workerBuildLod, extractLod as workerExtractLod, exportLod as workerExportLod, transformLod as workerTransformLod } from '../../workers/computeClient.js'
-import { openLodReader } from '../../core/lod/reader.js'
+import {
+  buildLod as workerBuildLod, extractLod as workerExtractLod, exportLod as workerExportLod, transformLod as workerTransformLod,
+  importCopc as workerImportCopc,
+} from '../../workers/computeClient.js'
+import { readCopcNode } from '../../workers/copcNodeClient.js'
+import { openCloudSource, isCopcLod, lodFileNames } from '../../core/lod/cloudSource.js'
 import { LOD_MIN_POINTS } from '../../core/lod/build.js'
 
 // Level-of-detail octrees of dense clouds (dev/planning/plan-lod.md). The octree is
@@ -9,23 +13,34 @@ import { LOD_MIN_POINTS } from '../../core/lod/build.js'
 // its metadata as `cloud.lod` (persisted with the cloud), the viewer reads its nodes
 // on demand. An octree belongs to the cloud object it was built from: every edit makes
 // a new cloud, which has none until it is built again.
-export function createCloudLod({ clouds, log, save, projectId, makeCloudId, selectedCloudId }) {
+//
+// A COPC file (core/lod/copc.js) needs no octree of ours: it is copied into lod/ as it
+// is and read in place (`lod.format === 'copc'`, the file is `lod.dataFile`).
+export function createCloudLod({ clouds, log, save, projectId, makeCloudId, selectedCloudId, projectCrs = () => null }) {
   const building = new Set() // octree names being written (kept by pruning)
 
   async function prune() {
     const pid = projectId()
     if (!pid) return 0
     const keep = new Set()
-    for (const c of clouds.value) if (c.lod) { keep.add(c.lod.dataFile); keep.add(c.lod.hierarchyFile) }
-    for (const name of building) { keep.add(`${name}.lod`); keep.add(`${name}.hier`) }
+    for (const c of clouds.value) if (c.lod) for (const f of lodFileNames(c.lod)) keep.add(f)
+    for (const name of building) { keep.add(`${name}.lod`); keep.add(`${name}.hier`); keep.add(`${name}.copc.laz`) }
     return opfs.pruneLodFiles(pid, keep, { building: building.size > 0 })
+  }
+
+  // The octree's files: { data, hierarchy (null for a COPC file) }.
+  async function lodFiles(pid, lod) {
+    const [data, hierarchy] = await Promise.all([
+      opfs.loadLodFile(pid, lod.dataFile), lod.hierarchyFile ? opfs.loadLodFile(pid, lod.hierarchyFile) : null,
+    ])
+    return { data, hierarchy }
   }
 
   // An octree written for a project that is no longer the open one (closed or switched
   // while the worker ran): no cloud of that project names it, so its files go now
   // rather than at that project's next open.
   async function discard(dir, meta) {
-    for (const f of [meta?.dataFile, meta?.hierarchyFile]) if (f) await dir.removeEntry(f).catch(() => {})
+    for (const f of lodFileNames(meta)) await dir.removeEntry(f).catch(() => {})
   }
 
   // → the cloud's new `lod` metadata, or null (refused, failed).
@@ -106,16 +121,70 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
     }
   }
 
-  // A reader of the cloud's octree (core/lod/reader.js), or null when it has none or
-  // its files are gone.
+  // A COPC file (core/lod/copc.js) imported as it is: it already is a level-of-detail
+  // octree, so it is copied into the project's lod/ folder and read in place, never
+  // decoded whole and never rebuilt. A streamed cloud like the others: drawn, cropped,
+  // gridded, edited and exported through its octree. → the new cloud, or null.
+  async function importCopcCloud(file, onProgress) {
+    const pid = projectId()
+    if (!pid) {
+      log(`Cloud import: reading ${file.name} in place (COPC) needs a saved project`, 'error', 'Import')
+      return null
+    }
+    const id = makeCloudId()
+    const name = `${id}-${Date.now().toString(36)}`
+    building.add(name)
+    try {
+      const dir = await opfs.lodDir(pid)
+      log(`Cloud import: ${file.name} is a COPC file — reading its octree in place`, 'info', 'Import')
+      const meta = await workerImportCopc({ file, dir, name },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
+      if (projectId() !== pid) {
+        await discard(dir, meta)
+        log(`Cloud import: ${file.name} was not added — its project was closed while it was copied`, 'warn', 'Import')
+        return null
+      }
+      // Coordinates land as they are (no reprojection, as for every cloud import): say so
+      // when the file's CRS is not the project's. A project still in its default
+      // (geographic) CRS has not chosen one yet: a hint, not a warning.
+      const crs = meta.file?.crs, project = projectCrs()
+      if (crs && project && project !== 'local' && crs !== project) {
+        const unset = project === 'EPSG:4326'
+        log(`Cloud import: ${file.name} is in ${crs}, the project in ${project} — its coordinates are used as they are, not reprojected`
+          + (unset ? `; set the project CRS to ${crs} to georeference the model into them` : ''), unset ? 'info' : 'warn', 'Import')
+      }
+      const cloud = {
+        id, name: `Imported (${file.name})`, kind: 'dense', createdAt: Date.now(), imported: true,
+        cameras: markRaw(new Map()), count: meta.points, pos: null, col: null, lod: markRaw(meta),
+        ...(meta.layout.colour ? {} : { style: { field: 'elevation' } }),
+      }
+      clouds.value.push(cloud)
+      selectedCloudId.value = cloud.id
+      log(`Cloud import: added "${cloud.name}" — ${meta.points.toLocaleString()} points, read in place (COPC)`
+        + `${meta.layout.colour ? ', colour' : ''}`, 'success', 'Import')
+      await save()
+      return cloud
+    } catch (err) {
+      log(`Cloud import: ${file.name}: ${err?.message ?? err}`, 'error', 'Import')
+      return null
+    } finally {
+      building.delete(name)
+      await prune().catch(() => {})
+    }
+  }
+
+  // A source over the cloud's octree (core/lod/cloudSource.js: ours or a COPC file), or
+  // null when it has none or its files are gone.
   async function openCloudLod(cloud) {
     const pid = projectId()
     if (!cloud?.lod || !pid) return null
     try {
-      const [data, hierarchy] = await Promise.all([
-        opfs.loadLodFile(pid, cloud.lod.dataFile), opfs.loadLodFile(pid, cloud.lod.hierarchyFile),
-      ])
-      return await openLodReader(cloud.lod, { data, hierarchy })
+      const lod = cloud.lod
+      const { data, hierarchy } = await lodFiles(pid, lod)
+      // A COPC node is a LASzip chunk: decoded in its own worker; the hierarchy pages
+      // below the root are read as the view reaches them.
+      return await openCloudSource(lod, { data, hierarchy },
+        isCopcLod(lod) ? { readNode: (node, as) => readCopcNode(data, node, lod, as), hierarchy: 'lazy' } : {})
     } catch (err) {
       // A cloud whose points are in memory does not need its octree: drop the
       // unreadable one (a new object, so the viewer draws it whole and the
@@ -158,9 +227,7 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
   async function extractCloudPoints(cloud, opts = {}, onProgress) {
     const pid = projectId()
     if (!cloud?.lod || !pid) throw new Error('the cloud has no octree')
-    const [data, hierarchy] = await Promise.all([
-      opfs.loadLodFile(pid, cloud.lod.dataFile), opfs.loadLodFile(pid, cloud.lod.hierarchyFile),
-    ])
+    const { data, hierarchy } = await lodFiles(pid, cloud.lod)
     return workerExtractLod({ lod: JSON.parse(JSON.stringify(cloud.lod)), data, hierarchy, ...opts },
       { onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
   }
@@ -169,9 +236,7 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
   async function exportCloudLod(cloud, { format, color = true } = {}, onProgress) {
     const pid = projectId()
     if (!cloud?.lod || !pid) throw new Error('the cloud has no octree')
-    const [data, hierarchy] = await Promise.all([
-      opfs.loadLodFile(pid, cloud.lod.dataFile), opfs.loadLodFile(pid, cloud.lod.hierarchyFile),
-    ])
+    const { data, hierarchy } = await lodFiles(pid, cloud.lod)
     return workerExportLod({ lod: JSON.parse(JSON.stringify(cloud.lod)), data, hierarchy, format, color },
       { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
   }
@@ -186,9 +251,7 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
     const fileName = `${id}-${Date.now().toString(36)}`
     building.add(fileName)
     try {
-      const [data, hierarchy] = await Promise.all([
-        opfs.loadLodFile(pid, source.lod.dataFile), opfs.loadLodFile(pid, source.lod.hierarchyFile),
-      ])
+      const { data, hierarchy } = await lodFiles(pid, source.lod)
       const dir = await opfs.lodDir(pid)
       const meta = await workerTransformLod({ lod: JSON.parse(JSON.stringify(source.lod)), data, hierarchy, dir, name: fileName, mode,
         settings: JSON.parse(JSON.stringify(settings)) },
@@ -213,5 +276,5 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
     }
   }
 
-  return { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, editStreamedCloud, pruneLod: prune }
+  return { buildCloudLod, openCloudLod, importStreamedCloud, importCopcCloud, extractCloudPoints, exportCloudLod, editStreamedCloud, pruneLod: prune }
 }

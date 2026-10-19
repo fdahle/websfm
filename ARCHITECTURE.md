@@ -38,6 +38,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   | `core/dense/` | PatchMatch depth-map orchestration, cross-view filtering, fusion, memory budgeting |
   | `core/products/` | DEM, orthophoto, mesh, georeferencing, scale, exporters (GeoTIFF/COG, PLY, LAS, 3D Tiles, …) |
   | `core/io/` | importers and format readers (COLMAP, LAS/LAZ, PLY, GeoTIFF, GCP/pose CSV, `.websfm` archives) |
+  | `core/lod/` | level-of-detail octrees of big clouds: the build, and the cloud sources the viewer and tools read nodes from (our octree, or a COPC file read in place) |
   | `core/eval/` | the statistics behind the Quality Report |
   | `core/help/` | glossary, user guide and the ribbon command tables |
 
