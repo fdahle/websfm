@@ -10,8 +10,8 @@ Notable changes to websfm. The format follows
   grid (a satellite frame at its native resolution) is no longer coarsened to fit: it is
   built block by block as a full-resolution Cloud-Optimized GeoTIFF, which the GeoTIFF
   export delivers. Its tab and the map draw it at full resolution as you zoom in,
-  coloured and hillshaded; the value under the cursor and measurements use its
-  4,096-cell overview for now.
+  coloured and hillshaded, and its tab reads the full-resolution height under the
+  cursor. The map's readout and measurements use its 4,096-cell overview for now.
 - **Watch the sparse model grow.** During Sparse Reconstruction the 3D view draws the
   cameras registered so far and their points, in colour, updated every couple of
   seconds, and zooms out as the model expands. The progress bar moves to the corner so
