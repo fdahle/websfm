@@ -658,6 +658,17 @@ try {
         await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
         continue
       }
+      if (entry === 'sensor') {
+        // `sensor`: apply the config's camera calibration again (hist.intrinsics, else
+        // `sensor`) — on a `reopen` of a project whose sensor never reached storage.
+        const { histSetup } = await import('./hist/histSetup.mjs')
+        const h = cfg.hist ? await histSetup({ imagesDir: cfg.images, ...cfg.hist }, files) : null
+        const fields = h?.sensor ?? cfg.sensor
+        const r = fields ? await page.evaluate((f) => window.bench.setSensor(f), fields) : { error: 'no sensor in the config' }
+        result.stages[entry] = r
+        console.log(`== ${entry}: ${JSON.stringify(r)}`)
+        continue
+      }
       if (entry.startsWith('pool:')) {
         // `pool:<n>`: set the compute worker pool to n workers (0 = the default).
         const r = await page.evaluate((n) => window.bench.setPoolSize(n), Number(entry.slice(5)))

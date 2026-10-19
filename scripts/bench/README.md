@@ -176,6 +176,8 @@ stage again with config key `dense:loose`.
 - An export spec may name the cloud: `{ kind, cloud, cloudName }` exports the cloud of
   that kind with that exact name (a derived or edited copy) instead of the computed one.
   For `kind: "tiles3d"` it selects that cloud or mesh first (3D Tiles writes the selection).
+- `sensor`: applies the config's calibration again (`hist.intrinsics`, else `sensor`),
+  e.g. after `reopen` on a project saved before the bench persisted it (2026-10-19).
 - `georef`: Georeferencing ▸ Georeference, from GCPs or the camera positions, into the
   project CRS (top-level `crs`). Then `dem: { "crs": "project" }` builds in that CRS.
 - `meshtools`: TOOL-03 on the computed mesh: Clean → Decimate 25 % → Smooth 10 → Clean

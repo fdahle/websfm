@@ -726,6 +726,10 @@ window.bench = {
     if (!first) return null
     for (const s of rest) sensorsStore.mergeSensors(first.id, s.id)
     Object.assign(first, fields)
+    // Persist through the store: a bare assignment never reached project storage, so a
+    // `reopen` run lost the certificate and reconstructed from a default-FOV guess
+    // (found 2026-10-19, SAT-6). Re-setting the unit saves the whole sensor.
+    sensorsStore.updateSensor(first.id, 'focalUnit', first.focalUnit === 'mm' ? 'mm' : 'px')
     // A later run's `sensor` override restores to these values, not the EXIF guess.
     sensorBase[first.id] = Object.fromEntries(SENSOR_OVERRIDE_FIELDS.map((k) => [k, first[k]]))
     return { sensors: sensorsStore.sensors.length, ...Object.fromEntries(Object.keys(fields).map((k) => [k, first[k]])) }
