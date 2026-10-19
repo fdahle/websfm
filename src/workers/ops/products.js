@@ -18,6 +18,7 @@ import { clipDem, clipOrtho, polygonPixelWindow, windowGeometry } from '../../co
 import { openRaster, readWindowBytes } from '../cogRead.js'
 import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
 import { nounFor, pluralize } from '../../core/textFormat.js'
+import { createBlockProgress } from '../blockProgress.js'
 
 // The ortho's source photos (plan-ortho-mosaic O1). `images` comes from the store, one
 // per depth map: { uuid, name, url, K (the camera's full-resolution K), dist, selfCal,
@@ -334,15 +335,22 @@ export function makeProductsOps({ rasterize } = {}) {
     const loadStatsImage = settings.blend === 'mosaic' && (settings.colourBalance || settings.seamline === 'graphcut')
       ? makePhotoLoader(input.images, rasterize, emit) : null
     emit('progress', [0, 1, 'Orthorectifying…'])
+    // A fine ortho is hundreds of blocks at up to minutes each: the label names the
+    // block, and the log gets a line with the rate and time left every 30 s or so.
+    let blockProgress = null
+    const progressLabel = () => (blockProgress ? `Orthorectifying… ${blockProgress.label()}` : 'Orthorectifying…')
     const res = await orthorectifyTiled(built.grid, geom, maps, loadMap, frame.toSfm,
       { ...settings, blockSize: ORTHO_BLOCK, cacheBytes, mapsResident: !streamed }, {
         loadImage, loadStatsImage,
-        onProgress: (done, total) => emit('progress', [done, total, 'Orthorectifying…', 0.95 * done / total]),
-        onBlock: (b) => {
+        onProgress: (done, total) => emit('progress', [done, total, progressLabel(), 0.95 * done / total]),
+        onBlocksStart: (count) => { blockProgress = createBlockProgress(count, { prefix: 'Ortho: ' }) },
+        onBlock: async (b) => {
           // `debugSeams` (bench only, not in the dialog): paint the seams magenta, so
           // side-by-sides show where each variant put them.
           if (settings.debugSeams && b.labels) paintSeams(b.rgba, b.labels, b.width, b.height)
-          return builder.addBlock({ col0: b.col0, row0: b.row0, width: b.width, height: b.height, data: b.rgba })
+          await builder.addBlock({ col0: b.col0, row0: b.row0, width: b.width, height: b.height, data: b.rgba })
+          const line = blockProgress?.finished()
+          if (line) emit('log', [line, 'info', 'Products'])
         },
       })
     emit('progress', [1, 1, 'Writing the GeoTIFF…', 0.96])
