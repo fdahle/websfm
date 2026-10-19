@@ -63,7 +63,7 @@ export function placeProductLayer(kind, product, state, view) {
     gt = { ...gt, originX: gt.originX + off.dx, originY: gt.originY + off.dy }
     offset = [off.dx, off.dy]
   }
-  // A computed ortho draws its stored COG as GPU tiles, like an imported raster. The
+  // A computed ortho (or a DEM past one plane) draws its stored COG as GPU tiles, like an imported raster. The
   // tiles carry the file's own geotransform, so a model-map layer shifted by a frame
   // offset falls back to the preview image, which can be placed anywhere.
   const tiled = productTiledMeta(kind, product)
@@ -84,7 +84,9 @@ export function placeProductLayer(kind, product, state, view) {
     offset,
     // An ortho's brightness/contrast/gamma (productStyle.js), applied at draw time.
     ...(kind === 'ortho' && product.style && { adjust: product.style }),
-    ...(cog && { cog, fileKey: tiled.fileKey, bands: tiled.bands, bitsPerSample: 8, sampleFormat: 1,
-      photometric: tiled.photometric, alphaBand: tiled.alphaBand }),
+    ...(cog && { cog, fileKey: tiled.fileKey, bands: tiled.bands, bitsPerSample: tiled.bitsPerSample,
+      sampleFormat: tiled.sampleFormat, photometric: tiled.photometric, alphaBand: tiled.alphaBand,
+      // A DEM's colour ramp + hillshade, drawn from its Float32 COG (SAT-3).
+      ...(tiled.demRelief && { demRelief: tiled.demRelief, zMin: tiled.zMin, zMax: tiled.zMax }) }),
   } }
 }

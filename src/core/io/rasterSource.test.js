@@ -145,3 +145,17 @@ describe('cellValueAt (cursor readout)', () => {
     expect(dem.cellValueAt(0.5, 0.5)).toBe(5)
   })
 })
+
+describe('productTiledMeta for a DEM past one plane (SAT-3)', () => {
+  it('draws the full-resolution COG with the DEM\'s symbology; a plane-only DEM stays on its preview', () => {
+    const dem = { width: 2500, height: 1200, gsd: 2, originX: 100, originY: 900, zMin: 10, zMax: 50, crs: 'EPSG:32612',
+      cog: new Blob([]), fullWidth: 5000, fullHeight: 2400, fullGsd: 1, createdAt: 9, style: { ramp: 'viridis' } }
+    expect(productTiledMeta('dem', dem)).toMatchObject({
+      id: 'product:dem:9', width: 5000, height: 2400, bands: 1, bitsPerSample: 32, sampleFormat: 3,
+      geoTransform: { originX: 100, originY: 900, scaleX: 1, scaleY: -1 },
+      demRelief: { ramp: 'viridis', min: 10, max: 50, gsd: 1 },
+    })
+    const { cog: _c, fullGsd: _g, ...plane } = dem
+    expect(productTiledMeta('dem', plane)).toBeNull()
+  })
+})

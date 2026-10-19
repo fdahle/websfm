@@ -19,6 +19,7 @@
 // once into a typed array and persisted as an OPFS sidecar.
 
 import { sampleRaster, cellValue, worldToPixel, pixelToWorld, rasterBounds } from './rasterSample.js'
+import { demRenderOptions } from '../products/productStyle.js'
 
 // One descriptor for both raster shapes: an imported raster carries a full
 // `geoTransform`; a computed DEM/ortho carries { originX, originY, gsd } on a
@@ -39,9 +40,24 @@ export function productDescriptor(product) {
 // A computed orthophoto as the tiled GPU layer draws it (components/viewers/raster/
 // gpuRaster.js): the same fields an imported raster's RasterMeta carries, over its
 // stored COG — 8-bit RGB plus an alpha band. `fileKey` changes exactly when the file
-// does (a rebuild), so a layer knows when to reload. Null for a DEM (drawn from its
-// preview) or an ortho with no COG.
+// does (a rebuild), so a layer knows when to reload. A DEM past one plane (SAT-3) is
+// drawn from its full-resolution COG the same way: one Float32 band, coloured and
+// hillshaded by its symbology (`demRelief`, rasterGpuStyle.js). Null for a DEM within
+// one plane (drawn from its preview) or a product with no COG.
 export function productTiledMeta(kind, product) {
+  if (kind === 'dem' && product?.cog && product.fullGsd > 0) {
+    const key = `product:dem:${product.createdAt ?? 0}`
+    return {
+      id: key, fileKey: key, kind: 'dem', name: product.name ?? 'DEM',
+      crs: product.crs && product.crs !== 'local' ? product.crs : null,
+      width: product.fullWidth, height: product.fullHeight,
+      geoTransform: { originX: product.originX, originY: product.originY, scaleX: product.fullGsd, scaleY: -product.fullGsd },
+      bands: 1, bitsPerSample: 32, sampleFormat: 3, photometric: 1, zMin: product.zMin, zMax: product.zMax,
+      demRelief: { ...demRenderOptions(product.style, product), gsd: product.fullGsd },
+      // A symbology change is what a GPU layer watches to restyle.
+      style: product.style ?? null,
+    }
+  }
   if (kind !== 'ortho' || !product?.cog) return null
   const desc = productDescriptor(product)
   if (!desc) return null

@@ -8,6 +8,8 @@ it.each([
   { bands:6, style:{mode:'rgb',bandR:3,bandG:4,bandB:5,ranges:[[0,3000],[0,3000],[0,3000]]} },
   { bands:6, style:{mode:'index',bandA:4,bandB2:2} },
   { bands:4, kind:'ortho', photometric:2, alphaBand:3 },
+  { bands:1, kind:'dem', demRelief:{ ramp:'turbo', min:0, max:300, hillshade:true, gsd:1 } },
+  { bands:1, kind:'dem', demRelief:{ ramp:'viridis', min:5, max:5, hillshade:false } },
 ])('produces a valid OpenLayers color expression for %j', meta => {
   expect(() => parse(gpuRasterStyle(meta).color, ColorType, newParsingContext())).not.toThrow()
 })
@@ -32,4 +34,12 @@ describe('safeStretchRange', () => {
     const json = JSON.stringify(gpuRasterStyle({ kind: 'dem', zMin: 12, zMax: null, bands: 1, bitsPerSample: 32, sampleFormat: 3 }))
     expect(json).not.toMatch(/null|NaN/)
   })
+})
+
+it('a block-built DEM draws its ramp over a hillshade, NaN transparent, never steeper than its own cells', () => {
+  const json = JSON.stringify(gpuRasterStyle({ bands: 1, kind: 'dem', demRelief: { ramp: 'turbo', min: 0, max: 300, hillshade: true, gsd: 1.5 } }))
+  expect(json).toContain(JSON.stringify(['band', 1, 1, 0]))
+  expect(json).toContain(JSON.stringify(['clamp', ['resolution'], 1.5, 1e30]))
+  expect(json).toContain(JSON.stringify(['<', ['abs', ['band', 1]], 3.4e38]))
+  expect(JSON.stringify(gpuRasterStyle({ bands: 1, demRelief: { ramp: 'turbo', min: 0, max: 1, hillshade: false } }))).not.toContain('resolution')
 })
