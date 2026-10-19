@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Find GCPs** matches the orthophoto to a georeferenced reference coarse to fine.
+  It tolerates rotation and a different resolution, finds a small block inside a
+  regional reference, and starts from the photos' GPS when the orthophoto is not yet
+  georeferenced. Each candidate shows a confidence, a residual and an accuracy taken
+  from the reference's pixel size. Candidates are spread over the block, and none is
+  added until you tick it.
 - **Quality gates and editable recipes in the Workflow Builder**: a Quality Gate
   block checks a Quality Report metric (registered images, reprojection error, track
   length, dense coverage …) after a stage and, when it fails, pauses, stops or jumps
