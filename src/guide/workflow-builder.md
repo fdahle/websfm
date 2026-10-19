@@ -27,6 +27,12 @@ the inputs it needs, including outputs from earlier blocks. Resolve dependency
 problems before choosing **Run workflow**. You can also run a selected block or
 start from it, provided the necessary inputs already exist.
 
+A run with a block that reads image pixels (detection, depth maps, dense, orthophoto,
+texturing, masks, fiducials) first checks that every image's file can still be read.
+An image whose file was moved, renamed or deleted is restored from project storage
+when the project has a copy; the rest are named in a warning before anything starts,
+rather than failing an hour into the run. Re-add those files, or remove the images.
+
 Automatic blocks execute in order. Interactive commands, such as Scale Bars or
 Georeference, open their usual dialog and pause the workflow. Finish the command,
 return to the builder, then choose **Mark complete & continue**. **Stop workflow**

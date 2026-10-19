@@ -18,14 +18,12 @@ const store = (page, src) => page.evaluate(async (s) => {
 }, src.toString())
 const logLines = (page, re) => store(page, `(images, log) => log.entries.value.map((e) => e.level + ' ' + e.message).filter((m) => ${re}.test(m))`)
 
-test('moved originals heal from project storage; an image with no copy is flagged once', async ({ page }) => {
-  const errors = []
-  page.on('pageerror', (e) => errors.push(e.message))
+// A new project with three JPEGs imported from disk files (Files backed by those
+// paths) and persisted, so each also has its project-storage copy.
+async function importFromDisk(page) {
   await page.goto('/')
   await page.getByRole('button', { name: 'Create project', exact: true }).click()
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
-
-  // Three JPEGs on disk, picked through a file input: Files backed by those paths.
   const dir = await mkdtemp(join(tmpdir(), 'websfm-srcloss-'))
   const names = ['a.jpg', 'b.jpg', 'c.jpg']
   const jpegs = await page.evaluate(async (n) => Promise.all(n.map(async (_, k) => {
@@ -42,23 +40,33 @@ test('moved originals heal from project storage; an image with no copy is flagge
   })), names)
   const paths = names.map((n) => join(dir, n))
   await Promise.all(paths.map((p, k) => writeFile(p, Buffer.from(jpegs[k], 'base64'))))
-  try {
-    await page.evaluate(() => document.body.appendChild(Object.assign(document.createElement('input'), { type: 'file', multiple: true, id: 'pick' })))
-    await page.setInputFiles('#pick', paths)
-    await page.evaluate(async () => {
-      const { useImagesStore } = await import('/src/stores/useImagesStore.js')
-      await useImagesStore().addImages([...document.getElementById('pick').files])
-    })
-    await expect.poll(() => store(page, '(images) => images.images.filter((i) => !i.loading && i.meta?.width === 320).length')).toBe(3)
-    await page.evaluate(async () => (await import('/src/utils/persistence.js')).flushPersistence())
+  await page.evaluate(() => document.body.appendChild(Object.assign(document.createElement('input'), { type: 'file', multiple: true, id: 'pick' })))
+  await page.setInputFiles('#pick', paths)
+  await page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    await useImagesStore().addImages([...document.getElementById('pick').files])
+  })
+  await expect.poll(() => store(page, '(images) => images.images.filter((i) => !i.loading && i.meta?.width === 320).length')).toBe(3)
+  await page.evaluate(async () => (await import('/src/utils/persistence.js')).flushPersistence())
+  return { dir, paths }
+}
 
-    // Move every original away; c.jpg also loses its project-storage copy (PRJ-11).
-    await Promise.all(paths.map((p) => rename(p, `${p}.moved`)))
-    await store(page, `async (images, log, opfs, projects) => {
-      const c = images.images.find((i) => i.name === 'c.jpg')
-      await opfs.deleteImage(projects.currentProjectId, c.uuid)
-      await opfs.deleteImageDerived(projects.currentProjectId, c.uuid)
-    }`)
+// Move every original away; c.jpg also loses its project-storage copy (PRJ-11).
+async function loseOriginals(page, paths) {
+  await Promise.all(paths.map((p) => rename(p, `${p}.moved`)))
+  await store(page, `async (images, log, opfs, projects) => {
+    const c = images.images.find((i) => i.name === 'c.jpg')
+    await opfs.deleteImage(projects.currentProjectId, c.uuid)
+    await opfs.deleteImageDerived(projects.currentProjectId, c.uuid)
+  }`)
+}
+
+test('moved originals heal from project storage; an image with no copy is flagged once', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  const { dir, paths } = await importFromDisk(page)
+  try {
+    await loseOriginals(page, paths)
 
     // Chrome keeps the images decoded at ingest in its memory cache, so a viewer would
     // still show them without reading the moved file; drop it so the views must read.
@@ -92,6 +100,25 @@ test('moved originals heal from project storage; an image with no copy is flagge
     await expect(shown).toHaveCount(1)
     await expect.poll(() => shown.evaluate((el) => el.complete && el.naturalWidth)).toBe(320)
     expect(errors).toEqual([])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+// IS-2: before a run, the Workflow Builder probes every image's file instead of
+// waiting for a stage to read its pixels. a/b heal from project storage on the
+// spot; c, with no copy, is the one reported.
+test('the source probe heals what it can and reports the rest before a run', async ({ page }) => {
+  const { dir, paths } = await importFromDisk(page)
+  try {
+    await loseOriginals(page, paths)
+    const lost = await store(page, `async (images) => (await images.probeImageSources()).map((i) => i.name)`)
+    expect(lost).toEqual(['c.jpg'])
+    expect(await logLines(page, '/^warn Image source recovered from project storage: [ab]\\.jpg/')).toHaveLength(2)
+    expect(await logLines(page, '/^error Image unavailable: c\\.jpg/')).toHaveLength(1)
+    // A second probe finds the healed images readable and reports c again, without new log lines.
+    expect(await store(page, `async (images) => (await images.probeImageSources()).map((i) => i.name)`)).toEqual(['c.jpg'])
+    expect(await logLines(page, '/^error Image unavailable/')).toHaveLength(1)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

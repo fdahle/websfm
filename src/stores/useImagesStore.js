@@ -22,6 +22,28 @@ import { mapConcurrent } from '../utils/concurrency.js'
 import { normalizeImageGroups } from '../utils/imageGroups.js'
 import { createImageThumbnails } from './images/thumbnails.js'
 
+// Reading one byte forces the browser to validate the file behind a blob (a File
+// handle is re-checked on every read), so a moved or deleted file shows up here.
+// Chromium does not throw for a deleted file's slice: the read comes back empty,
+// so the byte has to actually arrive.
+async function blobReadable(blob) {
+  if (!blob?.size) return false
+  try { return (await blob.slice(0, 1).arrayBuffer()).byteLength === 1 } catch { return false }
+}
+
+// The same for a compute source: a pyramid descriptor's container Blob, or a
+// blob: URL, whose first chunk is read and the rest left unread.
+async function sourceReadable(source) {
+  if (!source) return false
+  if (typeof source !== 'string') return blobReadable(source.blob)
+  try {
+    const reader = (await fetch(source)).body.getReader()
+    await reader.read()
+    reader.cancel().catch(() => {})
+    return true
+  } catch { return false }
+}
+
 // The image set: source images, their metadata, keypoints, masks, depth maps, and
 // sensor assignments. Project-scoped and persisted, but its restore/clear have
 // bespoke signatures (and a strict ordering relative to sensors), so it is driven
@@ -302,13 +324,9 @@ export const useImagesStore = defineStore('images', () => {
     const projectId = projects.currentProjectId
     if (!projectId || !isPersisting()) return false
 
-    // Reading one byte forces the browser to validate the file behind the blob,
-    // so a heal can't hand back a second dead URL that fails on first paint.
-    const readable = async (blob) => {
-      if (!blob) return false
-      try { await blob.slice(0, 1).arrayBuffer(); return true } catch { return false }
-    }
-
+    // Read before use, so a heal can't hand back a second dead URL that fails
+    // on first paint.
+    const readable = blobReadable
     let displayBlob = null, computeBlob = null
     if (img.computePyramid) {
       // Its compute pixels are the pyramid (a Blob, not a URL); only the display heals.
@@ -360,6 +378,23 @@ export const useImagesStore = defineStore('images', () => {
       + 'is no usable copy in project storage. Re-add the file to restore it; detection, dense '
       + 'MVS and orthophoto generation will fail for this image until you do.', 'error', 'Images')
     return false
+  }
+
+  // Before a long run (the Workflow Builder's start): is every image's compute
+  // source still readable? A dead one is otherwise only found when a stage reads
+  // its pixels, possibly an hour in. One small read per image, the same test the
+  // heal uses; an unreadable image goes through the <img> error path, so it is
+  // healed from project storage where it can be and flagged lost where it cannot.
+  // → the images that will fail
+  async function probeImageSources() {
+    const lost = []
+    await mapConcurrent([...images.value], 8, async (img) => {
+      if (img.previewFailReason === 'source-lost') { lost.push(img); return }
+      if (await sourceReadable(computeSourceOf(img))) return
+      if (await reportImageLoadError(img.id)) return
+      if (imageById(img.id)?.previewFailReason === 'source-lost') lost.push(img)
+    })
+    return lost
   }
 
   // `persist` false updates only the in-memory mask (so undo/redo, the viewer
@@ -700,6 +735,7 @@ export const useImagesStore = defineStore('images', () => {
     setImageGroupCollapsed,
     moveImageGroup,
     reportImageLoadError,
+    probeImageSources,
     // List thumbnails (stores/images/thumbnails.js).
     requestThumbnail: thumbnails.requestThumbnail,
     reportThumbnailError: thumbnails.reportThumbnailError,

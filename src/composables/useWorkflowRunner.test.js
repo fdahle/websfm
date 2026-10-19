@@ -193,4 +193,33 @@ describe('useWorkflowRunner quality gates', () => {
     expect(seen).toHaveLength(3)
     expect(new Set(seen).size).toBe(1)
   })
+
+  it('checks image files before a run that reads pixels, and pauses on unreadable ones', async () => {
+    const checkSources = vi.fn(async () => '2 images can no longer be read (a.jpg, b.jpg)')
+    const run = vi.fn()
+    const runner = useWorkflowRunner({
+      state: ref({ images: true }), runAutomated: run, checkSources,
+      openInteractive: vi.fn(), recordRun: vi.fn(),
+    })
+    const started = runner.start(createWorkflow('Detect', ['detect-features']))
+    await vi.waitFor(() => expect(runner.pause.value?.kind).toBe('warning'))
+    expect(runner.pause.value.message).toContain('a.jpg')
+    runner.respond('stop')
+    expect(await started).toBe(false)
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('skips the image check when no block reads pixels, or every file is readable', async () => {
+    const checkSources = vi.fn(async () => null)
+    const run = vi.fn(async () => ({ ok: true }))
+    const runner = useWorkflowRunner({
+      state: ref({ images: true, dense: true }), runAutomated: run, checkSources,
+      openInteractive: vi.fn(), recordRun: vi.fn(),
+    })
+    await runner.start(createWorkflow('Filter', ['filter-cloud']))
+    expect(checkSources).not.toHaveBeenCalled()
+    await runner.start(createWorkflow('Detect', ['detect-features']))
+    expect(checkSources).toHaveBeenCalledOnce()
+    expect(runner.pause.value).toBeNull()
+  })
 })

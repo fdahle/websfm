@@ -1,14 +1,16 @@
 import { computed, ref } from 'vue'
-import { blockOutputValid, WORKFLOW_BLOCK_BY_ID, workflowPreflight, workflowTargetIndex } from '../core/workflow.js'
+import { blockOutputValid, PIXEL_BLOCKS, WORKFLOW_BLOCK_BY_ID, workflowPreflight, workflowTargetIndex } from '../core/workflow.js'
 import { evaluateGate } from '../core/workflowGate.js'
 
 // Executes a workflow block by block. Injected: `state` (the semantic readiness the
 // preflight checks), `runAutomated(type, settings, context)` (one stage; `context` is
 // per run, so a cleanup chain can hand its newest cloud to the next tool), `measure(metric)`
 // (a Quality Gate's value, with the same context), `openInteractive(type)` and `recordRun(snapshot)`.
+// Optional `checkSources()` → a warning message or null: whether every image can still
+// be read, asked once before a run that has a block reading pixels.
 export function useWorkflowRunner({
   state, runAutomated, openInteractive, recordRun,
-  cancelAutomated = () => {}, onLog = () => {}, measure = async () => null,
+  cancelAutomated = () => {}, onLog = () => {}, measure = async () => null, checkSources = null,
 }) {
   const running = ref(false)
   const currentBlockId = ref(null)
@@ -61,6 +63,13 @@ export function useWorkflowRunner({
       pause.value = { kind: 'blocked', message: errors[0].message }
       running.value = false
       return false
+    }
+    // A moved or deleted image file otherwise surfaces only when a stage reads its
+    // pixels; the warning sits on the first such block, so its policy applies.
+    const firstPixelBlock = blocks.find((b, i) => active[i] && PIXEL_BLOCKS.has(b.type))
+    if (checkSources && firstPixelBlock) {
+      const message = await checkSources()
+      if (message) checks.push({ level: 'warning', blockId: firstPixelBlock.id, message })
     }
     const warnings = checks.filter((x) => x.level === 'warning').map((warning) => {
       const block = workflow.blocks.find((b) => b.id === warning.blockId)

@@ -13,6 +13,7 @@ import { useComputeSettings } from './useComputeSettings.js'
 import { useLog } from './useLog.js'
 import { useQualityReport } from './useQualityReport.js'
 import { useWorkflowRunner } from './useWorkflowRunner.js'
+import { pluralize } from '../core/textFormat.js'
 
 // Workflow execution wired to the app, lifted out of App.vue: the state the runner
 // preflights against, how an automated block runs (and how it is judged to have
@@ -28,7 +29,8 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
     runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, cancelRun,
   } = pipeline
-  const { images } = storeToRefs(useImagesStore())
+  const imagesStore = useImagesStore()
+  const { images } = storeToRefs(imagesStore)
   const { matchRun, usableMatchCount } = storeToRefs(useMatchesStore())
   const { currentSceneType } = storeToRefs(useProjectsStore())
   const { clouds, mainSparseCloud, depthMaps, depthMapCount, dem, ortho, denseSummary, meshSources } = storeToRefs(useReconstructionStore())
@@ -56,6 +58,16 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     ortho: orthoReady.value,
     texturedMesh: clouds.value.some((c) => c.kind === 'mesh' && !!c.texture),
   }))
+
+  // The runner's source check: images whose file can no longer be read (and had
+  // no copy in project storage to heal from), named in one warning.
+  async function checkImageSources() {
+    const lost = await imagesStore.probeImageSources()
+    if (!lost.length) return null
+    const names = lost.slice(0, 3).map((img) => img.name).join(', ') + (lost.length > 3 ? ', …' : '')
+    return `${pluralize(lost.length, 'image')} can no longer be read (${names}): the file was moved, `
+      + 'renamed or deleted. Re-add the files, or remove those images; stages that read pixels fail for them.'
+  }
 
   async function runAutomatedWorkflowBlock(type, rawSettings, context = {}) {
     const settings = resolveWorkflowSettings(type, rawSettings, {
@@ -216,6 +228,7 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     openInteractive,
     recordRun: recordWorkflowRun,
     onLog: log,
+    checkSources: checkImageSources,
   })
   const {
     running: workflowRunning, pause: workflowPause, statuses: workflowStatuses,
