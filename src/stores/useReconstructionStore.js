@@ -219,6 +219,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // when a product enters the store and revoked when its record is replaced.
   const dem = shallowRef(null)
   const ortho = shallowRef(null)
+  // The model a running sparse reconstruction has built so far, { cameras, points },
+  // for the live 3D view; null when none is running. Never persisted.
+  const liveSparse = shallowRef(null)
   const withPreviewUrl = (p) => (p?.previewBlob && !p.previewUrl
     ? { ...p, previewUrl: URL.createObjectURL(p.previewBlob) } : p)
   for (const product of [dem, ortho]) {
@@ -748,7 +751,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     SUMMARY_HISTORY_MAX, clouds, frameModelFor, gcpsStore, healthDirty, images, imagesById,
     imagesStore, invalidateSparseDependents, isPersisting, log, matchStore, save, posesStore,
     projects, reconStatus, releaseReplaceableModelForRerun, sensors, sparseCameras, summary,
-    summaryHistory, supersedeRestore, upsertSparseCloud,
+    summaryHistory, supersedeRestore, upsertSparseCloud, liveSparse,
   })
 
   // Reset the in-memory clouds. Pass { purge: true } to also delete the persisted
@@ -952,6 +955,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     sparseCameras,
     points3d,
     reconStatus,
+    liveSparse,
     depthMaps,
     depthMapsMeta,
     forgetDepthMap,

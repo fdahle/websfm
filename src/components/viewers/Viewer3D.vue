@@ -674,7 +674,10 @@ function updateLayerBounds() {
 // symbology or another layer changes. Each origin is placed in the same world
 // frame, so projected survey coordinates stay aligned across multiple files.
 let lastClouds = []
-function setCloudLayers(clouds) {
+// `follow`: the layers are a model still growing (the live view of a running sparse
+// reconstruction); the view is refitted whenever it has outgrown the last fit.
+let fittedRadius = 0
+function setCloudLayers(clouds, { follow = false } = {}) {
   lastClouds = clouds
   if (!scene) return
   const hadContent = cloudLayers.size > 0 || frustumGroup.children.length > 0
@@ -736,7 +739,10 @@ function setCloudLayers(clouds) {
   }
   // Fit newly added layers together, including distant survey tiles. Selection,
   // symbology and visibility toggles preserve the user's camera position.
-  if ((!hadContent || (addedCloud && !edit.editResult)) && cloudLayers.size) resetView()
+  const fit = (!hadContent || (addedCloud && !edit.editResult)) && cloudLayers.size
+  // An up estimated from more cameras turns the grid: refit, or the view is left tilted.
+  const outgrown = follow && cloudLayers.size && (sceneRadius > 1.3 * fittedRadius || upChanged)
+  if (fit || outgrown) { resetView(); fittedRadius = sceneRadius }
   updateClipping()
   pruneSelections()
   requestRender()

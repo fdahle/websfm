@@ -115,12 +115,21 @@ const viewerSceneUp = computed(() => (reconstructionStore.orientationState.activ
 
 // Queue layer changes while the 3D tab is hidden. Each cloud has its own GPU
 // object; selection no longer replaces the other visible layers.
-const sceneClouds = computed(() => clouds.value.map(c => ({ ...c })))
+// While a sparse reconstruction runs, the scene is its model so far (liveSparse),
+// alone: the clouds from before are in another frame, and are replaced at the end.
+const sceneClouds = computed(() => {
+  const live = reconstructionStore.liveSparse
+  if (live) {
+    return [{ id: 'live-sparse', name: 'Reconstructing…', kind: 'sparse', cameras: live.cameras,
+      points: live.points, count: live.points.count }]
+  }
+  return clouds.value.map(c => ({ ...c }))
+})
 let scenePending = true
 function flushScene() {
   if (!scenePending || !viewerRef.value) return
   scenePending = false
-  viewerRef.value.setCloudLayers(sceneClouds.value)
+  viewerRef.value.setCloudLayers(sceneClouds.value, { follow: !!reconstructionStore.liveSparse })
 }
 watch(sceneClouds, () => {
   scenePending = true

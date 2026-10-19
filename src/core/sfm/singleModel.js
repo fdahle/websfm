@@ -33,6 +33,7 @@ import {
   logRunTotals, unregisteredComponents, finaliseIntrinsics, assembleSummary,
 } from './runRecord.js'
 import { pluralize } from '../textFormat.js'
+import { sparseSnapshot, createSnapshotPacer } from './liveSnapshot.js'
 
 // ── Geometry helpers ────────────────────────────────────────────────────────────
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal
@@ -122,7 +123,10 @@ export async function reconstructSingleModel(input, hooks = {}) {
   // through the run. `hooks.progressRange` lets a nested sub-run (seed retry /
   // secondary model) report an honest local 0..1 into a slice of the parent's bar.
   const onProgress = hooks.onProgress
-  const report = makeProgressReporter(onProgress, hooks.progressRange ?? {})
+  const reportProgress = makeProgressReporter(onProgress, hooks.progressRange ?? {})
+  // Every phase's progress report also offers the live view a snapshot (paced).
+  let snapshots = null
+  const report = (...args) => { reportProgress(...args); snapshots?.tick() }
 
   // uuid → image, built once: it was a linear `images.find` per call, and it is called
   // per observation (BA, residuals) and per candidate keypoint (guided extension). The
@@ -143,6 +147,10 @@ export async function reconstructSingleModel(input, hooks = {}) {
   // Points and their observations (trackStore.js): dense point ids, views keyed by
   // image index, and the keypoint → point index the old `viewIndex` Map was.
   const tracks = createTrackStore(images.map((img) => img.kp?.n ?? 0), { impl: cfg.trackStore })
+  // `hooks.onSnapshot(snapshot)`: the model so far, for the live 3D view (liveSnapshot.js),
+  // at most every few seconds while cameras register.
+  snapshots = createSnapshotPacer(hooks.onSnapshot,
+    () => (cameras.size >= 2 ? sparseSnapshot(cameras, tracks, { keypointsAt }) : null))
 
   // Only 'done' pairs participate (the store passes those, but keep the guard
   // so the algorithm reads identically to the original).
@@ -425,6 +433,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       reportPhase: (local, label, counts) => report('register', local, label, counts),
     }
     await registerImages(registrationCtx)
+    snapshots.tick({ force: true })
     const preBaStats = modelReprojStats()
     log(`pre-BA reprojection — ${fmtStats(preBaStats)}`, 'info', 'Reconstruction')
     markStage('registration')
@@ -436,6 +445,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       imageByUuid, defaultKCount, log, report, memoryMark,
       selfCalLensTerms: imgs.reduce((m, im) => Math.max(m, selfCal.lensOf(im.uuid)?.terms ?? 0), 0),
     })
+    snapshots.tick({ force: true })
     // ── Registration plausibility (registrationCheck.js) ─────────────────────
     // A camera can register in a wrong place and stay there self-consistently (it
     // triangulates its own points). Score every camera against the epipolar geometry of

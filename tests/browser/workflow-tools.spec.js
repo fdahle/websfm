@@ -453,15 +453,25 @@ test('a synthetic three-view scene reconstructs through the store into one spars
       keypoints:points.map(p=>({x:500+500*(p.x-j*.4)/p.z,y:500+500*p.y/p.z,scale:1}))})),{invalidateMatches:false})
     await useMatchesStore().matchAll(images.images,{strategy:'exhaustive',subsetGate:false,minMatches:8,maxIters:200,overwrite:true})
     const recon=useReconstructionStore()
+    // The live view's snapshots (liveSnapshot.js): the first arrives with the initial pair.
+    const live=[]
+    let seen=null
+    const stop=recon.$subscribe(()=>{ const v=recon.liveSparse; if(v===seen) return; seen=v
+      live.push(v?{cameras:v.cameras.size,points:v.points.count}:null) },{flush:'sync'})
     await recon.reconstruct({})
+    stop()
     const sparse=recon.mainSparseCloud
     return { status: recon.reconStatus, cameras: sparse?.cameras?.size ?? 0, points: sparse?.points?.length ?? 0,
-      summary: !!recon.summary }
+      summary: !!recon.summary, live, liveAfter: recon.liveSparse }
   })
   expect(model.status).toBe('done')
   expect(model.cameras).toBe(3)
   expect(model.points).toBeGreaterThan(700)
   expect(model.summary).toBe(true)
+  expect(model.live[0].cameras).toBeGreaterThanOrEqual(2)
+  expect(model.live[0].points).toBeGreaterThan(100)
+  expect(model.live.at(-1)).toBeNull()
+  expect(model.liveAfter).toBeNull()
 })
 
 test('footprints from poses follow the terrain tiles, in the cameras\' vertical datum', async ({ page }) => {

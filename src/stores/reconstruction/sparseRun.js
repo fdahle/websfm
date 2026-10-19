@@ -16,6 +16,8 @@ import { toMatchSpace } from '../../core/features/siftDescriptors.js'
 import { unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
 import { aerialUpRotation, rotateReconstruction, sceneUpFromCameras } from '../../core/products/projection.js'
 import { pluralize } from '../../core/textFormat.js'
+import { SparsePoints } from '../../core/sfm/sparsePoints.js'
+import { markRaw } from 'vue'
 
 // The sparse reconstruction run, split out of useReconstructionStore: packing the
 // keypoints, matches and survey constraints for the SfM worker, the memory
@@ -28,7 +30,7 @@ export function createSparseRun({
   SUMMARY_HISTORY_MAX, clouds, frameModelFor, gcpsStore, healthDirty, images, imagesById,
   imagesStore, invalidateSparseDependents, isPersisting, log, matchStore, save, posesStore,
   projects, reconStatus, releaseReplaceableModelForRerun, sensors, sparseCameras, summary,
-  summaryHistory, supersedeRestore, upsertSparseCloud,
+  summaryHistory, supersedeRestore, upsertSparseCloud, liveSparse,
 }) {
   // The external 3D evidence a bundle adjustment is held to — enabled ground
   // control and camera priors — as worker-ready plain data, in ONE Cartesian survey
@@ -101,6 +103,7 @@ export function createSparseRun({
     supersedeRestore()
     reconStatus.value = 'running'
     let stopMemoryWatchdog = () => {}
+    const runProjectId = projects.currentProjectId
 
     try {
       // Descriptors are required for matching, never for SfM. In a persistent
@@ -389,11 +392,14 @@ export function createSparseRun({
         stopMemoryWatchdog = () => { stopped = true; clearInterval(timer) }
       }
 
+      input.liveSnapshots = true
       let packedResult = await workerReconstruct(input, {
         onLog: (message, level, category) => log(message, level, category),
         onProgress: (done, total, label, fraction) => onProgress?.(done, total, label, fraction),
+        onEvent: (ev, [snap]) => { if (ev === 'snapshot' && projects.currentProjectId === runProjectId) showLive(snap) },
         transfer: reconstructionTransfers,
       })
+      liveSparse.value = null
       stopMemoryWatchdog()
       stopMemoryWatchdog = () => {}
       const result = unpackReconstructionResult(packedResult)
@@ -469,7 +475,22 @@ export function createSparseRun({
       reconStatus.value = 'error'
     } finally {
       stopMemoryWatchdog()
+      liveSparse.value = null
     }
+  }
+
+  // A worker snapshot (core/sfm/liveSnapshot.js) as a cloud the 3D view can draw. An
+  // aerial model is turned Z-up as the finished one will be, so the view does not
+  // flip at the end.
+  function showLive({ cameras: list, pos, col }) {
+    const n = pos.length / 3
+    let cameras = new Map(list.map(({ uuid, R, t, K }) => [uuid, { R, t, K }]))
+    let points = new SparsePoints({ pos, col, vcount: new Uint32Array(n), vcam: new Uint32Array(0), vkp: new Uint32Array(0) })
+    if (projects.currentSceneType === 'aerial' && cameras.size >= 2) {
+      const R = aerialUpRotation(cameras)
+      if (R) ({ cameras, points } = rotateReconstruction(cameras, points, R, { inPlace: true }))
+    }
+    liveSparse.value = { cameras: markRaw(cameras), points: markRaw(points) }
   }
 
   return {
