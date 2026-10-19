@@ -50,7 +50,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 
 ## The pipeline
 
-1. **Detect**: SIFT in Rust, or a learned detector (DISK, SuperPoint) through ONNX
+1. **Detect**: SIFT in Rust, or a learned detector (ALIKED, DISK, SuperPoint) through ONNX
    Runtime Web. Large images can be detected in tiles.
 2. **Match**: brute-force nearest neighbour with a ratio test (WASM, or WebGPU), or
    LightGlue, then RANSAC fundamental-matrix verification. Pairs can be preselected

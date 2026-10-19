@@ -32,7 +32,7 @@ export function createDetection({
     // Re-detecting renumbers keypoints, so any existing matches for this image
     // become stale — invalidate them once detection succeeds (below).
     const hadKeypoints = img.kpStatus === 'done'
-    // Message-text label for the chosen detector (SIFT default, SuperPoint, DISK);
+    // Message-text label for the chosen detector (SIFT default, SuperPoint, DISK, ALIKED);
     // the console *source* is the pipeline stage 'Detection', not the detector.
     const tag = detectorLabel(settings.detector)
     img.kpStatus = 'running'

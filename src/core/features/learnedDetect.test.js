@@ -20,6 +20,21 @@ it('parses DISK-shaped outputs (int64 xy, [1,N,128]) best-first and capped', () 
   expect(out.descriptors[dim]).toBe(3)
 })
 
+it('parses ALIKED-shaped outputs (float sub-pixel xy, [1,N,128]) best-first', () => {
+  const n = 3, dim = 128
+  const desc = new Float32Array(n * dim)
+  for (let i = 0; i < n; i++) desc.fill(i + 1, i * dim, (i + 1) * dim)
+  const results = {
+    keypoints: t(Float32Array.from([1.25, 2.5, 3.75, 4.5, 10.125, 6]), [1, n, 2]),
+    scores: t(Float32Array.from([0.3, 0.2, 0.7]), [1, n]),
+    descriptors: t(desc, [1, n, dim]),
+  }
+  const out = parseDetections(results, ['keypoints', 'scores', 'descriptors'], LEARNED_DETECTORS.aliked, 0)
+  expect(out.keypoints.map((k) => [k.x, k.y])).toEqual([[10.125, 6], [1.25, 2.5], [3.75, 4.5]])
+  expect(out.descriptors[0]).toBe(3)
+  expect(out.descriptors[2 * dim]).toBe(2)
+})
+
 it('reads channels-first [1,D,N] descriptors', () => {
   const n = 2, dim = 256
   const desc = new Float32Array(n * dim)

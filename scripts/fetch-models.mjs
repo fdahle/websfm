@@ -21,8 +21,10 @@ const RELEASE = 'https://github.com/fdahle/websfm/releases/download/models-v1/'
 // Bump the release tag + these together (and MODEL_CACHE_NAME in registry.js)
 // when a weight file changes under the same name.
 const SHA256 = {
+  'aliked.onnx': 'd2e9e51fc57c2dd79d1a259ce4620b8e0e51f83cbfc402fa2b0b2d8ae789aaa4',
   'disk.onnx': 'f02f18e254bd52d978981c715a4e7961f15afaa23290379b9b357f6745df12c4',
   'lightglue.onnx': '4f44f440bc08f71afc2ba619d33154d395284001c1387b14a3b58a3224f9490e',
+  'lightglue_aliked.onnx': '8c6bebeee0852b63ef1e216118e3d9d2a352b367ad325153fa239ce370e75efe',
   'lightglue_disk.onnx': '2528772049c4d745102a389cb87ad0326d30bb3f4dbdf6520fee4fa04786e029',
   'sam2_decoder.onnx': '310fe043cc2d7d8c82a278c1075fc05547986ed80612155958b25b26c7c2e573',
   'sam2_encoder.onnx': 'bbd6003a6ab112afcd517157827eda1967b0ed9b93b493a3128f4207fc82f126',

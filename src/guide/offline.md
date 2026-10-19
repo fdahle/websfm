@@ -38,7 +38,7 @@ itself once the task has finished. Once another tab has switched, **Later** is n
 longer offered, since that tab's old code no longer matches the new version.
 
 ## What needs a connection
-- **Learned models** (DISK, LightGlue, and the Smart Select model for
+- **Learned models** (ALIKED, DISK, LightGlue, and the Smart Select model for
   [masks](guide:masks)) are downloaded on first use, after you agree, together with
   the runtime that executes them. The browser keeps them, so use them once while
   online if you will need them offline. A SuperPoint file you supply yourself is kept

@@ -22,6 +22,13 @@ export const LEARNED_DETECTORS = {
     // internally; tile origins sit on that grid so a tile matches the untiled run.
     descDim: 128, channels: 3, tileAlign: 16,
   },
+  aliked: {
+    id: 'aliked', label: 'ALIKED', modelId: 'aliked', matcherModelId: 'lightglue_aliked',
+    // Input [1,3,H,W] RGB in [0,1]; float (x, y) keypoints. It pads to a multiple of
+    // 32 internally, so tile origins sit on that grid. (The padding is split over
+    // both sides, so a tile whose size is not a multiple of 32 is still offset.)
+    descDim: 128, channels: 3, tileAlign: 32,
+  },
 }
 
 /** Every detector id, built-in first. */
@@ -36,7 +43,7 @@ export function isLearnedDetector(id) {
   return !!LEARNED_DETECTORS[id]
 }
 
-/** Message-text label: 'SIFT', 'SuperPoint', 'DISK'. */
+/** Message-text label: 'SIFT', 'SuperPoint', 'DISK', 'ALIKED'. */
 export function detectorLabel(id) {
   return LEARNED_DETECTORS[id]?.label ?? 'SIFT'
 }
@@ -70,7 +77,8 @@ export function lightGlueModelFor(images) {
   const target = learned.sort((a, b) => counts[b] - counts[a])[0]
   const bad = images.filter((im) => (im.detector ?? 'sift') !== target)
   if (!target) {
-    return { ok: false, bad, reason: 'LightGlue needs a learned detector (SuperPoint or DISK)' }
+    const names = Object.values(LEARNED_DETECTORS).map((d) => d.label)
+    return { ok: false, bad, reason: `LightGlue needs a learned detector (${names.slice(0, -1).join(', ')} or ${names.at(-1)})` }
   }
   return { ok: false, bad, reason: `LightGlue needs every image detected with one learned detector (${detectorLabel(target)})` }
 }

@@ -181,13 +181,18 @@ function selectPreset(id) {
 
 // Learned detectors are fully convolutional, so a single untiled pass on a very large
 // network input overflows ONNX Runtime's int32 tensor-size math and OrtRun fails
-// outright (see DETECT_TUNING.spMaxUntiledInputPx / diskMaxUntiledInputPx + the
+// outright (see DETECT_TUNING.spMaxUntiledInputPx / diskMaxUntiledInputPx /
+// alikedMaxUntiledInputPx + the
 // backstop in core/features/learnedDetect.js). Flag
 // images that would exceed it at the chosen resolution with tiling OFF — the network
 // input is the native size downscaled so its longest side ≤ maxDim — so we can offer to
 // auto-tile before dispatching instead of letting the run fail per image.
-const untiledCeilingPx = computed(() => (detector.value === 'disk'
-  ? DETECT_TUNING.diskMaxUntiledInputPx : DETECT_TUNING.spMaxUntiledInputPx))
+const UNTILED_CEILING_PX = {
+  superpoint: DETECT_TUNING.spMaxUntiledInputPx,
+  disk: DETECT_TUNING.diskMaxUntiledInputPx,
+  aliked: DETECT_TUNING.alikedMaxUntiledInputPx,
+}
+const untiledCeilingPx = computed(() => UNTILED_CEILING_PX[detector.value] ?? DETECT_TUNING.spMaxUntiledInputPx)
 // The images this run will actually touch (Append skips finished ones).
 const runImages = computed(() => props.images.filter((img) => overwrite.value || img.kpStatus !== 'done'))
 const oversizedSpImages = computed(() => {
@@ -278,7 +283,7 @@ function onShellClose() {
 <template>
   <ModalShell title="Detect Features" @close="onShellClose">
     <SettingsField label-for="detector-sel"
-      hint="SIFT works on any image; SuperPoint and DISK (learned) pair with LightGlue matching.">
+      hint="SIFT works on any image; the learned detectors (ALIKED, DISK, SuperPoint) pair with LightGlue matching.">
       <template #label><FieldHelp op="detect-features" param="detector">Detector</FieldHelp></template>
       <select id="detector-sel" v-model="detector" class="field-input field-select">
         <option v-for="d in detectors" :key="d.id" :value="d.id" :disabled="d.disabled">{{ d.label }}</option>
@@ -302,8 +307,8 @@ function onShellClose() {
       {{ learnedLabel }}'s pretrained weights are licensed for
       <strong>non-commercial research only</strong>
       (<a :href="restrictedModel.licenseUrl" target="_blank" rel="noopener">license</a>), so websfm
-      does not ship them — you supply the file once when you first run it. DISK is a
-      freely licensed alternative.
+      does not ship them — you supply the file once when you first run it. ALIKED and
+      DISK are freely licensed alternatives.
     </WarnBox>
 
     <WarnBox v-if="isLearned && !isChromium">
