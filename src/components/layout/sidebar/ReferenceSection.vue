@@ -129,6 +129,10 @@ const ctxOpenLabel = computed(() =>
             <span class="detail-label">GSD</span>
             <span class="detail-value">{{ num(Math.abs(r.geoTransform?.scaleX)) }} /px</span>
           </div>
+          <div v-if="r.horizontalAccuracy != null" class="detail-row">
+            <span class="detail-label">σ horizontal</span>
+            <span class="detail-value">{{ num(r.horizontalAccuracy, 3) }} m</span>
+          </div>
           <template v-if="r.kind === 'dem'">
             <div class="detail-row">
               <span class="detail-label">Elevation</span>
@@ -192,6 +196,8 @@ const ctxOpenLabel = computed(() =>
         <button v-if="menu.raster.styleable" class="ctx-item" @click="fromMenu((r) => sidebar.styleRaster(r.id))">
           Style bands…
         </button>
+        <!-- A confident import never asks for these, and Fill Z / GCP picking need them. -->
+        <button class="ctx-item" @click="fromMenu((r) => sidebar.rasterAccuracy(r.id))">Accuracy &amp; datum…</button>
 
         <div class="ctx-sep"></div>
         <!-- The classifier is confident but not infallible (an 8-bit hillshade is

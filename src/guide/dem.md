@@ -198,7 +198,7 @@ the feature's toe, then choose the **Base** in the measuring toolbox:
   offset is applied.
 
 On an imported reference DEM, heights, profiles and volumes include the raster's
-declared **vertical offset** (Reference Data ▸ vertical info), the same correction
+declared **vertical offset** (Reference Data ▸ right-click ▸ **Accuracy & datum…**), the same correction
 used when a GCP height is filled from it.
 
 **Cut** is the volume above the base and **Fill** the volume below it.

@@ -152,3 +152,37 @@ test('the tab context menu closes on Escape and on an outside click, then tabs c
   await expect(tab).toHaveCount(0)
   expect(errors).toEqual([])
 })
+
+test('a reference raster declares its accuracy and datum after a confident import', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await page.evaluate(async () => {
+    const { writeGeoTiff, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const z = new Float32Array(64 * 64).fill(120)
+    // Float samples: a high-confidence DEM, so no confirm modal opens on import.
+    await useExternalStore().importRaster(new File([writeGeoTiff({ width: 64, height: 64, samples: [{ bits: 32, format: 3 }], photometric: 1,
+      data: new Uint8Array(z.buffer), pixelScale: [2, 2, 0], tiepoint: [0, 0, 0, 1000, 2000, 0], geoKeys: geoKeysForEpsg(3031, false) })], 'rema.tif'))
+  })
+  // The import opens the section itself; open it only if it is still collapsed.
+  const section = page.getByRole('button', { name: /Reference Data/ })
+  if ((await section.textContent()).includes('▸')) await section.click()
+  await page.locator('.list-item').filter({ hasText: 'rema.tif' }).click({ button: 'right' })
+  await page.locator('.ctx-menu').getByRole('button', { name: 'Accuracy & datum…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Reference raster accuracy' })
+  await expect(dialog.getByRole('button', { name: /DEM \(elevation\)/ })).toHaveCount(0) // no kind choice here
+  await dialog.getByLabel(/Horizontal accuracy/).fill('2.5')
+  await dialog.getByLabel('Vertical datum').selectOption('ellipsoidal')
+  await dialog.getByLabel(/Vertical accuracy/).fill('1')
+  await dialog.getByLabel(/Vertical offset/).fill('-0.4')
+  await dialog.getByRole('button', { name: 'Done' }).click()
+  const meta = await page.evaluate(async () => {
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const r = useExternalStore().rasters[0]
+    return { h: r.horizontalAccuracy, datum: r.verticalDatum, v: r.verticalAccuracy, off: r.vOffset }
+  })
+  expect(meta).toEqual({ h: 2.5, datum: 'ellipsoidal', v: 1, off: -0.4 })
+  await page.locator('.list-item').filter({ hasText: 'rema.tif' }).locator('.expand-btn').click()
+  await expect(page.locator('.img-details').filter({ hasText: 'σ horizontal' })).toContainText('2.5')
+})

@@ -11,11 +11,11 @@ import { useGcpsStore } from '../../stores/useGcpsStore.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useLog } from '../../composables/useLog.js'
 import { findReferenceMatches } from '../../workers/computeClient.js'
-import { referenceGcpCandidates, candidateCoverage, referenceSigma, pixelSizeAt } from '../../core/sfm/referenceGcps.js'
+import { referenceGcpCandidates, candidateCoverage, referencePick } from '../../core/sfm/referenceGcps.js'
 import { gpsSearchOutline, searchRegion } from '../../core/sfm/referenceMatch.js'
 import { worldToPixel } from '../../core/io/rasterSample.js'
 import { makePinholeToMark, makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
-import { ensureProjection, transform } from '../../core/crs.js'
+import { ensureProjection, transform, isGeographic, metresToCrsUnits } from '../../core/crs.js'
 
 const props = defineProps({ hasRelativeOrtho: Boolean, referenceOrthos: { type: Array, default: () => [] } })
 const emit = defineEmits(['close'])
@@ -87,10 +87,11 @@ async function find() {
     })
     const toProject = (p) => transform(p, refRaster.crs, projects.currentCrs)
     const found = referenceGcpCandidates({ points: cloud.points, images: sourceImages, ortho, reference: refRaster, ...result })
+    const geographic = isGeographic(projects.currentCrs), declared = metresToCrsUnits(refRaster.horizontalAccuracy, projects.currentCrs)
     candidates.value = found.map(c => {
-      const [x, y] = toProject([c.x, c.y])
-      // Planimetric σ from the reference pixel size (core/sfm/referenceGcps.js referenceSigma).
-      const sigma = referenceSigma({ gsd: pixelSizeAt(refRaster, ...c.reference, toProject), residualPx: c.residualRefPx, declared: refRaster.horizontalAccuracy })
+      // Position and planimetric σ from the reference pixel, widened by the match's
+      // own residual (core/sfm/referenceGcps.js referencePick).
+      const { x, y, sigma } = referencePick(refRaster, ...c.reference, { toProject, geographic, declared, displayFactor: c.residualRefPx })
       const round = v => v == null ? null : Number(v.toPrecision(3))
       return { ...c, x, y, selected: false, role: 'control', z: null, accuracyX: round(sigma), accuracyY: round(sigma), accuracyZ: null, verticalDatum: 'unknown' }
     })

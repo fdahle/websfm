@@ -194,6 +194,21 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
     selectedGcpId.value = id
     refreshGcpReport()
   }
+  // A GCP read straight off a reference raster tab (A-5): a new control point,
+  // or the selected one moved there (ProductViewer pick-gcp).
+  async function pickGcpFromReference(rasterId, { col, row, displayFactor, gcpId = null }) {
+    let pick
+    try {
+      pick = await externalStore.pickGroundControl(rasterId, col, row, { displayFactor })
+    } catch (err) {
+      log(`GCP from reference: ${err.message}`, 'warn', 'GCP')
+      return
+    }
+    const id = gcpId ?? addGcp()
+    if (!gcpsStore.setGcpFromReference(id, pick)) return
+    selectedGcpId.value = id
+    refreshGcpReport()
+  }
   // Select a just-created point and put the image view into marking mode, so the
   // user's next click marks it. Used by the Scale Bars modal's "＋ New marker": the
   // marker exists but is useless until it is marked in ≥2 images.
@@ -305,7 +320,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   return {
     gcpReport, refreshGcpReport, selectedGcpId, selectGcp, changeGcpRole,
     fillGcpZFromReferenceDem, checkGcpZAgainstReferenceDem,
-    assignGcpObservation, addGcpAtObservation, setGcpGroundPosition, addGcpAtCoord,
+    assignGcpObservation, addGcpAtObservation, setGcpGroundPosition, addGcpAtCoord, pickGcpFromReference,
     startMarkingPoint, exitGcpEdit, jumpToImage, openGcpView, removeGcpAndCloseTab, removeGcpObservation,
     activeImageGcps, activeImageGcpGuides, allGcpsBrief,
   }

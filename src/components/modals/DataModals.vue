@@ -54,7 +54,7 @@ const { poses } = storeToRefs(usePosesStore())
 const { matchStore } = storeToRefs(useMatchesStore())
 const { setPairEnabled } = useMatchesStore()
 const { hasReferenceDem } = storeToRefs(useExternalStore())
-const { setRasterKind, setVerticalInfo } = useExternalStore()
+const { setRasterKind, setRasterAccuracy } = useExternalStore()
 const {
   autoMaskOpen, cameraImportMode, cameraImportName, cameraImportOpen, cameraImportText, fiducialCalibrateOpen,
   fiducialCalibrateSensorId, fiducialDetectOpen, fiducialDetectSensorId, fiducialImportData, footprintFromPosesOpen, footprintImportData, footprintImportOpen,
@@ -168,7 +168,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :data="importRasterData"
       @close="importRasterOpen = false; importRasterData = null"
       @set-kind="({ id, kind }) => setRasterKind(id, kind)"
-      @set-vertical="({ id, ...v }) => setVerticalInfo(id, v)"
+      @set-accuracy="({ id, ...v }) => setRasterAccuracy(id, v)"
       @import-as-image="onRasterImportAsImage"
     />
   </Teleport>

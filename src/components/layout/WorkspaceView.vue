@@ -57,7 +57,7 @@ const {
   toggleOrientPick, orientAutoUp, orientCentreOrigin, setOrientHeading,
   alignPairs, alignReferences, applyAlignPairs,
   viewerPickMode, onViewerPick, viewerMarkers, viewerRegionBox, viewerRegionStale,
-  gcpReport, selectedGcpId, selectGcp, jumpToImage, exitGcpEdit, setGcpGroundPosition, addGcpAtCoord,
+  gcpReport, selectedGcpId, selectGcp, jumpToImage, exitGcpEdit, setGcpGroundPosition, addGcpAtCoord, pickGcpFromReference,
   assignGcpObservation, addGcpAtObservation, activeImageGcps, activeImageGcpGuides, allGcpsBrief,
   confirmRemoveGcp, confirmRemoveGcpObservation,
   sensorForImage, fiducialDisplayForImage, markDisplayedFiducial,
@@ -250,7 +250,9 @@ onBeforeUnmount(() => {
         :kind="rasterById(tab.rasterId)?.kind ?? 'dem'"
         :product="rasterById(tab.rasterId)"
         :source="rasterSources.get(tab.rasterId) ?? null"
+        :selected-gcp="gcps.find((g) => g.id === selectedGcpId) ?? null"
         @command="handleCommand"
+        @pick-gcp="(pick) => pickGcpFromReference(tab.rasterId, pick)"
       />
     </template>
 

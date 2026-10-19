@@ -130,7 +130,7 @@ test('Find GCPs matches real pixels and imports only explicitly reviewed candida
     if (!imported) { const { useLog } = await import('/src/composables/useLog.js'); throw new Error(JSON.stringify(useLog().entries.value)) }
     const demBytes=writeGeoTiff({width:700,height:700,samples:[{bits:32,format:3}],photometric:1,data:new Uint8Array(new Float32Array(700*700).fill(42).buffer),pixelScale:[2,2,0],tiepoint:[0,0,0,1000,2000,0],geoKeys:geoKeysForEpsg(3031,false)})
     const dem=await external.importRaster(new File([demBytes],'height.tif'),{forceKind:'dem'})
-    await external.setVerticalInfo(dem.id,{verticalDatum:'orthometric',verticalAccuracy:1.5})
+    await external.setRasterAccuracy(dem.id,{verticalDatum:'orthometric',verticalAccuracy:1.5})
   })
   await page.getByRole('button',{name:'Find GCPs',exact:true}).click()
   await page.getByRole('button',{name:'Find candidates',exact:true}).click()
@@ -207,6 +207,52 @@ for (const SIZE of [3000, 6000]) test(`Find GCPs aligns a rotated, finer block i
   expect(errors[Math.floor(errors.length / 2)]).toBeLessThan(0.75)
   expect(errors[errors.length - 1]).toBeLessThan(2)
   expect(added.every(g => g.sx >= 1)).toBe(true) // σ from the 1 m reference pixel
+})
+
+test('a GCP picked off a reference ortho takes X/Y in the project CRS, σ from the pixel as drawn, Z from the DEM', async ({ page }) => {
+  await page.goto(harness)
+  await page.evaluate(async () => {
+    const { writeGeoTiff, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
+    const { external, projects, showRaster } = window.workflowTools
+    // Rasters in EPSG:3031, the project in EPSG:3976 (true scale at 70° S, not 71° S).
+    projects.projects = [{ id: 'pick', crs: 'EPSG:3976' }]; projects.currentProjectId = 'pick'
+    const W = 256, rgb = new Uint8Array(W * W * 3)
+    for (let i = 0; i < W * W; i++) rgb.fill(((i % W) ^ Math.floor(i / W)) & 255, i * 3, i * 3 + 3)
+    const geo = { pixelScale: [2, 2, 0], tiepoint: [0, 0, 0, 1000, 2000, 0], geoKeys: geoKeysForEpsg(3031, false) }
+    const ortho = await external.importRaster(new File([writeGeoTiff({ width: W, height: W, samples: [0, 1, 2].map(() => ({ bits: 8, format: 1 })), photometric: 2, data: rgb, ...geo })], 'ortho.tif'), { forceKind: 'ortho' })
+    // A DEM rising 1 m per column eastwards: 50 m at its west edge.
+    const z = new Float32Array(W * W); for (let i = 0; i < z.length; i++) z[i] = 50 + (i % W)
+    const dem = await external.importRaster(new File([writeGeoTiff({ width: W, height: W, samples: [{ bits: 32, format: 3 }], photometric: 1, data: new Uint8Array(z.buffer), ...geo })], 'dem.tif'), { forceKind: 'dem' })
+    await external.setRasterAccuracy(dem.id, { verticalDatum: 'ellipsoidal', verticalAccuracy: 1.5 })
+    await external.setRasterAccuracy(ortho.id, { horizontalAccuracy: 3 })
+    showRaster(ortho.id)
+  })
+  const viewport = page.locator('.viewport')
+  await viewport.click({ button: 'right', position: { x: 300, y: 250 } })
+  await page.getByRole('button', { name: 'Add GCP here' }).click()
+  const read = () => page.evaluate(async () => {
+    const { transform } = await import('/src/core/crs.js')
+    const g = window.workflowTools.gcps.gcps[0]
+    const [X, Y] = transform([g.x, g.y], 'EPSG:3976', 'EPSG:3031')
+    return { X, Y, z: g.z, sx: g.accuracyX, sy: g.accuracyY, sz: g.accuracyZ, datum: g.verticalDatum, status: g.accuracyStatus, n: window.workflowTools.gcps.gcps.length }
+  })
+  const first = await read()
+  // Back in the raster's CRS the point lies on the raster, and Z is the DEM there:
+  // 50 m plus the column the point falls in (bilinear on a linear ramp is exact).
+  expect(first.X).toBeGreaterThan(1000); expect(first.X).toBeLessThan(1512)
+  expect(first.z).toBeCloseTo(50 + (first.X - 1000) / 2 - 0.5, 4)
+  expect(first).toMatchObject({ sz: 1.5, datum: 'ellipsoidal', status: 'declared', n: 1 })
+  // Zoomed in on 2 m pixels with a declared 3 m: σ = √(3² + 2.0²) in 3976 metres.
+  expect(first.sx).toBeCloseTo(Math.hypot(3, 2), 1); expect(first.sy).toBe(first.sx)
+  // Zoomed far out, a click covers several native pixels: σ grows, and Move keeps one GCP.
+  await viewport.hover()
+  for (let i = 0; i < 12; i++) await page.mouse.wheel(0, 200)
+  await viewport.click({ button: 'right', position: { x: 400, y: 300 } })
+  await page.getByRole('button', { name: /^Move GCP 1 here$/ }).click()
+  const moved = await read()
+  expect(moved.n).toBe(1)
+  expect(moved.sx).toBeGreaterThan(first.sx + 0.5)
+  expect(moved.z).toBeCloseTo(50 + (moved.X - 1000) / 2 - 0.5, 4)
 })
 
 test('bounded SIFT batch preserves serial results and records throughput', async ({ page }) => {

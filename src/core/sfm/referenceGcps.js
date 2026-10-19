@@ -139,3 +139,24 @@ export function pixelSizeAt(reference, col, row, toProject) {
   const p = at(col, row), px = at(col + 1, row), py = at(col, row + 1)
   return (Math.hypot(px[0] - p[0], px[1] - p[1]) + Math.hypot(py[0] - p[0], py[1] - p[1])) / 2
 }
+
+/**
+ * A GCP's ground position read off a reference raster (A-5): the native
+ * pixel-edge point (col, row) in project coordinates, with its planimetric σ in
+ * GCP accuracy units — project units, but metres when the project CRS is
+ * `geographic` (useGcpsStore addGcps), measured in a local frame at the pick. A
+ * pick is good to one displayed pixel, so `displayFactor` (native pixels per
+ * pixel on screen, > 1 when only a downsampled preview is drawn) widens σ; the
+ * reference's declared horizontal accuracy (`declared`, same units) adds in
+ * quadrature. → { x, y, gsd, sigma }; x/y NaN when the point cannot be transformed.
+ */
+export function referencePick(reference, col, row, { toProject, geographic = false, declared = null, displayFactor = 1 }) {
+  const world = pixelToWorld(reference, col, row)
+  const [x, y] = toProject([world.x, world.y])
+  const k = 111320, cosLat = Math.cos(y * Math.PI / 180)
+  const toAccuracy = geographic
+    ? (p) => { const [lon, lat] = toProject(p); return [(lon - x) * k * cosLat, (lat - y) * k] }
+    : toProject
+  const gsd = pixelSizeAt(reference, col, row, toAccuracy)
+  return { x, y, gsd, sigma: referenceSigma({ gsd, residualPx: displayFactor, declared }) }
+}

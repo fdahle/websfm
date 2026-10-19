@@ -105,6 +105,36 @@ is first read at 8 bytes per cell, so its limit is about 16,000 × 16,000. A lar
 example `gdal_translate -tr 4 4`) or crop it to your area with `-projwin`. Orthophotos
 are drawn as tiles and have no such limit for display.
 
+## Pick GCPs off a reference raster
+Without survey data, a georeferenced orthophoto and DEM of the area can stand in
+for it: often the only option for historical imagery. Open the reference raster
+from **Reference Data**, zoom in on a feature you can also find in your photos,
+right-click it and choose **Add GCP here**. With a GCP selected, **Move <name> here**
+moves that point instead.
+
+The GCP's X/Y is the clicked point, converted to the project CRS. Its σ X/Y is one
+pixel of the reference measured in the project CRS, its
+[GSD](help:ground-sample-distance), or more when you click zoomed out or while only
+the preview is drawn: a click is good to one pixel as you see it. In a geographic
+project CRS σ is in metres. When the raster declares a horizontal accuracy, that
+and the pixel combine in quadrature.
+
+Z comes from a reference DEM at that point: the raster itself when it is a DEM,
+otherwise the default reference DEM. It is taken only when the DEM declares a
+vertical accuracy, which becomes σ Z, and it carries the DEM's vertical datum. Without
+one, Z is left as it was and the log says why, just as **Fill Z** does. Then mark
+the point in at least two photos as usual.
+
+## Reference raster accuracy
+<!-- param: horizontalAccuracy default: unknown -->
+Right-click a raster in **Reference Data** and choose **Accuracy & datum…** to
+declare how good it is. **Horizontal accuracy** is the 1σ error of its ground
+position, in metres, as its producer states it. Orthophoto archives often quote CE90
+or RMSE; divide CE90 by 2.15 for σ. For a DEM the same dialog sets the vertical
+datum, the vertical accuracy that GCP heights taken from it claim, and a vertical
+offset added to every height. A low-confidence import asks for these straight away;
+a confident one needs this dialog.
+
 ## Find candidate GCPs from a reference orthophoto
 Build an orthophoto, import a georeferenced reference raster, then open **Tools →
 Find GCPs**. Choose a reference band and select **Find candidates**. The matcher
@@ -155,8 +185,8 @@ For each candidate the table shows:
 - **σ XY**: prefilled from the reference [GSD](help:ground-sample-distance). It is
   one reference pixel measured in the project CRS, or the residual in reference
   pixels when that is larger. If the reference raster declares a horizontal
-  accuracy, σ is that accuracy and the residual combined in quadrature. Edit it if
-  you know better.
+  accuracy (**Accuracy & datum…**), σ is that accuracy and the residual combined in quadrature.
+  Edit it if you know better.
 
 Choose **Review** for side-by-side project/reference close-ups, cut from the
 candidate's fine tile at working resolution, and the source-photo marks. Check

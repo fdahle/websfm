@@ -139,7 +139,7 @@ const { addGcps } = gcpsStore
 const {
   gcpReport, refreshGcpReport, selectedGcpId, selectGcp, changeGcpRole,
   fillGcpZFromReferenceDem, checkGcpZAgainstReferenceDem,
-  assignGcpObservation, addGcpAtObservation, setGcpGroundPosition, addGcpAtCoord,
+  assignGcpObservation, addGcpAtObservation, setGcpGroundPosition, addGcpAtCoord, pickGcpFromReference,
   startMarkingPoint, exitGcpEdit, jumpToImage, openGcpView, removeGcpAndCloseTab, removeGcpObservation,
   activeImageGcps, activeImageGcpGuides, allGcpsBrief,
 } = useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
@@ -497,7 +497,7 @@ provideAppContext({
   onRasterStyleApply, onReconstructRun, onSaveProject, onSectionRun, onToolEditRun, onVideoImport, onViewerPick,
   onWorkflowRun, onWorkflowUpdate, openImageTab, openImageWithResiduals, openProjectFolder,
   orientAutoUp, orientCentreOrigin, orientDraft, orientEdit, orientPicking, orientPlanePicks,
-  pendingConfirm, pendingImageDelete, pickProjectFile, pickSfmFiles, pickSfmFolder,
+  pendingConfirm, pendingImageDelete, pickGcpFromReference, pickProjectFile, pickSfmFiles, pickSfmFolder,
   posedImageCount, probeMapLayersAt, productViewerRefs, progressCancelling, progressComplete,
   progressCurrent, progressFraction, progressIndeterminate, progressLabel, progressOpen,
   progressTitle, progressTotal, progressUnit, projectLoading, projectLoadingLabel,

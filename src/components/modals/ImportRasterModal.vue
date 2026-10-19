@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 
 // Confirm the DEM-vs-orthophoto classification of an already-imported reference
 // raster (the parseRaster worker op ran before this opens, and the raster is
@@ -14,9 +15,14 @@ import ModalShell from './ui/ModalShell.vue'
 // manual "Convert to reference data…" action, where the auto-routing already got
 // this file wrong once and its confidence is not worth trusting.
 //
-// `data` is { raster: RasterMeta, fileName } from useModalsStore.
+// With `mode: 'accuracy'` (the Reference Data row's "Accuracy & datum…") it edits
+// only the declarations, whenever: a confident import never opens this modal, and
+// Fill Z / GCP picking refuse a DEM height without a declared accuracy.
+//
+// `data` is { raster: RasterMeta, fileName, mode? } from useModalsStore.
 const props = defineProps({ data: { type: Object, required: true } })
-const emit = defineEmits(['close', 'set-kind', 'set-vertical', 'import-as-image'])
+const emit = defineEmits(['close', 'set-kind', 'set-accuracy', 'import-as-image'])
+const accuracyOnly = computed(() => props.data.mode === 'accuracy')
 
 const raster = computed(() => props.data.raster)
 const kind = ref(raster.value.kind)
@@ -27,25 +33,31 @@ const kind = ref(raster.value.kind)
 // silently soak into a scale/tilt error.
 const verticalDatum = ref(raster.value.verticalDatum || 'unknown')
 const verticalAccuracy = ref(raster.value.verticalAccuracy ?? null)
+const horizontalAccuracy = ref(raster.value.horizontalAccuracy ?? null)
+const vOffset = ref(raster.value.vOffset || 0)
 
 const reasons = computed(() => raster.value.classification?.reasons || [])
 const isDem = computed(() => kind.value === 'dem')
 
+const positiveOrNull = (v) => (Number.isFinite(v) && v > 0 ? v : null)
 function confirm() {
   if (kind.value !== raster.value.kind) emit('set-kind', { id: raster.value.id, kind: kind.value })
-  if (isDem.value) {
-    emit('set-vertical', {
-      id: raster.value.id,
+  emit('set-accuracy', {
+    id: raster.value.id,
+    horizontalAccuracy: positiveOrNull(horizontalAccuracy.value),
+    ...(isDem.value ? {
       verticalDatum: verticalDatum.value,
-      verticalAccuracy: Number.isFinite(verticalAccuracy.value) ? verticalAccuracy.value : null,
-    })
-  }
+      verticalAccuracy: positiveOrNull(verticalAccuracy.value),
+      ...(accuracyOnly.value ? { vOffset: Number.isFinite(vOffset.value) ? vOffset.value : 0 } : {}),
+    } : {}),
+  })
   emit('close')
 }
 </script>
 
 <template>
-  <ModalShell title="Reference raster — confirm type" aria-label="Import Reference Raster" width="460px" @close="emit('close')">
+  <ModalShell :title="accuracyOnly ? `${raster.name} — accuracy & datum` : 'Reference raster — confirm type'"
+    :aria-label="accuracyOnly ? 'Reference raster accuracy' : 'Import Reference Raster'" width="460px" @close="emit('close')">
     <div class="filename">{{ data.fileName }}</div>
     <div class="stats">
       <span>{{ raster.width.toLocaleString() }} × {{ raster.height.toLocaleString() }} px</span>
@@ -54,6 +66,7 @@ function confirm() {
       <span>{{ raster.crs || 'no CRS' }}</span>
     </div>
 
+    <template v-if="!accuracyOnly">
     <img v-if="raster.previewDataUrl" :src="raster.previewDataUrl" class="preview" alt="" />
 
     <!-- The reasons are the point of this modal: a guess you can't audit is
@@ -78,6 +91,19 @@ function confirm() {
           Orthophoto (imagery)
         </button>
       </div>
+    </div>
+    </template>
+
+    <div class="field">
+      <label class="field-label" for="hacc">
+        <FieldHelp op="georeferencing" param="horizontalAccuracy" :value="horizontalAccuracy">Horizontal accuracy (σ, metres)</FieldHelp>
+      </label>
+      <input id="hacc" v-model.number="horizontalAccuracy" type="number" min="0" step="any"
+        placeholder="unknown" class="field-input short" />
+      <span class="field-hint">
+        How well this raster is positioned on the ground. A GCP picked off it gets this
+        and its pixel size combined; left blank, the pixel size alone.
+      </span>
     </div>
 
     <template v-if="isDem">
@@ -111,11 +137,16 @@ function confirm() {
           and the fill action will refuse rather than let a GCP claim survey-grade Z.
         </span>
       </div>
+
+      <div v-if="accuracyOnly" class="field">
+        <label class="field-label" for="voff">Vertical offset (added to every height)</label>
+        <input id="voff" v-model.number="vOffset" type="number" step="any" class="field-input short" />
+      </div>
     </template>
 
     <!-- The escape hatch the routing fork promises: a georeferenced source
          photo is unusual but not impossible. -->
-    <button class="link-btn" @click="emit('import-as-image', { id: raster.id })">
+    <button v-if="!accuracyOnly" class="link-btn" @click="emit('import-as-image', { id: raster.id })">
       This is a source photo, not reference data — import it as an image instead
     </button>
 
