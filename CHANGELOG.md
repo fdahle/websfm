@@ -6,6 +6,13 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Heights convert between ellipsoid and geoid.** GCPs and reference DEMs declare
+  their vertical datum: ellipsoidal (WGS 84), EGM2008, EGM96, another geoid or local.
+  Filling or checking a GCP's height from a DEM, and comparing a DEM with a reference,
+  convert between the ellipsoid and the two global geoid models. The difference is up
+  to about 100 m, and tens of metres over Antarctica. **Convert heights to…** in the GCP
+  table changes a set of GCP heights to another datum. The geoid grids are part of the
+  app and work offline.
 - **GCPs straight off a reference orthophoto or DEM**: right-click an imported
   reference raster and choose Add GCP here, or move the selected GCP there. X/Y comes
   from the click and Z from a reference DEM. The accuracy comes from the raster's
