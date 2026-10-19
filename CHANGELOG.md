@@ -328,6 +328,9 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- After moving a project into a folder, its images, masks and products could no longer
+  be read until it was reopened by hand. A moved project now reopens from its new
+  location by itself, in both directions.
 - Picking a CRS from the search list by clicking it did nothing in Project Settings
   and the import dialogs; the field went back to the old CRS.
 - Calibration and camera-position imports no longer assign unrecognised columns by
