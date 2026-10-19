@@ -19,6 +19,10 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
+    // The real-kernel tests (WASM PatchMatch, ICP, BA covariance, COG assembly) take
+    // 2–6 s alone; with every file running at once they starve each other past the
+    // 5 s default, which made a loaded full run fail ~10 tests at random.
+    testTimeout: 30_000,
     include: [
       'src/core/**/*.test.{js,ts}',
       'src/utils/**/*.test.{js,ts}',

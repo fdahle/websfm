@@ -110,7 +110,7 @@ describe('PatchMatch refinement on a deep scene (real WASM kernel)', () => {
     expect(single.within02).toBeGreaterThan(0.44)
     const pyramid = await run({ coarseLong: 40 }, SHALLOW)
     expect(pyramid.within02).toBeGreaterThan(0.47)
-  }, 60_000) // two full kernel runs: ~5 s alone, past vitest's 5 s default under a loaded machine
+  }, 60_000) // two full kernel runs: ~5 s alone, several times that on a loaded machine
 })
 
 describe('refinement schedule', () => {
