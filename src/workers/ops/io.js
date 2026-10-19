@@ -1,7 +1,7 @@
 import { assembleCog, geoKeysForEpsg } from '../../core/products/geotiff.js'
 import { attributeBuffers } from '../../core/io/cloudAttributes.js'
 import { GeoTIFF, fromArrayBuffer, fromBlob } from 'geotiff'
-import { rasterWindow } from '../../core/io/rasterWindow.js'
+import { rasterWindow, overviewLayout } from '../../core/io/rasterWindow.js'
 import { edgeOriginFromTags, nodataForSampleType } from '../../core/io/rasterSample.js'
 import { parseCloudSource, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
 import { MAX_BUFFER_BYTES, isBufferAllocationFailure, rasterTooLargeMessage, tooManyPointsMessage } from '../../core/bufferLimit.js'
@@ -34,14 +34,9 @@ export function makeIoOps({ lazCodec = null } = {}) {
       previewBytes -= previewBands.get(oldest).bytes; previewBands.delete(oldest)
     }
   }
-  async function readRasterWindow([{ file, rect, maxDim = 2048, bands = [0] }]) {
-    const tiff = await fromBlob(file)
-    const image = await tiff.getImage()
-    const layout = rasterWindow({ width: image.getWidth(), height: image.getHeight(), bands: image.getSamplesPerPixel() }, rect, maxDim, bands)
-    const channels = await image.readRasters({ window: layout.window, width: layout.width, height: layout.height, samples: bands, interleave: false })
-    const fd = image.getFileDirectory()
-    const nodata = await bandNodata(image, fd)
-    return { result: { ...layout, bands, data: channels[0], channels: Array.from(channels), nodata }, transfer: [...new Set(Array.from(channels, c => c.buffer))] }
+  async function readRasterWindow([options]) {
+    const result = await readWindowFromFile(options.file, options)
+    return { result, transfer: [...new Set(result.channels.map(c => c.buffer))] }
   }
   // args: [{ file: File|Blob, name: string }] → { parsed, stats }
   // parsed: cloud { count, pos, col?, nrm? } | mesh { nVerts, count, pos, idx, col? }
@@ -386,6 +381,31 @@ export function makeIoOps({ lazCodec = null } = {}) {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// A bounded raw read of a GeoTIFF window (rasterWindow.js). `overviews` lets a
+// downsampled read come from the coarsest reduced-resolution IFD that still has
+// its sampling — values are then the overview's (box-averaged for our COGs), so
+// it is for looking at pixels (matching, previews), never for measuring them.
+// Without it every read decodes the full-resolution window and resamples it.
+export async function readWindowFromFile(file, { rect, maxDim = 2048, bands = [0], overviews = false } = {}) {
+  const tiff = await fromBlob(file)
+  const image = await tiff.getImage()
+  let layout = rasterWindow({ width: image.getWidth(), height: image.getHeight(), bands: image.getSamplesPerPixel() }, rect, maxDim, bands)
+  let source = image
+  if (overviews && (layout.scaleX > 1.5 || layout.scaleY > 1.5)) {
+    const levels = [image]
+    for (let i = 1, n = await tiff.getImageCount(); i < n; i++) {
+      const level = await tiff.getImage(i)
+      // NewSubfileType bit 2 marks a transparency mask, not an overview.
+      if (!((Number(await readTiffTag(level.getFileDirectory(), 'NewSubfileType')) || 0) & 4)) levels.push(level)
+    }
+    layout = overviewLayout(layout, levels.map(l => ({ width: l.getWidth(), height: l.getHeight() })))
+    source = levels[layout.level]
+  }
+  const channels = await source.readRasters({ window: layout.levelWindow ?? layout.window, width: layout.width, height: layout.height, samples: bands, interleave: false })
+  const nodata = await bandNodata(image, image.getFileDirectory())
+  return { ...layout, bands, data: channels[0], channels: Array.from(channels), nodata }
+}
 
 // GDAL_NODATA is an ASCII string tag ("-9999", "nan").
 function parseNodata(raw) {

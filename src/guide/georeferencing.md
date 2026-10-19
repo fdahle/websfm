@@ -108,15 +108,59 @@ are drawn as tiles and have no such limit for display.
 ## Find candidate GCPs from a reference orthophoto
 Build an orthophoto, import a georeferenced reference raster, then open **Tools →
 Find GCPs**. Choose a reference band and select **Find candidates**. The matcher
-uses SIFT and a robust planar alignment of the project preview and a bounded raw
-reference-band read. Repeated gamma/stretch changes reuse cached preview bands;
-the first read of a new band can still require a source decode.
+works [coarse to fine](help:coarse-to-fine):
 
-The numbered overlays and table show candidate locations. Choose **Review** for
-side-by-side project/reference close-ups and available source-photo marks. Check
-only candidates that identify the same stable feature. Each candidate uses an
-existing sparse track measured in at least two source photos; its reference
-coordinate is a local estimate near a verified match, not a surveyed point.
+1. **Where to look.** If the orthophoto is already georeferenced, the search starts
+   from its footprint in the reference. Otherwise it starts from the registered
+   photos' GPS positions, padded by half their spread and at least 300 m. Without
+   either, it searches the whole reference. A footprint that misses the reference
+   stops the search with that message.
+2. **Coarse.** SIFT runs on a 1,536-pixel look at the whole orthophoto and at the
+   search area, and one RANSAC [homography](help:homography) aligns them. If that
+   fails, the search area is tried again as 3 × 3 overlapping windows of half its
+   size, then 5 × 5 windows of a quarter. A block that is only a few dozen pixels
+   of a regional tile then gets two or four times as many pixels to match on.
+   Each success is refined by a second look at just the predicted footprint.
+3. **Fine.** Tiles of up to 512 pixels are laid over the orthophoto, up to 6 × 6
+   of them. Both sides are read at the coarser of the two native resolutions,
+   because neither raster can place a feature better than that. A tile keeps its
+   matches only when they sit near the coarse prediction, at least 10 agree on
+   the tile's own homography, at least 30 % of its matches agree, and they spread
+   over at least a fifth of the tile in both directions. Repeated texture matches
+   itself in a tight cluster, and the last rule rejects it. A per-tile model
+   follows relief and doming that one plane cannot. Tiles that are mostly empty
+   orthophoto are skipped.
+
+The fine pass needs the stored orthophoto file. An orthophoto record without one
+uses the coarse alignment only, and the message says so. Large rasters are read
+from their overviews, so a coarse look at a 30,000-pixel orthophoto does not decode
+it at full resolution.
+
+The numbered overlays and table show candidate locations. Each candidate is an
+existing sparse track measured in at least two source photos, lying within 2
+working pixels of a verified match. Its reference coordinate is that matched
+feature moved by the track's offset, using the tile's own homography. Up to 30 are
+kept, spread over the block: the best one in each cell of a 5 × 5 grid first, then
+the next best anywhere. The message gives how many of 16 cells they cover and the
+share of the block inside their outline. Control bunched in one corner fits that
+corner only.
+
+For each candidate the table shows:
+- **Confidence**, from 0 to 100 %. It multiplies the share of the tile's matches
+  that agreed, the inlier count (full credit from 30), how closely this match sits
+  on its tile's model (one working pixel off gives 61 %), and 80 % for a track seen
+  in only two photos. Use it to order your review, not as acceptance.
+  **Select confidence ≥ 50 %** ticks those rows for you to review.
+- **Residual**: the match's distance from its tile model, in working pixels.
+- **σ XY**: prefilled from the reference [GSD](help:ground-sample-distance). It is
+  one reference pixel measured in the project CRS, or the residual in reference
+  pixels when that is larger. If the reference raster declares a horizontal
+  accuracy, σ is that accuracy and the residual combined in quadrature. Edit it if
+  you know better.
+
+Choose **Review** for side-by-side project/reference close-ups, cut from the
+candidate's fine tile at working resolution, and the source-photo marks. Check
+only candidates that identify the same stable feature.
 
 In the same dialog, enter elevation and coordinate accuracies (positive 1σ values
 in project units), or select a reference DEM and **Fill selected heights**. DEM
@@ -127,7 +171,9 @@ Choose **Checkpoint** to reserve a point for checking rather than fitting.
 accuracy stay unknown; incomplete controls cannot constrain adjustment. Photo
 marks can still be refined later in Control & Markers.
 
-A heavily changed historical scene, repetitive texture, very different scales, or
-relief that violates the planar model can defeat this matcher. A failed alignment
-creates no control; use manual marks or a more suitable reference in that case.
-Closing the search dialog discards pending search results.
+Some scenes defeat this matcher: a heavily changed historical scene, a reference
+whose radiometry differs strongly (film against a multispectral band), or a block
+too small to find in a regional reference without GPS. In the last case, crop the
+reference to the area first. A failed alignment creates no control; use manual
+marks or a more suitable reference instead. Closing the search dialog discards
+pending search results.

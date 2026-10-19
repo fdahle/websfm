@@ -25,5 +25,41 @@ export function rasterWindow(meta, rect = {}, maxDim = 2048, bands = [0]) {
  * Sentinel-2 tile read at 1536 px.
  */
 export function windowToNative(layout, x, y) {
-  return [layout.col + x * layout.scaleX + 0.5, layout.row + y * layout.scaleY + 0.5]
+  return [(layout.centreX0 ?? layout.col + 0.5) + x * layout.scaleX,
+    (layout.centreY0 ?? layout.row + 0.5) + y * layout.scaleY]
+}
+
+// Native pixels per pixel of a reduced-resolution level. Overviews are halvings
+// (ours floor the size, GDAL's ceil it), so a ratio within 2 % of a power of two
+// is that power: W / levelW itself drifts by up to a native pixel across the image.
+export function levelFactor(full, level) {
+  return [full.width / level.width, full.height / level.height].map(f => {
+    const p = 2 ** Math.round(Math.log2(f))
+    return Math.abs(f / p - 1) < 0.02 ? p : f
+  })
+}
+
+/**
+ * The coarsest level (index into `levels`, full resolution first) that still has
+ * at least the sampling a downsampled read asks for, and the read re-expressed on
+ * it: `levelWindow` in that level's pixels, the per-axis native pixels per working
+ * sample, and the native pixel-edge position of working sample 0's centre (a level
+ * pixel k covers native [k·f, (k+1)·f), so its centre is f·(k + ½)). Reading a
+ * 1536-px look at a 30k-px COG from its overview decodes ~1/400 of the pixels.
+ */
+export function overviewLayout(layout, levels) {
+  const full = levels[0]
+  let best = 0
+  for (let i = 1; i < levels.length; i++) {
+    const [fx, fy] = levelFactor(full, levels[i])
+    if (fx <= layout.scaleX * 1.0001 && fy <= layout.scaleY * 1.0001) best = i
+  }
+  if (best === 0) return { ...layout, level: 0, levelWindow: layout.window }
+  const [fx, fy] = levelFactor(full, levels[best]), [x0, y0, x1, y1] = layout.window
+  const ox0 = Math.floor(x0 / fx), oy0 = Math.floor(y0 / fy)
+  const ox1 = Math.max(ox0 + 1, Math.min(levels[best].width, Math.ceil(x1 / fx)))
+  const oy1 = Math.max(oy0 + 1, Math.min(levels[best].height, Math.ceil(y1 / fy)))
+  return { ...layout, level: best, levelWindow: [ox0, oy0, ox1, oy1],
+    scaleX: fx * (ox1 - ox0) / layout.width, scaleY: fy * (oy1 - oy0) / layout.height,
+    centreX0: fx * (ox0 + 0.5), centreY0: fy * (oy0 + 0.5) }
 }
