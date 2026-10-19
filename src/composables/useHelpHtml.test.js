@@ -6,6 +6,7 @@ describe('useHelpHtml', () => {
     const { html, load } = useHelpHtml(({ renderHelpMarkdown }) => renderHelpMarkdown('Energy is $E = mc^2$.'))
     expect(html.value).toBe('')
     load()
-    await expect.poll(() => html.value).toContain('katex')
+    // The first load imports marked + KaTeX, which takes seconds in a loaded full run.
+    await expect.poll(() => html.value, { timeout: 15_000 }).toContain('katex')
   })
 })
