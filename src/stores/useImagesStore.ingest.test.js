@@ -42,14 +42,36 @@ describe('addImages with extras and fromStorage', () => {
     const img = store.images[0]
     expect(img.meta).toMatchObject({ width: 640, height: 360, videoSource: 'walk.mp4', videoTime: 1.5 })
     expect(saved.get(img.uuid)).toBe(frame)
-    // The record now reads the project's copy (named by uuid), not the encoded frame.
+    // The record now reads the project's copy, under the frame's name, and the
+    // in-memory frame's URL is revoked so it can be freed.
+    expect(opfs.loadImageBlob).toHaveBeenCalledWith('p1', img.uuid)
     expect(img.file).not.toBe(frame)
-    expect(img.file.name).toBe(img.uuid)
+    expect(img.file.name).toBe('walk_00m01.500s.jpg')
     expect(img.url).not.toBe('blob:1')
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:1')
 
-    // Without the options nothing changes: the picked file stays the source.
+    // A picked file (IS-1) is read back from its copy too, so a moved original no
+    // longer matters; its URL stays registered for any job queued with it.
     await store.addImages([photo])
-    expect(store.images[1].file).toBe(photo)
-    expect(store.images[1].meta?.videoSource).toBeUndefined()
+    const picked = store.images[1]
+    const pickedUrl = vi.mocked(URL.createObjectURL).mock.results.find((r, k) =>
+      vi.mocked(URL.createObjectURL).mock.calls[k][0] === photo)?.value
+    expect(picked.file).not.toBe(photo)
+    expect(picked.file.name).toBe('photo.jpg')
+    expect(picked.url).not.toBe(pickedUrl)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(pickedUrl)
+    expect(picked.meta?.videoSource).toBeUndefined()
+  })
+
+  it('leaves a non-persisting session on the picked files', async () => {
+    const projects = useProjectsStore()
+    projects.persistenceAvailable = false
+    projects.currentProjectId = null
+    const load = vi.spyOn(opfs, 'loadImageBlob')
+    const photo = new File([new Uint8Array(1000)], 'photo.jpg', { type: 'image/jpeg' })
+    const store = useImagesStore()
+    await store.addImages([photo])
+    expect(store.images[0].file).toBe(photo)
+    expect(load).not.toHaveBeenCalled()
   })
 })

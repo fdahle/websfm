@@ -6,6 +6,9 @@ import { transcodeTiff, buildPyramid } from '../../workers/computeClient.js'
 import { needsPyramid } from '../../core/io/rasterPyramid.js'
 import { pyramidSource } from '../../utils/image.js'
 import { markRaw } from 'vue'
+import { pluralize } from '../../core/textFormat.js'
+
+const READ_BACK_CONCURRENCY = 16
 
 // TIFF transcodes in flight, bounded by pixels rather than by count. Each holds the
 // decoded RGBA, its canvas and the JPEG + PNG encodes (~12 bytes per pixel), all in
@@ -70,9 +73,11 @@ export function createIngest({
   // `options` (both optional), for files made in the browser rather than picked:
   //   extras: Map<File, { meta, dims, thumb }> — metadata to merge over EXIF, the
   //     known pixel size (skips the <img> probe) and a ready list thumbnail;
-  //   fromStorage: once a file is written to the project, the record reads it back
-  //     from there, so the in-memory original can be freed (video frames: a long
-  //     video must not hold every extracted frame in memory).
+  //   fromStorage: the originals are in memory (video frames), so once the copy is
+  //     read back their URLs are revoked to free them: a long video must not hold
+  //     every extracted frame in memory.
+  // In a project with storage every image is read back from its copy once written
+  // (IS-1), so a moved, renamed or cloud-evicted original no longer matters.
   async function addImages(files, onProgress, options = {}) {
     const task = addImagesNow(files, onProgress, options)
     activeImports.add(task)
@@ -87,6 +92,8 @@ export function createIngest({
     const projectId = projects.currentProjectId
     const persistImport = !!projectId && isPersisting()
     const stored = []
+    // uuid → the object URL made from the picked File, to re-point at the copy.
+    const originalUrls = new Map()
     let added = 0
     const tiffItems = []
     const metadataTasks = []
@@ -112,8 +119,9 @@ export function createIngest({
       log(`Added image: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'info', 'Images')
 
       if (persistImport) {
+        originalUrls.set(item.uuid, item.url)
         batchWrites.push(trackWrite(opfs.saveImage(projectId, item.uuid, file)
-          .then(() => { if (fromStorage) stored.push(item.uuid) })
+          .then(() => stored.push(item.uuid))
           .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
       }
       const extra = extras?.get(file) ?? null
@@ -281,7 +289,7 @@ export function createIngest({
 
     await Promise.allSettled(metadataTasks)
     await Promise.allSettled(batchWrites)
-    if (stored.length) await readBackFromStorage(projectId, stored)
+    if (stored.length) await readBackFromStorage(projectId, stored, originalUrls, { release: fromStorage })
     if (added > 1) log(`Added ${added} images`, 'success', 'Images')
     if (persistImport) await save(projectId)
   }
@@ -325,17 +333,45 @@ export function createIngest({
   }
 
   // Point the records at their stored copies (File-backed, read on demand — what a
-  // restore gives them) and drop the in-memory originals they were made from. After
-  // the metadata read, which still decodes the original's `url` when it has no dims.
-  async function readBackFromStorage(projectId, uuids) {
-    for (const uuid of uuids) {
+  // restore gives them). After the metadata read, which still decodes the original's
+  // `url` when it has no dims. Only a URL still made from the original moves: a TIFF's
+  // transcoded display / compute blobs are already in memory. `getFile()` reads no
+  // bytes, so this costs a handle per image.
+  // `release`: the originals are in-memory Blobs; revoke their URLs so they can be
+  // freed. A picked disk File's URL is left registered (it holds a handle, not the
+  // bytes): a worker job queued with it must still be able to read it.
+  async function readBackFromStorage(projectId, uuids, originalUrls, { release = false } = {}) {
+    const started = performance.now()
+    let moved = 0
+    // The lookups are storage round trips (~5 ms each, measured on 300 images), so
+    // they run READ_BACK_CONCURRENCY at a time; the records are updated in order.
+    const byUuid = new Map(images.value.map((img) => [img.uuid, img]))
+    for (let i = 0; i < uuids.length; i += READ_BACK_CONCURRENCY) {
       if (projects.currentProjectId !== projectId) return
-      const file = await opfs.loadImageBlob(projectId, uuid).catch(() => null)
-      const found = images.value.find((img) => img.uuid === uuid)
-      if (!found || !(file?.size > 0)) continue
-      URL.revokeObjectURL(found.url)
-      found.url = URL.createObjectURL(file)
-      found.file = file
+      const batch = uuids.slice(i, i + READ_BACK_CONCURRENCY)
+      const files = await Promise.all(batch.map((uuid) => opfs.loadImageBlob(projectId, uuid).catch(() => null)))
+      if (projects.currentProjectId !== projectId) return
+      batch.forEach((uuid, k) => { if (repoint(byUuid.get(uuid), files[k])) moved++ })
+    }
+    log(`Images read from project storage: ${moved} of ${pluralize(uuids.length, 'image')}, `
+      + `in ${(performance.now() - started).toFixed(0)} ms`, 'debug', 'Images')
+
+    function repoint(found, file) {
+      if (!found || !(file?.size > 0)) return false
+      const uuid = found.uuid
+      const original = originalUrls.get(uuid)
+      const url = URL.createObjectURL(file)
+      let used = false
+      if (found.url === original) { found.url = url; used = true }
+      if (found.computeUrl === original) { found.computeUrl = url; used = true }
+      if (!used) URL.revokeObjectURL(url)
+      if (release && original) URL.revokeObjectURL(original)
+      // Keeps the original's name and type (exports and the TIFF conversion use them);
+      // wrapping the stored File copies nothing.
+      const prev = found.file
+      found.file = new File([file], prev?.name ?? found.sourceName ?? found.name,
+        { type: prev?.type || file.type, lastModified: prev?.lastModified ?? file.lastModified })
+      return true
     }
   }
 

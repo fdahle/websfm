@@ -10,6 +10,10 @@ so projects open and save without a connection (see [Working Offline](guide:offl
 The storage location matters because browser-private data and portable project files
 have different backup behaviour.
 
+Imported images are copied into the project. Once an image's copy is written, the
+project reads the copy, so moving, renaming or deleting the original afterwards changes
+nothing.
+
 ## In this browser
 The default uses the browser's Origin Private File System. It is fast and requires no
 file management, but belongs to this browser profile and site origin. Clearing site
