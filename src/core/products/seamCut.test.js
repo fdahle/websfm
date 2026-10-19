@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createGridGraph, gridNode, gridMaxflow, inSinkSet } from './gridMaxflow.js'
+import { createGridGraph, gridNode, gridMaxflow, inSinkSet, resetGridGraph } from './gridMaxflow.js'
 import { seamGrid, createSeamSurvey, addSeamCandidate, solveSeams, NO_LABEL } from './seamCut.js'
 
 let seed = 11
@@ -46,6 +46,26 @@ describe('gridMaxflow', () => {
       expect(cut).toBe(best)
       expect(flow).toBe(best)
     }
+  })
+  it('reuses a larger graph for a smaller problem in its corner', () => {
+    const g = createGridGraph(6, 5)
+    // A first problem over the whole graph leaves trees, flows and capacities behind …
+    for (let i = 0; i < g.n; i++) g.tr[i] = 0
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 6; c++) {
+      g.tr[gridNode(g, c, r)] = (c + r) % 3 - 1
+      for (let d = 0; d < 4; d++) {
+        const qc = c + [1, -1, 0, 0][d], qr = r + [0, 0, 1, -1][d]
+        if (qc >= 0 && qr >= 0 && qc < 6 && qr < 5) g.cap[4 * gridNode(g, c, r) + d] = 2
+      }
+    }
+    gridMaxflow(g)
+    // … which must not leak into a 2 × 2 one: source → a → b → sink, cut at a → b (1).
+    resetGridGraph(g, 2, 2)
+    g.tr[gridNode(g, 0, 0)] = 5; g.tr[gridNode(g, 1, 0)] = -5
+    g.cap[4 * gridNode(g, 0, 0)] = 1
+    expect(gridMaxflow(g)).toBe(1)
+    expect(inSinkSet(g, gridNode(g, 0, 0))).toBe(false)
+    expect(inSinkSet(g, gridNode(g, 1, 0))).toBe(true)
   })
 })
 

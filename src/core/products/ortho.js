@@ -465,6 +465,15 @@ export { srgbToLinear, linearToSrgb }
 // on a map pixel whose stored depth agrees (z-buffer), within the cost gate, and seen
 // from above the surface (the ray to the camera leans less than 90° from `up`).
 // Fills g = { u, v, i, depth, cos } and returns whether P is visible.
+//
+// A pixel without depth says nothing: the cross-view filter removes weakly matched
+// pixels (a uniform roof, foliage), so a depth map is full of small holes, and a photo
+// would "not see" scattered cells of its own region — each one then taken from another
+// photo, a speckle of seams (on quarry-80 the nadir labels switched 21 times per 100
+// cells, mostly so). Inside such a hole the nearest depth within MOSAIC_HOLE_REACH
+// map pixels that agrees stands in. Where the stored depth is nearer, something
+// occludes the point: that is never overridden.
+export const MOSAIC_HOLE_REACH = 2
 function seenFrom(m, C, P, up, tol, maxCost, g) {
   const { R, t, K } = m
   const zc = R[2][0] * P[0] + R[2][1] * P[1] + R[2][2] * P[2] + t[2]
@@ -473,8 +482,25 @@ function seenFrom(m, C, P, up, tol, maxCost, g) {
   const v = K.fy * ((R[1][0] * P[0] + R[1][1] * P[1] + R[1][2] * P[2] + t[1]) / zc) + K.cy
   const ui = Math.round(u), vi = Math.round(v)
   if (ui < 0 || vi < 0 || ui >= m.width || vi >= m.height) return false
-  const i = vi * m.width + ui, stored = m.depth[i]
-  if (!(stored > 0) || Math.abs(stored - zc) > tol * zc) return false
+  let i = vi * m.width + ui
+  const stored = m.depth[i]
+  if (stored > 0) {
+    if (Math.abs(stored - zc) > tol * zc) return false
+  } else {
+    // A hole: the agreeing depth nearest to (ui, vi), rings outwards, first in row order.
+    let found = -1
+    for (let rr = 1; rr <= MOSAIC_HOLE_REACH && found < 0; rr++) {
+      for (let dv = -rr; dv <= rr && found < 0; dv++) for (let du = -rr; du <= rr; du++) {
+        if (Math.max(Math.abs(du), Math.abs(dv)) !== rr) continue
+        const uu = ui + du, vv = vi + dv
+        if (uu < 0 || vv < 0 || uu >= m.width || vv >= m.height) continue
+        const j = vv * m.width + uu, sj = m.depth[j]
+        if (sj > 0 && Math.abs(sj - zc) <= tol * zc) { found = j; break }
+      }
+    }
+    if (found < 0) return false
+    i = found
+  }
   if (m.cost && m.cost[i] > maxCost) return false
   const dx = C[0] - P[0], dy = C[1] - P[1], dz = C[2] - P[2]
   const cos = (up[0] * dx + up[1] * dy + up[2] * dz) / Math.hypot(dx, dy, dz)
@@ -519,16 +545,56 @@ function cellToSfm(grid, affine, toSfm, col, row, z, P) {
 // O2 pass 1: label each cell of the window with map mi where it has the finest
 // foreshortened footprint so far (ties keep the lower index: maps arrive ascending).
 function labelFromMap(win, grid, m, mi, gp, toSfm, opts, scratch) {
-  const { x0, y0, w, h, data, mask, raw, score } = win
+  const { x0, y0, w, data, mask, raw, score } = win
   const { depthTolRel = 0.02, maxCost = Infinity } = opts
   const { P, g } = scratch, C = cameraCentre(m), fx = m.K.fx
-  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
-    const idx = r * w + c
-    if (!mask[idx]) continue
-    cellToSfm(grid, gp.affine, toSfm, x0 + c, y0 + r, data[idx], P)
-    if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g)) continue
-    const s = g.depth / (fx * g.cos * g.cos)
-    if (s < score[idx]) { score[idx] = s; raw[idx] = mi }
+  forTilesReaching(win, grid, m, gp.affine, 0, 0, w, win.h, (c0, r0, c1, r1) => {
+    for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
+      const idx = r * w + c
+      if (!mask[idx]) continue
+      cellToSfm(grid, gp.affine, toSfm, x0 + c, y0 + r, data[idx], P)
+      if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g)) continue
+      const s = g.depth / (fx * g.cos * g.cos)
+      if (s < score[idx]) { score[idx] = s; raw[idx] = mi }
+    }
+  })
+}
+
+// Within a block window, a map usually sees a part only: the window is split into
+// WIN_TILE² tiles and a pass visits only the tiles the map can see (the block cull's
+// exact box test, per tile with its own height range), so it computes exactly what a
+// loop over every cell would. `winTiles` sets the ranges up once per window.
+const WIN_TILE = 64
+function winTiles(win) {
+  const { w, h, data, mask } = win, nx = Math.ceil(w / WIN_TILE), ny = Math.ceil(h / WIN_TILE)
+  const lo = new Float64Array(nx * ny).fill(Infinity), hi = new Float64Array(nx * ny).fill(-Infinity)
+  for (let r = 0; r < h; r++) {
+    const tr = Math.floor(r / WIN_TILE) * nx
+    for (let c = 0; c < w; c++) {
+      const i = r * w + c
+      if (!mask[i]) continue
+      const t = tr + Math.floor(c / WIN_TILE), z = data[i]
+      if (z < lo[t]) lo[t] = z
+      if (z > hi[t]) hi[t] = z
+    }
+  }
+  win.tiles = { nx, ny, lo, hi }
+}
+// Call fn(c0, r0, c1, r1) for the part of window box [bx0, bx1) × [by0, by1) in each tile
+// that map m can see (every tile when the frame is not affine).
+function forTilesReaching(win, grid, m, affine, bx0, by0, bx1, by1, fn) {
+  const { nx, lo, hi } = win.tiles, { gsd, originX, originY } = grid
+  for (let ty = Math.floor(by0 / WIN_TILE); ty * WIN_TILE < by1; ty++) for (let tx = Math.floor(bx0 / WIN_TILE); tx * WIN_TILE < bx1; tx++) {
+    const t = ty * nx + tx
+    if (!(lo[t] <= hi[t])) continue
+    const c0 = Math.max(bx0, tx * WIN_TILE), r0 = Math.max(by0, ty * WIN_TILE)
+    const c1 = Math.min(bx1, (tx + 1) * WIN_TILE, win.w), r1 = Math.min(by1, (ty + 1) * WIN_TILE, win.h)
+    if (affine) {
+      const box = [originX + (win.x0 + c0 + 0.5) * gsd, originX + (win.x0 + c1 - 0.5) * gsd,
+        originY - (win.y0 + r1 - 0.5) * gsd, originY - (win.y0 + r0 + 0.5) * gsd, lo[t], hi[t]]
+      if (!boxReachesMap(m, affine, box)) continue
+    }
+    fn(c0, r0, c1, r1)
   }
 }
 
@@ -893,10 +959,13 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   // The visit sequence, and for each visit when its map is wanted next (Belady). A
   // mosaic visits a block's maps twice — labels, then colour — and a multiband one a
   // third time for the corrections; the colour passes skip the maps that own no cells
-  // there, which only makes the plan pessimistic.
+  // there, which only makes the plan pessimistic. Successive passes alternate their
+  // order (ascending, descending, ascending), so each starts on the maps the last one
+  // left in the cache.
   const sequence = []
   const passes = !mosaic ? 1 : multiband ? 3 : 2
-  for (const b of blocks) for (let k = 0; k < passes; k++) for (const mi of b.maps) sequence.push(mi)
+  const passOrder = (maps, k) => (k % 2 ? [...maps].reverse() : maps)
+  for (const b of blocks) for (let k = 0; k < passes; k++) for (const mi of passOrder(b.maps, k)) sequence.push(mi)
   const nextUse = new Float64Array(sequence.length)
   {
     const seen = new Map()
@@ -915,7 +984,15 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   }
   // A map's planes, and its photo once a pass needs colour (the mosaic's label pass
   // does not), loaded on a miss.
+  // Where the time goes (ms), for the caller's debug log: map reads + photo decodes,
+  // the label pass, the colour pass, and a multiband blend's ring samples and pyramids.
+  const ms = { read: 0, label: 0, colour: 0, ring: 0, pyramid: 0 }
+  const clock = (key, t) => { ms[key] += performance.now() - t }
   const fetch = async (mi, wantPhoto) => {
+    const t = performance.now()
+    try { return await fetchEntry(mi, wantPhoto) } finally { clock('read', t) }
+  }
+  const fetchEntry = async (mi, wantPhoto) => {
     let e = cache.get(mi)
     if (e && (!wantPhoto || e.hasPhoto)) cacheHits++
     if (!e) {
@@ -983,11 +1060,14 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       }
       sampleSurfaceWindow(surface, geom, ex0, ey0, ew, eh, win.data, win.mask)
       if (mosaic) {
+        winTiles(win)
         await mosaicBlock(b, win, n)
       } else {
         for (const mi of b.maps) {
           const e = await fetch(mi, true)
+          const t = performance.now()
           colourFromMap(win, geom, e.m, e.photo, mi, affine, toSfm, opts, scratch)
+          clock('colour', t)
           visited(mi, e)
         }
       }
@@ -1011,6 +1091,7 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     labelled: !!buf.labels, stats: stats.finish(), blocks: nBlocks,
     visits: blocks.reduce((v, b) => v + b.maps.length, 0),
     mapLoads, photoLoads, cacheHits,
+    timings: Object.fromEntries(Object.entries(ms).map(([k, v]) => [k, Math.round(v)])),
     ...(mosaic ? { mosaic: {
       seamline: graphcut ? 'graphcut' : 'nadir', seamBlend: multiband ? 'multiband' : 'feather',
       seamCells, smoothPasses: graphcut ? 0 : MOSAIC_SMOOTH_PASSES, levels: multiband ? mode.levels : 0,
@@ -1032,7 +1113,9 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     })
     for (const mi of b.maps) {
       const e = await fetch(mi, false)
+      const t = performance.now()
       labelFromMap(win, geom, e.m, mi, gp, toSfm, opts, scratch)
+      clock('label', t)
       visited(mi, e)
     }
     const k = b.maps.length
@@ -1067,7 +1150,7 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     const step = { ...scratch, P: [0, 0, 0] }
     const band = multiband ? 0 : seamCells, seam3 = 3 * band, viewWin = { ...win, sums: win.msums }
     const gains = balance?.gains ?? null
-    for (let j = 0; j < k; j++) {
+    for (let j = k - 1; j >= 0; j--) { // descending: see passOrder
       const mi = b.maps[j], s = 4 * j
       const hasOwn = own[s + 2] >= 0, hasFb = fb[s + 2] >= 0
       if (!hasOwn && !hasFb) { visited(mi, null); continue }
@@ -1082,7 +1165,9 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       if (seam3 && hasOwn) chamferTo(win.label, ew, x0, y0, x1, y1, mi, win.dist)
       else if (seam3) for (let r = y0; r < y1; r++) win.dist.fill(0xffff, r * ew + x0, r * ew + x1)
       const e = await fetch(mi, true)
+      const t = performance.now()
       blendFromMap(viewWin, geom, e.m, e.photo, mi, gp, toSfm, opts, step, [x0, y0, x1, y1], seam3, gains)
+      clock('colour', t)
       visited(mi, e)
     }
     if (multiband) await multibandPass(b, win, n, step, gains)
@@ -1106,7 +1191,9 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       else if (f & 2) { eff[i] = raw[i]; msums[o] = fallback[3 * i]; msums[o + 1] = fallback[3 * i + 1]; msums[o + 2] = fallback[3 * i + 2] }
     }
     const pyr = mb.pyr, { ring, margin } = multibandReach(mode.levels), ring3 = 3 * ring
+    let t = performance.now()
     multibandBegin(pyr, ew, eh, eff, NO_LABEL)
+    clock('pyramid', t)
     const k = b.maps.length, box = new Int32Array(4 * k)
     for (let j = 0; j < k; j++) box.set([ew, eh, -1, -1], 4 * j)
     for (let r = 0, i = 0; r < eh; r++) for (let c = 0; c < ew; c++, i++) {
@@ -1128,24 +1215,32 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       const x0 = Math.max(0, Math.floor((box[s] - margin) / align) * align), y0 = Math.max(0, Math.floor((box[s + 1] - margin) / align) * align)
       const x1 = Math.min(ew, box[s + 2] + 1 + margin), y1 = Math.min(eh, box[s + 3] + 1 + margin)
       const bw = x1 - x0, bh = y1 - y0
-      chamferTo(eff, ew, x0, y0, x1, y1, mi, win.dist)
       const e = await fetch(mi, true), m = e.m, C = cameraCentre(m)
+      t = performance.now()
+      chamferTo(eff, ew, x0, y0, x1, y1, mi, win.dist)
       const g0 = gains ? gains[mi * 3] : 1, g1 = gains ? gains[mi * 3 + 1] : 1, g2 = gains ? gains[mi * 3 + 2] : 1
       d.fill(0, 0, 3 * bw * bh)
-      for (let r = 0; r < bh; r++) for (let c = 0; c < bw; c++) {
-        const wi = (y0 + r) * ew + x0 + c, dd = win.dist[wi]
-        if (dd === 0 || dd > ring3 || eff[wi] === NO_LABEL) continue
-        cellToSfm(geom, gp.affine, toSfm, b.ex0 + x0 + c, b.ey0 + y0 + r, win.data[wi], P)
-        if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, e.photo, g, px)) continue
-        const o = 3 * (r * bw + c), wo = 4 * wi
-        d[o] = g0 * srgbToLinear(px[0]) - msums[wo]
-        d[o + 1] = g1 * srgbToLinear(px[1]) - msums[wo + 1]
-        d[o + 2] = g2 * srgbToLinear(px[2]) - msums[wo + 2]
-      }
+      forTilesReaching(win, geom, m, gp.affine, x0, y0, x1, y1, (c0, r0, c1, r1) => {
+        for (let wr = r0; wr < r1; wr++) for (let wc = c0; wc < c1; wc++) {
+          const wi = wr * ew + wc, dd = win.dist[wi]
+          if (dd === 0 || dd > ring3 || eff[wi] === NO_LABEL) continue
+          cellToSfm(geom, gp.affine, toSfm, b.ex0 + wc, b.ey0 + wr, win.data[wi], P)
+          if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, e.photo, g, px)) continue
+          const o = 3 * ((wr - y0) * bw + wc - x0), wo = 4 * wi
+          d[o] = g0 * srgbToLinear(px[0]) - msums[wo]
+          d[o + 1] = g1 * srgbToLinear(px[1]) - msums[wo + 1]
+          d[o + 2] = g2 * srgbToLinear(px[2]) - msums[wo + 2]
+        }
+      })
+      clock('ring', t)
+      t = performance.now()
       multibandAdd(pyr, x0, y0, bw, bh, d, eff, mi)
+      clock('pyramid', t)
       visited(mi, e)
     }
+    t = performance.now()
     multibandFinish(pyr, msums)
+    clock('pyramid', t)
     const { rgba, labels } = win
     for (let i = 0; i < n; i++) {
       const l = eff[i], o = 4 * i

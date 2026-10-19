@@ -170,7 +170,7 @@ export function solveSeams(sv, gains = null, weights = {}) {
         if (v) nVar++
       }
       if (!nVar) continue
-      resetGridGraph(g)
+      resetGridGraph(g, x1 - x0 + 1, y1 - y0 + 1)
       const { cap, tr } = g
       for (let r = y0; r <= y1; r++) for (let c = x0; c <= x1; c++) {
         const p = r * cw + c

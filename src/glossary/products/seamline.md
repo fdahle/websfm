@@ -34,7 +34,7 @@ display gamma:
   to 0.25–4, two stops either way.
 - **Seam blending** mixes the two photos at each seam. The default,
   [multiband blending](help:multiband-blending), mixes fine detail over a pixel or
-  two and brightness over about a hundred, so the seam shows neither a step nor a
+  two and brightness over about a hundred either side, so the seam shows neither a step nor a
   double image. **Feathering** cross-fades the photos over one band either side of
   each seam: a wider band hides larger colour steps, but small misalignments then
   show as a soft double image inside it. A width of 0 gives hard seams.

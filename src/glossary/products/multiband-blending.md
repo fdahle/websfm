@@ -22,6 +22,6 @@ photo's colour.
 <!-- TODO(image): assets/multiband-blending.svg - two photos meeting at a vertical seam, split into three bands (fine edges, medium, coarse brightness), each band's blend mask beside it, narrow for the fine band and wide for the coarse one, and the recombined result without a step. -->
 
 In an [orthophoto](help:orthophoto) WebSfM blends in five bands, so the coarsest
-fades over about a hundred pixels, after per-photo colour balance has already
+fades over about a hundred pixels either side, after per-photo colour balance has already
 removed most of the exposure difference. See [Seamline](help:seamline) and
 [Build an Orthophoto](guide:orthophoto).

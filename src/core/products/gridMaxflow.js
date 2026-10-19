@@ -16,7 +16,7 @@ const NONE = -1, TERMINAL = 4, ORPHAN = 5
 export function createGridGraph(w, h) {
   const W = w + 2, n = W * (h + 2)
   return {
-    w, h, W, n,
+    w, h, W, n, uw: w, uh: h,
     cap: new Float64Array(4 * n), tr: new Float64Array(n),
     // Search state, kept for reuse between solves of the same size.
     parent: new Int8Array(n), isSink: new Uint8Array(n), ts: new Int32Array(n), dist: new Int32Array(n),
@@ -27,8 +27,12 @@ export function createGridGraph(w, h) {
 // The node of grid cell (c, r), 0-based inside the ring.
 export const gridNode = (g, c, r) => (r + 1) * g.W + c + 1
 
-// Zero every capacity, for the next problem on the same graph.
-export function resetGridGraph(g) { g.cap.fill(0); g.tr.fill(0) }
+// Zero the capacities for the next problem on the same graph, which uses only its
+// top-left uw × uh cells (the rest stays isolated and is not visited).
+export function resetGridGraph(g, uw = g.w, uh = g.h) {
+  g.uw = uw; g.uh = uh
+  for (let r = 0; r < uh + 2; r++) { g.cap.fill(0, 4 * r * g.W, 4 * (r * g.W + uw + 2)); g.tr.fill(0, r * g.W, r * g.W + uw + 2) }
+}
 
 // Max flow; afterwards inSinkSet(g, i) says which side of the minimum cut node i is on
 // (nodes reachable from neither terminal are on the source side). Returns the flow.
@@ -56,7 +60,10 @@ export function gridMaxflow(g) {
   let oHead = 0, oCount = 0
   const orphan = (i) => { parent[i] = ORPHAN; orphans[(oHead + oCount++) % n] = i }
 
-  for (let i = 0; i < n; i++) {
+  // The used part and its ring, exactly what resetGridGraph cleared: no arc leads
+  // further (the ring's capacities are zero), so nothing else is ever visited.
+  for (let r = 0; r < g.uh + 2; r++) for (let c = 0; c < g.uw + 2; c++) {
+    const i = r * W + c
     nextActive[i] = -2; ts[i] = 0; dist[i] = 0
     if (tr[i] > 0) { parent[i] = TERMINAL; isSink[i] = 0; dist[i] = 1; activate(i) }
     else if (tr[i] < 0) { parent[i] = TERMINAL; isSink[i] = 1; dist[i] = 1; activate(i) }

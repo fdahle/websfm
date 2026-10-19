@@ -269,7 +269,7 @@ describe('bounded map loading', () => {
       expect({ covered: many.res.covered, sampled: many.res.sampled }).toEqual({ covered: one.res.covered, sampled: one.res.sampled })
       expect(many.res.stats).toEqual(orthoStats(one.rgba, geom.width, geom.height, one.labels))
     }
-  })
+  }, 30_000) // the multiband + graph-cut case takes ~2 s alone, more in a loaded full run
   it('tiles the surface\'s own grid (gsd 0) cell for cell, holes included', async () => {
     const { ms, surface } = tiledScene()
     const geom = resampledGeometry(surface, 0)

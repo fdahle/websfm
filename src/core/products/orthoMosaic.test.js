@@ -190,18 +190,38 @@ describe('mosaic orthophoto', () => {
 
   it('falls back to the pass-1 label where the smoothed label cannot see the cell', async () => {
     const s = plane(20, 10, 0.5)
-    // Map 1 sees only the one-cell column at x = 0.75 (map px 30; no depth elsewhere)
-    // and map 0 is blind exactly there (map px 38). Pass 1 labels the column 1, the
-    // majority relabels it 0 — which cannot see it — so the fallback must colour it.
+    // Map 1 sees only the one-cell column at x = 0.75 (map px 30; something nearer
+    // occludes the rest) and map 0 is occluded exactly there (map px 38). Pass 1 labels
+    // the column 1, the majority relabels it 0 — which cannot see it — so the fallback
+    // must colour it.
     const m0 = nadirMap(-2, [255, 0, 0]), m1 = nadirMap(2, [0, 0, 255])
-    for (let v = 0; v < 64; v++) for (let u = 0; u < 64; u++) if (u !== 30) m1.depth[v * 64 + u] = 0
-    for (let v = 0; v < 64; v++) m0.depth[v * 64 + 38] = 0
+    for (let v = 0; v < 64; v++) for (let u = 0; u < 64; u++) if (u !== 30) m1.depth[v * 64 + u] = 5
+    for (let v = 0; v < 64; v++) m0.depth[v * 64 + 38] = 5
     const res = await run(s, [m0, m1], { blend: 'mosaic', seamWidth: 0 })
     expect(res.covered).toBe(s.width * s.height)
     const blue = []
     for (let i = 0; i < s.width * s.height; i++) if (res.rgba[i * 4 + 2] === 255) blue.push(res.labels[i])
     expect(blue.length).toBeGreaterThan(0)
     expect(blue.every((l) => l === 1)).toBe(true)
+  })
+})
+
+describe('depth-map holes', () => {
+  it('a photo sees across a small hole in its depth map, never through a nearer surface', async () => {
+    const s = plane(40, 20, 0.25)
+    // Map 0 (most nadir on the left) has a 3-px hole in its depth map and, elsewhere,
+    // a 3-px patch of a nearer surface; map 1 sees everything.
+    const m0 = nadirMap(-2, [255, 0, 0]), m1 = nadirMap(2, [0, 0, 255])
+    for (let v = 29; v < 32; v++) for (let u = 33; u < 36; u++) m0.depth[v * 64 + u] = 0
+    for (let v = 34; v < 37; v++) for (let u = 33; u < 36; u++) m0.depth[v * 64 + u] = 5
+    const res = await run(s, [m0, m1], { blend: 'mosaic', seamWidth: 0, seamline: 'nadir' })
+    // Ground under map 0's pixel (u, v): x = (u − 32)/2 − 2, y = (32 − v)/2.
+    const label = (u, v) => {
+      const c = Math.floor(((u - 32) / 2 - 2 - s.originX) / s.gsd), r = Math.floor((s.originY - (32 - v) / 2) / s.gsd)
+      return res.labels[r * s.width + c]
+    }
+    expect(label(34, 30)).toBe(0) // the hole: still map 0
+    expect(label(34, 35)).toBe(1) // occluded in map 0: map 1
   })
 })
 

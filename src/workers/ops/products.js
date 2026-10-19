@@ -74,6 +74,16 @@ const TIFF_LIMIT = 0xffffffff
 // 256 MB each, and the clip is written as one baseline GeoTIFF.
 const MAX_CLIP_CELLS = 8192 * 8192
 
+// Cells whose source label differs from their right or lower neighbour's, in magenta.
+function paintSeams(rgba, labels, w, h) {
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const i = r * w + c, l = labels[i]
+    if (l === 0xffff) continue
+    const right = c + 1 < w ? labels[i + 1] : l, down = r + 1 < h ? labels[i + w] : l
+    if ((right !== l && right !== 0xffff) || (down !== l && down !== 0xffff)) rgba.set([255, 0, 255, 255], 4 * i)
+  }
+}
+
 // One tile's zlib stream, kept as a Blob part (off the heap; assembleCog takes parts).
 async function deflateTile(bytes) {
   const part = await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'))).blob()
@@ -327,7 +337,12 @@ export function makeProductsOps({ rasterize } = {}) {
       { ...settings, blockSize: ORTHO_BLOCK, cacheBytes, mapsResident: !streamed }, {
         loadImage, loadStatsImage,
         onProgress: (done, total) => emit('progress', [done, total, 'Orthorectifying…', 0.95 * done / total]),
-        onBlock: (b) => builder.addBlock({ col0: b.col0, row0: b.row0, width: b.width, height: b.height, data: b.rgba }),
+        onBlock: (b) => {
+          // `debugSeams` (bench only, not in the dialog): paint the seams magenta, so
+          // side-by-sides show where each variant put them.
+          if (settings.debugSeams && b.labels) paintSeams(b.rgba, b.labels, b.width, b.height)
+          return builder.addBlock({ col0: b.col0, row0: b.row0, width: b.width, height: b.height, data: b.rgba })
+        },
       })
     emit('progress', [1, 1, 'Writing the GeoTIFF…', 0.96])
     const { parts, preview } = await builder.finish()
@@ -356,7 +371,7 @@ export function makeProductsOps({ rasterize } = {}) {
     if (res.mosaic) {
       const { seamline, seamBlend, seamCells, smoothPasses, levels, seamCut, balance } = res.mosaic
       const seams = seamBlend === 'multiband'
-        ? `blended in ${levels} frequency bands (multiband; the coarsest fades over ~${2 << levels} cells)`
+        ? `blended in ${levels} frequency bands (multiband; the coarsest fades over ~±${3 << levels} cells)`
         : seamCells
           ? `feathered over ${seamCells} cell(s) (${settings.seamWidth}% of the short side${seamCells === MAX_SEAM_CELLS ? ', capped' : ''})`
           : 'hard (no feathering)'
@@ -389,6 +404,7 @@ export function makeProductsOps({ rasterize } = {}) {
         }
       }
     }
+    if (res.timings) emit('log', [`Ortho: time (s) — ${Object.entries(res.timings).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`).join(', ')}`, 'debug', 'Products'])
     emit('log', [`Ortho: ${describeOrthoStats(stats)}`, 'info', 'Products'])
     emit('progress', [1, 1, 'Done'])
 

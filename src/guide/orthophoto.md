@@ -115,7 +115,7 @@ Mosaic only. How the two photos at a seam are mixed.
 each photo into frequency bands and mixes each band over its own width: fine detail
 switches from one photo to the other within a pixel or two, so a small misalignment
 does not show as a double image, while brightness and colour fade over about a
-hundred pixels, so no step shows either. Away from the seams every pixel keeps its
+hundred pixels either side, so no step shows either. Away from the seams every pixel keeps its
 own photo's colour. Each block is computed with a border of about 200 pixels, so a
 multiband orthophoto takes more time and memory than a feathered one; the log reports
 both.
@@ -142,7 +142,11 @@ wall, fails the test, so the photo cannot paint the wall's colour onto it. Too t
 and errors in the surface or the depth maps make cells fail for every photo, which
 leaves holes; too loose, and hidden surface takes the colour of whatever stands in
 front of it, which shows as doubled edges beside tall objects. A pixel where the depth
-map has no depth never counts as seeing a cell, whatever the tolerance.
+map has no depth never counts as seeing a cell, whatever the tolerance, except in a
+**Mosaic**: depth maps have many small holes where matching was weak (a plain roof,
+foliage), so there a hole up to two depth-map pixels across takes the depth of its
+nearest neighbour that agrees, and the photo keeps colouring its own region instead
+of leaving scattered pixels to other photos.
 
 ## Max match cost
 <!-- param: maxCost default: 0 (off) -->
