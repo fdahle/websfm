@@ -23,7 +23,7 @@ export function createBlockProgress(total, { prefix = '', everyMs = 30_000, now 
       lastLine = t
       const elapsed = (t - t0) / 1000
       const per = elapsed / done
-      return `${prefix}${done} of ${pluralize(total, 'block')} done (${Math.floor(100 * done / total)} %) `
+      return `${prefix}${done} of ${pluralize(total, 'block')} done (${Math.floor(100 * done / total)}%) `
         + `in ${formatClock(elapsed)}, ${per.toFixed(per < 10 ? 1 : 0)} s per block, `
         + `about ${formatRemaining(per * (total - done))} left`
     },
