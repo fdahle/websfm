@@ -16,6 +16,13 @@ cannot bridge parts of the dataset that have no verified matches. Balanced is th
 first run; higher quality spends more iterations polishing a model, but cannot repair
 missing overlap.
 
+## While it runs
+In the 3D view, the model is drawn as it grows: the registered cameras and the points
+triangulated so far, updated every couple of seconds, and the view zooms out as it
+expands. The progress bar moves to the corner so the view stays visible. Big models are
+thinned for this picture. The finished model replaces it, together with the clouds
+shown before the run.
+
 ## Min correspondences
 <!-- param: minMatchesForRegistration default: 20 -->
 The minimum 3D–2D evidence needed to attempt registering another camera with PnP. Lowering it

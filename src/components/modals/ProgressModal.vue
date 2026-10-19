@@ -15,6 +15,9 @@ const props = defineProps({
   complete:      { type: Boolean, default: false },
   cancelling:    { type: Boolean, default: false },
   cancelable:    { type: Boolean, default: false },
+  // In a corner without dimming, so the view behind stays visible (the live sparse
+  // view). Clicks are still blocked: nothing else may start during a run.
+  docked:        { type: Boolean, default: false },
 })
 const emit = defineEmits(['cancel'])
 
@@ -240,7 +243,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="overlay">
+  <div class="overlay" :class="{ docked }">
     <div class="modal" role="dialog" aria-modal="true">
       <div class="modal-title">{{ title }}</div>
       <div class="progress-row">
@@ -296,6 +299,13 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   z-index: 300;
+}
+
+.overlay.docked {
+  background: transparent;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0 16px 16px 0;
 }
 
 .modal {

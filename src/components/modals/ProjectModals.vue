@@ -1,5 +1,5 @@
 <script setup>
-import { defineAsyncComponent } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useWorkflowsStore } from '../../stores/useWorkflowsStore.js'
@@ -29,7 +29,7 @@ const { folderSupported, renameProject } = useProjectsStore()
 const { activeId: activeWorkflowId, runs: workflowRuns, templates: workflowTemplates, workflows } = storeToRefs(useWorkflowsStore())
 const { applyTemplate: applyWorkflowTemplate, duplicateWorkflow, removeWorkflow, removeTemplate: removeWorkflowTemplate, saveTemplate: saveWorkflowTemplate, setActive: setActiveWorkflow } = useWorkflowsStore()
 const reconstructionStore = useReconstructionStore()
-const { crsSuggestion } = storeToRefs(reconstructionStore)
+const { crsSuggestion, liveSparse } = storeToRefs(reconstructionStore)
 const {
   aboutOpen, debugSummaryOpen, newProjectCanCancel, newProjectOpen, projectPickerOpen, projectSettingsOpen,
   saveProjectOpen, settingsOpen, systemInfoOpen, workflowBuilderOpen,
@@ -45,8 +45,11 @@ const {
   progressIndeterminate, progressLabel, progressOpen, progressTitle, progressTotal,
   progressUnit, projectLoading, projectLoadingLabel, projectLoadingProgress, runPendingConfirm,
   workflowCurrentBlockId, workflowPause, workflowRunner, workflowRunning, workflowState,
-  workflowStatuses,
+  workflowStatuses, activeTabId,
 } = useAppContext()
+// A sparse run draws its model as it grows (liveSparse): over the 3D view, the bar
+// moves to a corner and stops dimming the scene.
+const progressDocked = computed(() => !!liveSparse.value && activeTabId.value === 'viewer')
 </script>
 
 <template>
@@ -162,6 +165,7 @@ const {
       :complete="progressComplete"
       :cancelling="progressCancelling"
       :cancelable="true"
+      :docked="progressDocked"
       @cancel="cancelRun"
     />
   </Teleport>

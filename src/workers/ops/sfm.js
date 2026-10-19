@@ -16,6 +16,10 @@ export function makeSfmOps() {
       // `fraction` is the phase-weighted 0..1 bar value (core/sfm/progressPlan.js);
       // done/total ride along as the numeric readout only.
       onProgress: (done, total, label, fraction) => emit('progress', [done, total, label, fraction]),
+      // The model so far, for the live 3D view; its positions are transferred.
+      ...(input.liveSnapshots ? {
+        onSnapshot: (snap) => emit('snapshot', [snap], snap.col ? [snap.pos.buffer, snap.col.buffer] : [snap.pos.buffer]),
+      } : {}),
     })
     // Do not structured-clone the object-per-point/object-per-observation result.
     // Large surveys contain millions of those tuples; cloning them while the worker
