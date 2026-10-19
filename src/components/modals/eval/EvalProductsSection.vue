@@ -1,4 +1,5 @@
 <script setup>
+import { shiftRange } from '../../../core/verticalDatum.js'
 import { ref, computed, watch } from 'vue'
 import StatTiles from '../ui/StatTiles.vue'
 import WarnBox from '../ui/WarnBox.vue'
@@ -102,6 +103,8 @@ const hist = computed(() => {
         datum {{ result.reference.datum }}
         <template v-if="result.reference.accuracy != null"> · σ {{ result.reference.accuracy }}</template>
         <template v-if="result.reference.vOffset"> · offset {{ fmt(result.reference.vOffset) }}</template>
+        <template v-if="result.reference.conversion"> · converted to {{ result.reference.conversion.to }}
+          ({{ shiftRange(result.reference.conversion) }})</template>
       </span>
     </div>
 

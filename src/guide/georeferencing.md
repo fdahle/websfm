@@ -121,9 +121,29 @@ and the pixel combine in quadrature.
 
 Z comes from a reference DEM at that point: the raster itself when it is a DEM,
 otherwise the default reference DEM. It is taken only when the DEM declares a
-vertical accuracy, which becomes σ Z, and it carries the DEM's vertical datum. Without
-one, Z is left as it was and the log says why, just as **Fill Z** does. Then mark
-the point in at least two photos as usual.
+vertical accuracy, which becomes σ Z. A moved GCP keeps its own height datum when the
+DEM's converts to it; a new one takes the DEM's. Without a declared accuracy, Z is
+left as it was and the log says why, just as **Fill Z** does. Then mark the point in
+at least two photos as usual.
+
+## Height datums
+Every GCP and reference DEM declares what its heights are measured from: its
+[vertical datum](help:vertical-datum). Set a GCP's in the GCP table's Uncertainty
+column or when importing the file, and a DEM's with **Accuracy & datum…**. The datum
+select only says what the numbers already are. To change the numbers, use **Convert
+heights to…** in the GCP table's toolbar. It adds the geoid separation at each
+point's own position and converts ellipsoidal, EGM96 and EGM2008 heights; other
+points are skipped and logged. Converting refits the georeference.
+
+**Fill Z**, **Check Z** and a GCP picked off a reference convert the DEM's height into
+the GCP's declared datum when both convert. The log shows the shift. A GCP with
+an unknown datum takes the DEM's.
+
+The georeference records the datum its control shares and passes it to the DEM
+built in it. Control in mixed datums biases the fit, and the log says so.
+**Evaluate ▸ DEM vs Reference** and the DEM-of-difference volume then convert the
+reference to that datum and report the shift they added.
+
 
 ## Reference raster accuracy
 <!-- param: horizontalAccuracy default: unknown -->

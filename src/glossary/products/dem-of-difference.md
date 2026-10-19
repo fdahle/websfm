@@ -13,8 +13,10 @@ and lost (where it lies lower).
 <!-- TODO(image): assets/dem-of-difference.svg - two terrain profiles of one slope at two dates, the area between them shaded blue where material was added and red where it was removed. -->
 
 Two things decide whether the numbers mean anything. The two models must be in the
-same coordinate system and **vertical datum**: a geoid offset between them shows up as
-a uniform "change" over the whole area. And their difference has an uncertainty of its
+same coordinate system and [vertical datum](help:vertical-datum): a geoid offset
+between them shows up as a uniform "change" over the whole area. WebSfM converts the
+reference into the DEM's datum when both declare ellipsoidal, EGM96 or EGM2008
+heights. And their difference has an uncertainty of its
 own, the combined vertical error of both models; a change smaller than that is
 noise. Comparing the two DEMs on stable ground first (Evaluate ▸ DEM vs Reference)
 shows both the offset and the noise level.

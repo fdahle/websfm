@@ -1,7 +1,7 @@
 ---
 id: coordinate-reference-system
 title: Coordinate Reference System
-aliases: CRS, coordinate reference systems, map projection, EPSG, projected CRS, vertical datum
+aliases: CRS, coordinate reference systems, map projection, EPSG, projected CRS
 summary: The definition that gives coordinates meaning — which model of the Earth they refer to and how it was flattened onto a plane.
 ---
 A **Coordinate Reference System (CRS)** states what a triple of numbers actually
@@ -32,8 +32,8 @@ silently breaks Antarctic projects. WebSfM takes an arbitrary proj4 or EPSG
 definition instead of a fixed list.
 
 **Vertical is a separate question from horizontal.** A height is only meaningful
-relative to a stated *vertical datum* — an ellipsoid, or a geoid model — and the
-two can differ by tens of metres. Imported reference elevation data therefore
+relative to a stated [vertical datum](help:vertical-datum) — an ellipsoid, or a geoid
+model — and the two can differ by tens of metres. Imported reference elevation data therefore
 carries its vertical datum and its declared vertical accuracy, and WebSfM refuses
 to fill a GCP's `z` from a raster that declares no vertical accuracy: an
 undocumented height would enter the bundle adjustment anchor claiming

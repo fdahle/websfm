@@ -194,8 +194,11 @@ the feature's toe, then choose the **Base** in the measuring toolbox:
   (65,536 while you are still drawing it) the comparison uses a regular sub-grid of
   that many cells, scaled to the whole polygon, and the toolbox shows **Sampled: 1
   cell in n×n**. Only the reference base is sampled this way; the plane bases use
-  every cell. Both DEMs must use the same vertical datum; the reference's declared
-  offset is applied.
+  every cell. The reference's declared offset is applied, and its heights are
+  converted to the DEM's [vertical datum](help:vertical-datum) when both datums are
+  declared and convertible (ellipsoidal, EGM96, EGM2008). The DEM has the datum of the
+  control it was georeferenced with, when all of it shares one. Otherwise both
+  DEMs must use the same datum.
 
 On an imported reference DEM, heights, profiles and volumes include the raster's
 declared **vertical offset** (Reference Data ▸ right-click ▸ **Accuracy & datum…**), the same correction

@@ -211,12 +211,18 @@ export function createGeoreferencing({
     const gcpPairs = await gcpGeorefPairs()
     if (evidenceKey.value !== evidenceAtStart) return null
     const usingGcps = gcpPairs.length >= 3
-    if (usingGcps) {
-      const datums = new Set(qualifyingGcps().map((g) => g.verticalDatum ?? 'unknown'))
-      if (datums.size > 1 || datums.has('unknown')) {
-        log(`Georeference: GCP height datum is ${[...datums].join(' / ')} — verify ellipsoidal and orthometric heights are not mixed`,
-          'warn', 'Products')
-      }
+    // The vertical datum the fitted heights are in, recorded on the fit and so on
+    // every product built in it (a DEM compared with a reference DEM converts the
+    // reference to it): the one datum all control shares, else unknown.
+    const datums = new Set(usingGcps
+      ? qualifyingGcps().map((g) => g.verticalDatum ?? 'unknown')
+      : poses().filter((p) => p.enabled !== false).map((p) => p.verticalDatum ?? 'unknown'))
+    const verticalDatum = datums.size === 1 ? [...datums][0] : 'unknown'
+    if (usingGcps && (datums.size > 1 || datums.has('unknown'))) {
+      log(`Georeference: GCP height datum is ${[...datums].join(' / ')} — `
+        + (datums.size > 1 ? 'mixed heights bias the fit; GCP table ▸ Convert heights to… puts them in one datum'
+          : 'declare it in the GCP table, or products cannot be compared with a reference DEM in another datum'),
+      'warn', 'Products')
     }
     const pairs = usingGcps ? gcpPairs : georefPairs()
     if (pairs.length < 3) {
@@ -245,7 +251,7 @@ export function createGeoreferencing({
     georef.value = {
       evidenceKey: evidenceAtStart,
       sim: { scale: fit.scale, R: fit.R, t: fit.t, ...(local ? { local } : {}) },
-      crs: currentCrs(), rms: fit.rms, count: fit.count, method: usingGcps ? 'gcps' : 'poses',
+      crs: currentCrs(), rms: fit.rms, count: fit.count, method: usingGcps ? 'gcps' : 'poses', verticalDatum,
     }
     log(`Georeference: ${fit.count} ${usingGcps ? 'GCPs' : 'poses'} → ${currentCrs()}, `
       + `scale ${fit.scale.toPrecision(4)}, weighted RMS ${fit.rms.toPrecision(3)}`

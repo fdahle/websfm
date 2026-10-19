@@ -1,6 +1,14 @@
 <script setup>
+import { VERTICAL_DATUMS, isConvertible } from '../../core/verticalDatum.js'
 import { ref } from 'vue'
 
+// Short labels for the cramped per-row datum select (core/verticalDatum.js ids).
+const DATUM_SHORT = [
+  { id: 'unknown', label: 'datum?' }, { id: 'ellipsoidal', label: 'ellipsoid' },
+  { id: 'geoid:EGM2008', label: 'EGM2008' }, { id: 'geoid:EGM96', label: 'EGM96' },
+  { id: 'orthometric', label: 'geoid (other)' }, { id: 'local', label: 'local' },
+]
+const CONVERTIBLE = VERTICAL_DATUMS.filter((d) => isConvertible(d.id))
 const props = defineProps({
   gcps:   { type: Array,  required: true },
   crs:    { type: String, default: null },
@@ -19,7 +27,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'remove', 'update-accuracy', 'update-name', 'update-position', 'select', 'add',
-  'update-role', 'update-vertical-datum', 'fill-z', 'check-z', 'update-observation-accuracy',
+  'update-role', 'update-vertical-datum', 'fill-z', 'check-z', 'convert-heights', 'update-observation-accuracy',
 ])
 
 // Rows whose per-image observations are expanded (click the Observations count).
@@ -112,6 +120,16 @@ function onPositionInput(gcp, axis, e) {
           @click="emit('check-z')"
         >Check Z</button>
       </template>
+      <!-- Re-expresses heights (adds the geoid separation); the per-row datum
+           select only relabels what the numbers already are. -->
+      <template v-if="gcps.some((g) => g.role !== 'marker')">
+        <span class="toolbar-sep"></span>
+        <select class="tool-btn" aria-label="Convert heights" title="Convert every GCP's Z to this vertical datum: ellipsoidal and EGM96/EGM2008 heights convert, others are skipped"
+          value="" @change="emit('convert-heights', $event.target.value); $event.target.value = ''">
+          <option value="" disabled>Convert heights to…</option>
+          <option v-for="d in CONVERTIBLE" :key="d.id" :value="d.id">{{ d.label }}</option>
+        </select>
+      </template>
     </div>
     <table v-if="gcps.length">
       <thead>
@@ -170,8 +188,7 @@ function onPositionInput(gcp, axis, e) {
             {{ !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' ? '⚠ unknown' : gcp.accuracyStatus.replace('preset:', '') }}
             <select class="datum-select" :value="gcp.verticalDatum || 'unknown'" @click.stop
               @change="emit('update-vertical-datum', { id: gcp.id, verticalDatum: $event.target.value })">
-              <option value="unknown">datum?</option><option value="ellipsoidal">ellipsoid</option>
-              <option value="orthometric">geoid</option><option value="local">local</option>
+              <option v-for="d in DATUM_SHORT" :key="d.id" :value="d.id">{{ d.label }}</option>
             </select>
           </td>
           <td v-if="!isMarker(gcp)" class="num">

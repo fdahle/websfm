@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import FieldHelp from '../guide/FieldHelp.vue'
+import { VERTICAL_DATUMS } from '../../core/verticalDatum.js'
 
 // Confirm the DEM-vs-orthophoto classification of an already-imported reference
 // raster (the parseRaster worker op ran before this opens, and the raster is
@@ -36,6 +37,8 @@ const verticalAccuracy = ref(raster.value.verticalAccuracy ?? null)
 const horizontalAccuracy = ref(raster.value.horizontalAccuracy ?? null)
 const vOffset = ref(raster.value.vOffset || 0)
 
+// Which common products use which datum, for the choice.
+const DATUM_HINTS = { ellipsoidal: ' — REMA, ArcticDEM, most photogrammetric DSMs', 'geoid:EGM2008': ' — Copernicus DEM', 'geoid:EGM96': ' — SRTM' }
 const reasons = computed(() => raster.value.classification?.reasons || [])
 const isDem = computed(() => kind.value === 'dem')
 
@@ -110,10 +113,7 @@ function confirm() {
       <div class="field">
         <label class="field-label" for="vdatum">Vertical datum</label>
         <select id="vdatum" v-model="verticalDatum" class="field-input">
-          <option value="ellipsoidal">Ellipsoidal (WGS84) — REMA, most photogrammetric DSMs</option>
-          <option value="geoid:EGM2008">Geoid EGM2008</option>
-          <option value="geoid:EGM96">Geoid EGM96</option>
-          <option value="unknown">Unknown</option>
+          <option v-for="d in VERTICAL_DATUMS" :key="d.id" :value="d.id">{{ d.label }}{{ DATUM_HINTS[d.id] ?? '' }}</option>
         </select>
         <span v-if="verticalDatum === 'unknown'" class="field-hint warn">
           ⚠ Ellipsoid vs geoid differs by tens of metres in polar regions. Elevations taken

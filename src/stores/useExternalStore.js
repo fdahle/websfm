@@ -5,6 +5,7 @@ import { ensureProjection, transform, transformer, isGeographic, metresToCrsUnit
 import { createFlatRasterSource } from '../core/io/rasterSource.js'
 import { rasterBounds } from '../core/io/rasterSample.js'
 import { referencePick } from '../core/sfm/referenceGcps.js'
+import { heightShifter } from '../core/verticalDatum.js'
 import { describeStyle, styleStamp, resolveRasterStyle, bandsUsedBy } from '../core/io/rasterStyle.js'
 import { parseRasterFile, restyleRasterPreview, prepareRasterCog, readRasterWindow as workerReadRasterWindow } from '../workers/computeClient.js'
 import * as opfs from '../utils/opfs.js'
@@ -410,8 +411,12 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // Sample a reference DEM at a point given in the **project** CRS. Reprojects
   // the query into the raster's native CRS (invariant 2) and returns the value,
   // plus the declared vertical accuracy so callers never have to invent a σ.
-  // → { z, accuracy, datum, rasterId, rasterName } | null
-  async function sampleReferenceDem(x, y, { rasterId = null } = {}) {
+  // `datum`: the vertical datum the caller wants the height in. When the DEM's
+  // converts to it (ellipsoidal ↔ EGM96 ↔ EGM2008, core/verticalDatum.js) the
+  // geoid separation there is applied and reported as `shift`; otherwise the
+  // height stays in the DEM's own datum, which `datum` says.
+  // → { z, accuracy, datum, shift?, sourceDatum?, rasterId, rasterName } | null
+  async function sampleReferenceDem(x, y, { rasterId = null, datum = null } = {}) {
     const meta = rasterId ? rasterById(rasterId) : defaultDem.value
     if (!meta || meta.kind !== 'dem') return null
     if (meta.crsUnresolved && !(await resolveRasterCrs(meta))) return null
@@ -423,13 +428,25 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     const [rx, ry] = coords
     const raw = source.sampleAt(rx, ry)
     if (raw == null) return null
-    return {
+    const hit = {
       z: raw + (meta.vOffset || 0),
       accuracy: meta.verticalAccuracy ?? null,
       datum: meta.verticalDatum || 'unknown',
       rasterId: meta.id,
       rasterName: meta.name,
     }
+    if (!datum || datum === 'unknown' || datum === hit.datum) return hit
+    const shiftAt = await heightShifter(hit.datum, datum)
+    const lonLat = shiftAt && toLonLat(x, y)
+    if (!lonLat) return hit
+    const shift = shiftAt(...lonLat)
+    return { ...hit, z: hit.z + shift, datum, shift, sourceDatum: hit.datum }
+  }
+
+  // Project CRS → WGS 84 lon/lat, for the geoid grids; null when it fails.
+  function toLonLat(x, y) {
+    if (!currentCrs.value || currentCrs.value === 'EPSG:4326') return [x, y]
+    try { return transform([x, y], currentCrs.value, 'EPSG:4326') } catch { return null }
   }
 
   // The same sampling as `sampleReferenceDem`, prepared once for a caller that
@@ -439,11 +456,14 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // points — a computed DEM's own frame, which outlives a later project-CRS
   // change. A raster with no declared CRS is read in `fromCrs`, as in
   // `toRasterCoords`. Throws with a user-facing reason when it cannot sample.
-  // → { meta, sample(x, y) → z | null }
+  // → { meta, sample(x, y) → z | null, conversion: { from, to, min, max } | null }
   //   opts.strict — the cell containing a point must have a height: a reference
   //                 hole, or a point off the raster, reads null instead of a
   //                 neighbour's value (DEM of difference volumes count it unmeasured)
-  async function referenceDemSampler(rasterId, fromCrs, { strict = false } = {}) {
+  //   opts.datum  — heights in this vertical datum when the reference's converts
+  //                 to it (the geoid separation per point); `conversion` records
+  //                 the range of the shift applied
+  async function referenceDemSampler(rasterId, fromCrs, { strict = false, datum = null } = {}) {
     const meta = rasterById(rasterId)
     if (!meta || meta.kind !== 'dem') throw new Error('The reference DEM is no longer in the project')
     if (meta.crsUnresolved && !(await resolveRasterCrs(meta))) {
@@ -461,13 +481,30 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     if (!source) throw new Error(`The pixel data of "${meta.name}" is unavailable — re-import it`)
     const vOffset = meta.vOffset || 0
     const sampleOpts = strict ? { strict: true } : undefined
+    const refDatum = meta.verticalDatum || 'unknown'
+    let shiftAt = null, toLonLatFrom = null, conversion = null
+    if (datum && datum !== 'unknown' && refDatum !== 'unknown' && datum !== refDatum && fromCrs && fromCrs !== 'local') {
+      shiftAt = await heightShifter(refDatum, datum)
+      if (shiftAt) {
+        await ensureProjection(fromCrs)
+        toLonLatFrom = fromCrs === 'EPSG:4326' ? (x, y) => [x, y] : transformer(fromCrs, 'EPSG:4326')
+        conversion = { from: refDatum, to: datum, min: Infinity, max: -Infinity }
+      }
+    }
     return {
       meta,
+      conversion,
       sample(x, y) {
         let rx, ry
         try { [rx, ry] = toRaster(x, y) } catch { return null }
         const raw = source.sampleAt(rx, ry, sampleOpts)
-        return raw == null ? null : raw + vOffset
+        if (raw == null) return null
+        if (!shiftAt) return raw + vOffset
+        let shift
+        try { shift = shiftAt(...toLonLatFrom(x, y)) } catch { return null }
+        if (shift < conversion.min) conversion.min = shift
+        if (shift > conversion.max) conversion.max = shift
+        return raw + vOffset + shift
       },
     }
   }
@@ -475,11 +512,12 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // A GCP position read off a reference raster tab (A-5): the native pixel-edge
   // point (col, row) of raster `id` in project coordinates, σ XY from the pixel
   // size as drawn (core/sfm/referenceGcps.js referencePick), and the height of a
-  // reference DEM there — this raster when it is one, else the default DEM. The
-  // height comes back with its declared accuracy; without one the caller must
-  // not use it (the Fill Z rule). Throws with a user-facing reason.
+  // reference DEM there — this raster when it is one, else the default DEM — in
+  // `datum` when it converts. The height comes back with its declared accuracy;
+  // without one the caller must not use it (the Fill Z rule). Throws with a
+  // user-facing reason.
   // → { x, y, gsd, sigma, rasterName, dem: { z, accuracy, datum, rasterName } | null }
-  async function pickGroundControl(id, col, row, { displayFactor = 1 } = {}) {
+  async function pickGroundControl(id, col, row, { displayFactor = 1, datum = null } = {}) {
     const meta = rasterById(id)
     if (!meta) throw new Error('The reference raster is no longer in the project')
     if (meta.crsUnresolved && !(await resolveRasterCrs(meta))) {
@@ -493,7 +531,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     if (!Number.isFinite(pick.x) || !Number.isFinite(pick.y)) {
       throw new Error(`That point of "${meta.name}" has no position in ${currentCrs.value}`)
     }
-    const dem = await sampleReferenceDem(pick.x, pick.y, meta.kind === 'dem' ? { rasterId: id } : {})
+    const dem = await sampleReferenceDem(pick.x, pick.y, { datum, ...(meta.kind === 'dem' ? { rasterId: id } : {}) })
     return { ...pick, rasterName: meta.name, dem }
   }
 

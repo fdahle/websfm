@@ -65,7 +65,7 @@ const {
   symbologyProductKind,
 } = storeToRefs(useModalsStore())
 const {
-  alignedUuids, changeGcpRole, checkGcpZAgainstReferenceDem, closeSfmImport, commitSfmImport,
+  alignedUuids, changeGcpRole, checkGcpZAgainstReferenceDem, closeSfmImport, commitSfmImport, convertGcpHeightsTo,
   confirmRemoveGcp, confirmRemoveSensor, editMask, fiducialCalibrateImages, fiducialCalibrateSensor,
   fiducialDetectImages, fiducialDetectSensor, fillGcpZFromReferenceDem, gcpReport, hasSparse,
   matchNodePositions, matchSummaries, onCameraImport, onCloudImport, onFootprintFromPoses,
@@ -319,6 +319,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :scene-type="currentSceneType"
       @fill-z="fillGcpZFromReferenceDem"
       @check-z="checkGcpZAgainstReferenceDem"
+      @convert-heights="convertGcpHeightsTo"
       @close="gcpTableOpen = false"
       @remove="confirmRemoveGcp"
       @update-accuracy="({ id, kind, value }) => setGcpAccuracy(id, kind, value)"

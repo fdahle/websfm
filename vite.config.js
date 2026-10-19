@@ -106,7 +106,8 @@ export default defineConfig(({ mode }) => {
           // The app shell, workers, our own wasm, the EPSG catalog and KaTeX's woff2
           // (browsers that read the PWA cache all take woff2). ORT's runtime is
           // cached on first use instead (ORT_RUNTIME); models never go through here.
-          globPatterns: ['**/*.{html,js,css,wasm,json,svg,png,woff2}'],
+          // The geoid grids (core/verticalDatum.js, 1.6 MB each) convert heights offline.
+          globPatterns: ['**/*.{html,js,css,wasm,json,svg,png,woff2}', 'geoid/*.i16.z'],
           globIgnores: ['models/**', 'ort/**', '**/ort-wasm-*'],
           // The entry chunk (~2 MB) and the EPSG catalog (~8 MB) exceed the 2 MB default.
           maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,

@@ -4,6 +4,7 @@ import { useLog } from '../composables/useLog.js'
 import { ensureProjection, isGeographic, localMetricFrame, metresToCrsUnits, transform } from '../core/crs.js'
 import { confidenceToSigma, precisionFromGcp, reprojectGcpWithAccuracy } from '../core/gcpAccuracy.js'
 import { hasGcpElevation, normalizeGcpRole } from '../core/io/gcp.js'
+import { isVerticalDatum } from '../core/verticalDatum.js'
 import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
 import * as opfs from '../utils/opfs.js'
 import { createDocumentSaver } from '../utils/documentSaver.js'
@@ -341,7 +342,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
 
   function setGcpVerticalDatum(id, verticalDatum) {
     const g = gcps.value.find((x) => x.id === id)
-    if (!g || !['unknown', 'ellipsoidal', 'orthometric', 'local'].includes(verticalDatum)) return
+    if (!g || !isVerticalDatum(verticalDatum)) return
     g.verticalDatum = verticalDatum
     save()
   }
@@ -435,7 +436,9 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       const hasZ = hasGcpElevation(g)
       if (hasZ && !overwrite) { skippedHasZ++; continue }
 
-      const hit = await sampleDem(g.x, g.y)
+      // In the GCP's own declared datum when the DEM's converts to it (the geoid
+      // separation, core/verticalDatum.js); otherwise the GCP takes the DEM's datum.
+      const hit = await sampleDem(g.x, g.y, { datum: g.verticalDatum })
       if (!hit || hit.z == null) {
         log(`GCP ${g.name}: outside the reference DEM (or on nodata) — Z left unchanged`, 'warn', 'GCP')
         skippedNoData++
@@ -449,7 +452,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
         continue
       }
 
-      const before = g.z
+      const before = g.z, beforeDatum = g.verticalDatum ?? 'unknown'
       g.z = hit.z
       g.accuracyZ = hit.accuracy
       g.verticalDatum = hit.datum ?? 'unknown'
@@ -457,7 +460,11 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
         ? 'declared' : 'unknown'
       filled++
       log(`GCP ${g.name}: Z ${before == null ? '—' : fmtNum(before)} → ${fmtNum(hit.z)} `
-        + `from "${hit.rasterName}" (σ ${hit.accuracy}, ${hit.datum})`, 'info', 'GCP')
+        + `from "${hit.rasterName}" (σ ${hit.accuracy}, ${hit.datum}${shiftNote(hit)})`, 'info', 'GCP')
+      if (beforeDatum !== 'unknown' && beforeDatum !== g.verticalDatum) {
+        log(`GCP ${g.name}: ⚠ its height datum was ${beforeDatum}; the DEM's ${g.verticalDatum} cannot be `
+          + 'converted to it, so the GCP now carries the DEM\'s datum.', 'warn', 'GCP')
+      }
       if (hit.datum === 'unknown') {
         log(`GCP ${g.name}: ⚠ that DEM's vertical datum is undeclared — an ellipsoid/geoid `
           + 'mismatch is tens of metres in polar regions.', 'warn', 'GCP')
@@ -489,7 +496,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     g.accuracyStatus = [g.accuracyX, g.accuracyY, g.accuracyZ].every((v) => Number.isFinite(v) && v > 0)
       ? 'declared' : 'unknown'
     log(`GCP ${g.name}: position (${fmtNum(x)}, ${fmtNum(y)}) σ ${fmtNum(sigma)} from "${rasterName}"`
-      + (zUsable ? `, Z ${fmtNum(dem.z)} σ ${dem.accuracy} (${dem.datum}) from "${dem.rasterName}"` : ''), 'info', 'GCP')
+      + (zUsable ? `, Z ${fmtNum(dem.z)} σ ${dem.accuracy} (${dem.datum}${shiftNote(dem)}) from "${dem.rasterName}"` : ''), 'info', 'GCP')
     if (!zUsable) {
       log(`GCP ${g.name}: Z ${g.z == null ? 'left empty' : 'unchanged'} — `
         + (dem?.z != null ? `reference DEM "${dem.rasterName}" has no declared vertical accuracy`
@@ -509,7 +516,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     const targets = gcps.value.filter((g) => (ids ? ids.includes(g.id) : true))
     const rows = []
     for (const g of targets) {
-      const hit = await sampleDem(g.x, g.y)
+      const hit = await sampleDem(g.x, g.y, { datum: g.verticalDatum })
       const demZ = hit?.z ?? null
       const gcpZ = g.z ?? null
       rows.push({
@@ -520,13 +527,14 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
         datum: hit?.datum ?? null,
         rasterName: hit?.rasterName ?? null,
       })
-      log(`GCP ${g.name}: reference DEM ${demZ == null ? 'no data' : fmtNum(demZ)}`
+      log(`GCP ${g.name}: reference DEM ${demZ == null ? 'no data' : fmtNum(demZ)}${hit ? shiftNote(hit) : ''}`
         + `, GCP ${gcpZ == null ? '—' : fmtNum(gcpZ)}`
         + `${rows.at(-1).dz != null ? `, Δ ${fmtNum(rows.at(-1).dz)}` : ''}`, 'info', 'GCP')
+      // Still different after sampling: the two could not be converted.
       if (hit?.datum && hit.datum !== 'unknown' && g.verticalDatum && g.verticalDatum !== 'unknown'
           && hit.datum !== g.verticalDatum) {
-        log(`GCP ${g.name}: height datum ${g.verticalDatum} differs from reference DEM datum ${hit.datum}`,
-          'warn', 'GCP')
+        log(`GCP ${g.name}: height datum ${g.verticalDatum} differs from reference DEM datum ${hit.datum}, `
+          + 'and the two cannot be converted', 'warn', 'GCP')
       }
     }
     const withDz = rows.filter((r) => r.dz != null)
@@ -549,6 +557,32 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   }
 
   const fmtNum = (v) => (v == null ? '—' : (Math.abs(v) >= 1000 ? v.toFixed(2) : Number(v.toPrecision(6))))
+  // " converted from geoid:EGM96, +53.38" when the sampler applied a geoid separation.
+  const shiftNote = (hit) => (hit.shift ? `, converted from ${hit.sourceDatum}, ${hit.shift > 0 ? '+' : ''}${hit.shift.toFixed(2)}` : '')
+
+  // Re-express GCP heights in another vertical datum (core/verticalDatum.js):
+  // `shiftAt(g, from)` → metres to add, or null when that GCP's datum cannot be
+  // converted (injected, like sampleDem, so the store needs no CRS or geoid grid).
+  // σ Z is unchanged: the 15′ geoid grids add centimetres, not metres.
+  async function convertGcpHeights(toDatum, shiftAt, { ids = null } = {}) {
+    if (!isVerticalDatum(toDatum)) return { converted: 0, skipped: 0 }
+    let converted = 0, skipped = 0
+    for (const g of gcps.value.filter((gg) => (ids ? ids.includes(gg.id) : gg.role !== 'marker'))) {
+      const from = g.verticalDatum ?? 'unknown'
+      if (from === toDatum) continue
+      const shift = g.z == null ? 0 : await shiftAt(g, from)
+      if (shift == null) { skipped++; continue }
+      if (g.z != null) g.z += shift
+      g.verticalDatum = toDatum
+      converted++
+      log(`GCP ${g.name}: ${from} → ${toDatum}${g.z == null ? '' : `, Z ${fmtNum(g.z - shift)} → ${fmtNum(g.z)}`}`, 'info', 'GCP')
+    }
+    log(`Convert heights to ${toDatum}: ${converted} converted`
+      + `${skipped ? `, ${skipped} skipped (only ellipsoidal and EGM96/EGM2008 heights convert)` : ''}`,
+    converted ? 'success' : 'warn', 'GCP')
+    if (converted) save()
+    return { converted, skipped }
+  }
 
   // Upsert a pixel observation for `imageId` on a GCP (replacing any existing
   // observation for that image) — used by interactive click-to-mark.
@@ -642,6 +676,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     removeObservation,
     removeGcp,
     fillZFromReferenceDem,
+    convertGcpHeights,
     setGcpFromReference,
     checkZAgainstReferenceDem,
     reprojectGcps,

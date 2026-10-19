@@ -138,7 +138,7 @@ const { addGcps } = gcpsStore
 // Marking, map placement, the accuracy report and the shared selection.
 const {
   gcpReport, refreshGcpReport, selectedGcpId, selectGcp, changeGcpRole,
-  fillGcpZFromReferenceDem, checkGcpZAgainstReferenceDem,
+  fillGcpZFromReferenceDem, checkGcpZAgainstReferenceDem, convertGcpHeightsTo,
   assignGcpObservation, addGcpAtObservation, setGcpGroundPosition, addGcpAtCoord, pickGcpFromReference,
   startMarkingPoint, exitGcpEdit, jumpToImage, openGcpView, removeGcpAndCloseTab, removeGcpObservation,
   activeImageGcps, activeImageGcpGuides, allGcpsBrief,
@@ -475,7 +475,7 @@ provideAppContext({
   activateTab, activeImageGcpGuides, activeImageGcps, activeTab, activeTabId, addGcpAtCoord,
   addGcpAtObservation, addNewWorkflow, alignPairs, alignReferences, alignedUuids, allGcpsBrief,
   applyAlignPairs, applyCrsSuggestion, applyOrientation, applyRegion, assignGcpObservation,
-  cancelPendingConfirm, cancelRun, changeGcpRole, checkGcpZAgainstReferenceDem,
+  cancelPendingConfirm, cancelRun, changeGcpRole, checkGcpZAgainstReferenceDem, convertGcpHeightsTo,
   clearCurrentProjectDerived, closeAllTabs, closeOtherTabs, closeReconstructModal, closeSfmImport,
   closeTab, closeTabsToLeft, closeTabsToRight, closeWorkflowBuilder, commitSfmImport,
   confirmRemoveGcp, confirmRemoveGcpObservation, confirmRemoveImages, confirmRemoveSensor,

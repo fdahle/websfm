@@ -102,13 +102,15 @@ const referenceBases = computed(() => (props.kind === 'dem' && !props.product?.i
   && props.product.crs !== 'local' ? external.demRasters : []))
 const refSampler = shallowRef(null)
 const refError = ref('')
-watch([baseKind, () => props.product?.crs], async ([kind, crs]) => {
+watch([baseKind, () => props.product?.crs, () => props.product?.verticalDatum], async ([kind, crs]) => {
   refSampler.value = null; refError.value = ''
   if (!kind.startsWith('ref:')) return
   try {
     // Strict: a reference hole, or a cell centre off the reference, is unmeasured;
-    // never a neighbour's height borrowed across the hole's edge.
-    const s = await external.referenceDemSampler(kind.slice(4), crs, { strict: true })
+    // never a neighbour's height borrowed across the hole's edge. Heights in the
+    // DEM's vertical datum when the reference's converts to it (a geoid offset
+    // would otherwise read as a uniform change).
+    const s = await external.referenceDemSampler(kind.slice(4), crs, { strict: true, datum: props.product?.verticalDatum ?? null })
     if (baseKind.value === kind) refSampler.value = { name: s.meta.name, sample: s.sample }
   } catch (err) { refError.value = err?.message ?? String(err) }
 })

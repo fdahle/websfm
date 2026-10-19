@@ -1,4 +1,5 @@
 <script setup>
+import { VERTICAL_DATUMS } from '../../core/verticalDatum.js'
 import { ref, computed } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
 import ModalShell from './ui/ModalShell.vue'
@@ -199,10 +200,7 @@ function doImport() {
         <label class="accuracy-ctrl">
           <span>Height datum</span>
           <select v-model="verticalDatum">
-            <option value="unknown">Unknown</option>
-            <option value="ellipsoidal">Ellipsoidal</option>
-            <option value="orthometric">Orthometric / geoid</option>
-            <option value="local">Local datum</option>
+            <option v-for="d in VERTICAL_DATUMS" :key="d.id" :value="d.id">{{ d.label }}</option>
           </select>
         </label>
         <label class="accuracy-ctrl">
