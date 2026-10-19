@@ -1,7 +1,9 @@
 import { computeSourceOf } from '../../utils/image.js'
 import { makeNameResolver } from '../../core/io/nameMatch.js'
 import { observationsToDetections } from '../../core/sfm/fiducialModel.js'
-import { detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE, prepareFiducialTemplates, detectFiducials } from '../../workers/computeClient.js'
+import { detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE, prepareFiducialTemplates, detectFiducials, detectReseau } from '../../workers/computeClient.js'
+import { reseauLattice } from '../../core/sfm/reseauDetect.js'
+import { fitFiducialTransform } from '../../core/sfm/fiducialCalibration.js'
 import { fiducialDetectionConcurrency } from '../../core/features/detectConcurrency.js'
 import { fiducialBatchConsensus, fiducialShapeCheck } from '../../core/sfm/fiducialConsensus.js'
 import { FIDUCIAL_DETECT_TUNING } from '../../core/sfm/fiducialDetect.js'
@@ -260,7 +262,69 @@ export function createImageFiducials({
     return { perImage, drafts: buffered.flatMap((r) => (r.out.drafts || []).map((d) => ({ ...d, imageId: r.id, imageName: r.name }))), applied, masksGenerated }
   }
 
+  // Tools ▸ Images ▾ ▸ Detect reseau (SAT-5): the reseau crosses of every image of a
+  // film sensor, at native resolution (workers/ops/detect.js detectReseau). Each image's
+  // earlier reseau detections are replaced; other fiducial marks stay. settings:
+  // { spacingMm, filmWidthMm, filmHeightMm, armMm, widthMm }, the sensor's scan pitch
+  // (`pixelSize`, mm/px) sets the scale. Returns { calibration, perImage }: the caller
+  // applies `calibration` to the sensor (useSensorsStore.setFiducialCalibration), which
+  // makes reconstruction correct each image by its own 'reseau' fit (ingest.js).
+  async function detectReseauForSensor({ sensor, settings, onProgress, shouldCancel } = {}) {
+    if (!sensor?.id) throw new Error('Choose a film sensor')
+    const pitchMm = Number(sensor.pixelSize)
+    if (!(pitchMm > 0)) throw new Error(`Sensor ${sensor.label}: set the scan pixel size (mm/px) first`)
+    const { spacingMm, filmWidthMm, filmHeightMm, armMm, widthMm } = settings
+    const nodes = reseauLattice({ spacingMm, filmWidthMm, filmHeightMm })
+    if (!nodes.length) throw new Error('The reseau spacing and film size give no crosses')
+    const targets = images.value.filter((img) => img.sensorId === sensor.id)
+    const opts = {
+      nodes, pitchMm, armPx: armMm / pitchMm, widthPx: Math.max(1, widthMm / pitchMm),
+      // The scan may sit up to ~half a cell off centre; the film deforms by up to ~0.15 mm.
+      placePx: 0.45 * spacingMm / pitchMm, refinePx: Math.max(4, Math.ceil(0.15 / pitchMm)),
+    }
+    const perImage = []
+    for (const [k, img] of targets.entries()) {
+      if (shouldCancel?.()) { log('Reseau detection cancelled', 'warn', 'Fiducial'); return { calibration: null, perImage, cancelled: true } }
+      onProgress?.(k, targets.length, img.name)
+      try {
+        await whenComputeReady(img)
+        const out = await detectReseau(computeSourceOf(img), opts, { onLog: (m, l, c) => log(m, l, c) })
+        img.fiducialDetections = [
+          ...(img.fiducialDetections || []).filter((d) => d.source !== 'reseau'),
+          ...out.detections.map((d) => ({ slot: d.slot, px: d.px, py: d.py, family: 'reseau', source: 'reseau',
+            confidence: d.score, reviewed: false })),
+        ]
+        const byId = new Map(nodes.map((n) => [n.id, n]))
+        const fit = fitFiducialTransform(out.detections.map((d) => ({ px: d.px, py: d.py, xMm: byId.get(d.slot).xMm,
+          yMm: byId.get(d.slot).yMm })), 'reseau', { spacingMm })
+        const row = { id: img.id, name: img.name, found: out.found, of: out.of, placed: out.placed, ms: out.ms,
+          affineRmsUm: fit?.affineRmsUm ?? null, rmsUm: fit?.rmsUm ?? null, outliers: fit?.outliers ?? null }
+        perImage.push(row)
+        log(`${img.name}: reseau ${out.found}/${out.of} crosses`
+          + (fit ? `; film deformation ${fit.affineRmsUm.toFixed(1)} µm RMS beyond the scan placement, `
+            + `${fit.rmsUm.toFixed(1)} µm left after the correction, ${pluralize(fit.outliers, 'outlier')}` : '; too few to fit')
+          + ` (${(out.ms / 1000).toFixed(1)} s)`, fit ? 'info' : 'warn', 'Fiducial')
+      } catch (err) {
+        perImage.push({ id: img.id, name: img.name, error: err?.message ?? String(err) })
+        log(`${img.name}: reseau detection failed — ${err?.message ?? err}`, 'error', 'Fiducial')
+      }
+    }
+    onProgress?.(targets.length, targets.length, '')
+    if (isPersisting()) save()
+    const prev = sensor.fiducialCalibration
+    const focalMm = sensor.focalUnit === 'mm' && sensor.focal > 0 ? sensor.focal : (prev?.focalMm ?? 0)
+    const calibration = {
+      version: 1, method: 'reseau', transform: 'reseau', allowReflection: false,
+      reseau: { spacingMm, filmWidthMm, filmHeightMm, armMm, widthMm },
+      marks: nodes.map((n) => ({ id: n.id, xMm: n.xMm, yMm: n.yMm })),
+      slotMap: Object.fromEntries(nodes.map((n) => [n.id, n.id])),
+      focalMm, ppxMm: prev?.ppxMm ?? 0, ppyMm: prev?.ppyMm ?? 0, scanPitchMm: pitchMm, fit: null,
+    }
+    return { calibration, perImage }
+  }
+
   return {
     addFiducialObservations, setFiducialDetection, removeFiducialDetection, detectFiducialsForSensor,
+    detectReseauForSensor,
   }
 }

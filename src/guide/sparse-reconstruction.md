@@ -63,7 +63,10 @@ and Auto can bend the block by metres towards its ends while the checkpoints nea
 middle stay good. With a calibration certificate entered in the sensor table, compare
 the checkpoint residuals of a run with **None**: if the error grows towards the block's
 edges under Auto and not under None, keep None. On scanned film the certificate does
-not describe the film's own deformation, which Auto partly absorbs, so try both.
+not describe the film's own deformation, which Auto partly absorbs, so try both —
+unless the camera has a [reseau](help:reseau) and you ran
+[Detect Reseau](guide:reseau): the film's deformation is then measured per scan, and
+Auto holds the certificate values on its own (the log says so).
 
 ## Check the result
 Camera positions should follow the capture path, most useful images should register,

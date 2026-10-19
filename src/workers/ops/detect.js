@@ -12,6 +12,7 @@ import { analyzeImageQuality, IMAGE_QUALITY_DEFAULTS } from '../../core/features
 import { fromScaledPx } from '../../core/sfm/geometry.js'
 import { KP_STRIDE } from '../../core/features/keypoints.js'
 import { isPyramid, openPyramid, rasterizePyramidTo, readNativeRect } from '../rasterSource.js'
+import { crossInWindow, fitLatticeAffine, nominalScanPosition } from '../../core/sfm/reseauDetect.js'
 import {
   FIDUCIAL_DETECT_TUNING, grayFromRgba, detectFiducialsInImage,
 } from '../../core/sfm/fiducialDetect.js'
@@ -466,6 +467,64 @@ export function makeDetectOps({ rasterize }) {
     } finally { bmp.close() }
   }
 
+  // Reseau crosses (SAT-5) in one scan, at native resolution, a window per cross.
+  // opts: { nodes: [{ id, i, j, xMm, yMm }] (reseauDetect.js reseauLattice), pitchMm (the
+  // scan pitch), armPx, widthPx, placePx (how far the scan may sit off centre: the
+  // central crosses' search radius, < half a cell or the lattice is ambiguous), refinePx
+  // (every other cross's search radius around its prediction: the film's deformation) }.
+  // The central 5 × 5 crosses place the lattice (an affine), then every cross is found
+  // near its prediction; a weak or far-off peak is left out. → { detections: [{ slot,
+  // px, py, score }] (pixel-edge native px), placed, found, of, ms }.
+  async function detectReseau([url, opts], { emit } = {}) {
+    const t0 = performance.now()
+    const { nodes, pitchMm, armPx, widthPx = 1, placePx, refinePx } = opts
+    const bmp = await decodeBitmap(url)
+    try {
+      const geom = { width: bmp.width, height: bmp.height, pitchMm }
+      const margin = Math.ceil(armPx) + 2 * Math.max(1, Math.round(widthPx)) + 3
+      const find = (px, py, radius) => {
+        const half = Math.ceil(radius) + margin
+        const win = cropGray(bmp, px - half, py - half, 2 * half + 1, 2 * half + 1)
+        const hit = crossInWindow(win, { armPx, widthPx })
+        if (!hit) return null
+        const x = win.originX + hit.x, y = win.originY + hit.y
+        return Math.hypot(x - px, y - py) <= radius + 0.5 ? { px: x, py: y, score: hit.score } : null
+      }
+      // 1. Place: the central crosses around their nominal positions, then the affine.
+      const central = nodes.filter((n) => Math.abs(n.i) <= 2 && Math.abs(n.j) <= 2)
+      let placed = []
+      for (const n of central) {
+        const p = nominalScanPosition(n, geom)
+        const hit = find(p.px, p.py, placePx)
+        if (hit) placed.push({ ...n, ...hit })
+      }
+      // Keep the crosses that agree on the shift (a wrong central hit is a texture peak).
+      const med = (v) => { const a = [...v].sort((x, y) => x - y); return a[a.length >> 1] }
+      if (placed.length) {
+        const offs = placed.map((h) => { const p = nominalScanPosition(h, geom); return [h.px - p.px, h.py - p.py] })
+        const mx = med(offs.map((o) => o[0])), my = med(offs.map((o) => o[1]))
+        placed = placed.filter((h, k) => Math.hypot(offs[k][0] - mx, offs[k][1] - my) <= Math.max(3, 0.01 * placePx + refinePx))
+      }
+      const placement = fitLatticeAffine(placed)
+      if (!placement) {
+        emit?.('log', [`Reseau: could not place the lattice (${pluralize(placed.length, 'central cross', 'central crosses')} found)`, 'warn', 'Images'])
+        return { result: { detections: [], placed: placed.length, found: 0, of: nodes.length, ms: performance.now() - t0 } }
+      }
+      // 2. Every cross near its prediction.
+      const hits = []
+      for (const n of nodes) {
+        const p = placement.predict(n.xMm, n.yMm)
+        if (p.px < 0 || p.py < 0 || p.px > bmp.width || p.py > bmp.height) continue
+        const hit = find(p.px, p.py, refinePx)
+        if (hit) hits.push({ slot: n.id, ...hit })
+      }
+      // A weak peak is texture, not a cross.
+      const floor = 0.35 * (hits.length ? med(hits.map((h) => h.score)) : 0)
+      const detections = hits.filter((h) => h.score >= floor)
+      return { result: { detections, placed: placed.length, found: detections.length, of: nodes.length, ms: performance.now() - t0 } }
+    } finally { bmp.close() }
+  }
+
   // Tools ▸ Images ▾ ▸ Image quality: sharpness/exposure of one image
   // (core/features/imageQuality.js). Decoded at twice the analysis size so the
   // module's own area filter, not the canvas's bilinear shrink, makes the final
@@ -484,5 +543,5 @@ export function makeDetectOps({ rasterize }) {
     return { result: { ...q, natW: raster.natW, natH: raster.natH } }
   }
 
-  return { detect, prepareFiducialTemplates, detectFiducials, detectFiducialSpots, imageQuality }
+  return { detect, prepareFiducialTemplates, detectFiducials, detectFiducialSpots, detectReseau, imageQuality }
 }

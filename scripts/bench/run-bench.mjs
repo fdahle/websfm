@@ -293,7 +293,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho', modeledit: 'modelEdit', scalebar: 'scaleBar', stats: 'modelStats', region: 'setRegion', regioncheck: 'regionCheck', togglepair: 'togglePair', aligncheck: 'alignCheck', georef: 'georef', rastersample: 'rasterSample', rasterstyle: 'rasterRestyle', meshtools: 'meshTools' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho', modeledit: 'modelEdit', scalebar: 'scaleBar', stats: 'modelStats', region: 'setRegion', regioncheck: 'regionCheck', togglepair: 'togglePair', aligncheck: 'alignCheck', georef: 'georef', rastersample: 'rasterSample', rasterstyle: 'rasterRestyle', meshtools: 'meshTools', reseau: 'reseau' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
@@ -693,6 +693,15 @@ try {
       if ((stage === 'recon' || stage === 'dense') && cfg.exportCloudsProject) await exportCloudProject(stage === 'recon' ? 'sparse' : 'dense', tag)
       if (stage === 'dense' && lidarCfg) await denseLidarCheck(entry)
       if (stage === 'ortho') await exportOrtho(tag)
+      if (stage === 'reseau' && cfg.reseauTruth) {
+        // A synthetic block (synth_sat.py): each image's fit against the film truth.
+        const { reseauTruthCheck } = await import('./synth/reseauTruth.mjs')
+        const check = await reseauTruthCheck(cfg.reseauTruth, result.stages[entry]?.fits ?? [])
+        result.stages[entry].truth = check
+        delete result.stages[entry].fits
+        console.log(`== reseau vs truth: ${JSON.stringify(check)}`)
+        await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+      }
       if (stage === 'texture') await exportTexturePages(tag)
       if (stage === 'texturedump') {
         const r = result.stages[entry]

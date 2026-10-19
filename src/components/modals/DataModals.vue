@@ -18,6 +18,7 @@ import CameraPoseTableModal from '../modals/CameraPoseTableModal.vue'
 import CloudSymbologyModal from '../modals/CloudSymbologyModal.vue'
 import FiducialCalibrateModal from '../modals/FiducialCalibrateModal.vue'
 import FiducialDetectModal from '../modals/FiducialDetectModal.vue'
+import ReseauModal from '../modals/ReseauModal.vue'
 import FootprintFromPosesModal from '../modals/FootprintFromPosesModal.vue'
 import FootprintImportModal from '../modals/FootprintImportModal.vue'
 import GcpImportModal from '../modals/GcpImportModal.vue'
@@ -62,7 +63,7 @@ const {
   imageTableOpen, importCloudData, importCloudOpen, importKindDeclared, importKindFile, importKindOpen,
   importRasterData, importRasterOpen, importVideoFile, infoImageId, maskManagerOpen, matchListOpen, poseTableOpen,
   qualityOpen, qualitySection, rasterStyleId, sensorTableOpen, sfmSourceOpen, symbologyCloudId,
-  symbologyProductKind,
+  symbologyProductKind, reseauOpen,
 } = storeToRefs(useModalsStore())
 const {
   alignedUuids, changeGcpRole, checkGcpZAgainstReferenceDem, closeSfmImport, commitSfmImport, convertGcpHeightsTo,
@@ -305,6 +306,10 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       @close="fiducialDetectOpen = false"
       @open-image="(id) => { openImageTab(id); fiducialDetectOpen = false; sensorTableOpen = false }"
     />
+  </Teleport>
+
+  <Teleport to="body">
+    <ReseauModal v-if="reseauOpen" @close="reseauOpen = false" />
   </Teleport>
 
 

@@ -53,7 +53,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     georeferenceOpen, scaleBarsOpen, depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
     filterCloudOpen, cropCloudOpen, mergeCloudsOpen, footprintFromPosesOpen, settingsOpen,
     projectSettingsOpen, aboutOpen, systemInfoOpen, debugSummaryOpen, filterCloudPreset, toolModal,
-    gcpTableOpen, projectPickerOpen, rasterStyleId, infoImageId, symbologyProductKind, sfmSourceOpen,
+    gcpTableOpen, projectPickerOpen, rasterStyleId, infoImageId, symbologyProductKind, sfmSourceOpen, reseauOpen,
   } = storeToRefs(useModalsStore())
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
@@ -241,6 +241,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'img-zoom-out':         if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.zoomOut(); break
       case 'detect-fiducials':     openFiducialDetect(); break
       case 'calibrate-fiducials':  openFiducialCalibrate(); break
+      case 'detect-reseau':        reseauOpen.value = true; break
       case 'open-gcp-table':       gcpTableOpen.value = true; refreshGcpReport(); break
       case 'open-glossary':        glossaryStore.openHome(); break
       case 'open-guide':           guideStore.openHome(); break
