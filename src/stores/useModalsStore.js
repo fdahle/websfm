@@ -90,6 +90,7 @@ export const useModalsStore = defineStore('modals', () => {
   // Automatic fiducial measurement on film scans. Holds the sensor id, not the
   // record — the modal reads the live sensor back out of the sensors store.
   const fiducialDetectOpen     = ref(false)
+  const reseauOpen             = ref(false)
   const fiducialDetectSensorId = ref(null)
   const fiducialCalibrateOpen     = ref(false)
   const fiducialCalibrateSensorId = ref(null)
@@ -160,6 +161,7 @@ export const useModalsStore = defineStore('modals', () => {
     sfmSourceOpen,
     infoImageId,
     fiducialDetectOpen,
+    reseauOpen,
     fiducialDetectSensorId,
     fiducialCalibrateOpen,
     fiducialCalibrateSensorId,

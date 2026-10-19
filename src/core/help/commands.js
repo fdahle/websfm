@@ -116,6 +116,7 @@ export const CONSOLE_NAMES = {
   'footprints-from-poses': ['footprints'],
   'detect-fiducials':  ['fiducials'],
   'calibrate-fiducials': ['calibrate fiducials', 'fiducial-calibration'],
+  'detect-reseau':     ['reseau', 'detect reseau'],
   'image-quality':     ['image quality', 'blur', 'sharpness'],
   'optimize-cameras':  ['optimize'],
   'gradual-selection': ['gradual'],

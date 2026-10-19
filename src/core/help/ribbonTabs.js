@@ -245,6 +245,8 @@ export const TABS = [
               blurb: 'Find the fiducial marks on scanned film frames' },
             { id: 'calibrate-fiducials', label: 'Calibrate fiducials…', icon: 'calibration', needs: ['filmSensor'],
               blurb: 'Camera-certificate or batch-estimated fiducial layout' },
+            { id: 'detect-reseau', label: 'Detect reseau…', icon: 'target', needs: ['images', 'imagesReady'],
+              blurb: 'Measure the reseau crosses: scan placement and film deformation per scan' },
             { section: 'Edit' },
             // A mode on the image in front; brush/eraser/rect/invert/undo live in the
             // floating MaskToolbar over the image view.

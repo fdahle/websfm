@@ -289,6 +289,14 @@ export const DEM_DEFAULTS = {
   fillHoles: false, // also interpolate every enclosed nodata area (under removed buildings)
 }
 
+// Reseau crosses (Tools ▸ Images ▾ ▸ Detect reseau, SAT-5): the KH-9 mapping camera's
+// 1 cm grid of crosses. Film size comes from the scans (image size × scan pitch).
+export const RESEAU_DEFAULTS = {
+  spacingMm: 10,   // cross spacing on the film
+  armMm: 0.5,      // half-length of a cross arm
+  widthMm: 0.03,   // line width
+}
+
 // Orthophoto (core/products/ortho.js). Mirrored by OrthoModal.vue.
 // UI units: depthTolRel is a %, ÷100 on run; maxCost 0 ⇒ Infinity (no gate).
 export const ORTHO_DEFAULTS = {

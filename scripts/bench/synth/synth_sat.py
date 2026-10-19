@@ -20,6 +20,13 @@ across a frame) is in the images as it is in real ones. The camera: x right, y d
 z forward; film mm x right, y up; pixel-edge coordinates u = W/2 + x_mm / pitch,
 v = H/2 - y_mm / pitch. No lens distortion, no occlusion (moderate relief).
 
+Film (SAT-5): `--film-warp-um` deforms each frame's film by a smooth, non-affine field
+(sine and quadratic terms, its own phases per frame): a point exposed at film position p
+is scanned at q = p + d(p). `--scan-rot-deg` / `--scan-shift-px` place each frame on the
+scanner (a rotation and shift, up to the given size, random per frame). The reseau
+crosses are exposed at their nominal positions and deform with the film; the GCP
+observations go through the same chain. truth.json records each frame's `film`.
+
 The texture is procedural and evaluated at the ground point (hashed value noise down to
 2 nadir GSD, Voronoi fields with darker boundaries, hillshade), so images of any size
 need no texture raster and different scans of the same ground agree. Deterministic per
@@ -258,9 +265,9 @@ def render_rows(job):
     rr0, rr1 = max(0, r0 - pad), min(H, r1 + pad)
     v = np.arange(rr0, rr1) + 0.5
     u = np.arange(W) + 0.5
-    xmm = (u - W / 2) * pitch
-    ymm = (H / 2 - v) * pitch
-    X, Y = np.meshgrid((xmm - s['ppx']) / f, -(ymm - s['ppy']) / f)
+    U, V = np.meshgrid(u, v)
+    xmm, ymm = scan_to_film(cam.get('film'), s, U, V)
+    X, Y = (xmm - s['ppx']) / f, -(ymm - s['ppy']) / f
     dc = np.stack([X, Y, np.ones_like(X)], axis=-1)
     dc /= np.linalg.norm(dc, axis=-1, keepdims=True)
     R = np.array(cam['R'])
@@ -286,24 +293,64 @@ def render_rows(job):
 
 
 def project(cam, s, P):
-    """ECEF points (N×3) → pixel-edge u, v and the depth."""
+    """ECEF points (N×3) → scan pixel-edge u, v (film deformation and scanner placement
+    included) and the depth."""
     Xc = (P - np.array(cam['C'])) @ np.array(cam['R']).T
     xmm = s['ppx'] + s['focal'] * Xc[:, 0] / Xc[:, 2]
     ymm = s['ppy'] - s['focal'] * Xc[:, 1] / Xc[:, 2]
-    return s['W'] / 2 + xmm / s['pitch'], s['H'] / 2 - ymm / s['pitch'], Xc[:, 2]
+    u, v = film_to_scan(cam.get('film'), s, xmm, ymm)
+    return u, v, Xc[:, 2]
 
 
-def draw_reseau(img, s, spacing_mm, arm_mm=0.5, width_mm=0.03):
-    """Black crosses on a regular film grid centred on the frame (KH-9 MC: 1 cm)."""
-    W, H, p = s['W'], s['H'], s['pitch']
+def film_warp(film, s, x, y):
+    """The film's deformation d(p) (mm) at exposed film position p = (x, y) mm."""
+    if not film or film['amp_mm'] == 0:
+        return np.zeros_like(x), np.zeros_like(y)
+    A, (p0, p1) = film['amp_mm'], film['phase']
+    u, v = x / (s['film_w'] / 2), y / (s['film_h'] / 2)
+    dx = A * (0.6 * np.sin(np.pi * u + p0) * np.cos(0.5 * np.pi * v) + 0.4 * u * v)
+    dy = A * (0.6 * np.cos(0.5 * np.pi * u) * np.sin(np.pi * v + p1) + 0.3 * (u * u - 1 / 3))
+    return dx, dy
+
+
+def film_to_scan(film, s, x, y):
+    """Exposed film mm → scan pixel-edge u, v: deform, then place on the scanner."""
+    dx, dy = film_warp(film, s, x, y)
+    qx, qy = x + dx, y + dy
+    th = math.radians(film['rot_deg']) if film else 0.0
+    sx, sy = film['shift_px'] if film else (0.0, 0.0)
+    xr, yr = math.cos(th) * qx - math.sin(th) * qy, math.sin(th) * qx + math.cos(th) * qy
+    return s['W'] / 2 + sx + xr / s['pitch'], s['H'] / 2 + sy - yr / s['pitch']
+
+
+def scan_to_film(film, s, u, v):
+    """Scan pixel-edge u, v → the film position exposed there (inverts film_to_scan)."""
+    th = math.radians(film['rot_deg']) if film else 0.0
+    sx, sy = film['shift_px'] if film else (0.0, 0.0)
+    xr, yr = (u - s['W'] / 2 - sx) * s['pitch'], -(v - s['H'] / 2 - sy) * s['pitch']
+    qx, qy = math.cos(th) * xr + math.sin(th) * yr, -math.sin(th) * xr + math.cos(th) * yr
+    x, y = qx, qy
+    for _ in range(4):  # p = q − d(p); |∂d/∂p| ≪ 1, so this converges at once
+        dx, dy = film_warp(film, s, x, y)
+        x, y = qx - dx, qy - dy
+    return x, y
+
+
+def draw_reseau(img, s, spacing_mm, film=None, arm_mm=0.5, width_mm=0.03):
+    """Black crosses on a regular film grid centred on the frame (KH-9 MC: 1 cm), exposed at
+    their nominal positions and moved with the film."""
+    p = s['pitch']
     arm = max(2, round(arm_mm / p))
     th = max(1, round(width_mm / p))
     n = 0
     for gx in np.arange(-math.floor(s['film_w'] / 2 / spacing_mm), math.floor(s['film_w'] / 2 / spacing_mm) + 1) * spacing_mm:
         for gy in np.arange(-math.floor(s['film_h'] / 2 / spacing_mm), math.floor(s['film_h'] / 2 / spacing_mm) + 1) * spacing_mm:
-            u, v = int(round(W / 2 + gx / p)), int(round(H / 2 - gy / p))
-            cv2.line(img, (u - arm, v), (u + arm, v), 10, th)
-            cv2.line(img, (u, v - arm), (u, v + arm), 10, th)
+            fu, fv = film_to_scan(film, s, np.float64(gx), np.float64(gy))
+            # Sub-pixel centres: draw at 16× and let the line rasteriser place them. cv2
+            # takes pixel-index coordinates (integer = pixel centre): pixel-edge − ½.
+            u, v = int(round((float(fu) - 0.5) * 16)), int(round((float(fv) - 0.5) * 16))
+            cv2.line(img, (u - arm * 16, v), (u + arm * 16, v), 10, th, lineType=cv2.LINE_AA, shift=4)
+            cv2.line(img, (u, v - arm * 16), (u, v + arm * 16), 10, th, lineType=cv2.LINE_AA, shift=4)
             n += 1
     return n
 
@@ -328,6 +375,9 @@ def main():
     ap.add_argument('--base-m', type=float, default=400.0)
     ap.add_argument('--dem-spacing-m', type=float, default=30.0)
     ap.add_argument('--reseau-mm', type=float, default=0.0, help='reseau cross spacing (KH-9 MC 10); 0 = none')
+    ap.add_argument('--film-warp-um', type=float, default=0.0, help='film deformation amplitude (µm); 0 = none')
+    ap.add_argument('--scan-rot-deg', type=float, default=0.0, help='scanner placement rotation, up to ± this per frame')
+    ap.add_argument('--scan-shift-px', type=float, default=0.0, help='scanner placement shift, up to ± this per axis')
     ap.add_argument('--gcps', type=int, default=48)
     ap.add_argument('--gcp-noise-px', type=float, default=0.0)
     ap.add_argument('--gcp-acc-m', type=float, default=2.0)
@@ -359,6 +409,14 @@ def main():
         C = geodetic_to_ecef(np.float64(lat), np.float64(lon0), np.float64(a.altitude_m))
         cams.append({'name': f'S{i + 1:02d}.tif', 'C': C.tolist(), 'R': R.tolist(), 'lat': math.degrees(lat),
                      'lon': a.lon, 'h': a.altitude_m, 't0': a.base_m + a.relief_m / 2})
+    # Film deformation + scanner placement per frame, from their own stream (the GCPs
+    # and attitudes of a block without them stay what they were).
+    frng = np.random.default_rng(a.seed + 7)
+    for cam in cams:
+        cam['film'] = {'amp_mm': a.film_warp_um / 1000 * frng.uniform(0.6, 1.0),
+                       'phase': frng.uniform(-math.pi, math.pi, 2).tolist(),
+                       'rot_deg': a.scan_rot_deg * frng.uniform(-1, 1),
+                       'shift_px': (a.scan_shift_px * frng.uniform(-1, 1, 2)).tolist()}
 
     scene = {'W': W, 'H': H, 'pitch': a.pitch_mm, 'focal': a.focal_mm, 'ppx': a.pp_mm[0], 'ppy': a.pp_mm[1],
              'film_w': a.film_w_mm, 'film_h': a.film_h_mm, 'seed': a.seed, 'blur': a.blur_px, 'grain': a.grain_dn,
@@ -408,8 +466,8 @@ def main():
 
     reseau = 0
     if a.reseau_mm > 0:
-        for img in imgs:
-            reseau = draw_reseau(img, scene, a.reseau_mm)
+        for cam, img in zip(cams, imgs):
+            reseau = draw_reseau(img, scene, a.reseau_mm, cam.get('film'))
     big = W * H > 3.5e9
     for cam, img in zip(cams, imgs):
         with rasterio.open(os.path.join(a.out, 'images', cam['name']), 'w', driver='GTiff', width=W, height=H, count=1,
@@ -424,7 +482,7 @@ def main():
         cam = cams[k % a.frames]
         u = rng.uniform(0.08, 0.92) * W
         v = rng.uniform(0.08, 0.92) * H
-        xmm, ymm = (u - W / 2) * a.pitch_mm, (H / 2 - v) * a.pitch_mm
+        xmm, ymm = scan_to_film(cam.get('film'), scene, u, v)
         dc = np.array([(xmm - a.pp_mm[0]) / a.focal_mm, -(ymm - a.pp_mm[1]) / a.focal_mm, 1.0])
         d = (np.array(cam['R']).T @ (dc / np.linalg.norm(dc)))[None, :]
         lat, lon, _, _ = intersect(np.array(cam['C']), d, cam['t0'], iters=20)

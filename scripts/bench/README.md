@@ -176,6 +176,10 @@ stage again with config key `dense:loose`.
 - An export spec may name the cloud: `{ kind, cloud, cloudName }` exports the cloud of
   that kind with that exact name (a derived or edited copy) instead of the computed one.
   For `kind: "tiles3d"` it selects that cloud or mesh first (3D Tiles writes the selection).
+- `reseau[:tag]`: Tools ▸ Images ▾ ▸ Detect reseau on the block's sensor (settings from
+  `cfg.reseau`, film size from the scans) and applies the 'reseau' calibration; with
+  `reseauTruth: <truth.json>` (a `synth_sat.py --reseau-mm … --film-warp-um …` block) each
+  image's fit is scored against the film truth in scan pixels (SAT-5: < 0.5 px).
 - `sensor`: applies the config's calibration again (`hist.intrinsics`, else `sensor`),
   e.g. after `reopen` on a project saved before the bench persisted it (2026-10-19).
 - `georef`: Georeferencing ▸ Georeference, from GCPs or the camera positions, into the
@@ -289,6 +293,8 @@ Rays are intersected with the terrain in ECEF, so Earth curvature is in the imag
 
     python synth/synth_sat.py <out> --pitch-mm 0.112    # 6 × 4107×2054, ~2 min
     python synth/synth_sat.py <out> --pitch-mm 0.028    # 6 × 16k×8k (¼ of KH-9 native)
+    python synth/synth_sat.py <out> --pitch-mm 0.028 --frames 4 --reseau-mm 10 \
+        --film-warp-um 100 --scan-rot-deg 0.3 --scan-shift-px 40   # SAT-5: reseau + deformed film
 
 `exportCloudsProject: true` in a config writes the sparse (with view counts) and dense
 clouds in the project CRS after recon / dense (`<out>.sparse.project.bin`, Float64), and

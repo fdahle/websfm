@@ -41,7 +41,7 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       const cal = s?.fiducialCalibration
       if (s?.kind !== 'film' || !cal?.marks?.length) continue
       const obs = calibratedFiducialPairs(img, s)
-      const fit = fitFiducialTransform(obs, cal.transform || 'affine')
+      const fit = fitFiducialTransform(obs, cal.transform || 'affine', { spacingMm: cal.reseau?.spacingMm })
       if (!fit) {
         log(`${img.name} — fiducial fit failed (${pluralize(obs.length, 'usable mark')}, `
           + `need ≥3); falling back to standard intrinsics`, 'warn', 'Reconstruction')
@@ -49,7 +49,9 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       }
       const pitchUm = fit.pitchMm * 1000
       log(`${img.name} — fiducial ${cal.transform || 'affine'} fit: pitch ${pitchUm.toFixed(2)}µm/px, `
-        + `${fit.rotDeg == null ? '' : `rot ${fit.rotDeg.toFixed(2)}°, shear ${fit.shear.toFixed(4)}, `}RMS ${fit.rmsUm.toFixed(1)}µm`,
+        + `${fit.rotDeg == null ? '' : `rot ${fit.rotDeg.toFixed(2)}°, shear ${fit.shear.toFixed(4)}, `}RMS ${fit.rmsUm.toFixed(1)}µm`
+        + (fit.residual ? ` over ${pluralize(fit.crosses, 'reseau cross', 'reseau crosses')}, film deformation `
+          + `${fit.affineRmsUm.toFixed(1)}µm RMS corrected` : ''),
         'info', 'Reconstruction')
       if (fit.rmsUm > 0.5 * pitchUm) {
         log(`${img.name} — fiducial residual ${fit.rmsUm.toFixed(1)}µm exceeds `

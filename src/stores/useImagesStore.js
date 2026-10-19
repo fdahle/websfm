@@ -455,7 +455,7 @@ export const useImagesStore = defineStore('images', () => {
 
   // Fiducial marks and detections (images/fiducials.js).
   const {
-    addFiducialObservations, setFiducialDetection, removeFiducialDetection, detectFiducialsForSensor,
+    addFiducialObservations, setFiducialDetection, removeFiducialDetection, detectFiducialsForSensor, detectReseauForSensor,
   } = createImageFiducials({
     imageById, images, isPersisting, log, save, updateMask, whenComputeReady,
   })
@@ -747,6 +747,7 @@ export const useImagesStore = defineStore('images', () => {
     setFiducialDetection,
     removeFiducialDetection,
     detectFiducialsForSensor,
+    detectReseauForSensor,
     detectOne,
     detectAll,
     importFeatures,

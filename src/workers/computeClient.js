@@ -154,6 +154,11 @@ export function prepareFiducialTemplates(url, obs, options = {}, { onLog } = {})
 // into every call by design — do NOT add their buffers to a transfer list here,
 // they are reused across all images of the sensor and transferring would detach
 // them after the first.
+// Reseau crosses in one scan (SAT-5, workers/ops/detect.js detectReseau).
+export function detectReseau(url, options, { onLog } = {}) {
+  return call('detectReseau', [url, options], { onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined })
+}
+
 export function detectFiducials(url, templates, predictions, options = {}, { onLog } = {}) {
   return call('detectFiducials', [url, templates, predictions, options], {
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,

@@ -103,13 +103,22 @@ export function resolveGates({ cfg, settings, images, log }) {
 //
 // Mutates cfg.refineIntrinsics / cfg.selfCalStaged and records the resolution on
 // `selfCalRecord`. Runs after ingest (it needs `anyCalibratedDistortion`).
-export function resolveRefineIntrinsics({ cfg, anyCalibratedDistortion, selfCalRecord, log }) {
+// A reseau-calibrated film camera (SAT-5) is held too: its film's deformation is
+// measured per image, and the certificate gives the rest. Self-calibrating radial
+// distortion against a short strip of wide-angle frames bowed the block instead
+// (synthetic KH-9, 28 µm: checkpoints V 5.5 m with a +20 m bowl at 125 km under 'auto',
+// 3.5 m and none held; plan-satellite ▸ SAT-5).
+export function resolveRefineIntrinsics({ cfg, anyCalibratedDistortion, anyReseauCalibrated = false, selfCalRecord, log }) {
   if (cfg.refineIntrinsics === 'auto') {
     if (anyCalibratedDistortion) {
       cfg.refineIntrinsics = 'none'
       log(`refineIntrinsics 'auto' → 'none' `
         + '(a calibrated distortion model exists — self-cal off to avoid double-correcting)',
         'info', 'Reconstruction')
+    } else if (anyReseauCalibrated) {
+      cfg.refineIntrinsics = 'none'
+      log(`refineIntrinsics 'auto' → 'none' (a reseau-calibrated film camera: the film's deformation is `
+        + 'measured and the certificate holds; choose a self-calibration explicitly to refine it)', 'info', 'Reconstruction')
     } else {
       // Staged self-cal (WS2): registration + rescue solve the base 'f,k1'; the
       // post-filter passes escalate to k2 / principal-point / k3 as the camera and

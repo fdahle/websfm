@@ -40,7 +40,9 @@ import { triangulateGcp } from '/src/core/sfm/gcpTriangulation.js'
 import { encodeSfmInput } from './sfmInputDump.js'
 import { demToGeoTiff } from '/src/core/products/exporters.js'
 import { crsTagInfo } from '/src/core/products/geotiff.js'
-import { emptyFiducialCalibration } from '/src/core/sfm/fiducialModel.js'
+import { emptyFiducialCalibration, calibratedFiducialPairs } from '/src/core/sfm/fiducialModel.js'
+import { fitFiducialTransform } from '/src/core/sfm/fiducialCalibration.js'
+import { RESEAU_DEFAULTS } from '/src/core/defaults.user.js'
 import { buildBorderMask } from '/src/core/mask.js'
 import { FIDUCIAL_SPOT_DEFAULTS, VIDEO_IMPORT_DEFAULTS } from '/src/core/defaults.user.js'
 import { analysisTimes, intervalTimes, selectKeyframes } from '/src/core/io/videoFrames.js'
@@ -733,6 +735,25 @@ window.bench = {
     // A later run's `sensor` override restores to these values, not the EXIF guess.
     sensorBase[first.id] = Object.fromEntries(SENSOR_OVERRIDE_FIELDS.map((k) => [k, first[k]]))
     return { sensors: sensorsStore.sensors.length, ...Object.fromEntries(Object.keys(fields).map((k) => [k, first[k]])) }
+  },
+  // Tools ▸ Images ▾ ▸ Detect reseau (SAT-5) on the block's one sensor, as the dialog
+  // runs it: the crosses of every image, the 'reseau' calibration applied. Film size
+  // defaults to the first image × the scan pitch. Returns the per-image numbers and each
+  // image's fit (scan px → camera mm) for the runner's truth check.
+  async reseau(overrides = {}) {
+    const sensor = sensorsStore.sensors[0]
+    if (!sensor) return { error: 'no sensor' }
+    const img0 = images.images[0], pitch = Number(sensor.pixelSize)
+    const settings = { ...RESEAU_DEFAULTS, filmWidthMm: (img0?.meta?.width ?? 0) * pitch,
+      filmHeightMm: (img0?.meta?.height ?? 0) * pitch, ...overrides }
+    const t0 = performance.now()
+    const { calibration, perImage } = await images.detectReseauForSensor({ sensor, settings })
+    if (calibration) sensorsStore.setFiducialCalibration(sensor.id, calibration)
+    const fits = images.images.map((img) => {
+      const fit = fitFiducialTransform(calibratedFiducialPairs(img, sensor), 'reseau', { spacingMm: settings.spacingMm })
+      return fit && { name: img.name, forward: fit.forward, residual: fit.residual }
+    }).filter(Boolean)
+    return { seconds: (performance.now() - t0) / 1000, settings, perImage, fits }
   },
   // One static mask for every image (fiducial borders, data strip): a PNG data URL,
   // opaque = excluded, transparent = kept (core/mask.js).
