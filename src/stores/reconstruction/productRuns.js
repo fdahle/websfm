@@ -1,5 +1,5 @@
 import { computeSourceOf } from '../../utils/image.js'
-import { DEFAULT_BUDGET_BYTES } from '../../core/dense/memBudget.js'
+import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
 import { stageDemPoints, coreExtent, DEM_STAGE_BYTES_PER_POINT } from '../../core/products/dem.js'
 import { demGridFor, orthoGridFor, orthoDemSurface } from '../../core/products/rasterSize.js'
 import { gridGeometry } from '../../core/products/surface.js'
@@ -7,7 +7,8 @@ import { frameFromSpec } from '../../core/products/frameSpec.js'
 import { pointView } from '../../core/products/pointView.ts'
 import { isStreamed } from '../../core/lod/streamed.js'
 import { regionContains } from '../../core/products/region.js'
-import { generateDem as workerGenerateDem, generateOrtho as workerGenerateOrtho } from '../../workers/computeClient.js'
+import { generateDem as workerGenerateDem, generateOrtho as workerGenerateOrtho, releaseIdleWorkers } from '../../workers/computeClient.js'
+import { bufferFailureText } from '../../core/bufferLimit.js'
 import * as opfs from '../../utils/opfs.js'
 
 // Generating the computed rasters, split out of useReconstructionStore: the DEM
@@ -20,6 +21,7 @@ export function createProductRuns({
   activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf, groundSource,
   images, imagesStore, isPersisting, log, mainSparseCloud, meshCloud, ortho, orthoSurfaces, projects,
   reconStatus, saveProductRecord, sparseCameras, withPreviewUrl, extractCloudPoints = null, validGeoref = null,
+  clouds = null,
 }) {
   const logLine = log
   // How a DEM run reads its source cloud. A resident cloud whose full copy would be
@@ -101,6 +103,9 @@ export function createProductRuns({
       const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
         uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
       }))
+      // Fresh workers: idle ones keep their last run's garbage charged to the tab's
+      // shared buffer pool (computeClient releaseIdleWorkers).
+      releaseIdleWorkers()
       const grid = await workerGenerateDem(
         { points, cameras, frame: frameSpec, settings: { ...settings, memBudgetBytes: budgetBytes, style: dem.value?.style ?? null } },
         { transfer: [points.pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
@@ -121,7 +126,7 @@ export function createProductRuns({
       if (isPersisting() && orthoWasDem) opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
       reconStatus.value = 'done'
     } catch (err) {
-      log(`DEM error: ${err?.message ?? err}`, 'error', 'Products')
+      log(`DEM error: ${bufferFailureText(err?.message ?? err, 'Lower the memory budget (Settings ▸ Compute) or build at a coarser GSD')}`, 'error', 'Products')
       reconStatus.value = 'error'
     }
   }
@@ -277,9 +282,14 @@ export function createProductRuns({
       }
       // The machine's memory gate (Settings ▸ Compute): the worker sizes its map/photo
       // cache from it and refuses, with the figures, a run whose working set exceeds it.
+      // `pageBytes`: what the page itself holds in the tab's one buffer pool, so the cache
+      // also leaves the tab room for it (a 98 M-point dense cloud is ~3 GB of it).
       const memBudgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+      const pageBytes = pageBufferBytes() + (streamed ? 0 : mapsPayload.reduce((n, m) => n + bytesOf(m), 0))
+      log(`Ortho: the open project holds ${formatBytes(pageBytes)} of buffers in this tab`, 'debug', 'Products')
+      releaseIdleWorkers() // as for the DEM
       const res = await workerGenerateOrtho(
-        { surface, maps: mapsPayload, streamed, settings: { ...settings, memBudgetBytes }, images: photos },
+        { surface, maps: mapsPayload, streamed, settings: { ...settings, memBudgetBytes, pageBytes }, images: photos },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl, f) => onProgress?.(dn, t, lbl, f) },
       )
       if (!stillCurrent()) return
@@ -299,9 +309,24 @@ export function createProductRuns({
       reconStatus.value = 'done'
     } catch (err) {
       if (!stillCurrent()) return
-      log(`Ortho error: ${err?.message ?? err}`, 'error', 'Products')
+      log(`Ortho error: ${bufferFailureText(err?.message ?? err,
+        'Build at a coarser GSD, or lower the memory budget (Settings ▸ Compute) so the photo cache leaves room for the rest of the tab')}`, 'error', 'Products')
       reconStatus.value = 'error'
     }
+  }
+
+  // ArrayBuffers the page holds for the project — clouds (and a sparse cloud's
+  // columns), the mesh, the DEM plane — which share the tab's buffer pool with every
+  // worker (core/bufferLimit.js TAB_BUFFER_POOL_BYTES).
+  const bytesOf = (o) => {
+    let n = 0
+    if (o) for (const v of Object.values(o)) if (ArrayBuffer.isView(v)) n += v.byteLength
+    return n
+  }
+  function pageBufferBytes() {
+    let n = 0
+    for (const c of clouds?.value ?? []) n += bytesOf(c) + bytesOf(c.attributes) + bytesOf(c.points)
+    return n + bytesOf(dem.value)
   }
 
   // ── Size before the run (the DEM / Orthophoto dialogs' readout) ───────────────

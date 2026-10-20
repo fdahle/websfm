@@ -11,9 +11,12 @@ plane is available for genuinely flat scenes). Colour is read from the original 
 at full resolution, so the orthophoto can be as sharp as the photos even when the depth
 maps were computed at a lower quality. The orthophoto is built in blocks of 2,048 ×
 2,048 pixels, each from only the photos that see it; photos are kept in memory across
-neighbouring blocks within the memory budget (Settings ▸ Compute), so a very fine
-orthophoto decodes some photos more than once. If even one block, its photos and the
-overviews do not fit the budget, the build stops and the log gives the figures.
+neighbouring blocks within the memory budget (Settings ▸ Compute). When they don't all
+fit, neighbouring blocks are built together in groups, so each photo is read once per
+pass for the whole group instead of once per block; the log names the groups and the
+reads it predicted. A very fine orthophoto may still decode some photos more than once.
+If even one block, its photos and the overviews do not fit the budget, the build stops
+and the log gives the figures.
 
 ## Surface
 <!-- param: surface default: DEM -->
@@ -107,8 +110,9 @@ less straight down its photo looks, and every pixel of seam costs the colour
 difference between the two photos there. The seams are placed once for the whole
 orthophoto on a coarse grid of about a million cells, before the blocks; on a large
 orthophoto one grid cell spans several pixels, so seams run in small steps that the
-seam blending hides. It reads every photo once more at low resolution (shared with
-Colour balance), and the log reports how many cells moved off their most nadir photo.
+seam blending hides. It samples every photo once more at low resolution (shared with
+Colour balance), from the depth map's own copy of its colours when that is fine enough,
+and the log reports how many cells moved off their most nadir photo.
 
 **Most nadir photo** gives each area to the photo that looks most straight down on
 it, at the finest ground resolution, whatever lies there: the seams run halfway
@@ -121,8 +125,9 @@ Mosaic only. Evens out exposure: each photo gets one brightness gain per colour,
 fitted so overlapping photos agree. The log lists the smallest, median and largest
 gain. A gain far from 1 points at a photo with very different exposure, such as a
 camera that changed its aperture during the flight; a gain that hits the 0.25–4 limit
-(two stops either way) is reported as a warning. The fit reads every photo once more
-at low resolution, which adds a short pass before the blocks.
+(two stops either way) is reported as a warning. The fit samples every photo once more
+at low resolution, which adds a short pass before the blocks; it uses the depth map's
+own copy of the photo's colours when that is fine enough, so it decodes no photo.
 
 ## Seam blending
 <!-- param: seamBlend default: Multiband -->

@@ -31,6 +31,7 @@ import {
   DEM_DEFAULTS, ORTHO_DEFAULTS, MESH_DEFAULTS, DECIMATE_MESH_DEFAULTS, TEXTURE_DEFAULTS,
 } from '/src/core/defaults.user.js'
 import { learnedDetector } from '/src/core/features/learnedDetectors.js'
+import { LOD_MIN_POINTS } from '/src/core/lod/build.js'
 import { MODEL_CACHE_NAME, modelUrl } from '/src/core/models/registry.js'
 import { cameraPositionCheck, gcpCheck } from '/src/core/eval/positionCheck.js'
 import { applySimilarity } from '/src/core/products/georef.js'
@@ -427,6 +428,16 @@ window.bench = {
     const { memBudgetBytes } = useComputeSettings()
     const { gsd, ...rest } = { ...DEM_DEFAULTS, ...overrides }
     const settings = { ...rest, memBudgetBytes: memBudgetBytes.value, ...(gsd > 0 ? { gsd } : {}) }
+    // A dense cloud's octree is built in the background after fusion (cloudLod.js
+    // buildMissing), and a cloud too large to copy builds its DEM from it. A user opens
+    // Build DEM after that; the bench waits for it the same way (up to an hour).
+    const needsLod = () => { const c = recon.demSource?.cloud; return c?.kind === 'dense' && !c.lod && c.count >= LOD_MIN_POINTS }
+    if (needsLod()) {
+      const w0 = performance.now()
+      while (needsLod() && performance.now() - w0 < 3600e3) await new Promise((r) => setTimeout(r, 2000))
+      log(`Bench: waited ${((performance.now() - w0) / 1000).toFixed(0)} s for the dense cloud's octree`
+        + (needsLod() ? ' (still missing — the DEM runs without it)' : ''), 'info', 'Products')
+    }
     const t0 = performance.now()
     await recon.generateDem(settings, report)
     const d = recon.dem
@@ -541,10 +552,14 @@ window.bench = {
   // Orthophoto, settings resolved exactly as OrthoModal.run() does; returns the
   // ortho's own quality figures (its `stats` run record, core/eval/orthoStats.js).
   async ortho({ ...overrides } = {}) {
+    const { memBudgetBytes } = useComputeSettings()
     const { depthTolRel, maxCost, gsd: gsdIn, ...rest } = { ...ORTHO_DEFAULTS, ...overrides }
     // gsd "dem": the built DEM's cell size, so two surfaces can be compared at one GSD.
     const gsd = gsdIn === 'dem' ? recon.dem?.gsd ?? 0 : gsdIn
-    const settings = { ...rest, gsd: gsd > 0 ? gsd : 0, depthTolRel: depthTolRel / 100, maxCost: maxCost > 0 ? maxCost : Infinity }
+    // The modal passes Settings ▸ Compute's budget (it sizes the map/photo cache); a
+    // stage `memBudgetBytes` overrides it, as for depth and dense.
+    const settings = { ...rest, memBudgetBytes: overrides.memBudgetBytes ?? memBudgetBytes.value,
+      gsd: gsd > 0 ? gsd : 0, depthTolRel: depthTolRel / 100, maxCost: maxCost > 0 ? maxCost : Infinity }
     const t0 = performance.now()
     await recon.generateOrtho(settings, report)
     const o = recon.ortho

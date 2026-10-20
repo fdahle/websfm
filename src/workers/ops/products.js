@@ -5,13 +5,14 @@ import { demRenderOptions } from '../../core/products/productStyle.js'
 import { rasterToPng } from '../rasterPreview.js'
 import { frameFromSpec, describeFrame } from '../../core/products/frameSpec.js'
 import { rasterizeDem, coreExtent, demGeometry, rasterizeDemBlocks, fillEnclosedGaps } from '../../core/products/dem.js'
-import { orthorectifyTiled, orthoTiledWorkingBytes, orthoMapPxPerCell, ORTHO_BLOCK, MAX_SEAM_CELLS } from '../../core/products/ortho.js'
+import { orthorectifyTiled, orthoTiledWorkingBytes, orthoMapPxPerCell, orthoCacheLog, ORTHO_BLOCK, MAX_SEAM_CELLS } from '../../core/products/ortho.js'
 import { GAIN_MIN, GAIN_MAX } from '../../core/products/colourGains.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import { describeOrthoStats } from '../../core/eval/orthoStats.js'
 import { meshSurface, planeSurface } from '../../core/products/surface.js'
 import { createCogBuilder, geoKeysForEpsg, crsTagInfo } from '../../core/products/geotiff.js'
 import { DEM_PLANE_MAX, DEM_TILE, ORTHO_TILE, MAX_RASTER_SIDE, orthoGridFor } from '../../core/products/rasterSize.js'
+import { TAB_BUFFER_POOL_BYTES, isBufferAllocationFailure } from '../../core/bufferLimit.js'
 import { formatBytes } from '../../core/dense/memBudget.js'
 import { traceContours, contoursToGeoJSON, contoursToDxf } from '../../core/products/contours.js'
 import { terrainProducts } from '../../core/products/terrain.js'
@@ -24,6 +25,13 @@ import { deflateTile } from '../deflateTile.js'
 import { planDemWindow, demCogLevels, maskFromNaN } from '../../core/products/demWindow.js'
 import { fromBlob } from 'geotiff'
 
+// The browser refusing memory, however it says it: V8's RangeError, a canvas's "Out of
+// memory at ImageData creation", a Blob read's NotReadableError (core/bufferLimit.js), or
+// an image decode that "could not be decoded" under the same pressure (quarry run 2; a
+// truly broken photo then fails its one retry too and falls back as before).
+const isOutOfMemory = (err) => isBufferAllocationFailure(err)
+  || /out of memory|array buffer allocation failed|requested file could not be read|could not be decoded/i.test(err?.message ?? '')
+
 // The ortho's source photos (plan-ortho-mosaic O1). `images` comes from the store, one
 // per depth map: { uuid, name, url, K (the camera's full-resolution K), dist, selfCal,
 // fiducial }. Returns orthorectifyStreamed's loadImage(mi, map): the photo decoded at
@@ -34,7 +42,9 @@ import { fromBlob } from 'geotiff'
 function makePhotoLoader(images, rasterize, emit) {
   if (!images?.length || !rasterize) return null
   const byUuid = new Map(images.map((im) => [im.uuid, im]))
-  const load = async (mi, m, mapPxPerCell) => {
+  // `rethrowOutOfMemory`: a decode the browser refused memory for throws (err.outOfMemory)
+  // instead of falling back, so the caller can make room and try again.
+  const load = async (mi, m, mapPxPerCell, { rethrowOutOfMemory = false } = {}) => {
     const im = byUuid.get(m.uuid)
     if (!im) { load.fellBack++; return null }
     try {
@@ -56,6 +66,7 @@ function makePhotoLoader(images, rasterize, emit) {
       load.decoded++
       return { data: r.data, width: r.width, height: r.height, map }
     } catch (err) {
+      if (rethrowOutOfMemory && isOutOfMemory(err)) throw Object.assign(new Error(err?.message ?? String(err)), { outOfMemory: true })
       emit('log', [`Ortho: ${im.name ?? m.uuid} — source photo unavailable (${err?.message ?? err}); `
         + 'using its depth-map colour', 'warn', 'Products'])
       load.fellBack++
@@ -123,6 +134,16 @@ const photoBytesBound = (im, m = null, mapPxPerCell = null) => {
   const s = m?.K ? m.K.fx / im.K.fx : 0
   const scale = s > 0 && mapPxPerCell > 0 ? Math.min(1, (2 * s) / mapPxPerCell) : 1
   return Math.min(native, Math.ceil(4 * native * scale * scale)) * 4
+}
+// What that decode is expected to hold: the photo at its decode scale, RGBA (the bound
+// above allows 4× for a pyramid read one level finer). For predicting the cache, not
+// for gating it.
+const photoBytesExpected = (im, m, mapPxPerCell) => {
+  if (!im?.K) return 0
+  const native = Math.ceil(2 * im.K.cx) * Math.ceil(2 * im.K.cy)
+  const s = m?.K ? m.K.fx / im.K.fx : 0
+  const scale = s > 0 && mapPxPerCell > 0 ? Math.min(1, (2 * s) / mapPxPerCell) : 1
+  return Math.ceil(native * scale * scale) * 4
 }
 
 // Product ops (DEM + orthophoto). The frame rebuild/descriptor + raster→dataURL
@@ -428,7 +449,11 @@ export function makeProductsOps({ rasterize } = {}) {
     let zSum = 0, zN = 0
     for (let i = 0; i < built.grid.data.length; i += 97) { const z = built.grid.data[i]; if (Number.isFinite(z)) { zSum += z; zN++ } }
     const pxPerCell = orthoMapPxPerCell(geom, frame.toSfm, zN ? zSum / zN : 0)
+    // A cache entry: the map's planes when streamed (resident maps are not counted) and its
+    // decoded photo.
+    const entryBytes = (m) => (streamed ? m.width * m.height * 23 : 0) + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))
     const maxEntry = maps.reduce((n, m) => Math.max(n, m.width * m.height * 23 + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))), 0)
+    const maxCacheEntry = maps.reduce((n, m) => Math.max(n, entryBytes(m)), 0)
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : Infinity
     const fixed = blockBytes + pyramidBytes
     if (fixed + maxEntry > budget) {
@@ -436,7 +461,20 @@ export function makeProductsOps({ rasterize } = {}) {
         + `${formatBytes(blockBytes)}, overviews ${formatBytes(pyramidBytes)}, one depth map + photo ${formatBytes(maxEntry)}) `
         + `and the memory budget is ${formatBytes(budget)} — raise it in Settings ▸ Compute, or build at a coarser GSD`)
     }
-    const cacheBytes = Number.isFinite(budget) ? budget - fixed : 2 * 1024 ** 3
+    // The cache evicts after a visit, so a miss loads its entry on top of a full cache:
+    // leave room for one. The budget is the run's; the tab's buffer pool also holds what
+    // the page has (`pageBytes`) and a decode's transient, so the cache gets no more than
+    // ¾ of the pool leaves after those. Quarry (2026-10-20, 12 GiB budget, a 98 M-point
+    // cloud open): an 11 GB cache failed an allocation at 15.5 GB of process data, short of
+    // the 16 GiB pool, as the 80 MB photo buffers came and went; the quarter is that slack.
+    const forBudget = Number.isFinite(budget) ? budget - fixed - maxCacheEntry : 2 * 1024 ** 3
+    const forTab = 0.75 * TAB_BUFFER_POOL_BYTES - (settings.pageBytes ?? 0) - fixed - 2 * maxCacheEntry
+    const cacheBytes = Math.max(maxCacheEntry, Math.min(forBudget, forTab))
+    if (forTab < forBudget) {
+      emit('log', [`Ortho: the map/photo cache is held to ${formatBytes(cacheBytes)}, below what the memory budget allows, `
+        + `so the browser tab keeps room for the ${formatBytes(settings.pageBytes ?? 0)} the open project already holds `
+        + '(16 GB is all a tab gets, page and workers together)', 'info', 'Products'])
+    }
 
     const t0 = performance.now()
     const tags = crsTagInfo({ crs: frame.crs, unit: frame.unit })
@@ -460,12 +498,28 @@ export function makeProductsOps({ rasterize } = {}) {
     // A fine ortho is hundreds of blocks at up to minutes each: the label names the
     // block, and the log gets a line with the rate and time left every 30 s or so.
     let blockProgress = null
-    const progressLabel = () => (blockProgress ? `Orthorectifying… ${blockProgress.label()}` : 'Orthorectifying…')
+    // Grouped (P6), no block finishes until its whole group has: the label names the group.
+    let groupLabel = ''
+    const progressLabel = () => (groupLabel ? `Orthorectifying… ${groupLabel}`
+      : blockProgress ? `Orthorectifying… ${blockProgress.label()}` : 'Orthorectifying…')
     const res = await orthorectifyTiled(built.grid, geom, maps, loadMap, frame.toSfm,
-      { ...settings, blockSize: ORTHO_BLOCK, cacheBytes, mapsResident: !streamed }, {
+      // Blocks in groups, map-major inside (P6), sized by replaying the visits through the
+      // cache: each block of a group takes its working planes from the cache.
+      { ...settings, blockSize: ORTHO_BLOCK, cacheBytes, mapsResident: !streamed,
+        groupBlocks: settings.groupBlocks ?? 'auto', blockBytes, entryBytes: maxCacheEntry,
+        entrySizes: maps.map((m) => ({ map: streamed ? m.width * m.height * 23 : 0,
+          photo: photoBytesExpected(photoOf.get(m.uuid), m, pxPerCell(m)) })) }, {
         loadImage, loadStatsImage,
         onProgress: (done, total) => emit('progress', [done, total, progressLabel(), 0.95 * done / total]),
-        onBlocksStart: (count) => { blockProgress = createBlockProgress(count, { prefix: 'Ortho: ' }) },
+        onGroup: (gi, n, size) => { groupLabel = size > 1 ? `group ${gi + 1} of ${n} (${pluralize(size, 'block')})` : '' },
+        onBlocksStart: (count, { maxMaps = 0, groupSize = 1, cacheBytes: used = cacheBytes } = {}) => {
+          blockProgress = createBlockProgress(count, { prefix: 'Ortho: ' })
+          // Grouped, a pass reads each map once per group: the cache then only carries
+          // maps from one pass or group to the next, so the per-block warning is moot.
+          if (maxCacheEntry > 0 && maxMaps > 0 && groupSize === 1) {
+            emit('log', orthoCacheLog(used, maxCacheEntry, maxMaps, { mosaic: settings.blend === 'mosaic', streamed }))
+          }
+        },
         onBlock: async (b) => {
           // `debugSeams` (bench only, not in the dialog): paint the seams magenta, so
           // side-by-sides show where each variant put them.
@@ -490,7 +544,22 @@ export function makeProductsOps({ rasterize } = {}) {
     const blocksX = Math.ceil(width / ORTHO_BLOCK), blocksY = Math.ceil(height / ORTHO_BLOCK)
     emit('log', [`Ortho: ${pluralize(res.blocks, 'block')} of ${ORTHO_BLOCK}² (${blocksX}×${blocksY}), ${pluralize(res.visits, 'map visit')} `
       + `after culling (of ${res.blocks * maps.length}); ${pluralize(res.mapLoads, 'map read')}, ${pluralize(res.photoLoads, 'photo decode')}, `
-      + `${pluralize(res.cacheHits, 'cache hit')} in a ${Number.isFinite(cacheBytes) ? formatBytes(cacheBytes) : 'default'} cache`, 'info', 'Products'])
+      + `${pluralize(res.cacheHits, 'cache hit')} in a ${Number.isFinite(res.grouping?.cacheBytes) ? formatBytes(res.grouping.cacheBytes) : 'default'} cache`, 'info', 'Products'])
+    if (res.cacheShrinks) {
+      emit('log', [`Ortho: the browser refused memory for a photo ${pluralize(res.cacheShrinks, 'time')}; each time the `
+        + `map/photo cache gave up a quarter (to ${formatBytes(res.cacheLimit)} in the end) and the photo was decoded again. A lower memory `
+        + 'budget (Settings ▸ Compute) starts the run there', 'warn', 'Products'])
+    }
+    if (res.grouping?.predicted && Object.keys(res.grouping.predicted).length) {
+      emit('log', [`Ortho: group sizes, predicted read cost — ${Object.entries(res.grouping.predicted)
+        .map(([g, c]) => `${g}: ${Math.round(c)}`).join(', ')}; chose ${res.grouping.size}`, 'debug', 'Products'])
+    }
+    if (res.grouping?.size > 1) {
+      const p = res.grouping.predicted ?? {}
+      emit('log', [`Ortho: blocks in ${pluralize(res.grouping.groups, 'group')} of up to ${res.grouping.size}, each pass reading a map `
+        + `once for the whole group; predicted read cost ${Math.round(p[res.grouping.size] ?? 0)} against `
+        + `${Math.round(p[1] ?? 0)} block by block (a map read 1, a photo decode 3)`, 'info', 'Products'])
+    }
     const cells = width * height
     emit('log', [`Ortho: ${width}×${height}, ${covered}/${cells} cells coloured `
       + `(${(100 * covered / cells).toFixed(0)}%) from ${pluralize(maps.length, 'view')} over the `
@@ -521,8 +590,9 @@ export function makeProductsOps({ rasterize } = {}) {
       }
       if (balance) {
         const f = (v) => (v == null ? '—' : v.toFixed(3))
-        const decode = loadStatsImage?.decoded
-          ? `; photos decoded at ${(100 * loadStatsImage.scaleSum / loadStatsImage.decoded).toFixed(0)}% of native for the fit${seamCut ? ' and the seams' : ''}` : ''
+        const decode = (loadStatsImage?.decoded
+          ? `; photos decoded at ${(100 * loadStatsImage.scaleSum / loadStatsImage.decoded).toFixed(0)}% of native for the fit${seamCut ? ' and the seams' : ''}` : '')
+          + (res.surveyFromMapRgb ? `; ${res.surveyFromMapRgb} of ${maps.length} images sampled from their depth maps' own colour (as fine as the survey needs, no decode)` : '')
         emit('log', [`Ortho: colour balance — gains for ${balance.images} of ${pluralize(maps.length, 'image')} from `
           + `${pluralize(balance.pairs, 'overlapping pair')} over ${balance.latticeCells.toLocaleString()} lattice cells (every `
           + `${balance.latticeStep}th; ${balance.clippedObservations.toLocaleString()} ${nounFor(balance.clippedObservations, 'clipped sample')} left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}`

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createProductRuns } from './productRuns.js'
 
-vi.mock('../../workers/computeClient.js', () => ({ generateDem: vi.fn(), generateOrtho: vi.fn() }))
+vi.mock('../../workers/computeClient.js', () => ({ generateDem: vi.fn(), generateOrtho: vi.fn(), releaseIdleWorkers: vi.fn(() => true) }))
 
 // orthoSurfacePayload for the plane and mesh surfaces: the fit sample from whatever
 // cloud demSource offers, including a streamed one (pos: null, read from its octree).

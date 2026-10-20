@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   orthorectify, orthorectifyStreamed, orthorectifyTiled, smoothLabels, chamferTo, srgbToLinear, linearToSrgb,
-  mosaicSeamCells, orthoHalo, orthoTiledWorkingBytes, NO_LABEL,
+  mosaicSeamCells, orthoHalo, orthoTiledWorkingBytes, orthoCacheLog, chooseGroupSize, NO_LABEL,
 } from './ortho.js'
 import { resampledGeometry } from './surface.js'
 
@@ -30,7 +30,7 @@ async function run(surface, maps, opts, hooks = {}) {
   const rgba = new Uint8ClampedArray(W * H * 4), labels = new Uint16Array(W * H)
   for (const b of blocks) for (let r = 0; r < b.height; r++) {
     rgba.set(b.rgba.subarray(r * b.width * 4, (r + 1) * b.width * 4), ((b.row0 + r) * W + b.col0) * 4)
-    labels.set(b.labels.subarray(r * b.width, (r + 1) * b.width), (b.row0 + r) * W + b.col0)
+    if (b.labels) labels.set(b.labels.subarray(r * b.width, (r + 1) * b.width), (b.row0 + r) * W + b.col0)
   }
   return { ...res, rgba, labels }
 }
@@ -169,10 +169,14 @@ describe('mosaic orthophoto', () => {
     const level = [180, 120, 150, 100]
     const maps = [nadirMap(-2, [0, 0, 0]), nadirMap(2, [0, 0, 0]), nadirMap(-2, [0, 0, 0]), nadirMap(2, [0, 0, 0])]
     maps[2].t = [2, -2, 10]; maps[3].t = [-2, -2, 10]; maps[0].t = [2, 2, 10]; maps[1].t = [-2, 2, 10]
+    // A gradient inside each photo makes the overlap means depend on where the overlap is.
+    // A map's own rgb plane is its photo at the depth map's scale (dense builds it from
+    // the same decode), so it carries the same colours: the survey may sample either.
+    const photoValue = (mi, i, w) => Math.min(255, level[mi] + (i % w) / 4)
+    maps.forEach((m, mi) => { for (let i = 0; i < m.width * m.height; i++) m.rgb.fill(Math.round(photoValue(mi, i, m.width)), 3 * i, 3 * i + 3) })
     const loadImage = async (mi, m) => {
       const data = new Uint8ClampedArray(m.width * m.height * 4)
-      // A gradient inside each photo makes the overlap means depend on where the overlap is.
-      for (let i = 0; i < m.width * m.height; i++) data.fill(Math.min(255, level[mi] + (i % m.width) / 4), 4 * i, 4 * i + 4)
+      for (let i = 0; i < m.width * m.height; i++) data.fill(photoValue(mi, i, m.width), 4 * i, 4 * i + 4)
       return { width: m.width, height: m.height, map: null, data }
     }
     const res = await run(s, maps, { blend: 'mosaic', seamWidth: 0, colourBalance: true }, { loadImage })
@@ -282,5 +286,155 @@ describe('graph-cut seamlines and multiband blending', () => {
     for (let c = 1; c < s.width; c++) expect(red(mb, c)).toBeLessThanOrEqual(red(mb, c - 1))
     // Labels are the hard partition; the blend only changes colours.
     expect([...mb.labels]).toEqual([...hard.labels])
+  })
+})
+
+describe('the map/photo cache against one block', () => {
+  it('reports the most maps one block sees', async () => {
+    let seen = null
+    await run(plane(), [nadirMap(-2, [200, 0, 0]), nadirMap(2, [0, 0, 200])], { blend: 'best' },
+      { onBlocksStart: (n, info) => { seen = { n, ...info } } })
+    expect(seen).toMatchObject({ n: 1, maxMaps: 2, groups: 1, groupMaps: 2 })
+  })
+
+  it('warns when fewer entries fit than one block needs, and says what helps', () => {
+    const MB = 1024 ** 2
+    const ok = orthoCacheLog(4000 * MB, 100 * MB, 30, { mosaic: true })
+    expect(ok[1]).toBe('info')
+    expect(ok[0]).toMatch(/holds about 40 depth maps with their photos \(up to 100 MB each\); one block sees up to 30 maps$/)
+    const tight = orthoCacheLog(1000 * MB, 100 * MB, 30, { mosaic: true })
+    expect(tight[1]).toBe('warn')
+    expect(tight[0]).toMatch(/holds about 10 .* its passes re-read and re-decode the photos .* coarser GSD .* higher memory budget/)
+    expect(orthoCacheLog(1000 * MB, 100 * MB, 30, { streamed: false })[0]).toMatch(/about 10 decoded photos .* it re-reads/)
+  })
+})
+
+describe('blocks in groups (P6)', () => {
+  // Four nadir views over a 40 × 24 plane in 8-cell blocks (5 × 3 = 15 blocks), each view
+  // tinted, with a little cost so the seams have something to choose by.
+  const views = () => [nadirMap(-3, [200, 40, 40]), nadirMap(-1, [40, 200, 40]), nadirMap(1, [40, 40, 200]),
+    nadirMap(3, [200, 200, 40], { cost: (i) => (i % 7) / 20 })]
+  // A photo per map: its own rgb plane as RGBA, counted.
+  const photos = (maps) => {
+    const load = async (mi) => {
+      load.calls++
+      const m = maps[mi], data = new Uint8ClampedArray(m.width * m.height * 4)
+      for (let i = 0; i < m.width * m.height; i++) data.set([m.rgb[3 * i], m.rgb[3 * i + 1], m.rgb[3 * i + 2], 255], 4 * i)
+      return { data, width: m.width, height: m.height, map: null }
+    }
+    load.calls = 0
+    return load
+  }
+  const variants = [
+    { blend: 'best' }, { blend: 'average' },
+    { blend: 'mosaic', seamline: 'nadir', seamBlend: 'feather', seamWidth: 2 },
+    { blend: 'mosaic', seamline: 'graphcut', seamBlend: 'multiband', colourBalance: true, seamCutCells: 64 },
+  ]
+  for (const v of variants) {
+    it(`computes the same ortho grouped as block by block (${v.blend}${v.seamBlend ? ` · ${v.seamBlend}` : ''})`, async () => {
+      const surface = plane(40, 24)
+      const one = await run(surface, views(), { ...v, blockSize: 8, fillRadius: 1, groupBlocks: 1 }, { loadImage: photos(views()) })
+      for (const g of [2, 4, 15]) {
+        const grouped = await run(surface, views(), { ...v, blockSize: 8, fillRadius: 1, groupBlocks: g }, { loadImage: photos(views()) })
+        expect(grouped.groups).toBeLessThan(one.groups)
+        expect(Buffer.from(grouped.rgba).equals(Buffer.from(one.rgba))).toBe(true)
+        expect(Buffer.from(grouped.labels).equals(Buffer.from(one.labels))).toBe(true)
+        expect(grouped.covered).toBe(one.covered)
+      }
+    })
+  }
+
+  it('reads each photo once per pass of a group instead of once per block, when the cache holds none', async () => {
+    const surface = plane(40, 24), v = { blend: 'mosaic', seamline: 'nadir', seamBlend: 'multiband', blockSize: 8, cacheBytes: 1, mapsResident: false }
+    const byBlock = photos(views()), byGroup = photos(views())
+    const a = await run(surface, views(), { ...v, groupBlocks: 1 }, { loadImage: byBlock })
+    const b = await run(surface, views(), { ...v, groupBlocks: 15 }, { loadImage: byGroup })
+    // One group of all 15 blocks: two photo passes × 4 maps.
+    expect(byGroup.calls).toBe(8)
+    expect(byBlock.calls).toBeGreaterThan(4 * byGroup.calls)
+    expect(Buffer.from(b.rgba).equals(Buffer.from(a.rgba))).toBe(true)
+  })
+})
+
+describe('choosing the group size (P6)', () => {
+  // 6 × 5 blocks; one map centred on each block, seeing it and its 8 neighbours.
+  const nbx = 6, nby = 5
+  const blocks = []
+  for (let by = 0; by < nby; by++) for (let bx = 0; bx < nbx; bx++) {
+    const maps = []
+    for (let my = 0; my < nby; my++) for (let mx = 0; mx < nbx; mx++) if (Math.abs(mx - bx) <= 1 && Math.abs(my - by) <= 1) maps.push(my * nbx + mx)
+    blocks.push({ maps })
+  }
+  const MB = 2 ** 20
+  it('groups blocks when the cache cannot keep a row of them, and says what it predicts', () => {
+    // 5 entries: fewer than one block's 9 maps.
+    const r = chooseGroupSize(nbx, nby, blocks, 3, true, { cacheBytes: 5 * 100 * MB + 8 * 10 * MB, blockBytes: 10 * MB, entryBytes: 100 * MB })
+    expect(r.size).toBeGreaterThan(1)
+    expect(r.predicted[r.size]).toBeLessThan(0.97 * r.predicted[1])
+  })
+  it('stays block by block when the cache holds everything', () => {
+    const r = chooseGroupSize(nbx, nby, blocks, 3, true, { cacheBytes: 40 * 100 * MB, blockBytes: 300 * MB, entryBytes: 100 * MB })
+    expect(r.size).toBe(1)
+  })
+  it('replays expected bytes: small real entries make block by block cheap, as the run finds', () => {
+    const budget = { cacheBytes: 5 * 100 * MB + 8 * 10 * MB, blockBytes: 10 * MB, entryBytes: 100 * MB }
+    const worst = chooseGroupSize(nbx, nby, blocks, 3, true, budget)
+    // Planes 10 MB, photos 20 MB at their decode size: ~19 entries fit, more than a block's 9 maps.
+    const sizes = blocks.map(() => ({ map: 10 * MB, photo: 20 * MB }))
+    const real = chooseGroupSize(nbx, nby, blocks, 3, true, { ...budget, entrySizes: sizes })
+    expect(real.predicted[1]).toBeLessThan(0.6 * worst.predicted[1])
+    expect(real.size).toBeLessThanOrEqual(worst.size)
+  })
+
+  it('counts a colour pass as decoding only the maps that own part of a block', () => {
+    const budget = { cacheBytes: 5 * 100 * MB + 8 * 10 * MB, blockBytes: 10 * MB, entryBytes: 100 * MB }
+    const all = chooseGroupSize(nbx, nby, blocks, 3, true, budget)
+    // The cut gives each block to its centre map alone.
+    const owners = blocks.map((_, bi) => new Set([bi]))
+    const owned = chooseGroupSize(nbx, nby, blocks, 3, true, { ...budget, owners })
+    expect(owned.predicted[1]).toBeLessThan(0.6 * all.predicted[1])
+  })
+
+  it('never lets the groups take the whole cache', () => {
+    const r = chooseGroupSize(nbx, nby, blocks, 3, true, { cacheBytes: 3 * 100 * MB, blockBytes: 200 * MB, entryBytes: 100 * MB })
+    expect(Object.keys(r.predicted).map(Number).every((g) => 3 * 100 - (g - 1) * 200 >= 100)).toBe(true)
+  })
+})
+
+describe('the mosaic survey without photo decodes (P6)', () => {
+  it('samples the gains and seams from the maps\' own colour when it is as fine as the survey needs', async () => {
+    const maps = [nadirMap(-2, [180, 90, 60]), nadirMap(2, [120, 160, 90])]
+    let statsCalls = 0
+    const loadStatsImage = async () => { statsCalls++; return null }
+    const res = await run(plane(40, 24), maps, { blend: 'mosaic', seamline: 'graphcut', seamBlend: 'multiband', colourBalance: true, seamCutCells: 64 },
+      { loadStatsImage })
+    // 2 map px per unit at 0.25 units a cell, a gain step of 4 cells: 2 map px per step.
+    expect(res.surveyFromMapRgb).toBe(2)
+    expect(statsCalls).toBe(0)
+    expect(res.mosaic.balance.images).toBe(2)
+  })
+})
+
+describe('a photo decode the browser refuses memory for', () => {
+  it('halves the cache and decodes the photo again, so the ortho is unchanged', async () => {
+    const views = () => [nadirMap(-2, [200, 40, 40]), nadirMap(2, [40, 40, 200])]
+    const photo = (maps) => async (mi) => {
+      const m = maps[mi], data = new Uint8ClampedArray(m.width * m.height * 4)
+      for (let i = 0; i < m.width * m.height; i++) data.set([m.rgb[3 * i], m.rgb[3 * i + 1], m.rgb[3 * i + 2], 255], 4 * i)
+      return { data, width: m.width, height: m.height, map: null }
+    }
+    const opts = { blend: 'best', blockSize: 8, cacheBytes: 2 ** 30, mapsResident: false }
+    const clean = await run(plane(40, 24), views(), opts, { loadImage: photo(views()) })
+    const maps = views(), ok = photo(maps)
+    let refused = 0
+    const flaky = async (mi, m, per, o = {}) => {
+      if (mi === 1 && !refused && o.rethrowOutOfMemory) { refused++; throw Object.assign(new Error('Out of memory at ImageData creation'), { outOfMemory: true }) }
+      return ok(mi, m, per)
+    }
+    const res = await run(plane(40, 24), maps, opts, { loadImage: flaky })
+    expect(refused).toBe(1)
+    expect(res.cacheShrinks).toBe(1)
+    expect(res.cacheLimit).toBeLessThan(2 ** 30)
+    expect(Buffer.from(res.rgba).equals(Buffer.from(clean.rgba))).toBe(true)
   })
 })

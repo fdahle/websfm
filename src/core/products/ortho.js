@@ -20,6 +20,7 @@ import { sampleRgbaBilinear } from './undistort.js'
 import { srgbToLinear, linearToSrgb, fitGains, gainSampleClipped, growable } from './colourGains.js'
 import { sampleSurfaceWindow } from './surface.js'
 import { createOrthoStats } from '../eval/orthoStats.js'
+import { formatBytes } from '../formatBytes.js'
 import { seamGrid, seamSampleCol, createSeamSurvey, addSeamCandidate, solveSeams, SEAM_CUT_CELLS, SEAM_CANDIDATES } from './seamCut.js'
 import { MULTIBAND_LEVELS, MULTIBAND_BYTES_PER_CELL, multibandReach, createMultiband, multibandBegin, multibandAdd, multibandFinish } from './multiband.js'
 
@@ -801,7 +802,7 @@ async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toSfm, gp,
   }
   const obsPt = growable(Int32Array), obsImg = growable(Int32Array), obsRgb = growable(Float32Array)
   const g = {}, px = new Float32Array(4)
-  let clippedObs = 0, readMs = 0
+  let clippedObs = 0, readMs = 0, fromMapRgb = 0
   const t0 = performance.now()
   // Photo decode: ~2 px per step of the finer of the two samplings.
   const stepCells = Math.min(gainsOn ? k : Infinity, cut ? sg.f : Infinity)
@@ -809,7 +810,13 @@ async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toSfm, gp,
     const tr = performance.now()
     const m = await loadMap(mi)
     const per = gp.mapPxPerCell(m)
-    const photo = loadImage ? await loadImage(mi, m, per > 0 ? per * stepCells : null) : null
+    // The map's own colour plane is its photo resampled to the depth map's scale. Where a
+    // survey step spans ≥ 2 map px, that is as fine as the decode would be (≈ 2 photo px
+    // per step), so the photo is not decoded at all: on quarry-347 the survey decoded
+    // every photo at ~8 % of native, ~0.3 s each, for colour the map already had at 25 %.
+    const ownColour = !!m.rgb && per > 0 && per * stepCells >= 2
+    if (ownColour) fromMapRgb++
+    const photo = loadImage && !ownColour ? await loadImage(mi, m, per > 0 ? per * stepCells : null) : null
     readMs += performance.now() - tr
     const C = cameraCentre(m)
     for (let p = 0; p < L; p++) {
@@ -849,7 +856,22 @@ async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toSfm, gp,
     // Where the time went: reading maps + decoding photos, sampling, the min cuts.
     seams = { ...res, grid: sg, ms: { read: Math.round(readMs), sample: Math.round(t1 - t0 - readMs), solve: Math.round(performance.now() - t1) } }
   }
-  return { balance, seams }
+  return { balance, seams, fromMapRgb }
+}
+
+// What the ortho's map/photo cache can hold against what one block needs, as a log
+// entry. Fewer entries than a block's maps re-read (and re-decode) every map of that
+// block on each pass, which is most of the run time when it happens.
+// `streamed`: an entry is a depth map's planes and its photo, else the photo alone.
+export function orthoCacheLog(cacheBytes, entryBytes, maxMaps, { mosaic = false, streamed = true } = {}) {
+  const fit = Math.floor(cacheBytes / entryBytes)
+  const head = `Ortho: the map/photo cache (${formatBytes(cacheBytes)}) holds about ${fit} `
+    + `${streamed ? 'depth maps with their photos' : 'decoded photos'} (up to ${formatBytes(entryBytes)} each); `
+    + `one block sees up to ${maxMaps} maps`
+  if (fit >= maxMaps) return [head, 'info', 'Products']
+  return [`${head}, so ${mosaic ? 'its passes re-read and re-decode' : 'it re-reads and re-decodes'} the photos `
+    + 'of the busiest blocks. A coarser GSD (smaller photo decodes) or a higher memory budget '
+    + '(Settings ▸ Compute) avoids it', 'warn', 'Products']
 }
 
 // The largest block window: core + halo on both sides, plus up to align − 1 cells per
@@ -963,30 +985,76 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     blocks.push({ col0, row0, bw, bh, ex0, ey0, ew: ex1 - ex0, eh: ey1 - ey0, maps, empty: !(lo <= hi) })
   }
 
+  // O3 + O5: the gains and the graph-cut labels, once for the whole grid, before any
+  // block — and before the visits are planned, since the cut says which maps own a part
+  // of each block and so need their photos there. The progress total is corrected once
+  // the visits are known.
+  let ticks = 0
+  const survey = mosaic && (opts.colourBalance || graphcut)
+  const passes = !mosaic ? 1 : multiband ? 3 : 2
+  let total = (survey ? metas.length : 0) + blocks.reduce((n, b) => n + b.maps.length, 0) * passes
+  const tick = () => onProgress(++ticks, total)
+  let balance = null, seams = null, surveyFromMapRgb = 0
+  if (survey) {
+    ({ balance, seams, fromMapRgb: surveyFromMapRgb } = await mosaicSurvey(surface, geom, metas, loadMap, hooks.loadStatsImage ?? loadImage, toSfm, gp, opts, tick,
+      { gainsOn: !!opts.colourBalance, cut: graphcut }))
+  }
+
   // The visit sequence, and for each visit when its map is wanted next (Belady). A
   // mosaic visits a block's maps twice — labels, then colour — and a multiband one a
   // third time for the corrections; the colour passes skip the maps that own no cells
   // there, which only makes the plan pessimistic. Successive passes alternate their
   // order (ascending, descending, ascending), so each starts on the maps the last one
   // left in the cache.
-  const sequence = []
-  const passes = !mosaic ? 1 : multiband ? 3 : 2
-  const passOrder = (maps, k) => (k % 2 ? [...maps].reverse() : maps)
-  for (const b of blocks) for (let k = 0; k < passes; k++) for (const mi of passOrder(b.maps, k)) sequence.push(mi)
+  //
+  // Blocks are taken in groups (`opts.groupBlocks`, a rectangle of neighbouring blocks,
+  // P6): each pass of a group visits every map its blocks see ONCE, map-major, and each
+  // block of the group takes from that visit. With many blocks a photo is then read once
+  // per pass per group rather than per block. Within one block every map keeps its
+  // per-pass order, so a block computes exactly what it computes alone.
+  // `groupBlocks: 'auto'` picks the size (chooseGroupSize) from the cache it leaves:
+  // each block of a group holds `opts.blockBytes` of working planes, taken from the cache.
+  const grouping = opts.groupBlocks === 'auto'
+    ? chooseGroupSize(nbx, nby, blocks, passes, mosaic, { cacheBytes: opts.cacheBytes ?? 1024 ** 3,
+      blockBytes: opts.blockBytes ?? 0, entryBytes: opts.entryBytes ?? 0, mapsResident: !!opts.mapsResident,
+      entrySizes: opts.entrySizes ?? null, owners: seams ? blocks.map((b) => ownersFromCut(seams, b)) : null })
+    : { size: Math.max(1, Math.floor(opts.groupBlocks ?? 1)) }
+  const groups = blockGroups(nbx, nby, grouping.size)
+  const groupMaps = groups.map((g) => unionMaps(g.map((bi) => blocks[bi])))
+  const sequence = visitSequence(groupMaps, passes)
   const nextUse = new Float64Array(sequence.length)
   {
     const seen = new Map()
     for (let p = sequence.length - 1; p >= 0; p--) { nextUse[p] = seen.get(sequence[p]) ?? Infinity; seen.set(sequence[p], p) }
   }
-  const cacheBytes = opts.cacheBytes ?? 1024 ** 3
+  const cacheBytes = (opts.cacheBytes ?? 1024 ** 3) - (grouping.size - 1) * (opts.blockBytes ?? 0)
   const cache = new Map() // mi → { m, photo, hasPhoto, bytes, next }
   let cached = 0, mapLoads = 0, photoLoads = 0, cacheHits = 0
-  const evict = () => {
-    for (const [mi, e] of cache) if (e.next === Infinity) { cache.delete(mi); cached -= e.bytes }
-    while (cached > cacheBytes && cache.size) {
+  // The cache's limit: `cacheBytes`, until a photo decode runs out of memory (below).
+  let cacheLimit = cacheBytes, shrinks = 0
+  const evict = (keep = -1) => {
+    for (const [mi, e] of cache) if (e.next === Infinity && mi !== keep) { cache.delete(mi); cached -= e.bytes }
+    while (cached > cacheLimit && cache.size > (cache.has(keep) ? 1 : 0)) {
       let worst = -1, far = -Infinity
-      for (const [mi, e] of cache) if (e.next > far) { far = e.next; worst = mi }
+      for (const [mi, e] of cache) if (e.next > far && mi !== keep) { far = e.next; worst = mi }
       cached -= cache.get(worst).bytes; cache.delete(worst)
+    }
+  }
+  // The tab's real ceiling is below what the arithmetic allows when buffers come and go
+  // (quarry-347 at long side 12,000: 56 photo decodes failed "Out of memory at ImageData
+  // creation" at 14.6 GB of process data, with an 8.6 GB cache). A decode that runs out of
+  // memory takes a quarter off the cache for the rest of the run and is tried once more;
+  // only a second failure falls back to the map's own colour. (Halving cost the same run
+  // 1,313 photo decodes instead of ~900 after one refusal.)
+  const loadPhoto = async (mi, e) => {
+    try {
+      return await loadImage(mi, e.m, mapPxPerCell(e.m), { rethrowOutOfMemory: true })
+    } catch (err) {
+      if (!err?.outOfMemory) throw err
+      shrinks++
+      cacheLimit = Math.max(1, Math.min(cacheLimit, cached) * 0.75)
+      evict(mi)
+      return loadImage(mi, e.m, mapPxPerCell(e.m))
     }
   }
   // A map's planes, and its photo once a pass needs colour (the mosaic's label pass
@@ -1009,16 +1077,14 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       cache.set(mi, e); cached += e.bytes
     }
     if (wantPhoto && !e.hasPhoto) {
-      e.photo = loadImage ? await loadImage(mi, e.m, mapPxPerCell(e.m)) : null
+      e.photo = loadImage ? await loadPhoto(mi, e) : null
       e.hasPhoto = true
       if (e.photo) { photoLoads++; const b = e.photo.data?.byteLength ?? 0; e.bytes += b; cached += b }
     }
     return e
   }
-  let pos = 0, ticks = 0
-  const survey = mosaic && (opts.colourBalance || graphcut)
-  const total = (survey ? metas.length : 0) + sequence.length
-  const tick = () => onProgress(++ticks, total)
+  let pos = 0
+  total = (survey ? metas.length : 0) + sequence.length
   const visited = (mi, e) => {
     const p = pos++
     if (e) e.next = nextUse[p]
@@ -1027,39 +1093,43 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     tick()
   }
 
-  // O3 + O5: the gains and the graph-cut labels, once for the whole grid, before any block.
-  let balance = null, seams = null
-  if (survey) {
-    ({ balance, seams } = await mosaicSurvey(surface, geom, metas, loadMap, hooks.loadStatsImage ?? loadImage, toSfm, gp, opts, tick,
-      { gainsOn: !!opts.colourBalance, cut: graphcut }))
-  }
-
-  // Window buffers, sized once for the largest window.
+  // Window buffers, sized once for the largest window: one set per block of a group.
   const win0 = maxWindow(W, H, B, halo, align), maxCells = win0.ew * win0.eh
   const average = opts.blend === 'average'
-  const buf = {
-    data: new Float32Array(maxCells), mask: new Uint8Array(maxCells), rgba: new Uint8ClampedArray(maxCells * 4),
-    scores: average || mosaic ? null : new Float64Array(maxCells), sums: average ? new Float64Array(maxCells * 4) : null,
-    labels: newLabels(maxCells, opts, metas.length),
-  }
-  const mb = mosaic ? {
-    raw: new Uint16Array(maxCells), label: new Uint16Array(maxCells), tmp: new Uint16Array(maxCells),
-    score: new Float64Array(maxCells), sums: new Float32Array(maxCells * 4), fallback: new Float32Array(maxCells * 3),
-    flags: new Uint8Array(maxCells), dist: new Uint16Array(maxCells),
-    pyr: multiband ? createMultiband(win0.ew, win0.eh, mode.levels) : null,
-  } : null
-  const slot = mosaic ? new Int32Array(metas.length).fill(-1) : null
-  const stats = createOrthoStats(W, H, !!buf.labels)
+  const groupSize = groups.reduce((n, g) => Math.max(n, g.length), 0)
+  const states = Array.from({ length: groupSize }, () => ({
+    buf: {
+      data: new Float32Array(maxCells), mask: new Uint8Array(maxCells), rgba: new Uint8ClampedArray(maxCells * 4),
+      scores: average || mosaic ? null : new Float64Array(maxCells), sums: average ? new Float64Array(maxCells * 4) : null,
+      labels: newLabels(maxCells, opts, metas.length),
+    },
+    mb: mosaic ? {
+      raw: new Uint16Array(maxCells), label: new Uint16Array(maxCells), tmp: new Uint16Array(maxCells),
+      score: new Float64Array(maxCells), sums: new Float32Array(maxCells * 4), fallback: new Float32Array(maxCells * 3),
+      flags: new Uint8Array(maxCells), dist: new Uint16Array(maxCells),
+      pyr: multiband ? createMultiband(win0.ew, win0.eh, mode.levels) : null,
+    } : null,
+    // map index → its position in the block's map list, -1 for a map the block does not see
+    slot: new Int32Array(metas.length).fill(-1),
+  }))
+  const labelled = !!states[0]?.buf.labels
+  const stats = createOrthoStats(W, H, labelled)
   const scratch = { P: [0, 0, 0], px: new Float32Array(4), g: {} }
   let sampled = 0, covered = 0
 
-  hooks.onBlocksStart?.(nBlocks)
-  for (const b of blocks) {
-    const { col0, row0, bw, bh, ex0, ey0, ew, eh } = b
-    const coreRgba = new Uint8ClampedArray(bw * bh * 4)
-    const coreLabels = buf.labels ? new Uint16Array(bw * bh).fill(NO_LABEL) : null
-    if (!b.empty) {
-      const n = ew * eh
+  // `maxMaps`: the most maps one block sees, which the cache must hold for a block's
+  // passes to read each map once; `groups` / `groupMaps`: the same for a group.
+  hooks.onBlocksStart?.(nBlocks, { maxMaps: blocks.reduce((n, b) => Math.max(n, b.maps.length), 0),
+    groups: groups.length, groupSize: grouping.size, groupMaps: groupMaps.reduce((n, m) => Math.max(n, m.length), 0), cacheBytes })
+  for (let gi = 0; gi < groups.length; gi++) {
+    const group = groups[gi]
+    hooks.onGroup?.(gi, groups.length, group.length)
+    // The group's blocks with a surface, each in its own window buffers.
+    const active = []
+    group.forEach((bi, si) => {
+      const b = blocks[bi]
+      if (b.empty) return
+      const { ex0, ey0, ew, eh } = b, n = ew * eh, { buf } = states[si]
       const win = {
         x0: ex0, y0: ey0, w: ew, h: eh,
         data: buf.data.subarray(0, n), mask: buf.mask.subarray(0, n), rgba: buf.rgba.subarray(0, n * 4).fill(0),
@@ -1067,36 +1137,53 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
         labels: buf.labels?.subarray(0, n).fill(NO_LABEL) ?? null,
       }
       sampleSurfaceWindow(surface, geom, ex0, ey0, ew, eh, win.data, win.mask)
-      if (mosaic) {
-        winTiles(win)
-        await mosaicBlock(b, win, n)
-      } else {
-        for (const mi of b.maps) {
-          const e = await fetch(mi, true)
-          const t = performance.now()
-          colourFromMap(win, geom, e.m, e.photo, mi, affine, toSfm, opts, scratch)
-          clock('colour', t)
-          visited(mi, e)
-        }
-      }
-      const cx = col0 - ex0, cy = row0 - ey0
-      const s = finishWindow(win, cx, cy, bw, bh)
-      fillOrthoGaps(win.rgba, win.mask, ew, eh, fillRadius, fillMethod)
-      const c = countColoured(win.rgba, ew, cx, cy, bw, bh)
-      sampled += s; covered += c
-      stats.add({ rgba: win.rgba, labels: win.labels, x0: ex0, y0: ey0, w: ew, h: eh, cx0: col0, cy0: row0, cw: bw, ch: bh })
-      for (let r = 0; r < bh; r++) {
-        const src = (cy + r) * ew + cx
-        coreRgba.set(win.rgba.subarray(src * 4, (src + bw) * 4), r * bw * 4)
-        if (coreLabels) coreLabels.set(win.labels.subarray(src, src + bw), r * bw)
+      const st = states[si]
+      b.maps.forEach((mi, j) => { st.slot[mi] = j })
+      active.push({ b, win, n, st })
+    })
+    if (mosaic) {
+      for (const a of active) winTiles(a.win)
+      await mosaicGroup(active)
+    } else {
+      for (const mi of unionMaps(active.map((a) => a.b))) {
+        const e = await fetch(mi, true)
+        const t = performance.now()
+        for (const a of active) if (a.st.slot[mi] >= 0) colourFromMap(a.win, geom, e.m, e.photo, mi, affine, toSfm, opts, scratch)
+        clock('colour', t)
+        visited(mi, e)
       }
     }
-    if (onBlock) await onBlock({ col0, row0, width: bw, height: bh, rgba: coreRgba, labels: coreLabels })
+    // Finish and hand on every block of the group, in block order.
+    for (const bi of group) {
+      const b = blocks[bi], a = active.find((x) => x.b === b)
+      const { col0, row0, bw, bh, ex0, ey0, ew, eh } = b
+      const coreRgba = new Uint8ClampedArray(bw * bh * 4)
+      const coreLabels = labelled ? new Uint16Array(bw * bh).fill(NO_LABEL) : null
+      if (a) {
+        const { win } = a
+        const cx = col0 - ex0, cy = row0 - ey0
+        const s0 = finishWindow(win, cx, cy, bw, bh)
+        fillOrthoGaps(win.rgba, win.mask, ew, eh, fillRadius, fillMethod)
+        const c = countColoured(win.rgba, ew, cx, cy, bw, bh)
+        sampled += s0; covered += c
+        stats.add({ rgba: win.rgba, labels: win.labels, x0: ex0, y0: ey0, w: ew, h: eh, cx0: col0, cy0: row0, cw: bw, ch: bh })
+        for (let r = 0; r < bh; r++) {
+          const src = (cy + r) * ew + cx
+          coreRgba.set(win.rgba.subarray(src * 4, (src + bw) * 4), r * bw * 4)
+          if (coreLabels) coreLabels.set(win.labels.subarray(src, src + bw), r * bw)
+        }
+        for (const mi of b.maps) a.st.slot[mi] = -1
+      }
+      if (onBlock) await onBlock({ col0, row0, width: bw, height: bh, rgba: coreRgba, labels: coreLabels })
+    }
   }
   cache.clear()
   return {
     width: W, height: H, covered, sampled, filled: covered - sampled, surfaceCells,
-    labelled: !!buf.labels, stats: stats.finish(), blocks: nBlocks,
+    labelled, stats: stats.finish(), blocks: nBlocks, groups: groups.length,
+    grouping: { size: grouping.size, groups: groups.length, cacheBytes, predicted: grouping.predicted ?? null },
+    cacheShrinks: shrinks, cacheLimit,
+    ...(survey ? { surveyFromMapRgb } : {}),
     visits: blocks.reduce((v, b) => v + b.maps.length, 0),
     mapLoads, photoLoads, cacheHits,
     timings: Object.fromEntries(Object.entries(ms).map(([k, v]) => [k, Math.round(v)])),
@@ -1111,152 +1198,312 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     ...(balance ? { gains: balance.gains } : {}),
   }
 
-  // The mosaic's passes over one block window (see the section comment above).
-  async function mosaicBlock(b, win, n) {
-    const { ew, eh } = b
-    Object.assign(win, {
-      raw: mb.raw.subarray(0, n).fill(NO_LABEL), score: mb.score.subarray(0, n).fill(Infinity),
-      label: mb.label.subarray(0, n), sums: null, msums: mb.sums.subarray(0, n * 4).fill(0),
-      fallback: mb.fallback.subarray(0, n * 3), flags: mb.flags.subarray(0, n).fill(0), dist: mb.dist.subarray(0, n),
-    })
-    for (const mi of b.maps) {
+  // The mosaic's passes over a group's block windows (see the section comment above):
+  // each pass visits each map once, and every block that sees it takes its share.
+  async function mosaicGroup(active) {
+    for (const a of active) {
+      const { win, n, st } = a, mbs = st.mb
+      Object.assign(win, {
+        raw: mbs.raw.subarray(0, n).fill(NO_LABEL), score: mbs.score.subarray(0, n).fill(Infinity),
+        label: mbs.label.subarray(0, n), sums: null, msums: mbs.sums.subarray(0, n * 4).fill(0),
+        fallback: mbs.fallback.subarray(0, n * 3), flags: mbs.flags.subarray(0, n).fill(0), dist: mbs.dist.subarray(0, n),
+      })
+    }
+    const union = unionMaps(active.map((a) => a.b))
+    // Pass 1: labels (no photo).
+    for (const mi of union) {
       const e = await fetch(mi, false)
       const t = performance.now()
-      labelFromMap(win, geom, e.m, mi, gp, toSfm, opts, scratch)
+      for (const a of active) if (a.st.slot[mi] >= 0) labelFromMap(a.win, geom, e.m, mi, gp, toSfm, opts, scratch)
       clock('label', t)
       visited(mi, e)
     }
-    const k = b.maps.length
-    for (let j = 0; j < k; j++) slot[b.maps[j]] = j
-    if (seams) {
-      // O5: the coarse graph-cut label of each cell; its pass-1 label where the coarse
-      // cell has none, or names a map that sees nothing of this window (culled).
-      const { labels: cut, grid: { f, cw } } = seams
-      for (let r = 0, i = 0; r < eh; r++) {
-        const crow = Math.floor((b.ey0 + r) / f) * cw
-        for (let c = 0; c < ew; c++, i++) {
-          const l = cut[crow + Math.floor((b.ex0 + c) / f)]
-          win.label[i] = l !== NO_LABEL && slot[l] >= 0 ? l : win.raw[i]
-        }
-      }
-    } else smoothLabels(win.raw, win.label, mb.tmp.subarray(0, n), ew, eh)
-    // Each map's box: its region grown by the seam band, joined with the cells it
-    // holds as the pass-1 fallback.
-    const own = new Int32Array(4 * k), fb = new Int32Array(4 * k)
-    for (let j = 0; j < k; j++) { own.set([ew, eh, -1, -1], 4 * j); fb.set([ew, eh, -1, -1], 4 * j) }
-    const grow = (arr, s, c, r) => {
-      if (c < arr[s]) arr[s] = c
-      if (r < arr[s + 1]) arr[s + 1] = r
-      if (c > arr[s + 2]) arr[s + 2] = c
-      if (r > arr[s + 3]) arr[s + 3] = r
-    }
-    for (let r = 0, i = 0; r < eh; r++) for (let c = 0; c < ew; c++, i++) {
-      const l = win.label[i], rl = win.raw[i]
-      if (l !== NO_LABEL) grow(own, 4 * slot[l], c, r)
-      if (rl !== NO_LABEL && rl !== l) grow(fb, 4 * slot[rl], c, r)
-    }
-    const step = { ...scratch, P: [0, 0, 0] }
-    const band = multiband ? 0 : seamCells, seam3 = 3 * band, viewWin = { ...win, sums: win.msums }
+    const band = multiband ? 0 : seamCells, seam3 = 3 * band
     const gains = balance?.gains ?? null
-    for (let j = k - 1; j >= 0; j--) { // descending: see passOrder
-      const mi = b.maps[j], s = 4 * j
-      const hasOwn = own[s + 2] >= 0, hasFb = fb[s + 2] >= 0
-      if (!hasOwn && !hasFb) { visited(mi, null); continue }
-      let x0 = ew, y0 = eh, x1 = 0, y1 = 0
-      if (hasOwn) {
-        x0 = Math.max(0, own[s] - band); y0 = Math.max(0, own[s + 1] - band)
-        x1 = Math.min(ew, own[s + 2] + 1 + band); y1 = Math.min(eh, own[s + 3] + 1 + band)
+    for (const a of active) {
+      const { b, win, n, st } = a, { ew, eh } = b, k = b.maps.length
+      if (seams) {
+        // O5: the coarse graph-cut label of each cell; its pass-1 label where the coarse
+        // cell has none, or names a map that sees nothing of this window (culled).
+        const { labels: cut, grid: { f, cw } } = seams
+        for (let r = 0, i = 0; r < eh; r++) {
+          const crow = Math.floor((b.ey0 + r) / f) * cw
+          for (let c = 0; c < ew; c++, i++) {
+            const l = cut[crow + Math.floor((b.ex0 + c) / f)]
+            win.label[i] = l !== NO_LABEL && st.slot[l] >= 0 ? l : win.raw[i]
+          }
+        }
+      } else smoothLabels(win.raw, win.label, st.mb.tmp.subarray(0, n), ew, eh)
+      // Each map's box: its region grown by the seam band, joined with the cells it
+      // holds as the pass-1 fallback.
+      const own = new Int32Array(4 * k), fb = new Int32Array(4 * k)
+      for (let j = 0; j < k; j++) { own.set([ew, eh, -1, -1], 4 * j); fb.set([ew, eh, -1, -1], 4 * j) }
+      const grow = (arr, o, c, r) => {
+        if (c < arr[o]) arr[o] = c
+        if (r < arr[o + 1]) arr[o + 1] = r
+        if (c > arr[o + 2]) arr[o + 2] = c
+        if (r > arr[o + 3]) arr[o + 3] = r
       }
-      if (hasFb) {
-        x0 = Math.min(x0, fb[s]); y0 = Math.min(y0, fb[s + 1]); x1 = Math.max(x1, fb[s + 2] + 1); y1 = Math.max(y1, fb[s + 3] + 1)
+      for (let r = 0, i = 0; r < eh; r++) for (let c = 0; c < ew; c++, i++) {
+        const l = win.label[i], rl = win.raw[i]
+        if (l !== NO_LABEL) grow(own, 4 * st.slot[l], c, r)
+        if (rl !== NO_LABEL && rl !== l) grow(fb, 4 * st.slot[rl], c, r)
       }
-      if (seam3 && hasOwn) chamferTo(win.label, ew, x0, y0, x1, y1, mi, win.dist)
-      else if (seam3) for (let r = y0; r < y1; r++) win.dist.fill(0xffff, r * ew + x0, r * ew + x1)
+      a.own = own; a.fb = fb
+      a.step = { ...scratch, P: [0, 0, 0] }
+      a.viewWin = { ...win, sums: win.msums }
+    }
+    // Pass 2: colour, descending (see passOrder).
+    for (let u = union.length - 1; u >= 0; u--) {
+      const mi = union[u]
+      const boxes = []
+      for (const a of active) {
+        const j = a.st.slot[mi]
+        if (j < 0) continue
+        const o = 4 * j, { own, fb } = a, { ew, eh } = a.b
+        const hasOwn = own[o + 2] >= 0, hasFb = fb[o + 2] >= 0
+        if (!hasOwn && !hasFb) continue
+        let x0 = ew, y0 = eh, x1 = 0, y1 = 0
+        if (hasOwn) {
+          x0 = Math.max(0, own[o] - band); y0 = Math.max(0, own[o + 1] - band)
+          x1 = Math.min(ew, own[o + 2] + 1 + band); y1 = Math.min(eh, own[o + 3] + 1 + band)
+        }
+        if (hasFb) {
+          x0 = Math.min(x0, fb[o]); y0 = Math.min(y0, fb[o + 1]); x1 = Math.max(x1, fb[o + 2] + 1); y1 = Math.max(y1, fb[o + 3] + 1)
+        }
+        boxes.push({ a, hasOwn, box: [x0, y0, x1, y1] })
+      }
+      if (!boxes.length) { visited(mi, null); continue }
       const e = await fetch(mi, true)
       const t = performance.now()
-      blendFromMap(viewWin, geom, e.m, e.photo, mi, gp, toSfm, opts, step, [x0, y0, x1, y1], seam3, gains)
+      for (const { a, hasOwn, box: [x0, y0, x1, y1] } of boxes) {
+        const { win } = a, ew = a.b.ew
+        if (seam3 && hasOwn) chamferTo(win.label, ew, x0, y0, x1, y1, mi, win.dist)
+        else if (seam3) for (let r = y0; r < y1; r++) win.dist.fill(0xffff, r * ew + x0, r * ew + x1)
+        blendFromMap(a.viewWin, geom, e.m, e.photo, mi, gp, toSfm, opts, a.step, [x0, y0, x1, y1], seam3, gains)
+      }
       clock('colour', t)
       visited(mi, e)
     }
-    if (multiband) await multibandPass(b, win, n, step, gains)
-    else finishMosaicWindow({ ...win, sums: win.msums })
-    for (const mi of b.maps) slot[mi] = -1
+    if (multiband) await multibandGroup(active, union, gains)
+    else for (const a of active) finishMosaicWindow({ ...a.win, sums: a.win.msums })
   }
 
   // O4b: the hard-seam mosaic of pass 2 is the base; each map then adds its pyramid
-  // correction over the ring around its effective region (multiband.js).
-  async function multibandPass(b, win, n, step, gains) {
-    const { ew, eh } = b
-    const { mask, label, raw, msums, fallback, flags } = win
-    const eff = mb.tmp.subarray(0, n)
-    // The effective label and its colour: the label where it saw the cell, else the
-    // pass-1 fallback (as finishMosaicWindow), in linear light, gains applied.
-    for (let i = 0; i < n; i++) {
-      const f = flags[i], o = 4 * i
-      eff[i] = NO_LABEL
-      if (!mask[i]) continue
-      if (f & 1) eff[i] = label[i]
-      else if (f & 2) { eff[i] = raw[i]; msums[o] = fallback[3 * i]; msums[o + 1] = fallback[3 * i + 1]; msums[o + 2] = fallback[3 * i + 2] }
-    }
-    const pyr = mb.pyr, { ring, margin } = multibandReach(mode.levels), ring3 = 3 * ring
-    let t = performance.now()
-    multibandBegin(pyr, ew, eh, eff, NO_LABEL)
-    clock('pyramid', t)
-    const k = b.maps.length, box = new Int32Array(4 * k)
-    for (let j = 0; j < k; j++) box.set([ew, eh, -1, -1], 4 * j)
-    for (let r = 0, i = 0; r < eh; r++) for (let c = 0; c < ew; c++, i++) {
-      const l = eff[i]
-      if (l === NO_LABEL) continue
-      const s = 4 * slot[l]
-      if (c < box[s]) box[s] = c
-      if (r < box[s + 1]) box[s + 1] = r
-      if (c > box[s + 2]) box[s + 2] = c
-      if (r > box[s + 3]) box[s + 3] = r
-    }
-    const d = fallback // free now: the box's colour differences, 3 per cell
-    const { depthTolRel = 0.02, maxCost = Infinity } = opts
-    const { P, g, px } = step
-    for (let j = 0; j < k; j++) {
-      const mi = b.maps[j], s = 4 * j
-      if (box[s + 2] < 0) { visited(mi, null); continue }
-      // The box on the window's pyramid lattice (the window's origin is on the grid's).
-      const x0 = Math.max(0, Math.floor((box[s] - margin) / align) * align), y0 = Math.max(0, Math.floor((box[s + 1] - margin) / align) * align)
-      const x1 = Math.min(ew, box[s + 2] + 1 + margin), y1 = Math.min(eh, box[s + 3] + 1 + margin)
-      const bw = x1 - x0, bh = y1 - y0
-      const e = await fetch(mi, true), m = e.m, C = cameraCentre(m)
-      t = performance.now()
-      chamferTo(eff, ew, x0, y0, x1, y1, mi, win.dist)
-      const g0 = gains ? gains[mi * 3] : 1, g1 = gains ? gains[mi * 3 + 1] : 1, g2 = gains ? gains[mi * 3 + 2] : 1
-      d.fill(0, 0, 3 * bw * bh)
-      forTilesReaching(win, geom, m, gp.affine, x0, y0, x1, y1, (c0, r0, c1, r1) => {
-        for (let wr = r0; wr < r1; wr++) for (let wc = c0; wc < c1; wc++) {
-          const wi = wr * ew + wc, dd = win.dist[wi]
-          if (dd === 0 || dd > ring3 || eff[wi] === NO_LABEL) continue
-          cellToSfm(geom, gp.affine, toSfm, b.ex0 + wc, b.ey0 + wr, win.data[wi], P)
-          if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, e.photo, g, px)) continue
-          const o = 3 * ((wr - y0) * bw + wc - x0), wo = 4 * wi
-          d[o] = g0 * srgbToLinear(px[0]) - msums[wo]
-          d[o + 1] = g1 * srgbToLinear(px[1]) - msums[wo + 1]
-          d[o + 2] = g2 * srgbToLinear(px[2]) - msums[wo + 2]
-        }
-      })
-      clock('ring', t)
-      t = performance.now()
-      multibandAdd(pyr, x0, y0, bw, bh, d, eff, mi)
+  // correction over the ring around its effective region (multiband.js), map by map
+  // across the group's blocks.
+  async function multibandGroup(active, union, gains) {
+    const { ring, margin } = multibandReach(mode.levels), ring3 = 3 * ring
+    for (const a of active) {
+      const { b, win, n, st } = a, { ew, eh } = b
+      const { mask, label, raw, msums, fallback, flags } = win
+      // The effective label and its colour: the label where it saw the cell, else the
+      // pass-1 fallback (as finishMosaicWindow), in linear light, gains applied.
+      const eff = st.mb.tmp.subarray(0, n)
+      for (let i = 0; i < n; i++) {
+        const f = flags[i], o = 4 * i
+        eff[i] = NO_LABEL
+        if (!mask[i]) continue
+        if (f & 1) eff[i] = label[i]
+        else if (f & 2) { eff[i] = raw[i]; msums[o] = fallback[3 * i]; msums[o + 1] = fallback[3 * i + 1]; msums[o + 2] = fallback[3 * i + 2] }
+      }
+      const t = performance.now()
+      multibandBegin(st.mb.pyr, ew, eh, eff, NO_LABEL)
       clock('pyramid', t)
+      const k = b.maps.length, box = new Int32Array(4 * k)
+      for (let j = 0; j < k; j++) box.set([ew, eh, -1, -1], 4 * j)
+      for (let r = 0, i = 0; r < eh; r++) for (let c = 0; c < ew; c++, i++) {
+        const l = eff[i]
+        if (l === NO_LABEL) continue
+        const o = 4 * st.slot[l]
+        if (c < box[o]) box[o] = c
+        if (r < box[o + 1]) box[o + 1] = r
+        if (c > box[o + 2]) box[o + 2] = c
+        if (r > box[o + 3]) box[o + 3] = r
+      }
+      a.eff = eff; a.mbox = box
+    }
+    const { depthTolRel = 0.02, maxCost = Infinity } = opts
+    for (const mi of union) {
+      const users = active.filter((a) => a.st.slot[mi] >= 0 && a.mbox[4 * a.st.slot[mi] + 2] >= 0)
+      if (!users.length) { visited(mi, null); continue }
+      const e = await fetch(mi, true), m = e.m, C = cameraCentre(m)
+      const g0 = gains ? gains[mi * 3] : 1, g1 = gains ? gains[mi * 3 + 1] : 1, g2 = gains ? gains[mi * 3 + 2] : 1
+      for (const a of users) {
+        const { b, win, eff, mbox, st, step } = a, { ew, eh } = b, o = 4 * st.slot[mi]
+        const { P, g, px } = step
+        const { msums } = win
+        // The box on the window's pyramid lattice (the window's origin is on the grid's).
+        const x0 = Math.max(0, Math.floor((mbox[o] - margin) / align) * align), y0 = Math.max(0, Math.floor((mbox[o + 1] - margin) / align) * align)
+        const x1 = Math.min(ew, mbox[o + 2] + 1 + margin), y1 = Math.min(eh, mbox[o + 3] + 1 + margin)
+        const bw = x1 - x0, bh = y1 - y0
+        let t = performance.now()
+        chamferTo(eff, ew, x0, y0, x1, y1, mi, win.dist)
+        const d = win.fallback // free now: the box's colour differences, 3 per cell
+        d.fill(0, 0, 3 * bw * bh)
+        forTilesReaching(win, geom, m, gp.affine, x0, y0, x1, y1, (c0, r0, c1, r1) => {
+          for (let wr = r0; wr < r1; wr++) for (let wc = c0; wc < c1; wc++) {
+            const wi = wr * ew + wc, dd = win.dist[wi]
+            if (dd === 0 || dd > ring3 || eff[wi] === NO_LABEL) continue
+            cellToSfm(geom, gp.affine, toSfm, b.ex0 + wc, b.ey0 + wr, win.data[wi], P)
+            if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, e.photo, g, px)) continue
+            const q = 3 * ((wr - y0) * bw + wc - x0), wo = 4 * wi
+            d[q] = g0 * srgbToLinear(px[0]) - msums[wo]
+            d[q + 1] = g1 * srgbToLinear(px[1]) - msums[wo + 1]
+            d[q + 2] = g2 * srgbToLinear(px[2]) - msums[wo + 2]
+          }
+        })
+        clock('ring', t)
+        t = performance.now()
+        multibandAdd(st.mb.pyr, x0, y0, bw, bh, d, eff, mi)
+        clock('pyramid', t)
+      }
       visited(mi, e)
     }
-    t = performance.now()
-    multibandFinish(pyr, msums)
-    clock('pyramid', t)
-    const { rgba, labels } = win
-    for (let i = 0; i < n; i++) {
-      const l = eff[i], o = 4 * i
-      labels[i] = l
-      if (l === NO_LABEL) continue
-      rgba[o] = linearToSrgb(msums[o]); rgba[o + 1] = linearToSrgb(msums[o + 1]); rgba[o + 2] = linearToSrgb(msums[o + 2]); rgba[o + 3] = 255
+    for (const a of active) {
+      const { win, eff, n, st } = a
+      let t = performance.now()
+      multibandFinish(st.mb.pyr, win.msums)
+      clock('pyramid', t)
+      const { rgba, labels, msums } = win
+      for (let i = 0; i < n; i++) {
+        const l = eff[i], o = 4 * i
+        labels[i] = l
+        if (l === NO_LABEL) continue
+        rgba[o] = linearToSrgb(msums[o]); rgba[o + 1] = linearToSrgb(msums[o + 1]); rgba[o + 2] = linearToSrgb(msums[o + 2]); rgba[o + 3] = 255
+      }
     }
   }
+}
+
+// Blocks in groups of about `size`: a rectangle of neighbouring blocks (squarer is
+// better — fewer maps on its rim), the groups in serpentine row order so the next group
+// starts beside the last one. Each group lists block indices in row-major order.
+function blockGroups(nbx, nby, size) {
+  const n = Math.max(1, Math.min(nbx * nby, Math.floor(size) || 1))
+  let gx = Math.min(nbx, Math.max(1, Math.round(Math.sqrt(n))))
+  let gy = Math.min(nby, Math.max(1, Math.floor(n / gx)))
+  if (gx * gy < n && gx < nbx) gx = Math.min(nbx, Math.ceil(n / gy))
+  const groups = []
+  for (let ty = 0, row = 0; ty < nby; ty += gy, row++) {
+    const xs = []
+    for (let tx = 0; tx < nbx; tx += gx) xs.push(tx)
+    if (row % 2) xs.reverse()
+    for (const tx of xs) {
+      const g = []
+      for (let by = ty; by < Math.min(nby, ty + gy); by++) for (let bx = tx; bx < Math.min(nbx, tx + gx); bx++) g.push(by * nbx + bx)
+      groups.push(g)
+    }
+  }
+  return groups
+}
+
+// The order a run visits maps: per group, per pass, the group's maps — ascending on
+// even passes, descending on odd ones (each pass starts on what the last left cached).
+const passOrder = (maps, k) => (k % 2 ? [...maps].reverse() : maps)
+function visitSequence(groupMaps, passes) {
+  const seq = []
+  for (const maps of groupMaps) for (let k = 0; k < passes; k++) for (const mi of passOrder(maps, k)) seq.push(mi)
+  return seq
+}
+
+// Relative cost of a cache miss: a photo read and decode against a map's planes read
+// (quarry-347, 2026-10-20: ~0.2–0.3 s against ~0.07 s).
+const PHOTO_COST = 3, MAP_COST = 1
+
+// P6: the group size that costs the fewest reads — each candidate's visit sequence
+// replayed through a farthest-next-use cache (the run's own policy) of what the cache
+// keeps after the group's working planes. With `entrySizes` ([{ map, photo }] per map, the
+// EXPECTED bytes: planes, and the photo at its decode size) the replay counts bytes as the
+// run does; without, every entry is `entryBytes`. The worst-case entry made a big cache
+// look far worse than it is (quarry-347 at long side 12,000: block by block predicted
+// 16,539, ran at ~4,000), so the run passes expected sizes. A mosaic's first pass needs
+// no photo. A larger group must save ≥ 3 %: it holds more memory for less cache.
+// → { size, predicted: { [size]: cost } }
+// `owners` (per block, the Set of maps the graph cut gives part of it): a mosaic's colour
+// passes decode only those maps' photos — of the 238 maps that see a quarry block at long
+// side 12,000 a few dozen own any of it — so without them every visible map would count
+// as a decode, which overrated both plans (10,302 predicted against ~4,000 run).
+export function chooseGroupSize(nbx, nby, blocks, passes, mosaic, { cacheBytes, blockBytes, entryBytes, mapsResident = false, entrySizes = null, owners = null }) {
+  const nBlocks = nbx * nby
+  const predicted = {}
+  let best = { size: 1, cost: Infinity }
+  if (!(entryBytes > 0)) return { size: 1, predicted }
+  for (const size of [1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 36, 49, 64]) {
+    if (size > 1 && size > nBlocks) break
+    const room = cacheBytes - (size - 1) * blockBytes
+    const cap = Math.floor(room / entryBytes)
+    if (cap < 1) break
+    const groupList = blockGroups(nbx, nby, size)
+    const groupMaps = groupList.map((g) => unionMaps(g.map((bi) => blocks[bi])))
+    const seq = visitSequence(groupMaps, passes)
+    // Per visit: 1 = the map's planes (a label pass), 2 = also its photo, 0 = a colour pass
+    // skipping a map that owns nothing of the group (only its next use moves).
+    const kinds = []
+    for (let gi = 0; gi < groupMaps.length; gi++) {
+      const own = owners ? new Set(groupList[gi].flatMap((bi) => [...owners[bi]])) : null
+      for (let k = 0; k < passes; k++) {
+        for (const mi of passOrder(groupMaps[gi], k)) kinds.push(!mosaic ? 2 : k === 0 ? 1 : own && !own.has(mi) ? 0 : 2)
+      }
+    }
+    const cost = replayCache(seq, kinds, entrySizes ? room : cap, mapsResident ? 0 : MAP_COST, entrySizes)
+    predicted[size] = cost
+    if (cost < best.cost * 0.97) best = { size, cost }
+  }
+  return { size: best.size, predicted }
+}
+
+// The cost of a visit sequence through a cache that evicts the entry wanted farthest
+// ahead: a miss reads the map (`mapCost`), a visit that needs the photo decodes it unless
+// the cached entry already has it. The cache holds `cap` entries, or with `sizes`
+// (per map { map, photo } bytes) `cap` bytes.
+function replayCache(seq, kinds, cap, mapCost, sizes = null) {
+  const next = new Float64Array(seq.length), seen = new Map()
+  for (let p = seq.length - 1; p >= 0; p--) { next[p] = seen.get(seq[p]) ?? Infinity; seen.set(seq[p], p) }
+  const cache = new Map() // mi → { next, photo, bytes }
+  let cost = 0, held = 0
+  const over = () => (sizes ? held > cap : cache.size > cap)
+  for (let p = 0; p < seq.length; p++) {
+    const mi = seq[p]
+    let e = cache.get(mi)
+    if (kinds[p] === 0) {
+      if (e) e.next = next[p]
+      continue
+    }
+    if (!e) { cost += mapCost; e = { next: 0, photo: false, bytes: sizes ? sizes[mi].map : 1 }; cache.set(mi, e); held += e.bytes }
+    if (kinds[p] === 2 && !e.photo) {
+      cost += PHOTO_COST; e.photo = true
+      if (sizes) { e.bytes += sizes[mi].photo; held += sizes[mi].photo }
+    }
+    e.next = next[p]
+    for (const [k, v] of cache) if (v.next === Infinity) { cache.delete(k); held -= v.bytes }
+    while (over() && cache.size) {
+      let worst = -1, far = -Infinity
+      for (const [k, v] of cache) if (v.next > far) { far = v.next; worst = k }
+      held -= cache.get(worst).bytes; cache.delete(worst)
+    }
+  }
+  return cost
+}
+
+// The maps the graph cut (its coarse label grid) gives a part of block b's window, of
+// those the block sees.
+function ownersFromCut({ labels, grid: { f, cw } }, b) {
+  const sees = new Set(b.maps), own = new Set()
+  const c0 = Math.floor(b.ex0 / f), c1 = Math.floor((b.ex0 + b.ew - 1) / f)
+  const r0 = Math.floor(b.ey0 / f), r1 = Math.floor((b.ey0 + b.eh - 1) / f)
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const l = labels[r * cw + c]
+    if (l !== NO_LABEL && sees.has(l)) own.add(l)
+  }
+  return own
+}
+
+// The maps any of these blocks sees, ascending.
+function unionMaps(blocks) {
+  const set = new Set()
+  for (const b of blocks) for (const mi of b.maps) set.add(mi)
+  return [...set].sort((a, b) => a - b)
 }
 
 
