@@ -11,6 +11,9 @@ const props = defineProps({
   // Authoritative, monotonic 0..1 bar value from usePipeline. `current`/`total`
   // remain the numeric readout only — they may re-count within a run.
   fraction:      { type: Number, default: 0 },
+  // The stage's current phase, when it names one (usePipeline progressPhase). The ETA
+  // is measured afresh from each phase's start (see the estimator below).
+  phase:         { type: String, default: '' },
   indeterminate: { type: Boolean, default: false },
   complete:      { type: Boolean, default: false },
   cancelling:    { type: Boolean, default: false },
@@ -111,6 +114,13 @@ const cardStyle = computed(() => {
 // blended rate is the raw estimate, eased into `smoothedEta` so the countdown glides.
 const lastStamp    = ref(0)  // wall-clock of the most recent advance
 const lastFraction = ref(0)
+// Where the current phase began. A stage in phases (fusion: plan, then the slab pass)
+// gives each a fixed share of the bar, and the time a phase really takes varies with
+// the data (four times the pixels at step 1, the same plan). The cumulative rate since
+// the run started would carry the plan's rate into the slab pass, so it counts from
+// the phase start instead; a stage with no phases has one, from the start.
+const phaseAt       = ref(0)
+const phaseFraction = ref(0)
 const emaRate      = ref(0)  // exponential moving average of fraction per second
 const smoothedEta  = ref(null)
 const EMA_ALPHA    = 0.25    // weight of the newest sample in the EMA
@@ -131,6 +141,18 @@ const advances = ref(0)
 // zero-rate samples on the tick decays it toward 0, which is exactly what "no progress
 // for the last while" means; the cumulative rate still anchors the estimate.
 const STALL_AFTER_S = 2
+
+// A new phase: its rate is unknown until it has advanced, so the estimate, the EMA and
+// the promise all start again (the old promise was made about the old phase).
+watch(() => props.phase, () => {
+  phaseAt.value = Date.now()
+  phaseFraction.value = props.fraction
+  lastStamp.value = 0
+  emaRate.value = 0
+  smoothedEta.value = null
+  promiseEta = null
+  overrunLatched.value = false
+})
 
 watch(() => props.fraction, (val) => {
   // `fraction` is monotonic by construction in usePipeline, so there is no restart
@@ -154,12 +176,12 @@ watch(() => props.fraction, (val) => {
 const etaSeconds = computed(() => {
   // Depend on `now` so the countdown ticks down between advances.
   void now.value
-  const elapsedS = (now.value - startedAt.value) / 1000
-  const f = props.fraction
+  const elapsedS = (now.value - phaseAt.value) / 1000
+  const f = props.fraction, f0 = phaseFraction.value
   if (props.indeterminate || f <= 0) return null
-  if (f < MIN_FRACTION || elapsedS < MIN_ELAPSED_S || !lastStamp.value) return null
+  if (f - f0 < MIN_FRACTION * (1 - f0) || elapsedS < MIN_ELAPSED_S || !lastStamp.value) return null
   if (f >= 1) return 0
-  const cumRate = f / elapsedS
+  const cumRate = (f - f0) / elapsedS
   if (!(cumRate > 0)) return null
   // Blend the stable cumulative rate with the reactive EMA (equal weight once the EMA
   // has a sample; cumulative alone until then).
@@ -273,6 +295,7 @@ watch(() => [etaText.value, now.value], () => {
 onMounted(() => {
   startedAt.value = Date.now()
   now.value = startedAt.value
+  phaseAt.value = startedAt.value
   ticker = setInterval(() => { now.value = Date.now() }, 250)
   watchHole()
   window.addEventListener('resize', measureHole)

@@ -8,7 +8,10 @@
 import { DENSE_TUNING } from '../tuning.js'
 import { normalizeRegion, regionContains } from '../products/region.js'
 import { DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
-import { projectDensifyPeakBytes, densifyInputBytes, formatBytes, maxFusionTileCells, DENSIFY_CLOUD_BYTES_PER_CELL } from './memBudget.js'
+import {
+  projectDensifyPeakBytes, densifyInputBytes, formatBytes, maxFusionTileCells, DENSIFY_CLOUD_BYTES_PER_CELL,
+  MAX_BUDGET_BYTES, MAX_ACCUMULATOR_CELLS, MAX_CLOUD_POINTS,
+} from './memBudget.js'
 import { unprojectPixel, sliceCorners } from './denseGeometry.js'
 import { mix32, clampCellForBounds } from './voxelAccumulator.js'
 import { numOpt, boolOpt } from './denseOptions.js'
@@ -82,21 +85,44 @@ export function fusionCostStats(maps, options = {}) {
 // Auto voxel size for the spatial merge: the median ground-sample-distance across
 // maps (median valid depth / fx = the world-space span of one pixel). One cell ≈ one
 // pixel footprint, so cross-view overlap dedupes without discarding real resolution.
-function* mergeCellSteps(maps) {
-  const gsds = []
-  for (let mi = 0; mi < maps.length; mi++) {
-    const m = yield mi
-    const { depth } = m
-    const ds = []
-    for (let i = 0; i < depth.length; i++) if (depth[i] > 0) ds.push(depth[i])
-    if (!ds.length) continue
-    ds.sort((a, b) => a - b)
-    const fx = m.K?.fx || 0
-    if (fx > 0) gsds.push(ds[ds.length >> 1] / fx)
-  }
+// Per map here (the bounds pass calls it, so it costs no read of its own), the median
+// of the per-map values in mergeCellOf. Quickselect on a reused Float32Array: boxing
+// every valid depth into a JS array and sorting it took ~0.5 s a map, three of quarry's
+// four silent planning minutes. Same element of rank ⌊n/2⌋, so the same cell.
+function mapGsd(m, scratch) {
+  const { depth } = m
+  const fx = m.K?.fx || 0
+  if (!(fx > 0)) return null
+  if (scratch.buf.length < depth.length) scratch.buf = new Float32Array(depth.length)
+  const ds = scratch.buf
+  let n = 0
+  for (let i = 0; i < depth.length; i++) if (depth[i] > 0) ds[n++] = depth[i]
+  if (!n) return null
+  return selectRank(ds, n, n >> 1) / fx
+}
+function mergeCellOf(gsds) {
   if (!gsds.length) return 0
   gsds.sort((a, b) => a - b)
   return gsds[gsds.length >> 1]
+}
+
+// The value of rank k (0-based, ascending) among a[0..n): Hoare-partition quickselect,
+// reorders a in place.
+function selectRank(a, n, k) {
+  let lo = 0, hi = n - 1
+  while (hi > lo) {
+    const pivot = a[(lo + hi) >> 1]
+    let i = lo, j = hi
+    while (i <= j) {
+      while (a[i] < pivot) i++
+      while (a[j] > pivot) j--
+      if (i <= j) { const t = a[i]; a[i] = a[j]; a[j] = t; i++; j-- }
+    }
+    if (k <= j) hi = j
+    else if (k >= i) lo = i
+    else break
+  }
+  return a[k]
 }
 
 // Measured fusion size: the distinct merge cells of every pixel fusion could keep —
@@ -199,7 +225,36 @@ export function fusionGates(opts = {}) {
   return { consistencyPx, depthTolRel, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated, incidenceOn, cosIncGate }
 }
 
-export function* fusionPlanSteps(maps, opts, onLog, hooks) {
+// The pre-passes read every map once per pass (cost count, cost samples, bounds, cell
+// estimate and, tiled + streamed, the slab outlines) and log nothing in between: on
+// quarry's 347 saved maps that was minutes of a bar with no news. `hooks.onPlanProgress
+// (done, total, label, fraction)` hears each read: done/total within the current pass,
+// fraction over the whole plan (the last pass is only planned when streaming, so an
+// untiled plan ends with a short jump; a re-plan at a coarser step re-counts).
+// The plan's share of a fusion progress bar: on quarry (347 saved maps) the pre-passes
+// are roughly a quarter of Stage B once the merge-cell pass stopped sorting boxed depths.
+export const FUSION_PLAN_SHARE = 0.25
+const PLAN_PASS_LABELS = ['cost statistics', 'cost statistics', 'scene bounds', 'measuring the cloud size', 'slab outlines']
+export function* fusionPlanSteps(maps, opts, onLog, hooks = {}) {
+  const report = hooks.onPlanProgress, n = maps.length
+  const steps = planSteps(maps, opts, onLog, hooks)
+  if (!report || !n) return yield* steps
+  const passes = hooks.streaming ? 5 : 4
+  let reads = 0, r = steps.next()
+  while (!r.done) {
+    const map = yield r.value
+    if (typeof r.value === 'number') {
+      const pass = Math.floor(reads / n) % passes
+      reads++
+      report((reads - 1) % n + 1, n,
+        `Planning fusion (${pass + 1}/${passes}): ${PLAN_PASS_LABELS[pass]}`, Math.min(0.99, reads / (n * passes)))
+    }
+    r = steps.next(map)
+  }
+  return r.value
+}
+
+function* planSteps(maps, opts, onLog, hooks) {
   const gates = fusionGates(opts)
   const { consistencyPx, depthTolRel, step, removeIsolated } = gates
 
@@ -228,10 +283,17 @@ export function* fusionPlanSteps(maps, opts, onLog, hooks) {
 
   // Scene bounds from a coarse valid-depth grid (fuseBboxStride-th row/col of each
   // map) — enough to size the voxel-key packing without a full unprojection pass.
+  // The same read gives each map's GSD when the merge cell is automatic (mapGsd).
+  // mergeCell: null ⇒ auto (median GSD); ≤0 ⇒ "disabled" — streamed as a tiny cell so
+  // the flat output ≈ raw count but never a per-point object list (a true no-merge
+  // would resurrect the OOM).
+  const mergeOpt = numOpt(opts.mergeCell, null) // blank / non-finite ⇒ auto
+  const gsds = mergeOpt > 0 ? null : [], gsdScratch = { buf: new Float32Array(0) }
   const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
   const bboxStride = DENSE_TUNING.fuseBboxStride
   for (let mi = 0; mi < maps.length; mi++) {
     const m = yield mi
+    if (gsds) { const g = mapGsd(m, gsdScratch); if (g != null) gsds.push(g) }
     const { width: w, height: h, depth } = m
     for (let v = 0; v < h; v += bboxStride) {
       for (let u = 0; u < w; u += bboxStride) {
@@ -248,14 +310,10 @@ export function* fusionPlanSteps(maps, opts, onLog, hooks) {
   if (!hasBounds) { bounds.minX = bounds.minY = bounds.minZ = 0; bounds.maxX = bounds.maxY = bounds.maxZ = 0 }
 
   // Merge cell in world units (≈ one ground-sample-distance), clamped up if the
-  // packed key would overflow float64. mergeCell: null ⇒ auto (median GSD); ≤0 ⇒
-  // "disabled" — streamed as a tiny cell so the flat output ≈ raw count but never a
-  // per-point object list (a true no-merge would resurrect the OOM). autoMergeCell
-  // and the cost histogram only read `maps`, so both resolve before the loop.
-  const mergeOpt = numOpt(opts.mergeCell, null) // blank / non-finite ⇒ auto
-  let mergeCell = mergeOpt != null ? mergeOpt : yield* mergeCellSteps(maps)
+  // packed key would overflow float64.
+  let mergeCell = mergeOpt != null ? mergeOpt : mergeCellOf(gsds)
   if (!(mergeCell > 0)) {
-    const auto = yield* mergeCellSteps(maps)
+    const auto = mergeCellOf(gsds)
     mergeCell = (auto > 0 ? auto : 1) * 1e-3
     onLog(`Fusion: merge disabled — streaming near-unmerged at cell ${mergeCell.toExponential(2)} `
       + `(flat output, no raw point objects)`, 'warn', 'Dense')
@@ -282,15 +340,24 @@ export function* fusionPlanSteps(maps, opts, onLog, hooks) {
   // streamed, its comparison cache (memBudget.js densifyInputBytes).
   const inputBytes = densifyInputBytes(maps, { streamed: !!hooks.streaming }) + (hooks.streaming ? (opts.cacheBytes ?? 0) : 0)
   let proj = projectDensifyPeakBytes({ inputBytes, cells: estCells })
-  const budget = opts.memBudgetBytes > 0 ? opts.memBudgetBytes : 0
+  // Never more than a tab can hold (memBudget.js), whatever the caller passed.
+  const budget = opts.memBudgetBytes > 0 ? Math.min(opts.memBudgetBytes, MAX_BUDGET_BYTES) : 0
   onLog(`Fusion: measured ${est.candidates.toLocaleString()} candidate px → ≤ ${estCells.toLocaleString()} `
     + `merge cells at ${mergeCell.toExponential(2)}${est.level ? ` (hash-sampled 1/${2 ** est.level}, +${Math.round((DENSE_TUNING.fuseEstimateMargin - 1) * 100)}% margin)` : ' (exact)'}; `
     + `projected peak ≈ ${formatBytes(proj.total)} (input ${formatBytes(proj.input)} + accumulator `
-    + `${formatBytes(proj.accumulator)} + output ${formatBytes(proj.output)})`
+    + `${formatBytes(proj.accumulator)})`
     + (budget ? ` vs budget ${formatBytes(budget)}` : ''), 'info', 'Dense')
   const scaledHist = () => new Map([...est.hist].map(([ia, c]) => [ia, c * margin]))
   let slabs = [{ lo: -Infinity, hi: Infinity, cells: estCells }]
   let workers = 1
+  // Whatever the budget, no slab may need an accumulator past MAX_ACCUMULATOR_CELLS (its
+  // index table would pass the browser's largest ArrayBuffer); a tiled slab's capacity
+  // carries a 5% margin over its estimate (fusionSlabSteps). Both browser limits can be
+  // lowered through `opts.limits` (tests: no test scene reaches the real ones).
+  const maxAccCells = opts.limits?.accumulatorCells ?? MAX_ACCUMULATOR_CELLS
+  const maxCloudPoints = opts.limits?.cloudPoints ?? MAX_CLOUD_POINTS
+  const slabMax = Math.floor(maxAccCells / 1.05)
+  const onePieceFits = estCells <= maxAccCells
   // Parallel (`opts.parallel` workers, each running whole slabs): about one slab per
   // worker, each small enough that every worker can hold one slab's accumulator beside
   // the finished slabs.
@@ -299,7 +366,7 @@ export function* fusionPlanSteps(maps, opts, onLog, hooks) {
     const cap = maxFusionTileCells({ inputBytes, cells: estCells, budget: budget || Infinity, workers: parallel })
     // One slab per worker, balanced by cells: every extra cut makes the maps that span
     // it read and unprojected once more (17 slabs on quarry ran slower than one).
-    const planned = cap > 0 ? planFusionSlabs(scaledHist(), Math.min(cap, Math.ceil(estCells / parallel))) : []
+    const planned = cap > 0 ? planFusionSlabs(scaledHist(), Math.min(cap, Math.ceil(estCells / parallel), slabMax)) : []
     if (planned.length > 1) {
       const largest = Math.max(...planned.map((s) => s.cells))
       const parProj = projectDensifyPeakBytes({ inputBytes, cells: estCells, tileCells: largest, workers: Math.min(parallel, planned.length) })
@@ -314,13 +381,13 @@ export function* fusionPlanSteps(maps, opts, onLog, hooks) {
   // Over budget in one piece: build the cloud slab by slab, so only one slab's
   // accumulator is resident beside the finished slabs (already in the cloud's 27 B
   // layout). The cloud itself still has to fit, twice while the slabs are joined.
-  if (workers === 1 && budget && proj.total > budget) {
-    const cap = maxFusionTileCells({ inputBytes, cells: estCells, budget })
+  if (workers === 1 && ((budget && proj.total > budget) || !onePieceFits)) {
+    const cap = Math.min(budget ? maxFusionTileCells({ inputBytes, cells: estCells, budget }) : estCells, slabMax)
     if (cap > 0) {
       const planned = planFusionSlabs(scaledHist(), cap)
       const largest = Math.max(...planned.map((s) => s.cells))
       const tiledProj = projectDensifyPeakBytes({ inputBytes, cells: estCells, tileCells: largest })
-      if (planned.length > 1 && tiledProj.total <= budget) {
+      if (planned.length > 1 && (!budget || tiledProj.total <= budget)) {
         slabs = planned; proj = tiledProj
         onLog(`Fusion: one piece would need ${formatBytes(projectDensifyPeakBytes({ inputBytes, cells: estCells }).total)} — `
           + `fusing in ${slabs.length} slabs along ${axKey} (≤ ${Math.ceil(largest).toLocaleString()} cells each); `
@@ -329,25 +396,38 @@ export function* fusionPlanSteps(maps, opts, onLog, hooks) {
       }
     }
   }
-  // Over budget even in slabs: coarsen the sample grid before refusing. Stage A has
-  // already been paid for (37 min on Casa Grande's 1978 film at High), and a refusal
-  // left the user with 0 points and a DEM from the sparse cloud; a cloud at ¼ the
+  // Over budget even in slabs, or past what the browser can hold at all (a cloud whose
+  // positions would not fit one ArrayBuffer, or a piece too large for one accumulator
+  // that the scene gives no room to split): coarsen the sample grid before refusing.
+  // Stage A has already been paid for (37 min on Casa Grande's 1978 film at High), and a
+  // refusal left the user with 0 points and a DEM from the sparse cloud; a cloud at ¼ the
   // pixels is the useful outcome. Each doubling quarters the candidates; the plan is
   // re-measured, not extrapolated, because overlapping views share merge cells.
   // `autoStep: false` keeps the old refusal.
+  const overBudget = budget && proj.total > budget
+  const tooLarge = estCells > maxCloudPoints || (!onePieceFits && slabs.length === 1)
+  const why = tooLarge
+    ? `${estCells.toLocaleString()} merge cells are more than the browser can hold in one cloud `
+      + `(${maxCloudPoints.toLocaleString()} points; one piece at most ${maxAccCells.toLocaleString()} cells)`
+    : `projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)}`
   const autoStepMax = DENSE_TUNING.fuseAutoStepMax ?? 4
-  if (budget && proj.total > budget && opts.autoStep !== false && step * 2 <= autoStepMax) {
-    onLog(`Fusion: projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)} at sample step `
-      + `${step}px — re-planning at step ${step * 2}px (¼ the pixels) instead of refusing`, 'warn', 'Dense')
-    return yield* fusionPlanSteps(maps, { ...opts, step: step * 2 }, onLog, hooks)
+  if ((overBudget || tooLarge) && opts.autoStep !== false && step * 2 <= autoStepMax) {
+    onLog(`Fusion: ${why} at sample step ${step}px — re-planning at step ${step * 2}px (¼ the pixels) instead of refusing`, 'warn', 'Dense')
+    return yield* planSteps(maps, { ...opts, step: step * 2 }, onLog, hooks)
   }
-  if (budget && proj.total > budget) {
+  if (tooLarge) {
+    onLog(`Fusion: ${why}.`, 'error', 'Dense')
+    onLog('Fusion: aborting before the consistency pass. Raise the point-density sample step, set a Region around '
+      + 'the subject (Tools ▸ Model), raise the merge cell, or build depth maps at a lower Quality.', 'error', 'Dense')
+    return { refused: { ...proj, budget, mergeCell, maxCloudPoints } }
+  }
+  if (overBudget) {
     onLog(`Fusion: projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)} even in slabs `
       + `(the cloud alone is ${formatBytes(estCells * DENSIFY_CLOUD_BYTES_PER_CELL)}).`, 'error', 'Dense')
     onLog('Fusion: aborting before the consistency pass — projected memory exceeds the budget. '
       + 'Raise the point-density sample step to 2 (¼ the pixels), set a Region around the subject '
       + '(Tools ▸ Model), or build depth maps at a lower Quality; or raise the memory budget '
-      + '(Settings ▸ Compute) if the machine has the RAM.', 'error', 'Dense')
+      + `(Settings ▸ Compute, at most ${formatBytes(MAX_BUDGET_BYTES)}) if the machine has the RAM.`, 'error', 'Dense')
     return { refused: { ...proj, budget, mergeCell } }
   }
   const tiled = slabs.length > 1

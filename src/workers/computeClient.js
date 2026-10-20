@@ -76,6 +76,21 @@ export function terminateAll(reason = 'cancelled') {
   for (const [id, entry] of pending) { pending.delete(id); entry.reject(new Error(reason)) }
 }
 
+// Drop an idle pool so its workers' memory is returned before a run that needs a lot
+// of it. All of a tab's workers draw ArrayBuffers from one per-tab pool (memBudget.js
+// TAB_BUFFER_POOL_BYTES), and garbage in an idle worker is never collected, because only
+// a worker that allocates runs its GC: the depth filter's caches stayed charged to the
+// pool through all of fusion. The pool respawns on the next call. Returns false (and
+// does nothing) while any job is pending.
+export function releaseIdleWorkers() {
+  if (pending.size) return false
+  const oldWorkers = workers
+  workers = null
+  if (oldWorkers) for (const w of oldWorkers) w.terminate()
+  rr = 0
+  return true
+}
+
 // Reconfigure only while idle: killing a pool with active jobs would turn a
 // harmless preference change into a cancelled reconstruction. Returns false
 // when a run is active; the persisted choice still takes effect after reload.

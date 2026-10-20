@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MAX_FLOAT64_XYZ_POINTS, isBufferAllocationFailure, rasterTooLargeMessage, tooManyPointsMessage } from './bufferLimit.js'
+import { MAX_FLOAT64_XYZ_POINTS, isBufferAllocationFailure, bufferFailureText, rasterTooLargeMessage, tooManyPointsMessage } from './bufferLimit.js'
 import { stageDemPoints } from './products/dem.js'
 
 describe('the 2 GiB buffer wall', () => {
@@ -8,6 +8,16 @@ describe('the 2 GiB buffer wall', () => {
     expect(isBufferAllocationFailure(new RangeError('Invalid typed array length: 4294967296'))).toBe(true)
     expect(isBufferAllocationFailure(new Error('Array buffer allocation failed'))).toBe(false)
     expect(isBufferAllocationFailure(new RangeError('Maximum call stack size exceeded'))).toBe(false)
+  })
+
+  it('explains a refused buffer, also when Chrome reports it as an unreadable file', () => {
+    const remedy = 'Lower the memory budget'
+    expect(bufferFailureText('Array buffer allocation failed', remedy))
+      .toMatch(/^Array buffer allocation failed — the browser tab ran out of buffer memory .* Lower the memory budget$/)
+    // The message a Blob/File read gets on a full pool (Chrome's NotReadableError).
+    const notReadable = 'The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.'
+    expect(bufferFailureText(notReadable, remedy)).toMatch(/acquired\. — almost certainly not a permission problem: the browser tab ran out of buffer memory/)
+    expect(bufferFailureText('Corrupt depth map abc; recompute depth maps', remedy)).toBe('Corrupt depth map abc; recompute depth maps')
   })
 
   it('says how large is too large', () => {

@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue'
-import { DEFAULT_BUDGET_BYTES, deviceBudget } from '../core/dense/memBudget.js'
+import { DEFAULT_BUDGET_BYTES, MAX_BUDGET_BYTES, deviceBudget } from '../core/dense/memBudget.js'
 import { recommendSettings } from '../core/recommend.js'
 import { useLog } from './useLog.js'
 import { configureWorkerPoolSize, MAX_POOL_SIZE } from '../workers/computeClient.js'
@@ -13,6 +13,7 @@ import { configureWorkerPoolSize, MAX_POOL_SIZE } from '../workers/computeClient
 const BUDGET_KEY = 'websfm.dense.memBudgetGb'
 const GiB = 1024 ** 3
 const DEFAULT_BUDGET_GB = DEFAULT_BUDGET_BYTES / GiB
+export const MAX_BUDGET_GB = MAX_BUDGET_BYTES / GiB
 
 // Read browser-only hardware signals here, on the main thread; core receives only
 // injected numbers and remains DOM-free. Both APIs are intentionally optional.
@@ -25,9 +26,11 @@ const deviceBudgetInfo = deviceBudget({
 
 const storedBudgetGb = Number(localStorage.getItem(BUDGET_KEY))
 const hasStoredBudget = Number.isFinite(storedBudgetGb) && storedBudgetGb > 0
-const memBudgetGb = ref(hasStoredBudget ? storedBudgetGb : deviceBudgetInfo.budgetBytes / GiB)
+const memBudgetGb = ref(hasStoredBudget ? Math.min(MAX_BUDGET_GB, storedBudgetGb) : deviceBudgetInfo.budgetBytes / GiB)
 const memBudgetAuto = ref(!hasStoredBudget)
-const memBudgetBytes = computed(() => Math.max(0.25, Number(memBudgetGb.value) || DEFAULT_BUDGET_GB) * GiB)
+// Never past what a Chrome tab can hold (memBudget.js MAX_BUDGET_BYTES), whatever was
+// entered: a budget above it only moved the failure to the end of a long run.
+const memBudgetBytes = computed(() => Math.min(MAX_BUDGET_BYTES, Math.max(0.25, Number(memBudgetGb.value) || DEFAULT_BUDGET_GB) * GiB))
 
 // U2/U3 consume the real device-memory reading, not the user's safety-limit
 // override: recommendation quality describes hardware, while memBudgetBytes is a
@@ -67,11 +70,15 @@ export function useComputeSettings() {
       ? ` Using saved manual safety limit ${storedBudgetGb} GB.`
       : ' Using it as the automatic dense-run safety limit.'
     log(`${deviceBudgetInfo.note}${suffix}`, 'info', 'Compute')
+    if (hasStoredBudget && storedBudgetGb > MAX_BUDGET_GB) {
+      log(`Memory budget: the saved ${storedBudgetGb} GB is more than a Chrome tab can hold (16 GB of buffers for the page `
+        + `and all its workers together); using ${MAX_BUDGET_GB} GB.`, 'warn', 'Compute')
+    }
     budgetLogged = true
   }
 
   function setMemBudgetGb(v) {
-    const n = Number(v)
+    const n = Math.min(MAX_BUDGET_GB, Number(v))
     if (n > 0) {
       memBudgetGb.value = n
       memBudgetAuto.value = false
@@ -98,7 +105,7 @@ export function useComputeSettings() {
   }
   return {
     memBudgetGb, memBudgetBytes, memBudgetAuto,
-    setMemBudgetGb, resetMemBudgetAuto, DEFAULT_BUDGET_GB,
+    setMemBudgetGb, resetMemBudgetAuto, DEFAULT_BUDGET_GB, MAX_BUDGET_GB,
     deviceBudgetInfo, recommendationBudget, recommendForDataset,
     useGpu, setUseGpu,
     workerCount, setWorkerCount, MAX_POOL_SIZE,

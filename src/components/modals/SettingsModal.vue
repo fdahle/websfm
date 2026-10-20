@@ -28,7 +28,7 @@ const {
 } = useMobileWarning()
 const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
 const {
-  memBudgetGb, memBudgetAuto, setMemBudgetGb, resetMemBudgetAuto, deviceBudgetInfo,
+  memBudgetGb, memBudgetAuto, setMemBudgetGb, resetMemBudgetAuto, deviceBudgetInfo, MAX_BUDGET_GB,
   useGpu, setUseGpu, workerCount, setWorkerCount, MAX_POOL_SIZE,
 } = useComputeSettings()
 const {
@@ -340,12 +340,13 @@ onMounted(refreshStorage)
             <span class="setting-label">Memory safety limit</span>
             <span class="setting-desc">
               Dense runs stop before starting when estimated peak memory exceeds this amount.
+              At most 12 GB: a Chrome tab holds 16 GB of buffers, shared by the page and all its workers.
               {{ memBudgetAuto ? `Automatically derived from ${deviceBudgetInfo.source}.` : 'Manually overridden.' }}
             </span>
           </div>
           <div class="setting-actions">
             <div class="num-input">
-              <input type="number" min="0.25" step="0.5" :value="memBudgetGb" @change="setMemBudgetGb($event.target.value)">
+              <input type="number" min="0.25" :max="MAX_BUDGET_GB" step="0.5" :value="memBudgetGb" @change="setMemBudgetGb($event.target.value)">
               <span class="num-unit">GB</span>
             </div>
             <button

@@ -131,8 +131,10 @@ This reduces resident input memory, though the merged point cloud and its output
 still need memory. Unsaved maps remain in memory if project storage is unavailable.
 Streaming may trade repeated disk reads for a lower memory peak.
 
-Before the slow consistency check, fusion makes one quick pass over the depth maps
-and counts how many merged points the cloud can have at most (pixels that fail the
+Fusion starts by planning: a few quick passes over every depth map for the cost
+statistics, the scene's extent and the merge cell, shown in the progress bar as
+"Planning fusion (1/4)" and so on. On a few hundred saved maps this takes a minute or
+two. The last planning pass comes before the slow consistency check: it counts how many merged points the cloud can have at most (pixels that fail the
 cost gate or lie outside the Region don't count). The log line "Fusion: measured …
 projected peak …" shows that count and the memory it implies. If building the cloud
 in one piece would exceed the memory budget (Settings ▸ Compute), fusion builds it in
@@ -147,3 +149,18 @@ does fusion stop, and nothing is lost. To get under the budget yourself: raise
 build the depth maps at a lower Quality. Raise the budget only if the machine really has that much free
 memory. After fusion, a second log line compares the real point count with the
 measured limit.
+
+The consistency check compares each depth map with the views that can see it, nearest
+camera first, and keeps checking only the pixels not yet confirmed, so most pixels are
+settled after a few views. The order doesn't change the result. At the end, the log
+line "Fusion timing" shows where the time went: reading maps, the consistency check,
+the fusion pass and finishing.
+
+The browser sets limits of its own, however much memory the machine has. A Chrome tab
+holds at most 16 GB of buffers, shared by the page and all its workers, so the memory
+budget is capped at 12 GB, leaving the rest for the images, clouds and viewer. A single
+buffer can hold at most 2 GB. One piece of fusion therefore holds at most about 134
+million merged cells; a larger cloud is built in slabs even when the budget would allow
+one piece. A finished cloud holds at most about 178 million points; a larger one is
+re-planned at a coarser step, as above. Fusion starts with fresh workers, so memory
+the previous steps left behind is returned first.

@@ -8,9 +8,32 @@ export const MAX_BUFFER_BYTES = 2 ** 31 - 2 ** 21
 
 export const MAX_FLOAT64_XYZ_POINTS = Math.floor(MAX_BUFFER_BYTES / 24)
 
+// The total the same process may hold in ArrayBuffers: 16 GiB, one pool shared by the
+// page and every worker of the tab (Chrome 155, Linux, 61 GB RAM, measured 2026-10-20:
+// the page got 15 × 1 GiB, a worker 9 more while the page held 6). WebAssembly memories
+// are not drawn from it. Past it every allocation fails with the same RangeError.
+export const TAB_BUFFER_POOL_BYTES = 16 * 2 ** 30
+
 /** The engine refusing a buffer (V8: RangeError "Array buffer allocation failed" / "Invalid array length"). */
 export const isBufferAllocationFailure = (err) => err instanceof RangeError
   && /array buffer allocation failed|invalid array buffer length|invalid typed array length|invalid array length/i.test(err.message ?? '')
+
+// The same failure as it reaches the page: a worker's error crosses as its message only.
+const POOL_REFUSED = /array buffer allocation failed|invalid (typed )?array (buffer )?length/i
+// A Blob/File read (a saved depth map, a GeoTIFF) on a full pool fails with Chrome's
+// NotReadableError, whose message blames file permissions instead (probed 2026-10-20:
+// both an OPFS File and an in-memory Blob, the pool filled to its last MiB).
+const READ_REFUSED = /requested file could not be read/i
+
+/** A compute error's message, with the reason and `remedy` appended when the browser
+ *  refused memory (directly, or as a file read that could not get its buffer). */
+export function bufferFailureText(message, remedy) {
+  const msg = String(message ?? '')
+  const onRead = READ_REFUSED.test(msg)
+  if (!onRead && !POOL_REFUSED.test(msg)) return msg
+  return `${msg} — ${onRead ? 'almost certainly not a permission problem: ' : ''}the browser tab ran out of `
+    + `buffer memory (it holds 16 GB for the page and all its workers, one buffer at most 2 GB). ${remedy}`
+}
 
 /** The user-facing reason, for `what` (e.g. "this cloud") holding `points` points. */
 export function tooManyPointsMessage(what, points = null) {

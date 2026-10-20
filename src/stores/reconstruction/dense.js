@@ -3,10 +3,12 @@ import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { qualityToMaxDim, fitDepthQuality, filterConfig, filterSettings, logFilterCache, logFilterTotals, emptyFilterTotals, mergeFusionCounters, logFusionStream, finishFusion } from '../../core/dense/mvs.js'
 import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
-import { computeDepthMaps as workerComputeDepthMaps, POOL_SIZE, terminateAll, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
+import { computeDepthMaps as workerComputeDepthMaps, POOL_SIZE, terminateAll, releaseIdleWorkers, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
+import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
+import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
 
 // The dense pipeline, split out of useReconstructionStore: Stage A depth maps
@@ -284,6 +286,11 @@ export function createDense({
     }
   }
 
+  // A buffer the browser refused (it arrives from the worker as a plain message) says
+  // why and what to change; anything else as it is.
+  const densifyErrorText = (err) => bufferFailureText(err?.message ?? err,
+    'Lower the memory budget (Settings ▸ Compute) so fusion works in slabs, or raise the point-density sample step')
+
   // Fusion over saved maps on `workers` pool slots. The plan's preflight already counted
   // every worker's input, accumulator and the join; a plan that cannot split (small
   // scene, tight budget) runs whole on one worker without repeating the pre-passes.
@@ -294,14 +301,15 @@ export function createDense({
     // eighth of the budget split K ways starved the cache (96 MB each on quarry).
     const cacheBytes = Math.floor(Math.min(512 * 1024 ** 2, budget / (4 * workers)))
     const fuseSettings = withRegion({ ...settings, memBudgetBytes: budget, cacheBytes, parallel: workers })
-    const PLAN_SHARE = 0.1 // the pre-passes read every map four times, the slabs do the rest
+    const PLAN_SHARE = FUSION_PLAN_SHARE
     const onLog = (m, l, c) => log(m, l, c)
-    onProgress?.(0, 1, 'Planning fusion…', 0)
-    const { plan, refused } = await workerDensify({ maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'plan' }, { onLog, worker: 0 })
+    onProgress?.(0, 1, 'Planning fusion…', 0, 'plan')
+    const { plan, refused } = await workerDensify({ maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'plan' },
+      { onLog, worker: 0, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, PLAN_SHARE * (f ?? 0), 'plan') })
     if (refused || !plan || !stillCurrent()) return null
     if (plan.workers <= 1) {
       const { cloud, summary } = await workerDensify({ maps: mapsInput, streamed: true, settings: { ...fuseSettings, plan } },
-        { onLog, worker: 0, onProgress: (d, t, lbl) => onProgress?.(d, t, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * (t > 0 ? d / t : 0)) })
+        { onLog, worker: 0, onProgress: (d, t, lbl) => onProgress?.(d, t, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * (t > 0 ? d / t : 0), 'fuse') })
       return { cloud, summary }
     }
     const nM = plan.nMaps, nT = plan.slabs.length
@@ -310,7 +318,7 @@ export function createDense({
     const report = (lbl) => {
       let f = 0
       for (let i = 0; i < nT; i++) f += slabDone[i] * plan.slabs[i].cells / totalCells
-      onProgress?.(Math.round(f * nT), nT, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * f)
+      onProgress?.(Math.round(f * nT), nT, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * f, 'fuse')
     }
     // Largest slabs first, so the pool does not end on one long straggler.
     const queue = plan.slabs.map((s, i) => i).sort((a, b) => plan.slabs[b].cells - plan.slabs[a].cells)
@@ -331,8 +339,8 @@ export function createDense({
     if (!stillCurrent()) return null
     const merged = mergeFusionCounters(counters)
     const sum = (k) => streams.reduce((s, x) => s + (x?.[k] ?? 0), 0)
-    logFusionStream(onLog, { compared: sum('compared'), culled: sum('culled'), reads: sum('reads'), hits: sum('hits'),
-      cacheBytes, workers: plan.workers })
+    logFusionStream(onLog, { compared: sum('compared'), culled: sum('culled'), skipped: sum('skipped'), reads: sum('reads'), hits: sum('hits'),
+      cacheBytes, workers: plan.workers, loadMs: sum('loadMs'), eligMs: sum('eligMs'), checkMs: sum('checkMs') })
     const { summary } = finishFusion(plan, merged, [], onLog)
     // Join the slabs (in slab order, so a run is deterministic for a given plan).
     const n = parts.reduce((s, p) => s + p.count, 0)
@@ -367,6 +375,9 @@ export function createDense({
     // not see the merge cell, the step or the view overlap. Same budget knob as Stage A.
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     if (streamed) log('Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use', 'info', 'Dense')
+    // Start from fresh workers: the pool's idle ones still hold the depth filter's
+    // caches as uncollected garbage, charged to the tab's shared buffer pool.
+    releaseIdleWorkers()
     reconStatus.value = 'running'
     // Transfer (not clone) each map's depth/cost/rgb buffers to the worker — they're
     // the bulk of dense memory, and a clone briefly doubles it (the fusion OOM's
@@ -404,7 +415,7 @@ export function createDense({
         await save()
       } catch (err) {
         if (!stillCurrent()) return
-        log(`Densify error: ${err?.message ?? err}`, 'error', 'Dense')
+        log(`Densify error: ${densifyErrorText(err)}`, 'error', 'Dense')
         reconStatus.value = 'error'
       }
       return
@@ -412,7 +423,7 @@ export function createDense({
     try {
       const { cloud, summary: dSummary, refused, mapBuffers } = await workerDensify(
         { maps: mapsInput, streamed, settings: withRegion({ ...settings, memBudgetBytes: budget }) },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f, phase) => onProgress?.(d, t, lbl, f, phase), transfer },
       )
       if (!stillCurrent()) return
       // Re-attach the round-tripped buffers so ortho / a second densify still work.
@@ -438,7 +449,7 @@ export function createDense({
       // saved index: a retry rehydrates from OPFS instead of forcing a Stage A re-run.
       depthMaps.value = new Map()
       const recovered = await loadDepthIndexIntoMeta()
-      log(`Densify error: ${err?.message ?? err}. Depth maps were released to the worker`
+      log(`Densify error: ${densifyErrorText(err)}. Depth maps were released to the worker`
         + (recovered
           ? ' — they will be reloaded from disk on the next attempt.'
           : ' and must be recomputed before retrying.'), 'error', 'Dense')

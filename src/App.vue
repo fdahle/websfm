@@ -196,7 +196,7 @@ const {
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
-  progressUnit, progressFraction, progressIndeterminate, progressComplete, progressCancelling,
+  progressUnit, progressPhase, progressFraction, progressIndeterminate, progressComplete, progressCancelling,
   progressPercent, lastRun, cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
   runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, progress: exportProgress,
 } = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds, textureMesh })
@@ -508,7 +508,7 @@ provideAppContext({
   orientAutoUp, orientCentreOrigin, orientDraft, orientEdit, orientPicking, orientPlanePicks,
   pendingConfirm, pendingImageDelete, pickGcpFromReference, pickProjectFile, pickSfmFiles, pickSfmFolder,
   posedImageCount, probeMapLayersAt, productViewerRefs, progressCancelling, progressComplete,
-  progressCurrent, progressFraction, progressIndeterminate, progressLabel, progressOpen,
+  progressCurrent, progressFraction, progressIndeterminate, progressLabel, progressOpen, progressPhase,
   progressTitle, progressTotal, progressUnit, projectLoading, projectLoadingLabel,
   projectLoadingProgress, rasterBeingStyled, refreshGcpReport, regionDraft, regionEdit,
   removeOrientation, removeRegion, runPendingConfirm, selectGcp, selectTool3d, selectedGcpId,

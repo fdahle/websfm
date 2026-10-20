@@ -46,22 +46,24 @@ describe('bounded map loading', () => {
   })
 
   it('plans its comparison cache on the known request sequence (fewer reads, same cloud)', async () => {
-    // Four mutually visible maps, a two-plane cache: the sequence is 1,2,3 | 0,2,3 |
-    // 0,1,3 | 0,1,2. Evicting the plane wanted furthest ahead reads 8 planes; LRU
-    // would miss on all 12.
+    // Four mutually visible maps, a two-plane cache: 12 requests, nearest camera first.
+    // Evicting the plane wanted furthest ahead read 8 planes over that sequence (LRU
+    // missed on all 12); a reference whose pixels are all settled early skips the rest
+    // of its views, which saves one more read here.
     const ms = maps(), entries = files(ms), expected = fuseDepthMaps(ms, {})
     let reads = 0
     const actual = await fuseDepthMapsStreamed(entries, i => readDepthFiles(entries[i]), { cacheBytes: 2 * 32 * 32 * 4 },
       () => {}, { loadDepth: (i) => { reads++; return readDepthOnly(entries[i]) } })
     expect([...actual]).toEqual([...expected])
-    expect(reads).toBe(8)
+    expect(reads).toBe(7)
   })
 
   // Tiled fusion emits slab by slab, so the rows come in another order: compare the
   // multiset of [x,y,z,r,g,b,nx,ny,nz] rows.
   const rows = (flat) => Array.from({ length: flat.length / 6 }, (_, i) =>
     [...flat.subarray(i * 6, i * 6 + 6), ...flat.nrm.subarray(i * 3, i * 3 + 3)].join(',')).sort()
-  const slabBudget = (refused, slabsWanted) => refused.input + 27 * refused.cells + 85 * Math.ceil(refused.cells / slabsWanted)
+  // The cloud (27 B/cell) beside one slab's accumulator less its own share of the cloud (76 − 27).
+  const slabBudget = (refused, slabsWanted) => refused.input + 27 * refused.cells + 49 * Math.ceil(refused.cells / slabsWanted)
   it.each([{}, { step: 2 }, { removeIsolated: false, mergeCell: 0.2 }, { minViews: 1, minTriAngleDeg: 0, mergeCell: 0.15 }])(
     'over budget, fusion in slabs builds the identical cloud: %j', async (opts) => {
       // Two groups far apart along x (the slab axis), so some slabs skip some maps.
@@ -79,13 +81,20 @@ describe('bounded map loading', () => {
       const refused = (await fuseDepthMapsStreamed(entries, io[0], { ...sOpts, memBudgetBytes: 1, autoStep: false })).refused
       const parts = []
       const streamed = await fuseDepthMapsStreamed(entries, io[0], { ...sOpts, memBudgetBytes: slabBudget(refused, 5) }, () => {},
-        { loadDepth: (i) => readDepthOnly(entries[i]), onTile: (flat) => parts.push(flat) })
+        { loadDepth: (i) => readDepthOnly(entries[i]), onTile: (part) => parts.push(part) })
       expect(streamed.length).toBe(0)
       expect(parts.length).toBe(streamed.summary.slabs)
       expect(parts.length).toBeGreaterThan(2)
-      const joined = new Float32Array(parts.reduce((n, p) => n + p.length, 0)), nrm = new Float32Array(joined.length / 2)
+      // Slabs come in the cloud's layout: { count, pos, col, nrm }.
+      const n = parts.reduce((k, p) => k + p.count, 0)
+      const joined = new Float32Array(n * 6), nrm = new Float32Array(n * 3)
       let o = 0
-      for (const p of parts) { joined.set(p, o * 6); nrm.set(p.nrm, o * 3); o += p.length / 6 }
+      for (const p of parts) {
+        for (let i = 0; i < p.count; i++) for (let c = 0; c < 3; c++) {
+          joined[(o + i) * 6 + c] = p.pos[i * 3 + c]; joined[(o + i) * 6 + 3 + c] = p.col[i * 3 + c]
+        }
+        nrm.set(p.nrm, o * 3); o += p.count
+      }
       joined.nrm = nrm
       expect(rows(joined)).toEqual(rows(one))
       expect({ ...streamed.summary, slabs: 1 }).toEqual(one.summary)
@@ -105,7 +114,7 @@ describe('bounded map loading', () => {
     const bySlab = new Map(), counters = []
     for (const i of order) {
       const run = await fuseDepthMapsStreamed(entries, load, { ...sOpts, plan: sent, slabIndices: [i] }, () => {},
-        { loadDepth: (k) => readDepthOnly(entries[k]), onTile: (flat) => bySlab.set(i, flat) })
+        { loadDepth: (k) => readDepthOnly(entries[k]), onTile: (part) => bySlab.set(i, part) })
       counters.push(run.counters)
       expect(run.stream.compared).toBeGreaterThanOrEqual(0)
     }
@@ -113,6 +122,26 @@ describe('bounded map loading', () => {
     const joined = finishFusion(sent, mergeFusionCounters(counters), parts)
     expect(rows(joined)).toEqual(rows(one))
     expect({ ...joined.summary, slabs: 1 }).toEqual(one.summary)
+  })
+  it('splits a piece too large for one accumulator into slabs, whatever the budget', () => {
+    const ms = [...maps(), ...maps().map((m, j) => ({ ...m, uuid: `far${j}`, t: [m.t[0] - 30, 0, 10] }))]
+    const one = fuseDepthMaps(ms, {})
+    const cells = fuseDepthMaps(ms, { memBudgetBytes: 1, autoStep: false }).refused.cells
+    const logs = []
+    const split = fuseDepthMaps(ms, { limits: { accumulatorCells: Math.ceil(cells / 3) } }, (m) => logs.push(m))
+    expect(split.summary.slabs).toBeGreaterThan(2)
+    expect(rows(split)).toEqual(rows(one))
+    expect(logs.some((m) => m.includes('slabs along'))).toBe(true)
+  })
+  it('coarsens the step, then refuses, when the cloud is past what one array can hold', () => {
+    const ms = maps()
+    const cells = fuseDepthMaps(ms, { memBudgetBytes: 1, autoStep: false }).refused.cells
+    const logs = []
+    const coarse = fuseDepthMaps(ms, { limits: { cloudPoints: cells - 1 } }, (m, l) => logs.push([m, l]))
+    expect(coarse.refused).toBeUndefined()
+    expect(logs.some(([m, l]) => l === 'warn' && m.includes('more than the browser can hold') && m.includes('step 2px'))).toBe(true)
+    const refused = fuseDepthMaps(ms, { limits: { cloudPoints: cells - 1 }, autoStep: false }, (m, l) => logs.push([m, l]))
+    expect(refused.refused.maxCloudPoints).toBe(cells - 1)
   })
   it('refuses when even the cloud itself does not fit', () => {
     const ms = maps()

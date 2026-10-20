@@ -414,7 +414,8 @@ window.bench = {
     const v = { ...DENSE_FUSE_DEFAULTS, ...overrides }
     const settings = { minViews: v.auto ? null : v.minViews, maxCost: v.auto ? null : v.maxCost,
       depthTolRel: v.depthTolPct / 100, step: v.step, minTriAngleDeg: v.minTriAngleDeg,
-      maxIncidenceDeg: v.maxIncidenceDeg, removeIsolated: v.removeIsolated, memBudgetBytes: memBudgetBytes.value }
+      maxIncidenceDeg: v.maxIncidenceDeg, removeIsolated: v.removeIsolated,
+      memBudgetBytes: overrides.memBudgetBytes ?? memBudgetBytes.value }
     const t0 = performance.now()
     await recon.densify(settings, report)
     const dense = recon.clouds.filter((c) => c.kind === 'dense')

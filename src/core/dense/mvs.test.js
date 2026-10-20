@@ -327,6 +327,35 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
     }
   })
 
+  it('finalizeCloud gives the cloud layout of finalizeFlat + finalizeNormals, isolated cells and all', () => {
+    let seed = 7
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+    const pts = Array.from({ length: 3000 }, () => ({
+      x: rnd() * 20, y: rnd() * 20, z: rnd() * 2, c: [rnd() * 255, rnd() * 255, rnd() * 255].map(Math.floor),
+      // Some zero normals, so the (0,0,1) fallback is exercised too.
+      n: rnd() < 0.1 ? [0, 0, 0] : [rnd() - 0.5, rnd() - 0.5, rnd() - 0.5],
+    }))
+    const make = () => {
+      const acc = createVoxelAccumulator(0.7, boundsOf(pts), { capacity: 64 })
+      for (const p of pts) acc.add(p.x, p.y, p.z, p.c[0], p.c[1], p.c[2], p.n[0], p.n[1], p.n[2])
+      acc.filterIsolated({ radius: 1, minNeighbors: 3, maxSupport: 1 })
+      return acc
+    }
+    const a = make(), b = make()
+    const flat = a.finalizeFlat(), { nrm, degenerate } = a.finalizeNormals()
+    const cloud = b.finalizeCloud()
+    expect(cloud.count).toBe(flat.length / 6)
+    expect(cloud.degenerate).toBe(degenerate)
+    expect(degenerate).toBeGreaterThan(0)
+    for (let i = 0; i < cloud.count; i++) {
+      for (let c = 0; c < 3; c++) {
+        expect(cloud.pos[i * 3 + c]).toBe(flat[i * 6 + c])
+        expect(cloud.col[i * 3 + c]).toBe(flat[i * 6 + 3 + c])
+      }
+    }
+    expect([...cloud.nrm]).toEqual([...nrm])
+  })
+
   it('grows past the initial capacity without losing cells', () => {
     // > 1024 distinct cells forces at least one internal doubling.
     const pts = Array.from({ length: 3000 }, (_, i) => ({ x: i * 10, y: 0, z: 0, color: [1, 2, 3] }))

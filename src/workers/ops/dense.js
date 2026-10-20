@@ -5,6 +5,7 @@ import {
   depthMapSettings,
 } from '../../core/dense/mvs.js'
 import { depthCoverage } from '../../core/dense/depthMapCodec.js'
+import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { viewIndex } from '../../core/dense/sparseInput.js'
 import { buildMaskLookup } from '../../core/mask.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
@@ -679,13 +680,15 @@ export function makeDenseOps({ rasterize }) {
       const load = (i) => readDepthFiles(maps[i])
       const loadDepth = (i) => readDepthOnly(maps[i])
       if (mode === 'plan') {
-        const res = await fuseDepthMapsStreamed(maps, load, { ...settings, planOnly: true }, log, { loadDepth })
+        const res = await fuseDepthMapsStreamed(maps, load, { ...settings, planOnly: true }, log, {
+          loadDepth, onPlanProgress: (d, t, lbl, f) => emit('progress', [d, t, lbl, f, 'plan']),
+        })
         return { result: res.refused ? { plan: null, refused: res.refused } : { plan: res, refused: null }, transfer: [] }
       }
       const parts = []
       const run = await fuseDepthMapsStreamed(maps, load, { ...settings, plan, slabIndices: [slab] }, log, {
-        loadDepth, onTile: (f) => parts.push(denseFromFlat(f)),
-        onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]),
+        loadDepth, onTile: (p) => parts.push(p),
+        onProgress: (d, t, lbl) => emit('progress', [d, t, lbl, undefined, 'fuse']),
       })
       const part = parts[0]
       return { result: { part, counters: run.counters, stream: run.stream }, transfer: [part.pos.buffer, part.col.buffer, part.nrm.buffer] }
@@ -699,13 +702,20 @@ export function makeDenseOps({ rasterize }) {
       ? (ms, options, log, hooks) => fuseDepthMapsStreamed(ms, i => readDepthFiles(ms[i]), options, log,
         { ...hooks, loadDepth: i => readDepthOnly(ms[i]) })
       : fuseDepthMaps
-    // Each finished slab (one, unless fusion tiles to fit the budget) is converted at
-    // once to the cloud's own layout, so its flat [x,y,z,r,g,b] buffer is dropped
-    // before the next slab's accumulator exists; the slabs are joined at the end.
+    // Each finished slab (one, unless fusion tiles to fit the budget) comes in the
+    // cloud's own layout, its accumulator already released; the slabs are joined at the end.
+    // The plan's pre-passes take the first FUSION_PLAN_SHARE of the bar, the slabs the
+    // rest (a plan handed in has already been run: its share is filled at once). Each
+    // event names its phase, so the progress modal times the two apart.
     const parts = []
+    const share = settings.plan ? 0 : FUSION_PLAN_SHARE
     const flat = await fuse(maps, settings,
       (m, l, c) => emit('log', [m, l, c]),
-      { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]), onTile: (f) => parts.push(denseFromFlat(f)) })
+      {
+        onPlanProgress: (d, t, lbl, f) => emit('progress', [d, t, lbl, share * f, 'plan']),
+        onProgress: (d, t, lbl) => emit('progress', [d, t, lbl, share + (1 - share) * (t > 0 ? d / t : 0), 'fuse']),
+        onTile: (p) => parts.push(p),
+      })
     const cloud = joinDenseParts(parts)
     const nPoints = cloud.count
     // The fusion pre-flight refused (already logged with its numbers): no cloud, but
@@ -727,18 +737,6 @@ export function makeDenseOps({ rasterize }) {
     return { result: { cloud, summary: flat.summary ?? null, refused: flat.refused ?? null, mapBuffers }, transfer }
   }
 
-  // One fused slab → the dense cloud's split Float32 position / Uint8 colour / Float32
-  // normal arrays.
-  function denseFromFlat(flat) {
-    const n = flat.length / 6
-    const pos = new Float32Array(n * 3), col = new Uint8Array(n * 3)
-    for (let i = 0; i < n; i++) {
-      const s = i * 6, d = i * 3
-      pos[d] = flat[s]; pos[d + 1] = flat[s + 1]; pos[d + 2] = flat[s + 2]
-      col[d] = flat[s + 3]; col[d + 1] = flat[s + 4]; col[d + 2] = flat[s + 5]
-    }
-    return { count: n, pos, col, nrm: flat.nrm ?? new Float32Array(n * 3) }
-  }
   function joinDenseParts(parts) {
     if (parts.length === 1) return parts[0]
     const n = parts.reduce((s, p) => s + p.count, 0)

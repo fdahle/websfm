@@ -58,8 +58,18 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
   // for 56 k comparisons at ~150 cached planes). Only the policy changes; the planes
   // and their order of use do not, so neither does the cloud.
   const cache = new Map()
-  let cached = 0, reads = 0, hits = 0, compared = 0, culled = 0
+  let cached = 0, reads = 0, hits = 0, compared = 0, culled = 0, skipped = 0
+  // Where a streamed run's time goes, for the timing line: plane reads, finding each
+  // reference's eligible pixels, and the consistency comparisons.
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+  let loadMs = 0, eligMs = 0, checkMs = 0
   const planeBytes = (m) => m.depth?.byteLength ?? 0
+  // Nearest camera first: the views most likely to confirm a pixel come early, so most
+  // pixels are settled after a few comparisons and the rest of the list runs on the
+  // few still open, or not at all (below). The verdict does not depend on the order: a
+  // pixel passes when enough views agree and one of them has the parallax, whichever
+  // view comes first, and a failing pixel is compared with every view either way.
+  const centres = metas.map((m) => cameraCenter(m))
   const candidatesOf = (mi, corners, rad) => {
     const cand = []
     for (let ci = 0; ci < metas.length; ci++) {
@@ -67,7 +77,9 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
       if (!corners[mi] || sliceMisses(corners[mi], metas[ci], rad + 1)) continue
       cand.push(ci)
     }
-    return cand
+    const c = centres[mi], d2 = (ci) => (centres[ci][0] - c[0]) ** 2 + (centres[ci][1] - c[1]) ** 2 + (centres[ci][2] - c[2]) ** 2
+    const dist = new Map(cand.map((ci) => [ci, d2(ci)]))
+    return cand.sort((a, b) => dist.get(a) - dist.get(b) || a - b)
   }
   let planSlab = -1, candByRef = null, nextUse = null, pos = 0
   const planSequence = ({ visits, corners }, rad) => {
@@ -82,7 +94,11 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
   let next = iterator.next()
   while (!next.done) {
     const request = next.value
-    if (typeof request === 'number') next = iterator.next(await loadMap(request))
+    if (typeof request === 'number') {
+      const t = now(), map = await loadMap(request)
+      loadMs += now() - t
+      next = iterator.next(map)
+    }
     else {
       const { m, mi, minViews, minTriAngleDeg, maxCost, depthTolRel, consistencyPx, step, slab, slabIndex = 0, slabCount = 1 } = request
       const agree = new Uint32Array(m.width * m.height), angle = new Float64Array(agree.length)
@@ -91,12 +107,28 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
       if (slabIndex !== planSlab) { planSequence(request.plan, rad); planSlab = slabIndex }
       const cand = candByRef.get(mi)
       culled += metas.length - 1 - cand.length
+      let t = now()
       const { idx: elig, wp } = streamedEligible(m, { step, maxCost, slab })
+      eligMs += now() - t
+      // The eligible pixels still open (not yet enough agreeing views, or no view with
+      // the parallax), as positions in `elig`, compacted after every comparison. Once
+      // none is left, the remaining views would change nothing: their planes are not read.
+      const settled = (idx) => agree[idx] >= minViews && (minTriAngleDeg <= 0 || angle[idx] >= minTriAngleDeg)
+      const open = new Int32Array(elig.length)
+      let nOpen = 0
+      for (let e = 0; e < elig.length; e++) if (!settled(elig[e])) open[nOpen++] = e
       for (let k = 0; k < cand.length; k++) {
+        if (!nOpen) {
+          pos += cand.length - k; skipped += cand.length - k
+          hooks.onProgress?.(slabIndex * metas.length + mi + STREAMED_CHECK_SHARE, slabCount * metas.length, 'Checking depth consistency…')
+          break
+        }
         const ci = cand[k], want = nextUse[pos++]
         let entry = cache.get(ci)
         if (entry) { hits++; entry.next = want } else {
+          t = now()
           entry = { map: await loadComparison(ci), next: want }; reads++
+          loadMs += now() - t
           cache.set(ci, entry); cached += planeBytes(entry.map)
           while (cached > cacheBytes && cache.size > 1) {
             let far = -1, farKey = -1
@@ -107,13 +139,14 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
         }
         const other = entry.map
         compared++
+        t = now()
         const otherC = cameraCenter(other)
-        for (let e = 0; e < elig.length; e++) {
-          const idx = elig[e]
-          if (agree[idx] >= minViews && (minTriAngleDeg <= 0 || angle[idx] >= minTriAngleDeg)) continue
+        let kept = 0
+        for (let j = 0; j < nOpen; j++) {
+          const e = open[j], idx = elig[e]
           const P = { x: wp[3 * e], y: wp[3 * e + 1], z: wp[3 * e + 2] }
           const p = project(other, P.x, P.y, P.z)
-          if (!p) continue
+          if (!p) { open[kept++] = e; continue }
           const cu = Math.round(p.u), cv = Math.round(p.v), tol = depthTolRel * p.depth
           let hit = false
           for (let dv = -rad; dv <= rad && !hit; dv++) {
@@ -129,8 +162,12 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
           if (hit) {
             agree[idx]++
             if (minTriAngleDeg > 0) angle[idx] = Math.max(angle[idx], triangulationAngle(C, otherC, P))
+            if (settled(idx)) continue
           }
+          open[kept++] = e
         }
+        nOpen = kept
+        checkMs += now() - t
         // The N comparisons dominate a streamed map's time: they take the first
         // 90% of its progress slot, the single fusion pass the rest (see fusionSteps).
         hooks.onProgress?.(slabIndex * metas.length + mi + STREAMED_CHECK_SHARE * (k + 1) / cand.length,
@@ -139,7 +176,7 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
       next = iterator.next({ agree, angle })
     }
   }
-  const stream = { compared, culled, reads, hits, cacheBytes }
+  const stream = { compared, culled, skipped, reads, hits, cacheBytes, loadMs, eligMs, checkMs }
   // A slab run (opts.slabIndices) hands its counters to the caller that merges them.
   if (!opts.slabIndices && !opts.planOnly) logFusionStream(onLog, stream)
   const out = next.value
@@ -182,10 +219,14 @@ export function streamedEligible(m, { step, maxCost, slab = null }) {
   return { idx, wp }
 }
 
-export function logFusionStream(onLog, { compared, culled, reads, hits, cacheBytes, workers = 1 }) {
-  onLog(`Fusion: consistency over ${pluralize(compared, 'map pair')} (${culled} culled as out of view); `
+export function logFusionStream(onLog, { compared, culled, skipped = 0, reads, hits, cacheBytes, workers = 1, loadMs = 0, eligMs = 0, checkMs = 0 }) {
+  onLog(`Fusion: consistency over ${pluralize(compared, 'map pair')} (${culled} culled as out of view, `
+    + `${skipped} skipped once every pixel was settled); `
     + `${reads} plane reads, ${hits} cache hits (≤${formatBytes(cacheBytes)} cache${workers > 1 ? ` per worker, ${workers} workers` : ''})`, 'info', 'Dense')
+  onLog(`Fusion timing${workers > 1 ? ` (summed over ${workers} workers)` : ''}: reading maps ${secs(loadMs)}, `
+    + `eligible pixels ${secs(eligMs)}, consistency check ${secs(checkMs)}`, 'info', 'Dense')
 }
+const secs = (ms) => `${(ms / 1000).toFixed(1)}s`
 
 // Fusion in three parts, so a run can be split over workers: the plan (every pre-pass
 // over the maps, the preflight and the slab layout; serialisable), the slabs (any
@@ -206,7 +247,7 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
 const zeroFusionCounters = () => ({
   considered: 0, noDepth: 0, highCost: 0, failedConsistency: 0, kept: 0, lowParallax: 0, grazing: 0,
   outsideRegion: 0, mergedCells: 0, isolatedRemoved: 0, degenerate: 0, overflowCells: 0, accBytes: 0, cells: 0,
-  noNormalMaps: 0,
+  noNormalMaps: 0, passMs: 0, finishMs: 0,
 })
 // Counters of several slab runs as one (sums; the accumulator figure is the largest).
 export function mergeFusionCounters(list) {
@@ -258,6 +299,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
       // Camera centre C = −Rᵀt, for the view-direction normal fallback (stale caches).
       const C = rotToWorld(m, -m.t[0], -m.t[1], -m.t[2])
       let mapKept = 0, mapConsidered = 0
+      const tPass = now()
       let considered = 0, noDepth = 0, highCost = 0, failedConsistency = 0, kept = 0
       let lowParallax = 0, grazing = 0, outsideRegion = 0
       for (let v = 0; v < h; v += step) {
@@ -376,12 +418,14 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
       counters.considered += considered; counters.noDepth += noDepth; counters.highCost += highCost
       counters.failedConsistency += failedConsistency; counters.kept += kept; counters.lowParallax += lowParallax
       counters.grazing += grazing; counters.outsideRegion += outsideRegion
+      counters.passMs += now() - tPass
       onLog(`Fusion: ${m.name ?? m.uuid?.slice(0, 8) ?? '?'}${tiled ? ` (slab ${ti + 1}/${nT})` : ''} — ${mapKept}/${mapConsidered} px kept `
         + `(${(100 * mapKept / Math.max(1, mapConsidered)).toFixed(1)}%)`, 'debug', 'Dense')
     }
 
     // The slab's own cells: merged, then isolated-cell removal judged with the halo
     // as neighbours, then the halo dropped before finalizing.
+    const tFinish = now()
     counters.mergedCells += within ? acc.countWithin(within) : acc.count
     // WS4 post-fusion isolated-cell removal: drop lone low-support cells (fusion noise
     // that slipped the per-pixel gates) with too few occupied neighbours.
@@ -398,17 +442,17 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
     counters.accBytes = Math.max(counters.accBytes, acc.bytes)
     const slabCells = acc.count
     counters.cells += slabCells
-    const flat = acc.finalizeFlat()
-    const fin = acc.finalizeNormals()
-    counters.degenerate += fin.degenerate
-    flat.nrm = fin.nrm
-    acc = null // release the accumulator before the caller converts the slab
+    // Straight into the cloud's layout, releasing the accumulator on the way.
+    const { degenerate, ...part } = acc.finalizeCloud()
+    counters.degenerate += degenerate
+    acc = null
+    counters.finishMs += now() - tFinish
     if (tiled) {
       onLog(`Fusion: slab ${ti + 1}/${nT} (${axKey} cells ${Number.isFinite(lo) ? lo : '−∞'}…${Number.isFinite(hi) ? hi : '∞'}) → `
         + `${slabCells.toLocaleString()} points in ${((now() - tT) / 1000).toFixed(1)}s`, 'info', 'Dense')
     }
-    if (hooks.onTile) hooks.onTile(flat, { index: ti, count: nT })
-    else parts.push(flat)
+    if (hooks.onTile) hooks.onTile(part, { index: ti, count: nT })
+    else parts.push(part)
   }
   return { parts, counters }
 }
@@ -419,7 +463,7 @@ export function finishFusion(plan, counters, parts = [], onLog = () => {}, hooks
   const { minViews, maxCost, mergeCell, region, estCells, tiled, bboxStride, slabs, nMaps } = plan
   const { minTriAngleDeg, maxIncidenceDeg, incidenceOn } = plan.gates
   const { considered, noDepth, highCost, failedConsistency, kept, lowParallax, grazing, outsideRegion,
-    mergedCells, isolatedRemoved, degenerate, overflowCells, accBytes, cells, noNormalMaps } = counters
+    mergedCells, isolatedRemoved, degenerate, overflowCells, accBytes, cells, noNormalMaps, passMs, finishMs } = counters
   const nT = slabs.length
   hooks.onProgress?.(nT * nMaps - 0.02 * nT * nMaps, nT * nMaps, 'Packing points…')
 
@@ -449,19 +493,30 @@ export function finishFusion(plan, counters, parts = [], onLog = () => {}, hooks
   onLog(`Fusion: ${mergedCells.toLocaleString()} merged cells vs the measured bound `
     + `${estCells.toLocaleString()} (${(100 * mergedCells / Math.max(1, estCells)).toFixed(0)}%); `
     + `accumulator held ${formatBytes(accBytes)}${tiled ? ' (largest slab)' : ''}`, 'info', 'Dense')
+  onLog(`Fusion timing${plan.workers > 1 ? ` (summed over ${plan.workers} workers)` : ''}: fusion pass ${secs(passMs)} `
+    + `(unproject, gates, merge), finishing slabs ${secs(finishMs)} (isolated cells, packing)`, 'info', 'Dense')
   if (isolatedRemoved) {
     onLog(`Fusion: isolated-cell removal — dropped ${pluralize(isolatedRemoved, 'lone cell')} `
       + `(${(100 * isolatedRemoved / Math.max(1, mergedCells)).toFixed(1)}% of merged)`, 'info', 'Dense')
   }
 
+  // The slabs ({ count, pos, col, nrm }) as the flat [x,y,z,r,g,b] + normals that
+  // in-process callers read. The worker takes the slabs through onTile instead.
   let flat
   if (!parts.length) flat = Object.assign(new Float32Array(0), { nrm: null })
-  else if (parts.length === 1) flat = parts[0]
   else {
     flat = new Float32Array(cells * 6)
     const nrm = new Float32Array(cells * 3)
     let o = 0
-    for (const p of parts) { flat.set(p, o * 6); nrm.set(p.nrm, o * 3); o += p.length / 6 }
+    for (const p of parts) {
+      for (let i = 0; i < p.count; i++) {
+        const d = (o + i) * 6, q = i * 3
+        flat[d] = p.pos[q]; flat[d + 1] = p.pos[q + 1]; flat[d + 2] = p.pos[q + 2]
+        flat[d + 3] = p.col[q]; flat[d + 4] = p.col[q + 1]; flat[d + 5] = p.col[q + 2]
+      }
+      nrm.set(p.nrm, o * 3)
+      o += p.count
+    }
     flat.nrm = nrm
   }
   if (noNormalMaps) {

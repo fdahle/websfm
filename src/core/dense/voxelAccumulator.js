@@ -239,6 +239,45 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
       removed += c
       return c
     },
+    // Finalize into the dense cloud's own layout: Float32 position, Uint8 colour and
+    // Float32 unit normal per merged cell, 27 B, the same values finalizeFlat and
+    // finalizeNormals give. The accumulator is released while it goes (the index and
+    // keys first, then each sum as soon as its output is written), so the finished
+    // cloud never sits beside a whole accumulator: finishing peaks below what
+    // accumulating already held. The accumulator is spent afterwards.
+    // Returns { count, pos, col, nrm, degenerate }.
+    finalizeCloud() {
+      const m = n - removed
+      table = null; keyOf = null; overflow.clear()
+      const pos = new Float32Array(3 * m)
+      for (let s = 0, o = 0; s < n; s++) {
+        if (cnt[s] === 0) continue
+        const k = 1 / cnt[s]
+        pos[o] = sx[s] * k; pos[o + 1] = sy[s] * k; pos[o + 2] = sz[s] * k
+        o += 3
+      }
+      sx = sy = sz = null
+      const col = new Uint8Array(3 * m)
+      for (let s = 0, o = 0; s < n; s++) {
+        if (cnt[s] === 0) continue
+        const k = 1 / cnt[s]
+        col[o] = Math.round(sr[s] * k); col[o + 1] = Math.round(sg[s] * k); col[o + 2] = Math.round(sb[s] * k)
+        o += 3
+      }
+      sr = sg = sb = null
+      const nrm = new Float32Array(3 * m)
+      let degenerate = 0
+      for (let s = 0, o = 0; s < n; s++) {
+        if (cnt[s] === 0) continue
+        const ax = snx[s], ay = sny[s], az = snz[s]
+        const mag = Math.hypot(ax, ay, az)
+        if (mag > 1e-9) { nrm[o] = ax / mag; nrm[o + 1] = ay / mag; nrm[o + 2] = az / mag }
+        else { nrm[o] = 0; nrm[o + 1] = 0; nrm[o + 2] = 1; degenerate++ }
+        o += 3
+      }
+      snx = sny = snz = null; cnt = null
+      return { count: m, pos, col, nrm, degenerate }
+    },
     // Finalize straight into the wire format the densify op returns: a flat
     // Float32Array of [x,y,z,r,g,b] per merged cell (no intermediate objects). Cells
     // zeroed by filterIsolated (cnt === 0) are skipped and the output is compacted.

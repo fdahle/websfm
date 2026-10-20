@@ -42,7 +42,7 @@ const {
   moveCurrentProjectToBrowser, moveCurrentProjectToFolder, onFolderConnect, onFolderRepick, onSaveProject,
   onWorkflowRun, onWorkflowUpdate, openProjectFolder, pendingConfirm, pendingImageDelete,
   pickProjectFile, progressCancelling, progressComplete, progressCurrent, progressFraction,
-  progressIndeterminate, progressLabel, progressOpen, progressTitle, progressTotal,
+  progressIndeterminate, progressLabel, progressOpen, progressPhase, progressTitle, progressTotal,
   progressUnit, projectLoading, projectLoadingLabel, projectLoadingProgress, runPendingConfirm,
   workflowCurrentBlockId, workflowPause, workflowRunner, workflowRunning, workflowState,
   workflowStatuses, activeTabId,
@@ -162,6 +162,7 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
       :label="progressLabel"
       :unit="progressUnit"
       :fraction="progressFraction"
+      :phase="progressPhase"
       :indeterminate="progressIndeterminate"
       :complete="progressComplete"
       :cancelling="progressCancelling"

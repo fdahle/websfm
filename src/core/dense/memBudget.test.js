@@ -132,13 +132,13 @@ describe('projectDensePeakBytes', () => {
 })
 
 describe('projectDensifyPeakBytes', () => {
-  it('sums input + measured cells × the accumulator and output footprints', () => {
+  it('sums input + measured cells × the accumulator footprint', () => {
+    // Finishing writes the cloud while it frees the accumulator: no output term on top.
     const p = projectDensifyPeakBytes({ inputBytes: 1000, cells: 3 })
     expect(p.cells).toBe(3)
     expect(p.input).toBe(1000)
     expect(p.accumulator).toBe(3 * DENSIFY_CELL_BYTES)
-    expect(p.output).toBe(3 * 36) // 6·4 (pos+col) + 3·4 (normals)
-    expect(p.total).toBe(p.input + p.accumulator + p.output)
+    expect(p.total).toBe(p.input + p.accumulator)
   })
 })
 
@@ -165,12 +165,12 @@ describe('densifyInputBytes', () => {
       { width: 5, height: 5, hasNormals: true },
     ]
     // Per map: planes (23 B/px with normals, 11 without) + agree/angle 12 B/px + every
-    // pixel eligible, Int32 index + Float64×3 point = 28 B/px. Comparison planes live in
-    // the separately charged cache — no second full map is ever held.
-    // 100·(23+12+28) = 6300 vs 200·(11+12+28) = 10200.
-    expect(densifyInputBytes(metas, { streamed: true })).toBe(200 * (11 + 12 + 28))
-    expect(densifyInputBytes([metas[0], metas[2]], { streamed: true })).toBe(100 * (23 + 12 + 28))
-    expect(DENSIFY_STREAMED_REF_BYTES_PER_PX).toBe(12 + 28)
+    // pixel eligible, Int32 index + Float64×3 point + Int32 open-list entry = 32 B/px.
+    // Comparison planes live in the separately charged cache — no second full map is ever held.
+    // 100·(23+12+32) = 6700 vs 200·(11+12+32) = 11000.
+    expect(densifyInputBytes(metas, { streamed: true })).toBe(200 * (11 + 12 + 32))
+    expect(densifyInputBytes([metas[0], metas[2]], { streamed: true })).toBe(100 * (23 + 12 + 32))
+    expect(DENSIFY_STREAMED_REF_BYTES_PER_PX).toBe(12 + 32)
   })
 })
 

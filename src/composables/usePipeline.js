@@ -26,6 +26,10 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   const progressTotal   = ref(0)
   const progressLabel   = ref('')
   const progressUnit    = ref('')
+  // The stage's current phase, when it names one (fusion: 'plan', then 'fuse'). The
+  // progress modal measures its rate afresh per phase: a phase given the wrong share of
+  // the bar then only skews the estimate until the next phase begins.
+  const progressPhase   = ref('')
   // Authoritative bar value, 0..1 and monotonic — NOT current/total. A stage whose
   // `total` grows mid-run (matchAll) or whose counter restarts per sub-run (SfM seed
   // retries / secondary models) would otherwise drive the bar backwards.
@@ -52,7 +56,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
 
   // ── Ingestion (hot, non-reactive) ────────────────────────────────────────────
   // Every worker event lands here; only `flush` touches refs.
-  let pendingProgress = { current: 0, total: 0, label: '', fraction: 0 }
+  let pendingProgress = { current: 0, total: 0, label: '', fraction: 0, phase: '' }
   let maxFraction = 0
   // Two handles, not one: the pacing timer and the frame callback are cancelled by
   // different functions, and clearing a rAF handle with clearTimeout silently does
@@ -78,6 +82,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     // The label is the user's "it moved on" signal and changes rarely (per image or
     // per phase, not per pair), so it is never worth withholding for the timer.
     if (progressLabel.value !== pendingProgress.label) progressLabel.value = pendingProgress.label
+    if (progressPhase.value !== pendingProgress.phase) progressPhase.value = pendingProgress.phase
   }
 
   function scheduleFlush() {
@@ -95,7 +100,8 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
 
   // The single progress sink for every stage. `fraction` overrides done/total as the
   // bar value (the SfM phase plan supplies one); otherwise it derives from the count.
-  function report(done, total, label, fraction) {
+  // `phase` (optional) names the part of the stage running now (progressPhase).
+  function report(done, total, label, fraction, phase) {
     const raw = fraction != null
       ? fraction
       : (total > 0 ? done / total : 0)
@@ -113,6 +119,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
       total:    total ?? 0,
       label:    label ?? '',
       fraction: maxFraction,
+      phase:    phase ?? pendingProgress.phase,
     }
     scheduleFlush()
   }
@@ -134,6 +141,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     progressCurrent.value = 0
     progressTotal.value   = total
     progressLabel.value   = ''
+    progressPhase.value   = ''
     progressFraction.value = 0
     progressUnit.value          = unit
     progressIndeterminate.value = indeterminate
@@ -143,7 +151,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     runStartedAt          = Date.now()
     maxFraction           = 0
     lastFlush             = 0
-    pendingProgress       = { current: 0, total, label: '', fraction: 0 }
+    pendingProgress       = { current: 0, total, label: '', fraction: 0, phase: '' }
     aborted.value         = false
     cancelImpl            = onCancel
     progressOpen.value    = true
@@ -307,6 +315,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     progressTotal,
     progressLabel,
     progressUnit,
+    progressPhase,
     progressFraction,
     progressIndeterminate,
     progressComplete,
