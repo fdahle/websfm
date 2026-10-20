@@ -27,8 +27,22 @@ Notable changes to websfm. The format follows
   the full-resolution grid (coarser only past their memory limits, which the log names).
 - **Watch the sparse model grow.** During Sparse Reconstruction the 3D view draws the
   cameras registered so far and their points, in colour, updated every couple of
-  seconds, and zooms out as the model expands. The progress bar moves to the corner so
-  the view stays visible.
+  seconds, and zooms out as the model expands. You can orbit and zoom it while it
+  grows; the rest of the app is dimmed and locked until the run ends, and the progress
+  bar sits in the view's corner.
+- **Raster size in pixels, shown before the run.** The DEM and Orthophoto dialogs set
+  the size by cell size or by pixels on the long side, and show the size the run will
+  build (pixels, cell size, uncompressed size) and any cap before it starts.
+- **Orthophotos and DEMs past 4 GB.** The stored GeoTIFF becomes a BigTIFF when it
+  needs to, so a fine orthophoto is no longer coarsened to fit 4 GB. Rasters are capped
+  at 65,535 pixels a side.
+- **DEM and orthophoto GeoTIFFs in another CRS.** The GeoTIFF and COG exports can
+  write a reprojected copy in any CRS (bilinear or nearest), block by block. The product
+  itself stays as built, and heights keep their vertical datum.
+- **Duplicate images are caught.** Adding an image whose name and size match one
+  already in the project asks once per batch: skip the duplicates, or add them as
+  separate images ("photo (2).jpg").
+- **Camera positions on the map can be hidden** (View ▸ Map ▸ Cameras).
 - **Long runs look after themselves.** While a stage or workflow runs, the screen is
   kept on so the computer does not sleep mid-run, and the tab's title shows the stage
   and its percentage, or "Waiting for you" when a workflow stops to ask something.
@@ -355,6 +369,18 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- Fusing a very large dense cloud (about 100 million points) failed near its end:
+  Chrome holds at most 2 GB in one buffer and 16 GB for a tab, whatever the machine
+  has. Fusion now finishes each slab straight into the cloud, splits a piece too large
+  for one buffer, caps the memory budget at 12 GB and starts on fresh workers. Quarry
+  at Medium, step 1, fuses 98 M points in under 10 minutes. Planning shows its
+  progress, and the consistency check stops comparing once every pixel is settled.
+- An orthophoto run no longer fails when the open project's clouds fill the tab:
+  the photo cache leaves room for them and shrinks if the browser refuses memory.
+  Orthophotos also decode fewer photos. On quarry the colour balance and seamline
+  survey dropped from about 4 minutes to 1.5.
+- A GeoTIFF nodata value of three characters or fewer ("255", "0") was read back as
+  a different value by other programs.
 - An orthophoto over very large scans (satellite frames past one canvas) refused to
   run, or fell back to depth-map colour: it reserved memory for each photo at its native
   size, and read photos at twice the resolution it asked for.
