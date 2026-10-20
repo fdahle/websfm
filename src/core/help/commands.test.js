@@ -173,8 +173,7 @@ describe('registry integrity', () => {
     expect(resolveCommand('export camera fiducials').cmd.dispatch).toBe('export-camera-fiducials')
     expect(resolveCommand('export measurements').cmd.dispatch).toBe('export-measurements')
     expect(resolveCommand('basemap satellite').cmd.dispatch).toBe('map-basemap:satellite')
-    // A coming-soon row is not a command.
-    expect(getCommand('map-toggle-poses')).toBeNull()
+    expect(resolveCommand('map toggle cameras').cmd.dispatch).toBe('map-toggle-cameras')
   })
 })
 

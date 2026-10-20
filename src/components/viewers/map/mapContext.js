@@ -18,12 +18,14 @@
 const EMPTY = () => ({
   map: null,             // ol/Map
   vSource: null,         // image GPS markers
+  vLayer: null,
   gcpSource: null,
   gcpLayer: null,
   gcpTranslate: null,    // drag-to-place interaction (GCP edit mode)
   footprintSource: null,
   footprintLayer: null,
   poseSource: null,
+  poseLayer: null,
   grid: null,            // { layer, update(map) } — see mapGridLayer.js
 })
 

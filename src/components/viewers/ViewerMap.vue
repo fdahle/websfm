@@ -63,6 +63,8 @@ const props = defineProps({
   crs:        { type: String, default: 'EPSG:4326' },
   showFootprints: { type: Boolean, default: true },
   showGrid:       { type: Boolean, default: true },
+  // Camera positions: the pose layer and the GPS markers of images without a pose.
+  showCameras:    { type: Boolean, default: true },
   // Raster layers flagged "On map", in the order they should stack: imported
   // reference rasters and computed DEM/ortho (`product: true`) alike
   // (composables/useMapProducts.js). Metadata only — see useMapRasterLayers.
@@ -376,6 +378,12 @@ async function build() {
     source: ctx.footprintSource, style: (f) => footprintStyle(f, props.selectedId), visible: props.showFootprints,
   })
   ctx.poseSource = new VectorSource({ features: mapPoses.value.map(makePoseFeature) })
+  ctx.vLayer = new VectorLayer({
+    source: ctx.vSource, style: (f) => imageStyle(f, props.selectedId, featureUnaligned), visible: props.showCameras,
+  })
+  ctx.poseLayer = new VectorLayer({
+    source: ctx.poseSource, style: (f) => poseStyle(f, props.selectedId), visible: props.showCameras,
+  })
   ctx.gcpLayer = new VectorLayer({ source: ctx.gcpSource, style: gcpStyle })
 
   ctx.grid = makeGridLayer(info, projection, props.showGrid)
@@ -390,9 +398,9 @@ async function build() {
       rasterGroup,
       ctx.grid.layer,
       ctx.footprintLayer,
-      new VectorLayer({ source: ctx.vSource, style: (f) => imageStyle(f, props.selectedId, featureUnaligned) }),
+      ctx.vLayer,
       ctx.gcpLayer,
-      new VectorLayer({ source: ctx.poseSource, style: (f) => poseStyle(f, props.selectedId) }),
+      ctx.poseLayer,
     ],
     view: new View({
       projection: projection || 'EPSG:3857',
@@ -511,6 +519,9 @@ watch(() => props.showFootprints, (v) => ctx.footprintLayer?.setVisible(v))
 
 // Show/hide the grid from the ribbon toggle.
 watch(() => props.showGrid, (v) => ctx.grid?.layer.setVisible(v))
+
+// Show/hide the camera positions (poses and image GPS markers) from the ribbon toggle.
+watch(() => props.showCameras, (v) => { ctx.vLayer?.setVisible(v); ctx.poseLayer?.setVisible(v) })
 
 // Re-style on selection change without rebuilding features
 watch(() => props.selectedId, () => { ctx.vSource?.changed(); ctx.footprintSource?.changed(); ctx.poseSource?.changed() })

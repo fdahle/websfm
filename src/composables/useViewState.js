@@ -26,6 +26,9 @@ export function useViewState({ mapMode, mapFrame }) {
   // no longer clutters a bare basemap.
   const showFootprints = ref(true)
   const showMapGrid = ref(true)
+  // Camera positions on the map: pose markers (imported / EXIF, or the SfM centres in
+  // the model frame) and the GPS markers of images without a pose.
+  const showMapCameras = ref(true)
   // Modes entered from the ribbon and left from there or the tool's floating
   // toolbox: the 3D selection tool (reported up by Viewer3D) and map GCP editing.
   const selectTool3d = ref(null)   // null | 'rect' | 'lasso'
@@ -43,6 +46,7 @@ export function useViewState({ mapMode, mapFrame }) {
     showGrid: showGrid.value,
     showLegend: showLegend.value,
     showMapGrid: showMapGrid.value,
+    showMapCameras: showMapCameras.value,
     mapModelFrame: mapMode.value === 'model',
     showFootprints: showFootprints.value,
     pointSize: pointSize.value,
@@ -55,7 +59,7 @@ export function useViewState({ mapMode, mapFrame }) {
   }))
 
   return {
-    showCameras, showGrid, showLegend, showFootprints, showMapGrid, selectTool3d, mapGcpEdit,
+    showCameras, showGrid, showLegend, showFootprints, showMapGrid, showMapCameras, selectTool3d, mapGcpEdit,
     setPointSize, setCameraScale, setMapBasemap, ribbonViewState,
   }
 }

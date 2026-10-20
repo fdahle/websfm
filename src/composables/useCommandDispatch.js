@@ -30,7 +30,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   const { activateTab, activeView, activeTab, activeImageTab, openProductTab } = tabs
   const { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab } = viewers
   const {
-    showCameras, showGrid, showLegend, showFootprints, showMapGrid, selectTool3d, mapGcpEdit,
+    showCameras, showGrid, showLegend, showFootprints, showMapGrid, showMapCameras, selectTool3d, mapGcpEdit,
     setPointSize, setCameraScale, setMapBasemap,
   } = view
   const { toggleModelFrame, setMapMeasureTarget } = map
@@ -223,6 +223,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'map-fit-view':         mapViewerRef.value?.fitView(); break
       case 'map-toggle-grid': showMapGrid.value = !showMapGrid.value; break
       case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
+      case 'map-toggle-cameras': showMapCameras.value = !showMapCameras.value; break
       // Tools ▸ Images ▾ ▸ Edit GCPs: the mode of the view in front.
       case 'edit-gcps':
         if (activeView.value === 'map') mapGcpEdit.value = !mapGcpEdit.value

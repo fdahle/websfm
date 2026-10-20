@@ -240,7 +240,7 @@ const mapViewerRef = ref(null)
 // The 3D and map display toggles, the modes the ribbon enters, and what the
 // ribbon's View tab shows as on.
 const {
-  showCameras, showGrid, showLegend, showFootprints, showMapGrid, selectTool3d, mapGcpEdit,
+  showCameras, showGrid, showLegend, showFootprints, showMapGrid, showMapCameras, selectTool3d, mapGcpEdit,
   setPointSize, setCameraScale, setMapBasemap, ribbonViewState,
 } = useViewState({ mapMode, mapFrame })
 
@@ -454,7 +454,7 @@ const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useComma
   tabs: { activateTab, activeView, activeTab, activeImageTab, openProductTab },
   viewers: { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab },
   view: {
-    showCameras, showGrid, showLegend, showFootprints, showMapGrid, selectTool3d, mapGcpEdit,
+    showCameras, showGrid, showLegend, showFootprints, showMapGrid, showMapCameras, selectTool3d, mapGcpEdit,
     setPointSize, setCameraScale, setMapBasemap,
   },
   map: { toggleModelFrame, setMapMeasureTarget },
@@ -513,7 +513,7 @@ provideAppContext({
   projectLoadingProgress, rasterBeingStyled, refreshGcpReport, regionDraft, regionEdit,
   removeOrientation, removeRegion, runPendingConfirm, selectGcp, selectTool3d, selectedGcpId,
   sensorForImage, setGcpGroundPosition, setOrientHeading, sfmImportSession, showCameras,
-  showFootprints, showGrid, showLegend, showMapGrid, startMarkingPoint, tabs, toggleOrientPick,
+  showFootprints, showGrid, showLegend, showMapCameras, showMapGrid, startMarkingPoint, tabs, toggleOrientPick,
   usedKeysOf, viewerMarkers, viewerPickMode, viewerRef, viewerRegionBox, viewerRegionStale,
   workflowCurrentBlockId, workflowPause, workflowRunner, workflowRunning, workflowState,
   workflowStatuses,

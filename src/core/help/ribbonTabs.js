@@ -560,13 +560,13 @@ export const MAP_GROUP = {
   commands: [
     { id: 'map-fit-view',          label: 'Fit\nView',   icon: 'fit-view' },
     { id: 'map-toggle-grid',       label: 'Grid',        icon: 'grid',      activeKey: 'showMapGrid' },
+    { id: 'map-toggle-cameras',    label: 'Cameras',     icon: 'camera',    activeKey: 'showMapCameras' },
     { id: 'map-toggle-footprints', label: 'Footprints',  icon: 'footprint', activeKey: 'showFootprints', needs: ['footprints'] },
     // `map-basemap:<value>` rows pick the base layer (core/basemaps.js); App
     // dispatches the prefix. A layer the frame cannot show is greyed with its reason.
     { id: 'menu-basemap', label: 'Basemap', icon: 'layers', menu: BASEMAPS.map((b) => ({
       id: `map-basemap:${b.value}`, label: b.label, icon: b.icon, blurb: b.blurb, basemap: b.value,
     })) },
-    { id: 'map-toggle-poses',      label: 'Poses',       icon: 'camera',    disabled: true },
     // Project CRS ↔ the sparse model's local frame (composables/useMapProducts.js).
     { id: 'map-toggle-model-frame', label: 'Model\nFrame', icon: 'sparse-model', activeKey: 'mapModelFrame', needs: ['sparse'] },
   ],

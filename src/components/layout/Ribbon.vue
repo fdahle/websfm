@@ -18,7 +18,7 @@ const props = defineProps({
   // App.vue `commandState`: the counts/flags NEED_CHECKS reads.
   state: { type: Object, default: () => ({}) },
   // Display toggles and values the View tab shows as active / as stepper values:
-  // { showCameras, showGrid, showLegend, showMapGrid, showFootprints, pointSize,
+  // { showCameras, showGrid, showLegend, showMapGrid, showMapCameras, showFootprints, pointSize,
   //   cameraScale, selectRect, selectLasso, mapGcpEdit, mapBasemap,
   //   mapBasemapReasons: { [value]: why that base layer is unavailable } }.
   viewState: { type: Object, default: () => ({}) },
@@ -105,7 +105,7 @@ function isHidden(cmd) {
 
 // Keys answered by the View tab's display state rather than the image view.
 const VIEW_KEYS = new Set([
-  'showCameras', 'showGrid', 'showLegend', 'showMapGrid', 'showFootprints',
+  'showCameras', 'showGrid', 'showLegend', 'showMapGrid', 'showMapCameras', 'showFootprints',
   'selectRect', 'selectLasso', 'mapModelFrame',
 ])
 

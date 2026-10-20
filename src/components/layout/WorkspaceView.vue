@@ -49,7 +49,7 @@ const {
   tabs, activeTabId, activeTab, activateTab, moveTab, openImageTab,
   closeTab, closeAllTabs, closeOtherTabs, closeTabsToLeft, closeTabsToRight,
   viewerRef, mapViewerRef, imageViewerRefs, productViewerRefs, handleCommand,
-  showCameras, showGrid, showLegend, showFootprints, showMapGrid, selectTool3d, mapGcpEdit,
+  showCameras, showGrid, showLegend, showFootprints, showMapGrid, showMapCameras, selectTool3d, mapGcpEdit,
   mapLayers, probeMapLayersAt, mapFrame, modelCameras, modelMarkers, mapMeasureTarget, mapNotes,
   alignedUuids, hasSparse, editableClouds, onEditSelection,
   regionEdit, regionDraft, fitRegionDraft, applyRegion, removeRegion,
@@ -205,7 +205,7 @@ onBeforeUnmount(() => {
           @undo="alignPairs.pairs = alignPairs.pairs.slice(0, -1)" @clear="alignPairs.pairs = []" @apply="applyAlignPairs" @close="alignPairs = null" />
       </template>
     </Viewer3D>
-    <ViewerMap v-if="mapMounted" :ref="setMapViewer" v-show="activeTabId === 'map'" v-model:gcp-edit="mapGcpEdit" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapLayers" :probe-raster="probeMapLayersAt" :model-frame="mapFrame" :model-cameras="modelCameras" :model-markers="modelMarkers" :measure-target="mapMeasureTarget" :notes="mapNotes" :load-raster="ensureRasterLoaded" @select="selectImage" @open-image="(id) => openImageTab(id)" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="confirmRemoveGcp" />
+    <ViewerMap v-if="mapMounted" :ref="setMapViewer" v-show="activeTabId === 'map'" v-model:gcp-edit="mapGcpEdit" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :show-cameras="showMapCameras" :rasters="mapLayers" :probe-raster="probeMapLayersAt" :model-frame="mapFrame" :model-cameras="modelCameras" :model-markers="modelMarkers" :measure-target="mapMeasureTarget" :notes="mapNotes" :load-raster="ensureRasterLoaded" @select="selectImage" @open-image="(id) => openImageTab(id)" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="confirmRemoveGcp" />
     <template v-for="tab in tabs" :key="tab.id">
       <ViewerImage
         v-if="tab.type === 'image' && imageById(tab.imageId)"
