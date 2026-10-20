@@ -7,6 +7,7 @@ import { needsPyramid } from '../../core/io/rasterPyramid.js'
 import { pyramidSource } from '../../utils/image.js'
 import { markRaw } from 'vue'
 import { pluralize } from '../../core/textFormat.js'
+import { uniqueImageLabel } from '../../core/io/imageDuplicates.js'
 
 const READ_BACK_CONCURRENCY = 16
 
@@ -76,6 +77,9 @@ export function createIngest({
   //   fromStorage: the originals are in memory (video frames), so once the copy is
   //     read back their URLs are revoked to free them: a long video must not hold
   //     every extracted frame in memory.
+  //   allowDuplicates: the user chose to add files already in the project (see
+  //     useImportRouting.addImagesRouted). Each gets a fresh id and a numbered
+  //     label ("a (2).JPG") instead of being skipped, so the rows stay apart.
   // In a project with storage every image is read back from its copy once written
   // (IS-1), so a moved, renamed or cloud-evicted original no longer matters.
   async function addImages(files, onProgress, options = {}) {
@@ -88,7 +92,7 @@ export function createIngest({
     }
   }
 
-  async function addImagesNow(files, onProgress, { extras = null, fromStorage = false } = {}) {
+  async function addImagesNow(files, onProgress, { extras = null, fromStorage = false, allowDuplicates = false } = {}) {
     const projectId = projects.currentProjectId
     const persistImport = !!projectId && isPersisting()
     const stored = []
@@ -101,6 +105,7 @@ export function createIngest({
     // One id set for the whole batch: a per-file scan of the (growing, reactive)
     // list was O(N²) on a multi-thousand-image drop.
     const knownIds = new Set(images.value.map((img) => img.id))
+    const takenLabels = allowDuplicates ? new Set(images.value.map((img) => img.name)) : null
     for (const file of files) {
       const item = createImage(file)
       // Keep the immutable source filename separate from the user-editable label.
@@ -108,7 +113,12 @@ export function createIngest({
       // in the label they choose later.
       item.sourceName = file.name
       item.groupId = null
-      if (knownIds.has(item.id)) {
+      if (allowDuplicates) {
+        const base = item.id
+        for (let n = 2; knownIds.has(item.id); n++) item.id = `${base}#${n}`
+        item.name = uniqueImageLabel(item.name, takenLabels)
+        takenLabels.add(item.name)
+      } else if (knownIds.has(item.id)) {
         URL.revokeObjectURL(item.url)
         log(`Skip duplicate: ${file.name}`, 'warn', 'Images')
         continue

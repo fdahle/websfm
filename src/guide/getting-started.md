@@ -26,6 +26,12 @@ move around the subject. Avoid long runs of almost identical frames, motion blur
 featureless sky, and reflective or moving surfaces. [Mask](guide:masks) irrelevant
 regions when they dominate the image.
 
+**Duplicates.** A picked or dropped image whose file name and size match one already
+in the project (such as a copy of it from another folder) is caught before it is
+added. websfm asks once per batch: **Skip duplicates** (the default) leaves those
+out and adds the rest; **Add anyway** adds them as separate images, labelled
+"name (2).JPG" and so on.
+
 **From a video.** **Import → Video** (or dropping a video on the sidebar) extracts
 overlapping, sharp frames from a video and adds them as images; a slow phone video
 around an object or along a façade is an easy way to start. See

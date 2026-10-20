@@ -144,8 +144,9 @@ const progressDocked = computed(() => !!liveSparse.value && activeTabId.value ==
       :title="pendingConfirm.title"
       :message="pendingConfirm.message"
       :confirm-label="pendingConfirm.confirmLabel || 'Remove'"
+      :cancel-label="pendingConfirm.cancelLabel || 'Cancel'"
       :dont-ask="!!pendingConfirm.onDontAsk"
-      danger
+      :danger="pendingConfirm.danger ?? true"
       @confirm="runPendingConfirm"
       @cancel="cancelPendingConfirm"
     />

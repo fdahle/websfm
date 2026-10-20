@@ -74,4 +74,19 @@ describe('addImages with extras and fromStorage', () => {
     expect(store.images[0].file).toBe(photo)
     expect(load).not.toHaveBeenCalled()
   })
+
+  it('skips the same file again, or adds it with its own id and label when allowed', async () => {
+    const projects = useProjectsStore()
+    projects.persistenceAvailable = false
+    projects.currentProjectId = null
+    const photo = new File([new Uint8Array(1000)], 'photo.jpg', { type: 'image/jpeg' })
+    const store = useImagesStore()
+    await store.addImages([photo])
+    await store.addImages([photo])
+    expect(store.images).toHaveLength(1)
+    await store.addImages([photo, photo], null, { allowDuplicates: true })
+    expect(store.images.map((img) => img.name)).toEqual(['photo.jpg', 'photo (2).jpg', 'photo (3).jpg'])
+    expect(new Set(store.images.map((img) => img.id)).size).toBe(3)
+    expect(store.images.every((img) => img.sourceName === 'photo.jpg')).toBe(true)
+  })
 })

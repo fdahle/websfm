@@ -1,6 +1,9 @@
 import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useModalsStore } from '../stores/useModalsStore.js'
+import { useImagesStore } from '../stores/useImagesStore.js'
+import { findDuplicateFiles } from '../core/io/imageDuplicates.js'
+import { confirmDialog } from './useConfirmations.js'
 import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from '../core/io/geojson.js'
 import { detectCameraMode } from '../core/io/cameraKind.js'
 import { detectFileKind, isColmapFile } from '../core/io/importKind.js'
@@ -215,9 +218,33 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
   }
 
   // Dropped/picked image batch: fork the reference rasters out, ingest the rest.
+  // Files already in the project (same name and size, see imageDuplicates.js) are
+  // asked about once per batch: skipped by default, or added as separate images.
   async function addImagesRouted(files) {
     const photos = await forkGeoreferencedRasters(files)
-    if (photos.length && addImages) await addImages(photos)
+    if (!photos.length || !addImages) return
+    const dups = findDuplicateFiles(photos, useImagesStore().images)
+    if (!dups.size) { await addImages(photos); return }
+    const names = [...dups].map((f) => f.name)
+    const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? ` and ${names.length - 3} more` : '')
+    const which = dups.size < photos.length ? `${dups.size} of ${photos.length} images are`
+      : dups.size === 1 ? 'This image is' : `All ${dups.size} images are`
+    const addAnyway = await confirmDialog({
+      title: 'Duplicate images',
+      message: `${which} already in the project (same file name and size): ${shown}.`
+        + ' Skip them, or add them anyway as separate images?',
+      confirmLabel: 'Add anyway',
+      cancelLabel: 'Skip duplicates',
+      danger: false,
+    })
+    if (addAnyway) {
+      log(`Adding ${pluralize(dups.size, 'duplicate image')} as separate images`, 'warn', 'Images')
+      await addImages(photos, null, { allowDuplicates: true })
+      return
+    }
+    log(`Skipped ${pluralize(dups.size, 'duplicate image')} (same name and size): ${shown}`, 'warn', 'Images')
+    const rest = photos.filter((f) => !dups.has(f))
+    if (rest.length) await addImages(rest)
   }
 
   // Decode + classify off-thread, then either commit straight away (the sniff
