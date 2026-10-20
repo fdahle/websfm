@@ -280,7 +280,11 @@ export const DENSE_FUSE_DEFAULTS = {
 // DEM (core/products/dem.js). Mirrored by DemModal.vue; gsd 0 ⇒ worker auto-suggests.
 export const DEM_DEFAULTS = {
   crs: 'local',     // 'local' | 'project'
+  // The raster size: by cell size or by pixels on the longer side (the dialog shows one
+  // field); a set gsd wins over longSide, and both 0 = auto (core/products/rasterSize.js).
+  sizeBy: 'gsd',    // 'gsd' | 'px'
   gsd: 0,           // ground sample distance; 0 = auto (√(area/n))
+  longSide: 0,      // cells on the longer side; 0 = auto
   aggregate: 'max', // 'max' (DSM top surface) | 'mean' | 'median'
   fillMethod: 'idw', // 'none' | 'nearest' | 'idw'
   fillRadius: 2,    // IDW hole-fill radius (cells); 0 = none
@@ -305,7 +309,9 @@ export const ORTHO_DEFAULTS = {
   // (watertight ⇒ no holes); 'plane' fits a plane through the cloud (flat scenes).
   surface: 'dem',
   crs: 'local',     // frame for a mesh/plane surface; 'dem' reuses the DEM's frame
+  sizeBy: 'gsd',    // 'gsd' | 'px', as DEM_DEFAULTS
   gsd: 0,           // ortho cell size; 0 = the surface's own (auto) resolution
+  longSide: 0,      // cells on the longer side; 0 = auto
   // 'mosaic' (one photo per area, seamlines, gains, seam blending) |
   // 'best' (lowest matching cost per cell) | 'average' (every visible view).
   blend: 'mosaic',

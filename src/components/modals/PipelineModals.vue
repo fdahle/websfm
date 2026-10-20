@@ -215,6 +215,7 @@ const measurementsStore = useMeasurementsStore()
       :project-crs="currentCrs"
       :source="demSource"
       :ground-source="groundSource"
+      :estimate-size="(s) => reconstructionStore.estimateRasterSize('dem', s)"
       @close="demOpen = false"
       @run="onDemRun"
     />
@@ -233,6 +234,7 @@ const measurementsStore = useMeasurementsStore()
       :crs-suggestion="crsSuggestion"
       @apply-crs-suggestion="applyCrsSuggestion"
       :project-crs="currentCrs"
+      :estimate-size="(s) => reconstructionStore.estimateRasterSize('ortho', s)"
       @close="orthoOpen = false"
       @run="onOrthoRun"
     />

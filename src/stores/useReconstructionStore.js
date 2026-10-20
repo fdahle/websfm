@@ -736,11 +736,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   // DEM and orthophoto generation (reconstruction/productRuns.js).
   const {
-    generateDem, generateOrtho,
+    generateDem, generateOrtho, estimateRasterSize,
   } = createProductRuns({
     activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf, groundSource,
     images, imagesStore, isPersisting, log, mainSparseCloud, meshCloud, ortho, orthoSurfaces,
-    projects, reconStatus, saveProductRecord, sparseCameras, withPreviewUrl, extractCloudPoints,
+    projects, reconStatus, saveProductRecord, sparseCameras, withPreviewUrl, extractCloudPoints, validGeoref, clouds,
   })
 
   // Reconstruct and the survey constraints it shares with gradual selection
@@ -995,6 +995,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     gcpEstimate,
     generateDem,
     generateOrtho,
+    estimateRasterSize,
     generateMesh,
     reconstruct,
     importColmapModel, importInteropModel,

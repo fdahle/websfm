@@ -44,6 +44,22 @@ photos reach far past the site, and those thin distant points would otherwise ma
 orthophoto huge and mostly empty. The log says how many points the core leaves out.
 Choose **All points** to cover the full extent.
 
+## Raster size by
+<!-- param: sizeBy default: Cell size -->
+Set the orthophoto's size either as a **Cell size** (the ground sample distance below)
+or as the **Long side** in pixels, and let the other follow from the surface's
+extent. Under the field, the dialog shows the size the run will build: pixels, cell
+size and the uncompressed size. Over a DEM it's exact; over a mesh or plane it's
+estimated from a sample of the surface (marked ≈). A size past 65,535 pixels a side
+shows its warning there, before the run.
+
+## Long side
+<!-- param: longSide default: Auto -->
+The number of pixels on the orthophoto's longer side. The cell size is then the
+surface's extent divided by it, and the readout shows it. **0** (Auto) uses the
+surface's own cell size, as Auto does for the cell size. The same 65,535-pixel limit
+applies as for a cell size.
+
 ## Ground sample distance
 <!-- param: gsd default: Auto -->
 The orthophoto's pixel size on the ground
@@ -53,9 +69,10 @@ otherwise independent of the surface's: colour comes from the full-resolution ph
 so a 4,096-pixel DEM or mesh is enough for an orthophoto at the photos' own ground
 resolution, tens of thousands of pixels across. A pixel finer than the photos' own
 GSD adds file size and build time, not detail. The orthophoto is stored as a tiled
-GeoTIFF of at most 4 GiB uncompressed (about 28,000 pixels square); a pixel size that
-would exceed that over the surface's area is coarsened to fit, and the log says so.
-To go finer, limit the area with Region and rebuild the surface.
+GeoTIFF of at most 65,535 pixels a side, a BigTIFF past 4 GiB (GDAL and QGIS read it);
+a pixel size that would exceed that over the surface's area is coarsened to fit. The
+size readout warns before the run, and the log says so. To go finer, limit the area
+with Region and rebuild the surface.
 
 ## View blending
 <!-- param: blend default: Mosaic -->

@@ -1,6 +1,10 @@
 import { computeSourceOf } from '../../utils/image.js'
 import { DEFAULT_BUDGET_BYTES } from '../../core/dense/memBudget.js'
-import { stageDemPoints, DEM_STAGE_BYTES_PER_POINT } from '../../core/products/dem.js'
+import { stageDemPoints, coreExtent, DEM_STAGE_BYTES_PER_POINT } from '../../core/products/dem.js'
+import { demGridFor, orthoGridFor, orthoDemSurface } from '../../core/products/rasterSize.js'
+import { gridGeometry } from '../../core/products/surface.js'
+import { frameFromSpec } from '../../core/products/frameSpec.js'
+import { pointView } from '../../core/products/pointView.ts'
 import { isStreamed } from '../../core/lod/streamed.js'
 import { regionContains } from '../../core/products/region.js'
 import { generateDem as workerGenerateDem, generateOrtho as workerGenerateOrtho } from '../../workers/computeClient.js'
@@ -15,8 +19,22 @@ import * as opfs from '../../utils/opfs.js'
 export function createProductRuns({
   activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf, groundSource,
   images, imagesStore, isPersisting, log, mainSparseCloud, meshCloud, ortho, orthoSurfaces, projects,
-  reconStatus, saveProductRecord, sparseCameras, withPreviewUrl, extractCloudPoints = null,
+  reconStatus, saveProductRecord, sparseCameras, withPreviewUrl, extractCloudPoints = null, validGeoref = null,
 }) {
+  const logLine = log
+  // How a DEM run reads its source cloud. A resident cloud whose full copy would be
+  // large reads its octree too, when it has one: the grid needs no finer level than half
+  // its cell, and a 95 M-point copy (2.3 GB) failed to allocate next to the cloud itself
+  // (quarry, 2026-10-17). From the octree it reads at most `maxPoints` (half the budget).
+  function demStagePlan(src, settings, groundOnly) {
+    const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+    const octreeHasClasses = src.lod?.layout?.attributes?.some((a) => a.name === 'classification')
+    const fromOctree = isStreamed(src) || (!!src.lod && !!extractCloudPoints && src.kind === 'dense'
+      && src.count * DEM_STAGE_BYTES_PER_POINT > Math.min(budgetBytes / 4, 2 ** 30)
+      && (!groundOnly || octreeHasClasses))
+    return { budgetBytes, fromOctree, maxPoints: Math.floor(budgetBytes / 2 / DEM_STAGE_BYTES_PER_POINT) }
+  }
+
   // Build a DEM from the densest available cloud, in the requested frame
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
   // settings.points 'ground' builds a DTM from the ground class (LAS 2) of a
@@ -52,16 +70,9 @@ export function createProductRuns({
       // Plain copy: cloud state is reactive (Vue proxies can't be cloned), and the
       // worker takes it by transfer. Only in-region points are copied, and the copy
       // is checked against the machine's memory budget (Settings ▸ Compute).
-      const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+      const { budgetBytes, fromOctree, maxPoints } = demStagePlan(src, settings, groundOnly)
       const r = src.imported ? null : activeRegion()
       const streamed = isStreamed(src)
-      // A resident cloud whose full copy would be large reads its octree too, when it has
-      // one: the grid needs no finer level than half its cell, and a 95 M-point copy
-      // (2.3 GB) failed to allocate next to the cloud itself (quarry, 2026-10-17).
-      const octreeHasClasses = src.lod?.layout?.attributes?.some((a) => a.name === 'classification')
-      const fromOctree = streamed || (!!src.lod && !!extractCloudPoints && src.kind === 'dense'
-        && src.count * DEM_STAGE_BYTES_PER_POINT > Math.min(budgetBytes / 4, 2 ** 30)
-        && (!groundOnly || octreeHasClasses))
       const cls = groundOnly && !fromOctree ? src.attributes.classification : null
       const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
       const inside = cls
@@ -72,7 +83,6 @@ export function createProductRuns({
         // From the octree (core/lod): down to half the cell size when one is set (finer
         // levels add nothing to a cell), within half the budget (the grid gets the
         // rest), the ground class for a DTM, the region as the read box.
-        const maxPoints = Math.floor(budgetBytes / 2 / DEM_STAGE_BYTES_PER_POINT)
         const { cloud: flat, plan } = await extractCloudPoints(src, {
           classes: groundOnly ? [2] : null, fields: 'xyz', maxPoints, minSpacing: settings.gsd > 0 ? settings.gsd / 2 : 0,
           ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}),
@@ -123,7 +133,9 @@ export function createProductRuns({
   // A mesh/plane surface needs a frame of its own — a DEM carries the one it was
   // built in, but there may be no DEM at all now. It's resolved exactly as
   // generateDem does, so the two products stay co-registered.
-  async function orthoSurfacePayload(settings, resolved) {
+  // `quiet`: no log lines (the dialogs' size estimate builds the same payload).
+  async function orthoSurfacePayload(settings, resolved, { quiet = false } = {}) {
+    const log = quiet ? () => {} : logLine
     const id = settings.surface ?? 'dem'
     const opt = orthoSurfaces.value.find((s) => s.id === id)
     if (!opt) { log(`Ortho: unknown surface "${id}"`, 'warn', 'Products'); return null }
@@ -292,7 +304,148 @@ export function createProductRuns({
     }
   }
 
+  // ── Size before the run (the DEM / Orthophoto dialogs' readout) ───────────────
+  // The raster a run with these settings would build, from a ≤ 200 k-point sample of
+  // its source in the run's frame, through the same extent rule (dem.js coreExtent) and
+  // grid arithmetic (core/products/rasterSize.js) as the worker. An ortho over the DEM
+  // is exact; the rest is an estimate (`approx`), as close as the sample's extent and
+  // density. → { width, height, gsd, unit, blocks, coarsened, requestedGsd, approx }
+  //   | { unavailable: reason } | null (nothing to build from)
+  const SIZE_SAMPLE = 200_000
+  async function estimateRasterSize(kind, settings = {}) {
+    const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+    if (kind === 'ortho' && (settings.surface ?? 'dem') === 'dem') {
+      const d = dem.value
+      if (!d) return null
+      const fit = orthoGridFor(orthoDemSurface(d, budgetBytes), settings)
+      return fit && { ...sizeOf(fit.geom, d.unit), coarsened: fit.coarsened, requestedGsd: fit.want, blocks: true, approx: false }
+    }
+    // A georeferenced product needs the fit; the estimate never runs one.
+    if (settings.crs && settings.crs !== 'local' && validGeoref && validGeoref.value?.crs !== projects.currentCrs) {
+      return { unavailable: 'shown once the georeference is fitted' }
+    }
+    const basis = await sizeBasis(kind, settings, budgetBytes)
+    if (!basis || basis.unavailable) return basis
+    if (kind === 'dem') {
+      const fit = demGridFor(basis.box, basis.count, settings)
+      return fit && { ...sizeOf(fit.geom, basis.unit), blocks: fit.blocks, coarsened: fit.coarsened, requestedGsd: fit.requestedGsd, approx: true }
+    }
+    const fit = orthoGridFor(basis.surface, settings)
+    return fit && { ...sizeOf(fit.geom, basis.unit), coarsened: fit.coarsened, requestedGsd: fit.want, blocks: true, approx: true }
+  }
+
+  // What the sample gives an estimate, before any cell size: the DEM's box and staged
+  // point count, or the mesh / plane surface's grid. Sampling (an octree read for a
+  // streamed cloud) depends only on the source, frame, extent and points, so it is kept
+  // per those and a cell-size edit re-runs only the grid arithmetic.
+  let basisMemo = { key: null, value: null }
+  async function sizeBasis(kind, settings, budgetBytes) {
+    const groundOnly = settings.points === 'ground'
+    const src = kind === 'dem' ? (groundOnly ? groundSource.value : demSource.value)?.cloud : demSource.value?.cloud
+    const key = JSON.stringify([kind, settings.surface ?? null, settings.crs ?? null, settings.extent ?? null,
+      settings.points ?? null, settings.surfaceGsd ?? 0, kind === 'dem' ? budgetBytes : 0, src?.id ?? null, src?.count ?? 0,
+      !!src?.lod, meshCloud.value?.id ?? null, dem.value?.createdAt ?? null, validGeoref?.value?.evidenceKey ?? null,
+      mainSparseCloud.value?.id ?? null])
+    if (basisMemo.key === key) return basisMemo.value
+    const value = await computeSizeBasis(kind, settings, src, groundOnly)
+    basisMemo = { key, value }
+    return value
+  }
+
+  async function computeSizeBasis(kind, settings, src, groundOnly) {
+    const resolved = await effectiveFrameSpec({ crs: settings.crs })
+    const cameras = [...sparseCameras.value.values()]
+    if (kind === 'dem') {
+      if (!src) return null
+      const sample = await demSample(src, groundOnly)
+      if (!sample) return { unavailable: 'shown after the run (the cloud cannot be sampled here)' }
+      if (!sample.n) return null
+      const frame = frameFromSpec(resolved.frameSpec, cameras, pointView({ pos: sample.pos, count: sample.n }))
+      const box = sampleBox(frame, sample.pos, sample.n, settings.extent)
+      if (!box) return null
+      // The run grids what it staged: every kept point, or from the octree at most maxPoints.
+      const { fromOctree, maxPoints } = demStagePlan(src, settings, groundOnly)
+      const staged = fromOctree ? Math.min(sample.kept, maxPoints) : sample.kept
+      return { box, count: staged * box.share, unit: resolved.unit }
+    }
+    // An ortho over a mesh or plane: that surface's grid, at its own auto cell.
+    const payload = await orthoSurfacePayload(settings, resolved, { quiet: true })
+    if (!payload) return null
+    const frame = frameFromSpec(payload.frame, payload.cameras ?? [],
+      pointView({ pos: payload.framePoints, count: payload.framePointCount }))
+    const isMesh = payload.kind === 'mesh'
+    const nAll = isMesh ? Math.floor(payload.pos.length / 3) : payload.framePointCount
+    const pts = isMesh ? stridedPos(payload.pos, nAll) : { pos: payload.framePoints, n: payload.framePointCount }
+    const box = sampleBox(frame, pts.pos, pts.n, payload.settings?.extent)
+    if (!box) return null
+    // meshSurface / planeSurface: ≈ one vertex (fit point) per cell over the bounds, ≤ 4,096.
+    const { minX, minY, maxX, maxY } = box.bounds
+    const own = payload.settings?.gsd > 0 ? payload.settings.gsd : Math.sqrt(((maxX - minX) * (maxY - minY)) / Math.max(2, nAll))
+    const surface = gridGeometry(minX, minY, maxX, maxY, own)
+    return surface && { surface, unit: resolved.unit }
+  }
+
+  const sizeOf = (g, unit) => ({ width: g.width, height: g.height, gsd: g.gsd, unit: unit ?? 'model' })
+
+  function stridedPos(src, count, keep = null) {
+    const stride = Math.max(1, Math.ceil(count / SIZE_SAMPLE))
+    const out = new Float64Array(Math.ceil(count / stride) * 3)
+    let k = 0, seen = 0
+    for (let i = 0; i < count; i += stride) {
+      seen++
+      if (keep && !keep(src[i * 3], src[i * 3 + 1], src[i * 3 + 2], i)) continue
+      out[k * 3] = src[i * 3]; out[k * 3 + 1] = src[i * 3 + 1]; out[k * 3 + 2] = src[i * 3 + 2]; k++
+    }
+    return { pos: out.subarray(0, k * 3), n: k, keptShare: seen ? k / seen : 0 }
+  }
+
+  // A sample of what a DEM run stages (region, ground class), in SfM coordinates, and
+  // how many points the run keeps (`kept`). Null when the cloud has no positions here
+  // and no octree to read.
+  async function demSample(src, groundOnly) {
+    const r = src.imported ? null : activeRegion()
+    const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
+    if (isStreamed(src)) {
+      if (!extractCloudPoints) return null
+      const { cloud: flat, plan } = await extractCloudPoints(src, { classes: groundOnly ? [2] : null, fields: 'xyz',
+        maxPoints: SIZE_SAMPLE, ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}) })
+      // The coarse levels thin the cloud uniformly, so the share the class and region
+      // filters keep of the nodes read (`plan.estimate`, before them) is the cloud's.
+      const share = plan?.estimate > 0 ? Math.min(1, flat.count / plan.estimate) : 1
+      return { pos: flat.pos, n: flat.count, kept: Math.round(src.count * share) }
+    }
+    const pos = src.kind === 'dense' ? src.pos : src.points?.pos
+    const count = src.kind === 'dense' ? src.count : src.points?.length
+    if (!pos || !count) return null
+    const cls = groundOnly ? src.attributes?.classification : null
+    const keep = cls || inRegion ? (x, y, z, i) => (!cls || cls[i] === 2) && (!inRegion || inRegion(x, y, z)) : null
+    const s = stridedPos(pos, count, keep)
+    return { ...s, kept: Math.round(count * s.keptShare) }
+  }
+
+  // The sample in the frame, and the box a run grids: the extent rule (Dense core /
+  // All points) as the worker's productBounds applies it, then the points inside. →
+  // { minX, minY, maxX, maxY (the points inside), share (their fraction), bounds } | null
+  function sampleBox(frame, sfmPos, n, extent) {
+    const flat = new Float64Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      const q = frame.fromSfm([sfmPos[i * 3], sfmPos[i * 3 + 1], sfmPos[i * 3 + 2]])
+      flat[i * 3] = q[0]; flat[i * 3 + 1] = q[1]; flat[i * 3 + 2] = q[2]
+    }
+    const core = extent === 'all' ? null : coreExtent(flat, n)
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, inside = 0
+    for (let i = 0; i < n; i++) {
+      const x = flat[i * 3], y = flat[i * 3 + 1]
+      if (core && (x < core.minX || x > core.maxX || y < core.minY || y > core.maxY)) continue
+      inside++
+      if (x < minX) minX = x; if (x > maxX) maxX = x
+      if (y < minY) minY = y; if (y > maxY) maxY = y
+    }
+    if (!(maxX > minX) || !(maxY > minY)) return null
+    return { minX, minY, maxX, maxY, share: inside / n, bounds: core ?? { minX, minY, maxX, maxY } }
+  }
+
   return {
-    generateDem, orthoSurfacePayload, generateOrtho,
+    generateDem, orthoSurfacePayload, generateOrtho, estimateRasterSize,
   }
 }

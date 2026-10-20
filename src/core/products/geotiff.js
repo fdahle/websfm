@@ -31,6 +31,15 @@ function shortArrayBytes(vals) {
   vals.forEach((v, i) => dv.setUint16(i * 2, v, true))
   return b
 }
+// An ASCII tag (GDAL_NODATA): inline when it fits the 4-byte value field, else an
+// external block. A reader takes a value of count·size ≤ 4 from the field itself, so
+// writing "255\0" (4 bytes) as an offset made every reader see the offset's bytes as
+// the nodata value (found 2026-10-20: "255" and "12" read back as NaN).
+function asciiTag(entries, extern, tag, text) {
+  const bytes = new TextEncoder().encode(text + '\0')
+  if (bytes.length <= 4) entries.push({ tag, type: TYPE.ASCII, count: bytes.length, inlineBytes: bytes })
+  else extern(tag, TYPE.ASCII, bytes.length, bytes)
+}
 function doubleArrayBytes(vals) {
   const b = new Uint8Array(vals.length * 8)
   const dv = new DataView(b.buffer)
@@ -71,10 +80,7 @@ export function writeGeoTiff(spec) {
   const dir = [1, 1, 0, geoKeys.length]
   for (const k of geoKeys) dir.push(k[0], k[1], k[2], k[3])
   extern(34735, TYPE.SHORT, dir.length, shortArrayBytes(dir))  // GeoKeyDirectory
-  if (gdalNoData != null) {
-    extern(42113, TYPE.ASCII, undefined, new TextEncoder().encode(String(gdalNoData) + '\0'))
-    entries[entries.length - 1].count = externals[externals.length - 1].length
-  }
+  if (gdalNoData != null) asciiTag(entries, extern, 42113, String(gdalNoData))
 
   const nEntries = entries.length
   const even = (n) => (n % 2 ? n + 1 : n)
@@ -104,7 +110,8 @@ export function writeGeoTiff(spec) {
     dv.setUint16(p, e.tag, true)
     dv.setUint16(p + 2, e.type, true)
     dv.setUint32(p + 4, e.count, true)
-    if (e.externIndex != null) dv.setUint32(p + 8, externOffsets[e.externIndex], true)
+    if (e.inlineBytes) out.set(e.inlineBytes, p + 8)
+    else if (e.externIndex != null) dv.setUint32(p + 8, externOffsets[e.externIndex], true)
     else if (e.type === TYPE.SHORT) dv.setUint16(p + 8, e.inline, true)
     else dv.setUint32(p + 8, e.inline, true)
     p += 12
@@ -155,10 +162,7 @@ export function assembleStripTiff(spec, strips, { parts = false } = {}) {
   const dir = [1, 1, 0, geoKeys.length]
   for (const k of geoKeys) dir.push(k[0], k[1], k[2], k[3])
   extern(34735, TYPE.SHORT, dir.length, shortArrayBytes(dir))
-  if (gdalNoData != null) {
-    const bytes = new TextEncoder().encode(String(gdalNoData) + '\0')
-    extern(42113, TYPE.ASCII, bytes.length, bytes)
-  }
+  if (gdalNoData != null) asciiTag(entries, extern, 42113, String(gdalNoData))
 
   const even = (v) => (v % 2 ? v + 1 : v)
   const ifdOffset = 8
@@ -187,7 +191,8 @@ export function assembleStripTiff(spec, strips, { parts = false } = {}) {
     dv.setUint16(p, e.tag, true)
     dv.setUint16(p + 2, e.type, true)
     dv.setUint32(p + 4, e.count, true)
-    if (e.externIndex != null) dv.setUint32(p + 8, externOffsets[e.externIndex], true)
+    if (e.inlineBytes) out.set(e.inlineBytes, p + 8)
+    else if (e.externIndex != null) dv.setUint32(p + 8, externOffsets[e.externIndex], true)
     else if (e.type === TYPE.SHORT) dv.setUint16(p + 8, e.inline, true)
     else dv.setUint32(p + 8, e.inline, true)
     p += 12
@@ -394,126 +399,53 @@ export function planCog(spec) {
 // in the same order, either untouched or with each entry replaced by its
 // compressed form. `compression` is the TIFF tag value (1 = none, 8 = Adobe
 // DEFLATE) and must match what the caller actually did to the tiles.
-export function assembleCog(plan, tileBuffers, { compression = 1, parts = false } = {}) {
-  const { levels, tileCounts, order, spp, samples, photometric, extraSamples,
-          pixelScale, tiepoint, geoKeys, gdalNoData, tileSize } = plan
+// `bigTiff`: 'auto' (default) writes a classic TIFF while it fits 4 GiB and a BigTIFF
+// (64-bit offsets, version 43) past that; true / false force one. GDAL, QGIS and
+// geotiff.js read both; a classic file is what older tools expect, so it stays the
+// form whenever it fits.
+export function assembleCog(plan, tileBuffers, { compression = 1, parts = false, bigTiff = 'auto' } = {}) {
+  const { order, tileCounts, levels } = plan
   if (tileBuffers.length !== order.length)
     throw new Error(`assembleCog: expected ${order.length} tiles, got ${tileBuffers.length}`)
-  const even = (n) => (n % 2 ? n + 1 : n)
-
   // Per-level tile byte counts, from what the caller actually produced.
   const byteCounts = levels.map((_, li) => new Array(tileCounts[li]).fill(0))
   order.forEach(({ li, ti }, i) => { byteCounts[li][ti] = tileBuffers[i].length })
 
-  // --- Build each level's IFD entries (tag order ascending). --------------
-  const ifds = levels.map((level, li) => {
-    const entries = []
-    const externals = []
-    const inline = (tag, type, value, count = 1) => entries.push({ tag, type, count, inline: value })
-    const extern = (tag, type, count, bytes) => {
-      entries.push({ tag, type, count, externIndex: externals.length })
-      externals.push(bytes)
-    }
-    const shortField = (tag, vals) =>
-      vals.length === 1 ? inline(tag, TYPE.SHORT, vals[0])
-        : extern(tag, TYPE.SHORT, vals.length, shortArrayBytes(vals))
-    const longArray = (values) => {
-      const b = new Uint8Array(values.length * 4)
-      const bdv = new DataView(b.buffer)
-      values.forEach((v, i) => bdv.setUint32(i * 4, v, true))
-      return b
-    }
+  let layout = layoutCog(plan, byteCounts, tileBuffers, compression, bigTiff === true)
+  if (bigTiff === 'auto' && layout.total > 0xffffffff) layout = layoutCog(plan, byteCounts, tileBuffers, compression, true)
+  if (!layout.big && layout.total > 0xffffffff) throw new Error('COG exceeds the classic TIFF 4 GiB limit')
+  const { big, ifds, headerLength, tileOffsets, total } = layout
 
-    const nTiles = tileCounts[li]
-    inline(254, TYPE.LONG, li === 0 ? 0 : 1)          // NewSubfileType (1 = reduced resolution)
-    inline(256, TYPE.LONG, level.width)
-    inline(257, TYPE.LONG, level.height)
-    shortField(258, samples.map((s) => s.bits))
-    inline(259, TYPE.SHORT, compression)
-    inline(262, TYPE.SHORT, photometric)
-    inline(277, TYPE.SHORT, spp)
-    inline(284, TYPE.SHORT, 1)                        // PlanarConfiguration: chunky
-    inline(322, TYPE.LONG, tileSize)                  // TileWidth
-    inline(323, TYPE.LONG, tileSize)                  // TileLength
-    // Tile offsets are only known after layout; the blocks are filled in below.
-    // A single-tile level must stay INLINE — a reader takes count*size <= 4 as
-    // an inline value and would otherwise read the offset itself as the offset.
-    const offsetsEntry = { tag: 324, type: TYPE.LONG, count: nTiles }
-    if (nTiles === 1) offsetsEntry.inline = 0
-    else { offsetsEntry.externIndex = externals.length; externals.push(new Uint8Array(nTiles * 4)) }
-    entries.push(offsetsEntry)
-    if (nTiles === 1) inline(325, TYPE.LONG, byteCounts[li][0])
-    else extern(325, TYPE.LONG, nTiles, longArray(byteCounts[li]))
-    if (extraSamples && extraSamples.length) shortField(338, extraSamples)
-    shortField(339, samples.map((s) => s.format))
-    if (li === 0) {
-      // Georeferencing lives on the full-resolution IFD; an overview inherits it
-      // (its geotransform is implied by its own dimensions).
-      extern(33550, TYPE.DOUBLE, 3, doubleArrayBytes(pixelScale))
-      extern(33922, TYPE.DOUBLE, 6, doubleArrayBytes(tiepoint))
-      const dir = [1, 1, 0, geoKeys.length]
-      for (const k of geoKeys) dir.push(k[0], k[1], k[2], k[3])
-      extern(34735, TYPE.SHORT, dir.length, shortArrayBytes(dir))
-    }
-    if (gdalNoData != null) {
-      const bytes = new TextEncoder().encode(String(gdalNoData) + '\0')
-      extern(42113, TYPE.ASCII, bytes.length, bytes)
-    }
-    return { entries, externals, offsetsEntry }
-  })
-
-  // --- Layout: header, ghost area, all IFDs + externals, then tile data. --
-  const ghost = ghostArea()
-  let cur = 8 + ghost.length
-  for (const ifd of ifds) {
-    cur = even(cur)
-    ifd.offset = cur
-    cur += 2 + 12 * ifd.entries.length + 4
-    ifd.externOffsets = []
-    for (const b of ifd.externals) { cur = even(cur); ifd.externOffsets.push(cur); cur += b.length }
-  }
-  const headerLength = cur
-  // Tile data in write order (overviews first), each 2-byte aligned.
-  const tileOffsets = levels.map((_, li) => new Array(tileCounts[li]).fill(0))
-  order.forEach(({ li, ti }, i) => {
-    cur = even(cur)
-    tileOffsets[li][ti] = cur
-    cur += tileBuffers[i].length
-  })
-  const total = cur
-
-  if (total > 0xffffffff) throw new Error('COG exceeds the classic TIFF 4 GiB limit')
   const out = new Uint8Array(parts ? headerLength : total)
   const dv = new DataView(out.buffer)
-
+  const word = (p, v) => (big ? dv.setBigUint64(p, BigInt(v), true) : dv.setUint32(p, v, true))
   out[0] = 0x49; out[1] = 0x49
-  dv.setUint16(2, 42, true)
-  dv.setUint32(4, ifds[0].offset, true)
-  out.set(ghost, 8)
+  if (big) {
+    dv.setUint16(2, 43, true); dv.setUint16(4, 8, true); dv.setUint16(6, 0, true)
+    dv.setBigUint64(8, BigInt(ifds[0].offset), true)
+  } else {
+    dv.setUint16(2, 42, true)
+    dv.setUint32(4, ifds[0].offset, true)
+  }
+  out.set(ghostArea(), big ? 16 : 8)
 
   ifds.forEach((ifd, li) => {
     // Backfill the tile offsets now that they are known.
-    if (ifd.offsetsEntry.externIndex != null) {
-      const block = ifd.externals[ifd.offsetsEntry.externIndex]
-      const bdv = new DataView(block.buffer, block.byteOffset, block.byteLength)
-      tileOffsets[li].forEach((o, i) => bdv.setUint32(i * 4, o, true))
-    } else {
-      ifd.offsetsEntry.inline = tileOffsets[li][0]
-    }
-
+    const off = ifd.offsetsEntry.bytes, odv = new DataView(off.buffer, off.byteOffset, off.byteLength)
+    tileOffsets[li].forEach((o, i) => (big ? odv.setBigUint64(i * 8, BigInt(o), true) : odv.setUint32(i * 4, o, true)))
     let p = ifd.offset
-    dv.setUint16(p, ifd.entries.length, true); p += 2
+    if (big) { dv.setBigUint64(p, BigInt(ifd.entries.length), true); p += 8 } else { dv.setUint16(p, ifd.entries.length, true); p += 2 }
     for (const e of ifd.entries) {
       dv.setUint16(p, e.tag, true)
       dv.setUint16(p + 2, e.type, true)
-      dv.setUint32(p + 4, e.count, true)
-      if (e.externIndex != null) dv.setUint32(p + 8, ifd.externOffsets[e.externIndex], true)
-      else if (e.type === TYPE.SHORT) dv.setUint16(p + 8, e.inline, true)
-      else dv.setUint32(p + 8, e.inline, true)
-      p += 12
+      word(p + 4, e.count)
+      const field = p + (big ? 12 : 8)
+      if (e.offset != null) word(field, e.offset)
+      else out.set(e.bytes, field)
+      p += big ? 20 : 12
     }
-    dv.setUint32(p, li + 1 < ifds.length ? ifds[li + 1].offset : 0, true)
-    ifd.externals.forEach((b, i) => out.set(b, ifd.externOffsets[i]))
+    word(p, li + 1 < ifds.length ? ifds[li + 1].offset : 0)
+    for (const e of ifd.entries) if (e.offset != null) out.set(e.bytes, e.offset)
   })
 
   if (parts) {
@@ -529,6 +461,85 @@ export function assembleCog(plan, tileBuffers, { compression = 1, parts = false 
   }
   order.forEach(({ li, ti }, i) => out.set(tileBuffers[i], tileOffsets[li][ti]))
   return out
+}
+
+// TIFF field types and their sizes (LONG8 is BigTIFF's 64-bit unsigned).
+const TYPE_SIZE = { 2: 1, 3: 2, 4: 4, 12: 8, 16: 8 }
+const LONG8 = 16
+
+// The layout of assembleCog's file: every IFD's entries — each value as its bytes,
+// stored in the entry's value field when it fits (4 bytes classic, 8 BigTIFF), else in
+// an external block at `offset` — then the tile data in write order (overviews first),
+// each 2-byte aligned. The tile offsets are filled in by the caller.
+function layoutCog(plan, byteCounts, tileBuffers, compression, big) {
+  const { levels, tileCounts, order, spp, samples, photometric, extraSamples,
+          pixelScale, tiepoint, geoKeys, gdalNoData, tileSize } = plan
+  const even = (n) => (n % 2 ? n + 1 : n)
+  const cap = big ? 8 : 4
+  const ints = (vals, size) => {
+    const b = new Uint8Array(vals.length * size), d = new DataView(b.buffer)
+    vals.forEach((v, i) => (size === 2 ? d.setUint16(i * 2, v, true) : d.setUint32(i * 4, v, true)))
+    return b
+  }
+
+  const ifds = levels.map((level, li) => {
+    const entries = []
+    const field = (tag, type, bytes, count = bytes.length / TYPE_SIZE[type]) => {
+      const e = { tag, type, count, bytes }
+      entries.push(e)
+      return e
+    }
+    const shorts = (tag, vals) => field(tag, TYPE.SHORT, ints(vals, 2))
+    const long = (tag, v) => field(tag, TYPE.LONG, ints([v], 4))
+    const nTiles = tileCounts[li]
+    long(254, li === 0 ? 0 : 1)                     // NewSubfileType (1 = reduced resolution)
+    long(256, level.width)
+    long(257, level.height)
+    shorts(258, samples.map((s) => s.bits))
+    shorts(259, [compression])
+    shorts(262, [photometric])
+    shorts(277, [spp])
+    shorts(284, [1])                                // PlanarConfiguration: chunky
+    long(322, tileSize)                             // TileWidth
+    long(323, tileSize)                             // TileLength
+    // TileOffsets: known only after layout, so only their size here. A single-tile
+    // level's offset fits the value field, where a reader looks for it.
+    const offsetsEntry = field(324, big ? LONG8 : TYPE.LONG, new Uint8Array(nTiles * (big ? 8 : 4)))
+    field(325, TYPE.LONG, ints(byteCounts[li], 4))
+    if (extraSamples && extraSamples.length) shorts(338, extraSamples)
+    shorts(339, samples.map((s) => s.format))
+    if (li === 0) {
+      // Georeferencing lives on the full-resolution IFD; an overview inherits it
+      // (its geotransform is implied by its own dimensions).
+      field(33550, TYPE.DOUBLE, doubleArrayBytes(pixelScale))
+      field(33922, TYPE.DOUBLE, doubleArrayBytes(tiepoint))
+      const dir = [1, 1, 0, geoKeys.length]
+      for (const k of geoKeys) dir.push(k[0], k[1], k[2], k[3])
+      shorts(34735, dir)
+    }
+    if (gdalNoData != null) field(42113, TYPE.ASCII, new TextEncoder().encode(String(gdalNoData) + '\0'))
+    return { entries, offsetsEntry }
+  })
+
+  // Header (8 or 16 bytes), ghost area, all IFDs + their external values, then tiles.
+  let cur = (big ? 16 : 8) + ghostArea().length
+  for (const ifd of ifds) {
+    cur = even(cur)
+    ifd.offset = cur
+    cur += (big ? 8 : 2) + (big ? 20 : 12) * ifd.entries.length + (big ? 8 : 4)
+    for (const e of ifd.entries) {
+      e.offset = null
+      if (e.bytes.length > cap) { cur = even(cur); e.offset = cur; cur += e.bytes.length }
+    }
+  }
+  const headerLength = cur
+  const tileOffsets = levels.map((_, li) => new Array(tileCounts[li]).fill(0))
+  order.forEach(({ li, ti }, i) => {
+    cur = even(cur)
+    tileOffsets[li][ti] = cur
+    cur += tileBuffers[i].length
+  })
+  return { big, ifds, headerLength, tileOffsets, total: cur }
 }
 
 export function writeCog(spec) {

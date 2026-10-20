@@ -24,6 +24,23 @@ in degrees (WGS 84): use the projected CRS suggested under the field, or choose 
 Project Settings; the frame switches to it once the fit is possible. "Needs ≥3 camera
 positions or GCPs" means there is not enough evidence yet.
 
+## Raster size by
+<!-- param: sizeBy default: Cell size -->
+Set the DEM's size either as a **Cell size** (the ground sample distance below) or as
+the **Long side** in pixels, and let the other follow from the extent. Under the field,
+the dialog shows the size the run will build: pixels, cell size and the uncompressed
+size, estimated from a sample of the cloud in the chosen frame (marked ≈). In a
+project CRS it appears once the georeference is fitted. When Auto stops at 4,096 cells
+a side, or a size would pass 65,535 cells a side, the warning shows there before the
+run.
+
+## Long side
+<!-- param: longSide default: Auto -->
+The number of cells on the DEM's longer side. The cell size is then the extent divided
+by it, and the readout shows it. **0** (Auto) means one point per cell, as Auto does for
+the cell size. Past 4,096 the DEM is built block by block, as a set cell size is (see
+below).
+
 ## Ground sample distance
 <!-- param: gsd default: Auto -->
 The raster's [ground sample distance](help:ground-sample-distance): cell size in
@@ -32,9 +49,10 @@ point density, and keeps the grid to at most 4,096 cells a side. Choosing a much
 cell than the source spacing makes a larger file, not more detail, and forces
 interpolation across more empty cells.
 
-A GSD you set that needs more than 4,096 cells a side (a satellite frame at its
-native resolution, say) is built block by block as a
-[Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff) at that GSD, up to 4 GB. Everything
+A GSD (or long side) you set that needs more than 4,096 cells a side (a satellite
+frame at its native resolution, say) is built block by block as a
+[Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff) at that GSD, up to 65,535 cells a
+side (written as a BigTIFF past 4 GiB, which GDAL and QGIS read). Everything
 that reads heights reads that file:
 
 - the GeoTIFF and ASCII grid exports, at full resolution;

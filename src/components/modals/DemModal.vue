@@ -1,10 +1,11 @@
 <script setup>
 import { linearCrsUnit } from '../../core/crs.js'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import WarnBox from './ui/WarnBox.vue'
 import FrameCrsField from './ui/FrameCrsField.vue'
+import RasterSizeField from './ui/RasterSizeField.vue'
 import FieldHelp from '../guide/FieldHelp.vue'
 import { DEM_DEFAULTS } from '../../core/defaults.user.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
@@ -29,6 +30,8 @@ const props = defineProps({
   source: { type: Object, default: null },
   // The store's `groundSource`: the classified cloud Points ▸ Ground only uses.
   groundSource: { type: Object, default: null },
+  // The store's estimateRasterSize('dem', settings): the size readout under the cell size.
+  estimateSize: { type: Function, default: null },
 })
 
 const emit = defineEmits(['close', 'run', 'apply-crs-suggestion'])
@@ -63,16 +66,38 @@ const { memBudgetBytes } = useComputeSettings()
 // Run stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step). GSD 0 is auto; blank is not — it would read as 0 silently.
 const numbers = computed(() => checkNumberFields(settings.value, {
-  gsd: { label: 'Ground sample distance', min: 0 },
+  gsd: { label: 'Ground sample distance', min: 0, when: settings.value.sizeBy !== 'px' },
+  longSide: { label: 'Long side', min: 0, integer: true, when: settings.value.sizeBy === 'px' },
   fillRadius: { label: 'Interpolation radius', min: 1, max: 32, integer: true, when: settings.value.fillMethod !== 'none' },
 }))
 
-function run() {
-  // Pass gsd only when set (0 ⇒ let the worker auto-suggest).
-  const { gsd, ...rest } = settings.value
-  const out = { ...rest, memBudgetBytes: memBudgetBytes.value }
-  emit('run', gsd > 0 ? { ...out, gsd } : out)
+// What a run gets: the size field shown (a cell size, or a long side in px), only
+// when set — 0 ⇒ the worker's auto.
+function runSettings() {
+  const { gsd, longSide, ...rest } = settings.value
+  const size = rest.sizeBy === 'px' ? (longSide > 1 ? { longSide } : {}) : (gsd > 0 ? { gsd } : {})
+  return { ...rest, memBudgetBytes: memBudgetBytes.value, ...size }
 }
+function run() { emit('run', runSettings()) }
+
+// The size the run would build, re-estimated (debounced) when what sets it changes.
+const estimate = ref(null)
+let estimateGen = 0, estimateTimer = null
+watch(() => {
+  const s = settings.value
+  return JSON.stringify([s.crs, s.extent, s.points, s.sizeBy, s.gsd, s.longSide, memBudgetBytes.value])
+}, () => {
+  if (!props.estimateSize) return
+  clearTimeout(estimateTimer)
+  const gen = ++estimateGen
+  if (typeof estimate.value !== 'object' || !estimate.value) estimate.value = 'loading'
+  estimateTimer = setTimeout(async () => {
+    let e = null
+    try { e = await props.estimateSize(runSettings()) } catch { e = null }
+    if (gen === estimateGen) estimate.value = e
+  }, 250)
+}, { immediate: true })
+onBeforeUnmount(() => clearTimeout(estimateTimer))
 </script>
 
 <template>
@@ -105,14 +130,12 @@ function run() {
       :georeference-blocker="georeferenceBlocker" :crs-suggestion="crsSuggestion"
       @apply-crs-suggestion="(s) => emit('apply-crs-suggestion', s)" />
 
-    <SettingsField label-for="dem-gsd"
+    <RasterSizeField id="dem" op="dem" :defaults="DEM_DEFAULTS"
+      v-model:size-by="settings.sizeBy" v-model:gsd="settings.gsd" v-model:long-side="settings.longSide"
       :unit="settings.crs === 'project' ? `${linearCrsUnit(projectCrs)}/px` : localUnit"
-      hint="Cell size. 0 = auto (≈ one point per cell). Smaller = finer & slower.">
-      <template #label>
-        <FieldHelp op="dem" param="gsd" :value="settings.gsd || 'Auto'" :default-value="DEM_DEFAULTS.gsd || 'Auto'">Ground sample distance</FieldHelp>
-      </template>
-      <input id="dem-gsd" v-model.number="settings.gsd" :aria-invalid="numbers.bad.gsd" type="number" min="0" step="0.1" class="field-input" />
-    </SettingsField>
+      gsd-hint="Cell size. 0 = auto (≈ one point per cell). Smaller = finer & slower."
+      :invalid="numbers.bad" :estimate="estimate"
+      auto-capped="Auto keeps a DEM to 4,096 px a side, so this one is coarser than one point per cell. Set a cell size or a long side for a finer DEM." />
 
     <!-- The raw min/max lets far background (an oblique capture sees almost to the
          horizon) set the raster size; the dense core keeps the site. The run logs

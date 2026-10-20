@@ -1,10 +1,11 @@
 <script setup>
 import { linearCrsUnit } from '../../core/crs.js'
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import WarnBox from './ui/WarnBox.vue'
 import FrameCrsField from './ui/FrameCrsField.vue'
+import RasterSizeField from './ui/RasterSizeField.vue'
 import FieldHelp from '../guide/FieldHelp.vue'
 import { ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 import { orthoCostCeiling } from '../../core/products/ortho.js'
@@ -32,6 +33,8 @@ const props = defineProps({
   // Settings of the depth-map run the ortho will sample (the store's depthSummary
   // .settings), or null when unknown — they set the Max match cost's effective ceiling.
   depthSettings: { type: Object, default: null },
+  // The store's estimateRasterSize('ortho', settings): the size readout.
+  estimateSize: { type: Function, default: null },
 })
 
 const emit = defineEmits(['close', 'run', 'apply-crs-suggestion'])
@@ -89,7 +92,8 @@ const { memBudgetBytes } = useComputeSettings()
 const numbers = computed(() => {
   const s = settings.value
   return checkNumberFields(s, {
-    gsd: { label: 'Ground sample distance', min: 0 },
+    gsd: { label: 'Ground sample distance', min: 0, when: s.sizeBy !== 'px' },
+    longSide: { label: 'Long side', min: 0, integer: true, when: s.sizeBy === 'px' },
     seamWidth: { label: 'Seam blending width', min: 0, max: 5, when: s.blend === 'mosaic' && s.seamBlend === 'feather' },
     depthTolRel: { label: 'Occlusion tolerance', min: 0.5, max: 10 },
     maxCost: { label: 'Max match cost', min: 0, max: 2 },
@@ -97,19 +101,41 @@ const numbers = computed(() => {
   })
 })
 
-function run() {
-  const { depthTolRel, maxCost, gsd, ...rest } = settings.value
-  emit('run', {
+function runSettings() {
+  const { depthTolRel, maxCost, gsd, longSide, ...rest } = settings.value
+  const byPx = rest.sizeBy === 'px'
+  return {
     ...rest,
     memBudgetBytes: memBudgetBytes.value,
     // The surface is built at its own natural resolution and the ortho grid is
-    // resampled to `gsd`; passing it through as the surface GSD too would make a
-    // fine ortho pay for a needlessly fine mesh rasterisation.
-    gsd: gsd > 0 ? gsd : 0,
+    // resampled to `gsd` (or the long side in px); passing it through as the surface
+    // GSD too would make a fine ortho pay for a needlessly fine mesh rasterisation.
+    gsd: !byPx && gsd > 0 ? gsd : 0,
+    longSide: byPx && longSide > 1 ? longSide : 0,
     depthTolRel: depthTolRel / 100,
     maxCost: maxCost > 0 ? maxCost : Infinity,
-  })
+  }
 }
+function run() { emit('run', runSettings()) }
+
+// The size the run would build, re-estimated (debounced) when what sets it changes.
+const estimate = ref(null)
+let estimateGen = 0, estimateTimer = null
+watch(() => {
+  const s = settings.value
+  return JSON.stringify([s.surface, s.crs, s.extent, s.sizeBy, s.gsd, s.longSide, memBudgetBytes.value])
+}, () => {
+  if (!props.estimateSize || !canRun.value) { estimate.value = null; return }
+  clearTimeout(estimateTimer)
+  const gen = ++estimateGen
+  if (typeof estimate.value !== 'object' || !estimate.value) estimate.value = 'loading'
+  estimateTimer = setTimeout(async () => {
+    let e = null
+    try { e = await props.estimateSize(runSettings()) } catch { e = null }
+    if (gen === estimateGen) estimate.value = e
+  }, 250)
+}, { immediate: true })
+onBeforeUnmount(() => clearTimeout(estimateTimer))
 </script>
 
 <template>
@@ -156,14 +182,11 @@ function run() {
       </select>
     </SettingsField>
 
-    <SettingsField label-for="ortho-gsd"
+    <RasterSizeField id="ortho" op="orthophoto" :defaults="ORTHO_DEFAULTS"
+      v-model:size-by="settings.sizeBy" v-model:gsd="settings.gsd" v-model:long-side="settings.longSide"
       :unit="outputUnit"
-      hint="Ortho cell size. 0 = the surface's own resolution. Finer than the surface is fine — down to the photos' own GSD. The stored GeoTIFF holds at most 4 GiB (~28,000 px square); the log says when a GSD was coarsened.">
-      <template #label>
-        <FieldHelp op="orthophoto" param="gsd" :value="settings.gsd || 'Auto'" :default-value="ORTHO_DEFAULTS.gsd || 'Auto'">Ground sample distance</FieldHelp>
-      </template>
-      <input id="ortho-gsd" v-model.number="settings.gsd" :aria-invalid="numbers.bad.gsd" type="number" min="0" step="0.01" class="field-input" />
-    </SettingsField>
+      gsd-hint="Ortho cell size. 0 = the surface's own resolution. Finer than the surface is fine — down to the photos' own GSD."
+      :invalid="numbers.bad" :estimate="estimate" />
 
     <SettingsField label-for="ortho-blend" :hint="blendHint">
       <template #label><FieldHelp op="orthophoto" param="blend">View blending</FieldHelp></template>

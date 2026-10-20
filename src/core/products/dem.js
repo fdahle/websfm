@@ -9,6 +9,7 @@
 // empty cells are filled by inverse-distance weighting within a small radius and
 // otherwise left as NaN (nodata).
 
+import { requestedGsd as requestedGsdFor } from './rasterSize.js'
 import { MAX_FLOAT64_XYZ_POINTS, tooManyPointsMessage } from '../bufferLimit.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes } from '../dense/memBudget.js'
 
@@ -171,11 +172,12 @@ export function demGeometry(allPoints, opts = {}) {
   }
   if (!(maxX > minX) || !(maxY > minY)) return null
 
-  const requestedGsd = opts.gsd > 0 ? opts.gsd : suggestGsd(points)
+  // A chosen cell size, else the one a chosen long side (px) implies, else auto.
+  const spanMax = Math.max(maxX - minX, maxY - minY)
+  const requestedGsd = requestedGsdFor(opts, spanMax) || suggestGsd(points)
   if (!(requestedGsd > 0)) return null
   let gsd = requestedGsd
   // Cap the grid: grow gsd so the longer side (ceil(span/gsd)+1) stays ≤ maxGrid.
-  const spanMax = Math.max(maxX - minX, maxY - minY)
   if (spanMax / gsd > maxGrid - 1) gsd = spanMax / (maxGrid - 1)
 
   const width = Math.max(1, Math.ceil((maxX - minX) / gsd) + 1)

@@ -9,8 +9,9 @@ import { orthorectifyTiled, orthoTiledWorkingBytes, orthoMapPxPerCell, ORTHO_BLO
 import { GAIN_MIN, GAIN_MAX } from '../../core/products/colourGains.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import { describeOrthoStats } from '../../core/eval/orthoStats.js'
-import { meshSurface, planeSurface, resampledGeometry } from '../../core/products/surface.js'
-import { createCogBuilder, cogRawBytes, geoKeysForEpsg, crsTagInfo } from '../../core/products/geotiff.js'
+import { meshSurface, planeSurface } from '../../core/products/surface.js'
+import { createCogBuilder, geoKeysForEpsg, crsTagInfo } from '../../core/products/geotiff.js'
+import { DEM_PLANE_MAX, DEM_TILE, ORTHO_TILE, MAX_RASTER_SIDE, orthoGridFor } from '../../core/products/rasterSize.js'
 import { formatBytes } from '../../core/dense/memBudget.js'
 import { traceContours, contoursToGeoJSON, contoursToDxf } from '../../core/products/contours.js'
 import { terrainProducts } from '../../core/products/terrain.js'
@@ -67,19 +68,12 @@ function makePhotoLoader(images, rasterize, emit) {
   return load
 }
 
-// The stored ortho COG: 512-px tiles (as the ortho export always wrote them), a
-// preview of at most 2,048 px a side (the viewers draw the tiles for detail), and the
-// classic-TIFF ceiling. The side cap only bounds the grid arithmetic; the 4 GiB
-// ceiling is the real limit (~28 k px square).
-const ORTHO_TILE = 512
-// A DEM's plane stays ≤ this on a side; past it the DEM is a COG built in blocks
-// (generateDemBlocks), and the plane is its overview.
-const DEM_PLANE_MAX = 4096
-const DEM_TILE = 512
+// The raster sizes (tile sizes, the DEM plane cap, the side cap, the classic-TIFF
+// ceiling) are core/products/rasterSize.js, shared with the dialogs' size readout. The
+// ortho's preview is at most 2,048 px a side (the viewers draw the tiles for detail).
 const DEM_BLOCK = 2048
 const PREVIEW_MAX = 2048
-const MAX_ORTHO_SIDE = 65535
-const TIFF_LIMIT = 0xffffffff
+const MAX_ORTHO_SIDE = MAX_RASTER_SIDE
 // A clip window is read whole and copied once (the clipped output): 8,192² RGBA is
 // 256 MB each, and the clip is written as one baseline GeoTIFF.
 const MAX_CLIP_CELLS = 8192 * 8192
@@ -201,7 +195,8 @@ export function makeProductsOps({ rasterize } = {}) {
     // Past one plane (SAT-3): a GSD the user chose that needs more than DEM_PLANE_MAX
     // cells a side is built block by block into a Float32 COG, and the record's plane is
     // its ≤ 4,096 overview. Auto still picks a grid that fits one plane.
-    const full = settings.gsd > 0 ? demGeometry(framed, { ...settings, bounds, maxGrid: MAX_ORTHO_SIDE }) : null
+    const chosen = settings.gsd > 0 || settings.longSide > 1 // a cell size or a long side in px
+    const full = chosen ? demGeometry(framed, { ...settings, bounds, maxGrid: MAX_ORTHO_SIDE }) : null
     if (full && Math.max(full.width, full.height) > DEM_PLANE_MAX) {
       return generateDemBlocks({ pos, count: view.length, full, frame, frameSpec, settings, bounds, label, emit })
     }
@@ -237,15 +232,12 @@ export function makeProductsOps({ rasterize } = {}) {
   // reader keeps using; `cog` + `fullWidth` / `fullHeight` / `fullGsd` are the DEM.
   async function generateDemBlocks({ pos, count, full, frame, frameSpec, settings, bounds, label, emit }) {
     const unit = frameUnitName(frame.unit)
-    let geom = full
-    // The stored COG is a classic TIFF (32-bit offsets): coarsen, never silently.
-    for (let raw; (raw = cogRawBytes({ ...geom, tileSize: DEM_TILE, bytesPerPixel: 4 })) > TIFF_LIMIT;) {
-      geom = demGeometry(pointView({ pos, count }), { ...settings, bounds, maxGrid: MAX_ORTHO_SIDE,
-        gsd: geom.gsd * Math.sqrt(raw / TIFF_LIMIT) * 1.01 })
-    }
-    if (geom.gsd > geom.requestedGsd * (1 + 1e-6)) {
-      emit('log', [`${label}: ${geom.requestedGsd.toPrecision(3)} ${unit}/px would exceed a 4 GiB GeoTIFF; `
-        + `built at ${geom.gsd.toPrecision(3)} ${unit}/px`, 'warn', 'Products'])
+    // The grid is capped at MAX_ORTHO_SIDE a side (demGeometry grows the cell to fit);
+    // past 4 GiB the stored COG is a BigTIFF. Coarsened never silently.
+    const geom = full
+    if (geom.gsd > full.requestedGsd * (1 + 1e-6)) {
+      emit('log', [`${label}: ${full.requestedGsd.toPrecision(3)} ${unit}/px would need more than `
+        + `${MAX_ORTHO_SIDE.toLocaleString()} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px`, 'warn', 'Products'])
     }
     const tags = crsTagInfo({ crs: frame.crs, unit: frame.unit })
     const builder = createCogBuilder({
@@ -409,14 +401,10 @@ export function makeProductsOps({ rasterize } = {}) {
     // The ortho's own GSD is independent of the surface's: a coarse surface is
     // plenty for reprojection while the ortho wants image resolution. Its heights are
     // sampled from the surface per block, never resampled into a full-size copy.
-    const want = settings.gsd > 0 ? settings.gsd : 0
-    let geom = resampledGeometry(built.grid, want, MAX_ORTHO_SIDE)
-    // The stored COG is a classic TIFF, whose 32-bit offsets hold 4 GiB. A grid whose
-    // uncompressed tiles could exceed that is coarsened, never silently (BigTIFF would
-    // lift it).
-    for (let raw; (raw = cogRawBytes({ ...geom, tileSize: ORTHO_TILE, bytesPerPixel: 4 })) > TIFF_LIMIT;) {
-      geom = resampledGeometry(built.grid, geom.gsd * Math.sqrt(raw / TIFF_LIMIT) * 1.01, MAX_ORTHO_SIDE)
-    }
+    // A cell size or a long side in px (`longSide`), else the surface's own cells, capped
+    // at MAX_RASTER_SIDE a side (coarsened never silently); past 4 GiB the stored COG is
+    // a BigTIFF. rasterSize.js orthoGridFor, as the dialog's readout computes it.
+    const { geom, want } = orthoGridFor(built.grid, settings)
     if (!geom.identity) {
       emit('log', [`Ortho: ${geom.width.toLocaleString()}×${geom.height.toLocaleString()} @ ${geom.gsd.toPrecision(3)} ${unit}/px `
         + `over the ${label} surface (${built.grid.width}×${built.grid.height} @ ${built.grid.gsd.toPrecision(3)} ${unit}/px)`, 'info', 'Products'])
@@ -424,7 +412,7 @@ export function makeProductsOps({ rasterize } = {}) {
     if (want > 0 && geom.gsd > want * (1 + 1e-6)) {
       const side = Math.ceil(Math.max(geom.width, geom.height) * geom.gsd / want)
       emit('log', [`Ortho: the requested ${want.toPrecision(3)} ${unit}/px would need ~${side.toLocaleString()} px on the long side; `
-        + `an orthophoto is stored as a GeoTIFF of at most 4 GiB, so this one is ${geom.gsd.toPrecision(3)} ${unit}/px. `
+        + `a raster is at most ${MAX_ORTHO_SIDE.toLocaleString()} px a side, so this one is ${geom.gsd.toPrecision(3)} ${unit}/px. `
         + 'Limit the area (Tools ▸ Model ▸ Region, then rebuild the surface) for a finer GSD.', 'warn', 'Products'])
     }
 

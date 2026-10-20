@@ -577,3 +577,49 @@ describe('assembleStripTiff (a GeoTIFF streamed in strips)', () => {
     expect(() => assembleStripTiff({ ...base, rowsPerStrip: 5 }, [rgba])).toThrow('strips')
   })
 })
+
+describe('BigTIFF and short ASCII values', () => {
+  const tile = 16
+  const rgba = (w, h) => Uint8Array.from({ length: w * h * 4 }, (_, i) => (i * 7) % 251)
+  const spec = (w, h, extra = {}) => ({
+    width: w, height: h, samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })), photometric: 2, extraSamples: [2],
+    data: rgba(w, h), pixelScale: [0.5, 0.5, 0], tiepoint: [0, 0, 0, 500000, 5300000, 0],
+    geoKeys: geoKeysForEpsg(32632, false), tileSize: tile, ...extra,
+  })
+
+  it('writes a BigTIFF (version 43, 64-bit offsets) that reads back pixel for pixel, with its overviews and CRS', async () => {
+    const { plan, tiles } = planCog(spec(40, 30))
+    const big = assembleCog(plan, tiles, { bigTiff: true })
+    const dv = new DataView(big.buffer)
+    expect(dv.getUint16(2, true)).toBe(43)
+    expect(dv.getUint16(4, true)).toBe(8)
+    const tiff = await fromArrayBuffer(toBuf(big))
+    const image = await tiff.getImage(0)
+    expect(image.getGeoKeys().ProjectedCSTypeGeoKey).toBe(32632)
+    expect([...image.getOrigin()]).toEqual([500000, 5300000, 0])
+    const px = await image.readRasters({ interleave: true })
+    expect([...px]).toEqual([...spec(40, 30).data])
+    expect(await tiff.getImageCount()).toBe(plan.levels.length)
+    // The classic file of the same plan holds the same pixels.
+    const classic = await (await fromArrayBuffer(toBuf(assembleCog(plan, tiles)))).getImage(0)
+    expect([...(await classic.readRasters({ interleave: true }))]).toEqual([...px])
+  })
+
+  it('stays classic while the file fits 4 GiB', () => {
+    const { plan, tiles } = planCog(spec(40, 30))
+    expect(new DataView(assembleCog(plan, tiles).buffer).getUint16(2, true)).toBe(42)
+  })
+
+  it('stores a nodata value of up to 3 characters in the tag itself, where readers look', async () => {
+    for (const [nd, want] of [['255', 255], ['12', 12], ['0', 0], ['nan', NaN], ['-9999', -9999]]) {
+      const f32 = { width: 20, height: 20, samples: [{ bits: 32, format: 3 }], photometric: 1,
+        data: new Float32Array(400), pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 20, 0],
+        geoKeys: geoKeysForEpsg(32632, false), tileSize: tile, gdalNoData: nd }
+      for (const bytes of [writeCog(f32), writeGeoTiff(f32)]) {
+        const image = await (await fromArrayBuffer(toBuf(bytes))).getImage(0)
+        if (Number.isNaN(want)) expect(image.getGDALNoData()).toBeNaN()
+        else expect(image.getGDALNoData()).toBe(want)
+      }
+    }
+  })
+})

@@ -89,12 +89,14 @@ export const WORKFLOW_BLOCKS = [
   automated('gen-dem', 'Build DEM', 'Products', ['cloud'], ['dem'], { ...DEM_DEFAULTS }, [
     { key: 'crs', label: 'Frame', type: 'select', options: ['local', 'project'] },
     { key: 'gsd', label: 'GSD (0 = auto)', type: 'number', min: 0 },
+    { key: 'longSide', label: 'Long side px (when GSD is 0; 0 = auto)', type: 'number', min: 0 },
     { key: 'aggregate', label: 'Surface', type: 'select', options: ['max', 'mean', 'median'] },
   ]),
   automated('gen-ortho', 'Build Orthophoto', 'Products', ['surface', 'depthMaps'], ['ortho'],
     { ...ORTHO_DEFAULTS }, [
       { key: 'surface', label: 'Surface', type: 'select', options: ['dem', 'mesh', 'plane'] },
       { key: 'gsd', label: 'GSD (0 = auto)', type: 'number', min: 0 },
+      { key: 'longSide', label: 'Long side px (when GSD is 0; 0 = auto)', type: 'number', min: 0 },
       { key: 'blend', label: 'Blending', type: 'select', options: ['mosaic', 'best', 'average'] },
       { key: 'seamline', label: 'Seamlines', type: 'select', options: ['graphcut', 'nadir'] },
       { key: 'seamBlend', label: 'Seam blending', type: 'select', options: ['multiband', 'feather'] },

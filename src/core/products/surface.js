@@ -24,7 +24,7 @@ const MAX_GRID = 4096
 
 // The cells covering [minX,maxX]×[minY,maxY], without allocating them. Returns
 // null for a degenerate extent. `gsd` may be grown to honour maxGrid.
-function gridGeometry(minX, minY, maxX, maxY, gsd, maxGrid = MAX_GRID) {
+export function gridGeometry(minX, minY, maxX, maxY, gsd, maxGrid = MAX_GRID) {
   if (!(maxX > minX) || !(maxY > minY) || !(gsd > 0)) return null
   const spanMax = Math.max(maxX - minX, maxY - minY)
   if (spanMax / gsd > maxGrid - 1) gsd = spanMax / (maxGrid - 1)
