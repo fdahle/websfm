@@ -1,9 +1,12 @@
 import { computeSourceOf } from '../../utils/image.js'
 import { makeNameResolver } from '../../core/io/nameMatch.js'
 import { observationsToDetections } from '../../core/sfm/fiducialModel.js'
-import { detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE, prepareFiducialTemplates, detectFiducials, detectReseau } from '../../workers/computeClient.js'
-import { reseauLattice } from '../../core/sfm/reseauDetect.js'
-import { fitFiducialTransform } from '../../core/sfm/fiducialCalibration.js'
+import { detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE, prepareFiducialTemplates, detectFiducials, detectReseau,
+  growReseau, reseauOverlapScore, stitchReseauFrame } from '../../workers/computeClient.js'
+import { reseauLattice, assignReseauIndices, pairReseauHalves, stitchedFrameGeometry } from '../../core/sfm/reseauDetect.js'
+import { fitFiducialTransform, applyFiducialTransform } from '../../core/sfm/fiducialCalibration.js'
+import { useGcpsStore } from '../useGcpsStore.js'
+import { useSensorsStore } from '../useSensorsStore.js'
 import { fiducialDetectionConcurrency } from '../../core/features/detectConcurrency.js'
 import { fiducialBatchConsensus, fiducialShapeCheck } from '../../core/sfm/fiducialConsensus.js'
 import { FIDUCIAL_DETECT_TUNING } from '../../core/sfm/fiducialDetect.js'
@@ -19,7 +22,7 @@ import { pluralize } from '../../core/textFormat.js'
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createImageFiducials({
-  imageById, images, isPersisting, log, save, updateMask, whenComputeReady,
+  imageById, images, isPersisting, log, save, updateMask, whenComputeReady, addImages = null, removeImage = null,
 }) {
   // Bulk-import fiducial observations parsed from a file (F4). `rows` are
   // `[{ imageName, fidId, px, py }]`; each is matched to an image by name
@@ -323,8 +326,142 @@ export function createImageFiducials({
     return { calibration, perImage }
   }
 
+  // Half-frame scans (SAT-5): `<frame>_a` + `<frame>_b` of a sensor, each frame's two
+  // halves stitched into one image on the film grid through their reseau crosses —
+  // scanner placement and film deformation removed — added to the project, its GCP
+  // marks carried over, the halves removed (`removeHalves`). The stitched frames get a
+  // sensor of their own: the certificate focal, the scan pitch, the principal point at
+  // the film centre (+ the certificate's offset). settings: { spacingMm, armMm,
+  // widthMm }: a half shows every row, and how many columns the halves share is
+  // decided by where their scenes agree, so the film size is not needed.
+  // → { pairs: [{ stem, ... numbers or error }], stitched: [image] }.
+  async function stitchReseauHalvesForSensor({ sensor, settings, removeHalves = true, onProgress, shouldCancel } = {}) {
+    const pitchMm = Number(sensor?.pixelSize)
+    if (!(pitchMm > 0)) throw new Error(`Sensor ${sensor?.label}: set the scan pixel size (mm/px) first`)
+    const { spacingMm, armMm, widthMm } = settings
+    const pairs = pairReseauHalves(images.value.filter((img) => img.sensorId === sensor.id))
+    if (!pairs.length) throw new Error('No half-frame pairs (<name>_a / <name>_b) among this sensor\'s scans')
+    const cell = spacingMm / pitchMm
+    const opts = { pitchMm, spacingMm, armPx: armMm / pitchMm, widthPx: Math.max(1, widthMm / pitchMm),
+      refinePx: Math.max(4, Math.ceil(0.15 / pitchMm)) }
+    const gcpsStore = useGcpsStore(), sensors = useSensorsStore()
+    const cal = sensor.fiducialCalibration
+    const focalMm = sensor.focalUnit === 'mm' && sensor.focal > 0 ? sensor.focal : (cal?.focalMm ?? 0)
+    const out = [], stitched = []
+    for (const [k, { stem, a, b }] of pairs.entries()) {
+      if (shouldCancel?.()) break
+      onProgress?.(k, pairs.length, stem)
+      try {
+        await Promise.all([whenComputeReady(a), whenComputeReady(b)])
+        const [ga, gb] = await Promise.all([growReseau(computeSourceOf(a), opts), growReseau(computeSourceOf(b), opts)])
+        const span = (f) => {
+          let i0 = Infinity, i1 = -Infinity, j0 = Infinity, j1 = -Infinity
+          for (const x of f) { i0 = Math.min(i0, x.di); i1 = Math.max(i1, x.di); j0 = Math.min(j0, x.dj); j1 = Math.max(j1, x.dj) }
+          return { cols: i1 - i0 + 1, rows: j1 - j0 + 1 }
+        }
+        const sa = span(ga.found), sb = span(gb.found)
+        if (!ga.found.length || !gb.found.length) throw new Error(`no reseau found on ${ga.found.length ? b.name : a.name}`)
+        if (sa.rows !== sb.rows || sa.rows % 2 === 0) throw new Error(`the halves show ${sa.rows} and ${sb.rows} rows of crosses; both need the same odd count (the full height)`)
+        const nj = (sa.rows - 1) / 2
+        // Every shared-column count the halves allow; the scenes decide.
+        const candidates = []
+        for (let shared = 1; shared < Math.min(sa.cols, sb.cols); shared++) {
+          const total = sa.cols + sb.cols - shared
+          if (total % 2 === 0) continue
+          const ni = (total - 1) / 2
+          const fitOf = (found, side) => {
+            const { detections } = assignReseauIndices(found, { side, ni, nj })
+            return fitFiducialTransform(detections.map((d) => ({ px: d.px, py: d.py, xMm: d.i * spacingMm, yMm: d.j * spacingMm })),
+              'reseau', { spacingMm })
+          }
+          const fitA = fitOf(ga.found, 'left'), fitB = fitOf(gb.found, 'right')
+          if (fitA && fitB) candidates.push({ shared, ni, fitA, fitB })
+        }
+        if (!candidates.length) throw new Error('the halves\' crosses give no consistent lattice')
+        const ni0 = candidates[0].ni
+        const geometry0 = stitchedFrameGeometry({ spacingMm, filmWidthMm: 2 * ni0 * spacingMm, filmHeightMm: 2 * nj * spacingMm,
+          pitchMm, marginMm: spacingMm / 2 })
+        const { scores } = await reseauOverlapScore(computeSourceOf(a), computeSourceOf(b), {
+          candidates: candidates.map((c) => ({ fitA: c.fitA, fitB: c.fitB })), geometry: geometry0,
+          // The film both halves certainly show: a cell either side of the centre.
+          xMm: [-spacingMm, spacingMm],
+        })
+        const ranked = candidates.map((c, i) => ({ ...c, ncc: scores[i] ?? -1 })).sort((x, y) => y.ncc - x.ncc)
+        const best = ranked[0]
+        if (!(best.ncc >= 0.5) || (ranked[1] && ranked[1].ncc > best.ncc - 0.15)) {
+          throw new Error(`the halves do not agree on one overlap (best scene correlation ${best.ncc.toFixed(2)}`
+            + `${ranked[1] ? `, next ${ranked[1].ncc.toFixed(2)}` : ''}) — an edge column of crosses may be missing`)
+        }
+        const geometry = stitchedFrameGeometry({ spacingMm, filmWidthMm: 2 * best.ni * spacingMm, filmHeightMm: 2 * nj * spacingMm,
+          pitchMm, marginMm: spacingMm / 2, ppxMm: cal?.ppxMm ?? 0, ppyMm: cal?.ppyMm ?? 0 })
+        // Seam in the middle of the shared columns: between b's leftmost and a's rightmost.
+        const seamXMm = ((best.ni - sb.cols + 1) + (-best.ni + sa.cols - 1)) / 2 * spacingMm
+        const blob = await stitchReseauFrame(computeSourceOf(a), computeSourceOf(b),
+          { fitA: best.fitA, fitB: best.fitB, geometry, seamXMm: Number.isFinite(seamXMm) ? seamXMm : 0 },
+          { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t) => onProgress?.(k + d / t, pairs.length, stem) })
+        const name = `${stem}.tif`
+        const before = new Set(images.value.map((img) => img.id))
+        await addImages([new File([blob], name, { type: 'image/tiff' })])
+        const frame = images.value.find((img) => !before.has(img.id) && img.name === name)
+        // GCP marks: half px → film mm → stitched px (pixel-edge).
+        if (frame) {
+          for (const g of gcpsStore.gcps) {
+            const marks = []
+            for (const [img, fit] of [[a, best.fitA], [b, best.fitB]]) {
+              const o = g.observations.find((x) => x.imageId === img.id)
+              if (!o) continue
+              const mm = applyFiducialTransform({ x: o.px, y: o.py }, fit)
+              marks.push({ x: (mm.x - geometry.x0Mm) / pitchMm, y: (geometry.y0Mm - mm.y) / pitchMm })
+            }
+            if (marks.length) gcpsStore.setObservation(g.id, frame.id, frame.name,
+              marks.reduce((s0, m) => s0 + m.x, 0) / marks.length, marks.reduce((s0, m) => s0 + m.y, 0) / marks.length)
+          }
+          stitched.push({ image: frame, geometry })
+        }
+        const row = { stem, crossesA: ga.found.length, crossesB: gb.found.length, columns: 2 * best.ni + 1, rows: 2 * nj + 1,
+          shared: best.shared, ncc: best.ncc, deformationUm: [best.fitA.affineRmsUm, best.fitB.affineRmsUm],
+          leftUm: [best.fitA.rmsUm, best.fitB.rmsUm], size: [geometry.width, geometry.height],
+          // Each half's scan px → film mm, for a check against a synthetic block's truth.
+          fits: [{ name: a.name, forward: best.fitA.forward, residual: best.fitA.residual },
+            { name: b.name, forward: best.fitB.forward, residual: best.fitB.residual }] }
+        out.push(row)
+        log(`${stem}: stitched ${a.name} + ${b.name} → ${name} ${geometry.width}×${geometry.height}; `
+          + `${ga.found.length} + ${gb.found.length} reseau crosses, ${row.columns} × ${row.rows} lattice, `
+          + `${pluralize(best.shared, 'shared column')} (scene correlation ${best.ncc.toFixed(2)}), film deformation `
+          + `${best.fitA.affineRmsUm.toFixed(1)} / ${best.fitB.affineRmsUm.toFixed(1)} µm corrected`, 'success', 'Fiducial')
+        if (removeHalves && frame) {
+          // The marks now live on the frame: drop the halves' own, not leave them orphaned.
+          for (const img of [a, b]) {
+            for (const g of gcpsStore.gcps) gcpsStore.removeObservation(g.id, img.id)
+            removeImage?.(img.id)
+          }
+        }
+      } catch (err) {
+        out.push({ stem, error: err?.message ?? String(err) })
+        log(`${stem}: half-frame stitch failed — ${err?.message ?? err}`, 'error', 'Fiducial')
+      }
+    }
+    onProgress?.(pairs.length, pairs.length, '')
+    // The stitched frames' camera: one sensor, the certificate's focal and principal point.
+    const first = stitched[0]
+    if (first) {
+      let sid = first.image.sensorId
+      for (const { image } of stitched.slice(1)) if (image.sensorId !== sid) sensors.assignSensor(image.id, sid)
+      if (sid) {
+        const g = first.geometry
+        sensors.updateSensor(sid, 'label', `${sensor.label} (stitched)`)
+        if (focalMm > 0) { sensors.updateSensor(sid, 'focalUnit', 'mm'); sensors.updateSensor(sid, 'focal', focalMm) }
+        sensors.updateSensor(sid, 'pixelSize', pitchMm)
+        sensors.updateSensor(sid, 'cx', g.cx); sensors.updateSensor(sid, 'cy', g.cy)
+        sensors.markReseauStitched(sid)
+      }
+    }
+    if (isPersisting()) save()
+    return { pairs: out, stitched: stitched.map((s0) => s0.image) }
+  }
+
   return {
     addFiducialObservations, setFiducialDetection, removeFiducialDetection, detectFiducialsForSensor,
-    detectReseauForSensor,
+    detectReseauForSensor, stitchReseauHalvesForSensor,
   }
 }

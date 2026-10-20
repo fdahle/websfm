@@ -65,8 +65,9 @@ the checkpoint residuals of a run with **None**: if the error grows towards the 
 edges under Auto and not under None, keep None. On scanned film the certificate does
 not describe the film's own deformation, which Auto partly absorbs, so try both —
 unless the camera has a [reseau](help:reseau) and you ran
-[Detect Reseau](guide:reseau): the film's deformation is then measured per scan, and
-Auto holds the certificate values on its own (the log says so).
+[Detect Reseau](guide:reseau), or stitched half frames there: the film's deformation
+is then measured per scan, and Auto holds the certificate values on its own (the log
+says so).
 
 ## Check the result
 Camera positions should follow the capture path, most useful images should register,

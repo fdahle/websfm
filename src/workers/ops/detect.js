@@ -13,6 +13,9 @@ import { fromScaledPx } from '../../core/sfm/geometry.js'
 import { KP_STRIDE } from '../../core/features/keypoints.js'
 import { isPyramid, openPyramid, rasterizePyramidTo, readNativeRect } from '../rasterSource.js'
 import { crossInWindow, fitLatticeAffine, nominalScanPosition } from '../../core/sfm/reseauDetect.js'
+import { invertFiducialTransform } from '../../core/sfm/fiducialCalibration.js'
+import { createCogBuilder, geoKeysForEpsg } from '../../core/products/geotiff.js'
+import { deflateTile } from '../deflateTile.js'
 import {
   FIDUCIAL_DETECT_TUNING, grayFromRgba, detectFiducialsInImage,
 } from '../../core/sfm/fiducialDetect.js'
@@ -525,6 +528,184 @@ export function makeDetectOps({ rasterize }) {
     } finally { bmp.close() }
   }
 
+  // Reseau crosses of a half-frame scan (SAT-5), grown from one: no frame centre to
+  // place the lattice from. A seed cross near `start` (scan px) whose lattice neighbours
+  // are there too, then breadth first: each next cross is predicted from an affine of
+  // its found neighbours (the film's deformation bends the grid slowly) and searched
+  // within `refinePx`. A weak peak (texture, the dark border) stops the growth there.
+  // opts: { pitchMm, spacingMm, armPx, widthPx, refinePx, start: { px, py } }.
+  // → { found: [{ di, dj, px, py, score }] (grid steps from the seed: di right, dj
+  // down), seed, ms }.
+  async function growReseau([url, opts], { emit } = {}) {
+    const t0 = performance.now()
+    const { pitchMm, spacingMm, armPx, widthPx = 1, refinePx } = opts
+    const cell = spacingMm / pitchMm
+    const bmp = await decodeBitmap(url)
+    try {
+      const margin = Math.ceil(armPx) + 2 * Math.max(1, Math.round(widthPx)) + 3
+      const find = (px, py, radius) => {
+        if (px < margin || py < margin || px > bmp.width - margin || py > bmp.height - margin) return null
+        const half = Math.ceil(radius) + margin
+        const win = cropGray(bmp, px - half, py - half, 2 * half + 1, 2 * half + 1)
+        const hit = crossInWindow(win, { armPx, widthPx })
+        if (!hit) return null
+        const x = win.originX + hit.x, y = win.originY + hit.y
+        return Math.hypot(x - px, y - py) <= radius + 0.5 ? { px: x, py: y, score: hit.score } : null
+      }
+      // 1. A seed with its neighbours (axis-aligned lattice: the scan is rotated < 2°).
+      const start = opts.start ?? { px: bmp.width / 2, py: bmp.height / 2 }
+      let seed = null
+      const tries = [[0, 0], [0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5], [1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]
+      for (const [ox, oy] of tries) {
+        const c = find(start.px + ox * cell, start.py + oy * cell, 0.6 * cell)
+        if (!c) continue
+        const r = Math.max(refinePx, 0.03 * cell)
+        const near = [[cell, 0], [-cell, 0], [0, cell], [0, -cell]].map(([dx, dy]) => find(c.px + dx, c.py + dy, r)).filter(Boolean)
+        if (near.length >= 3) { seed = c; break }
+      }
+      if (!seed) return { result: { found: [], seed: null, ms: performance.now() - t0 } }
+      // 2. Breadth first from the seed.
+      const key = (di, dj) => `${di},${dj}`
+      const found = new Map([[key(0, 0), { di: 0, dj: 0, ...seed }]])
+      const queue = [[0, 0]]
+      const scores = [seed.score]
+      const median = () => { const a = [...scores].sort((x, y) => x - y); return a[a.length >> 1] }
+      const predict = (di, dj) => {
+        const near = []
+        for (let b = -2; b <= 2; b++) for (let a = -2; a <= 2; a++) {
+          const f = found.get(key(di + a, dj + b)); if (f) near.push({ xMm: f.di, yMm: f.dj, px: f.px, py: f.py })
+        }
+        const fit = near.length >= 3 ? fitLatticeAffine(near) : null
+        if (fit) return fit.predict(di, dj)
+        for (const [a, b] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const f = found.get(key(di + a, dj + b)); if (f) return { px: f.px - a * cell, py: f.py - b * cell }
+        }
+        return null
+      }
+      while (queue.length) {
+        const [di, dj] = queue.shift()
+        for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const ni = di + a, nj = dj + b
+          if (found.has(key(ni, nj))) continue
+          const p = predict(ni, nj)
+          if (!p) continue
+          const hit = find(p.px, p.py, refinePx)
+          if (!hit || hit.score < 0.35 * median()) { found.set(key(ni, nj), null); continue }
+          found.set(key(ni, nj), { di: ni, dj: nj, ...hit })
+          if (scores.length < 200) scores.push(hit.score)
+          queue.push([ni, nj])
+        }
+      }
+      const list = [...found.values()].filter(Boolean)
+      emit?.('log', [`Reseau: grew ${pluralize(list.length, 'cross', 'crosses')} from (${seed.px.toFixed(0)}, ${seed.py.toFixed(0)}) on ${bmp.width}×${bmp.height}`, 'debug', 'Fiducial'])
+      return { result: { found: list, seed, ms: performance.now() - t0 } }
+    } finally { bmp.close() }
+  }
+
+  // Film mm → a half's scan px over a patch of the stitched grid, sampled bilinearly.
+  // The exact inverse runs on a coarse lattice every `step` px; between, the (smooth)
+  // map is interpolated. → Float32Array (NaN off the scan).
+  function sampleHalf(bmp, fit, geom, c0, r0, w, h, inside, step = 32) {
+    const out = new Float32Array(w * h).fill(NaN)
+    const gw = Math.ceil(w / step) + 1, gh = Math.ceil(h / step) + 1
+    const gx = new Float64Array(gw * gh), gy = new Float64Array(gw * gh)
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, any = false
+    for (let b = 0; b < gh; b++) for (let a = 0; a < gw; a++) {
+      const c = c0 + Math.min(w, a * step), r = r0 + Math.min(h, b * step)
+      // The film under the output pixel's centre (pixel (c, r) spans [c, c + 1) × [r, r + 1)).
+      const q = invertFiducialTransform({ x: geom.x0Mm + (c + 0.5) * geom.pitchMm, y: geom.y0Mm - (r + 0.5) * geom.pitchMm }, fit)
+      gx[b * gw + a] = q.x; gy[b * gw + a] = q.y
+    }
+    // Which pixels this half supplies (the caller's seam), and its source window.
+    for (let r = 0; r < h; r += step) for (let c = 0; c < w; c += step) if (inside(c0 + c)) any = true
+    if (!any && !inside(c0 + w - 1)) return out
+    for (let k = 0; k < gx.length; k++) { x0 = Math.min(x0, gx[k]); x1 = Math.max(x1, gx[k]); y0 = Math.min(y0, gy[k]); y1 = Math.max(y1, gy[k]) }
+    const sx0 = Math.max(0, Math.floor(x0) - 2), sy0 = Math.max(0, Math.floor(y0) - 2)
+    const sx1 = Math.min(bmp.width, Math.ceil(x1) + 2), sy1 = Math.min(bmp.height, Math.ceil(y1) + 2)
+    if (sx1 <= sx0 || sy1 <= sy0) return out
+    const win = cropGray(bmp, sx0, sy0, sx1 - sx0, sy1 - sy0)
+    const ww = win.width, wh = win.height, d = win.data
+    for (let r = 0; r < h; r++) {
+      const fb = r / step, b = Math.min(gh - 2, Math.floor(fb)), tb = fb - b
+      for (let c = 0; c < w; c++) {
+        if (!inside(c0 + c)) continue
+        const fa = c / step, a = Math.min(gw - 2, Math.floor(fa)), ta = fa - a
+        const k = b * gw + a
+        const lerp = (g) => (1 - tb) * ((1 - ta) * g[k] + ta * g[k + 1]) + tb * ((1 - ta) * g[k + gw] + ta * g[k + gw + 1])
+        // Pixel-edge source coords → sample at the pixel-centre grid of the window.
+        const x = lerp(gx) - win.originX - 0.5, y = lerp(gy) - win.originY - 0.5
+        const ix = Math.floor(x), iy = Math.floor(y)
+        if (ix < 0 || iy < 0 || ix >= ww - 1 || iy >= wh - 1) continue
+        const fx = x - ix, fy = y - iy, i = iy * ww + ix
+        out[r * w + c] = (1 - fy) * ((1 - fx) * d[i] + fx * d[i + 1]) + fy * ((1 - fx) * d[i + ww] + fx * d[i + ww + 1])
+      }
+    }
+    return out
+  }
+
+  // The two halves' agreement in their overlap for each candidate pair of fits (their
+  // lattice indexing): the same film points sampled from both, as one normalised
+  // cross-correlation over a few patches. A column off by one disagrees everywhere.
+  // [urlA, urlB, { candidates: [{ fitA, fitB }], geometry, xMm: [lo, hi] }] → { scores }.
+  async function reseauOverlapScore([urlA, urlB, { candidates, geometry, xMm }]) {
+    const [A, B] = [await decodeBitmap(urlA), await decodeBitmap(urlB)]
+    try {
+      const size = 96, all = () => true
+      const scores = candidates.map(({ fitA, fitB }) => {
+        let sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0, n = 0
+        for (const fy of [0.25, 0.5, 0.75]) for (const fx of [0.3, 0.7]) {
+          const xm = xMm[0] + fx * (xMm[1] - xMm[0])
+          const c0 = Math.round((xm - geometry.x0Mm) / geometry.pitchMm) - size / 2
+          const r0 = Math.round(fy * geometry.height) - size / 2
+          const pa = sampleHalf(A, fitA, geometry, c0, r0, size, size, all, 16)
+          const pb = sampleHalf(B, fitB, geometry, c0, r0, size, size, all, 16)
+          for (let k = 0; k < pa.length; k++) {
+            const a = pa[k], b = pb[k]
+            if (!Number.isFinite(a) || !Number.isFinite(b)) continue
+            sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b; n++
+          }
+        }
+        if (n < 100) return null
+        const cov = sab / n - (sa / n) * (sb / n), va = saa / n - (sa / n) ** 2, vb = sbb / n - (sb / n) ** 2
+        return va > 0 && vb > 0 ? cov / Math.sqrt(va * vb) : null
+      })
+      return { result: { scores } }
+    } finally { A.close(); B.close() }
+  }
+
+  // The stitched frame (SAT-5): every pixel of the film grid `geometry` (reseauDetect.js
+  // stitchedFrameGeometry) sampled from half A left of `seamXMm`, from B right of it,
+  // through each half's reseau fit — placement and film deformation removed. Written
+  // block by block as a tiled 8-bit TIFF (DEFLATE). → a Blob (image/tiff).
+  async function stitchReseauFrame([urlA, urlB, { fitA, fitB, geometry, seamXMm }], { emit } = {}) {
+    const t0 = performance.now()
+    const [A, B] = [await decodeBitmap(urlA), await decodeBitmap(urlB)]
+    try {
+      const { width: W, height: H } = geometry, BLOCK = 2048
+      const builder = createCogBuilder({ width: W, height: H, tileSize: 512, ArrayType: Uint8Array,
+        samples: [{ bits: 8, format: 1 }], photometric: 1, pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 0, 0],
+        geoKeys: geoKeysForEpsg(null, false) }, { blockSize: BLOCK, compress: deflateTile })
+      const seamCol = (seamXMm - geometry.x0Mm) / geometry.pitchMm
+      const nb = Math.ceil(W / BLOCK) * Math.ceil(H / BLOCK)
+      let done = 0
+      for (let r0 = 0; r0 < H; r0 += BLOCK) for (let c0 = 0; c0 < W; c0 += BLOCK) {
+        const w = Math.min(BLOCK, W - c0), h = Math.min(BLOCK, H - r0)
+        const out = new Uint8Array(w * h)
+        for (const [bmp, fit, inside] of [[A, fitA, (c) => c + 0.5 < seamCol], [B, fitB, (c) => c + 0.5 >= seamCol]]) {
+          if (c0 + w <= seamCol && bmp === B) continue
+          if (c0 >= seamCol && bmp === A) continue
+          const v = sampleHalf(bmp, fit, geometry, c0, r0, w, h, inside)
+          for (let k = 0; k < v.length; k++) if (Number.isFinite(v[k])) out[k] = Math.max(0, Math.min(255, Math.round(v[k])))
+        }
+        await builder.addBlock({ col0: c0, row0: r0, width: w, height: h, data: out })
+        emit?.('progress', [++done, nb, 'Stitching…'])
+      }
+      const { parts } = await builder.finish()
+      emit?.('log', [`Reseau: stitched ${W}×${H} from ${A.width}×${A.height} + ${B.width}×${B.height} in ${((performance.now() - t0) / 1000).toFixed(1)} s`, 'info', 'Fiducial'])
+      return { result: new Blob(parts, { type: 'image/tiff' }) }
+    } finally { A.close(); B.close() }
+  }
+
   // Tools ▸ Images ▾ ▸ Image quality: sharpness/exposure of one image
   // (core/features/imageQuality.js). Decoded at twice the analysis size so the
   // module's own area filter, not the canvas's bilinear shrink, makes the final
@@ -543,5 +724,6 @@ export function makeDetectOps({ rasterize }) {
     return { result: { ...q, natW: raster.natW, natH: raster.natH } }
   }
 
-  return { detect, prepareFiducialTemplates, detectFiducials, detectFiducialSpots, detectReseau, imageQuality }
+  return { detect, prepareFiducialTemplates, detectFiducials, detectFiducialSpots, detectReseau, growReseau,
+    reseauOverlapScore, stitchReseauFrame, imageQuality }
 }

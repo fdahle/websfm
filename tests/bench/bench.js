@@ -755,6 +755,19 @@ window.bench = {
     }).filter(Boolean)
     return { seconds: (performance.now() - t0) / 1000, settings, perImage, fits }
   },
+  // Tools ▸ Images ▾ ▸ Detect reseau ▸ Half frames (SAT-5): every `<frame>_a` / `_b`
+  // pair of the block's sensor stitched into one frame on the film grid, GCP marks
+  // carried over, the halves removed — as the dialog runs it. Returns the per-pair
+  // numbers and each half's fit for the runner's truth check.
+  async reseauHalves(overrides = {}) {
+    const sensor = sensorsStore.sensors[0]
+    if (!sensor) return { error: 'no sensor' }
+    const t0 = performance.now()
+    const { pairs } = await images.stitchReseauHalvesForSensor({ sensor, settings: { ...RESEAU_DEFAULTS, ...overrides } })
+    const fits = pairs.flatMap((p) => p.fits ?? [])
+    return { seconds: (performance.now() - t0) / 1000, images: images.images.map((i) => i.name),
+      pairs: pairs.map(({ fits: _f, ...p }) => p), fits }
+  },
   // One static mask for every image (fiducial borders, data strip): a PNG data URL,
   // opaque = excluded, transparent = kept (core/mask.js).
   async setMask(dataUrl) {

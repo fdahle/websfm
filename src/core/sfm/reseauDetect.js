@@ -104,3 +104,61 @@ export function fitLatticeAffine(found) {
   const ax = solve(bx), ay = solve(byv)
   return ax && ay ? { ax, ay, predict: (xMm, yMm) => ({ px: ax[0] * xMm + ax[1] * yMm + ax[2], py: ay[0] * xMm + ay[1] * yMm + ay[2] }) } : null
 }
+
+// ── Half-frame scans ─────────────────────────────────────────────────────
+// Some archives scan a frame in two overlapping parts (KH-9: `<frame>_a` the left of
+// the film, `<frame>_b` the right). A half has no frame centre to place the lattice
+// from: its crosses are found by growing from one (workers/ops/detect.js, mode
+// 'grow'), each with grid steps (di right, dj down) relative to the first, and the
+// steps become lattice indices here. Rows: a half shows the full film height, so its
+// rows are centred. Columns: from the half's outer edge, the outermost column being
+// the film's (−ni on the left half, +ni on the right); `shift` moves them by whole
+// columns (the overlap check tries ±1, in case an edge column was missed).
+// found: [{ di, dj, px, py, score }] → [{ slot, i, j, px, py, score }] plus counts.
+export function assignReseauIndices(found, { side, ni, nj, shift = 0 }) {
+  if (!found.length) return { detections: [], columns: 0, rows: 0, rowsExpected: 2 * nj + 1 }
+  let dimin = Infinity, dimax = -Infinity, djmin = Infinity, djmax = -Infinity
+  for (const f of found) {
+    dimin = Math.min(dimin, f.di); dimax = Math.max(dimax, f.di)
+    djmin = Math.min(djmin, f.dj); djmax = Math.max(djmax, f.dj)
+  }
+  const rows = djmax - djmin + 1, columns = dimax - dimin + 1
+  const djc = Math.round((djmin + djmax) / 2)
+  const colOf = side === 'left' ? (di) => -ni + (di - dimin) + shift
+    : side === 'right' ? (di) => ni - (dimax - di) + shift
+      : (di) => di - Math.round((dimin + dimax) / 2) + shift
+  const detections = []
+  for (const f of found) {
+    const i = colOf(f.di), j = djc - f.dj // image rows run down, film y up
+    if (Math.abs(i) > ni || Math.abs(j) > nj) continue
+    detections.push({ slot: `r:${i}:${j}`, i, j, px: f.px, py: f.py, score: f.score })
+  }
+  return { detections, columns, rows, rowsExpected: 2 * nj + 1 }
+}
+
+// The half-frame pairs among `images` ({ id, name }): `<stem>_a` with `<stem>_b`
+// (also -a / -b, any case, before the extension). → [{ stem, a, b }] (images).
+export function pairReseauHalves(images) {
+  const bySide = new Map()
+  for (const img of images) {
+    const m = /^(.*)[_-]([ab])(\.[^.]+)?$/i.exec(img.name)
+    if (!m) continue
+    const stem = m[1], side = m[2].toLowerCase()
+    if (!bySide.has(stem)) bySide.set(stem, {})
+    bySide.get(stem)[side] = img
+  }
+  return [...bySide].filter(([, p]) => p.a && p.b).map(([stem, p]) => ({ stem, a: p.a, b: p.b }))
+    .sort((x, y) => x.stem.localeCompare(y.stem))
+}
+
+// The stitched frame's grid: the film's lattice extent plus `marginMm`, at `pitchMm`,
+// centred on the film's (0, 0). Pixel (c, r) covers film x ∈ [x0 + c·p, x0 + (c+1)·p),
+// y ∈ (y0 − (r+1)·p, y0 − r·p]. The principal point (certificate, mm) in the sensor
+// table's pixel-centre convention: cx = W/2 + ppx/p − ½, cy = H/2 − ppy/p − ½.
+export function stitchedFrameGeometry({ spacingMm, filmWidthMm, filmHeightMm, pitchMm, marginMm = 2, ppxMm = 0, ppyMm = 0 }) {
+  const ni = Math.floor(filmWidthMm / 2 / spacingMm + 1e-9), nj = Math.floor(filmHeightMm / 2 / spacingMm + 1e-9)
+  const halfW = Math.max(ni * spacingMm, filmWidthMm / 2) + marginMm, halfH = Math.max(nj * spacingMm, filmHeightMm / 2) + marginMm
+  const width = 2 * Math.ceil(halfW / pitchMm), height = 2 * Math.ceil(halfH / pitchMm)
+  return { width, height, pitchMm, x0Mm: -width / 2 * pitchMm, y0Mm: height / 2 * pitchMm, ni, nj,
+    cx: width / 2 + ppxMm / pitchMm - 0.5, cy: height / 2 - ppyMm / pitchMm - 0.5 }
+}

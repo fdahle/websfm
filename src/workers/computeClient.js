@@ -154,6 +154,14 @@ export function prepareFiducialTemplates(url, obs, options = {}, { onLog } = {})
 // into every call by design — do NOT add their buffers to a transfer list here,
 // they are reused across all images of the sensor and transferring would detach
 // them after the first.
+// Half-frame reseau (SAT-5, workers/ops/detect.js): the crosses grown from one, the
+// halves' agreement under candidate fits, and the stitched frame (a TIFF Blob).
+export const growReseau = (url, options) => call('growReseau', [url, options])
+export const reseauOverlapScore = (urlA, urlB, options) => call('reseauOverlapScore', [urlA, urlB, options])
+export const stitchReseauFrame = (urlA, urlB, options, { onLog, onProgress } = {}) => call('stitchReseauFrame', [urlA, urlB, options], {
+  onEvent: (ev, args) => { if (ev === 'log') onLog?.(...args); else if (ev === 'progress') onProgress?.(...args) },
+})
+
 // Reseau crosses in one scan (SAT-5, workers/ops/detect.js detectReseau).
 export function detectReseau(url, options, { onLog } = {}) {
   return call('detectReseau', [url, options], { onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined })

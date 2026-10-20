@@ -19,6 +19,7 @@ import { openRaster, readWindowBytes } from '../cogRead.js'
 import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
 import { nounFor, pluralize } from '../../core/textFormat.js'
 import { createBlockProgress } from '../../utils/blockProgress.js'
+import { deflateTile } from '../deflateTile.js'
 import { planDemWindow, demCogLevels, maskFromNaN } from '../../core/products/demWindow.js'
 import { fromBlob } from 'geotiff'
 
@@ -91,12 +92,6 @@ function paintSeams(rgba, labels, w, h) {
     const right = c + 1 < w ? labels[i + 1] : l, down = r + 1 < h ? labels[i + w] : l
     if ((right !== l && right !== 0xffff) || (down !== l && down !== 0xffff)) rgba.set([255, 0, 255, 255], 4 * i)
   }
-}
-
-// One tile's zlib stream, kept as a Blob part (off the heap; assembleCog takes parts).
-async function deflateTile(bytes) {
-  const part = await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'))).blob()
-  return { length: part.size, part }
 }
 
 // A block-built DEM (SAT-3) read back as a plain height grid: the finest COG level

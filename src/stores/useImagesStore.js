@@ -455,9 +455,10 @@ export const useImagesStore = defineStore('images', () => {
 
   // Fiducial marks and detections (images/fiducials.js).
   const {
-    addFiducialObservations, setFiducialDetection, removeFiducialDetection, detectFiducialsForSensor, detectReseauForSensor,
+    addFiducialObservations, setFiducialDetection, removeFiducialDetection, detectFiducialsForSensor, detectReseauForSensor, stitchReseauHalvesForSensor,
   } = createImageFiducials({
-    imageById, images, isPersisting, log, save, updateMask, whenComputeReady,
+    imageById, images, isPersisting, log, save, updateMask, whenComputeReady, addImages,
+    removeImage: (id) => removeImage(id),
   })
 
   // Keypoint detection and feature import (images/detection.js).
@@ -748,6 +749,7 @@ export const useImagesStore = defineStore('images', () => {
     removeFiducialDetection,
     detectFiducialsForSensor,
     detectReseauForSensor,
+    stitchReseauHalvesForSensor,
     detectOne,
     detectAll,
     importFeatures,

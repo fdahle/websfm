@@ -438,6 +438,16 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (purge && isPersisting()) opfs.deleteSensors(projects.currentProjectId).catch(() => {})
   }
 
+  // A sensor of half-frame scans stitched through their reseau (SAT-5): its images'
+  // film geometry is already corrected, so Auto self-calibration holds it like a
+  // reseau-calibrated film camera (core/sfm/runRecord.js resolveRefineIntrinsics).
+  function markReseauStitched(id) {
+    const s = sensors.value.find((x) => x.id === id)
+    if (!s) return
+    s.reseauStitched = true
+    save()
+  }
+
   async function restoreSensors(projectId) {
     sensors.value = []
     const data = await opfs.loadSensors(projectId)
@@ -456,6 +466,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     importSensors,
     importCameraGroups,
     updateSensor,
+    markReseauStitched,
     applyFilmFormat,
     toggleSensorFixed,
     setFiducialMarks,
