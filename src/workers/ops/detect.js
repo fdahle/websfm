@@ -14,6 +14,7 @@ import { KP_STRIDE } from '../../core/features/keypoints.js'
 import { isPyramid, openPyramid, rasterizePyramidTo, readNativeRect } from '../rasterSource.js'
 import { crossInWindow, fitLatticeAffine, nominalScanPosition } from '../../core/sfm/reseauDetect.js'
 import { invertFiducialTransform } from '../../core/sfm/fiducialCalibration.js'
+import { segmentToStrip } from '../../core/sfm/panoramic.js'
 import { createCogBuilder, geoKeysForEpsg } from '../../core/products/geotiff.js'
 import { deflateTile } from '../deflateTile.js'
 import {
@@ -603,21 +604,29 @@ export function makeDetectOps({ rasterize }) {
   }
 
   // Film mm → a half's scan px over a patch of the stitched grid, sampled bilinearly.
-  // The exact inverse runs on a coarse lattice every `step` px; between, the (smooth)
-  // map is interpolated. → Float32Array (NaN off the scan).
   function sampleHalf(bmp, fit, geom, c0, r0, w, h, inside, step = 32) {
+    // The film under the output pixel's centre (pixel (c, r) spans [c, c + 1) × [r, r + 1)).
+    const toSource = (x, y) => invertFiducialTransform({ x: geom.x0Mm + x * geom.pitchMm, y: geom.y0Mm - y * geom.pitchMm }, fit)
+    return sampleMapped(bmp, toSource, c0, r0, w, h, inside, step)
+  }
+
+  // An output patch [c0, c0 + w) × [r0, r0 + h) sampled bilinearly from `bmp` through
+  // `toSource(x, y)`: output pixel-edge position → source pixel-edge position. The exact
+  // map runs on a coarse lattice every `step` px; between, the (smooth) map is
+  // interpolated. `inside(c)`: the output columns this source supplies (all if null).
+  // → Float32Array (NaN off the source).
+  function sampleMapped(bmp, toSource, c0, r0, w, h, inside = null, step = 32) {
     const out = new Float32Array(w * h).fill(NaN)
     const gw = Math.ceil(w / step) + 1, gh = Math.ceil(h / step) + 1
     const gx = new Float64Array(gw * gh), gy = new Float64Array(gw * gh)
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, any = false
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, any = !inside
     for (let b = 0; b < gh; b++) for (let a = 0; a < gw; a++) {
       const c = c0 + Math.min(w, a * step), r = r0 + Math.min(h, b * step)
-      // The film under the output pixel's centre (pixel (c, r) spans [c, c + 1) × [r, r + 1)).
-      const q = invertFiducialTransform({ x: geom.x0Mm + (c + 0.5) * geom.pitchMm, y: geom.y0Mm - (r + 0.5) * geom.pitchMm }, fit)
+      const q = toSource(c + 0.5, r + 0.5)
       gx[b * gw + a] = q.x; gy[b * gw + a] = q.y
     }
-    // Which pixels this half supplies (the caller's seam), and its source window.
-    for (let r = 0; r < h; r += step) for (let c = 0; c < w; c += step) if (inside(c0 + c)) any = true
+    // Which pixels this source supplies (the caller's seam), and its source window.
+    if (inside) for (let r = 0; r < h; r += step) for (let c = 0; c < w; c += step) if (inside(c0 + c)) any = true
     if (!any && !inside(c0 + w - 1)) return out
     for (let k = 0; k < gx.length; k++) { x0 = Math.min(x0, gx[k]); x1 = Math.max(x1, gx[k]); y0 = Math.min(y0, gy[k]); y1 = Math.max(y1, gy[k]) }
     const sx0 = Math.max(0, Math.floor(x0) - 2), sy0 = Math.max(0, Math.floor(y0) - 2)
@@ -628,7 +637,7 @@ export function makeDetectOps({ rasterize }) {
     for (let r = 0; r < h; r++) {
       const fb = r / step, b = Math.min(gh - 2, Math.floor(fb)), tb = fb - b
       for (let c = 0; c < w; c++) {
-        if (!inside(c0 + c)) continue
+        if (inside && !inside(c0 + c)) continue
         const fa = c / step, a = Math.min(gw - 2, Math.floor(fa)), ta = fa - a
         const k = b * gw + a
         const lerp = (g) => (1 - tb) * ((1 - ta) * g[k] + ta * g[k + 1]) + tb * ((1 - ta) * g[k + gw] + ta * g[k + gw + 1])
@@ -706,6 +715,41 @@ export function makeDetectOps({ rasterize }) {
     } finally { A.close(); B.close() }
   }
 
+  // Split panoramic strips (core/sfm/panoramic.js): every segment of one strip resampled
+  // from the strip's cylinder onto its own pinhole image, block by block, each written as
+  // a tiled 8-bit TIFF (DEFLATE). Off the strip is black.
+  // [url, { strip, layout }] → [Blob (image/tiff)] in segment order.
+  async function splitPanoramicStrip([url, { strip, layout }], { emit } = {}) {
+    const t0 = performance.now()
+    const bmp = await decodeBitmap(url)
+    try {
+      const BLOCK = 2048
+      const total = layout.segments.reduce((n, g) => n + Math.ceil(g.width / BLOCK) * Math.ceil(g.height / BLOCK), 0)
+      const blobs = []
+      let done = 0
+      for (const seg of layout.segments) {
+        const { width: W, height: H } = seg
+        const builder = createCogBuilder({ width: W, height: H, tileSize: 512, ArrayType: Uint8Array,
+          samples: [{ bits: 8, format: 1 }], photometric: 1, pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 0, 0],
+          geoKeys: geoKeysForEpsg(null, false) }, { blockSize: BLOCK, compress: deflateTile })
+        const toSource = (a, b) => { const q = segmentToStrip(seg, layout, strip, a, b); return { x: q.u, y: q.v } }
+        for (let r0 = 0; r0 < H; r0 += BLOCK) for (let c0 = 0; c0 < W; c0 += BLOCK) {
+          const w = Math.min(BLOCK, W - c0), h = Math.min(BLOCK, H - r0)
+          const v = sampleMapped(bmp, toSource, c0, r0, w, h)
+          const out = new Uint8Array(w * h)
+          for (let k = 0; k < v.length; k++) if (Number.isFinite(v[k])) out[k] = Math.max(0, Math.min(255, Math.round(v[k])))
+          await builder.addBlock({ col0: c0, row0: r0, width: w, height: h, data: out })
+          emit?.('progress', [++done, total, `Segment ${seg.index + 1} of ${layout.segments.length}…`])
+        }
+        const { parts } = await builder.finish()
+        blobs.push(new Blob(parts, { type: 'image/tiff' }))
+      }
+      emit?.('log', [`Panoramic: ${bmp.width}×${bmp.height} → ${pluralize(layout.segments.length, 'segment')} of `
+        + `${layout.segments[0].width}×${layout.segments[0].height} in ${((performance.now() - t0) / 1000).toFixed(1)} s`, 'info', 'Fiducial'])
+      return { result: blobs }
+    } finally { bmp.close() }
+  }
+
   // Tools ▸ Images ▾ ▸ Image quality: sharpness/exposure of one image
   // (core/features/imageQuality.js). Decoded at twice the analysis size so the
   // module's own area filter, not the canvas's bilinear shrink, makes the final
@@ -725,5 +769,5 @@ export function makeDetectOps({ rasterize }) {
   }
 
   return { detect, prepareFiducialTemplates, detectFiducials, detectFiducialSpots, detectReseau, growReseau,
-    reseauOverlapScore, stitchReseauFrame, imageQuality }
+    reseauOverlapScore, stitchReseauFrame, splitPanoramicStrip, imageQuality }
 }

@@ -53,7 +53,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     georeferenceOpen, scaleBarsOpen, depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
     filterCloudOpen, cropCloudOpen, mergeCloudsOpen, footprintFromPosesOpen, settingsOpen,
     projectSettingsOpen, aboutOpen, systemInfoOpen, debugSummaryOpen, filterCloudPreset, toolModal,
-    gcpTableOpen, projectPickerOpen, rasterStyleId, infoImageId, symbologyProductKind, sfmSourceOpen, reseauOpen,
+    gcpTableOpen, projectPickerOpen, rasterStyleId, infoImageId, symbologyProductKind, sfmSourceOpen, reseauOpen, panoramicOpen,
   } = storeToRefs(useModalsStore())
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
@@ -243,6 +243,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'detect-fiducials':     openFiducialDetect(); break
       case 'calibrate-fiducials':  openFiducialCalibrate(); break
       case 'detect-reseau':        reseauOpen.value = true; break
+      case 'split-panoramic':      panoramicOpen.value = true; break
       case 'open-gcp-table':       gcpTableOpen.value = true; refreshGcpReport(); break
       case 'open-glossary':        glossaryStore.openHome(); break
       case 'open-guide':           guideStore.openHome(); break

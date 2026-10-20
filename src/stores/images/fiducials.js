@@ -2,9 +2,10 @@ import { computeSourceOf } from '../../utils/image.js'
 import { makeNameResolver } from '../../core/io/nameMatch.js'
 import { observationsToDetections } from '../../core/sfm/fiducialModel.js'
 import { detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE, prepareFiducialTemplates, detectFiducials, detectReseau,
-  growReseau, reseauOverlapScore, stitchReseauFrame } from '../../workers/computeClient.js'
+  growReseau, reseauOverlapScore, stitchReseauFrame, splitPanoramicStrip } from '../../workers/computeClient.js'
 import { reseauLattice, assignReseauIndices, pairReseauHalves, stitchedFrameGeometry } from '../../core/sfm/reseauDetect.js'
 import { fitFiducialTransform, applyFiducialTransform } from '../../core/sfm/fiducialCalibration.js'
+import { panoramicSegments, stripToSegment, segmentName } from '../../core/sfm/panoramic.js'
 import { useGcpsStore } from '../useGcpsStore.js'
 import { useSensorsStore } from '../useSensorsStore.js'
 import { fiducialDetectionConcurrency } from '../../core/features/detectConcurrency.js'
@@ -460,8 +461,92 @@ export function createImageFiducials({
     return { pairs: out, stitched: stitched.map((s0) => s0.image) }
   }
 
+  // Tools ▸ Images ▾ ▸ Split panoramic strips (core/sfm/panoramic.js): every scan of a
+  // panoramic (optical-bar) sensor cut into segments, each resampled from the film's
+  // cylinder onto a pinhole image, added to the project with its GCP marks; the strips
+  // removed (`removeStrips`). The segments share one new sensor: the certificate focal,
+  // the scan pitch, the principal point at the segment's centre, and one segment size
+  // (the largest any strip needs), so the camera is the same for all of them.
+  // settings: { segments (0 = near-square), overlapPct }.
+  // → { strips: [{ name, segments, size } | { name, error }], images: [segment image] }.
+  async function splitPanoramicForSensor({ sensor, settings = {}, removeStrips = true, onProgress, shouldCancel } = {}) {
+    const pitchMm = Number(sensor?.pixelSize)
+    if (!(pitchMm > 0)) throw new Error(`Sensor ${sensor?.label}: set the scan pixel size (mm/px) first`)
+    const focalMm = sensor.focalUnit === 'mm' && sensor.focal > 0 ? Number(sensor.focal) : (sensor.fiducialCalibration?.focalMm ?? 0)
+    if (!(focalMm > 0)) throw new Error(`Sensor ${sensor?.label}: set the focal length in mm first`)
+    const strips = images.value.filter((img) => img.sensorId === sensor.id)
+    if (!strips.length) throw new Error('This sensor has no scans')
+    const opts = { segments: Number(settings.segments) || 0, overlap: Math.max(0, Number(settings.overlapPct) || 0) / 100 }
+    const sizeOf = (img) => ({ width: img.meta?.width ?? img.width, height: img.meta?.height ?? img.height })
+    await Promise.all(strips.map((img) => whenComputeReady(img)))
+    // Every strip's layout first: one segment size for all, so they share a camera.
+    const plans = strips.map((img) => {
+      const strip = { ...sizeOf(img), pitchMm, focalMm }
+      return { img, strip, layout: panoramicSegments(strip, opts) }
+    })
+    const W = Math.max(...plans.map((q) => q.layout.segments[0].width))
+    const H = Math.max(...plans.map((q) => q.layout.segments[0].height))
+    for (const q of plans) for (const seg of q.layout.segments) Object.assign(seg, { width: W, height: H, cx: W / 2 - 0.5, cy: H / 2 - 0.5 })
+    const gcpsStore = useGcpsStore(), sensors = useSensorsStore()
+    const out = [], added = []
+    for (const [k, { img, strip, layout }] of plans.entries()) {
+      if (shouldCancel?.()) break
+      onProgress?.(k, plans.length, img.name)
+      try {
+        const blobs = await splitPanoramicStrip(computeSourceOf(img), { strip, layout },
+          { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t) => onProgress?.(k + d / t, plans.length, img.name) })
+        const names = layout.segments.map((seg) => segmentName(img.name, seg.index))
+        const before = new Set(images.value.map((x) => x.id))
+        await addImages(blobs.map((b, i) => new File([b], names[i], { type: 'image/tiff' })))
+        const segImages = names.map((name) => images.value.find((x) => !before.has(x.id) && x.name === name) ?? null)
+        // GCP marks: strip px → every segment that shows the point (pixel-edge).
+        let marks = 0
+        for (const g of gcpsStore.gcps) {
+          const o = g.observations.find((x) => x.imageId === img.id)
+          if (!o) continue
+          layout.segments.forEach((seg, i) => {
+            const q = stripToSegment(seg, layout, strip, o.px, o.py)
+            const si = segImages[i]
+            if (!si || !q || q.a < 0 || q.b < 0 || q.a >= seg.width || q.b >= seg.height) return
+            gcpsStore.setObservation(g.id, si.id, si.name, q.a, q.b)
+            marks++
+          })
+        }
+        added.push(...segImages.filter(Boolean))
+        out.push({ name: img.name, segments: layout.segments.length, size: [W, H],
+          scanDeg: layout.scanRad * 180 / Math.PI, marks })
+        log(`${img.name}: ${layout.axis === 'x' ? strip.width : strip.height} px of scan (${(layout.scanRad * 180 / Math.PI).toFixed(1)}°) → `
+          + `${pluralize(layout.segments.length, 'segment')} of ${W}×${H} (${(2 * layout.segments[0].halfRad * 180 / Math.PI).toFixed(1)}° each)`
+          + `${marks ? `, ${pluralize(marks, 'GCP mark')} carried over` : ''}`, 'success', 'Fiducial')
+        if (removeStrips && segImages.every(Boolean)) {
+          for (const g of gcpsStore.gcps) gcpsStore.removeObservation(g.id, img.id)
+          removeImage?.(img.id)
+        }
+      } catch (err) {
+        out.push({ name: img.name, error: err?.message ?? String(err) })
+        log(`${img.name}: panoramic split failed — ${err?.message ?? err}`, 'error', 'Fiducial')
+      }
+    }
+    onProgress?.(plans.length, plans.length, '')
+    // The segments' camera: one sensor, a pinhole of the strip's focal length and pitch.
+    const first = added[0]
+    if (first) {
+      const sid = first.sensorId
+      for (const im of added.slice(1)) if (im.sensorId !== sid) sensors.assignSensor(im.id, sid)
+      if (sid) {
+        sensors.updateSensor(sid, 'label', `${sensor.label} (segments)`)
+        sensors.updateSensor(sid, 'focalUnit', 'mm'); sensors.updateSensor(sid, 'focal', focalMm)
+        sensors.updateSensor(sid, 'pixelSize', pitchMm)
+        sensors.updateSensor(sid, 'cx', W / 2 - 0.5); sensors.updateSensor(sid, 'cy', H / 2 - 0.5)
+        sensors.markPanoramicSegments(sid)
+      }
+    }
+    if (isPersisting()) save()
+    return { strips: out, images: added }
+  }
+
   return {
     addFiducialObservations, setFiducialDetection, removeFiducialDetection, detectFiducialsForSensor,
-    detectReseauForSensor, stitchReseauHalvesForSensor,
+    detectReseauForSensor, stitchReseauHalvesForSensor, splitPanoramicForSensor,
   }
 }

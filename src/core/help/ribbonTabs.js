@@ -247,6 +247,8 @@ export const TABS = [
               blurb: 'Camera-certificate or batch-estimated fiducial layout' },
             { id: 'detect-reseau', label: 'Detect reseau…', icon: 'target', needs: ['images', 'imagesReady'],
               blurb: 'Measure the reseau crosses: scan placement and film deformation per scan' },
+            { id: 'split-panoramic', label: 'Split panoramic strips…', icon: 'image', needs: ['images', 'imagesReady'],
+              blurb: 'Cut panoramic (optical-bar) scans into frame-camera segments' },
             { section: 'Edit' },
             // A mode on the image in front; brush/eraser/rect/invert/undo live in the
             // floating MaskToolbar over the image view.

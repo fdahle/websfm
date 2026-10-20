@@ -91,6 +91,7 @@ export const useModalsStore = defineStore('modals', () => {
   // record — the modal reads the live sensor back out of the sensors store.
   const fiducialDetectOpen     = ref(false)
   const reseauOpen             = ref(false)
+  const panoramicOpen          = ref(false)
   const fiducialDetectSensorId = ref(null)
   const fiducialCalibrateOpen     = ref(false)
   const fiducialCalibrateSensorId = ref(null)
@@ -162,6 +163,7 @@ export const useModalsStore = defineStore('modals', () => {
     infoImageId,
     fiducialDetectOpen,
     reseauOpen,
+    panoramicOpen,
     fiducialDetectSensorId,
     fiducialCalibrateOpen,
     fiducialCalibrateSensorId,

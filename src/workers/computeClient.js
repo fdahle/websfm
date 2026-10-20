@@ -176,6 +176,11 @@ export const reseauOverlapScore = (urlA, urlB, options) => call('reseauOverlapSc
 export const stitchReseauFrame = (urlA, urlB, options, { onLog, onProgress } = {}) => call('stitchReseauFrame', [urlA, urlB, options], {
   onEvent: (ev, args) => { if (ev === 'log') onLog?.(...args); else if (ev === 'progress') onProgress?.(...args) },
 })
+// Panoramic strips (core/sfm/panoramic.js, workers/ops/detect.js): one strip's segments
+// as frame images, [TIFF Blob] in segment order.
+export const splitPanoramicStrip = (url, options, { onLog, onProgress } = {}) => call('splitPanoramicStrip', [url, options], {
+  onEvent: (ev, args) => { if (ev === 'log') onLog?.(...args); else if (ev === 'progress') onProgress?.(...args) },
+})
 
 // Reseau crosses in one scan (SAT-5, workers/ops/detect.js detectReseau).
 export function detectReseau(url, options, { onLog } = {}) {

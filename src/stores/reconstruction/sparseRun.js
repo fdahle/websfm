@@ -317,6 +317,8 @@ export function createSparseRun({
                   kind: s.kind ?? 'digital',
                   // Stitched half frames (SAT-5): film geometry already corrected.
                   reseauStitched: !!s.reseauStitched,
+                  // Panoramic strip segments: exact pinholes of the certificate focal.
+                  panoramicSegments: !!s.panoramicSegments,
                   fiducialCalibration: s.fiducialCalibration
                     ? JSON.parse(JSON.stringify(s.fiducialCalibration))
                     : null,

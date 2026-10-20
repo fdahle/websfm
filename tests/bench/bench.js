@@ -43,7 +43,7 @@ import { demToGeoTiff } from '/src/core/products/exporters.js'
 import { crsTagInfo } from '/src/core/products/geotiff.js'
 import { emptyFiducialCalibration, calibratedFiducialPairs } from '/src/core/sfm/fiducialModel.js'
 import { fitFiducialTransform } from '/src/core/sfm/fiducialCalibration.js'
-import { RESEAU_DEFAULTS } from '/src/core/defaults.user.js'
+import { RESEAU_DEFAULTS, PANORAMIC_DEFAULTS } from '/src/core/defaults.user.js'
 import { buildBorderMask } from '/src/core/mask.js'
 import { FIDUCIAL_SPOT_DEFAULTS, VIDEO_IMPORT_DEFAULTS } from '/src/core/defaults.user.js'
 import { analysisTimes, intervalTimes, selectKeyframes } from '/src/core/io/videoFrames.js'
@@ -783,6 +783,16 @@ window.bench = {
     const fits = pairs.flatMap((p) => p.fits ?? [])
     return { seconds: (performance.now() - t0) / 1000, images: images.images.map((i) => i.name),
       pairs: pairs.map(({ fits: _f, ...p }) => p), fits }
+  },
+  // Panoramic strips (config stage `panosplit`): every scan of the one sensor cut into
+  // frame-camera segments (Tools ▸ Images ▾ ▸ Split panoramic strips).
+  async panoramicSplit(overrides = {}) {
+    const sensor = sensorsStore.sensors[0]
+    if (!sensor) return { error: 'no sensor' }
+    const t0 = performance.now()
+    const { removeStrips, ...settings } = { ...PANORAMIC_DEFAULTS, ...overrides }
+    const { strips } = await images.splitPanoramicForSensor({ sensor, settings, removeStrips })
+    return { seconds: (performance.now() - t0) / 1000, images: images.images.length, strips }
   },
   // One static mask for every image (fiducial borders, data strip): a PNG data URL,
   // opaque = excluded, transparent = kept (core/mask.js).

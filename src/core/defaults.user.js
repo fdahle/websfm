@@ -301,6 +301,13 @@ export const RESEAU_DEFAULTS = {
   widthMm: 0.03,   // line width
 }
 
+// Split panoramic strips (core/sfm/panoramic.js). Mirrored by PanoramicModal.vue.
+export const PANORAMIC_DEFAULTS = {
+  segments: 0,       // segments per strip; 0 = near-square (one per strip height of scan)
+  overlapPct: 10,    // added to each side of a segment, as a % of its share of the scan
+  removeStrips: true,
+}
+
 // Orthophoto (core/products/ortho.js). Mirrored by OrthoModal.vue.
 // UI units: depthTolRel is a %, ÷100 on run; maxCost 0 ⇒ Infinity (no gate).
 export const ORTHO_DEFAULTS = {

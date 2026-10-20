@@ -448,6 +448,17 @@ export const useSensorsStore = defineStore('sensors', () => {
     save()
   }
 
+  // A sensor of panoramic-strip segments (core/sfm/panoramic.js): each is an exact pinhole
+  // resampling of the film's cylinder at the certificate focal length, so Auto
+  // self-calibration holds it as well, and over a few degrees of field the focal length
+  // could not be solved anyway (it trades with the height).
+  function markPanoramicSegments(id) {
+    const s = sensors.value.find((x) => x.id === id)
+    if (!s) return
+    s.panoramicSegments = true
+    save()
+  }
+
   async function restoreSensors(projectId) {
     sensors.value = []
     const data = await opfs.loadSensors(projectId)
@@ -467,6 +478,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     importCameraGroups,
     updateSensor,
     markReseauStitched,
+    markPanoramicSegments,
     applyFilmFormat,
     toggleSensorFixed,
     setFiducialMarks,

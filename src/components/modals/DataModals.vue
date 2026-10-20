@@ -19,6 +19,7 @@ import CloudSymbologyModal from '../modals/CloudSymbologyModal.vue'
 import FiducialCalibrateModal from '../modals/FiducialCalibrateModal.vue'
 import FiducialDetectModal from '../modals/FiducialDetectModal.vue'
 import ReseauModal from '../modals/ReseauModal.vue'
+import PanoramicModal from '../modals/PanoramicModal.vue'
 import FootprintFromPosesModal from '../modals/FootprintFromPosesModal.vue'
 import FootprintImportModal from '../modals/FootprintImportModal.vue'
 import GcpImportModal from '../modals/GcpImportModal.vue'
@@ -63,7 +64,7 @@ const {
   imageTableOpen, importCloudData, importCloudOpen, importKindDeclared, importKindFile, importKindOpen,
   importRasterData, importRasterOpen, importVideoFile, infoImageId, maskManagerOpen, matchListOpen, poseTableOpen,
   qualityOpen, qualitySection, rasterStyleId, sensorTableOpen, sfmSourceOpen, symbologyCloudId,
-  symbologyProductKind, reseauOpen,
+  symbologyProductKind, reseauOpen, panoramicOpen,
 } = storeToRefs(useModalsStore())
 const {
   alignedUuids, changeGcpRole, checkGcpZAgainstReferenceDem, closeSfmImport, commitSfmImport, convertGcpHeightsTo,
@@ -310,6 +311,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
 
   <Teleport to="body">
     <ReseauModal v-if="reseauOpen" @close="reseauOpen = false" />
+    <PanoramicModal v-if="panoramicOpen" @close="panoramicOpen = false" />
   </Teleport>
 
 

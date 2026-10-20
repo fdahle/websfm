@@ -27,6 +27,15 @@ scanner (a rotation and shift, up to the given size, random per frame). The rese
 crosses are exposed at their nominal positions and deform with the film; the GCP
 observations go through the same chain. truth.json records each frame's `film`.
 
+Panoramic (plan-satellite ▸ group 2): `--panoramic` renders optical-bar strips, KH-9 PC
+style (1,524 mm, the film on a cylinder of radius f round the along-track axis, x = f·θ
+along the scan of `--scan-deg`), as fore / aft pairs `F01` / `A01` … converging by
+`--tilt-deg` so each pair sees the same ground in stereo. `--scan-time-s` moves the
+satellite along track while the lens sweeps (0 = one exposure position per strip); the
+pose in truth.json is the mid-scan one. `--imc` is the share of that motion the film
+shift cancels for ground at the mid height (1 by default), as the cameras' image motion
+compensation did.
+
 Halves (SAT-5): `--halves MM` scans each frame in two overlapping parts, `<name>_a.tif`
 (the left part of the film) and `<name>_b.tif` (the right), overlapping by MM in the
 middle and each with a margin round the film, as the KH-9 archive scans are. The film's
@@ -197,7 +206,7 @@ def ray_ellipsoid(C, d, h):
     dd, cc = d * w, np.asarray(C) * w
     qa = (dd * dd).sum(-1)
     qb = 2 * (dd * cc).sum(-1)
-    qc = (cc * cc).sum() - 1
+    qc = (cc * cc).sum(-1) - 1
     return (-qb - np.sqrt(np.maximum(qb * qb - 4 * qa * qc, 0))) / (2 * qa)
 
 
@@ -209,16 +218,20 @@ def intersect(C, d, t0, iters=40):
     (a grazing ray on a slope facing away, ~1 % of pixels at 37° off-nadir) is replaced
     by bisection, so every pixel lands on the surface. Where a ray crosses the surface
     more than once (occlusion behind a ridge) it lands on one of the crossings.
+    `C` is one centre, or one per ray (a panoramic camera moves during its scan).
     """
     shape = d.shape[:-1]
     d = d.reshape(-1, 3)
+    C = np.asarray(C)
+    if C.ndim > 1:
+        C = C.reshape(-1, 3)
     lo = ray_ellipsoid(C, d, G['hmax'] + 5.0)  # above the terrain: miss > 0
     hi = ray_ellipsoid(C, d, G['hmin'] - 5.0)  # below: miss < 0
     t = np.clip(ray_ellipsoid(C, d, t0), lo, hi)
     act = np.arange(t.size)  # rays still iterating (most converge in a few steps)
     for _ in range(iters):
         ta, da = t[act], d[act]
-        P = C + ta[:, None] * da
+        P = (C[act] if C.ndim > 1 else C) + ta[:, None] * da
         lat, lon, h = ecef_to_geodetic(P[:, 0], P[:, 1], P[:, 2])
         miss = h - dem_sample(G['dem'], lat, lon)
         la, ha = np.where(miss > 0, ta, lo[act]), np.where(miss <= 0, ta, hi[act])
@@ -275,23 +288,25 @@ def render_rows(job):
     U, V = np.meshgrid(u, v)
     xmm, ymm = scan_to_film(scan['film'], s, U, V)
     off_film = (np.abs(xmm) > s['film_w'] / 2) | (np.abs(ymm) > s['film_h'] / 2)
-    X, Y = (xmm - s['ppx']) / f, -(ymm - s['ppy']) / f
-    dc = np.stack([X, Y, np.ones_like(X)], axis=-1)
-    dc /= np.linalg.norm(dc, axis=-1, keepdims=True)
+    # The film shift (IMC) moved what is recorded at y: the ray is the one at y + shift (y up).
+    dc = film_ray(cam, s, xmm, ymm + imc_shift(cam, s, xmm))
     R = np.array(cam['R'])
     d = (dc @ R).reshape(-1, 3)  # world direction = Rᵀ·dc
-    C = np.array(cam['C'])
+    C = exposure_centre(cam, s, xmm)
+    if C.ndim > 1:
+        C = C.reshape(-1, 3)
     # In cache-sized chunks: with every core busy, whole-strip temporaries (tens of
     # 16 MB float64 arrays per step) made the pool memory-bound, ~7× slower in total.
     img = np.empty(d.shape[0])
     miss = np.empty(d.shape[0])
     for c0 in range(0, d.shape[0], 8192):
-        lat, lon, _, m = intersect(C, d[c0:c0 + 8192], cam['t0'])
+        lat, lon, _, m = intersect(C[c0:c0 + 8192] if C.ndim > 1 else C, d[c0:c0 + 8192], cam['t0'])
         img[c0:c0 + 8192] = texture(lat, lon)
         miss[c0:c0 + 8192] = m
-    img = img.reshape(X.shape) * dc[..., 2] ** 2  # cos² fall-off
+    # cos² fall-off (a panoramic slit sees every column on its axis: only along it)
+    img = img.reshape(xmm.shape) * (1 / (1 + ((ymm - s['ppy']) / f) ** 2) if cam.get('kind') == 'panoramic' else dc[..., 2] ** 2)
     img[off_film] = 0.02  # the dark border round the film
-    miss = miss.reshape(X.shape)
+    miss = miss.reshape(xmm.shape)
     if s['blur'] > 0:
         img = cv2.GaussianBlur(img.astype(np.float32), (0, 0), s['blur'])
     img = img[r0 - rr0: r0 - rr0 + (r1 - r0)]
@@ -301,10 +316,67 @@ def render_rows(job):
     return fr, r0, np.clip(dn, 0, 255).astype(np.uint8), (float(core.max()), int((core > 0.5).sum()))
 
 
+def film_ray(cam, s, xmm, ymm):
+    """Film mm (x right, y up) → the unit ray in the camera frame (x right, y down, z forward).
+
+    A frame camera projects onto the film plane. A panoramic (optical-bar) camera projects
+    onto a cylinder of radius f round the camera's y axis (along track): film x is the arc
+    along the scan, x = f·θ, so the ray at scan angle θ is (sin θ, −y/f, cos θ) before
+    normalising; θ = 0 looks along z.
+    """
+    f = s['focal']
+    if cam.get('kind') == 'panoramic':
+        th = (xmm - s['ppx']) / f
+        dc = np.stack([np.sin(th), -(ymm - s['ppy']) / f + 0 * th, np.cos(th)], axis=-1)
+    else:
+        X, Y = (xmm - s['ppx']) / f, -(ymm - s['ppy']) / f
+        dc = np.stack([X, Y, np.ones_like(X)], axis=-1)
+    return dc / np.linalg.norm(dc, axis=-1, keepdims=True)
+
+
+def exposure_centre(cam, s, xmm):
+    """The perspective centre when film column `xmm` was exposed: a panoramic camera scans
+    its frame in `scan_time` s, from −θmax to +θmax, while the satellite moves along track
+    (`v`, at `speed`); the centre recorded is the one at mid-scan (θ = 0). A frame camera,
+    or a scan time of 0, has one centre."""
+    C = np.array(cam['C'])
+    if cam.get('kind') != 'panoramic' or not s.get('scan_time'):
+        return C
+    frac = ((xmm - s['ppx']) / s['focal']) / s['scan_rad']  # −½ … ½ of the scan
+    return C + np.multiply.outer(frac * s['scan_time'] * s['speed'], np.array(cam['v']))
+
+
+def imc_shift(cam, s, xmm):
+    """Image motion compensation (mm, camera y, down): a panoramic camera shifts its film
+    along the cylinder's axis during the scan so that ground at the reference height stays
+    put on the film while the satellite moves; `imc` of that motion is cancelled. 0 for a
+    frame camera or a still one."""
+    if cam.get('kind') != 'panoramic' or not s.get('scan_time') or not s.get('imc'):
+        return 0.0
+    R, C = np.array(cam['R']), np.array(cam['C'])
+    th = (np.asarray(xmm, dtype=np.float64) - s['ppx']) / s['focal']
+    D = th / s['scan_rad'] * s['scan_time'] * s['speed']  # the centre's offset from mid-scan (m)
+    d0 = np.stack([np.sin(th), np.zeros_like(th), np.cos(th)], axis=-1) @ R
+    r_ref = ray_ellipsoid(C, d0.reshape(-1, 3), s['ref_h']).reshape(th.shape)
+    vy = (R @ np.array(cam['v']))[1]  # the motion along the film's axis, in camera y
+    return s['imc'] * s['focal'] * vy * D / r_ref
+
+
 def project(cam, s, P, film):
     """ECEF points (N×3) → film mm, the scan pixel-edge u, v of the scan `film` describes
     (film deformation and scanner placement included), and the depth."""
-    Xc = (P - np.array(cam['C'])) @ np.array(cam['R']).T
+    R = np.array(cam['R'])
+    if cam.get('kind') == 'panoramic':
+        # The scan angle sets the exposure time, which moves the centre: iterate.
+        xmm = np.full(len(P), s['ppx'])
+        for _ in range(4 if s.get('scan_time') else 1):
+            Xc = (P - exposure_centre(cam, s, xmm)) @ R.T
+            xmm = s['ppx'] + s['focal'] * np.arctan2(Xc[:, 0], Xc[:, 2])
+        rho = np.hypot(Xc[:, 0], Xc[:, 2])
+        ymm = s['ppy'] - s['focal'] * Xc[:, 1] / rho - imc_shift(cam, s, xmm)
+        u, v = film_to_scan(film, s, xmm, ymm)
+        return xmm, ymm, u, v, rho
+    Xc = (P - np.array(cam['C'])) @ R.T
     xmm = s['ppx'] + s['focal'] * Xc[:, 0] / Xc[:, 2]
     ymm = s['ppy'] - s['focal'] * Xc[:, 1] / Xc[:, 2]
     u, v = film_to_scan(film, s, xmm, ymm)
@@ -376,9 +448,16 @@ def main():
     ap.add_argument('out')
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--pitch-mm', type=float, default=0.056, help='scan pitch (KH-9 MC native 0.007)')
-    ap.add_argument('--focal-mm', type=float, default=304.8)
-    ap.add_argument('--film-w-mm', type=float, default=460.0, help='across track')
-    ap.add_argument('--film-h-mm', type=float, default=230.0, help='along track')
+    ap.add_argument('--focal-mm', type=float, default=None, help='304.8 (KH-9 MC); 1524 with --panoramic (KH-9 PC)')
+    ap.add_argument('--film-w-mm', type=float, default=None, help='across track: 460; with --panoramic f × the scan angle')
+    ap.add_argument('--film-h-mm', type=float, default=None, help='along track: 230; 157 with --panoramic')
+    ap.add_argument('--panoramic', action='store_true', help='optical-bar strips (KH-9 PC): fore / aft pairs, film on a cylinder')
+    ap.add_argument('--scan-deg', type=float, default=90.0, help='--panoramic: the scan angle a strip covers')
+    ap.add_argument('--tilt-deg', type=float, default=10.0, help='--panoramic: fore / aft convergence of the two cameras')
+    ap.add_argument('--scan-time-s', type=float, default=0.0, help='--panoramic: scan duration; the satellite moves meanwhile (0 = still)')
+    ap.add_argument('--speed-mps', type=float, default=7600.0, help='--panoramic: ground-track speed for --scan-time-s')
+    ap.add_argument('--imc', type=float, default=1.0, help='--panoramic: image motion compensation, the share of the '
+                    'motion the film shift cancels for ground at the mid height (1 = all, 0 = none)')
     ap.add_argument('--pp-mm', type=float, nargs=2, default=[0.02, -0.03], help='principal point offset, y up')
     ap.add_argument('--altitude-m', type=float, default=170000.0)
     ap.add_argument('--frames', type=int, default=6)
@@ -404,6 +483,14 @@ def main():
     ap.add_argument('--strip-px', type=int, default=2_000_000, help='pixels per render job')
     ap.add_argument('--workers', type=int, default=max(1, (os.cpu_count() or 2) - 2))
     a = ap.parse_args()
+    if a.focal_mm is None:
+        a.focal_mm = 1524.0 if a.panoramic else 304.8
+    if a.film_h_mm is None:
+        a.film_h_mm = 157.0 if a.panoramic else 230.0
+    if a.film_w_mm is None:
+        a.film_w_mm = a.focal_mm * math.radians(a.scan_deg) if a.panoramic else 460.0
+    if a.panoramic and a.halves > 0:
+        ap.error('--halves is for frame cameras')
     t_start = time.time()
     os.makedirs(os.path.join(a.out, 'images'), exist_ok=True)
 
@@ -418,7 +505,28 @@ def main():
     along = a.film_h_mm / a.focal_mm * (a.altitude_m - a.base_m)
     base = (1 - a.overlap) * along
     cams = []
-    for i in range(a.frames):
+    if a.panoramic:
+        # Fore / aft pairs: F looks `tilt` ahead, A as far back, A placed 2·D on so that it
+        # sees the ground F saw (D = height · tan tilt). Successive pairs `base` apart.
+        tau = math.radians(a.tilt_deg)
+        D = (a.altitude_m - a.base_m) * math.tan(tau)
+        along /= math.cos(tau)
+        base = (1 - a.overlap) * along
+        npairs = max(1, a.frames // 2)
+        for i in range(npairs):
+            for side, sgn, off in (('F', 1, 0.0), ('A', -1, 2 * D)):
+                north_m = (i - (npairs - 1) / 2) * base + off - D
+                lat = lat0 + north_m / m_lat
+                east, north, up = enu_axes(lat, lon0)
+                z = -up * math.cos(tau) + sgn * north * math.sin(tau)
+                y = np.cross(z, east)
+                Rn = rot_xyz(*np.radians(rng.normal(0, a.attitude_deg, 3)))
+                R = Rn @ np.stack([east, y, z])
+                C = geodetic_to_ecef(np.float64(lat), np.float64(lon0), np.float64(a.altitude_m))
+                cams.append({'name': f'{side}{i + 1:02d}.tif', 'kind': 'panoramic', 'C': C.tolist(), 'R': R.tolist(),
+                             'v': north.tolist(), 'lat': math.degrees(lat), 'lon': a.lon, 'h': a.altitude_m,
+                             't0': a.base_m + a.relief_m / 2})
+    for i in range(0 if a.panoramic else a.frames):
         lat = lat0 + (i - (a.frames - 1) / 2) * base / m_lat
         east, north, up = enu_axes(lat, lon0)
         R0 = np.stack([east, -north, -up])  # rows: camera x, y, z in ECEF
@@ -454,20 +562,24 @@ def main():
 
     scene = {'W': W, 'H': H, 'pitch': a.pitch_mm, 'focal': a.focal_mm, 'ppx': a.pp_mm[0], 'ppy': a.pp_mm[1],
              'film_w': a.film_w_mm, 'film_h': a.film_h_mm, 'seed': a.seed, 'blur': a.blur_px, 'grain': a.grain_dn,
-             'lat_c': lat0, 'lon_c': lon0, 'm_per_rad_lat': m_lat, 'm_per_rad_lon': m_lon}
+             'lat_c': lat0, 'lon_c': lon0, 'm_per_rad_lat': m_lat, 'm_per_rad_lon': m_lon,
+             'scan_rad': a.film_w_mm / a.focal_mm, 'scan_time': a.scan_time_s if a.panoramic else 0.0, 'speed': a.speed_mps,
+             'imc': a.imc, 'ref_h': a.base_m + a.relief_m / 2}
     gsd = a.pitch_mm / a.focal_mm * (a.altitude_m - a.base_m - a.relief_m / 2)
     scene['finest_m'] = 2 * gsd
 
-    # Terrain grid: the footprints at the base height, plus a margin.
+    # Terrain grid: the footprints at the base height, plus a margin (the film's outline,
+    # sampled, so a panoramic strip's curved footprint is covered too).
     corners = []
+    edge = np.linspace(-0.5, 0.5, 9)
+    fx = np.concatenate([edge, edge, np.full(9, -0.5), np.full(9, 0.5)]) * a.film_w_mm
+    fy = np.concatenate([np.full(9, -0.5), np.full(9, 0.5), edge, edge]) * a.film_h_mm
     for cam in cams:
-        for (u, v) in [(0, 0), (W, 0), (0, H), (W, H)]:
-            xmm, ymm = (u - W / 2) * a.pitch_mm, (H / 2 - v) * a.pitch_mm
-            dc = np.array([(xmm - a.pp_mm[0]) / a.focal_mm, -(ymm - a.pp_mm[1]) / a.focal_mm, 1.0])
-            d = np.array(cam['R']).T @ (dc / np.linalg.norm(dc))
-            t = (a.altitude_m - a.base_m) / max(0.2, -(d @ enu_axes(math.radians(cam['lat']), lon0)[2]))
-            la, lo, _ = ecef_to_geodetic(*(np.array(cam['C']) + t * d))
-            corners.append((float(la), float(lo)))
+        d = film_ray(cam, scene, fx, fy) @ np.array(cam['R'])
+        Cs = exposure_centre(cam, scene, fx)
+        P = Cs + ray_ellipsoid(Cs, d, a.base_m)[:, None] * d
+        for la_, lo_, _ in zip(*ecef_to_geodetic(P[:, 0], P[:, 1], P[:, 2])):
+            corners.append((float(la_), float(lo_)))
     la = np.array([c[0] for c in corners])
     lo = np.array([c[1] for c in corners])
     marg_lat, marg_lon = 0.08 * (la.max() - la.min()), 0.08 * (lo.max() - lo.min())
@@ -517,9 +629,8 @@ def main():
         # A film point in the frame's interior (independent of how it was scanned).
         xmm = rng.uniform(-0.42, 0.42) * a.film_w_mm
         ymm = rng.uniform(-0.42, 0.42) * a.film_h_mm
-        dc = np.array([(xmm - a.pp_mm[0]) / a.focal_mm, -(ymm - a.pp_mm[1]) / a.focal_mm, 1.0])
-        d = (np.array(cam['R']).T @ (dc / np.linalg.norm(dc)))[None, :]
-        lat, lon, _, _ = intersect(np.array(cam['C']), d, cam['t0'], iters=20)
+        d = (np.array(cam['R']).T @ film_ray(cam, scene, np.float64(xmm), np.float64(ymm) + imc_shift(cam, scene, np.float64(xmm))))[None, :]
+        lat, lon, _, _ = intersect(exposure_centre(cam, scene, np.float64(xmm)), d, cam['t0'], iters=20)
         h = dem_sample(dem, lat, lon)
         P = geodetic_to_ecef(lat, lon, h)
         E, N = to_map.transform(math.degrees(lon[0]), math.degrees(lat[0]))
@@ -573,6 +684,8 @@ def main():
                       'refDem': f'{out}/truth_dem.tif'},
              'stages': 'detect,match,recon,depth,dense,dem', 'depth': {'quality': 'high'}, 'dense': {'step': 2},
              'dem': {'crs': 'project', 'gsd': round(4 * gsd, 1)}}
+    if a.panoramic:
+        bench['stages'] = 'panosplit,' + bench['stages']
     with open(os.path.join(a.out, 'bench.json'), 'w') as f:
         json.dump(bench, f, indent=2)
     print(f'{len(gcps)} GCPs, {len(gcp_rows)} observations; reseau crosses/frame {reseau}; total {time.time() - t_start:.0f} s')

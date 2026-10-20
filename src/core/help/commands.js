@@ -117,6 +117,7 @@ export const CONSOLE_NAMES = {
   'detect-fiducials':  ['fiducials'],
   'calibrate-fiducials': ['calibrate fiducials', 'fiducial-calibration'],
   'detect-reseau':     ['reseau', 'detect reseau'],
+  'split-panoramic':   ['panoramic', 'split panoramic'],
   'image-quality':     ['image quality', 'blur', 'sharpness'],
   'optimize-cameras':  ['optimize'],
   'gradual-selection': ['gradual'],

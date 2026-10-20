@@ -117,9 +117,9 @@ export function resolveRefineIntrinsics({ cfg, anyCalibratedDistortion, anyResea
         'info', 'Reconstruction')
     } else if (anyReseauCalibrated) {
       cfg.refineIntrinsics = 'none'
-      log(`refineIntrinsics 'auto' → 'none' (a reseau-calibrated film camera, or half frames stitched through `
-        + 'their reseau: the film\'s deformation is measured and the certificate holds; choose a self-calibration '
-        + 'explicitly to refine it)', 'info', 'Reconstruction')
+      log(`refineIntrinsics 'auto' → 'none' (a reseau-calibrated film camera, half frames stitched through `
+        + 'their reseau, or panoramic strip segments: the film\'s geometry is corrected and the certificate holds; '
+        + 'choose a self-calibration explicitly to refine it)', 'info', 'Reconstruction')
     } else {
       // Staged self-cal (WS2): registration + rescue solve the base 'f,k1'; the
       // post-filter passes escalate to k2 / principal-point / k3 as the camera and
