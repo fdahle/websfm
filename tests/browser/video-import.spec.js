@@ -26,6 +26,7 @@ const imageState = (page) => page.evaluate(async () => {
   const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
   const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
   const opfs = await import('/src/utils/opfs.js')
+  const { useLog } = await import('/src/composables/useLog.js')
   const pid = useProjectsStore().currentProjectId
   const imgs = useImagesStore().images
   const stored = []
@@ -37,8 +38,11 @@ const imageState = (page) => page.evaluate(async () => {
     sensorIds: [...new Set(imgs.map((i) => i.sensorId))],
     sensors: useSensorsStore().sensors.map((s) => s.label),
     stored,
-    // After the read-back, a record's file is the OPFS copy, not the encoded frame.
+    // After the read-back a record's file is the OPFS copy, under the frame's own name
+    // (IS-1: exports and conversions use it), so the name no longer tells them apart;
+    // the read-back's log line does.
     fileNames: imgs.map((i) => i.file?.name ?? null),
+    readBack: useLog().entries.value.map((e) => e.message).filter((m) => m.startsWith('Images read from project storage:')),
     thumbs: imgs.filter((i) => i.thumb).length,
   }
 })
@@ -73,9 +77,12 @@ test('Import ▸ Video plans frames, then extracts them into the project as imag
 
   await expect.poll(async () => {
     const s = await imageState(page)
-    return s.names.length === 8 && s.loading === 0 && s.fileNames.every((n) => n !== null && !n.endsWith('.jpg'))
+    // Frames arrive in batches, each read back with its own line ("4 of 4 images").
+    const readBack = s.readBack.reduce((sum, m) => sum + Number(/: (\d+) of /.exec(m)?.[1] ?? 0), 0)
+    return s.names.length === 8 && s.loading === 0 && readBack === 8
   }, { timeout: 30_000 }).toBe(true)
   const s = await imageState(page)
+  expect(s.fileNames).toEqual(s.names)
   expect(s.names).toEqual([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5].map((t) => `south-building-4_00m0${Math.floor(t)}.${String(Math.round((t % 1) * 1000)).padStart(3, '0')}s.jpg`))
   expect(s.meta.every((m) => m.src === NAME && m.w === 320 && m.h === 240)).toBe(true)
   expect(s.meta.map((m) => m.t)).toEqual([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5])
