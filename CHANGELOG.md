@@ -18,6 +18,14 @@ Notable changes to websfm. The format follows
   the film and correct its deformation, ground control marks move to the stitched
   frame, and the halves are removed. On real KH-9 scans the stitched frame's crosses
   lie on their grid to 6 µm.
+- **Panoramic satellite strips (Tools ▸ Images ▾ ▸ Film scans ▸ Split panoramic
+  strips).** KH-9 and KH-4 panoramic frames are long strips of curved film that no
+  frame camera describes. Each strip is now cut into segments, each resampled exactly
+  into the image a frame camera turned to that part of the scan would take, and
+  reconstructed like any frame images. Six Casa Grande KH-9 panoramic strips, of
+  which two images registered before, now register as 96 of 96 segments. The
+  satellite's motion during the scan is not modelled yet, so accuracy is coarse: tens
+  to hundreds of metres on a synthetic block that moves as a real one does.
 - **DEMs finer than 4,096 cells a side.** A DEM whose chosen cell size needs a bigger
   grid (a satellite frame at its native resolution) is no longer coarsened to fit: it is
   built block by block as a full-resolution Cloud-Optimized GeoTIFF, which the GeoTIFF
