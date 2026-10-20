@@ -12,6 +12,12 @@ Notable changes to websfm. The format follows
   has stretched or warped, centimetre by centimetre. On a synthetic satellite block
   with deformed film, checkpoint errors fell from tens of metres to under one pixel.
   Self-calibration on Auto keeps the camera's certificate values for such a camera.
+- **Half-frame film scans.** Archives that scan a frame in two overlapping halves
+  (`<frame>_a` and `<frame>_b`, as for the KH-9 mapping camera) can now be stitched
+  into one frame in Detect reseau ▸ Half frames. The crosses on each half place it on
+  the film and correct its deformation, ground control marks move to the stitched
+  frame, and the halves are removed. On real KH-9 scans the stitched frame's crosses
+  lie on their grid to 6 µm.
 - **DEMs finer than 4,096 cells a side.** A DEM whose chosen cell size needs a bigger
   grid (a satellite frame at its native resolution) is no longer coarsened to fit: it is
   built block by block as a full-resolution Cloud-Optimized GeoTIFF, which the GeoTIFF
