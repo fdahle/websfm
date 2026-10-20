@@ -22,7 +22,8 @@ Every WebSfM project has one **working CRS**, and everything positional —
 [GCPs](help:ground-control-point), imported [camera poses](help:camera-pose),
 footprints, and the [georeferenced](help:georeferencing) products — lives in it.
 Changing it reprojects all of them together rather than reinterpreting the
-numbers in place.
+numbers in place. A DEM or orthophoto can also be exported as a reprojected copy in
+another CRS, while the project stays in its working CRS.
 
 <!-- TODO(image): assets/crs-polar.svg - the same Antarctic coastline drawn in a UTM zone (severely distorted, zones converging) and in EPSG:3031 polar stereographic (clean), with the pole marked in both to show why the default choice fails at high latitude. -->
 

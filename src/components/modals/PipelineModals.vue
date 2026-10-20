@@ -77,6 +77,8 @@ const {
 // render time (not cached) because it depends on the marks, which the user edits
 // while the app is open. `scaleFitStatus` is the single owner of that rule.
 const scaleFitValid = computed(() => reconstructionStore.scaleFitStatus().valid)
+// A DEM / ortho's own CRS for the export's reprojection ('' = the local frame, no CRS).
+const rasterCrsOf = (r) => (r?.crs && r.crs !== 'local' ? r.crs : '')
 // A tool dialog starts on the cloud/mesh the user has selected, when it fits.
 const toolInitialId = computed(() => reconstructionStore.selectedCloudId)
 // The mesh a mesh or 3D Tiles export writes: the sidebar's target, else the selected
@@ -179,6 +181,7 @@ const measurementsStore = useMeasurementsStore()
       :subject="exportTargetCloud?.name ?? exportMeasurementScope?.label ?? ''"
       :textured="!!exportMeshCloud?.texture"
       :measurement-crs="exportKind === 'measurements' ? measurementExportCrs(exportMeasurementScope?.ids ?? null, georef?.crs === currentCrs) ?? '' : ''"
+      :raster-crs="exportKind === 'dem' ? rasterCrsOf(dem) : exportKind === 'ortho' ? rasterCrsOf(ortho) : ''"
       :tiles-subject="exportTilesSubject"
       @close="exportKind = null"
       @run="onExportRun"

@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import FieldHelp from '../guide/FieldHelp.vue'
+import CrsPicker from '../controls/CrsPicker.vue'
 import { EXPORT_DEFAULTS } from '../../core/defaults.user.js'
 import { MAX_ORTHO_IMAGE_CELLS } from '../../core/products/exporters.js'
 import { defaultTiling, singleTileFits } from '../../core/products/tiles3d.js'
@@ -33,6 +34,9 @@ const props = defineProps({
   // Measurements: the CRS a georeferenced GeoJSON would be in, or '' when none of
   // the measurements has one (they are then written in their own frames).
   measurementCrs: { type: String, default: '' },
+  // DEM / ortho: the CRS the raster was built in ('' for the local frame), which the
+  // GeoTIFF export can reproject into another (core/products/warp.js).
+  rasterCrs: { type: String, default: '' },
   // What a 3D Tiles export writes (core/products/tiles3d.js tilesSubject): { kind:
   // 'mesh' | 'cloud', count, streamed, textured }, or null. Sets the tiling default.
   tilesSubject: { type: Object, default: null },
@@ -174,8 +178,18 @@ function run() {
     })
     return
   }
-  emit('run', { ...settings.value })
+  // A raster reprojected only when another CRS is picked, and it differs from its own.
+  const reproject = (props.kind === 'dem' || props.kind === 'ortho') && isTiff.value && props.rasterCrs
+    && settings.value.rasterCrs === 'other' && outputCrs.value && outputCrs.value !== props.rasterCrs
+  emit('run', { ...settings.value, outputCrs: reproject ? outputCrs.value : null })
 }
+
+// The CRS a reprojected DEM / ortho is written in (the picker resolves its definition).
+const outputCrs = ref(props.rasterCrs || 'EPSG:4326')
+const isRaster = computed(() => props.kind === 'dem' || props.kind === 'ortho')
+// A reprojected copy is always a DEFLATE COG with NaN nodata: those fields don't apply.
+const reprojecting = computed(() => isRaster.value && isTiff.value && !!props.rasterCrs && settings.value.rasterCrs === 'other')
+const rasterOp = computed(() => (props.kind === 'dem' ? 'dem' : 'orthophoto'))
 </script>
 
 <template>
@@ -323,11 +337,11 @@ function run() {
         anywhere a normal GeoTIFF is.
       </p>
       <!-- The hillshade PNG is a rendered preview: it has no elevation cells to flag. -->
-      <SettingsField v-if="settings.format !== 'png'" label="NODATA value" label-for="nodata"
+      <SettingsField v-if="settings.format !== 'png' && !reprojecting" label="NODATA value" label-for="nodata"
         hint="Written for empty cells (holes with no measurement).">
         <input id="nodata" v-model.number="settings.nodata" type="number" step="any" class="field-input" />
       </SettingsField>
-      <SettingsField v-if="isTiff" label="Compression" label-for="comp">
+      <SettingsField v-if="isTiff && !reprojecting" label="Compression" label-for="comp">
         <select id="comp" v-model="settings.compression" class="field-input field-select">
           <option value="none">None (uncompressed)</option>
           <option value="deflate">DEFLATE (lossless)</option>
@@ -362,7 +376,7 @@ function run() {
         normal GeoTIFF is.
       </p>
       <!-- The COG export is the stored file itself, always DEFLATE. -->
-      <SettingsField v-if="isTiff && !isCog" label="Compression" label-for="ocomp">
+      <SettingsField v-if="isTiff && !isCog && !reprojecting" label="Compression" label-for="ocomp">
         <select id="ocomp" v-model="settings.compression" class="field-input field-select">
           <option value="none">None (uncompressed)</option>
           <option value="deflate">DEFLATE (lossless)</option>
@@ -371,6 +385,35 @@ function run() {
       <SettingsField v-if="settings.format === 'jpeg'" :label="`JPEG quality: ${settings.jpegQuality.toFixed(2)}`" label-for="jq">
         <input id="jq" v-model.number="settings.jpegQuality" type="range" min="0.1" max="1" step="0.05" class="field-input range" />
       </SettingsField>
+    </template>
+
+    <!-- DEM / ortho GeoTIFF in another CRS: warped block by block in the export worker. -->
+    <template v-if="isRaster && isTiff">
+      <SettingsField label-for="rcrs"
+        :hint="rasterCrs ? 'Another CRS writes a reprojected copy; the product itself stays as built.'
+          : 'A raster in the local frame has no CRS to reproject from.'">
+        <template #label><FieldHelp :op="rasterOp" param="rasterCrs">Coordinate system</FieldHelp></template>
+        <select id="rcrs" v-model="settings.rasterCrs" class="field-input field-select">
+          <option value="product">As built ({{ rasterCrs || 'local frame, no CRS' }})</option>
+          <option value="other" :disabled="!rasterCrs">Another CRS…</option>
+        </select>
+      </SettingsField>
+      <template v-if="rasterCrs && settings.rasterCrs === 'other'">
+        <div class="field"><CrsPicker v-model="outputCrs" /></div>
+        <SettingsField label-for="rresamp"
+          :hint="kind === 'dem' ? 'Bilinear interpolates heights; Nearest keeps every value as measured.'
+            : 'Bilinear is smoother; Nearest keeps every pixel as it was.'">
+          <template #label><FieldHelp :op="rasterOp" param="resampling">Resampling</FieldHelp></template>
+          <select id="rresamp" v-model="settings.resampling" class="field-input field-select">
+            <option value="bilinear">Bilinear</option>
+            <option value="nearest">Nearest</option>
+          </select>
+        </SettingsField>
+        <p class="field-hint">
+          Written as a Cloud-Optimized GeoTIFF (DEFLATE{{ kind === 'dem' ? ', nodata NaN' : '' }}) at the same ground
+          cell size.{{ kind === 'dem' ? ' Heights keep their vertical datum: only the horizontal CRS changes.' : '' }}
+        </p>
+      </template>
     </template>
 
     <template #footer>

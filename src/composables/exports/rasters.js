@@ -2,7 +2,8 @@ import { epsgToWkt } from '../../core/products/wkt.js'
 import { demToCog, demToGeoTiff, rasterWorldFile, demToAsciiGridParts, orthoToGeoTiff } from '../../core/products/exporters.js'
 import { downloadBlob } from '../../utils/download.js'
 import { partsToBlob } from '../../utils/blobParts.js'
-import { exportOrthoFile, demTool as workerDemTool, demAscii as workerDemAscii } from '../../workers/computeClient.js'
+import { exportOrthoFile, demTool as workerDemTool, demAscii as workerDemAscii, warpRaster as workerWarpRaster } from '../../workers/computeClient.js'
+import { ensureProjection, projDefinition, isGeographic } from '../../core/crs.js'
 import { rasterGroundScale, rasterUnits } from '../../core/products/rasterUnits.js'
 import { productDescriptor } from '../../core/io/rasterSource.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -33,8 +34,43 @@ export function createRasterExports({
 
   // DEM → GeoTIFF (optional DEFLATE), ESRI ASCII grid, or hillshade PNG — each
   // with a .prj sidecar carrying the CRS (real WKT where possible).
-  async function doExportDem({ format, nodata, compression }) {
+  // A DEM / ortho GeoTIFF in another CRS (`outputCrs`): reprojected block by block in
+  // the export worker (workers/ops/export.js warpRaster) from the stored GeoTIFF, or a
+  // DEM's plane when it has none; always a DEFLATE COG. The product stays as built.
+  async function exportReprojected(kind, product, { outputCrs, resampling }) {
+    const info = crsInfo(product)
+    const label = kind === 'dem' ? 'DEM' : 'Ortho'
+    if (!info.crs) { log(`${label} export: a raster in the local frame has no CRS to reproject from`, 'warn', 'Export'); return }
+    await ensureProjection(info.crs)
+    await ensureProjection(outputCrs)
+    const fromDef = projDefinition(info.crs), toDef = projDefinition(outputCrs)
+    if (!fromDef || !toDef) throw new Error(`no proj4 definition for ${fromDef ? outputCrs : info.crs}`)
+    const blockDem = kind === 'dem' && product.cog
+    const geo = blockDem
+      ? { width: product.fullWidth, height: product.fullHeight, gsd: product.fullGsd, originX: product.originX, originY: product.originY }
+      : { width: product.width, height: product.height, gsd: product.gsd, originX: product.originX, originY: product.originY }
+    let plane = null, transfer = []
+    if (kind === 'dem' && !product.cog) {
+      // The plane's mask can differ from its NaNs (a filled cell): what it masks is nodata.
+      const data = Float32Array.from(product.data)
+      if (product.mask) for (let i = 0; i < data.length; i++) if (!product.mask[i]) data[i] = NaN
+      plane = { data }
+      transfer = [data.buffer]
+    }
+    const epsg = Number(/^EPSG:(\d+)$/i.exec(outputCrs)?.[1]) || null
+    const { blob, width, height } = await workerWarpRaster({
+      kind, file: product.cog ?? null, plane, geo, resampling,
+      from: { code: info.crs, def: fromDef }, to: { code: outputCrs, def: toDef, epsg, geographic: isGeographic(outputCrs) },
+    }, { transfer, onLog: (m, l, c) => log(m, l, c) })
+    const tag = outputCrs.replace(/[^A-Za-z0-9]+/g, '')
+    downloadBlob(`${projectBase()}-${kind}-${tag}.tif`, blob, 'image/tiff')
+    log(`${label} export: ${width}×${height} Cloud-Optimized GeoTIFF in ${outputCrs}, reprojected from ${info.crs}`
+      + (kind === 'dem' ? ' (nodata NaN; heights keep their vertical datum)' : ''), 'success', 'Export')
+  }
+
+  async function doExportDem({ format, nodata, compression, outputCrs = null, resampling = 'bilinear' }) {
     if (!dem.value) return
+    if (outputCrs && (format === 'cog' || format === 'geotiff')) return exportReprojected('dem', dem.value, { outputCrs, resampling })
     const info = crsInfo(dem.value)
     // A DEM past one plane (SAT-3) is its stored COG: both TIFF formats hand that file
     // out as it is (DEFLATE, NaN for nodata), and the other formats are its overview.
@@ -92,9 +128,10 @@ export function createRasterExports({
   // its CRS tagged): the COG export is that file, and the other forms are streamed
   // out of it in the export worker (workers/ops/export.js exportOrtho), so no export
   // ever holds the ortho as one array. The geotransform is the ORTHO's own.
-  async function doExportOrtho({ format, compression, jpegQuality }) {
+  async function doExportOrtho({ format, compression, jpegQuality, outputCrs = null, resampling = 'bilinear' }) {
     const o = ortho.value
     if (!o?.cog) return
+    if (outputCrs && (format === 'cog' || format === 'geotiff')) return exportReprojected('ortho', o, { outputCrs, resampling })
     const info = crsInfo(o)
     if (format === 'cog') {
       downloadBlob(`${projectBase()}-ortho-cog.tif`, o.cog, 'image/tiff')

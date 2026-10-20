@@ -215,11 +215,28 @@ beside the image when moving it into GIS. They are offered up to 8,192 × 8,192
 pixels; a larger orthophoto exports as a GeoTIFF. JPEG has no transparency, so
 uncovered pixels become black.
 
+The GeoTIFF and COG exports can be written in another
+[CRS](help:coordinate-reference-system), set below.
+
 Inspect seams, leaning objects, ghosting, holes, and boundary behaviour at full
 resolution before using the result: the orthophoto's tab draws full-resolution tiles
 as you zoom in, and its status bar reads the colour of the pixel under the cursor.
 **Clip** reads only the part of the orthophoto the polygons cover, up to 8,192 ×
 8,192 pixels.
+
+## Export coordinate system
+<!-- param: rasterCrs default: As built -->
+**As built** writes the orthophoto in the CRS it was built in. **Another CRS…** writes a
+reprojected copy in the CRS you pick, as a Cloud-Optimized GeoTIFF (DEFLATE) at the
+same ground cell size; the orthophoto itself stays as built. Uncovered pixels stay
+transparent. An orthophoto in the local frame has no CRS, so it can't be reprojected.
+A raster around a pole can't be written in a geographic CRS (degrees).
+
+## Export resampling
+<!-- param: resampling default: Bilinear -->
+How a reprojected copy samples the orthophoto. **Bilinear** blends the four nearest
+pixels, which is smoother. **Nearest** keeps each pixel's colour exactly. Next to
+transparent pixels, Bilinear also takes the nearest pixel, so edges don't bleed.
 
 ## Show on the 2D map
 Choose **On Map** in the orthophoto's ribbon tab, or **Display on map** in the

@@ -140,6 +140,12 @@ export function metresToCrsUnits(value, code) {
 
 // Track what proj4 already knows so we don't re-register or re-fetch.
 const registered = new Set(['EPSG:4326', 'EPSG:3857'])
+// The proj4 definition string of every registered code, for a worker that runs proj4
+// itself (the raster warp): it cannot reach the catalog, the OPFS cache or epsg.io.
+const defStrings = new Map([
+  ['EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs'],
+  ['EPSG:3857', '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs'],
+])
 
 // Cache for definitions fetched from epsg.io, persisted in OPFS across reloads.
 // Definitions fetched from epsg.io, cached in OPFS so a code resolves offline
@@ -215,6 +221,7 @@ function setProjectionExtents(code, def, { extent, worldExtent } = {}) {
 }
 
 function applyDef(code, def, opts) {
+  defStrings.set(code, def)
   proj4.defs(code, def)
   register(proj4)
   registered.add(code)
@@ -274,6 +281,11 @@ export async function ensureProjection(code, supplied = null) {
   await saveDefCache()
   applyDef(code, def)
   return true
+}
+
+/** The proj4 definition `ensureProjection(code)` registered, or null. */
+export function projDefinition(code) {
+  return defStrings.get(code) ?? null
 }
 
 // ── Transforms ────────────────────────────────────────────────────────────────

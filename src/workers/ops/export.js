@@ -4,7 +4,10 @@ import { cloudToLasParts } from '../../core/io/las.js'
 import { cloudToLaz } from '../../core/io/laz.js'
 import { cloudToXyzParts } from '../../core/io/cloudText.js'
 import { partsToBlob } from '../../utils/blobParts.js'
-import { assembleStripTiff, geoKeysForEpsg } from '../../core/products/geotiff.js'
+import { assembleStripTiff, geoKeysForEpsg, createCogBuilder } from '../../core/products/geotiff.js'
+import { MAX_RASTER_SIDE } from '../../core/products/rasterSize.js'
+import { warpGrid, warpSourceCoords, sourceWindow, sampleRgbaWarp, sampleHeightsWarp } from '../../core/products/warp.js'
+import proj4 from 'proj4'
 import { MAX_ORTHO_IMAGE_CELLS as MAX_IMAGE_CELLS } from '../../core/products/exporters.js'
 import { openRaster, readWindowBytes, rowsPerBand } from '../cogRead.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -152,5 +155,80 @@ export function makeExportOps({ lazCodec = null } = {}) {
     return { result: { blob, width, height } }
   }
 
-  return { exportCloud, exportMesh, exportOrtho }
+  // A DEM or orthophoto in another CRS (plan-dense-past-one-tab P5): the output grid is
+  // the source outline's box in the target CRS at the source's ground cell size
+  // (core/products/warp.js), built block by block into a Cloud-Optimized GeoTIFF, each
+  // block reading only the source window it maps onto. Heights pass through unchanged
+  // (the horizontal CRS changes, the vertical datum does not). The page resolved both
+  // CRS definitions (core/crs.js projDefinition): this worker has no catalog of its own.
+  // args: [{ kind: 'dem' | 'ortho', file?: Blob (the stored COG), plane?: { data } (a
+  //   DEM's plane when it has no COG), geo: { width, height, gsd, originX, originY },
+  //   from: { code, def }, to: { code, def, epsg, geographic }, resampling }]
+  //   → { blob, width, height, gsd, originX, originY }
+  const WARP_BLOCK = 2048, WARP_TILE = 512, WARP_MAX_WINDOW = 64 * 1024 ** 2
+  async function warpRaster([{ kind, file = null, plane = null, geo, from, to, resampling = 'bilinear' }], { emit }) {
+    const t0 = performance.now()
+    proj4.defs(from.code, from.def)
+    proj4.defs(to.code, to.def)
+    const conv = proj4(from.code, to.code)
+    const forward = (x, y) => conv.forward([x, y]), inverse = (x, y) => conv.inverse([x, y])
+    if (to.geographic) {
+      // A pole inside the raster has no bounded box in degrees.
+      for (const lat of [90, -90]) {
+        const [px, py] = inverse(0, lat)
+        if (px >= geo.originX && px <= geo.originX + geo.width * geo.gsd && py <= geo.originY && py >= geo.originY - geo.height * geo.gsd) {
+          throw new Error(`the raster contains the ${lat > 0 ? 'North' : 'South'} Pole, which a geographic CRS cannot hold in one grid`)
+        }
+      }
+    }
+    const out = warpGrid(geo, forward)
+    const ortho = kind === 'ortho'
+    if (Math.max(out.width, out.height) > MAX_RASTER_SIDE) {
+      throw new Error(`in ${to.code} this ${ortho ? 'orthophoto' : 'DEM'} would be ${out.width.toLocaleString()} × ${out.height.toLocaleString()} px, `
+        + `past the ${MAX_RASTER_SIDE.toLocaleString()} px a raster may have on a side; export it in its own CRS`)
+    }
+    const image = file ? await openRaster(file) : null
+    const builder = createCogBuilder({
+      width: out.width, height: out.height, tileSize: WARP_TILE,
+      ...(ortho
+        ? { ArrayType: Uint8ClampedArray, samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })), photometric: 2, extraSamples: [2] }
+        : { ArrayType: Float32Array, samples: [{ bits: 32, format: 3 }], photometric: 1, gdalNoData: 'nan' }),
+      pixelScale: [out.gsd, out.gsd, 0], tiepoint: [0, 0, 0, out.originX, out.originY, 0],
+      geoKeys: geoKeysForEpsg(to.epsg, to.geographic),
+    }, { blockSize: WARP_BLOCK, compress: deflatePart })
+    const nb = Math.ceil(out.width / WARP_BLOCK) * Math.ceil(out.height / WARP_BLOCK)
+    let done = 0, finest = Infinity
+    const nearest = resampling === 'nearest'
+    for (let row0 = 0; row0 < out.height; row0 += WARP_BLOCK) for (let col0 = 0; col0 < out.width; col0 += WARP_BLOCK) {
+      const w = Math.min(WARP_BLOCK, out.width - col0), h = Math.min(WARP_BLOCK, out.height - row0)
+      const data = ortho ? new Uint8ClampedArray(w * h * 4) : new Float32Array(w * h).fill(NaN)
+      const { sx, sy, step } = warpSourceCoords(out, geo, inverse, col0, row0, w, h)
+      finest = Math.min(finest, step)
+      const win = sourceWindow(sx, sy, geo)
+      if (win) {
+        const ww = win.x1 - win.x0, wh = win.y1 - win.y0
+        if (ww * wh > WARP_MAX_WINDOW) throw new Error(`one output block reads ${ww.toLocaleString()} × ${wh.toLocaleString()} source cells; the CRS distorts this raster too much to warp`)
+        let src
+        if (image) {
+          src = ortho ? await readWindowBytes(image, win.x0, win.y0, win.x1, win.y1)
+            : (await image.readRasters({ window: [win.x0, win.y0, win.x1, win.y1], samples: [0], interleave: false }))[0]
+        } else {
+          src = new Float32Array(ww * wh)
+          for (let r = 0; r < wh; r++) src.set(plane.data.subarray((win.y0 + r) * geo.width + win.x0, (win.y0 + r) * geo.width + win.x1), r * ww)
+        }
+        if (ortho) sampleRgbaWarp(src, ww, wh, win.x0, win.y0, sx, sy, data, { nearest })
+        else sampleHeightsWarp(src instanceof Float32Array ? src : Float32Array.from(src), ww, wh, win.x0, win.y0, sx, sy, data, { nearest })
+      }
+      await builder.addBlock({ col0, row0, width: w, height: h, data })
+      emit('progress', [++done, nb, `Reprojecting to ${to.code}…`])
+    }
+    const { parts } = await builder.finish()
+    const blob = new Blob(parts, { type: 'image/tiff' })
+    emit('log', [`${ortho ? 'Ortho' : 'DEM'} export: reprojected to ${to.code}, ${out.width.toLocaleString()} × ${out.height.toLocaleString()} px `
+      + `at ${out.gsd.toPrecision(4)} per px (${resampling}${finest > 1 ? `, positions interpolated every ${finest} px` : ''}), `
+      + `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)} s; heights keep their vertical datum`, 'info', 'Export'])
+    return { result: { blob, ...out } }
+  }
+
+  return { exportCloud, exportMesh, exportOrtho, warpRaster }
 }

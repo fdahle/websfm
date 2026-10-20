@@ -257,6 +257,23 @@ before measuring or redraw the polygon around them. The units are the DEM's
 horizontal unit squared times its vertical unit, e.g. m³, or model units³ before
 the project has a scale.
 
+## Export coordinate system
+<!-- param: rasterCrs default: As built -->
+**As built** writes the DEM in the CRS it was built in. For the GeoTIFF and COG
+formats, **Another CRS…** writes a reprojected copy in the
+[CRS](help:coordinate-reference-system) you pick: a Cloud-Optimized GeoTIFF (DEFLATE,
+nodata NaN) at the same ground cell size, while the DEM itself stays as built. Only
+the horizontal CRS changes. Heights keep their [vertical datum](help:vertical-datum).
+A DEM in the local frame has no CRS, so it can't be reprojected, and a raster around a
+pole can't be written in a geographic CRS (degrees).
+
+## Export resampling
+<!-- param: resampling default: Bilinear -->
+How a reprojected copy samples the heights. **Bilinear** interpolates between the four
+nearest cells; **Nearest** keeps every height as it was measured, which suits a DTM
+whose values must not be smoothed. Next to an empty cell, Bilinear takes the nearest
+height instead, so holes don't spread.
+
 ## Export measurements
 <!-- param: measurementCoords default: Project CRS -->
 **Export ▸ Measurements…** writes every saved measurement of the project (rulers,

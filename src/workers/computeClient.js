@@ -369,6 +369,7 @@ export const demPreview = streamingOp('demPreview')
 // An orthophoto file made from its stored COG — { file, format: 'geotiff'|'png'|'jpeg',
 // deflate, quality, crs } → { blob, width, height } (workers/ops/export.js exportOrtho).
 export const exportOrthoFile = streamingOp('exportOrtho')
+export const warpRaster = streamingOp('warpRaster')
 
 // Products — mesh (screened Poisson over the dense cloud, see core/products/mesh.js).
 // Input { dense:{ count, pos, col, nrm }, settings }; resolves to
