@@ -280,7 +280,8 @@ export async function reconstructSingleModel(input, hooks = {}) {
     // 'auto' self-calibration → a concrete mode, now that ingest knows whether a
     // calibrated distortion model exists (runRecord.js resolveRefineIntrinsics).
     resolveRefineIntrinsics({ cfg, anyCalibratedDistortion, selfCalRecord, log,
-      anyReseauCalibrated: [...fiducialTransforms.values()].some((t) => t.transform?.residual) })
+      anyReseauCalibrated: [...fiducialTransforms.values()].some((t) => t.transform?.residual)
+        || imgs.some((img) => img.sensor?.reseauStitched) })
 
     if (defaultKCount > 0) {
       log(`${pluralize(defaultKCount, 'image')} of ${imgs.length} ${defaultKCount === 1 ? 'has' : 'have'} no focal length — using a default FOV guess. `

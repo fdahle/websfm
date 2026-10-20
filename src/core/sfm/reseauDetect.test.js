@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reseauLattice, crossInWindow, fitLatticeAffine, nominalScanPosition } from './reseauDetect.js'
+import { reseauLattice, crossInWindow, fitLatticeAffine, nominalScanPosition, assignReseauIndices, pairReseauHalves, stitchedFrameGeometry } from './reseauDetect.js'
 
 let seed = 5
 const rnd = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296 }
@@ -47,5 +47,39 @@ describe('the lattice', () => {
     const fit = fitLatticeAffine(found)
     const p = fit.predict(200, -100), t = truth(200, -100)
     expect(Math.hypot(p.px - t.px, p.py - t.py)).toBeLessThan(1e-6)
+  })
+})
+
+describe('half-frame scans', () => {
+  // A left half: columns −23 … +2 seen, all 23 rows; steps relative to a first cross at (−5, 3).
+  const left = []
+  for (let i = -23; i <= 2; i++) for (let j = -11; j <= 11; j++) left.push({ di: i + 5, dj: 3 - j, px: 0, py: 0, score: 1 })
+  it('indexes a left half from its outer edge and centres its rows', () => {
+    const r = assignReseauIndices(left, { side: 'left', ni: 23, nj: 11 })
+    expect(r.rows).toBe(23)
+    expect(r.columns).toBe(26)
+    const ids = new Set(r.detections.map((d) => d.slot))
+    expect(ids.has('r:-23:11')).toBe(true)
+    expect(ids.has('r:2:-11')).toBe(true)
+    expect(assignReseauIndices(left, { side: 'left', ni: 23, nj: 11, shift: 1 }).detections.some((d) => d.slot === 'r:-23:0')).toBe(false)
+  })
+  it('indexes a right half from its outer edge', () => {
+    const right = []
+    for (let i = -2; i <= 23; i++) for (let j = -11; j <= 11; j++) right.push({ di: i - 7, dj: -j, px: 0, py: 0, score: 1 })
+    const r = assignReseauIndices(right, { side: 'right', ni: 23, nj: 11 })
+    expect(Math.min(...r.detections.map((d) => d.i))).toBe(-2)
+    expect(Math.max(...r.detections.map((d) => d.i))).toBe(23)
+  })
+  it('pairs _a / _b scans by name', () => {
+    const imgs = ['L004_a.tif', 'L004_b.tif', 'L005-A.TIF', 'L005-B.TIF', 'L006_a.tif', 'other.tif'].map((name, id) => ({ id, name }))
+    expect(pairReseauHalves(imgs).map((p) => [p.stem, p.a.name, p.b.name]))
+      .toEqual([['L004', 'L004_a.tif', 'L004_b.tif'], ['L005', 'L005-A.TIF', 'L005-B.TIF']])
+  })
+  it('lays the stitched frame on the film grid, principal point in pixel-centre terms', () => {
+    const g = stitchedFrameGeometry({ spacingMm: 10, filmWidthMm: 460, filmHeightMm: 230, pitchMm: 0.028, marginMm: 2, ppxMm: 0.02, ppyMm: -0.03 })
+    expect(g.width * g.pitchMm).toBeGreaterThanOrEqual(464)
+    expect(g.x0Mm).toBeCloseTo(-g.width / 2 * 0.028)
+    expect(g.cx).toBeCloseTo(g.width / 2 + 0.02 / 0.028 - 0.5)
+    expect(g.cy).toBeCloseTo(g.height / 2 + 0.03 / 0.028 - 0.5)
   })
 })

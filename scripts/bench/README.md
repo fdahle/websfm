@@ -180,6 +180,9 @@ stage again with config key `dense:loose`.
   `cfg.reseau`, film size from the scans) and applies the 'reseau' calibration; with
   `reseauTruth: <truth.json>` (a `synth_sat.py --reseau-mm … --film-warp-um …` block) each
   image's fit is scored against the film truth in scan pixels (SAT-5: < 0.5 px).
+- `reseauhalves`: Detect reseau ▸ Half frames: every `<frame>_a` / `_b` pair stitched
+  into one frame through its reseau, GCP marks carried over, the halves removed; with
+  `reseauTruth` each half's fit is scored as for `reseau`. Run `detect` etc. after it.
 - `sensor`: applies the config's calibration again (`hist.intrinsics`, else `sensor`),
   e.g. after `reopen` on a project saved before the bench persisted it (2026-10-19).
 - `georef`: Georeferencing ▸ Georeference, from GCPs or the camera positions, into the

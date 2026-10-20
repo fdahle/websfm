@@ -315,6 +315,8 @@ export function createSparseRun({
                   // The sfm ingest fits a per-image transform and builds one canonical
                   // K per sensor (resolveK path 0).
                   kind: s.kind ?? 'digital',
+                  // Stitched half frames (SAT-5): film geometry already corrected.
+                  reseauStitched: !!s.reseauStitched,
                   fiducialCalibration: s.fiducialCalibration
                     ? JSON.parse(JSON.stringify(s.fiducialCalibration))
                     : null,

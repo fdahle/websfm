@@ -27,6 +27,12 @@ scanner (a rotation and shift, up to the given size, random per frame). The rese
 crosses are exposed at their nominal positions and deform with the film; the GCP
 observations go through the same chain. truth.json records each frame's `film`.
 
+Halves (SAT-5): `--halves MM` scans each frame in two overlapping parts, `<name>_a.tif`
+(the left part of the film) and `<name>_b.tif` (the right), overlapping by MM in the
+middle and each with a margin round the film, as the KH-9 archive scans are. The film's
+deformation belongs to the exposure; each half has its own scanner placement. Outside
+the film the scan is dark. truth.json lists every scan under `scans`.
+
 The texture is procedural and evaluated at the ground point (hashed value noise down to
 2 nadir GSD, Voronoi fields with darker boundaries, hillshade), so images of any size
 need no texture raster and different scans of the same ground agree. Deterministic per
@@ -258,15 +264,17 @@ def texture(lat, lon):
 
 
 def render_rows(job):
-    """One strip [r0, r1) of one frame, plus `pad` rows each side for the blur."""
+    """One strip [r0, r1) of one scan, plus `pad` rows each side for the blur."""
     fr, r0, r1, pad = job
-    s, cam = G['scene'], G['cams'][fr]
-    W, H, pitch, f = s['W'], s['H'], s['pitch'], s['focal']
+    s, scan = G['scene'], G['scans'][fr]
+    cam = G['cams'][scan['cam']]
+    W, H, pitch, f = scan['W'], scan['H'], s['pitch'], s['focal']
     rr0, rr1 = max(0, r0 - pad), min(H, r1 + pad)
     v = np.arange(rr0, rr1) + 0.5
     u = np.arange(W) + 0.5
     U, V = np.meshgrid(u, v)
-    xmm, ymm = scan_to_film(cam.get('film'), s, U, V)
+    xmm, ymm = scan_to_film(scan['film'], s, U, V)
+    off_film = (np.abs(xmm) > s['film_w'] / 2) | (np.abs(ymm) > s['film_h'] / 2)
     X, Y = (xmm - s['ppx']) / f, -(ymm - s['ppy']) / f
     dc = np.stack([X, Y, np.ones_like(X)], axis=-1)
     dc /= np.linalg.norm(dc, axis=-1, keepdims=True)
@@ -282,6 +290,7 @@ def render_rows(job):
         img[c0:c0 + 8192] = texture(lat, lon)
         miss[c0:c0 + 8192] = m
     img = img.reshape(X.shape) * dc[..., 2] ** 2  # cos² fall-off
+    img[off_film] = 0.02  # the dark border round the film
     miss = miss.reshape(X.shape)
     if s['blur'] > 0:
         img = cv2.GaussianBlur(img.astype(np.float32), (0, 0), s['blur'])
@@ -292,14 +301,14 @@ def render_rows(job):
     return fr, r0, np.clip(dn, 0, 255).astype(np.uint8), (float(core.max()), int((core > 0.5).sum()))
 
 
-def project(cam, s, P):
-    """ECEF points (N×3) → scan pixel-edge u, v (film deformation and scanner placement
-    included) and the depth."""
+def project(cam, s, P, film):
+    """ECEF points (N×3) → film mm, the scan pixel-edge u, v of the scan `film` describes
+    (film deformation and scanner placement included), and the depth."""
     Xc = (P - np.array(cam['C'])) @ np.array(cam['R']).T
     xmm = s['ppx'] + s['focal'] * Xc[:, 0] / Xc[:, 2]
     ymm = s['ppy'] - s['focal'] * Xc[:, 1] / Xc[:, 2]
-    u, v = film_to_scan(cam.get('film'), s, xmm, ymm)
-    return u, v, Xc[:, 2]
+    u, v = film_to_scan(film, s, xmm, ymm)
+    return xmm, ymm, u, v, Xc[:, 2]
 
 
 def film_warp(film, s, x, y):
@@ -313,21 +322,28 @@ def film_warp(film, s, x, y):
     return dx, dy
 
 
+def scan_origin(film, s):
+    """The scan pixel (pixel-edge) of the film's centre before the placement shift."""
+    return (film.get('cu', s['W'] / 2), film.get('cv', s['H'] / 2)) if film else (s['W'] / 2, s['H'] / 2)
+
+
 def film_to_scan(film, s, x, y):
     """Exposed film mm → scan pixel-edge u, v: deform, then place on the scanner."""
     dx, dy = film_warp(film, s, x, y)
     qx, qy = x + dx, y + dy
     th = math.radians(film['rot_deg']) if film else 0.0
     sx, sy = film['shift_px'] if film else (0.0, 0.0)
+    cu, cv = scan_origin(film, s)
     xr, yr = math.cos(th) * qx - math.sin(th) * qy, math.sin(th) * qx + math.cos(th) * qy
-    return s['W'] / 2 + sx + xr / s['pitch'], s['H'] / 2 + sy - yr / s['pitch']
+    return cu + sx + xr / s['pitch'], cv + sy - yr / s['pitch']
 
 
 def scan_to_film(film, s, u, v):
     """Scan pixel-edge u, v → the film position exposed there (inverts film_to_scan)."""
     th = math.radians(film['rot_deg']) if film else 0.0
     sx, sy = film['shift_px'] if film else (0.0, 0.0)
-    xr, yr = (u - s['W'] / 2 - sx) * s['pitch'], -(v - s['H'] / 2 - sy) * s['pitch']
+    cu, cv = scan_origin(film, s)
+    xr, yr = (u - cu - sx) * s['pitch'], -(v - cv - sy) * s['pitch']
     qx, qy = math.cos(th) * xr + math.sin(th) * yr, -math.sin(th) * xr + math.cos(th) * yr
     x, y = qx, qy
     for _ in range(4):  # p = q − d(p); |∂d/∂p| ≪ 1, so this converges at once
@@ -378,6 +394,8 @@ def main():
     ap.add_argument('--film-warp-um', type=float, default=0.0, help='film deformation amplitude (µm); 0 = none')
     ap.add_argument('--scan-rot-deg', type=float, default=0.0, help='scanner placement rotation, up to ± this per frame')
     ap.add_argument('--scan-shift-px', type=float, default=0.0, help='scanner placement shift, up to ± this per axis')
+    ap.add_argument('--halves', type=float, default=0.0, help='scan each frame in two halves overlapping by this (mm); 0 = whole')
+    ap.add_argument('--margin-mm', type=float, default=4.0, help='scan margin round the film, for --halves')
     ap.add_argument('--gcps', type=int, default=48)
     ap.add_argument('--gcp-noise-px', type=float, default=0.0)
     ap.add_argument('--gcp-acc-m', type=float, default=2.0)
@@ -417,6 +435,22 @@ def main():
                        'phase': frng.uniform(-math.pi, math.pi, 2).tolist(),
                        'rot_deg': a.scan_rot_deg * frng.uniform(-1, 1),
                        'shift_px': (a.scan_shift_px * frng.uniform(-1, 1, 2)).tolist()}
+    # The scans: one per frame, or two halves (each its own placement on the scanner).
+    scans = []
+    for ci, cam in enumerate(cams):
+        if a.halves <= 0:
+            scans.append({'name': cam['name'], 'cam': ci, 'W': W, 'H': H, 'film': dict(cam['film'], cu=W / 2, cv=H / 2)})
+            continue
+        m, ov = a.margin_mm, a.halves
+        hw = int(round((a.film_w_mm / 2 + ov / 2 + m) / a.pitch_mm))
+        hh = int(round((a.film_h_mm + 2 * m) / a.pitch_mm))
+        stem = cam['name'].rsplit('.', 1)[0]
+        for side, cu in (('a', (a.film_w_mm / 2 + m) / a.pitch_mm), ('b', (ov / 2) / a.pitch_mm)):
+            film = {'amp_mm': cam['film']['amp_mm'], 'phase': cam['film']['phase'],
+                    'rot_deg': a.scan_rot_deg * frng.uniform(-1, 1),
+                    'shift_px': (a.scan_shift_px * frng.uniform(-1, 1, 2)).tolist(),
+                    'cu': cu, 'cv': hh / 2}
+            scans.append({'name': f'{stem}_{side}.tif', 'cam': ci, 'W': hw, 'H': hh, 'film': film})
 
     scene = {'W': W, 'H': H, 'pitch': a.pitch_mm, 'focal': a.focal_mm, 'ppx': a.pp_mm[0], 'ppy': a.pp_mm[1],
              'film_w': a.film_w_mm, 'film_h': a.film_h_mm, 'seed': a.seed, 'blur': a.blur_px, 'grain': a.grain_dn,
@@ -447,13 +481,13 @@ def main():
     dem = fractal_dem(rows, cols, a.dem_spacing_m, a.relief_m, a.base_m, a.seed)
     shade = hillshade(dem, a.dem_spacing_m, a.dem_spacing_m)
     print(f'terrain {time.time() - t0:.0f} s, heights {dem.min():.0f}…{dem.max():.0f} m', flush=True)
-    G.update(dem=dem, shade=shade, grid=grid, scene=scene, cams=cams, hmin=float(dem.min()), hmax=float(dem.max()))
+    G.update(dem=dem, shade=shade, grid=grid, scene=scene, cams=cams, scans=scans, hmin=float(dem.min()), hmax=float(dem.max()))
 
-    # Render: every frame in row strips, across the pool (fork shares the scene).
-    strip = max(16, a.strip_px // W)
-    jobs = [(fr, r0, min(H, r0 + strip), 4) for fr in range(a.frames) for r0 in range(0, H, strip)]
-    imgs = [np.zeros((H, W), np.uint8) for _ in range(a.frames)]
-    worst = [0.0] * a.frames
+    # Render: every scan in row strips, across the pool (fork shares the scene).
+    jobs = [(k, r0, min(sc['H'], r0 + max(16, a.strip_px // sc['W'])), 4)
+            for k, sc in enumerate(scans) for r0 in range(0, sc['H'], max(16, a.strip_px // sc['W']))]
+    imgs = [np.zeros((sc['H'], sc['W']), np.uint8) for sc in scans]
+    worst = [0.0] * len(scans)
     bad = 0
     t0 = time.time()
     with get_context('fork').Pool(a.workers) as pool:
@@ -461,16 +495,16 @@ def main():
             imgs[fr][r0:r0 + block.shape[0]] = block
             worst[fr] = max(worst[fr], miss[0])
             bad += miss[1]
-    print(f'rendered {a.frames} frames in {time.time() - t0:.0f} s; worst terrain miss {max(worst):.2f} m, '
-          f'{bad} px ({bad / (a.frames * W * H):.2e}) off by > 0.5 m', flush=True)
+    print(f'rendered {len(scans)} scans in {time.time() - t0:.0f} s; worst terrain miss {max(worst):.2f} m, '
+          f'{bad} px ({bad / sum(sc["W"] * sc["H"] for sc in scans):.2e}) off by > 0.5 m', flush=True)
 
     reseau = 0
     if a.reseau_mm > 0:
-        for cam, img in zip(cams, imgs):
-            reseau = draw_reseau(img, scene, a.reseau_mm, cam.get('film'))
-    big = W * H > 3.5e9
-    for cam, img in zip(cams, imgs):
-        with rasterio.open(os.path.join(a.out, 'images', cam['name']), 'w', driver='GTiff', width=W, height=H, count=1,
+        for sc, img in zip(scans, imgs):
+            reseau = draw_reseau(img, scene, a.reseau_mm, sc['film'])
+    big = max(sc['W'] * sc['H'] for sc in scans) > 3.5e9
+    for sc, img in zip(scans, imgs):
+        with rasterio.open(os.path.join(a.out, 'images', sc['name']), 'w', driver='GTiff', width=sc['W'], height=sc['H'], count=1,
                            dtype='uint8', tiled=True, blockxsize=512, blockysize=512, compress='deflate',
                            BIGTIFF='YES' if big else 'IF_SAFER') as dst:
             dst.write(img, 1)
@@ -480,9 +514,9 @@ def main():
     gcp_rows, gcps = [], []
     for k in range(a.gcps):
         cam = cams[k % a.frames]
-        u = rng.uniform(0.08, 0.92) * W
-        v = rng.uniform(0.08, 0.92) * H
-        xmm, ymm = scan_to_film(cam.get('film'), scene, u, v)
+        # A film point in the frame's interior (independent of how it was scanned).
+        xmm = rng.uniform(-0.42, 0.42) * a.film_w_mm
+        ymm = rng.uniform(-0.42, 0.42) * a.film_h_mm
         dc = np.array([(xmm - a.pp_mm[0]) / a.focal_mm, -(ymm - a.pp_mm[1]) / a.focal_mm, 1.0])
         d = (np.array(cam['R']).T @ (dc / np.linalg.norm(dc)))[None, :]
         lat, lon, _, _ = intersect(np.array(cam['C']), d, cam['t0'], iters=20)
@@ -491,11 +525,12 @@ def main():
         E, N = to_map.transform(math.degrees(lon[0]), math.degrees(lat[0]))
         label = f'G{k + 1:03d}'
         gcps.append({'label': label, 'E': E, 'N': N, 'h': float(h[0]), 'lat': math.degrees(lat[0]), 'lon': math.degrees(lon[0])})
-        for c in cams:
-            pu, pv, z = project(c, scene, P)
-            if z[0] > 0 and 0.01 * W <= pu[0] <= 0.99 * W and 0.01 * H <= pv[0] <= 0.99 * H:
+        for sc in scans:
+            fx, fy, pu, pv, z = project(cams[sc['cam']], scene, P, sc['film'])
+            on_film = abs(fx[0]) <= 0.49 * a.film_w_mm and abs(fy[0]) <= 0.49 * a.film_h_mm
+            if z[0] > 0 and on_film and 0.01 * sc['W'] <= pu[0] <= 0.99 * sc['W'] and 0.01 * sc['H'] <= pv[0] <= 0.99 * sc['H']:
                 nu, nv = rng.normal(0, a.gcp_noise_px, 2) if a.gcp_noise_px > 0 else (0.0, 0.0)
-                gcp_rows.append([label, c['name'], f'{pu[0] + nu:.3f}', f'{pv[0] + nv:.3f}', f'{E:.3f}', f'{N:.3f}',
+                gcp_rows.append([label, sc['name'], f'{pu[0] + nu:.3f}', f'{pv[0] + nv:.3f}', f'{E:.3f}', f'{N:.3f}',
                                  f'{h[0]:.3f}', a.gcp_acc_m, a.gcp_acc_m, a.gcp_acc_m])
     with open(os.path.join(a.out, 'gcp.csv'), 'w') as f:
         f.write('gcp_label,image_file_name,x,y,x_map,y_map,elev,x_map_acc,y_map_acc,elev_acc\n')
@@ -526,6 +561,7 @@ def main():
         cam.update(E=E, N=N)
         cam.pop('t0')
     truth = {'config': vars(a), 'W': W, 'H': H, 'gsd_nadir_m': gsd, 'baseline_m': base, 'reseau_crosses': reseau,
+             'scans': [{'name': sc['name'], 'camera': cams[sc['cam']]['name'], 'W': sc['W'], 'H': sc['H'], 'film': sc['film']} for sc in scans],
              'worst_terrain_miss_m': max(worst), 'pixels_miss_over_half_m': bad, 'cameras': cams, 'gcps': gcps, 'gcp_observations': len(gcp_rows),
              'seconds': time.time() - t_start}
     with open(os.path.join(a.out, 'truth.json'), 'w') as f:
