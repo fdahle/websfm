@@ -9,6 +9,12 @@ Depth maps are Stage A of dense reconstruction. PatchMatch compares each registe
 image with selected source views to estimate per-pixel depth. They are cached because
 they are expensive and are also reused as visibility evidence by orthophoto generation.
 
+The depth map shown over an image is the one PatchMatch produced (after the speckle
+filter), from before **Cross-view consistency** runs. Its colours stretch from the nearest depth (red) to the farthest
+(blue) in that one map. Scattered dots in another colour are usually pixels the
+cross-view check removes before fusion. They are common in bare trees, on water and
+on low-texture ground such as ploughed fields, and are not a sign of a failed run.
+
 ## Quality
 <!-- param: quality  default: Medium -->
 **Medium** runs at one-quarter native resolution and is the normal starting point.
