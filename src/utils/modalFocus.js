@@ -2,7 +2,9 @@
 // and nested dialogs. Background elements are inert only while a modal is open,
 // except layers marked `data-modal-exempt`, which must stay clickable over any
 // dialog: app-level ones (the update prompt, hover help popups) and a dialog's own
-// popups teleported to <body> (the CRS picker's result list).
+// popups teleported to <body> (the CRS picker's result list). A dialog may also name
+// elements that stay usable beside it, `data-modal-keep="<selector>"`: the progress
+// card keeps the 3D view live while a sparse run draws into it, and only that view.
 export function installModalFocus(doc = document) {
   const selector = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]'
   const controls = 'button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]'
@@ -10,7 +12,7 @@ export function installModalFocus(doc = document) {
   const focusables = dialog => [...dialog.querySelectorAll(controls)]
     .filter(el => !el.disabled && el.tabIndex >= 0 && visible(el) && !el.closest('[inert]'))
   const known = new Map(), inert = new Map()
-  let top = null
+  let top = null, keeps = []
   const restoreInert = () => { for (const [el, value] of inert) el.inert = value; inert.clear() }
   const focusInitial = dialog => {
     const items = focusables(dialog)
@@ -36,11 +38,19 @@ export function installModalFocus(doc = document) {
     const returnTarget = previous && !dialogs.includes(previous) ? known.get(previous) : null
     for (const dialog of known.keys()) if (!dialogs.includes(dialog)) known.delete(dialog)
     restoreInert()
+    const keep = top?.getAttribute('data-modal-keep')
+    keeps = keep ? [...doc.querySelectorAll(keep)] : []
     if (top) {
-      for (let node = top; node.parentElement && node !== doc.body; node = node.parentElement) {
-        for (const sibling of node.parentElement.children) if (sibling !== node && !sibling.hasAttribute('data-modal-exempt')) {
-          inert.set(sibling, sibling.inert)
-          sibling.inert = true
+      // Everything off the paths from <body> to the dialog and to each kept element.
+      const anchors = [top, ...keeps], path = new Set()
+      for (const a of anchors) for (let node = a; node && node !== doc.body; node = node.parentElement) path.add(node)
+      for (const a of anchors) {
+        for (let node = a; node.parentElement && node !== doc.body; node = node.parentElement) {
+          for (const sibling of node.parentElement.children) {
+            if (path.has(sibling) || inert.has(sibling) || sibling.hasAttribute('data-modal-exempt')) continue
+            inert.set(sibling, sibling.inert)
+            sibling.inert = true
+          }
         }
       }
     }
@@ -59,9 +69,11 @@ export function installModalFocus(doc = document) {
       items[event.shiftKey ? items.length - 1 : 0].focus()
     }
   }
-  const onFocus = event => { if (top && !top.contains(event.target)) focusInitial(top) }
+  const onFocus = event => {
+    if (top && !top.contains(event.target) && !keeps.some(k => k.contains(event.target))) focusInitial(top)
+  }
   const observer = new MutationObserver(update)
-  observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'aria-modal'] })
+  observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'aria-modal', 'data-modal-keep'] })
   doc.addEventListener('keydown', onKey, true)
   doc.addEventListener('focusin', onFocus, true)
   update()

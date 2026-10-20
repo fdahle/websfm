@@ -20,6 +20,31 @@ test('nested modal Cancel stays safe on Enter, traps focus and restores it', asy
   expect(await page.locator('#launch').evaluate(el => el.inert)).toBe(false)
 })
 
+test('a modal keeps the elements it names usable and the rest inert', async ({ page }) => {
+  await page.goto(harness)
+  const inert = () => page.evaluate(() => Object.fromEntries(['k-app', 'k-ribbon', 'k-main', 'k-tabs', 'k-view']
+    .map((id) => [id, document.getElementById(id).inert])))
+  await page.evaluate(() => {
+    const app = document.createElement('div')
+    app.id = 'k-app'
+    app.innerHTML = '<button id="k-ribbon">Ribbon</button><div id="k-main"><div id="k-tabs">Tabs</div><div id="k-view" tabindex="0">View</div></div>'
+    document.body.append(app)
+    const dialog = document.createElement('div')
+    dialog.id = 'k-dialog'
+    dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('data-modal-keep', '#k-view')
+    dialog.innerHTML = '<button>Cancel</button>'
+    document.body.append(dialog)
+  })
+  await expect.poll(inert).toEqual({ 'k-app': false, 'k-ribbon': true, 'k-main': false, 'k-tabs': true, 'k-view': false })
+  // Focus may go to the kept view without the dialog taking it back.
+  await page.locator('#k-view').focus()
+  await expect(page.locator('#k-view')).toBeFocused()
+  await page.evaluate(() => document.getElementById('k-dialog').removeAttribute('data-modal-keep'))
+  await expect.poll(inert).toMatchObject({ 'k-app': true })
+  await page.evaluate(() => document.getElementById('k-dialog').remove())
+  await expect.poll(inert).toEqual({ 'k-app': false, 'k-ribbon': false, 'k-main': false, 'k-tabs': false, 'k-view': false })
+})
+
 test('real OPFS product save, replacement, reopen and deletion', async ({ page }) => {
   await page.goto(harness)
   await page.evaluate(async () => {

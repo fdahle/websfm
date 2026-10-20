@@ -1147,7 +1147,10 @@ function resetView() {
   requestRender()
 }
 
-defineExpose({ setCloudLayers, clearReconstructionData, setView, resetView, zoomToCloud, toggleSelectTool, toggleMeasureTool })
+// Leave selecting and measuring (a run's live view keeps orbit and zoom only).
+function exitTools() { exitSelection(); exitMeasure() }
+
+defineExpose({ setCloudLayers, clearReconstructionData, setView, resetView, zoomToCloud, toggleSelectTool, toggleMeasureTool, exitTools })
 
 function onResize() {
   const el = container.value

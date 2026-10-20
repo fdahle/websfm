@@ -136,6 +136,13 @@ watch(sceneClouds, () => {
   if (activeTabId.value === 'viewer') flushScene()
 })
 watch(viewerRef, () => { scenePending = true; if (activeTabId.value === 'viewer') flushScene() })
+// The live view stays usable during the run (ProgressModal's spotlight), for looking
+// only: a tool left open would put its toolbox, and its Delete or Export, within reach.
+watch(() => !!reconstructionStore.liveSparse, (live) => {
+  if (!live) return
+  viewerRef.value?.exitTools?.()
+  regionEdit.value = false; orientEdit.value = false; orientPicking.value = null; alignPairs.value = null
+})
 watch(activeTabId, (id) => { if (id === 'viewer') flushScene() })
 
 // The tab menu answers Escape and outside clicks before anything else sees them.
@@ -182,7 +189,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div class="content">
-    <Viewer3D :ref="setViewer" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" :frame-signature="reconstructionStore.currentFrameSignature" @command="handleCommand" @edit-selection="onEditSelection" @select-tool="(t) => { selectTool3d = t }"
+    <Viewer3D :ref="setViewer" data-run-spotlight v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" :frame-signature="reconstructionStore.currentFrameSignature" @command="handleCommand" @edit-selection="onEditSelection" @select-tool="(t) => { selectTool3d = t }"
       :region-box="viewerRegionBox" :region-stale="viewerRegionStale" :region-edit="regionEdit" @region-change="(b) => { regionDraft = b }"
       :pick-mode="viewerPickMode" :markers="viewerMarkers" @pick="onViewerPick">
       <template #toolbox>

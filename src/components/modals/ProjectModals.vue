@@ -47,9 +47,9 @@ const {
   workflowCurrentBlockId, workflowPause, workflowRunner, workflowRunning, workflowState,
   workflowStatuses, activeTabId,
 } = useAppContext()
-// A sparse run draws its model as it grows (liveSparse): over the 3D view, the bar
-// moves to a corner and stops dimming the scene.
-const progressDocked = computed(() => !!liveSparse.value && activeTabId.value === 'viewer')
+// A sparse run draws its model as it grows (liveSparse): over the 3D view, that view
+// stays lit and orbitable, the rest is dimmed and locked, and the bar docks in its corner.
+const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value === 'viewer' ? '[data-run-spotlight]' : ''))
 </script>
 
 <template>
@@ -166,7 +166,7 @@ const progressDocked = computed(() => !!liveSparse.value && activeTabId.value ==
       :complete="progressComplete"
       :cancelling="progressCancelling"
       :cancelable="true"
-      :docked="progressDocked"
+      :spotlight="progressSpotlight"
       @cancel="cancelRun"
     />
   </Teleport>

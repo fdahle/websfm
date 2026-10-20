@@ -19,8 +19,10 @@ missing overlap.
 ## While it runs
 In the 3D view, the model is drawn as it grows: the registered cameras and the points
 triangulated so far, updated every couple of seconds, and the view zooms out as it
-expands. The progress bar moves to the corner so the view stays visible. Big models are
-thinned for this picture. The finished model replaces it, together with the clouds
+expands. The 3D view stays usable while it grows: drag to orbit, scroll to zoom. The rest
+of the app is dimmed and locked until the run ends, and the progress bar sits in the
+view's corner. A selection, measuring or model tool left open is closed when the run
+starts. Big models are thinned for this picture. The finished model replaces it, together with the clouds
 shown before the run.
 
 ## Min correspondences

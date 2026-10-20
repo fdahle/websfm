@@ -15,9 +15,11 @@ const props = defineProps({
   complete:      { type: Boolean, default: false },
   cancelling:    { type: Boolean, default: false },
   cancelable:    { type: Boolean, default: false },
-  // In a corner without dimming, so the view behind stays visible (the live sparse
-  // view). Clicks are still blocked: nothing else may start during a run.
-  docked:        { type: Boolean, default: false },
+  // CSS selector of an element left lit and usable during the run (the 3D view while
+  // a sparse run draws its model live): the rest of the window is dimmed and blocks
+  // clicks, since nothing else may start during a run, and the card docks in that
+  // element's corner. Empty, or no such element on screen: the usual centred dialog.
+  spotlight:     { type: String, default: '' },
 })
 const emit = defineEmits(['cancel'])
 
@@ -59,6 +61,43 @@ const now = ref(0)
 let ticker = null
 
 const elapsed = computed(() => formatClock((now.value - startedAt.value) / 1000))
+
+// ── Spotlight: dim and lock everything but one element ───────────────────────
+// A transparent click-blocker over a fully visible app read as "the bar is just
+// sitting there, go ahead and click" — then nothing answered. The scrim now says
+// "locked" everywhere except the lit element, whose own input (orbit, zoom) passes
+// straight through: clip-path also clips hit-testing, so the hole is genuinely open.
+const hole = ref(null) // { x, y, w, h } in viewport px
+let holeObserver = null
+function measureHole() {
+  const el = props.spotlight ? document.querySelector(props.spotlight) : null
+  const r = el?.getBoundingClientRect()
+  hole.value = r && r.width > 0 && r.height > 0 ? { x: r.left, y: r.top, w: r.width, h: r.height } : null
+}
+function watchHole() {
+  holeObserver?.disconnect()
+  holeObserver = null
+  measureHole()
+  const el = props.spotlight ? document.querySelector(props.spotlight) : null
+  if (el && typeof ResizeObserver !== 'undefined') {
+    holeObserver = new ResizeObserver(measureHole)
+    holeObserver.observe(el)
+  }
+}
+watch(() => props.spotlight, watchHole)
+
+// Even-odd polygon: the window, then the hole traced inside it.
+const scrimStyle = computed(() => {
+  const h = hole.value
+  if (!h) return null
+  const x0 = `${h.x}px`, y0 = `${h.y}px`, x1 = `${h.x + h.w}px`, y1 = `${h.y + h.h}px`
+  return { clipPath: `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${x0} ${y0}, ${x0} ${y1}, ${x1} ${y1}, ${x1} ${y0}, ${x0} ${y0})` }
+})
+const cardStyle = computed(() => {
+  const h = hole.value
+  if (!h) return null
+  return { right: `${window.innerWidth - (h.x + h.w) + 16}px`, bottom: `${window.innerHeight - (h.y + h.h) + 16}px` }
+})
 
 // ── ETA: cumulative mean anchored, EMA-reactive, display-smoothed ────────────
 // Estimated in FRACTION space rather than item counts, so one estimator serves every
@@ -235,16 +274,22 @@ onMounted(() => {
   startedAt.value = Date.now()
   now.value = startedAt.value
   ticker = setInterval(() => { now.value = Date.now() }, 250)
+  watchHole()
+  window.addEventListener('resize', measureHole)
 })
 
 onBeforeUnmount(() => {
   if (ticker) clearInterval(ticker)
+  holeObserver?.disconnect()
+  window.removeEventListener('resize', measureHole)
 })
 </script>
 
 <template>
-  <div class="overlay" :class="{ docked }">
-    <div class="modal" role="dialog" aria-modal="true">
+  <!-- Exempt from the dialog's inert sweep: it is the blocker, and says so on hover. -->
+  <div v-if="hole" class="scrim" :style="scrimStyle" data-modal-exempt title="Available when the run finishes"></div>
+  <div class="overlay" :class="{ docked: !!hole }">
+    <div class="modal" role="dialog" aria-modal="true" :data-modal-keep="hole ? spotlight : null" :style="cardStyle">
       <div class="modal-title">{{ title }}</div>
       <div class="progress-row">
         <div class="progress-track">
@@ -281,6 +326,7 @@ onBeforeUnmount(() => {
           <span v-else-if="overrun" class="progress-time" title="The run has exceeded its estimate">&nbsp;· longer than expected</span>
         </span>
       </div>
+      <div v-if="hole" class="progress-hint">Drag to look around the model as it grows. The rest of the app unlocks when the run finishes.</div>
       <div v-if="cancelable" class="progress-actions">
         <button class="btn-cancel" :disabled="cancelling" @click="emit('cancel')">
           {{ cancelling ? 'Cancelling…' : 'Cancel' }}
@@ -301,11 +347,26 @@ onBeforeUnmount(() => {
   z-index: 300;
 }
 
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 300;
+  cursor: not-allowed;
+}
+
+/* The scrim does the blocking; this layer only places the card, so it must let the
+   lit element's input through. */
 .overlay.docked {
   background: transparent;
-  align-items: flex-end;
-  justify-content: flex-end;
-  padding: 0 16px 16px 0;
+  pointer-events: none;
+  display: block;
+}
+
+.overlay.docked .modal {
+  position: fixed;
+  pointer-events: auto;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 
 .modal {
@@ -419,6 +480,13 @@ onBeforeUnmount(() => {
 .progress-time {
   color: var(--text-dim);
   white-space: nowrap;
+}
+
+.progress-hint {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  margin-top: -6px;
 }
 
 .progress-actions {
