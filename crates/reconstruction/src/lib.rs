@@ -10,6 +10,12 @@ mod pose;
 mod bundle;
 mod sparse_chol;
 mod mvs;
+mod par;
+
+// The threaded build's pool (feature `threads`): JS awaits initThreadPool(n) once, before
+// the first call that uses it (src/core/sfm/reconstruction.js).
+#[cfg(all(feature = "threads", target_arch = "wasm32"))]
+pub use wasm_bindgen_rayon::init_thread_pool;
 
 #[allow(unused_imports)] pub(crate) use linalg::*;
 #[allow(unused_imports)] pub(crate) use pose::*;

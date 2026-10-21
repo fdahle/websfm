@@ -14,6 +14,37 @@ function ensureWasm() {
   return initPromise
 }
 
+// The threaded build of the same crate (src/wasm/reconstruction-mt, crates/README.md ▸
+// Threads): the bundle adjustment's Schur step, cost and back-substitution on a pool of
+// workers sharing its memory. Its results are the same bits as the single-threaded
+// build's, whatever the thread count (crates/reconstruction/src/par.rs). It needs
+// shared memory (a cross-origin isolated page) and a worker (a rayon thread blocks in
+// Atomics.wait, which the page's main thread may not); anywhere else, and if it fails to
+// start, bundleAdjust uses the single-threaded build. SFM_TUNING.baThreads: 0 = off,
+// else the pool size cap.
+let threadedPromise = null
+function threadedWasm() {
+  if (threadedPromise) return threadedPromise
+  const cap = SFM_TUNING.baThreads ?? 0
+  const usable = cap > 0 && typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated === true
+    && typeof globalThis.WorkerGlobalScope === 'function' && globalThis instanceof globalThis.WorkerGlobalScope
+  threadedPromise = !usable ? Promise.resolve(null) : (async () => {
+    try {
+      const mt = await import('../../wasm/reconstruction-mt/reconstruction.js')
+      await mt.default()
+      const threads = Math.max(1, Math.min(cap, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1))
+      await mt.initThreadPool(threads)
+      threadedThreads = threads
+      return mt
+    } catch (err) {
+      console.warn(`Bundle adjustment: the threaded build did not start (${err?.message ?? err}); using one thread`)
+      return null
+    }
+  })()
+  return threadedPromise
+}
+let threadedThreads = 0
+
 // Common sensor widths (mm), matched as lowercased substrings of "make model".
 // Last-resort fallback when EXIF carries a real focal length but no 35mm
 // equivalent and no focal-plane resolution. Extend as needed.
@@ -325,6 +356,8 @@ export function baSolverFlat(solver = {}) {
 
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
+  const threaded = await threadedWasm()
+  const adjust = threaded ? threaded.bundle_adjust : bundle_adjust
   const {
     maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null,
     gcpAnchors = [], cameraPriors = [], solver = SFM_TUNING.baSolver, flatPoints = false,
@@ -420,7 +453,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   for (const c of fixedCams ?? []) if (c >= 0 && c < nCam) fixedMask[c] = 1
 
   const tCall = performance.now()
-  const raw = bundle_adjust(
+  const raw = adjust(
     camFlat, kFlat, ptsFlat, obsIdx, obsPx, obsWFlat, anchorFlat, anchorWFlat, cameraPriorFlat,
     maxIters, sensorFlat, refineMode, baSolverFlat(solver), fixedMask, fisheyeFlat,
   )
@@ -462,7 +495,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   return {
     cameras: outCameras, points3d: outPoints, pos: outPos, intrinsics: outIntrinsics,
     costBefore, costAfter, costTrace, anchorRmsAfter, cameraPriorRmsAfter,
-    solver: solverStats, ms,
+    solver: solverStats, ms, threads: threaded ? threadedThreads : 1,
   }
 }
 

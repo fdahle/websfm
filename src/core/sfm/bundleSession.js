@@ -42,7 +42,7 @@ export function createBundleSession(ctx) {
   // What every bundle adjustment's linear solves did (bundle.rs SolveStats), summed for
   // the run record: the PCG-vs-Cholesky decision (TODO ▸ MEM ▸ PCG) is made from these.
   const baSolverTotals = { calls: 0, ms: 0, maxN: 0, solves: 0, cholesky: 0, pcgConverged: 0,
-    pcgPartial: 0, pcgFallback: 0, pcgNotPd: 0, pcgIters: 0, pcgItersMax: 0 }
+    pcgPartial: 0, pcgFallback: 0, pcgNotPd: 0, pcgIters: 0, pcgItersMax: 0, threads: 1 }
   const noteBaSolver = (label, result) => {
     const s = result?.solver
     if (!s) return
@@ -50,6 +50,7 @@ export function createBundleSession(ctx) {
     T.calls++; T.ms += result.ms ?? 0; T.maxN = Math.max(T.maxN, s.n)
     for (const k of ['solves', 'cholesky', 'pcgConverged', 'pcgPartial', 'pcgFallback', 'pcgNotPd', 'pcgIters']) T[k] += s[k]
     T.pcgItersMax = Math.max(T.pcgItersMax, s.pcgItersMax)
+    T.threads = Math.max(T.threads, result.threads ?? 1)
     const pcg = s.pcgConverged + s.pcgPartial + s.pcgFallback + s.pcgNotPd
     log(`${label} solver — n ${s.n}, ${pluralize(s.solves, 'solve')}: `
       + (pcg ? `PCG ${s.pcgConverged} converged / ${s.pcgPartial} partial / ${s.pcgFallback} → Cholesky / `

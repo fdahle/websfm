@@ -2,6 +2,7 @@
 // (points eliminated against the cameras) and adaptive Huber robustification.
 use wasm_bindgen::prelude::*;
 use crate::linalg::*;
+use crate::par::{for_each_index, map_indexed, SyncPtr, CHUNK};
 
 // ── Dense linear algebra for bundle adjustment ────────────────────────────────
 
@@ -609,6 +610,76 @@ fn add_eblock(list: &mut Vec<EBlock>, blk: usize, off: usize, dim: usize, rows: 
     }
 }
 
+// How the lower-triangle Schur step (and the assembly) is split over threads, so that
+// the result is the same bits whatever the thread count, in both builds. The free
+// cameras are cut into `n` contiguous ranges, a number fixed by the camera count alone.
+// Range r owns the block rows of its cameras (and their right-hand side), and the
+// group-row blocks (g, c) of its cameras c: each such element is written by one range,
+// from that range's points in Schur order, the order the single loop added them in.
+// The group × group blocks and the group right-hand side sum over every point: each
+// point's share goes to its owner range (the range of its lowest camera); range 0 writes
+// its share directly, the others into a partial that is added in range order after.
+// Without intrinsics groups (no self-calibration), or with one range (under 128 free
+// cameras), every sum is the single loop's, bit for bit; with them, the group blocks are
+// summed range by range, which rounds differently from one loop.
+struct RangePlan {
+    n: usize,
+    n_free: usize,
+    // Points each range visits (those touching one of its cameras, or owned by it), in
+    // Schur order, and the same in index order (the assembly's).
+    points: Vec<Vec<u32>>,
+    points_by_index: Vec<Vec<u32>>,
+    owner: Vec<u32>,
+    // Group × group blocks: (value offset in S, length), and each one's offset in a
+    // range's partial; the group right-hand side follows them in the partial.
+    gg: Vec<(usize, usize)>,
+    gg_at: std::collections::HashMap<usize, usize>,
+    gg_len: usize,
+    group_rows: usize,
+    group_off: usize,
+}
+
+impl RangePlan {
+    fn new(pattern: &BlockPattern, n_free: usize, schur_order: &[usize],
+           cams_of: impl Fn(usize, &mut dyn FnMut(usize))) -> RangePlan {
+        let n = (n_free / 64).clamp(1, 32);
+        let range = |b: usize| if n_free == 0 { 0 } else { b * n / n_free };
+        let n_pts = schur_order.iter().copied().max().map_or(0, |m| m + 1);
+        let mut owner = vec![0u32; n_pts];
+        let mut points: Vec<Vec<u32>> = vec![Vec::new(); n];
+        let mut seen: Vec<usize> = Vec::new();
+        for &p in schur_order {
+            seen.clear();
+            let mut lowest = usize::MAX;
+            cams_of(p, &mut |b| { lowest = lowest.min(b); seen.push(range(b)); });
+            let own = if lowest == usize::MAX { 0 } else { range(lowest) };
+            owner[p] = own as u32;
+            seen.push(own);
+            seen.sort_unstable();
+            seen.dedup();
+            for &r in &seen { points[r].push(p as u32); }
+        }
+        let mut gg = Vec::new();
+        let mut gg_at = std::collections::HashMap::new();
+        let mut gg_len = 0;
+        for r in n_free..pattern.dims.len() {
+            for k in pattern.row_ptr[r]..pattern.row_ptr[r + 1] {
+                let c = pattern.cols[k] as usize;
+                if c < n_free || c > r { continue; }
+                let len = pattern.dims[r] * pattern.dims[c];
+                gg_at.insert(pattern.val_at[k], gg_len);
+                gg.push((pattern.val_at[k], len));
+                gg_len += len;
+            }
+        }
+        let group_off = if n_free < pattern.dims.len() { pattern.offs[n_free] } else { pattern.n };
+        let points_by_index = points.iter().map(|l| { let mut v = l.clone(); v.sort_unstable(); v }).collect();
+        RangePlan { n, n_free, points, points_by_index, owner, gg, gg_at, gg_len, group_rows: pattern.n - group_off, group_off }
+    }
+    fn range(&self, b: usize) -> usize { if self.n_free == 0 { 0 } else { b * self.n / self.n_free } }
+    fn part_len(&self) -> usize { self.gg_len + self.group_rows }
+}
+
 // Group item indices 0..len by key (< n_keys), keeping item order within a key:
 // (start offsets, n_keys + 1 entries; the grouped item indices).
 fn csr(n_keys: usize, keys: impl Iterator<Item = usize> + Clone) -> (Vec<u32>, Vec<u32>) {
@@ -977,6 +1048,14 @@ pub fn bundle_adjust(
         key.sort_unstable();
         key.into_iter().map(|(_, p)| p).collect()
     } else { (0..n_pts).collect() };
+    // How the lower-triangle Schur step splits over threads (RangePlan). Only there:
+    // the full-matrix paths keep their single loop.
+    let range_plan = if lower_only { Some(RangePlan::new(&pattern, n_free, &schur_order, |p, visit: &mut dyn FnMut(usize)| {
+        for q in pt_start[p] as usize..pt_start[p + 1] as usize {
+            let sl = slot[obs[pt_obs[q] as usize].0];
+            if sl != FIXED { visit(sl); }
+        }
+    })) } else { None };
     // Per-group params, one [f64;7] slot each. The focal-scale slot (if present) inits
     // to 1 (multiplies fx/fy); every distortion/principal-point slot inits to 0 — a
     // fisheye group's k slots are offsets from its seed coefficients.
@@ -999,14 +1078,21 @@ pub fn bundle_adjust(
     };
 
     // Plain RMS reprojection error over all observations (reported to the caller).
+    // The per-observation loops below run on the pool (par.rs map_indexed) and are summed
+    // here in observation order, so they give the plain loop's bits.
+    // One observation's squared reprojection error, NaN when it projects nowhere.
+    let sq_err = |o: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
+        let (ci, pi, ox, oy, _, _) = obs[o];
+        let (r, t) = &cams[ci];
+        let e = eff(ci, gpar);
+        let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &pts[pi]);
+        if px.is_nan() { f64::NAN } else { (px - ox).powi(2) + (py - oy).powi(2) }
+    };
     let rms = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
         let mut sse = 0.0f64; let mut cnt = 0usize;
-        for &(ci, pi, ox, oy, _, _) in &obs {
-            let (r, t) = &cams[ci];
-            let e = eff(ci, gpar);
-            let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &pts[pi]);
-            if px.is_nan() { continue; }
-            sse += (px - ox).powi(2) + (py - oy).powi(2); cnt += 1;
+        for v in map_indexed(obs.len(), |o| sq_err(o, cams, pts, gpar)) {
+            if v.is_nan() { continue; }
+            sse += v; cnt += 1;
         }
         if cnt == 0 { 0.0 } else { (sse / cnt as f64).sqrt() }
     };
@@ -1014,37 +1100,35 @@ pub fn bundle_adjust(
     // Huber-robustified cost Σ ρ(‖r‖) at pixel threshold δ, plus the (unrobustified,
     // quadratic) GCP anchor term — same total objective the LM step below descends.
     let robust_cost = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64| -> f64 {
-        let mut sum = 0.0f64;
-        for &(ci, pi, ox, oy, wx, wy) in &obs {
+        let terms = map_indexed(obs.len(), |o| {
+            let (ci, pi, ox, oy, wx, wy) = obs[o];
             let (r, t) = &cams[ci];
             let e = eff(ci, gpar);
             let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &pts[pi]);
-            if px.is_nan() { sum += dh * dh; continue; }
+            if px.is_nan() { return dh * dh; }
             let dx=px-ox; let dy=py-oy; let e=(dx*dx+dy*dy).sqrt();
             // The Huber loss the IRLS weight r = δ/e actually descends: ρ = q·(2r − r²)
             // (= 2δe − δ² for unit weights), continuous with q at e = δ. Evaluating
             // r·q (= δe) instead halved the outlier slope relative to the step model
             // and the anchor/prior terms, so step acceptance judged a different cost.
             let q = wx*dx*dx + wy*dy*dy;
-            sum += if e <= dh { q } else { let r = dh/e; q * (2.0*r - r*r) };
-        }
+            if e <= dh { q } else { let r = dh/e; q * (2.0*r - r*r) }
+        });
+        let mut sum = 0.0f64;
+        for v in terms { sum += v; }
         sum + anchor_sse(pts) + camera_prior_sse(cams)
     };
 
     // Adaptive Huber threshold: a multiple of the residual median, so it tracks the
     // noise floor as the model tightens. Recomputed once per outer iteration.
     let huber_threshold = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
-        let mut es: Vec<f64> = Vec::with_capacity(obs.len());
-        for &(ci, pi, ox, oy, _, _) in &obs {
-            let (r, t) = &cams[ci];
-            let e = eff(ci, gpar);
-            let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &pts[pi]);
-            if px.is_nan() { continue; }
-            es.push(((px - ox).powi(2) + (py - oy).powi(2)).sqrt());
-        }
+        let mut es: Vec<f64> = map_indexed(obs.len(), |o| sq_err(o, cams, pts, gpar).sqrt());
+        es.retain(|v| !v.is_nan());
         if es.is_empty() { return 1.0; }
-        es.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        (2.5 * es[es.len() / 2]).max(1.0)
+        // The median by selection: the same element a full sort puts there.
+        let mid = es.len() / 2;
+        let (_, m, _) = es.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+        (2.5 * *m).max(1.0)
     };
 
     // One observation linearised at the given state: its residual, IRLS weights and
@@ -1216,41 +1300,114 @@ pub fn bundle_adjust(
             }
         }
 
-        for pi in 0..n_pts {
-            for q in pt_start[pi]..pt_start[pi + 1] {
-                let Some(Jac { ci, ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv }) = jac(pt_obs[q as usize] as usize, &cams, &pts, &gpar, dh)
-                    else { continue };
-                let sc = slot[ci];
-                let free = sc != FIXED;
-                let coff = if free { 6 * sc } else { 0 };
-                if free {
-                    let dc = pattern.diag_at[sc];
-                    for a in 0..6 {
-                        gr[coff + a] += wu*ju[a]*ru + wv*jv[a]*rv;
-                        for b in 0..6 { smat[dc + a*6 + b] += wu*ju[a]*ju[b] + wv*jv[a]*jv[b]; }
+        if let Some(rp) = range_plan.as_ref() {
+            // Range by range as the Schur step below (RangePlan): a camera's blocks and
+            // gradient by its range, a point's C and gp by its owner, the group diagonal
+            // and gradient by the owner (range 0 directly, the others into a partial
+            // added in range order); each range's points in index order, the loop's.
+            let (sm_p, gr_p) = (SyncPtr::of(&mut smat), SyncPtr::of(&mut gr));
+            let (cm_p, gp_p) = (SyncPtr::of(&mut cmat), SyncPtr::of(&mut gpv));
+            let mut parts: Vec<Vec<f64>> = (0..rp.n).map(|r| if r == 0 || !refine { Vec::new() } else { vec![0f64; rp.part_len()] }).collect();
+            let parts_p: Vec<SyncPtr<f64>> = parts.iter_mut().map(|v| SyncPtr::of(v)).collect();
+            for_each_index(rp.n, |r| {
+                let part = parts_p[r];
+                for &pi in &rp.points_by_index[r] {
+                    let pi = pi as usize;
+                    let owner = rp.owner[pi] as usize == r;
+                    for q in pt_start[pi]..pt_start[pi + 1] {
+                        let o = pt_obs[q as usize] as usize;
+                        let sc = slot[obs[o].0];
+                        let free = sc != FIXED;
+                        let mine = free && rp.range(sc) == r;
+                        if !mine && !owner { continue; }
+                        let Some(Jac { ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv, ci }) = jac(o, &cams, &pts, &gpar, dh)
+                            else { continue };
+                        // SAFETY (all writes below): RangePlan gives each element one writing range.
+                        if mine {
+                            let (coff, dc) = (6 * sc, pattern.diag_at[sc]);
+                            for a in 0..6 {
+                                unsafe { *gr_p.at(coff + a) += wu*ju[a]*ru + wv*jv[a]*rv; }
+                                for b in 0..6 { unsafe { *sm_p.at(dc + a*6 + b) += wu*ju[a]*ju[b] + wv*jv[a]*jv[b]; } }
+                            }
+                        }
+                        if refine {
+                            let g = grp[ci];
+                            let goff = group_off + g * kdim;
+                            let dg = pattern.diag_at[n_free + g];
+                            let (gc, cg) = if mine { (pattern.at(n_free + g, sc), pattern.at(sc, n_free + g)) } else { (0, 0) };
+                            for a in 0..kdim {
+                                if owner {
+                                    let gv = wu*jku[a]*ru + wv*jkv[a]*rv;
+                                    if r == 0 { unsafe { *gr_p.at(goff + a) += gv; } }
+                                    else { unsafe { *part.at(rp.gg_len + goff + a - rp.group_off) += gv; } }
+                                    let at = if r == 0 { dg } else { rp.gg_at[&dg] };
+                                    let dst = if r == 0 { sm_p } else { part };
+                                    for b in 0..kdim { unsafe { *dst.at(at + a*kdim + b) += wu*jku[a]*jku[b] + wv*jkv[a]*jkv[b]; } }
+                                }
+                                // Cross term camera(coff) ↔ group(goff), both triangles.
+                                if mine { for b in 0..6 {
+                                    let v = wu*jku[a]*ju[b] + wv*jkv[a]*jv[b];
+                                    unsafe { *sm_p.at(gc + a*6 + b) += v; *sm_p.at(cg + b*kdim + a) += v; }
+                                } }
+                            }
+                        }
+                        if owner {
+                            let (gp, cm) = unsafe { (gp_p.at(pi), cm_p.at(pi)) };
+                            for a in 0..3 {
+                                gp[a] += wu*jpu[a]*ru + wv*jpv[a]*rv;
+                                for b in 0..3 { cm[a][b] += wu*jpu[a]*jpu[b] + wv*jpv[a]*jpv[b]; }
+                            }
+                        }
                     }
                 }
-                if refine {
-                    let g = grp[ci];
-                    let goff = group_off + g * kdim;
-                    let dg = pattern.diag_at[n_free + g];
-                    let (gc, cg) = if free { (pattern.at(n_free + g, sc), pattern.at(sc, n_free + g)) } else { (0, 0) };
-                    for a in 0..kdim {
-                        gr[goff + a] += wu*jku[a]*ru + wv*jkv[a]*rv;
-                        for b in 0..kdim { smat[dg + a*kdim + b] += wu*jku[a]*jku[b] + wv*jkv[a]*jkv[b]; }
-                        // Cross term camera(coff) ↔ group(goff), both triangles.
-                        if free { for b in 0..6 {
-                            let v = wu*jku[a]*ju[b] + wv*jkv[a]*jv[b];
-                            smat[gc + a*6 + b] += v;
-                            smat[cg + b*kdim + a] += v;
-                        } }
+            });
+            if refine {
+                for part in parts.iter().skip(1) {
+                    for &(base, len) in &rp.gg {
+                        let o = rp.gg_at[&base];
+                        for i in 0..len { smat[base + i] += part[o + i]; }
                     }
-                }
-                for a in 0..3 {
-                    gpv[pi][a] += wu*jpu[a]*ru + wv*jpv[a]*rv;
-                    for b in 0..3 { cmat[pi][a][b] += wu*jpu[a]*jpu[b] + wv*jpv[a]*jpv[b]; }
+                    for i in 0..rp.group_rows { gr[rp.group_off + i] += part[rp.gg_len + i]; }
                 }
             }
+        } else {
+            for pi in 0..n_pts {
+                for q in pt_start[pi]..pt_start[pi + 1] {
+                    let Some(Jac { ci, ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv }) = jac(pt_obs[q as usize] as usize, &cams, &pts, &gpar, dh)
+                        else { continue };
+                    let sc = slot[ci];
+                    let free = sc != FIXED;
+                    let coff = if free { 6 * sc } else { 0 };
+                    if free {
+                        let dc = pattern.diag_at[sc];
+                        for a in 0..6 {
+                            gr[coff + a] += wu*ju[a]*ru + wv*jv[a]*rv;
+                            for b in 0..6 { smat[dc + a*6 + b] += wu*ju[a]*ju[b] + wv*jv[a]*jv[b]; }
+                        }
+                    }
+                    if refine {
+                        let g = grp[ci];
+                        let goff = group_off + g * kdim;
+                        let dg = pattern.diag_at[n_free + g];
+                        let (gc, cg) = if free { (pattern.at(n_free + g, sc), pattern.at(sc, n_free + g)) } else { (0, 0) };
+                        for a in 0..kdim {
+                            gr[goff + a] += wu*jku[a]*ru + wv*jkv[a]*rv;
+                            for b in 0..kdim { smat[dg + a*kdim + b] += wu*jku[a]*jku[b] + wv*jkv[a]*jkv[b]; }
+                            // Cross term camera(coff) ↔ group(goff), both triangles.
+                            if free { for b in 0..6 {
+                                let v = wu*jku[a]*ju[b] + wv*jkv[a]*jv[b];
+                                smat[gc + a*6 + b] += v;
+                                smat[cg + b*kdim + a] += v;
+                            } }
+                        }
+                    }
+                    for a in 0..3 {
+                        gpv[pi][a] += wu*jpu[a]*ru + wv*jpv[a]*rv;
+                        for b in 0..3 { cmat[pi][a][b] += wu*jpu[a]*jpu[b] + wv*jpv[a]*jpv[b]; }
+                    }
+                }
+            }
+
         }
 
         // A k slot the group's lens does not have has no Jacobian: pin it (unit
@@ -1282,55 +1439,133 @@ pub fn bundle_adjust(
             let mut cinv_store: Vec<Option<M3>> = vec![None; n_pts];
             let mut tmp_store: Vec<V3> = vec![[0.0; 3]; n_pts];
             let mut ok = true;
-            for &pi in &schur_order {
-                eblocks(pi, &cams, &pts, &gpar, dh, &mut el);
-                // An anchored point with no camera coupling (edge case: every
-                // observing camera failed cheirality) still needs its C⁻¹·gp
-                // computed so the back-substitution below moves it toward the anchor.
-                if el.is_empty() && !anchored[pi] { continue; }
-                let mut cp = cmat[pi];
-                for i in 0..3 { cp[i][i] = cp[i][i] * (1.0 + lambda) + 1e-12; }
-                let cinv = match inv3(&cp) { Some(m) => m, None => { ok = false; break; } };
-                let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
-                cinv_store[pi] = Some(cinv);
-                tmp_store[pi] = tmp;
-                for eb in &el {
-                    for a in 0..eb.dim {
-                        rhs[eb.off + a] += eb.rows[a][0]*tmp[0] + eb.rows[a][1]*tmp[1] + eb.rows[a][2]*tmp[2];
-                    }
-                }
-                // M_v = E_v·C⁻¹ (dim×3); then S -= Σ_{v1,v2} M_{v1}·E_{v2}ᵀ. The sparse direct
-                // solve reads only the lower triangle (block row ≥ block column), so with it
-                // the upper pairs are skipped: half of the Schur elimination, the largest
-                // part of a big BA (1,600 cameras: 4.1 of 7.8 s).
-                ms_buf.clear();
-                ms_buf.extend(el.iter().map(|eb| {
-                    let mut m = [[0f64; 3]; BLK_MAX];
-                    for a in 0..eb.dim {
-                        for k in 0..3 {
-                            m[a][k] = eb.rows[a][0]*cinv[0][k] + eb.rows[a][1]*cinv[1][k] + eb.rows[a][2]*cinv[2][k];
+            if let Some(rp) = range_plan.as_ref() {
+                // Range by range, on the thread pool when there is one (RangePlan: every
+                // element has one writer, and gets its terms in Schur order).
+                let failed = std::sync::atomic::AtomicBool::new(false);
+                let (s_p, rhs_p) = (SyncPtr::of(&mut s), SyncPtr::of(&mut rhs));
+                let (ci_p, tmp_p) = (SyncPtr::of(&mut cinv_store), SyncPtr::of(&mut tmp_store));
+                let mut parts: Vec<Vec<f64>> = (0..rp.n).map(|r| if r == 0 { Vec::new() } else { vec![0f64; rp.part_len()] }).collect();
+                let parts_p: Vec<SyncPtr<f64>> = parts.iter_mut().map(|v| SyncPtr::of(v)).collect();
+                for_each_index(rp.n, |r| {
+                    let part = parts_p[r];
+                    let mut el: Vec<EBlock> = Vec::new();
+                    let mut ms: Vec<[[f64; 3]; BLK_MAX]> = Vec::new();
+                    for &pi in &rp.points[r] {
+                        if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
+                        let pi = pi as usize;
+                        eblocks(pi, &cams, &pts, &gpar, dh, &mut el);
+                        if el.is_empty() && !anchored[pi] { continue; }
+                        let mut cp = cmat[pi];
+                        for i in 0..3 { cp[i][i] = cp[i][i] * (1.0 + lambda) + 1e-12; }
+                        let cinv = match inv3(&cp) { Some(m) => m, None => { failed.store(true, std::sync::atomic::Ordering::Relaxed); return; } };
+                        let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
+                        let owner = rp.owner[pi] as usize == r;
+                        // SAFETY (all writes below): RangePlan gives each element one writing range.
+                        if owner { unsafe { *ci_p.at(pi) = Some(cinv); *tmp_p.at(pi) = tmp; } }
+                        for eb in &el {
+                            let camera = eb.blk < rp.n_free;
+                            if !(if camera { rp.range(eb.blk) == r } else { owner }) { continue; }
+                            for a in 0..eb.dim {
+                                let v = eb.rows[a][0]*tmp[0] + eb.rows[a][1]*tmp[1] + eb.rows[a][2]*tmp[2];
+                                if camera || r == 0 { unsafe { *rhs_p.at(eb.off + a) += v; } }
+                                else { unsafe { *part.at(rp.gg_len + eb.off + a - rp.group_off) += v; } }
+                            }
                         }
-                    }
-                    m
-                }));
-                for (i1, eb1) in el.iter().enumerate() {
-                    let m = &ms_buf[i1];
-                    for eb2 in &el {
-                        if lower_only && eb2.blk > eb1.blk { continue; }
-                        let base = pattern.at(eb1.blk, eb2.blk);
-                        if eb1.dim == 6 && eb2.dim == 6 {
-                            // Camera × camera, fixed size (the same sums as below).
-                            for a in 0..6 {
-                                for b in 0..6 {
-                                    let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
-                                    s[base + a*6 + b] -= v;
+                        ms.clear();
+                        ms.extend(el.iter().map(|eb| {
+                            let mut m = [[0f64; 3]; BLK_MAX];
+                            for a in 0..eb.dim {
+                                for k in 0..3 {
+                                    m[a][k] = eb.rows[a][0]*cinv[0][k] + eb.rows[a][1]*cinv[1][k] + eb.rows[a][2]*cinv[2][k];
                                 }
                             }
-                        } else {
-                            for a in 0..eb1.dim {
-                                for b in 0..eb2.dim {
-                                    let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
-                                    s[base + a*eb2.dim + b] -= v;
+                            m
+                        }));
+                        for (i1, eb1) in el.iter().enumerate() {
+                            let m = &ms[i1];
+                            for eb2 in &el {
+                                if eb2.blk > eb1.blk { continue; }
+                                // Row eb1's owner for a camera row; the column camera's owner
+                                // for a group row; the point's owner for group × group.
+                                let (mine, direct) = if eb1.blk < rp.n_free { (rp.range(eb1.blk) == r, true) }
+                                    else if eb2.blk < rp.n_free { (rp.range(eb2.blk) == r, true) }
+                                    else { (owner, r == 0) };
+                                if !mine { continue; }
+                                let base = pattern.at(eb1.blk, eb2.blk);
+                                let at = if direct { base } else { rp.gg_at[&base] };
+                                let dst = if direct { s_p } else { part };
+                                for a in 0..eb1.dim {
+                                    for b in 0..eb2.dim {
+                                        let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                        if direct { unsafe { *dst.at(at + a*eb2.dim + b) -= v; } }
+                                        else { unsafe { *dst.at(at + a*eb2.dim + b) += v; } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                ok = !failed.load(std::sync::atomic::Ordering::Relaxed);
+                // The other ranges' group shares, in range order.
+                for part in parts.iter().skip(1) {
+                    for &(base, len) in &rp.gg {
+                        let o = rp.gg_at[&base];
+                        for i in 0..len { s[base + i] -= part[o + i]; }
+                    }
+                    for i in 0..rp.group_rows { rhs[rp.group_off + i] += part[rp.gg_len + i]; }
+                }
+            } else {
+                for &pi in &schur_order {
+                    eblocks(pi, &cams, &pts, &gpar, dh, &mut el);
+                    // An anchored point with no camera coupling (edge case: every
+                    // observing camera failed cheirality) still needs its C⁻¹·gp
+                    // computed so the back-substitution below moves it toward the anchor.
+                    if el.is_empty() && !anchored[pi] { continue; }
+                    let mut cp = cmat[pi];
+                    for i in 0..3 { cp[i][i] = cp[i][i] * (1.0 + lambda) + 1e-12; }
+                    let cinv = match inv3(&cp) { Some(m) => m, None => { ok = false; break; } };
+                    let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
+                    cinv_store[pi] = Some(cinv);
+                    tmp_store[pi] = tmp;
+                    for eb in &el {
+                        for a in 0..eb.dim {
+                            rhs[eb.off + a] += eb.rows[a][0]*tmp[0] + eb.rows[a][1]*tmp[1] + eb.rows[a][2]*tmp[2];
+                        }
+                    }
+                    // M_v = E_v·C⁻¹ (dim×3); then S -= Σ_{v1,v2} M_{v1}·E_{v2}ᵀ. The sparse direct
+                    // solve reads only the lower triangle (block row ≥ block column), so with it
+                    // the upper pairs are skipped: half of the Schur elimination, the largest
+                    // part of a big BA (1,600 cameras: 4.1 of 7.8 s).
+                    ms_buf.clear();
+                    ms_buf.extend(el.iter().map(|eb| {
+                        let mut m = [[0f64; 3]; BLK_MAX];
+                        for a in 0..eb.dim {
+                            for k in 0..3 {
+                                m[a][k] = eb.rows[a][0]*cinv[0][k] + eb.rows[a][1]*cinv[1][k] + eb.rows[a][2]*cinv[2][k];
+                            }
+                        }
+                        m
+                    }));
+                    for (i1, eb1) in el.iter().enumerate() {
+                        let m = &ms_buf[i1];
+                        for eb2 in &el {
+                            if lower_only && eb2.blk > eb1.blk { continue; }
+                            let base = pattern.at(eb1.blk, eb2.blk);
+                            if eb1.dim == 6 && eb2.dim == 6 {
+                                // Camera × camera, fixed size (the same sums as below).
+                                for a in 0..6 {
+                                    for b in 0..6 {
+                                        let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                        s[base + a*6 + b] -= v;
+                                    }
+                                }
+                            } else {
+                                for a in 0..eb1.dim {
+                                    for b in 0..eb2.dim {
+                                        let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                        s[base + a*eb2.dim + b] -= v;
+                                    }
                                 }
                             }
                         }
@@ -1358,21 +1593,28 @@ pub fn bundle_adjust(
 
             prof::mark(3);
             // Back-substitute points: δp = −C⁻¹·gp − C⁻¹·(Σ_v E_vᵀ·δv).
+            // Every point on its own: on the pool, CHUNK points per task.
             let mut dp = vec![[0f64; 3]; n_pts];
-            for pi in 0..n_pts {
-                let cinv = match cinv_store[pi] { Some(m) => m, None => continue };
-                eblocks(pi, &cams, &pts, &gpar, dh, &mut el);
-                let mut acc = [0f64; 3];
-                for eb in &el {
-                    for k in 0..3 {
-                        let mut sdot = 0.0;
-                        for a in 0..eb.dim { sdot += eb.rows[a][k] * dsol[eb.off + a]; }
-                        acc[k] += sdot;
+            let dp_p = SyncPtr::of(&mut dp);
+            for_each_index(n_pts.div_ceil(CHUNK), |k| {
+                let mut el: Vec<EBlock> = Vec::new();
+                for pi in k * CHUNK..((k + 1) * CHUNK).min(n_pts) {
+                    let cinv = match cinv_store[pi] { Some(m) => m, None => continue };
+                    eblocks(pi, &cams, &pts, &gpar, dh, &mut el);
+                    let mut acc = [0f64; 3];
+                    for eb in &el {
+                        for k in 0..3 {
+                            let mut sdot = 0.0;
+                            for a in 0..eb.dim { sdot += eb.rows[a][k] * dsol[eb.off + a]; }
+                            acc[k] += sdot;
+                        }
                     }
+                    let ca = mat3_vec(&cinv, &acc);
+                    // SAFETY: point pi belongs to chunk k alone.
+                    let d = unsafe { dp_p.at(pi) };
+                    for k in 0..3 { d[k] = -tmp_store[pi][k] - ca[k]; }
                 }
-                let ca = mat3_vec(&cinv, &acc);
-                for k in 0..3 { dp[pi][k] = -tmp_store[pi][k] - ca[k]; }
-            }
+            });
 
             // Tentative update: t += δt, R = exp(δω)·R, X += δX, group params += δ.
             let mut tent_cams = cams.clone();

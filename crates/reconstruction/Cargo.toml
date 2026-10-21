@@ -12,6 +12,14 @@ crate-type = ["cdylib", "rlib"]
 # Exports a timing hook for the sparse Cholesky (sparse_chol.rs), for measurement
 # builds only; the app's wasm is built without it.
 bench = []
+# The threaded build (src/wasm/reconstruction-mt): the bundle adjustment's Schur step on a
+# rayon pool, wasm atomics + shared memory, the pool started from JS by initThreadPool.
+# Needs nightly (build-std); see crates/README.md ▸ Threads.
+threads = ["dep:rayon", "dep:wasm-bindgen-rayon"]
 
 [dependencies]
 wasm-bindgen = "0.2"
+rayon = { version = "1.10", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-rayon = { version = "1.3", optional = true }

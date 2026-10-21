@@ -33,6 +33,43 @@ same commit. A source edit without the rebuilt wasm is a silent no-op at runtime
 `build:wasm` runs `wasm-pack build … --target web` for all three crates and
 strips the generated `.gitignore` files so the output stays tracked.
 
+## Threads
+
+`reconstruction` is built twice. `src/wasm/reconstruction` is the plain build;
+`src/wasm/reconstruction-mt` is the same crate with `--features threads`
+(`scripts/build-wasm-mt.mjs`, run by `build:wasm`): wasm atomics, a shared memory of
+up to 4 GiB, and a rayon pool that `initThreadPool(n)` starts as Web Workers sharing
+that memory (wasm-bindgen-rayon). The bundle adjustment's assembly, Schur step, cost
+and back-substitution run on it (`par.rs`); the sparse Cholesky is still one thread
+(spreading a supernode's updates over its targets was measured slower: 0.81 → 1.13 s
+at 1,600 cameras, native).
+
+`core/sfm/reconstruction.js` uses the threaded build for `bundleAdjust` only in a
+worker of a cross-origin isolated page (shared memory, and a thread may block in
+`Atomics.wait`, which a page's main thread may not), up to `SFM_TUNING.baThreads`
+threads; anywhere else, Node tests included, it uses the plain build. Both give the
+**same bits**, whatever the thread count: the work is cut into ranges fixed by the
+camera count alone, every element of the reduced system has one writing range and gets
+its terms in a fixed order (`bundle.rs` `RangePlan`), and every sum over observations
+is taken in index order. Keep it that way: a parallel reduction whose order depends on
+the thread count would make a reconstruction differ between machines. (Against the
+single loop before threads: the same bits without self-calibration; with it, the
+shared intrinsics blocks are summed range by range and may round differently.)
+`tests/browser/ba-scale.spec.js` (opt-in, `BA_SCALE=40`) checks the bits and times
+both builds on 1,600 synthetic cameras.
+
+The threaded build needs **nightly** Rust (it rebuilds `std` with atomics):
+
+```
+rustup toolchain install nightly
+rustup component add rust-src --toolchain nightly
+rustup target add wasm32-unknown-unknown --toolchain nightly
+```
+
+Built with `rustc 1.101.0-nightly (2026-10-20)`. The link flags (shared, imported
+memory; the TLS and heap symbols) are in the script because recent Rust no longer adds
+them for `+atomics`, and wasm-bindgen refuses the module without them.
+
 ## Profiles
 
 Release profile (`opt-level=3`, `lto`, `codegen-units=1`, `panic="abort"`) lives
