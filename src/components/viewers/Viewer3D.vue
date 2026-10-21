@@ -828,7 +828,7 @@ onBeforeUnmount(() => {
       <div class="tb-row" role="group" aria-label="Measure">
         <button v-for="t in [['distance', 'Distance'], ['polyline', 'Polyline'], ['area', 'Area']]" :key="t[0]"
           class="tb-textbtn" :class="{ active: measureTool === t[0] }" :aria-pressed="measureTool === t[0]"
-          @click="measureTool = t[0]; clearMeasure()">{{ t[1] }}</button>
+          @click="() => { measureTool = t[0]; clearMeasure() }">{{ t[1] }}</button>
       </div>
       <template v-if="measureResult?.line">
         <div class="tb-line"><span class="tb-count">{{ fmt(measureResult.line.length, measureResult.units) }}</span>

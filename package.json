@@ -28,7 +28,9 @@
     "test:browser": "playwright test",
     "test:wasm": "node scripts/check-laz-wasm.mjs",
     "check:wasm": "node scripts/wasm-stamp.mjs",
-    "lint": "eslint src scripts tests *.config.js"
+    "lint": "eslint src scripts tests *.config.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
@@ -51,6 +53,7 @@
     "@vitejs/plugin-vue": "^5.2.1",
     "eslint": "^10.13.0",
     "globals": "^17.13.0",
+    "prettier": "3.9.10",
     "typescript": "^5.9.3",
     "vite": "^6.4.4",
     "vite-plugin-pwa": "^2.0.0",

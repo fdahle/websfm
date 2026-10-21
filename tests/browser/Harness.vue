@@ -14,5 +14,5 @@ const open = ref(false), nested = ref(false), confirmed = ref(false)
     <template #footer><button @click="open = false">Close outer</button></template>
   </ModalShell>
   <ConfirmModal v-if="nested" title="Delete project?" danger @cancel="nested = false"
-    @confirm="confirmed = true; nested = false" />
+    @confirm="() => { confirmed = true; nested = false }" />
 </template>

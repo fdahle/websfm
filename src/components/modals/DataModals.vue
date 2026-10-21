@@ -115,7 +115,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :accuracy-defaults="gcpImportDefaults"
       :existing-gcps="gcps"
       :kind-declared="importKindDeclared"
-      @close="gcpImportOpen = false; gcpImportGeojson = null; gcpImportText = ''; gcpImportCrs = null"
+      @close="() => { gcpImportOpen = false; gcpImportGeojson = null; gcpImportText = ''; gcpImportCrs = null }"
       @import="onGcpImport"
       @switch-kind="onImportSwitchKind"
     />
@@ -126,7 +126,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
     <ImportKindModal
       v-if="importKindOpen && importKindFile"
       :file-name="importKindFile.name"
-      @close="importKindOpen = false; importKindFile = null"
+      @close="() => { importKindOpen = false; importKindFile = null }"
       @select="onImportKindChosen"
     />
   </Teleport>
@@ -147,7 +147,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
     <ImportCloudModal
       v-if="importCloudOpen && importCloudData"
       :data="importCloudData"
-      @close="importCloudOpen = false; importCloudData = null"
+      @close="() => { importCloudOpen = false; importCloudData = null }"
       @run="onCloudImport"
     />
   </Teleport>
@@ -168,7 +168,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
     <ImportRasterModal
       v-if="importRasterOpen && importRasterData"
       :data="importRasterData"
-      @close="importRasterOpen = false; importRasterData = null"
+      @close="() => { importRasterOpen = false; importRasterData = null }"
       @set-kind="({ id, kind }) => setRasterKind(id, kind)"
       @set-accuracy="({ id, ...v }) => setRasterAccuracy(id, v)"
       @import-as-image="onRasterImportAsImage"
@@ -199,7 +199,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :file-name="footprintImportData.fileName"
       :project-crs="currentCrs"
       :images="images"
-      @close="footprintImportOpen = false; footprintImportData = null"
+      @close="() => { footprintImportOpen = false; footprintImportData = null }"
       @import="onFootprintImport"
     />
   </Teleport>
@@ -248,7 +248,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       @select="selectImage"
       @open="(id) => { openImageTab(id); imageTableOpen = false }"
       @assign-sensor="({ imageId, sensorId }) => assignSensor(imageId, sensorId)"
-      @open-sensor-table="imageTableOpen = false; sensorTableOpen = true"
+      @open-sensor-table="() => { imageTableOpen = false; sensorTableOpen = true }"
     />
 
     <CameraPoseTableModal
@@ -366,7 +366,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       @close="qualityOpen = false"
       @open-image="(id) => { openImageTab(id); qualityOpen = false }"
       @open-image-residuals="openImageWithResiduals"
-      @open-match-list="qualityOpen = false; matchListOpen = true"
+      @open-match-list="() => { qualityOpen = false; matchListOpen = true }"
     />
   </Teleport>
 

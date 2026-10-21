@@ -1,0 +1,17 @@
+# Generated, vendored or large: never formatted.
+node_modules/
+dist/
+src/wasm/
+public/
+crates/
+package-lock.json
+# Local output and private notes.
+bench-out/
+test-results/
+playwright-report/
+data/
+dev/
+.claude/
+scripts/bench/configs/
+# Markdown keeps its hand wrapping: the guide's param markers and the changelog.
+*.md

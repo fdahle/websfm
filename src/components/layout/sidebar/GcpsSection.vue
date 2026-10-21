@@ -77,7 +77,7 @@ function reprojFor(gcpId, imageId) {
           class="list-item"
           :class="{ selected: gcp.id === sidebar.selectedGcpId }"
           :title="gcp.name"
-          @click="sidebar.selectGcp(gcp.id); toggleGcpExpand(gcp.id)"
+          @click="() => { sidebar.selectGcp(gcp.id); toggleGcpExpand(gcp.id) }"
           @dblclick="sidebar.openGcp(gcp.id)"
           @contextmenu="onGcpRightClick($event, gcp)"
         >

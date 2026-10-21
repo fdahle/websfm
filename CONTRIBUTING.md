@@ -47,10 +47,16 @@ tests, the headless pipeline bench and rebuilding the WASM.
 ## Before you open a pull request
 
 ```bash
+npm run format      # Prettier; CI checks it with format:check
 npm test
 npm run typecheck
 ```
 
+- **Formatting is Prettier's** (`.prettierrc.json`), so a review is about the code.
+  Your editor can format on save with the Prettier extension. In a Vue template, an
+  event handler with several statements is an arrow function,
+  `@click="() => { a = 1; b() }"`: Prettier puts plain `a = 1; b()` on two lines
+  without the semicolon, which Vue cannot parse (`npm run typecheck` catches it).
 - **Keep pull requests small and focused**: one fix or feature each. They are
   reviewed faster, and a bisect can find what broke.
 - **Rust changes:** run `npm run build:wasm` and commit the regenerated `src/wasm/`

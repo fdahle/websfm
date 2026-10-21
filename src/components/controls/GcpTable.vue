@@ -125,7 +125,7 @@ function onPositionInput(gcp, axis, e) {
       <template v-if="gcps.some((g) => g.role !== 'marker')">
         <span class="toolbar-sep"></span>
         <select class="tool-btn" aria-label="Convert heights" title="Convert every GCP's Z to this vertical datum: ellipsoidal and EGM96/EGM2008 heights convert, others are skipped"
-          value="" @change="emit('convert-heights', $event.target.value); $event.target.value = ''">
+          value="" @change="($event) => { emit('convert-heights', $event.target.value); $event.target.value = '' }">
           <option value="" disabled>Convert heights to…</option>
           <option v-for="d in CONVERTIBLE" :key="d.id" :value="d.id">{{ d.label }}</option>
         </select>

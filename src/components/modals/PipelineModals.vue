@@ -263,7 +263,7 @@ const measurementsStore = useMeasurementsStore()
       :initial-id="toolInitialId"
       :merge-cell="denseSummary?.mergeCell ?? 0"
       :start-method="filterCloudPreset"
-      @close="filterCloudOpen = false; filterCloudPreset = null"
+      @close="() => { filterCloudOpen = false; filterCloudPreset = null }"
       @run="onFilterCloudRun"
     />
   </Teleport>

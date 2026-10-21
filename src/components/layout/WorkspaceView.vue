@@ -283,12 +283,12 @@ onBeforeUnmount(() => {
     :style="{ left: tabCtx.x + 'px', top: tabCtx.y + 'px' }"
     @click.stop
   >
-    <button class="tab-ctx-item" @click="closeTab(tabCtx.id); closeTabCtx()">Close</button>
-    <button class="tab-ctx-item" :disabled="!tabCtxHasOthers" @click="closeOtherTabs(tabCtx.id); closeTabCtx()">Close others</button>
-    <button class="tab-ctx-item" :disabled="!tabCtxHasLeft" @click="closeTabsToLeft(tabCtx.id); closeTabCtx()">Close to the left</button>
-    <button class="tab-ctx-item" :disabled="!tabCtxHasRight" @click="closeTabsToRight(tabCtx.id); closeTabCtx()">Close to the right</button>
+    <button class="tab-ctx-item" @click="() => { closeTab(tabCtx.id); closeTabCtx() }">Close</button>
+    <button class="tab-ctx-item" :disabled="!tabCtxHasOthers" @click="() => { closeOtherTabs(tabCtx.id); closeTabCtx() }">Close others</button>
+    <button class="tab-ctx-item" :disabled="!tabCtxHasLeft" @click="() => { closeTabsToLeft(tabCtx.id); closeTabCtx() }">Close to the left</button>
+    <button class="tab-ctx-item" :disabled="!tabCtxHasRight" @click="() => { closeTabsToRight(tabCtx.id); closeTabCtx() }">Close to the right</button>
     <div class="tab-ctx-sep" />
-    <button class="tab-ctx-item" @click="closeAllTabs(); closeTabCtx()">Close all</button>
+    <button class="tab-ctx-item" @click="() => { closeAllTabs(); closeTabCtx() }">Close all</button>
   </div>
 </Teleport>
 </template>
