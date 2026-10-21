@@ -248,6 +248,16 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Sparse Reconstruction uses every core for its bundle adjustment.** Where the page
+  can share memory with its workers (it can when served as the app is: Chrome,
+  cross-origin isolated), the bundle adjustment runs on up to 16 threads, and gives the
+  same result as on one, bit for bit. On 1,600 synthetic cameras it took 20–36 s instead
+  of 62–120 s; on the 347-image quarry set 43 s instead of 92 s.
+- **Orthophotos build on several workers.** Over saved depth maps, the blocks are
+  shared among the compute workers (as many as the memory budget leaves room for), and
+  photos are decoded a few at a time ahead of when they are needed. The orthophoto is
+  the same, pixel for pixel. Quarry at 12,000 pixels across: 18 minutes on one worker,
+  under 8 on five.
 - **Imported images stop depending on the original files.** Once an image's copy is
   written to the project, websfm reads the copy, so moving, renaming or deleting the
   originals afterwards (or a cloud-sync folder freeing them) no longer breaks images in
@@ -378,6 +388,11 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- An orthophoto over a DEM or mesh in a projected CRS was up to ten times slower than
+  one in the model's local frame: the georeferenced frame is not exactly affine, so
+  every cell took the full transform and no part of a photo was skipped as out of view.
+  It now uses local fits checked against the exact frame. Quarry at 4,096 pixels across
+  took 4 minutes instead of 14.
 - Fusing a very large dense cloud (about 100 million points) failed near its end:
   Chrome holds at most 2 GB in one buffer and 16 GB for a tab, whatever the machine
   has. Fusion now finishes each slab straight into the cloud, splits a piece too large
