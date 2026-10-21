@@ -19,6 +19,11 @@ If even one block, its photos and the overviews do not fit the budget, the build
 and the log gives the figures. Photos are decoded a few at a time, ahead of when they
 are needed, so the browser decodes them alongside the work.
 
+Over saved depth maps the blocks are shared among several workers (Settings ▸ Compute
+▸ Compute workers), each with its part of the memory budget, as many as the budget leaves
+room for; the log says how many. The result is the same, pixel for pixel, as one
+worker would build.
+
 A fine orthophoto takes a while: about twenty minutes for 12,000 pixels across from a
 few hundred photos. Blocks built in a group all finish together, so the log may not
 report a finished block for minutes. It says how far the run has got (blocks done, or

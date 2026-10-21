@@ -8,7 +8,7 @@ import { rasterizeDem, coreExtent, demGeometry, rasterizeDemBlocks, fillEnclosed
 import { orthorectifyTiled, orthoTiledWorkingBytes, orthoMapPxPerCell, orthoCacheLog, ORTHO_BLOCK, MAX_SEAM_CELLS } from '../../core/products/ortho.js'
 import { GAIN_MIN, GAIN_MAX } from '../../core/products/colourGains.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
-import { describeOrthoStats } from '../../core/eval/orthoStats.js'
+import { describeOrthoStats, createOrthoStats } from '../../core/eval/orthoStats.js'
 import { meshSurface, planeSurface } from '../../core/products/surface.js'
 import { createCogBuilder, geoKeysForEpsg, crsTagInfo } from '../../core/products/geotiff.js'
 import { DEM_PLANE_MAX, DEM_TILE, ORTHO_TILE, MAX_RASTER_SIDE, orthoGridFor } from '../../core/products/rasterSize.js'
@@ -403,7 +403,20 @@ export function makeProductsOps({ rasterize } = {}) {
   // geotiff.js createCogBuilder), so no full-resolution plane exists anywhere: the
   // ortho's grid can be far finer than its ≤ 4,096 surface. The stored COG is the
   // ortho — the viewer and the map draw its tiles, exports copy or stream it.
-  async function generateOrtho([input], { emit }) {
+  // ── Orthophoto ────────────────────────────────────────────────────────────────
+  // One run (generateOrtho), or split over pool workers by the store
+  // (reconstruction/productRuns.js): orthoPlan on one worker (the survey and the group
+  // size, and the GeoTIFF writer it keeps for the run), orthoShare on the others (each
+  // a run of the groups, its blocks sent back as events), orthoCogAdd for each block on
+  // the planning worker, orthoFinish there. Every block computes what it computes in one
+  // run (core/products/ortho.js), so the ortho is the same bits either way.
+
+  // Everything a run needs before orthorectifyTiled: the surface and the ortho grid, the
+  // memory plan, the loaders. `shares`: how many workers split the blocks (each gets
+  // that share of the budget for its block planes, cache and photos in flight).
+  // `quiet`: no log lines (a share repeats what the plan said).
+  async function orthoSetup(input, emit, { shares = 1, quiet = false } = {}) {
+    const say = quiet ? () => {} : (m, l = 'info') => emit('log', [m, l, 'Products'])
     const { surface, maps, streamed = false, settings = {} } = input
     // A block-built DEM surface (SAT-3) is read from its COG, as fine as the memory
     // budget allows (a fifth of it for the Float32 heights + mask), not its overview.
@@ -411,12 +424,12 @@ export function makeProductsOps({ rasterize } = {}) {
       const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : 2 * 1024 ** 3
       const g = surface.grid
       const read = await readDemGrid(g, null, Math.floor(budget / 5 / 5))
-      emit('log', [`Ortho: DEM surface read from its GeoTIFF at ${read.width}×${read.height} @ ${read.gsd.toPrecision(3)}`
+      say(`Ortho: DEM surface read from its GeoTIFF at ${read.width}×${read.height} @ ${read.gsd.toPrecision(3)}`
         + `${read.level ? ` (level ${read.level}; the full ${g.fullWidth}×${g.fullHeight} grid exceeds the memory budget)` : ' (full resolution)'}`,
-      read.level ? 'warn' : 'info', 'Products'])
+      read.level ? 'warn' : 'info')
       surface.grid = { ...read, frame: g.frame }
     }
-    const built = buildSurfaceGrid(surface, emit)
+    const built = buildSurfaceGrid(surface, quiet ? () => {} : emit)
     const { frame, label } = built
     const unit = frameUnitName(frame.unit)
     // The ortho's own GSD is independent of the surface's: a coarse surface is
@@ -427,14 +440,14 @@ export function makeProductsOps({ rasterize } = {}) {
     // a BigTIFF. rasterSize.js orthoGridFor, as the dialog's readout computes it.
     const { geom, want } = orthoGridFor(built.grid, settings)
     if (!geom.identity) {
-      emit('log', [`Ortho: ${geom.width.toLocaleString()}×${geom.height.toLocaleString()} @ ${geom.gsd.toPrecision(3)} ${unit}/px `
-        + `over the ${label} surface (${built.grid.width}×${built.grid.height} @ ${built.grid.gsd.toPrecision(3)} ${unit}/px)`, 'info', 'Products'])
+      say(`Ortho: ${geom.width.toLocaleString()}×${geom.height.toLocaleString()} @ ${geom.gsd.toPrecision(3)} ${unit}/px `
+        + `over the ${label} surface (${built.grid.width}×${built.grid.height} @ ${built.grid.gsd.toPrecision(3)} ${unit}/px)`)
     }
     if (want > 0 && geom.gsd > want * (1 + 1e-6)) {
       const side = Math.ceil(Math.max(geom.width, geom.height) * geom.gsd / want)
-      emit('log', [`Ortho: the requested ${want.toPrecision(3)} ${unit}/px would need ~${side.toLocaleString()} px on the long side; `
+      say(`Ortho: the requested ${want.toPrecision(3)} ${unit}/px would need ~${side.toLocaleString()} px on the long side; `
         + `a raster is at most ${MAX_ORTHO_SIDE.toLocaleString()} px a side, so this one is ${geom.gsd.toPrecision(3)} ${unit}/px. `
-        + 'Limit the area (Tools ▸ Model ▸ Region, then rebuild the surface) for a finer GSD.', 'warn', 'Products'])
+        + 'Limit the area (Tools ▸ Model ▸ Region, then rebuild the surface) for a finer GSD.', 'warn')
     }
 
     // Preflight. Resident at once: one block's working planes, the COG's accumulated
@@ -467,29 +480,25 @@ export function makeProductsOps({ rasterize } = {}) {
     // ¾ of the pool leaves after those. Quarry (2026-10-20, 12 GiB budget, a 98 M-point
     // cloud open): an 11 GB cache failed an allocation at 15.5 GB of process data, short of
     // the 16 GiB pool, as the 80 MB photo buffers came and went; the quarter is that slack.
-    const forBudget = Number.isFinite(budget) ? budget - fixed - maxCacheEntry : 2 * 1024 ** 3
-    const forTab = 0.75 * TAB_BUFFER_POOL_BYTES - (settings.pageBytes ?? 0) - fixed - 2 * maxCacheEntry
     // Photos load ahead of their visit (ortho.js planPhotos; `photoPrefetch`, 4): the
-    // decodes overlap. Each one in flight holds an entry beyond the cache, so the cache
-    // gives way for them.
+    // decodes overlap, and each one in flight holds an entry beyond the cache.
+    // Split over `shares` workers, each has its own block planes, cache and photos in
+    // flight; the overviews stay with the writer.
     const photoPrefetch = settings.photoPrefetch ?? 4
-    const cacheBytes = Math.max(maxCacheEntry, Math.min(forBudget, forTab) - photoPrefetch * maxCacheEntry)
-    if (forTab < forBudget) {
-      emit('log', [`Ortho: the map/photo cache is held to ${formatBytes(cacheBytes)}, below what the memory budget allows, `
-        + `so the browser tab keeps room for the ${formatBytes(settings.pageBytes ?? 0)} the open project already holds `
-        + '(16 GB is all a tab gets, page and workers together)', 'info', 'Products'])
+    // Each worker's cache when `k` workers split the blocks, and whether the tab, not the
+    // budget, set it.
+    const cacheFor = (k) => {
+      const perShare = (total) => total / k - blockBytes - (1 + photoPrefetch) * maxCacheEntry
+      const forBudget = Number.isFinite(budget) ? perShare(budget - pyramidBytes) : 2 * 1024 ** 3
+      const forTab = perShare(0.75 * TAB_BUFFER_POOL_BYTES - (settings.pageBytes ?? 0) - pyramidBytes) - maxCacheEntry
+      return { bytes: Math.max(maxCacheEntry, Math.min(forBudget, forTab)), tabBound: forTab < forBudget }
     }
-
-    const t0 = performance.now()
-    const tags = crsTagInfo({ crs: frame.crs, unit: frame.unit })
-    const builder = createCogBuilder({
-      width, height, tileSize: ORTHO_TILE, ArrayType: Uint8ClampedArray,
-      samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
-      photometric: 2, extraSamples: [2], // RGB + unassociated alpha (transparent = no colour)
-      pixelScale: [geom.gsd, geom.gsd, 0], tiepoint: [0, 0, 0, geom.originX, geom.originY, 0],
-      geoKeys: geoKeysForEpsg(tags.code, tags.geographic),
-    }, { blockSize: ORTHO_BLOCK, compress: deflateTile, previewMaxDim: PREVIEW_MAX })
-
+    const { bytes: cacheBytes, tabBound } = cacheFor(shares)
+    if (tabBound) {
+      say(`Ortho: the map/photo cache is held to ${formatBytes(cacheBytes)}${shares > 1 ? ` per worker (${shares} workers)` : ''}, `
+        + 'below what the memory budget allows, so the browser tab keeps room for the '
+        + `${formatBytes(settings.pageBytes ?? 0)} the open project already holds (16 GB is all a tab gets, page and workers together)`)
+    }
     // Each map's planes and source photo are cached across the blocks that see it.
     const loadMap = streamed ? (i) => readDepthFiles(maps[i]) : async (i) => maps[i]
     const loadImage = makePhotoLoader(input.images, rasterize, emit)
@@ -498,65 +507,62 @@ export function makeProductsOps({ rasterize } = {}) {
     // figures below about the colour pass.
     const loadStatsImage = settings.blend === 'mosaic' && (settings.colourBalance || settings.seamline === 'graphcut')
       ? makePhotoLoader(input.images, rasterize, emit) : null
-    emit('progress', [0, 1, 'Orthorectifying…'])
-    // A fine ortho is hundreds of blocks at up to minutes each: the label names the
-    // block, and the log gets a line with the rate and time left every 30 s or so.
-    let blockProgress = null
-    // One pace for the block lines and the map-visit heartbeat (utils/blockProgress.js).
-    const pacer = createLogPacer()
-    const heartbeat = createStepProgress({ prefix: 'Ortho: ', unit: 'map visit', pacer })
-    // Grouped (P6), no block finishes until its whole group has: the label names the group.
-    let groupLabel = ''
-    const progressLabel = () => (groupLabel ? `Orthorectifying… ${groupLabel}`
-      : blockProgress ? `Orthorectifying… ${blockProgress.label()}` : 'Orthorectifying…')
-    const res = await orthorectifyTiled(built.grid, geom, maps, loadMap, frame.toSfm,
-      // Blocks in groups, map-major inside (P6), sized by replaying the visits through the
-      // cache: each block of a group takes its working planes from the cache.
-      { ...settings, blockSize: ORTHO_BLOCK, cacheBytes, mapsResident: !streamed, photoPrefetch,
-        groupBlocks: settings.groupBlocks ?? 'auto', blockBytes, entryBytes: maxCacheEntry,
-        entrySizes: maps.map((m) => ({ map: streamed ? m.width * m.height * 23 : 0,
-          photo: photoBytesExpected(photoOf.get(m.uuid), m, pxPerCell(m)) })) }, {
-        loadImage, loadStatsImage,
-        onProgress: (done, total) => {
-          emit('progress', [done, total, progressLabel(), 0.95 * done / total])
-          // A group of blocks finishes only when all of them have: the visits say it is moving.
-          const line = heartbeat.step(done, total, groupLabel || (blockProgress ? '' : 'survey'))
-          if (line) emit('log', [line, 'info', 'Products'])
-        },
-        onGroup: (gi, n, size) => { groupLabel = size > 1 ? `group ${gi + 1} of ${n} (${pluralize(size, 'block')})` : '' },
-        onBlocksStart: (count, { maxMaps = 0, groupSize = 1, cacheBytes: used = cacheBytes } = {}) => {
-          blockProgress = createBlockProgress(count, { prefix: 'Ortho: ', pacer })
-          // Grouped, a pass reads each map once per group: the cache then only carries
-          // maps from one pass or group to the next, so the per-block warning is moot.
-          if (maxCacheEntry > 0 && maxMaps > 0 && groupSize === 1) {
-            emit('log', orthoCacheLog(used, maxCacheEntry, maxMaps, { mosaic: settings.blend === 'mosaic', streamed }))
-          }
-        },
-        onBlock: async (b) => {
-          // `debugSeams` (bench only, not in the dialog): paint the seams magenta, so
-          // side-by-sides show where each variant put them.
-          if (settings.debugSeams && b.labels) paintSeams(b.rgba, b.labels, b.width, b.height)
-          await builder.addBlock({ col0: b.col0, row0: b.row0, width: b.width, height: b.height, data: b.rgba })
-          const line = blockProgress?.finished()
-          if (line) emit('log', [line, 'info', 'Products'])
-        },
-      })
+    return { settings, maps, streamed, built, frame, label, unit, geom, width, height, blockBytes, pyramidBytes,
+      maxCacheEntry, cacheBytes, cacheFor, photoPrefetch, photoOf, pxPerCell, loadMap, loadImage, loadStatsImage }
+  }
+
+  // The options orthorectifyTiled runs with: blocks in groups, map-major inside (P6),
+  // sized by replaying the visits through the cache; each block of a group takes its
+  // working planes from the cache.
+  const orthoTiledOpts = (ctx) => ({
+    ...ctx.settings, blockSize: ORTHO_BLOCK, cacheBytes: ctx.cacheBytes, mapsResident: !ctx.streamed,
+    photoPrefetch: ctx.photoPrefetch, groupBlocks: ctx.settings.groupBlocks ?? 'auto', blockBytes: ctx.blockBytes,
+    entryBytes: ctx.maxCacheEntry,
+    entrySizes: ctx.maps.map((m) => ({ map: ctx.streamed ? m.width * m.height * 23 : 0,
+      photo: photoBytesExpected(ctx.photoOf.get(m.uuid), m, ctx.pxPerCell(m)) })),
+  })
+
+  // The GeoTIFF the blocks are written into.
+  const orthoBuilder = (ctx) => {
+    const tags = crsTagInfo({ crs: ctx.frame.crs, unit: ctx.frame.unit })
+    return createCogBuilder({
+      width: ctx.width, height: ctx.height, tileSize: ORTHO_TILE, ArrayType: Uint8ClampedArray,
+      samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
+      photometric: 2, extraSamples: [2], // RGB + unassociated alpha (transparent = no colour)
+      pixelScale: [ctx.geom.gsd, ctx.geom.gsd, 0], tiepoint: [0, 0, 0, ctx.geom.originX, ctx.geom.originY, 0],
+      geoKeys: geoKeysForEpsg(tags.code, tags.geographic),
+    }, { blockSize: ORTHO_BLOCK, compress: deflateTile, previewMaxDim: PREVIEW_MAX })
+  }
+  const addOrthoBlock = async (builder, settings, b) => {
+    // `debugSeams` (bench only, not in the dialog): paint the seams magenta, so
+    // side-by-sides show where each variant put them.
+    if (settings.debugSeams && b.labels) paintSeams(b.rgba, b.labels, b.width, b.height)
+    await builder.addBlock({ col0: b.col0, row0: b.row0, width: b.width, height: b.height, data: b.rgba })
+  }
+
+  // The finished ortho: the GeoTIFF, its preview, the run's log lines and the record.
+  // `res` is orthorectifyTiled's result (or the shares' merged), `decode` the colour
+  // pass's photo loader figures ({ decoded, scaleSum, fellBack }), `statsDecode` the
+  // survey's.
+  async function orthoSummary(ctx, builder, res, { decode, statsDecode, t0, workers = 1 }, emit) {
+    const { settings, maps, width, height, label, photoOf } = ctx
     emit('progress', [1, 1, 'Writing the GeoTIFF…', 0.96])
     const { parts, preview } = await builder.finish()
     const cog = new Blob(parts, { type: 'image/tiff' })
     const previewBlob = await rasterToPng(new ImageData(preview.data, preview.width, preview.height), preview.width, preview.height)
 
     const { covered, sampled, filled, surfaceCells, stats } = res
-    if (loadImage) {
-      const meanScale = loadImage.decoded ? loadImage.scaleSum / loadImage.decoded : 0
+    if (decode) {
+      const meanScale = decode.decoded ? decode.scaleSum / decode.decoded : 0
       emit('log', [`Ortho: colour from the source photos, decoded at `
         + `${(100 * meanScale).toFixed(0)}% of native on average (≈ 2 photo px per ortho cell, at most native)`
-        + `${loadImage.fellBack ? `, ${loadImage.fellBack} from depth-map colour (photo unavailable)` : ''}`, 'info', 'Products'])
+        + `${decode.fellBack ? `, ${decode.fellBack} from depth-map colour (photo unavailable)` : ''}`, 'info', 'Products'])
     }
     const blocksX = Math.ceil(width / ORTHO_BLOCK), blocksY = Math.ceil(height / ORTHO_BLOCK)
     emit('log', [`Ortho: ${pluralize(res.blocks, 'block')} of ${ORTHO_BLOCK}² (${blocksX}×${blocksY}), ${pluralize(res.visits, 'map visit')} `
       + `after culling (of ${res.blocks * maps.length}); ${pluralize(res.mapLoads, 'map read')}, ${pluralize(res.photoLoads, 'photo decode')}, `
-      + `${pluralize(res.cacheHits, 'cache hit')} in a ${Number.isFinite(res.grouping?.cacheBytes) ? formatBytes(res.grouping.cacheBytes) : 'default'} cache`, 'info', 'Products'])
+      + `${pluralize(res.cacheHits, 'cache hit')} in a ${Number.isFinite(res.grouping?.cacheBytes) ? formatBytes(res.grouping.cacheBytes) : 'default'} cache`
+      + `${workers > 1 ? ` per worker, ${workers} workers` : ''}`, 'info', 'Products'])
     if (res.cacheShrinks) {
       emit('log', [`Ortho: the browser refused memory for a photo ${pluralize(res.cacheShrinks, 'time')}; each time the `
         + `map/photo cache gave up a quarter (to ${formatBytes(res.cacheLimit)} in the end) and the photo was decoded again. A lower memory `
@@ -577,7 +583,7 @@ export function makeProductsOps({ rasterize } = {}) {
       + `(${(100 * covered / cells).toFixed(0)}%) from ${pluralize(maps.length, 'view')} over the `
       + `${label} surface (${surfaceCells}/${cells} cells had a height) `
       + `— ${sampled} sampled + ${filled} interpolated; GeoTIFF ${formatBytes(cog.size)} `
-      + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'success', 'Products'])
+      + `in ${((performance.now() - t0) / 1000).toFixed(1)}s${workers > 1 ? ` on ${workers} workers` : ''}`, 'success', 'Products'])
     // The ortho's quality figures travel with it (its run record): sharpness, and
     // with a source label per cell, how visible the seams between images are.
     if (res.mosaic) {
@@ -602,13 +608,13 @@ export function makeProductsOps({ rasterize } = {}) {
       }
       if (balance) {
         const f = (v) => (v == null ? '—' : v.toFixed(3))
-        const decode = (loadStatsImage?.decoded
-          ? `; photos decoded at ${(100 * loadStatsImage.scaleSum / loadStatsImage.decoded).toFixed(0)}% of native for the fit${seamCut ? ' and the seams' : ''}` : '')
+        const surveyDecode = (statsDecode?.decoded
+          ? `; photos decoded at ${(100 * statsDecode.scaleSum / statsDecode.decoded).toFixed(0)}% of native for the fit${seamCut ? ' and the seams' : ''}` : '')
           + (res.surveyFromMapRgb ? `; ${res.surveyFromMapRgb} of ${maps.length} images sampled from their depth maps' own colour (as fine as the survey needs, no decode)` : '')
         emit('log', [`Ortho: colour balance — gains for ${balance.images} of ${pluralize(maps.length, 'image')} from `
           + `${pluralize(balance.pairs, 'overlapping pair')} over ${balance.latticeCells.toLocaleString()} lattice cells (every `
           + `${balance.latticeStep}th; ${balance.clippedObservations.toLocaleString()} ${nounFor(balance.clippedObservations, 'clipped sample')} left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}`
-          + (balance.clamped ? `, ${pluralize(balance.clamped, 'channel gain')} clamped to ${GAIN_MIN}–${GAIN_MAX}` : '') + decode,
+          + (balance.clamped ? `, ${pluralize(balance.clamped, 'channel gain')} clamped to ${GAIN_MIN}–${GAIN_MAX}` : '') + surveyDecode,
         balance.clamped ? 'warn' : 'info', 'Products'])
         if (res.gains) {
           const name = (m) => photoOf.get(m.uuid)?.name ?? m.uuid
@@ -617,23 +623,159 @@ export function makeProductsOps({ rasterize } = {}) {
         }
       }
     }
-    if (res.timings) emit('log', [`Ortho: time (s) — ${Object.entries(res.timings).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`).join(', ')}`, 'debug', 'Products'])
+    if (res.timings) emit('log', [`Ortho: time (s)${workers > 1 ? ', summed over the workers' : ''} — ${Object.entries(res.timings).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`).join(', ')}`, 'debug', 'Products'])
     emit('log', [`Ortho: ${describeOrthoStats(stats)}`, 'info', 'Products'])
     emit('progress', [1, 1, 'Done'])
 
+    // The geotransform travels WITH the ortho: its grid no longer has to be the
+    // DEM's, so the exporters/viewer must read it here, not off the DEM. Its frame is
+    // the SURFACE's frame, whatever the GSD (a resampled grid used to drop it).
     return {
-      // The geotransform travels WITH the ortho: its grid no longer has to be the
-      // DEM's, so the exporters/viewer must read it here, not off the DEM. Its frame is
-      // the SURFACE's frame, whatever the GSD (a resampled grid used to drop it).
-      result: {
-        width, height, covered, sampled, filled, previewBlob, cog, tileSize: ORTHO_TILE,
-        gsd: geom.gsd, originX: geom.originX, originY: geom.originY,
-        surface: label, surfaceCells,
-        frame: built.grid.frame, crs: frame.crs, unit: frame.unit, stats,
-        // How the pixels were chosen: the blend, and for a mosaic its seam band and gains.
-        blend: settings.blend ?? 'best', mosaic: res.mosaic ?? null,
+      width, height, covered, sampled, filled, previewBlob, cog, tileSize: ORTHO_TILE,
+      gsd: ctx.geom.gsd, originX: ctx.geom.originX, originY: ctx.geom.originY,
+      surface: label, surfaceCells,
+      frame: ctx.built.grid.frame, crs: ctx.frame.crs, unit: ctx.frame.unit, stats,
+      // How the pixels were chosen: the blend, and for a mosaic its seam band and gains.
+      blend: settings.blend ?? 'best', mosaic: res.mosaic ?? null,
+    }
+  }
+
+  // The log's progress lines for an ortho's blocks and map visits (one pace).
+  function orthoProgress(emit) {
+    let blockProgress = null, groupLabel = ''
+    const pacer = createLogPacer()
+    const heartbeat = createStepProgress({ prefix: 'Ortho: ', unit: 'map visit', pacer })
+    const label = () => (groupLabel ? `Orthorectifying… ${groupLabel}`
+      : blockProgress ? `Orthorectifying… ${blockProgress.label()}` : 'Orthorectifying…')
+    return {
+      // Grouped (P6), no block finishes until its whole group has: the label names the group.
+      group(gi, n, size) { groupLabel = size > 1 ? `group ${gi + 1} of ${n} (${pluralize(size, 'block')})` : '' },
+      progress(done, total) {
+        emit('progress', [done, total, label(), 0.95 * done / total])
+        // A group of blocks finishes only when all of them have: the visits say it is moving.
+        const line = heartbeat.step(done, total, groupLabel || (blockProgress ? '' : 'survey'))
+        if (line) emit('log', [line, 'info', 'Products'])
+      },
+      blocksStart(count) { blockProgress = createBlockProgress(count, { prefix: 'Ortho: ', pacer }) },
+      blockDone() {
+        const line = blockProgress?.finished()
+        if (line) emit('log', [line, 'info', 'Products'])
       },
     }
+  }
+
+  async function generateOrtho([input], { emit }) {
+    const ctx = await orthoSetup(input, emit)
+    const t0 = performance.now()
+    const builder = orthoBuilder(ctx)
+    emit('progress', [0, 1, 'Orthorectifying…'])
+    const prog = orthoProgress(emit)
+    const res = await orthorectifyTiled(ctx.built.grid, ctx.geom, ctx.maps, ctx.loadMap, ctx.frame.toSfm, orthoTiledOpts(ctx), {
+      loadImage: ctx.loadImage, loadStatsImage: ctx.loadStatsImage,
+      onProgress: (d, t) => prog.progress(d, t),
+      onGroup: (gi, n, size) => prog.group(gi, n, size),
+      onBlocksStart: (count, { maxMaps = 0, groupSize = 1, cacheBytes: used = ctx.cacheBytes } = {}) => {
+        prog.blocksStart(count)
+        // Grouped, a pass reads each map once per group: the cache then only carries
+        // maps from one pass or group to the next, so the per-block warning is moot.
+        if (ctx.maxCacheEntry > 0 && maxMaps > 0 && groupSize === 1) {
+          emit('log', orthoCacheLog(used, ctx.maxCacheEntry, maxMaps, { mosaic: ctx.settings.blend === 'mosaic', streamed: ctx.streamed }))
+        }
+      },
+      onBlock: async (b) => { await addOrthoBlock(builder, ctx.settings, b); prog.blockDone() },
+    })
+    const result = await orthoSummary(ctx, builder, res, { decode: ctx.loadImage, statsDecode: ctx.loadStatsImage, t0 }, emit)
+    return { result }
+  }
+
+  // The planning worker's run: its setup, its GeoTIFF writer and when it started.
+  let orthoSession = null
+
+  // A split ortho's first step, on the worker that then writes the GeoTIFF: the survey
+  // (gains, seams) and the group size, with each worker's share of the memory budget,
+  // and the groups dealt out in `shares` contiguous runs of about equal work (map visits).
+  // input as generateOrtho's, settings.orthoShares the worker count wanted.
+  // → { plan, shares: [[group index…]…], width, height, cacheBytes }
+  // A worker's cache below this many entries (at their largest) re-reads its maps on every
+  // pass: fewer workers then, each with more.
+  const ORTHO_SHARE_MIN_ENTRIES = 6
+  async function orthoPlan([input], { emit }) {
+    const ctx = await orthoSetup(input, emit, { quiet: false })
+    let want = Math.max(1, input.settings?.orthoShares ?? 1)
+    while (want > 1 && ctx.cacheFor(want).bytes < ORTHO_SHARE_MIN_ENTRIES * ctx.maxCacheEntry) want--
+    ctx.cacheBytes = ctx.cacheFor(want).bytes
+    const t0 = performance.now()
+    emit('progress', [0, 1, 'Orthorectifying…'])
+    const prog = orthoProgress(emit)
+    const { plan } = await orthorectifyTiled(ctx.built.grid, ctx.geom, ctx.maps, ctx.loadMap, ctx.frame.toSfm,
+      { ...orthoTiledOpts(ctx), planOnly: true },
+      { loadImage: ctx.loadImage, loadStatsImage: ctx.loadStatsImage, onProgress: (d, t) => prog.progress(d, t) })
+    orthoSession = { ctx, builder: orthoBuilder(ctx), t0 }
+    // Contiguous runs (neighbouring groups share maps, so each worker's cache carries
+    // over), cut where the visit count reaches each share's part.
+    const work = plan.groupVisits
+    const total = work.reduce((a, b) => a + b, 0)
+    const shares = []
+    let cur = [], acc = 0
+    for (let gi = 0; gi < work.length; gi++) {
+      cur.push(gi); acc += work[gi]
+      if (shares.length < want - 1 && acc >= total * (shares.length + 1) / want) { shares.push(cur); cur = [] }
+    }
+    if (cur.length) shares.push(cur)
+    emit('log', [`Ortho: ${pluralize(plan.groups, 'group')} of up to ${pluralize(plan.groupBlocks, 'block')} dealt to `
+      + `${pluralize(shares.length, 'worker')}, a ${formatBytes(ctx.cacheBytes)} map/photo cache each`, 'info', 'Products'])
+    // Fewer groups than workers: as many shares as groups.
+    return { result: { plan, shares, workers: want, width: ctx.width, height: ctx.height, cacheBytes: ctx.cacheBytes } }
+  }
+
+  // One worker's share of a split ortho: its groups, the plan's survey; each finished block
+  // goes out as a 'block' event (its arrays transferred). → the run's counts, its stats
+  // state (to merge) and its photo loaders' figures.
+  async function orthoShare([input, plan, groupIndices, shares], { emit }) {
+    const ctx = await orthoSetup(input, emit, { shares, quiet: true })
+    const res = await orthorectifyTiled(ctx.built.grid, ctx.geom, ctx.maps, ctx.loadMap, ctx.frame.toSfm,
+      { ...orthoTiledOpts(ctx), survey: plan.survey, groupBlocks: plan.groupBlocks, groupIndices }, {
+        loadImage: ctx.loadImage,
+        onProgress: (d, t) => emit('progress', [d, t]),
+        onBlock: async (b) => emit('block', [b], [b.rgba.buffer, ...(b.labels ? [b.labels.buffer] : [])]),
+      })
+    const { stats: _s, ...rest } = res
+    const fig = (l) => (l ? { decoded: l.decoded, scaleSum: l.scaleSum, fellBack: l.fellBack } : null)
+    // The group size was the plan's choice, and so are its predictions.
+    return { result: { ...rest, grouping: { ...rest.grouping, predicted: plan.predicted }, decode: fig(ctx.loadImage) } }
+  }
+
+  // A block of a split ortho, into the planning worker's GeoTIFF.
+  async function orthoCogAdd([b]) {
+    if (!orthoSession) throw new Error('orthoCogAdd: no ortho in progress on this worker')
+    await addOrthoBlock(orthoSession.builder, orthoSession.ctx.settings, b)
+    return { result: true }
+  }
+
+  // The end of a split ortho, on the planning worker: the shares' results merged
+  // (counts summed, stats states merged, the timings summed), the GeoTIFF finished, the
+  // log written; the same record generateOrtho returns.
+  async function orthoFinish([parts], { emit }) {
+    const session = orthoSession
+    orthoSession = null
+    if (!session) throw new Error('orthoFinish: no ortho in progress on this worker')
+    const stats = createOrthoStats(session.ctx.width, session.ctx.height, parts.some((p) => p.labelled))
+    for (const p of parts) stats.merge(p.statsState)
+    const sum = (k) => parts.reduce((n, p) => n + (p[k] ?? 0), 0)
+    const first = parts[0] ?? {}
+    const timings = {}
+    for (const p of parts) for (const [k, v] of Object.entries(p.timings ?? {})) timings[k] = (timings[k] ?? 0) + v
+    const res = {
+      ...first, stats: stats.finish(), timings,
+      covered: sum('covered'), sampled: sum('sampled'), filled: sum('filled'), blocks: sum('blocks'), visits: sum('visits'),
+      mapLoads: sum('mapLoads'), photoLoads: sum('photoLoads'), cacheHits: sum('cacheHits'), cacheShrinks: sum('cacheShrinks'),
+      grouping: { ...first.grouping, groups: sum('groups') },
+    }
+    const decode = { decoded: 0, scaleSum: 0, fellBack: 0 }
+    for (const p of parts) for (const k of Object.keys(decode)) decode[k] += p.decode?.[k] ?? 0
+    const result = await orthoSummary(session.ctx, session.builder, res,
+      { decode, statsDecode: session.ctx.loadStatsImage, t0: session.t0, workers: parts.length }, emit)
+    return { result }
   }
 
   // Tools ▸ Products ▾ — derived outputs of an existing DEM/ortho, all of which end
@@ -738,5 +880,5 @@ export function makeProductsOps({ rasterize } = {}) {
     return { result: new Blob(parts, { type: 'text/plain' }) }
   }
 
-  return { generateDem, generateOrtho, demTool, demPreview, readDemWindow, demAscii }
+  return { generateDem, generateOrtho, orthoPlan, orthoShare, orthoCogAdd, orthoFinish, demTool, demPreview, readDemWindow, demAscii }
 }

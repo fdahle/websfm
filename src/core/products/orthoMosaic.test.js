@@ -373,6 +373,41 @@ describe('blocks in groups (P6)', () => {
     })
   }
 
+  // Split over workers: a plan (survey + grouping), then each share of the groups run on
+  // its own with the plan's survey; the shares' blocks together are the single run's.
+  for (const v of variants) {
+    it(`computes the same ortho split over workers (${v.blend}${v.seamBlend ? ` · ${v.seamBlend}` : ''})`, async () => {
+      const surface = plane(40, 24)
+      const opts = { ...v, blockSize: 8, fillRadius: 1, groupBlocks: 2 }
+      const one = await run(surface, views(), opts, { loadImage: photos(views()) })
+      const geom = resampledGeometry(surface, 0)
+      const { plan } = await orthorectifyTiled(surface, geom, views(), async (i) => views()[i], (p) => p,
+        { fillRadius: 0, mapsResident: true, ...opts, planOnly: true }, { loadImage: photos(views()) })
+      // The plan crosses to other workers: plain data only.
+      const sent = structuredClone(plan)
+      const shares = [[], []]
+      for (let gi = 0; gi < sent.groups; gi++) shares[gi < sent.groups / 2 ? 0 : 1].push(gi)
+      const parts = []
+      for (const groupIndices of shares) {
+        parts.push(await run(surface, views(), { ...opts, groupBlocks: sent.groupBlocks, survey: sent.survey, groupIndices },
+          { loadImage: photos(views()) }))
+      }
+      // Each share fills its own blocks; together, the single run's image.
+      const rgba = new Uint8ClampedArray(one.rgba.length), labels = new Uint16Array(one.labels.length)
+      for (const p of parts) {
+        for (let i = 0; i < rgba.length; i += 4) if (p.rgba[i + 3]) rgba.set(p.rgba.subarray(i, i + 4), i)
+        for (let i = 0; i < labels.length; i++) if (p.labels[i]) labels[i] = p.labels[i]
+      }
+      expect(Buffer.from(rgba).equals(Buffer.from(one.rgba))).toBe(true)
+      expect(Buffer.from(labels).equals(Buffer.from(one.labels))).toBe(true)
+      expect(parts[0].covered + parts[1].covered).toBe(one.covered)
+      expect(parts[0].blocks + parts[1].blocks).toBe(one.blocks)
+      const stats = createOrthoStats(40, 24, true)
+      for (const p of parts) stats.merge(p.statsState)
+      expect(stats.finish()).toEqual(one.stats)
+    })
+  }
+
   it('reads each photo once per pass of a group instead of once per block, when the cache holds none', async () => {
     const surface = plane(40, 24), v = { blend: 'mosaic', seamline: 'nadir', seamBlend: 'multiband', blockSize: 8, cacheBytes: 1, mapsResident: false }
     const byBlock = photos(views()), byGroup = photos(views())

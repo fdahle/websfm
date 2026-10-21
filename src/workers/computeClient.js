@@ -356,6 +356,26 @@ export const generateDem = streamingOp('generateDem')
 // tiled RGBA GeoTIFF — the ortho has no other pixel store), previewBlob, … }.
 // See core/products/ortho.js orthorectifyTiled and workers/ops/products.js.
 export const generateOrtho = streamingOp('generateOrtho')
+// An ortho split over the pool (workers/ops/products.js, reconstruction/productRuns.js):
+// the plan and the GeoTIFF writer on one worker, the shares on the others. A share's
+// finished blocks arrive as `onBlock(block)`, their arrays transferred.
+export const orthoPlan = streamingOp('orthoPlan')
+export const orthoShare = (input, plan, groupIndices, workers, { onLog, onProgress, onBlock, worker } = {}) =>
+  call('orthoShare', [input, plan, groupIndices, workers], {
+    worker,
+    onEvent: (ev, args) => {
+      if (ev === 'log') onLog?.(...args)
+      else if (ev === 'progress') onProgress?.(...args)
+      else if (ev === 'block') onBlock?.(args[0])
+    },
+  })
+export const orthoCogAdd = (block, { worker }) => call('orthoCogAdd', [block], {
+  worker, transfer: [block.rgba.buffer, ...(block.labels ? [block.labels.buffer] : [])],
+})
+export const orthoFinish = (parts, { onLog, onProgress, worker } = {}) => call('orthoFinish', [parts], {
+  worker,
+  onEvent: (ev, args) => { if (ev === 'log') onLog?.(...args); else if (ev === 'progress') onProgress?.(...args) },
+})
 
 // Tools ▸ Products ▾ — contours / terrain derivatives / polygon clip of a DEM or
 // ortho (see workers/ops/products.js `demTool`). A DEM plane is a copy, transferred

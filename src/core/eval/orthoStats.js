@@ -85,7 +85,18 @@ export function createOrthoStats(width, height, hasLabels = false) {
     return out
   }
 
-  return { add, finish }
+  // The sums so far, to merge with other runs' (an ortho split over workers): every term
+  // is an integer, so merged sums are exact in any order.
+  function state() {
+    return { gradSum, gradCells, seamSum, seamPairs, inSum, inPairs, labelled, used: [...used] }
+  }
+  function merge(o) {
+    gradSum += o.gradSum; gradCells += o.gradCells; seamSum += o.seamSum; seamPairs += o.seamPairs
+    inSum += o.inSum; inPairs += o.inPairs; labelled += o.labelled
+    for (const l of o.used) used.add(l)
+  }
+
+  return { add, finish, state, merge }
 }
 
 export function orthoStats(rgba, width, height, labels = null) {

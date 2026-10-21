@@ -7,7 +7,12 @@ import { frameFromSpec } from '../../core/products/frameSpec.js'
 import { pointView } from '../../core/products/pointView.ts'
 import { isStreamed } from '../../core/lod/streamed.js'
 import { regionContains } from '../../core/products/region.js'
-import { generateDem as workerGenerateDem, generateOrtho as workerGenerateOrtho, releaseIdleWorkers } from '../../workers/computeClient.js'
+import { generateDem as workerGenerateDem, generateOrtho as workerGenerateOrtho, releaseIdleWorkers,
+  orthoPlan as workerOrthoPlan, orthoShare as workerOrthoShare, orthoCogAdd as workerOrthoCogAdd,
+  orthoFinish as workerOrthoFinish, POOL_SIZE } from '../../workers/computeClient.js'
+import { ORTHO_BLOCK } from '../../core/products/ortho.js'
+import { createBlockProgress, createStepProgress, createLogPacer } from '../../utils/blockProgress.js'
+import { pluralize } from '../../core/textFormat.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import * as opfs from '../../utils/opfs.js'
 
@@ -288,10 +293,9 @@ export function createProductRuns({
       const pageBytes = pageBufferBytes() + (streamed ? 0 : mapsPayload.reduce((n, m) => n + bytesOf(m), 0))
       log(`Ortho: the open project holds ${formatBytes(pageBytes)} of buffers in this tab`, 'debug', 'Products')
       releaseIdleWorkers() // as for the DEM
-      const res = await workerGenerateOrtho(
+      const res = await runOrtho(
         { surface, maps: mapsPayload, streamed, settings: { ...settings, memBudgetBytes, pageBytes }, images: photos },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl, f) => onProgress?.(dn, t, lbl, f) },
-      )
+        onProgress)
       if (!stillCurrent()) return
       // An ortho built ON the DEM inherits the DEM's recorded frame — its cells are
       // that grid's cells, so claiming today's frame would be a claim about a raster
@@ -313,6 +317,52 @@ export function createProductRuns({
         'Build at a coarser GSD, or lower the memory budget (Settings ▸ Compute) so the photo cache leaves room for the rest of the tab')}`, 'error', 'Products')
       reconStatus.value = 'error'
     }
+  }
+
+  // The ortho on the pool. Over saved depth maps it is split: one worker surveys (gains,
+  // seams), plans the groups and writes the GeoTIFF, the others each take a run of the
+  // groups, their blocks passed on to the writer (workers/ops/products.js orthoPlan …).
+  // The blocks are the bits one worker builds (core/products/ortho.js). Each worker gets
+  // its share of the memory budget, so the plan may use fewer than asked. Resident maps
+  // would be copied into every worker: those run whole on one, as does a pool of two.
+  // settings.orthoWorkers: the most workers that take groups (default: the pool less one).
+  async function runOrtho(input, onProgress) {
+    const onLog = (m, l, c) => log(m, l, c)
+    const want = input.streamed ? Math.min(POOL_SIZE - 1, input.settings.orthoWorkers ?? Infinity) : 1
+    if (want < 2) return workerGenerateOrtho(input, { onLog, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
+    const PLAN = 0.1 // the bar's share of the survey and plan
+    const { plan, shares, workers, width, height } = await workerOrthoPlan(
+      { ...input, settings: { ...input.settings, orthoShares: want } },
+      { onLog, worker: 0, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, PLAN * (f ?? 0), 'plan') })
+    const nBlocks = Math.ceil(width / ORTHO_BLOCK) * Math.ceil(height / ORTHO_BLOCK)
+    // The log's progress lines, as one worker's run gives them (utils/blockProgress.js).
+    const pacer = createLogPacer()
+    const heartbeat = createStepProgress({ prefix: 'Ortho: ', unit: 'map visit', pacer })
+    const blockLines = createBlockProgress(nBlocks, { prefix: 'Ortho: ', pacer })
+    const done = shares.map(() => 0), totals = shares.map(() => 0)
+    let blocks = 0
+    const report = () => {
+      const d = done.reduce((a, b) => a + b, 0), t = totals.reduce((a, b) => a + b, 0)
+      if (!(t > 0)) return
+      onProgress?.(d, t, `Orthorectifying… ${blocks} of ${pluralize(nBlocks, 'block')} on ${pluralize(shares.length, 'worker')}`,
+        PLAN + (0.95 - PLAN) * d / t, 'blocks')
+      const line = heartbeat.step(d, t)
+      if (line) log(line, 'info', 'Products')
+    }
+    const adds = []
+    const parts = await Promise.all(shares.map((groupIndices, k) => workerOrthoShare(input, plan, groupIndices, workers, {
+      worker: k + 1, onLog,
+      onProgress: (d, t) => { done[k] = d; totals[k] = t; report() },
+      onBlock: (b) => {
+        adds.push(workerOrthoCogAdd(b, { worker: 0 }))
+        blocks++
+        const line = blockLines.finished()
+        if (line) log(line, 'info', 'Products')
+      },
+    })))
+    await Promise.all(adds)
+    return workerOrthoFinish(parts, { onLog, worker: 0,
+      onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, 0.95 + 0.05 * (f ?? 0), 'finish') })
   }
 
   // ArrayBuffers the page holds for the project — clouds (and a sparse cloud's

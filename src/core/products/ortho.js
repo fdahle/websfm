@@ -994,8 +994,15 @@ export function orthoSeamSurveyBytes(width, height) {
 //   onBlocksStart(blockCount) — once, after the mosaic survey, before the first block,
 //   onBlock({ col0, row0, width, height, rgba, labels }) — awaited, the core cells of
 //   one block in row-major order, fresh arrays the hook may keep }.
-// → { width, height, covered, sampled, filled, surfaceCells, labelled, stats, blocks,
-//     visits, mapLoads, photoLoads, cacheHits, mosaic?, gains? }
+// → { width, height, covered, sampled, filled, surfaceCells, labelled, stats, statsState,
+//     blocks, visits, mapLoads, photoLoads, cacheHits, mosaic?, gains? }
+//
+// Split over workers (workers/ops/products.js): `opts.planOnly` stops after the survey
+// and the grouping and returns { plan: { survey, groupBlocks, groups, predicted, groupVisits } };
+// a worker then runs with `opts.survey` (the plan's, instead of surveying again),
+// `groupBlocks` (the plan's size) and `opts.groupIndices` (its share of the groups, in
+// order). Every block computes what it computes in one run, so the blocks of all the
+// shares are the single run's; their `statsState`s merge (core/eval/orthoStats.js).
 export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, opts = {}, hooks = {}) {
   const { onProgress = () => {}, onBlock = null, loadImage = null } = hooks
   const { width: W, height: H } = geom
@@ -1061,12 +1068,13 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   // of each block and so need their photos there. The progress total is corrected once
   // the visits are known.
   let ticks = 0
-  const survey = mosaic && (opts.colourBalance || graphcut)
+  const survey = mosaic && (opts.colourBalance || graphcut) && !opts.survey
   const passes = !mosaic ? 1 : multiband ? 3 : 2
   let total = (survey ? metas.length : 0) + blocks.reduce((n, b) => n + b.maps.length, 0) * passes
   const tick = () => onProgress(++ticks, total)
   let balance = null, seams = null, surveyFromMapRgb = 0
-  if (survey) {
+  if (opts.survey) ({ balance, seams, fromMapRgb: surveyFromMapRgb } = opts.survey)
+  else if (survey) {
     ({ balance, seams, fromMapRgb: surveyFromMapRgb } = await mosaicSurvey(surface, geom, metas, loadMap, hooks.loadStatsImage ?? loadImage, toSfm, gp, opts, tick,
       { gainsOn: !!opts.colourBalance, cut: graphcut }))
   }
@@ -1091,7 +1099,15 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       entrySizes: opts.entrySizes ?? null, owners: seams ? blocks.map((b) => ownersFromCut(seams, b)) : null })
     : { size: Math.max(1, Math.floor(opts.groupBlocks ?? 1)) }
   const groups = blockGroups(nbx, nby, grouping.size)
-  const groupMaps = groups.map((g) => unionMaps(g.map((bi) => blocks[bi])))
+  if (opts.planOnly) {
+    // groupVisits: each group's map visits, the work a split deals out.
+    return { plan: { survey: mosaic ? { balance, seams, fromMapRgb: surveyFromMapRgb } : null,
+      groupBlocks: grouping.size, groups: groups.length, predicted: grouping.predicted ?? null,
+      groupVisits: groups.map((g) => unionMaps(g.map((bi) => blocks[bi])).length * passes) } }
+  }
+  // This run's share of the groups (all of them unless the work is split), in order.
+  const runGroups = opts.groupIndices ?? groups.map((_, gi) => gi)
+  const groupMaps = runGroups.map((gi) => unionMaps(groups[gi].map((bi) => blocks[bi])))
   const sequence = visitSequence(groupMaps, passes)
   const nextUse = new Float64Array(sequence.length)
   {
@@ -1226,9 +1242,10 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
 
   // `maxMaps`: the most maps one block sees, which the cache must hold for a block's
   // passes to read each map once; `groups` / `groupMaps`: the same for a group.
-  hooks.onBlocksStart?.(nBlocks, { maxMaps: blocks.reduce((n, b) => Math.max(n, b.maps.length), 0),
-    groups: groups.length, groupSize: grouping.size, groupMaps: groupMaps.reduce((n, m) => Math.max(n, m.length), 0), cacheBytes })
-  for (let gi = 0; gi < groups.length; gi++) {
+  const runBlocks = runGroups.reduce((n, gi) => n + groups[gi].length, 0)
+  hooks.onBlocksStart?.(runBlocks, { maxMaps: blocks.reduce((n, b) => Math.max(n, b.maps.length), 0),
+    groups: runGroups.length, groupSize: grouping.size, groupMaps: groupMaps.reduce((n, m) => Math.max(n, m.length), 0), cacheBytes })
+  for (const gi of runGroups) {
     const group = groups[gi]
     hooks.onGroup?.(gi, groups.length, group.length)
     // The group's blocks with a surface, each in its own window buffers.
@@ -1289,11 +1306,11 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   cache.clear()
   return {
     width: W, height: H, covered, sampled, filled: covered - sampled, surfaceCells,
-    labelled, stats: stats.finish(), blocks: nBlocks, groups: groups.length,
+    labelled, stats: stats.finish(), statsState: stats.state(), blocks: runBlocks, groups: runGroups.length,
     grouping: { size: grouping.size, groups: groups.length, cacheBytes, predicted: grouping.predicted ?? null },
     cacheShrinks: shrinks, cacheLimit,
     ...(survey ? { surveyFromMapRgb } : {}),
-    visits: blocks.reduce((v, b) => v + b.maps.length, 0),
+    visits: runGroups.reduce((v, gi) => v + groups[gi].reduce((n, bi) => n + blocks[bi].maps.length, 0), 0),
     mapLoads, photoLoads, cacheHits,
     timings: Object.fromEntries(Object.entries(ms).map(([k, v]) => [k, Math.round(v)])),
     ...(mosaic ? { mosaic: {
