@@ -253,11 +253,14 @@ Notable changes to websfm. The format follows
   cross-origin isolated), the bundle adjustment runs on up to 16 threads, and gives the
   same result as on one, bit for bit. On 1,600 synthetic cameras it took 20–36 s instead
   of 62–120 s; on the 347-image quarry set 43 s instead of 92 s.
-- **Orthophotos build on several workers.** Over saved depth maps, the blocks are
-  shared among the compute workers (as many as the memory budget leaves room for), and
-  photos are decoded a few at a time ahead of when they are needed. The orthophoto is
-  the same, pixel for pixel. Quarry at 12,000 pixels across: 18 minutes on one worker,
-  under 8 on five.
+- **Orthophotos build on several workers, and faster on one.** Over saved depth maps,
+  the blocks are shared among the compute workers: as many as the build predicts to be
+  fastest, since each extra worker keeps a smaller cache of maps and photos. A worker
+  that finishes early takes over blocks from a busier one. Photos are decoded a few at
+  a time ahead of when they are needed and kept without their unused alpha channel,
+  depth maps are read without their normals, and the per-cell passes do less work. The
+  orthophoto is the same, pixel for pixel. Quarry at 12,000 pixels across: 18 minutes
+  on one worker before, now 14 on one and under 6 on six.
 - **Imported images stop depending on the original files.** Once an image's copy is
   written to the project, websfm reads the copy, so moving, renaming or deleting the
   originals afterwards (or a cloud-sync folder freeing them) no longer breaks images in

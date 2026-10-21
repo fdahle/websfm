@@ -20,16 +20,18 @@ and the log gives the figures. Photos are decoded a few at a time, ahead of when
 are needed, so the browser decodes them alongside the work.
 
 Over saved depth maps the blocks are shared among several workers (Settings ▸ Compute
-▸ Compute workers), each with its part of the memory budget, as many as the budget leaves
-room for; the log says how many. The result is the same, pixel for pixel, as one
-worker would build.
+▸ Compute workers), each with its part of the memory budget. More workers share the
+work, but each keeps a smaller cache of maps and photos and so reads more; the build
+uses the number it predicts to be fastest, and the log says how many. A worker that
+finishes early takes over part of a busier one's remaining blocks. The result is the
+same, pixel for pixel, as one worker would build.
 
 A fine orthophoto takes a while: for 12,000 pixels across from a few hundred photos,
-about 8 minutes on five workers, 18 on one. Blocks built in a group all finish together, so the log may not
-report a finished block for minutes. It says how far the run has got (blocks done, or
-map visits while a group is open) and roughly how long is left: after half a minute,
-then after 1, 2 and 4 minutes, then every 5. The progress bar moves throughout and
-names the group.
+about 6 minutes on six workers, 14 on one. Blocks built in a group all finish together,
+so the log may not report a finished block for minutes. It says how far the run has got
+(blocks done, or map visits while a group is open) and roughly how long is left: after
+half a minute, then after 1, 2 and 4 minutes, then every 5. The progress bar moves
+throughout and names the group.
 
 ## Surface
 <!-- param: surface default: DEM -->
