@@ -256,10 +256,11 @@ Notable changes to websfm. The format follows
   starts on **auto** pairing: Preselect when images have camera positions, Sequential
   for video frames, otherwise Exhaustive, the same as the Match Features dialog. A
   workflow used to match a video set exhaustively.
-- **A long orthophoto reports its progress.** The progress bar names the block being
-  built, and the log says every 30 seconds or so how many blocks are done, how long
-  each takes and roughly how long is left. A fine orthophoto can take hours, and the
-  log used to stay silent until the end.
+- **A long orthophoto or DEM reports its progress.** The progress bar names the block
+  or group being built, and the log says how far the run has got (blocks done, or map
+  visits while a group of blocks is still open) and roughly how long is left: after half
+  a minute, then after 1, 2 and 4 minutes, then every 5, so a long run does not fill the
+  log. A fine orthophoto used to stay silent until the end.
 - **Counts read as English.** Log lines, reports and dialogs say "1 image" and
   "3 images" instead of "image(s)", and the verb agrees where it follows.
 - **Georeferencing moved to the Reconstruct tab**, between Sparse and Dense, where it

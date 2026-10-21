@@ -20,7 +20,7 @@ import { clipDem, clipOrtho, polygonPixelWindow, windowGeometry } from '../../co
 import { openRaster, readWindowBytes } from '../cogRead.js'
 import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
 import { nounFor, pluralize } from '../../core/textFormat.js'
-import { createBlockProgress } from '../../utils/blockProgress.js'
+import { createBlockProgress, createStepProgress, createLogPacer } from '../../utils/blockProgress.js'
 import { deflateTile } from '../deflateTile.js'
 import { planDemWindow, demCogLevels, maskFromNaN } from '../../core/products/demWindow.js'
 import { fromBlob } from 'geotiff'
@@ -498,6 +498,9 @@ export function makeProductsOps({ rasterize } = {}) {
     // A fine ortho is hundreds of blocks at up to minutes each: the label names the
     // block, and the log gets a line with the rate and time left every 30 s or so.
     let blockProgress = null
+    // One pace for the block lines and the map-visit heartbeat (utils/blockProgress.js).
+    const pacer = createLogPacer()
+    const heartbeat = createStepProgress({ prefix: 'Ortho: ', unit: 'map visit', pacer })
     // Grouped (P6), no block finishes until its whole group has: the label names the group.
     let groupLabel = ''
     const progressLabel = () => (groupLabel ? `Orthorectifying… ${groupLabel}`
@@ -510,10 +513,15 @@ export function makeProductsOps({ rasterize } = {}) {
         entrySizes: maps.map((m) => ({ map: streamed ? m.width * m.height * 23 : 0,
           photo: photoBytesExpected(photoOf.get(m.uuid), m, pxPerCell(m)) })) }, {
         loadImage, loadStatsImage,
-        onProgress: (done, total) => emit('progress', [done, total, progressLabel(), 0.95 * done / total]),
+        onProgress: (done, total) => {
+          emit('progress', [done, total, progressLabel(), 0.95 * done / total])
+          // A group of blocks finishes only when all of them have: the visits say it is moving.
+          const line = heartbeat.step(done, total, groupLabel || (blockProgress ? '' : 'survey'))
+          if (line) emit('log', [line, 'info', 'Products'])
+        },
         onGroup: (gi, n, size) => { groupLabel = size > 1 ? `group ${gi + 1} of ${n} (${pluralize(size, 'block')})` : '' },
         onBlocksStart: (count, { maxMaps = 0, groupSize = 1, cacheBytes: used = cacheBytes } = {}) => {
-          blockProgress = createBlockProgress(count, { prefix: 'Ortho: ' })
+          blockProgress = createBlockProgress(count, { prefix: 'Ortho: ', pacer })
           // Grouped, a pass reads each map once per group: the cache then only carries
           // maps from one pass or group to the next, so the per-block warning is moot.
           if (maxCacheEntry > 0 && maxMaps > 0 && groupSize === 1) {

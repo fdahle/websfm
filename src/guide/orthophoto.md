@@ -18,6 +18,13 @@ reads it predicted. A very fine orthophoto may still decode some photos more tha
 If even one block, its photos and the overviews do not fit the budget, the build stops
 and the log gives the figures.
 
+A fine orthophoto takes a while: about twenty minutes for 12,000 pixels across from a
+few hundred photos. Blocks built in a group all finish together, so the log may not
+report a finished block for minutes. It says how far the run has got (blocks done, or
+map visits while a group is open) and roughly how long is left: after half a minute,
+then after 1, 2 and 4 minutes, then every 5. The progress bar moves throughout and
+names the group.
+
 ## Surface
 <!-- param: surface default: DEM -->
 Use a **DEM** for terrain and overhead mapping, a **mesh** for complex or vertical 3D
