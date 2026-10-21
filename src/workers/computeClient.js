@@ -360,8 +360,8 @@ export const generateOrtho = streamingOp('generateOrtho')
 // the plan and the GeoTIFF writer on one worker, the shares on the others. A share's
 // finished blocks arrive as `onBlock(block)`, their arrays transferred.
 export const orthoPlan = streamingOp('orthoPlan')
-export const orthoShare = (input, plan, groupIndices, workers, { onLog, onProgress, onBlock, worker } = {}) =>
-  call('orthoShare', [input, plan, groupIndices, workers], {
+export const orthoShare = (input, plan, groupIndices, workers, claims, { onLog, onProgress, onBlock, worker } = {}) =>
+  call('orthoShare', [input, plan, groupIndices, workers, claims], {
     worker,
     onEvent: (ev, args) => {
       if (ev === 'log') onLog?.(...args)

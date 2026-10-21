@@ -731,10 +731,12 @@ export function makeProductsOps({ rasterize } = {}) {
   // One worker's share of a split ortho: its groups, the plan's survey; each finished block
   // goes out as a 'block' event (its arrays transferred). → the run's counts, its stats
   // state (to merge) and its photo loaders' figures.
-  async function orthoShare([input, plan, groupIndices, shares], { emit }) {
+  // `claims`: the run's claim table (shared memory, one slot per group), when the page
+  // can share memory: a group of this list that another worker claimed first is skipped.
+  async function orthoShare([input, plan, groupIndices, shares, claims = null], { emit }) {
     const ctx = await orthoSetup(input, emit, { shares, quiet: true })
     const res = await orthorectifyTiled(ctx.built.grid, ctx.geom, ctx.maps, ctx.loadMap, ctx.frame.toSfm,
-      { ...orthoTiledOpts(ctx), survey: plan.survey, groupBlocks: plan.groupBlocks, groupIndices }, {
+      { ...orthoTiledOpts(ctx), survey: plan.survey, groupBlocks: plan.groupBlocks, groupIndices, claims }, {
         loadImage: ctx.loadImage,
         onProgress: (d, t) => emit('progress', [d, t]),
         onBlock: async (b) => emit('block', [b], [b.rgba.buffer, ...(b.labels ? [b.labels.buffer] : [])]),
@@ -774,7 +776,7 @@ export function makeProductsOps({ rasterize } = {}) {
     const decode = { decoded: 0, scaleSum: 0, fellBack: 0 }
     for (const p of parts) for (const k of Object.keys(decode)) decode[k] += p.decode?.[k] ?? 0
     const result = await orthoSummary(session.ctx, session.builder, res,
-      { decode, statsDecode: session.ctx.loadStatsImage, t0: session.t0, workers: parts.length }, emit)
+      { decode, statsDecode: session.ctx.loadStatsImage, t0: session.t0, workers: new Set(parts.map((p, i) => p.worker ?? i)).size }, emit)
     return { result }
   }
 

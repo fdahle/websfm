@@ -408,6 +408,34 @@ describe('blocks in groups (P6)', () => {
     })
   }
 
+  // Work stealing: two workers given every group, in opposite orders, with one claim
+  // table between them; each group is built once, by whichever claims it first.
+  it('builds each group once when shares claim them from one table', async () => {
+    const v = variants[3], surface = plane(40, 24), geom = resampledGeometry(surface, 0)
+    const opts = { ...v, blockSize: 8, fillRadius: 1, groupBlocks: 2 }
+    const one = await run(surface, views(), opts, { loadImage: photos(views()) })
+    const { plan } = await orthorectifyTiled(surface, geom, views(), async (i) => views()[i], (p) => p,
+      { fillRadius: 0, mapsResident: true, ...opts, planOnly: true }, { loadImage: photos(views()) })
+    const claims = new Int32Array(new SharedArrayBuffer(4 * plan.groups))
+    const all = Array.from({ length: plan.groups }, (_, gi) => gi)
+    const blocks = []
+    const share = (groupIndices) => orthorectifyTiled(surface, geom, views(), async (i) => views()[i], (p) => p,
+      { fillRadius: 0, mapsResident: true, ...opts, groupBlocks: plan.groupBlocks, survey: plan.survey, groupIndices, claims },
+      { loadImage: photos(views()), onBlock: (b) => blocks.push(b) })
+    const parts = await Promise.all([share(all), share([...all].reverse())])
+    expect(parts[0].groups + parts[1].groups).toBe(plan.groups)
+    expect(parts[0].groups).toBeGreaterThan(0)
+    expect(parts[1].groups).toBeGreaterThan(0)
+    expect(blocks).toHaveLength(15)
+    expect(new Set(blocks.map((b) => `${b.col0},${b.row0}`)).size).toBe(15)
+    const rgba = new Uint8ClampedArray(one.rgba.length)
+    for (const b of blocks) for (let r = 0; r < b.height; r++) {
+      rgba.set(b.rgba.subarray(r * b.width * 4, (r + 1) * b.width * 4), ((b.row0 + r) * 40 + b.col0) * 4)
+    }
+    expect(Buffer.from(rgba).equals(Buffer.from(one.rgba))).toBe(true)
+    expect(parts[0].covered + parts[1].covered).toBe(one.covered)
+  })
+
   it('reads each photo once per pass of a group instead of once per block, when the cache holds none', async () => {
     const surface = plane(40, 24), v = { blend: 'mosaic', seamline: 'nadir', seamBlend: 'multiband', blockSize: 8, cacheBytes: 1, mapsResident: false }
     const byBlock = photos(views()), byGroup = photos(views())

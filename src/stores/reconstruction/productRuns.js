@@ -339,27 +339,61 @@ export function createProductRuns({
     const pacer = createLogPacer()
     const heartbeat = createStepProgress({ prefix: 'Ortho: ', unit: 'map visit', pacer })
     const blockLines = createBlockProgress(nBlocks, { prefix: 'Ortho: ', pacer })
-    const done = shares.map(() => 0), totals = shares.map(() => 0)
+    // Visits done per call, for the heartbeat (less, per call, the visits of the groups
+    // taken off its list); the bar follows the blocks received.
+    const done = [], totals = [], taken = []
     let blocks = 0
     const report = () => {
-      const d = done.reduce((a, b) => a + b, 0), t = totals.reduce((a, b) => a + b, 0)
-      if (!(t > 0)) return
-      onProgress?.(d, t, `Orthorectifying… ${blocks} of ${pluralize(nBlocks, 'block')} on ${pluralize(shares.length, 'worker')}`,
-        PLAN + (0.95 - PLAN) * d / t, 'blocks')
-      const line = heartbeat.step(d, t)
+      onProgress?.(blocks, nBlocks, `Orthorectifying… ${blocks} of ${pluralize(nBlocks, 'block')} on ${pluralize(shares.length, 'worker')}`,
+        PLAN + (0.95 - PLAN) * blocks / nBlocks, 'blocks')
+      const d = done.reduce((a, b) => a + b, 0), t = totals.reduce((a, b, c) => a + b - taken[c], 0)
+      const line = t > 0 ? heartbeat.step(d, t) : null
       if (line) log(line, 'info', 'Products')
     }
-    const adds = []
-    const parts = await Promise.all(shares.map((groupIndices, k) => workerOrthoShare(input, plan, groupIndices, workers, {
-      worker: k + 1, onLog,
-      onProgress: (d, t) => { done[k] = d; totals[k] = t; report() },
-      onBlock: (b) => {
-        adds.push(workerOrthoCogAdd(b, { worker: 0 }))
-        blocks++
-        const line = blockLines.finished()
-        if (line) log(line, 'info', 'Products')
-      },
-    })))
+    // Each worker starts on its own run of groups. Where the page can share memory, the
+    // groups are claimed from one table (ortho.js `claims`): a worker that runs out takes
+    // the back half of the unclaimed groups of the longest list, and the list's owner
+    // skips what it took. Every group is built once, by whoever claims it first.
+    const claims = typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated
+      ? new Int32Array(new SharedArrayBuffer(4 * plan.groups)) : null
+    const lists = shares.map((list) => list)
+    const adds = [], parts = []
+    const runList = async (k, groupIndices) => {
+      const c = done.length // = its index in lists
+      done.push(0); totals.push(0); taken.push(0)
+      const part = await workerOrthoShare(input, plan, groupIndices, workers, claims, {
+        worker: k + 1, onLog,
+        onProgress: (d, t) => { done[c] = d; totals[c] = t; report() },
+        onBlock: (b) => {
+          adds.push(workerOrthoCogAdd(b, { worker: 0 }))
+          blocks++
+          const line = blockLines.finished()
+          if (line) log(line, 'info', 'Products')
+          report()
+        },
+      })
+      parts.push({ ...part, worker: k }) // a worker runs a list of its own, then any it takes
+    }
+    const steal = () => {
+      let best = [], from = -1
+      for (const [c, list] of lists.entries()) {
+        const left = list.filter((gi) => Atomics.load(claims, gi) === 0)
+        if (left.length > best.length) { best = left; from = c }
+      }
+      if (!best.length) return null
+      const more = best.slice(Math.floor(best.length / 2))
+      taken[from] += more.reduce((n, gi) => n + plan.groupVisits[gi], 0)
+      return more
+    }
+    let stolen = 0
+    await Promise.all(shares.map(async (list, k) => {
+      await runList(k, list)
+      for (let more = claims && steal(); more; more = steal()) {
+        lists.push(more); stolen += more.length
+        await runList(k, more)
+      }
+    }))
+    if (stolen) log(`Ortho: ${pluralize(stolen, 'group')} offered to workers that finished early`, 'debug', 'Products')
     await Promise.all(adds)
     return workerOrthoFinish(parts, { onLog, worker: 0,
       onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, 0.95 + 0.05 * (f ?? 0), 'finish') })

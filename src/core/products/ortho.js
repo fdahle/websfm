@@ -1245,8 +1245,21 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   const runBlocks = runGroups.reduce((n, gi) => n + groups[gi].length, 0)
   hooks.onBlocksStart?.(runBlocks, { maxMaps: blocks.reduce((n, b) => Math.max(n, b.maps.length), 0),
     groups: runGroups.length, groupSize: grouping.size, groupMaps: groupMaps.reduce((n, m) => Math.max(n, m.length), 0), cacheBytes })
-  for (const gi of runGroups) {
+  // `opts.claims` (an Int32Array over shared memory, one slot per group): split over
+  // workers, a group is taken by whichever worker claims it first, so a worker that is
+  // done can take groups off a slower one's list. A group claimed elsewhere is skipped;
+  // its visits are passed over in the plan, so the cache's view of what comes next stays
+  // in step.
+  const claims = opts.claims ?? null
+  const ran = { groups: 0, blocks: 0, visits: 0 } // what this run did (not what others claimed)
+  for (const [k, gi] of runGroups.entries()) {
+    if (claims && Atomics.compareExchange(claims, gi, 0, 1) !== 0) {
+      pos += groupMaps[k].length * passes
+      continue
+    }
     const group = groups[gi]
+    ran.groups++; ran.blocks += group.length
+    ran.visits += group.reduce((n, bi) => n + blocks[bi].maps.length, 0)
     hooks.onGroup?.(gi, groups.length, group.length)
     // The group's blocks with a surface, each in its own window buffers.
     const active = []
@@ -1306,11 +1319,11 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   cache.clear()
   return {
     width: W, height: H, covered, sampled, filled: covered - sampled, surfaceCells,
-    labelled, stats: stats.finish(), statsState: stats.state(), blocks: runBlocks, groups: runGroups.length,
+    labelled, stats: stats.finish(), statsState: stats.state(), blocks: ran.blocks, groups: ran.groups,
     grouping: { size: grouping.size, groups: groups.length, cacheBytes, predicted: grouping.predicted ?? null },
     cacheShrinks: shrinks, cacheLimit,
     ...(survey ? { surveyFromMapRgb } : {}),
-    visits: runGroups.reduce((v, gi) => v + groups[gi].reduce((n, bi) => n + blocks[bi].maps.length, 0), 0),
+    visits: ran.visits,
     mapLoads, photoLoads, cacheHits,
     timings: Object.fromEntries(Object.entries(ms).map(([k, v]) => [k, Math.round(v)])),
     ...(mosaic ? { mosaic: {
