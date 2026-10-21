@@ -11,18 +11,29 @@ for (const seed of seeds) {
   test(`bundle adjustment threads, ${side}×${side} cameras, seed ${seed}`, async ({ page }) => {
     test.skip(!side, 'set BA_SCALE to run')
     test.setTimeout(3_600_000)
-    page.on('console', (m) => { if (/threaded|Bundle adjustment/.test(m.text())) console.log('PAGE', m.text()) })
+    page.on('console', (m) => {
+      if (/threaded|Bundle adjustment/.test(m.text())) console.log('PAGE', m.text())
+    })
     await page.goto('/tests/browser/harness.html')
-    const run = (threads) => page.evaluate(({ seed, side, threads }) => new Promise((resolve) => {
-      const w = new Worker('/tests/browser/workers/baScale.worker.js', { type: 'module' })
-      w.onmessage = ({ data }) => { w.terminate(); resolve(data) }
-      w.onerror = (e) => resolve({ error: e.message })
-      w.postMessage({ seed, side, threads })
-    }), { seed, side, threads })
+    const run = (threads) =>
+      page.evaluate(
+        ({ seed, side, threads }) =>
+          new Promise((resolve) => {
+            const w = new Worker('/tests/browser/workers/baScale.worker.js', { type: 'module' })
+            w.onmessage = ({ data }) => {
+              w.terminate()
+              resolve(data)
+            }
+            w.onerror = (e) => resolve({ error: e.message })
+            w.postMessage({ seed, side, threads })
+          }),
+        { seed, side, threads },
+      )
     const one = await run(0)
     const many = await run(16)
-    const row = (r) => `SfM ${(r.ms / 1000).toFixed(1)} s, BA ${(r.baSolver.ms / 1000).toFixed(1)} s on ${r.baSolver.threads} thread(s), `
-      + `${r.baSolver.solves} solves, digest ${r.digest}`
+    const row = (r) =>
+      `SfM ${(r.ms / 1000).toFixed(1)} s, BA ${(r.baSolver.ms / 1000).toFixed(1)} s on ${r.baSolver.threads} thread(s), ` +
+      `${r.baSolver.solves} solves, digest ${r.digest}`
     console.log(`seed ${seed}, ${side * side} cameras:\n  ${row(one)}\n  ${row(many)}`)
     expect(one.error ?? null).toBeNull()
     expect(many.error ?? null).toBeNull()

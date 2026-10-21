@@ -5,7 +5,8 @@ import { LEARNED_DETECTORS } from './learnedDetectors.js'
 const t = (data, dims) => ({ data, dims })
 
 it('parses DISK-shaped outputs (int64 xy, [1,N,128]) best-first and capped', () => {
-  const n = 3, dim = 128
+  const n = 3,
+    dim = 128
   const desc = new Float32Array(n * dim)
   for (let i = 0; i < n; i++) desc.fill(i + 1, i * dim, (i + 1) * dim)
   const results = {
@@ -15,13 +16,17 @@ it('parses DISK-shaped outputs (int64 xy, [1,N,128]) best-first and capped', () 
   }
   const out = parseDetections(results, ['keypoints', 'scores', 'descriptors'], LEARNED_DETECTORS.disk, 2)
   expect(out.dim).toBe(128)
-  expect(out.keypoints).toEqual([{ x: 3, y: 4, score: expect.closeTo(0.9) }, { x: 5, y: 6, score: expect.closeTo(0.5) }])
+  expect(out.keypoints).toEqual([
+    { x: 3, y: 4, score: expect.closeTo(0.9) },
+    { x: 5, y: 6, score: expect.closeTo(0.5) },
+  ])
   expect(out.descriptors[0]).toBe(2)
   expect(out.descriptors[dim]).toBe(3)
 })
 
 it('parses ALIKED-shaped outputs (float sub-pixel xy, [1,N,128]) best-first', () => {
-  const n = 3, dim = 128
+  const n = 3,
+    dim = 128
   const desc = new Float32Array(n * dim)
   for (let i = 0; i < n; i++) desc.fill(i + 1, i * dim, (i + 1) * dim)
   const results = {
@@ -30,15 +35,23 @@ it('parses ALIKED-shaped outputs (float sub-pixel xy, [1,N,128]) best-first', ()
     descriptors: t(desc, [1, n, dim]),
   }
   const out = parseDetections(results, ['keypoints', 'scores', 'descriptors'], LEARNED_DETECTORS.aliked, 0)
-  expect(out.keypoints.map((k) => [k.x, k.y])).toEqual([[10.125, 6], [1.25, 2.5], [3.75, 4.5]])
+  expect(out.keypoints.map((k) => [k.x, k.y])).toEqual([
+    [10.125, 6],
+    [1.25, 2.5],
+    [3.75, 4.5],
+  ])
   expect(out.descriptors[0]).toBe(3)
   expect(out.descriptors[2 * dim]).toBe(2)
 })
 
 it('reads channels-first [1,D,N] descriptors', () => {
-  const n = 2, dim = 256
+  const n = 2,
+    dim = 256
   const desc = new Float32Array(n * dim)
-  for (let d = 0; d < dim; d++) { desc[d * n] = 10; desc[d * n + 1] = 20 }
+  for (let d = 0; d < dim; d++) {
+    desc[d * n] = 10
+    desc[d * n + 1] = 20
+  }
   const results = {
     k: t(Float32Array.from([0, 0, 1, 1]), [1, n, 2]),
     d: t(desc, [1, dim, n]),

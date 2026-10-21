@@ -37,10 +37,7 @@ export function groupImageSections(images, groups) {
     if (bucket) bucket.push(img)
     else ungrouped.push(img)
   }
-  return [
-    ...groups.map((g) => ({ group: g, images: byGroup.get(g.id) })),
-    { group: null, images: ungrouped },
-  ]
+  return [...groups.map((g) => ({ group: g, images: byGroup.get(g.id) })), { group: null, images: ungrouped }]
 }
 
 // "Group 1", "Group 2", … — the first number no existing group uses.

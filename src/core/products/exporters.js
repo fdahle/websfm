@@ -40,7 +40,9 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
     : (i) => [points[i].x, points[i].y, points[i].z]
   const hasCol = flat ? !!flat.col : n > 0 && !!points[0]?.color
   const getC = flat
-    ? (flat.col ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]] : () => null)
+    ? flat.col
+      ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]]
+      : () => null
     : (i) => points[i].color
   const hadNormals = flat ? !!flat.nrm : n > 0 && !!points[0]?.normal
   if (hadNormals) onLog?.('Export: normals dropped (georeference/downsample applied)', 'info', 'Export')
@@ -50,13 +52,20 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
   // whenever it is needed, so a 95 M-point export does not build a 2.3 GB Float64
   // plane next to the cloud (the browser refuses one past 2 GiB, core/bufferLimit.js).
   const at = sim ? (i) => applySimilarity(sim, getP(i)) : getP
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity
   for (let i = 0; i < n; i++) {
     const p = at(i)
-    if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0]
-    if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1]
-    if (p[2] < minZ) minZ = p[2]; if (p[2] > maxZ) maxZ = p[2]
+    if (p[0] < minX) minX = p[0]
+    if (p[0] > maxX) maxX = p[0]
+    if (p[1] < minY) minY = p[1]
+    if (p[1] > maxY) maxY = p[1]
+    if (p[2] < minZ) minZ = p[2]
+    if (p[2] > maxZ) maxZ = p[2]
   }
   if (!down) {
     // Every point is written, so its transformed position is a full plane: Float64 as
@@ -67,25 +76,62 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
     const xyz = relative ? new Float32Array(n * 3) : new Float64Array(n * 3)
     for (let i = 0; i < n; i++) {
       const p = at(i)
-      if (relative) { xyz[i * 3] = p[0] - origin[0]; xyz[i * 3 + 1] = p[1] - origin[1]; xyz[i * 3 + 2] = p[2] - origin[2] }
-      else { xyz[i * 3] = p[0]; xyz[i * 3 + 1] = p[1]; xyz[i * 3 + 2] = p[2] }
+      if (relative) {
+        xyz[i * 3] = p[0] - origin[0]
+        xyz[i * 3 + 1] = p[1] - origin[1]
+        xyz[i * 3 + 2] = p[2] - origin[2]
+      } else {
+        xyz[i * 3] = p[0]
+        xyz[i * 3 + 1] = p[1]
+        xyz[i * 3 + 2] = p[2]
+      }
     }
-    if (relative) onLog?.(`Export: ${n.toLocaleString()} points written relative to an origin (one Float64 plane would pass the 2 GiB buffer limit)`, 'debug', 'Export')
+    if (relative)
+      onLog?.(
+        `Export: ${n.toLocaleString()} points written relative to an origin (one Float64 plane would pass the 2 GiB buffer limit)`,
+        'debug',
+        'Export',
+      )
     const col = hasCol ? new Uint8Array(n * 3) : null
-    if (col) for (let i = 0; i < n; i++) { const c = getC(i) || [200, 200, 200]; col.set(c.map(byte), i * 3) }
+    if (col)
+      for (let i = 0; i < n; i++) {
+        const c = getC(i) || [200, 200, 200]
+        col.set(c.map(byte), i * 3)
+      }
     // Shared, not copied: nothing downstream writes into them.
     const attributes = attrs ? Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, v.subarray(0, n)])) : null
-    return { count: n, pos: xyz, ...(origin ? { origin } : {}), ...(col ? { col } : {}), ...(attributes ? { attributes } : {}) }
+    return {
+      count: n,
+      pos: xyz,
+      ...(origin ? { origin } : {}),
+      ...(col ? { col } : {}),
+      ...(attributes ? { attributes } : {}),
+    }
   }
-  if (attrs) return firstPointPerCell({ n, at, hasCol, getC, attrs, cell, min: [minX, minY, minZ], max: [maxX, maxY, maxZ], onLog })
+  if (attrs)
+    return firstPointPerCell({
+      n,
+      at,
+      hasCol,
+      getC,
+      attrs,
+      cell,
+      min: [minX, minY, minZ],
+      max: [maxX, maxY, maxZ],
+      onLog,
+    })
 
   // Pass 2: voxel downsample. Shift the frame to a cell-aligned origin near the
   // bbox so the accumulator's Float32 finalize keeps precision on CRS-sized
   // coordinates; the shift is added back into the Float64 output.
   const shift = [Math.floor(minX / cell) * cell, Math.floor(minY / cell) * cell, Math.floor(minZ / cell) * cell]
   const acc = createVoxelAccumulator(cell, {
-    minX: minX - shift[0], minY: minY - shift[1], minZ: minZ - shift[2],
-    maxX: maxX - shift[0], maxY: maxY - shift[1], maxZ: maxZ - shift[2],
+    minX: minX - shift[0],
+    minY: minY - shift[1],
+    minZ: minZ - shift[2],
+    maxX: maxX - shift[0],
+    maxY: maxY - shift[1],
+    maxZ: maxZ - shift[2],
   })
   for (let i = 0; i < n; i++) {
     const c = (hasCol && getC(i)) || [200, 200, 200]
@@ -99,12 +145,28 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
   const pos = relative ? new Float32Array(m * 3) : new Float64Array(m * 3)
   const col = hasCol ? new Uint8Array(m * 3) : null
   for (let i = 0; i < m; i++) {
-    const s = i * 6, d = i * 3
-    if (relative) { pos[d] = merged[s]; pos[d + 1] = merged[s + 1]; pos[d + 2] = merged[s + 2] }
-    else { pos[d] = merged[s] + shift[0]; pos[d + 1] = merged[s + 1] + shift[1]; pos[d + 2] = merged[s + 2] + shift[2] }
-    if (col) { col[d] = merged[s + 3]; col[d + 1] = merged[s + 4]; col[d + 2] = merged[s + 5] }
+    const s = i * 6,
+      d = i * 3
+    if (relative) {
+      pos[d] = merged[s]
+      pos[d + 1] = merged[s + 1]
+      pos[d + 2] = merged[s + 2]
+    } else {
+      pos[d] = merged[s] + shift[0]
+      pos[d + 1] = merged[s + 1] + shift[1]
+      pos[d + 2] = merged[s + 2] + shift[2]
+    }
+    if (col) {
+      col[d] = merged[s + 3]
+      col[d + 1] = merged[s + 4]
+      col[d + 2] = merged[s + 5]
+    }
   }
-  onLog?.(`Export: voxel downsample ${cell} → ${m.toLocaleString()} of ${n.toLocaleString()} points kept`, 'info', 'Export')
+  onLog?.(
+    `Export: voxel downsample ${cell} → ${m.toLocaleString()} of ${n.toLocaleString()} points kept`,
+    'info',
+    'Export',
+  )
   return { count: m, pos, ...(relative ? { origin: shift } : {}), ...(col ? { col } : {}) }
 }
 
@@ -137,13 +199,29 @@ function firstPointPerCell({ n, at, hasCol, getC, attrs, cell, min, max, onLog }
   for (let j = 0; j < m; j++) {
     const i = keep[j]
     const p = at(i)
-    if (origin) { pos[j * 3] = p[0] - origin[0]; pos[j * 3 + 1] = p[1] - origin[1]; pos[j * 3 + 2] = p[2] - origin[2] }
-    else { pos[j * 3] = p[0]; pos[j * 3 + 1] = p[1]; pos[j * 3 + 2] = p[2] }
-    if (col) { const c = getC(i) || [200, 200, 200]; col[j * 3] = byte(c[0]); col[j * 3 + 1] = byte(c[1]); col[j * 3 + 2] = byte(c[2]) }
+    if (origin) {
+      pos[j * 3] = p[0] - origin[0]
+      pos[j * 3 + 1] = p[1] - origin[1]
+      pos[j * 3 + 2] = p[2] - origin[2]
+    } else {
+      pos[j * 3] = p[0]
+      pos[j * 3 + 1] = p[1]
+      pos[j * 3 + 2] = p[2]
+    }
+    if (col) {
+      const c = getC(i) || [200, 200, 200]
+      col[j * 3] = byte(c[0])
+      col[j * 3 + 1] = byte(c[1])
+      col[j * 3 + 2] = byte(c[2])
+    }
     for (const [src, dst] of lists) dst[j] = src[i]
   }
-  onLog?.(`Export: voxel downsample ${cell} → ${m.toLocaleString()} of ${n.toLocaleString()} points kept `
-    + `(one real point per cell, so its attributes ${Object.keys(attrs).join(', ')} stay observed values)`, 'info', 'Export')
+  onLog?.(
+    `Export: voxel downsample ${cell} → ${m.toLocaleString()} of ${n.toLocaleString()} points kept ` +
+      `(one real point per cell, so its attributes ${Object.keys(attrs).join(', ')} stay observed values)`,
+    'info',
+    'Export',
+  )
   return { count: m, pos, ...(origin ? { origin } : {}), ...(col ? { col } : {}), attributes }
 }
 
@@ -159,7 +237,9 @@ export function prepareMeshForExport(mesh, { sim = null } = {}) {
   const pos = new Float64Array(n * 3)
   for (let i = 0; i < n; i++) {
     const p = applySimilarity(sim, [mesh.pos[i * 3], mesh.pos[i * 3 + 1], mesh.pos[i * 3 + 2]])
-    pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2]
+    pos[i * 3] = p[0]
+    pos[i * 3 + 1] = p[1]
+    pos[i * 3 + 2] = p[2]
   }
   return { ...mesh, nVerts: n, pos }
 }
@@ -175,21 +255,33 @@ export function prepareMeshForExport(mesh, { sim = null } = {}) {
 // one vertex property after the colour, in its own type (Float32 → float, Float64 →
 // double, Uint8 → uchar, …), which CloudCompare/MeshLab/PDAL read as scalar fields.
 // Yields parts: Uint8Arrays for binary (little-endian body), strings for ASCII.
-export function* cloudToPlyParts(points, { binary = true, color = true, normals = true, attributes = true,
-  partBytes = PART_BYTES, partChars = PART_CHARS } = {}) {
+export function* cloudToPlyParts(
+  points,
+  {
+    binary = true,
+    color = true,
+    normals = true,
+    attributes = true,
+    partBytes = PART_BYTES,
+    partChars = PART_CHARS,
+  } = {},
+) {
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
   const [getX, getY, getZ] = flat ? flatAxes(flat) : [(i) => points[i].x, (i) => points[i].y, (i) => points[i].z]
   const getC = flat
-    ? (flat.col ? (i) => [flat.col[i*3], flat.col[i*3+1], flat.col[i*3+2]] : () => null)
+    ? flat.col
+      ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]]
+      : () => null
     : (i) => points[i].color
   // Emit normals only when present (flat .nrm, or per-point .normal on the sample).
-  const hasNrm = normals && (flat ? !!flat.nrm : (points.length > 0 && !!points[0].normal))
+  const hasNrm = normals && (flat ? !!flat.nrm : points.length > 0 && !!points[0].normal)
   const getN = flat
-    ? (i) => [flat.nrm[i*3], flat.nrm[i*3+1], flat.nrm[i*3+2]]
+    ? (i) => [flat.nrm[i * 3], flat.nrm[i * 3 + 1], flat.nrm[i * 3 + 2]]
     : (i) => points[i].normal || [0, 0, 0]
   const fields = attributes && flat ? plyAttributeFields(flat.attributes, n) : []
-  const props = 'property float x\nproperty float y\nproperty float z\n' +
+  const props =
+    'property float x\nproperty float y\nproperty float z\n' +
     (hasNrm ? 'property float nx\nproperty float ny\nproperty float nz\n' : '') +
     (color ? 'property uchar red\nproperty uchar green\nproperty uchar blue\n' : '') +
     fields.map((f) => `property ${f.type} ${f.name}\n`).join('')
@@ -197,17 +289,30 @@ export function* cloudToPlyParts(points, { binary = true, color = true, normals 
     'ply\n' +
     `format ${binary ? 'binary_little_endian' : 'ascii'} 1.0\n` +
     'comment generated by websfm\n' +
-    `element vertex ${n}\n` + props + 'end_header\n'
+    `element vertex ${n}\n` +
+    props +
+    'end_header\n'
 
   if (!binary) {
     // An empty cloud keeps the historical lone newline after the header.
-    yield* lineParts(header, n, (i) => {
-      let s = `${getX(i)} ${getY(i)} ${getZ(i)}`
-      if (hasNrm) { const nn = getN(i); s += ` ${nn[0]} ${nn[1]} ${nn[2]}` }
-      if (color) { const c = getC(i) || [200, 200, 200]; s += ` ${byte(c[0])} ${byte(c[1])} ${byte(c[2])}` }
-      for (const f of fields) s += ` ${f.text(f.values[i])}`
-      return s
-    }, { emptyBody: '\n', partChars })
+    yield* lineParts(
+      header,
+      n,
+      (i) => {
+        let s = `${getX(i)} ${getY(i)} ${getZ(i)}`
+        if (hasNrm) {
+          const nn = getN(i)
+          s += ` ${nn[0]} ${nn[1]} ${nn[2]}`
+        }
+        if (color) {
+          const c = getC(i) || [200, 200, 200]
+          s += ` ${byte(c[0])} ${byte(c[1])} ${byte(c[2])}`
+        }
+        for (const f of fields) s += ` ${f.text(f.values[i])}`
+        return s
+      },
+      { emptyBody: '\n', partChars },
+    )
     return
   }
 
@@ -216,21 +321,33 @@ export function* cloudToPlyParts(points, { binary = true, color = true, normals 
   const NRM = hasNrm ? 12 : 0
   const ATTR = color ? 12 + NRM + 3 : 12 + NRM
   const STRIDE = ATTR + fields.reduce((sum, f) => sum + f.size, 0)
-  yield* recordParts(n, STRIDE, (dv, o, i) => {
-    dv.setFloat32(o, getX(i), true)
-    dv.setFloat32(o + 4, getY(i), true)
-    dv.setFloat32(o + 8, getZ(i), true)
-    if (hasNrm) {
-      const nn = getN(i)
-      dv.setFloat32(o + 12, nn[0], true); dv.setFloat32(o + 16, nn[1], true); dv.setFloat32(o + 20, nn[2], true)
-    }
-    if (color) {
-      const c = getC(i) || [200, 200, 200]
-      dv.setUint8(o + 12 + NRM, byte(c[0])); dv.setUint8(o + 13 + NRM, byte(c[1])); dv.setUint8(o + 14 + NRM, byte(c[2]))
-    }
-    let a = o + ATTR
-    for (const f of fields) { f.set(dv, a, f.values[i]); a += f.size }
-  }, partBytes)
+  yield* recordParts(
+    n,
+    STRIDE,
+    (dv, o, i) => {
+      dv.setFloat32(o, getX(i), true)
+      dv.setFloat32(o + 4, getY(i), true)
+      dv.setFloat32(o + 8, getZ(i), true)
+      if (hasNrm) {
+        const nn = getN(i)
+        dv.setFloat32(o + 12, nn[0], true)
+        dv.setFloat32(o + 16, nn[1], true)
+        dv.setFloat32(o + 20, nn[2], true)
+      }
+      if (color) {
+        const c = getC(i) || [200, 200, 200]
+        dv.setUint8(o + 12 + NRM, byte(c[0]))
+        dv.setUint8(o + 13 + NRM, byte(c[1]))
+        dv.setUint8(o + 14 + NRM, byte(c[2]))
+      }
+      let a = o + ATTR
+      for (const f of fields) {
+        f.set(dv, a, f.values[i])
+        a += f.size
+      }
+    },
+    partBytes,
+  )
 }
 
 // PLY scalar type per attribute array type, with its byte size and writer.
@@ -246,8 +363,23 @@ const PLY_TYPES = {
 }
 // Names a PLY reader maps to geometry or colour; an attribute so named would be read
 // back as one, so it is written as `scalar_<name>` (CloudCompare's own prefix).
-const PLY_RESERVED = new Set(['x', 'y', 'z', 'nx', 'ny', 'nz', 'red', 'green', 'blue', 'alpha',
-  'diffuse_red', 'diffuse_green', 'diffuse_blue', 'vertex_indices', 'vertex_index'])
+const PLY_RESERVED = new Set([
+  'x',
+  'y',
+  'z',
+  'nx',
+  'ny',
+  'nz',
+  'red',
+  'green',
+  'blue',
+  'alpha',
+  'diffuse_red',
+  'diffuse_green',
+  'diffuse_blue',
+  'vertex_indices',
+  'vertex_index',
+])
 
 // [{ name, type, size, set, text, values }] for each writable attribute. A PLY
 // property name is one whitespace-free token; anything else becomes '_'.
@@ -276,46 +408,73 @@ const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 // idx:Uint32Array(3·count), col?:Uint8Array(3·nVerts) }. Binary little-endian
 // (Uint8Array parts) by default; ASCII (string parts) when binary:false. Faces are
 // triangles (list: uchar count=3 + 3×int vertex indices).
-export function* meshToPlyParts(mesh, { binary = true, color = true, partBytes = PART_BYTES, partChars = PART_CHARS } = {}) {
-  const nV = mesh.nVerts ?? (mesh.pos.length / 3)
-  const nF = mesh.count ?? (mesh.idx.length / 3)
+export function* meshToPlyParts(
+  mesh,
+  { binary = true, color = true, partBytes = PART_BYTES, partChars = PART_CHARS } = {},
+) {
+  const nV = mesh.nVerts ?? mesh.pos.length / 3
+  const nF = mesh.count ?? mesh.idx.length / 3
   const hasCol = color && !!mesh.col
-  const vprops = 'property float x\nproperty float y\nproperty float z\n' +
+  const vprops =
+    'property float x\nproperty float y\nproperty float z\n' +
     (hasCol ? 'property uchar red\nproperty uchar green\nproperty uchar blue\n' : '')
   const header =
     'ply\n' +
     `format ${binary ? 'binary_little_endian' : 'ascii'} 1.0\n` +
     'comment generated by websfm\n' +
-    `element vertex ${nV}\n` + vprops +
+    `element vertex ${nV}\n` +
+    vprops +
     `element face ${nF}\n` +
     'property list uchar int vertex_indices\n' +
     'end_header\n'
 
   if (!binary) {
-    yield* lineParts(header, nV + nF, (k) => {
-      if (k >= nV) { const f = k - nV; return `3 ${mesh.idx[f*3]} ${mesh.idx[f*3+1]} ${mesh.idx[f*3+2]}` }
-      let s = `${mesh.pos[k*3]} ${mesh.pos[k*3+1]} ${mesh.pos[k*3+2]}`
-      if (hasCol) s += ` ${byte(mesh.col[k*3])} ${byte(mesh.col[k*3+1])} ${byte(mesh.col[k*3+2])}`
-      return s
-    }, { partChars })
+    yield* lineParts(
+      header,
+      nV + nF,
+      (k) => {
+        if (k >= nV) {
+          const f = k - nV
+          return `3 ${mesh.idx[f * 3]} ${mesh.idx[f * 3 + 1]} ${mesh.idx[f * 3 + 2]}`
+        }
+        let s = `${mesh.pos[k * 3]} ${mesh.pos[k * 3 + 1]} ${mesh.pos[k * 3 + 2]}`
+        if (hasCol) s += ` ${byte(mesh.col[k * 3])} ${byte(mesh.col[k * 3 + 1])} ${byte(mesh.col[k * 3 + 2])}`
+        return s
+      },
+      { partChars },
+    )
     return
   }
 
   yield new TextEncoder().encode(header)
   const vStride = 12 + (hasCol ? 3 : 0)
-  yield* recordParts(nV, vStride, (dv, o, i) => {
-    dv.setFloat32(o, mesh.pos[i*3], true)
-    dv.setFloat32(o + 4, mesh.pos[i*3+1], true)
-    dv.setFloat32(o + 8, mesh.pos[i*3+2], true)
-    if (hasCol) { dv.setUint8(o + 12, byte(mesh.col[i*3])); dv.setUint8(o + 13, byte(mesh.col[i*3+1])); dv.setUint8(o + 14, byte(mesh.col[i*3+2])) }
-  }, partBytes)
+  yield* recordParts(
+    nV,
+    vStride,
+    (dv, o, i) => {
+      dv.setFloat32(o, mesh.pos[i * 3], true)
+      dv.setFloat32(o + 4, mesh.pos[i * 3 + 1], true)
+      dv.setFloat32(o + 8, mesh.pos[i * 3 + 2], true)
+      if (hasCol) {
+        dv.setUint8(o + 12, byte(mesh.col[i * 3]))
+        dv.setUint8(o + 13, byte(mesh.col[i * 3 + 1]))
+        dv.setUint8(o + 14, byte(mesh.col[i * 3 + 2]))
+      }
+    },
+    partBytes,
+  )
   // uchar count + 3×int32
-  yield* recordParts(nF, 13, (dv, o, f) => {
-    dv.setUint8(o, 3)
-    dv.setInt32(o + 1, mesh.idx[f*3], true)
-    dv.setInt32(o + 5, mesh.idx[f*3+1], true)
-    dv.setInt32(o + 9, mesh.idx[f*3+2], true)
-  }, partBytes)
+  yield* recordParts(
+    nF,
+    13,
+    (dv, o, f) => {
+      dv.setUint8(o, 3)
+      dv.setInt32(o + 1, mesh.idx[f * 3], true)
+      dv.setInt32(o + 5, mesh.idx[f * 3 + 1], true)
+      dv.setInt32(o + 9, mesh.idx[f * 3 + 2], true)
+    },
+    partBytes,
+  )
 }
 
 // ── Mesh → OBJ (Wavefront) ───────────────────────────────────────────────────
@@ -329,43 +488,69 @@ export function* meshToPlyParts(mesh, { binary = true, color = true, partBytes =
 // `f a/a b/b c/c` (each vertex has exactly one UV, so the indices coincide). Vertex
 // colour is left out: viewers that read it would tint the texture.
 export function* meshToObjParts(mesh, { color = true, texture = null, partChars = PART_CHARS } = {}) {
-  const nV = mesh.nVerts ?? (mesh.pos.length / 3)
-  const nF = mesh.count ?? (mesh.idx.length / 3)
+  const nV = mesh.nVerts ?? mesh.pos.length / 3
+  const nF = mesh.count ?? mesh.idx.length / 3
   const textured = !!(texture?.groups?.length && mesh.uv)
   const hasCol = color && !!mesh.col && !textured
   if (!textured) {
-    yield* lineParts('# generated by websfm\n', nV + nF, (k) => {
-      // +1: OBJ vertex indices are 1-based.
-      if (k >= nV) { const f = k - nV; return `f ${mesh.idx[f*3]+1} ${mesh.idx[f*3+1]+1} ${mesh.idx[f*3+2]+1}` }
-      let s = `v ${mesh.pos[k*3]} ${mesh.pos[k*3+1]} ${mesh.pos[k*3+2]}`
-      if (hasCol) s += ` ${(byte(mesh.col[k*3])/255).toFixed(6)} ${(byte(mesh.col[k*3+1])/255).toFixed(6)} ${(byte(mesh.col[k*3+2])/255).toFixed(6)}`
-      return s
-    }, { partChars })
+    yield* lineParts(
+      '# generated by websfm\n',
+      nV + nF,
+      (k) => {
+        // +1: OBJ vertex indices are 1-based.
+        if (k >= nV) {
+          const f = k - nV
+          return `f ${mesh.idx[f * 3] + 1} ${mesh.idx[f * 3 + 1] + 1} ${mesh.idx[f * 3 + 2] + 1}`
+        }
+        let s = `v ${mesh.pos[k * 3]} ${mesh.pos[k * 3 + 1]} ${mesh.pos[k * 3 + 2]}`
+        if (hasCol)
+          s += ` ${(byte(mesh.col[k * 3]) / 255).toFixed(6)} ${(byte(mesh.col[k * 3 + 1]) / 255).toFixed(6)} ${(byte(mesh.col[k * 3 + 2]) / 255).toFixed(6)}`
+        return s
+      },
+      { partChars },
+    )
     return
   }
   // Face lines in page order, with a usemtl line opening each group.
   const groupOf = []
   let total = 0
-  for (const g of texture.groups) { groupOf.push({ at: total, g }); total += g.count + 1 }
+  for (const g of texture.groups) {
+    groupOf.push({ at: total, g })
+    total += g.count + 1
+  }
   let gi = 0 // lineParts asks for lines in order, so the group cursor only moves on
-  yield* lineParts(`# generated by websfm\nmtllib ${texture.mtl}\n`, 2 * nV + total, (k) => {
-    if (k < nV) return `v ${mesh.pos[k*3]} ${mesh.pos[k*3+1]} ${mesh.pos[k*3+2]}`
-    if (k < 2 * nV) { const i = k - nV; return `vt ${mesh.uv[i*2].toFixed(6)} ${(1 - mesh.uv[i*2+1]).toFixed(6)}` }
-    const r = k - 2 * nV
-    while (gi + 1 < groupOf.length && r >= groupOf[gi + 1].at) gi++
-    const { at, g } = groupOf[gi]
-    if (r === at) return `usemtl atlas-${g.page}`
-    const f = g.start + (r - at - 1)
-    const a = mesh.idx[f*3] + 1, b = mesh.idx[f*3+1] + 1, c = mesh.idx[f*3+2] + 1
-    return `f ${a}/${a} ${b}/${b} ${c}/${c}`
-  }, { partChars })
+  yield* lineParts(
+    `# generated by websfm\nmtllib ${texture.mtl}\n`,
+    2 * nV + total,
+    (k) => {
+      if (k < nV) return `v ${mesh.pos[k * 3]} ${mesh.pos[k * 3 + 1]} ${mesh.pos[k * 3 + 2]}`
+      if (k < 2 * nV) {
+        const i = k - nV
+        return `vt ${mesh.uv[i * 2].toFixed(6)} ${(1 - mesh.uv[i * 2 + 1]).toFixed(6)}`
+      }
+      const r = k - 2 * nV
+      while (gi + 1 < groupOf.length && r >= groupOf[gi + 1].at) gi++
+      const { at, g } = groupOf[gi]
+      if (r === at) return `usemtl atlas-${g.page}`
+      const f = g.start + (r - at - 1)
+      const a = mesh.idx[f * 3] + 1,
+        b = mesh.idx[f * 3 + 1] + 1,
+        c = mesh.idx[f * 3 + 2] + 1
+      return `f ${a}/${a} ${b}/${b} ${c}/${c}`
+    },
+    { partChars },
+  )
 }
 
 // The MTL file of a textured OBJ: one unlit material per atlas page (illum 0 = colour
 // only, no lighting model), its image named relative to the MTL.
 export function objMaterialLibrary(pageFiles) {
-  return '# generated by websfm\n' + pageFiles.map((file, k) =>
-    `newmtl atlas-${k}\nKa 1 1 1\nKd 1 1 1\nKs 0 0 0\nd 1\nillum 0\nmap_Kd ${file}\n`).join('\n')
+  return (
+    '# generated by websfm\n' +
+    pageFiles
+      .map((file, k) => `newmtl atlas-${k}\nKa 1 1 1\nKd 1 1 1\nKs 0 0 0\nd 1\nillum 0\nmap_Kd ${file}\n`)
+      .join('\n')
+  )
 }
 
 // ── Mesh → STL (binary) ──────────────────────────────────────────────────────
@@ -374,29 +559,62 @@ export function objMaterialLibrary(pageFiles) {
 // vertex colour is non-standard). A degenerate triangle yields a zero normal
 // rather than NaN. Yields Uint8Array parts.
 export function* meshToStlParts(mesh, { partBytes = PART_BYTES } = {}) {
-  const nF = mesh.count ?? (mesh.idx.length / 3)
+  const nF = mesh.count ?? mesh.idx.length / 3
   const head = new Uint8Array(84)
   // 80-byte header (zeroed) then triangle count.
   new TextEncoder().encodeInto('websfm binary STL', head.subarray(0, 80))
   new DataView(head.buffer).setUint32(80, nF, true)
   yield head
-  yield* recordParts(nF, 50, (dv, o, f) => {
-    const a = mesh.idx[f*3], b = mesh.idx[f*3+1], c = mesh.idx[f*3+2]
-    const ax = mesh.pos[a*3], ay = mesh.pos[a*3+1], az = mesh.pos[a*3+2]
-    const bx = mesh.pos[b*3], by = mesh.pos[b*3+1], bz = mesh.pos[b*3+2]
-    const cx = mesh.pos[c*3], cy = mesh.pos[c*3+1], cz = mesh.pos[c*3+2]
-    // Face normal = (b−a)×(c−a), normalized; (0,0,0) for a degenerate triangle.
-    const ux = bx-ax, uy = by-ay, uz = bz-az
-    const vx = cx-ax, vy = cy-ay, vz = cz-az
-    let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx
-    const len = Math.hypot(nx, ny, nz)
-    if (len > 0) { nx /= len; ny /= len; nz /= len } else { nx = ny = nz = 0 }
-    dv.setFloat32(o, nx, true); dv.setFloat32(o+4, ny, true); dv.setFloat32(o+8, nz, true)
-    dv.setFloat32(o+12, ax, true); dv.setFloat32(o+16, ay, true); dv.setFloat32(o+20, az, true)
-    dv.setFloat32(o+24, bx, true); dv.setFloat32(o+28, by, true); dv.setFloat32(o+32, bz, true)
-    dv.setFloat32(o+36, cx, true); dv.setFloat32(o+40, cy, true); dv.setFloat32(o+44, cz, true)
-    // attribute byte count u16 = 0 (o+48)
-  }, partBytes)
+  yield* recordParts(
+    nF,
+    50,
+    (dv, o, f) => {
+      const a = mesh.idx[f * 3],
+        b = mesh.idx[f * 3 + 1],
+        c = mesh.idx[f * 3 + 2]
+      const ax = mesh.pos[a * 3],
+        ay = mesh.pos[a * 3 + 1],
+        az = mesh.pos[a * 3 + 2]
+      const bx = mesh.pos[b * 3],
+        by = mesh.pos[b * 3 + 1],
+        bz = mesh.pos[b * 3 + 2]
+      const cx = mesh.pos[c * 3],
+        cy = mesh.pos[c * 3 + 1],
+        cz = mesh.pos[c * 3 + 2]
+      // Face normal = (b−a)×(c−a), normalized; (0,0,0) for a degenerate triangle.
+      const ux = bx - ax,
+        uy = by - ay,
+        uz = bz - az
+      const vx = cx - ax,
+        vy = cy - ay,
+        vz = cz - az
+      let nx = uy * vz - uz * vy,
+        ny = uz * vx - ux * vz,
+        nz = ux * vy - uy * vx
+      const len = Math.hypot(nx, ny, nz)
+      if (len > 0) {
+        nx /= len
+        ny /= len
+        nz /= len
+      } else {
+        nx = ny = nz = 0
+      }
+      dv.setFloat32(o, nx, true)
+      dv.setFloat32(o + 4, ny, true)
+      dv.setFloat32(o + 8, nz, true)
+      dv.setFloat32(o + 12, ax, true)
+      dv.setFloat32(o + 16, ay, true)
+      dv.setFloat32(o + 20, az, true)
+      dv.setFloat32(o + 24, bx, true)
+      dv.setFloat32(o + 28, by, true)
+      dv.setFloat32(o + 32, bz, true)
+      dv.setFloat32(o + 36, cx, true)
+      dv.setFloat32(o + 40, cy, true)
+      dv.setFloat32(o + 44, cz, true)
+      // attribute byte count u16 = 0 (o+48)
+    },
+    partBytes,
+  )
 }
 
 // ── Mesh → GLB (binary glTF 2.0) ─────────────────────────────────────────────
@@ -417,9 +635,11 @@ export function* meshToStlParts(mesh, { partBytes = PART_BYTES } = {}) {
 // hierarchy stores Float32 positions around its own centre (see tiles3d.js).
 // Yields Uint8Array parts: the container header + JSON chunk + BIN chunk header,
 // then the BIN sections.
-export function* meshToGlbParts(mesh, { color = true, texture = null, origin = null, yUp = false, translation = null,
-  partBytes = PART_BYTES } = {}) {
-  const nV = mesh.nVerts ?? (mesh.pos.length / 3)
+export function* meshToGlbParts(
+  mesh,
+  { color = true, texture = null, origin = null, yUp = false, translation = null, partBytes = PART_BYTES } = {},
+) {
+  const nV = mesh.nVerts ?? mesh.pos.length / 3
   const nIdx = mesh.idx.length
   const textured = !!(texture?.pages?.length && texture.groups?.length && mesh.uv)
   const hasCol = color && !!mesh.col && !textured
@@ -427,25 +647,47 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
   // Position i in the file's frame.
   const P = [0, 0, 0]
   const at = (i) => {
-    const x = mesh.pos[i * 3] - ox, y = mesh.pos[i * 3 + 1] - oy, z = mesh.pos[i * 3 + 2] - oz
-    if (yUp) { P[0] = x; P[1] = z; P[2] = -y } else { P[0] = x; P[1] = y; P[2] = z }
+    const x = mesh.pos[i * 3] - ox,
+      y = mesh.pos[i * 3 + 1] - oy,
+      z = mesh.pos[i * 3 + 2] - oz
+    if (yUp) {
+      P[0] = x
+      P[1] = z
+      P[2] = -y
+    } else {
+      P[0] = x
+      P[1] = y
+      P[2] = z
+    }
     return P
   }
 
   // Position bounds for the accessor min/max.
-  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]
+  const min = [Infinity, Infinity, Infinity],
+    max = [-Infinity, -Infinity, -Infinity]
   for (let i = 0; i < nV; i++) {
     const p = at(i)
-    for (let a = 0; a < 3; a++) { if (p[a] < min[a]) min[a] = p[a]; if (p[a] > max[a]) max[a] = p[a] }
+    for (let a = 0; a < 3; a++) {
+      if (p[a] < min[a]) min[a] = p[a]
+      if (p[a] > max[a]) max[a] = p[a]
+    }
   }
-  if (!Number.isFinite(min[0])) { min.fill(0); max.fill(0) }
+  if (!Number.isFinite(min[0])) {
+    min.fill(0)
+    max.fill(0)
+  }
 
   // The binary buffer: [positions f32][colors u8×4?][uvs f32×2?][indices u32][images?],
   // each section 4-byte aligned.
   const align4 = (n) => (n + 3) & ~3
   const sections = []
   let binLen = 0
-  const section = (byteLength) => { const off = binLen; sections.push({ off, byteLength }); binLen += align4(byteLength); return off }
+  const section = (byteLength) => {
+    const off = binLen
+    sections.push({ off, byteLength })
+    binLen += align4(byteLength)
+    return off
+  }
   const posOff = section(nV * 12)
   const colOff = hasCol ? section(nV * 4) : 0
   const uvOff = textured ? section(nV * 8) : 0
@@ -473,7 +715,11 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
     asset: { version: '2.0', generator: 'websfm' },
     scene: 0,
     scenes: [{ nodes: [0] }],
-    nodes: [translation ? { mesh: 0, translation: yUp ? [translation[0], translation[2], -translation[1]] : [...translation] } : { mesh: 0 }],
+    nodes: [
+      translation
+        ? { mesh: 0, translation: yUp ? [translation[0], translation[2], -translation[1]] : [...translation] }
+        : { mesh: 0 },
+    ],
     meshes: [{ primitives: [] }],
     accessors,
     bufferViews,
@@ -492,14 +738,21 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
     })
     gltf.textures = texture.pages.map((_, k) => ({ sampler: 0, source: k }))
     gltf.materials = texture.pages.map((_, k) => ({
-      name: `atlas-${k}`, doubleSided: true,
+      name: `atlas-${k}`,
+      doubleSided: true,
       pbrMetallicRoughness: { baseColorTexture: { index: k }, metallicFactor: 0, roughnessFactor: 1 },
       extensions: { KHR_materials_unlit: {} },
     }))
     for (const g of texture.groups) {
       if (!g.count) continue
       gltf.meshes[0].primitives.push({ attributes, indices: accessors.length, material: g.page, mode: 4 })
-      accessors.push({ bufferView: idxView, byteOffset: g.start * 12, componentType: 5125, count: g.count * 3, type: 'SCALAR' })
+      accessors.push({
+        bufferView: idxView,
+        byteOffset: g.start * 12,
+        componentType: 5125,
+        count: g.count * 3,
+        type: 'SCALAR',
+      })
     }
   }
 
@@ -507,13 +760,17 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
   const enc = new TextEncoder()
   let jsonBytes = enc.encode(JSON.stringify(gltf))
   const jsonPad = (4 - (jsonBytes.length & 3)) & 3
-  if (jsonPad) { const p = new Uint8Array(jsonBytes.length + jsonPad).fill(0x20); p.set(jsonBytes); jsonBytes = p }
+  if (jsonPad) {
+    const p = new Uint8Array(jsonBytes.length + jsonPad).fill(0x20)
+    p.set(jsonBytes)
+    jsonBytes = p
+  }
   const total = 12 + 8 + jsonBytes.length + 8 + binLen
   const head = new Uint8Array(20 + jsonBytes.length + 8)
   const dv = new DataView(head.buffer)
   dv.setUint32(0, 0x46546c67, true) // 'glTF'
-  dv.setUint32(4, 2, true)          // version
-  dv.setUint32(8, total, true)      // total length
+  dv.setUint32(4, 2, true) // version
+  dv.setUint32(8, total, true) // total length
   dv.setUint32(12, jsonBytes.length, true)
   dv.setUint32(16, 0x4e4f534a, true) // 'JSON'
   head.set(jsonBytes, 20)
@@ -523,26 +780,52 @@ export function* meshToGlbParts(mesh, { color = true, texture = null, origin = n
   yield head
 
   const pad = (bytes) => (align4(bytes) > bytes ? [new Uint8Array(align4(bytes) - bytes)] : [])
-  yield* recordParts(nV, 12, (bv, o, i) => {
-    const p = at(i)
-    bv.setFloat32(o, p[0], true); bv.setFloat32(o + 4, p[1], true); bv.setFloat32(o + 8, p[2], true)
-  }, partBytes)
+  yield* recordParts(
+    nV,
+    12,
+    (bv, o, i) => {
+      const p = at(i)
+      bv.setFloat32(o, p[0], true)
+      bv.setFloat32(o + 4, p[1], true)
+      bv.setFloat32(o + 8, p[2], true)
+    },
+    partBytes,
+  )
   yield* pad(nV * 12)
   if (hasCol) {
-    yield* recordParts(nV, 4, (bv, o, i, bin) => {
-      bin[o] = byte(mesh.col[i*3]); bin[o+1] = byte(mesh.col[i*3+1])
-      bin[o+2] = byte(mesh.col[i*3+2]); bin[o+3] = 255
-    }, partBytes)
+    yield* recordParts(
+      nV,
+      4,
+      (bv, o, i, bin) => {
+        bin[o] = byte(mesh.col[i * 3])
+        bin[o + 1] = byte(mesh.col[i * 3 + 1])
+        bin[o + 2] = byte(mesh.col[i * 3 + 2])
+        bin[o + 3] = 255
+      },
+      partBytes,
+    )
     yield* pad(nV * 4)
   }
   if (textured) {
-    yield* recordParts(nV, 8, (bv, o, i) => { bv.setFloat32(o, mesh.uv[i * 2], true); bv.setFloat32(o + 4, mesh.uv[i * 2 + 1], true) }, partBytes)
+    yield* recordParts(
+      nV,
+      8,
+      (bv, o, i) => {
+        bv.setFloat32(o, mesh.uv[i * 2], true)
+        bv.setFloat32(o + 4, mesh.uv[i * 2 + 1], true)
+      },
+      partBytes,
+    )
     yield* pad(nV * 8)
   }
   yield* recordParts(nIdx, 4, (bv, o, i) => bv.setUint32(o, mesh.idx[i], true), partBytes)
   yield* pad(nIdx * 4)
   if (textured) {
-    for (const p of texture.pages) if (!p.uri) { yield p.bytes; yield* pad(p.bytes.length) }
+    for (const p of texture.pages)
+      if (!p.uri) {
+        yield p.bytes
+        yield* pad(p.bytes.length)
+      }
   }
 }
 
@@ -567,7 +850,10 @@ export function reconstructionToJson(cameras, points, crs = 'local', { tracks = 
     })),
     points: lazyArray(points.length, (i) => {
       const views = []
-      if (tracks) points.forEachView(i, (uuid, kp) => { views.push([uuid, kp]) })
+      if (tracks)
+        points.forEachView(i, (uuid, kp) => {
+          views.push([uuid, kp])
+        })
       return { x: points.x(i), y: points.y(i), z: points.z(i), color: points.colorAt(i), views }
     }),
   }
@@ -599,13 +885,18 @@ export function* demToAsciiGridParts(dem, { nodata = -9999, partChars = PART_CHA
     `NODATA_value ${nodata}\n`
   // Row 0 is the northernmost (top) row, which is exactly what ASCII grid wants.
   const row = new Array(width)
-  yield* lineParts(head, height, (r) => {
-    for (let c = 0; c < width; c++) {
-      const v = data[r * width + c]
-      row[c] = Number.isFinite(v) ? v : nodata
-    }
-    return row.join(' ')
-  }, { emptyBody: '\n', partChars })
+  yield* lineParts(
+    head,
+    height,
+    (r) => {
+      for (let c = 0; c < width; c++) {
+        const v = data[r * width + c]
+        row[c] = Number.isFinite(v) ? v : nodata
+      }
+      return row.join(' ')
+    },
+    { emptyBody: '\n', partChars },
+  )
 }
 
 // ── DEM → GeoTIFF (single-band float32) ──────────────────────────────────────
@@ -621,12 +912,18 @@ export async function demToGeoTiff(dem, { crs = {}, nodata = -9999, deflate = nu
   for (let i = 0; i < buf.length; i++) buf[i] = Number.isFinite(data[i]) ? data[i] : nodata
   let strip = new Uint8Array(buf.buffer)
   let compression = 1
-  if (deflate) { strip = await deflate(strip); compression = 8 }
+  if (deflate) {
+    strip = await deflate(strip)
+    compression = 8
+  }
   return writeGeoTiff({
-    width, height,
+    width,
+    height,
     samples: [{ bits: 32, format: 3 }],
-    photometric: 1, extraSamples: null,
-    data: strip, compression,
+    photometric: 1,
+    extraSamples: null,
+    data: strip,
+    compression,
     pixelScale: [gsd, gsd, 0],
     tiepoint: [0, 0, 0, originX, originY, 0],
     geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
@@ -643,18 +940,24 @@ export async function demToCog(dem, { crs = {}, nodata = -9999, deflate = null, 
   const { width, height, gsd, originX, originY, data } = dem
   const buf = new Float32Array(width * height)
   for (let i = 0; i < buf.length; i++) buf[i] = Number.isFinite(data[i]) ? data[i] : nodata
-  return writeCogDeflate({
-    width, height,
-    samples: [{ bits: 32, format: 3 }],
-    photometric: 1, extraSamples: null,
-    // A COG writer needs the TypedArray, not packed bytes: it has to interpret
-    // pixels to tile them and to box-average the overviews.
-    data: buf, tileSize,
-    pixelScale: [gsd, gsd, 0],
-    tiepoint: [0, 0, 0, originX, originY, 0],
-    geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
-    gdalNoData: nodata,
-  }, deflate)
+  return writeCogDeflate(
+    {
+      width,
+      height,
+      samples: [{ bits: 32, format: 3 }],
+      photometric: 1,
+      extraSamples: null,
+      // A COG writer needs the TypedArray, not packed bytes: it has to interpret
+      // pixels to tile them and to box-average the overviews.
+      data: buf,
+      tileSize,
+      pixelScale: [gsd, gsd, 0],
+      tiepoint: [0, 0, 0, originX, originY, 0],
+      geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
+      gdalNoData: nodata,
+    },
+    deflate,
+  )
 }
 
 // ── Ortho → GeoTIFF (RGBA) ───────────────────────────────────────────────────
@@ -665,12 +968,18 @@ export async function orthoToGeoTiff(ortho, geo, { crs = {}, deflate = null } = 
   const { gsd, originX, originY } = geo
   let strip = rgba instanceof Uint8Array ? rgba : new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength)
   let compression = 1
-  if (deflate) { strip = await deflate(strip); compression = 8 }
+  if (deflate) {
+    strip = await deflate(strip)
+    compression = 8
+  }
   return writeGeoTiff({
-    width, height,
+    width,
+    height,
     samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
-    photometric: 2, extraSamples: [2], // unassociated alpha
-    data: strip, compression,
+    photometric: 2,
+    extraSamples: [2], // unassociated alpha
+    data: strip,
+    compression,
     pixelScale: [gsd, gsd, 0],
     tiepoint: [0, 0, 0, originX, originY, 0],
     geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
@@ -691,12 +1000,14 @@ export const MAX_ORTHO_IMAGE_CELLS = 8192 * 8192
 // are the CENTRE of the upper-left pixel (world-file convention).
 export function rasterWorldFile(geo) {
   const { gsd, originX, originY } = geo
-  return [
-    gsd,               // A: x pixel size
-    0,                 // D: rotation (y)
-    0,                 // B: rotation (x)
-    -gsd,              // E: y pixel size (negative: rows go south)
-    originX + gsd / 2, // C: x of upper-left pixel centre
-    originY - gsd / 2, // F: y of upper-left pixel centre
-  ].join('\n') + '\n'
+  return (
+    [
+      gsd, // A: x pixel size
+      0, // D: rotation (y)
+      0, // B: rotation (x)
+      -gsd, // E: y pixel size (negative: rows go south)
+      originX + gsd / 2, // C: x of upper-left pixel centre
+      originY - gsd / 2, // F: y of upper-left pixel centre
+    ].join('\n') + '\n'
+  )
 }

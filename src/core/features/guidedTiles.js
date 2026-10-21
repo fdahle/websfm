@@ -26,7 +26,8 @@ import { planTiles } from './tiling.js'
 function mulberry32(seed) {
   let a = seed >>> 0
   return function () {
-    a |= 0; a = (a + 0x6d2b79f5) | 0
+    a |= 0
+    a = (a + 0x6d2b79f5) | 0
     let t = Math.imul(a ^ (a >>> 15), 1 | a)
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
@@ -45,9 +46,14 @@ export function applyHomography(H, x, y) {
 // as a flat-9 array. Well-conditioned homography DLT needs this on pixel coords.
 function normalizePoints(pts) {
   const n = pts.length
-  let cx = 0, cy = 0
-  for (const [x, y] of pts) { cx += x; cy += y }
-  cx /= n; cy /= n
+  let cx = 0,
+    cy = 0
+  for (const [x, y] of pts) {
+    cx += x
+    cy += y
+  }
+  cx /= n
+  cy /= n
   let meanDist = 0
   for (const [x, y] of pts) meanDist += Math.hypot(x - cx, y - cy)
   meanDist /= n
@@ -61,23 +67,29 @@ function normalizePoints(pts) {
 function matMul3(A, B) {
   const C = new Array(9).fill(0)
   for (let r = 0; r < 3; r++)
-    for (let c = 0; c < 3; c++)
-      for (let k = 0; k < 3; k++)
-        C[r * 3 + c] += A[r * 3 + k] * B[k * 3 + c]
+    for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) C[r * 3 + c] += A[r * 3 + k] * B[k * 3 + c]
   return C
 }
 
 // Inverse of a 3×3 flat-9 matrix, or null if singular.
 function inv3(m) {
   const [a, b, c, d, e, f, g, h, i] = m
-  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g
+  const A = e * i - f * h,
+    B = -(d * i - f * g),
+    C = d * h - e * g
   const det = a * A + b * B + c * C
   if (Math.abs(det) < 1e-12) return null
   const id = 1 / det
   return [
-    A * id, (c * h - b * i) * id, (b * f - c * e) * id,
-    B * id, (a * i - c * g) * id, (c * d - a * f) * id,
-    C * id, (b * g - a * h) * id, (a * e - b * d) * id,
+    A * id,
+    (c * h - b * i) * id,
+    (b * f - c * e) * id,
+    B * id,
+    (a * i - c * g) * id,
+    (c * d - a * f) * id,
+    C * id,
+    (b * g - a * h) * id,
+    (a * e - b * d) * id,
   ]
 }
 
@@ -88,15 +100,25 @@ function solveLinear(M, v, n) {
   const b = v.slice()
   for (let col = 0; col < n; col++) {
     // partial pivot
-    let piv = col, best = Math.abs(a[col * n + col])
+    let piv = col,
+      best = Math.abs(a[col * n + col])
     for (let r = col + 1; r < n; r++) {
       const val = Math.abs(a[r * n + col])
-      if (val > best) { best = val; piv = r }
+      if (val > best) {
+        best = val
+        piv = r
+      }
     }
     if (best < 1e-12) return null
     if (piv !== col) {
-      for (let k = 0; k < n; k++) { const t = a[col * n + k]; a[col * n + k] = a[piv * n + k]; a[piv * n + k] = t }
-      const t = b[col]; b[col] = b[piv]; b[piv] = t
+      for (let k = 0; k < n; k++) {
+        const t = a[col * n + k]
+        a[col * n + k] = a[piv * n + k]
+        a[piv * n + k] = t
+      }
+      const t = b[col]
+      b[col] = b[piv]
+      b[piv] = t
     }
     const inv = 1 / a[col * n + col]
     for (let r = 0; r < n; r++) {
@@ -165,8 +187,12 @@ export function estimateHomographyRansac(ptsA, ptsB, { threshPx = 3, iters = 500
     let cnt = 0
     for (let i = 0; i < n; i++) {
       const [px, py] = applyHomography(H, ptsA[i][0], ptsA[i][1])
-      const dx = px - ptsB[i][0], dy = py - ptsB[i][1]
-      if (dx * dx + dy * dy <= t2) { mask[i] = 1; cnt++ }
+      const dx = px - ptsB[i][0],
+        dy = py - ptsB[i][1]
+      if (dx * dx + dy * dy <= t2) {
+        mask[i] = 1
+        cnt++
+      }
     }
     return { mask, cnt }
   }
@@ -178,22 +204,42 @@ export function estimateHomographyRansac(ptsA, ptsB, { threshPx = 3, iters = 500
     // 4 distinct random indices
     for (let s = 0; s < 4; s++) {
       let r
-      do { r = Math.floor(rng() * n) } while (idx.slice(0, s).includes(r))
+      do {
+        r = Math.floor(rng() * n)
+      } while (idx.slice(0, s).includes(r))
       idx[s] = r
     }
-    const Hn = homographyDLT(idx.map((i) => nA[i]), idx.map((i) => nB[i]))
+    const Hn = homographyDLT(
+      idx.map((i) => nA[i]),
+      idx.map((i) => nB[i]),
+    )
     if (!Hn) continue
     const H = denorm(Hn)
     const { mask, cnt } = countInliers(H)
-    if (cnt > bestCnt) { bestCnt = cnt; bestMask = mask }
+    if (cnt > bestCnt) {
+      bestCnt = cnt
+      bestMask = mask
+    }
   }
   if (!bestMask || bestCnt < 4) return null
 
   // Refit on the full consensus set (in normalized space), then re-classify.
-  const inA = [], inB = []
-  for (let i = 0; i < n; i++) if (bestMask[i]) { inA.push(nA[i]); inB.push(nB[i]) }
+  const inA = [],
+    inB = []
+  for (let i = 0; i < n; i++)
+    if (bestMask[i]) {
+      inA.push(nA[i])
+      inB.push(nB[i])
+    }
   const HnRefit = homographyDLT(inA, inB)
-  const H = HnRefit ? denorm(HnRefit) : denorm(homographyDLT(idx.map((i) => nA[i]), idx.map((i) => nB[i])))
+  const H = HnRefit
+    ? denorm(HnRefit)
+    : denorm(
+        homographyDLT(
+          idx.map((i) => nA[i]),
+          idx.map((i) => nB[i]),
+        ),
+      )
   if (!H) return null
   const { mask, cnt } = countInliers(H)
   if (cnt < 4) return null
@@ -238,9 +284,15 @@ export function planGuidedTiles({ wA, hA, wB, hB, H, tileSize, marginPx, overlap
   const out = []
   for (const t of tiles) {
     const corners = [
-      [t.x, t.y], [t.x + t.w, t.y], [t.x, t.y + t.h], [t.x + t.w, t.y + t.h],
+      [t.x, t.y],
+      [t.x + t.w, t.y],
+      [t.x, t.y + t.h],
+      [t.x + t.w, t.y + t.h],
     ]
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity
     for (const [cx, cy] of corners) {
       const [px, py] = applyHomography(H, cx, cy)
       if (px < minX) minX = px
@@ -260,10 +312,12 @@ export function planGuidedTiles({ wA, hA, wB, hB, H, tileSize, marginPx, overlap
 // cap still keeps the strongest.
 export function kptIndicesInRect(kps, rect) {
   const { x, y, w, h } = rect
-  const x1 = x + w, y1 = y + h
+  const x1 = x + w,
+    y1 = y + h
   const out = []
   for (let i = 0; i < kps.length; i++) {
-    const kx = kps.x(i), ky = kps.y(i) // typed keypoints (core/features/keypoints.js)
+    const kx = kps.x(i),
+      ky = kps.y(i) // typed keypoints (core/features/keypoints.js)
     if (kx >= x && kx < x1 && ky >= y && ky < y1) out.push(i)
   }
   return out

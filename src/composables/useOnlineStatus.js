@@ -9,6 +9,10 @@ import { ref } from 'vue'
 export const online = ref(typeof navigator === 'undefined' ? true : navigator.onLine !== false)
 
 if (typeof window !== 'undefined') {
-  window.addEventListener('online', () => { online.value = true })
-  window.addEventListener('offline', () => { online.value = false })
+  window.addEventListener('online', () => {
+    online.value = true
+  })
+  window.addEventListener('offline', () => {
+    online.value = false
+  })
 }

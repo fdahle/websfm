@@ -1,4 +1,10 @@
-import { parseColmapModelBin, parseColmapModel, readColmapModel, makeNameResolver, colmapToSparse } from '../../core/io/colmapModel.js'
+import {
+  parseColmapModelBin,
+  parseColmapModel,
+  readColmapModel,
+  makeNameResolver,
+  colmapToSparse,
+} from '../../core/io/colmapModel.js'
 import { markRaw } from 'vue'
 import { nounFor, pluralize } from '../../core/textFormat.js'
 
@@ -8,7 +14,14 @@ import { nounFor, pluralize } from '../../core/textFormat.js'
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createImporters({
-  clouds, images, log, mainSparseCloud, mainSparseId, makeCloudId, save, selectedCloudId,
+  clouds,
+  images,
+  log,
+  mainSparseCloud,
+  mainSparseId,
+  makeCloudId,
+  save,
+  selectedCloudId,
   upsertSparseCloud,
 }) {
   // Import a COLMAP sparse model (text OR binary) as a NEW sparse cloud (never
@@ -35,22 +48,38 @@ export function createImporters({
     }
 
     const resolve = makeNameResolver(images.value.map((im) => ({ uuid: im.uuid, name: im.name })))
-    const { cameras, points, matched, unmatched } = colmapToSparse(
-      { images: colImages, points: colPoints }, resolve)
+    const { cameras, points, matched, unmatched } = colmapToSparse({ images: colImages, points: colPoints }, resolve)
 
-    log(`COLMAP import: matched ${matched.length}/${colImages.length} images by name`
-      + `, ${points.length}/${colPoints.length} points`, 'info', 'Reconstruction')
+    log(
+      `COLMAP import: matched ${matched.length}/${colImages.length} images by name` +
+        `, ${points.length}/${colPoints.length} points`,
+      'info',
+      'Reconstruction',
+    )
     if (unmatched.length) {
-      log(`COLMAP import: ${pluralize(unmatched.length, 'image')} not in this project (skipped): `
-        + unmatched.slice(0, 8).join(', ') + (unmatched.length > 8 ? '…' : ''), 'warn', 'Reconstruction')
+      log(
+        `COLMAP import: ${pluralize(unmatched.length, 'image')} not in this project (skipped): ` +
+          unmatched.slice(0, 8).join(', ') +
+          (unmatched.length > 8 ? '…' : ''),
+        'warn',
+        'Reconstruction',
+      )
     }
     if (droppedDistortion.length) {
-      log(`COLMAP import: dropped distortion of ${nounFor(droppedDistortion.length, 'camera')} ${droppedDistortion.join(', ')} `
-        + '— intrinsics read as pinhole (fx/fy/cx/cy)', 'warn', 'Reconstruction')
+      log(
+        `COLMAP import: dropped distortion of ${nounFor(droppedDistortion.length, 'camera')} ${droppedDistortion.join(', ')} ` +
+          '— intrinsics read as pinhole (fx/fy/cx/cy)',
+        'warn',
+        'Reconstruction',
+      )
     }
     if (cameras.size < 2) {
-      log('COLMAP import: fewer than 2 images matched the loaded set — nothing to import. '
-        + 'Load the matching images first (names must correspond).', 'warn', 'Reconstruction')
+      log(
+        'COLMAP import: fewer than 2 images matched the loaded set — nothing to import. ' +
+          'Load the matching images first (names must correspond).',
+        'warn',
+        'Reconstruction',
+      )
       return false
     }
 
@@ -60,8 +89,12 @@ export function createImporters({
       name: 'Imported (COLMAP)',
       imported: true,
     })
-    log(`COLMAP import: added sparse cloud (${cameras.size} cameras, ${points.length} points)`
-      + `${mainSparseId.value === selectedCloudId.value ? ' — set as main' : ''}`, 'success', 'Reconstruction')
+    log(
+      `COLMAP import: added sparse cloud (${cameras.size} cameras, ${points.length} points)` +
+        `${mainSparseId.value === selectedCloudId.value ? ' — set as main' : ''}`,
+      'success',
+      'Reconstruction',
+    )
     save()
     return true
   }
@@ -70,17 +103,41 @@ export function createImporters({
     const resolve = makeNameResolver(images.value.map((im) => ({ uuid: im.uuid, name: im.name })))
     const loadedByUuid = new Map(images.value.map((im) => [im.uuid, im]))
     const normalizedImages = (model.images ?? []).map((im) => {
-      const uuid = resolve(im.name), loaded = loadedByUuid.get(uuid)
-      const width = im.width ?? loaded?.meta?.width ?? null, height = im.height ?? loaded?.meta?.height ?? null
-      return { ...im, width, height, K: { fx: im.K?.fx, fy: im.K?.fy ?? im.K?.fx, cx: im.K?.cx ?? (width ? width / 2 : 0), cy: im.K?.cy ?? (height ? height / 2 : 0) } }
+      const uuid = resolve(im.name),
+        loaded = loadedByUuid.get(uuid)
+      const width = im.width ?? loaded?.meta?.width ?? null,
+        height = im.height ?? loaded?.meta?.height ?? null
+      return {
+        ...im,
+        width,
+        height,
+        K: {
+          fx: im.K?.fx,
+          fy: im.K?.fy ?? im.K?.fx,
+          cx: im.K?.cx ?? (width ? width / 2 : 0),
+          cy: im.K?.cy ?? (height ? height / 2 : 0),
+        },
+      }
     })
-    const { cameras, points, matched, unmatched } = colmapToSparse({ images: normalizedImages, points: model.points ?? [] }, resolve)
+    const { cameras, points, matched, unmatched } = colmapToSparse(
+      { images: normalizedImages, points: model.points ?? [] },
+      resolve,
+    )
     if (cameras.size < 2) {
       log(`${model.format} import: fewer than 2 cameras match loaded images`, 'warn', 'Reconstruction')
       return false
     }
-    upsertSparseCloud(cameras, points, { replaceId: null, asMain: !mainSparseCloud.value, name: `Imported (${model.format})`, imported: true })
-    log(`${model.format} import: ${matched.length} cameras, ${points.length} points${unmatched.length ? `, ${unmatched.length} unmatched` : ''}`, 'success', 'Reconstruction')
+    upsertSparseCloud(cameras, points, {
+      replaceId: null,
+      asMain: !mainSparseCloud.value,
+      name: `Imported (${model.format})`,
+      imported: true,
+    })
+    log(
+      `${model.format} import: ${matched.length} cameras, ${points.length} points${unmatched.length ? `, ${unmatched.length} unmatched` : ''}`,
+      'success',
+      'Reconstruction',
+    )
     save()
     return true
   }
@@ -116,13 +173,19 @@ export function createImporters({
     }
     clouds.value.push(cloud)
     selectedCloudId.value = cloud.id
-    log(`Cloud import: added "${cloud.name}" — ${n.toLocaleString()} ${isMesh ? `vertices, ${parsed.count.toLocaleString()} triangles` : 'points'}`
-      + `${parsed.col ? ', color' : ''}${parsed.nrm ? ', normals' : ''}`, 'success', 'Reconstruction')
+    log(
+      `Cloud import: added "${cloud.name}" — ${n.toLocaleString()} ${isMesh ? `vertices, ${parsed.count.toLocaleString()} triangles` : 'points'}` +
+        `${parsed.col ? ', color' : ''}${parsed.nrm ? ', normals' : ''}`,
+      'success',
+      'Reconstruction',
+    )
     save()
     return true
   }
 
   return {
-    importColmapModel, importInteropModel, importCloud,
+    importColmapModel,
+    importInteropModel,
+    importCloud,
   }
 }

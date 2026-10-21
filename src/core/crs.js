@@ -57,7 +57,12 @@ export const CRS_CATALOG = [
     extent: [-4194304, -4194304, 4194304, 4194304],
     worldExtent: [-180, -90, 180, -50],
     basemap: 'gibs',
-    gibs: { endpoint: 'https://gibs.earthdata.nasa.gov/wmts/epsg3031/best/wmts.cgi', layer: 'SCAR_Land_Water_Map', matrixSet: '250m', format: 'image/png' },
+    gibs: {
+      endpoint: 'https://gibs.earthdata.nasa.gov/wmts/epsg3031/best/wmts.cgi',
+      layer: 'SCAR_Land_Water_Map',
+      matrixSet: '250m',
+      format: 'image/png',
+    },
   },
   {
     code: 'EPSG:3413',
@@ -68,7 +73,12 @@ export const CRS_CATALOG = [
     extent: [-4194304, -4194304, 4194304, 4194304],
     worldExtent: [-180, 30, 180, 90],
     basemap: 'gibs',
-    gibs: { endpoint: 'https://gibs.earthdata.nasa.gov/wmts/epsg3413/best/wmts.cgi', layer: 'BlueMarble_ShadedRelief_Bathymetry', matrixSet: '500m', format: 'image/jpeg' },
+    gibs: {
+      endpoint: 'https://gibs.earthdata.nasa.gov/wmts/epsg3413/best/wmts.cgi',
+      layer: 'BlueMarble_ShadedRelief_Bathymetry',
+      matrixSet: '500m',
+      format: 'image/jpeg',
+    },
   },
   {
     code: 'EPSG:32632',
@@ -84,8 +94,10 @@ const catalogByCode = new Map(CRS_CATALOG.map((c) => [c.code, c]))
 const dynamicInfoByCode = new Map()
 
 export function crsInfo(code) {
-  return catalogByCode.get(code) || dynamicInfoByCode.get(code)
-    || { code, name: code, geographic: false, axes: ['X', 'Y', 'Z'], basemap: 'osm' }
+  return (
+    catalogByCode.get(code) ||
+    dynamicInfoByCode.get(code) || { code, name: code, geographic: false, axes: ['X', 'Y', 'Z'], basemap: 'osm' }
+  )
 }
 
 export function axisLabels(code) {
@@ -110,7 +122,11 @@ export function isGeographic(code) {
 export function metresPerCrsUnit(code) {
   if (isGeographic(code)) return null
   let projection
-  try { projection = new proj4.Proj(code) } catch { return null }
+  try {
+    projection = new proj4.Proj(code)
+  } catch {
+    return null
+  }
   if (Number.isFinite(projection.to_meter) && projection.to_meter > 0) return projection.to_meter
   if (projection.units === 'm' || projection.units === 'meter' || projection.units === 'metre') return 1
   // proj4's default linear unit for a projected definition is metres, but the
@@ -144,7 +160,10 @@ const registered = new Set(['EPSG:4326', 'EPSG:3857'])
 // itself (the raster warp): it cannot reach the catalog, the OPFS cache or epsg.io.
 const defStrings = new Map([
   ['EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs'],
-  ['EPSG:3857', '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs'],
+  [
+    'EPSG:3857',
+    '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs',
+  ],
 ])
 
 // Cache for definitions fetched from epsg.io, persisted in OPFS across reloads.
@@ -191,17 +210,33 @@ function utmWorldExtent(def) {
 function projectExtent(world, code) {
   const [w, s, e, n] = world
   const samples = [
-    [w, s], [w, n], [e, s], [e, n],
-    [(w + e) / 2, s], [(w + e) / 2, n], [w, (s + n) / 2], [e, (s + n) / 2],
+    [w, s],
+    [w, n],
+    [e, s],
+    [e, n],
+    [(w + e) / 2, s],
+    [(w + e) / 2, n],
+    [w, (s + n) / 2],
+    [e, (s + n) / 2],
   ]
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, ok = false
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity,
+    ok = false
   for (const pt of samples) {
     let x, y
-    try { [x, y] = proj4('EPSG:4326', code, pt) } catch { continue }
+    try {
+      ;[x, y] = proj4('EPSG:4326', code, pt)
+    } catch {
+      continue
+    }
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue
     ok = true
-    minX = Math.min(minX, x); minY = Math.min(minY, y)
-    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y)
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x)
+    maxY = Math.max(maxY, y)
   }
   return ok ? [minX, minY, maxX, maxY] : null
 }
@@ -250,13 +285,22 @@ export async function ensureProjection(code, supplied = null) {
   }
 
   const cat = catalogByCode.get(code)
-  if (cat?.def) { applyDef(code, cat.def, { extent: cat.extent, worldExtent: cat.worldExtent }); return true }
+  if (cat?.def) {
+    applyDef(code, cat.def, { extent: cat.extent, worldExtent: cat.worldExtent })
+    return true
+  }
 
   const utm = utmDef(code)
-  if (utm) { applyDef(code, utm); return true }
+  if (utm) {
+    applyDef(code, utm)
+    return true
+  }
 
   const cache = await loadDefCache()
-  if (cache[code]) { applyDef(code, cache[code]); return true }
+  if (cache[code]) {
+    applyDef(code, cache[code])
+    return true
+  }
 
   // The bundled EPSG catalog (the CRS picker's index) covers nearly every code and
   // works offline; it also carries the name and area of use.
@@ -271,8 +315,10 @@ export async function ensureProjection(code, supplied = null) {
   try {
     res = await fetch(`https://epsg.io/${num}.proj4`)
   } catch {
-    throw new Error(`${code} is not in the built-in catalog and could not be looked up on epsg.io. `
-      + 'If you are offline, connect once to fetch it; it is remembered afterwards.')
+    throw new Error(
+      `${code} is not in the built-in catalog and could not be looked up on epsg.io. ` +
+        'If you are offline, connect once to fetch it; it is remembered afterwards.',
+    )
   }
   if (!res.ok) throw new Error(`Could not resolve ${code} (epsg.io ${res.status})`)
   const def = (await res.text()).trim()

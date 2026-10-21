@@ -19,16 +19,24 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
   const workers = new Map() // sessionId → { url, peak }
   const pending = new Map()
   let nextId = 1
-  const send = (sessionId, method, params = {}) => new Promise((resolve) => {
-    const id = nextId++
-    pending.set(id, resolve)
-    cdp.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) })
-      .catch(() => { pending.delete(id); resolve(null) })
-  })
+  const send = (sessionId, method, params = {}) =>
+    new Promise((resolve) => {
+      const id = nextId++
+      pending.set(id, resolve)
+      cdp
+        .send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) })
+        .catch(() => {
+          pending.delete(id)
+          resolve(null)
+        })
+    })
   cdp.on('Target.receivedMessageFromTarget', ({ message }) => {
     const m = JSON.parse(message)
     const done = pending.get(m.id)
-    if (done) { pending.delete(m.id); done(m.result ?? null) }
+    if (done) {
+      pending.delete(m.id)
+      done(m.result ?? null)
+    }
   })
   cdp.on('Target.attachedToTarget', ({ sessionId, targetInfo, waitingForDebugger }) => {
     if (targetInfo.type !== 'worker') return
@@ -40,23 +48,32 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
   // Playwright's page session without touching its own (flat) attachment.
   await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: false })
 
-  let segPeak = 0, segWorker = null, segPeakBuf = 0
+  let segPeak = 0,
+    segWorker = null,
+    segPeakBuf = 0
   const segments = [] // { label, peakBytes, peakWithBuffersBytes, worker }
   let busy = false
   const timer = setInterval(async () => {
     if (busy) return
     busy = true
     try {
-      await Promise.all([...workers].map(async ([sessionId, w]) => {
-        const r = await send(sessionId, 'Runtime.getHeapUsage')
-        if (!r) return
-        const withBuf = r.usedSize + (r.backingStorageSize ?? 0)
-        if (r.usedSize > w.peak) w.peak = r.usedSize
-        if (withBuf > w.peakWithBuffers) w.peakWithBuffers = withBuf
-        if (r.usedSize > segPeak) { segPeak = r.usedSize; segWorker = sessionId }
-        if (withBuf > segPeakBuf) segPeakBuf = withBuf
-      }))
-    } finally { busy = false }
+      await Promise.all(
+        [...workers].map(async ([sessionId, w]) => {
+          const r = await send(sessionId, 'Runtime.getHeapUsage')
+          if (!r) return
+          const withBuf = r.usedSize + (r.backingStorageSize ?? 0)
+          if (r.usedSize > w.peak) w.peak = r.usedSize
+          if (withBuf > w.peakWithBuffers) w.peakWithBuffers = withBuf
+          if (r.usedSize > segPeak) {
+            segPeak = r.usedSize
+            segWorker = sessionId
+          }
+          if (withBuf > segPeakBuf) segPeakBuf = withBuf
+        }),
+      )
+    } finally {
+      busy = false
+    }
   }, intervalMs)
   timer.unref?.()
 
@@ -64,7 +81,9 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
     // Close the current segment under `label` and start the next one.
     mark(label) {
       segments.push({ label, peakBytes: segPeak, peakWithBuffersBytes: segPeakBuf, worker: segWorker })
-      segPeak = 0; segWorker = null; segPeakBuf = 0
+      segPeak = 0
+      segWorker = null
+      segPeakBuf = 0
     },
     // Segments since the last take(), plus each live worker's overall peak.
     take() {
@@ -75,33 +94,45 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
     // worker's top functions by self time, and the raw profiles for DevTools.
     async profile(seconds, { interval = 1000 } = {}) {
       const ids = [...workers.keys()]
-      await Promise.all(ids.map(async (sid) => {
-        await send(sid, 'Profiler.enable')
-        await send(sid, 'Profiler.setSamplingInterval', { interval })
-        await send(sid, 'Profiler.start')
-      }))
+      await Promise.all(
+        ids.map(async (sid) => {
+          await send(sid, 'Profiler.enable')
+          await send(sid, 'Profiler.setSamplingInterval', { interval })
+          await send(sid, 'Profiler.start')
+        }),
+      )
       await new Promise((r) => setTimeout(r, seconds * 1000))
-      return Promise.all(ids.map(async (sid) => {
-        const r = await send(sid, 'Profiler.stop')
-        const profile = r?.profile
-        const self = new Map()
-        if (profile) {
-          const dt = new Map()
-          for (let i = 1; i < (profile.samples ?? []).length; i++) {
-            dt.set(profile.samples[i], (dt.get(profile.samples[i]) ?? 0) + (profile.timeDeltas[i] ?? 0))
+      return Promise.all(
+        ids.map(async (sid) => {
+          const r = await send(sid, 'Profiler.stop')
+          const profile = r?.profile
+          const self = new Map()
+          if (profile) {
+            const dt = new Map()
+            for (let i = 1; i < (profile.samples ?? []).length; i++) {
+              dt.set(profile.samples[i], (dt.get(profile.samples[i]) ?? 0) + (profile.timeDeltas[i] ?? 0))
+            }
+            for (const n of profile.nodes) {
+              const us = dt.get(n.id) ?? 0
+              if (!us) continue
+              const { functionName, url, lineNumber } = n.callFrame
+              const key = `${functionName || '(anonymous)'} ${url.split('/').pop()}:${lineNumber + 1}`
+              self.set(key, (self.get(key) ?? 0) + us)
+            }
           }
-          for (const n of profile.nodes) {
-            const us = dt.get(n.id) ?? 0
-            if (!us) continue
-            const { functionName, url, lineNumber } = n.callFrame
-            const key = `${functionName || '(anonymous)'} ${url.split('/').pop()}:${lineNumber + 1}`
-            self.set(key, (self.get(key) ?? 0) + us)
+          const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 25)
+          return {
+            worker: workers.get(sid)?.url ?? sid,
+            totalMs: [...self.values()].reduce((a, b) => a + b, 0) / 1000,
+            top,
+            profile,
           }
-        }
-        const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 25)
-        return { worker: workers.get(sid)?.url ?? sid, totalMs: [...self.values()].reduce((a, b) => a + b, 0) / 1000, top, profile }
-      }))
+        }),
+      )
     },
-    async stop() { clearInterval(timer); await cdp.detach().catch(() => {}) },
+    async stop() {
+      clearInterval(timer)
+      await cdp.detach().catch(() => {})
+    },
   }
 }

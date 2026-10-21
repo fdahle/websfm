@@ -1,8 +1,5 @@
 import { computed, shallowRef } from 'vue'
-import {
-  serializeDepthMap,
-  buildDepthIndex, isDepthIndexStale, depthMapBytes,
-} from '../../core/dense/depthMapCodec.js'
+import { serializeDepthMap, buildDepthIndex, isDepthIndexStale, depthMapBytes } from '../../core/dense/depthMapCodec.js'
 import { formatBytes } from '../../core/dense/memBudget.js'
 import * as opfs from '../../utils/opfs.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -37,12 +34,15 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
         depthMapsMeta.value = index.maps
         depthMaps.value = new Map()
       }
-      log(`Dense: ${pluralize(maps.length, 'depth map')} saved (${formatBytes(depthMapBytes(index.maps))}) `
-        + `— reopening this project will not need a Stage A re-run`, 'info', 'Dense')
+      log(
+        `Dense: ${pluralize(maps.length, 'depth map')} saved (${formatBytes(depthMapBytes(index.maps))}) ` +
+          `— reopening this project will not need a Stage A re-run`,
+        'info',
+        'Dense',
+      )
     } catch (err) {
       // Non-fatal: the maps are live in memory, this run still works.
-      log(`Dense: could not save depth maps — ${err?.message ?? err}. They will be lost on reload.`,
-        'warn', 'Dense')
+      log(`Dense: could not save depth maps — ${err?.message ?? err}. They will be lost on reload.`, 'warn', 'Dense')
     }
   }
 
@@ -63,8 +63,9 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
     const projectId = currentProjectId()
     await opfs.beginDepthPlanes(projectId)
     depthMaps.value = new Map()
-    depthMapsMeta.value = []   // the old set is gone; the new one is advertised on commit
-    const metas = [], writes = []
+    depthMapsMeta.value = [] // the old set is gone; the new one is advertised on commit
+    const metas = [],
+      writes = []
     let failure = null
     const settled = async () => {
       await Promise.all(writes)
@@ -76,11 +77,13 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
       add(m) {
         const { meta, buffers } = serializeDepthMap(m)
         metas.push(meta)
-        writes.push(opfs.saveDepthPlane(projectId, m.uuid, buffers).catch((err) => {
-          if (failure) return
-          failure = err
-          onWriteFailure?.(err)
-        }))
+        writes.push(
+          opfs.saveDepthPlane(projectId, m.uuid, buffers).catch((err) => {
+            if (failure) return
+            failure = err
+            onWriteFailure?.(err)
+          }),
+        )
       },
       settled,
       async commit(settings) {
@@ -88,8 +91,12 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
         const index = { ...buildDepthIndex([], { sparseCloud: mainSparseCloud(), settings }), maps: metas }
         await opfs.commitDepthIndex(projectId, index)
         if (currentProjectId() === projectId) depthMapsMeta.value = metas
-        log(`Dense: ${pluralize(metas.length, 'depth map')} saved (${formatBytes(depthMapBytes(metas))}) as they finished `
-          + `— reopening this project will not need a Stage A re-run`, 'info', 'Dense')
+        log(
+          `Dense: ${pluralize(metas.length, 'depth map')} saved (${formatBytes(depthMapBytes(metas))}) as they finished ` +
+            `— reopening this project will not need a Stage A re-run`,
+          'info',
+          'Dense',
+        )
       },
     }
   }
@@ -118,11 +125,17 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
     // In that case this result belongs to the old project and must not touch the
     // shared refs (or delete data based on the new project's sparse model).
     if (!shouldApply()) return false
-    if (!index?.maps?.length) { depthMapsMeta.value = []; return false }
+    if (!index?.maps?.length) {
+      depthMapsMeta.value = []
+      return false
+    }
     if (isDepthIndexStale(index, mainSparseCloud())) {
-      log(`Dense: discarding ${pluralize(index.maps.length, 'saved depth map')} — they belong to an older `
-        + `sparse reconstruction and no longer match the current model; recompute them`,
-        'warn', 'Dense')
+      log(
+        `Dense: discarding ${pluralize(index.maps.length, 'saved depth map')} — they belong to an older ` +
+          `sparse reconstruction and no longer match the current model; recompute them`,
+        'warn',
+        'Dense',
+      )
       depthMapsMeta.value = []
       await opfs.deleteDepthPlanes(projectId).catch(() => {})
       return false
@@ -146,7 +159,8 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
     const projectId = currentProjectId()
     const index = await opfs.loadDepthIndex(projectId)
     if (!index?.maps?.some((m) => m.uuid === uuid) || projectId !== currentProjectId()) return
-    await opfs.commitDepthIndex(projectId, { ...index, maps: index.maps.filter((m) => m.uuid !== uuid) })
+    await opfs
+      .commitDepthIndex(projectId, { ...index, maps: index.maps.filter((m) => m.uuid !== uuid) })
       .catch(() => {})
   }
 
@@ -157,7 +171,14 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
   }
 
   return {
-    depthMaps, depthMapsMeta, depthMapCount,
-    persistDepthMaps, beginStreamedDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps, forgetDepthMap,
+    depthMaps,
+    depthMapsMeta,
+    depthMapCount,
+    persistDepthMaps,
+    beginStreamedDepthMaps,
+    depthMapInput,
+    loadDepthIndexIntoMeta,
+    clearDepthMaps,
+    forgetDepthMap,
   }
 }

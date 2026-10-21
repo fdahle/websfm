@@ -28,10 +28,21 @@ export function zipStore(entries) {
     central.push(zipCentralHeader(nameBytes, { crc, size: e.data.length, offset: off }))
     off += lh.length + e.data.length
   }
-  const all = [...parts, ...central, zipEndRecords(entries.length, off, central.reduce((n, h) => n + h.length, 0))]
+  const all = [
+    ...parts,
+    ...central,
+    zipEndRecords(
+      entries.length,
+      off,
+      central.reduce((n, h) => n + h.length, 0),
+    ),
+  ]
   const out = new Uint8Array(all.reduce((s, p) => s + p.length, 0))
   let o = 0
-  for (const p of all) { out.set(p, o); o += p.length }
+  for (const p of all) {
+    out.set(p, o)
+    o += p.length
+  }
   return out
 }
 
@@ -47,8 +58,9 @@ export async function zipParts(entries) {
     const nameBytes = enc.encode(e.name)
     let data, size, crc
     if (typeof Blob !== 'undefined' && e.data instanceof Blob) {
-      data = [e.data]; size = e.data.size
-      crc = e.crc ?? await crc32Blob(e.data)
+      data = [e.data]
+      size = e.data.size
+      crc = e.crc ?? (await crc32Blob(e.data))
     } else {
       data = byteParts(e.data, enc)
       size = data.reduce((s, p) => s + p.length, 0)
@@ -60,7 +72,14 @@ export async function zipParts(entries) {
     central.push(zipCentralHeader(nameBytes, { crc, size, offset: off }))
     off += lh.length + size
   }
-  out.push(...central, zipEndRecords(entries.length, off, central.reduce((n, h) => n + h.length, 0)))
+  out.push(
+    ...central,
+    zipEndRecords(
+      entries.length,
+      off,
+      central.reduce((n, h) => n + h.length, 0),
+    ),
+  )
   return out
 }
 
@@ -71,7 +90,8 @@ export async function zipParts(entries) {
 export function zipStream() {
   const enc = new TextEncoder()
   const central = []
-  let off = 0, cdSize = 0
+  let off = 0,
+    cdSize = 0
   return {
     add(name, data) {
       const bytes = typeof data === 'string' ? enc.encode(data) : data
@@ -85,7 +105,9 @@ export function zipStream() {
       return [lh, bytes]
     },
     finish: () => [...central, zipEndRecords(central.length, off, cdSize)],
-    get entries() { return central.length },
+    get entries() {
+      return central.length
+    },
   }
 }
 
@@ -172,10 +194,14 @@ export function zipEndRecords(count, cdOffset, cdSize, { zip64 = false } = {}) {
   if (z) {
     dv.setUint32(0, 0x06064b50, true) // zip64 end of central directory record
     dv.setBigUint64(4, 44n, true) // size of the rest of this record
-    dv.setUint16(12, 45, true); dv.setUint16(14, 45, true)
-    dv.setUint32(16, 0, true); dv.setUint32(20, 0, true) // disk numbers
-    dv.setBigUint64(24, BigInt(count), true); dv.setBigUint64(32, BigInt(count), true)
-    dv.setBigUint64(40, BigInt(cdSize), true); dv.setBigUint64(48, BigInt(cdOffset), true)
+    dv.setUint16(12, 45, true)
+    dv.setUint16(14, 45, true)
+    dv.setUint32(16, 0, true)
+    dv.setUint32(20, 0, true) // disk numbers
+    dv.setBigUint64(24, BigInt(count), true)
+    dv.setBigUint64(32, BigInt(count), true)
+    dv.setBigUint64(40, BigInt(cdSize), true)
+    dv.setBigUint64(48, BigInt(cdOffset), true)
     dv.setUint32(56, 0x07064b50, true) // zip64 end of central directory locator
     dv.setUint32(60, 0, true)
     dv.setBigUint64(64, BigInt(cdOffset + cdSize), true) // where the zip64 record starts
@@ -183,7 +209,8 @@ export function zipEndRecords(count, cdOffset, cdSize, { zip64 = false } = {}) {
     o = 76
   }
   dv.setUint32(o, 0x06054b50, true) // end of central directory signature
-  dv.setUint16(o + 4, 0, true); dv.setUint16(o + 6, 0, true)
+  dv.setUint16(o + 4, 0, true)
+  dv.setUint16(o + 6, 0, true)
   dv.setUint16(o + 8, z ? U16_MAX : count, true)
   dv.setUint16(o + 10, z ? U16_MAX : count, true)
   dv.setUint32(o + 12, z ? U32_MAX : cdSize, true)
@@ -202,14 +229,22 @@ export async function readZipIndex(blob) {
   const tail = new Uint8Array(await blob.slice(blob.size - tailLen).arrayBuffer())
   const tv = new DataView(tail.buffer)
   let e = -1
-  for (let i = tail.length - 22; i >= 0; i--) if (tv.getUint32(i, true) === 0x06054b50) { e = i; break }
+  for (let i = tail.length - 22; i >= 0; i--)
+    if (tv.getUint32(i, true) === 0x06054b50) {
+      e = i
+      break
+    }
   if (e < 0) throw new Error('not a ZIP archive (no end-of-central-directory record)')
-  let count = tv.getUint16(e + 10, true), cdSize = tv.getUint32(e + 12, true), cdOffset = tv.getUint32(e + 16, true)
+  let count = tv.getUint16(e + 10, true),
+    cdSize = tv.getUint32(e + 12, true),
+    cdOffset = tv.getUint32(e + 16, true)
   if (e >= 20 && tv.getUint32(e - 20, true) === 0x07064b50) {
     const recOff = Number(tv.getBigUint64(e - 12, true))
     const rec = new DataView(await blob.slice(recOff, recOff + 56).arrayBuffer())
     if (rec.getUint32(0, true) !== 0x06064b50) throw new Error('malformed ZIP64 end record')
-    count = Number(rec.getBigUint64(32, true)); cdSize = Number(rec.getBigUint64(40, true)); cdOffset = Number(rec.getBigUint64(48, true))
+    count = Number(rec.getBigUint64(32, true))
+    cdSize = Number(rec.getBigUint64(40, true))
+    cdOffset = Number(rec.getBigUint64(48, true))
   }
   const cd = new Uint8Array(await blob.slice(cdOffset, cdOffset + cdSize).arrayBuffer())
   const dv = new DataView(cd.buffer)
@@ -218,21 +253,41 @@ export async function readZipIndex(blob) {
   let p = 0
   for (let n = 0; n < count; n++) {
     if (p + 46 > cd.length || dv.getUint32(p, true) !== 0x02014b50) throw new Error('malformed ZIP central directory')
-    const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), commentLen = dv.getUint16(p + 32, true)
-    let compressedSize = dv.getUint32(p + 20, true), size = dv.getUint32(p + 24, true), offset = dv.getUint32(p + 42, true)
+    const nameLen = dv.getUint16(p + 28, true),
+      extraLen = dv.getUint16(p + 30, true),
+      commentLen = dv.getUint16(p + 32, true)
+    let compressedSize = dv.getUint32(p + 20, true),
+      size = dv.getUint32(p + 24, true),
+      offset = dv.getUint32(p + 42, true)
     // The zip64 field holds, in order, only the fields marked 0xFFFFFFFF.
     for (let x = p + 46 + nameLen; x + 4 <= p + 46 + nameLen + extraLen;) {
-      const id = dv.getUint16(x, true), len = dv.getUint16(x + 2, true)
+      const id = dv.getUint16(x, true),
+        len = dv.getUint16(x + 2, true)
       if (id === 0x0001) {
         let q = x + 4
-        if (size === U32_MAX) { size = Number(dv.getBigUint64(q, true)); q += 8 }
-        if (compressedSize === U32_MAX) { compressedSize = Number(dv.getBigUint64(q, true)); q += 8 }
-        if (offset === U32_MAX) { offset = Number(dv.getBigUint64(q, true)); q += 8 }
+        if (size === U32_MAX) {
+          size = Number(dv.getBigUint64(q, true))
+          q += 8
+        }
+        if (compressedSize === U32_MAX) {
+          compressedSize = Number(dv.getBigUint64(q, true))
+          q += 8
+        }
+        if (offset === U32_MAX) {
+          offset = Number(dv.getBigUint64(q, true))
+          q += 8
+        }
       }
       x += 4 + len
     }
-    entries.push({ name: dec.decode(cd.subarray(p + 46, p + 46 + nameLen)), method: dv.getUint16(p + 10, true),
-      crc: dv.getUint32(p + 16, true), size, compressedSize, offset })
+    entries.push({
+      name: dec.decode(cd.subarray(p + 46, p + 46 + nameLen)),
+      method: dv.getUint16(p + 10, true),
+      crc: dv.getUint32(p + 16, true),
+      size,
+      compressedSize,
+      offset,
+    })
     p += 46 + nameLen + extraLen + commentLen
   }
   return entries
@@ -262,7 +317,10 @@ export function unzipStore(bytes) {
   // variable — scan backwards for the signature.
   let eocd = -1
   for (let i = u8.length - 22; i >= 0; i--) {
-    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break }
+    if (dv.getUint32(i, true) === 0x06054b50) {
+      eocd = i
+      break
+    }
   }
   if (eocd < 0) throw new Error('unzip: not a ZIP archive (no end-of-central-directory record)')
 
@@ -303,7 +361,7 @@ const CRC_TABLE = (() => {
 })()
 
 export function crc32(buf) {
-  return (~crc32Update(~0, buf)) >>> 0
+  return ~crc32Update(~0, buf) >>> 0
 }
 
 // The running (un-finalized) CRC after `buf`; start from ~0, finish with ~crc >>> 0.
@@ -318,5 +376,5 @@ export async function crc32Blob(blob, chunkBytes = 8 * 1024 * 1024) {
   for (let off = 0; off < blob.size; off += chunkBytes) {
     crc = crc32Update(crc, new Uint8Array(await blob.slice(off, off + chunkBytes).arrayBuffer()))
   }
-  return (~crc) >>> 0
+  return ~crc >>> 0
 }

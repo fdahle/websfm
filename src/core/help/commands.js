@@ -26,44 +26,57 @@ import { allGroups, leafCommands, ribbonEntries, labelText } from './ribbonTabs.
 // can never disagree. Each: does `state` (App.vue `commandState`) satisfy it, and
 // why not. A missing state field reads as unmet.
 export const NEED_CHECKS = {
-  project:   { ok: (s) => !!s.projectReady, reason: 'Open a project first' },
-  images:    { ok: (s) => s.imageCount   > 0, reason: 'Import images first' },
+  project: { ok: (s) => !!s.projectReady, reason: 'Open a project first' },
+  images: { ok: (s) => s.imageCount > 0, reason: 'Import images first' },
   imagesReady: { ok: (s) => !s.imagesLoading, reason: 'Images still loading…' },
   keypoints: { ok: (s) => s.kpImageCount > 0, reason: 'Detect keypoints first' },
-  matches:   { ok: (s) => s.matchCount   > 0, reason: 'Run feature matching first' },
-  sparse:    { ok: (s) => s.sparseReady,      reason: 'Build the sparse model first' },
+  matches: { ok: (s) => s.matchCount > 0, reason: 'Run feature matching first' },
+  sparse: { ok: (s) => s.sparseReady, reason: 'Build the sparse model first' },
   depthMaps: { ok: (s) => s.depthMapCount > 0, reason: 'Compute depth maps first' },
-  cloud:     { ok: (s) => s.cloudReady,       reason: 'Build a point cloud first' },
-  dense:     { ok: (s) => s.denseReady,       reason: 'Build a dense cloud first' },
+  cloud: { ok: (s) => s.cloudReady, reason: 'Build a point cloud first' },
+  dense: { ok: (s) => s.denseReady, reason: 'Build a dense cloud first' },
   twoClouds: { ok: (s) => s.editableCloudCount >= 2, reason: 'Needs at least two dense clouds' },
-  mesh:      { ok: (s) => s.meshReady,        reason: 'Build a mesh first' },
-  dem:     { ok: (s) => s.demReady,         reason: 'Build a DEM first' },
-  referenceDem: { ok: (s) => !!s.referenceDemReady,
-                  reason: 'Import a reference DEM first (Import ▸ Reference DEM / Ortho)' },
+  mesh: { ok: (s) => s.meshReady, reason: 'Build a mesh first' },
+  dem: { ok: (s) => s.demReady, reason: 'Build a DEM first' },
+  referenceDem: {
+    ok: (s) => !!s.referenceDemReady,
+    reason: 'Import a reference DEM first (Import ▸ Reference DEM / Ortho)',
+  },
   // An ortho reprojects onto a SURFACE — a DEM or a mesh, not a DEM specifically.
-  surface:   { ok: (s) => s.demReady || s.meshReady, reason: 'Build a DEM or a mesh first' },
-  ortho:     { ok: (s) => s.orthoReady,       reason: 'Build an orthophoto first' },
-  products:  { ok: (s) => s.productReady,     reason: 'Build a DEM or orthophoto first' },
-  poses:     { ok: (s) => s.poseCount   > 0,  reason: 'Import camera poses first' },
+  surface: { ok: (s) => s.demReady || s.meshReady, reason: 'Build a DEM or a mesh first' },
+  ortho: { ok: (s) => s.orthoReady, reason: 'Build an orthophoto first' },
+  products: { ok: (s) => s.productReady, reason: 'Build a DEM or orthophoto first' },
+  poses: { ok: (s) => s.poseCount > 0, reason: 'Import camera poses first' },
   measurements: { ok: (s) => s.measurementCount > 0, reason: 'Save a measurement first (Tools ▸ Measure)' },
   footprints: { ok: (s) => s.footprintCount > 0, reason: 'Import or generate footprints first' },
-  gcps:      { ok: (s) => s.gcpCount > 0,
-               reason: 'No GCPs yet — import a GCP file, or right-click the map or an image to add one' },
-  selection: { ok: (s) => !!s.hasSelection,   reason: 'Select an image first' },
-  sensors:   { ok: (s) => s.sensorCount > 0,  reason: 'No sensors available' },
+  gcps: {
+    ok: (s) => s.gcpCount > 0,
+    reason: 'No GCPs yet — import a GCP file, or right-click the map or an image to add one',
+  },
+  selection: { ok: (s) => !!s.hasSelection, reason: 'Select an image first' },
+  sensors: { ok: (s) => s.sensorCount > 0, reason: 'No sensors available' },
   filmSensor: { ok: (s) => s.filmSensorCount > 0, reason: 'Set at least one sensor to Film first' },
   fiducials: { ok: (s) => s.fiducialImageCount > 0, reason: 'Detect or mark fiducials first' },
-  fiducialMarks: { ok: (s) => s.fiducialMarkSensorCount > 0,
-                   reason: 'No camera fiducial marks yet — enter them in the sensor table, or calibrate fiducials' },
+  fiducialMarks: {
+    ok: (s) => s.fiducialMarkSensorCount > 0,
+    reason: 'No camera fiducial marks yet — enter them in the sensor table, or calibrate fiducials',
+  },
   // The 2D map in the model frame has no CRS positions (useMapProducts).
-  crsMap:    { ok: (s) => !s.mapModelFrame, reason: 'The map shows the model frame, which has no CRS positions — turn off Model Frame' },
+  crsMap: {
+    ok: (s) => !s.mapModelFrame,
+    reason: 'The map shows the model frame, which has no CRS positions — turn off Model Frame',
+  },
   // Tools that act on the view in front (`frontView`: 'image' | 'map' | 'viewer' |
   // 'raster' | ''). A mode belongs to one view, so the tool says which one it needs.
   imageView: { ok: (s) => s.frontView === 'image', reason: 'Open an image first' },
-  gcpView:   { ok: (s) => s.frontView === 'image' || (s.frontView === 'map' && !s.mapModelFrame),
-               reason: 'Open an image, or the map in a CRS frame (not Model Frame)' },
-  measureHost: { ok: (s) => s.frontView === 'raster' || (s.frontView === 'map' && s.mapRasterCount > 0),
-                 reason: 'Open a DEM or orthophoto, or show one on the map' },
+  gcpView: {
+    ok: (s) => s.frontView === 'image' || (s.frontView === 'map' && !s.mapModelFrame),
+    reason: 'Open an image, or the map in a CRS frame (not Model Frame)',
+  },
+  measureHost: {
+    ok: (s) => s.frontView === 'raster' || (s.frontView === 'map' && s.mapRasterCount > 0),
+    reason: 'Open a DEM or orthophoto, or show one on the map',
+  },
 }
 
 export const AERIAL_ONLY_REASON = 'Only for aerial projects — an object capture has no coordinate system'
@@ -98,112 +111,159 @@ export function consoleReason(cmd, state) {
 // the id as words are always aliases too, so this table only adds convenience — a
 // command missing here is still reachable. A test pins every key to a ribbon id.
 export const CONSOLE_NAMES = {
-  'workflow-builder':  ['workflow', 'recipe'],
-  'detect-features':   ['detect'],
-  'match-features':    ['match'],
-  'reconstruct':       ['sparse'],
-  'compute-depth':     ['depth', 'depthmaps'],
-  'dense':             ['dense'],
-  'gen-dem':           ['dem'],
-  'gen-ortho':         ['ortho'],
-  'gen-mesh':          ['mesh'],
-  'find-gcps':         ['find gcps', 'auto-gcps'],
-  'georeference':      ['georeference', 'georef'],
-  'scale-bars':        ['scale bars', 'scalebars'],
-  'edit-gcps':         ['edit gcps', 'mark gcps'],
-  'auto-mask':         ['automask'],
-  'img-mask-edit':     ['edit mask', 'mask edit'],
+  'workflow-builder': ['workflow', 'recipe'],
+  'detect-features': ['detect'],
+  'match-features': ['match'],
+  'reconstruct': ['sparse'],
+  'compute-depth': ['depth', 'depthmaps'],
+  'dense': ['dense'],
+  'gen-dem': ['dem'],
+  'gen-ortho': ['ortho'],
+  'gen-mesh': ['mesh'],
+  'find-gcps': ['find gcps', 'auto-gcps'],
+  'georeference': ['georeference', 'georef'],
+  'scale-bars': ['scale bars', 'scalebars'],
+  'edit-gcps': ['edit gcps', 'mark gcps'],
+  'auto-mask': ['automask'],
+  'img-mask-edit': ['edit mask', 'mask edit'],
   'footprints-from-poses': ['footprints'],
-  'detect-fiducials':  ['fiducials'],
+  'detect-fiducials': ['fiducials'],
   'calibrate-fiducials': ['calibrate fiducials', 'fiducial-calibration'],
-  'detect-reseau':     ['reseau', 'detect reseau'],
-  'split-panoramic':   ['panoramic', 'split panoramic'],
-  'image-quality':     ['image quality', 'blur', 'sharpness'],
-  'optimize-cameras':  ['optimize'],
+  'detect-reseau': ['reseau', 'detect reseau'],
+  'split-panoramic': ['panoramic', 'split panoramic'],
+  'image-quality': ['image quality', 'blur', 'sharpness'],
+  'optimize-cameras': ['optimize'],
   'gradual-selection': ['gradual'],
-  'set-region':        ['region'],
-  'orient-model':      ['orient', 'level'],
+  'set-region': ['region'],
+  'orient-model': ['orient', 'level'],
   'view-select-lasso': ['lasso'],
-  'view-select-rect':  ['rectangle'],
-  'estimate-normals':  ['normals'],
-  'classify-ground':   ['ground', 'dtm'],
-  'transform-cloud':   ['transform'],
-  'align-points':      ['align pairs'],
-  'align-icp':         ['icp', 'align'],
-  'filter-cloud':      ['filter'],
-  'crop-cloud':        ['crop'],
-  'merge-clouds':      ['merge'],
-  'clean-mesh':        ['clean'],
-  'texture-mesh':      ['texture'],
-  'decimate-mesh':     ['decimate', 'simplify'],
-  'smooth-mesh':       ['smooth'],
-  'dem-contours':      ['contours'],
-  'dem-derivatives':   ['terrain', 'slope', 'hillshade', 'aspect'],
-  'clip-raster':       ['clip'],
-  'measure-length':    ['ruler', 'length'],
-  'measure-area':      ['area'],
-  'measure-profile':   ['profile'],
-  'measure-volume':    ['volume', 'cut fill'],
-  'measure-3d':        ['measure 3d'],
-  'cloud-distance':    ['cloud distance', 'c2c', 'c2m'],
-  'cloud-section':     ['section', 'slice'],
-  'mesh-measure':      ['mesh area', 'mesh volume'],
-  'open-image-table':  ['images', 'image-table'],
+  'view-select-rect': ['rectangle'],
+  'estimate-normals': ['normals'],
+  'classify-ground': ['ground', 'dtm'],
+  'transform-cloud': ['transform'],
+  'align-points': ['align pairs'],
+  'align-icp': ['icp', 'align'],
+  'filter-cloud': ['filter'],
+  'crop-cloud': ['crop'],
+  'merge-clouds': ['merge'],
+  'clean-mesh': ['clean'],
+  'texture-mesh': ['texture'],
+  'decimate-mesh': ['decimate', 'simplify'],
+  'smooth-mesh': ['smooth'],
+  'dem-contours': ['contours'],
+  'dem-derivatives': ['terrain', 'slope', 'hillshade', 'aspect'],
+  'clip-raster': ['clip'],
+  'measure-length': ['ruler', 'length'],
+  'measure-area': ['area'],
+  'measure-profile': ['profile'],
+  'measure-volume': ['volume', 'cut fill'],
+  'measure-3d': ['measure 3d'],
+  'cloud-distance': ['cloud distance', 'c2c', 'c2m'],
+  'cloud-section': ['section', 'slice'],
+  'mesh-measure': ['mesh area', 'mesh volume'],
+  'open-image-table': ['images', 'image-table'],
   'open-mask-manager': ['masks', 'mask-manager'],
   'open-sensor-table': ['sensors', 'sensor-table'],
-  'open-pose-table':   ['poses'],
-  'open-gcp-table':    ['gcps', 'gcp-table'],
-  'open-match-list':   ['matchlist', 'match-list'],
-  'view-point-size':   ['point size'],
+  'open-pose-table': ['poses'],
+  'open-gcp-table': ['gcps', 'gcp-table'],
+  'open-match-list': ['matchlist', 'match-list'],
+  'view-point-size': ['point size'],
   'view-camera-scale': ['camera size'],
-  'import-images':     ['import'],
-  'import-video':      ['import video', 'video'],
-  'import-colmap':     ['import colmap', 'colmap-import'],
-  'eval-overview':     ['report', 'quality'],
+  'import-images': ['import'],
+  'import-video': ['import video', 'video'],
+  'import-colmap': ['import colmap', 'colmap-import'],
+  'eval-overview': ['report', 'quality'],
   'open-project-settings': ['project settings', 'project properties'],
   'save-project-file': ['save copy'],
-  'toggle-console':    ['console'],
-  'open-settings':     ['settings'],
-  'open-glossary':     ['glossary'],
-  'open-guide':        ['guide'],
-  'open-about':        ['about'],
-  'open-system-info':  ['system info', 'diagnostics'],
+  'toggle-console': ['console'],
+  'open-settings': ['settings'],
+  'open-glossary': ['glossary'],
+  'open-guide': ['guide'],
+  'open-about': ['about'],
+  'open-system-info': ['system info', 'diagnostics'],
 }
 
 // Dispatch ids the console reaches that have no ribbon button of their own.
 const CONSOLE_ONLY_DISPATCH = [
   { dispatch: 'view-viewer', names: ['viewer', '3d'], help: 'Switch to the 3D viewer' },
   { dispatch: 'view-map', names: ['map', '2d'], help: 'Switch to the map view' },
-  { dispatch: 'toggle-theme', names: ['theme', 'dark mode', 'light mode'], help: 'Cycle appearance: system / light / dark' },
+  {
+    dispatch: 'toggle-theme',
+    names: ['theme', 'dark mode', 'light mode'],
+    help: 'Cycle appearance: system / light / dark',
+  },
 ]
 
 // The stages `run` chains, by the word typed → workflow block id (core/workflow.js).
 export const RUN_STAGES = {
-  detect: 'detect-features', match: 'match-features', sparse: 'reconstruct', reconstruct: 'reconstruct',
-  depth: 'compute-depth', dense: 'dense', dem: 'gen-dem', ortho: 'gen-ortho', mesh: 'gen-mesh', texture: 'texture-mesh',
+  detect: 'detect-features',
+  match: 'match-features',
+  sparse: 'reconstruct',
+  reconstruct: 'reconstruct',
+  depth: 'compute-depth',
+  dense: 'dense',
+  dem: 'gen-dem',
+  ortho: 'gen-ortho',
+  mesh: 'gen-mesh',
+  texture: 'texture-mesh',
 }
 
 // Console-only verbs: they take arguments and act through the console environment
 // (core/help/console.js), not a ribbon command. `usage` lines are what `help <verb>`
 // and a malformed call print.
 export const VERBS = [
-  { verb: 'help', names: ['help', '?'], usage: ['help', 'help <command>', 'help <tab>   (e.g. help tools)', 'help all'],
-    help: 'List commands, or show one command\'s usage' },
+  {
+    verb: 'help',
+    names: ['help', '?'],
+    usage: ['help', 'help <command>', 'help <tab>   (e.g. help tools)', 'help all'],
+    help: "List commands, or show one command's usage",
+  },
   { verb: 'clear', names: ['clear', 'cls'], usage: ['clear'], help: 'Clear the console' },
-  { verb: 'run', names: ['run'], needs: ['project'],
-    usage: [`run <stage> [<stage> …]   stages: ${[...new Set(Object.keys(RUN_STAGES))].join(' ')}`, 'run workflow <name>'],
-    help: 'Run pipeline stages (default settings) or a saved workflow through the workflow runner' },
+  {
+    verb: 'run',
+    names: ['run'],
+    needs: ['project'],
+    usage: [
+      `run <stage> [<stage> …]   stages: ${[...new Set(Object.keys(RUN_STAGES))].join(' ')}`,
+      'run workflow <name>',
+    ],
+    help: 'Run pipeline stages (default settings) or a saved workflow through the workflow runner',
+  },
   { verb: 'continue', names: ['continue'], usage: ['continue'], help: 'Continue a paused workflow' },
   { verb: 'reuse', names: ['reuse'], usage: ['reuse'], help: 'Keep the existing output a paused workflow asks about' },
   { verb: 'stop', names: ['stop'], usage: ['stop'], help: 'Stop the running workflow' },
-  { verb: 'stats', names: ['stats', 'status'], needs: ['project'], usage: ['stats', 'stats matches'],
-    help: 'Project counts; "stats matches" for the match graph' },
-  { verb: 'set', names: ['set'], usage: ['set', 'set <group>   (sfm, match: list the keys)', 'set <group>.<key> <value>',
-    'set <group>.<key> default'], help: 'Override an internal tuning value for this session' },
-  { verb: 'pair', names: ['pair'], needs: ['matches'], usage: ['pair disable <imageA> <imageB>', 'pair enable <imageA> <imageB>'],
-    help: 'Exclude a verified pair from reconstruction, or restore it' },
-  { verb: 'select', names: ['select'], needs: ['images'], usage: ['select <image name>'],
-    help: 'Select an image (a unique start of its name is enough)' },
+  {
+    verb: 'stats',
+    names: ['stats', 'status'],
+    needs: ['project'],
+    usage: ['stats', 'stats matches'],
+    help: 'Project counts; "stats matches" for the match graph',
+  },
+  {
+    verb: 'set',
+    names: ['set'],
+    usage: [
+      'set',
+      'set <group>   (sfm, match: list the keys)',
+      'set <group>.<key> <value>',
+      'set <group>.<key> default',
+    ],
+    help: 'Override an internal tuning value for this session',
+  },
+  {
+    verb: 'pair',
+    names: ['pair'],
+    needs: ['matches'],
+    usage: ['pair disable <imageA> <imageB>', 'pair enable <imageA> <imageB>'],
+    help: 'Exclude a verified pair from reconstruction, or restore it',
+  },
+  {
+    verb: 'select',
+    names: ['select'],
+    needs: ['images'],
+    usage: ['select <image name>'],
+    help: 'Select an image (a unique start of its name is enough)',
+  },
 ]
 
 const idWords = (id) => id.replace(/[-:]/g, ' ')
@@ -216,8 +276,15 @@ const idWords = (id) => id.replace(/[-:]/g, ' ')
 function buildCommands() {
   const out = []
   for (const v of VERBS) {
-    out.push({ name: v.names[0], aliases: v.names.slice(1), verb: v.verb, group: 'Console', help: v.help,
-      usage: v.usage, ...(v.needs ? { needs: v.needs } : {}) })
+    out.push({
+      name: v.names[0],
+      aliases: v.names.slice(1),
+      verb: v.verb,
+      group: 'Console',
+      help: v.help,
+      usage: v.usage,
+      ...(v.needs ? { needs: v.needs } : {}),
+    })
   }
   for (const { cmd, tab, path } of ribbonEntries()) {
     if (cmd.disabled) continue
@@ -226,15 +293,31 @@ function buildCommands() {
     const keys = [...new Set([...short, ...basemap, idWords(cmd.id), cmd.id].map((k) => k.toLowerCase()))]
     const where = `${path} ▸ ${labelText(cmd)}`
     out.push({
-      name: keys[0], aliases: keys.slice(1), dispatch: cmd.id, group: tab, where,
+      name: keys[0],
+      aliases: keys.slice(1),
+      dispatch: cmd.id,
+      group: tab,
+      where,
       // The Export tab's ids already read as commands ("export cloud"), so they list too.
-      help: cmd.blurb ?? where, short: short.length > 0 || cmd.id.startsWith('export-'),
-      ...(cmd.stepper ? { stepper: { min: cmd.min, max: cmd.max, step: cmd.step },
-        usage: [`${keys[0]} <value>   (${cmd.min} – ${cmd.max})`] } : {}),
+      help: cmd.blurb ?? where,
+      short: short.length > 0 || cmd.id.startsWith('export-'),
+      ...(cmd.stepper
+        ? {
+            stepper: { min: cmd.min, max: cmd.max, step: cmd.step },
+            usage: [`${keys[0]} <value>   (${cmd.min} – ${cmd.max})`],
+          }
+        : {}),
     })
   }
   for (const c of CONSOLE_ONLY_DISPATCH) {
-    out.push({ name: c.names[0], aliases: c.names.slice(1), dispatch: c.dispatch, group: 'View', help: c.help, short: true })
+    out.push({
+      name: c.names[0],
+      aliases: c.names.slice(1),
+      dispatch: c.dispatch,
+      group: 'View',
+      help: c.help,
+      short: true,
+    })
   }
   return out
 }
@@ -258,7 +341,10 @@ const MAX_NAME_TOKENS = Math.max(...[...BY_NAME.keys()].map((k) => k.split(' ').
 
 /** Split a raw line into whitespace-delimited tokens (empties dropped). */
 export function tokenize(line) {
-  return String(line ?? '').trim().split(/\s+/).filter(Boolean)
+  return String(line ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
 }
 
 /**
@@ -281,7 +367,14 @@ export function resolveCommand(line) {
 
 /** Look up a command by exact name/alias (for `help <cmd>`). */
 export function getCommand(name) {
-  return BY_NAME.get(String(name ?? '').trim().toLowerCase().replace(/\s+/g, ' ')) ?? null
+  return (
+    BY_NAME.get(
+      String(name ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' '),
+    ) ?? null
+  )
 }
 
 /**
@@ -302,7 +395,9 @@ export function guardReason(needs, state) {
  * complete too once the verb itself is typed.
  */
 export function completions(prefix, argCompletions = null) {
-  const p = String(prefix ?? '').trimStart().toLowerCase()
+  const p = String(prefix ?? '')
+    .trimStart()
+    .toLowerCase()
   const out = []
   for (const key of BY_NAME.keys()) {
     if (key.startsWith(p)) out.push(key)
@@ -333,14 +428,16 @@ function suggestFor(name) {
   const scored = []
   for (const cmd of COMMANDS) {
     const d = editDistance(name, cmd.name.toLowerCase())
-    if (cmd.name.toLowerCase().startsWith(name) || d <= 2) scored.push({ name: cmd.name, d: d + (cmd.short || cmd.verb ? 0 : 0.5) })
+    if (cmd.name.toLowerCase().startsWith(name) || d <= 2)
+      scored.push({ name: cmd.name, d: d + (cmd.short || cmd.verb ? 0 : 0.5) })
   }
   scored.sort((a, b) => a.d - b.d)
   return scored.slice(0, 3).map((s) => s.name)
 }
 
 function editDistance(a, b) {
-  const m = a.length, n = b.length
+  const m = a.length,
+    n = b.length
   const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)])
   for (let j = 0; j <= n; j++) dp[0][j] = j
   for (let i = 1; i <= m; i++) {
@@ -365,7 +462,9 @@ function overviewLine(cmd) {
  * 'export', 'dem' …): that tab's commands. → lines, or null for an unknown topic.
  */
 export function helpLines(topic = '') {
-  const t = String(topic ?? '').trim().toLowerCase()
+  const t = String(topic ?? '')
+    .trim()
+    .toLowerCase()
   const groups = [...new Set(COMMANDS.map((c) => c.group))]
   const pick = !t || t === 'all' ? groups : groups.filter((g) => g.toLowerCase() === t || g.toLowerCase().startsWith(t))
   if (!pick.length) return null

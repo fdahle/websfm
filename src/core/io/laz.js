@@ -16,8 +16,15 @@
 
 import { flatAxes } from '../products/flatAxes.js'
 import {
-  validateLasAllocation, encodeLasPoints, writeLasHeader, readLasHeader, decodeLasPoints, planLasAttributes,
-  sliceLasPlan, extraBytesVlr, pointsByReturn,
+  validateLasAllocation,
+  encodeLasPoints,
+  writeLasHeader,
+  readLasHeader,
+  decodeLasPoints,
+  planLasAttributes,
+  sliceLasPlan,
+  extraBytesVlr,
+  pointsByReturn,
 } from './las.js'
 import { geoKeysForEpsg } from '../products/geotiff.js'
 
@@ -48,7 +55,10 @@ export const LAZ_CHUNK_POINTS = 50_000
 // Returns a Uint8Array, or with `parts: true` [header, points] for a Blob (no
 // concatenated copy). Throws if no compressor was supplied — silently writing an
 // uncompressed .las under a .laz name would be worse.
-export function cloudToLaz(points, { crsCode = null, geographic = false, attributes = true, compress, createCompressor, onLog, parts = false } = {}) {
+export function cloudToLaz(
+  points,
+  { crsCode = null, geographic = false, attributes = true, compress, createCompressor, onLog, parts = false } = {},
+) {
   if (typeof compress !== 'function' && typeof createCompressor !== 'function') {
     throw new Error('cloudToLaz: no LAZ compressor supplied (the lazcodec WASM module failed to load)')
   }
@@ -56,7 +66,9 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, attribu
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
   const [getX, getY, getZ] = flat ? flatAxes(flat) : [(i) => points[i].x, (i) => points[i].y, (i) => points[i].z]
   const getC = flat
-    ? (flat.col ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]] : () => null)
+    ? flat.col
+      ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]]
+      : () => null
     : (i) => points[i].color
 
   const { scale, offset, bbox } = quantization(n, getX, getY, getZ)
@@ -74,35 +86,65 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, attribu
     const pointBytes = encoder ? null : new Uint8Array(n * recordLength)
     for (let start = 0; start < n; start += LAZ_CHUNK_POINTS) {
       const len = Math.min(LAZ_CHUNK_POINTS, n - start)
-      const chunk = encodeLasPoints({ n: len,
-        getX: i => getX(start + i), getY: i => getY(start + i), getZ: i => getZ(start + i),
-        getC: i => getC(start + i), scale, offset, ...sliceLasPlan(plan, start, len) })
+      const chunk = encodeLasPoints({
+        n: len,
+        getX: (i) => getX(start + i),
+        getY: (i) => getY(start + i),
+        getZ: (i) => getZ(start + i),
+        getC: (i) => getC(start + i),
+        scale,
+        offset,
+        ...sliceLasPlan(plan, start, len),
+      })
       if (encoder) encoder.push(chunk)
       else pointBytes.set(chunk, start * recordLength)
     }
     packed = encoder ? encoder.finish() : compress(pointBytes, format, recordLength)
-  } finally { encoder?.free?.() }
+  } finally {
+    encoder?.free?.()
+  }
 
   const vlrs = []
-  if (crsCode) vlrs.push({ userId: 'LASF_Projection', recordId: 34735, description: 'GeoKeyDirectory', data: geoKeyBytes(crsCode, geographic) })
+  if (crsCode)
+    vlrs.push({
+      userId: 'LASF_Projection',
+      recordId: 34735,
+      description: 'GeoKeyDirectory',
+      data: geoKeyBytes(crsCode, geographic),
+    })
   if (plan.extra.length) vlrs.push(extraBytesVlr(plan.extra))
   // The LASzip VLR must be present for any reader to know how the points were
   // coded — the point format's high bit alone says only *that* they were.
   vlrs.push({
-    userId: LASZIP_VLR_USER_ID, recordId: LASZIP_VLR_RECORD_ID,
-    description: 'lazcodec', data: packed.vlr,
+    userId: LASZIP_VLR_USER_ID,
+    recordId: LASZIP_VLR_RECORD_ID,
+    description: 'lazcodec',
+    data: packed.vlr,
   })
 
-  const header = writeLasHeader({ n, vlrs, scale, offset, bbox, compressed: true, format, recordLength,
-    pointsByReturn: pointsByReturn(plan.native, n) })
+  const header = writeLasHeader({
+    n,
+    vlrs,
+    scale,
+    offset,
+    bbox,
+    compressed: true,
+    format,
+    recordLength,
+    pointsByReturn: pointsByReturn(plan.native, n),
+  })
   // The codec writes a standalone point block; LASzip files store absolute
   // chunk-table offsets, so account for the header and VLRs when embedding it.
   relocateChunkTable(packed.data, packed.vlr, header.length)
   const size = header.length + packed.data.length
-  const ratio = n ? (n * recordLength / packed.data.length) : 1
-  onLog?.(`LAZ export: ${n.toLocaleString()} points, ${(size / 1024 ** 2).toFixed(1)} MB `
-    + `(${ratio.toFixed(1)}× smaller than LAS)`
-    + (crsCode ? `, EPSG:${crsCode} GeoKey VLR` : ', no CRS VLR (local frame)'), 'info', 'Export')
+  const ratio = n ? (n * recordLength) / packed.data.length : 1
+  onLog?.(
+    `LAZ export: ${n.toLocaleString()} points, ${(size / 1024 ** 2).toFixed(1)} MB ` +
+      `(${ratio.toFixed(1)}× smaller than LAS)` +
+      (crsCode ? `, EPSG:${crsCode} GeoKey VLR` : ', no CRS VLR (local frame)'),
+    'info',
+    'Export',
+  )
   // parts: the two pieces for a Blob, without the concatenated copy.
   if (parts) return [header, packed.data]
   const out = new Uint8Array(size)
@@ -118,12 +160,20 @@ export function parseLaz(buffer, { decompress, onLog } = {}) {
   const { header: h, records } = decompressLazRecords(bytes, {
     decompress,
     // Include both this module's copy and the codec's input copy in the memory budget.
-    beforeDecompress: (hdr) => validateLasAllocation(hdr.count, hdr.recordLength,
-      bytes.byteLength + 2 * (bytes.byteLength - hdr.offsetToPoints)),
+    beforeDecompress: (hdr) =>
+      validateLasAllocation(
+        hdr.count,
+        hdr.recordLength,
+        bytes.byteLength + 2 * (bytes.byteLength - hdr.offsetToPoints),
+      ),
   })
   const cloud = decodeLasPoints(records, h.count, h.recordLength, h.format, h.scale, h.offset, h.extraBytes)
-  onLog?.(`LAZ: read ${h.count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `
-    + `format ${h.format}${cloud.col ? ', RGB' : ''})`, 'info', 'Import')
+  onLog?.(
+    `LAZ: read ${h.count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, ` +
+      `format ${h.format}${cloud.col ? ', RGB' : ''})`,
+    'info',
+    'Import',
+  )
   return cloud
 }
 
@@ -183,15 +233,27 @@ function relocateChunkTable(data, vlr, delta) {
 // Per-axis quantization, identical to the LAS writer's — a .laz and .las of the
 // same cloud must dequantize to the same coordinates.
 function quantization(n, getX, getY, getZ) {
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity
   for (let i = 0; i < n; i++) {
-    const x = getX(i), y = getY(i), z = getZ(i)
-    if (x < minX) minX = x; if (x > maxX) maxX = x
-    if (y < minY) minY = y; if (y > maxY) maxY = y
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+    const x = getX(i),
+      y = getY(i),
+      z = getZ(i)
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+    if (z < minZ) minZ = z
+    if (z > maxZ) maxZ = z
   }
-  if (!Number.isFinite(minX)) { minX = minY = minZ = 0; maxX = maxY = maxZ = 0 }
+  if (!Number.isFinite(minX)) {
+    minX = minY = minZ = 0
+    maxX = maxY = maxZ = 0
+  }
   const scaleFor = (span) => Math.max((span / 2 ** 31) * 1.01, 1e-4)
   return {
     scale: [scaleFor(maxX - minX), scaleFor(maxY - minY), scaleFor(maxZ - minZ)],

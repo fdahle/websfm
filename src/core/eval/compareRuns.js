@@ -7,11 +7,11 @@
 // larger value is an improvement (more registered, more points, more multi-view
 // tracks); otherwise smaller is better (reprojection error).
 const METRICS = [
-  { key: 'nCameras',           label: 'Registered',      dir: 'higher', digits: 0 },
-  { key: 'nPoints',            label: 'Points',          dir: 'higher', digits: 0 },
-  { key: 'pct3plusViewTracks', label: '≥3-view tracks',  dir: 'higher', digits: 1, unit: '%' },
-  { key: 'postBaMedianPx',     label: 'Post-BA median',  dir: 'lower',  digits: 2, unit: 'px' },
-  { key: 'preBaP95px',         label: 'Pre-BA P95',      dir: 'lower',  digits: 2, unit: 'px' },
+  { key: 'nCameras', label: 'Registered', dir: 'higher', digits: 0 },
+  { key: 'nPoints', label: 'Points', dir: 'higher', digits: 0 },
+  { key: 'pct3plusViewTracks', label: '≥3-view tracks', dir: 'higher', digits: 1, unit: '%' },
+  { key: 'postBaMedianPx', label: 'Post-BA median', dir: 'lower', digits: 2, unit: 'px' },
+  { key: 'preBaP95px', label: 'Pre-BA P95', dir: 'lower', digits: 2, unit: 'px' },
 ]
 
 // diffSummaries(cur, prev) → [{ key, label, cur, prev, delta, dir, verdict, unit,
@@ -34,8 +34,15 @@ export function diffSummaries(cur, prev) {
       else verdict = delta < 0 ? 'better' : 'worse'
     }
     out.push({
-      key: m.key, label: m.label, cur: c ?? null, prev: p ?? null,
-      delta, dir: m.dir, verdict, unit: m.unit || '', digits: m.digits,
+      key: m.key,
+      label: m.label,
+      cur: c ?? null,
+      prev: p ?? null,
+      delta,
+      dir: m.dir,
+      verdict,
+      unit: m.unit || '',
+      digits: m.digits,
     })
   }
   return out

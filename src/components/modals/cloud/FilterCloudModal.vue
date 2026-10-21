@@ -10,9 +10,7 @@ import SourcePicker from '../ui/SourcePicker.vue'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
-import {
-  FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META,
-} from '../../../core/defaults.user.js'
+import { FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META } from '../../../core/defaults.user.js'
 
 // Filter Cloud — remove noise from a dense cloud. Non-destructive: the run adds a
 // NEW cloud. Defaults are the single source of truth in core/defaults.user.js;
@@ -41,22 +39,23 @@ const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initi
 // Methods run in the listed order, so the checkbox order IS the pipeline order:
 // cheap linear rejections first, the neighbour sweep last over the smallest cloud.
 const METHODS = [
-  { id: 'range',    label: 'Elevation / brightness range' },
-  { id: 'voxel',    label: 'Voxel downsample' },
+  { id: 'range', label: 'Elevation / brightness range' },
+  { id: 'voxel', label: 'Voxel downsample' },
   { id: 'isolated', label: 'Isolated clusters' },
-  { id: 'sor',      label: 'Statistical outliers' },
+  { id: 'sor', label: 'Statistical outliers' },
 ]
 const has = (id) => settings.value.methods.includes(id)
 function toggle(id) {
   const on = has(id)
-  settings.value.methods = METHODS
-    .filter((m) => (m.id === id ? !on : has(m.id)))
-    .map((m) => m.id)
+  settings.value.methods = METHODS.filter((m) => (m.id === id ? !on : has(m.id))).map((m) => m.id)
 }
 
 // A card (and Reset) restores every filter setting; any edit reads as "· modified".
 const { baseId, activePreset, selectPreset } = usePresetSettings({
-  settings, defaults: FILTER_CLOUD_DEFAULTS, presets: FILTER_CLOUD_PRESETS, cards: FILTER_CLOUD_PRESET_META,
+  settings,
+  defaults: FILTER_CLOUD_DEFAULTS,
+  presets: FILTER_CLOUD_PRESETS,
+  cards: FILTER_CLOUD_PRESET_META,
   ownedKeys: Object.keys(FILTER_CLOUD_DEFAULTS),
 })
 
@@ -86,10 +85,13 @@ function run() {
 </script>
 
 <template>
-  <ModalShell :title="startMethod === 'sor' ? 'Remove Outliers' : startMethod === 'voxel' ? 'Subsample Cloud' : 'Filter Cloud'" @close="emit('close')">
+  <ModalShell
+    :title="startMethod === 'sor' ? 'Remove Outliers' : startMethod === 'voxel' ? 'Subsample Cloud' : 'Filter Cloud'"
+    @close="emit('close')"
+  >
     <WarnBox v-if="!clouds.length">
-      No dense cloud is available. Run <strong>Dense Model</strong> first, or import one. To clean the sparse
-      model, use <strong>Tools ▸ Model ▸ Gradual selection</strong>.
+      No dense cloud is available. Run <strong>Dense Model</strong> first, or import one. To clean the sparse model, use
+      <strong>Tools ▸ Model ▸ Gradual selection</strong>.
     </WarnBox>
 
     <template v-else>
@@ -101,8 +103,13 @@ function run() {
       />
 
       <SettingsGroup title="Source">
-        <SourcePicker id="filter-src" v-model="sourceId" label="Cloud" :items="clouds"
-          hint="The filter adds a new cloud; this one is left untouched." />
+        <SourcePicker
+          id="filter-src"
+          v-model="sourceId"
+          label="Cloud"
+          :items="clouds"
+          hint="The filter adds a new cloud; this one is left untouched."
+        />
       </SettingsGroup>
 
       <SettingsGroup title="Filters">
@@ -117,41 +124,107 @@ function run() {
 
       <AdvancedDisclosure label="Advanced settings" :default-open="!!startMethod">
         <SettingsGroup v-if="has('sor')" title="Statistical outliers">
-          <SettingsField label="Neighbours" label-for="filter-sor-k"
-            hint="How many nearest neighbours the per-point mean distance averages over.">
-            <input id="filter-sor-k" v-model.number="settings.sorK" type="number" min="3" max="64" step="1" class="field-input" />
+          <SettingsField
+            label="Neighbours"
+            label-for="filter-sor-k"
+            hint="How many nearest neighbours the per-point mean distance averages over."
+          >
+            <input
+              id="filter-sor-k"
+              v-model.number="settings.sorK"
+              type="number"
+              min="3"
+              max="64"
+              step="1"
+              class="field-input"
+            />
           </SettingsField>
-          <SettingsField label-for="filter-sor-std" unit="σ"
-            hint="Drop points above mean + ratio × σ. Lower is more aggressive.">
+          <SettingsField
+            label-for="filter-sor-std"
+            unit="σ"
+            hint="Drop points above mean + ratio × σ. Lower is more aggressive."
+          >
             <template #label><GlossaryTerm id="statistical-outlier-removal">Std-dev ratio</GlossaryTerm></template>
-            <input id="filter-sor-std" v-model.number="settings.sorStdRatio" type="number" min="0.1" max="10" step="0.1" class="field-input" />
+            <input
+              id="filter-sor-std"
+              v-model.number="settings.sorStdRatio"
+              type="number"
+              min="0.1"
+              max="10"
+              step="0.1"
+              class="field-input"
+            />
           </SettingsField>
         </SettingsGroup>
 
         <SettingsGroup v-if="has('voxel')" title="Voxel downsample">
-          <SettingsField label-for="filter-voxel" unit="units"
-            :hint="mergeCell > 0 && !(settings.voxelCell > 0)
-              ? `0 = auto (the dense run's merge cell, ${mergeCell.toPrecision(3)})`
-              : '0 = auto (about one point spacing)'">
-            <template #label>
-              One averaged point per cell
-            </template>
-            <input id="filter-voxel" v-model.number="settings.voxelCell" type="number" min="0" step="any" class="field-input" />
+          <SettingsField
+            label-for="filter-voxel"
+            unit="units"
+            :hint="
+              mergeCell > 0 && !(settings.voxelCell > 0)
+                ? `0 = auto (the dense run's merge cell, ${mergeCell.toPrecision(3)})`
+                : '0 = auto (about one point spacing)'
+            "
+          >
+            <template #label> One averaged point per cell </template>
+            <input
+              id="filter-voxel"
+              v-model.number="settings.voxelCell"
+              type="number"
+              min="0"
+              step="any"
+              class="field-input"
+            />
           </SettingsField>
         </SettingsGroup>
 
         <SettingsGroup v-if="has('isolated')" title="Isolated clusters">
-          <SettingsField label="Cell size" label-for="filter-iso-cell" unit="units"
-            hint="Occupancy grid cell. 0 = auto (about 4× the point spacing).">
-            <input id="filter-iso-cell" v-model.number="settings.isolatedCell" type="number" min="0" step="any" class="field-input" />
+          <SettingsField
+            label="Cell size"
+            label-for="filter-iso-cell"
+            unit="units"
+            hint="Occupancy grid cell. 0 = auto (about 4× the point spacing)."
+          >
+            <input
+              id="filter-iso-cell"
+              v-model.number="settings.isolatedCell"
+              type="number"
+              min="0"
+              step="any"
+              class="field-input"
+            />
           </SettingsField>
-          <SettingsField label="Min occupied neighbours" label-for="filter-iso-nb"
-            hint="A low-support cell needs this many of its 26 neighbours occupied to survive.">
-            <input id="filter-iso-nb" v-model.number="settings.isolatedMinNeighbors" type="number" min="1" max="26" step="1" class="field-input" />
+          <SettingsField
+            label="Min occupied neighbours"
+            label-for="filter-iso-nb"
+            hint="A low-support cell needs this many of its 26 neighbours occupied to survive."
+          >
+            <input
+              id="filter-iso-nb"
+              v-model.number="settings.isolatedMinNeighbors"
+              type="number"
+              min="1"
+              max="26"
+              step="1"
+              class="field-input"
+            />
           </SettingsField>
-          <SettingsField label="Max tested support" label-for="filter-iso-sup" unit="points"
-            hint="Cells holding more points than this are never tested — they are real surface.">
-            <input id="filter-iso-sup" v-model.number="settings.isolatedMaxSupport" type="number" min="1" max="64" step="1" class="field-input" />
+          <SettingsField
+            label="Max tested support"
+            label-for="filter-iso-sup"
+            unit="points"
+            hint="Cells holding more points than this are never tested — they are real surface."
+          >
+            <input
+              id="filter-iso-sup"
+              v-model.number="settings.isolatedMaxSupport"
+              type="number"
+              min="1"
+              max="64"
+              step="1"
+              class="field-input"
+            />
           </SettingsField>
         </SettingsGroup>
 
@@ -162,11 +235,26 @@ function run() {
               <input v-model.number="settings.zMax" type="number" step="any" class="field-input" placeholder="max" />
             </div>
           </SettingsField>
-          <SettingsField label="Brightness" unit="0–255"
-            hint="Rec. 709 luma. Ignored on a cloud with no colour.">
+          <SettingsField label="Brightness" unit="0–255" hint="Rec. 709 luma. Ignored on a cloud with no colour.">
             <div class="input-row">
-              <input v-model.number="settings.lumaMin" type="number" min="0" max="255" step="1" class="field-input" placeholder="min" />
-              <input v-model.number="settings.lumaMax" type="number" min="0" max="255" step="1" class="field-input" placeholder="max" />
+              <input
+                v-model.number="settings.lumaMin"
+                type="number"
+                min="0"
+                max="255"
+                step="1"
+                class="field-input"
+                placeholder="min"
+              />
+              <input
+                v-model.number="settings.lumaMax"
+                type="number"
+                min="0"
+                max="255"
+                step="1"
+                class="field-input"
+                placeholder="max"
+              />
             </div>
           </SettingsField>
         </SettingsGroup>

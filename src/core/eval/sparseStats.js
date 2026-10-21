@@ -25,21 +25,28 @@ import { SparsePoints } from '../sfm/sparsePoints.js'
 export function sparseResidualStats(cameras, points) {
   const camIds = [...cameras.keys()]
   const camIndex = new Map(camIds.map((id, i) => [id, i]))
-  let cap = 1024, n = 0
+  let cap = 1024,
+    n = 0
   let res = new Float64Array(cap)
   let owner = new Int32Array(cap)
   const pts = points ?? SparsePoints.empty()
   for (let i = 0; i < pts.length; i++) {
-    const x = pts.x(i), y = pts.y(i), z = pts.z(i)
+    const x = pts.x(i),
+      y = pts.y(i),
+      z = pts.z(i)
     pts.forEachPixel(i, (uuid, px, py) => {
       const cam = cameras.get(uuid)
-      if (!cam) return                       // observation of an image not in this model
+      if (!cam) return // observation of an image not in this model
       const proj = projectPoint(cam, x, y, z)
       if (!proj) return
       if (n === cap) {
         cap *= 2
-        const r2 = new Float64Array(cap); r2.set(res); res = r2
-        const o2 = new Int32Array(cap); o2.set(owner); owner = o2
+        const r2 = new Float64Array(cap)
+        r2.set(res)
+        res = r2
+        const o2 = new Int32Array(cap)
+        o2.set(owner)
+        owner = o2
       }
       res[n] = Math.hypot(proj.u - px, proj.v - py)
       owner[n] = camIndex.get(uuid)
@@ -59,7 +66,10 @@ export function sparseResidualStats(cameras, points) {
   const perImage = new Array(camIds.length)
   for (let c = 0; c < camIds.length; c++) {
     const nObs = counts[c]
-    if (!nObs) { perImage[c] = { uuid: camIds[c], nObs: 0, rmsPx: null, medianPx: null, maxPx: null }; continue }
+    if (!nObs) {
+      perImage[c] = { uuid: camIds[c], nObs: 0, rmsPx: null, medianPx: null, maxPx: null }
+      continue
+    }
     const g = grouped.subarray(start[c], start[c + 1]).sort()
     let sq = 0
     for (let k = 0; k < nObs; k++) sq += g[k] * g[k]
@@ -97,12 +107,22 @@ export function sparseModelStats(cameras, points) {
   const cams = cameras || new Map()
   const hit = memo.get(pts)
   if (hit && hit.cameras === cams && hit.count === pts.length) return hit.stats
-  let residuals = null, histogram = null, coverage = null
+  let residuals = null,
+    histogram = null,
+    coverage = null
   const stats = {
-    get reproj() { return (residuals ??= sparseResidualStats(cams, pts)).reproj },
-    get perImage() { return (residuals ??= sparseResidualStats(cams, pts)).perImage },
-    get histogram() { return (histogram ??= trackLengthHistogram(pts)) },
-    get coverage() { return (coverage ??= sparseCoverage(cams, pts)) },
+    get reproj() {
+      return (residuals ??= sparseResidualStats(cams, pts)).reproj
+    },
+    get perImage() {
+      return (residuals ??= sparseResidualStats(cams, pts)).perImage
+    },
+    get histogram() {
+      return (histogram ??= trackLengthHistogram(pts))
+    },
+    get coverage() {
+      return (coverage ??= sparseCoverage(cams, pts))
+    },
   }
   memo.set(pts, { cameras: cams, count: pts.length, stats })
   return stats

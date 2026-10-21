@@ -41,17 +41,19 @@ export function openHelp(level, spec) {
 
 /** The pointer left `anchor`: close its popup (and any above) unless pinned. */
 export function leaveHelp(anchor) {
-  const i = helpStack.findIndex(e => e.anchor === anchor)
+  const i = helpStack.findIndex((e) => e.anchor === anchor)
   if (i !== -1 && !helpStack[i].pinned) truncate(i)
 }
 
 /** `anchor` is going away (unmount): close its popup and everything above. */
 export function dropHelp(anchor) {
-  const i = helpStack.findIndex(e => e.anchor === anchor)
+  const i = helpStack.findIndex((e) => e.anchor === anchor)
   if (i !== -1) truncate(i)
 }
 
-export function closeHelp() { truncate(0) }
+export function closeHelp() {
+  truncate(0)
+}
 
 function truncate(level) {
   if (level >= helpStack.length) return
@@ -82,7 +84,7 @@ function unlisten() {
 
 function onDocMouseDown(e) {
   if (e.target.closest?.('.glossary-tooltip')) return
-  if (helpStack.some(entry => entry.anchor.contains(e.target))) return
+  if (helpStack.some((entry) => entry.anchor.contains(e.target))) return
   closeHelp()
 }
 
@@ -96,8 +98,14 @@ function onKeydown(e) {
 // ── What a popup shows ────────────────────────────────────────────────────────
 // Glossary and Guide are peer browsers: opening one closes the other instead of
 // stacking two same-z-index dialogs (each keeps its tabs for the next visit).
-export function openGlossaryTab(id) { useGuideStore().close(); useGlossaryStore().openTerm(id) }
-export function openGuideTab(id, param = null) { useGlossaryStore().close(); useGuideStore().openOp(id, param) }
+export function openGlossaryTab(id) {
+  useGuideStore().close()
+  useGlossaryStore().openTerm(id)
+}
+export function openGuideTab(id, param = null) {
+  useGlossaryStore().close()
+  useGuideStore().openOp(id, param)
+}
 
 export function glossarySpec(id, anchor) {
   const entry = getGlossaryEntry(id)
@@ -105,7 +113,7 @@ export function glossarySpec(id, anchor) {
   return {
     anchor,
     title: entry.title,
-    render: r => r.renderHelpMarkdown(entry.summary || '', { selfId: id }),
+    render: (r) => r.renderHelpMarkdown(entry.summary || '', { selfId: id }),
     readMore: () => openGlossaryTab(id),
   }
 }
@@ -116,7 +124,7 @@ export function guideSpec(id, anchor) {
   return {
     anchor,
     title: doc.title,
-    render: r => r.renderGuide(doc.summary),
+    render: (r) => r.renderGuide(doc.summary),
     readMore: () => openGuideTab(id),
   }
 }
@@ -158,9 +166,7 @@ export function helpLinkFrom(target) {
   return target?.closest?.('a[data-help-id], a[data-guide-id]') ?? null
 }
 export function linkSpec(link) {
-  return link.dataset.helpId
-    ? glossarySpec(link.dataset.helpId, link)
-    : guideSpec(link.dataset.guideId, link)
+  return link.dataset.helpId ? glossarySpec(link.dataset.helpId, link) : guideSpec(link.dataset.guideId, link)
 }
 export function followLink(link) {
   closeHelp()

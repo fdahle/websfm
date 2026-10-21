@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { gsdForLongSide, orthoGridFor, orthoDemSurface, demGridFor, DEM_PLANE_MAX, MAX_RASTER_SIDE } from './rasterSize.js'
+import {
+  gsdForLongSide,
+  orthoGridFor,
+  orthoDemSurface,
+  demGridFor,
+  DEM_PLANE_MAX,
+  MAX_RASTER_SIDE,
+} from './rasterSize.js'
 import { demGeometry } from './dem.js'
 import { gridGeometry } from './surface.js'
 
@@ -7,7 +14,12 @@ const surface = (width, height, gsd) => ({ width, height, gsd, originX: 1000, or
 
 describe('a raster size as its long side in pixels', () => {
   it('gives exactly that many cells on the longer side', () => {
-    for (const [span, n] of [[100, 2], [123.456, 4096], [987.6, 12345], [3, 7]]) {
+    for (const [span, n] of [
+      [100, 2],
+      [123.456, 4096],
+      [987.6, 12345],
+      [3, 7],
+    ]) {
       const g = gridGeometry(0, 0, span, span / 3, gsdForLongSide(span, n), Infinity)
       expect(g.width).toBe(n)
     }
@@ -39,7 +51,9 @@ describe('a raster size as its long side in pixels', () => {
     const dem = { cog: {}, fullWidth: 20000, fullHeight: 10000, fullGsd: 0.1, originX: 0, originY: 0, tileSize: 512 }
     // 2 GiB → 85.9 M cells: level 1 (10,000 × 5,000) is the finest that fits.
     expect(orthoDemSurface(dem, 2 * 1024 ** 3)).toMatchObject({ width: 10000, height: 5000, gsd: 0.2 })
-    expect(orthoDemSurface({ width: 300, height: 200, gsd: 1, originX: 0, originY: 0 }, 1)).toMatchObject({ width: 300 })
+    expect(orthoDemSurface({ width: 300, height: 200, gsd: 1, originX: 0, originY: 0 }, 1)).toMatchObject({
+      width: 300,
+    })
   })
 })
 
@@ -47,8 +61,12 @@ describe('the DEM grid the readout shows is the one the run builds', () => {
   // A cloud filling a 400 × 300 box with 120,000 points.
   const pts = []
   for (let i = 0; i < 120000; i++) pts.push({ x: (i % 400) + 0.5 * ((i * 7) % 2), y: Math.floor(i / 400), z: 0 })
-  const box = { minX: Math.min(...pts.map((p) => p.x)), maxX: Math.max(...pts.map((p) => p.x)),
-    minY: 0, maxY: Math.max(...pts.map((p) => p.y)) }
+  const box = {
+    minX: Math.min(...pts.map((p) => p.x)),
+    maxX: Math.max(...pts.map((p) => p.x)),
+    minY: 0,
+    maxY: Math.max(...pts.map((p) => p.y)),
+  }
 
   it('auto: about one point per cell, in one plane', () => {
     const est = demGridFor(box, pts.length, {})

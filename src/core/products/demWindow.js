@@ -19,7 +19,10 @@ export function planDemWindow(dem, levels, rect, maxCells) {
   for (let k = 0; k < levels.length; k++) {
     const { width: lw, height: lh } = levels[k]
     const gsd = dem.fullGsd * 2 ** k
-    let c0 = 0, r0 = 0, c1 = lw, r1 = lh
+    let c0 = 0,
+      r0 = 0,
+      c1 = lw,
+      r1 = lh
     if (rect) {
       c0 = Math.max(0, Math.floor((rect.minX - dem.originX) / gsd))
       c1 = Math.min(lw, Math.ceil((rect.maxX - dem.originX) / gsd))
@@ -30,8 +33,15 @@ export function planDemWindow(dem, levels, rect, maxCells) {
       if (r1 === r0 && r0 < lh) r1 = r0 + 1
       if (c1 <= c0 || r1 <= r0) return null
     }
-    last = { level: k, window: [c0, r0, c1, r1], width: c1 - c0, height: r1 - r0, gsd,
-      originX: dem.originX + c0 * gsd, originY: dem.originY - r0 * gsd }
+    last = {
+      level: k,
+      window: [c0, r0, c1, r1],
+      width: c1 - c0,
+      height: r1 - r0,
+      gsd,
+      originX: dem.originX + c0 * gsd,
+      originY: dem.originY - r0 * gsd,
+    }
     if (last.width * last.height <= maxCells) return last
   }
   return last
@@ -58,6 +68,14 @@ export function maskFromNaN(data) {
 // What a worker needs to read a block-built DEM: its COG handle and grid, plain data
 // (a File clones as a handle; nothing is read here).
 export function demRef(dem) {
-  return { cog: dem.cog, originX: dem.originX, originY: dem.originY, fullGsd: dem.fullGsd,
-    fullWidth: dem.fullWidth, fullHeight: dem.fullHeight, tileSize: dem.tileSize ?? 512, crs: dem.crs ?? null }
+  return {
+    cog: dem.cog,
+    originX: dem.originX,
+    originY: dem.originY,
+    fullGsd: dem.fullGsd,
+    fullWidth: dem.fullWidth,
+    fullHeight: dem.fullHeight,
+    tileSize: dem.tileSize ?? 512,
+    crs: dem.crs ?? null,
+  }
 }

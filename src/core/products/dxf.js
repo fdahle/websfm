@@ -25,7 +25,10 @@ const MAX_LAYER_NAME = 31
 
 // R12 layer-name rules. '0' is the always-present default layer.
 export function dxfLayerName(name) {
-  const s = String(name ?? '0').toUpperCase().replace(/[^A-Z0-9_$-]/g, '_').slice(0, MAX_LAYER_NAME)
+  const s = String(name ?? '0')
+    .toUpperCase()
+    .replace(/[^A-Z0-9_$-]/g, '_')
+    .slice(0, MAX_LAYER_NAME)
   return s.length ? s : '0'
 }
 
@@ -51,7 +54,9 @@ export function writeDxf(doc = {}, { precision = 6 } = {}) {
   const polylines = doc.polylines ?? []
   const points = doc.points ?? []
   const out = []
-  const g = (code, value) => { out.push(String(code).padStart(3), String(value)) }
+  const g = (code, value) => {
+    out.push(String(code).padStart(3), String(value))
+  }
   const num = (v) => formatDxfNumber(v, precision)
 
   // Layers: declared first (caller order), then any referenced-but-undeclared.
@@ -68,12 +73,19 @@ export function writeDxf(doc = {}, { precision = 6 } = {}) {
   for (const l of doc.layers ?? []) addLayer(l.name, l.color)
 
   // Extents over every coordinate written.
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity
   const grow = (x, y, z) => {
-    if (x < minX) minX = x; if (x > maxX) maxX = x
-    if (y < minY) minY = y; if (y > maxY) maxY = y
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+    if (z < minZ) minZ = z
+    if (z > maxZ) maxZ = z
   }
 
   // Resolve every polyline before writing so the header extents are known.
@@ -86,7 +98,11 @@ export function writeDxf(doc = {}, { precision = 6 } = {}) {
     let elev = flat ? pl.elevation : (pts[0][2] ?? 0)
     if (!flat) {
       flat = true
-      for (let i = 1; i < pts.length; i++) if ((pts[i][2] ?? 0) !== elev) { flat = false; break }
+      for (let i = 1; i < pts.length; i++)
+        if ((pts[i][2] ?? 0) !== elev) {
+          flat = false
+          break
+        }
     }
     const verts = new Array(pts.length)
     for (let i = 0; i < pts.length; i++) {
@@ -103,42 +119,81 @@ export function writeDxf(doc = {}, { precision = 6 } = {}) {
     resolvedPoints.push({ layer: addLayer(p.layer), x: p.x, y: p.y, z })
     grow(p.x, p.y, z)
   }
-  if (!(minX <= maxX)) { minX = minY = minZ = 0; maxX = maxY = maxZ = 0 }
+  if (!(minX <= maxX)) {
+    minX = minY = minZ = 0
+    maxX = maxY = maxZ = 0
+  }
 
   // HEADER
-  g(0, 'SECTION'); g(2, 'HEADER')
-  g(9, '$ACADVER'); g(1, 'AC1009')
-  g(9, '$EXTMIN'); g(10, num(minX)); g(20, num(minY)); g(30, num(minZ))
-  g(9, '$EXTMAX'); g(10, num(maxX)); g(20, num(maxY)); g(30, num(maxZ))
+  g(0, 'SECTION')
+  g(2, 'HEADER')
+  g(9, '$ACADVER')
+  g(1, 'AC1009')
+  g(9, '$EXTMIN')
+  g(10, num(minX))
+  g(20, num(minY))
+  g(30, num(minZ))
+  g(9, '$EXTMAX')
+  g(10, num(maxX))
+  g(20, num(maxY))
+  g(30, num(maxZ))
   g(0, 'ENDSEC')
 
   // TABLES: LTYPE (CONTINUOUS, which every layer references) + LAYER
-  g(0, 'SECTION'); g(2, 'TABLES')
-  g(0, 'TABLE'); g(2, 'LTYPE'); g(70, 1)
-  g(0, 'LTYPE'); g(2, 'CONTINUOUS'); g(70, 0); g(3, 'Solid line'); g(72, 65); g(73, 0); g(40, '0.0')
+  g(0, 'SECTION')
+  g(2, 'TABLES')
+  g(0, 'TABLE')
+  g(2, 'LTYPE')
+  g(70, 1)
+  g(0, 'LTYPE')
+  g(2, 'CONTINUOUS')
+  g(70, 0)
+  g(3, 'Solid line')
+  g(72, 65)
+  g(73, 0)
+  g(40, '0.0')
   g(0, 'ENDTAB')
-  g(0, 'TABLE'); g(2, 'LAYER'); g(70, layers.size)
+  g(0, 'TABLE')
+  g(2, 'LAYER')
+  g(70, layers.size)
   for (const [name, color] of layers) {
-    g(0, 'LAYER'); g(2, name); g(70, 0); g(62, color); g(6, 'CONTINUOUS')
+    g(0, 'LAYER')
+    g(2, name)
+    g(70, 0)
+    g(62, color)
+    g(6, 'CONTINUOUS')
   }
   g(0, 'ENDTAB')
   g(0, 'ENDSEC')
 
   // ENTITIES
-  g(0, 'SECTION'); g(2, 'ENTITIES')
+  g(0, 'SECTION')
+  g(2, 'ENTITIES')
   for (const pl of resolved) {
-    g(0, 'POLYLINE'); g(8, pl.layer); g(66, 1)
-    g(10, '0.0'); g(20, '0.0'); g(30, num(pl.elev))
+    g(0, 'POLYLINE')
+    g(8, pl.layer)
+    g(66, 1)
+    g(10, '0.0')
+    g(20, '0.0')
+    g(30, num(pl.elev))
     g(70, (pl.flat ? 0 : 8) | (pl.closed ? 1 : 0))
     for (const [x, y, z] of pl.verts) {
-      g(0, 'VERTEX'); g(8, pl.layer)
-      g(10, num(x)); g(20, num(y)); g(30, num(z))
+      g(0, 'VERTEX')
+      g(8, pl.layer)
+      g(10, num(x))
+      g(20, num(y))
+      g(30, num(z))
       g(70, pl.flat ? 0 : 32)
     }
-    g(0, 'SEQEND'); g(8, pl.layer)
+    g(0, 'SEQEND')
+    g(8, pl.layer)
   }
   for (const p of resolvedPoints) {
-    g(0, 'POINT'); g(8, p.layer); g(10, num(p.x)); g(20, num(p.y)); g(30, num(p.z))
+    g(0, 'POINT')
+    g(8, p.layer)
+    g(10, num(p.x))
+    g(20, num(p.y))
+    g(30, num(p.z))
   }
   g(0, 'ENDSEC')
   g(0, 'EOF')

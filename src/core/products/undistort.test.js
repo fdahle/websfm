@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import {
-  sampleRgbaBilinear, sampleRgbBilinear, packRgb, resampleRgba, resampleMaskLut, pinholeFrameSize,
-  validSampleRect, cropRgba, shiftPrincipalPoint, fisheyeCanvas, resampleRgbaMarked,
+  sampleRgbaBilinear,
+  sampleRgbBilinear,
+  packRgb,
+  resampleRgba,
+  resampleMaskLut,
+  pinholeFrameSize,
+  validSampleRect,
+  cropRgba,
+  shiftPrincipalPoint,
+  fisheyeCanvas,
+  resampleRgbaMarked,
 } from './undistort.js'
 import { makeSampleMap } from '../sfm/displayFrame.js'
 import { toScaledPx, fromScaledPx } from '../sfm/geometry.js'
@@ -16,7 +25,10 @@ function rampRaster(w, h) {
   for (let v = 0; v < h; v++) {
     for (let u = 0; u < w; u++) {
       const i = (v * w + u) * 4
-      data[i] = u; data[i + 1] = v; data[i + 2] = 0; data[i + 3] = 255
+      data[i] = u
+      data[i + 1] = v
+      data[i + 2] = 0
+      data[i + 3] = 255
     }
   }
   return { data, width: w, height: h }
@@ -27,13 +39,15 @@ describe('sampleRgbaBilinear', () => {
     const r = rampRaster(4, 4)
     const out = new Uint8ClampedArray(4)
     sampleRgbaBilinear(r.data, 4, 4, 1.5, 2, out, 0)
-    expect(out[0]).toBe(2)          // (1+2)/2 rounded by the clamped array
+    expect(out[0]).toBe(2) // (1+2)/2 rounded by the clamped array
     expect(out[1]).toBe(2)
     // Far outside → the corner pixel, never a wrap-around.
     sampleRgbaBilinear(r.data, 4, 4, -50, -50, out, 0)
-    expect(out[0]).toBe(0); expect(out[1]).toBe(0)
+    expect(out[0]).toBe(0)
+    expect(out[1]).toBe(0)
     sampleRgbaBilinear(r.data, 4, 4, 999, 999, out, 0)
-    expect(out[0]).toBe(3); expect(out[1]).toBe(3)
+    expect(out[0]).toBe(3)
+    expect(out[1]).toBe(3)
   })
 })
 
@@ -64,7 +78,7 @@ describe('undistort round-trip', () => {
     let worst = 0
     for (let v = 0; v < 480; v += 37) {
       for (let u = 0; u < 640; u += 41) {
-        const d = map(u, v)                       // ideal → distorted
+        const d = map(u, v) // ideal → distorted
         const back = undistortPixel(d.x, d.y, K, dist) // distorted → ideal
         worst = Math.max(worst, Math.hypot(back.x - u, back.y - v))
       }
@@ -91,7 +105,11 @@ describe('makeSampleMap scaling', () => {
     const half = makeSampleMap({ K, dist, outScale: 0.5, srcScale: 0.5 })
     // Centre-aligned grids (geometry.js toScaledPx): half-grid pixel u is native
     // (u + ½)/0.5 − ½, and the result goes back the same way.
-    for (const [u, v] of [[10, 10], [100, 60], [300, 200]]) {
+    for (const [u, v] of [
+      [10, 10],
+      [100, 60],
+      [300, 200],
+    ]) {
       const a = full(fromScaledPx(u, 0.5), fromScaledPx(v, 0.5))
       const b = half(u, v)
       expect(Math.abs(b.x - toScaledPx(a.x, 0.5))).toBeLessThan(1e-6)
@@ -106,19 +124,16 @@ describe('makeSampleMap scaling', () => {
 
 describe('pinholeFrameSize', () => {
   it('uses the native image size for a normal camera', () => {
-    expect(pinholeFrameSize({ meta: { width: 6000, height: 4000 } }))
-      .toEqual({ width: 6000, height: 4000 })
+    expect(pinholeFrameSize({ meta: { width: 6000, height: 4000 } })).toEqual({ width: 6000, height: 4000 })
   })
 
   it('uses the canonical frame for a film scan, not the scan size', () => {
     const fiducial = { frame: { width: 9200, height: 9200 }, A: null }
-    expect(pinholeFrameSize({ meta: { width: 20000, height: 19000 }, fiducial }))
-      .toEqual({ width: 9200, height: 9200 })
+    expect(pinholeFrameSize({ meta: { width: 20000, height: 19000 }, fiducial })).toEqual({ width: 9200, height: 9200 })
   })
 
   it('scales the grid down for a reduced-resolution run', () => {
-    expect(pinholeFrameSize({ meta: { width: 1000, height: 500 }, scale: 0.25 }))
-      .toEqual({ width: 250, height: 125 })
+    expect(pinholeFrameSize({ meta: { width: 1000, height: 500 }, scale: 0.25 })).toEqual({ width: 250, height: 125 })
   })
 })
 
@@ -139,8 +154,7 @@ describe('validSampleRect', () => {
     // pixel closer to the centre and nothing falls outside. Undistorting barrel
     // expands the image; it is pincushion that costs you a border.
     const map = makeSampleMap({ K, dist: { k1: -0.25, k2: 0, k3: 0, p1: 0, p2: 0 } })
-    expect(validSampleRect(map, 640, 480, 640, 480))
-      .toEqual({ x: 0, y: 0, width: 640, height: 480 })
+    expect(validSampleRect(map, 640, 480, 640, 480)).toEqual({ x: 0, y: 0, width: 640, height: 480 })
   })
 
   it('crops pincushion distortion to an inscribed rectangle strictly inside the frame', () => {
@@ -175,7 +189,7 @@ describe('cropRgba + shiftPrincipalPoint', () => {
     const rect = { x: 2, y: 3, width: 4, height: 2 }
     const out = cropRgba(r.data, 8, 8, rect)
     expect(out.length).toBe(4 * 2 * 4)
-    expect([out[0], out[1]]).toEqual([2, 3])           // top-left is source (2,3)
+    expect([out[0], out[1]]).toEqual([2, 3]) // top-left is source (2,3)
     const k2 = shiftPrincipalPoint(K, rect)
     expect(k2).toEqual({ fx: 800, fy: 800, cx: 318, cy: 237 })
   })
@@ -220,28 +234,39 @@ describe('fisheyeCanvas', () => {
   it('marks the canvas pixels whose sample falls off the photo', () => {
     const src = { data: new Uint8ClampedArray(4 * 4 * 4).fill(200), width: 4, height: 4 }
     const { data, outside } = resampleRgbaMarked(src, (u, v) => ({ x: u - 1, y: v - 1 }), 6, 6)
-    expect(outside[0]).toBe(1)              // (0,0) → (−1,−1): off the photo
-    expect(outside[1 * 6 + 1]).toBe(0)      // (1,1) → (0,0)
+    expect(outside[0]).toBe(1) // (0,0) → (−1,−1): off the photo
+    expect(outside[1 * 6 + 1]).toBe(0) // (1,1) → (0,0)
     expect(data[(1 * 6 + 1) * 4]).toBe(200)
-    expect(outside[5 * 6 + 5]).toBe(1)      // (5,5) → (4,4): past the last pixel
+    expect(outside[5 * 6 + 5]).toBe(1) // (5,5) → (4,4): past the last pixel
   })
 })
 
 describe('packed RGB photos', () => {
   it('pack in place and sample to the same three values as RGBA', () => {
-    const w = 7, h = 5, rgba = Uint8ClampedArray.from({ length: w * h * 4 }, (_, i) => (i * 37 + 11) % 256)
+    const w = 7,
+      h = 5,
+      rgba = Uint8ClampedArray.from({ length: w * h * 4 }, (_, i) => (i * 37 + 11) % 256)
     const ref = rgba.slice()
     const rgb = packRgb(rgba)
     expect(rgb.length).toBe(w * h * 3)
     for (let i = 0; i < w * h; i++) for (let c = 0; c < 3; c++) expect(rgb[3 * i + c]).toBe(ref[4 * i + c])
-    const a = new Float64Array(4), b = new Float64Array(4)
-    for (const [x, y] of [[0, 0], [2.3, 1.7], [6.4, 4.9], [-0.5, 3.2], [5.99, 0.01]]) {
-      sampleRgbaBilinear(ref, w, h, x, y, a, 0); sampleRgbBilinear(rgb, w, h, x, y, b, 0)
+    const a = new Float64Array(4),
+      b = new Float64Array(4)
+    for (const [x, y] of [
+      [0, 0],
+      [2.3, 1.7],
+      [6.4, 4.9],
+      [-0.5, 3.2],
+      [5.99, 0.01],
+    ]) {
+      sampleRgbaBilinear(ref, w, h, x, y, a, 0)
+      sampleRgbBilinear(rgb, w, h, x, y, b, 0)
       expect([...b.subarray(0, 3)]).toEqual([...a.subarray(0, 3)])
     }
   })
   it('copies when the view does not own its whole buffer', () => {
-    const buf = new Uint8ClampedArray(4 + 8), view = buf.subarray(4)
+    const buf = new Uint8ClampedArray(4 + 8),
+      view = buf.subarray(4)
     view.set([1, 2, 3, 255, 4, 5, 6, 255])
     expect([...packRgb(view)]).toEqual([1, 2, 3, 4, 5, 6])
   })

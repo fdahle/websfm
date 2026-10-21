@@ -27,7 +27,9 @@ export function useCameraFrustums({ view, images, requestRender }) {
   const thumbQueue = []
   let thumbActive = 0
   let thumbSyncRaf = 0
-  let frustumLineMat = null, frustumLineGeo = null, frustumPlaneGeo = null
+  let frustumLineMat = null,
+    frustumLineGeo = null,
+    frustumPlaneGeo = null
 
   // Removes the glyphs only; geometry, materials and thumbnails are shared/cached.
   function clearFrustums() {
@@ -46,7 +48,9 @@ export function useCameraFrustums({ view, images, requestRender }) {
     for (const entry of thumbCache.values()) disposeThumb(entry)
     thumbCache.clear()
     thumbQueue.length = 0
-    frustumLineMat?.dispose(); frustumLineGeo?.dispose(); frustumPlaneGeo?.dispose()
+    frustumLineMat?.dispose()
+    frustumLineGeo?.dispose()
+    frustumPlaneGeo?.dispose()
     frustumLineMat = frustumLineGeo = frustumPlaneGeo = null
   }
 
@@ -60,19 +64,30 @@ export function useCameraFrustums({ view, images, requestRender }) {
       // createImageBitmap decodes off the main thread and resizes in one step.
       // The bitmap is flipped here because WebGL ignores UNPACK_FLIP_Y for it.
       fetch(url)
-        .then(r => r.blob())
-        .then(blob => createImageBitmap(blob, {
-          resizeWidth: THUMB_PX, resizeHeight: THUMB_PX, resizeQuality: 'medium', imageOrientation: 'flipY',
-        }))
+        .then((r) => r.blob())
+        .then((blob) =>
+          createImageBitmap(blob, {
+            resizeWidth: THUMB_PX,
+            resizeHeight: THUMB_PX,
+            resizeQuality: 'medium',
+            imageOrientation: 'flipY',
+          }),
+        )
         .then((bitmap) => {
-          if (entry.disposed || entry.url !== url) { bitmap.close(); return }
+          if (entry.disposed || entry.url !== url) {
+            bitmap.close()
+            return
+          }
           entry.tex.image?.close?.()
           entry.tex.image = bitmap
           entry.tex.needsUpdate = true
           requestRender()
         })
         .catch(() => {}) // a dead blob: url just leaves the quad untextured
-        .finally(() => { thumbActive--; pumpThumbQueue() })
+        .finally(() => {
+          thumbActive--
+          pumpThumbQueue()
+        })
     }
   }
 
@@ -82,7 +97,13 @@ export function useCameraFrustums({ view, images, requestRender }) {
     const tex = new THREE.Texture()
     tex.colorSpace = THREE.SRGBColorSpace
     tex.flipY = false
-    entry = { url: null, tex, mat: new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }), queued: false, disposed: false }
+    entry = {
+      url: null,
+      tex,
+      mat: new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }),
+      queued: false,
+      disposed: false,
+    }
     thumbCache.set(uuid, entry)
     return entry
   }
@@ -92,7 +113,10 @@ export function useCameraFrustums({ view, images, requestRender }) {
     const url = img.thumb?.url ?? null
     if (!url || entry.url === url) return
     entry.url = url
-    if (!entry.queued) { entry.queued = true; thumbQueue.push(entry) }
+    if (!entry.queued) {
+      entry.queued = true
+      thumbQueue.push(entry)
+    }
     pumpThumbQueue()
   }
 
@@ -130,7 +154,12 @@ export function useCameraFrustums({ view, images, requestRender }) {
     // Unit frustum in camera space (x right, y down, +z forward), depth 1.
     // corners = [BL-in-image, BR, TR, TL]; 4 centre→corner edges + the far face.
     const h = 0.5
-    const c = [[-h, -h, 1], [h, -h, 1], [h, h, 1], [-h, h, 1]]
+    const c = [
+      [-h, -h, 1],
+      [h, -h, 1],
+      [h, h, 1],
+      [-h, h, 1],
+    ]
     const lines = []
     for (const p of c) lines.push(0, 0, 0, ...p)
     for (let i = 0; i < 4; i++) lines.push(...c[i], ...c[(i + 1) % 4])
@@ -150,10 +179,22 @@ export function useCameraFrustums({ view, images, requestRender }) {
   function placeFrustum(obj, depth) {
     const { R, centre: C } = obj.userData
     obj.matrix.set(
-      R[0][0] * depth, R[1][0] * depth, R[2][0] * depth, C.x,
-      R[0][1] * depth, R[1][1] * depth, R[2][1] * depth, C.y,
-      R[0][2] * depth, R[1][2] * depth, R[2][2] * depth, C.z,
-      0, 0, 0, 1,
+      R[0][0] * depth,
+      R[1][0] * depth,
+      R[2][0] * depth,
+      C.x,
+      R[0][1] * depth,
+      R[1][1] * depth,
+      R[2][1] * depth,
+      C.y,
+      R[0][2] * depth,
+      R[1][2] * depth,
+      R[2][2] * depth,
+      C.z,
+      0,
+      0,
+      0,
+      1,
     )
     obj.matrixWorldNeedsUpdate = true
   }
@@ -174,7 +215,10 @@ export function useCameraFrustums({ view, images, requestRender }) {
     ensureFrustumGeometry()
     const imgByUuid = new Map(images().map((im) => [im.uuid, im]))
     for (const [uuid, entry] of thumbCache) {
-      if (!imgByUuid.has(uuid)) { disposeThumb(entry); thumbCache.delete(uuid) }
+      if (!imgByUuid.has(uuid)) {
+        disposeThumb(entry)
+        thumbCache.delete(uuid)
+      }
     }
 
     for (const { uuid, R, centre } of cams) {
@@ -195,7 +239,10 @@ export function useCameraFrustums({ view, images, requestRender }) {
   }
 
   // Ribbon steppers — cheap live updates, no cloud recompute.
-  watch(cameraScale, () => { scaleFrustums(lastBaseDepth * cameraScale.value); requestRender() })
+  watch(cameraScale, () => {
+    scaleFrustums(lastBaseDepth * cameraScale.value)
+    requestRender()
+  })
   // A list thumbnail can land after the frustums were built (generated in the
   // background, or regenerated). One counter instead of a watch over every image.
   watch(() => imagesStore.thumbsVersion, scheduleThumbSync)
@@ -203,24 +250,34 @@ export function useCameraFrustums({ view, images, requestRender }) {
   // late). Debounced: a multi-thousand-image drop changes the length once per file,
   // and each rebuild touches every camera.
   let frustumRebuildTimer = 0
-  watch(() => images().length, () => {
-    clearTimeout(frustumRebuildTimer)
-    frustumRebuildTimer = setTimeout(() => {
-      if (view.unmounted || !view.scene || !lastCams.length) return
-      buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
-      requestRender()
-    }, 300)
-  })
+  watch(
+    () => images().length,
+    () => {
+      clearTimeout(frustumRebuildTimer)
+      frustumRebuildTimer = setTimeout(() => {
+        if (view.unmounted || !view.scene || !lastCams.length) return
+        buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
+        requestRender()
+      }, 300)
+    },
+  )
 
   // The cameras of the drawn layers changed: place a glyph per camera, sized by
   // their spacing (cameraFrustumDepth) and the ribbon's camera size.
   function setCameras(cameras) {
-    lastCams = [...cameras].map(([uuid, { R, t }]) => ({ uuid, R, centre: new THREE.Vector3(
-      -(R[0][0]*t[0] + R[1][0]*t[1] + R[2][0]*t[2]),
-      -(R[0][1]*t[0] + R[1][1]*t[1] + R[2][1]*t[2]),
-      -(R[0][2]*t[0] + R[1][2]*t[1] + R[2][2]*t[2]),
-    ) }))
-    lastBaseDepth = cameraFrustumDepth(lastCams.map(c => c.centre), [])
+    lastCams = [...cameras].map(([uuid, { R, t }]) => ({
+      uuid,
+      R,
+      centre: new THREE.Vector3(
+        -(R[0][0] * t[0] + R[1][0] * t[1] + R[2][0] * t[2]),
+        -(R[0][1] * t[0] + R[1][1] * t[1] + R[2][1] * t[2]),
+        -(R[0][2] * t[0] + R[1][2] * t[1] + R[2][2] * t[2]),
+      ),
+    }))
+    lastBaseDepth = cameraFrustumDepth(
+      lastCams.map((c) => c.centre),
+      [],
+    )
     buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
   }
 

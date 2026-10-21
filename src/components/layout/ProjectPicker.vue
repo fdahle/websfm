@@ -19,8 +19,18 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'switch', 'rename', 'delete', 'new', 'open-file', 'open-folder', 'close',
-  'settings', 'save-copy', 'move-to-folder', 'move-to-browser', 'example',
+  'switch',
+  'rename',
+  'delete',
+  'new',
+  'open-file',
+  'open-folder',
+  'close',
+  'settings',
+  'save-copy',
+  'move-to-folder',
+  'move-to-browser',
+  'example',
 ])
 
 // Per-project actions live in one row menu rather than a row of icon buttons:
@@ -28,7 +38,7 @@ const emit = defineEmits([
 // "Save a copy…"). Saving and migrating storage read/write the whole project
 // tree, which needs the project's root registered — so they are offered on the
 // *open* project only, with the reason spelled out rather than hidden.
-const menu = ref(null)   // { id, name, x, y } | null
+const menu = ref(null) // { id, name, x, y } | null
 
 function openMenu(e, project) {
   e.preventDefault()
@@ -41,15 +51,24 @@ function openMenu(e, project) {
     y: Math.min(rect.bottom + 2, window.innerHeight - 230),
   }
 }
-function closeMenu() { menu.value = null }
+function closeMenu() {
+  menu.value = null
+}
 // Run the action BEFORE clearing the menu: every callback reads `menu` lazily
 // (menu.id / menu.project), so closing first would null it out and the action
 // would throw on `null.project` — leaving every item dead.
-function runMenu(fn) { fn(); closeMenu() }
+function runMenu(fn) {
+  fn()
+  closeMenu()
+}
 
 const {
-  editingId: renamingId, editingName: renameValue, setInput: setRenameInput,
-  start: startRename, commit: commitRename, cancel: cancelRename,
+  editingId: renamingId,
+  editingName: renameValue,
+  setInput: setRenameInput,
+  start: startRename,
+  commit: commitRename,
+  cancel: cancelRename,
 } = useInlineRename((id, name) => emit('rename', id, name))
 
 // A folder project's files are on the user's own disk, so removing it here only
@@ -147,8 +166,15 @@ onBeforeUnmount(() => {
               <span class="project-name">{{ project.name }}</span>
             </div>
             <span class="project-meta">{{ projectMeta(project) }}</span>
-            <span class="project-version" :class="{ 'different-version': project.createdWithVersion && project.createdWithVersion !== appVersion }">
-              {{ project.createdWithVersion ? `Created with websfm v${project.createdWithVersion}` : 'Creation version unknown' }}
+            <span
+              class="project-version"
+              :class="{ 'different-version': project.createdWithVersion && project.createdWithVersion !== appVersion }"
+            >
+              {{
+                project.createdWithVersion
+                  ? `Created with websfm v${project.createdWithVersion}`
+                  : 'Creation version unknown'
+              }}
             </span>
           </button>
           <button class="icon-btn" title="Project actions" @click.stop="openMenu($event, project)">⋯</button>
@@ -194,42 +220,62 @@ onBeforeUnmount(() => {
     <!-- Teleported: the picker clips (overflow:hidden) and, when centered, sits
          in a transformed ancestor — which would re-root `position: fixed`. -->
     <Teleport to="body">
-    <div v-if="menu" class="row-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
-      <button
-        class="menu-item"
-        :disabled="menu.id !== currentProjectId"
-        :title="menu.id !== currentProjectId ? 'Open this project first' : 'Edit this project’s properties and storage'"
-        @click="runMenu(() => emit('settings', menu.id))"
-      >Project settings…</button>
-      <button class="menu-item" @click="runMenu(() => startRename(menu.project.id, menu.project.name))">Rename</button>
-      <button
-        class="menu-item"
-        :disabled="menu.id !== currentProjectId"
-        :title="menu.id !== currentProjectId ? 'Open this project first' : 'Write a portable .websfm file'"
-        @click="runMenu(() => emit('save-copy', menu.id))"
-      >Save a copy…</button>
-      <template v-if="folderSupported">
+      <div v-if="menu" class="row-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
+        <button
+          class="menu-item"
+          :disabled="menu.id !== currentProjectId"
+          :title="
+            menu.id !== currentProjectId ? 'Open this project first' : 'Edit this project’s properties and storage'
+          "
+          @click="runMenu(() => emit('settings', menu.id))"
+        >
+          Project settings…
+        </button>
+        <button class="menu-item" @click="runMenu(() => startRename(menu.project.id, menu.project.name))">
+          Rename
+        </button>
+        <button
+          class="menu-item"
+          :disabled="menu.id !== currentProjectId"
+          :title="menu.id !== currentProjectId ? 'Open this project first' : 'Write a portable .websfm file'"
+          @click="runMenu(() => emit('save-copy', menu.id))"
+        >
+          Save a copy…
+        </button>
+        <template v-if="folderSupported">
+          <div class="menu-sep"></div>
+          <button
+            v-if="!isFolderProject(menu.project)"
+            class="menu-item"
+            :disabled="menu.id !== currentProjectId"
+            :title="
+              menu.id !== currentProjectId
+                ? 'Open this project first'
+                : 'Move out of browser storage into a folder on disk'
+            "
+            @click="runMenu(() => emit('move-to-folder', menu.id))"
+          >
+            Move to folder…
+          </button>
+          <button
+            v-else
+            class="menu-item"
+            :disabled="menu.id !== currentProjectId"
+            :title="
+              menu.id !== currentProjectId
+                ? 'Open this project first'
+                : 'Copy into browser storage; the folder on disk is left in place'
+            "
+            @click="runMenu(() => emit('move-to-browser', menu.id))"
+          >
+            Move to browser storage
+          </button>
+        </template>
         <div class="menu-sep"></div>
-        <button
-          v-if="!isFolderProject(menu.project)"
-          class="menu-item"
-          :disabled="menu.id !== currentProjectId"
-          :title="menu.id !== currentProjectId ? 'Open this project first' : 'Move out of browser storage into a folder on disk'"
-          @click="runMenu(() => emit('move-to-folder', menu.id))"
-        >Move to folder…</button>
-        <button
-          v-else
-          class="menu-item"
-          :disabled="menu.id !== currentProjectId"
-          :title="menu.id !== currentProjectId ? 'Open this project first' : 'Copy into browser storage; the folder on disk is left in place'"
-          @click="runMenu(() => emit('move-to-browser', menu.id))"
-        >Move to browser storage</button>
-      </template>
-      <div class="menu-sep"></div>
-      <button class="menu-item danger" @click="runMenu(() => confirmDelete(menu.project))">
-        {{ isFolderProject(menu.project) ? 'Remove from websfm…' : 'Delete…' }}
-      </button>
-    </div>
+        <button class="menu-item danger" @click="runMenu(() => confirmDelete(menu.project))">
+          {{ isFolderProject(menu.project) ? 'Remove from websfm…' : 'Delete…' }}
+        </button>
+      </div>
     </Teleport>
   </div>
 </template>
@@ -342,7 +388,8 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-.project-version, .app-version {
+.project-version,
+.app-version {
   font-size: 11px;
   color: var(--text-dim);
 }

@@ -8,9 +8,7 @@ import { createImageGroups } from './images/imageGroups.js'
 import { createKeypointCache } from './images/keypointCache.js'
 import { defineStore } from 'pinia'
 import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult } from '../utils/tiff.js'
-import {
-  transcodeTiff, buildPyramid, POOL_SIZE, imageQuality as imageQualityWorker,
-} from '../workers/computeClient.js'
+import { transcodeTiff, buildPyramid, POOL_SIZE, imageQuality as imageQualityWorker } from '../workers/computeClient.js'
 import { dataUrlToBlob } from '../core/mask.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
@@ -29,7 +27,11 @@ import { pluralize } from '../core/textFormat.js'
 // so the byte has to actually arrive.
 async function blobReadable(blob) {
   if (!blob?.size) return false
-  try { return (await blob.slice(0, 1).arrayBuffer()).byteLength === 1 } catch { return false }
+  try {
+    return (await blob.slice(0, 1).arrayBuffer()).byteLength === 1
+  } catch {
+    return false
+  }
 }
 
 // The same for a compute source: a pyramid descriptor's container Blob, or a
@@ -42,7 +44,9 @@ async function sourceReadable(source) {
     await reader.read()
     reader.cancel().catch(() => {})
     return true
-  } catch { return false }
+  } catch {
+    return false
+  }
 }
 
 // The image set: source images, their metadata, keypoints, masks, depth maps, and
@@ -69,10 +73,20 @@ export const useImagesStore = defineStore('images', () => {
 
   // Keypoints: on disk, resident in a byte-budgeted LRU (images/keypointCache.js).
   const {
-    residentKeypoints, holdKeypoints, ensureKeypoints,
-    readKeypoints, resetKeypointCache, keypointCache, keypointCacheStats,
+    residentKeypoints,
+    holdKeypoints,
+    ensureKeypoints,
+    readKeypoints,
+    resetKeypointCache,
+    keypointCache,
+    keypointCacheStats,
   } = createKeypointCache({
-    hasKeypoints, imageById, isPersisting, log, projects, save,
+    hasKeypoints,
+    imageById,
+    isPersisting,
+    log,
+    projects,
+    save,
   })
 
   // TIFF compute-source readiness. A TIFF's `computeUrl` (lossless PNG) is encoded
@@ -111,7 +125,10 @@ export const useImagesStore = defineStore('images', () => {
 
   function markComputePending(uuid) {
     let resolve, reject
-    const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+    const promise = new Promise((res, rej) => {
+      resolve = res
+      reject = rej
+    })
     // Swallow the "unhandled rejection" warning if nothing is awaiting at the
     // moment we reject; real awaiters await `promise` directly and still see it.
     promise.catch(() => {})
@@ -119,11 +136,17 @@ export const useImagesStore = defineStore('images', () => {
   }
   function resolveComputeReady(uuid) {
     const e = computeReady.get(uuid)
-    if (e) { computeReady.delete(uuid); e.resolve() }
+    if (e) {
+      computeReady.delete(uuid)
+      e.resolve()
+    }
   }
   function rejectComputeReady(uuid, err) {
     const e = computeReady.get(uuid)
-    if (e) { computeReady.delete(uuid); e.reject(err) }
+    if (e) {
+      computeReady.delete(uuid)
+      e.reject(err)
+    }
   }
   // Compute entry points call this before reading `computeUrl`. Resolves
   // immediately for anything that never had a pending PNG encode.
@@ -153,7 +176,9 @@ export const useImagesStore = defineStore('images', () => {
   function save(expectedProjectId = projects.currentProjectId) {
     if (!isPersisting() || projects.currentProjectId !== expectedProjectId) return Promise.resolve()
     pendingWorkCount.value++
-    return saveProjectDocument().finally(() => { pendingWorkCount.value-- })
+    return saveProjectDocument().finally(() => {
+      pendingWorkCount.value--
+    })
   }
 
   function projectDocument(pid) {
@@ -167,16 +192,22 @@ export const useImagesStore = defineStore('images', () => {
         // eslint-disable-next-line no-unused-vars
         const { raw: _raw, ...metaToSave } = img.meta ?? {}
         return {
-          id: img.id, uuid: img.uuid, name: img.name,
+          id: img.id,
+          uuid: img.uuid,
+          name: img.name,
           sourceName: img.sourceName ?? img.name,
-          kpStatus: img.kpStatus, kpCount: img.kpCount, kpMs: img.kpMs,
-          detector: img.detector ?? null, descDim: img.descDim ?? null,
+          kpStatus: img.kpStatus,
+          kpCount: img.kpCount,
+          kpMs: img.kpMs,
+          detector: img.detector ?? null,
+          descDim: img.descDim ?? null,
           descNorm: img.descNorm ?? null,
           detectScale: img.detectScale ?? null,
           detectSettings: img.detectSettings ?? null,
           // Tools ▸ Images ▾ ▸ Image quality; absent ⇒ never measured.
           quality: img.quality ?? null,
-          hasMask: !!img.mask, hasDepth: !!img.depth,
+          hasMask: !!img.mask,
+          hasDepth: !!img.depth,
           sensorId: img.sensorId ?? null,
           groupId: img.groupId ?? null,
           // Fiducial detections (F4) are spots on the raster — tiny, and persisted
@@ -215,7 +246,8 @@ export const useImagesStore = defineStore('images', () => {
   function releaseImageUrls(img) {
     URL.revokeObjectURL(img.url)
     if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
-    releasePreview(img.mask); releasePreview(img.depth)
+    releasePreview(img.mask)
+    releasePreview(img.depth)
     thumbnails.release(img.thumb)
   }
 
@@ -224,10 +256,19 @@ export const useImagesStore = defineStore('images', () => {
   }
 
   // Adding images (images/ingest.js).
-  const {
-    addImages, } = createIngest({
-    activeImports, images, isPersisting, log, markComputePending, pendingWorkCount, projects,
-    rejectComputeReady, resolveComputeReady, save, thumbnails, trackWrite,
+  const { addImages } = createIngest({
+    activeImports,
+    images,
+    isPersisting,
+    log,
+    markComputePending,
+    pendingWorkCount,
+    projects,
+    rejectComputeReady,
+    resolveComputeReady,
+    save,
+    thumbnails,
+    trackWrite,
   })
 
   function removeImage(id, onRemoved) {
@@ -271,9 +312,18 @@ export const useImagesStore = defineStore('images', () => {
 
   // Image groups (images/imageGroups.js).
   const {
-    createImageGroup, renameImageGroup, removeImageGroup, setImagesGroup, setImageGroupCollapsed, moveImageGroup,
+    createImageGroup,
+    renameImageGroup,
+    removeImageGroup,
+    setImagesGroup,
+    setImageGroupCollapsed,
+    moveImageGroup,
   } = createImageGroups({
-    imageGroups, images, isPersisting, log, save,
+    imageGroups,
+    images,
+    isPersisting,
+    log,
+    save,
   })
 
   // ── Image source liveness ─────────────────────────────────────────────────
@@ -305,8 +355,12 @@ export const useImagesStore = defineStore('images', () => {
       attempt = refreshImageUrl(img)
         .then((healed) => {
           if (healed) {
-            log(`Image source recovered from project storage: ${img.name} — the file it was `
-              + 'loaded from is no longer readable (moved, renamed, or deleted)', 'warn', 'Images')
+            log(
+              `Image source recovered from project storage: ${img.name} — the file it was ` +
+                'loaded from is no longer readable (moved, renamed, or deleted)',
+              'warn',
+              'Images',
+            )
           }
           return healed
         })
@@ -328,7 +382,8 @@ export const useImagesStore = defineStore('images', () => {
     // Read before use, so a heal can't hand back a second dead URL that fails
     // on first paint.
     const readable = blobReadable
-    let displayBlob = null, computeBlob = null
+    let displayBlob = null,
+      computeBlob = null
     if (img.computePyramid) {
       // Its compute pixels are the pyramid (a Blob, not a URL); only the display heals.
       displayBlob = await opfs.loadImageDerivedBlob(projectId, img.uuid, 'display')
@@ -375,9 +430,13 @@ export const useImagesStore = defineStore('images', () => {
     if (!still || still.previewFailed) return false
     still.previewFailed = true
     still.previewFailReason = 'source-lost'
-    log(`Image unavailable: ${still.name} — the browser can no longer read its pixels, and there `
-      + 'is no usable copy in project storage. Re-add the file to restore it; detection, dense '
-      + 'MVS and orthophoto generation will fail for this image until you do.', 'error', 'Images')
+    log(
+      `Image unavailable: ${still.name} — the browser can no longer read its pixels, and there ` +
+        'is no usable copy in project storage. Re-add the file to restore it; detection, dense ' +
+        'MVS and orthophoto generation will fail for this image until you do.',
+      'error',
+      'Images',
+    )
     return false
   }
 
@@ -390,7 +449,10 @@ export const useImagesStore = defineStore('images', () => {
   async function probeImageSources() {
     const lost = []
     await mapConcurrent([...images.value], 8, async (img) => {
-      if (img.previewFailReason === 'source-lost') { lost.push(img); return }
+      if (img.previewFailReason === 'source-lost') {
+        lost.push(img)
+        return
+      }
       if (await sourceReadable(computeSourceOf(img))) return
       if (await reportImageLoadError(img.id)) return
       if (imageById(img.id)?.previewFailReason === 'source-lost') lost.push(img)
@@ -413,7 +475,9 @@ export const useImagesStore = defineStore('images', () => {
     const blob = typeof source === 'string' ? dataUrlToBlob(source) : source
     return markRaw({ blob, url: URL.createObjectURL(blob) })
   }
-  function releasePreview(p) { if (p?.url) URL.revokeObjectURL(p.url) }
+  function releasePreview(p) {
+    if (p?.url) URL.revokeObjectURL(p.url)
+  }
 
   function updateMask(imageId, source, persist = true) {
     const img = imageById(imageId)
@@ -455,18 +519,35 @@ export const useImagesStore = defineStore('images', () => {
 
   // Fiducial marks and detections (images/fiducials.js).
   const {
-    addFiducialObservations, setFiducialDetection, removeFiducialDetection, detectFiducialsForSensor, detectReseauForSensor, stitchReseauHalvesForSensor,
+    addFiducialObservations,
+    setFiducialDetection,
+    removeFiducialDetection,
+    detectFiducialsForSensor,
+    detectReseauForSensor,
+    stitchReseauHalvesForSensor,
     splitPanoramicForSensor,
   } = createImageFiducials({
-    imageById, images, isPersisting, log, save, updateMask, whenComputeReady, addImages,
+    imageById,
+    images,
+    isPersisting,
+    log,
+    save,
+    updateMask,
+    whenComputeReady,
+    addImages,
     removeImage: (id) => removeImage(id),
   })
 
   // Keypoint detection and feature import (images/detection.js).
-  const {
-    detectOne, detectAll, importFeatures, clearKeypoints,
-  } = createDetection({
-    holdKeypoints, imageById, images, isPersisting, keypointCache, log, projects, save,
+  const { detectOne, detectAll, importFeatures, clearKeypoints } = createDetection({
+    holdKeypoints,
+    imageById,
+    images,
+    isPersisting,
+    keypointCache,
+    log,
+    projects,
+    save,
     whenComputeReady,
   })
 
@@ -543,7 +624,9 @@ export const useImagesStore = defineStore('images', () => {
       depth: null,
       // Filled on demand (a row in view) from images-derived/{uuid}.thumb — never at open.
       thumb: null,
-      fiducialDetections: Array.isArray(record.fiducialDetections) ? record.fiducialDetections.map((d) => ({ ...d })) : [],
+      fiducialDetections: Array.isArray(record.fiducialDetections)
+        ? record.fiducialDetections.map((d) => ({ ...d }))
+        : [],
       pyramidIndex: record.pyramidIndex ? markRaw(record.pyramidIndex) : null,
       computePyramid: null,
     }))
@@ -551,7 +634,8 @@ export const useImagesStore = defineStore('images', () => {
     for (const name of missingKp.slice(0, 20)) {
       log(`Keypoints missing for ${name} — re-run feature detection`, 'warn', 'Project')
     }
-    if (missingKp.length > 20) log(`Keypoints missing for ${pluralize(missingKp.length - 20, 'more image')}`, 'warn', 'Project')
+    if (missingKp.length > 20)
+      log(`Keypoints missing for ${pluralize(missingKp.length - 20, 'more image')}`, 'warn', 'Project')
 
     const total = records.length
     if (total === 0) {
@@ -561,8 +645,11 @@ export const useImagesStore = defineStore('images', () => {
     let done = 0
     // One directory walk for the whole restore (opfs.projectSubDirs); a failure leaves
     // the loaders walking per file, as before.
-    const dirNames = ['images', ...(records.some((r) => r.hasMask) ? ['masks'] : []),
-      ...(records.some((r) => r.hasDepth) ? ['depthmaps'] : [])]
+    const dirNames = [
+      'images',
+      ...(records.some((r) => r.hasMask) ? ['masks'] : []),
+      ...(records.some((r) => r.hasDepth) ? ['depthmaps'] : []),
+    ]
     const dirs = await opfs.projectSubDirs(projectId, dirNames).catch(() => null)
     await mapConcurrent(records, 12, async (record, index) => {
       // `images` is a deep ref: assigning `restored` above makes its entries
@@ -578,9 +665,12 @@ export const useImagesStore = defineStore('images', () => {
         const loadOriginal = async () => (blob ??= await opfs.loadImageBlob(projectId, record.uuid, dirs))
         // OPFS keeps the original file, so TIFFs need the same transcode as on
         // ingest (the Blob has no name, so classify by the record's name).
-        let url, computeUrl, computePyramid = null
-        const pyr = isTiff(record.sourceName ?? record.name)
-          && (record.pyramidIndex || (record.meta?.width && needsPyramid(record.meta.width, record.meta.height)))
+        let url,
+          computeUrl,
+          computePyramid = null
+        const pyr =
+          isTiff(record.sourceName ?? record.name) &&
+          (record.pyramidIndex || (record.meta?.width && needsPyramid(record.meta.width, record.meta.height)))
         if (pyr) {
           // Past the canvas limit: the reduced display JPEG + the tile container, or a
           // rebuild from the original when either is missing.
@@ -589,16 +679,25 @@ export const useImagesStore = defineStore('images', () => {
             opfs.loadImageDerivedBlob(projectId, record.uuid, 'pyramid'),
           ])
           let index = record.pyramidIndex
-          let display = displayBlob, container = pyramidBlob
+          let display = displayBlob,
+            container = pyramidBlob
           if (!(index && display && container && container.size === index.bytes)) {
             log(`Building tiled pyramid (no cache): ${record.name}`, 'info', 'Images')
             const t = await buildPyramid(await loadOriginal())
-            index = t.index; display = t.displayBlob; container = t.blob
+            index = t.index
+            display = t.displayBlob
+            container = t.blob
             if (isPersisting()) {
-              opfs.saveImageDerived(projectId, record.uuid, 'display', display)
-                .catch((err) => log(`OPFS derived save failed (display): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'))
-              opfs.saveImageDerived(projectId, record.uuid, 'pyramid', container)
-                .catch((err) => log(`OPFS derived save failed (pyramid): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'))
+              opfs
+                .saveImageDerived(projectId, record.uuid, 'display', display)
+                .catch((err) =>
+                  log(`OPFS derived save failed (display): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'),
+                )
+              opfs
+                .saveImageDerived(projectId, record.uuid, 'pyramid', container)
+                .catch((err) =>
+                  log(`OPFS derived save failed (pyramid): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'),
+                )
             }
           } else {
             log(`Restored tiled pyramid from cache: ${record.name}`, 'info', 'Images')
@@ -633,10 +732,24 @@ export const useImagesStore = defineStore('images', () => {
               url = URL.createObjectURL(t.displayBlob)
               computeUrl = URL.createObjectURL(t.computeBlob)
               if (isPersisting()) {
-                opfs.saveImageDerived(projectId, record.uuid, 'display', t.displayBlob)
-                  .catch((err) => log(`OPFS derived save failed (display): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'))
-                opfs.saveImageDerived(projectId, record.uuid, 'compute', t.computeBlob)
-                  .catch((err) => log(`OPFS derived save failed (compute): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'))
+                opfs
+                  .saveImageDerived(projectId, record.uuid, 'display', t.displayBlob)
+                  .catch((err) =>
+                    log(
+                      `OPFS derived save failed (display): ${record.name} — ${err?.message ?? err}`,
+                      'error',
+                      'Images',
+                    ),
+                  )
+                opfs
+                  .saveImageDerived(projectId, record.uuid, 'compute', t.computeBlob)
+                  .catch((err) =>
+                    log(
+                      `OPFS derived save failed (compute): ${record.name} — ${err?.message ?? err}`,
+                      'error',
+                      'Images',
+                    ),
+                  )
               }
             }
           }
@@ -644,8 +757,11 @@ export const useImagesStore = defineStore('images', () => {
           url = URL.createObjectURL(await loadOriginal())
           computeUrl = url
         }
-        if (generation !== restoreGeneration || projectId !== projects.currentProjectId
-            || !images.value.includes(img)) {
+        if (
+          generation !== restoreGeneration ||
+          projectId !== projects.currentProjectId ||
+          !images.value.includes(img)
+        ) {
           URL.revokeObjectURL(url)
           if (computeUrl && computeUrl !== url) URL.revokeObjectURL(computeUrl)
           return
@@ -677,8 +793,11 @@ export const useImagesStore = defineStore('images', () => {
       }
     })
     if (generation === restoreGeneration && projectId === projects.currentProjectId) {
-      log(`Project assets ready: ${images.value.length} image${images.value.length !== 1 ? 's' : ''}`,
-        'success', 'Project')
+      log(
+        `Project assets ready: ${images.value.length} image${images.value.length !== 1 ? 's' : ''}`,
+        'success',
+        'Project',
+      )
     }
   }
 
@@ -691,16 +810,22 @@ export const useImagesStore = defineStore('images', () => {
     const targets = images.value.filter((img) => !wanted || wanted.has(img.id))
     if (!targets.length) return 0
     log(`Image quality: scoring ${pluralize(targets.length, 'image')}`, 'info', 'Images')
-    let done = 0, failed = 0
+    let done = 0,
+      failed = 0
     await mapConcurrent(targets, Math.max(1, Math.min(4, POOL_SIZE)), async (img) => {
       try {
         await whenComputeReady(img)
         const q = await imageQualityWorker(computeSourceOf(img), { mask: img.mask?.blob ?? null })
         img.quality = {
-          sharpness: q.sharpness, sharpnessP90: q.sharpnessP90, meanLuma: q.meanLuma,
-          overexposed: q.overexposed, underexposed: q.underexposed,
-          analysisWidth: q.analysisWidth, analysisHeight: q.analysisHeight,
-          masked: !!img.mask, at: new Date().toISOString(),
+          sharpness: q.sharpness,
+          sharpnessP90: q.sharpnessP90,
+          meanLuma: q.meanLuma,
+          overexposed: q.overexposed,
+          underexposed: q.underexposed,
+          analysisWidth: q.analysisWidth,
+          analysisHeight: q.analysisHeight,
+          masked: !!img.mask,
+          at: new Date().toISOString(),
         }
       } catch (err) {
         failed++
@@ -708,7 +833,11 @@ export const useImagesStore = defineStore('images', () => {
       }
       onProgress?.(++done, targets.length)
     })
-    log(`Image quality: scored ${targets.length - failed} of ${pluralize(targets.length, 'image')}`, failed ? 'warn' : 'success', 'Images')
+    log(
+      `Image quality: scored ${targets.length - failed} of ${pluralize(targets.length, 'image')}`,
+      failed ? 'warn' : 'success',
+      'Images',
+    )
     save()
     return targets.length - failed
   }

@@ -7,15 +7,29 @@ import { normalizeLeverArm } from './cameraPriors.js'
 // frame at half scale, so the SfM→survey scale is 2 and every offset must be halved.
 const SCALE = 2
 const nadir = (yawDeg) => {
-  const a = (yawDeg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a)
-  return [[c, s, 0], [s, -c, 0], [0, 0, -1]]
+  const a = (yawDeg * Math.PI) / 180,
+    c = Math.cos(a),
+    s = Math.sin(a)
+  return [
+    [c, s, 0],
+    [s, -c, 0],
+    [0, 0, -1],
+  ]
 }
 const mulT = (R, v) => [0, 1, 2].map((i) => R[0][i] * v[0] + R[1][i] * v[1] + R[2][i] * v[2])
 const ARM = [0.05, -0.41, -0.12] // metres, camera axes
 
 function block() {
-  const cams = new Map(), priors = []
-  const centres = [[0, 0, 100], [40, 0, 101], [80, 0, 99], [80, 30, 100], [40, 30, 102], [0, 30, 100]]
+  const cams = new Map(),
+    priors = []
+  const centres = [
+    [0, 0, 100],
+    [40, 0, 101],
+    [80, 0, 99],
+    [80, 30, 100],
+    [40, 30, 102],
+    [0, 30, 100],
+  ]
   centres.forEach((Cs, i) => {
     const R = nadir(i < 3 ? 0 : 180)
     const Csfm = Cs.map((v) => v / SCALE)
@@ -23,8 +37,16 @@ function block() {
     const uuid = `c${i}`
     cams.set(uuid, { R, t })
     const antenna = Cs.map((v, k) => v + mulT(R, ARM)[k])
-    priors.push({ uuid, x: antenna[0], y: antenna[1], z: antenna[2],
-      accuracyX: 0.02, accuracyY: 0.02, accuracyZ: 0.03, trueSfm: Csfm })
+    priors.push({
+      uuid,
+      x: antenna[0],
+      y: antenna[1],
+      z: antenna[2],
+      accuracyX: 0.02,
+      accuracyY: 0.02,
+      accuracyZ: 0.03,
+      trueSfm: Csfm,
+    })
   })
   return { cams, priors }
 }
@@ -33,7 +55,9 @@ describe('buildCameraPriorConstraints — GNSS lever arm', () => {
   it('targets the camera centre, not the antenna, when the prior carries the arm', () => {
     const { cams, priors } = block()
     const out = buildCameraPriorConstraints({
-      cameras: cams, cameraPriors: priors.map((p) => ({ ...p, leverArm: ARM })), uuidList: [...cams.keys()],
+      cameras: cams,
+      cameraPriors: priors.map((p) => ({ ...p, leverArm: ARM })),
+      uuidList: [...cams.keys()],
     })
     expect(out.fit.scale).toBeCloseTo(SCALE, 6)
     for (const c of out.priors) {

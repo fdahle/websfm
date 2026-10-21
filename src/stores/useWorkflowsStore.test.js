@@ -3,7 +3,9 @@ import { createPinia, setActivePinia } from 'pinia'
 import * as opfs from '../utils/opfs.js'
 
 vi.mock('../utils/opfs.js', () => ({
-  saveWorkflows: vi.fn(async () => {}), loadWorkflows: vi.fn(async () => null), deleteWorkflows: vi.fn(async () => {}),
+  saveWorkflows: vi.fn(async () => {}),
+  loadWorkflows: vi.fn(async () => null),
+  deleteWorkflows: vi.fn(async () => {}),
 }))
 vi.mock('../composables/useLog.js', () => ({ useLog: () => ({ log: vi.fn() }) }))
 
@@ -47,7 +49,11 @@ describe('useWorkflowsStore', () => {
     projects.projects = [{ id: 'project-1', name: 'One', sceneType: 'object' }]
     projects.currentProjectId = 'project-1'
     let finish
-    vi.mocked(opfs.loadWorkflows).mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    vi.mocked(opfs.loadWorkflows).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
     const store = useWorkflowsStore()
     const restoring = store.restore({ projectId: 'project-1' })
     store.clear()

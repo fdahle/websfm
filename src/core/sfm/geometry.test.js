@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
-  cameraCenter, toScaledPx, fromScaledPx,
+  cameraCenter,
+  toScaledPx,
+  fromScaledPx,
   projectPoint,
   projectWithDepth,
   triangulationAngle,
@@ -11,7 +13,11 @@ import {
   estimateUpFromCameras,
 } from './geometry.js'
 
-const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+const I3 = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+]
 const K = { fx: 100, fy: 100, cx: 320, cy: 240 }
 
 describe('cameraCenter', () => {
@@ -21,7 +27,11 @@ describe('cameraCenter', () => {
 
   it('computes C = -Rᵀt for a 90° rotation about z', () => {
     // R rotates world→camera; row-major.
-    const R = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    const R = [
+      [0, -1, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+    ]
     const t = [1, 0, 0]
     // C = -Rᵀt: Rᵀ = [[0,1,0],[-1,0,0],[0,0,1]], Rᵀt = [0,-1,0], C = [0,1,0].
     const C = cameraCenter({ R, t })
@@ -99,7 +109,7 @@ describe('medianTriangulationAngle', () => {
   it('picks the upper-middle element for an even count', () => {
     // Two points with distinct angles; median index = len>>1 = 1 (the larger).
     const near = { x: 0.5, y: 0.5, z: 0 } // between the centres → wide angle
-    const far = { x: 0, y: 0, z: 100 }    // far away → narrow angle
+    const far = { x: 0, y: 0, z: 100 } // far away → narrow angle
     const m = medianTriangulationAngle(camA, camB, [near, far])
     const a1 = triangulationAngle([1, 0, 0], [0, 1, 0], near)
     const a2 = triangulationAngle([1, 0, 0], [0, 1, 0], far)
@@ -110,15 +120,24 @@ describe('medianTriangulationAngle', () => {
 describe('scaleK', () => {
   it('scales the focal and moves the principal point centre-aligned', () => {
     // cx 320 → (320.5)·0.5 − 0.5 = 159.75: pixel-centre convention, as the resize is.
-    expect(scaleK({ fx: 100, fy: 200, cx: 320, cy: 240 }, 0.5))
-      .toEqual({ fx: 50, fy: 100, cx: 159.75, cy: 119.75 })
+    expect(scaleK({ fx: 100, fy: 200, cx: 320, cy: 240 }, 0.5)).toEqual({ fx: 50, fy: 100, cx: 159.75, cy: 119.75 })
   })
 
   it('projects onto the scaled grid exactly where the native projection maps to', () => {
     const K = { fx: 2400, fy: 2400, cx: 2997.3, cy: 1994.8 }
-    const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] }
+    const cam = {
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, 0],
+    }
     for (const s of [0.4, 0.5, 1 / 3]) {
-      for (const P of [[0.3, -0.2, 5], [-1.1, 0.7, 9]]) {
+      for (const P of [
+        [0.3, -0.2, 5],
+        [-1.1, 0.7, 9],
+      ]) {
         const native = projectPoint({ ...cam, K }, ...P)
         const scaled = projectPoint({ ...cam, K: scaleK(K, s) }, ...P)
         expect(scaled.u).toBeCloseTo(toScaledPx(native.u, s), 9)
@@ -135,9 +154,16 @@ describe('scaleK', () => {
     const sxy = resizeScale(2054, 1027, 4107, 2054)
     expect(sxy[1]).toBe(0.5)
     const Ks = scaleK(K, sxy)
-    expect(Ks.fx).toBeCloseTo(K.fx * 2054 / 4107, 9)
+    expect(Ks.fx).toBeCloseTo((K.fx * 2054) / 4107, 9)
     expect(Ks.fy).toBe(K.fy * 0.5)
-    const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] }
+    const cam = {
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, 0],
+    }
     const P = [0.31, -0.22, 5]
     const native = projectPoint({ ...cam, K }, ...P)
     const scaled = projectPoint({ ...cam, K: Ks }, ...P)
@@ -171,7 +197,11 @@ describe('estimateUpFromCameras', () => {
   it('recovers up for a Z-up rig looking along +Y (image-down = world -Z)', () => {
     // Camera looks +Y (world), x-right = +X, image-y (down) = world -Z.
     // world→cam rows: x_cam=+X, y_cam=-Z, z_cam(view)=+Y.
-    const R = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
+    const R = [
+      [1, 0, 0],
+      [0, 0, -1],
+      [0, 1, 0],
+    ]
     const up = estimateUpFromCameras([{ R }, { R }])
     // up = -(row 1) = -(0,0,-1) = (0,0,1) → world +Z.
     expect(up[0]).toBeCloseTo(0, 10)
@@ -182,24 +212,40 @@ describe('estimateUpFromCameras', () => {
   it('averages a small roll away and returns a unit vector', () => {
     // Two cameras rolled ±θ about the view axis average back to straight up.
     const th = 0.2
-    const c = Math.cos(th), s = Math.sin(th)
-    const Rp = [[c, -s, 0], [s, c, 0], [0, 0, 1]]
-    const Rm = [[c, s, 0], [-s, c, 0], [0, 0, 1]]
+    const c = Math.cos(th),
+      s = Math.sin(th)
+    const Rp = [
+      [c, -s, 0],
+      [s, c, 0],
+      [0, 0, 1],
+    ]
+    const Rm = [
+      [c, s, 0],
+      [-s, c, 0],
+      [0, 0, 1],
+    ]
     const up = estimateUpFromCameras([{ R: Rp }, { R: Rm }])
     expect(Math.hypot(up[0], up[1], up[2])).toBeCloseTo(1, 10)
-    expect(up[0]).toBeCloseTo(0, 10)  // rolls cancel
+    expect(up[0]).toBeCloseTo(0, 10) // rolls cancel
     expect(up[1]).toBeCloseTo(-1, 10)
   })
 
   it('accepts a Map of cameras', () => {
-    const m = new Map([['a', { R: I3 }], ['b', { R: I3 }]])
+    const m = new Map([
+      ['a', { R: I3 }],
+      ['b', { R: I3 }],
+    ])
     expect(estimateUpFromCameras(m)).not.toBeNull()
   })
 
   // A nadir camera at (cx,cy,cz) looking down world −Z. Its image-up axis is
   // horizontal (+Y here), so the image-axis mean alone would return a sideways up.
   const nadirCam = (cx, cy, cz) => {
-    const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]]
+    const R = [
+      [1, 0, 0],
+      [0, -1, 0],
+      [0, 0, -1],
+    ]
     return { R, t: [-cx, cy, cz] } // t = -R·C
   }
 
@@ -217,7 +263,11 @@ describe('estimateUpFromCameras', () => {
   it('keeps the image-up axis for a horizontal terrestrial strip', () => {
     // Cameras walking along +X at constant height, all looking at a wall (+Y).
     // world→cam rows: x_cam=+X, y_cam(down)=-Z, z_cam(view)=+Y.
-    const R = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
+    const R = [
+      [1, 0, 0],
+      [0, 0, -1],
+      [0, 1, 0],
+    ]
     const cams = []
     for (let i = 0; i < 6; i++) cams.push({ R, t: [-i * 2, 0, 0] })
     const up = estimateUpFromCameras(cams)
@@ -225,7 +275,10 @@ describe('estimateUpFromCameras', () => {
   })
 
   it('ignores the baseline when the centres are a tight cluster', () => {
-    const cams = [{ R: I3, t: [0, 0, 0] }, { R: I3, t: [0, 0, 0] }]
+    const cams = [
+      { R: I3, t: [0, 0, 0] },
+      { R: I3, t: [0, 0, 0] },
+    ]
     const up = estimateUpFromCameras(cams)
     expect(up[1]).toBeCloseTo(-1, 6)
   })

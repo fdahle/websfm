@@ -5,9 +5,18 @@ import { registerProjectStore, restoreProjectStores } from './projectStores.js'
 function fakeStore(id) {
   const pending = []
   const store = {
-    $id: id, data: null,
-    restore: ({ projectId }) => new Promise((resolve) => pending.push(() => { store.data = projectId; resolve() })),
-    clear: () => { store.data = null },
+    $id: id,
+    data: null,
+    restore: ({ projectId }) =>
+      new Promise((resolve) =>
+        pending.push(() => {
+          store.data = projectId
+          resolve()
+        }),
+      ),
+    clear: () => {
+      store.data = null
+    },
   }
   registerProjectStore(() => store)
   return { store, finishNext: () => pending.shift()() }
@@ -19,14 +28,14 @@ it('clears a restore that finished after its project closed, and runs the next p
   let open = 'a'
   const runA = restoreProjectStores({ projectId: 'a', projectData: {}, isCurrent: () => open === 'a' })
   await tick()
-  open = 'b'                                    // switched while a's read is still pending
+  open = 'b' // switched while a's read is still pending
   const runB = restoreProjectStores({ projectId: 'b', projectData: {}, isCurrent: () => open === 'b' })
   await tick()
-  finishNext()                                  // a's read lands late …
+  finishNext() // a's read lands late …
   await runA
-  expect(store.data).toBeNull()                 // … and is cleared, not kept for b
+  expect(store.data).toBeNull() // … and is cleared, not kept for b
   await tick()
-  finishNext()                                  // b's run started only after a's settled
+  finishNext() // b's run started only after a's settled
   await runB
   expect(store.data).toBe('b')
 })

@@ -13,14 +13,14 @@ import { computed } from 'vue'
 //             correction as links. It never disappears: the declaration can be
 //             wrong, and the dialog is the only place that mistake is visible.
 const props = defineProps({
-  active:   { type: String, required: true },
+  active: { type: String, required: true },
   declared: { type: Boolean, default: false },
 })
 const emit = defineEmits(['pick'])
 
 const KINDS = [
-  { id: 'gcp',    label: 'Ground Control Points' },
-  { id: 'pose',   label: 'Camera Positions' },
+  { id: 'gcp', label: 'Ground Control Points' },
+  { id: 'pose', label: 'Camera Positions' },
   { id: 'sensor', label: 'Camera Intrinsics' },
 ]
 // Correction links list the camera kinds first: from one camera kind, the
@@ -41,18 +41,25 @@ const corrections = computed(() => CORRECTION_ORDER.filter((id) => id !== props.
         class="kind-btn"
         :class="{ active: k.id === active }"
         @click="emit('pick', k.id)"
-      >{{ k.label }}</button>
+      >
+        {{ k.label }}
+      </button>
     </div>
   </template>
   <p v-else class="kind-note">
-    Importing as <b>{{ labelOf(active) }}</b>. Not right? Import as
-    <template v-for="(id, i) in corrections" :key="id">{{ i ? ' or ' : '' }}<button class="kind-link" @click="emit('pick', id)">{{ labelOf(id) }}</button></template>.
+    Importing as <b>{{ labelOf(active) }}</b
+    >. Not right? Import as
+    <template v-for="(id, i) in corrections" :key="id"
+      >{{ i ? ' or ' : '' }}<button class="kind-link" @click="emit('pick', id)">{{ labelOf(id) }}</button></template
+    >.
   </p>
 </template>
 
 <style scoped src="./import-modal.css"></style>
 <style scoped>
-.kind-label { margin-bottom: 8px; }
+.kind-label {
+  margin-bottom: 8px;
+}
 .kind-toggle {
   display: inline-flex;
   border: 1px solid var(--panel-border);
@@ -70,9 +77,16 @@ const corrections = computed(() => CORRECTION_ORDER.filter((id) => id !== props.
   padding: 7px 16px;
   cursor: pointer;
 }
-.kind-btn + .kind-btn { border-left: 1px solid var(--panel-border); }
-.kind-btn:hover { color: var(--text); }
-.kind-btn.active { background: var(--accent); color: #fff; }
+.kind-btn + .kind-btn {
+  border-left: 1px solid var(--panel-border);
+}
+.kind-btn:hover {
+  color: var(--text);
+}
+.kind-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
 
 .kind-link {
   background: none;
@@ -83,5 +97,7 @@ const corrections = computed(() => CORRECTION_ORDER.filter((id) => id !== props.
   cursor: pointer;
   text-decoration: underline;
 }
-.kind-link:hover { filter: brightness(1.15); }
+.kind-link:hover {
+  filter: brightness(1.15);
+}
 </style>

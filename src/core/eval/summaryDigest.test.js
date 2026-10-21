@@ -2,8 +2,24 @@ import { describe, it, expect } from 'vitest'
 import { buildProjectDigest, digestToMarkdown, digestToJson } from './summaryDigest.js'
 
 const ROWS = [
-  { id: 'registered', section: 'sparse', label: 'Registered images', value: 96.7, unit: '%', status: 'ok', hint: '118 / 122' },
-  { id: 'reproj', section: 'sparse', label: 'Reprojection median', value: 1.34, unit: 'px', status: 'warn', hint: 'warn > 1' },
+  {
+    id: 'registered',
+    section: 'sparse',
+    label: 'Registered images',
+    value: 96.7,
+    unit: '%',
+    status: 'ok',
+    hint: '118 / 122',
+  },
+  {
+    id: 'reproj',
+    section: 'sparse',
+    label: 'Reprojection median',
+    value: 1.34,
+    unit: 'px',
+    status: 'warn',
+    hint: 'warn > 1',
+  },
   { id: 'graph', section: 'matching', label: 'Match-graph components', value: 1, unit: '', status: 'ok', hint: '' },
   { id: 'gcp', section: 'accuracy', label: 'GCP RMSE', value: null, unit: 'm', status: 'missing', hint: 'no georef' },
 ]
@@ -97,51 +113,98 @@ describe('digestToJson', () => {
 const B4 = {
   ...INPUT,
   detect: {
-    detector: 'sift', images: 128, maxDim: 2400, maxDimMode: 'absolute',
-    maxKeypoints: 10000, contrastThreshold: 0.01, tiling: 'off',
-    medianKeypoints: 9800, medianDetectScale: 0.78, mixed: false,
+    detector: 'sift',
+    images: 128,
+    maxDim: 2400,
+    maxDimMode: 'absolute',
+    maxKeypoints: 10000,
+    contrastThreshold: 0.01,
+    tiling: 'off',
+    medianKeypoints: 9800,
+    medianDetectScale: 0.78,
+    mixed: false,
   },
   matchRun: {
-    strategy: 'exhaustive', matcher: 'bruteforce', nPairs: 8128,
-    accepted: 647, weak: 0, rejected: 15, skipped: 20, gated: 7446,
-    inliers: 145289, meanInlierRatio: 0.85, subsetGateActive: true, resolvedRansacPx: 2.53,
+    strategy: 'exhaustive',
+    matcher: 'bruteforce',
+    nPairs: 8128,
+    accepted: 647,
+    weak: 0,
+    rejected: 15,
+    skipped: 20,
+    gated: 7446,
+    inliers: 145289,
+    meanInlierRatio: 0.85,
+    subsetGateActive: true,
+    resolvedRansacPx: 2.53,
     settings: { ratioThreshold: 0.75, minInlierRatio: 0.15, crossCheck: true },
   },
   summary: {
     ...INPUT.summary,
     config: { reprjThresholdDetectPx: 4, baIterations: 30, refineIntrinsics: 'auto' },
     gates: {
-      detectScaleFactor: 2.53, medianScale: 0.395, clamped: false, mixed: false,
-      reprjThresholdPx: 7.6, filterMaxReprojPx: 10.14,
+      detectScaleFactor: 2.53,
+      medianScale: 0.395,
+      clamped: false,
+      mixed: false,
+      reprjThresholdPx: 7.6,
+      filterMaxReprojPx: 10.14,
     },
     initPair: {
-      nameA: 'P1180215', nameB: 'P1180321', angleDeg: 2.68, inliers: 812, points: 640,
-      score: 91.4, degree: 21, readyViews: 23, candidatesScored: 24,
+      nameA: 'P1180215',
+      nameB: 'P1180321',
+      angleDeg: 2.68,
+      inliers: 812,
+      points: 640,
+      score: 91.4,
+      degree: 21,
+      readyViews: 23,
+      candidatesScored: 24,
       runnerUp: { pair: 'P1180211 ↔ P1180210', score: 74.2, parallaxDeg: 5.21 },
     },
     attempts: {
-      retryCap: 4, retriesRun: 0, winner: 0,
+      retryCap: 4,
+      retriesRun: 0,
+      winner: 0,
       seeds: [{ attempt: 0, pair: 'P1180215 ↔ P1180321', cameras: 122, points: 20953, kept: true }],
     },
     selfCal: {
-      requested: 'auto', resolved: 'f,k1', staged: true,
-      passes: [{ pass: 1, mode: 'f,k1', reducedReason: null },
-        { pass: 2, mode: 'f', reducedReason: '2-view-dominated tracks' }],
+      requested: 'auto',
+      resolved: 'f,k1',
+      staged: true,
+      passes: [
+        { pass: 1, mode: 'f,k1', reducedReason: null },
+        { pass: 2, mode: 'f', reducedReason: '2-view-dominated tracks' },
+      ],
     },
-    intrinsics: [{ sensorId: 's1', label: 'Canon', fxNominal: 2389.3, fxFinal: 2565.9, deltaPct: 7.39, source: 'exif' }],
+    intrinsics: [
+      { sensorId: 's1', label: 'Canon', fxNominal: 2389.3, fxFinal: 2565.9, deltaPct: 7.39, source: 'exif' },
+    ],
     selfCalDistortion: [{ sensorId: 's1', k1: -0.0251, k2: 0, k3: 0, fitRmsPx: 0.153 }],
     secondaryRecovery: {
-      jobs: 1, merged: [],
-      separate: [{ name: 'Secondary sparse 1', cameras: 20, points: 6382, sharedCameras: 12, reason: 'position RMS 14.4%' }],
+      jobs: 1,
+      merged: [],
+      separate: [
+        { name: 'Secondary sparse 1', cameras: 20, points: 6382, sharedCameras: 12, reason: 'position RMS 14.4%' },
+      ],
     },
     timings: { init: 4200, register: 61000, bundle: 18000, totalMs: 96000 },
   },
   depthSummary: {
-    nMaps: 122, backend: 'gpu→wasm', gpuFallbacks: 1,
+    nMaps: 122,
+    backend: 'gpu→wasm',
+    gpuFallbacks: 1,
     settings: { quality: 'medium', maxDim: 768, maxSources: 6, iterations: 3, geomConsistency: true },
-    medianMsPerImage: 40000, totalMs: 4880000, medianCoveragePct: 82.4, medianCostMedian: 0.15,
-    geomFilterMs: 31000, geomFilterMedianKeptPct: 74.2, geomFilterMinKeptPct: 0.4,
-    geomFilterMarginalMaps: 2, projectedPeakBytes: 1943011000, budgetBytes: 12884901888,
+    medianMsPerImage: 40000,
+    totalMs: 4880000,
+    medianCoveragePct: 82.4,
+    medianCostMedian: 0.15,
+    geomFilterMs: 31000,
+    geomFilterMedianKeptPct: 74.2,
+    geomFilterMinKeptPct: 0.4,
+    geomFilterMarginalMaps: 2,
+    projectedPeakBytes: 1943011000,
+    budgetBytes: 12884901888,
   },
   verdict: {
     level: 'yellow',
@@ -241,19 +304,39 @@ const DJI = {
   ...B4,
   snapshot: { reproj: { median: 0.86, p95: 4.0, n: 800000 } },
   detect: {
-    detector: 'sift', images: 127, maxDim: 2400, maxDimMode: 'absolute',
-    maxKeypoints: 10000, contrastThreshold: 0.01, tiling: 'off',
-    medianKeypoints: 10000, medianDetectScale: 0.4386, kpCapHitPct: 100, mixed: false,
+    detector: 'sift',
+    images: 127,
+    maxDim: 2400,
+    maxDimMode: 'absolute',
+    maxKeypoints: 10000,
+    contrastThreshold: 0.01,
+    tiling: 'off',
+    medianKeypoints: 10000,
+    medianDetectScale: 0.4386,
+    kpCapHitPct: 100,
+    mixed: false,
   },
   matchRun: {
-    ...B4.matchRun, nPairs: 779, accepted: 779, rejected: 0, skipped: 0, gated: 0,
-    subsetGateActive: false, meanInlierRatio: 0.98, degenerate: 623, degenerateOf: 779,
+    ...B4.matchRun,
+    nPairs: 779,
+    accepted: 779,
+    rejected: 0,
+    skipped: 0,
+    gated: 0,
+    subsetGateActive: false,
+    meanInlierRatio: 0.98,
+    degenerate: 623,
+    degenerateOf: 779,
   },
   summary: {
     ...B4.summary,
     gates: {
-      detectScaleFactor: 2.28, medianScale: 0.4386, clamped: false, mixed: false,
-      reprjThresholdPx: 9.12, filterMaxReprojPx: 9.12,
+      detectScaleFactor: 2.28,
+      medianScale: 0.4386,
+      clamped: false,
+      mixed: false,
+      reprjThresholdPx: 9.12,
+      filterMaxReprojPx: 9.12,
     },
   },
 }
@@ -266,9 +349,12 @@ describe('digestToMarkdown — run-shape observations', () => {
   })
 
   it('does not flag a cap that most images stayed under', () => {
-    const ok = digestToMarkdown(buildProjectDigest({
-      ...DJI, detect: { ...DJI.detect, kpCapHitPct: 12 },
-    }))
+    const ok = digestToMarkdown(
+      buildProjectDigest({
+        ...DJI,
+        detect: { ...DJI.detect, kpCapHitPct: 12 },
+      }),
+    )
     expect(ok).toContain('12% of images at the keypoint cap')
     expect(ok).not.toContain('keypoint cap ⚠')
   })
@@ -279,10 +365,12 @@ describe('digestToMarkdown — run-shape observations', () => {
   })
 
   it('reports headroom without the warning when the gate actually bites', () => {
-    const tight = digestToMarkdown(buildProjectDigest({
-      ...DJI,
-      summary: { ...DJI.summary, gates: { ...DJI.summary.gates, filterMaxReprojPx: 4.4 } },
-    }))
+    const tight = digestToMarkdown(
+      buildProjectDigest({
+        ...DJI,
+        summary: { ...DJI.summary, gates: { ...DJI.summary.gates, filterMaxReprojPx: 4.4 } },
+      }),
+    )
     expect(tight).toContain('1.1× headroom')
     expect(tight).not.toContain('effectively inactive')
   })
@@ -292,9 +380,12 @@ describe('digestToMarkdown — run-shape observations', () => {
   })
 
   it('reports a zero degenerate share rather than omitting it', () => {
-    const clean = digestToMarkdown(buildProjectDigest({
-      ...DJI, matchRun: { ...DJI.matchRun, degenerate: 0 },
-    }))
+    const clean = digestToMarkdown(
+      buildProjectDigest({
+        ...DJI,
+        matchRun: { ...DJI.matchRun, degenerate: 0 },
+      }),
+    )
     expect(clean).toContain('0/779 accepted (0%)')
   })
 
@@ -319,7 +410,9 @@ describe('digest — track completion record', () => {
     const d = buildProjectDigest(withCompletion(rows))
     expect(d.diagnostics.trackCompletion).toHaveLength(2)
     const md = digestToMarkdown(d)
-    expect(md).toContain('**Track completion** (final stage): +1240 obs via verified pairs, 925 points lifted to ≥3 views over 2 passes')
+    expect(md).toContain(
+      '**Track completion** (final stage): +1240 obs via verified pairs, 925 points lifted to ≥3 views over 2 passes',
+    )
     expect(md).toContain('post-BA: +1200 in 3 rounds, lifted 900 (2-view 39000 → 38100)')
   })
 

@@ -18,13 +18,18 @@ import { trackPersistence } from './persistence.js'
 // `build()` returns the document; `write(projectId, doc)` stores it. `onError(err)`
 // (optional) receives a failed write; without it, save() rejects.
 export function createDocumentSaver({ label, currentProjectId, isPersisting = () => true, build, write, onError }) {
-  let inFlight = null, inFlightProject = null, again = false
+  let inFlight = null,
+    inFlightProject = null,
+    again = false
 
   function save() {
     const projectId = currentProjectId()
     if (!projectId || !isPersisting()) return Promise.resolve()
     if (inFlight) {
-      if (inFlightProject === projectId) { again = true; return inFlight }
+      if (inFlightProject === projectId) {
+        again = true
+        return inFlight
+      }
       return inFlight.then(save, save)
     }
     inFlightProject = projectId
@@ -35,7 +40,10 @@ export function createDocumentSaver({ label, currentProjectId, isPersisting = ()
         await write(projectId, build())
       } while (again)
     })
-    inFlight = run.finally(() => { inFlight = null; inFlightProject = null })
+    inFlight = run.finally(() => {
+      inFlight = null
+      inFlightProject = null
+    })
     return onError ? inFlight.catch(onError) : inFlight
   }
 

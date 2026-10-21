@@ -19,17 +19,29 @@ const DISPLAY_INTERVAL_MS = 100
 // completes instead of vanishing at 99%.
 const COMPLETE_HOLD_MS = 350
 
-export function usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds, textureMesh }) {
-  const progressOpen    = ref(false)
-  const progressTitle   = ref('')
+export function usePipeline({
+  images,
+  detectAll,
+  matchAll,
+  reconstruct,
+  computeDepthMaps,
+  densify,
+  generateDem,
+  generateOrtho,
+  generateMesh,
+  editClouds,
+  textureMesh,
+}) {
+  const progressOpen = ref(false)
+  const progressTitle = ref('')
   const progressCurrent = ref(0)
-  const progressTotal   = ref(0)
-  const progressLabel   = ref('')
-  const progressUnit    = ref('')
+  const progressTotal = ref(0)
+  const progressLabel = ref('')
+  const progressUnit = ref('')
   // The stage's current phase, when it names one (fusion: 'plan', then 'fuse'). The
   // progress modal measures its rate afresh per phase: a phase given the wrong share of
   // the bar then only skews the estimate until the next phase begins.
-  const progressPhase   = ref('')
+  const progressPhase = ref('')
   // Authoritative bar value, 0..1 and monotonic — NOT current/total. A stage whose
   // `total` grows mid-run (matchAll) or whose counter restarts per sub-run (SfM seed
   // retries / secondary models) would otherwise drive the bar backwards.
@@ -37,21 +49,21 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   // No meaningful count: render a moving indeterminate bar rather than a determinate
   // one frozen at 0% for minutes (the single-worker-call product ops).
   const progressIndeterminate = ref(false)
-  const progressComplete      = ref(false)
-  const progressCancelling    = ref(false)
+  const progressComplete = ref(false)
+  const progressCancelling = ref(false)
   // Whole percent of the bar, written straight from `report` rather than on a frame:
   // frames stop in a hidden tab, and a hidden tab is when its title shows progress
   // (useRunAttention). At most 100 writes a run.
-  const progressPercent       = ref(0)
+  const progressPercent = ref(0)
   // How the last run ended — { title, ok, cancelled, startedAt, endedAt } — for the
   // notification and the error toast once its modal has closed.
-  const lastRun               = ref(null)
+  const lastRun = ref(null)
   let runStartedAt = 0
 
   // Cancellation. Loop-based ops (detect/match) poll `aborted` between items;
   // single-call ops (reconstruct) register a hard-cancel via `cancelImpl`.
-  const aborted     = ref(false)
-  let cancelImpl    = null
+  const aborted = ref(false)
+  let cancelImpl = null
   const shouldCancel = () => aborted.value
 
   // ── Ingestion (hot, non-reactive) ────────────────────────────────────────────
@@ -68,7 +80,10 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
   function cancelScheduledFlush() {
-    if (flushTimer != null) { clearTimeout(flushTimer); flushTimer = null }
+    if (flushTimer != null) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
     if (flushFrame != null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(flushFrame)
     flushFrame = null
   }
@@ -76,8 +91,8 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   function flush() {
     flushFrame = null
     lastFlush = nowMs()
-    progressCurrent.value  = pendingProgress.current
-    progressTotal.value    = pendingProgress.total
+    progressCurrent.value = pendingProgress.current
+    progressTotal.value = pendingProgress.total
     progressFraction.value = pendingProgress.fraction
     // The label is the user's "it moved on" signal and changes rarely (per image or
     // per phase, not per pair), so it is never worth withholding for the timer.
@@ -102,9 +117,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   // bar value (the SfM phase plan supplies one); otherwise it derives from the count.
   // `phase` (optional) names the part of the stage running now (progressPhase).
   function report(done, total, label, fraction, phase) {
-    const raw = fraction != null
-      ? fraction
-      : (total > 0 ? done / total : 0)
+    const raw = fraction != null ? fraction : total > 0 ? done / total : 0
     // Monotonic: a stage may legitimately re-count (per-phase totals, restarted
     // sub-runs), but the bar must never retreat — a reversal reads as a failure.
     if (raw > maxFraction) maxFraction = Math.min(1, raw)
@@ -115,11 +128,11 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     // determinate from here. DEM and cloud editing never do, and stay animated.
     if (progressIndeterminate.value && total > 1) progressIndeterminate.value = false
     pendingProgress = {
-      current:  done ?? 0,
-      total:    total ?? 0,
-      label:    label ?? '',
+      current: done ?? 0,
+      total: total ?? 0,
+      label: label ?? '',
       fraction: maxFraction,
-      phase:    phase ?? pendingProgress.phase,
+      phase: phase ?? pendingProgress.phase,
     }
     scheduleFlush()
   }
@@ -137,24 +150,24 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
 
   function openProgress(title, total = 0, onCancel = null, { indeterminate = false, unit = '' } = {}) {
     cancelScheduledFlush()
-    progressTitle.value   = title
+    progressTitle.value = title
     progressCurrent.value = 0
-    progressTotal.value   = total
-    progressLabel.value   = ''
-    progressPhase.value   = ''
+    progressTotal.value = total
+    progressLabel.value = ''
+    progressPhase.value = ''
     progressFraction.value = 0
-    progressUnit.value          = unit
+    progressUnit.value = unit
     progressIndeterminate.value = indeterminate
-    progressComplete.value      = false
-    progressCancelling.value    = false
-    progressPercent.value       = 0
-    runStartedAt          = Date.now()
-    maxFraction           = 0
-    lastFlush             = 0
-    pendingProgress       = { current: 0, total, label: '', fraction: 0, phase: '' }
-    aborted.value         = false
-    cancelImpl            = onCancel
-    progressOpen.value    = true
+    progressComplete.value = false
+    progressCancelling.value = false
+    progressPercent.value = 0
+    runStartedAt = Date.now()
+    maxFraction = 0
+    lastFlush = 0
+    pendingProgress = { current: 0, total, label: '', fraction: 0, phase: '' }
+    aborted.value = false
+    cancelImpl = onCancel
+    progressOpen.value = true
   }
 
   // Land on a filled bar, hold briefly, then close. Without the hold the modal
@@ -162,9 +175,18 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   // "done" exactly once per run (the modal itself caps in-flight progress at 99%).
   async function closeProgress(ok = true) {
     cancelScheduledFlush()
-    lastRun.value = { title: progressTitle.value, ok, cancelled: aborted.value, startedAt: runStartedAt, endedAt: Date.now() }
+    lastRun.value = {
+      title: progressTitle.value,
+      ok,
+      cancelled: aborted.value,
+      startedAt: runStartedAt,
+      endedAt: Date.now(),
+    }
     // A cancelled run did not complete — don't reward it with a full bar.
-    if (aborted.value) { progressOpen.value = false; return }
+    if (aborted.value) {
+      progressOpen.value = false
+      return
+    }
     pendingProgress = { ...pendingProgress, fraction: 1 }
     maxFraction = 1
     flush()
@@ -191,9 +213,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   }
 
   async function runDetect(settings) {
-    const pending = settings.overwrite
-      ? images.value
-      : images.value.filter((img) => img.kpStatus !== 'done')
+    const pending = settings.overwrite ? images.value : images.value.filter((img) => img.kpStatus !== 'done')
     if (pending.length === 0) return { ok: true, unchanged: true }
     // Model consent BEFORE openProgress — see ensureModels.
     const learned = learnedDetector(settings.detector)
@@ -246,14 +266,19 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   // Dense Stage A — Build Depth Maps (PatchMatch MVS). Single worker call; cancel
   // by terminating the worker (the store catches the rejection and resets status).
   async function runComputeDepthMaps(settings) {
-    openProgress('Building Depth Maps', images.value.length, () => terminateAll('depth maps cancelled'), { unit: 'images' })
+    openProgress('Building Depth Maps', images.value.length, () => terminateAll('depth maps cancelled'), {
+      unit: 'images',
+    })
     await computeDepthMaps(settings, report)
     return finishRun()
   }
 
   // Dense Stage B — fuse the depth maps into the dense cloud.
   async function runDensify(settings) {
-    openProgress('Building Dense Cloud', 1, () => terminateAll('densify cancelled'), { indeterminate: true, unit: 'maps' })
+    openProgress('Building Dense Cloud', 1, () => terminateAll('densify cancelled'), {
+      indeterminate: true,
+      unit: 'maps',
+    })
     await densify(settings, report)
     return finishRun()
   }
@@ -285,14 +310,28 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   // cancel-by-terminate contract as the mesh run.
   async function runEditClouds(request) {
     const titles = {
-      crop: 'Cropping Cloud', filter: 'Filtering Cloud', merge: 'Merging Clouds', mask: 'Editing Selection', classify: 'Classifying Points',
-      normals: 'Estimating Normals', 'classify-ground': 'Classifying Ground', transform: 'Transforming Cloud', icp: 'Aligning Clouds',
-      sparse: 'Gradual Selection', optimize: 'Optimizing Cameras',
-      distance: 'Computing Distances', section: 'Cutting Section',
-      'mesh-clean': 'Cleaning Mesh', 'mesh-smooth': 'Smoothing Mesh', 'mesh-decimate': 'Decimating Mesh',
-      'mesh-crop': 'Cropping Mesh', 'mesh-sample': 'Sampling Mesh',
+      'crop': 'Cropping Cloud',
+      'filter': 'Filtering Cloud',
+      'merge': 'Merging Clouds',
+      'mask': 'Editing Selection',
+      'classify': 'Classifying Points',
+      'normals': 'Estimating Normals',
+      'classify-ground': 'Classifying Ground',
+      'transform': 'Transforming Cloud',
+      'icp': 'Aligning Clouds',
+      'sparse': 'Gradual Selection',
+      'optimize': 'Optimizing Cameras',
+      'distance': 'Computing Distances',
+      'section': 'Cutting Section',
+      'mesh-clean': 'Cleaning Mesh',
+      'mesh-smooth': 'Smoothing Mesh',
+      'mesh-decimate': 'Decimating Mesh',
+      'mesh-crop': 'Cropping Mesh',
+      'mesh-sample': 'Sampling Mesh',
     }
-    openProgress(titles[request.mode] ?? 'Editing Cloud', 1, () => terminateAll('cloud edit cancelled'), { indeterminate: true })
+    openProgress(titles[request.mode] ?? 'Editing Cloud', 1, () => terminateAll('cloud edit cancelled'), {
+      indeterminate: true,
+    })
     // ok ⇔ the store committed a result (it returns null for a refusal, an empty
     // result, a superseded run or an error) — callers act on the outcome, not on
     // a status flag a no-op leaves at its previous value.

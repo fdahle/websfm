@@ -7,14 +7,17 @@
 // Pure: takes the image list, returns plain data. Groups keep first-seen order
 // and images keep list order within a group.
 
-export const MASK_HINT = 'Red regions are excluded from feature detection and the dense cloud — applied on the next detect/dense run.'
+export const MASK_HINT =
+  'Red regions are excluded from feature detection and the dense cloud — applied on the next detect/dense run.'
 
 export function maskGroups(images) {
   const map = new Map()
   for (const img of images) {
-    const w = img.meta?.width, h = img.meta?.height
+    const w = img.meta?.width,
+      h = img.meta?.height
     const key = w && h ? `${w}×${h}` : 'unknown'
-    if (!map.has(key)) map.set(key, { key, w: w || null, h: h || null, label: w && h ? `${w} × ${h}` : 'Unknown size', images: [] })
+    if (!map.has(key))
+      map.set(key, { key, w: w || null, h: h || null, label: w && h ? `${w} × ${h}` : 'Unknown size', images: [] })
     map.get(key).images.push(img)
   }
   const groups = [...map.values()]

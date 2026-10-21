@@ -14,9 +14,9 @@ import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { FOOTPRINT_DEFAULTS } from '../../../core/defaults.user.js'
 
 const props = defineProps({
-  poses:   { type: Array, default: () => [] },
+  poses: { type: Array, default: () => [] },
   sensors: { type: Array, default: () => [] },
-  images:  { type: Array, default: () => [] },
+  images: { type: Array, default: () => [] },
   projectCrs: { type: String, default: null },
 })
 
@@ -38,7 +38,8 @@ const demOptions = computed(() => [
 ])
 const demDatum = computed(() => demOptions.value.find((o) => o.value === settings.value.demSource)?.datum ?? 'unknown')
 const datumHint = computed(() => {
-  const dem = datumLabel(demDatum.value), cams = settings.value.poseDatum
+  const dem = datumLabel(demDatum.value),
+    cams = settings.value.poseDatum
   if (cams === 'unknown') return `Taken to be the terrain model's datum (${dem}).`
   if (cams === demDatum.value) return 'Same datum as the terrain model.'
   return `The terrain model (${dem}) is converted to it where the two convert.`
@@ -73,13 +74,28 @@ const breakdown = computed(() => {
   const s = settings.value
   for (const p of props.poses) {
     if (p.enabled === false) continue
-    if (p.x == null || p.y == null) { b.noPose++; continue }
-    if (p.z == null) { b.noElevation++; continue }
-    if (!s.assumeNadir && (p.omega == null || p.phi == null || p.kappa == null)) { b.noAngles++; continue }
-    if (!resolveIntrinsics(p, fallback.value)) { b.noSensor++; continue }
+    if (p.x == null || p.y == null) {
+      b.noPose++
+      continue
+    }
+    if (p.z == null) {
+      b.noElevation++
+      continue
+    }
+    if (!s.assumeNadir && (p.omega == null || p.phi == null || p.kappa == null)) {
+      b.noAngles++
+      continue
+    }
+    if (!resolveIntrinsics(p, fallback.value)) {
+      b.noSensor++
+      continue
+    }
     // The terrain under a camera is only known once it is read, at run time.
     const groundZ = s.ground === 'agl' ? p.z - s.agl : s.ground === 'absolute' ? s.groundElev : null
-    if (groundZ != null && groundZ >= p.z) { b.belowPlane++; continue }
+    if (groundZ != null && groundZ >= p.z) {
+      b.belowPlane++
+      continue
+    }
     b.ok++
   }
   return b
@@ -114,8 +130,7 @@ function run() {
 <template>
   <ModalShell title="Footprints from Poses" @close="emit('close')">
     <p class="intro">
-      Project each image's corners onto the ground using its camera position,
-      orientation and sensor intrinsics.
+      Project each image's corners onto the ground using its camera position, orientation and sensor intrinsics.
     </p>
 
     <SettingsField :hint="groundHint">
@@ -142,39 +157,60 @@ function run() {
     </template>
     <SettingsField v-else-if="settings.ground === 'absolute'" label-for="fp-elev" unit="m (project CRS)">
       <template #label>
-        <FieldHelp op="footprints-from-poses" param="groundElev" :value="settings.groundElev"
-          :default-value="FOOTPRINT_DEFAULTS.groundElev">Ground elevation</FieldHelp>
+        <FieldHelp
+          op="footprints-from-poses"
+          param="groundElev"
+          :value="settings.groundElev"
+          :default-value="FOOTPRINT_DEFAULTS.groundElev"
+          >Ground elevation</FieldHelp
+        >
       </template>
       <input id="fp-elev" v-model.number="settings.groundElev" type="number" step="any" class="field-input" />
     </SettingsField>
     <SettingsField v-else label-for="fp-agl" unit="m below each camera">
       <template #label>
-        <FieldHelp op="footprints-from-poses" param="agl" :value="settings.agl"
-          :default-value="FOOTPRINT_DEFAULTS.agl">Flying height</FieldHelp>
+        <FieldHelp op="footprints-from-poses" param="agl" :value="settings.agl" :default-value="FOOTPRINT_DEFAULTS.agl"
+          >Flying height</FieldHelp
+        >
       </template>
       <input id="fp-agl" v-model.number="settings.agl" type="number" min="1" step="any" class="field-input" />
     </SettingsField>
 
     <SettingsField>
-      <template #label><GlossaryTerm id="camera-intrinsics">Camera intrinsics</GlossaryTerm> (for poses with no calibrated sensor)</template>
-      <label class="checkbox-row"><input type="checkbox" v-model="ov.enabled" class="checkbox" /> Provide a manual fallback</label>
+      <template #label
+        ><GlossaryTerm id="camera-intrinsics">Camera intrinsics</GlossaryTerm> (for poses with no calibrated
+        sensor)</template
+      >
+      <label class="checkbox-row"
+        ><input type="checkbox" v-model="ov.enabled" class="checkbox" /> Provide a manual fallback</label
+      >
       <div v-if="ov.enabled" class="override">
         <div class="ov-row">
-          <label class="ov-field"><span class="ov-label">Focal</span>
-            <input v-model.number="ov.focal" type="number" min="0" step="any" class="field-input sm" /></label>
-          <label class="ov-field"><span class="ov-label">Unit</span>
+          <label class="ov-field"
+            ><span class="ov-label">Focal</span>
+            <input v-model.number="ov.focal" type="number" min="0" step="any" class="field-input sm"
+          /></label>
+          <label class="ov-field"
+            ><span class="ov-label">Unit</span>
             <select v-model="ov.unit" class="field-input sm">
               <option value="px">pixels</option>
               <option value="mm">mm</option>
-            </select></label>
-          <label v-if="ov.unit === 'mm'" class="ov-field"><span class="ov-label">Pixel size (mm)</span>
-            <input v-model.number="ov.pixelSize" type="number" min="0" step="any" class="field-input sm" /></label>
+            </select></label
+          >
+          <label v-if="ov.unit === 'mm'" class="ov-field"
+            ><span class="ov-label">Pixel size (mm)</span>
+            <input v-model.number="ov.pixelSize" type="number" min="0" step="any" class="field-input sm"
+          /></label>
         </div>
         <div class="ov-row">
-          <label class="ov-field"><span class="ov-label">Image width (px)</span>
-            <input v-model.number="ov.width" type="number" min="1" step="1" class="field-input sm" /></label>
-          <label class="ov-field"><span class="ov-label">Image height (px)</span>
-            <input v-model.number="ov.height" type="number" min="1" step="1" class="field-input sm" /></label>
+          <label class="ov-field"
+            ><span class="ov-label">Image width (px)</span>
+            <input v-model.number="ov.width" type="number" min="1" step="1" class="field-input sm"
+          /></label>
+          <label class="ov-field"
+            ><span class="ov-label">Image height (px)</span>
+            <input v-model.number="ov.height" type="number" min="1" step="1" class="field-input sm"
+          /></label>
         </div>
         <span v-if="ov.unit === 'mm' && !ov.pixelSize" class="field-hint warn">
           A mm focal needs a pixel size to convert to pixels.
@@ -187,16 +223,24 @@ function run() {
 
     <SettingsField>
       <template #label>
-        <FieldHelp op="footprints-from-poses" param="assumeNadir" :value="settings.assumeNadir"
-          :default-value="FOOTPRINT_DEFAULTS.assumeNadir">Assume nadir</FieldHelp>
+        <FieldHelp
+          op="footprints-from-poses"
+          param="assumeNadir"
+          :value="settings.assumeNadir"
+          :default-value="FOOTPRINT_DEFAULTS.assumeNadir"
+          >Assume nadir</FieldHelp
+        >
       </template>
-      <label class="checkbox-row"><input type="checkbox" v-model="settings.assumeNadir" class="checkbox" /> For images without orientation angles</label>
+      <label class="checkbox-row"
+        ><input type="checkbox" v-model="settings.assumeNadir" class="checkbox" /> For images without orientation
+        angles</label
+      >
     </SettingsField>
     <p class="intro">Runs into one “footprints” layer under Shapefiles, replacing any previous computed one.</p>
 
     <p v-if="geographicCrs" class="intro">
-      Working CRS {{ projectCrs }} is geographic — footprints are computed in a local
-      metric frame and stored back in lat/lon.
+      Working CRS {{ projectCrs }} is geographic — footprints are computed in a local metric frame and stored back in
+      lat/lon.
     </p>
     <div v-if="breakdown.ok > 0" class="summary">
       {{ breakdown.ok }} of {{ total }} pose{{ total === 1 ? '' : 's' }} will produce a footprint
@@ -220,16 +264,61 @@ function run() {
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.intro { font-size: 12px; color: var(--text-dim); margin: 0; line-height: 1.45; }
-.radio-row { display: flex; gap: 16px; }
-.radio { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
-.field-hint.warn { color: #d89a3a; }
-.override { display: flex; flex-direction: column; gap: 8px; padding-left: 22px; margin-top: 6px; }
-.ov-row { display: flex; gap: 12px; flex-wrap: wrap; }
-.ov-field { display: flex; flex-direction: column; gap: 4px; }
-.ov-label { font-size: 11px; color: var(--text-dim); }
-.field-input.sm { width: 92px; }
-.summary { font-size: 12px; color: var(--text); }
-.reasons { margin: 4px 0 0; padding-left: 18px; color: var(--text-dim); }
-.reasons li { font-size: 11px; }
+.intro {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0;
+  line-height: 1.45;
+}
+.radio-row {
+  display: flex;
+  gap: 16px;
+}
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.field-hint.warn {
+  color: #d89a3a;
+}
+.override {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 22px;
+  margin-top: 6px;
+}
+.ov-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ov-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ov-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.field-input.sm {
+  width: 92px;
+}
+.summary {
+  font-size: 12px;
+  color: var(--text);
+}
+.reasons {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+}
+.reasons li {
+  font-size: 11px;
+}
 </style>

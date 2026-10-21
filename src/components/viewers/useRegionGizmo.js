@@ -12,10 +12,19 @@ export function useRegionGizmo({ view, props, container, pointerPx, requestRende
   // ── Region box ────────────────────────────────────────────────────────────────
   // A wireframe of the reconstruction region (Tools ▸ Model ▾ ▸ Region), in the
   // scene's own (model) coordinates. Drawn on top so it reads through the cloud.
-  let regionHelper = null, regionHandleObj = null
+  let regionHelper = null,
+    regionHandleObj = null
   function updateRegionBox(b) {
-    if (regionHelper) { view.scene?.remove(regionHelper); disposeObject(regionHelper); regionHelper = null }
-    if (regionHandleObj) { view.scene?.remove(regionHandleObj); disposeObject(regionHandleObj); regionHandleObj = null }
+    if (regionHelper) {
+      view.scene?.remove(regionHelper)
+      disposeObject(regionHelper)
+      regionHelper = null
+    }
+    if (regionHandleObj) {
+      view.scene?.remove(regionHandleObj)
+      disposeObject(regionHandleObj)
+      regionHandleObj = null
+    }
     requestRender()
     if (!view.scene || !b?.min || !b?.max) return
     const box = new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max))
@@ -28,7 +37,9 @@ export function useRegionGizmo({ view, props, container, pointerPx, requestRende
     view.scene.add(regionHelper)
     if (props.regionEdit) drawRegionHandles(b)
   }
-  watch([() => props.regionBox, () => props.regionStale, () => props.regionEdit], ([b]) => updateRegionBox(b), { deep: true })
+  watch([() => props.regionBox, () => props.regionStale, () => props.regionEdit], ([b]) => updateRegionBox(b), {
+    deep: true,
+  })
 
   // Drag handles while the Region toolbox is open (core/products/regionGizmo.js): a
   // square on each face centre moves that face along its axis (red x, green y, blue z),
@@ -37,12 +48,14 @@ export function useRegionGizmo({ view, props, container, pointerPx, requestRende
   // and closing the toolbox without Apply discards the draft.
   const REGION_HANDLE_PX = 9
   const REGION_AXIS_COLOURS = [0xff5555, 0x55dd55, 0x5599ff]
-  const regionHover = ref(null)    // id of the handle under the pointer, or being dragged
-  let regionDrag = null            // { drag, start, pointerId }
+  const regionHover = ref(null) // id of the handle under the pointer, or being dragged
+  let regionDrag = null // { drag, start, pointerId }
   function drawRegionHandles(b) {
     const hs = regionHandles(b)
-    const pos = new Float32Array(hs.length * 3), col = new Float32Array(hs.length * 3)
-    const c = new THREE.Color(), white = new THREE.Color(0xffffff)
+    const pos = new Float32Array(hs.length * 3),
+      col = new Float32Array(hs.length * 3)
+    const c = new THREE.Color(),
+      white = new THREE.Color(0xffffff)
     hs.forEach((h, i) => {
       pos.set(h.pos, i * 3)
       c.setHex(h.axis === null ? 0xffb020 : REGION_AXIS_COLOURS[h.axis])
@@ -52,9 +65,16 @@ export function useRegionGizmo({ view, props, container, pointerPx, requestRende
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3))
     geometry.setAttribute('color', new THREE.BufferAttribute(col, 3))
-    regionHandleObj = new THREE.Points(geometry, new THREE.PointsMaterial({
-      size: 2 * REGION_HANDLE_PX - 6, sizeAttenuation: false, vertexColors: true, depthTest: false, transparent: true,
-    }))
+    regionHandleObj = new THREE.Points(
+      geometry,
+      new THREE.PointsMaterial({
+        size: 2 * REGION_HANDLE_PX - 6,
+        sizeAttenuation: false,
+        vertexColors: true,
+        depthTest: false,
+        transparent: true,
+      }),
+    )
     regionHandleObj.renderOrder = 12
     regionHandleObj.frustumCulled = false
     view.scene.add(regionHandleObj)
@@ -63,7 +83,8 @@ export function useRegionGizmo({ view, props, container, pointerPx, requestRende
 
   function regionRay(e) {
     const [px, py] = pointerPx(e)
-    const w = container.value.clientWidth, h = container.value.clientHeight
+    const w = container.value.clientWidth,
+      h = container.value.clientHeight
     view.camera.updateMatrixWorld()
     raycaster.setFromCamera(new THREE.Vector2((px / w) * 2 - 1, 1 - (py / h) * 2), view.camera)
     const { origin: o, direction: d } = raycaster.ray
@@ -73,18 +94,20 @@ export function useRegionGizmo({ view, props, container, pointerPx, requestRende
     const b = props.regionBox
     if (!props.regionEdit || !b?.min || !b?.max || !view.camera || !container.value) return null
     const [px, py] = pointerPx(e)
-    const w = container.value.clientWidth, h = container.value.clientHeight
+    const w = container.value.clientWidth,
+      h = container.value.clientHeight
     view.camera.updateMatrixWorld()
     const v = new THREE.Vector3()
     const project = (p) => {
       v.set(p[0], p[1], p[2]).project(view.camera)
-      return v.z > 1 || v.z < -1 ? null : [(v.x + 1) / 2 * w, (1 - v.y) / 2 * h]
+      return v.z > 1 || v.z < -1 ? null : [((v.x + 1) / 2) * w, ((1 - v.y) / 2) * h]
     }
     return pickHandle(regionHandles(b), project, px, py, REGION_HANDLE_PX)
   }
   // Capture phase, before OrbitControls: a press on a handle drags it, anywhere else orbits.
   function onRegionPointerDown(e) {
-    if (!props.regionEdit || e.button !== 0 || !view.renderer || e.target !== view.renderer.domElement || regionDrag) return
+    if (!props.regionEdit || e.button !== 0 || !view.renderer || e.target !== view.renderer.domElement || regionDrag)
+      return
     if (otherToolActive()) return
     const handle = regionHandleAt(e)
     if (!handle) return
@@ -114,7 +137,15 @@ export function useRegionGizmo({ view, props, container, pointerPx, requestRende
     container.value?.releasePointerCapture?.(e.pointerId)
     regionHover.value = regionHandleAt(e)?.id ?? null
   }
-  watch(() => props.regionEdit, (on) => { if (!on) { regionDrag = null; regionHover.value = null } })
+  watch(
+    () => props.regionEdit,
+    (on) => {
+      if (!on) {
+        regionDrag = null
+        regionHover.value = null
+      }
+    },
+  )
 
   // Esc during a drag: the box goes back; the pointerup that follows finds nothing.
   function abortRegionDrag() {

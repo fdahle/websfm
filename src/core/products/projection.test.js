@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
-  estimateUpFromViewingDirs, estimateUpFromCloud, buildLocalFrame, makeFrame,
-  aerialUpRotation, rotateReconstruction, frameFromScaledLocal,
+  estimateUpFromViewingDirs,
+  estimateUpFromCloud,
+  buildLocalFrame,
+  makeFrame,
+  aerialUpRotation,
+  rotateReconstruction,
+  frameFromScaledLocal,
 } from './projection.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
 
@@ -11,7 +16,11 @@ import { SparsePoints } from '../sfm/sparsePoints.js'
 // R, a camera whose third row is [0,0,-1] looks down −Z.
 function nadirCam(cx, cy, cz) {
   // R rows: x_cam→world-x, y_cam→world-(−y), z_cam(optical)→world −Z.
-  const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]]
+  const R = [
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 0, -1],
+  ]
   // t = -R·C
   const t = [
     -(R[0][0] * cx + R[0][1] * cy + R[0][2] * cz),
@@ -27,13 +36,22 @@ describe('estimateUpFromViewingDirs', () => {
   it('recovers +Z up from a nadir flight strip looking down −Z', () => {
     const cams = [nadirCam(0, 0, 10), nadirCam(5, 0, 10), nadirCam(10, 2, 10)]
     const up = estimateUpFromViewingDirs(cams)
-    close(up[0], 0); close(up[1], 0); close(up[2], 1)
+    close(up[0], 0)
+    close(up[1], 0)
+    close(up[2], 1)
   })
 
   it('returns null when viewing directions cancel (convergent rig)', () => {
     // Two cameras looking at each other along ±Z → mean viewing dir ≈ 0.
-    const a = nadirCam(0, 0, 0)          // looks −Z
-    const b = { R: [[1, 0, 0], [0, -1, 0], [0, 0, 1]], t: [0, 0, 0] } // looks +Z
+    const a = nadirCam(0, 0, 0) // looks −Z
+    const b = {
+      R: [
+        [1, 0, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, 0],
+    } // looks +Z
     expect(estimateUpFromViewingDirs([a, b])).toBeNull()
   })
 })
@@ -58,36 +76,62 @@ describe('estimateUpFromCloud', () => {
 
 describe('buildLocalFrame', () => {
   it('fromSfm/toSfm are exact inverses', () => {
-    const frame = buildLocalFrame([nadirCam(0, 0, 10), nadirCam(4, 1, 10)], [
-      { x: 0, y: 0, z: 0 }, { x: 1, y: 2, z: 0.5 }, { x: -1, y: 1, z: -0.2 },
-    ])
+    const frame = buildLocalFrame(
+      [nadirCam(0, 0, 10), nadirCam(4, 1, 10)],
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 1, y: 2, z: 0.5 },
+        { x: -1, y: 1, z: -0.2 },
+      ],
+    )
     const p = [3.5, -2.1, 0.9]
     const round = frame.toSfm(frame.fromSfm(p))
-    close(round[0], p[0]); close(round[1], p[1]); close(round[2], p[2])
+    close(round[0], p[0])
+    close(round[1], p[1])
+    close(round[2], p[2])
   })
 
   it('maps the estimated up direction to +local-Z (height)', () => {
-    const frame = buildLocalFrame([nadirCam(0, 0, 10), nadirCam(5, 0, 10)], [
-      { x: 0, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }, { x: 0, y: 2, z: 0 },
-    ])
+    const frame = buildLocalFrame(
+      [nadirCam(0, 0, 10), nadirCam(5, 0, 10)],
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 2, y: 0, z: 0 },
+        { x: 0, y: 2, z: 0 },
+      ],
+    )
     // A point directly "up" from the origin (world +Z) should get a positive,
     // dominant local-Z and near-zero local-XY.
     const local = frame.fromSfm([frame.origin[0], frame.origin[1], frame.origin[2] + 3])
-    close(local[0], 0); close(local[1], 0); close(local[2], 3)
+    close(local[0], 0)
+    close(local[1], 0)
+    close(local[2], 3)
   })
 
   it('produces a right-handed orthonormal basis', () => {
-    const { east, north, up } = buildLocalFrame([nadirCam(1, 1, 8)], [
-      { x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 0 }, { x: 2, y: 0, z: 0 },
-    ])
+    const { east, north, up } = buildLocalFrame(
+      [nadirCam(1, 1, 8)],
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 1, y: 1, z: 0 },
+        { x: 2, y: 0, z: 0 },
+      ],
+    )
     const d = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-    close(d(east, north), 0); close(d(east, up), 0); close(d(north, up), 0)
-    close(d(east, east), 1); close(d(up, up), 1)
+    close(d(east, north), 0)
+    close(d(east, up), 0)
+    close(d(north, up), 0)
+    close(d(east, east), 1)
+    close(d(up, up), 1)
     // east × north = up
-    const cx = [east[1] * north[2] - east[2] * north[1],
+    const cx = [
+      east[1] * north[2] - east[2] * north[1],
       east[2] * north[0] - east[0] * north[2],
-      east[0] * north[1] - east[1] * north[0]]
-    close(cx[0], up[0]); close(cx[1], up[1]); close(cx[2], up[2])
+      east[0] * north[1] - east[1] * north[0],
+    ]
+    close(cx[0], up[0])
+    close(cx[1], up[1])
+    close(cx[2], up[2])
   })
 })
 
@@ -104,7 +148,11 @@ describe('aerial Z-up orientation', () => {
   // A "flipped" aerial reconstruction: cameras BELOW the ground (negative Z),
   // looking UP (+Z) — the classic SfM gauge/flip ambiguity. Identity R looks +Z.
   function upsideDownCam(cx, cy, cz) {
-    const R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    const R = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ]
     return { R, t: [-cx, -cy, -cz] } // t = -R·C, R = I
   }
 
@@ -116,7 +164,8 @@ describe('aerial Z-up orientation', () => {
     ])
     const pts = SparsePoints.fromRecords([
       { x: 0, y: 0, z: 0, color: [1, 2, 3], views: new Map([['a', 7]]) },
-      { x: 4, y: 1, z: 0 }, { x: 1, y: 3, z: 0 },
+      { x: 4, y: 1, z: 0 },
+      { x: 1, y: 3, z: 0 },
     ])
     // Before: cameras sit below the points (z = -10 < 0).
     for (const c of cams.values()) expect(centre(c)[2]).toBeLessThan(0)
@@ -133,9 +182,26 @@ describe('aerial Z-up orientation', () => {
   })
 
   it('preserves intrinsics, colour and view-tracks', () => {
-    const cams = new Map([['a', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 10], K: { fx: 900 } }]])
+    const cams = new Map([
+      [
+        'a',
+        {
+          R: [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+          ],
+          t: [0, 0, 10],
+          K: { fx: 900 },
+        },
+      ],
+    ])
     const pts = SparsePoints.fromRecords([{ x: 1, y: 2, z: 3, color: [10, 20, 30], views: new Map([['a', 5]]) }])
-    const R = [[0, -1, 0], [1, 0, 0], [0, 0, 1]] // 90° about Z
+    const R = [
+      [0, -1, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+    ] // 90° about Z
     const out = rotateReconstruction(cams, pts, R)
     expect(out.cameras.get('a').K).toEqual({ fx: 900 })
     expect(out.points.colorAt(0)).toEqual([10, 20, 30])
@@ -145,10 +211,32 @@ describe('aerial Z-up orientation', () => {
   })
 
   it('can rotate an owned result without allocating a second point array', () => {
-    const cams = new Map([['a', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: {} }]])
+    const cams = new Map([
+      [
+        'a',
+        {
+          R: [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+          ],
+          t: [0, 0, 0],
+          K: {},
+        },
+      ],
+    ])
     const pts = SparsePoints.fromRecords([{ x: 1, y: 2, z: 3 }])
     const pos = pts.pos
-    const out = rotateReconstruction(cams, pts, [[0, -1, 0], [1, 0, 0], [0, 0, 1]], { inPlace: true })
+    const out = rotateReconstruction(
+      cams,
+      pts,
+      [
+        [0, -1, 0],
+        [1, 0, 0],
+        [0, 0, 1],
+      ],
+      { inPlace: true },
+    )
     expect(out.points).toBe(pts)
     expect(pts.pos).toBe(pos)
     expect([...pos]).toEqual([-2, 1, 3])
@@ -156,8 +244,28 @@ describe('aerial Z-up orientation', () => {
 
   it('returns null for a convergent rig (no coherent up)', () => {
     const cams = new Map([
-      ['a', { R: [[1, 0, 0], [0, -1, 0], [0, 0, -1]], t: [0, 0, 0] }], // looks −Z
-      ['b', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] }],   // looks +Z
+      [
+        'a',
+        {
+          R: [
+            [1, 0, 0],
+            [0, -1, 0],
+            [0, 0, -1],
+          ],
+          t: [0, 0, 0],
+        },
+      ], // looks −Z
+      [
+        'b',
+        {
+          R: [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+          ],
+          t: [0, 0, 0],
+        },
+      ], // looks +Z
     ])
     expect(aerialUpRotation(cams)).toBeNull()
   })
@@ -166,7 +274,10 @@ describe('aerial Z-up orientation', () => {
 describe('makeFrame', () => {
   it('is a plain translation+rotation for an axis-aligned basis', () => {
     const frame = makeFrame({
-      origin: [10, 20, 30], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1],
+      origin: [10, 20, 30],
+      east: [1, 0, 0],
+      north: [0, 1, 0],
+      up: [0, 0, 1],
     })
     expect(frame.fromSfm([12, 23, 35])).toEqual([2, 3, 5])
     expect(frame.toSfm([2, 3, 5])).toEqual([12, 23, 35])
@@ -178,15 +289,22 @@ describe('frameFromScaledLocal', () => {
   // behind an identity basis, which is exactly the regression this test exists for.
   const base = makeFrame({
     origin: [3, -2, 7],
-    east:  [0.6, 0.8, 0],
+    east: [0.6, 0.8, 0],
     north: [-0.8, 0.6, 0],
-    up:    [0, 0, 1],
-    crs: 'local', unit: 'model', source: 'cameras',
+    up: [0, 0, 1],
+    crs: 'local',
+    unit: 'model',
+    source: 'cameras',
   })
 
   it('fromSfm and toSfm stay exact inverses', () => {
     const f = frameFromScaledLocal(base, 4.25)
-    for (const p of [[0, 0, 0], [3, -2, 7], [11.5, 4.25, -3.75], [-100, 250, 0.5]]) {
+    for (const p of [
+      [0, 0, 0],
+      [3, -2, 7],
+      [11.5, 4.25, -3.75],
+      [-100, 250, 0.5],
+    ]) {
       const round = f.toSfm(f.fromSfm(p))
       expect(round[0]).toBeCloseTo(p[0], 9)
       expect(round[1]).toBeCloseTo(p[1], 9)
@@ -197,10 +315,12 @@ describe('frameFromScaledLocal', () => {
   it('scales a known distance exactly once', () => {
     const s = 4.25
     const f = frameFromScaledLocal(base, s)
-    const a = [3, -2, 7], b = [3 + 0.6, -2 + 0.8, 7]   // 1 model unit along east
-    const fa = f.fromSfm(a), fb = f.fromSfm(b)
+    const a = [3, -2, 7],
+      b = [3 + 0.6, -2 + 0.8, 7] // 1 model unit along east
+    const fa = f.fromSfm(a),
+      fb = f.fromSfm(b)
     const d = Math.hypot(fb[0] - fa[0], fb[1] - fa[1], fb[2] - fa[2])
-    expect(d).toBeCloseTo(s, 9)          // not s² — that is the double-scale bug
+    expect(d).toBeCloseTo(s, 9) // not s² — that is the double-scale bug
   })
 
   it('keeps the serialised basis unit-length and reports metres with no CRS', () => {
@@ -210,7 +330,7 @@ describe('frameFromScaledLocal', () => {
     expect(Math.hypot(...f.up)).toBeCloseTo(1, 12)
     expect(f.scale).toBe(4.25)
     expect(f.unit).toBe('m')
-    expect(f.crs).toBe('local')          // metric with NO CRS
+    expect(f.crs).toBe('local') // metric with NO CRS
   })
 
   it('refuses a non-positive or non-finite scale', () => {

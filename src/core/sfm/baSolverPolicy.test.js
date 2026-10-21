@@ -16,8 +16,14 @@ describe('bundle-adjustment solver policy', () => {
   // an overnight solver sweep measured LM running to its iteration cap instead.
   it('merges a partial override over the tuned defaults, key by key', async () => {
     const scene = aerialBlock({ seed: 5, rows: 3, cols: 3, nPoints: 600, calibrated: true, prefix: 'p' })
-    const out = await reconstruct({ images: scene.images, pairs: scene.pairs,
-      settings: { ...(scene.settings ?? {}), baSolver: { pcgRelTol: 1e-6 } } }, { onLog: () => {} })
+    const out = await reconstruct(
+      {
+        images: scene.images,
+        pairs: scene.pairs,
+        settings: { ...(scene.settings ?? {}), baSolver: { pcgRelTol: 1e-6 } },
+      },
+      { onLog: () => {} },
+    )
     const policy = out.summary.baSolver.policy
     expect(policy.pcgRelTol).toBe(1e-6)
     expect(policy.functionTolerance).toBe(SFM_TUNING.baSolver.functionTolerance)

@@ -11,7 +11,7 @@ import { projectPoint } from '../sfm/geometry.js'
 // x-axis. `views` is the numeric bin (2..7) or the string '8+' for the last.
 // Points with fewer than 2 views (untracked) are ignored — they aren't tie points.
 export function trackLengthHistogram(points) {
-  const bins = new Map()          // binKey → count
+  const bins = new Map() // binKey → count
   for (let v = 2; v <= 7; v++) bins.set(v, 0)
   bins.set('8+', 0)
   let total = 0
@@ -40,7 +40,9 @@ export function trackLengthHistogram(points) {
 export function reprojectionStats(cameras, points) {
   const res = []
   for (let i = 0, N = points?.length ?? 0; i < N; i++) {
-    const x = points.x(i), y = points.y(i), z = points.z(i)
+    const x = points.x(i),
+      y = points.y(i),
+      z = points.z(i)
     points.forEachPixel(i, (uuid, px, py) => {
       const cam = cameras.get(uuid)
       if (!cam) return

@@ -5,23 +5,39 @@ import { keypointSetFrom } from './keypointSet.js'
 import { tracksFrom, pointsOf } from './trackStore.testutil.js'
 
 const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
-const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+const I = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+]
 const cams = new Map([
   ['a', { R: I, t: [0, 0, 0], K }],
   ['b', { R: I, t: [-0.5, 0, 0], K }],
   ['c', { R: I, t: [0.5, 0, 0], K }],
 ])
-const proj = (cam, p) => ({ x: K.fx * (p.x + cam.t[0]) / (p.z + cam.t[2]) + K.cx, y: K.fy * (p.y + cam.t[1]) / (p.z + cam.t[2]) + K.cy })
+const proj = (cam, p) => ({
+  x: (K.fx * (p.x + cam.t[0])) / (p.z + cam.t[2]) + K.cx,
+  y: (K.fy * (p.y + cam.t[1])) / (p.z + cam.t[2]) + K.cy,
+})
 
 let seed = 3
-const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
 const randomDesc = () => Uint8Array.from({ length: 128 }, () => Math.floor(rnd() * 120))
 const jitter = (d, amt) => Uint8Array.from(d, (v) => Math.max(0, Math.min(255, v + Math.round((rnd() - 0.5) * amt))))
 
 // World: 40 points; 0–19 are 3-view tracks (calibrate τ), 20–39 are 2-view (a, b).
 function scene() {
-  const images = new Map([['a', { keypoints: [], desc: [] }], ['b', { keypoints: [], desc: [] }], ['c', { keypoints: [], desc: [] }]])
-  const add = (u, kp, d) => { const im = images.get(u); im.keypoints.push(kp); im.desc.push(d); return im.keypoints.length - 1 }
+  const images = new Map([
+    ['a', { keypoints: [], desc: [] }],
+    ['b', { keypoints: [], desc: [] }],
+    ['c', { keypoints: [], desc: [] }],
+  ])
+  const add = (u, kp, d) => {
+    const im = images.get(u)
+    im.keypoints.push(kp)
+    im.desc.push(d)
+    return im.keypoints.length - 1
+  }
   const points = [] // the fixture in literal form
   for (let i = 0; i < 40; i++) {
     const p = { x: (i % 8) / 4 - 1, y: Math.floor(i / 8) / 4 - 0.5, z: 5 }
@@ -34,11 +50,13 @@ function scene() {
     points.push({ ...p, views })
   }
   const { tracks, ids } = tracksFrom(points, ['a', 'b', 'c'])
-  const flat = new Map([...images].map(([u, im]) => {
-    const arr = new Uint8Array(im.desc.length * 128)
-    im.desc.forEach((d, i) => arr.set(d, i * 128))
-    return [u, arr]
-  }))
+  const flat = new Map(
+    [...images].map(([u, im]) => {
+      const arr = new Uint8Array(im.desc.length * 128)
+      im.desc.forEach((d, i) => arr.set(d, i * 128))
+      return [u, arr]
+    }),
+  )
   const descOf = (img, k) => {
     const u = ids.uuid(img)
     return flat.has(u) && k < images.get(u).keypoints.length ? { arr: flat.get(u), off: k * 128 } : null
@@ -73,7 +91,10 @@ describe('guidedExtendTracks', () => {
     const kp = proj(cams.get('c'), s.points[25])
     const twin = s.flat.get('c').slice(25 * 128, 26 * 128)
     const idx = s.add('c', { x: kp.x + 1, y: kp.y }, twin)
-    const arr = new Uint8Array((idx + 1) * 128); arr.set(s.flat.get('c')); arr.set(twin, idx * 128); s.flat.set('c', arr)
+    const arr = new Uint8Array((idx + 1) * 128)
+    arr.set(s.flat.get('c'))
+    arr.set(twin, idx * 128)
+    s.flat.set('c', arr)
     s.run()
     const live = s.live()
     expect(live[25].views.has('c')).toBe(false)
@@ -106,7 +127,9 @@ describe('auditGuidedAdditions', () => {
     // Five extended points were filtered away.
     const live = s.live().slice(0, 35)
     const residualOf = (uuid, kp) => (uuid === 'c' && kp >= 20 ? 2 : 0.5)
-    const a = auditGuidedAdditions(adds, (visit) => live.forEach((pt) => pt.views.forEach((kp, uuid) => visit(uuid, kp, residualOf(uuid, kp)))))
+    const a = auditGuidedAdditions(adds, (visit) =>
+      live.forEach((pt) => pt.views.forEach((kp, uuid) => visit(uuid, kp, residualOf(uuid, kp)))),
+    )
     expect(a).toMatchObject({ proposed: 20, survived: 15, medianPx: 2, restMedianPx: 0.5 })
   })
 })

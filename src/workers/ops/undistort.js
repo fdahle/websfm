@@ -1,7 +1,11 @@
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import { scaleK } from '../../core/sfm/geometry.js'
 import {
-  resampleRgba, pinholeFrameSize, validSampleRect, cropRgba, shiftPrincipalPoint,
+  resampleRgba,
+  pinholeFrameSize,
+  validSampleRect,
+  cropRgba,
+  shiftPrincipalPoint,
 } from '../../core/products/undistort.js'
 
 // Undistorted-image export: resample one source image into the pinhole frame the
@@ -23,10 +27,10 @@ export function makeUndistortOps({ rasterize }) {
   //   mode    — 'crop' (largest all-valid rect, COLMAP blank_pixels=0) | 'full'
   //   maxDim  — 0/null ⇒ native resolution
   // → { bytes, width, height, K, rect, mime } with `bytes` transferred.
-  async function undistortImage([{
-    url, K, dist = null, selfCal = null, fid = null,
-    mode = 'crop', maxDim = 0, format = 'jpeg', quality = 0.92,
-  }], { emit }) {
+  async function undistortImage(
+    [{ url, K, dist = null, selfCal = null, fid = null, mode = 'crop', maxDim = 0, format = 'jpeg', quality = 0.92 }],
+    { emit },
+  ) {
     const log = (m, l = 'info') => emit('log', [m, l, 'Export'])
     const r = await rasterize(url, maxDim > 0 ? maxDim : Infinity)
 
@@ -35,10 +39,14 @@ export function makeUndistortOps({ rasterize }) {
     // different size from the scan raster).
     const srcScale = r.scaleXY ?? r.scale
     const outScale = fid
-      ? (maxDim > 0 ? Math.min(1, maxDim / Math.max(fid.frame.width, fid.frame.height)) : 1)
+      ? maxDim > 0
+        ? Math.min(1, maxDim / Math.max(fid.frame.width, fid.frame.height))
+        : 1
       : r.scale
     const { width: ow, height: oh } = pinholeFrameSize({
-      meta: { width: r.natW, height: r.natH }, fiducial: fid, scale: outScale,
+      meta: { width: r.natW, height: r.natH },
+      fiducial: fid,
+      scale: outScale,
     })
     const map = makeSampleMap({ K, dist, selfCal, fiducial: fid, outScale, srcScale })
 
@@ -62,8 +70,7 @@ export function makeUndistortOps({ rasterize }) {
     const mime = format === 'png' ? 'image/png' : 'image/jpeg'
     const canvas = new OffscreenCanvas(rect.width, rect.height)
     canvas.getContext('2d').putImageData(new ImageData(data, rect.width, rect.height), 0, 0)
-    const blob = await canvas.convertToBlob(
-      mime === 'image/png' ? { type: mime } : { type: mime, quality })
+    const blob = await canvas.convertToBlob(mime === 'image/png' ? { type: mime } : { type: mime, quality })
     const bytes = await blob.arrayBuffer()
 
     // `outScale` + `rect` are what the caller needs to move the model's

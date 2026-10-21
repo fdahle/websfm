@@ -25,7 +25,10 @@ export function fitFiducialObservations(observations, marks, model = 'affine') {
     // Only complete pairs: the fit skips any other, and its residuals are matched
     // back to `obs` by index (fiducialResiduals).
     .filter((o) => o && [o.px, o.py, o.xMm, o.yMm].every(Number.isFinite))
-  return { obs, fit: model === 'affine' ? (obs.length >= 3 ? fitFiducialAffine(obs) : null) : fitFiducialTransform(obs, model) }
+  return {
+    obs,
+    fit: model === 'affine' ? (obs.length >= 3 ? fitFiducialAffine(obs) : null) : fitFiducialTransform(obs, model),
+  }
 }
 
 /** fidId → residual µm, from a fitFiducialObservations result (empty without a fit). */
@@ -45,17 +48,24 @@ export function fiducialMarkPositions(fiducialMarks) {
   const marks = fiducialMarks.filter((m) => Number.isFinite(m.xMm) && Number.isFinite(m.yMm))
   const out = new Map()
   if (!marks.length) return out
-  let cx = 0, cy = 0, ext = 0
-  for (const m of marks) { cx += m.xMm; cy += m.yMm }
-  cx /= marks.length; cy /= marks.length
+  let cx = 0,
+    cy = 0,
+    ext = 0
+  for (const m of marks) {
+    cx += m.xMm
+    cy += m.yMm
+  }
+  cx /= marks.length
+  cy /= marks.length
   for (const m of marks) ext = Math.max(ext, Math.abs(m.xMm - cx), Math.abs(m.yMm - cy))
   const tol = 0.15 * (ext || 1)
   for (const m of marks) {
-    const dx = m.xMm - cx, dy = m.yMm - cy
+    const dx = m.xMm - cx,
+      dy = m.yMm - cy
     const v = dy > tol ? 'top' : dy < -tol ? 'bottom' : ''
     const h = dx > tol ? 'right' : dx < -tol ? 'left' : ''
     const label = [v, h].filter(Boolean).join('-') || 'center'
-    out.set(m.id, v && h ? label : (v || h ? `mid-${label}` : 'center'))
+    out.set(m.id, v && h ? label : v || h ? `mid-${label}` : 'center')
   }
   return out
 }
@@ -70,7 +80,9 @@ export function fiducialGhosts(fit, fiducialMarks, placed) {
   const out = []
   for (const m of fiducialMarks) {
     if (placed.has(m.id) || !Number.isFinite(m.xMm) || !Number.isFinite(m.yMm)) continue
-    const p = fit.A ? mmToScan(m.xMm, m.yMm, fit.A) : applyFiducialTransform({ x: m.xMm, y: m.yMm }, { forward: fit.inverse })
+    const p = fit.A
+      ? mmToScan(m.xMm, m.yMm, fit.A)
+      : applyFiducialTransform({ x: m.xMm, y: m.yMm }, { forward: fit.inverse })
     if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) out.push({ id: m.id, px: p.x, py: p.y })
   }
   return out

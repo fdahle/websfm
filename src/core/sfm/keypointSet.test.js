@@ -1,11 +1,21 @@
 import { describe, it, expect } from 'vitest'
 import {
-  keypointSetFrom, isKeypointSet, kpX, kpY, hasKp, kpColor, mapPositions, keypointSetTransfer,
+  keypointSetFrom,
+  isKeypointSet,
+  kpX,
+  kpY,
+  hasKp,
+  kpColor,
+  mapPositions,
+  keypointSetTransfer,
 } from './keypointSet.js'
 
 describe('keypointSet', () => {
   it('packs positions and colours, and passes a set through unchanged', () => {
-    const set = keypointSetFrom([{ x: 1.5, y: 2.25, color: [10, 20, 30] }, { x: 3, y: 4 }])
+    const set = keypointSetFrom([
+      { x: 1.5, y: 2.25, color: [10, 20, 30] },
+      { x: 3, y: 4 },
+    ])
     expect(isKeypointSet(set)).toBe(true)
     expect(set.n).toBe(2)
     expect([kpX(set, 0), kpY(set, 0), kpX(set, 1), kpY(set, 1)]).toEqual([1.5, 2.25, 3, 4])

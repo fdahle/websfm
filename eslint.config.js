@@ -8,6 +8,8 @@ export default [
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: globals.browser },
     rules: { 'no-undef': 'error', 'no-unreachable': 'error', 'constructor-super': 'error', 'getter-return': 'error' },
   },
-  { files: ['**/*.test.js', 'scripts/**/*.mjs', '*.config.js', 'tests/**/*.js'],
-    languageOptions: { globals: { ...globals.node, ...globals.browser } } },
+  {
+    files: ['**/*.test.js', 'scripts/**/*.mjs', '*.config.js', 'tests/**/*.js'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
 ]

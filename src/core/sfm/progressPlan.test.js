@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
-  SFM_PHASES, phaseOffsets, makeProgressReporter, scopeProgress, sliceRange, RUN_BUDGET,
+  SFM_PHASES,
+  phaseOffsets,
+  makeProgressReporter,
+  scopeProgress,
+  sliceRange,
+  RUN_BUDGET,
 } from './progressPlan.js'
 
 const collect = () => {
@@ -19,7 +24,10 @@ describe('phaseOffsets', () => {
   })
 
   it('normalises weights that do not sum to 1', () => {
-    const offs = phaseOffsets([{ key: 'a', weight: 3 }, { key: 'b', weight: 1 }])
+    const offs = phaseOffsets([
+      { key: 'a', weight: 3 },
+      { key: 'b', weight: 1 },
+    ])
     expect(offs.get('a').span).toBeCloseTo(0.75, 10)
     expect(offs.get('b').start).toBeCloseTo(0.75, 10)
   })
@@ -51,7 +59,10 @@ describe('makeProgressReporter', () => {
   it('advances monotonically through the phases in order', () => {
     const { calls, fn } = collect()
     const report = makeProgressReporter(fn)
-    for (const p of SFM_PHASES) { report(p.key, 0, 'x'); report(p.key, 1, 'x') }
+    for (const p of SFM_PHASES) {
+      report(p.key, 0, 'x')
+      report(p.key, 1, 'x')
+    }
     const fracs = calls.map((c) => c.fraction)
     for (let i = 1; i < fracs.length; i++) expect(fracs[i]).toBeGreaterThanOrEqual(fracs[i - 1])
     expect(fracs[fracs.length - 1]).toBeCloseTo(1, 10)

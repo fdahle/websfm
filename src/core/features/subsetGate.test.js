@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize, SUBSET_GATE_SIZE_DEFAULTS } from './subsetGate.js'
+import {
+  pickSpreadIndices,
+  sliceDescriptorRows,
+  resolveSubsetGateSize,
+  SUBSET_GATE_SIZE_DEFAULTS,
+} from './subsetGate.js'
 import { keypointsFromObjects as K } from './keypoints.js'
 
 // Build kps on a regular WxH grid so we can reason about spatial spread.
 function gridKps(w, h) {
   const kps = []
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) kps.push({ x: x * 10, y: y * 10 })
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) kps.push({ x: x * 10, y: y * 10 })
   return kps
 }
 
@@ -23,7 +27,7 @@ describe('pickSpreadIndices', () => {
     expect(idx.length).toBeLessThanOrEqual(60) // ~50, one per grid cell
     expect(idx.length).toBeGreaterThan(30)
     expect(new Set(idx).size).toBe(idx.length) // no dupes
-    for (const i of idx) expect(i).toBeGreaterThanOrEqual(0), expect(i).toBeLessThan(400)
+    for (const i of idx) (expect(i).toBeGreaterThanOrEqual(0), expect(i).toBeLessThan(400))
   })
 
   it('samples across the whole frame, not one corner', () => {

@@ -1,16 +1,24 @@
 import { describe, it, expect } from 'vitest'
 import { ref, nextTick } from 'vue'
 import {
-  fitFiducialObservations, fiducialResiduals, fiducialMarkPositions, fiducialGhosts, useFiducialFit,
+  fitFiducialObservations,
+  fiducialResiduals,
+  fiducialMarkPositions,
+  fiducialGhosts,
+  useFiducialFit,
 } from './useFiducialFit.js'
 
 // An 8-mark film layout (4 corners + 4 edge midpoints, mm, y up) and a scan where
 // 1 mm = 100 px around a principal point at (1000, 1000) px, y down.
 const MARKS = [
-  { id: 'TL', xMm: -5, yMm: 5 }, { id: 'TR', xMm: 5, yMm: 5 },
-  { id: 'BL', xMm: -5, yMm: -5 }, { id: 'BR', xMm: 5, yMm: -5 },
-  { id: 'T', xMm: 0, yMm: 5 }, { id: 'B', xMm: 0, yMm: -5 },
-  { id: 'L', xMm: -5, yMm: 0 }, { id: 'R', xMm: 5, yMm: 0 },
+  { id: 'TL', xMm: -5, yMm: 5 },
+  { id: 'TR', xMm: 5, yMm: 5 },
+  { id: 'BL', xMm: -5, yMm: -5 },
+  { id: 'BR', xMm: 5, yMm: -5 },
+  { id: 'T', xMm: 0, yMm: 5 },
+  { id: 'B', xMm: 0, yMm: -5 },
+  { id: 'L', xMm: -5, yMm: 0 },
+  { id: 'R', xMm: 5, yMm: 0 },
 ]
 const scan = (m) => ({ fidId: m.id, px: 1000 + 100 * m.xMm, py: 1000 - 100 * m.yMm })
 const byId = (id) => MARKS.find((m) => m.id === id)
@@ -41,8 +49,15 @@ describe('fiducialMarkPositions', () => {
   it('labels corners, edge midpoints and the centre relative to the layout centroid', () => {
     const pos = fiducialMarkPositions([...MARKS, { id: 'C', xMm: 0, yMm: 0 }, { id: 'bad', xMm: NaN, yMm: 0 }])
     expect(Object.fromEntries(pos)).toEqual({
-      TL: 'top-left', TR: 'top-right', BL: 'bottom-left', BR: 'bottom-right',
-      T: 'mid-top', B: 'mid-bottom', L: 'mid-left', R: 'mid-right', C: 'center',
+      TL: 'top-left',
+      TR: 'top-right',
+      BL: 'bottom-left',
+      BR: 'bottom-right',
+      T: 'mid-top',
+      B: 'mid-bottom',
+      L: 'mid-left',
+      R: 'mid-right',
+      C: 'center',
     })
     expect(fiducialMarkPositions([]).size).toBe(0)
   })
@@ -65,7 +80,12 @@ describe('useFiducialFit', () => {
   it('is empty unless the sensor is film and something is placed', async () => {
     const isFilm = ref(false)
     const obs = ref(['TL', 'TR', 'BL'].map((id) => scan(byId(id))))
-    const f = useFiducialFit({ isFilm: () => isFilm.value, marks: () => MARKS, obs: () => obs.value, transform: () => '' })
+    const f = useFiducialFit({
+      isFilm: () => isFilm.value,
+      marks: () => MARKS,
+      obs: () => obs.value,
+      transform: () => '',
+    })
     expect(f.fidResidual.value.size).toBe(0)
     expect(f.fidGhosts.value).toEqual([])
     expect([...f.markedFidIds.value]).toEqual(['TL', 'TR', 'BL']) // the menu ✓ shows regardless
@@ -79,11 +99,18 @@ describe('useFiducialFit', () => {
 
 describe('fiducialResiduals with an incomplete observation', () => {
   it('keys each residual to its own mark when one observation has no position', () => {
-    const marks = [{ id: 'F1', xMm: 0, yMm: 0 }, { id: 'F2', xMm: 10, yMm: 0 }, { id: 'F3', xMm: 0, yMm: 10 }, { id: 'F4', xMm: 10, yMm: 10 }]
+    const marks = [
+      { id: 'F1', xMm: 0, yMm: 0 },
+      { id: 'F2', xMm: 10, yMm: 0 },
+      { id: 'F3', xMm: 0, yMm: 10 },
+      { id: 'F4', xMm: 10, yMm: 10 },
+    ]
     // F2 has no pixel yet; F4 is off by one pixel, so only F4's residual is large.
     const obs = [
-      { fidId: 'F1', px: 100, py: 100 }, { fidId: 'F2', px: null, py: null },
-      { fidId: 'F3', px: 100, py: 200 }, { fidId: 'F4', px: 201, py: 200 },
+      { fidId: 'F1', px: 100, py: 100 },
+      { fidId: 'F2', px: null, py: null },
+      { fidId: 'F3', px: 100, py: 200 },
+      { fidId: 'F4', px: 201, py: 200 },
     ]
     const res = fiducialResiduals(fitFiducialObservations(obs, marks))
     expect(res.has('F2')).toBe(false)

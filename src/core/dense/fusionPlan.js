@@ -9,8 +9,14 @@ import { DENSE_TUNING } from '../tuning.js'
 import { normalizeRegion, regionContains } from '../products/region.js'
 import { DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
 import {
-  projectDensifyPeakBytes, densifyInputBytes, formatBytes, maxFusionTileCells, DENSIFY_CLOUD_BYTES_PER_CELL,
-  MAX_BUDGET_BYTES, MAX_ACCUMULATOR_CELLS, MAX_CLOUD_POINTS,
+  projectDensifyPeakBytes,
+  densifyInputBytes,
+  formatBytes,
+  maxFusionTileCells,
+  DENSIFY_CLOUD_BYTES_PER_CELL,
+  MAX_BUDGET_BYTES,
+  MAX_ACCUMULATOR_CELLS,
+  MAX_CLOUD_POINTS,
 } from './memBudget.js'
 import { unprojectPixel, sliceCorners } from './denseGeometry.js'
 import { mix32, clampCellForBounds } from './voxelAccumulator.js'
@@ -42,7 +48,8 @@ function* fusionCostSteps(maps, { maxSamples = DENSE_TUNING.fuseCostMaxSamples }
   if (!totalValid) return { n: 0, p70: 0, median: 0 }
   const stride = Math.max(1, Math.floor(totalValid / maxSamples))
   const samples = new Float32Array(Math.ceil(totalValid / stride) + 1)
-  let s = 0, vi = 0
+  let s = 0,
+    vi = 0
   for (let mi = 0; mi < maps.length; mi++) {
     const m = yield mi
     const { depth, cost } = m
@@ -109,14 +116,22 @@ function mergeCellOf(gsds) {
 // The value of rank k (0-based, ascending) among a[0..n): Hoare-partition quickselect,
 // reorders a in place.
 function selectRank(a, n, k) {
-  let lo = 0, hi = n - 1
+  let lo = 0,
+    hi = n - 1
   while (hi > lo) {
     const pivot = a[(lo + hi) >> 1]
-    let i = lo, j = hi
+    let i = lo,
+      j = hi
     while (i <= j) {
       while (a[i] < pivot) i++
       while (a[j] > pivot) j--
-      if (i <= j) { const t = a[i]; a[i] = a[j]; a[j] = t; i++; j-- }
+      if (i <= j) {
+        const t = a[i]
+        a[i] = a[j]
+        a[j] = t
+        i++
+        j--
+      }
     }
     if (k <= j) hi = j
     else if (k >= i) lo = i
@@ -147,18 +162,23 @@ function selectRank(a, n, k) {
 // every reference's comparison list before the pass starts.
 function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap, tile = null, withCorners = false }) {
   const inv = 1 / cell
-  let level = 0, mask = 0, candidates = 0
+  let level = 0,
+    mask = 0,
+    candidates = 0
   const seen = new Map() // sampled cell hash → its cell index along the tile axis
   const k = tile ? 'xyz'[tile.axis] : null
-  const mapLo = new Float64Array(maps.length).fill(Infinity), mapHi = new Float64Array(maps.length).fill(-Infinity)
+  const mapLo = new Float64Array(maps.length).fill(Infinity),
+    mapHi = new Float64Array(maps.length).fill(-Infinity)
   const corners = withCorners ? new Array(maps.length).fill(null) : null
   for (let mi = 0; mi < maps.length; mi++) {
     const m = yield mi
     const { width: w, height: h, depth, cost } = m
-    let lo = Infinity, hi = -Infinity
+    let lo = Infinity,
+      hi = -Infinity
     for (let v = 0; v < h; v += step) {
       for (let u = 0; u < w; u += step) {
-        const idx = v * w + u, d = depth[idx]
+        const idx = v * w + u,
+          d = depth[idx]
         if (!(d > 0) || cost[idx] > maxCost) continue
         const P = unprojectPixel(m, u, v, d)
         const ia = k ? Math.floor(P[k] * inv) : 0
@@ -166,19 +186,23 @@ function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap
         if (ia > hi) hi = ia
         if (region && !regionContains(region, P.x, P.y, P.z)) continue
         candidates++
-        const ix = Math.floor(P.x * inv) | 0, iy = Math.floor(P.y * inv) | 0, iz = Math.floor(P.z * inv) | 0
+        const ix = Math.floor(P.x * inv) | 0,
+          iy = Math.floor(P.y * inv) | 0,
+          iz = Math.floor(P.z * inv) | 0
         const h1 = mix32(mix32(mix32(ix) ^ iy) ^ iz)
         if ((h1 & mask) !== 0) continue
         const h2 = mix32(mix32(mix32(iz ^ 0x5bd1e995) ^ ix) ^ iy) & 0x1fffff
         const key = h1 * 2097152 + h2
         if (!seen.has(key)) seen.set(key, ia)
         if (seen.size > sampleCap) {
-          level++; mask = (2 ** level - 1) | 0
+          level++
+          mask = (2 ** level - 1) | 0
           for (const sk of seen.keys()) if ((Math.floor(sk / 2097152) & mask) !== 0) seen.delete(sk)
         }
       }
     }
-    mapLo[mi] = lo; mapHi[mi] = hi
+    mapLo[mi] = lo
+    mapHi[mi] = hi
     if (corners) corners[mi] = sliceCorners(m, 0, w, 0, h)
   }
   const cells = Math.min(candidates, Math.ceil(seen.size * 2 ** level))
@@ -197,10 +221,15 @@ function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap
 export function planFusionSlabs(hist, cap) {
   const idx = [...hist.keys()].sort((a, b) => a - b)
   const slabs = []
-  let start = -Infinity, cur = 0
+  let start = -Infinity,
+    cur = 0
   for (const ia of idx) {
     const c = hist.get(ia)
-    if (cur > 0 && cur + c > cap) { slabs.push({ lo: start, hi: ia, cells: cur }); start = ia; cur = 0 }
+    if (cur > 0 && cur + c > cap) {
+      slabs.push({ lo: start, hi: ia, cells: cur })
+      start = ia
+      cur = 0
+    }
     cur += c
   }
   slabs.push({ lo: start, hi: Infinity, cells: cur })
@@ -221,7 +250,7 @@ export function fusionGates(opts = {}) {
   const removeIsolated = boolOpt(opts.removeIsolated, DENSE_FUSE_DEFAULTS.removeIsolated)
   // cos of the incidence gate; ≤0 or ≥90 ⇒ disabled (cosInc ≥ 0 always passes).
   const incidenceOn = maxIncidenceDeg > 0 && maxIncidenceDeg < 90
-  const cosIncGate = incidenceOn ? Math.cos(maxIncidenceDeg * Math.PI / 180) : -1
+  const cosIncGate = incidenceOn ? Math.cos((maxIncidenceDeg * Math.PI) / 180) : -1
   return { consistencyPx, depthTolRel, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated, incidenceOn, cosIncGate }
 }
 
@@ -234,20 +263,32 @@ export function fusionGates(opts = {}) {
 // The plan's share of a fusion progress bar: on quarry (347 saved maps) the pre-passes
 // are roughly a quarter of Stage B once the merge-cell pass stopped sorting boxed depths.
 export const FUSION_PLAN_SHARE = 0.25
-const PLAN_PASS_LABELS = ['cost statistics', 'cost statistics', 'scene bounds', 'measuring the cloud size', 'slab outlines']
+const PLAN_PASS_LABELS = [
+  'cost statistics',
+  'cost statistics',
+  'scene bounds',
+  'measuring the cloud size',
+  'slab outlines',
+]
 export function* fusionPlanSteps(maps, opts, onLog, hooks = {}) {
-  const report = hooks.onPlanProgress, n = maps.length
+  const report = hooks.onPlanProgress,
+    n = maps.length
   const steps = planSteps(maps, opts, onLog, hooks)
   if (!report || !n) return yield* steps
   const passes = hooks.streaming ? 5 : 4
-  let reads = 0, r = steps.next()
+  let reads = 0,
+    r = steps.next()
   while (!r.done) {
     const map = yield r.value
     if (typeof r.value === 'number') {
       const pass = Math.floor(reads / n) % passes
       reads++
-      report((reads - 1) % n + 1, n,
-        `Planning fusion (${pass + 1}/${passes}): ${PLAN_PASS_LABELS[pass]}`, Math.min(0.99, reads / (n * passes)))
+      report(
+        ((reads - 1) % n) + 1,
+        n,
+        `Planning fusion (${pass + 1}/${passes}): ${PLAN_PASS_LABELS[pass]}`,
+        Math.min(0.99, reads / (n * passes)),
+      )
     }
     r = steps.next(map)
   }
@@ -267,19 +308,30 @@ function* planSteps(maps, opts, onLog, hooks) {
   // Infinity is an explicit "no cost gate".
   const minViews = numOpt(opts.minViews, Math.max(1, Math.min(2, maps.length - 1)), { int: true, min: 1 })
   const maxCost = opts.maxCost === Infinity ? Infinity : numOpt(opts.maxCost, DENSE_FUSE_DEFAULTS.maxCost, { min: 0 })
-  onLog(`Fusion: valid-pixel cost median ${costStats.median.toFixed(2)}, p70 ${costStats.p70.toFixed(2)} `
-    + `(${costStats.n} px)`, 'info', 'Dense')
+  onLog(
+    `Fusion: valid-pixel cost median ${costStats.median.toFixed(2)}, p70 ${costStats.p70.toFixed(2)} ` +
+      `(${costStats.n} px)`,
+    'info',
+    'Dense',
+  )
   // A real ZNCC match is ≥ ~0.55 (cost ≤ 0.45). A p70 above 0.55 means the
   // photoconsistency signal is weak across the whole set: the problem is upstream of
   // fusion, so say so.
   if (costStats.p70 > 0.55) {
-    onLog(`Fusion: weak cost distribution — p70 ${costStats.p70.toFixed(2)} > 0.55 (most pixels match at ZNCC < 0.45). `
-      + 'Check intrinsics / window size / working resolution.', 'warn', 'Dense')
+    onLog(
+      `Fusion: weak cost distribution — p70 ${costStats.p70.toFixed(2)} > 0.55 (most pixels match at ZNCC < 0.45). ` +
+        'Check intrinsics / window size / working resolution.',
+      'warn',
+      'Dense',
+    )
   }
 
-  onLog(`Fusion: ${pluralize(maps.length, 'map')}, minViews ${minViews}, maxCost ${maxCost}, `
-    + `depth tol ${(depthTolRel * 100).toFixed(1)}%, consistency ±${consistencyPx}px, step ${step}px`,
-    'info', 'Dense')
+  onLog(
+    `Fusion: ${pluralize(maps.length, 'map')}, minViews ${minViews}, maxCost ${maxCost}, ` +
+      `depth tol ${(depthTolRel * 100).toFixed(1)}%, consistency ±${consistencyPx}px, step ${step}px`,
+    'info',
+    'Dense',
+  )
 
   // Scene bounds from a coarse valid-depth grid (fuseBboxStride-th row/col of each
   // map) — enough to size the voxel-key packing without a full unprojection pass.
@@ -288,26 +340,36 @@ function* planSteps(maps, opts, onLog, hooks) {
   // the flat output ≈ raw count but never a per-point object list (a true no-merge
   // would resurrect the OOM).
   const mergeOpt = numOpt(opts.mergeCell, null) // blank / non-finite ⇒ auto
-  const gsds = mergeOpt > 0 ? null : [], gsdScratch = { buf: new Float32Array(0) }
+  const gsds = mergeOpt > 0 ? null : [],
+    gsdScratch = { buf: new Float32Array(0) }
   const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
   const bboxStride = DENSE_TUNING.fuseBboxStride
   for (let mi = 0; mi < maps.length; mi++) {
     const m = yield mi
-    if (gsds) { const g = mapGsd(m, gsdScratch); if (g != null) gsds.push(g) }
+    if (gsds) {
+      const g = mapGsd(m, gsdScratch)
+      if (g != null) gsds.push(g)
+    }
     const { width: w, height: h, depth } = m
     for (let v = 0; v < h; v += bboxStride) {
       for (let u = 0; u < w; u += bboxStride) {
         const d = depth[v * w + u]
         if (!(d > 0)) continue
         const P = unprojectPixel(m, u, v, d)
-        if (P.x < bounds.minX) bounds.minX = P.x; if (P.x > bounds.maxX) bounds.maxX = P.x
-        if (P.y < bounds.minY) bounds.minY = P.y; if (P.y > bounds.maxY) bounds.maxY = P.y
-        if (P.z < bounds.minZ) bounds.minZ = P.z; if (P.z > bounds.maxZ) bounds.maxZ = P.z
+        if (P.x < bounds.minX) bounds.minX = P.x
+        if (P.x > bounds.maxX) bounds.maxX = P.x
+        if (P.y < bounds.minY) bounds.minY = P.y
+        if (P.y > bounds.maxY) bounds.maxY = P.y
+        if (P.z < bounds.minZ) bounds.minZ = P.z
+        if (P.z > bounds.maxZ) bounds.maxZ = P.z
       }
     }
   }
   const hasBounds = Number.isFinite(bounds.minX)
-  if (!hasBounds) { bounds.minX = bounds.minY = bounds.minZ = 0; bounds.maxX = bounds.maxY = bounds.maxZ = 0 }
+  if (!hasBounds) {
+    bounds.minX = bounds.minY = bounds.minZ = 0
+    bounds.maxX = bounds.maxY = bounds.maxZ = 0
+  }
 
   // Merge cell in world units (≈ one ground-sample-distance), clamped up if the
   // packed key would overflow float64.
@@ -315,8 +377,12 @@ function* planSteps(maps, opts, onLog, hooks) {
   if (!(mergeCell > 0)) {
     const auto = mergeCellOf(gsds)
     mergeCell = (auto > 0 ? auto : 1) * 1e-3
-    onLog(`Fusion: merge disabled — streaming near-unmerged at cell ${mergeCell.toExponential(2)} `
-      + `(flat output, no raw point objects)`, 'warn', 'Dense')
+    onLog(
+      `Fusion: merge disabled — streaming near-unmerged at cell ${mergeCell.toExponential(2)} ` +
+        `(flat output, no raw point objects)`,
+      'warn',
+      'Dense',
+    )
   }
   mergeCell = clampCellForBounds(bounds, mergeCell)
   const region = normalizeRegion(opts.region)
@@ -331,22 +397,32 @@ function* planSteps(maps, opts, onLog, hooks) {
   // every map's pixels at the real merge cell; a refusal returns normally (no
   // throw), so the caller still gets transferred buffers home.
   const est = yield* fusionCellEstimateSteps(maps, {
-    cell: mergeCell, step, maxCost, region, sampleCap: DENSE_TUNING.fuseEstimateSampleCap, tile: { axis },
+    cell: mergeCell,
+    step,
+    maxCost,
+    region,
+    sampleCap: DENSE_TUNING.fuseEstimateSampleCap,
+    tile: { axis },
     withCorners: !!hooks.streaming,
   })
   const margin = est.level > 0 ? DENSE_TUNING.fuseEstimateMargin : 1
   const estCells = Math.ceil(est.cells * margin)
   // Per worker: its maps (streamed: the largest reference + its check buffers) and,
   // streamed, its comparison cache (memBudget.js densifyInputBytes).
-  const inputBytes = densifyInputBytes(maps, { streamed: !!hooks.streaming }) + (hooks.streaming ? (opts.cacheBytes ?? 0) : 0)
+  const inputBytes =
+    densifyInputBytes(maps, { streamed: !!hooks.streaming }) + (hooks.streaming ? (opts.cacheBytes ?? 0) : 0)
   let proj = projectDensifyPeakBytes({ inputBytes, cells: estCells })
   // Never more than a tab can hold (memBudget.js), whatever the caller passed.
   const budget = opts.memBudgetBytes > 0 ? Math.min(opts.memBudgetBytes, MAX_BUDGET_BYTES) : 0
-  onLog(`Fusion: measured ${est.candidates.toLocaleString()} candidate px → ≤ ${estCells.toLocaleString()} `
-    + `merge cells at ${mergeCell.toExponential(2)}${est.level ? ` (hash-sampled 1/${2 ** est.level}, +${Math.round((DENSE_TUNING.fuseEstimateMargin - 1) * 100)}% margin)` : ' (exact)'}; `
-    + `projected peak ≈ ${formatBytes(proj.total)} (input ${formatBytes(proj.input)} + accumulator `
-    + `${formatBytes(proj.accumulator)})`
-    + (budget ? ` vs budget ${formatBytes(budget)}` : ''), 'info', 'Dense')
+  onLog(
+    `Fusion: measured ${est.candidates.toLocaleString()} candidate px → ≤ ${estCells.toLocaleString()} ` +
+      `merge cells at ${mergeCell.toExponential(2)}${est.level ? ` (hash-sampled 1/${2 ** est.level}, +${Math.round((DENSE_TUNING.fuseEstimateMargin - 1) * 100)}% margin)` : ' (exact)'}; ` +
+      `projected peak ≈ ${formatBytes(proj.total)} (input ${formatBytes(proj.input)} + accumulator ` +
+      `${formatBytes(proj.accumulator)})` +
+      (budget ? ` vs budget ${formatBytes(budget)}` : ''),
+    'info',
+    'Dense',
+  )
   const scaledHist = () => new Map([...est.hist].map(([ia, c]) => [ia, c * margin]))
   let slabs = [{ lo: -Infinity, hi: Infinity, cells: estCells }]
   let workers = 1
@@ -369,12 +445,23 @@ function* planSteps(maps, opts, onLog, hooks) {
     const planned = cap > 0 ? planFusionSlabs(scaledHist(), Math.min(cap, Math.ceil(estCells / parallel), slabMax)) : []
     if (planned.length > 1) {
       const largest = Math.max(...planned.map((s) => s.cells))
-      const parProj = projectDensifyPeakBytes({ inputBytes, cells: estCells, tileCells: largest, workers: Math.min(parallel, planned.length) })
+      const parProj = projectDensifyPeakBytes({
+        inputBytes,
+        cells: estCells,
+        tileCells: largest,
+        workers: Math.min(parallel, planned.length),
+      })
       if (!budget || parProj.total <= budget) {
-        slabs = planned; proj = parProj; workers = Math.min(parallel, planned.length)
-        onLog(`Fusion: ${slabs.length} slabs along ${axKey} on ${workers} workers (≤ ${Math.ceil(largest).toLocaleString()} cells each); `
-          + `projected peak ≈ ${formatBytes(proj.total)} (accumulators ${formatBytes(proj.accumulator)} + finished slabs `
-          + `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`, 'info', 'Dense')
+        slabs = planned
+        proj = parProj
+        workers = Math.min(parallel, planned.length)
+        onLog(
+          `Fusion: ${slabs.length} slabs along ${axKey} on ${workers} workers (≤ ${Math.ceil(largest).toLocaleString()} cells each); ` +
+            `projected peak ≈ ${formatBytes(proj.total)} (accumulators ${formatBytes(proj.accumulator)} + finished slabs ` +
+            `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`,
+          'info',
+          'Dense',
+        )
       }
     }
   }
@@ -388,11 +475,16 @@ function* planSteps(maps, opts, onLog, hooks) {
       const largest = Math.max(...planned.map((s) => s.cells))
       const tiledProj = projectDensifyPeakBytes({ inputBytes, cells: estCells, tileCells: largest })
       if (planned.length > 1 && (!budget || tiledProj.total <= budget)) {
-        slabs = planned; proj = tiledProj
-        onLog(`Fusion: one piece would need ${formatBytes(projectDensifyPeakBytes({ inputBytes, cells: estCells }).total)} — `
-          + `fusing in ${slabs.length} slabs along ${axKey} (≤ ${Math.ceil(largest).toLocaleString()} cells each); `
-          + `projected peak ≈ ${formatBytes(proj.total)} (accumulator ${formatBytes(proj.accumulator)} + finished slabs `
-          + `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`, 'info', 'Dense')
+        slabs = planned
+        proj = tiledProj
+        onLog(
+          `Fusion: one piece would need ${formatBytes(projectDensifyPeakBytes({ inputBytes, cells: estCells }).total)} — ` +
+            `fusing in ${slabs.length} slabs along ${axKey} (≤ ${Math.ceil(largest).toLocaleString()} cells each); ` +
+            `projected peak ≈ ${formatBytes(proj.total)} (accumulator ${formatBytes(proj.accumulator)} + finished slabs ` +
+            `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`,
+          'info',
+          'Dense',
+        )
       }
     }
   }
@@ -407,27 +499,43 @@ function* planSteps(maps, opts, onLog, hooks) {
   const overBudget = budget && proj.total > budget
   const tooLarge = estCells > maxCloudPoints || (!onePieceFits && slabs.length === 1)
   const why = tooLarge
-    ? `${estCells.toLocaleString()} merge cells are more than the browser can hold in one cloud `
-      + `(${maxCloudPoints.toLocaleString()} points; one piece at most ${maxAccCells.toLocaleString()} cells)`
+    ? `${estCells.toLocaleString()} merge cells are more than the browser can hold in one cloud ` +
+      `(${maxCloudPoints.toLocaleString()} points; one piece at most ${maxAccCells.toLocaleString()} cells)`
     : `projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)}`
   const autoStepMax = DENSE_TUNING.fuseAutoStepMax ?? 4
   if ((overBudget || tooLarge) && opts.autoStep !== false && step * 2 <= autoStepMax) {
-    onLog(`Fusion: ${why} at sample step ${step}px — re-planning at step ${step * 2}px (¼ the pixels) instead of refusing`, 'warn', 'Dense')
+    onLog(
+      `Fusion: ${why} at sample step ${step}px — re-planning at step ${step * 2}px (¼ the pixels) instead of refusing`,
+      'warn',
+      'Dense',
+    )
     return yield* planSteps(maps, { ...opts, step: step * 2 }, onLog, hooks)
   }
   if (tooLarge) {
     onLog(`Fusion: ${why}.`, 'error', 'Dense')
-    onLog('Fusion: aborting before the consistency pass. Raise the point-density sample step, set a Region around '
-      + 'the subject (Tools ▸ Model), raise the merge cell, or build depth maps at a lower Quality.', 'error', 'Dense')
+    onLog(
+      'Fusion: aborting before the consistency pass. Raise the point-density sample step, set a Region around ' +
+        'the subject (Tools ▸ Model), raise the merge cell, or build depth maps at a lower Quality.',
+      'error',
+      'Dense',
+    )
     return { refused: { ...proj, budget, mergeCell, maxCloudPoints } }
   }
   if (overBudget) {
-    onLog(`Fusion: projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)} even in slabs `
-      + `(the cloud alone is ${formatBytes(estCells * DENSIFY_CLOUD_BYTES_PER_CELL)}).`, 'error', 'Dense')
-    onLog('Fusion: aborting before the consistency pass — projected memory exceeds the budget. '
-      + 'Raise the point-density sample step to 2 (¼ the pixels), set a Region around the subject '
-      + '(Tools ▸ Model), or build depth maps at a lower Quality; or raise the memory budget '
-      + `(Settings ▸ Compute, at most ${formatBytes(MAX_BUDGET_BYTES)}) if the machine has the RAM.`, 'error', 'Dense')
+    onLog(
+      `Fusion: projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)} even in slabs ` +
+        `(the cloud alone is ${formatBytes(estCells * DENSIFY_CLOUD_BYTES_PER_CELL)}).`,
+      'error',
+      'Dense',
+    )
+    onLog(
+      'Fusion: aborting before the consistency pass — projected memory exceeds the budget. ' +
+        'Raise the point-density sample step to 2 (¼ the pixels), set a Region around the subject ' +
+        '(Tools ▸ Model), or build depth maps at a lower Quality; or raise the memory budget ' +
+        `(Settings ▸ Compute, at most ${formatBytes(MAX_BUDGET_BYTES)}) if the machine has the RAM.`,
+      'error',
+      'Dense',
+    )
     return { refused: { ...proj, budget, mergeCell } }
   }
   const tiled = slabs.length > 1
@@ -460,7 +568,8 @@ function* planSteps(maps, opts, onLog, hooks) {
   // considers. One more read of every map, only when tiled.
   let slabCorners = null
   if (tiled && hooks.streaming) {
-    const inv = 1 / mergeCell, k = 'xyz'[axis]
+    const inv = 1 / mergeCell,
+      k = 'xyz'[axis]
     slabCorners = slabs.map(() => new Array(nM).fill(null))
     for (let mi = 0; mi < nM; mi++) {
       if (!(est.mapLo[mi] <= est.mapHi[mi])) continue
@@ -469,29 +578,50 @@ function* planSteps(maps, opts, onLog, hooks) {
       const box = slabs.map(() => [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity]) // u0 u1 v0 v1 d0 d1
       for (let v = 0; v < h; v += step) {
         for (let u = 0; u < w; u += step) {
-          const idx = v * w + u, d = depth[idx]
+          const idx = v * w + u,
+            d = depth[idx]
           if (!(d > 0) || cost[idx] > maxCost) continue
           const ca = Math.floor(unprojectPixel(m, u, v, d)[k] * inv)
           for (let ti = 0; ti < slabs.length; ti++) {
             if (ca < slabs[ti].lo - halo || ca >= slabs[ti].hi + halo) continue
             const b = box[ti]
-            if (u < b[0]) b[0] = u; if (u > b[1]) b[1] = u
-            if (v < b[2]) b[2] = v; if (v > b[3]) b[3] = v
-            if (d < b[4]) b[4] = d; if (d > b[5]) b[5] = d
+            if (u < b[0]) b[0] = u
+            if (u > b[1]) b[1] = u
+            if (v < b[2]) b[2] = v
+            if (v > b[3]) b[3] = v
+            if (d < b[4]) b[4] = d
+            if (d > b[5]) b[5] = d
           }
         }
       }
       box.forEach((b, ti) => {
         if (!(b[5] > 0)) return
         const cs = []
-        for (const d of [b[4], b[5]]) for (const u of [b[0], b[1]]) for (const v of [b[2], b[3]]) cs.push(unprojectPixel(m, u, v, d))
+        for (const d of [b[4], b[5]])
+          for (const u of [b[0], b[1]]) for (const v of [b[2], b[3]]) cs.push(unprojectPixel(m, u, v, d))
         slabCorners[ti][mi] = cs
       })
     }
   }
   return {
-    nMaps: nM, gates, minViews, maxCost, costMedian: costStats.median, bounds, bboxStride, mergeCell, region,
-    axis, slabs, tiled, halo, workers, visits, firstSlab, estCells, slabCorners,
+    nMaps: nM,
+    gates,
+    minViews,
+    maxCost,
+    costMedian: costStats.median,
+    bounds,
+    bboxStride,
+    mergeCell,
+    region,
+    axis,
+    slabs,
+    tiled,
+    halo,
+    workers,
+    visits,
+    firstSlab,
+    estCells,
+    slabCorners,
     est: { mapLo: est.mapLo, mapHi: est.mapHi, corners: est.corners },
   }
 }

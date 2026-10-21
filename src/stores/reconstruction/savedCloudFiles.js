@@ -20,8 +20,17 @@
 // Heavy-data identity of a dense/mesh cloud; null for kinds that are never reused.
 export function heavyIdentity(c) {
   if (!c || (c.kind !== 'dense' && c.kind !== 'mesh') || !c.pos) return null
-  const id = [c.kind, c.count ?? null, c.nVerts ?? null, c.pos, c.col ?? null, c.nrm ?? null, c.idx ?? null,
-    c.uv ?? null, c.texture?.data ?? null]
+  const id = [
+    c.kind,
+    c.count ?? null,
+    c.nVerts ?? null,
+    c.pos,
+    c.col ?? null,
+    c.nrm ?? null,
+    c.idx ?? null,
+    c.uv ?? null,
+    c.texture?.data ?? null,
+  ]
   for (const [name, values] of Object.entries(c.attributes ?? {})) id.push(name, values)
   return id
 }
@@ -46,6 +55,8 @@ export function createSavedCloudFiles() {
       if (!id || !files?.pos) return
       byPos.set(c.pos, { projectId, identity: id, files: { ...files } })
     },
-    clear() { byPos = new WeakMap() },
+    clear() {
+      byPos = new WeakMap()
+    },
   }
 }

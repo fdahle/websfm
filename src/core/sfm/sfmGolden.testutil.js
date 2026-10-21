@@ -22,8 +22,18 @@ export const GOLDEN_SCENES = {
   // Three unconnected 9-image blocks: the primary takes one (a third of the set), so
   // the alternate-seed retries run, then the other two become secondary models (kept
   // separate: they share no cameras).
-  stranded: () => aerialBlock({ seed: 33, rows: 3, cols: 3, nPoints: 2000, prefix: 'st',
-    blocks: [{ rows: 3, cols: 3, offsetX: 400, offsetY: 0 }, { rows: 3, cols: 3, offsetX: 0, offsetY: 500 }] }),
+  stranded: () =>
+    aerialBlock({
+      seed: 33,
+      rows: 3,
+      cols: 3,
+      nPoints: 2000,
+      prefix: 'st',
+      blocks: [
+        { rows: 3, cols: 3, offsetX: 400, offsetY: 0 },
+        { rows: 3, cols: 3, offsetX: 0, offsetY: 500 },
+      ],
+    }),
   // Film scans: per-image scan→canonical fiducial affine at ingest, F refit.
   film: () => aerialBlock({ seed: 45, rows: 3, cols: 4, nPoints: 2000, film: true, prefix: 'fm' }),
 }
@@ -36,11 +46,16 @@ export function goldenScenes() {
   const dumps = (process.env.WEBSFM_SFM_GOLDEN_INPUTS || '').split(',').filter(Boolean)
   return {
     ...GOLDEN_SCENES,
-    ...Object.fromEntries(dumps.map((path) => [`dump:${basename(path)}`, () => {
-      const input = decodeSfmInput(readFileSync(path))
-      wrapPackedMatches(input.pairs)
-      return input
-    }])),
+    ...Object.fromEntries(
+      dumps.map((path) => [
+        `dump:${basename(path)}`,
+        () => {
+          const input = decodeSfmInput(readFileSync(path))
+          wrapPackedMatches(input.pairs)
+          return input
+        },
+      ]),
+    ),
   }
 }
 
@@ -67,9 +82,15 @@ function scrub(value) {
 function digestModel(m) {
   const b = m.buffers || {}
   return scrub({
-    status: m.status, cameras: m.cameras, summary: m.summary, viewUuids: m.viewUuids,
-    pointCount: m.pointCount, hasColor: m.hasColor,
-    name: m.name ?? null, componentImageUuids: m.componentImageUuids ?? null, alignment: m.alignment ?? null,
+    status: m.status,
+    cameras: m.cameras,
+    summary: m.summary,
+    viewUuids: m.viewUuids,
+    pointCount: m.pointCount,
+    hasColor: m.hasColor,
+    name: m.name ?? null,
+    componentImageUuids: m.componentImageUuids ?? null,
+    alignment: m.alignment ?? null,
     pos: digestTyped(b.pos && new Float64Array(b.pos)),
     col: digestTyped(b.col && new Uint8Array(b.col)),
     colorMask: digestTyped(b.colorMask && new Uint8Array(b.colorMask)),
@@ -86,12 +107,22 @@ export async function runGoldenScene(name, { prepare = (scene) => scene } = {}) 
   const logs = []
   const out = await reconstruct(
     {
-      images: scene.images, pairs: scene.pairs, gcps: scene.gcps, cameraPriors: scene.cameraPriors,
+      images: scene.images,
+      pairs: scene.pairs,
+      gcps: scene.gcps,
+      cameraPriors: scene.cameraPriors,
       // WEBSFM_SFM_TRACKS=map|typed picks the track store (trackStore.js); neither choice
       // may change the digest.
-      settings: { ...(scene.settings ?? {}), ...(process.env.WEBSFM_SFM_TRACKS ? { trackStore: process.env.WEBSFM_SFM_TRACKS } : {}) },
+      settings: {
+        ...(scene.settings ?? {}),
+        ...(process.env.WEBSFM_SFM_TRACKS ? { trackStore: process.env.WEBSFM_SFM_TRACKS } : {}),
+      },
     },
-    { onLog: (m, level, cat) => { if (!DROP_LOG.some((re) => re.test(m))) logs.push(`${level}|${cat}|${m}`) } },
+    {
+      onLog: (m, level, cat) => {
+        if (!DROP_LOG.some((re) => re.test(m))) logs.push(`${level}|${cat}|${m}`)
+      },
+    },
   )
   const { result } = packReconstructionResult(out)
   return {
@@ -115,4 +146,3 @@ export function firstDiff(a, b, path = '') {
   }
   return null
 }
-

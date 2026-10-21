@@ -14,7 +14,10 @@ describe('loadProgressView', () => {
       ['gcps', null],
     ])
     expect(loadProgressView(null, stores)).toEqual({
-      label: 'Reconstruction: Decoding "Dense"', done: 1, total: 2, detail: 'Also restoring: Matches',
+      label: 'Reconstruction: Decoding "Dense"',
+      done: 1,
+      total: 2,
+      detail: 'Also restoring: Matches',
     })
   })
 

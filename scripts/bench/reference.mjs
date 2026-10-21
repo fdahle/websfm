@@ -29,8 +29,16 @@ const stem = (n) => n.replace(/\.[^.]+$/, '').toLowerCase()
 // Tab-separated when the line has tabs (a date column may contain a space), else any
 // whitespace / comma / semicolon.
 function parseTable(text) {
-  return text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-    .map((l) => l.split(l.includes('\t') ? /\t/ : /[,; ]+/).map((c) => c.trim()).filter(Boolean))
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))
+    .map((l) =>
+      l
+        .split(l.includes('\t') ? /\t/ : /[,; ]+/)
+        .map((c) => c.trim())
+        .filter(Boolean),
+    )
 }
 
 async function readZipEntry(path, entry) {
@@ -50,7 +58,8 @@ async function metashapeMarks(dir) {
   for (const m of frame.matchAll(/<marker marker_id="(\d+)">([\s\S]*?)<\/marker>/g)) {
     const label = markerLabel.get(m[1])
     if (label == null) continue
-    out[label] = [...m[2].matchAll(/<location [^>]*\/>/g)].map((l) => attrs(l[0]))
+    out[label] = [...m[2].matchAll(/<location [^>]*\/>/g)]
+      .map((l) => attrs(l[0]))
       .filter((a) => camLabel.has(a.camera_id))
       .map((a) => ({ image: camLabel.get(a.camera_id), px: Number(a.x), py: Number(a.y) }))
   }
@@ -59,12 +68,16 @@ async function metashapeMarks(dir) {
 
 export async function loadReference(ref) {
   if (!ref) return null
-  const out = { positions: null, leverArm: null, gcps: null,
+  const out = {
+    positions: null,
+    leverArm: null,
+    gcps: null,
     // GCP labels whose reference is known bad (GeoScan's 19: its file line was never
     // converted out of the source datum, 1.6 m E / 3.1 m U; HANDOVER ▸ GeoScan datum);
     // they are reported but left out of the checkpoint RMS.
     excludeGcps: Array.isArray(ref.excludeGcps) ? ref.excludeGcps.map(String) : [],
-    markOffsetsPx: Array.isArray(ref.markOffsetsPx) ? ref.markOffsetsPx.map(Number).filter(Number.isFinite) : [] }
+    markOffsetsPx: Array.isArray(ref.markOffsetsPx) ? ref.markOffsetsPx.map(Number).filter(Number.isFinite) : [],
+  }
   if (ref.cameras) {
     out.positions = {}
     // Optional per-camera standard deviations in metres: `sigmaColumns` = 0-based column
@@ -99,7 +112,10 @@ export async function loadReference(ref) {
       .filter((r) => r.length >= 4 && Number.isFinite(+r[1]))
       .map(([label, lat, lon, h]) => [label, ...(ref.gcpOverrides?.[label] ?? [lat, lon, h])])
       .map(([label, lat, lon, h]) => ({
-        label, lat: +lat, lon: +lon, h: +h,
+        label,
+        lat: +lat,
+        lon: +lon,
+        h: +h,
         marks: (marks[label] ?? []).map((m) => ({ image: stem(m.image), px: m.px + off, py: m.py + off })),
       }))
   }

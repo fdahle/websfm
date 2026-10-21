@@ -38,7 +38,11 @@ const horizontalAccuracy = ref(raster.value.horizontalAccuracy ?? null)
 const vOffset = ref(raster.value.vOffset || 0)
 
 // Which common products use which datum, for the choice.
-const DATUM_HINTS = { ellipsoidal: ' — REMA, ArcticDEM, most photogrammetric DSMs', 'geoid:EGM2008': ' — Copernicus DEM', 'geoid:EGM96': ' — SRTM' }
+const DATUM_HINTS = {
+  'ellipsoidal': ' — REMA, ArcticDEM, most photogrammetric DSMs',
+  'geoid:EGM2008': ' — Copernicus DEM',
+  'geoid:EGM96': ' — SRTM',
+}
 const reasons = computed(() => raster.value.classification?.reasons || [])
 const isDem = computed(() => kind.value === 'dem')
 
@@ -48,19 +52,25 @@ function confirm() {
   emit('set-accuracy', {
     id: raster.value.id,
     horizontalAccuracy: positiveOrNull(horizontalAccuracy.value),
-    ...(isDem.value ? {
-      verticalDatum: verticalDatum.value,
-      verticalAccuracy: positiveOrNull(verticalAccuracy.value),
-      ...(accuracyOnly.value ? { vOffset: Number.isFinite(vOffset.value) ? vOffset.value : 0 } : {}),
-    } : {}),
+    ...(isDem.value
+      ? {
+          verticalDatum: verticalDatum.value,
+          verticalAccuracy: positiveOrNull(verticalAccuracy.value),
+          ...(accuracyOnly.value ? { vOffset: Number.isFinite(vOffset.value) ? vOffset.value : 0 } : {}),
+        }
+      : {}),
   })
   emit('close')
 }
 </script>
 
 <template>
-  <ModalShell :title="accuracyOnly ? `${raster.name} — accuracy & datum` : 'Reference raster — confirm type'"
-    :aria-label="accuracyOnly ? 'Reference raster accuracy' : 'Import Reference Raster'" width="460px" @close="emit('close')">
+  <ModalShell
+    :title="accuracyOnly ? `${raster.name} — accuracy & datum` : 'Reference raster — confirm type'"
+    :aria-label="accuracyOnly ? 'Reference raster accuracy' : 'Import Reference Raster'"
+    width="460px"
+    @close="emit('close')"
+  >
     <div class="filename">{{ data.fileName }}</div>
     <div class="stats">
       <span>{{ raster.width.toLocaleString() }} × {{ raster.height.toLocaleString() }} px</span>
@@ -70,42 +80,49 @@ function confirm() {
     </div>
 
     <template v-if="!accuracyOnly">
-    <img v-if="raster.previewDataUrl" :src="raster.previewDataUrl" class="preview" alt="" />
+      <img v-if="raster.previewDataUrl" :src="raster.previewDataUrl" class="preview" alt="" />
 
-    <!-- The reasons are the point of this modal: a guess you can't audit is
+      <!-- The reasons are the point of this modal: a guess you can't audit is
          a guess you have to reverse-engineer later. -->
-    <div class="why">
-      <div class="why-hd">
-        Guessed <strong>{{ raster.kind === 'dem' ? 'DEM' : 'orthophoto' }}</strong>,
-        {{ raster.classification?.confidence ?? 'low' }} confidence:
+      <div class="why">
+        <div class="why-hd">
+          Guessed <strong>{{ raster.kind === 'dem' ? 'DEM' : 'orthophoto' }}</strong
+          >, {{ raster.classification?.confidence ?? 'low' }} confidence:
+        </div>
+        <ul>
+          <li v-for="(r, i) in reasons" :key="i">{{ r }}</li>
+        </ul>
       </div>
-      <ul>
-        <li v-for="(r, i) in reasons" :key="i">{{ r }}</li>
-      </ul>
-    </div>
 
-    <div class="field">
-      <label class="field-label">This raster is</label>
-      <div class="seg">
-        <button class="seg-btn" :class="{ active: kind === 'dem' }" @click="kind = 'dem'">
-          DEM (elevation)
-        </button>
-        <button class="seg-btn" :class="{ active: kind === 'ortho' }" @click="kind = 'ortho'">
-          Orthophoto (imagery)
-        </button>
+      <div class="field">
+        <label class="field-label">This raster is</label>
+        <div class="seg">
+          <button class="seg-btn" :class="{ active: kind === 'dem' }" @click="kind = 'dem'">DEM (elevation)</button>
+          <button class="seg-btn" :class="{ active: kind === 'ortho' }" @click="kind = 'ortho'">
+            Orthophoto (imagery)
+          </button>
+        </div>
       </div>
-    </div>
     </template>
 
     <div class="field">
       <label class="field-label" for="hacc">
-        <FieldHelp op="georeferencing" param="horizontalAccuracy" :value="horizontalAccuracy">Horizontal accuracy (σ, metres)</FieldHelp>
+        <FieldHelp op="georeferencing" param="horizontalAccuracy" :value="horizontalAccuracy"
+          >Horizontal accuracy (σ, metres)</FieldHelp
+        >
       </label>
-      <input id="hacc" v-model.number="horizontalAccuracy" type="number" min="0" step="any"
-        placeholder="unknown" class="field-input short" />
+      <input
+        id="hacc"
+        v-model.number="horizontalAccuracy"
+        type="number"
+        min="0"
+        step="any"
+        placeholder="unknown"
+        class="field-input short"
+      />
       <span class="field-hint">
-        How well this raster is positioned on the ground. A GCP picked off it gets this
-        and its pixel size combined; left blank, the pixel size alone.
+        How well this raster is positioned on the ground. A GCP picked off it gets this and its pixel size combined;
+        left blank, the pixel size alone.
       </span>
     </div>
 
@@ -113,11 +130,13 @@ function confirm() {
       <div class="field">
         <label class="field-label" for="vdatum">Vertical datum</label>
         <select id="vdatum" v-model="verticalDatum" class="field-input">
-          <option v-for="d in VERTICAL_DATUMS" :key="d.id" :value="d.id">{{ d.label }}{{ DATUM_HINTS[d.id] ?? '' }}</option>
+          <option v-for="d in VERTICAL_DATUMS" :key="d.id" :value="d.id">
+            {{ d.label }}{{ DATUM_HINTS[d.id] ?? '' }}
+          </option>
         </select>
         <span v-if="verticalDatum === 'unknown'" class="field-hint warn">
-          ⚠ Ellipsoid vs geoid differs by tens of metres in polar regions. Elevations taken
-          from this raster will carry a standing warning.
+          ⚠ Ellipsoid vs geoid differs by tens of metres in polar regions. Elevations taken from this raster will carry
+          a standing warning.
         </span>
       </div>
 
@@ -133,8 +152,8 @@ function confirm() {
           class="field-input short"
         />
         <span class="field-hint">
-          Used as <code>accuracyZ</code> when a GCP's Z is filled from this DEM. Leave blank
-          and the fill action will refuse rather than let a GCP claim survey-grade Z.
+          Used as <code>accuracyZ</code> when a GCP's Z is filled from this DEM. Leave blank and the fill action will
+          refuse rather than let a GCP claim survey-grade Z.
         </span>
       </div>
 
@@ -157,40 +176,114 @@ function confirm() {
 </template>
 
 <style scoped>
-.filename { font-size: 13px; font-weight: 600; color: var(--text); word-break: break-all; }
-.stats { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--text-dim); }
+.filename {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-all;
+}
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
 .preview {
-  max-width: 100%; max-height: 180px; align-self: center;
-  border: 1px solid var(--panel-border); border-radius: 4px;
-  image-rendering: pixelated; background: var(--bg);
+  max-width: 100%;
+  max-height: 180px;
+  align-self: center;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  image-rendering: pixelated;
+  background: var(--bg);
 }
 .why {
-  background: var(--bg); border: 1px solid var(--panel-border);
-  border-radius: 5px; padding: 8px 10px; font-size: 11px; color: var(--text-dim);
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
-.why-hd { margin-bottom: 4px; color: var(--text); }
-.why ul { margin: 0; padding-left: 16px; }
-.field { display: flex; flex-direction: column; gap: 5px; }
-.field-label { font-size: 12px; font-weight: 600; color: var(--text); }
-.field-hint { font-size: 11px; color: var(--text-dim); }
-.field-hint.warn { color: var(--warn, #d9a441); }
+.why-hd {
+  margin-bottom: 4px;
+  color: var(--text);
+}
+.why ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.field-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.field-hint.warn {
+  color: var(--warn, #d9a441);
+}
 .field-input {
-  background: var(--bg); border: 1px solid var(--panel-border);
-  border-radius: 5px; color: var(--text); font: inherit; font-size: 13px; padding: 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
 }
-.field-input.short { width: 140px; }
-.field-input:focus { outline: none; border-color: var(--accent); }
-.seg { display: flex; gap: 0; }
+.field-input.short {
+  width: 140px;
+}
+.field-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.seg {
+  display: flex;
+  gap: 0;
+}
 .seg-btn {
-  flex: 1; background: var(--bg); border: 1px solid var(--panel-border);
-  color: var(--text-dim); font: inherit; font-size: 12px; padding: 6px 10px; cursor: pointer;
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
 }
-.seg-btn:first-child { border-radius: 5px 0 0 5px; }
-.seg-btn:last-child { border-radius: 0 5px 5px 0; border-left: none; }
-.seg-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.seg-btn:first-child {
+  border-radius: 5px 0 0 5px;
+}
+.seg-btn:last-child {
+  border-radius: 0 5px 5px 0;
+  border-left: none;
+}
+.seg-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 .link-btn {
-  background: none; border: none; color: var(--accent);
-  font: inherit; font-size: 11px; text-align: left; padding: 0; cursor: pointer;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
 }
-.link-btn:hover { text-decoration: underline; }
+.link-btn:hover {
+  text-decoration: underline;
+}
 </style>

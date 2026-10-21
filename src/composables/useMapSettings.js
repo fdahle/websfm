@@ -12,7 +12,13 @@ const basemap = ref(VALUES.includes(stored) ? stored : 'auto')
 // template (it may carry their API key, so it stays in this browser only).
 const SAT_URL_KEY = 'mapSatelliteUrl'
 const SAT_ATTRIBUTION_KEY = 'mapSatelliteAttribution'
-const readKey = (key) => { try { return localStorage.getItem(key) ?? '' } catch { return '' } }
+const readKey = (key) => {
+  try {
+    return localStorage.getItem(key) ?? ''
+  } catch {
+    return ''
+  }
+}
 const satelliteUrl = ref(tileUrlError(readKey(SAT_URL_KEY)) ? '' : readKey(SAT_URL_KEY))
 const satelliteAttribution = ref(readKey(SAT_ATTRIBUTION_KEY))
 

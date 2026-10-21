@@ -15,7 +15,7 @@ import { buffer, getIntersection, isEmpty as extentIsEmpty } from 'ol/extent'
 // Desired on-screen gap between grid lines. Full coordinates are wide labels
 // ("E -1,300,000 m" ≈ 85 px at 11 px type), so the spacing has to clear one.
 export const GRID_TARGET_PX = 150
-export const GRID_MAX_LINES = 400  // per axis; a stale resolution can't hang the renderer
+export const GRID_MAX_LINES = 400 // per axis; a stale resolution can't hang the renderer
 
 /** Round spacing (1/2/5 × 10ⁿ) no smaller than `target` map units. */
 export function niceGridSpacing(target) {
@@ -43,7 +43,7 @@ export function formatGridLabel(v, spacing, axis, units) {
  * handful in feet; coordinates are printed in that unit as-is, never rescaled.
  */
 export function gridUnitFor(info, olUnits) {
-  return info.gridUnit ?? (olUnits === 'us-ft' ? 'ft' : (olUnits || 'm'))
+  return info.gridUnit ?? (olUnits === 'us-ft' ? 'ft' : olUnits || 'm')
 }
 
 /** Identity of a rendered view: an unchanged key means the grid is still current. */
@@ -79,10 +79,12 @@ export function computeGrid({ viewExtent, resolution, size, validExtent }) {
   let n = 0
   // `+ 0` folds the -0 that ceil of a small negative gives, so the origin line
   // reads "E 0 m", not "E -0 m".
-  for (let x = Math.ceil(bounds[0] / spacing) * spacing + 0; x <= bounds[2] && n < GRID_MAX_LINES; x += spacing, n++) xs.push(x)
+  for (let x = Math.ceil(bounds[0] / spacing) * spacing + 0; x <= bounds[2] && n < GRID_MAX_LINES; x += spacing, n++)
+    xs.push(x)
   const ys = []
   n = 0
-  for (let y = Math.ceil(bounds[1] / spacing) * spacing + 0; y <= bounds[3] && n < GRID_MAX_LINES; y += spacing, n++) ys.push(y)
+  for (let y = Math.ceil(bounds[1] / spacing) * spacing + 0; y <= bounds[3] && n < GRID_MAX_LINES; y += spacing, n++)
+    ys.push(y)
 
   return { bounds, spacing, xs, ys, labelX, labelY }
 }

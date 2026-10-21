@@ -37,8 +37,10 @@ function draw() {
   const aspect = g.rows && g.cols ? g.rows / g.cols : 0.6
   const H = Math.max(180, Math.min(460, Math.round(W * aspect)))
   const dpr = window.devicePixelRatio || 1
-  cv.width = W * dpr; cv.height = H * dpr
-  cv.style.width = W + 'px'; cv.style.height = H + 'px'
+  cv.width = W * dpr
+  cv.height = H * dpr
+  cv.style.width = W + 'px'
+  cv.style.height = H + 'px'
   const ctx = cv.getContext('2d')
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, W, H)
@@ -87,26 +89,63 @@ watch(grid, () => nextTick(draw))
       <canvas ref="canvas" class="cov-canvas"></canvas>
     </div>
     <div class="legend">
-      <span class="lg"><i style="background:#8a3524"></i>1 view</span>
-      <span class="lg"><i style="background:#c78a1e"></i>2 (minimum)</span>
-      <span class="lg"><i style="background:#2e8c5b"></i>3+ (good)</span>
+      <span class="lg"><i style="background: #8a3524"></i>1 view</span>
+      <span class="lg"><i style="background: #c78a1e"></i>2 (minimum)</span>
+      <span class="lg"><i style="background: #2e8c5b"></i>3+ (good)</span>
       <span class="lg"><i class="dot"></i>camera</span>
     </div>
     <p class="eval-note">
-      Top-down tie-point density, cells coloured by how many images see that patch of ground.
-      Thin (red/amber) regions are where the survey is weakest.
+      Top-down tie-point density, cells coloured by how many images see that patch of ground. Thin (red/amber) regions
+      are where the survey is weakest.
     </p>
   </template>
 </template>
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.eval-loading { padding: 24px; text-align: center; color: var(--text-dim); }
-.eval-note { font-size: 11px; color: var(--text-dim); margin: 2px 0 0; line-height: 1.5; }
-.cov-wrap { width: 100%; background: var(--bg); border: 1px solid var(--panel-border); border-radius: 8px; padding: 4px; }
-.cov-canvas { display: block; }
-.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: var(--text-dim); }
-.lg { display: inline-flex; align-items: center; gap: 5px; }
-.lg i { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
-.lg i.dot { width: 8px; height: 8px; border-radius: 50%; background: #4fc3f7; }
+.eval-loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-dim);
+}
+.eval-note {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 2px 0 0;
+  line-height: 1.5;
+}
+.cov-wrap {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 4px;
+}
+.cov-canvas {
+  display: block;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lg i {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.lg i.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4fc3f7;
+}
 </style>

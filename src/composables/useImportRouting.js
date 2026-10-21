@@ -31,14 +31,48 @@ import { pluralize } from '../core/textFormat.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, importSensors, addPoses, addFiducialObs, addFiducialMarks, importColmap, openSfmProject, importCloud, importStreamedCloud = null, importCopcCloud = null, progress = null, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
+export function useImportRouting({
+  addGcps,
+  addFootprints,
+  importSensors,
+  addPoses,
+  addFiducialObs,
+  addFiducialMarks,
+  importColmap,
+  openSfmProject,
+  importCloud,
+  importStreamedCloud = null,
+  importCopcCloud = null,
+  progress = null,
+  importRaster,
+  importProjectFile,
+  addImages,
+  activateTab,
+  showGcps,
+  showSensors,
+  showPoses,
+}) {
   const {
-    gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
-    footprintImportOpen, footprintImportData,
-    cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
-    importKindDeclared, importKindOpen, importKindFile, fiducialImportData,
-    importCloudOpen, importCloudData,
-    importRasterOpen, importRasterData, importVideoFile,
+    gcpImportOpen,
+    gcpImportText,
+    gcpImportName,
+    gcpImportGeojson,
+    gcpImportCrs,
+    footprintImportOpen,
+    footprintImportData,
+    cameraImportOpen,
+    cameraImportText,
+    cameraImportName,
+    cameraImportMode,
+    importKindDeclared,
+    importKindOpen,
+    importKindFile,
+    fiducialImportData,
+    importCloudOpen,
+    importCloudData,
+    importRasterOpen,
+    importRasterData,
+    importVideoFile,
   } = storeToRefs(useModalsStore())
   const { log } = useLog()
 
@@ -107,33 +141,55 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
   async function openDroppedImport(file) {
     if (!file) return
     // A video becomes images (Import ▸ Video's frame selection), never text or a cloud.
-    if (isVideoFile(file)) { openVideoImport(file); return }
+    if (isVideoFile(file)) {
+      openVideoImport(file)
+      return
+    }
     // A `.websfm` project file is a whole *project*, not data to merge into the
     // open one, so it is checked first and short-circuits every other route. The
     // gate is magic bytes + a manifest peek, never the extension alone: a COLMAP
     // model also arrives as a `.zip`, and the manifest is what tells them apart.
-    if (importProjectFile && await isProjectArchive(file)) { await importProjectFile(file); return }
+    if (importProjectFile && (await isProjectArchive(file))) {
+      await importProjectFile(file)
+      return
+    }
     // A TIFF that reached the non-image path (no `image/tiff` MIME type, e.g. a
     // bare `.tif` from some file managers) still has to be checked for geokeys
     // before anything tries to decode it as text.
     if (importRaster && isTiff(file)) {
-      if (await isGeoreferencedTiff(file)) { await openRasterImport(file); return }
-      if (addImages) { addImages([file]); return } // a plain TIFF is a source photo
+      if (await isGeoreferencedTiff(file)) {
+        await openRasterImport(file)
+        return
+      }
+      if (addImages) {
+        addImages([file])
+        return
+      } // a plain TIFF is a source photo
     }
     // Binary cloud formats (PLY/LAS) must be sniffed by magic bytes BEFORE any
     // text decode — decoding a 500 MB LAS as a string would blow up. Peek the head.
     try {
       const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
       const fmt = sniffCloudFormat(head, file.name)
-      if (fmt === 'ply' || fmt === 'las') { openCloudImport(file); return }
-    } catch { /* fall through to text routing */ }
+      if (fmt === 'ply' || fmt === 'las') {
+        openCloudImport(file)
+        return
+      }
+    } catch {
+      /* fall through to text routing */
+    }
     // A large text file is sniffed from its head alone: a multi-GB .xyz must reach
     // the streaming cloud reader without ever becoming one string here. GCP / pose /
     // GeoJSON files are small, so everything else keeps the whole-text detection.
     if (file.size > LARGE_TEXT_BYTES && !isColmapFile(file.name)) {
       try {
-        if (looksLikeXyzText(await headText(file))) { openCloudImport(file); return }
-      } catch { /* fall through */ }
+        if (looksLikeXyzText(await headText(file))) {
+          openCloudImport(file)
+          return
+        }
+      } catch {
+        /* fall through */
+      }
     }
 
     let text
@@ -174,7 +230,10 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     else if (kind === 'fiducialMarks') openFiducialMarksImport(file)
     else if (kind === 'colmap') openColmapImport([file])
     else if (kind === 'cloud') openCloudImport(file)
-    else { importKindFile.value = file; importKindOpen.value = true }
+    else {
+      importKindFile.value = file
+      importKindOpen.value = true
+    }
   }
 
   // ── Import (georeferenced reference raster) ─────────────────────────────────
@@ -202,15 +261,21 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
         // without a pixel scale, or one geotiff.js can't parse, becomes a very
         // confused source image), and the sidebar's "Convert to reference
         // data…" is the manual override for exactly this line.
-        log(`${file.name}: ${probe.degenerate
-          ? 'placeholder GeoTIFF tags (identity transform at origin 0,0, no CRS) — not georeferencing'
-          : 'no GeoTIFF geolocation tags'}`
-          + `${probe.error ? ` (header unreadable: ${probe.error})` : ''}`
-          + ` [tiepoint ${probe.hasTiepoint ? 'yes' : 'no'},`
-          + ` pixelscale ${probe.hasPixelScale ? 'yes' : 'no'},`
-          + ` transformation ${probe.hasTransformation ? 'yes' : 'no'},`
-          + ` crs ${probe.hasCrs ? 'yes' : 'no'}]`
-          + ' — ingesting as a source image', 'info', 'Import')
+        log(
+          `${file.name}: ${
+            probe.degenerate
+              ? 'placeholder GeoTIFF tags (identity transform at origin 0,0, no CRS) — not georeferencing'
+              : 'no GeoTIFF geolocation tags'
+          }` +
+            `${probe.error ? ` (header unreadable: ${probe.error})` : ''}` +
+            ` [tiepoint ${probe.hasTiepoint ? 'yes' : 'no'},` +
+            ` pixelscale ${probe.hasPixelScale ? 'yes' : 'no'},` +
+            ` transformation ${probe.hasTransformation ? 'yes' : 'no'},` +
+            ` crs ${probe.hasCrs ? 'yes' : 'no'}]` +
+            ' — ingesting as a source image',
+          'info',
+          'Import',
+        )
       }
       photos.push(file)
     }
@@ -224,15 +289,23 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     const photos = await forkGeoreferencedRasters(files)
     if (!photos.length || !addImages) return
     const dups = findDuplicateFiles(photos, useImagesStore().images)
-    if (!dups.size) { await addImages(photos); return }
+    if (!dups.size) {
+      await addImages(photos)
+      return
+    }
     const names = [...dups].map((f) => f.name)
     const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? ` and ${names.length - 3} more` : '')
-    const which = dups.size < photos.length ? `${dups.size} of ${photos.length} images are`
-      : dups.size === 1 ? 'This image is' : `All ${dups.size} images are`
+    const which =
+      dups.size < photos.length
+        ? `${dups.size} of ${photos.length} images are`
+        : dups.size === 1
+          ? 'This image is'
+          : `All ${dups.size} images are`
     const addAnyway = await confirmDialog({
       title: 'Duplicate images',
-      message: `${which} already in the project (same file name and size): ${shown}.`
-        + ' Skip them, or add them anyway as separate images?',
+      message:
+        `${which} already in the project (same file name and size): ${shown}.` +
+        ' Skip them, or add them anyway as separate images?',
       confirmLabel: 'Add anyway',
       cancelLabel: 'Skip duplicates',
       danger: false,
@@ -303,17 +376,27 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
   async function onVideoImport({ file, times, duration, fps, settings }) {
     importVideoFile.value = null
     if (!file || !times?.length || !addImages) return
-    const how = settings.mode === 'auto'
-      ? `automatic: ${settings.overlap} % overlap, at most ${settings.maxFrames}, blurry below ${settings.minSharpness} × nearby median`
-      : `every ${settings.every} ${settings.unit}${settings.unit === 'frames' ? ` at ${fps ?? '30 (assumed)'} fps` : ''}`
-    log(`Video import: ${file.name} — extracting ${pluralize(times.length, 'frame')} (${how}) as `
-      + `${settings.format === 'png' ? 'PNG' : `JPEG q${settings.jpegQuality}`}`
-      + `${settings.maxDim > 0 ? `, long side ≤ ${settings.maxDim} px` : ', full size'}`, 'info', 'Import')
+    const how =
+      settings.mode === 'auto'
+        ? `automatic: ${settings.overlap} % overlap, at most ${settings.maxFrames}, blurry below ${settings.minSharpness} × nearby median`
+        : `every ${settings.every} ${settings.unit}${settings.unit === 'frames' ? ` at ${fps ?? '30 (assumed)'} fps` : ''}`
+    log(
+      `Video import: ${file.name} — extracting ${pluralize(times.length, 'frame')} (${how}) as ` +
+        `${settings.format === 'png' ? 'PNG' : `JPEG q${settings.jpegQuality}`}` +
+        `${settings.maxDim > 0 ? `, long side ≤ ${settings.maxDim} px` : ', full size'}`,
+      'info',
+      'Import',
+    )
     progress?.open('Extracting video frames', times.length, null, { unit: 'frames' })
     let result = null
     try {
       result = await extractVideoFrames({
-        file, times, duration, fps, settings, addImages,
+        file,
+        times,
+        duration,
+        fps,
+        settings,
+        addImages,
         onProgress: (done, total, name) => progress?.report(done, total, name),
         shouldCancel: () => !!progress?.aborted?.value,
       })
@@ -323,8 +406,12 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
       await progress?.close()
     }
     if (!result) return
-    log(`Video import: ${result.added} of ${pluralize(times.length, 'frame')} from ${file.name} added`
-      + `${result.cancelled ? ' (cancelled)' : ''}`, result.cancelled ? 'warn' : 'success', 'Import')
+    log(
+      `Video import: ${result.added} of ${pluralize(times.length, 'frame')} from ${file.name} added` +
+        `${result.cancelled ? ' (cancelled)' : ''}`,
+      result.cancelled ? 'warn' : 'success',
+      'Import',
+    )
     if (result.added) {
       showToast(`Added ${result.added} frame${result.added === 1 ? '' : 's'} from ${file.name}`, {
         detail: 'Match Features starts on Sequential pairing for video frames.',
@@ -342,7 +429,7 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     // A LAS/LAZ too large to hold in memory is streamed into a level-of-detail octree
     // instead (core/io/lasStream.js); the dialog's transforms need resident points.
     // A large COPC file is an octree already: read in place, never decoded whole.
-    const route = (importStreamedCloud || importCopcCloud) ? await lasRoute(file) : null
+    const route = importStreamedCloud || importCopcCloud ? await lasRoute(file) : null
     const importer = route === 'copc' ? importCopcCloud : route === 'stream' ? importStreamedCloud : null
     if (importer) {
       progress?.open('Importing point cloud', 100, () => terminateAll('import cancelled'))
@@ -367,8 +454,10 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
     const head = new Uint8Array(await file.slice(0, Math.min(file.size, 1 << 16)).arrayBuffer())
     if (head.length < 100 || String.fromCharCode(head[0], head[1], head[2], head[3]) !== 'LASF') return null
     const offsetToPoints = new DataView(head.buffer).getUint32(96, true)
-    const full = offsetToPoints > head.length
-      ? new Uint8Array(await file.slice(0, Math.min(file.size, offsetToPoints)).arrayBuffer()) : head
+    const full =
+      offsetToPoints > head.length
+        ? new Uint8Array(await file.slice(0, Math.min(file.size, offsetToPoints)).arrayBuffer())
+        : head
     const stream = lasNeedsStreaming(full, file.size) === true
     if (importCopcCloud && copcReadsInPlace(full, { minPoints: stream ? 0 : COPC_IN_PLACE_MIN_POINTS })) return 'copc'
     return stream && importStreamedCloud ? 'stream' : null
@@ -397,12 +486,19 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
   // suffix. A model must not mix text + binary of the same table; the binary
   // variant wins when both appear (unlikely; a defensive tie-break).
   const COLMAP_CANON = {
-    'cameras.txt': 'cameras.txt', 'images.txt': 'images.txt', 'points3d.txt': 'points3D.txt',
-    'cameras.bin': 'cameras.bin', 'images.bin': 'images.bin', 'points3d.bin': 'points3D.bin',
+    'cameras.txt': 'cameras.txt',
+    'images.txt': 'images.txt',
+    'points3d.txt': 'points3D.txt',
+    'cameras.bin': 'cameras.bin',
+    'images.bin': 'images.bin',
+    'points3d.bin': 'points3D.bin',
   }
   async function openColmapImport(fileList) {
     const files = [...(fileList || [])]
-    if (openSfmProject) { await openSfmProject(files); return }
+    if (openSfmProject) {
+      await openSfmProject(files)
+      return
+    }
     if (!files.length || !importColmap) return
     const model = {}
     try {
@@ -432,9 +528,17 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
   async function openFiducialObsImport(file) {
     if (!file || !addFiducialObs) return
     let text
-    try { text = await file.text() } catch (err) { readFailed('the fiducial file', file, err); return }
+    try {
+      text = await file.text()
+    } catch (err) {
+      readFailed('the fiducial file', file, err)
+      return
+    }
     const { rows, layout } = parseFiducialObs(text)
-    if (!rows.length) { log(`Image fiducials: no marks with finite pixel positions in ${file.name}`, 'warn', 'Sensor'); return }
+    if (!rows.length) {
+      log(`Image fiducials: no marks with finite pixel positions in ${file.name}`, 'warn', 'Sensor')
+      return
+    }
     fiducialImportData.value = { kind: 'image', fileName: file.name, rows, layout }
   }
 
@@ -443,9 +547,17 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
   async function openFiducialMarksImport(file) {
     if (!file || !addFiducialMarks) return
     let text
-    try { text = await file.text() } catch (err) { readFailed('the fiducial file', file, err); return }
+    try {
+      text = await file.text()
+    } catch (err) {
+      readFailed('the fiducial file', file, err)
+      return
+    }
     const { groups } = parseFiducialMarks(text)
-    if (!groups.length) { log('Camera fiducials: no marks with finite x_mm / y_mm found', 'warn', 'Sensor'); return }
+    if (!groups.length) {
+      log('Camera fiducials: no marks with finite x_mm / y_mm found', 'warn', 'Sensor')
+      return
+    }
     fiducialImportData.value = { kind: 'camera', fileName: file.name, groups }
   }
 
@@ -468,7 +580,7 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
   function onImportSwitchKind({ kind, rawText, fileName }) {
     gcpImportOpen.value = false
     cameraImportOpen.value = false
-    importKindDeclared.value = true   // the correction itself is a declaration
+    importKindDeclared.value = true // the correction itself is a declaration
     if (kind === 'gcp') {
       gcpImportGeojson.value = null
       gcpImportCrs.value = null
@@ -503,7 +615,7 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
 
   function onGcpPick(event) {
     const file = event.target.files?.[0]
-    if (file) openImportFile(file, { declared: true })   // Ribbon ▸ Import ▸ GCP File
+    if (file) openImportFile(file, { declared: true }) // Ribbon ▸ Import ▸ GCP File
     event.target.value = ''
   }
 
@@ -564,13 +676,34 @@ export function useImportRouting({ addGcps, addFootprints, importSensors, addPos
 
   return {
     cameraPickMode,
-    openImportFile, openDroppedImport, routeImport, isProjectArchive,
-    openFiducialObsImport, openFiducialMarksImport, openColmapImport,
-    openCloudImport, onCloudImport, onCloudPick,
-    openRasterImport, onRasterPick, forkGeoreferencedRasters, addImagesRouted,
-    openVideoImport, onVideoPick, onVideoImport,
-    onImportKindChosen, onImportSwitchKind,
-    openCameraImport, onCameraImport, onGcpImport, onFootprintImport, onFiducialImport,
-    onGcpPick, onCameraPick, onColmapPick, onFiducialObsPick, onFiducialMarksPick,
+    openImportFile,
+    openDroppedImport,
+    routeImport,
+    isProjectArchive,
+    openFiducialObsImport,
+    openFiducialMarksImport,
+    openColmapImport,
+    openCloudImport,
+    onCloudImport,
+    onCloudPick,
+    openRasterImport,
+    onRasterPick,
+    forkGeoreferencedRasters,
+    addImagesRouted,
+    openVideoImport,
+    onVideoPick,
+    onVideoImport,
+    onImportKindChosen,
+    onImportSwitchKind,
+    openCameraImport,
+    onCameraImport,
+    onGcpImport,
+    onFootprintImport,
+    onFiducialImport,
+    onGcpPick,
+    onCameraPick,
+    onColmapPick,
+    onFiducialObsPick,
+    onFiducialMarksPick,
   }
 }

@@ -10,7 +10,9 @@ beforeEach(() => {
   vi.stubGlobal('caches', {
     open: async () => ({
       match: async (url) => store.get(url),
-      put: async (url, resp) => { store.set(url, resp) },
+      put: async (url, resp) => {
+        store.set(url, resp)
+      },
       delete: async (url) => store.delete(url),
     }),
   })
@@ -18,7 +20,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 const onnxFile = (name = 'superpoint.onnx') => {
-  const b = new Uint8Array(200_000); b[0] = 0x08; b[1] = 0x07
+  const b = new Uint8Array(200_000)
+  b[0] = 0x08
+  b[1] = 0x07
   return new File([b], name)
 }
 
@@ -38,7 +42,9 @@ it('asks the user to supply a non-redistributable model and never downloads it',
   expect(models.request).not.toBeNull()
 
   // A saved error page is refused with a reason, and the request stays open.
-  expect(await models.provideModelFile('superpoint', new File(['<!doctype html><html></html>'], 'superpoint.onnx'))).toBe(false)
+  expect(
+    await models.provideModelFile('superpoint', new File(['<!doctype html><html></html>'], 'superpoint.onnx')),
+  ).toBe(false)
   expect(models.request.items[0].fileError).toMatch(/not an ONNX model/)
 
   // The real file is cached under the model URL and the run continues by itself.
@@ -49,8 +55,12 @@ it('asks the user to supply a non-redistributable model and never downloads it',
 })
 
 it('downloads redistributable models as before', async () => {
-  const body = new Uint8Array(200_000); body[0] = 0x08
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': 'application/octet-stream' } })))
+  const body = new Uint8Array(200_000)
+  body[0] = 0x08
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': 'application/octet-stream' } })),
+  )
   const models = useModelsStore()
   const ready = models.ensureReady(['disk'])
   await vi.waitFor(() => expect(models.request).not.toBeNull())

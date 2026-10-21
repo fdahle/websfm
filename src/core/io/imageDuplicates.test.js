@@ -6,7 +6,9 @@ const file = (name, size, lastModified = 1) => ({ name, size, lastModified })
 describe('imageFileSize', () => {
   it('reads the File, else the id of a restored image', () => {
     expect(imageFileSize({ id: 'x', name: 'a.JPG', file: { size: 7 } })).toBe(7)
-    expect(imageFileSize({ id: 'DSC-01.JPG-8694528-1551254774', name: 'renamed', sourceName: 'DSC-01.JPG', file: null })).toBe(8694528)
+    expect(
+      imageFileSize({ id: 'DSC-01.JPG-8694528-1551254774', name: 'renamed', sourceName: 'DSC-01.JPG', file: null }),
+    ).toBe(8694528)
     expect(imageFileSize({ id: 'a.JPG-12-3#2', name: 'a (2).JPG', sourceName: 'a.JPG' })).toBe(12)
     expect(imageFileSize({ id: 'other', name: 'a.JPG' })).toBeNull()
   })

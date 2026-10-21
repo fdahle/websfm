@@ -18,8 +18,15 @@ import { runTabTitle, stageNotice, workflowNotice, stageErrorToast } from '../ut
 // Injected: usePipeline's progress state and lastRun, the workflow runner's running /
 // pause / lastOutcome, and `openConsole()`.
 export function useRunAttention({
-  progressOpen, progressTitle, progressPercent, progressIndeterminate, lastRun,
-  workflowRunning, workflowPause, workflowOutcome, openConsole,
+  progressOpen,
+  progressTitle,
+  progressPercent,
+  progressIndeterminate,
+  lastRun,
+  workflowRunning,
+  workflowPause,
+  workflowOutcome,
+  openConsole,
 }) {
   const { keepAwake, notifyWhenDone } = useUiSettings()
   const busy = () => progressOpen.value || workflowRunning.value
@@ -32,7 +39,9 @@ export function useRunAttention({
     requesting = true
     try {
       lock = await navigator.wakeLock.request('screen')
-      lock.addEventListener('release', () => { lock = null })
+      lock.addEventListener('release', () => {
+        lock = null
+      })
       // The run may have ended while the request was pending.
       if (!(busy() && keepAwake.value)) releaseLock()
     } catch {
@@ -61,13 +70,22 @@ export function useRunAttention({
     const next = runTabTitle(baseTitle, { run, waiting: !!workflowPause.value && workflowRunning.value })
     if (document.title !== next) document.title = next
   }
-  watch([progressOpen, progressTitle, progressPercent, progressIndeterminate, workflowPause, workflowRunning], syncTitle)
+  watch(
+    [progressOpen, progressTitle, progressPercent, progressIndeterminate, workflowPause, workflowRunning],
+    syncTitle,
+  )
 
   // ── Errors logged during a stage ───────────────────────────────────────────
   const { entries, onLog } = useLog()
   let runErrors = []
   // Sync: a stage may log before a deferred watcher would run, and that line belongs to it.
-  watch(progressOpen, (open) => { if (open) runErrors = [] }, { flush: 'sync' })
+  watch(
+    progressOpen,
+    (open) => {
+      if (open) runErrors = []
+    },
+    { flush: 'sync' },
+  )
   const stopListening = onLog(() => {
     if (!progressOpen.value) return
     const entry = entries.value[entries.value.length - 1]
@@ -80,7 +98,10 @@ export function useRunAttention({
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
     try {
       const n = new Notification(notice.title, { body: notice.body, tag: 'websfm-run' })
-      n.onclick = () => { window.focus(); n.close() }
+      n.onclick = () => {
+        window.focus()
+        n.close()
+      }
     } catch {
       // Some platforms only allow notifications from a service worker; skip.
     }
@@ -91,7 +112,13 @@ export function useRunAttention({
     runErrors = []
     const toast = stageErrorToast(run, errors)
     if (toast) {
-      showToast(toast.title, { detail: toast.detail, kind: 'error', ms: 10_000, onClick: openConsole, action: 'Open the console' })
+      showToast(toast.title, {
+        detail: toast.detail,
+        kind: 'error',
+        ms: 10_000,
+        onClick: openConsole,
+        action: 'Open the console',
+      })
     }
     // Inside a workflow, the workflow's own end is the one worth a notification.
     if (!workflowRunning.value) notify(stageNotice(run, errors))

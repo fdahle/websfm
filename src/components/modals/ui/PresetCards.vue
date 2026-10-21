@@ -26,9 +26,7 @@ const emit = defineEmits(['select'])
 const isCustom = computed(() => props.modelValue === 'custom')
 // When custom, highlight the base card (the one being modified) rather than nothing.
 const highlightId = computed(() => (isCustom.value ? props.baseId : props.modelValue))
-const baseLabel = computed(
-  () => props.presets.find((p) => p.id === props.baseId)?.label ?? props.baseId,
-)
+const baseLabel = computed(() => props.presets.find((p) => p.id === props.baseId)?.label ?? props.baseId)
 </script>
 
 <template>
@@ -76,14 +74,26 @@ const baseLabel = computed(
   color: var(--text);
   font: inherit;
 }
-.preset-card:hover { border-color: var(--text-dim); }
+.preset-card:hover {
+  border-color: var(--text-dim);
+}
 .preset-card.active {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
-.preset-card.modified { box-shadow: none; }
-.preset-card-label { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; }
-.preset-card.active .preset-card-label { color: var(--accent); }
+.preset-card.modified {
+  box-shadow: none;
+}
+.preset-card-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.preset-card.active .preset-card-label {
+  color: var(--accent);
+}
 .preset-card-badge {
   flex: 0 0 auto;
   padding: 1px 5px;
@@ -95,8 +105,17 @@ const baseLabel = computed(
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
-.preset-note { margin-top: 7px; font-size: 11px; line-height: 1.4; color: var(--text-dim); }
-.preset-card-blurb { font-size: 11px; color: var(--text-dim); line-height: 1.35; }
+.preset-note {
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+.preset-card-blurb {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
 .preset-modified {
   display: flex;
   align-items: center;
@@ -105,5 +124,7 @@ const baseLabel = computed(
   font-size: 11px;
   color: var(--text-dim);
 }
-.preset-modified .link-btn { font-size: 11px; }
+.preset-modified .link-btn {
+  font-size: 11px;
+}
 </style>

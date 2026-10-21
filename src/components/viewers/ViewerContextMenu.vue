@@ -5,8 +5,8 @@
 import { useMenuPlacement } from '../../composables/useMenuPlacement.js'
 
 const props = defineProps({
-  menu:  { type: Object, default: null },   // { x, y } | null
-  items: { type: Array,  default: () => [] }, // [{ id, label, active?, separator?, disabled? }]
+  menu: { type: Object, default: null }, // { x, y } | null
+  items: { type: Array, default: () => [] }, // [{ id, label, active?, separator?, disabled? }]
 })
 const emit = defineEmits(['select'])
 const { el, pos } = useMenuPlacement(() => props.menu)
@@ -14,14 +14,7 @@ const { el, pos } = useMenuPlacement(() => props.menu)
 
 <template>
   <Teleport to="body">
-    <div
-      v-if="menu"
-      ref="el"
-      class="viewer-ctx"
-      :style="pos"
-      @click.stop
-      @contextmenu.prevent.stop
-    >
+    <div v-if="menu" ref="el" class="viewer-ctx" :style="pos" @click.stop @contextmenu.prevent.stop>
       <template v-for="(it, i) in items" :key="it.id || i">
         <div v-if="it.separator" class="vctx-sep"></div>
         <button
@@ -31,7 +24,8 @@ const { el, pos } = useMenuPlacement(() => props.menu)
           :disabled="it.disabled"
           @click="!it.disabled && emit('select', it.id)"
         >
-          <span class="vctx-check">{{ it.active ? '✓' : '' }}</span>{{ it.label }}
+          <span class="vctx-check">{{ it.active ? '✓' : '' }}</span
+          >{{ it.label }}
         </button>
       </template>
     </div>
@@ -64,9 +58,16 @@ const { el, pos } = useMenuPlacement(() => props.menu)
   border-radius: 4px;
   cursor: pointer;
 }
-.vctx-item:hover { background: var(--hover-bg); }
-.vctx-item.disabled { opacity: 0.4; cursor: default; }
-.vctx-item.disabled:hover { background: none; }
+.vctx-item:hover {
+  background: var(--hover-bg);
+}
+.vctx-item.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.vctx-item.disabled:hover {
+  background: none;
+}
 .vctx-check {
   display: inline-block;
   width: 16px;

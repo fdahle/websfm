@@ -1,18 +1,27 @@
 import { describe, it, expect } from 'vitest'
 import {
-  compareDemToReference, summarizeDifferences, differenceHistogram, differenceRange, differenceRgba,
+  compareDemToReference,
+  summarizeDifferences,
+  differenceHistogram,
+  differenceRange,
+  differenceRgba,
 } from './demCompare.js'
 import { sampleRaster } from '../io/rasterSample.js'
 
 // A w×h DEM, gsd 1, top-left corner at (0, h): z = f(x, y) at each cell centre.
 function makeDem(w, h, f, { holes = [] } = {}) {
-  const data = new Float32Array(w * h), mask = new Uint8Array(w * h)
-  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
-    const i = r * w + c
-    data[i] = f(c + 0.5, h - r - 0.5)
-    mask[i] = 1
+  const data = new Float32Array(w * h),
+    mask = new Uint8Array(w * h)
+  for (let r = 0; r < h; r++)
+    for (let c = 0; c < w; c++) {
+      const i = r * w + c
+      data[i] = f(c + 0.5, h - r - 0.5)
+      mask[i] = 1
+    }
+  for (const i of holes) {
+    data[i] = NaN
+    mask[i] = 0
   }
-  for (const i of holes) { data[i] = NaN; mask[i] = 0 }
   return { width: w, height: h, gsd: 1, originX: 0, originY: h, data, mask }
 }
 
@@ -30,8 +39,18 @@ describe('compareDemToReference', () => {
   it('samples the reference at the DEM cell centres in the DEM frame', async () => {
     const dem = makeDem(3, 2, () => 0)
     const seen = []
-    await compareDemToReference(dem, (x, y) => { seen.push([x, y]); return 0 })
-    expect(seen).toEqual([[0.5, 1.5], [1.5, 1.5], [2.5, 1.5], [0.5, 0.5], [1.5, 0.5], [2.5, 0.5]])
+    await compareDemToReference(dem, (x, y) => {
+      seen.push([x, y])
+      return 0
+    })
+    expect(seen).toEqual([
+      [0.5, 1.5],
+      [1.5, 1.5],
+      [2.5, 1.5],
+      [0.5, 0.5],
+      [1.5, 0.5],
+      [2.5, 0.5],
+    ])
   })
 
   it('separates DEM holes from cells the reference does not cover', async () => {
@@ -57,12 +76,18 @@ describe('compareDemToReference', () => {
     // The same surface as a reference raster offset by half a cell: bilinear on a
     // plane is exact, so the difference is the constant offset everywhere inside.
     const dem = makeDem(6, 6, (x, y) => 2 * x - y)
-    const ref = { width: 8, height: 8, data: new Float32Array(64),
-      geoTransform: { originX: -1.5, originY: 7.5, scaleX: 1, scaleY: -1 } }
-    for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
-      const x = -1.5 + c + 0.5, y = 7.5 - r - 0.5
-      ref.data[r * 8 + c] = 2 * x - y - 0.25
+    const ref = {
+      width: 8,
+      height: 8,
+      data: new Float32Array(64),
+      geoTransform: { originX: -1.5, originY: 7.5, scaleX: 1, scaleY: -1 },
     }
+    for (let r = 0; r < 8; r++)
+      for (let c = 0; c < 8; c++) {
+        const x = -1.5 + c + 0.5,
+          y = 7.5 - r - 0.5
+        ref.data[r * 8 + c] = 2 * x - y - 0.25
+      }
     const res = await compareDemToReference(dem, (x, y) => sampleRaster(ref, x, y))
     expect(res.compared).toBe(36)
     expect(res.stats.min).toBeCloseTo(0.25, 5)
@@ -130,8 +155,11 @@ describe('difference map', () => {
 
   it('maps zero to the ramp centre, greys DEM-only cells and leaves holes transparent', () => {
     const ramp = (t) => [Math.round(t * 200), 0, 0]
-    const rgba = differenceRgba({ width: 4, height: 1, diff: Float32Array.from([0, 2, NaN, NaN]),
-      demOnly: Uint8Array.from([0, 0, 1, 0]) }, 1, ramp)
+    const rgba = differenceRgba(
+      { width: 4, height: 1, diff: Float32Array.from([0, 2, NaN, NaN]), demOnly: Uint8Array.from([0, 0, 1, 0]) },
+      1,
+      ramp,
+    )
     expect([...rgba.slice(0, 4)]).toEqual([100, 0, 0, 255])
     expect(rgba[4]).toBe(200)
     expect([...rgba.slice(8, 12)]).toEqual([128, 128, 128, 90])

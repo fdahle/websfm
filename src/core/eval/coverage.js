@@ -17,17 +17,27 @@ export function coverageGrid(points, cams = [], opts = {}) {
   const pts = points
   if (!pts?.length) {
     return {
-      cols: 0, rows: 0, cellSize: 0, minX: 0, minY: 0,
-      count: new Uint32Array(0), maxViews: new Uint16Array(0),
-      maxCount: 0, cams: cams.map((c) => ({ x: c.x, y: c.y })),
+      cols: 0,
+      rows: 0,
+      cellSize: 0,
+      minX: 0,
+      minY: 0,
+      count: new Uint32Array(0),
+      maxViews: new Uint16Array(0),
+      maxCount: 0,
+      cams: cams.map((c) => ({ x: c.x, y: c.y })),
       bbox: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
     }
   }
 
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity
   const n = pts.length
   for (let i = 0; i < n; i++) {
-    const x = pts.x(i), y = pts.y(i)
+    const x = pts.x(i),
+      y = pts.y(i)
     if (x < minX) minX = x
     if (x > maxX) maxX = x
     if (y < minY) minY = y
@@ -53,7 +63,14 @@ export function coverageGrid(points, cams = [], opts = {}) {
   }
 
   return {
-    cols, rows, cellSize, minX, minY, count, maxViews, maxCount,
+    cols,
+    rows,
+    cellSize,
+    minX,
+    minY,
+    count,
+    maxViews,
+    maxCount,
     cams: cams.map((c) => ({ x: c.x, y: c.y })),
     bbox: { minX, minY, maxX, maxY },
   }

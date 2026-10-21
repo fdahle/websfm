@@ -38,7 +38,11 @@ describe('matchDescriptors (SIMD wasm)', () => {
 
     const { matches } = await matchDescriptors(A, B, { ratioThreshold: 0.75 })
     const pairs = matches.map((m) => [m.ia, m.ib]).sort((a, b) => a[0] - b[0])
-    expect(pairs).toEqual([[0, 0], [1, 1], [2, 2]])
+    expect(pairs).toEqual([
+      [0, 0],
+      [1, 1],
+      [2, 2],
+    ])
   })
 
   it('cross-check keeps only mutually-nearest pairs', async () => {
@@ -82,11 +86,20 @@ describe('matchDescriptors (SIMD wasm)', () => {
     const rows = (n, dim) => Float32Array.from({ length: n * dim }, rnd)
     const naive = (a, b, dim, ratio) => {
       const nn2 = (q, qi, db) => {
-        let best = -1, d1 = Infinity, d2 = Infinity
+        let best = -1,
+          d1 = Infinity,
+          d2 = Infinity
         for (let j = 0; j < db.length / dim; j++) {
           let d = 0
-          for (let k = 0; k < dim; k++) { const t = q[qi * dim + k] - db[j * dim + k]; d += t * t }
-          if (d < d1) { d2 = d1; d1 = d; best = j } else if (d < d2) d2 = d
+          for (let k = 0; k < dim; k++) {
+            const t = q[qi * dim + k] - db[j * dim + k]
+            d += t * t
+          }
+          if (d < d1) {
+            d2 = d1
+            d1 = d
+            best = j
+          } else if (d < d2) d2 = d
         }
         return d1 < ratio * ratio * d2 ? best : -1
       }
@@ -97,7 +110,11 @@ describe('matchDescriptors (SIMD wasm)', () => {
       }
       return out.sort()
     }
-    for (const [dim, nA, nB] of [[128, 61, 47], [256, 33, 40], [130, 9, 14]]) {
+    for (const [dim, nA, nB] of [
+      [128, 61, 47],
+      [256, 33, 40],
+      [130, 9, 14],
+    ]) {
       // Near-duplicates of A rows planted in B so the mutual set is non-trivial.
       const A = rows(nA, dim)
       const B = rows(nB, dim)

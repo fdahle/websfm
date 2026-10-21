@@ -7,7 +7,9 @@ const esri = (z, x, y) => SATELLITE.url.replace('{z}', z).replace('{y}', y).repl
 describe('tileCacheFor', () => {
   it('caches each built-in source up to the zoom limit', () => {
     expect(tileCacheFor('https://tile.openstreetmap.org/0/0/0.png')?.name).toBe('websfm-tiles-osm')
-    expect(tileCacheFor(`https://tile.openstreetmap.org/${TILE_CACHE_MAX_ZOOM}/2100/1350.png`)?.name).toBe('websfm-tiles-osm')
+    expect(tileCacheFor(`https://tile.openstreetmap.org/${TILE_CACHE_MAX_ZOOM}/2100/1350.png`)?.name).toBe(
+      'websfm-tiles-osm',
+    )
     expect(tileCacheFor(esri(9, 270, 170))?.name).toBe('websfm-tiles-satellite')
     expect(tileCacheFor(TERRAIN.url(12, 2100, 1350))?.name).toBe('websfm-tiles-terrain')
   })
@@ -20,10 +22,12 @@ describe('tileCacheFor', () => {
   })
 
   it('caches NASA GIBS polar tiles in both request encodings', () => {
-    const kvp = 'https://gibs.earthdata.nasa.gov/wmts/epsg3031/best/wmts.cgi?layer=SCAR_Land_Water_Map'
-      + '&style=default&tilematrixset=250m&Service=WMTS&Request=GetTile&Version=1.0.0&Format=image%2Fpng'
-      + '&TileMatrix=2&TileCol=1&TileRow=3'
-    const rest = 'https://gibs.earthdata.nasa.gov/wmts/epsg3413/best/BlueMarble_ShadedRelief_Bathymetry/default/2004-08-01/500m/3/2/1.jpeg'
+    const kvp =
+      'https://gibs.earthdata.nasa.gov/wmts/epsg3031/best/wmts.cgi?layer=SCAR_Land_Water_Map' +
+      '&style=default&tilematrixset=250m&Service=WMTS&Request=GetTile&Version=1.0.0&Format=image%2Fpng' +
+      '&TileMatrix=2&TileCol=1&TileRow=3'
+    const rest =
+      'https://gibs.earthdata.nasa.gov/wmts/epsg3413/best/BlueMarble_ShadedRelief_Bathymetry/default/2004-08-01/500m/3/2/1.jpeg'
     expect(tileCacheFor(kvp)?.name).toBe('websfm-tiles-polar')
     expect(tileCacheFor(rest)?.name).toBe('websfm-tiles-polar')
   })
@@ -41,7 +45,9 @@ describe('ORT_RUNTIME', () => {
   it('matches the versioned runtime files and the hashed bundle copy', () => {
     expect(ORT_RUNTIME.pattern.test('https://example.org/ort/1.27.0/ort-wasm-simd-threaded.jsep.wasm')).toBe(true)
     expect(ORT_RUNTIME.pattern.test('https://example.org/ort/1.27.0/ort-wasm-simd-threaded.mjs')).toBe(true)
-    expect(ORT_RUNTIME.pattern.test('https://example.org/assets/ort-wasm-simd-threaded.asyncify-CvvOzbbq.wasm')).toBe(true)
+    expect(ORT_RUNTIME.pattern.test('https://example.org/assets/ort-wasm-simd-threaded.asyncify-CvvOzbbq.wasm')).toBe(
+      true,
+    )
     expect(ORT_RUNTIME.pattern.test('https://example.org/assets/sqlite3-BVKGSWc-.wasm')).toBe(false)
   })
 })

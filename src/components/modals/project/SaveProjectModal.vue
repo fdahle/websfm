@@ -9,7 +9,10 @@ import SettingsField from '../ui/SettingsField.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import * as opfs from '../../../utils/opfs.js'
 import {
-  ARCHIVE_DERIVED_DIRS, shouldArchivePath, archiveSizeVerdict, formatBytes,
+  ARCHIVE_DERIVED_DIRS,
+  shouldArchivePath,
+  archiveSizeVerdict,
+  formatBytes,
 } from '../../../core/io/projectArchive.js'
 
 const props = defineProps({
@@ -19,7 +22,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const includeDerived = ref(true)
-const sizes = ref(null)   // { all, derived } bytes, or null while measuring
+const sizes = ref(null) // { all, derived } bytes, or null while measuring
 
 onMounted(async () => {
   let all = 0
@@ -42,9 +45,8 @@ const tooLarge = computed(() => estimate.value != null && !archiveSizeVerdict(es
 <template>
   <ModalShell title="Save project as…" @close="emit('close')">
     <p class="intro">
-      Writes a single <code>.websfm</code> file containing this project — source images,
-      features, matches, reconstruction and ground control. It can be reopened on any
-      machine, in any browser.
+      Writes a single <code>.websfm</code> file containing this project — source images, features, matches,
+      reconstruction and ground control. It can be reopened on any machine, in any browser.
     </p>
 
     <SettingsField
@@ -60,10 +62,10 @@ const tooLarge = computed(() => estimate.value != null && !archiveSizeVerdict(es
     <div class="size-row">
       <span v-if="!sizes" class="dim">Measuring project size…</span>
       <template v-else>
-        <span>Uncompressed size: <strong>{{ formatBytes(estimate) }}</strong></span>
-        <span v-if="sizes.derived" class="dim">
-          (cached &amp; derived data: {{ formatBytes(sizes.derived) }})
-        </span>
+        <span
+          >Uncompressed size: <strong>{{ formatBytes(estimate) }}</strong></span
+        >
+        <span v-if="sizes.derived" class="dim"> (cached &amp; derived data: {{ formatBytes(sizes.derived) }}) </span>
       </template>
     </div>
 
@@ -74,11 +76,7 @@ const tooLarge = computed(() => estimate.value != null && !archiveSizeVerdict(es
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button
-        class="btn btn-primary"
-        :disabled="!sizes || tooLarge"
-        @click="emit('run', { includeDerived })"
-      >
+      <button class="btn btn-primary" :disabled="!sizes || tooLarge" @click="emit('run', { includeDerived })">
         Save…
       </button>
     </template>
@@ -107,5 +105,7 @@ const tooLarge = computed(() => estimate.value != null && !archiveSizeVerdict(es
   font-size: 12px;
   margin-top: 4px;
 }
-.dim { color: var(--text-dim); }
+.dim {
+  color: var(--text-dim);
+}
 </style>

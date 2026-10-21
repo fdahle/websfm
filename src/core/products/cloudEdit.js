@@ -35,13 +35,22 @@ export function cloudBounds(cloud) {
   const n = cloudCount(cloud)
   if (!n) return null
   const { pos } = cloud
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity
   for (let i = 0; i < n; i++) {
-    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
-    if (x < minX) minX = x; if (x > maxX) maxX = x
-    if (y < minY) minY = y; if (y > maxY) maxY = y
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+    const x = pos[i * 3],
+      y = pos[i * 3 + 1],
+      z = pos[i * 3 + 2]
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+    if (z < minZ) minZ = z
+    if (z > maxZ) maxZ = z
   }
   return { minX, minY, minZ, maxX, maxY, maxZ }
 }
@@ -53,8 +62,10 @@ export function cloudBounds(cloud) {
  */
 export function selectPoints(cloud, keep, kept) {
   const n = cloudCount(cloud)
-  const src = cloud.pos, sc = cloud.col || null, sn = cloud.nrm || null
-  const pos = new (cloud.pos.constructor)(kept * 3)
+  const src = cloud.pos,
+    sc = cloud.col || null,
+    sn = cloud.nrm || null
+  const pos = new cloud.pos.constructor(kept * 3)
   const col = sc ? new Uint8Array(kept * 3) : null
   const nrm = sn ? new Float32Array(kept * 3) : null
   const fields = Object.entries(cloud.attributes || {})
@@ -62,14 +73,31 @@ export function selectPoints(cloud, keep, kept) {
   let o = 0
   for (let i = 0; i < n; i++) {
     if (!keep[i]) continue
-    const s = i * 3, d = o * 3
-    pos[d] = src[s]; pos[d + 1] = src[s + 1]; pos[d + 2] = src[s + 2]
-    if (col) { col[d] = sc[s]; col[d + 1] = sc[s + 1]; col[d + 2] = sc[s + 2] }
-    if (nrm) { nrm[d] = sn[s]; nrm[d + 1] = sn[s + 1]; nrm[d + 2] = sn[s + 2] }
+    const s = i * 3,
+      d = o * 3
+    pos[d] = src[s]
+    pos[d + 1] = src[s + 1]
+    pos[d + 2] = src[s + 2]
+    if (col) {
+      col[d] = sc[s]
+      col[d + 1] = sc[s + 1]
+      col[d + 2] = sc[s + 2]
+    }
+    if (nrm) {
+      nrm[d] = sn[s]
+      nrm[d + 1] = sn[s + 1]
+      nrm[d + 2] = sn[s + 2]
+    }
     for (const [name, values] of fields) attributes[name][o] = values[i]
     o++
   }
-  return { count: kept, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}), ...(fields.length ? { attributes } : {}) }
+  return {
+    count: kept,
+    pos,
+    ...(col ? { col } : {}),
+    ...(nrm ? { nrm } : {}),
+    ...(fields.length ? { attributes } : {}),
+  }
 }
 
 // Largest packed cell key we allow: keys are float64 integers, so the per-axis cell
@@ -114,21 +142,28 @@ export function buildSpatialGrid(cloud, bounds, cell) {
   const nx = Math.floor(bounds.maxX * inv) - Math.floor(bounds.minX * inv) + 3
   const ny = Math.floor(bounds.maxY * inv) - Math.floor(bounds.minY * inv) + 3
   const nz = Math.floor(bounds.maxZ * inv) - Math.floor(bounds.minZ * inv) + 3
-  const clamp = (i, hi) => (i < 0 ? 0 : (i >= hi ? hi - 1 : i))
+  const clamp = (i, hi) => (i < 0 ? 0 : i >= hi ? hi - 1 : i)
   const keyAt = (ix, iy, iz) => (clamp(ix - bx, nx) * ny + clamp(iy - by, ny)) * nz + clamp(iz - bz, nz)
 
   const idOfKey = bigMap(n) // one key per occupied cell: past 2²⁴ a plain Map throws
   const cellOf = new Int32Array(n)
-  const ix = new Int32Array(n), iy = new Int32Array(n), iz = new Int32Array(n)
+  const ix = new Int32Array(n),
+    iy = new Int32Array(n),
+    iz = new Int32Array(n)
   let cellCount = 0
   for (let i = 0; i < n; i++) {
     const gx = Math.floor(pos[i * 3] * inv)
     const gy = Math.floor(pos[i * 3 + 1] * inv)
     const gz = Math.floor(pos[i * 3 + 2] * inv)
-    ix[i] = gx; iy[i] = gy; iz[i] = gz
+    ix[i] = gx
+    iy[i] = gy
+    iz[i] = gz
     const key = keyAt(gx, gy, gz)
     let id = idOfKey.get(key)
-    if (id === undefined) { id = cellCount++; idOfKey.set(key, id) }
+    if (id === undefined) {
+      id = cellCount++
+      idOfKey.set(key, id)
+    }
     cellOf[i] = id
   }
   // Counting sort into per-cell contiguous runs.
@@ -177,12 +212,20 @@ export function cropCloud(cloud, { min = [], max = [], invert = false } = {}, on
   const keep = new Uint8Array(n)
   let kept = 0
   for (let i = 0; i < n; i++) {
-    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
+    const x = pos[i * 3],
+      y = pos[i * 3 + 1],
+      z = pos[i * 3 + 2]
     const inside = x >= lo[0] && x <= hi[0] && y >= lo[1] && y <= hi[1] && z >= lo[2] && z <= hi[2]
-    if (inside !== invert) { keep[i] = 1; kept++ }
+    if (inside !== invert) {
+      keep[i] = 1
+      kept++
+    }
   }
-  onLog?.(`Crop: kept ${kept.toLocaleString()} of ${n.toLocaleString()} points`
-    + `${invert ? ' (outside box)' : ''}`, 'info', 'Products')
+  onLog?.(
+    `Crop: kept ${kept.toLocaleString()} of ${n.toLocaleString()} points` + `${invert ? ' (outside box)' : ''}`,
+    'info',
+    'Products',
+  )
   return selectPoints(cloud, keep, kept)
 }
 
@@ -205,10 +248,17 @@ export function maskCloud(cloud, { mask, keepSelected = false } = {}, onLog) {
   const keep = new Uint8Array(n)
   let kept = 0
   for (let i = 0; i < n; i++) {
-    if ((mask[i] !== 0) === keepSelected) { keep[i] = 1; kept++ }
+    if ((mask[i] !== 0) === keepSelected) {
+      keep[i] = 1
+      kept++
+    }
   }
-  onLog?.(`Selection: ${keepSelected ? 'kept' : 'deleted'} ${(keepSelected ? kept : n - kept).toLocaleString()}`
-    + ` selected of ${n.toLocaleString()} points`, 'info', 'Products')
+  onLog?.(
+    `Selection: ${keepSelected ? 'kept' : 'deleted'} ${(keepSelected ? kept : n - kept).toLocaleString()}` +
+      ` selected of ${n.toLocaleString()} points`,
+    'info',
+    'Products',
+  )
   return selectPoints(cloud, keep, kept)
 }
 
@@ -226,15 +276,28 @@ export function classifySelection(cloud, { mask, classValue } = {}, onLog) {
   if (!(c >= 0 && c <= 255)) throw new Error(`class ${classValue} is not a LAS class (0–255)`)
   const prev = cloud.attributes?.classification
   const cls = prev ? Uint8Array.from(prev) : new Uint8Array(n)
-  let changed = 0, selected = 0
+  let changed = 0,
+    selected = 0
   for (let i = 0; i < n; i++) {
     if (!mask[i]) continue
     selected++
-    if (cls[i] !== c) { cls[i] = c; changed++ }
+    if (cls[i] !== c) {
+      cls[i] = c
+      changed++
+    }
   }
-  onLog?.(`Classify: ${selected.toLocaleString()} selected points set to class ${c} (${changed.toLocaleString()} changed)`, 'info', 'Products')
-  return { count: n, pos: cloud.pos, col: cloud.col ?? null, ...(cloud.nrm ? { nrm: cloud.nrm } : {}),
-    attributes: { ...(cloud.attributes || {}), classification: cls } }
+  onLog?.(
+    `Classify: ${selected.toLocaleString()} selected points set to class ${c} (${changed.toLocaleString()} changed)`,
+    'info',
+    'Products',
+  )
+  return {
+    count: n,
+    pos: cloud.pos,
+    col: cloud.col ?? null,
+    ...(cloud.nrm ? { nrm: cloud.nrm } : {}),
+    attributes: { ...(cloud.attributes || {}), classification: cls },
+  }
 }
 
 // ── Filters ──────────────────────────────────────────────────────────────────
@@ -277,15 +340,26 @@ function occupancyGrid(cloud, bounds, perCell) {
  * opts: { k = 12, stdRatio = 1.5, cell = 0 (auto), reach (see sorNeighbourMeans),
  *         limit (instead of the cloud's own mean + stdRatio·σ) }
  */
-export function statisticalOutlierFilter(cloud, { k = 12, stdRatio = 1.5, cell = 0, reach = 0, limit: given = null } = {}, onLog) {
+export function statisticalOutlierFilter(
+  cloud,
+  { k = 12, stdRatio = 1.5, cell = 0, reach = 0, limit: given = null } = {},
+  onLog,
+) {
   const n = cloudCount(cloud)
   if (n < 3) return selectPoints(cloud, new Uint8Array(n).fill(1), n)
   const { mean, lonely } = sorNeighbourMeans(cloud, { k, cell, reach })
 
   // Cloud-wide mean/σ over the points that had neighbours (or the caller's limit: a
   // tiled run takes the whole cloud's, core/lod/transform.js).
-  let cnt = 0, s1 = 0, s2 = 0
-  for (let i = 0; i < n; i++) { if (lonely[i]) continue; cnt++; s1 += mean[i]; s2 += mean[i] * mean[i] }
+  let cnt = 0,
+    s1 = 0,
+    s2 = 0
+  for (let i = 0; i < n; i++) {
+    if (lonely[i]) continue
+    cnt++
+    s1 += mean[i]
+    s2 += mean[i] * mean[i]
+  }
   const mu = cnt ? s1 / cnt : 0
   const sigma = cnt ? Math.sqrt(Math.max(s2 / cnt - mu * mu, 0)) : 0
   const limit = given ?? mu + stdRatio * sigma
@@ -294,10 +368,17 @@ export function statisticalOutlierFilter(cloud, { k = 12, stdRatio = 1.5, cell =
   let kept = 0
   for (let i = 0; i < n; i++) {
     if (lonely[i]) continue
-    if (mean[i] <= limit) { keep[i] = 1; kept++ }
+    if (mean[i] <= limit) {
+      keep[i] = 1
+      kept++
+    }
   }
-  onLog?.(`Filter (outlier): mean neighbour distance ${mu.toFixed(4)} ±${sigma.toFixed(4)}, `
-    + `limit ${limit.toFixed(4)} → kept ${kept.toLocaleString()} of ${n.toLocaleString()}`, 'info', 'Products')
+  onLog?.(
+    `Filter (outlier): mean neighbour distance ${mu.toFixed(4)} ±${sigma.toFixed(4)}, ` +
+      `limit ${limit.toFixed(4)} → kept ${kept.toLocaleString()} of ${n.toLocaleString()}`,
+    'info',
+    'Products',
+  )
   return selectPoints(cloud, keep, kept)
 }
 
@@ -337,14 +418,19 @@ export function sorNeighbourMeans(cloud, { k = 12, cell = 0, reach = 0 } = {}) {
     for (let s = start[id]; s < start[id + 1]; s++) {
       const j = order[s]
       if (j === i) continue
-      const ddx = pos[j * 3] - x, ddy = pos[j * 3 + 1] - y, ddz = pos[j * 3 + 2] - z
+      const ddx = pos[j * 3] - x,
+        ddy = pos[j * 3 + 1] - y,
+        ddz = pos[j * 3 + 2] - z
       const d2 = ddx * ddx + ddy * ddy + ddz * ddz
       if (d2 > far2) continue
       added++
       if (d2 >= best[kk - 1]) continue
       // Insertion into the ascending k-list (kk is small; a heap is not worth it).
       let p = kk - 1
-      while (p > 0 && best[p - 1] > d2) { best[p] = best[p - 1]; p-- }
+      while (p > 0 && best[p - 1] > d2) {
+        best[p] = best[p - 1]
+        p--
+      }
       best[p] = d2
     }
     return added
@@ -352,7 +438,9 @@ export function sorNeighbourMeans(cloud, { k = 12, cell = 0, reach = 0 } = {}) {
   for (let i = 0; i < n; i++) {
     let found = 0
     best.fill(Infinity)
-    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
+    const x = pos[i * 3],
+      y = pos[i * 3 + 1],
+      z = pos[i * 3 + 2]
     for (let r = 0; r <= maxRing; r++) {
       for (let dx = -r; dx <= r; dx++) {
         for (let dy = -r; dy <= r; dy++) {
@@ -364,7 +452,10 @@ export function sorNeighbourMeans(cloud, { k = 12, cell = 0, reach = 0 } = {}) {
       }
       if (r >= 1 && found >= kk && best[kk - 1] <= (r * cs) ** 2) break
     }
-    if (!found) { lonely[i] = 1; continue }
+    if (!found) {
+      lonely[i] = 1
+      continue
+    }
     const m = Math.min(found, kk)
     let sum = 0
     for (let p = 0; p < m; p++) sum += Math.sqrt(best[p])
@@ -399,7 +490,10 @@ export function removeIsolated(cloud, { cell = 0, minNeighbors = 2, maxSupport =
   const cellKeep = new Uint8Array(cellCount)
   for (let c = 0; c < cellCount; c++) {
     const size = start[c + 1] - start[c]
-    if (size > maxSupport) { cellKeep[c] = 1; continue }
+    if (size > maxSupport) {
+      cellKeep[c] = 1
+      continue
+    }
     const i = rep[c]
     let neigh = 0
     for (let dx = -1; dx <= 1 && neigh < minNeighbors; dx++) {
@@ -418,9 +512,17 @@ export function removeIsolated(cloud, { cell = 0, minNeighbors = 2, maxSupport =
 
   const keep = new Uint8Array(n)
   let kept = 0
-  for (let i = 0; i < n; i++) if (cellKeep[cellOf[i]]) { keep[i] = 1; kept++ }
-  onLog?.(`Filter (isolated): cell ${grid.cell.toFixed(4)} → kept ${kept.toLocaleString()} `
-    + `of ${n.toLocaleString()} points`, 'info', 'Products')
+  for (let i = 0; i < n; i++)
+    if (cellKeep[cellOf[i]]) {
+      keep[i] = 1
+      kept++
+    }
+  onLog?.(
+    `Filter (isolated): cell ${grid.cell.toFixed(4)} → kept ${kept.toLocaleString()} ` +
+      `of ${n.toLocaleString()} points`,
+    'info',
+    'Products',
+  )
   return selectPoints(cloud, keep, kept)
 }
 
@@ -456,7 +558,8 @@ export function filterRange(cloud, { zMin = null, zMax = null, lumaMin = null, l
       const l = luma(col[i * 3], col[i * 3 + 1], col[i * 3 + 2])
       if (l < l0 || l > l1) continue
     }
-    keep[i] = 1; kept++
+    keep[i] = 1
+    kept++
   }
   onLog?.(`Filter (range): kept ${kept.toLocaleString()} of ${n.toLocaleString()} points`, 'info', 'Products')
   return selectPoints(cloud, keep, kept)
@@ -481,43 +584,73 @@ export function voxelDownsample(cloud, { cell = 0 } = {}, onLog) {
     // The first point of each cell, the cell named by one integer (the grid's own
     // indices; the same cells as floor(pos / c) per axis), not a string per point.
     const { pos } = cloud
-    const x0 = Math.floor(b.minX / c), y0 = Math.floor(b.minY / c), z0 = Math.floor(b.minZ / c)
-    const ny = Math.floor(b.maxY / c) - y0 + 1, nz = Math.floor(b.maxZ / c) - z0 + 1
+    const x0 = Math.floor(b.minX / c),
+      y0 = Math.floor(b.minY / c),
+      z0 = Math.floor(b.minZ / c)
+    const ny = Math.floor(b.maxY / c) - y0 + 1,
+      nz = Math.floor(b.maxZ / c) - z0 + 1
     const nx = Math.floor(b.maxX / c) - x0 + 1
     const exact = nx * ny * nz <= Number.MAX_SAFE_INTEGER
     const seen = bigSet(n) // one key per occupied cell: past 2²⁴ a plain Set throws
     const keep = new Uint8Array(n)
     for (let i = 0; i < n; i++) {
-      const ix = Math.floor(pos[i * 3] / c), iy = Math.floor(pos[i * 3 + 1] / c), iz = Math.floor(pos[i * 3 + 2] / c)
+      const ix = Math.floor(pos[i * 3] / c),
+        iy = Math.floor(pos[i * 3 + 1] / c),
+        iz = Math.floor(pos[i * 3 + 2] / c)
       const key = exact ? ((ix - x0) * ny + (iy - y0)) * nz + (iz - z0) : `${ix},${iy},${iz}`
-      if (!seen.has(key)) { seen.add(key); keep[i] = 1 }
+      if (!seen.has(key)) {
+        seen.add(key)
+        keep[i] = 1
+      }
     }
-    onLog?.(`Subsample: retained ${seen.size.toLocaleString()} representative points with their attributes`, 'info', 'Products')
+    onLog?.(
+      `Subsample: retained ${seen.size.toLocaleString()} representative points with their attributes`,
+      'info',
+      'Products',
+    )
     return selectPoints(cloud, keep, seen.size)
   }
   const shift = [Math.floor(b.minX / c) * c, Math.floor(b.minY / c) * c, Math.floor(b.minZ / c) * c]
   const acc = createVoxelAccumulator(c, {
-    minX: b.minX - shift[0], minY: b.minY - shift[1], minZ: b.minZ - shift[2],
-    maxX: b.maxX - shift[0], maxY: b.maxY - shift[1], maxZ: b.maxZ - shift[2],
+    minX: b.minX - shift[0],
+    minY: b.minY - shift[1],
+    minZ: b.minZ - shift[2],
+    maxX: b.maxX - shift[0],
+    maxY: b.maxY - shift[1],
+    maxZ: b.maxZ - shift[2],
   })
   const { pos } = cloud
-  const sc = cloud.col || null, sn = cloud.nrm || null
+  const sc = cloud.col || null,
+    sn = cloud.nrm || null
   for (let i = 0; i < n; i++) {
     const s = i * 3
     acc.add(
-      pos[s] - shift[0], pos[s + 1] - shift[1], pos[s + 2] - shift[2],
-      sc ? sc[s] : 200, sc ? sc[s + 1] : 200, sc ? sc[s + 2] : 200,
-      sn ? sn[s] : 0, sn ? sn[s + 1] : 0, sn ? sn[s + 2] : 0,
+      pos[s] - shift[0],
+      pos[s + 1] - shift[1],
+      pos[s + 2] - shift[2],
+      sc ? sc[s] : 200,
+      sc ? sc[s + 1] : 200,
+      sc ? sc[s + 2] : 200,
+      sn ? sn[s] : 0,
+      sn ? sn[s + 1] : 0,
+      sn ? sn[s + 2] : 0,
     )
   }
   const flat = acc.finalizeFlat()
   const m = flat.length / 6
-  const outPos = new (cloud.pos.constructor)(m * 3)
+  const outPos = new cloud.pos.constructor(m * 3)
   const outCol = sc ? new Uint8Array(m * 3) : null
   for (let i = 0; i < m; i++) {
-    const s = i * 6, d = i * 3
-    outPos[d] = flat[s] + shift[0]; outPos[d + 1] = flat[s + 1] + shift[1]; outPos[d + 2] = flat[s + 2] + shift[2]
-    if (outCol) { outCol[d] = flat[s + 3]; outCol[d + 1] = flat[s + 4]; outCol[d + 2] = flat[s + 5] }
+    const s = i * 6,
+      d = i * 3
+    outPos[d] = flat[s] + shift[0]
+    outPos[d + 1] = flat[s + 1] + shift[1]
+    outPos[d + 2] = flat[s + 2] + shift[2]
+    if (outCol) {
+      outCol[d] = flat[s + 3]
+      outCol[d + 1] = flat[s + 4]
+      outCol[d + 2] = flat[s + 5]
+    }
   }
   const outNrm = sn ? acc.finalizeNormals().nrm : null
   onLog?.(`Filter (voxel ${c}): ${m.toLocaleString()} of ${n.toLocaleString()} points kept`, 'info', 'Products')
@@ -570,19 +703,22 @@ export function mergeClouds(clouds, { cell = 0 } = {}, onLog) {
   if (!allNrm && list.some((c) => c.nrm))
     onLog?.('Merge: normals dropped (not every input cloud has them)', 'info', 'Products')
 
-  const PositionArray = list.some(c => c.pos instanceof Float64Array) ? Float64Array : Float32Array
+  const PositionArray = list.some((c) => c.pos instanceof Float64Array) ? Float64Array : Float32Array
   const pos = new PositionArray(total * 3)
   const col = anyCol ? new Uint8Array(total * 3) : null
   const nrm = allNrm ? new Float32Array(total * 3) : null
-  const names = [...new Set(list.flatMap(c => Object.keys(c.attributes || {})))]
-  const shared = names.filter(name => list.every(c => c.attributes?.[name]))
+  const names = [...new Set(list.flatMap((c) => Object.keys(c.attributes || {})))]
+  const shared = names.filter((name) => list.every((c) => c.attributes?.[name]))
   // Promote mixed numeric types to Float64; only keep fields every input has.
-  const attributes = Object.fromEntries(shared.map(name => {
-    const FirstType = list[0].attributes[name].constructor
-    const Type = list.every(c => c.attributes[name].constructor === FirstType) ? FirstType : Float64Array
-    return [name, new Type(total)]
-  }))
-  if (shared.length !== names.length) onLog?.('Merge: retained only scalar fields shared by every input cloud', 'info', 'Products')
+  const attributes = Object.fromEntries(
+    shared.map((name) => {
+      const FirstType = list[0].attributes[name].constructor
+      const Type = list.every((c) => c.attributes[name].constructor === FirstType) ? FirstType : Float64Array
+      return [name, new Type(total)]
+    }),
+  )
+  if (shared.length !== names.length)
+    onLog?.('Merge: retained only scalar fields shared by every input cloud', 'info', 'Products')
   let o = 0
   for (const c of list) {
     const n = cloudCount(c)
@@ -596,6 +732,12 @@ export function mergeClouds(clouds, { cell = 0 } = {}, onLog) {
     o += n
   }
   onLog?.(`Merge: ${list.length} clouds → ${total.toLocaleString()} points`, 'info', 'Products')
-  const merged = { count: total, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}), ...(shared.length ? { attributes } : {}) }
+  const merged = {
+    count: total,
+    pos,
+    ...(col ? { col } : {}),
+    ...(nrm ? { nrm } : {}),
+    ...(shared.length ? { attributes } : {}),
+  }
   return cell > 0 ? voxelDownsample(merged, { cell }, onLog) : merged
 }

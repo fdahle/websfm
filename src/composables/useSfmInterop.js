@@ -12,13 +12,20 @@ import { parseSfmText } from '../core/io/sfmInterop.js'
 import { pluralize } from '../core/textFormat.js'
 
 const MODEL_FILES = new Map([
-  ['cameras.txt', 'cameras.txt'], ['images.txt', 'images.txt'], ['points3d.txt', 'points3D.txt'],
-  ['cameras.bin', 'cameras.bin'], ['images.bin', 'images.bin'], ['points3d.bin', 'points3D.bin'],
+  ['cameras.txt', 'cameras.txt'],
+  ['images.txt', 'images.txt'],
+  ['points3d.txt', 'points3D.txt'],
+  ['cameras.bin', 'cameras.bin'],
+  ['images.bin', 'images.bin'],
+  ['points3d.bin', 'points3D.bin'],
 ])
 const IMAGE_EXT = /\.(?:jpe?g|png|tiff?|webp|bmp)$/i
 const DB_EXT = /(?:^|\/)(?:database\.(?:db|sqlite)|[^/]+\.(?:db|sqlite))$/i
 
-const cleanPath = (path) => String(path || '').replace(/\\/g, '/').replace(/^\.\//, '')
+const cleanPath = (path) =>
+  String(path || '')
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
 const baseName = (path) => cleanPath(path).split('/').pop()
 
 function safeArchivePath(path) {
@@ -31,18 +38,29 @@ function modelSummary(files, name) {
   const complete = binary
     ? !!(files['cameras.bin'] && files['images.bin'])
     : !!(files['cameras.txt'] && files['images.txt'])
-  if (!complete) return { externalId: name, name, complete: false, registeredImages: 0, pointCount: 0, observationCount: 0 }
+  if (!complete)
+    return { externalId: name, name, complete: false, registeredImages: 0, pointCount: 0, observationCount: 0 }
   try {
     const parsed = binary ? parseColmapModelBin(files) : parseColmapModel(files)
     const model = readColmapModel(parsed)
     return {
-      externalId: name, name, complete: true,
+      externalId: name,
+      name,
+      complete: true,
       registeredImages: model.images.length,
       pointCount: model.points.length,
       observationCount: model.points.reduce((n, p) => n + p.views.length, 0),
     }
   } catch (err) {
-    return { externalId: name, name, complete: false, registeredImages: 0, pointCount: 0, observationCount: 0, error: err?.message ?? String(err) }
+    return {
+      externalId: name,
+      name,
+      complete: false,
+      registeredImages: 0,
+      pointCount: 0,
+      observationCount: 0,
+      error: err?.message ?? String(err),
+    }
   }
 }
 
@@ -96,7 +114,10 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
     importController = new AbortController()
     const signal = importController.signal
     disposeColmapDatabase()
-    importSession.value = { status: 'inspecting', sourceName: files.length === 1 ? files[0].name : `${files.length} selected files` }
+    importSession.value = {
+      status: 'inspecting',
+      sourceName: files.length === 1 ? files[0].name : `${files.length} selected files`,
+    }
     try {
       if (files.length === 1 && /\.(?:json|nvm)$/i.test(files[0].name)) {
         const text = await files[0].text()
@@ -105,12 +126,25 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
         const resolve = makeNameResolver(imagesStore.images, { key: 'uuid' })
         const matchedImages = model.images.filter((im) => resolve(im.name)).length
         importSession.value = {
-          status: 'ready', format: model.format, sourceName: files[0].name,
+          status: 'ready',
+          format: model.format,
+          sourceName: files[0].name,
           database: null,
-          models: [{ externalId: 'model', name: model.format, complete: true, registeredImages: model.images.length, pointCount: model.points.length, observationCount: model.points.reduce((n, p) => n + (p.views?.length ?? 0), 0) }],
-          genericModel: model, bundledImages: [],
+          models: [
+            {
+              externalId: 'model',
+              name: model.format,
+              complete: true,
+              registeredImages: model.images.length,
+              pointCount: model.points.length,
+              observationCount: model.points.reduce((n, p) => n + (p.views?.length ?? 0), 0),
+            },
+          ],
+          genericModel: model,
+          bundledImages: [],
           counts: { externalImages: model.images.length, matchedImages, bundledImages: 0 },
-          warnings: model.warnings ?? [], error: null,
+          warnings: model.warnings ?? [],
+          error: null,
         }
         return
       }
@@ -136,29 +170,47 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
 
       let database = null
       if (dbEntry) {
-        const dbFile = dbEntry.file ?? new File([dbEntry.data], baseName(dbEntry.path), { type: 'application/vnd.sqlite3' })
+        const dbFile =
+          dbEntry.file ?? new File([dbEntry.data], baseName(dbEntry.path), { type: 'application/vnd.sqlite3' })
         database = await inspectColmapDatabase(dbFile)
         signal.throwIfAborted()
       }
       const models = [...modelGroups].map(([name, model]) => ({ ...modelSummary(model, name), files: model }))
-      if (!database && !models.some((m) => m.complete)) throw new Error('No COLMAP database or complete sparse model was found')
+      if (!database && !models.some((m) => m.complete))
+        throw new Error('No COLMAP database or complete sparse model was found')
 
       const resolve = makeNameResolver(imagesStore.images, { key: 'uuid' })
       const externalImages = database?.images ?? []
       const matchedImages = externalImages.filter((im) => resolve(im.name)).length
       const warnings = [...(database?.warnings ?? [])]
-      if (database?.unsupportedCameras) warnings.push(`${pluralize(database.unsupportedCameras, 'camera')} with an unsupported lens model (FOV, thin-prism fisheye) will be skipped`)
-      if (database?.rigs || database?.frames) warnings.push('Rig/frame records are detected but rig constraints are not imported')
-      if (database?.posePriors) warnings.push(`${pluralize(database.posePriors, 'pose prior')} detected; their coordinate reference is not self-describing and they will be skipped`)
-      for (const model of models) if (!model.complete) warnings.push(`${model.name}: ${model.error || 'incomplete sparse model'}`)
-      if (database && !models.length) warnings.push('A database contains feature data, but no reconstructed sparse 3D model')
-      if (!bundledImages.length && externalImages.length > matchedImages) warnings.push(`${pluralize(externalImages.length - matchedImages, 'external image')} not loaded or bundled`)
+      if (database?.unsupportedCameras)
+        warnings.push(
+          `${pluralize(database.unsupportedCameras, 'camera')} with an unsupported lens model (FOV, thin-prism fisheye) will be skipped`,
+        )
+      if (database?.rigs || database?.frames)
+        warnings.push('Rig/frame records are detected but rig constraints are not imported')
+      if (database?.posePriors)
+        warnings.push(
+          `${pluralize(database.posePriors, 'pose prior')} detected; their coordinate reference is not self-describing and they will be skipped`,
+        )
+      for (const model of models)
+        if (!model.complete) warnings.push(`${model.name}: ${model.error || 'incomplete sparse model'}`)
+      if (database && !models.length)
+        warnings.push('A database contains feature data, but no reconstructed sparse 3D model')
+      if (!bundledImages.length && externalImages.length > matchedImages)
+        warnings.push(`${pluralize(externalImages.length - matchedImages, 'external image')} not loaded or bundled`)
 
       importSession.value = {
-        status: 'ready', format: 'COLMAP', sourceName: importSession.value.sourceName,
-        database, models, modelGroups, bundledImages,
+        status: 'ready',
+        format: 'COLMAP',
+        sourceName: importSession.value.sourceName,
+        database,
+        models,
+        modelGroups,
+        bundledImages,
         counts: { externalImages: externalImages.length, matchedImages, bundledImages: bundledImages.length },
-        warnings, error: null,
+        warnings,
+        error: null,
       }
     } catch (err) {
       if (signal.aborted) return
@@ -182,15 +234,18 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
     session.error = null
     try {
       // Read and validate all selected database blobs before mutating a store.
-      const selected = session.database ? await readColmapDatabase({
-        calibration: !!options.calibration,
-        features: !!options.features,
-        descriptors: !!options.descriptors,
-        matches: !!options.matches,
-        matchSource: options.matchSource,
-      }) : { cameras: [], images: [], features: [], pairs: [] }
+      const selected = session.database
+        ? await readColmapDatabase({
+            calibration: !!options.calibration,
+            features: !!options.features,
+            descriptors: !!options.descriptors,
+            matches: !!options.matches,
+            matchSource: options.matchSource,
+          })
+        : { cameras: [], images: [], features: [], pairs: [] }
 
-      if (options.images && session.bundledImages.length) await addImages(await materializeImages(session.bundledImages, signal))
+      if (options.images && session.bundledImages.length)
+        await addImages(await materializeImages(session.bundledImages, signal))
       const resolve = makeNameResolver(imagesStore.images, { key: 'uuid' })
       const dbImages = session.database?.images ?? []
       const uuidByExternal = new Map(dbImages.map((im) => [im.externalId, resolve(im.name)]).filter(([, uuid]) => uuid))
@@ -198,21 +253,27 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
       if (options.calibration) {
         const referenced = new Set(dbImages.filter((im) => uuidByExternal.has(im.externalId)).map((im) => im.cameraId))
         const cameraGroups = selected.cameras.map(cameraToWebsfmSensor).filter((c) => c && referenced.has(c.externalId))
-        const bindings = dbImages.filter((im) => uuidByExternal.has(im.externalId))
+        const bindings = dbImages
+          .filter((im) => uuidByExternal.has(im.externalId))
           .map((im) => ({ uuid: uuidByExternal.get(im.externalId), cameraId: im.cameraId }))
         await sensorsStore.importCameraGroups(cameraGroups, bindings)
       }
 
       const importedFeatureCounts = new Map()
       if (options.features) {
-        const featureEntries = selected.features.filter((f) => uuidByExternal.has(f.imageId)).map((f) => {
-          importedFeatureCounts.set(f.imageId, f.keypoints.length)
-          return {
-            uuid: uuidByExternal.get(f.imageId), keypoints: f.keypoints,
-            descriptors: options.descriptors && f.compatible ? f.descriptors : null,
-            descDim: f.descDim ?? 128, detector: f.descriptorType?.startsWith('aliked') ? 'aliked' : 'sift', source: 'colmap',
-          }
-        })
+        const featureEntries = selected.features
+          .filter((f) => uuidByExternal.has(f.imageId))
+          .map((f) => {
+            importedFeatureCounts.set(f.imageId, f.keypoints.length)
+            return {
+              uuid: uuidByExternal.get(f.imageId),
+              keypoints: f.keypoints,
+              descriptors: options.descriptors && f.compatible ? f.descriptors : null,
+              descDim: f.descDim ?? 128,
+              detector: f.descriptorType?.startsWith('aliked') ? 'aliked' : 'sift',
+              source: 'colmap',
+            }
+          })
         await imagesStore.importFeatures(featureEntries, { invalidateMatches: true })
       }
 
@@ -222,24 +283,46 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
         let invalid = 0
         for (const pair of selected.pairs) {
           const [a, b] = pair.imageIds
-          const uuidA = uuidByExternal.get(a), uuidB = uuidByExternal.get(b)
+          const uuidA = uuidByExternal.get(a),
+            uuidB = uuidByExternal.get(b)
           if (!uuidA || !uuidB) continue
-          const countA = importedFeatureCounts.get(a) ?? 0, countB = importedFeatureCounts.get(b) ?? 0
+          const countA = importedFeatureCounts.get(a) ?? 0,
+            countB = importedFeatureCounts.get(b) ?? 0
           const valid = pair.matches.filter(([ia, ib]) => ia < countA && ib < countB)
           invalid += pair.matches.length - valid.length
-          if (valid.length) pairEntries.push({ uuidA, uuidB, matches: valid, F: pair.F, verified: pair.verified, rawCount: valid.length, source: 'colmap' })
+          if (valid.length)
+            pairEntries.push({
+              uuidA,
+              uuidB,
+              matches: valid,
+              F: pair.F,
+              verified: pair.verified,
+              rawCount: valid.length,
+              source: 'colmap',
+            })
         }
-        if (invalid) log(`COLMAP import: skipped ${pluralize(invalid, 'match', 'matches')} with invalid feature indices`, 'warn', 'Import')
+        if (invalid)
+          log(
+            `COLMAP import: skipped ${pluralize(invalid, 'match', 'matches')} with invalid feature indices`,
+            'warn',
+            'Import',
+          )
         await matchesStore.importMatches(pairEntries, { replace: !!options.replaceMatches })
       }
 
       let sparseImported = 0
       if (session.genericModel && options.modelIds?.includes('model')) {
         if (importInteropModel(session.genericModel)) sparseImported++
-      } else for (const model of session.models) {
-        if (options.modelIds?.includes(model.externalId) && model.complete && importColmapModel(model.files)) sparseImported++
-      }
-      log(`SfM project imported: ${pluralize(uuidByExternal.size, 'image name')} matched${sparseImported ? `, ${pluralize(sparseImported, 'sparse model')}` : ''}`, 'success', 'Import')
+      } else
+        for (const model of session.models) {
+          if (options.modelIds?.includes(model.externalId) && model.complete && importColmapModel(model.files))
+            sparseImported++
+        }
+      log(
+        `SfM project imported: ${pluralize(uuidByExternal.size, 'image name')} matched${sparseImported ? `, ${pluralize(sparseImported, 'sparse model')}` : ''}`,
+        'success',
+        'Import',
+      )
       closeImport()
       if (sparseImported) activateTab('viewer')
     } catch (err) {

@@ -34,18 +34,21 @@ export async function loadCrsRegistry() {
     // Keep the catalog as a static JSON asset. Bundling it as an object-literal
     // JavaScript chunk inflated it and triggered the large-chunk warning even though
     // it was already lazy. The hashed local URL remains offline-capable.
-    registryPromise = fetch(registryUrl).then((response) => {
-      if (!response.ok) throw new Error(`Could not load the CRS catalog (${response.status})`)
-      return response.json()
-    }).then((index) =>
-      Object.values(index)
-        .filter((record) => HORIZONTAL_KINDS.has(record.kind) && (record.proj4 || record.wkt))
-        .map(normaliseCrsRecord),
-    ).catch((error) => {
-      // Don't memoise a failure (e.g. a first load while offline): the next call retries.
-      registryPromise = null
-      throw error
-    })
+    registryPromise = fetch(registryUrl)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Could not load the CRS catalog (${response.status})`)
+        return response.json()
+      })
+      .then((index) =>
+        Object.values(index)
+          .filter((record) => HORIZONTAL_KINDS.has(record.kind) && (record.proj4 || record.wkt))
+          .map(normaliseCrsRecord),
+      )
+      .catch((error) => {
+        // Don't memoise a failure (e.g. a first load while offline): the next call retries.
+        registryPromise = null
+        throw error
+      })
   }
   return registryPromise
 }
@@ -65,7 +68,10 @@ function searchable(record) {
 // Requiring every token makes searches such as "wgs 84 netherlands" useful
 // without flooding the result list.
 export function searchCrsRecords(records, query, limit = 12) {
-  const q = query.trim().toLocaleLowerCase().replace(/^epsg\s*:\s*/, '')
+  const q = query
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/^epsg\s*:\s*/, '')
   if (!q) return records.slice(0, limit)
   const tokens = q.split(/\s+/).filter(Boolean)
 

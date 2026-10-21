@@ -46,7 +46,8 @@ export function capOrder(items, cap, rule = 'response') {
  * @returns {{minResponse:number, minScale:number}}
  */
 export function capBoundary(items, kept) {
-  let minResponse = Infinity, minScale = Infinity
+  let minResponse = Infinity,
+    minScale = Infinity
   for (const i of kept) {
     if (items[i].response < minResponse) minResponse = items[i].response
     if ((items[i].scale ?? Infinity) < minScale) minScale = items[i].scale

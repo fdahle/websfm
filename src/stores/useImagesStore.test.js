@@ -19,16 +19,28 @@ describe('image project restore readiness', () => {
     projects.currentProjectId = 'project-1'
 
     let finishLoad
-    vi.spyOn(opfs, 'loadImageBlob').mockReturnValue(new Promise((resolve) => { finishLoad = resolve }))
+    vi.spyOn(opfs, 'loadImageBlob').mockReturnValue(
+      new Promise((resolve) => {
+        finishLoad = resolve
+      }),
+    )
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:restored-image')
 
     const store = useImagesStore()
-    const imagesLoading = computed(() =>
-      store.images.some((image) => image.loading || image.previewPending))
-    const restoring = store.restoreImages([{
-      id: 'image-1', uuid: 'uuid-1', name: 'photo.jpg', meta: { width: 100, height: 80 },
-      kpStatus: 'idle', kpCount: 0,
-    }], 'project-1')
+    const imagesLoading = computed(() => store.images.some((image) => image.loading || image.previewPending))
+    const restoring = store.restoreImages(
+      [
+        {
+          id: 'image-1',
+          uuid: 'uuid-1',
+          name: 'photo.jpg',
+          meta: { width: 100, height: 80 },
+          kpStatus: 'idle',
+          kpCount: 0,
+        },
+      ],
+      'project-1',
+    )
 
     await nextTick()
     expect(imagesLoading.value).toBe(true)
@@ -38,8 +50,10 @@ describe('image project restore readiness', () => {
     await nextTick()
 
     expect(store.images[0]).toMatchObject({
-      url: 'blob:restored-image', computeUrl: 'blob:restored-image',
-      loading: false, previewPending: false,
+      url: 'blob:restored-image',
+      computeUrl: 'blob:restored-image',
+      loading: false,
+      previewPending: false,
     })
     expect(imagesLoading.value).toBe(false)
   })
@@ -55,10 +69,19 @@ describe('image project restore readiness', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:restored-image')
 
     const store = useImagesStore()
-    await store.restoreImages([{
-      id: 'image-1', uuid: 'uuid-1', name: 'photo.jpg', meta: { width: 100, height: 80 },
-      kpStatus: 'done', kpCount: 250,
-    }], 'project-1')
+    await store.restoreImages(
+      [
+        {
+          id: 'image-1',
+          uuid: 'uuid-1',
+          name: 'photo.jpg',
+          meta: { width: 100, height: 80 },
+          kpStatus: 'done',
+          kpCount: 250,
+        },
+      ],
+      'project-1',
+    )
 
     // One directory listing decides it; no keypoint file is opened at restore.
     expect(load).not.toHaveBeenCalled()
@@ -189,10 +212,14 @@ describe('image groups', () => {
 
     expect(store.removeImageGroup(group.id)).toBe(true)
     expect(store.imageGroups).toEqual([])
-    expect(store.images.map((i) => [i.id, i.groupId])).toEqual([['a', null], ['b', null], ['c', null]])
+    expect(store.images.map((i) => [i.id, i.groupId])).toEqual([
+      ['a', null],
+      ['b', null],
+      ['c', null],
+    ])
   })
 
-  it('persists the group list and each image\'s groupId', async () => {
+  it("persists the group list and each image's groupId", async () => {
     const projects = openProject()
     const store = useImagesStore()
     await store.restoreImages(records, 'project-1')
@@ -224,24 +251,42 @@ describe('saving a mask', () => {
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mask')
     vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined)
     const store = useImagesStore()
-    await store.restoreImages([{ id: 'image-1', uuid: 'uuid-1', name: 'photo.jpg', meta: { width: 100, height: 80 },
-      kpStatus: 'idle', kpCount: 0 }], 'project-1')
+    await store.restoreImages(
+      [
+        {
+          id: 'image-1',
+          uuid: 'uuid-1',
+          name: 'photo.jpg',
+          meta: { width: 100, height: 80 },
+          kpStatus: 'idle',
+          kpCount: 0,
+        },
+      ],
+      'project-1',
+    )
     projects.persistenceAvailable = true
     vi.spyOn(opfs, 'writeProject').mockResolvedValue(undefined)
     vi.spyOn(opfs, 'updateProject').mockResolvedValue(undefined)
     return store
   }
-  const lines = () => useLog().entries.value.filter((e) => e.source === 'Images').map((e) => [e.level, e.message])
+  const lines = () =>
+    useLog()
+      .entries.value.filter((e) => e.source === 'Images')
+      .map((e) => [e.level, e.message])
 
   it('a write that fails says so, with the reason, and never "Mask saved"', async () => {
     const store = await storeWithImage()
-    const full = Object.assign(new Error('Storage is full: free space, then run the step again. (uuid-1.png)'),
-      { name: 'QuotaExceededError', storageFull: true })
+    const full = Object.assign(new Error('Storage is full: free space, then run the step again. (uuid-1.png)'), {
+      name: 'QuotaExceededError',
+      storageFull: true,
+    })
     vi.spyOn(opfs, 'saveMask').mockRejectedValue(full)
     useLog().clear()
     store.updateMask('image-1', new Blob(['png'], { type: 'image/png' }))
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(lines()).toEqual([['error', 'Mask not saved: photo.jpg: Storage is full: free space, then run the step again. (uuid-1.png)']])
+    expect(lines()).toEqual([
+      ['error', 'Mask not saved: photo.jpg: Storage is full: free space, then run the step again. (uuid-1.png)'],
+    ])
   })
 
   it('a write that lands is logged once it has', async () => {

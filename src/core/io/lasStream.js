@@ -12,8 +12,10 @@ import { readLasHeader, createLasDecoder, validateLasAllocation, LAS_FIELD_DEFAU
 import { LASZIP_VLR_USER_ID, LASZIP_VLR_RECORD_ID } from './laz.js'
 
 export const STREAM_ATTRIBUTES = [
-  { name: 'intensity', type: 'uint16' }, { name: 'classification', type: 'uint8' },
-  { name: 'returnNumber', type: 'uint8' }, { name: 'numberOfReturns', type: 'uint8' },
+  { name: 'intensity', type: 'uint16' },
+  { name: 'classification', type: 'uint8' },
+  { name: 'returnNumber', type: 'uint8' },
+  { name: 'numberOfReturns', type: 'uint8' },
 ]
 const RGB_FORMATS = new Set([2, 3, 5, 7, 8, 10])
 const SAMPLE_RUNS = 8 // runs read to decide the colour depth
@@ -24,8 +26,13 @@ const SAMPLE_RUNS = 8 // runs read to decide the colour depth
  * returns 1); a streamed cloud keeps all four.
  */
 export function streamAttributes(attributes, n) {
-  return Object.fromEntries(STREAM_ATTRIBUTES.map((a) => [a.name,
-    attributes[a.name] ?? new (a.type === 'uint16' ? Uint16Array : Uint8Array)(n).fill(LAS_FIELD_DEFAULTS[a.name] ?? 0)]))
+  return Object.fromEntries(
+    STREAM_ATTRIBUTES.map((a) => [
+      a.name,
+      attributes[a.name] ??
+        new (a.type === 'uint16' ? Uint16Array : Uint8Array)(n).fill(LAS_FIELD_DEFAULTS[a.name] ?? 0),
+    ]),
+  )
 }
 
 /**
@@ -36,7 +43,11 @@ export function streamAttributes(attributes, n) {
  */
 export function lasNeedsStreaming(head, fileSize) {
   let h
-  try { h = readLasHeader(head) } catch { return null }
+  try {
+    h = readLasHeader(head)
+  } catch {
+    return null
+  }
   try {
     validateLasAllocation(h.count, h.recordLength, h.isLaz ? fileSize + 2 * (fileSize - h.offsetToPoints) : 0)
     return false
@@ -51,7 +62,8 @@ export function lasNeedsStreaming(head, fileSize) {
  */
 export async function openLasStream(source, { createLazDecoder = null, batchPoints = 1 << 20, onLog } = {}) {
   const first = await source.read(0, Math.min(source.size, 375))
-  const offsetToPoints = first.length >= 100 ? new DataView(first.buffer, first.byteOffset, first.byteLength).getUint32(96, true) : 0
+  const offsetToPoints =
+    first.length >= 100 ? new DataView(first.buffer, first.byteOffset, first.byteLength).getUint32(96, true) : 0
   const h = readLasHeader(await source.read(0, Math.min(source.size, Math.max(offsetToPoints, 375))))
   const { recordLength: size } = h
   let count = h.count
@@ -65,19 +77,37 @@ export async function openLasStream(source, { createLazDecoder = null, batchPoin
     const pointer = (bytes) => Number(new DataView(bytes.buffer, bytes.byteOffset, 8).getBigInt64(0, true))
     let tableAt = pointer(await source.read(h.offsetToPoints, h.offsetToPoints + 8))
     if (tableAt <= h.offsetToPoints) tableAt = pointer(await source.read(source.size - 8, source.size))
-    if (!(tableAt > h.offsetToPoints && tableAt < source.size)) throw new Error('Invalid LAZ chunk-table offset (file may be truncated)')
-    const decoder = createLazDecoder(vlr.data, await source.read(tableAt, Math.min(source.size, tableAt + 64 * 1024 ** 2)))
-    if (decoder.pointSize?.() != null && decoder.pointSize() !== size) throw new Error('LAZ record size does not match its LASzip VLR')
+    if (!(tableAt > h.offsetToPoints && tableAt < source.size))
+      throw new Error('Invalid LAZ chunk-table offset (file may be truncated)')
+    const decoder = createLazDecoder(
+      vlr.data,
+      await source.read(tableAt, Math.min(source.size, tableAt + 64 * 1024 ** 2)),
+    )
+    if (decoder.pointSize?.() != null && decoder.pointSize() !== size)
+      throw new Error('LAZ record size does not match its LASzip VLR')
     // Runs of whole chunks, about batchPoints points each.
-    let at = h.offsetToPoints + 8, left = count, run = null
+    let at = h.offsetToPoints + 8,
+      left = count,
+      run = null
     for (let i = 0; i < decoder.chunkCount() && left > 0; i++) {
-      const n = Math.min(decoder.chunkPoints(i), left), bytes = decoder.chunkBytes(i)
-      if (!run || run.n + n > batchPoints) { run = { at, bytes: 0, first: i, chunks: 0, n: 0 }; runs.push(run) }
-      run.bytes += bytes; run.chunks++; run.n += n
-      at += bytes; left -= n
+      const n = Math.min(decoder.chunkPoints(i), left),
+        bytes = decoder.chunkBytes(i)
+      if (!run || run.n + n > batchPoints) {
+        run = { at, bytes: 0, first: i, chunks: 0, n: 0 }
+        runs.push(run)
+      }
+      run.bytes += bytes
+      run.chunks++
+      run.n += n
+      at += bytes
+      left -= n
     }
     if (left > 0) {
-      onLog?.(`LAZ: the chunk table covers ${(count - left).toLocaleString()} of ${count.toLocaleString()} points — reading those`, 'warn', 'Import')
+      onLog?.(
+        `LAZ: the chunk table covers ${(count - left).toLocaleString()} of ${count.toLocaleString()} points — reading those`,
+        'warn',
+        'Import',
+      )
       count -= left
     }
     decodeRun = async (r, chunks = r.chunks) => {
@@ -112,7 +142,8 @@ export async function openLasStream(source, { createLazDecoder = null, batchPoin
     for (let k = 0; k < runs.length && max <= 255; k += step) {
       const { n, records } = await decodeRun(runs[k], 1)
       const dv = new DataView(records.buffer, records.byteOffset, records.byteLength)
-      for (let i = 0, p = off; i < n; i++, p += size) max = Math.max(max, dv.getUint16(p, true), dv.getUint16(p + 2, true), dv.getUint16(p + 4, true))
+      for (let i = 0, p = off; i < n; i++, p += size)
+        max = Math.max(max, dv.getUint16(p, true), dv.getUint16(p + 2, true), dv.getUint16(p + 4, true))
     }
     rgbBits = max > 255 ? 16 : 8
     // A colour format whose colours are all zero (a writer that had none): no colour.
@@ -129,7 +160,10 @@ export async function openLasStream(source, { createLazDecoder = null, batchPoin
       dec.decode(records, 0, n)
       const c = dec.finish()
       yield {
-        count: n, pos: c.pos, col: colour ? c.col ?? null : null, attributes: streamAttributes(c.attributes, n),
+        count: n,
+        pos: c.pos,
+        col: colour ? (c.col ?? null) : null,
+        attributes: streamAttributes(c.attributes, n),
       }
     }
   }
@@ -137,26 +171,37 @@ export async function openLasStream(source, { createLazDecoder = null, batchPoin
   // The header's extent, unless it cannot be right; then one pass measures it.
   const b = h.bounds
   let bounds = { min: [...b.min], max: [...b.max] }
-  const plausible = [0, 1, 2].every((k) => Number.isFinite(b.min[k]) && Number.isFinite(b.max[k]) && b.min[k] <= b.max[k])
-    && (count < 2 || [0, 1, 2].some((k) => b.max[k] > b.min[k]))
+  const plausible =
+    [0, 1, 2].every((k) => Number.isFinite(b.min[k]) && Number.isFinite(b.max[k]) && b.min[k] <= b.max[k]) &&
+    (count < 2 || [0, 1, 2].some((k) => b.max[k] > b.min[k]))
   if (!plausible && count) {
     onLog?.('LAS: the header has no usable extent — measuring the points first', 'warn', 'Import')
-    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]
+    const min = [Infinity, Infinity, Infinity],
+      max = [-Infinity, -Infinity, -Infinity]
     for await (const batch of batches()) {
-      for (let i = 0; i < batch.count; i++) for (let k = 0; k < 3; k++) {
-        const v = batch.pos[3 * i + k]
-        if (v < min[k]) min[k] = v
-        if (v > max[k]) max[k] = v
-      }
+      for (let i = 0; i < batch.count; i++)
+        for (let k = 0; k < 3; k++) {
+          const v = batch.pos[3 * i + k]
+          if (v < min[k]) min[k] = v
+          if (v > max[k]) max[k] = v
+        }
     }
     bounds = { min, max }
   } else {
     // Widen by half a quantum: header extents are often rounded.
-    for (let k = 0; k < 3; k++) { bounds.min[k] -= h.scale[k]; bounds.max[k] += h.scale[k] }
+    for (let k = 0; k < 3; k++) {
+      bounds.min[k] -= h.scale[k]
+      bounds.max[k] += h.scale[k]
+    }
   }
 
   return {
-    header: h, count, bounds, layout: { offset: [...h.offset], scale: [...h.scale] },
-    colour, attributes: STREAM_ATTRIBUTES.map((a) => ({ ...a })), batches,
+    header: h,
+    count,
+    bounds,
+    layout: { offset: [...h.offset], scale: [...h.scale] },
+    colour,
+    attributes: STREAM_ATTRIBUTES.map((a) => ({ ...a })),
+    batches,
   }
 }

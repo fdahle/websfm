@@ -24,8 +24,10 @@ it('lets a newer refresh win when an older one finishes last', async () => {
 })
 
 it('keeps separate sequences independent', () => {
-  const a = createLatest(), b = createLatest()
+  const a = createLatest(),
+    b = createLatest()
   const ta = a.begin()
-  b.begin(); b.begin()
+  b.begin()
+  b.begin()
   expect(a.isCurrent(ta)).toBe(true)
 })

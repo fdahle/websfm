@@ -8,15 +8,40 @@ import { decimateMesh } from './meshDecimate.js'
 function icosphere(level, r = 1, center = [0, 0, 0]) {
   const t = (1 + Math.sqrt(5)) / 2
   const verts = [
-    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
-    [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
-    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+    [-1, t, 0],
+    [1, t, 0],
+    [-1, -t, 0],
+    [1, -t, 0],
+    [0, -1, t],
+    [0, 1, t],
+    [0, -1, -t],
+    [0, 1, -t],
+    [t, 0, -1],
+    [t, 0, 1],
+    [-t, 0, -1],
+    [-t, 0, 1],
   ].map(normalize)
   let faces = [
-    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
-    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
-    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
-    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+    [0, 11, 5],
+    [0, 5, 1],
+    [0, 1, 7],
+    [0, 7, 10],
+    [0, 10, 11],
+    [1, 5, 9],
+    [5, 11, 4],
+    [11, 10, 2],
+    [10, 7, 6],
+    [7, 1, 8],
+    [3, 9, 4],
+    [3, 4, 2],
+    [3, 2, 6],
+    [3, 6, 8],
+    [3, 8, 9],
+    [4, 9, 5],
+    [2, 4, 11],
+    [6, 2, 10],
+    [8, 6, 7],
+    [9, 8, 1],
   ]
   for (let l = 0; l < level; l++) {
     const cache = new Map()
@@ -24,7 +49,8 @@ function icosphere(level, r = 1, center = [0, 0, 0]) {
       const key = a < b ? `${a},${b}` : `${b},${a}`
       let m = cache.get(key)
       if (m === undefined) {
-        const va = verts[a], vb = verts[b]
+        const va = verts[a],
+          vb = verts[b]
         m = verts.length
         verts.push(normalize([(va[0] + vb[0]) / 2, (va[1] + vb[1]) / 2, (va[2] + vb[2]) / 2]))
         cache.set(key, m)
@@ -33,15 +59,23 @@ function icosphere(level, r = 1, center = [0, 0, 0]) {
     }
     const nf = []
     for (const [a, b, c] of faces) {
-      const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a)
+      const ab = mid(a, b),
+        bc = mid(b, c),
+        ca = mid(c, a)
       nf.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca])
     }
     faces = nf
   }
   const pos = new Float64Array(verts.length * 3)
-  verts.forEach((v, i) => { for (let k = 0; k < 3; k++) pos[i * 3 + k] = v[k] * r + center[k] })
+  verts.forEach((v, i) => {
+    for (let k = 0; k < 3; k++) pos[i * 3 + k] = v[k] * r + center[k]
+  })
   const idx = new Uint32Array(faces.length * 3)
-  faces.forEach((f, i) => { idx[i * 3] = f[0]; idx[i * 3 + 1] = f[1]; idx[i * 3 + 2] = f[2] })
+  faces.forEach((f, i) => {
+    idx[i * 3] = f[0]
+    idx[i * 3 + 1] = f[1]
+    idx[i * 3 + 2] = f[2]
+  })
   const col = new Uint8Array(verts.length * 3)
   for (let i = 0; i < verts.length; i++) {
     col[i * 3] = Math.round((verts[i][0] + 1) * 127.5)
@@ -63,30 +97,47 @@ function uvSphere(nLat, nLon, r = 1) {
   const nV = ring + 2
   const pos = new Float64Array(nV * 3)
   for (let i = 1; i < nLat; i++) {
-    const th = Math.PI * i / nLat
+    const th = (Math.PI * i) / nLat
     for (let j = 0; j < nLon; j++) {
-      const ph = 2 * Math.PI * j / nLon
+      const ph = (2 * Math.PI * j) / nLon
       const v = (i - 1) * nLon + j
       pos[v * 3] = r * Math.sin(th) * Math.cos(ph)
       pos[v * 3 + 1] = r * Math.sin(th) * Math.sin(ph)
       pos[v * 3 + 2] = r * Math.cos(th)
     }
   }
-  const N = ring, S = ring + 1
-  pos[N * 3 + 2] = r; pos[S * 3 + 2] = -r
+  const N = ring,
+    S = ring + 1
+  pos[N * 3 + 2] = r
+  pos[S * 3 + 2] = -r
   const nT = 2 * nLon * (nLat - 1)
   const idx = new Uint32Array(nT * 3)
   let o = 0
   const at = (i, j) => (i - 1) * nLon + (j % nLon)
-  for (let j = 0; j < nLon; j++) { idx[o++] = N; idx[o++] = at(1, j); idx[o++] = at(1, j + 1) }
+  for (let j = 0; j < nLon; j++) {
+    idx[o++] = N
+    idx[o++] = at(1, j)
+    idx[o++] = at(1, j + 1)
+  }
   for (let i = 1; i < nLat - 1; i++) {
     for (let j = 0; j < nLon; j++) {
-      const a = at(i, j), b = at(i, j + 1), c = at(i + 1, j), d = at(i + 1, j + 1)
-      idx[o++] = a; idx[o++] = c; idx[o++] = b
-      idx[o++] = b; idx[o++] = c; idx[o++] = d
+      const a = at(i, j),
+        b = at(i, j + 1),
+        c = at(i + 1, j),
+        d = at(i + 1, j + 1)
+      idx[o++] = a
+      idx[o++] = c
+      idx[o++] = b
+      idx[o++] = b
+      idx[o++] = c
+      idx[o++] = d
     }
   }
-  for (let j = 0; j < nLon; j++) { idx[o++] = S; idx[o++] = at(nLat - 1, j + 1); idx[o++] = at(nLat - 1, j) }
+  for (let j = 0; j < nLon; j++) {
+    idx[o++] = S
+    idx[o++] = at(nLat - 1, j + 1)
+    idx[o++] = at(nLat - 1, j)
+  }
   return { nVerts: nV, count: nT, pos, idx, col: null }
 }
 
@@ -99,17 +150,28 @@ function grid(n, offset = 0) {
   for (let y = 0; y <= n; y++) {
     for (let x = 0; x <= n; x++) {
       const v = y * (n + 1) + x
-      pos[v * 3] = x + offset; pos[v * 3 + 1] = y + offset; pos[v * 3 + 2] = offset
-      col[v * 3] = (x * 7) & 255; col[v * 3 + 1] = (y * 5) & 255; col[v * 3 + 2] = 128
+      pos[v * 3] = x + offset
+      pos[v * 3 + 1] = y + offset
+      pos[v * 3 + 2] = offset
+      col[v * 3] = (x * 7) & 255
+      col[v * 3 + 1] = (y * 5) & 255
+      col[v * 3 + 2] = 128
     }
   }
   const idx = new Uint32Array(n * n * 6)
   let o = 0
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
-      const a = y * (n + 1) + x, b = a + 1, c = a + n + 1, d = c + 1
-      idx[o++] = a; idx[o++] = b; idx[o++] = d
-      idx[o++] = a; idx[o++] = d; idx[o++] = c
+      const a = y * (n + 1) + x,
+        b = a + 1,
+        c = a + n + 1,
+        d = c + 1
+      idx[o++] = a
+      idx[o++] = b
+      idx[o++] = d
+      idx[o++] = a
+      idx[o++] = d
+      idx[o++] = c
     }
   }
   return { nVerts: nV, count: n * n * 2, pos, idx, col }
@@ -122,7 +184,8 @@ function edgeUse(mesh) {
   const { idx, count, nVerts } = mesh
   for (let t = 0; t < count; t++) {
     for (let k = 0; k < 3; k++) {
-      const a = idx[t * 3 + k], b = idx[t * 3 + ((k + 1) % 3)]
+      const a = idx[t * 3 + k],
+        b = idx[t * 3 + ((k + 1) % 3)]
       const key = a < b ? a * nVerts + b : b * nVerts + a
       m.set(key, (m.get(key) || 0) + 1)
     }
@@ -132,9 +195,15 @@ function edgeUse(mesh) {
 
 function triNormal(mesh, t) {
   const { pos, idx } = mesh
-  const a = idx[t * 3] * 3, b = idx[t * 3 + 1] * 3, c = idx[t * 3 + 2] * 3
-  const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2]
-  const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2]
+  const a = idx[t * 3] * 3,
+    b = idx[t * 3 + 1] * 3,
+    c = idx[t * 3 + 2] * 3
+  const ux = pos[b] - pos[a],
+    uy = pos[b + 1] - pos[a + 1],
+    uz = pos[b + 2] - pos[a + 2]
+  const vx = pos[c] - pos[a],
+    vy = pos[c + 1] - pos[a + 1],
+    vz = pos[c + 2] - pos[a + 2]
   return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx]
 }
 
@@ -148,7 +217,9 @@ function checkShape(mesh) {
   const used = new Uint8Array(mesh.nVerts)
   let degenerate = 0
   for (let t = 0; t < mesh.count; t++) {
-    const a = mesh.idx[t * 3], b = mesh.idx[t * 3 + 1], c = mesh.idx[t * 3 + 2]
+    const a = mesh.idx[t * 3],
+      b = mesh.idx[t * 3 + 1],
+      c = mesh.idx[t * 3 + 2]
     expect(Math.max(a, b, c)).toBeLessThan(mesh.nVerts)
     used[a] = used[b] = used[c] = 1
     const n = triNormal(mesh, t)
@@ -267,7 +338,8 @@ describe('decimateMesh — planar grid', () => {
     const set = new Set()
     for (const [key, n] of use) {
       if (n !== 1) continue
-      set.add(Math.floor(key / mesh.nVerts)); set.add(key % mesh.nVerts)
+      set.add(Math.floor(key / mesh.nVerts))
+      set.add(key % mesh.nVerts)
     }
     return set
   }
@@ -285,10 +357,15 @@ describe('decimateMesh — planar grid', () => {
   })
 
   it('keeps the outer outline', () => {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity
     for (let v = 0; v < out.nVerts; v++) {
-      minX = Math.min(minX, out.pos[v * 3]); maxX = Math.max(maxX, out.pos[v * 3])
-      minY = Math.min(minY, out.pos[v * 3 + 1]); maxY = Math.max(maxY, out.pos[v * 3 + 1])
+      minX = Math.min(minX, out.pos[v * 3])
+      maxX = Math.max(maxX, out.pos[v * 3])
+      minY = Math.min(minY, out.pos[v * 3 + 1])
+      maxY = Math.max(maxY, out.pos[v * 3 + 1])
     }
     expect([minX, minY, maxX, maxY]).toEqual([0, 0, L, L])
     const onLine = (x, y) => Math.min(Math.abs(x), Math.abs(x - L), Math.abs(y), Math.abs(y - L)) < 1e-9
@@ -296,7 +373,12 @@ describe('decimateMesh — planar grid', () => {
     expect(bv.size).toBeGreaterThanOrEqual(4)
     for (const v of bv) expect(onLine(out.pos[v * 3], out.pos[v * 3 + 1])).toBe(true)
     // All four corners survive.
-    for (const [cx, cy] of [[0, 0], [L, 0], [0, L], [L, L]]) {
+    for (const [cx, cy] of [
+      [0, 0],
+      [L, 0],
+      [0, L],
+      [L, L],
+    ]) {
       let found = false
       for (let v = 0; v < out.nVerts; v++) if (out.pos[v * 3] === cx && out.pos[v * 3 + 1] === cy) found = true
       expect(found).toBe(true)
@@ -340,15 +422,25 @@ describe('decimateMesh — performance', () => {
     expect(ms).toBeLessThan(30000)
   }, 60000)
 
-  it.skipIf(!process.env.BENCH)('bench: ~2M-triangle sphere → 10%', () => {
-    for (const [label, m] of [['grid 200k', grid(316)], ['icosphere 327k', icosphere(7)], ['uv sphere 2M', uvSphere(708, 1414)]]) {
-      const t0 = performance.now()
-      const { stats } = decimateMesh(m, { targetRatio: 0.1 })
-      const ms = performance.now() - t0
-      console.log(`[bench] ${label}: ${stats.before} → ${stats.after} tris, ${stats.collapses} collapses, `
-        + `max error ${stats.maxError.toExponential(2)}, ${Math.round(ms)} ms`)
-    }
-  }, 600000)
+  it.skipIf(!process.env.BENCH)(
+    'bench: ~2M-triangle sphere → 10%',
+    () => {
+      for (const [label, m] of [
+        ['grid 200k', grid(316)],
+        ['icosphere 327k', icosphere(7)],
+        ['uv sphere 2M', uvSphere(708, 1414)],
+      ]) {
+        const t0 = performance.now()
+        const { stats } = decimateMesh(m, { targetRatio: 0.1 })
+        const ms = performance.now() - t0
+        console.log(
+          `[bench] ${label}: ${stats.before} → ${stats.after} tris, ${stats.collapses} collapses, ` +
+            `max error ${stats.maxError.toExponential(2)}, ${Math.round(ms)} ms`,
+        )
+      }
+    },
+    600000,
+  )
 })
 
 describe('decimateMesh on a textured mesh', () => {
@@ -356,8 +448,11 @@ describe('decimateMesh on a textured mesh', () => {
   // its vertices (as a texture atlas splits a vertex per piece), with their own UVs.
   function twoPieces(n) {
     const g = grid(n)
-    const nV = g.nVerts, copyOf = new Int32Array(nV).fill(-1)
-    const pos = Array.from(g.pos), col = Array.from(g.col), uv = Array.from({ length: 2 * nV }, () => 0)
+    const nV = g.nVerts,
+      copyOf = new Int32Array(nV).fill(-1)
+    const pos = Array.from(g.pos),
+      col = Array.from(g.col),
+      uv = Array.from({ length: 2 * nV }, () => 0)
     const idx = Uint32Array.from(g.idx)
     for (let t = 0; t < g.count; t++) {
       const right = [0, 1, 2].every((k) => g.pos[3 * g.idx[3 * t + k]] >= n / 2)
@@ -366,14 +461,25 @@ describe('decimateMesh on a textured mesh', () => {
         const v = g.idx[3 * t + k]
         if (copyOf[v] < 0) {
           copyOf[v] = pos.length / 3
-          pos.push(g.pos[3 * v], g.pos[3 * v + 1], g.pos[3 * v + 2]); col.push(g.col[3 * v], g.col[3 * v + 1], g.col[3 * v + 2])
+          pos.push(g.pos[3 * v], g.pos[3 * v + 1], g.pos[3 * v + 2])
+          col.push(g.col[3 * v], g.col[3 * v + 1], g.col[3 * v + 2])
           uv.push(0.5, 0.5)
         }
         idx[3 * t + k] = copyOf[v]
       }
     }
-    return { plain: g, textured: { nVerts: pos.length / 3, count: g.count, pos: Float64Array.from(pos), idx,
-      col: Uint8Array.from(col), uv: Float32Array.from(uv), page: new Uint16Array(g.count) } }
+    return {
+      plain: g,
+      textured: {
+        nVerts: pos.length / 3,
+        count: g.count,
+        pos: Float64Array.from(pos),
+        idx,
+        col: Uint8Array.from(col),
+        uv: Float32Array.from(uv),
+        page: new Uint16Array(g.count),
+      },
+    }
   }
   const boundary = (mesh) => [...edgeUse(mesh).values()].filter((n) => n === 1).length
 
@@ -381,7 +487,8 @@ describe('decimateMesh on a textured mesh', () => {
     const { plain, textured } = twoPieces(16)
     for (const preserveBoundary of [true, false]) {
       const opts = { targetRatio: 0.25, preserveBoundary }
-      const a = decimateMesh(plain, opts).mesh, b = decimateMesh(textured, opts).mesh
+      const a = decimateMesh(plain, opts).mesh,
+        b = decimateMesh(textured, opts).mesh
       checkShape(b)
       expect(b.uv).toBeUndefined()
       expect(b.page).toBeUndefined()
@@ -396,12 +503,14 @@ describe('decimateMesh with locked vertices', () => {
   // A wavy grid: collapses there move vertices, so a lock has something to stop.
   function wavy(n) {
     const g = grid(n)
-    for (let v = 0; v < g.nVerts; v++) g.pos[v * 3 + 2] = Math.sin(g.pos[v * 3] * 0.7) * Math.cos(g.pos[v * 3 + 1] * 0.5)
+    for (let v = 0; v < g.nVerts; v++)
+      g.pos[v * 3 + 2] = Math.sin(g.pos[v * 3] * 0.7) * Math.cos(g.pos[v * 3 + 1] * 0.5)
     return g
   }
 
-  it('keeps every locked vertex where it is and names each output vertex\'s source', () => {
-    const n = 24, g = wavy(n)
+  it("keeps every locked vertex where it is and names each output vertex's source", () => {
+    const n = 24,
+      g = wavy(n)
     const locked = new Uint8Array(g.nVerts)
     for (let v = 0; v < g.nVerts; v++) if (g.pos[v * 3] === n / 2 || g.pos[v * 3 + 1] === 0) locked[v] = 1
     const { mesh, sourceVertex } = decimateMesh(g, { targetRatio: 0.2, locked })
@@ -420,7 +529,11 @@ describe('decimateMesh with locked vertices', () => {
 
   it('refuses a textured mesh with locks', () => {
     const g = grid(4)
-    expect(() => decimateMesh({ ...g, uv: new Float32Array(g.nVerts * 2) }, { targetRatio: 0.5, locked: new Uint8Array(g.nVerts) }))
-      .toThrow(/locked/)
+    expect(() =>
+      decimateMesh(
+        { ...g, uv: new Float32Array(g.nVerts * 2) },
+        { targetRatio: 0.5, locked: new Uint8Array(g.nVerts) },
+      ),
+    ).toThrow(/locked/)
   })
 })

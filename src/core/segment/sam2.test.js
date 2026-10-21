@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
-  imageToInputTensor, pointsToModelSpace, bestMaskIndex, logitsToBinaryMask,
-  findInput, SAM2_INPUT_SIZE,
+  imageToInputTensor,
+  pointsToModelSpace,
+  bestMaskIndex,
+  logitsToBinaryMask,
+  findInput,
+  SAM2_INPUT_SIZE,
 } from './sam2.js'
 
 // Build a w×h RGBA buffer from a per-pixel (x,y)→[r,g,b] fn (alpha=255).
@@ -11,7 +15,10 @@ function rgba(w, h, fn) {
     for (let x = 0; x < w; x++) {
       const [r, g, b] = fn(x, y)
       const o = (y * w + x) * 4
-      out[o] = r; out[o + 1] = g; out[o + 2] = b; out[o + 3] = 255
+      out[o] = r
+      out[o + 1] = g
+      out[o + 2] = b
+      out[o + 3] = 255
     }
   return out
 }
@@ -21,7 +28,12 @@ const IMAGENET_STD = [0.229, 0.224, 0.225]
 
 describe('imageToInputTensor', () => {
   it('produces a CHW Float32Array of length 3·S·S', () => {
-    const t = imageToInputTensor(rgba(4, 4, () => [0, 0, 0]), 4, 4, 8)
+    const t = imageToInputTensor(
+      rgba(4, 4, () => [0, 0, 0]),
+      4,
+      4,
+      8,
+    )
     expect(t).toBeInstanceOf(Float32Array)
     expect(t.length).toBe(3 * 8 * 8)
   })
@@ -29,7 +41,12 @@ describe('imageToInputTensor', () => {
   it('ImageNet-normalizes a constant image to a constant per-channel value', () => {
     // Solid mid-grey 128 → normalized (128/255 − mean)/std, same for every pixel.
     const size = 8
-    const t = imageToInputTensor(rgba(4, 4, () => [128, 128, 128]), 4, 4, size)
+    const t = imageToInputTensor(
+      rgba(4, 4, () => [128, 128, 128]),
+      4,
+      4,
+      size,
+    )
     const plane = size * size
     for (let c = 0; c < 3; c++) {
       const expected = (128 / 255 - IMAGENET_MEAN[c]) / IMAGENET_STD[c]
@@ -42,23 +59,31 @@ describe('imageToInputTensor', () => {
   it('lays out channels contiguously (R plane, then G, then B)', () => {
     const size = 4
     // Pure red image: R=255, G=B=0.
-    const t = imageToInputTensor(rgba(2, 2, () => [255, 0, 0]), 2, 2, size)
+    const t = imageToInputTensor(
+      rgba(2, 2, () => [255, 0, 0]),
+      2,
+      2,
+      size,
+    )
     const plane = size * size
     const rVal = (255 / 255 - IMAGENET_MEAN[0]) / IMAGENET_STD[0]
     const gVal = (0 - IMAGENET_MEAN[1]) / IMAGENET_STD[1]
     const bVal = (0 - IMAGENET_MEAN[2]) / IMAGENET_STD[2]
-    expect(t[0]).toBeCloseTo(rVal, 5)          // first R
-    expect(t[plane]).toBeCloseTo(gVal, 5)      // first G
-    expect(t[2 * plane]).toBeCloseTo(bVal, 5)  // first B (also 0, but its own std)
+    expect(t[0]).toBeCloseTo(rVal, 5) // first R
+    expect(t[plane]).toBeCloseTo(gVal, 5) // first G
+    expect(t[2 * plane]).toBeCloseTo(bVal, 5) // first B (also 0, but its own std)
   })
 })
 
 describe('pointsToModelSpace', () => {
   it('scales pixel coords per-axis into S-space and maps labels', () => {
-    const pts = [{ x: 100, y: 50, positive: true }, { x: 0, y: 0, positive: false }]
+    const pts = [
+      { x: 100, y: 50, positive: true },
+      { x: 0, y: 0, positive: false },
+    ]
     const { coords, labels } = pointsToModelSpace(pts, 200, 100, 1024)
-    expect(coords[0]).toBeCloseTo(100 * 1024 / 200, 4) // 512
-    expect(coords[1]).toBeCloseTo(50 * 1024 / 100, 4)  // 512
+    expect(coords[0]).toBeCloseTo((100 * 1024) / 200, 4) // 512
+    expect(coords[1]).toBeCloseTo((50 * 1024) / 100, 4) // 512
     expect(coords[2]).toBe(0)
     expect(coords[3]).toBe(0)
     expect(Array.from(labels)).toEqual([1, 0])
@@ -71,7 +96,7 @@ describe('pointsToModelSpace', () => {
 
   it('uses SAM2_INPUT_SIZE by default', () => {
     const { coords } = pointsToModelSpace([{ x: 5, y: 5 }], 10, 10)
-    expect(coords[0]).toBeCloseTo(5 * SAM2_INPUT_SIZE / 10, 4)
+    expect(coords[0]).toBeCloseTo((5 * SAM2_INPUT_SIZE) / 10, 4)
   })
 })
 
@@ -92,13 +117,24 @@ describe('findInput — decoder input-name resolution', () => {
   // Real input names from onnx-community/sam2-hiera-tiny's
   // prompt_encoder_mask_decoder.onnx (transformers.js export).
   const onnxCommunity = [
-    'image_embeddings', 'high_res_feats_0', 'high_res_feats_1',
-    'input_points', 'input_labels', 'input_masks', 'has_input_masks',
+    'image_embeddings',
+    'high_res_feats_0',
+    'high_res_feats_1',
+    'input_points',
+    'input_labels',
+    'input_masks',
+    'has_input_masks',
   ]
   // Meta's own export uses these names — must resolve too.
   const meta = [
-    'image_embeddings', 'high_res_feats_0', 'high_res_feats_1',
-    'point_coords', 'point_labels', 'mask_input', 'has_mask_input', 'orig_im_size',
+    'image_embeddings',
+    'high_res_feats_0',
+    'high_res_feats_1',
+    'point_coords',
+    'point_labels',
+    'mask_input',
+    'has_mask_input',
+    'orig_im_size',
   ]
 
   it('resolves the onnx-community names to the right inputs', () => {

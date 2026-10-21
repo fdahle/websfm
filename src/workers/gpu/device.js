@@ -45,7 +45,14 @@ async function initDevice() {
 
     // Drop the cached promise if this device is lost, so ensureDevice() re-inits.
     // (Ignore the 'destroyed' reason — that's our own teardown, not a failure.)
-    const state = { device, adapter, info: {}, limits: device.limits, isFallback: !!adapter.isFallbackAdapter, lossInfo: null }
+    const state = {
+      device,
+      adapter,
+      info: {},
+      limits: device.limits,
+      isFallback: !!adapter.isFallbackAdapter,
+      lossInfo: null,
+    }
     device.lost.then((info) => {
       state.lossInfo = info ?? { reason: 'unknown', message: 'WebGPU device lost without details' }
       if (info?.reason !== 'destroyed') devicePromise = null
@@ -56,7 +63,9 @@ async function initDevice() {
     let info = {}
     try {
       info = adapter.info ?? (adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : {})
-    } catch { /* info is best-effort */ }
+    } catch {
+      /* info is best-effort */
+    }
 
     state.info = info
     return state

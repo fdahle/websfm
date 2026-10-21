@@ -15,7 +15,8 @@ export const COLLECTION_LIMIT = 2 ** 24
 // 32-bit mix of a number (an integer up to 2⁵³, or any finite number: it only has to
 // be deterministic). Its top bits pick the shard.
 function hashNumber(k) {
-  const lo = k | 0, hi = (k / 4294967296) | 0
+  const lo = k | 0,
+    hi = (k / 4294967296) | 0
   let h = Math.imul(lo ^ Math.imul(hi, 0x85ebca6b), 0x9e3779b1)
   h ^= h >>> 16
   return Math.imul(h, 0x2c1b3c6d)
@@ -31,7 +32,7 @@ function hashString(s) {
 // Shards so that `expected` keys fill each to about half of `capacity`: a power of two.
 function shardBits(expected, capacity) {
   let bits = 1
-  while ((expected / 2 ** bits) > capacity / 2 && bits < 16) bits++
+  while (expected / 2 ** bits > capacity / 2 && bits < 16) bits++
   return bits
 }
 
@@ -43,31 +44,61 @@ class Sharded {
   shardOf(k) {
     return this.shards[(typeof k === 'number' ? hashNumber(k) : hashString(String(k))) >>> this.shift]
   }
-  has(k) { return this.shardOf(k).has(k) }
-  delete(k) { return this.shardOf(k).delete(k) }
-  clear() { for (const s of this.shards) s.clear() }
+  has(k) {
+    return this.shardOf(k).has(k)
+  }
+  delete(k) {
+    return this.shardOf(k).delete(k)
+  }
+  clear() {
+    for (const s of this.shards) s.clear()
+  }
   get size() {
     let n = 0
     for (const s of this.shards) n += s.size
     return n
   }
-  * keys() { for (const s of this.shards) yield* s.keys() }
-  * values() { for (const s of this.shards) yield* s.values() }
-  * entries() { for (const s of this.shards) yield* s.entries() }
-  forEach(fn, thisArg) { for (const s of this.shards) s.forEach((v, k) => fn.call(thisArg, v, k, this)) }
+  *keys() {
+    for (const s of this.shards) yield* s.keys()
+  }
+  *values() {
+    for (const s of this.shards) yield* s.values()
+  }
+  *entries() {
+    for (const s of this.shards) yield* s.entries()
+  }
+  forEach(fn, thisArg) {
+    for (const s of this.shards) s.forEach((v, k) => fn.call(thisArg, v, k, this))
+  }
 }
 
 class ShardedSet extends Sharded {
-  constructor(bits) { super(Set, bits) }
-  add(k) { this.shardOf(k).add(k); return this }
-  [Symbol.iterator]() { return this.keys() }
+  constructor(bits) {
+    super(Set, bits)
+  }
+  add(k) {
+    this.shardOf(k).add(k)
+    return this
+  }
+  [Symbol.iterator]() {
+    return this.keys()
+  }
 }
 
 class ShardedMap extends Sharded {
-  constructor(bits) { super(Map, bits) }
-  get(k) { return this.shardOf(k).get(k) }
-  set(k, v) { this.shardOf(k).set(k, v); return this }
-  [Symbol.iterator]() { return this.entries() }
+  constructor(bits) {
+    super(Map, bits)
+  }
+  get(k) {
+    return this.shardOf(k).get(k)
+  }
+  set(k, v) {
+    this.shardOf(k).set(k, v)
+    return this
+  }
+  [Symbol.iterator]() {
+    return this.entries()
+  }
 }
 
 /** A Set for at most `expected` keys: a plain Set up to the cap, sharded past it.

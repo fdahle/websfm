@@ -35,11 +35,37 @@ describe('dxfLayerName', () => {
 
 describe('writeDxf', () => {
   const doc = {
-    layers: [{ name: 'CONTOUR', color: 8 }, { name: 'CONTOUR_INDEX', color: 7 }],
+    layers: [
+      { name: 'CONTOUR', color: 8 },
+      { name: 'CONTOUR_INDEX', color: 7 },
+    ],
     polylines: [
-      { layer: 'CONTOUR', points: [[500000.123456, 4200000.5], [500010, 4200010]], elevation: 120 },
-      { layer: 'CONTOUR_INDEX', points: [[0, 0], [1, 0], [1, 1]], closed: true, elevation: 125 },
-      { layer: 'BREAK', points: [[0, 0, 1], [1, 0, 2], [2, 0, 3]] },
+      {
+        layer: 'CONTOUR',
+        points: [
+          [500000.123456, 4200000.5],
+          [500010, 4200010],
+        ],
+        elevation: 120,
+      },
+      {
+        layer: 'CONTOUR_INDEX',
+        points: [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+        ],
+        closed: true,
+        elevation: 125,
+      },
+      {
+        layer: 'BREAK',
+        points: [
+          [0, 0, 1],
+          [1, 0, 2],
+          [2, 0, 3],
+        ],
+      },
     ],
     points: [{ layer: 'CONTOUR', x: 1, y: 2, z: 3 }],
   }
@@ -56,7 +82,9 @@ describe('writeDxf', () => {
   })
 
   it('declares every layer, including undeclared referenced ones', () => {
-    const names = pairs.filter(([c], i) => c === 2 && pairs[i - 1]?.[1] === 'LAYER' && pairs[i - 1][0] === 0).map(([, v]) => v)
+    const names = pairs
+      .filter(([c], i) => c === 2 && pairs[i - 1]?.[1] === 'LAYER' && pairs[i - 1][0] === 0)
+      .map(([, v]) => v)
     expect(names).toEqual(['0', 'CONTOUR', 'CONTOUR_INDEX', 'BREAK'])
     const tbl = pairs.findIndex(([c, v], i) => c === 2 && v === 'LAYER' && pairs[i - 1][1] === 'TABLE')
     expect(pairs[tbl + 1]).toEqual([70, '4'])
@@ -78,7 +106,11 @@ describe('writeDxf', () => {
         flags.push([Number(f[1]), z[1]])
       }
     })
-    expect(flags).toEqual([[0, '120.0'], [1, '125.0'], [8, '0.0']])
+    expect(flags).toEqual([
+      [0, '120.0'],
+      [1, '125.0'],
+      [8, '0.0'],
+    ])
   })
 
   it('keeps large coordinates exact and extents correct', () => {
@@ -97,7 +129,17 @@ describe('writeDxf', () => {
   })
 
   it('does not mutate its input', () => {
-    const d = { polylines: [{ layer: 'a b', points: [[1, 2], [3, 4]] }] }
+    const d = {
+      polylines: [
+        {
+          layer: 'a b',
+          points: [
+            [1, 2],
+            [3, 4],
+          ],
+        },
+      ],
+    }
     const snap = JSON.stringify(d)
     writeDxf(d)
     expect(JSON.stringify(d)).toBe(snap)

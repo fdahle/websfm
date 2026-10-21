@@ -10,11 +10,11 @@ defineProps({
   columnCount: { type: Number, required: true },
   columnRoles: { type: Array, required: true },
   roleOptions: { type: Array, required: true },
-  hasHeader:   { type: Boolean, default: true },
+  hasHeader: { type: Boolean, default: true },
   headerCells: { type: Array, default: () => [] },
   previewRows: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['set-role'])   // (columnIndex, roleId)
+const emit = defineEmits(['set-role']) // (columnIndex, roleId)
 </script>
 
 <template>
@@ -48,18 +48,40 @@ const emit = defineEmits(['set-role'])   // (columnIndex, roleId)
 
 <style scoped src="./import-modal.css"></style>
 <style scoped>
-.preview td { color: var(--text); font-family: monospace; }
+.preview td {
+  color: var(--text);
+  font-family: monospace;
+}
 
-.role-cell { padding: 4px; background: var(--bg); position: sticky; top: 0; z-index: 1; }
+.role-cell {
+  padding: 4px;
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
 
 /* The per-column floor that keeps the selected role label readable lives in
    ./importRoles.js `roleSelectStyle` — the data cells are too narrow to size
    this column, and it depends on the chosen label. */
 .role-select {
-  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 4px;
-  color: var(--text); font: inherit; font-size: 11px; padding: 3px 6px; outline: none; width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 6px;
+  outline: none;
+  width: 100%;
 }
-.role-select:focus { border-color: var(--accent); }
+.role-select:focus {
+  border-color: var(--accent);
+}
 
-.header-cell { background: var(--bg); color: var(--text-dim); font-weight: 600; }
+.header-cell {
+  background: var(--bg);
+  color: var(--text-dim);
+  font-weight: 600;
+}
 </style>

@@ -10,9 +10,15 @@ import { cameraCenter } from './geometry.js'
 import { fitSimilarity, applySimilarity } from '../products/georef.js'
 import { SparsePoints } from './sparsePoints.js'
 
-const transpose = (R) => [[R[0][0], R[1][0], R[2][0]], [R[0][1], R[1][1], R[2][1]], [R[0][2], R[1][2], R[2][2]]]
-const mul = (A, B) => Array.from({ length: 3 }, (_, i) => Array.from({ length: 3 }, (_, j) =>
-  A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]))
+const transpose = (R) => [
+  [R[0][0], R[1][0], R[2][0]],
+  [R[0][1], R[1][1], R[2][1]],
+  [R[0][2], R[1][2], R[2][2]],
+]
+const mul = (A, B) =>
+  Array.from({ length: 3 }, (_, i) =>
+    Array.from({ length: 3 }, (_, j) => A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]),
+  )
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x))
 
 export function secondaryJobs(input, primary, opts = {}) {
@@ -29,12 +35,16 @@ export function secondaryJobs(input, primary, opts = {}) {
     const set = new Set(ids)
     const score = new Map()
     for (const p of accepted) {
-      const aInside = set.has(p.idA), bInside = set.has(p.idB)
+      const aInside = set.has(p.idA),
+        bInside = set.has(p.idB)
       if (aInside === bInside) continue
       const boundary = aInside ? p.idB : p.idA
       if (registered.has(boundary)) score.set(boundary, (score.get(boundary) || 0) + p.inlierCount)
     }
-    const boundaryIds = [...score].sort((a, b) => b[1] - a[1]).slice(0, maxBoundary).map(([id]) => id)
+    const boundaryIds = [...score]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, maxBoundary)
+      .map(([id]) => id)
     // A component may touch the primary through only one or two immediate bridge
     // cameras (South Building's signature). Two centres cannot determine a stable
     // similarity, so grow the halo through strong primary-primary edges until it has
@@ -45,14 +55,16 @@ export function secondaryJobs(input, primary, opts = {}) {
       const candidates = new Map()
       for (const p of accepted) {
         if (!registered.has(p.idA) || !registered.has(p.idB)) continue
-        const a = halo.has(p.idA), b = halo.has(p.idB)
+        const a = halo.has(p.idA),
+          b = halo.has(p.idB)
         if (a === b) continue
         const id = a ? p.idB : p.idA
         candidates.set(id, Math.max(candidates.get(id) || 0, p.inlierCount))
       }
       if (!candidates.size) break
       const next = [...candidates].sort((a, b) => b[1] - a[1])[0][0]
-      halo.add(next); boundaryIds.push(next)
+      halo.add(next)
+      boundaryIds.push(next)
     }
     const all = new Set([...ids, ...boundaryIds])
     const images = [...all].map((id) => byId.get(id)).filter(Boolean)
@@ -64,13 +76,14 @@ export function secondaryJobs(input, primary, opts = {}) {
 
 function rotationErrorDeg(A, B) {
   const D = mul(A, transpose(B))
-  return Math.acos(clamp((D[0][0] + D[1][1] + D[2][2] - 1) / 2, -1, 1)) * 180 / Math.PI
+  return (Math.acos(clamp((D[0][0] + D[1][1] + D[2][2] - 1) / 2, -1, 1)) * 180) / Math.PI
 }
 
 function diameter(points) {
   let d = 0
-  for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++)
-    d = Math.max(d, Math.hypot(points[i][0] - points[j][0], points[i][1] - points[j][1], points[i][2] - points[j][2]))
+  for (let i = 0; i < points.length; i++)
+    for (let j = i + 1; j < points.length; j++)
+      d = Math.max(d, Math.hypot(points[i][0] - points[j][0], points[i][1] - points[j][1], points[i][2] - points[j][2]))
   return d
 }
 
@@ -94,10 +107,13 @@ export function alignSecondary(primary, secondary, componentIds, opts = {}) {
   const rotErrors = common.map((id) => rotationErrorDeg(mul(scam.get(id).R, Qt), pcam.get(id).R)).sort((a, b) => a - b)
   const medianRotationDeg = rotErrors[rotErrors.length >> 1]
   const worstRotationDeg = rotErrors[rotErrors.length - 1]
-  const focalDiff = Math.max(...common.map((id) => {
-    const a = scam.get(id).K?.fx, b = pcam.get(id).K?.fx
-    return a > 0 && b > 0 ? Math.abs(a - b) / b : 0
-  }))
+  const focalDiff = Math.max(
+    ...common.map((id) => {
+      const a = scam.get(id).K?.fx,
+        b = pcam.get(id).K?.fx
+      return a > 0 && b > 0 ? Math.abs(a - b) / b : 0
+    }),
+  )
   const pDist = new Map((primary.summary?.selfCalDistortion || []).map((d) => [d.sensorId, d]))
   const sDist = new Map((secondary.summary?.selfCalDistortion || []).map((d) => [d.sensorId, d]))
   let radialCoeffDiff = 0
@@ -108,16 +124,47 @@ export function alignSecondary(primary, secondary, componentIds, opts = {}) {
   }
   let scaleSpread = 0
   if (pairs.length >= 4) {
-    const scales = pairs.map((_, omit) => fitSimilarity(pairs.filter((__, i) => i !== omit))?.scale).filter((x) => x > 0)
+    const scales = pairs
+      .map((_, omit) => fitSimilarity(pairs.filter((__, i) => i !== omit))?.scale)
+      .filter((x) => x > 0)
     if (scales.length) scaleSpread = (Math.max(...scales) - Math.min(...scales)) / sim.scale
   }
-  const diagnostics = { common, sim, rmsFrac, medianRotationDeg, worstRotationDeg, scaleSpread, focalDiff, radialCoeffDiff }
-  if (rmsFrac > maxPositionRmsFrac) return { accepted: false, reason: `shared-camera position RMS ${(100 * rmsFrac).toFixed(1)}% of span`, ...diagnostics }
+  const diagnostics = {
+    common,
+    sim,
+    rmsFrac,
+    medianRotationDeg,
+    worstRotationDeg,
+    scaleSpread,
+    focalDiff,
+    radialCoeffDiff,
+  }
+  if (rmsFrac > maxPositionRmsFrac)
+    return {
+      accepted: false,
+      reason: `shared-camera position RMS ${(100 * rmsFrac).toFixed(1)}% of span`,
+      ...diagnostics,
+    }
   if (medianRotationDeg > maxMedianRotationDeg || worstRotationDeg > maxRotationDeg)
-    return { accepted: false, reason: `shared-camera rotation disagreement median ${medianRotationDeg.toFixed(1)}°, max ${worstRotationDeg.toFixed(1)}°`, ...diagnostics }
-  if (scaleSpread > maxScaleSpread) return { accepted: false, reason: `leave-one-out scale spread ${(100 * scaleSpread).toFixed(1)}%`, ...diagnostics }
-  if (focalDiff > maxFocalDiff) return { accepted: false, reason: `shared-camera focal disagreement ${(100 * focalDiff).toFixed(1)}%`, ...diagnostics }
-  if (radialCoeffDiff > maxRadialCoeffDiff) return { accepted: false, reason: `self-calibration radial disagreement ${radialCoeffDiff.toFixed(3)}`, ...diagnostics }
+    return {
+      accepted: false,
+      reason: `shared-camera rotation disagreement median ${medianRotationDeg.toFixed(1)}°, max ${worstRotationDeg.toFixed(1)}°`,
+      ...diagnostics,
+    }
+  if (scaleSpread > maxScaleSpread)
+    return { accepted: false, reason: `leave-one-out scale spread ${(100 * scaleSpread).toFixed(1)}%`, ...diagnostics }
+  if (focalDiff > maxFocalDiff)
+    return {
+      accepted: false,
+      reason: `shared-camera focal disagreement ${(100 * focalDiff).toFixed(1)}%`,
+      ...diagnostics,
+    }
+  if (radialCoeffDiff > maxRadialCoeffDiff)
+    return {
+      accepted: false,
+      reason: `self-calibration radial disagreement ${radialCoeffDiff.toFixed(3)}`,
+      ...diagnostics,
+    }
 
   const transformedCameras = (secondary.cameras || []).map((cam) => {
     const R = mul(cam.R, Qt)
@@ -132,7 +179,9 @@ export function alignSecondary(primary, secondary, componentIds, opts = {}) {
   const src = secondary.points ?? SparsePoints.empty()
   const keep = src.indicesWhere((i) => {
     let hit = false
-    src.forEachView(i, (uuid) => { hit ||= component.has(uuid) })
+    src.forEachView(i, (uuid) => {
+      hit ||= component.has(uuid)
+    })
     return hit
   })
   const pos = new Float64Array(3 * keep.length)
@@ -144,7 +193,11 @@ export function alignSecondary(primary, secondary, componentIds, opts = {}) {
 export function mergeAligned(primary, aligned) {
   const cameraMap = new Map((primary.cameras || []).map((c) => [c.uuid, c]))
   let addedCameras = 0
-  for (const c of aligned.transformedCameras) if (!cameraMap.has(c.uuid)) { cameraMap.set(c.uuid, c); addedCameras++ }
+  for (const c of aligned.transformedCameras)
+    if (!cameraMap.has(c.uuid)) {
+      cameraMap.set(c.uuid, c)
+      addedCameras++
+    }
   const points = SparsePoints.concat([primary.points, aligned.transformedPoints])
   let n3 = 0
   for (let i = 0; i < points.length; i++) if (points.viewCount(i) >= 3) n3++
@@ -156,7 +209,7 @@ export function mergeAligned(primary, aligned) {
       ...(primary.summary || {}),
       nCameras: cameraMap.size,
       nPoints: points.length,
-      pct3plusViewTracks: points.length ? 100 * n3 / points.length : 0,
+      pct3plusViewTracks: points.length ? (100 * n3) / points.length : 0,
       secondaryMerge: {
         addedCameras,
         addedPoints: aligned.transformedPoints.length,

@@ -106,9 +106,12 @@ export function buildVerdict(snapshot = {}) {
   // 1. Degenerate — a run that never left the ground. This is red regardless of
   //    every other number (they are survivor-biased on a 2-camera model).
   if ((reg != null && reg < 2) || s.nPoints === 0) {
-    add('red', 'failed',
+    add(
+      'red',
+      'failed',
       'Reconstruction failed — too few cameras or no points.',
-      'Check that images overlap and share texture; lower the matching floors (minMatches) and re-run detection at higher resolution.')
+      'Check that images overlap and share texture; lower the matching floors (minMatches) and re-run detection at higher resolution.',
+    )
     // Nothing else is meaningful on a failed run — return early with just this.
     return finalize(findings)
   }
@@ -119,15 +122,23 @@ export function buildVerdict(snapshot = {}) {
     const level = toneToLevel(classify(regPct, EVAL_THRESHOLDS.registeredPct))
     if (level) {
       const missing = total - reg
-      const names = (s.unregistered || []).map((u) => u.name).filter(Boolean).slice(0, 5)
+      const names = (s.unregistered || [])
+        .map((u) => u.name)
+        .filter(Boolean)
+        .slice(0, 5)
       const listed = names.length ? ` (e.g. ${names.join(', ')}${missing > names.length ? ', …' : ''})` : ''
-      const secondary = s.separateSecondaryModels > 0
-        ? ` ${pluralize(s.separateSecondaryModels, 'additional usable model')} ${s.separateSecondaryModels === 1 ? 'was' : 'were'} reconstructed but could not be aligned to the primary.` : ''
-      add(level, 'registration',
+      const secondary =
+        s.separateSecondaryModels > 0
+          ? ` ${pluralize(s.separateSecondaryModels, 'additional usable model')} ${s.separateSecondaryModels === 1 ? 'was' : 'were'} reconstructed but could not be aligned to the primary.`
+          : ''
+      add(
+        level,
+        'registration',
         `Only ${reg}/${total} images registered in the primary (${pct(regPct)})${listed}.${secondary}`,
         s.graphComponents > 1
           ? 'The verified match graph is split. Add bridging images, use exhaustive/pose preselection, or run targeted cross-component matching; lowering reconstruction gates cannot reconnect a split graph.'
-          : 'Inspect the unregistered-image and self-calibration diagnostics first. Add overlap where correspondences are absent; only lower matching floors when the match graph itself is demonstrably too sparse.')
+          : 'Inspect the unregistered-image and self-calibration diagnostics first. Add overlap where correspondences are absent; only lower matching floors when the match graph itself is demonstrably too sparse.',
+      )
     }
   }
 
@@ -144,9 +155,7 @@ export function buildVerdict(snapshot = {}) {
       const fix = selfCalActive
         ? 'Self-calibration already ran, so this ratio alone does not prove uncorrected distortion. Inspect the worst residual images and the spatial/radial residual plot; remove localized bad tracks or images, and only change the lens model if the residuals grow coherently toward the corners.'
         : 'This can indicate uncorrected lens distortion, but the ratio alone is not proof. Inspect residuals versus image radius; if they grow toward the corners, enable self-calibration or set a calibrated distortion model.'
-      add(level, code,
-        `Reprojection tail is ${ratio.toFixed(1)}× the median (median ${px(med)}, p95 ${px(p95)}).`,
-        fix)
+      add(level, code, `Reprojection tail is ${ratio.toFixed(1)}× the median (median ${px(med)}, p95 ${px(p95)}).`, fix)
     }
   }
 
@@ -154,34 +163,46 @@ export function buildVerdict(snapshot = {}) {
   {
     const level = toneToLevel(classify(med, EVAL_THRESHOLDS.reprojMedianPx))
     if (level && !findings.some((f) => f.code === 'distortion' || f.code === 'reprojection-tail')) {
-      add(level, 'reprojection',
+      add(
+        level,
+        'reprojection',
         `Reprojection median is ${px(med)}.`,
-        'Tighten the reprojection gate and add BA iterations (Reconstruct ▸ High), and remove any high-residual images.')
+        'Tighten the reprojection gate and add BA iterations (Reconstruct ▸ High), and remove any high-residual images.',
+      )
     }
   }
 
   // 5. Weakly constrained — dominated by 2-view points.
   const t3 = s.track3ViewPct ?? null
   if (t3 != null && t3 < TRACK3_ACT_PCT) {
-    add('yellow', 'weak-geometry',
+    add(
+      'yellow',
+      'weak-geometry',
       `Only ${pct(t3)} of tie points are seen by ≥3 views — the model is geometrically thin.`,
-      'Increase image overlap so more points are shared across three or more views; a set of near-stereo pairs cannot constrain the block well.')
+      'Increase image overlap so more points are shared across three or more views; a set of near-stereo pairs cannot constrain the block well.',
+    )
   }
 
   // 6. Split match graph.
   const comp = s.graphComponents ?? null
   if (comp != null && comp > 1) {
-    add('yellow', 'graph-split',
+    add(
+      'yellow',
+      'graph-split',
       `The match graph has ${comp} disconnected components.`,
-      'The images fall into groups that share no matches — add bridging images/overlap, or reconstruct the groups separately.')
+      'The images fall into groups that share no matches — add bridging images/overlap, or reconstruct the groups separately.',
+    )
   }
 
   // 7. Focal disagreement (self-cal absorbed it, but the nominal was wrong).
   const focalLevel = toneToLevel(classify(s.focalDeltaPct ?? null, EVAL_THRESHOLDS.focalDeltaPct))
   if (focalLevel) {
-    add(focalLevel, 'focal',
+    add(
+      focalLevel,
+      'focal',
       `Refined focal differs from the nominal by ${pct(Math.abs(s.focalDeltaPct))}.`,
-      'The EXIF focal or the entered sensor/film width is likely wrong. Self-cal recovered it, but correct the sensor for a cleaner next run.')
+      'The EXIF focal or the entered sensor/film width is likely wrong. Self-cal recovered it, but correct the sensor for a cleaner next run.',
+    )
   }
 
   // 8. Dense depth-map coverage (only present after a dense run). A thin coverage
@@ -189,17 +210,23 @@ export function buildVerdict(snapshot = {}) {
   //    few source views, and it directly starves fusion / the DEM / the ortho.
   const depthLevel = toneToLevel(classify(s.depthCoveragePct ?? null, EVAL_THRESHOLDS.depthCoveragePct))
   if (depthLevel) {
-    add(depthLevel, 'depth-coverage',
+    add(
+      depthLevel,
+      'depth-coverage',
       `Depth maps kept only ${pct(s.depthCoveragePct)} of pixels on average.`,
-      'Increase the source-view count and check the intrinsics are right (a wrong focal wrecks depth); raising depth-map quality also helps on weak texture.')
+      'Increase the source-view count and check the intrinsics are right (a wrong focal wrecks depth); raising depth-map quality also helps on weak texture.',
+    )
   }
 
   // 9. A stage the memory preflight turned off so the run could finish (memBudget.js).
   //    Not a defect in the model, but the run is not what was asked for.
   if (s.guidedSkippedForMemory) {
-    add('yellow', 'memory-degraded',
+    add(
+      'yellow',
+      'memory-degraded',
       'Guided track extension was skipped: with it the worker was projected past its memory ceiling.',
-      'The model is complete, with fewer ≥3-view tracks. To get it back, lower the keypoint cap (maxKeypoints) or the preselection neighbours, or reconstruct the block in parts.')
+      'The model is complete, with fewer ≥3-view tracks. To get it back, lower the keypoint cap (maxKeypoints) or the preselection neighbours, or reconstruct the block in parts.',
+    )
   }
 
   // ── Contributing causes ────────────────────────────────────────────────────
@@ -207,8 +234,8 @@ export function buildVerdict(snapshot = {}) {
   // are silent on an otherwise-clean run, because none of them is a defect on its own.
   const fired = (...codes) => findings.some((f) => codes.includes(f.code))
   const residualFinding = () => fired('reprojection-tail', 'distortion', 'reprojection')
-  const structuralFinding = () => fired(
-    'reprojection-tail', 'distortion', 'reprojection', 'registration', 'weak-geometry')
+  const structuralFinding = () =>
+    fired('reprojection-tail', 'distortion', 'reprojection', 'registration', 'weak-geometry')
 
   // 9. Inert track filter. Ordered directly after the residual rules because when both
   //    fire this is the actionable one: the tail was never filtered, so "the residuals
@@ -217,26 +244,33 @@ export function buildVerdict(snapshot = {}) {
     const headroom = s.filterMaxReprojPx / p95
     if (headroom >= GATE_HEADROOM_WARN) {
       const scale = s.detectScaleFactor
-      const scaleNote = scale != null && scale > 1.2
-        ? ` The gate is set in detection pixels and scaled ×${scale.toFixed(2)} to native, `
-          + `because detection ran at maxDim ${s.maxDim ?? '?'} on a larger sensor — `
-          + 'raising maxDim shrinks the factor and tightens every gate with it.'
-        : ''
-      add('yellow', 'gate-headroom',
-        `The track filter gate (${px(s.filterMaxReprojPx)}) sits ${headroom.toFixed(1)}× above the `
-          + `observed p95 (${px(p95)}), so it removed essentially nothing.`,
-        `The residual tail above survived the filter by construction, not because the geometry is sound.${scaleNote}`
-          + ' Raise detection resolution or lower filterMaxReprojDetectPx, then re-run and compare the tail.')
+      const scaleNote =
+        scale != null && scale > 1.2
+          ? ` The gate is set in detection pixels and scaled ×${scale.toFixed(2)} to native, ` +
+            `because detection ran at maxDim ${s.maxDim ?? '?'} on a larger sensor — ` +
+            'raising maxDim shrinks the factor and tightens every gate with it.'
+          : ''
+      add(
+        'yellow',
+        'gate-headroom',
+        `The track filter gate (${px(s.filterMaxReprojPx)}) sits ${headroom.toFixed(1)}× above the ` +
+          `observed p95 (${px(p95)}), so it removed essentially nothing.`,
+        `The residual tail above survived the filter by construction, not because the geometry is sound.${scaleNote}` +
+          ' Raise detection resolution or lower filterMaxReprojDetectPx, then re-run and compare the tail.',
+      )
     }
   }
 
   // 10. Saturated keypoint cap.
   if (s.kpCapHitPct != null && s.kpCapHitPct >= KP_CAP_WARN_PCT && structuralFinding()) {
-    add('yellow', 'keypoint-cap',
+    add(
+      'yellow',
+      'keypoint-cap',
       `${pct(s.kpCapHitPct)} of images hit the ${s.maxKeypoints ?? 'keypoint'} keypoint cap.`,
-      'The cap, not contrastThreshold, is selecting the keypoints, and it selects by response — '
-        + 'biasing toward high-contrast texture and away from even spatial coverage. Raise maxKeypoints, '
-        + 'or raise contrastThreshold so the threshold does the selecting.')
+      'The cap, not contrastThreshold, is selecting the keypoints, and it selects by response — ' +
+        'biasing toward high-contrast texture and away from even spatial coverage. Raise maxKeypoints, ' +
+        'or raise contrastThreshold so the threshold does the selecting.',
+    )
   }
 
   return finalize(findings)

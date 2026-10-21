@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { resolveRefineIntrinsics } from './runRecord.js'
 
 const run = (flags) => {
-  const cfg = { refineIntrinsics: 'auto' }, record = {}, lines = []
+  const cfg = { refineIntrinsics: 'auto' },
+    record = {},
+    lines = []
   resolveRefineIntrinsics({ cfg, selfCalRecord: record, log: (m) => lines.push(m), ...flags })
   return { cfg, record, lines }
 }

@@ -25,11 +25,7 @@ const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 const scale = (a, s) => [a[0] * s, a[1] * s, a[2] * s]
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-const cross = (a, b) => [
-  a[1] * b[2] - a[2] * b[1],
-  a[2] * b[0] - a[0] * b[2],
-  a[0] * b[1] - a[1] * b[0],
-]
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 const norm = (a) => Math.hypot(a[0], a[1], a[2])
 const normalize = (a) => {
   const n = norm(a)
@@ -64,10 +60,16 @@ function viewingDir({ R }) {
 // This one stays viewing-dir-only — DEM/ortho geometry depends on its exact null
 // semantics (null ⇒ buildLocalFrame falls through to the cloud-PCA vertical).
 export function estimateUpFromViewingDirs(cameras) {
-  let sx = 0, sy = 0, sz = 0, n = 0
+  let sx = 0,
+    sy = 0,
+    sz = 0,
+    n = 0
   for (const cam of cameras) {
     const d = viewingDir(cam)
-    sx += d[0]; sy += d[1]; sz += d[2]; n++
+    sx += d[0]
+    sy += d[1]
+    sz += d[2]
+    n++
   }
   if (n === 0) return null
   const mean = [sx / n, sy / n, sz / n]
@@ -95,17 +97,40 @@ export function sceneUpFromCameras(cams) {
 export function estimateUpFromCloud(points, hint = null) {
   const n = points.length
   if (n < 3) return null
-  let cx = 0, cy = 0, cz = 0
-  for (const p of points) { cx += p.x; cy += p.y; cz += p.z }
-  cx /= n; cy /= n; cz /= n
-  // Symmetric 3×3 covariance.
-  let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0
+  let cx = 0,
+    cy = 0,
+    cz = 0
   for (const p of points) {
-    const dx = p.x - cx, dy = p.y - cy, dz = p.z - cz
-    xx += dx * dx; xy += dx * dy; xz += dx * dz
-    yy += dy * dy; yz += dy * dz; zz += dz * dz
+    cx += p.x
+    cy += p.y
+    cz += p.z
   }
-  const cov = [[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]]
+  cx /= n
+  cy /= n
+  cz /= n
+  // Symmetric 3×3 covariance.
+  let xx = 0,
+    xy = 0,
+    xz = 0,
+    yy = 0,
+    yz = 0,
+    zz = 0
+  for (const p of points) {
+    const dx = p.x - cx,
+      dy = p.y - cy,
+      dz = p.z - cz
+    xx += dx * dx
+    xy += dx * dy
+    xz += dx * dz
+    yy += dy * dy
+    yz += dy * dz
+    zz += dz * dz
+  }
+  const cov = [
+    [xx, xy, xz],
+    [xy, yy, yz],
+    [xz, yz, zz],
+  ]
   const axis = smallestEigenvector(cov)
   if (!axis) return null
   const up = normalize(axis)
@@ -133,7 +158,10 @@ function smallestEigenvector(M) {
     const len = norm(nv)
     if (len < 1e-20) return null
     const next = scale(nv, 1 / len)
-    if (Math.abs(Math.abs(dot(next, v)) - 1) < 1e-10) { v = next; break }
+    if (Math.abs(Math.abs(dot(next, v)) - 1) < 1e-10) {
+      v = next
+      break
+    }
     v = next
   }
   return v
@@ -148,7 +176,9 @@ function solve3(A, b) {
   if (Math.abs(det) < 1e-20) return null
   const col = (c) => {
     const m = [A[0].slice(), A[1].slice(), A[2].slice()]
-    m[0][c] = b[0]; m[1][c] = b[1]; m[2][c] = b[2]
+    m[0][c] = b[0]
+    m[1][c] = b[1]
+    m[2][c] = b[2]
     return (
       m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
       m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
@@ -183,13 +213,22 @@ export function buildLocalFrame(cameras = [], points = []) {
     up = estimateUpFromCloud(points, null)
     source = 'cloud-pca'
   }
-  if (!up) { up = [0, 0, 1]; source = 'default-z' }
+  if (!up) {
+    up = [0, 0, 1]
+    source = 'default-z'
+  }
 
   // Origin: centroid of the points if present, else of the camera centres.
   let origin = [0, 0, 0]
   if (points.length) {
-    let sx = 0, sy = 0, sz = 0
-    for (const p of points) { sx += p.x; sy += p.y; sz += p.z }
+    let sx = 0,
+      sy = 0,
+      sz = 0
+    for (const p of points) {
+      sx += p.x
+      sy += p.y
+      sz += p.z
+    }
     origin = [sx / points.length, sy / points.length, sz / points.length]
   } else if (cams.length) {
     let s = [0, 0, 0]
@@ -230,9 +269,13 @@ export function rotateReconstruction(cameras, points, R, { inPlace = false } = {
     [R[0][2], R[1][2], R[2][2]],
   ]
   const mul = (A, B) => {
-    const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
-    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
-      C[i][j] = A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]
+    const C = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ]
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 3; j++) C[i][j] = A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]
     return C
   }
   const newCams = new Map()
@@ -243,7 +286,9 @@ export function rotateReconstruction(cameras, points, R, { inPlace = false } = {
   const src = points.pos
   const pos = inPlace ? src : new Float64Array(src.length)
   for (let i = 0; i < src.length; i += 3) {
-    const x = src[i], y = src[i + 1], z = src[i + 2]
+    const x = src[i],
+      y = src[i + 1],
+      z = src[i + 2]
     pos[i] = R[0][0] * x + R[0][1] * y + R[0][2] * z
     pos[i + 1] = R[1][0] * x + R[1][1] * y + R[1][2] * z
     pos[i + 2] = R[2][0] * x + R[2][1] * y + R[2][2] * z

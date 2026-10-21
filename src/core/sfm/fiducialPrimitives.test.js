@@ -3,7 +3,9 @@ import { bestPrototypeHit, estimateFrameBounds, makeFiducialPrototype } from './
 
 describe('estimateFrameBounds', () => {
   it('measures a film rectangle', () => {
-    const width = 100, height = 80, data = new Float32Array(width * height).fill(10)
+    const width = 100,
+      height = 80,
+      data = new Float32Array(width * height).fill(10)
     for (let y = 7; y <= 71; y++) for (let x = 9; x <= 90; x++) data[y * width + x] = 200
     const b = estimateFrameBounds({ data, width, height })
     expect([b.left, b.right, b.top, b.bottom]).toEqual([9, 90, 7, 71])
@@ -11,7 +13,8 @@ describe('estimateFrameBounds', () => {
   })
 
   it('reports ~zero confidence on a flat image', () => {
-    const width = 100, height = 80
+    const width = 100,
+      height = 80
     const gray = { data: new Float32Array(width * height).fill(100), width, height }
     expect(estimateFrameBounds(gray).confidence).toBeLessThan(1e-6)
   })
@@ -20,7 +23,8 @@ describe('estimateFrameBounds', () => {
   // throws RangeError past ~124k arguments. Scans reach this at 1536 px on the
   // long edge (FIDUCIAL_*_TUNING.maxDim), so every real image crashed the op.
   it('handles a full-size scan without blowing the argument limit', () => {
-    const width = 1536, height = 1024
+    const width = 1536,
+      height = 1024
     const data = new Float32Array(width * height).fill(12)
     for (let y = 40; y < height - 40; y++) for (let x = 60; x < width - 60; x++) data[y * width + x] = 210
     expect(data.length).toBeGreaterThan(124_000) // past the spread/argument limit
@@ -33,10 +37,12 @@ describe('estimateFrameBounds', () => {
 
 describe('makeFiducialPrototype', () => {
   const darkPixels = (p) => {
-    const h = (p.size - 1) / 2, out = []
-    for (let y = 0; y < p.size; y++) for (let x = 0; x < p.size; x++) {
-      if (p.data[y * p.size + x] === 0) out.push({ dx: x - h, dy: y - h })
-    }
+    const h = (p.size - 1) / 2,
+      out = []
+    for (let y = 0; y < p.size; y++)
+      for (let x = 0; x < p.size; x++) {
+        if (p.data[y * p.size + x] === 0) out.push({ dx: x - h, dy: y - h })
+      }
     return out
   }
 
@@ -58,8 +64,8 @@ describe('makeFiducialPrototype', () => {
     // The ring variant keeps its hole — the one shape whose centre band is light.
     const ring = makeFiducialPrototype('generic', S, 2, { strokeFrac: 0.1 })
     const at = (dx, dy) => ring.data[(dy + (S - 1) / 2) * ring.size + dx + (S - 1) / 2]
-    expect(at(0, 0)).toBe(0)                    // centre dot
-    expect(at(0, stroke + 1)).toBe(1)           // gap between centre and ring
+    expect(at(0, 0)).toBe(0) // centre dot
+    expect(at(0, stroke + 1)).toBe(1) // gap between centre and ring
     expect(at(0, Math.round(S * 0.29))).toBe(0) // the ring itself
   })
 })
@@ -67,13 +73,17 @@ describe('makeFiducialPrototype', () => {
 describe('bestPrototypeHit', () => {
   // Paint one unambiguous crosshair on a clean field.
   function scanWithMark(family = 'generic', variant = 1, size = 13) {
-    const width = 121, height = 101
+    const width = 121,
+      height = 101
     const data = new Float32Array(width * height).fill(230)
     const p = makeFiducialPrototype(family, size, variant)
-    const h = (p.size - 1) >> 1, cx = 60, cy = 50
-    for (let y = 0; y < p.size; y++) for (let x = 0; x < p.size; x++) {
-      data[(cy - h + y) * width + cx - h + x] = p.data[y * p.size + x] ? 230 : 20
-    }
+    const h = (p.size - 1) >> 1,
+      cx = 60,
+      cy = 50
+    for (let y = 0; y < p.size; y++)
+      for (let x = 0; x < p.size; x++) {
+        data[(cy - h + y) * width + cx - h + x] = p.data[y * p.size + x] ? 230 : 20
+      }
     return { gray: { data, width, height }, cx, cy }
   }
 

@@ -12,8 +12,7 @@
 export function stripSourcePrefix(source, message) {
   if (!source || typeof message !== 'string') return message
   const head = `${source}: `
-  if (message.length >= head.length &&
-      message.slice(0, head.length).toLowerCase() === head.toLowerCase()) {
+  if (message.length >= head.length && message.slice(0, head.length).toLowerCase() === head.toLowerCase()) {
     return message.slice(head.length)
   }
   return message

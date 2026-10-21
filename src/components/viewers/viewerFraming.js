@@ -36,15 +36,26 @@ export function cameraFrustumDepth(centres, points3d) {
       if (best < Infinity) nn.push(best)
     }
     const med = median(nn)
-    if (med > 0) return med * 0.6  // adjacent quads (half-width 0.3·d) stay clear
+    if (med > 0) return med * 0.6 // adjacent quads (half-width 0.3·d) stay clear
   }
   // Fallback (<2 cameras): robust point radius about the centroid — 95th
   // percentile so a handful of outlier points can't blow up the scale.
   if (points3d.length > 0) {
-    let mx = 0, my = 0, mz = 0
-    for (const p of points3d) { mx += p.x; my += p.y; mz += p.z }
-    mx /= points3d.length; my /= points3d.length; mz /= points3d.length
-    const r = percentile(points3d.map((p) => Math.hypot(p.x - mx, p.y - my, p.z - mz)), 0.95)
+    let mx = 0,
+      my = 0,
+      mz = 0
+    for (const p of points3d) {
+      mx += p.x
+      my += p.y
+      mz += p.z
+    }
+    mx /= points3d.length
+    my /= points3d.length
+    mz /= points3d.length
+    const r = percentile(
+      points3d.map((p) => Math.hypot(p.x - mx, p.y - my, p.z - mz)),
+      0.95,
+    )
     if (r > 0) return r * 0.15
   }
   return 0.15
@@ -60,14 +71,23 @@ export function cameraFrustumDepth(centres, points3d) {
 const BOUNDS_SAMPLE = 20000
 export function robustBounds(positions, count, up) {
   const step = Math.max(1, Math.floor(count / BOUNDS_SAMPLE))
-  const xs = [], ys = [], zs = []
+  const xs = [],
+    ys = [],
+    zs = []
   for (let i = 0; i < count; i += step) {
-    xs.push(positions[i * 3]); ys.push(positions[i * 3 + 1]); zs.push(positions[i * 3 + 2])
+    xs.push(positions[i * 3])
+    ys.push(positions[i * 3 + 1])
+    zs.push(positions[i * 3 + 2])
   }
-  const cx = median(xs), cy = median(ys), cz = median(zs)
-  const dists = [], alongs = []
+  const cx = median(xs),
+    cy = median(ys),
+    cz = median(zs)
+  const dists = [],
+    alongs = []
   for (let k = 0; k < xs.length; k++) {
-    const dx = xs[k] - cx, dy = ys[k] - cy, dz = zs[k] - cz
+    const dx = xs[k] - cx,
+      dy = ys[k] - cy,
+      dz = zs[k] - cz
     dists.push(Math.hypot(dx, dy, dz))
     alongs.push(dx * up.x + dy * up.y + dz * up.z)
   }

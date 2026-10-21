@@ -21,7 +21,7 @@
   --console-btn-hover: #2a2a2a;
 }
 
-[data-theme="light"] {
+[data-theme='light'] {
   --bg: #f0f0f0;
   --panel: #ffffff;
   --panel-border: #d0d0d0;
@@ -57,7 +57,11 @@ body,
 }
 
 body {
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
@@ -66,7 +70,9 @@ body {
 /* Explicit accessibility override. The default continues to follow the user's
    operating-system preference; Settings can force the reduced-motion variant. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
@@ -112,7 +118,18 @@ html[data-reduce-motion] *::after {
   padding: 5px 14px;
   cursor: pointer;
 }
-.btn:hover { background: var(--hover-bg); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover { opacity: 0.88; }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:hover {
+  background: var(--hover-bg);
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover {
+  opacity: 0.88;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

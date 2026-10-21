@@ -18,7 +18,14 @@ import { pluralize } from '../../core/textFormat.js'
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createDetection({
-  holdKeypoints, imageById, images, isPersisting, keypointCache, log, projects, save,
+  holdKeypoints,
+  imageById,
+  images,
+  isPersisting,
+  keypointCache,
+  log,
+  projects,
+  save,
   whenComputeReady,
 }) {
   async function detectOne(id, settings = {}, onDetected, shouldCancel) {
@@ -54,24 +61,28 @@ export function createDetection({
       // Auto mode also scales the SIFT keypoint cap with the detected area (same module).
       const kp0 = resolveDetectKeypoints(
         img.meta?.width > 0 && img.meta?.height > 0 ? detectSize(img.meta.width, img.meta.height, res0.maxDim) : null,
-        settings)
+        settings,
+      )
       if (res0.mode === 'auto') {
         log(`${tag} ${img.name} — detect at ${res0.reason}; keypoint cap ${kp0.reason}`, 'debug', 'Detection')
       }
       // SIFT keypoints per extremum (dominant + secondary orientations, tuning.js
       // DETECT_TUNING). Null for a learned detector: no orientation histogram.
-      const maxOrientations = learned
-        ? null : (settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations)
+      const maxOrientations = learned ? null : (settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations)
       // Which keypoints the SIFT cap keeps (keypointCap.js). Learned ones rank by score.
-      const capRule = learned
-        ? null : (settings.capRule ?? DETECT_TUNING.siftCapRule)
+      const capRule = learned ? null : (settings.capRule ?? DETECT_TUNING.siftCapRule)
       // Pass the per-image mask (if any) so keypoints inside masked regions are
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(
         computeSourceOf(img),
-        { ...settings, maxDim: res0.maxDim, maxKeypoints: kp0.maxKeypoints, mask: img.mask?.blob ?? null,
+        {
+          ...settings,
+          maxDim: res0.maxDim,
+          maxKeypoints: kp0.maxKeypoints,
+          mask: img.mask?.blob ?? null,
           ...(maxOrientations != null ? { maxOrientations } : {}),
-          ...(capRule != null ? { capRule } : {}) },
+          ...(capRule != null ? { capRule } : {}),
+        },
         { onLog: (msg) => log(msg, 'info', 'Detection') },
       )
       // The worker can't be interrupted mid-image, so a cancel pressed while this
@@ -94,18 +105,22 @@ export function createDetection({
         const pid = projects.currentProjectId
         const persisting = isPersisting()
         const kpsNew = new Keypoints(res.keypoints.data, res.keypoints.rgb)
-        holdKeypoints(found, kpsNew, persisting
-          ? Promise.all([opfs.saveKeypoints(pid, found.uuid, kpsNew), opfs.saveColors(pid, found.uuid, kpsNew)])
-          : null)
-        found.descriptors = markRaw(res.descriptors)   // keep in-memory for non-persistent matching
-        found.kpCount  = kpsNew.length
-        found.kpMs     = Math.round(res.ms)
+        holdKeypoints(
+          found,
+          kpsNew,
+          persisting
+            ? Promise.all([opfs.saveKeypoints(pid, found.uuid, kpsNew), opfs.saveColors(pid, found.uuid, kpsNew)])
+            : null,
+        )
+        found.descriptors = markRaw(res.descriptors) // keep in-memory for non-persistent matching
+        found.kpCount = kpsNew.length
+        found.kpMs = Math.round(res.ms)
         found.kpStatus = 'done'
         // Detector + descriptor width travel with the image so matching can pick
         // the right matcher and read the descriptor stride off the buffer (SIFT
         // 128-d, SuperPoint 256-d, DISK 128-d) rather than assume a constant.
         found.detector = res.detector ?? 'sift'
-        found.descDim  = res.descDim ?? 128
+        found.descDim = res.descDim ?? 128
         // Which normalisation the stored SIFT descriptors are in (RootSIFT since
         // 2026-10). Absent ⇒ legacy L2; matching converts on load, so it is never
         // back-filled (core/features/siftDescriptors.js).
@@ -141,25 +156,41 @@ export function createDetection({
         // spread (the signal for tuning maxKeypoints / contrastThreshold).
         const d = res.diag
         if (d) {
-          log(`${tag} ${found.name} — detect @ ${d.detectWidth}×${d.detectHeight} `
-            + `(${d.scale.toFixed(3)}× of ${d.natW}×${d.natH})`, 'debug', 'Detection')
+          log(
+            `${tag} ${found.name} — detect @ ${d.detectWidth}×${d.detectHeight} ` +
+              `(${d.scale.toFixed(3)}× of ${d.natW}×${d.natH})`,
+            'debug',
+            'Detection',
+          )
           if (learnedDetector(res.detector)) {
             // Learned detector: no near-duplicate suppression / response, so report
             // the cap + mask drops and the keypoint-score spread instead.
-            log(`${tag} ${found.name} — ${d.capped} keypoints`
-              + `${d.capHit ? ' (top-K cap hit)' : ''}`
-              + `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}`
-              + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
-              + `; score p50 ${d.scoreP50.toFixed(3)} / p95 ${d.scoreP95.toFixed(3)}`, 'debug', 'Detection')
+            log(
+              `${tag} ${found.name} — ${d.capped} keypoints` +
+                `${d.capHit ? ' (top-K cap hit)' : ''}` +
+                `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}` +
+                `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}` +
+                `; score p50 ${d.scoreP50.toFixed(3)} / p95 ${d.scoreP95.toFixed(3)}`,
+              'debug',
+              'Detection',
+            )
           } else {
-            log(`${tag} ${found.name} — ${d.rawFound} found → ${d.capped}`
-              + `${!d.capHit ? ' (under cap)' : d.capRule === 'coarse-first'
-                ? ` capped coarse-first (smallest kept σ ${d.minScale.toFixed(2)} detect px)`
-                : ` capped (min response ${d.minResponse.toFixed(3)})`}`
-              + `${d.suppressed > 0 ? `, −${d.suppressed} duplicate-position keypoints suppressed` : ''}`
-              + `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}`
-              + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
-              + `; response p50 ${d.respP50.toFixed(3)} / p95 ${d.respP95.toFixed(3)}`, 'debug', 'Detection')
+            log(
+              `${tag} ${found.name} — ${d.rawFound} found → ${d.capped}` +
+                `${
+                  !d.capHit
+                    ? ' (under cap)'
+                    : d.capRule === 'coarse-first'
+                      ? ` capped coarse-first (smallest kept σ ${d.minScale.toFixed(2)} detect px)`
+                      : ` capped (min response ${d.minResponse.toFixed(3)})`
+                }` +
+                `${d.suppressed > 0 ? `, −${d.suppressed} duplicate-position keypoints suppressed` : ''}` +
+                `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}` +
+                `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}` +
+                `; response p50 ${d.respP50.toFixed(3)} / p95 ${d.respP95.toFixed(3)}`,
+              'debug',
+              'Detection',
+            )
           }
         }
         if (persisting) {
@@ -168,8 +199,11 @@ export function createDetection({
           // descriptors, enough to fail the sparse memory preflight hours later.
           // Kept if the save fails: matching falls back to it.
           const descriptors = res.descriptors
-          opfs.saveDescriptors(pid, found.uuid, descriptors)
-            .then(() => { if (found.descriptors === descriptors) found.descriptors = null })
+          opfs
+            .saveDescriptors(pid, found.uuid, descriptors)
+            .then(() => {
+              if (found.descriptors === descriptors) found.descriptors = null
+            })
             .catch(() => {})
           save()
         }
@@ -191,14 +225,18 @@ export function createDetection({
   }
 
   async function detectAll(settings = {}, onDetected, onProgress, shouldCancel) {
-    const pending = (settings.overwrite
-      ? images.value
-      : images.value.filter((img) => img.kpStatus !== 'done')).filter((img) => img.kpStatus !== 'running')
+    const pending = (settings.overwrite ? images.value : images.value.filter((img) => img.kpStatus !== 'done')).filter(
+      (img) => img.kpStatus !== 'running',
+    )
     const total = pending.length
     // Echo the settings actually in effect so the console records what was run.
     const {
-      detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000,
-      maxDimMode = 'absolute', preset = 'medium',
+      detector = 'sift',
+      maxDim = 1200,
+      contrastThreshold = 0.01,
+      maxKeypoints = 5000,
+      maxDimMode = 'absolute',
+      preset = 'medium',
     } = settings
     // Message-text label only; the console source is the stage 'Detection'.
     const batchTag = detectorLabel(detector)
@@ -212,18 +250,24 @@ export function createDetection({
     // Resolution: one figure in absolute mode; in auto mode it varies per image, so
     // report the band being applied rather than a number that would only be right
     // for some of the batch.
-    const resLabel = maxDimMode === 'auto'
-      ? `auto resolution (${preset} band, ≥${maxDim}px)`
-      : `≤${maxDim}px`
+    const resLabel = maxDimMode === 'auto' ? `auto resolution (${preset} band, ≥${maxDim}px)` : `≤${maxDim}px`
     const concurrency = detectionConcurrency(pending, settings, POOL_SIZE, navigator.deviceMemory)
     const started = performance.now()
-    const budgetNote = settings.memBudgetBytes > 0 ? ` (memory budget ${(settings.memBudgetBytes / 1024 ** 3).toFixed(1)} GB)` : ''
-    log(`${batchTag} batch: ${pluralize(total, 'image')} queued — ${resLabel}, ${concurrency} concurrent${budgetNote}`
-      + `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`
-      + `${maxDimMode === 'auto' && !learnedSpec ? ' (auto: scaled with the detected area, up to 4×)' : ''}`
-      + `${learnedSpec ? '' : `, ≤${pluralize(settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations, 'orientation')} per extremum`
-        + `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors`}`,
-      'info', 'Detection')
+    const budgetNote =
+      settings.memBudgetBytes > 0 ? ` (memory budget ${(settings.memBudgetBytes / 1024 ** 3).toFixed(1)} GB)` : ''
+    log(
+      `${batchTag} batch: ${pluralize(total, 'image')} queued — ${resLabel}, ${concurrency} concurrent${budgetNote}` +
+        `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp` +
+        `${maxDimMode === 'auto' && !learnedSpec ? ' (auto: scaled with the detected area, up to 4×)' : ''}` +
+        `${
+          learnedSpec
+            ? ''
+            : `, ≤${pluralize(settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations, 'orientation')} per extremum` +
+              `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors`
+        }`,
+      'info',
+      'Detection',
+    )
     let done = 0
     let cursor = 0
     let cancelled = false
@@ -240,8 +284,12 @@ export function createDetection({
     }
     await Promise.all(Array.from({ length: concurrency }, drain))
     const seconds = (performance.now() - started) / 1000
-    log(`${batchTag} ${stop() ? 'cancelled' : 'batch complete'} — ${done}/${total} processed in ${seconds.toFixed(2)} s`
-      + ` (${concurrency} concurrent)`, stop() ? 'warn' : 'success', 'Detection')
+    log(
+      `${batchTag} ${stop() ? 'cancelled' : 'batch complete'} — ${done}/${total} processed in ${seconds.toFixed(2)} s` +
+        ` (${concurrency} concurrent)`,
+      stop() ? 'warn' : 'success',
+      'Detection',
+    )
   }
 
   // Attach an external feature index to existing images in one batch. The caller
@@ -259,8 +307,8 @@ export function createDetection({
       // An import hands objects ({ x, y, … }) or typed keypoints; the store keeps typed.
       const kps = fillNormalized(asKeypoints(entry.keypoints), img.meta?.width, img.meta?.height)
       const persist = isPersisting()
-        // Colours too: an import without them must not inherit a previous detection's file.
-        ? Promise.all([opfs.saveKeypoints(pid, img.uuid, kps), opfs.saveColors(pid, img.uuid, kps)])
+        ? // Colours too: an import without them must not inherit a previous detection's file.
+          Promise.all([opfs.saveKeypoints(pid, img.uuid, kps), opfs.saveColors(pid, img.uuid, kps)])
         : null
       if (persist) writes.push(persist)
       holdKeypoints(img, kps, persist)
@@ -286,10 +334,10 @@ export function createDetection({
     const img = imageById(id)
     if (!img) return
     keypointCache.delete(img.uuid)
-    img.kpRev     = (img.kpRev ?? 0) + 1
-    img.kpCount   = 0
-    img.kpMs      = 0
-    img.kpStatus  = null
+    img.kpRev = (img.kpRev ?? 0) + 1
+    img.kpCount = 0
+    img.kpMs = 0
+    img.kpStatus = null
     // The scale described keypoints that no longer exist. Inert either way (a
     // null kpStatus excludes the image from matching and SfM), but a stale value
     // must not survive into the next detection run at different settings.
@@ -307,6 +355,9 @@ export function createDetection({
   }
 
   return {
-    detectOne, detectAll, importFeatures, clearKeypoints,
+    detectOne,
+    detectAll,
+    importFeatures,
+    clearKeypoints,
   }
 }

@@ -5,14 +5,16 @@ import { nextGroupName, moveListEntry } from '../../utils/imageGroups.js'
 // activity channel and re-persists project.json.
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
-export function createImageGroups({
-  imageGroups, images, isPersisting, log, save,
-}) {
+export function createImageGroups({ imageGroups, images, isPersisting, log, save }) {
   // ── Image groups ──────────────────────────────────────────────────────────
   // Display-only folders (utils/imageGroups.js). Every mutation is a reversible
   // user edit, so it logs on the activity channel and re-persists project.json.
-  function persistGroups() { if (isPersisting()) save() }
-  function groupById(id) { return imageGroups.value.find((g) => g.id === id) || null }
+  function persistGroups() {
+    if (isPersisting()) save()
+  }
+  function groupById(id) {
+    return imageGroups.value.find((g) => g.id === id) || null
+  }
 
   // Create a group, optionally filling it. `id` may be supplied by the caller
   // (the sidebar picks it so it can start an inline rename on the new row).
@@ -23,15 +25,22 @@ export function createImageGroups({
     const trimmed = name?.trim()
     if (id == null && trimmed) {
       const existing = imageGroups.value.find((g) => g.name === trimmed)
-      if (existing) { setImagesGroup(imageIds, existing.id); return existing }
+      if (existing) {
+        setImagesGroup(imageIds, existing.id)
+        return existing
+      }
     }
     id ??= crypto.randomUUID()
     if (groupById(id)) return null
     const group = { id, name: trimmed || nextGroupName(imageGroups.value), collapsed: false }
     imageGroups.value.push(group)
     const moved = assignGroup(imageIds, id)
-    log(`Created image group "${group.name}"${moved ? ` with ${moved} image${moved !== 1 ? 's' : ''}` : ''}`,
-      'info', 'Images', { channel: 'activity' })
+    log(
+      `Created image group "${group.name}"${moved ? ` with ${moved} image${moved !== 1 ? 's' : ''}` : ''}`,
+      'info',
+      'Images',
+      { channel: 'activity' },
+    )
     persistGroups()
     return group
   }
@@ -52,10 +61,18 @@ export function createImageGroups({
     const group = groupById(id)
     if (!group) return false
     let freed = 0
-    for (const img of images.value) if (img.groupId === id) { img.groupId = null; freed++ }
+    for (const img of images.value)
+      if (img.groupId === id) {
+        img.groupId = null
+        freed++
+      }
     imageGroups.value = imageGroups.value.filter((g) => g.id !== id)
-    log(`Removed image group "${group.name}"${freed ? ` (${freed} image${freed !== 1 ? 's' : ''} now ungrouped)` : ''}`,
-      'info', 'Images', { channel: 'activity' })
+    log(
+      `Removed image group "${group.name}"${freed ? ` (${freed} image${freed !== 1 ? 's' : ''} now ungrouped)` : ''}`,
+      'info',
+      'Images',
+      { channel: 'activity' },
+    )
     persistGroups()
     return true
   }
@@ -78,8 +95,9 @@ export function createImageGroups({
     const moved = assignGroup(imageIds, target?.id ?? null)
     if (!moved) return 0
     const what = `${moved} image${moved !== 1 ? 's' : ''}`
-    log(target ? `Moved ${what} to group "${target.name}"` : `Removed ${what} from their group`,
-      'info', 'Images', { channel: 'activity' })
+    log(target ? `Moved ${what} to group "${target.name}"` : `Removed ${what} from their group`, 'info', 'Images', {
+      channel: 'activity',
+    })
     persistGroups()
     return moved
   }
@@ -102,7 +120,14 @@ export function createImageGroups({
   }
 
   return {
-    persistGroups, groupById, createImageGroup, renameImageGroup, removeImageGroup, assignGroup,
-    setImagesGroup, setImageGroupCollapsed, moveImageGroup,
+    persistGroups,
+    groupById,
+    createImageGroup,
+    renameImageGroup,
+    removeImageGroup,
+    assignGroup,
+    setImagesGroup,
+    setImageGroupCollapsed,
+    moveImageGroup,
   }
 }

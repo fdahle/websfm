@@ -1,11 +1,31 @@
 import { isStreamed } from '../../core/lod/streamed.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
-import { exportCloudFile, exportMeshFile, exportPointTiles as workerExportPointTiles, exportMeshTiles as workerExportMeshTiles } from '../../workers/computeClient.js'
+import {
+  exportCloudFile,
+  exportMeshFile,
+  exportPointTiles as workerExportPointTiles,
+  exportMeshTiles as workerExportMeshTiles,
+} from '../../workers/computeClient.js'
 import { downloadBlob } from '../../utils/download.js'
 import { buildTransformsJson } from '../../core/io/transforms.js'
-import { reconstructionToJson, prepareCloudForExport, prepareMeshForExport, meshToGlbParts } from '../../core/products/exporters.js'
+import {
+  reconstructionToJson,
+  prepareCloudForExport,
+  prepareMeshForExport,
+  meshToGlbParts,
+} from '../../core/products/exporters.js'
 import { partsToBlob } from '../../utils/blobParts.js'
-import { cloudCentroid, ecefTransformFromProbes, cloudToGlbPoints, localBounds, buildTileset, boundingBox, tilesSubject, defaultTiling, singleTileFits } from '../../core/products/tiles3d.js'
+import {
+  cloudCentroid,
+  ecefTransformFromProbes,
+  cloudToGlbPoints,
+  localBounds,
+  buildTileset,
+  boundingBox,
+  tilesSubject,
+  defaultTiling,
+  singleTileFits,
+} from '../../core/products/tiles3d.js'
 import { exportOrigin, lasEpsg } from '../../core/lod/tiles3d.js'
 import { EXPORT_DEFAULTS } from '../../core/defaults.user.js'
 import { ensureProjection, transformAsync, metresPerCrsUnit } from '../../core/crs.js'
@@ -21,14 +41,24 @@ import { pluralize } from '../../core/textFormat.js'
 //
 // Deps are useExports' injected refs and shared helpers.
 export function createCloudExports({
-  cloudFileBase, clouds, currentCrs, effectiveFrameSpec, exportSimilarity, images, log,
-  mainSparseCloud, projectBase, saveJson, selectedCloud, sensors = null, summary = null,
+  cloudFileBase,
+  clouds,
+  currentCrs,
+  effectiveFrameSpec,
+  exportSimilarity,
+  images,
+  log,
+  mainSparseCloud,
+  projectBase,
+  saveJson,
+  selectedCloud,
+  sensors = null,
+  summary = null,
 }) {
   // The main sparse cloud (what downstream stages consume — MC), or the selected
   // cloud if it carries cameras. Shared by the two model exporters.
   function sparseCloud() {
-    return mainSparseCloud.value
-      ?? (selectedCloud.value?.cameras?.size ? selectedCloud.value : null)
+    return mainSparseCloud.value ?? (selectedCloud.value?.cameras?.size ? selectedCloud.value : null)
   }
 
   // Point cloud (selected, else the first non-empty) → PLY / LAS / LAZ / XYZ, with an
@@ -42,9 +72,10 @@ export function createCloudExports({
       const count = src.count ?? src.pos.length / 3
       // One copy per attribute: a restored cloud's attributes are views into ONE
       // shared sidecar buffer, and a transfer list may not name a buffer twice.
-      const attributes = src.attributes && Object.keys(src.attributes).length
-        ? Object.fromEntries(Object.entries(src.attributes).map(([k, v]) => [k, v.slice(0, count)]))
-        : null
+      const attributes =
+        src.attributes && Object.keys(src.attributes).length
+          ? Object.fromEntries(Object.entries(src.attributes).map(([k, v]) => [k, v.slice(0, count)]))
+          : null
       // The result is one Float64 xyz plane, so it holds at most the buffer wall's
       // worth of points (core/bufferLimit.js): refuse a larger cloud with the reason
       // rather than fail on the allocation.
@@ -74,10 +105,13 @@ export function createCloudExports({
   function exportCloudCopy(cloud) {
     if (cloud.kind === 'dense') {
       const n = cloud.count
-      const attributes = cloud.attributes && Object.keys(cloud.attributes).length
-        ? Object.fromEntries(Object.entries(cloud.attributes).map(([k, v]) => [k, v.slice(0, n)])) : null
+      const attributes =
+        cloud.attributes && Object.keys(cloud.attributes).length
+          ? Object.fromEntries(Object.entries(cloud.attributes).map(([k, v]) => [k, v.slice(0, n)]))
+          : null
       return {
-        count: n, pos: cloud.pos.slice(0, n * 3),
+        count: n,
+        pos: cloud.pos.slice(0, n * 3),
         ...(cloud.col ? { col: cloud.col.slice(0, n * 3) } : {}),
         ...(cloud.nrm ? { nrm: cloud.nrm.slice(0, n * 3) } : {}),
         ...(attributes ? { attributes } : {}),
@@ -89,8 +123,12 @@ export function createCloudExports({
   function logExportFrame(what, frame) {
     if (frame.source === 'georef') log(`${what} export: georeferenced to ${frame.crs}`, 'info', 'Export')
     else if (frame.source === 'scalebars') {
-      log(`${what} export: scaled to metres (×${frame.sim.scale.toPrecision(6)}) `
-        + 'from the scale bars — metric coordinates, no CRS', 'info', 'Export')
+      log(
+        `${what} export: scaled to metres (×${frame.sim.scale.toPrecision(6)}) ` +
+          'from the scale bars — metric coordinates, no CRS',
+        'info',
+        'Export',
+      )
     } else if (frame.source === 'orientation') {
       log(`${what} export: in the oriented local frame (Orient model) — model units, no CRS`, 'info', 'Export')
     }
@@ -99,16 +137,19 @@ export function createCloudExports({
   // Serialization (and the georeference / downsample before it) runs in the export
   // worker, which streams the file into a Blob — see workers/ops/export.js.
   async function doExportCloud({ format, includeColor, applyGeoref, downsampleCell }, target = null) {
-    const cloud = target ?? (cloudHasPoints(selectedCloud.value)
-      ? selectedCloud.value
-      : clouds.value.find(cloudHasPoints))
+    const cloud =
+      target ?? (cloudHasPoints(selectedCloud.value) ? selectedCloud.value : clouds.value.find(cloudHasPoints))
     if (!cloud) return
     // A streamed cloud (core/lod/streamed.js) is written from its octree, node by node,
     // in its own coordinates (an imported LAS's own quantisation and projection).
     if (isStreamed(cloud)) {
       if (applyGeoref || downsampleCell > 0) {
-        log(`Export: "${cloud.name}" is streamed, so it is written in its own coordinates`
-          + `${downsampleCell > 0 ? ', without a downsample' : ''}`, 'info', 'Export')
+        log(
+          `Export: "${cloud.name}" is streamed, so it is written in its own coordinates` +
+            `${downsampleCell > 0 ? ', without a downsample' : ''}`,
+          'info',
+          'Export',
+        )
       }
       const { blob } = await useReconstructionStore().exportCloudLod(cloud, { format, color: includeColor })
       downloadBlob(`${cloudFileBase(cloud, target)}.${format === 'ply-ascii' ? 'ply' : format}`, blob)
@@ -132,9 +173,18 @@ export function createCloudExports({
       if (frame.sim || cell) delete copy.col
       else if (format === 'xyz') color = false
     }
-    const { blob } = await exportCloudFile({
-      cloud: copy, format, color, sim: frame.sim, cell, crsCode, geographic: crsCode === 4326,
-    }, { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') })
+    const { blob } = await exportCloudFile(
+      {
+        cloud: copy,
+        format,
+        color,
+        sim: frame.sim,
+        cell,
+        crsCode,
+        geographic: crsCode === 4326,
+      },
+      { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') },
+    )
     const ext = format === 'las' || format === 'laz' || format === 'xyz' ? format : 'ply'
     downloadBlob(`${cloudFileBase(cloud, target)}.${ext}`, blob)
   }
@@ -142,21 +192,35 @@ export function createCloudExports({
   // Mesh (screened Poisson) → PLY (faces) / GLB / OBJ / STL, in the export worker.
   // Uses the selected mesh cloud, else the first mesh cloud.
   async function doExportMesh({ format, includeColor, includeTexture = true, applyGeoref }, target = null) {
-    const cloud = target ?? (selectedCloud.value?.kind === 'mesh'
-      ? selectedCloud.value
-      : clouds.value.find((c) => c.kind === 'mesh' && c.count > 0))
+    const cloud =
+      target ??
+      (selectedCloud.value?.kind === 'mesh'
+        ? selectedCloud.value
+        : clouds.value.find((c) => c.kind === 'mesh' && c.count > 0))
     if (!cloud) return
     const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
     logExportFrame('Mesh', frame)
     const textured = includeTexture && !!(cloud.uv && cloud.texture)
-    const mesh = { nVerts: cloud.nVerts, count: cloud.count, pos: cloud.pos.slice(), idx: cloud.idx.slice(),
-      ...(cloud.col ? { col: cloud.col.slice() } : {}), ...(textured ? { uv: cloud.uv.slice() } : {}) }
+    const mesh = {
+      nVerts: cloud.nVerts,
+      count: cloud.count,
+      pos: cloud.pos.slice(),
+      idx: cloud.idx.slice(),
+      ...(cloud.col ? { col: cloud.col.slice() } : {}),
+      ...(textured ? { uv: cloud.uv.slice() } : {}),
+    }
     const texture = textured
-      ? { data: cloud.texture.data.slice(), pages: cloud.texture.pages.map((p) => ({ ...p })), groups: cloud.texture.groups.map((g) => ({ ...g })) }
+      ? {
+          data: cloud.texture.data.slice(),
+          pages: cloud.texture.pages.map((p) => ({ ...p })),
+          groups: cloud.texture.groups.map((g) => ({ ...g })),
+        }
       : null
     const base = target ? cloudFileBase(cloud, target) : `${projectBase()}-mesh`
-    const { blob, ext } = await exportMeshFile({ mesh, format, color: includeColor, sim: frame.sim, texture, name: base },
-      { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') })
+    const { blob, ext } = await exportMeshFile(
+      { mesh, format, color: includeColor, sim: frame.sim, texture, name: base },
+      { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') },
+    )
     downloadBlob(`${base}.${ext}`, blob)
   }
 
@@ -185,9 +249,13 @@ export function createCloudExports({
         .filter(Boolean)
       if (!transformImages.length) return
       if (warped) {
-        log(`transforms.json export: ${warped} of ${pluralize(transformImages.length, 'image')} ${warped === 1 ? 'is not a pinhole image' : 'are not pinhole images'} (lens `
-          + 'distortion, self-calibrated radial terms or a film scan), so their pixels would not match the cameras. '
-          + 'Use Export ▸ Undistorted images, which writes the undistorted images with their own transforms.json.', 'error', 'Export')
+        log(
+          `transforms.json export: ${warped} of ${pluralize(transformImages.length, 'image')} ${warped === 1 ? 'is not a pinhole image' : 'are not pinhole images'} (lens ` +
+            'distortion, self-calibrated radial terms or a film scan), so their pixels would not match the cameras. ' +
+            'Use Export ▸ Undistorted images, which writes the undistorted images with their own transforms.json.',
+          'error',
+          'Export',
+        )
         return
       }
       saveJson(buildTransformsJson({ images: transformImages }), `${projectBase()}-transforms.json`)
@@ -197,8 +265,10 @@ export function createCloudExports({
     const cams = [...cloud.cameras.entries()].map(([uuid, c]) => ({ uuid, R: c.R, t: c.t, K: c.K }))
     // The points are written one at a time from the cloud itself (a lazyArray), never
     // copied into a second per-point structure first.
-    saveJson(reconstructionToJson(cams, cloud.points, currentCrs.value, { tracks: !!includeTracks }),
-      `${projectBase()}-model.json`)
+    saveJson(
+      reconstructionToJson(cams, cloud.points, currentCrs.value, { tracks: !!includeTracks }),
+      `${projectBase()}-model.json`,
+    )
   }
 
   // Sparse model → COLMAP text model (cameras/images/points3D.txt) zipped into
@@ -226,8 +296,12 @@ export function createCloudExports({
   // when the project has no georeference.
   async function tileTransform(origin, crs) {
     if (!crs || crs === 'local') {
-      log('3D Tiles: no georeference — the tileset has no place on the globe. '
-        + 'Georeference the model first for a viewer to position it.', 'warn', 'Export')
+      log(
+        '3D Tiles: no georeference — the tileset has no place on the globe. ' +
+          'Georeference the model first for a viewer to position it.',
+        'warn',
+        'Export',
+      )
       return null
     }
     await ensureProjection(crs)
@@ -247,20 +321,31 @@ export function createCloudExports({
 
   // settings { includeColor, tiling: 'lod' | 'single' | null (by size, defaultTiling),
   // tileTriangles }. The subject is tilesSubject's: the selected mesh, else a cloud.
-  async function doExportTiles3d({ includeColor = true, tiling = null, tileTriangles = EXPORT_DEFAULTS.tileTriangles } = {}) {
+  async function doExportTiles3d({
+    includeColor = true,
+    tiling = null,
+    tileTriangles = EXPORT_DEFAULTS.tileTriangles,
+  } = {}) {
     const subject = tilesSubject(selectedCloud.value, clouds.value)
     if (!subject) return
     const resolved = await effectiveFrameSpec?.()
     const g = resolved?.source === 'georef' ? { sim: resolved.frameSpec, crs: resolved.crs } : null
     let mode = tiling ?? defaultTiling(subject)
     if (mode === 'single' && !singleTileFits(subject)) {
-      log(`3D Tiles export: "${subject.cloud.name}" is ${subject.streamed ? 'streamed' : 'too large for one tile'
-      } — writing a hierarchy of tiles (level of detail) instead`, 'info', 'Export')
+      log(
+        `3D Tiles export: "${subject.cloud.name}" is ${
+          subject.streamed ? 'streamed' : 'too large for one tile'
+        } — writing a hierarchy of tiles (level of detail) instead`,
+        'info',
+        'Export',
+      )
       mode = 'lod'
     }
     if (subject.kind === 'mesh') {
       // A mesh is the tile (with its photo texture when it has one), or a tree of them.
-      return mode === 'lod' ? exportMeshTiles(subject.cloud, g, includeColor, tileTriangles) : exportMeshTile(subject.cloud, g, includeColor)
+      return mode === 'lod'
+        ? exportMeshTiles(subject.cloud, g, includeColor, tileTriangles)
+        : exportMeshTile(subject.cloud, g, includeColor)
     }
     const cloud = subject.cloud
     if (mode === 'lod') return exportCloudTiles(cloud, g, includeColor)
@@ -268,13 +353,16 @@ export function createCloudExports({
     // browser's buffer wall it cannot be built (core/bufferLimit.js; singleTileFits).
     const points = subject.count
     if (points > MAX_FLOAT64_XYZ_POINTS) {
-      log(`3D Tiles export: ${tooManyPointsMessage(`"${cloud.name}"`, points)} Export it with Tiling ▸ Level of detail.`, 'error', 'Export')
+      log(
+        `3D Tiles export: ${tooManyPointsMessage(`"${cloud.name}"`, points)} Export it with Tiling ▸ Level of detail.`,
+        'error',
+        'Export',
+      )
       return
     }
 
-    const raw = cloud.kind === 'dense'
-      ? { count: cloud.count, pos: cloud.pos, col: cloud.col }
-      : cloud.points.flatCopy()
+    const raw =
+      cloud.kind === 'dense' ? { count: cloud.count, pos: cloud.pos, col: cloud.col } : cloud.points.flatCopy()
     // Georeference first: a tileset is only placeable in the project CRS.
     const src = toFlatCloud(prepareCloudForExport(raw, { sim: g?.sim ?? null, cell: 0, onLog: log }))
 
@@ -285,15 +373,21 @@ export function createCloudExports({
     const glb = cloudToGlbPoints(src, { origin, color: includeColor })
     const { min, max } = localBounds(src, origin)
     const tileset = buildTileset({
-      transform, box: boundingBox(min, max), contentUri: 'content.glb',
+      transform,
+      box: boundingBox(min, max),
+      contentUri: 'content.glb',
     })
     const entries = [
       { name: 'tileset.json', data: JSON.stringify(tileset, null, 2) },
       { name: 'content.glb', data: glb },
     ]
     downloadBlob(`${projectBase()}-3dtiles.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
-    log(`3D Tiles export: ${src.count.toLocaleString()} points, `
-      + `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`, 'success', 'Export')
+    log(
+      `3D Tiles export: ${src.count.toLocaleString()} points, ` +
+        `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`,
+      'success',
+      'Export',
+    )
   }
 
   // A cloud as a hierarchy of tiles, one per node of its level-of-detail octree. A
@@ -304,23 +398,35 @@ export function createCloudExports({
   async function exportCloudTiles(cloud, g, includeColor) {
     const store = useReconstructionStore()
     const streamed = isStreamed(cloud)
-    let sim = g?.sim ?? null, crs = g?.crs ?? null
+    let sim = g?.sim ?? null,
+      crs = g?.crs ?? null
     if (streamed) {
       const epsg = lasEpsg(cloud.lod)
       sim = null
-      crs = epsg ? `EPSG:${epsg}` : (currentCrs.value && currentCrs.value !== 'local' ? currentCrs.value : null)
-      log(`3D Tiles export: "${cloud.name}" is streamed, so it is written in its own coordinates`
-        + `${crs ? `, placed as ${crs}${epsg ? ' (from the file)' : ' (the project CRS)'}` : ''}`, 'info', 'Export')
+      crs = epsg ? `EPSG:${epsg}` : currentCrs.value && currentCrs.value !== 'local' ? currentCrs.value : null
+      log(
+        `3D Tiles export: "${cloud.name}" is streamed, so it is written in its own coordinates` +
+          `${crs ? `, placed as ${crs}${epsg ? ' (from the file)' : ' (the project CRS)'}` : ''}`,
+        'info',
+        'Export',
+      )
     }
     const plain = (s) => (s ? JSON.parse(JSON.stringify(s)) : null)
     let input
     if (cloud.lod && (streamed || cloud.lod.points === cloud.count)) {
       input = { bounds: cloud.lod.bounds }
     } else {
-      const raw = cloud.kind === 'dense' ? { count: cloud.count, pos: cloud.pos, col: cloud.col, attributes: cloud.attributes } : cloud.points.flatCopy()
+      const raw =
+        cloud.kind === 'dense'
+          ? { count: cloud.count, pos: cloud.pos, col: cloud.col, attributes: cloud.attributes }
+          : cloud.points.flatCopy()
       if ((raw.count ?? raw.pos.length / 3) > MAX_FLOAT64_XYZ_POINTS) {
-        log(`3D Tiles export: ${tooManyPointsMessage(`"${cloud.name}"`, raw.count)} Its level-of-detail octree is not built yet: `
-          + 'save the project and wait for it, then export again.', 'error', 'Export')
+        log(
+          `3D Tiles export: ${tooManyPointsMessage(`"${cloud.name}"`, raw.count)} Its level-of-detail octree is not built yet: ` +
+            'save the project and wait for it, then export again.',
+          'error',
+          'Export',
+        )
         return
       }
       const flat = toFlatCloud(raw)
@@ -330,13 +436,25 @@ export function createCloudExports({
     const transform = await placement(origin, crs)
     const opts = { sim: plain(sim), origin, transform, color: includeColor }
     const res = input.cloud
-      ? await workerExportPointTiles({ cloud: input.cloud, ...opts },
-        { onLog: (m, l, c) => log(m, l, c ?? 'Export'), transfer: [input.cloud.pos.buffer, ...(input.cloud.col ? [input.cloud.col.buffer] : []),
-          ...Object.values(input.cloud.attributes ?? {}).map((a) => a.buffer)] })
+      ? await workerExportPointTiles(
+          { cloud: input.cloud, ...opts },
+          {
+            onLog: (m, l, c) => log(m, l, c ?? 'Export'),
+            transfer: [
+              input.cloud.pos.buffer,
+              ...(input.cloud.col ? [input.cloud.col.buffer] : []),
+              ...Object.values(input.cloud.attributes ?? {}).map((a) => a.buffer),
+            ],
+          },
+        )
       : await store.exportCloudTiles(cloud, opts)
     downloadBlob(`${projectBase()}-3dtiles.zip`, res.blob)
-    log(`3D Tiles export: "${cloud.name}", ${res.points.toLocaleString()} points in ${res.contentTiles.toLocaleString()} tiles `
-      + `(${res.levels} levels), ${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`, 'success', 'Export')
+    log(
+      `3D Tiles export: "${cloud.name}", ${res.points.toLocaleString()} points in ${res.contentTiles.toLocaleString()} tiles ` +
+        `(${res.levels} levels), ${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`,
+      'success',
+      'Export',
+    )
   }
 
   // A mesh as a hierarchy of tiles: split in space, decimated per level, the leaves
@@ -347,19 +465,49 @@ export function createCloudExports({
     const vertices = { count: cloud.nVerts, pos: cloud.pos }
     const origin = exportOrigin(localBounds(vertices), g?.sim ?? null)
     const transform = await placement(origin, crs)
-    const mesh = { nVerts: cloud.nVerts, count: cloud.count, pos: Float64Array.from(cloud.pos.subarray(0, 3 * cloud.nVerts)), idx: cloud.idx.slice(),
-      ...(cloud.col ? { col: cloud.col.slice() } : {}), ...(textured ? { uv: cloud.uv.slice() } : {}) }
+    const mesh = {
+      nVerts: cloud.nVerts,
+      count: cloud.count,
+      pos: Float64Array.from(cloud.pos.subarray(0, 3 * cloud.nVerts)),
+      idx: cloud.idx.slice(),
+      ...(cloud.col ? { col: cloud.col.slice() } : {}),
+      ...(textured ? { uv: cloud.uv.slice() } : {}),
+    }
     const texture = textured
-      ? { data: cloud.texture.data.slice(), pages: cloud.texture.pages.map((p) => ({ ...p })), groups: cloud.texture.groups.map((x) => ({ ...x })) }
+      ? {
+          data: cloud.texture.data.slice(),
+          pages: cloud.texture.pages.map((p) => ({ ...p })),
+          groups: cloud.texture.groups.map((x) => ({ ...x })),
+        }
       : null
-    const res = await workerExportMeshTiles({ mesh, texture, sim: g?.sim ? JSON.parse(JSON.stringify(g.sim)) : null, origin, transform,
-      color: includeColor, tileTriangles }, {
-      onLog: (m, l, c) => log(m, l, c ?? 'Export'),
-      transfer: [mesh.pos.buffer, mesh.idx.buffer, ...(mesh.col ? [mesh.col.buffer] : []), ...(mesh.uv ? [mesh.uv.buffer] : []), ...(texture ? [texture.data.buffer] : [])],
-    })
+    const res = await workerExportMeshTiles(
+      {
+        mesh,
+        texture,
+        sim: g?.sim ? JSON.parse(JSON.stringify(g.sim)) : null,
+        origin,
+        transform,
+        color: includeColor,
+        tileTriangles,
+      },
+      {
+        onLog: (m, l, c) => log(m, l, c ?? 'Export'),
+        transfer: [
+          mesh.pos.buffer,
+          mesh.idx.buffer,
+          ...(mesh.col ? [mesh.col.buffer] : []),
+          ...(mesh.uv ? [mesh.uv.buffer] : []),
+          ...(texture ? [texture.data.buffer] : []),
+        ],
+      },
+    )
     downloadBlob(`${projectBase()}-3dtiles.zip`, res.blob)
-    log(`3D Tiles export: mesh "${cloud.name}", ${cloud.count.toLocaleString()} triangles in ${res.tiles.toLocaleString()} tiles `
-      + `(${res.levels} levels${res.textured ? ', textured leaves' : ''}), ${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`, 'success', 'Export')
+    log(
+      `3D Tiles export: mesh "${cloud.name}", ${cloud.count.toLocaleString()} triangles in ${res.tiles.toLocaleString()} tiles ` +
+        `(${res.levels} levels${res.textured ? ', textured leaves' : ''}), ${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`,
+      'success',
+      'Export',
+    )
   }
 
   // The tile transform, or null when there is no CRS or it cannot be loaded (logged).
@@ -367,7 +515,11 @@ export function createCloudExports({
     try {
       return await tileTransform(origin, crs)
     } catch (err) {
-      log(`3D Tiles: ${crs} could not be loaded (${err?.message ?? err}) — the tileset has no place on the globe`, 'warn', 'Export')
+      log(
+        `3D Tiles: ${crs} could not be loaded (${err?.message ?? err}) — the tileset has no place on the globe`,
+        'warn',
+        'Export',
+      )
       return null
     }
   }
@@ -376,17 +528,34 @@ export function createCloudExports({
   // embedded, unlit), placed like a cloud tile.
   async function exportMeshTile(cloud, g, includeColor) {
     const textured = !!(cloud.uv && cloud.texture)
-    const mesh = prepareMeshForExport({ nVerts: cloud.nVerts, count: cloud.count, pos: cloud.pos, idx: cloud.idx,
-      col: cloud.col ?? null, uv: cloud.uv ?? null }, { sim: g?.sim ?? null })
+    const mesh = prepareMeshForExport(
+      {
+        nVerts: cloud.nVerts,
+        count: cloud.count,
+        pos: cloud.pos,
+        idx: cloud.idx,
+        col: cloud.col ?? null,
+        uv: cloud.uv ?? null,
+      },
+      { sim: g?.sim ?? null },
+    )
     const vertices = { count: mesh.nVerts, pos: mesh.pos }
     const origin = cloudCentroid(vertices)
     const crs = g?.crs ?? null
     const transform = await tileTransform(origin, crs)
-    const texture = textured ? {
-      pages: cloud.texture.pages.map((p) => ({ type: p.type, bytes: cloud.texture.data.subarray(p.offset, p.offset + p.length) })),
-      groups: cloud.texture.groups,
-    } : null
-    const glb = partsToBlob(meshToGlbParts(mesh, { color: includeColor, texture, origin, yUp: true }), 'model/gltf-binary')
+    const texture = textured
+      ? {
+          pages: cloud.texture.pages.map((p) => ({
+            type: p.type,
+            bytes: cloud.texture.data.subarray(p.offset, p.offset + p.length),
+          })),
+          groups: cloud.texture.groups,
+        }
+      : null
+    const glb = partsToBlob(
+      meshToGlbParts(mesh, { color: includeColor, texture, origin, yUp: true }),
+      'model/gltf-binary',
+    )
     const { min, max } = localBounds(vertices, origin)
     const tileset = buildTileset({ transform, box: boundingBox(min, max), contentUri: 'content.glb' })
     const entries = [
@@ -394,13 +563,24 @@ export function createCloudExports({
       { name: 'content.glb', data: glb },
     ]
     downloadBlob(`${projectBase()}-3dtiles.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
-    log(`3D Tiles export: mesh "${cloud.name}", ${cloud.count.toLocaleString()} triangles`
-      + `${textured ? `, ${texture.pages.length} texture page${texture.pages.length === 1 ? '' : 's'}` : ''}, `
-      + `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`, 'success', 'Export')
+    log(
+      `3D Tiles export: mesh "${cloud.name}", ${cloud.count.toLocaleString()} triangles` +
+        `${textured ? `, ${texture.pages.length} texture page${texture.pages.length === 1 ? '' : 's'}` : ''}, ` +
+        `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`,
+      'success',
+      'Export',
+    )
   }
 
   return {
-    sparseCloud, toFlatCloud, exportCloudCopy, logExportFrame, doExportCloud, doExportMesh,
-    doExportModel, doExportTiles3d, cloudHasPoints,
+    sparseCloud,
+    toFlatCloud,
+    exportCloudCopy,
+    logExportFrame,
+    doExportCloud,
+    doExportMesh,
+    doExportModel,
+    doExportTiles3d,
+    cloudHasPoints,
   }
 }

@@ -28,9 +28,11 @@ export function pointInPolygon(x, y, poly) {
   let inside = false
   const n = poly.length >> 1
   for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = poly[i * 2], yi = poly[i * 2 + 1]
-    const xj = poly[j * 2], yj = poly[j * 2 + 1]
-    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+    const xi = poly[i * 2],
+      yi = poly[i * 2 + 1]
+    const xj = poly[j * 2],
+      yj = poly[j * 2 + 1]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
   }
   return inside
 }
@@ -53,17 +55,25 @@ export function bandedPolygonTest(poly) {
   const bands = Math.max(0, m - 1) // band k covers [ys[k], ys[k+1])
   // First index whose height is ≥ v (v is always one of the distinct heights here).
   const lower = (v) => {
-    let lo = 0, hi = m
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (ys[mid] < v) lo = mid + 1; else hi = mid }
+    let lo = 0,
+      hi = m
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (ys[mid] < v) lo = mid + 1
+      else hi = mid
+    }
     return lo
   }
   const span = new Int32Array(n * 2) // per edge: [firstBand, endBand)
   const counts = new Int32Array(bands + 1)
   for (let i = 0, j = n - 1; i < n; j = i++) {
-    const yi = poly[i * 2 + 1], yj = poly[j * 2 + 1]
+    const yi = poly[i * 2 + 1],
+      yj = poly[j * 2 + 1]
     if (yi === yj) continue // a horizontal edge never satisfies the crossing rule
-    const a = lower(Math.min(yi, yj)), b = lower(Math.max(yi, yj))
-    span[i * 2] = a; span[i * 2 + 1] = b
+    const a = lower(Math.min(yi, yj)),
+      b = lower(Math.max(yi, yj))
+    span[i * 2] = a
+    span[i * 2 + 1] = b
     for (let k = a; k < b; k++) counts[k + 1]++
   }
   for (let k = 0; k < bands; k++) counts[k + 1] += counts[k]
@@ -76,15 +86,23 @@ export function bandedPolygonTest(poly) {
   return (x, y) => {
     // Band containing y: the last k with ys[k] ≤ y. Outside [ys[0], ys[m-1]) no
     // edge satisfies the half-open rule, exactly as in the full walk.
-    let lo = 0, hi = m
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (ys[mid] <= y) lo = mid + 1; else hi = mid }
+    let lo = 0,
+      hi = m
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (ys[mid] <= y) lo = mid + 1
+      else hi = mid
+    }
     const k = lo - 1
     if (k < 0 || k >= bands) return false
     let inside = false
     for (let e = counts[k]; e < counts[k + 1]; e++) {
-      const i = edges[e], j = i === 0 ? n - 1 : i - 1
-      const xi = poly[i * 2], yi = poly[i * 2 + 1]
-      const xj = poly[j * 2], yj = poly[j * 2 + 1]
+      const i = edges[e],
+        j = i === 0 ? n - 1 : i - 1
+      const xi = poly[i * 2],
+        yi = poly[i * 2 + 1]
+      const xj = poly[j * 2],
+        yj = poly[j * 2 + 1]
       if (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
     }
     return inside
@@ -95,18 +113,25 @@ export function bandedPolygonTest(poly) {
 // reject before the polygon walk. Returns null for a degenerate shape.
 function compileShape(shape) {
   if (shape?.kind === 'rect') {
-    const minX = Math.min(shape.x0, shape.x1), maxX = Math.max(shape.x0, shape.x1)
-    const minY = Math.min(shape.y0, shape.y1), maxY = Math.max(shape.y0, shape.y1)
+    const minX = Math.min(shape.x0, shape.x1),
+      maxX = Math.max(shape.x0, shape.x1)
+    const minY = Math.min(shape.y0, shape.y1),
+      maxY = Math.max(shape.y0, shape.y1)
     if (!(maxX > minX && maxY > minY)) return null
     return { minX, maxX, minY, maxY, test: () => true }
   }
   if (shape?.kind === 'lasso') {
     const poly = shape.points
     if (!poly || poly.length < 6) return null
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity
     for (let i = 0; i < poly.length; i += 2) {
-      if (poly[i] < minX) minX = poly[i]; if (poly[i] > maxX) maxX = poly[i]
-      if (poly[i + 1] < minY) minY = poly[i + 1]; if (poly[i + 1] > maxY) maxY = poly[i + 1]
+      if (poly[i] < minX) minX = poly[i]
+      if (poly[i] > maxX) maxX = poly[i]
+      if (poly[i + 1] < minY) minY = poly[i + 1]
+      if (poly[i + 1] > maxY) maxY = poly[i + 1]
     }
     if (!(maxX > minX && maxY > minY)) return null
     return { minX, maxX, minY, maxY, test: bandedPolygonTest(poly) }
@@ -132,7 +157,9 @@ export function screenSelectMask(pos, count, { matrix, shape, indices = null, ba
   const m = matrix
   const setTo = op === 'subtract' ? 0 : 1
   const visit = (i) => {
-    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
+    const x = pos[i * 3],
+      y = pos[i * 3 + 1],
+      z = pos[i * 3 + 2]
     const w = m[3] * x + m[7] * y + m[11] * z + m[15]
     if (!(w > 0)) return
     const zc = m[2] * x + m[6] * y + m[10] * z + m[14]
@@ -142,9 +169,15 @@ export function screenSelectMask(pos, count, { matrix, shape, indices = null, ba
     const ny = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w
     if (ny < s.minY || ny > s.maxY) return
     if (!s.test(nx, ny)) return
-    if (mask[i] !== setTo) { mask[i] = setTo; selected += setTo ? 1 : -1 }
+    if (mask[i] !== setTo) {
+      mask[i] = setTo
+      selected += setTo ? 1 : -1
+    }
   }
-  if (indices) for (let k = 0; k < indices.length; k++) { if (indices[k] < count) visit(indices[k]) }
+  if (indices)
+    for (let k = 0; k < indices.length; k++) {
+      if (indices[k] < count) visit(indices[k])
+    }
   else for (let i = 0; i < count; i++) visit(i)
   return { mask, selected }
 }

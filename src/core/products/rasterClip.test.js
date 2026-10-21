@@ -1,13 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { polygonMask, clipBounds, clipDem, clipOrtho, polygonsFromGeoJSON, normalizePolygons, polygonPixelWindow, windowGeometry } from './rasterClip.js'
+import {
+  polygonMask,
+  clipBounds,
+  clipDem,
+  clipOrtho,
+  polygonsFromGeoJSON,
+  normalizePolygons,
+  polygonPixelWindow,
+  windowGeometry,
+} from './rasterClip.js'
 
 // 10×8 grid of 2-unit cells at survey-sized coordinates.
-const ox = 5e5, oy = 7e6, gsd = 2
+const ox = 5e5,
+  oy = 7e6,
+  gsd = 2
 const geo = { width: 10, height: 8, gsd, originX: ox, originY: oy }
 // Pixel-space corner (col, row) → world [x, y].
 const W = (c, r) => [ox + c * gsd, oy - r * gsd]
 const rect = (c0, r0, c1, r1) => [W(c0, r0), W(c1, r0), W(c1, r1), W(c0, r1), W(c0, r0)]
-const count = (m) => { let n = 0; for (const v of m) n += v; return n }
+const count = (m) => {
+  let n = 0
+  for (const v of m) n += v
+  return n
+}
 
 describe('polygonMask', () => {
   it('fills a pixel-aligned square exactly, allTouched adds nothing on aligned edges', () => {
@@ -61,7 +76,12 @@ describe('polygonMask', () => {
     const ref = polygonMask(geo, [[ring]])
     expect(count(ref)).toBe(12)
     expect(polygonMask(geo, ring)).toEqual(ref)
-    expect(polygonMask(geo, ring.map(([x, y]) => ({ x, y })))).toEqual(ref)
+    expect(
+      polygonMask(
+        geo,
+        ring.map(([x, y]) => ({ x, y })),
+      ),
+    ).toEqual(ref)
     expect(polygonMask(geo, [ring])).toEqual(ref)
     expect(polygonMask(geo, { type: 'Polygon', coordinates: [ring] })).toEqual(ref)
     expect(polygonMask(geo, [ring, rect(6, 0, 8, 1)])).toEqual(polygonMask(geo, [[ring], [rect(6, 0, 8, 1)]]))
@@ -79,8 +99,11 @@ describe('polygonMask', () => {
   it('approximates a many-vertex circle area and leaves the input untouched', () => {
     const big = { width: 400, height: 400, gsd: 1, originX: 0, originY: 400 }
     const ring = []
-    for (let i = 0; i < 2000; i++) { const t = 2 * Math.PI * i / 2000; ring.push([200 + 150 * Math.cos(t), 200 + 150 * Math.sin(t)]) }
-    const copy = ring.map(p => [...p])
+    for (let i = 0; i < 2000; i++) {
+      const t = (2 * Math.PI * i) / 2000
+      ring.push([200 + 150 * Math.cos(t), 200 + 150 * Math.sin(t)])
+    }
+    const copy = ring.map((p) => [...p])
     const n = count(polygonMask(big, ring))
     expect(Math.abs(n - Math.PI * 150 * 150) / (Math.PI * 150 * 150)).toBeLessThan(0.005)
     expect(ring).toEqual(copy)
@@ -93,7 +116,17 @@ describe('clipDem', () => {
     for (let i = 0; i < 80; i++) data[i] = i
     const mask = new Uint8Array(80).fill(1)
     mask[2 * 10 + 3] = 0 // a hole inside the clip polygon
-    return { ...geo, data, mask, zMin: 0, zMax: 79, count: 79, crs: 'EPSG:3031', previewUrl: 'stale', previewBlob: 'stale' }
+    return {
+      ...geo,
+      data,
+      mask,
+      zMin: 0,
+      zMax: 79,
+      count: 79,
+      crs: 'EPSG:3031',
+      previewUrl: 'stale',
+      previewBlob: 'stale',
+    }
   }
 
   it('crops with exact origin arithmetic and keeps holes as holes', () => {
@@ -185,28 +218,132 @@ describe('polygonsFromGeoJSON', () => {
     const fc = {
       type: 'FeatureCollection',
       features: [
-        { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]], [[1, 1], [2, 1], [2, 2], [1, 1]]] } },
-        { type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: [[[[10, 10], [11, 10], [11, 11], [10, 10]]], [[[20, 20], [21, 20], [21, 21]]]] } },
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [
+              [
+                [0, 0],
+                [4, 0],
+                [4, 4],
+                [0, 4],
+                [0, 0],
+              ],
+              [
+                [1, 1],
+                [2, 1],
+                [2, 2],
+                [1, 1],
+              ],
+            ],
+          },
+        },
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'MultiPolygon',
+            coordinates: [
+              [
+                [
+                  [10, 10],
+                  [11, 10],
+                  [11, 11],
+                  [10, 10],
+                ],
+              ],
+              [
+                [
+                  [20, 20],
+                  [21, 20],
+                  [21, 21],
+                ],
+              ],
+            ],
+          },
+        },
         { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [1, 2] } },
-        { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] } },
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [0, 0],
+              [1, 1],
+            ],
+          },
+        },
         { type: 'Feature', properties: {}, geometry: null },
-        { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 1], [0, 0]]] } }, // degenerate
+        {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [
+              [
+                [0, 0],
+                [1, 1],
+                [0, 0],
+              ],
+            ],
+          },
+        }, // degenerate
       ],
     }
     const { polygons, ignored } = polygonsFromGeoJSON(fc)
     expect(polygons).toHaveLength(3)
     expect(ignored).toBe(4)
-    expect(polygons[0][0]).toEqual([[0, 0], [4, 0], [4, 4], [0, 4]])
-    expect(polygons[0][1]).toEqual([[1, 1], [2, 1], [2, 2]])
-    expect(polygons[2][0]).toEqual([[20, 20], [21, 20], [21, 21]])
+    expect(polygons[0][0]).toEqual([
+      [0, 0],
+      [4, 0],
+      [4, 4],
+      [0, 4],
+    ])
+    expect(polygons[0][1]).toEqual([
+      [1, 1],
+      [2, 1],
+      [2, 2],
+    ])
+    expect(polygons[2][0]).toEqual([
+      [20, 20],
+      [21, 20],
+      [21, 21],
+    ])
   })
 
   it('accepts a bare geometry, a Feature and a GeometryCollection', () => {
-    const poly = { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] }
+    const poly = {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+          [0, 0],
+        ],
+      ],
+    }
     expect(polygonsFromGeoJSON(poly).polygons).toHaveLength(1)
     expect(polygonsFromGeoJSON({ type: 'Feature', geometry: poly }).polygons).toHaveLength(1)
-    const gc = polygonsFromGeoJSON({ type: 'GeometryCollection', geometries: [poly, { type: 'Point', coordinates: [0, 0] }] })
-    expect(gc).toEqual({ polygons: [[[[0, 0], [1, 0], [1, 1]]]], ignored: 1 })
+    const gc = polygonsFromGeoJSON({
+      type: 'GeometryCollection',
+      geometries: [poly, { type: 'Point', coordinates: [0, 0] }],
+    })
+    expect(gc).toEqual({
+      polygons: [
+        [
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+          ],
+        ],
+      ],
+      ignored: 1,
+    })
     expect(normalizePolygons({ type: 'Feature', geometry: poly })).toEqual(gc.polygons)
   })
 })
@@ -216,21 +353,42 @@ describe('polygonPixelWindow (clipping a file-backed ortho)', () => {
   const plane = () => Uint8Array.from({ length: 40 * 30 * 4 }, (_, i) => (i * 7) % 256)
   const crop = (data, w, win) => {
     const out = new Uint8Array(win.width * win.height * 4)
-    for (let r = 0; r < win.height; r++) out.set(data.subarray(((win.row0 + r) * w + win.col0) * 4, ((win.row0 + r) * w + win.col0 + win.width) * 4), r * win.width * 4)
+    for (let r = 0; r < win.height; r++)
+      out.set(
+        data.subarray(((win.row0 + r) * w + win.col0) * 4, ((win.row0 + r) * w + win.col0 + win.width) * 4),
+        r * win.width * 4,
+      )
     return out
   }
-  const tri = [[ox + 13.3, oy - 9.1], [ox + 51.7, oy - 22.4], [ox + 20.2, oy - 47.9]]
+  const tri = [
+    [ox + 13.3, oy - 9.1],
+    [ox + 51.7, oy - 22.4],
+    [ox + 20.2, oy - 47.9],
+  ]
   it.each([{}, { allTouched: true }])('a window read clips exactly as the whole plane does: %j', (opts) => {
     const data = plane()
     const whole = clipOrtho({ ...big, data }, [tri], opts)
     const win = polygonPixelWindow(big, [tri])
-    expect(win.width * win.height).toBeLessThan(big.width * big.height / 2)
+    expect(win.width * win.height).toBeLessThan((big.width * big.height) / 2)
     const part = clipOrtho({ ...windowGeometry(big, win), data: crop(data, big.width, win) }, [tri], opts)
-    expect([part.width, part.height, part.originX, part.originY]).toEqual([whole.width, whole.height, whole.originX, whole.originY])
+    expect([part.width, part.height, part.originX, part.originY]).toEqual([
+      whole.width,
+      whole.height,
+      whole.originX,
+      whole.originY,
+    ])
     expect([...part.data]).toEqual([...whole.data])
     expect(part.clip.insideCells).toBe(whole.clip.insideCells)
   })
   it('is null when the polygons miss the raster', () => {
-    expect(polygonPixelWindow(big, [[[ox - 50, oy + 50], [ox - 40, oy + 50], [ox - 40, oy + 40]]])).toBeNull()
+    expect(
+      polygonPixelWindow(big, [
+        [
+          [ox - 50, oy + 50],
+          [ox - 40, oy + 50],
+          [ox - 40, oy + 40],
+        ],
+      ]),
+    ).toBeNull()
   })
 })

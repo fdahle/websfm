@@ -18,7 +18,10 @@ describe('nextMarkId', () => {
 describe('duplicateMarkIds', () => {
   it('lists each repeated id once', () => {
     expect(duplicateMarkIds([{ id: 'F1' }, { id: 'F2' }])).toEqual([])
-    expect(duplicateMarkIds([{ id: 'F1' }, { id: 'F1' }, { id: 'F2' }, { id: 'F1' }, { id: 'F2' }])).toEqual(['F1', 'F2'])
+    expect(duplicateMarkIds([{ id: 'F1' }, { id: 'F1' }, { id: 'F2' }, { id: 'F1' }, { id: 'F2' }])).toEqual([
+      'F1',
+      'F2',
+    ])
   })
 
   it('ignores blank ids', () => {

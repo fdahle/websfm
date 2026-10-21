@@ -25,9 +25,8 @@ function close() {
     <div class="bw-body">
       <div class="bw-title">This browser may not be fully supported</div>
       <p class="bw-text">
-        websfm works best in a Chromium-based browser (Chrome, Edge). Some
-        features — notably GPU-accelerated depth maps (WebGPU) — may be
-        slower or unavailable here.
+        websfm works best in a Chromium-based browser (Chrome, Edge). Some features — notably GPU-accelerated depth maps
+        (WebGPU) — may be slower or unavailable here.
       </p>
       <label class="bw-check">
         <input type="checkbox" v-model="dontShowAgain" />
@@ -56,10 +55,23 @@ function close() {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   font-size: 13px;
 }
-.bw-icon { font-size: 18px; line-height: 1.2; }
-.bw-body { flex: 1; min-width: 0; }
-.bw-title { font-weight: 600; margin-bottom: 4px; }
-.bw-text { margin: 0 0 8px; color: var(--text-dim); line-height: 1.4; }
+.bw-icon {
+  font-size: 18px;
+  line-height: 1.2;
+}
+.bw-body {
+  flex: 1;
+  min-width: 0;
+}
+.bw-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.bw-text {
+  margin: 0 0 8px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
 .bw-check {
   display: flex;
   align-items: center;
@@ -78,5 +90,7 @@ function close() {
   padding: 2px 4px;
   line-height: 1;
 }
-.bw-close:hover { color: var(--text); }
+.bw-close:hover {
+  color: var(--text);
+}
 </style>

@@ -15,117 +15,138 @@ import { useProjectsStore } from './useProjectsStore.js'
 //   a) opening a different project starts from that project's own console,
 //   b) reopening a project restores the tail it had when you left, and
 //   c) no line is ever lost to the buffer cap — only shifted out of view.
-export const useLogStore = registerProjectStore(defineStore('log', () => {
-  const { entries, onLog, takePending, MAX_BUFFER } = useLog()
-  const projects = useProjectsStore()
+export const useLogStore = registerProjectStore(
+  defineStore('log', () => {
+    const { entries, onLog, takePending, MAX_BUFFER } = useLog()
+    const projects = useProjectsStore()
 
-  const isPersisting = () => projects.isPersisting
+    const isPersisting = () => projects.isPersisting
 
-  // Debounced, single-flight appender. Logging bursts (hundreds of lines during
-  // a pipeline), so coalesce into batched appends ~0.8s after activity. Appends
-  // must serialise — each reads the file size to seek to the end — so keep ≤1 in
-  // flight with a trailing re-run, like the document saver (utils/documentSaver.js), but appending.
-  let timer = null
-  let inFlight = false
-  let again = false
-  function cancelTimer() {
-    if (timer) { clearTimeout(timer); timer = null }
-  }
-  function schedule() {
-    if (!isPersisting()) return
-    cancelTimer()
-    timer = setTimeout(flush, 800)
-  }
-  async function flush() {
-    cancelTimer()
-    if (inFlight) { again = true; return }
-    const pid = projects.currentProjectId
-    // Not attributable to a project (pre-open boot logs): drop from the queue so
-    // it can't grow unbounded, but leave the display window intact.
-    if (!isPersisting() || !pid) { takePending(); return }
-    const batch = takePending()
-    if (batch.length === 0) return
-    inFlight = true
-    try { await opfs.appendLog(pid, batch) } catch {}
-    inFlight = false
-    if (again) { again = false; flush() }
-  }
-  // Every logged line schedules a flush; the queue itself lives in useLog.
-  onLog(schedule)
-
-  // Await all queued lines onto disk — used before reading the stream (export /
-  // scroll-back) so the file reflects everything currently displayed.
-  async function flushNow() {
-    cancelTimer()
-    while (inFlight) await new Promise(r => setTimeout(r, 20))
-    const pid = projects.currentProjectId
-    if (!isPersisting() || !pid) { takePending(); return }
-    const batch = takePending()
-    if (batch.length === 0) return
-    inFlight = true
-    try { await opfs.appendLog(pid, batch) } catch {}
-    inFlight = false
-  }
-
-  // The complete stream for this project (export + scroll-back read from here).
-  async function readAll() {
-    const pid = projects.currentProjectId
-    if (!pid) return []
-    await flushNow()
-    return (await opfs.readLog(pid)) || []
-  }
-
-  // Project-store contract: load this project's saved console.
-  //
-  // Seeds the display with the *tail* of the stream (last MAX_BUFFER lines),
-  // placed in front of whatever restore-time messages have already accumulated
-  // this open (sensors/images restore before us), so the user sees prior history
-  // followed by the fresh restore activity. Unlike the old whole-array save,
-  // appends are incremental, so no de-duplication is needed here.
-  async function restore({ projectId }) {
-    cancelTimer()
-    const saved = await opfs.readLogTail(projectId, MAX_BUFFER)
-    if (!Array.isArray(saved) || saved.length === 0) return
-    entries.value = [...saved, ...entries.value]
-    if (entries.value.length > MAX_BUFFER) entries.value = entries.value.slice(-MAX_BUFFER)
-  }
-
-  // Project-store contract: reset the console. On a plain clear (leaving a
-  // project) flush any queued lines; on a purge (new project / delete) drop the
-  // saved stream entirely. The lifecycle flushes the project being left BEFORE
-  // switching (flushProjectWork), so lines still queued here were logged after
-  // currentProjectId moved and belong to the project being opened.
-  function clear(opts = {}) {
-    cancelTimer()
-    const pid = projects.currentProjectId
-    if (opts.purge) {
-      takePending()
-      if (isPersisting() && pid) opfs.deleteLog(pid).catch(() => {})
-    } else {
-      const batch = takePending()
-      if (isPersisting() && pid && batch.length) opfs.appendLog(pid, batch).catch(() => {})
+    // Debounced, single-flight appender. Logging bursts (hundreds of lines during
+    // a pipeline), so coalesce into batched appends ~0.8s after activity. Appends
+    // must serialise — each reads the file size to seek to the end — so keep ≤1 in
+    // flight with a trailing re-run, like the document saver (utils/documentSaver.js), but appending.
+    let timer = null
+    let inFlight = false
+    let again = false
+    function cancelTimer() {
+      if (timer) {
+        clearTimeout(timer)
+        timer = null
+      }
     }
-    entries.value = []
-  }
+    function schedule() {
+      if (!isPersisting()) return
+      cancelTimer()
+      timer = setTimeout(flush, 800)
+    }
+    async function flush() {
+      cancelTimer()
+      if (inFlight) {
+        again = true
+        return
+      }
+      const pid = projects.currentProjectId
+      // Not attributable to a project (pre-open boot logs): drop from the queue so
+      // it can't grow unbounded, but leave the display window intact.
+      if (!isPersisting() || !pid) {
+        takePending()
+        return
+      }
+      const batch = takePending()
+      if (batch.length === 0) return
+      inFlight = true
+      try {
+        await opfs.appendLog(pid, batch)
+      } catch {}
+      inFlight = false
+      if (again) {
+        again = false
+        flush()
+      }
+    }
+    // Every logged line schedules a flush; the queue itself lives in useLog.
+    onLog(schedule)
 
-  // User "Clear" button: wipe both the display and the on-disk stream for the
-  // current project (distinct from the lifecycle clear() above, which preserves
-  // the file when leaving a project).
-  async function clearConsole() {
-    cancelTimer()
-    takePending()
-    entries.value = []
-    const pid = projects.currentProjectId
-    if (isPersisting() && pid) await opfs.truncateLog(pid).catch(() => {})
-  }
+    // Await all queued lines onto disk — used before reading the stream (export /
+    // scroll-back) so the file reflects everything currently displayed.
+    async function flushNow() {
+      cancelTimer()
+      while (inFlight) await new Promise((r) => setTimeout(r, 20))
+      const pid = projects.currentProjectId
+      if (!isPersisting() || !pid) {
+        takePending()
+        return
+      }
+      const batch = takePending()
+      if (batch.length === 0) return
+      inFlight = true
+      try {
+        await opfs.appendLog(pid, batch)
+      } catch {}
+      inFlight = false
+    }
 
-  return {
-    // project-store contract
-    clear,
-    restore,
-    // console-facing API
-    flushNow,
-    readAll,
-    clearConsole,
-  }
-}))
+    // The complete stream for this project (export + scroll-back read from here).
+    async function readAll() {
+      const pid = projects.currentProjectId
+      if (!pid) return []
+      await flushNow()
+      return (await opfs.readLog(pid)) || []
+    }
+
+    // Project-store contract: load this project's saved console.
+    //
+    // Seeds the display with the *tail* of the stream (last MAX_BUFFER lines),
+    // placed in front of whatever restore-time messages have already accumulated
+    // this open (sensors/images restore before us), so the user sees prior history
+    // followed by the fresh restore activity. Unlike the old whole-array save,
+    // appends are incremental, so no de-duplication is needed here.
+    async function restore({ projectId }) {
+      cancelTimer()
+      const saved = await opfs.readLogTail(projectId, MAX_BUFFER)
+      if (!Array.isArray(saved) || saved.length === 0) return
+      entries.value = [...saved, ...entries.value]
+      if (entries.value.length > MAX_BUFFER) entries.value = entries.value.slice(-MAX_BUFFER)
+    }
+
+    // Project-store contract: reset the console. On a plain clear (leaving a
+    // project) flush any queued lines; on a purge (new project / delete) drop the
+    // saved stream entirely. The lifecycle flushes the project being left BEFORE
+    // switching (flushProjectWork), so lines still queued here were logged after
+    // currentProjectId moved and belong to the project being opened.
+    function clear(opts = {}) {
+      cancelTimer()
+      const pid = projects.currentProjectId
+      if (opts.purge) {
+        takePending()
+        if (isPersisting() && pid) opfs.deleteLog(pid).catch(() => {})
+      } else {
+        const batch = takePending()
+        if (isPersisting() && pid && batch.length) opfs.appendLog(pid, batch).catch(() => {})
+      }
+      entries.value = []
+    }
+
+    // User "Clear" button: wipe both the display and the on-disk stream for the
+    // current project (distinct from the lifecycle clear() above, which preserves
+    // the file when leaving a project).
+    async function clearConsole() {
+      cancelTimer()
+      takePending()
+      entries.value = []
+      const pid = projects.currentProjectId
+      if (isPersisting() && pid) await opfs.truncateLog(pid).catch(() => {})
+    }
+
+    return {
+      // project-store contract
+      clear,
+      restore,
+      // console-facing API
+      flushNow,
+      readAll,
+      clearConsole,
+    }
+  }),
+)

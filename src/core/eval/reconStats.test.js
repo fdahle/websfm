@@ -4,7 +4,15 @@ import { SparsePoints } from '../sfm/sparsePoints.js'
 
 // Identity camera at the origin looking down +z, K = { fx, fy, cx, cy }.
 const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
-const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K }
+const cam = {
+  R: [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ],
+  t: [0, 0, 0],
+  K,
+}
 
 function makePoint(x, y, z, viewsMap, viewsPxMap) {
   return { x, y, z, views: viewsMap, viewsPx: viewsPxMap }
@@ -13,9 +21,26 @@ function makePoint(x, y, z, viewsMap, viewsPxMap) {
 describe('trackLengthHistogram', () => {
   it('bins by view count with a stable 2..7 + 8+ axis', () => {
     const pts = SparsePoints.fromRecords([
-      makePoint(0, 0, 1, new Map([['a', 0]])),                       // 1 view — ignored
-      makePoint(0, 0, 1, new Map([['a', 0], ['b', 1]])),             // 2
-      makePoint(0, 0, 1, new Map([['a', 0], ['b', 1], ['c', 2]])),   // 3
+      makePoint(0, 0, 1, new Map([['a', 0]])), // 1 view — ignored
+      makePoint(
+        0,
+        0,
+        1,
+        new Map([
+          ['a', 0],
+          ['b', 1],
+        ]),
+      ), // 2
+      makePoint(
+        0,
+        0,
+        1,
+        new Map([
+          ['a', 0],
+          ['b', 1],
+          ['c', 2],
+        ]),
+      ), // 3
       makePoint(0, 0, 1, new Map(Array.from({ length: 9 }, (_, i) => [String(i), i]))), // 9 → 8+
     ])
     const h = trackLengthHistogram(pts)
@@ -50,9 +75,20 @@ describe('reprojectionStats', () => {
   it('skips observations for absent cameras and points without viewsPx', () => {
     const cams = new Map([['a', cam]])
     const pts = SparsePoints.fromRecords([
-      makePoint(0, 0, 10, new Map([['a', 0], ['ghost', 1]]),
-        new Map([['a', [500, 400]], ['ghost', [0, 0]]])),   // ghost cam skipped
-      makePoint(0, 0, 10, new Map([['a', 0]]), undefined),   // no viewsPx → skipped
+      makePoint(
+        0,
+        0,
+        10,
+        new Map([
+          ['a', 0],
+          ['ghost', 1],
+        ]),
+        new Map([
+          ['a', [500, 400]],
+          ['ghost', [0, 0]],
+        ]),
+      ), // ghost cam skipped
+      makePoint(0, 0, 10, new Map([['a', 0]]), undefined), // no viewsPx → skipped
     ])
     const s = reprojectionStats(cams, pts)
     expect(s.n).toBe(1)

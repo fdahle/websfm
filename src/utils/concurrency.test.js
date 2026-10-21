@@ -17,9 +17,11 @@ describe('mapConcurrent', () => {
   })
 
   it('rejects when a worker rejects', async () => {
-    await expect(mapConcurrent([1, 2, 3], 2, async (value) => {
-      if (value === 2) throw new Error('failed')
-      return value
-    })).rejects.toThrow('failed')
+    await expect(
+      mapConcurrent([1, 2, 3], 2, async (value) => {
+        if (value === 2) throw new Error('failed')
+        return value
+      }),
+    ).rejects.toThrow('failed')
   })
 })

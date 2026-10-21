@@ -18,17 +18,28 @@ beforeAll(async () => {
   await initRecon({ module_or_path: await readFile(fileURLToPath(wasmUrl)) })
 })
 
-const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+const I = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+]
 
 // `nVec`/`D` give the plane N·X = D (N facing the camera, nz < 0); the default is the
 // steep, deep one.
 function planeScene(nVec = [0, -0.8, -0.6], D = -1.5) {
-  const W = 160, H = 120
+  const W = 160,
+    H = 120
   const K = { fx: 120, fy: 120, cx: W / 2, cy: H / 2 }
   const m = Math.hypot(...nVec)
   const N = nVec.map((x) => x / m)
   // Several incommensurate wave directions: no repetition the matcher could lock onto.
-  const waves = [[9.1, 3.3, 0.2], [-4.7, 11.3, 1.1], [17.9, -6.1, 2.3], [5.3, 21.7, 0.7], [27.1, 13.9, 1.9]]
+  const waves = [
+    [9.1, 3.3, 0.2],
+    [-4.7, 11.3, 1.1],
+    [17.9, -6.1, 2.3],
+    [5.3, 21.7, 0.7],
+    [27.1, 13.9, 1.9],
+  ]
   const tex = (x, z) => {
     let s = 0
     for (const [a, b, ph] of waves) s += Math.sin(a * x + b * z + ph)
@@ -38,27 +49,38 @@ function planeScene(nVec = [0, -0.8, -0.6], D = -1.5) {
   const render = (t) => {
     // Camera at world C = −t (R = I): plane in its frame is N·Xc = D + N·t.
     const Dc = D + N[0] * t[0] + N[1] * t[1] + N[2] * t[2]
-    const gray = new Uint8Array(W * H), depth = new Float64Array(W * H)
-    for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
-      const r = [(u - K.cx) / K.fx, (v - K.cy) / K.fy, 1]
-      const Z = Dc / (N[0] * r[0] + N[1] * r[1] + N[2])
-      depth[v * W + u] = Z
-      gray[v * W + u] = clip(tex(Z * r[0] - t[0], Z - t[2]))
-    }
+    const gray = new Uint8Array(W * H),
+      depth = new Float64Array(W * H)
+    for (let v = 0; v < H; v++)
+      for (let u = 0; u < W; u++) {
+        const r = [(u - K.cx) / K.fx, (v - K.cy) / K.fy, 1]
+        const Z = Dc / (N[0] * r[0] + N[1] * r[1] + N[2])
+        depth[v * W + u] = Z
+        gray[v * W + u] = clip(tex(Z * r[0] - t[0], Z - t[2]))
+      }
     return { gray, depth }
   }
   const ref = render([0, 0, 0])
-  const srcT = [[-0.3, 0, 0], [0.3, 0, 0], [0, -0.2, 0]]
+  const srcT = [
+    [-0.3, 0, 0],
+    [0.3, 0, 0],
+    [0, -0.2, 0],
+  ]
   const sources = srcT.map((t) => ({ gray: render(t).gray, w: W, h: H, K, cam: { R: I, t } }))
   // Sparse support: a sprinkle of true surface points (as the SfM cloud would give).
   const points = []
-  for (let v = 4; v < H; v += 13) for (let u = 5; u < W; u += 17) {
-    const Z = ref.depth[v * W + u]
-    points.push({ x: Z * (u - K.cx) / K.fx, y: Z * (v - K.cy) / K.fy, z: Z })
-  }
+  for (let v = 4; v < H; v += 13)
+    for (let u = 5; u < W; u += 17) {
+      const Z = ref.depth[v * W + u]
+      points.push({ x: (Z * (u - K.cx)) / K.fx, y: (Z * (v - K.cy)) / K.fy, z: Z })
+    }
   return {
     ref: { gray: ref.gray, width: W, height: H, K, cam: { R: I, t: [0, 0, 0] } },
-    sources, points: SparsePoints.fromRecords(points), gt: ref.depth, W, H,
+    sources,
+    points: SparsePoints.fromRecords(points),
+    gt: ref.depth,
+    W,
+    H,
   }
 }
 
@@ -66,10 +88,11 @@ function planeScene(nVec = [0, -0.8, -0.6], D = -1.5) {
 function score(dm, gt, W, H) {
   const errs = []
   const b = 6 // skip the window-wide border, where sources leave the frame
-  for (let v = b; v < H - b; v++) for (let u = b; u < W - b; u++) {
-    const i = v * W + u
-    errs.push(Math.abs(dm.depth[i] - gt[i]) / gt[i])
-  }
+  for (let v = b; v < H - b; v++)
+    for (let u = b; u < W - b; u++) {
+      const i = v * W + u
+      errs.push(Math.abs(dm.depth[i] - gt[i]) / gt[i])
+    }
   errs.sort((a, c) => a - c)
   const within = (tol) => errs.filter((e) => e <= tol).length / errs.length
   return { within1: within(0.01), within02: within(0.002), median: errs[errs.length >> 1] }
@@ -78,7 +101,12 @@ function score(dm, gt, W, H) {
 describe('PatchMatch refinement on a deep scene (real WASM kernel)', () => {
   const run = async (settings, plane = []) => {
     const s = planeScene(...plane)
-    const dm = await depthMapForImage(s.ref, s.sources, packSparseForDense(s.points).pos, { window: 3, iterations: 3, bestK: 2, ...settings })
+    const dm = await depthMapForImage(s.ref, s.sources, packSparseForDense(s.points).pos, {
+      window: 3,
+      iterations: 3,
+      bestK: 2,
+      ...settings,
+    })
     return score(dm, s.gt, s.W, s.H)
   }
   // Measured 2026-10-08 (share of pixels within 1 % / 0.2 %, median error), deep scene:

@@ -11,16 +11,29 @@
 // source minus sink: the cut pays tr[i] when i ends on the sink side if tr[i] > 0, and
 // −tr[i] when it ends on the source side if tr[i] < 0.
 
-const NONE = -1, TERMINAL = 4, ORPHAN = 5
+const NONE = -1,
+  TERMINAL = 4,
+  ORPHAN = 5
 
 export function createGridGraph(w, h) {
-  const W = w + 2, n = W * (h + 2)
+  const W = w + 2,
+    n = W * (h + 2)
   return {
-    w, h, W, n, uw: w, uh: h,
-    cap: new Float64Array(4 * n), tr: new Float64Array(n),
+    w,
+    h,
+    W,
+    n,
+    uw: w,
+    uh: h,
+    cap: new Float64Array(4 * n),
+    tr: new Float64Array(n),
     // Search state, kept for reuse between solves of the same size.
-    parent: new Int8Array(n), isSink: new Uint8Array(n), ts: new Int32Array(n), dist: new Int32Array(n),
-    nextActive: new Int32Array(n), orphans: new Int32Array(n),
+    parent: new Int8Array(n),
+    isSink: new Uint8Array(n),
+    ts: new Int32Array(n),
+    dist: new Int32Array(n),
+    nextActive: new Int32Array(n),
+    orphans: new Int32Array(n),
   }
 }
 
@@ -30,8 +43,12 @@ export const gridNode = (g, c, r) => (r + 1) * g.W + c + 1
 // Zero the capacities for the next problem on the same graph, which uses only its
 // top-left uw × uh cells (the rest stays isolated and is not visited).
 export function resetGridGraph(g, uw = g.w, uh = g.h) {
-  g.uw = uw; g.uh = uh
-  for (let r = 0; r < uh + 2; r++) { g.cap.fill(0, 4 * r * g.W, 4 * (r * g.W + uw + 2)); g.tr.fill(0, r * g.W, r * g.W + uw + 2) }
+  g.uw = uw
+  g.uh = uh
+  for (let r = 0; r < uh + 2; r++) {
+    g.cap.fill(0, 4 * r * g.W, 4 * (r * g.W + uw + 2))
+    g.tr.fill(0, r * g.W, r * g.W + uw + 2)
+  }
 }
 
 // Max flow; afterwards inSinkSet(g, i) says which side of the minimum cut node i is on
@@ -39,13 +56,16 @@ export function resetGridGraph(g, uw = g.w, uh = g.h) {
 export function gridMaxflow(g) {
   const { cap, tr, parent, isSink, ts, dist, nextActive, orphans, n, W } = g
   const off = [1, -1, W, -W]
-  let flow = 0, time = 0
+  let flow = 0,
+    time = 0
   // Active queue: a FIFO threaded through nextActive (−2 = not queued, −1 = last).
-  let first = -1, last = -1
+  let first = -1,
+    last = -1
   const activate = (i) => {
     if (nextActive[i] !== -2) return
     nextActive[i] = -1
-    if (last >= 0) nextActive[last] = i; else first = i
+    if (last >= 0) nextActive[last] = i
+    else first = i
     last = i
   }
   const popActive = () => {
@@ -57,59 +77,107 @@ export function gridMaxflow(g) {
     return i
   }
   // Orphans: a ring buffer (a node is queued at most once per adoption phase).
-  let oHead = 0, oCount = 0
-  const orphan = (i) => { parent[i] = ORPHAN; orphans[(oHead + oCount++) % n] = i }
+  let oHead = 0,
+    oCount = 0
+  const orphan = (i) => {
+    parent[i] = ORPHAN
+    orphans[(oHead + oCount++) % n] = i
+  }
 
   // The used part and its ring, exactly what resetGridGraph cleared: no arc leads
   // further (the ring's capacities are zero), so nothing else is ever visited.
-  for (let r = 0; r < g.uh + 2; r++) for (let c = 0; c < g.uw + 2; c++) {
-    const i = r * W + c
-    nextActive[i] = -2; ts[i] = 0; dist[i] = 0
-    if (tr[i] > 0) { parent[i] = TERMINAL; isSink[i] = 0; dist[i] = 1; activate(i) }
-    else if (tr[i] < 0) { parent[i] = TERMINAL; isSink[i] = 1; dist[i] = 1; activate(i) }
-    else { parent[i] = NONE; isSink[i] = 0 }
-  }
+  for (let r = 0; r < g.uh + 2; r++)
+    for (let c = 0; c < g.uw + 2; c++) {
+      const i = r * W + c
+      nextActive[i] = -2
+      ts[i] = 0
+      dist[i] = 0
+      if (tr[i] > 0) {
+        parent[i] = TERMINAL
+        isSink[i] = 0
+        dist[i] = 1
+        activate(i)
+      } else if (tr[i] < 0) {
+        parent[i] = TERMINAL
+        isSink[i] = 1
+        dist[i] = 1
+        activate(i)
+      } else {
+        parent[i] = NONE
+        isSink[i] = 0
+      }
+    }
 
   let current = -1
   for (;;) {
     let i = current
     if (i >= 0 && parent[i] === NONE) i = -1
     if (i < 0) {
-      do { i = popActive() } while (i >= 0 && parent[i] === NONE)
+      do {
+        i = popActive()
+      } while (i >= 0 && parent[i] === NONE)
       if (i < 0) break
     }
     // Grow the tree of i; stop at the first arc into the other tree.
-    let mu = -1, md = -1 // the middle arc, from its source-tree end mu in direction md
+    let mu = -1,
+      md = -1 // the middle arc, from its source-tree end mu in direction md
     if (!isSink[i]) {
       for (let d = 0; d < 4; d++) {
         if (!(cap[4 * i + d] > 0)) continue
         const j = i + off[d]
         if (parent[j] === NONE) {
-          isSink[j] = 0; parent[j] = d ^ 1; ts[j] = ts[i]; dist[j] = dist[i] + 1; activate(j)
-        } else if (isSink[j]) { mu = i; md = d; break }
-        else if (ts[j] <= ts[i] && dist[j] > dist[i]) { parent[j] = d ^ 1; ts[j] = ts[i]; dist[j] = dist[i] + 1 }
+          isSink[j] = 0
+          parent[j] = d ^ 1
+          ts[j] = ts[i]
+          dist[j] = dist[i] + 1
+          activate(j)
+        } else if (isSink[j]) {
+          mu = i
+          md = d
+          break
+        } else if (ts[j] <= ts[i] && dist[j] > dist[i]) {
+          parent[j] = d ^ 1
+          ts[j] = ts[i]
+          dist[j] = dist[i] + 1
+        }
       }
     } else {
       for (let d = 0; d < 4; d++) {
         const j = i + off[d]
         if (!(cap[4 * j + (d ^ 1)] > 0)) continue
         if (parent[j] === NONE) {
-          isSink[j] = 1; parent[j] = d ^ 1; ts[j] = ts[i]; dist[j] = dist[i] + 1; activate(j)
-        } else if (!isSink[j]) { mu = j; md = d ^ 1; break }
-        else if (ts[j] <= ts[i] && dist[j] > dist[i]) { parent[j] = d ^ 1; ts[j] = ts[i]; dist[j] = dist[i] + 1 }
+          isSink[j] = 1
+          parent[j] = d ^ 1
+          ts[j] = ts[i]
+          dist[j] = dist[i] + 1
+          activate(j)
+        } else if (!isSink[j]) {
+          mu = j
+          md = d ^ 1
+          break
+        } else if (ts[j] <= ts[i] && dist[j] > dist[i]) {
+          parent[j] = d ^ 1
+          ts[j] = ts[i]
+          dist[j] = dist[i] + 1
+        }
       }
     }
     time++
-    if (mu < 0) { current = -1; continue }
+    if (mu < 0) {
+      current = -1
+      continue
+    }
     current = i
 
     // Augment along source … mu → mv … sink by the path's bottleneck.
     const mv = mu + off[md]
-    let b = cap[4 * mu + md], x = mu
+    let b = cap[4 * mu + md],
+      x = mu
     for (;;) {
       const p = parent[x]
       if (p === TERMINAL) break
-      const y = x + off[p], c = cap[4 * y + (p ^ 1)]
+      const y = x + off[p],
+        c = cap[4 * y + (p ^ 1)]
       if (c < b) b = c
       x = y
     }
@@ -123,20 +191,31 @@ export function gridMaxflow(g) {
       x += off[p]
     }
     if (-tr[x] < b) b = -tr[x]
-    cap[4 * mu + md] -= b; cap[4 * mv + (md ^ 1)] += b
+    cap[4 * mu + md] -= b
+    cap[4 * mv + (md ^ 1)] += b
     for (x = mu; ;) {
       const p = parent[x]
-      if (p === TERMINAL) { tr[x] -= b; if (!tr[x]) orphan(x); break }
+      if (p === TERMINAL) {
+        tr[x] -= b
+        if (!tr[x]) orphan(x)
+        break
+      }
       const y = x + off[p]
-      cap[4 * y + (p ^ 1)] -= b; cap[4 * x + p] += b
+      cap[4 * y + (p ^ 1)] -= b
+      cap[4 * x + p] += b
       if (!cap[4 * y + (p ^ 1)]) orphan(x)
       x = y
     }
     for (x = mv; ;) {
       const p = parent[x]
-      if (p === TERMINAL) { tr[x] += b; if (!tr[x]) orphan(x); break }
+      if (p === TERMINAL) {
+        tr[x] += b
+        if (!tr[x]) orphan(x)
+        break
+      }
       const y = x + off[p]
-      cap[4 * x + p] -= b; cap[4 * y + (p ^ 1)] += b
+      cap[4 * x + p] -= b
+      cap[4 * y + (p ^ 1)] += b
       if (!cap[4 * x + p]) orphan(x)
       x = y
     }
@@ -146,32 +225,58 @@ export function gridMaxflow(g) {
     // terminal (the shortest such), or free it and orphan its children.
     time++
     while (oCount) {
-      const o = orphans[oHead]; oHead = (oHead + 1) % n; oCount--
+      const o = orphans[oHead]
+      oHead = (oHead + 1) % n
+      oCount--
       const sink = isSink[o]
-      let best = -1, dmin = Infinity
+      let best = -1,
+        dmin = Infinity
       for (let d = 0; d < 4; d++) {
         const j = o + off[d]
         if (isSink[j] !== sink || parent[j] === NONE) continue
         if (!(sink ? cap[4 * o + d] > 0 : cap[4 * j + (d ^ 1)] > 0)) continue
         // Does j's path still reach the terminal? Count its length on the way.
-        let dd = 0, y = j
+        let dd = 0,
+          y = j
         for (;;) {
-          if (ts[y] === time) { dd += dist[y]; break }
+          if (ts[y] === time) {
+            dd += dist[y]
+            break
+          }
           const p = parent[y]
           dd++
-          if (p === TERMINAL) { ts[y] = time; dist[y] = 1; break }
-          if (p === ORPHAN) { dd = Infinity; break }
+          if (p === TERMINAL) {
+            ts[y] = time
+            dist[y] = 1
+            break
+          }
+          if (p === ORPHAN) {
+            dd = Infinity
+            break
+          }
           y += off[p]
         }
         if (dd === Infinity) continue
-        if (dd < dmin) { best = d; dmin = dd }
-        for (y = j; ts[y] !== time; y += off[parent[y]]) { ts[y] = time; dist[y] = dd--; }
+        if (dd < dmin) {
+          best = d
+          dmin = dd
+        }
+        for (y = j; ts[y] !== time; y += off[parent[y]]) {
+          ts[y] = time
+          dist[y] = dd--
+        }
       }
-      if (best >= 0) { parent[o] = best; ts[o] = time; dist[o] = dmin + 1; continue }
+      if (best >= 0) {
+        parent[o] = best
+        ts[o] = time
+        dist[o] = dmin + 1
+        continue
+      }
       // No parent: o leaves its tree. Neighbours that could reach it become active,
       // and its own children become orphans.
       for (let d = 0; d < 4; d++) {
-        const j = o + off[d], p = parent[j]
+        const j = o + off[d],
+          p = parent[j]
         if (isSink[j] !== sink || p === NONE) continue
         if (sink ? cap[4 * o + d] > 0 : cap[4 * j + (d ^ 1)] > 0) activate(j)
         if (p !== TERMINAL && p !== ORPHAN && j + off[p] === o) orphan(j)

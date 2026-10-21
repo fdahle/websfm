@@ -19,7 +19,10 @@ function setup({ stored = null, make, persisting = true, healImage = vi.fn(async
     imageById: (id) => images.find((i) => i.id === id) ?? null,
     currentProjectId: () => 'p1',
     isPersisting: () => persisting,
-    trackWrite: (p) => { writes.push(p); return p },
+    trackWrite: (p) => {
+      writes.push(p)
+      return p
+    },
     log: vi.fn(),
     healImage,
     make: make ?? vi.fn(async () => ({ blob: new Blob(['jpg'], { type: 'image/jpeg' }), width: 256, height: 192 })),
@@ -66,7 +69,9 @@ describe('image thumbnails', () => {
   })
 
   it('a failed decode is not retried in a loop', async () => {
-    const make = vi.fn(async () => { throw new Error('bad pixels') })
+    const make = vi.fn(async () => {
+      throw new Error('bad pixels')
+    })
     const { images, t } = setup({ make })
     expect(await t.requestThumbnail(images[0])).toBeNull()
     expect(await t.requestThumbnail(images[0])).toBeNull()
@@ -93,8 +98,9 @@ describe('image thumbnails', () => {
     await t.requestThumbnail(images[0])
     t.reportThumbnailError('a')
     expect(images[0].thumb).toBeNull()
-    await flush(); await flush()
-    expect(make).toHaveBeenCalledTimes(1)          // regenerated, not re-read from storage
+    await flush()
+    await flush()
+    expect(make).toHaveBeenCalledTimes(1) // regenerated, not re-read from storage
     expect(images[0].thumb.blob).not.toBe(stored)
     t.reportThumbnailError('a')
     await flush()
@@ -105,8 +111,13 @@ describe('image thumbnails', () => {
 
   it('reset drops queued work and discards results of running jobs', async () => {
     let release
-    const gate = new Promise((r) => { release = r })
-    const make = vi.fn(async () => { await gate; return { blob: new Blob(['late']) } })
+    const gate = new Promise((r) => {
+      release = r
+    })
+    const make = vi.fn(async () => {
+      await gate
+      return { blob: new Blob(['late']) }
+    })
     const { images, t } = setup({ make })
     const running = t.requestThumbnail(images[0])
     await flush()

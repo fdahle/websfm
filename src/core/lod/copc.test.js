@@ -2,7 +2,13 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import init, { LazDecoder, decompress_points } from '../../wasm/lazcodec/lazcodec.js'
 import {
-  readCopcInfo, readCopcMeta, openCopcSource, parseHierarchyPage, crsFromWkt, crsFromGeoKeys, copcReadsInPlace,
+  readCopcInfo,
+  readCopcMeta,
+  openCopcSource,
+  parseHierarchyPage,
+  crsFromWkt,
+  crsFromGeoKeys,
+  copcReadsInPlace,
 } from './copc.js'
 import { openCloudSource, lodFileNames, isCopcLod } from './cloudSource.js'
 import { planExtract, extractPoints } from './extract.js'
@@ -43,10 +49,22 @@ describe('COPC file', () => {
     expect(isCopcLod(lod)).toBe(true)
     expect(lod).toMatchObject({ points: 24_000, nodeCount: 5, levels: 2, dataBytes: bytes.length })
     expect(lod.layout.colour).toBe(true)
-    expect(lod.layout.attributes.map((a) => a.name)).toEqual(['intensity', 'classification', 'returnNumber', 'numberOfReturns'])
+    expect(lod.layout.attributes.map((a) => a.name)).toEqual([
+      'intensity',
+      'classification',
+      'returnNumber',
+      'numberOfReturns',
+    ])
     expect(lod.layout.scale).toEqual([0.01, 0.01, 0.01])
     expect(lod.copc).toMatchObject({ pointFormat: 7, recordLength: 36, rgbBits: 16 })
-    expect(lod.file).toMatchObject({ version: '1.4', format: 7, laz: true, copc: true, crs: 'EPSG:25832', crsName: 'ETRS89 / UTM zone 32N' })
+    expect(lod.file).toMatchObject({
+      version: '1.4',
+      format: 7,
+      laz: true,
+      copc: true,
+      crs: 'EPSG:25832',
+      crsName: 'ETRS89 / UTM zone 32N',
+    })
     expect(lod.file.projection.map((v) => v.recordId)).toEqual([2112])
     // Every point is in the top two levels, so the statistics are exact.
     expect(lod.stats.sampled).toBeUndefined()
@@ -101,8 +119,12 @@ describe('COPC file', () => {
   }, 30_000)
 
   it('serves box reads and a LAS export as a cloud source', async () => {
-    const lod = { ...await readCopcMeta(source, { createChunkDecoder }), dataFile: 'x.copc.laz', hierarchyFile: null }
-    const reader = await openCloudSource(JSON.parse(JSON.stringify(lod)), { data: new Blob([bytes]) }, { createChunkDecoder })
+    const lod = { ...(await readCopcMeta(source, { createChunkDecoder })), dataFile: 'x.copc.laz', hierarchyFile: null }
+    const reader = await openCloudSource(
+      JSON.parse(JSON.stringify(lod)),
+      { data: new Blob([bytes]) },
+      { createChunkDecoder },
+    )
     const box = { min: [480040, 5200020, null], max: [480070, 5200050, null] }
     const plan = planExtract(reader.nodes, lod, { box })
     const cloud = await extractPoints(reader, plan, lod, { box, classes: new Set([6]) })
@@ -128,9 +150,12 @@ describe('COPC hierarchy pages', () => {
   // A root page whose child (1,0,0,0) lives in a second page, read when the root is.
   function pagedFile() {
     const entry = (key, offset, length, count) => {
-      const b = new Uint8Array(32), dv = new DataView(b.buffer)
+      const b = new Uint8Array(32),
+        dv = new DataView(b.buffer)
       key.forEach((v, k) => dv.setInt32(4 * k, v, true))
-      dv.setBigUint64(16, BigInt(offset), true); dv.setInt32(24, length, true); dv.setInt32(28, count, true)
+      dv.setBigUint64(16, BigInt(offset), true)
+      dv.setInt32(24, length, true)
+      dv.setInt32(28, count, true)
       return b
     }
     const file = new Uint8Array(200)
@@ -141,14 +166,27 @@ describe('COPC hierarchy pages', () => {
     file.set(entry([2, 0, 0, 0], 0, 0, 2), 132)
     return { size: file.length, read: async (a, b) => file.slice(a, b) }
   }
-  const lod = { root: { min: [0, 0, 0], size: 8 }, spacing: 1, layout: { offset: [0, 0, 0], scale: [1, 1, 1], colour: false, attributes: [] },
-    copc: { rootPage: { offset: 0, length: 96 }, lazVlr: '' } }
-  const readNode = async (node) => ({ count: node.count, pos: new Float32Array(3 * node.count), col: null, attributes: {} })
+  const lod = {
+    root: { min: [0, 0, 0], size: 8 },
+    spacing: 1,
+    layout: { offset: [0, 0, 0], scale: [1, 1, 1], colour: false, attributes: [] },
+    copc: { rootPage: { offset: 0, length: 96 }, lazVlr: '' },
+  }
+  const readNode = async (node) => ({
+    count: node.count,
+    pos: new Float32Array(3 * node.count),
+    col: null,
+    attributes: {},
+  })
 
   it('parses entries, with -1 for a page', () => {
     const src = pagedFile()
     return src.read(0, 96).then((b) => {
-      expect(parseHierarchyPage(b).map((e) => [e.key.join(), e.count])).toEqual([['0,0,0,0', 10], ['1,0,0,0', -1], ['1,1,0,0', 3]])
+      expect(parseHierarchyPage(b).map((e) => [e.key.join(), e.count])).toEqual([
+        ['0,0,0,0', 10],
+        ['1,0,0,0', -1],
+        ['1,1,0,0', 3],
+      ])
     })
   })
 
@@ -172,12 +210,22 @@ describe('COPC hierarchy pages', () => {
 
 describe('CRS from the projection records', () => {
   it('reads EPSG codes from WKT 1, WKT 2 and compound CRSs', () => {
-    expect(crsFromWkt('PROJCS["ETRS89 / UTM zone 32N",GEOGCS["ETRS89",AUTHORITY["EPSG","4258"]],UNIT["metre",1],AUTHORITY["EPSG","25832"]]'))
-      .toEqual({ name: 'ETRS89 / UTM zone 32N', epsg: 'EPSG:25832' })
-    expect(crsFromWkt('COMPD_CS["RD New + NAP",PROJCS["Amersfoort / RD New",GEOGCS["Amersfoort",AUTHORITY["EPSG","4289"]],AUTHORITY["EPSG","28992"]],'
-      + 'VERT_CS["NAP height",AUTHORITY["EPSG","5709"]],AUTHORITY["EPSG","7415"]]')).toEqual({ name: 'Amersfoort / RD New', epsg: 'EPSG:28992' })
-    expect(crsFromWkt('PROJCRS["WGS 84 / UTM zone 33N",BASEGEOGCRS["WGS 84",ID["EPSG",4326]],CONVERSION["UTM zone 33N",ID["EPSG",16033]],ID["EPSG",32633]]'))
-      .toEqual({ name: 'WGS 84 / UTM zone 33N', epsg: 'EPSG:32633' })
+    expect(
+      crsFromWkt(
+        'PROJCS["ETRS89 / UTM zone 32N",GEOGCS["ETRS89",AUTHORITY["EPSG","4258"]],UNIT["metre",1],AUTHORITY["EPSG","25832"]]',
+      ),
+    ).toEqual({ name: 'ETRS89 / UTM zone 32N', epsg: 'EPSG:25832' })
+    expect(
+      crsFromWkt(
+        'COMPD_CS["RD New + NAP",PROJCS["Amersfoort / RD New",GEOGCS["Amersfoort",AUTHORITY["EPSG","4289"]],AUTHORITY["EPSG","28992"]],' +
+          'VERT_CS["NAP height",AUTHORITY["EPSG","5709"]],AUTHORITY["EPSG","7415"]]',
+      ),
+    ).toEqual({ name: 'Amersfoort / RD New', epsg: 'EPSG:28992' })
+    expect(
+      crsFromWkt(
+        'PROJCRS["WGS 84 / UTM zone 33N",BASEGEOGCRS["WGS 84",ID["EPSG",4326]],CONVERSION["UTM zone 33N",ID["EPSG",16033]],ID["EPSG",32633]]',
+      ),
+    ).toEqual({ name: 'WGS 84 / UTM zone 33N', epsg: 'EPSG:32633' })
     expect(crsFromWkt('LOCAL_CS["site"]')).toBe(null)
     expect(crsFromWkt('not wkt')).toBe(null)
   })
@@ -190,7 +238,7 @@ describe('CRS from the projection records', () => {
 
 describe('COPC as a 3D Tiles source', () => {
   it('writes one tile per non-empty node with every point, placed by its WKT record', async () => {
-    const lod = { ...await readCopcMeta(source, { createChunkDecoder }), dataFile: 'x.copc.laz', hierarchyFile: null }
+    const lod = { ...(await readCopcMeta(source, { createChunkDecoder })), dataFile: 'x.copc.laz', hierarchyFile: null }
     const blob = new Blob([bytes])
     const reader = await openCloudSource(lod, { data: blob }, { createChunkDecoder, hierarchy: 'all' })
     const names = []

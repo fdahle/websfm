@@ -42,12 +42,29 @@ const dontAskAgain = ref(false)
 <style scoped>
 /* Above the project picker (z 300), which asks through this dialog too; the
    shell's own overlay is z 200. Two classes outrank the shell's `.overlay`. */
-.overlay.confirm-overlay { z-index: 350; }
-.message { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
-.dont-ask {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--text-dim); cursor: pointer;
+.overlay.confirm-overlay {
+  z-index: 350;
 }
-.btn-danger { background: #c0453a; border-color: #c0453a; color: #fff; }
-.btn-danger:hover { opacity: 0.88; }
+.message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.dont-ask {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.btn-danger {
+  background: #c0453a;
+  border-color: #c0453a;
+  color: #fff;
+}
+.btn-danger:hover {
+  opacity: 0.88;
+}
 </style>

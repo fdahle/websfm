@@ -59,7 +59,11 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
  */
 export function deviceBudget({ deviceMemoryGB = null, jsHeapLimitBytes = null } = {}) {
   if (Number.isFinite(deviceMemoryGB) && deviceMemoryGB > 0) {
-    const budgetBytes = clamp(deviceMemoryGB * GiB * DEVICE_MEMORY_FRACTION, MIN_DEVICE_BUDGET_BYTES, MAX_DEVICE_BUDGET_BYTES)
+    const budgetBytes = clamp(
+      deviceMemoryGB * GiB * DEVICE_MEMORY_FRACTION,
+      MIN_DEVICE_BUDGET_BYTES,
+      MAX_DEVICE_BUDGET_BYTES,
+    )
     return {
       budgetBytes,
       deviceMemoryGB,
@@ -85,7 +89,6 @@ export function deviceBudget({ deviceMemoryGB = null, jsHeapLimitBytes = null } 
     note: `Device budget ${formatBytes(DEFAULT_BUDGET_BYTES)} — no memory API available (Safari/Firefox); using the conservative default.`,
   }
 }
-
 
 // A tagged allocation ledger. track()/release() by tag; used() is the current
 // live total; peak() the high-water mark. Re-tracking a live tag replaces its
@@ -136,8 +139,14 @@ export function createMemLedger() {
 // Working dims are the maxDim² upper bound (longest side = maxDim, other ≤ it).
 // Returns a byte breakdown { store, raster, gpu, filter, total }.
 export function projectDensePeakBytes({
-  nImages, maxDim, nSources = 6, backend = 'wasm', rasterBytesPerPx = 4, retainedMaps = nImages,
-  filterMaps = retainedMaps, pixels = null,
+  nImages,
+  maxDim,
+  nSources = 6,
+  backend = 'wasm',
+  rasterBytesPerPx = 4,
+  retainedMaps = nImages,
+  filterMaps = retainedMaps,
+  pixels = null,
 }) {
   // Per-image working pixels when the sizes are known (workingPixels); else the
   // maxDim² upper bound, which counts a 2 : 1 frame at twice its size (the KH-9
@@ -149,7 +158,7 @@ export function projectDensePeakBytes({
   const some = (count) => (count >= px.length ? sum : count * largest)
   const store = 23 * some(retainedMaps) // depth 4 + cost 4 + rgb 3 + normals 12
   const raster = rasterBytesPerPx * sum
-  const gpu = backend === 'gpu' ? (48 * largest + nSources * 4 * largest) : 0
+  const gpu = backend === 'gpu' ? 48 * largest + nSources * 4 * largest : 0
   const filter = some(filterMaps)
   return { store, raster, gpu, filter, total: store + raster + gpu + filter }
 }
@@ -201,8 +210,8 @@ export function densifyInputBytes(maps, { streamed = false, residency = 1 } = {}
   }
   let bytes = 0
   for (const m of maps) {
-    bytes += (m.depth?.byteLength || 0) + (m.cost?.byteLength || 0)
-      + (m.rgb?.byteLength || 0) + (m.normals?.byteLength || 0)
+    bytes +=
+      (m.depth?.byteLength || 0) + (m.cost?.byteLength || 0) + (m.rgb?.byteLength || 0) + (m.normals?.byteLength || 0)
   }
   return bytes * residency
 }
@@ -221,7 +230,8 @@ export function densifyInputBytes(maps, { streamed = false, residency = 1 } = {}
 // accumulator.
 // Returns { input, accumulator, finished, assemble, total, cells, tileCells, workers }.
 export function projectDensifyPeakBytes({ inputBytes, cells, tileCells = cells, workers = 1 }) {
-  const t = Math.min(tileCells, cells), k = Math.max(1, workers)
+  const t = Math.min(tileCells, cells),
+    k = Math.max(1, workers)
   const live = Math.min(cells, k * t)
   const input = k * inputBytes
   const accumulator = live * DENSIFY_CELL_BYTES

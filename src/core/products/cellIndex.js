@@ -8,7 +8,8 @@
 const EMPTY = -1
 
 function hashOf(key, mask) {
-  const lo = key % 4294967296, hi = (key - lo) / 4294967296
+  const lo = key % 4294967296,
+    hi = (key - lo) / 4294967296
   return (Math.imul(lo | 0, 0x9e3779b1) ^ Math.imul(hi | 0, 0x85ebca77)) & mask
 }
 
@@ -26,24 +27,32 @@ export function createCellIndex(capacityHint = 1024) {
     return s
   }
   function grow() {
-    const oldKeys = keys, oldVals = vals
+    const oldKeys = keys,
+      oldVals = vals
     cap *= 2
     keys = new Float64Array(cap).fill(EMPTY)
     vals = new Int32Array(cap)
     for (let i = 0; i < oldKeys.length; i++) {
       if (oldKeys[i] === EMPTY) continue
       const s = slotOf(oldKeys[i])
-      keys[s] = oldKeys[i]; vals[s] = oldVals[i]
+      keys[s] = oldKeys[i]
+      vals[s] = oldVals[i]
     }
   }
   return {
-    get size() { return size },
+    get size() {
+      return size
+    },
     // Insert or overwrite.
     set(key, value) {
       let s = slotOf(key)
       if (keys[s] === EMPTY) {
-        if (2 * (size + 1) > cap) { grow(); s = slotOf(key) }
-        keys[s] = key; size++
+        if (2 * (size + 1) > cap) {
+          grow()
+          s = slotOf(key)
+        }
+        keys[s] = key
+        size++
       }
       vals[s] = value
     },

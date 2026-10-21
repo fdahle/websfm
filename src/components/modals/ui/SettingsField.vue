@@ -20,7 +20,9 @@ defineProps({
       <span class="field-unit">{{ unit }}</span>
     </div>
     <slot v-else />
-    <span v-if="hint || $slots.hint" class="field-hint"><slot name="hint">{{ hint }}</slot></span>
+    <span v-if="hint || $slots.hint" class="field-hint"
+      ><slot name="hint">{{ hint }}</slot></span
+    >
   </div>
 </template>
 

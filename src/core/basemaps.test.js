@@ -33,7 +33,9 @@ describe('terrain hillshade', () => {
     const out = new Uint8ClampedArray(elevations.length * 4)
     elevations.forEach((e, i) => {
       const v = e + 32768
-      out[i * 4] = Math.floor(v / 256); out[i * 4 + 1] = Math.floor(v) % 256; out[i * 4 + 2] = Math.round((v % 1) * 256)
+      out[i * 4] = Math.floor(v / 256)
+      out[i * 4 + 1] = Math.floor(v) % 256
+      out[i * 4 + 2] = Math.round((v % 1) * 256)
       out[i * 4 + 3] = 255
     })
     return out
@@ -44,11 +46,14 @@ describe('terrain hillshade', () => {
   })
 
   it('shades flat ground evenly and lights a north-west slope more than a south-east one', () => {
-    const w = 8, h = 8, z = 14, y = 8000
+    const w = 8,
+      h = 8,
+      z = 14,
+      y = 8000
     const flat = hillshade(new Float32Array(w * h), w, h, z, y)
     expect(new Set([...flat].filter((_, i) => i % 4 === 0)).size).toBe(1)
     // Elevation rising towards the south-east: the slope faces the north-west sun.
-    const facingNw = Float32Array.from({ length: w * h }, (_, i) => (i % w + Math.floor(i / w)) * 5)
+    const facingNw = Float32Array.from({ length: w * h }, (_, i) => ((i % w) + Math.floor(i / w)) * 5)
     const facingSe = facingNw.map((e) => -e)
     expect(hillshade(facingNw, w, h, z, y)[0]).toBeGreaterThan(flat[0])
     expect(hillshade(facingSe, w, h, z, y)[0]).toBeLessThan(flat[0])

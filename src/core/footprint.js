@@ -13,13 +13,16 @@
 // down with image x→east, y→north. Row-major 3×3.
 export function opkMatrix(omegaDeg, phiDeg, kappaDeg) {
   const d = Math.PI / 180
-  const co = Math.cos(omegaDeg * d), so = Math.sin(omegaDeg * d)
-  const cp = Math.cos(phiDeg   * d), sp = Math.sin(phiDeg   * d)
-  const ck = Math.cos(kappaDeg * d), sk = Math.sin(kappaDeg * d)
+  const co = Math.cos(omegaDeg * d),
+    so = Math.sin(omegaDeg * d)
+  const cp = Math.cos(phiDeg * d),
+    sp = Math.sin(phiDeg * d)
+  const ck = Math.cos(kappaDeg * d),
+    sk = Math.sin(kappaDeg * d)
   return [
-    [ cp * ck,              -cp * sk,               sp      ],
-    [ co * sk + so * sp * ck,  co * ck - so * sp * sk, -so * cp ],
-    [ so * sk - co * sp * ck,  so * ck + co * sp * sk,  co * cp ],
+    [cp * ck, -cp * sk, sp],
+    [co * sk + so * sp * ck, co * ck - so * sp * sk, -so * cp],
+    [so * sk - co * sp * ck, so * ck + co * sp * sk, co * cp],
   ]
 }
 
@@ -62,7 +65,7 @@ export function projectPixelToGround(u, v, { Mt, center, focal, cx, cy, groundZ,
   const dz = Mt[2][0] * vx + Mt[2][1] * vy + Mt[2][2] * vz
   if (dz === 0) return null
   const s = (groundZ - center[2]) / dz
-  if (s <= 0) return null   // plane is behind the camera along this ray
+  if (s <= 0) return null // plane is behind the camera along this ray
   // Reject a near-horizontal (grazing) ray: its depression below horizontal is
   // asin(-dz / |d|). Too shallow ⇒ the intersection is implausibly far.
   if (minSinDepression > 0) {
@@ -89,7 +92,7 @@ export function projectFootprint(pose, sensor, groundZ) {
   const { width, height } = sensor
   if (!(focal > 0) || !(width > 0) || !(height > 0)) return { error: 'invalid' }
   if (pose.x == null || pose.y == null || pose.z == null || groundZ == null) return { error: 'invalid' }
-  if (groundZ >= pose.z) return { error: 'below_plane' }   // camera must be above the plane
+  if (groundZ >= pose.z) return { error: 'below_plane' } // camera must be above the plane
 
   const cx = sensor.cx ?? width / 2
   const cy = sensor.cy ?? height / 2
@@ -103,14 +106,19 @@ export function projectFootprint(pose, sensor, groundZ) {
   const minSinDepression = Math.sin((MIN_RAY_DEPRESSION_DEG * Math.PI) / 180)
   const ctx = { Mt, center: [pose.x, pose.y, pose.z], focal, cx, cy, groundZ, minSinDepression }
 
-  const corners = [[0, 0], [width, 0], [width, height], [0, height]]
+  const corners = [
+    [0, 0],
+    [width, 0],
+    [width, height],
+    [0, height],
+  ]
   const ring = []
   for (const [u, v] of corners) {
     const g = projectPixelToGround(u, v, ctx)
     if (!g) return { error: 'diverges' }
     ring.push(g)
   }
-  ring.push([ring[0][0], ring[0][1]])   // close the ring (GeoJSON convention)
+  ring.push([ring[0][0], ring[0][1]]) // close the ring (GeoJSON convention)
   return { rings: [ring] }
 }
 
@@ -142,7 +150,8 @@ export async function projectFootprintOnTerrain(pose, sensor, heightAt) {
   if (first.error) return first
 
   const { width, height, focal } = sensor
-  const cx = sensor.cx ?? width / 2, cy = sensor.cy ?? height / 2
+  const cx = sensor.cx ?? width / 2,
+    cy = sensor.cy ?? height / 2
   const M = opkMatrix(pose.omega ?? 0, pose.phi ?? 0, pose.kappa ?? 0)
   // Ray height above the terrain at parameter s along direction d, or null.
   const above = async (d, s) => {
@@ -151,16 +160,23 @@ export async function projectFootprintOnTerrain(pose, sensor, heightAt) {
   }
 
   const ring = []
-  for (const [u, v] of [[0, 0], [width, 0], [width, height], [0, height]]) {
+  for (const [u, v] of [
+    [0, 0],
+    [width, 0],
+    [width, height],
+    [0, height],
+  ]) {
     // Object-space direction Mᵀ · [u − cx, −(v − cy), −focal], as projectPixelToGround.
     const r = [u - cx, -(v - cy), -focal]
     const d = [0, 1, 2].map((i) => M[0][i] * r[0] + M[1][i] * r[1] + M[2][i] * r[2])
-    let s0 = 0, f0 = pose.z - below
+    let s0 = 0,
+      f0 = pose.z - below
     let s1 = (below - pose.z) / d[2]
     let f1 = await above(d, s1)
     // Still above the ground at the first guess: the terrain falls away, go farther.
     for (let k = 0; f1 != null && f1 > 0 && k < 8; k++) {
-      s0 = s1; f0 = f1
+      s0 = s1
+      f0 = f1
       s1 *= 2
       f1 = await above(d, s1)
     }
@@ -168,19 +184,24 @@ export async function projectFootprintOnTerrain(pose, sensor, heightAt) {
     if (f1 > 0) return { error: 'diverges' }
     let side = 0
     for (let k = 0; k < TERRAIN_MAX_ITER && Math.abs(f1) >= TERRAIN_TOL; k++) {
-      const s = s1 - f1 * (s1 - s0) / (f1 - f0)
+      const s = s1 - (f1 * (s1 - s0)) / (f1 - f0)
       const f = await above(d, s)
       if (f == null) return { error: 'off_terrain' }
       if (f > 0) {
-        s0 = s; f0 = f
+        s0 = s
+        f0 = f
         if (side === 1) f1 /= 2
         side = 1
       } else {
-        s1 = s; f1 = f
+        s1 = s
+        f1 = f
         if (side === -1) f0 /= 2
         side = -1
       }
-      if (Math.abs(f) < TERRAIN_TOL) { s1 = s; f1 = f }
+      if (Math.abs(f) < TERRAIN_TOL) {
+        s1 = s
+        f1 = f
+      }
     }
     ring.push([pose.x + s1 * d[0], pose.y + s1 * d[1]])
   }

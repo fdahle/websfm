@@ -20,19 +20,16 @@ const emit = defineEmits(['connect', 'repick', 'cancel'])
 </script>
 
 <template>
-  <ModalShell
-    :title="mode === 'repick' ? 'Find project folder' : 'Reconnect project folder'"
-    @close="emit('cancel')"
-  >
+  <ModalShell :title="mode === 'repick' ? 'Find project folder' : 'Reconnect project folder'" @close="emit('cancel')">
     <p class="message">
       <strong>{{ projectName }}</strong> keeps its files in a folder on this computer<template v-if="folderName">
-        (<code>{{ folderName }}</code>)</template>.
+        (<code>{{ folderName }}</code
+        >)</template
+      >.
       <template v-if="mode === 'repick'">
         websfm can no longer reach it — the folder may have been moved, renamed or removed.
       </template>
-      <template v-else>
-        Your browser needs your permission before websfm can read it again.
-      </template>
+      <template v-else> Your browser needs your permission before websfm can read it again. </template>
     </p>
 
     <WarnBox v-if="error">{{ error }}</WarnBox>
@@ -40,9 +37,7 @@ const emit = defineEmits(['connect', 'repick', 'cancel'])
     <template #footer>
       <button class="btn" @click="emit('cancel')">Cancel</button>
       <button class="btn" @click="emit('repick')">Choose folder…</button>
-      <button v-if="mode !== 'repick'" class="btn btn-primary" @click="emit('connect')">
-        Connect
-      </button>
+      <button v-if="mode !== 'repick'" class="btn btn-primary" @click="emit('connect')">Connect</button>
     </template>
   </ModalShell>
 </template>

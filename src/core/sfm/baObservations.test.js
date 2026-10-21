@@ -2,8 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { mapObservations } from './baObservations.js'
 
 describe('mapObservations', () => {
-  const list = () => ({ n: 3, cam: Int32Array.of(0, 1, 0), pt: Int32Array.of(0, 0, 1),
-    x: Float64Array.of(1, 2, 3), y: Float64Array.of(4, 5, 6), wx: null, wy: null })
+  const list = () => ({
+    n: 3,
+    cam: Int32Array.of(0, 1, 0),
+    pt: Int32Array.of(0, 0, 1),
+    x: Float64Array.of(1, 2, 3),
+    y: Float64Array.of(4, 5, 6),
+    wx: null,
+    wy: null,
+  })
 
   it("moves only the mapped cameras' pixels, leaving the input untouched", () => {
     const obs = list()

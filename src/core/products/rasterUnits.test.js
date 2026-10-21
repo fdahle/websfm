@@ -26,7 +26,9 @@ describe('rasterGroundScale', () => {
   it('is 1 for a local frame and null for a geographic CRS', async () => {
     expect(await rasterGroundScale(productDescriptor(dem), 'local')).toBe(1)
     expect(await rasterGroundScale(productDescriptor(dem), null)).toBe(1)
-    expect(await rasterGroundScale(productDescriptor({ ...dem, originX: 10, originY: 50, gsd: 0.01 }), 'EPSG:4326')).toBeNull()
+    expect(
+      await rasterGroundScale(productDescriptor({ ...dem, originX: 10, originY: 50, gsd: 0.01 }), 'EPSG:4326'),
+    ).toBeNull()
   })
 
   it('is the UTM scale factor near the central meridian', async () => {

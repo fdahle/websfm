@@ -1,9 +1,29 @@
 import { computeSourceOf } from '../../utils/image.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
-import { qualityToMaxDim, fitDepthQuality, filterConfig, filterSettings, logFilterCache, logFilterTotals, emptyFilterTotals, mergeFusionCounters, logFusionStream, finishFusion } from '../../core/dense/mvs.js'
+import {
+  qualityToMaxDim,
+  fitDepthQuality,
+  filterConfig,
+  filterSettings,
+  logFilterCache,
+  logFilterTotals,
+  emptyFilterTotals,
+  mergeFusionCounters,
+  logFusionStream,
+  finishFusion,
+} from '../../core/dense/mvs.js'
 import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
-import { computeDepthMaps as workerComputeDepthMaps, depthBackend as workerDepthBackend, POOL_SIZE, terminateAll, releaseIdleWorkers, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
+import {
+  computeDepthMaps as workerComputeDepthMaps,
+  depthBackend as workerDepthBackend,
+  POOL_SIZE,
+  terminateAll,
+  releaseIdleWorkers,
+  filterDepthMaps as workerFilterDepthMaps,
+  densify as workerDensify,
+  meshify as workerMeshify,
+} from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes, projectDensePeakBytes, workingPixels } from '../../core/dense/memBudget.js'
 import { contiguousChunks, depthWorkerCount, mergeDepthSummaries } from '../../core/dense/depthSplit.js'
@@ -20,10 +40,31 @@ import { pluralize } from '../../core/textFormat.js'
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createDense({
-  beginStreamedDepthMaps, clipToRegion, clouds, denseSummary, depthMapInput, depthMaps,
-  depthMapsMeta, depthSummary, images, imagesStore, isPersisting, loadDepthIndexIntoMeta, log,
-  mainSparseCloud, meshSource, meshSources, save, persistDepthMaps, projects, reconStatus,
-  sensors, summary, upsertDenseCloud, upsertMeshCloud, withRegion,
+  beginStreamedDepthMaps,
+  clipToRegion,
+  clouds,
+  denseSummary,
+  depthMapInput,
+  depthMaps,
+  depthMapsMeta,
+  depthSummary,
+  images,
+  imagesStore,
+  isPersisting,
+  loadDepthIndexIntoMeta,
+  log,
+  mainSparseCloud,
+  meshSource,
+  meshSources,
+  save,
+  persistDepthMaps,
+  projects,
+  reconStatus,
+  sensors,
+  summary,
+  upsertDenseCloud,
+  upsertMeshCloud,
+  withRegion,
 }) {
   // Dense Stage A — Build Depth Maps. Runs PatchMatch MVS in the worker over the
   // sparse cloud's registered cameras, stores the raw depth maps for fusion, and
@@ -63,7 +104,11 @@ export function createDense({
       // defines it. Fail loudly if a film image is in the cloud but its transform
       // is missing (a stale/partial summary would silently mis-warp its raster).
       const fidByUuid = new Map(
-        (summary.value?.fiducialTransforms ?? []).map((t) => [t.uuid, { A: t.A, transform: t.transform ?? null, frame: t.frame }]))
+        (summary.value?.fiducialTransforms ?? []).map((t) => [
+          t.uuid,
+          { A: t.A, transform: t.transform ?? null, frame: t.frame },
+        ]),
+      )
       const inputImages = []
       for (const [uuid, cam] of cloud.cameras) {
         const im = imgByUuid.get(uuid)
@@ -79,14 +124,17 @@ export function createDense({
           const nObs = im.fiducialDetections?.length || 0
           let why
           if (nMarks < 3) {
-            why = `its detected fiducials are not calibrated (${nMarks} metric marks, need ≥3) — `
-              + `run Calibrate Fiducials, then re-run the sparse reconstruction`
+            why =
+              `its detected fiducials are not calibrated (${nMarks} metric marks, need ≥3) — ` +
+              `run Calibrate Fiducials, then re-run the sparse reconstruction`
           } else if (nObs < 3) {
-            why = `this image has ${pluralize(nObs, 'accepted fiducial detection')} (need ≥3) — `
-              + `run Detect Fiducials or review its spots, then re-run the sparse reconstruction`
+            why =
+              `this image has ${pluralize(nObs, 'accepted fiducial detection')} (need ≥3) — ` +
+              `run Detect Fiducials or review its spots, then re-run the sparse reconstruction`
           } else {
-            why = `the last sparse run produced no interior-orientation transform for it — `
-              + `re-run the sparse reconstruction before densifying`
+            why =
+              `the last sparse run produced no interior-orientation transform for it — ` +
+              `re-run the sparse reconstruction before densifying`
           }
           log(`Dense: ${im.name} skipped — ${why}.`, 'error', 'Dense')
           continue
@@ -99,7 +147,9 @@ export function createDense({
         // self-cal bag applied after it — null when self-cal was off for it.
         const { dist, selfCal } = frameModel(im)
         inputImages.push({
-          uuid, name: im.name, url: computeSourceOf(im),
+          uuid,
+          name: im.name,
+          url: computeSourceOf(im),
           // Per-image mask (if any) so masked regions are excluded from the dense cloud.
           mask: im.mask?.blob ?? null,
           R: cam.R.map((row) => [...row]),
@@ -116,13 +166,17 @@ export function createDense({
         })
       }
       if (selfCalRows.length) {
-        const parts = selfCalRows.map((d) =>
-          `${d.sensorId != null ? (sensorById.get(d.sensorId)?.label ?? d.sensorId.slice(0, 6))
-            : (imgByUuid.get(d.imageUuid)?.name ?? 'image')}${d.fisheye ? ' fisheye' : ''} k1 ${(d.k1 || 0).toFixed(5)}`
-          + `${d.k2 ? `, k2 ${d.k2.toFixed(5)}` : ''}${d.k3 ? `, k3 ${d.k3.toFixed(5)}` : ''}`
-          + `${d.k4 ? `, k4 ${d.k4.toFixed(5)}` : ''}`)
-        log(`Dense: applying self-calibrated distortion from the sparse run — ${parts.join('; ')}`,
-          'info', 'Dense')
+        const parts = selfCalRows.map(
+          (d) =>
+            `${
+              d.sensorId != null
+                ? (sensorById.get(d.sensorId)?.label ?? d.sensorId.slice(0, 6))
+                : (imgByUuid.get(d.imageUuid)?.name ?? 'image')
+            }${d.fisheye ? ' fisheye' : ''} k1 ${(d.k1 || 0).toFixed(5)}` +
+            `${d.k2 ? `, k2 ${d.k2.toFixed(5)}` : ''}${d.k3 ? `, k3 ${d.k3.toFixed(5)}` : ''}` +
+            `${d.k4 ? `, k4 ${d.k4.toFixed(5)}` : ''}`,
+        )
+        log(`Dense: applying self-calibrated distortion from the sparse run — ${parts.join('; ')}`, 'info', 'Dense')
       }
       // Packed typed arrays, transferred (core/dense/sparseInput.js) — not an object
       // plus a views array per point, structured-cloned.
@@ -132,7 +186,10 @@ export function createDense({
       let previews = 0
       const takePreview = (m) => {
         const im = imgByUuid.get(m.uuid)
-        if (im && m.displayBlob) { imagesStore.updateDepth(im.id, m.displayBlob, { quiet: true, persistSync: false }); previews++ }
+        if (im && m.displayBlob) {
+          imagesStore.updateDepth(im.id, m.displayBlob, { quiet: true, persistSync: false })
+          previews++
+        }
         delete m.displayBlob
       }
       // Streamed (TODO ▸ SC-4) whenever the maps can be saved: each finished map is
@@ -142,7 +199,10 @@ export function createDense({
       // A map that cannot be saved (storage full) stops the run: the rest could not
       // be kept either, and the worker would spend minutes computing them.
       const run = await beginStreamedDepthMaps({
-        onWriteFailure: (err) => { writeFailure = err; terminateAll(err.message) },
+        onWriteFailure: (err) => {
+          writeFailure = err
+          terminateAll(err.message)
+        },
       })
       // Resolve a quality preset → working maxDim from the largest native image
       // dimension (Step 3), unless the user set an explicit maxDim in Advanced. A
@@ -150,30 +210,55 @@ export function createDense({
       // Medium → Low) with a warning, rather than the worker refusing to start.
       const resolved = { ...settings }
       if (resolved.quality && !(resolved.maxDim > 0)) {
-        const nativeLong = images.value.reduce(
-          (m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0)
+        const nativeLong = images.value.reduce((m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0)
         resolved.maxDim = qualityToMaxDim(resolved.quality, nativeLong)
         const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
-        const plan = (quality, cap) => fitDepthQuality({
-          quality, budget: cap, sizes: inputImages.map((im) => ({ width: im.width, height: im.height })),
-          backend: settings.useGpu ? 'gpu' : 'wasm', nSources: Math.min(16, settings.maxSources ?? 6),
-          streamMaps: !!run, geomConsistency: settings.geomConsistency !== false,
-        })
+        const plan = (quality, cap) =>
+          fitDepthQuality({
+            quality,
+            budget: cap,
+            sizes: inputImages.map((im) => ({ width: im.width, height: im.height })),
+            backend: settings.useGpu ? 'gpu' : 'wasm',
+            nSources: Math.min(16, settings.maxSources ?? 6),
+            streamMaps: !!run,
+            geomConsistency: settings.geomConsistency !== false,
+          })
         const fit = plan(resolved.quality, budget)
         if (fit?.steps > 0) {
-          log(`Dense: quality '${resolved.quality}' would need ≈ ${formatBytes(plan(resolved.quality, Infinity).proj.total)} `
-            + `against the ${formatBytes(budget)} budget — using '${fit.quality}' (≤${fit.maxDim}px, ≈ ${formatBytes(fit.proj.total)}). `
-            + 'Raise the memory budget (Settings ▸ Compute) to keep the higher quality.', 'warn', 'Dense')
+          log(
+            `Dense: quality '${resolved.quality}' would need ≈ ${formatBytes(plan(resolved.quality, Infinity).proj.total)} ` +
+              `against the ${formatBytes(budget)} budget — using '${fit.quality}' (≤${fit.maxDim}px, ≈ ${formatBytes(fit.proj.total)}). ` +
+              'Raise the memory budget (Settings ▸ Compute) to keep the higher quality.',
+            'warn',
+            'Dense',
+          )
           resolved.quality = fit.quality
           resolved.maxDim = fit.maxDim
         }
-        log(`Dense: quality '${resolved.quality}' → working ≤${resolved.maxDim}px `
-          + `(¼-scale presets of ${nativeLong}px native)`, 'info', 'Dense')
+        log(
+          `Dense: quality '${resolved.quality}' → working ≤${resolved.maxDim}px ` +
+            `(¼-scale presets of ${nativeLong}px native)`,
+          'info',
+          'Dense',
+        )
       }
       settings = resolved
-      const { maps, summary: aSummary, loopShare } = await runDepthMaps(inputImages, sparse,
-        withRegion({ ...settings, streamMaps: !!run }), onProgress,
-        run ? (m) => { takePreview(m); run.add(m) } : null)
+      const {
+        maps,
+        summary: aSummary,
+        loopShare,
+      } = await runDepthMaps(
+        inputImages,
+        sparse,
+        withRegion({ ...settings, streamMaps: !!run }),
+        onProgress,
+        run
+          ? (m) => {
+              takePreview(m)
+              run.add(m)
+            }
+          : null,
+      )
       let stageSummary = aSummary ?? null
       if (run) {
         await run.settled()
@@ -188,7 +273,7 @@ export function createDense({
         await run.commit(settings)
       } else {
         depthMaps.value = new Map(maps.map((m) => [m.uuid, m]))
-        depthMapsMeta.value = []   // the fresh maps supersede any restored index
+        depthMapsMeta.value = [] // the fresh maps supersede any restored index
         for (const m of maps) takePreview(m)
       }
       depthSummary.value = stageSummary
@@ -211,38 +296,73 @@ export function createDense({
   // `onMap` takes each streamed map; null for an in-memory run.
   async function runDepthMaps(images, sparse, settings, onProgress, onMap) {
     const onLog = (m, l, c) => log(m, l, c)
-    const onEvent = (ev, [m]) => { if (ev === 'map' && onMap) onMap(m) }
+    const onEvent = (ev, [m]) => {
+      if (ev === 'map' && onMap) onMap(m)
+    }
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     let workers = 1
     if (onMap && images.length > 1 && !(settings.useGpu && (await workerDepthBackend(0)).gpu)) {
       const nSources = Math.min(16, settings.maxSources ?? 6)
       // One worker's peak: its raster cache plus the run's shared inputs (counted whole).
       const perWorkerBytes = projectDensePeakBytes({
-        nImages: images.length, maxDim: settings.maxDim, nSources, backend: 'wasm',
+        nImages: images.length,
+        maxDim: settings.maxDim,
+        nSources,
+        backend: 'wasm',
         pixels: images.map((im) => workingPixels(im.width, im.height, settings.maxDim)),
-        retainedMaps: 1, filterMaps: 0,
+        retainedMaps: 1,
+        filterMaps: 0,
       }).total
       workers = depthWorkerCount({ n: images.length, poolSize: POOL_SIZE, budget, perWorkerBytes })
     }
     if (workers === 1) {
-      return workerComputeDepthMaps({ images, sparse, settings }, {
-        worker: 0, transfer: sparseInputTransfer(sparse), onLog, onEvent,
-        onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
-      })
+      return workerComputeDepthMaps(
+        { images, sparse, settings },
+        {
+          worker: 0,
+          transfer: sparseInputTransfer(sparse),
+          onLog,
+          onEvent,
+          onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+        },
+      )
     }
-    log(`Depth maps: on the CPU, split over ${workers} workers (${formatBytes(budget / workers)} of the `
-      + `memory budget each)`, 'info', 'Dense')
+    log(
+      `Depth maps: on the CPU, split over ${workers} workers (${formatBytes(budget / workers)} of the ` +
+        `memory budget each)`,
+      'info',
+      'Dense',
+    )
     const chunks = contiguousChunks(images.length, workers)
-    const counts = new Array(workers).fill(0), fractions = new Array(workers).fill(0)
+    const counts = new Array(workers).fill(0),
+      fractions = new Array(workers).fill(0)
     const t0 = performance.now()
     // Each worker gets its own copy of the sparse inputs (no transfer: there are several).
-    const parts = await Promise.all(chunks.map((refs, w) => workerComputeDepthMaps(
-      { images, sparse, refs, settings: { ...settings, memBudgetBytes: budget / workers } },
-      { worker: w, onLog, onEvent,
-        onProgress: (d, t, lbl, f) => {
-          counts[w] = d; fractions[w] = f
-          onProgress?.(counts.reduce((x, y) => x + y, 0), images.length, lbl, fractions.reduce((x, y) => x + y, 0) / workers)
-        } }))).catch((err) => { terminateAll(String(err?.message ?? err)); throw err })
+    const parts = await Promise.all(
+      chunks.map((refs, w) =>
+        workerComputeDepthMaps(
+          { images, sparse, refs, settings: { ...settings, memBudgetBytes: budget / workers } },
+          {
+            worker: w,
+            onLog,
+            onEvent,
+            onProgress: (d, t, lbl, f) => {
+              counts[w] = d
+              fractions[w] = f
+              onProgress?.(
+                counts.reduce((x, y) => x + y, 0),
+                images.length,
+                lbl,
+                fractions.reduce((x, y) => x + y, 0) / workers,
+              )
+            },
+          },
+        ),
+      ),
+    ).catch((err) => {
+      terminateAll(String(err?.message ?? err))
+      throw err
+    })
     return {
       maps: [],
       summary: mergeDepthSummaries(parts, { totalMs: performance.now() - t0, nImages: images.length }),
@@ -257,8 +377,10 @@ export function createDense({
   async function filterSavedDepthMaps(run, settings, stageSummary, from, onProgress) {
     const metaByUuid = new Map(run.metas.map((m) => [m.uuid, m]))
     const nameByUuid = new Map(images.value.map((im) => [im.uuid, im.name]))
-    const entries = (await opfs.loadDepthFiles(run.projectId, run.metas))
-      .map((e) => ({ ...e, name: nameByUuid.get(e.uuid) }))
+    const entries = (await opfs.loadDepthFiles(run.projectId, run.metas)).map((e) => ({
+      ...e,
+      name: nameByUuid.get(e.uuid),
+    }))
     // Each rewrite is handled as it is queued (see beginStreamedDepthMaps): the first
     // that fails (storage full) stops the workers and fails the stage with its message.
     const writes = []
@@ -267,11 +389,13 @@ export function createDense({
       if (ev !== 'filtered') return
       const meta = metaByUuid.get(f.uuid)
       if (meta) Object.assign(meta, f.coverage)
-      writes.push(opfs.saveDepthPlane(run.projectId, f.uuid, { depth: f.depth }).catch((err) => {
-        if (writeFailure) return
-        writeFailure = err
-        terminateAll(err.message)
-      }))
+      writes.push(
+        opfs.saveDepthPlane(run.projectId, f.uuid, { depth: f.depth }).catch((err) => {
+          if (writeFailure) return
+          writeFailure = err
+          terminateAll(err.message)
+        }),
+      )
     }
     // References are judged independently against the unfiltered planes, so the maps
     // split over the pool in contiguous chunks (neighbouring captures share candidate
@@ -280,63 +404,107 @@ export function createDense({
     const workers = Math.max(1, Math.min(POOL_SIZE, Math.floor(n / 16)))
     let stats, ms
     if (workers === 1) {
-      ({ stats, ms } = await workerFilterDepthMaps({ maps: entries, settings, from },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), onEvent }))
+      ;({ stats, ms } = await workerFilterDepthMaps(
+        { maps: entries, settings, from },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), onEvent },
+      ))
     } else {
       const t0 = performance.now()
-      const fractions = new Array(workers).fill(from), counts = new Array(workers).fill(0)
+      const fractions = new Array(workers).fill(from),
+        counts = new Array(workers).fill(0)
       const chunks = contiguousChunks(n, workers)
-      const parts = await Promise.all(chunks.map((refs, w) => workerFilterDepthMaps(
-        { maps: entries, settings, from, refs, workers },
-        { worker: w, onLog: (m, l, c) => log(m, l, c), onEvent,
-          onProgress: (d, t, lbl, f) => {
-            fractions[w] = f; counts[w] = d
-            onProgress?.(counts.reduce((x, y) => x + y, 0), n, lbl, fractions.reduce((x, y) => x + y, 0) / workers)
-          } })))
+      const parts = await Promise.all(
+        chunks.map((refs, w) =>
+          workerFilterDepthMaps(
+            { maps: entries, settings, from, refs, workers },
+            {
+              worker: w,
+              onLog: (m, l, c) => log(m, l, c),
+              onEvent,
+              onProgress: (d, t, lbl, f) => {
+                fractions[w] = f
+                counts[w] = d
+                onProgress?.(
+                  counts.reduce((x, y) => x + y, 0),
+                  n,
+                  lbl,
+                  fractions.reduce((x, y) => x + y, 0) / workers,
+                )
+              },
+            },
+          ),
+        ),
+      )
       stats = new Array(n)
       const totals = emptyFilterTotals()
-      let loads = 0, hits = 0, nCand = 0
+      let loads = 0,
+        hits = 0,
+        nCand = 0
       parts.forEach((p, w) => {
         for (const i of chunks[w]) stats[i] = p.stats[i]
         for (const k of Object.keys(totals)) totals[k] += p.totals[k]
-        loads += p.loads; hits += p.hits; nCand += p.nCand
+        loads += p.loads
+        hits += p.hits
+        nCand += p.nCand
       })
       // Every map is judged now; only now may any of them be rewritten.
-      await Promise.all(chunks.map((refs, w) => workerFilterDepthMaps(
-        { maps: entries, apply: { refs, masks: parts[w].masks, stats: refs.map((i) => parts[w].stats[i]) } },
-        { worker: w, onEvent, transfer: parts[w].masks.map((m) => m.buffer) })))
+      await Promise.all(
+        chunks.map((refs, w) =>
+          workerFilterDepthMaps(
+            { maps: entries, apply: { refs, masks: parts[w].masks, stats: refs.map((i) => parts[w].stats[i]) } },
+            { worker: w, onEvent, transfer: parts[w].masks.map((m) => m.buffer) },
+          ),
+        ),
+      )
       ms = performance.now() - t0
       const cfg = filterConfig(filterSettings(settings))
-      if (n >= 2 && cfg.minConsistent > 0) logFilterCache(log, { nMaps: n, nCand, loads, hits, cacheBytes: parts[0].cacheBytes, cull: cfg.cull, workers })
+      if (n >= 2 && cfg.minConsistent > 0)
+        logFilterCache(log, { nMaps: n, nCand, loads, hits, cacheBytes: parts[0].cacheBytes, cull: cfg.cull, workers })
       logFilterTotals(log, totals, n, cfg)
       const marginal = entries.map((e, i) => ({ e, s: stats[i] })).filter(({ s }) => s.considered > 0 && s.keptPct < 1)
       if (marginal.length) {
-        const names = marginal.slice(0, 12).map(({ e, s }) => `${e.name || e.uuid} ${s.keptPct.toFixed(1)}%`).join('; ')
-        log(`Depth filter: ${pluralize(marginal.length, 'marginal map')} kept <1% after cross-view filtering — `
-          + `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. `
-          + 'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.', 'warn', 'Dense')
+        const names = marginal
+          .slice(0, 12)
+          .map(({ e, s }) => `${e.name || e.uuid} ${s.keptPct.toFixed(1)}%`)
+          .join('; ')
+        log(
+          `Depth filter: ${pluralize(marginal.length, 'marginal map')} kept <1% after cross-view filtering — ` +
+            `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. ` +
+            'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.',
+          'warn',
+          'Dense',
+        )
       }
-      log(`Depth filter: cross-view consistency in ${(ms / 1000).toFixed(1)}s on ${workers} workers `
-        + `(streamed from saved maps; judging ${(Math.max(...parts.map((p) => p.judgeMs)) / 1000).toFixed(1)}s in the slowest)`, 'info', 'Dense')
+      log(
+        `Depth filter: cross-view consistency in ${(ms / 1000).toFixed(1)}s on ${workers} workers ` +
+          `(streamed from saved maps; judging ${(Math.max(...parts.map((p) => p.judgeMs)) / 1000).toFixed(1)}s in the slowest)`,
+        'info',
+        'Dense',
+      )
       onProgress?.(n, n, 'Depth maps complete', 1)
     }
     await Promise.all(writes)
     if (writeFailure) throw writeFailure
     const kept = stats.map((s) => s.keptPct)
     const sorted = [...kept].sort((a, b) => a - b)
-    return stageSummary && {
-      ...stageSummary,
-      geomFilterMs: ms,
-      geomFilterMedianKeptPct: sorted.length ? sorted[Math.round(0.5 * (sorted.length - 1))] : null,
-      geomFilterMinKeptPct: sorted.length ? sorted[0] : null,
-      geomFilterMarginalMaps: kept.filter((v) => v < 1).length,
-    }
+    return (
+      stageSummary && {
+        ...stageSummary,
+        geomFilterMs: ms,
+        geomFilterMedianKeptPct: sorted.length ? sorted[Math.round(0.5 * (sorted.length - 1))] : null,
+        geomFilterMinKeptPct: sorted.length ? sorted[0] : null,
+        geomFilterMarginalMaps: kept.filter((v) => v < 1).length,
+      }
+    )
   }
 
   // A buffer the browser refused (it arrives from the worker as a plain message) says
   // why and what to change; anything else as it is.
-  const densifyErrorText = (err) => bufferFailureText(err?.message ?? err,
-    'Lower the memory budget (Settings ▸ Compute) so fusion works in slabs, or raise the point-density sample step')
+  const densifyErrorText = (err) =>
+    bufferFailureText(
+      err?.message ?? err,
+      'Lower the memory budget (Settings ▸ Compute) so fusion works in slabs, or raise the point-density sample step',
+    )
 
   // Fusion over saved maps on `workers` pool slots. The plan's preflight already counted
   // every worker's input, accumulator and the join; a plan that cannot split (small
@@ -351,33 +519,54 @@ export function createDense({
     const PLAN_SHARE = FUSION_PLAN_SHARE
     const onLog = (m, l, c) => log(m, l, c)
     onProgress?.(0, 1, 'Planning fusion…', 0, 'plan')
-    const { plan, refused } = await workerDensify({ maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'plan' },
-      { onLog, worker: 0, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, PLAN_SHARE * (f ?? 0), 'plan') })
+    const { plan, refused } = await workerDensify(
+      { maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'plan' },
+      { onLog, worker: 0, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, PLAN_SHARE * (f ?? 0), 'plan') },
+    )
     if (refused || !plan || !stillCurrent()) return null
     if (plan.workers <= 1) {
-      const { cloud, summary } = await workerDensify({ maps: mapsInput, streamed: true, settings: { ...fuseSettings, plan } },
-        { onLog, worker: 0, onProgress: (d, t, lbl) => onProgress?.(d, t, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * (t > 0 ? d / t : 0), 'fuse') })
+      const { cloud, summary } = await workerDensify(
+        { maps: mapsInput, streamed: true, settings: { ...fuseSettings, plan } },
+        {
+          onLog,
+          worker: 0,
+          onProgress: (d, t, lbl) =>
+            onProgress?.(d, t, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * (t > 0 ? d / t : 0), 'fuse'),
+        },
+      )
       return { cloud, summary }
     }
-    const nM = plan.nMaps, nT = plan.slabs.length
+    const nM = plan.nMaps,
+      nT = plan.slabs.length
     const totalCells = plan.slabs.reduce((s, x) => s + x.cells, 0) || 1
     const slabDone = new Float64Array(nT)
     const report = (lbl) => {
       let f = 0
-      for (let i = 0; i < nT; i++) f += slabDone[i] * plan.slabs[i].cells / totalCells
+      for (let i = 0; i < nT; i++) f += (slabDone[i] * plan.slabs[i].cells) / totalCells
       onProgress?.(Math.round(f * nT), nT, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * f, 'fuse')
     }
     // Largest slabs first, so the pool does not end on one long straggler.
     const queue = plan.slabs.map((s, i) => i).sort((a, b) => plan.slabs[b].cells - plan.slabs[a].cells)
-    const parts = new Array(nT), counters = [], streams = []
+    const parts = new Array(nT),
+      counters = [],
+      streams = []
     const runner = async (w) => {
       while (queue.length) {
         const i = queue.shift()
-        const res = await workerDensify({ maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'slab', plan, slab: i }, {
-          onLog, worker: w,
-          onProgress: (d, t, lbl) => { slabDone[i] = Math.min(1, Math.max(0, (d - i * nM) / nM)); report(lbl) },
-        })
-        parts[i] = res.part; counters.push(res.counters); streams.push(res.stream)
+        const res = await workerDensify(
+          { maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'slab', plan, slab: i },
+          {
+            onLog,
+            worker: w,
+            onProgress: (d, t, lbl) => {
+              slabDone[i] = Math.min(1, Math.max(0, (d - i * nM) / nM))
+              report(lbl)
+            },
+          },
+        )
+        parts[i] = res.part
+        counters.push(res.counters)
+        streams.push(res.stream)
         slabDone[i] = 1
         report(`slab ${i + 1}/${nT} done`)
       }
@@ -386,8 +575,18 @@ export function createDense({
     if (!stillCurrent()) return null
     const merged = mergeFusionCounters(counters)
     const sum = (k) => streams.reduce((s, x) => s + (x?.[k] ?? 0), 0)
-    logFusionStream(onLog, { compared: sum('compared'), culled: sum('culled'), skipped: sum('skipped'), reads: sum('reads'), hits: sum('hits'),
-      cacheBytes, workers: plan.workers, loadMs: sum('loadMs'), eligMs: sum('eligMs'), checkMs: sum('checkMs') })
+    logFusionStream(onLog, {
+      compared: sum('compared'),
+      culled: sum('culled'),
+      skipped: sum('skipped'),
+      reads: sum('reads'),
+      hits: sum('hits'),
+      cacheBytes,
+      workers: plan.workers,
+      loadMs: sum('loadMs'),
+      eligMs: sum('eligMs'),
+      checkMs: sum('checkMs'),
+    })
     const { summary } = finishFusion(plan, merged, [], onLog)
     // Join the slabs (in slab order, so a run is deterministic for a given plan).
     const n = parts.reduce((s, p) => s + p.count, 0)
@@ -395,22 +594,34 @@ export function createDense({
     let o = 0
     for (let i = 0; i < nT; i++) {
       const p = parts[i]
-      cloud.pos.set(p.pos, o * 3); cloud.col.set(p.col, o * 3); cloud.nrm.set(p.nrm, o * 3)
-      o += p.count; parts[i] = null
+      cloud.pos.set(p.pos, o * 3)
+      cloud.col.set(p.col, o * 3)
+      cloud.nrm.set(p.nrm, o * 3)
+      o += p.count
+      parts[i] = null
     }
-    log(`Dense cloud: fused ${nM} depth maps → ${n} points in ${((performance.now() - t0) / 1000).toFixed(1)}s `
-      + `(${nT} slabs on ${plan.workers} workers)`, n === 0 ? 'error' : 'success', 'Dense')
+    log(
+      `Dense cloud: fused ${nM} depth maps → ${n} points in ${((performance.now() - t0) / 1000).toFixed(1)}s ` +
+        `(${nT} slabs on ${plan.workers} workers)`,
+      n === 0 ? 'error' : 'success',
+      'Dense',
+    )
     onProgress?.(1, 1, 'Done', 1)
     return { cloud, summary }
   }
 
   // Dense Stage B — fuse the Stage A depth maps into a coloured dense cloud.
   async function densify(settings = {}, onProgress) {
-    const projectId = projects.currentProjectId, sparse = mainSparseCloud.value
+    const projectId = projects.currentProjectId,
+      sparse = mainSparseCloud.value
     const stillCurrent = () => projectId === projects.currentProjectId && sparse === mainSparseCloud.value
     let input
-    try { input = await depthMapInput() }
-    catch (err) { log(`Dense: ${err.message}`, 'error', 'Dense'); return }
+    try {
+      input = await depthMapInput()
+    } catch (err) {
+      log(`Dense: ${err.message}`, 'error', 'Dense')
+      return
+    }
     const { maps, streamed } = input
     if (!maps.length) {
       log('Dense: compute depth maps before building the dense cloud', 'warn', 'Dense')
@@ -421,7 +632,12 @@ export function createDense({
     // pass, returning the transferred buffers home — a pixel-count guess here could
     // not see the merge cell, the step or the view overlap. Same budget knob as Stage A.
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
-    if (streamed) log('Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use', 'info', 'Dense')
+    if (streamed)
+      log(
+        'Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use',
+        'info',
+        'Dense',
+      )
     // Start from fresh workers: the pool's idle ones still hold the depth filter's
     // caches as uncollected garbage, charged to the tab's shared buffer pool.
     releaseIdleWorkers()
@@ -437,10 +653,21 @@ export function createDense({
     // project has the list but no name on the map. Falls back to a uuid fragment in
     // core/dense/mvs.js when the image is gone.
     const nameByUuid = new Map(images.value.map((im) => [im.uuid, im.name]))
-    const mapsInput = streamed ? maps.map(m => ({ ...m, name: nameByUuid.get(m.uuid) })) : maps.map((m) => ({
-      uuid: m.uuid, name: m.name ?? nameByUuid.get(m.uuid), width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
-      depth: m.depth, cost: m.cost, rgb: m.rgb, normals: m.normals || null,
-    }))
+    const mapsInput = streamed
+      ? maps.map((m) => ({ ...m, name: nameByUuid.get(m.uuid) }))
+      : maps.map((m) => ({
+          uuid: m.uuid,
+          name: m.name ?? nameByUuid.get(m.uuid),
+          width: m.width,
+          height: m.height,
+          K: m.K,
+          R: m.R,
+          t: m.t,
+          depth: m.depth,
+          cost: m.cost,
+          rgb: m.rgb,
+          normals: m.normals || null,
+        }))
     const transfer = []
     for (const m of streamed ? [] : mapsInput) {
       transfer.push(m.depth.buffer, m.cost.buffer, m.rgb.buffer)
@@ -455,7 +682,10 @@ export function createDense({
     if (workers > 1) {
       try {
         const done = await densifyParallel(mapsInput, settings, budget, workers, onProgress, stillCurrent)
-        if (!stillCurrent() || !done) { if (!done) reconStatus.value = 'error'; return }
+        if (!stillCurrent() || !done) {
+          if (!done) reconStatus.value = 'error'
+          return
+        }
         upsertDenseCloud(done.cloud)
         denseSummary.value = done.summary
         reconStatus.value = 'done'
@@ -468,20 +698,37 @@ export function createDense({
       return
     }
     try {
-      const { cloud, summary: dSummary, refused, mapBuffers } = await workerDensify(
+      const {
+        cloud,
+        summary: dSummary,
+        refused,
+        mapBuffers,
+      } = await workerDensify(
         { maps: mapsInput, streamed, settings: withRegion({ ...settings, memBudgetBytes: budget }) },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f, phase) => onProgress?.(d, t, lbl, f, phase), transfer },
+        {
+          onLog: (m, l, c) => log(m, l, c),
+          onProgress: (d, t, lbl, f, phase) => onProgress?.(d, t, lbl, f, phase),
+          transfer,
+        },
       )
       if (!stillCurrent()) return
       // Re-attach the round-tripped buffers so ortho / a second densify still work.
       if (mapBuffers) {
         for (const mb of mapBuffers) {
           const m = depthMaps.value.get(mb.uuid)
-          if (m) { m.depth = mb.depth; m.cost = mb.cost; m.rgb = mb.rgb; if (mb.normals) m.normals = mb.normals }
+          if (m) {
+            m.depth = mb.depth
+            m.cost = mb.cost
+            m.rgb = mb.rgb
+            if (mb.normals) m.normals = mb.normals
+          }
         }
       }
       // Refused by fusion's measured pre-flight (logged there with its numbers).
-      if (refused) { reconStatus.value = 'error'; return }
+      if (refused) {
+        reconStatus.value = 'error'
+        return
+      }
       // The worker returns the cloud already split (Float32 pos, Uint8 col, Float32
       // world-space normals for the Poisson mesh), assembled from its fusion slabs.
       upsertDenseCloud(cloud)
@@ -496,10 +743,14 @@ export function createDense({
       // saved index: a retry rehydrates from OPFS instead of forcing a Stage A re-run.
       depthMaps.value = new Map()
       const recovered = await loadDepthIndexIntoMeta()
-      log(`Densify error: ${densifyErrorText(err)}. Depth maps were released to the worker`
-        + (recovered
-          ? ' — they will be reloaded from disk on the next attempt.'
-          : ' and must be recomputed before retrying.'), 'error', 'Dense')
+      log(
+        `Densify error: ${densifyErrorText(err)}. Depth maps were released to the worker` +
+          (recovered
+            ? ' — they will be reloaded from disk on the next attempt.'
+            : ' and must be recomputed before retrying.'),
+        'error',
+        'Dense',
+      )
       reconStatus.value = 'error'
     }
   }
@@ -515,9 +766,13 @@ export function createDense({
     const pick = sourceId != null ? meshSources.value.find((s) => s.id === sourceId) : meshSource.value
     const dense = pick ? clouds.value.find((c) => c.id === pick.id) : null
     if (!dense?.count) {
-      log(sourceId != null
-        ? 'Mesh: the chosen dense cloud is gone or has no normals'
-        : 'Mesh: build a dense point cloud (with normals) first', 'warn', 'Products')
+      log(
+        sourceId != null
+          ? 'Mesh: the chosen dense cloud is gone or has no normals'
+          : 'Mesh: build a dense point cloud (with normals) first',
+        'warn',
+        'Products',
+      )
       return
     }
     if (!dense.nrm || dense.nrm.length < dense.count * 3) {
@@ -528,15 +783,19 @@ export function createDense({
     // frame — the computed cloud and its edits. An imported cloud (or an edit of one)
     // has its own spacing, which the worker estimates.
     const mergeCell = dense.imported ? 0 : (denseSummary.value?.mergeCell ?? 0)
-    log(`Mesh: source "${dense.name ?? 'Dense'}" (${dense.count.toLocaleString()} points`
-      + `${dense.derived ? ', edited' : ''}${dense.imported ? ', imported' : ''})`, 'info', 'Products')
+    log(
+      `Mesh: source "${dense.name ?? 'Dense'}" (${dense.count.toLocaleString()} points` +
+        `${dense.derived ? ', edited' : ''}${dense.imported ? ', imported' : ''})`,
+      'info',
+      'Products',
+    )
     const clipped = clipToRegion(dense, 'Mesh')
     if (clipped && !clipped.count) {
       log('Mesh: no point of the source lies inside the region', 'warn', 'Products')
       return
     }
     const posCopy = clipped ? clipped.pos : dense.pos.slice()
-    const colCopy = clipped ? (clipped.col ?? null) : (dense.col?.slice() || null)
+    const colCopy = clipped ? (clipped.col ?? null) : dense.col?.slice() || null
     const nrmCopy = clipped ? clipped.nrm : dense.nrm.slice()
     const input = {
       dense: { count: clipped ? clipped.count : dense.count, pos: posCopy, col: colCopy, nrm: nrmCopy },
@@ -547,8 +806,11 @@ export function createDense({
     transfer.push(nrmCopy.buffer)
     reconStatus.value = 'running'
     try {
-      const { mesh } = await workerMeshify(input,
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer })
+      const { mesh } = await workerMeshify(input, {
+        onLog: (m, l, c) => log(m, l, c),
+        onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+        transfer,
+      })
       if (!mesh || !mesh.nVerts) {
         log('Mesh: Poisson produced no surface — try a lower depth or check the cloud/normals', 'warn', 'Products')
         reconStatus.value = 'done'
@@ -564,6 +826,10 @@ export function createDense({
   }
 
   return {
-    computeDepthMaps, filterSavedDepthMaps, densifyParallel, densify, generateMesh,
+    computeDepthMaps,
+    filterSavedDepthMaps,
+    densifyParallel,
+    densify,
+    generateMesh,
   }
 }

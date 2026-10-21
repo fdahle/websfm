@@ -31,7 +31,10 @@ export function siblingCanonicalMap(keypoints) {
     if (!(s > 0)) return null // no scale (a learned detector, an import) ⇒ not SIFT ⇒ no siblings
     const key = `${keypoints.x(i)},${keypoints.y(i)},${s}`
     const first = firstAt.get(key)
-    if (first === undefined) { firstAt.set(key, i); continue }
+    if (first === undefined) {
+      firstAt.set(key, i)
+      continue
+    }
     if (!canon) {
       canon = new Int32Array(n)
       for (let j = 0; j < n; j++) canon[j] = j

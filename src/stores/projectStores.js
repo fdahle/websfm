@@ -54,28 +54,33 @@ const now = () => globalThis.performance?.now?.() ?? Date.now()
 let lastRun = Promise.resolve()
 
 export function restoreProjectStores(ctx) {
-  const run = lastRun.then(() => restoreAll(ctx), () => restoreAll(ctx))
+  const run = lastRun.then(
+    () => restoreAll(ctx),
+    () => restoreAll(ctx),
+  )
   lastRun = run.catch(() => {})
   return run
 }
 
 async function restoreAll(ctx) {
   const { onProgress, isCurrent = () => true, ...base } = ctx
-  return Promise.all(registry.map(async (useStore) => {
-    const store = useStore()
-    if (typeof store.restore !== 'function') return null
-    const id = store.$id || 'unknown'
-    const report = (label, done = null, total = null) => onProgress?.(id, { label, done, total })
-    report(null)
-    const started = now()
-    try {
-      await store.restore({ ...base, report })
-    } finally {
-      onProgress?.(id, null)
-      if (!isCurrent() && typeof store.clear === 'function') store.clear()
-    }
-    return { store: id, ms: now() - started }
-  })).then((items) => items.filter(Boolean))
+  return Promise.all(
+    registry.map(async (useStore) => {
+      const store = useStore()
+      if (typeof store.restore !== 'function') return null
+      const id = store.$id || 'unknown'
+      const report = (label, done = null, total = null) => onProgress?.(id, { label, done, total })
+      report(null)
+      const started = now()
+      try {
+        await store.restore({ ...base, report })
+      } finally {
+        onProgress?.(id, null)
+        if (!isCurrent() && typeof store.clear === 'function') store.clear()
+      }
+      return { store: id, ms: now() - started }
+    }),
+  ).then((items) => items.filter(Boolean))
 }
 
 // Clear every registered store. `opts` is forwarded to each store's clear()

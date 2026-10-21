@@ -48,11 +48,25 @@ export function productTiledMeta(kind, product) {
   if (kind === 'dem' && product?.cog && product.fullGsd > 0) {
     const key = `product:dem:${product.createdAt ?? 0}`
     return {
-      id: key, fileKey: key, kind: 'dem', name: product.name ?? 'DEM',
+      id: key,
+      fileKey: key,
+      kind: 'dem',
+      name: product.name ?? 'DEM',
       crs: product.crs && product.crs !== 'local' ? product.crs : null,
-      width: product.fullWidth, height: product.fullHeight,
-      geoTransform: { originX: product.originX, originY: product.originY, scaleX: product.fullGsd, scaleY: -product.fullGsd },
-      bands: 1, bitsPerSample: 32, sampleFormat: 3, photometric: 1, zMin: product.zMin, zMax: product.zMax,
+      width: product.fullWidth,
+      height: product.fullHeight,
+      geoTransform: {
+        originX: product.originX,
+        originY: product.originY,
+        scaleX: product.fullGsd,
+        scaleY: -product.fullGsd,
+      },
+      bands: 1,
+      bitsPerSample: 32,
+      sampleFormat: 3,
+      photometric: 1,
+      zMin: product.zMin,
+      zMax: product.zMax,
       demRelief: { ...demRenderOptions(product.style, product), gsd: product.fullGsd },
       // A symbology change is what a GPU layer watches to restyle.
       style: product.style ?? null,
@@ -62,10 +76,19 @@ export function productTiledMeta(kind, product) {
   const desc = productDescriptor(product)
   if (!desc) return null
   return {
-    id: `product:ortho:${product.createdAt ?? 0}`, fileKey: `product:ortho:${product.createdAt ?? 0}`,
-    kind: 'ortho', name: product.name ?? 'Orthophoto', crs: product.crs && product.crs !== 'local' ? product.crs : null,
-    width: desc.width, height: desc.height, geoTransform: desc.geoTransform,
-    bands: 4, bitsPerSample: 8, sampleFormat: 1, photometric: 2, alphaBand: 3,
+    id: `product:ortho:${product.createdAt ?? 0}`,
+    fileKey: `product:ortho:${product.createdAt ?? 0}`,
+    kind: 'ortho',
+    name: product.name ?? 'Orthophoto',
+    crs: product.crs && product.crs !== 'local' ? product.crs : null,
+    width: desc.width,
+    height: desc.height,
+    geoTransform: desc.geoTransform,
+    bands: 4,
+    bitsPerSample: 8,
+    sampleFormat: 1,
+    photometric: 2,
+    alphaBand: 3,
     // Its symbology (productStyle.js), applied by the GPU style at draw time.
     adjust: product.style ?? null,
   }
@@ -80,9 +103,15 @@ export function productTiledMeta(kind, product) {
 export function createProductRasterSource(kind, product, { readRawWindow = null } = {}) {
   const desc = productDescriptor(product)
   if (!desc) return null
-  const meta = { width: desc.width, height: desc.height, bands: kind === 'dem' ? 1 : 4,
-    dtype: kind === 'dem' ? 'float32' : 'uint8', nodata: null, geoTransform: desc.geoTransform,
-    crs: product.crs ?? null }
+  const meta = {
+    width: desc.width,
+    height: desc.height,
+    bands: kind === 'dem' ? 1 : 4,
+    dtype: kind === 'dem' ? 'float32' : 'uint8',
+    nodata: null,
+    geoTransform: desc.geoTransform,
+    crs: product.crs ?? null,
+  }
   return createFlatRasterSource(meta, kind === 'dem' ? (product.data ?? null) : null, {
     previewDataUrl: product.previewUrl ?? null,
     readRawWindow: kind === 'dem' ? null : readRawWindow,

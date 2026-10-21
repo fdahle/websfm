@@ -15,7 +15,9 @@ const gpuBuilt = []
 const gpuGate = { wait: null, entered: null }
 vi.mock('../components/viewers/raster/gpuRaster.js', () => ({
   gpuRasterStyle: (r) => ({ styleOf: r.id }),
-  disposeRasterLayer: (layer) => { if (layer) disposed.push(layer) },
+  disposeRasterLayer: (layer) => {
+    if (layer) disposed.push(layer)
+  },
   createGpuRasterLayer: async (r) => {
     gpuGate.entered?.()
     if (gpuGate.wait) await gpuGate.wait
@@ -32,14 +34,22 @@ const { useMapRasterLayers } = await import('./useMapRasterLayers.js')
 
 const deferred = () => {
   let resolve
-  const promise = new Promise((r) => { resolve = r })
+  const promise = new Promise((r) => {
+    resolve = r
+  })
   return { promise, resolve }
 }
 
 // A preview-drawn raster (photometric 3 = not the tiled display path).
 const preview = (id, extra = {}) => ({
-  id, crs: 'EPSG:4326', width: 10, height: 10, photometric: 3, previewDataUrl: `data:${id}`,
-  geoTransform: { originX: 0, originY: 10, scaleX: 1, scaleY: -1 }, ...extra,
+  id,
+  crs: 'EPSG:4326',
+  width: 10,
+  height: 10,
+  photometric: 3,
+  previewDataUrl: `data:${id}`,
+  geoTransform: { originX: 0, originY: 10, scaleX: 1, scaleY: -1 },
+  ...extra,
 })
 
 function setup(list) {
@@ -47,7 +57,11 @@ function setup(list) {
   const ctx = { map: { getView: () => ({ getProjection: () => getOlProjection('EPSG:4326') }) } }
   const r = useMapRasterLayers(ctx, { rasters: () => state.rasters, modelCode: () => undefined })
   const group = r.createGroup()
-  const ids = () => group.getLayers().getArray().map((l) => l.get('previewUrl') ?? 'gpu')
+  const ids = () =>
+    group
+      .getLayers()
+      .getArray()
+      .map((l) => l.get('previewUrl') ?? 'gpu')
   return { ...r, ctx, state, group, ids }
 }
 
@@ -75,7 +89,8 @@ describe('useMapRasterLayers', () => {
   })
 
   it('follows opacity in place, rebuilds on a new preview, disposes what left the list', async () => {
-    const a = preview('a'), b = preview('b')
+    const a = preview('a'),
+      b = preview('b')
     const s = setup([a, b])
     await s.sync()
     const [la, lb] = s.group.getLayers().getArray()
@@ -115,7 +130,7 @@ describe('useMapRasterLayers', () => {
     const wait = deferred()
     ensureProjection.mockImplementationOnce(() => wait.promise)
     const s = setup([preview('a')])
-    const first = s.sync()        // parked on the projection lookup
+    const first = s.sync() // parked on the projection lookup
     s.state.rasters = [preview('b')]
     await s.sync()
     wait.resolve()
@@ -137,7 +152,8 @@ describe('useMapRasterLayers', () => {
   it('a sync abandons once the map is gone, and disposes a layer it had just made', async () => {
     const ortho = { ...preview('o'), product: true, cog: {}, fileKey: 'k1' }
     const s = setup([ortho])
-    const gate = deferred(), entered = deferred()
+    const gate = deferred(),
+      entered = deferred()
     gpuGate.wait = gate.promise
     gpuGate.entered = entered.resolve
     const pending = s.sync()
@@ -165,7 +181,10 @@ describe('useMapRasterLayers', () => {
 
   it('never looks the model frame code up remotely', async () => {
     const s = setup([])
-    const r = useMapRasterLayers(s.ctx, { rasters: () => [preview('a', { crs: 'MODEL:1' })], modelCode: () => 'MODEL:1' })
+    const r = useMapRasterLayers(s.ctx, {
+      rasters: () => [preview('a', { crs: 'MODEL:1' })],
+      modelCode: () => 'MODEL:1',
+    })
     r.createGroup()
     await r.sync()
     expect(ensureProjection).not.toHaveBeenCalled()

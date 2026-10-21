@@ -1,7 +1,7 @@
 import { ref, computed, watch } from 'vue'
 
 const VIEWER_TAB = { id: 'viewer', type: 'viewer', title: '3D', closable: false }
-const MAP_TAB    = { id: 'map',    type: 'map',    title: '2D', closable: false }
+const MAP_TAB = { id: 'map', type: 'map', title: '2D', closable: false }
 
 // showMap: Ref<boolean> — when false the 2D tab is hidden and map view redirects to viewer
 export function useTabs(imageById, showMap) {
@@ -36,8 +36,8 @@ export function useTabs(imageById, showMap) {
   })
 
   const activeView = computed(() => {
-    if (activeTabId.value === 'viewer')   return 'viewer'
-    if (activeTabId.value === 'map')      return 'map'
+    if (activeTabId.value === 'viewer') return 'viewer'
+    if (activeTabId.value === 'map') return 'map'
     if (activeTabId.value === 'metadata') return 'table'
     return ''
   })
@@ -102,7 +102,8 @@ export function useTabs(imageById, showMap) {
 
   // Open a raster product (DEM / orthophoto) in its own tab, like an image.
   // One tab per kind; re-opening focuses the existing tab.
-  function openProductTab(kind, title) { // 'dem' | 'ortho'
+  function openProductTab(kind, title) {
+    // 'dem' | 'ortho'
     const tabId = `product:${kind}`
     const existing = tabs.value.find((t) => t.id === tabId)
     if (existing) {
@@ -124,8 +125,9 @@ export function useTabs(imageById, showMap) {
   function openRasterTab(id, title) {
     const tabId = `raster:${id}`
     const existing = tabs.value.find((t) => t.id === tabId)
-    if (existing) { if (title) existing.title = title }
-    else {
+    if (existing) {
+      if (title) existing.title = title
+    } else {
       tabs.value.push({
         id: tabId,
         type: 'raster',
@@ -178,9 +180,8 @@ export function useTabs(imageById, showMap) {
   // only; fixed tabs are always kept. `id` is the right-clicked tab.
   function keepActiveValid(fallbackId) {
     if (!tabs.value.some((t) => t.id === activeTabId.value)) {
-      activeTabId.value = fallbackId && tabs.value.some((t) => t.id === fallbackId)
-        ? fallbackId
-        : (tabs.value[0]?.id ?? 'viewer')
+      activeTabId.value =
+        fallbackId && tabs.value.some((t) => t.id === fallbackId) ? fallbackId : (tabs.value[0]?.id ?? 'viewer')
     }
   }
 

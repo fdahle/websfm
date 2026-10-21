@@ -28,8 +28,16 @@ export async function mapConcurrent(items, limit, mapper) {
 // outside a browser (tests, workers without rAF) it is a plain macrotask.
 export function yieldToPaint() {
   return new Promise((resolve) => {
-    if (typeof requestAnimationFrame !== 'function') { setTimeout(resolve, 0); return }
+    if (typeof requestAnimationFrame !== 'function') {
+      setTimeout(resolve, 0)
+      return
+    }
     const cap = setTimeout(resolve, 100)
-    requestAnimationFrame(() => setTimeout(() => { clearTimeout(cap); resolve() }, 0))
+    requestAnimationFrame(() =>
+      setTimeout(() => {
+        clearTimeout(cap)
+        resolve()
+      }, 0),
+    )
   })
 }

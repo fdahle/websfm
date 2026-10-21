@@ -27,18 +27,26 @@ import { THUMB_MAX_DIM, SOURCE_UNREADABLE } from '../../utils/thumbnail.js'
 export const THUMB_CONCURRENCY = 2
 
 export function createImageThumbnails({
-  imageById, currentProjectId, isPersisting, trackWrite, log, healImage,
-  make = makeThumbnail, storage = opfs,
+  imageById,
+  currentProjectId,
+  isPersisting,
+  trackWrite,
+  log,
+  healImage,
+  make = makeThumbnail,
+  storage = opfs,
 }) {
   const queue = createKeyedQueue({ concurrency: THUMB_CONCURRENCY })
   // Bumped whenever an image gains or loses a thumbnail — the 3D view watches this
   // one number instead of every image's `thumb`.
   const version = ref(0)
   let generation = 0
-  const failed = new Set()   // uuid → generation failed this session; no retry loop
-  const healed = new Set()   // uuid → a broken thumbnail was already regenerated once
+  const failed = new Set() // uuid → generation failed this session; no retry loop
+  const healed = new Set() // uuid → a broken thumbnail was already regenerated once
 
-  function release(p) { if (p?.url) URL.revokeObjectURL(p.url) }
+  function release(p) {
+    if (p?.url) URL.revokeObjectURL(p.url)
+  }
   function attach(img, blob) {
     release(img.thumb)
     img.thumb = markRaw({ blob, url: URL.createObjectURL(blob) })
@@ -65,22 +73,27 @@ export function createImageThumbnails({
       img = imageById(id)
       if (!img || stale()) return null
       if (img.thumb) return img.thumb
-      if (file?.size > 0) { attach(img, file); return img.thumb }
+      if (file?.size > 0) {
+        attach(img, file)
+        return img.thumb
+      }
     }
 
     // A TIFF still transcoding has no displayable URL yet; the row asks again once
     // `img.url` changes. A failed decode will never have one.
     const from = source ?? (img.previewPending || img.previewFailed ? null : img.url)
     if (!from) return null
-    const hint = img.meta?.width > 0 && img.meta?.height > 0
-      ? { width: img.meta.width, height: img.meta.height } : null
+    const hint = img.meta?.width > 0 && img.meta?.height > 0 ? { width: img.meta.width, height: img.meta.height } : null
     const { blob } = await make(from, { maxDim: THUMB_MAX_DIM, hint })
     img = imageById(id)
     if (!img || stale()) return null
     attach(img, blob)
     if (persist && currentProjectId() === pid) {
-      trackWrite(storage.saveImageDerived(pid, uuid, 'thumb', blob)
-        .catch((err) => log(`Thumbnail save failed: ${img.name} — ${err?.message ?? err}`, 'warn', 'Images')))
+      trackWrite(
+        storage
+          .saveImageDerived(pid, uuid, 'thumb', blob)
+          .catch((err) => log(`Thumbnail save failed: ${img.name} — ${err?.message ?? err}`, 'warn', 'Images')),
+      )
     }
     return img.thumb
   }
@@ -91,15 +104,23 @@ export function createImageThumbnails({
     if (!img) return Promise.resolve(null)
     if (img.thumb && !regenerate) return Promise.resolve(img.thumb)
     if (!source && !regenerate && failed.has(img.uuid)) return Promise.resolve(null)
-    const id = img.id, uuid = img.uuid, name = img.name, gen = generation
-    return queue.request(uuid, () => produce(id, source, regenerate, gen), { urgent })
+    const id = img.id,
+      uuid = img.uuid,
+      name = img.name,
+      gen = generation
+    return queue
+      .request(uuid, () => produce(id, source, regenerate, gen), { urgent })
       .catch(async (err) => {
         if (err instanceof QueueCancelled || gen !== generation) return null
         const message = err?.message ?? String(err)
         // The display URL itself is dead (its file moved, OPFS evicted): that is the
         // image's problem, healed the usual way; one retry if it came back.
-        if (!source && message.startsWith(SOURCE_UNREADABLE) && healImage && await healImage(id)) {
-          try { return await produce(id, null, regenerate, gen) } catch { /* fall through */ }
+        if (!source && message.startsWith(SOURCE_UNREADABLE) && healImage && (await healImage(id))) {
+          try {
+            return await produce(id, null, regenerate, gen)
+          } catch {
+            /* fall through */
+          }
         }
         if (gen !== generation) return null
         failed.add(uuid)
@@ -113,7 +134,10 @@ export function createImageThumbnails({
     const img = imageById(id)
     if (!img?.thumb) return
     drop(img)
-    if (healed.has(img.uuid)) { failed.add(img.uuid); return }
+    if (healed.has(img.uuid)) {
+      failed.add(img.uuid)
+      return
+    }
     healed.add(img.uuid)
     requestThumbnail(img, { regenerate: true, urgent: true })
   }

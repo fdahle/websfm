@@ -24,8 +24,30 @@ function makeCtx(overrides = {}) {
   ]
   const K = { fx: 100, fy: 100, cx: 50, cy: 50 }
   const cameras = new Map([
-    ['a', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K }],
-    ['b', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [1, 0, 0], K }],
+    [
+      'a',
+      {
+        R: [
+          [1, 0, 0],
+          [0, 1, 0],
+          [0, 0, 1],
+        ],
+        t: [0, 0, 0],
+        K,
+      },
+    ],
+    [
+      'b',
+      {
+        R: [
+          [1, 0, 0],
+          [0, 1, 0],
+          [0, 0, 1],
+        ],
+        t: [1, 0, 0],
+        K,
+      },
+    ],
   ])
   const donePairs = [
     { idA: 'a', idB: 'b', matches: [], inlierCount: 200 },
@@ -34,25 +56,42 @@ function makeCtx(overrides = {}) {
   const logs = []
   const baCalls = []
   return {
-    logs, baCalls,
+    logs,
+    baCalls,
     ctx: {
-      imgs, donePairs, cameras,
+      imgs,
+      donePairs,
+      cameras,
       Kmap: new Map(imgs.map((i) => [i.uuid, K])),
-      ...tracksFrom([], imgs.map((i) => i.uuid)),
+      ...tracksFrom(
+        [],
+        imgs.map((i) => i.uuid),
+      ),
       keypointsAt: () => null,
       registeredUuids: new Set(['a', 'b']),
       cfg: {
-        minMatchesForRegistration: 12, reprjThreshold: 4, pnpGateScale: 2,
-        minPnpInliers: 15, minPnpInlierRatio: 0.3, minPnpRefineInlierRatio: 0.3,
-        filterMaxReprojPx: 4, filterMinTriAngleDeg: 1.5,
-        baIterations: 25, interimBaEvery: 5, interimBaIterations: 12,
-        rescueStalled: true, rescueRefineRatio: 0.2, refineIntrinsics: 'f,k1',
+        minMatchesForRegistration: 12,
+        reprjThreshold: 4,
+        pnpGateScale: 2,
+        minPnpInliers: 15,
+        minPnpInlierRatio: 0.3,
+        minPnpRefineInlierRatio: 0.3,
+        filterMaxReprojPx: 4,
+        filterMinTriAngleDeg: 1.5,
+        baIterations: 25,
+        interimBaEvery: 5,
+        interimBaIterations: 12,
+        rescueStalled: true,
+        rescueRefineRatio: 0.2,
+        refineIntrinsics: 'f,k1',
         ...overrides,
       },
       refreshTracks: () => {},
       foldOneEndpointMatches: () => 0,
       mergeTracks: () => 0,
-      runBundleAdjust: async (label, iters, mode) => { baCalls.push({ label, iters, mode }) },
+      runBundleAdjust: async (label, iters, mode) => {
+        baCalls.push({ label, iters, mode })
+      },
       filterTracks: () => ({ obsRemoved: 0, ptsRemoved: 0 }),
       modelReprojStats: () => ({ p95: 1, median: 0.5, mean: 0.5 }),
       imageByUuid: (u) => imgs.find((i) => i.uuid === u),
@@ -112,10 +151,25 @@ function makeRescueCtx({ nCams = 6, viewsPerTrack = 2, nTracks = 40, ...cfgOverr
   const names = Array.from({ length: nCams }, (_, i) => `c${i}`)
   const K = { fx: 100, fy: 100, cx: 50, cy: 50 }
   const imgs = [...names, 'z'].map((n) => ({
-    uuid: n, name: n, keypoints: [], meta: { width: 100, height: 100 },
+    uuid: n,
+    name: n,
+    keypoints: [],
+    meta: { width: 100, height: 100 },
   }))
-  const cameras = new Map(names.map((n, i) => [n,
-    { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [i, 0, 0], K }]))
+  const cameras = new Map(
+    names.map((n, i) => [
+      n,
+      {
+        R: [
+          [1, 0, 0],
+          [0, 1, 0],
+          [0, 0, 1],
+        ],
+        t: [i, 0, 0],
+        K,
+      },
+    ]),
+  )
   // 'z' is linked to the model but supplies no usable correspondences → the sweep
   // stalls with a linked image outstanding, which is the rescue's trigger.
   const donePairs = [
@@ -123,31 +177,50 @@ function makeRescueCtx({ nCams = 6, viewsPerTrack = 2, nTracks = 40, ...cfgOverr
     { idA: names[0], idB: 'z', matches: [], inlierCount: 200 },
   ]
   const points3d = Array.from({ length: nTracks }, (_, p) => ({
-    x: p, y: 0, z: 10,
+    x: p,
+    y: 0,
+    z: 10,
     views: new Map(names.slice(0, viewsPerTrack).map((n, i) => [n, i])),
   }))
   const logs = []
   const baCalls = []
   return {
-    logs, baCalls,
+    logs,
+    baCalls,
     ctx: {
-      imgs, donePairs, cameras,
+      imgs,
+      donePairs,
+      cameras,
       Kmap: new Map(imgs.map((i) => [i.uuid, K])),
-      ...tracksFrom(points3d, imgs.map((i) => i.uuid)),
+      ...tracksFrom(
+        points3d,
+        imgs.map((i) => i.uuid),
+      ),
       keypointsAt: () => null,
       registeredUuids: new Set(names),
       cfg: {
-        minMatchesForRegistration: 12, reprjThreshold: 4, pnpGateScale: 2,
-        minPnpInliers: 15, minPnpInlierRatio: 0.3, minPnpRefineInlierRatio: 0.3,
-        filterMaxReprojPx: 4, filterMinTriAngleDeg: 1.5,
-        baIterations: 25, interimBaEvery: 5, interimBaIterations: 12,
-        rescueStalled: true, rescueRefineRatio: 0.2, refineIntrinsics: 'f,k1',
+        minMatchesForRegistration: 12,
+        reprjThreshold: 4,
+        pnpGateScale: 2,
+        minPnpInliers: 15,
+        minPnpInlierRatio: 0.3,
+        minPnpRefineInlierRatio: 0.3,
+        filterMaxReprojPx: 4,
+        filterMinTriAngleDeg: 1.5,
+        baIterations: 25,
+        interimBaEvery: 5,
+        interimBaIterations: 12,
+        rescueStalled: true,
+        rescueRefineRatio: 0.2,
+        refineIntrinsics: 'f,k1',
         ...cfgOverrides,
       },
       refreshTracks: () => {},
       foldOneEndpointMatches: () => 0,
       mergeTracks: () => 0,
-      runBundleAdjust: async (label, iters, mode) => { baCalls.push({ label, iters, mode }) },
+      runBundleAdjust: async (label, iters, mode) => {
+        baCalls.push({ label, iters, mode })
+      },
       filterTracks: () => ({ obsRemoved: 0, ptsRemoved: 0 }),
       modelReprojStats: () => ({ p95: 1, median: 0.5, mean: 0.5 }),
       imageByUuid: (u) => imgs.find((i) => i.uuid === u),

@@ -9,17 +9,25 @@ const MARGIN = 4
 export function useMenuPlacement(menu) {
   const el = ref(null)
   const pos = ref({ left: '0px', top: '0px' })
-  const at = (left, top) => { pos.value = { left: `${left}px`, top: `${top}px` } }
+  const at = (left, top) => {
+    pos.value = { left: `${left}px`, top: `${top}px` }
+  }
 
-  watch(menu, async (m) => {
-    if (!m) return
-    at(m.x, m.y)
-    await nextTick()   // laid out, not yet painted
-    const r = el.value?.getBoundingClientRect()
-    if (!r || menu() !== m) return
-    at(Math.max(MARGIN, Math.min(m.x, window.innerWidth - r.width - MARGIN)),
-      Math.max(MARGIN, Math.min(m.y, window.innerHeight - r.height - MARGIN)))
-  }, { immediate: true })
+  watch(
+    menu,
+    async (m) => {
+      if (!m) return
+      at(m.x, m.y)
+      await nextTick() // laid out, not yet painted
+      const r = el.value?.getBoundingClientRect()
+      if (!r || menu() !== m) return
+      at(
+        Math.max(MARGIN, Math.min(m.x, window.innerWidth - r.width - MARGIN)),
+        Math.max(MARGIN, Math.min(m.y, window.innerHeight - r.height - MARGIN)),
+      )
+    },
+    { immediate: true },
+  )
 
   return { el, pos }
 }

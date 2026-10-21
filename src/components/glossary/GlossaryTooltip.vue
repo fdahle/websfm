@@ -11,8 +11,8 @@ import { ref, watch, nextTick, onMounted } from 'vue'
 // these per level; this component only positions itself, animates the ring,
 // and relays pointer events on its body.
 const props = defineProps({
-  anchor: { type: Object, required: true },   // DOM element to position against
-  level: { type: Number, default: 0 },        // stack depth: deeper popups sit on top
+  anchor: { type: Object, required: true }, // DOM element to position against
+  level: { type: Number, default: 0 }, // stack depth: deeper popups sit on top
   title: { type: String, default: '' },
   summaryHtml: { type: String, default: '' }, // rendered (auto-linked) summary
   pinned: { type: Boolean, default: false },
@@ -38,17 +38,14 @@ function place() {
   style.value = { left: `${left}px`, top: `${top}px`, zIndex: 500 + props.level }
 }
 onMounted(place)
-watch(() => props.summaryHtml, () => nextTick(place))
+watch(
+  () => props.summaryHtml,
+  () => nextTick(place),
+)
 </script>
 
 <template>
-  <div
-    ref="rootEl"
-    class="glossary-tooltip"
-    :class="{ pinned }"
-    :style="style"
-    data-modal-exempt
-  >
+  <div ref="rootEl" class="glossary-tooltip" :class="{ pinned }" :style="style" data-modal-exempt>
     <svg class="ring" :style="{ '--ring-ms': ringMs + 'ms' }" preserveAspectRatio="none">
       <rect class="ring-track" x="1" y="1" rx="6" />
       <rect class="ring-fill" x="1" y="1" rx="6" pathLength="1" />
@@ -77,7 +74,9 @@ watch(() => props.summaryHtml, () => nextTick(place))
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   pointer-events: none; /* transparent to the mouse until pinned */
 }
-.glossary-tooltip.pinned { pointer-events: auto; }
+.glossary-tooltip.pinned {
+  pointer-events: auto;
+}
 
 /* Border progress ring: an SVG overlay whose stroke sweeps once over ringMs.
    pathLength="1" normalises the perimeter so the dash math is size-agnostic. */
@@ -94,7 +93,9 @@ watch(() => props.summaryHtml, () => nextTick(place))
   height: calc(100% - 2px);
   fill: none;
 }
-.ring-track { stroke: transparent; }
+.ring-track {
+  stroke: transparent;
+}
 .ring-fill {
   stroke: var(--accent);
   stroke-width: 2;
@@ -102,19 +103,41 @@ watch(() => props.summaryHtml, () => nextTick(place))
   stroke-dashoffset: 1;
   animation: ring-sweep var(--ring-ms) linear forwards;
 }
-.glossary-tooltip.pinned .ring-fill { stroke-dashoffset: 0; animation: none; }
+.glossary-tooltip.pinned .ring-fill {
+  stroke-dashoffset: 0;
+  animation: none;
+}
 @keyframes ring-sweep {
-  from { stroke-dashoffset: 1; }
-  to { stroke-dashoffset: 0; }
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
-.tt-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
-.tt-summary { font-size: 11.5px; color: var(--text-dim); line-height: 1.45; }
-.tt-summary :deep(p) { margin: 0; }
-.tt-summary :deep(p + p) { margin-top: 5px; }
+.tt-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.tt-summary {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+.tt-summary :deep(p) {
+  margin: 0;
+}
+.tt-summary :deep(p + p) {
+  margin-top: 5px;
+}
 .tt-summary :deep(a.glossary-link),
 .tt-summary :deep(a.guide-link) {
-  color: var(--accent); cursor: pointer; text-decoration: underline dotted;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline dotted;
 }
 .tt-more {
   margin-top: 7px;
@@ -126,6 +149,10 @@ watch(() => props.summaryHtml, () => nextTick(place))
   font-size: 10.5px;
   cursor: pointer;
 }
-.glossary-tooltip:not(.pinned) .tt-more { opacity: 0.6; }
-.tt-more:hover { text-decoration: underline; }
+.glossary-tooltip:not(.pinned) .tt-more {
+  opacity: 0.6;
+}
+.tt-more:hover {
+  text-decoration: underline;
+}
 </style>

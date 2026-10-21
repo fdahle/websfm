@@ -9,9 +9,7 @@ import XYZ from 'ol/source/XYZ'
 import ImageTileSource from 'ol/source/ImageTile'
 import WMTS, { optionsFromCapabilities } from 'ol/source/WMTS'
 import WMTSCapabilities from 'ol/format/WMTSCapabilities'
-import {
-  SATELLITE, TERRAIN, CUSTOM_SATELLITE_MAX_ZOOM, customAttribution, hillshade,
-} from '../../../core/basemaps.js'
+import { SATELLITE, TERRAIN, CUSTOM_SATELLITE_MAX_ZOOM, customAttribution, hillshade } from '../../../core/basemaps.js'
 import { fetchTerrariumTile } from '../../../core/terrainHeights.js'
 
 // Every basemap layer preloads all coarser levels under the view. Online this
@@ -45,9 +43,13 @@ async function loadHillshadeTile(z, x, y, { signal }) {
 }
 
 function makeTerrainLayer() {
-  return basemapLayer(new ImageTileSource({
-    loader: loadHillshadeTile, maxZoom: TERRAIN.maxZoom, attributions: TERRAIN.attributions,
-  }))
+  return basemapLayer(
+    new ImageTileSource({
+      loader: loadHillshadeTile,
+      maxZoom: TERRAIN.maxZoom,
+      attributions: TERRAIN.attributions,
+    }),
+  )
 }
 
 /**

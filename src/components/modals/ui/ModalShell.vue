@@ -30,18 +30,33 @@ const panelStyle = computed(() => ({
   ...(props.width ? { width: props.width } : {}),
   ...(props.height ? { height: props.height } : {}),
 }))
-function close() { if (props.dismissible) emit('close') }
+function close() {
+  if (props.dismissible) emit('close')
+}
 </script>
 
 <template>
   <div class="overlay" @click.self="close" @keydown.esc.stop="close">
-    <div ref="modal" class="modal" :class="{ sized: !!height }" :style="panelStyle" role="dialog" aria-modal="true" :aria-label="ariaLabel || title" tabindex="-1">
+    <div
+      ref="modal"
+      class="modal"
+      :class="{ sized: !!height }"
+      :style="panelStyle"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="ariaLabel || title"
+      tabindex="-1"
+    >
       <div class="modal-header">
-        <slot name="header"><span class="modal-title">{{ title }}</span></slot>
-        <button v-if="dismissible" class="modal-close" type="button" title="Close" aria-label="Close" @click="close">×</button>
+        <slot name="header"
+          ><span class="modal-title">{{ title }}</span></slot
+        >
+        <button v-if="dismissible" class="modal-close" type="button" title="Close" aria-label="Close" @click="close">
+          ×
+        </button>
       </div>
 
-      <div class="modal-body" :class="{ flush, fill: !!height, 'no-scroll': !scroll }">
+      <div class="modal-body" :class="{ flush, 'fill': !!height, 'no-scroll': !scroll }">
         <slot />
       </div>
 
@@ -54,9 +69,20 @@ function close() { if (props.dismissible) emit('close') }
 
 <style scoped src="./modal.css"></style>
 <style scoped>
-.modal-header { gap: 12px; }
-.modal.sized { overflow: hidden; }
-.modal-body.flush { padding: 0; gap: 0; }
-.modal-body.fill { flex: 1; }
-.modal-body.no-scroll { overflow: hidden; }
+.modal-header {
+  gap: 12px;
+}
+.modal.sized {
+  overflow: hidden;
+}
+.modal-body.flush {
+  padding: 0;
+  gap: 0;
+}
+.modal-body.fill {
+  flex: 1;
+}
+.modal-body.no-scroll {
+  overflow: hidden;
+}
 </style>

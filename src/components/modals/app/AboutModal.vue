@@ -33,37 +33,28 @@ const tabs = [
     </div>
 
     <div class="tabs">
-      <button
-        v-for="t in tabs"
-        :key="t.id"
-        class="tab"
-        :class="{ active: tab === t.id }"
-        @click="tab = t.id"
-      >{{ t.label }}</button>
+      <button v-for="t in tabs" :key="t.id" class="tab" :class="{ active: tab === t.id }" @click="tab = t.id">
+        {{ t.label }}
+      </button>
     </div>
 
     <!-- Identity -->
     <div v-show="tab === 'about'" class="pane">
       <p class="lede">
-        A complete photogrammetry pipeline — detection, matching, sparse &amp; dense
-        reconstruction, meshing and orthophotos — that runs entirely in your browser.
-        No server, no upload: your images never leave your machine.
+        A complete photogrammetry pipeline — detection, matching, sparse &amp; dense reconstruction, meshing and
+        orthophotos — that runs entirely in your browser. No server, no upload: your images never leave your machine.
       </p>
       <div class="chips">
         <a class="chip" href="https://github.com/fdahle/websfm" target="_blank" rel="noopener">
           <Icon name="link" /> GitHub
         </a>
-        <a class="chip" :href="licenseUrl" target="_blank" rel="noopener">
-          <Icon name="file" /> MIT License
-        </a>
+        <a class="chip" :href="licenseUrl" target="_blank" rel="noopener"> <Icon name="file" /> MIT License </a>
       </div>
     </div>
 
     <!-- Acknowledgments (courtesy) -->
     <div v-show="tab === 'credits'" class="pane">
-      <p class="lede">
-        websfm stands on decades of open research and software. Its methods draw on:
-      </p>
+      <p class="lede">websfm stands on decades of open research and software. Its methods draw on:</p>
       <ul class="ack-list">
         <li v-for="a in ACKNOWLEDGMENTS" :key="a.name" class="ack-item">
           <a :href="a.url" target="_blank" rel="noopener" class="ack-name">{{ a.name }}</a>
@@ -116,9 +107,22 @@ const tabs = [
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #7c5cff));
   box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 40%, transparent);
 }
-.hero-mark :deep(.icon) { width: 26px; height: 26px; }
-.hero-name { font-size: 20px; font-weight: 700; letter-spacing: 0.02em; color: var(--text); line-height: 1.1; }
-.hero-tag { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
+.hero-mark :deep(.icon) {
+  width: 26px;
+  height: 26px;
+}
+.hero-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  line-height: 1.1;
+}
+.hero-tag {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
 
 /* Tabs */
 .tabs {
@@ -139,16 +143,35 @@ const tabs = [
   font-weight: 500;
   padding: 6px 8px;
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--text); background: var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,0.18); }
+.tab:hover {
+  color: var(--text);
+}
+.tab.active {
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
 
-.pane { min-height: 190px; }
-.lede { font-size: 12.5px; color: var(--text-dim); line-height: 1.55; margin: 0 0 16px; }
+.pane {
+  min-height: 190px;
+}
+.lede {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin: 0 0 16px;
+}
 
 /* About chips */
-.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .chip {
   display: inline-flex;
   align-items: center;
@@ -159,35 +182,89 @@ const tabs = [
   font-size: 12px;
   color: var(--text);
   text-decoration: none;
-  transition: border-color 0.12s, background 0.12s;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
 }
-.chip:hover { border-color: var(--accent); background: var(--hover-bg); }
-.chip :deep(.icon) { width: 14px; height: 14px; color: var(--text-dim); }
+.chip:hover {
+  border-color: var(--accent);
+  background: var(--hover-bg);
+}
+.chip :deep(.icon) {
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
+}
 
 /* Acknowledgments */
-.ack-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ack-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .ack-item {
   padding: 11px 13px;
   border: 1px solid var(--panel-border);
   border-radius: 8px;
 }
-.ack-name { display: block; color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
-.ack-name:hover { text-decoration: underline; }
-.ack-note { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+.ack-name {
+  display: block;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.ack-name:hover {
+  text-decoration: underline;
+}
+.ack-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
 
 /* Licenses */
-.lic-group + .lic-group { margin-top: 18px; }
+.lic-group + .lic-group {
+  margin-top: 18px;
+}
 .group-head {
-  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.07em; color: var(--text-dim);
-  padding-bottom: 6px; margin-bottom: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-dim);
+  padding-bottom: 6px;
+  margin-bottom: 6px;
   border-bottom: 1px solid var(--panel-border);
 }
-.lic-item { padding: 5px 0; }
-.lic-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.lic-name { color: var(--text); text-decoration: none; font-size: 12.5px; font-weight: 500; }
-.lic-name:hover { color: var(--accent); text-decoration: underline; }
-.lic-ver { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.lic-item {
+  padding: 5px 0;
+}
+.lic-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.lic-name {
+  color: var(--text);
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.lic-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.lic-ver {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
 .lic-badge {
   margin-left: auto;
   font-size: 10.5px;
@@ -198,5 +275,10 @@ const tabs = [
   border-radius: 5px;
   white-space: nowrap;
 }
-.lic-notice { font-size: 11px; color: var(--text-dim); line-height: 1.45; margin-top: 4px; }
+.lic-notice {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin-top: 4px;
+}
 </style>

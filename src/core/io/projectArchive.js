@@ -80,8 +80,9 @@ export function validateManifest(raw) {
   if (version > PROJECT_ARCHIVE_VERSION) {
     return {
       ok: false,
-      error: `project file was written by a newer version of websfm `
-        + `(format v${version}, this app reads up to v${PROJECT_ARCHIVE_VERSION})`,
+      error:
+        `project file was written by a newer version of websfm ` +
+        `(format v${version}, this app reads up to v${PROJECT_ARCHIVE_VERSION})`,
     }
   }
   return { ok: true, manifest: raw }
@@ -91,8 +92,7 @@ export function validateManifest(raw) {
 // the same discipline as the PLY/LAS sniff (never text-decode a big binary).
 export function looksLikeZipHead(head) {
   const u8 = head instanceof Uint8Array ? head : new Uint8Array(head || [])
-  return u8.length >= 4 && u8[0] === 0x50 && u8[1] === 0x4b
-    && (u8[2] === 0x03 || u8[2] === 0x05 || u8[2] === 0x07)
+  return u8.length >= 4 && u8[0] === 0x50 && u8[1] === 0x4b && (u8[2] === 0x03 || u8[2] === 0x05 || u8[2] === 0x07)
 }
 
 export function isProjectArchiveName(fileName = '') {
@@ -102,7 +102,10 @@ export function isProjectArchiveName(fileName = '') {
 // A safe, readable download name. Keeps the project name recognisable but
 // strips anything a filesystem would object to.
 export function archiveFileName(projectName) {
-  const base = String(projectName || 'project').trim().replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80)
+  const base = String(projectName || 'project')
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .slice(0, 80)
   return `${base || 'project'}${PROJECT_ARCHIVE_EXT}`
 }
 
@@ -131,12 +134,11 @@ export function archiveSizeVerdict(totalBytes) {
 // with the manifest. Entry names come from an untrusted file.
 export function isSafeArchiveEntry(name) {
   const n = String(name || '')
-  if (!n || n.endsWith('/')) return false                 // directory marker
+  if (!n || n.endsWith('/')) return false // directory marker
   if (n.startsWith('/') || /^[a-zA-Z]:/.test(n)) return false
   if (n.includes('\\')) return false
   return !n.split('/').some((p) => p === '' || p === '.' || p === '..')
 }
-
 
 // Per-top-level-section byte counts, for the export log line (heavy-logging
 // convention: every derived number the user might question gets printed).
@@ -147,9 +149,7 @@ export function summarizeSections(entries) {
     const section = parts.length > 1 ? parts[0] : 'project'
     bySection.set(section, (bySection.get(section) || 0) + (size || 0))
   }
-  return [...bySection.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([section, bytes]) => ({ section, bytes }))
+  return [...bySection.entries()].sort((a, b) => b[1] - a[1]).map(([section, bytes]) => ({ section, bytes }))
 }
 
 // The one byte formatter (core/formatBytes.js), re-exported for existing importers.

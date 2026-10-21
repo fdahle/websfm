@@ -23,21 +23,23 @@ describe('preselectPairs', () => {
   it('maxNeighbors=2 widens the window (still fewer than exhaustive 10)', () => {
     const keep = preselectPairs(strip, { maxNeighbors: 2 })
     expect(keep.has('a--b')).toBe(true)
-    expect(keep.has('a--c')).toBe(true)   // 2nd nearest to a
-    expect(keep.has('a--d')).toBe(false)  // beyond the window
-    expect(keep.size).toBeLessThan(10)    // exhaustive would be C(5,2)=10
+    expect(keep.has('a--c')).toBe(true) // 2nd nearest to a
+    expect(keep.has('a--d')).toBe(false) // beyond the window
+    expect(keep.size).toBeLessThan(10) // exhaustive would be C(5,2)=10
   })
 
   it('respects maxDistance', () => {
     const keep = preselectPairs(strip, { maxNeighbors: 10, maxDistance: 1.5 })
-    expect(keep.has('a--b')).toBe(true)   // distance 1
-    expect(keep.has('a--c')).toBe(false)  // distance 2 > 1.5
+    expect(keep.has('a--b')).toBe(true) // distance 1
+    expect(keep.has('a--c')).toBe(false) // distance 2 > 1.5
   })
 
   it('handles a 2D block (nearest neighbours are the grid neighbours)', () => {
     const block = [
-      { uuid: 'p00', pos: [0, 0, 0] }, { uuid: 'p10', pos: [1, 0, 0] },
-      { uuid: 'p01', pos: [0, 1, 0] }, { uuid: 'p11', pos: [1, 1, 0] },
+      { uuid: 'p00', pos: [0, 0, 0] },
+      { uuid: 'p10', pos: [1, 0, 0] },
+      { uuid: 'p01', pos: [0, 1, 0] },
+      { uuid: 'p11', pos: [1, 1, 0] },
     ]
     const keep = preselectPairs(block, { maxNeighbors: 2 })
     // Each corner's two nearest are its edge neighbours (dist 1), not the diagonal (√2).
@@ -90,24 +92,31 @@ describe('preselectPairs', () => {
 
 describe('positionsForProximity', () => {
   it('drops altitude in a projected CRS', () => {
-    expect(positionsForProximity([{ uuid: 'a', pos: [3, 4, 99] }], 'EPSG:3857'))
-      .toEqual([{ uuid: 'a', pos: [3, 4] }])
+    expect(positionsForProximity([{ uuid: 'a', pos: [3, 4, 99] }], 'EPSG:3857')).toEqual([{ uuid: 'a', pos: [3, 4] }])
   })
 
   it('turns geographic positions into locally metric XY, including across the dateline', () => {
-    const out = positionsForProximity([
-      { uuid: 'west', pos: [179.999, 10, 0] },
-      { uuid: 'east', pos: [-179.999, 10, 5000] },
-    ], 'EPSG:4326')
+    const out = positionsForProximity(
+      [
+        { uuid: 'west', pos: [179.999, 10, 0] },
+        { uuid: 'east', pos: [-179.999, 10, 5000] },
+      ],
+      'EPSG:4326',
+    )
     expect(out).toHaveLength(2)
-    expect(Math.hypot(out[0].pos[0] - out[1].pos[0], out[0].pos[1] - out[1].pos[1]))
-      .toBeLessThan(250)
+    expect(Math.hypot(out[0].pos[0] - out[1].pos[0], out[0].pos[1] - out[1].pos[1])).toBeLessThan(250)
   })
 })
 
 // Unit square [0,1]², shifted by dx along x. Closed ring (repeats first vertex),
 // matching what core/footprint.js emits.
-const squareAt = (dx) => [[dx, 0], [dx + 1, 0], [dx + 1, 1], [dx, 1], [dx, 0]]
+const squareAt = (dx) => [
+  [dx, 0],
+  [dx + 1, 0],
+  [dx + 1, 1],
+  [dx, 1],
+  [dx, 0],
+]
 
 describe('footprintOverlap', () => {
   it('is 1 for identical footprints', () => {
@@ -128,20 +137,43 @@ describe('footprintOverlap', () => {
   })
 
   it('normalises by the SMALLER footprint (a small one inside a big one scores ~1)', () => {
-    const big = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
-    const small = [[4, 4], [6, 4], [6, 6], [4, 6], [4, 4]]  // fully inside big
+    const big = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+      [0, 0],
+    ]
+    const small = [
+      [4, 4],
+      [6, 4],
+      [6, 6],
+      [4, 6],
+      [4, 4],
+    ] // fully inside big
     expect(footprintOverlap(big, small)).toBeCloseTo(1, 6)
-    expect(footprintOverlap(small, big)).toBeCloseTo(1, 6)   // symmetric
+    expect(footprintOverlap(small, big)).toBeCloseTo(1, 6) // symmetric
   })
 
   it('handles open rings (no repeated closing vertex)', () => {
-    const open = (dx) => [[dx, 0], [dx + 1, 0], [dx + 1, 1], [dx, 1]]
+    const open = (dx) => [
+      [dx, 0],
+      [dx + 1, 0],
+      [dx + 1, 1],
+      [dx, 1],
+    ]
     expect(footprintOverlap(open(0), open(0.25))).toBeCloseTo(0.75, 6)
   })
 
   it('handles a rotated (convex) footprint', () => {
     // A diamond centred at (0.5,0.5) with area 0.5, fully inside the unit square.
-    const diamond = [[0.5, 0.1], [0.9, 0.5], [0.5, 0.9], [0.1, 0.5], [0.5, 0.1]]
+    const diamond = [
+      [0.5, 0.1],
+      [0.9, 0.5],
+      [0.5, 0.9],
+      [0.1, 0.5],
+      [0.5, 0.1],
+    ]
     expect(footprintOverlap(squareAt(0), diamond)).toBeCloseTo(1, 6) // diamond ⊂ square
   })
 })
@@ -152,22 +184,22 @@ describe('preselectByFootprintOverlap', () => {
     { uuid: 'a', ring: squareAt(0) },
     { uuid: 'b', ring: squareAt(0.25) },
     { uuid: 'c', ring: squareAt(0.5) },
-    { uuid: 'd', ring: squareAt(3) },   // far away — overlaps nothing
+    { uuid: 'd', ring: squareAt(3) }, // far away — overlaps nothing
   ]
 
   it('keeps pairs above the overlap threshold, drops the rest', () => {
     const keep = preselectByFootprintOverlap(strip, { minOverlap: 0.5 })
-    expect(keep.has('a--b')).toBe(true)   // 0.75
-    expect(keep.has('b--c')).toBe(true)   // 0.75
-    expect(keep.has('a--c')).toBe(true)   // squares 0 and 0.5 share 0.5 ⇒ == threshold
-    expect(keep.has('a--d')).toBe(false)  // disjoint
-    expect(keep.has('c--d')).toBe(false)  // disjoint
+    expect(keep.has('a--b')).toBe(true) // 0.75
+    expect(keep.has('b--c')).toBe(true) // 0.75
+    expect(keep.has('a--c')).toBe(true) // squares 0 and 0.5 share 0.5 ⇒ == threshold
+    expect(keep.has('a--d')).toBe(false) // disjoint
+    expect(keep.has('c--d')).toBe(false) // disjoint
   })
 
   it('a stricter threshold prunes the weaker overlaps', () => {
     const keep = preselectByFootprintOverlap(strip, { minOverlap: 0.6 })
-    expect(keep.has('a--b')).toBe(true)   // 0.75 ≥ 0.6
-    expect(keep.has('a--c')).toBe(false)  // 0.5 < 0.6
+    expect(keep.has('a--b')).toBe(true) // 0.75 ≥ 0.6
+    expect(keep.has('a--c')).toBe(false) // 0.5 < 0.6
   })
 
   it('returns an empty set for fewer than two footprints', () => {

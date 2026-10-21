@@ -30,11 +30,16 @@ const SNAP = 1e-9
 
 // World→pixel arithmetic leaves 2.9999999997 where the user drew 3; snap so a
 // boundary drawn on a pixel edge stays on it (matters only for allTouched).
-const snap = (v) => { const r = Math.round(v); return Math.abs(v - r) < SNAP ? r : v }
+const snap = (v) => {
+  const r = Math.round(v)
+  return Math.abs(v - r) < SNAP ? r : v
+}
 
 function isVertex(v) {
-  return (Array.isArray(v) && typeof v[0] === 'number')
-    || (v != null && typeof v === 'object' && !Array.isArray(v) && typeof v.x === 'number' && typeof v.y === 'number')
+  return (
+    (Array.isArray(v) && typeof v[0] === 'number') ||
+    (v != null && typeof v === 'object' && !Array.isArray(v) && typeof v.x === 'number' && typeof v.y === 'number')
+  )
 }
 
 // → [[x, y], …] with finite numbers, the GeoJSON closing vertex dropped, or null
@@ -82,8 +87,9 @@ export function normalizePolygons(input) {
   if (Array.isArray(input[0]) && isVertex(input[0][0])) return [cleanPolygon(input)].filter(Boolean)
   const out = []
   for (const el of input) {
-    if (el && !Array.isArray(el) && el.type) { for (const p of polygonsFromGeoJSON(el).polygons) out.push(p) }
-    else if (Array.isArray(el) && el.length) {
+    if (el && !Array.isArray(el) && el.type) {
+      for (const p of polygonsFromGeoJSON(el).polygons) out.push(p)
+    } else if (Array.isArray(el) && el.length) {
       const p = isVertex(el[0]) ? cleanPolygon([el]) : cleanPolygon(el)
       if (p) out.push(p)
     }
@@ -103,13 +109,19 @@ export function polygonsFromGeoJSON(geojson) {
   const polygons = []
   let ignored = 0
   const visit = (g) => {
-    if (!g || typeof g !== 'object') { ignored++; return }
+    if (!g || typeof g !== 'object') {
+      ignored++
+      return
+    }
     switch (g.type) {
       case 'FeatureCollection':
         for (const f of g.features || []) visit(f)
         return
       case 'Feature':
-        if (!g.geometry) { ignored++; return }
+        if (!g.geometry) {
+          ignored++
+          return
+        }
         visit(g.geometry)
         return
       case 'GeometryCollection':
@@ -117,13 +129,15 @@ export function polygonsFromGeoJSON(geojson) {
         return
       case 'Polygon': {
         const p = Array.isArray(g.coordinates) ? cleanPolygon(g.coordinates) : null
-        if (p) polygons.push(p); else ignored++
+        if (p) polygons.push(p)
+        else ignored++
         return
       }
       case 'MultiPolygon':
         for (const rings of g.coordinates || []) {
           const p = Array.isArray(rings) ? cleanPolygon(rings) : null
-          if (p) polygons.push(p); else ignored++
+          if (p) polygons.push(p)
+          else ignored++
         }
         return
       default:
@@ -150,14 +164,16 @@ function markSpan(mask, w, r, xa, xb) {
     c0 = Math.floor(xa)
     c1 = Math.ceil(xb) - 1
   }
-  c0 = Math.max(0, c0); c1 = Math.min(w - 1, c1)
+  c0 = Math.max(0, c0)
+  c1 = Math.min(w - 1, c1)
   if (c1 >= c0) mask.fill(1, r * w + c0, r * w + c1 + 1)
 }
 
 // Every pixel whose open interior the segment a→b passes through. Walks the
 // pixel-row strips the segment spans — O(rows + touched cells) per edge.
 function markSegment(mask, w, h, a, b) {
-  const lo = a[1] <= b[1] ? a : b, hi = a[1] <= b[1] ? b : a
+  const lo = a[1] <= b[1] ? a : b,
+    hi = a[1] <= b[1] ? b : a
   if (lo[1] === hi[1]) {
     if (Number.isInteger(lo[1])) return // horizontal on a pixel edge
     const r = Math.floor(lo[1])
@@ -168,9 +184,11 @@ function markSegment(mask, w, h, a, b) {
   const ra = Math.max(0, Math.floor(lo[1]))
   const rb = Math.min(h - 1, Math.ceil(hi[1]) - 1)
   for (let r = ra; r <= rb; r++) {
-    const y0 = Math.max(lo[1], r), y1 = Math.min(hi[1], r + 1)
+    const y0 = Math.max(lo[1], r),
+      y1 = Math.min(hi[1], r + 1)
     if (!(y1 > y0)) continue
-    const x0 = snap(lo[0] + (y0 - lo[1]) * dxdy), x1 = snap(lo[0] + (y1 - lo[1]) * dxdy)
+    const x0 = snap(lo[0] + (y0 - lo[1]) * dxdy),
+      x1 = snap(lo[0] + (y1 - lo[1]) * dxdy)
     markSpan(mask, w, r, Math.min(x0, x1), Math.max(x0, x1))
   }
 }
@@ -183,11 +201,13 @@ function markSegment(mask, w, h, a, b) {
  */
 export function polygonMask(geo, polygons, { allTouched = false } = {}) {
   const { width: w, height: h, gsd, originX, originY } = geo
-  if (!(Number.isInteger(w) && w > 0 && Number.isInteger(h) && h > 0)) throw new Error('polygonMask: grid needs positive integer width/height')
-  if (!(gsd > 0) || !Number.isFinite(originX) || !Number.isFinite(originY)) throw new Error('polygonMask: grid needs gsd > 0 and a finite origin')
+  if (!(Number.isInteger(w) && w > 0 && Number.isInteger(h) && h > 0))
+    throw new Error('polygonMask: grid needs positive integer width/height')
+  if (!(gsd > 0) || !Number.isFinite(originX) || !Number.isFinite(originY))
+    throw new Error('polygonMask: grid needs gsd > 0 and a finite origin')
   const mask = new Uint8Array(w * h)
   for (const poly of normalizePolygons(polygons)) {
-    const rings = poly.map(ring => ring.map(([x, y]) => [snap((x - originX) / gsd), snap((originY - y) / gsd)]))
+    const rings = poly.map((ring) => ring.map(([x, y]) => [snap((x - originX) / gsd), snap((originY - y) / gsd)]))
     fillPolygon(mask, w, h, rings)
     if (allTouched) {
       for (const ring of rings) {
@@ -205,11 +225,19 @@ export function polygonMask(geo, polygons, { allTouched = false } = {}) {
  */
 export function clipBounds(grid, mask) {
   const { width: w, height: h } = grid
-  let col0 = Infinity, row0 = -1, col1 = -1, row1 = -1
+  let col0 = Infinity,
+    row0 = -1,
+    col1 = -1,
+    row1 = -1
   for (let r = 0; r < h; r++) {
     const off = r * w
-    let first = -1, last = -1
-    for (let c = 0; c < w; c++) if (mask[off + c]) { if (first < 0) first = c; last = c }
+    let first = -1,
+      last = -1
+    for (let c = 0; c < w; c++)
+      if (mask[off + c]) {
+        if (first < 0) first = c
+        last = c
+      }
     if (first < 0) continue
     if (row0 < 0) row0 = r
     row1 = r
@@ -258,13 +286,18 @@ export function clipDem(grid, polygons, { crop = true, allTouched = false, onLog
   }
   const { width: w, data, mask } = grid
   const nodata = typeof grid.nodata === 'number' && Number.isFinite(grid.nodata) ? grid.nodata : null
-  const ow = win.width, oh = win.height
+  const ow = win.width,
+    oh = win.height
   const outData = data instanceof Float64Array ? new Float64Array(ow * oh) : new Float32Array(ow * oh)
   outData.fill(NaN)
   const outMask = new Uint8Array(ow * oh)
-  let insideCells = 0, validCells = 0, zMin = Infinity, zMax = -Infinity
+  let insideCells = 0,
+    validCells = 0,
+    zMin = Infinity,
+    zMax = -Infinity
   for (let r = 0; r < oh; r++) {
-    const srcOff = (win.row0 + r) * w + win.col0, dstOff = r * ow
+    const srcOff = (win.row0 + r) * w + win.col0,
+      dstOff = r * ow
     for (let c = 0; c < ow; c++) {
       const s = srcOff + c
       if (!inside[s]) continue
@@ -278,16 +311,32 @@ export function clipDem(grid, polygons, { crop = true, allTouched = false, onLog
       if (z > zMax) zMax = z
     }
   }
-  if (zMin > zMax) { zMin = 0; zMax = 0 }
-  onLog?.(`Clip DEM: ${insideCells} cells inside (${validCells} with data), `
-    + `${crop ? `cropped to ${ow}×${oh} at col ${win.col0}, row ${win.row0}` : `kept ${ow}×${oh}`}`, 'info', 'Products')
+  if (zMin > zMax) {
+    zMin = 0
+    zMax = 0
+  }
+  onLog?.(
+    `Clip DEM: ${insideCells} cells inside (${validCells} with data), ` +
+      `${crop ? `cropped to ${ow}×${oh} at col ${win.col0}, row ${win.row0}` : `kept ${ow}×${oh}`}`,
+    'info',
+    'Products',
+  )
   return {
     ...carried(grid),
-    width: ow, height: oh, gsd: grid.gsd,
+    width: ow,
+    height: oh,
+    gsd: grid.gsd,
     originX: grid.originX + win.col0 * grid.gsd,
     originY: grid.originY - win.row0 * grid.gsd,
-    data: outData, mask: outMask, zMin, zMax,
-    clip: { ...(bounds && { col0: bounds.col0, row0: bounds.row0, col1: bounds.col1, row1: bounds.row1 }), insideCells, validCells },
+    data: outData,
+    mask: outMask,
+    zMin,
+    zMax,
+    clip: {
+      ...(bounds && { col0: bounds.col0, row0: bounds.row0, col1: bounds.col1, row1: bounds.row1 }),
+      insideCells,
+      validCells,
+    },
   }
 }
 
@@ -302,21 +351,36 @@ export function clipDem(grid, polygons, { crop = true, allTouched = false, onLog
  */
 export function polygonPixelWindow(geo, polygons) {
   const { width: w, height: h, gsd, originX, originY } = geo
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
-  for (const poly of normalizePolygons(polygons)) for (const ring of poly) for (const [x, y] of ring) {
-    const c = (x - originX) / gsd, r = (originY - y) / gsd
-    if (c < x0) x0 = c; if (c > x1) x1 = c
-    if (r < y0) y0 = r; if (r > y1) y1 = r
-  }
-  const col0 = Math.max(0, Math.floor(x0) - 1), row0 = Math.max(0, Math.floor(y0) - 1)
-  const col1 = Math.min(w, Math.ceil(x1) + 1), row1 = Math.min(h, Math.ceil(y1) + 1)
+  let x0 = Infinity,
+    x1 = -Infinity,
+    y0 = Infinity,
+    y1 = -Infinity
+  for (const poly of normalizePolygons(polygons))
+    for (const ring of poly)
+      for (const [x, y] of ring) {
+        const c = (x - originX) / gsd,
+          r = (originY - y) / gsd
+        if (c < x0) x0 = c
+        if (c > x1) x1 = c
+        if (r < y0) y0 = r
+        if (r > y1) y1 = r
+      }
+  const col0 = Math.max(0, Math.floor(x0) - 1),
+    row0 = Math.max(0, Math.floor(y0) - 1)
+  const col1 = Math.min(w, Math.ceil(x1) + 1),
+    row1 = Math.min(h, Math.ceil(y1) + 1)
   return col1 > col0 && row1 > row0 ? { col0, row0, width: col1 - col0, height: row1 - row0 } : null
 }
 
 // The sub-raster geometry of a pixel window (see polygonPixelWindow).
 export function windowGeometry(geo, win) {
-  return { width: win.width, height: win.height, gsd: geo.gsd,
-    originX: geo.originX + win.col0 * geo.gsd, originY: geo.originY - win.row0 * geo.gsd }
+  return {
+    width: win.width,
+    height: win.height,
+    gsd: geo.gsd,
+    originX: geo.originX + win.col0 * geo.gsd,
+    originY: geo.originY - win.row0 * geo.gsd,
+  }
 }
 
 /**
@@ -336,31 +400,46 @@ export function clipOrtho(ortho, polygons, { crop = true, allTouched = false, on
     return null
   }
   const { width: w, data, mask } = ortho
-  const ow = win.width, oh = win.height
+  const ow = win.width,
+    oh = win.height
   const Ctor = data instanceof Uint8ClampedArray ? Uint8ClampedArray : Uint8Array
   const outData = new Ctor(ow * oh * 4)
   const outMask = mask ? new Uint8Array(ow * oh) : null
   let insideCells = 0
   for (let r = 0; r < oh; r++) {
-    const srcOff = (win.row0 + r) * w + win.col0, dstOff = r * ow
+    const srcOff = (win.row0 + r) * w + win.col0,
+      dstOff = r * ow
     for (let c = 0; c < ow; c++) {
       const s = srcOff + c
       if (!inside[s]) continue
       insideCells++
-      const si = s * 4, di = (dstOff + c) * 4
-      outData[di] = data[si]; outData[di + 1] = data[si + 1]; outData[di + 2] = data[si + 2]; outData[di + 3] = data[si + 3]
+      const si = s * 4,
+        di = (dstOff + c) * 4
+      outData[di] = data[si]
+      outData[di + 1] = data[si + 1]
+      outData[di + 2] = data[si + 2]
+      outData[di + 3] = data[si + 3]
       if (outMask) outMask[dstOff + c] = mask[s] ? 1 : 0
     }
   }
-  onLog?.(`Clip ortho: ${insideCells} pixels inside, `
-    + `${crop ? `cropped to ${ow}×${oh} at col ${win.col0}, row ${win.row0}` : `kept ${ow}×${oh}`}`, 'info', 'Products')
+  onLog?.(
+    `Clip ortho: ${insideCells} pixels inside, ` +
+      `${crop ? `cropped to ${ow}×${oh} at col ${win.col0}, row ${win.row0}` : `kept ${ow}×${oh}`}`,
+    'info',
+    'Products',
+  )
   return {
     ...carried(ortho),
-    width: ow, height: oh, gsd: ortho.gsd,
+    width: ow,
+    height: oh,
+    gsd: ortho.gsd,
     originX: ortho.originX + win.col0 * ortho.gsd,
     originY: ortho.originY - win.row0 * ortho.gsd,
     data: outData,
     ...(outMask && { mask: outMask }),
-    clip: { ...(bounds && { col0: bounds.col0, row0: bounds.row0, col1: bounds.col1, row1: bounds.row1 }), insideCells },
+    clip: {
+      ...(bounds && { col0: bounds.col0, row0: bounds.row0, col1: bounds.col1, row1: bounds.row1 }),
+      insideCells,
+    },
   }
 }

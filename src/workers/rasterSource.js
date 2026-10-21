@@ -12,7 +12,14 @@
 //   descriptor = { kind: 'pyramid', index, blob }   (index: rasterPyramid buildIndex)
 
 import {
-  planPyramid, buildIndex, createLevelCascade, levelFor, levelScale, tilesForRect, tileRange, PYRAMID_TUNING,
+  planPyramid,
+  buildIndex,
+  createLevelCascade,
+  levelFor,
+  levelScale,
+  tilesForRect,
+  tileRange,
+  PYRAMID_TUNING,
 } from '../core/io/rasterPyramid.js'
 import { percentileRange } from '../core/io/tonalStretch.js'
 import { readTiffTag } from '../utils/tiff.js'
@@ -41,12 +48,20 @@ async function openTiff(blob) {
  * through the level cascade; each finished tile is compressed at once.
  * Returns { index, blob, displayBlob, thumbBlob, srcInfo }.
  */
-export async function buildPyramidFromTiff(file, {
-  tileSize = PYRAMID_TUNING.tileSize, minLong = PYRAMID_TUNING.minLong, onProgress, displayMax = 8192, previews = true,
-} = {}) {
+export async function buildPyramidFromTiff(
+  file,
+  {
+    tileSize = PYRAMID_TUNING.tileSize,
+    minLong = PYRAMID_TUNING.minLong,
+    onProgress,
+    displayMax = 8192,
+    previews = true,
+  } = {},
+) {
   const tiff = await openTiff(file)
   const image = await tiff.getImage()
-  const W = image.getWidth(), H = image.getHeight()
+  const W = image.getWidth(),
+    H = image.getHeight()
   const spp = image.getSamplesPerPixel()
   const fd = image.getFileDirectory()
   const bpsRaw = image.getBitsPerSample?.() ?? (await readTiffTag(fd, 'BitsPerSample'))
@@ -55,26 +70,43 @@ export async function buildPyramidFromTiff(file, {
   const gray = (spp === 1 || spp === 2) && (photometric === 0 || photometric === 1)
   const channels = gray ? 1 : 3
   const plain = (bps === 8 || bps === 16) && (gray || photometric === 2)
-  const srcInfo = { width: W, height: H, samplesPerPixel: spp, bitsPerSample: bps, photometric, srcBytes: file.size, channels }
+  const srcInfo = {
+    width: W,
+    height: H,
+    samplesPerPixel: spp,
+    bitsPerSample: bps,
+    photometric,
+    srcBytes: file.size,
+    channels,
+  }
 
   // 16-bit: one stretch for the whole image, from a decimated overview.
   let range = null
   if (plain && bps === 16) {
     const s = Math.min(1, 2048 / Math.max(W, H))
-    const ov = await image.readRasters({ interleave: true, width: Math.max(1, Math.round(W * s)), height: Math.max(1, Math.round(H * s)) })
+    const ov = await image.readRasters({
+      interleave: true,
+      width: Math.max(1, Math.round(W * s)),
+      height: Math.max(1, Math.round(H * s)),
+    })
     range = percentileRange(ov, spp)
     srcInfo.stretch = range
   }
   const toChannels = (raw, rows) => {
-    const n = W * rows, out = new Uint8Array(n * channels)
+    const n = W * rows,
+      out = new Uint8Array(n * channels)
     if (!plain) {
       // readRGB: always 3 channels. A gray scan that is not 8/16-bit (1/4/12-bit,
       // float) comes back with R = G = B, so it keeps one channel: its R.
-      if (channels === 3) { out.set(raw.subarray ? raw.subarray(0, n * 3) : Array.prototype.slice.call(raw, 0, n * 3)); return out }
+      if (channels === 3) {
+        out.set(raw.subarray ? raw.subarray(0, n * 3) : Array.prototype.slice.call(raw, 0, n * 3))
+        return out
+      }
       for (let i = 0; i < n; i++) out[i] = raw[i * 3]
       return out
     }
-    const lo = range?.lo ?? 0, span = range ? Math.max(1, range.hi - range.lo) : 1
+    const lo = range?.lo ?? 0,
+      span = range ? Math.max(1, range.hi - range.lo) : 1
     const invert = gray && photometric === 0
     for (let i = 0; i < n; i++) {
       for (let c = 0; c < channels; c++) {
@@ -93,16 +125,24 @@ export async function buildPyramidFromTiff(file, {
     const L = plan.levels[k]
     const row = y0 / tileSize
     for (let col = 0; col < L.cols; col++) {
-      const x0 = col * tileSize, w = Math.min(tileSize, L.width - x0)
+      const x0 = col * tileSize,
+        w = Math.min(tileSize, L.width - x0)
       const t = new Uint8Array(w * rows * channels)
-      for (let r = 0; r < rows; r++) t.set(data.subarray((r * L.width + x0) * channels, (r * L.width + x0 + w) * channels), r * w * channels)
-      pending.push(deflate(t).then((b) => { tiles[k][row * L.cols + col] = b }))
+      for (let r = 0; r < rows; r++)
+        t.set(data.subarray((r * L.width + x0) * channels, (r * L.width + x0 + w) * channels), r * w * channels)
+      pending.push(
+        deflate(t).then((b) => {
+          tiles[k][row * L.cols + col] = b
+        }),
+      )
     }
   })
   for (let y = 0; y < H; y += tileSize) {
     const y1 = Math.min(H, y + tileSize)
     const window = [0, y, W, y1]
-    const raw = plain ? await image.readRasters({ window, interleave: true }) : await image.readRGB({ window, interleave: true })
+    const raw = plain
+      ? await image.readRasters({ window, interleave: true })
+      : await image.readRGB({ window, interleave: true })
     cascade.push(toChannels(raw, y1 - y), y1 - y)
     // Keep at most a few bands' tiles compressing at once.
     if (pending.length > 4 * plan.levels[0].cols) await Promise.all(pending.splice(0))
@@ -111,7 +151,11 @@ export async function buildPyramidFromTiff(file, {
   cascade.finish()
   await Promise.all(pending)
   const flat = tiles.flat()
-  const index = buildIndex(plan, flat.map((b) => b.size), channels)
+  const index = buildIndex(
+    plan,
+    flat.map((b) => b.size),
+    channels,
+  )
   const desc = { kind: 'pyramid', index, blob: new Blob(flat) }
 
   if (!previews) return { ...desc, displayBlob: null, thumbBlob: null, srcInfo }
@@ -152,7 +196,10 @@ let tileCacheBytes = 0
 export async function openPyramid(desc) {
   if (typeof FileReaderSync !== 'undefined') {
     const reader = new FileReaderSync()
-    return { ...desc, readRange: (offset, length) => new Uint8Array(reader.readAsArrayBuffer(desc.blob.slice(offset, offset + length))) }
+    return {
+      ...desc,
+      readRange: (offset, length) => new Uint8Array(reader.readAsArrayBuffer(desc.blob.slice(offset, offset + length))),
+    }
   }
   const bytes = new Uint8Array(await desc.blob.arrayBuffer())
   return { ...desc, readRange: (offset, length) => bytes.subarray(offset, offset + length) }
@@ -161,13 +208,19 @@ export async function openPyramid(desc) {
 function tileBytes(src, k, col, row) {
   const key = `${src.index.bytes}:${src.blob.size}:${k}:${col}:${row}`
   const hit = tileCache.get(key)
-  if (hit) { tileCache.delete(key); tileCache.set(key, hit); return hit }
+  if (hit) {
+    tileCache.delete(key)
+    tileCache.set(key, hit)
+    return hit
+  }
   const { offset, length } = tileRange(src.index, k, col, row)
   const bytes = inflateSync(src.readRange(offset, length))
-  tileCache.set(key, bytes); tileCacheBytes += bytes.length
+  tileCache.set(key, bytes)
+  tileCacheBytes += bytes.length
   while (tileCacheBytes > TILE_CACHE_BYTES && tileCache.size > 1) {
     const [oldKey, old] = tileCache.entries().next().value
-    tileCache.delete(oldKey); tileCacheBytes -= old.length
+    tileCache.delete(oldKey)
+    tileCacheBytes -= old.length
   }
   return bytes
 }
@@ -175,18 +228,30 @@ function tileBytes(src, k, col, row) {
 /** RGBA pixels of a level-pixel rect of level k (clipped to the level); `src` from openPyramid. */
 export function readLevelRect(src, k, rect) {
   const { index } = src
-  const L = index.levels[k], C = index.channels, ts = index.tileSize
-  const x0 = Math.max(0, Math.floor(rect.x0)), y0 = Math.max(0, Math.floor(rect.y0))
-  const x1 = Math.min(L.width, Math.ceil(rect.x1)), y1 = Math.min(L.height, Math.ceil(rect.y1))
-  const w = Math.max(0, x1 - x0), h = Math.max(0, y1 - y0)
+  const L = index.levels[k],
+    C = index.channels,
+    ts = index.tileSize
+  const x0 = Math.max(0, Math.floor(rect.x0)),
+    y0 = Math.max(0, Math.floor(rect.y0))
+  const x1 = Math.min(L.width, Math.ceil(rect.x1)),
+    y1 = Math.min(L.height, Math.ceil(rect.y1))
+  const w = Math.max(0, x1 - x0),
+    h = Math.max(0, y1 - y0)
   const out = new Uint8ClampedArray(w * h * 4)
   for (const p of tilesForRect(index, k, { x0, y0, x1, y1 })) {
     const t = tileBytes(src, k, p.col, p.row)
     const tw = Math.min(ts, L.width - p.col * ts)
     for (let r = 0; r < p.sh; r++) {
-      let s = ((p.sy + r) * tw + p.sx) * C, d = ((p.dy + r) * w + p.dx) * 4
+      let s = ((p.sy + r) * tw + p.sx) * C,
+        d = ((p.dy + r) * w + p.dx) * 4
       for (let x = 0; x < p.sw; x++, s += C, d += 4) {
-        if (C === 1) { out[d] = out[d + 1] = out[d + 2] = t[s] } else { out[d] = t[s]; out[d + 1] = t[s + 1]; out[d + 2] = t[s + 2] }
+        if (C === 1) {
+          out[d] = out[d + 1] = out[d + 2] = t[s]
+        } else {
+          out[d] = t[s]
+          out[d + 1] = t[s + 1]
+          out[d + 2] = t[s + 2]
+        }
         out[d + 3] = 255
       }
     }
@@ -205,7 +270,7 @@ export function rasterizePyramid(src, maxDim) {
   // copies a resample makes — each the size of the result).
   const k = levelFor(src.index, scale, { slack: LEVEL_SLACK })
   const L = src.index.levels[k]
-  if (k > 0 && L.width >= natW * scale / (1 + LEVEL_SLACK)) {
+  if (k > 0 && L.width >= (natW * scale) / (1 + LEVEL_SLACK)) {
     const lvl = readLevelRect(src, k, { x0: 0, y0: 0, x1: L.width, y1: L.height })
     // A level's pixel is exactly 2^k native pixels (rasterPyramid.js), whatever its
     // last partial column.
@@ -224,9 +289,15 @@ const LEVEL_SLACK = 0.02
  */
 export function rasterizePyramidTo(src, width, height) {
   const { width: natW, height: natH } = src.index
-  if (width > PYRAMID_TUNING.maxSidePx || height > PYRAMID_TUNING.maxSidePx || width * height > PYRAMID_TUNING.maxAreaPx) {
-    throw new Error(`rasterize: ${width}×${height} px of a ${natW}×${natH} image exceeds one canvas `
-      + `(≤ ${PYRAMID_TUNING.maxSidePx} px a side, ≤ ${PYRAMID_TUNING.maxAreaPx / 1e6} MP) — use a lower resolution`)
+  if (
+    width > PYRAMID_TUNING.maxSidePx ||
+    height > PYRAMID_TUNING.maxSidePx ||
+    width * height > PYRAMID_TUNING.maxAreaPx
+  ) {
+    throw new Error(
+      `rasterize: ${width}×${height} px of a ${natW}×${natH} image exceeds one canvas ` +
+        `(≤ ${PYRAMID_TUNING.maxSidePx} px a side, ≤ ${PYRAMID_TUNING.maxAreaPx / 1e6} MP) — use a lower resolution`,
+    )
   }
   const k = levelFor(src.index, Math.max(width / natW, height / natH))
   const L = src.index.levels[k]

@@ -6,9 +6,9 @@ import { icons } from './icons.js'
 // A ribbon command naming an icon that does not exist renders an EMPTY <svg> —
 // no error, no warning, just an invisible button (`icon: 'sensor'` shipped that
 // way). Pin the command tables against the icon set so it can't happen silently.
-const vueFiles = [
-  '../components/layout/Ribbon.vue',
-].map(rel => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
+const vueFiles = ['../components/layout/Ribbon.vue'].map((rel) =>
+  readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'),
+)
 
 describe('icon set', () => {
   it('defines every icon the command tables reference', () => {

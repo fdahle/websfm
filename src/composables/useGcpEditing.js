@@ -58,7 +58,9 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
       try {
         if (crs !== 'EPSG:4326') await ensureProjection(crs)
         return shift(...(crs === 'EPSG:4326' ? [g.x, g.y] : transform([g.x, g.y], crs, 'EPSG:4326')))
-      } catch { return null }
+      } catch {
+        return null
+      }
     })
     if (res.converted && reconstructionStore.sparseCameras.size) await georeference()
     refreshGcpReport()
@@ -88,7 +90,9 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // photo observations, return to the setup modal so the user can continue with
   // point 2 or enter the measured distance without hunting through the ribbon.
   const scaleSetupMarkerId = ref(null)
-  function selectGcp(id) { selectedGcpId.value = id }
+  function selectGcp(id) {
+    selectedGcpId.value = id
+  }
 
   // Turn on the GCP overlay so a freshly-placed mark is visible.
   function ensureGcpsVisible() {
@@ -111,8 +115,9 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
     const at = `(${px.toFixed(0)}, ${py.toFixed(0)}) on ${imageName}`
     // Runs after setObservation, but this excludes the target image, so 0 still
     // means "the mark just placed is this GCP's first".
-    const otherMarks = (gcp?.observations ?? [])
-      .filter((o) => o.imageId !== imageId && o.px != null && o.py != null).length
+    const otherMarks = (gcp?.observations ?? []).filter(
+      (o) => o.imageId !== imageId && o.px != null && o.py != null,
+    ).length
     // Guides are only computed in gcpEdit mode, so an absent guide means either
     // nothing could be predicted yet, or the user is marking with guides off — say
     // which, rather than implying a prediction existed and was missed.
@@ -122,17 +127,23 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
     } else if (guide.kind === 'line') {
       // `line` is normalised (a²+b²=1), so |a·u+b·v+c| is a true pixel distance.
       const d = Math.abs(guide.line[0] * px + guide.line[1] * py + guide.line[2])
-      log(`GCP "${name}" marked at ${at} — ${d.toFixed(1)}px off the epipolar line predicted `
-        + `from its 1 other mark`, 'info', 'GCP')
+      log(
+        `GCP "${name}" marked at ${at} — ${d.toFixed(1)}px off the epipolar line predicted ` + `from its 1 other mark`,
+        'info',
+        'GCP',
+      )
     } else {
       const d = Math.hypot(guide.u - px, guide.v - py)
       const used = guide.viewCount - (guide.rejectedCount ?? 0)
       const from = guide.rejectedCount
-        ? `${used} of its ${guide.viewCount} other marks (${guide.rejectedCount} inconsistent with `
-          + `the rest, left out of that prediction only)`
+        ? `${used} of its ${guide.viewCount} other marks (${guide.rejectedCount} inconsistent with ` +
+          `the rest, left out of that prediction only)`
         : `its ${guide.viewCount} other marks`
-      log(`GCP "${name}" marked at ${at} — ${d.toFixed(1)}px from the position predicted by `
-        + `${from}`, 'info', 'GCP')
+      log(
+        `GCP "${name}" marked at ${at} — ${d.toFixed(1)}px from the position predicted by ` + `${from}`,
+        'info',
+        'GCP',
+      )
     }
     await logGcpEstimateShift(gcpId, imageId, px, py, name, guide)
   }
@@ -148,19 +159,21 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // vote of N+1). A 0.0px move with the mark counted as inconsistent is the robust
   // fit rejecting it, not a stuck estimate.
   async function logGcpEstimateShift(gcpId, imageId, px, py, name, guide) {
-    if (guide?.kind !== 'point') return   // nothing predicted here before the mark
+    if (guide?.kind !== 'point') return // nothing predicted here before the mark
     const after = await gcpEstimate(gcpId, imageId)
     if (!after) return
-    const dx = after.u - guide.u, dy = after.v - guide.v
+    const dx = after.u - guide.u,
+      dy = after.v - guide.v
     const moved = Math.hypot(dx, dy)
     // Sign against the click: a mark should pull the estimate toward itself.
     const toClick = Math.hypot(px - guide.u, py - guide.v)
-    const towards = toClick > 1e-6 && ((px - guide.u) * dx + (py - guide.v) * dy) > 0
-    const dir = moved < 0.05
-      ? 'did not move the estimate (mark consistent with it, or rejected as inconsistent)'
-      : `moved the estimate ${moved.toFixed(1)}px ${towards ? 'toward' : 'away from'} your click `
-        + `(Δx ${dx >= 0 ? '+' : ''}${dx.toFixed(1)}, Δy ${dy >= 0 ? '+' : ''}${dy.toFixed(1)}), `
-        + `now (${after.u.toFixed(1)}, ${after.v.toFixed(1)}) from ${after.viewCount} marks`
+    const towards = toClick > 1e-6 && (px - guide.u) * dx + (py - guide.v) * dy > 0
+    const dir =
+      moved < 0.05
+        ? 'did not move the estimate (mark consistent with it, or rejected as inconsistent)'
+        : `moved the estimate ${moved.toFixed(1)}px ${towards ? 'toward' : 'away from'} your click ` +
+          `(Δx ${dx >= 0 ? '+' : ''}${dx.toFixed(1)}, Δy ${dy >= 0 ? '+' : ''}${dy.toFixed(1)}), ` +
+          `now (${after.u.toFixed(1)}, ${after.v.toFixed(1)}) from ${after.viewCount} marks`
     log(`GCP "${name}": this mark ${dir}`, 'debug', 'GCP')
   }
 
@@ -193,7 +206,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
     selectedGcpId.value = id
     ensureGcpsVisible()
     refreshGcpReport()
-    logGcpMark(id, imageId, imageName, px, py, null)  // new point — never has a guide
+    logGcpMark(id, imageId, imageName, px, py, null) // new point — never has a guide
   }
 
   // ── GCP ground-position editing from the 2D map ─────────────────────────────────
@@ -247,7 +260,9 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   }
 
   // Sidebar observation-list actions.
-  function jumpToImage({ imageId }) { if (imageId != null) openImageTab(imageId) }
+  function jumpToImage({ imageId }) {
+    if (imageId != null) openImageTab(imageId)
+  }
 
   // Double-click a GCP in the sidebar → multi-image inspector tab.
   function openGcpView(gcpId) {
@@ -319,18 +334,19 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   function queueGcpGuidesRefresh() {
     if (guideRefreshQueued) return
     guideRefreshQueued = true
-    nextTick(() => { guideRefreshQueued = false; refreshGcpGuides() })
+    nextTick(() => {
+      guideRefreshQueued = false
+      refreshGcpGuides()
+    })
   }
   // Cameras change on a rebuild (`sparseCameras` is a fresh Map), so a shallow
   // watch catches it — no deep traversal of every camera's R/t/K.
   // Not selectedGcpId: the guide set doesn't depend on it (every unmarked GCP gets
   // one; selection only changes which are drawn boldly, which is ViewerImage's own
   // prop). Watching it here just recomputed the identical set on every row click.
-  watch(
-    [() => activeTab.value?.imageId, () => imageViewPrefs.value.gcpEdit, sparseCameras],
-    queueGcpGuidesRefresh,
-    { immediate: true },
-  )
+  watch([() => activeTab.value?.imageId, () => imageViewPrefs.value.gcpEdit, sparseCameras], queueGcpGuidesRefresh, {
+    immediate: true,
+  })
   // Marks mutate in place, so this one needs to be deep — it's what retires a
   // guide the moment its GCP is marked on this image.
   watch(gcps, queueGcpGuidesRefresh, { deep: true })
@@ -340,10 +356,27 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   const allGcpsBrief = computed(() => gcps.value.map((g) => ({ id: g.id, name: g.name })))
 
   return {
-    gcpReport, refreshGcpReport, selectedGcpId, selectGcp, changeGcpRole,
-    fillGcpZFromReferenceDem, checkGcpZAgainstReferenceDem, convertGcpHeightsTo,
-    assignGcpObservation, addGcpAtObservation, setGcpGroundPosition, addGcpAtCoord, pickGcpFromReference,
-    startMarkingPoint, exitGcpEdit, jumpToImage, openGcpView, removeGcpAndCloseTab, removeGcpObservation,
-    activeImageGcps, activeImageGcpGuides, allGcpsBrief,
+    gcpReport,
+    refreshGcpReport,
+    selectedGcpId,
+    selectGcp,
+    changeGcpRole,
+    fillGcpZFromReferenceDem,
+    checkGcpZAgainstReferenceDem,
+    convertGcpHeightsTo,
+    assignGcpObservation,
+    addGcpAtObservation,
+    setGcpGroundPosition,
+    addGcpAtCoord,
+    pickGcpFromReference,
+    startMarkingPoint,
+    exitGcpEdit,
+    jumpToImage,
+    openGcpView,
+    removeGcpAndCloseTab,
+    removeGcpObservation,
+    activeImageGcps,
+    activeImageGcpGuides,
+    allGcpsBrief,
   }
 }

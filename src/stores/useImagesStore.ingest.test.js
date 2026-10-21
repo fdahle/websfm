@@ -22,7 +22,9 @@ describe('addImages with extras and fromStorage', () => {
     projects.projects = [{ id: 'p1', name: 'test', sceneType: 'object' }]
     projects.currentProjectId = 'p1'
     const saved = new Map()
-    vi.spyOn(opfs, 'saveImage').mockImplementation(async (_pid, uuid, file) => { saved.set(uuid, file) })
+    vi.spyOn(opfs, 'saveImage').mockImplementation(async (_pid, uuid, file) => {
+      saved.set(uuid, file)
+    })
     vi.spyOn(opfs, 'saveImageDerived').mockResolvedValue()
     vi.spyOn(opfs, 'writeProject').mockResolvedValue()
     const storedCopy = (uuid) => new File([saved.get(uuid)], uuid, { type: 'image/jpeg' })
@@ -35,7 +37,16 @@ describe('addImages with extras and fromStorage', () => {
     const photo = new File([new Uint8Array(1000)], 'photo.jpg', { type: 'image/jpeg', lastModified: 5 })
     const store = useImagesStore()
     await store.addImages([frame], null, {
-      extras: new Map([[frame, { meta: { videoSource: 'walk.mp4', videoTime: 1.5 }, dims: { width: 640, height: 360 }, thumb: new Blob(['t']) }]]),
+      extras: new Map([
+        [
+          frame,
+          {
+            meta: { videoSource: 'walk.mp4', videoTime: 1.5 },
+            dims: { width: 640, height: 360 },
+            thumb: new Blob(['t']),
+          },
+        ],
+      ]),
       fromStorage: true,
     })
 
@@ -54,8 +65,9 @@ describe('addImages with extras and fromStorage', () => {
     // longer matters; its URL stays registered for any job queued with it.
     await store.addImages([photo])
     const picked = store.images[1]
-    const pickedUrl = vi.mocked(URL.createObjectURL).mock.results.find((r, k) =>
-      vi.mocked(URL.createObjectURL).mock.calls[k][0] === photo)?.value
+    const pickedUrl = vi
+      .mocked(URL.createObjectURL)
+      .mock.results.find((r, k) => vi.mocked(URL.createObjectURL).mock.calls[k][0] === photo)?.value
     expect(picked.file).not.toBe(photo)
     expect(picked.file.name).toBe('photo.jpg')
     expect(picked.url).not.toBe(pickedUrl)

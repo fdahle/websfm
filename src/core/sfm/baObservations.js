@@ -31,8 +31,10 @@ export function isObservationList(o) {
 export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt) {
   let cap = 0
   for (let r = 0; r < ids.length; r++) cap += tracks.viewCount(ids[r])
-  const cam = new Int32Array(cap), pt = new Int32Array(cap)
-  const x = new Float64Array(cap), y = new Float64Array(cap)
+  const cam = new Int32Array(cap),
+    pt = new Int32Array(cap)
+  const x = new Float64Array(cap),
+    y = new Float64Array(cap)
   let n = 0
   for (let r = 0; r < ids.length; r++) {
     tracks.forEachView(ids[r], (img, kpIdx) => {
@@ -40,7 +42,10 @@ export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt) {
       if (ci == null || ci === -1) return
       const set = keypointsAt(img)
       if (!hasKp(set, kpIdx)) return
-      cam[n] = ci; pt[n] = r; x[n] = set.xy[2 * kpIdx]; y[n] = set.xy[2 * kpIdx + 1]
+      cam[n] = ci
+      pt[n] = r
+      x[n] = set.xy[2 * kpIdx]
+      y[n] = set.xy[2 * kpIdx + 1]
       n++
     })
   }
@@ -52,9 +57,16 @@ export function trackPositions(tracks, ids, extra = []) {
   const pos = new Float64Array(3 * (ids.length + extra.length))
   for (let r = 0; r < ids.length; r++) {
     const p = ids[r]
-    pos[3 * r] = tracks.x(p); pos[3 * r + 1] = tracks.y(p); pos[3 * r + 2] = tracks.z(p)
+    pos[3 * r] = tracks.x(p)
+    pos[3 * r + 1] = tracks.y(p)
+    pos[3 * r + 2] = tracks.z(p)
   }
-  extra.forEach((q, i) => { const j = 3 * (ids.length + i); pos[j] = q.x; pos[j + 1] = q.y; pos[j + 2] = q.z })
+  extra.forEach((q, i) => {
+    const j = 3 * (ids.length + i)
+    pos[j] = q.x
+    pos[j + 1] = q.y
+    pos[j + 2] = q.z
+  })
   return pos
 }
 
@@ -64,16 +76,29 @@ export function trackPositions(tracks, ids, extra = []) {
  */
 export function appendObservations(list, extra) {
   const n = list.n + extra.length
-  const cam = new Int32Array(n), pt = new Int32Array(n)
-  const x = new Float64Array(n), y = new Float64Array(n)
-  const wx = new Float64Array(n).fill(1), wy = new Float64Array(n).fill(1)
-  cam.set(list.cam.subarray(0, list.n)); pt.set(list.pt.subarray(0, list.n))
-  x.set(list.x.subarray(0, list.n)); y.set(list.y.subarray(0, list.n))
-  if (list.wx) { wx.set(list.wx.subarray(0, list.n)); wy.set(list.wy.subarray(0, list.n)) }
+  const cam = new Int32Array(n),
+    pt = new Int32Array(n)
+  const x = new Float64Array(n),
+    y = new Float64Array(n)
+  const wx = new Float64Array(n).fill(1),
+    wy = new Float64Array(n).fill(1)
+  cam.set(list.cam.subarray(0, list.n))
+  pt.set(list.pt.subarray(0, list.n))
+  x.set(list.x.subarray(0, list.n))
+  y.set(list.y.subarray(0, list.n))
+  if (list.wx) {
+    wx.set(list.wx.subarray(0, list.n))
+    wy.set(list.wy.subarray(0, list.n))
+  }
   for (let i = 0; i < extra.length; i++) {
-    const o = extra[i], j = list.n + i
-    cam[j] = o.camIdx; pt[j] = o.ptIdx; x[j] = o.x; y[j] = o.y
-    wx[j] = o.weightX ?? 1; wy[j] = o.weightY ?? 1
+    const o = extra[i],
+      j = list.n + i
+    cam[j] = o.camIdx
+    pt[j] = o.ptIdx
+    x[j] = o.x
+    y[j] = o.y
+    wx[j] = o.weightX ?? 1
+    wy[j] = o.weightY ?? 1
   }
   return { n, cam, pt, x, y, wx, wy }
 }
@@ -87,16 +112,21 @@ export function appendObservations(list, extra) {
 export function mapObservations(observations, mapFor) {
   const { n, cam } = observations
   const maps = new Map()
-  const mapOf = (ci) => { if (!maps.has(ci)) maps.set(ci, mapFor(ci) ?? null); return maps.get(ci) }
+  const mapOf = (ci) => {
+    if (!maps.has(ci)) maps.set(ci, mapFor(ci) ?? null)
+    return maps.get(ci)
+  }
   let any = false
   for (let i = 0; i < n && !any; i++) any = !!mapOf(cam[i])
   if (!any) return observations
-  const x = Float64Array.from(observations.x.subarray(0, n)), y = Float64Array.from(observations.y.subarray(0, n))
+  const x = Float64Array.from(observations.x.subarray(0, n)),
+    y = Float64Array.from(observations.y.subarray(0, n))
   for (let i = 0; i < n; i++) {
     const m = mapOf(cam[i])
     if (!m) continue
     const p = m(x[i], y[i])
-    x[i] = p.x; y[i] = p.y
+    x[i] = p.x
+    y[i] = p.y
   }
   return { ...observations, x, y }
 }

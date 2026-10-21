@@ -21,25 +21,26 @@ export { sniffDelimiter, parseRows }
 // ── Column-role guessing ──────────────────────────────────────────────────────
 
 const PATTERNS = {
-  image:     IMAGE_COLUMN,
-  label:     /^(label|name|id|sensor|camera|model|(sensor|camera)_?(label|name|id))$/i,
-  width:     /^(width|w|cols|columns|imgw|image_?width|width_?px|image_?width_?px|nx)$/i,
-  height:    /^(height|h|rows|imgh|image_?height|height_?px|image_?height_?px|ny)$/i,
-  focal:     /^(focal|f|focallength|focal_?length|fl|focal_?(px|mm)|focal_?length_?(px|mm)|fpx|calibrated_?focal(_?length)?(_?mm)?)$/i,
-  cx:        /^(cx|ppx|principal_x|c_x|u0|px|cx_?px|principal_?point_?x(_?px)?)$/i,
-  cy:        /^(cy|ppy|principal_y|c_y|v0|py|cy_?px|principal_?point_?y(_?px)?)$/i,
-  ppxMm:     /^(ppx_?mm|pp_?x_?mm|xp_?mm|cx_?mm|principal_?(point_?)?x_?mm)$/i,
-  ppyMm:     /^(ppy_?mm|pp_?y_?mm|yp_?mm|cy_?mm|principal_?(point_?)?y_?mm)$/i,
-  k1:        /^(k1|radial1)$/i,
-  k2:        /^(k2|radial2)$/i,
-  k3:        /^(k3|radial3)$/i,
-  k4:        /^(k4|radial4)$/i,
-  k5:        /^(k5|radial5)$/i,
-  k6:        /^(k6|radial6)$/i,
+  image: IMAGE_COLUMN,
+  label: /^(label|name|id|sensor|camera|model|(sensor|camera)_?(label|name|id))$/i,
+  width: /^(width|w|cols|columns|imgw|image_?width|width_?px|image_?width_?px|nx)$/i,
+  height: /^(height|h|rows|imgh|image_?height|height_?px|image_?height_?px|ny)$/i,
+  focal:
+    /^(focal|f|focallength|focal_?length|fl|focal_?(px|mm)|focal_?length_?(px|mm)|fpx|calibrated_?focal(_?length)?(_?mm)?)$/i,
+  cx: /^(cx|ppx|principal_x|c_x|u0|px|cx_?px|principal_?point_?x(_?px)?)$/i,
+  cy: /^(cy|ppy|principal_y|c_y|v0|py|cy_?px|principal_?point_?y(_?px)?)$/i,
+  ppxMm: /^(ppx_?mm|pp_?x_?mm|xp_?mm|cx_?mm|principal_?(point_?)?x_?mm)$/i,
+  ppyMm: /^(ppy_?mm|pp_?y_?mm|yp_?mm|cy_?mm|principal_?(point_?)?y_?mm)$/i,
+  k1: /^(k1|radial1)$/i,
+  k2: /^(k2|radial2)$/i,
+  k3: /^(k3|radial3)$/i,
+  k4: /^(k4|radial4)$/i,
+  k5: /^(k5|radial5)$/i,
+  k6: /^(k6|radial6)$/i,
   // Text, not a number: the lens model by name (distortion.js parseDistortionModelName).
   distortionModel: /^(distortion_?model|lens_?model|camera_?model|projection(_?type)?|model_?type)$/i,
-  p1:        /^(p1|tangential1)$/i,
-  p2:        /^(p2|tangential2)$/i,
+  p1: /^(p1|tangential1)$/i,
+  p2: /^(p2|tangential2)$/i,
   pixelSize: /^(pixelsize|pixel|psize|pitch|mm_per_px|pixel_?(size|pitch)(_?mm)?|scan_?(pitch|resolution)_?mm)$/i,
 }
 
@@ -56,33 +57,54 @@ export const FIDUCIAL_ROLES = FIDUCIAL_POSITIONS.flatMap((p) => [fiducialRole(p.
 
 // `image` first: per-image rows (`image_id`) must not read as a sensor label (`id`).
 export const SENSOR_ROLES = [
-  'image', 'label', 'width', 'height', 'focal', 'cx', 'cy', 'ppxMm', 'ppyMm',
-  'k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'p1', 'p2', 'distortionModel', 'pixelSize', ...FIDUCIAL_ROLES,
+  'image',
+  'label',
+  'width',
+  'height',
+  'focal',
+  'cx',
+  'cy',
+  'ppxMm',
+  'ppyMm',
+  'k1',
+  'k2',
+  'k3',
+  'k4',
+  'k5',
+  'k6',
+  'p1',
+  'p2',
+  'distortionModel',
+  'pixelSize',
+  ...FIDUCIAL_ROLES,
 ]
 
 export const SENSOR_ROLE_LABELS = {
-  ignore:    'Ignore',
-  image:     'Image name',
-  label:     'Label / ID',
-  width:     'Width (px)',
-  height:    'Height (px)',
-  focal:     'Focal length',
-  cx:        'Principal X (px)',
-  cy:        'Principal Y (px)',
-  ppxMm:     'Principal X (mm)',
-  ppyMm:     'Principal Y (mm)',
-  k1:        'Distortion k1',
-  k2:        'Distortion k2',
-  k3:        'Distortion k3',
-  k4:        'Distortion k4',
-  k5:        'Distortion k5',
-  k6:        'Distortion k6',
+  ignore: 'Ignore',
+  image: 'Image name',
+  label: 'Label / ID',
+  width: 'Width (px)',
+  height: 'Height (px)',
+  focal: 'Focal length',
+  cx: 'Principal X (px)',
+  cy: 'Principal Y (px)',
+  ppxMm: 'Principal X (mm)',
+  ppyMm: 'Principal Y (mm)',
+  k1: 'Distortion k1',
+  k2: 'Distortion k2',
+  k3: 'Distortion k3',
+  k4: 'Distortion k4',
+  k5: 'Distortion k5',
+  k6: 'Distortion k6',
   distortionModel: 'Lens model',
-  p1:        'Distortion p1',
-  p2:        'Distortion p2',
+  p1: 'Distortion p1',
+  p2: 'Distortion p2',
   pixelSize: 'Pixel size (mm)',
-  ...Object.fromEntries(FIDUCIAL_POSITIONS.flatMap((p) => ['x', 'y'].map((axis) =>
-    [fiducialRole(p.slot, axis), `Fiducial ${p.label} ${axis.toUpperCase()} (mm)`]))),
+  ...Object.fromEntries(
+    FIDUCIAL_POSITIONS.flatMap((p) =>
+      ['x', 'y'].map((axis) => [fiducialRole(p.slot, axis), `Fiducial ${p.label} ${axis.toUpperCase()} (mm)`]),
+    ),
+  ),
 }
 
 // Returns each role mapped to a column index (or null). Header text when there is
@@ -96,7 +118,10 @@ export function guessMapping(headerCells, columnCount, hasHeader, { positional =
     headerCells.forEach((cell, i) => {
       const text = String(cell ?? '').trim()
       for (const role of SENSOR_ROLES) {
-        if (mapping[role] == null && PATTERNS[role].test(text)) { mapping[role] = i; break }
+        if (mapping[role] == null && PATTERNS[role].test(text)) {
+          mapping[role] = i
+          break
+        }
       }
     })
     return mapping
@@ -106,10 +131,22 @@ export function guessMapping(headerCells, columnCount, hasHeader, { positional =
 
   const used = new Set(Object.values(mapping).filter((v) => v != null))
   const freeAt = (i) => i < columnCount && !used.has(i)
-  if (mapping.label  == null && freeAt(0)) { mapping.label  = 0; used.add(0) }
-  if (mapping.width  == null && freeAt(1)) { mapping.width  = 1; used.add(1) }
-  if (mapping.height == null && freeAt(2)) { mapping.height = 2; used.add(2) }
-  if (mapping.focal  == null && freeAt(3)) { mapping.focal  = 3; used.add(3) }
+  if (mapping.label == null && freeAt(0)) {
+    mapping.label = 0
+    used.add(0)
+  }
+  if (mapping.width == null && freeAt(1)) {
+    mapping.width = 1
+    used.add(1)
+  }
+  if (mapping.height == null && freeAt(2)) {
+    mapping.height = 2
+    used.add(2)
+  }
+  if (mapping.focal == null && freeAt(3)) {
+    mapping.focal = 3
+    used.add(3)
+  }
   return mapping
 }
 
@@ -131,12 +168,32 @@ export function guessFocalUnit(headerCells, mapping, dataRows) {
   if (/mm$/i.test(head)) return 'mm'
   if (/px$/i.test(head)) return 'px'
   if (hasFiducialColumns(mapping) || mapping.ppxMm != null || mapping.ppyMm != null) return 'mm'
-  const values = dataRows.map((r) => num(r[mapping.focal])).filter((v) => v > 0).sort((a, b) => a - b)
+  const values = dataRows
+    .map((r) => num(r[mapping.focal]))
+    .filter((v) => v > 0)
+    .sort((a, b) => a - b)
   if (!values.length) return 'px'
   return values[Math.floor(values.length / 2)] < 400 ? 'mm' : 'px'
 }
 
-const VALUE_FIELDS = ['width', 'height', 'focal', 'cx', 'cy', 'ppxMm', 'ppyMm', 'k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'p1', 'p2', 'pixelSize']
+const VALUE_FIELDS = [
+  'width',
+  'height',
+  'focal',
+  'cx',
+  'cy',
+  'ppxMm',
+  'ppyMm',
+  'k1',
+  'k2',
+  'k3',
+  'k4',
+  'k5',
+  'k6',
+  'p1',
+  'p2',
+  'pixelSize',
+]
 
 // Build sensors from a role mapping. Without an image column every data row is one
 // sensor. With one, rows are images: rows carrying the same values collapse into one
@@ -156,18 +213,36 @@ export function buildSensors(dataRows, mapping, { focalUnit = 'px' } = {}) {
   for (const row of dataRows) {
     const values = Object.fromEntries(VALUE_FIELDS.map((k) => [k, cell(row, k)]))
     const marks = FIDUCIAL_POSITIONS.flatMap(({ slot }) => {
-      const xMm = cell(row, fiducialRole(slot, 'x')), yMm = cell(row, fiducialRole(slot, 'y'))
+      const xMm = cell(row, fiducialRole(slot, 'x')),
+        yMm = cell(row, fiducialRole(slot, 'y'))
       return xMm != null && yMm != null ? [{ id: slot, slot, xMm, yMm }] : []
     })
-    if (!marks.length && VALUE_FIELDS.every((k) => values[k] == null)) { skipped++; continue }
+    if (!marks.length && VALUE_FIELDS.every((k) => values[k] == null)) {
+      skipped++
+      continue
+    }
     const label = mapping.label != null ? String(row[mapping.label] ?? '').trim() || null : null
     const image = mapping.image != null ? String(row[mapping.image] ?? '').trim() : ''
-    const distortionModel = mapping.distortionModel != null ? parseDistortionModelName(row[mapping.distortionModel]) : null
+    const distortionModel =
+      mapping.distortionModel != null ? parseDistortionModelName(row[mapping.distortionModel]) : null
 
-    const sensor = { label, images: mapping.image != null ? [] : null, focalUnit, ...values, distortionModel, marks: marks.length ? marks : null }
-    if (mapping.image == null) { sensors.push(sensor); continue }
+    const sensor = {
+      label,
+      images: mapping.image != null ? [] : null,
+      focalUnit,
+      ...values,
+      distortionModel,
+      marks: marks.length ? marks : null,
+    }
+    if (mapping.image == null) {
+      sensors.push(sensor)
+      continue
+    }
     const key = JSON.stringify([label, values, distortionModel, marks])
-    if (!byKey.has(key)) { byKey.set(key, sensor); sensors.push(sensor) }
+    if (!byKey.has(key)) {
+      byKey.set(key, sensor)
+      sensors.push(sensor)
+    }
     if (image) byKey.get(key).images.push(image)
   }
 
@@ -201,7 +276,8 @@ export function planSensorImport(parsed, sensors, images) {
   const sole = sensors.length === 1 ? sensors[0] : used.length === 1 ? used[0] : null
 
   return parsed.map((p) => {
-    const ids = new Set(), unmatched = []
+    const ids = new Set(),
+      unmatched = []
     for (const name of p.images ?? []) {
       const id = resolve(name)
       if (id == null) unmatched.push(name)
@@ -263,14 +339,21 @@ export function exifLabel(meta) {
 // (no pixel conversion without a known sensor/pixel size).
 export function sensorFromExif(meta) {
   return {
-    label:  exifLabel(meta),
-    width:  meta?.width ?? null,
+    label: exifLabel(meta),
+    width: meta?.width ?? null,
     height: meta?.height ?? null,
-    focal:  meta?.focalLength ?? null,
+    focal: meta?.focalLength ?? null,
     focalUnit: 'mm',
     cx: meta?.width != null ? meta.width / 2 : null,
     cy: meta?.height != null ? meta.height / 2 : null,
-    k1: null, k2: null, k3: null, k4: null, k5: null, k6: null, p1: null, p2: null,
+    k1: null,
+    k2: null,
+    k3: null,
+    k4: null,
+    k5: null,
+    k6: null,
+    p1: null,
+    p2: null,
     pixelSize: null,
   }
 }

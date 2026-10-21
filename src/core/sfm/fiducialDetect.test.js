@@ -43,7 +43,8 @@ function drawMark(img, cx, cy, { symmetric = false } = {}) {
   for (let dy = -10; dy <= 10; dy++) {
     for (let dx = -10; dx <= 10; dx++) {
       const d = Math.hypot(dx, dy)
-      if (d < 3) set(cx + dx, cy + dy, 20)                    // dot
+      if (d < 3)
+        set(cx + dx, cy + dy, 20) // dot
       else if (d > 7.5 && d < 9.5) set(cx + dx, cy + dy, 235) // ring
     }
   }
@@ -56,16 +57,20 @@ function drawMark(img, cx, cy, { symmetric = false } = {}) {
 }
 
 function bilinear(img, x, y) {
-  const x0 = Math.floor(x), y0 = Math.floor(y)
-  const fx = x - x0, fy = y - y0
+  const x0 = Math.floor(x),
+    y0 = Math.floor(y)
+  const fx = x - x0,
+    fy = y - y0
   const px = (xx, yy) => {
     const cx = Math.min(img.width - 1, Math.max(0, xx))
     const cy = Math.min(img.height - 1, Math.max(0, yy))
     return img.data[cy * img.width + cx]
   }
   return (
-    px(x0, y0) * (1 - fx) * (1 - fy) + px(x0 + 1, y0) * fx * (1 - fy) +
-    px(x0, y0 + 1) * (1 - fx) * fy + px(x0 + 1, y0 + 1) * fx * fy
+    px(x0, y0) * (1 - fx) * (1 - fy) +
+    px(x0 + 1, y0) * fx * (1 - fy) +
+    px(x0, y0 + 1) * (1 - fx) * fy +
+    px(x0 + 1, y0 + 1) * fx * fy
   )
 }
 
@@ -84,7 +89,8 @@ function rotateImage90(img, k) {
   const kk = ((k % 4) + 4) % 4
   let cur = img
   for (let step = 0; step < kk; step++) {
-    const W = cur.width, H = cur.height
+    const W = cur.width,
+      H = cur.height
     const data = new Float32Array(W * H)
     for (let ny = 0; ny < W; ny++) {
       for (let nx = 0; nx < H; nx++) data[ny * H + nx] = cur.data[(H - 1 - nx) * W + ny]
@@ -100,13 +106,16 @@ function coarseOf(img, scale) {
   const w = Math.max(1, Math.round(img.width * scale))
   const h = Math.max(1, Math.round(img.height * scale))
   const data = new Float32Array(w * h)
-  const sx = img.width / w, sy = img.height / h
+  const sx = img.width / w,
+    sy = img.height / h
   for (let r = 0; r < h; r++) {
     for (let c = 0; c < w; c++) {
-      let sum = 0, n = 0
+      let sum = 0,
+        n = 0
       for (let y = Math.floor(r * sy); y < Math.floor((r + 1) * sy); y++) {
         for (let x = Math.floor(c * sx); x < Math.floor((c + 1) * sx); x++) {
-          sum += img.data[y * img.width + x]; n++
+          sum += img.data[y * img.width + x]
+          n++
         }
       }
       data[r * w + c] = n ? sum / n : 0
@@ -118,7 +127,8 @@ function coarseOf(img, scale) {
 // The worker's cropWindow, done over a full-res array (tests have no canvas).
 function makeCropWindow(img) {
   return (cx, cy, half) => {
-    const x0 = Math.round(cx) - half, y0 = Math.round(cy) - half
+    const x0 = Math.round(cx) - half,
+      y0 = Math.round(cy) - half
     const size = 2 * half + 1
     const data = new Float32Array(size * size)
     for (let r = 0; r < size; r++) {
@@ -207,7 +217,8 @@ describe('matchZNCC', () => {
     const noisy = { ...clean, data: Float32Array.from(clean.data) }
     for (let i = 0; i < noisy.data.length; i++) {
       // Box–Muller, σ = 10 on a 0..255 range.
-      const u = Math.max(1e-9, r()), v = r()
+      const u = Math.max(1e-9, r()),
+        v = r()
       noisy.data[i] += Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v) * 10
     }
     const hit = matchZNCC(noisy, tpl, 100, 40, 140, 80)
@@ -279,7 +290,9 @@ describe('detectFiducialsInImage', () => {
     const { img, marks, templates } = buildScene()
     const predictions = marks.map((m) => ({ fidId: m.fidId, px: m.x + 5, py: m.y - 4, radius: 12 }))
     const out = detectFiducialsInImage({
-      coarse: coarseOf(img, CFG.coarseScale), templates, predictions,
+      coarse: coarseOf(img, CFG.coarseScale),
+      templates,
+      predictions,
       cfg: { ...CFG, tryRotations: false },
       cropWindow: makeCropWindow(img),
     })
@@ -298,7 +311,9 @@ describe('detectFiducialsInImage', () => {
       // Predictions stay in the REFERENCE frame — that is what the store has.
       const predictions = marks.map((m) => ({ fidId: m.fidId, px: m.x, py: m.y, radius: 10 }))
       const out = detectFiducialsInImage({
-        coarse: coarseOf(target, CFG.coarseScale), templates, predictions,
+        coarse: coarseOf(target, CFG.coarseScale),
+        templates,
+        predictions,
         cfg: { ...CFG, tryRotations: true },
         cropWindow: makeCropWindow(target),
       })
@@ -318,7 +333,10 @@ describe('detectFiducialsInImage', () => {
     // noise — a wrong guess scrambles every search window at once, whereas k=0 is
     // right for every consistently-scanned batch. The same holds for identical
     // marks in a symmetric layout (see buildScene).
-    const marks = [{ fidId: 'A', x: 60, y: 50 }, { fidId: 'B', x: 180, y: 130 }]
+    const marks = [
+      { fidId: 'A', x: 60, y: 50 },
+      { fidId: 'B', x: 180, y: 130 },
+    ]
     const img = blankImage(240, 180, 31)
     for (const m of marks) drawMark(img, m.x, m.y, { symmetric: true })
     const templates = marks.map((m) => ({ fidId: m.fidId, patch: extractPatch(img, m.x, m.y, 16) }))
@@ -336,7 +354,8 @@ describe('detectFiducialsInImage', () => {
   it('keeps k=0 when the target is not rotated', () => {
     const { img, marks, templates } = buildScene()
     const out = detectFiducialsInImage({
-      coarse: coarseOf(img, CFG.coarseScale), templates,
+      coarse: coarseOf(img, CFG.coarseScale),
+      templates,
       predictions: marks.map((m) => ({ fidId: m.fidId, px: m.x, py: m.y, radius: 10 })),
       cfg: { ...CFG, tryRotations: true },
       cropWindow: makeCropWindow(img),
@@ -347,7 +366,8 @@ describe('detectFiducialsInImage', () => {
   it('runs coarse-only when no cropWindow is injected', () => {
     const { img, marks, templates } = buildScene()
     const out = detectFiducialsInImage({
-      coarse: coarseOf(img, CFG.coarseScale), templates,
+      coarse: coarseOf(img, CFG.coarseScale),
+      templates,
       predictions: marks.map((m) => ({ fidId: m.fidId, px: m.x, py: m.y, radius: 8 })),
       cfg: { ...CFG, tryRotations: false },
     })

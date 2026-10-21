@@ -3,8 +3,17 @@ import { readFileSync } from 'node:fs'
 import { NEED_CHECKS, guardReason } from './commands.js'
 import { icons } from '../../utils/icons.js'
 import {
-  TABS, SCENE_GROUP, CAMERA_GROUP, MAP_GROUP, PICTURE_TAB, rasterTab, measureMenu,
-  allGroups, leafCommands, menuReason, stepValue,
+  TABS,
+  SCENE_GROUP,
+  CAMERA_GROUP,
+  MAP_GROUP,
+  PICTURE_TAB,
+  rasterTab,
+  measureMenu,
+  allGroups,
+  leafCommands,
+  menuReason,
+  stepValue,
 } from './ribbonTabs.js'
 
 const leaves = leafCommands(allGroups())
@@ -38,7 +47,10 @@ describe('ribbon tables', () => {
       for (const c of g.commands) {
         if (!c.menu) continue
         const rows = c.menu.filter((m) => !m.section)
-        expect(rows.some((r) => !r.disabled), c.id).toBe(true)
+        expect(
+          rows.some((r) => !r.disabled),
+          c.id,
+        ).toBe(true)
         for (const r of rows) {
           expect(r.label, r.id).toBeTruthy()
           expect(r.blurb, r.id).toBeTruthy()
@@ -87,8 +99,10 @@ describe('stepValue', () => {
 // nothing can reach any more) fails here instead of silently doing nothing.
 function dispatchedIds() {
   // Dedented one level: the tables and the switch sit inside the composable.
-  const src = readFileSync(new URL('../../composables/useCommandDispatch.js', import.meta.url), 'utf8')
-    .replace(/^ {2}/gm, '')
+  const src = readFileSync(new URL('../../composables/useCommandDispatch.js', import.meta.url), 'utf8').replace(
+    /^ {2}/gm,
+    '',
+  )
   const block = (start, end = '\n}') => {
     const i = src.indexOf(start)
     expect(i, start).toBeGreaterThan(-1)
@@ -114,9 +128,11 @@ describe('command dispatch', () => {
   const handled = (id) => ids.has(id) || prefixes.some((p) => id.startsWith(p))
   const ribbon = leafCommands([
     ...allGroups(),
-    ...rasterTab({ kind: 'dem', imported: true }).groups, ...rasterTab({ kind: 'ortho', imported: false }).groups,
+    ...rasterTab({ kind: 'dem', imported: true }).groups,
+    ...rasterTab({ kind: 'ortho', imported: false }).groups,
   ]).filter((c) => !c.disabled)
-  for (const row of measureMenu({ targets: [{ id: 'a', name: 'DEM', kind: 'dem' }] })) if (row.id && !row.disabled) ribbon.push(row)
+  for (const row of measureMenu({ targets: [{ id: 'a', name: 'DEM', kind: 'dem' }] }))
+    if (row.id && !row.disabled) ribbon.push(row)
 
   it('handles every enabled ribbon command', () => {
     expect(ribbon.map((c) => c.id).filter((id) => !handled(id))).toEqual([])
@@ -124,10 +140,14 @@ describe('command dispatch', () => {
 
   it('handles no command id that nothing dispatches', async () => {
     const { COMMANDS } = await import('./commands.js')
-    const reachable = new Set([...ribbon.map((c) => c.id), ...COMMANDS.map((c) => c.dispatch),
+    const reachable = new Set([
+      ...ribbon.map((c) => c.id),
+      ...COMMANDS.map((c) => c.dispatch),
       // Emitted outside the ribbon tables: Ribbon.vue's project button, and the
       // image tab's own GCP-edit toggle.
-      'open-project-picker', 'img-gcp-edit'])
+      'open-project-picker',
+      'img-gcp-edit',
+    ])
     expect([...ids].filter((id) => !reachable.has(id))).toEqual([])
   })
 })
@@ -145,7 +165,9 @@ describe('console parity', () => {
 
   it('makes every enabled ribbon command typeable, by its id at least', async () => {
     const { getCommand } = await import('./commands.js')
-    const missing = leaves.filter((c) => !c.disabled && !c.id.startsWith('measure-target:') && getCommand(c.id)?.dispatch !== c.id)
+    const missing = leaves.filter(
+      (c) => !c.disabled && !c.id.startsWith('measure-target:') && getCommand(c.id)?.dispatch !== c.id,
+    )
     expect(missing.map((c) => c.id)).toEqual([])
   })
 })
@@ -154,33 +176,83 @@ describe('one home per tool', () => {
   const tabLeaves = (id) => leafCommands(TABS.find((t) => t.id === id).groups)
   const toolIds = new Set(tabLeaves('tools').map((c) => c.id))
   // Modes and measuring tools: everything that runs in a view.
-  const isTool = (c) => !!(c.measureTool || ['img-mask-edit', 'edit-gcps', 'view-select-rect', 'view-select-lasso',
-    'set-region', 'orient-model', 'align-points'].includes(c.id))
+  const isTool = (c) =>
+    !!(
+      c.measureTool ||
+      [
+        'img-mask-edit',
+        'edit-gcps',
+        'view-select-rect',
+        'view-select-lasso',
+        'set-region',
+        'orient-model',
+        'align-points',
+      ].includes(c.id)
+    )
 
   it('keeps every tool in the Tools tab and none in View or a contextual tab', () => {
     const elsewhere = leafCommands([
       ...TABS.filter((t) => t.id !== 'tools').flatMap((t) => t.groups),
-      CAMERA_GROUP, SCENE_GROUP, MAP_GROUP, ...PICTURE_TAB.groups,
-      ...rasterTab({ kind: 'dem', imported: true }).groups, ...rasterTab({ kind: 'ortho', imported: false }).groups,
+      CAMERA_GROUP,
+      SCENE_GROUP,
+      MAP_GROUP,
+      ...PICTURE_TAB.groups,
+      ...rasterTab({ kind: 'dem', imported: true }).groups,
+      ...rasterTab({ kind: 'ortho', imported: false }).groups,
     ])
     expect(elsewhere.filter(isTool).map((c) => c.id)).toEqual([])
-    for (const id of ['img-mask-edit', 'edit-gcps', 'view-select-rect', 'measure-length', 'measure-volume', 'mesh-measure'])
+    for (const id of [
+      'img-mask-edit',
+      'edit-gcps',
+      'view-select-rect',
+      'measure-length',
+      'measure-volume',
+      'mesh-measure',
+    ])
       expect(toolIds.has(id), id).toBe(true)
   })
 
   it('greys DEM-only measuring instead of hiding it, and lists the map targets', () => {
-    const rows = measureMenu({ targets: [{ id: 'a', name: 'DEM', kind: 'dem' }, { id: 'b', name: 'Ortho', kind: 'ortho' }], targetId: 'b' })
+    const rows = measureMenu({
+      targets: [
+        { id: 'a', name: 'DEM', kind: 'dem' },
+        { id: 'b', name: 'Ortho', kind: 'ortho' },
+      ],
+      targetId: 'b',
+    })
     expect(rows.filter((r) => r.demOnly).map((r) => r.id)).toEqual(['measure-profile', 'measure-volume'])
-    expect(rows.filter((r) => r.id?.startsWith('measure-target:')).map((r) => [r.id, r.selected]))
-      .toEqual([['measure-target:a', false], ['measure-target:b', true]])
+    expect(rows.filter((r) => r.id?.startsWith('measure-target:')).map((r) => [r.id, r.selected])).toEqual([
+      ['measure-target:a', false],
+      ['measure-target:b', true],
+    ])
     expect(measureMenu().some((r) => r.id?.startsWith('measure-target:'))).toBe(false)
   })
 
   it('offers the same object actions on a computed and an imported raster tab', () => {
-    const ids = (r) => leafCommands(rasterTab(r).groups).map((c) => c.id).filter((id) => !id.startsWith('raster-fit') && !id.startsWith('raster-zoom'))
-    expect(ids({ kind: 'dem', imported: false })).toEqual(['gen-dem', 'export-dem', 'raster-symbology', 'raster-toggle-map', 'raster-remove'])
-    expect(ids({ kind: 'ortho', imported: false })).toEqual(['gen-ortho', 'export-ortho', 'raster-symbology', 'raster-toggle-map', 'raster-remove'])
-    expect(ids({ kind: 'dem', imported: true })).toEqual(['raster-download', 'raster-style', 'raster-toggle-map', 'raster-remove'])
+    const ids = (r) =>
+      leafCommands(rasterTab(r).groups)
+        .map((c) => c.id)
+        .filter((id) => !id.startsWith('raster-fit') && !id.startsWith('raster-zoom'))
+    expect(ids({ kind: 'dem', imported: false })).toEqual([
+      'gen-dem',
+      'export-dem',
+      'raster-symbology',
+      'raster-toggle-map',
+      'raster-remove',
+    ])
+    expect(ids({ kind: 'ortho', imported: false })).toEqual([
+      'gen-ortho',
+      'export-ortho',
+      'raster-symbology',
+      'raster-toggle-map',
+      'raster-remove',
+    ])
+    expect(ids({ kind: 'dem', imported: true })).toEqual([
+      'raster-download',
+      'raster-style',
+      'raster-toggle-map',
+      'raster-remove',
+    ])
   })
 
   it("gives the raster tab's Rebuild / Export the Reconstruct / Export tabs' own checks", () => {

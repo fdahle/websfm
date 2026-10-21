@@ -5,7 +5,11 @@ import { facePages, regroupByPage } from '../../core/products/texture/carry.js'
 import { isFisheyeModel } from '../../core/sfm/distortion.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
-import { refineSparse as workerRefineSparse, optimizeSparse as workerOptimizeSparse, editCloud as workerEditCloud } from '../../workers/computeClient.js'
+import {
+  refineSparse as workerRefineSparse,
+  optimizeSparse as workerOptimizeSparse,
+  editCloud as workerEditCloud,
+} from '../../workers/computeClient.js'
 import { pluralize } from '../../core/textFormat.js'
 
 // A crop of a streamed cloud becomes a resident one: at most this many points.
@@ -20,7 +24,16 @@ const MESH_EDIT_MODES = new Set(['mesh-clean', 'mesh-smooth', 'mesh-decimate', '
 const REFERENCE_MODES = new Set(['icp', 'distance'])
 // … and these produce a replacement view of their source (an aligned or
 // recoloured copy), so the source is hidden like a selection edit's.
-const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals', 'classify-ground', 'mesh-clean', 'mesh-smooth', 'mesh-decimate'])
+const REPLACES_SOURCE_VIEW = new Set([
+  'transform',
+  'icp',
+  'distance',
+  'normals',
+  'classify-ground',
+  'mesh-clean',
+  'mesh-smooth',
+  'mesh-decimate',
+])
 
 // Tools-tab cloud and mesh edits, split out of useReconstructionStore: every
 // `editClouds` mode runs in the cloud-edit worker (workers/ops/cloud.js) and adds a
@@ -30,9 +43,23 @@ const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals',
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createCloudEdits({
-  clouds, healthDirty, imagesStore, invalidateSparseDependents, log, mainSparseCloud, makeCloudId,
-  save, projects, reconStatus, selectedCloudId, summary, surveyConstraintInput, upsertSparseCloud, sensors,
-  extractCloudPoints = null, editStreamedCloud = null,
+  clouds,
+  healthDirty,
+  imagesStore,
+  invalidateSparseDependents,
+  log,
+  mainSparseCloud,
+  makeCloudId,
+  save,
+  projects,
+  reconStatus,
+  selectedCloudId,
+  summary,
+  surveyConstraintInput,
+  upsertSparseCloud,
+  sensors,
+  extractCloudPoints = null,
+  editStreamedCloud = null,
 }) {
   // ── Cloud editing (crop / filter / merge) ────────────────────────────────────
 
@@ -94,11 +121,23 @@ export function createCloudEdits({
     if (!(source?.uv && source.texture)) return edited
     const regrouped = edited.uv ? regroupByPage(edited) : null
     if (regrouped) {
-      return { ...edited, idx: regrouped.idx, texture: { data: source.texture.data, pages: source.texture.pages, groups: regrouped.groups } }
+      return {
+        ...edited,
+        idx: regrouped.idx,
+        texture: { data: source.texture.data, pages: source.texture.pages, groups: regrouped.groups },
+      }
     }
-    const why = mode === 'mesh-decimate' ? 'decimation merges triangles, so the photo texture cannot follow'
-      : edited.uv ? 'the filled holes have no photo' : 'this tool does not keep it'
-    log(`Mesh edit: the result has no texture (${why}); texture it again with Tools ▸ Mesh ▸ Texture`, 'warn', 'Products')
+    const why =
+      mode === 'mesh-decimate'
+        ? 'decimation merges triangles, so the photo texture cannot follow'
+        : edited.uv
+          ? 'the filled holes have no photo'
+          : 'this tool does not keep it'
+    log(
+      `Mesh edit: the result has no texture (${why}); texture it again with Tools ▸ Mesh ▸ Texture`,
+      'warn',
+      'Products',
+    )
     const { uv: _uv, page: _page, ...plain } = edited
     return plain
   }
@@ -157,7 +196,9 @@ export function createCloudEdits({
         if (reconStatus.value === 'running') reconStatus.value = statusBefore
         return null
       }
-      const result = unpackReconstructionResult(await run(packed, { gcps: survey.gcps, cameraPriors: survey.cameraPriors }))
+      const result = unpackReconstructionResult(
+        await run(packed, { gcps: survey.gcps, cameraPriors: survey.cameraPriors }),
+      )
       if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
         // Superseded (project switch / set-as-main mid-run): nothing changed here.
         if (reconStatus.value === 'running') reconStatus.value = statusBefore
@@ -165,8 +206,13 @@ export function createCloudEdits({
       }
       // An edit of the model, not a recompute: provenance and the user's
       // display choices carry over (a reconstruct deliberately clears `imported`).
-      upsertSparseCloud(result.cameras, result.points, { replaceId: original.id, asMain: true,
-        name: original.name, imported: !!original.imported, secondary: !!original.secondary })
+      upsertSparseCloud(result.cameras, result.points, {
+        replaceId: original.id,
+        asMain: true,
+        name: original.name,
+        imported: !!original.imported,
+        secondary: !!original.secondary,
+      })
       const edited = mainSparseCloud.value
       if (edited && original.style !== undefined) edited.style = original.style
       if (edited && original.visible !== undefined) edited.visible = original.visible
@@ -184,10 +230,14 @@ export function createCloudEdits({
         log(`${label}: the edited model could not be saved — it will be lost on reload`, 'warn', 'Reconstruction')
       }
       const held = result.constraints ?? {}
-      log(`${label}: ${describe(result)}; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px`
-        + (held.gcpAnchors || held.cameraPriors
-          ? ` (held to ${pluralize(held.gcpAnchors || 0, 'GCP anchor')}, ${pluralize(held.cameraPriors || 0, 'camera prior')})` : ' (no survey constraints)'),
-        'success', 'Reconstruction')
+      log(
+        `${label}: ${describe(result)}; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px` +
+          (held.gcpAnchors || held.cameraPriors
+            ? ` (held to ${pluralize(held.gcpAnchors || 0, 'GCP anchor')}, ${pluralize(held.cameraPriors || 0, 'camera prior')})`
+            : ' (no survey constraints)'),
+        'success',
+        'Reconstruction',
+      )
       if (held.gcpError) log(`${label}: GCP anchoring skipped — ${held.gcpError}`, 'warn', 'Reconstruction')
       return mainSparseCloud.value
     } catch (err) {
@@ -235,7 +285,11 @@ export function createCloudEdits({
     try {
       const box = { min: settings.min ?? [], max: settings.max ?? [] }
       const projectId = projects.currentProjectId
-      const { cloud: flat, plan } = await extractCloudPoints(source, { box, maxPoints: STREAMED_CROP_MAX_POINTS }, onProgress)
+      const { cloud: flat, plan } = await extractCloudPoints(
+        source,
+        { box, maxPoints: STREAMED_CROP_MAX_POINTS },
+        onProgress,
+      )
       // A project closed or switched while the octree was read: the crop is not its.
       if (projects.currentProjectId !== projectId) {
         log('Crop: not added — its project was closed while the points were read', 'warn', 'Products')
@@ -249,10 +303,15 @@ export function createCloudEdits({
       }
       const cloud = addDerivedCloud(flat, { name: name || `${source.name} (cropped)`, imported: !!source.imported })
       if (source.style) cloud.style = JSON.parse(JSON.stringify(source.style))
-      log(`Crop: copied ${flat.count.toLocaleString()} points of the streamed cloud into "${cloud.name}"`
-        + (plan.complete ? '' : ` — thinned to ${plan.spacing.toPrecision(3)}-unit spacing to stay within `
-          + `${(STREAMED_CROP_MAX_POINTS / 1e6).toFixed(0)} M points; crop a smaller box for full detail`),
-      plan.complete ? 'success' : 'warn', 'Products')
+      log(
+        `Crop: copied ${flat.count.toLocaleString()} points of the streamed cloud into "${cloud.name}"` +
+          (plan.complete
+            ? ''
+            : ` — thinned to ${plan.spacing.toPrecision(3)}-unit spacing to stay within ` +
+              `${(STREAMED_CROP_MAX_POINTS / 1e6).toFixed(0)} M points; crop a smaller box for full detail`),
+        plan.complete ? 'success' : 'warn',
+        'Products',
+      )
       reconStatus.value = 'done'
       await save()
       return cloud
@@ -267,20 +326,30 @@ export function createCloudEdits({
     // Model edits (Tools ▸ Model ▾): one shared commit path, refineMainSparse.
     if (mode === 'sparse') {
       return refineMainSparse({
-        label: 'Gradual selection', sourceId: sourceIds[0], createdAt: settings.createdAt,
-        run: (packed, survey) => workerRefineSparse(packed, { metric: settings.metric, threshold: settings.threshold }, survey),
+        label: 'Gradual selection',
+        sourceId: sourceIds[0],
+        createdAt: settings.createdAt,
+        run: (packed, survey) =>
+          workerRefineSparse(packed, { metric: settings.metric, threshold: settings.threshold }, survey),
         describe: (r) => `removed ${r.removed} points`,
       })
     }
     if (mode === 'optimize') {
       return refineMainSparse({
-        label: 'Optimize cameras', sourceId: sourceIds[0], createdAt: settings.createdAt,
+        label: 'Optimize cameras',
+        sourceId: sourceIds[0],
+        createdAt: settings.createdAt,
         // Fisheye cameras solve in recorded pixels with the run's lens, and their
         // observations are re-derived about the new K (gradualSelection.js).
-        run: (packed, survey) => workerOptimizeSparse(packed,
-          { refine: settings.refine, sensorOfUuid: sensorIndexByUuid(), lensOfUuid: fisheyeLensByUuid() }, survey),
-        describe: (r) => `refined ${settings.refine === 'f,cxcy' ? 'focal length and principal point' : 'focal length'} (largest change ${((r.focalChange ?? 0) * 100).toFixed(2)}%)`
-          + (r.removed ? `, dropped ${r.removed} points with fewer than two observations` : ''),
+        run: (packed, survey) =>
+          workerOptimizeSparse(
+            packed,
+            { refine: settings.refine, sensorOfUuid: sensorIndexByUuid(), lensOfUuid: fisheyeLensByUuid() },
+            survey,
+          ),
+        describe: (r) =>
+          `refined ${settings.refine === 'f,cxcy' ? 'focal length and principal point' : 'focal length'} (largest change ${((r.focalChange ?? 0) * 100).toFixed(2)}%)` +
+          (r.removed ? `, dropped ${r.removed} points with fewer than two observations` : ''),
       })
     }
     // Which kinds each slot accepts. Mesh ▾ tools read a mesh; the reference of an
@@ -288,9 +357,17 @@ export function createCloudEdits({
     // dense-only (a sparse cloud's points carry view-tracks — never edited here).
     const meshSource = MESH_EDIT_MODES.has(mode)
     const resolved = sourceIds.map((id) => clouds.value.find((c) => c.id === id) ?? null)
-    const okKind = (c, slot) => c && c.count > 0 && !isStreamed(c) && (
-      slot === 0 ? (meshSource ? c.kind === 'mesh' : c.kind === 'dense')
-        : (REFERENCE_MODES.has(mode) ? (c.kind === 'dense' || c.kind === 'mesh') : c.kind === 'dense'))
+    const okKind = (c, slot) =>
+      c &&
+      c.count > 0 &&
+      !isStreamed(c) &&
+      (slot === 0
+        ? meshSource
+          ? c.kind === 'mesh'
+          : c.kind === 'dense'
+        : REFERENCE_MODES.has(mode)
+          ? c.kind === 'dense' || c.kind === 'mesh'
+          : c.kind === 'dense')
     const sources = resolved.filter((c, slot) => okKind(c, slot))
     const streamed = resolved.find(isStreamed)
     if (streamed && mode === 'crop' && !settings.invert && resolved.length === 1 && extractCloudPoints) {
@@ -304,20 +381,35 @@ export function createCloudEdits({
       }
       reconStatus.value = 'running'
       try {
-        const label = { crop: 'cropped', mask: 'edited', classify: 'reclassified', filter: 'filtered', 'classify-ground': 'ground' }[mode]
+        const label = {
+          'crop': 'cropped',
+          'mask': 'edited',
+          'classify': 'reclassified',
+          'filter': 'filtered',
+          'classify-ground': 'ground',
+        }[mode]
         const selection = mode === 'mask' || mode === 'classify'
         // A selection edit of a derived cloud refines it (as for a resident cloud): the
         // new one takes its place, and the old octree's files are pruned once no cloud
         // names them (the next octree build, or the project's next open).
         const refine = selection && streamed.derived
-        const cloud = await editStreamedCloud(streamed, { mode, settings, name: refine ? streamed.name : (name || `${streamed.name} (${label})`) }, onProgress)
+        const cloud = await editStreamedCloud(
+          streamed,
+          { mode, settings, name: refine ? streamed.name : name || `${streamed.name} (${label})` },
+          onProgress,
+        )
         if (cloud && mode === 'classify-ground') cloud.style = { field: 'attribute:classification' }
         if (cloud && refine) {
           clouds.value = clouds.value.filter((c) => c !== streamed)
           await save()
         } else if (cloud && (selection || REPLACES_SOURCE_VIEW.has(mode))) streamed.visible = false
         reconStatus.value = cloud ? 'done' : 'error'
-        if (cloud) log(`Cloud edit: added "${cloud.name}" (${cloud.count.toLocaleString()} points, streamed)`, 'success', 'Products')
+        if (cloud)
+          log(
+            `Cloud edit: added "${cloud.name}" (${cloud.count.toLocaleString()} points, streamed)`,
+            'success',
+            'Products',
+          )
         return cloud
       } catch (err) {
         log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
@@ -354,18 +446,26 @@ export function createCloudEdits({
         transfer.push(idx.buffer)
         // A textured mesh: UVs and a page per face travel with it (meshEdit.js carries
         // them); Sample to points also needs the pages themselves.
-        const tex = c.uv && c.texture ? {
-          uv: c.uv.slice(), page: facePages(c.texture.groups, c.count),
-          ...(mode === 'mesh-sample' ? { texture: { data: c.texture.data, pages: c.texture.pages.map((p) => ({ ...p })) } } : {}),
-        } : {}
+        const tex =
+          c.uv && c.texture
+            ? {
+                uv: c.uv.slice(),
+                page: facePages(c.texture.groups, c.count),
+                ...(mode === 'mesh-sample'
+                  ? { texture: { data: c.texture.data, pages: c.texture.pages.map((p) => ({ ...p })) } }
+                  : {}),
+              }
+            : {}
         if (tex.uv) transfer.push(tex.uv.buffer, tex.page.buffer)
         return { id: c.id, kind: 'mesh', count: c.count, nVerts: c.nVerts, pos, col, idx, ...tex }
       }
-      const attributes = Object.fromEntries(Object.entries(c.attributes || {}).map(([key, values]) => {
-        const copy = values.slice()
-        transfer.push(copy.buffer)
-        return [key, copy]
-      }))
+      const attributes = Object.fromEntries(
+        Object.entries(c.attributes || {}).map(([key, values]) => {
+          const copy = values.slice()
+          transfer.push(copy.buffer)
+          return [key, copy]
+        }),
+      )
       return { id: c.id, kind: 'dense', count: c.count, pos, col, nrm, attributes }
     })
     if (mode === 'mask' || mode === 'classify') {
@@ -379,7 +479,11 @@ export function createCloudEdits({
     }
     reconStatus.value = 'running'
     try {
-      const { cloud: edited, error, extra } = await workerEditCloud(
+      const {
+        cloud: edited,
+        error,
+        extra,
+      } = await workerEditCloud(
         { mode, clouds: payload, settings },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
@@ -401,28 +505,47 @@ export function createCloudEdits({
           reconStatus.value = 'done'
           return null
         }
-        log(mode === 'classify' ? `Classify: "${cloud.name}" updated`
-          : `Selection edit: "${cloud.name}" now has ${cloud.count.toLocaleString()} points`, 'success', 'Products')
+        log(
+          mode === 'classify'
+            ? `Classify: "${cloud.name}" updated`
+            : `Selection edit: "${cloud.name}" now has ${cloud.count.toLocaleString()} points`,
+          'success',
+          'Products',
+        )
         // A reclassification shows its classes.
-        if (mode === 'classify' && cloud.style?.field !== 'attribute:classification') cloud.style = { ...(cloud.style || {}), field: 'attribute:classification' }
+        if (mode === 'classify' && cloud.style?.field !== 'attribute:classification')
+          cloud.style = { ...(cloud.style || {}), field: 'attribute:classification' }
       } else {
         const opts = {
-          name: name || `${sources[0].name} (${mode === 'mask' ? 'edited' : mode === 'classify' ? 'classified' : mode})`,
+          name:
+            name || `${sources[0].name} (${mode === 'mask' ? 'edited' : mode === 'classify' ? 'classified' : mode})`,
           // Provenance follows the SOURCE (slot 0) — a reference only informs the edit.
           imported: REFERENCE_MODES.has(mode) ? !!sources[0].imported : sources.every((c) => c.imported),
         }
-        cloud = edited.idx ? addDerivedMesh(carryTexture(sources[0], edited, mode), opts) : addDerivedCloud(edited, opts)
+        cloud = edited.idx
+          ? addDerivedMesh(carryTexture(sources[0], edited, mode), opts)
+          : addDerivedCloud(edited, opts)
         // A tool may start its result on a colouring (distance → a diverging ramp);
         // a function sees the worker's small result record (e.g. the distance spread).
-        const startStyle = mode === 'classify' ? { field: 'attribute:classification' }
-          : typeof style === 'function' ? style(extra ?? null) : style
+        const startStyle =
+          mode === 'classify'
+            ? { field: 'attribute:classification' }
+            : typeof style === 'function'
+              ? style(extra ?? null)
+              : style
         if (startStyle) cloud.style = startStyle
         // Show the edit in place of its source; the source stays one visibility
         // toggle away for comparison or to start over.
         if (mode === 'mask' || mode === 'classify' || REPLACES_SOURCE_VIEW.has(mode)) sources[0].visible = false
-        log(`Cloud edit: added "${cloud.name}" — ${cloud.kind === 'mesh'
-          ? `${cloud.count.toLocaleString()} triangles` : `${cloud.count.toLocaleString()} points`}`,
-        'success', 'Products')
+        log(
+          `Cloud edit: added "${cloud.name}" — ${
+            cloud.kind === 'mesh'
+              ? `${cloud.count.toLocaleString()} triangles`
+              : `${cloud.count.toLocaleString()} points`
+          }`,
+          'success',
+          'Products',
+        )
       }
       reconStatus.value = 'done'
       await save()
@@ -435,7 +558,11 @@ export function createCloudEdits({
   }
 
   return {
-    addDerivedCloud, addDerivedMesh, replaceDerivedCloud, refineMainSparse, sensorIndexByUuid,
+    addDerivedCloud,
+    addDerivedMesh,
+    replaceDerivedCloud,
+    refineMainSparse,
+    sensorIndexByUuid,
     editClouds,
   }
 }

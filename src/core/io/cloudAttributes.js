@@ -31,8 +31,14 @@ export function unpackAttributes(fields = [], buffer, count) {
   const attributes = Object.create(null)
   for (const { name, type, offset } of fields) {
     const ArrayType = Object.hasOwn(TYPES, type) ? TYPES[type] : null
-    if (!ArrayType || !buffer || !Number.isSafeInteger(offset) || offset < 0
-        || offset % ArrayType.BYTES_PER_ELEMENT || offset + count * ArrayType.BYTES_PER_ELEMENT > buffer.byteLength) {
+    if (
+      !ArrayType ||
+      !buffer ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset % ArrayType.BYTES_PER_ELEMENT ||
+      offset + count * ArrayType.BYTES_PER_ELEMENT > buffer.byteLength
+    ) {
       throw new Error(`Invalid saved cloud attribute: ${name}`)
     }
     attributes[name] = new ArrayType(buffer, offset, count)
@@ -41,5 +47,5 @@ export function unpackAttributes(fields = [], buffer, count) {
 }
 
 export function attributeBuffers(cloud) {
-  return [...new Set(Object.values(cloud.attributes || {}).map(values => values.buffer))]
+  return [...new Set(Object.values(cloud.attributes || {}).map((values) => values.buffer))]
 }

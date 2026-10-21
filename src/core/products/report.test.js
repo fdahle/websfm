@@ -11,9 +11,16 @@ describe('buildReportHtml', () => {
         { label: 'GCP RMSE', value: null, unit: 'm', status: 'missing', hint: 'need ≥3 GCPs' },
       ],
       sections: [
-        { title: 'Sparse', tiles: [{ label: 'Points', value: '10,000', tone: 'none' }],
-          columns: [{ key: 'name', label: 'Image' }, { key: 'rms', label: 'RMS', align: 'right' }],
-          rows: [{ name: 'IMG_1', rms: '0.42' }], note: 'worst first' },
+        {
+          title: 'Sparse',
+          tiles: [{ label: 'Points', value: '10,000', tone: 'none' }],
+          columns: [
+            { key: 'name', label: 'Image' },
+            { key: 'rms', label: 'RMS', align: 'right' },
+          ],
+          rows: [{ name: 'IMG_1', rms: '0.42' }],
+          note: 'worst first',
+        },
       ],
     })
     expect(html.startsWith('<!doctype html>')).toBe(true)

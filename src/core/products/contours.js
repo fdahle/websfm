@@ -37,14 +37,17 @@ export const MAX_CONTOUR_LEVELS = 10000
 // Levels base + k·interval within [min, max] (inclusive), ascending.
 // Throws when interval is not positive/finite or the count exceeds the cap.
 export function contourLevels({ min, max }, { interval, base = 0 } = {}) {
-  if (!(Number.isFinite(interval) && interval > 0)) throw new Error(`Contour interval must be a positive number (got ${interval})`)
+  if (!(Number.isFinite(interval) && interval > 0))
+    throw new Error(`Contour interval must be a positive number (got ${interval})`)
   if (!Number.isFinite(base)) throw new Error(`Contour base must be finite (got ${base})`)
   if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) return []
   const kStart = Math.ceil((min - base) / interval)
   const kEnd = Math.floor((max - base) / interval)
   const count = kEnd - kStart + 1
   if (count > MAX_CONTOUR_LEVELS) {
-    throw new Error(`Contour interval ${interval} gives ${count} levels over ${min}…${max} (limit ${MAX_CONTOUR_LEVELS}); use a larger interval`)
+    throw new Error(
+      `Contour interval ${interval} gives ${count} levels over ${min}…${max} (limit ${MAX_CONTOUR_LEVELS}); use a larger interval`,
+    )
   }
   const levels = []
   for (let k = kStart; k <= kEnd; k++) {
@@ -80,8 +83,13 @@ function smoothLine(pts, closed, iterations) {
   for (let it = 0; it < iterations; it++) {
     const dst = new Float64Array(src.length)
     for (let i = 0; i < n; i++) {
-      let p = i - 1, q = i + 1
-      if (!closed && (i === 0 || i === n - 1)) { dst[2 * i] = src[2 * i]; dst[2 * i + 1] = src[2 * i + 1]; continue }
+      let p = i - 1,
+        q = i + 1
+      if (!closed && (i === 0 || i === n - 1)) {
+        dst[2 * i] = src[2 * i]
+        dst[2 * i + 1] = src[2 * i + 1]
+        continue
+      }
       if (p < 0) p = n - 1
       if (q >= n) q = 0
       dst[2 * i] = 0.25 * src[2 * p] + 0.5 * src[2 * i] + 0.25 * src[2 * q]
@@ -103,7 +111,9 @@ export function traceContours(grid, opts = {}, onLog) {
   const { width: W, height: H, data, mask } = grid
   const valid = (i) => Number.isFinite(data[i]) && (!mask || mask[i] !== 0)
 
-  let min = Infinity, max = -Infinity, nValid = 0
+  let min = Infinity,
+    max = -Infinity,
+    nValid = 0
   for (let i = 0; i < W * H; i++) {
     if (!valid(i)) continue
     const v = data[i]
@@ -120,32 +130,55 @@ export function traceContours(grid, opts = {}, onLog) {
 
   // Per level: flat list of segments as edge-id pairs.
   const segs = levels.map(() => [])
-  const firstAbove = (v) => { // first level index with levels[k] > v
-    let lo = 0, hi = levels.length
-    while (lo < hi) { const m = (lo + hi) >> 1; if (levels[m] > v) hi = m; else lo = m + 1 }
+  const firstAbove = (v) => {
+    // first level index with levels[k] > v
+    let lo = 0,
+      hi = levels.length
+    while (lo < hi) {
+      const m = (lo + hi) >> 1
+      if (levels[m] > v) hi = m
+      else lo = m + 1
+    }
     return lo
   }
   const val = new Float64Array(4)
   const above = [false, false, false, false]
   const edge = [0, 0, 0, 0] // top, right, bottom, left
-  let skippedQuads = 0, saddles = 0
+  let skippedQuads = 0,
+    saddles = 0
   for (let r = 0; r < H - 1; r++) {
     for (let c = 0; c < W - 1; c++) {
-      const i0 = r * W + c, i1 = i0 + 1, i2 = i0 + W + 1, i3 = i0 + W
-      if (!valid(i0) || !valid(i1) || !valid(i2) || !valid(i3)) { skippedQuads++; continue }
-      val[0] = data[i0]; val[1] = data[i1]; val[2] = data[i2]; val[3] = data[i3]
-      let qMin = val[0], qMax = val[0]
-      for (let k = 1; k < 4; k++) { if (val[k] < qMin) qMin = val[k]; if (val[k] > qMax) qMax = val[k] }
+      const i0 = r * W + c,
+        i1 = i0 + 1,
+        i2 = i0 + W + 1,
+        i3 = i0 + W
+      if (!valid(i0) || !valid(i1) || !valid(i2) || !valid(i3)) {
+        skippedQuads++
+        continue
+      }
+      val[0] = data[i0]
+      val[1] = data[i1]
+      val[2] = data[i2]
+      val[3] = data[i3]
+      let qMin = val[0],
+        qMax = val[0]
+      for (let k = 1; k < 4; k++) {
+        if (val[k] < qMin) qMin = val[k]
+        if (val[k] > qMax) qMax = val[k]
+      }
       if (qMin === qMax) continue
-      edge[0] = 2 * i0          // top    (c,r)→(c+1,r)
-      edge[1] = 2 * i1 + 1      // right  (c+1,r)→(c+1,r+1)
-      edge[2] = 2 * i3          // bottom (c,r+1)→(c+1,r+1)
-      edge[3] = 2 * i0 + 1      // left   (c,r)→(c,r+1)
+      edge[0] = 2 * i0 // top    (c,r)→(c+1,r)
+      edge[1] = 2 * i1 + 1 // right  (c+1,r)→(c+1,r+1)
+      edge[2] = 2 * i3 // bottom (c,r+1)→(c+1,r+1)
+      edge[3] = 2 * i0 + 1 // left   (c,r)→(c,r+1)
       // Levels with qMin < L ≤ qMax are the ones that split this quad.
       for (let li = firstAbove(qMin); li < levels.length && levels[li] <= qMax; li++) {
         const L = levels[li]
         let code = 0
-        for (let k = 0; k < 4; k++) { above[k] = val[k] >= L; if (above[k]) code |= 1 << k }
+        for (let k = 0; k < 4; k++) {
+          above[k] = val[k] >= L
+          if (above[k]) code |= 1 << k
+        }
         const out = segs[li]
         if (code === 0b0101 || code === 0b1010) {
           // Saddle. Corner k is bounded by edges k (clockwise side) and k-1.
@@ -158,9 +191,13 @@ export function traceContours(grid, opts = {}, onLog) {
           continue
         }
         // Exactly two crossed edges; edge e joins corners e and e+1.
-        let a = -1, b = -1
+        let a = -1,
+          b = -1
         for (let e = 0; e < 4; e++) {
-          if (above[e] !== above[(e + 1) & 3]) { if (a < 0) a = e; else b = e }
+          if (above[e] !== above[(e + 1) & 3]) {
+            if (a < 0) a = e
+            else b = e
+          }
         }
         out.push(edge[a], edge[b])
       }
@@ -170,17 +207,25 @@ export function traceContours(grid, opts = {}, onLog) {
   // Crossing point of `level` on lattice edge `id`.
   const edgePoint = (id, level, dst, o) => {
     const i = id >> 1
-    const c = i % W, r = (i - c) / W
-    const j = (id & 1) ? i + W : i + 1
-    const v0 = data[i], v1 = data[j]
+    const c = i % W,
+      r = (i - c) / W
+    const j = id & 1 ? i + W : i + 1
+    const v0 = data[i],
+      v1 = data[j]
     const t = (level - v0) / (v1 - v0)
     const [x0, y0] = cellCenter(grid, c, r)
-    if (id & 1) { dst[o] = x0; dst[o + 1] = y0 - t * grid.gsd }
-    else { dst[o] = x0 + t * grid.gsd; dst[o + 1] = y0 }
+    if (id & 1) {
+      dst[o] = x0
+      dst[o + 1] = y0 - t * grid.gsd
+    } else {
+      dst[o] = x0 + t * grid.gsd
+      dst[o + 1] = y0
+    }
   }
 
   const lines = []
-  let dropped = 0, degenerate = 0
+  let dropped = 0,
+    degenerate = 0
   for (let li = 0; li < levels.length; li++) {
     const s = segs[li]
     const nSeg = s.length / 2
@@ -191,7 +236,8 @@ export function traceContours(grid, opts = {}, onLog) {
     for (let k = 0; k < nSeg; k++) {
       for (const e of [s[2 * k], s[2 * k + 1]]) {
         const list = adj.get(e)
-        if (list) list.push(k); else adj.set(e, [k])
+        if (list) list.push(k)
+        else adj.set(e, [k])
       }
     }
     const used = new Uint8Array(nSeg)
@@ -206,7 +252,11 @@ export function traceContours(grid, opts = {}, onLog) {
         cur = next
         const list = adj.get(cur)
         seg = -1
-        for (const k of list) if (!used[k]) { seg = k; break }
+        for (const k of list)
+          if (!used[k]) {
+            seg = k
+            break
+          }
       }
       return chain
     }
@@ -223,10 +273,16 @@ export function traceContours(grid, opts = {}, onLog) {
         m++
       }
       if (closed && m > 1 && raw[0] === raw[2 * m - 2] && raw[1] === raw[2 * m - 1]) m--
-      if (m < (closed ? 3 : 2)) { degenerate++; return }
+      if (m < (closed ? 3 : 2)) {
+        degenerate++
+        return
+      }
       let pts = m === n ? raw : raw.slice(0, 2 * m)
       if (smooth > 0) pts = smoothLine(pts, closed, Math.round(smooth))
-      if (minLength > 0 && lineLength(pts, closed) < minLength) { dropped++; return }
+      if (minLength > 0 && lineLength(pts, closed) < minLength) {
+        dropped++
+        return
+      }
       lines.push({ level: L, index: isIndexLevel(L, base, interval, indexEvery), points: pts, closed })
     }
     // Open lines first: start at every degree-1 edge.
@@ -244,12 +300,14 @@ export function traceContours(grid, opts = {}, onLog) {
   const nClosed = lines.reduce((a, l) => a + (l.closed ? 1 : 0), 0)
   onLog?.(
     `Contours: ${lines.length} lines (${nClosed} closed) over ${levels.length} levels ` +
-    `(interval ${interval}, base ${base}, z ${min.toFixed(3)}…${max.toFixed(3)}); ` +
-    `${saddles} saddle cells, ${skippedQuads} nodata cells skipped` +
-    (dropped ? `, ${dropped} shorter than ${minLength} dropped` : '') +
-    (degenerate ? `, ${degenerate} zero-length (level on a sample) dropped` : '') +
-    (smooth > 0 ? `, smoothed ×${Math.round(smooth)}` : ''),
-    'info', 'Products')
+      `(interval ${interval}, base ${base}, z ${min.toFixed(3)}…${max.toFixed(3)}); ` +
+      `${saddles} saddle cells, ${skippedQuads} nodata cells skipped` +
+      (dropped ? `, ${dropped} shorter than ${minLength} dropped` : '') +
+      (degenerate ? `, ${degenerate} zero-length (level on a sample) dropped` : '') +
+      (smooth > 0 ? `, smoothed ×${Math.round(smooth)}` : ''),
+    'info',
+    'Products',
+  )
   return { levels, lines }
 }
 
@@ -281,8 +339,14 @@ export function contoursToDxf(result, opts = {}) {
     for (let k = 0; k < p.length; k += 2) points.push([p[k], p[k + 1]])
     return { layer: line.index ? 'CONTOUR_INDEX' : 'CONTOUR', points, closed: line.closed, elevation: line.level }
   })
-  return writeDxf({
-    layers: [{ name: 'CONTOUR', color: 8 }, { name: 'CONTOUR_INDEX', color: 7 }],
-    polylines,
-  }, opts)
+  return writeDxf(
+    {
+      layers: [
+        { name: 'CONTOUR', color: 8 },
+        { name: 'CONTOUR_INDEX', color: 7 },
+      ],
+      polylines,
+    },
+    opts,
+  )
 }

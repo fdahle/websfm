@@ -22,10 +22,15 @@ export function chooseBasemap(choice, info, isModel) {
     note = `${BASEMAPS.find((b) => b.value === choice)?.label} base layer is not available for this coordinate system — showing the automatic one.`
     choice = 'auto'
   }
-  const kind = choice === 'satellite' ? 'satellite'
-    : choice === 'terrain' ? 'terrain'
-    : choice === 'streets' || (choice === 'auto' && info.basemap === 'osm') ? 'osm'
-    : choice === 'auto' && info.basemap === 'gibs' ? 'gibs'
-    : null
+  const kind =
+    choice === 'satellite'
+      ? 'satellite'
+      : choice === 'terrain'
+        ? 'terrain'
+        : choice === 'streets' || (choice === 'auto' && info.basemap === 'osm')
+          ? 'osm'
+          : choice === 'auto' && info.basemap === 'gibs'
+            ? 'gibs'
+            : null
   return { kind, note }
 }

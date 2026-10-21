@@ -32,22 +32,36 @@ export function keypointSetFrom(objects) {
     const { data, rgb } = objects
     const n = Math.floor(data.length / KP_STRIDE)
     const xy = new Float64Array(2 * n)
-    for (let k = 0; k < n; k++) { xy[2 * k] = data[KP_STRIDE * k]; xy[2 * k + 1] = data[KP_STRIDE * k + 1] }
+    for (let k = 0; k < n; k++) {
+      xy[2 * k] = data[KP_STRIDE * k]
+      xy[2 * k + 1] = data[KP_STRIDE * k + 1]
+    }
     const colored = rgb?.length === 3 * n
     return { n, xy, rgb: colored ? rgb.slice() : null, hasColor: colored ? new Uint8Array(n).fill(1) : null }
   }
   const list = objects ?? []
   const n = list.length
   const xy = new Float64Array(2 * n)
-  let rgb = null, hasColor = null
+  let rgb = null,
+    hasColor = null
   for (let k = 0; k < n; k++) {
     const kp = list[k]
-    if (!kp) { xy[2 * k] = NaN; xy[2 * k + 1] = NaN; continue }
-    xy[2 * k] = kp.x; xy[2 * k + 1] = kp.y
+    if (!kp) {
+      xy[2 * k] = NaN
+      xy[2 * k + 1] = NaN
+      continue
+    }
+    xy[2 * k] = kp.x
+    xy[2 * k + 1] = kp.y
     const c = kp.color
     if (c) {
-      if (!rgb) { rgb = new Uint8Array(3 * n); hasColor = new Uint8Array(n) }
-      rgb[3 * k] = c[0]; rgb[3 * k + 1] = c[1]; rgb[3 * k + 2] = c[2]
+      if (!rgb) {
+        rgb = new Uint8Array(3 * n)
+        hasColor = new Uint8Array(n)
+      }
+      rgb[3 * k] = c[0]
+      rgb[3 * k + 1] = c[1]
+      rgb[3 * k + 2] = c[2]
       hasColor[k] = 1
     }
   }
@@ -79,9 +93,14 @@ export function mapPositions(set, fn) {
   for (let k = 0; k < set.n; k++) {
     const x = src[2 * k]
     // eslint-disable-next-line no-self-compare
-    if (x !== x) { xy[2 * k] = NaN; xy[2 * k + 1] = NaN; continue }
+    if (x !== x) {
+      xy[2 * k] = NaN
+      xy[2 * k + 1] = NaN
+      continue
+    }
     const p = fn(x, src[2 * k + 1], k)
-    xy[2 * k] = p.x; xy[2 * k + 1] = p.y
+    xy[2 * k] = p.x
+    xy[2 * k + 1] = p.y
   }
   return { n: set.n, xy, rgb: set.rgb, hasColor: set.hasColor }
 }

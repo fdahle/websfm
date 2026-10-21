@@ -10,7 +10,10 @@ import { createTrackStore, makeImageIds } from './trackStore.js'
  */
 export function tracksFrom(points, uuids, { kpCount = 64, impl = 'typed' } = {}) {
   const ids = makeImageIds(uuids)
-  const tracks = createTrackStore(uuids.map(() => kpCount), { impl })
+  const tracks = createTrackStore(
+    uuids.map(() => kpCount),
+    { impl },
+  )
   for (const pt of points) {
     const p = tracks.addPoint(pt.x, pt.y, pt.z)
     for (const [uuid, kp] of pt.views) tracks.addView(p, ids.img(uuid), kp)

@@ -2,11 +2,21 @@ import { describe, it, expect } from 'vitest'
 import { computed, ref } from 'vue'
 import { usePresetSettings, presetOwnedKeys, sameSettingValue } from './usePresetSettings.js'
 import {
-  MATCH_DEFAULTS, MATCH_PRESETS, MATCH_PRESET_META,
-  MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META,
-  RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, RECONSTRUCT_PRESET_META,
-  FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META,
-  DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, DETECT_PRESET_META,
+  MATCH_DEFAULTS,
+  MATCH_PRESETS,
+  MATCH_PRESET_META,
+  MESH_DEFAULTS,
+  MESH_PRESETS,
+  MESH_PRESET_META,
+  RECONSTRUCT_DEFAULTS,
+  RECONSTRUCT_PRESETS,
+  RECONSTRUCT_PRESET_META,
+  FILTER_CLOUD_DEFAULTS,
+  FILTER_CLOUD_PRESETS,
+  FILTER_CLOUD_PRESET_META,
+  DETECT_SIFT_DEFAULTS,
+  DETECT_SIFT_PRESETS,
+  DETECT_PRESET_META,
 } from '../core/defaults.user.js'
 
 const setup = (defaults, presets, cards, extra = {}) => {
@@ -38,14 +48,26 @@ describe('usePresetSettings', () => {
   it('a match preset patches only the keys presets own', () => {
     const p = setup(MATCH_DEFAULTS, MATCH_PRESETS, MATCH_PRESET_META)
     Object.assign(p.settings.value, {
-      preselectMethod: 'footprint', maxNeighbors: 4, minOverlap: 55, sequentialOverlap: 3,
-      sequentialLoopClosure: true, lgTiled: true, lgMaxKeypoints: 1024, lgTileBudget: 512,
+      preselectMethod: 'footprint',
+      maxNeighbors: 4,
+      minOverlap: 55,
+      sequentialOverlap: 3,
+      sequentialLoopClosure: true,
+      lgTiled: true,
+      lgMaxKeypoints: 1024,
+      lgTileBudget: 512,
     })
     p.selectPreset('high')
     expect(p.settings.value).toMatchObject({
       ...MATCH_PRESETS.high,
-      preselectMethod: 'footprint', maxNeighbors: 4, minOverlap: 55, sequentialOverlap: 3,
-      sequentialLoopClosure: true, lgTiled: true, lgMaxKeypoints: 1024, lgTileBudget: 512,
+      preselectMethod: 'footprint',
+      maxNeighbors: 4,
+      minOverlap: 55,
+      sequentialOverlap: 3,
+      sequentialLoopClosure: true,
+      lgTiled: true,
+      lgMaxKeypoints: 1024,
+      lgTileBudget: 512,
     })
     expect(p.activePreset.value).toBe('high')
     expect(p.baseId.value).toBe('high')
@@ -72,7 +94,14 @@ describe('usePresetSettings', () => {
     const p = setup(MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META)
     Object.assign(p.settings.value, { trim: 'off', fillHoles: false, removeFloaters: false, colorize: false })
     p.selectPreset('high')
-    expect(p.settings.value).toEqual({ ...MESH_DEFAULTS, depth: 10, trim: 'off', fillHoles: false, removeFloaters: false, colorize: false })
+    expect(p.settings.value).toEqual({
+      ...MESH_DEFAULTS,
+      depth: 10,
+      trim: 'off',
+      fillHoles: false,
+      removeFloaters: false,
+      colorize: false,
+    })
     expect(p.activePreset.value).toBe('high')
   })
 
@@ -103,21 +132,32 @@ describe('usePresetSettings', () => {
   it('checks cards in order, so the first matching one wins', () => {
     const settings = ref({ a: 1, b: 2 })
     const p = usePresetSettings({
-      settings, defaults: { a: 1, b: 2 },
-      presets: { rec: { a: 1 }, medium: {}, low: { a: 0 } }, cards: ['rec', 'medium', 'low'],
+      settings,
+      defaults: { a: 1, b: 2 },
+      presets: { rec: { a: 1 }, medium: {}, low: { a: 0 } },
+      cards: ['rec', 'medium', 'low'],
     })
     expect(p.activePreset.value).toBe('rec')
   })
 
   it('follows reactive defaults/presets and a writable computed target (Detect: per detector)', () => {
     const detector = ref('sift')
-    const store = ref({ sift: { ...DETECT_SIFT_DEFAULTS }, other: { maxDim: 500, maxDimMode: 'absolute', maxKeypoints: 50 } })
+    const store = ref({
+      sift: { ...DETECT_SIFT_DEFAULTS },
+      other: { maxDim: 500, maxDimMode: 'absolute', maxKeypoints: 50 },
+    })
     const settings = computed({
       get: () => store.value[detector.value],
-      set: (v) => { store.value = { ...store.value, [detector.value]: v } },
+      set: (v) => {
+        store.value = { ...store.value, [detector.value]: v }
+      },
     })
-    const presets = computed(() => (detector.value === 'sift' ? DETECT_SIFT_PRESETS : { low: { maxDim: 100 }, medium: {} }))
-    const defaults = computed(() => (detector.value === 'sift' ? DETECT_SIFT_DEFAULTS : { maxDim: 500, maxDimMode: 'absolute', maxKeypoints: 50 }))
+    const presets = computed(() =>
+      detector.value === 'sift' ? DETECT_SIFT_PRESETS : { low: { maxDim: 100 }, medium: {} },
+    )
+    const defaults = computed(() =>
+      detector.value === 'sift' ? DETECT_SIFT_DEFAULTS : { maxDim: 500, maxDimMode: 'absolute', maxKeypoints: 50 },
+    )
     const p = usePresetSettings({ settings, defaults, presets, cards: DETECT_PRESET_META })
     settings.value = { ...settings.value, maxDimMode: 'auto' } // orthogonal mode
     expect(p.activePreset.value).toBe('medium')
@@ -133,7 +173,12 @@ describe('usePresetSettings', () => {
 
   it('honours explicit ownedKeys', () => {
     const settings = ref({ a: 1, b: 2 })
-    const p = usePresetSettings({ settings, defaults: { a: 1, b: 2 }, presets: { medium: {}, x: { a: 5 } }, ownedKeys: ['a', 'b'] })
+    const p = usePresetSettings({
+      settings,
+      defaults: { a: 1, b: 2 },
+      presets: { medium: {}, x: { a: 5 } },
+      ownedKeys: ['a', 'b'],
+    })
     settings.value.b = 3
     expect(p.activePreset.value).toBe('custom')
     p.selectPreset('x')

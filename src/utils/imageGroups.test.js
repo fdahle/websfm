@@ -8,13 +8,15 @@ describe('normalizeImageGroups', () => {
   })
 
   it('drops malformed and duplicate entries and defaults the rest', () => {
-    expect(normalizeImageGroups([
-      { id: 'a', name: '  North  ', collapsed: 1 },
-      { id: 'a', name: 'dup' },
-      { name: 'no id' },
-      null,
-      { id: 'b', name: '   ' },
-    ])).toEqual([
+    expect(
+      normalizeImageGroups([
+        { id: 'a', name: '  North  ', collapsed: 1 },
+        { id: 'a', name: 'dup' },
+        { name: 'no id' },
+        null,
+        { id: 'b', name: '   ' },
+      ]),
+    ).toEqual([
       { id: 'a', name: 'North', collapsed: true },
       { id: 'b', name: 'Group', collapsed: false },
     ])
@@ -22,7 +24,10 @@ describe('normalizeImageGroups', () => {
 })
 
 describe('groupImageSections', () => {
-  const groups = [{ id: 'g1', name: 'A' }, { id: 'g2', name: 'B' }]
+  const groups = [
+    { id: 'g1', name: 'A' },
+    { id: 'g2', name: 'B' },
+  ]
   const images = [
     { id: 1, groupId: 'g2' },
     { id: 2, groupId: null },

@@ -20,7 +20,10 @@ const { useSmartSelect } = await import('./useSmartSelect.js')
 
 // Minimal OffscreenCanvas for buildMaskCanvas (node has none).
 class FakeCanvas {
-  constructor(w, h) { this.width = w; this.height = h }
+  constructor(w, h) {
+    this.width = w
+    this.height = h
+  }
   getContext() {
     return {
       createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
@@ -51,7 +54,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   globalThis.OffscreenCanvas = FakeCanvas
 })
-afterEach(() => { delete globalThis.OffscreenCanvas })
+afterEach(() => {
+  delete globalThis.OffscreenCanvas
+})
 
 describe('useSmartSelect', () => {
   it('maps NATIVE click pixels to the encoded raster', async () => {
@@ -67,7 +72,7 @@ describe('useSmartSelect', () => {
     await encoded(s)
     const click = s.smartClick(100, 100, false)
     await tick()
-    s.discardSmart()                       // Delete pressed while segmenting
+    s.discardSmart() // Delete pressed while segmenting
     pending.decode.shift().resolve(decodeResult)
     await click
     expect(s.smartHasPreview.value).toBe(false)
@@ -82,12 +87,12 @@ describe('useSmartSelect', () => {
     const first = s.smartClick(100, 100, false)
     await tick()
     s.discardSmart()
-    s.smartClick(200, 200, false)          // coalesced: re-runs after the in-flight decode
+    s.smartClick(200, 200, false) // coalesced: re-runs after the in-flight decode
     pending.decode.shift().resolve(decodeResult) // stale (pre-discard)
     await tick()
     expect(s.smartHasPreview.value).toBe(false)
     const next = pending.decode.shift()
-    expect(next.pts).toEqual([{ x: 200 * 1024 / 4000, y: 200 * 768 / 3000, positive: true }])
+    expect(next.pts).toEqual([{ x: (200 * 1024) / 4000, y: (200 * 768) / 3000, positive: true }])
     next.resolve(decodeResult)
     await first
     expect(s.smartHasPreview.value).toBe(true)
@@ -108,7 +113,7 @@ describe('useSmartSelect', () => {
     const { s } = setup()
     const p = s.ensureEncoded()
     await tick()
-    s.resetSmart('u1')                     // image switched mid-encode
+    s.resetSmart('u1') // image switched mid-encode
     pending.encode.shift()({ width: 1024, height: 768 })
     await p
     expect(s.smartStatus.value).toBe('')

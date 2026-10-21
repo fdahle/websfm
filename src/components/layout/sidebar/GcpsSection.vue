@@ -23,8 +23,12 @@ const { gcps } = storeToRefs(useGcpsStore())
 // `isGroundControl`), and the badge is what says so at a glance.
 const ROLE_BADGES = {
   control: { cls: 'control', text: 'CTL', title: 'Control point — constrains georeferencing' },
-  check:   { cls: 'check',   text: 'CHK', title: 'Checkpoint — excluded from adjustment' },
-  marker:  { cls: 'marker',  text: 'MRK', title: 'Marker — a scale-bar endpoint with no surveyed position; never constrains the solve' },
+  check: { cls: 'check', text: 'CHK', title: 'Checkpoint — excluded from adjustment' },
+  marker: {
+    cls: 'marker',
+    text: 'MRK',
+    title: 'Marker — a scale-bar endpoint with no surveyed position; never constrains the solve',
+  },
 }
 const roleBadge = (gcp) => ROLE_BADGES[gcp.role] ?? ROLE_BADGES.control
 const isMarker = (gcp) => gcp.role === 'marker'
@@ -48,7 +52,11 @@ function onGcpRightClick(e, gcp) {
   openGcpCtx(e, { gcp })
 }
 // Run a menu item against the point it was opened on, then close.
-function fromMenu(fn) { const gcp = gcpCtx.value.gcp; closeMenu(); fn(gcp) }
+function fromMenu(fn) {
+  const gcp = gcpCtx.value.gcp
+  closeMenu()
+  fn(gcp)
+}
 
 // Compact coordinate formatting (projected metres vs. lat/lon degrees).
 function fmtCoord(v) {
@@ -77,7 +85,12 @@ function reprojFor(gcpId, imageId) {
           class="list-item"
           :class="{ selected: gcp.id === sidebar.selectedGcpId }"
           :title="gcp.name"
-          @click="() => { sidebar.selectGcp(gcp.id); toggleGcpExpand(gcp.id) }"
+          @click="
+            () => {
+              sidebar.selectGcp(gcp.id)
+              toggleGcpExpand(gcp.id)
+            }
+          "
           @dblclick="sidebar.openGcp(gcp.id)"
           @contextmenu="onGcpRightClick($event, gcp)"
         >
@@ -94,7 +107,11 @@ function reprojFor(gcpId, imageId) {
           <span
             class="obs-badge"
             :class="{ low: (gcp.observations?.length || 0) < 2 }"
-            :title="(gcp.observations?.length || 0) < 2 ? 'Needs ≥2 marked images to be usable' : `${pluralize(gcp.observations.length, 'observation')}`"
+            :title="
+              (gcp.observations?.length || 0) < 2
+                ? 'Needs ≥2 marked images to be usable'
+                : `${pluralize(gcp.observations.length, 'observation')}`
+            "
           >
             {{ gcp.observations?.length || 0 }}<template v-if="(gcp.observations?.length || 0) < 2"> ⚠</template>
           </span>
@@ -145,12 +162,15 @@ function reprojFor(gcpId, imageId) {
                 class="obs-jump"
                 :title="`Open ${obs.imageName}`"
                 @click.stop="sidebar.jumpToImage({ imageId: obs.imageId })"
-              >{{ obs.imageName }}</button>
+              >
+                {{ obs.imageName }}
+              </button>
               <span
                 v-else
                 class="obs-missing"
                 :title="`${obs.imageName} — not loaded yet; add this image to enable its link`"
-              >{{ obs.imageName }}</span>
+                >{{ obs.imageName }}</span
+              >
               <span v-if="reprojFor(gcp.id, obs.imageId) != null" class="obs-reproj" title="Reprojection error (px)">
                 {{ reprojFor(gcp.id, obs.imageId).toFixed(1) }}px
               </span>
@@ -159,7 +179,9 @@ function reprojFor(gcpId, imageId) {
           <div v-else class="obs-empty">Right-click a position in an image tab to mark this point.</div>
         </li>
       </template>
-      <li v-if="!gcps.length" class="empty">No points — right-click in an image tab to add one, or import a control-point file</li>
+      <li v-if="!gcps.length" class="empty">
+        No points — right-click in an image tab to add one, or import a control-point file
+      </li>
     </ul>
 
     <!-- GCP context menu -->
@@ -171,18 +193,26 @@ function reprojFor(gcpId, imageId) {
 
 <style scoped src="./sidebar-sections.css"></style>
 <style scoped>
-.list-item.selected { background: rgba(80, 200, 255, 0.1); }
+.list-item.selected {
+  background: rgba(80, 200, 255, 0.1);
+}
 
-.obs-badge.low { color: #e0a030; }
+.obs-badge.low {
+  color: #e0a030;
+}
 
 .role-badge {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: .04em;
+  letter-spacing: 0.04em;
   color: #3fae6a;
 }
-.role-badge.check { color: #38a9c7; }
-.role-badge.marker { color: #b98ae0; }
+.role-badge.check {
+  color: #38a9c7;
+}
+.role-badge.marker {
+  color: #b98ae0;
+}
 
 .obs-header {
   margin: 6px 0 2px;
@@ -190,7 +220,11 @@ function reprojFor(gcpId, imageId) {
   font-weight: 600;
   color: var(--text-dim);
 }
-.obs-list { list-style: none; margin: 0; padding: 0; }
+.obs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 .obs-item {
   display: flex;
   align-items: center;
@@ -212,7 +246,9 @@ function reprojFor(gcpId, imageId) {
   cursor: pointer;
   padding: 0;
 }
-.obs-jump:hover { text-decoration: underline; }
+.obs-jump:hover {
+  text-decoration: underline;
+}
 .obs-missing {
   flex: 1;
   min-width: 0;
@@ -224,6 +260,15 @@ function reprojFor(gcpId, imageId) {
   font-style: italic;
   cursor: default;
 }
-.obs-reproj { font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.obs-empty { font-size: 11px; color: var(--text-dim); font-style: italic; margin: 2px 0; }
+.obs-reproj {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.obs-empty {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+  margin: 2px 0;
+}
 </style>

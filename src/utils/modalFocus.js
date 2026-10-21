@@ -8,21 +8,32 @@
 export function installModalFocus(doc = document) {
   const selector = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]'
   const controls = 'button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]'
-  const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
-  const focusables = dialog => [...dialog.querySelectorAll(controls)]
-    .filter(el => !el.disabled && el.tabIndex >= 0 && visible(el) && !el.closest('[inert]'))
-  const known = new Map(), inert = new Map()
-  let top = null, keeps = []
-  const restoreInert = () => { for (const [el, value] of inert) el.inert = value; inert.clear() }
-  const focusInitial = dialog => {
+  const visible = (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+  const focusables = (dialog) =>
+    [...dialog.querySelectorAll(controls)].filter(
+      (el) => !el.disabled && el.tabIndex >= 0 && visible(el) && !el.closest('[inert]'),
+    )
+  const known = new Map(),
+    inert = new Map()
+  let top = null,
+    keeps = []
+  const restoreInert = () => {
+    for (const [el, value] of inert) el.inert = value
+    inert.clear()
+  }
+  const focusInitial = (dialog) => {
     const items = focusables(dialog)
-    const initial = items.find(el => el.hasAttribute('autofocus'))
-      ?? items.find(el => el.matches('.modal-body input, .modal-body select, .modal-body textarea, .modal-footer button'))
-      ?? items[0] ?? dialog
+    const initial =
+      items.find((el) => el.hasAttribute('autofocus')) ??
+      items.find((el) =>
+        el.matches('.modal-body input, .modal-body select, .modal-body textarea, .modal-footer button'),
+      ) ??
+      items[0] ??
+      dialog
     if (!dialog.hasAttribute('tabindex')) dialog.tabIndex = -1
     initial.focus({ preventScroll: true })
   }
-  const layer = el => {
+  const layer = (el) => {
     let z = 0
     for (let node = el; node && node !== doc.body; node = node.parentElement) {
       z = Math.max(z, Number.parseInt(getComputedStyle(node).zIndex) || 0)
@@ -42,7 +53,8 @@ export function installModalFocus(doc = document) {
     keeps = keep ? [...doc.querySelectorAll(keep)] : []
     if (top) {
       // Everything off the paths from <body> to the dialog and to each kept element.
-      const anchors = [top, ...keeps], path = new Set()
+      const anchors = [top, ...keeps],
+        path = new Set()
       for (const a of anchors) for (let node = a; node && node !== doc.body; node = node.parentElement) path.add(node)
       for (const a of anchors) {
         for (let node = a; node.parentElement && node !== doc.body; node = node.parentElement) {
@@ -55,30 +67,41 @@ export function installModalFocus(doc = document) {
       }
     }
     if (top !== previous) {
-      if (returnTarget?.isConnected && (!top || top.contains(returnTarget)) && visible(returnTarget)) returnTarget.focus()
+      if (returnTarget?.isConnected && (!top || top.contains(returnTarget)) && visible(returnTarget))
+        returnTarget.focus()
       else if (top) focusInitial(top)
     } else if (top && !top.contains(doc.activeElement)) focusInitial(top)
   }
-  const onKey = event => {
+  const onKey = (event) => {
     if (!top || event.key !== 'Tab') return
     const items = focusables(top)
     const index = items.indexOf(doc.activeElement)
-    if (!items.length) { event.preventDefault(); top.focus(); return }
+    if (!items.length) {
+      event.preventDefault()
+      top.focus()
+      return
+    }
     if (event.shiftKey ? index <= 0 : index < 0 || index === items.length - 1) {
       event.preventDefault()
       items[event.shiftKey ? items.length - 1 : 0].focus()
     }
   }
-  const onFocus = event => {
-    if (top && !top.contains(event.target) && !keeps.some(k => k.contains(event.target))) focusInitial(top)
+  const onFocus = (event) => {
+    if (top && !top.contains(event.target) && !keeps.some((k) => k.contains(event.target))) focusInitial(top)
   }
   const observer = new MutationObserver(update)
-  observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'aria-modal', 'data-modal-keep'] })
+  observer.observe(doc.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['hidden', 'aria-modal', 'data-modal-keep'],
+  })
   doc.addEventListener('keydown', onKey, true)
   doc.addEventListener('focusin', onFocus, true)
   update()
   return () => {
-    observer.disconnect(); restoreInert()
+    observer.disconnect()
+    restoreInert()
     doc.removeEventListener('keydown', onKey, true)
     doc.removeEventListener('focusin', onFocus, true)
   }

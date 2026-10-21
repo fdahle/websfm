@@ -9,7 +9,8 @@ describe('bigSet / bigMap', () => {
   })
 
   it('shard numeric keys so that no shard nears its capacity', () => {
-    const capacity = 256, n = 10_000
+    const capacity = 256,
+      n = 10_000
     const s = bigSet(n, { capacity })
     // Packed cell ids: consecutive runs and large strides, as a voxel grid makes them.
     const keys = []
@@ -25,7 +26,8 @@ describe('bigSet / bigMap', () => {
   })
 
   it('shard a Map and string keys alike', () => {
-    const capacity = 64, n = 3000
+    const capacity = 64,
+      n = 3000
     const m = bigMap(n, { capacity })
     for (let i = 0; i < n; i++) m.set(`${i},${-i},${i * 3}`, i)
     expect(m.size).toBe(n)
@@ -36,7 +38,9 @@ describe('bigSet / bigMap', () => {
     expect(m.has('0,0,0')).toBe(false)
     expect(m.size).toBe(n - 1)
     let seen = 0
-    m.forEach(() => { seen++ })
+    m.forEach(() => {
+      seen++
+    })
     expect(seen).toBe(n - 1)
   })
 })

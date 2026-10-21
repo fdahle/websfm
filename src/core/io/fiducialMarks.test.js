@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { parseFiducialMarks, looksLikeFiducialMarks, applyFiducialMarks, planFiducialMarkTargets } from './fiducialMarks.js'
+import {
+  parseFiducialMarks,
+  looksLikeFiducialMarks,
+  applyFiducialMarks,
+  planFiducialMarkTargets,
+} from './fiducialMarks.js'
 
 describe('parseFiducialMarks', () => {
   it('groups a headered file by sensor, with per-sensor focal and principal point', () => {
@@ -12,7 +17,10 @@ describe('parseFiducialMarks', () => {
     const { groups } = parseFiducialMarks(text)
     expect(groups).toHaveLength(2)
     expect(groups[0]).toEqual({
-      sensor: 'RC10', focalMm: 152.8, ppxMm: 0.01, ppyMm: -0.02,
+      sensor: 'RC10',
+      focalMm: 152.8,
+      ppxMm: 0.01,
+      ppyMm: -0.02,
       marks: [
         { id: 'F1', xMm: -106, yMm: -106, slot: 'corner-tl' },
         { id: 'F2', xMm: 106, yMm: -106, slot: 'corner-tr' },
@@ -24,10 +32,18 @@ describe('parseFiducialMarks', () => {
 
   it('reads a headerless `id, xMm, yMm` block like the paste box', () => {
     const { groups } = parseFiducialMarks('F1\t-106\t-106\nF2\t106\t-106\nbad\tx\ty')
-    expect(groups).toEqual([{ sensor: '', focalMm: null, ppxMm: null, ppyMm: null, marks: [
-      { id: 'F1', xMm: -106, yMm: -106, slot: null },
-      { id: 'F2', xMm: 106, yMm: -106, slot: null },
-    ] }])
+    expect(groups).toEqual([
+      {
+        sensor: '',
+        focalMm: null,
+        ppxMm: null,
+        ppyMm: null,
+        marks: [
+          { id: 'F1', xMm: -106, yMm: -106, slot: null },
+          { id: 'F2', xMm: 106, yMm: -106, slot: null },
+        ],
+      },
+    ])
   })
 
   it('recognises a marks header but not an image-fiducial or GCP one', () => {
@@ -39,7 +55,10 @@ describe('parseFiducialMarks', () => {
 
 describe('applyFiducialMarks', () => {
   const group = (slots) => ({
-    sensor: 'RC10', focalMm: 152.8, ppxMm: null, ppyMm: null,
+    sensor: 'RC10',
+    focalMm: 152.8,
+    ppxMm: null,
+    ppyMm: null,
     marks: [
       { id: 'F1', xMm: -106, yMm: -106, slot: slots ? 'corner-tl' : null },
       { id: 'F2', xMm: 106, yMm: -106, slot: slots ? 'corner-tr' : null },
@@ -47,36 +66,65 @@ describe('applyFiducialMarks', () => {
   })
 
   it('records an uncalibrated certificate when the file has no slots and nothing is calibrated', () => {
-    const r = applyFiducialMarks({ fiducialCalibration: { marks: [], slotMap: {}, ppxMm: 0.5, ppyMm: 0, focalMm: 0 } }, group(false))
+    const r = applyFiducialMarks(
+      { fiducialCalibration: { marks: [], slotMap: {}, ppxMm: 0.5, ppyMm: 0, focalMm: 0 } },
+      group(false),
+    )
     expect(r).toMatchObject({
-      marks: [{ id: 'F1', xMm: -106, yMm: -106 }, { id: 'F2', xMm: 106, yMm: -106 }],
-      ppxMm: 0.5, ppyMm: 0, focalMm: 152.8, slotMap: {}, fit: null,
+      marks: [
+        { id: 'F1', xMm: -106, yMm: -106 },
+        { id: 'F2', xMm: 106, yMm: -106 },
+      ],
+      ppxMm: 0.5,
+      ppyMm: 0,
+      focalMm: 152.8,
+      slotMap: {},
+      fit: null,
     })
   })
 
   it('builds a certificate calibration from slotted marks', () => {
     const r = applyFiducialMarks({}, group(true))
     expect(r).toMatchObject({
-      method: 'certificate', transform: 'affine', focalMm: 152.8, fit: null,
+      method: 'certificate',
+      transform: 'affine',
+      focalMm: 152.8,
+      fit: null,
       slotMap: { 'corner-tl': 'F1', 'corner-tr': 'F2' },
     })
   })
 
   it('updates an existing calibration, keeping its transform and surviving slot entries', () => {
     const old = {
-      method: 'batch', transform: 'projective', scanPitchMm: 0.021, fit: { rmsUm: 3 },
-      slotMap: { 'corner-tl': 'F1', 'corner-br': 'F9' }, marks: [], focalMm: 150, ppxMm: 0.1, ppyMm: 0.2,
+      method: 'batch',
+      transform: 'projective',
+      scanPitchMm: 0.021,
+      fit: { rmsUm: 3 },
+      slotMap: { 'corner-tl': 'F1', 'corner-br': 'F9' },
+      marks: [],
+      focalMm: 150,
+      ppxMm: 0.1,
+      ppyMm: 0.2,
     }
     const r = applyFiducialMarks({ fiducialCalibration: old }, group(false))
     expect(r).toMatchObject({
-      method: 'certificate', transform: 'projective', scanPitchMm: 0.021, fit: null,
-      slotMap: { 'corner-tl': 'F1' }, focalMm: 152.8, ppxMm: 0.1, ppyMm: 0.2,
+      method: 'certificate',
+      transform: 'projective',
+      scanPitchMm: 0.021,
+      fit: null,
+      slotMap: { 'corner-tl': 'F1' },
+      focalMm: 152.8,
+      ppxMm: 0.1,
+      ppyMm: 0.2,
     })
   })
 })
 
 describe('planFiducialMarkTargets', () => {
-  const sensors = [{ id: 'a', label: 'RC10', kind: 'film' }, { id: 'b', label: 'Drone' }]
+  const sensors = [
+    { id: 'a', label: 'RC10', kind: 'film' },
+    { id: 'b', label: 'Drone' },
+  ]
   it('matches by label, else a lone group goes to the only film sensor', () => {
     expect(planFiducialMarkTargets([{ sensor: 'drone' }], sensors)).toEqual(['b'])
     expect(planFiducialMarkTargets([{ sensor: '' }], sensors)).toEqual(['a'])

@@ -24,9 +24,14 @@ export function useHelpHtml(render) {
   const html = computed(() => (renderer.value ? render(renderer.value) : ''))
   function load() {
     if (renderer.value) return
-    loadHelpRenderer().then((module) => { renderer.value = module }, (error) => {
-      console.warn('[help] could not load the help renderer:', error)
-    })
+    loadHelpRenderer().then(
+      (module) => {
+        renderer.value = module
+      },
+      (error) => {
+        console.warn('[help] could not load the help renderer:', error)
+      },
+    )
   }
   return { html, load }
 }

@@ -10,25 +10,42 @@
 // w, h: Int32Array sizes (each ≤ pageSize). → { page, x, y: Int32Array, nPages,
 // pageHeights: number[] } — the last page is cut to its used height (rounded up to 4).
 export function packAtlas(w, h, pageSize) {
-  const n = w.length, P = pageSize
+  const n = w.length,
+    P = pageSize
   const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => h[b] - h[a] || w[b] - w[a])
-  const page = new Int32Array(n), x = new Int32Array(n), y = new Int32Array(n)
+  const page = new Int32Array(n),
+    x = new Int32Array(n),
+    y = new Int32Array(n)
   // Per page: skyline segments as parallel arrays (x, top, width), sorted by x.
   const pages = []
-  const newPage = () => { pages.push({ sx: [0], sy: [0], sw: [P], minTop: 0, used: 0 }); return pages.length - 1 }
+  const newPage = () => {
+    pages.push({ sx: [0], sy: [0], sw: [P], minTop: 0, used: 0 })
+    return pages.length - 1
+  }
   for (const i of order) {
-    const wi = w[i], hi = h[i]
+    const wi = w[i],
+      hi = h[i]
     let placed = false
     for (let p = 0; p < pages.length && !placed; p++) {
       const pg = pages[p]
       if (pg.minTop + hi > P) continue
       const fit = bestFit(pg, wi, hi, P)
-      if (fit) { place(pg, fit, wi, hi); page[i] = p; x[i] = fit.x; y[i] = fit.y; placed = true }
+      if (fit) {
+        place(pg, fit, wi, hi)
+        page[i] = p
+        x[i] = fit.x
+        y[i] = fit.y
+        placed = true
+      }
     }
     if (!placed) {
-      const p = newPage(), pg = pages[p]
+      const p = newPage(),
+        pg = pages[p]
       const fit = bestFit(pg, wi, hi, P)
-      place(pg, fit, wi, hi); page[i] = p; x[i] = fit.x; y[i] = fit.y
+      place(pg, fit, wi, hi)
+      page[i] = p
+      x[i] = fit.x
+      y[i] = fit.y
     }
   }
   const nPages = pages.length
@@ -44,8 +61,14 @@ function bestFit(pg, w, h, P) {
     const x0 = sx[s]
     if (x0 + w > P) break
     // The rectangle rests on the highest segment it spans.
-    let top = 0, reach = 0, k = s
-    while (reach < w) { top = Math.max(top, sy[k]); reach += sw[k]; k++ }
+    let top = 0,
+      reach = 0,
+      k = s
+    while (reach < w) {
+      top = Math.max(top, sy[k])
+      reach += sw[k]
+      k++
+    }
     if (top + h > P) continue
     if (!best || top + h < best.y + h || (top + h === best.y + h && x0 < best.x)) best = { x: x0, y: top, s }
   }
@@ -55,17 +78,31 @@ function bestFit(pg, w, h, P) {
 // Raise the skyline under a placed rectangle and merge equal neighbours.
 function place(pg, { x: x0, y, s }, w, h) {
   const { sx, sy, sw } = pg
-  const top = y + h, x1 = x0 + w
+  const top = y + h,
+    x1 = x0 + w
   // Segments [s, e) are covered; the last one may stick out on the right.
   let e = s
   while (e < sx.length && sx[e] < x1) e++
   const last = e - 1
-  const tailX = x1, tailW = sx[last] + sw[last] - x1, tailY = sy[last]
+  const tailX = x1,
+    tailW = sx[last] + sw[last] - x1,
+    tailY = sy[last]
   const ins = { x: [x0], y: [top], w: [w] }
-  if (tailW > 0) { ins.x.push(tailX); ins.y.push(tailY); ins.w.push(tailW) }
-  sx.splice(s, e - s, ...ins.x); sy.splice(s, e - s, ...ins.y); sw.splice(s, e - s, ...ins.w)
+  if (tailW > 0) {
+    ins.x.push(tailX)
+    ins.y.push(tailY)
+    ins.w.push(tailW)
+  }
+  sx.splice(s, e - s, ...ins.x)
+  sy.splice(s, e - s, ...ins.y)
+  sw.splice(s, e - s, ...ins.w)
   for (let k = Math.max(0, s - 1); k < sx.length - 1 && k <= s + 1;) {
-    if (sy[k] === sy[k + 1]) { sw[k] += sw[k + 1]; sx.splice(k + 1, 1); sy.splice(k + 1, 1); sw.splice(k + 1, 1) } else k++
+    if (sy[k] === sy[k + 1]) {
+      sw[k] += sw[k + 1]
+      sx.splice(k + 1, 1)
+      sy.splice(k + 1, 1)
+      sw.splice(k + 1, 1)
+    } else k++
   }
   let minTop = Infinity
   for (let k = 0; k < sy.length; k++) if (sy[k] < minTop) minTop = sy[k]

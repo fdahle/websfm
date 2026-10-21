@@ -24,9 +24,15 @@ export function useTableSort(rowsGetter, accessor, options = {}) {
 
   function toggleSort(key) {
     if (sortKey.value === key) sortDir.value *= -1
-    else { sortKey.value = key; sortDir.value = firstDir }
+    else {
+      sortKey.value = key
+      sortDir.value = firstDir
+    }
   }
-  function resetSort() { sortKey.value = initialKey; sortDir.value = initialDir }
+  function resetSort() {
+    sortKey.value = initialKey
+    sortDir.value = initialDir
+  }
   // '▲' / '▼' for the active column, '' otherwise (rendered next to the header).
   function sortArrow(key) {
     if (sortKey.value !== key) return ''
@@ -58,9 +64,10 @@ export function compareRaw(a, b) {
 export function sortRows(list, key, dir, accessor, compare = compareValues) {
   if (!key) return list
   return [...list].sort((a, b) => {
-    const va = accessor(a, key), vb = accessor(b, key)
+    const va = accessor(a, key),
+      vb = accessor(b, key)
     if (isEmpty(va) && isEmpty(vb)) return 0
-    if (isEmpty(va)) return 1   // empties last, both directions
+    if (isEmpty(va)) return 1 // empties last, both directions
     if (isEmpty(vb)) return -1
     return compare(va, vb) * dir
   })

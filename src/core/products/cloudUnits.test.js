@@ -9,7 +9,11 @@ describe('cloudUnits', () => {
   })
 
   it('never applies a project scale to an imported cloud', () => {
-    expect(cloudUnits({ imported: true }, { source: 'georef', scale: 2.5 })).toEqual({ scale: 1, unit: 'source', label: 'file units' })
+    expect(cloudUnits({ imported: true }, { source: 'georef', scale: 2.5 })).toEqual({
+      scale: 1,
+      unit: 'source',
+      label: 'file units',
+    })
   })
 
   it('converts lengths both ways and formats with a unit, never bare', () => {

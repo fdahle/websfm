@@ -1,6 +1,15 @@
 <script setup>
 import { shallowRef, computed, watch } from 'vue'
-import { helpStack, RING_MS, openHelp, leaveHelp, helpLinkFrom, linkSpec, followLink, closeHelp } from '../../composables/useHelpStack.js'
+import {
+  helpStack,
+  RING_MS,
+  openHelp,
+  leaveHelp,
+  helpLinkFrom,
+  linkSpec,
+  followLink,
+  closeHelp,
+} from '../../composables/useHelpStack.js'
 import { loadHelpRenderer } from '../../composables/useHelpHtml.js'
 import GlossaryTooltip from './GlossaryTooltip.vue'
 
@@ -10,10 +19,19 @@ import GlossaryTooltip from './GlossaryTooltip.vue'
 // The markdown/KaTeX renderer is a lazy chunk, fetched when the first popup opens
 // (openHelp already reports a failed load).
 const renderer = shallowRef(null)
-watch(() => helpStack.length > 0, (open) => {
-  if (open && !renderer.value) loadHelpRenderer().then((module) => { renderer.value = module }, () => {})
-})
-const htmls = computed(() => helpStack.map(e => (renderer.value ? e.render(renderer.value) : '')))
+watch(
+  () => helpStack.length > 0,
+  (open) => {
+    if (open && !renderer.value)
+      loadHelpRenderer().then(
+        (module) => {
+          renderer.value = module
+        },
+        () => {},
+      )
+  },
+)
+const htmls = computed(() => helpStack.map((e) => (renderer.value ? e.render(renderer.value) : '')))
 
 function onLinkOver(level, event) {
   const link = helpLinkFrom(event.target)

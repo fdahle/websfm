@@ -44,8 +44,9 @@ export function presetOwnedKeys(presets) {
 export function usePresetSettings({ settings, defaults, presets, cards, initialId = 'medium', ownedKeys }) {
   const baseId = ref(initialId)
   const owned = computed(() => read(ownedKeys) ?? presetOwnedKeys(read(presets)))
-  const cardIds = computed(() => (read(cards) ?? Object.keys(read(presets) ?? {}))
-    .map((c) => (typeof c === 'string' ? c : c.id)))
+  const cardIds = computed(() =>
+    (read(cards) ?? Object.keys(read(presets) ?? {})).map((c) => (typeof c === 'string' ? c : c.id)),
+  )
 
   /** The owned-key values preset `id` stands for: defaults patched by the preset. */
   function resolvePreset(id) {

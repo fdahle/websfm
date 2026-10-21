@@ -31,9 +31,9 @@
  * duplicating the numbers.
  */
 export const FIDUCIAL_DETECT_TUNING = {
-  templateHalf: 32,     // template = (2·half+1)² px cut from the reference image
-  coarseScale: 1 / 8,   // coarse-pass downscale of window + template
-  refineHalf: 48,       // full-res refine window half-size around the coarse peak
+  templateHalf: 32, // template = (2·half+1)² px cut from the reference image
+  coarseScale: 1 / 8, // coarse-pass downscale of window + template
+  refineHalf: 48, // full-res refine window half-size around the coarse peak
 }
 
 // ── basic image / patch helpers ────────────────────────────────────────────
@@ -69,7 +69,8 @@ function at(gray, x, y) {
  * @returns {null | { data: Float32Array, size: number }}
  */
 export function extractPatch(gray, cx, cy, half) {
-  const x0 = Math.round(cx), y0 = Math.round(cy)
+  const x0 = Math.round(cx),
+    y0 = Math.round(cy)
   if (x0 < 0 || y0 < 0 || x0 >= gray.width || y0 >= gray.height) return null
   const size = 2 * half + 1
   const data = new Float32Array(size * size)
@@ -100,12 +101,18 @@ export function downscalePatch(patch, scale) {
   const data = new Float32Array(outSize * outSize)
   const step = patch.size / outSize
   for (let r = 0; r < outSize; r++) {
-    const r0 = Math.floor(r * step), r1 = Math.max(r0 + 1, Math.floor((r + 1) * step))
+    const r0 = Math.floor(r * step),
+      r1 = Math.max(r0 + 1, Math.floor((r + 1) * step))
     for (let c = 0; c < outSize; c++) {
-      const c0 = Math.floor(c * step), c1 = Math.max(c0 + 1, Math.floor((c + 1) * step))
-      let sum = 0, n = 0
+      const c0 = Math.floor(c * step),
+        c1 = Math.max(c0 + 1, Math.floor((c + 1) * step))
+      let sum = 0,
+        n = 0
       for (let y = r0; y < r1 && y < patch.size; y++) {
-        for (let x = c0; x < c1 && x < patch.size; x++) { sum += patch.data[y * patch.size + x]; n++ }
+        for (let x = c0; x < c1 && x < patch.size; x++) {
+          sum += patch.data[y * patch.size + x]
+          n++
+        }
       }
       data[r * outSize + c] = n ? sum / n : 0
     }
@@ -149,10 +156,14 @@ export function rotatePatch90(patch, k) {
  */
 export function rotatePoint90(x, y, k, width, height) {
   switch (((k % 4) + 4) % 4) {
-    case 1: return { x: height - 1 - y, y: x }
-    case 2: return { x: width - 1 - x, y: height - 1 - y }
-    case 3: return { x: y, y: width - 1 - x }
-    default: return { x, y }
+    case 1:
+      return { x: height - 1 - y, y: x }
+    case 2:
+      return { x: width - 1 - x, y: height - 1 - y }
+    case 3:
+      return { x: y, y: width - 1 - x }
+    default:
+      return { x, y }
   }
 }
 
@@ -165,7 +176,10 @@ function templateStats(tpl) {
   for (let i = 0; i < n; i++) sum += tpl.data[i]
   const mean = sum / n
   let energy = 0
-  for (let i = 0; i < n; i++) { const d = tpl.data[i] - mean; energy += d * d }
+  for (let i = 0; i < n; i++) {
+    const d = tpl.data[i] - mean
+    energy += d * d
+  }
   return { mean, energy }
 }
 
@@ -180,13 +194,15 @@ function znccAt(gray, tpl, stats, x, y) {
   // below. Degrade, never lie.
   const half = (tpl.size - 1) >> 1
   const S = tpl.size
-  const x0 = Math.round(x) - half, y0 = Math.round(y) - half
+  const x0 = Math.round(x) - half,
+    y0 = Math.round(y) - half
   let sum = 0
   for (let r = 0; r < S; r++) {
     for (let c = 0; c < S; c++) sum += at(gray, x0 + c, y0 + r)
   }
   const mean = sum / (S * S)
-  let num = 0, energy = 0
+  let num = 0,
+    energy = 0
   for (let r = 0; r < S; r++) {
     for (let c = 0; c < S; c++) {
       const d = at(gray, x0 + c, y0 + r) - mean
@@ -278,7 +294,8 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
   const tryRotations = cfg.tryRotations !== false
   const byId = new Map(templates.map((t) => [t.fidId, t.patch]))
   const scale = coarse.scale
-  const natW = coarse.natW, natH = coarse.natH
+  const natW = coarse.natW,
+    natH = coarse.natH
 
   // ── rotation pass ────────────────────────────────────────────────────────
   // A scan fed through the scanner the other way round moves every mark, so the
@@ -318,7 +335,8 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
         const tpl = downscalePatch(rotatePatch90(byId.get(pred.fidId), k), coarseScale)
         const [sw, sh] = k % 2 ? [natH, natW] : [natW, natH]
         const p = rotatePoint90(pred.px, pred.py, k, sw, sh)
-        const cx = p.x * scale, cy = p.y * scale
+        const cx = p.x * scale,
+          cy = p.y * scale
         const r = Math.max(1, pred.radius * scale)
         sum += matchZNCC(coarse, tpl, cx - r, cy - r, cx + r, cy + r).score
       }
@@ -335,8 +353,10 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
     const ROTATION_MARGIN = 0.1
     const decisive = scores.every((s, k) => k === bestK || scores[bestK] > s + ROTATION_MARGIN)
     rotationK = decisive ? bestK : 0
-    onLog?.(`rotation probe: k=${rotationK}${decisive ? '' : ' (undecided → assuming unrotated)'}`
-      + ` (mean zncc ${scores.map((s) => s.toFixed(3)).join(' / ')} for k=0..3)`)
+    onLog?.(
+      `rotation probe: k=${rotationK}${decisive ? '' : ' (undecided → assuming unrotated)'}` +
+        ` (mean zncc ${scores.map((s) => s.toFixed(3)).join(' / ')} for k=0..3)`,
+    )
   }
 
   const results = []
@@ -354,7 +374,8 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
     // every prediction on non-square scans.
     const [srcW, srcH] = rotationK % 2 ? [natH, natW] : [natW, natH]
     const p = rotatePoint90(pred.px, pred.py, rotationK, srcW, srcH)
-    const cx = p.x * scale, cy = p.y * scale
+    const cx = p.x * scale,
+      cy = p.y * scale
     const r = Math.max(1, pred.radius * scale)
     const hit = matchZNCC(coarse, tplCoarse, cx - r, cy - r, cx + r, cy + r)
     const coarseScore = hit.score
@@ -376,7 +397,9 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
       score = best.score
     }
 
-    onLog?.(`${pred.fidId}: predicted (${pred.px.toFixed(1)}, ${pred.py.toFixed(1)}) → matched (${px.toFixed(1)}, ${py.toFixed(1)}), zncc ${score.toFixed(3)} (coarse ${coarseScore.toFixed(3)})`)
+    onLog?.(
+      `${pred.fidId}: predicted (${pred.px.toFixed(1)}, ${pred.py.toFixed(1)}) → matched (${px.toFixed(1)}, ${py.toFixed(1)}), zncc ${score.toFixed(3)} (coarse ${coarseScore.toFixed(3)})`,
+    )
     results.push({ fidId: pred.fidId, px, py, score, coarseScore, rotationK })
   }
   return results

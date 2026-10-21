@@ -68,20 +68,20 @@ describe('projectHealth', () => {
   })
 
   it('treats sub-quarter-pixel composed warp error as healthy', () => {
-    const row = projectHealth({ selfCal: [{ sensorId: 's1', fitRmsPx: 0.2 }] })
-      .find((r) => r.id === 'selfcal')
+    const row = projectHealth({ selfCal: [{ sensorId: 's1', fitRmsPx: 0.2 }] }).find((r) => r.id === 'selfcal')
     expect(row.label).toBe('Self-cal warp fit RMS')
     expect(row.status).toBe('ok')
   })
 
   it('flags a split graph and a low registration rate', () => {
     const rows = projectHealth({
-      imageCount: 10, registeredCount: 6,
+      imageCount: 10,
+      registeredCount: 6,
       graph: { components: [['a', 'b'], ['c']], isolated: ['d'] },
     })
     const byId = Object.fromEntries(rows.map((r) => [r.id, r]))
-    expect(byId.registered.status).toBe('bad')   // 60% < 70
-    expect(byId.graph.status).toBe('warn')       // 2 components
+    expect(byId.registered.status).toBe('bad') // 60% < 70
+    expect(byId.graph.status).toBe('warn') // 2 components
     expect(byId.graph.hint).toMatch(/isolated/)
   })
 
@@ -101,11 +101,13 @@ describe('projectHealth', () => {
   })
 
   it('uses checkpoint RMSE instead of blending control fit residuals', () => {
-    const row = projectHealth({ gcpReport: [
-      { role: 'control', dTotal: 0.01 },
-      { role: 'check', dTotal: 2 },
-      { role: 'check', dTotal: 4 },
-    ] }).find((r) => r.id === 'gcp')
+    const row = projectHealth({
+      gcpReport: [
+        { role: 'control', dTotal: 0.01 },
+        { role: 'check', dTotal: 2 },
+        { role: 'check', dTotal: 4 },
+      ],
+    }).find((r) => r.id === 'gcp')
     expect(row.label).toBe('Checkpoint RMSE')
     expect(row.value).toBeCloseTo(Math.sqrt(10), 6)
     expect(row.hint).toBe('independent accuracy')

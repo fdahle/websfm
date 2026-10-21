@@ -8,9 +8,7 @@ describe('completedMatchGraphHealth', () => {
   })
 
   it('reports a genuinely empty accepted graph after matching completes', () => {
-    const h = completedMatchGraphHealth([
-      { idA: 'a', idB: 'b', status: 'done', inlierCount: 0 },
-    ], ['a', 'b'])
+    const h = completedMatchGraphHealth([{ idA: 'a', idB: 'b', status: 'done', inlierCount: 0 }], ['a', 'b'])
     expect(h.components).toHaveLength(2)
     expect(h.isolated).toEqual(['a', 'b'])
   })
@@ -23,7 +21,7 @@ describe('graphHealth', () => {
       { idA: 'a', idB: 'b', inlierCount: 100 },
       { idA: 'b', idB: 'c', inlierCount: 80 },
       { idA: 'd', idB: 'e', inlierCount: 50 },
-      { idA: 'a', idB: 'e', inlierCount: 5, weak: true },      // weak — must NOT join
+      { idA: 'a', idB: 'e', inlierCount: 5, weak: true }, // weak — must NOT join
       { idA: 'c', idB: 'd', inlierCount: 40, enabled: false }, // excluded — must NOT join
     ]
     const h = graphHealth(pairs, ids)
@@ -70,7 +68,7 @@ describe('bridgeEdges', () => {
       { idA: 'a', idB: 'b', inlierCount: 100 },
       { idA: 'b', idB: 'c', inlierCount: 90 },
       { idA: 'a', idB: 'c', inlierCount: 80 },
-      { idA: 'c', idB: 'd', inlierCount: 12 },  // the only link between clusters
+      { idA: 'c', idB: 'd', inlierCount: 12 }, // the only link between clusters
       { idA: 'd', idB: 'e', inlierCount: 70 },
       { idA: 'e', idB: 'f', inlierCount: 60 },
       { idA: 'd', idB: 'f', inlierCount: 50 },

@@ -48,12 +48,23 @@ function doubleArrayBytes(vals) {
 }
 
 export function writeGeoTiff(spec) {
-  const { width, height, samples, photometric, extraSamples, data,
-          pixelScale, tiepoint, geoKeys, gdalNoData, compression = 1 } = spec
+  const {
+    width,
+    height,
+    samples,
+    photometric,
+    extraSamples,
+    data,
+    pixelScale,
+    tiepoint,
+    geoKeys,
+    gdalNoData,
+    compression = 1,
+  } = spec
   const spp = samples.length
 
   // Entries are appended in ascending tag order (TIFF requires sorted IFD).
-  const entries = []   // { tag, type, count, inline? , externIndex? }
+  const entries = [] // { tag, type, count, inline? , externIndex? }
   const externals = [] // Uint8Array[]
   const inline = (tag, type, value, count = 1) => entries.push({ tag, type, count, inline: value })
   const extern = (tag, type, count, bytes) => {
@@ -64,22 +75,28 @@ export function writeGeoTiff(spec) {
   const shortField = (tag, vals) =>
     vals.length === 1 ? inline(tag, TYPE.SHORT, vals[0]) : extern(tag, TYPE.SHORT, vals.length, shortArrayBytes(vals))
 
-  inline(256, TYPE.LONG, width)                     // ImageWidth
-  inline(257, TYPE.LONG, height)                    // ImageLength
-  shortField(258, samples.map((s) => s.bits))       // BitsPerSample
-  inline(259, TYPE.SHORT, compression)             // Compression (1=none, 8=Adobe DEFLATE)
-  inline(262, TYPE.SHORT, photometric)              // PhotometricInterpretation
-  inline(273, TYPE.LONG, 8)                         // StripOffsets = right after header
-  inline(277, TYPE.SHORT, spp)                      // SamplesPerPixel
-  inline(278, TYPE.LONG, height)                    // RowsPerStrip (single strip)
-  inline(279, TYPE.LONG, data.length)               // StripByteCounts
+  inline(256, TYPE.LONG, width) // ImageWidth
+  inline(257, TYPE.LONG, height) // ImageLength
+  shortField(
+    258,
+    samples.map((s) => s.bits),
+  ) // BitsPerSample
+  inline(259, TYPE.SHORT, compression) // Compression (1=none, 8=Adobe DEFLATE)
+  inline(262, TYPE.SHORT, photometric) // PhotometricInterpretation
+  inline(273, TYPE.LONG, 8) // StripOffsets = right after header
+  inline(277, TYPE.SHORT, spp) // SamplesPerPixel
+  inline(278, TYPE.LONG, height) // RowsPerStrip (single strip)
+  inline(279, TYPE.LONG, data.length) // StripByteCounts
   if (extraSamples && extraSamples.length) shortField(338, extraSamples) // ExtraSamples
-  shortField(339, samples.map((s) => s.format))     // SampleFormat
-  extern(33550, TYPE.DOUBLE, 3, doubleArrayBytes(pixelScale))  // ModelPixelScale
-  extern(33922, TYPE.DOUBLE, 6, doubleArrayBytes(tiepoint))    // ModelTiepoint
+  shortField(
+    339,
+    samples.map((s) => s.format),
+  ) // SampleFormat
+  extern(33550, TYPE.DOUBLE, 3, doubleArrayBytes(pixelScale)) // ModelPixelScale
+  extern(33922, TYPE.DOUBLE, 6, doubleArrayBytes(tiepoint)) // ModelTiepoint
   const dir = [1, 1, 0, geoKeys.length]
   for (const k of geoKeys) dir.push(k[0], k[1], k[2], k[3])
-  extern(34735, TYPE.SHORT, dir.length, shortArrayBytes(dir))  // GeoKeyDirectory
+  extern(34735, TYPE.SHORT, dir.length, shortArrayBytes(dir)) // GeoKeyDirectory
   if (gdalNoData != null) asciiTag(entries, extern, 42113, String(gdalNoData))
 
   const nEntries = entries.length
@@ -91,21 +108,27 @@ export function writeGeoTiff(spec) {
   // Assign external block offsets (each even-aligned).
   const externOffsets = []
   let cur = ifdOffset + ifdSize
-  for (const b of externals) { cur = even(cur); externOffsets.push(cur); cur += b.length }
+  for (const b of externals) {
+    cur = even(cur)
+    externOffsets.push(cur)
+    cur += b.length
+  }
   const total = cur
 
   const out = new Uint8Array(total)
   const dv = new DataView(out.buffer)
 
   // Header.
-  out[0] = 0x49; out[1] = 0x49            // 'II' little-endian
+  out[0] = 0x49
+  out[1] = 0x49 // 'II' little-endian
   dv.setUint16(2, 42, true)
   dv.setUint32(4, ifdOffset, true)
   // Image strip.
   out.set(data, dataOffset)
   // IFD.
   let p = ifdOffset
-  dv.setUint16(p, nEntries, true); p += 2
+  dv.setUint16(p, nEntries, true)
+  p += 2
   for (const e of entries) {
     dv.setUint16(p, e.tag, true)
     dv.setUint16(p + 2, e.type, true)
@@ -116,7 +139,7 @@ export function writeGeoTiff(spec) {
     else dv.setUint32(p + 8, e.inline, true)
     p += 12
   }
-  dv.setUint32(p, 0, true)                // next IFD offset = 0 (last)
+  dv.setUint32(p, 0, true) // next IFD offset = 0 (last)
   // External blocks.
   externals.forEach((b, i) => out.set(b, externOffsets[i]))
   return out
@@ -130,33 +153,62 @@ export function writeGeoTiff(spec) {
 // takes), ceil(height / rowsPerStrip) of them, each the rows' interleaved samples —
 // raw, or deflated when `compression` is 8. → Uint8Array, or the parts for a Blob.
 export function assembleStripTiff(spec, strips, { parts = false } = {}) {
-  const { width, height, samples, photometric, extraSamples, pixelScale, tiepoint, geoKeys, gdalNoData,
-    compression = 1, rowsPerStrip } = spec
+  const {
+    width,
+    height,
+    samples,
+    photometric,
+    extraSamples,
+    pixelScale,
+    tiepoint,
+    geoKeys,
+    gdalNoData,
+    compression = 1,
+    rowsPerStrip,
+  } = spec
   const n = strips.length
   if (!(rowsPerStrip > 0) || n !== Math.ceil(height / rowsPerStrip))
     throw new Error(`assembleStripTiff: ${n} strips for ${height} rows of ${rowsPerStrip}`)
-  const entries = [], externals = []
-  const inline = (tag, type, value, count = 1) => { const e = { tag, type, count, inline: value }; entries.push(e); return e }
+  const entries = [],
+    externals = []
+  const inline = (tag, type, value, count = 1) => {
+    const e = { tag, type, count, inline: value }
+    entries.push(e)
+    return e
+  }
   const extern = (tag, type, count, bytes) => {
     const e = { tag, type, count, externIndex: externals.length }
-    entries.push(e); externals.push(bytes); return e
+    entries.push(e)
+    externals.push(bytes)
+    return e
   }
   const shortField = (tag, vals) =>
     vals.length === 1 ? inline(tag, TYPE.SHORT, vals[0]) : extern(tag, TYPE.SHORT, vals.length, shortArrayBytes(vals))
-  const longField = (tag, vals) => (vals.length === 1 ? inline(tag, TYPE.LONG, vals[0])
-    : extern(tag, TYPE.LONG, vals.length, new Uint8Array(vals.length * 4)))
+  const longField = (tag, vals) =>
+    vals.length === 1
+      ? inline(tag, TYPE.LONG, vals[0])
+      : extern(tag, TYPE.LONG, vals.length, new Uint8Array(vals.length * 4))
 
   inline(256, TYPE.LONG, width)
   inline(257, TYPE.LONG, height)
-  shortField(258, samples.map((s) => s.bits))
+  shortField(
+    258,
+    samples.map((s) => s.bits),
+  )
   inline(259, TYPE.SHORT, compression)
   inline(262, TYPE.SHORT, photometric)
   const offsetsEntry = longField(273, new Array(n).fill(0)) // filled once laid out
   inline(277, TYPE.SHORT, samples.length)
   inline(278, TYPE.LONG, rowsPerStrip)
-  const countsEntry = longField(279, strips.map((s) => s.length))
+  const countsEntry = longField(
+    279,
+    strips.map((s) => s.length),
+  )
   if (extraSamples && extraSamples.length) shortField(338, extraSamples)
-  shortField(339, samples.map((s) => s.format))
+  shortField(
+    339,
+    samples.map((s) => s.format),
+  )
   extern(33550, TYPE.DOUBLE, 3, doubleArrayBytes(pixelScale))
   extern(33922, TYPE.DOUBLE, 6, doubleArrayBytes(tiepoint))
   const dir = [1, 1, 0, geoKeys.length]
@@ -167,26 +219,45 @@ export function assembleStripTiff(spec, strips, { parts = false } = {}) {
   const even = (v) => (v % 2 ? v + 1 : v)
   const ifdOffset = 8
   let cur = ifdOffset + 2 + 12 * entries.length + 4
-  const externOffsets = externals.map((b) => { cur = even(cur); const o = cur; cur += b.length; return o })
+  const externOffsets = externals.map((b) => {
+    cur = even(cur)
+    const o = cur
+    cur += b.length
+    return o
+  })
   const headerLength = cur
-  const stripOffsets = strips.map((s) => { cur = even(cur); const o = cur; cur += s.length; return o })
+  const stripOffsets = strips.map((s) => {
+    cur = even(cur)
+    const o = cur
+    cur += s.length
+    return o
+  })
   if (cur > 0xffffffff) throw new Error('GeoTIFF exceeds the classic TIFF 4 GiB limit')
 
   const fillLongs = (entry, vals) => {
-    if (entry.externIndex == null) { entry.inline = vals[0]; return }
-    const block = externals[entry.externIndex], bdv = new DataView(block.buffer, block.byteOffset, block.byteLength)
+    if (entry.externIndex == null) {
+      entry.inline = vals[0]
+      return
+    }
+    const block = externals[entry.externIndex],
+      bdv = new DataView(block.buffer, block.byteOffset, block.byteLength)
     vals.forEach((v, i) => bdv.setUint32(i * 4, v, true))
   }
   fillLongs(offsetsEntry, stripOffsets)
-  fillLongs(countsEntry, strips.map((s) => s.length))
+  fillLongs(
+    countsEntry,
+    strips.map((s) => s.length),
+  )
 
   const out = new Uint8Array(parts ? headerLength : cur)
   const dv = new DataView(out.buffer)
-  out[0] = 0x49; out[1] = 0x49
+  out[0] = 0x49
+  out[1] = 0x49
   dv.setUint16(2, 42, true)
   dv.setUint32(4, ifdOffset, true)
   let p = ifdOffset
-  dv.setUint16(p, entries.length, true); p += 2
+  dv.setUint16(p, entries.length, true)
+  p += 2
   for (const e of entries) {
     dv.setUint16(p, e.tag, true)
     dv.setUint16(p + 2, e.type, true)
@@ -340,9 +411,7 @@ function cutTiles(level, spp, tileSize, nodata) {
 // no BLOCK_LEADER/BLOCK_TRAILER, since we write bare tile data with no per-block
 // size prefix. The declared size counts the bytes after the first line.
 function ghostArea() {
-  const body = 'LAYOUT=IFDS_BEFORE_DATA\n'
-    + 'BLOCK_ORDER=ROW_MAJOR\n'
-    + 'KNOWN_INCOMPATIBLE_EDITION=NO\n'
+  const body = 'LAYOUT=IFDS_BEFORE_DATA\n' + 'BLOCK_ORDER=ROW_MAJOR\n' + 'KNOWN_INCOMPATIBLE_EDITION=NO\n'
   const head = `GDAL_STRUCTURAL_METADATA_SIZE=${String(body.length).padStart(6, '0')} bytes\n`
   return new TextEncoder().encode(head + body)
 }
@@ -352,15 +421,25 @@ function ghostArea() {
 // is what puts the overviews in the first bytes of the file — plus the plan
 // assembleCog needs.
 export function planCog(spec) {
-  const { width, height, samples, photometric, extraSamples, data,
-          pixelScale, tiepoint, geoKeys, gdalNoData,
-          tileSize = 256, maxOverviews = Infinity } = spec
+  const {
+    width,
+    height,
+    samples,
+    photometric,
+    extraSamples,
+    data,
+    pixelScale,
+    tiepoint,
+    geoKeys,
+    gdalNoData,
+    tileSize = 256,
+    maxOverviews = Infinity,
+  } = spec
   const spp = samples.length
   const { bits, format } = samples[0]
   if (!samples.every((s) => s.bits === bits && s.format === format))
     throw new Error('planCog: every sample must share bits and format')
-  if (tileSize % 16 || tileSize <= 0)
-    throw new Error('planCog: tileSize must be a positive multiple of 16')
+  if (tileSize % 16 || tileSize <= 0) throw new Error('planCog: tileSize must be a positive multiple of 16')
   if (!ArrayBuffer.isView(data) || data instanceof DataView)
     throw new Error('planCog: data must be a TypedArray of the sample type')
   if (data.length !== width * height * spp)
@@ -384,13 +463,24 @@ export function planCog(spec) {
   const order = []
   const tiles = []
   for (let li = levels.length - 1; li >= 0; li--) {
-    cut[li].tiles.forEach((t, ti) => { order.push({ li, ti }); tiles.push(t) })
+    cut[li].tiles.forEach((t, ti) => {
+      order.push({ li, ti })
+      tiles.push(t)
+    })
   }
   const plan = {
     levels: levels.map((l) => ({ width: l.width, height: l.height })),
     tileCounts: cut.map((c) => c.tiles.length),
-    order, spp, samples, photometric, extraSamples,
-    pixelScale, tiepoint, geoKeys, gdalNoData, tileSize,
+    order,
+    spp,
+    samples,
+    photometric,
+    extraSamples,
+    pixelScale,
+    tiepoint,
+    geoKeys,
+    gdalNoData,
+    tileSize,
   }
   return { plan, tiles }
 }
@@ -409,19 +499,25 @@ export function assembleCog(plan, tileBuffers, { compression = 1, parts = false,
     throw new Error(`assembleCog: expected ${order.length} tiles, got ${tileBuffers.length}`)
   // Per-level tile byte counts, from what the caller actually produced.
   const byteCounts = levels.map((_, li) => new Array(tileCounts[li]).fill(0))
-  order.forEach(({ li, ti }, i) => { byteCounts[li][ti] = tileBuffers[i].length })
+  order.forEach(({ li, ti }, i) => {
+    byteCounts[li][ti] = tileBuffers[i].length
+  })
 
   let layout = layoutCog(plan, byteCounts, tileBuffers, compression, bigTiff === true)
-  if (bigTiff === 'auto' && layout.total > 0xffffffff) layout = layoutCog(plan, byteCounts, tileBuffers, compression, true)
+  if (bigTiff === 'auto' && layout.total > 0xffffffff)
+    layout = layoutCog(plan, byteCounts, tileBuffers, compression, true)
   if (!layout.big && layout.total > 0xffffffff) throw new Error('COG exceeds the classic TIFF 4 GiB limit')
   const { big, ifds, headerLength, tileOffsets, total } = layout
 
   const out = new Uint8Array(parts ? headerLength : total)
   const dv = new DataView(out.buffer)
   const word = (p, v) => (big ? dv.setBigUint64(p, BigInt(v), true) : dv.setUint32(p, v, true))
-  out[0] = 0x49; out[1] = 0x49
+  out[0] = 0x49
+  out[1] = 0x49
   if (big) {
-    dv.setUint16(2, 43, true); dv.setUint16(4, 8, true); dv.setUint16(6, 0, true)
+    dv.setUint16(2, 43, true)
+    dv.setUint16(4, 8, true)
+    dv.setUint16(6, 0, true)
     dv.setBigUint64(8, BigInt(ifds[0].offset), true)
   } else {
     dv.setUint16(2, 42, true)
@@ -431,10 +527,17 @@ export function assembleCog(plan, tileBuffers, { compression = 1, parts = false,
 
   ifds.forEach((ifd, li) => {
     // Backfill the tile offsets now that they are known.
-    const off = ifd.offsetsEntry.bytes, odv = new DataView(off.buffer, off.byteOffset, off.byteLength)
+    const off = ifd.offsetsEntry.bytes,
+      odv = new DataView(off.buffer, off.byteOffset, off.byteLength)
     tileOffsets[li].forEach((o, i) => (big ? odv.setBigUint64(i * 8, BigInt(o), true) : odv.setUint32(i * 4, o, true)))
     let p = ifd.offset
-    if (big) { dv.setBigUint64(p, BigInt(ifd.entries.length), true); p += 8 } else { dv.setUint16(p, ifd.entries.length, true); p += 2 }
+    if (big) {
+      dv.setBigUint64(p, BigInt(ifd.entries.length), true)
+      p += 8
+    } else {
+      dv.setUint16(p, ifd.entries.length, true)
+      p += 2
+    }
     for (const e of ifd.entries) {
       dv.setUint16(p, e.tag, true)
       dv.setUint16(p + 2, e.type, true)
@@ -472,12 +575,25 @@ const LONG8 = 16
 // an external block at `offset` — then the tile data in write order (overviews first),
 // each 2-byte aligned. The tile offsets are filled in by the caller.
 function layoutCog(plan, byteCounts, tileBuffers, compression, big) {
-  const { levels, tileCounts, order, spp, samples, photometric, extraSamples,
-          pixelScale, tiepoint, geoKeys, gdalNoData, tileSize } = plan
+  const {
+    levels,
+    tileCounts,
+    order,
+    spp,
+    samples,
+    photometric,
+    extraSamples,
+    pixelScale,
+    tiepoint,
+    geoKeys,
+    gdalNoData,
+    tileSize,
+  } = plan
   const even = (n) => (n % 2 ? n + 1 : n)
   const cap = big ? 8 : 4
   const ints = (vals, size) => {
-    const b = new Uint8Array(vals.length * size), d = new DataView(b.buffer)
+    const b = new Uint8Array(vals.length * size),
+      d = new DataView(b.buffer)
     vals.forEach((v, i) => (size === 2 ? d.setUint16(i * 2, v, true) : d.setUint32(i * 4, v, true)))
     return b
   }
@@ -492,22 +608,28 @@ function layoutCog(plan, byteCounts, tileBuffers, compression, big) {
     const shorts = (tag, vals) => field(tag, TYPE.SHORT, ints(vals, 2))
     const long = (tag, v) => field(tag, TYPE.LONG, ints([v], 4))
     const nTiles = tileCounts[li]
-    long(254, li === 0 ? 0 : 1)                     // NewSubfileType (1 = reduced resolution)
+    long(254, li === 0 ? 0 : 1) // NewSubfileType (1 = reduced resolution)
     long(256, level.width)
     long(257, level.height)
-    shorts(258, samples.map((s) => s.bits))
+    shorts(
+      258,
+      samples.map((s) => s.bits),
+    )
     shorts(259, [compression])
     shorts(262, [photometric])
     shorts(277, [spp])
-    shorts(284, [1])                                // PlanarConfiguration: chunky
-    long(322, tileSize)                             // TileWidth
-    long(323, tileSize)                             // TileLength
+    shorts(284, [1]) // PlanarConfiguration: chunky
+    long(322, tileSize) // TileWidth
+    long(323, tileSize) // TileLength
     // TileOffsets: known only after layout, so only their size here. A single-tile
     // level's offset fits the value field, where a reader looks for it.
     const offsetsEntry = field(324, big ? LONG8 : TYPE.LONG, new Uint8Array(nTiles * (big ? 8 : 4)))
     field(325, TYPE.LONG, ints(byteCounts[li], 4))
     if (extraSamples && extraSamples.length) shorts(338, extraSamples)
-    shorts(339, samples.map((s) => s.format))
+    shorts(
+      339,
+      samples.map((s) => s.format),
+    )
     if (li === 0) {
       // Georeferencing lives on the full-resolution IFD; an overview inherits it
       // (its geotransform is implied by its own dimensions).
@@ -529,7 +651,11 @@ function layoutCog(plan, byteCounts, tileBuffers, compression, big) {
     cur += (big ? 8 : 2) + (big ? 20 : 12) * ifd.entries.length + (big ? 8 : 4)
     for (const e of ifd.entries) {
       e.offset = null
-      if (e.bytes.length > cap) { cur = even(cur); e.offset = cur; cur += e.bytes.length }
+      if (e.bytes.length > cap) {
+        cur = even(cur)
+        e.offset = cur
+        cur += e.bytes.length
+      }
     }
   }
   const headerLength = cur
@@ -597,13 +723,26 @@ export function planCogFromTiles({ width, height, tileSize = 256, maxOverviews =
 //     levels } } — `parts` for a Blob (assembleCog parts), `preview` = { data, width,
 //     height } or null. Blocks may arrive in any order; every block must arrive once.
 export function createCogBuilder(spec, { blockSize = 2048, compress = null, previewMaxDim = 0 } = {}) {
-  const { width, height, samples, photometric, extraSamples, pixelScale, tiepoint, geoKeys, gdalNoData,
-    tileSize = 256, maxOverviews = Infinity, ArrayType = Uint8Array } = spec
+  const {
+    width,
+    height,
+    samples,
+    photometric,
+    extraSamples,
+    pixelScale,
+    tiepoint,
+    geoKeys,
+    gdalNoData,
+    tileSize = 256,
+    maxOverviews = Infinity,
+    ArrayType = Uint8Array,
+  } = spec
   const spp = samples.length
   const { bits, format } = samples[0]
   if (!samples.every((s) => s.bits === bits && s.format === format))
     throw new Error('createCogBuilder: every sample must share bits and format')
-  if (!(blockSize > 0) || blockSize % tileSize) throw new Error('createCogBuilder: blockSize must be a multiple of tileSize')
+  if (!(blockSize > 0) || blockSize % tileSize)
+    throw new Error('createCogBuilder: blockSize must be a multiple of tileSize')
   const layout = planCogFromTiles({ width, height, tileSize, maxOverviews })
   const { levels, across, tileCounts } = layout
   const float = isFloatFormat(format)
@@ -616,13 +755,17 @@ export function createCogBuilder(spec, { blockSize = 2048, compress = null, prev
   const acc = accLevel >= 0 ? new ArrayType(levels[accLevel].width * levels[accLevel].height * spp) : null
   let previewLevel = -1
   if (previewMaxDim > 0) previewLevel = levels.findIndex((l) => Math.max(l.width, l.height) <= previewMaxDim)
-  const preview = previewLevel >= 0 && previewLevel < blockLevels
-    ? new ArrayType(levels[previewLevel].width * levels[previewLevel].height * spp) : null
+  const preview =
+    previewLevel >= 0 && previewLevel < blockLevels
+      ? new ArrayType(levels[previewLevel].width * levels[previewLevel].height * spp)
+      : null
 
   const packed = levels.map((_, li) => new Array(tileCounts[li]).fill(null))
   const pack = async (li, tiles, tx0, ty0, nAcross) => {
     const out = compress ? await Promise.all(tiles.map((t) => compress(t))) : tiles
-    out.forEach((t, i) => { packed[li][(ty0 + Math.floor(i / nAcross)) * across[li] + tx0 + (i % nAcross)] = t })
+    out.forEach((t, i) => {
+      packed[li][(ty0 + Math.floor(i / nAcross)) * across[li] + tx0 + (i % nAcross)] = t
+    })
   }
   // Copy a window into a whole-level plane.
   const place = (dst, lw, win, x0, y0) => {
@@ -632,19 +775,30 @@ export function createCogBuilder(spec, { blockSize = 2048, compress = null, prev
   }
 
   async function addBlock({ col0, row0, width: bw, height: bh, data }) {
-    if (col0 % blockSize || row0 % blockSize || bw !== Math.min(blockSize, width - col0) || bh !== Math.min(blockSize, height - row0))
+    if (
+      col0 % blockSize ||
+      row0 % blockSize ||
+      bw !== Math.min(blockSize, width - col0) ||
+      bh !== Math.min(blockSize, height - row0)
+    )
       throw new Error(`createCogBuilder: block at ${col0},${row0} (${bw}×${bh}) is not on the ${blockSize} grid`)
     if (data.length !== bw * bh * spp) throw new Error('createCogBuilder: block data length mismatch')
     let cur = { data, width: bw, height: bh }
     const last = accLevel >= 0 ? accLevel : levels.length - 1
     for (let k = 0; k <= last; k++) {
-      const f = 2 ** k, x0 = col0 / f, y0 = row0 / f
+      const f = 2 ** k,
+        x0 = col0 / f,
+        y0 = row0 / f
       if (k > 0) {
-        const lw = Math.min(levels[k].width - x0, blockSize / f), lh = Math.min(levels[k].height - y0, blockSize / f)
+        const lw = Math.min(levels[k].width - x0, blockSize / f),
+          lh = Math.min(levels[k].height - y0, blockSize / f)
         cur = downsampleTo(cur.data, cur.width, cur.height, lw, lh, spp, nodata, float)
       }
       if (k === previewLevel && preview) place(preview, levels[k].width, cur, x0, y0)
-      if (k === accLevel) { place(acc, levels[k].width, cur, x0, y0); break }
+      if (k === accLevel) {
+        place(acc, levels[k].width, cur, x0, y0)
+        break
+      }
       const { tiles, across: nAcross } = cutTiles(cur, spp, tileSize, nodata)
       await pack(k, tiles, x0 / tileSize, y0 / tileSize, nAcross)
     }
@@ -660,15 +814,29 @@ export function createCogBuilder(spec, { blockSize = 2048, compress = null, prev
         await pack(li, cutTiles(cur, spp, tileSize, nodata).tiles, 0, 0, across[li])
       }
     }
-    const order = [], buffers = []
+    const order = [],
+      buffers = []
     for (let li = levels.length - 1; li >= 0; li--) {
       packed[li].forEach((t, ti) => {
         if (t == null) throw new Error(`createCogBuilder: level ${li} tile ${ti} never arrived`)
-        order.push({ li, ti }); buffers.push(t)
+        order.push({ li, ti })
+        buffers.push(t)
       })
     }
-    const plan = { levels, tileCounts, order, spp, samples, photometric, extraSamples,
-      pixelScale, tiepoint, geoKeys, gdalNoData, tileSize }
+    const plan = {
+      levels,
+      tileCounts,
+      order,
+      spp,
+      samples,
+      photometric,
+      extraSamples,
+      pixelScale,
+      tiepoint,
+      geoKeys,
+      gdalNoData,
+      tileSize,
+    }
     const parts = assembleCog(plan, buffers, { compression: compress ? 8 : 1, parts: true })
     return { parts, preview: previewOut, levels }
   }
@@ -701,8 +869,20 @@ export function crsTagInfo(source) {
 // 2=geographic, 32767=user-defined), 1025 GTRasterType (1=PixelIsArea), 3072
 // ProjectedCSType, 2048 GeographicType.
 export function geoKeysForEpsg(code, geographic) {
-  if (!code) return [[1024, 0, 1, 32767], [1025, 0, 1, 1]]
+  if (!code)
+    return [
+      [1024, 0, 1, 32767],
+      [1025, 0, 1, 1],
+    ]
   return geographic
-    ? [[1024, 0, 1, 2], [1025, 0, 1, 1], [2048, 0, 1, code]]
-    : [[1024, 0, 1, 1], [1025, 0, 1, 1], [3072, 0, 1, code]]
+    ? [
+        [1024, 0, 1, 2],
+        [1025, 0, 1, 1],
+        [2048, 0, 1, code],
+      ]
+    : [
+        [1024, 0, 1, 1],
+        [1025, 0, 1, 1],
+        [3072, 0, 1, code],
+      ]
 }

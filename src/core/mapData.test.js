@@ -1,12 +1,25 @@
 import { describe, it, expect } from 'vitest'
 import {
-  gpsImagesOf, plottedGcps, modelMarkerGcps, gcpPlacement, plottedFootprints, plottedPoses, modelCameraPoses,
-  isUnaligned, hoverText, linkedImageOf,
+  gpsImagesOf,
+  plottedGcps,
+  modelMarkerGcps,
+  gcpPlacement,
+  plottedFootprints,
+  plottedPoses,
+  modelCameraPoses,
+  isUnaligned,
+  hoverText,
+  linkedImageOf,
 } from './mapData.js'
 // The map's OL feature factories and style functions: what they set is what
 // hoverText / linkedImageOf / the click handler read back, so the property names
 // are a contract between the two halves. Both are DOM-free and load in node.
-import { makeImageFeature, makeGcpFeature, makeFootprintFeature, makePoseFeature } from '../components/viewers/map/mapFeatures.js'
+import {
+  makeImageFeature,
+  makeGcpFeature,
+  makeFootprintFeature,
+  makePoseFeature,
+} from '../components/viewers/map/mapFeatures.js'
 import { imageStyle, gcpStyle, poseStyle, footprintStyle } from '../components/viewers/map/mapStyles.js'
 
 const feature = (props) => ({ get: (k) => props[k] })
@@ -53,12 +66,16 @@ describe('GCP markers', () => {
   })
 
   it('turns model-frame markers into marker-role records', () => {
-    expect(modelMarkerGcps([{ id: 'm', name: 'M', x: 3, y: 4, extra: 1 }]))
-      .toEqual([{ id: 'm', name: 'M', x: 3, y: 4, role: 'marker' }])
+    expect(modelMarkerGcps([{ id: 'm', name: 'M', x: 3, y: 4, extra: 1 }])).toEqual([
+      { id: 'm', name: 'M', x: 3, y: 4, role: 'marker' },
+    ])
   })
 
   it('placement changes on a move / add / remove, not on a rename or role change', () => {
-    const base = [{ id: '1', name: 'A', x: 1, y: 2, role: 'control' }, { id: '2', name: 'B', x: 3, y: 4 }]
+    const base = [
+      { id: '1', name: 'A', x: 1, y: 2, role: 'control' },
+      { id: '2', name: 'B', x: 3, y: 4 },
+    ]
     const key = gcpPlacement(base)
     expect(gcpPlacement([{ ...base[0], name: 'Z', role: 'check' }, base[1]])).toBe(key)
     expect(gcpPlacement([{ ...base[0], x: 1.5 }, base[1]])).not.toBe(key)
@@ -70,18 +87,28 @@ describe('GCP markers', () => {
 
 describe('footprints and poses', () => {
   it('plots enabled footprints that have rings', () => {
-    const fps = [{ id: 'a', rings: [[[0, 0]]] }, { id: 'b', rings: [] }, { id: 'c' }, { id: 'd', rings: [[[0, 0]]], enabled: false }]
+    const fps = [
+      { id: 'a', rings: [[[0, 0]]] },
+      { id: 'b', rings: [] },
+      { id: 'c' },
+      { id: 'd', rings: [[[0, 0]]], enabled: false },
+    ]
     expect(plottedFootprints(fps).map((f) => f.id)).toEqual(['a'])
   })
 
   it('plots enabled poses with a finite position', () => {
-    const poses = [{ imageId: 'a', x: 1, y: 2 }, { imageId: 'b', x: 1 }, { imageId: 'c', x: 1, y: 2, enabled: false }]
+    const poses = [
+      { imageId: 'a', x: 1, y: 2 },
+      { imageId: 'b', x: 1 },
+      { imageId: 'c', x: 1, y: 2, enabled: false },
+    ]
     expect(plottedPoses(poses).map((p) => p.imageId)).toEqual(['a'])
   })
 
   it('turns model cameras into sfm-sourced pose records', () => {
-    expect(modelCameraPoses([{ imageId: 'i', imageName: 'I', x: 1, y: 2, extra: 0 }]))
-      .toEqual([{ x: 1, y: 2, imageId: 'i', imageName: 'I', source: 'sfm' }])
+    expect(modelCameraPoses([{ imageId: 'i', imageName: 'I', x: 1, y: 2, extra: 0 }])).toEqual([
+      { x: 1, y: 2, imageId: 'i', imageName: 'I', source: 'sfm' },
+    ])
   })
 })
 
@@ -131,11 +158,34 @@ describe('feature factories ↔ readers', () => {
   })
 
   it('a footprint links its image and names it, else the set', () => {
-    const f = makeFootprintFeature({ rings: [[[0, 0], [1, 0], [1, 1], [0, 0]]], imageId: 'a', imageName: 'A.tif', name: 'set' })
+    const f = makeFootprintFeature({
+      rings: [
+        [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+          [0, 0],
+        ],
+      ],
+      imageId: 'a',
+      imageName: 'A.tif',
+      name: 'set',
+    })
     expect(f.get('imgId')).toBe('a')
     expect(hoverText(f, false)).toBe('Footprint: A.tif')
     expect(linkedImageOf(f, [{ id: 'a' }])).toEqual({ id: 'a' })
-    const loose = makeFootprintFeature({ rings: [[[0, 0], [1, 0], [1, 1], [0, 0]]], setName: 'Blocks', name: 'x' })
+    const loose = makeFootprintFeature({
+      rings: [
+        [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+          [0, 0],
+        ],
+      ],
+      setName: 'Blocks',
+      name: 'x',
+    })
     expect(loose.get('imgId')).toBeUndefined()
     expect(hoverText(loose, false)).toBe('Footprint: Blocks')
   })
@@ -162,7 +212,10 @@ describe('style functions', () => {
 
   it('a selected image marker wins over the unaligned look; the predicate is not asked then', () => {
     let asked = 0
-    const unaligned = () => { asked++; return true }
+    const unaligned = () => {
+      asked++
+      return true
+    }
     const selected = imageStyle(img, 'a', unaligned)
     expect(asked).toBe(0)
     const faded = imageStyle(img, 'other', unaligned)
@@ -172,7 +225,9 @@ describe('style functions', () => {
   })
 
   it('GCP roles each get their own shape colour', () => {
-    const styles = ['control', 'check', 'marker'].map((role) => gcpStyle(makeGcpFeature({ id: 'g', name: 'G', x: 0, y: 0, role })))
+    const styles = ['control', 'check', 'marker'].map((role) =>
+      gcpStyle(makeGcpFeature({ id: 'g', name: 'G', x: 0, y: 0, role })),
+    )
     expect(new Set(styles).size).toBe(3)
     expect(gcpStyle(makeGcpFeature({ id: 'g', name: 'G', x: 0, y: 0 }))).toBe(styles[0])
   })
@@ -185,7 +240,14 @@ describe('style functions', () => {
   })
 
   it('a footprint highlights only when linked to the selected image', () => {
-    const ring = [[[0, 0], [1, 0], [1, 1], [0, 0]]]
+    const ring = [
+      [
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 0],
+      ],
+    ]
     const linked = makeFootprintFeature({ rings: ring, imageId: 'a' })
     const loose = makeFootprintFeature({ rings: ring })
     expect(footprintStyle(linked, 'a')).not.toBe(footprintStyle(linked, 'b'))

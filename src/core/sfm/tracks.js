@@ -1,7 +1,5 @@
 import { makeP34flat } from './reconstruction.js'
-import {
-  cameraCenter, projectWithDepth, triangulationAngle, projectPoint,
-} from './geometry.js'
+import { cameraCenter, projectWithDepth, triangulationAngle, projectPoint } from './geometry.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { asPairList } from './matchCodec.js'
 
@@ -45,37 +43,56 @@ export const reprojErrAt = (cam, x, y, z, set, k) => {
 // reprojects ≤ gate in both. `triangulate(nA, nB, PA, PB)` is injected (WASM DLT
 // in production). Adds to `tracks`; returns { added, lowParallax }.
 export async function retriangulatePairs({
-  tracks, ids, cameras, pairs, keypointsAt, maxReprojPx, triangulate,
+  tracks,
+  ids,
+  cameras,
+  pairs,
+  keypointsAt,
+  maxReprojPx,
+  triangulate,
   minTriAngleDeg = 0,
 }) {
   // A fresh index, as the private one this function used to build.
   tracks.reindex()
-  let added = 0, lowParallax = 0
+  let added = 0,
+    lowParallax = 0
   for (const e of pairs) {
-    const camA = cameras.get(e.idA), camB = cameras.get(e.idB)
+    const camA = cameras.get(e.idA),
+      camB = cameras.get(e.idB)
     if (!camA || !camB) continue // both endpoints must be registered
-    const iA = ids.img(e.idA), iB = ids.img(e.idB)
+    const iA = ids.img(e.idA),
+      iB = ids.img(e.idB)
     const m = asPairList(e.matches)
     const fresh = [] // match indices whose endpoints are both unassigned
-    for (let i = 0; i < m.length; i++) if (tracks.pointAt(iA, m.a(i)) < 0 && tracks.pointAt(iB, m.b(i)) < 0) fresh.push(i)
+    for (let i = 0; i < m.length; i++)
+      if (tracks.pointAt(iA, m.a(i)) < 0 && tracks.pointAt(iB, m.b(i)) < 0) fresh.push(i)
     if (!fresh.length) continue
 
-    const KA = camA.K, KB = camB.K
-    const PA = camToP34flat(camA), PB = camToP34flat(camB)
+    const KA = camA.K,
+      KB = camB.K
+    const PA = camToP34flat(camA),
+      PB = camToP34flat(camB)
     const CA = minTriAngleDeg > 0 ? cameraCenter(camA) : null
     const CB = minTriAngleDeg > 0 ? cameraCenter(camB) : null
-    const sA = keypointsAt(iA), sB = keypointsAt(iB)
-    const nA = [], nB = [], keep = [] // keep: match indices, aligned with nA / nB
+    const sA = keypointsAt(iA),
+      sB = keypointsAt(iB)
+    const nA = [],
+      nB = [],
+      keep = [] // keep: match indices, aligned with nA / nB
     for (const i of fresh) {
-      const ia = m.a(i), ib = m.b(i)
+      const ia = m.a(i),
+        ib = m.b(i)
       if (!hasKp(sA, ia) || !hasKp(sB, ib)) continue
-      nA.push(toNorm(kpX(sA, ia), kpY(sA, ia), KA)); nB.push(toNorm(kpX(sB, ib), kpY(sB, ib), KB)); keep.push(i)
+      nA.push(toNorm(kpX(sA, ia), kpY(sA, ia), KA))
+      nB.push(toNorm(kpX(sB, ib), kpY(sB, ib), KB))
+      keep.push(i)
     }
     if (!keep.length) continue
 
     const tri = await triangulate(nA, nB, PA, PB) // [{ x, y, z, srcIdx }]
     for (const { x, y, z, srcIdx } of tri) {
-      const ia = m.a(keep[srcIdx]), ib = m.b(keep[srcIdx])
+      const ia = m.a(keep[srcIdx]),
+        ib = m.b(keep[srcIdx])
       // A point added earlier in this batch may already own one endpoint.
       if (tracks.pointAt(iA, ia) >= 0 || tracks.pointAt(iB, ib) >= 0) continue
       if (reprojErrAt(camA, x, y, z, sA, ia) > maxReprojPx) continue
@@ -106,45 +123,52 @@ export async function retriangulatePairs({
 // this preserves legitimate two-camera reconstructions and tiny/weak datasets instead
 // of turning them into an empty result. Pure so the policy can be regression-tested.
 // Removes the pruned points from `tracks`.
-export function pruneFinalTwoViewTracks(tracks, {
-  minViews = 3,
-  minSupportedTracks = 50,
-  minSupportedShare = 0.2,
-  // Coverage-aware (with `keypointsAt`): a short track is removed only where its image
-  // area is already covered by corroborated tracks — each image is split into a
-  // coverageGrid² grid by its observed keypoint extent, and a short track survives when
-  // ANY of its observations lands in a cell no ≥minViews observation reaches. Over a
-  // film block most ground is seen by exactly two images (60 % forward, 20–30 % side
-  // overlap): the blanket rule removed 54,025 of 79,656 Casa Grande points and left the
-  // sparse cloud a lattice of strips around empty squares.
-  keypointsAt = null,
-  coverageGrid = 16,
-} = {}) {
+export function pruneFinalTwoViewTracks(
+  tracks,
+  {
+    minViews = 3,
+    minSupportedTracks = 50,
+    minSupportedShare = 0.2,
+    // Coverage-aware (with `keypointsAt`): a short track is removed only where its image
+    // area is already covered by corroborated tracks — each image is split into a
+    // coverageGrid² grid by its observed keypoint extent, and a short track survives when
+    // ANY of its observations lands in a cell no ≥minViews observation reaches. Over a
+    // film block most ground is seen by exactly two images (60 % forward, 20–30 % side
+    // overlap): the blanket rule removed 54,025 of 79,656 Casa Grande points and left the
+    // sparse cloud a lattice of strips around empty squares.
+    keypointsAt = null,
+    coverageGrid = 16,
+  } = {},
+) {
   const total = tracks.liveCount()
   let supported = 0
-  tracks.forEachPoint((p) => { if (tracks.viewCount(p) >= minViews) supported++ })
+  tracks.forEachPoint((p) => {
+    if (tracks.viewCount(p) >= minViews) supported++
+  })
   const supportedShare = total ? supported / total : 0
-  const applied = minViews > 2
-    && supported >= minSupportedTracks
-    && supportedShare >= minSupportedShare
+  const applied = minViews > 2 && supported >= minSupportedTracks && supportedShare >= minSupportedShare
   let keptForCoverage = 0
   if (applied) {
     let cellOf = null
     if (keypointsAt && coverageGrid > 0) {
       // Per-image extent from every observation, then the corroborated cells.
       const extent = new Map()
-      tracks.forEachPoint((p) => tracks.forEachView(p, (img, kp) => {
-        const set = keypointsAt(img)
-        if (!set || !hasKp(set, kp)) return
-        const e = extent.get(img) ?? { w: 1, h: 1 }
-        e.w = Math.max(e.w, kpX(set, kp) + 1); e.h = Math.max(e.h, kpY(set, kp) + 1)
-        extent.set(img, e)
-      }))
+      tracks.forEachPoint((p) =>
+        tracks.forEachView(p, (img, kp) => {
+          const set = keypointsAt(img)
+          if (!set || !hasKp(set, kp)) return
+          const e = extent.get(img) ?? { w: 1, h: 1 }
+          e.w = Math.max(e.w, kpX(set, kp) + 1)
+          e.h = Math.max(e.h, kpY(set, kp) + 1)
+          extent.set(img, e)
+        }),
+      )
       cellOf = (img, kp) => {
-        const set = keypointsAt(img), e = extent.get(img)
+        const set = keypointsAt(img),
+          e = extent.get(img)
         if (!set || !e || !hasKp(set, kp)) return -1
-        const cx = Math.min(coverageGrid - 1, Math.floor(kpX(set, kp) / e.w * coverageGrid))
-        const cy = Math.min(coverageGrid - 1, Math.floor(kpY(set, kp) / e.h * coverageGrid))
+        const cx = Math.min(coverageGrid - 1, Math.floor((kpX(set, kp) / e.w) * coverageGrid))
+        const cy = Math.min(coverageGrid - 1, Math.floor((kpY(set, kp) / e.h) * coverageGrid))
         return img * coverageGrid * coverageGrid + cy * coverageGrid + cx
       }
     }
@@ -152,15 +176,24 @@ export function pruneFinalTwoViewTracks(tracks, {
     if (cellOf) {
       tracks.forEachPoint((p) => {
         if (tracks.viewCount(p) < minViews) return
-        tracks.forEachView(p, (img, kp) => { const c = cellOf(img, kp); if (c >= 0) covered.add(c) })
+        tracks.forEachView(p, (img, kp) => {
+          const c = cellOf(img, kp)
+          if (c >= 0) covered.add(c)
+        })
       })
     }
     tracks.forEachPoint((p) => {
       if (tracks.viewCount(p) >= minViews) return
       if (cellOf) {
         let fillsGap = false
-        tracks.forEachView(p, (img, kp) => { const c = cellOf(img, kp); if (c >= 0 && !covered.has(c)) fillsGap = true })
-        if (fillsGap) { keptForCoverage++; return }
+        tracks.forEachView(p, (img, kp) => {
+          const c = cellOf(img, kp)
+          if (c >= 0 && !covered.has(c)) fillsGap = true
+        })
+        if (fillsGap) {
+          keptForCoverage++
+          return
+        }
       }
       tracks.removePoint(p)
     })
@@ -186,12 +219,15 @@ export function mergeSplitTracks({ tracks, ids, cameras, pairs, keypointsAt, max
   let merged = 0
   for (const e of pairs) {
     if (!cameras.has(e.idA) || !cameras.has(e.idB)) continue
-    const iA = ids.img(e.idA), iB = ids.img(e.idB)
+    const iA = ids.img(e.idA),
+      iB = ids.img(e.idB)
     const m = asPairList(e.matches)
     for (let i = 0; i < m.length; i++) {
-      const ia = m.a(i), ib = m.b(i)
+      const ia = m.a(i),
+        ib = m.b(i)
       // A merged-away point has released its keypoints, so it is never returned here.
-      const p1 = tracks.pointAt(iA, ia), p2 = tracks.pointAt(iB, ib)
+      const p1 = tracks.pointAt(iA, ia),
+        p2 = tracks.pointAt(iB, ib)
       if (p1 < 0 || p2 < 0 || p1 === p2) continue
       // No image may be observed with two different keypoints across the union.
       const conflict = tracks.someView(p2, (img, kp) => {
@@ -200,9 +236,12 @@ export function mergeSplitTracks({ tracks, ids, cameras, pairs, keypointsAt, max
       })
       if (conflict) continue
       // Every added observation must still reproject within the gate against p1.
-      const x = tracks.x(p1), y = tracks.y(p1), z = tracks.z(p1)
+      const x = tracks.x(p1),
+        y = tracks.y(p1),
+        z = tracks.z(p1)
       const bad = tracks.someView(p2, (img, kp) => {
-        const cam = cameras.get(ids.uuid(img)), set = keypointsAt(img)
+        const cam = cameras.get(ids.uuid(img)),
+          set = keypointsAt(img)
         return !cam || !hasKp(set, kp) || reprojErrAt(cam, x, y, z, set, kp) > maxReprojPx
       })
       if (bad) continue
@@ -226,28 +265,29 @@ export function mergeSplitTracks({ tracks, ids, cameras, pairs, keypointsAt, max
 //
 // Returns { added, rounds, lifted } — `lifted` = points that had ≤2 views
 // before and ≥3 after, i.e. what the final 2-view prune no longer removes.
-export function completeTracks({
-  tracks, ids, cameras, pairs, keypointsAt, maxReprojPx, maxRounds = 1,
-}) {
+export function completeTracks({ tracks, ids, cameras, pairs, keypointsAt, maxReprojPx, maxRounds = 1 }) {
   const sizeBefore = new Map() // p → view count before its first addition
   const sweep = (list) => {
     let n = 0
     for (const e of list) {
       if (!cameras.has(e.idA) || !cameras.has(e.idB)) continue
-      const iA = ids.img(e.idA), iB = ids.img(e.idB)
+      const iA = ids.img(e.idA),
+        iB = ids.img(e.idB)
       const m = asPairList(e.matches)
       for (let i = 0; i < m.length; i++) {
-        const ia = m.a(i), ib = m.b(i)
+        const ia = m.a(i),
+          ib = m.b(i)
         const pA = tracks.pointAt(iA, ia)
         const pB = tracks.pointAt(iB, ib)
-        if ((pA >= 0) === (pB >= 0)) continue
+        if (pA >= 0 === pB >= 0) continue
         const p = pA >= 0 ? pA : pB
         const tgtImg = pA >= 0 ? iB : iA
         const tgtKp = pA >= 0 ? ib : ia
         if (tracks.viewKp(p, tgtImg) >= 0) continue // one keypoint per image per track
         const set = keypointsAt(tgtImg)
         if (!hasKp(set, tgtKp)) continue
-        if (reprojErrAt(cameras.get(ids.uuid(tgtImg)), tracks.x(p), tracks.y(p), tracks.z(p), set, tgtKp) > maxReprojPx) continue
+        if (reprojErrAt(cameras.get(ids.uuid(tgtImg)), tracks.x(p), tracks.y(p), tracks.z(p), set, tgtKp) > maxReprojPx)
+          continue
         if (!sizeBefore.has(p)) sizeBefore.set(p, tracks.viewCount(p))
         tracks.addView(p, tgtImg, tgtKp)
         n++
@@ -255,7 +295,8 @@ export function completeTracks({
     }
     return n
   }
-  let added = 0, rounds = 0
+  let added = 0,
+    rounds = 0
   while (rounds < maxRounds) {
     rounds++
     const a = sweep(pairs)
@@ -273,22 +314,34 @@ export function completeTracks({
 // viewing rays are too parallel to triangulate stably (< minTriAngleDeg).
 // Removes the views and points from `tracks`; returns { obsRemoved, ptsRemoved }.
 export function filterTracks({ tracks, ids, cameras, keypointsAt, maxReprojPx, minTriAngleDeg }) {
-  let obsRemoved = 0, ptsRemoved = 0
+  let obsRemoved = 0,
+    ptsRemoved = 0
   const centres = new Map() // camera → its centre
   tracks.forEachPoint((p) => {
-    const x = tracks.x(p), y = tracks.y(p), z = tracks.z(p)
+    const x = tracks.x(p),
+      y = tracks.y(p),
+      z = tracks.z(p)
     tracks.forEachView(p, (img, kpIdx) => {
       const cam = cameras.get(ids.uuid(img))
       const set = keypointsAt(img)
-      if (!cam || !hasKp(set, kpIdx)) { tracks.removeView(p, img); obsRemoved++; return }
+      if (!cam || !hasKp(set, kpIdx)) {
+        tracks.removeView(p, img)
+        obsRemoved++
+        return
+      }
       // Cheirality: point must be in front of the camera.
       const zc = cam.R[2][0] * x + cam.R[2][1] * y + cam.R[2][2] * z + cam.t[2]
       const proj = zc > 0 ? projectPoint(cam, x, y, z) : null
       if (!proj || Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)) > maxReprojPx) {
-        tracks.removeView(p, img); obsRemoved++
+        tracks.removeView(p, img)
+        obsRemoved++
       }
     })
-    if (tracks.viewCount(p) < 2) { ptsRemoved++; tracks.removePoint(p); return }
+    if (tracks.viewCount(p) < 2) {
+      ptsRemoved++
+      tracks.removePoint(p)
+      return
+    }
     // Max parallax angle between any two surviving rays; only whether it clears the
     // floor matters, so the first pair that does ends the search. Camera centres are
     // computed once per camera (they were per pair, per point).
@@ -297,7 +350,10 @@ export function filterTracks({ tracks, ids, cameras, keypointsAt, maxReprojPx, m
       const c = cameras.get(ids.uuid(img))
       if (!c) return
       let C = centres.get(c)
-      if (!C) { C = cameraCenter(c); centres.set(c, C) }
+      if (!C) {
+        C = cameraCenter(c)
+        centres.set(c, C)
+      }
       cs.push(C)
     })
     const pt = { x, y, z }
@@ -309,7 +365,10 @@ export function filterTracks({ tracks, ids, cameras, keypointsAt, maxReprojPx, m
         if (a >= minTriAngleDeg || Number.isNaN(a)) clears = true
       }
     }
-    if (!clears) { ptsRemoved++; tracks.removePoint(p) }
+    if (!clears) {
+      ptsRemoved++
+      tracks.removePoint(p)
+    }
   })
   return { obsRemoved, ptsRemoved }
 }

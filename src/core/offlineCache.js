@@ -30,7 +30,9 @@ export const TILE_CACHES = [
   },
   {
     name: 'websfm-tiles-satellite',
-    pattern: new RegExp(`^https://server\\.arcgisonline\\.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${Z}/\\d+/\\d+$`),
+    pattern: new RegExp(
+      `^https://server\\.arcgisonline\\.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${Z}/\\d+/\\d+$`,
+    ),
     maxEntries: 500,
   },
   {

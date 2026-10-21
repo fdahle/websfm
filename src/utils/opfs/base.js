@@ -44,8 +44,16 @@ async function withFileLock(key, fn) {
   const prev = fileLocks.get(key)
   // Run regardless of how the predecessor settled: a queue must not cancel the
   // writes behind a failed one.
-  const run = prev ? prev.then(() => fn(), () => fn()) : fn()
-  const tail = run.then(() => {}, () => {})
+  const run = prev
+    ? prev.then(
+        () => fn(),
+        () => fn(),
+      )
+    : fn()
+  const tail = run.then(
+    () => {},
+    () => {},
+  )
   fileLocks.set(key, tail)
   try {
     return await run
@@ -77,7 +85,7 @@ export async function writeFileIn(dir, filename, data, { append = false } = {}) 
         throw error
       }
     } catch (error) {
-      throw isStorageFull(error) || await outOfSpace(data) ? storageFullError(filename, error) : error
+      throw isStorageFull(error) || (await outOfSpace(data)) ? storageFullError(filename, error) : error
     }
   })
 }
@@ -90,8 +98,10 @@ export async function writeFileIn(dir, filename, data, { append = false } = {}) 
 // "Failed to write data to data pipe": the bytes could not be put on disk. Neither
 // case shows in navigator.storage.estimate(), so the space left is only a third test.
 const PIPE_WRITE_FAILED = /failed to write data to data pipe/i
-export const isStorageFull = (error) => error?.name === 'QuotaExceededError' || error?.storageFull === true
-  || (error?.name === 'AbortError' && PIPE_WRITE_FAILED.test(error?.message ?? ''))
+export const isStorageFull = (error) =>
+  error?.name === 'QuotaExceededError' ||
+  error?.storageFull === true ||
+  (error?.name === 'AbortError' && PIPE_WRITE_FAILED.test(error?.message ?? ''))
 async function outOfSpace(data) {
   try {
     const { usage, quota } = await navigator.storage.estimate()
@@ -103,9 +113,11 @@ async function outOfSpace(data) {
 }
 function storageFullError(filename, cause) {
   if (cause?.storageFull) return cause
-  const err = new Error('Storage is full: the browser or the disk refused to save project data. Free space (delete '
-    + 'projects you no longer need, or Project settings… ▸ Clear derived data), or move this project to a folder on '
-    + `disk, then run the step again. (${filename})`)
+  const err = new Error(
+    'Storage is full: the browser or the disk refused to save project data. Free space (delete ' +
+      'projects you no longer need, or Project settings… ▸ Clear derived data), or move this project to a folder on ' +
+      `disk, then run the step again. (${filename})`,
+  )
   err.name = 'QuotaExceededError'
   err.storageFull = true
   err.cause = cause

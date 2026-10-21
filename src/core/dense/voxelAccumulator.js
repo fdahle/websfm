@@ -22,17 +22,30 @@ export function mergePointsSpatial(points, cellSize) {
   for (const p of points) {
     const key = `${Math.floor(p.x * inv)},${Math.floor(p.y * inv)},${Math.floor(p.z * inv)}`
     let acc = cells.get(key)
-    if (!acc) { acc = { x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, nx: 0, ny: 0, nz: 0, n: 0 }; cells.set(key, acc) }
-    acc.x += p.x; acc.y += p.y; acc.z += p.z
-    acc.r += p.color[0]; acc.g += p.color[1]; acc.b += p.color[2]
-    if (p.normal) { acc.nx += p.normal[0]; acc.ny += p.normal[1]; acc.nz += p.normal[2] }
+    if (!acc) {
+      acc = { x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, nx: 0, ny: 0, nz: 0, n: 0 }
+      cells.set(key, acc)
+    }
+    acc.x += p.x
+    acc.y += p.y
+    acc.z += p.z
+    acc.r += p.color[0]
+    acc.g += p.color[1]
+    acc.b += p.color[2]
+    if (p.normal) {
+      acc.nx += p.normal[0]
+      acc.ny += p.normal[1]
+      acc.nz += p.normal[2]
+    }
     acc.n++
   }
   const out = []
   for (const a of cells.values()) {
     const k = 1 / a.n
     const o = {
-      x: a.x * k, y: a.y * k, z: a.z * k,
+      x: a.x * k,
+      y: a.y * k,
+      z: a.z * k,
       color: [Math.round(a.r * k), Math.round(a.g * k), Math.round(a.b * k)],
     }
     // Renormalized averaged normal (matches finalizeNormals); (0,0,1) fallback.
@@ -46,8 +59,10 @@ export function mergePointsSpatial(points, cellSize) {
 // murmur3's 32-bit finalizer: a bijective avalanche mix of an int32 (→ uint32). The
 // voxel accumulator's index and the fusion cell-count estimate hash with it.
 export function mix32(h) {
-  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b)
-  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35)
+  h ^= h >>> 16
+  h = Math.imul(h, 0x85ebca6b)
+  h ^= h >>> 13
+  h = Math.imul(h, 0xc2b2ae35)
   return (h ^ (h >>> 16)) >>> 0
 }
 
@@ -76,32 +91,49 @@ export function mix32(h) {
 // count), so a run that stays within it never reallocates.
 export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {}) {
   const inv = 1 / cellSize
-  const ix0 = Math.floor(bounds.minX * inv), iy0 = Math.floor(bounds.minY * inv), iz0 = Math.floor(bounds.minZ * inv)
-  const ix1 = Math.floor(bounds.maxX * inv), iy1 = Math.floor(bounds.maxY * inv), iz1 = Math.floor(bounds.maxZ * inv)
+  const ix0 = Math.floor(bounds.minX * inv),
+    iy0 = Math.floor(bounds.minY * inv),
+    iz0 = Math.floor(bounds.minZ * inv)
+  const ix1 = Math.floor(bounds.maxX * inv),
+    iy1 = Math.floor(bounds.maxY * inv),
+    iz1 = Math.floor(bounds.maxZ * inv)
   // Pad one cell each side so a point just past a coarse-estimated bound still packs
   // to a unique in-range key instead of aliasing onto the opposite face.
-  const bx = ix0 - 1, by = iy0 - 1, bz = iz0 - 1
-  const nx = (ix1 - ix0) + 3, ny = (iy1 - iy0) + 3, nz = (iz1 - iz0) + 3
+  const bx = ix0 - 1,
+    by = iy0 - 1,
+    bz = iz0 - 1
+  const nx = ix1 - ix0 + 3,
+    ny = iy1 - iy0 + 3,
+    nz = iz1 - iz0 + 3
   // Cells outside the packed grid, keyed `${dix},${diy},${diz}` in the same grid-relative
   // indices (negative or ≥ n* there). Empty for callers that pass exact bounds.
   const overflow = new Map()
   const inGrid = (dix, diy, diz) => dix >= 0 && dix < nx && diy >= 0 && diy < ny && diz >= 0 && diz < nz
-  let cap = Math.max(16, Math.ceil(capacity)), n = 0, nGrid = 0
+  let cap = Math.max(16, Math.ceil(capacity)),
+    n = 0,
+    nGrid = 0
   // keyOf[s]: the packed key of an in-grid slot, −1 for an overflow slot.
   let keyOf = new Float64Array(cap)
-  let sx = new Float64Array(cap), sy = new Float64Array(cap), sz = new Float64Array(cap)
-  let sr = new Uint32Array(cap), sg = new Uint32Array(cap), sb = new Uint32Array(cap)
+  let sx = new Float64Array(cap),
+    sy = new Float64Array(cap),
+    sz = new Float64Array(cap)
+  let sr = new Uint32Array(cap),
+    sg = new Uint32Array(cap),
+    sb = new Uint32Array(cap)
   // World-space normal sums (Phase: Poisson meshing). Averaging unit normals then
   // renormalizing is a valid orientation estimate; the k coincident shell points a
   // surface produces all carry ~the same normal, so the sum stays well-conditioned.
-  let snx = new Float32Array(cap), sny = new Float32Array(cap), snz = new Float32Array(cap)
+  let snx = new Float32Array(cap),
+    sny = new Float32Array(cap),
+    snz = new Float32Array(cap)
   let cnt = new Uint32Array(cap)
   let removed = 0 // cells zeroed by filterIsolated (WS4); excluded from count + finalize
   // Open-addressing index (linear probing): table[i] = slot, −1 = empty. Power-of-two
   // size, load kept ≤ ½.
   let tsize = 1
   while (tsize < 2 * cap) tsize *= 2
-  let table = new Int32Array(tsize).fill(-1), tmask = tsize - 1
+  let table = new Int32Array(tsize).fill(-1),
+    tmask = tsize - 1
   // Table position holding `key`, or −1 − (the empty position where it belongs).
   const find = (key) => {
     const hi = Math.floor(key / 4294967296)
@@ -114,19 +146,38 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     }
   }
   const growTable = () => {
-    tsize *= 2; table = new Int32Array(tsize).fill(-1); tmask = tsize - 1
+    tsize *= 2
+    table = new Int32Array(tsize).fill(-1)
+    tmask = tsize - 1
     for (let s = 0; s < n; s++) if (keyOf[s] >= 0) table[-1 - find(keyOf[s])] = s
   }
-  const lookup = (key) => { const i = find(key); return i >= 0 ? table[i] : undefined }
-  const slotAt = (dix, diy, diz) => (inGrid(dix, diy, diz) ? lookup((dix * ny + diy) * nz + diz)
-    : overflow.size ? overflow.get(`${dix},${diy},${diz}`) : undefined)
+  const lookup = (key) => {
+    const i = find(key)
+    return i >= 0 ? table[i] : undefined
+  }
+  const slotAt = (dix, diy, diz) =>
+    inGrid(dix, diy, diz)
+      ? lookup((dix * ny + diy) * nz + diz)
+      : overflow.size
+        ? overflow.get(`${dix},${diy},${diz}`)
+        : undefined
   const grow = () => {
     cap *= 2
-    const g = (a, T) => { const b = new T(cap); b.set(a); return b } // tail zero-filled
+    const g = (a, T) => {
+      const b = new T(cap)
+      b.set(a)
+      return b
+    } // tail zero-filled
     keyOf = g(keyOf, Float64Array)
-    sx = g(sx, Float64Array); sy = g(sy, Float64Array); sz = g(sz, Float64Array)
-    sr = g(sr, Uint32Array); sg = g(sg, Uint32Array); sb = g(sb, Uint32Array)
-    snx = g(snx, Float32Array); sny = g(sny, Float32Array); snz = g(snz, Float32Array)
+    sx = g(sx, Float64Array)
+    sy = g(sy, Float64Array)
+    sz = g(sz, Float64Array)
+    sr = g(sr, Uint32Array)
+    sg = g(sg, Uint32Array)
+    sb = g(sb, Uint32Array)
+    snx = g(snx, Float32Array)
+    sny = g(sny, Float32Array)
+    snz = g(snz, Float32Array)
     cnt = g(cnt, Uint32Array)
   }
   // Occupied 26-neighbours of a cell, stopping at `need` (filterIsolated's probe).
@@ -152,12 +203,16 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     let d
     if (key >= 0) d = axis === 0 ? Math.floor(key / (nz * ny)) : axis === 1 ? Math.floor(key / nz) % ny : key % nz
     else {
-      if (!overflowKeyOf || overflowKeyOf.size !== overflow.size) overflowKeyOf = new Map([...overflow].map(([k, v]) => [v, k]))
+      if (!overflowKeyOf || overflowKeyOf.size !== overflow.size)
+        overflowKeyOf = new Map([...overflow].map(([k, v]) => [v, k]))
       d = Number(overflowKeyOf.get(s).split(',')[axis])
     }
     return d + (axis === 0 ? bx : axis === 1 ? by : bz)
   }
-  const inRange = (s, { axis, lo, hi }) => { const a = cellIndex(s, axis); return a >= lo && a < hi }
+  const inRange = (s, { axis, lo, hi }) => {
+    const a = cellIndex(s, axis)
+    return a >= lo && a < hi
+  }
   return {
     // Normals (nx,ny,nz) are optional (world-space, unit) — omitted callers still
     // get the exact same cells/averages for the 6-float wire format.
@@ -170,28 +225,48 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
         const key = (dix * ny + diy) * nz + diz
         const i = find(key)
         if (i >= 0) s = table[i]
-        else { // fresh slot is zeroed
+        else {
+          // fresh slot is zeroed
           if (n === cap) grow()
-          s = n++; keyOf[s] = key; table[-1 - i] = s
+          s = n++
+          keyOf[s] = key
+          table[-1 - i] = s
           if (2 * ++nGrid > tsize) growTable()
         }
       } else {
         const key = `${dix},${diy},${diz}`
         s = overflow.get(key)
-        if (s === undefined) { if (n === cap) grow(); s = n++; keyOf[s] = -1; overflow.set(key, s) }
+        if (s === undefined) {
+          if (n === cap) grow()
+          s = n++
+          keyOf[s] = -1
+          overflow.set(key, s)
+        }
       }
-      sx[s] += x; sy[s] += y; sz[s] += z
-      sr[s] += r; sg[s] += g; sb[s] += b
-      snx[s] += nx_; sny[s] += ny_; snz[s] += nz_
+      sx[s] += x
+      sy[s] += y
+      sz[s] += z
+      sr[s] += r
+      sg[s] += g
+      sb[s] += b
+      snx[s] += nx_
+      sny[s] += ny_
+      snz[s] += nz_
       cnt[s]++
     },
-    get count() { return n - removed },
+    get count() {
+      return n - removed
+    },
     // Cells that fell outside `bounds` (kept exact in the overflow map). Non-zero means
     // the caller's bounds estimate missed real points — worth a log line, not an error.
-    get overflowCells() { return overflow.size },
+    get overflowCells() {
+      return overflow.size
+    },
     // Bytes the accumulator holds (slot arrays at capacity + the index table) — the
     // figure fusion logs against its pre-flight projection.
-    get bytes() { return cap * 60 + tsize * 4 },
+    get bytes() {
+      return cap * 60 + tsize * 4
+    },
     // Post-fusion isolated-cell removal (WS4): a real surface cell has occupied
     // neighbours; a lone low-support cell is fusion noise (a sky/vegetation flyer that
     // slipped the consistency gate). Only *low-support* cells (cnt ≤ maxSupport) are
@@ -235,7 +310,11 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     // neighbours), so `count` and the finalizers see the tile's own cells only.
     restrict(within) {
       let c = 0
-      for (let s = 0; s < n; s++) if (cnt[s] > 0 && !inRange(s, within)) { cnt[s] = 0; c++ }
+      for (let s = 0; s < n; s++)
+        if (cnt[s] > 0 && !inRange(s, within)) {
+          cnt[s] = 0
+          c++
+        }
       removed += c
       return c
     },
@@ -248,12 +327,16 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     // Returns { count, pos, col, nrm, degenerate }.
     finalizeCloud() {
       const m = n - removed
-      table = null; keyOf = null; overflow.clear()
+      table = null
+      keyOf = null
+      overflow.clear()
       const pos = new Float32Array(3 * m)
       for (let s = 0, o = 0; s < n; s++) {
         if (cnt[s] === 0) continue
         const k = 1 / cnt[s]
-        pos[o] = sx[s] * k; pos[o + 1] = sy[s] * k; pos[o + 2] = sz[s] * k
+        pos[o] = sx[s] * k
+        pos[o + 1] = sy[s] * k
+        pos[o + 2] = sz[s] * k
         o += 3
       }
       sx = sy = sz = null
@@ -261,7 +344,9 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
       for (let s = 0, o = 0; s < n; s++) {
         if (cnt[s] === 0) continue
         const k = 1 / cnt[s]
-        col[o] = Math.round(sr[s] * k); col[o + 1] = Math.round(sg[s] * k); col[o + 2] = Math.round(sb[s] * k)
+        col[o] = Math.round(sr[s] * k)
+        col[o + 1] = Math.round(sg[s] * k)
+        col[o + 2] = Math.round(sb[s] * k)
         o += 3
       }
       sr = sg = sb = null
@@ -269,13 +354,24 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
       let degenerate = 0
       for (let s = 0, o = 0; s < n; s++) {
         if (cnt[s] === 0) continue
-        const ax = snx[s], ay = sny[s], az = snz[s]
+        const ax = snx[s],
+          ay = sny[s],
+          az = snz[s]
         const mag = Math.hypot(ax, ay, az)
-        if (mag > 1e-9) { nrm[o] = ax / mag; nrm[o + 1] = ay / mag; nrm[o + 2] = az / mag }
-        else { nrm[o] = 0; nrm[o + 1] = 0; nrm[o + 2] = 1; degenerate++ }
+        if (mag > 1e-9) {
+          nrm[o] = ax / mag
+          nrm[o + 1] = ay / mag
+          nrm[o + 2] = az / mag
+        } else {
+          nrm[o] = 0
+          nrm[o + 1] = 0
+          nrm[o + 2] = 1
+          degenerate++
+        }
         o += 3
       }
-      snx = sny = snz = null; cnt = null
+      snx = sny = snz = null
+      cnt = null
       return { count: m, pos, col, nrm, degenerate }
     },
     // Finalize straight into the wire format the densify op returns: a flat
@@ -287,8 +383,12 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
       for (let s = 0; s < n; s++) {
         if (cnt[s] === 0) continue
         const k = 1 / cnt[s]
-        out[o] = sx[s] * k; out[o + 1] = sy[s] * k; out[o + 2] = sz[s] * k
-        out[o + 3] = Math.round(sr[s] * k); out[o + 4] = Math.round(sg[s] * k); out[o + 5] = Math.round(sb[s] * k)
+        out[o] = sx[s] * k
+        out[o + 1] = sy[s] * k
+        out[o + 2] = sz[s] * k
+        out[o + 3] = Math.round(sr[s] * k)
+        out[o + 4] = Math.round(sg[s] * k)
+        out[o + 5] = Math.round(sb[s] * k)
         o += 6
       }
       return out
@@ -300,13 +400,24 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     // arrays stay row-aligned.
     finalizeNormals() {
       const out = new Float32Array((n - removed) * 3)
-      let degenerate = 0, o = 0
+      let degenerate = 0,
+        o = 0
       for (let s = 0; s < n; s++) {
         if (cnt[s] === 0) continue
-        const ax = snx[s], ay = sny[s], az = snz[s]
+        const ax = snx[s],
+          ay = sny[s],
+          az = snz[s]
         const mag = Math.hypot(ax, ay, az)
-        if (mag > 1e-9) { out[o] = ax / mag; out[o + 1] = ay / mag; out[o + 2] = az / mag }
-        else { out[o] = 0; out[o + 1] = 0; out[o + 2] = 1; degenerate++ }
+        if (mag > 1e-9) {
+          out[o] = ax / mag
+          out[o + 1] = ay / mag
+          out[o + 2] = az / mag
+        } else {
+          out[o] = 0
+          out[o + 1] = 0
+          out[o + 2] = 1
+          degenerate++
+        }
         o += 3
       }
       return { nrm: out, degenerate }

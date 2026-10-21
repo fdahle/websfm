@@ -43,18 +43,20 @@ export function assignRole(columnRoles, colIdx, role) {
  *  column carrying a role wins. */
 export function mappingFromRoles(columnRoles, roleIds) {
   const m = Object.fromEntries(roleIds.map((r) => [r, null]))
-  columnRoles.forEach((role, i) => { if (role !== 'ignore' && m[role] == null) m[role] = i })
+  columnRoles.forEach((role, i) => {
+    if (role !== 'ignore' && m[role] == null) m[role] = i
+  })
   return m
 }
 
 export function useDelimitedImport({ rawText, guessMapping, roles }) {
   const delimiter = ref(sniffDelimiter(toValue(rawText)))
   const hasHeader = ref(true)
-  const columnRoles = ref([])   // index → role id
+  const columnRoles = ref([]) // index → role id
 
   const rows = computed(() => parseRows(toValue(rawText), delimiter.value))
   const columnCount = computed(() => rows.value.reduce((m, r) => Math.max(m, r.length), 0))
-  const headerCells = computed(() => (hasHeader.value ? (rows.value[0] || []) : []))
+  const headerCells = computed(() => (hasHeader.value ? rows.value[0] || [] : []))
   const dataRows = computed(() => (hasHeader.value ? rows.value.slice(1) : rows.value))
   const previewRows = computed(() => dataRows.value.slice(0, PREVIEW_ROW_COUNT))
 
@@ -72,5 +74,17 @@ export function useDelimitedImport({ rawText, guessMapping, roles }) {
 
   const mapping = computed(() => mappingFromRoles(columnRoles.value, unref(roles)))
 
-  return { delimiter, hasHeader, columnRoles, rows, columnCount, headerCells, dataRows, previewRows, reguess, setRole, mapping }
+  return {
+    delimiter,
+    hasHeader,
+    columnRoles,
+    rows,
+    columnCount,
+    headerCells,
+    dataRows,
+    previewRows,
+    reguess,
+    setRole,
+    mapping,
+  }
 }

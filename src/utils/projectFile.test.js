@@ -14,7 +14,13 @@ const notFound = (relPath) => Object.assign(new Error(`${relPath} not found`), {
 const locks = new Map()
 function lock(key, work) {
   const run = (locks.get(key) ?? Promise.resolve()).then(work, work)
-  locks.set(key, run.then(() => {}, () => {}))
+  locks.set(
+    key,
+    run.then(
+      () => {},
+      () => {},
+    ),
+  )
   return run
 }
 
@@ -24,7 +30,9 @@ vi.mock('./opfs.js', async () => {
     binaryDocumentLockKey: real.binaryDocumentLockKey,
     binaryDocumentOf: real.binaryDocumentOf,
     withBinaryDocumentLock: (projectId, relPath, work) => lock(real.binaryDocumentLockKey(projectId, relPath), work),
-    async getProjectFile(_projectId, relPath) { return store.get(relPath) ?? null },
+    async getProjectFile(_projectId, relPath) {
+      return store.get(relPath) ?? null
+    },
     async *walkProjectFiles(_projectId, { skip = null } = {}) {
       for (const [relPath, blob] of [...store]) {
         // Mirror the real prune: `skip` is consulted per directory, so a skipped
@@ -32,7 +40,10 @@ vi.mock('./opfs.js', async () => {
         const parts = relPath.split('/')
         let pruned = false
         for (let i = 1; i < parts.length; i++) {
-          if (skip?.(parts.slice(0, i).join('/'), 'directory')) { pruned = true; break }
+          if (skip?.(parts.slice(0, i).join('/'), 'directory')) {
+            pruned = true
+            break
+          }
         }
         if (pruned || skip?.(relPath, 'file')) continue
         let attempt = 0
@@ -51,7 +62,9 @@ vi.mock('./opfs.js', async () => {
     async writeProjectFile(_projectId, relPath, data) {
       store.set(relPath, new Blob([data]))
     },
-    async getQuota() { return { quota: 10 * 1024 * 1024 * 1024, usage: 0 } },
+    async getQuota() {
+      return { quota: 10 * 1024 * 1024 * 1024, usage: 0 }
+    },
   }
 })
 
@@ -65,9 +78,13 @@ function memorySink() {
   return {
     sink: () => ({
       streaming: false,
-      write: (c) => { chunks.push(c.slice()) },
+      write: (c) => {
+        chunks.push(c.slice())
+      },
       close: async () => {},
-      abort: () => { chunks.length = 0 },
+      abort: () => {
+        chunks.length = 0
+      },
     }),
     blob: () => new Blob(chunks),
   }
@@ -83,7 +100,10 @@ const MANIFEST = buildManifest({
 
 function seedProject() {
   store.clear()
-  store.set('project.json', new Blob([JSON.stringify({ id: 'old-id', name: 'Ross Ice Shelf', images: [{ uuid: 'img-1' }] })]))
+  store.set(
+    'project.json',
+    new Blob([JSON.stringify({ id: 'old-id', name: 'Ross Ice Shelf', images: [{ uuid: 'img-1' }] })]),
+  )
   store.set('gcps.json', new Blob([JSON.stringify({ crs: 'EPSG:3031', gcps: [{ id: 'g1', x: 1, y: 2, z: 3 }] })]))
   // Binary sidecars: float payloads must survive byte-exact, which is the point
   // of storing (not deflating) them.
@@ -105,7 +125,11 @@ async function roundTrip(includeDerived = true) {
   const before = await snapshot()
   const { sink, blob } = memorySink()
   const res = await exportProjectArchive({
-    projectId: 'src', manifest: MANIFEST, fileName: 'p.websfm', includeDerived, openSink: sink,
+    projectId: 'src',
+    manifest: MANIFEST,
+    fileName: 'p.websfm',
+    includeDerived,
+    openSink: sink,
   })
   const archive = blob()
   store.clear()
@@ -113,7 +137,11 @@ async function roundTrip(includeDerived = true) {
   return { before, after: await snapshot(), res, imported, archive }
 }
 
-beforeEach(() => { store.clear(); hooks.onGetFile = null; hooks.fileOverride = null })
+beforeEach(() => {
+  store.clear()
+  hooks.onGetFile = null
+  hooks.fileOverride = null
+})
 
 describe('project archive round trip', () => {
   it('restores every archived file byte-for-byte', async () => {
@@ -131,7 +159,7 @@ describe('project archive round trip', () => {
   it('reports the manifest it read back', async () => {
     const { imported } = await roundTrip()
     expect(imported.manifest).toEqual(MANIFEST)
-    expect(imported.entryCount).toBe(6)   // 7 seeded files − log.ndjson
+    expect(imported.entryCount).toBe(6) // 7 seeded files − log.ndjson
   })
 
   it('excludes only the derived trees when asked, and stays loadable', async () => {
@@ -180,8 +208,7 @@ describe('importProjectArchive', () => {
     const enc = new TextEncoder()
     const foreign = zipStore([{ name: 'project.json', data: enc.encode('{}') }])
     store.clear()
-    await expect(importProjectArchive({ file: new Blob([foreign]), projectId: 'dst' }))
-      .rejects.toThrow(/manifest/)
+    await expect(importProjectArchive({ file: new Blob([foreign]), projectId: 'dst' })).rejects.toThrow(/manifest/)
   })
 
   it('refuses path-traversal entry names', async () => {
@@ -193,7 +220,9 @@ describe('importProjectArchive', () => {
     store.clear()
     const warnings = []
     await importProjectArchive({
-      file: archive, projectId: 'dst', onLog: (m, level) => warnings.push([level, m]),
+      file: archive,
+      projectId: 'dst',
+      onLog: (m, level) => warnings.push([level, m]),
     })
     expect(store.has('../escape.txt')).toBe(false)
     expect(warnings.some(([level, m]) => level === 'warn' && /unsafe paths/.test(m))).toBe(true)
@@ -204,9 +233,13 @@ describe('importProjectArchive', () => {
     const { sink, blob } = memorySink()
     await exportProjectArchive({ projectId: 'src', manifest: MANIFEST, fileName: 'p.websfm', openSink: sink })
     store.clear()
-    await expect(importProjectArchive({
-      file: blob(), projectId: 'dst', limits: { maxTotalBytes: 16 },
-    })).rejects.toThrow(/beyond the .* available/)
+    await expect(
+      importProjectArchive({
+        file: blob(),
+        projectId: 'dst',
+        limits: { maxTotalBytes: 16 },
+      }),
+    ).rejects.toThrow(/beyond the .* available/)
   })
 })
 
@@ -216,8 +249,15 @@ describe('projects saved by the earlier fflate writer', () => {
   it('import and peek read them through the central directory', async () => {
     const { Zip, ZipDeflate, ZipPassThrough } = await import('fflate')
     const parts = []
-    const zip = new Zip((err, chunk) => { if (err) throw err; if (chunk) parts.push(chunk.slice()) })
-    const add = (name, data, deflate) => { const e = deflate ? new ZipDeflate(name, { level: 6 }) : new ZipPassThrough(name); zip.add(e); e.push(data, true) }
+    const zip = new Zip((err, chunk) => {
+      if (err) throw err
+      if (chunk) parts.push(chunk.slice())
+    })
+    const add = (name, data, deflate) => {
+      const e = deflate ? new ZipDeflate(name, { level: 6 }) : new ZipPassThrough(name)
+      zip.add(e)
+      e.push(data, true)
+    }
     const enc = new TextEncoder()
     add(MANIFEST_NAME, enc.encode(JSON.stringify(MANIFEST)), true)
     add('project.json', enc.encode(JSON.stringify({ id: 'x', name: 'Old' })), true)
@@ -240,10 +280,16 @@ async function saveReconstruction(generation, values) {
     const name = `reconstruction.json.${generation}.c1.pos.bin`
     const buffer = new Float64Array(values).buffer
     store.set(name, new Blob([buffer]))
-    store.set('reconstruction.json', new Blob([JSON.stringify({
-      version: 3, clouds: [{ id: 'c1', kind: 'sparse', pointCount: values.length / 3 }],
-      binaryFiles: { 'c1.pos': { name, bytes: buffer.byteLength } },
-    })]))
+    store.set(
+      'reconstruction.json',
+      new Blob([
+        JSON.stringify({
+          version: 3,
+          clouds: [{ id: 'c1', kind: 'sparse', pointCount: values.length / 3 }],
+          binaryFiles: { 'c1.pos': { name, bytes: buffer.byteLength } },
+        }),
+      ]),
+    )
     for (const key of [...store.keys()]) {
       if (key.startsWith('reconstruction.json.') && key !== name) store.delete(key)
     }
@@ -267,8 +313,14 @@ function reopenedModel() {
 async function exportAndReopen(opts = {}) {
   const { sink, blob } = memorySink()
   const logs = []
-  await exportProjectArchive({ projectId: 'src', manifest: MANIFEST, fileName: 'p.websfm', openSink: sink,
-    onLog: (m, level) => logs.push([level, m]), ...opts })
+  await exportProjectArchive({
+    projectId: 'src',
+    manifest: MANIFEST,
+    fileName: 'p.websfm',
+    openSink: sink,
+    onLog: (m, level) => logs.push([level, m]),
+    ...opts,
+  })
   store.clear()
   await importProjectArchive({ file: blob(), projectId: 'dst' })
   return logs
@@ -287,7 +339,9 @@ describe('saving a busy project', () => {
     }
     await exportAndReopen()
     expect(await reopenedModel()).toEqual({ 'c1.pos': [4, 5, 6, 7, 8, 9] })
-    expect([...store.keys()].filter((k) => k.startsWith('reconstruction.json.'))).toEqual(['reconstruction.json.genB.c1.pos.bin'])
+    expect([...store.keys()].filter((k) => k.startsWith('reconstruction.json.'))).toEqual([
+      'reconstruction.json.genB.c1.pos.bin',
+    ])
   })
 
   it('a save that starts while the model is being archived waits for it', async () => {
@@ -298,7 +352,10 @@ describe('saving a busy project', () => {
     // The archive reads the metadata under the document's lock; a save queued then
     // commits after, so the archive holds generation A, whole.
     class SaveOnRead extends Blob {
-      arrayBuffer() { pending ??= saveReconstruction('genB', [7, 8, 9]); return super.arrayBuffer() }
+      arrayBuffer() {
+        pending ??= saveReconstruction('genB', [7, 8, 9])
+        return super.arrayBuffer()
+      }
     }
     store.set('reconstruction.json', new SaveOnRead([real]))
     await exportAndReopen()
@@ -312,9 +369,12 @@ describe('saving a busy project', () => {
     store.set('lod/c1.lod', new Blob([big]))
     const stale = Object.assign(new Error('The requested file could not be read'), { name: 'NotReadableError' })
     class StaleSnapshot extends Blob {
-      slice() { return { arrayBuffer: () => Promise.reject(stale) } }
+      slice() {
+        return { arrayBuffer: () => Promise.reject(stale) }
+      }
     }
-    hooks.fileOverride = (relPath, attempt) => (relPath === 'lod/c1.lod' && attempt === 0 ? new StaleSnapshot([big]) : null)
+    hooks.fileOverride = (relPath, attempt) =>
+      relPath === 'lod/c1.lod' && attempt === 0 ? new StaleSnapshot([big]) : null
     await exportAndReopen()
     const back = new Uint8Array(await store.get('lod/c1.lod').arrayBuffer())
     expect(back.length).toBe(big.length)
@@ -328,11 +388,14 @@ describe('saving a busy project', () => {
     store.set('lod/c1.lod', new Blob([big]))
     const stale = Object.assign(new Error('The requested file could not be read'), { name: 'NotReadableError' })
     class Rewritten extends Blob {
-      stream() { return new ReadableStream({ pull: (c) => c.error(stale) }) }
+      stream() {
+        return new ReadableStream({ pull: (c) => c.error(stale) })
+      }
     }
     hooks.fileOverride = (relPath) => (relPath === 'lod/c1.lod' ? new Rewritten([big]) : null)
     const { sink } = memorySink()
-    await expect(exportProjectArchive({ projectId: 'src', manifest: MANIFEST, fileName: 'p.websfm', openSink: sink }))
-      .rejects.toThrow(/lod\/c1\.lod was rewritten while the project was being saved/)
+    await expect(
+      exportProjectArchive({ projectId: 'src', manifest: MANIFEST, fileName: 'p.websfm', openSink: sink }),
+    ).rejects.toThrow(/lod\/c1\.lod was rewritten while the project was being saved/)
   }, 30_000)
 })

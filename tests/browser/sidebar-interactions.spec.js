@@ -19,15 +19,31 @@ async function seed(page) {
     for (const name of ['north.laz', 'south.laz']) {
       store.importCloud({ count: 2, pos: new Float64Array([500000, 7000000, 0, 500001, 7000000, 1]) }, name)
     }
-    await useFootprintsStore().addFootprints([{ name: 'IMG_1.jpg', imageName: 'IMG_1.jpg',
-      rings: [[[500000, 7000000], [500010, 7000000], [500010, 7000010]]] }], 'EPSG:32632', 'Site outline')
+    await useFootprintsStore().addFootprints(
+      [
+        {
+          name: 'IMG_1.jpg',
+          imageName: 'IMG_1.jpg',
+          rings: [
+            [
+              [500000, 7000000],
+              [500010, 7000000],
+              [500010, 7000010],
+            ],
+          ],
+        },
+      ],
+      'EPSG:32632',
+      'Site outline',
+    )
   })
 }
 
-const cloudNames = (page) => page.evaluate(async () => {
-  const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-  return useReconstructionStore().clouds.map((c) => c.name)
-})
+const cloudNames = (page) =>
+  page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    return useReconstructionStore().clouds.map((c) => c.name)
+  })
 
 test('sidebar rows rename, expand and confirm through the shared primitives', async ({ page }) => {
   const errors = []
@@ -67,10 +83,13 @@ test('sidebar rows rename, expand and confirm through the shared primitives', as
 
   // A menu opened at the bottom edge is lifted by its measured height.
   const viewport = page.viewportSize()
-  await page.evaluate(({ h }) => {
-    const row = [...document.querySelectorAll('.list-item')].find((el) => el.textContent.includes('north.laz'))
-    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: h - 2 }))
-  }, { h: viewport.height })
+  await page.evaluate(
+    ({ h }) => {
+      const row = [...document.querySelectorAll('.list-item')].find((el) => el.textContent.includes('north.laz'))
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: h - 2 }))
+    },
+    { h: viewport.height },
+  )
   const box = await menu.boundingBox()
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height)
   expect(box.y).toBeGreaterThan(0)
@@ -125,13 +144,30 @@ test('the tab context menu closes on Escape and on an outside click, then tabs c
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
   await page.evaluate(async () => {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-    const W = 4, canvas = document.createElement('canvas')
+    const W = 4,
+      canvas = document.createElement('canvas')
     canvas.width = canvas.height = W
-    useReconstructionStore().dem = { width: W, height: W, gsd: 1, originX: 0, originY: W, crs: 'local', unit: 'm',
-      data: new Float32Array(W * W).fill(5), mask: new Uint8Array(W * W).fill(1), zMin: 5, zMax: 5,
-      name: 'DEM', createdAt: 1, previewUrl: canvas.toDataURL() }
+    useReconstructionStore().dem = {
+      width: W,
+      height: W,
+      gsd: 1,
+      originX: 0,
+      originY: W,
+      crs: 'local',
+      unit: 'm',
+      data: new Float32Array(W * W).fill(5),
+      mask: new Uint8Array(W * W).fill(1),
+      zMin: 5,
+      zMax: 5,
+      name: 'DEM',
+      createdAt: 1,
+      previewUrl: canvas.toDataURL(),
+    }
   })
-  await page.getByRole('button', { name: /Products/ }).first().click()
+  await page
+    .getByRole('button', { name: /Products/ })
+    .first()
+    .click()
   await page.locator('.item-name', { hasText: /^DEM$/ }).dblclick()
   const tab = page.locator('.tabstrip .tab', { hasText: 'DEM' })
   await expect(tab).toHaveClass(/active/)
@@ -162,8 +198,23 @@ test('a reference raster declares its accuracy and datum after a confident impor
     const { useExternalStore } = await import('/src/stores/useExternalStore.js')
     const z = new Float32Array(64 * 64).fill(120)
     // Float samples: a high-confidence DEM, so no confirm modal opens on import.
-    await useExternalStore().importRaster(new File([writeGeoTiff({ width: 64, height: 64, samples: [{ bits: 32, format: 3 }], photometric: 1,
-      data: new Uint8Array(z.buffer), pixelScale: [2, 2, 0], tiepoint: [0, 0, 0, 1000, 2000, 0], geoKeys: geoKeysForEpsg(3031, false) })], 'rema.tif'))
+    await useExternalStore().importRaster(
+      new File(
+        [
+          writeGeoTiff({
+            width: 64,
+            height: 64,
+            samples: [{ bits: 32, format: 3 }],
+            photometric: 1,
+            data: new Uint8Array(z.buffer),
+            pixelScale: [2, 2, 0],
+            tiepoint: [0, 0, 0, 1000, 2000, 0],
+            geoKeys: geoKeysForEpsg(3031, false),
+          }),
+        ],
+        'rema.tif',
+      ),
+    )
   })
   // The import opens the section itself; open it only if it is still collapsed.
   const section = page.getByRole('button', { name: /Reference Data/ })

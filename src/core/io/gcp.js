@@ -11,10 +11,10 @@
 import { IMAGE_COLUMN } from './nameMatch.js'
 
 const DELIMITERS = [
-  { id: 'tab',       char: '\t', label: 'Tab' },
-  { id: 'comma',     char: ',',  label: 'Comma' },
-  { id: 'semicolon', char: ';',  label: 'Semicolon' },
-  { id: 'space',     char: ' ',  label: 'Whitespace' },
+  { id: 'tab', char: '\t', label: 'Tab' },
+  { id: 'comma', char: ',', label: 'Comma' },
+  { id: 'semicolon', char: ';', label: 'Semicolon' },
+  { id: 'space', char: ' ', label: 'Whitespace' },
 ]
 
 export const DELIMITER_OPTIONS = DELIMITERS
@@ -48,7 +48,10 @@ export function isGroundControl(gcp, { precision = () => true } = {}) {
 
 // Strip comment (#) and blank lines.
 function contentLines(text) {
-  return text.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim() && !l.trimStart().startsWith('#'))
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim() && !l.trimStart().startsWith('#'))
 }
 
 // One content line → trimmed cells (exported for the streaming XYZ reader, which
@@ -63,10 +66,14 @@ export function splitRow(line, delimId) {
 export function sniffDelimiter(text) {
   const lines = contentLines(text)
   if (!lines.length) return 'comma'
-  let best = 'comma', bestCount = 0
+  let best = 'comma',
+    bestCount = 0
   for (const d of DELIMITERS) {
     const n = splitRow(lines[0], d.id).length
-    if (n > bestCount) { bestCount = n; best = d.id }
+    if (n > bestCount) {
+      bestCount = n
+      best = d.id
+    }
   }
   return best
 }
@@ -89,15 +96,24 @@ const PLAIN_X = /^(x|e)$/i
 const PLAIN_Y = /^(y|n)$/i
 
 const PATTERNS = {
-  name:  /^(name|id|label|gcp|point|pt|(gcp|point|pt|marker|target)_?(name|id|label))$/i,
-  z:     /^(z|elev|elevation|alt|altitude|height|h|z_?(map|world|ground|geo|proj|utm|crs))$/i,
+  name: /^(name|id|label|gcp|point|pt|(gcp|point|pt|marker|target)_?(name|id|label))$/i,
+  z: /^(z|elev|elevation|alt|altitude|height|h|z_?(map|world|ground|geo|proj|utm|crs))$/i,
   image: IMAGE_COLUMN,
-  px:    /^(px|pixelx|pixel_x|imx|u|col|column|x_?(px|pix|pixel|img|image))$/i,
-  py:    /^(py|pixely|pixel_y|imy|v|row|line|y_?(px|pix|pixel|img|image))$/i,
-  role:  /^(role|type|usage|pointtype|point_type)$/i,
-  accuracyX: new RegExp(`^(accuracyx|accuracy_x|accx|acc_x|sigmax|sigma_x|stdx|std_x|(x|e|east|easting|lon|longitude)(_?${FRAME})?_?${ACC})$`, 'i'),
-  accuracyY: new RegExp(`^(accuracyy|accuracy_y|accy|acc_y|sigmay|sigma_y|stdy|std_y|(y|n|north|northing|lat|latitude)(_?${FRAME})?_?${ACC})$`, 'i'),
-  accuracyZ: new RegExp(`^(accuracyz|accuracy_z|accz|acc_z|sigmaz|sigma_z|stdz|std_z|(z|elev|elevation|alt|altitude|height|h)(_?${FRAME})?_?${ACC})$`, 'i'),
+  px: /^(px|pixelx|pixel_x|imx|u|col|column|x_?(px|pix|pixel|img|image))$/i,
+  py: /^(py|pixely|pixel_y|imy|v|row|line|y_?(px|pix|pixel|img|image))$/i,
+  role: /^(role|type|usage|pointtype|point_type)$/i,
+  accuracyX: new RegExp(
+    `^(accuracyx|accuracy_x|accx|acc_x|sigmax|sigma_x|stdx|std_x|(x|e|east|easting|lon|longitude)(_?${FRAME})?_?${ACC})$`,
+    'i',
+  ),
+  accuracyY: new RegExp(
+    `^(accuracyy|accuracy_y|accy|acc_y|sigmay|sigma_y|stdy|std_y|(y|n|north|northing|lat|latitude)(_?${FRAME})?_?${ACC})$`,
+    'i',
+  ),
+  accuracyZ: new RegExp(
+    `^(accuracyz|accuracy_z|accz|acc_z|sigmaz|sigma_z|stdz|std_z|(z|elev|elevation|alt|altitude|height|h)(_?${FRAME})?_?${ACC})$`,
+    'i',
+  ),
   accuracyXY: /^(accuracyxy|accuracy_xy|horizontalaccuracy|horizontal_accuracy|hrms|cep|cep95|sigmah|sigma_h)$/i,
   accuracyImgX: /^(accuracyimgx|accuracy_img_x|imgaccx|img_acc_x|sigmau|sigma_u|pixelaccuracyx|pixel_accuracy_x)$/i,
   accuracyImgY: /^(accuracyimgy|accuracy_img_y|imgaccy|img_acc_y|sigmav|sigma_v|pixelaccuracyy|pixel_accuracy_y)$/i,
@@ -107,8 +123,23 @@ const PATTERNS = {
 }
 
 // Matched by name in this order; x / y are decided afterwards (see guessMapping).
-const ROLES = ['name', 'z', 'image', 'px', 'py', 'role', 'accuracyX', 'accuracyY', 'accuracyZ', 'accuracyXY',
-  'accuracyImgX', 'accuracyImgY', 'correlationXY', 'correlationXZ', 'correlationYZ']
+const ROLES = [
+  'name',
+  'z',
+  'image',
+  'px',
+  'py',
+  'role',
+  'accuracyX',
+  'accuracyY',
+  'accuracyZ',
+  'accuracyXY',
+  'accuracyImgX',
+  'accuracyImgY',
+  'correlationXY',
+  'correlationXZ',
+  'correlationYZ',
+]
 
 // Returns { name, x, y, z, image, px, py, … } mapping each role to a column index
 // (or null). With a header, by header text; only a file whose header names nothing
@@ -124,11 +155,23 @@ const ROLES = ['name', 'z', 'image', 'px', 'py', 'role', 'accuracyX', 'accuracyY
 // height (a list of image observations).
 export function guessMapping(headerCells, columnCount, hasHeader, { positional = true } = {}) {
   const mapping = {
-    name: null, x: null, y: null, z: null, image: null, px: null, py: null, role: null,
-    accuracyX: null, accuracyY: null, accuracyZ: null,
+    name: null,
+    x: null,
+    y: null,
+    z: null,
+    image: null,
+    px: null,
+    py: null,
+    role: null,
+    accuracyX: null,
+    accuracyY: null,
+    accuracyZ: null,
     accuracyXY: null,
-    accuracyImgX: null, accuracyImgY: null,
-    correlationXY: null, correlationXZ: null, correlationYZ: null,
+    accuracyImgX: null,
+    accuracyImgY: null,
+    correlationXY: null,
+    correlationXZ: null,
+    correlationYZ: null,
   }
 
   if (hasHeader) {
@@ -136,14 +179,31 @@ export function guessMapping(headerCells, columnCount, hasHeader, { positional =
     const used = new Set()
     cells.forEach((cell, i) => {
       for (const role of ROLES) {
-        if (mapping[role] == null && PATTERNS[role].test(cell)) { mapping[role] = i; used.add(i); break }
+        if (mapping[role] == null && PATTERNS[role].test(cell)) {
+          mapping[role] = i
+          used.add(i)
+          break
+        }
       }
     })
-    const find = (re) => { const i = cells.findIndex((c, j) => !used.has(j) && re.test(c)); return i === -1 ? null : i }
-    const pair = (reX, reY) => { const x = find(reX), y = find(reY); return x != null && y != null ? [x, y] : null }
-    const geo = pair(LON, LAT), projected = pair(GROUND_X, GROUND_Y), plain = pair(PLAIN_X, PLAIN_Y)
-    const plainArePixels = plain && mapping.image != null && mapping.px == null && mapping.py == null
-      && (geo || projected || mapping.z == null)
+    const find = (re) => {
+      const i = cells.findIndex((c, j) => !used.has(j) && re.test(c))
+      return i === -1 ? null : i
+    }
+    const pair = (reX, reY) => {
+      const x = find(reX),
+        y = find(reY)
+      return x != null && y != null ? [x, y] : null
+    }
+    const geo = pair(LON, LAT),
+      projected = pair(GROUND_X, GROUND_Y),
+      plain = pair(PLAIN_X, PLAIN_Y)
+    const plainArePixels =
+      plain &&
+      mapping.image != null &&
+      mapping.px == null &&
+      mapping.py == null &&
+      (geo || projected || mapping.z == null)
     const ground = geo ?? projected ?? (plainArePixels ? null : plain)
     if (ground) [mapping.x, mapping.y] = ground
     if (plainArePixels) [mapping.px, mapping.py] = plain
@@ -169,14 +229,14 @@ export function guessGcpCrs(headerCells, mapping) {
 
 export const ROLE_LABELS = {
   ignore: 'Ignore',
-  name:  'Name / ID',
-  x:     'Abs X',
-  y:     'Abs Y',
-  z:     'Abs Z',
+  name: 'Name / ID',
+  x: 'Abs X',
+  y: 'Abs Y',
+  z: 'Abs Z',
   image: 'Image name',
-  px:    'Pixel X',
-  py:    'Pixel Y',
-  role:  'Control / check / marker',
+  px: 'Pixel X',
+  py: 'Pixel Y',
+  role: 'Control / check / marker',
   accuracyX: 'X accuracy',
   accuracyY: 'Y accuracy',
   accuracyZ: 'Z accuracy',
@@ -200,7 +260,10 @@ export const ROLE_LABELS = {
 // would reload a marker from disk as a control point at whatever coordinates the
 // table happens to hold.
 export function normalizeGcpRole(value) {
-  const s = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+  const s = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '')
   if (['check', 'checkpoint', 'checkpt', 'validation'].includes(s)) return 'check'
   if (['marker', 'scalemarker', 'scalebar'].includes(s)) return 'marker'
   return 'control'
@@ -234,14 +297,26 @@ export function buildGcps(dataRows, mapping) {
 
   for (const row of dataRows) {
     const name = mapping.name != null ? row[mapping.name]?.trim() : ''
-    if (!name) { skipped++; continue }
+    if (!name) {
+      skipped++
+      continue
+    }
 
     let g = byName.get(name)
     if (!g) {
       g = {
-        name, role: 'control', x: null, y: null, z: null,
-        accuracyX: null, accuracyY: null, accuracyZ: null, observations: [],
-        correlationXY: null, correlationXZ: null, correlationYZ: null,
+        name,
+        role: 'control',
+        x: null,
+        y: null,
+        z: null,
+        accuracyX: null,
+        accuracyY: null,
+        accuracyZ: null,
+        observations: [],
+        correlationXY: null,
+        correlationXZ: null,
+        correlationYZ: null,
       }
       byName.set(name, g)
     }
@@ -279,7 +354,9 @@ export function buildGcps(dataRows, mapping) {
       const py = num(row[mapping.py])
       if (imageName && px != null && py != null) {
         g.observations.push({
-          imageName, px, py,
+          imageName,
+          px,
+          py,
           accuracyX: mapping.accuracyImgX != null ? positiveNum(row[mapping.accuracyImgX]) : null,
           accuracyY: mapping.accuracyImgY != null ? positiveNum(row[mapping.accuracyImgY]) : null,
         })
@@ -294,10 +371,19 @@ export function buildGcps(dataRows, mapping) {
   const noGround = mapping.x == null || mapping.y == null
   for (const g of byName.values()) {
     if (g.role === 'marker') {
-      if (!g.observations.length) { skipped++; continue }
-      g.x = null; g.y = null; g.z = null
-      g.accuracyX = null; g.accuracyY = null; g.accuracyZ = null
-      g.correlationXY = null; g.correlationXZ = null; g.correlationYZ = null
+      if (!g.observations.length) {
+        skipped++
+        continue
+      }
+      g.x = null
+      g.y = null
+      g.z = null
+      g.accuracyX = null
+      g.accuracyY = null
+      g.accuracyZ = null
+      g.correlationXY = null
+      g.correlationXZ = null
+      g.correlationYZ = null
       gcps.push(g)
       continue
     }
@@ -305,7 +391,10 @@ export function buildGcps(dataRows, mapping) {
     // each point (x/y null) for the store to join to an existing point of that name
     // or to add as a marker. With ground columns, a row lacking them is skipped.
     if (g.x == null || g.y == null) {
-      if (!noGround || !g.observations.length) { skipped++; continue }
+      if (!noGround || !g.observations.length) {
+        skipped++
+        continue
+      }
     }
     gcps.push(g)
   }

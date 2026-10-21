@@ -8,7 +8,10 @@ export function useTabDrag({ tabs, moveTab }) {
   const dragOverTabId = ref(null)
 
   function onTabDragStart(e, tab) {
-    if (!tab.closable) { e.preventDefault(); return }
+    if (!tab.closable) {
+      e.preventDefault()
+      return
+    }
     draggedTabId.value = tab.id
     e.dataTransfer.effectAllowed = 'move'
   }
@@ -32,14 +35,17 @@ export function useTabDrag({ tabs, moveTab }) {
   function onTabRightClick(e, tab) {
     if (!tab.closable) return
     e.preventDefault()
-    const menuW = 150, menuH = 132
+    const menuW = 150,
+      menuH = 132
     tabCtx.value = {
       x: Math.min(e.clientX, window.innerWidth - menuW),
       y: Math.min(e.clientY, window.innerHeight - menuH),
       id: tab.id,
     }
   }
-  function closeTabCtx() { tabCtx.value = null }
+  function closeTabCtx() {
+    tabCtx.value = null
+  }
   // Are there any closable tabs to the left / right of the menu target?
   const tabCtxHasLeft = computed(() => {
     if (!tabCtx.value) return false
@@ -52,13 +58,21 @@ export function useTabDrag({ tabs, moveTab }) {
     return tabs.value.some((t, i) => t.closable && i > idx)
   })
   const tabCtxHasOthers = computed(() =>
-    tabCtx.value ? tabs.value.some((t) => t.closable && t.id !== tabCtx.value.id) : false
+    tabCtx.value ? tabs.value.some((t) => t.closable && t.id !== tabCtx.value.id) : false,
   )
 
   return {
-    draggedTabId, dragOverTabId,
-    onTabDragStart, onTabDragOver, onTabDrop, onTabDragEnd,
-    tabCtx, onTabRightClick, closeTabCtx,
-    tabCtxHasLeft, tabCtxHasRight, tabCtxHasOthers,
+    draggedTabId,
+    dragOverTabId,
+    onTabDragStart,
+    onTabDragOver,
+    onTabDrop,
+    onTabDragEnd,
+    tabCtx,
+    onTabRightClick,
+    closeTabCtx,
+    tabCtxHasLeft,
+    tabCtxHasRight,
+    tabCtxHasOthers,
   }
 }

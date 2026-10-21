@@ -32,11 +32,13 @@ const NMAD_K = 1.4826 // NMAD = 1.4826 · median |ΔZ − median|; equals σ for
 export async function compareDemToReference(dem, sampleRef, { maxSide = 512, sliceMs = 30, signal = null } = {}) {
   const { width: w, height: h, gsd, originX, originY, data, mask } = dem
   const step = Math.max(1, Math.ceil(Math.max(w, h) / maxSide))
-  const gw = Math.ceil(w / step), gh = Math.ceil(h / step)
+  const gw = Math.ceil(w / step),
+    gh = Math.ceil(h / step)
   const diff = new Float32Array(gw * gh).fill(NaN)
   const demOnly = new Uint8Array(gw * gh)
   const half = step >> 1
-  let demCells = 0, compared = 0
+  let demCells = 0,
+    compared = 0
   let sliceStart = now()
 
   for (let gr = 0; gr < gh; gr++) {
@@ -50,7 +52,10 @@ export async function compareDemToReference(dem, sampleRef, { maxSide = 512, sli
       if (!Number.isFinite(z)) continue
       demCells++
       const ref = sampleRef(originX + (c + 0.5) * gsd, y)
-      if (ref == null || !Number.isFinite(ref)) { demOnly[gr * gw + gc] = 1; continue }
+      if (ref == null || !Number.isFinite(ref)) {
+        demOnly[gr * gw + gc] = 1
+        continue
+      }
       diff[gr * gw + gc] = z - ref
       compared++
     }
@@ -76,13 +81,22 @@ export function summarizeDifferences(values) {
   const n = values?.length ?? 0
   if (!n) return null
   const sorted = Float64Array.from(values).sort()
-  let sum = 0, sumSq = 0
-  for (let i = 0; i < n; i++) { sum += sorted[i]; sumSq += sorted[i] * sorted[i] }
+  let sum = 0,
+    sumSq = 0
+  for (let i = 0; i < n; i++) {
+    sum += sorted[i]
+    sumSq += sorted[i] * sorted[i]
+  }
   const mean = sum / n
   const median = quantile(sorted, 0.5)
-  const absDev = new Float64Array(n), absErr = new Float64Array(n)
-  for (let i = 0; i < n; i++) { absDev[i] = Math.abs(sorted[i] - median); absErr[i] = Math.abs(sorted[i]) }
-  absDev.sort(); absErr.sort()
+  const absDev = new Float64Array(n),
+    absErr = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    absDev[i] = Math.abs(sorted[i] - median)
+    absErr[i] = Math.abs(sorted[i])
+  }
+  absDev.sort()
+  absErr.sort()
   return {
     n,
     mean,
@@ -104,15 +118,25 @@ export function summarizeDifferences(values) {
 // blunder tail as a spike at the edge).
 // → { lo, hi, binWidth, counts:number[], below, above }
 export function differenceHistogram(diff, lo, hi, bins = 40) {
-  if (!(hi > lo)) { lo -= 0.5; hi += 0.5 }
+  if (!(hi > lo)) {
+    lo -= 0.5
+    hi += 0.5
+  }
   const counts = new Array(bins).fill(0)
   const binWidth = (hi - lo) / bins
-  let below = 0, above = 0
+  let below = 0,
+    above = 0
   for (let i = 0; i < diff.length; i++) {
     const v = diff[i]
     if (Number.isNaN(v)) continue
-    if (v < lo) { below++; continue }
-    if (v > hi) { above++; continue }
+    if (v < lo) {
+      below++
+      continue
+    }
+    if (v > hi) {
+      above++
+      continue
+    }
     counts[Math.min(bins - 1, Math.floor((v - lo) / binWidth))]++
   }
   return { lo, hi, binWidth, counts, below, above }
@@ -135,11 +159,17 @@ export function differenceRgba({ width, height, diff, demOnly = null }, range, r
   for (let i = 0; i < diff.length; i++) {
     const v = diff[i]
     if (Number.isNaN(v)) {
-      if (demOnly?.[i]) { rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = 128; rgba[i * 4 + 3] = 90 }
+      if (demOnly?.[i]) {
+        rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = 128
+        rgba[i * 4 + 3] = 90
+      }
       continue
     }
     const [r, g, b] = ramp(0.5 + 0.5 * Math.max(-1, Math.min(1, v / range)))
-    rgba[i * 4] = r; rgba[i * 4 + 1] = g; rgba[i * 4 + 2] = b; rgba[i * 4 + 3] = 255
+    rgba[i * 4] = r
+    rgba[i * 4 + 1] = g
+    rgba[i * 4 + 2] = b
+    rgba[i * 4 + 3] = 255
   }
   return rgba
 }
@@ -147,7 +177,8 @@ export function differenceRgba({ width, height, diff, demOnly = null }, range, r
 // Linear-interpolated quantile of an ascending array (the R-7 / NumPy default).
 function quantile(sorted, q) {
   const pos = (sorted.length - 1) * q
-  const lo = Math.floor(pos), hi = Math.ceil(pos)
+  const lo = Math.floor(pos),
+    hi = Math.ceil(pos)
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo)
 }
 

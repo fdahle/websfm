@@ -28,7 +28,9 @@ const overallPct = computed(() => {
 
 // While downloading the modal is not dismissable (closing would leave a half-
 // written cache entry). Backdrop/Escape close maps to decline only pre-download.
-function onClose() { if (!downloading.value) models.decline() }
+function onClose() {
+  if (!downloading.value) models.decline()
+}
 
 const anyDownload = computed(() => (request.value?.items ?? []).some((m) => !m.userSupplied))
 const anySupplied = computed(() => (request.value?.items ?? []).some((m) => m.userSupplied))
@@ -47,15 +49,10 @@ function onDrop(item, ev) {
 </script>
 
 <template>
-  <ModalShell
-    v-if="request"
-    title="Download model files"
-    aria-label="Download model files"
-    @close="onClose"
-  >
+  <ModalShell v-if="request" title="Download model files" aria-label="Download model files" @close="onClose">
     <p class="mdl-intro">
-      This feature runs a learned neural-network model in your browser. The model
-      weights are <template v-if="anyDownload">downloaded ({{ totalMB }} MB) and</template>
+      This feature runs a learned neural-network model in your browser. The model weights are
+      <template v-if="anyDownload">downloaded ({{ totalMB }} MB) and</template>
       cached locally, once — no images ever leave your machine.
     </p>
 
@@ -70,13 +67,12 @@ function onDrop(item, ev) {
           <a v-if="item.licenseUrl" :href="item.licenseUrl" target="_blank" rel="noopener">{{ item.license }}</a>
           <template v-else>{{ item.license }}</template>
         </div>
-        <div v-if="item.userSupplied" class="mdl-byo"
-          @dragover.prevent.stop @drop.prevent.stop="onDrop(item, $event)">
+        <div v-if="item.userSupplied" class="mdl-byo" @dragover.prevent.stop @drop.prevent.stop="onDrop(item, $event)">
           <p v-if="item.ready" class="mdl-ok">✓ File received</p>
           <template v-else>
             <p class="mdl-byo-text">
-              These weights carry a non-commercial license, so websfm does not ship
-              them. If your use qualifies, get the file yourself — once per browser:
+              These weights carry a non-commercial license, so websfm does not ship them. If your use qualifies, get the
+              file yourself — once per browser:
             </p>
             <ol class="mdl-steps">
               <li>
@@ -105,14 +101,16 @@ function onDrop(item, ev) {
 
     <template #footer>
       <button v-if="!downloading" class="btn" @click="models.decline()">Cancel</button>
-      <button v-if="!downloading && anyDownload" class="btn btn-primary"
-        :disabled="!suppliedAll" :title="suppliedAll ? '' : 'Provide the file above first'"
-        @click="models.approve()">
+      <button
+        v-if="!downloading && anyDownload"
+        class="btn btn-primary"
+        :disabled="!suppliedAll"
+        :title="suppliedAll ? '' : 'Provide the file above first'"
+        @click="models.approve()"
+      >
         Download ({{ totalMB }} MB)
       </button>
-      <button v-else-if="!downloading && anySupplied" class="btn btn-primary" disabled>
-        Waiting for the file…
-      </button>
+      <button v-else-if="!downloading && anySupplied" class="btn btn-primary" disabled>Waiting for the file…</button>
       <button v-else class="btn" disabled>Downloading…</button>
     </template>
   </ModalShell>
@@ -124,22 +122,92 @@ function onDrop(item, ev) {
    raises this prompt mid-run — a per-image detect, Smart Select — must stay
    clickable rather than sit under the progress backdrop. Declared after the
    modal.css import so it wins on source order at equal specificity. */
-.overlay { z-index: 400; }
+.overlay {
+  z-index: 400;
+}
 
-.mdl-intro { margin: 0 0 14px; line-height: 1.5; }
-.mdl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.mdl-item { display: flex; flex-direction: column; gap: 6px; }
-.mdl-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-.mdl-label { font-size: 13px; }
-.mdl-size { font-size: 12px; opacity: 0.7; font-variant-numeric: tabular-nums; }
-.mdl-license { font-size: 11px; opacity: 0.6; }
-.mdl-bar { height: 6px; border-radius: 3px; background: var(--panel-border); overflow: hidden; }
-.mdl-bar-fill { height: 100%; background: var(--accent); transition: width 0.15s linear; }
-.mdl-overall { margin: 14px 0 0; font-size: 13px; opacity: 0.8; font-variant-numeric: tabular-nums; }
-.mdl-error { margin: 12px 0 0; color: var(--danger, #e05252); font-size: 13px; }
-.mdl-byo { border: 1px dashed var(--panel-border); border-radius: 6px; padding: 8px 10px; font-size: 12px; }
-.mdl-byo-text { margin: 0 0 6px; line-height: 1.45; }
-.mdl-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; line-height: 1.45; }
-.mdl-pick { font-size: 12px; padding: 2px 8px; cursor: pointer; }
-.mdl-ok { margin: 0; color: var(--success, #3fa76a); }
+.mdl-intro {
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+.mdl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mdl-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mdl-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.mdl-label {
+  font-size: 13px;
+}
+.mdl-size {
+  font-size: 12px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.mdl-license {
+  font-size: 11px;
+  opacity: 0.6;
+}
+.mdl-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-border);
+  overflow: hidden;
+}
+.mdl-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+.mdl-overall {
+  margin: 14px 0 0;
+  font-size: 13px;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+.mdl-error {
+  margin: 12px 0 0;
+  color: var(--danger, #e05252);
+  font-size: 13px;
+}
+.mdl-byo {
+  border: 1px dashed var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.mdl-byo-text {
+  margin: 0 0 6px;
+  line-height: 1.45;
+}
+.mdl-steps {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.45;
+}
+.mdl-pick {
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.mdl-ok {
+  margin: 0;
+  color: var(--success, #3fa76a);
+}
 </style>

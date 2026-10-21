@@ -25,15 +25,28 @@ export function percentileRange(samples, spp, { loQ = 0.005, hiQ = 0.995 } = {})
     n += colour
   }
   if (!n) return { lo: 0, hi: 65535 }
-  const loTarget = Math.floor(loQ * (n - 1)), hiTarget = Math.floor(hiQ * (n - 1))
-  let lo = 0, hi = 65535, acc = 0, haveLo = false
+  const loTarget = Math.floor(loQ * (n - 1)),
+    hiTarget = Math.floor(hiQ * (n - 1))
+  let lo = 0,
+    hi = 65535,
+    acc = 0,
+    haveLo = false
   for (let v = 0; v < 65536; v++) {
     acc += hist[v]
-    if (!haveLo && acc > loTarget) { lo = v; haveLo = true }
-    if (acc > hiTarget) { hi = v; break }
+    if (!haveLo && acc > loTarget) {
+      lo = v
+      haveLo = true
+    }
+    if (acc > hiTarget) {
+      hi = v
+      break
+    }
   }
   // A flat image (lo === hi) would divide by zero; widen to one DN either side.
-  if (hi <= lo) { lo = Math.max(0, lo - 1); hi = Math.min(65535, lo + 2) }
+  if (hi <= lo) {
+    lo = Math.max(0, lo - 1)
+    hi = Math.min(65535, lo + 2)
+  }
   return { lo, hi }
 }
 
@@ -60,10 +73,14 @@ export function stretch16ToRgba(samples, width, height, spp, { lo, hi }, { inver
     const o = p * 4
     if (spp <= 2) {
       const g = lut[samples[s]]
-      out[o] = g; out[o + 1] = g; out[o + 2] = g
+      out[o] = g
+      out[o + 1] = g
+      out[o + 2] = g
       out[o + 3] = spp === 2 ? samples[s + 1] >> 8 : 255
     } else {
-      out[o] = lut[samples[s]]; out[o + 1] = lut[samples[s + 1]]; out[o + 2] = lut[samples[s + 2]]
+      out[o] = lut[samples[s]]
+      out[o + 1] = lut[samples[s + 1]]
+      out[o + 2] = lut[samples[s + 2]]
       out[o + 3] = spp === 4 ? samples[s + 3] >> 8 : 255
     }
   }

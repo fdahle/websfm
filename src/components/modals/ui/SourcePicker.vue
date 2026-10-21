@@ -37,7 +37,16 @@ const model = defineModel({ default: null })
 <style scoped src="./modal.css"></style>
 <style scoped>
 /* Inline: a statement or a short pick, not a settings field — label and value on one line. */
-.source-row { display: flex; align-items: baseline; gap: 8px; }
-.source-value { color: var(--text); }
-.source-select { flex: 1; min-width: 0; }
+.source-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.source-value {
+  color: var(--text);
+}
+.source-select {
+  flex: 1;
+  min-width: 0;
+}
 </style>

@@ -76,9 +76,7 @@ export function newFolderVerdict({ isEmpty, hasProjectJson, confirmed = false })
 // A copy is only trusted when both totals match. Used before the OPFS source
 // tree is deleted — the one moment where getting this wrong loses data.
 export function copyVerified(source, copied) {
-  return !!source && !!copied
-    && source.files === copied.files
-    && source.bytes === copied.bytes
+  return !!source && !!copied && source.files === copied.files && source.bytes === copied.bytes
 }
 
 // The picker shows this next to a folder project. The full path is deliberately

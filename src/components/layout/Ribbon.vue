@@ -4,8 +4,15 @@ import Icon from '../Icon.vue'
 import RibbonMenu from './RibbonMenu.vue'
 import { commandReason } from '../../core/help/commands.js'
 import {
-  TABS, CAMERA_GROUP, SCENE_GROUP, MAP_GROUP, PICTURE_TAB, rasterTab as buildRasterTab, measureMenu,
-  menuReason, stepValue,
+  TABS,
+  CAMERA_GROUP,
+  SCENE_GROUP,
+  MAP_GROUP,
+  PICTURE_TAB,
+  rasterTab as buildRasterTab,
+  measureMenu,
+  menuReason,
+  stepValue,
 } from '../../core/help/ribbonTabs.js'
 
 // Renders the command tables in core/help/ribbonTabs.js. The ribbon only CHOOSES
@@ -50,21 +57,27 @@ const measureCtx = computed(() => props.activeRaster ?? (props.activeView === 'm
 
 const activeTab = ref('view')
 
-watch(() => !!props.activeImageId, (hasImage) => {
-  if (hasImage) {
-    activeTab.value = 'picture'
-  } else if (activeTab.value === 'picture') {
-    activeTab.value = 'view'
-  }
-})
+watch(
+  () => !!props.activeImageId,
+  (hasImage) => {
+    if (hasImage) {
+      activeTab.value = 'picture'
+    } else if (activeTab.value === 'picture') {
+      activeTab.value = 'view'
+    }
+  },
+)
 
-watch(() => !!props.activeRaster, (hasRaster) => {
-  if (hasRaster) {
-    activeTab.value = 'raster'
-  } else if (activeTab.value === 'raster') {
-    activeTab.value = 'view'
-  }
-})
+watch(
+  () => !!props.activeRaster,
+  (hasRaster) => {
+    if (hasRaster) {
+      activeTab.value = 'raster'
+    } else if (activeTab.value === 'raster') {
+      activeTab.value = 'view'
+    }
+  },
+)
 
 const allTabs = computed(() => {
   const extra = []
@@ -85,8 +98,13 @@ const currentTab = computed(() => {
   if (tab.id === 'tools' && props.activeView === 'map' && !props.activeRaster && props.mapMeasure?.targets?.length) {
     // The map stacks rasters, so its Measure menu also picks which one is measured.
     const menu = measureMenu(props.mapMeasure)
-    return { ...tab, groups: tab.groups.map((g) => ({
-      ...g, commands: g.commands.map((c) => (c.id === 'menu-measure' ? { ...c, menu } : c)) })) }
+    return {
+      ...tab,
+      groups: tab.groups.map((g) => ({
+        ...g,
+        commands: g.commands.map((c) => (c.id === 'menu-measure' ? { ...c, menu } : c)),
+      })),
+    }
   }
   return tab
 })
@@ -105,8 +123,15 @@ function isHidden(cmd) {
 
 // Keys answered by the View tab's display state rather than the image view.
 const VIEW_KEYS = new Set([
-  'showCameras', 'showGrid', 'showLegend', 'showMapGrid', 'showMapCameras', 'showFootprints',
-  'selectRect', 'selectLasso', 'mapModelFrame',
+  'showCameras',
+  'showGrid',
+  'showLegend',
+  'showMapGrid',
+  'showMapCameras',
+  'showFootprints',
+  'selectRect',
+  'selectLasso',
+  'mapModelFrame',
 ])
 
 function isActive(cmd) {
@@ -117,13 +142,13 @@ function isActive(cmd) {
   if (isDisabled(cmd)) return false
   if (cmd.activeKey === 'consoleOpen') return props.consoleOpen
   if (VIEW_KEYS.has(cmd.activeKey)) return !!props.viewState[cmd.activeKey]
-  if (cmd.activeKey === 'rasterVisible')    return !!props.activeRaster?.visible
+  if (cmd.activeKey === 'rasterVisible') return !!props.activeRaster?.visible
   if (cmd.selected !== undefined) return cmd.selected // a map measure-target row
   if (cmd.basemap) return props.viewState.mapBasemap === cmd.basemap
   // Edit GCPs is one mode per view: the map's own flag, else the image view's.
   if (cmd.activeKey === 'gcpEdit' && props.activeView === 'map') return !!props.viewState.mapGcpEdit
   if (cmd.measureTool) return measureCtx.value?.measure?.tool === cmd.measureTool
-  if (cmd.activeKey === 'measureSaved')   return !!measureCtx.value?.measure?.showSaved
+  if (cmd.activeKey === 'measureSaved') return !!measureCtx.value?.measure?.showSaved
   const s = props.imageViewState
   if (!s || !cmd.activeKey) return false
   return !!s[cmd.activeKey]
@@ -142,7 +167,9 @@ function disabledReason(cmd) {
   if (base) return base
   const m = measureCtx.value?.measure
   if (cmd.demOnly && measureCtx.value?.kind !== 'dem')
-    return props.activeRaster ? 'Needs a DEM — this is an orthophoto' : 'Needs a DEM — pick a DEM layer to measure below'
+    return props.activeRaster
+      ? 'Needs a DEM — this is an orthophoto'
+      : 'Needs a DEM — pick a DEM layer to measure below'
   if (cmd.measureTool && !m?.available)
     return 'Measuring needs a current frame with linear coordinates (not geographic, not an outdated frame)'
   if (cmd.measureTool && cmd.demOnly && !m?.heights) return 'Needs the DEM elevation values, which are not loaded yet'
@@ -151,12 +178,13 @@ function disabledReason(cmd) {
   if (cmd.activeKey === 'rasterVisible' && props.activeRaster?.mapBlocked) return props.activeRaster.mapBlocked
   if (cmd.id === 'raster-style' && props.activeRaster?.imported && !props.activeRaster.styleable)
     return 'Nothing to style — an 8-bit raster with up to 3 bands is shown as it is'
-  if (cmd.basemap && props.viewState.mapBasemapReasons?.[cmd.basemap]) return props.viewState.mapBasemapReasons[cmd.basemap]
+  if (cmd.basemap && props.viewState.mapBasemapReasons?.[cmd.basemap])
+    return props.viewState.mapBasemapReasons[cmd.basemap]
   const s = props.imageViewState
   if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return 'Detect keypoints first'
-  if (cmd.disableKey === 'noMask'    && !s?.hasMask)            return 'No mask available'
-  if (cmd.disableKey === 'noDepth'   && !s?.hasDepth)           return 'No depth map available'
-  if (cmd.disableKey === 'noGcps'    && !s?.gcpCount)           return 'No GCPs on this image'
+  if (cmd.disableKey === 'noMask' && !s?.hasMask) return 'No mask available'
+  if (cmd.disableKey === 'noDepth' && !s?.hasDepth) return 'No depth map available'
+  if (cmd.disableKey === 'noGcps' && !s?.gcpCount) return 'No GCPs on this image'
   return ''
 }
 
@@ -170,8 +198,9 @@ const isToggleRow = (row) => !!(row.activeKey || row.measureTool || row.selected
 function menuRows(cmd) {
   return cmd.menu
     .filter((row) => row.section || !isHidden(row))
-    .map((row) => row.section ? row
-      : { ...row, reason: disabledReason(row), active: isToggleRow(row) ? isActive(row) : undefined })
+    .map((row) =>
+      row.section ? row : { ...row, reason: disabledReason(row), active: isToggleRow(row) ? isActive(row) : undefined },
+    )
 }
 // A menu whose tool is running shows as on, so a mode entered from a menu is
 // visible without opening it (a chosen target is an option, not a running tool).
@@ -179,7 +208,10 @@ function menuActive(cmd) {
   return cmd.menu.some((row) => !row.section && (row.activeKey || row.measureTool) && isActive(row))
 }
 function menuDisabledReason(cmd) {
-  return menuReason(cmd.menu.filter((row) => row.section || !isHidden(row)), disabledReason)
+  return menuReason(
+    cmd.menu.filter((row) => row.section || !isHidden(row)),
+    disabledReason,
+  )
 }
 
 function cmdLabel(cmd) {
@@ -232,22 +264,14 @@ function step(cmd, dir) {
 
       <template v-if="activeImageId">
         <div class="ctx-separator"></div>
-        <button
-          class="tab ctx-tab"
-          :class="{ active: activeTab === 'picture' }"
-          @click="activeTab = 'picture'"
-        >
+        <button class="tab ctx-tab" :class="{ active: activeTab === 'picture' }" @click="activeTab = 'picture'">
           {{ activeImageName || 'Image' }}
         </button>
       </template>
 
       <template v-if="activeRaster">
         <div class="ctx-separator"></div>
-        <button
-          class="tab ctx-tab"
-          :class="{ active: activeTab === 'raster' }"
-          @click="activeTab = 'raster'"
-        >
+        <button class="tab ctx-tab" :class="{ active: activeTab === 'raster' }" @click="activeTab = 'raster'">
           {{ activeRaster.name || rasterTab.label }}
         </button>
       </template>
@@ -269,14 +293,18 @@ function step(cmd, dir) {
                       :aria-label="`Smaller ${cmd.label.toLowerCase()}`"
                       :disabled="stepperValue(cmd) <= cmd.min"
                       @click="step(cmd, -1)"
-                    >−</button>
+                    >
+                      −
+                    </button>
                     <span class="step-val">{{ stepperText(cmd) }}</span>
                     <button
                       class="step-btn"
                       :aria-label="`Larger ${cmd.label.toLowerCase()}`"
                       :disabled="stepperValue(cmd) >= cmd.max"
                       @click="step(cmd, 1)"
-                    >+</button>
+                    >
+                      +
+                    </button>
                   </div>
                   <button
                     v-else
@@ -471,8 +499,13 @@ function step(cmd, dir) {
   cursor: default;
 }
 
-.cmd.danger       { color: #c0604a; }
-.cmd.danger:hover:not(.disabled) { background: rgba(220, 80, 60, 0.1); border-color: rgba(220, 80, 60, 0.3); }
+.cmd.danger {
+  color: #c0604a;
+}
+.cmd.danger:hover:not(.disabled) {
+  background: rgba(220, 80, 60, 0.1);
+  border-color: rgba(220, 80, 60, 0.3);
+}
 
 .cmd-icon {
   width: 18px;
@@ -519,8 +552,12 @@ function step(cmd, dir) {
   border-radius: 5px;
   color: var(--text);
 }
-.stepper:hover { border-color: var(--panel-border); }
-.stepper-label { min-width: 44px; }
+.stepper:hover {
+  border-color: var(--panel-border);
+}
+.stepper-label {
+  min-width: 44px;
+}
 .step-btn {
   width: 18px;
   height: 18px;
@@ -536,8 +573,13 @@ function step(cmd, dir) {
   line-height: 1;
   cursor: pointer;
 }
-.step-btn:hover:not(:disabled) { background: var(--hover-bg); }
-.step-btn:disabled { opacity: 0.35; cursor: default; }
+.step-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+.step-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .step-val {
   min-width: 30px;
   text-align: center;

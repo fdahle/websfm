@@ -102,7 +102,8 @@ export const useSensorsStore = defineStore('sensors', () => {
           source: 'exif',
         }
         sensors.value.push(sensor)
-        liveIds.add(sensor.id); bySignature.set(sig, sensor)
+        liveIds.add(sensor.id)
+        bySignature.set(sig, sensor)
         log(`Sensor detected: ${sensor.label}`, 'info', 'Sensor')
       }
       img.sensorId = sensor.id
@@ -121,8 +122,16 @@ export const useSensorsStore = defineStore('sensors', () => {
   // landing, and a string over all images made that O(images²) characters.
   const imageSensorSig = computed(() => {
     let h = 0x811c9dc5
-    const mix = (s) => { s = String(s ?? ''); for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0; h = Math.imul(h ^ 0x7c, 0x01000193) >>> 0 }
-    for (const i of images.value) { mix(i.id); mix(i.sensorId); mix(i.meta ? exifSignature(i.meta) : '') }
+    const mix = (s) => {
+      s = String(s ?? '')
+      for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0
+      h = Math.imul(h ^ 0x7c, 0x01000193) >>> 0
+    }
+    for (const i of images.value) {
+      mix(i.id)
+      mix(i.sensorId)
+      mix(i.meta ? exifSignature(i.meta) : '')
+    }
     return `${images.value.length}:${h}`
   })
   watch(imageSensorSig, ensureExifSensors)
@@ -133,16 +142,34 @@ export const useSensorsStore = defineStore('sensors', () => {
   // everything it lacks stays — a null target becomes a new sensor; the listed
   // images are then bound to it. Returns { created, updated, assigned }.
   async function importSensors(items) {
-    let created = 0, updated = 0, assigned = 0
+    let created = 0,
+      updated = 0,
+      assigned = 0
     for (const { sensor: raw, targetId, imageIds = [] } of items || []) {
       let s = targetId ? sensors.value.find((x) => x.id === targetId) : null
       const isNew = !s
       if (isNew) {
         s = {
-          id: crypto.randomUUID(), label: raw.label || `Sensor ${nextSensorNumber()}`,
-          width: null, height: null, focal: null, focalUnit: 'px', cx: null, cy: null,
-          k1: null, k2: null, k3: null, k4: null, k5: null, k6: null, p1: null, p2: null, pixelSize: null,
-          distortionModel: 'pinhole', signature: null, source: 'imported',
+          id: crypto.randomUUID(),
+          label: raw.label || `Sensor ${nextSensorNumber()}`,
+          width: null,
+          height: null,
+          focal: null,
+          focalUnit: 'px',
+          cx: null,
+          cy: null,
+          k1: null,
+          k2: null,
+          k3: null,
+          k4: null,
+          k5: null,
+          k6: null,
+          p1: null,
+          p2: null,
+          pixelSize: null,
+          distortionModel: 'pinhole',
+          signature: null,
+          source: 'imported',
         }
         sensors.value.push(s)
         created++
@@ -150,10 +177,17 @@ export const useSensorsStore = defineStore('sensors', () => {
       const set = applyImportedValues(s, raw)
       for (const id of imageIds) {
         const img = images.value.find((i) => i.id === id)
-        if (img && img.sensorId !== s.id) { img.sensorId = s.id; assigned++ }
+        if (img && img.sensorId !== s.id) {
+          img.sensorId = s.id
+          assigned++
+        }
       }
-      log(`Sensor ${s.label} ${isNew ? 'created' : 'updated'} from file: ${set.join(', ') || 'no values'}`
-        + (imageIds.length ? ` — ${pluralize(imageIds.length, 'image')}` : ''), 'success', 'Sensor')
+      log(
+        `Sensor ${s.label} ${isNew ? 'created' : 'updated'} from file: ${set.join(', ') || 'no values'}` +
+          (imageIds.length ? ` — ${pluralize(imageIds.length, 'image')}` : ''),
+        'success',
+        'Sensor',
+      )
     }
     await save()
     if (assigned && isPersisting()) await imagesStore.save()
@@ -164,20 +198,32 @@ export const useSensorsStore = defineStore('sensors', () => {
   function applyImportedValues(s, raw) {
     const set = []
     for (const k of ['width', 'height', 'cx', 'cy', ...DISTORTION_COEFFS, 'pixelSize']) {
-      if (raw[k] != null) { s[k] = raw[k]; set.push(k) }
+      if (raw[k] != null) {
+        s[k] = raw[k]
+        set.push(k)
+      }
     }
-    if (raw.focal != null) { s.focal = raw.focal; s.focalUnit = raw.focalUnit; set.push(`focal (${raw.focalUnit})`) }
+    if (raw.focal != null) {
+      s.focal = raw.focal
+      s.focalUnit = raw.focalUnit
+      set.push(`focal (${raw.focalUnit})`)
+    }
     // A named lens model wins (coefficients alone cannot say "fisheye"); otherwise
     // the tightest model covering the imported coefficients.
-    if (raw.distortionModel) { s.distortionModel = raw.distortionModel; set.push(`lens model ${raw.distortionModel}`) }
-    else if (DISTORTION_COEFFS.some((k) => raw[k] != null)) s.distortionModel = inferDistortionModel(s)
+    if (raw.distortionModel) {
+      s.distortionModel = raw.distortionModel
+      set.push(`lens model ${raw.distortionModel}`)
+    } else if (DISTORTION_COEFFS.some((k) => raw[k] != null)) s.distortionModel = inferDistortionModel(s)
     const focalMm = raw.focal != null && raw.focalUnit === 'mm' ? raw.focal : null
     if (raw.marks?.length) {
       // Certificate marks named by position: each is its own slot, so the sensor
       // comes out calibrated (validate in Calibrate fiducials).
       s.fiducialCalibration = applyFiducialMarks(s, { marks: raw.marks, focalMm, ppxMm: raw.ppxMm, ppyMm: raw.ppyMm })
       s.kind = 'film'
-      if (s.fiducialCalibration.focalMm > 0) { s.focal = s.fiducialCalibration.focalMm; s.focalUnit = 'mm' }
+      if (s.fiducialCalibration.focalMm > 0) {
+        s.focal = s.fiducialCalibration.focalMm
+        s.focalUnit = 'mm'
+      }
       set.push(`${raw.marks.length} fiducial marks`)
     } else if (s.kind === 'film' && (focalMm != null || raw.ppxMm != null || raw.ppyMm != null)) {
       const cal = (s.fiducialCalibration ??= emptyFiducialCalibration())
@@ -195,7 +241,11 @@ export const useSensorsStore = defineStore('sensors', () => {
         s.cy = s.height / 2 - (raw.ppyMm ?? 0) / s.pixelSize
         set.push('principal point (mm → px)')
       } else {
-        log(`Sensor ${s.label}: principal point in mm skipped — needs a pixel size and the image size`, 'warn', 'Sensor')
+        log(
+          `Sensor ${s.label}: principal point in mm skipped — needs a pixel size and the image size`,
+          'warn',
+          'Sensor',
+        )
       }
     }
     return set
@@ -207,15 +257,26 @@ export const useSensorsStore = defineStore('sensors', () => {
     const idByExternal = new Map()
     for (const raw of rawSensors || []) {
       const sensor = {
-        id: crypto.randomUUID(), label: raw.label,
-        width: raw.width ?? null, height: raw.height ?? null,
-        focal: raw.focal ?? raw.fx ?? null, focalUnit: 'px',
-        cx: raw.cx ?? null, cy: raw.cy ?? null,
-        k1: raw.k1 ?? null, k2: raw.k2 ?? null, k3: raw.k3 ?? null,
-        k4: raw.k4 ?? null, k5: raw.k5 ?? null, k6: raw.k6 ?? null,
-        p1: raw.p1 ?? null, p2: raw.p2 ?? null,
+        id: crypto.randomUUID(),
+        label: raw.label,
+        width: raw.width ?? null,
+        height: raw.height ?? null,
+        focal: raw.focal ?? raw.fx ?? null,
+        focalUnit: 'px',
+        cx: raw.cx ?? null,
+        cy: raw.cy ?? null,
+        k1: raw.k1 ?? null,
+        k2: raw.k2 ?? null,
+        k3: raw.k3 ?? null,
+        k4: raw.k4 ?? null,
+        k5: raw.k5 ?? null,
+        k6: raw.k6 ?? null,
+        p1: raw.p1 ?? null,
+        p2: raw.p2 ?? null,
         distortionModel: raw.distortionModel ?? inferDistortionModel(raw),
-        pixelSize: null, signature: null, source: raw.source ?? 'imported',
+        pixelSize: null,
+        signature: null,
+        source: raw.source ?? 'imported',
         // Keep anisotropic focal information for lossless re-export even though
         // the current sensor editor/solver uses the scalar focal field.
         externalFx: raw.fx ?? raw.focal ?? null,
@@ -231,14 +292,31 @@ export const useSensorsStore = defineStore('sensors', () => {
     }
     await save()
     if (isPersisting()) await imagesStore.save()
-    log(`Camera calibration imported: ${pluralize(idByExternal.size, 'group')}`, idByExternal.size ? 'success' : 'warn', 'Import')
+    log(
+      `Camera calibration imported: ${pluralize(idByExternal.size, 'group')}`,
+      idByExternal.size ? 'success' : 'warn',
+      'Import',
+    )
     return idByExternal
   }
 
   // Editable intrinsic fields and their parsing. Blank input clears the field
   // to null; `label` is free text, everything else is numeric.
-  const NUMERIC_FIELDS = new Set(['width', 'height', 'focal', 'cx', 'cy', ...DISTORTION_COEFFS, 'pixelSize', 'sensorWidthMm'])
-  const LEVER_ARM_FIELDS = new Map([['gnssLeverArmX', 0], ['gnssLeverArmY', 1], ['gnssLeverArmZ', 2]])
+  const NUMERIC_FIELDS = new Set([
+    'width',
+    'height',
+    'focal',
+    'cx',
+    'cy',
+    ...DISTORTION_COEFFS,
+    'pixelSize',
+    'sensorWidthMm',
+  ])
+  const LEVER_ARM_FIELDS = new Map([
+    ['gnssLeverArmX', 0],
+    ['gnssLeverArmY', 1],
+    ['gnssLeverArmZ', 2],
+  ])
 
   // Film-camera fiducial fields (F4): the certificate's focal and principal point,
   // kept on the sensor's one fiducial record (fiducialCalibration). Numeric and
@@ -270,7 +348,10 @@ export const useSensorsStore = defineStore('sensors', () => {
       s.fiducialCalibration ??= emptyFiducialCalibration()
       s.fiducialCalibration[field] = num
       // focalMm is authoritative on the fiducial path — mirror it into focal/focalUnit.
-      if (field === 'focalMm') { s.focal = num; s.focalUnit = 'mm' }
+      if (field === 'focalMm') {
+        s.focal = num
+        s.focalUnit = 'mm'
+      }
       log(`Sensor ${s.label}: ${field} = ${num}`, 'info', 'Sensor')
       save()
       return
@@ -282,23 +363,34 @@ export const useSensorsStore = defineStore('sensors', () => {
       if (!Number.isFinite(num)) return
       arm[LEVER_ARM_FIELDS.get(field)] = num
       s.gnssLeverArm = normalizeLeverArm(arm)
-      log(`Sensor ${s.label}: GNSS antenna offset ${s.gnssLeverArm ? `(${s.gnssLeverArm.join(', ')}) m` : 'cleared'}`,
-        'info', 'Sensor', { channel: 'activity' })
+      log(
+        `Sensor ${s.label}: GNSS antenna offset ${s.gnssLeverArm ? `(${s.gnssLeverArm.join(', ')}) m` : 'cleared'}`,
+        'info',
+        'Sensor',
+        { channel: 'activity' },
+      )
       save()
       return
     } else if (field === 'focalUnit') {
       // Toggle between a focal length in pixels and one in millimetres. Only
       // these two are valid; anything else leaves it as-is.
-      if (value === 'px' || value === 'mm') { s.focalUnit = value; save() }
+      if (value === 'px' || value === 'mm') {
+        s.focalUnit = value
+        save()
+      }
       return
     } else if (field === 'distortionModel') {
       // Lens model (D3): the projection (Brown / rational / fisheye) and which
       // coefficients this sensor uses.
-      if (DISTORTION_MODELS.some((m) => m.id === value)) { s.distortionModel = value; save() }
+      if (DISTORTION_MODELS.some((m) => m.id === value)) {
+        s.distortionModel = value
+        save()
+      }
       return
     } else if (NUMERIC_FIELDS.has(field)) {
-      if (value === '' || value == null) { s[field] = null }
-      else {
+      if (value === '' || value == null) {
+        s[field] = null
+      } else {
         const num = Number(value)
         if (Number.isFinite(num)) s[field] = num
       }
@@ -318,8 +410,13 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (!s || !Number.isFinite(mm) || mm <= 0) return
     const prev = s.sensorWidthMm
     s.sensorWidthMm = mm
-    log(`Sensor ${s.label}: film format set to ${mm} mm${prev ? ` (was ${prev} mm)` : ''}`
-      + `${reason ? ` — ${reason}` : ''}`, 'info', 'Sensor', { channel: 'activity' })
+    log(
+      `Sensor ${s.label}: film format set to ${mm} mm${prev ? ` (was ${prev} mm)` : ''}` +
+        `${reason ? ` — ${reason}` : ''}`,
+      'info',
+      'Sensor',
+      { channel: 'activity' },
+    )
     save()
   }
 
@@ -352,11 +449,15 @@ export const useSensorsStore = defineStore('sensors', () => {
       .map((m, i) => ({ id: String(m.id ?? `F${i + 1}`), xMm: Number(m.xMm), yMm: Number(m.yMm) }))
     const cal = (s.fiducialCalibration ??= emptyFiducialCalibration())
     const prev = cal.marks || []
-    const renamed = prev.length === clean.length
-      ? new Map(prev.map((m, i) => [m.id, clean[i].id]))
-      : new Map(clean.map((m) => [m.id, m.id]))
-    cal.slotMap = Object.fromEntries(Object.entries(cal.slotMap || {})
-      .flatMap(([slot, fidId]) => (renamed.has(fidId) ? [[slot, renamed.get(fidId)]] : [])))
+    const renamed =
+      prev.length === clean.length
+        ? new Map(prev.map((m, i) => [m.id, clean[i].id]))
+        : new Map(clean.map((m) => [m.id, m.id]))
+    cal.slotMap = Object.fromEntries(
+      Object.entries(cal.slotMap || {}).flatMap(([slot, fidId]) =>
+        renamed.has(fidId) ? [[slot, renamed.get(fidId)]] : [],
+      ),
+    )
     cal.marks = clean
     cal.fit = null
     if (!s.kind) s.kind = 'film'
@@ -369,8 +470,15 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (!s) return
     s.kind = 'film'
     s.fiducialCalibration = calibration ? JSON.parse(JSON.stringify(calibration)) : null
-    if (calibration?.focalMm > 0) { s.focal = calibration.focalMm; s.focalUnit = 'mm' }
-    log(`Sensor ${s.label}: fiducial calibration ${calibration ? 'applied' : 'cleared'}`, calibration ? 'success' : 'info', 'Sensor')
+    if (calibration?.focalMm > 0) {
+      s.focal = calibration.focalMm
+      s.focalUnit = 'mm'
+    }
+    log(
+      `Sensor ${s.label}: fiducial calibration ${calibration ? 'applied' : 'cleared'}`,
+      calibration ? 'success' : 'info',
+      'Sensor',
+    )
     save()
     if (isPersisting()) imagesStore.save()
   }
@@ -384,17 +492,30 @@ export const useSensorsStore = defineStore('sensors', () => {
     const unmatched = []
     list.forEach((g, i) => {
       const s = targetIds[i] ? sensors.value.find((x) => x.id === targetIds[i]) : null
-      if (!s || !g.marks.length) { unmatched.push(g.sensor || '(no sensor column)'); return }
+      if (!s || !g.marks.length) {
+        unmatched.push(g.sensor || '(no sensor column)')
+        return
+      }
       const cal = applyFiducialMarks(s, g)
       s.kind = 'film'
       s.fiducialCalibration = cal
-      if (cal.focalMm > 0) { s.focal = cal.focalMm; s.focalUnit = 'mm' }
-      log(`Sensor ${s.label}: ${pluralize(g.marks.length, 'fiducial mark')} imported`
-        + (isFiducialCalibrated(cal) ? ' — validate them in Calibrate fiducials' : ''), 'success', 'Sensor')
+      if (cal.focalMm > 0) {
+        s.focal = cal.focalMm
+        s.focalUnit = 'mm'
+      }
+      log(
+        `Sensor ${s.label}: ${pluralize(g.marks.length, 'fiducial mark')} imported` +
+          (isFiducialCalibrated(cal) ? ' — validate them in Calibrate fiducials' : ''),
+        'success',
+        'Sensor',
+      )
       applied++
     })
     if (unmatched.length) log(`Camera fiducials: no sensor matched ${unmatched.join(', ')}`, 'warn', 'Sensor')
-    if (applied) { save(); if (isPersisting()) imagesStore.save() }
+    if (applied) {
+      save()
+      if (isPersisting()) imagesStore.save()
+    }
     return applied
   }
 

@@ -61,15 +61,24 @@ for (const [, m] of restricted) {
   try {
     await access(new URL(`models/${m.file}`, dist))
     errors.push(`models/${m.file} must not be shipped (${m.license}); delete it from dist/ (and public/models/)`)
-  } catch { /* absent, as required */ }
+  } catch {
+    /* absent, as required */
+  }
 }
 
 try {
   const html = await readFile(new URL('index.html', dist), 'utf8')
-  for (const fragment of [`href="${base}favicon.svg"`, `href="${base}manifest.webmanifest"`, `src="${base}assets/`, `href="${base}assets/`]) {
+  for (const fragment of [
+    `href="${base}favicon.svg"`,
+    `href="${base}manifest.webmanifest"`,
+    `src="${base}assets/`,
+    `href="${base}assets/`,
+  ]) {
     if (!html.includes(fragment)) errors.push(`index.html does not contain ${fragment}`)
   }
-} catch { /* the missing index is already reported above */ }
+} catch {
+  /* the missing index is already reported above */
+}
 
 if (errors.length) {
   console.error('Release artifact is incomplete:')

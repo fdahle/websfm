@@ -5,8 +5,14 @@ import { beforeAll, describe, it, expect } from 'vitest'
 import initMatching from '../../wasm/matching/matching.js'
 import { matchDescriptors } from './bruteforce.js'
 import {
-  makeTop2, offerTop2, mergeTop2, selectMatches, top2Reference, compareMatchSets,
-  descriptorNorms, S_SENTINEL,
+  makeTop2,
+  offerTop2,
+  mergeTop2,
+  selectMatches,
+  top2Reference,
+  compareMatchSets,
+  descriptorNorms,
+  S_SENTINEL,
 } from './nnSelect.js'
 
 beforeAll(async () => {
@@ -16,13 +22,12 @@ beforeAll(async () => {
 
 function lcg(seed) {
   let s = seed >>> 0
-  return () => ((s = (s * 1103515245 + 12345) >>> 0) / 2 ** 32)
+  return () => (s = (s * 1103515245 + 12345) >>> 0) / 2 ** 32
 }
 const continuous = (rnd, n, dim) => Float32Array.from({ length: n * dim }, () => rnd() * 2 - 1)
 // Small integers: every product and partial sum is exact in f32, so summation order
 // cannot matter and any two correct implementations agree bit for bit — ties included.
-const quantised = (rnd, n, dim, levels = 3) =>
-  Float32Array.from({ length: n * dim }, () => Math.floor(rnd() * levels))
+const quantised = (rnd, n, dim, levels = 3) => Float32Array.from({ length: n * dim }, () => Math.floor(rnd() * levels))
 
 const triples = (ms) => ms.map((m) => [m.ia, m.ib, m.dist])
 const pairs = (ms) => ms.map((m) => `${m.ia}-${m.ib}`)
@@ -54,7 +59,10 @@ describe('selectMatches over top-2 arrays reproduces the WASM matcher', () => {
 
   it('on continuous descriptors (same pairs; distances within GEMM-identity rounding)', async () => {
     const rnd = lcg(7)
-    for (const [dim, nA, nB] of [[128, 40, 37], [256, 20, 31]]) {
+    for (const [dim, nA, nB] of [
+      [128, 40, 37],
+      [256, 20, 31],
+    ]) {
       const A = continuous(rnd, nA, dim)
       const B = continuous(rnd, nB, dim)
       for (let j = 0; j < Math.min(nA, nB); j += 3) {
@@ -100,8 +108,8 @@ describe('mergeTop2 (the GPU reduction rule)', () => {
       })
       // Shuffle the merge order.
       for (let i = partials.length - 1; i > 0; i--) {
-        const k = Math.floor(rnd() * (i + 1));
-        [partials[i], partials[k]] = [partials[k], partials[i]]
+        const k = Math.floor(rnd() * (i + 1))
+        ;[partials[i], partials[k]] = [partials[k], partials[i]]
       }
       const merged = partials.reduce((acc, p) => mergeTop2(acc, p))
       // An empty group's sentinel best index is 0 and cannot win (its s1 is the sentinel)

@@ -2,7 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { planImageDetection, planDetection, plannedTileSize, LEARNED_AUTO_TILE_MAX } from './detectPlan.js'
 import { autoTileSize } from './tiling.js'
 
-const sift = (extra = {}) => ({ detector: 'sift', maxDim: 2400, maxDimMode: 'absolute', tiling: 'off', overlap: 64, ...extra })
+const sift = (extra = {}) => ({
+  detector: 'sift',
+  maxDim: 2400,
+  maxDimMode: 'absolute',
+  tiling: 'off',
+  overlap: 64,
+  ...extra,
+})
 
 describe('planImageDetection — resize happens before tiling', () => {
   it('reduces a large scan to the detection resolution, keeping aspect', () => {
@@ -48,12 +55,15 @@ describe('plannedTileSize', () => {
 
 describe('planDetection', () => {
   it('summarises a mixed set around its largest image', () => {
-    const plan = planDetection([
-      { width: 4000, height: 3000 },
-      { width: 2000, height: 1500 },
-      { width: undefined, height: undefined },
-      { width: 10000, height: 7500 },
-    ], sift({ tiling: 'manual', tileSize: 1024 }))
+    const plan = planDetection(
+      [
+        { width: 4000, height: 3000 },
+        { width: 2000, height: 1500 },
+        { width: undefined, height: undefined },
+        { width: 10000, height: 7500 },
+      ],
+      sift({ tiling: 'manual', tileSize: 1024 }),
+    )
     expect(plan).toMatchObject({ count: 3, unknown: 1, downscaled: 2, minDetect: 2000, maxDetect: 2400, tiled: 3 })
     expect(plan.largest.natW).toBe(10000)
   })

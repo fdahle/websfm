@@ -35,11 +35,14 @@ for (const set of sets.length ? sets : ['building', 'rubble']) {
   const origin = Array.from(f32(entry(coords, '/data/0')))
   const metaDir = join(base, 'train', 'metadata')
   const files = (await readdir(metaDir)).filter((f) => f.endsWith('.pt')).sort()
-  const lines = [], K = []
+  const lines = [],
+    K = []
   for (const f of files) {
     const z = await zipOf(join(metaDir, f))
     // Storage keys follow the pickle's order: 0 = c2w (3×4), 1 = intrinsics, 2 = distortion.
-    const c2w = f32(entry(z, '/data/0')), intr = f32(entry(z, '/data/1')), dist = f32(entry(z, '/data/2'))
+    const c2w = f32(entry(z, '/data/0')),
+      intr = f32(entry(z, '/data/1')),
+      dist = f32(entry(z, '/data/2'))
     const d = [c2w[3], c2w[7], c2w[11]].map((v, a) => v * scale + origin[a]) // down, right, back (m)
     const enu = [d[1], -d[2], -d[0]]
     const [lon, lat, h] = lidar.enuToGeodetic(enu, ORIGIN)
@@ -48,9 +51,21 @@ for (const set of sets.length ? sets : ['building', 'rubble']) {
   }
   const mean = (i) => K.reduce((s, k) => s + k[i], 0) / K.length
   const spread = (i) => Math.max(...K.map((k) => k[i])) - Math.min(...K.map((k) => k[i]))
-  const intrinsics = { fx: mean(0), fy: mean(1), cx: mean(2), cy: mean(3), distortion: [mean(4), mean(5), mean(6), mean(7)],
-    spread: { fx: spread(0), cx: spread(2), cy: spread(3), k1: spread(4) }, images: K.length, scale, origin }
-  await writeFile(join(dir, `${set}-cameras.txt`), `# name\tlat\tlon\th (Mill19 ${set}, PixSFM centres → WGS84 around ${JSON.stringify(ORIGIN)})\n${lines.join('\n')}\n`)
+  const intrinsics = {
+    fx: mean(0),
+    fy: mean(1),
+    cx: mean(2),
+    cy: mean(3),
+    distortion: [mean(4), mean(5), mean(6), mean(7)],
+    spread: { fx: spread(0), cx: spread(2), cy: spread(3), k1: spread(4) },
+    images: K.length,
+    scale,
+    origin,
+  }
+  await writeFile(
+    join(dir, `${set}-cameras.txt`),
+    `# name\tlat\tlon\th (Mill19 ${set}, PixSFM centres → WGS84 around ${JSON.stringify(ORIGIN)})\n${lines.join('\n')}\n`,
+  )
   await writeFile(join(dir, `${set}-intrinsics.json`), JSON.stringify(intrinsics, null, 2))
   console.log(set, JSON.stringify(intrinsics))
 }

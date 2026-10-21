@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
-  geodeticToEcef, ecefTransformFromProbes, boundingBox, buildTileset,
-  cloudToGlbPoints, localBounds, cloudCentroid,
+  geodeticToEcef,
+  ecefTransformFromProbes,
+  boundingBox,
+  buildTileset,
+  cloudToGlbPoints,
+  localBounds,
+  cloudCentroid,
 } from './tiles3d.js'
 
 const norm = (v) => Math.hypot(...v)
@@ -20,7 +25,7 @@ describe('geodeticToEcef', () => {
     const p = geodeticToEcef(0, 90, 0)
     expect(p[0]).toBeCloseTo(0, 6)
     expect(p[1]).toBeCloseTo(0, 6)
-    expect(p[2]).toBeCloseTo(6356752.314, 2)   // b = a(1−f)
+    expect(p[2]).toBeCloseTo(6356752.314, 2) // b = a(1−f)
   })
 
   it('places (90°E, 0) on +Y — the longitude convention', () => {
@@ -43,7 +48,7 @@ const M_PER_DEG = 111319.4907932736
 describe('ecefTransformFromProbes', () => {
   const origin = { lon: 0, lat: 0, h: 0 }
   const east = { lon: 1 / M_PER_DEG, lat: 0, h: 0 }
-  const north = { lon: 0, lat: 1 / 110574.389, h: 0 }   // 1 m north at the equator
+  const north = { lon: 0, lat: 1 / 110574.389, h: 0 } // 1 m north at the equator
 
   it('puts the ECEF origin in the translation column', () => {
     const m = ecefTransformFromProbes({ origin, east, north })
@@ -90,15 +95,13 @@ describe('ecefTransformFromProbes', () => {
   })
 
   it('rejects degenerate probes rather than emitting a collapsed frame', () => {
-    expect(() => ecefTransformFromProbes({ origin, east: origin, north }))
-      .toThrow(/degenerate/)
+    expect(() => ecefTransformFromProbes({ origin, east: origin, north })).toThrow(/degenerate/)
   })
 })
 
 describe('boundingBox', () => {
   it('is centre + three half-axis vectors', () => {
-    expect(boundingBox([-2, -4, 0], [2, 4, 10]))
-      .toEqual([0, 0, 5, 2, 0, 0, 0, 4, 0, 0, 0, 5])
+    expect(boundingBox([-2, -4, 0], [2, 4, 10])).toEqual([0, 0, 5, 2, 0, 0, 0, 4, 0, 0, 0, 5])
   })
 
   it('never produces a zero half-axis for a flat cloud', () => {
@@ -203,8 +206,7 @@ describe('localBounds / cloudCentroid', () => {
   const cloud = { count: 2, pos: new Float64Array([0, 0, 0, 10, 20, 30]) }
 
   it('measures the bbox relative to the origin', () => {
-    expect(localBounds(cloud, [5, 10, 15]))
-      .toEqual({ min: [-5, -10, -15], max: [5, 10, 15] })
+    expect(localBounds(cloud, [5, 10, 15])).toEqual({ min: [-5, -10, -15], max: [5, 10, 15] })
   })
 
   it('averages the centroid', () => {

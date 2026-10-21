@@ -52,14 +52,21 @@ const SECTIONS = computed(() => [
 ])
 
 const componentFor = {
-  overview: EvalOverviewSection, matching: EvalMatchingSection, sparse: EvalSparseSection,
-  calibration: EvalCalibrationSection, accuracy: EvalAccuracySection,
-  coverage: EvalCoverageSection, dense: EvalDenseSection, products: EvalProductsSection,
+  overview: EvalOverviewSection,
+  matching: EvalMatchingSection,
+  sparse: EvalSparseSection,
+  calibration: EvalCalibrationSection,
+  accuracy: EvalAccuracySection,
+  coverage: EvalCoverageSection,
+  dense: EvalDenseSection,
+  products: EvalProductsSection,
 }
 const activeMeta = computed(() => SECTIONS.value.find((s) => s.id === active.value) ?? SECTIONS.value[0])
 const activeComponent = computed(() => componentFor[active.value] ?? EvalOverviewSection)
 
-function go(id) { active.value = id }
+function go(id) {
+  active.value = id
+}
 
 const exporting = ref(false)
 async function onExport() {
@@ -93,7 +100,9 @@ async function onExport() {
           :class="{ active: active === s.id, disabled: !s.avail }"
           :title="s.avail ? '' : s.prereq"
           @click="go(s.id)"
-        >{{ s.label }}</button>
+        >
+          {{ s.label }}
+        </button>
       </nav>
 
       <div class="qsection">
@@ -122,24 +131,68 @@ async function onExport() {
 </template>
 
 <style scoped>
-.qbody { flex: 1; display: flex; min-height: 0; }
+.qbody {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
 .qnav {
-  width: 150px; flex-shrink: 0; border-right: 1px solid var(--panel-border);
-  padding: 8px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto;
+  width: 150px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--panel-border);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
 }
 .qnav-item {
-  text-align: left; background: none; border: none; border-radius: 6px;
-  color: var(--text-dim); font: inherit; font-size: 13px; padding: 7px 10px; cursor: pointer;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  cursor: pointer;
 }
-.qnav-item:hover:not(.active) { background: var(--hover-bg); color: var(--text); }
-.qnav-item.active { background: var(--accent); color: #fff; }
-.qnav-item.disabled { color: var(--text-dim); opacity: 0.45; }
-.qnav-item.disabled.active { background: var(--panel-border); color: var(--text-dim); }
+.qnav-item:hover:not(.active) {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+.qnav-item.active {
+  background: var(--accent);
+  color: #fff;
+}
+.qnav-item.disabled {
+  color: var(--text-dim);
+  opacity: 0.45;
+}
+.qnav-item.disabled.active {
+  background: var(--panel-border);
+  color: var(--text-dim);
+}
 .qsection {
-  flex: 1; min-width: 0; overflow-y: auto; padding: 16px;
-  display: flex; flex-direction: column; gap: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.qempty { margin: auto; text-align: center; color: var(--text-dim); }
-.qempty-icon { font-size: 34px; opacity: 0.5; }
-.qempty-text { font-size: 13px; margin-top: 8px; }
+.qempty {
+  margin: auto;
+  text-align: center;
+  color: var(--text-dim);
+}
+.qempty-icon {
+  font-size: 34px;
+  opacity: 0.5;
+}
+.qempty-text {
+  font-size: 13px;
+  margin-top: 8px;
+}
 </style>

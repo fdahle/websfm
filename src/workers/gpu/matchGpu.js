@@ -23,7 +23,11 @@ import { descriptorNorms, selectMatches } from '../../core/features/nnSelect.js'
 
 // Kernel geometry — must agree with the constants in match.wgsl.
 export const MATCH_GPU_GEOMETRY = Object.freeze({
-  tileA: 64, tileB: 64, workgroup: '16×16', microTile: '4×4', kChunk: 16,
+  tileA: 64,
+  tileB: 64,
+  workgroup: '16×16',
+  microTile: '4×4',
+  kChunk: 16,
 })
 // Upper bound on multiply-adds per dispatch. A pair is split into row-block chunks
 // so no single dispatch approaches the OS GPU watchdog (Windows TDR ≈ 2 s): 2³³
@@ -52,8 +56,7 @@ function getPipelines(device) {
 let run = null
 
 function freshStats() {
-  return { calls: 0, uploads: 0, uploadBytes: 0, hits: 0, misses: 0, evictions: 0,
-    peakBytes: 0, gpuMs: 0, selectMs: 0 }
+  return { calls: 0, uploads: 0, uploadBytes: 0, hits: 0, misses: 0, evictions: 0, peakBytes: 0, gpuMs: 0, selectMs: 0 }
 }
 
 function adapterLabel(state) {
@@ -118,7 +121,10 @@ function createEntry(device, desc, dim) {
   const buf = device.createBuffer({ size: descBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
   if (n) device.queue.writeBuffer(buf, 0, desc.buffer, desc.byteOffset, n * dim * 4)
   const norms = descriptorNorms(desc, dim)
-  const normBuf = device.createBuffer({ size: Math.max(RECORD, n * 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
+  const normBuf = device.createBuffer({
+    size: Math.max(RECORD, n * 4),
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  })
   if (n) device.queue.writeBuffer(normBuf, 0, norms)
   return { buf, normBuf, norms, n, dim, bytes: descBytes + Math.max(RECORD, n * 4) }
 }
@@ -129,13 +135,19 @@ function resolveSide(r, id, desc, dim, keep) {
   if (id != null && r.entries.has(id)) {
     const e = r.entries.get(id)
     if (e.dim === dim) {
-      r.entries.delete(id); r.entries.set(id, e) // LRU touch
+      r.entries.delete(id)
+      r.entries.set(id, e) // LRU touch
       r.stats.hits++
       return { entry: e, ephemeral: false }
     }
-    r.entries.delete(id); r.bytes -= e.bytes; destroyEntry(e) // re-detected at another width
+    r.entries.delete(id)
+    r.bytes -= e.bytes
+    destroyEntry(e) // re-detected at another width
   }
-  if (!desc) { r.stats.misses++; return { miss: true } }
+  if (!desc) {
+    r.stats.misses++
+    return { miss: true }
+  }
   const e = createEntry(r.device, desc, dim)
   r.stats.uploads++
   r.stats.uploadBytes += e.bytes
@@ -144,7 +156,9 @@ function resolveSide(r, id, desc, dim, keep) {
   for (const [oid, oe] of r.entries) {
     if (r.bytes + e.bytes <= r.budgetBytes) break
     if (keep.has(oid)) continue
-    r.entries.delete(oid); r.bytes -= oe.bytes; destroyEntry(oe)
+    r.entries.delete(oid)
+    r.bytes -= oe.bytes
+    destroyEntry(oe)
     r.stats.evictions++
   }
   r.entries.set(id, e)
@@ -156,7 +170,9 @@ function resolveSide(r, id, desc, dim, keep) {
 function evict(r, id) {
   const e = id != null ? r.entries.get(id) : null
   if (!e) return
-  r.entries.delete(id); r.bytes -= e.bytes; destroyEntry(e)
+  r.entries.delete(id)
+  r.bytes -= e.bytes
+  destroyEntry(e)
 }
 
 /**
@@ -183,8 +199,10 @@ export async function matchDescriptorsGpu({ runId, idA, idB, descA, descB, dim, 
   const keep = new Set([idA, idB].filter((x) => x != null))
   const pre = [descA, descB].map((d) => (d ? d.length * 4 : 0))
   if (Math.max(...pre) > bindCap) {
-    throw new Error(`descriptor buffer ${Math.round(Math.max(...pre) / 2 ** 20)} MB exceeds GPU binding limit `
-      + `${Math.round(bindCap / 2 ** 20)} MB`)
+    throw new Error(
+      `descriptor buffer ${Math.round(Math.max(...pre) / 2 ** 20)} MB exceeds GPU binding limit ` +
+        `${Math.round(bindCap / 2 ** 20)} MB`,
+    )
   }
   const sa = resolveSide(r, idA, descA, dim, keep)
   const sb = resolveSide(r, idB, descB, dim, keep)
@@ -196,7 +214,9 @@ export async function matchDescriptorsGpu({ runId, idA, idB, descA, descB, dim, 
   const B = sb.entry
   const nA = A.n
   const nB = B.n
-  const cleanupInputs = () => { for (const s of [sa, sb]) if (s.ephemeral) destroyEntry(s.entry) }
+  const cleanupInputs = () => {
+    for (const s of [sa, sb]) if (s.ephemeral) destroyEntry(s.entry)
+  }
   if (!nA || !nB) {
     cleanupInputs()
     return { matches: [], count: 0, nA, nB, gpuMs: 0, selectMs: 0, chunks: 0 }
@@ -206,8 +226,10 @@ export async function matchDescriptorsGpu({ runId, idA, idB, descA, descB, dim, 
   const dim4 = dim / 4
   const totalBlocks = Math.ceil(nA / 64)
   const macPerBlock = 64 * nB * dim
-  let blocksPerChunk = Math.max(1, Math.min(totalBlocks, Math.floor(MAC_PER_DISPATCH / macPerBlock),
-    lim.maxComputeWorkgroupsPerDimension ?? 65535))
+  let blocksPerChunk = Math.max(
+    1,
+    Math.min(totalBlocks, Math.floor(MAC_PER_DISPATCH / macPerBlock), lim.maxComputeWorkgroupsPerDimension ?? 65535),
+  )
   // The column partials buffer is blocksPerChunk × nB records — keep it bindable.
   if (doCols) blocksPerChunk = Math.max(1, Math.min(blocksPerChunk, Math.floor(bindCap / (nB * RECORD))))
   const nChunks = Math.ceil(totalBlocks / blocksPerChunk)
@@ -309,14 +331,16 @@ export async function matchDescriptorsGpu({ runId, idA, idB, descA, descB, dim, 
     destroyScratch()
     // A failed upload may have left an invalid cached buffer — drop both sides so a
     // later pair re-uploads rather than failing on the same broken entry forever.
-    evict(r, idA); evict(r, idB)
+    evict(r, idA)
+    evict(r, idB)
     throw new Error(`GPU match failed: ${gpuErr.message ?? gpuErr}`)
   }
   try {
     await readBuf.mapAsync(GPUMapMode.READ)
   } catch (err) {
     destroyScratch()
-    evict(r, idA); evict(r, idB)
+    evict(r, idA)
+    evict(r, idB)
     throw new Error(`GPU match readback failed: ${err?.message ?? err}`)
   }
   const gpuMs = performance.now() - t0
@@ -333,7 +357,9 @@ export async function matchDescriptorsGpu({ runId, idA, idB, descA, descB, dim, 
     const t = { best: new Uint32Array(n), s1: new Float32Array(n), s2: new Float32Array(n) }
     for (let i = 0; i < n; i++) {
       const o = (rec0 + i) * 4
-      t.best[i] = u[o]; t.s1[i] = fl[o + 1]; t.s2[i] = fl[o + 2]
+      t.best[i] = u[o]
+      t.s1[i] = fl[o + 1]
+      t.s2[i] = fl[o + 2]
     }
     return t
   }

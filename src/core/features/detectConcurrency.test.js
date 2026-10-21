@@ -13,7 +13,7 @@ it('bounds SIFT concurrency by the pool, image count and estimated decode/pyrami
 it('sizes SIFT concurrency to the machine compute budget when one is given', () => {
   // South Building at native resolution: ~620 MB per job.
   const sb = Array.from({ length: 10 }, () => ({ meta: { width: 3072, height: 2304 } }))
-  expect(detectionConcurrency(sb, { maxDim: 3200 }, 8, 8)).toBe(1)            // the 1 GB fallback
+  expect(detectionConcurrency(sb, { maxDim: 3200 }, 8, 8)).toBe(1) // the 1 GB fallback
   expect(detectionConcurrency(sb, { maxDim: 3200, memBudgetBytes: 6 * 1024 ** 3 }, 8, 8)).toBe(4)
   expect(detectionConcurrency(sb, { maxDim: 3200, memBudgetBytes: 1.5 * 1024 ** 3 }, 8, 8)).toBe(2)
   expect(detectionConcurrency(sb, { maxDim: 3200, memBudgetBytes: 6 * 1024 ** 3 }, 3, 8)).toBe(3) // the pool
@@ -25,7 +25,13 @@ describe('fiducialDetectionConcurrency', () => {
     expect(fiducialDetectionConcurrency([img(11000, 8800), img(11000, 8800)], 8, 8)).toBe(1)
   })
   it('lets small scans share the pool, capped at four', () => {
-    expect(fiducialDetectionConcurrency(Array.from({ length: 10 }, () => img(3000, 2400)), 8, 8)).toBe(4)
+    expect(
+      fiducialDetectionConcurrency(
+        Array.from({ length: 10 }, () => img(3000, 2400)),
+        8,
+        8,
+      ),
+    ).toBe(4)
   })
   it('stays serial when any size is unknown', () => {
     expect(fiducialDetectionConcurrency([img(3000, 2400), { meta: {} }], 8, 8)).toBe(1)

@@ -38,21 +38,14 @@ const WGS84_E2 = WGS84_F * (2 - WGS84_F)
 export function geodeticToEcef(lonDeg, latDeg, h = 0) {
   const lon = (lonDeg * Math.PI) / 180
   const lat = (latDeg * Math.PI) / 180
-  const sinLat = Math.sin(lat), cosLat = Math.cos(lat)
+  const sinLat = Math.sin(lat),
+    cosLat = Math.cos(lat)
   const N = WGS84_A / Math.sqrt(1 - WGS84_E2 * sinLat * sinLat)
-  return [
-    (N + h) * cosLat * Math.cos(lon),
-    (N + h) * cosLat * Math.sin(lon),
-    (N * (1 - WGS84_E2) + h) * sinLat,
-  ]
+  return [(N + h) * cosLat * Math.cos(lon), (N + h) * cosLat * Math.sin(lon), (N * (1 - WGS84_E2) + h) * sinLat]
 }
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-const cross = (a, b) => [
-  a[1] * b[2] - a[2] * b[1],
-  a[2] * b[0] - a[0] * b[2],
-  a[0] * b[1] - a[1] * b[0],
-]
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 const norm = (v) => Math.hypot(v[0], v[1], v[2])
 
 // The tile transform: tile-local (east, north, up) metres → ECEF.
@@ -78,13 +71,8 @@ export function ecefTransformFromProbes({ origin, east, north, verticalMetresPer
   const up = cross(ex, ey)
   const upLen = norm(up)
   const v = verticalMetresPerUnit
-  const ez = [up[0] / upLen * v, up[1] / upLen * v, up[2] / upLen * v]
-  return [
-    ex[0], ex[1], ex[2], 0,
-    ey[0], ey[1], ey[2], 0,
-    ez[0], ez[1], ez[2], 0,
-    o[0], o[1], o[2], 1,
-  ]
+  const ez = [(up[0] / upLen) * v, (up[1] / upLen) * v, (up[2] / upLen) * v]
+  return [ex[0], ex[1], ex[2], 0, ey[0], ey[1], ey[2], 0, ez[0], ez[1], ez[2], 0, o[0], o[1], o[2], 1]
 }
 
 // 3D Tiles `box` bounding volume from an axis-aligned local-frame bbox:
@@ -106,11 +94,18 @@ export function boundingBox(min, max) {
 // 'mesh' | 'cloud', count (triangles or points), streamed, textured } or null
 export function tilesSubject(selected, clouds = []) {
   const hasPoints = (c) => c && (c.kind === 'dense' ? c.count > 0 : c.kind !== 'mesh' && c.points?.length > 0)
-  const cloud = selected?.kind === 'mesh' && selected.count > 0 ? selected
-    : hasPoints(selected) ? selected : clouds.find(hasPoints)
+  const cloud =
+    selected?.kind === 'mesh' && selected.count > 0 ? selected : hasPoints(selected) ? selected : clouds.find(hasPoints)
   if (!cloud) return null
-  if (cloud.kind === 'mesh') return { cloud, kind: 'mesh', count: cloud.count, streamed: false, textured: !!(cloud.uv && cloud.texture) }
-  return { cloud, kind: 'cloud', count: cloud.kind === 'dense' ? cloud.count : cloud.points.length, streamed: isStreamed(cloud), textured: false }
+  if (cloud.kind === 'mesh')
+    return { cloud, kind: 'mesh', count: cloud.count, streamed: false, textured: !!(cloud.uv && cloud.texture) }
+  return {
+    cloud,
+    kind: 'cloud',
+    count: cloud.kind === 'dense' ? cloud.count : cloud.points.length,
+    streamed: isStreamed(cloud),
+    textured: false,
+  }
 }
 
 // One tile or a hierarchy, when the dialog leaves it to the size: a hierarchy from
@@ -124,7 +119,8 @@ export function defaultTiling(subject, { tilesLodMinPoints, tilesLodMinTriangles
 }
 
 /** Whether one tile can hold the subject (a single tile is one Float64 plane and one GLB). */
-export const singleTileFits = (subject) => subject?.kind === 'mesh' || (!subject?.streamed && subject?.count <= MAX_FLOAT64_XYZ_POINTS)
+export const singleTileFits = (subject) =>
+  subject?.kind === 'mesh' || (!subject?.streamed && subject?.count <= MAX_FLOAT64_XYZ_POINTS)
 
 export function buildTileset({ transform, box, contentUri, geometricError }) {
   const err = geometricError ?? Math.max(box[3], box[7], box[11]) * 2
@@ -133,7 +129,7 @@ export function buildTileset({ transform, box, contentUri, geometricError }) {
     geometricError: err,
     root: {
       boundingVolume: { box },
-      geometricError: 0,          // a leaf: no coarser representation exists
+      geometricError: 0, // a leaf: no coarser representation exists
       refine: 'REPLACE',
       ...(transform ? { transform } : {}),
       content: { uri: contentUri },
@@ -152,18 +148,28 @@ export function buildTileset({ transform, box, contentUri, geometricError }) {
 // a viewer then reads the hierarchy as it descends instead of one JSON of every
 // tile, which for a 200 M-point cloud's ten thousand nodes is several megabytes.
 // → { tileset, external: [{ name, json }], tiles }
-export function buildTileTree(root, { transform = null, refine = 'ADD', externalEvery = 5, externalAbove = 2000 } = {}) {
+export function buildTileTree(
+  root,
+  { transform = null, refine = 'ADD', externalEvery = 5, externalAbove = 2000 } = {},
+) {
   let tiles = 0
   const finish = (t) => {
     tiles++
-    const min = [...(t.min ?? [Infinity, Infinity, Infinity])], max = [...(t.max ?? [-Infinity, -Infinity, -Infinity])]
+    const min = [...(t.min ?? [Infinity, Infinity, Infinity])],
+      max = [...(t.max ?? [-Infinity, -Infinity, -Infinity])]
     let err = t.geometricError ?? 0
     for (const c of t.children ?? []) {
       finish(c)
-      for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], c.box.min[k]); max[k] = Math.max(max[k], c.box.max[k]) }
+      for (let k = 0; k < 3; k++) {
+        min[k] = Math.min(min[k], c.box.min[k])
+        max[k] = Math.max(max[k], c.box.max[k])
+      }
       err = Math.max(err, c.err)
     }
-    if (!Number.isFinite(min[0])) { min.fill(0); max.fill(0) }
+    if (!Number.isFinite(min[0])) {
+      min.fill(0)
+      max.fill(0)
+    }
     t.box = { min, max }
     t.err = err
   }
@@ -174,10 +180,14 @@ export function buildTileTree(root, { transform = null, refine = 'ADD', external
   const json = (t, depth, dir) => {
     const out = { boundingVolume: { box: boundingBox(t.box.min, t.box.max) }, geometricError: t.err }
     if (split && depth > 0 && depth % externalEvery === 0 && t.children?.length) {
-      external.push({ name: `tiles/${t.id}.json`, json: {
-        asset: { version: '1.1', tilesetVersion: 'websfm' }, geometricError: t.err,
-        root: { ...json(t, 0, ''), refine },
-      } })
+      external.push({
+        name: `tiles/${t.id}.json`,
+        json: {
+          asset: { version: '1.1', tilesetVersion: 'websfm' },
+          geometricError: t.err,
+          root: { ...json(t, 0, ''), refine },
+        },
+      })
       out.content = { uri: `${dir}${t.id}.json` }
       return out
     }
@@ -190,8 +200,13 @@ export function buildTileTree(root, { transform = null, refine = 'ADD', external
   // model's size, so a viewer loads the root once the model is a few pixels across.
   const size = Math.max(...[0, 1, 2].map((k) => root.box.max[k] - root.box.min[k]))
   return {
-    tileset: { asset: { version: '1.1', tilesetVersion: 'websfm' }, geometricError: Math.max(root.err * 2, size / 8), root: rootJson },
-    external, tiles,
+    tileset: {
+      asset: { version: '1.1', tilesetVersion: 'websfm' },
+      geometricError: Math.max(root.err * 2, size / 8),
+      root: rootJson,
+    },
+    external,
+    tiles,
   }
 }
 
@@ -202,8 +217,11 @@ export const POINT_PROPERTIES = { classification: '_CLASSIFICATION', intensity: 
 // Typed array → [glTF accessor componentType, metadata componentType]; anything a
 // vertex attribute cannot hold (32-bit integers, Float64) is written as FLOAT32.
 const PROPERTY_TYPES = [
-  [Uint8Array, 5121, 'UINT8'], [Int8Array, 5120, 'INT8'], [Uint16Array, 5123, 'UINT16'],
-  [Int16Array, 5122, 'INT16'], [Float32Array, 5126, 'FLOAT32'],
+  [Uint8Array, 5121, 'UINT8'],
+  [Int8Array, 5120, 'INT8'],
+  [Uint16Array, 5123, 'UINT16'],
+  [Int16Array, 5122, 'INT16'],
+  [Float32Array, 5126, 'FLOAT32'],
 ]
 const PROPERTY_SETTER = { 5121: 'setUint8', 5120: 'setInt8', 5123: 'setUint16', 5122: 'setInt16', 5126: 'setFloat32' }
 
@@ -219,15 +237,24 @@ const PROPERTY_SETTER = { 5121: 'setUint8', 5120: 'setInt8', 5123: 'setUint16', 
 // `properties` names attributes of `cloud.attributes` to carry (POINT_PROPERTIES);
 // each becomes a vertex attribute described by EXT_structural_metadata, so CesiumJS
 // can style by it (`${classification}`).
-export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color = true, translation = null, properties = [] } = {}) {
+export function cloudToGlbPoints(
+  cloud,
+  { origin = [0, 0, 0], yUp = true, color = true, translation = null, properties = [] } = {},
+) {
   const n = cloud.count ?? cloud.pos.length / 3
   const hasCol = color && !!cloud.col
   const align4 = (v) => (v + 3) & ~3
-  const props = properties.filter((name) => POINT_PROPERTIES[name] && cloud.attributes?.[name]).map((name) => {
-    const arr = cloud.attributes[name]
-    const [, componentType, metaType] = PROPERTY_TYPES.find(([T]) => arr instanceof T) ?? [Float32Array, 5126, 'FLOAT32']
-    return { name, arr, componentType, metaType, off: 0 }
-  })
+  const props = properties
+    .filter((name) => POINT_PROPERTIES[name] && cloud.attributes?.[name])
+    .map((name) => {
+      const arr = cloud.attributes[name]
+      const [, componentType, metaType] = PROPERTY_TYPES.find(([T]) => arr instanceof T) ?? [
+        Float32Array,
+        5126,
+        'FLOAT32',
+      ]
+      return { name, arr, componentType, metaType, off: 0 }
+    })
   const posBytes = n * 12
   const colBytes = hasCol ? n * 4 : 0
   const posOff = 0
@@ -235,12 +262,19 @@ export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color 
   // A vertex attribute's elements start on 4-byte boundaries: a 1- or 2-byte property
   // takes a 4-byte stride.
   let binLen = colOff + align4(colBytes)
-  for (const p of props) { p.off = binLen; binLen += n * 4 }
+  for (const p of props) {
+    p.off = binLen
+    binLen += n * 4
+  }
   const bin = new Uint8Array(binLen)
   const bv = new DataView(bin.buffer)
 
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity
   for (let i = 0; i < n; i++) {
     const e = cloud.pos[i * 3] - origin[0]
     const nn = cloud.pos[i * 3 + 1] - origin[1]
@@ -249,11 +283,17 @@ export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color 
     bv.setFloat32(posOff + i * 12, x, true)
     bv.setFloat32(posOff + i * 12 + 4, y, true)
     bv.setFloat32(posOff + i * 12 + 8, z, true)
-    if (x < minX) minX = x; if (x > maxX) maxX = x
-    if (y < minY) minY = y; if (y > maxY) maxY = y
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+    if (z < minZ) minZ = z
+    if (z > maxZ) maxZ = z
   }
-  if (!Number.isFinite(minX)) { minX = minY = minZ = 0; maxX = maxY = maxZ = 0 }
+  if (!Number.isFinite(minX)) {
+    minX = minY = minZ = 0
+    maxX = maxY = maxZ = 0
+  }
   if (hasCol) {
     for (let i = 0; i < n; i++) {
       bin[colOff + i * 4] = cloud.col[i * 3]
@@ -268,10 +308,16 @@ export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color 
     for (let i = 0; i < n; i++) bv[set](p.off + i * 4, p.arr[i], true)
   }
 
-  const accessors = [{
-    bufferView: 0, componentType: 5126, count: n, type: 'VEC3',
-    min: [minX, minY, minZ], max: [maxX, maxY, maxZ],
-  }]
+  const accessors = [
+    {
+      bufferView: 0,
+      componentType: 5126,
+      count: n,
+      type: 'VEC3',
+      min: [minX, minY, minZ],
+      max: [maxX, maxY, maxZ],
+    },
+  ]
   const bufferViews = [{ buffer: 0, byteOffset: posOff, byteLength: posBytes, target: 34962 }]
   const attributes = { POSITION: 0 }
   if (hasCol) {
@@ -300,10 +346,15 @@ export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color 
   if (props.length) {
     const each = (f) => Object.fromEntries(props.map((p) => [p.name, f(p)]))
     gltf.extensionsUsed = ['EXT_structural_metadata']
-    gltf.extensions = { EXT_structural_metadata: {
-      schema: { id: 'websfm', classes: { point: { properties: each((p) => ({ type: 'SCALAR', componentType: p.metaType })) } } },
-      propertyAttributes: [{ class: 'point', properties: each((p) => ({ attribute: POINT_PROPERTIES[p.name] })) }],
-    } }
+    gltf.extensions = {
+      EXT_structural_metadata: {
+        schema: {
+          id: 'websfm',
+          classes: { point: { properties: each((p) => ({ type: 'SCALAR', componentType: p.metaType })) } },
+        },
+        propertyAttributes: [{ class: 'point', properties: each((p) => ({ attribute: POINT_PROPERTIES[p.name] })) }],
+      },
+    }
     primitive.extensions = { EXT_structural_metadata: { propertyAttributes: [0] } }
   }
   return packGlb(gltf, bin)
@@ -323,11 +374,11 @@ export function packGlb(gltf, bin) {
   const total = 12 + 8 + jsonBytes.length + 8 + bin.length
   const out = new Uint8Array(total)
   const dv = new DataView(out.buffer)
-  dv.setUint32(0, 0x46546c67, true)   // 'glTF'
+  dv.setUint32(0, 0x46546c67, true) // 'glTF'
   dv.setUint32(4, 2, true)
   dv.setUint32(8, total, true)
   dv.setUint32(12, jsonBytes.length, true)
-  dv.setUint32(16, 0x4e4f534a, true)  // 'JSON'
+  dv.setUint32(16, 0x4e4f534a, true) // 'JSON'
   out.set(jsonBytes, 20)
   const binHdr = 20 + jsonBytes.length
   dv.setUint32(binHdr, bin.length, true)
@@ -358,9 +409,13 @@ export function localBounds(cloud, origin = [0, 0, 0]) {
 export function cloudCentroid(cloud) {
   const n = cloud.count ?? cloud.pos.length / 3
   if (!n) return [0, 0, 0]
-  let sx = 0, sy = 0, sz = 0
+  let sx = 0,
+    sy = 0,
+    sz = 0
   for (let i = 0; i < n; i++) {
-    sx += cloud.pos[i * 3]; sy += cloud.pos[i * 3 + 1]; sz += cloud.pos[i * 3 + 2]
+    sx += cloud.pos[i * 3]
+    sy += cloud.pos[i * 3 + 1]
+    sz += cloud.pos[i * 3 + 2]
   }
   return [sx / n, sy / n, sz / n]
 }

@@ -91,7 +91,8 @@ export function detectFileKind(text, fileName = '') {
   const looksImage = cells.some((c) => IMAGE_COLUMN.test(c))
   // A point-name column (`gcp_label`, `point_id`) names ground control even beside an
   // image column: those rows are observations of the point in images.
-  if (cells.some((c) => /^(gcp|point|pt|marker|target)_?(name|id|label)?$/i.test(c))) return { kind: 'gcp', confidence: 'low' }
+  if (cells.some((c) => /^(gcp|point|pt|marker|target)_?(name|id|label)?$/i.test(c)))
+    return { kind: 'gcp', confidence: 'low' }
   if (looksImage && !looksGcp) return { kind: 'pose', confidence: 'low' }
   if (looksGcp && !looksImage) return { kind: 'gcp', confidence: 'low' }
 

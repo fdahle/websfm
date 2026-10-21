@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { sniffCloudFormat, looksLikeXyzText, parseCloudFile, parseCloudSource, cloudStats, applyImportTransform } from './cloudImport.js'
+import {
+  sniffCloudFormat,
+  looksLikeXyzText,
+  parseCloudFile,
+  parseCloudSource,
+  cloudStats,
+  applyImportTransform,
+} from './cloudImport.js'
 import { blobSource } from '../../utils/blobParts.js'
 import { cloudToPlyParts } from '../products/exporters.js'
 import { cloudToLasParts } from './las.js'
@@ -64,7 +71,12 @@ describe('cloudStats', () => {
     expect(s.bbox.max).toEqual([2, 4, 6])
   })
   it('reports vertices + faces for a mesh', () => {
-    const parsed = { nVerts: 3, count: 1, pos: Float64Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]), idx: Uint32Array.from([0, 1, 2]) }
+    const parsed = {
+      nVerts: 3,
+      count: 1,
+      pos: Float64Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      idx: Uint32Array.from([0, 1, 2]),
+    }
     const s = cloudStats(parsed)
     expect(s.points).toBe(3)
     expect(s.faces).toBe(1)
@@ -85,10 +97,19 @@ describe('applyImportTransform', () => {
     expect([out.nrm[0] + 0, out.nrm[1] + 0, out.nrm[2] + 0]).toEqual([0, 0, 1])
   })
   it('subsamples a cloud but never a mesh', () => {
-    const cloud = { count: 3, pos: Float64Array.from([0, 0, 0, 0.1, 0, 0, 0.2, 0, 0]), col: new Uint8Array(9).fill(100) }
+    const cloud = {
+      count: 3,
+      pos: Float64Array.from([0, 0, 0, 0.1, 0, 0, 0.2, 0, 0]),
+      col: new Uint8Array(9).fill(100),
+    }
     const outCloud = applyImportTransform(cloud, { subsampleCell: 1 })
     expect(outCloud.count).toBe(1)
-    const mesh = { nVerts: 3, count: 1, pos: Float64Array.from([0, 0, 0, 0.1, 0, 0, 0.2, 0, 0]), idx: Uint32Array.from([0, 1, 2]) }
+    const mesh = {
+      nVerts: 3,
+      count: 1,
+      pos: Float64Array.from([0, 0, 0, 0.1, 0, 0, 0.2, 0, 0]),
+      idx: Uint32Array.from([0, 1, 2]),
+    }
     const outMesh = applyImportTransform(mesh, { subsampleCell: 1 })
     expect(outMesh.nVerts).toBe(3) // untouched
   })
@@ -99,7 +120,10 @@ describe('applyImportTransform', () => {
 })
 
 describe('parseCloudSource — streaming dispatch', () => {
-  const pts = [{ x: 1, y: 2, z: 3, color: [10, 20, 30] }, { x: 4, y: 5, z: 6, color: [1, 2, 3] }]
+  const pts = [
+    { x: 1, y: 2, z: 3, color: [10, 20, 30] },
+    { x: 4, y: 5, z: 6, color: [1, 2, 3] },
+  ]
   const plain = (r) => JSON.parse(JSON.stringify(r, (k, v) => (ArrayBuffer.isView(v) ? [v.constructor.name, ...v] : v)))
   const files = {
     'a.ply': cloudToPly(pts, { binary: false }),

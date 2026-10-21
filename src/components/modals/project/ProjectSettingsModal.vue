@@ -24,18 +24,18 @@ const clearing = ref(false)
 const error = ref('')
 const sections = ref([])
 const totalBytes = computed(() => sections.value.reduce((sum, row) => sum + row.bytes, 0))
-const derivedBytes = computed(() => sections.value
-  .filter((row) => ARCHIVE_DERIVED_DIRS.includes(row.id))
-  .reduce((sum, row) => sum + row.bytes, 0))
+const derivedBytes = computed(() =>
+  sections.value.filter((row) => ARCHIVE_DERIVED_DIRS.includes(row.id)).reduce((sum, row) => sum + row.bytes, 0),
+)
 
 const LABELS = {
-  images: 'Source images',
+  'images': 'Source images',
   'images-derived': 'Image previews & transcodes',
-  keypoints: 'Keypoints',
-  matches: 'Matches',
-  depthmaps: 'Depth maps',
-  products: 'DEM & orthophoto products',
-  project: 'Project metadata',
+  'keypoints': 'Keypoints',
+  'matches': 'Matches',
+  'depthmaps': 'Depth maps',
+  'products': 'DEM & orthophoto products',
+  'project': 'Project metadata',
 }
 
 async function measure() {
@@ -60,17 +60,23 @@ async function measure() {
 
 function commitName() {
   const value = name.value.trim()
-  if (!value) { name.value = props.project.name; return }
+  if (!value) {
+    name.value = props.project.name
+    return
+  }
   if (value !== props.project.name) emit('rename', value)
 }
 
 async function onClearDerived() {
   if (!derivedBytes.value) return
-  if (!(await confirmDialog({
-    title: 'Clear derived data?',
-    message: `Clear ${formatBytes(derivedBytes.value)} of derived data? Depth maps and raster products will need to be recomputed; source data and reconstructions are kept.`,
-    confirmLabel: 'Clear',
-  }))) return
+  if (
+    !(await confirmDialog({
+      title: 'Clear derived data?',
+      message: `Clear ${formatBytes(derivedBytes.value)} of derived data? Depth maps and raster products will need to be recomputed; source data and reconstructions are kept.`,
+      confirmLabel: 'Clear',
+    }))
+  )
+    return
   clearing.value = true
   error.value = ''
   try {
@@ -88,13 +94,20 @@ onMounted(measure)
 
 <template>
   <!-- Flush: each section carries its own padding and divider. -->
-  <ModalShell class="project-settings" title="Project Settings" aria-label="Project settings" width="520px" flush @close="emit('close')">
+  <ModalShell
+    class="project-settings"
+    title="Project Settings"
+    aria-label="Project settings"
+    width="520px"
+    flush
+    @close="emit('close')"
+  >
     <div class="sections">
       <section class="section">
         <h3>Project</h3>
         <label class="field">
           <span>Name</span>
-          <input v-model="name" maxlength="80" @change="commitName" @keydown.enter="commitName">
+          <input v-model="name" maxlength="80" @change="commitName" @keydown.enter="commitName" />
         </label>
         <div class="readout-row">
           <span>Capture type</span>
@@ -116,11 +129,17 @@ onMounted(measure)
 
       <section v-if="project.sceneType !== 'object'" class="section">
         <h3>Coordinate system</h3>
-        <p>Working CRS for maps, GCPs, footprints, and camera positions. Changing it reprojects existing spatial data.</p>
+        <p>
+          Working CRS for maps, GCPs, footprints, and camera positions. Changing it reprojects existing spatial data.
+        </p>
         <CrsPicker :model-value="project.crs || 'EPSG:4326'" @update:model-value="emit('set-crs', $event)" />
-        <CrsSuggestion v-if="crsSuggestion" context="settings"
-          :suggestion="crsSuggestion" :current-crs="project.crs || 'EPSG:4326'"
-          @apply="emit('apply-crs-suggestion', $event)" />
+        <CrsSuggestion
+          v-if="crsSuggestion"
+          context="settings"
+          :suggestion="crsSuggestion"
+          :current-crs="project.crs || 'EPSG:4326'"
+          @apply="emit('apply-crs-suggestion', $event)"
+        />
       </section>
 
       <section class="section">
@@ -157,28 +176,115 @@ onMounted(measure)
 <style scoped>
 /* One step above the other settings-family dialogs (z 200), as before; two classes
    outrank the shell's `.overlay`. */
-.overlay.project-settings { z-index: 210; }
-.sections { padding: 4px 0; }
-.section { padding: 14px 16px; }
-.section + .section { border-top: 1px solid var(--panel-border); }
-h3 { font-size: 12px; font-weight: 650; margin-bottom: 8px; color: var(--text); }
-p, .muted, small { display: block; font-size: 11px; line-height: 1.45; color: var(--text-dim); }
-p { margin-bottom: 10px; }
-.field { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
-.field input { width: 100%; padding: 6px 8px; border: 1px solid var(--panel-border); border-radius: 5px; background: var(--bg); color: var(--text); font: inherit; }
-.readout-row, .breakdown-row, .clear-row, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.readout-row { padding: 5px 0; font-size: 12px; color: var(--text-dim); }
-.readout-row strong, .section-heading strong { color: var(--text); font-size: 12px; font-weight: 550; }
-.section-heading { align-items: flex-start; }
-.section-heading h3 { margin-bottom: 2px; }
-.breakdown { margin-top: 8px; border: 1px solid var(--panel-border); border-radius: 5px; overflow: hidden; }
-.breakdown-row { padding: 6px 8px; font-size: 11px; }
-.breakdown-row + .breakdown-row { border-top: 1px solid var(--panel-border); }
-.breakdown-row span:last-child { color: var(--text-dim); }
-.breakdown .muted { padding: 8px; }
-.clear-row { margin-top: 12px; }
-.clear-row > div > span { display: block; font-size: 12px; }
-.btn { white-space: nowrap; }
-.btn.danger:hover:not(:disabled) { color: #e66; border-color: #e66; background: rgba(220,50,50,.1); }
-.error { margin-top: 10px; color: #e66; font-size: 11px; }
+.overlay.project-settings {
+  z-index: 210;
+}
+.sections {
+  padding: 4px 0;
+}
+.section {
+  padding: 14px 16px;
+}
+.section + .section {
+  border-top: 1px solid var(--panel-border);
+}
+h3 {
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+p,
+.muted,
+small {
+  display: block;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+p {
+  margin-bottom: 10px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.field input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.readout-row,
+.breakdown-row,
+.clear-row,
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.readout-row {
+  padding: 5px 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.readout-row strong,
+.section-heading strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 550;
+}
+.section-heading {
+  align-items: flex-start;
+}
+.section-heading h3 {
+  margin-bottom: 2px;
+}
+.breakdown {
+  margin-top: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.breakdown-row {
+  padding: 6px 8px;
+  font-size: 11px;
+}
+.breakdown-row + .breakdown-row {
+  border-top: 1px solid var(--panel-border);
+}
+.breakdown-row span:last-child {
+  color: var(--text-dim);
+}
+.breakdown .muted {
+  padding: 8px;
+}
+.clear-row {
+  margin-top: 12px;
+}
+.clear-row > div > span {
+  display: block;
+  font-size: 12px;
+}
+.btn {
+  white-space: nowrap;
+}
+.btn.danger:hover:not(:disabled) {
+  color: #e66;
+  border-color: #e66;
+  background: rgba(220, 50, 50, 0.1);
+}
+.error {
+  margin-top: 10px;
+  color: #e66;
+  font-size: 11px;
+}
 </style>

@@ -6,7 +6,11 @@ import { adaptiveReprojThreshold, CLEANUP_THRESHOLD_DEFAULTS } from './cleanupTh
 // no-op case that keeps existing baselines byte-identical.
 const healthy = [
   ...Array.from({ length: 95 }, (_, i) => 0.3 + i * 0.02), // 0.30 … 2.18 px
-  40, 60, 90, 120, 180,                                     // gross tail
+  40,
+  60,
+  90,
+  120,
+  180, // gross tail
 ]
 
 // A systematically shifted model (wrong focal): EVERY residual is above the
@@ -63,7 +67,6 @@ describe('adaptiveReprojThreshold', () => {
   })
 
   it('exposes a tighter bound for the pre-BA pass than the filter passes', () => {
-    expect(CLEANUP_THRESHOLD_DEFAULTS.preBaMaxRemovedFrac)
-      .toBeLessThan(CLEANUP_THRESHOLD_DEFAULTS.filterMaxRemovedFrac)
+    expect(CLEANUP_THRESHOLD_DEFAULTS.preBaMaxRemovedFrac).toBeLessThan(CLEANUP_THRESHOLD_DEFAULTS.filterMaxRemovedFrac)
   })
 })

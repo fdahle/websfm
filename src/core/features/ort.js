@@ -62,7 +62,9 @@ export function resolveBackend() {
       if (chromium && globalThis.navigator?.gpu) {
         try {
           if (await navigator.gpu.requestAdapter()) return 'webgpu'
-        } catch { /* fall through to wasm */ }
+        } catch {
+          /* fall through to wasm */
+        }
       }
       return 'wasm'
     })()
@@ -83,14 +85,16 @@ export async function createSession(model, opts = {}, onLog, backendOverride) {
   // `backendOverride` lets a caller pin a backend regardless of the machine —
   // e.g. LightGlue drives this to try 'webgpu' (when useGpu is enabled) or 'wasm', managing its
   // own GPU→CPU fallback in core/features/lightglue.js rather than trusting ORT's EP order.
-  const backend = backendOverride || await resolveBackend()
+  const backend = backendOverride || (await resolveBackend())
   onLog?.(`ORT: compiling wasm + creating session (${backend})…`)
   // A watchdog line so a hang here is visible and reportable — session creation
   // has no progress callback, and on a cold cache (or with DevTools open, which
   // slows Chrome's wasm compile a lot) it can take a while.
   const watchdog = setInterval(() => {
-    onLog?.(`ORT: still creating session (${backend})… if this repeats for minutes, `
-      + 'check the browser console (worker context) for errors; closing DevTools speeds up wasm compile')
+    onLog?.(
+      `ORT: still creating session (${backend})… if this repeats for minutes, ` +
+        'check the browser console (worker context) for errors; closing DevTools speeds up wasm compile',
+    )
   }, 15000)
   const t = performance.now()
   try {

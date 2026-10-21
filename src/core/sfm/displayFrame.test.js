@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { makeSampleMap, makeCanonicalToScan, makeScanToPinhole, makePinholeToMark, markToCentrePx, centreToMarkPx, makeFrameModelResolver, gcpsInPinholeFrame, guideToScan } from './displayFrame.js'
+import {
+  makeSampleMap,
+  makeCanonicalToScan,
+  makeScanToPinhole,
+  makePinholeToMark,
+  markToCentrePx,
+  centreToMarkPx,
+  makeFrameModelResolver,
+  gcpsInPinholeFrame,
+  guideToScan,
+} from './displayFrame.js'
 import { fitFiducialAffine, canonicalFrame } from './fiducials.js'
 
 const K = { fx: 3000, fy: 3000, cx: 2000, cy: 1500 }
@@ -7,18 +17,32 @@ const dist = { k1: -0.08, k2: 0.01, k3: 0, p1: 0.0005, p2: -0.0003 }
 const selfCal = { k1: 0.02, k2: -0.003, k3: 0 }
 
 // A film affine + canonical frame (scan px → mm → canonical px).
-const MARKS = [[-106, -106], [106, -106], [106, 106], [-106, 106]].map(([x, y], i) => ({ id: `F${i}`, xMm: x, yMm: y }))
+const MARKS = [
+  [-106, -106],
+  [106, -106],
+  [106, 106],
+  [-106, 106],
+].map(([x, y], i) => ({ id: `F${i}`, xMm: x, yMm: y }))
 const pitch = 0.0227
-const fit = fitFiducialAffine(MARKS.map((m) => ({ px: 4800 + m.xMm / pitch, py: 4800 + m.yMm / pitch, xMm: m.xMm, yMm: m.yMm })))
+const fit = fitFiducialAffine(
+  MARKS.map((m) => ({ px: 4800 + m.xMm / pitch, py: 4800 + m.yMm / pitch, xMm: m.xMm, yMm: m.yMm })),
+)
 const frame = canonicalFrame({ marks: MARKS, focalMm: 153, ppxMm: 0, ppyMm: 0 }, fit.pitchMm)
 const fiducial = { A: fit.A, frame }
 
 describe('makeScanToPinhole', () => {
   it('is the exact inverse of makePinholeToMark for every chain', () => {
     for (const model of [{}, { dist }, { selfCal }, { dist, selfCal }, { fiducial }, { dist, selfCal, fiducial }]) {
-      const toMark = makePinholeToMark({ K, ...model }), toPin = makeScanToPinhole({ K, ...model })
-      for (const [u, v] of [[100, 120], [2000, 1500], [3900, 2900], [1234.5, 77.25]]) {
-        const s = toMark(u, v), back = toPin(s.x, s.y)
+      const toMark = makePinholeToMark({ K, ...model }),
+        toPin = makeScanToPinhole({ K, ...model })
+      for (const [u, v] of [
+        [100, 120],
+        [2000, 1500],
+        [3900, 2900],
+        [1234.5, 77.25],
+      ]) {
+        const s = toMark(u, v),
+          back = toPin(s.x, s.y)
         expect(back.x).toBeCloseTo(u, 6)
         expect(back.y).toBeCloseTo(v, 6)
       }
@@ -36,8 +60,13 @@ describe('makeScanToPinhole', () => {
 describe('makeFrameModelResolver', () => {
   it('joins sensor bag, normalised self-cal bag and film transform per image', () => {
     const resolve = makeFrameModelResolver({
-      summary: { selfCalDistortion: [{ sensorId: 's1', k1: 0.01, k2: 0, k3: 0 }, { sensorId: 's2', k1: 0, k2: 0, k3: 0 }],
-        fiducialTransforms: [{ uuid: 'u3', A: fit.A, frame }] },
+      summary: {
+        selfCalDistortion: [
+          { sensorId: 's1', k1: 0.01, k2: 0, k3: 0 },
+          { sensorId: 's2', k1: 0, k2: 0, k3: 0 },
+        ],
+        fiducialTransforms: [{ uuid: 'u3', A: fit.A, frame }],
+      },
       sensors: [{ id: 's1', k1: -0.1, distortionModel: 'radial' }, { id: 's2' }, { id: 's3', kind: 'film' }],
     })
     const a = resolve({ uuid: 'u1', sensorId: 's1' })
@@ -58,13 +87,24 @@ describe('makeFrameModelResolver', () => {
 })
 
 describe('GCP marks and guides cross the frame boundary', () => {
-  const imagesById = new Map([[1, { id: 1, uuid: 'a' }], [2, { id: 2, uuid: 'b' }]])
+  const imagesById = new Map([
+    [1, { id: 1, uuid: 'a' }],
+    [2, { id: 2, uuid: 'b' }],
+  ])
   const sparseCameras = new Map([['a', { K }]])
   const frameModel = (im) => (im.uuid === 'a' ? { dist } : {})
 
   it('maps marks on registered images only and never mutates the input', () => {
     const raw = makePinholeToMark({ K, dist })(3500, 2600) // the click a user would make
-    const gcps = [{ id: 'g', observations: [{ imageId: 1, px: raw.x, py: raw.y }, { imageId: 2, px: 5, py: 6 }] }]
+    const gcps = [
+      {
+        id: 'g',
+        observations: [
+          { imageId: 1, px: raw.x, py: raw.y },
+          { imageId: 2, px: 5, py: 6 },
+        ],
+      },
+    ]
     const [out] = gcpsInPinholeFrame(gcps, { imagesById, sparseCameras, frameModel })
     expect(out.observations[0].px).toBeCloseTo(3500, 6)
     expect(out.observations[0].py).toBeCloseTo(2600, 6)
@@ -91,7 +131,8 @@ describe('makeSampleMap per-axis scales', () => {
     // Output at a uniform 0.5, source resized 1001×500 → 501×250 (0.5005 × 0.5).
     const map = makeSampleMap({ K, outScale: 0.5, srcScale: [501 / 1001, 0.5] })
     const p = map(100, 60)
-    const nx = (100 + 0.5) / 0.5 - 0.5, ny = (60 + 0.5) / 0.5 - 0.5
+    const nx = (100 + 0.5) / 0.5 - 0.5,
+      ny = (60 + 0.5) / 0.5 - 0.5
     expect(p.x).toBeCloseTo((nx + 0.5) * (501 / 1001) - 0.5, 12)
     expect(p.y).toBeCloseTo((ny + 0.5) * 0.5 - 0.5, 12)
     // Same factors in and out, no distortion: the identity.
@@ -104,12 +145,19 @@ describe('makeSampleMap per-axis scales', () => {
 describe('makeFrameModelResolver (fisheye)', () => {
   it('a self-calibrated fisheye row replaces the sensor lens instead of composing', () => {
     const sensors = [{ id: 's', distortionModel: 'fisheye2', k1: 0.01, k2: 0.002 }]
-    const summary = { selfCalDistortion: [{ sensorId: 's', fisheye: true, k1: 0.04, k2: -0.003, k3: 0, k4: 0, fitRmsPx: 0 }] }
+    const summary = {
+      selfCalDistortion: [{ sensorId: 's', fisheye: true, k1: 0.04, k2: -0.003, k3: 0, k4: 0, fitRmsPx: 0 }],
+    }
     const fm = makeFrameModelResolver({ summary, sensors })({ uuid: 'u', sensorId: 's' })
     expect(fm.dist).toEqual({ fisheye: true, k1: 0.04, k2: -0.003, k3: 0, k4: 0 })
     expect(fm.selfCal).toBeNull()
     // Without a run row, the sensor's own lens.
-    expect(makeFrameModelResolver({ summary: {}, sensors })({ uuid: 'u', sensorId: 's' }).dist)
-      .toEqual({ fisheye: true, k1: 0.01, k2: 0.002, k3: 0, k4: 0 })
+    expect(makeFrameModelResolver({ summary: {}, sensors })({ uuid: 'u', sensorId: 's' }).dist).toEqual({
+      fisheye: true,
+      k1: 0.01,
+      k2: 0.002,
+      k3: 0,
+      k4: 0,
+    })
   })
 })

@@ -17,36 +17,42 @@ import { LOD_MIN_POINTS } from '../../core/lod/build.js'
 // with whole-cloud context (ranges and class counts from the build), so nodes match.
 
 export const LOD_VIEW_MIN = LOD_MIN_POINTS // a resident cloud this big is drawn through its octree
-const MIN_NODE_PIXELS = 150             // nodes smaller on screen are not refined
+const MIN_NODE_PIXELS = 150 // nodes smaller on screen are not refined
 const CONCURRENT_LOADS = 4
-const CACHE_FACTOR = 2                  // loaded points kept: this × the budget
+const CACHE_FACTOR = 2 // loaded points kept: this × the budget
 
 // Max-heap of { node, weight }.
 function heap() {
   const a = []
   return {
-    get size() { return a.length },
+    get size() {
+      return a.length
+    },
     push(node, weight) {
       a.push({ node, weight })
       let i = a.length - 1
       while (i > 0) {
         const p = (i - 1) >> 1
         if (a[p].weight >= a[i].weight) break
-        ;[a[p], a[i]] = [a[i], a[p]]; i = p
+        ;[a[p], a[i]] = [a[i], a[p]]
+        i = p
       }
     },
     pop() {
-      const top = a[0], last = a.pop()
+      const top = a[0],
+        last = a.pop()
       if (a.length) {
         a[0] = last
         let i = 0
         for (;;) {
-          const l = 2 * i + 1, r = l + 1
+          const l = 2 * i + 1,
+            r = l + 1
           let m = i
           if (l < a.length && a[l].weight > a[m].weight) m = l
           if (r < a.length && a[r].weight > a[m].weight) m = r
           if (m === i) break
-          ;[a[m], a[i]] = [a[i], a[m]]; i = m
+          ;[a[m], a[i]] = [a[i], a[m]]
+          i = m
         }
       }
       return top
@@ -65,15 +71,28 @@ export function createLodLayer(cloud, { open, material, onChange }) {
   const group = new THREE.Group()
   group.position.set(...offset)
   group.userData.cloudId = cloud.id
-  const cache = new Map()   // key → { key, node, pts, object, lastUsed }
+  const cache = new Map() // key → { key, node, pts, object, lastUsed }
   const loading = new Set()
   const failed = new Set()
-  let reader = null, disposed = false, frame = 0, queue = []
-  let style = null          // { input, opts } of the last restyle
-  const frustum = new THREE.Frustum(), viewProj = new THREE.Matrix4(), box = new THREE.Box3(), centre = new THREE.Vector3()
+  let reader = null,
+    disposed = false,
+    frame = 0,
+    queue = []
+  let style = null // { input, opts } of the last restyle
+  const frustum = new THREE.Frustum(),
+    viewProj = new THREE.Matrix4(),
+    box = new THREE.Box3(),
+    centre = new THREE.Vector3()
   const layer = {
-    lod: true, object: group, baseMaterial: material, source: cloud, count: cloud.count,
-    visiblePoints: 0, loadedPoints: 0, rootPoints: null, ready: false,
+    lod: true,
+    object: group,
+    baseMaterial: material,
+    source: cloud,
+    count: cloud.count,
+    visiblePoints: 0,
+    loadedPoints: 0,
+    rootPoints: null,
+    ready: false,
   }
 
   open(cloud).then((r) => {
@@ -94,17 +113,20 @@ export function createLodLayer(cloud, { open, material, onChange }) {
     const c = cubeBox(node)
     const r = c.size * 0.866
     box.getCenter(centre)
-    if (camera.isOrthographicCamera) return r * camera.zoom * height / (camera.top - camera.bottom)
+    if (camera.isOrthographicCamera) return (r * camera.zoom * height) / (camera.top - camera.bottom)
     const d = camera.position.distanceTo(centre)
     if (d <= r) return Infinity
-    return r / (d * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) * height / 2
+    return ((r / (d * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))) * height) / 2
   }
 
   function colourise(e) {
     if (!e.object || !style) return
     const { pts } = e
-    const visual = buildCloudStyle({ kind: 'dense', count: pts.count, pos: pts.pos, col: pts.col, attributes: pts.attributes, style: style.input },
-      style.input, style.opts)
+    const visual = buildCloudStyle(
+      { kind: 'dense', count: pts.count, pos: pts.pos, col: pts.col, attributes: pts.attributes, style: style.input },
+      style.input,
+      style.opts,
+    )
     const g = e.object.geometry
     if (visual.colors) g.setAttribute('color', new THREE.BufferAttribute(visual.colors, 3, true))
     else g.deleteAttribute('color')
@@ -147,10 +169,15 @@ export function createLodLayer(cloud, { open, material, onChange }) {
 
   function evict(wanted, budget) {
     if (layer.loadedPoints <= CACHE_FACTOR * budget) return
-    const idle = [...cache.values()].filter((e) => !wanted.has(e.key) && e.node.key[0] > 0).sort((a, b) => a.lastUsed - b.lastUsed)
+    const idle = [...cache.values()]
+      .filter((e) => !wanted.has(e.key) && e.node.key[0] > 0)
+      .sort((a, b) => a.lastUsed - b.lastUsed)
     for (const e of idle) {
       if (layer.loadedPoints <= CACHE_FACTOR * budget) break
-      if (e.object) { group.remove(e.object); e.object.geometry.dispose() }
+      if (e.object) {
+        group.remove(e.object)
+        e.object.geometry.dispose()
+      }
       cache.delete(e.key)
       layer.loadedPoints -= e.pts.count
     }
@@ -164,7 +191,8 @@ export function createLodLayer(cloud, { open, material, onChange }) {
     frustum.setFromProjectionMatrix(viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse))
     const h = heap()
     h.push(reader.root, Infinity)
-    const wanted = new Set(), missing = []
+    const wanted = new Set(),
+      missing = []
     let points = 0
     while (h.size) {
       const { node, weight: w } = h.pop()
@@ -174,7 +202,10 @@ export function createLodLayer(cloud, { open, material, onChange }) {
       const key = keyString(node.key)
       if (failed.has(key)) continue
       const e = cache.get(key)
-      if (!e) { missing.push({ node, key, weight: w }); continue }
+      if (!e) {
+        missing.push({ node, key, weight: w })
+        continue
+      }
       points += node.count
       wanted.add(key)
       e.lastUsed = frame
@@ -199,13 +230,20 @@ export function createLodLayer(cloud, { open, material, onChange }) {
     layer.source = c
     const input = c.style || {} // a restored cloud's style may be null
     const proxy = {
-      kind: 'dense', count: 0, style: input, col: lod.layout.colour ? new Uint8Array(0) : null,
+      kind: 'dense',
+      count: 0,
+      style: input,
+      col: lod.layout.colour ? new Uint8Array(0) : null,
       attributes: Object.fromEntries(lod.layout.attributes.map((a) => [a.name, new Float32Array(0)])),
     }
     const resolved = resolveCloudStyle(proxy)
     const axis = { x: 0, y: 1, elevation: 2 }[resolved.field]
-    const range = axis != null ? { min: lod.bounds.min[axis], max: lod.bounds.max[axis] }
-      : resolved.field.startsWith('attribute:') ? lod.stats?.ranges?.[resolved.field.slice(10)] ?? null : null
+    const range =
+      axis != null
+        ? { min: lod.bounds.min[axis], max: lod.bounds.max[axis] }
+        : resolved.field.startsWith('attribute:')
+          ? (lod.stats?.ranges?.[resolved.field.slice(10)] ?? null)
+          : null
     const opts = { elevationRange, origin: offset, range, classCounts: lod.stats?.classes ?? null }
     const visual = buildCloudStyle(proxy, input, opts)
     style = { input, opts }
@@ -228,13 +266,16 @@ export function createLodLayer(cloud, { open, material, onChange }) {
       b.center.add(group.position)
       return b
     }
-    const min = new THREE.Vector3(...lod.bounds.min), max = new THREE.Vector3(...lod.bounds.max)
+    const min = new THREE.Vector3(...lod.bounds.min),
+      max = new THREE.Vector3(...lod.bounds.max)
     const center = min.clone().add(max).multiplyScalar(0.5)
-    let alongMin = Infinity, alongMax = -Infinity
+    let alongMin = Infinity,
+      alongMax = -Infinity
     for (let k = 0; k < 8; k++) {
       const corner = new THREE.Vector3(k & 1 ? max.x : min.x, k & 2 ? max.y : min.y, k & 4 ? max.z : min.z).sub(center)
       const a = corner.dot(up)
-      alongMin = Math.min(alongMin, a); alongMax = Math.max(alongMax, a)
+      alongMin = Math.min(alongMin, a)
+      alongMax = Math.max(alongMax, a)
     }
     return { center, radius: max.distanceTo(min) / 2 || 1, alongMin, alongMax }
   }
@@ -246,10 +287,20 @@ export function createLodLayer(cloud, { open, material, onChange }) {
     for (const e of cache.values()) {
       if (!e.object?.visible) continue
       const matrix = vp.clone().multiply(group.matrixWorld).elements
-      const hit = pickNearestPoint(e.pts.pos, e.pts.count, { matrix, x, y, tolX, tolY, indices: e.object.geometry.index?.array ?? null })
+      const hit = pickNearestPoint(e.pts.pos, e.pts.count, {
+        matrix,
+        x,
+        y,
+        tolX,
+        tolY,
+        indices: e.object.geometry.index?.array ?? null,
+      })
       if (hit && (!best || hit.depth < best.depth)) {
         const i = hit.index
-        best = { depth: hit.depth, pos: [e.pts.pos[3 * i] + offset[0], e.pts.pos[3 * i + 1] + offset[1], e.pts.pos[3 * i + 2] + offset[2]] }
+        best = {
+          depth: hit.depth,
+          pos: [e.pts.pos[3 * i] + offset[0], e.pts.pos[3 * i + 1] + offset[1], e.pts.pos[3 * i + 2] + offset[2]],
+        }
       }
     }
     return best
@@ -265,17 +316,33 @@ export function createLodLayer(cloud, { open, material, onChange }) {
       if (!e.object?.visible) continue
       const indices = e.object.geometry.index?.array ?? null
       let mask = new Uint8Array(e.pts.count)
-      for (const o of ops) mask = screenSelectMask(e.pts.pos, e.pts.count, { matrix: o.matrix, shape: o.shape, indices, base: mask, op: o.op }).mask
+      for (const o of ops)
+        mask = screenSelectMask(e.pts.pos, e.pts.count, {
+          matrix: o.matrix,
+          shape: o.shape,
+          indices,
+          base: mask,
+          op: o.op,
+        }).mask
       let n = 0
       for (let i = 0; i < mask.length; i++) n += mask[i]
       if (!n) continue
       const pos = new Float32Array(3 * n)
-      for (let i = 0, k = 0; i < mask.length; i++) if (mask[i]) { pos[k++] = e.pts.pos[3 * i]; pos[k++] = e.pts.pos[3 * i + 1]; pos[k++] = e.pts.pos[3 * i + 2] }
-      parts.push(pos); selected += n
+      for (let i = 0, k = 0; i < mask.length; i++)
+        if (mask[i]) {
+          pos[k++] = e.pts.pos[3 * i]
+          pos[k++] = e.pts.pos[3 * i + 1]
+          pos[k++] = e.pts.pos[3 * i + 2]
+        }
+      parts.push(pos)
+      selected += n
     }
     const pos = new Float32Array(3 * selected)
     let o = 0
-    for (const p of parts) { pos.set(p, o); o += p.length }
+    for (const p of parts) {
+      pos.set(p, o)
+      o += p.length
+    }
     return { selected, pos }
   }
 

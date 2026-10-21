@@ -58,7 +58,9 @@ describe('buildScaleContext', () => {
 
   it('uses the median, so a few odd images do not move the factor', () => {
     const ctx = buildScaleContext([
-      { detectScale: 0.25 }, { detectScale: 0.25 }, { detectScale: 0.25 },
+      { detectScale: 0.25 },
+      { detectScale: 0.25 },
+      { detectScale: 0.25 },
       { detectScale: 1 },
     ])
     expect(ctx.medianScale).toBe(0.25)
@@ -147,7 +149,7 @@ describe('describeScaleContext', () => {
     const msg = describeScaleContext(ctx, 'SfM thresholds')
     expect(msg).toMatch(/SfM thresholds/)
     expect(msg).toMatch(/×4\.00/)
-    expect(msg).toMatch(/0\.250/)   // the median scale behind the factor
+    expect(msg).toMatch(/0\.250/) // the median scale behind the factor
     expect(msg).toMatch(/2 images/)
   })
 

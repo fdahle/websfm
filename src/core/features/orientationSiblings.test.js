@@ -12,7 +12,14 @@ describe('siblingCanonicalMap', () => {
 
   it('returns null when there are no siblings, or no scale (SuperPoint)', () => {
     expect(siblingCanonicalMap(K([kp(1, 1), kp(2, 2)]))).toBeNull()
-    expect(siblingCanonicalMap(K([{ x: 1, y: 1 }, { x: 1, y: 1 }]))).toBeNull()
+    expect(
+      siblingCanonicalMap(
+        K([
+          { x: 1, y: 1 },
+          { x: 1, y: 1 },
+        ]),
+      ),
+    ).toBeNull()
     expect(siblingCanonicalMap(K([]))).toBeNull()
   })
 })
@@ -28,12 +35,23 @@ describe('canonicalizeMatches', () => {
   })
 
   it('merges sibling-to-sibling duplicates, keeping the smallest distance', () => {
-    const res = canonicalizeMatches([
-      { ia: 0, ib: 1, dist: 0.4 },
-      { ia: 2, ib: 3, dist: 0.3 }, // same feature pair via the other orientations
-      { ia: 1, ib: 2, dist: 0.5 },
-    ], canonA, canonB)
-    expect(res).toEqual({ matches: [{ ia: 0, ib: 1, dist: 0.3 }, { ia: 1, ib: 2, dist: 0.5 }], merged: 1, ambiguous: 0 })
+    const res = canonicalizeMatches(
+      [
+        { ia: 0, ib: 1, dist: 0.4 },
+        { ia: 2, ib: 3, dist: 0.3 }, // same feature pair via the other orientations
+        { ia: 1, ib: 2, dist: 0.5 },
+      ],
+      canonA,
+      canonB,
+    )
+    expect(res).toEqual({
+      matches: [
+        { ia: 0, ib: 1, dist: 0.3 },
+        { ia: 1, ib: 2, dist: 0.5 },
+      ],
+      merged: 1,
+      ambiguous: 0,
+    })
   })
 
   it('re-expresses a match made only through a secondary orientation', () => {
@@ -42,11 +60,15 @@ describe('canonicalizeMatches', () => {
   })
 
   it('drops a feature matched to two different features as ambiguous', () => {
-    const res = canonicalizeMatches([
-      { ia: 0, ib: 0, dist: 0.2 },
-      { ia: 2, ib: 2, dist: 0.2 }, // A's feature 0 (via sibling 2) → a different B feature
-      { ia: 3, ib: 1, dist: 0.4 },
-    ], canonA, canonB)
+    const res = canonicalizeMatches(
+      [
+        { ia: 0, ib: 0, dist: 0.2 },
+        { ia: 2, ib: 2, dist: 0.2 }, // A's feature 0 (via sibling 2) → a different B feature
+        { ia: 3, ib: 1, dist: 0.4 },
+      ],
+      canonA,
+      canonB,
+    )
     expect(res.matches).toEqual([{ ia: 3, ib: 1, dist: 0.4 }])
     expect(res.ambiguous).toBe(2)
   })

@@ -52,7 +52,9 @@ describe('cloudToXyz / parseXyzText', () => {
 })
 
 describe('parseXyzChunks — the streaming reader', () => {
-  async function* chunksOf(bytes, size) { for (let o = 0; o < bytes.length; o += size) yield bytes.subarray(o, o + size) }
+  async function* chunksOf(bytes, size) {
+    for (let o = 0; o < bytes.length; o += size) yield bytes.subarray(o, o + size)
+  }
   const texts = {
     plain: '1 2 3\n4 5 6\n',
     crlfComma: 'x,y,z,r,g,b\r\n1,2,3,100,110,120\r\n4,5,6,10,20,30',
@@ -75,7 +77,11 @@ describe('parseXyzChunks — the streaming reader', () => {
 
   it('reads a written cloud back through the chunked path', async () => {
     const n = 3000
-    const flat = { count: n, pos: Float64Array.from({ length: n * 3 }, (_, i) => i * 0.25 - 100), col: Uint8Array.from({ length: n * 3 }, (_, i) => i % 256) }
+    const flat = {
+      count: n,
+      pos: Float64Array.from({ length: n * 3 }, (_, i) => i * 0.25 - 100),
+      col: Uint8Array.from({ length: n * 3 }, (_, i) => i % 256),
+    }
     const parts = [...cloudToXyzParts(flat, { partChars: 1000 })]
     expect(parts.length).toBeGreaterThan(10)
     const out = await parseXyzChunks(chunksOf(new TextEncoder().encode(parts.join('')), 4093))

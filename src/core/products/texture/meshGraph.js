@@ -22,15 +22,18 @@ export function faceAdjacency(idx, nVerts) {
   for (let f = 0; f < F; f++) {
     for (let k = 0; k < 3; k++) {
       if (adj[3 * f + k] >= 0) continue
-      const a = idx[3 * f + k], b = idx[3 * f + (k + 1) % 3]
+      const a = idx[3 * f + k],
+        b = idx[3 * f + ((k + 1) % 3)]
       if (a === b) continue
       for (let x = start[a]; x < start[a + 1]; x++) {
         const g = inc[x]
         if (g === f) continue
         const r = edgeSlot(idx, g, a, b)
         if (r < 0 || adj[3 * g + r] >= 0) continue
-        adj[3 * f + k] = g; rev[3 * f + k] = r
-        adj[3 * g + r] = f; rev[3 * g + r] = k
+        adj[3 * f + k] = g
+        rev[3 * f + k] = r
+        adj[3 * g + r] = f
+        rev[3 * g + r] = k
         break
       }
     }
@@ -41,7 +44,8 @@ export function faceAdjacency(idx, nVerts) {
 // The slot of edge {a, b} in face g, or −1.
 function edgeSlot(idx, g, a, b) {
   for (let r = 0; r < 3; r++) {
-    const p = idx[3 * g + r], q = idx[3 * g + (r + 1) % 3]
+    const p = idx[3 * g + r],
+      q = idx[3 * g + ((r + 1) % 3)]
     if ((p === a && q === b) || (p === b && q === a)) return r
   }
   return -1

@@ -6,9 +6,7 @@ describe('sequentialPairs', () => {
   const keys = (pairs) => pairs.map(([a, b]) => [a, b].sort().join('--'))
 
   it('matches each item to the requested number of following frames', () => {
-    expect(keys(sequentialPairs(ids, { overlap: 2 }))).toEqual([
-      'a--b', 'a--c', 'b--c', 'b--d', 'c--d', 'c--e', 'd--e',
-    ])
+    expect(keys(sequentialPairs(ids, { overlap: 2 }))).toEqual(['a--b', 'a--c', 'b--c', 'b--d', 'c--d', 'c--e', 'd--e'])
   })
 
   it('closes an orbit without emitting duplicate undirected pairs', () => {

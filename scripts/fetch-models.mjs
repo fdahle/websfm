@@ -35,7 +35,9 @@ await mkdir(dir, { recursive: true })
 
 async function sha256Of(url) {
   try {
-    return createHash('sha256').update(await readFile(url)).digest('hex')
+    return createHash('sha256')
+      .update(await readFile(url))
+      .digest('hex')
   } catch {
     return null
   }
@@ -51,7 +53,7 @@ for (const [id, m] of Object.entries(MODELS)) {
     failed = true
     continue
   }
-  if (await sha256Of(target) === want) {
+  if ((await sha256Of(target)) === want) {
     console.log(`✓ ${m.file} (present)`)
     continue
   }
@@ -64,7 +66,7 @@ for (const [id, m] of Object.entries(MODELS)) {
   }
   const part = new URL(`${m.file}.part`, dir)
   await pipeline(Readable.fromWeb(res.body), createWriteStream(part))
-  if (await sha256Of(part) !== want) {
+  if ((await sha256Of(part)) !== want) {
     await rm(part, { force: true })
     console.log('checksum mismatch')
     failed = true

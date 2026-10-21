@@ -10,33 +10,55 @@ test('Split Panoramic Strips cuts a strip into frame-camera segments', async ({ 
   await page.goto('/')
   await page.getByRole('button', { name: 'Create project', exact: true }).click()
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
-  const W = 1600, H = 200, PITCH = 0.1, F = 100
+  const W = 1600,
+    H = 200,
+    PITCH = 0.1,
+    F = 100
   // The mark: a ray at scan angle 0.3 rad, 4 mm below the film's centre line.
-  const mark = { u: W / 2 + 0.3 * F / PITCH, v: H / 2 + 4 / PITCH }
-  await page.evaluate(async ({ W, H }) => {
-    const c = new OffscreenCanvas(W, H), g = c.getContext('2d')
-    for (let y = 0; y < H; y += 8) for (let x = 0; x < W; x += 8) {
-      const v = 90 + ((x * 7 + y * 13) % 120); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, y, 8, 8)
-    }
-    const file = new File([await c.convertToBlob({ type: 'image/png' })], 'P01.png', { type: 'image/png' })
-    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
-    await useImagesStore().addImages([file])
-  }, { W, H })
-  await expect.poll(() => page.evaluate(async () => (await import('/src/stores/useImagesStore.js')).useImagesStore()
-    .images.filter((i) => i.meta?.width > 0).length)).toBe(1)
-  await page.evaluate(async ({ PITCH, F, mark }) => {
-    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
-    const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
-    const img = useImagesStore().images[0]
-    const gcps = useGcpsStore(), gid = gcps.addPoint({ role: 'marker' })
-    gcps.setObservation(gid, img.id, img.name, mark.u, mark.v)
-    const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
-    const s = useSensorsStore(), id = s.sensors[0].id
-    s.updateSensor(id, 'pixelSize', PITCH)
-    s.updateSensor(id, 'focalUnit', 'mm')
-    s.updateSensor(id, 'focal', F)
-    document.querySelector('#app').__vue_app__._instance.setupState.handleCommand('split-panoramic')
-  }, { PITCH, F, mark })
+  const mark = { u: W / 2 + (0.3 * F) / PITCH, v: H / 2 + 4 / PITCH }
+  await page.evaluate(
+    async ({ W, H }) => {
+      const c = new OffscreenCanvas(W, H),
+        g = c.getContext('2d')
+      for (let y = 0; y < H; y += 8)
+        for (let x = 0; x < W; x += 8) {
+          const v = 90 + ((x * 7 + y * 13) % 120)
+          g.fillStyle = `rgb(${v},${v},${v})`
+          g.fillRect(x, y, 8, 8)
+        }
+      const file = new File([await c.convertToBlob({ type: 'image/png' })], 'P01.png', { type: 'image/png' })
+      const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+      await useImagesStore().addImages([file])
+    },
+    { W, H },
+  )
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () =>
+          (await import('/src/stores/useImagesStore.js')).useImagesStore().images.filter((i) => i.meta?.width > 0)
+            .length,
+      ),
+    )
+    .toBe(1)
+  await page.evaluate(
+    async ({ PITCH, F, mark }) => {
+      const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+      const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
+      const img = useImagesStore().images[0]
+      const gcps = useGcpsStore(),
+        gid = gcps.addPoint({ role: 'marker' })
+      gcps.setObservation(gid, img.id, img.name, mark.u, mark.v)
+      const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
+      const s = useSensorsStore(),
+        id = s.sensors[0].id
+      s.updateSensor(id, 'pixelSize', PITCH)
+      s.updateSensor(id, 'focalUnit', 'mm')
+      s.updateSensor(id, 'focal', F)
+      document.querySelector('#app').__vue_app__._instance.setupState.handleCommand('split-panoramic')
+    },
+    { PITCH, F, mark },
+  )
   const dlg = page.getByRole('dialog', { name: /Split Panoramic Strips/ })
   await expect(dlg).toContainText('1 strip of 92° scan each → 8 segments')
   await dlg.getByRole('button', { name: 'Split', exact: true }).click()
@@ -49,10 +71,24 @@ test('Split Panoramic Strips cuts a strip into frame-camera segments', async ({ 
     const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
     const imgs = useImagesStore().images
     const s = useSensorsStore().sensors.find((x) => x.id === imgs[0].sensorId)
-    return { names: imgs.map((i) => i.name), sensors: [...new Set(imgs.map((i) => i.sensorId))].length,
-      sensor: { focal: s.focal, focalUnit: s.focalUnit, pixelSize: s.pixelSize, cx: s.cx, cy: s.cy, panoramicSegments: s.panoramicSegments },
+    return {
+      names: imgs.map((i) => i.name),
+      sensors: [...new Set(imgs.map((i) => i.sensorId))].length,
+      sensor: {
+        focal: s.focal,
+        focalUnit: s.focalUnit,
+        pixelSize: s.pixelSize,
+        cx: s.cx,
+        cy: s.cy,
+        panoramicSegments: s.panoramicSegments,
+      },
       sizes: [...new Set(imgs.map((i) => `${i.meta?.width}x${i.meta?.height}`))],
-      obs: useGcpsStore().gcps[0].observations.map((o) => ({ name: o.imageName ?? imgs.find((i) => i.id === o.imageId)?.name, px: o.px, py: o.py })) }
+      obs: useGcpsStore().gcps[0].observations.map((o) => ({
+        name: o.imageName ?? imgs.find((i) => i.id === o.imageId)?.name,
+        px: o.px,
+        py: o.py,
+      })),
+    }
   })
   expect(out.names).toEqual(Array.from({ length: 8 }, (_, k) => `P01_s0${k + 1}.tif`))
   expect(out.sensors).toBe(1)

@@ -1,14 +1,22 @@
 import { describe, it, expect } from 'vitest'
 import { fromArrayBuffer } from 'geotiff'
 import {
-  writeGeoTiff, writeCog, writeCogDeflate, planCog, assembleCog, geoKeysForEpsg, createCogBuilder, cogRawBytes,
+  writeGeoTiff,
+  writeCog,
+  writeCogDeflate,
+  planCog,
+  assembleCog,
+  geoKeysForEpsg,
+  createCogBuilder,
+  cogRawBytes,
   assembleStripTiff,
 } from './geotiff.js'
 
 // Minimal baseline-TIFF reader (little-endian) — enough to verify the writer.
 function parseTiff(bytes) {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  expect(bytes[0]).toBe(0x49); expect(bytes[1]).toBe(0x49)   // 'II'
+  expect(bytes[0]).toBe(0x49)
+  expect(bytes[1]).toBe(0x49) // 'II'
   expect(dv.getUint16(2, true)).toBe(42)
   const ifd = dv.getUint32(4, true)
   const n = dv.getUint16(ifd, true)
@@ -37,9 +45,11 @@ describe('writeGeoTiff', () => {
   it('writes a georeferenced single-band float DEM readable back', () => {
     const data = new Float32Array([1.5, 2.5, 3.5, 4.5]) // 2×2
     const tif = writeGeoTiff({
-      width: 2, height: 2,
+      width: 2,
+      height: 2,
       samples: [{ bits: 32, format: 3 }],
-      photometric: 1, extraSamples: null,
+      photometric: 1,
+      extraSamples: null,
       data: new Uint8Array(data.buffer),
       pixelScale: [10, 10, 0],
       tiepoint: [0, 0, 0, 100, 200, 0],
@@ -47,12 +57,12 @@ describe('writeGeoTiff', () => {
       gdalNoData: -9999,
     })
     const { dv, tags } = parseTiff(tif)
-    expect(tags.get(256)).toEqual([2])       // width
-    expect(tags.get(257)).toEqual([2])       // height
-    expect(tags.get(258)).toEqual([32])      // bits per sample
-    expect(tags.get(339)).toEqual([3])       // SampleFormat = float
-    expect(tags.get(277)).toEqual([1])       // 1 sample
-    expect(tags.get(33550)).toEqual([10, 10, 0])          // pixel scale
+    expect(tags.get(256)).toEqual([2]) // width
+    expect(tags.get(257)).toEqual([2]) // height
+    expect(tags.get(258)).toEqual([32]) // bits per sample
+    expect(tags.get(339)).toEqual([3]) // SampleFormat = float
+    expect(tags.get(277)).toEqual([1]) // 1 sample
+    expect(tags.get(33550)).toEqual([10, 10, 0]) // pixel scale
     expect(tags.get(33922)).toEqual([0, 0, 0, 100, 200, 0]) // tiepoint
     // GeoKeyDirectory: header [1,1,0,3] then the projected-CS key holds 3031.
     const gk = tags.get(34735)
@@ -65,30 +75,36 @@ describe('writeGeoTiff', () => {
   })
 
   it('writes an RGBA raster with 4 samples + alpha extra-sample', () => {
-    const rgba = new Uint8Array([10, 20, 30, 255,  40, 50, 60, 128]) // 2×1
+    const rgba = new Uint8Array([10, 20, 30, 255, 40, 50, 60, 128]) // 2×1
     const tif = writeGeoTiff({
-      width: 2, height: 1,
+      width: 2,
+      height: 1,
       samples: [1, 2, 3, 4].map(() => ({ bits: 8, format: 1 })),
-      photometric: 2, extraSamples: [2],
+      photometric: 2,
+      extraSamples: [2],
       data: rgba,
-      pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 0, 0],
+      pixelScale: [1, 1, 0],
+      tiepoint: [0, 0, 0, 0, 0, 0],
       geoKeys: geoKeysForEpsg(null, false),
     })
     const { tags } = parseTiff(tif)
-    expect(tags.get(277)).toEqual([4])           // samples per pixel
-    expect(tags.get(258)).toEqual([8, 8, 8, 8])  // bits per sample
-    expect(tags.get(262)).toEqual([2])           // RGB
-    expect(tags.get(338)).toEqual([2])           // ExtraSamples = unassociated alpha
+    expect(tags.get(277)).toEqual([4]) // samples per pixel
+    expect(tags.get(258)).toEqual([8, 8, 8, 8]) // bits per sample
+    expect(tags.get(262)).toEqual([2]) // RGB
+    expect(tags.get(338)).toEqual([2]) // ExtraSamples = unassociated alpha
     // No EPSG → user-defined model type, still a valid geotransform.
     expect(tags.get(34735).slice(0, 4)).toEqual([1, 1, 0, 2])
   })
 
   it('writes the Compression tag (1 default, 8 when compressed) with the strip as-is', () => {
     const base = {
-      width: 1, height: 1,
+      width: 1,
+      height: 1,
       samples: [{ bits: 32, format: 3 }],
-      photometric: 1, extraSamples: null,
-      pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 0, 0],
+      photometric: 1,
+      extraSamples: null,
+      pixelScale: [1, 1, 0],
+      tiepoint: [0, 0, 0, 0, 0, 0],
       geoKeys: geoKeysForEpsg(null, false),
     }
     const uncompressed = parseTiff(writeGeoTiff({ ...base, data: new Uint8Array(4) }))
@@ -98,19 +114,22 @@ describe('writeGeoTiff', () => {
     // them verbatim and records StripByteCounts = their length.
     const fakeCompressed = new Uint8Array([9, 9, 9])
     const t = parseTiff(writeGeoTiff({ ...base, data: fakeCompressed, compression: 8 }))
-    expect(t.tags.get(259)).toEqual([8])            // Adobe DEFLATE
-    expect(t.tags.get(279)).toEqual([3])            // StripByteCounts = compressed length
+    expect(t.tags.get(259)).toEqual([8]) // Adobe DEFLATE
+    expect(t.tags.get(279)).toEqual([3]) // StripByteCounts = compressed length
     const off = t.tags.get(273)[0]
     expect([t.dv.getUint8(off), t.dv.getUint8(off + 1), t.dv.getUint8(off + 2)]).toEqual([9, 9, 9])
   })
 
   it('emits a GDAL_NODATA tag only when a nodata value is given', () => {
     const base = {
-      width: 1, height: 1,
+      width: 1,
+      height: 1,
       samples: [{ bits: 32, format: 3 }],
-      photometric: 1, extraSamples: null,
+      photometric: 1,
+      extraSamples: null,
       data: new Uint8Array(new Float32Array([0]).buffer),
-      pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 0, 0],
+      pixelScale: [1, 1, 0],
+      tiepoint: [0, 0, 0, 0, 0, 0],
       geoKeys: geoKeysForEpsg(3031, false),
     }
     const withNoData = parseTiff(writeGeoTiff({ ...base, gdalNoData: -9999 }))
@@ -139,14 +158,17 @@ function ramp(w, h, spp, Ctor = Float32Array) {
 
 const cogBase = {
   samples: [{ bits: 32, format: 3 }],
-  photometric: 1, extraSamples: null,
-  pixelScale: [10, 10, 0], tiepoint: [0, 0, 0, 100, 200, 0],
+  photometric: 1,
+  extraSamples: null,
+  pixelScale: [10, 10, 0],
+  tiepoint: [0, 0, 0, 100, 200, 0],
   geoKeys: geoKeysForEpsg(3031, false),
 }
 
 describe('writeCog', () => {
   it('round-trips a tiled full-resolution image pixel-for-pixel', async () => {
-    const w = 40, h = 24
+    const w = 40,
+      h = 24
     const data = ramp(w, h, 1)
     const bytes = writeCog({ ...cogBase, width: w, height: h, data, tileSize: 16 })
     const tiff = await fromArrayBuffer(toBuf(bytes))
@@ -180,7 +202,11 @@ describe('writeCog', () => {
       // NewSubfileType: 0 for full res, 1 (reduced resolution) for the overviews.
       expect(await tag(img, 'NewSubfileType')).toBe(i === 0 ? 0 : 1)
     }
-    expect(dims).toEqual([[40, 24], [20, 12], [10, 6]])
+    expect(dims).toEqual([
+      [40, 24],
+      [20, 12],
+      [10, 6],
+    ])
   })
 
   it('lets the reader pick a reduced IFD for a downscaled read', async () => {
@@ -203,11 +229,20 @@ describe('writeCog', () => {
   it('averages when downsampling and skips nodata cells', async () => {
     // 2×2 block of 1,3 / 5,NODATA → mean of the three valid values.
     const NODATA = -9999
-    const w = 32, h = 32
+    const w = 32,
+      h = 32
     const data = new Float32Array(w * h).fill(1)
-    data[0] = 1; data[1] = 3; data[w] = 5; data[w + 1] = NODATA
+    data[0] = 1
+    data[1] = 3
+    data[w] = 5
+    data[w + 1] = NODATA
     const bytes = writeCog({
-      ...cogBase, width: w, height: h, data, tileSize: 16, gdalNoData: NODATA,
+      ...cogBase,
+      width: w,
+      height: h,
+      data,
+      tileSize: 16,
+      gdalNoData: NODATA,
     })
     const tiff = await fromArrayBuffer(toBuf(bytes))
     const [ov] = await (await tiff.getImage(1)).readRasters()
@@ -216,11 +251,20 @@ describe('writeCog', () => {
 
   it('keeps a cell nodata when its whole source block is nodata', async () => {
     const NODATA = -9999
-    const w = 32, h = 32
+    const w = 32,
+      h = 32
     const data = new Float32Array(w * h).fill(1)
-    data[0] = NODATA; data[1] = NODATA; data[w] = NODATA; data[w + 1] = NODATA
+    data[0] = NODATA
+    data[1] = NODATA
+    data[w] = NODATA
+    data[w + 1] = NODATA
     const bytes = writeCog({
-      ...cogBase, width: w, height: h, data, tileSize: 16, gdalNoData: NODATA,
+      ...cogBase,
+      width: w,
+      height: h,
+      data,
+      tileSize: 16,
+      gdalNoData: NODATA,
     })
     const tiff = await fromArrayBuffer(toBuf(bytes))
     const [ov] = await (await tiff.getImage(1)).readRasters()
@@ -229,7 +273,8 @@ describe('writeCog', () => {
   })
 
   it('handles dimensions that are not a multiple of the tile size', async () => {
-    const w = 37, h = 19            // partial edge tiles in both axes
+    const w = 37,
+      h = 19 // partial edge tiles in both axes
     const data = ramp(w, h, 1)
     const bytes = writeCog({ ...cogBase, width: w, height: h, data, tileSize: 16 })
     const tiff = await fromArrayBuffer(toBuf(bytes))
@@ -255,10 +300,16 @@ describe('writeCog', () => {
     ['uint16', Uint16Array, 16, 1],
     ['float32', Float32Array, 32, 3],
   ])('round-trips %s samples', async (_name, Ctor, bits, format) => {
-    const w = 40, h = 24
+    const w = 40,
+      h = 24
     const data = ramp(w, h, 1, Ctor)
     const bytes = writeCog({
-      ...cogBase, samples: [{ bits, format }], width: w, height: h, data, tileSize: 16,
+      ...cogBase,
+      samples: [{ bits, format }],
+      width: w,
+      height: h,
+      data,
+      tileSize: 16,
     })
     const tiff = await fromArrayBuffer(toBuf(bytes))
     const [band] = await (await tiff.getImage(0)).readRasters()
@@ -267,17 +318,22 @@ describe('writeCog', () => {
   })
 
   it('round-trips a multi-band scene interleaved by pixel', async () => {
-    const w = 40, h = 24, spp = 6                       // the benchmark shape
+    const w = 40,
+      h = 24,
+      spp = 6 // the benchmark shape
     const data = ramp(w, h, spp, Int16Array)
     const bytes = writeCog({
       ...cogBase,
       samples: Array.from({ length: spp }, () => ({ bits: 16, format: 2 })),
-      width: w, height: h, data, tileSize: 16,
+      width: w,
+      height: h,
+      data,
+      tileSize: 16,
     })
     const tiff = await fromArrayBuffer(toBuf(bytes))
     const img = await tiff.getImage(0)
     expect(img.getSamplesPerPixel()).toBe(spp)
-    const bands = await img.readRasters()          // de-interleaved, one array per band
+    const bands = await img.readRasters() // de-interleaved, one array per band
     expect(bands.length).toBe(spp)
     for (let s = 0; s < spp; s++) {
       expect(bands[s][0]).toBe(data[s])
@@ -330,28 +386,41 @@ describe('writeCog', () => {
     expect(() => writeCog({ ...ok, tileSize: 100 })).toThrow(/multiple of 16/)
     expect(() => writeCog({ ...ok, data: new Float32Array(15) })).toThrow(/data length/)
     expect(() => writeCog({ ...ok, data: [1, 2, 3] })).toThrow(/TypedArray/)
-    expect(() => writeCog({
-      ...ok, samples: [{ bits: 8, format: 1 }, { bits: 16, format: 1 }],
-      data: new Float32Array(32),
-    })).toThrow(/share bits and format/)
+    expect(() =>
+      writeCog({
+        ...ok,
+        samples: [
+          { bits: 8, format: 1 },
+          { bits: 16, format: 1 },
+        ],
+        data: new Float32Array(32),
+      }),
+    ).toThrow(/share bits and format/)
   })
 })
 
 describe('geoKeysForEpsg', () => {
   it('sets a projected model type + ProjectedCSType key', () => {
     expect(geoKeysForEpsg(3031, false)).toEqual([
-      [1024, 0, 1, 1], [1025, 0, 1, 1], [3072, 0, 1, 3031],
+      [1024, 0, 1, 1],
+      [1025, 0, 1, 1],
+      [3072, 0, 1, 3031],
     ])
   })
 
   it('sets a geographic model type + GeographicType key', () => {
     expect(geoKeysForEpsg(4326, true)).toEqual([
-      [1024, 0, 1, 2], [1025, 0, 1, 1], [2048, 0, 1, 4326],
+      [1024, 0, 1, 2],
+      [1025, 0, 1, 1],
+      [2048, 0, 1, 4326],
     ])
   })
 
   it('falls back to a user-defined model when no code is given', () => {
-    expect(geoKeysForEpsg(null, false)).toEqual([[1024, 0, 1, 32767], [1025, 0, 1, 1]])
+    expect(geoKeysForEpsg(null, false)).toEqual([
+      [1024, 0, 1, 32767],
+      [1025, 0, 1, 1],
+    ])
   })
 })
 
@@ -362,26 +431,29 @@ describe('geoKeysForEpsg', () => {
 async function deflateBytes(bytes) {
   const cs = new CompressionStream('deflate')
   const w = cs.writable.getWriter()
-  w.write(bytes); w.close()
+  w.write(bytes)
+  w.close()
   return new Uint8Array(await new Response(cs.readable).arrayBuffer())
 }
 
 describe('writeCogDeflate', () => {
   it('round-trips pixel-for-pixel through per-tile DEFLATE', async () => {
-    const w = 40, h = 24
+    const w = 40,
+      h = 24
     const data = ramp(w, h, 1)
-    const bytes = await writeCogDeflate(
-      { ...cogBase, width: w, height: h, data, tileSize: 16 }, deflateBytes)
+    const bytes = await writeCogDeflate({ ...cogBase, width: w, height: h, data, tileSize: 16 }, deflateBytes)
     const tiff = await fromArrayBuffer(toBuf(bytes))
     const img = await tiff.getImage(0)
-    expect(await tag(img, 'Compression')).toBe(8)   // Adobe DEFLATE
+    expect(await tag(img, 'Compression')).toBe(8) // Adobe DEFLATE
     const [band] = await img.readRasters()
     expect(Array.from(band)).toEqual(Array.from(data))
   })
 
   it('keeps overviews readable and compressed too', async () => {
     const bytes = await writeCogDeflate(
-      { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 }, deflateBytes)
+      { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 },
+      deflateBytes,
+    )
     const tiff = await fromArrayBuffer(toBuf(bytes))
     expect(await tiff.getImageCount()).toBe(3)
     const ov = await tiff.getImage(1)
@@ -392,7 +464,8 @@ describe('writeCogDeflate', () => {
 
   it('is smaller than the uncompressed form on compressible data', async () => {
     // A constant plane is the clearest case: uncompressed pays full tile bytes.
-    const w = 128, h = 128
+    const w = 128,
+      h = 128
     const flat = new Float32Array(w * h).fill(42)
     const spec = { ...cogBase, width: w, height: h, data: flat, tileSize: 16 }
     const plain = writeCog(spec)
@@ -410,10 +483,11 @@ describe('writeCogDeflate', () => {
 
 describe('planCog / assembleCog', () => {
   it('hands back tiles in write order — overviews first, full resolution last', () => {
-    const { plan, tiles } = planCog(
-      { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 })
+    const { plan, tiles } = planCog({ ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 })
     expect(plan.levels).toEqual([
-      { width: 40, height: 24 }, { width: 20, height: 12 }, { width: 10, height: 6 },
+      { width: 40, height: 24 },
+      { width: 20, height: 12 },
+      { width: 10, height: 6 },
     ])
     // Level 2 (a single tile) comes first; level 0's six tiles come last.
     expect(plan.order[0].li).toBe(2)
@@ -422,7 +496,7 @@ describe('planCog / assembleCog', () => {
     expect(tiles.length).toBe(plan.tileCounts.reduce((a, b) => a + b, 0))
   })
 
-  it('records each tile\'s real byte count, so variable-size tiles stay readable', async () => {
+  it("records each tile's real byte count, so variable-size tiles stay readable", async () => {
     const spec = { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 }
     const { plan, tiles } = planCog(spec)
     const packed = []
@@ -436,14 +510,12 @@ describe('planCog / assembleCog', () => {
   })
 
   it('rejects a tile array that does not match the plan', () => {
-    const { plan, tiles } = planCog(
-      { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 })
+    const { plan, tiles } = planCog({ ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 })
     expect(() => assembleCog(plan, tiles.slice(1))).toThrow(/expected/)
   })
 
   it('writes the GDAL ghost area so readers recognise the COG layout', () => {
-    const bytes = writeCog(
-      { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 })
+    const bytes = writeCog({ ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 })
     const ghost = new TextDecoder().decode(bytes.subarray(8, 160))
     expect(ghost).toContain('GDAL_STRUCTURAL_METADATA_SIZE=')
     expect(ghost).toContain('LAYOUT=IFDS_BEFORE_DATA')
@@ -458,38 +530,68 @@ describe('planCog / assembleCog', () => {
 })
 
 it('assembles COG Blob parts with the same offsets and bytes as contiguous output', async () => {
-  const { plan, tiles } = planCog({ width: 259, height: 17,
-    samples: [{ bits: 16, format: 1 }], photometric: 1,
+  const { plan, tiles } = planCog({
+    width: 259,
+    height: 17,
+    samples: [{ bits: 16, format: 1 }],
+    photometric: 1,
     data: Uint16Array.from({ length: 259 * 17 }, (_, i) => i),
-    pixelScale: [2, 2, 0], tiepoint: [0, 0, 0, 1000, 2000, 0], geoKeys: geoKeysForEpsg(3031, false) })
+    pixelScale: [2, 2, 0],
+    tiepoint: [0, 0, 0, 1000, 2000, 0],
+    geoKeys: geoKeysForEpsg(3031, false),
+  })
   const expected = assembleCog(plan, tiles)
-  const parts = assembleCog(plan, tiles.map(t => ({ length: t.length, part: new Blob([t]) })), { parts: true })
+  const parts = assembleCog(
+    plan,
+    tiles.map((t) => ({ length: t.length, part: new Blob([t]) })),
+    { parts: true },
+  )
   expect(new Uint8Array(await new Blob(parts).arrayBuffer())).toEqual(expected)
 })
 
 describe('createCogBuilder (a COG from blocks)', () => {
   // An RGBA scene with structure at every scale and transparent holes.
-  const rgbaScene = (w, h) => Uint8Array.from({ length: w * h * 4 }, (_, i) => {
-    const p = i >> 2, x = p % w, y = (p / w) | 0
-    if ((i & 3) === 3) return (x * 3 + y * 5) % 17 === 0 ? 0 : 255
-    return (x * 7 + y * 13 + (i & 3) * 50 + ((x >> 4) ^ (y >> 3)) * 9) % 256
+  const rgbaScene = (w, h) =>
+    Uint8Array.from({ length: w * h * 4 }, (_, i) => {
+      const p = i >> 2,
+        x = p % w,
+        y = (p / w) | 0
+      if ((i & 3) === 3) return (x * 3 + y * 5) % 17 === 0 ? 0 : 255
+      return (x * 7 + y * 13 + (i & 3) * 50 + ((x >> 4) ^ (y >> 3)) * 9) % 256
+    })
+  const spec = (w, h, tileSize) => ({
+    width: w,
+    height: h,
+    tileSize,
+    samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
+    photometric: 2,
+    extraSamples: [2],
+    pixelScale: [0.5, 0.5, 0],
+    tiepoint: [0, 0, 0, 2.5e6, 1.2e6, 0],
+    geoKeys: geoKeysForEpsg(3031, false),
   })
-  const spec = (w, h, tileSize) => ({ width: w, height: h, tileSize,
-    samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })), photometric: 2, extraSamples: [2],
-    pixelScale: [0.5, 0.5, 0], tiepoint: [0, 0, 0, 2.5e6, 1.2e6, 0], geoKeys: geoKeysForEpsg(3031, false) })
   const blockOf = (data, w, h, col0, row0, B) => {
-    const bw = Math.min(B, w - col0), bh = Math.min(B, h - row0), out = new Uint8ClampedArray(bw * bh * 4)
-    for (let r = 0; r < bh; r++) out.set(data.subarray(((row0 + r) * w + col0) * 4, ((row0 + r) * w + col0 + bw) * 4), r * bw * 4)
+    const bw = Math.min(B, w - col0),
+      bh = Math.min(B, h - row0),
+      out = new Uint8ClampedArray(bw * bh * 4)
+    for (let r = 0; r < bh; r++)
+      out.set(data.subarray(((row0 + r) * w + col0) * 4, ((row0 + r) * w + col0 + bw) * 4), r * bw * 4)
     return { col0, row0, width: bw, height: bh, data: out }
   }
   it.each([
-    [300, 170, 16, 64], [257, 33, 16, 32], [100, 100, 16, 48], [40, 24, 16, 16], [1025, 3, 16, 64], [512, 512, 32, 64],
+    [300, 170, 16, 64],
+    [257, 33, 16, 32],
+    [100, 100, 16, 48],
+    [40, 24, 16, 16],
+    [1025, 3, 16, 64],
+    [512, 512, 32, 64],
   ])('is byte-identical to writeCogDeflate (%i×%i, tile %i, block %i)', async (w, h, tileSize, B) => {
     const data = rgbaScene(w, h)
     const expected = await writeCogDeflate({ ...spec(w, h, tileSize), data }, deflateBytes)
     const builder = createCogBuilder(spec(w, h, tileSize), { blockSize: B, compress: deflateBytes, previewMaxDim: 64 })
     const blocks = []
-    for (let row0 = 0; row0 < h; row0 += B) for (let col0 = 0; col0 < w; col0 += B) blocks.push(blockOf(data, w, h, col0, row0, B))
+    for (let row0 = 0; row0 < h; row0 += B)
+      for (let col0 = 0; col0 < w; col0 += B) blocks.push(blockOf(data, w, h, col0, row0, B))
     for (const b of blocks.reverse()) await builder.addBlock(b) // any arrival order
     const { parts, preview } = await builder.finish()
     const bytes = new Uint8Array(await new Blob(parts).arrayBuffer())
@@ -507,18 +609,32 @@ describe('createCogBuilder (a COG from blocks)', () => {
       break
     }
   })
-  it('keeps NaN nodata out of a Float32 raster\'s overviews and pads its edge tiles with NaN', async () => {
+  it("keeps NaN nodata out of a Float32 raster's overviews and pads its edge tiles with NaN", async () => {
     // A DEM: 40×24 heights, a hole of NaN in the top-left quarter.
-    const w = 40, h = 24
-    const data = Float32Array.from({ length: w * h }, (_, i) => ((i % w) < 10 && i < w * 12 ? NaN : 100 + (i % w)))
-    const demSpec = { width: w, height: h, tileSize: 16, ArrayType: Float32Array, samples: [{ bits: 32, format: 3 }], photometric: 1,
-      pixelScale: [10, 10, 0], tiepoint: [0, 0, 0, 5e5, 4e6, 0], geoKeys: geoKeysForEpsg(32612, false), gdalNoData: 'nan' }
-    const builder = createCogBuilder(demSpec, { blockSize: 16, previewMaxDim: 20 })
-    for (let row0 = 0; row0 < h; row0 += 16) for (let col0 = 0; col0 < w; col0 += 16) {
-      const bw = Math.min(16, w - col0), bh = Math.min(16, h - row0), out = new Float32Array(bw * bh)
-      for (let r = 0; r < bh; r++) out.set(data.subarray((row0 + r) * w + col0, (row0 + r) * w + col0 + bw), r * bw)
-      await builder.addBlock({ col0, row0, width: bw, height: bh, data: out })
+    const w = 40,
+      h = 24
+    const data = Float32Array.from({ length: w * h }, (_, i) => (i % w < 10 && i < w * 12 ? NaN : 100 + (i % w)))
+    const demSpec = {
+      width: w,
+      height: h,
+      tileSize: 16,
+      ArrayType: Float32Array,
+      samples: [{ bits: 32, format: 3 }],
+      photometric: 1,
+      pixelScale: [10, 10, 0],
+      tiepoint: [0, 0, 0, 5e5, 4e6, 0],
+      geoKeys: geoKeysForEpsg(32612, false),
+      gdalNoData: 'nan',
     }
+    const builder = createCogBuilder(demSpec, { blockSize: 16, previewMaxDim: 20 })
+    for (let row0 = 0; row0 < h; row0 += 16)
+      for (let col0 = 0; col0 < w; col0 += 16) {
+        const bw = Math.min(16, w - col0),
+          bh = Math.min(16, h - row0),
+          out = new Float32Array(bw * bh)
+        for (let r = 0; r < bh; r++) out.set(data.subarray((row0 + r) * w + col0, (row0 + r) * w + col0 + bw), r * bw)
+        await builder.addBlock({ col0, row0, width: bw, height: bh, data: out })
+      }
     const { parts, preview } = await builder.finish()
     // The 20×12 overview: a cell over the hole is NaN, one beside it the mean of its heights
     // (x 10, 11 → 110.5) — never NaN-poisoned by a neighbouring hole cell.
@@ -537,7 +653,9 @@ describe('createCogBuilder (a COG from blocks)', () => {
   })
   it('refuses a block off the grid and a missing block', async () => {
     const b = createCogBuilder(spec(64, 64, 16), { blockSize: 32 })
-    await expect(b.addBlock({ col0: 16, row0: 0, width: 32, height: 32, data: new Uint8Array(32 * 32 * 4) })).rejects.toThrow('not on the 32 grid')
+    await expect(
+      b.addBlock({ col0: 16, row0: 0, width: 32, height: 32, data: new Uint8Array(32 * 32 * 4) }),
+    ).rejects.toThrow('not on the 32 grid')
     await b.addBlock({ col0: 0, row0: 0, width: 32, height: 32, data: new Uint8Array(32 * 32 * 4) })
     await expect(b.finish()).rejects.toThrow('never arrived')
   })
@@ -548,7 +666,8 @@ describe('createCogBuilder (a COG from blocks)', () => {
 })
 
 describe('assembleStripTiff (a GeoTIFF streamed in strips)', () => {
-  const w = 37, h = 23
+  const w = 37,
+    h = 23
   const rgba = Uint8Array.from({ length: w * h * 4 }, (_, i) => (i * 13 + (i >> 7)) % 256)
   const stripsOf = async (rows, deflate) => {
     const out = []
@@ -558,13 +677,31 @@ describe('assembleStripTiff (a GeoTIFF streamed in strips)', () => {
     }
     return out
   }
-  const base = { width: w, height: h, samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })), photometric: 2, extraSamples: [2],
-    pixelScale: [0.25, 0.25, 0], tiepoint: [0, 0, 0, 2.5e6, 1.2e6, 0], geoKeys: geoKeysForEpsg(3031, false) }
-  it.each([[5, false], [5, true], [23, false], [1, true], [100, false]])('round-trips through a reader: %i rows per strip, deflate %s', async (rows, deflate) => {
+  const base = {
+    width: w,
+    height: h,
+    samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
+    photometric: 2,
+    extraSamples: [2],
+    pixelScale: [0.25, 0.25, 0],
+    tiepoint: [0, 0, 0, 2.5e6, 1.2e6, 0],
+    geoKeys: geoKeysForEpsg(3031, false),
+  }
+  it.each([
+    [5, false],
+    [5, true],
+    [23, false],
+    [1, true],
+    [100, false],
+  ])('round-trips through a reader: %i rows per strip, deflate %s', async (rows, deflate) => {
     const strips = await stripsOf(Math.min(rows, h), deflate)
     const spec = { ...base, rowsPerStrip: Math.min(rows, h), compression: deflate ? 8 : 1 }
     const whole = assembleStripTiff(spec, strips)
-    const parts = assembleStripTiff(spec, strips.map((s) => ({ length: s.length, part: new Blob([s]) })), { parts: true })
+    const parts = assembleStripTiff(
+      spec,
+      strips.map((s) => ({ length: s.length, part: new Blob([s]) })),
+      { parts: true },
+    )
     expect(new Uint8Array(await new Blob(parts).arrayBuffer())).toEqual(whole)
     const img = await (await fromArrayBuffer(toBuf(whole))).getImage()
     expect([img.getWidth(), img.getHeight()]).toEqual([w, h])
@@ -582,9 +719,17 @@ describe('BigTIFF and short ASCII values', () => {
   const tile = 16
   const rgba = (w, h) => Uint8Array.from({ length: w * h * 4 }, (_, i) => (i * 7) % 251)
   const spec = (w, h, extra = {}) => ({
-    width: w, height: h, samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })), photometric: 2, extraSamples: [2],
-    data: rgba(w, h), pixelScale: [0.5, 0.5, 0], tiepoint: [0, 0, 0, 500000, 5300000, 0],
-    geoKeys: geoKeysForEpsg(32632, false), tileSize: tile, ...extra,
+    width: w,
+    height: h,
+    samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
+    photometric: 2,
+    extraSamples: [2],
+    data: rgba(w, h),
+    pixelScale: [0.5, 0.5, 0],
+    tiepoint: [0, 0, 0, 500000, 5300000, 0],
+    geoKeys: geoKeysForEpsg(32632, false),
+    tileSize: tile,
+    ...extra,
   })
 
   it('writes a BigTIFF (version 43, 64-bit offsets) that reads back pixel for pixel, with its overviews and CRS', async () => {
@@ -611,10 +756,25 @@ describe('BigTIFF and short ASCII values', () => {
   })
 
   it('stores a nodata value of up to 3 characters in the tag itself, where readers look', async () => {
-    for (const [nd, want] of [['255', 255], ['12', 12], ['0', 0], ['nan', NaN], ['-9999', -9999]]) {
-      const f32 = { width: 20, height: 20, samples: [{ bits: 32, format: 3 }], photometric: 1,
-        data: new Float32Array(400), pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 20, 0],
-        geoKeys: geoKeysForEpsg(32632, false), tileSize: tile, gdalNoData: nd }
+    for (const [nd, want] of [
+      ['255', 255],
+      ['12', 12],
+      ['0', 0],
+      ['nan', NaN],
+      ['-9999', -9999],
+    ]) {
+      const f32 = {
+        width: 20,
+        height: 20,
+        samples: [{ bits: 32, format: 3 }],
+        photometric: 1,
+        data: new Float32Array(400),
+        pixelScale: [1, 1, 0],
+        tiepoint: [0, 0, 0, 0, 20, 0],
+        geoKeys: geoKeysForEpsg(32632, false),
+        tileSize: tile,
+        gdalNoData: nd,
+      }
       for (const bytes of [writeCog(f32), writeGeoTiff(f32)]) {
         const image = await (await fromArrayBuffer(toBuf(bytes))).getImage(0)
         if (Number.isNaN(want)) expect(image.getGDALNoData()).toBeNaN()

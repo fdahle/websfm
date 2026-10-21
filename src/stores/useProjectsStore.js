@@ -5,12 +5,16 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
 import { exportProjectArchive, importProjectArchive, peekArchiveManifest } from '../utils/projectFile.js'
+import { buildManifest, validateManifest, archiveFileName, importedProjectName } from '../core/io/projectArchive.js'
 import {
-  buildManifest, validateManifest, archiveFileName, importedProjectName,
-} from '../core/io/projectArchive.js'
-import {
-  STORAGE_FOLDER, STORAGE_OPFS, isFolderProject, folderOpenPlan, folderStorageSupported,
-  adoptFolderVerdict, newFolderVerdict, copyVerified,
+  STORAGE_FOLDER,
+  STORAGE_OPFS,
+  isFolderProject,
+  folderOpenPlan,
+  folderStorageSupported,
+  adoptFolderVerdict,
+  newFolderVerdict,
+  copyVerified,
 } from '../core/io/folderProject.js'
 import { saveProjectHandle, loadProjectHandle, deleteProjectHandle } from '../utils/handleStore.js'
 import { useLog } from '../composables/useLog.js'
@@ -27,14 +31,12 @@ export const useProjectsStore = defineStore('projects', () => {
   // Persistence is always on; this only tracks whether OPFS is usable in this
   // environment. When false, the app runs transiently without a project.
   const persistenceAvailable = ref(true)
-  const projects = ref([])        // [{ id, name, sceneType, createdAt, lastModified }]
+  const projects = ref([]) // [{ id, name, sceneType, createdAt, lastModified }]
   let leasedId = null
   let releaseLease = null
   const currentProjectId = ref(null)
 
-  const currentProject = computed(() =>
-    projects.value.find((p) => p.id === currentProjectId.value) || null,
-  )
+  const currentProject = computed(() => projects.value.find((p) => p.id === currentProjectId.value) || null)
   const currentProjectName = computed(() => currentProject.value?.name || null)
   const currentSceneType = computed(() => currentProject.value?.sceneType || null)
   const currentCrs = computed(() => currentProject.value?.crs || 'EPSG:4326')
@@ -55,26 +57,40 @@ export const useProjectsStore = defineStore('projects', () => {
   // memoizes the request, so this only logs the first verdict.
   let durableLogged = false
   function requestDurableOnce() {
-    opfs.ensureDurableStorage().then((r) => {
-      if (durableLogged) return
-      durableLogged = true
-      if (!r.supported) {
-        log('Storage durability unsupported in this browser — project data is best-effort and the browser '
-          + 'may evict it under disk pressure', 'warn', 'Project')
-      } else if (r.durable) {
-        log(`Storage durability ${r.alreadyGranted ? 'already granted' : 'granted'} — project data will not be evicted`,
-          'info', 'Project')
-      } else {
-        log('Storage durability denied — the browser may evict project data under disk pressure. Keep a '
-          + '.websfm copy, or use a folder-backed project, for anything you cannot recompute', 'warn', 'Project')
-      }
-    }).catch(() => {})
+    opfs
+      .ensureDurableStorage()
+      .then((r) => {
+        if (durableLogged) return
+        durableLogged = true
+        if (!r.supported) {
+          log(
+            'Storage durability unsupported in this browser — project data is best-effort and the browser ' +
+              'may evict it under disk pressure',
+            'warn',
+            'Project',
+          )
+        } else if (r.durable) {
+          log(
+            `Storage durability ${r.alreadyGranted ? 'already granted' : 'granted'} — project data will not be evicted`,
+            'info',
+            'Project',
+          )
+        } else {
+          log(
+            'Storage durability denied — the browser may evict project data under disk pressure. Keep a ' +
+              '.websfm copy, or use a folder-backed project, for anything you cannot recompute',
+            'warn',
+            'Project',
+          )
+        }
+      })
+      .catch(() => {})
   }
 
   // ── Index I/O ───────────────────────────────────────────────────────────────
 
   let indexBaseline = []
-  const snapshotOf = value => JSON.parse(JSON.stringify(value))
+  const snapshotOf = (value) => JSON.parse(JSON.stringify(value))
 
   async function loadIndex() {
     const index = await opfs.readIndex()
@@ -87,14 +103,16 @@ export const useProjectsStore = defineStore('projects', () => {
     const snapshot = snapshotOf(projects.value)
     const baseline = snapshotOf(indexBaseline)
     const lastOpenedId = currentProjectId.value
-    return trackPersistence('project-index', () => persistenceLock('project-index', async () => {
-      const latest = await opfs.readIndex()
-      const merged = mergeProjectIndex(latest?.projects ?? [], baseline, snapshot)
-      await opfs.writeIndex({ version: 1, lastOpenedId, projects: merged })
-      // Preserve edits made locally while the disk operation was in flight.
-      projects.value = mergeProjectIndex(merged, snapshot, snapshotOf(projects.value))
-      indexBaseline = snapshotOf(merged)
-    }))
+    return trackPersistence('project-index', () =>
+      persistenceLock('project-index', async () => {
+        const latest = await opfs.readIndex()
+        const merged = mergeProjectIndex(latest?.projects ?? [], baseline, snapshot)
+        await opfs.writeIndex({ version: 1, lastOpenedId, projects: merged })
+        // Preserve edits made locally while the disk operation was in flight.
+        projects.value = mergeProjectIndex(merged, snapshot, snapshotOf(projects.value))
+        indexBaseline = snapshotOf(merged)
+      }),
+    )
   }
 
   // ── CRUD ────────────────────────────────────────────────────────────────────
@@ -106,8 +124,13 @@ export const useProjectsStore = defineStore('projects', () => {
     // Persist the project before exposing it as current. If storage fails the
     // caller remains in the old project instead of selecting a half-created one.
     const newLease = await acquireProjectLease(id)
-    try { await opfs.writeProject(id, { ...entry, images: [] }) }
-    catch (error) { newLease(); discardPersistenceFailure(`writeProject:${id}`); throw error }
+    try {
+      await opfs.writeProject(id, { ...entry, images: [] })
+    } catch (error) {
+      newLease()
+      discardPersistenceFailure(`writeProject:${id}`)
+      throw error
+    }
     const previousId = currentProjectId.value
     projects.value.push(entry)
     currentProjectId.value = id
@@ -149,8 +172,16 @@ export const useProjectsStore = defineStore('projects', () => {
     // failures must not change lastOpenedId or abandon the active project.
     const newLease = leasedId === id ? null : await acquireProjectLease(id)
     let data
-    try { data = await opfs.readProject(id) } catch (error) { newLease?.(); throw error }
-    if (!data) { newLease?.(); return null }
+    try {
+      data = await opfs.readProject(id)
+    } catch (error) {
+      newLease?.()
+      throw error
+    }
+    if (!data) {
+      newLease?.()
+      return null
+    }
     const previousId = currentProjectId.value
     const previousModified = p.lastModified
     currentProjectId.value = id
@@ -164,7 +195,11 @@ export const useProjectsStore = defineStore('projects', () => {
       newLease?.()
       throw err
     }
-    if (newLease) { releaseLease?.(); releaseLease = newLease; leasedId = id }
+    if (newLease) {
+      releaseLease?.()
+      releaseLease = newLease
+      leasedId = id
+    }
     requestDurableOnce()
     return data
   }
@@ -191,9 +226,15 @@ export const useProjectsStore = defineStore('projects', () => {
       await deleteProjectHandle(id)
       if (currentProjectId.value === id) currentProjectId.value = null
       await saveIndex()
-      if (leasedId === id) { releaseLease?.(); releaseLease = null; leasedId = null }
+      if (leasedId === id) {
+        releaseLease?.()
+        releaseLease = null
+        leasedId = null
+      }
       return projects.value[0]?.id || null
-    } finally { temporaryLease?.() }
+    } finally {
+      temporaryLease?.()
+    }
   }
 
   // ── Folder-backed projects ──────────────────────────────────────────────────
@@ -218,7 +259,11 @@ export const useProjectsStore = defineStore('projects', () => {
     const handle = await loadProjectHandle(id)
     let permission = null
     if (handle) {
-      try { permission = await handle.queryPermission({ mode: 'readwrite' }) } catch { permission = null }
+      try {
+        permission = await handle.queryPermission({ mode: 'readwrite' })
+      } catch {
+        permission = null
+      }
     }
     const plan = folderOpenPlan({ entry, handle, permission })
     if (plan.action === 'open') opfs.setProjectRoot(id, handle)
@@ -232,11 +277,17 @@ export const useProjectsStore = defineStore('projects', () => {
     const handle = await loadProjectHandle(id)
     if (!handle) return { ok: false, error: 'the folder link was lost — pick the folder again' }
     let permission
-    try { permission = await handle.requestPermission({ mode: 'readwrite' }) } catch { permission = 'denied' }
+    try {
+      permission = await handle.requestPermission({ mode: 'readwrite' })
+    } catch {
+      permission = 'denied'
+    }
     if (permission !== 'granted') return { ok: false, error: 'permission to read the folder was not granted' }
     // A granted handle can still point at a folder that has since moved or been
     // deleted; probing it now turns that into an honest "pick it again".
-    try { await handle.getFileHandle('project.json') } catch {
+    try {
+      await handle.getFileHandle('project.json')
+    } catch {
       return { ok: false, error: 'the folder is no longer there — pick it again' }
     }
     opfs.setProjectRoot(id, handle)
@@ -252,7 +303,10 @@ export const useProjectsStore = defineStore('projects', () => {
     opfs.setProjectRoot(id, dirHandle)
     await saveProjectHandle(id, dirHandle)
     const entry = projectEntry(id)
-    if (entry) { entry.storage = STORAGE_FOLDER; entry.folderName = dirHandle.name }
+    if (entry) {
+      entry.storage = STORAGE_FOLDER
+      entry.folderName = dirHandle.name
+    }
     await saveIndex()
     return { ok: true }
   }
@@ -266,9 +320,15 @@ export const useProjectsStore = defineStore('projects', () => {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
     const entry = {
-      id, name, sceneType, crs, createdAt: now, lastModified: now,
+      id,
+      name,
+      sceneType,
+      crs,
+      createdAt: now,
+      lastModified: now,
       createdWithVersion: appVersion,
-      storage: STORAGE_FOLDER, folderName: dirHandle.name,
+      storage: STORAGE_FOLDER,
+      folderName: dirHandle.name,
     }
     opfs.setProjectRoot(id, dirHandle)
     await saveProjectHandle(id, dirHandle)
@@ -334,7 +394,10 @@ export const useProjectsStore = defineStore('projects', () => {
     const before = await opfs.measureTree(source)
     const copied = await opfs.copyTree(source, dirHandle, { onProgress })
     if (!copyVerified(before, copied)) {
-      return { ok: false, error: `copy did not verify (${copied.files}/${before.files} files) — the project was left in browser storage` }
+      return {
+        ok: false,
+        error: `copy did not verify (${copied.files}/${before.files} files) — the project was left in browser storage`,
+      }
     }
 
     opfs.setProjectRoot(id, dirHandle)
@@ -343,7 +406,7 @@ export const useProjectsStore = defineStore('projects', () => {
     entry.folderName = dirHandle.name
     entry.lastModified = new Date().toISOString()
     await saveIndex()
-    await opfs.deleteOpfsProjectTree(id)   // safe: verified, and the tree is ours
+    await opfs.deleteOpfsProjectTree(id) // safe: verified, and the tree is ours
     return { ok: true, ...copied }
   }
 
@@ -361,7 +424,10 @@ export const useProjectsStore = defineStore('projects', () => {
     const copied = await opfs.copyTree(source, target, { onProgress })
     if (!copyVerified(before, copied)) {
       await opfs.deleteOpfsProjectTree(id)
-      return { ok: false, error: `copy did not verify (${copied.files}/${before.files} files) — the project was left in its folder` }
+      return {
+        ok: false,
+        error: `copy did not verify (${copied.files}/${before.files} files) — the project was left in its folder`,
+      }
     }
 
     opfs.clearProjectRoot(id)
@@ -413,7 +479,7 @@ export const useProjectsStore = defineStore('projects', () => {
     try {
       ;({ manifest } = await importProjectArchive({ file, projectId: id, onProgress, onLog }))
     } catch (err) {
-      await opfs.deleteProject(id).catch(() => {})   // never leave a half-written project behind
+      await opfs.deleteProject(id).catch(() => {}) // never leave a half-written project behind
       throw err
     }
 
@@ -423,8 +489,10 @@ export const useProjectsStore = defineStore('projects', () => {
       throw new Error('project file is missing project.json')
     }
 
-    const name = importedProjectName(manifest.project?.name || data.name || 'Imported project',
-      projects.value.map((p) => p.name))
+    const name = importedProjectName(
+      manifest.project?.name || data.name || 'Imported project',
+      projects.value.map((p) => p.name),
+    )
     const now = new Date().toISOString()
     const entry = {
       id,

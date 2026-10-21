@@ -18,7 +18,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...CONTOUR_DEFAULTS })
-const unit = computed(() => (props.dem?.unit === 'model' ? 'model units' : (props.dem?.unit || 'units')))
+const unit = computed(() => (props.dem?.unit === 'model' ? 'model units' : props.dem?.unit || 'units'))
 
 // ≈ 25 levels over the height range, rounded to a 1·2·5 × 10ⁿ step — the interval a
 // cartographer would pick, not 3.7183.
@@ -32,22 +32,31 @@ const autoInterval = computed(() => {
 })
 const interval = computed(() => (settings.value.interval > 0 ? settings.value.interval : autoInterval.value))
 const levelCount = computed(() => {
-  try { return contourLevels({ min: props.dem.zMin, max: props.dem.zMax }, { interval: interval.value }).length } catch { return Infinity }
+  try {
+    return contourLevels({ min: props.dem.zMin, max: props.dem.zMax }, { interval: interval.value }).length
+  } catch {
+    return Infinity
+  }
 })
 // Export stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step). An interval of 0 is auto; blank is not.
-const numbers = computed(() => checkNumberFields(settings.value, {
-  interval: { label: 'Interval', min: 0 },
-  indexEvery: { label: 'Index contour every', min: 1, integer: true },
-  smooth: { label: 'Smoothing', min: 0, max: 10, integer: true },
-  minLength: { label: 'Drop lines shorter than', min: 0 },
-}))
+const numbers = computed(() =>
+  checkNumberFields(settings.value, {
+    interval: { label: 'Interval', min: 0 },
+    indexEvery: { label: 'Index contour every', min: 1, integer: true },
+    smooth: { label: 'Smoothing', min: 0, max: 10, integer: true },
+    minLength: { label: 'Drop lines shorter than', min: 0 },
+  }),
+)
 
 function run() {
   const s = settings.value
   emit('run', {
-    interval: interval.value, indexEvery: s.indexEvery, smooth: s.smooth,
-    minLength: s.minLength, format: s.format,
+    interval: interval.value,
+    indexEvery: s.indexEvery,
+    smooth: s.smooth,
+    minLength: s.minLength,
+    format: s.format,
   })
 }
 </script>
@@ -57,22 +66,66 @@ function run() {
     <WarnBox v-if="!dem">Build a DEM first (<strong>Reconstruct ▸ DEM</strong>).</WarnBox>
     <template v-else>
       <SettingsGroup title="Levels">
-        <SettingsField label="Interval" label-for="ct-int" :unit="unit"
-          :hint="`0 = auto (${autoInterval} ${unit}). Heights run ${dem.zMin.toPrecision(5)} – ${dem.zMax.toPrecision(5)} ${unit}.`">
-          <input id="ct-int" v-model.number="settings.interval" :aria-invalid="numbers.bad.interval" type="number" min="0" step="any" class="field-input" />
+        <SettingsField
+          label="Interval"
+          label-for="ct-int"
+          :unit="unit"
+          :hint="`0 = auto (${autoInterval} ${unit}). Heights run ${dem.zMin.toPrecision(5)} – ${dem.zMax.toPrecision(5)} ${unit}.`"
+        >
+          <input
+            id="ct-int"
+            v-model.number="settings.interval"
+            :aria-invalid="numbers.bad.interval"
+            type="number"
+            min="0"
+            step="any"
+            class="field-input"
+          />
         </SettingsField>
-        <SettingsField label-for="ct-index" unit="lines"
-          hint="Index contours go on their own layer (drawn heavier in GIS/CAD).">
+        <SettingsField
+          label-for="ct-index"
+          unit="lines"
+          hint="Index contours go on their own layer (drawn heavier in GIS/CAD)."
+        >
           <template #label><GlossaryTerm id="contour-lines">Index contour</GlossaryTerm> every</template>
-          <input id="ct-index" v-model.number="settings.indexEvery" :aria-invalid="numbers.bad.indexEvery" type="number" min="1" step="1" class="field-input" />
+          <input
+            id="ct-index"
+            v-model.number="settings.indexEvery"
+            :aria-invalid="numbers.bad.indexEvery"
+            type="number"
+            min="1"
+            step="1"
+            class="field-input"
+          />
         </SettingsField>
       </SettingsGroup>
       <SettingsGroup title="Shape">
         <SettingsField label="Smoothing" label-for="ct-smooth" unit="passes" hint="0 keeps the exact grid crossings.">
-          <input id="ct-smooth" v-model.number="settings.smooth" :aria-invalid="numbers.bad.smooth" type="number" min="0" max="10" step="1" class="field-input" />
+          <input
+            id="ct-smooth"
+            v-model.number="settings.smooth"
+            :aria-invalid="numbers.bad.smooth"
+            type="number"
+            min="0"
+            max="10"
+            step="1"
+            class="field-input"
+          />
         </SettingsField>
-        <SettingsField label="Drop lines shorter than" label-for="ct-min" :unit="dem.crs && dem.crs !== 'local' ? 'map units' : unit">
-          <input id="ct-min" v-model.number="settings.minLength" :aria-invalid="numbers.bad.minLength" type="number" min="0" step="any" class="field-input" />
+        <SettingsField
+          label="Drop lines shorter than"
+          label-for="ct-min"
+          :unit="dem.crs && dem.crs !== 'local' ? 'map units' : unit"
+        >
+          <input
+            id="ct-min"
+            v-model.number="settings.minLength"
+            :aria-invalid="numbers.bad.minLength"
+            type="number"
+            min="0"
+            step="any"
+            class="field-input"
+          />
         </SettingsField>
       </SettingsGroup>
       <SettingsGroup title="Download">
@@ -88,7 +141,14 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!dem || !numbers.valid || !(levelCount > 0 && levelCount <= MAX_CONTOUR_LEVELS)" :title="numbers.reason" @click="run">Export contours</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!dem || !numbers.valid || !(levelCount > 0 && levelCount <= MAX_CONTOUR_LEVELS)"
+        :title="numbers.reason"
+        @click="run"
+      >
+        Export contours
+      </button>
     </template>
   </ModalShell>
 </template>

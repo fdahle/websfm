@@ -10,8 +10,13 @@ import { cameraCenter } from '../sfm/geometry.js'
 export const MODEL_MAP_CRS = 'websfm:model'
 
 const EPS = 1e-9
-const sameVec = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === 3
-  && Math.abs(a[0] - b[0]) < EPS && Math.abs(a[1] - b[1]) < EPS && Math.abs(a[2] - b[2]) < EPS
+const sameVec = (a, b) =>
+  Array.isArray(a) &&
+  Array.isArray(b) &&
+  a.length === 3 &&
+  Math.abs(a[0] - b[0]) < EPS &&
+  Math.abs(a[1] - b[1]) < EPS &&
+  Math.abs(a[2] - b[2]) < EPS
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 // Where a product built in local frame `desc` (its recorded frame descriptor)
@@ -55,14 +60,21 @@ export function modelMapCameras(cameras, frame) {
 // still reach ~span·1e-8, so close-ups lose nothing. Never degenerate (one camera).
 //   points: [{ x, y }]   boxes: [[minX, minY, maxX, maxY]]
 export function modelMapExtent(points, boxes = []) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity
   for (const p of points) {
-    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x
-    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y
+    if (p.x < minX) minX = p.x
+    if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.y > maxY) maxY = p.y
   }
   for (const b of boxes) {
-    if (b[0] < minX) minX = b[0]; if (b[2] > maxX) maxX = b[2]
-    if (b[1] < minY) minY = b[1]; if (b[3] > maxY) maxY = b[3]
+    if (b[0] < minX) minX = b[0]
+    if (b[2] > maxX) maxX = b[2]
+    if (b[1] < minY) minY = b[1]
+    if (b[3] > maxY) maxY = b[3]
   }
   if (!(minX <= maxX)) return [-100, -100, 100, 100]
   const span = Math.max(maxX - minX, maxY - minY, 1e-3)

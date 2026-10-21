@@ -51,12 +51,18 @@ async function loadEarlier() {
   loadingEarlier = true
   try {
     if (!fullCache) fullCache = await logStore.readAll()
-    if (!fullCache.length) { allEarlierLoaded.value = true; return }
+    if (!fullCache.length) {
+      allEarlierLoaded.value = true
+      return
+    }
     // Anchor on the oldest line currently shown; load the chunk before it.
     const firstId = earlier.value.length ? earlier.value[0].id : entries.value[0]?.id
-    let idx = firstId ? fullCache.findIndex(e => e.id === firstId) : fullCache.length
+    let idx = firstId ? fullCache.findIndex((e) => e.id === firstId) : fullCache.length
     if (idx < 0) idx = fullCache.length // not yet on disk ⇒ everything is earlier
-    if (idx <= 0) { allEarlierLoaded.value = true; return }
+    if (idx <= 0) {
+      allEarlierLoaded.value = true
+      return
+    }
     const start = Math.max(0, idx - CHUNK)
     const chunk = fullCache.slice(start, idx)
     // Preserve the viewport: prepending grows scrollHeight, so re-offset scrollTop.
@@ -133,7 +139,9 @@ const showDetail = ref(false)
 // confirmations (toggles, add/enable/rename), 'all' = both. Entries persisted before
 // this field existed have no `channel` ⇒ treated as pipeline.
 const activeTab = ref('pipeline')
-function entryChannel(e) { return e.channel === 'activity' ? 'activity' : 'pipeline' }
+function entryChannel(e) {
+  return e.channel === 'activity' ? 'activity' : 'pipeline'
+}
 
 // Filter panel
 const filterOpen = ref(false)
@@ -163,8 +171,11 @@ const filteredEntries = computed(() => {
 
 // Per-tab counts for the tab badges (live tail + loaded scroll-back).
 const channelCounts = computed(() => {
-  let pipeline = 0, activity = 0
-  const tally = e => { entryChannel(e) === 'activity' ? activity++ : pipeline++ }
+  let pipeline = 0,
+    activity = 0
+  const tally = (e) => {
+    entryChannel(e) === 'activity' ? activity++ : pipeline++
+  }
   for (const e of earlier.value) tally(e)
   for (const e of entries.value) tally(e)
   return { pipeline, activity, all: pipeline + activity }
@@ -181,18 +192,22 @@ function isVisible(source) {
   return !hiddenSources.value.has(source)
 }
 
-function showAll() { hiddenSources.value = new Set() }
-function hideAll() { hiddenSources.value = new Set(allSources.value) }
+function showAll() {
+  hiddenSources.value = new Set()
+}
+function hideAll() {
+  hiddenSources.value = new Set(allSources.value)
+}
 
 // Source colors
 const SOURCE_COLORS = {
-  'Images':   '#4d9de0',
-  'Metadata': '#9b59b6',
-  'Detection': '#e67e22',
-  'Matching': '#1abc9c',
-  'Project':  '#2ecc71',
-  'Reconstruction': '#e0518a',
-  'Console':  '#c0a020',
+  Images: '#4d9de0',
+  Metadata: '#9b59b6',
+  Detection: '#e67e22',
+  Matching: '#1abc9c',
+  Project: '#2ecc71',
+  Reconstruction: '#e0518a',
+  Console: '#c0a020',
 }
 
 function sourceColor(source) {
@@ -214,7 +229,11 @@ const command = ref('')
 const HISTORY_KEY = 'consoleHistory'
 const HISTORY_MAX = 50
 function loadHistory() {
-  try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || [] } catch { return [] }
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []
+  } catch {
+    return []
+  }
 }
 const history = ref(loadHistory())
 // -1 == editing a fresh line; 0..n-1 index into history from the newest end.
@@ -227,7 +246,11 @@ function submitCommand() {
   if (history.value[history.value.length - 1] !== line) {
     history.value.push(line)
     if (history.value.length > HISTORY_MAX) history.value.shift()
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.value)) } catch { /* ignore quota */ }
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history.value))
+    } catch {
+      /* ignore quota */
+    }
   }
   command.value = ''
   histCursor.value = -1
@@ -252,7 +275,10 @@ function recallHistory(delta) {
 function completeCommand() {
   const matches = complete(command.value)
   if (matches.length === 0) return
-  if (matches.length === 1) { command.value = matches[0]; return }
+  if (matches.length === 1) {
+    command.value = matches[0]
+    return
+  }
   const shared = commonPrefix(matches)
   if (shared && shared.length > command.value.trimStart().length) command.value = shared
   log(matches.join('   '), 'debug', 'Console')
@@ -260,10 +286,22 @@ function completeCommand() {
 
 function onPromptKey(e) {
   switch (e.key) {
-    case 'Enter':      e.preventDefault(); submitCommand(); break
-    case 'ArrowUp':    e.preventDefault(); recallHistory(+1); break
-    case 'ArrowDown':  e.preventDefault(); recallHistory(-1); break
-    case 'Tab':        e.preventDefault(); completeCommand(); break
+    case 'Enter':
+      e.preventDefault()
+      submitCommand()
+      break
+    case 'ArrowUp':
+      e.preventDefault()
+      recallHistory(+1)
+      break
+    case 'ArrowDown':
+      e.preventDefault()
+      recallHistory(-1)
+      break
+    case 'Tab':
+      e.preventDefault()
+      completeCommand()
+      break
   }
 }
 
@@ -302,11 +340,12 @@ const exportDebug = ref(false)
 // source toggles). The source-name prefix is stripped so the column isn't doubled.
 // Falls back to what's in memory if the stream can't be read.
 async function saveTxt() {
-  const fmt = e => `${e.time}  ${(e.source ?? '').padEnd(10)}  ${e.level.padEnd(7)}  ${stripSourcePrefix(e.source, e.message)}`
+  const fmt = (e) =>
+    `${e.time}  ${(e.source ?? '').padEnd(10)}  ${e.level.padEnd(7)}  ${stripSourcePrefix(e.source, e.message)}`
   let src = await logStore.readAll()
   if (!src || src.length === 0) src = [...earlier.value, ...entries.value]
-  src = src.filter(e => {
-    if (!exportActivity.value && (e.channel === 'activity')) return false
+  src = src.filter((e) => {
+    if (!exportActivity.value && e.channel === 'activity') return false
     if (!exportDebug.value && e.level === 'debug') return false
     return true
   })
@@ -316,7 +355,7 @@ async function saveTxt() {
   const a = document.createElement('a')
   a.href = url
   const now = new Date()
-  const pad = n => n.toString().padStart(2, '0')
+  const pad = (n) => n.toString().padStart(2, '0')
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`
   a.download = `console-${stamp}.txt`
   a.click()
@@ -339,7 +378,9 @@ async function saveTxt() {
           class="console-tab"
           :class="{ active: activeTab === tab.id }"
           @click="activeTab = tab.id"
-        >{{ tab.label }}<span class="tab-count">{{ tab.count }}</span></button>
+        >
+          {{ tab.label }}<span class="tab-count">{{ tab.count }}</span>
+        </button>
       </div>
       <div class="header-actions">
         <button
@@ -347,19 +388,25 @@ async function saveTxt() {
           :class="{ active: showSource }"
           title="Toggle source labels"
           @click="showSource = !showSource"
-        >src</button>
+        >
+          src
+        </button>
         <button
           class="btn-action"
           :class="{ active: showDetail }"
           title="Show detailed (debug) log entries"
           @click="showDetail = !showDetail"
-        >Detail</button>
+        >
+          Detail
+        </button>
         <button
           class="btn-action"
           :class="{ active: filterOpen }"
           title="Filter by source"
           @click="filterOpen = !filterOpen"
-        >Filter</button>
+        >
+          Filter
+        </button>
         <div class="export-wrap">
           <button class="btn-action" title="Save the log to a TXT file" @click="saveTxt">Save TXT</button>
           <button
@@ -367,7 +414,9 @@ async function saveTxt() {
             :class="{ active: exportMenuOpen }"
             title="Export options"
             @click="exportMenuOpen = !exportMenuOpen"
-          >▾</button>
+          >
+            ▾
+          </button>
           <div v-if="exportMenuOpen" class="export-menu" @mouseleave="exportMenuOpen = false">
             <div class="export-menu-title">Include in export</div>
             <label class="export-opt">
@@ -393,27 +442,25 @@ async function saveTxt() {
         >
           <span v-if="entryChannel(entry) === 'activity'" class="entry-activity-glyph" title="User action">▸</span>
           <span class="entry-time">{{ entry.time }}</span>
-          <span
-            v-if="showSource"
-            class="entry-source"
-            :style="entry.source ? sourceStyle(entry.source) : {}"
-          >{{ entry.source ?? '—' }}</span>
+          <span v-if="showSource" class="entry-source" :style="entry.source ? sourceStyle(entry.source) : {}">{{
+            entry.source ?? '—'
+          }}</span>
           <span class="entry-msg">{{ stripSourcePrefix(entry.source, entry.message) }}</span>
         </div>
         <div v-if="filteredEntries.length === 0" class="empty">
-          {{ entries.length === 0 && earlier.length === 0
-            ? 'No output yet.'
-            : activeTab === 'activity' ? 'No activity yet — actions you take appear here.'
-            : 'No entries match the current filter.' }}
+          {{
+            entries.length === 0 && earlier.length === 0
+              ? 'No output yet.'
+              : activeTab === 'activity'
+                ? 'No activity yet — actions you take appear here.'
+                : 'No entries match the current filter.'
+          }}
         </div>
       </div>
 
-      <button
-        v-if="!stickToBottom"
-        class="jump-btn"
-        title="Jump to newest log entries"
-        @click="scrollToBottom"
-      >↓ New logs</button>
+      <button v-if="!stickToBottom" class="jump-btn" title="Jump to newest log entries" @click="scrollToBottom">
+        ↓ New logs
+      </button>
 
       <div v-if="filterOpen" class="filter-panel">
         <div class="filter-header">
@@ -424,16 +471,8 @@ async function saveTxt() {
           </div>
         </div>
         <div class="filter-items">
-          <label
-            v-for="source in allSources"
-            :key="source"
-            class="filter-item"
-          >
-            <input
-              type="checkbox"
-              :checked="isVisible(source)"
-              @change="toggleSource(source)"
-            />
+          <label v-for="source in allSources" :key="source" class="filter-item">
+            <input type="checkbox" :checked="isVisible(source)" @change="toggleSource(source)" />
             <span class="filter-dot" :style="{ background: sourceColor(source) }" />
             <span class="filter-label">{{ source }}</span>
           </label>
@@ -452,7 +491,7 @@ async function saveTxt() {
         spellcheck="false"
         autocomplete="off"
         autocapitalize="off"
-        placeholder="Type a command — try &quot;help&quot;"
+        placeholder='Type a command — try "help"'
         @keydown="onPromptKey"
       />
     </div>
@@ -615,7 +654,7 @@ async function saveTxt() {
   background: var(--console-hover);
 }
 
-.export-opt input[type="checkbox"] {
+.export-opt input[type='checkbox'] {
   margin: 0;
   cursor: pointer;
   accent-color: var(--accent);
@@ -695,7 +734,9 @@ async function saveTxt() {
   opacity: 0.92;
 }
 
-.jump-btn:hover { opacity: 1; }
+.jump-btn:hover {
+  opacity: 1;
+}
 
 .console-body {
   flex: 1;
@@ -752,10 +793,18 @@ async function saveTxt() {
   font-style: italic;
 }
 
-.level-success .entry-msg { color: #4ec94e; }
-.level-warn    .entry-msg { color: #d4900a; }
-.level-error   .entry-msg { color: #f05050; }
-.level-debug   .entry-msg { color: var(--console-text-dim); }
+.level-success .entry-msg {
+  color: #4ec94e;
+}
+.level-warn .entry-msg {
+  color: #d4900a;
+}
+.level-error .entry-msg {
+  color: #f05050;
+}
+.level-debug .entry-msg {
+  color: var(--console-text-dim);
+}
 
 .empty {
   padding: 8px 10px;
@@ -834,7 +883,7 @@ async function saveTxt() {
   background: var(--console-hover);
 }
 
-.filter-item input[type="checkbox"] {
+.filter-item input[type='checkbox'] {
   margin: 0;
   cursor: pointer;
   accent-color: var(--accent);

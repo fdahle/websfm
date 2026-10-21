@@ -36,7 +36,9 @@ export function selectSourceViews(cameras, sparse, refUuid, opts = {}, index = v
   const { pos, vstart, vcam, viewUuids } = sparse
   const pt = { x: 0, y: 0, z: 0 }
   for (const i of index.get(refUuid) ?? []) {
-    pt.x = pos[3 * i]; pt.y = pos[3 * i + 1]; pt.z = pos[3 * i + 2]
+    pt.x = pos[3 * i]
+    pt.y = pos[3 * i + 1]
+    pt.z = pos[3 * i + 2]
     for (let k = vstart[i]; k < vstart[i + 1]; k++) {
       const u = viewUuids[vcam[k]]
       if (u === refUuid || !cameras.has(u)) continue
@@ -61,7 +63,8 @@ export function seedDepthFromSparse(refCam, pos, width, height) {
   for (let i = 0; i < pos.length; i += 3) {
     const p = project(refCam, pos[i], pos[i + 1], pos[i + 2])
     if (!p) continue
-    const u = Math.round(p.u), v = Math.round(p.v)
+    const u = Math.round(p.u),
+      v = Math.round(p.v)
     if (u < 0 || v < 0 || u >= width || v >= height) continue
     seed[v * width + u] = p.depth
     depths.push(p.depth)
@@ -69,7 +72,8 @@ export function seedDepthFromSparse(refCam, pos, width, height) {
   if (depths.length < 2) return { seedDepth: seed, depthMin: 0, depthMax: 0 }
   depths.sort((a, b) => a - b)
   const at = (q) => depths[Math.min(depths.length - 1, Math.max(0, Math.round(q * (depths.length - 1))))]
-  const lo = at(0.05), hi = at(0.95)
+  const lo = at(0.05),
+    hi = at(0.95)
   const pad = (hi - lo) * 0.25 || hi * 0.1
   return { seedDepth: seed, depthMin: Math.max(1e-4, lo - pad), depthMax: hi + pad, seeded: depths.length }
 }
@@ -87,14 +91,16 @@ export function seedDepthFromSparse(refCam, pos, width, height) {
 // dropped, not squeezed in, so coarse pixel u is exactly fine pixels 2u…2u+1 and the
 // coarse grid is the fine one at a factor of exactly ½ (halfScale). Returns { gray,w,h }.
 function downsampleGray2x(gray, w, h) {
-  const nw = Math.max(1, w >> 1), nh = Math.max(1, h >> 1)
+  const nw = Math.max(1, w >> 1),
+    nh = Math.max(1, h >> 1)
   const out = new Uint8Array(nw * nh)
   for (let v = 0; v < nh; v++) {
-    const v0 = 2 * v, v1 = Math.min(v0 + 1, h - 1)
+    const v0 = 2 * v,
+      v1 = Math.min(v0 + 1, h - 1)
     for (let u = 0; u < nw; u++) {
-      const u0 = 2 * u, u1 = Math.min(u0 + 1, w - 1)
-      out[v * nw + u] = (gray[v0 * w + u0] + gray[v0 * w + u1]
-                       + gray[v1 * w + u0] + gray[v1 * w + u1] + 2) >> 2
+      const u0 = 2 * u,
+        u1 = Math.min(u0 + 1, w - 1)
+      out[v * nw + u] = (gray[v0 * w + u0] + gray[v0 * w + u1] + gray[v1 * w + u0] + gray[v1 * w + u1] + 2) >> 2
     }
   }
   return { gray: out, w: nw, h: nh }
@@ -104,14 +110,16 @@ function downsampleGray2x(gray, w, h) {
 // (up to) four contributors is masked (so a coarse warp can't sample near a
 // frame/fiducial edge that the fine mask would have rejected).
 function downsampleMaskMax2x(mask, w, h) {
-  const nw = Math.max(1, w >> 1), nh = Math.max(1, h >> 1)
+  const nw = Math.max(1, w >> 1),
+    nh = Math.max(1, h >> 1)
   const out = new Uint8Array(nw * nh)
   for (let v = 0; v < nh; v++) {
-    const v0 = 2 * v, v1 = Math.min(v0 + 1, h - 1)
+    const v0 = 2 * v,
+      v1 = Math.min(v0 + 1, h - 1)
     for (let u = 0; u < nw; u++) {
-      const u0 = 2 * u, u1 = Math.min(u0 + 1, w - 1)
-      out[v * nw + u] = (mask[v0 * w + u0] || mask[v0 * w + u1]
-                       || mask[v1 * w + u0] || mask[v1 * w + u1]) ? 1 : 0
+      const u0 = 2 * u,
+        u1 = Math.min(u0 + 1, w - 1)
+      out[v * nw + u] = mask[v0 * w + u0] || mask[v0 * w + u1] || mask[v1 * w + u0] || mask[v1 * w + u1] ? 1 : 0
     }
   }
   return out
@@ -128,7 +136,8 @@ const halfScale = (n) => (n >= 2 ? 0.5 : 1)
 // level's refinement to sharpen).
 function upsampleDepthNearest(depth, cw, ch, fw, fh) {
   const out = new Float32Array(fw * fh)
-  const sx = halfScale(fw), sy = halfScale(fh)
+  const sx = halfScale(fw),
+    sy = halfScale(fh)
   for (let v = 0; v < fh; v++) {
     // Centre-aligned nearest (geometry.js toScaledPx): fine pixel centre v + ½ lands at
     // (v + ½)·½ on the coarse grid, i.e. coarse pixel ⌊v/2⌋; a cropped odd last row
@@ -169,7 +178,14 @@ function pyramidLevelCount(w, h, coarseLong = DENSE_TUNING.coarseLong) {
 // share the (refGray, refW, refH, refK, sources, opts) → { depth, cost, w, h }
 // contract, so this orchestration is backend-agnostic.
 // `pos`: the sparse positions (flat xyz Float64Array; sparseInput.js `pos`).
-export async function depthMapForImage(ref, sources, pos, settings = {}, computeDepthMapFn = computeDepthMap, hooks = {}) {
+export async function depthMapForImage(
+  ref,
+  sources,
+  pos,
+  settings = {},
+  computeDepthMapFn = computeDepthMap,
+  hooks = {},
+) {
   // window/iterations/bestK are user-facing (DEPTHMAP_DEFAULTS); coarseLong is internal (tuning.js).
   const window = numOpt(settings.window, DEPTHMAP_DEFAULTS.window, { int: true, min: 1 })
   const iterations = numOpt(settings.iterations, DEPTHMAP_DEFAULTS.iterations, { int: true, min: 1 })
@@ -195,7 +211,10 @@ export async function depthMapForImage(ref, sources, pos, settings = {}, compute
   // box-downsampled (masks max-pooled). Each level carries its own scaled K.
   const nLevels = pyramidLevelCount(ref.width, ref.height, coarseLong)
   const finest = {
-    gray: ref.gray, w: ref.width, h: ref.height, K: ref.K,
+    gray: ref.gray,
+    w: ref.width,
+    h: ref.height,
+    K: ref.K,
     srcs: src.map((s) => ({ gray: s.gray, w: s.w, h: s.h, K: s.K, R: s.R, t: s.t, mask: s.mask })),
   }
   const levels = [finest]
@@ -203,13 +222,19 @@ export async function depthMapForImage(ref, sources, pos, settings = {}, compute
     const cur = levels[0]
     const dr = downsampleGray2x(cur.gray, cur.w, cur.h)
     const level = {
-      gray: dr.gray, w: dr.w, h: dr.h,
+      gray: dr.gray,
+      w: dr.w,
+      h: dr.h,
       K: scaleKxy(cur.K, halfScale(cur.w), halfScale(cur.h)),
       srcs: cur.srcs.map((s) => {
         const ds = downsampleGray2x(s.gray, s.w, s.h)
         return {
-          gray: ds.gray, w: ds.w, h: ds.h,
-          K: scaleKxy(s.K, halfScale(s.w), halfScale(s.h)), R: s.R, t: s.t,
+          gray: ds.gray,
+          w: ds.w,
+          h: ds.h,
+          K: scaleKxy(s.K, halfScale(s.w), halfScale(s.h)),
+          R: s.R,
+          t: s.t,
           mask: s.mask ? downsampleMaskMax2x(s.mask, s.w, s.h) : null,
         }
       }),
@@ -233,7 +258,10 @@ export async function depthMapForImage(ref, sources, pos, settings = {}, compute
   const levelWeight = levels.map((L, li) => L.w * L.h * (iterations + (levels.length - 1 - li)))
   const totalWeight = levelWeight.reduce((a, b) => a + b, 0) || 1
   let doneWeight = 0
-  let dm = null, prevDepth = null, prevW = 0, prevH = 0
+  let dm = null,
+    prevDepth = null,
+    prevW = 0,
+    prevH = 0
   // Refinement continues across levels rather than restarting (refineSchedule.js).
   const perturbStarts = levelPerturbStarts(levels.map((_, li) => iterations + (levels.length - 1 - li)))
   for (let li = 0; li < levels.length; li++) {
@@ -247,11 +275,19 @@ export async function depthMapForImage(ref, sources, pos, settings = {}, compute
     }
     const levelIters = iterations + (levels.length - 1 - li) // coarsest gets the most
     dm = await computeDepthMapFn(L.gray, L.w, L.h, L.K, L.srcs, {
-      depthMin, depthMax, seedDepth, window, iterations: levelIters, bestK,
-      seed: (baseSeed ^ (li * 0x9e3779b1)) >>> 0, perturbStart: perturbStarts[li],
+      depthMin,
+      depthMax,
+      seedDepth,
+      window,
+      iterations: levelIters,
+      bestK,
+      seed: (baseSeed ^ (li * 0x9e3779b1)) >>> 0,
+      perturbStart: perturbStarts[li],
     })
     if (!dm) return null
-    prevDepth = dm.depth; prevW = L.w; prevH = L.h
+    prevDepth = dm.depth
+    prevW = L.w
+    prevH = L.h
     doneWeight += levelWeight[li]
     hooks.onProgress?.(doneWeight / totalWeight)
   }
@@ -265,7 +301,18 @@ export async function depthMapForImage(ref, sources, pos, settings = {}, compute
   if (hooks.validate && src.length) {
     const radius = Math.min(5, Math.max(1, window)) // match mvs.rs / wgsl radius cap
     const refC = { gray: ref.gray, w: ref.width, h: ref.height, fx: ref.K.fx, fy: ref.K.fy, cx: ref.K.cx, cy: ref.K.cy }
-    const srcCs = src.map((s) => ({ gray: s.gray, w: s.w, h: s.h, fx: s.K.fx, fy: s.K.fy, cx: s.K.cx, cy: s.K.cy, R: s.R, t: s.t, mask: s.mask }))
+    const srcCs = src.map((s) => ({
+      gray: s.gray,
+      w: s.w,
+      h: s.h,
+      fx: s.K.fx,
+      fy: s.K.fy,
+      cx: s.K.cx,
+      cy: s.K.cy,
+      R: s.R,
+      t: s.t,
+      mask: s.mask,
+    }))
     const k = Math.min(Math.max(bestK, 1), srcCs.length) // reported best-K (upper bound)
     // Best-K aggregation matching the GPU's aggCost: exclude no-measurement
     // sources (INVALID sentinel) instead of averaging their max cost in.
@@ -276,12 +323,13 @@ export async function depthMapForImage(ref, sources, pos, settings = {}, compute
     }
     const stride = Math.max(1, Math.floor(dm.depth.length / 4000))
     const costs = []
-    let sse = 0, max = 0, cnt = 0
+    let sse = 0,
+      max = 0,
+      cnt = 0
     for (let i = 0; i < dm.depth.length; i += stride) {
-      const u = i % ref.width, v = (i / ref.width) | 0
-      const n = dm.normals
-        ? [dm.normals[i * 3], dm.normals[i * 3 + 1], dm.normals[i * 3 + 2]]
-        : [0, 0, -1]
+      const u = i % ref.width,
+        v = (i / ref.width) | 0
+      const n = dm.normals ? [dm.normals[i * 3], dm.normals[i * 3 + 1], dm.normals[i * 3 + 2]] : [0, 0, -1]
       const cpu = aggRef(u, v, dm.depth[i], n)
       const diff = Math.abs(cpu - dm.cost[i])
       sse += diff * diff
@@ -292,9 +340,12 @@ export async function depthMapForImage(ref, sources, pos, settings = {}, compute
     const rms = cnt ? Math.sqrt(sse / cnt) : 0
     costs.sort((a, b) => a - b)
     const medCost = costs.length ? costs[costs.length >> 1] : 0
-    hooks.onLog?.(`GPU validate: cost consistency RMS ${rms.toExponential(2)} (max ${max.toExponential(2)}) `
-      + `over ${cnt} px; median final cost ${medCost.toFixed(3)} (${srcCs.length} src, best-${k})`,
-      rms < 5e-3 ? 'success' : 'warn', 'Dense')
+    hooks.onLog?.(
+      `GPU validate: cost consistency RMS ${rms.toExponential(2)} (max ${max.toExponential(2)}) ` +
+        `over ${cnt} px; median final cost ${medCost.toFixed(3)} (${srcCs.length} src, best-${k})`,
+      rms < 5e-3 ? 'success' : 'warn',
+      'Dense',
+    )
   }
 
   // Carry the seeding diagnostics through so the caller can log them.
@@ -317,7 +368,8 @@ export function filterDepthMap(depth, w, h, opts = {}) {
   const smooth = boolOpt(opts.smooth, true)
   const out = new Float32Array(depth.length)
   const win = []
-  let removed = 0, smoothed = 0
+  let removed = 0,
+    smoothed = 0
   for (let v = 0; v < h; v++) {
     for (let u = 0; u < w; u++) {
       const idx = v * w + u
@@ -334,10 +386,16 @@ export function filterDepthMap(depth, w, h, opts = {}) {
           if (nd > 0) win.push(nd)
         }
       }
-      if (win.length < minValidNeighbors) { removed++; continue } // isolated → drop
+      if (win.length < minValidNeighbors) {
+        removed++
+        continue
+      } // isolated → drop
       win.sort((a, b) => a - b)
       const med = win[win.length >> 1]
-      if (Math.abs(d - med) > relTol * med) { removed++; continue }   // speckle → drop
+      if (Math.abs(d - med) > relTol * med) {
+        removed++
+        continue
+      } // speckle → drop
       out[idx] = smooth ? med : d
       if (smooth && med !== d) smoothed++
     }
@@ -365,14 +423,25 @@ export function qualityToMaxDim(quality, nativeLongSide) {
 // film canonical frame). Returns { quality, maxDim, proj, steps } (steps = levels
 // dropped) or null when not even Low fits; `proj` is the chosen level's projection.
 export const DEPTH_QUALITY_ORDER = ['ultra', 'high', 'medium', 'low']
-export function fitDepthQuality({ quality, sizes, budget, backend = 'wasm', nSources = 6, streamMaps = true, geomConsistency = true }) {
+export function fitDepthQuality({
+  quality,
+  sizes,
+  budget,
+  backend = 'wasm',
+  nSources = 6,
+  streamMaps = true,
+  geomConsistency = true,
+}) {
   const nativeLong = sizes.reduce((m, s) => Math.max(m, s.width || 0, s.height || 0), 0)
   const start = Math.max(0, DEPTH_QUALITY_ORDER.indexOf(quality))
   for (let k = start; k < DEPTH_QUALITY_ORDER.length; k++) {
     const q = DEPTH_QUALITY_ORDER[k]
     const maxDim = qualityToMaxDim(q, nativeLong)
     const proj = projectDensePeakBytes({
-      nImages: sizes.length, maxDim, nSources, backend,
+      nImages: sizes.length,
+      maxDim,
+      nSources,
+      backend,
       pixels: sizes.map((s) => workingPixels(s.width, s.height, maxDim)),
       retainedMaps: streamMaps ? 1 : sizes.length,
       filterMaps: geomConsistency && !streamMaps ? sizes.length : 0,

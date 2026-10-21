@@ -12,12 +12,14 @@ describe('detectFileKind', () => {
   })
 
   it('routes a GeoJSON point file to gcp', () => {
-    const text = '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[1,2]},"properties":{}}]}'
+    const text =
+      '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[1,2]},"properties":{}}]}'
     expect(detectFileKind(text, 'pts.geojson')).toEqual({ kind: 'gcp', confidence: 'high' })
   })
 
   it('routes a GeoJSON polygon file to footprint', () => {
-    const text = '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]},"properties":{}}]}'
+    const text =
+      '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]},"properties":{}}]}'
     expect(detectFileKind(text, 'fp.geojson')).toEqual({ kind: 'footprint', confidence: 'high' })
   })
 
@@ -41,15 +43,17 @@ describe('detectFileKind', () => {
   })
 
   it('detects image fiducials with one image per row (marks in scan pixels), not intrinsics', () => {
-    const text = 'image_id,corner_top_left_x,corner_top_left_y,corner_top_right_x,corner_top_right_y,'
-      + 'corner_bottom_left_x,corner_bottom_left_y,principal_point_x,principal_point_y\n'
-      + 'a.tif,329.7,329.7,8809.7,329.7,330.3,8810.3,4569.4,4569.9'
+    const text =
+      'image_id,corner_top_left_x,corner_top_left_y,corner_top_right_x,corner_top_right_y,' +
+      'corner_bottom_left_x,corner_bottom_left_y,principal_point_x,principal_point_y\n' +
+      'a.tif,329.7,329.7,8809.7,329.7,330.3,8810.3,4569.4,4569.9'
     expect(detectFileKind(text)).toEqual({ kind: 'fiducialObs', confidence: 'high' })
   })
 
   it('keeps a one-row camera certificate (marks in mm) a sensor file', () => {
-    const text = 'focal_length,corner_top_left_x_mm,corner_top_left_y_mm,corner_top_right_x_mm,corner_top_right_y_mm,'
-      + 'corner_bottom_left_x_mm,corner_bottom_left_y_mm\n152.865,-106,106,106,106,-106,-106'
+    const text =
+      'focal_length,corner_top_left_x_mm,corner_top_left_y_mm,corner_top_right_x_mm,corner_top_right_y_mm,' +
+      'corner_bottom_left_x_mm,corner_bottom_left_y_mm\n152.865,-106,106,106,106,-106,-106'
     expect(detectFileKind(text)).toEqual({ kind: 'sensor', confidence: 'high' })
   })
 
@@ -75,10 +79,14 @@ describe('detectFileKind', () => {
 
 describe('detectFileKind — image file-name columns', () => {
   it('reads an image_file_name + lon/lat list as camera positions', () => {
-    expect(detectFileKind('image_file_name,lon,lat,alt,x_map,y_map\na.tif,-111.7,32.9,3810,432998,3642109').kind).toBe('pose')
+    expect(detectFileKind('image_file_name,lon,lat,alt,x_map,y_map\na.tif,-111.7,32.9,3810,432998,3642109').kind).toBe(
+      'pose',
+    )
   })
   it('reads a point-label column beside image names as ground control', () => {
-    expect(detectFileKind('gcp_label,image_file_name,x,y,lon,lat,elev\nG1,a.tif,100,200,-111.7,32.9,400').kind).toBe('gcp')
+    expect(detectFileKind('gcp_label,image_file_name,x,y,lon,lat,elev\nG1,a.tif,100,200,-111.7,32.9,400').kind).toBe(
+      'gcp',
+    )
     expect(detectFileKind('point_label,image_file_name,x,y\nP1,a.tif,100,200').kind).toBe('gcp')
   })
 })

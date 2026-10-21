@@ -7,11 +7,15 @@ import { pluralize, nounFor } from '../core/textFormat.js'
 // minutes, a dozen in an hour. One pacer can serve several progress sources (the ortho's
 // blocks and its map visits): whichever speaks, the next line waits for the next interval.
 export function createLogPacer({ everyMs = 30_000, maxMs = 300_000, now = () => performance.now() } = {}) {
-  let last = now(), wait = everyMs
+  let last = now(),
+    wait = everyMs
   return {
     now,
     due: () => now() - last >= wait,
-    spoke() { last = now(); wait = Math.min(maxMs, wait * 2) },
+    spoke() {
+      last = now()
+      wait = Math.min(maxMs, wait * 2)
+    },
   }
 }
 
@@ -36,9 +40,11 @@ export function createBlockProgress(total, { prefix = '', pacer = null, now = ()
       pace.spoke()
       const elapsed = (pace.now() - t0) / 1000
       const per = elapsed / done
-      return `${prefix}${done} of ${pluralize(total, 'block')} done (${Math.floor(100 * done / total)}%) `
-        + `in ${formatClock(elapsed)}, ${per.toFixed(per < 10 ? 1 : 0)} s per block, `
-        + `${remainingText(per * (total - done))} left`
+      return (
+        `${prefix}${done} of ${pluralize(total, 'block')} done (${Math.floor((100 * done) / total)}%) ` +
+        `in ${formatClock(elapsed)}, ${per.toFixed(per < 10 ? 1 : 0)} s per block, ` +
+        `${remainingText(per * (total - done))} left`
+      )
     },
   }
 }
@@ -61,8 +67,10 @@ export function createStepProgress({ prefix = '', unit = 'step', pacer = null, n
       if (done <= 0 || done >= total || !pace.due()) return null
       pace.spoke()
       const elapsed = (pace.now() - t0) / 1000
-      return `${prefix}${what ? `${what} — ` : ''}${done.toLocaleString()} of ${total.toLocaleString()} ${nounFor(total, unit)} `
-        + `(${Math.floor(100 * done / total)}%) in ${formatClock(elapsed)}, ${remainingText(elapsed / done * (total - done))} left`
+      return (
+        `${prefix}${what ? `${what} — ` : ''}${done.toLocaleString()} of ${total.toLocaleString()} ${nounFor(total, unit)} ` +
+        `(${Math.floor((100 * done) / total)}%) in ${formatClock(elapsed)}, ${remainingText((elapsed / done) * (total - done))} left`
+      )
     },
   }
 }

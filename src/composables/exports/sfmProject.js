@@ -22,13 +22,28 @@ import { pluralize } from '../../core/textFormat.js'
 //
 // Deps are useExports' injected refs and shared helpers.
 export function createSfmProjectExports({
-  doExportModel, images, imagesStore, log, matchStore, matchesStore, progress, projectBase, projects,
-  saveJson, sensors, sparseCloud, summary, swapPairs,
+  doExportModel,
+  images,
+  imagesStore,
+  log,
+  matchStore,
+  matchesStore,
+  progress,
+  projectBase,
+  projects,
+  saveJson,
+  sensors,
+  sparseCloud,
+  summary,
+  swapPairs,
 }) {
   async function doExportColmap({ format, includeImages = false } = {}) {
     const cloud = sparseCloud()
     if (!cloud) return
-    if (format === 'transforms') { doExportModel({ format: 'transforms' }); return }
+    if (format === 'transforms') {
+      doExportModel({ format: 'transforms' })
+      return
+    }
     const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
     const sensorById = new Map(sensors.value.map((sensor) => [sensor.id, sensor]))
 
@@ -36,7 +51,17 @@ export function createSfmProjectExports({
       .map(([uuid, cam]) => {
         const im = imgByUuid.get(uuid)
         if (!im || !cam.K || !im.meta?.width || !im.meta?.height) return null
-        return { uuid, name: im.name, width: im.meta.width, height: im.meta.height, K: cam.K, R: cam.R, t: cam.t, keypoints: null, file: im.file ?? null }
+        return {
+          uuid,
+          name: im.name,
+          width: im.meta.width,
+          height: im.meta.height,
+          K: cam.K,
+          R: cam.R,
+          t: cam.t,
+          keypoints: null,
+          file: im.file ?? null,
+        }
       })
       .filter(Boolean)
     if (!exportImages.length) return
@@ -57,8 +82,10 @@ export function createSfmProjectExports({
         return sensor?.kind === 'film' || !!distortionOf(sensor)
       })
       if (risky) {
-        throw new Error('This legacy model has no BA-frame observations, but its sensors use '
-          + 'lens distortion or film coordinates. Re-run reconstruction before COLMAP export.')
+        throw new Error(
+          'This legacy model has no BA-frame observations, but its sensors use ' +
+            'lens distortion or film coordinates. Re-run reconstruction before COLMAP export.',
+        )
       }
     }
 
@@ -68,7 +95,10 @@ export function createSfmProjectExports({
       const views = []
       sp.forEachView(i, (uuid, kpIdx, px, py) => {
         if (!exported.has(uuid)) return
-        if (Number.isFinite(px)) { views.push({ uuid, x: px, y: py, featureIdx: kpIdx }); return }
+        if (Number.isFinite(px)) {
+          views.push({ uuid, x: px, y: py, featureIdx: kpIdx })
+          return
+        }
         const kps = keypointsByUuid.get(uuid)
         if (kps && kpIdx < kps.length) views.push({ uuid, x: kps.x(kpIdx), y: kps.y(kpIdx), featureIdx: kpIdx })
       })
@@ -78,7 +108,12 @@ export function createSfmProjectExports({
     const model = buildColmapModel({ images: exportImages, points })
     // Adapters share the deterministic COLMAP-like model so image, feature and
     // track ids remain stable across every export representation.
-    model.images.forEach((im, i) => { im.R = exportImages[i].R; im.K = exportImages[i].K; im.width = exportImages[i].width; im.height = exportImages[i].height })
+    model.images.forEach((im, i) => {
+      im.R = exportImages[i].R
+      im.K = exportImages[i].K
+      im.width = exportImages[i].width
+      im.height = exportImages[i].height
+    })
     if (format === 'nvm') {
       downloadBlob(`${projectBase()}.nvm`, partsToBlob(buildNvmParts(model), 'text/plain;charset=utf-8'))
       log(`NVM export: ${model.images.length} cameras, ${model.points3D.length} points`, 'success', 'Export')
@@ -94,30 +129,41 @@ export function createSfmProjectExports({
       // COLMAP stores RootSIFT ×512 as uint8. A saved project keeps descriptors only
       // in OPFS (detection drops the in-memory copy), so read them from there; legacy
       // L2 detections convert exactly as matching does.
-      const features = await Promise.all(exportImages.map(async (im, i) => {
-        const source = imgByUuid.get(im.uuid)
-        let descriptors = null
-        if (source && siftDescNorm(source) != null) {
-          const stored = source.descriptors
-            ?? (projects.isPersisting ? await opfs.loadDescriptors(projects.currentProjectId, im.uuid) : null)
-          const root = toMatchSpace(stored, source)
-          if (root?.length === im.keypoints.length * 128) {
-            descriptors = new Uint8Array(root.length)
-            for (let k = 0; k < root.length; k++) descriptors[k] = Math.max(0, Math.min(255, Math.round(root[k] * 512)))
+      const features = await Promise.all(
+        exportImages.map(async (im, i) => {
+          const source = imgByUuid.get(im.uuid)
+          let descriptors = null
+          if (source && siftDescNorm(source) != null) {
+            const stored =
+              source.descriptors ??
+              (projects.isPersisting ? await opfs.loadDescriptors(projects.currentProjectId, im.uuid) : null)
+            const root = toMatchSpace(stored, source)
+            if (root?.length === im.keypoints.length * 128) {
+              descriptors = new Uint8Array(root.length)
+              for (let k = 0; k < root.length; k++)
+                descriptors[k] = Math.max(0, Math.min(255, Math.round(root[k] * 512)))
+            }
           }
-        }
-        return { imageId: model.images[i].imageId, keypoints: im.keypoints, descriptors }
-      }))
+          return { imageId: model.images[i].imageId, keypoints: im.keypoints, descriptors }
+        }),
+      )
       const withDesc = features.filter((f) => f.descriptors).length
       if (withDesc < features.length) {
-        log(`COLMAP database: descriptors for ${withDesc} of ${pluralize(features.length, 'image')} — the rest `
-          + 'are not SIFT or were not found; COLMAP will need to re-extract them', 'warn', 'Export')
+        log(
+          `COLMAP database: descriptors for ${withDesc} of ${pluralize(features.length, 'image')} — the rest ` +
+            'are not SIFT or were not found; COLMAP will need to re-extract them',
+          'warn',
+          'Export',
+        )
       }
       const pairs = []
-      const wanted = [...matchStore.value.values()].filter((pair) => pair.status === 'done' && pair.nMatches > 0
-        && imageIdByUuid.get(pair.idA) && imageIdByUuid.get(pair.idB))
+      const wanted = [...matchStore.value.values()].filter(
+        (pair) =>
+          pair.status === 'done' && pair.nMatches > 0 && imageIdByUuid.get(pair.idA) && imageIdByUuid.get(pair.idB),
+      )
       await matchesStore.streamPairMatches(wanted, (pair, m) => {
-        const imageIdA = imageIdByUuid.get(pair.idA), imageIdB = imageIdByUuid.get(pair.idB)
+        const imageIdA = imageIdByUuid.get(pair.idA),
+          imageIdB = imageIdByUuid.get(pair.idB)
         const flip = imageIdA > imageIdB
         pairs.push({
           pairId: imageIdsToPairId(imageIdA, imageIdB),
@@ -125,8 +171,16 @@ export function createSfmProjectExports({
           // Always a copy: the stream hands views into its read windows, and posting a
           // view to the worker would clone that whole window once per pair.
           matches: flip ? swapPairs(m) : m.slice(),
-          F: flip && pair.F ? [[pair.F[0][0], pair.F[1][0], pair.F[2][0]], [pair.F[0][1], pair.F[1][1], pair.F[2][1]], [pair.F[0][2], pair.F[1][2], pair.F[2][2]]] : (pair.F ?? null),
-          E: pair.E ?? null, H: pair.H ?? null,
+          F:
+            flip && pair.F
+              ? [
+                  [pair.F[0][0], pair.F[1][0], pair.F[2][0]],
+                  [pair.F[0][1], pair.F[1][1], pair.F[2][1]],
+                  [pair.F[0][2], pair.F[1][2], pair.F[2][2]],
+                ]
+              : (pair.F ?? null),
+          E: pair.E ?? null,
+          H: pair.H ?? null,
         })
       })
       const database = await exportColmapDatabase({ cameras: model.cameras, images: model.images, features, pairs })
@@ -145,7 +199,10 @@ export function createSfmProjectExports({
       if (includeImages) {
         for (const im of exportImages) if (im.file) entries.push({ name: `images/${im.name}`, data: im.file })
       }
-      downloadBlob(`${projectBase()}-colmap-workspace.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
+      downloadBlob(
+        `${projectBase()}-colmap-workspace.zip`,
+        new Blob(await zipParts(entries), { type: 'application/zip' }),
+      )
       log(`COLMAP workspace export: database + sparse model${includeImages ? ' + images' : ''}`, 'success', 'Export')
       return
     }
@@ -154,9 +211,15 @@ export function createSfmProjectExports({
     // zip writer UTF-8 encodes one at a time).
     const files = format === 'bin' ? serializeColmapModelBinParts(model) : serializeColmapModelParts(model)
     const entries = Object.entries(files).map(([name, data]) => ({ name, data }))
-    downloadBlob(`${projectBase()}-colmap-${format === 'bin' ? 'bin' : 'txt'}.zip`,
-      new Blob(await zipParts(entries), { type: 'application/zip' }))
-    log(`COLMAP export: ${exportImages.length} cameras, ${points.length} points → ${format === 'bin' ? '.bin' : '.txt'} zip`, 'success', 'Export')
+    downloadBlob(
+      `${projectBase()}-colmap-${format === 'bin' ? 'bin' : 'txt'}.zip`,
+      new Blob(await zipParts(entries), { type: 'application/zip' }),
+    )
+    log(
+      `COLMAP export: ${exportImages.length} cameras, ${points.length} points → ${format === 'bin' ? '.bin' : '.txt'} zip`,
+      'success',
+      'Export',
+    )
   }
 
   // zlib-DEFLATE a byte buffer via the browser-native CompressionStream (DOM/
@@ -178,9 +241,7 @@ export function createSfmProjectExports({
   // Layout mirrors COLMAP's undistorter so downstream tools need no arguments:
   //   images/<name>.<ext>
   //   sparse/{cameras,images,points3D}.bin
-  async function doExportUndistorted({
-    mode = 'crop', format = 'jpeg', quality = 0.92, maxDim = 0,
-  } = {}) {
+  async function doExportUndistorted({ mode = 'crop', format = 'jpeg', quality = 0.92, maxDim = 0 } = {}) {
     const cloud = sparseCloud()
     if (!cloud || !cloud.cameras?.size) return
     const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
@@ -189,15 +250,17 @@ export function createSfmProjectExports({
     // Self-cal bags per sensor or per sensorless image (core/sfm/displayFrame.js).
     const frameModel = makeFrameModelResolver({ summary: sum, sensors: sensors.value })
     const fidByUuid = new Map(
-      (sum?.fiducialTransforms ?? []).map((t) => [t.uuid, { A: t.A, transform: t.transform ?? null, frame: t.frame }]))
+      (sum?.fiducialTransforms ?? []).map((t) => [t.uuid, { A: t.A, transform: t.transform ?? null, frame: t.frame }]),
+    )
 
     // The observations must be in the BA (pinhole) frame — that is the only frame
     // the undistorted pixels are in. Raw store keypoints are in scan/distorted
     // space, so a legacy model without view pixels would write marks that don't sit
     // on the images it ships beside them.
     if (!cloud.points.hasPixels && cloud.points.length) {
-      throw new Error('This model has no BA-frame observations. Re-run reconstruction '
-        + 'before exporting undistorted images.')
+      throw new Error(
+        'This model has no BA-frame observations. Re-run reconstruction ' + 'before exporting undistorted images.',
+      )
     }
 
     const ext = format === 'png' ? 'png' : 'jpg'
@@ -210,8 +273,7 @@ export function createSfmProjectExports({
     const entries = []
     const outImages = []
     let bytesTotal = 0
-    progress?.open?.(`Exporting ${targets.length} undistorted images`, targets.length, null,
-      { unit: 'images' })
+    progress?.open?.(`Exporting ${targets.length} undistorted images`, targets.length, null, { unit: 'images' })
     try {
       for (let i = 0; i < targets.length; i++) {
         if (progress?.aborted?.value) break
@@ -220,18 +282,29 @@ export function createSfmProjectExports({
         const sensor = im.sensorId ? sensorById.get(im.sensorId) : null
         const fid = fidByUuid.get(uuid) ?? null
         if (sensor?.kind === 'film' && !fid) {
-          log(`Undistort: ${im.name} skipped — no interior-orientation transform from the `
-            + 'last sparse run (re-run reconstruction).', 'warn', 'Export')
+          log(
+            `Undistort: ${im.name} skipped — no interior-orientation transform from the ` +
+              'last sparse run (re-run reconstruction).',
+            'warn',
+            'Export',
+          )
           progress?.report?.(i + 1, targets.length, im.name)
           continue
         }
-        const res = await undistortImage({
-          url: computeSourceOf(im),
-          K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
-          dist: frameModel(im).dist,
-          selfCal: frameModel(im).selfCal,
-          fid, mode, maxDim, format, quality,
-        }, { onLog: (m, l, c) => log(m, l, c ?? 'Export') })
+        const res = await undistortImage(
+          {
+            url: computeSourceOf(im),
+            K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
+            dist: frameModel(im).dist,
+            selfCal: frameModel(im).selfCal,
+            fid,
+            mode,
+            maxDim,
+            format,
+            quality,
+          },
+          { onLog: (m, l, c) => log(m, l, c ?? 'Export') },
+        )
 
         const name = `${im.name.replace(/\.[^.]+$/, '')}.${ext}`
         const data = new Uint8Array(res.bytes)
@@ -241,8 +314,15 @@ export function createSfmProjectExports({
         // now, while the bytes are in hand, so the zip never re-reads it.
         entries.push({ name: `images/${name}`, data: new Blob([data]), crc: crc32(data) })
         outImages.push({
-          uuid, name, width: res.width, height: res.height, K: res.K,
-          R: cam.R, t: cam.t, outScale: res.outScale, rect: res.rect,
+          uuid,
+          name,
+          width: res.width,
+          height: res.height,
+          K: res.K,
+          R: cam.R,
+          t: cam.t,
+          outScale: res.outScale,
+          rect: res.rect,
         })
         progress?.report?.(i + 1, targets.length, im.name)
       }
@@ -279,21 +359,45 @@ export function createSfmProjectExports({
       const files = serializeColmapModelBinParts(model)
       for (const [n, data] of Object.entries(files)) entries.push({ name: `sparse/${n}`, data })
       // The same cameras for NeRF / 3DGS tools: these images ARE pinhole, with this K.
-      entries.push({ name: 'transforms.json', data: new Blob([JSON.stringify(buildTransformsJson({
-        images: outImages.map((o) => ({ name: `images/${o.name}`, R: o.R, t: o.t, K: o.K, width: o.width, height: o.height })),
-      }), null, 2)], { type: 'application/json' }) })
+      entries.push({
+        name: 'transforms.json',
+        data: new Blob(
+          [
+            JSON.stringify(
+              buildTransformsJson({
+                images: outImages.map((o) => ({
+                  name: `images/${o.name}`,
+                  R: o.R,
+                  t: o.t,
+                  K: o.K,
+                  width: o.width,
+                  height: o.height,
+                })),
+              }),
+              null,
+              2,
+            ),
+          ],
+          { type: 'application/json' },
+        ),
+      })
 
       downloadBlob(`${projectBase()}-undistorted.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
       const cropped = outImages.filter((o) => o.rect.x || o.rect.y).length
-      log(`Undistorted export: ${outImages.length} images (${ext.toUpperCase()}, ${mode}`
-        + `${cropped ? `, ${cropped} cropped` : ''}) + PINHOLE sparse model, `
-        + `${(bytesTotal / 1024 ** 2).toFixed(0)} MB`, 'success', 'Export')
+      log(
+        `Undistorted export: ${outImages.length} images (${ext.toUpperCase()}, ${mode}` +
+          `${cropped ? `, ${cropped} cropped` : ''}) + PINHOLE sparse model, ` +
+          `${(bytesTotal / 1024 ** 2).toFixed(0)} MB`,
+        'success',
+        'Export',
+      )
     } finally {
       await progress?.close?.()
     }
   }
 
   return {
-    doExportColmap, doExportUndistorted,
+    doExportColmap,
+    doExportUndistorted,
   }
 }

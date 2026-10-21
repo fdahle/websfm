@@ -32,8 +32,9 @@ const priorSigma = (p) => [p.accuracyX, p.accuracyY, p.accuracyZ].map((v) => (Nu
  */
 export function buildCameraPriorConstraints({ cameras, cameraPriors, uuidList, minCameras = 3, reference = null }) {
   const camIdxOf = new Map(uuidList.map((uuid, i) => [uuid, i]))
-  const usable = (cameraPriors || []).filter((p) => camIdxOf.has(p.uuid)
-    && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z))
+  const usable = (cameraPriors || []).filter(
+    (p) => camIdxOf.has(p.uuid) && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z),
+  )
   if (usable.length < (reference ? 1 : minCameras)) return null
   // A prior with a `leverArm` (metres, camera frame) is the GNSS ANTENNA position,
   // which sits at C + Rᵀ·a, not at the camera centre C. Holding C to it pulls every
@@ -48,14 +49,16 @@ export function buildCameraPriorConstraints({ cameras, cameraPriors, uuidList, m
     const a = p.leverArm
     return [0, 1, 2].map((i) => (R[0][i] * a[0] + R[1][i] * a[1] + R[2][i] * a[2]) / scale)
   }
-  const pairsAt = (scale) => usable.map((p) => {
-    const C = cameraCenter(cameras.get(p.uuid))
-    const arm = armInSfm(p, scale)
-    return {
-      src: arm ? [C[0] + arm[0], C[1] + arm[1], C[2] + arm[2]] : C, dst: [p.x, p.y, p.z],
-      weight: 3 / priorSigma(p).reduce((sum, v) => sum + v * v, 0),
-    }
-  })
+  const pairsAt = (scale) =>
+    usable.map((p) => {
+      const C = cameraCenter(cameras.get(p.uuid))
+      const arm = armInSfm(p, scale)
+      return {
+        src: arm ? [C[0] + arm[0], C[1] + arm[1], C[2] + arm[2]] : C,
+        dst: [p.x, p.y, p.z],
+        weight: 3 / priorSigma(p).reduce((sum, v) => sum + v * v, 0),
+      }
+    })
   let fit = reference?.fit ?? null
   if (!fit) {
     // The offset needs the scale and the scale comes from the fit: fit the centres
@@ -75,9 +78,10 @@ export function buildCameraPriorConstraints({ cameras, cameraPriors, uuidList, m
   if (!fit) return null
   const frame = reference?.frame ?? frameFromSimilarity(fit, 'camera-prior')
   const priors = usable.map((p) => ({
-    camIdx: camIdxOf.get(p.uuid), target: centreTarget(frame.toSfm([p.x, p.y, p.z]), armInSfm(p, fit.scale)),
+    camIdx: camIdxOf.get(p.uuid),
+    target: centreTarget(frame.toSfm([p.x, p.y, p.z]), armInSfm(p, fit.scale)),
     // sigma_sfm = sigma_project / scale, hence inverse variance scales by s².
-    weights: priorSigma(p).map((v) => fit.scale * fit.scale / (v * v)),
+    weights: priorSigma(p).map((v) => (fit.scale * fit.scale) / (v * v)),
     ...(orientationPriorInSfm(p, fit.R) ?? {}),
   }))
   return { fit, priors }
@@ -107,19 +111,23 @@ export async function buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPoin
   const tri = []
   for (const g of qualifying) {
     // A mark with no pinhole image (a fisheye ray past 90°) comes out of ingest as NaN.
-    const obsWithCam = (g.observations || [])
-      .filter((o) => cameras.has(o.uuid) && Number.isFinite(o.px) && Number.isFinite(o.py))
+    const obsWithCam = (g.observations || []).filter(
+      (o) => cameras.has(o.uuid) && Number.isFinite(o.px) && Number.isFinite(o.py),
+    )
     const t = await triangulateGcp(
       obsWithCam.map((o) => ({ imageId: o.uuid, px: o.px, py: o.py, accuracyX: o.accuracyX, accuracyY: o.accuracyY })),
       cameras,
     )
     tri.push({ g, tri: t, obsWithCam })
   }
-  const pairs = tri.filter((r) => r.tri).map((r) => ({
-    src: [r.tri.x, r.tri.y, r.tri.z], dst: [r.g.x, r.g.y, r.g.z],
-    weight: 3 / (r.g.accuracyX ** 2 + r.g.accuracyY ** 2 + r.g.accuracyZ ** 2),
-    precision: precisionFromGcp(r.g),
-  }))
+  const pairs = tri
+    .filter((r) => r.tri)
+    .map((r) => ({
+      src: [r.tri.x, r.tri.y, r.tri.z],
+      dst: [r.g.x, r.g.y, r.g.z],
+      weight: 3 / (r.g.accuracyX ** 2 + r.g.accuracyY ** 2 + r.g.accuracyZ ** 2),
+      precision: precisionFromGcp(r.g),
+    }))
   if (pairs.length < 3) return { error: 'fewer than 3 GCPs triangulated' }
   const fit = fitSimilarity(pairs)
   if (!fit) return { error: 'similarity fit failed — degenerate configuration' }
@@ -128,7 +136,9 @@ export async function buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPoin
   // Anchor points are extra 3D points (their own index range, after the real ones)
   // with ordinary reprojection observations of their marks PLUS the one anchor
   // residual pulling them toward the GCP-implied SfM-frame position.
-  const anchorPts = [], anchors = [], observations = []
+  const anchorPts = [],
+    anchors = [],
+    observations = []
   for (const { g, tri: t, obsWithCam } of tri) {
     if (!t) continue
     const precision = precisionInSfmFrame(g, fit)
@@ -138,8 +148,15 @@ export async function buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPoin
     anchors.push({ ptIdx, target: frame.toSfm([g.x, g.y, g.z]), precision })
     for (const o of obsWithCam) {
       const camIdx = camIdxOf.get(o.uuid)
-      if (camIdx != null) observations.push({ camIdx, ptIdx, x: o.px, y: o.py,
-        weightX: 1 / ((o.accuracyX ?? 1) ** 2), weightY: 1 / ((o.accuracyY ?? 1) ** 2) })
+      if (camIdx != null)
+        observations.push({
+          camIdx,
+          ptIdx,
+          x: o.px,
+          y: o.py,
+          weightX: 1 / (o.accuracyX ?? 1) ** 2,
+          weightY: 1 / (o.accuracyY ?? 1) ** 2,
+        })
     }
   }
   if (!anchors.length) return { error: 'no GCP had a usable precision' }

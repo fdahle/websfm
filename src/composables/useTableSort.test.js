@@ -59,7 +59,11 @@ describe('compareValues / compareRaw', () => {
 })
 
 describe('useTableSort', () => {
-  const rows = ref([{ id: 'x', v: 2 }, { id: 'y', v: 1 }, { id: 'z', v: 3 }])
+  const rows = ref([
+    { id: 'x', v: 2 },
+    { id: 'y', v: 1 },
+    { id: 'z', v: 3 },
+  ])
 
   it('keeps the original order until a column is clicked, then toggles', () => {
     const t = useTableSort(() => rows.value, get)

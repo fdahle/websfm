@@ -34,9 +34,9 @@ function isSizeOverflow(err) {
 function sizeOverflowError(label, w, h) {
   const mp = ((w * h) / 1e6).toFixed(1)
   return new Error(
-    `${label}: input ${w}×${h} (${mp} MP) is too large for a single pass — ONNX `
-    + `Runtime overflowed its 32-bit tensor-size limit. Enable Tiling in the Detect `
-    + `Features dialog (recommended) or lower the Detection resolution.`,
+    `${label}: input ${w}×${h} (${mp} MP) is too large for a single pass — ONNX ` +
+      `Runtime overflowed its 32-bit tensor-size limit. Enable Tiling in the Detect ` +
+      `Features dialog (recommended) or lower the Detection resolution.`,
   )
 }
 
@@ -62,10 +62,16 @@ const gpuFailedAtPx = new Map() // modelKey → smallest failed npix
 async function chooseBackend(modelKey, npix) {
   const failedAt = gpuFailedAtPx.get(modelKey)
   if (failedAt !== undefined && npix >= failedAt) {
-    return { backend: 'wasm', reason: `WebGPU failed earlier at ${failedAt} px — inputs that size or larger stay on CPU` }
+    return {
+      backend: 'wasm',
+      reason: `WebGPU failed earlier at ${failedAt} px — inputs that size or larger stay on CPU`,
+    }
   }
   const backend = await resolveBackend()
-  return { backend, reason: backend === 'webgpu' ? '' : 'WebGPU via ORT is Chromium-only for now — use Chrome/Edge for GPU speed' }
+  return {
+    backend,
+    reason: backend === 'webgpu' ? '' : 'WebGPU via ORT is Chromium-only for now — use Chrome/Edge for GPU speed',
+  }
 }
 
 // Build the session once per `${modelKey}:${backend}`. The first call is the
@@ -73,16 +79,20 @@ async function chooseBackend(modelKey, npix) {
 function getSession(label, model, modelKey, backend, onLog, reason = '') {
   const key = `${modelKey}:${backend}`
   if (!sessions.has(key)) {
-    sessions.set(key, (async () => {
-      onLog?.(`${label}: first run — backend ${backend}`
-        + `${reason ? ` (CPU; ${reason})` : ''}; fetching model…`)
-      const bytes = await loadModelBytes(model, onLog, label)
-      const t = performance.now()
-      const session = await createSession(bytes, {}, onLog, backend)
-      onLog?.(`${label}: runtime ready in ${Math.round(performance.now() - t)} ms `
-        + `(backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`)
-      return session
-    })())
+    sessions.set(
+      key,
+      (async () => {
+        onLog?.(`${label}: first run — backend ${backend}` + `${reason ? ` (CPU; ${reason})` : ''}; fetching model…`)
+        const bytes = await loadModelBytes(model, onLog, label)
+        const t = performance.now()
+        const session = await createSession(bytes, {}, onLog, backend)
+        onLog?.(
+          `${label}: runtime ready in ${Math.round(performance.now() - t)} ms ` +
+            `(backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`,
+        )
+        return session
+      })(),
+    )
   }
   return sessions.get(key)
 }
@@ -127,9 +137,7 @@ export function classifyOutputs(results, outputNames, dim) {
  */
 export async function detectLearned(spec, pixels, w, h, opts = {}) {
   const { label, descDim: dim, channels } = spec
-  const {
-    maxKeypoints = 5000, model = modelUrl(spec.modelId), modelKey = spec.modelId, onLog,
-  } = opts
+  const { maxKeypoints = 5000, model = modelUrl(spec.modelId), modelKey = spec.modelId, onLog } = opts
   let { backend, reason } = await chooseBackend(modelKey, w * h)
   let session = await getSession(label, model, modelKey, backend, onLog, reason)
 
@@ -139,8 +147,11 @@ export async function detectLearned(spec, pixels, w, h, opts = {}) {
   // On WebGPU the first run() compiles the graph's shaders — often the real
   // first-image cost (not createSession). Time it once so a stall here is visible.
   const first = !warmedUp.has(modelKey)
-  if (first) onLog?.(`${label}: first inference on ${w}×${h} on ${backend}`
-    + `${backend === 'webgpu' ? ' (compiling GPU shaders — one-time)' : ''}…`)
+  if (first)
+    onLog?.(
+      `${label}: first inference on ${w}×${h} on ${backend}` +
+        `${backend === 'webgpu' ? ' (compiling GPU shaders — one-time)' : ''}…`,
+    )
   const tRun = performance.now()
   let results
   try {
@@ -155,8 +166,10 @@ export async function detectLearned(spec, pixels, w, h, opts = {}) {
     // device lost). Record the failure SIZE for this model — smaller inputs
     // (e.g. tiles) may still fit — drop the bad session, and re-run this image
     // on CPU WASM: same graph, same outputs, just slower.
-    onLog?.(`${label}: WebGPU path failed at ${w}×${h} (${err?.message || err}) — `
-      + 'falling back to CPU WASM for inputs this size or larger')
+    onLog?.(
+      `${label}: WebGPU path failed at ${w}×${h} (${err?.message || err}) — ` +
+        'falling back to CPU WASM for inputs this size or larger',
+    )
     const npix = w * h
     const prev = gpuFailedAtPx.get(modelKey)
     gpuFailedAtPx.set(modelKey, prev === undefined ? npix : Math.min(prev, npix))
@@ -172,7 +185,9 @@ export async function detectLearned(spec, pixels, w, h, opts = {}) {
   }
   if (first) {
     warmedUp.add(modelKey)
-    onLog?.(`${label}: first inference done in ${Math.round(performance.now() - tRun)} ms on ${backend}; subsequent images reuse the compiled graph`)
+    onLog?.(
+      `${label}: first inference done in ${Math.round(performance.now() - tRun)} ms on ${backend}; subsequent images reuse the compiled graph`,
+    )
   }
   return parseDetections(results, session.outputNames, spec, maxKeypoints)
 }
@@ -247,4 +262,3 @@ export function rgbaToPlanar(data, width, height, channels) {
   }
   return out
 }
-

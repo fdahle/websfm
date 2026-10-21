@@ -20,9 +20,40 @@ import { srgbToLinear, linearToSrgb } from './colourGains.js'
 import { sampleSurfaceWindow } from './surface.js'
 import { createOrthoStats } from '../eval/orthoStats.js'
 import { seamGrid, SEAM_CANDIDATES } from './seamCut.js'
-import { MULTIBAND_LEVELS, MULTIBAND_BYTES_PER_CELL, multibandReach, createMultiband, multibandBegin, multibandAdd, multibandFinish } from './multiband.js'
-import { NO_LABEL, WIN_TILE, boxReachesMap, forTilesReaching, newLabels, projectInto, samplePhoto, winCellToSfm, winTiles } from './orthoWindow.js'
-import { MOSAIC_SMOOTH_PASSES, blendFromMap, chamferTo, finishMosaicWindow, labelFromMap, mapSight, mosaicMode, mosaicSeamCells, mosaicSurvey, orthoHalo, sampleColour, smoothLabels } from './orthoMosaic.js'
+import {
+  MULTIBAND_LEVELS,
+  MULTIBAND_BYTES_PER_CELL,
+  multibandReach,
+  createMultiband,
+  multibandBegin,
+  multibandAdd,
+  multibandFinish,
+} from './multiband.js'
+import {
+  NO_LABEL,
+  WIN_TILE,
+  boxReachesMap,
+  forTilesReaching,
+  newLabels,
+  projectInto,
+  samplePhoto,
+  winCellToSfm,
+  winTiles,
+} from './orthoWindow.js'
+import {
+  MOSAIC_SMOOTH_PASSES,
+  blendFromMap,
+  chamferTo,
+  finishMosaicWindow,
+  labelFromMap,
+  mapSight,
+  mosaicMode,
+  mosaicSeamCells,
+  mosaicSurvey,
+  orthoHalo,
+  sampleColour,
+  smoothLabels,
+} from './orthoMosaic.js'
 import { blockGroups, chooseGroupSize, ownersFromCut, unionMaps, viewBytes, visitSequence } from './orthoPlan.js'
 
 // The highest matching cost left in the depth maps, given the settings of the run that
@@ -48,18 +79,22 @@ export function sampleOrtho(P, maps, opts = {}) {
 // -1 for 'average', which mixes every visible view).
 function pickOrthoView(P, maps, opts) {
   const { depthTolRel = 0.02, blend = 'best', maxCost = Infinity } = opts
-  let best = null           // { score, rgb, mi }
-  let wsum = 0, r = 0, g = 0, b = 0  // for 'average'
+  let best = null // { score, rgb, mi }
+  let wsum = 0,
+    r = 0,
+    g = 0,
+    b = 0 // for 'average'
 
   for (let mi = 0; mi < maps.length; mi++) {
     const m = maps[mi]
     const p = projectInto(m, P)
     if (!p) continue
-    const u = Math.round(p.u), v = Math.round(p.v)
+    const u = Math.round(p.u),
+      v = Math.round(p.v)
     if (u < 0 || v < 0 || u >= m.width || v >= m.height) continue
     const idx = v * m.width + u
     const stored = m.depth[idx]
-    if (!(stored > 0)) continue                              // no surface here
+    if (!(stored > 0)) continue // no surface here
     // Occlusion: the cell's distance to this camera must match the map's own
     // surface distance. A stored depth closer than p.depth ⇒ something in front.
     if (Math.abs(stored - p.depth) > depthTolRel * p.depth) continue
@@ -74,7 +109,10 @@ function pickOrthoView(P, maps, opts) {
 
     if (blend === 'average') {
       const w = 1 / (cost + 1e-3)
-      wsum += w; r += w * rgb[0]; g += w * rgb[1]; b += w * rgb[2]
+      wsum += w
+      r += w * rgb[0]
+      g += w * rgb[1]
+      b += w * rgb[2]
     } else if (!best || score < best.score) {
       best = { score, rgb, mi }
     }
@@ -108,7 +146,12 @@ export function fillOrthoGaps(rgba, surfaceMask, width, height, radius, method =
     for (let col = 0; col < width; col++) {
       const i = row * width + col
       if (!surfaceMask[i] || sampled[i]) continue
-      let nearest = -1, nearestD2 = Infinity, wsum = 0, rs = 0, gs = 0, bs = 0
+      let nearest = -1,
+        nearestD2 = Infinity,
+        wsum = 0,
+        rs = 0,
+        gs = 0,
+        bs = 0
       for (let dr = -r; dr <= r; dr++) {
         const rr = row + dr
         if (rr < 0 || rr >= height) continue
@@ -119,18 +162,29 @@ export function fillOrthoGaps(rgba, surfaceMask, width, height, radius, method =
           if (!d2 || d2 > r2) continue
           const ni = rr * width + cc
           if (!sampled[ni]) continue
-          if (d2 < nearestD2) { nearestD2 = d2; nearest = ni }
-          const w = 1 / d2, o = ni * 4
-          wsum += w; rs += w * rgba[o]; gs += w * rgba[o + 1]; bs += w * rgba[o + 2]
+          if (d2 < nearestD2) {
+            nearestD2 = d2
+            nearest = ni
+          }
+          const w = 1 / d2,
+            o = ni * 4
+          wsum += w
+          rs += w * rgba[o]
+          gs += w * rgba[o + 1]
+          bs += w * rgba[o + 2]
         }
       }
       if (nearest < 0) continue
       const o = i * 4
       if (method === 'nearest') {
         const no = nearest * 4
-        rgba[o] = rgba[no]; rgba[o + 1] = rgba[no + 1]; rgba[o + 2] = rgba[no + 2]
+        rgba[o] = rgba[no]
+        rgba[o + 1] = rgba[no + 1]
+        rgba[o + 2] = rgba[no + 2]
       } else {
-        rgba[o] = Math.round(rs / wsum); rgba[o + 1] = Math.round(gs / wsum); rgba[o + 2] = Math.round(bs / wsum)
+        rgba[o] = Math.round(rs / wsum)
+        rgba[o + 1] = Math.round(gs / wsum)
+        rgba[o + 2] = Math.round(bs / wsum)
       }
       rgba[o + 3] = 255
       filled++
@@ -164,7 +218,10 @@ export function orthorectify(grid, maps, toSfm, opts = {}, onProgress = () => {}
       const view = pickOrthoView(P, maps, opts)
       if (!view) continue
       const { rgb } = view
-      rgba[o] = rgb[0]; rgba[o + 1] = rgb[1]; rgba[o + 2] = rgb[2]; rgba[o + 3] = 255
+      rgba[o] = rgb[0]
+      rgba[o + 1] = rgb[1]
+      rgba[o + 2] = rgb[2]
+      rgba[o + 3] = 255
       if (labels) labels[idx] = view.mi
       covered++
     }
@@ -201,14 +258,17 @@ function fitAffineToSfm(toSfm, lo, hi) {
   const P0 = toSfm(c0)
   const A = new Float64Array(9)
   for (let k = 0; k < 3; k++) {
-    const c = c0.slice(); c[k] += 1
+    const c = c0.slice()
+    c[k] += 1
     const Pk = toSfm(c)
     for (let r = 0; r < 3; r++) A[r * 3 + k] = Pk[r] - P0[r]
   }
-  let size = 0, err = 0
+  let size = 0,
+    err = 0
   for (let corner = 0; corner < 8; corner++) {
     const c = [corner & 1 ? hi[0] : lo[0], corner & 2 ? hi[1] : lo[1], corner & 4 ? hi[2] : lo[2]]
-    const P = toSfm(c), d = [c[0] - c0[0], c[1] - c0[1], c[2] - c0[2]]
+    const P = toSfm(c),
+      d = [c[0] - c0[0], c[1] - c0[1], c[2] - c0[2]]
     for (let r = 0; r < 3; r++) {
       const lin = P0[r] + A[r * 3] * d[0] + A[r * 3 + 1] * d[1] + A[r * 3 + 2] * d[2]
       err = Math.max(err, Math.abs(lin - P[r]))
@@ -230,17 +290,28 @@ function fitAffineToSfm(toSfm, lo, hi) {
 // Its third argument is how many depth-map pixels one ortho cell spans in that map
 // (measured at the grid centre; null when the centre does not project), so the loader
 // can decode the photo no finer than the ortho can use.
-export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {}, onProgress = () => {}, loadImage = null) {
+export async function orthorectifyStreamed(
+  grid,
+  metas,
+  loadMap,
+  toSfm,
+  opts = {},
+  onProgress = () => {},
+  loadImage = null,
+) {
   refuseMosaic(opts)
   const { width, height, data, mask } = grid
-  const n = width * height, rgba = new Uint8ClampedArray(n * 4)
+  const n = width * height,
+    rgba = new Uint8ClampedArray(n * 4)
   const average = opts.blend === 'average'
   // Per-cell state is a real cost at MAX_GRID (16.8 M cells): allocate only what
   // the chosen blend reads — 8 B/cell for 'best', 32 B/cell for 'average'.
   const scores = average ? null : new Float64Array(n).fill(Infinity)
   const sums = average ? new Float64Array(n * 4) : null
   const labels = newLabels(n, opts, metas.length)
-  let zLo = Infinity, zHi = -Infinity, zMid = 0
+  let zLo = Infinity,
+    zHi = -Infinity,
+    zMid = 0
   for (let i = 0, k = 0; i < n; i++) {
     if (!mask[i]) continue
     const z = data[i]
@@ -276,18 +347,26 @@ export function orthoMapPxPerCell(geom, toSfm, zMid) {
 }
 
 function gridProjection({ width, height, gsd, originX, originY }, toSfm, zLo, zHi, zMid) {
-  const affine = zLo <= zHi ? affineToSfm(toSfm,
-    [originX, originY - height * gsd, zLo], [originX + width * gsd, originY, zHi]) : null
-  const cx = originX + (width / 2) * gsd, cy = originY - (height / 2) * gsd
-  const P0 = toSfm([cx, cy, zMid]), P1 = toSfm([cx + gsd, cy, zMid])
+  const affine =
+    zLo <= zHi
+      ? affineToSfm(toSfm, [originX, originY - height * gsd, zLo], [originX + width * gsd, originY, zHi])
+      : null
+  const cx = originX + (width / 2) * gsd,
+    cy = originY - (height / 2) * gsd
+  const P0 = toSfm([cx, cy, zMid]),
+    P1 = toSfm([cx + gsd, cy, zMid])
   const mapPxPerCell = (m) => {
-    const a = projectInto(m, P0), b = projectInto(m, P1)
+    const a = projectInto(m, P0),
+      b = projectInto(m, P1)
     return a && b ? Math.hypot(b.u - a.u, b.v - a.v) : null
   }
   // The frame's up axis in SfM coordinates (unit), for the mosaic's view angle.
   let up
   if (affine) up = [affine.A[2], affine.A[5], affine.A[8]]
-  else { const Pz = toSfm([cx, cy, zMid + 1]); up = [Pz[0] - P0[0], Pz[1] - P0[1], Pz[2] - P0[2]] }
+  else {
+    const Pz = toSfm([cx, cy, zMid + 1])
+    up = [Pz[0] - P0[0], Pz[1] - P0[1], Pz[2] - P0[2]]
+  }
   const un = Math.hypot(up[0], up[1], up[2]) || 1
   // A frame with no exact affine (a projected CRS, the Earth's curvature restored) is
   // smooth: over a block or a 64-cell tile an affine fitted there misses by far less than
@@ -301,8 +380,15 @@ function gridProjection({ width, height, gsd, originX, originY }, toSfm, zLo, zH
     const fit = fitAffineToSfm(toSfm, [x0, y0, z0], [x1, y1, z1])
     const col = (k) => Math.hypot(fit.A[k], fit.A[3 + k], fit.A[6 + k])
     const pad = (2 * fit.err) / Math.max(1e-12, Math.min(col(0), col(1), col(2)))
-    return { c0: fit.c0, P0: fit.P0, A: fit.A, err: fit.err, pad, stretch: col(0),
-      box: [x0 - pad, x1 + pad, y0 - pad, y1 + pad, z0 - pad, z1 + pad] }
+    return {
+      c0: fit.c0,
+      P0: fit.P0,
+      A: fit.A,
+      err: fit.err,
+      pad,
+      stretch: col(0),
+      box: [x0 - pad, x1 + pad, y0 - pad, y1 + pad, z0 - pad, z1 + pad],
+    }
   }
   return { affine, local, mapPxPerCell, up: [up[0] / un, up[1] / un, up[2] / un] }
 }
@@ -318,46 +404,69 @@ function colourFromMap(win, grid, m, photo, mi, affine, toSfm, opts, scratch) {
   const { gsd, originX, originY } = grid
   const { depthTolRel = 0.02, maxCost = Infinity } = opts
   const { P, px } = scratch
-  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
-    const idx = r * w + c
-    if (!mask[idx]) continue
-    const col = x0 + c, row = y0 + r
-    const x = originX + (col + 0.5) * gsd, y = originY - (row + 0.5) * gsd, z = data[idx]
-    // The frame's affine, else the cell's tile's (winTiles), else the exact frame.
-    const aff = affine ?? win.tiles?.cellAff?.[Math.floor(r / WIN_TILE) * win.tiles.nx + Math.floor(c / WIN_TILE)] ?? null
-    if (aff) {
-      const { c0, P0, A } = aff, dx = x - c0[0], dy = y - c0[1], dz = z - c0[2]
-      P[0] = P0[0] + A[0] * dx + A[1] * dy + A[2] * dz
-      P[1] = P0[1] + A[3] * dx + A[4] * dy + A[5] * dz
-      P[2] = P0[2] + A[6] * dx + A[7] * dy + A[8] * dz
-    } else {
-      const q = toSfm([x, y, z]); P[0] = q[0]; P[1] = q[1]; P[2] = q[2]
+  for (let r = 0; r < h; r++)
+    for (let c = 0; c < w; c++) {
+      const idx = r * w + c
+      if (!mask[idx]) continue
+      const col = x0 + c,
+        row = y0 + r
+      const x = originX + (col + 0.5) * gsd,
+        y = originY - (row + 0.5) * gsd,
+        z = data[idx]
+      // The frame's affine, else the cell's tile's (winTiles), else the exact frame.
+      const aff =
+        affine ?? win.tiles?.cellAff?.[Math.floor(r / WIN_TILE) * win.tiles.nx + Math.floor(c / WIN_TILE)] ?? null
+      if (aff) {
+        const { c0, P0, A } = aff,
+          dx = x - c0[0],
+          dy = y - c0[1],
+          dz = z - c0[2]
+        P[0] = P0[0] + A[0] * dx + A[1] * dy + A[2] * dz
+        P[1] = P0[1] + A[3] * dx + A[4] * dy + A[5] * dz
+        P[2] = P0[2] + A[6] * dx + A[7] * dy + A[8] * dz
+      } else {
+        const q = toSfm([x, y, z])
+        P[0] = q[0]
+        P[1] = q[1]
+        P[2] = q[2]
+      }
+      const p = projectInto(m, P)
+      if (!p) continue
+      const u = Math.round(p.u),
+        v = Math.round(p.v)
+      if (u < 0 || v < 0 || u >= m.width || v >= m.height) continue
+      const i = v * m.width + u,
+        stored = m.depth[i],
+        cost = m.cost ? m.cost[i] : 0
+      if (!(stored > 0) || Math.abs(stored - p.depth) > depthTolRel * p.depth || cost > maxCost) continue
+      const score = cost + 1e-6 * p.depth,
+        o = idx * 4
+      if (photo) {
+        const q = photo.map ? photo.map(p.u, p.v) : { x: p.u, y: p.v }
+        // Pixel centres at integers: the photo spans [−½, size − ½].
+        if (!(q.x >= -0.5 && q.y >= -0.5 && q.x <= photo.width - 0.5 && q.y <= photo.height - 0.5)) continue
+        samplePhoto(photo, q.x, q.y, px)
+      } else {
+        const c3 = i * 3
+        px[0] = m.rgb[c3]
+        px[1] = m.rgb[c3 + 1]
+        px[2] = m.rgb[c3 + 2]
+      }
+      if (sums) {
+        const wt = 1 / (cost + 1e-3)
+        sums[o] += wt * px[0]
+        sums[o + 1] += wt * px[1]
+        sums[o + 2] += wt * px[2]
+        sums[o + 3] += wt
+      } else if (score < scores[idx]) {
+        scores[idx] = score
+        rgba[o] = px[0]
+        rgba[o + 1] = px[1]
+        rgba[o + 2] = px[2]
+        rgba[o + 3] = 255
+        if (labels) labels[idx] = mi
+      }
     }
-    const p = projectInto(m, P)
-    if (!p) continue
-    const u = Math.round(p.u), v = Math.round(p.v)
-    if (u < 0 || v < 0 || u >= m.width || v >= m.height) continue
-    const i = v * m.width + u, stored = m.depth[i], cost = m.cost ? m.cost[i] : 0
-    if (!(stored > 0) || Math.abs(stored - p.depth) > depthTolRel * p.depth || cost > maxCost) continue
-    const score = cost + 1e-6 * p.depth, o = idx * 4
-    if (photo) {
-      const q = photo.map ? photo.map(p.u, p.v) : { x: p.u, y: p.v }
-      // Pixel centres at integers: the photo spans [−½, size − ½].
-      if (!(q.x >= -0.5 && q.y >= -0.5 && q.x <= photo.width - 0.5 && q.y <= photo.height - 0.5)) continue
-      samplePhoto(photo, q.x, q.y, px)
-    } else {
-      const c3 = i * 3
-      px[0] = m.rgb[c3]; px[1] = m.rgb[c3 + 1]; px[2] = m.rgb[c3 + 2]
-    }
-    if (sums) {
-      const wt = 1 / (cost + 1e-3)
-      sums[o] += wt * px[0]; sums[o + 1] += wt * px[1]; sums[o + 2] += wt * px[2]; sums[o + 3] += wt
-    } else if (score < scores[idx]) {
-      scores[idx] = score
-      rgba[o] = px[0]; rgba[o + 1] = px[1]; rgba[o + 2] = px[2]; rgba[o + 3] = 255
-      if (labels) labels[idx] = mi
-    }
-  }
 }
 
 // Resolve 'average' sums to colours over the whole window; return how many cells of
@@ -368,7 +477,10 @@ function finishWindow(win, cx, cy, cw, ch) {
     for (let i = 0, n = w * h; i < n; i++) {
       const o = i * 4
       if (sums[o + 3] > 0) {
-        rgba[o] = Math.round(sums[o] / sums[o + 3]); rgba[o + 1] = Math.round(sums[o + 1] / sums[o + 3]); rgba[o + 2] = Math.round(sums[o + 2] / sums[o + 3]); rgba[o + 3] = 255
+        rgba[o] = Math.round(sums[o] / sums[o + 3])
+        rgba[o + 1] = Math.round(sums[o + 1] / sums[o + 3])
+        rgba[o + 2] = Math.round(sums[o + 2] / sums[o + 3])
+        rgba[o + 3] = 255
       }
     }
   }
@@ -426,7 +538,17 @@ function maxWindow(W, H, B, halo, align) {
 // rgba 4 + label 2. A graph-cut mosaic holds its coarse labels (2 B per coarse cell)
 // throughout, and before the blocks its survey of the candidates (orthoSeamSurveyBytes),
 // whichever is larger.
-export function orthoTiledWorkingBytes({ width, height, blend = 'best', fillRadius = 2, seamWidth = 0, seamline = 'nadir', seamBlend = 'feather', blendLevels = MULTIBAND_LEVELS, blockSize = ORTHO_BLOCK }) {
+export function orthoTiledWorkingBytes({
+  width,
+  height,
+  blend = 'best',
+  fillRadius = 2,
+  seamWidth = 0,
+  seamline = 'nadir',
+  seamBlend = 'feather',
+  blendLevels = MULTIBAND_LEVELS,
+  blockSize = ORTHO_BLOCK,
+}) {
   const mode = mosaicMode({ blend, seamline, seamBlend, blendLevels })
   const halo = orthoHalo({ width, height, blend, fillRadius, seamWidth, seamline, seamBlend, blendLevels })
   const { ew, eh } = maxWindow(width, height, blockSize, halo, mode.align)
@@ -475,20 +597,38 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   const { onProgress = () => {}, onBlock = null, loadImage = null } = hooks
   const { width: W, height: H } = geom
   const B = opts.blockSize ?? ORTHO_BLOCK
-  const fillRadius = opts.fillRadius ?? 2, fillMethod = opts.fillMethod ?? 'idw'
-  const mode = mosaicMode(opts), { mosaic, graphcut, multiband, align } = mode
-  if (mosaic && metas.length >= NO_LABEL) throw new Error(`a mosaic labels cells with a 16-bit image index; ${metas.length} depth maps is too many`)
+  const fillRadius = opts.fillRadius ?? 2,
+    fillMethod = opts.fillMethod ?? 'idw'
+  const mode = mosaicMode(opts),
+    { mosaic, graphcut, multiband, align } = mode
+  if (mosaic && metas.length >= NO_LABEL)
+    throw new Error(`a mosaic labels cells with a 16-bit image index; ${metas.length} depth maps is too many`)
   const seamCells = mosaic && !multiband ? mosaicSeamCells(W, H, opts.seamWidth ?? 0) : 0
-  const halo = orthoHalo({ width: W, height: H, blend: opts.blend, fillRadius, seamWidth: opts.seamWidth ?? 0,
-    seamline: opts.seamline, seamBlend: opts.seamBlend, blendLevels: mode.levels })
+  const halo = orthoHalo({
+    width: W,
+    height: H,
+    blend: opts.blend,
+    fillRadius,
+    seamWidth: opts.seamWidth ?? 0,
+    seamline: opts.seamline,
+    seamBlend: opts.seamBlend,
+    blendLevels: mode.levels,
+  })
   if (!(B >= 1)) throw new Error(`orthorectifyTiled: block size ${B} must be positive`)
-  const nbx = Math.ceil(W / B), nby = Math.ceil(H / B), nBlocks = nbx * nby
+  const nbx = Math.ceil(W / B),
+    nby = Math.ceil(H / B),
+    nBlocks = nbx * nby
 
   // Pre-pass: the grid's height range and mean (row-major, as the single pass reads
   // them), the surface cell count, and each block core's height range for the cull.
-  const blockLo = new Float64Array(nBlocks).fill(Infinity), blockHi = new Float64Array(nBlocks).fill(-Infinity)
-  const rowData = new Float32Array(W), rowMask = new Uint8Array(W)
-  let zLo = Infinity, zHi = -Infinity, zMid = 0, surfaceCells = 0
+  const blockLo = new Float64Array(nBlocks).fill(Infinity),
+    blockHi = new Float64Array(nBlocks).fill(-Infinity)
+  const rowData = new Float32Array(W),
+    rowMask = new Uint8Array(W)
+  let zLo = Infinity,
+    zHi = -Infinity,
+    zMid = 0,
+    surfaceCells = 0
   for (let row = 0; row < H; row++) {
     sampleSurfaceWindow(surface, geom, 0, row, W, 1, rowData, rowMask)
     const base = Math.floor(row / B) * nbx
@@ -511,25 +651,39 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   // `reach` blocks over, so those blocks' core ranges bound every height in it.
   const reach = Math.ceil((halo + align - 1) / B)
   const blocks = []
-  for (let by = 0; by < nby; by++) for (let bx = 0; bx < nbx; bx++) {
-    const col0 = bx * B, row0 = by * B, bw = Math.min(B, W - col0), bh = Math.min(B, H - row0)
-    const ex0 = Math.max(0, Math.floor((col0 - halo) / align) * align), ey0 = Math.max(0, Math.floor((row0 - halo) / align) * align)
-    const ex1 = Math.min(W, Math.ceil((col0 + bw + halo) / align) * align), ey1 = Math.min(H, Math.ceil((row0 + bh + halo) / align) * align)
-    let lo = Infinity, hi = -Infinity
-    for (let ny = Math.max(0, by - reach); ny <= Math.min(nby - 1, by + reach); ny++) {
-      for (let nx = Math.max(0, bx - reach); nx <= Math.min(nbx - 1, bx + reach); nx++) {
-        lo = Math.min(lo, blockLo[ny * nbx + nx]); hi = Math.max(hi, blockHi[ny * nbx + nx])
+  for (let by = 0; by < nby; by++)
+    for (let bx = 0; bx < nbx; bx++) {
+      const col0 = bx * B,
+        row0 = by * B,
+        bw = Math.min(B, W - col0),
+        bh = Math.min(B, H - row0)
+      const ex0 = Math.max(0, Math.floor((col0 - halo) / align) * align),
+        ey0 = Math.max(0, Math.floor((row0 - halo) / align) * align)
+      const ex1 = Math.min(W, Math.ceil((col0 + bw + halo) / align) * align),
+        ey1 = Math.min(H, Math.ceil((row0 + bh + halo) / align) * align)
+      let lo = Infinity,
+        hi = -Infinity
+      for (let ny = Math.max(0, by - reach); ny <= Math.min(nby - 1, by + reach); ny++) {
+        for (let nx = Math.max(0, bx - reach); nx <= Math.min(nbx - 1, bx + reach); nx++) {
+          lo = Math.min(lo, blockLo[ny * nbx + nx])
+          hi = Math.max(hi, blockHi[ny * nbx + nx])
+        }
       }
+      const maps = []
+      if (lo <= hi) {
+        // The cull with the block's own affine (and its grown box) when the frame has none.
+        const near = gp.local([
+          geom.originX + (ex0 + 0.5) * geom.gsd,
+          geom.originX + (ex1 - 0.5) * geom.gsd,
+          geom.originY - (ey1 - 0.5) * geom.gsd,
+          geom.originY - (ey0 + 0.5) * geom.gsd,
+          lo,
+          hi,
+        ])
+        for (let mi = 0; mi < metas.length; mi++) if (boxReachesMap(metas[mi], near, near.box)) maps.push(mi)
+      }
+      blocks.push({ col0, row0, bw, bh, ex0, ey0, ew: ex1 - ex0, eh: ey1 - ey0, maps, empty: !(lo <= hi) })
     }
-    const maps = []
-    if (lo <= hi) {
-      // The cull with the block's own affine (and its grown box) when the frame has none.
-      const near = gp.local([geom.originX + (ex0 + 0.5) * geom.gsd, geom.originX + (ex1 - 0.5) * geom.gsd,
-        geom.originY - (ey1 - 0.5) * geom.gsd, geom.originY - (ey0 + 0.5) * geom.gsd, lo, hi])
-      for (let mi = 0; mi < metas.length; mi++) if (boxReachesMap(metas[mi], near, near.box)) maps.push(mi)
-    }
-    blocks.push({ col0, row0, bw, bh, ex0, ey0, ew: ex1 - ex0, eh: ey1 - ey0, maps, empty: !(lo <= hi) })
-  }
 
   // O3 + O5: the gains and the graph-cut labels, once for the whole grid, before any
   // block — and before the visits are planned, since the cut says which maps own a part
@@ -540,11 +694,19 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   const passes = !mosaic ? 1 : multiband ? 3 : 2
   let total = (survey ? metas.length : 0) + blocks.reduce((n, b) => n + b.maps.length, 0) * passes
   const tick = () => onProgress(++ticks, total)
-  let balance = null, seams = null, surveyFromMapRgb = 0
+  let balance = null,
+    seams = null,
+    surveyFromMapRgb = 0
   if (opts.survey) ({ balance, seams, fromMapRgb: surveyFromMapRgb } = opts.survey)
   else if (survey) {
-    ({ balance, seams, fromMapRgb: surveyFromMapRgb } = await mosaicSurvey(surface, geom, metas, loadMap, hooks.loadStatsImage ?? loadImage, toSfm, gp, opts, tick,
-      { gainsOn: !!opts.colourBalance, cut: graphcut }))
+    ;({
+      balance,
+      seams,
+      fromMapRgb: surveyFromMapRgb,
+    } = await mosaicSurvey(surface, geom, metas, loadMap, hooks.loadStatsImage ?? loadImage, toSfm, gp, opts, tick, {
+      gainsOn: !!opts.colourBalance,
+      cut: graphcut,
+    }))
   }
 
   // The visit sequence, and for each visit when its map is wanted next (Belady). A
@@ -562,19 +724,28 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   // `groupBlocks: 'auto'` picks the size (chooseGroupSize) from the cache it leaves:
   // each block of a group holds `opts.blockBytes` of working planes, taken from the cache.
   const owners = seams ? blocks.map((b) => ownersFromCut(seams, b)) : null
-  const groupingFor = (cacheBytes) => (opts.groupBlocks === 'auto'
-    ? chooseGroupSize(nbx, nby, blocks, passes, mosaic, { cacheBytes, blockBytes: opts.blockBytes ?? 0,
-      entryBytes: opts.entryBytes ?? 0, mapsResident: !!opts.mapsResident, entrySizes: opts.entrySizes ?? null, owners })
-    : { size: Math.max(1, Math.floor(opts.groupBlocks ?? 1)) })
+  const groupingFor = (cacheBytes) =>
+    opts.groupBlocks === 'auto'
+      ? chooseGroupSize(nbx, nby, blocks, passes, mosaic, {
+          cacheBytes,
+          blockBytes: opts.blockBytes ?? 0,
+          entryBytes: opts.entryBytes ?? 0,
+          mapsResident: !!opts.mapsResident,
+          entrySizes: opts.entrySizes ?? null,
+          owners,
+        })
+      : { size: Math.max(1, Math.floor(opts.groupBlocks ?? 1)) }
   // Planning a split (`opts.planShares`: [{ k, cacheBytes }], a worker count and each
   // worker's cache): the count whose predicted time is least, each worker doing 1/k of the
   // visits' work and of the reads its cache size predicts (chooseGroupSize's replay).
   // More workers split the work but each holds a smaller cache and decodes more.
-  let grouping, shareModel = null
+  let grouping,
+    shareModel = null
   if (opts.planOnly && opts.planShares?.length) {
     const visits = blocks.reduce((n, b) => n + b.maps.length, 0)
     shareModel = opts.planShares.map(({ k, cacheBytes }) => {
-      const g = groupingFor(cacheBytes), reads = g.predicted?.[g.size] ?? 0
+      const g = groupingFor(cacheBytes),
+        reads = g.predicted?.[g.size] ?? 0
       return { k, cacheBytes, grouping: g, reads, seconds: (ORTHO_VISIT_S * visits + ORTHO_READ_S * reads) / k }
     })
     const best = shareModel.reduce((a, b) => (b.seconds < a.seconds ? b : a))
@@ -584,9 +755,16 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   const groups = blockGroups(nbx, nby, grouping.size)
   if (opts.planOnly) {
     // groupVisits: each group's map visits, the work a split deals out.
-    return { plan: { survey: mosaic ? { balance, seams, fromMapRgb: surveyFromMapRgb } : null,
-      groupBlocks: grouping.size, groups: groups.length, predicted: grouping.predicted ?? null, shareModel,
-      groupVisits: groups.map((g) => unionMaps(g.map((bi) => blocks[bi])).length * passes) } }
+    return {
+      plan: {
+        survey: mosaic ? { balance, seams, fromMapRgb: surveyFromMapRgb } : null,
+        groupBlocks: grouping.size,
+        groups: groups.length,
+        predicted: grouping.predicted ?? null,
+        shareModel,
+        groupVisits: groups.map((g) => unionMaps(g.map((bi) => blocks[bi])).length * passes),
+      },
+    }
   }
   // This run's share of the groups (all of them unless the work is split), in order.
   const runGroups = opts.groupIndices ?? groups.map((_, gi) => gi)
@@ -595,21 +773,38 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   const nextUse = new Float64Array(sequence.length)
   {
     const seen = new Map()
-    for (let p = sequence.length - 1; p >= 0; p--) { nextUse[p] = seen.get(sequence[p]) ?? Infinity; seen.set(sequence[p], p) }
+    for (let p = sequence.length - 1; p >= 0; p--) {
+      nextUse[p] = seen.get(sequence[p]) ?? Infinity
+      seen.set(sequence[p], p)
+    }
   }
   const cacheBytes = (opts.cacheBytes ?? 1024 ** 3) - (grouping.size - 1) * (opts.blockBytes ?? 0)
   const cache = new Map() // mi → { m, photo, hasPhoto, bytes, next }
-  let cached = 0, mapLoads = 0, photoLoads = 0, cacheHits = 0
+  let cached = 0,
+    mapLoads = 0,
+    photoLoads = 0,
+    cacheHits = 0
   // The cache's limit: `cacheBytes`, until a photo decode runs out of memory (below).
-  let cacheLimit = cacheBytes, shrinks = 0
+  let cacheLimit = cacheBytes,
+    shrinks = 0
   // A prefetched entry (`pinned`, below) stays until its visit.
   const evict = (keep = -1) => {
-    for (const [mi, e] of cache) if (e.next === Infinity && mi !== keep && !e.pinned) { cache.delete(mi); cached -= e.bytes }
+    for (const [mi, e] of cache)
+      if (e.next === Infinity && mi !== keep && !e.pinned) {
+        cache.delete(mi)
+        cached -= e.bytes
+      }
     while (cached > cacheLimit && cache.size > (cache.has(keep) ? 1 : 0)) {
-      let worst = -1, far = -Infinity
-      for (const [mi, e] of cache) if (e.next > far && mi !== keep && !e.pinned) { far = e.next; worst = mi }
+      let worst = -1,
+        far = -Infinity
+      for (const [mi, e] of cache)
+        if (e.next > far && mi !== keep && !e.pinned) {
+          far = e.next
+          worst = mi
+        }
       if (worst < 0) break
-      cached -= cache.get(worst).bytes; cache.delete(worst)
+      cached -= cache.get(worst).bytes
+      cache.delete(worst)
     }
   }
   // The tab's real ceiling is below what the arithmetic allows when buffers come and go
@@ -634,14 +829,17 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   // Where the time goes (ms), for the caller's debug log: map reads + photo decodes,
   // the label pass, the colour pass, and a multiband blend's ring samples and pyramids.
   const ms = { read: 0, label: 0, colour: 0, ring: 0, pyramid: 0 }
-  const clock = (key, t) => { ms[key] += performance.now() - t }
+  const clock = (key, t) => {
+    ms[key] += performance.now() - t
+  }
   // A pass that needs photos names its maps in visit order first (planPhotos), and up to
   // `opts.photoPrefetch` of the next ones load ahead: the browser decodes a photo off the
   // worker's thread (createImageBitmap), so several decodes then run while this one
   // computes, where one at a time they ran end to end. The photos are the same either
   // way; the caller leaves room in the cache budget for the extra entries.
   const prefetchDepth = loadImage ? Math.max(0, opts.photoPrefetch ?? 0) : 0
-  let plan = [], planPos = 0
+  let plan = [],
+    planPos = 0
   const pending = new Map() // mi → its entry's load
   const topUp = () => {
     while (pending.size < prefetchDepth && planPos < plan.length) {
@@ -650,7 +848,11 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       pending.set(mi, fetchEntry(mi, true, true))
     }
   }
-  const planPhotos = (list) => { plan = list; planPos = 0; topUp() }
+  const planPhotos = (list) => {
+    plan = list
+    planPos = 0
+    topUp()
+  }
   const fetch = async (mi, wantPhoto) => {
     const t = performance.now()
     try {
@@ -663,7 +865,9 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
         return e
       }
       return await fetchEntry(mi, wantPhoto)
-    } finally { clock('read', t) }
+    } finally {
+      clock('read', t)
+    }
   }
   const fetchEntry = async (mi, wantPhoto, prefetch = false) => {
     let e = cache.get(mi)
@@ -674,7 +878,9 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       cache.set(mi, e)
       e.mapLoad = loadMap(mi).then((m) => {
         mapLoads++
-        entry.m = m; entry.bytes = opts.mapsResident ? 0 : viewBytes(m); cached += entry.bytes
+        entry.m = m
+        entry.bytes = opts.mapsResident ? 0 : viewBytes(m)
+        cached += entry.bytes
       })
       await e.mapLoad
     } else {
@@ -685,7 +891,12 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       e.hasPhoto = true // claimed before the await: a second request waits on the first
       e.photoLoad = loadImage ? loadPhoto(mi, e) : Promise.resolve(null)
       e.photo = await e.photoLoad
-      if (e.photo) { photoLoads++; const b = e.photo.data?.byteLength ?? 0; e.bytes += b; cached += b }
+      if (e.photo) {
+        photoLoads++
+        const b = e.photo.data?.byteLength ?? 0
+        e.bytes += b
+        cached += b
+      }
     } else if (wantPhoto && e.photoLoad) await e.photoLoad
     return e
   }
@@ -694,40 +905,60 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   const visited = (mi, e) => {
     const p = pos++
     if (e) e.next = nextUse[p]
-    else { const c = cache.get(mi); if (c) c.next = nextUse[p] }
+    else {
+      const c = cache.get(mi)
+      if (c) c.next = nextUse[p]
+    }
     evict()
     tick()
   }
 
   // Window buffers, sized once for the largest window: one set per block of a group.
-  const win0 = maxWindow(W, H, B, halo, align), maxCells = win0.ew * win0.eh
+  const win0 = maxWindow(W, H, B, halo, align),
+    maxCells = win0.ew * win0.eh
   const average = opts.blend === 'average'
   const groupSize = groups.reduce((n, g) => Math.max(n, g.length), 0)
   const states = Array.from({ length: groupSize }, () => ({
     buf: {
-      data: new Float32Array(maxCells), mask: new Uint8Array(maxCells), rgba: new Uint8ClampedArray(maxCells * 4),
-      scores: average || mosaic ? null : new Float64Array(maxCells), sums: average ? new Float64Array(maxCells * 4) : null,
+      data: new Float32Array(maxCells),
+      mask: new Uint8Array(maxCells),
+      rgba: new Uint8ClampedArray(maxCells * 4),
+      scores: average || mosaic ? null : new Float64Array(maxCells),
+      sums: average ? new Float64Array(maxCells * 4) : null,
       labels: newLabels(maxCells, opts, metas.length),
     },
-    mb: mosaic ? {
-      raw: new Uint16Array(maxCells), label: new Uint16Array(maxCells), tmp: new Uint16Array(maxCells),
-      score: new Float64Array(maxCells), sums: new Float32Array(maxCells * 4), fallback: new Float32Array(maxCells * 3),
-      flags: new Uint8Array(maxCells), dist: new Uint16Array(maxCells),
-      pyr: multiband ? createMultiband(win0.ew, win0.eh, mode.levels) : null,
-    } : null,
+    mb: mosaic
+      ? {
+          raw: new Uint16Array(maxCells),
+          label: new Uint16Array(maxCells),
+          tmp: new Uint16Array(maxCells),
+          score: new Float64Array(maxCells),
+          sums: new Float32Array(maxCells * 4),
+          fallback: new Float32Array(maxCells * 3),
+          flags: new Uint8Array(maxCells),
+          dist: new Uint16Array(maxCells),
+          pyr: multiband ? createMultiband(win0.ew, win0.eh, mode.levels) : null,
+        }
+      : null,
     // map index → its position in the block's map list, -1 for a map the block does not see
     slot: new Int32Array(metas.length).fill(-1),
   }))
   const labelled = !!states[0]?.buf.labels
   const stats = createOrthoStats(W, H, labelled)
   const scratch = { P: [0, 0, 0], px: new Float32Array(4), g: {} }
-  let sampled = 0, covered = 0
+  let sampled = 0,
+    covered = 0
 
   // `maxMaps`: the most maps one block sees, which the cache must hold for a block's
   // passes to read each map once; `groups` / `groupMaps`: the same for a group.
   const runBlocks = runGroups.reduce((n, gi) => n + groups[gi].length, 0)
-  hooks.onBlocksStart?.(runBlocks, { maxMaps: blocks.reduce((n, b) => Math.max(n, b.maps.length), 0),
-    groups: runGroups.length, groupSize: grouping.size, groupMaps: groupMaps.reduce((n, m) => Math.max(n, m.length), 0), cacheBytes })
+  hooks.onBlocksStart?.(runBlocks, {
+    maxMaps: blocks.reduce((n, b) => Math.max(n, b.maps.length), 0),
+    groups: runGroups.length,
+    groupSize: grouping.size,
+    groupMaps: groupMaps.reduce((n, m) => Math.max(n, m.length), 0),
+    cacheBytes,
+  })
   // `opts.claims` (an Int32Array over shared memory, one slot per group): split over
   // workers, a group is taken by whichever worker claims it first, so a worker that is
   // done can take groups off a slower one's list. A group claimed elsewhere is skipped;
@@ -741,7 +972,8 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       continue
     }
     const group = groups[gi]
-    ran.groups++; ran.blocks += group.length
+    ran.groups++
+    ran.blocks += group.length
     ran.visits += group.reduce((n, bi) => n + blocks[bi].maps.length, 0)
     hooks.onGroup?.(gi, groups.length, group.length)
     // The group's blocks with a surface, each in its own window buffers.
@@ -749,16 +981,26 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     group.forEach((bi, si) => {
       const b = blocks[bi]
       if (b.empty) return
-      const { ex0, ey0, ew, eh } = b, n = ew * eh, { buf } = states[si]
+      const { ex0, ey0, ew, eh } = b,
+        n = ew * eh,
+        { buf } = states[si]
       const win = {
-        x0: ex0, y0: ey0, w: ew, h: eh,
-        data: buf.data.subarray(0, n), mask: buf.mask.subarray(0, n), rgba: buf.rgba.subarray(0, n * 4).fill(0),
-        scores: buf.scores?.subarray(0, n).fill(Infinity) ?? null, sums: buf.sums?.subarray(0, n * 4).fill(0) ?? null,
+        x0: ex0,
+        y0: ey0,
+        w: ew,
+        h: eh,
+        data: buf.data.subarray(0, n),
+        mask: buf.mask.subarray(0, n),
+        rgba: buf.rgba.subarray(0, n * 4).fill(0),
+        scores: buf.scores?.subarray(0, n).fill(Infinity) ?? null,
+        sums: buf.sums?.subarray(0, n * 4).fill(0) ?? null,
         labels: buf.labels?.subarray(0, n).fill(NO_LABEL) ?? null,
       }
       sampleSurfaceWindow(surface, geom, ex0, ey0, ew, eh, win.data, win.mask)
       const st = states[si]
-      b.maps.forEach((mi, j) => { st.slot[mi] = j })
+      b.maps.forEach((mi, j) => {
+        st.slot[mi] = j
+      })
       active.push({ b, win, n, st })
     })
     for (const a of active) winTiles(a.win, geom, gp)
@@ -770,25 +1012,40 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       for (const mi of union) {
         const e = await fetch(mi, true)
         const t = performance.now()
-        for (const a of active) if (a.st.slot[mi] >= 0) colourFromMap(a.win, geom, e.m, e.photo, mi, affine, toSfm, opts, scratch)
+        for (const a of active)
+          if (a.st.slot[mi] >= 0) colourFromMap(a.win, geom, e.m, e.photo, mi, affine, toSfm, opts, scratch)
         clock('colour', t)
         visited(mi, e)
       }
     }
     // Finish and hand on every block of the group, in block order.
     for (const bi of group) {
-      const b = blocks[bi], a = active.find((x) => x.b === b)
+      const b = blocks[bi],
+        a = active.find((x) => x.b === b)
       const { col0, row0, bw, bh, ex0, ey0, ew, eh } = b
       const coreRgba = new Uint8ClampedArray(bw * bh * 4)
       const coreLabels = labelled ? new Uint16Array(bw * bh).fill(NO_LABEL) : null
       if (a) {
         const { win } = a
-        const cx = col0 - ex0, cy = row0 - ey0
+        const cx = col0 - ex0,
+          cy = row0 - ey0
         const s0 = finishWindow(win, cx, cy, bw, bh)
         fillOrthoGaps(win.rgba, win.mask, ew, eh, fillRadius, fillMethod)
         const c = countColoured(win.rgba, ew, cx, cy, bw, bh)
-        sampled += s0; covered += c
-        stats.add({ rgba: win.rgba, labels: win.labels, x0: ex0, y0: ey0, w: ew, h: eh, cx0: col0, cy0: row0, cw: bw, ch: bh })
+        sampled += s0
+        covered += c
+        stats.add({
+          rgba: win.rgba,
+          labels: win.labels,
+          x0: ex0,
+          y0: ey0,
+          w: ew,
+          h: eh,
+          cx0: col0,
+          cy0: row0,
+          cw: bw,
+          ch: bh,
+        })
         for (let r = 0; r < bh; r++) {
           const src = (cy + r) * ew + cx
           coreRgba.set(win.rgba.subarray(src * 4, (src + bw) * 4), r * bw * 4)
@@ -801,19 +1058,39 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   }
   cache.clear()
   return {
-    width: W, height: H, covered, sampled, filled: covered - sampled, surfaceCells,
-    labelled, stats: stats.finish(), statsState: stats.state(), blocks: ran.blocks, groups: ran.groups,
+    width: W,
+    height: H,
+    covered,
+    sampled,
+    filled: covered - sampled,
+    surfaceCells,
+    labelled,
+    stats: stats.finish(),
+    statsState: stats.state(),
+    blocks: ran.blocks,
+    groups: ran.groups,
     grouping: { size: grouping.size, groups: groups.length, cacheBytes, predicted: grouping.predicted ?? null },
-    cacheShrinks: shrinks, cacheLimit,
+    cacheShrinks: shrinks,
+    cacheLimit,
     ...(survey ? { surveyFromMapRgb } : {}),
     visits: ran.visits,
-    mapLoads, photoLoads, cacheHits,
+    mapLoads,
+    photoLoads,
+    cacheHits,
     timings: Object.fromEntries(Object.entries(ms).map(([k, v]) => [k, Math.round(v)])),
-    ...(mosaic ? { mosaic: {
-      seamline: graphcut ? 'graphcut' : 'nadir', seamBlend: multiband ? 'multiband' : 'feather',
-      seamCells, smoothPasses: graphcut ? 0 : MOSAIC_SMOOTH_PASSES, levels: multiband ? mode.levels : 0,
-      seamCut: seams?.summary ?? null, balance: balance?.summary ?? null,
-    } } : {}),
+    ...(mosaic
+      ? {
+          mosaic: {
+            seamline: graphcut ? 'graphcut' : 'nadir',
+            seamBlend: multiband ? 'multiband' : 'feather',
+            seamCells,
+            smoothPasses: graphcut ? 0 : MOSAIC_SMOOTH_PASSES,
+            levels: multiband ? mode.levels : 0,
+            seamCut: seams?.summary ?? null,
+            balance: balance?.summary ?? null,
+          },
+        }
+      : {}),
     // Where the graph-cut survey's time went (ms): map + photo reads, sampling, min cuts.
     ...(seams ? { seamCutMs: seams.ms } : {}),
     // Per image the R, G, B gains (3 per map, map order), for the caller's audit log.
@@ -824,11 +1101,17 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   // each pass visits each map once, and every block that sees it takes its share.
   async function mosaicGroup(active) {
     for (const a of active) {
-      const { win, n, st } = a, mbs = st.mb
+      const { win, n, st } = a,
+        mbs = st.mb
       Object.assign(win, {
-        raw: mbs.raw.subarray(0, n).fill(NO_LABEL), score: mbs.score.subarray(0, n).fill(Infinity),
-        label: mbs.label.subarray(0, n), sums: null, msums: mbs.sums.subarray(0, n * 4).fill(0),
-        fallback: mbs.fallback.subarray(0, n * 3), flags: mbs.flags.subarray(0, n).fill(0), dist: mbs.dist.subarray(0, n),
+        raw: mbs.raw.subarray(0, n).fill(NO_LABEL),
+        score: mbs.score.subarray(0, n).fill(Infinity),
+        label: mbs.label.subarray(0, n),
+        sums: null,
+        msums: mbs.sums.subarray(0, n * 4).fill(0),
+        fallback: mbs.fallback.subarray(0, n * 3),
+        flags: mbs.flags.subarray(0, n).fill(0),
+        dist: mbs.dist.subarray(0, n),
       })
     }
     const union = unionMaps(active.map((a) => a.b))
@@ -840,14 +1123,20 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       clock('label', t)
       visited(mi, e)
     }
-    const band = multiband ? 0 : seamCells, seam3 = 3 * band
+    const band = multiband ? 0 : seamCells,
+      seam3 = 3 * band
     const gains = balance?.gains ?? null
     for (const a of active) {
-      const { b, win, n, st } = a, { ew, eh } = b, k = b.maps.length
+      const { b, win, n, st } = a,
+        { ew, eh } = b,
+        k = b.maps.length
       if (seams) {
         // O5: the coarse graph-cut label of each cell; its pass-1 label where the coarse
         // cell has none, or names a map that sees nothing of this window (culled).
-        const { labels: cut, grid: { f, cw } } = seams
+        const {
+          labels: cut,
+          grid: { f, cw },
+        } = seams
         for (let r = 0, i = 0; r < eh; r++) {
           const crow = Math.floor((b.ey0 + r) / f) * cw
           for (let c = 0; c < ew; c++, i++) {
@@ -858,20 +1147,27 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       } else smoothLabels(win.raw, win.label, st.mb.tmp.subarray(0, n), ew, eh)
       // Each map's box: its region grown by the seam band, joined with the cells it
       // holds as the pass-1 fallback.
-      const own = new Int32Array(4 * k), fb = new Int32Array(4 * k)
-      for (let j = 0; j < k; j++) { own.set([ew, eh, -1, -1], 4 * j); fb.set([ew, eh, -1, -1], 4 * j) }
+      const own = new Int32Array(4 * k),
+        fb = new Int32Array(4 * k)
+      for (let j = 0; j < k; j++) {
+        own.set([ew, eh, -1, -1], 4 * j)
+        fb.set([ew, eh, -1, -1], 4 * j)
+      }
       const grow = (arr, o, c, r) => {
         if (c < arr[o]) arr[o] = c
         if (r < arr[o + 1]) arr[o + 1] = r
         if (c > arr[o + 2]) arr[o + 2] = c
         if (r > arr[o + 3]) arr[o + 3] = r
       }
-      for (let r = 0, i = 0; r < eh; r++) for (let c = 0; c < ew; c++, i++) {
-        const l = win.label[i], rl = win.raw[i]
-        if (l !== NO_LABEL) grow(own, 4 * st.slot[l], c, r)
-        if (rl !== NO_LABEL && rl !== l) grow(fb, 4 * st.slot[rl], c, r)
-      }
-      a.own = own; a.fb = fb
+      for (let r = 0, i = 0; r < eh; r++)
+        for (let c = 0; c < ew; c++, i++) {
+          const l = win.label[i],
+            rl = win.raw[i]
+          if (l !== NO_LABEL) grow(own, 4 * st.slot[l], c, r)
+          if (rl !== NO_LABEL && rl !== l) grow(fb, 4 * st.slot[rl], c, r)
+        }
+      a.own = own
+      a.fb = fb
       a.step = { ...scratch, P: [0, 0, 0] }
       a.viewWin = { ...win, sums: win.msums }
     }
@@ -884,16 +1180,27 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       for (const a of active) {
         const j = a.st.slot[mi]
         if (j < 0) continue
-        const o = 4 * j, { own, fb } = a, { ew, eh } = a.b
-        const hasOwn = own[o + 2] >= 0, hasFb = fb[o + 2] >= 0
+        const o = 4 * j,
+          { own, fb } = a,
+          { ew, eh } = a.b
+        const hasOwn = own[o + 2] >= 0,
+          hasFb = fb[o + 2] >= 0
         if (!hasOwn && !hasFb) continue
-        let x0 = ew, y0 = eh, x1 = 0, y1 = 0
+        let x0 = ew,
+          y0 = eh,
+          x1 = 0,
+          y1 = 0
         if (hasOwn) {
-          x0 = Math.max(0, own[o] - band); y0 = Math.max(0, own[o + 1] - band)
-          x1 = Math.min(ew, own[o + 2] + 1 + band); y1 = Math.min(eh, own[o + 3] + 1 + band)
+          x0 = Math.max(0, own[o] - band)
+          y0 = Math.max(0, own[o + 1] - band)
+          x1 = Math.min(ew, own[o + 2] + 1 + band)
+          y1 = Math.min(eh, own[o + 3] + 1 + band)
         }
         if (hasFb) {
-          x0 = Math.min(x0, fb[o]); y0 = Math.min(y0, fb[o + 1]); x1 = Math.max(x1, fb[o + 2] + 1); y1 = Math.max(y1, fb[o + 3] + 1)
+          x0 = Math.min(x0, fb[o])
+          y0 = Math.min(y0, fb[o + 1])
+          x1 = Math.max(x1, fb[o + 2] + 1)
+          y1 = Math.max(y1, fb[o + 3] + 1)
         }
         boxes.push({ a, hasOwn, box: [x0, y0, x1, y1] })
       }
@@ -901,11 +1208,19 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     }
     planPhotos(colourVisits.filter((v) => v.boxes.length).map((v) => v.mi))
     for (const { mi, boxes } of colourVisits) {
-      if (!boxes.length) { visited(mi, null); continue }
+      if (!boxes.length) {
+        visited(mi, null)
+        continue
+      }
       const e = await fetch(mi, true)
       const t = performance.now()
-      for (const { a, hasOwn, box: [x0, y0, x1, y1] } of boxes) {
-        const { win } = a, ew = a.b.ew
+      for (const {
+        a,
+        hasOwn,
+        box: [x0, y0, x1, y1],
+      } of boxes) {
+        const { win } = a,
+          ew = a.b.ew
         if (seam3 && hasOwn) chamferTo(win.label, ew, x0, y0, x1, y1, mi, win.dist)
         else if (seam3) for (let r = y0; r < y1; r++) win.dist.fill(0xffff, r * ew + x0, r * ew + x1)
         blendFromMap(a.viewWin, geom, e.m, e.photo, mi, gp, toSfm, opts, a.step, [x0, y0, x1, y1], seam3, gains)
@@ -921,67 +1236,93 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   // correction over the ring around its effective region (multiband.js), map by map
   // across the group's blocks.
   async function multibandGroup(active, union, gains) {
-    const { ring, margin } = multibandReach(mode.levels), ring3 = 3 * ring
+    const { ring, margin } = multibandReach(mode.levels),
+      ring3 = 3 * ring
     for (const a of active) {
-      const { b, win, n, st } = a, { ew, eh } = b
+      const { b, win, n, st } = a,
+        { ew, eh } = b
       const { mask, label, raw, msums, fallback, flags } = win
       // The effective label and its colour: the label where it saw the cell, else the
       // pass-1 fallback (as finishMosaicWindow), in linear light, gains applied.
       const eff = st.mb.tmp.subarray(0, n)
       for (let i = 0; i < n; i++) {
-        const f = flags[i], o = 4 * i
+        const f = flags[i],
+          o = 4 * i
         eff[i] = NO_LABEL
         if (!mask[i]) continue
         if (f & 1) eff[i] = label[i]
-        else if (f & 2) { eff[i] = raw[i]; msums[o] = fallback[3 * i]; msums[o + 1] = fallback[3 * i + 1]; msums[o + 2] = fallback[3 * i + 2] }
+        else if (f & 2) {
+          eff[i] = raw[i]
+          msums[o] = fallback[3 * i]
+          msums[o + 1] = fallback[3 * i + 1]
+          msums[o + 2] = fallback[3 * i + 2]
+        }
       }
       const t = performance.now()
       multibandBegin(st.mb.pyr, ew, eh, eff, NO_LABEL)
       clock('pyramid', t)
-      const k = b.maps.length, box = new Int32Array(4 * k)
+      const k = b.maps.length,
+        box = new Int32Array(4 * k)
       for (let j = 0; j < k; j++) box.set([ew, eh, -1, -1], 4 * j)
-      for (let r = 0, i = 0; r < eh; r++) for (let c = 0; c < ew; c++, i++) {
-        const l = eff[i]
-        if (l === NO_LABEL) continue
-        const o = 4 * st.slot[l]
-        if (c < box[o]) box[o] = c
-        if (r < box[o + 1]) box[o + 1] = r
-        if (c > box[o + 2]) box[o + 2] = c
-        if (r > box[o + 3]) box[o + 3] = r
-      }
-      a.eff = eff; a.mbox = box
+      for (let r = 0, i = 0; r < eh; r++)
+        for (let c = 0; c < ew; c++, i++) {
+          const l = eff[i]
+          if (l === NO_LABEL) continue
+          const o = 4 * st.slot[l]
+          if (c < box[o]) box[o] = c
+          if (r < box[o + 1]) box[o + 1] = r
+          if (c > box[o + 2]) box[o + 2] = c
+          if (r > box[o + 3]) box[o + 3] = r
+        }
+      a.eff = eff
+      a.mbox = box
     }
     const { depthTolRel = 0.02, maxCost = Infinity } = opts
     const usersOf = union.map((mi) => active.filter((a) => a.st.slot[mi] >= 0 && a.mbox[4 * a.st.slot[mi] + 2] >= 0))
     planPhotos(union.filter((_, u) => usersOf[u].length))
     for (const [u, mi] of union.entries()) {
       const users = usersOf[u]
-      if (!users.length) { visited(mi, null); continue }
-      const e = await fetch(mi, true), m = e.m, see = mapSight(m, gp.up, depthTolRel, maxCost)
-      const g0 = gains ? gains[mi * 3] : 1, g1 = gains ? gains[mi * 3 + 1] : 1, g2 = gains ? gains[mi * 3 + 2] : 1
+      if (!users.length) {
+        visited(mi, null)
+        continue
+      }
+      const e = await fetch(mi, true),
+        m = e.m,
+        see = mapSight(m, gp.up, depthTolRel, maxCost)
+      const g0 = gains ? gains[mi * 3] : 1,
+        g1 = gains ? gains[mi * 3 + 1] : 1,
+        g2 = gains ? gains[mi * 3 + 2] : 1
       for (const a of users) {
-        const { b, win, eff, mbox, st, step } = a, { ew, eh } = b, o = 4 * st.slot[mi]
+        const { b, win, eff, mbox, st, step } = a,
+          { ew, eh } = b,
+          o = 4 * st.slot[mi]
         const { P, g, px } = step
         const { msums } = win
         // The box on the window's pyramid lattice (the window's origin is on the grid's).
-        const x0 = Math.max(0, Math.floor((mbox[o] - margin) / align) * align), y0 = Math.max(0, Math.floor((mbox[o + 1] - margin) / align) * align)
-        const x1 = Math.min(ew, mbox[o + 2] + 1 + margin), y1 = Math.min(eh, mbox[o + 3] + 1 + margin)
-        const bw = x1 - x0, bh = y1 - y0
+        const x0 = Math.max(0, Math.floor((mbox[o] - margin) / align) * align),
+          y0 = Math.max(0, Math.floor((mbox[o + 1] - margin) / align) * align)
+        const x1 = Math.min(ew, mbox[o + 2] + 1 + margin),
+          y1 = Math.min(eh, mbox[o + 3] + 1 + margin)
+        const bw = x1 - x0,
+          bh = y1 - y0
         let t = performance.now()
         chamferTo(eff, ew, x0, y0, x1, y1, mi, win.dist)
         const d = win.fallback // free now: the box's colour differences, 3 per cell
         d.fill(0, 0, 3 * bw * bh)
         forTilesReaching(win, geom, m, gp.affine, x0, y0, x1, y1, (c0, r0, c1, r1) => {
-          for (let wr = r0; wr < r1; wr++) for (let wc = c0; wc < c1; wc++) {
-            const wi = wr * ew + wc, dd = win.dist[wi]
-            if (dd === 0 || dd > ring3 || eff[wi] === NO_LABEL) continue
-            winCellToSfm(win, geom, gp, toSfm, wc, wr, win.data[wi], P)
-            if (!see(P, g) || !sampleColour(m, e.photo, g, px)) continue
-            const q = 3 * ((wr - y0) * bw + wc - x0), wo = 4 * wi
-            d[q] = g0 * srgbToLinear(px[0]) - msums[wo]
-            d[q + 1] = g1 * srgbToLinear(px[1]) - msums[wo + 1]
-            d[q + 2] = g2 * srgbToLinear(px[2]) - msums[wo + 2]
-          }
+          for (let wr = r0; wr < r1; wr++)
+            for (let wc = c0; wc < c1; wc++) {
+              const wi = wr * ew + wc,
+                dd = win.dist[wi]
+              if (dd === 0 || dd > ring3 || eff[wi] === NO_LABEL) continue
+              winCellToSfm(win, geom, gp, toSfm, wc, wr, win.data[wi], P)
+              if (!see(P, g) || !sampleColour(m, e.photo, g, px)) continue
+              const q = 3 * ((wr - y0) * bw + wc - x0),
+                wo = 4 * wi
+              d[q] = g0 * srgbToLinear(px[0]) - msums[wo]
+              d[q + 1] = g1 * srgbToLinear(px[1]) - msums[wo + 1]
+              d[q + 2] = g2 * srgbToLinear(px[2]) - msums[wo + 2]
+            }
         })
         clock('ring', t)
         t = performance.now()
@@ -997,10 +1338,14 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       clock('pyramid', t)
       const { rgba, labels, msums } = win
       for (let i = 0; i < n; i++) {
-        const l = eff[i], o = 4 * i
+        const l = eff[i],
+          o = 4 * i
         labels[i] = l
         if (l === NO_LABEL) continue
-        rgba[o] = linearToSrgb(msums[o]); rgba[o + 1] = linearToSrgb(msums[o + 1]); rgba[o + 2] = linearToSrgb(msums[o + 2]); rgba[o + 3] = 255
+        rgba[o] = linearToSrgb(msums[o])
+        rgba[o + 1] = linearToSrgb(msums[o + 1])
+        rgba[o + 2] = linearToSrgb(msums[o + 2])
+        rgba[o + 3] = 255
       }
     }
   }
@@ -1009,4 +1354,5 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
 // The split's time model (opts.planShares), measured on quarry-347 at long side 12,000
 // (2026-10-21, six workers): a map visit's work (labels, colour, seams; a 2048² block)
 // ~0.17 s, and a unit of predicted reads (a map read 1, a photo decode 3) ~0.08 s.
-const ORTHO_VISIT_S = 0.17, ORTHO_READ_S = 0.08
+const ORTHO_VISIT_S = 0.17,
+  ORTHO_READ_S = 0.08

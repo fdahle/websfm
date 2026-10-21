@@ -14,28 +14,39 @@ async function seed(page) {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
     const store = useReconstructionStore()
     const N = 30
-    const pos = new Float64Array(N * N * 3), col = new Uint8Array(N * N * 3).fill(180)
-    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-      const k = (j * N + i) * 3
-      pos[k] = i; pos[k + 1] = j; pos[k + 2] = Math.sin(i / 4) * Math.cos(j / 5)
-    }
+    const pos = new Float64Array(N * N * 3),
+      col = new Uint8Array(N * N * 3).fill(180)
+    for (let j = 0; j < N; j++)
+      for (let i = 0; i < N; i++) {
+        const k = (j * N + i) * 3
+        pos[k] = i
+        pos[k + 1] = j
+        pos[k + 2] = Math.sin(i / 4) * Math.cos(j / 5)
+      }
     const idx = []
-    for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) {
-      const a = j * N + i
-      idx.push(a, a + 1, a + N, a + 1, a + N + 1, a + N)
-    }
+    for (let j = 0; j < N - 1; j++)
+      for (let i = 0; i < N - 1; i++) {
+        const a = j * N + i
+        idx.push(a, a + 1, a + N, a + 1, a + N + 1, a + N)
+      }
     store.importCloud({ count: N * N, pos: pos.slice(), col: col.slice() }, 'grid.ply')
     store.importCloud({ nVerts: N * N, count: idx.length / 3, pos, idx: Uint32Array.from(idx), col }, 'surface.ply')
   })
 }
 
-const clouds = (page) => page.evaluate(async () => {
-  const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-  return useReconstructionStore().clouds.map((c) => ({
-    name: c.name, kind: c.kind, count: c.count, derived: !!c.derived, nrm: !!c.nrm,
-    attributes: Object.keys(c.attributes || {}), style: c.style?.field ?? null,
-  }))
-})
+const clouds = (page) =>
+  page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    return useReconstructionStore().clouds.map((c) => ({
+      name: c.name,
+      kind: c.kind,
+      count: c.count,
+      derived: !!c.derived,
+      nrm: !!c.nrm,
+      attributes: Object.keys(c.attributes || {}),
+      style: c.style?.field ?? null,
+    }))
+  })
 
 async function openTool(page, menu, row) {
   await page.getByRole('button', { name: 'Tools', exact: true }).click()
@@ -58,7 +69,9 @@ test('Point Cloud ▾ and Mesh ▾ tools add derived results through the worker'
   const dist = page.getByRole('dialog', { name: 'Distance to Reference' })
   await dist.getByLabel('To', { exact: true }).selectOption({ label: 'Imported (surface.ply) (mesh)' })
   await dist.getByRole('button', { name: 'Compute', exact: true }).click()
-  await expect.poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(distance)'))?.style).toBe('attribute:distance')
+  await expect
+    .poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(distance)'))?.style)
+    .toBe('attribute:distance')
 
   // Clean, decimate and smooth the mesh: three derived meshes, the import untouched.
   await openTool(page, 'Mesh', /Clean mesh/)
@@ -66,7 +79,9 @@ test('Point Cloud ▾ and Mesh ▾ tools add derived results through the worker'
   await expect.poll(async () => (await clouds(page)).filter((c) => c.kind === 'mesh' && c.derived).length).toBe(1)
   await openTool(page, 'Mesh', /Decimate/)
   await page.getByRole('button', { name: 'Decimate', exact: true }).click()
-  await expect.poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(decimated)'))?.count ?? 0).toBeGreaterThan(0)
+  await expect
+    .poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(decimated)'))?.count ?? 0)
+    .toBeGreaterThan(0)
   const list = await clouds(page)
   const source = list.find((c) => c.name === 'Imported (surface.ply)')
   const decimated = list.find((c) => c.name.endsWith('(decimated)'))
@@ -96,17 +111,26 @@ test('Classify ground labels a cloud and Build DEM ▸ Ground only makes a DTM u
   await page.evaluate(async () => {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
     const xyz = []
-    for (let x = 0; x <= 40; x += 0.5) for (let y = 0; y <= 40; y += 0.5) {
-      const roof = x >= 14 && x <= 26 && y >= 14 && y <= 26
-      xyz.push(x, y, 0.05 * x + (roof ? 6 : 0))
-    }
+    for (let x = 0; x <= 40; x += 0.5)
+      for (let y = 0; y <= 40; y += 0.5) {
+        const roof = x >= 14 && x <= 26 && y >= 14 && y <= 26
+        xyz.push(x, y, 0.05 * x + (roof ? 6 : 0))
+      }
     const n = xyz.length / 3
-    useReconstructionStore().importCloud({ count: n, pos: Float64Array.from(xyz), col: new Uint8Array(n * 3).fill(150) }, 'site.ply')
+    useReconstructionStore().importCloud(
+      { count: n, pos: Float64Array.from(xyz), col: new Uint8Array(n * 3).fill(150) },
+      'site.ply',
+    )
   })
 
   await openTool(page, /Point\s*Cloud/, /Classify ground/)
-  await page.getByRole('dialog', { name: 'Classify Ground' }).getByRole('button', { name: 'Classify', exact: true }).click()
-  await expect.poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(ground)'))?.style).toBe('attribute:classification')
+  await page
+    .getByRole('dialog', { name: 'Classify Ground' })
+    .getByRole('button', { name: 'Classify', exact: true })
+    .click()
+  await expect
+    .poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(ground)'))?.style)
+    .toBe('attribute:classification')
   const counts = await page.evaluate(async () => {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
     const c = useReconstructionStore().clouds.find((x) => x.name.endsWith('(ground)'))
@@ -128,14 +152,19 @@ test('Classify ground labels a cloud and Build DEM ▸ Ground only makes a DTM u
   await dialog.getByRole('button', { name: 'Build DTM', exact: true }).click()
   // Every cell inside the grid has a height: the hole under the roof is filled.
   // Empty cells on the grid border are the survey's edge and stay nodata.
-  await expect.poll(async () => page.evaluate(async () => {
-    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-    const d = useReconstructionStore().dem
-    if (!d) return null
-    let interior = 0
-    for (let r = 1; r < d.height - 1; r++) for (let c = 1; c < d.width - 1; c++) if (!d.mask[r * d.width + c]) interior++
-    return { points: d.points, interior, holes: d.holesFilled > 0, roofGone: d.zMax < 2.5 }
-  })).toEqual({ points: 'ground', interior: 0, holes: true, roofGone: true })
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+        const d = useReconstructionStore().dem
+        if (!d) return null
+        let interior = 0
+        for (let r = 1; r < d.height - 1; r++)
+          for (let c = 1; c < d.width - 1; c++) if (!d.mask[r * d.width + c]) interior++
+        return { points: d.points, interior, holes: d.holesFilled > 0, roofGone: d.zMax < 2.5 }
+      }),
+    )
+    .toEqual({ points: 'ground', interior: 0, holes: true, roofGone: true })
 
   expect(errors).toEqual([])
 })

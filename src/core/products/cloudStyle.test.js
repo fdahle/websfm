@@ -5,19 +5,36 @@ import { cropCloud, mergeClouds, voxelDownsample } from './cloudEdit.js'
 import { serializeCloud, deserializeCloud } from '../../stores/reconstruction/cloudSerde.js'
 
 function cloud() {
-  return { id: 'a', kind: 'dense', name: 'Survey', cameras: new Map(), imported: true, count: 3,
+  return {
+    id: 'a',
+    kind: 'dense',
+    name: 'Survey',
+    cameras: new Map(),
+    imported: true,
+    count: 3,
     pos: new Float64Array([500000, 7000000, 10, 500000.01, 7000000, 20, 500005, 7000000, 30]),
     col: new Uint8Array([255, 0, 0, 0, 255, 0, 0, 0, 255]),
-    attributes: { classification: new Uint8Array([2, 6, 2]), intensity: new Uint16Array([0, 32768, 65535]),
-      gpsTime: new Float64Array([123456789.125, 123456789.25, 123456789.5]) } }
+    attributes: {
+      classification: new Uint8Array([2, 6, 2]),
+      intensity: new Uint16Array([0, 32768, 65535]),
+      gpsTime: new Float64Array([123456789.125, 123456789.25, 123456789.5]),
+    },
+  }
 }
 describe('cloud symbology and attributes', () => {
   it('hides classes with a draw index and leaves source coordinates, RGB and fields intact', () => {
-    const c = cloud(), original = structuredClone(c)
-    const out = buildCloudStyle(c, { field: 'attribute:classification', classes: { 6: { visible: false }, 2: { colour: '#123456' } } })
+    const c = cloud(),
+      original = structuredClone(c)
+    const out = buildCloudStyle(c, {
+      field: 'attribute:classification',
+      classes: { 6: { visible: false }, 2: { colour: '#123456' } },
+    })
     expect([...out.indices]).toEqual([0, 2])
     expect([...out.colors.slice(0, 3)]).toEqual([18, 52, 86])
-    expect(out.legend.entries.map(e => [e.value, e.count])).toEqual([[2, 2], [6, 1]])
+    expect(out.legend.entries.map((e) => [e.value, e.count])).toEqual([
+      [2, 2],
+      [6, 1],
+    ])
     expect(c).toEqual(original)
   })
   it('styles scalar values with a shared manual range and handles missing values', () => {
@@ -28,10 +45,14 @@ describe('cloud symbology and attributes', () => {
     c.attributes.gpsTime[1] = NaN
     expect(scalarRange(c, 'attribute:gpsTime')).toEqual({ min: 123456789.125, max: 123456789.5 })
     expect([...buildCloudStyle(c, { field: 'attribute:gpsTime' }).colors.slice(3, 6)]).toEqual([160, 160, 160])
-    expect(styleFields(c).some(f => f.value === 'attribute:nir')).toBe(false)
+    expect(styleFields(c).some((f) => f.value === 'attribute:nir')).toBe(false)
   })
   it('round-trips typed attributes, class styling and visibility through the project representation', () => {
-    const c = { ...cloud(), visible: false, style: { field: 'attribute:classification', classes: { 6: { visible: false } } } }
+    const c = {
+      ...cloud(),
+      visible: false,
+      style: { field: 'attribute:classification', classes: { 6: { visible: false } } },
+    }
     const packed = serializeCloud(c)
     const out = deserializeCloud(structuredClone(packed), () => 'new')
     expect(out.attributes.intensity).toBeInstanceOf(Uint16Array)
@@ -76,15 +97,24 @@ describe('viewer clipping', () => {
 describe('shared scales and concise legends', () => {
   it('maps the same elevation to the same colour across files, retaining hidden clouds in the scale', () => {
     const a = { ...cloud(), style: { field: 'elevation' } }
-    const b = { ...cloud(), id: 'b', visible: false, style: { field: 'elevation' }, pos: new Float64Array([0, 0, 30, 0, 0, 40, 0, 0, 50]) }
+    const b = {
+      ...cloud(),
+      id: 'b',
+      visible: false,
+      style: { field: 'elevation' },
+      pos: new Float64Array([0, 0, 30, 0, 0, 40, 0, 0, 50]),
+    }
     const range = sharedElevationRange([a, b])
     expect(range).toEqual({ min: 10, max: 50 })
     const va = buildCloudStyle(a, undefined, { elevationRange: range })
     const vb = buildCloudStyle(b, undefined, { elevationRange: range })
     expect([...va.colors.slice(6, 9)]).toEqual([...vb.colors.slice(0, 3)])
-    expect(groupCloudLegends([{ id: 'a', name: 'A', legend: va.legend }, { id: 'b', name: 'B', legend: vb.legend }])).toMatchObject([
-      { names: ['A', 'B'], legend: { min: 10, max: 50, ramp: 'viridis' } },
-    ])
+    expect(
+      groupCloudLegends([
+        { id: 'a', name: 'A', legend: va.legend },
+        { id: 'b', name: 'B', legend: vb.legend },
+      ]),
+    ).toMatchObject([{ names: ['A', 'B'], legend: { min: 10, max: 50, ramp: 'viridis' } }])
     b.style.range = 'local'
     expect(sharedElevationRange([a, b])).toEqual({ min: 10, max: 30 })
     expect(buildCloudStyle(b, undefined, { elevationRange: range }).legend.min).toBe(30)
@@ -96,32 +126,54 @@ describe('shared scales and concise legends', () => {
     const c = cloud()
     const layer = (id, style) => ({ id, name: id, legend: buildCloudStyle(c, style).legend })
     const groups = groupCloudLegends([
-      layer('rgb', { field: 'rgb' }), layer('transparent', { field: 'elevation', opacity: 0 }),
-      layer('hidden classes', { field: 'attribute:classification', classes: { 2: { visible: false }, 6: { visible: false } } }),
-      layer('A', { field: 'elevation' }), layer('B', { field: 'elevation', ramp: 'gray' }),
+      layer('rgb', { field: 'rgb' }),
+      layer('transparent', { field: 'elevation', opacity: 0 }),
+      layer('hidden classes', {
+        field: 'attribute:classification',
+        classes: { 2: { visible: false }, 6: { visible: false } },
+      }),
+      layer('A', { field: 'elevation' }),
+      layer('B', { field: 'elevation', ramp: 'gray' }),
       layer('C', { field: 'elevation', range: 'manual', min: 0, max: 100 }),
     ])
-    expect(groups.map(g => g.names)).toEqual([['A'], ['B'], ['C']])
+    expect(groups.map((g) => g.names)).toEqual([['A'], ['B'], ['C']])
   })
 
   it('combines class legends with matching colours but separates conflicting class colours', () => {
     const c = cloud()
     const layers = [
-      { id: 'a', name: 'A', legend: buildCloudStyle(c, { field: 'attribute:classification', classes: { 6: { visible: false } } }).legend },
+      {
+        id: 'a',
+        name: 'A',
+        legend: buildCloudStyle(c, { field: 'attribute:classification', classes: { 6: { visible: false } } }).legend,
+      },
       { id: 'b', name: 'B', legend: buildCloudStyle(c, { field: 'attribute:classification' }).legend },
-      { id: 'c', name: 'C', legend: buildCloudStyle(c, { field: 'attribute:classification', classes: { 2: { colour: '#ffffff' } } }).legend },
+      {
+        id: 'c',
+        name: 'C',
+        legend: buildCloudStyle(c, { field: 'attribute:classification', classes: { 2: { colour: '#ffffff' } } }).legend,
+      },
     ]
     const original = structuredClone(layers)
     const groups = groupCloudLegends(layers)
-    expect(groups.map(g => g.names)).toEqual([['A', 'B'], ['C']])
-    expect(groups[0].legend.entries.map(e => e.value)).toEqual([2, 6])
+    expect(groups.map((g) => g.names)).toEqual([['A', 'B'], ['C']])
+    expect(groups[0].legend.entries.map((e) => e.value)).toEqual([2, 6])
     expect(layers).toEqual(original)
   })
 })
 
 describe('texture style', () => {
-  const textured = { id: 't', kind: 'mesh', nVerts: 3, count: 1, pos: new Float32Array(9), idx: Uint32Array.of(0, 1, 2),
-    col: new Uint8Array(9), uv: new Float32Array(6), texture: { data: new Uint8Array(1), pages: [{ width: 1, height: 1 }], groups: [] } }
+  const textured = {
+    id: 't',
+    kind: 'mesh',
+    nVerts: 3,
+    count: 1,
+    pos: new Float32Array(9),
+    idx: Uint32Array.of(0, 1, 2),
+    col: new Uint8Array(9),
+    uv: new Float32Array(6),
+    texture: { data: new Uint8Array(1), pages: [{ width: 1, height: 1 }], groups: [] },
+  }
   it('offers Texture first and uses it by default on a textured mesh', () => {
     expect(styleFields(textured)[0].value).toBe('texture')
     const v = buildCloudStyle(textured)

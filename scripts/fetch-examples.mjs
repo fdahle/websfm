@@ -55,7 +55,7 @@ for (const id of Object.keys(EXAMPLES)) {
     if (name.includes('/') || name.startsWith('.')) continue
     await writeFile(new URL(name, dir), bytes)
   }
-  console.log(await present(dir) ? 'ok' : 'incomplete')
+  console.log((await present(dir)) ? 'ok' : 'incomplete')
 }
 
 if (failed) process.exit(1)

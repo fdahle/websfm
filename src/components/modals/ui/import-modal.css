@@ -19,7 +19,9 @@
      .preview th / td    header styling and monospace body cells
    Keep it that way. A shared value plus a per-modal "undo" is worse than no sharing. */
 
-.import-body { padding: 16px; }
+.import-body {
+  padding: 16px;
+}
 
 .filename {
   font-size: 12px;
@@ -35,7 +37,10 @@
   font-size: 12px;
   color: var(--text-dim);
 }
-.kind-note b { color: var(--text); font-weight: 600; }
+.kind-note b {
+  color: var(--text);
+  font-weight: 600;
+}
 
 .controls {
   display: grid;
@@ -44,24 +49,50 @@
   margin-bottom: 18px;
 }
 
-.ctrl { display: flex; flex-direction: column; gap: 6px; }
-.ctrl-crs { max-width: 360px; }
-
-.ctrl-label, .section-label {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.06em; color: var(--text-dim);
+.ctrl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.section-label { display: block; margin-bottom: 8px; }
+.ctrl-crs {
+  max-width: 360px;
+}
+
+.ctrl-label,
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.section-label {
+  display: block;
+  margin-bottom: 8px;
+}
 
 .ctrl-input {
-  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 5px;
-  color: var(--text); font: inherit; font-size: 13px; padding: 7px 10px; outline: none;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  outline: none;
 }
-.ctrl-input:focus { border-color: var(--accent); }
+.ctrl-input:focus {
+  border-color: var(--accent);
+}
 
 .ctrl-check {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 13px; color: var(--text); cursor: pointer; padding-bottom: 7px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  padding-bottom: 7px;
 }
 
 .table-wrap {
@@ -77,26 +108,54 @@
   width: 100%;
 }
 
-.preview th, .preview td {
+.preview th,
+.preview td {
   border: 1px solid var(--panel-border);
   padding: 4px 8px;
   text-align: left;
   white-space: nowrap;
 }
 
-.summary { margin-top: 12px; font-size: 12px; }
-.summary .warn { color: #d89a3a; }
-.summary .ok { color: var(--text-dim); }
+.summary {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.summary .warn {
+  color: #d89a3a;
+}
+.summary .ok {
+  color: var(--text-dim);
+}
 
 .btn-secondary {
-  background: none; border: 1px solid var(--panel-border); border-radius: 5px;
-  color: var(--text-dim); font: inherit; font-size: 12px; padding: 6px 14px; cursor: pointer;
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
 }
-.btn-secondary:hover { background: var(--hover-bg); color: var(--text); }
+.btn-secondary:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
 
 .btn-primary {
-  background: var(--accent); border: none; border-radius: 5px;
-  color: #fff; font: inherit; font-size: 12px; padding: 6px 16px; cursor: pointer;
+  background: var(--accent);
+  border: none;
+  border-radius: 5px;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 16px;
+  cursor: pointer;
 }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-.btn-primary:disabled { opacity: 0.45; cursor: default; }
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

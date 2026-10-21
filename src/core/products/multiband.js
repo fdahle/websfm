@@ -40,16 +40,20 @@ export function multibandReach(levels = MULTIBAND_LEVELS) {
   return { ring, margin: ring + (2 << levels), halo: 4 * (1 << levels) + ring, align: 1 << levels }
 }
 
-const W0 = 1 / 16, W1 = 4 / 16, W2 = 6 / 16
+const W0 = 1 / 16,
+  W1 = 4 / 16,
+  W2 = 6 / 16
 
 // REDUCE: blur with the 5-tap kernel and keep every other cell, zero outside [w × h].
 // dst is ceil(w/2) × ceil(h/2); tmp holds h × ceil(w/2). The interior runs without the
 // edge tests; every cell adds its taps in the same order either way.
 function reduce(src, so, w, h, dst, dO, tmp) {
-  const w2 = (w + 1) >> 1, h2 = (h + 1) >> 1
+  const w2 = (w + 1) >> 1,
+    h2 = (h + 1) >> 1
   const mIn = Math.max(1, Math.min(w2, (w - 1) >> 1)) // cells 1 ≤ m < mIn have all four taps
   for (let r = 0; r < h; r++) {
-    const row = so + r * w, t = r * w2
+    const row = so + r * w,
+      t = r * w2
     if (w2 > 0) reduceCell(src, row, w, tmp, t, 0)
     for (let m = 1, c = row + 2; m < mIn; m++, c += 2) {
       tmp[t + m] = W2 * src[c] + W1 * src[c - 1] + W0 * src[c - 2] + W1 * src[c + 1] + W0 * src[c + 2]
@@ -57,10 +61,17 @@ function reduce(src, so, w, h, dst, dO, tmp) {
     for (let m = mIn; m < w2; m++) reduceCell(src, row, w, tmp, t, m)
   }
   for (let m = 0; m < h2; m++) {
-    const r = 2 * m, o = dO + m * w2, t = r * w2
+    const r = 2 * m,
+      o = dO + m * w2,
+      t = r * w2
     if (r >= 2 && r + 2 < h) {
       for (let c = 0; c < w2; c++) {
-        dst[o + c] = W2 * tmp[t + c] + W1 * tmp[t - w2 + c] + W0 * tmp[t - 2 * w2 + c] + W1 * tmp[t + w2 + c] + W0 * tmp[t + 2 * w2 + c]
+        dst[o + c] =
+          W2 * tmp[t + c] +
+          W1 * tmp[t - w2 + c] +
+          W0 * tmp[t - 2 * w2 + c] +
+          W1 * tmp[t + w2 + c] +
+          W0 * tmp[t + 2 * w2 + c]
       }
       continue
     }
@@ -90,7 +101,8 @@ function reduceCell(src, row, w, tmp, t, m) {
 function expandSum(src, so, sw, sh, dst, dO, dw, dh, tmp) {
   const mIn = Math.max(1, Math.min(sw - 1, dw >> 1)) // 1 ≤ m < mIn: m ± 1 inside, both outputs exist
   for (let r = 0; r < sh; r++) {
-    const row = so + r * sw, t = r * dw
+    const row = so + r * sw,
+      t = r * dw
     if (dw > 0) expandCell(src, row, sw, tmp, t, dw, 0)
     for (let m = 1, x = row + 1, i = t + 2; m < mIn; m++, x++, i += 2) {
       tmp[i] = W2 * src[x] + W0 * src[x - 1] + W0 * src[x + 1]
@@ -99,7 +111,9 @@ function expandSum(src, so, sw, sh, dst, dO, dw, dh, tmp) {
     for (let m = mIn; 2 * m < dw; m++) expandCell(src, row, sw, tmp, t, dw, m)
   }
   for (let i = 0; i < dh; i++) {
-    const m = i >> 1, o = dO + i * dw, t = m * dw
+    const m = i >> 1,
+      o = dO + i * dw,
+      t = m * dw
     if (i & 1) {
       if (m + 1 < sh) for (let c = 0; c < dw; c++) dst[o + c] = W1 * tmp[t + c] + W1 * tmp[t + dw + c]
       else for (let c = 0; c < dw; c++) dst[o + c] = W1 * tmp[t + c] + 0
@@ -121,11 +135,15 @@ function expandCell(src, row, sw, tmp, t, dw, m) {
 
 // Level offsets and sizes of a pyramid over w × h.
 function layout(w, h, levels) {
-  const dims = [], off = []
+  const dims = [],
+    off = []
   let o = 0
   for (let k = 0; k <= levels; k++) {
-    const lw = Math.ceil(w / 2 ** k), lh = Math.ceil(h / 2 ** k)
-    dims.push([lw, lh]); off.push(o); o += lw * lh
+    const lw = Math.ceil(w / 2 ** k),
+      lh = Math.ceil(h / 2 ** k)
+    dims.push([lw, lh])
+    off.push(o)
+    o += lw * lh
   }
   return { dims, off, size: o }
 }
@@ -135,21 +153,27 @@ function layout(w, h, levels) {
 // (its mask and one channel's pyramid, an expand, the separable pass) — about
 // 7 · 4/3 + 2 floats per cell (MULTIBAND_BYTES_PER_CELL).
 export function createMultiband(maxW, maxH, levels = MULTIBAND_LEVELS) {
-  const pyr = layout(maxW, maxH, levels).size, maxCells = maxW * maxH
+  const pyr = layout(maxW, maxH, levels).size,
+    maxCells = maxW * maxH
   return {
     levels,
-    V: new Float32Array(pyr), EV: new Float32Array(pyr), acc: [0, 1, 2].map(() => new Float32Array(pyr)),
-    M: new Float32Array(pyr), N: new Float32Array(pyr),
-    E: new Float32Array(maxCells), tmp: new Float32Array(maxCells + 64),
+    V: new Float32Array(pyr),
+    EV: new Float32Array(pyr),
+    acc: [0, 1, 2].map(() => new Float32Array(pyr)),
+    M: new Float32Array(pyr),
+    N: new Float32Array(pyr),
+    E: new Float32Array(maxCells),
+    tmp: new Float32Array(maxCells + 64),
     win: null,
   }
 }
 // Bytes per window cell of createMultiband (for the block's memory preflight).
-export const MULTIBAND_BYTES_PER_CELL = 4 * (4 / 3 * 7 + 2)
+export const MULTIBAND_BYTES_PER_CELL = 4 * ((4 / 3) * 7 + 2)
 
 // Start a window of ew × eh cells with its label plane (stride ew; `none` = no label).
 export function multibandBegin(mb, ew, eh, labels, none) {
-  const L = mb.levels, lay = layout(ew, eh, L)
+  const L = mb.levels,
+    lay = layout(ew, eh, L)
   mb.win = { ew, eh, lay }
   const { V, EV, tmp } = mb
   for (let i = 0, n = ew * eh; i < n; i++) V[i] = labels[i] !== none ? 1 : 0
@@ -158,7 +182,8 @@ export function multibandBegin(mb, ew, eh, labels, none) {
     reduce(V, lay.off[k], w, h, V, lay.off[k + 1], tmp)
   }
   for (let k = 0; k < L; k++) {
-    const [w, h] = lay.dims[k], [w1, h1] = lay.dims[k + 1]
+    const [w, h] = lay.dims[k],
+      [w1, h1] = lay.dims[k + 1]
     expandSum(V, lay.off[k + 1], w1, h1, EV, lay.off[k], w, h, tmp)
   }
   for (const a of mb.acc) a.fill(0, 0, lay.size)
@@ -168,7 +193,9 @@ export function multibandBegin(mb, ew, eh, labels, none) {
 // bx0/by0 multiples of 2^levels; d: 3 floats per box cell (j's colour minus the base,
 // zero where j is not sampled); j's region: the window cells labelled j.
 export function multibandAdd(mb, bx0, by0, bw, bh, d, labels, j) {
-  const L = mb.levels, { lay, ew } = mb.win, box = layout(bw, bh, L)
+  const L = mb.levels,
+    { lay, ew } = mb.win,
+    box = layout(bw, bh, L)
   const { V, EV, M, N, E, tmp, acc } = mb
   for (let r = 0, i = 0; r < bh; r++) {
     const row = (by0 + r) * ew + bx0
@@ -180,18 +207,28 @@ export function multibandAdd(mb, bx0, by0, bw, bh, d, labels, j) {
     for (let k = 0; k < L; k++) reduce(N, box.off[k], box.dims[k][0], box.dims[k][1], N, box.off[k + 1], tmp)
     const a = acc[ch]
     for (let k = 0; k <= L; k++) {
-      const [w, h] = box.dims[k], wo = lay.off[k], ww = lay.dims[k][0], bo = box.off[k]
-      const ox = bx0 >> k, oy = by0 >> k
+      const [w, h] = box.dims[k],
+        wo = lay.off[k],
+        ww = lay.dims[k][0],
+        bo = box.off[k]
+      const ox = bx0 >> k,
+        oy = by0 >> k
       if (k < L) expandSum(N, box.off[k + 1], box.dims[k + 1][0], box.dims[k + 1][1], E, 0, w, h, tmp)
-      for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
-        const bi = r * w + c, g = M[bo + bi]
-        if (g === 0) continue
-        const wi = wo + (oy + r) * ww + ox + c, v = V[wi]
-        if (!(v > 0)) continue
-        let lp = N[bo + bi] / v
-        if (k < L) { const ev = EV[wi]; if (ev > 0) lp -= E[bi] / ev }
-        a[wi] += g * lp
-      }
+      for (let r = 0; r < h; r++)
+        for (let c = 0; c < w; c++) {
+          const bi = r * w + c,
+            g = M[bo + bi]
+          if (g === 0) continue
+          const wi = wo + (oy + r) * ww + ox + c,
+            v = V[wi]
+          if (!(v > 0)) continue
+          let lp = N[bo + bi] / v
+          if (k < L) {
+            const ev = EV[wi]
+            if (ev > 0) lp -= E[bi] / ev
+          }
+          a[wi] += g * lp
+        }
     }
   }
 }
@@ -199,16 +236,21 @@ export function multibandAdd(mb, bx0, by0, bw, bh, d, labels, j) {
 // Collapse the corrections and add them to `base` (4 floats per window cell, linear
 // RGB + unused) on the labelled cells.
 export function multibandFinish(mb, base) {
-  const L = mb.levels, { lay, ew, eh } = mb.win
+  const L = mb.levels,
+    { lay, ew, eh } = mb.win
   const { V, EV, E, tmp, acc, N } = mb
   for (const a of acc) {
     // corr_L = acc_L / V_L; corr_k = acc_k / V_k + E(corr_{k+1}·V_{k+1}) / EV_k
     {
-      const o = lay.off[L], n = lay.dims[L][0] * lay.dims[L][1]
+      const o = lay.off[L],
+        n = lay.dims[L][0] * lay.dims[L][1]
       for (let i = 0; i < n; i++) a[o + i] = V[o + i] > 0 ? a[o + i] / V[o + i] : 0
     }
     for (let k = L - 1; k >= 0; k--) {
-      const [w, h] = lay.dims[k], [w1, h1] = lay.dims[k + 1], o = lay.off[k], o1 = lay.off[k + 1]
+      const [w, h] = lay.dims[k],
+        [w1, h1] = lay.dims[k + 1],
+        o = lay.off[k],
+        o1 = lay.off[k + 1]
       for (let i = 0, n = w1 * h1; i < n; i++) N[i] = a[o1 + i] * V[o1 + i]
       expandSum(N, 0, w1, h1, E, 0, w, h, tmp)
       for (let i = 0, n = w * h; i < n; i++) {
@@ -219,6 +261,8 @@ export function multibandFinish(mb, base) {
   }
   for (let i = 0, n = ew * eh; i < n; i++) {
     if (!(V[i] > 0)) continue
-    base[4 * i] += acc[0][i]; base[4 * i + 1] += acc[1][i]; base[4 * i + 2] += acc[2][i]
+    base[4 * i] += acc[0][i]
+    base[4 * i + 1] += acc[1][i]
+    base[4 * i + 2] += acc[2][i]
   }
 }

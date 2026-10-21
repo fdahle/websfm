@@ -8,31 +8,39 @@ import FloatingToolbox from './FloatingToolbox.vue'
 // drag, ×) is the shared FloatingToolbox; its position sticks across images and tabs
 // for the session (not persisted).
 const props = defineProps({
-  tool:        { type: String,  default: null }, // 'brush' | 'erase' | 'rect' | 'smart' | null (pan)
-  brushRadius: { type: Number,  default: 20 },
-  opacity:     { type: Number,  default: 0.45 },
-  hasMask:     { type: Boolean, default: false },
-  canUndo:     { type: Boolean, default: false },
-  canRedo:     { type: Boolean, default: false },
+  tool: { type: String, default: null }, // 'brush' | 'erase' | 'rect' | 'smart' | null (pan)
+  brushRadius: { type: Number, default: 20 },
+  opacity: { type: Number, default: 0.45 },
+  hasMask: { type: Boolean, default: false },
+  canUndo: { type: Boolean, default: false },
+  canRedo: { type: Boolean, default: false },
   // Smart Select (SAM2): a human-readable status line + whether a candidate
   // segment is currently previewed (enables Add/Clear).
-  smartStatus:     { type: String,  default: '' },
+  smartStatus: { type: String, default: '' },
   smartHasPreview: { type: Boolean, default: false },
   // False on a very large scan (only its reduced copy is shown): the painting tools
   // are off; invert / import / clear / undo still work.
-  paintable:       { type: Boolean, default: true },
+  paintable: { type: Boolean, default: true },
 })
 
 const emit = defineEmits([
-  'set-tool', 'update:brushRadius', 'update:opacity',
-  'invert', 'undo', 'redo', 'import', 'clear', 'close',
-  'smart-commit', 'smart-discard',
+  'set-tool',
+  'update:brushRadius',
+  'update:opacity',
+  'invert',
+  'undo',
+  'redo',
+  'import',
+  'clear',
+  'close',
+  'smart-commit',
+  'smart-discard',
 ])
 
 const TOOLS = [
-  { id: 'brush', icon: 'brush',    title: 'Brush — paint mask (B)' },
-  { id: 'erase', icon: 'eraser',   title: 'Eraser — unpaint mask (E)' },
-  { id: 'rect',  icon: 'rect',     title: 'Rectangle — drag to mask, hold Alt to erase (R)' },
+  { id: 'brush', icon: 'brush', title: 'Brush — paint mask (B)' },
+  { id: 'erase', icon: 'eraser', title: 'Eraser — unpaint mask (E)' },
+  { id: 'rect', icon: 'rect', title: 'Rectangle — drag to mask, hold Alt to erase (R)' },
   { id: 'smart', icon: 'sparkles', title: 'Smart Select — click an object to segment it (SAM2) (S)' },
 ]
 
@@ -45,7 +53,6 @@ function pickTool(id) {
 
 <template>
   <FloatingToolbox id="mask" title="Mask" :width="168" close-title="Exit mask editing (Esc)" @close="emit('close')">
-
     <div class="mt-row">
       <button
         v-for="t in TOOLS"
@@ -61,7 +68,12 @@ function pickTool(id) {
       <button class="mt-btn" :class="{ disabled: !canUndo }" title="Undo (Ctrl+Z)" @click="canUndo && emit('undo')">
         <Icon name="undo" class="mt-icon" />
       </button>
-      <button class="mt-btn" :class="{ disabled: !canRedo }" title="Redo (Ctrl+Shift+Z)" @click="canRedo && emit('redo')">
+      <button
+        class="mt-btn"
+        :class="{ disabled: !canRedo }"
+        title="Redo (Ctrl+Shift+Z)"
+        @click="canRedo && emit('redo')"
+      >
         <Icon name="redo" class="mt-icon" />
       </button>
     </div>
@@ -76,13 +88,17 @@ function pickTool(id) {
           :class="{ disabled: !smartHasPreview }"
           title="Add the previewed segment to the mask (Enter)"
           @click="smartHasPreview && emit('smart-commit')"
-        >Add to mask</button>
+        >
+          Add to mask
+        </button>
         <button
           class="mt-textbtn"
           :class="{ disabled: !smartHasPreview }"
           title="Discard the previewed segment (Del)"
           @click="smartHasPreview && emit('smart-discard')"
-        >Clear</button>
+        >
+          Clear
+        </button>
       </div>
     </div>
 
@@ -93,7 +109,12 @@ function pickTool(id) {
       <button class="mt-btn" title="Import an image as mask" @click="emit('import')">
         <Icon name="download" class="mt-icon" />
       </button>
-      <button class="mt-btn danger" :class="{ disabled: !hasMask }" title="Clear mask (undoable)" @click="hasMask && emit('clear')">
+      <button
+        class="mt-btn danger"
+        :class="{ disabled: !hasMask }"
+        title="Clear mask (undoable)"
+        @click="hasMask && emit('clear')"
+      >
         <Icon name="x" class="mt-icon" />
       </button>
     </div>
@@ -101,7 +122,10 @@ function pickTool(id) {
     <label class="mt-slider" title="Brush size ([ / ])">
       <span class="mt-label">Size</span>
       <input
-        type="range" min="4" max="80" step="1"
+        type="range"
+        min="4"
+        max="80"
+        step="1"
         :value="brushRadius"
         @input="emit('update:brushRadius', Number($event.target.value))"
       />
@@ -111,7 +135,10 @@ function pickTool(id) {
     <label class="mt-slider" title="Mask overlay opacity">
       <span class="mt-label">Opacity</span>
       <input
-        type="range" min="0.1" max="1" step="0.05"
+        type="range"
+        min="0.1"
+        max="1"
+        step="0.05"
         :value="opacity"
         @input="emit('update:opacity', Number($event.target.value))"
       />
@@ -128,7 +155,9 @@ function pickTool(id) {
   margin-bottom: 6px;
 }
 
-.mt-gap { flex: 1; }
+.mt-gap {
+  flex: 1;
+}
 
 .mt-btn {
   display: flex;
@@ -143,17 +172,30 @@ function pickTool(id) {
   cursor: pointer;
   padding: 0;
 }
-.mt-btn:hover { background: var(--hover-bg); }
+.mt-btn:hover {
+  background: var(--hover-bg);
+}
 .mt-btn.active {
   background: var(--active-bg, var(--hover-bg));
   border-color: var(--accent);
   color: var(--accent);
 }
-.mt-btn.danger:hover { color: #ff8a8a; }
-.mt-btn.disabled { opacity: 0.35; cursor: default; }
-.mt-btn.disabled:hover { background: none; color: var(--text); }
+.mt-btn.danger:hover {
+  color: #ff8a8a;
+}
+.mt-btn.disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.mt-btn.disabled:hover {
+  background: none;
+  color: var(--text);
+}
 
-.mt-icon { width: 16px; height: 16px; }
+.mt-icon {
+  width: 16px;
+  height: 16px;
+}
 
 /* Smart Select panel */
 .mt-smart {
@@ -178,7 +220,10 @@ function pickTool(id) {
   margin-bottom: 6px;
   line-height: 1.3;
 }
-.mt-smart-actions { gap: 6px; margin-bottom: 0; }
+.mt-smart-actions {
+  gap: 6px;
+  margin-bottom: 0;
+}
 .mt-textbtn {
   flex: 1;
   padding: 4px 6px;
@@ -189,7 +234,9 @@ function pickTool(id) {
   color: var(--text);
   cursor: pointer;
 }
-.mt-textbtn:hover { background: var(--panel); }
+.mt-textbtn:hover {
+  background: var(--panel);
+}
 .mt-textbtn.add {
   border-color: var(--accent);
   color: var(--accent);
@@ -200,7 +247,9 @@ function pickTool(id) {
   border-color: var(--panel-border);
   color: var(--text-dim);
 }
-.mt-textbtn.disabled:hover { background: none; }
+.mt-textbtn.disabled:hover {
+  background: none;
+}
 
 .mt-slider {
   display: flex;
@@ -217,6 +266,13 @@ function pickTool(id) {
   accent-color: var(--accent);
 }
 
-.mt-label { width: 38px; flex-shrink: 0; }
-.mt-val   { width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
+.mt-label {
+  width: 38px;
+  flex-shrink: 0;
+}
+.mt-val {
+  width: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 </style>

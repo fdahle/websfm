@@ -8,7 +8,8 @@ describe('createCellIndex', () => {
     // Keys spread over 2^50 (float64-exact packed cells), many collisions on the low bits.
     for (let i = 0; i < 20000; i++) {
       const key = (i % 7000) * 2 ** 32 + (i % 13) * 4096 + (i % 5)
-      idx.set(key, i); ref.set(key, i)
+      idx.set(key, i)
+      ref.set(key, i)
     }
     expect(idx.size).toBe(ref.size)
     for (const [k, v] of ref) expect(idx.get(k)).toBe(v)

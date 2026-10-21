@@ -17,22 +17,27 @@
 // }
 
 function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ))
+  return String(s ?? '').replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+  )
 }
 
 const STATUS_LABEL = { ok: 'OK', warn: 'Warn', bad: 'Bad', missing: 'n/a' }
 
 function healthTable(rows) {
   if (!rows?.length) return ''
-  const body = rows.map((r) => `
+  const body = rows
+    .map(
+      (r) => `
     <tr class="st-${esc(r.status)}">
       <td><span class="dot"></span>${esc(r.label)}</td>
       <td class="num">${r.value == null ? '—' : esc(r.value)}${r.unit ? ' ' + esc(r.unit) : ''}</td>
       <td class="tag">${esc(STATUS_LABEL[r.status] ?? r.status)}</td>
       <td class="hint">${esc(r.hint || '')}</td>
-    </tr>`).join('')
+    </tr>`,
+    )
+    .join('')
   return `<table class="health"><thead><tr>
     <th>Metric</th><th class="num">Value</th><th>Status</th><th>Note</th>
   </tr></thead><tbody>${body}</tbody></table>`
@@ -40,21 +45,30 @@ function healthTable(rows) {
 
 function tiles(list) {
   if (!list?.length) return ''
-  const cells = list.map((t) => `
+  const cells = list
+    .map(
+      (t) => `
     <div class="tile tone-${esc(t.tone || 'none')}">
       <div class="tv">${esc(t.value)}${t.unit ? `<span class="tu"> ${esc(t.unit)}</span>` : ''}</div>
       <div class="tl">${esc(t.label)}</div>
       ${t.hint ? `<div class="th">${esc(t.hint)}</div>` : ''}
-    </div>`).join('')
+    </div>`,
+    )
+    .join('')
   return `<div class="tiles">${cells}</div>`
 }
 
 function dataTable(columns, rows) {
   if (!columns?.length || !rows?.length) return ''
   const head = columns.map((c) => `<th class="${c.align === 'right' ? 'num' : ''}">${esc(c.label)}</th>`).join('')
-  const body = rows.map((row) => `<tr>${
-    columns.map((c) => `<td class="${c.align === 'right' ? 'num' : ''}">${esc(row[c.key] ?? '—')}</td>`).join('')
-  }</tr>`).join('')
+  const body = rows
+    .map(
+      (row) =>
+        `<tr>${columns
+          .map((c) => `<td class="${c.align === 'right' ? 'num' : ''}">${esc(row[c.key] ?? '—')}</td>`)
+          .join('')}</tr>`,
+    )
+    .join('')
   return `<table class="dt"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
 }
 

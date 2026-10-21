@@ -19,16 +19,24 @@ const { makeIoOps, sampleBytes } = await import('../workers/ops/io.js')
 function demTiff(values, width, height, { bits = 32, nodata = null } = {}) {
   const Arr = bits === 64 ? Float64Array : Float32Array
   return writeArrayBuffer(Arr.from(values), {
-    width, height, SamplesPerPixel: 1, BitsPerSample: [bits], SampleFormat: [3],
-    PhotometricInterpretation: 1, PlanarConfiguration: 1,
-    ModelPixelScale: [1, 1, 0], ModelTiepoint: [0, 0, 0, 1000, 2000, 0],
-    GTModelTypeGeoKey: 1, GTRasterTypeGeoKey: 1, ProjectedCSTypeGeoKey: 32633,
+    width,
+    height,
+    SamplesPerPixel: 1,
+    BitsPerSample: [bits],
+    SampleFormat: [3],
+    PhotometricInterpretation: 1,
+    PlanarConfiguration: 1,
+    ModelPixelScale: [1, 1, 0],
+    ModelTiepoint: [0, 0, 0, 1000, 2000, 0],
+    GTModelTypeGeoKey: 1,
+    GTRasterTypeGeoKey: 1,
+    ProjectedCSTypeGeoKey: 32633,
     ...(nodata != null ? { GDAL_NODATA: `${nodata}\0` } : {}),
   })
 }
 
-const parse = (buffer, extra = {}) => makeIoOps().parseRaster(
-  [{ buffer, name: 'test.tif', forceKind: 'dem', ...extra }], { emit: () => {} })
+const parse = (buffer, extra = {}) =>
+  makeIoOps().parseRaster([{ buffer, name: 'test.tif', forceKind: 'dem', ...extra }], { emit: () => {} })
 
 describe('parseRaster nodata', () => {
   for (const nodata of [-3.4e38, -9999.9]) {

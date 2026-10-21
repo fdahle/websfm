@@ -4,8 +4,27 @@ import { SparsePoints } from './sparsePoints.js'
 // Three points: p0 seen by a, b (pixels); p1 by b, c (c without a pixel); p2 by a only,
 // no colour.
 const records = () => [
-  { x: 1, y: 2, z: 3, color: [10, 20, 30], views: [['a', 5, 100, 200], ['b', 7, 110, 210]] },
-  { x: 4, y: 5, z: 6, color: [0, 0, 0], views: new Map([['b', 8], ['c', 9]]), viewsPx: new Map([['b', [120, 220]]]) },
+  {
+    x: 1,
+    y: 2,
+    z: 3,
+    color: [10, 20, 30],
+    views: [
+      ['a', 5, 100, 200],
+      ['b', 7, 110, 210],
+    ],
+  },
+  {
+    x: 4,
+    y: 5,
+    z: 6,
+    color: [0, 0, 0],
+    views: new Map([
+      ['b', 8],
+      ['c', 9],
+    ]),
+    viewsPx: new Map([['b', [120, 220]]]),
+  },
   { x: 7, y: 8, z: 9, views: [['a', 1, 130, 230]] },
 ]
 
@@ -25,7 +44,10 @@ describe('SparsePoints', () => {
     expect(p.hasColorAt(2)).toBe(false)
     const views = []
     p.forEachView(1, (u, kp, x, y) => views.push([u, kp, x, y]))
-    expect(views).toEqual([['b', 8, 120, 220], ['c', 9, NaN, NaN]])
+    expect(views).toEqual([
+      ['b', 8, 120, 220],
+      ['c', 9, NaN, NaN],
+    ])
     expect(p.pixelCount(1)).toBe(1)
     expect(p.kpOf(0, 'b')).toBe(7)
     expect(p.pixelOf(1, 'c')).toBeUndefined()
@@ -37,8 +59,13 @@ describe('SparsePoints', () => {
     const p = SparsePoints.fromRecords(records())
     const seen = []
     p.forEachPointOf('a', (i, k) => seen.push([i, p.vkp[k]]))
-    expect(seen).toEqual([[0, 5], [2, 1]])
-    p.forEachPointOf('nobody', () => { throw new Error('no views expected') })
+    expect(seen).toEqual([
+      [0, 5],
+      [2, 1],
+    ])
+    p.forEachPointOf('nobody', () => {
+      throw new Error('no views expected')
+    })
   })
 
   it('selects points with new positions and moved pixels, leaving the source untouched', () => {
@@ -59,13 +86,26 @@ describe('SparsePoints', () => {
 
   it('concatenates clouds onto one camera list', () => {
     const p = SparsePoints.fromRecords(records())
-    const other = SparsePoints.fromRecords([{ x: 0, y: 0, z: 1, views: [['d', 3], ['a', 4]] }])
+    const other = SparsePoints.fromRecords([
+      {
+        x: 0,
+        y: 0,
+        z: 1,
+        views: [
+          ['d', 3],
+          ['a', 4],
+        ],
+      },
+    ])
     const all = SparsePoints.concat([p, other])
     expect(all.length).toBe(4)
     expect(all.viewUuids).toEqual(['a', 'b', 'c', 'd'])
     const views = []
     all.forEachView(3, (u, kp, x) => views.push([u, kp, x]))
-    expect(views).toEqual([['d', 3, NaN], ['a', 4, NaN]])
+    expect(views).toEqual([
+      ['d', 3, NaN],
+      ['a', 4, NaN],
+    ])
     expect(all.colorAt(3)).toBeNull()
     expect(all.colorAt(0)).toEqual([10, 20, 30])
   })

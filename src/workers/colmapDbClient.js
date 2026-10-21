@@ -15,7 +15,10 @@ function getWorker() {
   }
   worker.onerror = (event) => {
     const err = new Error(event.message || 'COLMAP database worker failed')
-    for (const [id, p] of pending) { pending.delete(id); p.reject(err) }
+    for (const [id, p] of pending) {
+      pending.delete(id)
+      p.reject(err)
+    }
   }
   return worker
 }
@@ -24,8 +27,12 @@ function call(op, args, transfer = []) {
   const id = nextId++
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject })
-    try { getWorker().postMessage({ id, op, args }, transfer) }
-    catch (err) { pending.delete(id); reject(err) }
+    try {
+      getWorker().postMessage({ id, op, args }, transfer)
+    } catch (err) {
+      pending.delete(id)
+      reject(err)
+    }
   })
 }
 
@@ -38,5 +45,8 @@ export const exportColmapDatabase = (bundle) => call('export', [bundle])
 export function disposeColmapDatabase() {
   if (worker) worker.terminate()
   worker = null
-  for (const [id, p] of pending) { pending.delete(id); p.reject(new Error('COLMAP database session closed')) }
+  for (const [id, p] of pending) {
+    pending.delete(id)
+    p.reject(new Error('COLMAP database session closed'))
+  }
 }

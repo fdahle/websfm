@@ -113,18 +113,21 @@ export function geoJsonToGcps(features, nameKey) {
     if (!POINT_TYPES.has(t)) continue
     const coords = t === 'Point' ? [f.geometry.coordinates] : f.geometry.coordinates
     for (const c of coords) {
-      const x = num(c?.[0]); const y = num(c?.[1])
+      const x = num(c?.[0])
+      const y = num(c?.[1])
       if (x == null || y == null) continue
       i++
       gcps.push({
         name: nameFrom(f.properties, nameKey, `GCP ${i}`),
-        x, y, z: num(c?.[2]),
-        accuracyX: num(propertyCI(f.properties, ['accuracyx','accx','sigmax','stdx'])),
-        accuracyY: num(propertyCI(f.properties, ['accuracyy','accy','sigmay','stdy'])),
-        accuracyZ: num(propertyCI(f.properties, ['accuracyz','accz','sigmaz','stdz'])),
-        correlationXY: num(propertyCI(f.properties, ['correlationxy','corrxy','rhoxy'])),
-        correlationXZ: num(propertyCI(f.properties, ['correlationxz','corrxz','rhoxz'])),
-        correlationYZ: num(propertyCI(f.properties, ['correlationyz','corryz','rhoyz'])),
+        x,
+        y,
+        z: num(c?.[2]),
+        accuracyX: num(propertyCI(f.properties, ['accuracyx', 'accx', 'sigmax', 'stdx'])),
+        accuracyY: num(propertyCI(f.properties, ['accuracyy', 'accy', 'sigmay', 'stdy'])),
+        accuracyZ: num(propertyCI(f.properties, ['accuracyz', 'accz', 'sigmaz', 'stdz'])),
+        correlationXY: num(propertyCI(f.properties, ['correlationxy', 'corrxy', 'rhoxy'])),
+        correlationXZ: num(propertyCI(f.properties, ['correlationxz', 'corrxz', 'rhoxz'])),
+        correlationYZ: num(propertyCI(f.properties, ['correlationyz', 'corryz', 'rhoyz'])),
         observations: [],
       })
     }
@@ -165,11 +168,13 @@ export function polygonSetToGeoJson(set, { crs = null } = {}) {
     const [a, b] = [ring[0], ring[ring.length - 1]]
     return a && b && (a[0] !== b[0] || a[1] !== b[1]) ? [...ring, [a[0], a[1]]] : ring
   }
-  const features = (set?.footprints ?? []).filter((fp) => fp.rings?.length).map((fp) => ({
-    type: 'Feature',
-    properties: { name: fp.imageName ?? fp.name ?? null },
-    geometry: { type: 'Polygon', coordinates: fp.rings.map((ring) => close(ring.map((c) => [c[0], c[1]]))) },
-  }))
+  const features = (set?.footprints ?? [])
+    .filter((fp) => fp.rings?.length)
+    .map((fp) => ({
+      type: 'Feature',
+      properties: { name: fp.imageName ?? fp.name ?? null },
+      geometry: { type: 'Polygon', coordinates: fp.rings.map((ring) => close(ring.map((c) => [c[0], c[1]]))) },
+    }))
   const fc = { type: 'FeatureCollection', name: set?.name ?? null, features }
   if (crs && /^EPSG:\d+$/i.test(crs)) fc.crs = { type: 'name', properties: { name: crs.toUpperCase() } }
   return fc

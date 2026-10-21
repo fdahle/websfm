@@ -44,7 +44,7 @@ export function parseGuideDoc(raw, sourcePath = '<string>') {
   const chunks = body.split(/^## /m)
   const intro = chunks.shift().trim()
   const params = new Map() // key -> { key, label, defaultText, body }
-  const order = []         // param keys in document order
+  const order = [] // param keys in document order
   for (const chunk of chunks) {
     const nl = chunk.indexOf('\n')
     const label = (nl === -1 ? chunk : chunk.slice(0, nl)).trim()
@@ -99,9 +99,7 @@ export function getParam(opId, key) {
 }
 
 export function getAllGuideDocs() {
-  return [...loadDocs().values()].sort((a, b) =>
-    a.sortOrder - b.sortOrder || a.title.localeCompare(b.title),
-  )
+  return [...loadDocs().values()].sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title))
 }
 
 // Case-insensitive search over operation title/summary/intro and param labels.
@@ -111,10 +109,12 @@ export function searchGuide(query) {
   const scored = []
   for (const d of loadDocs().values()) {
     const inTitle = d.title.toLowerCase().includes(q)
-    const inBody = d.summary.toLowerCase().includes(q) || d.intro.toLowerCase().includes(q) ||
-      [...d.params.values()].some(p => p.label.toLowerCase().includes(q) || p.body.toLowerCase().includes(q))
+    const inBody =
+      d.summary.toLowerCase().includes(q) ||
+      d.intro.toLowerCase().includes(q) ||
+      [...d.params.values()].some((p) => p.label.toLowerCase().includes(q) || p.body.toLowerCase().includes(q))
     if (inTitle) scored.push({ d, rank: 0 })
     else if (inBody) scored.push({ d, rank: 1 })
   }
-  return scored.sort((a, b) => a.rank - b.rank || a.d.title.localeCompare(b.d.title)).map(s => s.d)
+  return scored.sort((a, b) => a.rank - b.rank || a.d.title.localeCompare(b.d.title)).map((s) => s.d)
 }

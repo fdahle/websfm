@@ -35,12 +35,13 @@ const DEG = 180 / Math.PI
 // Solve a symmetric 3×3 system N·x = b (Cramer's rule). Returns null if singular.
 function solve3(N, b) {
   // N is symmetric so N[i][j] === N[j][i]; name the six distinct entries.
-  const n00 = N[0][0], n01 = N[0][1], n02 = N[0][2]
-  const n11 = N[1][1], n12 = N[1][2], n22 = N[2][2]
-  const det =
-    n00 * (n11 * n22 - n12 * n12) -
-    n01 * (n01 * n22 - n12 * n02) +
-    n02 * (n01 * n12 - n11 * n02)
+  const n00 = N[0][0],
+    n01 = N[0][1],
+    n02 = N[0][2]
+  const n11 = N[1][1],
+    n12 = N[1][2],
+    n22 = N[2][2]
+  const det = n00 * (n11 * n22 - n12 * n12) - n01 * (n01 * n22 - n12 * n02) + n02 * (n01 * n12 - n11 * n02)
   if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null
   // Inverse of the symmetric 3×3.
   const c00 = n11 * n22 - n12 * n12
@@ -78,24 +79,46 @@ function solve3(N, b) {
  */
 export function fitFiducialAffine(obs) {
   const pts = (obs || []).filter(
-    (o) => o && Number.isFinite(o.px) && Number.isFinite(o.py)
-      && Number.isFinite(o.xMm) && Number.isFinite(o.yMm),
+    (o) => o && Number.isFinite(o.px) && Number.isFinite(o.py) && Number.isFinite(o.xMm) && Number.isFinite(o.yMm),
   )
   if (pts.length < 3) return null
 
   // Normal matrix N = MᵀM with M = [px py 1] and RHS Mᵀ·xMm, Mᵀ·yMm.
-  let spp = 0, spq = 0, sp = 0, sqq = 0, sq = 0, s1 = 0
-  let bx0 = 0, bx1 = 0, bx2 = 0, by0 = 0, by1 = 0, by2 = 0
+  let spp = 0,
+    spq = 0,
+    sp = 0,
+    sqq = 0,
+    sq = 0,
+    s1 = 0
+  let bx0 = 0,
+    bx1 = 0,
+    bx2 = 0,
+    by0 = 0,
+    by1 = 0,
+    by2 = 0
   for (const o of pts) {
-    const p = o.px, q = o.py
-    spp += p * p; spq += p * q; sp += p
-    sqq += q * q; sq += q; s1 += 1
-    bx0 += p * o.xMm; bx1 += q * o.xMm; bx2 += o.xMm
-    by0 += p * o.yMm; by1 += q * o.yMm; by2 += o.yMm
+    const p = o.px,
+      q = o.py
+    spp += p * p
+    spq += p * q
+    sp += p
+    sqq += q * q
+    sq += q
+    s1 += 1
+    bx0 += p * o.xMm
+    bx1 += q * o.xMm
+    bx2 += o.xMm
+    by0 += p * o.yMm
+    by1 += q * o.yMm
+    by2 += o.yMm
   }
-  const N = [[spp, spq, sp], [spq, sqq, sq], [sp, sq, s1]]
-  const rowX = solve3(N, [bx0, bx1, bx2])   // [a, b, c]
-  const rowY = solve3(N, [by0, by1, by2])   // [d, e, f]
+  const N = [
+    [spp, spq, sp],
+    [spq, sqq, sq],
+    [sp, sq, s1],
+  ]
+  const rowX = solve3(N, [bx0, bx1, bx2]) // [a, b, c]
+  const rowY = solve3(N, [by0, by1, by2]) // [d, e, f]
   if (!rowX || !rowY) return null
 
   const A = [rowX[0], rowX[1], rowX[2], rowY[0], rowY[1], rowY[2]]
@@ -103,14 +126,16 @@ export function fitFiducialAffine(obs) {
 
   // Residuals in µm.
   const residualsUm = pts.map((o) => {
-    const ex = (a * o.px + A[1] * o.py + A[2]) - o.xMm
-    const ey = (d * o.px + e * o.py + A[5]) - o.yMm
+    const ex = a * o.px + A[1] * o.py + A[2] - o.xMm
+    const ey = d * o.px + e * o.py + A[5] - o.yMm
     return Math.hypot(ex, ey) * 1000
   })
   const rmsUm = Math.sqrt(residualsUm.reduce((s, r) => s + r * r, 0) / residualsUm.length)
 
   // Singular values of the 2×2 linear part B = [[a,b],[d,e]] via eigenvalues of BᵀB.
-  const pp = a * a + d * d, qq = b * b + e * e, rr = a * b + d * e
+  const pp = a * a + d * d,
+    qq = b * b + e * e,
+    rr = a * b + d * e
   const mid = (pp + qq) / 2
   const rad = Math.sqrt(Math.max(0, ((pp - qq) / 2) ** 2 + rr * rr))
   const sigma1 = Math.sqrt(Math.max(0, mid + rad))
@@ -150,9 +175,18 @@ export function fitFiducialAffine(obs) {
 //   sparse cloud stays consistent with its own recorded transforms.
 export function canonicalFrame(fiducials, pitchMm, { yUp = false } = {}) {
   const marks = fiducials?.marks || []
-  if (!Number.isFinite(pitchMm) || pitchMm <= 0 || !Number.isFinite(fiducials?.focalMm)
-    || fiducials.focalMm <= 0 || marks.length < 3) return null
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  if (
+    !Number.isFinite(pitchMm) ||
+    pitchMm <= 0 ||
+    !Number.isFinite(fiducials?.focalMm) ||
+    fiducials.focalMm <= 0 ||
+    marks.length < 3
+  )
+    return null
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity
   for (const m of marks) {
     if (!Number.isFinite(m.xMm) || !Number.isFinite(m.yMm)) continue
     if (m.xMm < minX) minX = m.xMm
@@ -186,7 +220,8 @@ export function scanToCanonical(px, py, A, frame) {
   const mm = Array.isArray(A)
     ? { x: A[0] * px + A[1] * py + A[2], y: A[3] * px + A[4] * py + A[5] }
     : applyFiducialTransform({ x: px, y: py }, A)
-  const mmX = mm.x, mmY = mm.y
+  const mmX = mm.x,
+    mmY = mm.y
   return {
     x: (mmX - frame.originX) / frame.pitchMm,
     y: (frame.ySign === -1 ? frame.originY - mmY : mmY - frame.originY) / frame.pitchMm,
@@ -203,7 +238,8 @@ export function mmToScan(xMm, yMm, A) {
   const [a, b, c, d, e, f] = A
   const det = a * e - b * d
   if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null
-  const rx = xMm - c, ry = yMm - f
+  const rx = xMm - c,
+    ry = yMm - f
   return { x: (e * rx - b * ry) / det, y: (-d * rx + a * ry) / det }
 }
 
@@ -218,7 +254,8 @@ export function canonicalToScan(x, y, A, frame) {
   if (!Array.isArray(A)) return invertFiducialTransform({ x: mmX, y: mmY }, A)
   const [a, b, c, d, e, f] = A
   const det = a * e - b * d
-  const rx = mmX - c, ry = mmY - f
+  const rx = mmX - c,
+    ry = mmY - f
   return {
     x: (e * rx - b * ry) / det,
     y: (-d * rx + a * ry) / det,

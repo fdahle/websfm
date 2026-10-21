@@ -23,10 +23,14 @@ import { undistortNormalized } from '../sfm/distortion.js'
 export function sampleRgbaBilinear(data, w, h, x, y, out, oi) {
   const x0 = Math.max(0, Math.min(w - 1, Math.floor(x)))
   const y0 = Math.max(0, Math.min(h - 1, Math.floor(y)))
-  const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1)
-  const fx = x - x0, fy = y - y0
-  const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4
-  const i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4
+  const x1 = Math.min(w - 1, x0 + 1),
+    y1 = Math.min(h - 1, y0 + 1)
+  const fx = x - x0,
+    fy = y - y0
+  const i00 = (y0 * w + x0) * 4,
+    i10 = (y0 * w + x1) * 4
+  const i01 = (y1 * w + x0) * 4,
+    i11 = (y1 * w + x1) * 4
   for (let c = 0; c < 4; c++) {
     const top = data[i00 + c] * (1 - fx) + data[i10 + c] * fx
     const bot = data[i01 + c] * (1 - fx) + data[i11 + c] * fx
@@ -38,10 +42,14 @@ export function sampleRgbaBilinear(data, w, h, x, y, out, oi) {
 export function sampleRgbBilinear(data, w, h, x, y, out, oi) {
   const x0 = Math.max(0, Math.min(w - 1, Math.floor(x)))
   const y0 = Math.max(0, Math.min(h - 1, Math.floor(y)))
-  const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1)
-  const fx = x - x0, fy = y - y0
-  const i00 = (y0 * w + x0) * 3, i10 = (y0 * w + x1) * 3
-  const i01 = (y1 * w + x0) * 3, i11 = (y1 * w + x1) * 3
+  const x1 = Math.min(w - 1, x0 + 1),
+    y1 = Math.min(h - 1, y0 + 1)
+  const fx = x - x0,
+    fy = y - y0
+  const i00 = (y0 * w + x0) * 3,
+    i10 = (y0 * w + x1) * 3
+  const i01 = (y1 * w + x0) * 3,
+    i11 = (y1 * w + x1) * 3
   for (let c = 0; c < 3; c++) {
     const top = data[i00 + c] * (1 - fx) + data[i10 + c] * fx
     const bot = data[i01 + c] * (1 - fx) + data[i11 + c] * fx
@@ -53,9 +61,17 @@ export function sampleRgbBilinear(data, w, h, x, y, out, oi) {
 // so `rgba` is spent). A decoded photo held for sampling needs no alpha: a quarter less.
 export function packRgb(rgba) {
   const n = rgba.length >> 2
-  for (let i = 0, j = 0; i < n; i++, j += 4) { const o = 3 * i; rgba[o] = rgba[j]; rgba[o + 1] = rgba[j + 1]; rgba[o + 2] = rgba[j + 2] }
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    const o = 3 * i
+    rgba[o] = rgba[j]
+    rgba[o + 1] = rgba[j + 1]
+    rgba[o + 2] = rgba[j + 2]
+  }
   const whole = rgba.byteOffset === 0 && rgba.byteLength === rgba.buffer.byteLength
-  const buf = whole && rgba.buffer.transfer ? rgba.buffer.transfer(3 * n) : rgba.buffer.slice(rgba.byteOffset, rgba.byteOffset + 3 * n)
+  const buf =
+    whole && rgba.buffer.transfer
+      ? rgba.buffer.transfer(3 * n)
+      : rgba.buffer.slice(rgba.byteOffset, rgba.byteOffset + 3 * n)
   return new Uint8ClampedArray(buf)
 }
 
@@ -131,17 +147,28 @@ export function validSampleRect(map, ow, oh, sw, sh, { maxPasses = 100000 } = {}
     const s = map(u, v)
     return s.x >= 0 && s.y >= 0 && s.x <= sw - 1 && s.y <= sh - 1
   }
-  const rowBad = (v, x0, x1) => { let n = 0; for (let u = x0; u <= x1; u++) if (!inside(u, v)) n++; return n }
-  const colBad = (u, y0, y1) => { let n = 0; for (let v = y0; v <= y1; v++) if (!inside(u, v)) n++; return n }
+  const rowBad = (v, x0, x1) => {
+    let n = 0
+    for (let u = x0; u <= x1; u++) if (!inside(u, v)) n++
+    return n
+  }
+  const colBad = (u, y0, y1) => {
+    let n = 0
+    for (let v = y0; v <= y1; v++) if (!inside(u, v)) n++
+    return n
+  }
 
-  let x0 = 0, y0 = 0, x1 = ow - 1, y1 = oh - 1
+  let x0 = 0,
+    y0 = 0,
+    x1 = ow - 1,
+    y1 = oh - 1
   for (let pass = 0; pass < maxPasses; pass++) {
     if (x1 <= x0 || y1 <= y0) return null
     const bad = [
-      rowBad(y0, x0, x1),   // 0: top
-      rowBad(y1, x0, x1),   // 1: bottom
-      colBad(x0, y0, y1),   // 2: left
-      colBad(x1, y0, y1),   // 3: right
+      rowBad(y0, x0, x1), // 0: top
+      rowBad(y1, x0, x1), // 1: bottom
+      colBad(x0, y0, y1), // 2: left
+      colBad(x1, y0, y1), // 3: right
     ]
     let worst = 0
     for (let i = 1; i < 4; i++) if (bad[i] > bad[worst]) worst = i
@@ -195,10 +222,14 @@ export function fisheyeCanvas(K, dist, width, height, maxDeg = FISHEYE_DENSE_MAX
     return f * (Number.isFinite(t) && t > 0 ? Math.min(t, cap) : cap)
   }
   const grow = (pinhole, recorded) => Math.max(0, Math.ceil(pinhole - recorded))
-  const left = K.cx + 0.5, right = width - 0.5 - K.cx
-  const top = K.cy + 0.5, bottom = height - 0.5 - K.cy
-  const dx = grow(reach(left, K.fx), left), dxR = grow(reach(right, K.fx), right)
-  const dy = grow(reach(top, K.fy), top), dyB = grow(reach(bottom, K.fy), bottom)
+  const left = K.cx + 0.5,
+    right = width - 0.5 - K.cx
+  const top = K.cy + 0.5,
+    bottom = height - 0.5 - K.cy
+  const dx = grow(reach(left, K.fx), left),
+    dxR = grow(reach(right, K.fx), right)
+  const dy = grow(reach(top, K.fy), top),
+    dyB = grow(reach(bottom, K.fy), bottom)
   if (!(dx || dxR || dy || dyB)) return null
   return { width: width + dx + dxR, height: height + dy + dyB, dx, dy }
 }
@@ -217,7 +248,8 @@ export function resampleRgbaMarked(src, map, ow, oh) {
       const i = v * ow + u
       // eslint-disable-next-line no-self-compare
       if (!(s.x >= -0.5 && s.y >= -0.5 && s.x <= sw - 0.5 && s.y <= sh - 0.5) || s.x !== s.x) {
-        outside[i] = 1; nOutside++
+        outside[i] = 1
+        nOutside++
         continue
       }
       sampleRgbaBilinear(data, sw, sh, s.x, s.y, out, i * 4)

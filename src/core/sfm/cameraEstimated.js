@@ -20,7 +20,8 @@ export function estimatedIntrinsics(cam) {
 // Camera centre in model space: C = -Rᵀ·t
 export function estimatedCenter(cam) {
   if (!cam?.R || !cam?.t) return null
-  const R = cam.R, t = cam.t
+  const R = cam.R,
+    t = cam.t
   const x = -(R[0][0] * t[0] + R[1][0] * t[1] + R[2][0] * t[2])
   const y = -(R[0][1] * t[0] + R[1][1] * t[1] + R[2][1] * t[2])
   const z = -(R[0][2] * t[0] + R[1][2] * t[1] + R[2][2] * t[2])

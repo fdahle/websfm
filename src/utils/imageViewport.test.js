@@ -17,25 +17,46 @@ describe('imageFrame', () => {
 
   it('maps a flagged preview through the native size from metadata', () => {
     const f = imageFrame({
-      naturalWidth: PREVIEW.w, naturalHeight: PREVIEW.h, metaWidth: NATIVE.w, metaHeight: NATIVE.h, lowRes: true,
+      naturalWidth: PREVIEW.w,
+      naturalHeight: PREVIEW.h,
+      metaWidth: NATIVE.w,
+      metaHeight: NATIVE.h,
+      lowRes: true,
     })
     expect(f).toMatchObject({ width: NATIVE.w, height: NATIVE.h, preview: true, exact: true })
     expect(f.bitmapScale).toBeCloseTo(PREVIEW.w / NATIVE.w)
   })
 
   it('treats an unflagged bitmap smaller than the recorded size as a preview too', () => {
-    const f = imageFrame({ naturalWidth: PREVIEW.w, naturalHeight: PREVIEW.h, metaWidth: NATIVE.w, metaHeight: NATIVE.h })
+    const f = imageFrame({
+      naturalWidth: PREVIEW.w,
+      naturalHeight: PREVIEW.h,
+      metaWidth: NATIVE.w,
+      metaHeight: NATIVE.h,
+    })
     expect(f).toMatchObject({ width: NATIVE.w, height: NATIVE.h, preview: true, exact: true })
   })
 
   it('is a non-exact preview while the native size is unknown', () => {
-    const f = imageFrame({ naturalWidth: PREVIEW.w, naturalHeight: PREVIEW.h, metaWidth: null, metaHeight: null, lowRes: true })
+    const f = imageFrame({
+      naturalWidth: PREVIEW.w,
+      naturalHeight: PREVIEW.h,
+      metaWidth: null,
+      metaHeight: null,
+      lowRes: true,
+    })
     expect(f).toMatchObject({ width: PREVIEW.w, height: PREVIEW.h, preview: true, exact: false })
   })
 
   it('ignores a recorded size whose aspect does not match the bitmap', () => {
     // e.g. width/height recorded swapped: never stretch the mapping onto it.
-    const f = imageFrame({ naturalWidth: PREVIEW.w, naturalHeight: PREVIEW.h, metaWidth: NATIVE.h, metaHeight: NATIVE.w, lowRes: true })
+    const f = imageFrame({
+      naturalWidth: PREVIEW.w,
+      naturalHeight: PREVIEW.h,
+      metaWidth: NATIVE.h,
+      metaHeight: NATIVE.w,
+      lowRes: true,
+    })
     expect(f.exact).toBe(false)
     const full = imageFrame({ naturalWidth: 4000, naturalHeight: 3000, metaWidth: 3000, metaHeight: 4000 })
     expect(full).toMatchObject({ width: 4000, height: 3000, preview: false, exact: true })
@@ -82,7 +103,11 @@ describe('zoomAbout', () => {
 
 describe('screenToImage on a preview', () => {
   const frame = imageFrame({
-    naturalWidth: PREVIEW.w, naturalHeight: PREVIEW.h, metaWidth: NATIVE.w, metaHeight: NATIVE.h, lowRes: true,
+    naturalWidth: PREVIEW.w,
+    naturalHeight: PREVIEW.h,
+    metaWidth: NATIVE.w,
+    metaHeight: NATIVE.h,
+    lowRes: true,
   })
   const view = fitView(1140, 855, frame.width, frame.height) // scale 0.1, no offset
 
@@ -103,8 +128,10 @@ describe('screenToImage on a preview', () => {
   })
 
   it('round-trips with the native → screen draw mapping', () => {
-    const px = 1234.5, py = 6789.25
-    const sx = px * view.scale + view.tx, sy = py * view.scale + view.ty
+    const px = 1234.5,
+      py = 6789.25
+    const sx = px * view.scale + view.tx,
+      sy = py * view.scale + view.ty
     const p = screenToImage(sx, sy, view, frame)
     expect(p.px).toBeCloseTo(px)
     expect(p.py).toBeCloseTo(py)

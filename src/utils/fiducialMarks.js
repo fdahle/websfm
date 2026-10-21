@@ -13,7 +13,8 @@ export function nextMarkId(marks = []) {
 /** Ids carried by more than one mark, in first-seen order. Blank ids are not
  *  counted — the calibration drops unnamed marks rather than confusing them. */
 export function duplicateMarkIds(marks = []) {
-  const seen = new Set(), dup = new Set()
+  const seen = new Set(),
+    dup = new Set()
   for (const m of marks) {
     const id = String(m.id ?? '')
     if (!id) continue

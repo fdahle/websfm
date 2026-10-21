@@ -4,8 +4,12 @@ import { beforeAll, describe, it, expect } from 'vitest'
 
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import {
-  fundamentalFromCams, epipolarLine, clipLineToRect,
-  gcpGuideForImage, gcpGuidesForImage, gcpEstimateForImage,
+  fundamentalFromCams,
+  epipolarLine,
+  clipLineToRect,
+  gcpGuideForImage,
+  gcpGuidesForImage,
+  gcpEstimateForImage,
 } from './gcpGuides.js'
 
 beforeAll(async () => {
@@ -18,8 +22,14 @@ const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
 
 // Rotation about world Y (row-major, websfm convention).
 function rotY(deg) {
-  const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a)
-  return [[c, 0, s], [0, 1, 0], [-s, 0, c]]
+  const a = (deg * Math.PI) / 180,
+    c = Math.cos(a),
+    s = Math.sin(a)
+  return [
+    [c, 0, s],
+    [0, 1, 0],
+    [-s, 0, c],
+  ]
 }
 
 // Camera from a world centre + rotation: world→cam is x_cam = R·x + t, and the
@@ -49,7 +59,11 @@ const camC = makeCam([0.4, 0.9, -0.2], rotY(3))
 const X = { x: 0.2, y: -0.1, z: 5 }
 
 describe('gcpEstimateForImage', () => {
-  const cams = new Map([['imgA', camA], ['imgB', camB], ['imgC', camC]])
+  const cams = new Map([
+    ['imgA', camA],
+    ['imgB', camB],
+    ['imgC', camC],
+  ])
   const marksAt = (target, offset) => [
     { imageId: 'imgA', ...project(camA, X) },
     { imageId: 'imgB', ...project(camB, X) },
@@ -57,7 +71,7 @@ describe('gcpEstimateForImage', () => {
     { imageId: target, px: project(camC, X).px + offset, py: project(camC, X).py },
   ]
 
-  it('includes the target image\'s own mark, unlike a guide', async () => {
+  it("includes the target image's own mark, unlike a guide", async () => {
     // 2px off — inside the robust cut's absolute floor, so the mark is kept.
     const obs = marksAt('imgC', 2)
     const guide = await gcpGuideForImage(obs, 'imgC', camC, cams)
@@ -104,7 +118,11 @@ describe('fundamentalFromCams / epipolarLine', () => {
   })
 
   it('holds for several points and both orderings of the pair', () => {
-    for (const P of [{ x: -1.5, y: 0.8, z: 3 }, { x: 2, y: -1, z: 8 }, { x: 0, y: 0, z: 4.2 }]) {
+    for (const P of [
+      { x: -1.5, y: 0.8, z: 3 },
+      { x: 2, y: -1, z: 8 },
+      { x: 0, y: 0, z: 4.2 },
+    ]) {
       const ab = epipolarLine(fundamentalFromCams(camA, camB), project(camA, P).px, project(camA, P).py)
       const b = project(camB, P)
       expect(Math.abs(ab[0] * b.px + ab[1] * b.py + ab[2])).toBeLessThan(1e-6)
@@ -156,7 +174,11 @@ describe('clipLineToRect', () => {
 })
 
 describe('gcpGuideForImage', () => {
-  const cams = new Map([['imgA', camA], ['imgB', camB], ['imgC', camC]])
+  const cams = new Map([
+    ['imgA', camA],
+    ['imgB', camB],
+    ['imgC', camC],
+  ])
 
   it('predicts an exact point from two other observations', async () => {
     const obs = [
@@ -181,7 +203,7 @@ describe('gcpGuideForImage', () => {
     expect(dist).toBeLessThan(1e-6)
   })
 
-  it('ignores the target image\'s own observation (the guide stays independent)', async () => {
+  it("ignores the target image's own observation (the guide stays independent)", async () => {
     const obs = [
       { imageId: 'imgA', ...project(camA, X) },
       { imageId: 'imgB', px: 12, py: 34 }, // deliberately wrong mark on the target
@@ -221,9 +243,15 @@ describe('gcpGuideForImage', () => {
 })
 
 describe('gcpGuidesForImage', () => {
-  const sparseCameras = new Map([['uuidA', camA], ['uuidB', camB], ['uuidC', camC]])
+  const sparseCameras = new Map([
+    ['uuidA', camA],
+    ['uuidB', camB],
+    ['uuidC', camC],
+  ])
   const imagesById = new Map([
-    ['imgA', { uuid: 'uuidA' }], ['imgB', { uuid: 'uuidB' }], ['imgC', { uuid: 'uuidC' }],
+    ['imgA', { uuid: 'uuidA' }],
+    ['imgB', { uuid: 'uuidB' }],
+    ['imgC', { uuid: 'uuidC' }],
   ])
   const twoViews = [
     { imageId: 'imgA', ...project(camA, X) },

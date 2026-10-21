@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { fillOrthoGaps, sampleOrtho, orthorectify, orthorectifyStreamed, affineToSfm, orthoCostCeiling } from './ortho.js'
+import {
+  fillOrthoGaps,
+  sampleOrtho,
+  orthorectify,
+  orthorectifyStreamed,
+  affineToSfm,
+  orthoCostCeiling,
+} from './ortho.js'
 import { NO_LABEL } from './orthoWindow.js'
 import { filterDepthMapsGeometric } from '../dense/geomFilter.js'
 import { makeSampleMap } from '../sfm/displayFrame.js'
@@ -12,13 +19,21 @@ import { makeFrame } from './projection.js'
 // For a horizontal plane every ground point is at camera-depth H, so the depth
 // plane is a constant H — a valid synthetic z-buffer. Paints one solid colour.
 function nadirMap({ cx, cy, H = 10, fx = 100, size = 100, color = [255, 0, 0], uuid = 'a' }) {
-  const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]]
+  const R = [
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 0, -1],
+  ]
   const t = [-cx, cy, H] // t = -R·C
   const K = { fx, fy: fx, cx: size / 2, cy: size / 2 }
   const depth = new Float32Array(size * size).fill(H)
   const cost = new Float32Array(size * size) // all 0
   const rgb = new Uint8Array(size * size * 3)
-  for (let i = 0; i < size * size; i++) { rgb[i * 3] = color[0]; rgb[i * 3 + 1] = color[1]; rgb[i * 3 + 2] = color[2] }
+  for (let i = 0; i < size * size; i++) {
+    rgb[i * 3] = color[0]
+    rgb[i * 3 + 1] = color[1]
+    rgb[i * 3 + 2] = color[2]
+  }
   return { uuid, width: size, height: size, K, R, t, depth, cost, rgb }
 }
 
@@ -63,7 +78,8 @@ describe('orthorectify', () => {
     for (let i = 0; i < dem.width * dem.height; i++) {
       if (ortho.rgba[i * 4 + 3] === 255) {
         expect([ortho.rgba[i * 4], ortho.rgba[i * 4 + 1], ortho.rgba[i * 4 + 2]]).toEqual([40, 90, 160])
-        found = true; break
+        found = true
+        break
       }
     }
     expect(found).toBe(true)
@@ -106,39 +122,99 @@ describe('orthorectifyStreamed with the source photo (O1)', () => {
   const s = 0.25
   const K = scaleK(Kfull, s)
   const map = {
-    uuid: 'p', width: 100, height: 100, K, R: [[1, 0, 0], [0, -1, 0], [0, 0, -1]], t: [-5, 5, 10],
-    depth: new Float32Array(100 * 100).fill(10), cost: new Float32Array(100 * 100),
+    uuid: 'p',
+    width: 100,
+    height: 100,
+    K,
+    R: [
+      [1, 0, 0],
+      [0, -1, 0],
+      [0, 0, -1],
+    ],
+    t: [-5, 5, 10],
+    depth: new Float32Array(100 * 100).fill(10),
+    cost: new Float32Array(100 * 100),
     rgb: new Uint8Array(100 * 100 * 3).fill(77),
   }
   const photo = new Uint8ClampedArray(400 * 400 * 4)
-  for (let y = 0; y < 400; y++) for (let x = 0; x < 400; x++) {
-    const o = 4 * (y * 400 + x), v = ((x >> 3) + (y >> 3)) % 2 ? 255 : 0
-    photo[o] = v; photo[o + 1] = 255 - v; photo[o + 2] = 30; photo[o + 3] = 255
+  for (let y = 0; y < 400; y++)
+    for (let x = 0; x < 400; x++) {
+      const o = 4 * (y * 400 + x),
+        v = ((x >> 3) + (y >> 3)) % 2 ? 255 : 0
+      photo[o] = v
+      photo[o + 1] = 255 - v
+      photo[o + 2] = 30
+      photo[o + 3] = 255
+    }
+  const grid = {
+    width: 80,
+    height: 80,
+    gsd: 0.025,
+    originX: 4,
+    originY: 6,
+    data: new Float32Array(80 * 80),
+    mask: new Uint8Array(80 * 80).fill(1),
   }
-  const grid = { width: 80, height: 80, gsd: 0.025, originX: 4, originY: 6,
-    data: new Float32Array(80 * 80), mask: new Uint8Array(80 * 80).fill(1) }
   const opts = { fillRadius: 0 }
 
   it('samples colour from the photo at full resolution through the sample map', async () => {
-    const loadImage = async () => ({ data: photo, width: 400, height: 400,
-      map: makeSampleMap({ K: Kfull, outScale: s, srcScale: 1 }) })
-    const out = await orthorectifyStreamed(grid, [map], async () => map, (p) => p, opts, () => {}, loadImage)
+    const loadImage = async () => ({
+      data: photo,
+      width: 400,
+      height: 400,
+      map: makeSampleMap({ K: Kfull, outScale: s, srcScale: 1 }),
+    })
+    const out = await orthorectifyStreamed(
+      grid,
+      [map],
+      async () => map,
+      (p) => p,
+      opts,
+      () => {},
+      loadImage,
+    )
     expect(out.sampled).toBe(80 * 80)
-    for (const [col, row] of [[0, 0], [7, 0], [8, 0], [37, 51], [79, 79]]) {
-      const o = 4 * (row * 80 + col), po = 4 * ((row + 160) * 400 + col + 160)
+    for (const [col, row] of [
+      [0, 0],
+      [7, 0],
+      [8, 0],
+      [37, 51],
+      [79, 79],
+    ]) {
+      const o = 4 * (row * 80 + col),
+        po = 4 * ((row + 160) * 400 + col + 160)
       expect([out.rgba[o], out.rgba[o + 1], out.rgba[o + 2]]).toEqual([photo[po], photo[po + 1], photo[po + 2]])
     }
   })
 
   it('tells the loader how many depth-map pixels one ortho cell spans', async () => {
     let seen = null
-    await orthorectifyStreamed(grid, [map], async () => map, (p) => p, opts, () => {}, async (mi, m, perCell) => { seen = perCell; return null })
+    await orthorectifyStreamed(
+      grid,
+      [map],
+      async () => map,
+      (p) => p,
+      opts,
+      () => {},
+      async (mi, m, perCell) => {
+        seen = perCell
+        return null
+      },
+    )
     expect(seen).toBeCloseTo(0.25, 9) // one cell = one photo pixel = ¼ depth-map pixel
   })
 
   it('without loadImage (or when it returns null) colours from the depth map', async () => {
     for (const loadImage of [null, async () => null]) {
-      const out = await orthorectifyStreamed(grid, [map], async () => map, (p) => p, opts, () => {}, loadImage)
+      const out = await orthorectifyStreamed(
+        grid,
+        [map],
+        async () => map,
+        (p) => p,
+        opts,
+        () => {},
+        loadImage,
+      )
       expect(out.rgba[0]).toBe(77)
       expect(out.rgba[4 * 80 * 80 - 4]).toBe(77)
     }
@@ -147,20 +223,25 @@ describe('orthorectifyStreamed with the source photo (O1)', () => {
   it('leaves a cell the photo does not cover uncoloured', async () => {
     // A photo cropped to its left half: cells mapping to x ≥ 200 have no colour.
     const half = { data: photo, width: 200, height: 400, map: makeSampleMap({ K: Kfull, outScale: s, srcScale: 1 }) }
-    const out = await orthorectifyStreamed(grid, [map], async () => map, (p) => p, opts, () => {}, async () => half)
-    expect(out.rgba[4 * 39 + 3]).toBe(255)   // col 39 → x 199
-    expect(out.rgba[4 * 41 + 3]).toBe(0)     // col 41 → x 201
+    const out = await orthorectifyStreamed(
+      grid,
+      [map],
+      async () => map,
+      (p) => p,
+      opts,
+      () => {},
+      async () => half,
+    )
+    expect(out.rgba[4 * 39 + 3]).toBe(255) // col 39 → x 199
+    expect(out.rgba[4 * 41 + 3]).toBe(0) // col 41 → x 201
   })
 })
 
 describe('fillOrthoGaps', () => {
   it('fills interior transparent pixels but not cells outside the surface', () => {
-    const width = 3, height = 1
-    const rgba = new Uint8ClampedArray([
-      20, 40, 60, 255,
-      0, 0, 0, 0,
-      0, 0, 0, 0,
-    ])
+    const width = 3,
+      height = 1
+    const rgba = new Uint8ClampedArray([20, 40, 60, 255, 0, 0, 0, 0, 0, 0, 0, 0])
     const surface = new Uint8Array([1, 1, 0])
     const filled = fillOrthoGaps(rgba, surface, width, height, 2, 'nearest')
     expect(filled).toBe(1)
@@ -181,16 +262,35 @@ describe('fillOrthoGaps', () => {
 
 describe('affineToSfm', () => {
   it('linearises a georeference similarity at survey coordinates to sub-nanometre', () => {
-    const c = Math.cos(0.3), s = Math.sin(0.3)
-    const frame = frameFromSimilarity({ scale: 2.5, R: [[c, -s, 0], [s, c, 0], [0, 0, 1]], t: [5e5, 7e6, 120] }, 'EPSG:3031')
-    const lo = [4.99e5, 6.999e6, 50], hi = [5.01e5, 7.001e6, 400]
+    const c = Math.cos(0.3),
+      s = Math.sin(0.3)
+    const frame = frameFromSimilarity(
+      {
+        scale: 2.5,
+        R: [
+          [c, -s, 0],
+          [s, c, 0],
+          [0, 0, 1],
+        ],
+        t: [5e5, 7e6, 120],
+      },
+      'EPSG:3031',
+    )
+    const lo = [4.99e5, 6.999e6, 50],
+      hi = [5.01e5, 7.001e6, 400]
     const aff = affineToSfm(frame.toSfm, lo, hi)
     expect(aff).not.toBeNull()
-    for (const q of [[5.004e5, 7.0003e6, 77], [4.995e5, 6.9995e6, 390]]) {
+    for (const q of [
+      [5.004e5, 7.0003e6, 77],
+      [4.995e5, 6.9995e6, 390],
+    ]) {
       const d = q.map((v, i) => v - aff.c0[i])
       const want = frame.toSfm(q)
       for (let r = 0; r < 3; r++) {
-        expect(aff.P0[r] + aff.A[r * 3] * d[0] + aff.A[r * 3 + 1] * d[1] + aff.A[r * 3 + 2] * d[2]).toBeCloseTo(want[r], 9)
+        expect(aff.P0[r] + aff.A[r * 3] * d[0] + aff.A[r * 3 + 1] * d[1] + aff.A[r * 3 + 2] * d[2]).toBeCloseTo(
+          want[r],
+          9,
+        )
       }
     }
   })
@@ -218,7 +318,14 @@ describe('orthoCostCeiling', () => {
     for (let i = 0; i < m.cost.length; i++) {
       if (m.depth[i] > 0) expect(m.cost[i]).toBeLessThanOrEqual(ceiling)
     }
-    const pts = [[0, 0, 0], [1, 1, 0], [-2, 3, 0], [3.3, -1.7, 0], [0.05, 0, 0], [1.05, 1, 0]]
+    const pts = [
+      [0, 0, 0],
+      [1, 1, 0],
+      [-2, 3, 0],
+      [3.3, -1.7, 0],
+      [0.05, 0, 0],
+      [1.05, 1, 0],
+    ]
     expect(pts.filter((P) => sampleOrtho(P, [m], { maxCost: Infinity })).length).toBeGreaterThan(0)
     for (const P of pts) {
       expect(sampleOrtho(P, [m], { maxCost: ceiling })).toEqual(sampleOrtho(P, [m], { maxCost: Infinity }))

@@ -50,10 +50,14 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
         if (file) {
           const layer = await createGpuRasterLayer(r, file)
           layer.set('fileKey', r.fileKey ?? r.id)
-          layer.once('postrender', () => { r.gpuReady = true })
+          layer.once('postrender', () => {
+            r.gpuReady = true
+          })
           return layer
         }
-      } catch (err) { console.warn('Tiled raster display failed; using preview', err) }
+      } catch (err) {
+        console.warn('Tiled raster display failed; using preview', err)
+      }
     }
     const bounds = rasterBounds({ width: r.width, height: r.height, geoTransform: r.geoTransform })
     if (!bounds) return null
@@ -78,8 +82,12 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
     // canvas filter around this layer's draw — the same maths (utils/orthoFilter.js).
     const filter = r.product ? orthoAdjustFilter(r.adjust) : null
     if (filter) {
-      layer.on('prerender', (e) => { e.context.filter = filter })
-      layer.on('postrender', (e) => { e.context.filter = 'none' })
+      layer.on('prerender', (e) => {
+        e.context.filter = filter
+      })
+      layer.on('postrender', (e) => {
+        e.context.filter = 'none'
+      })
     }
     layer.set('filter', filter)
     return layer
@@ -119,10 +127,13 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
           // A GPU layer restyles in place while it draws the same file; a rebuilt
           // product (new fileKey), or one that must now draw its preview, is rebuilt.
           if ((!r.product || r.cog) && existing.get('fileKey') === (r.fileKey ?? r.id)) {
-            existing.setStyle(gpuRasterStyle(r)); continue
+            existing.setStyle(gpuRasterStyle(r))
+            continue
           }
-        } else if (existing.get('previewUrl') === r.previewDataUrl
-          && existing.get('filter') === (r.product ? orthoAdjustFilter(r.adjust) : null)) {
+        } else if (
+          existing.get('previewUrl') === r.previewDataUrl &&
+          existing.get('filter') === (r.product ? orthoAdjustFilter(r.adjust) : null)
+        ) {
           // Opacity is a live property; the image itself is not. A restyle (or a
           // kind flip) replaces previewDataUrl in place on the same record, so an
           // unchanged url is the ONLY case that may keep its source — otherwise the
@@ -134,7 +145,10 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
         layers.delete(r.id)
       }
       const layer = await makeRasterLayer(r)
-      if (run !== generation || !ctx.map) { disposeRasterLayer(layer); return }
+      if (run !== generation || !ctx.map) {
+        disposeRasterLayer(layer)
+        return
+      }
       if (layer) layers.set(r.id, layer)
     }
     for (const [id, layer] of [...layers]) {
@@ -172,7 +186,11 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
       const b = rasterBounds({ width: r.width, height: r.height, geoTransform: r.geoTransform })
       const proj = r.crs ? getOlProjection(r.crs) : null
       if (!b || !proj || !view) continue
-      try { out.push(transformExtent(b, proj, view)) } catch { /* unknown transform */ }
+      try {
+        out.push(transformExtent(b, proj, view))
+      } catch {
+        /* unknown transform */
+      }
     }
     return out
   }

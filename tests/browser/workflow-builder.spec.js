@@ -8,7 +8,7 @@ async function openBuilder(page) {
 
 test('new project workflow supports editing, reordering, templates and persistence', async ({ page }, testInfo) => {
   const errors = []
-  page.on('pageerror', error => errors.push(error.message))
+  page.on('pageerror', (error) => errors.push(error.message))
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
   await page.getByRole('button', { name: 'Object capture', exact: false }).click()
@@ -31,7 +31,9 @@ test('new project workflow supports editing, reordering, templates and persisten
   await page.screenshot({ path: testInfo.outputPath('builder-desktop.png') })
   await dialog.getByRole('button', { name: 'Save template', exact: true }).click()
   await dialog.getByRole('button', { name: 'Recipe', exact: true }).click()
-  await expect(dialog.locator('textarea')).toHaveValue(/workflow "My sparse workflow"[\s\S]*detect-features[\s\S]*match-features[\s\S]*reconstruct/)
+  await expect(dialog.locator('textarea')).toHaveValue(
+    /workflow "My sparse workflow"[\s\S]*detect-features[\s\S]*match-features[\s\S]*reconstruct/,
+  )
   await dialog.getByRole('button', { name: 'Blocks', exact: true }).click()
   await page.setViewportSize({ width: 1024, height: 768 })
   await expect(dialog.getByRole('combobox', { name: 'Preset', exact: true })).toBeVisible()
@@ -44,12 +46,16 @@ test('new project workflow supports editing, reordering, templates and persisten
   await expect(dialog.locator('.workflow-block')).toHaveCount(3)
   await expect(dialog.locator('.workflow-block').last()).toContainText('Preset: high')
   // Wait for real OPFS writes, then verify the same app restore path users take.
-  await expect.poll(() => page.evaluate(async () => {
-    const { readIndex, loadWorkflows } = await import('/src/utils/opfs.js')
-    const index = await readIndex()
-    const data = await loadWorkflows(index.lastOpenedId)
-    return data?.workflows?.length
-  })).toBe(3)
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const { readIndex, loadWorkflows } = await import('/src/utils/opfs.js')
+        const index = await readIndex()
+        const data = await loadWorkflows(index.lastOpenedId)
+        return data?.workflows?.length
+      }),
+    )
+    .toBe(3)
   await page.reload()
   await page.getByText('My Project', { exact: true }).click()
   const restored = await openBuilder(page)
@@ -77,14 +83,19 @@ test('interactive workflow pauses and records a completed run', async ({ page })
 
 test('quality gate branches to a named block and the recipe text edits the same graph', async ({ page }) => {
   const errors = []
-  page.on('pageerror', error => errors.push(error.message))
+  page.on('pageerror', (error) => errors.push(error.message))
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
   await page.getByRole('button', { name: 'Object capture', exact: false }).click()
   await page.getByRole('button', { name: 'Create project', exact: true }).click()
   const dialog = await openBuilder(page)
   await dialog.getByRole('button', { name: 'Add Detect Features', exact: true }).click()
-  for (const name of ['Match Features Automatic', 'Sparse Model Automatic', 'Quality Gate Control', 'Sparse Model Automatic']) {
+  for (const name of [
+    'Match Features Automatic',
+    'Sparse Model Automatic',
+    'Quality Gate Control',
+    'Sparse Model Automatic',
+  ]) {
     await dialog.getByRole('button', { name, exact: true }).click()
   }
   const blocks = dialog.locator('.workflow-block')
@@ -103,7 +114,9 @@ test('quality gate branches to a named block and the recipe text edits the same 
 
   await dialog.getByRole('button', { name: 'Recipe', exact: true }).click()
   const recipe = dialog.getByRole('textbox', { name: 'Recipe text', exact: true })
-  await expect(recipe).toHaveValue(/gate metric="reprojMedianPx" op="<" threshold=1 onFail="branch" failTarget="reconstruct-1"/)
+  await expect(recipe).toHaveValue(
+    /gate metric="reprojMedianPx" op="<" threshold=1 onFail="branch" failTarget="reconstruct-1"/,
+  )
   await expect(recipe).toHaveValue(/\nreconstruct-1: reconstruct preset="medium"/)
   const original = await recipe.inputValue()
   // A broken line is refused with its line number; nothing is applied.
@@ -117,8 +130,10 @@ test('quality gate branches to a named block and the recipe text edits the same 
   await expect(recipe).toHaveValue(original)
   // A text edit rebuilds the blocks: a tighter threshold, stop instead of the
   // branch, and a disabled tool block appended.
-  await recipe.fill(original.replace('threshold=1 onFail="branch" failTarget="reconstruct-1"', 'threshold=0.5 onFail=stop')
-    + '\nfilter-cloud preset=light @off')
+  await recipe.fill(
+    original.replace('threshold=1 onFail="branch" failTarget="reconstruct-1"', 'threshold=0.5 onFail=stop') +
+      '\nfilter-cloud preset=light @off',
+  )
   await dialog.getByRole('button', { name: 'Apply recipe', exact: true }).click()
   await expect(dialog.locator('.recipe-errors')).toHaveCount(0)
   await expect(recipe).toHaveValue(/gate metric="reprojMedianPx" op="<" threshold=0.5 onFail="stop"/)
@@ -129,7 +144,9 @@ test('quality gate branches to a named block and the recipe text edits the same 
   await expect(blocks.nth(5).locator('.status')).toHaveText('Disabled')
   // A backward jump is refused by preflight.
   await dialog.getByRole('button', { name: 'Recipe', exact: true }).click()
-  await recipe.fill((await recipe.inputValue()).replace('detect-features', 'top: detect-features') + '\ngoto target=top')
+  await recipe.fill(
+    (await recipe.inputValue()).replace('detect-features', 'top: detect-features') + '\ngoto target=top',
+  )
   await dialog.getByRole('button', { name: 'Apply recipe', exact: true }).click()
   await dialog.getByRole('button', { name: 'Blocks', exact: true }).click()
   await expect(dialog.getByText(/Go to: “top” is not below this block — jumps only go forward/)).toBeVisible()
@@ -139,7 +156,7 @@ test('quality gate branches to a named block and the recipe text edits the same 
 
 test('a cleanup chain runs tool blocks on its own outputs and records its gates', async ({ page }) => {
   const errors = []
-  page.on('pageerror', error => errors.push(error.message))
+  page.on('pageerror', (error) => errors.push(error.message))
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
   await page.getByRole('button', { name: 'Object capture', exact: false }).click()
@@ -149,24 +166,41 @@ test('a cleanup chain runs tool blocks on its own outputs and records its gates'
   await page.evaluate(async () => {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
     const store = useReconstructionStore()
-    const n = 2000, pos = new Float64Array(n * 3), col = new Uint8Array(n * 3).fill(128)
+    const n = 2000,
+      pos = new Float64Array(n * 3),
+      col = new Uint8Array(n * 3).fill(128)
     let seed = 1
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
-    for (let i = 0; i < n; i++) { pos[3 * i] = rnd() * 10; pos[3 * i + 1] = rnd() * 10; pos[3 * i + 2] = rnd() * 0.05 }
-    store.clouds.push({ id: 'dense-1', name: 'Dense cloud', kind: 'dense', createdAt: 1, cameras: new Map(), count: n, pos, col })
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+    for (let i = 0; i < n; i++) {
+      pos[3 * i] = rnd() * 10
+      pos[3 * i + 1] = rnd() * 10
+      pos[3 * i + 2] = rnd() * 0.05
+    }
+    store.clouds.push({
+      id: 'dense-1',
+      name: 'Dense cloud',
+      kind: 'dense',
+      createdAt: 1,
+      cameras: new Map(),
+      count: n,
+      pos,
+      col,
+    })
   })
   const dialog = await openBuilder(page)
   await dialog.getByRole('button', { name: 'Recipe', exact: true }).click()
   const recipe = dialog.getByRole('textbox', { name: 'Recipe text', exact: true })
-  await recipe.fill([
-    'workflow "Cleanup chain"',
-    'defaults warning=continue reuse=valid display=standard',
-    'gate metric=densePoints op=">=" threshold=500 onFail=stop',
-    'filter-cloud preset=custom methods=["voxel"] voxelCell=1',
-    'gate metric=densePoints op=">=" threshold=1000000 onFail=branch failTarget=normals',
-    'filter-cloud preset=light',
-    'normals: estimate-normals k=8 orient=up',
-  ].join('\n'))
+  await recipe.fill(
+    [
+      'workflow "Cleanup chain"',
+      'defaults warning=continue reuse=valid display=standard',
+      'gate metric=densePoints op=">=" threshold=500 onFail=stop',
+      'filter-cloud preset=custom methods=["voxel"] voxelCell=1',
+      'gate metric=densePoints op=">=" threshold=1000000 onFail=branch failTarget=normals',
+      'filter-cloud preset=light',
+      'normals: estimate-normals k=8 orient=up',
+    ].join('\n'),
+  )
   await dialog.getByRole('button', { name: 'Apply recipe', exact: true }).click()
   await dialog.getByRole('button', { name: 'Blocks', exact: true }).click()
   await expect(dialog.locator('.preflight .ok')).toBeVisible()
@@ -176,7 +210,9 @@ test('a cleanup chain runs tool blocks on its own outputs and records its gates'
   await expect(blocks.locator('.status')).toHaveText(['passed', 'completed', 'failed', 'skipped', 'completed'])
   await expect(blocks.nth(0)).toContainText('Dense points 2,000 — meets >= 500')
   await expect(blocks.nth(2)).toContainText(/Dense points \d+ — fails >= 1,000,000/)
-  await expect(dialog.locator('.run-row .run-gates').first()).toHaveText(/^Dense points 2,000: pass · Dense points \d+: fail$/)
+  await expect(dialog.locator('.run-row .run-gates').first()).toHaveText(
+    /^Dense points 2,000: pass · Dense points \d+: fail$/,
+  )
   // Each tool worked on the previous one's output, never on the source again.
   const names = await page.evaluate(async () => {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')

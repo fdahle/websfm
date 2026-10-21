@@ -31,10 +31,14 @@ const anchorEl = ref(null)
 
 function show() {
   if (!active.value) return
-  openHelp(0, paramSpec(props.op, props.param, anchorEl.value,
-    () => ({ value: props.value, defaultValue: props.defaultValue })))
+  openHelp(
+    0,
+    paramSpec(props.op, props.param, anchorEl.value, () => ({ value: props.value, defaultValue: props.defaultValue })),
+  )
 }
-function onLeave() { leaveHelp(anchorEl.value) }
+function onLeave() {
+  leaveHelp(anchorEl.value)
+}
 
 onBeforeUnmount(() => dropHelp(anchorEl.value))
 </script>
@@ -49,7 +53,8 @@ onBeforeUnmount(() => dropHelp(anchorEl.value))
     @mouseleave="onLeave"
     @focus="show"
     @blur="onLeave"
-  ><slot /></span>
+    ><slot
+  /></span>
 </template>
 
 <style scoped>

@@ -11,19 +11,25 @@ export function trackPersistence(key, work) {
   pendingPersistence.value++
   const promise = Promise.resolve().then(work)
   pending.add(promise)
-  promise.then(() => failures.delete(key), error => {
-    failures.set(key, { key, error, retry: work })
-  }).finally(() => {
-    pending.delete(promise)
-    pendingPersistence.value--
-    persistenceFailures.value = [...failures.values()]
-  })
+  promise
+    .then(
+      () => failures.delete(key),
+      (error) => {
+        failures.set(key, { key, error, retry: work })
+      },
+    )
+    .finally(() => {
+      pending.delete(promise)
+      pendingPersistence.value--
+      persistenceFailures.value = [...failures.values()]
+    })
   return promise
 }
 
 export async function flushPersistence() {
   while (pending.size) await Promise.allSettled([...pending])
-  if (failures.size) throw new Error(`Unsaved changes: ${[...failures.values()][0].error?.message ?? 'storage write failed'}`)
+  if (failures.size)
+    throw new Error(`Unsaved changes: ${[...failures.values()][0].error?.message ?? 'storage write failed'}`)
 }
 
 /** Forget an operation only after its caller explicitly rolled back the edit. */
@@ -44,9 +50,14 @@ export function persistenceLock(key, work) {
   if (globalThis.navigator?.locks?.request) return navigator.locks.request(`websfm:${key}`, work)
   const previous = queues.get(key) ?? Promise.resolve()
   const run = previous.then(work, work)
-  const tail = run.then(() => {}, () => {})
+  const tail = run.then(
+    () => {},
+    () => {},
+  )
   queues.set(key, tail)
-  tail.then(() => { if (queues.get(key) === tail) queues.delete(key) })
+  tail.then(() => {
+    if (queues.get(key) === tail) queues.delete(key)
+  })
   return run
 }
 

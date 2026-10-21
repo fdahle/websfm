@@ -5,8 +5,9 @@ import { fiducialBatchConsensus, fiducialShapeCheck } from './fiducialConsensus.
 // 11000×11000 scan. `shift` moves the whole scan on the platen (the frame moves
 // with it); `bad` displaces one slot, the way a data-strip blob captures a mark.
 function scan(id, { shift = 0, jitter = 0, bad = null } = {}) {
-  const inset = 500 + shift, size = 10000
-  const j = (k) => (jitter ? ((id.charCodeAt(0) * 37 + k * 91) % 100) / 100 * jitter - jitter / 2 : 0)
+  const inset = 500 + shift,
+    size = 10000
+  const j = (k) => (jitter ? (((id.charCodeAt(0) * 37 + k * 91) % 100) / 100) * jitter - jitter / 2 : 0)
   const marks = {
     'side-left': [inset - 300, inset + size / 2],
     'side-right': [inset + size + 300, inset + size / 2],
@@ -15,13 +16,16 @@ function scan(id, { shift = 0, jitter = 0, bad = null } = {}) {
   }
   const accepted = Object.entries(marks).map(([slot, [px, py]], k) => ({
     slot,
-    px: px + j(k) + (bad?.slot === slot ? bad.dx ?? 0 : 0),
-    py: py + j(k + 7) + (bad?.slot === slot ? bad.dy ?? 0 : 0),
+    px: px + j(k) + (bad?.slot === slot ? (bad.dx ?? 0) : 0),
+    py: py + j(k + 7) + (bad?.slot === slot ? (bad.dy ?? 0) : 0),
   }))
   return {
-    id, name: `${id}.tif`, accepted,
+    id,
+    name: `${id}.tif`,
+    accepted,
     frame: { left: inset, right: inset + size, top: inset, bottom: inset + size },
-    natW: 11000, natH: 11000,
+    natW: 11000,
+    natH: 11000,
   }
 }
 
@@ -83,13 +87,24 @@ describe('fiducialShapeCheck', () => {
   // 8 marks on a sheared, scaled, rotated rectangle — an affine scan. Midpoints of
   // opposite pairs still coincide, so nothing may be flagged.
   const affine = ([u, v]) => [5000 + 4100 * u + 300 * v, 5200 - 150 * u + 3950 * v]
-  const unit = { 'corner-tl': [-1, -1], 'corner-tr': [1, -1], 'corner-br': [1, 1], 'corner-bl': [-1, 1],
-    'side-top': [0, -1.05], 'side-bottom': [0, 1.05], 'side-left': [-1.05, 0], 'side-right': [1.05, 0] }
-  const marks = (slots, bump = {}) => slots.map((slot) => {
-    const [px, py] = affine(unit[slot]), [dx, dy] = bump[slot] ?? [0, 0]
-    return { slot, px: px + dx, py: py + dy }
-  })
-  const ALL = Object.keys(unit), CORNERS = ALL.slice(0, 4)
+  const unit = {
+    'corner-tl': [-1, -1],
+    'corner-tr': [1, -1],
+    'corner-br': [1, 1],
+    'corner-bl': [-1, 1],
+    'side-top': [0, -1.05],
+    'side-bottom': [0, 1.05],
+    'side-left': [-1.05, 0],
+    'side-right': [1.05, 0],
+  }
+  const marks = (slots, bump = {}) =>
+    slots.map((slot) => {
+      const [px, py] = affine(unit[slot]),
+        [dx, dy] = bump[slot] ?? [0, 0]
+      return { slot, px: px + dx, py: py + dy }
+    })
+  const ALL = Object.keys(unit),
+    CORNERS = ALL.slice(0, 4)
 
   it('accepts any affine image of a centrally symmetric layout', () => {
     const r = fiducialShapeCheck(marks(ALL, { 'corner-tl': [1.5, -2] }))
@@ -113,7 +128,9 @@ describe('fiducialShapeCheck', () => {
 describe('consensus frame confidence', () => {
   it('falls back to the raster basis when any frame is below the detector floor', () => {
     const rows = Array.from({ length: 5 }, (_, i) => ({
-      id: `i${i}`, natW: 1000, natH: 1000,
+      id: `i${i}`,
+      natW: 1000,
+      natH: 1000,
       frame: { left: 50, right: 950, top: 50, bottom: 950, confidence: i === 2 ? 0.01 : 0.5 },
       accepted: [{ slot: 'corner-tl', px: 60, py: 60 }],
     }))

@@ -5,7 +5,9 @@ function flatCloud(points, withColor = true) {
   const pos = new Float64Array(points.length * 3)
   const col = withColor ? new Uint8Array(points.length * 3) : null
   points.forEach(([x, y, z], i) => {
-    pos[3 * i] = x; pos[3 * i + 1] = y; pos[3 * i + 2] = z
+    pos[3 * i] = x
+    pos[3 * i + 1] = y
+    pos[3 * i + 2] = z
     if (col) col[3 * i] = i % 256
   })
   return { count: points.length, pos, col }
@@ -15,7 +17,10 @@ function flatCloud(points, withColor = true) {
 function planeCloud() {
   const pts = []
   for (let x = 0; x <= 20; x++) for (let y = -5; y <= 5; y++) pts.push([x + 1000, y + 2000, 0.5 * x])
-  for (let i = pts.length - 1; i > 0; i--) { const j = (i * 7919) % (i + 1); [pts[i], pts[j]] = [pts[j], pts[i]] }
+  for (let i = pts.length - 1; i > 0; i--) {
+    const j = (i * 7919) % (i + 1)
+    ;[pts[i], pts[j]] = [pts[j], pts[i]]
+  }
   return flatCloud(pts)
 }
 
@@ -42,7 +47,8 @@ describe('sectionCloud', () => {
     const cloud = planeCloud()
     const s = sectionCloud(cloud, { a: [1000, 2000], b: [1020, 2000], thickness: 0.5 })
     for (let k = 0; k < s.cloud.count; k++) {
-      const x = s.cloud.pos[3 * k], y = s.cloud.pos[3 * k + 1]
+      const x = s.cloud.pos[3 * k],
+        y = s.cloud.pos[3 * k + 1]
       let src = -1
       for (let i = 0; i < cloud.count; i++) if (cloud.pos[3 * i] === x && cloud.pos[3 * i + 1] === y) src = i
       expect(s.cloud.col[3 * k]).toBe(cloud.col[3 * src])
@@ -57,7 +63,11 @@ describe('sectionCloud', () => {
   })
 
   it('offset is positive to the left of a→b', () => {
-    const cloud = flatCloud([[0, 1, 0], [0, -1, 0], [5, 1, 0]])
+    const cloud = flatCloud([
+      [0, 1, 0],
+      [0, -1, 0],
+      [5, 1, 0],
+    ])
     const east = sectionCloud(cloud, { a: [-1, 0], b: [10, 0], thickness: 4 })
     // Heading east, +y is left.
     expect(Array.from(east.profile.offset)).toEqual([1, -1, 1])
@@ -77,7 +87,11 @@ describe('sectionCloud', () => {
   })
 
   it('works on a diagonal line', () => {
-    const cloud = flatCloud([[3, 3, 7], [3.1, 2.9, 1], [1, 5, 2]])
+    const cloud = flatCloud([
+      [3, 3, 7],
+      [3.1, 2.9, 1],
+      [1, 5, 2],
+    ])
     const s = sectionCloud(cloud, { a: [0, 0], b: [10, 10], thickness: 1 })
     expect(s.cloud.count).toBe(2)
     expect(s.profile.station[0]).toBeCloseTo(3 * Math.SQRT2, 9)
@@ -104,7 +118,8 @@ describe('sectionCloud', () => {
 
   it('does not mutate the input cloud', () => {
     const cloud = planeCloud()
-    const pos = Float64Array.from(cloud.pos), col = Uint8Array.from(cloud.col)
+    const pos = Float64Array.from(cloud.pos),
+      col = Uint8Array.from(cloud.col)
     sectionCloud(cloud, { a: [1000, 2000], b: [1020, 2000], thickness: 3 })
     expect(cloud.pos).toEqual(pos)
     expect(cloud.col).toEqual(col)
@@ -120,7 +135,9 @@ describe('sectionToCsv', () => {
     expect(rows).toHaveLength(5)
     expect(rows[2]).toBe('1.000,0.500,0.000,1001.000,2000.000')
     expect(sectionToCsv(s, { decimals: 1 }).split('\n')[1]).toBe('0.0,0.0,0.0,1000.0,2000.0')
-    expect(sectionToCsv(sectionCloud(planeCloud(), { a: [0, 0], b: [1, 0], thickness: 1 }))).toBe('station,z,offset,x,y\n')
+    expect(sectionToCsv(sectionCloud(planeCloud(), { a: [0, 0], b: [1, 0], thickness: 1 }))).toBe(
+      'station,z,offset,x,y\n',
+    )
   })
 })
 

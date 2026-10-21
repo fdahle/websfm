@@ -24,8 +24,8 @@ const MAX_SCALE = 40
 
 export function useImageViewport({ container, imgEl, image, onViewChange, onFrameChange }) {
   const scale = ref(1)
-  const tx    = ref(0)
-  const ty    = ref(0)
+  const tx = ref(0)
+  const ty = ref(0)
 
   // True once the current image has loaded AND been fitted to the viewport —
   // gates the <img> visibility so the browser never paints it at native
@@ -49,11 +49,15 @@ export function useImageViewport({ container, imgEl, image, onViewChange, onFram
 
   function refreshFrame() {
     const img = imgEl.value
-    frame.value = img?.naturalWidth ? imageFrame({
-      naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight,
-      metaWidth: image().meta?.width, metaHeight: image().meta?.height,
-      lowRes: showingLowRes(),
-    }) : null
+    frame.value = img?.naturalWidth
+      ? imageFrame({
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          metaWidth: image().meta?.width,
+          metaHeight: image().meta?.height,
+          lowRes: showingLowRes(),
+        })
+      : null
   }
 
   // Fit the image to the viewport. A v-show-hidden tab measures 0×0 (e.g. an image
@@ -66,7 +70,10 @@ export function useImageViewport({ container, imgEl, image, onViewChange, onFram
     const f = frame.value
     if (!c || !f) return false
     const v = fitView(c.clientWidth, c.clientHeight, f.width, f.height)
-    if (!v) { lastSize = null; return false }
+    if (!v) {
+      lastSize = null
+      return false
+    }
     scale.value = v.scale
     tx.value = v.tx
     ty.value = v.ty
@@ -91,8 +98,12 @@ export function useImageViewport({ container, imgEl, image, onViewChange, onFram
     zoomAt(factor, c.clientWidth / 2, c.clientHeight / 2)
   }
 
-  function zoomIn()  { applyZoom(1.5) }
-  function zoomOut() { applyZoom(1 / 1.5) }
+  function zoomIn() {
+    applyZoom(1.5)
+  }
+  function zoomOut() {
+    applyZoom(1 / 1.5)
+  }
 
   // Event → viewport-relative coords.
   function getViewportCoords(e) {
@@ -116,7 +127,8 @@ export function useImageViewport({ container, imgEl, image, onViewChange, onFram
     resizeObserver = new ResizeObserver(() => {
       const c = container.value
       if (!c) return
-      const w = c.clientWidth, h = c.clientHeight
+      const w = c.clientWidth,
+        h = c.clientHeight
       if (!w || !h) return
       // lastSize is null while a fit is pending (deferred at 0×0) → fit now.
       if (lastSize && lastSize.w === w && lastSize.h === h) return
@@ -132,25 +144,45 @@ export function useImageViewport({ container, imgEl, image, onViewChange, onFram
   // A new `url` means a new decode (image switch, or the TIFF thumbnail →
   // full-res swap) — hide the old frame until the new one has loaded and been
   // fitted, instead of flashing native size or a stale image.
-  watch(() => image().url, () => { imageReady.value = false; frame.value = null })
+  watch(
+    () => image().url,
+    () => {
+      imageReady.value = false
+      frame.value = null
+    },
+  )
 
   // The native size can arrive after the preview bitmap has loaded (TIFF metadata
   // is read alongside the transcode). Re-derive the frame and refit if it changed.
-  watch(() => [image().meta?.width, image().meta?.height], () => {
-    if (!frame.value) return
-    const prev = frame.value
-    refreshFrame()
-    const f = frame.value
-    if (f && (f.width !== prev.width || f.height !== prev.height || f.preview !== prev.preview)) {
-      fit()
-      onFrameChange()
-    }
-  })
+  watch(
+    () => [image().meta?.width, image().meta?.height],
+    () => {
+      if (!frame.value) return
+      const prev = frame.value
+      refreshFrame()
+      const f = frame.value
+      if (f && (f.width !== prev.width || f.height !== prev.height || f.preview !== prev.preview)) {
+        fit()
+        onFrameChange()
+      }
+    },
+  )
 
   return {
-    scale, tx, ty, imageReady, frame, editable,
-    refreshFrame, fit, zoomAt, zoomIn, zoomOut,
-    getViewportCoords, toImagePixel,
-    observeResize, disconnectResize,
+    scale,
+    tx,
+    ty,
+    imageReady,
+    frame,
+    editable,
+    refreshFrame,
+    fit,
+    zoomAt,
+    zoomIn,
+    zoomOut,
+    getViewportCoords,
+    toImagePixel,
+    observeResize,
+    disconnectResize,
   }
 }

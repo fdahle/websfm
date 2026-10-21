@@ -43,7 +43,9 @@ describe('useInlineRename', () => {
 describe('useExpandedSet', () => {
   it('toggles rows independently and clears', () => {
     const e = useExpandedSet()
-    e.toggle('a'); e.toggle('b'); e.toggle('a')
+    e.toggle('a')
+    e.toggle('b')
+    e.toggle('a')
     expect(e.isExpanded('a')).toBe(false)
     expect(e.isExpanded('b')).toBe(true)
     e.clear()

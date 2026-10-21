@@ -43,12 +43,34 @@ export const is3dMeasurement = (record) => record?.kind === 'length3d' || record
 // Columns, in order. Each value column's unit sits in the `*_unit` column after its
 // group; `coverage_pct` is a percentage and `ground_scale_factor` has no unit.
 export const MEASUREMENT_COLUMNS = [
-  'name', 'kind', 'measured_on', 'stale',
-  'length', 'horizontal_length', 'height_change', 'perimeter', 'length_unit',
-  'area', 'footprint_area', 'area_unit',
-  'elevation_min', 'elevation_max', 'relief', 'base_height', 'elevation_unit',
-  'volume_cut', 'volume_fill', 'volume_net', 'volume_unit', 'base', 'coverage_pct',
-  'ground_scale_factor', 'vertices', 'coordinate_frame', 'coordinate_unit', 'saved_at',
+  'name',
+  'kind',
+  'measured_on',
+  'stale',
+  'length',
+  'horizontal_length',
+  'height_change',
+  'perimeter',
+  'length_unit',
+  'area',
+  'footprint_area',
+  'area_unit',
+  'elevation_min',
+  'elevation_max',
+  'relief',
+  'base_height',
+  'elevation_unit',
+  'volume_cut',
+  'volume_fill',
+  'volume_net',
+  'volume_unit',
+  'base',
+  'coverage_pct',
+  'ground_scale_factor',
+  'vertices',
+  'coordinate_frame',
+  'coordinate_unit',
+  'saved_at',
 ]
 
 /**
@@ -59,7 +81,11 @@ export const MEASUREMENT_COLUMNS = [
 export function rasterRecordCrs(record) {
   let crs = record?.crs
   if (crs === undefined && typeof record?.stamp === 'string') {
-    try { crs = JSON.parse(record.stamp)?.[4] } catch { crs = null }
+    try {
+      crs = JSON.parse(record.stamp)?.[4]
+    } catch {
+      crs = null
+    }
   }
   return crs && crs !== 'local' ? crs : null
 }
@@ -88,7 +114,10 @@ export function describeMeasurement(record, ctx = {}) {
   f.measured_on = ctx.sourceName?.(record) ?? record.source ?? ''
   f.stale = !!ctx.stale?.(record)
   f.saved_at = Number.isFinite(record.savedAt) ? new Date(record.savedAt).toISOString() : null
-  let frame, coords, closed = false, profile = null
+  let frame,
+    coords,
+    closed = false,
+    profile = null
 
   if (is3dMeasurement(record)) {
     const units = ctx.units3d?.(record) ?? record.unitSnapshot ?? { scale: 1, unit: 'model', label: 'model units' }
@@ -135,20 +164,31 @@ export function describeMeasurement(record, ctx = {}) {
     }
     if (record.kind === 'profile') {
       profile = (record.profile ?? []).map((p) => [round(p.distance), p.z == null ? null : round(p.z)])
-      let lo = Infinity, hi = -Infinity
-      for (const [, z] of profile) if (z != null) { lo = Math.min(lo, z); hi = Math.max(hi, z) }
+      let lo = Infinity,
+        hi = -Infinity
+      for (const [, z] of profile)
+        if (z != null) {
+          lo = Math.min(lo, z)
+          hi = Math.max(hi, z)
+        }
       f.elevation_unit = vertical
-      if (lo <= hi) { f.elevation_min = lo; f.elevation_max = hi; f.relief = round(hi - lo) }
+      if (lo <= hi) {
+        f.elevation_min = lo
+        f.elevation_max = hi
+        f.relief = round(hi - lo)
+      }
     }
     if (record.kind === 'volume') {
       const v = record.volume
       f.volume_unit = volumeUnitLabel({ horizontal: unit, vertical })
       f.elevation_unit = vertical
       if (v && !v.error) {
-        f.volume_cut = round(v.cut); f.volume_fill = round(v.fill); f.volume_net = round(v.net)
+        f.volume_cut = round(v.cut)
+        f.volume_fill = round(v.fill)
+        f.volume_net = round(v.net)
         f.coverage_pct = round(100 * v.coverage, 2)
         const b = v.base ?? {}
-        f.base = b.kind === 'surface' ? `reference DEM "${b.name ?? ''}"` : VOLUME_BASES[b.kind] ?? b.kind ?? null
+        f.base = b.kind === 'surface' ? `reference DEM "${b.name ?? ''}"` : (VOLUME_BASES[b.kind] ?? b.kind ?? null)
         if (b.kind === 'lowest' || b.kind === 'custom') f.base_height = round(b.height)
       }
     }
@@ -228,11 +268,16 @@ export function measurementsGeoJson(rows, { mode = 'project', targetCrs = null, 
     } else if (row.frame.crs && target && reproject) {
       const xy = row.frame.crs === target ? row.coords : reproject(row.coords, row.frame.crs, target)
       if (used === 'wgs84') {
-        geometry = geometryOf(xy.map((p) => [p[0], p[1]]), row.closed, 9)
+        geometry = geometryOf(
+          xy.map((p) => [p[0], p[1]]),
+          row.closed,
+          9,
+        )
         props.frame_coordinates = row.coords.map((p) => p.map((v) => Number(v.toFixed(6))))
       } else {
         geometry = geometryOf(xy, row.closed, 6)
-        if (row.frame.crs !== target) props.frame_coordinates = row.coords.map((p) => p.map((v) => Number(v.toFixed(6))))
+        if (row.frame.crs !== target)
+          props.frame_coordinates = row.coords.map((p) => p.map((v) => Number(v.toFixed(6))))
       }
     } else {
       // No CRS for this one: it cannot be placed in a georeferenced file.
@@ -245,8 +290,12 @@ export function measurementsGeoJson(rows, { mode = 'project', targetCrs = null, 
     fc.crs = { type: 'name', properties: { name: target.toUpperCase() } }
   }
   // Foreign members (RFC 7946 §6.1): what the coordinates are, for a human reader.
-  fc.coordinate_frame = used === 'wgs84' ? 'WGS 84 longitude/latitude (RFC 7946)'
-    : used === 'project' ? target : 'local — see each feature\'s coordinate_frame'
+  fc.coordinate_frame =
+    used === 'wgs84'
+      ? 'WGS 84 longitude/latitude (RFC 7946)'
+      : used === 'project'
+        ? target
+        : "local — see each feature's coordinate_frame"
   fc.georeferenced = used !== 'local'
   fc.features = features
   return fc

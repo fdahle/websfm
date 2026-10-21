@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
-  stagedSelfCalTerms, stagedSelfCalDeferred, SELF_CAL_BASE_TERMS,
-  distortionIdentifiable, withoutDistortionTerms,
+  stagedSelfCalTerms,
+  stagedSelfCalDeferred,
+  SELF_CAL_BASE_TERMS,
+  distortionIdentifiable,
+  withoutDistortionTerms,
 } from './selfCalSchedule.js'
 
 describe('stagedSelfCalTerms', () => {
@@ -38,7 +41,9 @@ describe('stagedSelfCalTerms', () => {
     expect(stagedSelfCalDeferred({ ...big, lensTerms: 2 })).toHaveLength(0)
     // Four terms: the first pass that unlocks k3 holds k4 back …
     expect(stagedSelfCalTerms({ ...big, lensTerms: 4 })).toBe('f,cxcy,k1,k2,k3')
-    expect(stagedSelfCalDeferred({ ...big, lensTerms: 4 }).join(' ')).toMatch(/k4 \(waits for a pass that has refined k3\)/)
+    expect(stagedSelfCalDeferred({ ...big, lensTerms: 4 }).join(' ')).toMatch(
+      /k4 \(waits for a pass that has refined k3\)/,
+    )
     // … the next one adds it.
     expect(stagedSelfCalTerms({ ...big, lensTerms: 4, k3Settled: true })).toBe('f,cxcy,k1,k2,k3,k4')
     expect(stagedSelfCalDeferred({ ...big, lensTerms: 4, k3Settled: true })).toHaveLength(0)

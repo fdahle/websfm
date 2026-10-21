@@ -26,7 +26,7 @@ function referenceSets(points) {
 // Random model where each keypoint belongs to at most one point, as in a real track store.
 function randomModel(seed, nImages = 7, nPoints = 400) {
   let s = seed
-  const rand = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+  const rand = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
   const uuids = Array.from({ length: nImages }, (_, i) => `img-${String.fromCharCode(103 - i)}-${i}`)
   const nextKp = new Array(nImages).fill(0)
   const points = []
@@ -45,14 +45,21 @@ function randomModel(seed, nImages = 7, nPoints = 400) {
 function pack(points, uuids) {
   const idx = new Map(uuids.map((u, i) => [u, i]))
   const vcount = new Uint32Array(points.length)
-  const vcam = [], vkp = []
+  const vcam = [],
+    vkp = []
   points.forEach((p, i) => {
     vcount[i] = p.views.size
-    for (const [u, kp] of p.views) { vcam.push(idx.get(u)); vkp.push(kp) }
+    for (const [u, kp] of p.views) {
+      vcam.push(idx.get(u))
+      vkp.push(kp)
+    }
   })
   return makePackedPoints({
-    pos: new Float64Array(points.length * 3), viewUuids: uuids, vcount,
-    vcam: Uint32Array.from(vcam), vkp: Uint32Array.from(vkp),
+    pos: new Float64Array(points.length * 3),
+    viewUuids: uuids,
+    vcount,
+    vcam: Uint32Array.from(vcam),
+    vkp: Uint32Array.from(vkp),
   })
 }
 

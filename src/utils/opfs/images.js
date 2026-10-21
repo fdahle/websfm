@@ -25,7 +25,7 @@ export async function projectSubDirs(projectId, names) {
 }
 
 export async function loadImageBlob(projectId, uuid, dirs = null) {
-  const dir = dirs?.images ?? await getSubDir(projectId, 'images')
+  const dir = dirs?.images ?? (await getSubDir(projectId, 'images'))
   const fh = await dir.getFileHandle(uuid)
   return fh.getFile()
 }
@@ -35,7 +35,9 @@ export async function deleteImage(projectId, uuid) {
     try {
       const dir = await getSubDir(projectId, 'images')
       await dir.removeEntry(uuid)
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -56,10 +58,13 @@ async function derivedName(uuid, kind) {
 }
 
 export async function saveImageDerived(projectId, uuid, kind, blob) {
-  return trackPersistence('saveImageDerived:' + String(projectId) + ':' + String(uuid) + ':' + String(kind), async () => {
-    const dir = await getSubDir(projectId, 'images-derived')
-    await writeFileIn(dir, await derivedName(uuid, kind), blob)
-  })
+  return trackPersistence(
+    'saveImageDerived:' + String(projectId) + ':' + String(uuid) + ':' + String(kind),
+    async () => {
+      const dir = await getSubDir(projectId, 'images-derived')
+      await writeFileIn(dir, await derivedName(uuid, kind), blob)
+    },
+  )
 }
 
 export async function loadImageDerivedBlob(projectId, uuid, kind) {
@@ -77,7 +82,9 @@ export async function deleteImageDerived(projectId, uuid) {
     try {
       const dir = await getSubDir(projectId, 'images-derived')
       for (const kind of DERIVED_KINDS) await dir.removeEntry(await derivedName(uuid, kind)).catch(ignoreMissing)
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -96,7 +103,7 @@ export async function saveMask(projectId, uuid, blob) {
 
 export async function loadMaskFile(projectId, uuid, dirs = null) {
   try {
-    const dir = dirs?.masks ?? await getSubDir(projectId, 'masks')
+    const dir = dirs?.masks ?? (await getSubDir(projectId, 'masks'))
     return await (await dir.getFileHandle(uuid + '.png')).getFile()
   } catch {
     return null
@@ -108,7 +115,9 @@ export async function deleteMask(projectId, uuid) {
     try {
       const dir = await getSubDir(projectId, 'masks')
       await dir.removeEntry(uuid + '.png')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -125,7 +134,7 @@ export async function saveDepth(projectId, uuid, blob) {
 
 export async function loadDepthFile(projectId, uuid, dirs = null) {
   try {
-    const dir = dirs?.depthmaps ?? await getSubDir(projectId, 'depthmaps')
+    const dir = dirs?.depthmaps ?? (await getSubDir(projectId, 'depthmaps'))
     return await (await dir.getFileHandle(uuid + '.png')).getFile()
   } catch {
     return null
@@ -142,6 +151,8 @@ export async function deleteDepth(projectId, uuid) {
       for (const key of DEPTH_BIN_KEYS) {
         await dir.removeEntry(`${uuid}.${key}.bin`).catch(ignoreMissing)
       }
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }

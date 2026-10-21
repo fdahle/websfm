@@ -28,15 +28,17 @@ export function positionsForProximity(items, crs) {
     uuid: item.uuid,
     pos: transform([item.pos[0], item.pos[1]], crs, 'EPSG:4326'),
   }))
-  const lonRad = wgs.map((item) => item.pos[0] * Math.PI / 180)
-  const lon = Math.atan2(
-    lonRad.reduce((sum, v) => sum + Math.sin(v), 0),
-    lonRad.reduce((sum, v) => sum + Math.cos(v), 0),
-  ) * 180 / Math.PI
+  const lonRad = wgs.map((item) => (item.pos[0] * Math.PI) / 180)
+  const lon =
+    (Math.atan2(
+      lonRad.reduce((sum, v) => sum + Math.sin(v), 0),
+      lonRad.reduce((sum, v) => sum + Math.cos(v), 0),
+    ) *
+      180) /
+    Math.PI
   const lat = wgs.reduce((sum, item) => sum + item.pos[1], 0) / wgs.length
   const metric = localMetricFrame(lon, lat)
-  return wgs.map((item) => ({ uuid: item.uuid,
-    pos: transform(item.pos, 'EPSG:4326', metric) }))
+  return wgs.map((item) => ({ uuid: item.uuid, pos: transform(item.pos, 'EPSG:4326', metric) }))
 }
 
 // items: [{ uuid, pos: [x, y, z] }]. Returns a Set of pair keys to match.
@@ -70,7 +72,8 @@ export function preselectPairs(items, { maxNeighbors = 10, maxDistance = Infinit
 // Drop a repeated closing vertex (GeoJSON rings repeat the first point).
 function openRing(ring) {
   if (ring.length > 1) {
-    const a = ring[0], b = ring[ring.length - 1]
+    const a = ring[0],
+      b = ring[ring.length - 1]
     if (a[0] === b[0] && a[1] === b[1]) return ring.slice(0, -1)
   }
   return ring
@@ -92,7 +95,10 @@ function polygonArea(ring) {
 
 // Axis-aligned bbox [minX, minY, maxX, maxY] of an (open) ring.
 function bbox(ring) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity
   for (const [x, y] of ring) {
     if (x < minX) minX = x
     if (y < minY) minY = y
@@ -114,11 +120,14 @@ function clipPolygon(subject, clip) {
   let output = subject
   for (let i = 0, n = clipCcw.length; i < n; i++) {
     if (!output.length) break
-    const a = clipCcw[i], b = clipCcw[(i + 1) % n]
+    const a = clipCcw[i],
+      b = clipCcw[(i + 1) % n]
     const inside = (p) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= 0
     const intersect = (p, q) => {
-      const dx1 = q[0] - p[0], dy1 = q[1] - p[1]
-      const dx2 = b[0] - a[0], dy2 = b[1] - a[1]
+      const dx1 = q[0] - p[0],
+        dy1 = q[1] - p[1]
+      const dx2 = b[0] - a[0],
+        dy2 = b[1] - a[1]
       const denom = dx1 * dy2 - dy1 * dx2
       if (denom === 0) return q
       const t = ((a[0] - p[0]) * dy2 - (a[1] - p[1]) * dx2) / denom
@@ -127,8 +136,10 @@ function clipPolygon(subject, clip) {
     const input = output
     output = []
     for (let j = 0; j < input.length; j++) {
-      const cur = input[j], prev = input[(j + input.length - 1) % input.length]
-      const curIn = inside(cur), prevIn = inside(prev)
+      const cur = input[j],
+        prev = input[(j + input.length - 1) % input.length]
+      const curIn = inside(cur),
+        prevIn = inside(prev)
       if (curIn) {
         if (!prevIn) output.push(intersect(prev, cur))
         output.push(cur)
@@ -144,7 +155,8 @@ function clipPolygon(subject, clip) {
 // footprint's area (so a small footprint fully inside a large one scores ~1 — a
 // strong match candidate, which IoU would underrate). Returns 0..1.
 export function footprintOverlap(ringA, ringB) {
-  const a = openRing(ringA), b = openRing(ringB)
+  const a = openRing(ringA),
+    b = openRing(ringB)
   if (a.length < 3 || b.length < 3) return 0
   if (bboxesDisjoint(bbox(a), bbox(b))) return 0
   const inter = clipPolygon(a, b)
@@ -161,8 +173,7 @@ export function preselectByFootprintOverlap(items, { minOverlap = 0.3 } = {}) {
   for (let i = 0; i < items.length; i++) {
     for (let j = i + 1; j < items.length; j++) {
       if (bboxesDisjoint(boxes[i], boxes[j])) continue
-      if (footprintOverlap(items[i].ring, items[j].ring) >= minOverlap)
-        keep.add(pairKey(items[i].uuid, items[j].uuid))
+      if (footprintOverlap(items[i].ring, items[j].ring) >= minOverlap) keep.add(pairKey(items[i].uuid, items[j].uuid))
     }
   }
   return keep

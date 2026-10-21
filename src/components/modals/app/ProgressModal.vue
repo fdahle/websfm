@@ -3,26 +3,26 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { formatClock, formatRemaining } from '../../../utils/timeFormat.js'
 
 const props = defineProps({
-  title:      { type: String, required: true },
-  current:    { type: Number, default: 0 },
-  total:      { type: Number, default: 0 },
-  label:      { type: String, default: '' },
-  unit:       { type: String, default: '' },
+  title: { type: String, required: true },
+  current: { type: Number, default: 0 },
+  total: { type: Number, default: 0 },
+  label: { type: String, default: '' },
+  unit: { type: String, default: '' },
   // Authoritative, monotonic 0..1 bar value from usePipeline. `current`/`total`
   // remain the numeric readout only — they may re-count within a run.
-  fraction:      { type: Number, default: 0 },
+  fraction: { type: Number, default: 0 },
   // The stage's current phase, when it names one (usePipeline progressPhase). The ETA
   // is measured afresh from each phase's start (see the estimator below).
-  phase:         { type: String, default: '' },
+  phase: { type: String, default: '' },
   indeterminate: { type: Boolean, default: false },
-  complete:      { type: Boolean, default: false },
-  cancelling:    { type: Boolean, default: false },
-  cancelable:    { type: Boolean, default: false },
+  complete: { type: Boolean, default: false },
+  cancelling: { type: Boolean, default: false },
+  cancelable: { type: Boolean, default: false },
   // CSS selector of an element left lit and usable during the run (the 3D view while
   // a sparse run draws its model live): the rest of the window is dimmed and blocks
   // clicks, since nothing else may start during a run, and the card docks in that
   // element's corner. Empty, or no such element on screen: the usual centred dialog.
-  spotlight:     { type: String, default: '' },
+  spotlight: { type: String, default: '' },
 })
 const emit = defineEmits(['cancel'])
 
@@ -40,9 +40,12 @@ const pct = computed(() => {
 // is the item, the remainder is progress inside it — so a second thin bar comes free
 // with no extra plumbing. Latched: a stage that never emits fractions never shows it.
 const hasSubProgress = ref(false)
-watch(() => props.current, (v) => {
-  if (v > 0 && !Number.isInteger(v)) hasSubProgress.value = true
-})
+watch(
+  () => props.current,
+  (v) => {
+    if (v > 0 && !Number.isInteger(v)) hasSubProgress.value = true
+  },
+)
 const subPct = computed(() => Math.round((props.current - Math.floor(props.current)) * 100))
 
 // The count readout is noise when there is nothing to count (the single-call product
@@ -53,9 +56,7 @@ const showCount = computed(() => props.total > 1)
 // strips a leading whitespace-only text node inside an element, so the space before
 // the unit in `<template v-if="unit"> {{ unit }}</template>` was silently dropped and
 // rendered "1 / 3images".
-const countText = computed(() =>
-  `${Math.floor(props.current)} / ${props.total}${props.unit ? ` ${props.unit}` : ''}`
-)
+const countText = computed(() => `${Math.floor(props.current)} / ${props.total}${props.unit ? ` ${props.unit}` : ''}`)
 
 // Elapsed-time timer. The modal is created fresh per run (v-if), so timing it
 // from mount measures the run; the ticker just refreshes the display each second.
@@ -93,8 +94,13 @@ watch(() => props.spotlight, watchHole)
 const scrimStyle = computed(() => {
   const h = hole.value
   if (!h) return null
-  const x0 = `${h.x}px`, y0 = `${h.y}px`, x1 = `${h.x + h.w}px`, y1 = `${h.y + h.h}px`
-  return { clipPath: `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${x0} ${y0}, ${x0} ${y1}, ${x1} ${y1}, ${x1} ${y0}, ${x0} ${y0})` }
+  const x0 = `${h.x}px`,
+    y0 = `${h.y}px`,
+    x1 = `${h.x + h.w}px`,
+    y1 = `${h.y + h.h}px`
+  return {
+    clipPath: `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${x0} ${y0}, ${x0} ${y1}, ${x1} ${y1}, ${x1} ${y0}, ${x0} ${y0})`,
+  }
 })
 const cardStyle = computed(() => {
   const h = hole.value
@@ -112,19 +118,19 @@ const cardStyle = computed(() => {
 // stable anchor that integrates over the variance, while an exponential moving average
 // of the recent rate reacts when the workload shifts phase. Remaining fraction ÷ the
 // blended rate is the raw estimate, eased into `smoothedEta` so the countdown glides.
-const lastStamp    = ref(0)  // wall-clock of the most recent advance
+const lastStamp = ref(0) // wall-clock of the most recent advance
 const lastFraction = ref(0)
 // Where the current phase began. A stage in phases (fusion: plan, then the slab pass)
 // gives each a fixed share of the bar, and the time a phase really takes varies with
 // the data (four times the pixels at step 1, the same plan). The cumulative rate since
 // the run started would carry the plan's rate into the slab pass, so it counts from
 // the phase start instead; a stage with no phases has one, from the start.
-const phaseAt       = ref(0)
+const phaseAt = ref(0)
 const phaseFraction = ref(0)
-const emaRate      = ref(0)  // exponential moving average of fraction per second
-const smoothedEta  = ref(null)
-const EMA_ALPHA    = 0.25    // weight of the newest sample in the EMA
-const DISP_EASE     = 0.25   // per-tick easing of the displayed value toward the raw ETA
+const emaRate = ref(0) // exponential moving average of fraction per second
+const smoothedEta = ref(null)
+const EMA_ALPHA = 0.25 // weight of the newest sample in the EMA
+const DISP_EASE = 0.25 // per-tick easing of the displayed value toward the raw ETA
 // Below this the sample is unrepresentative: on a big batch the first items are
 // systematically the expensive ones (exhaustive matching visits an image's overlapping
 // neighbours first), and extrapolating them shows an ETA wrong by an order of
@@ -144,40 +150,45 @@ const STALL_AFTER_S = 2
 
 // A new phase: its rate is unknown until it has advanced, so the estimate, the EMA and
 // the promise all start again (the old promise was made about the old phase).
-watch(() => props.phase, () => {
-  phaseAt.value = Date.now()
-  phaseFraction.value = props.fraction
-  lastStamp.value = 0
-  emaRate.value = 0
-  smoothedEta.value = null
-  promiseEta = null
-  overrunLatched.value = false
-})
+watch(
+  () => props.phase,
+  () => {
+    phaseAt.value = Date.now()
+    phaseFraction.value = props.fraction
+    lastStamp.value = 0
+    emaRate.value = 0
+    smoothedEta.value = null
+    promiseEta = null
+    overrunLatched.value = false
+  },
+)
 
-watch(() => props.fraction, (val) => {
-  // `fraction` is monotonic by construction in usePipeline, so there is no restart
-  // branch here any more — a sub-run re-counting is invisible at this layer.
-  if (!(val > lastFraction.value)) return
-  advances.value++
-  const t = Date.now()
-  if (lastStamp.value) {
-    const dt = (t - lastStamp.value) / 1000
-    if (dt > 0) {
-      const rate = (val - lastFraction.value) / dt
-      emaRate.value = emaRate.value > 0
-        ? EMA_ALPHA * rate + (1 - EMA_ALPHA) * emaRate.value
-        : rate
+watch(
+  () => props.fraction,
+  (val) => {
+    // `fraction` is monotonic by construction in usePipeline, so there is no restart
+    // branch here any more — a sub-run re-counting is invisible at this layer.
+    if (!(val > lastFraction.value)) return
+    advances.value++
+    const t = Date.now()
+    if (lastStamp.value) {
+      const dt = (t - lastStamp.value) / 1000
+      if (dt > 0) {
+        const rate = (val - lastFraction.value) / dt
+        emaRate.value = emaRate.value > 0 ? EMA_ALPHA * rate + (1 - EMA_ALPHA) * emaRate.value : rate
+      }
     }
-  }
-  lastStamp.value = t
-  lastFraction.value = val
-})
+    lastStamp.value = t
+    lastFraction.value = val
+  },
+)
 
 const etaSeconds = computed(() => {
   // Depend on `now` so the countdown ticks down between advances.
   void now.value
   const elapsedS = (now.value - phaseAt.value) / 1000
-  const f = props.fraction, f0 = phaseFraction.value
+  const f = props.fraction,
+    f0 = phaseFraction.value
   if (props.indeterminate || f <= 0) return null
   if (f - f0 < MIN_FRACTION * (1 - f0) || elapsedS < MIN_ELAPSED_S || !lastStamp.value) return null
   if (f >= 1) return 0
@@ -191,10 +202,11 @@ const etaSeconds = computed(() => {
 
 // Ease the displayed value toward the raw estimate so advances don't jolt it.
 watch(etaSeconds, (v) => {
-  if (v == null) { smoothedEta.value = null; return }
-  smoothedEta.value = smoothedEta.value == null
-    ? v
-    : smoothedEta.value + (v - smoothedEta.value) * DISP_EASE
+  if (v == null) {
+    smoothedEta.value = null
+    return
+  }
+  smoothedEta.value = smoothedEta.value == null ? v : smoothedEta.value + (v - smoothedEta.value) * DISP_EASE
 })
 
 // ── Overrun: the estimate is falsified, not "reached zero" ────────────────────
@@ -210,9 +222,9 @@ watch(etaSeconds, (v) => {
 // and when. Blowing past it (plus a grace) is an overrun, regardless of what the
 // current estimate says.
 const overrunLatched = ref(false)
-let promiseEta = null      // seconds the committed promise claimed
-let promiseAt  = 0         // wall-clock it was made
-let promiseAdvances = 0    // `advances` at commit time
+let promiseEta = null // seconds the committed promise claimed
+let promiseAt = 0 // wall-clock it was made
+let promiseAdvances = 0 // `advances` at commit time
 // A promise may be re-armed when the model genuinely revises upward by this much — a
 // run entering a slower phase (registration → bundle adjustment) is new information,
 // not a missed deadline.
@@ -240,7 +252,10 @@ watch(now, () => {
 
   const v = smoothedEta.value
   if (v == null || props.complete || props.fraction >= 1) return
-  if (promiseEta == null) { commitPromise(v); return }
+  if (promiseEta == null) {
+    commitPromise(v)
+    return
+  }
 
   const overdueBy = (Date.now() - promiseAt) / 1000 - (promiseEta + overrunGraceS(promiseEta))
   if (overdueBy <= 0) {
@@ -250,13 +265,14 @@ watch(now, () => {
   }
   // Overdue. Only a *fresh advance* may re-arm the promise, so a wedged run's
   // self-inflating estimate can't quietly paper over the miss it just made.
-  if (advances.value > promiseAdvances && v > promiseEta * REARM_FACTOR) { commitPromise(v); return }
+  if (advances.value > promiseAdvances && v > promiseEta * REARM_FACTOR) {
+    commitPromise(v)
+    return
+  }
   overrunLatched.value = true
 })
 
-const overrun = computed(() =>
-  !props.complete && props.fraction < 1 && overrunLatched.value
-)
+const overrun = computed(() => !props.complete && props.fraction < 1 && overrunLatched.value)
 
 const etaText = computed(() => {
   if (props.complete || props.fraction >= 1) return null
@@ -279,24 +295,33 @@ let etaShownAt = 0
 // Driven by the ticker as well as the estimate: a suppressed change must still land
 // once the hold expires, and by then the candidate string may have stopped changing
 // (so a watcher on the candidate alone would never fire again).
-watch(() => [etaText.value, now.value], () => {
-  const v = etaText.value
-  // Appearing or disappearing is a state change, not a twitch — never delay it.
-  if (v == null || eta.value == null) {
-    if (v !== eta.value) { eta.value = v; etaShownAt = Date.now() }
-    return
-  }
-  if (v === eta.value) return
-  if (Date.now() - etaShownAt < ETA_HOLD_MS) return
-  eta.value = v
-  etaShownAt = Date.now()
-}, { immediate: true })
+watch(
+  () => [etaText.value, now.value],
+  () => {
+    const v = etaText.value
+    // Appearing or disappearing is a state change, not a twitch — never delay it.
+    if (v == null || eta.value == null) {
+      if (v !== eta.value) {
+        eta.value = v
+        etaShownAt = Date.now()
+      }
+      return
+    }
+    if (v === eta.value) return
+    if (Date.now() - etaShownAt < ETA_HOLD_MS) return
+    eta.value = v
+    etaShownAt = Date.now()
+  },
+  { immediate: true },
+)
 
 onMounted(() => {
   startedAt.value = Date.now()
   now.value = startedAt.value
   phaseAt.value = startedAt.value
-  ticker = setInterval(() => { now.value = Date.now() }, 250)
+  ticker = setInterval(() => {
+    now.value = Date.now()
+  }, 250)
   watchHole()
   window.addEventListener('resize', measureHole)
 })
@@ -316,17 +341,8 @@ onBeforeUnmount(() => {
       <div class="modal-title">{{ title }}</div>
       <div class="progress-row">
         <div class="progress-track">
-          <div
-            v-if="indeterminate && !complete"
-            class="progress-fill indeterminate"
-            :class="{ cancelling }"
-          ></div>
-          <div
-            v-else
-            class="progress-fill"
-            :class="{ cancelling, complete }"
-            :style="{ width: pct + '%' }"
-          ></div>
+          <div v-if="indeterminate && !complete" class="progress-fill indeterminate" :class="{ cancelling }"></div>
+          <div v-else class="progress-fill" :class="{ cancelling, complete }" :style="{ width: pct + '%' }"></div>
         </div>
         <span class="progress-pct">{{ indeterminate && !complete ? '' : pct + '%' }}</span>
       </div>
@@ -346,10 +362,14 @@ onBeforeUnmount(() => {
                whitespace: 'condense' removes outright, rendering "0:42· 4 minutes left".
                Same trap as countText above. -->
           <span v-if="eta" class="progress-time" title="Estimated time remaining">&nbsp;· {{ eta }} left</span>
-          <span v-else-if="overrun" class="progress-time" title="The run has exceeded its estimate">&nbsp;· longer than expected</span>
+          <span v-else-if="overrun" class="progress-time" title="The run has exceeded its estimate"
+            >&nbsp;· longer than expected</span
+          >
         </span>
       </div>
-      <div v-if="hole" class="progress-hint">Drag to look around the model as it grows. The rest of the app unlocks when the run finishes.</div>
+      <div v-if="hole" class="progress-hint">
+        Drag to look around the model as it grows. The rest of the app unlocks when the run finishes.
+      </div>
       <div v-if="cancelable" class="progress-actions">
         <button class="btn-cancel" :disabled="cancelling" @click="emit('cancel')">
           {{ cancelling ? 'Cancelling…' : 'Cancel' }}
@@ -453,8 +473,12 @@ onBeforeUnmount(() => {
 }
 
 @keyframes progress-shuttle {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(286%); } /* 100/35 — travels the full track */
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(286%);
+  } /* 100/35 — travels the full track */
 }
 
 /* Sub-item bar: thinner and dimmer, so it reads as subordinate to the main one. */

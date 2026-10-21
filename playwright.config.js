@@ -7,9 +7,14 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   timeout: 30_000,
-  use: { baseURL: `http://127.0.0.1:${port}`,
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
     channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
-    trace: 'retain-on-failure' },
-  webServer: { command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,
-    url: `http://127.0.0.1:${port}/tests/browser/harness.html`, reuseExistingServer: !process.env.CI },
+    trace: 'retain-on-failure',
+  },
+  webServer: {
+    command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,
+    url: `http://127.0.0.1:${port}/tests/browser/harness.html`,
+    reuseExistingServer: !process.env.CI,
+  },
 })

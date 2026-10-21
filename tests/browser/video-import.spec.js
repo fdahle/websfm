@@ -21,31 +21,39 @@ async function createProject(page) {
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
 }
 
-const imageState = (page) => page.evaluate(async () => {
-  const { useImagesStore } = await import('/src/stores/useImagesStore.js')
-  const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
-  const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
-  const opfs = await import('/src/utils/opfs.js')
-  const { useLog } = await import('/src/composables/useLog.js')
-  const pid = useProjectsStore().currentProjectId
-  const imgs = useImagesStore().images
-  const stored = []
-  for (const img of imgs) stored.push((await opfs.loadImageBlob(pid, img.uuid).catch(() => null))?.size ?? 0)
-  return {
-    names: imgs.map((i) => i.name),
-    loading: imgs.filter((i) => i.loading).length,
-    meta: imgs.map((i) => ({ src: i.meta?.videoSource ?? null, t: i.meta?.videoTime ?? null, w: i.meta?.width, h: i.meta?.height })),
-    sensorIds: [...new Set(imgs.map((i) => i.sensorId))],
-    sensors: useSensorsStore().sensors.map((s) => s.label),
-    stored,
-    // After the read-back a record's file is the OPFS copy, under the frame's own name
-    // (IS-1: exports and conversions use it), so the name no longer tells them apart;
-    // the read-back's log line does.
-    fileNames: imgs.map((i) => i.file?.name ?? null),
-    readBack: useLog().entries.value.map((e) => e.message).filter((m) => m.startsWith('Images read from project storage:')),
-    thumbs: imgs.filter((i) => i.thumb).length,
-  }
-})
+const imageState = (page) =>
+  page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
+    const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+    const opfs = await import('/src/utils/opfs.js')
+    const { useLog } = await import('/src/composables/useLog.js')
+    const pid = useProjectsStore().currentProjectId
+    const imgs = useImagesStore().images
+    const stored = []
+    for (const img of imgs) stored.push((await opfs.loadImageBlob(pid, img.uuid).catch(() => null))?.size ?? 0)
+    return {
+      names: imgs.map((i) => i.name),
+      loading: imgs.filter((i) => i.loading).length,
+      meta: imgs.map((i) => ({
+        src: i.meta?.videoSource ?? null,
+        t: i.meta?.videoTime ?? null,
+        w: i.meta?.width,
+        h: i.meta?.height,
+      })),
+      sensorIds: [...new Set(imgs.map((i) => i.sensorId))],
+      sensors: useSensorsStore().sensors.map((s) => s.label),
+      stored,
+      // After the read-back a record's file is the OPFS copy, under the frame's own name
+      // (IS-1: exports and conversions use it), so the name no longer tells them apart;
+      // the read-back's log line does.
+      fileNames: imgs.map((i) => i.file?.name ?? null),
+      readBack: useLog()
+        .entries.value.map((e) => e.message)
+        .filter((m) => m.startsWith('Images read from project storage:')),
+      thumbs: imgs.filter((i) => i.thumb).length,
+    }
+  })
 
 test('Import ▸ Video plans frames, then extracts them into the project as images', async ({ page }) => {
   test.setTimeout(90_000)
@@ -75,15 +83,24 @@ test('Import ▸ Video plans frames, then extracts them into the project as imag
   await dialog.getByRole('button', { name: 'Extract 8 frames' }).click()
   await expect(dialog).toHaveCount(0)
 
-  await expect.poll(async () => {
-    const s = await imageState(page)
-    // Frames arrive in batches, each read back with its own line ("4 of 4 images").
-    const readBack = s.readBack.reduce((sum, m) => sum + Number(/: (\d+) of /.exec(m)?.[1] ?? 0), 0)
-    return s.names.length === 8 && s.loading === 0 && readBack === 8
-  }, { timeout: 30_000 }).toBe(true)
+  await expect
+    .poll(
+      async () => {
+        const s = await imageState(page)
+        // Frames arrive in batches, each read back with its own line ("4 of 4 images").
+        const readBack = s.readBack.reduce((sum, m) => sum + Number(/: (\d+) of /.exec(m)?.[1] ?? 0), 0)
+        return s.names.length === 8 && s.loading === 0 && readBack === 8
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true)
   const s = await imageState(page)
   expect(s.fileNames).toEqual(s.names)
-  expect(s.names).toEqual([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5].map((t) => `south-building-4_00m0${Math.floor(t)}.${String(Math.round((t % 1) * 1000)).padStart(3, '0')}s.jpg`))
+  expect(s.names).toEqual(
+    [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5].map(
+      (t) => `south-building-4_00m0${Math.floor(t)}.${String(Math.round((t % 1) * 1000)).padStart(3, '0')}s.jpg`,
+    ),
+  )
   expect(s.meta.every((m) => m.src === NAME && m.w === 320 && m.h === 240)).toBe(true)
   expect(s.meta.map((m) => m.t)).toEqual([0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5])
   // One sensor for the whole video, named after it.
@@ -94,7 +111,11 @@ test('Import ▸ Video plans frames, then extracts them into the project as imag
   await expect.poll(async () => (await imageState(page)).thumbs).toBe(8)
 
   // The sidebar lists them.
-  await page.locator('aside.sidebar').getByRole('button', { name: /Images/ }).first().click()
+  await page
+    .locator('aside.sidebar')
+    .getByRole('button', { name: /Images/ })
+    .first()
+    .click()
   await expect(page.locator('.list-item').filter({ hasText: 'south-building-4_00m00.000s.jpg' })).toBeVisible()
   expect(errors).toEqual([])
 })
@@ -107,12 +128,15 @@ test('a dropped video opens the dialog, and its frames start Match Features on S
 
   // Drop the video on the sidebar, as from a file manager.
   const bytes = readFileSync(FIXTURE).toString('base64')
-  const dt = await page.evaluateHandle(({ b64, name }) => {
-    const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
-    const data = new DataTransfer()
-    data.items.add(new File([bin], name, { type: 'video/webm' }))
-    return data
-  }, { b64: bytes, name: NAME })
+  const dt = await page.evaluateHandle(
+    ({ b64, name }) => {
+      const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+      const data = new DataTransfer()
+      data.items.add(new File([bin], name, { type: 'video/webm' }))
+      return data
+    },
+    { b64: bytes, name: NAME },
+  )
   await page.locator('aside.sidebar').dispatchEvent('drop', { dataTransfer: dt })
 
   const dialog = page.getByRole('dialog', { name: 'Import Video' })
@@ -121,10 +145,15 @@ test('a dropped video opens the dialog, and its frames start Match Features on S
   await expect(extract).toBeEnabled({ timeout: 30_000 })
   const n = Number((await extract.textContent()).match(/\d+/)[0])
   await extract.click()
-  await expect.poll(async () => {
-    const s = await imageState(page)
-    return s.names.length === n && s.loading === 0
-  }, { timeout: 30_000 }).toBe(true)
+  await expect
+    .poll(
+      async () => {
+        const s = await imageState(page)
+        return s.names.length === n && s.loading === 0
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true)
   const s = await imageState(page)
   expect(s.names.every((name) => /^south-building-4_00m0\d\.\d{3}s\.jpg$/.test(name))).toBe(true)
 

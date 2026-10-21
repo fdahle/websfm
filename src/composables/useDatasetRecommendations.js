@@ -15,12 +15,14 @@ export function useDatasetRecommendations() {
   const gcps = useGcpsStore()
   const { recommendForDataset } = useComputeSettings()
 
-  const profile = computed(() => profileDataset({
-    images: images.images,
-    sensors: sensors.sensors,
-    poses: poses.poses,
-    gcps: gcps.gcps,
-  }))
+  const profile = computed(() =>
+    profileDataset({
+      images: images.images,
+      sensors: sensors.sensors,
+      poses: poses.poses,
+      gcps: gcps.gcps,
+    }),
+  )
   const recommendations = computed(() => recommendForDataset(profile.value))
 
   return { profile, recommendations }

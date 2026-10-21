@@ -1,9 +1,24 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import {
-  overlayView, beginOverlayFrame, paintRaster, paintRampLegend, paintResidualLegend,
-  keypointResponseRange, paintKeypoints, paintResiduals, residualColor, RESIDUAL_AMP,
-  pointGuideLabel, paintGcpGuides, paintGcps, paintFiducials, paintLoupe,
-  paintBrushCursor, paintRectPreview, KEYPOINT_LEGEND, DEPTH_LEGEND,
+  overlayView,
+  beginOverlayFrame,
+  paintRaster,
+  paintRampLegend,
+  paintResidualLegend,
+  keypointResponseRange,
+  paintKeypoints,
+  paintResiduals,
+  residualColor,
+  RESIDUAL_AMP,
+  pointGuideLabel,
+  paintGcpGuides,
+  paintGcps,
+  paintFiducials,
+  paintLoupe,
+  paintBrushCursor,
+  paintRectPreview,
+  KEYPOINT_LEGEND,
+  DEPTH_LEGEND,
 } from './imageOverlay.js'
 
 // A fake 2D context recording every call and property write, in order. measureText
@@ -11,43 +26,100 @@ import {
 function fakeCtx() {
   const calls = []
   const state = {}
-  const rec = (name) => (...args) => { calls.push([name, ...args]); return undefined }
-  const methods = ['save', 'restore', 'setTransform', 'clearRect', 'drawImage', 'beginPath', 'moveTo', 'lineTo',
-    'arc', 'stroke', 'fill', 'fillRect', 'strokeRect', 'fillText', 'rect', 'clip', 'setLineDash']
-  const ctx = new Proxy({}, {
-    get(_, k) {
-      if (methods.includes(k)) return rec(k)
-      if (k === 'measureText') return (t) => ({ width: t.length * 6 })
-      if (k === 'createLinearGradient') return (...a) => { calls.push(['createLinearGradient', ...a]); return { addColorStop: rec('addColorStop') } }
-      return state[k]
+  const rec =
+    (name) =>
+    (...args) => {
+      calls.push([name, ...args])
+      return undefined
+    }
+  const methods = [
+    'save',
+    'restore',
+    'setTransform',
+    'clearRect',
+    'drawImage',
+    'beginPath',
+    'moveTo',
+    'lineTo',
+    'arc',
+    'stroke',
+    'fill',
+    'fillRect',
+    'strokeRect',
+    'fillText',
+    'rect',
+    'clip',
+    'setLineDash',
+  ]
+  const ctx = new Proxy(
+    {},
+    {
+      get(_, k) {
+        if (methods.includes(k)) return rec(k)
+        if (k === 'measureText') return (t) => ({ width: t.length * 6 })
+        if (k === 'createLinearGradient')
+          return (...a) => {
+            calls.push(['createLinearGradient', ...a])
+            return { addColorStop: rec('addColorStop') }
+          }
+        return state[k]
+      },
+      set(_, k, v) {
+        state[k] = v
+        calls.push(['set', k, v])
+        return true
+      },
     },
-    set(_, k, v) { state[k] = v; calls.push(['set', k, v]); return true },
-  })
+  )
   const of = (name) => calls.filter((c) => c[0] === name)
   return { ctx, calls, of, state }
 }
 
 // 1000×500 native image shown at scale 0.5, panned by (10, 20), in an 800×600 viewport.
-const FRAME = { width: 1000, height: 500, naturalWidth: 1000, naturalHeight: 500, bitmapScale: 1, preview: false, exact: true }
+const FRAME = {
+  width: 1000,
+  height: 500,
+  naturalWidth: 1000,
+  naturalHeight: 500,
+  bitmapScale: 1,
+  preview: false,
+  exact: true,
+}
 const view = overlayView({ w: 800, h: 600, tx: 10, ty: 20, scale: 0.5, frame: FRAME })
 
 // Path2D is a browser global; record the sub-paths per instance.
 class FakePath2D {
-  constructor() { this.ops = []; FakePath2D.made.push(this) }
-  moveTo(x, y) { this.ops.push(['moveTo', x, y]) }
-  arc(x, y) { this.ops.push(['arc', x, y]) }
+  constructor() {
+    this.ops = []
+    FakePath2D.made.push(this)
+  }
+  moveTo(x, y) {
+    this.ops.push(['moveTo', x, y])
+  }
+  arc(x, y) {
+    this.ops.push(['arc', x, y])
+  }
 }
 FakePath2D.made = []
 let savedPath2D
-beforeAll(() => { savedPath2D = globalThis.Path2D; globalThis.Path2D = FakePath2D })
-afterAll(() => { globalThis.Path2D = savedPath2D })
+beforeAll(() => {
+  savedPath2D = globalThis.Path2D
+  globalThis.Path2D = FakePath2D
+})
+afterAll(() => {
+  globalThis.Path2D = savedPath2D
+})
 
 describe('overlayView', () => {
   it('derives the on-screen image size from the NATIVE frame', () => {
     // A preview bitmap 20× smaller still displays at native size × scale.
     const preview = { ...FRAME, naturalWidth: 50, naturalHeight: 25, bitmapScale: 0.05, preview: true }
-    expect(overlayView({ w: 800, h: 600, tx: 0, ty: 0, scale: 0.5, frame: preview }))
-      .toMatchObject({ nw: 1000, nh: 500, dispW: 500, dispH: 250 })
+    expect(overlayView({ w: 800, h: 600, tx: 0, ty: 0, scale: 0.5, frame: preview })).toMatchObject({
+      nw: 1000,
+      nh: 500,
+      dispW: 500,
+      dispH: 250,
+    })
     expect(view).toMatchObject({ w: 800, h: 600, tx: 10, ty: 20, scale: 0.5, dispW: 500, dispH: 250 })
   })
 })
@@ -103,7 +175,9 @@ describe('paintRaster', () => {
 function kpSet(points) {
   return {
     length: points.length,
-    nx: (i) => points[i].nx, ny: (i) => points[i].ny, response: (i) => points[i].r,
+    nx: (i) => points[i].nx,
+    ny: (i) => points[i].ny,
+    response: (i) => points[i].r,
   }
 }
 
@@ -119,10 +193,10 @@ describe('keypoints', () => {
     FakePath2D.made = []
     const { ctx, of, calls } = fakeCtx()
     const kps = kpSet([
-      { nx: 0, ny: 0, r: 0 },       // → (10, 20), coldest
-      { nx: 1, ny: 1, r: 10 },      // → (510, 270), hottest
-      { nx: 0.5, ny: 0.5, r: 10 },  // hottest again: same bucket, same path
-      { nx: 2, ny: 0, r: 5 },       // → x = 1010, off the 800 px viewport: culled
+      { nx: 0, ny: 0, r: 0 }, // → (10, 20), coldest
+      { nx: 1, ny: 1, r: 10 }, // → (510, 270), hottest
+      { nx: 0.5, ny: 0.5, r: 10 }, // hottest again: same bucket, same path
+      { nx: 2, ny: 0, r: 5 }, // → x = 1010, off the 800 px viewport: culled
     ])
     paintKeypoints(ctx, view, kps, keypointResponseRange(kps))
     expect(FakePath2D.made).toHaveLength(2)
@@ -131,7 +205,10 @@ describe('keypoints', () => {
     const styles = calls.filter((c) => c[0] === 'set' && c[1] === 'fillStyle').map((c) => c[2])
     expect(styles).toEqual(['hsl(240,100%,55%)', 'hsl(0,100%,55%)'])
     const hot = FakePath2D.made[1].ops.filter((o) => o[0] === 'arc')
-    expect(hot).toEqual([['arc', 510, 270], ['arc', 260, 145]])
+    expect(hot).toEqual([
+      ['arc', 510, 270],
+      ['arc', 260, 145],
+    ])
   })
 })
 
@@ -147,7 +224,10 @@ describe('paintResiduals', () => {
 })
 
 describe('GCP guides', () => {
-  const clip = () => [{ x: 0, y: 0 }, { x: 1000, y: 500 }]
+  const clip = () => [
+    { x: 0, y: 0 },
+    { x: 1000, y: 500 },
+  ]
 
   it('label counts the marks the prediction used', () => {
     expect(pointGuideLabel({ name: 'G1', viewCount: 9 })).toBe('G1 — mark here (9 marks)')
@@ -168,12 +248,21 @@ describe('GCP guides', () => {
 
   it('skips a point prediction outside the frame and labels only the selected one', () => {
     const { ctx, of } = fakeCtx()
-    paintGcpGuides(ctx, view, [
-      { gcpId: 'a', name: 'A', kind: 'point', u: 1200, v: 10, viewCount: 2 }, // off-frame
-      { gcpId: 'b', name: 'B', kind: 'point', u: 100, v: 100, viewCount: 3 },
-      { gcpId: 'c', name: 'C', kind: 'point', u: 200, v: 100, viewCount: 4 },
-    ], 'c', clip)
-    expect(of('arc').map((c) => [c[1], c[2]])).toEqual([[60, 70], [110, 70]])
+    paintGcpGuides(
+      ctx,
+      view,
+      [
+        { gcpId: 'a', name: 'A', kind: 'point', u: 1200, v: 10, viewCount: 2 }, // off-frame
+        { gcpId: 'b', name: 'B', kind: 'point', u: 100, v: 100, viewCount: 3 },
+        { gcpId: 'c', name: 'C', kind: 'point', u: 200, v: 100, viewCount: 4 },
+      ],
+      'c',
+      clip,
+    )
+    expect(of('arc').map((c) => [c[1], c[2]])).toEqual([
+      [60, 70],
+      [110, 70],
+    ])
     expect(of('fillText').map((c) => c[1])).toEqual(['C — mark here (4 marks)'])
   })
 })
@@ -181,27 +270,48 @@ describe('GCP guides', () => {
 describe('paintGcps', () => {
   it('rings each placed observation and shows the live reprojection error', () => {
     const { ctx, of, calls } = fakeCtx()
-    paintGcps(ctx, view, [
-      { id: 'a', name: 'A', px: 100, py: 100, reprojPx: 7.25 },
-      { id: 'b', name: 'B', px: null, py: 5 },             // not marked: skipped
-      { id: 'c', name: 'C', px: 0, py: 0, reprojPx: 1 },
-    ], 'c')
-    expect(of('arc').map((c) => [c[1], c[2]])).toEqual([[60, 70], [10, 20]])
+    paintGcps(
+      ctx,
+      view,
+      [
+        { id: 'a', name: 'A', px: 100, py: 100, reprojPx: 7.25 },
+        { id: 'b', name: 'B', px: null, py: 5 }, // not marked: skipped
+        { id: 'c', name: 'C', px: 0, py: 0, reprojPx: 1 },
+      ],
+      'c',
+    )
+    expect(of('arc').map((c) => [c[1], c[2]])).toEqual([
+      [60, 70],
+      [10, 20],
+    ])
     expect(of('fillText').map((c) => c[1])).toEqual(['A', '  7.3px', 'C', '  1.0px'])
     const fills = calls.filter((c) => c[0] === 'set' && c[1] === 'fillStyle').map((c) => c[2])
-    expect(fills).toContain('rgba(255,90,90,0.95)')   // A's 7.3 px > 5 px: red
-    expect(fills).toContain('rgba(80,200,255,0.95)')  // C is selected: blue label
+    expect(fills).toContain('rgba(255,90,90,0.95)') // A's 7.3 px > 5 px: red
+    expect(fills).toContain('rgba(80,200,255,0.95)') // C is selected: blue label
   })
 })
 
 describe('paintFiducials', () => {
   it('labels marks with their residual (red past 12 µm) and draws ghost guides dashed', () => {
     const { ctx, of, calls } = fakeCtx()
-    paintFiducials(ctx, view,
-      [{ fidId: 'F1', px: 100, py: 100 }, { fidId: 'F2', px: 0, py: 0 }],
-      new Map([['F1', 20], ['F2', 3]]),
-      [{ id: 'F3', px: 200, py: 100 }])
-    expect(of('strokeRect').map((c) => [c[1], c[2]])).toEqual([[54, 64], [4, 14], [104, 64]])
+    paintFiducials(
+      ctx,
+      view,
+      [
+        { fidId: 'F1', px: 100, py: 100 },
+        { fidId: 'F2', px: 0, py: 0 },
+      ],
+      new Map([
+        ['F1', 20],
+        ['F2', 3],
+      ]),
+      [{ id: 'F3', px: 200, py: 100 }],
+    )
+    expect(of('strokeRect').map((c) => [c[1], c[2]])).toEqual([
+      [54, 64],
+      [4, 14],
+      [104, 64],
+    ])
     expect(of('fillText').map((c) => c[1])).toEqual(['F1', '  20.0µm', 'F2', '  3.0µm', 'F3'])
     const fills = calls.filter((c) => c[0] === 'set' && c[1] === 'fillStyle').map((c) => c[2])
     expect(fills.filter((f) => f === 'rgba(255,90,90,0.95)')).toHaveLength(1)
@@ -233,7 +343,8 @@ describe('paintLoupe', () => {
 
 describe('mask-edit cursors', () => {
   it('brush cursor is red, the eraser blue', () => {
-    const brush = fakeCtx(), erase = fakeCtx()
+    const brush = fakeCtx(),
+      erase = fakeCtx()
     paintBrushCursor(brush.ctx, { x: 1, y: 2 }, 20, false)
     paintBrushCursor(erase.ctx, { x: 1, y: 2 }, 20, true)
     expect(brush.of('arc')[0]).toEqual(['arc', 1, 2, 20, 0, Math.PI * 2])

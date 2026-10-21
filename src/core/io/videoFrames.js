@@ -77,7 +77,11 @@ export function frameTimestamp(t, duration = t) {
 
 /** `<video name>_<timestamp>.<ext>`, e.g. `walk_00m12.345s.jpg`. */
 export function frameFileName(videoName, t, duration, ext = 'jpg') {
-  const base = String(videoName ?? 'video').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'video'
+  const base =
+    String(videoName ?? 'video')
+      .replace(/\.[^.]+$/, '')
+      .replace(/[\\/:*?"<>|]+/g, '_')
+      .trim() || 'video'
   return `${base}_${frameTimestamp(t, duration)}.${ext}`
 }
 
@@ -127,7 +131,11 @@ export function intervalTimes(duration, { every = 1, unit = 'seconds', fps = nul
  * Analysis sample times for the auto mode: `rate` per second, sparser for a long
  * video so there are at most `maxSamples`, never closer than one frame.
  */
-export function analysisTimes(duration, fps = null, { rate = VIDEO_ANALYSIS.rate, maxSamples = VIDEO_ANALYSIS.maxSamples } = {}) {
+export function analysisTimes(
+  duration,
+  fps = null,
+  { rate = VIDEO_ANALYSIS.rate, maxSamples = VIDEO_ANALYSIS.maxSamples } = {},
+) {
   if (!(duration > 0)) return { step: 0, times: [] }
   const step = Math.max(1 / rate, duration / maxSamples, fps > 0 ? 1 / fps : 0)
   const times = []
@@ -152,7 +160,8 @@ export function lumaOf(rgba, w, h) {
 
 /** Output size with the long side at most `maxDim` (never upscaled). */
 export function fitSize(width, height, maxDim) {
-  const w = Math.max(1, Math.round(width || 1)), h = Math.max(1, Math.round(height || 1))
+  const w = Math.max(1, Math.round(width || 1)),
+    h = Math.max(1, Math.round(height || 1))
   const s = maxDim > 0 ? Math.min(1, maxDim / Math.max(w, h)) : 1
   return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)) }
 }
@@ -160,13 +169,17 @@ export function fitSize(width, height, maxDim) {
 /** Sharpness: variance of the 3×3 Laplacian over the interior pixels. */
 export function laplacianVariance(gray, w, h) {
   if (w < 3 || h < 3) return 0
-  let sum = 0, sum2 = 0, n = 0
+  let sum = 0,
+    sum2 = 0,
+    n = 0
   for (let y = 1; y < h - 1; y++) {
     const r = y * w
     for (let x = 1; x < w - 1; x++) {
       const i = r + x
       const v = gray[i - 1] + gray[i + 1] + gray[i - w] + gray[i + w] - 4 * gray[i]
-      sum += v; sum2 += v * v; n++
+      sum += v
+      sum2 += v * v
+      n++
     }
   }
   const mean = sum / n
@@ -177,7 +190,12 @@ export function laplacianVariance(gray, w, h) {
  * Both scores' inputs from one luma frame (any size): the sharpness at
  * `sharpDim` and the reduced frame the motion tracker takes, at `motionDim`.
  */
-export function scoreFrame(gray, w, h, { sharpDim = VIDEO_ANALYSIS.sharpDim, motionDim = VIDEO_ANALYSIS.motionDim } = {}) {
+export function scoreFrame(
+  gray,
+  w,
+  h,
+  { sharpDim = VIDEO_ANALYSIS.sharpDim, motionDim = VIDEO_ANALYSIS.motionDim } = {},
+) {
   const s = fitSize(w, h, sharpDim)
   const sharpGray = s.width === w && s.height === h ? gray : resampleArea(gray, w, h, s.width, s.height, 1)
   const m = fitSize(s.width, s.height, motionDim)
@@ -193,7 +211,8 @@ export function scoreFrame(gray, w, h, { sharpDim = VIDEO_ANALYSIS.sharpDim, mot
 // every block, a zoom or a roll moves the outer blocks, and a static camera none.
 
 function half(d, w, h) {
-  const w2 = Math.max(1, w >> 1), h2 = Math.max(1, h >> 1)
+  const w2 = Math.max(1, w >> 1),
+    h2 = Math.max(1, h >> 1)
   const out = new Float32Array(w2 * h2)
   for (let y = 0; y < h2; y++) {
     for (let x = 0; x < w2; x++) {
@@ -227,12 +246,19 @@ export function motionPyramid(gray, w, h) {
 // shifted position lies inside `b`; Infinity when under half the region overlaps.
 function regionDiff(a, b, x0, y0, x1, y1, dx, dy) {
   const { w, h } = a
-  let s = 0, n = 0
-  const ya = Math.max(y0, -dy), yb = Math.min(y1, h - dy)
-  const xa = Math.max(x0, -dx), xb = Math.min(x1, w - dx)
+  let s = 0,
+    n = 0
+  const ya = Math.max(y0, -dy),
+    yb = Math.min(y1, h - dy)
+  const xa = Math.max(x0, -dx),
+    xb = Math.min(x1, w - dx)
   for (let y = ya; y < yb; y++) {
-    const ra = y * w, rb = (y + dy) * w + dx
-    for (let x = xa; x < xb; x++) { s += Math.abs(a.d[ra + x] - b.d[rb + x]); n++ }
+    const ra = y * w,
+      rb = (y + dy) * w + dx
+    for (let x = xa; x < xb; x++) {
+      s += Math.abs(a.d[ra + x] - b.d[rb + x])
+      n++
+    }
   }
   return n * 2 >= (x1 - x0) * (y1 - y0) ? s / n : Infinity
 }
@@ -251,8 +277,16 @@ function searchShift(a, b, region, cx, cy, radius) {
 }
 
 function regionStd(a, [x0, y0, x1, y1]) {
-  let s = 0, s2 = 0, n = 0
-  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const v = a.d[y * a.w + x]; s += v; s2 += v * v; n++ }
+  let s = 0,
+    s2 = 0,
+    n = 0
+  for (let y = y0; y < y1; y++)
+    for (let x = x0; x < x1; x++) {
+      const v = a.d[y * a.w + x]
+      s += v
+      s2 += v * v
+      n++
+    }
   return n ? Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)) : 0
 }
 
@@ -270,7 +304,8 @@ function subSample(fm, f0, fp) {
  *   hit its edge: the view moved faster than it can follow), blocks }
  */
 export function measureMotion(ref, cur, { grid = 3, minTexture = 0.01 } = {}) {
-  const [r0, r1, r2] = ref, [c0, c1, c2] = cur
+  const [r0, r1, r2] = ref,
+    [c0, c1, c2] = cur
   if (r0.w !== c0.w || r0.h !== c0.h) throw new Error('measureMotion: frames differ in size')
   const R2 = Math.max(2, Math.round(r2.w * 0.2))
   const g = searchShift(r2, c2, [0, 0, r2.w, r2.h], 0, 0, R2)
@@ -278,11 +313,19 @@ export function measureMotion(ref, cur, { grid = 3, minTexture = 0.01 } = {}) {
   const blocks = []
   for (let by = 0; by < grid; by++) {
     for (let bx = 0; bx < grid; bx++) {
-      const reg0 = [Math.floor(bx * r0.w / grid), Math.floor(by * r0.h / grid),
-        Math.floor((bx + 1) * r0.w / grid), Math.floor((by + 1) * r0.h / grid)]
+      const reg0 = [
+        Math.floor((bx * r0.w) / grid),
+        Math.floor((by * r0.h) / grid),
+        Math.floor(((bx + 1) * r0.w) / grid),
+        Math.floor(((by + 1) * r0.h) / grid),
+      ]
       if (regionStd(r0, reg0) < minTexture) continue
-      const reg1 = [Math.floor(bx * r1.w / grid), Math.floor(by * r1.h / grid),
-        Math.floor((bx + 1) * r1.w / grid), Math.floor((by + 1) * r1.h / grid)]
+      const reg1 = [
+        Math.floor((bx * r1.w) / grid),
+        Math.floor((by * r1.h) / grid),
+        Math.floor(((bx + 1) * r1.w) / grid),
+        Math.floor(((by + 1) * r1.h) / grid),
+      ]
       const b1 = searchShift(r1, c1, reg1, 2 * g.dx, 2 * g.dy, 2)
       if (!Number.isFinite(b1.diff)) continue
       const b0 = searchShift(r0, c0, reg0, 2 * b1.dx, 2 * b1.dy, 1)
@@ -294,9 +337,7 @@ export function measureMotion(ref, cur, { grid = 3, minTexture = 0.01 } = {}) {
     }
   }
   const scale = 4 // level 2 → full size
-  const mags = blocks.length >= 3
-    ? blocks.map((b) => Math.hypot(b.dx, b.dy))
-    : [Math.hypot(g.dx, g.dy) * scale]
+  const mags = blocks.length >= 3 ? blocks.map((b) => Math.hypot(b.dx, b.dy)) : [Math.hypot(g.dx, g.dy) * scale]
   mags.sort((a, b) => a - b)
   const med = mags.length % 2 ? mags[mags.length >> 1] : (mags[mags.length / 2 - 1] + mags[mags.length / 2]) / 2
   return { motion: med / r0.w, global: { dx: g.dx * scale, dy: g.dy * scale }, diff: g.diff, atBound, blocks }
@@ -311,7 +352,9 @@ export function measureMotion(ref, cur, { grid = 3, minTexture = 0.01 } = {}) {
  * lost — the frame no longer resembles the anchor (a cut): counted as one full width.
  */
 export function createMotionTracker({
-  reanchor = VIDEO_ANALYSIS.reanchor, lostRatio = VIDEO_ANALYSIS.lostRatio, minContrast = VIDEO_ANALYSIS.minContrast,
+  reanchor = VIDEO_ANALYSIS.reanchor,
+  lostRatio = VIDEO_ANALYSIS.lostRatio,
+  minContrast = VIDEO_ANALYSIS.minContrast,
 } = {}) {
   let anchor = null
   let anchorContrast = 0
@@ -327,7 +370,10 @@ export function createMotionTracker({
   return {
     push(gray, w, h) {
       const pyr = motionPyramid(gray, w, h)
-      if (!anchor) { setAnchor(pyr); return { travel: 0, sinceAnchor: 0, fast: false, lost: false } }
+      if (!anchor) {
+        setAnchor(pyr)
+        return { travel: 0, sinceAnchor: 0, fast: false, lost: false }
+      }
       const m = measureMotion(anchor, pyr)
       const lost = !(m.diff <= lostRatio * anchorContrast)
       let since = m.motion
@@ -354,8 +400,12 @@ export function relativeSharpness(values, window = VIDEO_ANALYSIS.sharpWindow) {
   const half = Math.max(0, Math.floor(window / 2))
   const out = new Float64Array(n)
   for (let i = 0; i < n; i++) {
-    const lo = Math.max(0, i - half), hi = Math.min(n, i + half + 1)
-    const win = values.slice(lo, hi).filter(Number.isFinite).sort((a, b) => a - b)
+    const lo = Math.max(0, i - half),
+      hi = Math.min(n, i + half + 1)
+    const win = values
+      .slice(lo, hi)
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b)
     const k = win.length
     const med = !k ? 0 : k % 2 ? win[k >> 1] : (win[k / 2 - 1] + win[k / 2]) / 2
     out[i] = med > 0 && Number.isFinite(values[i]) ? values[i] / med : 1
@@ -377,12 +427,16 @@ function pickGreedy(travel, rel, step, minSharpness, slack) {
     return bi
   }
   const indices = []
-  let blurryKept = 0, gaps = 0
+  let blurryKept = 0,
+    gaps = 0
   // First frame: the sharpest within the first `slack` of a step.
   let end = 0
   while (end < n && travel[end] <= travel[0] + slack * step) end++
   let last = best(0, end, true)
-  if (last == null) { last = best(0, end, false); blurryKept++ }
+  if (last == null) {
+    last = best(0, end, false)
+    blurryKept++
+  }
   indices.push(last)
   for (;;) {
     const lo = travel[last] + (1 - slack) * step
@@ -409,7 +463,10 @@ function pickGreedy(travel, rel, step, minSharpness, slack) {
       pick = best(b, c, true)
       // The video ends inside the blur: nothing after it to link to.
       if (pick == null && c >= n) break
-      if (pick == null) { pick = best(a, b, false); blurryKept++ }
+      if (pick == null) {
+        pick = best(a, b, false)
+        blurryKept++
+      }
     }
     last = pick
     indices.push(last)
@@ -430,15 +487,27 @@ function pickGreedy(travel, rel, step, minSharpness, slack) {
  * → { indices, times, step, overlap (%, as planned), blurry (samples below the
  *     sharpness gate), blurryKept, gaps, travel (total) }
  */
-export function selectKeyframes(samples, {
-  overlap = 80, maxFrames = 200, minSharpness = 0.5,
-  window = VIDEO_ANALYSIS.sharpWindow, slack = VIDEO_ANALYSIS.slack,
-} = {}) {
+export function selectKeyframes(
+  samples,
+  {
+    overlap = 80,
+    maxFrames = 200,
+    minSharpness = 0.5,
+    window = VIDEO_ANALYSIS.sharpWindow,
+    slack = VIDEO_ANALYSIS.slack,
+  } = {},
+) {
   const n = samples?.length ?? 0
   if (!n) return { indices: [], times: [], step: 0, overlap, blurry: 0, blurryKept: 0, gaps: 0, travel: 0 }
-  const rel = relativeSharpness(samples.map((s) => s.sharpness), window)
+  const rel = relativeSharpness(
+    samples.map((s) => s.sharpness),
+    window,
+  )
   const travel = new Float64Array(n)
-  for (let i = 0, m = 0; i < n; i++) { m = Math.max(m, Number(samples[i].travel) || 0); travel[i] = m }
+  for (let i = 0, m = 0; i < n; i++) {
+    m = Math.max(m, Number(samples[i].travel) || 0)
+    travel[i] = m
+  }
   const total = travel[n - 1] - travel[0]
   const step0 = Math.min(1, Math.max(0.01, 1 - (Number(overlap) || 0) / 100))
   let step = step0
@@ -446,7 +515,8 @@ export function selectKeyframes(samples, {
   const cap = Math.max(2, Math.floor(Number(maxFrames) || 0))
   if (maxFrames > 0 && res.indices.length > cap) {
     // Count falls as the step grows: double to bracket, then bisect.
-    let lo = step0, hi = step0
+    let lo = step0,
+      hi = step0
     let hiRes = res
     for (let k = 0; k < 40 && hiRes.indices.length > cap; k++) {
       lo = hi
@@ -457,7 +527,10 @@ export function selectKeyframes(samples, {
       const mid = (lo + hi) / 2
       const r = pickGreedy(travel, rel, mid, minSharpness, slack)
       if (r.indices.length > cap) lo = mid
-      else { hi = mid; hiRes = r }
+      else {
+        hi = mid
+        hiRes = r
+      }
     }
     step = hi
     res = hiRes

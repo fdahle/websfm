@@ -22,14 +22,16 @@ import { hasFundamental } from './ingest.js'
 import { pluralize } from '../textFormat.js'
 
 export const FOCAL_FROM_PAIRS_DEFAULTS = {
-  maxPairs: 40,       // strongest pairs used per group
-  minPairs: 5,        // fewer usable pairs ⇒ keep the default guess
-  minRatio: 0.9,      // a pair counts only if its best σ2/σ1 reaches this
-  agree: 0.1,         // pairs within ±10 % of the median agree …
-  minAgreement: 0.4,  // … and at least this share of the pairs must (a consensus, not a spread
-                      // gate: on low-texture ETH3D pipes a third of the weak pairs scatter
-                      // 1,500–8,700 px while 53 % agree on ≈ 3,400 — the truth is ≈ 3,430)
-  sMin: 0.25, sMax: 3, sStep: 1.01, // search range of s = f / max(w, h), multiplicative step
+  maxPairs: 40, // strongest pairs used per group
+  minPairs: 5, // fewer usable pairs ⇒ keep the default guess
+  minRatio: 0.9, // a pair counts only if its best σ2/σ1 reaches this
+  agree: 0.1, // pairs within ±10 % of the median agree …
+  minAgreement: 0.4, // … and at least this share of the pairs must (a consensus, not a spread
+  // gate: on low-texture ETH3D pipes a third of the weak pairs scatter
+  // 1,500–8,700 px while 53 % agree on ≈ 3,400 — the truth is ≈ 3,430)
+  sMin: 0.25,
+  sMax: 3,
+  sStep: 1.01, // search range of s = f / max(w, h), multiplicative step
 }
 
 // σ2/σ1 of Kbᵀ·F·Ka for focal fa / fb (pixels) and principal points pa / pb.
@@ -47,7 +49,8 @@ export function essentialRatio(F, fa, fb, pa, pb) {
 
 // Best scale s (f = s · max(w, h), shared by both images) for one pair; { s, ratio }.
 export function pairFocalScale(F, dimsA, dimsB, pa, pb, cfg = FOCAL_FROM_PAIRS_DEFAULTS) {
-  const wa = Math.max(dimsA.width, dimsA.height), wb = Math.max(dimsB.width, dimsB.height)
+  const wa = Math.max(dimsA.width, dimsA.height),
+    wb = Math.max(dimsB.width, dimsB.height)
   let best = { s: null, ratio: 0 }
   for (let s = cfg.sMin; s <= cfg.sMax; s *= cfg.sStep) {
     const r = essentialRatio(F, s * wa, s * wb, pa, pb)
@@ -62,7 +65,8 @@ const quantile = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.floor(q 
 function estimateScale(pairs, dims, Kmap, c) {
   const scales = []
   for (const e of pairs.slice(0, c.maxPairs)) {
-    const Ka = Kmap.get(e.idA), Kb = Kmap.get(e.idB)
+    const Ka = Kmap.get(e.idA),
+      Kb = Kmap.get(e.idB)
     const best = pairFocalScale(e.F, dims(e.idA), dims(e.idB), Ka, Kb, c)
     if (best.s != null && best.ratio >= c.minRatio) scales.push(best.s)
   }
@@ -96,13 +100,24 @@ export function estimateFocalsFromPairs({ imgs, Kmap, pairs, isGuess, groupOf, d
   const out = []
   for (const [g, members] of byGroup) {
     const mine = new Set(members)
-    const own = estimateScale(usable.filter((e) => mine.has(e.idA) && mine.has(e.idB)), dims, Kmap, c)
+    const own = estimateScale(
+      usable.filter((e) => mine.has(e.idA) && mine.has(e.idB)),
+      dims,
+      Kmap,
+      c,
+    )
     const est = own ?? global
     if (!est) continue
     for (const u of members) {
-      const K = Kmap.get(u), d = dims(u)
+      const K = Kmap.get(u),
+        d = dims(u)
       const f = est.s * Math.max(d.width, d.height)
-      Kmap.set(u, { ...K, fx: f, fy: f, source: `${K.source}, refined from ${pluralize(est.n, 'pair')} to ${f.toFixed(0)}px` })
+      Kmap.set(u, {
+        ...K,
+        fx: f,
+        fy: f,
+        source: `${K.source}, refined from ${pluralize(est.n, 'pair')} to ${f.toFixed(0)}px`,
+      })
     }
     out.push({ group: g, s: est.s, n: est.n, of: est.of, agreement: est.agreement, images: members.length, own: !!own })
   }

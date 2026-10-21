@@ -4,23 +4,29 @@ import { polygonSpans } from './polygonSpans.js'
 
 export function polylineLength(points) {
   let total = 0
-  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
+  for (let i = 1; i < points.length; i++)
+    total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
   return total
 }
 
 export function planimetricArea(points) {
   if (points.length < 3) return 0
   const side = (a, b, p) => (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
-  for (let i = 0; i < points.length; i++) for (let j = i + 2; j < points.length; j++) {
-    if (i === 0 && j === points.length - 1) continue
-    const a = points[i], b = points[(i + 1) % points.length], c = points[j], d = points[(j + 1) % points.length]
-    if (side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0) return null
-  }
+  for (let i = 0; i < points.length; i++)
+    for (let j = i + 2; j < points.length; j++) {
+      if (i === 0 && j === points.length - 1) continue
+      const a = points[i],
+        b = points[(i + 1) % points.length],
+        c = points[j],
+        d = points[(j + 1) % points.length]
+      if (side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0) return null
+    }
   // Translate before summing: survey coordinates can be millions of metres.
   const origin = points[0]
   let twice = 0
   for (let i = 0; i < points.length; i++) {
-    const a = points[i], b = points[(i + 1) % points.length]
+    const a = points[i],
+      b = points[(i + 1) % points.length]
     twice += (a.x - origin.x) * (b.y - origin.y) - (b.x - origin.x) * (a.y - origin.y)
   }
   return Math.abs(twice) / 2
@@ -38,19 +44,28 @@ export function sampleProfile(grid, points, { step, maxSamples = 4096 } = {}) {
   const sample = (x, y, d) => {
     // Preserve holes even when the shared sampler could borrow a neighbour.
     const pixel = worldToPixel(grid, x, y)
-    const c = Math.floor(pixel.col), r = Math.floor(pixel.row), index = r * grid.width + c
-    const valid = c >= 0 && r >= 0 && c < grid.width && r < grid.height
-      && (!grid.mask || grid.mask[index]) && Number.isFinite(grid.data[index])
-      && (grid.nodata == null || grid.data[index] !== grid.nodata)
+    const c = Math.floor(pixel.col),
+      r = Math.floor(pixel.row),
+      index = r * grid.width + c
+    const valid =
+      c >= 0 &&
+      r >= 0 &&
+      c < grid.width &&
+      r < grid.height &&
+      (!grid.mask || grid.mask[index]) &&
+      Number.isFinite(grid.data[index]) &&
+      (grid.nodata == null || grid.data[index] !== grid.nodata)
     samples.push({ distance: d, z: valid ? sampleRaster(grid, x, y) + zOffset : null })
   }
   sample(points[0].x, points[0].y, 0)
   for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1], b = points[i]
+    const a = points[i - 1],
+      b = points[i]
     const segment = Math.hypot(b.x - a.x, b.y - a.y)
     if (!segment) continue
     const n = Math.max(1, Math.ceil(segment / spacing))
-    for (let j = 1; j <= n; j++) sample(a.x + (b.x - a.x) * j / n, a.y + (b.y - a.y) * j / n, distance + segment * j / n)
+    for (let j = 1; j <= n; j++)
+      sample(a.x + ((b.x - a.x) * j) / n, a.y + ((b.y - a.y) * j) / n, distance + (segment * j) / n)
     distance += segment
   }
   return samples
@@ -61,8 +76,11 @@ export function sampleProfile(grid, points, { step, maxSamples = 4096 } = {}) {
 function validCell(grid, c, r) {
   if (c < 0 || r < 0 || c >= grid.width || r >= grid.height) return false
   const i = r * grid.width + c
-  return (!grid.mask || !!grid.mask[i]) && Number.isFinite(grid.data[i])
-    && (grid.nodata == null || grid.data[i] !== grid.nodata)
+  return (
+    (!grid.mask || !!grid.mask[i]) &&
+    Number.isFinite(grid.data[i]) &&
+    (grid.nodata == null || grid.data[i] !== grid.nodata)
+  )
 }
 
 // Least-squares plane z = a·(x−x0) + b·(y−y0) + c through ≥3 points, centred so
@@ -71,19 +89,35 @@ function validCell(grid, c, r) {
 export function fitBasePlane(points) {
   const n = points.length
   if (n < 3) return null
-  let x0 = 0, y0 = 0
-  for (const p of points) { x0 += p.x; y0 += p.y }
-  x0 /= n; y0 /= n
-  let sxx = 0, sxy = 0, syy = 0, sxz = 0, syz = 0, sz = 0, span = 0
+  let x0 = 0,
+    y0 = 0
   for (const p of points) {
-    const dx = p.x - x0, dy = p.y - y0
-    sxx += dx * dx; sxy += dx * dy; syy += dy * dy
-    sxz += dx * p.z; syz += dy * p.z; sz += p.z
+    x0 += p.x
+    y0 += p.y
+  }
+  x0 /= n
+  y0 /= n
+  let sxx = 0,
+    sxy = 0,
+    syy = 0,
+    sxz = 0,
+    syz = 0,
+    sz = 0,
+    span = 0
+  for (const p of points) {
+    const dx = p.x - x0,
+      dy = p.y - y0
+    sxx += dx * dx
+    sxy += dx * dy
+    syy += dy * dy
+    sxz += dx * p.z
+    syz += dy * p.z
+    sz += p.z
     span = Math.max(span, Math.abs(dx), Math.abs(dy))
   }
   const det = sxx * syy - sxy * sxy
   // Relative test: the determinant scales with span⁴·n².
-  if (!(det > 1e-12 * (span ** 4) * n * n)) return null
+  if (!(det > 1e-12 * span ** 4 * n * n)) return null
   return { x0, y0, a: (sxz * syy - syz * sxy) / det, b: (syz * sxx - sxz * sxy) / det, c: sz / n }
 }
 
@@ -116,19 +150,22 @@ export function fitBasePlane(points) {
  */
 export const SURFACE_VOLUME_MAX_SAMPLES = 262144 // 512², as the DEM-vs-reference check
 
-export function polygonVolume(grid, points, { base = 'plane', height = null, surface = null,
-  maxSurfaceSamples = SURFACE_VOLUME_MAX_SAMPLES } = {}) {
+export function polygonVolume(
+  grid,
+  points,
+  { base = 'plane', height = null, surface = null, maxSurfaceSamples = SURFACE_VOLUME_MAX_SAMPLES } = {},
+) {
   if (points.length < 3) return { error: 'polygon' }
   if (planimetricArea(points) == null) return { error: 'self-intersecting' }
   const { scaleX, scaleY } = grid.geoTransform
   const zOffset = grid.zOffset || 0
-  const vertexHeights = points.map(p => {
+  const vertexHeights = points.map((p) => {
     const px = worldToPixel(grid, p.x, p.y)
     if (!px || !validCell(grid, Math.floor(px.col), Math.floor(px.row))) return null
     const z = sampleRaster(grid, p.x, p.y)
     return Number.isFinite(z) ? z + zOffset : null
   })
-  const known = points.map((p, i) => ({ x: p.x, y: p.y, z: vertexHeights[i] })).filter(p => p.z != null)
+  const known = points.map((p, i) => ({ x: p.x, y: p.y, z: vertexHeights[i] })).filter((p) => p.z != null)
   let baseAt, baseInfo
   if (base === 'surface') {
     if (typeof surface?.sample !== 'function') return { error: 'base' }
@@ -155,17 +192,26 @@ export function polygonVolume(grid, points, { base = 'plane', height = null, sur
   // A cell is inside when its centre (c+½, r+½) is — the same spans raster
   // clipping uses (polygonSpans.js). Unclamped: cells off the raster count as
   // inside-but-unmeasured, so a polygon hanging off the edge lowers coverage.
-  const ring = points.map(p => { const px = worldToPixel(grid, p.x, p.y); return [px.col, px.row] })
+  const ring = points.map((p) => {
+    const px = worldToPixel(grid, p.x, p.y)
+    return [px.col, px.row]
+  })
   const cellArea = Math.abs(scaleX * scaleY)
   // A second surface is the costly base (a reprojected sample per cell): above the
   // cap, a regular sub-grid of the inside cells. The planes stay exact.
   let step = 1
   if (base === 'surface' && maxSurfaceSamples > 0) {
     let n = 0
-    polygonSpans([ring], (r, c0, c1) => { n += c1 - c0 + 1 })
+    polygonSpans([ring], (r, c0, c1) => {
+      n += c1 - c0 + 1
+    })
     if (n > maxSurfaceSamples) step = Math.ceil(Math.sqrt(n / maxSurfaceSamples))
   }
-  let cut = 0, fill = 0, insideCells = 0, sampled = 0, validSampled = 0
+  let cut = 0,
+    fill = 0,
+    insideCells = 0,
+    sampled = 0,
+    validSampled = 0
   polygonSpans([ring], (r, c0, c1) => {
     insideCells += c1 - c0 + 1
     if (step > 1 && r % step) return
@@ -186,10 +232,20 @@ export function polygonVolume(grid, points, { base = 'plane', height = null, sur
   // Each sampled cell stands for insideCells / sampled of the polygon (exactly 1
   // without a sub-grid).
   const scale = step > 1 ? insideCells / sampled : 1
-  cut *= scale; fill *= scale
+  cut *= scale
+  fill *= scale
   const validCells = step > 1 ? Math.round(validSampled * scale) : validSampled
-  return { cut, fill, net: cut - fill, cellArea, insideCells, validCells,
-    coverage: validSampled / sampled, base: baseInfo, sampleStep: step }
+  return {
+    cut,
+    fill,
+    net: cut - fill,
+    cellArea,
+    insideCells,
+    validCells,
+    coverage: validSampled / sampled,
+    base: baseInfo,
+    sampleStep: step,
+  }
 }
 
 /**
@@ -219,7 +275,9 @@ export function groundVolume(v, k = 1) {
  */
 export function polyline3d(points, up = [0, 0, 1]) {
   if (!points || points.length < 2) return null
-  let length = 0, horizontal = 0, climb = 0
+  let length = 0,
+    horizontal = 0,
+    climb = 0
   const segments = []
   for (let i = 1; i < points.length; i++) {
     const d = [0, 1, 2].map((k) => points[i][k] - points[i - 1][k])
@@ -230,7 +288,8 @@ export function polyline3d(points, up = [0, 0, 1]) {
     horizontal += Math.sqrt(Math.max(0, l * l - v * v))
     if (v > 0) climb += v
   }
-  const first = points[0], last = points[points.length - 1]
+  const first = points[0],
+    last = points[points.length - 1]
   const vertical = (last[0] - first[0]) * up[0] + (last[1] - first[1]) * up[1] + (last[2] - first[2]) * up[2]
   return { length, horizontal, vertical, climb, segments }
 }
@@ -252,7 +311,8 @@ export function polygon3d(points, up = [0, 0, 1]) {
   const n = [0, 0, 0]
   let perimeter = 0
   for (let i = 0; i < rel.length; i++) {
-    const a = rel[i], b = rel[(i + 1) % rel.length]
+    const a = rel[i],
+      b = rel[(i + 1) % rel.length]
     n[0] += a[1] * b[2] - a[2] * b[1]
     n[1] += a[2] * b[0] - a[0] * b[2]
     n[2] += a[0] * b[1] - a[1] * b[0]
@@ -265,6 +325,10 @@ export function polygon3d(points, up = [0, 0, 1]) {
   // Planarity against the plane through the centroid with that normal.
   const c = [0, 1, 2].map((k) => rel.reduce((s, p) => s + p[k], 0) / rel.length)
   let planarity = 0
-  for (const p of rel) planarity = Math.max(planarity, Math.abs((p[0] - c[0]) * normal[0] + (p[1] - c[1]) * normal[1] + (p[2] - c[2]) * normal[2]))
+  for (const p of rel)
+    planarity = Math.max(
+      planarity,
+      Math.abs((p[0] - c[0]) * normal[0] + (p[1] - c[1]) * normal[1] + (p[2] - c[2]) * normal[2]),
+    )
   return { area, footprint, perimeter, normal, planarity }
 }

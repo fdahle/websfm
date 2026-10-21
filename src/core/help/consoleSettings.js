@@ -11,15 +11,28 @@ import { SFM_TUNING, MATCH_TUNING } from '../tuning.js'
 import { RECONSTRUCT_DEFAULTS, MATCH_DEFAULTS } from '../defaults.user.js'
 
 export const TUNING_GROUPS = {
-  sfm: { defaults: SFM_TUNING, dialog: RECONSTRUCT_DEFAULTS, dialogName: 'Sparse Model', appliesTo: 'the next Sparse Model run' },
-  match: { defaults: MATCH_TUNING, dialog: MATCH_DEFAULTS, dialogName: 'Match Features', appliesTo: 'the next matching run' },
+  sfm: {
+    defaults: SFM_TUNING,
+    dialog: RECONSTRUCT_DEFAULTS,
+    dialogName: 'Sparse Model',
+    appliesTo: 'the next Sparse Model run',
+  },
+  match: {
+    defaults: MATCH_TUNING,
+    dialog: MATCH_DEFAULTS,
+    dialogName: 'Match Features',
+    appliesTo: 'the next matching run',
+  },
 }
 
 const isGroup = (v) => v != null && typeof v === 'object' && !Array.isArray(v)
 
 export function getPath(obj, path) {
   let v = obj
-  for (const k of path) { if (v == null || typeof v !== 'object') return undefined; v = v[k] }
+  for (const k of path) {
+    if (v == null || typeof v !== 'object') return undefined
+    v = v[k]
+  }
   return v
 }
 
@@ -54,9 +67,12 @@ export function tuningKeys(group) {
  * a nested group such as sfm.baSolver) — or { error }.
  */
 export function parseTuningKey(key) {
-  const parts = String(key ?? '').split('.').filter(Boolean)
+  const parts = String(key ?? '')
+    .split('.')
+    .filter(Boolean)
   const group = TUNING_GROUPS[parts[0]]
-  if (!group) return { error: `Unknown group "${parts[0] ?? ''}" — settable groups: ${Object.keys(TUNING_GROUPS).join(', ')}` }
+  if (!group)
+    return { error: `Unknown group "${parts[0] ?? ''}" — settable groups: ${Object.keys(TUNING_GROUPS).join(', ')}` }
   const path = parts.slice(1)
   if (!path.length) return { group: parts[0], path, def: group.defaults }
   if (path.length === 1 && path[0] in group.dialog && !(path[0] in group.defaults)) {
@@ -64,19 +80,26 @@ export function parseTuningKey(key) {
   }
   const def = getPath(group.defaults, path)
   if (def === undefined) {
-    const near = tuningKeys(parts[0]).filter((k) => k.toLowerCase().includes(path[path.length - 1].toLowerCase().slice(0, 6)))
-    return { error: `Unknown key ${key}${near.length ? ` — did you mean ${near.slice(0, 3).join(', ')}?` : ` — "set ${parts[0]}" lists the keys`}` }
+    const near = tuningKeys(parts[0]).filter((k) =>
+      k.toLowerCase().includes(path[path.length - 1].toLowerCase().slice(0, 6)),
+    )
+    return {
+      error: `Unknown key ${key}${near.length ? ` — did you mean ${near.slice(0, 3).join(', ')}?` : ` — "set ${parts[0]}" lists the keys`}`,
+    }
   }
   return { group: parts[0], path, def }
 }
 
 /** A typed value for a knob whose default is `def`, or { error }. */
 export function parseTuningValue(raw, def) {
-  const text = String(raw ?? '').trim().replace(/^(["'])(.*)\1$/, '$2')
+  const text = String(raw ?? '')
+    .trim()
+    .replace(/^(["'])(.*)\1$/, '$2')
   if (typeof def === 'number' || def === null) {
     if (def === null && /^(null|none|auto)$/i.test(text)) return { value: null }
     const n = Number(text)
-    if (text === '' || !Number.isFinite(n)) return { error: `expects a number${def === null ? ' or null' : ''}, got "${text}"` }
+    if (text === '' || !Number.isFinite(n))
+      return { error: `expects a number${def === null ? ' or null' : ''}, got "${text}"` }
     return { value: n }
   }
   if (typeof def === 'boolean') {

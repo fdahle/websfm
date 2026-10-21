@@ -27,39 +27,57 @@
 // in the sensor table's pixel-centre convention (the segment's centre).
 export function panoramicSegments(strip, { segments = 0, overlap = 0.1 } = {}) {
   const { width, height, pitchMm: p, focalMm: f } = strip
-  if (!(width > 0 && height > 0 && p > 0 && f > 0)) throw new Error('a panoramic strip needs its size, scan pixel size and focal length')
+  if (!(width > 0 && height > 0 && p > 0 && f > 0))
+    throw new Error('a panoramic strip needs its size, scan pixel size and focal length')
   const axis = strip.axis ?? (width >= height ? 'x' : 'y')
-  const length = axis === 'x' ? width : height, across = axis === 'x' ? height : width
-  const u0 = strip.u0 ?? width / 2, v0 = strip.v0 ?? height / 2
+  const length = axis === 'x' ? width : height,
+    across = axis === 'x' ? height : width
+  const u0 = strip.u0 ?? width / 2,
+    v0 = strip.v0 ?? height / 2
   const c0 = axis === 'x' ? u0 : v0
   // The scan the strip shows, either side of its centre.
-  const lo = -c0 * p / f, hi = (length - c0) * p / f
+  const lo = (-c0 * p) / f,
+    hi = ((length - c0) * p) / f
   const scanRad = hi - lo
   const n = Math.max(1, Math.round(segments > 0 ? segments : length / across))
   const core = scanRad / n
-  const half = Math.min(core / 2 * (1 + 2 * Math.max(0, overlap)), Math.PI / 3)
+  const half = Math.min((core / 2) * (1 + 2 * Math.max(0, overlap)), Math.PI / 3)
   // Wide enough for the segment's angle, high enough for the strip's full height at its
   // edges (the cylinder's height maps to b = t / cos θ there).
-  const w = Math.max(1, Math.ceil(2 * f * Math.tan(half) / p))
+  const w = Math.max(1, Math.ceil((2 * f * Math.tan(half)) / p))
   const h = Math.max(1, Math.ceil(across / Math.cos(half)))
   const out = []
   for (let k = 0; k < n; k++) {
     const thetaRad = lo + (k + 0.5) * core
-    out.push({ index: k, thetaRad, halfRad: half, coreHalfRad: core / 2, width: w, height: h, cx: w / 2 - 0.5, cy: h / 2 - 0.5 })
+    out.push({
+      index: k,
+      thetaRad,
+      halfRad: half,
+      coreHalfRad: core / 2,
+      width: w,
+      height: h,
+      cx: w / 2 - 0.5,
+      cy: h / 2 - 0.5,
+    })
   }
   return { axis, scanRad, length, across, u0, v0, segments: out }
 }
 
 // A segment pixel (pixel-edge a, b) → the strip pixel (pixel-edge u, v) it samples.
 export function segmentToStrip(seg, layout, strip, a, b) {
-  const p = strip.pitchMm, f = strip.focalMm
-  const am = (a - seg.width / 2) * p, bm = (b - seg.height / 2) * p
-  const c = Math.cos(seg.thetaRad), s = Math.sin(seg.thetaRad)
+  const p = strip.pitchMm,
+    f = strip.focalMm
+  const am = (a - seg.width / 2) * p,
+    bm = (b - seg.height / 2) * p
+  const c = Math.cos(seg.thetaRad),
+    s = Math.sin(seg.thetaRad)
   // r = am·xk + bm·y + f·zk
-  const rx = am * c + f * s, ry = bm, rz = -am * s + f * c
+  const rx = am * c + f * s,
+    ry = bm,
+    rz = -am * s + f * c
   const theta = Math.atan2(rx, rz)
-  const t = f * ry / Math.hypot(rx, rz)
-  const along = (layout.axis === 'x' ? layout.u0 : layout.v0) + f * theta / p
+  const t = (f * ry) / Math.hypot(rx, rz)
+  const along = (layout.axis === 'x' ? layout.u0 : layout.v0) + (f * theta) / p
   const acr = (layout.axis === 'x' ? layout.v0 : layout.u0) + t / p
   return layout.axis === 'x' ? { u: along, v: acr } : { u: acr, v: along }
 }
@@ -67,15 +85,21 @@ export function segmentToStrip(seg, layout, strip, a, b) {
 // A strip pixel (pixel-edge u, v) → the segment pixel (pixel-edge a, b) that shows it, or
 // null when the segment cannot (behind it, past 80° off its axis).
 export function stripToSegment(seg, layout, strip, u, v) {
-  const p = strip.pitchMm, f = strip.focalMm
+  const p = strip.pitchMm,
+    f = strip.focalMm
   const along = layout.axis === 'x' ? u - layout.u0 : v - layout.v0
   const acr = layout.axis === 'x' ? v - layout.v0 : u - layout.u0
-  const theta = along * p / f, t = acr * p
-  const dx = Math.sin(theta), dy = t / f, dz = Math.cos(theta)
-  const c = Math.cos(seg.thetaRad), s = Math.sin(seg.thetaRad)
-  const kx = dx * c - dz * s, kz = dx * s + dz * c
-  if (!(kz > Math.cos(80 * Math.PI / 180) * Math.hypot(kx, dy, kz))) return null
-  return { a: seg.width / 2 + f * kx / kz / p, b: seg.height / 2 + f * dy / kz / p }
+  const theta = (along * p) / f,
+    t = acr * p
+  const dx = Math.sin(theta),
+    dy = t / f,
+    dz = Math.cos(theta)
+  const c = Math.cos(seg.thetaRad),
+    s = Math.sin(seg.thetaRad)
+  const kx = dx * c - dz * s,
+    kz = dx * s + dz * c
+  if (!(kz > Math.cos((80 * Math.PI) / 180) * Math.hypot(kx, dy, kz))) return null
+  return { a: seg.width / 2 + (f * kx) / kz / p, b: seg.height / 2 + (f * dy) / kz / p }
 }
 
 // The segment images' names: `<strip>_s01.tif` …, in scan order.

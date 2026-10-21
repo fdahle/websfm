@@ -34,7 +34,21 @@ import { getProjectDir, getRoot, getSubDir, readBin, writeBin, writeJson } from 
 // does not rewrite every other. Returns `{ ok: true, files: { cloudId: { key: file } } }`,
 // or `{ ok: false, stale: [cloudId] }` — nothing written — when a reused file has gone
 // (another tab's save collected it); the caller then resends those clouds' buffers.
-const RECON_BIN_KEYS = ['pos', 'col', 'colorMask', 'nrm', 'idx', 'uv', 'texture', 'vcount', 'vcam', 'vkp', 'vx', 'vy', 'attributes']
+const RECON_BIN_KEYS = [
+  'pos',
+  'col',
+  'colorMask',
+  'nrm',
+  'idx',
+  'uv',
+  'texture',
+  'vcount',
+  'vcam',
+  'vkp',
+  'vx',
+  'vy',
+  'attributes',
+]
 
 export async function saveReconstruction(projectId, data) {
   return trackPersistence('saveReconstruction:' + String(projectId), async () => {
@@ -91,19 +105,27 @@ export async function loadReconstruction(projectId) {
     const savedFiles = filesByCloud(meta.binaryFiles)
     await mapConcurrent(meta.clouds || [], 3, async (c) => {
       const buffers = {}
-      RECON_BIN_KEYS.forEach((key) => { buffers[key] = saved[`${c.id}.${key}`] ?? null })
+      RECON_BIN_KEYS.forEach((key) => {
+        buffers[key] = saved[`${c.id}.${key}`] ?? null
+      })
       const n = c.pointCount ?? 0
       // A dense/mesh pos is stored at its in-memory width (Float32 = 12 bytes per
       // point, Float64 = 24; cloudSerde posArray); a sparse pos is always Float64.
       const posBytes = buffers.pos?.byteLength ?? 0
-      const posOk = posBytes === n * 24 || (c.kind !== 'sparse' && c.kind != null && posBytes === n * 12)
+      const posOk =
+        posBytes === n * 24 ||
+        (c.kind !== 'sparse' && c.kind != null && posBytes === n * 12) ||
         // A streamed cloud's points are only in its octree (lod/), never here.
-        || (c.kind === 'dense' && c.streamed && c.lod && posBytes === 0)
-      if (!Number.isSafeInteger(n) || n < 0 || !posOk
-          || (c.hasColor && buffers.col?.byteLength !== n * 3)
-          || (c.hasNormals && buffers.nrm?.byteLength !== n * 12)
-          || (c.kind === 'mesh' && buffers.idx?.byteLength !== (c.triCount ?? 0) * 12)
-          || (c.hasUv && (buffers.uv?.byteLength !== n * 8 || buffers.texture?.byteLength !== c.texture?.bytes))) {
+        (c.kind === 'dense' && c.streamed && c.lod && posBytes === 0)
+      if (
+        !Number.isSafeInteger(n) ||
+        n < 0 ||
+        !posOk ||
+        (c.hasColor && buffers.col?.byteLength !== n * 3) ||
+        (c.hasNormals && buffers.nrm?.byteLength !== n * 12) ||
+        (c.kind === 'mesh' && buffers.idx?.byteLength !== (c.triCount ?? 0) * 12) ||
+        (c.hasUv && (buffers.uv?.byteLength !== n * 8 || buffers.texture?.byteLength !== c.texture?.bytes))
+      ) {
         throw new Error('Incomplete saved reconstruction')
       }
       c.buffers = buffers
@@ -117,13 +139,17 @@ export async function loadReconstruction(projectId) {
 }
 
 export async function deleteReconstruction(projectId) {
-  return trackPersistence('deleteReconstruction:' + String(projectId), () => persistenceLock(`reconstruction:${projectId}`, async () => {
-    const dir = await getProjectDir(projectId)
-    await dir.removeEntry('reconstruction.json').catch(ignoreMissing)
-    if (dir.keys) for await (const name of dir.keys()) {
-      if (name.startsWith('reconstruction.json.') && name.endsWith('.bin')) await dir.removeEntry(name).catch(ignoreMissing)
-    }
-  }))
+  return trackPersistence('deleteReconstruction:' + String(projectId), () =>
+    persistenceLock(`reconstruction:${projectId}`, async () => {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('reconstruction.json').catch(ignoreMissing)
+      if (dir.keys)
+        for await (const name of dir.keys()) {
+          if (name.startsWith('reconstruction.json.') && name.endsWith('.bin'))
+            await dir.removeEntry(name).catch(ignoreMissing)
+        }
+    }),
+  )
 }
 
 // ── Level-of-detail octrees (dev/planning/plan-lod.md) ──────────────────────
@@ -147,7 +173,8 @@ export async function pruneLodFiles(projectId, keepNames, { building = false } =
   return trackPersistence('pruneLodFiles:' + String(projectId), async () => {
     const dir = await getSubDir(projectId, 'lod')
     const stale = []
-    for await (const name of dir.keys()) if (/\.(lod|hier)$|\.copc\.laz$/.test(name) && !keepNames.has(name)) stale.push(name)
+    for await (const name of dir.keys())
+      if (/\.(lod|hier)$|\.copc\.laz$/.test(name) && !keepNames.has(name)) stale.push(name)
     for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
     if (!building) {
       const root = await getRoot()

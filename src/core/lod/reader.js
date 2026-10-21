@@ -20,7 +20,9 @@ export async function openLodReader(lod, { data, hierarchy }) {
     cube: (node) => nodeCube(lod.root, node.key),
     spacing: (node) => lod.spacing / 2 ** node.key[0],
     async read(node, { as = 'render' } = {}) {
-      const bytes = node.length ? new Uint8Array(await data.slice(node.offset, node.offset + node.length).arrayBuffer()) : new Uint8Array(0)
+      const bytes = node.length
+        ? new Uint8Array(await data.slice(node.offset, node.offset + node.length).arrayBuffer())
+        : new Uint8Array(0)
       return decodeNode(bytes, node.count, lod.layout, { as })
     },
   }

@@ -22,7 +22,9 @@ function bruteKnn(cloud, q, k, exclude = -1, maxD2 = Infinity) {
   const d = []
   for (let j = 0; j < cloud.count; j++) {
     if (j === exclude) continue
-    const dx = cloud.pos[j * 3] - q[0], dy = cloud.pos[j * 3 + 1] - q[1], dz = cloud.pos[j * 3 + 2] - q[2]
+    const dx = cloud.pos[j * 3] - q[0],
+      dy = cloud.pos[j * 3 + 1] - q[1],
+      dz = cloud.pos[j * 3 + 2] - q[2]
     const d2 = dx * dx + dy * dy + dz * dz
     if (d2 < maxD2) d.push(d2)
   }
@@ -30,7 +32,8 @@ function bruteKnn(cloud, q, k, exclude = -1, maxD2 = Infinity) {
 }
 
 function query(index, q, k, exclude = -1, maxD2 = Infinity) {
-  const idx = new Int32Array(k), d2 = new Float64Array(k)
+  const idx = new Int32Array(k),
+    d2 = new Float64Array(k)
   const n = knnQuery(index, q[0], q[1], q[2], k, idx, d2, exclude, maxD2)
   return { n, idx: [...idx.subarray(0, n)], d2: [...d2.subarray(0, n)] }
 }
@@ -79,7 +82,15 @@ describe('knn', () => {
   it('nearestNeighbors returns distances and −1/NaN beyond maxDist', () => {
     const ref = cloudOf(100, (i) => [i, 0, 0])
     const index = buildKnnIndex(ref)
-    const q = cloudOf(3, (i) => [[10.4, 0, 0], [50, 3, 4], [500, 0, 0]][i])
+    const q = cloudOf(
+      3,
+      (i) =>
+        [
+          [10.4, 0, 0],
+          [50, 3, 4],
+          [500, 0, 0],
+        ][i],
+    )
     const { index: nn, dist } = nearestNeighbors(index, q, { maxDist: 100 })
     expect([...nn]).toEqual([10, 50, -1])
     expect(dist[0]).toBeCloseTo(0.4, 12)
@@ -90,6 +101,11 @@ describe('knn', () => {
   it('is empty-safe', () => {
     const index = buildKnnIndex({ count: 0, pos: new Float64Array(0) })
     expect(query(index, [0, 0, 0], 4).n).toBe(0)
-    expect(nearestNeighbors(index, cloudOf(2, () => [0, 0, 0])).index[0]).toBe(-1)
+    expect(
+      nearestNeighbors(
+        index,
+        cloudOf(2, () => [0, 0, 0]),
+      ).index[0],
+    ).toBe(-1)
   })
 })

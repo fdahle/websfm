@@ -6,7 +6,14 @@ import { triangulateAllGcps } from '../../core/sfm/gcpTriangulation.js'
 import { gcpGuidesForImage, gcpEstimateForImage } from '../../core/sfm/gcpGuides.js'
 import { gcpsInPinholeFrame, guideToScan, makePinholeToMark } from '../../core/sfm/displayFrame.js'
 import { isGeographic, ensureProjection, transform, metresPerCrsUnit } from '../../core/crs.js'
-import { normalizedGroundResidual, precisionFromGcp, covarianceFromGcp, normalizedWithCovariance, addCovariance, subCovariance } from '../../core/gcpAccuracy.js'
+import {
+  normalizedGroundResidual,
+  precisionFromGcp,
+  covarianceFromGcp,
+  normalizedWithCovariance,
+  addCovariance,
+  subCovariance,
+} from '../../core/gcpAccuracy.js'
 import { isGroundControl } from '../../core/io/gcp.js'
 import { suggestProjectedCrs, formatLatLon } from '../../core/crsSuggest.js'
 
@@ -44,15 +51,27 @@ const inverseVariance3d = (p) => {
 //   poses(), gcps(), currentCrs() — snapshot getters over the other stores
 //   save(), log() — store side effects
 export function createGeoreferencing({
-  sparseCameras, images, georef, healthDirty, poses, gcps, currentCrs, save, log,
+  sparseCameras,
+  images,
+  georef,
+  healthDirty,
+  poses,
+  gcps,
+  currentCrs,
+  save,
+  log,
   modelStamp = () => null,
   // image → { dist, selfCal, fiducial } from the run record (displayFrame.js). Marks
   // are clicked on the raw scan; the cameras project into the pinhole/canonical
   // frame, so every triangulation here maps them first. Null ⇒ identity.
   frameModel = () => null,
 }) {
-  const inPinhole = (list) => gcpsInPinholeFrame(list, {
-    imagesById: imagesById(), sparseCameras: sparseCameras.value, frameModel: frameModel() })
+  const inPinhole = (list) =>
+    gcpsInPinholeFrame(list, {
+      imagesById: imagesById(),
+      sparseCameras: sparseCameras.value,
+      frameModel: frameModel(),
+    })
   // The Cartesian frame the similarity is fitted in (core/products/localFrame.js):
   // the project grid with its point scale factor divided out and Earth curvature
   // restored about the targets' centroid. Null for no CRS / a geographic CRS, where
@@ -63,18 +82,27 @@ export function createGeoreferencing({
     try {
       await ensureProjection(crs)
       if (isGeographic(crs)) return null
-    } catch { return null }
-    let e0 = 0, n0 = 0
-    for (const d of dsts) { e0 += d[0]; n0 += d[1] }
-    e0 /= dsts.length; n0 /= dsts.length
-    return buildMetricFrame((xy) => transform(xy, crs, 'EPSG:4326'), e0, n0,
-      { metresPerUnit: metresPerCrsUnit(crs) ?? 1 })
+    } catch {
+      return null
+    }
+    let e0 = 0,
+      n0 = 0
+    for (const d of dsts) {
+      e0 += d[0]
+      n0 += d[1]
+    }
+    e0 /= dsts.length
+    n0 /= dsts.length
+    return buildMetricFrame((xy) => transform(xy, crs, 'EPSG:4326'), e0, n0, {
+      metresPerUnit: metresPerCrsUnit(crs) ?? 1,
+    })
   }
 
   const toScanFor = (imageId) => {
     // Guides and estimates are drawn where marks are clicked, so they go back to the
     // mark convention (makePinholeToMark adds the half pixel), even with no bags.
-    const resolve = frameModel(), im = imagesById().get(imageId)
+    const resolve = frameModel(),
+      im = imagesById().get(imageId)
     const cam = im ? sparseCameras.value.get(im.uuid) : null
     return cam ? { toScan: makePinholeToMark({ K: cam.K, ...(resolve ? resolve(im) : {}) }), K: cam.K } : null
   }
@@ -82,14 +110,23 @@ export function createGeoreferencing({
   const evidenceKey = computed(() => {
     // Camera buffers are markRaw; healthDirty signals in-place model edits.
     void healthDirty.value
-    return JSON.stringify({ crs: currentCrs(), model: modelStamp(),
-      cameras: [...sparseCameras.value], images: images.value.map(im => [im.id, im.uuid]),
-      gcps: gcps(), poses: poses() })
+    return JSON.stringify({
+      crs: currentCrs(),
+      model: modelStamp(),
+      cameras: [...sparseCameras.value],
+      images: images.value.map((im) => [im.id, im.uuid]),
+      gcps: gcps(),
+      poses: poses(),
+    })
   })
-  const validGeoref = computed(() => georef.value?.evidenceKey === evidenceKey.value ? georef.value : null)
-  watch([evidenceKey, () => georef.value], () => {
-    if (georef.value && !validGeoref.value) georef.value = null
-  }, { flush: 'sync' })
+  const validGeoref = computed(() => (georef.value?.evidenceKey === evidenceKey.value ? georef.value : null))
+  watch(
+    [evidenceKey, () => georef.value],
+    () => {
+      if (georef.value && !validGeoref.value) georef.value = null
+    },
+    { flush: 'sync' },
+  )
 
   // 3D-3D correspondences for the SfM→CRS fit: registered sparse camera centres
   // ↔ imported camera poses (both keyed to images; poses are in the project CRS).
@@ -108,8 +145,18 @@ export function createGeoreferencing({
       // scalar weight: the fit is then held hardest where the positions are best.
       const sig = [p.accuracyX, p.accuracyY, p.accuracyZ]
       const precision = sig.every((v) => Number.isFinite(v) && v > 0)
-        ? [[1 / sig[0] ** 2, 0, 0], [0, 1 / sig[1] ** 2, 0], [0, 0, 1 / sig[2] ** 2]] : null
-      pairs.push({ src: cameraCenter(cam), dst: [p.x, p.y, p.z], weight: inverseVariance3d(p), ...(precision ? { precision } : {}) })
+        ? [
+            [1 / sig[0] ** 2, 0, 0],
+            [0, 1 / sig[1] ** 2, 0],
+            [0, 0, 1 / sig[2] ** 2],
+          ]
+        : null
+      pairs.push({
+        src: cameraCenter(cam),
+        dst: [p.x, p.y, p.z],
+        weight: inverseVariance3d(p),
+        ...(precision ? { precision } : {}),
+      })
     }
     return pairs
   }
@@ -150,7 +197,8 @@ export function createGeoreferencing({
     return results
       .filter(({ tri }) => tri != null)
       .map(({ gcp, tri }) => ({
-        src: [tri.x, tri.y, tri.z], dst: [gcp.x, gcp.y, gcp.z],
+        src: [tri.x, tri.y, tri.z],
+        dst: [gcp.x, gcp.y, gcp.z],
         weight: inverseVariance3d(gcp),
         precision: precisionFromGcp(gcp),
       }))
@@ -158,8 +206,9 @@ export function createGeoreferencing({
 
   // True when a georeference can be fit (≥3 correspondences from GCPs or poses),
   // so the product modals can offer a real-CRS output alongside the local frame.
-  const canGeoreference = computed(() => !isGeographic(currentCrs())
-    && (canGeoreferenceGcps.value || georefPairs().length >= 3))
+  const canGeoreference = computed(
+    () => !isGeographic(currentCrs()) && (canGeoreferenceGcps.value || georefPairs().length >= 3),
+  )
 
   // Why `canGeoreference` is false, so the product modals can say so instead of a
   // generic "needs camera poses": 'geographic' (the project CRS is in degrees — a
@@ -177,8 +226,8 @@ export function createGeoreferencing({
   // projected CRS — the choice was already made, and is not second-guessed.
   const crsSuggestion = computed(() => {
     if (!isGeographic(currentCrs())) return null
-    const fromXy = (list) => list.filter((p) => Number.isFinite(p?.x) && Number.isFinite(p?.y))
-      .map((p) => ({ lon: p.x, lat: p.y }))
+    const fromXy = (list) =>
+      list.filter((p) => Number.isFinite(p?.x) && Number.isFinite(p?.y)).map((p) => ({ lon: p.x, lat: p.y }))
     let positions = fromXy(poses())
     if (!positions.length) positions = fromXy(gcps().filter(groundControl))
     if (!positions.length) {
@@ -201,10 +250,15 @@ export function createGeoreferencing({
     if (isGeographic(currentCrs())) {
       clearFit()
       const hint = crsSuggestion.value
-      log(`Georeference: ${currentCrs()} uses angular coordinates; choose a projected metric CRS`
-        + (hint ? ` — for positions around ${formatLatLon(hint.lat, hint.lon)}, ${hint.code} (${hint.name}) `
-          + 'in Project Settings' : ''),
-        'warn', 'Products')
+      log(
+        `Georeference: ${currentCrs()} uses angular coordinates; choose a projected metric CRS` +
+          (hint
+            ? ` — for positions around ${formatLatLon(hint.lat, hint.lon)}, ${hint.code} (${hint.name}) ` +
+              'in Project Settings'
+            : ''),
+        'warn',
+        'Products',
+      )
       return null
     }
     const evidenceAtStart = evidenceKey.value
@@ -214,15 +268,23 @@ export function createGeoreferencing({
     // The vertical datum the fitted heights are in, recorded on the fit and so on
     // every product built in it (a DEM compared with a reference DEM converts the
     // reference to it): the one datum all control shares, else unknown.
-    const datums = new Set(usingGcps
-      ? qualifyingGcps().map((g) => g.verticalDatum ?? 'unknown')
-      : poses().filter((p) => p.enabled !== false).map((p) => p.verticalDatum ?? 'unknown'))
+    const datums = new Set(
+      usingGcps
+        ? qualifyingGcps().map((g) => g.verticalDatum ?? 'unknown')
+        : poses()
+            .filter((p) => p.enabled !== false)
+            .map((p) => p.verticalDatum ?? 'unknown'),
+    )
     const verticalDatum = datums.size === 1 ? [...datums][0] : 'unknown'
     if (usingGcps && (datums.size > 1 || datums.has('unknown'))) {
-      log(`Georeference: GCP height datum is ${[...datums].join(' / ')} — `
-        + (datums.size > 1 ? 'mixed heights bias the fit; GCP table ▸ Convert heights to… puts them in one datum'
-          : 'declare it in the GCP table, or products cannot be compared with a reference DEM in another datum'),
-      'warn', 'Products')
+      log(
+        `Georeference: GCP height datum is ${[...datums].join(' / ')} — ` +
+          (datums.size > 1
+            ? 'mixed heights bias the fit; GCP table ▸ Convert heights to… puts them in one datum'
+            : 'declare it in the GCP table, or products cannot be compared with a reference DEM in another datum'),
+        'warn',
+        'Products',
+      )
     }
     const pairs = usingGcps ? gcpPairs : georefPairs()
     if (pairs.length < 3) {
@@ -231,13 +293,18 @@ export function createGeoreferencing({
       return null
     }
     if (usingGcps) {
-      const xs = pairs.map((p) => p.dst[0]), ys = pairs.map((p) => p.dst[1]), zs = pairs.map((p) => p.dst[2])
-      const horizontalSpan = Math.hypot(Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys))
-      const verticalSpan = Math.max(...zs)-Math.min(...zs)
+      const xs = pairs.map((p) => p.dst[0]),
+        ys = pairs.map((p) => p.dst[1]),
+        zs = pairs.map((p) => p.dst[2])
+      const horizontalSpan = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))
+      const verticalSpan = Math.max(...zs) - Math.min(...zs)
       const verticalSigma = Math.max(...qualifyingGcps().map((g) => g.accuracyZ ?? 0))
       if (horizontalSpan > 0 && verticalSpan < 3 * verticalSigma) {
-        log(`Georeference: GCP vertical range (${verticalSpan.toPrecision(3)}) is small relative to vertical uncertainty; scale/tilt may be weakly constrained`,
-          'warn', 'Products')
+        log(
+          `Georeference: GCP vertical range (${verticalSpan.toPrecision(3)}) is small relative to vertical uncertainty; scale/tilt may be weakly constrained`,
+          'warn',
+          'Products',
+        )
       }
     }
     const local = await metricFrameFor(pairs.map((p) => p.dst))
@@ -251,13 +318,23 @@ export function createGeoreferencing({
     georef.value = {
       evidenceKey: evidenceAtStart,
       sim: { scale: fit.scale, R: fit.R, t: fit.t, ...(local ? { local } : {}) },
-      crs: currentCrs(), rms: fit.rms, count: fit.count, method: usingGcps ? 'gcps' : 'poses', verticalDatum,
+      crs: currentCrs(),
+      rms: fit.rms,
+      count: fit.count,
+      method: usingGcps ? 'gcps' : 'poses',
+      verticalDatum,
     }
-    log(`Georeference: ${fit.count} ${usingGcps ? 'GCPs' : 'poses'} → ${currentCrs()}, `
-      + `scale ${fit.scale.toPrecision(4)}, weighted RMS ${fit.rms.toPrecision(3)}`
-      + (local ? ` (fitted in a local metric frame: grid scale factor k=${local.k.toFixed(6)}, `
-        + `curvature restored; ground units)` : ''), 'success', 'Products')
-    healthDirty.value++   // GCP prune / refit → the hub overview must recompute
+    log(
+      `Georeference: ${fit.count} ${usingGcps ? 'GCPs' : 'poses'} → ${currentCrs()}, ` +
+        `scale ${fit.scale.toPrecision(4)}, weighted RMS ${fit.rms.toPrecision(3)}` +
+        (local
+          ? ` (fitted in a local metric frame: grid scale factor k=${local.k.toFixed(6)}, ` +
+            `curvature restored; ground units)`
+          : ''),
+      'success',
+      'Products',
+    )
+    healthDirty.value++ // GCP prune / refit → the hub overview must recompute
     save()
     return georef.value
   }
@@ -279,11 +356,22 @@ export function createGeoreferencing({
       const cam = im && cams.get(im.uuid)
       if (!cam) continue
       const fit = applySimilarity(sim, cameraCenter(cam))
-      const dx = fit[0] - p.x, dy = fit[1] - p.y, dz = fit[2] - p.z
-      out.push({ uuid: im.uuid, name: im.name, source: p.source ?? 'imported',
-        accuracyX: p.accuracyX ?? p.accXYZ, accuracyY: p.accuracyY ?? p.accXYZ,
-        accuracyZ: p.accuracyZ ?? p.accXYZ, verticalDatum: p.verticalDatum ?? null,
-        dx, dy, dz, dTotal: Math.hypot(dx, dy, dz) })
+      const dx = fit[0] - p.x,
+        dy = fit[1] - p.y,
+        dz = fit[2] - p.z
+      out.push({
+        uuid: im.uuid,
+        name: im.name,
+        source: p.source ?? 'imported',
+        accuracyX: p.accuracyX ?? p.accXYZ,
+        accuracyY: p.accuracyY ?? p.accXYZ,
+        accuracyZ: p.accuracyZ ?? p.accXYZ,
+        verticalDatum: p.verticalDatum ?? null,
+        dx,
+        dy,
+        dz,
+        dTotal: Math.hypot(dx, dy, dz),
+      })
     }
     return out
   }
@@ -306,10 +394,15 @@ export function createGeoreferencing({
     // How well the fit itself is known (core/products/georef.js similarityPrecision),
     // from the pairs it was fitted to: the control GCPs, or the camera poses.
     const controls = results.filter(({ gcp, tri }) => tri && groundControl(gcp))
-    const fitPairs = validGeoref.value?.method === 'poses'
-      ? georefPairs()
-      : controls.map(({ gcp, tri }) => ({ src: [tri.x, tri.y, tri.z], dst: [gcp.x, gcp.y, gcp.z],
-        weight: inverseVariance3d(gcp), precision: precisionFromGcp(gcp) }))
+    const fitPairs =
+      validGeoref.value?.method === 'poses'
+        ? georefPairs()
+        : controls.map(({ gcp, tri }) => ({
+            src: [tri.x, tri.y, tri.z],
+            dst: [gcp.x, gcp.y, gcp.z],
+            weight: inverseVariance3d(gcp),
+            precision: precisionFromGcp(gcp),
+          }))
     const fitPrecision = sim && fitPairs.length >= 3 ? similarityPrecision(fitPairs, sim) : null
     const inFit = (gcp) => validGeoref.value?.method !== 'poses' && groundControl(gcp)
     // A residual's normalisation: a point the fit was made to sits closer to the fit
@@ -319,51 +412,90 @@ export function createGeoreferencing({
     const normalizeResidual = (gcp, src, residual, predictedCov) => {
       const own = covarianceFromGcp(gcp)
       if (own && predictedCov) {
-        const nr = normalizedWithCovariance(residual,
-          predictedCov.inFit ? subCovariance(own, predictedCov.cov) : addCovariance(own, predictedCov.cov))
+        const nr = normalizedWithCovariance(
+          residual,
+          predictedCov.inFit ? subCovariance(own, predictedCov.cov) : addCovariance(own, predictedCov.cov),
+        )
         if (nr) return nr
       }
       return normalizedGroundResidual(gcp, residual)
     }
     const rows = results.map(({ gcp, tri }) => {
       if (!tri) {
-        return { gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: 0,
-          sfm: null, dx: null, dy: null, dz: null, dTotal: null, observations: [] }
+        return {
+          gcpId: gcp.id,
+          name: gcp.name,
+          role: gcp.role ?? 'control',
+          viewCount: 0,
+          sfm: null,
+          dx: null,
+          dy: null,
+          dz: null,
+          dTotal: null,
+          observations: [],
+        }
       }
-      let dx = null, dy = null, dz = null, dTotal = null
-      let normalized = null, normalizedAxes = null, chi2 = null
+      let dx = null,
+        dy = null,
+        dz = null,
+        dTotal = null
+      let normalized = null,
+        normalizedAxes = null,
+        chi2 = null
       if (sim && finite3d(gcp)) {
         const p = applySimilarity(sim, [tri.x, tri.y, tri.z])
-        dx = p[0] - gcp.x; dy = p[1] - gcp.y; dz = p[2] - gcp.z
+        dx = p[0] - gcp.x
+        dy = p[1] - gcp.y
+        dz = p[2] - gcp.z
         dTotal = Math.hypot(dx, dy, dz)
         const src = [tri.x, tri.y, tri.z]
-        const nr = normalizeResidual(gcp, src, [dx, dy, dz],
-          fitPrecision ? { cov: fitPrecision.predicted(src), inFit: inFit(gcp) } : null)
+        const nr = normalizeResidual(
+          gcp,
+          src,
+          [dx, dy, dz],
+          fitPrecision ? { cov: fitPrecision.predicted(src), inFit: inFit(gcp) } : null,
+        )
         normalized = nr?.normalized ?? null
         normalizedAxes = nr?.axes ?? null
         chi2 = nr?.chi2 ?? null
       }
       return {
-        gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: tri.viewCount,
+        gcpId: gcp.id,
+        name: gcp.name,
+        role: gcp.role ?? 'control',
+        viewCount: tri.viewCount,
         // Where the model puts the point, in SfM-frame units. For a control/check
         // point this is intermediate; for a MARKER it is the whole answer — a
         // marker has no surveyed coordinate to diff against, so its triangulated
         // position and the per-view reprojection errors are the only quality
         // signals it has. It is also what the scale-bar fit measures across.
         sfm: { x: tri.x, y: tri.y, z: tri.z },
-        dx, dy, dz, dTotal, normalized, normalizedAxes, chi2,
+        dx,
+        dy,
+        dz,
+        dTotal,
+        normalized,
+        normalizedAxes,
+        chi2,
         observations: tri.perViewReprojPx,
       }
     })
     // When no checkpoints exist, leave-one-control-out prediction is the next
     // best validation: fit without one control and predict that withheld point.
     if (controls.length >= 4) {
-      const local = sim?.local ?? await metricFrameFor(controls.map(({ gcp }) => [gcp.x, gcp.y, gcp.z]))
+      const local = sim?.local ?? (await metricFrameFor(controls.map(({ gcp }) => [gcp.x, gcp.y, gcp.z])))
       for (const withheld of controls) {
-        const fit = fitGeoreference(controls.filter((r) => r !== withheld).map(({ gcp, tri }) => ({
-          src: [tri.x, tri.y, tri.z], dst: [gcp.x, gcp.y, gcp.z],
-          weight: inverseVariance3d(gcp), precision: precisionFromGcp(gcp),
-        })), local)
+        const fit = fitGeoreference(
+          controls
+            .filter((r) => r !== withheld)
+            .map(({ gcp, tri }) => ({
+              src: [tri.x, tri.y, tri.z],
+              dst: [gcp.x, gcp.y, gcp.z],
+              weight: inverseVariance3d(gcp),
+              precision: precisionFromGcp(gcp),
+            })),
+          local,
+        )
         if (!fit) continue
         const predicted = applySimilarity(fit, [withheld.tri.x, withheld.tri.y, withheld.tri.z])
         const residual = predicted.map((v, i) => v - [withheld.gcp.x, withheld.gcp.y, withheld.gcp.z][i])
@@ -374,8 +506,11 @@ export function createGeoreferencing({
         const nr = normalizeResidual(withheld.gcp, src, residual, without ? { cov: without, inFit: false } : null)
         const row = rows.find((r) => r.gcpId === withheld.gcp.id)
         if (row) {
-          row.looDx = residual[0]; row.looDy = residual[1]; row.looDz = residual[2]
-          row.looTotal = Math.hypot(...residual); row.looNormalized = nr?.normalized ?? null
+          row.looDx = residual[0]
+          row.looDy = residual[1]
+          row.looDz = residual[2]
+          row.looTotal = Math.hypot(...residual)
+          row.looNormalized = nr?.normalized ?? null
           row.looNormalizedAxes = nr?.axes ?? null
         }
       }
@@ -423,9 +558,21 @@ export function createGeoreferencing({
     return { ...est, u: p.x, v: p.y }
   }
 
-  return { validGeoref, evidenceKey,
-    georefPairs, imagesById, qualifyingGcps, canGeoreferenceGcps, gcpGeorefPairs,
-    canGeoreference, georeferenceBlocker, crsSuggestion, georeference, poseResidualReport, gcpAccuracyReport,
-    gcpGuides, gcpEstimate,
+  return {
+    validGeoref,
+    evidenceKey,
+    georefPairs,
+    imagesById,
+    qualifyingGcps,
+    canGeoreferenceGcps,
+    gcpGeorefPairs,
+    canGeoreference,
+    georeferenceBlocker,
+    crsSuggestion,
+    georeference,
+    poseResidualReport,
+    gcpAccuracyReport,
+    gcpGuides,
+    gcpEstimate,
   }
 }

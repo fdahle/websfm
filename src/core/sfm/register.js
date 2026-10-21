@@ -19,12 +19,12 @@
 // }
 // Point ids from `tracks` are held only within one sweep's correspondence cache, and
 // `refreshTracks` (which renumbers them) runs only where that cache is invalidated.
-import { solvePnp, triangulateDlt } from "./reconstruction.js"
-import { projectPoint, triangulationAngle, cameraCenter } from "./geometry.js"
-import { toNorm, camToP34flat, retriangulatePairs } from "./tracks.js"
-import { distortionIdentifiable, withoutDistortionTerms } from "./selfCalSchedule.js"
-import { hasKp, kpX, kpY } from "./keypointSet.js"
-import { asPairList } from "./matchCodec.js"
+import { solvePnp, triangulateDlt } from './reconstruction.js'
+import { projectPoint, triangulationAngle, cameraCenter } from './geometry.js'
+import { toNorm, camToP34flat, retriangulatePairs } from './tracks.js'
+import { distortionIdentifiable, withoutDistortionTerms } from './selfCalSchedule.js'
+import { hasKp, kpX, kpY } from './keypointSet.js'
+import { asPairList } from './matchCodec.js'
 import { pluralize } from '../textFormat.js'
 
 // Skip an interim BA when fewer images than this share of the model remain to register.
@@ -38,23 +38,37 @@ function projDepth(P, x, y, z) {
 
 export async function registerImages(ctx) {
   const {
-    imgs, donePairs, Kmap, cfg,
-    cameras, tracks, ids, keypointsAt, registeredUuids,
-    refreshTracks, foldOneEndpointMatches, mergeTracks,
-    runBundleAdjust, runLocalBundleAdjust = null, filterTracks, modelReprojStats, imageByUuid, numStats,
-    log, onProgress,
+    imgs,
+    donePairs,
+    Kmap,
+    cfg,
+    cameras,
+    tracks,
+    ids,
+    keypointsAt,
+    registeredUuids,
+    refreshTracks,
+    foldOneEndpointMatches,
+    mergeTracks,
+    runBundleAdjust,
+    runLocalBundleAdjust = null,
+    filterTracks,
+    modelReprojStats,
+    imageByUuid,
+    numStats,
+    log,
+    onProgress,
   } = ctx
   // Phase-relative progress (core/sfm/progressPlan.js). The caller binds this to a
   // phase and a slice of the overall bar; here we only say how far *this* sweep has
   // got. Registration starts from the 2-camera init pair, so that's the zero point.
-  const reportPhase = ctx.reportPhase
-    ?? ((local, label, counts) => onProgress?.(counts?.done ?? 0, counts?.total ?? 0, label))
+  const reportPhase =
+    ctx.reportPhase ?? ((local, label, counts) => onProgress?.(counts?.done ?? 0, counts?.total ?? 0, label))
   const registerLocal = () => {
     const span = Math.max(1, imgs.length - 2)
     return Math.min(1, Math.max(0, (cameras.size - 2) / span))
   }
-  const reportRegister = (label) =>
-    reportPhase(registerLocal(), label, { done: cameras.size, total: imgs.length })
+  const reportRegister = (label) => reportPhase(registerLocal(), label, { done: cameras.size, total: imgs.length })
   // WS1 — correspondence-pair superset. `corrPairs` = strong donePairs + weak PnP
   // bridges; it drives 2D-3D correspondence collection and connectivity scoring (a weak
   // pair is a legitimate link for resecting a camera). Triangulation and retriangulation
@@ -65,8 +79,15 @@ export async function registerImages(ctx) {
   // not every pair of the block (at 1,600 cameras that scan was most of registration).
   const pairsByImage = (list) => {
     const by = new Map()
-    const push = (uuid, e) => { let l = by.get(uuid); if (!l) by.set(uuid, l = []); l.push(e) }
-    for (const e of list) { push(e.idA, e); if (e.idB !== e.idA) push(e.idB, e) }
+    const push = (uuid, e) => {
+      let l = by.get(uuid)
+      if (!l) by.set(uuid, (l = []))
+      l.push(e)
+    }
+    for (const e of list) {
+      push(e.idA, e)
+      if (e.idB !== e.idA) push(e.idB, e)
+    }
     return (uuid) => by.get(uuid) ?? []
   }
   const corrPairsOf = pairsByImage(corrPairs)
@@ -145,16 +166,23 @@ export async function registerImages(ctx) {
   const identifiableRefine = (mode) => {
     if (mode === 'none') return 'none'
     let multiView = 0
-    tracks.forEachPoint((p) => { if (tracks.viewCount(p) >= 3) multiView++ })
+    tracks.forEachPoint((p) => {
+      if (tracks.viewCount(p) >= 3) multiView++
+    })
     const ident = distortionIdentifiable({
-      nCams: cameras.size, nTracks: tracks.liveCount(), nMultiViewTracks: multiView,
+      nCams: cameras.size,
+      nTracks: tracks.liveCount(),
+      nMultiViewTracks: multiView,
     })
     if (ident.ok) return mode
     const next = ident.scope === 'all' ? 'none' : withoutDistortionTerms(mode)
     if (next !== mode && !identReasonsLogged.has(ident.reason)) {
       identReasonsLogged.add(ident.reason)
-      log(`in-registration self-cal ${next === 'none' ? 'skipped' : `reduced to '${next}'`} — `
-        + `${ident.reason}`, 'info', 'Reconstruction')
+      log(
+        `in-registration self-cal ${next === 'none' ? 'skipped' : `reduced to '${next}'`} — ` + `${ident.reason}`,
+        'info',
+        'Reconstruction',
+      )
     }
     return next
   }
@@ -219,10 +247,10 @@ export async function registerImages(ctx) {
   // matches can *extend* the track after PnP confirms the pose. `pts3` holds point
   // ids (trackStore.js), `pts2` the new image's keypoint positions.
   function collectCorrespondences(img) {
-    const ptToIdx = new Map()    // point id → newIdx (first seen)
-    const idxToPt = new Map()    // newIdx → point id (first seen)
-    const badPts = new Set()     // points reached with ≥2 distinct newIdx (many→one)
-    const badIdx = new Set()     // newIdx reached from ≥2 distinct points (one→many)
+    const ptToIdx = new Map() // point id → newIdx (first seen)
+    const idxToPt = new Map() // newIdx → point id (first seen)
+    const badPts = new Set() // points reached with ≥2 distinct newIdx (many→one)
+    const badIdx = new Set() // newIdx reached from ≥2 distinct points (one→many)
     // corrPairs (strong + weak): a weak bridge can supply the 2D-3D links that resect a
     // camera even though it never triangulated the points it links to.
     for (const entry of corrPairsOf(img.uuid)) {
@@ -246,11 +274,15 @@ export async function registerImages(ctx) {
         else if (prevPt !== pt) badIdx.add(nIdx)
       }
     }
-    const pts3 = []; const pts2 = []; const newIdx = []
+    const pts3 = []
+    const pts2 = []
+    const newIdx = []
     for (const [pt, idx] of ptToIdx) {
       if (badPts.has(pt) || badIdx.has(idx)) continue
       if (!hasKp(img.kp, idx)) continue
-      pts3.push(pt); pts2.push({ x: kpX(img.kp, idx), y: kpY(img.kp, idx) }); newIdx.push(idx)
+      pts3.push(pt)
+      pts2.push({ x: kpX(img.kp, idx), y: kpY(img.kp, idx) })
+      newIdx.push(idx)
     }
     return { pts3, pts2, newIdx }
   }
@@ -262,7 +294,7 @@ export async function registerImages(ctx) {
   let progressed = true
   let pass = 0
   let registeredSinceBA = 0 // R3: cameras added since the last interim bundle adjust
-  let camerasAtLastBA = 0   // model size at the last interim BA (interimBaGrowth spacing)
+  let camerasAtLastBA = 0 // model size at the last interim BA (interimBaGrowth spacing)
   // P1: an image's correspondences depend only on its pairs to registered images and
   // the points those images' keypoints belong to. A per-pass cache built during
   // scoring is reused for the PnP attempt while that holds. A registration changes it
@@ -307,14 +339,18 @@ export async function registerImages(ctx) {
         corrCache.set(img.uuid, { corr, version: modelVersion })
         return { img, score: nextViewScore(corr, img), links: countMatchesToRegistered(img.uuid) }
       })
-      .sort((a, b) => (b.score - a.score) || (b.links - a.links))
+      .sort((a, b) => b.score - a.score || b.links - a.links)
       .map((r) => r.img)
 
     // R2: gate is fixed (pnpThresh, set once above); log it against the model p95
     // so a diverging model is still visible without loosening the gate to match it.
     const modelStats = modelReprojStats()
-    log(`registration pass ${pass} — ${pluralize(remaining.length, 'image')} remaining `
-      + `(fixed PnP gate ${pnpThresh.toFixed(1)}px, model p95 ${modelStats.p95.toFixed(1)}px)`, 'debug', 'Reconstruction')
+    log(
+      `registration pass ${pass} — ${pluralize(remaining.length, 'image')} remaining ` +
+        `(fixed PnP gate ${pnpThresh.toFixed(1)}px, model p95 ${modelStats.p95.toFixed(1)}px)`,
+      'debug',
+      'Reconstruction',
+    )
 
     for (const img of remaining) {
       const K = Kmap.get(img.uuid)
@@ -348,8 +384,9 @@ export async function registerImages(ctx) {
           const ic = p ? p.inlierMask.filter((v) => v > 0.5).length : 0
           probe.push(`${ic}/${pts3.length}@${thr.toFixed(0)}px`)
         }
-        const reason = `PnP solve failed (${pts3.length} correspondences, gate ${pnpThresh.toFixed(1)}px; `
-          + `at looser gates: ${probe.join(', ')})`
+        const reason =
+          `PnP solve failed (${pts3.length} correspondences, gate ${pnpThresh.toFixed(1)}px; ` +
+          `at looser gates: ${probe.join(', ')})`
         deferReasons.set(img.uuid, reason)
         log(`${reason} for ${img.name}`, 'warn', 'Reconstruction')
         continue
@@ -362,9 +399,10 @@ export async function registerImages(ctx) {
       const inlierCount = pnp.inlierMask.filter((v) => v > 0.5).length
       const minInliersNeeded = Math.max(minPnpInliers, Math.ceil(minPnpInlierRatio * pts3.length))
       if (inlierCount < minInliersNeeded) {
-        const reason = `too few PnP inliers (${inlierCount}/${pts3.length} = `
-          + `${(100 * inlierCount / pts3.length).toFixed(0)}%, need ≥${minInliersNeeded} `
-          + `[max(${minPnpInliers}, ${(100 * minPnpInlierRatio).toFixed(0)}%)], gate ${pnpThresh.toFixed(1)}px)`
+        const reason =
+          `too few PnP inliers (${inlierCount}/${pts3.length} = ` +
+          `${((100 * inlierCount) / pts3.length).toFixed(0)}%, need ≥${minInliersNeeded} ` +
+          `[max(${minPnpInliers}, ${(100 * minPnpInlierRatio).toFixed(0)}%)], gate ${pnpThresh.toFixed(1)}px)`
         deferReasons.set(img.uuid, reason)
         log(`${reason} for ${img.name}`, 'warn', 'Reconstruction')
         continue
@@ -388,10 +426,11 @@ export async function registerImages(ctx) {
       }
       const refineNeeded = Math.max(minPnpInliers, Math.ceil(recheckRatio * pts3.length))
       if (refineInliers < refineNeeded) {
-        const reason = `pose fits loosely — only ${refineInliers}/${pts3.length} correspondences `
-          + `within ${recheckPx.toFixed(1)}px after polish (need ≥${refineNeeded} `
-          + `[${(100 * recheckRatio).toFixed(0)}%]); ${inlierCount} held at the `
-          + `${pnpThresh.toFixed(1)}px gate`
+        const reason =
+          `pose fits loosely — only ${refineInliers}/${pts3.length} correspondences ` +
+          `within ${recheckPx.toFixed(1)}px after polish (need ≥${refineNeeded} ` +
+          `[${(100 * recheckRatio).toFixed(0)}%]); ${inlierCount} held at the ` +
+          `${pnpThresh.toFixed(1)}px gate`
         deferReasons.set(img.uuid, reason)
         log(`defer ${img.name} — ${reason}`, 'warn', 'Reconstruction')
         continue
@@ -410,8 +449,12 @@ export async function registerImages(ctx) {
         if (proj) inlierResid.push(Math.hypot(proj.u - pts2[i].x, proj.v - pts2[i].y))
       }
       const rs = numStats(inlierResid)
-      log(`registered ${img.name} (${inlierCount}/${pts3.length} PnP inliers, `
-        + `inlier reproj mean ${rs.mean.toFixed(2)}px / median ${rs.median.toFixed(2)}px)`, 'success', 'Reconstruction')
+      log(
+        `registered ${img.name} (${inlierCount}/${pts3.length} PnP inliers, ` +
+          `inlier reproj mean ${rs.mean.toFixed(2)}px / median ${rs.median.toFixed(2)}px)`,
+        'success',
+        'Reconstruction',
+      )
 
       // Extend existing tracks: every inlier correspondence is this image observing
       // a point already in the model. Recording that observation grows the track to
@@ -433,9 +476,9 @@ export async function registerImages(ctx) {
       const Pnew = camToP34flat(newCam)
       const Cnew = cameraCenter(newCam)
       let added = 0
-      let triTotal = 0    // triangulated before cheirality
+      let triTotal = 0 // triangulated before cheirality
       let lowParallax = 0 // rejected for too-parallel rays (P4.4)
-      let badReproj = 0   // rejected: reprojection beyond the track-filter gate
+      let badReproj = 0 // rejected: reprojection beyond the track-filter gate
       for (const entry of donePairsOf(img.uuid)) {
         let regUuid = null
         if (entry.idA === img.uuid && registeredUuids.has(entry.idB) && entry.idB !== img.uuid) regUuid = entry.idB
@@ -486,17 +529,27 @@ export async function registerImages(ctx) {
             // wildly uncertain — those bursts poisoned interim BA (max residual
             // >1000px on the building run). Require a real baseline angle, same
             // floor the track filter later enforces.
-            if (triangulationAngle(Cnew, Creg, { x, y, z }) < filterMinTriAngleDeg) { lowParallax++; continue }
+            if (triangulationAngle(Cnew, Creg, { x, y, z }) < filterMinTriAngleDeg) {
+              lowParallax++
+              continue
+            }
             const newKp = newKpOf(pairsToTri[srcIdx])
             const regKp = regKpOf(pairsToTri[srcIdx])
             // Reprojection gate, as COLMAP's triangulator applies. A near-degenerate DLT
             // solve can pass cheirality and parallax while landing hundreds or thousands
             // of pixels off its own observations: on South Building every gross pre-solve
             // residual of the late interim BAs (up to 112,000 px) sat on such a point.
-            const pn = projectPoint(newCam, x, y, z), pr = projectPoint(regCam, x, y, z)
-            if (!pn || !pr
-              || Math.hypot(pn.u - kpX(img.kp, newKp), pn.v - kpY(img.kp, newKp)) > filterMaxReprojPx
-              || Math.hypot(pr.u - kpX(regImg.kp, regKp), pr.v - kpY(regImg.kp, regKp)) > filterMaxReprojPx) { badReproj++; continue }
+            const pn = projectPoint(newCam, x, y, z),
+              pr = projectPoint(regCam, x, y, z)
+            if (
+              !pn ||
+              !pr ||
+              Math.hypot(pn.u - kpX(img.kp, newKp), pn.v - kpY(img.kp, newKp)) > filterMaxReprojPx ||
+              Math.hypot(pr.u - kpX(regImg.kp, regKp), pr.v - kpY(regImg.kp, regKp)) > filterMaxReprojPx
+            ) {
+              badReproj++
+              continue
+            }
             // A keypoint can recur across this image's pairs; guard against the
             // live index so the same observation never lands in two different
             // points within one pass (an earlier triangulation may have claimed it).
@@ -508,10 +561,14 @@ export async function registerImages(ctx) {
           }
         }
       }
-      const pct = triTotal ? (100 * added / triTotal).toFixed(0) : '0'
-      log(`${img.name} — extended ${pluralize(extended, 'track')}, `
-        + `+${added} new points (${added}/${triTotal} survived cheirality + parallax, ${pct}%; `
-        + `${lowParallax} dropped for <${filterMinTriAngleDeg}° parallax, ${badReproj} for >${filterMaxReprojPx.toFixed(1)}px reprojection)`, 'debug', 'Reconstruction')
+      const pct = triTotal ? ((100 * added) / triTotal).toFixed(0) : '0'
+      log(
+        `${img.name} — extended ${pluralize(extended, 'track')}, ` +
+          `+${added} new points (${added}/${triTotal} survived cheirality + parallax, ${pct}%; ` +
+          `${lowParallax} dropped for <${filterMinTriAngleDeg}° parallax, ${badReproj} for >${filterMaxReprojPx.toFixed(1)}px reprojection)`,
+        'debug',
+        'Reconstruction',
+      )
 
       // R3: interleaved bundle adjustment. Registering all cameras in one sweep
       // with zero intermediate BA lets the model drift far from the optimum before
@@ -526,7 +583,8 @@ export async function registerImages(ctx) {
       // fresh cameras drift until the next one.
       if (localBaWindow > 1 && runLocalBundleAdjust) {
         await runLocalBundleAdjust(img.uuid, localBaWindow, localBaIterations)
-        modelVersion++; stale.clear()
+        modelVersion++
+        stale.clear()
       }
       registeredSinceBA++
       // With `interimBaGrowth` > 1 the solves are also spaced geometrically (COLMAP's
@@ -537,35 +595,52 @@ export async function registerImages(ctx) {
       // synthetic cameras: 9.6 s at 896 cameras, then the final BA). A tenth of the model
       // still to register keeps it.
       const nearlyDone = imgs.length - cameras.size < INTERIM_SKIP_REMAINING * cameras.size
-      if (baIterations > 0 && interimBaEvery > 0 && registeredSinceBA >= interimBaEvery
-          && !(interimBaGrowth > 1 && cameras.size < interimBaGrowth * camerasAtLastBA)
-          && !nearlyDone && cameras.size >= 3 && tracks.liveCount() >= 10) {
+      if (
+        baIterations > 0 &&
+        interimBaEvery > 0 &&
+        registeredSinceBA >= interimBaEvery &&
+        !(interimBaGrowth > 1 && cameras.size < interimBaGrowth * camerasAtLastBA) &&
+        !nearlyDone &&
+        cameras.size >= 3 &&
+        tracks.liveCount() >= 10
+      ) {
         reportRegister(`Bundle adjustment (${cameras.size} cameras)…`)
-        await runBundleAdjust(`interim BA (${cameras.size} cameras)`, interimBaIterations,
-          distortionRefine(cameras.size))
+        await runBundleAdjust(
+          `interim BA (${cameras.size} cameras)`,
+          interimBaIterations,
+          distortionRefine(cameras.size),
+        )
         const ptsBeforeFilter = tracks.liveCount()
         const f = filterTracks({ maxReprojPx: filterMaxReprojPx * 2, minTriAngleDeg: filterMinTriAngleDeg })
         const mergedTr = mergeTracks(filterMaxReprojPx) // fold split tracks (both-endpoint case)
         refreshTracks() // BA + filter + merge dropped points; compact + reindex first
         const folded = foldOneEndpointMatches(filterMaxReprojPx)
-        log(`interim BA cleanup — filtered ${f.obsRemoved} obs + ${f.ptsRemoved} points, `
-          + `merged ${pluralize(mergedTr, 'split track')}, folded ${pluralize(folded, 'track observation')}; `
-          + `${tracks.liveCount()} points`,
+        log(
+          `interim BA cleanup — filtered ${f.obsRemoved} obs + ${f.ptsRemoved} points, ` +
+            `merged ${pluralize(mergedTr, 'split track')}, folded ${pluralize(folded, 'track observation')}; ` +
+            `${tracks.liveCount()} points`,
           // A cleanup that removes most of the model is the failure itself, not detail:
           // with no points left, nothing further can register (St Nazaire, 2026-10-09,
           // where every point sat under the parallax floor and this line was invisible).
-          f.ptsRemoved > 0.5 * ptsBeforeFilter ? 'warn' : 'debug', 'Reconstruction')
+          f.ptsRemoved > 0.5 * ptsBeforeFilter ? 'warn' : 'debug',
+          'Reconstruction',
+        )
         registeredSinceBA = 0
         camerasAtLastBA = cameras.size
-        modelVersion++; stale.clear() // the cleanup re-numbered and dropped points
+        modelVersion++
+        stale.clear() // the cleanup re-numbered and dropped points
       }
     }
 
     // R4: after each sweep, fold every one-endpoint-assigned match between two
     // registered images into its existing track (raises the ≥3-view share).
     const foldedPass = foldOneEndpointMatches(pnpThresh)
-    if (foldedPass) log(`pass ${pass} folded `
-      + `${pluralize(foldedPass, 'one-endpoint observation')} into existing tracks`, 'debug', 'Reconstruction')
+    if (foldedPass)
+      log(
+        `pass ${pass} folded ` + `${pluralize(foldedPass, 'one-endpoint observation')} into existing tracks`,
+        'debug',
+        'Reconstruction',
+      )
 
     // (2)+(3) Stalled-strip rescue (one shot). A full sweep registered nothing, but
     // images still link to the model — typically a short film strip whose end frames
@@ -584,19 +659,22 @@ export async function registerImages(ctx) {
     // is only retriangulation + one relaxed sweep (f/k1 are not observable from 2 views),
     // and `rescued` keeps it to a single shot.
     if (!progressed && !rescued && rescueStalled && !finalSweep && cameras.size >= 2) {
-      const stalledLinked = imgs.filter((img) =>
-        !registeredUuids.has(img.uuid) && countMatchesToRegistered(img.uuid) > 0)
+      const stalledLinked = imgs.filter(
+        (img) => !registeredUuids.has(img.uuid) && countMatchesToRegistered(img.uuid) > 0,
+      )
       if (stalledLinked.length) {
         rescued = true
         const rescueMode = rescueRefine(cameras.size)
         // At the 2-camera seed the focal solve is skipped (guard below), so say so
         // rather than logging a step that never runs.
-        const focalSolve = baIterations > 0 && rescueMode !== 'none' && cameras.size >= 3
-          && tracks.liveCount() >= 10
-        log(`registration stalled at ${pluralize(cameras.size, 'camera')} — `
-          + `${pluralize(stalledLinked.length, 'linked image')} still unregistered; rescue (${focalSolve ? `intrinsics solve '${rescueMode}' + ` : ''}`
-          + `retriangulation, then a relaxed retry${focalSolve ? '' : '; intrinsics not solvable at 2 views'})`,
-          'info', 'Reconstruction')
+        const focalSolve = baIterations > 0 && rescueMode !== 'none' && cameras.size >= 3 && tracks.liveCount() >= 10
+        log(
+          `registration stalled at ${pluralize(cameras.size, 'camera')} — ` +
+            `${pluralize(stalledLinked.length, 'linked image')} still unregistered; rescue (${focalSolve ? `intrinsics solve '${rescueMode}' + ` : ''}` +
+            `retriangulation, then a relaxed retry${focalSolve ? '' : '; intrinsics not solvable at 2 views'})`,
+          'info',
+          'Reconstruction',
+        )
         if (focalSolve) {
           reportRegister('Rescue: focal solve…')
           await runBundleAdjust('rescue focal solve', interimBaIterations, rescueMode)
@@ -604,15 +682,24 @@ export async function registerImages(ctx) {
         }
         reportRegister('Rescue: retriangulating…')
         const { added } = await retriangulatePairs({
-          tracks, ids, cameras, pairs: donePairs,
-          keypointsAt, maxReprojPx: filterMaxReprojPx,
-          minTriAngleDeg: filterMinTriAngleDeg, triangulate: triangulateDlt,
+          tracks,
+          ids,
+          cameras,
+          pairs: donePairs,
+          keypointsAt,
+          maxReprojPx: filterMaxReprojPx,
+          minTriAngleDeg: filterMinTriAngleDeg,
+          triangulate: triangulateDlt,
         })
         refreshTracks()
-        log(`rescue retriangulation +${pluralize(added, 'point')}; retrying with a relaxed `
-          + `recheck (${pnpThresh.toFixed(1)}px, ${(100 * rescueRefineRatio).toFixed(0)}%)`, 'info', 'Reconstruction')
+        log(
+          `rescue retriangulation +${pluralize(added, 'point')}; retrying with a relaxed ` +
+            `recheck (${pnpThresh.toFixed(1)}px, ${(100 * rescueRefineRatio).toFixed(0)}%)`,
+          'info',
+          'Reconstruction',
+        )
         relaxed = true
-        modelVersion++    // model changed → invalidate the per-pass correspondence cache
+        modelVersion++ // model changed → invalidate the per-pass correspondence cache
         progressed = true // force one more sweep
       }
     }
@@ -628,19 +715,30 @@ export async function registerImages(ctx) {
   if (unregistered.length) {
     log(`${pluralize(unregistered.length, 'image')} never registered:`, 'warn', 'Reconstruction')
     for (const img of unregistered) {
-      let regLinks = 0, regInliers = 0, unregLinks = 0, weakRegLinks = 0
+      let regLinks = 0,
+        regInliers = 0,
+        unregLinks = 0,
+        weakRegLinks = 0
       for (const e of corrPairsOf(img.uuid)) {
         const other = e.idA === img.uuid ? e.idB : e.idB === img.uuid ? e.idA : null
         if (!other || !(e.inlierCount > 0)) continue
         const toReg = registeredUuids.has(other)
-        if (e.weak) { if (toReg) weakRegLinks++; continue }
-        if (toReg) { regLinks++; regInliers += e.inlierCount }
-        else unregLinks++
+        if (e.weak) {
+          if (toReg) weakRegLinks++
+          continue
+        }
+        if (toReg) {
+          regLinks++
+          regInliers += e.inlierCount
+        } else unregLinks++
       }
-      log(`  • ${img.name} — ${deferReasons.get(img.uuid) ?? 'no link to the model'} `
-        + `[verified pairs: ${regLinks} to registered (${regInliers} inliers), ${unregLinks} to unregistered`
-        + `${weakRegLinks ? `; ${pluralize(weakRegLinks, 'weak bridge')} to registered` : ''}]`,
-        'warn', 'Reconstruction')
+      log(
+        `  • ${img.name} — ${deferReasons.get(img.uuid) ?? 'no link to the model'} ` +
+          `[verified pairs: ${regLinks} to registered (${regInliers} inliers), ${unregLinks} to unregistered` +
+          `${weakRegLinks ? `; ${pluralize(weakRegLinks, 'weak bridge')} to registered` : ''}]`,
+        'warn',
+        'Reconstruction',
+      )
     }
   }
 

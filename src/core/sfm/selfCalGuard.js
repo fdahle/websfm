@@ -8,10 +8,10 @@
 const finite = (v) => Number.isFinite(v)
 
 export const SELF_CAL_GUARD_DEFAULTS = {
-  maxFocalStepFrac: 0.25,       // one BA pass may not move focal by more than 25%
-  maxFocalNominalFrac: 0.35,    // nor end >35% from the ingest/EXIF focal
-  maxPrincipalOffsetFrac: 0.10, // principal point must remain within 10% of image size of centre
-  maxCornerShiftFrac: 0.25,     // radial displacement at a corner, relative to image diagonal
+  maxFocalStepFrac: 0.25, // one BA pass may not move focal by more than 25%
+  maxFocalNominalFrac: 0.35, // nor end >35% from the ingest/EXIF focal
+  maxPrincipalOffsetFrac: 0.1, // principal point must remain within 10% of image size of centre
+  maxCornerShiftFrac: 0.25, // radial displacement at a corner, relative to image diagonal
   // When the starting focal is resolveK's default-FOV guess (fx = max(w,h): no EXIF focal,
   // no sensor format), that "nominal" is not evidence. A 153 mm lens on a 230 mm film
   // frame sits 33% below it, an 88 mm super-wide 62%. The 25% / 35% bounds above rejected
@@ -23,7 +23,7 @@ export const SELF_CAL_GUARD_DEFAULTS = {
   // A fisheye's whole lens is refined, not a residual on top of a calibration: one pass
   // may move its recorded radius by up to this share of the image diagonal at any ray
   // inside the frame. Equidistant → a real action-camera lens is ~5%.
-  maxFisheyeShiftFrac: 0.10,
+  maxFisheyeShiftFrac: 0.1,
 }
 
 // θd(θ) = θ·(1 + k1θ² + k2θ⁴ + k3θ⁶ + k4θ⁸) and its slope (distortion.js, bundle.rs).
@@ -42,7 +42,12 @@ const thetaDSlope = (k, th) => {
 // diagonal from the lens it replaces.
 function checkFisheye(before, proposed, width, height, maxShiftFrac) {
   let rObs = 0
-  for (const [x, y] of [[0, 0], [width, 0], [0, height], [width, height]]) {
+  for (const [x, y] of [
+    [0, 0],
+    [width, 0],
+    [0, height],
+    [width, height],
+  ]) {
     rObs = Math.max(rObs, Math.hypot((x - proposed.cx) / proposed.fx, (y - proposed.cy) / proposed.fy))
   }
   const steps = 512
@@ -50,9 +55,13 @@ function checkFisheye(before, proposed, width, height, maxShiftFrac) {
   for (let i = 1; i <= steps; i++) {
     const th = (i / steps) * Math.PI
     if (!(thetaDSlope(proposed, th) > 0)) break
-    if (thetaD(proposed, th) >= rObs) { thCorner = th; break }
+    if (thetaD(proposed, th) >= rObs) {
+      thCorner = th
+      break
+    }
   }
-  if (thCorner == null) return { ok: false, code: 'fisheye-fold', reason: 'fisheye lens curve folds before the image corner' }
+  if (thCorner == null)
+    return { ok: false, code: 'fisheye-fold', reason: 'fisheye lens curve folds before the image corner' }
   let maxShift = 0
   for (let i = 1; i <= 64; i++) {
     const th = (i / 64) * thCorner
@@ -60,7 +69,11 @@ function checkFisheye(before, proposed, width, height, maxShiftFrac) {
   }
   const frac = maxShift / Math.hypot(width, height)
   if (frac > maxShiftFrac) {
-    return { ok: false, code: 'fisheye-shift', reason: `fisheye lens moved a ray ${(100 * frac).toFixed(1)}% of the image diagonal, beyond the ${(100 * maxShiftFrac).toFixed(0)}% limit` }
+    return {
+      ok: false,
+      code: 'fisheye-shift',
+      reason: `fisheye lens moved a ray ${(100 * frac).toFixed(1)}% of the image diagonal, beyond the ${(100 * maxShiftFrac).toFixed(0)}% limit`,
+    }
   }
   return null
 }
@@ -76,10 +89,14 @@ function radialScale(k, r2) {
 // below) misses this: it accepted k1 down to ≈ −0.7 at a 4000×3000 / f=3000
 // corner, where an inverse stops existing near k1 ≈ −0.21.
 function invertibleTo(k, rObs) {
-  const k1 = k.k1 || 0, k2 = k.k2 || 0, k3 = k.k3 || 0
-  const steps = 512, rMax = 4 * rObs
+  const k1 = k.k1 || 0,
+    k2 = k.k2 || 0,
+    k3 = k.k3 || 0
+  const steps = 512,
+    rMax = 4 * rObs
   for (let i = 1; i <= steps; i++) {
-    const r = (i / steps) * rMax, r2 = r * r
+    const r = (i / steps) * rMax,
+      r2 = r * r
     if (!(1 + r2 * (3 * k1 + r2 * (5 * k2 + r2 * 7 * k3)) > 0)) return false // f'(r) ≤ 0: the curve folds
     if (r * radialScale(k, r2) >= rObs) return true
   }
@@ -96,18 +113,23 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
   const maxNominal = focalIsGuess ? c.maxGuessFocalNominalFrac : c.maxFocalNominalFrac
   const nominalName = focalIsGuess ? 'the default-FOV guess' : 'nominal'
   const fail = (reason, code) => ({ ok: false, code, reason })
-  if (!before || !proposed || !finite(proposed.fx) || !finite(proposed.fy)
-      || proposed.fx <= 0 || proposed.fy <= 0) {
+  if (!before || !proposed || !finite(proposed.fx) || !finite(proposed.fy) || proposed.fx <= 0 || proposed.fy <= 0) {
     return fail('self-calibration returned non-finite or non-positive focal values', 'invalid-focal')
   }
 
   const stepFrac = before.fx > 0 ? Math.abs(proposed.fx - before.fx) / before.fx : 0
   if (stepFrac > maxStep) {
-    return fail(`focal step ${(100 * stepFrac).toFixed(1)}% exceeds the ${(100 * maxStep).toFixed(0)}% safety limit`, 'focal-step')
+    return fail(
+      `focal step ${(100 * stepFrac).toFixed(1)}% exceeds the ${(100 * maxStep).toFixed(0)}% safety limit`,
+      'focal-step',
+    )
   }
   const nominalFrac = nominalFx > 0 ? Math.abs(proposed.fx - nominalFx) / nominalFx : 0
   if (nominalFrac > maxNominal) {
-    return fail(`focal is ${(100 * nominalFrac).toFixed(1)}% from ${nominalName}, beyond the ${(100 * maxNominal).toFixed(0)}% safety limit`, 'focal-nominal')
+    return fail(
+      `focal is ${(100 * nominalFrac).toFixed(1)}% from ${nominalName}, beyond the ${(100 * maxNominal).toFixed(0)}% safety limit`,
+      'focal-nominal',
+    )
   }
 
   if (width > 0 && height > 0) {
@@ -117,7 +139,10 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
     const ox = Math.abs(proposed.cx - width / 2) / width
     const oy = Math.abs(proposed.cy - height / 2) / height
     if (Math.max(ox, oy) > c.maxPrincipalOffsetFrac) {
-      return fail(`principal point moved ${(100 * Math.max(ox, oy)).toFixed(1)}% of the image size from centre`, 'principal-point')
+      return fail(
+        `principal point moved ${(100 * Math.max(ox, oy)).toFixed(1)}% of the image size from centre`,
+        'principal-point',
+      )
     }
 
     if (proposed.fisheye) {
@@ -128,7 +153,12 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
     // Check the proposed forward radial map at all four corners. A negative scale
     // folds the image; a very large displacement is almost always thin-block overfit.
     let maxShift = 0
-    for (const [x, y] of [[0, 0], [width, 0], [0, height], [width, height]]) {
+    for (const [x, y] of [
+      [0, 0],
+      [width, 0],
+      [0, height],
+      [width, height],
+    ]) {
       const nx = (x - proposed.cx) / proposed.fx
       const ny = (y - proposed.cy) / proposed.fy
       const r2 = nx * nx + ny * ny
@@ -140,7 +170,10 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
     }
     const shiftFrac = maxShift / Math.hypot(width, height)
     if (shiftFrac > c.maxCornerShiftFrac) {
-      return fail(`radial corner shift ${(100 * shiftFrac).toFixed(1)}% exceeds the ${(100 * c.maxCornerShiftFrac).toFixed(0)}% image-diagonal limit`, 'radial-shift')
+      return fail(
+        `radial corner shift ${(100 * shiftFrac).toFixed(1)}% exceeds the ${(100 * c.maxCornerShiftFrac).toFixed(0)}% image-diagonal limit`,
+        'radial-shift',
+      )
     }
   }
 

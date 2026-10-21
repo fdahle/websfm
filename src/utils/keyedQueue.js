@@ -7,12 +7,15 @@
 // tasks finish, and their callers decide whether the result is still wanted.
 
 export class QueueCancelled extends Error {
-  constructor(reason = 'cancelled') { super(reason); this.name = 'QueueCancelled' }
+  constructor(reason = 'cancelled') {
+    super(reason)
+    this.name = 'QueueCancelled'
+  }
 }
 
 export function createKeyedQueue({ concurrency = 2 } = {}) {
-  const waiting = []                // [{ key, run, resolve, reject }]
-  const byKey = new Map()           // key → { promise, job | null (running) }
+  const waiting = [] // [{ key, run, resolve, reject }]
+  const byKey = new Map() // key → { promise, job | null (running) }
   let active = 0
 
   function pump() {
@@ -31,7 +34,10 @@ export function createKeyedQueue({ concurrency = 2 } = {}) {
       }
       Promise.resolve()
         .then(job.run)
-        .then((v) => settle(job.resolve, v), (e) => settle(job.reject, e))
+        .then(
+          (v) => settle(job.resolve, v),
+          (e) => settle(job.reject, e),
+        )
     }
   }
 
@@ -40,12 +46,18 @@ export function createKeyedQueue({ concurrency = 2 } = {}) {
     if (existing) {
       if (urgent && existing.job) {
         const i = waiting.indexOf(existing.job)
-        if (i > 0) { waiting.splice(i, 1); waiting.unshift(existing.job) }
+        if (i > 0) {
+          waiting.splice(i, 1)
+          waiting.unshift(existing.job)
+        }
       }
       return existing.promise
     }
     let resolve, reject
-    const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+    const promise = new Promise((res, rej) => {
+      resolve = res
+      reject = rej
+    })
     const job = { key, run, resolve, reject, promise }
     byKey.set(key, { promise, job })
     if (urgent) waiting.unshift(job)
@@ -67,7 +79,11 @@ export function createKeyedQueue({ concurrency = 2 } = {}) {
     request,
     cancelPending,
     has: (key) => byKey.has(key),
-    get pending() { return waiting.length },
-    get active() { return active },
+    get pending() {
+      return waiting.length
+    },
+    get active() {
+      return active
+    },
   }
 }

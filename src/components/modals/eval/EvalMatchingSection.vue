@@ -27,8 +27,14 @@ const pairs = computed(() => {
   return out
 })
 const counts = computed(() => {
-  let verified = 0, weak = 0, excluded = 0
-  for (const p of pairs.value) { if (!p.enabled) excluded++; else if (p.weak) weak++; else verified++ }
+  let verified = 0,
+    weak = 0,
+    excluded = 0
+  for (const p of pairs.value) {
+    if (!p.enabled) excluded++
+    else if (p.weak) weak++
+    else verified++
+  }
   return { verified, weak, excluded }
 })
 const health = computed(() => graphHealth(pairs.value, imageIds.value))
@@ -37,11 +43,20 @@ const tiles = computed(() => {
   const h = health.value
   const largest = h.components[0]?.length ?? 0
   return [
-    { label: 'Components', value: h.components.length, tone: h.components.length > 1 ? 'warn' : 'ok',
-      hint: h.components.length > 1 ? 'graph is split' : 'connected' },
+    {
+      label: 'Components',
+      value: h.components.length,
+      tone: h.components.length > 1 ? 'warn' : 'ok',
+      hint: h.components.length > 1 ? 'graph is split' : 'connected',
+    },
     { label: 'Largest component', value: largest, hint: `of ${imageIds.value.length} images` },
     { label: 'Isolated', value: h.isolated.length, tone: h.isolated.length ? 'warn' : undefined },
-    { label: 'Fragile links', value: h.bridges.length, tone: h.bridges.length ? 'warn' : undefined, hint: 'bridge edges' },
+    {
+      label: 'Fragile links',
+      value: h.bridges.length,
+      tone: h.bridges.length ? 'warn' : undefined,
+      hint: 'bridge edges',
+    },
     { label: 'Verified pairs', value: counts.value.verified },
     { label: 'Weak pairs', value: counts.value.weak },
   ]
@@ -50,7 +65,8 @@ const tiles = computed(() => {
 // Per-image rows with a component column.
 const rows = computed(() =>
   imageIds.value.map((uuid) => ({
-    id: uuid, name: nm(uuid),
+    id: uuid,
+    name: nm(uuid),
     degree: health.value.degrees.get(uuid) ?? 0,
     component: (health.value.componentIndex.get(uuid) ?? 0) + 1,
   })),
@@ -62,9 +78,14 @@ const columns = [
 ]
 
 // Components as an expandable list (largest first).
-const componentList = computed(() => health.value.components.map((c, i) => ({
-  id: i, rank: i + 1, size: c.length, names: c.map(nm),
-})))
+const componentList = computed(() =>
+  health.value.components.map((c, i) => ({
+    id: i,
+    rank: i + 1,
+    size: c.length,
+    names: c.map(nm),
+  })),
+)
 const bridges = computed(() => health.value.bridges.map((b, i) => ({ id: i, ...b, a: nm(b.idA), b2: nm(b.idB) })))
 </script>
 
@@ -75,7 +96,9 @@ const bridges = computed(() => health.value.bridges.map((b, i) => ({ id: i, ...b
     <summary>Components ({{ componentList.length }})</summary>
     <div class="comp-list">
       <div v-for="c in componentList" :key="c.id" class="comp">
-        <div class="comp-head">#{{ c.rank }} <span class="comp-size">{{ c.size }} image{{ c.size === 1 ? '' : 's' }}</span></div>
+        <div class="comp-head">
+          #{{ c.rank }} <span class="comp-size">{{ c.size }} image{{ c.size === 1 ? '' : 's' }}</span>
+        </div>
         <div class="comp-names">{{ c.names.join(', ') }}</div>
       </div>
     </div>
@@ -101,15 +124,61 @@ const bridges = computed(() => health.value.bridges.map((b, i) => ({ id: i, ...b
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.eval-note { font-size: 11px; color: var(--text-dim); margin: 2px 0 0; line-height: 1.5; }
-.grp { border: 1px solid var(--panel-border); border-radius: 8px; padding: 8px 12px; font-size: 12px; }
-.grp summary { cursor: pointer; font-weight: 600; color: var(--text); }
-.comp-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.comp-head { font-size: 12px; font-weight: 600; color: var(--text); }
-.comp-size { font-weight: 400; color: var(--text-dim); }
-.comp-names { font-size: 11px; color: var(--text-dim); line-height: 1.5; margin-top: 2px; }
-.bridge-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
-.bridge { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
-.bridge-pair { color: var(--text); }
-.bridge-inl { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.eval-note {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 2px 0 0;
+  line-height: 1.5;
+}
+.grp {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.grp summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+.comp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.comp-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.comp-size {
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.comp-names {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.bridge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.bridge {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+.bridge-pair {
+  color: var(--text);
+}
+.bridge-inl {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
 </style>

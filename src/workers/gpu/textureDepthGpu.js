@@ -47,13 +47,18 @@ function pipelinesFor(device) {
   let p = cache.get(device)
   if (p) return p
   const module = device.createShaderModule({ code: SHADER })
-  const make = (topology) => device.createRenderPipeline({
-    layout: 'auto',
-    vertex: { module, entryPoint: 'vs', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] },
-    fragment: { module, entryPoint: 'fs', targets: [{ format: 'r32float' }] },
-    primitive: { topology, cullMode: 'none' },
-    depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-  })
+  const make = (topology) =>
+    device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module,
+        entryPoint: 'vs',
+        buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }],
+      },
+      fragment: { module, entryPoint: 'fs', targets: [{ format: 'r32float' }] },
+      primitive: { topology, cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+    })
   p = { tris: make('triangle-list'), points: make('point-list') }
   cache.set(device, p)
   return p
@@ -70,22 +75,41 @@ export async function createTextureDepthGpu(P, idx) {
   if (pos.byteLength > device.limits.maxBufferSize || idx.byteLength > device.limits.maxBufferSize) return null
   const vbuf = device.createBuffer({ size: pos.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(vbuf, 0, pos)
-  const ibuf = device.createBuffer({ size: Math.ceil(idx.byteLength / 4) * 4, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST })
+  const ibuf = device.createBuffer({
+    size: Math.ceil(idx.byteLength / 4) * 4,
+    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+  })
   device.queue.writeBuffer(ibuf, 0, idx)
   const ubuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const pipes = pipelinesFor(device)
-  const bindTris = device.createBindGroup({ layout: pipes.tris.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: ubuf } }] })
-  const bindPts = device.createBindGroup({ layout: pipes.points.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: ubuf } }] })
+  const bindTris = device.createBindGroup({
+    layout: pipes.tris.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: { buffer: ubuf } }],
+  })
+  const bindPts = device.createBindGroup({
+    layout: pipes.points.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: { buffer: ubuf } }],
+  })
   const nVerts = pos.length / 3
   let targets = null // reused while the grid size stays the same
 
   function targetsFor(W, H) {
     if (targets && targets.W === W && targets.H === H) return targets
-    if (targets) { targets.color.destroy(); targets.depth.destroy(); targets.read.destroy() }
+    if (targets) {
+      targets.color.destroy()
+      targets.depth.destroy()
+      targets.read.destroy()
+    }
     const bytesPerRow = Math.ceil((W * 4) / 256) * 256
     targets = {
-      W, H, bytesPerRow,
-      color: device.createTexture({ size: [W, H], format: 'r32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC }),
+      W,
+      H,
+      bytesPerRow,
+      color: device.createTexture({
+        size: [W, H],
+        format: 'r32float',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+      }),
       depth: device.createTexture({ size: [W, H], format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT }),
       read: device.createBuffer({ size: bytesPerRow * H, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
     }
@@ -94,10 +118,12 @@ export async function createTextureDepthGpu(P, idx) {
 
   // cam: visibility.js localCamera; grid: viewGrid; near: clip distance (scene units).
   async function render(cam, grid, near) {
-    const W = grid.width, H = grid.height
+    const W = grid.width,
+      H = grid.height
     const max = device.limits.maxTextureDimension2D
     if (W > max || H > max) return null
-    const { r, t, K } = cam, s = grid.scale
+    const { r, t, K } = cam,
+      s = grid.scale
     const u = new Float32Array(20)
     u.set([r[0], r[1], r[2], t[0], r[3], r[4], r[5], t[1], r[6], r[7], r[8], t[2]])
     u.set([K.fx * s, (K.cx - grid.x0 + 0.5) * s - 0.5 + 0.5, K.fy * s, (K.cy - grid.y0 + 0.5) * s - 0.5 + 0.5], 12)
@@ -106,8 +132,15 @@ export async function createTextureDepthGpu(P, idx) {
     const tg = targetsFor(W, H)
     const enc = device.createCommandEncoder()
     const pass = enc.beginRenderPass({
-      colorAttachments: [{ view: tg.color.createView(), clearValue: { r: FAR, g: 0, b: 0, a: 0 }, loadOp: 'clear', storeOp: 'store' }],
-      depthStencilAttachment: { view: tg.depth.createView(), depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'store' },
+      colorAttachments: [
+        { view: tg.color.createView(), clearValue: { r: FAR, g: 0, b: 0, a: 0 }, loadOp: 'clear', storeOp: 'store' },
+      ],
+      depthStencilAttachment: {
+        view: tg.depth.createView(),
+        depthClearValue: 0,
+        depthLoadOp: 'clear',
+        depthStoreOp: 'store',
+      },
     })
     pass.setPipeline(pipes.tris)
     pass.setBindGroup(0, bindTris)
@@ -135,8 +168,14 @@ export async function createTextureDepthGpu(P, idx) {
   }
 
   function destroy() {
-    vbuf.destroy(); ibuf.destroy(); ubuf.destroy()
-    if (targets) { targets.color.destroy(); targets.depth.destroy(); targets.read.destroy() }
+    vbuf.destroy()
+    ibuf.destroy()
+    ubuf.destroy()
+    if (targets) {
+      targets.color.destroy()
+      targets.depth.destroy()
+      targets.read.destroy()
+    }
   }
 
   return { render, destroy, adapter: gpu.info }
@@ -152,9 +191,11 @@ export async function createTextureDepthGpu(P, idx) {
 // (1 − near/z, saturating to 1.0 in float32) scored 85 %.
 // → { agree (share of covered pixels; 0 when none), covered (pixels), coverage (share of the grid) }
 export function compareDepth(a, b, rel = 5e-3) {
-  let agree = 0, covered = 0
+  let agree = 0,
+    covered = 0
   for (let i = 0; i < a.length; i++) {
-    const fa = Number.isFinite(a[i]), fb = Number.isFinite(b[i])
+    const fa = Number.isFinite(a[i]),
+      fb = Number.isFinite(b[i])
     if (!fa && !fb) continue
     covered++
     if (fa && fb && Math.abs(a[i] - b[i]) <= rel * Math.max(a[i], b[i])) agree++

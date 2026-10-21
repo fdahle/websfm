@@ -53,7 +53,9 @@ async function importForImage(img) {
   try {
     const { w, h } = await dimsOf(img)
     updateMask(img.id, await maskFromSource(f, w, h))
-  } finally { busy.value = false }
+  } finally {
+    busy.value = false
+  }
 }
 
 // Same-resolution group: rasterize the source once, copy to every image.
@@ -64,7 +66,9 @@ async function importForGroup(group) {
   try {
     const dataUrl = await maskFromSource(f, group.w, group.h)
     for (const img of group.images) updateMask(img.id, dataUrl)
-  } finally { busy.value = false }
+  } finally {
+    busy.value = false
+  }
 }
 
 // Apply one mask to all images, rescaled per resolution group.
@@ -77,19 +81,37 @@ async function importForAll() {
       const dataUrl = await maskFromSource(f, g.w, g.h)
       for (const img of g.images) updateMask(img.id, dataUrl)
     }
-  } finally { busy.value = false }
+  } finally {
+    busy.value = false
+  }
 }
 
-function clearGroup(group) { for (const img of group.images) updateMask(img.id, null) }
-function clearImage(img)   { updateMask(img.id, null) }
-function edit(img)         { emit('edit', img.id) }
+function clearGroup(group) {
+  for (const img of group.images) updateMask(img.id, null)
+}
+function clearImage(img) {
+  updateMask(img.id, null)
+}
+function edit(img) {
+  emit('edit', img.id)
+}
 </script>
 
 <template>
   <!-- Flush and a fixed height: the sub-bar stays put while the group list scrolls. -->
-  <ModalShell class="mask-manager" title="Masks" width="760px" height="80vh" flush :scroll="false" @close="emit('close')">
+  <ModalShell
+    class="mask-manager"
+    title="Masks"
+    width="760px"
+    height="80vh"
+    flush
+    :scroll="false"
+    @close="emit('close')"
+  >
     <div class="subbar">
-      <button class="btn" :disabled="busy || !grouping.sizedGroups.length" @click="importForAll">Import &amp; apply to all…</button>
+      <button class="btn" :disabled="busy || !grouping.sizedGroups.length" @click="importForAll">
+        Import &amp; apply to all…
+      </button>
       <span class="hint">{{ grouping.hint }}</span>
     </div>
 
@@ -101,7 +123,14 @@ function edit(img)         { emit('edit', img.id) }
           <span class="group-title">{{ group.label }}</span>
           <span class="group-count">{{ group.images.length }} image{{ group.images.length !== 1 ? 's' : '' }}</span>
           <div class="group-actions">
-            <button class="btn sm" :disabled="busy || !group.w" :title="group.w ? '' : 'Unknown size — open an image to draw a mask'" @click="importForGroup(group)">Import &amp; apply to group…</button>
+            <button
+              class="btn sm"
+              :disabled="busy || !group.w"
+              :title="group.w ? '' : 'Unknown size — open an image to draw a mask'"
+              @click="importForGroup(group)"
+            >
+              Import &amp; apply to group…
+            </button>
             <button class="btn sm ghost" :disabled="busy" @click="clearGroup(group)">Clear group</button>
           </div>
         </div>
@@ -126,47 +155,134 @@ function edit(img)         { emit('edit', img.id) }
 </template>
 
 <style scoped>
-
 .subbar {
-  display: flex; align-items: center; gap: 14px;
-  padding: 8px 16px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
 }
-.hint { font-size: 11px; color: var(--text-dim); }
+.hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
-.list { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
-.empty { padding: 40px; text-align: center; color: var(--text-dim); }
+.list {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  background: var(--bg);
+}
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-dim);
+}
 
-.group { border-bottom: 1px solid var(--panel-border); }
-.group-head {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 16px; background: var(--panel); position: sticky; top: 0; z-index: 1;
+.group {
   border-bottom: 1px solid var(--panel-border);
 }
-.group-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.group-count { font-size: 11px; color: var(--text-dim); }
-.group-actions { margin-left: auto; display: flex; gap: 6px; }
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--panel-border);
+}
+.group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.group-count {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.group-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
 
-.rows { display: flex; flex-direction: column; }
+.rows {
+  display: flex;
+  flex-direction: column;
+}
 .row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 6px 16px; border-bottom: 1px solid var(--panel-border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--panel-border);
 }
-.row:last-child { border-bottom: none; }
-.thumb { width: 48px; height: 36px; object-fit: cover; border-radius: 3px; background: #000; flex-shrink: 0; }
-.name { flex: 1; min-width: 0; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row:last-child {
+  border-bottom: none;
+}
+.thumb {
+  width: 48px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #000;
+  flex-shrink: 0;
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .badge {
-  font-size: 11px; padding: 2px 8px; border-radius: 10px;
-  background: var(--bg); color: var(--text-dim); border: 1px solid var(--panel-border);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--panel-border);
 }
-.badge.on { background: rgba(255, 80, 80, 0.18); color: #ff9a9a; border-color: rgba(255, 80, 80, 0.4); }
-.row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.badge.on {
+  background: rgba(255, 80, 80, 0.18);
+  color: #ff9a9a;
+  border-color: rgba(255, 80, 80, 0.4);
+}
+.row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
 
 .btn {
-  background: var(--accent); border: none; color: #fff; font: inherit; font-size: 12px;
-  padding: 5px 11px; border-radius: 5px; cursor: pointer;
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 5px;
+  cursor: pointer;
 }
-.btn.sm { font-size: 11px; padding: 4px 9px; }
-.btn.ghost { background: var(--bg); color: var(--text-dim); border: 1px solid var(--panel-border); }
-.btn:hover:not(:disabled) { filter: brightness(1.1); }
-.btn:disabled { opacity: 0.4; cursor: default; }
+.btn.sm {
+  font-size: 11px;
+  padding: 4px 9px;
+}
+.btn.ghost {
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--panel-border);
+}
+.btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 </style>

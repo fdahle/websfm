@@ -11,14 +11,14 @@
 import { sniffDelimiter, parseRows } from './gcp.js'
 
 const PATTERNS = {
-  sensor:   /^(sensor|camera|sensor_?label|camera_?label)$/i,
+  sensor: /^(sensor|camera|sensor_?label|camera_?label)$/i,
   fiducial: /^(fiducial|fid|fid_?id|fiducial_?id|mark|mark_?id|id)$/i,
-  xMm:      /^(x_?mm|mark_?x_?mm|x)$/i,
-  yMm:      /^(y_?mm|mark_?y_?mm|y)$/i,
-  slot:     /^slot$/i,
-  focalMm:  /^(focal_?mm|focal_?length_?mm|calibrated_?focal(_?mm)?)$/i,
-  ppxMm:    /^(ppx_?mm|pp_?x_?mm|xp_?mm)$/i,
-  ppyMm:    /^(ppy_?mm|pp_?y_?mm|yp_?mm)$/i,
+  xMm: /^(x_?mm|mark_?x_?mm|x)$/i,
+  yMm: /^(y_?mm|mark_?y_?mm|y)$/i,
+  slot: /^slot$/i,
+  focalMm: /^(focal_?mm|focal_?length_?mm|calibrated_?focal(_?mm)?)$/i,
+  ppxMm: /^(ppx_?mm|pp_?x_?mm|xp_?mm)$/i,
+  ppyMm: /^(ppy_?mm|pp_?y_?mm|yp_?mm)$/i,
 }
 const ROLES = Object.keys(PATTERNS)
 
@@ -29,7 +29,10 @@ export function guessMapping(headerCells) {
   headerCells.forEach((cell, i) => {
     const text = String(cell ?? '').trim()
     for (const role of ROLES) {
-      if (mapping[role] == null && PATTERNS[role].test(text)) { mapping[role] = i; break }
+      if (mapping[role] == null && PATTERNS[role].test(text)) {
+        mapping[role] = i
+        break
+      }
     }
   })
   return mapping
@@ -57,7 +60,8 @@ export function parseFiducialMarks(text) {
   const at = (cells, role) => (mapping[role] != null ? String(cells[mapping[role]] ?? '').trim() : '')
   const groups = new Map()
   for (const cells of body) {
-    const xMm = num(at(cells, 'xMm')), yMm = num(at(cells, 'yMm'))
+    const xMm = num(at(cells, 'xMm')),
+      yMm = num(at(cells, 'yMm'))
     if (!Number.isFinite(xMm) || !Number.isFinite(yMm)) continue
     const sensor = at(cells, 'sensor')
     if (!groups.has(sensor)) groups.set(sensor, { sensor, marks: [], focalMm: null, ppxMm: null, ppyMm: null })
@@ -87,10 +91,17 @@ export function applyFiducialMarks(sensor, group) {
     ? Object.fromEntries(group.marks.map((m) => [m.slot, m.id]))
     : Object.fromEntries(Object.entries(old?.slotMap || {}).filter(([, id]) => ids.has(id)))
   return {
-    version: 1, method: 'certificate', transform: old?.transform ?? 'affine',
-    allowReflection: old?.allowReflection ?? false, slotMap, marks,
-    focalMm: pick('focalMm'), ppxMm: pick('ppxMm'), ppyMm: pick('ppyMm'),
-    scanPitchMm: old?.scanPitchMm ?? null, fit: null,
+    version: 1,
+    method: 'certificate',
+    transform: old?.transform ?? 'affine',
+    allowReflection: old?.allowReflection ?? false,
+    slotMap,
+    marks,
+    focalMm: pick('focalMm'),
+    ppxMm: pick('ppxMm'),
+    ppyMm: pick('ppyMm'),
+    scanPitchMm: old?.scanPitchMm ?? null,
+    fit: null,
   }
 }
 

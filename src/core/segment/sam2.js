@@ -46,7 +46,8 @@ function sampleChannel(rgba, w, h, fx, fy, c) {
   const y0 = Math.min(h - 1, Math.max(0, Math.floor(fy)))
   const x1 = Math.min(w - 1, x0 + 1)
   const y1 = Math.min(h - 1, y0 + 1)
-  const dx = fx - x0, dy = fy - y0
+  const dx = fx - x0,
+    dy = fy - y0
   const p = (x, y) => rgba[(y * w + x) * 4 + c]
   const top = p(x0, y0) * (1 - dx) + p(x1, y0) * dx
   const bot = p(x0, y1) * (1 - dx) + p(x1, y1) * dx
@@ -60,7 +61,8 @@ function sampleChannel(rgba, w, h, fx, fy, c) {
  */
 export function imageToInputTensor(rgba, w, h, size = SAM2_INPUT_SIZE) {
   const out = new Float32Array(3 * size * size)
-  const sx = w / size, sy = h / size
+  const sx = w / size,
+    sy = h / size
   const plane = size * size
   for (let y = 0; y < size; y++) {
     // Sample at pixel centres so a 1:1 resize is identity.
@@ -86,7 +88,8 @@ export function pointsToModelSpace(points, w, h, size = SAM2_INPUT_SIZE) {
   const n = points.length
   const coords = new Float32Array(n * 2)
   const labels = new Float32Array(n)
-  const sx = size / w, sy = size / h
+  const sx = size / w,
+    sy = size / h
   for (let i = 0; i < n; i++) {
     coords[i * 2] = points[i].x * sx
     coords[i * 2 + 1] = points[i].y * sy
@@ -98,10 +101,14 @@ export function pointsToModelSpace(points, w, h, size = SAM2_INPUT_SIZE) {
 /** Index of the highest-IoU mask among `count` candidates (0 if no scores). */
 export function bestMaskIndex(iou, count) {
   if (!iou || !count) return 0
-  let best = 0, bestV = -Infinity
+  let best = 0,
+    bestV = -Infinity
   for (let i = 0; i < count; i++) {
     const v = typeof iou[i] === 'bigint' ? Number(iou[i]) : iou[i]
-    if (v > bestV) { bestV = v; best = i }
+    if (v > bestV) {
+      bestV = v
+      best = i
+    }
   }
   return best
 }
@@ -113,7 +120,8 @@ export function bestMaskIndex(iou, count) {
  */
 export function logitsToBinaryMask(logits, mw, mh, w, h, threshold = 0) {
   const out = new Uint8Array(w * h)
-  const sx = mw / w, sy = mh / h
+  const sx = mw / w,
+    sy = mh / h
   for (let y = 0; y < h; y++) {
     const fy = (y + 0.5) * sy - 0.5
     for (let x = 0; x < w; x++) {
@@ -123,9 +131,11 @@ export function logitsToBinaryMask(logits, mw, mh, w, h, threshold = 0) {
       const y0 = Math.min(mh - 1, Math.max(0, Math.floor(fy)))
       const x1 = Math.min(mw - 1, x0 + 1)
       const y1 = Math.min(mh - 1, y0 + 1)
-      const dx = fx - x0, dy = fy - y0
-      const v = (logits[y0 * mw + x0] * (1 - dx) + logits[y0 * mw + x1] * dx) * (1 - dy)
-        + (logits[y1 * mw + x0] * (1 - dx) + logits[y1 * mw + x1] * dx) * dy
+      const dx = fx - x0,
+        dy = fy - y0
+      const v =
+        (logits[y0 * mw + x0] * (1 - dx) + logits[y0 * mw + x1] * dx) * (1 - dy) +
+        (logits[y1 * mw + x0] * (1 - dx) + logits[y1 * mw + x1] * dx) * dy
       out[y * w + x] = v > threshold ? 1 : 0
     }
   }
@@ -136,8 +146,12 @@ export function logitsToBinaryMask(logits, mw, mh, w, h, threshold = 0) {
 
 // Downloaded-on-demand; served from Cache Storage once fetched with consent
 // (see core/models/). loadModelBytes resolves each URL to bytes.
-function defaultEncoderUrl() { return modelUrl('sam2_encoder') }
-function defaultDecoderUrl() { return modelUrl('sam2_decoder') }
+function defaultEncoderUrl() {
+  return modelUrl('sam2_encoder')
+}
+function defaultDecoderUrl() {
+  return modelUrl('sam2_decoder')
+}
 
 // One cached session per `${role}:${backend}` (role = encoder | decoder). Like
 // LightGlue, a role can hold both a WebGPU and a WASM session if we fall back.
@@ -150,7 +164,10 @@ const sessions = new Map()
 let runChain = Promise.resolve()
 export function serialized(fn) {
   const p = runChain.then(fn, fn)
-  runChain = p.then(() => {}, () => {})
+  runChain = p.then(
+    () => {},
+    () => {},
+  )
   return p
 }
 
@@ -162,14 +179,21 @@ function getSession(role, model, backend, onLog, sessionOpts = {}) {
   // level builds a fresh session rather than returning the failed/cached one.
   const key = `${role}:${backend}:${sessionOpts.graphOptimizationLevel || 'all'}`
   if (!sessions.has(key)) {
-    sessions.set(key, (async () => {
-      onLog?.(`SAM2: first use — ${role} on backend ${backend}`
-        + `${sessionOpts.graphOptimizationLevel ? ` (opt=${sessionOpts.graphOptimizationLevel})` : ''}; fetching model…`)
-      const bytes = await loadModelBytes(model, onLog, `SAM2 ${role}`)
-      const session = await createSession(bytes, sessionOpts, onLog, backend)
-      onLog?.(`SAM2: ${role} ready (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`)
-      return session
-    })())
+    sessions.set(
+      key,
+      (async () => {
+        onLog?.(
+          `SAM2: first use — ${role} on backend ${backend}` +
+            `${sessionOpts.graphOptimizationLevel ? ` (opt=${sessionOpts.graphOptimizationLevel})` : ''}; fetching model…`,
+        )
+        const bytes = await loadModelBytes(model, onLog, `SAM2 ${role}`)
+        const session = await createSession(bytes, sessionOpts, onLog, backend)
+        onLog?.(
+          `SAM2: ${role} ready (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`,
+        )
+        return session
+      })(),
+    )
   }
   return sessions.get(key)
 }
@@ -193,7 +217,7 @@ export function findInput(names, ...fragments) {
  */
 export async function encode(rgba, w, h, opts = {}) {
   const { encoderModel = defaultEncoderUrl(), backend: backendOverride, sessionOpts, onLog } = opts
-  const backend = backendOverride || await resolveBackend()
+  const backend = backendOverride || (await resolveBackend())
   const session = await getSession('encoder', encoderModel, backend, onLog, sessionOpts)
   const input = await tensor('float32', imageToInputTensor(rgba, w, h), [1, 3, SAM2_INPUT_SIZE, SAM2_INPUT_SIZE])
   const t = performance.now()

@@ -22,9 +22,13 @@ const imagesStore = useImagesStore()
 const { updateMask } = imagesStore
 const { log } = useLog()
 
-const sides = reactive({ top: AUTO_MASK_DEFAULTS.border, right: AUTO_MASK_DEFAULTS.border,
-  bottom: AUTO_MASK_DEFAULTS.border, left: AUTO_MASK_DEFAULTS.border })
-const linked = ref(AUTO_MASK_DEFAULTS.linked)     // edit one side → fill all four
+const sides = reactive({
+  top: AUTO_MASK_DEFAULTS.border,
+  right: AUTO_MASK_DEFAULTS.border,
+  bottom: AUTO_MASK_DEFAULTS.border,
+  left: AUTO_MASK_DEFAULTS.border,
+})
+const linked = ref(AUTO_MASK_DEFAULTS.linked) // edit one side → fill all four
 const existing = ref(AUTO_MASK_DEFAULTS.existing) // 'merge' | 'replace' for images that already have a mask
 const busy = ref(false)
 
@@ -69,7 +73,8 @@ async function applyToGroups(groups) {
   if (!jobs.length) return
   busy.value = true
   const merge = existing.value === 'merge'
-  let done = 0, current = null
+  let done = 0,
+    current = null
   try {
     for (const { img, g } of jobs) {
       current = img
@@ -81,16 +86,27 @@ async function applyToGroups(groups) {
       }
       done++
     }
-    const what = noBorder.value ? (merge ? 'nothing to add (zero border)' : 'masks cleared (zero border)') : `border ${borderText.value}`
+    const what = noBorder.value
+      ? merge
+        ? 'nothing to add (zero border)'
+        : 'masks cleared (zero border)'
+      : `border ${borderText.value}`
     log(`Auto Mask: ${plural(done, 'image')}, ${what}`, 'success', 'Images')
   } catch (err) {
     const why = err?.message ?? String(err)
-    log(`Auto Mask failed on ${current?.name ?? 'an image'} after ${done} of ${plural(jobs.length, 'image')}: ${why}`, 'error', 'Images')
+    log(
+      `Auto Mask failed on ${current?.name ?? 'an image'} after ${done} of ${plural(jobs.length, 'image')}: ${why}`,
+      'error',
+      'Images',
+    )
     showToast('Auto Mask failed', {
       detail: `${done} of ${plural(jobs.length, 'image')} masked before ${current?.name ?? 'an image'} failed: ${why}`,
-      kind: 'error', ms: 6000,
+      kind: 'error',
+      ms: 6000,
     })
-  } finally { busy.value = false }
+  } finally {
+    busy.value = false
+  }
 }
 
 const applyToGroup = (g) => applyToGroups([g])
@@ -102,23 +118,26 @@ const applyToAll = () => applyToGroups(grouping.value.sizedGroups)
   <ModalShell class="auto-mask" title="Auto Mask" width="620px" flush :scroll="false" @close="emit('close')">
     <!-- Strategy controls. v1 = border only; future strategies add sections here. -->
     <div class="controls">
-      <div class="section-title"><FieldHelp op="masks" param="border" :value="borderText" :default-value="`${AUTO_MASK_DEFAULTS.border} px`">Mask border</FieldHelp> (exclude outer pixels)</div>
+      <div class="section-title">
+        <FieldHelp op="masks" param="border" :value="borderText" :default-value="`${AUTO_MASK_DEFAULTS.border} px`"
+          >Mask border</FieldHelp
+        >
+        (exclude outer pixels)
+      </div>
       <div class="sides">
         <label v-for="k in SIDE_KEYS" :key="k" class="side">
           <span class="side-label">{{ k }}</span>
-          <input
-            class="num"
-            type="number"
-            min="0"
-            step="1"
-            :value="sides[k]"
-            @input="onSideInput(k, $event)"
-          />
+          <input class="num" type="number" min="0" step="1" :value="sides[k]" @input="onSideInput(k, $event)" />
           <span class="unit">px</span>
         </label>
       </div>
       <div class="opts">
-        <label class="opt"><input v-model="linked" type="checkbox" /> <FieldHelp op="masks" param="linked" :value="linked" :default-value="AUTO_MASK_DEFAULTS.linked">Link all sides</FieldHelp></label>
+        <label class="opt"
+          ><input v-model="linked" type="checkbox" />
+          <FieldHelp op="masks" param="linked" :value="linked" :default-value="AUTO_MASK_DEFAULTS.linked"
+            >Link all sides</FieldHelp
+          ></label
+        >
         <span class="sep">·</span>
         <span class="opt-label"><FieldHelp op="masks" param="existing">If a mask exists</FieldHelp>:</span>
         <label class="opt"><input v-model="existing" type="radio" value="merge" /> Merge</label>
@@ -127,7 +146,9 @@ const applyToAll = () => applyToGroups(grouping.value.sizedGroups)
     </div>
 
     <div class="subbar">
-      <button class="btn" :disabled="busy || !grouping.sizedGroups.length" @click="applyToAll">Apply to all groups</button>
+      <button class="btn" :disabled="busy || !grouping.sizedGroups.length" @click="applyToAll">
+        Apply to all groups
+      </button>
       <span class="hint">{{ grouping.hint }}</span>
     </div>
 
@@ -148,68 +169,187 @@ const applyToAll = () => applyToGroups(grouping.value.sizedGroups)
           :disabled="busy || !g.w"
           :title="g.w ? '' : 'Unknown size — open an image to draw a mask manually'"
           @click="applyToGroup(g)"
-        >Apply to group</button>
+        >
+          Apply to group
+        </button>
       </div>
     </div>
   </ModalShell>
 </template>
 
 <style scoped>
-
-.controls { padding: 12px 16px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
-.section-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
-.sides { display: flex; gap: 14px; flex-wrap: wrap; }
-.side { display: inline-flex; align-items: center; gap: 5px; }
-.side-label { font-size: 12px; color: var(--text-dim); text-transform: capitalize; width: 42px; }
-.num {
-  width: 60px; background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
-  color: var(--text); font: inherit; font-size: 12px; padding: 3px 5px; outline: none;
+.controls {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
 }
-.num:focus { border-color: var(--accent); }
-.num[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.sides {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.side {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.side-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: capitalize;
+  width: 42px;
+}
+.num {
+  width: 60px;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 5px;
+  outline: none;
+}
+.num:focus {
+  border-color: var(--accent);
+}
+.num[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
 .num[type='number']::-webkit-outer-spin-button,
-.num[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.unit { font-size: 11px; color: var(--text-dim); }
+.num[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.unit {
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
-.opts { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--text); }
-.opt { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-.opt input { accent-color: var(--accent); }
-.opt-label { color: var(--text-dim); }
-.sep { color: var(--text-dim); }
+.opts {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text);
+}
+.opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.opt input {
+  accent-color: var(--accent);
+}
+.opt-label {
+  color: var(--text-dim);
+}
+.sep {
+  color: var(--text-dim);
+}
 
 .subbar {
-  display: flex; align-items: center; gap: 14px;
-  padding: 8px 16px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
 }
-.hint { font-size: 11px; color: var(--text-dim); }
+.hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
-.list { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
-.empty { padding: 40px; text-align: center; color: var(--text-dim); }
+.list {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  background: var(--bg);
+}
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-dim);
+}
 
 .group {
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 16px; border-bottom: 1px solid var(--panel-border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--panel-border);
 }
-.preview { position: relative; width: 72px; height: 54px; flex-shrink: 0; background: #000; border-radius: 3px; overflow: hidden; }
-.thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.preview {
+  position: relative;
+  width: 72px;
+  height: 54px;
+  flex-shrink: 0;
+  background: #000;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 /* `inset` places this over the *interior* (kept) rectangle; the large spread
    box-shadow then washes everything outside it red, clipped to the preview's
    overflow:hidden — so the highlighted area is exactly the excluded border. */
 .border-overlay {
-  position: absolute; background: transparent;
+  position: absolute;
+  background: transparent;
   box-shadow: 0 0 0 9999px rgba(255, 60, 60, 0.45);
   outline: 1px solid rgba(255, 80, 80, 0.7);
   pointer-events: none;
 }
-.group-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.group-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.group-count { font-size: 11px; color: var(--text-dim); }
+.group-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.group-count {
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
 .btn {
-  background: var(--accent); border: none; color: #fff; font: inherit; font-size: 12px;
-  padding: 5px 11px; border-radius: 5px; cursor: pointer;
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 5px;
+  cursor: pointer;
 }
-.btn.sm { font-size: 11px; padding: 4px 9px; }
-.btn:hover:not(:disabled) { filter: brightness(1.1); }
-.btn:disabled { opacity: 0.4; cursor: default; }
+.btn.sm {
+  font-size: 11px;
+  padding: 4px 9px;
+}
+.btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 </style>

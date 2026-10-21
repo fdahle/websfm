@@ -13,20 +13,40 @@ beforeAll(async () => {
 
 // ── tiny linear algebra (mirrors sfm.test.js) ─────────────────────────────────
 const mul = (A, B) => {
-  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  const C = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
   for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) C[i][j] += A[i][k] * B[k][j]
   return C
 }
-const T = (M) => [[M[0][0], M[1][0], M[2][0]], [M[0][1], M[1][1], M[2][1]], [M[0][2], M[1][2], M[2][2]]]
+const T = (M) => [
+  [M[0][0], M[1][0], M[2][0]],
+  [M[0][1], M[1][1], M[2][1]],
+  [M[0][2], M[1][2], M[2][2]],
+]
 const mv = (M, v) => [
   M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2],
   M[1][0] * v[0] + M[1][1] * v[1] + M[1][2] * v[2],
   M[2][0] * v[0] + M[2][1] * v[1] + M[2][2] * v[2],
 ]
-const skew = (t) => [[0, -t[2], t[1]], [t[2], 0, -t[0]], [-t[1], t[0], 0]]
+const skew = (t) => [
+  [0, -t[2], t[1]],
+  [t[2], 0, -t[0]],
+  [-t[1], t[0], 0],
+]
 
-const KM = [[1000, 0, 640], [0, 1000, 480], [0, 0, 1]]
-const KINV = [[1 / 1000, 0, -640 / 1000], [0, 1 / 1000, -480 / 1000], [0, 0, 1]]
+const KM = [
+  [1000, 0, 640],
+  [0, 1000, 480],
+  [0, 0, 1],
+]
+const KINV = [
+  [1 / 1000, 0, -640 / 1000],
+  [0, 1 / 1000, -480 / 1000],
+  [0, 0, 1],
+]
 const K = { fx: 1000, fy: 1000, cx: 640, cy: 480 }
 
 const project = (R, t, X) => {
@@ -41,7 +61,8 @@ const fundamental = (Ri, ti, Rj, tj) => {
 
 function mulberry32(seed) {
   return () => {
-    seed |= 0; seed = (seed + 0x6D2B79F5) | 0
+    seed |= 0
+    seed = (seed + 0x6d2b79f5) | 0
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
@@ -65,9 +86,21 @@ const numStats = (arr) => {
 // cheiralKept × connectivityHealth / reprojection penalty.
 function makePair(idA, idB, nPoints, seed, baseline = 0.7) {
   const rng = mulberry32(seed)
-  const RA = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], tA = [0, 0, 0]
-  const RB = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], tB = [-baseline, 0, 0]
-  const kpA = [], kpB = [], matches = []
+  const RA = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    tA = [0, 0, 0]
+  const RB = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    tB = [-baseline, 0, 0]
+  const kpA = [],
+    kpB = [],
+    matches = []
   for (let i = 0; i < nPoints; i++) {
     const X = [(rng() - 0.5) * 3, (rng() - 0.5) * 3, 4 + rng() * 2]
     kpA.push(project(RA, tA, X))
@@ -171,11 +204,16 @@ describe('selectInitPair — match-graph connectivity bias', () => {
     const { lean, rich, images, Kmap } = scene()
     // Every candidate image sits at the same degree (3), so connectivityHealth ≡ 1.
     const donePairs = [
-      lean.entry, rich.entry,
-      filler('leanA', 'x1'), filler('leanA', 'x2'),
-      filler('leanB', 'x1'), filler('leanB', 'x2'),
-      filler('richA', 'x1'), filler('richA', 'x2'),
-      filler('richB', 'x1'), filler('richB', 'x2'),
+      lean.entry,
+      rich.entry,
+      filler('leanA', 'x1'),
+      filler('leanA', 'x2'),
+      filler('leanB', 'x1'),
+      filler('leanB', 'x2'),
+      filler('richA', 'x1'),
+      filler('richA', 'x2'),
+      filler('richB', 'x1'),
+      filler('richB', 'x2'),
     ]
     const res = await pick(donePairs, images, Kmap)
     expect(res.status).toBe('ok')
@@ -184,8 +222,7 @@ describe('selectInitPair — match-graph connectivity bias', () => {
 
   it('can exclude a previously stalled seed for an alternate-seed retry', async () => {
     const { lean, rich, images, Kmap } = scene()
-    const res = await pick([lean.entry, rich.entry], images, Kmap,
-      { excludedInitPairs: ['richA--richB'] })
+    const res = await pick([lean.entry, rich.entry], images, Kmap, { excludedInitPairs: ['richA--richB'] })
     expect(res.status).toBe('ok')
     expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['leanA', 'leanB'])
   })
@@ -199,13 +236,22 @@ describe('selectInitPair — match-graph connectivity bias', () => {
     const { lean, rich, images, Kmap } = scene()
     // `lean` (40 pts) sits at degree 6, `rich` (60 pts) at the median degree 3.
     const donePairs = [
-      lean.entry, rich.entry,
-      filler('leanA', 'x1'), filler('leanA', 'x2'), filler('leanA', 'x3'),
-      filler('leanA', 'x4'), filler('leanA', 'x5'),
-      filler('leanB', 'x1'), filler('leanB', 'x2'), filler('leanB', 'x3'),
-      filler('leanB', 'x4'), filler('leanB', 'x5'),
-      filler('richA', 'x1'), filler('richA', 'x2'),
-      filler('richB', 'x1'), filler('richB', 'x2'),
+      lean.entry,
+      rich.entry,
+      filler('leanA', 'x1'),
+      filler('leanA', 'x2'),
+      filler('leanA', 'x3'),
+      filler('leanA', 'x4'),
+      filler('leanA', 'x5'),
+      filler('leanB', 'x1'),
+      filler('leanB', 'x2'),
+      filler('leanB', 'x3'),
+      filler('leanB', 'x4'),
+      filler('leanB', 'x5'),
+      filler('richA', 'x1'),
+      filler('richA', 'x2'),
+      filler('richB', 'x1'),
+      filler('richB', 'x2'),
     ]
     const res = await pick(donePairs, images, Kmap)
     expect(res.status).toBe('ok')
@@ -222,10 +268,17 @@ describe('selectInitPair — match-graph connectivity bias', () => {
     // each other (degree 1) while `lean` sits at the graph median. `rich` keeps its
     // geometric edge (1.5× the points) and must still lose to the connected seed.
     const donePairs = [
-      lean.entry, rich.entry,
-      filler('leanA', 'x1'), filler('leanA', 'x2'), filler('leanA', 'x3'),
-      filler('leanB', 'x1'), filler('leanB', 'x2'), filler('leanB', 'x3'),
-      filler('x1', 'x2'), filler('x2', 'x3'), filler('x1', 'x3'),
+      lean.entry,
+      rich.entry,
+      filler('leanA', 'x1'),
+      filler('leanA', 'x2'),
+      filler('leanA', 'x3'),
+      filler('leanB', 'x1'),
+      filler('leanB', 'x2'),
+      filler('leanB', 'x3'),
+      filler('x1', 'x2'),
+      filler('x2', 'x3'),
+      filler('x1', 'x3'),
     ]
     const res = await pick(donePairs, images, Kmap)
     expect(res.status).toBe('ok')
@@ -235,13 +288,18 @@ describe('selectInitPair — match-graph connectivity bias', () => {
   it('prefers seed features observed by PnP-ready third views over nominal degree', async () => {
     const { lean, rich, images, Kmap } = scene()
     const donePairs = [
-      lean.entry, rich.entry,
-      growthEdge('leanA', 'next1', 25), growthEdge('leanB', 'next1', 25),
-      growthEdge('leanA', 'next2', 22), growthEdge('leanB', 'next2', 22),
+      lean.entry,
+      rich.entry,
+      growthEdge('leanA', 'next1', 25),
+      growthEdge('leanB', 'next1', 25),
+      growthEdge('leanA', 'next2', 22),
+      growthEdge('leanB', 'next2', 22),
       // Same degree, but these edges repeatedly observe too few seed points to
       // supply the default 20-correspondence registration gate.
-      growthEdge('richA', 'dead1', 8), growthEdge('richB', 'dead1', 8),
-      growthEdge('richA', 'dead2', 8), growthEdge('richB', 'dead2', 8),
+      growthEdge('richA', 'dead1', 8),
+      growthEdge('richB', 'dead1', 8),
+      growthEdge('richA', 'dead2', 8),
+      growthEdge('richB', 'dead2', 8),
     ]
     const res = await pick(donePairs, images, Kmap)
     expect(res.status).toBe('ok')
@@ -275,16 +333,24 @@ describe('selectInitPair — match-graph connectivity bias', () => {
 function makeBurst(ids, nPoints, seed, step = 0.01) {
   const rng = mulberry32(seed)
   const X = Array.from({ length: nPoints }, () => [(rng() - 0.5) * 3, (rng() - 0.5) * 3, 4 + rng() * 2])
-  const R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const R = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]
   const t = ids.map((_, k) => [-step * k, 0, 0])
-  const images = Object.fromEntries(ids.map((id, k) =>
-    [id, { name: id, kp: keypointSetFrom(X.map((p) => project(R, t[k], p))) }]))
+  const images = Object.fromEntries(
+    ids.map((id, k) => [id, { name: id, kp: keypointSetFrom(X.map((p) => project(R, t[k], p))) }]),
+  )
   const entries = []
   for (let a = 0; a < ids.length; a++) {
     for (let b = a + 1; b < ids.length; b++) {
       entries.push({
-        idA: ids[a], idB: ids[b], F: fundamental(R, t[a], R, t[b]),
-        matches: X.map((_, i) => [i, i]), inlierCount: nPoints,
+        idA: ids[a],
+        idB: ids[b],
+        F: fundamental(R, t[a], R, t[b]),
+        matches: X.map((_, i) => [i, i]),
+        inlierCount: nPoints,
       })
     }
   }
@@ -307,10 +373,17 @@ describe('selectInitPair — widening past a near-coincident burst', () => {
   it('keeps probing beyond the first batch until a pair clears the floor', async () => {
     const { donePairs, images, Kmap } = hoverScene()
     const logs = []
-    const res = await selectInitPair({
-      donePairs, Kmap, settings: { initCandidates: 3 },
-      imageByUuid: (uuid) => images[uuid] ?? null, numStats, projDepth,
-    }, { onLog: (m) => logs.push(m) })
+    const res = await selectInitPair(
+      {
+        donePairs,
+        Kmap,
+        settings: { initCandidates: 3 },
+        imageByUuid: (uuid) => images[uuid] ?? null,
+        numStats,
+        projDepth,
+      },
+      { onLog: (m) => logs.push(m) },
+    )
     expect(res.status).toBe('ok')
     expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['goodA', 'goodB'])
     expect(res.best.angle).toBeGreaterThan(2)
@@ -323,20 +396,34 @@ describe('selectInitPair — widening past a near-coincident burst', () => {
   it('is unchanged when the first batch already holds a sound seed', async () => {
     const { donePairs, images, Kmap } = hoverScene()
     const logs = []
-    await selectInitPair({
-      donePairs, Kmap, settings: { initCandidates: 24 },
-      imageByUuid: (uuid) => images[uuid] ?? null, numStats, projDepth,
-    }, { onLog: (m) => logs.push(m) })
+    await selectInitPair(
+      {
+        donePairs,
+        Kmap,
+        settings: { initCandidates: 24 },
+        imageByUuid: (uuid) => images[uuid] ?? null,
+        numStats,
+        projDepth,
+      },
+      { onLog: (m) => logs.push(m) },
+    )
     expect(logs.some((m) => /widening the search/.test(m))).toBe(false)
   })
 
   it('says plainly when the fallback seed is below the track filter floor', async () => {
     const { donePairs, images, Kmap } = hoverScene()
     const logs = []
-    const res = await selectInitPair({
-      donePairs, Kmap, settings: { initCandidates: 3, initCandidateMax: 3, filterMinTriAngleDeg: 1.5 },
-      imageByUuid: (uuid) => images[uuid] ?? null, numStats, projDepth,
-    }, { onLog: (m) => logs.push(m) })
+    const res = await selectInitPair(
+      {
+        donePairs,
+        Kmap,
+        settings: { initCandidates: 3, initCandidateMax: 3, filterMinTriAngleDeg: 1.5 },
+        imageByUuid: (uuid) => images[uuid] ?? null,
+        numStats,
+        projDepth,
+      },
+      { onLog: (m) => logs.push(m) },
+    )
     expect(res.status).toBe('ok')
     expect(res.best.angle).toBeLessThan(1.5)
     expect(logs.some((m) => /below the 1.5° the track filter requires/.test(m))).toBe(true)

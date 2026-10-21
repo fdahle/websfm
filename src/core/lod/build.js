@@ -23,7 +23,7 @@ import { encodeHierarchy } from './hierarchy.js'
 
 export const CHUNK_MAX = 4_000_000 // points of one chunk built in memory
 export const LOD_MIN_POINTS = 4_000_000 // dense clouds this big get an octree and are drawn through it
-const HEADER = 8                   // block: Uint32 count, Uint32 payload bytes
+const HEADER = 8 // block: Uint32 count, Uint32 payload bytes
 const MAX_CHUNK_LEVEL = 12
 
 /**
@@ -43,7 +43,7 @@ export function chooseLayout({ bounds, colour, attributes = [], offset, scale })
 
 /** The chunk level whose cubes hold about `chunkMax / 2` points on 2.5D data. */
 export function chunkLevelFor(count, chunkMax = CHUNK_MAX) {
-  return Math.min(7, Math.max(0, Math.ceil(Math.log(2 * count / chunkMax) / Math.log(4))))
+  return Math.min(7, Math.max(0, Math.ceil(Math.log((2 * count) / chunkMax) / Math.log(4))))
 }
 
 const chunkName = ([l, x, y, z]) => `c${l}-${x}-${y}-${z}`
@@ -51,7 +51,8 @@ const chunkName = ([l, x, y, z]) => `c${l}-${x}-${y}-${z}`
 function block(bytes, count) {
   const out = new Uint8Array(HEADER + bytes.length)
   const dv = new DataView(out.buffer)
-  dv.setUint32(0, count, true); dv.setUint32(4, bytes.length, true)
+  dv.setUint32(0, count, true)
+  dv.setUint32(4, bytes.length, true)
   out.set(bytes, HEADER)
   return out
 }
@@ -63,7 +64,8 @@ async function* readBlocks(tmp, name, layout) {
   while (off < size) {
     const head = await tmp.read(name, off, HEADER)
     const dv = new DataView(head.buffer, head.byteOffset, HEADER)
-    const count = dv.getUint32(0, true), len = dv.getUint32(4, true)
+    const count = dv.getUint32(0, true),
+      len = dv.getUint32(4, true)
     const body = await tmp.read(name, off + HEADER, len)
     yield decodeNode(body, count, layout, { as: 'absolute' })
     off += HEADER + len
@@ -72,7 +74,17 @@ async function* readBlocks(tmp, name, layout) {
 
 // Growable columns of points (absolute Float64 positions, colour, attributes).
 function columns(layout, capacity) {
-  const T = (a) => ({ uint8: Uint8Array, int8: Int8Array, uint16: Uint16Array, int16: Int16Array, uint32: Uint32Array, int32: Int32Array, float32: Float32Array, float64: Float64Array })[a.type]
+  const T = (a) =>
+    ({
+      uint8: Uint8Array,
+      int8: Int8Array,
+      uint16: Uint16Array,
+      int16: Int16Array,
+      uint32: Uint32Array,
+      int32: Int32Array,
+      float32: Float32Array,
+      float64: Float64Array,
+    })[a.type]
   const c = {
     count: 0,
     pos: new Float64Array(3 * capacity),
@@ -82,8 +94,12 @@ function columns(layout, capacity) {
   c.reserve = (extra) => {
     const need = c.count + extra
     if (3 * need <= c.pos.length) return
-    const cap = Math.max(need, Math.ceil(c.pos.length / 3 * 1.5))
-    const grow = (arr, per) => { const g = new arr.constructor(per * cap); g.set(arr.subarray(0, per * c.count)); return g }
+    const cap = Math.max(need, Math.ceil((c.pos.length / 3) * 1.5))
+    const grow = (arr, per) => {
+      const g = new arr.constructor(per * cap)
+      g.set(arr.subarray(0, per * c.count))
+      return g
+    }
     c.pos = grow(c.pos, 3)
     if (c.col) c.col = grow(c.col, 3)
     for (const k of Object.keys(c.attributes)) c.attributes[k] = grow(c.attributes[k], 1)
@@ -93,9 +109,16 @@ function columns(layout, capacity) {
     const n = idx ? idx.length : src.count
     c.reserve(n)
     for (let k = 0; k < n; k++) {
-      const i = idx ? idx[k] : k, j = c.count + k
-      c.pos[3 * j] = src.pos[3 * i]; c.pos[3 * j + 1] = src.pos[3 * i + 1]; c.pos[3 * j + 2] = src.pos[3 * i + 2]
-      if (c.col) { c.col[3 * j] = src.col[3 * i]; c.col[3 * j + 1] = src.col[3 * i + 1]; c.col[3 * j + 2] = src.col[3 * i + 2] }
+      const i = idx ? idx[k] : k,
+        j = c.count + k
+      c.pos[3 * j] = src.pos[3 * i]
+      c.pos[3 * j + 1] = src.pos[3 * i + 1]
+      c.pos[3 * j + 2] = src.pos[3 * i + 2]
+      if (c.col) {
+        c.col[3 * j] = src.col[3 * i]
+        c.col[3 * j + 1] = src.col[3 * i + 1]
+        c.col[3 * j + 2] = src.col[3 * i + 2]
+      }
       for (const [name, arr] of Object.entries(c.attributes)) arr[j] = src.attributes[name][i]
     }
     c.count += n
@@ -105,7 +128,8 @@ function columns(layout, capacity) {
 
 // Point indices of `pts` grouped by the cube (at `level`) they fall in. → Map keyString → { key, idx }
 function groupByCube(pts, root, level) {
-  const per = 2 ** level, cs = root.size / per
+  const per = 2 ** level,
+    cs = root.size / per
   const cell = new Uint32Array(pts.count)
   const counts = new Map()
   for (let i = 0; i < pts.count; i++) {
@@ -118,10 +142,15 @@ function groupByCube(pts, root, level) {
   }
   const groups = new Map()
   for (const [id, n] of counts) {
-    const cx = id % per, cy = Math.floor(id / per) % per, cz = Math.floor(id / (per * per))
+    const cx = id % per,
+      cy = Math.floor(id / per) % per,
+      cz = Math.floor(id / (per * per))
     groups.set(id, { key: [level, cx, cy, cz], idx: new Uint32Array(n), fill: 0 })
   }
-  for (let i = 0; i < pts.count; i++) { const g = groups.get(cell[i]); g.idx[g.fill++] = i }
+  for (let i = 0; i < pts.count; i++) {
+    const g = groups.get(cell[i])
+    g.idx[g.fill++] = i
+  }
   return [...groups.values()]
 }
 
@@ -136,7 +165,8 @@ export async function buildLod(source, tmp, out, opts = {}) {
   const { chunkMax = CHUNK_MAX, grid = GRID, onProgress = () => {} } = opts
   const layout = chooseLayout({ ...source, ...(opts.layout ?? {}) })
   const root = rootCube(source.bounds.min, source.bounds.max)
-  const [ox, oy, oz] = layout.offset, [sx, sy, sz] = layout.scale
+  const [ox, oy, oz] = layout.offset,
+    [sx, sy, sz] = layout.scale
   const total = source.count
 
   // 1. Distribute. Each point goes by its quantised position, so the chunk it lands
@@ -149,7 +179,8 @@ export async function buildLod(source, tmp, out, opts = {}) {
   // The extent of the points as written (an edit's output is not its source's extent,
   // a LAS header's is often rounded or stale), and how many fall outside the root cube
   // the build was planned in (a wrong header: stored, but in edge nodes).
-  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+  const lo = [Infinity, Infinity, Infinity],
+    hi = [-Infinity, -Infinity, -Infinity]
   const cubeHi = [0, 1, 2].map((k) => root.min[k] + root.size)
   let outside = 0
   let done = 0
@@ -166,16 +197,17 @@ export async function buildLod(source, tmp, out, opts = {}) {
     }
     const q = { count: b.count, pos: new Float64Array(3 * b.count), col: b.col, attributes: b.attributes }
     for (let i = 0; i < b.count; i++) {
-      const x = q.pos[3 * i] = Math.round((b.pos[3 * i] - ox) / sx) * sx + ox
-      const y = q.pos[3 * i + 1] = Math.round((b.pos[3 * i + 1] - oy) / sy) * sy + oy
-      const z = q.pos[3 * i + 2] = Math.round((b.pos[3 * i + 2] - oz) / sz) * sz + oz
+      const x = (q.pos[3 * i] = Math.round((b.pos[3 * i] - ox) / sx) * sx + ox)
+      const y = (q.pos[3 * i + 1] = Math.round((b.pos[3 * i + 1] - oy) / sy) * sy + oy)
+      const z = (q.pos[3 * i + 2] = Math.round((b.pos[3 * i + 2] - oz) / sz) * sz + oz)
       if (x < lo[0]) lo[0] = x
       if (x > hi[0]) hi[0] = x
       if (y < lo[1]) lo[1] = y
       if (y > hi[1]) hi[1] = y
       if (z < lo[2]) lo[2] = z
       if (z > hi[2]) hi[2] = z
-      if (x < root.min[0] || y < root.min[1] || z < root.min[2] || x > cubeHi[0] || y > cubeHi[1] || z > cubeHi[2]) outside++
+      if (x < root.min[0] || y < root.min[1] || z < root.min[2] || x > cubeHi[0] || y > cubeHi[1] || z > cubeHi[2])
+        outside++
     }
     for (const g of groupByCube(q, root, level0)) {
       const name = chunkName(g.key)
@@ -225,7 +257,9 @@ export async function buildLod(source, tmp, out, opts = {}) {
     const start = kept.count
     kept.push(pts, sub[0].idx)
     roots.set(keyString(chunk.key), {
-      key: chunk.key, idx: Uint32Array.from({ length: kept.count - start }, (_, i) => start + i), hasChildren: sub.length > 1,
+      key: chunk.key,
+      idx: Uint32Array.from({ length: kept.count - start }, (_, i) => start + i),
+      hasChildren: sub.length > 1,
     })
     built += chunk.count
     onProgress(built, total, 'Building the octree')
@@ -238,18 +272,41 @@ export async function buildLod(source, tmp, out, opts = {}) {
     const childOf = n.hasChildren ?? true // lifted parents always have children
     if (!n.idx.length && !childOf) continue
     const bytes = n.idx.length ? encodeNode(keptPts, n.idx, layout) : new Uint8Array(0)
-    entries.push({ key: n.key, count: n.idx.length, offset: bytes.length ? await out.write(bytes) : 0, length: bytes.length })
+    entries.push({
+      key: n.key,
+      count: n.idx.length,
+      offset: bytes.length ? await out.write(bytes) : 0,
+      length: bytes.length,
+    })
   }
 
   // Parents before children, then by position: the reader's walk order.
   entries.sort((a, b) => a.key[0] - b.key[0] || a.key[3] - b.key[3] || a.key[2] - b.key[2] || a.key[1] - b.key[1])
-  let dataBytes = 0, points = 0, levels = 0
-  for (const e of entries) { dataBytes += e.length; points += e.count; levels = Math.max(levels, e.key[0] + 1) }
-  for (const r of Object.values(ranges)) if (r.min > r.max) { r.min = 0; r.max = 1 }
+  let dataBytes = 0,
+    points = 0,
+    levels = 0
+  for (const e of entries) {
+    dataBytes += e.length
+    points += e.count
+    levels = Math.max(levels, e.key[0] + 1)
+  }
+  for (const r of Object.values(ranges))
+    if (r.min > r.max) {
+      r.min = 0
+      r.max = 1
+    }
   const bounds = points ? { min: lo, max: hi } : { min: [...source.bounds.min], max: [...source.bounds.max] }
   return {
-    root, layout, spacing: root.size / grid, hierarchy: encodeHierarchy(entries),
-    bounds, stats: { ranges, classes }, nodeCount: entries.length, dataBytes, points, levels,
+    root,
+    layout,
+    spacing: root.size / grid,
+    hierarchy: encodeHierarchy(entries),
+    bounds,
+    stats: { ranges, classes },
+    nodeCount: entries.length,
+    dataBytes,
+    points,
+    levels,
     ...(outside ? { outside } : {}),
   }
 }

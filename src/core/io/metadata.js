@@ -1,6 +1,9 @@
 import exifr from 'exifr'
 
-const normalizedTag = (key) => String(key).replace(/[^a-z0-9]/gi, '').toLowerCase()
+const normalizedTag = (key) =>
+  String(key)
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase()
 
 // XMP properties are grouped under their namespace by exifr (for example
 // `drone-dji.GimbalYawDegree`). Search those small nested objects by tag name so
@@ -37,8 +40,8 @@ function metadataNumber(root, names) {
   return Number.isFinite(number) ? number : null
 }
 
-const deg = (value) => value * Math.PI / 180
-const angle = (value) => value * 180 / Math.PI
+const deg = (value) => (value * Math.PI) / 180
+const angle = (value) => (value * 180) / Math.PI
 
 function opkFromMatrix(R) {
   const phi = Math.asin(Math.max(-1, Math.min(1, R[0][2])))
@@ -57,32 +60,33 @@ function opkFromMatrix(R) {
 // avoids the common but destructive mistake of treating DJI -90 pitch as phi=-90.
 export function droneYprToOpk(yawDeg, pitchDeg, rollDeg) {
   if (![yawDeg, pitchDeg, rollDeg].every(Number.isFinite)) return null
-  const yaw = deg(yawDeg), tilt = deg(pitchDeg + 90), roll = deg(rollDeg)
+  const yaw = deg(yawDeg),
+    tilt = deg(pitchDeg + 90),
+    roll = deg(rollDeg)
   const heading = [Math.sin(yaw), Math.cos(yaw), 0]
   const right = [Math.cos(yaw), -Math.sin(yaw), 0]
   const photoZ = [-heading[0] * Math.sin(tilt), -heading[1] * Math.sin(tilt), Math.cos(tilt)]
   const photoY = [heading[0] * Math.cos(tilt), heading[1] * Math.cos(tilt), Math.sin(tilt)]
-  const cr = Math.cos(roll), sr = Math.sin(roll)
+  const cr = Math.cos(roll),
+    sr = Math.sin(roll)
   const photoX = right.map((v, i) => cr * v - sr * photoY[i])
   const rolledY = right.map((v, i) => sr * v + cr * photoY[i])
   return opkFromMatrix([photoX, rolledY, photoZ])
 }
 
 export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
-  const horizontalAccuracy = metadataNumber(e, [
-    'GPSHPositioningError', 'HorizontalPositioningError', 'GPSXYAccuracy',
-  ])
+  const horizontalAccuracy = metadataNumber(e, ['GPSHPositioningError', 'HorizontalPositioningError', 'GPSXYAccuracy'])
   // Longitude/easting and latitude/northing standard deviations. DJI RTK XMP
   // uses RtkStdLon/RtkStdLat/RtkStdHgt; other vendors use the longer aliases.
-  const accuracyX = metadataNumber(e, [
-    'RtkStdLon', 'GPSLongitudeAccuracy', 'LongitudeAccuracy', 'PositionAccuracyX',
-  ])
-  const accuracyY = metadataNumber(e, [
-    'RtkStdLat', 'GPSLatitudeAccuracy', 'LatitudeAccuracy', 'PositionAccuracyY',
-  ])
+  const accuracyX = metadataNumber(e, ['RtkStdLon', 'GPSLongitudeAccuracy', 'LongitudeAccuracy', 'PositionAccuracyX'])
+  const accuracyY = metadataNumber(e, ['RtkStdLat', 'GPSLatitudeAccuracy', 'LatitudeAccuracy', 'PositionAccuracyY'])
   const accuracyZ = metadataNumber(e, [
-    'RtkStdHgt', 'RtkStdHeight', 'GPSZAccuracy', 'GPSVerticalAccuracy',
-    'GPSAltitudeAccuracy', 'VerticalPositioningError',
+    'RtkStdHgt',
+    'RtkStdHeight',
+    'GPSZAccuracy',
+    'GPSVerticalAccuracy',
+    'GPSAltitudeAccuracy',
+    'VerticalPositioningError',
   ])
 
   // Explicit photogrammetric angles win. Otherwise consume the well-defined
@@ -91,15 +95,9 @@ export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
   const explicitOmega = metadataNumber(e, ['CameraOmega', 'OmegaDegree'])
   const explicitPhi = metadataNumber(e, ['CameraPhi', 'PhiDegree'])
   const explicitKappa = metadataNumber(e, ['CameraKappa', 'KappaDegree'])
-  const gimbalYaw = metadataNumber(e, [
-    'GimbalYawDegree', 'GimbalYaw', 'GPSImgDirection',
-  ])
-  const gimbalPitch = metadataNumber(e, [
-    'GimbalPitchDegree', 'GimbalPitch',
-  ])
-  const gimbalRoll = metadataNumber(e, [
-    'GimbalRollDegree', 'GimbalRoll',
-  ])
+  const gimbalYaw = metadataNumber(e, ['GimbalYawDegree', 'GimbalYaw', 'GPSImgDirection'])
+  const gimbalPitch = metadataNumber(e, ['GimbalPitchDegree', 'GimbalPitch'])
+  const gimbalRoll = metadataNumber(e, ['GimbalRollDegree', 'GimbalRoll'])
   const explicitOpk = [explicitOmega, explicitPhi, explicitKappa].every(Number.isFinite)
     ? { omega: explicitOmega, phi: explicitPhi, kappa: explicitKappa }
     : null
@@ -142,7 +140,7 @@ export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
     cameraAccuracyOmega: metadataNumber(e, ['CameraOmegaAccuracy']),
     cameraAccuracyPhi: metadataNumber(e, ['CameraPhiAccuracy']),
     cameraAccuracyKappa: metadataNumber(e, ['CameraKappaAccuracy']),
-    cameraOrientationSource: explicitOpk ? 'exif-opk' : (opk ? 'xmp-gimbal' : null),
+    cameraOrientationSource: explicitOpk ? 'exif-opk' : opk ? 'xmp-gimbal' : null,
     fileSize,
     // No `raw: e`. For a TIFF, exifr reads the WHOLE file into one buffer and returns
     // some tags (GPSAltitudeRef, OpcodeList3, …) as small typed-array views into it,
@@ -218,15 +216,28 @@ export const FIELD_DEFS = [
   { key: 'make', label: 'Make', format: (m) => m.make },
   { key: 'model', label: 'Camera', format: (m) => m.model },
   { key: 'lens', label: 'Lens', format: (m) => m.lens },
-  { key: 'focalLength', label: 'Focal length', important: true, format: (m) => (m.focalLength != null ? `${round(m.focalLength)} mm` : null) },
-  { key: 'focalLength35', label: 'Focal (35mm eq.)', format: (m) => (m.focalLength35 != null ? `${m.focalLength35} mm` : null) },
+  {
+    key: 'focalLength',
+    label: 'Focal length',
+    important: true,
+    format: (m) => (m.focalLength != null ? `${round(m.focalLength)} mm` : null),
+  },
+  {
+    key: 'focalLength35',
+    label: 'Focal (35mm eq.)',
+    format: (m) => (m.focalLength35 != null ? `${m.focalLength35} mm` : null),
+  },
   { key: 'fNumber', label: 'Aperture', format: (m) => (m.fNumber != null ? `f/${round(m.fNumber)}` : null) },
   { key: 'exposureTime', label: 'Exposure', format: (m) => formatExposure(m.exposureTime) },
   { key: 'iso', label: 'ISO', format: (m) => m.iso },
   { key: 'orientation', label: 'Orientation', format: (m) => m.orientation },
   { key: 'dateTime', label: 'Taken', format: (m) => formatDate(m.dateTime) },
   // A frame extracted by Import ▸ Video: which video, and where in it.
-  { key: 'video', label: 'Video frame', format: (m) => (m.videoSource ? `${m.videoSource} at ${Number(m.videoTime ?? 0).toFixed(3)} s` : null) },
+  {
+    key: 'video',
+    label: 'Video frame',
+    format: (m) => (m.videoSource ? `${m.videoSource} at ${Number(m.videoTime ?? 0).toFixed(3)} s` : null),
+  },
   {
     key: 'gps',
     label: 'GPS',

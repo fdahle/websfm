@@ -1,4 +1,3 @@
-
 // ── Projection-guided track extension (pure) ─────────────────────────────────
 // Every South Building run discarded 46–73k two-view points that had no verified
 // correspondence into a third registered image (MAT-06): matching missed those
@@ -22,7 +21,10 @@ const DIM = 128
 
 function dist2(a, ao, b, bo) {
   let s = 0
-  for (let i = 0; i < DIM; i++) { const d = a[ao + i] - b[bo + i]; s += d * d }
+  for (let i = 0; i < DIM; i++) {
+    const d = a[ao + i] - b[bo + i]
+    s += d * d
+  }
   return s
 }
 
@@ -35,19 +37,30 @@ function dist2(a, ao, b, bo) {
  */
 export function trackDistanceThreshold(tracks, descOf, { quantile = 0.9, maxSamples = 20000 } = {}) {
   const multi = []
-  tracks.forEachPoint((p) => { if (tracks.viewCount(p) >= 3) multi.push(p) })
+  tracks.forEachPoint((p) => {
+    if (tracks.viewCount(p) >= 3) multi.push(p)
+  })
   if (!multi.length) return null
   const step = Math.max(1, Math.floor(multi.length / maxSamples))
   const d = []
   for (let i = 0; i < multi.length; i += step) {
     // The first two observations of the track.
-    let img0 = -1, kp0 = -1, img1 = -1, kp1 = -1
+    let img0 = -1,
+      kp0 = -1,
+      img1 = -1,
+      kp1 = -1
     tracks.someView(multi[i], (img, kp) => {
-      if (img0 < 0) { img0 = img; kp0 = kp; return false }
-      img1 = img; kp1 = kp
+      if (img0 < 0) {
+        img0 = img
+        kp0 = kp
+        return false
+      }
+      img1 = img
+      kp1 = kp
       return true
     })
-    const a = descOf(img0, kp0), b = descOf(img1, kp1)
+    const a = descOf(img0, kp0),
+      b = descOf(img1, kp1)
     if (a && b) d.push(dist2(a.arr, a.off, b.arr, b.off))
   }
   if (!d.length) return null
@@ -69,11 +82,29 @@ export function trackDistanceThreshold(tracks, descOf, { quantile = 0.9, maxSamp
  * @param {number} [o.refObs]                compare against at most this many observations
  * @param {(p:number, img:number, kp:number) => void} [o.onAdd]  called per accepted observation
  */
-export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, gatePx,
-  maxDist2 = null, ratio = 0.8, quantile = 0.9, refObs = 3, onAdd = null }) {
+export function guidedExtendTracks({
+  tracks,
+  ids,
+  cameras,
+  keypointsAt,
+  descOf,
+  gatePx,
+  maxDist2 = null,
+  ratio = 0.8,
+  quantile = 0.9,
+  refObs = 3,
+  onAdd = null,
+}) {
   const tau2 = maxDist2 ?? trackDistanceThreshold(tracks, descOf, { quantile })
-  const stats = { tau: tau2 == null ? null : Math.sqrt(tau2) / 512, projections: 0, windows: 0, proposals: 0,
-    added: 0, lifted: 0, pointsExtended: 0 }
+  const stats = {
+    tau: tau2 == null ? null : Math.sqrt(tau2) / 512,
+    projections: 0,
+    windows: 0,
+    proposals: 0,
+    added: 0,
+    lifted: 0,
+    pointsExtended: 0,
+  }
   if (tau2 == null) return stats
   const r2 = gatePx * gatePx
   const ratio2 = ratio * ratio
@@ -83,19 +114,47 @@ export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, 
   for (const [uuid, cam] of cameras) {
     const img = ids.img(uuid)
     const kps = keypointsAt(img)
-    if (!kps?.n) { camList.push({ img, cam, grid: null }); continue }
+    if (!kps?.n) {
+      camList.push({ img, cam, grid: null })
+      continue
+    }
     const cells = new Map()
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity
     const xy = kps.xy
     for (let i = 0; i < kps.n; i++) {
-      const x = xy[2 * i], y = xy[2 * i + 1]
-      if (x < minX) minX = x; if (y < minY) minY = y; if (x > maxX) maxX = x; if (y > maxY) maxY = y
+      const x = xy[2 * i],
+        y = xy[2 * i + 1]
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x > maxX) maxX = x
+      if (y > maxY) maxY = y
       const key = Math.floor(x / gatePx) * 1e6 + Math.floor(y / gatePx)
-      const c = cells.get(key); if (c) c.push(i); else cells.set(key, [i])
+      const c = cells.get(key)
+      if (c) c.push(i)
+      else cells.set(key, [i])
     }
     // The pose and K flat, for the projection inlined below.
-    const P = Float64Array.of(cam.R[0][0], cam.R[0][1], cam.R[0][2], cam.R[1][0], cam.R[1][1], cam.R[1][2],
-      cam.R[2][0], cam.R[2][1], cam.R[2][2], cam.t[0], cam.t[1], cam.t[2], cam.K.fx, cam.K.fy, cam.K.cx, cam.K.cy)
+    const P = Float64Array.of(
+      cam.R[0][0],
+      cam.R[0][1],
+      cam.R[0][2],
+      cam.R[1][0],
+      cam.R[1][1],
+      cam.R[1][2],
+      cam.R[2][0],
+      cam.R[2][1],
+      cam.R[2][2],
+      cam.t[0],
+      cam.t[1],
+      cam.t[2],
+      cam.K.fx,
+      cam.K.fy,
+      cam.K.cx,
+      cam.K.cy,
+    )
     camList.push({ img, cam, P, grid: { xy, cells, minX, minY, maxX, maxY } })
   }
 
@@ -103,9 +162,15 @@ export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, 
   const refs = []
   tracks.forEachPoint((p) => {
     refs.length = 0
-    tracks.someView(p, (img, k) => { const d = descOf(img, k); if (d) refs.push(d); return refs.length >= refObs })
+    tracks.someView(p, (img, k) => {
+      const d = descOf(img, k)
+      if (d) refs.push(d)
+      return refs.length >= refObs
+    })
     if (!refs.length) return
-    const px = tracks.x(p), py = tracks.y(p), pz = tracks.z(p)
+    const px = tracks.x(p),
+      py = tracks.y(p),
+      pz = tracks.z(p)
     for (const { img, P, grid: g } of camList) {
       if (tracks.viewKp(p, img) >= 0) continue
       if (!g) continue
@@ -118,8 +183,12 @@ export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, 
       const v = P[13] * ((P[3] * px + P[4] * py + P[5] * pz + P[10]) / zc) + P[15]
       if (u < g.minX || u > g.maxX || v < g.minY || v > g.maxY) continue
       const pr = { u, v }
-      const cx = Math.floor(pr.u / gatePx), cy = Math.floor(pr.v / gatePx)
-      let best = Infinity, second = Infinity, bestKp = -1, any = false
+      const cx = Math.floor(pr.u / gatePx),
+        cy = Math.floor(pr.v / gatePx)
+      let best = Infinity,
+        second = Infinity,
+        bestKp = -1,
+        any = false
       for (let gx = cx - 1; gx <= cx + 1; gx++) {
         for (let gy = cy - 1; gy <= cy + 1; gy++) {
           const cell = g.cells.get(gx * 1e6 + gy)
@@ -132,7 +201,11 @@ export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, 
             any = true
             let d = Infinity
             for (const ref of refs) d = Math.min(d, dist2(ref.arr, ref.off, cd.arr, cd.off))
-            if (d < best) { second = best; best = d; bestKp = i } else if (d < second) second = d
+            if (d < best) {
+              second = best
+              best = d
+              bestKp = i
+            } else if (d < second) second = d
           }
         }
       }
@@ -152,7 +225,10 @@ export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, 
   for (const pr of proposals) {
     if (tracks.viewKp(pr.p, pr.img) >= 0) continue
     let c = claimed.get(pr.img)
-    if (!c) { c = new Set(); claimed.set(pr.img, c) }
+    if (!c) {
+      c = new Set()
+      claimed.set(pr.img, c)
+    }
     if (c.has(pr.kp) || tracks.pointAt(pr.img, pr.kp) >= 0) continue
     c.add(pr.kp)
     const before = tracks.viewCount(pr.p)
@@ -179,14 +255,23 @@ export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, 
 export function auditGuidedAdditions(additions, forEachObservation) {
   const key = (uuid, kp) => `${uuid}|${kp}`
   const added = new Set(additions.map((a) => key(a.uuid, a.kp)))
-  const mine = [], rest = []
+  const mine = [],
+    rest = []
   forEachObservation((uuid, kp, r) => {
     if (r == null) return
     ;(added.has(key(uuid, kp)) ? mine : rest).push(r)
   })
-  const q = (arr, f) => { if (!arr.length) return null; const a = [...arr].sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(f * a.length))] }
+  const q = (arr, f) => {
+    if (!arr.length) return null
+    const a = [...arr].sort((x, y) => x - y)
+    return a[Math.min(a.length - 1, Math.floor(f * a.length))]
+  }
   return {
-    proposed: additions.length, survived: mine.length,
-    medianPx: q(mine, 0.5), p90Px: q(mine, 0.9), restMedianPx: q(rest, 0.5), restP90Px: q(rest, 0.9),
+    proposed: additions.length,
+    survived: mine.length,
+    medianPx: q(mine, 0.5),
+    p90Px: q(mine, 0.9),
+    restMedianPx: q(rest, 0.5),
+    restP90Px: q(rest, 0.9),
   }
 }

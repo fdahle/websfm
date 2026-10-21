@@ -25,8 +25,7 @@ export function unitName(unit) {
  */
 export function rasterUnits(product) {
   const crs = product?.crs
-  const horizontal = unitName(product?.unit)
-    ?? (crs && crs !== 'local' ? linearCrsUnit(crs) : 'model units')
+  const horizontal = unitName(product?.unit) ?? (crs && crs !== 'local' ? linearCrsUnit(crs) : 'model units')
   return { horizontal, vertical: unitName(product?.verticalUnit) ?? horizontal }
 }
 
@@ -49,7 +48,8 @@ export async function rasterGroundScale(desc, crs) {
   if (isGeographic(crs)) return null
   const c = pixelToWorld(desc, desc.width / 2, desc.height / 2)
   if (!c) return 1
-  const k = pointScaleFactor((xy) => transform(xy, crs, 'EPSG:4326'), c.x, c.y,
-    { metresPerUnit: metresPerCrsUnit(crs) ?? 1 })
+  const k = pointScaleFactor((xy) => transform(xy, crs, 'EPSG:4326'), c.x, c.y, {
+    metresPerUnit: metresPerCrsUnit(crs) ?? 1,
+  })
   return k > 0 ? k : 1
 }

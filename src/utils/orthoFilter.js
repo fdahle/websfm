@@ -26,7 +26,10 @@ function filterRoot() {
 export function orthoAdjustFilter(style) {
   const steps = orthoFilterSteps(style)
   if (!steps.length || typeof document === 'undefined') return null
-  const key = steps.map((s) => Object.values(s).join('_')).join('-').replace(/[^\w-]/g, (c) => (c === '.' ? 'p' : 'm'))
+  const key = steps
+    .map((s) => Object.values(s).join('_'))
+    .join('-')
+    .replace(/[^\w-]/g, (c) => (c === '.' ? 'p' : 'm'))
   const id = `ortho-adjust-${key}`
   if (!document.getElementById(id)) {
     const filter = document.createElementNS(SVG_NS, 'filter')

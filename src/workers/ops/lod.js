@@ -16,8 +16,8 @@ import { streamedEditSource } from '../../core/lod/transform.js'
 //   - the data file and hierarchy: in the directory the caller passes (the project's
 //     lod/ folder, OPFS or on disk), written sequentially through one writable.
 
-const OPEN_HANDLES = 48           // chunk files open at once (each holds a descriptor)
-const WRITE_BUFFER = 16 << 20     // data file bytes gathered per write
+const OPEN_HANDLES = 48 // chunk files open at once (each holds a descriptor)
+const WRITE_BUFFER = 16 << 20 // data file bytes gathered per write
 
 async function tmpStore(dirName) {
   const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('websfm', { create: true })
@@ -26,10 +26,15 @@ async function tmpStore(dirName) {
   const open = new Map() // name → handle, in least-recently-used order
   async function handle(name) {
     let h = open.get(name)
-    if (h) { open.delete(name); open.set(name, h); return h }
+    if (h) {
+      open.delete(name)
+      open.set(name, h)
+      return h
+    }
     if (open.size >= OPEN_HANDLES) {
       const [oldest, oh] = open.entries().next().value
-      oh.close(); open.delete(oldest)
+      oh.close()
+      open.delete(oldest)
     }
     const fh = await dir.getFileHandle(name, { create: true })
     h = await fh.createSyncAccessHandle()
@@ -37,15 +42,21 @@ async function tmpStore(dirName) {
     return h
   }
   return {
-    async append(name, u8) { const h = await handle(name); h.write(u8, { at: h.getSize() }) },
-    async size(name) { return (await handle(name)).getSize() },
+    async append(name, u8) {
+      const h = await handle(name)
+      h.write(u8, { at: h.getSize() })
+    },
+    async size(name) {
+      return (await handle(name)).getSize()
+    },
     async read(name, offset, length) {
       const out = new Uint8Array(length)
       ;(await handle(name)).read(out, { at: offset })
       return out
     },
     async remove(name) {
-      open.get(name)?.close(); open.delete(name)
+      open.get(name)?.close()
+      open.delete(name)
       await dir.removeEntry(name).catch(() => {})
     },
     async dispose() {
@@ -58,24 +69,37 @@ async function tmpStore(dirName) {
 
 async function dataWriter(dir, name) {
   const writable = await (await dir.getFileHandle(name, { create: true })).createWritable()
-  let size = 0, pending = [], pendingBytes = 0
+  let size = 0,
+    pending = [],
+    pendingBytes = 0
   async function flush() {
     if (!pendingBytes) return
     const buf = new Uint8Array(pendingBytes)
     let o = 0
-    for (const p of pending) { buf.set(p, o); o += p.length }
-    pending = []; pendingBytes = 0
+    for (const p of pending) {
+      buf.set(p, o)
+      o += p.length
+    }
+    pending = []
+    pendingBytes = 0
     await writable.write(buf)
   }
   return {
     async write(u8) {
       const at = size
-      pending.push(u8); pendingBytes += u8.length; size += u8.length
+      pending.push(u8)
+      pendingBytes += u8.length
+      size += u8.length
       if (pendingBytes >= WRITE_BUFFER) await flush()
       return at
     },
-    async close() { await flush(); await writable.close() },
-    async abort() { await writable.abort?.().catch(() => {}) },
+    async close() {
+      await flush()
+      await writable.close()
+    },
+    async abort() {
+      await writable.abort?.().catch(() => {})
+    },
   }
 }
 
@@ -85,22 +109,28 @@ function arraySource(cloud, batch = 1 << 20) {
   const attrs = cloud.attributes ?? {}
   let bounds = cloud.bounds
   if (!bounds) {
-    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]
-    for (let i = 0; i < count; i++) for (let k = 0; k < 3; k++) {
-      const v = pos[3 * i + k]
-      if (v < min[k]) min[k] = v
-      if (v > max[k]) max[k] = v
-    }
+    const min = [Infinity, Infinity, Infinity],
+      max = [-Infinity, -Infinity, -Infinity]
+    for (let i = 0; i < count; i++)
+      for (let k = 0; k < 3; k++) {
+        const v = pos[3 * i + k]
+        if (v < min[k]) min[k] = v
+        if (v > max[k]) max[k] = v
+      }
     bounds = { min, max }
   }
   return {
-    count, bounds, colour: !!col,
+    count,
+    bounds,
+    colour: !!col,
     attributes: Object.entries(attrs).map(([name, arr]) => ({ name, type: typeName(arr) })),
     async *batches() {
       for (let s = 0; s < count; s += batch) {
         const e = Math.min(count, s + batch)
         yield {
-          count: e - s, pos: pos.subarray(3 * s, 3 * e), col: col?.subarray(3 * s, 3 * e),
+          count: e - s,
+          pos: pos.subarray(3 * s, 3 * e),
+          col: col?.subarray(3 * s, 3 * e),
           attributes: Object.fromEntries(Object.entries(attrs).map(([k, a]) => [k, a.subarray(s, e)])),
         }
       }
@@ -131,7 +161,10 @@ export function makeLodOps({ lazCodec = null } = {}) {
     const log = (m, l, c = 'Import') => emit('log', [m, l, c])
     await lazCodec.ensure()
     emit('progress', [0, 1, 'Reading the COPC hierarchy', 0])
-    const meta = await readCopcMeta(blobSource(file, file.name), { createChunkDecoder: lazCodec.createChunkDecoder, onLog: log })
+    const meta = await readCopcMeta(blobSource(file, file.name), {
+      createChunkDecoder: lazCodec.createChunkDecoder,
+      onLog: log,
+    })
     const dataFile = `${name}.copc.laz`
     const writable = await (await dir.getFileHandle(dataFile, { create: true })).createWritable()
     try {
@@ -147,11 +180,18 @@ export function makeLodOps({ lazCodec = null } = {}) {
       await dir.removeEntry(dataFile).catch(() => {})
       throw err
     }
-    log(`COPC: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, ${meta.levels} levels, `
-      + `point format ${meta.file.format}${meta.layout.colour ? ', colour' : ''}, read in place `
-      + `(${(file.size / 1024 ** 2).toFixed(1)} MB copied) in ${((performance.now() - t0) / 1000).toFixed(1)} s`, 'info')
-    log(meta.file.crs ? `COPC: CRS ${meta.file.crs}${meta.file.crsName ? ` (${meta.file.crsName})` : ''} from its ${meta.file.projection.some((v) => v.recordId === 2112) ? 'WKT' : 'GeoKey'} record`
-      : 'COPC: no CRS record (local coordinates)', 'info')
+    log(
+      `COPC: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, ${meta.levels} levels, ` +
+        `point format ${meta.file.format}${meta.layout.colour ? ', colour' : ''}, read in place ` +
+        `(${(file.size / 1024 ** 2).toFixed(1)} MB copied) in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
+      'info',
+    )
+    log(
+      meta.file.crs
+        ? `COPC: CRS ${meta.file.crs}${meta.file.crsName ? ` (${meta.file.crsName})` : ''} from its ${meta.file.projection.some((v) => v.recordId === 2112) ? 'WKT' : 'GeoKey'} record`
+        : 'COPC: no CRS record (local coordinates)',
+      'info',
+    )
     return { result: { ...meta, name, dataFile, hierarchyFile: null } }
   }
 
@@ -163,7 +203,9 @@ export function makeLodOps({ lazCodec = null } = {}) {
     const { cloud, file, dir, name } = input
     const t0 = performance.now()
     const log = (m, l, c) => emit('log', [m, l, c])
-    let source, layout = input.layout, fileInfo = null
+    let source,
+      layout = input.layout,
+      fileInfo = null
     if (file) {
       const src = blobSource(file, file.name)
       await lazCodec?.ensure() // a LAZ is told by its header bit or its VLR: load it either way
@@ -171,13 +213,19 @@ export function makeLodOps({ lazCodec = null } = {}) {
       layout = source.layout
       const h = source.header
       // The projection VLRs (GeoKeys, WKT) go back into a LAS written from the octree.
-      const projection = h.vlrs.filter((v) => v.userId === 'LASF_Projection').map((v) => ({
-        userId: v.userId, recordId: v.recordId, description: '', data: btoa(String.fromCharCode(...v.data)),
-      }))
+      const projection = h.vlrs
+        .filter((v) => v.userId === 'LASF_Projection')
+        .map((v) => ({
+          userId: v.userId,
+          recordId: v.recordId,
+          description: '',
+          data: btoa(String.fromCharCode(...v.data)),
+        }))
       fileInfo = { version: `${h.versionMajor}.${h.versionMinor}`, format: h.format, laz: h.isLaz, projection }
     } else source = arraySource(cloud)
     const tmp = await tmpStore(`lod-${name}`)
-    const dataFile = `${name}.lod`, hierarchyFile = `${name}.hier`
+    const dataFile = `${name}.lod`,
+      hierarchyFile = `${name}.hier`
     const out = await dataWriter(dir, dataFile)
     try {
       const res = await runBuild(source, tmp, out, {
@@ -189,15 +237,31 @@ export function makeLodOps({ lazCodec = null } = {}) {
       await hw.write(res.hierarchy)
       await hw.close()
       const { hierarchy, ...meta } = res
-      emit('log', [`Level of detail: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, `
-        + `${meta.levels} levels, ${((performance.now() - t0) / 1000).toFixed(1)} s`, 'info', 'Products'])
+      emit('log', [
+        `Level of detail: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, ` +
+          `${meta.levels} levels, ${((performance.now() - t0) / 1000).toFixed(1)} s`,
+        'info',
+        'Products',
+      ])
       if (meta.outside) {
         // The octree's cube came from the file header's extent, before any point was read.
-        emit('log', [`Level of detail: ${meta.outside.toLocaleString()} points lie outside the extent ${file ? 'the file header gives' : 'measured'} `
-          + '— they are kept, but the view and box reads (crop, DEM) can miss them; fix the header (e.g. pdal translate / lasinfo -repair) and import again',
-        'warn', file ? 'Import' : 'Products'])
+        emit('log', [
+          `Level of detail: ${meta.outside.toLocaleString()} points lie outside the extent ${file ? 'the file header gives' : 'measured'} ` +
+            '— they are kept, but the view and box reads (crop, DEM) can miss them; fix the header (e.g. pdal translate / lasinfo -repair) and import again',
+          'warn',
+          file ? 'Import' : 'Products',
+        ])
       }
-      return { result: { ...meta, name, dataFile, hierarchyFile, hierarchyBytes: hierarchy.length, ...(fileInfo ? { file: fileInfo } : {}) } }
+      return {
+        result: {
+          ...meta,
+          name,
+          dataFile,
+          hierarchyFile,
+          hierarchyBytes: hierarchy.length,
+          ...(fileInfo ? { file: fileInfo } : {}),
+        },
+      }
     } catch (err) {
       await out.abort()
       await dir.removeEntry(dataFile).catch(() => {})
@@ -211,15 +275,30 @@ export function makeLodOps({ lazCodec = null } = {}) {
   // input { lod, data: File, hierarchy: File, box?, maxPoints?, minSpacing?, classes?: [n], fields? }
   // → { cloud: { count, pos, col?, attributes }, plan: { level, deepest, spacing, complete } }
   async function extractLod([input], { emit }) {
-    const { lod, data, hierarchy, box = null, maxPoints = Infinity, minSpacing = 0, classes = null, fields = 'all' } = input
+    const {
+      lod,
+      data,
+      hierarchy,
+      box = null,
+      maxPoints = Infinity,
+      minSpacing = 0,
+      classes = null,
+      fields = 'all',
+    } = input
     const reader = await openSource(lod, { data, hierarchy })
     const plan = planExtract(reader.nodes, lod, { box, maxPoints, minSpacing })
     const cloud = await extractPoints(reader, plan, lod, {
-      box, classes: classes ? new Set(classes) : null, fields,
+      box,
+      classes: classes ? new Set(classes) : null,
+      fields,
       onProgress: (done, total) => emit('progress', [done, total, 'Reading points', done / Math.max(1, total)]),
     })
     reader.close()
-    const transfer = [cloud.pos.buffer, ...(cloud.col ? [cloud.col.buffer] : []), ...Object.values(cloud.attributes).map((a) => a.buffer)]
+    const transfer = [
+      cloud.pos.buffer,
+      ...(cloud.col ? [cloud.col.buffer] : []),
+      ...Object.values(cloud.attributes).map((a) => a.buffer),
+    ]
     const { nodes, ...summary } = plan
     return { result: { cloud, plan: { ...summary, nodes: nodes.length } }, transfer }
   }
@@ -233,10 +312,17 @@ export function makeLodOps({ lazCodec = null } = {}) {
     const reader = await openSource(lod, { data, hierarchy })
     const onProgress = (done, total) => emit('progress', [done, total, 'Writing points', done / Math.max(1, total)])
     // Parts gathered into a Blob in batches (the browser keeps large Blobs on disk).
-    let blob = null, batch = [], size = 0
+    let blob = null,
+      batch = [],
+      size = 0
     const add = (p) => {
-      batch.push(p); size += typeof p === 'string' ? p.length : p.byteLength
-      if (size >= 64 << 20) { blob = new Blob(blob ? [blob, ...batch] : batch); batch = []; size = 0 }
+      batch.push(p)
+      size += typeof p === 'string' ? p.length : p.byteLength
+      if (size >= 64 << 20) {
+        blob = new Blob(blob ? [blob, ...batch] : batch)
+        batch = []
+        size = 0
+      }
     }
     let type = 'application/octet-stream'
     if (format === 'las') {
@@ -250,20 +336,30 @@ export function makeLodOps({ lazCodec = null } = {}) {
       try {
         const laz = lodToLas(reader, lod, { onProgress, compressor })
         if (laz.dropped.length) {
-          emit('log', [`LAZ export: ${laz.dropped.join(', ')} not written — no LAS extra-bytes type holds it`, 'warn', 'Export'])
+          emit('log', [
+            `LAZ export: ${laz.dropped.join(', ')} not written — no LAS extra-bytes type holds it`,
+            'warn',
+            'Export',
+          ])
         }
         for await (const p of laz.parts) add(p)
         const { header, first, tail } = laz.lazEnds()
         blob = new Blob([header, first, ...(blob ? [blob] : []), ...batch, tail], { type })
-      } finally { compressor.free?.() }
+      } finally {
+        compressor.free?.()
+      }
     } else {
       if (format === 'xyz' || format === 'ply-ascii') type = 'text/plain;charset=utf-8'
       for await (const p of lodToText(reader, lod, { format, color, onProgress })) add(p)
       blob = new Blob([...(blob ? [blob] : []), ...batch], { type })
     }
     reader.close()
-    emit('log', [`${format.toUpperCase()} written: ${lod.points.toLocaleString()} points from the octree, `
-      + `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'info', 'Export'])
+    emit('log', [
+      `${format.toUpperCase()} written: ${lod.points.toLocaleString()} points from the octree, ` +
+        `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+      'info',
+      'Export',
+    ])
     return { result: { blob, count: lod.points } }
   }
 
@@ -277,10 +373,12 @@ export function makeLodOps({ lazCodec = null } = {}) {
     const reader = await openSource(lod, { data, hierarchy })
     const log = (m, l = 'info') => emit('log', [m, l, 'Products'])
     const source = streamedEditSource(reader, lod, mode, settings, {
-      log, progress: (done, total, label) => emit('progress', [done, total, label, done / Math.max(1, total)]),
+      log,
+      progress: (done, total, label) => emit('progress', [done, total, label, done / Math.max(1, total)]),
     })
     const tmp = await tmpStore(`lod-${name}`)
-    const dataFile = `${name}.lod`, hierarchyFile = `${name}.hier`
+    const dataFile = `${name}.lod`,
+      hierarchyFile = `${name}.hier`
     const out = await dataWriter(dir, dataFile)
     try {
       const res = await runBuild(source, tmp, out, { layout: { offset: lod.layout.offset, scale: lod.layout.scale } })
@@ -289,8 +387,19 @@ export function makeLodOps({ lazCodec = null } = {}) {
       await hw.write(res.hierarchy)
       await hw.close()
       const { hierarchy: h, ...meta } = res
-      log(`Edit: ${meta.points.toLocaleString()} of ${lod.points.toLocaleString()} points into a new octree in ${((performance.now() - t0) / 1000).toFixed(1)} s`)
-      return { result: { ...meta, name, dataFile, hierarchyFile, hierarchyBytes: h.length, ...(lod.file ? { file: lod.file } : {}) } }
+      log(
+        `Edit: ${meta.points.toLocaleString()} of ${lod.points.toLocaleString()} points into a new octree in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
+      )
+      return {
+        result: {
+          ...meta,
+          name,
+          dataFile,
+          hierarchyFile,
+          hierarchyBytes: h.length,
+          ...(lod.file ? { file: lod.file } : {}),
+        },
+      }
     } catch (err) {
       await out.abort()
       await dir.removeEntry(dataFile).catch(() => {})

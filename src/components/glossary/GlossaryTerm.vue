@@ -19,7 +19,9 @@ const anchorEl = ref(null)
 function onMouseEnter() {
   if (active.value) openHelp(0, glossarySpec(props.id, anchorEl.value))
 }
-function onMouseLeave() { leaveHelp(anchorEl.value) }
+function onMouseLeave() {
+  leaveHelp(anchorEl.value)
+}
 
 onBeforeUnmount(() => dropHelp(anchorEl.value))
 </script>

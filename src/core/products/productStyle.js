@@ -34,7 +34,8 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 // one flat colour.
 export function resolveDemStyle(style) {
   const s = style && typeof style === 'object' ? style : {}
-  const min = num(s.min), max = num(s.max)
+  const min = num(s.min),
+    max = num(s.max)
   const manual = s.range === 'manual' && Number.isFinite(min) && Number.isFinite(max) && max > min
   return {
     ramp: RAMPS[s.ramp] ? s.ramp : DEFAULT_DEM_STYLE.ramp,
@@ -60,7 +61,9 @@ export function demRenderOptions(style, dem) {
 
 export function resolveOrthoStyle(style) {
   const s = style && typeof style === 'object' ? style : {}
-  const brightness = num(s.brightness), contrast = num(s.contrast), gamma = num(s.gamma)
+  const brightness = num(s.brightness),
+    contrast = num(s.contrast),
+    gamma = num(s.gamma)
   return {
     brightness: Number.isFinite(brightness) ? clamp(brightness, -1, 1) : 0,
     contrast: Number.isFinite(contrast) ? clamp(contrast, -1, 1) : 0,
@@ -77,7 +80,8 @@ export function isDefaultOrthoStyle(style) {
 // shader applies contrast, then gamma, then brightness). Only the non-neutral ones,
 // so an unstyled ortho compiles the shader it always did.
 export function orthoGpuAdjustments(style) {
-  const s = resolveOrthoStyle(style), out = {}
+  const s = resolveOrthoStyle(style),
+    out = {}
   if (s.contrast) out.contrast = s.contrast
   if (s.gamma !== 1) out.gamma = s.gamma
   if (s.brightness) out.brightness = s.brightness
@@ -99,7 +103,8 @@ export function adjustChannel(v, style) {
 // (slope, intercept) per contrast and brightness step, a gamma transfer (exponent
 // 1/gamma) between them. Each primitive clamps to 0…1, as the shader does.
 export function orthoFilterSteps(style) {
-  const s = resolveOrthoStyle(style), steps = []
+  const s = resolveOrthoStyle(style),
+    steps = []
   if (s.contrast) steps.push({ type: 'linear', slope: s.contrast + 1, intercept: -s.contrast / 2 })
   if (s.gamma !== 1) steps.push({ type: 'gamma', amplitude: 1, exponent: 1 / s.gamma, offset: 0 })
   if (s.brightness) steps.push({ type: 'linear', slope: 1, intercept: s.brightness })
@@ -112,13 +117,14 @@ export function orthoFilterSteps(style) {
 export function demThumbnailGrid(dem, maxDim = 320) {
   if (!dem?.data || !dem.width || !dem.height) return null
   const step = Math.max(1, Math.max(dem.width, dem.height) / maxDim)
-  const width = Math.max(1, Math.round(dem.width / step)), height = Math.max(1, Math.round(dem.height / step))
+  const width = Math.max(1, Math.round(dem.width / step)),
+    height = Math.max(1, Math.round(dem.height / step))
   const data = new Float32Array(width * height)
   const mask = dem.mask ? new Uint8Array(width * height) : null
   for (let r = 0; r < height; r++) {
-    const sr = Math.min(dem.height - 1, Math.floor((r + 0.5) * dem.height / height))
+    const sr = Math.min(dem.height - 1, Math.floor(((r + 0.5) * dem.height) / height))
     for (let c = 0; c < width; c++) {
-      const sc = Math.min(dem.width - 1, Math.floor((c + 0.5) * dem.width / width))
+      const sc = Math.min(dem.width - 1, Math.floor(((c + 0.5) * dem.width) / width))
       const i = sr * dem.width + sc
       data[r * width + c] = dem.data[i]
       if (mask) mask[r * width + c] = dem.mask[i]

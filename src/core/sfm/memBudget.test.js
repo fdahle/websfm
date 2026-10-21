@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
-  projectSparsePeakBytes, projectSparsePeakBreakdownBytes, sparseMemoryDecision, SPARSE_MEMORY_MODEL, planSparseRun,
-  projectSolverWasmBytes, WASM_SOLVER_LIMIT_BYTES,
+  projectSparsePeakBytes,
+  projectSparsePeakBreakdownBytes,
+  sparseMemoryDecision,
+  SPARSE_MEMORY_MODEL,
+  planSparseRun,
+  projectSolverWasmBytes,
+  WASM_SOLVER_LIMIT_BYTES,
 } from './memBudget.js'
 
 const GiB = 1024 ** 3
@@ -16,24 +21,43 @@ describe('sparse reconstruction memory guard', () => {
 
   it('puts the descriptors in buffers and the guided grids in the heap, only when guided', () => {
     const base = projectSparsePeakBreakdownBytes({ keypointCount: 1_000_000, matchCount: 2_000_000 })
-    const guided = projectSparsePeakBreakdownBytes({ keypointCount: 1_000_000, matchCount: 2_000_000,
-      descriptorBytesPerKeypoint: 128 })
+    const guided = projectSparsePeakBreakdownBytes({
+      keypointCount: 1_000_000,
+      matchCount: 2_000_000,
+      descriptorBytesPerKeypoint: 128,
+    })
     const m = SPARSE_MEMORY_MODEL.margin
     // Held once in each isolate: the worker's working copy shares them (cloneSfmInput).
     expect(guided.workerBufferBytes - base.workerBufferBytes).toBeCloseTo(128e6 * m, -3)
     expect(guided.rendererBufferBytes - base.rendererBufferBytes).toBeCloseTo(128e6 * m, -3)
     expect(guided.workerHeapBytes - base.workerHeapBytes).toBe(guided.guidedHeapBytes)
     expect(guided.guidedHeapBytes).toBeGreaterThan(0)
-    expect(projectSparsePeakBreakdownBytes({ keypointCount: 1e6, matchCount: 2e6, descriptorBytesPerKeypoint: 128, guided: false }))
-      .toEqual(base)
+    expect(
+      projectSparsePeakBreakdownBytes({
+        keypointCount: 1e6,
+        matchCount: 2e6,
+        descriptorBytesPerKeypoint: 128,
+        guided: false,
+      }),
+    ).toEqual(base)
   })
 
   it('keeps the Monster-sized worker heap far below the 4 GB ceiling', () => {
     // 4.5 M keypoints, 7.7 M matches: the run that died at the old 3.42 GB projection.
-    const p = projectSparsePeakBreakdownBytes({ keypointCount: 4_500_000, matchCount: 7_700_000, descriptorBytesPerKeypoint: 128 })
+    const p = projectSparsePeakBreakdownBytes({
+      keypointCount: 4_500_000,
+      matchCount: 7_700_000,
+      descriptorBytesPerKeypoint: 128,
+    })
     expect(p.workerHeapBytes).toBeLessThan(1 * GiB)
-    expect(sparseMemoryDecision({ estimateBytes: p.workerHeapBytes, bufferBytes: p.workerBufferBytes,
-      usedHeapBytes: 0, heapLimitBytes: 4 * GiB }).safe).toBe(true)
+    expect(
+      sparseMemoryDecision({
+        estimateBytes: p.workerHeapBytes,
+        bufferBytes: p.workerBufferBytes,
+        usedHeapBytes: 0,
+        heapLimitBytes: 4 * GiB,
+      }).safe,
+    ).toBe(true)
   })
 
   it('budgets renderer and worker isolates independently', () => {
@@ -41,17 +65,27 @@ describe('sparse reconstruction memory guard', () => {
     expect(peak.rendererBytes).toBeLessThan(peak.totalBytes)
     expect(peak.workerBytes).toBeLessThan(peak.totalBytes)
     // Each heap is judged against its own isolate's ceiling, never the combined total.
-    expect(sparseMemoryDecision({ estimateBytes: 3.3 * GiB, usedHeapBytes: 0,
-      heapLimitBytes: (3.52 / 0.86) * GiB }).safe).toBe(true)
-    expect(sparseMemoryDecision({ estimateBytes: peak.rendererHeapBytes, usedHeapBytes: 1.4 * GiB,
-      heapLimitBytes: (3.52 / 0.86) * GiB }).safe).toBe(true)
+    expect(
+      sparseMemoryDecision({ estimateBytes: 3.3 * GiB, usedHeapBytes: 0, heapLimitBytes: (3.52 / 0.86) * GiB }).safe,
+    ).toBe(true)
+    expect(
+      sparseMemoryDecision({
+        estimateBytes: peak.rendererHeapBytes,
+        usedHeapBytes: 1.4 * GiB,
+        heapLimitBytes: (3.52 / 0.86) * GiB,
+      }).safe,
+    ).toBe(true)
   })
 
   it('judges buffers against the device budget, not the heap ceiling', () => {
     const args = { estimateBytes: 100, usedHeapBytes: 0, heapLimitBytes: 1_000, fallbackBudgetBytes: 10_000 }
     expect(sparseMemoryDecision({ ...args, bufferBytes: 7_000 })).toMatchObject({ safe: true, heapSafe: true })
     // Far more buffer than heap ceiling is fine — up to 75 % of the device budget.
-    expect(sparseMemoryDecision({ ...args, bufferBytes: 8_000 })).toMatchObject({ safe: false, heapSafe: true, buffersSafe: false })
+    expect(sparseMemoryDecision({ ...args, bufferBytes: 8_000 })).toMatchObject({
+      safe: false,
+      heapSafe: true,
+      buffersSafe: false,
+    })
   })
 
   it('subtracts descriptors released just before the preflight', () => {

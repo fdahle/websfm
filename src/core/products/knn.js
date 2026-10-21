@@ -28,7 +28,7 @@ export function buildKnnIndex(cloud) {
   for (let i = 0; i < count; i++) perm[i] = i
   // Node count of a midpoint-split tree with leaves ≤ LEAF: < 2·count/LEAF·2.
   let depth = 0
-  while ((count >> depth) > LEAF) depth++
+  while (count >> depth > LEAF) depth++
   const nodes = (1 << (depth + 1)) - 1
   const axis = new Uint8Array(Math.max(1, nodes)).fill(255) // 255 = leaf
   const split = new Float64Array(Math.max(1, nodes))
@@ -37,18 +37,32 @@ export function buildKnnIndex(cloud) {
   // (a cycled axis degenerates on the flat clouds aerial surveys produce).
   const stack = [0, 0, count]
   while (stack.length) {
-    const hi = stack.pop(), lo = stack.pop(), node = stack.pop()
+    const hi = stack.pop(),
+      lo = stack.pop(),
+      node = stack.pop()
     if (hi - lo <= LEAF || node >= nodes) continue
-    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+    let minX = Infinity,
+      minY = Infinity,
+      minZ = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity,
+      maxZ = -Infinity
     for (let s = lo; s < hi; s++) {
       const p = perm[s] * 3
-      const x = pos[p], y = pos[p + 1], z = pos[p + 2]
-      if (x < minX) minX = x; if (x > maxX) maxX = x
-      if (y < minY) minY = y; if (y > maxY) maxY = y
-      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+      const x = pos[p],
+        y = pos[p + 1],
+        z = pos[p + 2]
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
+      if (z < minZ) minZ = z
+      if (z > maxZ) maxZ = z
     }
-    const ex = maxX - minX, ey = maxY - minY, ez = maxZ - minZ
-    const a = ex >= ey && ex >= ez ? 0 : (ey >= ez ? 1 : 2)
+    const ex = maxX - minX,
+      ey = maxY - minY,
+      ez = maxZ - minZ
+    const a = ex >= ey && ex >= ez ? 0 : ey >= ez ? 1 : 2
     const mid = (lo + hi) >> 1
     select(perm, pos, a, lo, hi - 1, mid)
     axis[node] = a
@@ -61,7 +75,9 @@ export function buildKnnIndex(cloud) {
   const tpos = new Float64Array(count * 3)
   for (let s = 0; s < count; s++) {
     const p = perm[s] * 3
-    tpos[s * 3] = pos[p]; tpos[s * 3 + 1] = pos[p + 1]; tpos[s * 3 + 2] = pos[p + 2]
+    tpos[s * 3] = pos[p]
+    tpos[s * 3 + 1] = pos[p + 1]
+    tpos[s * 3 + 2] = pos[p + 2]
   }
   return { pos, tpos, count, perm, axis, split }
 }
@@ -71,11 +87,18 @@ export function buildKnnIndex(cloud) {
 function select(perm, pos, a, lo, hi, k) {
   while (hi > lo) {
     const pivot = pos[perm[(lo + hi) >> 1] * 3 + a]
-    let i = lo, j = hi
+    let i = lo,
+      j = hi
     while (i <= j) {
       while (pos[perm[i] * 3 + a] < pivot) i++
       while (pos[perm[j] * 3 + a] > pivot) j--
-      if (i <= j) { const t = perm[i]; perm[i] = perm[j]; perm[j] = t; i++; j-- }
+      if (i <= j) {
+        const t = perm[i]
+        perm[i] = perm[j]
+        perm[j] = t
+        i++
+        j--
+      }
     }
     if (k <= j) hi = j
     else if (k >= i) lo = i
@@ -102,36 +125,61 @@ export function knnQuery(index, x, y, z, k, outIdx, outD2, exclude = -1, maxD2 =
   const st = stackBuf
   const nodes = axis.length
   let sp = 0
-  st[sp++] = 0; st[sp++] = 0; st[sp++] = count; st[sp++] = 0
+  st[sp++] = 0
+  st[sp++] = 0
+  st[sp++] = count
+  st[sp++] = 0
   while (sp) {
-    const bound = st[--sp], hi = st[--sp], lo = st[--sp], node = st[--sp]
+    const bound = st[--sp],
+      hi = st[--sp],
+      lo = st[--sp],
+      node = st[--sp]
     if (bound >= worst) continue
     const a = node < nodes ? axis[node] : 255
     if (a === 255) {
       for (let s = lo; s < hi; s++) {
         const j = perm[s]
         if (j === exclude) continue
-        const dx = tpos[s * 3] - x, dy = tpos[s * 3 + 1] - y, dz = tpos[s * 3 + 2] - z
+        const dx = tpos[s * 3] - x,
+          dy = tpos[s * 3 + 1] - y,
+          dz = tpos[s * 3 + 2] - z
         const d2 = dx * dx + dy * dy + dz * dz
         if (d2 >= worst) continue
         // Insertion into a sorted bounded list — k is small, so this beats a heap.
         let p = found < k ? found++ : k - 1
-        while (p > 0 && outD2[p - 1] > d2) { outD2[p] = outD2[p - 1]; outIdx[p] = outIdx[p - 1]; p-- }
-        outD2[p] = d2; outIdx[p] = j
+        while (p > 0 && outD2[p - 1] > d2) {
+          outD2[p] = outD2[p - 1]
+          outIdx[p] = outIdx[p - 1]
+          p--
+        }
+        outD2[p] = d2
+        outIdx[p] = j
         if (found === k && outD2[k - 1] < worst) worst = outD2[k - 1]
       }
       continue
     }
     const mid = (lo + hi) >> 1
-    const d = (a === 0 ? x : (a === 1 ? y : z)) - split[node]
+    const d = (a === 0 ? x : a === 1 ? y : z) - split[node]
     const far = d * d > bound ? d * d : bound
     // Far child first onto the stack so the near child is popped (searched) first.
     if (d < 0) {
-      st[sp++] = 2 * node + 2; st[sp++] = mid; st[sp++] = hi; st[sp++] = far
-      st[sp++] = 2 * node + 1; st[sp++] = lo; st[sp++] = mid; st[sp++] = bound
+      st[sp++] = 2 * node + 2
+      st[sp++] = mid
+      st[sp++] = hi
+      st[sp++] = far
+      st[sp++] = 2 * node + 1
+      st[sp++] = lo
+      st[sp++] = mid
+      st[sp++] = bound
     } else {
-      st[sp++] = 2 * node + 1; st[sp++] = lo; st[sp++] = mid; st[sp++] = far
-      st[sp++] = 2 * node + 2; st[sp++] = mid; st[sp++] = hi; st[sp++] = bound
+      st[sp++] = 2 * node + 1
+      st[sp++] = lo
+      st[sp++] = mid
+      st[sp++] = far
+      st[sp++] = 2 * node + 2
+      st[sp++] = mid
+      st[sp++] = hi
+      st[sp++] = bound
     }
   }
   return found
@@ -149,7 +197,8 @@ export function nearestNeighbors(index, query, { maxDist = Infinity, onProgress 
   const dist = new Float64Array(n).fill(NaN)
   if (!index.count) return { index: outIdx, dist }
   const maxD2 = Number.isFinite(maxDist) ? maxDist * maxDist : Infinity
-  const qi = new Int32Array(1), qd = new Float64Array(1)
+  const qi = new Int32Array(1),
+    qd = new Float64Array(1)
   const { pos } = query
   const tick = Math.max(1, Math.floor(n / 50))
   for (let i = 0; i < n; i++) {

@@ -33,14 +33,36 @@ describe('parseGeoJson', () => {
   })
 
   it('classifies polygons', () => {
-    const fc = { type: 'FeatureCollection', features: [polyFeature([[[0, 0], [1, 0], [1, 1], [0, 0]]])] }
+    const fc = {
+      type: 'FeatureCollection',
+      features: [
+        polyFeature([
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 0],
+          ],
+        ]),
+      ],
+    }
     expect(parseGeoJson(JSON.stringify(fc)).kind).toBe('polygons')
   })
 
   it('classifies a mixed collection', () => {
     const fc = {
       type: 'FeatureCollection',
-      features: [pointFeature([1, 2]), polyFeature([[[0, 0], [1, 0], [1, 1], [0, 0]]])],
+      features: [
+        pointFeature([1, 2]),
+        polyFeature([
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 0],
+          ],
+        ]),
+      ],
     }
     expect(parseGeoJson(JSON.stringify(fc)).kind).toBe('mixed')
   })
@@ -112,24 +134,57 @@ describe('guessNameKey', () => {
 describe('geoJsonToGcps', () => {
   it('converts Point features into GCPs with numeric coordinates', () => {
     const gcps = geoJsonToGcps([pointFeature([10, 20, 30], { name: 'P1' })], 'name')
-    expect(gcps).toEqual([{ name: 'P1', x: 10, y: 20, z: 30,
-      accuracyX: null, accuracyY: null, accuracyZ: null,
-      correlationXY: null, correlationXZ: null, correlationYZ: null, observations: [] }])
+    expect(gcps).toEqual([
+      {
+        name: 'P1',
+        x: 10,
+        y: 20,
+        z: 30,
+        accuracyX: null,
+        accuracyY: null,
+        accuracyZ: null,
+        correlationXY: null,
+        correlationXZ: null,
+        correlationYZ: null,
+        observations: [],
+      },
+    ])
   })
 
   it('expands a MultiPoint into one GCP per coordinate', () => {
     const f = {
       type: 'Feature',
-      geometry: { type: 'MultiPoint', coordinates: [[1, 2], [3, 4]] },
+      geometry: {
+        type: 'MultiPoint',
+        coordinates: [
+          [1, 2],
+          [3, 4],
+        ],
+      },
       properties: {},
     }
     const gcps = geoJsonToGcps([f], null)
-    expect(gcps.map((g) => [g.x, g.y])).toEqual([[1, 2], [3, 4]])
+    expect(gcps.map((g) => [g.x, g.y])).toEqual([
+      [1, 2],
+      [3, 4],
+    ])
     expect(gcps[0].name).toBe('GCP 1')
   })
 
   it('skips non-Point geometries', () => {
-    const gcps = geoJsonToGcps([polyFeature([[[0, 0], [1, 0], [1, 1], [0, 0]]])], null)
+    const gcps = geoJsonToGcps(
+      [
+        polyFeature([
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 0],
+          ],
+        ]),
+      ],
+      null,
+    )
     expect(gcps).toHaveLength(0)
   })
 
@@ -142,12 +197,29 @@ describe('geoJsonToGcps', () => {
 describe('geoJsonToFootprints', () => {
   it('extracts a polygon ring', () => {
     const fps = geoJsonToFootprints(
-      [polyFeature([[[0, 0], [1, 0], [1, 1], [0, 0]]], { name: 'F1' })],
+      [
+        polyFeature(
+          [
+            [
+              [0, 0],
+              [1, 0],
+              [1, 1],
+              [0, 0],
+            ],
+          ],
+          { name: 'F1' },
+        ),
+      ],
       'name',
     )
     expect(fps).toHaveLength(1)
     expect(fps[0]).toMatchObject({ name: 'F1', imageName: 'F1' })
-    expect(fps[0].rings[0]).toEqual([[0, 0], [1, 0], [1, 1], [0, 0]])
+    expect(fps[0].rings[0]).toEqual([
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 0],
+    ])
   })
 
   it('expands a MultiPolygon into one footprint per part', () => {
@@ -156,8 +228,22 @@ describe('geoJsonToFootprints', () => {
       geometry: {
         type: 'MultiPolygon',
         coordinates: [
-          [[[0, 0], [1, 0], [1, 1], [0, 0]]],
-          [[[5, 5], [6, 5], [6, 6], [5, 5]]],
+          [
+            [
+              [0, 0],
+              [1, 0],
+              [1, 1],
+              [0, 0],
+            ],
+          ],
+          [
+            [
+              [5, 5],
+              [6, 5],
+              [6, 6],
+              [5, 5],
+            ],
+          ],
         ],
       },
       properties: {},
@@ -167,7 +253,17 @@ describe('geoJsonToFootprints', () => {
   })
 
   it('drops degenerate rings with fewer than 3 points', () => {
-    const fps = geoJsonToFootprints([polyFeature([[[0, 0], [1, 1]]])], null)
+    const fps = geoJsonToFootprints(
+      [
+        polyFeature([
+          [
+            [0, 0],
+            [1, 1],
+          ],
+        ]),
+      ],
+      null,
+    )
     expect(fps).toHaveLength(0)
   })
 
@@ -178,17 +274,37 @@ describe('geoJsonToFootprints', () => {
 })
 
 describe('polygonSetToGeoJson', () => {
-  const set = { name: 'Footprints', footprints: [
-    { id: 'a', imageName: 'IMG_1.jpg', rings: [[[0, 0], [2, 0], [2, 2], [0, 2]]] },
-    { id: 'b', imageName: 'IMG_2.jpg', rings: [] },
-  ] }
+  const set = {
+    name: 'Footprints',
+    footprints: [
+      {
+        id: 'a',
+        imageName: 'IMG_1.jpg',
+        rings: [
+          [
+            [0, 0],
+            [2, 0],
+            [2, 2],
+            [0, 2],
+          ],
+        ],
+      },
+      { id: 'b', imageName: 'IMG_2.jpg', rings: [] },
+    ],
+  }
 
   it('writes closed Polygon features named by image, with the project CRS', () => {
     const fc = polygonSetToGeoJson(set, { crs: 'EPSG:32632' })
     expect(fc.crs.properties.name).toBe('EPSG:32632')
     expect(fc.features).toHaveLength(1)
     expect(fc.features[0].properties.name).toBe('IMG_1.jpg')
-    expect(fc.features[0].geometry.coordinates[0]).toEqual([[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]])
+    expect(fc.features[0].geometry.coordinates[0]).toEqual([
+      [0, 0],
+      [2, 0],
+      [2, 2],
+      [0, 2],
+      [0, 0],
+    ])
   })
 
   it('round-trips through the importer', () => {

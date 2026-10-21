@@ -17,11 +17,8 @@ export const TERRAIN_MAX_TILES = 64
 // Fractional Web-Mercator tile coordinates of a lon/lat at level z.
 export function tileCoords(lon, lat, z) {
   const n = 2 ** z
-  const phi = Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI / 180
-  return [
-    ((lon + 180) / 360) * n,
-    ((1 - Math.log(Math.tan(phi) + 1 / Math.cos(phi)) / Math.PI) / 2) * n,
-  ]
+  const phi = (Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI) / 180
+  return [((lon + 180) / 360) * n, ((1 - Math.log(Math.tan(phi) + 1 / Math.cos(phi)) / Math.PI) / 2) * n]
 }
 
 // The finest level at which a lon/lat box spans at most TERRAIN_MAX_TILES tiles.
@@ -61,10 +58,15 @@ export function terrainSampler(zoom, { loadTile = fetchTerrariumTile } = {}) {
   const tileAt = (x, y) => {
     const key = `${x}/${y}`
     if (!tiles.has(key)) {
-      tiles.set(key, Promise.resolve().then(() => loadTile(zoom, x, y)).catch((err) => {
-        sampler.error ??= err?.message ?? String(err)
-        return null
-      }))
+      tiles.set(
+        key,
+        Promise.resolve()
+          .then(() => loadTile(zoom, x, y))
+          .catch((err) => {
+            sampler.error ??= err?.message ?? String(err)
+            return null
+          }),
+      )
     }
     return tiles.get(key)
   }
@@ -81,21 +83,27 @@ export function terrainSampler(zoom, { loadTile = fetchTerrariumTile } = {}) {
     },
     async heightAt(lon, lat) {
       const [tx, ty] = tileCoords(lon, lat, zoom)
-      const x = Math.floor(tx), y = Math.floor(ty)
+      const x = Math.floor(tx),
+        y = Math.floor(ty)
       const tile = await tileAt(x, y)
       if (!tile) return null
       const { elev, w, h } = tile
       const px = Math.max(0, Math.min(w - 1, (tx - x) * w - 0.5))
       const py = Math.max(0, Math.min(h - 1, (ty - y) * h - 0.5))
-      const c0 = Math.floor(px), r0 = Math.floor(py)
-      const c1 = Math.min(w - 1, c0 + 1), r1 = Math.min(h - 1, r0 + 1)
-      const fx = px - c0, fy = py - r0
+      const c0 = Math.floor(px),
+        r0 = Math.floor(py)
+      const c1 = Math.min(w - 1, c0 + 1),
+        r1 = Math.min(h - 1, r0 + 1)
+      const fx = px - c0,
+        fy = py - r0
       const at = (r, c) => elev[r * w + c]
       const top = at(r0, c0) * (1 - fx) + at(r0, c1) * fx
       const bottom = at(r1, c0) * (1 - fx) + at(r1, c1) * fx
       return top * (1 - fy) + bottom * fy
     },
-    get tileCount() { return tiles.size },
+    get tileCount() {
+      return tiles.size
+    },
   }
   return sampler
 }

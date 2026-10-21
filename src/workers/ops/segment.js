@@ -46,7 +46,11 @@ export function makeSegmentOps({ rasterize }) {
     remember(uuid, entry) // touch LRU
     const onLog = emit ? (msg) => emit('log', [msg]) : undefined
     const { backend, sessionOpts } = options
-    const { logits, mw, mh, iou, ms } = await decode(entry.embeddings, points, entry.w, entry.h, { onLog, backend, sessionOpts })
+    const { logits, mw, mh, iou, ms } = await decode(entry.embeddings, points, entry.w, entry.h, {
+      onLog,
+      backend,
+      sessionOpts,
+    })
     return {
       result: { uuid, width: entry.w, height: entry.h, mw, mh, logits, iou, ms },
       transfer: [logits.buffer],

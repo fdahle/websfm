@@ -9,8 +9,8 @@ import { pluralize } from '../../core/textFormat.js'
 // image view (a panel's "Open" jumps there); a bad mark can be dropped here,
 // where the crops make it easy to spot.
 const props = defineProps({
-  gcp:    { type: Object, default: null },   // { id, name, x, y, z, observations }
-  images: { type: Array,  default: () => [] }, // full image list (resolve imageId → url)
+  gcp: { type: Object, default: null }, // { id, name, x, y, z, observations }
+  images: { type: Array, default: () => [] }, // full image list (resolve imageId → url)
   // Accuracy-report entry for this GCP: { observations: [{ imageId, reprojPx }] }.
   report: { type: Object, default: null },
 })
@@ -21,8 +21,12 @@ const emit = defineEmits(['jump-to-image', 'remove-observation'])
 const zoom = ref(2)
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 16
-function zoomIn()  { zoom.value = Math.min(MAX_ZOOM, +(zoom.value * 1.5).toFixed(3)) }
-function zoomOut() { zoom.value = Math.max(MIN_ZOOM, +(zoom.value / 1.5).toFixed(3)) }
+function zoomIn() {
+  zoom.value = Math.min(MAX_ZOOM, +(zoom.value * 1.5).toFixed(3))
+}
+function zoomOut() {
+  zoom.value = Math.max(MIN_ZOOM, +(zoom.value / 1.5).toFixed(3))
+}
 
 const imageById = computed(() => {
   const m = new Map()
@@ -56,8 +60,8 @@ const panels = computed(() => {
   return out
 })
 
-const missingCount = computed(() =>
-  (props.gcp?.observations || []).filter((o) => o.imageId == null && o.px != null).length,
+const missingCount = computed(
+  () => (props.gcp?.observations || []).filter((o) => o.imageId == null && o.px != null).length,
 )
 
 // Place the marked pixel at the panel's centre. The image's top-left corner is
@@ -83,10 +87,15 @@ function fmtCoord(v) {
       <div class="gcp-hd-main">
         <span class="gcp-title">{{ gcp?.name ?? 'GCP' }}</span>
         <span class="gcp-coords">
-          X {{ fmtCoord(gcp?.x) }} · Y {{ fmtCoord(gcp?.y) }}<template v-if="gcp?.z != null"> · Z {{ fmtCoord(gcp?.z) }}</template>
+          X {{ fmtCoord(gcp?.x) }} · Y {{ fmtCoord(gcp?.y)
+          }}<template v-if="gcp?.z != null"> · Z {{ fmtCoord(gcp?.z) }}</template>
         </span>
         <span class="gcp-count">{{ panels.length }} image{{ panels.length === 1 ? '' : 's' }}</span>
-        <span v-if="missingCount" class="gcp-missing" :title="`${pluralize(missingCount, 'observation')} reference images that aren't loaded yet`">
+        <span
+          v-if="missingCount"
+          class="gcp-missing"
+          :title="`${pluralize(missingCount, 'observation')} reference images that aren't loaded yet`"
+        >
           +{{ missingCount }} not loaded
         </span>
       </div>
@@ -100,8 +109,15 @@ function fmtCoord(v) {
     <div v-if="panels.length" class="gcp-grid">
       <div v-for="p in panels" :key="p.imageId" class="gcp-panel">
         <div class="panel-viewport">
-          <img class="panel-img" :src="p.url" :alt="p.name" :style="imgStyle(p)" draggable="false" decoding="async"
-            @error="imagesStore.reportImageLoadError(p.imageId)" />
+          <img
+            class="panel-img"
+            :src="p.url"
+            :alt="p.name"
+            :style="imgStyle(p)"
+            draggable="false"
+            decoding="async"
+            @error="imagesStore.reportImageLoadError(p.imageId)"
+          />
           <div class="panel-crosshair">
             <span class="ch-h"></span>
             <span class="ch-v"></span>
@@ -109,10 +125,19 @@ function fmtCoord(v) {
           </div>
         </div>
         <div class="panel-cap">
-          <button class="panel-open" :title="`Open ${p.name}`" @click="emit('jump-to-image', { imageId: p.imageId })">{{ p.name }}</button>
-          <span v-if="p.reprojPx != null" class="panel-reproj" title="Reprojection error (px)">{{ p.reprojPx.toFixed(1) }}px</span>
-          <button class="panel-remove" :title="`Remove the mark in ${p.name}`"
-            @click="emit('remove-observation', { gcpId: gcp.id, imageId: p.imageId })">×</button>
+          <button class="panel-open" :title="`Open ${p.name}`" @click="emit('jump-to-image', { imageId: p.imageId })">
+            {{ p.name }}
+          </button>
+          <span v-if="p.reprojPx != null" class="panel-reproj" title="Reprojection error (px)"
+            >{{ p.reprojPx.toFixed(1) }}px</span
+          >
+          <button
+            class="panel-remove"
+            :title="`Remove the mark in ${p.name}`"
+            @click="emit('remove-observation', { gcpId: gcp.id, imageId: p.imageId })"
+          >
+            ×
+          </button>
         </div>
       </div>
     </div>
@@ -141,13 +166,37 @@ function fmtCoord(v) {
   border-bottom: 1px solid var(--border, #2a2a33);
   background: var(--panel, #1e1e24);
 }
-.gcp-hd-main { display: flex; align-items: baseline; gap: 12px; min-width: 0; flex-wrap: wrap; }
-.gcp-title { font-size: 14px; font-weight: 600; }
-.gcp-coords { font-size: 12px; color: var(--text-dim, #9a9aa5); font-variant-numeric: tabular-nums; }
-.gcp-count { font-size: 12px; color: var(--text-dim, #9a9aa5); }
-.gcp-missing { font-size: 11px; color: #e0a030; }
+.gcp-hd-main {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.gcp-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.gcp-coords {
+  font-size: 12px;
+  color: var(--text-dim, #9a9aa5);
+  font-variant-numeric: tabular-nums;
+}
+.gcp-count {
+  font-size: 12px;
+  color: var(--text-dim, #9a9aa5);
+}
+.gcp-missing {
+  font-size: 11px;
+  color: #e0a030;
+}
 
-.gcp-zoom { flex: none; display: flex; align-items: center; gap: 6px; }
+.gcp-zoom {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .zoom-btn {
   width: 24px;
   height: 24px;
@@ -159,8 +208,16 @@ function fmtCoord(v) {
   line-height: 1;
   cursor: pointer;
 }
-.zoom-btn:hover { background: var(--panel-hover, #2a2a33); }
-.zoom-val { font-size: 11px; color: var(--text-dim, #9a9aa5); min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
+.zoom-btn:hover {
+  background: var(--panel-hover, #2a2a33);
+}
+.zoom-val {
+  font-size: 11px;
+  color: var(--text-dim, #9a9aa5);
+  min-width: 38px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 
 .gcp-grid {
   flex: 1;
@@ -185,8 +242,7 @@ function fmtCoord(v) {
   width: 100%;
   aspect-ratio: 1 / 1;
   overflow: hidden;
-  background:
-    repeating-conic-gradient(#1a1a20 0% 25%, #202028 0% 50%) 50% / 20px 20px;
+  background: repeating-conic-gradient(#1a1a20 0% 25%, #202028 0% 50%) 50% / 20px 20px;
 }
 .panel-img {
   position: absolute;
@@ -203,9 +259,25 @@ function fmtCoord(v) {
   inset: 0;
   pointer-events: none;
 }
-.ch-h, .ch-v { position: absolute; background: rgba(255, 80, 80, 0.85); }
-.ch-h { left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-0.5px); }
-.ch-v { top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-0.5px); }
+.ch-h,
+.ch-v {
+  position: absolute;
+  background: rgba(255, 80, 80, 0.85);
+}
+.ch-h {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-0.5px);
+}
+.ch-v {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+}
 .ch-dot {
   position: absolute;
   top: 50%;
@@ -241,8 +313,15 @@ function fmtCoord(v) {
   cursor: pointer;
   padding: 0;
 }
-.panel-open:hover { text-decoration: underline; }
-.panel-reproj { flex: none; font-size: 10px; color: var(--text-dim, #9a9aa5); font-variant-numeric: tabular-nums; }
+.panel-open:hover {
+  text-decoration: underline;
+}
+.panel-reproj {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-dim, #9a9aa5);
+  font-variant-numeric: tabular-nums;
+}
 .panel-remove {
   flex: none;
   background: none;
@@ -253,7 +332,9 @@ function fmtCoord(v) {
   cursor: pointer;
   padding: 0 2px;
 }
-.panel-remove:hover { color: #e55; }
+.panel-remove:hover {
+  color: #e55;
+}
 
 .gcp-empty {
   flex: 1;

@@ -19,8 +19,26 @@
 // Order: the ten cubics first (eliminated), then the ten monomials of degree ≤ 2,
 // which form the quotient-ring basis (10 solutions).
 const MONOMIALS = [
-  [3, 0, 0], [2, 1, 0], [2, 0, 1], [1, 2, 0], [1, 1, 1], [1, 0, 2], [0, 3, 0], [0, 2, 1], [0, 1, 2], [0, 0, 3],
-  [2, 0, 0], [1, 1, 0], [1, 0, 1], [0, 2, 0], [0, 1, 1], [0, 0, 2], [1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 0],
+  [3, 0, 0],
+  [2, 1, 0],
+  [2, 0, 1],
+  [1, 2, 0],
+  [1, 1, 1],
+  [1, 0, 2],
+  [0, 3, 0],
+  [0, 2, 1],
+  [0, 1, 2],
+  [0, 0, 3],
+  [2, 0, 0],
+  [1, 1, 0],
+  [1, 0, 1],
+  [0, 2, 0],
+  [0, 1, 1],
+  [0, 0, 2],
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+  [0, 0, 0],
 ]
 const monoKey = (a, b, c) => a * 16 + b * 4 + c
 const MONO_INDEX = new Map(MONOMIALS.map((m, i) => [monoKey(...m), i]))
@@ -46,11 +64,17 @@ const polyScale = (p, s) => p.map((v) => v * s)
 
 function polyEval(p, x, y, z) {
   let v = 0
-  for (let i = 0; i < 20; i++) if (p[i]) { const [a, b, c] = MONOMIALS[i]; v += p[i] * x ** a * y ** b * z ** c }
+  for (let i = 0; i < 20; i++)
+    if (p[i]) {
+      const [a, b, c] = MONOMIALS[i]
+      v += p[i] * x ** a * y ** b * z ** c
+    }
   return v
 }
 function polyGrad(p, x, y, z) {
-  let gx = 0, gy = 0, gz = 0
+  let gx = 0,
+    gy = 0,
+    gz = 0
   for (let i = 0; i < 20; i++) {
     if (!p[i]) continue
     const [a, b, c] = MONOMIALS[i]
@@ -64,17 +88,28 @@ function polyGrad(p, x, y, z) {
 // ~1e-4..1e-8; a few steps bring it to machine precision.
 function polishRoot(eqs, x, y, z) {
   for (let it = 0; it < 6; it++) {
-    const JtJ = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], Jtr = [0, 0, 0]
+    const JtJ = [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0],
+      ],
+      Jtr = [0, 0, 0]
     let rr = 0
     for (const e of eqs) {
-      const r = polyEval(e, x, y, z), g = polyGrad(e, x, y, z)
+      const r = polyEval(e, x, y, z),
+        g = polyGrad(e, x, y, z)
       rr += r * r
-      for (let i = 0; i < 3; i++) { Jtr[i] += g[i] * r; for (let j = 0; j < 3; j++) JtJ[i][j] += g[i] * g[j] }
+      for (let i = 0; i < 3; i++) {
+        Jtr[i] += g[i] * r
+        for (let j = 0; j < 3; j++) JtJ[i][j] += g[i] * g[j]
+      }
     }
     if (rr < 1e-30) break
     const d = solve3(JtJ, Jtr)
     if (!d) break
-    x -= d[0]; y -= d[1]; z -= d[2]
+    x -= d[0]
+    y -= d[1]
+    z -= d[2]
   }
   return [x, y, z]
 }
@@ -95,7 +130,11 @@ function solve3(A, b) {
 function jacobiEig(Ain) {
   const n = Ain.length
   const A = Ain.map((r) => Float64Array.from(r))
-  const V = Array.from({ length: n }, (_, i) => { const r = new Float64Array(n); r[i] = 1; return r })
+  const V = Array.from({ length: n }, (_, i) => {
+    const r = new Float64Array(n)
+    r[i] = 1
+    return r
+  })
   for (let sweep = 0; sweep < 60; sweep++) {
     let off = 0
     for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) off += A[p][q] * A[p][q]
@@ -105,18 +144,25 @@ function jacobiEig(Ain) {
         if (Math.abs(A[p][q]) < 1e-300) continue
         const th = (A[q][q] - A[p][p]) / (2 * A[p][q])
         const t = Math.sign(th || 1) / (Math.abs(th) + Math.sqrt(th * th + 1))
-        const c = 1 / Math.sqrt(t * t + 1), s = t * c
+        const c = 1 / Math.sqrt(t * t + 1),
+          s = t * c
         for (let k = 0; k < n; k++) {
-          const akp = A[k][p], akq = A[k][q]
-          A[k][p] = c * akp - s * akq; A[k][q] = s * akp + c * akq
+          const akp = A[k][p],
+            akq = A[k][q]
+          A[k][p] = c * akp - s * akq
+          A[k][q] = s * akp + c * akq
         }
         for (let k = 0; k < n; k++) {
-          const apk = A[p][k], aqk = A[q][k]
-          A[p][k] = c * apk - s * aqk; A[q][k] = s * apk + c * aqk
+          const apk = A[p][k],
+            aqk = A[q][k]
+          A[p][k] = c * apk - s * aqk
+          A[q][k] = s * apk + c * aqk
         }
         for (let k = 0; k < n; k++) {
-          const vkp = V[k][p], vkq = V[k][q]
-          V[k][p] = c * vkp - s * vkq; V[k][q] = s * vkp + c * vkq
+          const vkp = V[k][p],
+            vkq = V[k][q]
+          V[k][p] = c * vkp - s * vkq
+          V[k][q] = s * vkp + c * vkq
         }
       }
     }
@@ -133,11 +179,24 @@ function realEigenvalues(Min) {
   const a = Min.map((r) => Float64Array.from(r))
   // elmhes: Gaussian elimination with pivoting to upper Hessenberg form.
   for (let m = 1; m < n - 1; m++) {
-    let x = 0, i = m
-    for (let j = m; j < n; j++) if (Math.abs(a[j][m - 1]) > Math.abs(x)) { x = a[j][m - 1]; i = j }
+    let x = 0,
+      i = m
+    for (let j = m; j < n; j++)
+      if (Math.abs(a[j][m - 1]) > Math.abs(x)) {
+        x = a[j][m - 1]
+        i = j
+      }
     if (i !== m) {
-      for (let j = m - 1; j < n; j++) { const t = a[i][j]; a[i][j] = a[m][j]; a[m][j] = t }
-      for (let j = 0; j < n; j++) { const t = a[j][i]; a[j][i] = a[j][m]; a[j][m] = t }
+      for (let j = m - 1; j < n; j++) {
+        const t = a[i][j]
+        a[i][j] = a[m][j]
+        a[m][j] = t
+      }
+      for (let j = 0; j < n; j++) {
+        const t = a[j][i]
+        a[j][i] = a[j][m]
+        a[j][m] = t
+      }
     }
     if (x !== 0) {
       for (i = m + 1; i < n; i++) {
@@ -153,23 +212,34 @@ function realEigenvalues(Min) {
   }
   for (let i = 2; i < n; i++) for (let j = 0; j < i - 1; j++) a[i][j] = 0
   // hqr
-  const wr = new Float64Array(n), wi = new Float64Array(n)
+  const wr = new Float64Array(n),
+    wi = new Float64Array(n)
   let anorm = 0
   for (let i = 0; i < n; i++) for (let j = Math.max(i - 1, 0); j < n; j++) anorm += Math.abs(a[i][j])
-  let nn = n - 1, t = 0
+  let nn = n - 1,
+    t = 0
   while (nn >= 0) {
-    let its = 0, l
+    let its = 0,
+      l
     do {
       for (l = nn; l >= 1; l--) {
         const s = Math.abs(a[l - 1][l - 1]) + Math.abs(a[l][l])
-        if (Math.abs(a[l][l - 1]) <= 1e-15 * (s || anorm)) { a[l][l - 1] = 0; break }
+        if (Math.abs(a[l][l - 1]) <= 1e-15 * (s || anorm)) {
+          a[l][l - 1] = 0
+          break
+        }
       }
       const x = a[nn][nn]
-      if (l === nn) { wr[nn] = x + t; wi[nn--] = 0 }
-      else {
-        const y = a[nn - 1][nn - 1], w = a[nn][nn - 1] * a[nn - 1][nn]
+      if (l === nn) {
+        wr[nn] = x + t
+        wi[nn--] = 0
+      } else {
+        const y = a[nn - 1][nn - 1],
+          w = a[nn][nn - 1] * a[nn - 1][nn]
         if (l === nn - 1) {
-          const p = 0.5 * (y - x), q = p * p + w, z = Math.sqrt(Math.abs(q))
+          const p = 0.5 * (y - x),
+            q = p * p + w,
+            z = Math.sqrt(Math.abs(q))
           const xx = x + t
           if (q >= 0) {
             const zz = p + (p >= 0 ? Math.abs(z) : -Math.abs(z))
@@ -183,7 +253,9 @@ function realEigenvalues(Min) {
           nn -= 2
         } else {
           if (its === 60) throw new Error('five-point: QR did not converge')
-          let xs = x, ys = y, ws = w
+          let xs = x,
+            ys = y,
+            ws = w
           if (its === 10 || its === 20) {
             t += x
             for (let i = 0; i <= nn; i++) a[i][i] -= x
@@ -201,7 +273,9 @@ function realEigenvalues(Min) {
             q = a[m + 1][m + 1] - z - r - s0
             r = a[m + 2][m + 1]
             const s = Math.abs(p) + Math.abs(q) + Math.abs(r)
-            p /= s; q /= s; r /= s
+            p /= s
+            q /= s
+            r /= s
             if (m === l) break
             const u = Math.abs(a[m][m - 1]) * (Math.abs(q) + Math.abs(r))
             const v = Math.abs(p) * (Math.abs(a[m - 1][m - 1]) + Math.abs(z) + Math.abs(a[m + 1][m + 1]))
@@ -213,41 +287,72 @@ function realEigenvalues(Min) {
           }
           for (let k = m; k <= nn - 1; k++) {
             if (k !== m) {
-              p = a[k][k - 1]; q = a[k + 1][k - 1]; r = 0
+              p = a[k][k - 1]
+              q = a[k + 1][k - 1]
+              r = 0
               if (k !== nn - 1) r = a[k + 2][k - 1]
               const xx = Math.abs(p) + Math.abs(q) + Math.abs(r)
-              if (xx !== 0) { p /= xx; q /= xx; r /= xx }
-              else continue
+              if (xx !== 0) {
+                p /= xx
+                q /= xx
+                r /= xx
+              } else continue
               const s = (p >= 0 ? 1 : -1) * Math.sqrt(p * p + q * q + r * r)
               if (s === 0) continue
               a[k][k - 1] = -s * xx
-              p += s; const xk = p / s, yk = q / s, zk = r / s; q /= p; r /= p
+              p += s
+              const xk = p / s,
+                yk = q / s,
+                zk = r / s
+              q /= p
+              r /= p
               for (let j = k; j <= nn; j++) {
                 p = a[k][j] + q * a[k + 1][j]
-                if (k !== nn - 1) { p += r * a[k + 2][j]; a[k + 2][j] -= p * zk }
-                a[k + 1][j] -= p * yk; a[k][j] -= p * xk
+                if (k !== nn - 1) {
+                  p += r * a[k + 2][j]
+                  a[k + 2][j] -= p * zk
+                }
+                a[k + 1][j] -= p * yk
+                a[k][j] -= p * xk
               }
               const mmin = nn < k + 3 ? nn : k + 3
               for (let i = l; i <= mmin; i++) {
                 p = xk * a[i][k] + yk * a[i][k + 1]
-                if (k !== nn - 1) { p += zk * a[i][k + 2]; a[i][k + 2] -= p * r }
-                a[i][k + 1] -= p * q; a[i][k] -= p
+                if (k !== nn - 1) {
+                  p += zk * a[i][k + 2]
+                  a[i][k + 2] -= p * r
+                }
+                a[i][k + 1] -= p * q
+                a[i][k] -= p
               }
             } else {
               const s = (p >= 0 ? 1 : -1) * Math.sqrt(p * p + q * q + r * r)
               if (s === 0) continue
               if (l !== m) a[k][k - 1] = -a[k][k - 1]
-              p += s; const xk = p / s, yk = q / s, zk = r / s; q /= p; r /= p
+              p += s
+              const xk = p / s,
+                yk = q / s,
+                zk = r / s
+              q /= p
+              r /= p
               for (let j = k; j <= nn; j++) {
                 p = a[k][j] + q * a[k + 1][j]
-                if (k !== nn - 1) { p += r * a[k + 2][j]; a[k + 2][j] -= p * zk }
-                a[k + 1][j] -= p * yk; a[k][j] -= p * xk
+                if (k !== nn - 1) {
+                  p += r * a[k + 2][j]
+                  a[k + 2][j] -= p * zk
+                }
+                a[k + 1][j] -= p * yk
+                a[k][j] -= p * xk
               }
               const mmin = nn < k + 3 ? nn : k + 3
               for (let i = l; i <= mmin; i++) {
                 p = xk * a[i][k] + yk * a[i][k + 1]
-                if (k !== nn - 1) { p += zk * a[i][k + 2]; a[i][k + 2] -= p * r }
-                a[i][k + 1] -= p * q; a[i][k] -= p
+                if (k !== nn - 1) {
+                  p += zk * a[i][k + 2]
+                  a[i][k + 2] -= p * r
+                }
+                a[i][k + 1] -= p * q
+                a[i][k] -= p
               }
             }
           }
@@ -266,7 +371,11 @@ function nullVector(M, lambda) {
   const B = M.map((r, i) => r.map((v, j) => v - (i === j ? lambda : 0)))
   const BtB = Array.from({ length: n }, (_, i) => {
     const r = new Float64Array(n)
-    for (let j = 0; j < n; j++) { let s = 0; for (let k = 0; k < n; k++) s += B[k][i] * B[k][j]; r[j] = s }
+    for (let j = 0; j < n; j++) {
+      let s = 0
+      for (let k = 0; k < n; k++) s += B[k][i] * B[k][j]
+      r[j] = s
+    }
     return r
   })
   return jacobiEig(BtB).vectors[0]
@@ -281,35 +390,51 @@ export function fivePoint(x1, x2) {
   // Epipolar constraint rows: coefficient of E_ij is x2_i · x1_j (homogeneous).
   const A = []
   for (let k = 0; k < 5; k++) {
-    const [u1, v1] = x1[k], [u2, v2] = x2[k]
+    const [u1, v1] = x1[k],
+      [u2, v2] = x2[k]
     A.push([u2 * u1, u2 * v1, u2, v2 * u1, v2 * v1, v2, u1, v1, 1])
   }
-  const AtA = Array.from({ length: 9 }, (_, i) => Array.from({ length: 9 }, (_, j) => {
-    let s = 0
-    for (let k = 0; k < 5; k++) s += A[k][i] * A[k][j]
-    return s
-  }))
+  const AtA = Array.from({ length: 9 }, (_, i) =>
+    Array.from({ length: 9 }, (_, j) => {
+      let s = 0
+      for (let k = 0; k < 5; k++) s += A[k][i] * A[k][j]
+      return s
+    }),
+  )
   const ns = jacobiEig(AtA).vectors.slice(0, 4) // X, Y, Z, W
   // E entries as linear polynomials x·X + y·Y + z·Z + W.
-  const iX = MONO_INDEX.get(monoKey(1, 0, 0)), iY = MONO_INDEX.get(monoKey(0, 1, 0))
-  const iZ = MONO_INDEX.get(monoKey(0, 0, 1)), i1 = MONO_INDEX.get(monoKey(0, 0, 0))
-  const E = Array.from({ length: 3 }, (_, r) => Array.from({ length: 3 }, (_, c) => {
-    const p = new Float64Array(20)
-    p[iX] = ns[0][3 * r + c]; p[iY] = ns[1][3 * r + c]; p[iZ] = ns[2][3 * r + c]; p[i1] = ns[3][3 * r + c]
-    return p
-  }))
+  const iX = MONO_INDEX.get(monoKey(1, 0, 0)),
+    iY = MONO_INDEX.get(monoKey(0, 1, 0))
+  const iZ = MONO_INDEX.get(monoKey(0, 0, 1)),
+    i1 = MONO_INDEX.get(monoKey(0, 0, 0))
+  const E = Array.from({ length: 3 }, (_, r) =>
+    Array.from({ length: 3 }, (_, c) => {
+      const p = new Float64Array(20)
+      p[iX] = ns[0][3 * r + c]
+      p[iY] = ns[1][3 * r + c]
+      p[iZ] = ns[2][3 * r + c]
+      p[i1] = ns[3][3 * r + c]
+      return p
+    }),
+  )
   // Constraints: det(E) = 0 and 2 E Eᵀ E − tr(E Eᵀ) E = 0.
   const eqs = []
-  const det = polyAdd(polyAdd(
-    polyMul(E[0][0], polyAdd(polyMul(E[1][1], E[2][2]), polyMul(E[1][2], E[2][1]), -1)),
-    polyMul(E[0][1], polyAdd(polyMul(E[1][0], E[2][2]), polyMul(E[1][2], E[2][0]), -1)), -1),
-    polyMul(E[0][2], polyAdd(polyMul(E[1][0], E[2][1]), polyMul(E[1][1], E[2][0]), -1)))
+  const det = polyAdd(
+    polyAdd(
+      polyMul(E[0][0], polyAdd(polyMul(E[1][1], E[2][2]), polyMul(E[1][2], E[2][1]), -1)),
+      polyMul(E[0][1], polyAdd(polyMul(E[1][0], E[2][2]), polyMul(E[1][2], E[2][0]), -1)),
+      -1,
+    ),
+    polyMul(E[0][2], polyAdd(polyMul(E[1][0], E[2][1]), polyMul(E[1][1], E[2][0]), -1)),
+  )
   eqs.push(det)
-  const EEt = Array.from({ length: 3 }, (_, r) => Array.from({ length: 3 }, (_, c) => {
-    let p = polyMul(E[r][0], E[c][0])
-    p = polyAdd(p, polyMul(E[r][1], E[c][1]))
-    return polyAdd(p, polyMul(E[r][2], E[c][2]))
-  }))
+  const EEt = Array.from({ length: 3 }, (_, r) =>
+    Array.from({ length: 3 }, (_, c) => {
+      let p = polyMul(E[r][0], E[c][0])
+      p = polyAdd(p, polyMul(E[r][1], E[c][1]))
+      return polyAdd(p, polyMul(E[r][2], E[c][2]))
+    }),
+  )
   const tr = polyAdd(polyAdd(EEt[0][0], EEt[1][1]), EEt[2][2])
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
@@ -343,12 +468,21 @@ export function fivePoint(x1, x2) {
     return row
   })
   const out = []
-  const bx = MONO_INDEX.get(monoKey(1, 0, 0)) - 10, by = MONO_INDEX.get(monoKey(0, 1, 0)) - 10
-  const bz = MONO_INDEX.get(monoKey(0, 0, 1)) - 10, b1 = MONO_INDEX.get(monoKey(0, 0, 0)) - 10
+  const bx = MONO_INDEX.get(monoKey(1, 0, 0)) - 10,
+    by = MONO_INDEX.get(monoKey(0, 1, 0)) - 10
+  const bz = MONO_INDEX.get(monoKey(0, 0, 1)) - 10,
+    b1 = MONO_INDEX.get(monoKey(0, 0, 0)) - 10
   let lambdas
-  try { lambdas = realEigenvalues(act.map((r) => Array.from(r))) } catch { return [] }
+  try {
+    lambdas = realEigenvalues(act.map((r) => Array.from(r)))
+  } catch {
+    return []
+  }
   for (const lam of lambdas) {
-    const v = nullVector(act.map((r) => Array.from(r)), lam)
+    const v = nullVector(
+      act.map((r) => Array.from(r)),
+      lam,
+    )
     if (Math.abs(v[b1]) < 1e-12) continue
     const [x, y, z] = polishRoot(eqs, v[bx] / v[b1], v[by] / v[b1], v[bz] / v[b1])
     const e = new Array(9)
@@ -362,7 +496,8 @@ export function fivePoint(x1, x2) {
 
 /** Squared Sampson distance of one normalised correspondence to E. */
 export function sampsonSq(E, p1, p2) {
-  const [x1, y1] = p1, [x2, y2] = p2
+  const [x1, y1] = p1,
+    [x2, y2] = p2
   const Ex1 = [E[0] * x1 + E[1] * y1 + E[2], E[3] * x1 + E[4] * y1 + E[5], E[6] * x1 + E[7] * y1 + E[8]]
   const Etx2 = [E[0] * x2 + E[3] * y2 + E[6], E[1] * x2 + E[4] * y2 + E[7], E[2] * x2 + E[5] * y2 + E[8]]
   const r = x2 * Ex1[0] + y2 * Ex1[1] + Ex1[2]
@@ -384,27 +519,42 @@ export function sampsonSq(E, p1, p2) {
  * no similarity could fit the GCPs (9 km). The caller disambiguates (initPair.js);
  * `minIters` keeps the adaptive stop from ending before both twins were sampled.
  */
-export function ransacEssential(x1, x2, { thresh = 1e-3, maxIters = 400, minIters = 64, confidence = 0.999, altFrac = 0.9, maxAlternatives = 4 } = {}) {
+export function ransacEssential(
+  x1,
+  x2,
+  { thresh = 1e-3, maxIters = 400, minIters = 64, confidence = 0.999, altFrac = 0.9, maxAlternatives = 4 } = {},
+) {
   const n = Math.min(x1.length, x2.length)
   if (n < 5) return null
   const t2 = thresh * thresh
   let seed = (0x2545f491 ^ n) >>> 0
-  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32 }
-  let bestCount = 0, iters = maxIters
+  const rnd = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0
+    return seed / 2 ** 32
+  }
+  let bestCount = 0,
+    iters = maxIters
   const top = [] // { E, count }, distinct up to sign, best first
   const same = (a, b) => Math.abs(a.reduce((acc, v, i) => acc + v * b[i], 0)) > 0.999
   const note = (E, c) => {
     const j = top.findIndex((t) => same(t.E, E))
-    if (j >= 0) { if (c > top[j].count) top[j] = { E, count: c } } else top.push({ E, count: c })
+    if (j >= 0) {
+      if (c > top[j].count) top[j] = { E, count: c }
+    } else top.push({ E, count: c })
     top.sort((a, b) => b.count - a.count)
     if (top.length > maxAlternatives * 2) top.length = maxAlternatives * 2
   }
-  const s1 = new Array(5), s2 = new Array(5)
+  const s1 = new Array(5),
+    s2 = new Array(5)
   for (let it = 0; it < iters; it++) {
     const idx = new Set()
     while (idx.size < 5) idx.add(Math.floor(rnd() * n))
     let k = 0
-    for (const i of idx) { s1[k] = x1[i]; s2[k] = x2[i]; k++ }
+    for (const i of idx) {
+      s1[k] = x1[i]
+      s2[k] = x2[i]
+      k++
+    }
     for (const E of fivePoint(s1, s2)) {
       let c = 0
       for (let i = 0; i < n; i++) if (sampsonSq(E, x1[i], x2[i]) <= t2) c++

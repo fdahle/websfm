@@ -27,13 +27,30 @@ const slots = useSlots()
 
 const asDir = (d) => (d === 'asc' ? 1 : -1)
 // Sorting is composables/useTableSort; a newly clicked column starts descending.
-const { sortKey, sortDir, toggleSort, sortArrow, sorted: sortedRows } = useTableSort(
-  () => props.rows, (row, k) => row[k],
+const {
+  sortKey,
+  sortDir,
+  toggleSort,
+  sortArrow,
+  sorted: sortedRows,
+} = useTableSort(
+  () => props.rows,
+  (row, k) => row[k],
   { initialKey: props.sortKey, initialDir: asDir(props.sortDir), firstDir: -1 },
 )
 // Follow a caller that changes the default sort (e.g. after switching data source).
-watch(() => props.sortKey, (k) => { sortKey.value = k })
-watch(() => props.sortDir, (d) => { sortDir.value = asDir(d) })
+watch(
+  () => props.sortKey,
+  (k) => {
+    sortKey.value = k
+  },
+)
+watch(
+  () => props.sortDir,
+  (d) => {
+    sortDir.value = asDir(d)
+  },
+)
 
 function toggle(col) {
   if (col.sortable === false) return
@@ -48,7 +65,12 @@ function arrow(col) {
 // view (composables/useVirtualList, measured row height). A table with an
 // `expanded` slot keeps rendering every row: its detail rows have content-defined
 // heights, and those tables (GCPs, fiducial drafts) are short.
-const { listRef: bodyRef, visibleItems: visibleRows, padTop, padBottom } = useVirtualList({
+const {
+  listRef: bodyRef,
+  visibleItems: visibleRows,
+  padTop,
+  padBottom,
+} = useVirtualList({
   items: () => sortedRows.value,
   itemHeight: 31,
   measure: true,
@@ -58,7 +80,8 @@ const { listRef: bodyRef, visibleItems: visibleRows, padTop, padBottom } = useVi
 const expanded = ref(new Set())
 function toggleExpand(row) {
   const s = new Set(expanded.value)
-  if (s.has(row.id)) s.delete(row.id); else s.add(row.id)
+  if (s.has(row.id)) s.delete(row.id)
+  else s.add(row.id)
   expanded.value = s
 }
 
@@ -85,7 +108,9 @@ function fmt(col, row) {
         </tr>
       </thead>
       <tbody ref="bodyRef">
-        <tr v-if="padTop" class="dt-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"><td :colspan="columns.length"></td></tr>
+        <tr v-if="padTop" class="dt-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }">
+          <td :colspan="columns.length"></td>
+        </tr>
         <template v-for="row in visibleRows" :key="row.id">
           <tr
             data-vrow
@@ -93,11 +118,7 @@ function fmt(col, row) {
             :class="{ expandable: !!slots.expanded }"
             @click="slots.expanded ? toggleExpand(row) : emit('row-click', row)"
           >
-            <td
-              v-for="col in columns"
-              :key="col.key"
-              :class="col.align ? `align-${col.align}` : ''"
-            >
+            <td v-for="col in columns" :key="col.key" :class="col.align ? `align-${col.align}` : ''">
               <slot :name="`cell-${col.key}`" :row="row" :value="row[col.key]">
                 {{ fmt(col, row) }}
               </slot>
@@ -109,7 +130,9 @@ function fmt(col, row) {
             </td>
           </tr>
         </template>
-        <tr v-if="padBottom" class="dt-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }"><td :colspan="columns.length"></td></tr>
+        <tr v-if="padBottom" class="dt-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }">
+          <td :colspan="columns.length"></td>
+        </tr>
       </tbody>
     </table>
     <div v-else class="dt-empty">{{ emptyText }}</div>
@@ -119,5 +142,8 @@ function fmt(col, row) {
 <style scoped src="./modal.css"></style>
 <style scoped>
 /* Virtual-list spacers stand in for off-screen rows; they carry no cell chrome. */
-.dt tbody tr.dt-spacer > td { padding: 0; border: 0; }
+.dt tbody tr.dt-spacer > td {
+  padding: 0;
+  border: 0;
+}
 </style>

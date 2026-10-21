@@ -31,7 +31,7 @@ export const SPARSE_MEMORY_MODEL = {
   margin: 1.25,
   // Renderer: the worker input, built as typed arrays and transferred.
   rendererBufPerKeypoint: 20, // Float64 xy + RGB + colour mask (core/sfm/keypointSet.js)
-  rendererBufPerMatch: 8,     // packed Uint32 pair
+  rendererBufPerMatch: 8, // packed Uint32 pair
   rendererHeapPerKeypoint: 2, // the per-image/per-pair input records, amortised
   // Worker heap (the ceiling that matters): per-pair records, the registration
   // correspondence cache, transient per-observation number arrays.
@@ -68,10 +68,16 @@ export const SPARSE_MEMORY_MODEL = {
  *   `descriptorBytesPerKeypoint` > 0 means guided extension runs (128: uint8 RootSIFT)
  *   unless `guided` says otherwise.
  */
-export function projectSparsePeakBreakdownBytes({
-  keypointCount = 0, matchCount = 0, imageCount = 0, descriptorBytesPerKeypoint = 0,
-  guided = descriptorBytesPerKeypoint > 0,
-} = {}, model = SPARSE_MEMORY_MODEL) {
+export function projectSparsePeakBreakdownBytes(
+  {
+    keypointCount = 0,
+    matchCount = 0,
+    imageCount = 0,
+    descriptorBytesPerKeypoint = 0,
+    guided = descriptorBytesPerKeypoint > 0,
+  } = {},
+  model = SPARSE_MEMORY_MODEL,
+) {
   const C = Math.max(0, imageCount)
   const K = Math.max(0, keypointCount)
   const M = Math.max(0, matchCount)
@@ -86,17 +92,22 @@ export function projectSparsePeakBreakdownBytes({
   // them are resident in the renderer before the worker starts.
   const rendererBufferBytes = up(K * m.rendererBufPerKeypoint + M * m.rendererBufPerMatch + D)
   const guidedHeapBytes = guided ? up(K * m.guidedHeapPerKeypoint) : 0
-  const workerHeapBytes = up(m.workerHeapBase + O * m.workerHeapPerObservation + K * m.workerHeapPerKeypoint)
-    + guidedHeapBytes
+  const workerHeapBytes =
+    up(m.workerHeapBase + O * m.workerHeapPerObservation + K * m.workerHeapPerKeypoint) + guidedHeapBytes
   const solverWasmBytes = projectSolverWasmBytes({ cameras: C, observations: O }, m)
   // Descriptors are held once: every sub-run shares them (sfm.js cloneSfmInput).
-  const workerBufferBytes = up(K * m.workerBufPerKeypoint + M * m.workerBufPerMatch + O * m.workerBufPerObservation + D)
-    + solverWasmBytes
+  const workerBufferBytes =
+    up(K * m.workerBufPerKeypoint + M * m.workerBufPerMatch + O * m.workerBufPerObservation + D) + solverWasmBytes
   return {
-    rendererHeapBytes, rendererBufferBytes, workerHeapBytes, workerBufferBytes, guidedHeapBytes,
+    rendererHeapBytes,
+    rendererBufferBytes,
+    workerHeapBytes,
+    workerBufferBytes,
+    guidedHeapBytes,
     guidedBufferBytes: up(D),
     // The solver's linear memory, a hard per-module ceiling (wasmSolverSafe).
-    solverWasmBytes, wasmSolverSafe: solverWasmBytes <= WASM_SOLVER_LIMIT_BYTES,
+    solverWasmBytes,
+    wasmSolverSafe: solverWasmBytes <= WASM_SOLVER_LIMIT_BYTES,
     // Per isolate, heap + buffers: what the device has to hold for each.
     rendererBytes: rendererHeapBytes + rendererBufferBytes,
     workerBytes: workerHeapBytes + workerBufferBytes,
@@ -114,11 +125,14 @@ export const WASM_SOLVER_LIMIT_BYTES = 3.5 * 1024 ** 3
 // observation (`points` defaults from the observations by the average track length).
 export function projectSolverWasmBytes({ cameras = 0, observations = 0, points = null }, model = SPARSE_MEMORY_MODEL) {
   const m = model
-  const C = Math.max(0, cameras), O = Math.max(0, observations)
+  const C = Math.max(0, cameras),
+    O = Math.max(0, observations)
   const P = points ?? Math.ceil(O / m.observationsPerPoint)
   const pairs = C * Math.min(C, m.solverCovisible + 1)
   const n = Math.min(6 * C, m.solverDenseMaxN)
-  return Math.ceil((O * m.solverPerObservation + P * m.solverPerPoint + pairs * m.solverPerCameraPair + 16 * n * n) * m.margin)
+  return Math.ceil(
+    (O * m.solverPerObservation + P * m.solverPerPoint + pairs * m.solverPerCameraPair + 16 * n * n) * m.margin,
+  )
 }
 
 export function projectSparsePeakBytes(counts = {}) {
@@ -133,30 +147,61 @@ export function projectSparsePeakBytes(counts = {}) {
  * - Without one, heap + buffers must fit 75 % of the device budget.
  */
 export function sparseMemoryDecision({
-  estimateBytes, bufferBytes = 0, usedHeapBytes = null, heapLimitBytes = null,
-  fallbackBudgetBytes = null, releasedBytes = 0,
+  estimateBytes,
+  bufferBytes = 0,
+  usedHeapBytes = null,
+  heapLimitBytes = null,
+  fallbackBudgetBytes = null,
+  releasedBytes = 0,
 }) {
   const estimate = Math.max(0, estimateBytes || 0)
   const buffers = Math.max(0, bufferBytes || 0)
-  const deviceLimit = Number.isFinite(fallbackBudgetBytes) && fallbackBudgetBytes > 0 ? fallbackBudgetBytes * 0.75 : null
-  if (Number.isFinite(heapLimitBytes) && heapLimitBytes > 0
-      && Number.isFinite(usedHeapBytes) && usedHeapBytes >= 0) {
+  const deviceLimit =
+    Number.isFinite(fallbackBudgetBytes) && fallbackBudgetBytes > 0 ? fallbackBudgetBytes * 0.75 : null
+  if (Number.isFinite(heapLimitBytes) && heapLimitBytes > 0 && Number.isFinite(usedHeapBytes) && usedHeapBytes >= 0) {
     const used = Math.max(0, usedHeapBytes - Math.max(0, releasedBytes || 0))
     const limit = heapLimitBytes * SPARSE_HEAP_FRACTION
     const heapSafe = used + estimate <= limit
     const buffersSafe = deviceLimit == null || buffers <= deviceLimit
-    return { safe: heapSafe && buffersSafe, heapSafe, buffersSafe, estimateBytes: estimate, bufferBytes: buffers,
-      usedBytes: used, limitBytes: limit, bufferLimitBytes: deviceLimit, source: 'heap' }
+    return {
+      safe: heapSafe && buffersSafe,
+      heapSafe,
+      buffersSafe,
+      estimateBytes: estimate,
+      bufferBytes: buffers,
+      usedBytes: used,
+      limitBytes: limit,
+      bufferLimitBytes: deviceLimit,
+      source: 'heap',
+    }
   }
   if (deviceLimit != null) {
     const safe = estimate + buffers <= deviceLimit
-    return { safe, heapSafe: safe, buffersSafe: safe, estimateBytes: estimate, bufferBytes: buffers,
-      usedBytes: null, limitBytes: deviceLimit, bufferLimitBytes: deviceLimit, source: 'device' }
+    return {
+      safe,
+      heapSafe: safe,
+      buffersSafe: safe,
+      estimateBytes: estimate,
+      bufferBytes: buffers,
+      usedBytes: null,
+      limitBytes: deviceLimit,
+      bufferLimitBytes: deviceLimit,
+      source: 'device',
+    }
   }
   // Unknown platforms still get the estimate in the log; the live watchdog is
   // unavailable there, but refusing every sizeable job without a limit is worse.
-  return { safe: true, heapSafe: true, buffersSafe: true, estimateBytes: estimate, bufferBytes: buffers,
-    usedBytes: null, limitBytes: null, bufferLimitBytes: null, source: 'unknown' }
+  return {
+    safe: true,
+    heapSafe: true,
+    buffersSafe: true,
+    estimateBytes: estimate,
+    bufferBytes: buffers,
+    usedBytes: null,
+    limitBytes: null,
+    bufferLimitBytes: null,
+    source: 'unknown',
+  }
 }
 
 /**
@@ -180,7 +225,14 @@ export function planSparseRun({ guided, project, decide }) {
   const lean = project(false)
   const leanDecisions = decide(lean)
   if (ok(leanDecisions, lean)) {
-    return { peak: lean, decisions: leanDecisions, guided: false, guidedDropped: true, withGuidedPeak: peak, safe: true }
+    return {
+      peak: lean,
+      decisions: leanDecisions,
+      guided: false,
+      guidedDropped: true,
+      withGuidedPeak: peak,
+      safe: true,
+    }
   }
   return { peak, decisions, guided, guidedDropped: false, withGuidedPeak: null, safe: false }
 }

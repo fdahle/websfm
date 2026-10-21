@@ -16,9 +16,9 @@
 // chunks by lifting a subsample of their roots' points up (`liftLevels`), removing the
 // lifted points from the nodes they came from.
 
-export const GRID = 128          // cells per axis in a node's subsample grid
-export const LEAF_MAX = 32768    // a node with at most this many points is a leaf
-export const MAX_LEVEL = 24      // guard: never split below this
+export const GRID = 128 // cells per axis in a node's subsample grid
+export const LEAF_MAX = 32768 // a node with at most this many points is a leaf
+export const MAX_LEVEL = 24 // guard: never split below this
 
 /** The cube of node `key` inside a root cube { min: [x,y,z], size }. */
 export function nodeCube(root, [level, x, y, z]) {
@@ -40,7 +40,14 @@ export const childKey = ([l, x, y, z], o) => [l + 1, 2 * x + (o & 1), 2 * y + ((
 function makeCellTable(n) {
   let cap = 16
   while (cap < 2 * n) cap <<= 1
-  return { cap, keys: new Int32Array(cap).fill(-1), best: new Uint32Array(cap), dist: new Float64Array(cap), used: new Int32Array(Math.min(cap, n + 1)), nUsed: 0 }
+  return {
+    cap,
+    keys: new Int32Array(cap).fill(-1),
+    best: new Uint32Array(cap),
+    dist: new Float64Array(cap),
+    used: new Int32Array(Math.min(cap, n + 1)),
+    nUsed: 0,
+  }
 }
 
 /**
@@ -51,30 +58,47 @@ export function subsample(pts, idx, cube, grid = GRID) {
   const n = idx.length
   const t = makeCellTable(n)
   const { pos } = pts
-  const cs = cube.size / grid, [mx, my, mz] = cube.min
+  const cs = cube.size / grid,
+    [mx, my, mz] = cube.min
   const mask = t.cap - 1
   const cellOf = new Int32Array(n)
   for (let k = 0; k < n; k++) {
     const i = idx[k]
-    const fx = (pos[3 * i] - mx) / cs, fy = (pos[3 * i + 1] - my) / cs, fz = (pos[3 * i + 2] - mz) / cs
+    const fx = (pos[3 * i] - mx) / cs,
+      fy = (pos[3 * i + 1] - my) / cs,
+      fz = (pos[3 * i + 2] - mz) / cs
     const cx = Math.min(grid - 1, Math.max(0, Math.floor(fx)))
     const cy = Math.min(grid - 1, Math.max(0, Math.floor(fy)))
     const cz = Math.min(grid - 1, Math.max(0, Math.floor(fz)))
     const cell = cx + grid * (cy + grid * cz)
     cellOf[k] = cell
-    const dx = fx - cx - 0.5, dy = fy - cy - 0.5, dz = fz - cz - 0.5
+    const dx = fx - cx - 0.5,
+      dy = fy - cy - 0.5,
+      dz = fz - cz - 0.5
     const d = dx * dx + dy * dy + dz * dz
     let h = Math.imul(cell, 0x9e3779b1) & mask
     while (t.keys[h] !== -1 && t.keys[h] !== cell) h = (h + 1) & mask
-    if (t.keys[h] === -1) { t.keys[h] = cell; t.best[h] = k; t.dist[h] = d }
-    else if (d < t.dist[h]) { t.best[h] = k; t.dist[h] = d }
+    if (t.keys[h] === -1) {
+      t.keys[h] = cell
+      t.best[h] = k
+      t.dist[h] = d
+    } else if (d < t.dist[h]) {
+      t.best[h] = k
+      t.dist[h] = d
+    }
   }
   const take = new Uint8Array(n)
   let np = 0
-  for (let h = 0; h < t.cap; h++) if (t.keys[h] !== -1) { take[t.best[h]] = 1; np++ }
-  const picked = new Uint32Array(np), rest = new Uint32Array(n - np)
-  let a = 0, b = 0
-  for (let k = 0; k < n; k++) (take[k] ? (picked[a++] = idx[k]) : (rest[b++] = idx[k]))
+  for (let h = 0; h < t.cap; h++)
+    if (t.keys[h] !== -1) {
+      take[t.best[h]] = 1
+      np++
+    }
+  const picked = new Uint32Array(np),
+    rest = new Uint32Array(n - np)
+  let a = 0,
+    b = 0
+  for (let k = 0; k < n; k++) take[k] ? (picked[a++] = idx[k]) : (rest[b++] = idx[k])
   return { picked, rest }
 }
 
@@ -82,12 +106,16 @@ export function subsample(pts, idx, cube, grid = GRID) {
 export function splitOctants(pts, idx, cube) {
   const { pos } = pts
   const half = cube.size / 2
-  const cx = cube.min[0] + half, cy = cube.min[1] + half, cz = cube.min[2] + half
-  const oct = new Uint8Array(idx.length), counts = new Int32Array(8)
+  const cx = cube.min[0] + half,
+    cy = cube.min[1] + half,
+    cz = cube.min[2] + half
+  const oct = new Uint8Array(idx.length),
+    counts = new Int32Array(8)
   for (let k = 0; k < idx.length; k++) {
     const i = idx[k]
     const o = (pos[3 * i] >= cx ? 1 : 0) | (pos[3 * i + 1] >= cy ? 2 : 0) | (pos[3 * i + 2] >= cz ? 4 : 0)
-    oct[k] = o; counts[o]++
+    oct[k] = o
+    counts[o]++
   }
   const out = Array.from({ length: 8 }, (_, o) => new Uint32Array(counts[o]))
   const fill = new Int32Array(8)
@@ -106,7 +134,10 @@ export function buildSubtree(pts, idx, root, key = [0, 0, 0, 0], opts = {}) {
   while (stack.length) {
     const [k, ix] = stack.pop()
     if (!ix.length) continue
-    if (ix.length <= leafMax || k[0] >= maxLevel) { nodes.push({ key: k, idx: ix }); continue }
+    if (ix.length <= leafMax || k[0] >= maxLevel) {
+      nodes.push({ key: k, idx: ix })
+      continue
+    }
     const cube = nodeCube(root, k)
     const { picked, rest } = subsample(pts, ix, cube, grid)
     nodes.push({ key: k, idx: picked })
@@ -144,7 +175,10 @@ export function liftLevels(pts, nodes, root, opts = {}) {
       for (const c of children) total += c.idx.length
       const all = new Uint32Array(total)
       let o = 0
-      for (const c of children) { all.set(c.idx, o); o += c.idx.length }
+      for (const c of children) {
+        all.set(c.idx, o)
+        o += c.idx.length
+      }
       const { picked } = subsample(pts, all, nodeCube(root, key), grid)
       for (const i of picked) lifted[i] = 1
       for (const c of children) c.idx = c.idx.filter((i) => !lifted[i])
@@ -152,7 +186,8 @@ export function liftLevels(pts, nodes, root, opts = {}) {
       const existing = nodes.get(s)
       if (existing) {
         const merged = new Uint32Array(existing.idx.length + picked.length)
-        merged.set(existing.idx); merged.set(picked, existing.idx.length)
+        merged.set(existing.idx)
+        merged.set(picked, existing.idx.length)
         existing.idx = merged
       } else nodes.set(s, { key, idx: picked })
     }
@@ -180,7 +215,8 @@ export function buildOctree(pts, root, opts = {}) {
     return nodes
   }
   // Points into chunk cubes at chunkLevel, a subtree per chunk, then lift.
-  const per = 2 ** chunkLevel, cs = root.size / per
+  const per = 2 ** chunkLevel,
+    cs = root.size / per
   const chunks = new Map()
   for (let i = 0; i < pts.count; i++) {
     const cx = Math.min(per - 1, Math.floor((pts.pos[3 * i] - root.min[0]) / cs))

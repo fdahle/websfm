@@ -19,7 +19,10 @@ let dbPromise = null
 function openDb() {
   if (dbPromise) return dbPromise
   dbPromise = new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB unavailable')); return }
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB unavailable'))
+      return
+    }
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = () => {
       const db = req.result
@@ -27,17 +30,23 @@ function openDb() {
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
-  }).catch((err) => { dbPromise = null; throw err })
+  }).catch((err) => {
+    dbPromise = null
+    throw err
+  })
   return dbPromise
 }
 
 function tx(mode, fn) {
-  return openDb().then((db) => new Promise((resolve, reject) => {
-    const t = db.transaction(STORE, mode)
-    const req = fn(t.objectStore(STORE))
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  }))
+  return openDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const t = db.transaction(STORE, mode)
+        const req = fn(t.objectStore(STORE))
+        req.onsuccess = () => resolve(req.result)
+        req.onerror = () => reject(req.error)
+      }),
+  )
 }
 
 // All three swallow failures into a benign result: a missing/blocked IndexedDB
@@ -63,5 +72,7 @@ export async function loadProjectHandle(projectId) {
 export async function deleteProjectHandle(projectId) {
   try {
     await tx('readwrite', (s) => s.delete(projectId))
-  } catch { /* nothing to forget */ }
+  } catch {
+    /* nothing to forget */
+  }
 }

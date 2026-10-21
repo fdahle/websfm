@@ -10,25 +10,50 @@ test('Detect Reseau finds the crosses and applies a reseau calibration', async (
   await page.getByRole('button', { name: 'Create project', exact: true }).click()
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
   await page.evaluate(async () => {
-    const W = 2000, H = 1000, PITCH = 0.1, DX = 7, DY = 4
-    const files = await Promise.all(['a.png', 'b.png'].map(async (name, k) => {
-      const c = new OffscreenCanvas(W, H), g = c.getContext('2d')
-      // Textured ground: blocks of grey, different per image.
-      for (let y = 0; y < H; y += 10) for (let x = 0; x < W; x += 10) {
-        const v = 110 + ((x * 7 + y * 13 + k * 31) % 60); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, y, 10, 10)
-      }
-      g.strokeStyle = 'rgb(10,10,10)'; g.lineWidth = 1
-      for (let j = -4; j <= 4; j++) for (let i = -9; i <= 9; i++) {
-        const cx = W / 2 + DX + i * 10 / PITCH, cy = H / 2 + DY - j * 10 / PITCH
-        g.beginPath(); g.moveTo(cx - 5, cy); g.lineTo(cx + 5, cy); g.moveTo(cx, cy - 5); g.lineTo(cx, cy + 5); g.stroke()
-      }
-      return new File([await c.convertToBlob({ type: 'image/png' })], name, { type: 'image/png' })
-    }))
+    const W = 2000,
+      H = 1000,
+      PITCH = 0.1,
+      DX = 7,
+      DY = 4
+    const files = await Promise.all(
+      ['a.png', 'b.png'].map(async (name, k) => {
+        const c = new OffscreenCanvas(W, H),
+          g = c.getContext('2d')
+        // Textured ground: blocks of grey, different per image.
+        for (let y = 0; y < H; y += 10)
+          for (let x = 0; x < W; x += 10) {
+            const v = 110 + ((x * 7 + y * 13 + k * 31) % 60)
+            g.fillStyle = `rgb(${v},${v},${v})`
+            g.fillRect(x, y, 10, 10)
+          }
+        g.strokeStyle = 'rgb(10,10,10)'
+        g.lineWidth = 1
+        for (let j = -4; j <= 4; j++)
+          for (let i = -9; i <= 9; i++) {
+            const cx = W / 2 + DX + (i * 10) / PITCH,
+              cy = H / 2 + DY - (j * 10) / PITCH
+            g.beginPath()
+            g.moveTo(cx - 5, cy)
+            g.lineTo(cx + 5, cy)
+            g.moveTo(cx, cy - 5)
+            g.lineTo(cx, cy + 5)
+            g.stroke()
+          }
+        return new File([await c.convertToBlob({ type: 'image/png' })], name, { type: 'image/png' })
+      }),
+    )
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
     await useImagesStore().addImages(files)
   })
-  await expect.poll(() => page.evaluate(async () => (await import('/src/stores/useImagesStore.js')).useImagesStore()
-    .images.filter((i) => i.meta?.width > 0).length)).toBe(2)
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () =>
+          (await import('/src/stores/useImagesStore.js')).useImagesStore().images.filter((i) => i.meta?.width > 0)
+            .length,
+      ),
+    )
+    .toBe(2)
   await page.evaluate(async () => {
     const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
     const s = useSensorsStore()
@@ -42,7 +67,8 @@ test('Detect Reseau finds the crosses and applies a reseau calibration', async (
   const out = await page.evaluate(async () => {
     const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
-    const s = useSensorsStore().sensors[0], img = useImagesStore().images[0]
+    const s = useSensorsStore().sensors[0],
+      img = useImagesStore().images[0]
     const centre = img.fiducialDetections.find((d) => d.slot === 'r:0:0')
     return { kind: s.kind, transform: s.fiducialCalibration?.transform, found: img.fiducialDetections.length, centre }
   })
@@ -64,19 +90,36 @@ test('Detect Reseau stitches half-frame scans into one frame', async ({ page }) 
   await page.getByRole('button', { name: 'Create project', exact: true }).click()
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
   await page.evaluate(async () => {
-    const W = 2000, H = 1000, PITCH = 0.1
-    const frame = new OffscreenCanvas(W, H), g = frame.getContext('2d')
+    const W = 2000,
+      H = 1000,
+      PITCH = 0.1
+    const frame = new OffscreenCanvas(W, H),
+      g = frame.getContext('2d')
     // Textured ground without a period, so the overlap is decided by the scene.
     let seed = 7
-    const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 }
-    for (let y = 0; y < H; y += 10) for (let x = 0; x < W; x += 10) {
-      const v = Math.round(100 + 80 * rnd()); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, y, 10, 10)
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      return seed / 2147483648
     }
-    g.strokeStyle = 'rgb(10,10,10)'; g.lineWidth = 1
-    for (let j = -4; j <= 4; j++) for (let i = -9; i <= 9; i++) {
-      const cx = W / 2 + i * 10 / PITCH, cy = H / 2 - j * 10 / PITCH
-      g.beginPath(); g.moveTo(cx - 5, cy); g.lineTo(cx + 5, cy); g.moveTo(cx, cy - 5); g.lineTo(cx, cy + 5); g.stroke()
-    }
+    for (let y = 0; y < H; y += 10)
+      for (let x = 0; x < W; x += 10) {
+        const v = Math.round(100 + 80 * rnd())
+        g.fillStyle = `rgb(${v},${v},${v})`
+        g.fillRect(x, y, 10, 10)
+      }
+    g.strokeStyle = 'rgb(10,10,10)'
+    g.lineWidth = 1
+    for (let j = -4; j <= 4; j++)
+      for (let i = -9; i <= 9; i++) {
+        const cx = W / 2 + (i * 10) / PITCH,
+          cy = H / 2 - (j * 10) / PITCH
+        g.beginPath()
+        g.moveTo(cx - 5, cy)
+        g.lineTo(cx + 5, cy)
+        g.moveTo(cx, cy - 5)
+        g.lineTo(cx, cy + 5)
+        g.stroke()
+      }
     const half = async (name, x0) => {
       const c = new OffscreenCanvas(1250, H)
       c.getContext('2d').drawImage(frame, -x0, 0)
@@ -85,8 +128,15 @@ test('Detect Reseau stitches half-frame scans into one frame', async ({ page }) 
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
     await useImagesStore().addImages([await half('f1_a.png', 0), await half('f1_b.png', 750)])
   })
-  await expect.poll(() => page.evaluate(async () => (await import('/src/stores/useImagesStore.js')).useImagesStore()
-    .images.filter((i) => i.meta?.width > 0).length)).toBe(2)
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () =>
+          (await import('/src/stores/useImagesStore.js')).useImagesStore().images.filter((i) => i.meta?.width > 0)
+            .length,
+      ),
+    )
+    .toBe(2)
   await page.evaluate(async () => {
     const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
@@ -95,7 +145,8 @@ test('Detect Reseau stitches half-frame scans into one frame', async ({ page }) 
     s.updateSensor(s.sensors[0].id, 'pixelSize', 0.1)
     // A mark on the left half at frame px (600, 300): film (−40, 20) mm.
     const a = useImagesStore().images.find((i) => i.name === 'f1_a.png')
-    const gcps = useGcpsStore(), id = gcps.addPoint({ role: 'marker' })
+    const gcps = useGcpsStore(),
+      id = gcps.addPoint({ role: 'marker' })
     gcps.setObservation(id, a.id, a.name, 600, 300)
     document.querySelector('#app').__vue_app__._instance.setupState.handleCommand('detect-reseau')
   })
@@ -106,8 +157,16 @@ test('Detect Reseau stitches half-frame scans into one frame', async ({ page }) 
   await expect(row).toHaveCount(1, { timeout: 60_000 })
   await expect(row).toContainText('19 × 9')
   await expect(row.locator('td').nth(3)).toHaveText('5')
-  await expect.poll(() => page.evaluate(async () => (await import('/src/stores/useImagesStore.js')).useImagesStore()
-    .images.map((i) => `${i.name} ${i.meta?.width}×${i.meta?.height}`).join(','))).toBe('f1.tif 1900×900')
+  await expect
+    .poll(() =>
+      page.evaluate(async () =>
+        (await import('/src/stores/useImagesStore.js'))
+          .useImagesStore()
+          .images.map((i) => `${i.name} ${i.meta?.width}×${i.meta?.height}`)
+          .join(','),
+      ),
+    )
+    .toBe('f1.tif 1900×900')
   const out = await page.evaluate(async () => {
     const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
@@ -120,11 +179,18 @@ test('Detect Reseau stitches half-frame scans into one frame', async ({ page }) 
     const bmp = await createImageBitmap(await (await fetch(computeSourceOf(img))).blob())
     const ctx = new OffscreenCanvas(bmp.width, bmp.height).getContext('2d')
     ctx.drawImage(bmp, 0, 0)
-    const N = 41, rgba = ctx.getImageData(930, 430, N, N).data, data = new Float32Array(N * N)
+    const N = 41,
+      rgba = ctx.getImageData(930, 430, N, N).data,
+      data = new Float32Array(N * N)
     for (let k = 0; k < N * N; k++) data[k] = rgba[4 * k]
     const c = crossInWindow({ data, width: N, height: N }, { armPx: 5, widthPx: 1 })
-    return { label: s.label, stitched: s.reseauStitched, pixelSize: s.pixelSize, obs: useGcpsStore().gcps[0].observations,
-      centre: c && { x: 930 + c.x, y: 430 + c.y } }
+    return {
+      label: s.label,
+      stitched: s.reseauStitched,
+      pixelSize: s.pixelSize,
+      obs: useGcpsStore().gcps[0].observations,
+      centre: c && { x: 930 + c.x, y: 430 + c.y },
+    }
   })
   expect(out.label).toMatch(/\(stitched\)$/)
   expect(out.stitched).toBe(true)

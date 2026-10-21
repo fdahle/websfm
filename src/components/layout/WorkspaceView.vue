@@ -46,37 +46,112 @@ const { rasterById, ensureRasterLoaded } = externalStore
 const { theme } = useTheme()
 const { imageViewPrefs, patchImageView, showKeypointsFor } = useImageViewSettings()
 const {
-  tabs, activeTabId, activeTab, activateTab, moveTab, openImageTab,
-  closeTab, closeAllTabs, closeOtherTabs, closeTabsToLeft, closeTabsToRight,
-  viewerRef, mapViewerRef, imageViewerRefs, productViewerRefs, handleCommand,
-  showCameras, showGrid, showLegend, showFootprints, showMapGrid, showMapCameras, selectTool3d, mapGcpEdit,
-  mapLayers, probeMapLayersAt, mapFrame, modelCameras, modelMarkers, mapMeasureTarget, mapNotes,
-  alignedUuids, hasSparse, editableClouds, onEditSelection,
-  regionEdit, regionDraft, fitRegionDraft, applyRegion, removeRegion,
-  orientEdit, orientDraft, orientPicking, orientPlanePicks, applyOrientation, removeOrientation,
-  toggleOrientPick, orientAutoUp, orientCentreOrigin, setOrientHeading,
-  alignPairs, alignReferences, applyAlignPairs,
-  viewerPickMode, onViewerPick, viewerMarkers, viewerRegionBox, viewerRegionStale,
-  gcpReport, selectedGcpId, selectGcp, jumpToImage, exitGcpEdit, setGcpGroundPosition, addGcpAtCoord, pickGcpFromReference,
-  assignGcpObservation, addGcpAtObservation, activeImageGcps, activeImageGcpGuides, allGcpsBrief,
-  confirmRemoveGcp, confirmRemoveGcpObservation,
-  sensorForImage, fiducialDisplayForImage, markDisplayedFiducial,
+  tabs,
+  activeTabId,
+  activeTab,
+  activateTab,
+  moveTab,
+  openImageTab,
+  closeTab,
+  closeAllTabs,
+  closeOtherTabs,
+  closeTabsToLeft,
+  closeTabsToRight,
+  viewerRef,
+  mapViewerRef,
+  imageViewerRefs,
+  productViewerRefs,
+  handleCommand,
+  showCameras,
+  showGrid,
+  showLegend,
+  showFootprints,
+  showMapGrid,
+  showMapCameras,
+  selectTool3d,
+  mapGcpEdit,
+  mapLayers,
+  probeMapLayersAt,
+  mapFrame,
+  modelCameras,
+  modelMarkers,
+  mapMeasureTarget,
+  mapNotes,
+  alignedUuids,
+  hasSparse,
+  editableClouds,
+  onEditSelection,
+  regionEdit,
+  regionDraft,
+  fitRegionDraft,
+  applyRegion,
+  removeRegion,
+  orientEdit,
+  orientDraft,
+  orientPicking,
+  orientPlanePicks,
+  applyOrientation,
+  removeOrientation,
+  toggleOrientPick,
+  orientAutoUp,
+  orientCentreOrigin,
+  setOrientHeading,
+  alignPairs,
+  alignReferences,
+  applyAlignPairs,
+  viewerPickMode,
+  onViewerPick,
+  viewerMarkers,
+  viewerRegionBox,
+  viewerRegionStale,
+  gcpReport,
+  selectedGcpId,
+  selectGcp,
+  jumpToImage,
+  exitGcpEdit,
+  setGcpGroundPosition,
+  addGcpAtCoord,
+  pickGcpFromReference,
+  assignGcpObservation,
+  addGcpAtObservation,
+  activeImageGcps,
+  activeImageGcpGuides,
+  allGcpsBrief,
+  confirmRemoveGcp,
+  confirmRemoveGcpObservation,
+  sensorForImage,
+  fiducialDisplayForImage,
+  markDisplayedFiducial,
 } = useAppContext()
 
-const setViewer = (el) => { viewerRef.value = el }
-const setMapViewer = (el) => { mapViewerRef.value = el }
+const setViewer = (el) => {
+  viewerRef.value = el
+}
+const setMapViewer = (el) => {
+  mapViewerRef.value = el
+}
 
 // The map is a large OpenLayers subtree. Mount it on first use, then retain it so
 // pan/zoom/layer state survives subsequent tab switches.
 const mapMounted = ref(activeTabId.value === 'map')
-watch(activeTabId, (id) => { if (id === 'map') mapMounted.value = true })
+watch(activeTabId, (id) => {
+  if (id === 'map') mapMounted.value = true
+})
 
 // ── Tab drag-reorder + context menu ─────────────────────────────────────────────
 const {
-  draggedTabId, dragOverTabId,
-  onTabDragStart, onTabDragOver, onTabDrop, onTabDragEnd,
-  tabCtx, onTabRightClick, closeTabCtx,
-  tabCtxHasLeft, tabCtxHasRight, tabCtxHasOthers,
+  draggedTabId,
+  dragOverTabId,
+  onTabDragStart,
+  onTabDragOver,
+  onTabDrop,
+  onTabDragEnd,
+  tabCtx,
+  onTabRightClick,
+  closeTabCtx,
+  tabCtxHasLeft,
+  tabCtxHasRight,
+  tabCtxHasOthers,
 } = useTabDrag({ tabs, moveTab })
 
 // Per-observation reprojection residual vectors for the active image (WS3 overlay).
@@ -89,7 +164,9 @@ const activeImageResiduals = computed(() => {
   const cam = img && reconstructionStore.sparseCameras.get(img.uuid)
   if (!cam) return []
   return imageResidualVectors(
-    cam, reconstructionStore.mainSparseCloud?.points ?? [], img.uuid,
+    cam,
+    reconstructionStore.mainSparseCloud?.points ?? [],
+    img.uuid,
     canonicalToScanFor(img, cam),
   )
 })
@@ -109,9 +186,11 @@ function canonicalToScanFor(img, cam) {
 // same way COLMAP/Metashape orient the view (see estimateUpFromCameras). Derived from
 // the sparse cameras, so it's stable across sparse↔dense↔mesh selections.
 // A user orientation (Orient model) defines up; otherwise it is estimated from the cameras.
-const viewerSceneUp = computed(() => (reconstructionStore.orientationState.active
-  ? normalizeOrientation(reconstructionStore.orientation).up
-  : estimateUpFromCameras(sparseCameras.value)))
+const viewerSceneUp = computed(() =>
+  reconstructionStore.orientationState.active
+    ? normalizeOrientation(reconstructionStore.orientation).up
+    : estimateUpFromCameras(sparseCameras.value),
+)
 
 // Queue layer changes while the 3D tab is hidden. Each cloud has its own GPU
 // object; selection no longer replaces the other visible layers.
@@ -120,10 +199,18 @@ const viewerSceneUp = computed(() => (reconstructionStore.orientationState.activ
 const sceneClouds = computed(() => {
   const live = reconstructionStore.liveSparse
   if (live) {
-    return [{ id: 'live-sparse', name: 'Reconstructing…', kind: 'sparse', cameras: live.cameras,
-      points: live.points, count: live.points.count }]
+    return [
+      {
+        id: 'live-sparse',
+        name: 'Reconstructing…',
+        kind: 'sparse',
+        cameras: live.cameras,
+        points: live.points,
+        count: live.points.count,
+      },
+    ]
   }
-  return clouds.value.map(c => ({ ...c }))
+  return clouds.value.map((c) => ({ ...c }))
 })
 let scenePending = true
 function flushScene() {
@@ -135,24 +222,41 @@ watch(sceneClouds, () => {
   scenePending = true
   if (activeTabId.value === 'viewer') flushScene()
 })
-watch(viewerRef, () => { scenePending = true; if (activeTabId.value === 'viewer') flushScene() })
+watch(viewerRef, () => {
+  scenePending = true
+  if (activeTabId.value === 'viewer') flushScene()
+})
 // The live view stays usable during the run (ProgressModal's spotlight), for looking
 // only: a tool left open would put its toolbox, and its Delete or Export, within reach.
-watch(() => !!reconstructionStore.liveSparse, (live) => {
-  if (!live) return
-  viewerRef.value?.exitTools?.()
-  regionEdit.value = false; orientEdit.value = false; orientPicking.value = null; alignPairs.value = null
+watch(
+  () => !!reconstructionStore.liveSparse,
+  (live) => {
+    if (!live) return
+    viewerRef.value?.exitTools?.()
+    regionEdit.value = false
+    orientEdit.value = false
+    orientPicking.value = null
+    alignPairs.value = null
+  },
+)
+watch(activeTabId, (id) => {
+  if (id === 'viewer') flushScene()
 })
-watch(activeTabId, (id) => { if (id === 'viewer') flushScene() })
 
 // The tab menu answers Escape and outside clicks before anything else sees them.
 // Capture phase: the viewers below (3D selection, measuring) also listen on window
 // and mount before this, so a bubbling listener would let them clear a selection
 // on the same press that only meant to close the menu.
 function onKeydown(e) {
-  if (e.key === 'Escape' && tabCtx.value) { closeTabCtx(); e.preventDefault(); e.stopImmediatePropagation() }
+  if (e.key === 'Escape' && tabCtx.value) {
+    closeTabCtx()
+    e.preventDefault()
+    e.stopImmediatePropagation()
+  }
 }
-function onDocumentClick() { if (tabCtx.value) closeTabCtx() }
+function onDocumentClick() {
+  if (tabCtx.value) closeTabCtx()
+}
 onMounted(() => {
   window.addEventListener('keydown', onKeydown, true)
   document.addEventListener('click', onDocumentClick)
@@ -164,133 +268,290 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-<main class="main">
-  <div class="tabstrip">
-    <button
-      v-for="tab in tabs"
-      :key="tab.id"
-      class="tab"
-      :class="{
-        active: tab.id === activeTabId,
-        dragging: tab.id === draggedTabId,
-        'drag-over': tab.id === dragOverTabId && tab.id !== draggedTabId,
-      }"
-      :draggable="tab.closable"
-      @click="activateTab(tab.id)"
-      @contextmenu="onTabRightClick($event, tab)"
-      @dragstart="onTabDragStart($event, tab)"
-      @dragover="onTabDragOver($event, tab)"
-      @drop="onTabDrop(tab)"
-      @dragend="onTabDragEnd"
-    >
-      <span class="tab-title">{{ tab.title }}</span>
-      <span v-if="tab.closable" class="tab-close" title="Close" @click.stop="closeTab(tab.id)">×</span>
-    </button>
-  </div>
+  <main class="main">
+    <div class="tabstrip">
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="tab"
+        :class="{
+          'active': tab.id === activeTabId,
+          'dragging': tab.id === draggedTabId,
+          'drag-over': tab.id === dragOverTabId && tab.id !== draggedTabId,
+        }"
+        :draggable="tab.closable"
+        @click="activateTab(tab.id)"
+        @contextmenu="onTabRightClick($event, tab)"
+        @dragstart="onTabDragStart($event, tab)"
+        @dragover="onTabDragOver($event, tab)"
+        @drop="onTabDrop(tab)"
+        @dragend="onTabDragEnd"
+      >
+        <span class="tab-title">{{ tab.title }}</span>
+        <span v-if="tab.closable" class="tab-close" title="Close" @click.stop="closeTab(tab.id)">×</span>
+      </button>
+    </div>
 
-  <div class="content">
-    <Viewer3D :ref="setViewer" data-run-spotlight v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" :frame-signature="reconstructionStore.currentFrameSignature" @command="handleCommand" @edit-selection="onEditSelection" @select-tool="(t) => { selectTool3d = t }"
-      :region-box="viewerRegionBox" :region-stale="viewerRegionStale" :region-edit="regionEdit" @region-change="(b) => { regionDraft = b }"
-      :pick-mode="viewerPickMode" :markers="viewerMarkers" @pick="onViewerPick">
-      <template #toolbox>
-        <RegionToolbox v-if="regionEdit" v-model="regionDraft" :saved-state="reconstructionStore.regionState.active ? 'active' : (reconstructionStore.region ? 'stale' : 'none')"
-          :can-fit-dense="editableClouds.some((c) => !c.imported)" @fit="fitRegionDraft" @apply="applyRegion" @clear="removeRegion" @close="regionEdit = false" />
-        <OrientToolbox v-if="orientEdit" :draft="orientDraft" :picking="orientPicking" :plane-picks="orientPlanePicks.length"
-          :saved-state="reconstructionStore.orientationState.active ? 'active' : (reconstructionStore.orientation ? 'stale' : 'none')"
-          :georeferenced="!!georef" @pick="toggleOrientPick"
-          @auto-up="orientAutoUp" @centre-origin="orientCentreOrigin" @heading="setOrientHeading"
-          @apply="applyOrientation" @clear="removeOrientation" @close="orientEdit = false" />
-        <AlignPairsToolbox v-if="alignPairs" v-model:source-id="alignPairs.sourceId" v-model:reference-id="alignPairs.referenceId"
-          v-model:allow-scale="alignPairs.allowScale" :clouds="editableClouds" :references="alignReferences" :pairs="alignPairs.pairs"
-          @undo="alignPairs.pairs = alignPairs.pairs.slice(0, -1)" @clear="alignPairs.pairs = []" @apply="applyAlignPairs" @close="alignPairs = null" />
-      </template>
-    </Viewer3D>
-    <ViewerMap v-if="mapMounted" :ref="setMapViewer" v-show="activeTabId === 'map'" v-model:gcp-edit="mapGcpEdit" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :show-cameras="showMapCameras" :rasters="mapLayers" :probe-raster="probeMapLayersAt" :model-frame="mapFrame" :model-cameras="modelCameras" :model-markers="modelMarkers" :measure-target="mapMeasureTarget" :notes="mapNotes" :load-raster="ensureRasterLoaded" @select="selectImage" @open-image="(id) => openImageTab(id)" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="confirmRemoveGcp" />
-    <template v-for="tab in tabs" :key="tab.id">
-      <ViewerImage
-        v-if="tab.type === 'image' && imageById(tab.imageId)"
-        v-show="activeTabId === tab.id"
-        :ref="(el) => { if (el) imageViewerRefs[tab.imageId] = el; else delete imageViewerRefs[tab.imageId] }"
-        :image="imageById(tab.imageId)"
-        :show-keypoints="showKeypointsFor(imageById(tab.imageId))"
-        :show-mask="imageViewPrefs.showMask"
-        :show-depth="imageViewPrefs.showDepth"
-        :show-gcps="imageViewPrefs.showGcps"
-        :gcps="activeTabId === tab.id ? activeImageGcps : []"
-        :gcp-guides="activeTabId === tab.id ? activeImageGcpGuides : []"
-        :show-residuals="imageViewPrefs.showResiduals"
-        :residuals="activeTabId === tab.id ? activeImageResiduals : []"
-        :all-gcps="allGcpsBrief"
-        :selected-gcp-id="selectedGcpId"
-        :mask-edit="imageViewPrefs.maskEdit"
-        :gcp-edit="imageViewPrefs.gcpEdit"
-        :scene-type="currentSceneType"
-        @exit-mask-edit="patchImageView({ maskEdit: false })"
-        @exit-gcp-edit="exitGcpEdit"
-        @update-mask="(blob, persist) => updateMask(tab.imageId, blob, persist)"
-        @update-depth="(blob) => updateDepth(tab.imageId, blob)"
-        :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
-        :show-fiducials="imageViewPrefs.showFiducials"
-        :fiducial-marks="fiducialDisplayForImage(tab.imageId).marks"
-        :fiducial-obs="fiducialDisplayForImage(tab.imageId).obs"
-        :fiducial-transform="fiducialDisplayForImage(tab.imageId).transform"
-        @mark-gcp="(pt) => assignGcpObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
-        @add-gcp="(pt) => addGcpAtObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
-        @select-gcp="selectGcp"
-        @delete-gcp="confirmRemoveGcp"
-        @mark-fiducial="(event) => markDisplayedFiducial(tab.imageId, event)"
-      />
-      <ViewerGcp
-        v-else-if="tab.type === 'gcp'"
-        v-show="activeTabId === tab.id"
-        :gcp="gcps.find((g) => g.id === tab.gcpId) ?? null"
+    <div class="content">
+      <Viewer3D
+        :ref="setViewer"
+        data-run-spotlight
+        v-show="activeTabId === 'viewer'"
+        :theme="theme"
         :images="images"
-        :report="gcpReport.find((r) => r.gcpId === tab.gcpId) ?? null"
-        @jump-to-image="jumpToImage"
-        @remove-observation="confirmRemoveGcpObservation"
-      />
-      <ProductViewer
-        v-else-if="tab.type === 'product'"
-        v-show="activeTabId === tab.id"
-        :ref="(el) => { if (el) productViewerRefs[tab.id] = el; else delete productViewerRefs[tab.id] }"
-        :kind="tab.productKind"
-        :product="tab.productKind === 'ortho' ? ortho : dem"
-        :frame-status="reconstructionStore.productFrameStatus(tab.productKind === 'ortho' ? ortho : dem)"
+        :show-cameras="showCameras"
+        :show-grid="showGrid"
+        :show-legend="showLegend"
+        :scene-up="viewerSceneUp"
+        :frame-signature="reconstructionStore.currentFrameSignature"
         @command="handleCommand"
-      />
-      <!-- Same viewer, imported raster instead of a computed product. -->
-      <ProductViewer
-        v-else-if="tab.type === 'raster'"
-        v-show="activeTabId === tab.id"
-        :ref="(el) => { if (el) productViewerRefs[tab.id] = el; else delete productViewerRefs[tab.id] }"
-        :kind="rasterById(tab.rasterId)?.kind ?? 'dem'"
-        :product="rasterById(tab.rasterId)"
-        :source="rasterSources.get(tab.rasterId) ?? null"
-        :selected-gcp="gcps.find((g) => g.id === selectedGcpId) ?? null"
+        @edit-selection="onEditSelection"
+        @select-tool="
+          (t) => {
+            selectTool3d = t
+          }
+        "
+        :region-box="viewerRegionBox"
+        :region-stale="viewerRegionStale"
+        :region-edit="regionEdit"
+        @region-change="
+          (b) => {
+            regionDraft = b
+          }
+        "
+        :pick-mode="viewerPickMode"
+        :markers="viewerMarkers"
+        @pick="onViewerPick"
+      >
+        <template #toolbox>
+          <RegionToolbox
+            v-if="regionEdit"
+            v-model="regionDraft"
+            :saved-state="
+              reconstructionStore.regionState.active ? 'active' : reconstructionStore.region ? 'stale' : 'none'
+            "
+            :can-fit-dense="editableClouds.some((c) => !c.imported)"
+            @fit="fitRegionDraft"
+            @apply="applyRegion"
+            @clear="removeRegion"
+            @close="regionEdit = false"
+          />
+          <OrientToolbox
+            v-if="orientEdit"
+            :draft="orientDraft"
+            :picking="orientPicking"
+            :plane-picks="orientPlanePicks.length"
+            :saved-state="
+              reconstructionStore.orientationState.active
+                ? 'active'
+                : reconstructionStore.orientation
+                  ? 'stale'
+                  : 'none'
+            "
+            :georeferenced="!!georef"
+            @pick="toggleOrientPick"
+            @auto-up="orientAutoUp"
+            @centre-origin="orientCentreOrigin"
+            @heading="setOrientHeading"
+            @apply="applyOrientation"
+            @clear="removeOrientation"
+            @close="orientEdit = false"
+          />
+          <AlignPairsToolbox
+            v-if="alignPairs"
+            v-model:source-id="alignPairs.sourceId"
+            v-model:reference-id="alignPairs.referenceId"
+            v-model:allow-scale="alignPairs.allowScale"
+            :clouds="editableClouds"
+            :references="alignReferences"
+            :pairs="alignPairs.pairs"
+            @undo="alignPairs.pairs = alignPairs.pairs.slice(0, -1)"
+            @clear="alignPairs.pairs = []"
+            @apply="applyAlignPairs"
+            @close="alignPairs = null"
+          />
+        </template>
+      </Viewer3D>
+      <ViewerMap
+        v-if="mapMounted"
+        :ref="setMapViewer"
+        v-show="activeTabId === 'map'"
+        v-model:gcp-edit="mapGcpEdit"
+        :images="images"
+        :gcps="gcps"
+        :footprints="mapFootprints"
+        :poses="poses"
+        :selected-id="selectedId"
+        :selected-gcp-id="selectedGcpId"
+        :aligned-uuids="alignedUuids"
+        :has-sparse="hasSparse"
+        :crs="currentCrs"
+        :show-footprints="showFootprints"
+        :show-grid="showMapGrid"
+        :show-cameras="showMapCameras"
+        :rasters="mapLayers"
+        :probe-raster="probeMapLayersAt"
+        :model-frame="mapFrame"
+        :model-cameras="modelCameras"
+        :model-markers="modelMarkers"
+        :measure-target="mapMeasureTarget"
+        :notes="mapNotes"
+        :load-raster="ensureRasterLoaded"
+        @select="selectImage"
+        @open-image="(id) => openImageTab(id)"
         @command="handleCommand"
-        @pick-gcp="(pick) => pickGcpFromReference(tab.rasterId, pick)"
+        @select-gcp="selectGcp"
+        @set-gcp-position="setGcpGroundPosition"
+        @add-gcp-at="addGcpAtCoord"
+        @delete-gcp="confirmRemoveGcp"
       />
-    </template>
+      <template v-for="tab in tabs" :key="tab.id">
+        <ViewerImage
+          v-if="tab.type === 'image' && imageById(tab.imageId)"
+          v-show="activeTabId === tab.id"
+          :ref="
+            (el) => {
+              if (el) imageViewerRefs[tab.imageId] = el
+              else delete imageViewerRefs[tab.imageId]
+            }
+          "
+          :image="imageById(tab.imageId)"
+          :show-keypoints="showKeypointsFor(imageById(tab.imageId))"
+          :show-mask="imageViewPrefs.showMask"
+          :show-depth="imageViewPrefs.showDepth"
+          :show-gcps="imageViewPrefs.showGcps"
+          :gcps="activeTabId === tab.id ? activeImageGcps : []"
+          :gcp-guides="activeTabId === tab.id ? activeImageGcpGuides : []"
+          :show-residuals="imageViewPrefs.showResiduals"
+          :residuals="activeTabId === tab.id ? activeImageResiduals : []"
+          :all-gcps="allGcpsBrief"
+          :selected-gcp-id="selectedGcpId"
+          :mask-edit="imageViewPrefs.maskEdit"
+          :gcp-edit="imageViewPrefs.gcpEdit"
+          :scene-type="currentSceneType"
+          @exit-mask-edit="patchImageView({ maskEdit: false })"
+          @exit-gcp-edit="exitGcpEdit"
+          @update-mask="(blob, persist) => updateMask(tab.imageId, blob, persist)"
+          @update-depth="(blob) => updateDepth(tab.imageId, blob)"
+          :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
+          :show-fiducials="imageViewPrefs.showFiducials"
+          :fiducial-marks="fiducialDisplayForImage(tab.imageId).marks"
+          :fiducial-obs="fiducialDisplayForImage(tab.imageId).obs"
+          :fiducial-transform="fiducialDisplayForImage(tab.imageId).transform"
+          @mark-gcp="(pt) => assignGcpObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
+          @add-gcp="(pt) => addGcpAtObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
+          @select-gcp="selectGcp"
+          @delete-gcp="confirmRemoveGcp"
+          @mark-fiducial="(event) => markDisplayedFiducial(tab.imageId, event)"
+        />
+        <ViewerGcp
+          v-else-if="tab.type === 'gcp'"
+          v-show="activeTabId === tab.id"
+          :gcp="gcps.find((g) => g.id === tab.gcpId) ?? null"
+          :images="images"
+          :report="gcpReport.find((r) => r.gcpId === tab.gcpId) ?? null"
+          @jump-to-image="jumpToImage"
+          @remove-observation="confirmRemoveGcpObservation"
+        />
+        <ProductViewer
+          v-else-if="tab.type === 'product'"
+          v-show="activeTabId === tab.id"
+          :ref="
+            (el) => {
+              if (el) productViewerRefs[tab.id] = el
+              else delete productViewerRefs[tab.id]
+            }
+          "
+          :kind="tab.productKind"
+          :product="tab.productKind === 'ortho' ? ortho : dem"
+          :frame-status="reconstructionStore.productFrameStatus(tab.productKind === 'ortho' ? ortho : dem)"
+          @command="handleCommand"
+        />
+        <!-- Same viewer, imported raster instead of a computed product. -->
+        <ProductViewer
+          v-else-if="tab.type === 'raster'"
+          v-show="activeTabId === tab.id"
+          :ref="
+            (el) => {
+              if (el) productViewerRefs[tab.id] = el
+              else delete productViewerRefs[tab.id]
+            }
+          "
+          :kind="rasterById(tab.rasterId)?.kind ?? 'dem'"
+          :product="rasterById(tab.rasterId)"
+          :source="rasterSources.get(tab.rasterId) ?? null"
+          :selected-gcp="gcps.find((g) => g.id === selectedGcpId) ?? null"
+          @command="handleCommand"
+          @pick-gcp="(pick) => pickGcpFromReference(tab.rasterId, pick)"
+        />
+      </template>
+    </div>
+  </main>
 
-  </div>
-</main>
-
-<!-- Tab context menu (closable tabs only) -->
-<Teleport to="body">
-  <div
-    v-if="tabCtx"
-    class="tab-ctx-menu"
-    :style="{ left: tabCtx.x + 'px', top: tabCtx.y + 'px' }"
-    @click.stop
-  >
-    <button class="tab-ctx-item" @click="() => { closeTab(tabCtx.id); closeTabCtx() }">Close</button>
-    <button class="tab-ctx-item" :disabled="!tabCtxHasOthers" @click="() => { closeOtherTabs(tabCtx.id); closeTabCtx() }">Close others</button>
-    <button class="tab-ctx-item" :disabled="!tabCtxHasLeft" @click="() => { closeTabsToLeft(tabCtx.id); closeTabCtx() }">Close to the left</button>
-    <button class="tab-ctx-item" :disabled="!tabCtxHasRight" @click="() => { closeTabsToRight(tabCtx.id); closeTabCtx() }">Close to the right</button>
-    <div class="tab-ctx-sep" />
-    <button class="tab-ctx-item" @click="() => { closeAllTabs(); closeTabCtx() }">Close all</button>
-  </div>
-</Teleport>
+  <!-- Tab context menu (closable tabs only) -->
+  <Teleport to="body">
+    <div v-if="tabCtx" class="tab-ctx-menu" :style="{ left: tabCtx.x + 'px', top: tabCtx.y + 'px' }" @click.stop>
+      <button
+        class="tab-ctx-item"
+        @click="
+          () => {
+            closeTab(tabCtx.id)
+            closeTabCtx()
+          }
+        "
+      >
+        Close
+      </button>
+      <button
+        class="tab-ctx-item"
+        :disabled="!tabCtxHasOthers"
+        @click="
+          () => {
+            closeOtherTabs(tabCtx.id)
+            closeTabCtx()
+          }
+        "
+      >
+        Close others
+      </button>
+      <button
+        class="tab-ctx-item"
+        :disabled="!tabCtxHasLeft"
+        @click="
+          () => {
+            closeTabsToLeft(tabCtx.id)
+            closeTabCtx()
+          }
+        "
+      >
+        Close to the left
+      </button>
+      <button
+        class="tab-ctx-item"
+        :disabled="!tabCtxHasRight"
+        @click="
+          () => {
+            closeTabsToRight(tabCtx.id)
+            closeTabCtx()
+          }
+        "
+      >
+        Close to the right
+      </button>
+      <div class="tab-ctx-sep" />
+      <button
+        class="tab-ctx-item"
+        @click="
+          () => {
+            closeAllTabs()
+            closeTabCtx()
+          }
+        "
+      >
+        Close all
+      </button>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -323,15 +584,21 @@ onBeforeUnmount(() => {
   cursor: pointer;
   white-space: nowrap;
 }
-.tab:hover { color: var(--text); }
+.tab:hover {
+  color: var(--text);
+}
 .tab.active {
   background: var(--bg);
   color: var(--text);
   box-shadow: inset 0 2px 0 var(--accent);
 }
-.tab.dragging { opacity: 0.45; }
+.tab.dragging {
+  opacity: 0.45;
+}
 /* Drop indicator: accent bar on the leading edge of the hovered tab. */
-.tab.drag-over { box-shadow: inset 3px 0 0 var(--accent); }
+.tab.drag-over {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 .tab-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -376,7 +643,9 @@ onBeforeUnmount(() => {
   text-align: left;
   cursor: pointer;
 }
-.tab-ctx-item:hover:not(:disabled) { background: var(--hover-bg); }
+.tab-ctx-item:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
 .tab-ctx-item:disabled {
   opacity: 0.35;
   cursor: default;

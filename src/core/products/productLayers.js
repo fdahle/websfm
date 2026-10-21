@@ -17,7 +17,10 @@ export function normalizeProductLayers(raw) {
     const v = raw?.[kind]
     if (!v || typeof v !== 'object') continue
     const opacity = Number(v.opacity)
-    out[kind] = { visible: v.visible === true, opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1 }
+    out[kind] = {
+      visible: v.visible === true,
+      opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1,
+    }
   }
   return out
 }
@@ -52,7 +55,9 @@ export function placeProductLayer(kind, product, state, view) {
   if (blocker) return { reason: blocker }
   const local = !product.crs || product.crs === 'local'
   const desc = productDescriptor(product)
-  let crs = product.crs, gt = desc.geoTransform, offset = null
+  let crs = product.crs,
+    gt = desc.geoTransform,
+    offset = null
   if (view.mode === 'crs') {
     if (local) return { reason: 'it is in the model frame — turn on Map ▸ Model Frame to see it' }
   } else {
@@ -68,25 +73,34 @@ export function placeProductLayer(kind, product, state, view) {
   // offset falls back to the preview image, which can be placed anywhere.
   const tiled = productTiledMeta(kind, product)
   const cog = tiled && !(offset && (offset[0] || offset[1])) ? product.cog : null
-  return { layer: {
-    id: `product:${kind}`,
-    product: true,
-    kind,
-    name: productLabel(kind, product),
-    crs,
-    width: desc.width,
-    height: desc.height,
-    geoTransform: gt,
-    // The map's raster layer takes any URL: a computed product's is a blob: URL.
-    previewDataUrl: product.previewUrl,
-    opacity: state.opacity ?? 1,
-    // Model map only: product coords = map coords − offset (the status-bar probe).
-    offset,
-    // An ortho's brightness/contrast/gamma (productStyle.js), applied at draw time.
-    ...(kind === 'ortho' && product.style && { adjust: product.style }),
-    ...(cog && { cog, fileKey: tiled.fileKey, bands: tiled.bands, bitsPerSample: tiled.bitsPerSample,
-      sampleFormat: tiled.sampleFormat, photometric: tiled.photometric, alphaBand: tiled.alphaBand,
-      // A DEM's colour ramp + hillshade, drawn from its Float32 COG (SAT-3).
-      ...(tiled.demRelief && { demRelief: tiled.demRelief, zMin: tiled.zMin, zMax: tiled.zMax }) }),
-  } }
+  return {
+    layer: {
+      id: `product:${kind}`,
+      product: true,
+      kind,
+      name: productLabel(kind, product),
+      crs,
+      width: desc.width,
+      height: desc.height,
+      geoTransform: gt,
+      // The map's raster layer takes any URL: a computed product's is a blob: URL.
+      previewDataUrl: product.previewUrl,
+      opacity: state.opacity ?? 1,
+      // Model map only: product coords = map coords − offset (the status-bar probe).
+      offset,
+      // An ortho's brightness/contrast/gamma (productStyle.js), applied at draw time.
+      ...(kind === 'ortho' && product.style && { adjust: product.style }),
+      ...(cog && {
+        cog,
+        fileKey: tiled.fileKey,
+        bands: tiled.bands,
+        bitsPerSample: tiled.bitsPerSample,
+        sampleFormat: tiled.sampleFormat,
+        photometric: tiled.photometric,
+        alphaBand: tiled.alphaBand,
+        // A DEM's colour ramp + hillshade, drawn from its Float32 COG (SAT-3).
+        ...(tiled.demRelief && { demRelief: tiled.demRelief, zMin: tiled.zMin, zMax: tiled.zMax }),
+      }),
+    },
+  }
 }

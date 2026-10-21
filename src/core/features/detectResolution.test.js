@@ -1,17 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import { resolveDetectMaxDim, DETECT_RESOLUTION_BANDS, resolveDetectKeypoints, detectSize } from './detectResolution.js'
 import {
-  DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS,
-  DETECT_SUPERPOINT_DEFAULTS, DETECT_SUPERPOINT_PRESETS,
-  DETECT_DISK_DEFAULTS, DETECT_DISK_PRESETS,
-  DETECT_ALIKED_DEFAULTS, DETECT_ALIKED_PRESETS,
+  DETECT_SIFT_DEFAULTS,
+  DETECT_SIFT_PRESETS,
+  DETECT_SUPERPOINT_DEFAULTS,
+  DETECT_SUPERPOINT_PRESETS,
+  DETECT_DISK_DEFAULTS,
+  DETECT_DISK_PRESETS,
+  DETECT_ALIKED_DEFAULTS,
+  DETECT_ALIKED_PRESETS,
 } from '../defaults.user.js'
 import { DETECT_TUNING } from '../tuning.js'
 
 // The absolute maxDim each preset resolves to today (presets are deltas over the
 // defaults; medium is the empty delta).
-const absoluteMaxDim = (defaults, presets, preset) =>
-  ({ ...defaults, ...presets[preset] }).maxDim
+const absoluteMaxDim = (defaults, presets, preset) => ({ ...defaults, ...presets[preset] }).maxDim
 
 describe('resolveDetectMaxDim — absolute mode', () => {
   // The default must be bit-identical to the pre-existing behaviour, or every
@@ -27,8 +30,7 @@ describe('resolveDetectMaxDim — absolute mode', () => {
 })
 
 describe('resolveDetectMaxDim — auto mode', () => {
-  const auto = (nativeMax, extra = {}) =>
-    resolveDetectMaxDim(nativeMax, { maxDim: 2400, maxDimMode: 'auto', ...extra })
+  const auto = (nativeMax, extra = {}) => resolveDetectMaxDim(nativeMax, { maxDim: 2400, maxDimMode: 'auto', ...extra })
 
   it('gives a film scan more resolution, up to the ceiling', () => {
     const r = auto(10137)
@@ -69,8 +71,7 @@ describe('resolveDetectMaxDim — auto mode', () => {
   it('honours the preset band', () => {
     expect(auto(10137, { preset: 'low' }).maxDim).toBe(DETECT_RESOLUTION_BANDS.sift.low.ceilPx)
     expect(auto(10137, { preset: 'high' }).maxDim).toBe(DETECT_RESOLUTION_BANDS.sift.high.ceilPx)
-    expect(auto(10137, { preset: 'low' }).maxDim)
-      .toBeLessThan(auto(10137, { preset: 'high' }).maxDim)
+    expect(auto(10137, { preset: 'low' }).maxDim).toBeLessThan(auto(10137, { preset: 'high' }).maxDim)
   })
 
   it('keeps SuperPoint well under the untiled ORT overflow size', () => {
@@ -84,8 +85,9 @@ describe('resolveDetectMaxDim — auto mode', () => {
 
   it('is always tighter for SuperPoint than for SIFT', () => {
     for (const preset of ['low', 'medium', 'high']) {
-      expect(auto(10137, { detector: 'superpoint', preset }).maxDim)
-        .toBeLessThan(auto(10137, { detector: 'sift', preset }).maxDim)
+      expect(auto(10137, { detector: 'superpoint', preset }).maxDim).toBeLessThan(
+        auto(10137, { detector: 'sift', preset }).maxDim,
+      )
     }
   })
 
@@ -120,11 +122,10 @@ describe('auto is never worse than absolute', () => {
     ['aliked', DETECT_ALIKED_DEFAULTS, DETECT_ALIKED_PRESETS],
   ]
 
-  it('pins each band floor to that preset\'s absolute default', () => {
+  it("pins each band floor to that preset's absolute default", () => {
     for (const [detector, defaults, presets] of cases) {
       for (const preset of ['low', 'medium', 'high']) {
-        expect(DETECT_RESOLUTION_BANDS[detector][preset].floorPx)
-          .toBe(absoluteMaxDim(defaults, presets, preset))
+        expect(DETECT_RESOLUTION_BANDS[detector][preset].floorPx).toBe(absoluteMaxDim(defaults, presets, preset))
       }
     }
   })
@@ -136,7 +137,10 @@ describe('auto is never worse than absolute', () => {
         const abs = absoluteMaxDim(defaults, presets, preset)
         for (const nativeMax of sizes) {
           const got = resolveDetectMaxDim(nativeMax, {
-            maxDim: abs, maxDimMode: 'auto', detector, preset,
+            maxDim: abs,
+            maxDimMode: 'auto',
+            detector,
+            preset,
           }).maxDim
           // Capped at native: an image smaller than the absolute cap was already
           // being detected whole, so "no worse" means min(abs, nativeMax).
@@ -149,7 +153,10 @@ describe('auto is never worse than absolute', () => {
 
 describe('DISK and ALIKED bands', () => {
   it('stay inside the untiled single-pass ceiling at every preset (4:3 frame)', () => {
-    for (const [detector, limit] of [['disk', DETECT_TUNING.diskMaxUntiledInputPx], ['aliked', DETECT_TUNING.alikedMaxUntiledInputPx]]) {
+    for (const [detector, limit] of [
+      ['disk', DETECT_TUNING.diskMaxUntiledInputPx],
+      ['aliked', DETECT_TUNING.alikedMaxUntiledInputPx],
+    ]) {
       for (const preset of ['low', 'medium', 'high']) {
         const ceil = DETECT_RESOLUTION_BANDS[detector][preset].ceilPx
         expect(ceil * Math.round(ceil * 0.75)).toBeLessThanOrEqual(limit)
@@ -160,17 +167,23 @@ describe('DISK and ALIKED bands', () => {
 
 describe('resolveDetectKeypoints — auto scales the SIFT cap with the detected area', () => {
   const auto = { maxDimMode: 'auto', maxKeypoints: 10000, detector: 'sift', preset: 'medium' }
-  const capFor = (w, h) => resolveDetectKeypoints(detectSize(w, h, resolveDetectMaxDim(Math.max(w, h), auto).maxDim), auto)
+  const capFor = (w, h) =>
+    resolveDetectKeypoints(detectSize(w, h, resolveDetectMaxDim(Math.max(w, h), auto).maxDim), auto)
 
   it('leaves absolute mode and learned detectors at the configured cap', () => {
-    expect(resolveDetectKeypoints({ width: 4000, height: 4000 }, { ...auto, maxDimMode: 'absolute' }).maxKeypoints).toBe(10000)
-    expect(resolveDetectKeypoints({ width: 3000, height: 3000 }, { ...auto, detector: 'superpoint', maxKeypoints: 2048 }).maxKeypoints).toBe(2048)
+    expect(
+      resolveDetectKeypoints({ width: 4000, height: 4000 }, { ...auto, maxDimMode: 'absolute' }).maxKeypoints,
+    ).toBe(10000)
+    expect(
+      resolveDetectKeypoints({ width: 3000, height: 3000 }, { ...auto, detector: 'superpoint', maxKeypoints: 2048 })
+        .maxKeypoints,
+    ).toBe(2048)
   })
 
   it('never goes below the configured cap and stops at 4×', () => {
-    expect(capFor(6000, 4000).maxKeypoints).toBe(10000)   // 2400 × 1600: the reference frame
-    expect(capFor(2000, 1500).maxKeypoints).toBe(10000)   // native 3 MP: floor
-    expect(capFor(9139, 9139).maxKeypoints).toBe(Math.round(10000 * 3656 * 3656 / (2400 * 1600))) // Casa Grande ≈ 34.8 k
+    expect(capFor(6000, 4000).maxKeypoints).toBe(10000) // 2400 × 1600: the reference frame
+    expect(capFor(2000, 1500).maxKeypoints).toBe(10000) // native 3 MP: floor
+    expect(capFor(9139, 9139).maxKeypoints).toBe(Math.round((10000 * 3656 * 3656) / (2400 * 1600))) // Casa Grande ≈ 34.8 k
     expect(capFor(11425, 11425).maxKeypoints).toBe(40000) // Iceland: 4000² = 16 MP → capped at 4×
     expect(capFor(11425, 11425).reason).toMatch(/capped at 4×/)
   })
@@ -178,6 +191,6 @@ describe('resolveDetectKeypoints — auto scales the SIFT cap with the detected 
   it('counts a 2 : 1 frame by its real area', () => {
     // Synthetic KH-9 block, 8214 × 4107 → detected 3286 × 1643 = 5.4 MP.
     const r = capFor(8214, 4107)
-    expect(r.maxKeypoints).toBe(Math.round(10000 * 3286 * 1643 / (2400 * 1600)))
+    expect(r.maxKeypoints).toBe(Math.round((10000 * 3286 * 1643) / (2400 * 1600)))
   })
 })

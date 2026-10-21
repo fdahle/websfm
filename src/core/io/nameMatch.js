@@ -12,13 +12,18 @@
 
 /** Header of a column holding image file names, shared by every tabular importer
  *  (`image`, `filename`, `image_file_name`, `image_id`, …). */
-export const IMAGE_COLUMN = /^(image|img|photo|picture|file|filename|file_?name|image_?(name|file|file_?name|id)|img_?(name|file))$/i
+export const IMAGE_COLUMN =
+  /^(image|img|photo|picture|file|filename|file_?name|image_?(name|file|file_?name|id)|img_?(name|file))$/i
 
 /** Last path segment, tolerant of both separators. */
-export function basename(n) { return String(n).split(/[\\/]/).pop() }
+export function basename(n) {
+  return String(n).split(/[\\/]/).pop()
+}
 
 /** Basename without its final extension. */
-export function stem(n) { return basename(n).replace(/\.[^.]+$/, '') }
+export function stem(n) {
+  return basename(n).replace(/\.[^.]+$/, '')
+}
 
 /**
  * Build a name→id resolver over `entries`.
@@ -42,7 +47,10 @@ export function stem(n) { return basename(n).replace(/\.[^.]+$/, '') }
  * @returns {(name: string|null|undefined) => any|null}
  */
 export function makeNameResolver(entries, { key = 'id' } = {}) {
-  const exact = new Map(), base = new Map(), baseLower = new Map(), stemLower = new Map()
+  const exact = new Map(),
+    base = new Map(),
+    baseLower = new Map(),
+    stemLower = new Map()
   for (const e of entries ?? []) {
     const id = e?.[key]
     const name = e?.name
@@ -57,11 +65,13 @@ export function makeNameResolver(entries, { key = 'id' } = {}) {
   }
   return (name) => {
     if (name == null || name === '') return null
-    return exact.get(name)
-      ?? base.get(basename(name))
-      ?? baseLower.get(basename(name).toLowerCase())
-      ?? stemLower.get(stem(name).toLowerCase())
-      ?? null
+    return (
+      exact.get(name) ??
+      base.get(basename(name)) ??
+      baseLower.get(basename(name).toLowerCase()) ??
+      stemLower.get(stem(name).toLowerCase()) ??
+      null
+    )
   }
 }
 

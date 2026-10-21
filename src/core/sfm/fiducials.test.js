@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  fitFiducialAffine, canonicalFrame, scanToCanonical, canonicalToScan, mmToScan,
-} from './fiducials.js'
+import { fitFiducialAffine, canonicalFrame, scanToCanonical, canonicalToScan, mmToScan } from './fiducials.js'
 
 // A calibrated 4-corner fiducial layout (mm, certificate origin at frame centre),
 // typical of an aerial metric camera (≈212mm frame).
@@ -16,7 +14,8 @@ const FIDUCIALS = { marks: MARKS, ppxMm: 0.011, ppyMm: -0.004, focalMm: 153.87 }
 // Build synthetic scan-pixel observations by applying a known affine mm→px
 // (scanner geometry) so we can check exact recovery of its inverse.
 function makeObs(marks, { pitchMm = 0.0227, rotDeg = 0, offX = 1000, offY = 1200, shear = 0, noiseMm = 0 } = {}) {
-  const c = Math.cos(rotDeg * Math.PI / 180), s = Math.sin(rotDeg * Math.PI / 180)
+  const c = Math.cos((rotDeg * Math.PI) / 180),
+    s = Math.sin((rotDeg * Math.PI) / 180)
   return marks.map((m) => {
     // mm → px: rotate+shear+scale then offset. (Inverse of what fit recovers.)
     const xs = m.xMm + shear * m.yMm
@@ -105,7 +104,11 @@ describe('scanToCanonical / canonicalToScan round-trip', () => {
     const obs = makeObs(MARKS, { pitchMm: 0.0227, rotDeg: 2.5, shear: 0.001 })
     const fit = fitFiducialAffine(obs)
     const frame = canonicalFrame(FIDUCIALS, fit.pitchMm)
-    for (const [px, py] of [[500, 700], [1500, 300], [42.5, 1999.9]]) {
+    for (const [px, py] of [
+      [500, 700],
+      [1500, 300],
+      [42.5, 1999.9],
+    ]) {
       const { x, y } = scanToCanonical(px, py, fit.A, frame)
       const back = canonicalToScan(x, y, fit.A, frame)
       expect(back.x).toBeCloseTo(px, 6)
@@ -113,7 +116,7 @@ describe('scanToCanonical / canonicalToScan round-trip', () => {
     }
   })
 
-  it('mmToScan recovers each mark\'s scan pixel (ghost-guide prediction)', () => {
+  it("mmToScan recovers each mark's scan pixel (ghost-guide prediction)", () => {
     const opts = { pitchMm: 0.0227, rotDeg: 2.5, offX: 1000, offY: 1200, shear: 0.001 }
     const obs = makeObs(MARKS, opts)
     const fit = fitFiducialAffine(obs)
@@ -153,15 +156,22 @@ describe('y-up fiducial certificates (scan rows run down)', () => {
   it('the fit is a reflection, and the y-up frame undoes it (canonical image not mirrored)', () => {
     expect(fit.A[0] * fit.A[4] - fit.A[1] * fit.A[3]).toBeLessThan(0)
     // Two scan points, one above the other: their canonical order must match.
-    const top = scanToCanonical(1000, 300, fit.A, frame), bottom = scanToCanonical(1000, 2000, fit.A, frame)
+    const top = scanToCanonical(1000, 300, fit.A, frame),
+      bottom = scanToCanonical(1000, 2000, fit.A, frame)
     expect(top.y).toBeLessThan(bottom.y)
-    const left = scanToCanonical(300, 1200, fit.A, frame), right = scanToCanonical(2000, 1200, fit.A, frame)
+    const left = scanToCanonical(300, 1200, fit.A, frame),
+      right = scanToCanonical(2000, 1200, fit.A, frame)
     expect(left.x).toBeLessThan(right.x)
   })
 
   it('round-trips exactly and puts the principal point on K', () => {
-    for (const [px, py] of [[500, 700], [1500, 300], [42.5, 1999.9]]) {
-      const c = scanToCanonical(px, py, fit.A, frame), back = canonicalToScan(c.x, c.y, fit.A, frame)
+    for (const [px, py] of [
+      [500, 700],
+      [1500, 300],
+      [42.5, 1999.9],
+    ]) {
+      const c = scanToCanonical(px, py, fit.A, frame),
+        back = canonicalToScan(c.x, c.y, fit.A, frame)
       expect(back.x).toBeCloseTo(px, 6)
       expect(back.y).toBeCloseTo(py, 6)
     }

@@ -41,11 +41,16 @@ function sampleGrayBilinear(img, w, h, x, y) {
   if (w === 0 || h === 0) return 0
   const xc = Math.min(Math.max(x, 0), w - 1)
   const yc = Math.min(Math.max(y, 0), h - 1)
-  const x0 = Math.floor(xc), y0 = Math.floor(yc)
-  const x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1)
-  const fx = xc - x0, fy = yc - y0
-  const p00 = img[y0 * w + x0], p10 = img[y0 * w + x1]
-  const p01 = img[y1 * w + x0], p11 = img[y1 * w + x1]
+  const x0 = Math.floor(xc),
+    y0 = Math.floor(yc)
+  const x1 = Math.min(x0 + 1, w - 1),
+    y1 = Math.min(y0 + 1, h - 1)
+  const fx = xc - x0,
+    fy = yc - y0
+  const p00 = img[y0 * w + x0],
+    p10 = img[y0 * w + x1]
+  const p01 = img[y1 * w + x0],
+    p11 = img[y1 * w + x1]
   const a = p00 + (p10 - p00) * fx
   const b = p01 + (p11 - p01) * fx
   return a + (b - a) * fy
@@ -66,12 +71,20 @@ export function planeCostRef(ref, src, u, v, depth, n, radius) {
   const d = n[0] * P[0] + n[1] * P[1] + n[2] * P[2]
   if (Math.abs(d) < 1e-9) return 2.0
 
-  const R = src.R, t = src.t
-  let sumR = 0, sumS = 0, sumRR = 0, sumSS = 0, sumRS = 0, cnt = 0
-  let kR = 0, kS = 0 // shift = first contributing sample (keeps sums small)
+  const R = src.R,
+    t = src.t
+  let sumR = 0,
+    sumS = 0,
+    sumRR = 0,
+    sumSS = 0,
+    sumRS = 0,
+    cnt = 0
+  let kR = 0,
+    kS = 0 // shift = first contributing sample (keeps sums small)
   for (let y = -radius; y <= radius; y++) {
     for (let x = -radius; x <= radius; x++) {
-      const xi = u + x, yi = v + y
+      const xi = u + x,
+        yi = v + y
       if (xi < 0 || yi < 0 || xi >= ref.w || yi >= ref.h) continue
       const ray = [(xi - ref.cx) / ref.fx, (yi - ref.cy) / ref.fy, 1]
       const nr = n[0] * ray[0] + n[1] * ray[1] + n[2] * ray[2]
@@ -80,9 +93,9 @@ export function planeCostRef(ref, src, u, v, depth, n, radius) {
       // is what makes the cost bottom out at the true depth — see mvs.rs for the
       // derivation and the freckle bug it fixes. Keep the three kernels in lockstep.
       const xs = [
-        R[0][0] * ray[0] + R[0][1] * ray[1] + R[0][2] * ray[2] + t[0] * nr / d,
-        R[1][0] * ray[0] + R[1][1] * ray[1] + R[1][2] * ray[2] + t[1] * nr / d,
-        R[2][0] * ray[0] + R[2][1] * ray[1] + R[2][2] * ray[2] + t[2] * nr / d,
+        R[0][0] * ray[0] + R[0][1] * ray[1] + R[0][2] * ray[2] + (t[0] * nr) / d,
+        R[1][0] * ray[0] + R[1][1] * ray[1] + R[1][2] * ray[2] + (t[1] * nr) / d,
+        R[2][0] * ray[0] + R[2][1] * ray[1] + R[2][2] * ray[2] + (t[2] * nr) / d,
       ]
       if (Math.abs(xs[2]) < 1e-9) continue
       const su = src.fx * (xs[0] / xs[2]) + src.cx
@@ -91,19 +104,28 @@ export function planeCostRef(ref, src, u, v, depth, n, radius) {
       if (src.mask && src.mask[(sv | 0) * src.w + (su | 0)]) return INVALID // masked texel → no measurement
       const r0 = ref.gray[yi * ref.w + xi]
       const s0 = sampleGrayBilinear(src.gray, src.w, src.h, su, sv)
-      if (cnt === 0) { kR = r0; kS = s0 }
-      const rval = r0 - kR, sval = s0 - kS
-      sumR += rval; sumS += sval
-      sumRR += rval * rval; sumSS += sval * sval; sumRS += rval * sval
+      if (cnt === 0) {
+        kR = r0
+        kS = s0
+      }
+      const rval = r0 - kR,
+        sval = s0 - kS
+      sumR += rval
+      sumS += sval
+      sumRR += rval * rval
+      sumSS += sval * sval
+      sumRS += rval * sval
       cnt++
     }
   }
   if (cnt < 4) return INVALID // too little overlap → no measurement
-  const mr = sumR / cnt, ms = sumS / cnt
-  const vr = sumRR / cnt - mr * mr, vs = sumSS / cnt - ms * ms
+  const mr = sumR / cnt,
+    ms = sumS / cnt
+  const vr = sumRR / cnt - mr * mr,
+    vs = sumSS / cnt - ms * ms
   const cov = sumRS / cnt - mr * ms
   if (vr < VAR_FLOOR) return INVALID // textureless REFERENCE patch → no measurement
-  if (vs < VAR_FLOOR) return 2.0      // textured ref onto flat source → bad hypothesis
+  if (vs < VAR_FLOOR) return 2.0 // textured ref onto flat source → bad hypothesis
   const denom = Math.sqrt(vr * vs)
   const ncc = Math.max(-1, Math.min(1, cov / denom))
   return 1 - ncc

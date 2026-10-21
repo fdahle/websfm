@@ -14,11 +14,23 @@ export const PART_BYTES = 8 * 1024 * 1024 // binary
 // Collects short strings; `add` reports when a part's worth is buffered, `take`
 // returns it joined. Usage inside a generator: `if (buf.add(s)) yield buf.take()`.
 export function textBuffer(limit = PART_CHARS) {
-  let pieces = [], size = 0
+  let pieces = [],
+    size = 0
   return {
-    add(s) { pieces.push(s); size += s.length; return size >= limit },
-    take() { const s = pieces.join(''); pieces = []; size = 0; return s },
-    get size() { return size },
+    add(s) {
+      pieces.push(s)
+      size += s.length
+      return size >= limit
+    },
+    take() {
+      const s = pieces.join('')
+      pieces = []
+      size = 0
+      return s
+    },
+    get size() {
+      return size
+    },
   }
 }
 
@@ -51,21 +63,54 @@ export function* recordParts(count, stride, write, partBytes = PART_BYTES) {
 // never straddle parts: a write that does not fit closes the current part.
 export function chunkedByteWriter(partBytes = PART_BYTES) {
   const parts = []
-  let buf = new Uint8Array(0), dv = new DataView(buf.buffer), len = 0
+  let buf = new Uint8Array(0),
+    dv = new DataView(buf.buffer),
+    len = 0
   const ensure = (extra) => {
     if (len + extra <= buf.length) return
     if (len) parts.push(buf.subarray(0, len))
-    buf = new Uint8Array(Math.max(partBytes, extra)); dv = new DataView(buf.buffer); len = 0
+    buf = new Uint8Array(Math.max(partBytes, extra))
+    dv = new DataView(buf.buffer)
+    len = 0
   }
   return {
-    u8(v) { ensure(1); dv.setUint8(len, v); len += 1 },
-    i32(v) { ensure(4); dv.setInt32(len, v, true); len += 4 },
-    u64(v) { ensure(8); dv.setBigUint64(len, BigInt(v), true); len += 8 },
-    i64(v) { ensure(8); dv.setBigInt64(len, BigInt(v), true); len += 8 },
-    f64(v) { ensure(8); dv.setFloat64(len, v, true); len += 8 },
-    bytes(arr) { ensure(arr.length); buf.set(arr, len); len += arr.length },
+    u8(v) {
+      ensure(1)
+      dv.setUint8(len, v)
+      len += 1
+    },
+    i32(v) {
+      ensure(4)
+      dv.setInt32(len, v, true)
+      len += 4
+    },
+    u64(v) {
+      ensure(8)
+      dv.setBigUint64(len, BigInt(v), true)
+      len += 8
+    },
+    i64(v) {
+      ensure(8)
+      dv.setBigInt64(len, BigInt(v), true)
+      len += 8
+    },
+    f64(v) {
+      ensure(8)
+      dv.setFloat64(len, v, true)
+      len += 8
+    },
+    bytes(arr) {
+      ensure(arr.length)
+      buf.set(arr, len)
+      len += arr.length
+    },
     // The parts written so far plus the open one; the writer is finished after this.
-    done() { if (len) parts.push(buf.subarray(0, len)); buf = new Uint8Array(0); len = 0; return parts },
+    done() {
+      if (len) parts.push(buf.subarray(0, len))
+      buf = new Uint8Array(0)
+      len = 0
+      return parts
+    },
   }
 }
 
@@ -78,7 +123,10 @@ export function joinParts(parts) {
   const bytes = list.map((p) => (typeof p === 'string' ? enc.encode(p) : p))
   const out = new Uint8Array(bytes.reduce((s, b) => s + b.length, 0))
   let o = 0
-  for (const b of bytes) { out.set(b, o); o += b.length }
+  for (const b of bytes) {
+    out.set(b, o)
+    o += b.length
+  }
   return out
 }
 
@@ -89,15 +137,21 @@ export function joinParts(parts) {
 // one object per item — each element exists only while it is written.
 
 const LAZY = Symbol('lazyJsonArray')
-export function lazyArray(length, at) { return { [LAZY]: true, length, at } }
+export function lazyArray(length, at) {
+  return { [LAZY]: true, length, at }
+}
 export const isLazyArray = (v) => v != null && v[LAZY] === true
 
 // A container of primitives this small goes to JSON.stringify whole (re-indented):
 // the per-element walk is for the containers that scale.
 const FLAT_LIMIT = 4096
 
-const gapOf = (space) => (typeof space === 'number' ? ' '.repeat(Math.max(0, Math.min(10, Math.floor(space))))
-  : typeof space === 'string' ? space.slice(0, 10) : '')
+const gapOf = (space) =>
+  typeof space === 'number'
+    ? ' '.repeat(Math.max(0, Math.min(10, Math.floor(space))))
+    : typeof space === 'string'
+      ? space.slice(0, 10)
+      : ''
 
 // `indent`: the value's nesting prefix, so a caller can write a container's elements
 // one at a time (jsonArrayItemParts) and get the bytes the whole container would give.
@@ -111,8 +165,14 @@ export function* jsonParts(value, { space = 2, partChars = PART_CHARS, indent = 
   if (buf.size) yield buf.take()
 
   function* write(v, indent) {
-    if (v === null) { if (buf.add('null')) yield buf.take(); return }
-    if (typeof v !== 'object') { if (buf.add(primitive(v))) yield buf.take(); return }
+    if (v === null) {
+      if (buf.add('null')) yield buf.take()
+      return
+    }
+    if (typeof v !== 'object') {
+      if (buf.add(primitive(v))) yield buf.take()
+      return
+    }
     const lazy = isLazyArray(v)
     const isArr = lazy || Array.isArray(v)
     const keys = isArr ? null : Object.keys(v)
@@ -127,7 +187,9 @@ export function* jsonParts(value, { space = 2, partChars = PART_CHARS, indent = 
     const inner = indent + gap
     const sep = gap ? `\n${inner}` : ''
     if (isArr) {
-      if (!n) { if (buf.add('[]')) yield buf.take() } else {
+      if (!n) {
+        if (buf.add('[]')) yield buf.take()
+      } else {
         buf.add('[')
         for (let i = 0; i < n; i++) {
           if (buf.add(i ? `,${sep}` : sep)) yield buf.take()
@@ -147,7 +209,7 @@ export function* jsonParts(value, { space = 2, partChars = PART_CHARS, indent = 
         first = false
         yield* write(el, inner)
       }
-      if (buf.add(first ? '}' : (gap ? `\n${indent}}` : '}'))) yield buf.take()
+      if (buf.add(first ? '}' : gap ? `\n${indent}}` : '}')) yield buf.take()
     }
     open.delete(v)
   }
@@ -183,7 +245,16 @@ function primitive(v) {
 // Every child a primitive (or something JSON drops), and no toJSON on the container.
 function isFlat(v, keys) {
   if (typeof v.toJSON === 'function') return false
-  if (keys) { for (const k of keys) { const c = v[k]; if (c !== null && typeof c === 'object') return false } return true }
-  for (let i = 0; i < v.length; i++) { const c = v[i]; if (c !== null && typeof c === 'object') return false }
+  if (keys) {
+    for (const k of keys) {
+      const c = v[k]
+      if (c !== null && typeof c === 'object') return false
+    }
+    return true
+  }
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i]
+    if (c !== null && typeof c === 'object') return false
+  }
   return true
 }

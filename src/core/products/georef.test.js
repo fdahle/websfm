@@ -5,8 +5,13 @@ const close = (a, b, eps = 1e-4) => expect(Math.abs(a - b)).toBeLessThan(eps)
 
 // Rotation about Z by θ (row-major).
 function rotZ(theta) {
-  const c = Math.cos(theta), s = Math.sin(theta)
-  return [[c, -s, 0], [s, c, 0], [0, 0, 1]]
+  const c = Math.cos(theta),
+    s = Math.sin(theta)
+  return [
+    [c, -s, 0],
+    [s, c, 0],
+    [0, 0, 1],
+  ]
 }
 const apply = (R, p) => [
   R[0][0] * p[0] + R[0][1] * p[1] + R[0][2] * p[2],
@@ -16,9 +21,16 @@ const apply = (R, p) => [
 
 describe('fitSimilarity', () => {
   it('recovers a known scale + rotation + translation exactly', () => {
-    const s = 2.5, R = rotZ(0.7), t = [100, -50, 8]
+    const s = 2.5,
+      R = rotZ(0.7),
+      t = [100, -50, 8]
     const src = [
-      [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [2, -1, 0.5], [-1, 3, 2],
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [2, -1, 0.5],
+      [-1, 3, 2],
     ]
     const pairs = src.map((p) => ({ src: p, dst: applySimilarity({ scale: s, R, t }, p) }))
     const fit = fitSimilarity(pairs)
@@ -27,12 +39,16 @@ describe('fitSimilarity', () => {
     close(fit.rms, 0, 1e-6)
     for (const { src: p, dst } of pairs) {
       const q = applySimilarity(fit, p)
-      close(q[0], dst[0]); close(q[1], dst[1]); close(q[2], dst[2])
+      close(q[0], dst[0])
+      close(q[1], dst[1])
+      close(q[2], dst[2])
     }
   })
 
   it('reports a non-zero RMS on noisy data but stays close', () => {
-    const s = 1.2, R = rotZ(-0.3), t = [5, 5, 0]
+    const s = 1.2,
+      R = rotZ(-0.3),
+      t = [5, 5, 0]
     const src = []
     for (let i = 0; i < 20; i++) src.push([Math.cos(i), Math.sin(i * 1.7), 0.1 * i])
     const pairs = src.map((p, i) => {
@@ -50,22 +66,36 @@ describe('fitSimilarity', () => {
   })
 
   it('recovers a pure uniform scale (no rotation, no translation)', () => {
-    const src = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1]]
+    const src = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 1, 1],
+    ]
     const pairs = src.map((p) => ({ src: p, dst: [p[0] * 3, p[1] * 3, p[2] * 3] }))
     const fit = fitSimilarity(pairs)
     close(fit.scale, 3)
     close(fit.rms, 0, 1e-6)
     // Rotation is (close to) identity.
-    close(fit.R[0][0], 1); close(fit.R[1][1], 1); close(fit.R[2][2], 1)
+    close(fit.R[0][0], 1)
+    close(fit.R[1][1], 1)
+    close(fit.R[2][2], 1)
   })
 
   it('recovers a pure translation (unit scale, identity rotation)', () => {
-    const src = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    const src = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ]
     const t = [7, -3, 11]
     const pairs = src.map((p) => ({ src: p, dst: [p[0] + t[0], p[1] + t[1], p[2] + t[2]] }))
     const fit = fitSimilarity(pairs)
     close(fit.scale, 1)
-    close(fit.t[0], 7); close(fit.t[1], -3); close(fit.t[2], 11)
+    close(fit.t[0], 7)
+    close(fit.t[1], -3)
+    close(fit.t[2], 11)
     close(fit.rms, 0, 1e-6)
   })
 
@@ -80,43 +110,78 @@ describe('fitSimilarity', () => {
   })
 
   it('rejects collinear points because rotation about the line is underdetermined', () => {
-    const s = 2, R = rotZ(0.5), t = [1, 2, 3]
-    const src = [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]]
+    const s = 2,
+      R = rotZ(0.5),
+      t = [1, 2, 3]
+    const src = [
+      [0, 0, 0],
+      [1, 0, 0],
+      [2, 0, 0],
+      [3, 0, 0],
+    ]
     const pairs = src.map((p) => ({ src: p, dst: applySimilarity({ scale: s, R, t }, p) }))
     const fit = fitSimilarity(pairs)
     expect(fit).toBeNull()
   })
 
   it('rejects missing and non-finite coordinates', () => {
-    expect(fitSimilarity([
-      { src: [0, 0, 0], dst: [0, 0, 0] },
-      { src: [1, 0, 0], dst: [1, 0, 0] },
-      { src: [0, 1, 0], dst: [0, 1, undefined] },
-    ])).toBeNull()
-    expect(fitSimilarity([
-      { src: [0, 0, 0], dst: [0, 0, 0] },
-      { src: [1, 0, 0], dst: [1, 0, 0] },
-      { src: [0, 1, 0], dst: [0, 1, Number.NaN] },
-    ])).toBeNull()
+    expect(
+      fitSimilarity([
+        { src: [0, 0, 0], dst: [0, 0, 0] },
+        { src: [1, 0, 0], dst: [1, 0, 0] },
+        { src: [0, 1, 0], dst: [0, 1, undefined] },
+      ]),
+    ).toBeNull()
+    expect(
+      fitSimilarity([
+        { src: [0, 0, 0], dst: [0, 0, 0] },
+        { src: [1, 0, 0], dst: [1, 0, 0] },
+        { src: [0, 1, 0], dst: [0, 1, Number.NaN] },
+      ]),
+    ).toBeNull()
   })
 
   it('uses correspondence weights to reduce a low-confidence outlier influence', () => {
-    const src = [[0, 0, 0], [2, 0, 0], [0, 2, 0], [0, 0, 2], [2, 2, 2]]
+    const src = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [0, 2, 0],
+      [0, 0, 2],
+      [2, 2, 2],
+    ]
     const clean = src.map((p) => ({ src: p, dst: [...p] }))
-    const noisy = clean.map((p, i) => i === 4
-      ? { ...p, dst: [12, -8, 7], weight: 1e-6 }
-      : { ...p, weight: 1 })
+    const noisy = clean.map((p, i) => (i === 4 ? { ...p, dst: [12, -8, 7], weight: 1e-6 } : { ...p, weight: 1 }))
     const fit = fitSimilarity(noisy)
     close(fit.scale, 1, 1e-3)
-    close(fit.t[0], 0, 1e-3); close(fit.t[1], 0, 1e-3); close(fit.t[2], 0, 1e-3)
+    close(fit.t[0], 0, 1e-3)
+    close(fit.t[1], 0, 1e-3)
+    close(fit.t[2], 0, 1e-3)
   })
 
   it('refines the Horn seed under full anisotropic precision', () => {
-    const src = [[0,0,0],[2,0,0],[0,2,0],[0,0,2],[2,2,2],[-1,1,1]]
+    const src = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [0, 2, 0],
+      [0, 0, 2],
+      [2, 2, 2],
+      [-1, 1, 1],
+    ]
     const pairs = src.map((p, i) => ({
       src: p,
       dst: i === 4 ? [p[0], p[1], p[2] + 20] : [...p],
-      precision: i === 4 ? [[1,0,0],[0,1,0],[0,0,1e-8]] : [[1,0,0],[0,1,0],[0,0,1]],
+      precision:
+        i === 4
+          ? [
+              [1, 0, 0],
+              [0, 1, 0],
+              [0, 0, 1e-8],
+            ]
+          : [
+              [1, 0, 0],
+              [0, 1, 0],
+              [0, 0, 1],
+            ],
     }))
     const fit = fitSimilarity(pairs)
     expect(fit.scale).toBeCloseTo(1, 3)
@@ -134,9 +199,13 @@ describe('frameFromSimilarity', () => {
     const p = [1.5, -2.5, 4]
     const crs = frame.fromSfm(p)
     const expected = applySimilarity(sim, p)
-    close(crs[0], expected[0]); close(crs[1], expected[1]); close(crs[2], expected[2])
+    close(crs[0], expected[0])
+    close(crs[1], expected[1])
+    close(crs[2], expected[2])
     const back = frame.toSfm(crs)
-    close(back[0], p[0]); close(back[1], p[1]); close(back[2], p[2])
+    close(back[0], p[0])
+    close(back[1], p[1])
+    close(back[2], p[2])
   })
 })
 
@@ -147,15 +216,34 @@ describe('similarityPrecision', () => {
   // (Σŷ), and a withheld control's leave-one-out prediction error (Σŷ without it).
   it('matches the Monte-Carlo covariance of residuals and predictions', () => {
     let s = 11
-    const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647)
+    const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647
     const gauss = () => Math.sqrt(-2 * Math.log(rnd() || 1e-12)) * Math.cos(2 * Math.PI * rnd())
-    const truth = { scale: 2.5, R: [[0, -1, 0], [1, 0, 0], [0, 0, 1]], t: [100, 200, 30] }
-    const src = [[0, 0, 0], [10, 0, 1], [0, 12, -1], [11, 9, 2]]
+    const truth = {
+      scale: 2.5,
+      R: [
+        [0, -1, 0],
+        [1, 0, 0],
+        [0, 0, 1],
+      ],
+      t: [100, 200, 30],
+    }
+    const src = [
+      [0, 0, 0],
+      [10, 0, 1],
+      [0, 12, -1],
+      [11, 9, 2],
+    ]
     const sigma = [0.02, 0.03, 0.08]
-    const P = [[1 / sigma[0] ** 2, 0, 0], [0, 1 / sigma[1] ** 2, 0], [0, 0, 1 / sigma[2] ** 2]]
+    const P = [
+      [1 / sigma[0] ** 2, 0, 0],
+      [0, 1 / sigma[1] ** 2, 0],
+      [0, 0, 1 / sigma[2] ** 2],
+    ]
     const check = [5, 5, 0]
     const trials = 3000
-    const res0 = [], pred = [], loo = []
+    const res0 = [],
+      pred = [],
+      loo = []
     for (let k = 0; k < trials; k++) {
       const pairs = src.map((p) => {
         const d = applySimilarity(truth, p).map((v, i) => v + sigma[i] * gauss())

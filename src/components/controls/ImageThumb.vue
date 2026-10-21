@@ -25,10 +25,16 @@ const nearView = ref(false)
 let io = null
 
 onMounted(() => {
-  if (typeof IntersectionObserver === 'undefined' || !root.value) { nearView.value = true; return }
-  io = new IntersectionObserver((entries) => {
-    nearView.value = entries.some((e) => e.isIntersecting)
-  }, { rootMargin: '200px' })
+  if (typeof IntersectionObserver === 'undefined' || !root.value) {
+    nearView.value = true
+    return
+  }
+  io = new IntersectionObserver(
+    (entries) => {
+      nearView.value = entries.some((e) => e.isIntersecting)
+    },
+    { rootMargin: '200px' },
+  )
   io.observe(root.value)
 })
 onBeforeUnmount(() => io?.disconnect())
@@ -43,15 +49,21 @@ watch(
   { immediate: true },
 )
 
-const src = computed(() => (props.image.previewFailed ? null : props.image.thumb?.url ?? null))
-const failTitle = computed(() => (props.image.previewFailReason === 'source-lost'
-  ? 'Image file no longer available — re-add the file'
-  : 'Preview unavailable — decode failed'))
+const src = computed(() => (props.image.previewFailed ? null : (props.image.thumb?.url ?? null)))
+const failTitle = computed(() =>
+  props.image.previewFailReason === 'source-lost'
+    ? 'Image file no longer available — re-add the file'
+    : 'Preview unavailable — decode failed',
+)
 </script>
 
 <template>
-  <span ref="root" class="image-thumb" :class="{ pending: !src && !image.previewFailed, failed: image.previewFailed }"
-    :title="image.previewFailed ? failTitle : null">
+  <span
+    ref="root"
+    class="image-thumb"
+    :class="{ pending: !src && !image.previewFailed, failed: image.previewFailed }"
+    :title="image.previewFailed ? failTitle : null"
+  >
     <img
       v-if="src"
       :src="src"
@@ -90,7 +102,11 @@ const failTitle = computed(() => (props.image.previewFailReason === 'source-lost
   font-weight: 600;
 }
 @keyframes image-thumb-shimmer {
-  0% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }
 </style>

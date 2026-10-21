@@ -56,31 +56,31 @@
 export const DETECT_RESOLUTION_BANDS = {
   // SIFT: the ceiling is set by matching cost at the next stage, not detection.
   sift: {
-    low:    { fraction: 0.25, floorPx: 1400, ceilPx: 2000 },
-    medium: { fraction: 0.40, floorPx: 2400, ceilPx: 4000 },
-    high:   { fraction: 0.65, floorPx: 4000, ceilPx: 6000 },
+    low: { fraction: 0.25, floorPx: 1400, ceilPx: 2000 },
+    medium: { fraction: 0.4, floorPx: 2400, ceilPx: 4000 },
+    high: { fraction: 0.65, floorPx: 4000, ceilPx: 6000 },
   },
   // SuperPoint: far tighter. LightGlue's attention is O(N²) in keypoints and ORT's
   // int32 shape math overflows past ~16 MP in a single untiled pass
   // (DETECT_TUNING.spMaxUntiledInputPx), so the ceiling is a hard constraint rather
   // than a speed dial — it deliberately stays below the untiled-overflow size.
   superpoint: {
-    low:    { fraction: 0.20, floorPx: 1200, ceilPx: 1600 },
-    medium: { fraction: 0.30, floorPx: 1600, ceilPx: 2400 },
-    high:   { fraction: 0.45, floorPx: 2400, ceilPx: 3600 },
+    low: { fraction: 0.2, floorPx: 1200, ceilPx: 1600 },
+    medium: { fraction: 0.3, floorPx: 1600, ceilPx: 2400 },
+    high: { fraction: 0.45, floorPx: 2400, ceilPx: 3600 },
   },
   // DISK: tighter still — 128 full-resolution channels make memory, not the
   // keypoint budget, the binding limit (DETECT_TUNING.diskMaxUntiledInputPx).
   disk: {
-    low:    { fraction: 0.10, floorPx: 768,  ceilPx: 1024 },
+    low: { fraction: 0.1, floorPx: 768, ceilPx: 1024 },
     medium: { fraction: 0.15, floorPx: 1024, ceilPx: 1600 },
-    high:   { fraction: 0.25, floorPx: 1600, ceilPx: 2000 },
+    high: { fraction: 0.25, floorPx: 1600, ceilPx: 2000 },
   },
   // ALIKED: DISK's memory profile (DETECT_TUNING.alikedMaxUntiledInputPx), DISK's bands.
   aliked: {
-    low:    { fraction: 0.10, floorPx: 768,  ceilPx: 1024 },
+    low: { fraction: 0.1, floorPx: 768, ceilPx: 1024 },
     medium: { fraction: 0.15, floorPx: 1024, ceilPx: 1600 },
-    high:   { fraction: 0.25, floorPx: 1600, ceilPx: 2000 },
+    high: { fraction: 0.25, floorPx: 1600, ceilPx: 2000 },
   },
 }
 
@@ -93,12 +93,7 @@ export const DETECT_RESOLUTION_BANDS = {
 // string for the log, since a silently-derived resolution is exactly the kind of
 // value CLAUDE.md ▸ Conventions requires be auditable.
 export function resolveDetectMaxDim(nativeMax, settings = {}) {
-  const {
-    maxDim = 2400,
-    maxDimMode = 'absolute',
-    detector = 'sift',
-    preset = 'medium',
-  } = settings
+  const { maxDim = 2400, maxDimMode = 'absolute', detector = 'sift', preset = 'medium' } = settings
 
   if (maxDimMode !== 'auto') {
     return { maxDim, mode: 'absolute', band: null, nativeMax, reason: `fixed ${maxDim}px` }
@@ -107,8 +102,7 @@ export function resolveDetectMaxDim(nativeMax, settings = {}) {
   // the absolute value is the only honest option — guessing from a stale meta or a
   // previous image would produce a resolution the log could not justify.
   if (!Number.isFinite(nativeMax) || nativeMax <= 0) {
-    return { maxDim, mode: 'absolute', band: null, nativeMax,
-      reason: `fixed ${maxDim}px (native size unknown)` }
+    return { maxDim, mode: 'absolute', band: null, nativeMax, reason: `fixed ${maxDim}px (native size unknown)` }
   }
 
   const bands = DETECT_RESOLUTION_BANDS[detector] ?? DETECT_RESOLUTION_BANDS.sift
@@ -121,11 +115,12 @@ export function resolveDetectMaxDim(nativeMax, settings = {}) {
   // Never upscale: a maxDim above the native size just pads the raster.
   const maxDimOut = Math.min(resolved, nativeMax)
 
-  const reason = maxDimOut >= nativeMax
-    ? `${maxDimOut}px = full native resolution`
-    : `${maxDimOut}px = ${(band.fraction * 100).toFixed(0)}% of ${nativeMax}px`
-      + (clampedLow ? ` (raised to the ${band.floorPx}px floor)` : '')
-      + (clampedHigh ? ` (capped at the ${band.ceilPx}px ceiling)` : '')
+  const reason =
+    maxDimOut >= nativeMax
+      ? `${maxDimOut}px = full native resolution`
+      : `${maxDimOut}px = ${(band.fraction * 100).toFixed(0)}% of ${nativeMax}px` +
+        (clampedLow ? ` (raised to the ${band.floorPx}px floor)` : '') +
+        (clampedHigh ? ` (capped at the ${band.ceilPx}px ceiling)` : '')
 
   return { maxDim: maxDimOut, mode: 'auto', band, nativeMax, reason }
 }
@@ -166,9 +161,12 @@ export function resolveDetectKeypoints(size, settings = {}) {
   const factor = Math.min(rule.maxFactor, Math.max(1, px / rule.refPx))
   const out = Math.round(maxKeypoints * factor)
   return {
-    maxKeypoints: out, factor,
-    reason: factor <= 1 ? `${out} (configured cap; ${(px / 1e6).toFixed(1)} MP detected)`
-      : `${out} = ${factor.toFixed(2)}× ${maxKeypoints} for ${(px / 1e6).toFixed(1)} MP detected`
-        + (factor >= rule.maxFactor ? ` (capped at ${rule.maxFactor}×)` : ''),
+    maxKeypoints: out,
+    factor,
+    reason:
+      factor <= 1
+        ? `${out} (configured cap; ${(px / 1e6).toFixed(1)} MP detected)`
+        : `${out} = ${factor.toFixed(2)}× ${maxKeypoints} for ${(px / 1e6).toFixed(1)} MP detected` +
+          (factor >= rule.maxFactor ? ` (capped at ${rule.maxFactor}×)` : ''),
   }
 }

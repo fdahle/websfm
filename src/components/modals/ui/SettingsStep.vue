@@ -19,7 +19,9 @@ defineProps({
       <span class="step-num">{{ step }}</span>
       <span class="step-title">{{ title }}</span>
     </div>
-    <div v-if="effect || $slots.effect" class="step-effect"><slot name="effect">{{ effect }}</slot></div>
+    <div v-if="effect || $slots.effect" class="step-effect">
+      <slot name="effect">{{ effect }}</slot>
+    </div>
     <div v-if="$slots.default" class="step-fields"><slot /></div>
   </div>
 </template>
@@ -27,25 +29,56 @@ defineProps({
 <style scoped src="./modal.css"></style>
 <style scoped>
 .settings-step {
-  display: flex; flex-direction: column; gap: 8px;
-  padding-left: 12px; border-left: 2px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--panel-border);
 }
-.step-head { display: flex; align-items: center; gap: 8px; margin-left: -23px; }
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: -23px;
+}
 .step-num {
-  width: 20px; height: 20px; flex: none; border-radius: 50%;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; color: #fff; background: var(--accent);
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
 }
 .step-title {
-  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 .step-effect {
-  font-size: 11px; line-height: 1.45; color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
-.step-fields { display: flex; flex-direction: column; gap: 12px; }
-.settings-step.inactive .step-num { background: var(--text-dim); }
-.settings-step.inactive .step-effect { color: var(--text-dim); }
-.settings-step.inactive .step-fields { opacity: 0.6; }
+.step-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.settings-step.inactive .step-num {
+  background: var(--text-dim);
+}
+.settings-step.inactive .step-effect {
+  color: var(--text-dim);
+}
+.settings-step.inactive .step-fields {
+  opacity: 0.6;
+}
 </style>

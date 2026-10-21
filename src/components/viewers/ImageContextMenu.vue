@@ -12,25 +12,29 @@ import { copyToClipboard } from '../../composables/useToasts.js'
 const props = defineProps({
   // { x, y (viewport, clamped for positioning), sx, sy (the clicked viewport
   //   point), px, py (native image pixel), mode: 'main' | 'gcp' | 'fiducial' } | null
-  menu:             { type: Object,  default: null },
+  menu: { type: Object, default: null },
   // Full-res bitmap loaded: the marking entries are hidden until then, and the
   // guards below cover a menu opened just before a url swap.
-  editable:         { type: Boolean, default: false },
-  isFilm:           { type: Boolean, default: false },
-  fiducialMarks:    { type: Array,   default: () => [] }, // [{ id, xMm, yMm }]
-  markedFidIds:     { type: Set,     default: () => new Set() }, // ids placed on this image (✓)
-  fidMarkPos:       { type: Map,     default: () => new Map() }, // id → "top-left"…
-  allGcps:          { type: Array,   default: () => [] }, // [{ id, name }]
+  editable: { type: Boolean, default: false },
+  isFilm: { type: Boolean, default: false },
+  fiducialMarks: { type: Array, default: () => [] }, // [{ id, xMm, yMm }]
+  markedFidIds: { type: Set, default: () => new Set() }, // ids placed on this image (✓)
+  fidMarkPos: { type: Map, default: () => new Map() }, // id → "top-left"…
+  allGcps: { type: Array, default: () => [] }, // [{ id, name }]
   // Which create action is listed first ('control' | 'marker').
-  defaultPointRole: { type: String,  default: 'control' },
+  defaultPointRole: { type: String, default: 'control' },
 })
 
 // add-gcp { px, py, role } · mark-gcp { gcpId, px, py } · mark-fiducial { fidId, px, py }
 // copy-color { px, py } · zoom-in { sx, sy } (about the clicked point) · fit
 const emit = defineEmits(['update:menu', 'add-gcp', 'mark-gcp', 'mark-fiducial', 'copy-color', 'zoom-in', 'fit'])
 
-function close() { emit('update:menu', null) }
-function setMode(mode) { if (props.menu) emit('update:menu', { ...props.menu, mode }) }
+function close() {
+  emit('update:menu', null)
+}
+function setMode(mode) {
+  if (props.menu) emit('update:menu', { ...props.menu, mode })
+}
 
 function newPoint(role) {
   if (props.menu && props.editable) emit('add-gcp', { px: props.menu.px, py: props.menu.py, role })
@@ -57,11 +61,20 @@ function zoomIn() {
   if (props.menu) emit('zoom-in', { sx: props.menu.sx, sy: props.menu.sy })
   close()
 }
-function fitView() { emit('fit'); close() }
+function fitView() {
+  emit('fit')
+  close()
+}
 </script>
 
 <template>
-  <div v-if="menu" class="ctx-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop @contextmenu.prevent>
+  <div
+    v-if="menu"
+    class="ctx-menu"
+    :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
+    @mousedown.stop
+    @contextmenu.prevent
+  >
     <template v-if="menu.mode === 'main'">
       <template v-if="editable">
         <button class="ctx-item add" @click="setMode('gcp')">Add control/marker here…</button>
@@ -77,12 +90,9 @@ function fitView() { emit('fit'); close() }
     <template v-else-if="menu.mode === 'fiducial'">
       <div class="ctx-hd">Mark fiducial here</div>
       <template v-if="fiducialMarks.length">
-        <button
-          v-for="m in fiducialMarks"
-          :key="m.id"
-          class="ctx-item"
-          @click="markFiducial(m.id)"
-        >{{ markedFidIds.has(m.id) ? '✓ ' : '' }}{{ m.id }}<span class="ctx-pos">{{ fidMarkPos.get(m.id) }}</span></button>
+        <button v-for="m in fiducialMarks" :key="m.id" class="ctx-item" @click="markFiducial(m.id)">
+          {{ markedFidIds.has(m.id) ? '✓ ' : '' }}{{ m.id }}<span class="ctx-pos">{{ fidMarkPos.get(m.id) }}</span>
+        </button>
       </template>
       <div v-else class="ctx-sub">No marks defined — add them in the Sensor table.</div>
       <div class="ctx-sep"></div>
@@ -104,12 +114,7 @@ function fitView() { emit('fit'); close() }
       </template>
       <template v-if="allGcps.length">
         <div class="ctx-sub">Assign to existing</div>
-        <button
-          v-for="g in allGcps"
-          :key="g.id"
-          class="ctx-item"
-          @click="assign(g.id)"
-        >{{ g.name }}</button>
+        <button v-for="g in allGcps" :key="g.id" class="ctx-item" @click="assign(g.id)">{{ g.name }}</button>
       </template>
       <div class="ctx-sep"></div>
       <button class="ctx-item back" @click="setMode('main')">‹ Back</button>
@@ -167,8 +172,20 @@ function fitView() { emit('fit'); close() }
   text-overflow: ellipsis;
 }
 
-.ctx-item:hover { background: var(--hover-bg); }
-.ctx-item.add { color: var(--accent, #5cf); font-weight: 500; }
-.ctx-item.back { color: var(--text-dim); }
-.ctx-pos { float: right; margin-left: 12px; color: var(--text-dim); font-size: 11px; }
+.ctx-item:hover {
+  background: var(--hover-bg);
+}
+.ctx-item.add {
+  color: var(--accent, #5cf);
+  font-weight: 500;
+}
+.ctx-item.back {
+  color: var(--text-dim);
+}
+.ctx-pos {
+  float: right;
+  margin-left: 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
 </style>

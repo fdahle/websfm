@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import {
-  meshTopology, compactMesh, removeSmallComponents, removeLongEdges, fillHoles,
-  cleanMesh, taubinSmooth, cropMesh, sampleMesh, meshMeasure, weldVertices,
+  meshTopology,
+  compactMesh,
+  removeSmallComponents,
+  removeLongEdges,
+  fillHoles,
+  cleanMesh,
+  taubinSmooth,
+  cropMesh,
+  sampleMesh,
+  meshMeasure,
+  weldVertices,
 } from './meshEdit.js'
 
 // ── Synthetic meshes ─────────────────────────────────────────────────────────
@@ -12,23 +21,59 @@ function makeMesh(verts, tris, { col = null, Pos = Float64Array } = {}) {
   const idx = new Uint32Array(tris.length * 3)
   tris.forEach((t, i) => idx.set(t, i * 3))
   let c = null
-  if (col) { c = new Uint8Array(verts.length * 3); verts.forEach((_, i) => c.set(typeof col === 'function' ? col(i) : col, i * 3)) }
+  if (col) {
+    c = new Uint8Array(verts.length * 3)
+    verts.forEach((_, i) => c.set(typeof col === 'function' ? col(i) : col, i * 3))
+  }
   return { nVerts: verts.length, count: tris.length, pos, idx, col: c }
 }
 
 // Unit icosphere (outward, CCW seen from outside), `level` midpoint subdivisions.
 function icosphere(level = 3, radius = 1) {
   const t = (1 + Math.sqrt(5)) / 2
-  const verts = [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
-    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]].map(normalize)
-  let tris = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6],
-    [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]]
+  const verts = [
+    [-1, t, 0],
+    [1, t, 0],
+    [-1, -t, 0],
+    [1, -t, 0],
+    [0, -1, t],
+    [0, 1, t],
+    [0, -1, -t],
+    [0, 1, -t],
+    [t, 0, -1],
+    [t, 0, 1],
+    [-t, 0, -1],
+    [-t, 0, 1],
+  ].map(normalize)
+  let tris = [
+    [0, 11, 5],
+    [0, 5, 1],
+    [0, 1, 7],
+    [0, 7, 10],
+    [0, 10, 11],
+    [1, 5, 9],
+    [5, 11, 4],
+    [11, 10, 2],
+    [10, 7, 6],
+    [7, 1, 8],
+    [3, 9, 4],
+    [3, 4, 2],
+    [3, 2, 6],
+    [3, 6, 8],
+    [3, 8, 9],
+    [4, 9, 5],
+    [2, 4, 11],
+    [6, 2, 10],
+    [8, 6, 7],
+    [9, 8, 1],
+  ]
   for (let l = 0; l < level; l++) {
     const cache = new Map()
     const mid = (a, b) => {
       const key = a < b ? `${a},${b}` : `${b},${a}`
       if (!cache.has(key)) {
-        const p = verts[a], q = verts[b]
+        const p = verts[a],
+          q = verts[b]
         verts.push(normalize([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2]))
         cache.set(key, verts.length - 1)
       }
@@ -36,12 +81,17 @@ function icosphere(level = 3, radius = 1) {
     }
     const next = []
     for (const [a, b, c] of tris) {
-      const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a)
+      const ab = mid(a, b),
+        bc = mid(b, c),
+        ca = mid(c, a)
       next.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca])
     }
     tris = next
   }
-  return makeMesh(verts.map((v) => v.map((x) => x * radius)), tris)
+  return makeMesh(
+    verts.map((v) => v.map((x) => x * radius)),
+    tris,
+  )
 }
 
 function normalize(v) {
@@ -51,13 +101,15 @@ function normalize(v) {
 
 // n×m cell grid on z = 0 from (ox,oy), CCW seen from +z.
 function gridParts(n, m, { step = 1, ox = 0, oy = 0, base = 0, skip = () => false, z = () => 0 } = {}) {
-  const verts = [], tris = []
+  const verts = [],
+    tris = []
   for (let j = 0; j <= m; j++) for (let i = 0; i <= n; i++) verts.push([ox + i * step, oy + j * step, z(i, j)])
   const at = (i, j) => base + j * (n + 1) + i
-  for (let j = 0; j < m; j++) for (let i = 0; i < n; i++) {
-    if (skip(i, j)) continue
-    tris.push([at(i, j), at(i + 1, j), at(i + 1, j + 1)], [at(i, j), at(i + 1, j + 1), at(i, j + 1)])
-  }
+  for (let j = 0; j < m; j++)
+    for (let i = 0; i < n; i++) {
+      if (skip(i, j)) continue
+      tris.push([at(i, j), at(i + 1, j), at(i + 1, j + 1)], [at(i, j), at(i + 1, j + 1), at(i, j + 1)])
+    }
   return { verts, tris }
 }
 
@@ -69,8 +121,21 @@ function grid(n, m, opts = {}) {
 function cube(offset = 0) {
   const verts = []
   for (let i = 0; i < 8; i++) verts.push([(i & 1) + offset, ((i >> 1) & 1) + offset, ((i >> 2) & 1) + offset])
-  const quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]
-  return makeMesh(verts, quads.flatMap(([a, b, c, d]) => [[a, b, c], [a, c, d]]))
+  const quads = [
+    [0, 2, 3, 1],
+    [4, 5, 7, 6],
+    [0, 1, 5, 4],
+    [2, 6, 7, 3],
+    [0, 4, 6, 2],
+    [1, 3, 7, 5],
+  ]
+  return makeMesh(
+    verts,
+    quads.flatMap(([a, b, c, d]) => [
+      [a, b, c],
+      [a, c, d],
+    ]),
+  )
 }
 
 // STL-style: every triangle carries its own three corners (and colour).
@@ -91,7 +156,8 @@ function unweld(mesh) {
 const vtx = (mesh, v) => [mesh.pos[v * 3], mesh.pos[v * 3 + 1], mesh.pos[v * 3 + 2]]
 const faceNormalDotCentroid = (mesh, t) => {
   const [a, b, c] = [0, 1, 2].map((k) => vtx(mesh, mesh.idx[t * 3 + k]))
-  const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
+  const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+    v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
   const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
   return n[0] * (a[0] + b[0] + c[0]) + n[1] * (a[1] + b[1] + c[1]) + n[2] * (a[2] + b[2] + c[2])
 }
@@ -101,7 +167,10 @@ function radii(mesh) {
   return r
 }
 const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length
-const std = (a) => { const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / a.length) }
+const std = (a) => {
+  const m = mean(a)
+  return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / a.length)
+}
 
 // Remove every triangle touching vertex v (cuts the vertex's one-ring fan out).
 function withoutFan(mesh, v) {
@@ -110,7 +179,10 @@ function withoutFan(mesh, v) {
     const tri = [mesh.idx[t * 3], mesh.idx[t * 3 + 1], mesh.idx[t * 3 + 2]]
     if (!tri.includes(v)) tris.push(tri)
   }
-  return makeMesh(Array.from({ length: mesh.nVerts }, (_, i) => vtx(mesh, i)), tris)
+  return makeMesh(
+    Array.from({ length: mesh.nVerts }, (_, i) => vtx(mesh, i)),
+    tris,
+  )
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -125,7 +197,20 @@ describe('meshTopology', () => {
   })
   it('counts boundary edges of an open grid and a non-manifold fin', () => {
     expect(meshTopology(grid(4, 3)).boundaryEdges).toBe(2 * (4 + 3))
-    const fin = makeMesh([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1]], [[0, 1, 2], [1, 0, 3], [0, 1, 4]])
+    const fin = makeMesh(
+      [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+      ],
+      [
+        [0, 1, 2],
+        [1, 0, 3],
+        [0, 1, 4],
+      ],
+    )
     const t = meshTopology(fin)
     expect(t.nonManifoldEdges).toBe(1)
     expect(t.boundaryEdges).toBe(6)
@@ -140,8 +225,20 @@ describe('meshTopology', () => {
 
 describe('compactMesh', () => {
   it('drops unreferenced vertices and degenerate triangles, remapping indices', () => {
-    const verts = [[9, 9, 9], [0, 0, 0], [1, 0, 0], [0, 1, 0], [2, 0, 0], [5, 5, 5]]
-    const tris = [[1, 2, 3], [1, 1, 2], [1, 2, 4], [1, 2, 7]] // ok, repeated, collinear, out of range
+    const verts = [
+      [9, 9, 9],
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+      [2, 0, 0],
+      [5, 5, 5],
+    ]
+    const tris = [
+      [1, 2, 3],
+      [1, 1, 2],
+      [1, 2, 4],
+      [1, 2, 7],
+    ] // ok, repeated, collinear, out of range
     const m = makeMesh(verts, tris, { col: (i) => [i, i, i] })
     const out = compactMesh(m)
     expect(out.count).toBe(1)
@@ -210,7 +307,10 @@ describe('fillHoles', () => {
     const sphere = icosphere(1)
     const tris = []
     for (let t = 1; t < sphere.count; t++) tris.push([sphere.idx[t * 3], sphere.idx[t * 3 + 1], sphere.idx[t * 3 + 2]])
-    const holed = makeMesh(Array.from({ length: sphere.nVerts }, (_, i) => vtx(sphere, i)), tris)
+    const holed = makeMesh(
+      Array.from({ length: sphere.nVerts }, (_, i) => vtx(sphere, i)),
+      tris,
+    )
     const r = fillHoles(holed)
     expect(r.filled).toBe(1)
     expect(r.addedTriangles).toBe(1)
@@ -240,7 +340,8 @@ describe('fillHoles', () => {
     const a = gridParts(2, 2)
     const b = gridParts(2, 2, { ox: 2, oy: 2, base: a.verts.length })
     // Weld b's (0,0) corner onto a's (2,2) corner.
-    const shared = 8, dup = a.verts.length
+    const shared = 8,
+      dup = a.verts.length
     const trisB = b.tris.map((t) => t.map((v) => (v === dup ? shared : v)))
     const m = makeMesh([...a.verts, ...b.verts], [...a.tris, ...trisB])
     const logs = []
@@ -269,10 +370,13 @@ describe('weldVertices', () => {
     expect(m.watertight).toBe(true)
     expect(m.volume).toBeCloseTo(1, 12)
   })
-  it('logs ε with its inputs and keeps the first corner\'s colour', () => {
+  it("logs ε with its inputs and keeps the first corner's colour", () => {
     const c = cube()
-    const coloured = makeMesh(Array.from({ length: 8 }, (_, i) => vtx(c, i)), Array.from({ length: 12 }, (_, t) => [...c.idx.subarray(t * 3, t * 3 + 3)]),
-      { col: (i) => [i * 10, 0, 255 - i] })
+    const coloured = makeMesh(
+      Array.from({ length: 8 }, (_, i) => vtx(c, i)),
+      Array.from({ length: 12 }, (_, t) => [...c.idx.subarray(t * 3, t * 3 + 3)]),
+      { col: (i) => [i * 10, 0, 255 - i] },
+    )
     const logs = []
     const r = weldVertices(unweld(coloured), {}, (m) => logs.push(m))
     expect(logs[0]).toMatch(/ε .*bbox diagonal 1\.732.*median edge 1\.000.*merged 28 duplicate vertices/)
@@ -295,20 +399,58 @@ describe('weldVertices', () => {
   it('merges within ε but not near-coincident vertices beyond it', () => {
     // Two triangles sharing an edge, the second's copy of the edge jittered.
     const d = 1e-9 // below the default ε (1e-6 × diagonal ≈ 2.2e-6)
-    const near = makeMesh([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1 + d, 0, 0], [0, 1 - d, 0], [1, 1, 0]],
-      [[0, 1, 2], [3, 5, 4]])
+    const near = makeMesh(
+      [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0],
+        [1 + d, 0, 0],
+        [0, 1 - d, 0],
+        [1, 1, 0],
+      ],
+      [
+        [0, 1, 2],
+        [3, 5, 4],
+      ],
+    )
     expect(weldVertices(near).merged).toBe(2)
     const gap = 1e-4 // a real feature, well above ε
-    const far = makeMesh([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1 + gap, 0, 0], [0, 1 - gap, 0], [1, 1, 0]],
-      [[0, 1, 2], [3, 5, 4]])
+    const far = makeMesh(
+      [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0],
+        [1 + gap, 0, 0],
+        [0, 1 - gap, 0],
+        [1, 1, 0],
+      ],
+      [
+        [0, 1, 2],
+        [3, 5, 4],
+      ],
+    )
     expect(weldVertices(far).merged).toBe(0)
     // An explicit ε overrides the derived one.
     expect(weldVertices(far, { epsilon: 1e-3 }).merged).toBe(2)
   })
   it('does not chain: points ε/2 apart in a row join only the first within ε', () => {
     const eps = 1
-    const row = makeMesh([[0, 0, 0], [0.6, 0, 0], [1.2, 0, 0], [1.8, 0, 0], [0, 5, 0], [0, 0, 5]],
-      [[0, 4, 5], [1, 4, 5], [2, 4, 5], [3, 4, 5]])
+    const row = makeMesh(
+      [
+        [0, 0, 0],
+        [0.6, 0, 0],
+        [1.2, 0, 0],
+        [1.8, 0, 0],
+        [0, 5, 0],
+        [0, 0, 5],
+      ],
+      [
+        [0, 4, 5],
+        [1, 4, 5],
+        [2, 4, 5],
+        [3, 4, 5],
+      ],
+    )
     const r = weldVertices(row, { epsilon: eps })
     // 0.6 joins 0; 1.2 is 1.2 from rep 0 → new rep; 1.8 joins 1.2.
     expect(r.mesh.nVerts).toBe(4)
@@ -327,8 +469,7 @@ describe('cleanMesh', () => {
     const main = gridParts(10, 10, { skip: (i, j) => i === 4 && j === 4 })
     const speck = gridParts(1, 1, { ox: 50, base: main.verts.length })
     const far = main.verts.length + speck.verts.length
-    const m = makeMesh([...main.verts, ...speck.verts, [30, 0, 0]],
-      [...main.tris, ...speck.tris, [10, far, 120]])
+    const m = makeMesh([...main.verts, ...speck.verts, [30, 0, 0]], [...main.tris, ...speck.tris, [10, far, 120]])
     const { mesh, stats } = cleanMesh(m, { minTriangles: 10, maxEdgeFactor: 4, maxHoleEdges: 16 })
     expect(stats.components.removedComponents).toBe(1)
     expect(stats.components.removedTriangles).toBe(2)
@@ -370,7 +511,10 @@ describe('taubinSmooth', () => {
   it('reduces radial noise on a noisy sphere without shrinking it', () => {
     const s = icosphere(4)
     let seed = 7
-    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
+    const rnd = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      return seed / 4294967296
+    }
     const noisy = { ...s, pos: new Float64Array(s.pos) }
     for (let v = 0; v < s.nVerts; v++) {
       const k = 1 + (rnd() - 0.5) * 0.04
@@ -396,8 +540,10 @@ describe('taubinSmooth', () => {
   it('stays exact at survey coordinates', () => {
     const s = icosphere(2)
     const shifted = { ...s, pos: s.pos.map((x, i) => x + (i % 3 === 2 ? 0 : 1e6)) }
-    const a = taubinSmooth(s, { iterations: 3 }), b = taubinSmooth(shifted, { iterations: 3 })
-    for (let i = 0; i < a.pos.length; i++) expect(Math.abs(b.pos[i] - (i % 3 === 2 ? 0 : 1e6) - a.pos[i])).toBeLessThan(1e-8)
+    const a = taubinSmooth(s, { iterations: 3 }),
+      b = taubinSmooth(shifted, { iterations: 3 })
+    for (let i = 0; i < a.pos.length; i++)
+      expect(Math.abs(b.pos[i] - (i % 3 === 2 ? 0 : 1e6) - a.pos[i])).toBeLessThan(1e-8)
   })
 })
 
@@ -441,7 +587,8 @@ describe('sampleMesh', () => {
   })
   it('is deterministic per seed', () => {
     const s = icosphere(2)
-    const a = sampleMesh(s, { count: 200, seed: 42 }), b = sampleMesh(s, { count: 200, seed: 42 })
+    const a = sampleMesh(s, { count: 200, seed: 42 }),
+      b = sampleMesh(s, { count: 200, seed: 42 })
     const c = sampleMesh(s, { count: 200, seed: 43 })
     expect(Array.from(a.pos)).toEqual(Array.from(b.pos))
     expect(Array.from(a.pos)).not.toEqual(Array.from(c.pos))
@@ -462,7 +609,9 @@ describe('sampleMesh', () => {
   })
   it('returns an empty cloud for an empty mesh or count 0', () => {
     expect(sampleMesh(grid(2, 2), { count: 0 }).count).toBe(0)
-    expect(sampleMesh({ nVerts: 0, count: 0, pos: new Float64Array(0), idx: new Uint32Array(0), col: null }).count).toBe(0)
+    expect(
+      sampleMesh({ nVerts: 0, count: 0, pos: new Float64Array(0), idx: new Uint32Array(0), col: null }).count,
+    ).toBe(0)
   })
 })
 
@@ -508,7 +657,7 @@ describe('meshMeasure', () => {
   })
   it('sphere volume approaches 4/3π', () => {
     const m = meshMeasure(icosphere(4))
-    expect(Math.abs(m.volume - 4 / 3 * Math.PI) / (4 / 3 * Math.PI)).toBeLessThan(0.01)
+    expect(Math.abs(m.volume - (4 / 3) * Math.PI) / ((4 / 3) * Math.PI)).toBeLessThan(0.01)
   })
 })
 
@@ -516,7 +665,7 @@ describe('performance smoke', () => {
   it('cleans + smooths a ~200k-triangle grid quickly', () => {
     const n = 316
     const m = grid(n, n, {
-      skip: (i, j) => (i % 50 === 25 && j % 50 === 25),
+      skip: (i, j) => i % 50 === 25 && j % 50 === 25,
       z: (i, j) => Math.sin(i * 0.1) * Math.cos(j * 0.1) + ((i * 31 + j * 17) % 7) * 0.01,
       col: [128, 128, 128],
     })
@@ -527,8 +676,10 @@ describe('performance smoke', () => {
     const t2 = performance.now()
     const meas = meshMeasure(smooth)
     const t3 = performance.now()
-    console.log(`meshEdit perf: ${m.count} tris — clean ${(t1 - t0).toFixed(0)} ms, `
-      + `smooth ${(t2 - t1).toFixed(0)} ms, measure ${(t3 - t2).toFixed(0)} ms`)
+    console.log(
+      `meshEdit perf: ${m.count} tris — clean ${(t1 - t0).toFixed(0)} ms, ` +
+        `smooth ${(t2 - t1).toFixed(0)} ms, measure ${(t3 - t2).toFixed(0)} ms`,
+    )
     expect(m.count).toBeGreaterThan(195000)
     expect(stats.holes.filled).toBe(36)
     expect(meas.boundaryEdges).toBe(4 * n)

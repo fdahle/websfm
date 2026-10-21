@@ -75,8 +75,11 @@ function lowestPerCell(pos, count, grid, inside) {
   const H = new Float64Array(width * height).fill(NaN)
   for (let i = 0; i < count; i++) {
     if (inside && !inside[i]) continue
-    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
-    const c = Math.floor((x - x0) / res + 0.5), r = Math.floor((y0 - y) / res + 0.5)
+    const x = pos[i * 3],
+      y = pos[i * 3 + 1],
+      z = pos[i * 3 + 2]
+    const c = Math.floor((x - x0) / res + 0.5),
+      r = Math.floor((y0 - y) / res + 0.5)
     if (c < 0 || c >= width || r < 0 || r >= height) continue
     const k = r * width + c
     if (!(H[k] <= z)) H[k] = z
@@ -100,7 +103,8 @@ function despike(H, width, height, threshold) {
       const k = r * width + c
       const h = src[k]
       if (Number.isNaN(h)) continue
-      let n = 0, near = 0
+      let n = 0,
+        near = 0
       for (let dr = -1; dr <= 1; dr++) {
         const rr = r + dr
         if (rr < 0 || rr >= height) continue
@@ -129,15 +133,26 @@ function fillNearest(H, width, height) {
   const n = width * height
   const measured = new Uint8Array(n)
   const queue = new Int32Array(n)
-  let head = 0, tail = 0
+  let head = 0,
+    tail = 0
   for (let k = 0; k < n; k++) {
-    if (!Number.isNaN(H[k])) { measured[k] = 1; queue[tail++] = k }
+    if (!Number.isNaN(H[k])) {
+      measured[k] = 1
+      queue[tail++] = k
+    }
   }
   const seen = Uint8Array.from(measured)
   while (head < tail) {
     const k = queue[head++]
-    const r = (k / width) | 0, c = k - r * width
-    const visit = (j) => { if (!seen[j]) { seen[j] = 1; H[j] = H[k]; queue[tail++] = j } }
+    const r = (k / width) | 0,
+      c = k - r * width
+    const visit = (j) => {
+      if (!seen[j]) {
+        seen[j] = 1
+        H[j] = H[k]
+        queue[tail++] = j
+      }
+    }
     if (c > 0) visit(k - 1)
     if (c < width - 1) visit(k + 1)
     if (r > 0) visit(k - width)
@@ -149,8 +164,22 @@ function fillNearest(H, width, height) {
 // Spring neighbours of a particle, as (dc, dr) offsets: the 8 around it and
 // the 8 two steps away.
 const SPRINGS = [
-  [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1],
-  [2, 0], [-2, 0], [0, 2], [0, -2], [2, 2], [-2, -2], [2, -2], [-2, 2],
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [-1, -1],
+  [1, -1],
+  [-1, 1],
+  [2, 0],
+  [-2, 0],
+  [0, 2],
+  [0, -2],
+  [2, 2],
+  [-2, -2],
+  [2, -2],
+  [-2, 2],
 ]
 
 // Run the cloth. Mutates nothing it was given; returns the particle heights and
@@ -166,7 +195,9 @@ function simulateCloth(H, width, height, opts, onProgress) {
   const pinned = new Uint8Array(n)
   const moveBoth = 0.5 * (1 - 0.4 ** rigidness)
   const moveOne = 1 - 0.7 ** rigidness
-  let iterations = 0, converged = false, pinnedCount = 0
+  let iterations = 0,
+    converged = false,
+    pinnedCount = 0
 
   for (let it = 0; it < maxIterations; it++) {
     iterations = it + 1
@@ -184,13 +215,17 @@ function simulateCloth(H, width, height, opts, onProgress) {
         const a = r * width + c
         const pa = pinned[a]
         for (let s = 0; s < 16; s++) {
-          const cc = c + SPRINGS[s][0], rr = r + SPRINGS[s][1]
+          const cc = c + SPRINGS[s][0],
+            rr = r + SPRINGS[s][1]
           if (cc < 0 || cc >= width || rr < 0 || rr >= height) continue
           const b = rr * width + cc
           const pb = pinned[b]
           if (pa && pb) continue
           const d = z[b] - z[a]
-          if (!pa && !pb) { z[a] += moveBoth * d; z[b] -= moveBoth * d } else if (!pa) z[a] += moveOne * d
+          if (!pa && !pb) {
+            z[a] += moveBoth * d
+            z[b] -= moveBoth * d
+          } else if (!pa) z[a] += moveOne * d
           else z[b] -= moveOne * d
         }
       }
@@ -199,13 +234,22 @@ function simulateCloth(H, width, height, opts, onProgress) {
     let maxMove = 0
     for (let k = 0; k < n; k++) {
       if (pinned[k]) continue
-      if (z[k] >= H[k]) { z[k] = H[k]; zOld[k] = H[k]; pinned[k] = 1; pinnedCount++; continue }
+      if (z[k] >= H[k]) {
+        z[k] = H[k]
+        zOld[k] = H[k]
+        pinned[k] = 1
+        pinnedCount++
+        continue
+      }
       const move = Math.abs(z[k] - zOld[k])
       if (move > maxMove) maxMove = move
     }
     onProgress?.(iterations / maxIterations)
     // The first iterations accelerate from rest, so only test once moving.
-    if (pinnedCount === n || (it > 2 && maxMove < convergence)) { converged = true; break }
+    if (pinnedCount === n || (it > 2 && maxMove < convergence)) {
+      converged = true
+      break
+    }
   }
   return { z, pinned, iterations, converged }
 }
@@ -221,14 +265,20 @@ function simulateCloth(H, width, height, opts, onProgress) {
 function snapSlopes(z, pinned, H, measured, width, height, threshold) {
   const n = width * height
   const queue = new Int32Array(n)
-  let head = 0, tail = 0, snapped = 0
+  let head = 0,
+    tail = 0,
+    snapped = 0
   for (let k = 0; k < n; k++) if (pinned[k] && measured[k]) queue[tail++] = k
   while (head < tail) {
     const k = queue[head++]
-    const r = (k / width) | 0, c = k - r * width
+    const r = (k / width) | 0,
+      c = k - r * width
     const visit = (j) => {
       if (pinned[j] || !measured[j] || Math.abs(H[j] - H[k]) >= threshold) return
-      z[j] = H[j]; pinned[j] = 1; queue[tail++] = j; snapped++
+      z[j] = H[j]
+      pinned[j] = 1
+      queue[tail++] = j
+      snapped++
     }
     if (c > 0) visit(k - 1)
     if (c < width - 1) visit(k + 1)
@@ -283,54 +333,75 @@ export function classifyGround(pos, count, opts = {}) {
 
   // Extent of the classified points.
   let inside = null
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, n = 0
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity,
+    n = 0
   if (bounds) inside = new Uint8Array(count)
   for (let i = 0; i < count; i++) {
-    const x = pos[i * 3], y = pos[i * 3 + 1]
+    const x = pos[i * 3],
+      y = pos[i * 3 + 1]
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(pos[i * 3 + 2])) continue
     if (bounds && (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY)) continue
     if (inside) inside[i] = 1
     n++
-    if (x < minX) minX = x; if (x > maxX) maxX = x
-    if (y < minY) minY = y; if (y > maxY) maxY = y
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
   }
   if (n === 0) return null
   if (!inside && n < count) {
     // Non-finite points are left unclassified (class 0) like out-of-bounds ones.
     inside = new Uint8Array(count)
     for (let i = 0; i < count; i++) {
-      inside[i] = Number.isFinite(pos[i * 3]) && Number.isFinite(pos[i * 3 + 1]) && Number.isFinite(pos[i * 3 + 2]) ? 1 : 0
+      inside[i] =
+        Number.isFinite(pos[i * 3]) && Number.isFinite(pos[i * 3 + 1]) && Number.isFinite(pos[i * 3 + 2]) ? 1 : 0
     }
   }
 
-  const spanX = Math.max(maxX - minX, 0), spanY = Math.max(maxY - minY, 0)
+  const spanX = Math.max(maxX - minX, 0),
+    spanY = Math.max(maxY - minY, 0)
   let res = Math.max(clothResolution, GROUND_FILTER_LIMITS.minResolution)
   // Enough particles that every point lies within half a cell of one.
   const dims = (s) => [Math.floor(spanX / s + 0.5) + 1, Math.floor(spanY / s + 0.5) + 1]
   let [width, height] = dims(res)
   if (width * height > maxParticles) {
     const asked = res
-    res = Math.sqrt((spanX + res) * (spanY + res) / maxParticles) * 1.01
+    res = Math.sqrt(((spanX + res) * (spanY + res)) / maxParticles) * 1.01
     ;[width, height] = dims(res)
-    while (width * height > maxParticles) { res *= 1.05;[width, height] = dims(res) }
-    onLog?.(`Ground filter: cloth resolution ${asked.toPrecision(3)} ${unitLabel} would need more than `
-      + `${maxParticles.toLocaleString()} particles; using ${res.toPrecision(3)} ${unitLabel}`)
+    while (width * height > maxParticles) {
+      res *= 1.05
+      ;[width, height] = dims(res)
+    }
+    onLog?.(
+      `Ground filter: cloth resolution ${asked.toPrecision(3)} ${unitLabel} would need more than ` +
+        `${maxParticles.toLocaleString()} particles; using ${res.toPrecision(3)} ${unitLabel}`,
+    )
   }
   // Particle (c, r) sits at (x0 + c·res, y0 − r·res), the top-left one on the
   // extent's corner, and owns the cell of width `res` centred on it. Indices are
   // taken relative to that corner, so survey-sized coordinates round the same as
   // small ones.
   const grid = { width, height, res, x0: minX, y0: maxY }
-  onLog?.(`Ground filter: ${n.toLocaleString()} points, cloth ${width}×${height} at `
-    + `${res.toPrecision(3)} ${unitLabel}, rigidness ${rigidness}, `
-    + `class threshold ${+classThreshold.toPrecision(3)} ${unitLabel}`)
+  onLog?.(
+    `Ground filter: ${n.toLocaleString()} points, cloth ${width}×${height} at ` +
+      `${res.toPrecision(3)} ${unitLabel}, rigidness ${rigidness}, ` +
+      `class threshold ${+classThreshold.toPrecision(3)} ${unitLabel}`,
+  )
 
   const H = lowestPerCell(pos, count, grid, inside)
   const despiked = despikeThreshold > 0 ? despike(H, width, height, despikeThreshold) : 0
   const measured = fillNearest(H, width, height)
 
-  const sim = simulateCloth(H, width, height, { rigidness, maxIterations, convergence, metresPerUnit },
-    onProgress ? (f) => onProgress(0.9 * f) : null)
+  const sim = simulateCloth(
+    H,
+    width,
+    height,
+    { rigidness, maxIterations, convergence, metresPerUnit },
+    onProgress ? (f) => onProgress(0.9 * f) : null,
+  )
   const snapped = slopeSmoothing ? snapSlopes(sim.z, sim.pinned, H, measured, width, height, slopeThreshold) : 0
   let pinned = 0
   for (let k = 0; k < sim.pinned.length; k++) pinned += sim.pinned[k]
@@ -338,7 +409,9 @@ export function classifyGround(pos, count, opts = {}) {
   // Classify against the cloth, bilinear between particle centres.
   const z = sim.z
   const classes = new Uint8Array(count)
-  let ground = 0, unclassified = 0, low = 0
+  let ground = 0,
+    unclassified = 0,
+    low = 0
   const { x0, y0 } = grid
   for (let i = 0; i < count; i++) {
     if (inside && !inside[i]) continue
@@ -346,22 +419,35 @@ export function classifyGround(pos, count, opts = {}) {
     const fy = (y0 - pos[i * 3 + 1]) / res
     const c0 = Math.min(width - 1, Math.max(0, Math.floor(fx)))
     const r0 = Math.min(height - 1, Math.max(0, Math.floor(fy)))
-    const c1 = Math.min(width - 1, c0 + 1), r1 = Math.min(height - 1, r0 + 1)
-    const tx = Math.min(1, Math.max(0, fx - c0)), ty = Math.min(1, Math.max(0, fy - r0))
+    const c1 = Math.min(width - 1, c0 + 1),
+      r1 = Math.min(height - 1, r0 + 1)
+    const tx = Math.min(1, Math.max(0, fx - c0)),
+      ty = Math.min(1, Math.max(0, fy - r0))
     const top = z[r0 * width + c0] * (1 - tx) + z[r0 * width + c1] * tx
     const bot = z[r1 * width + c0] * (1 - tx) + z[r1 * width + c1] * tx
     const d = pos[i * 3 + 2] - (top * (1 - ty) + bot * ty)
-    if (d > classThreshold) { classes[i] = CLASS_UNCLASSIFIED; unclassified++ }
-    else if (d < -classThreshold) { classes[i] = CLASS_LOW_POINT; low++ }
-    else { classes[i] = CLASS_GROUND; ground++ }
+    if (d > classThreshold) {
+      classes[i] = CLASS_UNCLASSIFIED
+      unclassified++
+    } else if (d < -classThreshold) {
+      classes[i] = CLASS_LOW_POINT
+      low++
+    } else {
+      classes[i] = CLASS_GROUND
+      ground++
+    }
   }
   onProgress?.(1)
-  onLog?.(`Ground filter: ${sim.converged ? 'converged' : 'stopped'} after ${sim.iterations} iterations; `
-    + `${pinned.toLocaleString()} of ${(width * height).toLocaleString()} particles on the cloud`
-    + `${snapped ? ` (${snapped.toLocaleString()} snapped on slopes)` : ''}`
-    + `${despiked ? `, ${despiked.toLocaleString()} isolated low cells raised` : ''}`)
-  onLog?.(`Ground filter: ${ground.toLocaleString()} ground, ${unclassified.toLocaleString()} above ground, `
-    + `${low.toLocaleString()} low points${count - n ? `, ${(count - n).toLocaleString()} outside the extent` : ''}`)
+  onLog?.(
+    `Ground filter: ${sim.converged ? 'converged' : 'stopped'} after ${sim.iterations} iterations; ` +
+      `${pinned.toLocaleString()} of ${(width * height).toLocaleString()} particles on the cloud` +
+      `${snapped ? ` (${snapped.toLocaleString()} snapped on slopes)` : ''}` +
+      `${despiked ? `, ${despiked.toLocaleString()} isolated low cells raised` : ''}`,
+  )
+  onLog?.(
+    `Ground filter: ${ground.toLocaleString()} ground, ${unclassified.toLocaleString()} above ground, ` +
+      `${low.toLocaleString()} low points${count - n ? `, ${(count - n).toLocaleString()} outside the extent` : ''}`,
+  )
 
   return {
     classes,
@@ -390,25 +476,33 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
   const { count, pos } = cloud
   const bytes = count * 24
   if (bytes > budgetBytes) {
-    throw new Error(`Ground filter needs ${Math.ceil(bytes / 2 ** 20).toLocaleString()} MiB for ${count.toLocaleString()} `
-      + 'points, over the memory budget (Settings ▸ Compute); raise the budget or subsample the cloud')
+    throw new Error(
+      `Ground filter needs ${Math.ceil(bytes / 2 ** 20).toLocaleString()} MiB for ${count.toLocaleString()} ` +
+        'points, over the memory budget (Settings ▸ Compute); raise the budget or subsample the cloud',
+    )
   }
   let framed = pos
   if (frame) {
     framed = new Float64Array(count * 3)
     const p = [0, 0, 0]
     for (let i = 0; i < count; i++) {
-      p[0] = pos[i * 3]; p[1] = pos[i * 3 + 1]; p[2] = pos[i * 3 + 2]
+      p[0] = pos[i * 3]
+      p[1] = pos[i * 3 + 1]
+      p[2] = pos[i * 3 + 2]
       const q = frame.fromSfm(p)
-      framed[i * 3] = q[0]; framed[i * 3 + 1] = q[1]; framed[i * 3 + 2] = q[2]
+      framed[i * 3] = q[0]
+      framed[i * 3 + 1] = q[1]
+      framed[i * 3 + 2] = q[2]
     }
   }
   let bounds = null
   if (extent === 'core') {
     bounds = coreExtent(framed, count)
     if (bounds && bounds.inside < count) {
-      onLog?.(`Ground filter: classifying the cloud's dense core; ${(count - bounds.inside).toLocaleString()} `
-        + 'points outside it stay never classified (class 0)')
+      onLog?.(
+        `Ground filter: classifying the cloud's dense core; ${(count - bounds.inside).toLocaleString()} ` +
+          'points outside it stay never classified (class 0)',
+      )
     }
   }
   // Lengths are set in metres and the simulation runs in frame units.

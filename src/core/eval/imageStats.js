@@ -11,14 +11,16 @@ import { projectPoint } from '../sfm/geometry.js'
 // Sorting the result by rmsPx desc names the cameras poisoning the reconstruction —
 // the whole point of the view.
 export function perImageResiduals(cameras, points) {
-  const acc = new Map()   // uuid → number[]
+  const acc = new Map() // uuid → number[]
   for (const uuid of cameras.keys()) acc.set(uuid, [])
 
   for (let i = 0, n = points?.length ?? 0; i < n; i++) {
-    const x = points.x(i), y = points.y(i), z = points.z(i)
+    const x = points.x(i),
+      y = points.y(i),
+      z = points.z(i)
     points.forEachPixel(i, (uuid, px, py) => {
       const cam = cameras.get(uuid)
-      if (!cam) return                         // observation of an image not in this model
+      if (!cam) return // observation of an image not in this model
       const proj = projectPoint(cam, x, y, z)
       if (proj) acc.get(uuid).push(Math.hypot(proj.u - px, proj.v - py))
     })
@@ -27,7 +29,10 @@ export function perImageResiduals(cameras, points) {
   const out = []
   for (const [uuid, res] of acc) {
     const nObs = res.length
-    if (!nObs) { out.push({ uuid, nObs: 0, rmsPx: null, medianPx: null, maxPx: null }); continue }
+    if (!nObs) {
+      out.push({ uuid, nObs: 0, rmsPx: null, medianPx: null, maxPx: null })
+      continue
+    }
     res.sort((a, b) => a - b)
     const rms = Math.sqrt(res.reduce((a, b) => a + b * b, 0) / nObs)
     out.push({ uuid, nObs, rmsPx: rms, medianPx: res[nObs >> 1], maxPx: res[nObs - 1] })
@@ -70,7 +75,8 @@ export function imageResidualVectors(cam, points, uuid, toScan = null) {
   const { vx, vy } = points
   if (!vx) return out
   points.forEachPointOf(uuid, (i, k) => {
-    const ox = vx[k], oy = vy[k]
+    const ox = vx[k],
+      oy = vy[k]
     if (!Number.isFinite(ox)) return
     const proj = projectPoint(cam, points.x(i), points.y(i), points.z(i))
     if (!proj) return

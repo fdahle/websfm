@@ -19,14 +19,22 @@
 
 import { depthColor } from '../core/products/colormap.js'
 
-function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)) }
+function clamp(v, lo, hi) {
+  return Math.min(hi, Math.max(lo, v))
+}
 
 /** The view of one repaint: viewport `w × h`, pan `tx/ty`, `scale`, native `frame`. */
 export function overlayView({ w, h, tx, ty, scale, frame }) {
   return {
-    w, h, tx, ty, scale,
-    nw: frame.width, nh: frame.height,
-    dispW: frame.width * scale, dispH: frame.height * scale,
+    w,
+    h,
+    tx,
+    ty,
+    scale,
+    nw: frame.width,
+    nh: frame.height,
+    dispW: frame.width * scale,
+    dispH: frame.height * scale,
   }
 }
 
@@ -39,9 +47,9 @@ export function beginOverlayFrame(canvas, w, h, dpr) {
   const pw = Math.round(w * dpr)
   const ph = Math.round(h * dpr)
   if (canvas.width !== pw || canvas.height !== ph) {
-    canvas.width  = pw
+    canvas.width = pw
     canvas.height = ph
-    canvas.style.width  = `${w}px`
+    canvas.style.width = `${w}px`
     canvas.style.height = `${h}px`
   }
   const ctx = canvas.getContext('2d')
@@ -57,11 +65,13 @@ export function beginOverlayFrame(canvas, w, h, dpr) {
 // Legend colour ramps as [offset, cssColor] stops.
 export const KEYPOINT_LEGEND = {
   stops: [
-    [0,   'hsl(240,100%,55%)'],
+    [0, 'hsl(240,100%,55%)'],
     [0.5, 'hsl(120,100%,55%)'],
-    [1,   'hsl(0,100%,55%)'],
+    [1, 'hsl(0,100%,55%)'],
   ],
-  left: 'low', right: 'high', title: 'response',
+  left: 'low',
+  right: 'high',
+  title: 'response',
 }
 // Sample the depth ramp (core/colormap depthColor) at a few points for the gradient.
 export const DEPTH_LEGEND = {
@@ -69,12 +79,16 @@ export const DEPTH_LEGEND = {
     const [r, g, b] = depthColor(t)
     return [t, `rgb(${r},${g},${b})`]
   }),
-  left: 'near', right: 'far', title: 'depth',
+  left: 'near',
+  right: 'far',
+  title: 'depth',
 }
 
 /** A labelled colour-ramp legend (`legend`: { stops, left, right, title }) in row `slot`. */
 export function paintRampLegend(ctx, view, slot, { stops, left, right, title }) {
-  const LW = 72, LH = 8, ROW = 34
+  const LW = 72,
+    LH = 8,
+    ROW = 34
   const LX = 12
   const LY = view.h - 36 - slot * ROW
   ctx.save()
@@ -97,7 +111,9 @@ export function paintRampLegend(ctx, view, slot, { stops, left, right, title }) 
 
 /** Caption for the residual overlay in row `slot`: the ×25 amplification + colour meaning. */
 export function paintResidualLegend(ctx, view, slot) {
-  const ROW = 34, LX = 12, LY = view.h - 36 - slot * ROW
+  const ROW = 34,
+    LX = 12,
+    LY = view.h - 36 - slot * ROW
   ctx.save()
   const text = '×25  red > 2 px'
   ctx.font = '9px sans-serif'
@@ -132,7 +148,8 @@ export function paintRaster(ctx, view, source, alpha, { smooth = false } = {}) {
  */
 export function keypointResponseRange(kps) {
   if (!kps?.length) return null
-  let minR = Infinity, maxR = -Infinity
+  let minR = Infinity,
+    maxR = -Infinity
   for (let i = 0; i < kps.length; i++) {
     const r = kps.response(i)
     if (r < minR) minR = r
@@ -153,22 +170,24 @@ export function paintKeypoints(ctx, view, kps, { minR, range }) {
   // than the eye resolves on a 4 px dot.
   const BUCKETS = 24
   const paths = new Array(BUCKETS)
-  const R = 2, edge = R + 1
-  const ox = view.tx, oy = view.ty
+  const R = 2,
+    edge = R + 1
+  const ox = view.tx,
+    oy = view.ty
   for (let i = 0; i < kps.length; i++) {
     const x = kps.nx(i) * dispW + ox
     const y = kps.ny(i) * dispH + oy
     // Cull off-screen points: zoomed in, that is nearly all of them.
     if (x < -edge || y < -edge || x > w + edge || y > h + edge) continue
-    const t = (kps.response(i) - minR) / range  // 0 = coldest, 1 = hottest
+    const t = (kps.response(i) - minR) / range // 0 = coldest, 1 = hottest
     const b = clamp(Math.round(t * (BUCKETS - 1)), 0, BUCKETS - 1)
     const p = paths[b] ?? (paths[b] = new Path2D())
-    p.moveTo(x + R, y)                          // arc start, so no joining line
+    p.moveTo(x + R, y) // arc start, so no joining line
     p.arc(x, y, R, 0, Math.PI * 2)
   }
   for (let b = 0; b < BUCKETS; b++) {
     if (!paths[b]) continue
-    const hue = Math.round((1 - b / (BUCKETS - 1)) * 240)   // 240° blue → 0° red
+    const hue = Math.round((1 - b / (BUCKETS - 1)) * 240) // 240° blue → 0° red
     ctx.fillStyle = `hsl(${hue},100%,55%)`
     ctx.fill(paths[b])
   }
@@ -186,7 +205,7 @@ export const RESIDUAL_AMP = 25
 
 /** Stroke colour of a residual vector by its raw magnitude (px). */
 export function residualColor(mag) {
-  return mag >= 2 ? '#e0533d' : (mag >= 1 ? '#e6a01e' : '#3fca77')
+  return mag >= 2 ? '#e0533d' : mag >= 1 ? '#e6a01e' : '#3fca77'
 }
 
 /**
@@ -261,7 +280,7 @@ export function paintGcpGuides(ctx, view, guides, selectedGcpId, clipLine) {
   for (const g of guides) {
     const isSelected = g.gcpId != null && g.gcpId === selectedGcpId
     const strong = 'rgba(120,230,180,0.95)'
-    const faint  = 'rgba(120,230,180,0.45)'
+    const faint = 'rgba(120,230,180,0.45)'
     ctx.save()
     ctx.setLineDash([5, 4])
     ctx.lineWidth = isSelected ? 1.8 : 1.2
@@ -288,10 +307,14 @@ export function paintGcpGuides(ctx, view, guides, selectedGcpId, clipLine) {
         ctx.arc(x, y, 7, 0, Math.PI * 2)
         ctx.stroke()
         ctx.beginPath()
-        ctx.moveTo(x - 11, y); ctx.lineTo(x - 3, y)
-        ctx.moveTo(x + 3, y);  ctx.lineTo(x + 11, y)
-        ctx.moveTo(x, y - 11); ctx.lineTo(x, y - 3)
-        ctx.moveTo(x, y + 3);  ctx.lineTo(x, y + 11)
+        ctx.moveTo(x - 11, y)
+        ctx.lineTo(x - 3, y)
+        ctx.moveTo(x + 3, y)
+        ctx.lineTo(x + 11, y)
+        ctx.moveTo(x, y - 11)
+        ctx.lineTo(x, y - 3)
+        ctx.moveTo(x, y + 3)
+        ctx.lineTo(x, y + 11)
         ctx.stroke()
         if (g.name && isSelected) drawGuideLabel(ctx, x + 12, y - 9, pointGuideLabel(g), strong)
       }
@@ -321,10 +344,14 @@ export function paintGcps(ctx, view, gcps, selectedGcpId) {
     ctx.stroke()
     // Cross-hair
     ctx.beginPath()
-    ctx.moveTo(x - 11, y); ctx.lineTo(x - 3, y)
-    ctx.moveTo(x + 3, y);  ctx.lineTo(x + 11, y)
-    ctx.moveTo(x, y - 11);  ctx.lineTo(x, y - 3)
-    ctx.moveTo(x, y + 3);   ctx.lineTo(x, y + 11)
+    ctx.moveTo(x - 11, y)
+    ctx.lineTo(x - 3, y)
+    ctx.moveTo(x + 3, y)
+    ctx.lineTo(x + 11, y)
+    ctx.moveTo(x, y - 11)
+    ctx.lineTo(x, y - 3)
+    ctx.moveTo(x, y + 3)
+    ctx.lineTo(x, y + 11)
     ctx.stroke()
     // Label — name, plus the live reprojection error (px) when available so a
     // bad mark is obvious. Colour the error red once it's clearly off (>5px).
@@ -367,8 +394,10 @@ export function paintFiducials(ctx, view, obs, residualUm, ghosts) {
     ctx.lineWidth = 1.5
     ctx.strokeRect(x - 6, y - 6, 12, 12)
     ctx.beginPath()
-    ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6)
-    ctx.moveTo(x - 6, y + 6); ctx.lineTo(x + 6, y - 6)
+    ctx.moveTo(x - 6, y - 6)
+    ctx.lineTo(x + 6, y + 6)
+    ctx.moveTo(x - 6, y + 6)
+    ctx.lineTo(x + 6, y - 6)
     ctx.stroke()
     const res = residualUm.get(o.fidId)
     const label = o.fidId + (res != null ? `  ${res.toFixed(1)}µm` : '')
@@ -376,7 +405,8 @@ export function paintFiducials(ctx, view, obs, residualUm, ghosts) {
     const tw = ctx.measureText(label).width
     ctx.fillStyle = 'rgba(0,0,0,0.55)'
     ctx.fillRect(x + 9, y - 16, tw + 6, 14)
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
     ctx.fillStyle = 'rgba(255,120,230,0.95)'
     ctx.fillText(o.fidId, x + 12, y - 9)
     if (res != null) {
@@ -397,7 +427,8 @@ export function paintFiducials(ctx, view, obs, residualUm, ghosts) {
     ctx.strokeRect(x - 6, y - 6, 12, 12)
     ctx.setLineDash([])
     ctx.font = '11px sans-serif'
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
     ctx.fillStyle = 'rgba(255,120,230,0.55)'
     ctx.fillText(g.id, x + 10, y)
     ctx.restore()
@@ -420,27 +451,41 @@ export function paintLoupe(ctx, view, img, frame, mouse) {
   const ipy = (mouse.y - view.ty) / view.scale
   if (ipx < 0 || ipy < 0 || ipx >= frame.width || ipy >= frame.height) return
 
-  const SIZE = 128, ZOOM = 8, src = (SIZE / ZOOM) * frame.bitmapScale
-  const bx = ipx * frame.bitmapScale, by = ipy * frame.bitmapScale
-  const lx = view.w - SIZE - 12, ly = 12
+  const SIZE = 128,
+    ZOOM = 8,
+    src = (SIZE / ZOOM) * frame.bitmapScale
+  const bx = ipx * frame.bitmapScale,
+    by = ipy * frame.bitmapScale
+  const lx = view.w - SIZE - 12,
+    ly = 12
 
   ctx.save()
-  ctx.beginPath(); ctx.rect(lx, ly, SIZE, SIZE); ctx.clip()
-  ctx.fillStyle = '#000'; ctx.fillRect(lx, ly, SIZE, SIZE)
+  ctx.beginPath()
+  ctx.rect(lx, ly, SIZE, SIZE)
+  ctx.clip()
+  ctx.fillStyle = '#000'
+  ctx.fillRect(lx, ly, SIZE, SIZE)
   ctx.imageSmoothingEnabled = false
   try {
     ctx.drawImage(img, bx - src / 2, by - src / 2, src, src, lx, ly, SIZE, SIZE)
-  } catch { /* source rect off-image near the edge — skip */ }
+  } catch {
+    /* source rect off-image near the edge — skip */
+  }
   // Centre crosshair (the pixel that a mark would land on).
-  const cx = lx + SIZE / 2, cy = ly + SIZE / 2
-  ctx.strokeStyle = 'rgba(255,210,0,0.95)'; ctx.lineWidth = 1
+  const cx = lx + SIZE / 2,
+    cy = ly + SIZE / 2
+  ctx.strokeStyle = 'rgba(255,210,0,0.95)'
+  ctx.lineWidth = 1
   ctx.beginPath()
-  ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy)
-  ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8)
+  ctx.moveTo(cx - 8, cy)
+  ctx.lineTo(cx + 8, cy)
+  ctx.moveTo(cx, cy - 8)
+  ctx.lineTo(cx, cy + 8)
   ctx.stroke()
   ctx.restore()
   // Border.
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)'
+  ctx.lineWidth = 1
   ctx.strokeRect(lx + 0.5, ly + 0.5, SIZE, SIZE)
 }
 

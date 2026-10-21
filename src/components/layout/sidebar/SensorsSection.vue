@@ -31,17 +31,21 @@ function fmtDims(s) {
   return s.width && s.height ? `${s.width} × ${s.height}` : '—'
 }
 // The lens model when it changes anything (a fisheye always does), else null.
-const lensLabel = (s) => (distortionOf(s)
-  ? DISTORTION_MODELS.find((m) => m.id === s.distortionModel)?.label ?? 'Brown' : null)
+const lensLabel = (s) =>
+  distortionOf(s) ? (DISTORTION_MODELS.find((m) => m.id === s.distortionModel)?.label ?? 'Brown') : null
 
 // Sensor context menu (right-click). { x, y, sensor }
 const { menu: sensorCtx, open: openSensorCtx, close: closeMenu } = useContextMenu()
 // Other sensors a right-clicked sensor can be merged into.
 const mergeTargets = computed(() =>
-  sensorCtx.value ? sensors.value.filter((s) => s.id !== sensorCtx.value.sensor.id) : []
+  sensorCtx.value ? sensors.value.filter((s) => s.id !== sensorCtx.value.sensor.id) : [],
 )
 // Run a menu item against the sensor it was opened on, then close.
-function fromMenu(fn) { const sensor = sensorCtx.value.sensor; closeMenu(); fn(sensor) }
+function fromMenu(fn) {
+  const sensor = sensorCtx.value.sensor
+  closeMenu()
+  fn(sensor)
+}
 </script>
 
 <template>
@@ -71,8 +75,11 @@ function fromMenu(fn) { const sensor = sensorCtx.value.sensor; closeMenu(); fn(s
             v-if="sidebar.incompleteSensorIds.has(sensor.id)"
             class="unaligned-tag"
             title="No usable calibration — intrinsics fall back to a default field-of-view guess, which distorts SfM and depth maps. Set a focal length in the sensor table."
-          >⚠</span>
-          <span class="obs-badge" :title="`${pluralize(sidebar.sensorImageCount(sensor.id), 'image')}`">{{ sidebar.sensorImageCount(sensor.id) }}</span>
+            >⚠</span
+          >
+          <span class="obs-badge" :title="`${pluralize(sidebar.sensorImageCount(sensor.id), 'image')}`">{{
+            sidebar.sensorImageCount(sensor.id)
+          }}</span>
         </li>
         <li v-if="isExpanded(sensor.id)" class="img-details" @contextmenu.stop>
           <div class="detail-row">
@@ -96,7 +103,9 @@ function fromMenu(fn) { const sensor = sensorCtx.value.sensor; closeMenu(); fn(s
           </div>
           <div class="detail-row">
             <span class="detail-label">Lens</span>
-            <span class="detail-value" :class="{ 'detail-dim': !lensLabel(sensor) }">{{ lensLabel(sensor) ?? '—' }}</span>
+            <span class="detail-value" :class="{ 'detail-dim': !lensLabel(sensor) }">{{
+              lensLabel(sensor) ?? '—'
+            }}</span>
           </div>
         </li>
       </template>
@@ -113,7 +122,9 @@ function fromMenu(fn) { const sensor = sensorCtx.value.sensor; closeMenu(); fn(s
             :key="t.id"
             class="ctx-item"
             @click="fromMenu((s) => sidebar.mergeSensors({ target: t.id, source: s.id }))"
-          >{{ t.label }}</button>
+          >
+            {{ t.label }}
+          </button>
         </div>
       </div>
       <div v-if="mergeTargets.length" class="ctx-sep"></div>

@@ -7,11 +7,15 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 // open menu — exactly the behaviour the monolithic Sidebar had before the split.
 const closers = new Set()
 let docBound = false
-function closeAll() { for (const c of closers) c() }
+function closeAll() {
+  for (const c of closers) c()
+}
 
 export function useContextMenu() {
   const menu = ref(null) // { x, y, …payload } | null
-  const close = () => { menu.value = null }
+  const close = () => {
+    menu.value = null
+  }
 
   // Open at the cursor, closing any other open menu first. ContextMenu.vue keeps
   // it on screen by its measured size.
@@ -23,9 +27,14 @@ export function useContextMenu() {
 
   onMounted(() => {
     closers.add(close)
-    if (!docBound) { document.addEventListener('click', closeAll); docBound = true }
+    if (!docBound) {
+      document.addEventListener('click', closeAll)
+      docBound = true
+    }
   })
-  onBeforeUnmount(() => { closers.delete(close) })
+  onBeforeUnmount(() => {
+    closers.delete(close)
+  })
 
   return { menu, open, close }
 }

@@ -16,14 +16,17 @@ import { pluralize } from '../textFormat.js'
 // are deliberately conservative — a term that overfits corrupts the whole calibration.
 
 export const SELF_CAL_STAGE_DEFAULTS = {
-  k2MinCams: 8,   k2MinObs: 10_000,   // add k2 once the model is well populated
-  cxcyMinCams: 10,                    // add principal point once many cameras constrain it
-  k3MinCams: 20,  k3MinObs: 30_000,   // add k3 only on a large, well-observed model
+  k2MinCams: 8,
+  k2MinObs: 10_000, // add k2 once the model is well populated
+  cxcyMinCams: 10, // add principal point once many cameras constrain it
+  k3MinCams: 20,
+  k3MinObs: 30_000, // add k3 only on a large, well-observed model
   // k4 exists only on a four-term (Kannala–Brandt, OPENCV_FISHEYE) lens. It is the θ⁸
   // term: at 75° (θ = 1.31) θ⁸ ≈ 8.7 against θ⁶ ≈ 5.0, so on its own it trades
   // almost one for one with k3. It is added only on a pass AFTER one that already
   // refined k3 (k1–k3 have settled; k4 then fits what they leave), and at the k3 gates.
-  k4MinCams: 20,  k4MinObs: 30_000,
+  k4MinCams: 20,
+  k4MinObs: 30_000,
 }
 
 // The base terms solved during registration (interim / rescue BA) and the floor the
@@ -61,9 +64,9 @@ const k4Applies = (lensTerms) => lensTerms >= 4
 // post-filter passes (+0.02574 → −0.02048), each fold physically moving the
 // keypoints ~20px. A fold is destructive, so refusing to fit noise beats folding it.
 export const DISTORTION_IDENT_DEFAULTS = {
-  minCams: 3,                 // below this nothing is identifiable (incl. focal)
-  minMultiViewFrac: 0.15,     // ≥3-view tracks as a share of all tracks…
-  minMultiViewTracks: 200,    // …or enough of them outright, on a big sparse model
+  minCams: 3, // below this nothing is identifiable (incl. focal)
+  minMultiViewFrac: 0.15, // ≥3-view tracks as a share of all tracks…
+  minMultiViewTracks: 200, // …or enough of them outright, on a big sparse model
 }
 
 // Can this model's geometry identify radial distortion?
@@ -76,27 +79,40 @@ export const DISTORTION_IDENT_DEFAULTS = {
 export function distortionIdentifiable({ nCams, nTracks, nMultiViewTracks }, cfg = DISTORTION_IDENT_DEFAULTS) {
   const c = { ...DISTORTION_IDENT_DEFAULTS, ...cfg }
   if (nCams < c.minCams) {
-    return { ok: false, scope: 'all',
-      reason: `${pluralize(nCams, 'camera')} cannot identify intrinsics (a 2-view model hides distortion in its points)` }
+    return {
+      ok: false,
+      scope: 'all',
+      reason: `${pluralize(nCams, 'camera')} cannot identify intrinsics (a 2-view model hides distortion in its points)`,
+    }
   }
   const frac = nTracks > 0 ? nMultiViewTracks / nTracks : 0
-  if (frac >= c.minMultiViewFrac || nMultiViewTracks >= c.minMultiViewTracks) return { ok: true, scope: null, reason: null }
-  return { ok: false, scope: 'distortion',
-    reason: `only ${nMultiViewTracks}/${nTracks} tracks (${(100 * frac).toFixed(1)}%) span ≥3 views `
-      + `— a 2-view track absorbs any radial coefficient into its depth, so k1 would fit noise `
-      + `(needs ≥${(100 * c.minMultiViewFrac).toFixed(0)}% or ≥${c.minMultiViewTracks} such tracks)` }
+  if (frac >= c.minMultiViewFrac || nMultiViewTracks >= c.minMultiViewTracks)
+    return { ok: true, scope: null, reason: null }
+  return {
+    ok: false,
+    scope: 'distortion',
+    reason:
+      `only ${nMultiViewTracks}/${nTracks} tracks (${(100 * frac).toFixed(1)}%) span ≥3 views ` +
+      `— a 2-view track absorbs any radial coefficient into its depth, so k1 would fit noise ` +
+      `(needs ≥${(100 * c.minMultiViewFrac).toFixed(0)}% or ≥${c.minMultiViewTracks} such tracks)`,
+  }
 }
 
 // Drop the radial terms from a refine string, keeping f / cx,cy. Returns 'none' if
 // nothing identifiable is left.
 export function withoutDistortionTerms(refineMode) {
-  const kept = String(refineMode).split(',').map((s) => s.trim())
+  const kept = String(refineMode)
+    .split(',')
+    .map((s) => s.trim())
     .filter((t) => t && !/^k[1-4]$/.test(t))
   return kept.length ? kept.join(',') : 'none'
 }
 
 // Human-readable note on which terms are deferred and why, for the run log.
-export function stagedSelfCalDeferred({ nCams, nObs, lensTerms = 0, k3Settled = false }, cfg = SELF_CAL_STAGE_DEFAULTS) {
+export function stagedSelfCalDeferred(
+  { nCams, nObs, lensTerms = 0, k3Settled = false },
+  cfg = SELF_CAL_STAGE_DEFAULTS,
+) {
   const c = { ...SELF_CAL_STAGE_DEFAULTS, ...cfg }
   const out = []
   if (nCams < c.cxcyMinCams) out.push(`cx,cy (needs ≥${c.cxcyMinCams} cams, have ${nCams})`)

@@ -8,7 +8,7 @@ import CloudRows from './CloudRows.vue'
 // because `mainSparseCloud` is a first-class role with a set-as-main action, and
 // it's the layer you spend all your time inspecting.
 defineProps({
-  open:   { type: Boolean, default: true },
+  open: { type: Boolean, default: true },
   clouds: { type: Array, default: () => [] }, // kind:'sparse' only
 })
 const emit = defineEmits(['toggle'])

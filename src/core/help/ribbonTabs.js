@@ -30,9 +30,15 @@
 import { BASEMAPS } from '../basemaps.js'
 
 // Shared between Reconstruct/Export and the raster tab's object actions.
-const GEN_DEM      = { id: 'gen-dem',      label: 'DEM',   icon: 'dem',   needs: ['cloud'], aerialOnly: true }
-const GEN_ORTHO    = { id: 'gen-ortho',    label: 'Ortho', icon: 'ortho', needs: ['imagesReady', 'depthMaps', 'surface'], aerialOnly: true }
-const EXPORT_DEM   = { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needs: ['dem'],   aerialOnly: true }
+const GEN_DEM = { id: 'gen-dem', label: 'DEM', icon: 'dem', needs: ['cloud'], aerialOnly: true }
+const GEN_ORTHO = {
+  id: 'gen-ortho',
+  label: 'Ortho',
+  icon: 'ortho',
+  needs: ['imagesReady', 'depthMaps', 'surface'],
+  aerialOnly: true,
+}
+const EXPORT_DEM = { id: 'export-dem', label: 'DEM', icon: 'dem', needs: ['dem'], aerialOnly: true }
 const EXPORT_ORTHO = { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needs: ['ortho'], aerialOnly: true }
 
 // Tools ▸ Measure ▾. Raster tools run on the raster in front: a DEM/Orthophoto
@@ -45,36 +51,98 @@ export function measureMenu(m = null) {
   const targets = m?.targets ?? []
   return [
     { section: 'DEM / orthophoto in front' },
-    { id: 'measure-length',  label: 'Ruler',   icon: 'ruler',   measureTool: 'length', needs: ['measureHost'],
-      blurb: 'Ground distance along a polyline' },
-    { id: 'measure-area',    label: 'Area',    icon: 'area',    measureTool: 'area', needs: ['measureHost'],
-      blurb: 'Planimetric area and perimeter of a polygon' },
-    { id: 'measure-profile', label: 'Profile', icon: 'profile', measureTool: 'profile', demOnly: true, needs: ['measureHost'],
-      blurb: 'Elevation profile along a line (DEM)' },
-    { id: 'measure-volume',  label: 'Volume',  icon: 'volume',  measureTool: 'volume', demOnly: true, needs: ['measureHost'],
-      blurb: 'Cut / fill against a base surface (DEM)' },
-    { id: 'measure-saved',   label: 'Saved measurements', icon: 'list', activeKey: 'measureSaved',
-      needsSavedMeasurements: true, needs: ['measureHost'], blurb: 'Show, reopen and export saved results' },
-    ...(targets.length ? [
-      { section: 'Map layer to measure' },
-      ...targets.map((t) => ({
-        id: `measure-target:${t.id}`, label: t.name, icon: t.kind === 'dem' ? 'dem' : 'ortho',
-        selected: t.id === m.targetId,
-        blurb: t.kind === 'dem' ? 'DEM — all tools, including profile and volume' : 'Orthophoto — ruler and area',
-      })),
-    ] : []),
+    {
+      id: 'measure-length',
+      label: 'Ruler',
+      icon: 'ruler',
+      measureTool: 'length',
+      needs: ['measureHost'],
+      blurb: 'Ground distance along a polyline',
+    },
+    {
+      id: 'measure-area',
+      label: 'Area',
+      icon: 'area',
+      measureTool: 'area',
+      needs: ['measureHost'],
+      blurb: 'Planimetric area and perimeter of a polygon',
+    },
+    {
+      id: 'measure-profile',
+      label: 'Profile',
+      icon: 'profile',
+      measureTool: 'profile',
+      demOnly: true,
+      needs: ['measureHost'],
+      blurb: 'Elevation profile along a line (DEM)',
+    },
+    {
+      id: 'measure-volume',
+      label: 'Volume',
+      icon: 'volume',
+      measureTool: 'volume',
+      demOnly: true,
+      needs: ['measureHost'],
+      blurb: 'Cut / fill against a base surface (DEM)',
+    },
+    {
+      id: 'measure-saved',
+      label: 'Saved measurements',
+      icon: 'list',
+      activeKey: 'measureSaved',
+      needsSavedMeasurements: true,
+      needs: ['measureHost'],
+      blurb: 'Show, reopen and export saved results',
+    },
+    ...(targets.length
+      ? [
+          { section: 'Map layer to measure' },
+          ...targets.map((t) => ({
+            id: `measure-target:${t.id}`,
+            label: t.name,
+            icon: t.kind === 'dem' ? 'dem' : 'ortho',
+            selected: t.id === m.targetId,
+            blurb: t.kind === 'dem' ? 'DEM — all tools, including profile and volume' : 'Orthophoto — ruler and area',
+          })),
+        ]
+      : []),
     { section: 'Clouds & meshes' },
-    { id: 'measure-3d', label: 'Measure in 3D', icon: 'ruler', needs: ['cloud'],
-      blurb: 'Distance, height and surface area picked on clouds and meshes' },
-    { id: 'cloud-distance', label: 'Distance to reference…', icon: 'distance', needs: ['dense'],
-      blurb: 'Per-point distance to another cloud or a mesh (change detection)' },
-    { id: 'cloud-section', label: 'Section…', icon: 'section', needs: ['dense'],
-      blurb: 'Cut a thin slice and export it as a 2D profile' },
-    { id: 'mesh-measure', label: 'Mesh area & volume…', icon: 'volume', needs: ['mesh'],
-      blurb: 'Surface area; enclosed volume when watertight' },
+    {
+      id: 'measure-3d',
+      label: 'Measure in 3D',
+      icon: 'ruler',
+      needs: ['cloud'],
+      blurb: 'Distance, height and surface area picked on clouds and meshes',
+    },
+    {
+      id: 'cloud-distance',
+      label: 'Distance to reference…',
+      icon: 'distance',
+      needs: ['dense'],
+      blurb: 'Per-point distance to another cloud or a mesh (change detection)',
+    },
+    {
+      id: 'cloud-section',
+      label: 'Section…',
+      icon: 'section',
+      needs: ['dense'],
+      blurb: 'Cut a thin slice and export it as a 2D profile',
+    },
+    {
+      id: 'mesh-measure',
+      label: 'Mesh area & volume…',
+      icon: 'volume',
+      needs: ['mesh'],
+      blurb: 'Surface area; enclosed volume when watertight',
+    },
     { section: 'Change' },
-    { id: 'dem-difference', label: 'DEM of difference', icon: 'volume', needs: ['dem', 'referenceDem'],
-      blurb: 'Gain and loss between the DEM and a reference DEM inside a polygon' },
+    {
+      id: 'dem-difference',
+      label: 'DEM of difference',
+      icon: 'volume',
+      needs: ['dem', 'referenceDem'],
+      blurb: 'Gain and loss between the DEM and a reference DEM inside a polygon',
+    },
   ]
 }
 
@@ -86,17 +154,17 @@ export const TABS = [
       {
         label: 'Inspect',
         commands: [
-          { id: 'open-image-table',  label: 'Images',  icon: 'table',   needs: ['images'] },
-          { id: 'open-mask-manager', label: 'Masks',   icon: 'mask',    needs: ['images'] },
-          { id: 'open-sensor-table', label: 'Sensors', icon: 'camera',  needs: ['sensors'] },
-          { id: 'open-pose-table',   label: 'Camera\nPoses', icon: 'camera-pose', needs: ['poses'] },
+          { id: 'open-image-table', label: 'Images', icon: 'table', needs: ['images'] },
+          { id: 'open-mask-manager', label: 'Masks', icon: 'mask', needs: ['images'] },
+          { id: 'open-sensor-table', label: 'Sensors', icon: 'camera', needs: ['sensors'] },
+          { id: 'open-pose-table', label: 'Camera\nPoses', icon: 'camera-pose', needs: ['poses'] },
           // The table edits existing points; one is born elsewhere (import, or a
           // right-click on the map / an image), so an empty project has nothing to show.
           // Deliberately NOT aerialOnly: it also holds markers (scale-bar endpoints),
           // which are an object-capture feature. Importing surveyed *ground control*
           // stays aerial-only — that command is in the Import tab, not this one.
-          { id: 'open-gcp-table',    label: 'Control &\nMarkers', icon: 'map-pin', needs: ['gcps'] },
-          { id: 'open-match-list',   label: 'Matches', icon: 'list',    needs: ['matches'] },
+          { id: 'open-gcp-table', label: 'Control &\nMarkers', icon: 'map-pin', needs: ['gcps'] },
+          { id: 'open-match-list', label: 'Matches', icon: 'list', needs: ['matches'] },
         ],
       },
       // The remaining groups are contextual: see CAMERA_GROUP etc. below, injected by
@@ -153,9 +221,7 @@ export const TABS = [
       },
       {
         label: 'Interoperability',
-        commands: [
-          { id: 'import-colmap', label: 'SfM\nProject…', icon: 'cube' },
-        ],
+        commands: [{ id: 'import-colmap', label: 'SfM\nProject…', icon: 'cube' }],
       },
     ],
   },
@@ -165,9 +231,7 @@ export const TABS = [
     groups: [
       {
         label: 'Workflow',
-        commands: [
-          { id: 'workflow-builder', label: 'Workflow\nBuilder', icon: 'list', needs: ['project'] },
-        ],
+        commands: [{ id: 'workflow-builder', label: 'Workflow\nBuilder', icon: 'list', needs: ['project'] }],
       },
       {
         label: 'Features',
@@ -183,7 +247,7 @@ export const TABS = [
       {
         label: 'Sparse',
         commands: [
-          { id: 'reconstruct',   label: 'Sparse\nModel', icon: 'sparse-model', needs: ['imagesReady', 'matches'] },
+          { id: 'reconstruct', label: 'Sparse\nModel', icon: 'sparse-model', needs: ['imagesReady', 'matches'] },
         ],
       },
       {
@@ -196,31 +260,27 @@ export const TABS = [
         // Edit GCPs is a mode, so it lives in Tools ▸ Images ▾ (ONE HOME PER TOOL).
         label: 'Georeferencing',
         commands: [
-          { id: 'find-gcps',      label: 'Find\nGCPs',      icon: 'map-pin', needs: ['sparse'], aerialOnly: true },
+          { id: 'find-gcps', label: 'Find\nGCPs', icon: 'map-pin', needs: ['sparse'], aerialOnly: true },
           // One entry point for both GCP-constrained adjustment + final similarity fit
           // and the cheap transform-only path. The modal explains/validates each mode.
-          { id: 'georeference',   label: 'Geo-\nreference', icon: 'target',  needs: ['sparse'], aerialOnly: true },
+          { id: 'georeference', label: 'Geo-\nreference', icon: 'target', needs: ['sparse'], aerialOnly: true },
           // Same job as Georeference — fixing the datum — for a project that has no
           // CRS at all. Deliberately NOT aerialOnly: scale bars are the object-capture
           // way to get metres, and an object project is exactly where there is no
           // georeference to supply one.
-          { id: 'scale-bars',     label: 'Scale\nBars',     icon: 'scale-bar', needs: ['sparse'] },
+          { id: 'scale-bars', label: 'Scale\nBars', icon: 'scale-bar', needs: ['sparse'] },
         ],
       },
       {
         label: 'Dense',
         commands: [
-          { id: 'compute-depth', label: 'Depth\nMaps',   icon: 'depth',       needs: ['imagesReady', 'sparse'] },
-          { id: 'dense',         label: 'Dense\nModel',  icon: 'point-cloud', needs: ['depthMaps'] },
+          { id: 'compute-depth', label: 'Depth\nMaps', icon: 'depth', needs: ['imagesReady', 'sparse'] },
+          { id: 'dense', label: 'Dense\nModel', icon: 'point-cloud', needs: ['depthMaps'] },
         ],
       },
       {
         label: 'Products',
-        commands: [
-          GEN_DEM,
-          GEN_ORTHO,
-          { id: 'gen-mesh',      label: 'Mesh',    icon: 'cube',  needs: ['dense'] },
-        ],
+        commands: [GEN_DEM, GEN_ORTHO, { id: 'gen-mesh', label: 'Mesh', icon: 'cube', needs: ['dense'] }],
       },
     ],
   },
@@ -234,51 +294,129 @@ export const TABS = [
       {
         label: 'Images',
         commands: [
-          { id: 'menu-images', label: 'Images', icon: 'image', menu: [
-            { section: 'Prepare' },
-            { id: 'image-quality', label: 'Image quality…', icon: 'quality', needs: ['images', 'imagesReady'],
-              blurb: 'Score sharpness and exposure; exclude blurry images' },
-            { id: 'auto-mask', label: 'Auto mask…', icon: 'mask', needs: ['images', 'imagesReady'],
-              blurb: 'Mask a border strip on every image (film edges, data strips)' },
-            { section: 'Film scans' },
-            { id: 'detect-fiducials', label: 'Detect fiducials…', icon: 'target', needs: ['filmSensor', 'imagesReady'],
-              blurb: 'Find the fiducial marks on scanned film frames' },
-            { id: 'calibrate-fiducials', label: 'Calibrate fiducials…', icon: 'calibration', needs: ['filmSensor'],
-              blurb: 'Camera-certificate or batch-estimated fiducial layout' },
-            { id: 'detect-reseau', label: 'Detect reseau…', icon: 'target', needs: ['images', 'imagesReady'],
-              blurb: 'Measure the reseau crosses: scan placement and film deformation per scan' },
-            { id: 'split-panoramic', label: 'Split panoramic strips…', icon: 'image', needs: ['images', 'imagesReady'],
-              blurb: 'Cut panoramic (optical-bar) scans into frame-camera segments' },
-            { section: 'Edit' },
-            // A mode on the image in front; brush/eraser/rect/invert/undo live in the
-            // floating MaskToolbar over the image view.
-            { id: 'img-mask-edit', label: 'Edit mask', icon: 'pencil', activeKey: 'maskEdit', needs: ['imageView'],
-              blurb: 'Paint the mask of the image in front' },
-            // One mode for the view in front: on an image a click marks a GCP (the
-            // floating GcpToolbar), on the map it places/moves surveyed points.
-            { id: 'edit-gcps', label: 'Edit GCPs', icon: 'map-pin', activeKey: 'gcpEdit', needs: ['gcpView'],
-              blurb: 'Mark GCPs on the image in front, or place them on the map' },
-          ] },
+          {
+            id: 'menu-images',
+            label: 'Images',
+            icon: 'image',
+            menu: [
+              { section: 'Prepare' },
+              {
+                id: 'image-quality',
+                label: 'Image quality…',
+                icon: 'quality',
+                needs: ['images', 'imagesReady'],
+                blurb: 'Score sharpness and exposure; exclude blurry images',
+              },
+              {
+                id: 'auto-mask',
+                label: 'Auto mask…',
+                icon: 'mask',
+                needs: ['images', 'imagesReady'],
+                blurb: 'Mask a border strip on every image (film edges, data strips)',
+              },
+              { section: 'Film scans' },
+              {
+                id: 'detect-fiducials',
+                label: 'Detect fiducials…',
+                icon: 'target',
+                needs: ['filmSensor', 'imagesReady'],
+                blurb: 'Find the fiducial marks on scanned film frames',
+              },
+              {
+                id: 'calibrate-fiducials',
+                label: 'Calibrate fiducials…',
+                icon: 'calibration',
+                needs: ['filmSensor'],
+                blurb: 'Camera-certificate or batch-estimated fiducial layout',
+              },
+              {
+                id: 'detect-reseau',
+                label: 'Detect reseau…',
+                icon: 'target',
+                needs: ['images', 'imagesReady'],
+                blurb: 'Measure the reseau crosses: scan placement and film deformation per scan',
+              },
+              {
+                id: 'split-panoramic',
+                label: 'Split panoramic strips…',
+                icon: 'image',
+                needs: ['images', 'imagesReady'],
+                blurb: 'Cut panoramic (optical-bar) scans into frame-camera segments',
+              },
+              { section: 'Edit' },
+              // A mode on the image in front; brush/eraser/rect/invert/undo live in the
+              // floating MaskToolbar over the image view.
+              {
+                id: 'img-mask-edit',
+                label: 'Edit mask',
+                icon: 'pencil',
+                activeKey: 'maskEdit',
+                needs: ['imageView'],
+                blurb: 'Paint the mask of the image in front',
+              },
+              // One mode for the view in front: on an image a click marks a GCP (the
+              // floating GcpToolbar), on the map it places/moves surveyed points.
+              {
+                id: 'edit-gcps',
+                label: 'Edit GCPs',
+                icon: 'map-pin',
+                activeKey: 'gcpEdit',
+                needs: ['gcpView'],
+                blurb: 'Mark GCPs on the image in front, or place them on the map',
+              },
+            ],
+          },
         ],
       },
       {
         label: 'Model',
         commands: [
-          { id: 'menu-model', label: 'Model', icon: 'sparse-model', menu: [
-            { section: 'Refine' },
-            { id: 'optimize-cameras', label: 'Optimize cameras…', icon: 'calibration', needs: ['sparse'],
-              blurb: 'Re-run bundle adjustment with chosen lens parameters' },
-            { id: 'gradual-selection', label: 'Gradual selection…', icon: 'sparse-model', needs: ['sparse'],
-              blurb: 'Remove weak tie points by error, views or angle' },
-            { section: 'Frame' },
-            { id: 'set-region', label: 'Region…', icon: 'region', needs: ['sparse'],
-              blurb: 'A box that limits depth maps, fusion, mesh and DEM' },
-            { id: 'orient-model', label: 'Orient model…', icon: 'level', needs: ['sparse'],
-              blurb: 'Level the model and set its origin (projects without CRS)' },
-            { section: 'Cameras' },
-            { id: 'footprints-from-poses', label: 'Footprints from poses…', icon: 'footprint', needs: ['poses', 'sensors'], aerialOnly: true,
-              blurb: 'Project image outlines onto the ground' },
-          ] },
+          {
+            id: 'menu-model',
+            label: 'Model',
+            icon: 'sparse-model',
+            menu: [
+              { section: 'Refine' },
+              {
+                id: 'optimize-cameras',
+                label: 'Optimize cameras…',
+                icon: 'calibration',
+                needs: ['sparse'],
+                blurb: 'Re-run bundle adjustment with chosen lens parameters',
+              },
+              {
+                id: 'gradual-selection',
+                label: 'Gradual selection…',
+                icon: 'sparse-model',
+                needs: ['sparse'],
+                blurb: 'Remove weak tie points by error, views or angle',
+              },
+              { section: 'Frame' },
+              {
+                id: 'set-region',
+                label: 'Region…',
+                icon: 'region',
+                needs: ['sparse'],
+                blurb: 'A box that limits depth maps, fusion, mesh and DEM',
+              },
+              {
+                id: 'orient-model',
+                label: 'Orient model…',
+                icon: 'level',
+                needs: ['sparse'],
+                blurb: 'Level the model and set its origin (projects without CRS)',
+              },
+              { section: 'Cameras' },
+              {
+                id: 'footprints-from-poses',
+                label: 'Footprints from poses…',
+                icon: 'footprint',
+                needs: ['poses', 'sensors'],
+                aerialOnly: true,
+                blurb: 'Project image outlines onto the ground',
+              },
+            ],
+          },
         ],
       },
       {
@@ -287,86 +425,209 @@ export const TABS = [
         // not editable: its points carry the view-tracks dense/ortho/COLMAP read.
         label: 'Point Cloud',
         commands: [
-          { id: 'menu-cloud', label: 'Point\nCloud', icon: 'point-cloud', menu: [
-            { section: 'Clean' },
-            { id: 'filter-cloud', label: 'Filter…', icon: 'point-cloud', needs: ['dense'],
-              blurb: 'Height/brightness range, voxel, isolated points, outliers' },
-            { id: 'cloud-outliers', label: 'Remove outliers…', icon: 'point-cloud', needs: ['dense'],
-              blurb: 'Statistical outlier removal' },
-            { id: 'cloud-subsample', label: 'Subsample…', icon: 'grid', needs: ['dense'],
-              blurb: 'Thin to one point per voxel' },
-            { section: 'Edit' },
-            // Modes in the 3D view; Delete / Keep only / Clear are its floating toolbox.
-            { id: 'view-select-rect', label: 'Select (rectangle)', icon: 'rect', activeKey: 'selectRect', needs: ['dense'],
-              blurb: 'Drag a box in the 3D view, then delete or keep' },
-            { id: 'view-select-lasso', label: 'Select (lasso)', icon: 'lasso', activeKey: 'selectLasso', needs: ['dense'],
-              blurb: 'Draw a freehand outline in the 3D view, then delete or keep' },
-            { id: 'crop-cloud', label: 'Crop…', icon: 'rect', needs: ['dense'],
-              blurb: 'Keep or remove an axis-aligned box' },
-            { id: 'transform-cloud', label: 'Transform…', icon: 'transform', needs: ['dense'],
-              blurb: 'Move, rotate, scale, or apply a 4×4 matrix' },
-            { section: 'Combine' },
-            { id: 'merge-clouds', label: 'Merge…', icon: 'link', needs: ['twoClouds'],
-              blurb: 'Concatenate clouds with an optional seam dedupe' },
-            { id: 'align-points', label: 'Align by point pairs…', icon: 'align', needs: ['dense'],
-              blurb: 'Pick ≥3 matching points in both clouds' },
-            { id: 'align-icp', label: 'Align to reference (ICP)…', icon: 'align', needs: ['dense'],
-              blurb: 'Refine an approximate alignment automatically' },
-            { section: 'Attributes' },
-            { id: 'estimate-normals', label: 'Estimate normals…', icon: 'normals', needs: ['dense'],
-              blurb: 'Per-point normals, e.g. to mesh an imported cloud' },
-            { id: 'classify-ground', label: 'Classify ground…', icon: 'dem', needs: ['dense'],
-              blurb: 'Bare-earth classification for a DTM' },
-          ] },
+          {
+            id: 'menu-cloud',
+            label: 'Point\nCloud',
+            icon: 'point-cloud',
+            menu: [
+              { section: 'Clean' },
+              {
+                id: 'filter-cloud',
+                label: 'Filter…',
+                icon: 'point-cloud',
+                needs: ['dense'],
+                blurb: 'Height/brightness range, voxel, isolated points, outliers',
+              },
+              {
+                id: 'cloud-outliers',
+                label: 'Remove outliers…',
+                icon: 'point-cloud',
+                needs: ['dense'],
+                blurb: 'Statistical outlier removal',
+              },
+              {
+                id: 'cloud-subsample',
+                label: 'Subsample…',
+                icon: 'grid',
+                needs: ['dense'],
+                blurb: 'Thin to one point per voxel',
+              },
+              { section: 'Edit' },
+              // Modes in the 3D view; Delete / Keep only / Clear are its floating toolbox.
+              {
+                id: 'view-select-rect',
+                label: 'Select (rectangle)',
+                icon: 'rect',
+                activeKey: 'selectRect',
+                needs: ['dense'],
+                blurb: 'Drag a box in the 3D view, then delete or keep',
+              },
+              {
+                id: 'view-select-lasso',
+                label: 'Select (lasso)',
+                icon: 'lasso',
+                activeKey: 'selectLasso',
+                needs: ['dense'],
+                blurb: 'Draw a freehand outline in the 3D view, then delete or keep',
+              },
+              {
+                id: 'crop-cloud',
+                label: 'Crop…',
+                icon: 'rect',
+                needs: ['dense'],
+                blurb: 'Keep or remove an axis-aligned box',
+              },
+              {
+                id: 'transform-cloud',
+                label: 'Transform…',
+                icon: 'transform',
+                needs: ['dense'],
+                blurb: 'Move, rotate, scale, or apply a 4×4 matrix',
+              },
+              { section: 'Combine' },
+              {
+                id: 'merge-clouds',
+                label: 'Merge…',
+                icon: 'link',
+                needs: ['twoClouds'],
+                blurb: 'Concatenate clouds with an optional seam dedupe',
+              },
+              {
+                id: 'align-points',
+                label: 'Align by point pairs…',
+                icon: 'align',
+                needs: ['dense'],
+                blurb: 'Pick ≥3 matching points in both clouds',
+              },
+              {
+                id: 'align-icp',
+                label: 'Align to reference (ICP)…',
+                icon: 'align',
+                needs: ['dense'],
+                blurb: 'Refine an approximate alignment automatically',
+              },
+              { section: 'Attributes' },
+              {
+                id: 'estimate-normals',
+                label: 'Estimate normals…',
+                icon: 'normals',
+                needs: ['dense'],
+                blurb: 'Per-point normals, e.g. to mesh an imported cloud',
+              },
+              {
+                id: 'classify-ground',
+                label: 'Classify ground…',
+                icon: 'dem',
+                needs: ['dense'],
+                blurb: 'Bare-earth classification for a DTM',
+              },
+            ],
+          },
         ],
       },
       {
         // Same rules as clouds: every edit adds a derived mesh, never mutates one.
         label: 'Mesh',
         commands: [
-          { id: 'menu-mesh', label: 'Mesh', icon: 'cube', menu: [
-            { section: 'Clean' },
-            { id: 'clean-mesh', label: 'Clean mesh…', icon: 'cube', needs: ['mesh'],
-              blurb: 'Small pieces, long-edge bridges, holes (watertight)' },
-            { id: 'smooth-mesh', label: 'Smooth…', icon: 'smooth', needs: ['mesh'],
-              blurb: 'Taubin smoothing without shrinkage' },
-            { section: 'Simplify' },
-            { id: 'decimate-mesh', label: 'Decimate…', icon: 'decimate', needs: ['mesh'],
-              blurb: 'Reduce to a target triangle count (quadric collapse)' },
-            { section: 'Edit' },
-            { id: 'crop-mesh', label: 'Crop…', icon: 'rect', needs: ['mesh'],
-              blurb: 'Keep or remove an axis-aligned box' },
-            { section: 'Convert' },
-            { id: 'mesh-to-points', label: 'Sample to points…', icon: 'point-cloud', needs: ['mesh'],
-              blurb: 'Uniform surface sampling into a dense cloud' },
-            { section: 'Colour' },
-            { id: 'texture-mesh', label: 'Texture…', icon: 'image', needs: ['mesh', 'sparse'],
-              blurb: 'Photo texture from the registered cameras' },
-          ] },
+          {
+            id: 'menu-mesh',
+            label: 'Mesh',
+            icon: 'cube',
+            menu: [
+              { section: 'Clean' },
+              {
+                id: 'clean-mesh',
+                label: 'Clean mesh…',
+                icon: 'cube',
+                needs: ['mesh'],
+                blurb: 'Small pieces, long-edge bridges, holes (watertight)',
+              },
+              {
+                id: 'smooth-mesh',
+                label: 'Smooth…',
+                icon: 'smooth',
+                needs: ['mesh'],
+                blurb: 'Taubin smoothing without shrinkage',
+              },
+              { section: 'Simplify' },
+              {
+                id: 'decimate-mesh',
+                label: 'Decimate…',
+                icon: 'decimate',
+                needs: ['mesh'],
+                blurb: 'Reduce to a target triangle count (quadric collapse)',
+              },
+              { section: 'Edit' },
+              {
+                id: 'crop-mesh',
+                label: 'Crop…',
+                icon: 'rect',
+                needs: ['mesh'],
+                blurb: 'Keep or remove an axis-aligned box',
+              },
+              { section: 'Convert' },
+              {
+                id: 'mesh-to-points',
+                label: 'Sample to points…',
+                icon: 'point-cloud',
+                needs: ['mesh'],
+                blurb: 'Uniform surface sampling into a dense cloud',
+              },
+              { section: 'Colour' },
+              {
+                id: 'texture-mesh',
+                label: 'Texture…',
+                icon: 'image',
+                needs: ['mesh', 'sparse'],
+                blurb: 'Photo texture from the registered cameras',
+              },
+            ],
+          },
         ],
       },
       {
         label: 'Products',
         commands: [
-          { id: 'menu-products', label: 'Products', icon: 'dem', menu: [
-            { section: 'Terrain' },
-            { id: 'dem-contours', label: 'Contours…', icon: 'contours', needs: ['dem'], aerialOnly: true,
-              blurb: 'Contour lines from the DEM (GeoJSON / DXF)' },
-            { id: 'dem-derivatives', label: 'Slope, aspect, hillshade…', icon: 'dem', needs: ['dem'], aerialOnly: true,
-              blurb: 'Terrain derivative rasters as GeoTIFF' },
-            { section: 'Export' },
-            { id: 'clip-raster', label: 'Clip to polygon…', icon: 'clip', needs: ['products'], aerialOnly: true,
-              blurb: 'Export a DEM/ortho clipped to a polygon' },
-          ] },
+          {
+            id: 'menu-products',
+            label: 'Products',
+            icon: 'dem',
+            menu: [
+              { section: 'Terrain' },
+              {
+                id: 'dem-contours',
+                label: 'Contours…',
+                icon: 'contours',
+                needs: ['dem'],
+                aerialOnly: true,
+                blurb: 'Contour lines from the DEM (GeoJSON / DXF)',
+              },
+              {
+                id: 'dem-derivatives',
+                label: 'Slope, aspect, hillshade…',
+                icon: 'dem',
+                needs: ['dem'],
+                aerialOnly: true,
+                blurb: 'Terrain derivative rasters as GeoTIFF',
+              },
+              { section: 'Export' },
+              {
+                id: 'clip-raster',
+                label: 'Clip to polygon…',
+                icon: 'clip',
+                needs: ['products'],
+                aerialOnly: true,
+                blurb: 'Export a DEM/ortho clipped to a polygon',
+              },
+            ],
+          },
         ],
       },
       {
         // Every measuring tool, whatever it measures. The rows are rebuilt with the
         // map's targets while the map is in front (Ribbon.vue → measureMenu).
         label: 'Measure',
-        commands: [
-          { id: 'menu-measure', label: 'Measure', icon: 'ruler', menu: measureMenu() },
-        ],
+        commands: [{ id: 'menu-measure', label: 'Measure', icon: 'ruler', menu: measureMenu() }],
       },
     ],
   },
@@ -382,36 +643,36 @@ export const TABS = [
       // ("where in the pipeline am I?") carries across tabs.
       {
         label: 'Report',
-        commands: [
-          { id: 'eval-overview', label: 'Quality\nReport', icon: 'report' },
-        ],
+        commands: [{ id: 'eval-overview', label: 'Quality\nReport', icon: 'report' }],
       },
       {
         label: 'Features',
-        commands: [
-          { id: 'eval-match-graph', label: 'Matching', icon: 'link', needs: ['matches'] },
-        ],
+        commands: [{ id: 'eval-match-graph', label: 'Matching', icon: 'link', needs: ['matches'] }],
       },
       {
         label: 'Sparse',
         commands: [
-          { id: 'eval-reconstruction', label: 'Sparse\nModel',  icon: 'sparse-model', needs: ['sparse'] },
-          { id: 'eval-calibration',    label: 'Calibration',    icon: 'calibration',  needs: ['sparse'] },
-          { id: 'eval-gcps',           label: 'Accuracy',       icon: 'map-pin',      needs: ['sparse'] },
-          { id: 'eval-coverage',       label: 'Coverage',       icon: 'grid',         needs: ['sparse'] },
+          { id: 'eval-reconstruction', label: 'Sparse\nModel', icon: 'sparse-model', needs: ['sparse'] },
+          { id: 'eval-calibration', label: 'Calibration', icon: 'calibration', needs: ['sparse'] },
+          { id: 'eval-gcps', label: 'Accuracy', icon: 'map-pin', needs: ['sparse'] },
+          { id: 'eval-coverage', label: 'Coverage', icon: 'grid', needs: ['sparse'] },
         ],
       },
       {
         label: 'Dense',
-        commands: [
-          { id: 'eval-depth-coverage', label: 'Depth\nCoverage', icon: 'depth', needs: ['depthMaps'] },
-        ],
+        commands: [{ id: 'eval-depth-coverage', label: 'Depth\nCoverage', icon: 'depth', needs: ['depthMaps'] }],
       },
       {
         label: 'Products',
         commands: [
           // The computed DEM against an imported reference DEM (TODO.md ▸ A-6).
-          { id: 'eval-dem-reference', label: 'DEM vs\nReference', icon: 'dem', needs: ['dem', 'referenceDem'], aerialOnly: true },
+          {
+            id: 'eval-dem-reference',
+            label: 'DEM vs\nReference',
+            icon: 'dem',
+            needs: ['dem', 'referenceDem'],
+            aerialOnly: true,
+          },
         ],
       },
     ],
@@ -427,7 +688,7 @@ export const TABS = [
         label: 'Cameras',
         commands: [
           { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera-pose', needs: ['poses'] },
-          { id: 'export-sensors', label: 'Calibration',   icon: 'calibration', needs: ['sensors'] },
+          { id: 'export-sensors', label: 'Calibration', icon: 'calibration', needs: ['sensors'] },
           { id: 'export-camera-fiducials', label: 'Camera\nFiducials', icon: 'camera', needs: ['fiducialMarks'] },
         ],
       },
@@ -436,20 +697,18 @@ export const TABS = [
         commands: [
           { id: 'export-image-fiducials', label: 'Image\nFiducials', icon: 'target', needs: ['fiducials'] },
           { id: 'export-keypoints', label: 'Key\npoints', icon: 'keypoints', needs: ['imagesReady', 'keypoints'] },
-          { id: 'export-matches',   label: 'Matches',     icon: 'link',      needs: ['matches'] },
+          { id: 'export-matches', label: 'Matches', icon: 'link', needs: ['matches'] },
         ],
       },
       {
         label: 'Reconstruction',
-        commands: [
-          { id: 'export-model',  label: 'Model\nJSON',   icon: 'cube', needs: ['sparse'] },
-        ],
+        commands: [{ id: 'export-model', label: 'Model\nJSON', icon: 'cube', needs: ['sparse'] }],
       },
       {
         label: 'Geometry',
         commands: [
           { id: 'export-cloud', label: 'Point\nCloud', icon: 'point-cloud', needs: ['cloud'] },
-          { id: 'export-mesh',  label: 'Mesh',         icon: 'cube',        needs: ['mesh'] },
+          { id: 'export-mesh', label: 'Mesh', icon: 'cube', needs: ['mesh'] },
         ],
       },
       {
@@ -489,29 +748,25 @@ export const TABS = [
       },
       {
         label: 'Panels',
-        commands: [
-          { id: 'toggle-console', label: 'Console', icon: 'console', activeKey: 'consoleOpen' },
-        ],
+        commands: [{ id: 'toggle-console', label: 'Console', icon: 'console', activeKey: 'consoleOpen' }],
       },
       {
         label: 'App',
         commands: [
           { id: 'open-glossary', label: 'Glossary', icon: 'book' },
-          { id: 'open-guide',    label: 'Guide',    icon: 'book' },
+          { id: 'open-guide', label: 'Guide', icon: 'book' },
           // Appearance lives in Settings ▸ Display (and the command palette's
           // `theme`) — deliberately not duplicated as a ribbon button.
-          { id: 'open-settings',    label: 'Settings',    icon: 'settings' },
+          { id: 'open-settings', label: 'Settings', icon: 'settings' },
           { id: 'open-system-info', label: 'System info', icon: 'cpu' },
-          { id: 'open-about',       label: 'About',       icon: 'info' },
+          { id: 'open-about', label: 'About', icon: 'info' },
         ],
       },
       {
         // A compact, classified reconstruction-health digest — copy-pasteable so a
         // run's outcome can be shared without the full (thousands-of-lines) log.
         label: 'Debug',
-        commands: [
-          { id: 'open-debug-summary', label: 'Project\nSummary', icon: 'summary', needs: ['project'] },
-        ],
+        commands: [{ id: 'open-debug-summary', label: 'Project\nSummary', icon: 'summary', needs: ['project'] }],
       },
     ],
   },
@@ -523,18 +778,24 @@ export const CAMERA_GROUP = {
   label: 'Camera',
   dynamic: '3D',
   commands: [
-    { pair: [
-      { id: 'view-preset-top',    label: 'Top',    icon: 'view-top' },
-      { id: 'view-preset-bottom', label: 'Bottom', icon: 'view-bottom' },
-    ] },
-    { pair: [
-      { id: 'view-preset-left',  label: 'Left',  icon: 'view-left' },
-      { id: 'view-preset-right', label: 'Right', icon: 'view-right' },
-    ] },
-    { pair: [
-      { id: 'view-preset-front', label: 'Front', icon: 'view-front' },
-      { id: 'view-preset-back',  label: 'Back',  icon: 'view-back' },
-    ] },
+    {
+      pair: [
+        { id: 'view-preset-top', label: 'Top', icon: 'view-top' },
+        { id: 'view-preset-bottom', label: 'Bottom', icon: 'view-bottom' },
+      ],
+    },
+    {
+      pair: [
+        { id: 'view-preset-left', label: 'Left', icon: 'view-left' },
+        { id: 'view-preset-right', label: 'Right', icon: 'view-right' },
+      ],
+    },
+    {
+      pair: [
+        { id: 'view-preset-front', label: 'Front', icon: 'view-front' },
+        { id: 'view-preset-back', label: 'Back', icon: 'view-back' },
+      ],
+    },
     { id: 'reset-view', label: 'Reset\nView', icon: 'view-reset' },
   ],
 }
@@ -546,13 +807,33 @@ export const SCENE_GROUP = {
   dynamic: '3D',
   commands: [
     { id: 'view-toggle-cameras', label: 'Cameras', icon: 'camera', activeKey: 'showCameras' },
-    { id: 'view-toggle-grid',    label: 'Grid',    icon: 'grid',   activeKey: 'showGrid' },
-    { id: 'view-toggle-legend',  label: 'Legend',  icon: 'layers', activeKey: 'showLegend' },
-    { pair: [
-      { stepper: true, id: 'view-point-size',   label: 'Points',  icon: 'point-cloud', valueKey: 'pointSize',   min: 1,   max: 8, step: 1 },
-      { stepper: true, id: 'view-camera-scale', label: 'Cameras', icon: 'camera',      valueKey: 'cameraScale', min: 0.2, max: 3, step: 0.2,
-        format: (v) => `${v.toFixed(1)}×` },
-    ] },
+    { id: 'view-toggle-grid', label: 'Grid', icon: 'grid', activeKey: 'showGrid' },
+    { id: 'view-toggle-legend', label: 'Legend', icon: 'layers', activeKey: 'showLegend' },
+    {
+      pair: [
+        {
+          stepper: true,
+          id: 'view-point-size',
+          label: 'Points',
+          icon: 'point-cloud',
+          valueKey: 'pointSize',
+          min: 1,
+          max: 8,
+          step: 1,
+        },
+        {
+          stepper: true,
+          id: 'view-camera-scale',
+          label: 'Cameras',
+          icon: 'camera',
+          valueKey: 'cameraScale',
+          min: 0.2,
+          max: 3,
+          step: 0.2,
+          format: (v) => `${v.toFixed(1)}×`,
+        },
+      ],
+    },
   ],
 }
 
@@ -560,17 +841,38 @@ export const MAP_GROUP = {
   label: 'Map',
   dynamic: '2D',
   commands: [
-    { id: 'map-fit-view',          label: 'Fit\nView',   icon: 'fit-view' },
-    { id: 'map-toggle-grid',       label: 'Grid',        icon: 'grid',      activeKey: 'showMapGrid' },
-    { id: 'map-toggle-cameras',    label: 'Cameras',     icon: 'camera',    activeKey: 'showMapCameras' },
-    { id: 'map-toggle-footprints', label: 'Footprints',  icon: 'footprint', activeKey: 'showFootprints', needs: ['footprints'] },
+    { id: 'map-fit-view', label: 'Fit\nView', icon: 'fit-view' },
+    { id: 'map-toggle-grid', label: 'Grid', icon: 'grid', activeKey: 'showMapGrid' },
+    { id: 'map-toggle-cameras', label: 'Cameras', icon: 'camera', activeKey: 'showMapCameras' },
+    {
+      id: 'map-toggle-footprints',
+      label: 'Footprints',
+      icon: 'footprint',
+      activeKey: 'showFootprints',
+      needs: ['footprints'],
+    },
     // `map-basemap:<value>` rows pick the base layer (core/basemaps.js); App
     // dispatches the prefix. A layer the frame cannot show is greyed with its reason.
-    { id: 'menu-basemap', label: 'Basemap', icon: 'layers', menu: BASEMAPS.map((b) => ({
-      id: `map-basemap:${b.value}`, label: b.label, icon: b.icon, blurb: b.blurb, basemap: b.value,
-    })) },
+    {
+      id: 'menu-basemap',
+      label: 'Basemap',
+      icon: 'layers',
+      menu: BASEMAPS.map((b) => ({
+        id: `map-basemap:${b.value}`,
+        label: b.label,
+        icon: b.icon,
+        blurb: b.blurb,
+        basemap: b.value,
+      })),
+    },
     // Project CRS ↔ the sparse model's local frame (composables/useMapProducts.js).
-    { id: 'map-toggle-model-frame', label: 'Model\nFrame', icon: 'sparse-model', activeKey: 'mapModelFrame', needs: ['sparse'] },
+    {
+      id: 'map-toggle-model-frame',
+      label: 'Model\nFrame',
+      icon: 'sparse-model',
+      activeKey: 'mapModelFrame',
+      needs: ['sparse'],
+    },
   ],
 }
 
@@ -585,14 +887,14 @@ export const PICTURE_TAB = {
       label: 'Image',
       commands: [
         { id: 'img-show-info', label: 'Image\nInfo', icon: 'info' },
-        { id: 'img-remove',    label: 'Remove',      icon: 'remove', danger: true },
+        { id: 'img-remove', label: 'Remove', icon: 'remove', danger: true },
       ],
     },
     {
       label: 'View',
       commands: [
-        { id: 'img-fit',      label: 'Fit\nView', icon: 'fit-view' },
-        { id: 'img-zoom-in',  label: 'Zoom\nIn',  icon: 'zoom-in' },
+        { id: 'img-fit', label: 'Fit\nView', icon: 'fit-view' },
+        { id: 'img-zoom-in', label: 'Zoom\nIn', icon: 'zoom-in' },
         { id: 'img-zoom-out', label: 'Zoom\nOut', icon: 'zoom-out' },
       ],
     },
@@ -601,15 +903,21 @@ export const PICTURE_TAB = {
       commands: [
         {
           id: 'img-toggle-keypoints',
-          labelFn: (s) => s?.kpCount ? `KP\n${s.kpCount}` : 'Keypoints',
+          labelFn: (s) => (s?.kpCount ? `KP\n${s.kpCount}` : 'Keypoints'),
           icon: 'keypoints',
           activeKey: 'showKeypoints',
           disableKey: 'kpNotDone',
         },
-        { id: 'img-toggle-mask',  label: 'Mask',  icon: 'mask',    activeKey: 'showMask',  disableKey: 'noMask' },
-        { id: 'img-toggle-depth', label: 'Depth', icon: 'depth',   activeKey: 'showDepth', disableKey: 'noDepth' },
-        { id: 'img-toggle-gcps',  label: 'GCPs',  icon: 'map-pin', activeKey: 'showGcps',  disableKey: 'noGcps' },
-        { id: 'img-toggle-residuals', label: 'Residuals', icon: 'target', activeKey: 'showResiduals', needs: ['sparse'] },
+        { id: 'img-toggle-mask', label: 'Mask', icon: 'mask', activeKey: 'showMask', disableKey: 'noMask' },
+        { id: 'img-toggle-depth', label: 'Depth', icon: 'depth', activeKey: 'showDepth', disableKey: 'noDepth' },
+        { id: 'img-toggle-gcps', label: 'GCPs', icon: 'map-pin', activeKey: 'showGcps', disableKey: 'noGcps' },
+        {
+          id: 'img-toggle-residuals',
+          label: 'Residuals',
+          icon: 'target',
+          activeKey: 'showResiduals',
+          needs: ['sparse'],
+        },
         { id: 'img-toggle-fiducials', label: 'Fiducials', icon: 'target', activeKey: 'showFiducials', filmOnly: true },
       ],
     },
@@ -635,8 +943,8 @@ export function rasterTab(r) {
       {
         label: 'View',
         commands: [
-          { id: 'raster-fit',      label: 'Fit\nView', icon: 'fit-view' },
-          { id: 'raster-zoom-in',  label: 'Zoom\nIn',  icon: 'zoom-in' },
+          { id: 'raster-fit', label: 'Fit\nView', icon: 'fit-view' },
+          { id: 'raster-zoom-in', label: 'Zoom\nIn', icon: 'zoom-in' },
           { id: 'raster-zoom-out', label: 'Zoom\nOut', icon: 'zoom-out' },
         ],
       },
@@ -644,10 +952,10 @@ export function rasterTab(r) {
         ? {
             label: 'Reference',
             commands: [
-              { id: 'raster-download',   label: 'Download', icon: 'download' },
-              { id: 'raster-style',      label: 'Style…',  icon: 'settings' },
+              { id: 'raster-download', label: 'Download', icon: 'download' },
+              { id: 'raster-style', label: 'Style…', icon: 'settings' },
               { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterVisible' },
-              { id: 'raster-remove',     label: 'Remove',  icon: 'remove', danger: true },
+              { id: 'raster-remove', label: 'Remove', icon: 'remove', danger: true },
             ],
           }
         : {
@@ -656,9 +964,9 @@ export function rasterTab(r) {
               // The Reconstruct / Export commands themselves, relabelled.
               { ...(isOrtho ? GEN_ORTHO : GEN_DEM), label: 'Rebuild' },
               { ...(isOrtho ? EXPORT_ORTHO : EXPORT_DEM), label: 'Export', icon: 'download' },
-              { id: 'raster-symbology',  label: 'Symbology…', icon: 'settings' },
+              { id: 'raster-symbology', label: 'Symbology…', icon: 'settings' },
               { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterVisible' },
-              { id: 'raster-remove',     label: 'Remove',  icon: 'remove', danger: true },
+              { id: 'raster-remove', label: 'Remove', icon: 'remove', danger: true },
             ],
           },
     ],
@@ -682,13 +990,24 @@ export function leafCommands(groups) {
 export function allGroups() {
   return [
     ...TABS.flatMap((t) => t.groups),
-    CAMERA_GROUP, SCENE_GROUP, MAP_GROUP,
+    CAMERA_GROUP,
+    SCENE_GROUP,
+    MAP_GROUP,
     ...PICTURE_TAB.groups,
     ...rasterTab({ kind: 'dem', imported: true }).groups,
     ...rasterTab({ kind: 'ortho', imported: false }).groups,
     // The Measure menu as the map shows it, with its target rows.
-    { label: 'Measure (map)', commands: [{ id: 'menu-measure', label: 'Measure', icon: 'ruler',
-      menu: measureMenu({ targets: [{ id: 'product:dem', name: 'DEM', kind: 'dem' }], targetId: 'product:dem' }) }] },
+    {
+      label: 'Measure (map)',
+      commands: [
+        {
+          id: 'menu-measure',
+          label: 'Measure',
+          icon: 'ruler',
+          menu: measureMenu({ targets: [{ id: 'product:dem', name: 'DEM', kind: 'dem' }], targetId: 'product:dem' }),
+        },
+      ],
+    },
   ]
 }
 
@@ -707,12 +1026,16 @@ export function labelText(cmd) {
  */
 export function ribbonEntries() {
   const sources = [
-    ...TABS.map((t) => ({ tab: t.label, groups: t.id === 'view' ? [...t.groups, CAMERA_GROUP, SCENE_GROUP, MAP_GROUP] : t.groups })),
+    ...TABS.map((t) => ({
+      tab: t.label,
+      groups: t.id === 'view' ? [...t.groups, CAMERA_GROUP, SCENE_GROUP, MAP_GROUP] : t.groups,
+    })),
     { tab: PICTURE_TAB.label, groups: PICTURE_TAB.groups },
     { tab: 'DEM / Orthophoto', groups: rasterTab({ kind: 'dem', imported: false }).groups },
     { tab: 'Reference raster', groups: rasterTab({ kind: 'dem', imported: true }).groups },
   ]
-  const out = [], seen = new Set()
+  const out = [],
+    seen = new Set()
   const add = (cmd, tab, path) => {
     if (!cmd.id || seen.has(cmd.id) || cmd.id.startsWith('measure-target:')) return
     seen.add(cmd.id)
@@ -726,8 +1049,7 @@ export function ribbonEntries() {
           // 'Tools ▸ Mesh ▸ Mesh' reads as 'Tools ▸ Mesh' when the menu is its group.
           const menuPath = labelText(c) === g.label ? `${tab} ▸ ${g.label}` : `${tab} ▸ ${g.label} ▸ ${labelText(c)}`
           for (const m of c.menu) if (!m.section) add(m, tab, menuPath)
-        }
-        else add(c, tab, `${tab} ▸ ${g.label}`)
+        } else add(c, tab, `${tab} ▸ ${g.label}`)
       }
     }
   }

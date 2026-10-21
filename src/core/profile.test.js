@@ -3,7 +3,8 @@ import { profileDataset } from './profile.js'
 
 // Small helpers to keep the fixtures readable.
 const img = (name, meta = {}) => ({ name, meta })
-const seq = (prefix, n, meta) => Array.from({ length: n }, (_, i) => img(`${prefix}${String(i + 1).padStart(4, '0')}.jpg`, meta))
+const seq = (prefix, n, meta) =>
+  Array.from({ length: n }, (_, i) => img(`${prefix}${String(i + 1).padStart(4, '0')}.jpg`, meta))
 
 describe('profileDataset', () => {
   it('classifies a scanned film set (no EXIF) and tags it tentative', () => {
@@ -20,8 +21,14 @@ describe('profileDataset', () => {
   })
 
   it('classifies video frames as video, not as EXIF-less film', () => {
-    const images = Array.from({ length: 30 }, (_, i) => img(`walk_00m${String(i).padStart(2, '0')}.500s.jpg`,
-      { width: 1920, height: 1080, videoSource: 'walk.mp4', videoTime: i + 0.5 }))
+    const images = Array.from({ length: 30 }, (_, i) =>
+      img(`walk_00m${String(i).padStart(2, '0')}.500s.jpg`, {
+        width: 1920,
+        height: 1080,
+        videoSource: 'walk.mp4',
+        videoTime: i + 0.5,
+      }),
+    )
     const p = profileDataset({ images })
     expect(p.kind).toBe('video')
     expect(p.videoFrames).toBe(30)
@@ -42,8 +49,13 @@ describe('profileDataset', () => {
 
   it('classifies a drone set from make/model and surfaces GPS + poses', () => {
     const images = seq('DJI_', 30, {
-      width: 5472, height: 3648, make: 'DJI', model: 'FC6310', focalLength: 8.8,
-      gpsLat: 47.1, gpsLon: 8.2,
+      width: 5472,
+      height: 3648,
+      make: 'DJI',
+      model: 'FC6310',
+      focalLength: 8.8,
+      gpsLat: 47.1,
+      gpsLon: 8.2,
     })
     const p = profileDataset({ images, poses: [{ imageId: 'a' }] })
     expect(p.kind).toBe('drone')
@@ -91,10 +103,7 @@ describe('profileDataset', () => {
   })
 
   it('flags mixed resolutions when the long edge spans >1.5×', () => {
-    const images = [
-      img('a.jpg', { width: 2000, height: 1500 }),
-      img('b.jpg', { width: 6000, height: 4000 }),
-    ]
+    const images = [img('a.jpg', { width: 2000, height: 1500 }), img('b.jpg', { width: 6000, height: 4000 })]
     const p = profileDataset({ images })
     expect(p.minDim).toBe(2000)
     expect(p.maxDim).toBe(6000)

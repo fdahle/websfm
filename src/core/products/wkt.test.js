@@ -26,8 +26,8 @@ describe('epsgToWkt', () => {
   })
 
   it('returns null for codes we cannot build (caller falls back to proj4)', () => {
-    expect(epsgToWkt(3031)).toBeNull()   // Antarctic polar stereographic
-    expect(epsgToWkt(25832)).toBeNull()  // ETRS89 UTM
+    expect(epsgToWkt(3031)).toBeNull() // Antarctic polar stereographic
+    expect(epsgToWkt(25832)).toBeNull() // ETRS89 UTM
     expect(epsgToWkt(null)).toBeNull()
   })
 })

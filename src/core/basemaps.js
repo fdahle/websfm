@@ -8,11 +8,28 @@
 // the CRS-aware default (OSM, or NASA GIBS for the polar presets).
 
 export const BASEMAPS = [
-  { value: 'auto',      label: 'Automatic', icon: 'sparkles', blurb: 'Street map, or the matching NASA layer for polar CRSs' },
-  { value: 'streets',   label: 'Streets',   icon: 'map-pin',  blurb: 'OpenStreetMap' },
-  { value: 'satellite', label: 'Satellite', icon: 'ortho',    blurb: 'Esri World Imagery, or your own source (Settings)', mercator: true },
-  { value: 'terrain',   label: 'Terrain',   icon: 'dem',      blurb: 'Shaded relief of a global elevation model', mercator: true },
-  { value: 'none',      label: 'None',      icon: 'grid',     blurb: 'Grid only' },
+  {
+    value: 'auto',
+    label: 'Automatic',
+    icon: 'sparkles',
+    blurb: 'Street map, or the matching NASA layer for polar CRSs',
+  },
+  { value: 'streets', label: 'Streets', icon: 'map-pin', blurb: 'OpenStreetMap' },
+  {
+    value: 'satellite',
+    label: 'Satellite',
+    icon: 'ortho',
+    blurb: 'Esri World Imagery, or your own source (Settings)',
+    mercator: true,
+  },
+  {
+    value: 'terrain',
+    label: 'Terrain',
+    icon: 'dem',
+    blurb: 'Shaded relief of a global elevation model',
+    mercator: true,
+  },
+  { value: 'none', label: 'None', icon: 'grid', blurb: 'Grid only' },
 ]
 export const BASEMAP_VALUES = BASEMAPS.map((b) => b.value)
 
@@ -21,7 +38,8 @@ export const SATELLITE = {
   // Deeper levels exist only in places; past 19 the service returns "no data"
   // placeholder tiles, so OL upsamples level 19 instead.
   maxZoom: 19,
-  attributions: 'Tiles © <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a> — Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
+  attributions:
+    'Tiles © <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a> — Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
   // World Imagery is under the Esri Master License Agreement, not an open
   // licence, so Settings lets a user swap in a provider they hold a licence or
   // API key for (custom tile source below).
@@ -44,7 +62,15 @@ export function tileUrlError(url) {
 
 /** Attribution HTML for a custom source: the user's text (escaped), else its host. */
 export function customAttribution(url, text) {
-  const label = text.trim() || (() => { try { return new URL(url.replace(/[{}]/g, '')).host } catch { return 'Custom source' } })()
+  const label =
+    text.trim() ||
+    (() => {
+      try {
+        return new URL(url.replace(/[{}]/g, '')).host
+      } catch {
+        return 'Custom source'
+      }
+    })()
   return label.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 }
 
@@ -54,7 +80,8 @@ export const TERRAIN = {
   // Levels past 13 mostly resample the ~30 m sources, which shades as striping;
   // OL upsamples the level-13 hillshade instead.
   maxZoom: 13,
-  attributions: 'Elevation: <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">Mapzen Terrain Tiles</a> (USGS, NASA SRTM, NOAA ETOPO1 and others)',
+  attributions:
+    'Elevation: <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">Mapzen Terrain Tiles</a> (USGS, NASA SRTM, NOAA ETOPO1 and others)',
 }
 
 // True when the CRS's area reaches a pole without crossing the equator — a polar
@@ -80,8 +107,8 @@ export function basemapReason(value, info) {
 // ── Terrain hillshade ─────────────────────────────────────────────────────────
 
 const EARTH_CIRCUMFERENCE = 40075016.686
-const SUN_AZIMUTH = 315 * Math.PI / 180   // from the north-west, the cartographic convention
-const SUN_ELEVATION = 45 * Math.PI / 180
+const SUN_AZIMUTH = (315 * Math.PI) / 180 // from the north-west, the cartographic convention
+const SUN_ELEVATION = (45 * Math.PI) / 180
 
 /** Terrarium RGBA → elevation in metres: R·256 + G + B/256 − 32768. */
 export function decodeTerrarium(rgba, w, h) {
@@ -103,14 +130,16 @@ export function hillshade(elev, w, h, z, y) {
   const ly = Math.cos(SUN_AZIMUTH) * Math.cos(SUN_ELEVATION)
   const lz = Math.sin(SUN_ELEVATION)
   for (let r = 0; r < h; r++) {
-    const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y * h + r + 0.5) / n)))
-    const px = EARTH_CIRCUMFERENCE * Math.cos(lat) / n
+    const lat = Math.atan(Math.sinh(Math.PI * (1 - (2 * (y * h + r + 0.5)) / n)))
+    const px = (EARTH_CIRCUMFERENCE * Math.cos(lat)) / n
     // One-sided differences at the tile edge (no neighbour tile to read).
-    const r0 = Math.max(0, r - 1), r1 = Math.min(h - 1, r + 1)
+    const r0 = Math.max(0, r - 1),
+      r1 = Math.min(h - 1, r + 1)
     for (let c = 0; c < w; c++) {
-      const c0 = Math.max(0, c - 1), c1 = Math.min(w - 1, c + 1)
-      const east = (elev[r * w + c1] - elev[r * w + c0]) / ((c1 - c0) * px) * exaggeration
-      const north = (elev[r0 * w + c] - elev[r1 * w + c]) / ((r1 - r0) * px) * exaggeration
+      const c0 = Math.max(0, c - 1),
+        c1 = Math.min(w - 1, c + 1)
+      const east = ((elev[r * w + c1] - elev[r * w + c0]) / ((c1 - c0) * px)) * exaggeration
+      const north = ((elev[r0 * w + c] - elev[r1 * w + c]) / ((r1 - r0) * px)) * exaggeration
       const shade = Math.max(0, (-east * lx - north * ly + lz) / Math.sqrt(east * east + north * north + 1))
       const v = 255 * (0.25 + 0.75 * shade)
       const i = (r * w + c) * 4

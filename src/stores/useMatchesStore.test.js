@@ -35,10 +35,20 @@ const commit = (entries) => {
 const asIndex = (disk) => ({ meta: disk.meta, buffers: disk.buffers, files: {}, matchesFile: disk.buffers.matches })
 const u32 = async (blob) => [...new Uint32Array(await blob.arrayBuffer())]
 
-it.each(['rejected', 'cancelled', 'missing'])('does not resurrect old matches after %s rematching', async outcome => {
+it.each(['rejected', 'cancelled', 'missing'])('does not resurrect old matches after %s rematching', async (outcome) => {
   // The one packed match document (core/features/matchStorage.js), holding the old a–b result.
-  let disk = commit(new Map([['a--b', { idA: 'a', idB: 'b', rawCount: 1, inlierCount: 1, matches: toMatchArray([[0, 0]]), F: null, status: 'done' }]]))
-  vi.spyOn(opfs, 'saveMatchDocument').mockImplementation(async (_project, meta, buffers) => { disk = { meta, buffers }; return { files: {} } })
+  let disk = commit(
+    new Map([
+      [
+        'a--b',
+        { idA: 'a', idB: 'b', rawCount: 1, inlierCount: 1, matches: toMatchArray([[0, 0]]), F: null, status: 'done' },
+      ],
+    ]),
+  )
+  vi.spyOn(opfs, 'saveMatchDocument').mockImplementation(async (_project, meta, buffers) => {
+    disk = { meta, buffers }
+    return { files: {} }
+  })
   vi.spyOn(opfs, 'loadDescriptors').mockResolvedValue(outcome === 'missing' ? null : new Float32Array(128))
   vi.spyOn(opfs, 'loadMatchIndex').mockImplementation(async () => asIndex(disk))
   const match = vi.spyOn(workers, 'matchDescriptors')
@@ -51,7 +61,7 @@ it.each(['rejected', 'cancelled', 'missing'])('does not resurrect old matches af
   expect(store.getMatch('a', 'b')).toBeNull()
 })
 
-it('posts only the putatives\' packed coordinates to verification', async () => {
+it("posts only the putatives' packed coordinates to verification", async () => {
   vi.spyOn(opfs, 'saveMatchDocument').mockResolvedValue({ files: {} })
   const n = 20
   const kps = (dx) => Array.from({ length: 50 }, (_, i) => ({ x: i * 10 + dx, y: i * 3, nx: 0, ny: 0 }))
@@ -67,15 +77,15 @@ it('posts only the putatives\' packed coordinates to verification', async () => 
   const [ptsA, ptsB] = verify.mock.calls[0]
   expect(ptsA).toBeInstanceOf(Float32Array)
   expect(ptsA).toHaveLength(2 * n)
-  expect([ptsA[2], ptsA[3]]).toEqual([10, 3])      // a's keypoint 1
-  expect([ptsB[2], ptsB[3]]).toEqual([485, 144])   // b's keypoint 48
+  expect([ptsA[2], ptsA[3]]).toEqual([10, 3]) // a's keypoint 1
+  expect([ptsB[2], ptsB[3]]).toEqual([485, 144]) // b's keypoint 48
 })
 
 it('matches in image-name order and stores the result in uuid order', async () => {
   // uuid order a < b, name order "alpha" (b) < "zeta" (a): b plays A in matching.
   vi.spyOn(opfs, 'saveMatchDocument').mockResolvedValue({ files: {} })
   const n = 20
-  const kps = (dx) => Array.from({ length: 50 }, (_, i) => ({ x: i * 10 + dx, y: i * 7 % 300, nx: 0, ny: 0 }))
+  const kps = (dx) => Array.from({ length: 50 }, (_, i) => ({ x: i * 10 + dx, y: (i * 7) % 300, nx: 0, ny: 0 }))
   const a = { ...withKeypoints('a', kps(0)), name: 'zeta.jpg' }
   const b = { ...withKeypoints('b', kps(5)), name: 'alpha.jpg' }
   // Distinguishable after RootSIFT: a's rows are e0, b's rows e1.
@@ -85,9 +95,16 @@ it('matches in image-name order and stores the result in uuid order', async () =
   const match = vi.spyOn(workers, 'matchDescriptors').mockResolvedValue({
     matches: Array.from({ length: n }, (_, i) => ({ ia: i, ib: 49 - i, dist: 1 })),
   })
-  const F = [[0, -0.3, 0.2], [0.4, 0, -1.1], [-0.25, 0.9, 0.05]]
+  const F = [
+    [0, -0.3, 0.2],
+    [0.4, 0, -1.1],
+    [-0.25, 0.9, 0.05],
+  ]
   const verify = vi.spyOn(workers, 'verifyPointPairs').mockResolvedValue({
-    F, inlierMask: new Float32Array(n).fill(1), inlierCount: n, hInlierCount: 0,
+    F,
+    inlierMask: new Float32Array(n).fill(1),
+    inlierCount: n,
+    hInlierCount: 0,
   })
   const store = useMatchesStore()
   await store.matchPair(a, b, { subsetGate: false })
@@ -98,7 +115,11 @@ it('matches in image-name order and stores the result in uuid order', async () =
   const entry = store.getMatch('a', 'b')
   expect(entry.idA).toBe('a')
   expect([...store.residentPairMatches('a--b')].slice(0, 4)).toEqual([49, 0, 48, 1])
-  expect(entry.F).toEqual([[0, 0.4, -0.25], [-0.3, 0, 0.9], [0.2, -1.1, 0.05]])
+  expect(entry.F).toEqual([
+    [0, 0.4, -0.25],
+    [-0.3, 0, 0.9],
+    [0.2, -1.1, 0.05],
+  ])
 })
 
 it('folds SIFT orientation siblings onto one keypoint before verification', async () => {
@@ -127,7 +148,7 @@ it('folds SIFT orientation siblings onto one keypoint before verification', asyn
   expect(entry).toMatchObject({ rawCount: 21, siblingMerged: 20, siblingAmbiguous: 0 })
 })
 
-it.each(['dimensions', 'length', 'detector'])('refuses incompatible descriptor %s before dispatch', async reason => {
+it.each(['dimensions', 'length', 'detector'])('refuses incompatible descriptor %s before dispatch', async (reason) => {
   vi.spyOn(opfs, 'saveMatchDocument').mockResolvedValue({ files: {} })
   vi.spyOn(opfs, 'loadDescriptors').mockResolvedValue(new Float32Array(reason === 'length' ? 127 : 128))
   const match = vi.spyOn(workers, 'matchDescriptors').mockResolvedValue({ matches: [] })
@@ -142,7 +163,8 @@ it('fails a pair whose keypoint file is missing instead of matching against noth
   vi.spyOn(opfs, 'saveMatchDocument').mockResolvedValue({ files: {} })
   vi.spyOn(opfs, 'loadDescriptors').mockResolvedValue(new Float32Array(128))
   const match = vi.spyOn(workers, 'matchDescriptors').mockResolvedValue({ matches: [] })
-  const b = image('b'); kpFiles.delete('b')
+  const b = image('b')
+  kpFiles.delete('b')
   await useMatchesStore().matchPair(image('a'), b, { subsetGate: false })
   expect(match).not.toHaveBeenCalled()
   expect(useMatchesStore().getMatch('a', 'b').status).toBe('error')
@@ -153,7 +175,15 @@ it('keeps matches as a flat Uint32Array and rewrites only the flags when a pair 
   const saves = []
   vi.spyOn(opfs, 'saveMatchDocument').mockImplementation(async (_p, meta, buffers) => {
     saves.push(buffers)
-    return { files: { pairs: { name: 'p', bytes: 8 }, counts: { name: 'c', bytes: 12 }, flags: { name: 'f', bytes: 1 }, F: { name: 'F', bytes: 72 }, matches: { name: 'm', bytes: 8 } } }
+    return {
+      files: {
+        pairs: { name: 'p', bytes: 8 },
+        counts: { name: 'c', bytes: 12 },
+        flags: { name: 'f', bytes: 1 },
+        F: { name: 'F', bytes: 72 },
+        matches: { name: 'm', bytes: 8 },
+      },
+    }
   })
   vi.spyOn(opfs, 'loadMatchesFile').mockImplementation(async () => saves.at(-1).matches)
   const store = useMatchesStore()
@@ -174,15 +204,64 @@ it('keeps matches as a flat Uint32Array and rewrites only the flags when a pair 
   expect([...last.flags]).toEqual([1])
 })
 
-it('opens on the index alone and reads each pair\'s matches from its byte range on demand', async () => {
-  const disk = commit(new Map([
-    ['a--b', { idA: 'a', idB: 'b', rawCount: 9, inlierCount: 3, F: null, matches: toMatchArray([[1, 2], [3, 4], [5, 6]]), status: 'done' }],
-    ['a--c', { idA: 'a', idB: 'c', rawCount: 4, inlierCount: 1, F: null, matches: toMatchArray([[7, 8]]), status: 'done', weak: true }],
-    ['b--c', { idA: 'b', idB: 'c', rawCount: 4, inlierCount: 2, F: null, matches: toMatchArray([[9, 10], [11, 12]]), status: 'done' }],
-  ]))
+it("opens on the index alone and reads each pair's matches from its byte range on demand", async () => {
+  const disk = commit(
+    new Map([
+      [
+        'a--b',
+        {
+          idA: 'a',
+          idB: 'b',
+          rawCount: 9,
+          inlierCount: 3,
+          F: null,
+          matches: toMatchArray([
+            [1, 2],
+            [3, 4],
+            [5, 6],
+          ]),
+          status: 'done',
+        },
+      ],
+      [
+        'a--c',
+        {
+          idA: 'a',
+          idB: 'c',
+          rawCount: 4,
+          inlierCount: 1,
+          F: null,
+          matches: toMatchArray([[7, 8]]),
+          status: 'done',
+          weak: true,
+        },
+      ],
+      [
+        'b--c',
+        {
+          idA: 'b',
+          idB: 'c',
+          rawCount: 4,
+          inlierCount: 2,
+          F: null,
+          matches: toMatchArray([
+            [9, 10],
+            [11, 12],
+          ]),
+          status: 'done',
+        },
+      ],
+    ]),
+  )
   const blob = disk.buffers.matches
   const reads = []
-  const file = { size: blob.size, slice: vi.fn((s, e) => { reads.push([s, e]); return blob.slice(s, e) }) }
+  const file = {
+    size: blob.size,
+    slice: vi.fn((s, e) => {
+      reads.push([s, e])
+      return blob.slice(s, e)
+    }),
+  }
   vi.spyOn(opfs, 'loadMatchIndex').mockResolvedValue({ ...asIndex(disk), matchesFile: file })
   const store = useMatchesStore()
   await store.restore({ projectId: 'match-test' })
@@ -197,26 +276,51 @@ it('opens on the index alone and reads each pair\'s matches from its byte range 
   expect(store.matchCacheStats().entries).toBe(0)
 
   // One pair: exactly its byte range, then kept.
-  expect([...await store.ensurePairMatches('a--c')]).toEqual([7, 8])
+  expect([...(await store.ensurePairMatches('a--c'))]).toEqual([7, 8])
   expect(reads).toEqual([[24, 32]])
-  expect([...await store.ensurePairMatches('a--c')]).toEqual([7, 8])
+  expect([...(await store.ensurePairMatches('a--c'))]).toEqual([7, 8])
   expect(reads).toHaveLength(1)
   // A read-through does not displace the cache.
-  expect([...await store.readPairMatches('b--c')]).toEqual([9, 10, 11, 12])
+  expect([...(await store.readPairMatches('b--c'))]).toEqual([9, 10, 11, 12])
   expect(store.residentPairMatches('b--c')).toBeNull()
 
   // A bulk pass in document order: one read for the non-resident run.
   reads.length = 0
   const seen = []
-  await store.streamPairMatches([...store.matchStore.values()], (e, m) => { seen.push([`${e.idA}--${e.idB}`, [...m]]) })
-  expect(seen).toEqual([['a--b', [1, 2, 3, 4, 5, 6]], ['a--c', [7, 8]], ['b--c', [9, 10, 11, 12]]])
-  expect(reads).toEqual([[0, 24], [32, 48]]) // a--c came from memory, so the run splits around it
+  await store.streamPairMatches([...store.matchStore.values()], (e, m) => {
+    seen.push([`${e.idA}--${e.idB}`, [...m]])
+  })
+  expect(seen).toEqual([
+    ['a--b', [1, 2, 3, 4, 5, 6]],
+    ['a--c', [7, 8]],
+    ['b--c', [9, 10, 11, 12]],
+  ])
+  expect(reads).toEqual([
+    [0, 24],
+    [32, 48],
+  ]) // a--c came from memory, so the run splits around it
 })
 
 it('rewrites the document from resident pairs plus slices of the previous generation', async () => {
-  const disk = commit(new Map([
-    ['a--b', { idA: 'a', idB: 'b', rawCount: 9, inlierCount: 3, F: null, matches: toMatchArray([[1, 2], [3, 4]]), status: 'done' }],
-  ]))
+  const disk = commit(
+    new Map([
+      [
+        'a--b',
+        {
+          idA: 'a',
+          idB: 'b',
+          rawCount: 9,
+          inlierCount: 3,
+          F: null,
+          matches: toMatchArray([
+            [1, 2],
+            [3, 4],
+          ]),
+          status: 'done',
+        },
+      ],
+    ]),
+  )
   vi.spyOn(opfs, 'loadMatchIndex').mockResolvedValue(asIndex(disk))
   let saved = null
   vi.spyOn(opfs, 'saveMatchDocument').mockImplementation(async (_p, meta, buffers) => {
@@ -232,7 +336,7 @@ it('rewrites the document from resident pairs plus slices of the previous genera
   // Both pairs now point into the new generation; nothing is pinned any more.
   expect(store.getMatch('a', 'c').src).toMatchObject({ off: 4 })
   expect(store.matchCacheStats().pinnedBytes).toBe(0)
-  expect([...await store.readPairMatches('a--b')]).toEqual([1, 2, 3, 4])
+  expect([...(await store.readPairMatches('a--b'))]).toEqual([1, 2, 3, 4])
 })
 
 it('refuses an unreadable document instead of opening an empty graph silently', async () => {
@@ -243,16 +347,36 @@ it('refuses an unreadable document instead of opening an empty graph silently', 
 })
 
 it('re-points at the copy when the file it read from went away (a storage move)', async () => {
-  const disk = commit(new Map([
-    ['a--b', { idA: 'a', idB: 'b', rawCount: 9, inlierCount: 2, F: null, matches: toMatchArray([[1, 2], [3, 4]]), status: 'done' }],
-  ]))
+  const disk = commit(
+    new Map([
+      [
+        'a--b',
+        {
+          idA: 'a',
+          idB: 'b',
+          rawCount: 9,
+          inlierCount: 2,
+          F: null,
+          matches: toMatchArray([
+            [1, 2],
+            [3, 4],
+          ]),
+          status: 'done',
+        },
+      ],
+    ]),
+  )
   const blob = disk.buffers.matches
   const gone = { size: blob.size, slice: () => ({ arrayBuffer: () => Promise.reject(new Error('NotFoundError')) }) }
-  vi.spyOn(opfs, 'loadMatchIndex').mockResolvedValue({ ...asIndex(disk), files: { matches: { name: 'm', bytes: blob.size } }, matchesFile: gone })
+  vi.spyOn(opfs, 'loadMatchIndex').mockResolvedValue({
+    ...asIndex(disk),
+    files: { matches: { name: 'm', bytes: blob.size } },
+    matchesFile: gone,
+  })
   const refetch = vi.spyOn(opfs, 'loadMatchesFile').mockResolvedValue(blob)
   const store = useMatchesStore()
   await store.restore({ projectId: 'match-test' })
-  expect([...await store.readPairMatches('a--b')]).toEqual([1, 2, 3, 4])
+  expect([...(await store.readPairMatches('a--b'))]).toEqual([1, 2, 3, 4])
   expect(refetch).toHaveBeenCalledWith('match-test', { name: 'm', bytes: blob.size })
   expect(store.getMatch('a', 'b').src.file).toBe(blob)
 })

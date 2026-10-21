@@ -19,7 +19,9 @@ defineEmits(['update:modelValue'])
       :class="{ active: modelValue === o.id }"
       :disabled="o.disabled"
       @click="!o.disabled && $emit('update:modelValue', o.id)"
-    >{{ o.label }}</button>
+    >
+      {{ o.label }}
+    </button>
   </div>
 </template>
 

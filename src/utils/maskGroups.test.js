@@ -14,7 +14,10 @@ describe('maskGroups', () => {
   })
 
   it('puts an image with only one known dimension in the unknown group', () => {
-    const { groups, sizedGroups } = maskGroups([{ id: 1, meta: { width: 100 } }, { id: 2, meta: { width: 0, height: 50 } }])
+    const { groups, sizedGroups } = maskGroups([
+      { id: 1, meta: { width: 100 } },
+      { id: 2, meta: { width: 0, height: 50 } },
+    ])
     expect(groups.map((g) => g.key)).toEqual(['unknown'])
     expect(groups[0].images).toHaveLength(2)
     expect(sizedGroups).toEqual([])

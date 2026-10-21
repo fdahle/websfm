@@ -1,14 +1,27 @@
 import { describe, it, expect } from 'vitest'
 import {
-  maskLookupFromRgba, normalizeMaskPixels, paintBorderExclude, invertMaskPixels, anyExcluded,
-  hasMaskTransparency, maskStorageSize, scaleBorderSides, upsampleLookupNearest, MASK_LARGE_LONG_SIDE,
+  maskLookupFromRgba,
+  normalizeMaskPixels,
+  paintBorderExclude,
+  invertMaskPixels,
+  anyExcluded,
+  hasMaskTransparency,
+  maskStorageSize,
+  scaleBorderSides,
+  upsampleLookupNearest,
+  MASK_LARGE_LONG_SIDE,
 } from './mask.js'
 
 // Build a flat RGBA buffer (Uint8ClampedArray-like) of w*h pixels from a list
 // of [r,g,b,a] tuples.
 function rgba(pixels) {
   const d = new Uint8Array(pixels.length * 4)
-  pixels.forEach((p, i) => { d[i * 4] = p[0]; d[i * 4 + 1] = p[1]; d[i * 4 + 2] = p[2]; d[i * 4 + 3] = p[3] })
+  pixels.forEach((p, i) => {
+    d[i * 4] = p[0]
+    d[i * 4 + 1] = p[1]
+    d[i * 4 + 2] = p[2]
+    d[i * 4 + 3] = p[3]
+  })
   return d
 }
 
@@ -16,7 +29,7 @@ describe('maskLookupFromRgba', () => {
   it('marks opaque pixels masked and transparent pixels kept', () => {
     const data = rgba([
       [255, 0, 0, 255], // opaque red → masked
-      [0, 0, 0, 0],     // transparent → kept
+      [0, 0, 0, 0], // transparent → kept
       [255, 0, 0, 128], // alpha just over threshold → masked
       [10, 10, 10, 100], // alpha under threshold → kept
     ])
@@ -28,21 +41,19 @@ describe('normalizeMaskPixels', () => {
   it('turns bright or opaque source pixels into opaque red, others transparent', () => {
     const data = rgba([
       [255, 255, 255, 255], // bright + opaque → excluded
-      [0, 0, 0, 255],       // dark but opaque → excluded
-      [0, 0, 0, 0],         // dark + transparent → kept
-      [200, 200, 200, 0],   // bright but transparent → excluded (lum>127)
+      [0, 0, 0, 255], // dark but opaque → excluded
+      [0, 0, 0, 0], // dark + transparent → kept
+      [200, 200, 200, 0], // bright but transparent → excluded (lum>127)
     ])
     normalizeMaskPixels(data)
-    expect(Array.from(data)).toEqual([
-      255, 0, 0, 255,
-      255, 0, 0, 255,
-      0, 0, 0, 0,
-      255, 0, 0, 255,
-    ])
+    expect(Array.from(data)).toEqual([255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255])
   })
 
   it('is idempotent on an already-normalized mask', () => {
-    const data = rgba([[255, 0, 0, 255], [0, 0, 0, 0]])
+    const data = rgba([
+      [255, 0, 0, 255],
+      [0, 0, 0, 0],
+    ])
     normalizeMaskPixels(data)
     const once = Array.from(data)
     normalizeMaskPixels(data)
@@ -53,9 +64,9 @@ describe('normalizeMaskPixels', () => {
 describe('normalizeMaskPixels: files without transparency', () => {
   it('masks BLACK and keeps white when every pixel is opaque (JPEG, plain B/W PNG)', () => {
     const data = rgba([
-      [0, 0, 0, 255],       // black → excluded
+      [0, 0, 0, 255], // black → excluded
       [255, 255, 255, 255], // white → kept
-      [40, 40, 40, 255],    // dark grey → excluded
+      [40, 40, 40, 255], // dark grey → excluded
       [200, 200, 200, 255], // light grey → kept
     ])
     normalizeMaskPixels(data)
@@ -63,27 +74,58 @@ describe('normalizeMaskPixels: files without transparency', () => {
   })
 
   it('an all-white opaque file masks nothing, an all-black one everything', () => {
-    const white = normalizeMaskPixels(rgba([[255, 255, 255, 255], [255, 255, 255, 255]]))
+    const white = normalizeMaskPixels(
+      rgba([
+        [255, 255, 255, 255],
+        [255, 255, 255, 255],
+      ]),
+    )
     expect(anyExcluded(white)).toBe(false)
-    const black = normalizeMaskPixels(rgba([[0, 0, 0, 255], [0, 0, 0, 255]]))
+    const black = normalizeMaskPixels(
+      rgba([
+        [0, 0, 0, 255],
+        [0, 0, 0, 255],
+      ]),
+    )
     expect(Array.from(maskLookupFromRgba(black, 2, 1))).toEqual([1, 1])
   })
 
-  it('one transparent pixel switches to the alpha rule (the app\'s own masks round-trip)', () => {
-    const data = rgba([[255, 255, 255, 255], [0, 0, 0, 0], [255, 0, 0, 255]])
+  it("one transparent pixel switches to the alpha rule (the app's own masks round-trip)", () => {
+    const data = rgba([
+      [255, 255, 255, 255],
+      [0, 0, 0, 0],
+      [255, 0, 0, 255],
+    ])
     normalizeMaskPixels(data)
     expect(Array.from(maskLookupFromRgba(data, 3, 1))).toEqual([1, 0, 1])
   })
 
   it('a fully masked stored mask (all red, so opaque everywhere) stays fully masked', () => {
-    const data = rgba([[255, 0, 0, 255], [255, 0, 0, 255]])
+    const data = rgba([
+      [255, 0, 0, 255],
+      [255, 0, 0, 255],
+    ])
     normalizeMaskPixels(data)
     expect(Array.from(maskLookupFromRgba(data, 2, 1))).toEqual([1, 1])
   })
 
   it('hasMaskTransparency asks for a pixel the alpha rule would keep', () => {
-    expect(hasMaskTransparency(rgba([[0, 0, 0, 255], [9, 9, 9, 200]]))).toBe(false)
-    expect(hasMaskTransparency(rgba([[0, 0, 0, 255], [9, 9, 9, 127]]))).toBe(true)
+    expect(
+      hasMaskTransparency(
+        rgba([
+          [0, 0, 0, 255],
+          [9, 9, 9, 200],
+        ]),
+      ),
+    ).toBe(false)
+    expect(
+      hasMaskTransparency(
+        rgba([
+          [0, 0, 0, 255],
+          [9, 9, 9, 127],
+        ]),
+      ),
+    ).toBe(true)
   })
 })
 
@@ -112,19 +154,31 @@ describe('scaleBorderSides', () => {
 describe('upsampleLookupNearest', () => {
   it('repeats each source cell over its block', () => {
     const lut = Uint8Array.from([1, 0, 0, 1]) // 2×2
-    expect(Array.from(upsampleLookupNearest(lut, 2, 2, 4, 2))).toEqual([
-      1, 1, 0, 0,
-      0, 0, 1, 1,
-    ])
+    expect(Array.from(upsampleLookupNearest(lut, 2, 2, 4, 2))).toEqual([1, 1, 0, 0, 0, 0, 1, 1])
   })
 })
 
 describe('anyExcluded', () => {
   it('is false for an all-transparent (empty) mask', () => {
-    expect(anyExcluded(rgba([[0, 0, 0, 0], [255, 0, 0, 0], [10, 10, 10, 100]]))).toBe(false)
+    expect(
+      anyExcluded(
+        rgba([
+          [0, 0, 0, 0],
+          [255, 0, 0, 0],
+          [10, 10, 10, 100],
+        ]),
+      ),
+    ).toBe(false)
   })
   it('is true when at least one pixel is opaque', () => {
-    expect(anyExcluded(rgba([[0, 0, 0, 0], [255, 0, 0, 255]]))).toBe(true)
+    expect(
+      anyExcluded(
+        rgba([
+          [0, 0, 0, 0],
+          [255, 0, 0, 255],
+        ]),
+      ),
+    ).toBe(true)
   })
 })
 
@@ -132,7 +186,7 @@ describe('invertMaskPixels', () => {
   it('swaps excluded and kept pixels and returns the new excluded count', () => {
     const data = rgba([
       [255, 0, 0, 255], // excluded → kept
-      [0, 0, 0, 0],     // kept → excluded
+      [0, 0, 0, 0], // kept → excluded
       [255, 0, 0, 128], // alpha just over threshold → kept
       [10, 10, 10, 100], // partial alpha under threshold (brush AA edge) → excluded
     ])
@@ -142,7 +196,11 @@ describe('invertMaskPixels', () => {
   })
 
   it('double inversion restores the lookup (normalized input)', () => {
-    const data = rgba([[255, 0, 0, 255], [0, 0, 0, 0], [255, 0, 0, 255]])
+    const data = rgba([
+      [255, 0, 0, 255],
+      [0, 0, 0, 0],
+      [255, 0, 0, 255],
+    ])
     const before = Array.from(maskLookupFromRgba(data, 3, 1))
     invertMaskPixels(data)
     invertMaskPixels(data)
@@ -150,7 +208,10 @@ describe('invertMaskPixels', () => {
   })
 
   it('returns 0 when inverting a fully-excluded mask (caller can drop it)', () => {
-    const data = rgba([[255, 0, 0, 255], [255, 0, 0, 255]])
+    const data = rgba([
+      [255, 0, 0, 255],
+      [255, 0, 0, 255],
+    ])
     expect(invertMaskPixels(data)).toBe(0)
   })
 })
@@ -166,7 +227,8 @@ describe('paintBorderExclude', () => {
   const RED = [255, 0, 0, 255]
 
   it('excludes the requested per-side margins and leaves the interior untouched', () => {
-    const w = 5, h = 4
+    const w = 5,
+      h = 4
     const d = filled(w, h)
     paintBorderExclude(d, w, h, { top: 1, bottom: 1, left: 2, right: 1 })
 
@@ -182,7 +244,8 @@ describe('paintBorderExclude', () => {
   })
 
   it('clamps margins to half each dimension (no wrap)', () => {
-    const w = 4, h = 4
+    const w = 4,
+      h = 4
     const d = filled(w, h)
     // left/right each ≥ w/2 → clamped to 2, together covering the full width.
     paintBorderExclude(d, w, h, { left: 10, right: 10 })
@@ -192,7 +255,8 @@ describe('paintBorderExclude', () => {
   })
 
   it('is a no-op with zero margins', () => {
-    const w = 3, h = 3
+    const w = 3,
+      h = 3
     const d = filled(w, h)
     paintBorderExclude(d, w, h, {})
     expect(Array.from(d)).toEqual(Array.from(filled(w, h)))

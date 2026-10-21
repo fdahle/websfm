@@ -43,15 +43,14 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
   // accepted solve that refines its k terms (fold). Every consumer — the BA's
   // recorded-pixel observations (bundleSession.js), the fold, the summary dense reads —
   // takes it from here, so all of them see the same lens at every point of the run.
-  const lensByGroup = new Map()        // group key → fisheye lens bag, or null (not a fisheye)
-  const refinedLensGroups = new Set()  // groups whose lens self-calibration has changed
+  const lensByGroup = new Map() // group key → fisheye lens bag, or null (not a fisheye)
+  const refinedLensGroups = new Set() // groups whose lens self-calibration has changed
   const imgByUuid = new Map(imgs.map((img) => [img.uuid, img]))
   function groupLens(key) {
     if (!lensByGroup.has(key)) {
       const img = imgsBySelfCalGroup.get(key)?.[0]
       const dist = distortionOf(img?.sensor)
-      lensByGroup.set(key, dist?.fisheye
-        ? { ...dist, terms: coeffsForModel(img.sensor.distortionModel).length } : null)
+      lensByGroup.set(key, dist?.fisheye ? { ...dist, terms: coeffsForModel(img.sensor.distortionModel).length } : null)
     }
     return lensByGroup.get(key)
   }
@@ -76,9 +75,9 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
   // `selfCalDistByGroup` holds the composed bag fitted from pristine→folded about each
   // image's current K (selfCalCompose.js), refitted whenever a BA changes that K —
   // replacing the old additive-k1 sum, which was wrong beyond first order.
-  const pristineKpByUuid = new Map()      // uuid → KeypointSet before the first fold
-  const foldedTermsByGroup = new Map()    // group key → { k2, k3 } ever folded into its keypoints
-  const selfCalDistByGroup = new Map()    // group key → { sensorId, imageUuid, k1, k2, k3, fitRmsPx }
+  const pristineKpByUuid = new Map() // uuid → KeypointSet before the first fold
+  const foldedTermsByGroup = new Map() // group key → { k2, k3 } ever folded into its keypoints
+  const selfCalDistByGroup = new Map() // group key → { sensorId, imageUuid, k1, k2, k3, fitRmsPx }
 
   // ── Propagate the refined calibration + fold distortion into the keypoints (WS2) ──
   // A refined calibration belongs to the whole group, not just the cameras that were
@@ -119,25 +118,37 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
     // the identifiability guard can drop k2/k3 later): fitting only the current
     // pass's terms would silently erase them from what dense reproduces.
     const passTerms = { k2: refineMode.includes('k2'), k3: refineMode.includes('k3') }
-    let foldedImgs = 0, foldedShift = 0, foldedN = 0, refitFisheye = 0
+    let foldedImgs = 0,
+      foldedShift = 0,
+      foldedN = 0,
+      refitFisheye = 0
     for (const [key, ci0] of solvedGroups) {
-      const rk0 = refined[ci0], k0 = kList[ci0]
+      const rk0 = refined[ci0],
+        k0 = kList[ci0]
       // A fisheye group's k terms are its own lens, solved in recorded pixels: it
       // never folds a Brown bag, it takes the new lens (fisheyeFold below).
       const lensBefore = groupLens(key)
       const lensAfter = lensBefore && {
-        ...lensBefore, k1: rk0.k1 ?? lensBefore.k1, k2: rk0.k2 ?? lensBefore.k2,
-        k3: rk0.k3 ?? lensBefore.k3, k4: rk0.k4 ?? lensBefore.k4,
+        ...lensBefore,
+        k1: rk0.k1 ?? lensBefore.k1,
+        k2: rk0.k2 ?? lensBefore.k2,
+        k3: rk0.k3 ?? lensBefore.k3,
+        k4: rk0.k4 ?? lensBefore.k4,
       }
       const bag = lensBefore ? { k1: 0, k2: 0, k3: 0 } : { k1: rk0.k1 || 0, k2: rk0.k2 || 0, k3: rk0.k3 || 0 }
       const folds = !!(bag.k1 || bag.k2 || bag.k3)
       for (const img of imgsBySelfCalGroup.get(key) ?? []) {
         const ci = camIdxOf.get(img.uuid)
         const k = Kmap.get(img.uuid)
-        const own = ci != null ? refined[ci] : k && {
-          fx: k.fx * (rk0.fx / k0.fx), fy: k.fy * (rk0.fy / k0.fy),
-          cx: k.cx + (rk0.cx - k0.cx), cy: k.cy + (rk0.cy - k0.cy),
-        }
+        const own =
+          ci != null
+            ? refined[ci]
+            : k && {
+                fx: k.fx * (rk0.fx / k0.fx),
+                fy: k.fy * (rk0.fy / k0.fy),
+                cx: k.cx + (rk0.cx - k0.cx),
+                cy: k.cy + (rk0.cy - k0.cy),
+              }
         if (!own) continue
         const Kc = { fx: own.fx, fy: own.fy, cx: own.cx, cy: own.cy }
         // Fold EVERY image on a solved group — not just the registered ones. When
@@ -150,7 +161,8 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
           if (!pristineKpByUuid.has(img.uuid)) pristineKpByUuid.set(img.uuid, img.kp)
           img.kp = mapPositions(img.kp, (x, y) => {
             const u = undistortPixel(x, y, Kc, bag)
-            foldedShift += Math.hypot(u.x - x, u.y - y); foldedN++
+            foldedShift += Math.hypot(u.x - x, u.y - y)
+            foldedN++
             return u
           })
           moveGcpObs(img.uuid, (x, y) => undistortPixel(x, y, Kc, bag))
@@ -175,19 +187,26 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
       if (folds) {
         const ever = foldedTermsByGroup.get(key) ?? { k2: false, k3: false }
         foldedTermsByGroup.set(key, {
-          k2: ever.k2 || (passTerms.k2 && !!bag.k2), k3: ever.k3 || (passTerms.k3 && !!bag.k3),
+          k2: ever.k2 || (passTerms.k2 && !!bag.k2),
+          k3: ever.k3 || (passTerms.k3 && !!bag.k3),
         })
       }
       if (foldedTermsByGroup.has(key)) composeSelfCalRecord(key, label)
     }
     if (refitFisheye > 0) {
-      log(`${label} re-mapped ${pluralize(refitFisheye, 'fisheye image')}' keypoints onto the refined lens / focal / principal point`,
-        'info', 'Reconstruction')
+      log(
+        `${label} re-mapped ${pluralize(refitFisheye, 'fisheye image')}' keypoints onto the refined lens / focal / principal point`,
+        'info',
+        'Reconstruction',
+      )
     }
     if (foldedImgs > 0) {
-      log(`${label} folded self-calibrated distortion into ${pluralize(foldedImgs, 'image')}' `
-        + `keypoints (mean shift ${(foldedShift / Math.max(1, foldedN)).toFixed(2)}px; model stays pinhole)`,
-        'info', 'Reconstruction')
+      log(
+        `${label} folded self-calibrated distortion into ${pluralize(foldedImgs, 'image')}' ` +
+          `keypoints (mean shift ${(foldedShift / Math.max(1, foldedN)).toFixed(2)}px; model stays pinhole)`,
+        'info',
+        'Reconstruction',
+      )
     }
   }
 
@@ -207,7 +226,8 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
       if (!pristine || !K) continue
       setPairs.push({ pristine, folded: img.kp, K })
       const { width, height } = kFrameDims(img)
-      const w = width || 2 * K.cx, h = height || 2 * K.cy
+      const w = width || 2 * K.cx,
+        h = height || 2 * K.cy
       maxNormR = Math.max(maxNormR, Math.hypot(Math.max(K.cx, w - K.cx) / K.fx, Math.max(K.cy, h - K.cy) / K.fy))
     }
     if (!setPairs.length) return
@@ -218,13 +238,21 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
     // (staged gating makes this rare) so a bad calibration is visible in the log.
     const guard = radialCurveOk(composed, maxNormR, setPairs[0].K.fx)
     if (!guard.ok) {
-      log(`${label} self-cal composed radial fit looks unreliable — ${guard.reason}; `
-        + `dense will use it as-is but review the calibration`, 'warn', 'Reconstruction')
+      log(
+        `${label} self-cal composed radial fit looks unreliable — ${guard.reason}; ` +
+          `dense will use it as-is but review the calibration`,
+        'warn',
+        'Reconstruction',
+      )
     }
     const sensorId = gimgs[0].sensorId ?? null
     selfCalDistByGroup.set(key, {
-      sensorId, imageUuid: sensorId == null ? gimgs[0].uuid : null,
-      k1: composed.k1, k2: composed.k2, k3: composed.k3, fitRmsPx: composed.fitRmsPx,
+      sensorId,
+      imageUuid: sensorId == null ? gimgs[0].uuid : null,
+      k1: composed.k1,
+      k2: composed.k2,
+      k3: composed.k3,
+      fitRmsPx: composed.fitRmsPx,
     })
   }
 
@@ -237,14 +265,25 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
     ...[...selfCalDistByGroup.values()]
       .filter((d) => d.k1 || d.k2 || d.k3)
       .map((d) => ({
-        sensorId: d.sensorId, ...(d.imageUuid ? { imageUuid: d.imageUuid } : {}),
-        k1: d.k1, k2: d.k2, k3: d.k3, fitRmsPx: d.fitRmsPx,
+        sensorId: d.sensorId,
+        ...(d.imageUuid ? { imageUuid: d.imageUuid } : {}),
+        k1: d.k1,
+        k2: d.k2,
+        k3: d.k3,
+        fitRmsPx: d.fitRmsPx,
       })),
     ...[...refinedLensGroups].map((key) => {
-      const img = imgsBySelfCalGroup.get(key)[0], lens = lensByGroup.get(key)
+      const img = imgsBySelfCalGroup.get(key)[0],
+        lens = lensByGroup.get(key)
       return {
-        sensorId: img.sensorId ?? null, ...(img.sensorId == null ? { imageUuid: img.uuid } : {}),
-        fisheye: true, k1: lens.k1, k2: lens.k2, k3: lens.k3, k4: lens.k4, fitRmsPx: 0,
+        sensorId: img.sensorId ?? null,
+        ...(img.sensorId == null ? { imageUuid: img.uuid } : {}),
+        fisheye: true,
+        k1: lens.k1,
+        k2: lens.k2,
+        k3: lens.k3,
+        k4: lens.k4,
+        fitRmsPx: 0,
       }
     }),
   ]

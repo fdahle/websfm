@@ -94,17 +94,24 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
   if (!longEdges.length) {
     notes.push('No image dimensions available — cannot size detection/quality; using conservative defaults downstream.')
   } else if (minDim != null && maxDim != null && maxDim > minDim * 1.5) {
-    notes.push(`Mixed resolutions (${minDim}–${maxDim} px long edge) — a per-image detection cap may over/under-shoot some images.`)
+    notes.push(
+      `Mixed resolutions (${minDim}–${maxDim} px long edge) — a per-image detection cap may over/under-shoot some images.`,
+    )
   }
   if (medianMP != null) notes.push(`Median ${medianMP.toFixed(1)} MP across ${pluralize(nImages, 'image')}.`)
 
   const hasGps = images.some((i) => isFiniteNum(i.meta?.gpsLat) && isFiniteNum(i.meta?.gpsLon))
   const hasPoses = (poses?.length ?? 0) > 0
-  if (hasPoses) notes.push(`${pluralize(poses.length, 'camera position')} present — proximity preselection + georef seeds available.`)
-  else if (hasGps) notes.push('EXIF GPS present — synchronizing project-CRS camera positions for proximity preselection.')
+  if (hasPoses)
+    notes.push(
+      `${pluralize(poses.length, 'camera position')} present — proximity preselection + georef seeds available.`,
+    )
+  else if (hasGps)
+    notes.push('EXIF GPS present — synchronizing project-CRS camera positions for proximity preselection.')
 
   const hasCalibratedDistortion = (sensors ?? []).some(sensorHasDistortion)
-  if (hasCalibratedDistortion) notes.push('A sensor declares non-zero lens distortion — self-cal can start from it rather than from scratch.')
+  if (hasCalibratedDistortion)
+    notes.push('A sensor declares non-zero lens distortion — self-cal can start from it rather than from scratch.')
 
   const nGcps = gcps?.length ?? 0
   if (nGcps >= 3) notes.push(`${pluralize(nGcps, 'GCP')} — GCP-anchored BA + georeferencing available.`)
@@ -116,7 +123,8 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
   const models = images.map((i) => String(i.meta?.model ?? '')).filter(Boolean)
   const anyExif = images.some((i) => i.meta?.make || i.meta?.model || isFiniteNum(i.meta?.focalLength))
 
-  const droneHit = makes.some((mk) => DRONE_MAKES.some((d) => mk.includes(d))) || models.some((md) => DRONE_MODEL_RE.test(md))
+  const droneHit =
+    makes.some((mk) => DRONE_MAKES.some((d) => mk.includes(d))) || models.some((md) => DRONE_MODEL_RE.test(md))
   const phoneHit = makes.some((mk) => PHONE_MAKES.some((p) => mk.includes(p)))
 
   // Frames extracted from a video (Import ▸ Video) carry their source in meta. They
@@ -130,16 +138,22 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
     notes.push('Classified film: a sensor is kind:"film" (scanned imagery, fiducial interior orientation).')
   } else if (fromVideo) {
     kind = 'video'
-    notes.push(`Classified video: ${videoFrames} of ${pluralize(nImages, 'image')} ${videoFrames === 1 ? 'is a frame' : 'are frames'} extracted from a video, in capture order.`)
+    notes.push(
+      `Classified video: ${videoFrames} of ${pluralize(nImages, 'image')} ${videoFrames === 1 ? 'is a frame' : 'are frames'} extracted from a video, in capture order.`,
+    )
   } else if (!anyExif && nImages >= 2) {
     // No make/model/focal anywhere is the signature of scanned aerial film — the
     // scanner strips EXIF. Only a hint (a bare-EXIF digital set looks the same),
     // so it is the weakest film verdict and stays overridable.
     kind = 'film'
-    notes.push('Classified film (tentative): no EXIF make/model/focal on any image — typical of scanned film; override if these are digital photos.')
+    notes.push(
+      'Classified film (tentative): no EXIF make/model/focal on any image — typical of scanned film; override if these are digital photos.',
+    )
   } else if (droneHit) {
     kind = 'drone'
-    notes.push('Classified drone: camera make/model matches a known UAV (proximity preselection + georef from GPS apply).')
+    notes.push(
+      'Classified drone: camera make/model matches a known UAV (proximity preselection + georef from GPS apply).',
+    )
   } else if (phoneHit) {
     kind = 'phone'
     notes.push('Classified phone: camera make matches a known smartphone vendor.')
@@ -149,7 +163,8 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
 
   const scale = sizeBucket(nImages)
   const sequentialNames = detectSequentialNames(images.map((i) => i.name ?? ''))
-  if (sequentialNames) notes.push('Image names are sequential — capture-order (sequential) matching can prune pairs even without poses.')
+  if (sequentialNames)
+    notes.push('Image names are sequential — capture-order (sequential) matching can prune pairs even without poses.')
 
   return {
     nImages,

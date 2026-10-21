@@ -29,8 +29,16 @@ function createPixelBudget(cap) {
     }
   }
   return {
-    acquire(px) { return new Promise((resolve) => { waiting.push({ px, resolve }); pump() }) },
-    release(px) { inFlight -= px; pump() },
+    acquire(px) {
+      return new Promise((resolve) => {
+        waiting.push({ px, resolve })
+        pump()
+      })
+    },
+    release(px) {
+      inFlight -= px
+      pump()
+    },
   }
 }
 const tiffBudget = createPixelBudget(TIFF_TRANSCODE_PIXEL_BUDGET)
@@ -42,29 +50,42 @@ const tiffBudget = createPixelBudget(TIFF_TRANSCODE_PIXEL_BUDGET)
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createIngest({
-  activeImports, images, isPersisting, log, markComputePending, pendingWorkCount, projects,
-  rejectComputeReady, resolveComputeReady, save, thumbnails, trackWrite,
+  activeImports,
+  images,
+  isPersisting,
+  log,
+  markComputePending,
+  pendingWorkCount,
+  projects,
+  rejectComputeReady,
+  resolveComputeReady,
+  save,
+  thumbnails,
+  trackWrite,
 }) {
   // `extraMeta`: fields the file itself cannot carry (a video frame's source and
   // time), merged over what EXIF gave.
   function extractMetadataFor(item, file, projectId, presetDims, extraMeta = null) {
     return extractMetadata(file, item.url, presetDims)
       .then((meta) => {
-        const found = projects.currentProjectId === projectId
-          ? images.value.find((img) => img.uuid === item.uuid) : null
+        const found =
+          projects.currentProjectId === projectId ? images.value.find((img) => img.uuid === item.uuid) : null
         if (found) {
           found.meta = extraMeta ? { ...meta, ...extraMeta } : meta
           found.loading = false
-          const cam = [meta.make, meta.model].filter(Boolean).join(' ')
-            || (extraMeta?.videoSource ? `frame of ${extraMeta.videoSource} at ${Number(extraMeta.videoTime ?? 0).toFixed(3)} s` : 'unknown camera')
+          const cam =
+            [meta.make, meta.model].filter(Boolean).join(' ') ||
+            (extraMeta?.videoSource
+              ? `frame of ${extraMeta.videoSource} at ${Number(extraMeta.videoTime ?? 0).toFixed(3)} s`
+              : 'unknown camera')
           const dim = meta.width && meta.height ? ` ${meta.width}×${meta.height}` : ''
           log(`Metadata: ${file.name} — ${cam}${dim}`, 'success', 'Metadata')
           if (isPersisting()) save(projectId)
         }
       })
       .catch((err) => {
-        const found = projects.currentProjectId === projectId
-          ? images.value.find((img) => img.uuid === item.uuid) : null
+        const found =
+          projects.currentProjectId === projectId ? images.value.find((img) => img.uuid === item.uuid) : null
         if (found) found.loading = false
         log(`Metadata failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Metadata')
         if (isPersisting()) save(projectId)
@@ -86,7 +107,9 @@ export function createIngest({
     const task = addImagesNow(files, onProgress, options)
     activeImports.add(task)
     pendingWorkCount.value++
-    try { return await task } finally {
+    try {
+      return await task
+    } finally {
       activeImports.delete(task)
       pendingWorkCount.value--
     }
@@ -130,9 +153,14 @@ export function createIngest({
 
       if (persistImport) {
         originalUrls.set(item.uuid, item.url)
-        batchWrites.push(trackWrite(opfs.saveImage(projectId, item.uuid, file)
-          .then(() => stored.push(item.uuid))
-          .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
+        batchWrites.push(
+          trackWrite(
+            opfs
+              .saveImage(projectId, item.uuid, file)
+              .then(() => stored.push(item.uuid))
+              .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')),
+          ),
+        )
       }
       const extra = extras?.get(file) ?? null
 
@@ -150,9 +178,11 @@ export function createIngest({
         // EXIF + dimensions don't need the slow full pixel decode — the TIFF
         // header gives real width/height near-instantly (readTiffDimensions),
         // so metadata shows up right away instead of waiting on the transcode.
-        metadataTasks.push(readTiffDimensions(file)
-          .then((dims) => extractMetadataFor(item, file, projectId, dims))
-          .catch(() => extractMetadataFor(item, file, projectId)))
+        metadataTasks.push(
+          readTiffDimensions(file)
+            .then((dims) => extractMetadataFor(item, file, projectId, dims))
+            .catch(() => extractMetadataFor(item, file, projectId)),
+        )
       } else {
         metadataTasks.push(extractMetadataFor(item, file, projectId, extra?.dims ?? null, extra?.meta ?? null))
         // The list thumbnail, from the File itself — background, behind any row in
@@ -164,137 +194,179 @@ export function createIngest({
     if (tiffItems.length) {
       let done = 0
       const total = tiffItems.length
-      await Promise.all(tiffItems.map(async ({ item, file }) => {
-        try {
-          // Past the canvas limit (a native KH-9 scan, 2 GP): no transcode can exist,
-          // natively or not — build the tiled pyramid by window reads instead.
-          const dims0 = await readTiffDimensions(file).catch(() => null)
-          if (dims0 && needsPyramid(dims0.width, dims0.height)) {
-            await ingestPyramid(item, file, dims0, persistImport, projectId, batchWrites)
-            return
-          }
-          if (await canDecodeTiffNatively(file)) {
-            // This engine renders the raw TIFF natively — item.url (already the
-            // raw object URL) works as-is for both display and compute.
-            const found = images.value.find((img) => img.id === item.id)
-            if (found) { found.computeUrl = found.url; found.previewPending = false }
-            resolveComputeReady(item.uuid)
-            // This engine decodes the TIFF itself, so the File is the display source.
-            thumbnails.requestThumbnail(item, { source: file })
-            return
-          }
-          const dims = await readTiffDimensions(file).catch(() => null)
-          const px = dims?.width > 0 && dims?.height > 0 ? dims.width * dims.height : 100e6
-          await tiffBudget.acquire(px)
-          let transcoded
+      await Promise.all(
+        tiffItems.map(async ({ item, file }) => {
           try {
-            transcoded = await transcodeTiff(file, undefined, {
-              // Fires once the decode finishes, well before the full-res JPEG+PNG
-              // encode below — swap in a quick low-res preview so the user sees
-              // something long before the full-quality one is ready.
-              onThumbnail: (thumbBlob) => {
-                const found = images.value.find((img) => img.id === item.id)
-                // The ≤512 px transcode preview is also the cheapest source for the
-                // list thumbnail: no second decode of the full-resolution display JPEG.
-                if (found) thumbnails.requestThumbnail(found, { source: thumbBlob })
-                if (!found || !found.previewPending) return
-                URL.revokeObjectURL(found.url)
-                found.url = URL.createObjectURL(thumbBlob)
-                // Tells the image viewer that `url` is this reduced preview, not the
-                // native-resolution image: it maps coordinates through meta.width/height
-                // and holds off editing until a later swap replaces `url` (it compares
-                // the two, so any replacement — onDisplay, a heal — clears it). Session
-                // only; never persisted.
-                found.lowResUrl = found.url
-                found.previewPending = false
-              },
-              // Fires when the full-res display JPEG is encoded, before the slower
-              // compute PNG — swap in the full-quality display so the viewer is
-              // fully usable while the PNG (computeUrl) is still encoding.
-              onDisplay: (dispBlob) => {
-                const found = images.value.find((img) => img.id === item.id)
-                if (!found) return
-                URL.revokeObjectURL(found.url)
-                found.url = URL.createObjectURL(dispBlob)
-                found.lowResUrl = null
-                found.previewPending = false
-              },
-            })
-          } finally {
-            tiffBudget.release(px)
-          }
-          const { displayBlob, computeBlob, width, height, timings, srcInfo } = transcoded
-          const found = images.value.find((img) => img.id === item.id)
-          if (!found) { resolveComputeReady(item.uuid); return } // removed mid-decode
-          // onDisplay already set found.url from displayBlob; if the display
-          // event never fired (older worker), fall back to setting it here.
-          if (found.previewPending || found.lowResUrl) {
-            URL.revokeObjectURL(found.url)
-            found.url = URL.createObjectURL(displayBlob)
-            found.lowResUrl = null
-            found.previewPending = false
-          }
-          found.computeUrl = URL.createObjectURL(computeBlob)
-          resolveComputeReady(item.uuid)
-          // No preview event (an older worker): fall back to the display JPEG.
-          if (!found.thumb) thumbnails.requestThumbnail(found)
-          log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
-          if (timings) {
-            // Per-stage baseline for the TIFF-codec plan (TODO.md): which stage
-            // dominates decides whether/what to move to a Rust/WASM codec.
-            const c = { 1: 'none', 5: 'LZW', 7: 'JPEG', 8: 'Deflate', 32773: 'PackBits' }[srcInfo?.compression] ?? srcInfo?.compression
-            const p = { 1: 'gray', 2: 'RGB', 3: 'palette', 6: 'YCbCr' }[srcInfo?.photometric] ?? srcInfo?.photometric
-            // Only the source fields the decoder could tell us; an unknown one is left out.
-            const shape = [
-              p,
-              srcInfo?.bitsPerSample && `${srcInfo.bitsPerSample}-bit`,
-              srcInfo?.samplesPerPixel && `${srcInfo.samplesPerPixel} spp`,
-              c,
-              srcInfo?.srcBytes && `src ${(srcInfo.srcBytes / 1048576).toFixed(1)} MB`,
-            ].filter((v) => v != null && v !== false && v !== '').join(' · ')
-            // JPEG and PNG encode concurrently: JPEG is time-to-JPEG, PNG the whole encode.
-            log(
-              `TIFF timing (${timings.backend ?? 'unknown'}): ${file.name} — decode ${timings.decodeMs?.toFixed(0)} ms · repack ${timings.repackMs?.toFixed(0)} ms · `
-              + `JPEG ${timings.jpegMs?.toFixed(0)} ms · PNG ${timings.pngMs?.toFixed(0)} ms · total ${timings.totalMs?.toFixed(0)} ms`
-              + (shape ? `  [${shape}]` : ''),
-              'debug', 'Images',
-            )
-            // A 16-bit source is stretched between its 0.5 / 99.5 % levels for display
-            // and detection (core/io/tonalStretch.js) — record the mapping it got.
-            if (srcInfo?.stretch) {
-              log(`16-bit TIFF stretched to 8-bit: ${file.name} — DN ${srcInfo.stretch.lo}…${srcInfo.stretch.hi} → 0…255 `
-                + `(0.5 / 99.5 % levels; the high byte alone would span ${srcInfo.stretch.lo >> 8}…${srcInfo.stretch.hi >> 8})`,
-              'debug', 'Images')
+            // Past the canvas limit (a native KH-9 scan, 2 GP): no transcode can exist,
+            // natively or not — build the tiled pyramid by window reads instead.
+            const dims0 = await readTiffDimensions(file).catch(() => null)
+            if (dims0 && needsPyramid(dims0.width, dims0.height)) {
+              await ingestPyramid(item, file, dims0, persistImport, projectId, batchWrites)
+              return
             }
+            if (await canDecodeTiffNatively(file)) {
+              // This engine renders the raw TIFF natively — item.url (already the
+              // raw object URL) works as-is for both display and compute.
+              const found = images.value.find((img) => img.id === item.id)
+              if (found) {
+                found.computeUrl = found.url
+                found.previewPending = false
+              }
+              resolveComputeReady(item.uuid)
+              // This engine decodes the TIFF itself, so the File is the display source.
+              thumbnails.requestThumbnail(item, { source: file })
+              return
+            }
+            const dims = await readTiffDimensions(file).catch(() => null)
+            const px = dims?.width > 0 && dims?.height > 0 ? dims.width * dims.height : 100e6
+            await tiffBudget.acquire(px)
+            let transcoded
+            try {
+              transcoded = await transcodeTiff(file, undefined, {
+                // Fires once the decode finishes, well before the full-res JPEG+PNG
+                // encode below — swap in a quick low-res preview so the user sees
+                // something long before the full-quality one is ready.
+                onThumbnail: (thumbBlob) => {
+                  const found = images.value.find((img) => img.id === item.id)
+                  // The ≤512 px transcode preview is also the cheapest source for the
+                  // list thumbnail: no second decode of the full-resolution display JPEG.
+                  if (found) thumbnails.requestThumbnail(found, { source: thumbBlob })
+                  if (!found || !found.previewPending) return
+                  URL.revokeObjectURL(found.url)
+                  found.url = URL.createObjectURL(thumbBlob)
+                  // Tells the image viewer that `url` is this reduced preview, not the
+                  // native-resolution image: it maps coordinates through meta.width/height
+                  // and holds off editing until a later swap replaces `url` (it compares
+                  // the two, so any replacement — onDisplay, a heal — clears it). Session
+                  // only; never persisted.
+                  found.lowResUrl = found.url
+                  found.previewPending = false
+                },
+                // Fires when the full-res display JPEG is encoded, before the slower
+                // compute PNG — swap in the full-quality display so the viewer is
+                // fully usable while the PNG (computeUrl) is still encoding.
+                onDisplay: (dispBlob) => {
+                  const found = images.value.find((img) => img.id === item.id)
+                  if (!found) return
+                  URL.revokeObjectURL(found.url)
+                  found.url = URL.createObjectURL(dispBlob)
+                  found.lowResUrl = null
+                  found.previewPending = false
+                },
+              })
+            } finally {
+              tiffBudget.release(px)
+            }
+            const { displayBlob, computeBlob, width, height, timings, srcInfo } = transcoded
+            const found = images.value.find((img) => img.id === item.id)
+            if (!found) {
+              resolveComputeReady(item.uuid)
+              return
+            } // removed mid-decode
+            // onDisplay already set found.url from displayBlob; if the display
+            // event never fired (older worker), fall back to setting it here.
+            if (found.previewPending || found.lowResUrl) {
+              URL.revokeObjectURL(found.url)
+              found.url = URL.createObjectURL(displayBlob)
+              found.lowResUrl = null
+              found.previewPending = false
+            }
+            found.computeUrl = URL.createObjectURL(computeBlob)
+            resolveComputeReady(item.uuid)
+            // No preview event (an older worker): fall back to the display JPEG.
+            if (!found.thumb) thumbnails.requestThumbnail(found)
+            log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
+            if (timings) {
+              // Per-stage baseline for the TIFF-codec plan (TODO.md): which stage
+              // dominates decides whether/what to move to a Rust/WASM codec.
+              const c =
+                { 1: 'none', 5: 'LZW', 7: 'JPEG', 8: 'Deflate', 32773: 'PackBits' }[srcInfo?.compression] ??
+                srcInfo?.compression
+              const p = { 1: 'gray', 2: 'RGB', 3: 'palette', 6: 'YCbCr' }[srcInfo?.photometric] ?? srcInfo?.photometric
+              // Only the source fields the decoder could tell us; an unknown one is left out.
+              const shape = [
+                p,
+                srcInfo?.bitsPerSample && `${srcInfo.bitsPerSample}-bit`,
+                srcInfo?.samplesPerPixel && `${srcInfo.samplesPerPixel} spp`,
+                c,
+                srcInfo?.srcBytes && `src ${(srcInfo.srcBytes / 1048576).toFixed(1)} MB`,
+              ]
+                .filter((v) => v != null && v !== false && v !== '')
+                .join(' · ')
+              // JPEG and PNG encode concurrently: JPEG is time-to-JPEG, PNG the whole encode.
+              log(
+                `TIFF timing (${timings.backend ?? 'unknown'}): ${file.name} — decode ${timings.decodeMs?.toFixed(0)} ms · repack ${timings.repackMs?.toFixed(0)} ms · ` +
+                  `JPEG ${timings.jpegMs?.toFixed(0)} ms · PNG ${timings.pngMs?.toFixed(0)} ms · total ${timings.totalMs?.toFixed(0)} ms` +
+                  (shape ? `  [${shape}]` : ''),
+                'debug',
+                'Images',
+              )
+              // A 16-bit source is stretched between its 0.5 / 99.5 % levels for display
+              // and detection (core/io/tonalStretch.js) — record the mapping it got.
+              if (srcInfo?.stretch) {
+                log(
+                  `16-bit TIFF stretched to 8-bit: ${file.name} — DN ${srcInfo.stretch.lo}…${srcInfo.stretch.hi} → 0…255 ` +
+                    `(0.5 / 99.5 % levels; the high byte alone would span ${srcInfo.stretch.lo >> 8}…${srcInfo.stretch.hi >> 8})`,
+                  'debug',
+                  'Images',
+                )
+              }
+            }
+            // Cache the transcode outputs in OPFS so reopening the project skips
+            // the (multi-second) re-decode + re-encode — see the TIFF gotcha in
+            // CLAUDE.md. Pure function of the immutable original; fire-and-forget.
+            if (persistImport) {
+              log(
+                `Caching TIFF derived blobs: ${file.name} — display ${(displayBlob.size / 1024).toFixed(0)} KB, compute ${(computeBlob.size / 1024).toFixed(0)} KB`,
+                'debug',
+                'Images',
+              )
+              batchWrites.push(
+                trackWrite(
+                  opfs
+                    .saveImageDerived(projectId, item.uuid, 'display', displayBlob)
+                    .catch((err) =>
+                      log(
+                        `OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`,
+                        'error',
+                        'Images',
+                      ),
+                    ),
+                ),
+              )
+              batchWrites.push(
+                trackWrite(
+                  opfs
+                    .saveImageDerived(projectId, item.uuid, 'compute', computeBlob)
+                    .catch((err) =>
+                      log(
+                        `OPFS derived save failed (compute): ${file.name} — ${err?.message ?? err}`,
+                        'error',
+                        'Images',
+                      ),
+                    ),
+                ),
+              )
+            }
+          } catch (err) {
+            const found = images.value.find((img) => img.id === item.id)
+            if (found) {
+              found.loading = false
+              found.previewPending = false
+              found.previewFailed = true
+              found.previewFailReason = 'decode'
+            }
+            // Reject readiness so compute consumers error loudly rather than
+            // silently fall back to the lossy display JPEG for a TIFF (that would
+            // leak JPEG artifacts into keypoints/depth — the computeUrl invariant).
+            rejectComputeReady(item.uuid, err instanceof Error ? err : new Error(String(err)))
+            log(`TIFF decode failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')
+          } finally {
+            done++
+            onProgress?.(done, total, file.name)
           }
-          // Cache the transcode outputs in OPFS so reopening the project skips
-          // the (multi-second) re-decode + re-encode — see the TIFF gotcha in
-          // CLAUDE.md. Pure function of the immutable original; fire-and-forget.
-          if (persistImport) {
-            log(`Caching TIFF derived blobs: ${file.name} — display ${(displayBlob.size / 1024).toFixed(0)} KB, compute ${(computeBlob.size / 1024).toFixed(0)} KB`, 'debug', 'Images')
-            batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'display', displayBlob)
-              .catch((err) => log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
-            batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'compute', computeBlob)
-              .catch((err) => log(`OPFS derived save failed (compute): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
-          }
-        } catch (err) {
-          const found = images.value.find((img) => img.id === item.id)
-          if (found) {
-            found.loading = false
-            found.previewPending = false
-            found.previewFailed = true
-            found.previewFailReason = 'decode'
-          }
-          // Reject readiness so compute consumers error loudly rather than
-          // silently fall back to the lossy display JPEG for a TIFF (that would
-          // leak JPEG artifacts into keypoints/depth — the computeUrl invariant).
-          rejectComputeReady(item.uuid, err instanceof Error ? err : new Error(String(err)))
-          log(`TIFF decode failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')
-        } finally {
-          done++
-          onProgress?.(done, total, file.name)
-        }
-      }))
+        }),
+      )
     }
 
     await Promise.allSettled(metadataTasks)
@@ -313,14 +385,21 @@ export function createIngest({
     await tiffBudget.acquire(TIFF_TRANSCODE_PIXEL_BUDGET)
     let pyr
     try {
-      log(`Large TIFF: ${file.name} — ${dims.width}×${dims.height} (${(dims.width * dims.height / 1e6).toFixed(0)} MP) is past `
-        + 'one canvas; building a tiled pyramid', 'info', 'Images')
+      log(
+        `Large TIFF: ${file.name} — ${dims.width}×${dims.height} (${((dims.width * dims.height) / 1e6).toFixed(0)} MP) is past ` +
+          'one canvas; building a tiled pyramid',
+        'info',
+        'Images',
+      )
       pyr = await buildPyramid(file)
     } finally {
       tiffBudget.release(TIFF_TRANSCODE_PIXEL_BUDGET)
     }
     const found = images.value.find((img) => img.id === item.id)
-    if (!found) { resolveComputeReady(item.uuid); return }
+    if (!found) {
+      resolveComputeReady(item.uuid)
+      return
+    }
     URL.revokeObjectURL(found.url)
     found.url = URL.createObjectURL(pyr.displayBlob)
     found.lowResUrl = null
@@ -330,15 +409,32 @@ export function createIngest({
     resolveComputeReady(item.uuid)
     thumbnails.requestThumbnail(found, { source: pyr.thumbBlob })
     const L = pyr.index.levels
-    log(`Pyramid: ${file.name} — ${L.length} levels, ${L.reduce((n, l) => n + l.cols * l.rows, 0)} tiles of `
-      + `${pyr.index.tileSize} px, ${(pyr.blob.size / 1024 ** 2).toFixed(0)} MB, ${pyr.index.channels === 1 ? 'gray' : 'RGB'} `
-      + `in ${(pyr.ms / 1000).toFixed(1)} s; display ${L.find((l) => Math.max(l.width, l.height) <= 8192)?.width ?? '?'} px wide`,
-    'debug', 'Images')
+    log(
+      `Pyramid: ${file.name} — ${L.length} levels, ${L.reduce((n, l) => n + l.cols * l.rows, 0)} tiles of ` +
+        `${pyr.index.tileSize} px, ${(pyr.blob.size / 1024 ** 2).toFixed(0)} MB, ${pyr.index.channels === 1 ? 'gray' : 'RGB'} ` +
+        `in ${(pyr.ms / 1000).toFixed(1)} s; display ${L.find((l) => Math.max(l.width, l.height) <= 8192)?.width ?? '?'} px wide`,
+      'debug',
+      'Images',
+    )
     if (persistImport) {
-      batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'display', pyr.displayBlob)
-        .catch((err) => log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
-      batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'pyramid', pyr.blob)
-        .catch((err) => log(`OPFS derived save failed (pyramid): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
+      batchWrites.push(
+        trackWrite(
+          opfs
+            .saveImageDerived(projectId, item.uuid, 'display', pyr.displayBlob)
+            .catch((err) =>
+              log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'),
+            ),
+        ),
+      )
+      batchWrites.push(
+        trackWrite(
+          opfs
+            .saveImageDerived(projectId, item.uuid, 'pyramid', pyr.blob)
+            .catch((err) =>
+              log(`OPFS derived save failed (pyramid): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'),
+            ),
+        ),
+      )
     }
   }
 
@@ -361,10 +457,16 @@ export function createIngest({
       const batch = uuids.slice(i, i + READ_BACK_CONCURRENCY)
       const files = await Promise.all(batch.map((uuid) => opfs.loadImageBlob(projectId, uuid).catch(() => null)))
       if (projects.currentProjectId !== projectId) return
-      batch.forEach((uuid, k) => { if (repoint(byUuid.get(uuid), files[k])) moved++ })
+      batch.forEach((uuid, k) => {
+        if (repoint(byUuid.get(uuid), files[k])) moved++
+      })
     }
-    log(`Images read from project storage: ${moved} of ${pluralize(uuids.length, 'image')}, `
-      + `in ${(performance.now() - started).toFixed(0)} ms`, 'debug', 'Images')
+    log(
+      `Images read from project storage: ${moved} of ${pluralize(uuids.length, 'image')}, ` +
+        `in ${(performance.now() - started).toFixed(0)} ms`,
+      'debug',
+      'Images',
+    )
 
     function repoint(found, file) {
       if (!found || !(file?.size > 0)) return false
@@ -372,20 +474,30 @@ export function createIngest({
       const original = originalUrls.get(uuid)
       const url = URL.createObjectURL(file)
       let used = false
-      if (found.url === original) { found.url = url; used = true }
-      if (found.computeUrl === original) { found.computeUrl = url; used = true }
+      if (found.url === original) {
+        found.url = url
+        used = true
+      }
+      if (found.computeUrl === original) {
+        found.computeUrl = url
+        used = true
+      }
       if (!used) URL.revokeObjectURL(url)
       if (release && original) URL.revokeObjectURL(original)
       // Keeps the original's name and type (exports and the TIFF conversion use them);
       // wrapping the stored File copies nothing.
       const prev = found.file
-      found.file = new File([file], prev?.name ?? found.sourceName ?? found.name,
-        { type: prev?.type || file.type, lastModified: prev?.lastModified ?? file.lastModified })
+      found.file = new File([file], prev?.name ?? found.sourceName ?? found.name, {
+        type: prev?.type || file.type,
+        lastModified: prev?.lastModified ?? file.lastModified,
+      })
       return true
     }
   }
 
   return {
-    extractMetadataFor, addImages, addImagesNow,
+    extractMetadataFor,
+    addImages,
+    addImagesNow,
   }
 }

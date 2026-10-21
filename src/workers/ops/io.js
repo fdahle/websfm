@@ -4,14 +4,24 @@ import { GeoTIFF, fromArrayBuffer, fromBlob } from 'geotiff'
 import { rasterWindow, overviewLayout } from '../../core/io/rasterWindow.js'
 import { edgeOriginFromTags, nodataForSampleType } from '../../core/io/rasterSample.js'
 import { parseCloudSource, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
-import { MAX_BUFFER_BYTES, isBufferAllocationFailure, rasterTooLargeMessage, tooManyPointsMessage } from '../../core/bufferLimit.js'
+import {
+  MAX_BUFFER_BYTES,
+  isBufferAllocationFailure,
+  rasterTooLargeMessage,
+  tooManyPointsMessage,
+} from '../../core/bufferLimit.js'
 import { blobSource } from '../../utils/blobParts.js'
 import { classifyRasterKind } from '../../core/io/rasterKind.js'
 import { hillshadeRgba } from '../../core/products/colormap.js'
 import { rasterToDataUrl } from '../rasterPreview.js'
 import { isAxisAlignedModelTransformation, readTiffTag } from '../../utils/tiff.js'
 import {
-  needsStyling, resolveRasterStyle, bandsUsedBy, resolveRange, composeStyledRgba, describeStyle,
+  needsStyling,
+  resolveRasterStyle,
+  bandsUsedBy,
+  resolveRange,
+  composeStyledRgba,
+  describeStyle,
 } from '../../core/io/rasterStyle.js'
 import { pluralize } from '../../core/textFormat.js'
 
@@ -29,15 +39,17 @@ export function makeIoOps({ lazCodec = null } = {}) {
     if (!key) return
     if (previewBands.has(key)) previewBytes -= previewBands.get(key).bytes
     previewBands.delete(key)
-    previewBands.set(key, entry); previewBytes += entry.bytes
+    previewBands.set(key, entry)
+    previewBytes += entry.bytes
     while (previewBytes > 32 * 1024 ** 2) {
       const oldest = previewBands.keys().next().value
-      previewBytes -= previewBands.get(oldest).bytes; previewBands.delete(oldest)
+      previewBytes -= previewBands.get(oldest).bytes
+      previewBands.delete(oldest)
     }
   }
   async function readRasterWindow([options]) {
     const result = await readWindowFromFile(options.file, options)
-    return { result, transfer: [...new Set(result.channels.map(c => c.buffer))] }
+    return { result, transfer: [...new Set(result.channels.map((c) => c.buffer))] }
   }
   // args: [{ file: File|Blob, name: string }] → { parsed, stats }
   // parsed: cloud { count, pos, col?, nrm? } | mesh { nVerts, count, pos, idx, col? }
@@ -60,13 +72,19 @@ export function makeIoOps({ lazCodec = null } = {}) {
       })
     } catch (err) {
       if (!isBufferAllocationFailure(err)) throw err
-      throw new Error(`${tooManyPointsMessage(name || 'This file')} Import it as LAS or LAZ, which streams `
-        + 'into a level-of-detail octree, or thin it first.')
+      throw new Error(
+        `${tooManyPointsMessage(name || 'This file')} Import it as LAS or LAZ, which streams ` +
+          'into a level-of-detail octree, or thin it first.',
+      )
     }
     const stats = cloudStats(parsed)
-    emit('log', [`Parsed ${name}: ${stats.points.toLocaleString()} points`
-      + `${stats.faces ? `, ${stats.faces.toLocaleString()} faces` : ''}`
-      + ` in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'info', 'Import'])
+    emit('log', [
+      `Parsed ${name}: ${stats.points.toLocaleString()} points` +
+        `${stats.faces ? `, ${stats.faces.toLocaleString()} faces` : ''}` +
+        ` in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+      'info',
+      'Import',
+    ])
     const transfer = [parsed.pos.buffer, ...attributeBuffers(parsed)]
     if (parsed.col) transfer.push(parsed.col.buffer)
     if (parsed.nrm) transfer.push(parsed.nrm.buffer)
@@ -117,15 +135,25 @@ export function makeIoOps({ lazCodec = null } = {}) {
     const sampledValues = await readDecimatedSample(image, nodata)
 
     const guess = classifyRasterKind({
-      bands, sampleFormat, bitsPerSample, nodata, geoKeys, sampledValues, fileName: name,
+      bands,
+      sampleFormat,
+      bitsPerSample,
+      nodata,
+      geoKeys,
+      sampledValues,
+      fileName: name,
     })
     const kind = forceKind || guess.kind
-    log(`Raster ${name}: ${kind.toUpperCase()} (${guess.confidence} confidence)`
-      + `${forceKind ? ' — user-specified' : ''} — ${guess.reasons.join('; ')}`)
-    log(`Raster ${name}: ${width}×${height}, ${pluralize(bands, 'band')}, `
-      + `${sampleFormat === 3 ? 'float' : 'int'}${bitsPerSample}, CRS ${crs || 'unknown'}`
-      + `, origin ${geoTransform.originX.toPrecision(8)}/${geoTransform.originY.toPrecision(8)}`
-      + `, scale ${geoTransform.scaleX}/${geoTransform.scaleY}`)
+    log(
+      `Raster ${name}: ${kind.toUpperCase()} (${guess.confidence} confidence)` +
+        `${forceKind ? ' — user-specified' : ''} — ${guess.reasons.join('; ')}`,
+    )
+    log(
+      `Raster ${name}: ${width}×${height}, ${pluralize(bands, 'band')}, ` +
+        `${sampleFormat === 3 ? 'float' : 'int'}${bitsPerSample}, CRS ${crs || 'unknown'}` +
+        `, origin ${geoTransform.originX.toPrecision(8)}/${geoTransform.originY.toPrecision(8)}` +
+        `, scale ${geoTransform.scaleX}/${geoTransform.scaleY}`,
+    )
 
     // Every path but the ortho preview builds one full-resolution plane of 4 bytes a cell
     // (Float32 elevations or RGBA), and first reads each band whole in its native type
@@ -135,50 +163,73 @@ export function makeIoOps({ lazCodec = null } = {}) {
       throw new Error(rasterTooLargeMessage(name, width, height, cellBytes))
     }
 
-    let plane, zMin = null, zMax = null, previewDataUrl = null, dtype
+    let plane,
+      zMin = null,
+      zMax = null,
+      previewDataUrl = null,
+      dtype
     // The style actually used, echoed back on the meta so the Style modal opens
     // on what is on screen rather than on a guess it has to re-derive.
     let resolvedStyle = null
 
     if (kind === 'ortho' && previewOnly) {
-      dtype = 'uint8'; plane = null
+      dtype = 'uint8'
+      plane = null
       if (style || needsStyling({ bands, bitsPerSample, sampleFormat })) {
         const result = await restyleRasterPreview([{ buffer, file, name, style }], { emit })
-        resolvedStyle = result.result.style; previewDataUrl = result.result.previewDataUrl
+        resolvedStyle = result.result.style
+        previewDataUrl = result.result.previewDataUrl
       } else {
         const ratio = Math.min(1, PREVIEW_MAX / Math.max(width, height))
-        const w = Math.max(1, Math.round(width * ratio)), h = Math.max(1, Math.round(height * ratio))
+        const w = Math.max(1, Math.round(width * ratio)),
+          h = Math.max(1, Math.round(height * ratio))
         const rgb = await image.readRGB({ width: w, height: h, interleave: true })
         const rgba = new Uint8ClampedArray(w * h * 4)
-        for (let i = 0; i < w * h; i++) { rgba.set(rgb.subarray(i * 3, i * 3 + 3), i * 4); rgba[i * 4 + 3] = 255 }
+        for (let i = 0; i < w * h; i++) {
+          rgba.set(rgb.subarray(i * 3, i * 3 + 3), i * 4)
+          rgba[i * 4 + 3] = 255
+        }
         previewDataUrl = await rasterToDataUrl(rgba, w, h)
       }
     } else if (kind === 'dem') {
       dtype = 'float32'
       const [band] = await image.readRasters({ samples: [0], interleave: false })
       plane = new Float32Array(width * height)
-      let lo = Infinity, hi = -Infinity, valid = 0
+      let lo = Infinity,
+        hi = -Infinity,
+        valid = 0
       for (let i = 0; i < plane.length; i++) {
         const v = band[i]
         // Nodata → NaN once, here, so nothing downstream has to remember the
         // sentinel (and so a -9999 can never be averaged into a bilinear sample).
-        if (!Number.isFinite(v) || (nodata != null && v === nodata)) { plane[i] = NaN; continue }
+        if (!Number.isFinite(v) || (nodata != null && v === nodata)) {
+          plane[i] = NaN
+          continue
+        }
         plane[i] = v
         if (v < lo) lo = v
         if (v > hi) hi = v
         valid++
       }
       if (!valid) throw new Error(`${name} contained no valid elevation samples`)
-      zMin = lo; zMax = hi
+      zMin = lo
+      zMax = hi
       const nodataPct = (100 * (plane.length - valid)) / plane.length
-      log(`Raster ${name}: elevation ${lo.toPrecision(6)}…${hi.toPrecision(6)}`
-        + `, ${nodataPct.toFixed(1)}% nodata`)
+      log(`Raster ${name}: elevation ${lo.toPrecision(6)}…${hi.toPrecision(6)}` + `, ${nodataPct.toFixed(1)}% nodata`)
       previewDataUrl = await makePreview(
-        (w, h, sub) => hillshadeRgba({
-          width: w, height: h, data: sub, gsd: Math.abs(geoTransform.scaleX) * (width / w),
-          zMin: lo, zMax: hi,
-        }),
-        plane, width, height)
+        (w, h, sub) =>
+          hillshadeRgba({
+            width: w,
+            height: h,
+            data: sub,
+            gsd: Math.abs(geoTransform.scaleX) * (width / w),
+            zMin: lo,
+            zMax: hi,
+          }),
+        plane,
+        width,
+        height,
+      )
     } else if (!style && !needsStyling({ bands, bitsPerSample, sampleFormat })) {
       dtype = 'uint8'
       // Fast path, unchanged: an 8-bit 1–3 band image is already display-ready.
@@ -217,8 +268,12 @@ export function makeIoOps({ lazCodec = null } = {}) {
       }
       resolvedStyle.ranges = ranges
       plane = composeStyledRgba({ width, height, style: resolvedStyle, channels, ranges, nodata })
-      log(`Raster ${name}: ${describeStyle(resolvedStyle)}`
-        + (ranges.length ? ` — range ${ranges.map((r) => r ? `${r[0].toPrecision(4)}…${r[1].toPrecision(4)}` : '—').join(', ')}` : ''))
+      log(
+        `Raster ${name}: ${describeStyle(resolvedStyle)}` +
+          (ranges.length
+            ? ` — range ${ranges.map((r) => (r ? `${r[0].toPrecision(4)}…${r[1].toPrecision(4)}` : '—')).join(', ')}`
+            : ''),
+      )
       previewDataUrl = await makeRgbaPreview(plane, width, height)
     }
 
@@ -227,20 +282,34 @@ export function makeIoOps({ lazCodec = null } = {}) {
     // Antarctica, so the store flags it and every report derived from it says so.
     const verticalDatum = readVerticalDatum(geoKeys)
     if (kind === 'dem' && verticalDatum === 'unknown') {
-      log(`Raster ${name}: vertical datum not declared — elevations may be offset `
-        + '(ellipsoid vs geoid is tens of metres in polar regions). Set it on the dataset row.', 'warn')
+      log(
+        `Raster ${name}: vertical datum not declared — elevations may be offset ` +
+          '(ellipsoid vs geoid is tens of metres in polar regions). Set it on the dataset row.',
+        'warn',
+      )
     }
 
     const meta = {
-      name, kind, width, height, bands, dtype,
-      bitsPerSample, sampleFormat,
+      name,
+      kind,
+      width,
+      height,
+      bands,
+      dtype,
+      bitsPerSample,
+      sampleFormat,
       photometric: await readTiffTag(fd, 'PhotometricInterpretation'),
       // null on the 8-bit fast path and on DEMs — "this raster has no band math"
       // is a meaningful state, distinct from "styled with the defaults".
       style: resolvedStyle,
       styleable: kind !== 'dem' && needsStyling({ bands, bitsPerSample, sampleFormat }),
-      crs, geoTransform, rawNodata: nodata, nodata: kind === 'dem' ? null : nodata, // folded to NaN for DEMs
-      zMin, zMax, verticalDatum,
+      crs,
+      geoTransform,
+      rawNodata: nodata,
+      nodata: kind === 'dem' ? null : nodata, // folded to NaN for DEMs
+      zMin,
+      zMax,
+      verticalDatum,
       classification: { ...guess, forced: !!forceKind },
       previewDataUrl,
     }
@@ -288,7 +357,8 @@ export function makeIoOps({ lazCodec = null } = {}) {
     const step = Math.max(1, Math.ceil(Math.max(width, height) / PREVIEW_MAX))
     const pw = Math.max(1, Math.floor(width / step))
     const ph = Math.max(1, Math.floor(height / step))
-    const channels = [], samples = []
+    const channels = [],
+      samples = []
     let decodedBands = 0
     for (const band of used) {
       const key = cacheKey ? `${cacheKey}:${band}` : null
@@ -300,7 +370,8 @@ export function makeIoOps({ lazCodec = null } = {}) {
         entry = { plane, sample, bytes: plane.byteLength + (sample?.length || 0) * 8 }
       }
       rememberBand(key, entry)
-      channels.push(entry.plane); samples.push(entry.sample)
+      channels.push(entry.plane)
+      samples.push(entry.sample)
     }
 
     const ranges = []
@@ -317,8 +388,10 @@ export function makeIoOps({ lazCodec = null } = {}) {
     const rgba = composeStyledRgba({ width: pw, height: ph, style: resolvedStyle, channels, ranges, nodata })
     const previewDataUrl = await rasterToDataUrl(new Uint8ClampedArray(rgba), pw, ph)
 
-    log(`Raster ${name}: preview restyled — ${describeStyle(resolvedStyle)}`
-      + ` (${pw}×${ph}, ${(performance.now() - t0).toFixed(0)} ms)`)
+    log(
+      `Raster ${name}: preview restyled — ${describeStyle(resolvedStyle)}` +
+        ` (${pw}×${ph}, ${(performance.now() - t0).toFixed(0)} ms)`,
+    )
     return { result: { style: resolvedStyle, previewDataUrl, decodedBands, ms: performance.now() - t0 } }
   }
 
@@ -326,54 +399,91 @@ export function makeIoOps({ lazCodec = null } = {}) {
     const started = performance.now()
     // Cache source blocks within this one job. For an untiled TIFF a block may
     // be the full image; the preflight bounds that cache before decoding.
-    const tiff = await GeoTIFF.fromSource({
-      fetch: slices => Promise.all(slices.map(({ offset, length }) => file.slice(offset, offset + length).arrayBuffer())),
-    }, { cache: true }), image = await tiff.getImage()
+    const tiff = await GeoTIFF.fromSource(
+        {
+          fetch: (slices) =>
+            Promise.all(slices.map(({ offset, length }) => file.slice(offset, offset + length).arrayBuffer())),
+        },
+        { cache: true },
+      ),
+      image = await tiff.getImage()
     const count = await tiff.getImageCount()
     if (image.isTiled && count > 1) return { result: { file, reused: true, ms: performance.now() - started } }
     const gt = meta.geoTransform
     if (!(gt.scaleX > 0 && gt.scaleY < 0)) throw new Error('Tiled conversion requires a north-up raster')
-    const fd = image.getFileDirectory(), photometric = await readTiffTag(fd, 'PhotometricInterpretation')
+    const fd = image.getFileDirectory(),
+      photometric = await readTiffTag(fd, 'PhotometricInterpretation')
     if (![1, 2].includes(photometric)) throw new Error('This photometric interpretation uses the original GeoTIFF')
     const bits = await readTiffTag(fd, 'BitsPerSample')
     const formats = await readTiffTag(fd, 'SampleFormat')
     const supported = meta.sampleFormat === 3 ? [32, 64] : [8, 16, 32]
-    if (!supported.includes(meta.bitsPerSample)
-      || (bits && !Array.from(bits).every(b => b === meta.bitsPerSample))
-      || (formats && !Array.from(formats).every(f => f === meta.sampleFormat)))
+    if (
+      !supported.includes(meta.bitsPerSample) ||
+      (bits && !Array.from(bits).every((b) => b === meta.bitsPerSample)) ||
+      (formats && !Array.from(formats).every((f) => f === meta.sampleFormat))
+    )
       throw new Error('Packed or mixed sample types use the original GeoTIFF')
     const sampleBytes = meta.bitsPerSample / 8
     const estimated = meta.width * meta.height * meta.bands * sampleBytes + 32 * 1024 * 1024
-    if (estimated > budget) throw new Error(`Source decoding needs approximately ${Math.ceil(estimated / 1048576)} MiB; using the original file within the ${Math.floor(budget / 1048576)} MiB conversion budget`)
+    if (estimated > budget)
+      throw new Error(
+        `Source decoding needs approximately ${Math.ceil(estimated / 1048576)} MiB; using the original file within the ${Math.floor(budget / 1048576)} MiB conversion budget`,
+      )
     const nodata = parseNodata(await readTiffTag(fd, 'GDAL_NODATA'))
-    const tileSize = 256, levels = [{ width: meta.width, height: meta.height }]
+    const tileSize = 256,
+      levels = [{ width: meta.width, height: meta.height }]
     while (levels.at(-1).width > tileSize || levels.at(-1).height > tileSize) {
       const last = levels.at(-1)
       levels.push({ width: Math.ceil(last.width / 2), height: Math.ceil(last.height / 2) })
     }
-    const tileCounts = levels.map(l => Math.ceil(l.width / tileSize) * Math.ceil(l.height / tileSize))
-    const order = [], packed = []
+    const tileCounts = levels.map((l) => Math.ceil(l.width / tileSize) * Math.ceil(l.height / tileSize))
+    const order = [],
+      packed = []
     for (let li = levels.length - 1; li >= 0; li--) {
-      const level = levels[li], factor = 2 ** li
+      const level = levels[li],
+        factor = 2 ** li
       let ti = 0
-      for (let y = 0; y < level.height; y += tileSize) for (let x = 0; x < level.width; x += tileSize) {
-        const w = Math.min(tileSize, level.width - x), h = Math.min(tileSize, level.height - y)
-        const raw = await image.readRasters({ interleave: true,
-          window: [x * factor, y * factor, Math.min(meta.width, (x + w) * factor), Math.min(meta.height, (y + h) * factor)],
-          width: w, height: h, resampleMethod: 'nearest' })
-        const tile = new raw.constructor(tileSize * tileSize * meta.bands)
-        if (nodata != null) tile.fill(nodata)
-        for (let row = 0; row < h; row++) tile.set(raw.subarray(row * w * meta.bands, (row + 1) * w * meta.bands), row * tileSize * meta.bands)
-        const blob = await new Response(new Blob([tile]).stream().pipeThrough(new CompressionStream('deflate'))).blob()
-        order.push({ li, ti: ti++ }); packed.push({ length: blob.size, part: blob })
-      }
+      for (let y = 0; y < level.height; y += tileSize)
+        for (let x = 0; x < level.width; x += tileSize) {
+          const w = Math.min(tileSize, level.width - x),
+            h = Math.min(tileSize, level.height - y)
+          const raw = await image.readRasters({
+            interleave: true,
+            window: [
+              x * factor,
+              y * factor,
+              Math.min(meta.width, (x + w) * factor),
+              Math.min(meta.height, (y + h) * factor),
+            ],
+            width: w,
+            height: h,
+            resampleMethod: 'nearest',
+          })
+          const tile = new raw.constructor(tileSize * tileSize * meta.bands)
+          if (nodata != null) tile.fill(nodata)
+          for (let row = 0; row < h; row++)
+            tile.set(raw.subarray(row * w * meta.bands, (row + 1) * w * meta.bands), row * tileSize * meta.bands)
+          const blob = await new Response(
+            new Blob([tile]).stream().pipeThrough(new CompressionStream('deflate')),
+          ).blob()
+          order.push({ li, ti: ti++ })
+          packed.push({ length: blob.size, part: blob })
+        }
     }
-    const plan = { levels, tileCounts, order, spp: meta.bands,
+    const plan = {
+      levels,
+      tileCounts,
+      order,
+      spp: meta.bands,
       samples: Array.from({ length: meta.bands }, () => ({ bits: meta.bitsPerSample, format: meta.sampleFormat })),
-      photometric, extraSamples: await readTiffTag(fd, 'ExtraSamples'), tileSize,
-      pixelScale: [gt.scaleX, -gt.scaleY, 0], tiepoint: [0, 0, 0, gt.originX, gt.originY, 0],
+      photometric,
+      extraSamples: await readTiffTag(fd, 'ExtraSamples'),
+      tileSize,
+      pixelScale: [gt.scaleX, -gt.scaleY, 0],
+      tiepoint: [0, 0, 0, gt.originX, gt.originY, 0],
       geoKeys: geoKeysForEpsg(Number(meta.crs?.split(':')[1]) || null, image.getGeoKeys()?.GTModelTypeGeoKey === 2),
-      gdalNoData: nodata == null ? undefined : String(nodata) }
+      gdalNoData: nodata == null ? undefined : String(nodata),
+    }
     const parts = assembleCog(plan, packed, { compression: 8, parts: true })
     return { result: { file: new Blob(parts, { type: 'image/tiff' }), reused: false, ms: performance.now() - started } }
   }
@@ -391,7 +501,12 @@ export function makeIoOps({ lazCodec = null } = {}) {
 export async function readWindowFromFile(file, { rect, maxDim = 2048, bands = [0], overviews = false } = {}) {
   const tiff = await fromBlob(file)
   const image = await tiff.getImage()
-  let layout = rasterWindow({ width: image.getWidth(), height: image.getHeight(), bands: image.getSamplesPerPixel() }, rect, maxDim, bands)
+  let layout = rasterWindow(
+    { width: image.getWidth(), height: image.getHeight(), bands: image.getSamplesPerPixel() },
+    rect,
+    maxDim,
+    bands,
+  )
   let source = image
   if (overviews && (layout.scaleX > 1.5 || layout.scaleY > 1.5)) {
     const levels = [image]
@@ -400,10 +515,19 @@ export async function readWindowFromFile(file, { rect, maxDim = 2048, bands = [0
       // NewSubfileType bit 2 marks a transparency mask, not an overview.
       if (!((Number(await readTiffTag(level.getFileDirectory(), 'NewSubfileType')) || 0) & 4)) levels.push(level)
     }
-    layout = overviewLayout(layout, levels.map(l => ({ width: l.getWidth(), height: l.getHeight() })))
+    layout = overviewLayout(
+      layout,
+      levels.map((l) => ({ width: l.getWidth(), height: l.getHeight() })),
+    )
     source = levels[layout.level]
   }
-  const channels = await source.readRasters({ window: layout.levelWindow ?? layout.window, width: layout.width, height: layout.height, samples: bands, interleave: false })
+  const channels = await source.readRasters({
+    window: layout.levelWindow ?? layout.window,
+    width: layout.width,
+    height: layout.height,
+    samples: bands,
+    interleave: false,
+  })
   const nodata = await bandNodata(image, image.getFileDirectory())
   return { ...layout, bands, data: channels[0], channels: Array.from(channels), nodata }
 }
@@ -441,8 +565,13 @@ async function readGeoTransform(image, fd) {
   try {
     const [scaleX, scaleY] = image.getResolution()
     const tiepoint = matrix?.length ? null : await readTiffTag(fd, 'ModelTiepoint')
-    const [originX, originY] = edgeOriginFromTags({ tiepoint, origin: image.getOrigin(), scaleX, scaleY,
-      rasterType: image.getGeoKeys?.()?.GTRasterTypeGeoKey ?? 1 })
+    const [originX, originY] = edgeOriginFromTags({
+      tiepoint,
+      origin: image.getOrigin(),
+      scaleX,
+      scaleY,
+      rasterType: image.getGeoKeys?.()?.GTRasterTypeGeoKey ?? 1,
+    })
     if (![originX, originY, scaleX, scaleY].every(Number.isFinite) || !scaleX || !scaleY) return null
     return { originX, originY, scaleX, scaleY }
   } catch {
@@ -478,7 +607,8 @@ function readVerticalDatum(geoKeys) {
 // every range test — and would peg a percentile stretch to the nodata value).
 async function readDecimatedSample(image, nodata, target = 10000, bandIndex = 0) {
   try {
-    const w = image.getWidth(), h = image.getHeight()
+    const w = image.getWidth(),
+      h = image.getHeight()
     const step = Math.max(1, Math.floor(Math.sqrt((w * h) / target)))
     const sw = Math.max(1, Math.floor(w / step))
     const sh = Math.max(1, Math.floor(h / step))
@@ -505,7 +635,7 @@ async function makePreview(colourise, plane, width, height) {
   const h = Math.max(1, Math.floor(height / step))
   const sub = new Float32Array(w * h)
   for (let r = 0; r < h; r++) {
-    for (let c = 0; c < w; c++) sub[r * w + c] = plane[(r * step) * width + c * step]
+    for (let c = 0; c < w; c++) sub[r * w + c] = plane[r * step * width + c * step]
   }
   return rasterToDataUrl(colourise(w, h, sub), w, h)
 }
@@ -518,9 +648,12 @@ async function makeRgbaPreview(rgba, width, height) {
   const sub = new Uint8ClampedArray(w * h * 4)
   for (let r = 0; r < h; r++) {
     for (let c = 0; c < w; c++) {
-      const s = ((r * step) * width + c * step) * 4
+      const s = (r * step * width + c * step) * 4
       const d = (r * w + c) * 4
-      sub[d] = rgba[s]; sub[d + 1] = rgba[s + 1]; sub[d + 2] = rgba[s + 2]; sub[d + 3] = rgba[s + 3]
+      sub[d] = rgba[s]
+      sub[d + 1] = rgba[s + 1]
+      sub[d + 2] = rgba[s + 2]
+      sub[d + 3] = rgba[s + 3]
     }
   }
   return rasterToDataUrl(sub, w, h)

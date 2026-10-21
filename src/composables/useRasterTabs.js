@@ -18,7 +18,8 @@ import { useLog } from './useLog.js'
 // Injected: `tabs` (useTabs' functions; `openRasterTabRaw` is its openRasterTab),
 // `openRasterImport` (useImportRouting — a converted image re-enters the raster import).
 export function useRasterTabs({ tabs, openRasterImport }) {
-  const { activeTab, openProductTab, openRasterTabRaw, closeTab, closeTabForRaster, closeTabForImage, setTabTitle } = tabs
+  const { activeTab, openProductTab, openRasterTabRaw, closeTab, closeTabForRaster, closeTabForImage, setTabTitle } =
+    tabs
   const { log } = useLog()
   const { currentProjectId } = storeToRefs(useProjectsStore())
   const imagesStore = useImagesStore()
@@ -49,7 +50,6 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     setTabTitle(`raster:${id}`, trimmed)
   }
 
-
   function confirmRemoveProduct(kind) {
     const name = computedProductName(kind)
     askConfirm({
@@ -61,7 +61,6 @@ export function useRasterTabs({ tabs, openRasterImport }) {
       },
     })
   }
-
 
   // Open an imported reference raster in its own tab. The tab opens immediately
   // (the preview PNG is in the index, so there's something to look at at once) and
@@ -112,8 +111,9 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     if (!img) return
     askConfirm({
       title: 'Convert to reference data?',
-      message: `Re-import “${img.name}” as an imported DEM / orthophoto? It is removed from `
-        + 'the source images, along with its keypoints, mask, depth map and matches.',
+      message:
+        `Re-import “${img.name}” as an imported DEM / orthophoto? It is removed from ` +
+        'the source images, along with its keypoints, mask, depth map and matches.',
       confirmLabel: 'Convert',
       onConfirm: async () => {
         // Two sources for the ORIGINAL TIFF, and both are needed: a freshly added
@@ -127,7 +127,9 @@ export function useRasterTabs({ tabs, openRasterImport }) {
           try {
             const blob = await opfs.loadImageBlob(currentProjectId.value, img.uuid)
             if (blob) file = new File([blob], img.sourceName ?? img.name, { type: 'image/tiff' })
-          } catch { /* fall through to the warning below */ }
+          } catch {
+            /* fall through to the warning below */
+          }
         }
         if (!file) {
           log(`Could not re-read “${img.name}” to convert it — re-add the file.`, 'warn', 'Import')
@@ -145,14 +147,12 @@ export function useRasterTabs({ tabs, openRasterImport }) {
   // The raster the Style modal is editing, resolved live from the store: a
   // restyle replaces the record, so holding the object would leave the modal
   // showing the pre-restyle preview.
-  const rasterBeingStyled = computed(() =>
-    rasterStyleId.value ? externalStore.rasterById(rasterStyleId.value) : null)
+  const rasterBeingStyled = computed(() => (rasterStyleId.value ? externalStore.rasterById(rasterStyleId.value) : null))
 
   async function onRasterStyleApply({ id, style }) {
     rasterStyleId.value = null
     await setRasterStyle(id, style)
   }
-
 
   // ── Raster tabs (DEM / orthophoto / imported reference) ───────────────────────
   // One ProductViewer ref per open raster tab, for the Ribbon's contextual tab to
@@ -166,11 +166,18 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     const tab = activeTab.value
     // `measure` is the viewer's measurement-tool state (RasterMeasurements), read
     // through the tab's ProductViewer ref so the Ribbon's Measure group can show it.
-    const measure = tab ? productViewerRefs[tab.id]?.measureState ?? null : null
+    const measure = tab ? (productViewerRefs[tab.id]?.measureState ?? null) : null
     if (tab?.type === 'product') {
       const product = tab.productKind === 'ortho' ? ortho.value : dem.value
-      return { tabId: tab.id, kind: tab.productKind, imported: false, name: tab.title, measure,
-        visible: !!productLayers.value[tab.productKind]?.visible, mapBlocked: productMapBlocker(product) }
+      return {
+        tabId: tab.id,
+        kind: tab.productKind,
+        imported: false,
+        name: tab.title,
+        measure,
+        visible: !!productLayers.value[tab.productKind]?.visible,
+        mapBlocked: productMapBlocker(product),
+      }
     }
     if (tab?.type === 'raster') {
       const r = rasterById(tab.rasterId)
@@ -189,16 +196,23 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     return null
   })
 
-
   function activeProductViewer() {
     const t = activeRasterTab.value
-    return t ? productViewerRefs[t.tabId] ?? null : null
+    return t ? (productViewerRefs[t.tabId] ?? null) : null
   }
 
   return {
-    productViewerRefs, activeRasterTab, activeProductViewer,
-    openComputedProductTab, renameProductFromSidebar, confirmRemoveProduct,
-    openRasterTab, renameRasterFromSidebar, onRasterImportAsImage, convertImageToRaster,
-    rasterBeingStyled, onRasterStyleApply,
+    productViewerRefs,
+    activeRasterTab,
+    activeProductViewer,
+    openComputedProductTab,
+    renameProductFromSidebar,
+    confirmRemoveProduct,
+    openRasterTab,
+    renameRasterFromSidebar,
+    onRasterImportAsImage,
+    convertImageToRaster,
+    rasterBeingStyled,
+    onRasterStyleApply,
   }
 }

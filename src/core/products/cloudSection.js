@@ -20,13 +20,18 @@ import { writeDxf } from './dxf.js'
 //       profile: { station, z, offset: Float64Array(M) }, length }
 export function sectionCloud(cloud, { a, b, thickness, extend = false } = {}, onLog) {
   if (!a || !b) throw new Error('Section needs two line points a and b')
-  if (!(Number.isFinite(thickness) && thickness > 0)) throw new Error(`Section thickness must be a positive number (got ${thickness})`)
-  const ax = a[0], ay = a[1]
-  const dx = b[0] - ax, dy = b[1] - ay
+  if (!(Number.isFinite(thickness) && thickness > 0))
+    throw new Error(`Section thickness must be a positive number (got ${thickness})`)
+  const ax = a[0],
+    ay = a[1]
+  const dx = b[0] - ax,
+    dy = b[1] - ay
   const length = Math.hypot(dx, dy)
   if (!(length > 0)) throw new Error('Section line has zero horizontal length (a and b coincide)')
-  const ux = dx / length, uy = dy / length
-  const nx = -uy, ny = ux // left normal of a→b
+  const ux = dx / length,
+    uy = dy / length
+  const nx = -uy,
+    ny = ux // left normal of a→b
   const half = thickness / 2
 
   const pos = cloud?.pos
@@ -37,35 +42,54 @@ export function sectionCloud(cloud, { a, b, thickness, extend = false } = {}, on
   const of = new Float64Array(n)
   let m = 0
   for (let i = 0; i < n; i++) {
-    const x = pos[3 * i], y = pos[3 * i + 1], z = pos[3 * i + 2]
+    const x = pos[3 * i],
+      y = pos[3 * i + 1],
+      z = pos[3 * i + 2]
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue
-    const px = x - ax, py = y - ay
+    const px = x - ax,
+      py = y - ay
     const s = px * ux + py * uy
     if (!extend && (s < 0 || s > length)) continue
     const o = px * nx + py * ny
     if (Math.abs(o) > half) continue
-    keep[m] = i; st[m] = s; of[m] = o; m++
+    keep[m] = i
+    st[m] = s
+    of[m] = o
+    m++
   }
 
   // Sort kept slots by station (stable on input order).
   const order = new Uint32Array(m)
   for (let k = 0; k < m; k++) order[k] = k
-  order.sort((p, q) => (st[p] - st[q]) || (p - q))
+  order.sort((p, q) => st[p] - st[q] || p - q)
 
   const outPos = new Float64Array(3 * m)
   const outCol = cloud?.col ? new Uint8Array(3 * m) : null
-  const station = new Float64Array(m), z = new Float64Array(m), offset = new Float64Array(m)
+  const station = new Float64Array(m),
+    z = new Float64Array(m),
+    offset = new Float64Array(m)
   for (let k = 0; k < m; k++) {
-    const slot = order[k], i = keep[slot]
-    outPos[3 * k] = pos[3 * i]; outPos[3 * k + 1] = pos[3 * i + 1]; outPos[3 * k + 2] = pos[3 * i + 2]
-    if (outCol) { outCol[3 * k] = cloud.col[3 * i]; outCol[3 * k + 1] = cloud.col[3 * i + 1]; outCol[3 * k + 2] = cloud.col[3 * i + 2] }
-    station[k] = st[slot]; z[k] = pos[3 * i + 2]; offset[k] = of[slot]
+    const slot = order[k],
+      i = keep[slot]
+    outPos[3 * k] = pos[3 * i]
+    outPos[3 * k + 1] = pos[3 * i + 1]
+    outPos[3 * k + 2] = pos[3 * i + 2]
+    if (outCol) {
+      outCol[3 * k] = cloud.col[3 * i]
+      outCol[3 * k + 1] = cloud.col[3 * i + 1]
+      outCol[3 * k + 2] = cloud.col[3 * i + 2]
+    }
+    station[k] = st[slot]
+    z[k] = pos[3 * i + 2]
+    offset[k] = of[slot]
   }
 
   onLog?.(
     `Section: ${m} of ${n} points within ±${half} of ${extend ? 'the line through' : 'the segment'} ` +
-    `(${ax}, ${ay}) → (${b[0]}, ${b[1]}), length ${length.toFixed(3)}`,
-    m ? 'info' : 'warn', 'Products')
+      `(${ax}, ${ay}) → (${b[0]}, ${b[1]}), length ${length.toFixed(3)}`,
+    m ? 'info' : 'warn',
+    'Products',
+  )
   return { cloud: { count: m, pos: outPos, col: outCol }, profile: { station, z, offset }, length }
 }
 
@@ -75,8 +99,10 @@ export function sectionToCsv(section, { decimals = 3 } = {}) {
   const pos = section.cloud.pos
   const rows = ['station,z,offset,x,y']
   for (let k = 0; k < station.length; k++) {
-    rows.push(`${station[k].toFixed(decimals)},${z[k].toFixed(decimals)},${offset[k].toFixed(decimals)},` +
-      `${pos[3 * k].toFixed(decimals)},${pos[3 * k + 1].toFixed(decimals)}`)
+    rows.push(
+      `${station[k].toFixed(decimals)},${z[k].toFixed(decimals)},${offset[k].toFixed(decimals)},` +
+        `${pos[3 * k].toFixed(decimals)},${pos[3 * k + 1].toFixed(decimals)}`,
+    )
   }
   return rows.join('\n') + '\n'
 }

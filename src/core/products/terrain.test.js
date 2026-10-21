@@ -4,10 +4,11 @@ import { slope, aspect, hillshade, terrainProducts } from './terrain.js'
 // A w×h DEM sampling z = f(x, y) at cell centres, row 0 = north (max y).
 function demOf(f, { w = 7, h = 6, gsd = 2, originX = 5e5, originY = 7e6 } = {}) {
   const data = new Float32Array(w * h)
-  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
-    // Relative coordinates keep the plane's Float32 heights well conditioned.
-    data[r * w + c] = f((c + 0.5) * gsd, -(r + 0.5) * gsd)
-  }
+  for (let r = 0; r < h; r++)
+    for (let c = 0; c < w; c++) {
+      // Relative coordinates keep the plane's Float32 heights well conditioned.
+      data[r * w + c] = f((c + 0.5) * gsd, -(r + 0.5) * gsd)
+    }
   return { width: w, height: h, gsd, originX, originY, data }
 }
 const plane = (a, b, opts) => demOf((x, y) => 100 + a * x + b * y, opts)
@@ -15,19 +16,23 @@ const plane = (a, b, opts) => demOf((x, y) => 100 + a * x + b * y, opts)
 // (GDAL -compute_edges), which deliberately under-reads a plane there.
 const interior = (raster) => {
   const out = []
-  for (let r = 1; r < raster.height - 1; r++) for (let c = 1; c < raster.width - 1; c++) out.push(raster.data[r * raster.width + c])
+  for (let r = 1; r < raster.height - 1; r++)
+    for (let c = 1; c < raster.width - 1; c++) out.push(raster.data[r * raster.width + c])
   return out
 }
 // Float32 heights of ~100 carry ~1e-5 rounding, so 3 decimals.
-const allClose = (raster, v, digits = 3) => { for (const x of interior(raster)) expect(x).toBeCloseTo(v, digits) }
+const allClose = (raster, v, digits = 3) => {
+  for (const x of interior(raster)) expect(x).toBeCloseTo(v, digits)
+}
 const MID = 2 * 7 + 3 // an interior cell of the default 7×6 grid
 
 describe('slope', () => {
   it('is constant atan(√(a²+b²)) on a plane', () => {
-    const a = 0.3, b = -0.4
+    const a = 0.3,
+      b = -0.4
     const s = slope(plane(a, b))
-    allClose(s, Math.atan(0.5) * 180 / Math.PI)
-    expect([...s.mask].every(m => m === 1)).toBe(true)
+    allClose(s, (Math.atan(0.5) * 180) / Math.PI)
+    expect([...s.mask].every((m) => m === 1)).toBe(true)
     expect(s.units).toBe('degrees')
     expect(s.originX).toBe(5e5)
   })
@@ -39,7 +44,7 @@ describe('slope', () => {
   it('divides the grid spacing by k: k = 2 doubles tan(slope)', () => {
     const g = plane(0.25, 0)
     allClose(slope(g, { k: 2, units: 'percent' }), 50)
-    allClose(slope(g, { k: 2 }), Math.atan(0.5) * 180 / Math.PI)
+    allClose(slope(g, { k: 2 }), (Math.atan(0.5) * 180) / Math.PI)
   })
 
   it('applies zFactor to heights only', () => {
@@ -71,7 +76,9 @@ describe('slope', () => {
   it('does not mutate the input', () => {
     const g = plane(0.1, 0.2)
     const before = g.data.slice()
-    slope(g); aspect(g); hillshade(g)
+    slope(g)
+    aspect(g)
+    hillshade(g)
     expect(g.data).toEqual(before)
     expect(g.mask).toBeUndefined()
   })
@@ -100,15 +107,15 @@ describe('aspect', () => {
 
   it('returns flatValue on flat ground', () => {
     const g = plane(0, 0)
-    expect([...aspect(g).data].every(v => v === -1)).toBe(true)
-    expect([...aspect(g, { flatValue: -9999 }).data].every(v => v === -9999)).toBe(true)
+    expect([...aspect(g).data].every((v) => v === -1)).toBe(true)
+    expect([...aspect(g, { flatValue: -9999 }).data].every((v) => v === -9999)).toBe(true)
   })
 })
 
 describe('hillshade', () => {
   it('is constant on a plane and lights flat ground at sin(altitude)', () => {
     const flat = hillshade(plane(0, 0))
-    expect([...flat.data].every(v => v === Math.round(1 + 254 * Math.sin(Math.PI / 4)))).toBe(true)
+    expect([...flat.data].every((v) => v === Math.round(1 + 254 * Math.sin(Math.PI / 4)))).toBe(true)
     const tilted = hillshade(plane(0.2, -0.1))
     expect(new Set(interior(tilted)).size).toBe(1)
   })
@@ -117,10 +124,10 @@ describe('hillshade', () => {
     // 45° slopes facing each compass direction; downhill toward bearing θ means
     // the surface rises toward θ+180: z = −tan(45°)·(sin θ·x + cos θ·y).
     const shadeFacing = (deg) => {
-      const t = deg * Math.PI / 180
+      const t = (deg * Math.PI) / 180
       return hillshade(plane(-Math.sin(t), -Math.cos(t)), { azimuth: 315, altitude: 45 }).data[MID]
     }
-    const values = [0, 45, 90, 135, 180, 225, 270, 315].map(d => [d, shadeFacing(d)])
+    const values = [0, 45, 90, 135, 180, 225, 270, 315].map((d) => [d, shadeFacing(d)])
     values.sort((p, q) => q[1] - p[1])
     expect(values[0][0]).toBe(315)
     expect(values[0][1]).toBe(255) // normal parallel to the sun
@@ -142,7 +149,11 @@ describe('hillshade', () => {
     // A 45° slope facing due west: weights cos² to the fall line give the 270° sun
     // 2/4, the 225°/315° suns 1/4 each, the 360° sun none (USGS / GDAL rule).
     const west = hillshade(plane(1, 0), { multidirectional: true }).data[MID]
-    const s = (az) => { const A = az * Math.PI / 180, H = Math.PI / 4; return (Math.sin(H) - Math.sin(A) * Math.cos(H)) / Math.SQRT2 }
+    const s = (az) => {
+      const A = (az * Math.PI) / 180,
+        H = Math.PI / 4
+      return (Math.sin(H) - Math.sin(A) * Math.cos(H)) / Math.SQRT2
+    }
     expect(west).toBe(Math.round(1 + 254 * (0.5 * s(270) + 0.25 * (s(225) + s(315)))))
     expect(west).toBeLessThan(hillshade(plane(1, 0), { azimuth: 270 }).data[MID])
   })

@@ -6,7 +6,13 @@ import { gcpsInPinholeFrame } from '../../core/sfm/displayFrame.js'
 import { formatBytes, deviceBudget } from '../../core/dense/memBudget.js'
 import { SFM_TUNING } from '../../core/tuning.js'
 import { applyTuningOverrides } from '../tuningOverrides.js'
-import { projectSparsePeakBreakdownBytes, sparseMemoryDecision, planSparseRun, WASM_SOLVER_LIMIT_BYTES, SPARSE_HEAP_FRACTION } from '../../core/sfm/memBudget.js'
+import {
+  projectSparsePeakBreakdownBytes,
+  sparseMemoryDecision,
+  planSparseRun,
+  WASM_SOLVER_LIMIT_BYTES,
+  SPARSE_HEAP_FRACTION,
+} from '../../core/sfm/memBudget.js'
 import { terminateAll, reconstruct as workerReconstruct } from '../../workers/computeClient.js'
 import { keypointSetFrom, keypointSetTransfer } from '../../core/sfm/keypointSet.js'
 import { useMatchesStore } from '../useMatchesStore.js'
@@ -27,10 +33,30 @@ import { markRaw } from 'vue'
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createSparseRun({
-  SUMMARY_HISTORY_MAX, clouds, frameModelFor, gcpsStore, healthDirty, images, imagesById,
-  imagesStore, invalidateSparseDependents, isPersisting, log, matchStore, save, posesStore,
-  projects, reconStatus, releaseReplaceableModelForRerun, sensors, sparseCameras, summary,
-  summaryHistory, supersedeRestore, upsertSparseCloud, liveSparse,
+  SUMMARY_HISTORY_MAX,
+  clouds,
+  frameModelFor,
+  gcpsStore,
+  healthDirty,
+  images,
+  imagesById,
+  imagesStore,
+  invalidateSparseDependents,
+  isPersisting,
+  log,
+  matchStore,
+  save,
+  posesStore,
+  projects,
+  reconStatus,
+  releaseReplaceableModelForRerun,
+  sensors,
+  sparseCameras,
+  summary,
+  summaryHistory,
+  supersedeRestore,
+  upsertSparseCloud,
+  liveSparse,
 }) {
   // The external 3D evidence a bundle adjustment is held to — enabled ground
   // control and camera priors — as worker-ready plain data, in ONE Cartesian survey
@@ -43,34 +69,58 @@ export function createSparseRun({
     const crs = projects.currentCrs
     if (crs && crs !== 'local') await ensureProjection(crs).catch(() => {})
     const control = gcpsStore.gcps.filter((g) => isGroundControl(g, { precision: precisionFromGcp }))
-    const surveyFrame = surveyFrameFor([
-      ...control.map((g) => [g.x, g.y, g.z]),
-      ...posesStore.poses.filter((p) => p.enabled !== false).map((p) => [p.x, p.y, p.z]),
-    ], crs)
+    const surveyFrame = surveyFrameFor(
+      [
+        ...control.map((g) => [g.x, g.y, g.z]),
+        ...posesStore.poses.filter((p) => p.enabled !== false).map((p) => [p.x, p.y, p.z]),
+      ],
+      crs,
+    )
     if (surveyFrame) {
-      log(`Survey constraints: fitted in a local metric frame (grid scale factor k=${surveyFrame.k.toFixed(6)}, `
-        + 'curvature restored) — the project CRS is unchanged for display and export', 'info', 'Reconstruction')
+      log(
+        `Survey constraints: fitted in a local metric frame (grid scale factor k=${surveyFrame.k.toFixed(6)}, ` +
+          'curvature restored) — the project CRS is unchanged for display and export',
+        'info',
+        'Reconstruction',
+      )
     }
     const imgById = imagesById()
     // Anchored BA is a Euclidean 3D constraint. Do not mix longitude/latitude
     // degrees with metre elevations, and never invent z=0 for a 2D control point.
     // Post-hoc products enforce the same boundary.
-    const inFrame = marks === 'pinhole'
-      ? gcpsInPinholeFrame(control, { imagesById: imgById, sparseCameras: sparseCameras.value, frameModel: frameModelFor.value })
-      : control
-    const gcps = isGeographic(crs) ? [] : inFrame
-      .map((g) => gcpToSurveyFrame(g, surveyFrame))
-      .map((g) => ({
-        role: 'control',
-        x: g.x, y: g.y, z: g.z,
-        accuracyX: g.accuracyX, accuracyY: g.accuracyY, accuracyZ: g.accuracyZ,
-        correlationXY: g.correlationXY, correlationXZ: g.correlationXZ, correlationYZ: g.correlationYZ,
-        observations: (g.observations || [])
-          .map((o) => ({ uuid: imgById.get(o.imageId)?.uuid, px: o.px, py: o.py,
-            accuracyX: o.accuracyX ?? g.accuracyImgX,
-            accuracyY: o.accuracyY ?? g.accuracyImgY }))
-          .filter((o) => o.uuid != null),
-      }))
+    const inFrame =
+      marks === 'pinhole'
+        ? gcpsInPinholeFrame(control, {
+            imagesById: imgById,
+            sparseCameras: sparseCameras.value,
+            frameModel: frameModelFor.value,
+          })
+        : control
+    const gcps = isGeographic(crs)
+      ? []
+      : inFrame
+          .map((g) => gcpToSurveyFrame(g, surveyFrame))
+          .map((g) => ({
+            role: 'control',
+            x: g.x,
+            y: g.y,
+            z: g.z,
+            accuracyX: g.accuracyX,
+            accuracyY: g.accuracyY,
+            accuracyZ: g.accuracyZ,
+            correlationXY: g.correlationXY,
+            correlationXZ: g.correlationXZ,
+            correlationYZ: g.correlationYZ,
+            observations: (g.observations || [])
+              .map((o) => ({
+                uuid: imgById.get(o.imageId)?.uuid,
+                px: o.px,
+                py: o.py,
+                accuracyX: o.accuracyX ?? g.accuracyImgX,
+                accuracyY: o.accuracyY ?? g.accuracyImgY,
+              }))
+              .filter((o) => o.uuid != null),
+          }))
     // Surveyed/imported and EXIF-derived camera positions; a geographic project's
     // priors get their own survey-centred metric frame (buildCameraPriors).
     // A sensor's GNSS antenna offset makes its images' priors antenna positions.
@@ -78,15 +128,23 @@ export function createSparseRun({
     const leverArmFor = (imageId) => armBySensor.get(imgById.get(imageId)?.sensorId) ?? null
     const cameraPriors = buildCameraPriors(posesStore.poses, images.value, crs, { surveyFrame, leverArmFor })
     if (isGeographic(crs) && cameraPriors.length) {
-      log(`Camera priors: ${pluralize(cameraPriors.length, 'geographic position')} converted to a `
-        + 'survey-centred metric frame for bundle adjustment', 'info', 'Pose')
+      log(
+        `Camera priors: ${pluralize(cameraPriors.length, 'geographic position')} converted to a ` +
+          'survey-centred metric frame for bundle adjustment',
+        'info',
+        'Pose',
+      )
     }
     const withArm = cameraPriors.filter((p) => p.leverArm)
     if (withArm.length) {
       const arms = [...new Set(withArm.map((p) => p.leverArm.map((v) => v.toFixed(3)).join(', ')))]
-      log(`Camera priors: ${withArm.length}/${cameraPriors.length} are GNSS antenna positions, `
-        + `offset from the camera centre by (${arms.slice(0, 3).join('), (')}) m in camera axes`
-        + `${arms.length > 3 ? ', …' : ''}`, 'info', 'Pose')
+      log(
+        `Camera priors: ${withArm.length}/${cameraPriors.length} are GNSS antenna positions, ` +
+          `offset from the camera centre by (${arms.slice(0, 3).join('), (')}) m in camera axes` +
+          `${arms.length > 3 ? ', …' : ''}`,
+        'info',
+        'Pose',
+      )
     }
     return { gcps, cameraPriors, surveyFrame }
   }
@@ -122,8 +180,12 @@ export function createSparseRun({
         }
       }
       if (descriptorBytesReleased) {
-        log(`Released ${formatBytes(descriptorBytesReleased)} of persisted descriptors from `
-          + `${pluralize(descriptorImagesReleased, 'image')} before reconstruction`, 'info', 'Compute')
+        log(
+          `Released ${formatBytes(descriptorBytesReleased)} of persisted descriptors from ` +
+            `${pluralize(descriptorImagesReleased, 'image')} before reconstruction`,
+          'info',
+          'Compute',
+        )
         // Yield once so the engine can reclaim detached descriptor backing stores
         // before the live-heap reading below. Never assume it did: the decision
         // uses the observed value without subtracting bytes optimistically.
@@ -133,12 +195,14 @@ export function createSparseRun({
       // image by image / pair by pair straight into the worker input.
       // By name, not import order (the file picker's order varies): with inNameOrder below,
       // the same photos and matches always reach the solver in the same order.
-      let imgs = images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
+      let imgs = images.value
+        .filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
         .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
       const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
       const reconstructionTransfers = []
-      const reconstructionPairs = [...matchStore.value.values()]
-        .filter((e) => e.status === 'done' && e.enabled !== false)
+      const reconstructionPairs = [...matchStore.value.values()].filter(
+        (e) => e.status === 'done' && e.enabled !== false,
+      )
 
       // Renderer OOM cannot be caught after the fact. Refuse before constructing
       // the large plain worker input when its projected peak exceeds safe headroom.
@@ -149,8 +213,13 @@ export function createSparseRun({
       // without it (logged, recorded in the summary, flagged by the verdict) rather than
       // being refused or dying in the worker.
       let guided = settings.guidedTrackExtension ?? SFM_TUNING.guidedTrackExtension
-      const project = (withGuided) => projectSparsePeakBreakdownBytes({ keypointCount, matchCount,
-        imageCount: imgs.length, descriptorBytesPerKeypoint: withGuided ? 128 : 0 })
+      const project = (withGuided) =>
+        projectSparsePeakBreakdownBytes({
+          keypointCount,
+          matchCount,
+          imageCount: imgs.length,
+          descriptorBytesPerKeypoint: withGuided ? 128 : 0,
+        })
       const heap = globalThis.performance?.memory
       const hardwareBudget = deviceBudget({
         deviceMemoryGB: Number(globalThis.navigator?.deviceMemory) || null,
@@ -188,11 +257,14 @@ export function createSparseRun({
         const released = releaseReplaceableModelForRerun()
         if (released.released) {
           terminateAll('preparing a clean sparse-reconstruction rerun')
-          log(`Released the loaded reconstruction before rerun (${released.cameraCount} cameras, `
-            + `${released.pointCount.toLocaleString()} points`
-            + `${released.dependentClouds ? `, ${pluralize(released.dependentClouds, 'computed dependent cloud')}` : ''}). `
-            + 'The saved model remains recoverable by reloading until the replacement succeeds.',
-          'info', 'Compute')
+          log(
+            `Released the loaded reconstruction before rerun (${released.cameraCount} cameras, ` +
+              `${released.pointCount.toLocaleString()} points` +
+              `${released.dependentClouds ? `, ${pluralize(released.dependentClouds, 'computed dependent cloud')}` : ''}). ` +
+              'The saved model remains recoverable by reloading until the replacement succeeds.',
+            'info',
+            'Compute',
+          )
           await new Promise((resolve) => setTimeout(resolve, 50))
           plan = planSparseRun({ guided, project, decide: decideMemory })
         }
@@ -202,26 +274,33 @@ export function createSparseRun({
       if (plan.guidedDropped) {
         guided = false
         const w = plan.withGuidedPeak
-        const reason = `worker heap ${formatBytes(w.workerHeapBytes)} / buffers `
-          + `${formatBytes(w.workerBufferBytes)} projected with it, `
-          + `${formatBytes(peak.workerHeapBytes)} / ${formatBytes(peak.workerBufferBytes)} without`
+        const reason =
+          `worker heap ${formatBytes(w.workerHeapBytes)} / buffers ` +
+          `${formatBytes(w.workerBufferBytes)} projected with it, ` +
+          `${formatBytes(peak.workerHeapBytes)} / ${formatBytes(peak.workerBufferBytes)} without`
         guidedSkippedForMemory = { reason, withBytes: w.workerBytes, withoutBytes: peak.workerBytes }
-        log(`Sparse memory preflight: guided track extension turned off for this run so it fits — ${reason}. `
-          + 'The model is complete without it; lower the keypoint cap or the preselection neighbours to keep it.',
-        'warn', 'Reconstruction')
+        log(
+          `Sparse memory preflight: guided track extension turned off for this run so it fits — ${reason}. ` +
+            'The model is complete without it; lower the keypoint cap or the preselection neighbours to keep it.',
+          'warn',
+          'Reconstruction',
+        )
       }
       const decisionSafe = plan.safe
       const ceiling = (d) => (d.limitBytes ? ` ≤ ${formatBytes(d.limitBytes)} ceiling` : '')
-      log(`Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, `
-        + `${matchCount.toLocaleString()} matches${guided ? ', guided extension on' : ''}; renderer heap `
-        + `${decisions.renderer.usedBytes != null ? `${formatBytes(decisions.renderer.usedBytes)} current + ` : ''}`
-        + `${formatBytes(peak.rendererHeapBytes)}${ceiling(decisions.renderer)}, `
-        + `input buffers ${formatBytes(peak.rendererBufferBytes)}; `
-        + `worker projected heap ${formatBytes(peak.workerHeapBytes)}${ceiling(decisions.worker)}, `
-        + `buffers ${formatBytes(peak.workerBufferBytes)}`
-        + `${decisions.worker.bufferLimitBytes ? ` ≤ ${formatBytes(decisions.worker.bufferLimitBytes)} device budget` : ''}`
-        + ` (of which bundle adjustment ${formatBytes(peak.solverWasmBytes)} ≤ ${formatBytes(WASM_SOLVER_LIMIT_BYTES)} wasm memory)`,
-      decisionSafe ? 'info' : 'error', 'Compute')
+      log(
+        `Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, ` +
+          `${matchCount.toLocaleString()} matches${guided ? ', guided extension on' : ''}; renderer heap ` +
+          `${decisions.renderer.usedBytes != null ? `${formatBytes(decisions.renderer.usedBytes)} current + ` : ''}` +
+          `${formatBytes(peak.rendererHeapBytes)}${ceiling(decisions.renderer)}, ` +
+          `input buffers ${formatBytes(peak.rendererBufferBytes)}; ` +
+          `worker projected heap ${formatBytes(peak.workerHeapBytes)}${ceiling(decisions.worker)}, ` +
+          `buffers ${formatBytes(peak.workerBufferBytes)}` +
+          `${decisions.worker.bufferLimitBytes ? ` ≤ ${formatBytes(decisions.worker.bufferLimitBytes)} device budget` : ''}` +
+          ` (of which bundle adjustment ${formatBytes(peak.solverWasmBytes)} ≤ ${formatBytes(WASM_SOLVER_LIMIT_BYTES)} wasm memory)`,
+        decisionSafe ? 'info' : 'error',
+        'Compute',
+      )
       if (!decisionSafe) {
         reconStatus.value = 'error'
         const parts = []
@@ -230,10 +309,14 @@ export function createSparseRun({
         if (!decisions.renderer.buffersSafe || !decisions.worker.buffersSafe) parts.push('device memory')
         if (!peak.wasmSolverSafe) parts.push('bundle-adjustment (wasm) memory')
         const where = parts.join(' and ') || 'memory'
-        log(`Sparse reconstruction stopped before start because the projected ${where} would exceed `
-          + 'its safety ceiling. Close other memory-heavy tabs or reduce the image/keypoint/match set'
-          + (!peak.wasmSolverSafe ? ' (fewer keypoints per image lowers the solver\'s observation count)' : '') + '.',
-        'error', 'Reconstruction')
+        log(
+          `Sparse reconstruction stopped before start because the projected ${where} would exceed ` +
+            'its safety ceiling. Close other memory-heavy tabs or reduce the image/keypoint/match set' +
+            (!peak.wasmSolverSafe ? " (fewer keypoints per image lowers the solver's observation count)" : '') +
+            '.',
+          'error',
+          'Reconstruction',
+        )
         return
       }
 
@@ -247,14 +330,21 @@ export function createSparseRun({
       const missingKeypoints = []
       for (const img of imgs) {
         const kps = await imagesStore.readKeypoints(img)
-        if (!kps) { missingKeypoints.push(img.name); continue }
+        if (!kps) {
+          missingKeypoints.push(img.name)
+          continue
+        }
         const set = keypointSetFrom(kps)
         reconstructionTransfers.push(...keypointSetTransfer(set))
         keypointSets.set(img.uuid, set)
       }
       if (missingKeypoints.length) {
-        log(`Reconstruction: ${pluralize(missingKeypoints.length, 'image')} left out — their keypoints could not be read `
-          + `(${missingKeypoints.slice(0, 5).join(', ')}${missingKeypoints.length > 5 ? ', …' : ''})`, 'warn', 'Reconstruction')
+        log(
+          `Reconstruction: ${pluralize(missingKeypoints.length, 'image')} left out — their keypoints could not be read ` +
+            `(${missingKeypoints.slice(0, 5).join(', ')}${missingKeypoints.length > 5 ? ', …' : ''})`,
+          'warn',
+          'Reconstruction',
+        )
         imgs = imgs.filter((img) => keypointSets.has(img.uuid))
       }
       // Millions of tuple arrays are catastrophic to clone. Each pair's matches are a
@@ -288,8 +378,15 @@ export function createSparseRun({
             // Fiducial detections (F4) — scan-pixel slots the sfm ingest joins with
             // the sensor's calibration to fit this image's scan→canonical transform.
             // Spread to plain objects (the Vue proxy can't be structured-cloned).
-            fiducialDetections: (img.fiducialDetections || []).map((d) => ({ slot: d.slot, px: d.px, py: d.py,
-              family: d.family, source: d.source, confidence: d.confidence, reviewed: d.reviewed })),
+            fiducialDetections: (img.fiducialDetections || []).map((d) => ({
+              slot: d.slot,
+              px: d.px,
+              py: d.py,
+              family: d.family,
+              source: d.source,
+              confidence: d.confidence,
+              reviewed: d.reviewed,
+            })),
             meta: img.meta
               ? {
                   width: img.meta.width,
@@ -304,12 +401,24 @@ export function createSparseRun({
               : null,
             sensor: s
               ? {
-                  focal: s.focal, focalUnit: s.focalUnit, pixelSize: s.pixelSize,
+                  focal: s.focal,
+                  focalUnit: s.focalUnit,
+                  pixelSize: s.pixelSize,
                   sensorWidthMm: s.sensorWidthMm,
-                  cx: s.cx, cy: s.cy, width: s.width, height: s.height,
+                  cx: s.cx,
+                  cy: s.cy,
+                  width: s.width,
+                  height: s.height,
                   // Lens model (Brown / rational / fisheye) — undistorted at ingest so the
                   // pipeline stays pinhole. Null coeffs are treated as zero.
-                  k1: s.k1, k2: s.k2, k3: s.k3, k4: s.k4, k5: s.k5, k6: s.k6, p1: s.p1, p2: s.p2,
+                  k1: s.k1,
+                  k2: s.k2,
+                  k3: s.k3,
+                  k4: s.k4,
+                  k5: s.k5,
+                  k6: s.k6,
+                  p1: s.p1,
+                  p2: s.p2,
                   distortionModel: s.distortionModel,
                   // Film-scan interior orientation (F4): kind + fiducial calibration.
                   // The sfm ingest fits a per-image transform and builds one canonical
@@ -319,18 +428,17 @@ export function createSparseRun({
                   reseauStitched: !!s.reseauStitched,
                   // Panoramic strip segments: exact pinholes of the certificate focal.
                   panoramicSegments: !!s.panoramicSegments,
-                  fiducialCalibration: s.fiducialCalibration
-                    ? JSON.parse(JSON.stringify(s.fiducialCalibration))
-                    : null,
+                  fiducialCalibration: s.fiducialCalibration ? JSON.parse(JSON.stringify(s.fiducialCalibration)) : null,
                 }
               : null,
           }
         }),
         // Name order, not uuid order (matchCodec.js inNameOrder): the same matches must
         // reconstruct the same model in every session.
-        pairs: inNameOrder(reconstructionPairs
-          .map((e) => ({
-            idA: e.idA, idB: e.idB,
+        pairs: inNameOrder(
+          reconstructionPairs.map((e) => ({
+            idA: e.idA,
+            idB: e.idB,
             // F (3×3) and matches come from reactive store entries; rebuild them
             // as plain arrays or the Vue proxy can't be structured-cloned to the
             // worker ("[object Array] could not be cloned").
@@ -340,8 +448,12 @@ export function createSparseRun({
             // WS1: weak pairs (valid F below the accept gate) ride through with the flag.
             // sfm.js keeps them out of init / triangulation and feeds
             // them only to PnP correspondence collection (register.js).
-            inlierCount: e.inlierCount, weak: e.weak ?? false, status: 'done',
-          })), (uuid) => imageNameByUuid.get(uuid)),
+            inlierCount: e.inlierCount,
+            weak: e.weak ?? false,
+            status: 'done',
+          })),
+          (uuid) => imageNameByUuid.get(uuid),
+        ),
         // GCP anchors + camera priors in one survey frame (surveyConstraintInput).
         gcps: survey.gcps,
         cameraPriors: survey.cameraPriors,
@@ -358,12 +470,13 @@ export function createSparseRun({
       if (guided) {
         // One image at a time: the float descriptors are 4× the uint8 copy, and loading
         // them all at once (2.2 M keypoints ≈ 1.1 GB) would be the renderer's peak.
-        let bytes = 0, shipped = 0
+        let bytes = 0,
+          shipped = 0
         for (let i = 0; i < imgs.length; i++) {
           const img = imgs[i]
           if ((img.detector ?? 'sift') !== 'sift' || (img.descDim ?? 128) !== 128) continue
           const raw = isPersisting()
-            ? (await opfs.loadDescriptors(projects.currentProjectId, img.uuid)) ?? img.descriptors
+            ? ((await opfs.loadDescriptors(projects.currentProjectId, img.uuid)) ?? img.descriptors)
             : img.descriptors
           const d = toMatchSpace(raw, img, 128)
           if (!d || d.length !== img.kpCount * 128) continue
@@ -371,11 +484,16 @@ export function createSparseRun({
           for (let k = 0; k < d.length; k++) u8[k] = Math.min(255, Math.round(d[k] * 512))
           input.images[i].descU8 = u8
           reconstructionTransfers.push(u8.buffer)
-          bytes += u8.length; shipped++
+          bytes += u8.length
+          shipped++
         }
         if (shipped) {
-          log(`guided track extension: sending ${shipped}/${pluralize(imgs.length, 'image')}' descriptors `
-            + `to the worker (${formatBytes(bytes)}, uint8 RootSIFT)`, 'info', 'Reconstruction')
+          log(
+            `guided track extension: sending ${shipped}/${pluralize(imgs.length, 'image')}' descriptors ` +
+              `to the worker (${formatBytes(bytes)}, uint8 RootSIFT)`,
+            'info',
+            'Reconstruction',
+          )
         }
       }
 
@@ -389,18 +507,27 @@ export function createSparseRun({
           stopped = true
           clearInterval(timer)
           const used = performance.memory.usedJSHeapSize
-          log(`Sparse reconstruction stopped at ${formatBytes(used)} heap usage `
-            + `(safety ceiling ${formatBytes(stopAt)})`, 'error', 'Compute')
+          log(
+            `Sparse reconstruction stopped at ${formatBytes(used)} heap usage ` +
+              `(safety ceiling ${formatBytes(stopAt)})`,
+            'error',
+            'Compute',
+          )
           terminateAll('reconstruction stopped before browser memory exhaustion')
         }, 500)
-        stopMemoryWatchdog = () => { stopped = true; clearInterval(timer) }
+        stopMemoryWatchdog = () => {
+          stopped = true
+          clearInterval(timer)
+        }
       }
 
       input.liveSnapshots = true
       let packedResult = await workerReconstruct(input, {
         onLog: (message, level, category) => log(message, level, category),
         onProgress: (done, total, label, fraction) => onProgress?.(done, total, label, fraction),
-        onEvent: (ev, [snap]) => { if (ev === 'snapshot' && projects.currentProjectId === runProjectId) showLive(snap) },
+        onEvent: (ev, [snap]) => {
+          if (ev === 'snapshot' && projects.currentProjectId === runProjectId) showLive(snap)
+        },
         transfer: reconstructionTransfers,
       })
       liveSparse.value = null
@@ -410,8 +537,7 @@ export function createSparseRun({
       // The expanded Maps are now authoritative. Drop the transferred CSR buffers
       // before orientation + persistence allocate their own compact arrays.
       packedResult = null
-      log(`Compact result received: ${result.points.length.toLocaleString()} points`,
-        'info', 'Reconstruction')
+      log(`Compact result received: ${result.points.length.toLocaleString()} points`, 'info', 'Reconstruction')
 
       // Apply the compact worker result. The transport codec has already expanded
       // its CSR buffers directly into the Map-based point shape used by the app.
@@ -431,9 +557,13 @@ export function createSparseRun({
             // Which camera signal set "up" — an oblique set's viewing directions are
             // not vertical, so say when the level camera plane overrode them.
             const how = sceneUpFromCameras([...camMap.values()])
-            log(how.source === 'camera-plane'
-              ? `Oriented model Z-up from the level camera plane (aerial; the mean viewing direction is ${how.viewTiltDeg.toFixed(1)}° off it — an oblique capture)`
-              : 'Oriented model Z-up from the mean viewing direction (aerial: cameras above ground)', 'info', 'Reconstruction')
+            log(
+              how.source === 'camera-plane'
+                ? `Oriented model Z-up from the level camera plane (aerial; the mean viewing direction is ${how.viewTiltDeg.toFixed(1)}° off it — an oblique capture)`
+                : 'Oriented model Z-up from the mean viewing direction (aerial: cameras above ground)',
+              'info',
+              'Reconstruction',
+            )
           }
         }
         upsertSparseCloud(camMap, pts)
@@ -446,8 +576,13 @@ export function createSparseRun({
           let secondaryPoints = model.points
           if (projects.currentSceneType === 'aerial') {
             const R = aerialUpRotation(secondaryCameras)
-            if (R) ({ cameras: secondaryCameras, points: secondaryPoints } =
-              rotateReconstruction(secondaryCameras, secondaryPoints, R, { inPlace: true }))
+            if (R)
+              ({ cameras: secondaryCameras, points: secondaryPoints } = rotateReconstruction(
+                secondaryCameras,
+                secondaryPoints,
+                R,
+                { inPlace: true },
+              ))
           }
           upsertSparseCloud(secondaryCameras, secondaryPoints, {
             replaceId: null,
@@ -467,10 +602,13 @@ export function createSparseRun({
         healthDirty.value++
         reconStatus.value = 'done'
         const saved = await save()
-        log(saved
-          ? 'Reconstruction saved to project storage'
-          : 'Reconstruction is available in memory but could not be saved to project storage',
-        saved ? 'success' : 'warn', 'Project')
+        log(
+          saved
+            ? 'Reconstruction saved to project storage'
+            : 'Reconstruction is available in memory but could not be saved to project storage',
+          saved ? 'success' : 'warn',
+          'Project',
+        )
       } else {
         reconStatus.value = result.status === 'error' ? 'error' : 'idle'
       }
@@ -489,7 +627,13 @@ export function createSparseRun({
   function showLive({ cameras: list, pos, col }) {
     const n = pos.length / 3
     let cameras = new Map(list.map(({ uuid, R, t, K }) => [uuid, { R, t, K }]))
-    let points = new SparsePoints({ pos, col, vcount: new Uint32Array(n), vcam: new Uint32Array(0), vkp: new Uint32Array(0) })
+    let points = new SparsePoints({
+      pos,
+      col,
+      vcount: new Uint32Array(n),
+      vcam: new Uint32Array(0),
+      vkp: new Uint32Array(0),
+    })
     if (projects.currentSceneType === 'aerial' && cameras.size >= 2) {
       const R = aerialUpRotation(cameras)
       if (R) ({ cameras, points } = rotateReconstruction(cameras, points, R, { inPlace: true }))
@@ -498,6 +642,7 @@ export function createSparseRun({
   }
 
   return {
-    surveyConstraintInput, reconstruct,
+    surveyConstraintInput,
+    reconstruct,
   }
 }

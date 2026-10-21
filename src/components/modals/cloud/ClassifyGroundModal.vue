@@ -31,16 +31,21 @@ const emit = defineEmits(['close', 'run'])
 const settings = ref({ ...GROUND_DEFAULTS })
 const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 // A streamed cloud's classes are in its octree's layout (it has no resident attributes).
-const classified = (c) => !!c?.attributes?.classification || !!(c?.lod && !c.pos && c.lod.layout?.attributes?.some((a) => a.name === 'classification'))
-const groundOptionLabel = (c) => `${cloudOptionLabel(c)}${classified(c) ? ' · classified' : ''}${c.lod && !c.pos ? ' · streamed' : ''}`
+const classified = (c) =>
+  !!c?.attributes?.classification ||
+  !!(c?.lod && !c.pos && c.lod.layout?.attributes?.some((a) => a.name === 'classification'))
+const groundOptionLabel = (c) =>
+  `${cloudOptionLabel(c)}${classified(c) ? ' · classified' : ''}${c.lod && !c.pos ? ' · streamed' : ''}`
 const units = computed(() => cloudUnits(source.value, props.frameSignature))
 const noScale = computed(() => units.value.unit === 'model')
 const { memBudgetBytes } = useComputeSettings()
 
-const numbers = computed(() => checkNumberFields(settings.value, {
-  clothResolution: { label: 'Cloth resolution', min: 0.05, max: 50 },
-  classThreshold: { label: 'Ground tolerance', min: 0.01, max: 10 },
-}))
+const numbers = computed(() =>
+  checkNumberFields(settings.value, {
+    clothResolution: { label: 'Cloth resolution', min: 0.05, max: 50 },
+    classThreshold: { label: 'Ground tolerance', min: 0.01, max: 10 },
+  }),
+)
 
 function run() {
   emit('run', {
@@ -56,28 +61,47 @@ function run() {
     <NoSourceWarn v-if="!clouds.length" kind="cloud" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SourcePicker id="gnd-src" v-model="sourceId" label="Cloud" :items="clouds" :option-label="groundOptionLabel"
-          hint="Adds a new cloud with every point classified; this one is left untouched." />
+        <SourcePicker
+          id="gnd-src"
+          v-model="sourceId"
+          label="Cloud"
+          :items="clouds"
+          :option-label="groundOptionLabel"
+          hint="Adds a new cloud with every point classified; this one is left untouched."
+        />
         <WarnBox v-if="noScale">
-          This model has no real-world scale, so lengths in metres mean nothing yet.
-          Georeference it or add scale bars first.
+          This model has no real-world scale, so lengths in metres mean nothing yet. Georeference it or add scale bars
+          first.
         </WarnBox>
         <WarnBox v-else-if="classified(source)">
           This cloud is already classified. The new cloud replaces those classes.
         </WarnBox>
         <p v-if="source?.imported" class="field-hint">
-          An imported cloud is classified in its own coordinates: its z must point up, and its units are taken as metres.
+          An imported cloud is classified in its own coordinates: its z must point up, and its units are taken as
+          metres.
         </p>
       </SettingsGroup>
       <SettingsGroup title="Cloth">
-        <SettingsField label-for="gnd-res" unit="m"
-          hint="Coarser spans wider roofs; finer follows steeper ground.">
+        <SettingsField label-for="gnd-res" unit="m" hint="Coarser spans wider roofs; finer follows steeper ground.">
           <template #label>
-            <FieldHelp op="classify-ground" param="clothResolution" :value="settings.clothResolution"
-              :default-value="GROUND_DEFAULTS.clothResolution">Cloth resolution</FieldHelp>
+            <FieldHelp
+              op="classify-ground"
+              param="clothResolution"
+              :value="settings.clothResolution"
+              :default-value="GROUND_DEFAULTS.clothResolution"
+              >Cloth resolution</FieldHelp
+            >
           </template>
-          <input id="gnd-res" v-model.number="settings.clothResolution" :aria-invalid="numbers.bad.clothResolution"
-            type="number" min="0.05" max="50" step="0.5" class="field-input" />
+          <input
+            id="gnd-res"
+            v-model.number="settings.clothResolution"
+            :aria-invalid="numbers.bad.clothResolution"
+            type="number"
+            min="0.05"
+            max="50"
+            step="0.5"
+            class="field-input"
+          />
         </SettingsField>
         <SettingsField label-for="gnd-rigid" hint="How stiff the cloth is: steep ground needs a soft cloth.">
           <template #label><FieldHelp op="classify-ground" param="rigidness">Terrain</FieldHelp></template>
@@ -89,20 +113,40 @@ function run() {
         </SettingsField>
         <SettingsField hint="Spread the cloth onto continuous steep ground it settled below.">
           <template #label>
-            <FieldHelp op="classify-ground" param="slopeSmoothing" :value="settings.slopeSmoothing"
-              :default-value="GROUND_DEFAULTS.slopeSmoothing">Slope smoothing</FieldHelp>
+            <FieldHelp
+              op="classify-ground"
+              param="slopeSmoothing"
+              :value="settings.slopeSmoothing"
+              :default-value="GROUND_DEFAULTS.slopeSmoothing"
+              >Slope smoothing</FieldHelp
+            >
           </template>
-          <label class="checkbox-row"><input v-model="settings.slopeSmoothing" type="checkbox" class="checkbox" /> Enabled</label>
+          <label class="checkbox-row"
+            ><input v-model="settings.slopeSmoothing" type="checkbox" class="checkbox" /> Enabled</label
+          >
         </SettingsField>
       </SettingsGroup>
       <SettingsGroup title="Classes">
         <SettingsField label-for="gnd-thr" unit="m" hint="Points this close to the cloth are ground.">
           <template #label>
-            <FieldHelp op="classify-ground" param="classThreshold" :value="settings.classThreshold"
-              :default-value="GROUND_DEFAULTS.classThreshold">Ground tolerance</FieldHelp>
+            <FieldHelp
+              op="classify-ground"
+              param="classThreshold"
+              :value="settings.classThreshold"
+              :default-value="GROUND_DEFAULTS.classThreshold"
+              >Ground tolerance</FieldHelp
+            >
           </template>
-          <input id="gnd-thr" v-model.number="settings.classThreshold" :aria-invalid="numbers.bad.classThreshold"
-            type="number" min="0.01" max="10" step="0.1" class="field-input" />
+          <input
+            id="gnd-thr"
+            v-model.number="settings.classThreshold"
+            :aria-invalid="numbers.bad.classThreshold"
+            type="number"
+            min="0.01"
+            max="10"
+            step="0.1"
+            class="field-input"
+          />
         </SettingsField>
         <SettingsField label-for="gnd-extent" hint="The same area a DEM covers by default.">
           <template #label><FieldHelp op="classify-ground" param="extent">Extent</FieldHelp></template>
@@ -115,13 +159,21 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || noScale || !numbers.valid"
-        :title="noScale ? 'Needs a georeference or scale bars' : numbers.reason" @click="run">Classify</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || noScale || !numbers.valid"
+        :title="noScale ? 'Needs a georeference or scale bars' : numbers.reason"
+        @click="run"
+      >
+        Classify
+      </button>
     </template>
   </ModalShell>
 </template>
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.field-select { width: 100%; }
+.field-select {
+  width: 100%;
+}
 </style>

@@ -20,7 +20,11 @@ function spawn(slot) {
   }
   w.onerror = (e) => {
     const err = new Error(e.message || 'COPC node worker error')
-    for (const [id, entry] of pending) if (entry.worker === w) { pending.delete(id); entry.reject(err) }
+    for (const [id, entry] of pending)
+      if (entry.worker === w) {
+        pending.delete(id)
+        entry.reject(err)
+      }
     w.terminate()
     if (workers[slot] === w) workers[slot] = null
   }
@@ -42,7 +46,13 @@ export function readCopcNode(data, node, lod, as = 'render') {
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, worker })
     try {
-      worker.postMessage({ id, data, node: { offset: node.offset, length: node.length, count: node.count }, lod: meta, as })
+      worker.postMessage({
+        id,
+        data,
+        node: { offset: node.offset, length: node.length, count: node.count },
+        lod: meta,
+        as,
+      })
     } catch (err) {
       pending.delete(id)
       reject(err)

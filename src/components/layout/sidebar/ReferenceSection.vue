@@ -14,7 +14,7 @@ import { useSidebar } from './sidebarContext.js'
 // in here — that's the whole point of the section, and it's the one thing the
 // old type-split "Clouds vs Products" taxonomy could not express.
 defineProps({
-  open:   { type: Boolean, default: true },
+  open: { type: Boolean, default: true },
   // Imported (imported:true) kind:'dense' | 'mesh' clouds.
   clouds: { type: Array, default: () => [] },
 })
@@ -40,17 +40,27 @@ const datumWarn = (r) => r.kind === 'dem' && (!r.verticalDatum || r.verticalDatu
 const canMap = (r) => !!r.previewDataUrl && !!r.crs && !r.crsUnresolved
 
 const {
-  editingId: editingRasterId, editingName, setInput: setRenameInput, start: startRename, commit: commitRename, cancel: cancelRename,
+  editingId: editingRasterId,
+  editingName,
+  setInput: setRenameInput,
+  start: startRename,
+  commit: commitRename,
+  cancel: cancelRename,
 } = useInlineRename((id, name) => sidebar.renameRaster({ id, name }))
 
 const { menu: ctx, open: openCtx, close: closeCtx } = useContextMenu()
 // Run a menu item against the row it was opened on, then close.
-function fromMenu(fn) { const raster = ctx.value.raster; closeCtx(); fn(raster) }
+function fromMenu(fn) {
+  const raster = ctx.value.raster
+  closeCtx()
+  fn(raster)
+}
 
 // Tab id per useTabs.openRasterTab — openRaster focuses an existing tab either
 // way, so only the wording changes.
 const ctxOpenLabel = computed(() =>
-  sidebar.openTabIds.has(`raster:${ctx.value?.raster?.id}`) ? 'Switch to tab' : 'Open in tab')
+  sidebar.openTabIds.has(`raster:${ctx.value?.raster?.id}`) ? 'Switch to tab' : 'Open in tab',
+)
 </script>
 
 <template>
@@ -104,12 +114,13 @@ const ctxOpenLabel = computed(() =>
           <span v-else class="item-name">{{ r.name }}</span>
           <!-- On-map indicator: the toggle lives in the right-click menu, so
                without this the state is invisible until you open the menu again. -->
+          <span v-if="r.visible" class="map-flag" title="Shown on the map — right-click to hide">◉</span>
           <span
-            v-if="r.visible"
-            class="map-flag"
-            title="Shown on the map — right-click to hide"
-          >◉</span>
-          <span v-if="datumWarn(r)" class="warn-flag" title="Vertical datum unknown — elevations may be offset by tens of metres">⚠</span>
+            v-if="datumWarn(r)"
+            class="warn-flag"
+            title="Vertical datum unknown — elevations may be offset by tens of metres"
+            >⚠</span
+          >
           <span class="obs-badge" :title="`${r.width}×${r.height} px`">{{ kindLabel(r.kind) }}</span>
         </li>
         <li v-if="isRasterExpanded(r.id)" class="img-details" @contextmenu.stop>
@@ -153,7 +164,10 @@ const ctxOpenLabel = computed(() =>
             <span class="detail-label">Opacity</span>
             <span class="detail-value opacity-cell">
               <input
-                type="range" min="0" max="1" step="0.05"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
                 :value="r.opacity ?? 1"
                 class="opacity-slider"
                 @click.stop
@@ -216,7 +230,9 @@ const ctxOpenLabel = computed(() =>
           class="ctx-item"
           title="This is really a source photo — re-import it as an image"
           @click="fromMenu((r) => sidebar.convertRasterToImage(r.id))"
-        >Convert to source image</button>
+        >
+          Convert to source image
+        </button>
         <button class="ctx-item" @click="fromMenu((r) => startRename(r.id, r.name))">Rename</button>
 
         <div class="ctx-sep"></div>
@@ -234,7 +250,9 @@ const ctxOpenLabel = computed(() =>
   line-height: 15px;
   color: var(--warn, #d9a441);
 }
-.detail-value.warn { color: var(--warn, #d9a441); }
+.detail-value.warn {
+  color: var(--warn, #d9a441);
+}
 
 .raster-loading {
   cursor: default;
@@ -254,7 +272,8 @@ const ctxOpenLabel = computed(() =>
 }
 
 @keyframes raster-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
-
 </style>

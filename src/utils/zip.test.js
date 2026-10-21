@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { zipStore, zipParts, unzipStore, crc32, readZipIndex, zipEntryBlob, zipLocalHeader, zipCentralHeader, zipEndRecords, zipStream } from './zip.js'
+import {
+  zipStore,
+  zipParts,
+  unzipStore,
+  crc32,
+  readZipIndex,
+  zipEntryBlob,
+  zipLocalHeader,
+  zipCentralHeader,
+  zipEndRecords,
+  zipStream,
+} from './zip.js'
 
 // Parse zipStore's own output structurally: signatures at the recorded offsets, name
 // round-trip, CRC of known bytes, and the EOCD's central-directory size/offset. A
@@ -139,7 +150,9 @@ describe('zipParts — the streaming form', () => {
     const index = await readZipIndex(new Blob([bytes]))
     expect(index.length).toBe(0x10001)
     expect(index[0x10000]).toMatchObject({ name: 'f65536', size: 1, method: 0 })
-    expect([...new Uint8Array(await (await zipEntryBlob(new Blob([bytes]), index[300])).arrayBuffer())]).toEqual([300 & 0xff])
+    expect([...new Uint8Array(await (await zipEntryBlob(new Blob([bytes]), index[300])).arrayBuffer())]).toEqual([
+      300 & 0xff,
+    ])
   })
 })
 
@@ -148,11 +161,18 @@ describe('ZIP64 records and the index reader', () => {
   // and offset goes through the zip64 fields, and the reader must find them there.
   async function forced() {
     const enc = new TextEncoder()
-    const a = enc.encode('hello zip64'), json = enc.encode(JSON.stringify({ k: 'v'.repeat(500) }))
-    const deflated = new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer())
-    const parts = [], central = []
+    const a = enc.encode('hello zip64'),
+      json = enc.encode(JSON.stringify({ k: 'v'.repeat(500) }))
+    const deflated = new Uint8Array(
+      await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer(),
+    )
+    const parts = [],
+      central = []
     let off = 0
-    for (const [name, data, size, method, crc] of [['a.txt', a, a.length, 0, crc32(a)], ['m.json', deflated, json.length, 8, crc32(json)]]) {
+    for (const [name, data, size, method, crc] of [
+      ['a.txt', a, a.length, 0, crc32(a)],
+      ['m.json', deflated, json.length, 8, crc32(json)],
+    ]) {
       const nb = enc.encode(name)
       const lh = zipLocalHeader(nb, { crc, size, compressedSize: data.length, method, zip64: true })
       parts.push(lh, data)
@@ -166,13 +186,19 @@ describe('ZIP64 records and the index reader', () => {
   it('reads sizes and offsets from the zip64 fields, stored and deflated', async () => {
     const { blob, a, json } = await forced()
     const index = await readZipIndex(blob)
-    expect(index.map((e) => [e.name, e.size, e.method])).toEqual([['a.txt', a.length, 0], ['m.json', json.length, 8]])
+    expect(index.map((e) => [e.name, e.size, e.method])).toEqual([
+      ['a.txt', a.length, 0],
+      ['m.json', json.length, 8],
+    ])
     expect(new TextDecoder().decode(await (await zipEntryBlob(blob, index[0])).arrayBuffer())).toBe('hello zip64')
     expect(new Uint8Array(await (await zipEntryBlob(blob, index[1])).arrayBuffer())).toEqual(json)
   })
 
   it('reads plain archives written by zipParts', async () => {
-    const parts = await zipParts([{ name: 'x/y.bin', data: Uint8Array.of(1, 2, 3) }, { name: 'z.txt', data: 'zz' }])
+    const parts = await zipParts([
+      { name: 'x/y.bin', data: Uint8Array.of(1, 2, 3) },
+      { name: 'z.txt', data: 'zz' },
+    ])
     const blob = new Blob(parts)
     const index = await readZipIndex(blob)
     expect(index.map((e) => e.name)).toEqual(['x/y.bin', 'z.txt'])
@@ -182,12 +208,18 @@ describe('ZIP64 records and the index reader', () => {
 
 describe('zipStream — one entry at a time', () => {
   it('is byte-identical to zipStore', () => {
-    const entries = [{ name: 'tileset.json', data: enc.encode('{"a":1}') }, { name: 'tiles/0-0-0-0.glb', data: new Uint8Array([1, 2, 3, 4, 5]) }]
+    const entries = [
+      { name: 'tileset.json', data: enc.encode('{"a":1}') },
+      { name: 'tiles/0-0-0-0.glb', data: new Uint8Array([1, 2, 3, 4, 5]) },
+    ]
     const z = zipStream()
     const parts = [...z.add(entries[0].name, '{"a":1}'), ...z.add(entries[1].name, entries[1].data), ...z.finish()]
     const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
     let o = 0
-    for (const p of parts) { out.set(p, o); o += p.length }
+    for (const p of parts) {
+      out.set(p, o)
+      o += p.length
+    }
     expect(out).toEqual(zipStore(entries))
     expect(z.entries).toBe(2)
   })

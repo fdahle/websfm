@@ -21,8 +21,10 @@ export function numStats(arr) {
 
 // One-line formatter for a numStats result.
 export function fmtStats(s) {
-  return `mean ${s.mean.toFixed(2)}px, median ${s.median.toFixed(2)}px, `
-    + `p95 ${s.p95.toFixed(2)}px, max ${s.max.toFixed(2)}px (${s.count} obs)`
+  return (
+    `mean ${s.mean.toFixed(2)}px, median ${s.median.toFixed(2)}px, ` +
+    `p95 ${s.p95.toFixed(2)}px, max ${s.max.toFixed(2)}px (${s.count} obs)`
+  )
 }
 
 // Reprojection-error statistics (pixels) over every observation currently in
@@ -32,7 +34,9 @@ export function fmtStats(s) {
 export function modelResiduals({ tracks, cameras, ids, images }) {
   const residuals = []
   tracks.forEachPoint((p) => {
-    const x = tracks.x(p), y = tracks.y(p), z = tracks.z(p)
+    const x = tracks.x(p),
+      y = tracks.y(p),
+      z = tracks.z(p)
     tracks.forEachView(p, (img, kpIdx) => {
       const cam = cameras.get(ids.uuid(img))
       if (!cam || !cam.K || !images[img]) return
@@ -48,7 +52,14 @@ export function modelResiduals({ tracks, cameras, ids, images }) {
 
 // Track-length histogram { t2, t3, t4 } (2-view / 3-view / 4+-view counts).
 export function trackHist(tracks) {
-  let t2 = 0, t3 = 0, t4 = 0
-  tracks.forEachPoint((p) => { const n = tracks.viewCount(p); if (n <= 2) t2++; else if (n === 3) t3++; else t4++ })
+  let t2 = 0,
+    t3 = 0,
+    t4 = 0
+  tracks.forEachPoint((p) => {
+    const n = tracks.viewCount(p)
+    if (n <= 2) t2++
+    else if (n === 3) t3++
+    else t4++
+  })
   return { t2, t3, t4 }
 }

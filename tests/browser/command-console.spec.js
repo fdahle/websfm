@@ -15,14 +15,19 @@ test('Ctrl-K focuses the console, whose verbs reach the stores and the workflow 
   const prompt = page.locator('.prompt-input')
   await expect(prompt).toBeFocused()
   const log = page.locator('.console-body')
-  const type = async (line) => { await prompt.fill(line); await prompt.press('Enter') }
+  const type = async (line) => {
+    await prompt.fill(line)
+    await prompt.press('Enter')
+  }
 
   await type('help set')
   await expect(log).toContainText('usage: set <group>.<key> <value>')
 
   await type('set sfm.minPnpInlierRatio 0.5')
   await expect(log).toContainText('sfm.minPnpInlierRatio: 0.3 → 0.5 (default 0.3)')
-  const override = await page.evaluate(async () => (await import('/src/stores/tuningOverrides.js')).tuningOverrides('sfm'))
+  const override = await page.evaluate(async () =>
+    (await import('/src/stores/tuningOverrides.js')).tuningOverrides('sfm'),
+  )
   expect(override).toEqual({ minPnpInlierRatio: 0.5 })
   await type('set sfm.reprjThreshold 2')
   await expect(log).toContainText('is a Sparse Model dialog setting')
@@ -38,12 +43,34 @@ test('Ctrl-K focuses the console, whose verbs reach the stores and the workflow 
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
     const { useMatchesStore } = await import('/src/stores/useMatchesStore.js')
     const images = useImagesStore()
-    for (const [id, name] of [[101, 'DJI_0001.JPG'], [102, 'DJI_0002.JPG']]) {
-      images.images.push({ id, uuid: `u${id}`, name, width: 100, height: 100, kpStatus: 'done', kpCount: 50, meta: null })
+    for (const [id, name] of [
+      [101, 'DJI_0001.JPG'],
+      [102, 'DJI_0002.JPG'],
+    ]) {
+      images.images.push({
+        id,
+        uuid: `u${id}`,
+        name,
+        width: 100,
+        height: 100,
+        kpStatus: 'done',
+        kpCount: 50,
+        meta: null,
+      })
     }
     const m = useMatchesStore()
-    m.matchStore.set(m.pairId('u101', 'u102'), { idA: 'u101', idB: 'u102', rawCount: 80, inlierCount: 60, F: null, nMatches: 60,
-      src: null, status: 'done', enabled: true, weak: false })
+    m.matchStore.set(m.pairId('u101', 'u102'), {
+      idA: 'u101',
+      idB: 'u102',
+      rawCount: 80,
+      inlierCount: 60,
+      F: null,
+      nMatches: 60,
+      src: null,
+      status: 'done',
+      enabled: true,
+      weak: false,
+    })
     m.matchStore = new Map(m.matchStore)
   })
   await type('stats')
@@ -59,7 +86,9 @@ test('Ctrl-K focuses the console, whose verbs reach the stores and the workflow 
   expect(enabled).toBe(false)
   await type('select 0002')
   await expect(log).toContainText('Selected DJI_0002.JPG')
-  expect(await page.evaluate(async () => (await import('/src/stores/useImagesStore.js')).useImagesStore().selectedId)).toBe(102)
+  expect(
+    await page.evaluate(async () => (await import('/src/stores/useImagesStore.js')).useImagesStore().selectedId),
+  ).toBe(102)
 
   // A saved workflow with an interactive block: the console reports the wait and answers it.
   await page.evaluate(async () => {

@@ -6,7 +6,10 @@ import { SIFT_DESC_NORM, rootSiftInPlace, siftDescNorm, toMatchSpace } from './s
 function siftRow(seed, dim = 128) {
   const r = new Float32Array(dim)
   let s = seed
-  for (let j = 0; j < dim; j++) { s = (s * 1103515245 + 12345) >>> 0; r[j] = (s % 1000) / 1000 }
+  for (let j = 0; j < dim; j++) {
+    s = (s * 1103515245 + 12345) >>> 0
+    r[j] = (s % 1000) / 1000
+  }
   const n = Math.hypot(...r)
   for (let j = 0; j < dim; j++) r[j] /= n
   return r

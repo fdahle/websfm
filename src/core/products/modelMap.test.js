@@ -7,18 +7,40 @@ import { makeFrame } from './projection.js'
 // built from different point sets (so different origins) — the DEM-from-dense vs
 // map-from-sparse situation.
 const cams = [
-  { R: [[1, 0, 0], [0, -1, 0], [0, 0, -1]], t: [0, 0, 10] },
-  { R: [[1, 0, 0], [0, -1, 0], [0, 0, -1]], t: [-4, 0, 10] },
+  {
+    R: [
+      [1, 0, 0],
+      [0, -1, 0],
+      [0, 0, -1],
+    ],
+    t: [0, 0, 10],
+  },
+  {
+    R: [
+      [1, 0, 0],
+      [0, -1, 0],
+      [0, 0, -1],
+    ],
+    t: [-4, 0, 10],
+  },
 ]
-const pts = (dx) => [{ x: 1 + dx, y: 2, z: 0 }, { x: 3 + dx, y: 4, z: 1 }]
+const pts = (dx) => [
+  { x: 1 + dx, y: 2, z: 0 },
+  { x: 3 + dx, y: 4, z: 1 },
+]
 
 it('a translated product lands where the map frame puts the same world point', () => {
   const map = frameFromSpec({ kind: 'local' }, cams, pts(0))
   const product = frameFromSpec({ kind: 'local' }, cams, pts(5))
   const off = frameOffset(describeFrame(product, { kind: 'local' }), map)
   expect(off.reason).toBeUndefined()
-  for (const p of [[0, 0, 0], [12.5, -3, 2], [-7, 9, -1]]) {
-    const inProduct = product.fromSfm(p), inMap = map.fromSfm(p)
+  for (const p of [
+    [0, 0, 0],
+    [12.5, -3, 2],
+    [-7, 9, -1],
+  ]) {
+    const inProduct = product.fromSfm(p),
+      inMap = map.fromSfm(p)
     expect(inProduct[0] + off.dx).toBeCloseTo(inMap[0], 9)
     expect(inProduct[1] + off.dy).toBeCloseTo(inMap[1], 9)
   }
@@ -43,6 +65,7 @@ it('puts camera centres in the frame and pads a degenerate extent', () => {
   const out = modelMapCameras([{ imageId: 'a', imageName: 'A', ...cams[1] }], frame)
   expect(out).toEqual([{ imageId: 'a', imageName: 'A', x: 4, y: 0 }])
   const e = modelMapExtent(out)
-  expect(e[0]).toBeLessThan(4); expect(e[2]).toBeGreaterThan(4)
+  expect(e[0]).toBeLessThan(4)
+  expect(e[2]).toBeGreaterThan(4)
   expect(modelMapExtent([])).toEqual([-100, -100, 100, 100])
 })

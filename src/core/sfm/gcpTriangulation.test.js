@@ -11,7 +11,11 @@ beforeAll(async () => {
   await initRecon({ module_or_path: bytes })
 })
 
-const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+const I3 = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+]
 const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
 
 // Two cameras: A at the origin, B shifted +1 along world-X (t = -baseline).
@@ -43,7 +47,10 @@ describe('triangulateGcp', () => {
     const X = { x: 0.2, y: -0.1, z: 5 }
     const obsA = project(camA, X)
     const obsB = project(camB, X)
-    const cams = new Map([['imgA', camA], ['imgB', camB]])
+    const cams = new Map([
+      ['imgA', camA],
+      ['imgB', camB],
+    ])
     const observations = [
       { imageId: 'imgA', px: obsA.px, py: obsA.py },
       { imageId: 'imgB', px: obsB.px, py: obsB.py },
@@ -60,7 +67,10 @@ describe('triangulateGcp', () => {
 
   it('returns null with fewer than 2 registered observations', async () => {
     const cams = new Map([['imgA', camA]])
-    const observations = [{ imageId: 'imgA', px: 500, py: 400 }, { imageId: 'imgUnregistered', px: 500, py: 400 }]
+    const observations = [
+      { imageId: 'imgA', px: 500, py: 400 },
+      { imageId: 'imgUnregistered', px: 500, py: 400 },
+    ]
     expect(await triangulateGcp(observations, cams)).toBeNull()
   })
 
@@ -69,7 +79,11 @@ describe('triangulateGcp', () => {
     const obsA = project(camA, X)
     const obsB = project(camB, X)
     const camC = { R: I3, t: [0, -1, 0], K }
-    const cams = new Map([['imgA', camA], ['imgB', camB], ['imgC', camC]])
+    const cams = new Map([
+      ['imgA', camA],
+      ['imgB', camB],
+      ['imgC', camC],
+    ])
     const observations = [
       { imageId: 'imgA', px: obsA.px, py: obsA.py },
       { imageId: 'imgB', px: obsB.px, py: obsB.py },
@@ -113,13 +127,18 @@ describe('refineGcpPoint', () => {
     // worse. Whatever the iteration does, every view projectable at the seed must
     // still be projectable at the result.
     const cams = [camA, camB, camC, camD]
-    const projectable = (p) => cams.map((c) => {
-      const zc = c.R[2][0] * p.x + c.R[2][1] * p.y + c.R[2][2] * p.z + c.t[2]
-      return Number.isFinite(zc) && Math.abs(zc) >= 1e-9
-    })
+    const projectable = (p) =>
+      cams.map((c) => {
+        const zc = c.R[2][0] * p.x + c.R[2][1] * p.y + c.R[2][2] * p.z + c.t[2]
+        return Number.isFinite(zc) && Math.abs(zc) >= 1e-9
+      })
     // Near-degenerate seeds: barely in front of the cameras, so a large GN step
     // can easily overshoot through a camera plane.
-    for (const seed of [{ x: 0, y: 0, z: 1e-6 }, { x: 5, y: -5, z: 1e-4 }, { x: 0.2, y: -0.1, z: 0.001 }]) {
+    for (const seed of [
+      { x: 0, y: 0, z: 1e-6 },
+      { x: 5, y: -5, z: 1e-4 },
+      { x: 0.2, y: -0.1, z: 0.001 },
+    ]) {
       const before = projectable(seed)
       const out = refineGcpPoint(viewsFor(cams), seed)
       const after = projectable(out)
@@ -132,14 +151,21 @@ describe('refineGcpPoint', () => {
 
 describe('triangulateGcp — N-view refinement', () => {
   const X = { x: 0.2, y: -0.1, z: 5 }
-  const cams = new Map([['imgA', camA], ['imgB', camB], ['imgC', camC], ['imgD', camD]])
+  const cams = new Map([
+    ['imgA', camA],
+    ['imgB', camB],
+    ['imgC', camC],
+    ['imgD', camD],
+  ])
 
   // imgA is in the seed pair (camA↔camB is the widest baseline — see the camera
   // note above) and carries a few px of marking noise, which a pair-only fit has
   // no way to see. The clean C/D marks can outvote it only if they reach the fit.
   const noisySeedMark = () => {
-    const oa = project(camA, X), ob = project(camB, X)
-    const oc = project(camC, X), od = project(camD, X)
+    const oa = project(camA, X),
+      ob = project(camB, X)
+    const oc = project(camC, X),
+      od = project(camD, X)
     return [
       { imageId: 'imgA', px: oa.px + 4, py: oa.py + 4 },
       { imageId: 'imgB', px: ob.px, py: ob.py },
@@ -151,30 +177,52 @@ describe('triangulateGcp — N-view refinement', () => {
 
   it('uses observations beyond the widest-baseline pair', async () => {
     const observations = noisySeedMark()
-    const pairOnly = await triangulateGcp(observations.slice(0, 2), new Map([['imgA', camA], ['imgB', camB]]))
+    const pairOnly = await triangulateGcp(
+      observations.slice(0, 2),
+      new Map([
+        ['imgA', camA],
+        ['imgB', camB],
+      ]),
+    )
     const nView = await triangulateGcp(observations, cams)
     expect(errFrom(nView)).toBeLessThan(errFrom(pairOnly))
   })
 
   it('lets a low-uncertainty mark outweigh a noisy low-confidence mark', async () => {
     const observations = noisySeedMark()
-    observations[0].accuracyX = 20; observations[0].accuracyY = 20
-    for (const o of observations.slice(1)) { o.accuracyX = 0.5; o.accuracyY = 0.5 }
+    observations[0].accuracyX = 20
+    observations[0].accuracyY = 20
+    for (const o of observations.slice(1)) {
+      o.accuracyX = 0.5
+      o.accuracyY = 0.5
+    }
     const weighted = await triangulateGcp(observations, cams)
-    const equal = await triangulateGcp(observations.map((o) => ({ ...o, accuracyX: 1, accuracyY: 1 })), cams)
+    const equal = await triangulateGcp(
+      observations.map((o) => ({ ...o, accuracyX: 1, accuracyY: 1 })),
+      cams,
+    )
     expect(errFrom(weighted)).toBeLessThan(errFrom(equal))
     expect(weighted.perViewReprojPx[0].normalized).toBeLessThan(weighted.perViewReprojPx[0].reprojPx)
   })
 
   it('reports every view in perViewReprojPx and rejects none by default', async () => {
-    const oa = project(camA, X), ob = project(camB, X), oc = project(camC, X)
+    const oa = project(camA, X),
+      ob = project(camB, X),
+      oc = project(camC, X)
     const observations = [
       { imageId: 'imgA', px: oa.px, py: oa.py },
       { imageId: 'imgB', px: ob.px, py: ob.py },
       { imageId: 'imgC', px: oc.px + 80, py: oc.py }, // misclick
     ]
 
-    const tri = await triangulateGcp(observations, new Map([['imgA', camA], ['imgB', camB], ['imgC', camC]]))
+    const tri = await triangulateGcp(
+      observations,
+      new Map([
+        ['imgA', camA],
+        ['imgB', camB],
+        ['imgC', camC],
+      ]),
+    )
     expect(tri.viewCount).toBe(3)
     expect(tri.perViewReprojPx).toHaveLength(3)
     expect(tri.rejectedImageIds).toEqual([])
@@ -183,9 +231,17 @@ describe('triangulateGcp — N-view refinement', () => {
 
 describe('triangulateGcp — robust rejection', () => {
   const X = { x: 0.2, y: -0.1, z: 5 }
-  const cams = new Map([['imgA', camA], ['imgB', camB], ['imgC', camC], ['imgD', camD]])
+  const cams = new Map([
+    ['imgA', camA],
+    ['imgB', camB],
+    ['imgC', camC],
+    ['imgD', camD],
+  ])
   const clean = () => {
-    const oa = project(camA, X), ob = project(camB, X), oc = project(camC, X), od = project(camD, X)
+    const oa = project(camA, X),
+      ob = project(camB, X),
+      oc = project(camC, X),
+      od = project(camD, X)
     return [
       { imageId: 'imgA', px: oa.px, py: oa.py },
       { imageId: 'imgB', px: ob.px, py: ob.py },
@@ -242,7 +298,14 @@ describe('triangulateGcp — robust rejection', () => {
   it('does not robustify a 2-view fit (rejection must leave a triangulable pair)', async () => {
     const observations = clean().slice(0, 2)
     observations[1].px += 60
-    const tri = await triangulateGcp(observations, new Map([['imgA', camA], ['imgB', camB]]), { robust: true })
+    const tri = await triangulateGcp(
+      observations,
+      new Map([
+        ['imgA', camA],
+        ['imgB', camB],
+      ]),
+      { robust: true },
+    )
     expect(tri.rejectedImageIds).toEqual([])
     expect(tri.viewCount).toBe(2)
   })
@@ -253,11 +316,21 @@ describe('triangulateAllGcps', () => {
     const X = { x: 0.2, y: -0.1, z: 5 }
     const obsA = project(camA, X)
     const obsB = project(camB, X)
-    const sparseCameras = new Map([['uuidA', camA], ['uuidB', camB]])
-    const imagesById = new Map([['imgA', { uuid: 'uuidA' }], ['imgB', { uuid: 'uuidB' }]])
+    const sparseCameras = new Map([
+      ['uuidA', camA],
+      ['uuidB', camB],
+    ])
+    const imagesById = new Map([
+      ['imgA', { uuid: 'uuidA' }],
+      ['imgB', { uuid: 'uuidB' }],
+    ])
     const gcps = [
       {
-        id: 'g1', x: 1, y: 2, z: 3, enabled: true,
+        id: 'g1',
+        x: 1,
+        y: 2,
+        z: 3,
+        enabled: true,
         observations: [
           { imageId: 'imgA', px: obsA.px, py: obsA.py },
           { imageId: 'imgB', px: obsB.px, py: obsB.py },

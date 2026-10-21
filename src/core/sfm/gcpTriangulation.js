@@ -73,21 +73,28 @@ const SEED_PAIR_CANDIDATES = 3
 // before the 3D point is known (the DLT pair is chosen by this, not by the
 // true triangulation angle).
 function baseline(camA, camB) {
-  const Ca = cameraCenter(camA), Cb = cameraCenter(camB)
+  const Ca = cameraCenter(camA),
+    Cb = cameraCenter(camB)
   return Math.hypot(Ca[0] - Cb[0], Ca[1] - Cb[1], Ca[2] - Cb[2])
 }
 
 // Solve the 3×3 system M·x = b by Gaussian elimination with partial pivoting.
 // Returns null when M is singular to working precision.
 function solve3(M, b) {
-  const A = [[M[0][0], M[0][1], M[0][2], b[0]],
-             [M[1][0], M[1][1], M[1][2], b[1]],
-             [M[2][0], M[2][1], M[2][2], b[2]]]
+  const A = [
+    [M[0][0], M[0][1], M[0][2], b[0]],
+    [M[1][0], M[1][1], M[1][2], b[1]],
+    [M[2][0], M[2][1], M[2][2], b[2]],
+  ]
   for (let c = 0; c < 3; c++) {
     let piv = c
     for (let r = c + 1; r < 3; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r
     if (!(Math.abs(A[piv][c]) > 1e-15)) return null
-    if (piv !== c) { const tmp = A[piv]; A[piv] = A[c]; A[c] = tmp }
+    if (piv !== c) {
+      const tmp = A[piv]
+      A[piv] = A[c]
+      A[c] = tmp
+    }
     for (let r = c + 1; r < 3; r++) {
       const f = A[r][c] / A[c][c]
       for (let k = c; k < 4; k++) A[r][k] -= f * A[c][k]
@@ -117,13 +124,20 @@ function reprojCost(views, x, y, z, huberPx = null) {
   const valid = []
   for (const v of views) {
     const p = projectPoint(v.cam, x, y, z)
-    if (!p) { valid.push(false); continue }
+    if (!p) {
+      valid.push(false)
+      continue
+    }
     valid.push(true)
-    const ru = p.u - v.px, rv = p.v - v.py
-    const wx = 1 / ((Number.isFinite(v.accuracyX) && v.accuracyX > 0 ? v.accuracyX : 1) ** 2)
-    const wy = 1 / ((Number.isFinite(v.accuracyY) && v.accuracyY > 0 ? v.accuracyY : 1) ** 2)
+    const ru = p.u - v.px,
+      rv = p.v - v.py
+    const wx = 1 / (Number.isFinite(v.accuracyX) && v.accuracyX > 0 ? v.accuracyX : 1) ** 2
+    const wy = 1 / (Number.isFinite(v.accuracyY) && v.accuracyY > 0 ? v.accuracyY : 1) ** 2
     const weightedSq = wx * ru * ru + wy * rv * rv
-    if (huberPx == null) { s += weightedSq; continue }
+    if (huberPx == null) {
+      s += weightedSq
+      continue
+    }
     const r = Math.hypot(ru, rv)
     const robustWeight = r <= huberPx ? 1 : huberPx / r
     s += robustWeight * weightedSq
@@ -158,7 +172,11 @@ export function refineGcpPoint(views, seed, opts = {}) {
   const scale = Math.max(Math.hypot(x - C0[0], y - C0[1], z - C0[2]), 1e-12)
 
   for (let iter = 0; iter < GN_MAX_ITERS; iter++) {
-    const H = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+    const H = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ]
     const g = [0, 0, 0]
     let used = 0
 
@@ -179,8 +197,8 @@ export function refineGcpPoint(views, seed, opts = {}) {
         const rn = Math.hypot(ru, rv)
         if (rn > huberPx) robustWeight = huberPx / rn
       }
-      const wx = robustWeight / ((Number.isFinite(v.accuracyX) && v.accuracyX > 0 ? v.accuracyX : 1) ** 2)
-      const wy = robustWeight / ((Number.isFinite(v.accuracyY) && v.accuracyY > 0 ? v.accuracyY : 1) ** 2)
+      const wx = robustWeight / (Number.isFinite(v.accuracyX) && v.accuracyX > 0 ? v.accuracyX : 1) ** 2
+      const wy = robustWeight / (Number.isFinite(v.accuracyY) && v.accuracyY > 0 ? v.accuracyY : 1) ** 2
       const ju = [
         (K.fx / zc) * (R[0][0] - (xc / zc) * R[2][0]),
         (K.fx / zc) * (R[0][1] - (xc / zc) * R[2][1]),
@@ -202,7 +220,9 @@ export function refineGcpPoint(views, seed, opts = {}) {
     const step = solve3(H, [-g[0], -g[1], -g[2]])
     if (!step) break
 
-    const nx = x + step[0], ny = y + step[1], nz = z + step[2]
+    const nx = x + step[0],
+      ny = y + step[1],
+      nz = z + step[2]
     if (![nx, ny, nz].every(Number.isFinite)) break
     const cand = reprojCost(views, nx, ny, nz, huberPx)
     // Refuse a step that costs us a view: its error would vanish from the sum and
@@ -210,7 +230,11 @@ export function refineGcpPoint(views, seed, opts = {}) {
     // allowed — the extra term only makes the improvement test stricter.)
     if (valid.some((wasValid, i) => wasValid && !cand.valid[i])) break
     if (!(cand.cost < cost)) break // not an improvement — keep the current estimate
-    x = nx; y = ny; z = nz; cost = cand.cost; valid = cand.valid
+    x = nx
+    y = ny
+    z = nz
+    cost = cand.cost
+    valid = cand.valid
 
     if (Math.hypot(step[0], step[1], step[2]) / scale < GN_STEP_EPS_REL) break
   }
@@ -221,10 +245,11 @@ function perViewResiduals(views, x, y, z) {
   return views.map((v) => {
     const proj = projectPoint(v.cam, x, y, z)
     if (!proj) return { imageId: v.imageId, reprojPx: null, normalized: null }
-    const dx = proj.u - v.px, dy = proj.v - v.py
+    const dx = proj.u - v.px,
+      dy = proj.v - v.py
     const sx = Number.isFinite(v.accuracyX) && v.accuracyX > 0 ? v.accuracyX : 1
     const sy = Number.isFinite(v.accuracyY) && v.accuracyY > 0 ? v.accuracyY : 1
-    return { imageId: v.imageId, dx, dy, reprojPx: Math.hypot(dx, dy), normalized: Math.hypot(dx/sx, dy/sy) }
+    return { imageId: v.imageId, dx, dy, reprojPx: Math.hypot(dx, dy), normalized: Math.hypot(dx / sx, dy / sy) }
   })
 }
 
@@ -286,7 +311,10 @@ export async function triangulateGcp(observations, camerasByImageId, opts = {}) 
       if (!s) continue
       const fit = refineGcpPoint(views, s, { huberPx: HUBER_DELTA_PX })
       const { cost } = reprojCost(views, fit.x, fit.y, fit.z, HUBER_DELTA_PX)
-      if (cost < best) { best = cost; seed = s }
+      if (cost < best) {
+        best = cost
+        seed = s
+      }
     }
   }
   if (!seed) return null
@@ -330,7 +358,10 @@ export async function triangulateGcp(observations, camerasByImageId, opts = {}) 
 export async function triangulateAllGcps(gcps, sparseCameras, imagesById) {
   const out = []
   for (const gcp of gcps) {
-    if (gcp.enabled === false) { out.push({ gcp, tri: null }); continue }
+    if (gcp.enabled === false) {
+      out.push({ gcp, tri: null })
+      continue
+    }
     const camerasByImageId = new Map()
     for (const o of gcp.observations || []) {
       const uuid = imagesById.get(o.imageId)?.uuid

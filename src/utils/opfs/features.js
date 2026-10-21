@@ -37,7 +37,9 @@ export async function listKeypointFiles(projectId) {
   try {
     const dir = await getSubDir(projectId, 'keypoints')
     for await (const name of dir.keys()) if (name.endsWith('.bin')) uuids.add(name.slice(0, -4))
-  } catch { /* no directory ⇒ none */ }
+  } catch {
+    /* no directory ⇒ none */
+  }
   return uuids
 }
 
@@ -46,7 +48,9 @@ export async function deleteKeypoints(projectId, uuid) {
     try {
       const dir = await getSubDir(projectId, 'keypoints')
       await dir.removeEntry(uuid + '.bin')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -99,7 +103,9 @@ export async function deleteDescriptors(projectId, uuid) {
     try {
       const dir = await getSubDir(projectId, 'descriptors')
       await dir.removeEntry(uuid + '.bin')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -110,11 +116,12 @@ export async function deleteDescriptors(projectId, uuid) {
 // pair rewrites only the flags.
 
 export async function saveMatchDocument(projectId, meta, buffers) {
-  return trackPersistence('saveMatchDocument:' + String(projectId), async () => (
+  return trackPersistence('saveMatchDocument:' + String(projectId), async () =>
     persistenceLock(`matches:${projectId}`, async () => {
       const dir = await getSubDir(projectId, 'matches')
       return writeBinaryDocument(dir, 'matches.json', meta, buffers, { writeJson, writeBin })
-    })))
+    }),
+  )
 }
 
 // The document's INDEX — every column except the matches themselves — plus the
@@ -158,6 +165,8 @@ export async function clearAllMatches(projectId) {
     try {
       const dir = await getProjectDir(projectId)
       await dir.removeEntry('matches', { recursive: true })
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }

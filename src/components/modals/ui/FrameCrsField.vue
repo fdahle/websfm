@@ -44,17 +44,25 @@ function applyCrsSuggestion(suggestion) {
   appliedCrsSuggestion.value = true
   emit('apply-crs-suggestion', suggestion)
 }
-watch(() => props.canGeoreference, (can) => {
-  if (can && appliedCrsSuggestion.value) crs.value = 'project'
-  else if (!can && crs.value === 'project') crs.value = 'local'
-}, { immediate: true })
+watch(
+  () => props.canGeoreference,
+  (can) => {
+    if (can && appliedCrsSuggestion.value) crs.value = 'project'
+    else if (!can && crs.value === 'project') crs.value = 'local'
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
-  <SettingsField :label-for="id"
-    :hint="hasScale
-      ? 'Local uses a camera-estimated orientation and the current highest-ranked scale evidence, so coordinates are metric but have no CRS.'
-      : `Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world ${realWorld} & GSD.`">
+  <SettingsField
+    :label-for="id"
+    :hint="
+      hasScale
+        ? 'Local uses a camera-estimated orientation and the current highest-ranked scale evidence, so coordinates are metric but have no CRS.'
+        : `Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world ${realWorld} & GSD.`
+    "
+  >
     <template #label>
       <FieldHelp v-if="helpOp" :op="helpOp" param="crs">Coordinate frame</FieldHelp>
       <GlossaryTerm v-else id="coordinate-reference-system">Coordinate frame</GlossaryTerm>
@@ -65,14 +73,19 @@ watch(() => props.canGeoreference, (can) => {
         {{ projectCrs || 'Project CRS' }}{{ canGeoreference ? '' : (BLOCKED_REASON[georeferenceBlocker] ?? '') }}
       </option>
     </select>
-    <CrsSuggestion v-if="georeferenceBlocker === 'geographic'"
-      :suggestion="crsSuggestion" :current-crs="projectCrs || 'EPSG:4326'"
-      @apply="applyCrsSuggestion" />
+    <CrsSuggestion
+      v-if="georeferenceBlocker === 'geographic'"
+      :suggestion="crsSuggestion"
+      :current-crs="projectCrs || 'EPSG:4326'"
+      @apply="applyCrsSuggestion"
+    />
   </SettingsField>
 </template>
 
 <style scoped src="./modal.css"></style>
 <style scoped>
 /* The frame select reads better full-width (as both dialogs style their selects). */
-.field-select { width: 100%; }
+.field-select {
+  width: 100%;
+}
 </style>

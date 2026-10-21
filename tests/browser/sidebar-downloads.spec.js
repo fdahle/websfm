@@ -25,14 +25,48 @@ test('sidebar context menus download clouds, products and polygon layers', async
     await projects.setProjectCrs(projects.currentProjectId, 'EPSG:32632')
     const store = useReconstructionStore()
     for (const name of ['north.laz', 'south.laz']) {
-      store.importCloud({ count: 2, pos: new Float64Array([500000, 7000000, 0, 500001, 7000000, 1]),
-        col: new Uint8Array([255, 0, 0, 0, 255, 0]) }, name)
+      store.importCloud(
+        {
+          count: 2,
+          pos: new Float64Array([500000, 7000000, 0, 500001, 7000000, 1]),
+          col: new Uint8Array([255, 0, 0, 0, 255, 0]),
+        },
+        name,
+      )
     }
     const W = 8
-    store.dem = { width: W, height: W, gsd: 1, originX: 500000, originY: 7000008, crs: 'EPSG:32632', unit: 'm',
-      data: new Float32Array(W * W).fill(5), mask: new Uint8Array(W * W).fill(1), zMin: 5, zMax: 5, name: 'DEM', createdAt: 1 }
-    await useFootprintsStore().addFootprints([{ name: 'IMG_1.jpg', imageName: 'IMG_1.jpg',
-      rings: [[[500000, 7000000], [500010, 7000000], [500010, 7000010]]] }], 'EPSG:32632', 'Site outline')
+    store.dem = {
+      width: W,
+      height: W,
+      gsd: 1,
+      originX: 500000,
+      originY: 7000008,
+      crs: 'EPSG:32632',
+      unit: 'm',
+      data: new Float32Array(W * W).fill(5),
+      mask: new Uint8Array(W * W).fill(1),
+      zMin: 5,
+      zMax: 5,
+      name: 'DEM',
+      createdAt: 1,
+    }
+    await useFootprintsStore().addFootprints(
+      [
+        {
+          name: 'IMG_1.jpg',
+          imageName: 'IMG_1.jpg',
+          rings: [
+            [
+              [500000, 7000000],
+              [500010, 7000000],
+              [500010, 7000010],
+            ],
+          ],
+        },
+      ],
+      'EPSG:32632',
+      'Site outline',
+    )
   })
 
   // The second imported cloud, not the selected / first one.
@@ -48,7 +82,10 @@ test('sidebar context menus download clouds, products and polygon layers', async
   expect(cloud.bytes.toString().trim().split('\n')).toHaveLength(2)
 
   // The DEM opens its own export dialog.
-  await page.getByRole('button', { name: /Products/ }).first().click()
+  await page
+    .getByRole('button', { name: /Products/ })
+    .first()
+    .click()
   await page.locator('.item-name', { hasText: /^DEM$/ }).click({ button: 'right' })
   await page.locator('.ctx-menu').getByRole('button', { name: 'Download…' }).click()
   const demDialog = page.getByRole('dialog', { name: 'Export DEM' })
@@ -58,9 +95,14 @@ test('sidebar context menus download clouds, products and polygon layers', async
   expect(asc.name).toMatch(/-dem\.asc$/)
 
   // A polygon layer as GeoJSON in the project CRS.
-  await page.getByRole('button', { name: /Shapefiles/ }).first().click()
+  await page
+    .getByRole('button', { name: /Shapefiles/ })
+    .first()
+    .click()
   await page.locator('.list-item').filter({ hasText: 'Site outline' }).click({ button: 'right' })
-  const gj = await download(page, () => page.locator('.ctx-menu').getByRole('button', { name: 'Download GeoJSON' }).click())
+  const gj = await download(page, () =>
+    page.locator('.ctx-menu').getByRole('button', { name: 'Download GeoJSON' }).click(),
+  )
   expect(gj.name).toBe('Site_outline.geojson')
   const fc = JSON.parse(gj.bytes.toString())
   expect(fc.crs.properties.name).toBe('EPSG:32632')

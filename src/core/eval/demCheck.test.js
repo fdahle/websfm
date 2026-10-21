@@ -4,7 +4,11 @@ import { sampleDemAtGcps, sampleDem } from './demCheck.js'
 // 2×2 DEM, gsd=10, origin at (0,100) top-left (row 0 = max Y).
 // Cell centres: (5,95)=10, (15,95)=20, (5,85)=30, (15,85)=40.
 const dem = {
-  width: 2, height: 2, gsd: 10, originX: 0, originY: 100,
+  width: 2,
+  height: 2,
+  gsd: 10,
+  originX: 0,
+  originY: 100,
   data: new Float32Array([10, 20, 30, 40]),
   mask: new Uint8Array([1, 1, 1, 1]),
 }
@@ -36,7 +40,7 @@ describe('sampleDem', () => {
 describe('sampleDemAtGcps', () => {
   it('produces dz = demZ - gcpZ, null where outside', () => {
     const gcps = [
-      { id: 'g1', name: 'A', x: 5, y: 95, z: 8 },   // demZ 10 → dz 2
+      { id: 'g1', name: 'A', x: 5, y: 95, z: 8 }, // demZ 10 → dz 2
       { id: 'g2', name: 'B', x: 999, y: 999, z: 5 }, // outside → demZ null, dz null
     ]
     const out = sampleDemAtGcps(dem, gcps)

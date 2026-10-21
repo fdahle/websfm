@@ -16,7 +16,8 @@ describe('useWorkflowRunner', () => {
         if (type === 'match-features') state.value.matches = true
         if (type === 'reconstruct') state.value.sparse = true
       },
-      openInteractive: vi.fn(), recordRun: vi.fn(),
+      openInteractive: vi.fn(),
+      recordRun: vi.fn(),
     })
     await runner.start(workflow)
     expect(calls).toEqual(['detect-features', 'match-features', 'reconstruct'])
@@ -26,8 +27,10 @@ describe('useWorkflowRunner', () => {
     const run = vi.fn()
     const workflow = createWorkflow('Sparse', ['reconstruct'])
     const runner = useWorkflowRunner({
-      state: ref({ matches: true, sparse: true }), runAutomated: run,
-      openInteractive: vi.fn(), recordRun: vi.fn(),
+      state: ref({ matches: true, sparse: true }),
+      runAutomated: run,
+      openInteractive: vi.fn(),
+      recordRun: vi.fn(),
     })
     await runner.start(workflow)
     expect(run).not.toHaveBeenCalled()
@@ -41,12 +44,14 @@ describe('useWorkflowRunner', () => {
     const runner = useWorkflowRunner({
       state: ref({ matches: true, sparse: true }),
       runAutomated: async () => ({ ok: false, reason: 'memory preflight refused the run' }),
-      openInteractive: vi.fn(), recordRun,
+      openInteractive: vi.fn(),
+      recordRun,
     })
 
     expect(await runner.start(workflow)).toBe(false)
     expect(Object.values(runner.statuses.value)[0]).toMatchObject({
-      status: 'failed', detail: 'memory preflight refused the run',
+      status: 'failed',
+      detail: 'memory preflight refused the run',
     })
     expect(recordRun.mock.calls[0][0]).toMatchObject({ outcome: 'failed' })
   })
@@ -54,8 +59,10 @@ describe('useWorkflowRunner', () => {
   it('locks while awaiting a preflight warning so a second start cannot replace its decision', async () => {
     const workflow = createWorkflow('Reference', ['georeference'])
     const runner = useWorkflowRunner({
-      state: ref({ sparse: true, sceneType: 'object' }), runAutomated: vi.fn(),
-      openInteractive: vi.fn(), recordRun: vi.fn(),
+      state: ref({ sparse: true, sceneType: 'object' }),
+      runAutomated: vi.fn(),
+      openInteractive: vi.fn(),
+      recordRun: vi.fn(),
     })
 
     const first = runner.start(workflow)
@@ -76,8 +83,13 @@ describe('useWorkflowRunner', () => {
     const cancelAutomated = vi.fn()
     const runner = useWorkflowRunner({
       state: ref({ images: true }),
-      runAutomated: () => new Promise((resolve) => { finish = resolve }),
-      cancelAutomated, openInteractive: vi.fn(), recordRun: vi.fn(),
+      runAutomated: () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+      cancelAutomated,
+      openInteractive: vi.fn(),
+      recordRun: vi.fn(),
     })
 
     const run = runner.start(workflow)
@@ -95,7 +107,9 @@ describe('useWorkflowRunner quality gates', () => {
   function gated(gate, tail = [['compute-depth']]) {
     const w = createWorkflow('Gated', ['reconstruct', 'gate', ...tail.map(([t]) => t)])
     Object.assign(w.blocks[1].settings, { metric: 'reprojMedianPx', op: '<', threshold: 1 }, gate)
-    tail.forEach(([, name], i) => { if (name) w.blocks[2 + i].name = name })
+    tail.forEach(([, name], i) => {
+      if (name) w.blocks[2 + i].name = name
+    })
     return w
   }
   function harness(value) {
@@ -103,7 +117,9 @@ describe('useWorkflowRunner quality gates', () => {
     const state = ref({ matches: true })
     const recordRun = vi.fn()
     const runner = useWorkflowRunner({
-      state, recordRun, openInteractive: vi.fn(),
+      state,
+      recordRun,
+      openInteractive: vi.fn(),
       measure: vi.fn(async () => value),
       runAutomated: async (type, settings, context) => {
         calls.push(type)
@@ -123,9 +139,17 @@ describe('useWorkflowRunner quality gates', () => {
     expect(calls).toEqual(['reconstruct', 'compute-depth'])
     const snap = recordRun.mock.calls[0][0]
     expect(snap.outcome).toBe('completed')
-    expect(snap.gates).toEqual([expect.objectContaining({
-      metric: 'reprojMedianPx', value: 0.6, op: '<', threshold: 1, outcome: 'pass', action: 'continue', target: null,
-    })])
+    expect(snap.gates).toEqual([
+      expect.objectContaining({
+        metric: 'reprojMedianPx',
+        value: 0.6,
+        op: '<',
+        threshold: 1,
+        outcome: 'pass',
+        action: 'continue',
+        target: null,
+      }),
+    ])
     expect(snap.statuses[w.blocks[1].id]).toMatchObject({ status: 'passed', gate: { outcome: 'pass' } })
   })
 
@@ -133,7 +157,10 @@ describe('useWorkflowRunner quality gates', () => {
     const { runner, calls, recordRun } = harness(1.7)
     expect(await runner.start(gated({ onFail: 'stop' }))).toBe(false)
     expect(calls).toEqual(['reconstruct'])
-    expect(recordRun.mock.calls[0][0]).toMatchObject({ outcome: 'failed', error: expect.stringMatching(/Quality gate failed — Reprojection median 1.70 px/) })
+    expect(recordRun.mock.calls[0][0]).toMatchObject({
+      outcome: 'failed',
+      error: expect.stringMatching(/Quality gate failed — Reprojection median 1.70 px/),
+    })
   })
 
   it('branches forward on failure and marks the skipped blocks', async () => {
@@ -149,7 +176,12 @@ describe('useWorkflowRunner quality gates', () => {
 
   it('a pass target jumps over the fail branch; Go to ends the run', async () => {
     const { runner, calls } = harness(0.5)
-    const w = gated({ onFail: 'continue', passTarget: 'depth' }, [['reconstruct'], ['compute-depth', 'depth'], ['goto'], ['dense']])
+    const w = gated({ onFail: 'continue', passTarget: 'depth' }, [
+      ['reconstruct'],
+      ['compute-depth', 'depth'],
+      ['goto'],
+      ['dense'],
+    ])
     w.blocks[4].settings.target = 'end'
     // Dense Model sits behind `goto end`: preflight warns that it never runs.
     w.defaults.warningPolicy = 'continue'
@@ -165,7 +197,11 @@ describe('useWorkflowRunner quality gates', () => {
     runner.respond('continue')
     expect(await run).toBe(true)
     expect(calls).toEqual(['reconstruct', 'compute-depth'])
-    expect(recordRun.mock.calls[0][0].gates[0]).toMatchObject({ outcome: 'fail', action: 'pause', decision: 'continue' })
+    expect(recordRun.mock.calls[0][0].gates[0]).toMatchObject({
+      outcome: 'fail',
+      action: 'pause',
+      decision: 'continue',
+    })
   })
 
   it('fails a gate whose metric the project cannot report', async () => {
@@ -178,7 +214,10 @@ describe('useWorkflowRunner quality gates', () => {
     const { runner, calls } = harness(0.5)
     const w = gated({ onFail: 'branch', failTarget: 'nowhere' })
     expect(await runner.start(w)).toBe(false)
-    expect(runner.pause.value).toMatchObject({ kind: 'blocked', message: expect.stringMatching(/no block is named “nowhere”/) })
+    expect(runner.pause.value).toMatchObject({
+      kind: 'blocked',
+      message: expect.stringMatching(/no block is named “nowhere”/),
+    })
     expect(calls).toEqual([])
   })
 
@@ -186,8 +225,14 @@ describe('useWorkflowRunner quality gates', () => {
     const seen = []
     const state = ref({ dense: true, mesh: true })
     const runner = useWorkflowRunner({
-      state, recordRun: vi.fn(), openInteractive: vi.fn(),
-      runAutomated: async (type, settings, context) => { seen.push(context); context.cloudId = type; return { ok: true } },
+      state,
+      recordRun: vi.fn(),
+      openInteractive: vi.fn(),
+      runAutomated: async (type, settings, context) => {
+        seen.push(context)
+        context.cloudId = type
+        return { ok: true }
+      },
     })
     await runner.start(createWorkflow('Chain', ['filter-cloud', 'estimate-normals', 'clean-mesh']))
     expect(seen).toHaveLength(3)
@@ -198,8 +243,11 @@ describe('useWorkflowRunner quality gates', () => {
     const checkSources = vi.fn(async () => '2 images can no longer be read (a.jpg, b.jpg)')
     const run = vi.fn()
     const runner = useWorkflowRunner({
-      state: ref({ images: true }), runAutomated: run, checkSources,
-      openInteractive: vi.fn(), recordRun: vi.fn(),
+      state: ref({ images: true }),
+      runAutomated: run,
+      checkSources,
+      openInteractive: vi.fn(),
+      recordRun: vi.fn(),
     })
     const started = runner.start(createWorkflow('Detect', ['detect-features']))
     await vi.waitFor(() => expect(runner.pause.value?.kind).toBe('warning'))
@@ -213,8 +261,11 @@ describe('useWorkflowRunner quality gates', () => {
     const checkSources = vi.fn(async () => null)
     const run = vi.fn(async () => ({ ok: true }))
     const runner = useWorkflowRunner({
-      state: ref({ images: true, dense: true }), runAutomated: run, checkSources,
-      openInteractive: vi.fn(), recordRun: vi.fn(),
+      state: ref({ images: true, dense: true }),
+      runAutomated: run,
+      checkSources,
+      openInteractive: vi.fn(),
+      recordRun: vi.fn(),
     })
     await runner.start(createWorkflow('Filter', ['filter-cloud']))
     expect(checkSources).not.toHaveBeenCalled()

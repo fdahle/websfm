@@ -38,7 +38,11 @@ describe('createLogPacer', () => {
     let t = 0
     const pace = createLogPacer({ now: () => t })
     const at = []
-    for (t = 0; t <= 1_800_000; t += 1_000) if (pace.due()) { pace.spoke(); at.push(t / 1000) }
+    for (t = 0; t <= 1_800_000; t += 1_000)
+      if (pace.due()) {
+        pace.spoke()
+        at.push(t / 1000)
+      }
     expect(at).toEqual([30, 90, 210, 450, 750, 1050, 1350, 1650])
   })
 })
@@ -50,7 +54,9 @@ describe('createStepProgress', () => {
     t = 10_000
     expect(hb.step(10, 1000, 'group 1 of 3')).toBeNull()
     t = 30_000
-    expect(hb.step(30, 1000, 'group 1 of 3')).toBe('Ortho: group 1 of 3 — 30 of 1,000 map visits (3%) in 0:30, about 15 minutes left')
+    expect(hb.step(30, 1000, 'group 1 of 3')).toBe(
+      'Ortho: group 1 of 3 — 30 of 1,000 map visits (3%) in 0:30, about 15 minutes left',
+    )
     t = 80_000
     expect(hb.step(80, 1000)).toBeNull()
     t = 90_000

@@ -1,13 +1,30 @@
 import { describe, it, expect } from 'vitest'
 import {
-  needsPyramid, planPyramid, levelFor, levelScale, tilesForRect, tileSize, buildIndex, tileRange, halveRows, createLevelCascade,
+  needsPyramid,
+  planPyramid,
+  levelFor,
+  levelScale,
+  tilesForRect,
+  tileSize,
+  buildIndex,
+  tileRange,
+  halveRows,
+  createLevelCascade,
 } from './rasterPyramid.js'
 
 describe('planPyramid', () => {
   it('halves (rounding up) down to the first level ≤ minLong', () => {
     const p = planPyramid(65714, 32857, { tileSize: 2048, minLong: 1024 })
     expect(p.levels.map((L) => [L.width, L.height])).toEqual([
-      [65714, 32857], [32857, 16429], [16429, 8215], [8215, 4108], [4108, 2054], [2054, 1027], [1027, 514], [514, 257]])
+      [65714, 32857],
+      [32857, 16429],
+      [16429, 8215],
+      [8215, 4108],
+      [4108, 2054],
+      [2054, 1027],
+      [1027, 514],
+      [514, 257],
+    ])
     expect(p.levels[0]).toMatchObject({ cols: 33, rows: 17 })
   })
 
@@ -62,24 +79,32 @@ describe('halveRows / createLevelCascade', () => {
   })
 
   it('streams every level in tile rows, matching a whole-image halving', () => {
-    const W = 37, H = 29, C = 1, ts = 8
+    const W = 37,
+      H = 29,
+      C = 1,
+      ts = 8
     const img = new Uint8Array(W * H)
     for (let i = 0; i < img.length; i++) img[i] = (i * 37 + (i >> 3) * 11) & 255
     const plan = planPyramid(W, H, { tileSize: ts, minLong: 4 })
     const got = plan.levels.map((L) => new Uint8Array(L.width * L.height * C))
     const seen = plan.levels.map(() => 0)
     const cascade = createLevelCascade(plan, C, (k, y0, rows, data) => {
-      expect(y0).toBe(seen[k]); seen[k] += rows
+      expect(y0).toBe(seen[k])
+      seen[k] += rows
       got[k].set(data, y0 * plan.levels[k].width * C)
     })
     // Uneven feeding (bands of 5 rows) must not matter.
     for (let y = 0; y < H; y += 5) cascade.push(img.subarray(y * W, Math.min(H, y + 5) * W), Math.min(5, H - y))
     cascade.finish()
-    let want = img, w = W, h = H
+    let want = img,
+      w = W,
+      h = H
     for (let k = 0; k < plan.levels.length; k++) {
       expect(seen[k]).toBe(plan.levels[k].height)
       expect([...got[k]]).toEqual([...want])
-      want = halveRows(want, w, h, C); w = Math.ceil(w / 2); h = Math.ceil(h / 2)
+      want = halveRows(want, w, h, C)
+      w = Math.ceil(w / 2)
+      h = Math.ceil(h / 2)
     }
   })
 })

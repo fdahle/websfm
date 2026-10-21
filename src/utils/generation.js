@@ -8,6 +8,8 @@ export function createGeneration() {
   return {
     next: () => ++current,
     isCurrent: (token) => token === current,
-    invalidate: () => { current++ },
+    invalidate: () => {
+      current++
+    },
   }
 }

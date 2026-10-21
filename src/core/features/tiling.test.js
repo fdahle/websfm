@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import {
-  planTiles, tileOwns, sliceRaster, nmsByPosition, autoTileSize, SIFT_TILE_ALIGN,
-} from './tiling.js'
+import { planTiles, tileOwns, sliceRaster, nmsByPosition, autoTileSize, SIFT_TILE_ALIGN } from './tiling.js'
 
 // Distinct starts along one axis, with each tile's extent.
 const axis = (tiles, key, size) => {
@@ -14,7 +12,7 @@ const axis = (tiles, key, size) => {
 // Deterministic pseudo-random sequence for the property sweep.
 function lcg(seed) {
   let s = seed >>> 0
-  return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32)
+  return () => (s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32
 }
 
 describe('planTiles', () => {
@@ -25,7 +23,10 @@ describe('planTiles', () => {
   })
 
   it('covers every pixel with overlapping tiles', () => {
-    const W = 3000, H = 2000, ts = 1024, ov = 64
+    const W = 3000,
+      H = 2000,
+      ts = 1024,
+      ov = 64
     const tiles = planTiles(W, H, ts, ov)
     // Union of tiles must cover [0,W)×[0,H): build a coverage bitmap on a coarse grid.
     const step = 50
@@ -63,7 +64,10 @@ describe('planTiles', () => {
       const H = 1 + Math.floor(rnd() * 9000)
       const tiles = planTiles(W, H, ts, ov, { align })
       const ctx = `W=${W} H=${H} ts=${ts} ov=${ov} align=${align}`
-      for (const [key, size, total] of [['x', 'w', W], ['y', 'h', H]]) {
+      for (const [key, size, total] of [
+        ['x', 'w', W],
+        ['y', 'h', H],
+      ]) {
         const a = axis(tiles, key, size)
         expect(a[0].start, ctx).toBe(0)
         const last = a[a.length - 1]
@@ -81,7 +85,8 @@ describe('planTiles', () => {
       // Ownership partitions the raster: exactly one tile owns each sample point,
       // and it lies inside that tile with ≥ ⌊ov/2⌋ clearance to any cut edge.
       for (let k = 0; k < 40; k++) {
-        const x = rnd() * W - 0.5, y = rnd() * H - 0.5
+        const x = rnd() * W - 0.5,
+          y = rnd() * H - 0.5
         const owners = tiles.filter((t) => tileOwns(t, x, y))
         expect(owners, `${ctx} at ${x},${y}`).toHaveLength(1)
         const t = owners[0]
@@ -97,7 +102,8 @@ describe('planTiles', () => {
 
 describe('sliceRaster', () => {
   it('extracts a tile-local RGBA buffer at the right offset', () => {
-    const W = 4, H = 3
+    const W = 4,
+      H = 3
     // Encode each pixel's R channel as its row-major index so we can verify layout.
     const data = new Uint8ClampedArray(W * H * 4)
     for (let i = 0; i < W * H; i++) data[i * 4] = i
@@ -152,7 +158,10 @@ describe('nmsByPosition', () => {
   })
 
   it('never treats scale-less items (SuperPoint) as siblings', () => {
-    const items = [{ x: 5, y: 5, response: 0.9 }, { x: 5, y: 5, response: 0.8 }]
+    const items = [
+      { x: 5, y: 5, response: 0.9 },
+      { x: 5, y: 5, response: 0.8 },
+    ]
     expect(nmsByPosition(items, 3)).toEqual([0])
   })
 })

@@ -28,8 +28,8 @@ const { rasters, pendingRasters } = storeToRefs(useExternalStore())
 // everything else divides on the already-persisted `imported` flag — computed
 // outputs the pipeline may replace (Products) vs. evidence it must never touch
 // (Reference Data). Filtering here keeps the sections dumb.
-const sparseClouds    = computed(() => clouds.value.filter((c) => c.kind === 'sparse'))
-const productClouds   = computed(() => clouds.value.filter((c) => c.kind !== 'sparse' && !c.imported))
+const sparseClouds = computed(() => clouds.value.filter((c) => c.kind === 'sparse'))
+const productClouds = computed(() => clouds.value.filter((c) => c.kind !== 'sparse' && !c.imported))
 const referenceClouds = computed(() => clouds.value.filter((c) => c.kind !== 'sparse' && c.imported))
 
 // Whole-sidebar drag-and-drop (counter avoids false dragleave on children).
@@ -70,8 +70,14 @@ function onDrop(e) {
 // created/opened, so a new project always presents the same tidy sidebar.
 function allClosed() {
   return {
-    images: false, gcps: false, footprints: false, sensors: false, matches: false,
-    reconstruction: false, products: false, reference: false,
+    images: false,
+    gcps: false,
+    footprints: false,
+    sensors: false,
+    matches: false,
+    reconstruction: false,
+    products: false,
+    reference: false,
   }
 }
 
@@ -84,10 +90,18 @@ function toggle(key) {
 // The sidebar stays mounted across project switches, so the initial value alone
 // wouldn't reset it.
 const projects = useProjectsStore()
-watch(() => projects.currentProjectId, () => { open.value = allClosed() })
-watch(() => pendingRasters.value.length, (count, previous) => {
-  if (count > previous) open.value.reference = true
-})
+watch(
+  () => projects.currentProjectId,
+  () => {
+    open.value = allClosed()
+  },
+)
+watch(
+  () => pendingRasters.value.length,
+  (count, previous) => {
+    if (count > previous) open.value.reference = true
+  },
+)
 </script>
 
 <template>

@@ -34,6 +34,6 @@ describe('depthColor', () => {
     const lo = depthColor(0.1)
     const hi = depthColor(0.9)
     expect(hi[0]).toBeGreaterThan(lo[0]) // red increases
-    expect(hi[2]).toBeLessThan(lo[2])    // blue decreases
+    expect(hi[2]).toBeLessThan(lo[2]) // blue decreases
   })
 })

@@ -32,12 +32,16 @@ export function regionHandles(box) {
  * view straight down an axis.
  */
 export function pickHandle(handles, project, x, y, tol) {
-  let best = null, bestD = tol
+  let best = null,
+    bestD = tol
   for (const h of handles) {
     const p = project(h.pos)
     if (!p) continue
     const d = Math.hypot(p[0] - x, p[1] - y) + (h.axis === null ? 1e-9 : 0)
-    if (d <= bestD) { bestD = d; best = h }
+    if (d <= bestD) {
+      bestD = d
+      best = h
+    }
   }
   return best
 }
@@ -49,13 +53,16 @@ export function pickHandle(handles, project, x, y, tol) {
  */
 export function axisParam(ray, point, axis) {
   const d = ray.dir
-  const e = [0, 0, 0]; e[axis] = 1
+  const e = [0, 0, 0]
+  e[axis] = 1
   const w = [point[0] - ray.origin[0], point[1] - ray.origin[1], point[2] - ray.origin[2]]
   // Closest points of the lines point + t·e and origin + s·d (|e| = 1).
-  const b = d[axis], c = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+  const b = d[axis],
+    c = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
   const den = c - b * b
   if (!(den > 1e-6 * c)) return null
-  const dw = d[0] * w[0] + d[1] * w[1] + d[2] * w[2], ew = w[axis]
+  const dw = d[0] * w[0] + d[1] * w[1] + d[2] * w[2],
+    ew = w[axis]
   return (b * dw - c * ew) / den
 }
 
@@ -64,8 +71,11 @@ export function planeHit(ray, point, normal) {
   const d = ray.dir
   const den = d[0] * normal[0] + d[1] * normal[1] + d[2] * normal[2]
   if (Math.abs(den) < 1e-12) return null
-  const s = ((point[0] - ray.origin[0]) * normal[0] + (point[1] - ray.origin[1]) * normal[1]
-    + (point[2] - ray.origin[2]) * normal[2]) / den
+  const s =
+    ((point[0] - ray.origin[0]) * normal[0] +
+      (point[1] - ray.origin[1]) * normal[1] +
+      (point[2] - ray.origin[2]) * normal[2]) /
+    den
   if (s < 0) return null
   return [ray.origin[0] + s * d[0], ray.origin[1] + s * d[1], ray.origin[2] + s * d[2]]
 }
@@ -76,9 +86,13 @@ export function planeHit(ray, point, normal) {
  * the opposite one (1e-6 of the box's largest side), so the box never turns inside out.
  */
 export function dragRegion(start, handle, delta) {
-  const min = start.min.slice(), max = start.max.slice()
+  const min = start.min.slice(),
+    max = start.max.slice()
   if (handle.axis === null) {
-    for (let k = 0; k < 3; k++) { min[k] += delta[k]; max[k] += delta[k] }
+    for (let k = 0; k < 3; k++) {
+      min[k] += delta[k]
+      max[k] += delta[k]
+    }
     return { min, max }
   }
   const k = handle.axis
@@ -95,7 +109,8 @@ export function dragRegion(start, handle, delta) {
  * the plane the centre handle moves in.
  */
 export function createRegionDrag(start, handle, viewDir) {
-  let t0 = null, p0 = null
+  let t0 = null,
+    p0 = null
   const anchor = handle.pos
   return {
     begin(ray) {

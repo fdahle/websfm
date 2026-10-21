@@ -97,22 +97,26 @@ export async function readProject(projectId) {
 // them, and updateProject reads inside it, so a rename never writes back an image
 // list that a concurrent sync has already replaced.
 export async function writeProject(projectId, data) {
-  return trackPersistence('writeProject:' + String(projectId), () => persistenceLock(`project:${projectId}`, async () => {
-    const dir = await getProjectDir(projectId, true)
-    await writeJson(dir, 'project.json', data)
-  }))
+  return trackPersistence('writeProject:' + String(projectId), () =>
+    persistenceLock(`project:${projectId}`, async () => {
+      const dir = await getProjectDir(projectId, true)
+      await writeJson(dir, 'project.json', data)
+    }),
+  )
 }
 
 // Read-modify-write: `update(data)` returns the new document. False when there is
 // no project.json to update.
 export async function updateProject(projectId, update) {
-  return trackPersistence('updateProject:' + String(projectId), () => persistenceLock(`project:${projectId}`, async () => {
-    const dir = await getProjectDir(projectId)
-    const data = await readJson(dir, 'project.json')
-    if (!data) return false
-    await writeJson(dir, 'project.json', update(data))
-    return true
-  }))
+  return trackPersistence('updateProject:' + String(projectId), () =>
+    persistenceLock(`project:${projectId}`, async () => {
+      const dir = await getProjectDir(projectId)
+      const data = await readJson(dir, 'project.json')
+      if (!data) return false
+      await writeJson(dir, 'project.json', update(data))
+      return true
+    }),
+  )
 }
 
 // Remove the project's OPFS tree. A folder-backed project has none — its files
@@ -165,7 +169,7 @@ export async function* walkProjectFiles(projectId, { skip = null } = {}) {
   try {
     dir = await getProjectDir(projectId)
   } catch {
-    return   // no such project — an empty walk, matching the "absence is empty" convention
+    return // no such project — an empty walk, matching the "absence is empty" convention
   }
   yield* walkDir(dir, '', skip)
 }
@@ -250,7 +254,9 @@ export async function writeProjectFile(projectId, relPath, data) {
 
 export async function writeFileAt(dirHandle, relPath, data) {
   return trackPersistence('writeFileAt:' + String(relPath), async () => {
-    const parts = String(relPath).split('/').filter((p) => p !== '' && p !== '.')
+    const parts = String(relPath)
+      .split('/')
+      .filter((p) => p !== '' && p !== '.')
     if (!parts.length || parts.some((p) => p === '..')) {
       throw new Error(`writeFileAt: unsafe path "${relPath}"`)
     }
@@ -265,7 +271,7 @@ export async function readJsonAt(dirHandle, filename) {
 }
 
 export async function dirIsEmpty(dirHandle) {
-  for await (const _ of dirHandle.keys()) return false   // eslint-disable-line no-unused-vars
+  for await (const _ of dirHandle.keys()) return false // eslint-disable-line no-unused-vars
   return true
 }
 
@@ -299,6 +305,9 @@ export async function copyTree(from, to, { onProgress = null } = {}) {
 export async function measureTree(dirHandle) {
   let files = 0
   let bytes = 0
-  for await (const { file } of walkDir(dirHandle, '', null)) { files++; bytes += file.size }
+  for await (const { file } of walkDir(dirHandle, '', null)) {
+    files++
+    bytes += file.size
+  }
   return { files, bytes }
 }

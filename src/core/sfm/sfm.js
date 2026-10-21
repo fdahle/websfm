@@ -61,7 +61,9 @@ export function cloneSfmInput(value) {
   if (shared && out) {
     out.forEach((im, i) => {
       if (!im) return
-      SHARED_IMAGE_FIELDS.forEach((f, j) => { if (shared[i][j]) im[f] = shared[i][j] })
+      SHARED_IMAGE_FIELDS.forEach((f, j) => {
+        if (shared[i][j]) im[f] = shared[i][j]
+      })
     })
   }
   // structuredClone drops the Uint32PairList prototype; re-wrap — including when the
@@ -96,8 +98,11 @@ export async function reconstruct(input, hooks = {}) {
     // The one place the factor's *inputs* are reported; sub-runs only echo the
     // resolved gates. Emitted here rather than in the primary sub-run so it
     // appears once per reconstruction, not once per retry.
-    (hooks.onLog ?? (() => {}))(describeScaleContext(runScale, 'Reprojection gates'),
-      runScale.clamped ? 'warn' : 'info', 'SfM')
+    ;(hooks.onLog ?? (() => {}))(
+      describeScaleContext(runScale, 'Reprojection gates'),
+      runScale.clamped ? 'warn' : 'info',
+      'SfM',
+    )
   }
 
   const cfg = { ...SFM_TUNING, ...(input.settings || {}) }
@@ -130,7 +135,7 @@ export async function reconstruct(input, hooks = {}) {
   // solution and the secondary pass merely repeated the same seed.
   const log = hooks.onLog ?? (() => {})
   const excluded = new Set()
-  const pairKey = (p) => p ? (p.idA < p.idB ? `${p.idA}--${p.idB}` : `${p.idB}--${p.idA}`) : null
+  const pairKey = (p) => (p ? (p.idA < p.idB ? `${p.idA}--${p.idB}` : `${p.idB}--${p.idA}`) : null)
   const nInputImages = (input.images || []).filter((im) => im.kpStatus === 'done').length
   const maxRetries = Math.max(0, cfg.seedRetryMax ?? 0)
   // Recovery budget: seed retries take the first half, secondary models the second.
@@ -148,56 +153,78 @@ export async function reconstruct(input, hooks = {}) {
   const explored = new Set(primary.cameras.map((c) => c.uuid))
   attempts.seeds.push({
     attempt: 0,
-    pair: primary.summary?.initPair
-      ? `${primary.summary.initPair.nameA} ↔ ${primary.summary.initPair.nameB}` : null,
+    pair: primary.summary?.initPair ? `${primary.summary.initPair.nameA} ↔ ${primary.summary.initPair.nameB}` : null,
     cameras: primary.cameras.length,
     points: primary.points.length,
     kept: true,
   })
-  for (let attempt = 0; attempt < maxRetries && primary.cameras.length < cfg.seedRetryMinFraction * nInputImages; attempt++) {
-    log(`primary registered only ${primary.cameras.length}/${nInputImages}; `
-      + `retrying with alternate seed (${attempt + 1}/${maxRetries}, ${pluralize(excluded.size, 'prior seed')} excluded)`,
-    'warn', 'Reconstruction')
-    const candidate = await reconstructSingleModel({
-      ...clone(input),
-      settings: { ...(input.settings || {}), secondaryModels: false, excludedInitPairs: [...excluded],
-        exploredInitImages: [...explored] },
-    }, {
-      onLog: (message, level, category) => log(`Seed retry ${attempt + 1}: ${message}`, level, category),
-      // Retries share the first half of the recovery budget, subdivided by the retry
-      // cap (the actual count isn't known in advance — the loop exits early on a good
-      // primary, which simply means the bar jumps ahead to the secondary phase).
-      progressRange: retryRange(attempt),
-      onProgress: scopeProgress(hooks.onProgress, {
-        ...retryRange(attempt),
-        decorate: (label) => `Seed retry ${attempt + 1}: ${label}`,
-      }),
-    })
+  for (
+    let attempt = 0;
+    attempt < maxRetries && primary.cameras.length < cfg.seedRetryMinFraction * nInputImages;
+    attempt++
+  ) {
+    log(
+      `primary registered only ${primary.cameras.length}/${nInputImages}; ` +
+        `retrying with alternate seed (${attempt + 1}/${maxRetries}, ${pluralize(excluded.size, 'prior seed')} excluded)`,
+      'warn',
+      'Reconstruction',
+    )
+    const candidate = await reconstructSingleModel(
+      {
+        ...clone(input),
+        settings: {
+          ...(input.settings || {}),
+          secondaryModels: false,
+          excludedInitPairs: [...excluded],
+          exploredInitImages: [...explored],
+        },
+      },
+      {
+        onLog: (message, level, category) => log(`Seed retry ${attempt + 1}: ${message}`, level, category),
+        // Retries share the first half of the recovery budget, subdivided by the retry
+        // cap (the actual count isn't known in advance — the loop exits early on a good
+        // primary, which simply means the bar jumps ahead to the secondary phase).
+        progressRange: retryRange(attempt),
+        onProgress: scopeProgress(hooks.onProgress, {
+          ...retryRange(attempt),
+          decorate: (label) => `Seed retry ${attempt + 1}: ${label}`,
+        }),
+      },
+    )
     attempts.retriesRun = attempt + 1
     if (candidate.status !== 'done') {
       // A failed retry has no summary, but it may have committed to a seed before it
       // failed (`seedPair`): exclude that too, or every later retry repeats it.
       const failed = candidate.seedPair ?? null
       attempts.seeds.push({
-        attempt: attempt + 1, pair: failed ? `${failed.nameA} ↔ ${failed.nameB}` : null,
-        cameras: 0, points: 0, kept: false, status: candidate.status,
+        attempt: attempt + 1,
+        pair: failed ? `${failed.nameA} ↔ ${failed.nameB}` : null,
+        cameras: 0,
+        points: 0,
+        kept: false,
+        status: candidate.status,
       })
       const failedKey = pairKey(failed)
       if (!failedKey) {
         // Failed before choosing a seed: the same exclusions would fail the same way.
-        log(`seed retry ${attempt + 1} found no usable seed (${candidate.status}); stopping the retries`,
-          'warn', 'Reconstruction')
+        log(
+          `seed retry ${attempt + 1} found no usable seed (${candidate.status}); stopping the retries`,
+          'warn',
+          'Reconstruction',
+        )
         break
       }
       excluded.add(failedKey)
       continue
     }
-    const improved = candidate.cameras.length > primary.cameras.length
-      || (candidate.cameras.length === primary.cameras.length && candidate.points.length > primary.points.length)
+    const improved =
+      candidate.cameras.length > primary.cameras.length ||
+      (candidate.cameras.length === primary.cameras.length && candidate.points.length > primary.points.length)
     attempts.seeds.push({
       attempt: attempt + 1,
       pair: candidate.summary?.initPair
-        ? `${candidate.summary.initPair.nameA} ↔ ${candidate.summary.initPair.nameB}` : null,
+        ? `${candidate.summary.initPair.nameA} ↔ ${candidate.summary.initPair.nameB}`
+        : null,
       cameras: candidate.cameras.length,
       points: candidate.points.length,
       kept: improved,
@@ -206,23 +233,35 @@ export async function reconstruct(input, hooks = {}) {
       attempts.winner = attempt + 1
       for (const s of attempts.seeds) if (s.attempt !== attempts.winner) s.kept = false
     }
-    if (candidate.cameras.length > primary.cameras.length
-      || (candidate.cameras.length === primary.cameras.length && candidate.points.length > primary.points.length)) {
-      log(`alternate seed improved primary ${primary.cameras.length} → ${candidate.cameras.length} cameras; keeping it`,
-        'success', 'Reconstruction')
+    if (
+      candidate.cameras.length > primary.cameras.length ||
+      (candidate.cameras.length === primary.cameras.length && candidate.points.length > primary.points.length)
+    ) {
+      log(
+        `alternate seed improved primary ${primary.cameras.length} → ${candidate.cameras.length} cameras; keeping it`,
+        'success',
+        'Reconstruction',
+      )
       primary = candidate
     } else {
-      log(`alternate seed reached ${candidate.cameras.length} cameras; keeping ${primary.cameras.length}-camera primary`,
-        'info', 'Reconstruction')
+      log(
+        `alternate seed reached ${candidate.cameras.length} cameras; keeping ${primary.cameras.length}-camera primary`,
+        'info',
+        'Reconstruction',
+      )
     }
     const candidateKey = pairKey(candidate.summary?.initPair)
     if (candidateKey) excluded.add(candidateKey)
     for (const c of candidate.cameras) explored.add(c.uuid)
   }
   if (primary.cameras.length < 0.25 * nInputImages) {
-    log(`primary remains too small after alternate-seed retries `
-      + `(${primary.cameras.length}/${nInputImages}); secondary recovery suppressed because it cannot `
-      + `reliably align against a tiny primary`, 'error', 'Reconstruction')
+    log(
+      `primary remains too small after alternate-seed retries ` +
+        `(${primary.cameras.length}/${nInputImages}); secondary recovery suppressed because it cannot ` +
+        `reliably align against a tiny primary`,
+      'error',
+      'Reconstruction',
+    )
     primary.secondaryModels = []
     primary.summary = { ...(primary.summary || {}), secondaryMerges: [] }
     return withRunRecord(primary)
@@ -245,29 +284,36 @@ export async function reconstruct(input, hooks = {}) {
 
   const secondaryModels = []
   const mergeReports = []
-  log(`secondary-model recovery — ${pluralize(jobs.length, 'viable stranded component')}`,
-    'info', 'Reconstruction')
+  log(`secondary-model recovery — ${pluralize(jobs.length, 'viable stranded component')}`, 'info', 'Reconstruction')
   for (let ji = 0; ji < jobs.length; ji++) {
     const job = jobs[ji]
-    log(`secondary ${ji + 1}/${jobs.length} — ${job.componentIds.length} stranded + `
-      + `${pluralize(job.boundaryIds.length, 'primary boundary image')}, ${pluralize(job.pairs.length, 'pair')}`,
-    'info', 'Reconstruction')
+    log(
+      `secondary ${ji + 1}/${jobs.length} — ${job.componentIds.length} stranded + ` +
+        `${pluralize(job.boundaryIds.length, 'primary boundary image')}, ${pluralize(job.pairs.length, 'pair')}`,
+      'info',
+      'Reconstruction',
+    )
     // Clone only this job's subset: cloning the whole input and then overriding its
     // images and pairs briefly held a second copy of every keypoint and match.
-    const secondary = await reconstructSingleModel({
-      ...clone({
-        ...input, images: job.images, pairs: job.pairs,
-        gcps: [], // GCP anchoring belongs to the merged/final project model, not a local frame
-      }),
-      settings: { ...(input.settings || {}), secondaryModels: false },
-    }, {
-      onLog: (message, level, category) => log(`Secondary ${ji + 1}: ${message}`, level, category),
-      progressRange: secondaryRange(ji),
-      onProgress: scopeProgress(hooks.onProgress, {
-        ...secondaryRange(ji),
-        decorate: (label) => `Secondary ${ji + 1}: ${label}`,
-      }),
-    })
+    const secondary = await reconstructSingleModel(
+      {
+        ...clone({
+          ...input,
+          images: job.images,
+          pairs: job.pairs,
+          gcps: [], // GCP anchoring belongs to the merged/final project model, not a local frame
+        }),
+        settings: { ...(input.settings || {}), secondaryModels: false },
+      },
+      {
+        onLog: (message, level, category) => log(`Secondary ${ji + 1}: ${message}`, level, category),
+        progressRange: secondaryRange(ji),
+        onProgress: scopeProgress(hooks.onProgress, {
+          ...secondaryRange(ji),
+          decorate: (label) => `Secondary ${ji + 1}: ${label}`,
+        }),
+      },
+    )
     if (secondary.status !== 'done' || secondary.cameras.length < 2 || !secondary.points.length) {
       log(`secondary ${ji + 1} failed to form a usable model`, 'warn', 'Reconstruction')
       continue
@@ -284,8 +330,9 @@ export async function reconstruct(input, hooks = {}) {
       continue
     }
     primary = mergeAligned(primary, aligned)
-    primary.summary.unregisteredComponents = (primary.summary.unregisteredComponents || [])
-      .filter((c) => !c.imageUuids?.some((u) => job.componentIds.includes(u)))
+    primary.summary.unregisteredComponents = (primary.summary.unregisteredComponents || []).filter(
+      (c) => !c.imageUuids?.some((u) => job.componentIds.includes(u)),
+    )
     const report = {
       componentImages: job.componentIds.length,
       addedCameras: primary.summary.secondaryMerge.addedCameras,
@@ -296,11 +343,15 @@ export async function reconstruct(input, hooks = {}) {
       scaleSpread: aligned.scaleSpread,
     }
     mergeReports.push(report)
-    log(`secondary ${ji + 1} merged — +${report.addedCameras} cameras, `
-      + `+${report.addedPoints} points; ${report.sharedCameras} shared cameras, `
-      + `position RMS ${(100 * report.alignmentRmsFrac).toFixed(2)}% of span, `
-      + `rotation median ${report.medianRotationDeg.toFixed(2)}°, scale spread `
-      + `${(100 * report.scaleSpread).toFixed(2)}%`, 'success', 'Reconstruction')
+    log(
+      `secondary ${ji + 1} merged — +${report.addedCameras} cameras, ` +
+        `+${report.addedPoints} points; ${report.sharedCameras} shared cameras, ` +
+        `position RMS ${(100 * report.alignmentRmsFrac).toFixed(2)}% of span, ` +
+        `rotation median ${report.medianRotationDeg.toFixed(2)}°, scale spread ` +
+        `${(100 * report.scaleSpread).toFixed(2)}%`,
+      'success',
+      'Reconstruction',
+    )
   }
   primary.secondaryModels = secondaryModels
   primary.summary = {

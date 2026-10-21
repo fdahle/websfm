@@ -48,17 +48,22 @@ const coeff = (f) => [f.k * (f.gE || 0), -f.k * (f.gN || 0)]
 
 function csqrt(a, b) {
   const r = Math.hypot(a, b)
-  const re = Math.sqrt((r + a) / 2), im = Math.sqrt(Math.max(0, (r - a) / 2))
+  const re = Math.sqrt((r + a) / 2),
+    im = Math.sqrt(Math.max(0, (r - a) / 2))
   return [re, b < 0 ? -im : im]
 }
 
 export function gridToLocal(p, f) {
-  const ur = (p[0] - f.e0) / f.k, ui = (p[1] - f.n0) / f.k
+  const ur = (p[0] - f.e0) / f.k,
+    ui = (p[1] - f.n0) / f.k
   const [cr, ci] = coeff(f)
   // ζ = 2u / (1 + √(1 + 2cu))
   const [sr, si] = csqrt(1 + 2 * (cr * ur - ci * ui), 2 * (cr * ui + ci * ur))
-  const dr = 1 + sr, di = si, dd = dr * dr + di * di
-  const x = 2 * (ur * dr + ui * di) / dd, y = 2 * (ui * dr - ur * di) / dd
+  const dr = 1 + sr,
+    di = si,
+    dd = dr * dr + di * di
+  const x = (2 * (ur * dr + ui * di)) / dd,
+    y = (2 * (ui * dr - ur * di)) / dd
   const lift = 1 + p[2] / f.R
   return [x * lift, y * lift, p[2] - (x * x + y * y) / (2 * f.R)]
 }
@@ -66,15 +71,20 @@ export function gridToLocal(p, f) {
 export function localToGrid(p, f) {
   const [cr, ci] = coeff(f)
   // Recover the foot ζ and the height h together: h = u + |ζ|²/(2R), ζ = (x,y)/(1+h/R).
-  let h = p[2], x = p[0], y = p[1]
+  let h = p[2],
+    x = p[0],
+    y = p[1]
   for (let i = 0; i < 6; i++) {
     const lift = 1 + h / f.R
-    x = p[0] / lift; y = p[1] / lift
+    x = p[0] / lift
+    y = p[1] / lift
     h = p[2] + (x * x + y * y) / (2 * f.R)
   }
   // u = ζ + ½cζ²
-  const zr = x * x - y * y, zi = 2 * x * y
-  const ur = x + 0.5 * (cr * zr - ci * zi), ui = y + 0.5 * (cr * zi + ci * zr)
+  const zr = x * x - y * y,
+    zi = 2 * x * y
+  const ur = x + 0.5 * (cr * zr - ci * zi),
+    ui = y + 0.5 * (cr * zi + ci * zr)
   return [f.e0 + f.k * ur, f.n0 + f.k * ui, h]
 }
 
@@ -92,7 +102,7 @@ export function precisionToLocal(P, f) {
 export function gaussianRadius(latDeg) {
   const s = Math.sin((latDeg * Math.PI) / 180)
   const w = Math.sqrt(1 - WGS84_E2 * s * s)
-  return Math.sqrt((WGS84_A * (1 - WGS84_E2)) / (w * w * w) * (WGS84_A / w))
+  return Math.sqrt(((WGS84_A * (1 - WGS84_E2)) / (w * w * w)) * (WGS84_A / w))
 }
 
 /**
@@ -112,7 +122,8 @@ export function buildMetricFrame(toLonLat, e0, n0, { metresPerUnit = 1, probe = 
   const centre = toLonLat([e0, n0])
   if (!centre || !Number.isFinite(centre[1])) return null
   const span = (a, b) => {
-    const pa = ecef(a), pb = ecef(b)
+    const pa = ecef(a),
+      pb = ecef(b)
     return pa && pb ? Math.hypot(pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]) : NaN
   }
   const ground = (span([e0 - probe, n0], [e0 + probe, n0]) + span([e0, n0 - probe], [e0, n0 + probe])) / 2
@@ -124,7 +135,10 @@ export function buildMetricFrame(toLonLat, e0, n0, { metresPerUnit = 1, probe = 
   // that the probe chords resolve the change, small enough to stay local).
   const D = 1000 / metresPerUnit
   const kAt = (x, y) => buildMetricFrame(toLonLat, x, y, { metresPerUnit, probe, gradient: false })?.k
-  const kE1 = kAt(e0 + D, n0), kE0 = kAt(e0 - D, n0), kN1 = kAt(e0, n0 + D), kN0 = kAt(e0, n0 - D)
+  const kE1 = kAt(e0 + D, n0),
+    kE0 = kAt(e0 - D, n0),
+    kN1 = kAt(e0, n0 + D),
+    kN0 = kAt(e0, n0 - D)
   const gE = kE1 && kE0 ? (Math.log(kE1) - Math.log(kE0)) / (2 * D) : 0
   const gN = kN1 && kN0 ? (Math.log(kN1) - Math.log(kN0)) / (2 * D) : 0
   return { e0, n0, k, R, gE, gN }

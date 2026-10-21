@@ -51,13 +51,22 @@ function fmtCreated(ts) {
 
 // Inline rename. Only one cloud edits at a time.
 const {
-  editingId: editingCloudId, editingName, setInput: setRenameInput, start: startRename, commit: commitRename, cancel: cancelRename,
+  editingId: editingCloudId,
+  editingName,
+  setInput: setRenameInput,
+  start: startRename,
+  commit: commitRename,
+  cancel: cancelRename,
 } = useInlineRename((id, name) => sidebar.renameCloud({ id, name }))
 
 // Point cloud context menu (right-click). { x, y, cloud }
 const { menu: cloudCtx, open: openCloudCtx, close: closeMenu } = useContextMenu()
 // Run a menu item against the cloud it was opened on, then close.
-function fromMenu(fn) { const cloud = cloudCtx.value.cloud; closeMenu(); fn(cloud) }
+function fromMenu(fn) {
+  const cloud = cloudCtx.value.cloud
+  closeMenu()
+  fn(cloud)
+}
 </script>
 
 <template>
@@ -75,9 +84,15 @@ function fromMenu(fn) { const cloud = cloudCtx.value.cloud; closeMenu(); fn(clou
         @click.stop="toggleCloudExpand(cloud.id)"
         :title="isCloudExpanded(cloud.id) ? 'Collapse' : 'Expand'"
       ></button>
-      <input class="cloud-visibility" type="checkbox" :checked="cloud.visible !== false"
-        :aria-label="`Show ${cloud.name} in 3D`" title="Visible in 3D"
-        @click.stop @change="sidebar.cloudVisibility({ id: cloud.id, visible: $event.target.checked })" />
+      <input
+        class="cloud-visibility"
+        type="checkbox"
+        :checked="cloud.visible !== false"
+        :aria-label="`Show ${cloud.name} in 3D`"
+        title="Visible in 3D"
+        @click.stop
+        @change="sidebar.cloudVisibility({ id: cloud.id, visible: $event.target.checked })"
+      />
       <input
         v-if="editingCloudId === cloud.id"
         :ref="setRenameInput"
@@ -94,34 +109,33 @@ function fromMenu(fn) { const cloud = cloudCtx.value.cloud; closeMenu(); fn(clou
         v-if="cloud.id === mainSparseId"
         class="main-badge"
         title="Main sparse cloud — used for dense / DEM / ortho / export"
-      >main</span>
+        >main</span
+      >
       <!-- Provenance chip: which of these you brought in is exactly the thing you
            forget three weeks later, and it's the difference between re-fusable
            and sacred. -->
       <!-- Independent of the main badge, not v-else-if: role and provenance are
            different questions, and a COLMAP import set as main answers both. -->
-      <span
-        v-if="cloud.imported"
-        class="imported-badge"
-        title="Imported — the pipeline never overwrites this cloud"
-      >imported</span>
+      <span v-if="cloud.imported" class="imported-badge" title="Imported — the pipeline never overwrites this cloud"
+        >imported</span
+      >
       <span
         v-if="cloud.kind === 'dense' && cloud.lod && !cloud.pos && cloud.lod.format === 'copc'"
         class="imported-badge"
         :title="`Read in place from its COPC file — the file's own level-of-detail octree, never loaded whole${cloud.lod.file?.crs ? ` (${cloud.lod.file.crs})` : ''}; tools that need every point in memory leave it out`"
-      >COPC</span>
+        >COPC</span
+      >
       <span
         v-else-if="cloud.kind === 'dense' && cloud.lod && !cloud.pos"
         class="imported-badge"
         title="Streamed — too large to hold in memory, drawn from its level-of-detail octree; tools that need every point in memory leave it out"
-      >streamed</span>
+        >streamed</span
+      >
       <!-- Only sparse clouds carry cameras; dense/mesh hold an empty Map, so the
            badge would read a permanent, meaningless 0. -->
-      <span
-        v-if="cloud.kind === 'sparse'"
-        class="obs-badge"
-        :title="`${pluralize(cloud.cameras.size, 'camera')}`"
-      >{{ cloud.cameras.size }}</span>
+      <span v-if="cloud.kind === 'sparse'" class="obs-badge" :title="`${pluralize(cloud.cameras.size, 'camera')}`">{{
+        cloud.cameras.size
+      }}</span>
     </li>
     <li v-if="isCloudExpanded(cloud.id)" class="img-details" @contextmenu.stop>
       <div class="detail-row">
@@ -165,7 +179,9 @@ function fromMenu(fn) { const cloud = cloudCtx.value.cloud; closeMenu(); fn(clou
         v-if="menu.cloud.kind === 'sparse' && menu.cloud.id !== mainSparseId"
         class="ctx-item"
         @click="fromMenu((c) => sidebar.setMainCloud(c.id))"
-      >Set as main</button>
+      >
+        Set as main
+      </button>
       <button class="ctx-item" @click="fromMenu((c) => startRename(c.id, c.name))">Rename</button>
       <div class="ctx-sep"></div>
       <button class="ctx-item danger" @click="fromMenu((c) => sidebar.removeCloud(c.id))">Remove</button>
@@ -175,7 +191,11 @@ function fromMenu(fn) { const cloud = cloudCtx.value.cloud; closeMenu(); fn(clou
 
 <style scoped src="./sidebar-sections.css"></style>
 <style scoped>
-.cloud-visibility { flex-shrink: 0; margin: 0 6px 0 0; accent-color: var(--accent); }
+.cloud-visibility {
+  flex-shrink: 0;
+  margin: 0 6px 0 0;
+  accent-color: var(--accent);
+}
 /* Marks the sparse cloud downstream stages consume (MC). */
 .main-badge {
   flex-shrink: 0;

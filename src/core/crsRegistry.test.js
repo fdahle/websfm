@@ -26,18 +26,28 @@ describe('searchCrsRecords', () => {
 
 describe('normaliseCrsRecord', () => {
   it('normalises codes and converts the EPSG index bbox to a world extent', () => {
-    expect(normaliseCrsRecord({
-      code: '28992', name: 'Amersfoort / RD New', kind: 'CRS-PROJCRS',
-      proj4: '+proj=sterea', bbox: [53.7, 3.2, 50.7, 7.3],
-    })).toMatchObject({
-      code: 'EPSG:28992', geographic: false, worldExtent: [3.2, 50.7, 7.3, 53.7],
+    expect(
+      normaliseCrsRecord({
+        code: '28992',
+        name: 'Amersfoort / RD New',
+        kind: 'CRS-PROJCRS',
+        proj4: '+proj=sterea',
+        bbox: [53.7, 3.2, 50.7, 7.3],
+      }),
+    ).toMatchObject({
+      code: 'EPSG:28992',
+      geographic: false,
+      worldExtent: [3.2, 50.7, 7.3, 53.7],
     })
   })
 
   it('passes registry metadata into the shared CRS helpers', async () => {
     const record = normaliseCrsRecord({
-      code: '999002', name: 'Test geographic CRS', kind: 'CRS-GEOGCRS',
-      proj4: '+proj=longlat +datum=WGS84 +no_defs', bbox: [90, -180, -90, 180],
+      code: '999002',
+      name: 'Test geographic CRS',
+      kind: 'CRS-GEOGCRS',
+      proj4: '+proj=longlat +datum=WGS84 +no_defs',
+      bbox: [90, -180, -90, 180],
     })
     await ensureProjection(record.code, record)
     expect(crsInfo(record.code).name).toBe('Test geographic CRS')
@@ -70,8 +80,12 @@ describe('catalog fallback in ensureProjection', () => {
     return { registry: await import('./crsRegistry.js'), crs: await import('./crs.js') }
   }
   const catalog = {
-    999003: { code: '999003', name: 'Catalog-only CRS', kind: 'CRS-PROJCRS',
-      proj4: '+proj=tmerc +lat_0=0 +lon_0=9 +k=1 +x_0=500000 +y_0=0 +datum=WGS84 +units=m +no_defs' },
+    999003: {
+      code: '999003',
+      name: 'Catalog-only CRS',
+      kind: 'CRS-PROJCRS',
+      proj4: '+proj=tmerc +lat_0=0 +lon_0=9 +k=1 +x_0=500000 +y_0=0 +datum=WGS84 +units=m +no_defs',
+    },
   }
   const respond = (url) => {
     if (String(url).includes('epsg.io')) throw new TypeError('Failed to fetch')
@@ -89,14 +103,18 @@ describe('catalog fallback in ensureProjection', () => {
   })
 
   it('says a code outside the catalog needs a connection when epsg.io is unreachable', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url) => respond(url)))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url) => respond(url)),
+    )
     const { crs } = await freshModules()
     await expect(crs.ensureProjection('EPSG:999004')).rejects.toThrow(/not in the built-in catalog/)
     vi.unstubAllGlobals()
   })
 
   it('retries the catalog after a failed load instead of memoising the failure', async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockImplementation(async (url) => respond(url))
     vi.stubGlobal('fetch', fetchMock)

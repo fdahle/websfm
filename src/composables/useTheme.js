@@ -9,9 +9,8 @@ import { computed, ref, watch } from 'vue'
 const STORAGE_KEY = 'theme'
 const PREFERENCES = ['system', 'light', 'dark']
 
-const media = typeof window !== 'undefined' && window.matchMedia
-  ? window.matchMedia('(prefers-color-scheme: dark)')
-  : null
+const media =
+  typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
 
 function storedPreference() {
   const v = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
@@ -24,15 +23,17 @@ const themePreference = ref(storedPreference())
 const systemDark = ref(media ? media.matches : true)
 
 if (media) {
-  const onChange = (e) => { systemDark.value = e.matches }
+  const onChange = (e) => {
+    systemDark.value = e.matches
+  }
   // Safari <14 has no addEventListener on MediaQueryList.
   if (media.addEventListener) media.addEventListener('change', onChange)
   else media.addListener(onChange)
 }
 
-const theme = computed(() => (
-  themePreference.value === 'system' ? (systemDark.value ? 'dark' : 'light') : themePreference.value
-))
+const theme = computed(() =>
+  themePreference.value === 'system' ? (systemDark.value ? 'dark' : 'light') : themePreference.value,
+)
 
 // `data-theme` is always written explicitly (never removed for dark): rules keyed
 // on [data-theme="dark"] — ViewerMap's OpenLayers attribution, for one — only
@@ -47,7 +48,11 @@ function applyTheme(t = theme.value) {
 function setTheme(pref) {
   const next = PREFERENCES.includes(pref) ? pref : 'system'
   themePreference.value = next
-  try { localStorage.setItem(STORAGE_KEY, next) } catch { /* private mode */ }
+  try {
+    localStorage.setItem(STORAGE_KEY, next)
+  } catch {
+    /* private mode */
+  }
 }
 
 // Order matches the settings toggle, so the quick button and the settings panel

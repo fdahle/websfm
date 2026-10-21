@@ -46,7 +46,8 @@ export const FIDUCIAL_CONSENSUS_TUNING = {
 
 const median = (v) => {
   if (!v.length) return NaN
-  const s = [...v].sort((a, b) => a - b), m = s.length >> 1
+  const s = [...v].sort((a, b) => a - b),
+    m = s.length >> 1
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
@@ -55,7 +56,8 @@ function frameBasis(row, minFrameConfidence) {
   const f = row.frame
   if (!f) return null
   if (Number.isFinite(f.confidence) && f.confidence < minFrameConfidence) return null
-  const w = f.right - f.left, h = f.bottom - f.top
+  const w = f.right - f.left,
+    h = f.bottom - f.top
   if (!(w > 0) || !(h > 0)) return null
   if (row.natW > 0 && w < row.natW * 0.2) return null
   if (row.natH > 0 && h < row.natH * 0.2) return null
@@ -103,18 +105,24 @@ export function fiducialBatchConsensus(rows = [], cfg = {}) {
       if (!Number.isFinite(d.px) || !Number.isFinite(d.py)) continue
       if (!bySlot.has(d.slot)) bySlot.set(d.slot, [])
       bySlot.get(d.slot).push({
-        row, slot: d.slot, u: (d.px - b.x0) / b.scale, v: (d.py - b.y0) / b.scale, scale: b.scale,
+        row,
+        slot: d.slot,
+        u: (d.px - b.x0) / b.scale,
+        v: (d.py - b.y0) / b.scale,
+        scale: b.scale,
       })
     }
   }
 
-  const perSlot = [], outliers = []
+  const perSlot = [],
+    outliers = []
   for (const [slot, pts] of bySlot) {
     if (pts.length < minImages) {
       perSlot.push({ slot, n: pts.length, spreadFrac: NaN, tolFrac: NaN, checked: false })
       continue
     }
-    const cu = median(pts.map((p) => p.u)), cv = median(pts.map((p) => p.v))
+    const cu = median(pts.map((p) => p.u)),
+      cv = median(pts.map((p) => p.v))
     const res = pts.map((p) => Math.hypot(p.u - cu, p.v - cv))
     const spreadFrac = median(res)
     const tolFrac = Math.max(minTolFrac, madScale * spreadFrac)
@@ -122,8 +130,12 @@ export function fiducialBatchConsensus(rows = [], cfg = {}) {
     for (const [i, p] of pts.entries()) {
       if (res[i] <= tolFrac) continue
       outliers.push({
-        imageId: p.row.id, imageName: p.row.name, slot,
-        distFrac: res[i], distPx: res[i] * p.scale, tolPx: tolFrac * p.scale,
+        imageId: p.row.id,
+        imageName: p.row.name,
+        slot,
+        distFrac: res[i],
+        distPx: res[i] * p.scale,
+        tolPx: tolFrac * p.scale,
       })
     }
   }
@@ -134,8 +146,10 @@ export function fiducialBatchConsensus(rows = [], cfg = {}) {
 // fiducial centre, and an affine map (any scanner scale/shear/rotation) keeps
 // midpoints, so every available pair's midpoint lands on the same point.
 const OPPOSITE_PAIRS = [
-  ['corner-tl', 'corner-br'], ['corner-tr', 'corner-bl'],
-  ['side-top', 'side-bottom'], ['side-left', 'side-right'],
+  ['corner-tl', 'corner-br'],
+  ['corner-tr', 'corner-bl'],
+  ['side-top', 'side-bottom'],
+  ['side-left', 'side-right'],
 ]
 
 /**
@@ -154,16 +168,18 @@ export function fiducialShapeCheck(accepted = [], cfg = {}) {
   const { shapeTolFrac, shapeMinTolPx } = { ...FIDUCIAL_CONSENSUS_TUNING, ...cfg }
   const bySlot = new Map(accepted.filter((d) => Number.isFinite(d.px) && Number.isFinite(d.py)).map((d) => [d.slot, d]))
   const pairs = OPPOSITE_PAIRS.filter(([a, b]) => bySlot.has(a) && bySlot.has(b)).map(([a, b]) => {
-    const p = bySlot.get(a), q = bySlot.get(b)
+    const p = bySlot.get(a),
+      q = bySlot.get(b)
     return { slots: [a, b], x: (p.px + q.px) / 2, y: (p.py + q.py) / 2 }
   })
   if (pairs.length < 2) return { checked: false, centreSpreadPx: NaN, tolPx: NaN, outliers: [] }
   const pts = [...bySlot.values()]
   let extent = 0
-  for (let i = 0; i < pts.length; i++) for (let j = 0; j < i; j++)
-    extent = Math.max(extent, Math.hypot(pts[i].px - pts[j].px, pts[i].py - pts[j].py))
+  for (let i = 0; i < pts.length; i++)
+    for (let j = 0; j < i; j++) extent = Math.max(extent, Math.hypot(pts[i].px - pts[j].px, pts[i].py - pts[j].py))
   const tolPx = Math.max(shapeMinTolPx, shapeTolFrac * extent)
-  const cx = median(pairs.map((p) => p.x)), cy = median(pairs.map((p) => p.y))
+  const cx = median(pairs.map((p) => p.x)),
+    cy = median(pairs.map((p) => p.y))
   const dist = pairs.map((p) => Math.hypot(p.x - cx, p.y - cy))
   const centreSpreadPx = Math.max(...dist) // a handful of pairs, not pixel data
   const outliers = []

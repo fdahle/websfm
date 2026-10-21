@@ -53,18 +53,40 @@ describe('estimateHomographyRansac', () => {
     const res = estimateHomographyRansac(ptsA, ptsB, { threshPx: 2, iters: 500 })
     expect(res).not.toBeNull()
     expect(res.inlierCount).toBeGreaterThanOrEqual(58) // the 60 inliers (allow a couple lost)
-    expect(res.inlierCount).toBeLessThan(72)           // outliers excluded
+    expect(res.inlierCount).toBeLessThan(72) // outliers excluded
   })
 
   it('returns null for < 4 points', () => {
-    expect(estimateHomographyRansac([[0, 0], [1, 1], [2, 2]], [[0, 0], [1, 1], [2, 2]])).toBeNull()
+    expect(
+      estimateHomographyRansac(
+        [
+          [0, 0],
+          [1, 1],
+          [2, 2],
+        ],
+        [
+          [0, 0],
+          [1, 1],
+          [2, 2],
+        ],
+      ),
+    ).toBeNull()
   })
 })
 
 describe('planGuidedTiles', () => {
   it('maps tiles through an identity H onto the same region', () => {
     const H = [1, 0, 0, 0, 1, 0, 0, 0, 1]
-    const tiles = planGuidedTiles({ wA: 2000, hA: 2000, wB: 2000, hB: 2000, H, tileSize: 1024, marginPx: 0, overlap: 0 })
+    const tiles = planGuidedTiles({
+      wA: 2000,
+      hA: 2000,
+      wB: 2000,
+      hB: 2000,
+      H,
+      tileSize: 1024,
+      marginPx: 0,
+      overlap: 0,
+    })
     expect(tiles.length).toBeGreaterThan(1)
     for (const { tileA, regionB } of tiles) {
       // identity + zero margin → regionB ≈ tileA (integer clamp only)
@@ -77,12 +99,21 @@ describe('planGuidedTiles', () => {
 
   it('applies a translation H and margin, clamped to B bounds', () => {
     const H = [1, 0, 100, 0, 1, 50, 0, 0, 1]
-    const tiles = planGuidedTiles({ wA: 1000, hA: 1000, wB: 1000, hB: 1000, H, tileSize: 1024, marginPx: 10, overlap: 0 })
+    const tiles = planGuidedTiles({
+      wA: 1000,
+      hA: 1000,
+      wB: 1000,
+      hB: 1000,
+      H,
+      tileSize: 1024,
+      marginPx: 10,
+      overlap: 0,
+    })
     expect(tiles.length).toBe(1)
     const { regionB } = tiles[0]
     // tileA covers 0..1000; +translation 100/50 then +margin 10, clamped to 1000.
-    expect(regionB.x).toBe(90)   // 100 - 10
-    expect(regionB.y).toBe(40)   // 50 - 10
+    expect(regionB.x).toBe(90) // 100 - 10
+    expect(regionB.y).toBe(40) // 50 - 10
     expect(regionB.w).toBe(1000 - 90)
     expect(regionB.h).toBe(1000 - 40)
   })
@@ -97,13 +128,21 @@ describe('planGuidedTiles', () => {
 
 describe('kptIndicesInRect', () => {
   it('selects only keypoints inside the rect, preserving order', () => {
-    const kps = [{ x: 5, y: 5 }, { x: 50, y: 50 }, { x: 5, y: 60 }, { x: 40, y: 40 }]
+    const kps = [
+      { x: 5, y: 5 },
+      { x: 50, y: 50 },
+      { x: 5, y: 60 },
+      { x: 40, y: 40 },
+    ]
     const idx = kptIndicesInRect(K(kps), { x: 10, y: 10, w: 50, h: 50 })
     expect(idx).toEqual([1, 3]) // (50,50) and (40,40); order preserved
   })
 
   it('is half-open on the far edges', () => {
-    const kps = [{ x: 0, y: 0 }, { x: 10, y: 10 }]
+    const kps = [
+      { x: 0, y: 0 },
+      { x: 10, y: 10 },
+    ]
     const idx = kptIndicesInRect(K(kps), { x: 0, y: 0, w: 10, h: 10 })
     expect(idx).toEqual([0]) // (10,10) is on the far edge → excluded
   })

@@ -30,30 +30,92 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   const { activateTab, activeView, activeTab, activeImageTab, openProductTab } = tabs
   const { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab } = viewers
   const {
-    showCameras, showGrid, showLegend, showFootprints, showMapGrid, showMapCameras, selectTool3d, mapGcpEdit,
-    setPointSize, setCameraScale, setMapBasemap,
+    showCameras,
+    showGrid,
+    showLegend,
+    showFootprints,
+    showMapGrid,
+    showMapCameras,
+    selectTool3d,
+    mapGcpEdit,
+    setPointSize,
+    setCameraScale,
+    setMapBasemap,
   } = view
   const { toggleModelFrame, setMapMeasureTarget } = map
   const {
-    openRegionTool, openOrientTool, openAlignPairs, openFiducialDetect, openFiducialCalibrate,
-    refreshGcpReport, openQuality,
+    openRegionTool,
+    openOrientTool,
+    openAlignPairs,
+    openFiducialDetect,
+    openFiducialCalibrate,
+    refreshGcpReport,
+    openQuality,
   } = tools
   const {
-    exportKind, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials,
-    exportKeypoints, exportMatches, downloadRasterOriginal, openMeasurementExport,
+    exportKind,
+    exportPoses,
+    exportSensors,
+    exportCameraFiducials,
+    exportImageFiducials,
+    exportKeypoints,
+    exportMatches,
+    downloadRasterOriginal,
+    openMeasurementExport,
   } = exports
   const { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages } = removals
   const {
-    cameraPickMode, addImagesRouted, onGcpPick, onCameraPick, onFiducialObsPick, onFiducialMarksPick,
-    onColmapPick, onCloudPick, onRasterPick, onVideoPick, onProjectFilePick,
+    cameraPickMode,
+    addImagesRouted,
+    onGcpPick,
+    onCameraPick,
+    onFiducialObsPick,
+    onFiducialMarksPick,
+    onColmapPick,
+    onCloudPick,
+    onRasterPick,
+    onVideoPick,
+    onProjectFilePick,
   } = imports
   const {
-    saveProjectOpen, workflowBuilderOpen, imageTableOpen, poseTableOpen, maskManagerOpen, autoMaskOpen,
-    sensorTableOpen, matchListOpen, detectFeaturesOpen, matchFeaturesOpen, reconstructOpen, findGcpsOpen,
-    georeferenceOpen, scaleBarsOpen, depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
-    filterCloudOpen, cropCloudOpen, mergeCloudsOpen, footprintFromPosesOpen, settingsOpen,
-    projectSettingsOpen, aboutOpen, systemInfoOpen, debugSummaryOpen, filterCloudPreset, toolModal,
-    gcpTableOpen, projectPickerOpen, rasterStyleId, infoImageId, symbologyProductKind, sfmSourceOpen, reseauOpen, panoramicOpen,
+    saveProjectOpen,
+    workflowBuilderOpen,
+    imageTableOpen,
+    poseTableOpen,
+    maskManagerOpen,
+    autoMaskOpen,
+    sensorTableOpen,
+    matchListOpen,
+    detectFeaturesOpen,
+    matchFeaturesOpen,
+    reconstructOpen,
+    findGcpsOpen,
+    georeferenceOpen,
+    scaleBarsOpen,
+    depthMapsOpen,
+    denseOpen,
+    demOpen,
+    orthoOpen,
+    meshOpen,
+    filterCloudOpen,
+    cropCloudOpen,
+    mergeCloudsOpen,
+    footprintFromPosesOpen,
+    settingsOpen,
+    projectSettingsOpen,
+    aboutOpen,
+    systemInfoOpen,
+    debugSummaryOpen,
+    filterCloudPreset,
+    toolModal,
+    gcpTableOpen,
+    projectPickerOpen,
+    rasterStyleId,
+    infoImageId,
+    symbologyProductKind,
+    sfmSourceOpen,
+    reseauOpen,
+    panoramicOpen,
   } = storeToRefs(useModalsStore())
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
@@ -70,9 +132,21 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   }
   // The choosers the template opens itself (Import ▸ SfM project's two buttons and
   // the project picker's "Open file…").
-  function pickSfmFiles() { pickFiles(FILE_PICKERS.sfmFiles, (e) => { sfmSourceOpen.value = false; onColmapPick(e) }) }
-  function pickSfmFolder() { pickFiles(FILE_PICKERS.sfmFolder, (e) => { sfmSourceOpen.value = false; onColmapPick(e) }) }
-  function pickProjectFile() { pickFiles(FILE_PICKERS.project, onProjectFilePick) }
+  function pickSfmFiles() {
+    pickFiles(FILE_PICKERS.sfmFiles, (e) => {
+      sfmSourceOpen.value = false
+      onColmapPick(e)
+    })
+  }
+  function pickSfmFolder() {
+    pickFiles(FILE_PICKERS.sfmFolder, (e) => {
+      sfmSourceOpen.value = false
+      onColmapPick(e)
+    })
+  }
+  function pickProjectFile() {
+    pickFiles(FILE_PICKERS.project, onProjectFilePick)
+  }
 
   // Commands whose entire effect is "open this modal", as data rather than 22
   // identical switch cases. A new pipeline modal is one line here. Anything with a
@@ -80,46 +154,46 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   // open-project-picker toggles) stays an explicit case below — the table is for the
   // trivial ones only, so it never hides behaviour.
   const MODAL_COMMANDS = {
-    'save-project-file':     saveProjectOpen,
-    'workflow-builder':      workflowBuilderOpen,
-    'open-image-table':      imageTableOpen,
-    'open-pose-table':       poseTableOpen,
-    'open-mask-manager':     maskManagerOpen,
-    'auto-mask':             autoMaskOpen,
-    'open-sensor-table':     sensorTableOpen,
-    'open-match-list':       matchListOpen,
-    'detect-features':       detectFeaturesOpen,
-    'match-features':        matchFeaturesOpen,
-    'reconstruct':           reconstructOpen,
-    'find-gcps':             findGcpsOpen,
-    'georeference':          georeferenceOpen,
-    'scale-bars':            scaleBarsOpen,
-    'compute-depth':         depthMapsOpen,
-    'dense':                 denseOpen,
-    'gen-dem':               demOpen,
-    'gen-ortho':             orthoOpen,
-    'gen-mesh':              meshOpen,
-    'filter-cloud':          filterCloudOpen,
-    'crop-cloud':            cropCloudOpen,
-    'merge-clouds':          mergeCloudsOpen,
+    'save-project-file': saveProjectOpen,
+    'workflow-builder': workflowBuilderOpen,
+    'open-image-table': imageTableOpen,
+    'open-pose-table': poseTableOpen,
+    'open-mask-manager': maskManagerOpen,
+    'auto-mask': autoMaskOpen,
+    'open-sensor-table': sensorTableOpen,
+    'open-match-list': matchListOpen,
+    'detect-features': detectFeaturesOpen,
+    'match-features': matchFeaturesOpen,
+    'reconstruct': reconstructOpen,
+    'find-gcps': findGcpsOpen,
+    'georeference': georeferenceOpen,
+    'scale-bars': scaleBarsOpen,
+    'compute-depth': depthMapsOpen,
+    'dense': denseOpen,
+    'gen-dem': demOpen,
+    'gen-ortho': orthoOpen,
+    'gen-mesh': meshOpen,
+    'filter-cloud': filterCloudOpen,
+    'crop-cloud': cropCloudOpen,
+    'merge-clouds': mergeCloudsOpen,
     'footprints-from-poses': footprintFromPosesOpen,
-    'open-settings':         settingsOpen,
+    'open-settings': settingsOpen,
     'open-project-settings': projectSettingsOpen,
-    'open-about':            aboutOpen,
-    'open-system-info':      systemInfoOpen,
-    'open-debug-summary':    debugSummaryOpen,
+    'open-about': aboutOpen,
+    'open-system-info': systemInfoOpen,
+    'open-debug-summary': debugSummaryOpen,
   }
 
   // Quality Report hub deep-links: each ribbon id opens the hub on its section.
   const EVAL_SECTIONS = {
-    'eval-overview':       'overview',
+    'eval-overview': 'overview',
     'eval-reconstruction': 'sparse',
-    'eval-calibration':    'calibration',
-    'eval-gcps':           'accuracy',
-    'eval-match-graph':    'matching',
-    'eval-coverage':       'coverage',
+    'eval-calibration': 'calibration',
+    'eval-gcps': 'accuracy',
+    'eval-match-graph': 'matching',
+    'eval-coverage': 'coverage',
     'eval-depth-coverage': 'dense',
-    'eval-dem-reference':  'products',
+    'eval-dem-reference': 'products',
   }
 
   // Tools-tab dialogs that share the one `toolModal` slot (see useModalsStore): the
@@ -127,11 +201,24 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   const TOOL_MODALS = new Set([
     'gradual-selection',
     // Point Cloud ▾
-    'estimate-normals', 'classify-ground', 'cloud-section', 'transform-cloud', 'align-icp', 'cloud-distance',
+    'estimate-normals',
+    'classify-ground',
+    'cloud-section',
+    'transform-cloud',
+    'align-icp',
+    'cloud-distance',
     // Mesh ▾
-    'clean-mesh', 'smooth-mesh', 'decimate-mesh', 'crop-mesh', 'mesh-to-points', 'texture-mesh', 'mesh-measure',
+    'clean-mesh',
+    'smooth-mesh',
+    'decimate-mesh',
+    'crop-mesh',
+    'mesh-to-points',
+    'texture-mesh',
+    'mesh-measure',
     // Products ▾
-    'dem-contours', 'dem-derivatives', 'clip-raster',
+    'dem-contours',
+    'dem-derivatives',
+    'clip-raster',
     // Images ▾
     'image-quality',
     // Model ▾
@@ -158,16 +245,38 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     // closes the dialog without passing through its @close handler).
     if (id === 'filter-cloud') filterCloudPreset.value = null
     const modal = MODAL_COMMANDS[id]
-    if (modal) { modal.value = true; return }
-    if (TOOL_MODALS.has(id)) { toolModal.value = id; return }
-    if (FILTER_DEEP_LINKS[id]) { filterCloudPreset.value = FILTER_DEEP_LINKS[id]; filterCloudOpen.value = true; return }
-    if (EVAL_SECTIONS[id]) { openQuality(EVAL_SECTIONS[id]); return }
+    if (modal) {
+      modal.value = true
+      return
+    }
+    if (TOOL_MODALS.has(id)) {
+      toolModal.value = id
+      return
+    }
+    if (FILTER_DEEP_LINKS[id]) {
+      filterCloudPreset.value = FILTER_DEEP_LINKS[id]
+      filterCloudOpen.value = true
+      return
+    }
+    if (EVAL_SECTIONS[id]) {
+      openQuality(EVAL_SECTIONS[id])
+      return
+    }
     // 3D view presets: 'view-preset-top' → setView('top').
-    if (id.startsWith('view-preset-')) { viewerRef.value?.setView(id.slice('view-preset-'.length)); return }
+    if (id.startsWith('view-preset-')) {
+      viewerRef.value?.setView(id.slice('view-preset-'.length))
+      return
+    }
     // Measure groups: 'measure-length' → the ruler of the viewer in front (a raster
     // tab, or the 2D map), etc. The map also picks which raster it measures.
-    if (id.startsWith('measure-target:')) { setMapMeasureTarget(id.slice('measure-target:'.length)); return }
-    if (id.startsWith('map-basemap:')) { setMapBasemap(id.slice('map-basemap:'.length)); return }
+    if (id.startsWith('measure-target:')) {
+      setMapMeasureTarget(id.slice('measure-target:'.length))
+      return
+    }
+    if (id.startsWith('map-basemap:')) {
+      setMapBasemap(id.slice('map-basemap:'.length))
+      return
+    }
     // DEM of difference: the DEM's Volume tool with a reference DEM as the base.
     if (id === 'dem-difference') {
       openProductTab?.('dem')
@@ -182,94 +291,236 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       return
     }
     // Measure in 3D: the 3D view's own tool (before the raster measure-* prefix).
-    if (id === 'measure-3d') { activateTab('viewer'); viewerRef.value?.toggleMeasureTool('distance'); return }
+    if (id === 'measure-3d') {
+      activateTab('viewer')
+      viewerRef.value?.toggleMeasureTool('distance')
+      return
+    }
     const measureHost = activeView.value === 'map' ? mapViewerRef.value : activeProductViewer()
-    if (id === 'measure-saved') { measureHost?.toggleSavedMeasurements(); return }
-    if (id.startsWith('measure-')) { measureHost?.setMeasureTool(id.slice('measure-'.length)); return }
+    if (id === 'measure-saved') {
+      measureHost?.toggleSavedMeasurements()
+      return
+    }
+    if (id.startsWith('measure-')) {
+      measureHost?.setMeasureTool(id.slice('measure-'.length))
+      return
+    }
 
     switch (id) {
-      case 'import-images':        pickFiles(FILE_PICKERS.images, onRibbonPick); break
-      case 'import-video':         pickFiles(FILE_PICKERS.video, onVideoPick); break
-      case 'import-gcps':          pickFiles(FILE_PICKERS.gcps, onGcpPick); break
-      case 'import-camera-list':   cameraPickMode.value = 'pose';   pickFiles(FILE_PICKERS.cameras, onCameraPick); break
-      case 'import-calib':         cameraPickMode.value = 'sensor'; pickFiles(FILE_PICKERS.cameras, onCameraPick); break
-      case 'import-image-fiducials':  pickFiles(FILE_PICKERS.imageFiducials, onFiducialObsPick); break
-      case 'import-camera-fiducials': pickFiles(FILE_PICKERS.cameraFiducials, onFiducialMarksPick); break
-      case 'import-colmap':        sfmSourceOpen.value = true; break
-      case 'import-cloud':         pickFiles(FILE_PICKERS.cloud, onCloudPick); break
-      case 'import-raster':        pickFiles(FILE_PICKERS.raster, onRasterPick); break
-      case 'export-cameras':       exportPoses(); break
-      case 'export-sensors':       exportSensors(); break
-      case 'export-camera-fiducials': exportCameraFiducials(); break
-      case 'export-image-fiducials':  exportImageFiducials(); break
-      case 'export-cloud':         exportKind.value = 'cloud'; break
-      case 'export-mesh':          exportKind.value = 'mesh'; break
-      case 'export-model':         exportKind.value = 'model'; break
-      case 'export-colmap':        exportKind.value = 'colmap'; break
-      case 'export-undistorted':   exportKind.value = 'undistorted'; break
-      case 'export-tiles3d':       exportKind.value = 'tiles3d'; break
-      case 'export-dem':           exportKind.value = 'dem'; break
-      case 'export-ortho':         exportKind.value = 'ortho'; break
-      case 'export-keypoints':     exportKeypoints(); break
-      case 'export-matches':       exportMatches(); break
+      case 'import-images':
+        pickFiles(FILE_PICKERS.images, onRibbonPick)
+        break
+      case 'import-video':
+        pickFiles(FILE_PICKERS.video, onVideoPick)
+        break
+      case 'import-gcps':
+        pickFiles(FILE_PICKERS.gcps, onGcpPick)
+        break
+      case 'import-camera-list':
+        cameraPickMode.value = 'pose'
+        pickFiles(FILE_PICKERS.cameras, onCameraPick)
+        break
+      case 'import-calib':
+        cameraPickMode.value = 'sensor'
+        pickFiles(FILE_PICKERS.cameras, onCameraPick)
+        break
+      case 'import-image-fiducials':
+        pickFiles(FILE_PICKERS.imageFiducials, onFiducialObsPick)
+        break
+      case 'import-camera-fiducials':
+        pickFiles(FILE_PICKERS.cameraFiducials, onFiducialMarksPick)
+        break
+      case 'import-colmap':
+        sfmSourceOpen.value = true
+        break
+      case 'import-cloud':
+        pickFiles(FILE_PICKERS.cloud, onCloudPick)
+        break
+      case 'import-raster':
+        pickFiles(FILE_PICKERS.raster, onRasterPick)
+        break
+      case 'export-cameras':
+        exportPoses()
+        break
+      case 'export-sensors':
+        exportSensors()
+        break
+      case 'export-camera-fiducials':
+        exportCameraFiducials()
+        break
+      case 'export-image-fiducials':
+        exportImageFiducials()
+        break
+      case 'export-cloud':
+        exportKind.value = 'cloud'
+        break
+      case 'export-mesh':
+        exportKind.value = 'mesh'
+        break
+      case 'export-model':
+        exportKind.value = 'model'
+        break
+      case 'export-colmap':
+        exportKind.value = 'colmap'
+        break
+      case 'export-undistorted':
+        exportKind.value = 'undistorted'
+        break
+      case 'export-tiles3d':
+        exportKind.value = 'tiles3d'
+        break
+      case 'export-dem':
+        exportKind.value = 'dem'
+        break
+      case 'export-ortho':
+        exportKind.value = 'ortho'
+        break
+      case 'export-keypoints':
+        exportKeypoints()
+        break
+      case 'export-matches':
+        exportMatches()
+        break
       // `value` from a saved-measurements list: { ids, label } exports just its records.
-      case 'export-measurements':  openMeasurementExport(value); break
-      case 'view-viewer':          activateTab('viewer'); break
-      case 'view-map':             activateTab('map'); break
-      case 'reset-view':           viewerRef.value?.resetView(); break
-      case 'view-toggle-cameras':  showCameras.value = !showCameras.value; break
-      case 'view-toggle-grid': showGrid.value = !showGrid.value; break
-      case 'view-toggle-legend': showLegend.value = !showLegend.value; break
-      case 'map-fit-view':         mapViewerRef.value?.fitView(); break
-      case 'map-toggle-grid': showMapGrid.value = !showMapGrid.value; break
-      case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
-      case 'map-toggle-cameras': showMapCameras.value = !showMapCameras.value; break
+      case 'export-measurements':
+        openMeasurementExport(value)
+        break
+      case 'view-viewer':
+        activateTab('viewer')
+        break
+      case 'view-map':
+        activateTab('map')
+        break
+      case 'reset-view':
+        viewerRef.value?.resetView()
+        break
+      case 'view-toggle-cameras':
+        showCameras.value = !showCameras.value
+        break
+      case 'view-toggle-grid':
+        showGrid.value = !showGrid.value
+        break
+      case 'view-toggle-legend':
+        showLegend.value = !showLegend.value
+        break
+      case 'map-fit-view':
+        mapViewerRef.value?.fitView()
+        break
+      case 'map-toggle-grid':
+        showMapGrid.value = !showMapGrid.value
+        break
+      case 'map-toggle-footprints':
+        showFootprints.value = !showFootprints.value
+        break
+      case 'map-toggle-cameras':
+        showMapCameras.value = !showMapCameras.value
+        break
       // Tools ▸ Images ▾ ▸ Edit GCPs: the mode of the view in front.
       case 'edit-gcps':
         if (activeView.value === 'map') mapGcpEdit.value = !mapGcpEdit.value
         else handleCommand('img-gcp-edit')
         break
-      case 'map-toggle-model-frame': toggleModelFrame(); break
-      case 'set-region':           openRegionTool(); break
-      case 'orient-model':         openOrientTool(); break
-      case 'align-points':         openAlignPairs(); break
-      case 'view-point-size':      setPointSize(value); break
-      case 'view-camera-scale':    setCameraScale(value); break
-      case 'view-select-rect':     chooseSelectTool('rect'); break
-      case 'view-select-lasso':    chooseSelectTool('lasso'); break
-      case 'img-fit':              if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.fit(); break
-      case 'img-zoom-in':          if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.zoomIn(); break
-      case 'img-zoom-out':         if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.zoomOut(); break
-      case 'detect-fiducials':     openFiducialDetect(); break
-      case 'calibrate-fiducials':  openFiducialCalibrate(); break
-      case 'detect-reseau':        reseauOpen.value = true; break
-      case 'split-panoramic':      panoramicOpen.value = true; break
-      case 'open-gcp-table':       gcpTableOpen.value = true; refreshGcpReport(); break
-      case 'open-glossary':        glossaryStore.openHome(); break
-      case 'open-guide':           guideStore.openHome(); break
-      case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
-      case 'toggle-console':       consoleOpen.value = !consoleOpen.value; break
-      case 'toggle-theme':         cycleTheme(); break
-      case 'raster-fit':           activeProductViewer()?.fit(); break
-      case 'raster-zoom-in':       activeProductViewer()?.zoomBy(1.4); break
-      case 'raster-zoom-out':      activeProductViewer()?.zoomBy(1 / 1.4); break
-      case 'raster-style':         if (activeRasterTab.value?.rasterId) rasterStyleId.value = activeRasterTab.value.rasterId; break
+      case 'map-toggle-model-frame':
+        toggleModelFrame()
+        break
+      case 'set-region':
+        openRegionTool()
+        break
+      case 'orient-model':
+        openOrientTool()
+        break
+      case 'align-points':
+        openAlignPairs()
+        break
+      case 'view-point-size':
+        setPointSize(value)
+        break
+      case 'view-camera-scale':
+        setCameraScale(value)
+        break
+      case 'view-select-rect':
+        chooseSelectTool('rect')
+        break
+      case 'view-select-lasso':
+        chooseSelectTool('lasso')
+        break
+      case 'img-fit':
+        if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.fit()
+        break
+      case 'img-zoom-in':
+        if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.zoomIn()
+        break
+      case 'img-zoom-out':
+        if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.zoomOut()
+        break
+      case 'detect-fiducials':
+        openFiducialDetect()
+        break
+      case 'calibrate-fiducials':
+        openFiducialCalibrate()
+        break
+      case 'detect-reseau':
+        reseauOpen.value = true
+        break
+      case 'split-panoramic':
+        panoramicOpen.value = true
+        break
+      case 'open-gcp-table':
+        gcpTableOpen.value = true
+        refreshGcpReport()
+        break
+      case 'open-glossary':
+        glossaryStore.openHome()
+        break
+      case 'open-guide':
+        guideStore.openHome()
+        break
+      case 'open-project-picker':
+        projectPickerOpen.value = !projectPickerOpen.value
+        break
+      case 'toggle-console':
+        consoleOpen.value = !consoleOpen.value
+        break
+      case 'toggle-theme':
+        cycleTheme()
+        break
+      case 'raster-fit':
+        activeProductViewer()?.fit()
+        break
+      case 'raster-zoom-in':
+        activeProductViewer()?.zoomBy(1.4)
+        break
+      case 'raster-zoom-out':
+        activeProductViewer()?.zoomBy(1 / 1.4)
+        break
+      case 'raster-style':
+        if (activeRasterTab.value?.rasterId) rasterStyleId.value = activeRasterTab.value.rasterId
+        break
       case 'raster-toggle-map': {
         const r = activeRasterTab.value
         if (r?.rasterId) setRasterVisible(r.rasterId, !r.visible)
         else if (r && !r.imported) setProductVisible(r.kind, !r.visible)
         break
       }
-      case 'raster-symbology':     if (activeRasterTab.value && !activeRasterTab.value.imported) symbologyProductKind.value = activeRasterTab.value.kind; break
-      case 'raster-download':      if (activeRasterTab.value?.rasterId) downloadRasterOriginal(activeRasterTab.value.rasterId); break
+      case 'raster-symbology':
+        if (activeRasterTab.value && !activeRasterTab.value.imported)
+          symbologyProductKind.value = activeRasterTab.value.kind
+        break
+      case 'raster-download':
+        if (activeRasterTab.value?.rasterId) downloadRasterOriginal(activeRasterTab.value.rasterId)
+        break
       case 'raster-remove': {
         const r = activeRasterTab.value
         if (r?.rasterId) confirmRemoveRaster(r.rasterId)
         else if (r && !r.imported) confirmRemoveProduct(r.kind)
         break
       }
-      case 'img-show-info':        if (activeImageTab.value) infoImageId.value = activeImageTab.value.id; break
-      case 'img-remove':           if (activeImageTab.value) requestRemoveImages(activeImageTab.value.id); break
+      case 'img-show-info':
+        if (activeImageTab.value) infoImageId.value = activeImageTab.value.id
+        break
+      case 'img-remove':
+        if (activeImageTab.value) requestRemoveImages(activeImageTab.value.id)
+        break
       case 'img-toggle-keypoints': {
         // The toggle is global, but the overlay only draws on detected images
         // (showKeypointsFor), so flipping it here reads the preference, not the gate.
@@ -324,7 +575,6 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       }
     }
   }
-
 
   function onRibbonPick(event) {
     const files = [...event.target.files].filter((f) => f.type.startsWith('image/'))

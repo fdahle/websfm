@@ -25,9 +25,18 @@ import { toScaledPx, fromScaledPx, scaleAxes } from './geometry.js'
 // `Kw` must be the K the coefficients were fitted against (working-res if the
 // caller scaled it). A no-op when both bags are empty.
 export function distortComposed(u, v, Kw, dist, selfCal) {
-  let x = u, y = v
-  if (hasDistortion(selfCal)) { const p = distortPixel(x, y, Kw, selfCal); x = p.x; y = p.y }
-  if (hasDistortion(dist))    { const p = distortPixel(x, y, Kw, dist);    x = p.x; y = p.y }
+  let x = u,
+    y = v
+  if (hasDistortion(selfCal)) {
+    const p = distortPixel(x, y, Kw, selfCal)
+    x = p.x
+    y = p.y
+  }
+  if (hasDistortion(dist)) {
+    const p = distortPixel(x, y, Kw, dist)
+    x = p.x
+    y = p.y
+  }
   return { x, y }
 }
 
@@ -67,13 +76,12 @@ export function makePinholeToMark({ K, dist = null, selfCal = null, fiducial = n
 // Returns **null** when the whole chain is the identity (no bags, no fiducial, both
 // scales 1); callers treat null as "no work to do", which is the common
 // EXIF-only digital case.
-export function makeSampleMap({
-  K, dist = null, selfCal = null, fiducial = null, outScale = 1, srcScale = 1,
-} = {}) {
+export function makeSampleMap({ K, dist = null, selfCal = null, fiducial = null, outScale = 1, srcScale = 1 } = {}) {
   const needsDist = !!K && (hasDistortion(dist) || hasDistortion(selfCal))
   // Either scale may be per axis [sx, sy] (geometry.js scaleAxes): a raster resized to
   // a rounded size has slightly different factors per axis.
-  const [ox, oy] = scaleAxes(outScale), [qx, qy] = scaleAxes(srcScale)
+  const [ox, oy] = scaleAxes(outScale),
+    [qx, qy] = scaleAxes(srcScale)
   const needsScale = ox !== 1 || oy !== 1 || qx !== 1 || qy !== 1
   if (!needsDist && !fiducial && !needsScale) return null
   return (u, v) => {
@@ -81,8 +89,16 @@ export function makeSampleMap({
     // (geometry.js toScaledPx), the same convention scaleK uses.
     let x = ox === 1 ? u : fromScaledPx(u, ox)
     let y = oy === 1 ? v : fromScaledPx(v, oy)
-    if (needsDist) { const d = distortComposed(x, y, K, dist, selfCal); x = d.x; y = d.y }
-    if (fiducial) { const s = canonicalToScan(x, y, fiducial.transform ?? fiducial.A, fiducial.frame); x = s.x; y = s.y }
+    if (needsDist) {
+      const d = distortComposed(x, y, K, dist, selfCal)
+      x = d.x
+      y = d.y
+    }
+    if (fiducial) {
+      const s = canonicalToScan(x, y, fiducial.transform ?? fiducial.A, fiducial.frame)
+      x = s.x
+      y = s.y
+    }
     // Into the source raster's grid.
     if (qx !== 1) x = toScaledPx(x, qx)
     if (qy !== 1) y = toScaledPx(y, qy)
@@ -109,12 +125,26 @@ export const centreToMarkPx = (x) => x + 0.5
 // off by the whole lens distortion — and on a film scan by the entire scan→canonical
 // affine. Never the identity (the half-pixel convention shift always applies).
 export function makeScanToPinhole({ K, dist = null, selfCal = null, fiducial = null } = {}) {
-  const undoDist = !!K && hasDistortion(dist), undoSelf = !!K && hasDistortion(selfCal)
+  const undoDist = !!K && hasDistortion(dist),
+    undoSelf = !!K && hasDistortion(selfCal)
   return (px, py) => {
-    let x = markToCentrePx(px), y = markToCentrePx(py)
-    if (fiducial) { const c = scanToCanonical(x, y, fiducial.transform ?? fiducial.A, fiducial.frame); x = c.x; y = c.y }
-    if (undoDist) { const p = undistortPixel(x, y, K, dist); x = p.x; y = p.y }
-    if (undoSelf) { const p = undistortPixel(x, y, K, selfCal); x = p.x; y = p.y }
+    let x = markToCentrePx(px),
+      y = markToCentrePx(py)
+    if (fiducial) {
+      const c = scanToCanonical(x, y, fiducial.transform ?? fiducial.A, fiducial.frame)
+      x = c.x
+      y = c.y
+    }
+    if (undoDist) {
+      const p = undistortPixel(x, y, K, dist)
+      x = p.x
+      y = p.y
+    }
+    if (undoSelf) {
+      const p = undistortPixel(x, y, K, selfCal)
+      x = p.x
+      y = p.y
+    }
     return { x, y }
   }
 }
@@ -133,23 +163,41 @@ export function makeFrameModelResolver({ summary = null, sensors = [] } = {}) {
   // such an image self-calibrates as its own group (runRecord.js ▸ selfCalDistortion (rows built by selfCalFold.js)).
   const rows = summary?.selfCalDistortion ?? []
   const selfCalBySensor = new Map(rows.filter((d) => d.sensorId != null).map((d) => [d.sensorId, d]))
-  const selfCalByImage = new Map(rows.filter((d) => d.sensorId == null && d.imageUuid != null).map((d) => [d.imageUuid, d]))
-  const fidByUuid = new Map((summary?.fiducialTransforms ?? []).map((t) =>
-    [t.uuid, { A: t.A ?? null, transform: t.transform ?? null, frame: t.frame }]))
+  const selfCalByImage = new Map(
+    rows.filter((d) => d.sensorId == null && d.imageUuid != null).map((d) => [d.imageUuid, d]),
+  )
+  const fidByUuid = new Map(
+    (summary?.fiducialTransforms ?? []).map((t) => [
+      t.uuid,
+      { A: t.A ?? null, transform: t.transform ?? null, frame: t.frame },
+    ]),
+  )
   return (image) => {
     const sensor = image?.sensorId != null ? sensorById.get(image.sensorId) : null
-    const sc = image?.sensorId != null ? selfCalBySensor.get(image.sensorId)
-      : image?.uuid != null ? selfCalByImage.get(image.uuid) : null
-    const fiducial = image?.uuid != null ? fidByUuid.get(image.uuid) ?? null : null
+    const sc =
+      image?.sensorId != null
+        ? selfCalBySensor.get(image.sensorId)
+        : image?.uuid != null
+          ? selfCalByImage.get(image.uuid)
+          : null
+    const fiducial = image?.uuid != null ? (fidByUuid.get(image.uuid) ?? null) : null
     // A `fisheye` row is the run's self-calibrated lens (selfCalFold.js): it replaces
     // the sensor's, it does not compose on top of it.
     if (sc?.fisheye) {
-      return { dist: { fisheye: true, k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0, k4: sc.k4 || 0 },
-        selfCal: null, fiducial, filmMissing: false }
+      return {
+        dist: { fisheye: true, k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0, k4: sc.k4 || 0 },
+        selfCal: null,
+        fiducial,
+        filmMissing: false,
+      }
     }
     const selfCal = sc && (sc.k1 || sc.k2 || sc.k3) ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null
-    return { dist: sensor ? distortionOf(sensor) : null, selfCal, fiducial,
-      filmMissing: sensor?.kind === 'film' && !fiducial }
+    return {
+      dist: sensor ? distortionOf(sensor) : null,
+      selfCal,
+      fiducial,
+      filmMissing: sensor?.kind === 'film' && !fiducial,
+    }
   }
 }
 
@@ -164,7 +212,8 @@ export function gcpsInPinholeFrame(gcps, { imagesById, sparseCameras, frameModel
   const maps = new Map()
   const mapperFor = (imageId) => {
     if (maps.has(imageId)) return maps.get(imageId)
-    const im = imagesById.get(imageId), cam = im ? sparseCameras.get(im.uuid) : null
+    const im = imagesById.get(imageId),
+      cam = im ? sparseCameras.get(im.uuid) : null
     const m = cam?.K ? makeScanToPinhole({ K: cam.K, ...frameModel(im) }) : null
     maps.set(imageId, m)
     return m
@@ -190,13 +239,21 @@ export function gcpsInPinholeFrame(gcps, { imagesById, sparseCameras, frameModel
 // distortion — the same approximation the guide already documents).
 export function guideToScan(guide, toScan, K) {
   if (!guide || !toScan) return guide
-  if (guide.kind === 'point') { const p = toScan(guide.u, guide.v); return { ...guide, u: p.x, v: p.y } }
+  if (guide.kind === 'point') {
+    const p = toScan(guide.u, guide.v)
+    return { ...guide, u: p.x, v: p.y }
+  }
   if (guide.kind !== 'line' || !guide.line || !K) return guide
   const [a, b, c] = guide.line
   const off = a * K.cx + b * K.cy + c
-  const fx = K.cx - off * a, fy = K.cy - off * b, D = Math.max(K.cx, K.cy, 1)
-  const p = toScan(fx - D * b, fy + D * a), q = toScan(fx + D * b, fy - D * a)
-  const la = q.y - p.y, lb = p.x - q.x, n = Math.hypot(la, lb)
+  const fx = K.cx - off * a,
+    fy = K.cy - off * b,
+    D = Math.max(K.cx, K.cy, 1)
+  const p = toScan(fx - D * b, fy + D * a),
+    q = toScan(fx + D * b, fy - D * a)
+  const la = q.y - p.y,
+    lb = p.x - q.x,
+    n = Math.hypot(la, lb)
   if (!(n > 1e-12)) return null
   return { ...guide, line: [la / n, lb / n, -(la * p.x + lb * p.y) / n] }
 }

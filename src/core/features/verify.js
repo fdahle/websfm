@@ -41,9 +41,9 @@ export function packMatchedPoints(kpsA, kpsB, matches) {
   const ptsB = new Float32Array(n * 2)
   for (let i = 0; i < n; i++) {
     const { ia, ib } = matches[i]
-    ptsA[i * 2]     = kpsA.x(ia)
+    ptsA[i * 2] = kpsA.x(ia)
     ptsA[i * 2 + 1] = kpsA.y(ia)
-    ptsB[i * 2]     = kpsB.x(ib)
+    ptsB[i * 2] = kpsB.x(ib)
     ptsB[i * 2 + 1] = kpsB.y(ib)
   }
   return { ptsA, ptsB }
@@ -100,14 +100,23 @@ export async function verifyPointPairs(ptsA, ptsB, options = {}) {
  * `inlierMask[i]` (i.e. the same putative list handed to `verifyMatches`).
  */
 export function inlierSpread(kpsA, kpsB, matches, inlierMask, roundPx = 1) {
-  const seenA = new Set(), seenB = new Set()
-  let minAx = Infinity, minAy = Infinity, maxAx = -Infinity, maxAy = -Infinity
-  let minBx = Infinity, minBy = Infinity, maxBx = -Infinity, maxBy = -Infinity
+  const seenA = new Set(),
+    seenB = new Set()
+  let minAx = Infinity,
+    minAy = Infinity,
+    maxAx = -Infinity,
+    maxAy = -Infinity
+  let minBx = Infinity,
+    minBy = Infinity,
+    maxBx = -Infinity,
+    maxBy = -Infinity
   let count = 0
   for (let i = 0; i < matches.length; i++) {
     if (!(inlierMask[i] > 0.5)) continue
-    const ax = kpsA.x(matches[i].ia), ay = kpsA.y(matches[i].ia)
-    const bx = kpsB.x(matches[i].ib), by = kpsB.y(matches[i].ib)
+    const ax = kpsA.x(matches[i].ia),
+      ay = kpsA.y(matches[i].ia)
+    const bx = kpsB.x(matches[i].ib),
+      by = kpsB.y(matches[i].ib)
     count++
     seenA.add(`${Math.round(ax / roundPx)},${Math.round(ay / roundPx)}`)
     seenB.add(`${Math.round(bx / roundPx)},${Math.round(by / roundPx)}`)

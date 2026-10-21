@@ -8,14 +8,28 @@ let decodes
 beforeEach(() => {
   decodes = []
   globalThis.OffscreenCanvas = class {
-    constructor(w, h) { this.width = w; this.height = h; this.drawn = null }
+    constructor(w, h) {
+      this.width = w
+      this.height = h
+      this.drawn = null
+    }
     getContext() {
-      return { clearRect: () => { this.drawn = null }, drawImage: (bmp) => { this.drawn = bmp.src } }
+      return {
+        clearRect: () => {
+          this.drawn = null
+        },
+        drawImage: (bmp) => {
+          this.drawn = bmp.src
+        },
+      }
     }
   }
   globalThis.createImageBitmap = (blob) => new Promise((resolve) => decodes.push(() => resolve({ src: blob.id })))
 })
-afterEach(() => { delete globalThis.OffscreenCanvas; delete globalThis.createImageBitmap })
+afterEach(() => {
+  delete globalThis.OffscreenCanvas
+  delete globalThis.createImageBitmap
+})
 
 function setup() {
   const image = reactive({ depth: null })
@@ -28,18 +42,28 @@ function setup() {
 describe('useDepthOverlay: latest wins', () => {
   it('ignores an older decode that resolves after a newer one', async () => {
     const { image, overlay } = setup()
-    image.depth = { blob: { id: 'old' } }; await nextTick()
-    image.depth = { blob: { id: 'new' } }; await nextTick()
-    decodes[1](); await Promise.resolve(); await Promise.resolve()
-    decodes[0](); await Promise.resolve(); await Promise.resolve()
+    image.depth = { blob: { id: 'old' } }
+    await nextTick()
+    image.depth = { blob: { id: 'new' } }
+    await nextTick()
+    decodes[1]()
+    await Promise.resolve()
+    await Promise.resolve()
+    decodes[0]()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(overlay.depthCanvas.value.drawn).toBe('new')
   })
 
   it('does not repaint a decode that lands after the depth map was cleared', async () => {
     const { image, overlay } = setup()
-    image.depth = { blob: { id: 'a' } }; await nextTick()
-    image.depth = null; await nextTick()
-    decodes[0](); await Promise.resolve(); await Promise.resolve()
+    image.depth = { blob: { id: 'a' } }
+    await nextTick()
+    image.depth = null
+    await nextTick()
+    decodes[0]()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(overlay.depthCanvas.value.drawn).toBe(null)
     expect(overlay.hasDepth.value).toBe(false)
   })

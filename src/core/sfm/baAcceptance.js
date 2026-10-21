@@ -32,14 +32,17 @@ export function projectFullXYZ(cam, K, x, y, z) {
   const yc = R[1][0] * x + R[1][1] * y + R[1][2] * z + t[1]
   const zc = R[2][0] * x + R[2][1] * y + R[2][2] * z + t[2]
   if (Math.abs(zc) < 1e-9) return null
-  const a = xc / zc, b = yc / zc
+  const a = xc / zc,
+    b = yc / zc
   const r2 = a * a + b * b
   let d
   if (K.fisheye) {
     // θd/r with θ = atan r — bundle.rs `lens_factor`, its on-axis limit included.
-    const r = Math.sqrt(r2), th = Math.atan(r), t2 = th * th
-    d = r2 < 1e-16 ? 1
-      : th * (1 + t2 * ((K.k1 ?? 0) + t2 * ((K.k2 ?? 0) + t2 * ((K.k3 ?? 0) + t2 * (K.k4 ?? 0))))) / r
+    const r = Math.sqrt(r2),
+      th = Math.atan(r),
+      t2 = th * th
+    d =
+      r2 < 1e-16 ? 1 : (th * (1 + t2 * ((K.k1 ?? 0) + t2 * ((K.k2 ?? 0) + t2 * ((K.k3 ?? 0) + t2 * (K.k4 ?? 0)))))) / r
   } else {
     const r4 = r2 * r2
     d = 1 + (K.k1 ?? 0) * r2 + (K.k2 ?? 0) * r4 + (K.k3 ?? 0) * r4 * r2
@@ -90,10 +93,15 @@ export function compareRobustCost({ before, after, observations }) {
   const finite = [...eb].filter((e) => Number.isFinite(e)).sort((x, y) => x - y)
   const med = finite.length ? finite[Math.floor(finite.length / 2)] : 1
   const delta = Math.max(1, 2.5 * med)
-  let cb = 0, ca = 0
+  let cb = 0,
+    ca = 0
   const nObs = obsCount(observations)
-  for (let i = 0; i < nObs; i++) { cb += huber(eb[i], delta); ca += huber(ea[i], delta) }
+  for (let i = 0; i < nObs; i++) {
+    cb += huber(eb[i], delta)
+    ca += huber(ea[i], delta)
+  }
   const n = Math.max(1, nObs)
-  const b = Math.sqrt(cb / n), a = Math.sqrt(ca / n)
+  const b = Math.sqrt(cb / n),
+    a = Math.sqrt(ca / n)
   return { delta, before: b, after: a, improved: a <= b }
 }

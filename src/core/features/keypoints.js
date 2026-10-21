@@ -21,14 +21,28 @@ export class Keypoints {
     this.rgb = rgb
     this.length = Math.floor(data.length / KP_STRIDE)
   }
-  x(i) { return this.data[KP_STRIDE * i] }
-  y(i) { return this.data[KP_STRIDE * i + 1] }
-  nx(i) { return this.data[KP_STRIDE * i + 2] }
-  ny(i) { return this.data[KP_STRIDE * i + 3] }
-  scale(i) { return this.data[KP_STRIDE * i + 4] }
-  response(i) { return this.data[KP_STRIDE * i + 5] }
+  x(i) {
+    return this.data[KP_STRIDE * i]
+  }
+  y(i) {
+    return this.data[KP_STRIDE * i + 1]
+  }
+  nx(i) {
+    return this.data[KP_STRIDE * i + 2]
+  }
+  ny(i) {
+    return this.data[KP_STRIDE * i + 3]
+  }
+  scale(i) {
+    return this.data[KP_STRIDE * i + 4]
+  }
+  response(i) {
+    return this.data[KP_STRIDE * i + 5]
+  }
   /** [r, g, b] or null — allocates; for colouring passes use `rgb` directly. */
-  color(i) { return this.rgb ? [this.rgb[3 * i], this.rgb[3 * i + 1], this.rgb[3 * i + 2]] : null }
+  color(i) {
+    return this.rgb ? [this.rgb[3 * i], this.rgb[3 * i + 1], this.rgb[3 * i + 2]] : null
+  }
 }
 
 export const isKeypoints = (k) => k instanceof Keypoints
@@ -51,12 +65,19 @@ export function keypointsFromObjects(list) {
   const data = new Float32Array(KP_STRIDE * n)
   let rgb = null
   for (let i = 0; i < n; i++) {
-    const k = list[i], o = KP_STRIDE * i
-    data[o] = k.x; data[o + 1] = k.y; data[o + 2] = k.nx ?? 0; data[o + 3] = k.ny ?? 0
-    data[o + 4] = k.scale ?? 0; data[o + 5] = k.response ?? 0
+    const k = list[i],
+      o = KP_STRIDE * i
+    data[o] = k.x
+    data[o + 1] = k.y
+    data[o + 2] = k.nx ?? 0
+    data[o + 3] = k.ny ?? 0
+    data[o + 4] = k.scale ?? 0
+    data[o + 5] = k.response ?? 0
     if (k.color) {
       rgb ??= new Uint8Array(3 * n)
-      rgb[3 * i] = k.color[0]; rgb[3 * i + 1] = k.color[1]; rgb[3 * i + 2] = k.color[2]
+      rgb[3 * i] = k.color[0]
+      rgb[3 * i + 1] = k.color[1]
+      rgb[3 * i + 2] = k.color[2]
     }
   }
   return new Keypoints(data, rgb)
@@ -77,7 +98,10 @@ export function fillNormalized(kps, width, height) {
   const d = kps.data
   for (let i = 0; i < kps.length; i++) {
     const o = KP_STRIDE * i
-    if (d[o + 2] === 0 && d[o + 3] === 0) { d[o + 2] = d[o] / width; d[o + 3] = d[o + 1] / height }
+    if (d[o + 2] === 0 && d[o + 3] === 0) {
+      d[o + 2] = d[o] / width
+      d[o + 3] = d[o + 1] / height
+    }
   }
   return kps
 }

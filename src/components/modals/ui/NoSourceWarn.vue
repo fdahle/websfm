@@ -8,6 +8,8 @@ defineProps({ kind: { type: String, default: 'cloud' } })
 </script>
 
 <template>
-  <WarnBox v-if="kind === 'mesh'">No mesh yet. Build one with <strong>Reconstruct ▸ Mesh</strong> or import one.</WarnBox>
+  <WarnBox v-if="kind === 'mesh'"
+    >No mesh yet. Build one with <strong>Reconstruct ▸ Mesh</strong> or import one.</WarnBox
+  >
   <WarnBox v-else>No dense cloud yet. Build one with <strong>Dense Model</strong> or import one.</WarnBox>
 </template>

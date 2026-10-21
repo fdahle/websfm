@@ -1,10 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { settleEditLatch } from './editFraming.js'
 
-const posA = new Float32Array(3), posA2 = new Float32Array(3), posB = new Float32Array(3)
+const posA = new Float32Array(3),
+  posA2 = new Float32Array(3),
+  posB = new Float32Array(3)
 const cloudA = { id: 'a', pos: posA, count: 1 }
 const cloudB = { id: 'b', pos: posB, count: 1 }
-const drawn = (...clouds) => (id) => clouds.find((c) => c.id === id)
+const drawn =
+  (...clouds) =>
+  (id) =>
+    clouds.find((c) => c.id === id)
 
 describe('settleEditLatch', () => {
   it('is inert with nothing latched', () => {
@@ -14,7 +19,10 @@ describe('settleEditLatch', () => {
   })
 
   it('a fork (new cloud + source hidden) is an edit result: no re-frame', () => {
-    const clouds = [{ ...cloudA, visible: false }, { id: 'a-edit', pos: new Float32Array(3), count: 1 }]
+    const clouds = [
+      { ...cloudA, visible: false },
+      { id: 'a-edit', pos: new Float32Array(3), count: 1 },
+    ]
     const r = settleEditLatch(new Set(['a']), clouds, drawn(cloudA), true)
     expect(r.editResult).toBe(true)
     expect([...r.pending]).toEqual([])
@@ -44,7 +52,17 @@ describe('settleEditLatch', () => {
     const r1 = settleEditLatch(new Set(['a', 'b']), first, drawn(cloudA, cloudB), true)
     expect(r1.editResult).toBe(true)
     expect([...r1.pending]).toEqual(['b'])
-    const r2 = settleEditLatch(r1.pending, [...first.slice(0, 1), { ...cloudB, visible: false }, first[2], { id: 'b-edit', pos: new Float32Array(3), count: 1 }], drawn(cloudB), true)
+    const r2 = settleEditLatch(
+      r1.pending,
+      [
+        ...first.slice(0, 1),
+        { ...cloudB, visible: false },
+        first[2],
+        { id: 'b-edit', pos: new Float32Array(3), count: 1 },
+      ],
+      drawn(cloudB),
+      true,
+    )
     expect(r2.editResult).toBe(true)
     expect(r2.pending.size).toBe(0)
   })

@@ -12,22 +12,37 @@ import { SUPERPOINT_TILE_ALIGN } from './tiling.js'
 
 export const LEARNED_DETECTORS = {
   superpoint: {
-    id: 'superpoint', label: 'SuperPoint', modelId: 'superpoint', matcherModelId: 'lightglue',
+    id: 'superpoint',
+    label: 'SuperPoint',
+    modelId: 'superpoint',
+    matcherModelId: 'lightglue',
     // Input [1,1,H,W] luma in [0,1]; output cell 8 px.
-    descDim: 256, channels: 1, tileAlign: SUPERPOINT_TILE_ALIGN,
+    descDim: 256,
+    channels: 1,
+    tileAlign: SUPERPOINT_TILE_ALIGN,
   },
   disk: {
-    id: 'disk', label: 'DISK', modelId: 'disk', matcherModelId: 'lightglue_disk',
+    id: 'disk',
+    label: 'DISK',
+    modelId: 'disk',
+    matcherModelId: 'lightglue_disk',
     // Input [1,3,H,W] RGB in [0,1]. Its U-Net pads to a multiple of 16
     // internally; tile origins sit on that grid so a tile matches the untiled run.
-    descDim: 128, channels: 3, tileAlign: 16,
+    descDim: 128,
+    channels: 3,
+    tileAlign: 16,
   },
   aliked: {
-    id: 'aliked', label: 'ALIKED', modelId: 'aliked', matcherModelId: 'lightglue_aliked',
+    id: 'aliked',
+    label: 'ALIKED',
+    modelId: 'aliked',
+    matcherModelId: 'lightglue_aliked',
     // Input [1,3,H,W] RGB in [0,1]; float (x, y) keypoints. It pads to a multiple of
     // 32 internally, so tile origins sit on that grid. (The padding is split over
     // both sides, so a tile whose size is not a multiple of 32 is still offset.)
-    descDim: 128, channels: 3, tileAlign: 32,
+    descDim: 128,
+    channels: 3,
+    tileAlign: 32,
   },
 }
 
@@ -78,7 +93,15 @@ export function lightGlueModelFor(images) {
   const bad = images.filter((im) => (im.detector ?? 'sift') !== target)
   if (!target) {
     const names = Object.values(LEARNED_DETECTORS).map((d) => d.label)
-    return { ok: false, bad, reason: `LightGlue needs a learned detector (${names.slice(0, -1).join(', ')} or ${names.at(-1)})` }
+    return {
+      ok: false,
+      bad,
+      reason: `LightGlue needs a learned detector (${names.slice(0, -1).join(', ')} or ${names.at(-1)})`,
+    }
   }
-  return { ok: false, bad, reason: `LightGlue needs every image detected with one learned detector (${detectorLabel(target)})` }
+  return {
+    ok: false,
+    bad,
+    reason: `LightGlue needs every image detected with one learned detector (${detectorLabel(target)})`,
+  }
 }

@@ -32,7 +32,10 @@ export async function selectInitPair(
   // geometrically cleanest one rather than the first that clears the parallax floor.
   function initReprojStats(init) {
     const residuals = []
-    const camById = new Map([[init.entry.idA, init.cA], [init.entry.idB, init.cB]])
+    const camById = new Map([
+      [init.entry.idA, init.cA],
+      [init.entry.idB, init.cB],
+    ])
     for (const pt of init.points) {
       pt.views.forEach((kpIdx, uuid) => {
         const cam = camById.get(uuid)
@@ -66,26 +69,52 @@ export async function selectInitPair(
     const tri = await triangulateDlt(
       pa.map((p) => toNorm(p.x, p.y, KA)),
       pb.map((p) => toNorm(p.x, p.y, KB)),
-      PA, PB,
+      PA,
+      PB,
     )
     const points = []
     for (const { x, y, z, srcIdx } of tri) {
       if (projDepth(PA, x, y, z) > 0 && projDepth(PB, x, y, z) > 0) {
-        const ia = matches.a(srcIdx), ib = matches.b(srcIdx)
-        points.push({ x, y, z, views: new Map([[entry.idA, ia], [entry.idB, ib]]) })
+        const ia = matches.a(srcIdx),
+          ib = matches.b(srcIdx)
+        points.push({
+          x,
+          y,
+          z,
+          views: new Map([
+            [entry.idA, ia],
+            [entry.idB, ib],
+          ]),
+        })
       }
     }
     const angle = medianTriangulationAngle(cA, cB, points)
     // Relative depth spread of the seed points in camera A (std / mean): the planar
     // twin tie-break below. Ground seen from above sits at nearly one depth; the twin
     // of a nadir pair puts it on a steeply tilted plane.
-    let zs = 0, zz = 0
-    for (const q of points) { zs += q.z; zz += q.z * q.z }
+    let zs = 0,
+      zz = 0
+    for (const q of points) {
+      zs += q.z
+      zz += q.z * q.z
+    }
     const zMean = points.length ? zs / points.length : 0
     const depthCv = zMean > 0 ? Math.sqrt(Math.max(0, zz / points.length - zMean * zMean)) / zMean : Infinity
     const init = {
-      ok: true, entry, iA, iB, cA, cB, points, angle, esv, eSource, depthCv,
-      inliers: entry.inlierCount, triCount: tri.length, cheiralKept: points.length,
+      ok: true,
+      entry,
+      iA,
+      iB,
+      cA,
+      cB,
+      points,
+      angle,
+      esv,
+      eSource,
+      depthCv,
+      inliers: entry.inlierCount,
+      triCount: tri.length,
+      cheiralKept: points.length,
     }
     init.reproj = points.length ? initReprojStats(init) : { median: Infinity }
     return init
@@ -98,7 +127,8 @@ export async function selectInitPair(
     const KA = Kmap.get(entry.idA)
     const KB = Kmap.get(entry.idB)
     const matches = asPairList(entry.matches)
-    const pa = new Array(matches.length), pb = new Array(matches.length)
+    const pa = new Array(matches.length),
+      pb = new Array(matches.length)
     for (let i = 0; i < matches.length; i++) {
       pa[i] = { x: kpX(iA.kp, matches.a(i)), y: kpY(iA.kp, matches.a(i)) }
       pb[i] = { x: kpX(iB.kp, matches.b(i)), y: kpY(iB.kp, matches.b(i)) }
@@ -111,7 +141,10 @@ export async function selectInitPair(
       const r = ransacEssential(na, nb, { thresh: essThreshPx / ((KA.fx + KB.fx) / 2) })
       for (const [k, alt] of (r?.alternatives ?? []).entries()) {
         const c = await poseCandidate(entry, iA, iB, KA, KB, pa, pb, matches, alt.E, k ? `5pt alt ${k}` : '5pt')
-        if (c) { c.eInliers = alt.count; tried.push(c) }
+        if (c) {
+          c.eInliers = alt.count
+          tried.push(c)
+        }
       }
     }
     const ok = tried.filter((c) => c && c.cheiralKept >= 10)
@@ -129,8 +162,13 @@ export async function selectInitPair(
     // depth — the twin of a camera moving across a surface moves along its normal and
     // tilts the surface steeply (Casa Grande 1978: a twin seed gave a block whose
     // camera axes spread 18° instead of 0.3°, and the GCP fit collapsed).
-    const twins = fit.filter((c) => c.eInliers != null && best.eInliers != null
-      && c.eInliers >= 0.95 * best.eInliers && c.reproj.median <= 1.5 * best.reproj.median + 1)
+    const twins = fit.filter(
+      (c) =>
+        c.eInliers != null &&
+        best.eInliers != null &&
+        c.eInliers >= 0.95 * best.eInliers &&
+        c.reproj.median <= 1.5 * best.reproj.median + 1,
+    )
     if (twins.length > 1) {
       const flat = twins.reduce((a, b) => (b.depthCv < a.depthCv ? b : a))
       if (flat !== best) {
@@ -147,14 +185,24 @@ export async function selectInitPair(
   // (tiny parallax) whose triangulated points collapse onto a line. Probe the
   // top candidates and score every one that recovers a valid pose.
   const {
-    minInitInliers = 15, minInitAngleDeg = 2.0, initCandidates = 24, initCandidateMax = 240,
-    excludedInitPairs = [], exploredInitImages = [],
+    minInitInliers = 15,
+    minInitAngleDeg = 2.0,
+    initCandidates = 24,
+    initCandidateMax = 240,
+    excludedInitPairs = [],
+    exploredInitImages = [],
   } = settings
   const excluded = new Set(excludedInitPairs)
   const pairId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
   const eligible = donePairs
-    .filter((e) => e.inlierCount >= minInitInliers
-      && Kmap.has(e.idA) && Kmap.has(e.idB) && hasFundamental(e) && !excluded.has(pairId(e.idA, e.idB)))
+    .filter(
+      (e) =>
+        e.inlierCount >= minInitInliers &&
+        Kmap.has(e.idA) &&
+        Kmap.has(e.idB) &&
+        hasFundamental(e) &&
+        !excluded.has(pairId(e.idA, e.idB)),
+    )
     .sort((a, b) => b.inlierCount - a.inlierCount)
   // A seed retry (sfm.js) passes the images earlier attempts registered: a new seed
   // must bring at least one image none of them reached, or the retry re-grows the same
@@ -164,14 +212,22 @@ export async function selectInitPair(
   const explored = new Set(exploredInitImages)
   const fresh = explored.size ? eligible.filter((e) => !(explored.has(e.idA) && explored.has(e.idB))) : eligible
   if (explored.size && fresh.length < eligible.length) {
-    log(`${pluralize(eligible.length - fresh.length, 'seed candidate')} skipped — both images already registered by an `
-      + `earlier attempt${fresh.length ? '' : ' (none left, so they stay in)'}`, 'info', 'Reconstruction')
+    log(
+      `${pluralize(eligible.length - fresh.length, 'seed candidate')} skipped — both images already registered by an ` +
+        `earlier attempt${fresh.length ? '' : ' (none left, so they stay in)'}`,
+      'info',
+      'Reconstruction',
+    )
   }
   const ranked = fresh.length ? fresh : eligible
   const candidates = ranked.slice(0, initCandidates)
 
-  log(`${pluralize(candidates.length, 'init candidate')} of ${donePairs.length} done pairs `
-    + `(≥${minInitInliers} inliers, need ≥${minInitAngleDeg}° parallax)`, 'info', 'Reconstruction')
+  log(
+    `${pluralize(candidates.length, 'init candidate')} of ${donePairs.length} done pairs ` +
+      `(≥${minInitInliers} inliers, need ≥${minInitAngleDeg}° parallax)`,
+    'info',
+    'Reconstruction',
+  )
 
   if (candidates.length === 0) {
     log('no valid matched pair found — check inlier counts and metadata', 'warn', 'Reconstruction')
@@ -194,20 +250,32 @@ export async function selectInitPair(
   // one-step growth signal we actually care about: a seed with many nominal edges but
   // no third view observing its 3D points cannot grow.
   function seedGrowth(init) {
-    const seedPointByView = new Map([[init.entry.idA, new Map()], [init.entry.idB, new Map()]])
-    init.points.forEach((pt, pointIdx) => pt.views.forEach((kpIdx, uuid) => {
-      seedPointByView.get(uuid)?.set(kpIdx, pointIdx)
-    }))
+    const seedPointByView = new Map([
+      [init.entry.idA, new Map()],
+      [init.entry.idB, new Map()],
+    ])
+    init.points.forEach((pt, pointIdx) =>
+      pt.views.forEach((kpIdx, uuid) => {
+        seedPointByView.get(uuid)?.set(kpIdx, pointIdx)
+      }),
+    )
     const pointsByThirdView = new Map()
     for (const edge of donePairs) {
       let seedUuid, thirdUuid, seedSide
       if (seedPointByView.has(edge.idA) && !seedPointByView.has(edge.idB)) {
-        seedUuid = edge.idA; thirdUuid = edge.idB; seedSide = 0
+        seedUuid = edge.idA
+        thirdUuid = edge.idB
+        seedSide = 0
       } else if (seedPointByView.has(edge.idB) && !seedPointByView.has(edge.idA)) {
-        seedUuid = edge.idB; thirdUuid = edge.idA; seedSide = 1
+        seedUuid = edge.idB
+        thirdUuid = edge.idA
+        seedSide = 1
       } else continue
       let seen = pointsByThirdView.get(thirdUuid)
-      if (!seen) { seen = new Set(); pointsByThirdView.set(thirdUuid, seen) }
+      if (!seen) {
+        seen = new Set()
+        pointsByThirdView.set(thirdUuid, seen)
+      }
       const pointByKp = seedPointByView.get(seedUuid)
       const m = asPairList(edge.matches ?? [])
       for (let i = 0; i < m.length; i++) {
@@ -253,16 +321,14 @@ export async function selectInitPair(
   // low-parallax seed does win badly on real data, the term to add is the E-matrix
   // conditioning σ2/σ1 (already computed and logged per candidate) — with measured
   // evidence behind its shape, not a guess.
-  const {
-    initAngleTargetDeg = 8, initConnFloor = 0.4, initConnCeil = 2, initSoftFloorFactor = 1.25,
-  } = settings
+  const { initAngleTargetDeg = 8, initConnFloor = 0.4, initConnCeil = 2, initSoftFloorFactor = 1.25 } = settings
   // initAngleTargetDeg no longer names a ramp target — it survives only as the knee
   // (×4) past which a grazing baseline's decaying overlap starts to cost more than
   // its extra parallax buys.
   const softFloorDeg = minInitAngleDeg * initSoftFloorFactor
   const parallaxHealth = (a) => {
     if (a <= minInitAngleDeg) return 0
-    if (a < softFloorDeg) return 0.5 + 0.5 * (a - minInitAngleDeg) / (softFloorDeg - minInitAngleDeg)
+    if (a < softFloorDeg) return 0.5 + (0.5 * (a - minInitAngleDeg)) / (softFloorDeg - minInitAngleDeg)
     const wide = initAngleTargetDeg * 4
     return a <= wide ? 1 : Math.max(0.4, wide / a)
   }
@@ -282,9 +348,8 @@ export async function selectInitPair(
   // range, not a ceiling: floored at initConnFloor (a great pair in a thin neighbourhood
   // is still a candidate) and capped at initConnCeil so one freak hub can't buy the seed
   // outright. On a uniformly-connected graph every seed scores 1 and this is inert.
-  const connectivityHealth = (v) => (medianDegree
-    ? Math.min(initConnCeil, Math.max(initConnFloor, pairDegree(v.entry) / medianDegree))
-    : 1)
+  const connectivityHealth = (v) =>
+    medianDegree ? Math.min(initConnCeil, Math.max(initConnFloor, pairDegree(v.entry) / medianDegree)) : 1
 
   // Point count enters as a SQUARE ROOT, not linearly. A pair with 2× the surviving points
   // is better conditioned but not twice as likely to grow the model — and taken linearly it
@@ -302,8 +367,9 @@ export async function selectInitPair(
   // and let point count pick the stalled seed. Zero/one both map to 1 so sparse graphs
   // retain the geometry-only behaviour.
   const growthHealth = (v) => Math.max(1, v.growth.views)
-  const seedScore = (v) => Math.sqrt(v.cheiralKept) * parallaxHealth(v.angle)
-    * connectivityHealth(v) * growthHealth(v) / (1 + v.reproj.median / 4)
+  const seedScore = (v) =>
+    (Math.sqrt(v.cheiralKept) * parallaxHealth(v.angle) * connectivityHealth(v) * growthHealth(v)) /
+    (1 + v.reproj.median / 4)
 
   // Probe *every* candidate (don't stop at the first adequate one) so we can both log
   // the full table and score them against each other. Picking the first pair over the
@@ -319,7 +385,10 @@ export async function selectInitPair(
       const entry = batch[ci]
       if (onProgress) {
         const t = nowMs()
-        if (t - lastEmit >= 250) { lastEmit = t; onProgress(ci, batch.length) }
+        if (t - lastEmit >= 250) {
+          lastEmit = t
+          onProgress(ci, batch.length)
+        }
       }
       const init = await tryInitPair(entry)
       const nameA = imageByUuid(entry.idA)?.name ?? entry.idA
@@ -330,11 +399,16 @@ export async function selectInitPair(
       }
       // Cheirality survival = how many triangulated points are in front of both
       // cameras. A low ratio almost always means the recovered pose is wrong.
-      const kept = init.cheiralKept, tri = init.triCount
-      const pct = tri ? (100 * kept / tri).toFixed(0) : '0'
+      const kept = init.cheiralKept,
+        tri = init.triCount
+      const pct = tri ? ((100 * kept) / tri).toFixed(0) : '0'
       if (kept < 10) {
-        log(`candidate ${nameA} ↔ ${nameB} rejected — only ${kept}/${tri} pts `
-          + `survived cheirality (${pct}%), need ≥10`, 'debug', 'Reconstruction')
+        log(
+          `candidate ${nameA} ↔ ${nameB} rejected — only ${kept}/${tri} pts ` +
+            `survived cheirality (${pct}%), need ≥10`,
+          'debug',
+          'Reconstruction',
+        )
         continue
       }
       init.nameA = nameA
@@ -347,16 +421,19 @@ export async function selectInitPair(
       const candRatio = fe.s1 > 0 ? fe.s2 / fe.s1 : 0
       // Log the score AND its factors: a seed decision that can only be re-derived by
       // hand from raw candidate numbers is what made the B4 post-mortem manual.
-      log(`candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, `
-        + `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, `
-        + `init reproj median ${init.reproj.median.toFixed(2)}px (E from ${init.eSource}`
-        + `${init.twinOf ? `, planar twin of ${init.twinOf.eSource}: depth spread ${init.depthCv.toFixed(3)} vs ${init.twinOf.depthCv.toFixed(3)}` : ''}), `
-        + `KᵀFK σ2/σ1 ${candRatio.toFixed(2)}, `
-        + `graph degree ${pairDegree(entry)} (median ${medianDegree}) `
-        + `⇒ score ${init.score.toFixed(1)} (parallax ×${parallaxHealth(init.angle).toFixed(2)}, `
-        + `connectivity ×${connectivityHealth(init).toFixed(2)}, `
-        + `growth ×${growthHealth(init).toFixed(2)} from ${pluralize(init.growth.views, 'PnP-ready view')})`,
-        'debug', 'Reconstruction')
+      log(
+        `candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, ` +
+          `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, ` +
+          `init reproj median ${init.reproj.median.toFixed(2)}px (E from ${init.eSource}` +
+          `${init.twinOf ? `, planar twin of ${init.twinOf.eSource}: depth spread ${init.depthCv.toFixed(3)} vs ${init.twinOf.depthCv.toFixed(3)}` : ''}), ` +
+          `KᵀFK σ2/σ1 ${candRatio.toFixed(2)}, ` +
+          `graph degree ${pairDegree(entry)} (median ${medianDegree}) ` +
+          `⇒ score ${init.score.toFixed(1)} (parallax ×${parallaxHealth(init.angle).toFixed(2)}, ` +
+          `connectivity ×${connectivityHealth(init).toFixed(2)}, ` +
+          `growth ×${growthHealth(init).toFixed(2)} from ${pluralize(init.growth.views, 'PnP-ready view')})`,
+        'debug',
+        'Reconstruction',
+      )
       viable.push(init)
     }
   }
@@ -381,13 +458,17 @@ export async function selectInitPair(
   const nearViews = new Map() // image → Set of images probed within halfFloor of it
   const noteNear = (v) => {
     if (!(v.angle < halfFloor)) return
-    for (const [a, b] of [[v.entry.idA, v.entry.idB], [v.entry.idB, v.entry.idA]]) {
+    for (const [a, b] of [
+      [v.entry.idA, v.entry.idB],
+      [v.entry.idB, v.entry.idA],
+    ]) {
       if (!nearViews.has(a)) nearViews.set(a, new Set())
       nearViews.get(a).add(b)
     }
   }
   const predictedLow = (e) => {
-    const na = nearViews.get(e.idA), nb = nearViews.get(e.idB)
+    const na = nearViews.get(e.idA),
+      nb = nearViews.get(e.idB)
     if (!na || !nb) return false
     if (na.has(e.idB)) return true
     for (const z of na) if (nb.has(z)) return true
@@ -405,10 +486,13 @@ export async function selectInitPair(
       else batch.push(e)
     }
     const widest = viable.reduce((m, v) => Math.max(m, v.angle), 0)
-    log(`no candidate among ${probed} probed clears ${minInitAngleDeg}° parallax (widest ${widest.toFixed(2)}°) — `
-      + `widening the search: next ${pluralize(batch.length, 'pair')} by inlier count`
-      + (skipped ? `, ${skipped} skipped as near-coincident with already-probed views` : ''),
-    'info', 'Reconstruction')
+    log(
+      `no candidate among ${probed} probed clears ${minInitAngleDeg}° parallax (widest ${widest.toFixed(2)}°) — ` +
+        `widening the search: next ${pluralize(batch.length, 'pair')} by inlier count` +
+        (skipped ? `, ${skipped} skipped as near-coincident with already-probed views` : ''),
+      'info',
+      'Reconstruction',
+    )
     if (!batch.length) break
     probed += batch.length
     await probe(batch)
@@ -424,14 +508,17 @@ export async function selectInitPair(
     // is worth a second look, and neither is visible from the winner's numbers alone.
     const rest = adequate.filter((v) => v !== best)
     const second = rest.length ? rest.reduce((a, b) => (b.score > a.score ? b : a)) : null
-    log(`selected seed ${best.nameA} ↔ ${best.nameB} of `
-      + `${pluralize(adequate.length, 'pair')} over ${minInitAngleDeg}° parallax (score ${best.score.toFixed(1)}: `
-      + `${best.cheiralKept} pts, ${best.angle.toFixed(2)}° parallax, `
-      + `init reproj median ${best.reproj.median.toFixed(2)}px, `
-      + `connectivity ${connectivityHealth(best).toFixed(2)} at graph degree ${pairDegree(best.entry)} `
-      + `vs median ${medianDegree}, ${pluralize(best.growth.views, 'PnP-ready view')})`
-      + (second ? ` — ahead of ${second.nameA} ↔ ${second.nameB} at ${second.score.toFixed(1)}` : ''),
-      'info', 'Reconstruction')
+    log(
+      `selected seed ${best.nameA} ↔ ${best.nameB} of ` +
+        `${pluralize(adequate.length, 'pair')} over ${minInitAngleDeg}° parallax (score ${best.score.toFixed(1)}: ` +
+        `${best.cheiralKept} pts, ${best.angle.toFixed(2)}° parallax, ` +
+        `init reproj median ${best.reproj.median.toFixed(2)}px, ` +
+        `connectivity ${connectivityHealth(best).toFixed(2)} at graph degree ${pairDegree(best.entry)} ` +
+        `vs median ${medianDegree}, ${pluralize(best.growth.views, 'PnP-ready view')})` +
+        (second ? ` — ahead of ${second.nameA} ↔ ${second.nameB} at ${second.score.toFixed(1)}` : ''),
+      'info',
+      'Reconstruction',
+    )
   } else if (viable.length) {
     best = viable.reduce((a, b) => (b.angle > a.angle ? b : a))
   }
@@ -452,8 +539,11 @@ export async function selectInitPair(
   }))
 
   if (!best) {
-    log('pose recovery failed for all candidate pairs '
-      + '(toggle "Detail" in the console to see per-candidate reasons)', 'error', 'Reconstruction')
+    log(
+      'pose recovery failed for all candidate pairs ' + '(toggle "Detail" in the console to see per-candidate reasons)',
+      'error',
+      'Reconstruction',
+    )
     return { status: 'error' }
   }
   if (best.angle < minInitAngleDeg) {
@@ -462,13 +552,17 @@ export async function selectInitPair(
     // further image can register. Say that, and the usual cause, instead of "flat".
     const trackFloor = settings.filterMinTriAngleDeg
     const doomed = Number.isFinite(trackFloor) && best.angle < trackFloor
-    log(`best initial parallax is only ${best.angle.toFixed(2)}° `
-      + `(< ${minInitAngleDeg}°) — `
-      + (doomed
-        ? `below the ${trackFloor}° the track filter requires, so this seed's points will be filtered out and `
-          + `the model is unlikely to grow. Every probed pair views the scene from (almost) one position — a hover, `
-          + `a turn on the spot, or a very distant scene.`
-        : 'the sparse cloud may look flat/linear'), 'warn', 'Reconstruction')
+    log(
+      `best initial parallax is only ${best.angle.toFixed(2)}° ` +
+        `(< ${minInitAngleDeg}°) — ` +
+        (doomed
+          ? `below the ${trackFloor}° the track filter requires, so this seed's points will be filtered out and ` +
+            `the model is unlikely to grow. Every probed pair views the scene from (almost) one position — a hover, ` +
+            `a turn on the spot, or a very distant scene.`
+          : 'the sparse cloud may look flat/linear'),
+      'warn',
+      'Reconstruction',
+    )
   }
 
   return { status: 'ok', best, perPairInitReproj }

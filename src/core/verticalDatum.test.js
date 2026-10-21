@@ -4,15 +4,26 @@ import { unzlibSync } from 'fflate'
 import { geoidGrid, datumShift, isConvertible, loadGeoid, heightShifter } from './verticalDatum.js'
 
 const read = (file) => readFileSync(new URL(`../../public/geoid/${file}`, import.meta.url))
-const grid = (file) => { const b = unzlibSync(read(file)); return geoidGrid(new Int16Array(b.buffer, b.byteOffset, b.byteLength / 2)) }
-const egm96 = grid('egm96-15.i16.z'), egm2008 = grid('egm2008-15.i16.z')
+const grid = (file) => {
+  const b = unzlibSync(read(file))
+  return geoidGrid(new Int16Array(b.buffer, b.byteOffset, b.byteLength / 2))
+}
+const egm96 = grid('egm96-15.i16.z'),
+  egm2008 = grid('egm2008-15.i16.z')
 
 // N = −H from PROJ 9 (cs2cs EPSG:4979 → EPSG:4326+5773 / +3855 at h = 0), against
 // NGA's full grids: EGM96 at 15′ (the same nodes), EGM2008 at 2.5′.
-const PROJ = [ // [lat, lon, N EGM96, N EGM2008]
-  [0, 0, 17.1616, 17.2251], [-75, 0, 9.2582, 11.7382], [-77.85, 166.67, -53.3815, -52.4734],
-  [-90, 0, -29.5338, -30.15], [47.37, 8.54, 47.3412, 47.7185], [27.99, 86.93, -28.8575, -28.3921],
-  [-80, -120, -38.9727, -38.5448], [60, -179.9, 0.5944, 0.9824], [-64.5, -62, 17.695, 19.781],
+const PROJ = [
+  // [lat, lon, N EGM96, N EGM2008]
+  [0, 0, 17.1616, 17.2251],
+  [-75, 0, 9.2582, 11.7382],
+  [-77.85, 166.67, -53.3815, -52.4734],
+  [-90, 0, -29.5338, -30.15],
+  [47.37, 8.54, 47.3412, 47.7185],
+  [27.99, 86.93, -28.8575, -28.3921],
+  [-80, -120, -38.9727, -38.5448],
+  [60, -179.9, 0.5944, 0.9824],
+  [-64.5, -62, 17.695, 19.781],
 ]
 
 it('interpolates the geoid like PROJ: EGM96 to the centimetre grid, EGM2008 within its 15′ reduction', () => {
@@ -42,7 +53,11 @@ it('shifts heights between ellipsoid and geoids, and refuses what it cannot conv
 
 it('loads a grid once over fetch and converts many points with one shifter', async () => {
   let fetches = 0
-  const fetchImpl = async () => { fetches++; const b = read('egm96-15.i16.z'); return { ok: true, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) } }
+  const fetchImpl = async () => {
+    fetches++
+    const b = read('egm96-15.i16.z')
+    return { ok: true, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) }
+  }
   const g = await loadGeoid('geoid:EGM96', { fetchImpl })
   await loadGeoid('geoid:EGM96', { fetchImpl })
   expect(fetches).toBe(1)

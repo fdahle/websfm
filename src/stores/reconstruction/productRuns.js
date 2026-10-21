@@ -7,9 +7,16 @@ import { frameFromSpec } from '../../core/products/frameSpec.js'
 import { pointView } from '../../core/products/pointView.ts'
 import { isStreamed } from '../../core/lod/streamed.js'
 import { regionContains } from '../../core/products/region.js'
-import { generateDem as workerGenerateDem, generateOrtho as workerGenerateOrtho, releaseIdleWorkers,
-  orthoPlan as workerOrthoPlan, orthoShare as workerOrthoShare, orthoCogAdd as workerOrthoCogAdd,
-  orthoFinish as workerOrthoFinish, POOL_SIZE } from '../../workers/computeClient.js'
+import {
+  generateDem as workerGenerateDem,
+  generateOrtho as workerGenerateOrtho,
+  releaseIdleWorkers,
+  orthoPlan as workerOrthoPlan,
+  orthoShare as workerOrthoShare,
+  orthoCogAdd as workerOrthoCogAdd,
+  orthoFinish as workerOrthoFinish,
+  POOL_SIZE,
+} from '../../workers/computeClient.js'
 import { ORTHO_BLOCK } from '../../core/products/ortho.js'
 import { createBlockProgress, createStepProgress, createLogPacer } from '../../utils/blockProgress.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -23,9 +30,29 @@ import * as opfs from '../../utils/opfs.js'
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createProductRuns({
-  activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf, groundSource,
-  images, imagesStore, isPersisting, log, mainSparseCloud, meshCloud, ortho, orthoSurfaces, projects,
-  reconStatus, saveProductRecord, sparseCameras, withPreviewUrl, extractCloudPoints = null, validGeoref = null,
+  activeRegion,
+  dem,
+  demSource,
+  depthMapInput,
+  effectiveFrameSpec,
+  frameModelFor,
+  frameStampOf,
+  groundSource,
+  images,
+  imagesStore,
+  isPersisting,
+  log,
+  mainSparseCloud,
+  meshCloud,
+  ortho,
+  orthoSurfaces,
+  projects,
+  reconStatus,
+  saveProductRecord,
+  sparseCameras,
+  withPreviewUrl,
+  extractCloudPoints = null,
+  validGeoref = null,
   clouds = null,
 }) {
   const logLine = log
@@ -36,9 +63,13 @@ export function createProductRuns({
   function demStagePlan(src, settings, groundOnly) {
     const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     const octreeHasClasses = src.lod?.layout?.attributes?.some((a) => a.name === 'classification')
-    const fromOctree = isStreamed(src) || (!!src.lod && !!extractCloudPoints && src.kind === 'dense'
-      && src.count * DEM_STAGE_BYTES_PER_POINT > Math.min(budgetBytes / 4, 2 ** 30)
-      && (!groundOnly || octreeHasClasses))
+    const fromOctree =
+      isStreamed(src) ||
+      (!!src.lod &&
+        !!extractCloudPoints &&
+        src.kind === 'dense' &&
+        src.count * DEM_STAGE_BYTES_PER_POINT > Math.min(budgetBytes / 4, 2 ** 30) &&
+        (!groundOnly || octreeHasClasses))
     return { budgetBytes, fromOctree, maxPoints: Math.floor(budgetBytes / 2 / DEM_STAGE_BYTES_PER_POINT) }
   }
 
@@ -52,25 +83,35 @@ export function createProductRuns({
     // Single source of truth for "which cloud" — the same getter the modal shows.
     const source = groundOnly ? groundSource.value : demSource.value
     if (!source) {
-      log(groundOnly ? 'DTM: classify the ground of a dense cloud first (Tools ▸ Point Cloud ▸ Classify ground)'
-        : 'DEM: build a point cloud first', 'warn', 'Products')
+      log(
+        groundOnly
+          ? 'DTM: classify the ground of a dense cloud first (Tools ▸ Point Cloud ▸ Classify ground)'
+          : 'DEM: build a point cloud first',
+        'warn',
+        'Products',
+      )
       return
     }
     const src = source.cloud
-    log(`DEM: source is the ${source.kind} cloud`
-      + `${source.name ? ` "${source.name}"` : ''} (${source.count.toLocaleString()} points)`
-      + (source.kind === 'sparse'
-        ? ' — cells are interpolated from tie points; densify for a true surface'
-        : ''),
-      source.kind === 'sparse' ? 'warn' : 'info', 'Products')
+    log(
+      `DEM: source is the ${source.kind} cloud` +
+        `${source.name ? ` "${source.name}"` : ''} (${source.count.toLocaleString()} points)` +
+        (source.kind === 'sparse' ? ' — cells are interpolated from tie points; densify for a true surface' : ''),
+      source.kind === 'sparse' ? 'warn' : 'info',
+      'Products',
+    )
     // Resolve the target frame through THE resolver — never independently. A
     // 'project' request fits/refits the georeference on demand; otherwise a valid
     // scale-bar fit still makes the local frame metric (with no CRS).
     const resolved = await effectiveFrameSpec({ crs: settings.crs })
     const frameSpec = resolved.frameSpec
     if (settings.crs && settings.crs !== 'local' && resolved.source !== 'georef') {
-      log('DEM: no georeference available — using the local frame'
-        + (resolved.unit === 'm' ? ', scaled to metres by the scale bars' : ''), 'warn', 'Products')
+      log(
+        'DEM: no georeference available — using the local frame' +
+          (resolved.unit === 'm' ? ', scaled to metres by the scale bars' : ''),
+        'warn',
+        'Products',
+      )
     }
     reconStatus.value = 'running'
     try {
@@ -82,41 +123,86 @@ export function createProductRuns({
       const streamed = isStreamed(src)
       const cls = groundOnly && !fromOctree ? src.attributes.classification : null
       const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
-      const inside = cls
-        ? (x, y, z, i) => cls[i] === 2 && (!inRegion || inRegion(x, y, z))
-        : inRegion
+      const inside = cls ? (x, y, z, i) => cls[i] === 2 && (!inRegion || inRegion(x, y, z)) : inRegion
       let staged
       if (fromOctree) {
         // From the octree (core/lod): down to half the cell size when one is set (finer
         // levels add nothing to a cell), within half the budget (the grid gets the
         // rest), the ground class for a DTM, the region as the read box.
-        const { cloud: flat, plan } = await extractCloudPoints(src, {
-          classes: groundOnly ? [2] : null, fields: 'xyz', maxPoints, minSpacing: settings.gsd > 0 ? settings.gsd / 2 : 0,
-          ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}),
-        }, (d, t, lbl, f) => onProgress?.(d, t, 'Reading the octree', f))
+        const { cloud: flat, plan } = await extractCloudPoints(
+          src,
+          {
+            classes: groundOnly ? [2] : null,
+            fields: 'xyz',
+            maxPoints,
+            minSpacing: settings.gsd > 0 ? settings.gsd / 2 : 0,
+            ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}),
+          },
+          (d, t, lbl, f) => onProgress?.(d, t, 'Reading the octree', f),
+        )
         staged = { pos: flat.pos, count: flat.count, total: src.count }
-        log(`${groundOnly ? 'DTM' : 'DEM'}: read ${flat.count.toLocaleString()} ${groundOnly ? 'ground ' : ''}points `
-          + `of ${streamed ? 'the streamed cloud' : `the cloud's octree (${src.count.toLocaleString()} points)`} `
-          + (plan.complete ? '(every level of its octree)' : `down to ${plan.spacing.toPrecision(3)}-unit spacing`), 'info', 'Products')
-        if (!flat.count) throw new Error(groundOnly ? 'the cloud has no ground points' : (r ? 'no point of the source lies inside the region' : 'the cloud has no points'))
-      } else staged = stageDemPoints(src.kind === 'dense' ? src : { count: src.points.length, pos: src.points.pos }, { budgetBytes, inside })
-      if (cls) log(`DTM: ${staged.count.toLocaleString()} ground points of ${staged.total.toLocaleString()}`, 'info', 'Products')
-      else if (r && !fromOctree) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
-      if (cls && !staged.count) throw new Error(r ? 'no ground point lies inside the region' : 'the cloud has no ground points')
+        log(
+          `${groundOnly ? 'DTM' : 'DEM'}: read ${flat.count.toLocaleString()} ${groundOnly ? 'ground ' : ''}points ` +
+            `of ${streamed ? 'the streamed cloud' : `the cloud's octree (${src.count.toLocaleString()} points)`} ` +
+            (plan.complete ? '(every level of its octree)' : `down to ${plan.spacing.toPrecision(3)}-unit spacing`),
+          'info',
+          'Products',
+        )
+        if (!flat.count)
+          throw new Error(
+            groundOnly
+              ? 'the cloud has no ground points'
+              : r
+                ? 'no point of the source lies inside the region'
+                : 'the cloud has no points',
+          )
+      } else
+        staged = stageDemPoints(src.kind === 'dense' ? src : { count: src.points.length, pos: src.points.pos }, {
+          budgetBytes,
+          inside,
+        })
+      if (cls)
+        log(
+          `DTM: ${staged.count.toLocaleString()} ground points of ${staged.total.toLocaleString()}`,
+          'info',
+          'Products',
+        )
+      else if (r && !fromOctree)
+        log(
+          `DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`,
+          'info',
+          'Products',
+        )
+      if (cls && !staged.count)
+        throw new Error(r ? 'no ground point lies inside the region' : 'the cloud has no ground points')
       if (r && !staged.count) throw new Error('no point of the source lies inside the region')
       const points = { pos: staged.pos, count: staged.count }
       const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
-        uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
+        uuid,
+        R: cam.R.map((r) => [...r]),
+        t: [...cam.t],
+        K: { ...cam.K },
       }))
       // Fresh workers: idle ones keep their last run's garbage charged to the tab's
       // shared buffer pool (computeClient releaseIdleWorkers).
       releaseIdleWorkers()
       const grid = await workerGenerateDem(
-        { points, cameras, frame: frameSpec, settings: { ...settings, memBudgetBytes: budgetBytes, style: dem.value?.style ?? null } },
-        { transfer: [points.pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+        {
+          points,
+          cameras,
+          frame: frameSpec,
+          settings: { ...settings, memBudgetBytes: budgetBytes, style: dem.value?.style ?? null },
+        },
+        {
+          transfer: [points.pos.buffer],
+          onLog: (m, l, c) => log(m, l, c),
+          onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+        },
       )
       dem.value = withPreviewUrl({
-        ...grid, createdAt: Date.now(), points: groundOnly ? 'ground' : 'all',
+        ...grid,
+        createdAt: Date.now(),
+        points: groundOnly ? 'ground' : 'all',
         name: dem.value?.name || 'DEM',
         frameStamp: frameStampOf(resolved),
         // Heights are in the georeference's vertical datum (georeferencing.js).
@@ -131,7 +217,11 @@ export function createProductRuns({
       if (isPersisting() && orthoWasDem) opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
       reconStatus.value = 'done'
     } catch (err) {
-      log(`DEM error: ${bufferFailureText(err?.message ?? err, 'Lower the memory budget (Settings ▸ Compute) or build at a coarser GSD')}`, 'error', 'Products')
+      log(
+        `DEM error: ${bufferFailureText(err?.message ?? err, 'Lower the memory budget (Settings ▸ Compute) or build at a coarser GSD')}`,
+        'error',
+        'Products',
+      )
       reconStatus.value = 'error'
     }
   }
@@ -148,20 +238,37 @@ export function createProductRuns({
     const log = quiet ? () => {} : logLine
     const id = settings.surface ?? 'dem'
     const opt = orthoSurfaces.value.find((s) => s.id === id)
-    if (!opt) { log(`Ortho: unknown surface "${id}"`, 'warn', 'Products'); return null }
-    if (!opt.available) { log(`Ortho: ${opt.hint}`, 'warn', 'Products'); return null }
+    if (!opt) {
+      log(`Ortho: unknown surface "${id}"`, 'warn', 'Products')
+      return null
+    }
+    if (!opt.available) {
+      log(`Ortho: ${opt.hint}`, 'warn', 'Products')
+      return null
+    }
 
     if (id === 'dem') {
       const d = dem.value
-      log('Ortho: surface is the DEM — cells the DEM has no height for stay transparent',
-        'info', 'Products')
+      log('Ortho: surface is the DEM — cells the DEM has no height for stay transparent', 'info', 'Products')
       return {
         kind: 'dem',
         grid: {
-          width: d.width, height: d.height, gsd: d.gsd, originX: d.originX, originY: d.originY,
-          data: d.data, mask: d.mask, frame: d.frame,
+          width: d.width,
+          height: d.height,
+          gsd: d.gsd,
+          originX: d.originX,
+          originY: d.originY,
+          data: d.data,
+          mask: d.mask,
+          frame: d.frame,
           // A DEM past one plane (SAT-3): the worker reads the surface from its COG.
-          ...(d.cog && { cog: d.cog, fullWidth: d.fullWidth, fullHeight: d.fullHeight, fullGsd: d.fullGsd, tileSize: d.tileSize }),
+          ...(d.cog && {
+            cog: d.cog,
+            fullWidth: d.fullWidth,
+            fullHeight: d.fullHeight,
+            fullGsd: d.fullGsd,
+            tileSize: d.tileSize,
+          }),
         },
       }
     }
@@ -179,8 +286,9 @@ export function createProductRuns({
     if (!frameSpec) {
       const reusable = dem.value?.frame
       const sameKind = reusable?.kind === resolved.frameSpec.kind
-      const sameScale = resolved.frameSpec.kind !== 'scaled-local'
-        || Math.abs((reusable?.scale ?? 0) - resolved.frameSpec.scale) < 1e-12
+      const sameScale =
+        resolved.frameSpec.kind !== 'scaled-local' ||
+        Math.abs((reusable?.scale ?? 0) - resolved.frameSpec.scale) < 1e-12
       frameSpec = sameKind && sameScale ? reusable : resolved.frameSpec
     }
     const surfSettings = { gsd: settings.surfaceGsd > 0 ? settings.surfaceGsd : 0, extent: settings.extent ?? 'core' }
@@ -199,11 +307,14 @@ export function createProductRuns({
       const m = count ? Math.ceil(count / stride) : 0
       const out = new Float64Array(m * 3)
       for (let i = 0, k = 0; i < count; i += stride, k++) {
-        out[k * 3] = srcPos[i * 3]; out[k * 3 + 1] = srcPos[i * 3 + 1]; out[k * 3 + 2] = srcPos[i * 3 + 2]
+        out[k * 3] = srcPos[i * 3]
+        out[k * 3 + 1] = srcPos[i * 3 + 1]
+        out[k * 3 + 2] = srcPos[i * 3 + 2]
       }
       return { pos: out, n: m }
     }
-    let pos = new Float64Array(0), n = 0
+    let pos = new Float64Array(0),
+      n = 0
     if (cloud && isStreamed(cloud)) {
       if (!extractCloudPoints) {
         log('Ortho: the point cloud is streamed from its octree and cannot be sampled here', 'warn', 'Products')
@@ -230,25 +341,47 @@ export function createProductRuns({
       return null
     }
     const cameras = [...sparseCameras.value.entries()].map(([uuid, cam]) => ({
-      uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
+      uuid,
+      R: cam.R.map((r) => [...r]),
+      t: [...cam.t],
+      K: { ...cam.K },
     }))
 
     if (id === 'mesh') {
       const m = meshCloud.value
-      log(`Ortho: surface is the mesh "${m.name ?? 'mesh'}" `
-        + `(${m.count.toLocaleString()} triangles)`, 'info', 'Products')
+      log(
+        `Ortho: surface is the mesh "${m.name ?? 'mesh'}" ` + `(${m.count.toLocaleString()} triangles)`,
+        'info',
+        'Products',
+      )
       return {
-        kind: 'mesh', frame: frameSpec, cameras, framePoints: pos, framePointCount: n,
-        pos: m.pos, idx: m.idx, settings: surfSettings,
+        kind: 'mesh',
+        frame: frameSpec,
+        cameras,
+        framePoints: pos,
+        framePointCount: n,
+        pos: m.pos,
+        idx: m.idx,
+        settings: surfSettings,
       }
     }
 
-    log(`Ortho: surface is a plane fitted to the ${src.kind} cloud `
-      + `(${n.toLocaleString()} of ${total.toLocaleString()} points${isStreamed(cloud) ? ', from its octree' : ''})`, 'info', 'Products')
+    log(
+      `Ortho: surface is a plane fitted to the ${src.kind} cloud ` +
+        `(${n.toLocaleString()} of ${total.toLocaleString()} points${isStreamed(cloud) ? ', from its octree' : ''})`,
+      'info',
+      'Products',
+    )
     // The plane's fit points double as the local frame's — one sample, one array.
     return {
-      kind: 'plane', frame: frameSpec, cameras, framePoints: pos, framePointCount: n,
-      pos, count: n, settings: surfSettings,
+      kind: 'plane',
+      frame: frameSpec,
+      cameras,
+      framePoints: pos,
+      framePointCount: n,
+      pos,
+      count: n,
+      settings: surfSettings,
     }
   }
 
@@ -256,34 +389,63 @@ export function createProductRuns({
   // planes, colour from their RGB planes). Needs depth maps and a surface — which
   // is a DEM only when the user picks one (see orthoSurfaces).
   async function generateOrtho(settings = {}, onProgress) {
-    const projectId = projects.currentProjectId, sparse = mainSparseCloud.value
+    const projectId = projects.currentProjectId,
+      sparse = mainSparseCloud.value
     const stillCurrent = () => projectId === projects.currentProjectId && sparse === mainSparseCloud.value
     let input
-    try { input = await depthMapInput() }
-    catch (err) { log(`Ortho: ${err.message}`, 'error', 'Products'); return }
+    try {
+      input = await depthMapInput()
+    } catch (err) {
+      log(`Ortho: ${err.message}`, 'error', 'Products')
+      return
+    }
     const { maps, streamed } = input
-    if (!maps.length) { log('Ortho: compute depth maps first', 'warn', 'Products'); return }
+    if (!maps.length) {
+      log('Ortho: compute depth maps first', 'warn', 'Products')
+      return
+    }
     const resolved = await effectiveFrameSpec({ crs: settings.crs })
     const surface = await orthoSurfacePayload(settings, resolved)
     if (!surface) return
     reconStatus.value = 'running'
     try {
-      const mapsPayload = streamed ? maps : maps.map((m) => ({
-        uuid: m.uuid, width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
-        depth: m.depth, cost: m.cost, rgb: m.rgb,
-      }))
+      const mapsPayload = streamed
+        ? maps
+        : maps.map((m) => ({
+            uuid: m.uuid,
+            width: m.width,
+            height: m.height,
+            K: m.K,
+            R: m.R,
+            t: m.t,
+            depth: m.depth,
+            cost: m.cost,
+            rgb: m.rgb,
+          }))
       // The source photo per map, for full-resolution colour (the depth maps then only
       // decide visibility): the same image + frame-model join dense used to build them.
       const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
       const frameModel = frameModelFor.value
       const photos = []
       for (const m of maps) {
-        const im = imgByUuid.get(m.uuid), cam = sparse?.cameras?.get(m.uuid)
+        const im = imgByUuid.get(m.uuid),
+          cam = sparse?.cameras?.get(m.uuid)
         if (!im || !cam) continue
-        try { await imagesStore.whenComputeReady(im) } catch { continue } // falls back to map colour
+        try {
+          await imagesStore.whenComputeReady(im)
+        } catch {
+          continue
+        } // falls back to map colour
         const { dist, selfCal, fiducial } = frameModel(im)
-        photos.push({ uuid: m.uuid, name: im.name, url: computeSourceOf(im),
-          K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy }, dist, selfCal, fiducial })
+        photos.push({
+          uuid: m.uuid,
+          name: im.name,
+          url: computeSourceOf(im),
+          K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
+          dist,
+          selfCal,
+          fiducial,
+        })
       }
       // The machine's memory gate (Settings ▸ Compute): the worker sizes its map/photo
       // cache from it and refuses, with the figures, a run whose working set exceeds it.
@@ -295,26 +457,35 @@ export function createProductRuns({
       releaseIdleWorkers() // as for the DEM
       const res = await runOrtho(
         { surface, maps: mapsPayload, streamed, settings: { ...settings, memBudgetBytes, pageBytes }, images: photos },
-        onProgress)
+        onProgress,
+      )
       if (!stillCurrent()) return
       // An ortho built ON the DEM inherits the DEM's recorded frame — its cells are
       // that grid's cells, so claiming today's frame would be a claim about a raster
       // this run never re-projected.
       ortho.value = withPreviewUrl({
-        ...res, createdAt: Date.now(),
+        ...res,
+        createdAt: Date.now(),
         name: ortho.value?.name || 'Orthophoto',
         // Symbology survives a rebuild, like the name (display only).
         ...(ortho.value?.style && { style: ortho.value.style }),
-        frameStamp: (settings.surface ?? 'dem') === 'dem'
-          ? (dem.value?.frameStamp ?? frameStampOf(resolved))
-          : frameStampOf(resolved),
+        frameStamp:
+          (settings.surface ?? 'dem') === 'dem'
+            ? (dem.value?.frameStamp ?? frameStampOf(resolved))
+            : frameStampOf(resolved),
       })
       saveProductRecord('ortho', ortho.value)
       reconStatus.value = 'done'
     } catch (err) {
       if (!stillCurrent()) return
-      log(`Ortho error: ${bufferFailureText(err?.message ?? err,
-        'Build at a coarser GSD, or lower the memory budget (Settings ▸ Compute) so the photo cache leaves room for the rest of the tab')}`, 'error', 'Products')
+      log(
+        `Ortho error: ${bufferFailureText(
+          err?.message ?? err,
+          'Build at a coarser GSD, or lower the memory budget (Settings ▸ Compute) so the photo cache leaves room for the rest of the tab',
+        )}`,
+        'error',
+        'Products',
+      )
       reconStatus.value = 'error'
     }
   }
@@ -333,7 +504,8 @@ export function createProductRuns({
     const PLAN = 0.1 // the bar's share of the survey and plan
     const { plan, shares, workers, width, height } = await workerOrthoPlan(
       { ...input, settings: { ...input.settings, orthoShares: want } },
-      { onLog, worker: 0, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, PLAN * (f ?? 0), 'plan') })
+      { onLog, worker: 0, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, PLAN * (f ?? 0), 'plan') },
+    )
     const nBlocks = Math.ceil(width / ORTHO_BLOCK) * Math.ceil(height / ORTHO_BLOCK)
     // The log's progress lines, as one worker's run gives them (utils/blockProgress.js).
     const pacer = createLogPacer()
@@ -341,12 +513,20 @@ export function createProductRuns({
     const blockLines = createBlockProgress(nBlocks, { prefix: 'Ortho: ', pacer })
     // Visits done per call, for the heartbeat (less, per call, the visits of the groups
     // taken off its list); the bar follows the blocks received.
-    const done = [], totals = [], taken = []
+    const done = [],
+      totals = [],
+      taken = []
     let blocks = 0
     const report = () => {
-      onProgress?.(blocks, nBlocks, `Orthorectifying… ${blocks} of ${pluralize(nBlocks, 'block')} on ${pluralize(shares.length, 'worker')}`,
-        PLAN + (0.95 - PLAN) * blocks / nBlocks, 'blocks')
-      const d = done.reduce((a, b) => a + b, 0), t = totals.reduce((a, b, c) => a + b - taken[c], 0)
+      onProgress?.(
+        blocks,
+        nBlocks,
+        `Orthorectifying… ${blocks} of ${pluralize(nBlocks, 'block')} on ${pluralize(shares.length, 'worker')}`,
+        PLAN + ((0.95 - PLAN) * blocks) / nBlocks,
+        'blocks',
+      )
+      const d = done.reduce((a, b) => a + b, 0),
+        t = totals.reduce((a, b, c) => a + b - taken[c], 0)
       const line = t > 0 ? heartbeat.step(d, t) : null
       if (line) log(line, 'info', 'Products')
     }
@@ -354,16 +534,26 @@ export function createProductRuns({
     // groups are claimed from one table (ortho.js `claims`): a worker that runs out takes
     // the back half of the unclaimed groups of the longest list, and the list's owner
     // skips what it took. Every group is built once, by whoever claims it first.
-    const claims = typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated
-      ? new Int32Array(new SharedArrayBuffer(4 * plan.groups)) : null
+    const claims =
+      typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated
+        ? new Int32Array(new SharedArrayBuffer(4 * plan.groups))
+        : null
     const lists = shares.map((list) => list)
-    const adds = [], parts = []
+    const adds = [],
+      parts = []
     const runList = async (k, groupIndices) => {
       const c = done.length // = its index in lists
-      done.push(0); totals.push(0); taken.push(0)
+      done.push(0)
+      totals.push(0)
+      taken.push(0)
       const part = await workerOrthoShare(input, plan, groupIndices, workers, claims, {
-        worker: k + 1, onLog,
-        onProgress: (d, t) => { done[c] = d; totals[c] = t; report() },
+        worker: k + 1,
+        onLog,
+        onProgress: (d, t) => {
+          done[c] = d
+          totals[c] = t
+          report()
+        },
         onBlock: (b) => {
           adds.push(workerOrthoCogAdd(b, { worker: 0 }))
           blocks++
@@ -375,10 +565,14 @@ export function createProductRuns({
       parts.push({ ...part, worker: k }) // a worker runs a list of its own, then any it takes
     }
     const steal = () => {
-      let best = [], from = -1
+      let best = [],
+        from = -1
       for (const [c, list] of lists.entries()) {
         const left = list.filter((gi) => Atomics.load(claims, gi) === 0)
-        if (left.length > best.length) { best = left; from = c }
+        if (left.length > best.length) {
+          best = left
+          from = c
+        }
       }
       if (!best.length) return null
       const more = best.slice(Math.floor(best.length / 2))
@@ -386,17 +580,23 @@ export function createProductRuns({
       return more
     }
     let stolen = 0
-    await Promise.all(shares.map(async (list, k) => {
-      await runList(k, list)
-      for (let more = claims && steal(); more; more = steal()) {
-        lists.push(more); stolen += more.length
-        await runList(k, more)
-      }
-    }))
+    await Promise.all(
+      shares.map(async (list, k) => {
+        await runList(k, list)
+        for (let more = claims && steal(); more; more = steal()) {
+          lists.push(more)
+          stolen += more.length
+          await runList(k, more)
+        }
+      }),
+    )
     if (stolen) log(`Ortho: ${pluralize(stolen, 'group')} offered to workers that finished early`, 'debug', 'Products')
     await Promise.all(adds)
-    return workerOrthoFinish(parts, { onLog, worker: 0,
-      onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, 0.95 + 0.05 * (f ?? 0), 'finish') })
+    return workerOrthoFinish(parts, {
+      onLog,
+      worker: 0,
+      onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, 0.95 + 0.05 * (f ?? 0), 'finish'),
+    })
   }
 
   // ArrayBuffers the page holds for the project — clouds (and a sparse cloud's
@@ -427,7 +627,15 @@ export function createProductRuns({
       const d = dem.value
       if (!d) return null
       const fit = orthoGridFor(orthoDemSurface(d, budgetBytes), settings)
-      return fit && { ...sizeOf(fit.geom, d.unit), coarsened: fit.coarsened, requestedGsd: fit.want, blocks: true, approx: false }
+      return (
+        fit && {
+          ...sizeOf(fit.geom, d.unit),
+          coarsened: fit.coarsened,
+          requestedGsd: fit.want,
+          blocks: true,
+          approx: false,
+        }
+      )
     }
     // A georeferenced product needs the fit; the estimate never runs one.
     if (settings.crs && settings.crs !== 'local' && validGeoref && validGeoref.value?.crs !== projects.currentCrs) {
@@ -437,10 +645,26 @@ export function createProductRuns({
     if (!basis || basis.unavailable) return basis
     if (kind === 'dem') {
       const fit = demGridFor(basis.box, basis.count, settings)
-      return fit && { ...sizeOf(fit.geom, basis.unit), blocks: fit.blocks, coarsened: fit.coarsened, requestedGsd: fit.requestedGsd, approx: true }
+      return (
+        fit && {
+          ...sizeOf(fit.geom, basis.unit),
+          blocks: fit.blocks,
+          coarsened: fit.coarsened,
+          requestedGsd: fit.requestedGsd,
+          approx: true,
+        }
+      )
     }
     const fit = orthoGridFor(basis.surface, settings)
-    return fit && { ...sizeOf(fit.geom, basis.unit), coarsened: fit.coarsened, requestedGsd: fit.want, blocks: true, approx: true }
+    return (
+      fit && {
+        ...sizeOf(fit.geom, basis.unit),
+        coarsened: fit.coarsened,
+        requestedGsd: fit.want,
+        blocks: true,
+        approx: true,
+      }
+    )
   }
 
   // What the sample gives an estimate, before any cell size: the DEM's box and staged
@@ -451,10 +675,22 @@ export function createProductRuns({
   async function sizeBasis(kind, settings, budgetBytes) {
     const groundOnly = settings.points === 'ground'
     const src = kind === 'dem' ? (groundOnly ? groundSource.value : demSource.value)?.cloud : demSource.value?.cloud
-    const key = JSON.stringify([kind, settings.surface ?? null, settings.crs ?? null, settings.extent ?? null,
-      settings.points ?? null, settings.surfaceGsd ?? 0, kind === 'dem' ? budgetBytes : 0, src?.id ?? null, src?.count ?? 0,
-      !!src?.lod, meshCloud.value?.id ?? null, dem.value?.createdAt ?? null, validGeoref?.value?.evidenceKey ?? null,
-      mainSparseCloud.value?.id ?? null])
+    const key = JSON.stringify([
+      kind,
+      settings.surface ?? null,
+      settings.crs ?? null,
+      settings.extent ?? null,
+      settings.points ?? null,
+      settings.surfaceGsd ?? 0,
+      kind === 'dem' ? budgetBytes : 0,
+      src?.id ?? null,
+      src?.count ?? 0,
+      !!src?.lod,
+      meshCloud.value?.id ?? null,
+      dem.value?.createdAt ?? null,
+      validGeoref?.value?.evidenceKey ?? null,
+      mainSparseCloud.value?.id ?? null,
+    ])
     if (basisMemo.key === key) return basisMemo.value
     const value = await computeSizeBasis(kind, settings, src, groundOnly)
     basisMemo = { key, value }
@@ -480,8 +716,11 @@ export function createProductRuns({
     // An ortho over a mesh or plane: that surface's grid, at its own auto cell.
     const payload = await orthoSurfacePayload(settings, resolved, { quiet: true })
     if (!payload) return null
-    const frame = frameFromSpec(payload.frame, payload.cameras ?? [],
-      pointView({ pos: payload.framePoints, count: payload.framePointCount }))
+    const frame = frameFromSpec(
+      payload.frame,
+      payload.cameras ?? [],
+      pointView({ pos: payload.framePoints, count: payload.framePointCount }),
+    )
     const isMesh = payload.kind === 'mesh'
     const nAll = isMesh ? Math.floor(payload.pos.length / 3) : payload.framePointCount
     const pts = isMesh ? stridedPos(payload.pos, nAll) : { pos: payload.framePoints, n: payload.framePointCount }
@@ -489,7 +728,8 @@ export function createProductRuns({
     if (!box) return null
     // meshSurface / planeSurface: ≈ one vertex (fit point) per cell over the bounds, ≤ 4,096.
     const { minX, minY, maxX, maxY } = box.bounds
-    const own = payload.settings?.gsd > 0 ? payload.settings.gsd : Math.sqrt(((maxX - minX) * (maxY - minY)) / Math.max(2, nAll))
+    const own =
+      payload.settings?.gsd > 0 ? payload.settings.gsd : Math.sqrt(((maxX - minX) * (maxY - minY)) / Math.max(2, nAll))
     const surface = gridGeometry(minX, minY, maxX, maxY, own)
     return surface && { surface, unit: resolved.unit }
   }
@@ -499,11 +739,15 @@ export function createProductRuns({
   function stridedPos(src, count, keep = null) {
     const stride = Math.max(1, Math.ceil(count / SIZE_SAMPLE))
     const out = new Float64Array(Math.ceil(count / stride) * 3)
-    let k = 0, seen = 0
+    let k = 0,
+      seen = 0
     for (let i = 0; i < count; i += stride) {
       seen++
       if (keep && !keep(src[i * 3], src[i * 3 + 1], src[i * 3 + 2], i)) continue
-      out[k * 3] = src[i * 3]; out[k * 3 + 1] = src[i * 3 + 1]; out[k * 3 + 2] = src[i * 3 + 2]; k++
+      out[k * 3] = src[i * 3]
+      out[k * 3 + 1] = src[i * 3 + 1]
+      out[k * 3 + 2] = src[i * 3 + 2]
+      k++
     }
     return { pos: out.subarray(0, k * 3), n: k, keptShare: seen ? k / seen : 0 }
   }
@@ -516,8 +760,12 @@ export function createProductRuns({
     const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
     if (isStreamed(src)) {
       if (!extractCloudPoints) return null
-      const { cloud: flat, plan } = await extractCloudPoints(src, { classes: groundOnly ? [2] : null, fields: 'xyz',
-        maxPoints: SIZE_SAMPLE, ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}) })
+      const { cloud: flat, plan } = await extractCloudPoints(src, {
+        classes: groundOnly ? [2] : null,
+        fields: 'xyz',
+        maxPoints: SIZE_SAMPLE,
+        ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}),
+      })
       // The coarse levels thin the cloud uniformly, so the share the class and region
       // filters keep of the nodes read (`plan.estimate`, before them) is the cloud's.
       const share = plan?.estimate > 0 ? Math.min(1, flat.count / plan.estimate) : 1
@@ -539,22 +787,34 @@ export function createProductRuns({
     const flat = new Float64Array(n * 3)
     for (let i = 0; i < n; i++) {
       const q = frame.fromSfm([sfmPos[i * 3], sfmPos[i * 3 + 1], sfmPos[i * 3 + 2]])
-      flat[i * 3] = q[0]; flat[i * 3 + 1] = q[1]; flat[i * 3 + 2] = q[2]
+      flat[i * 3] = q[0]
+      flat[i * 3 + 1] = q[1]
+      flat[i * 3 + 2] = q[2]
     }
     const core = extent === 'all' ? null : coreExtent(flat, n)
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, inside = 0
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity,
+      inside = 0
     for (let i = 0; i < n; i++) {
-      const x = flat[i * 3], y = flat[i * 3 + 1]
+      const x = flat[i * 3],
+        y = flat[i * 3 + 1]
       if (core && (x < core.minX || x > core.maxX || y < core.minY || y > core.maxY)) continue
       inside++
-      if (x < minX) minX = x; if (x > maxX) maxX = x
-      if (y < minY) minY = y; if (y > maxY) maxY = y
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
     }
     if (!(maxX > minX) || !(maxY > minY)) return null
     return { minX, minY, maxX, maxY, share: inside / n, bounds: core ?? { minX, minY, maxX, maxY } }
   }
 
   return {
-    generateDem, orthoSurfacePayload, generateOrtho, estimateRasterSize,
+    generateDem,
+    orthoSurfacePayload,
+    generateOrtho,
+    estimateRasterSize,
   }
 }

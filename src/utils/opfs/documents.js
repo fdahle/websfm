@@ -28,7 +28,9 @@ export async function deleteGcps(projectId) {
     try {
       const dir = await getProjectDir(projectId)
       await dir.removeEntry('gcps.json')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -57,7 +59,9 @@ export async function deleteFootprints(projectId) {
     try {
       const dir = await getProjectDir(projectId)
       await dir.removeEntry('footprints.json')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -92,7 +96,9 @@ export async function deleteScaleBars(projectId) {
     try {
       const dir = await getProjectDir(projectId)
       await dir.removeEntry('scalebars.json')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -102,13 +108,19 @@ export async function saveMeasurements(projectId, data) {
   })
 }
 export async function loadMeasurements(projectId) {
-  try { return await readJson(await getProjectDir(projectId), 'measurements.json') }
-  catch { return null }
+  try {
+    return await readJson(await getProjectDir(projectId), 'measurements.json')
+  } catch {
+    return null
+  }
 }
 export async function deleteMeasurements(projectId) {
   return trackPersistence('deleteMeasurements:' + String(projectId), async () => {
-    try { await (await getProjectDir(projectId)).removeEntry('measurements.json') }
-    catch (error) { ignoreMissing(error) }
+    try {
+      await (await getProjectDir(projectId)).removeEntry('measurements.json')
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -136,7 +148,9 @@ export async function deleteWorkflows(projectId) {
     try {
       const dir = await getProjectDir(projectId)
       await dir.removeEntry('workflows.json')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -166,7 +180,9 @@ export async function deleteSensors(projectId) {
     try {
       const dir = await getProjectDir(projectId)
       await dir.removeEntry('sensors.json')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -198,6 +214,8 @@ export async function deletePoses(projectId) {
     try {
       const dir = await getProjectDir(projectId)
       await dir.removeEntry('poses.json')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }

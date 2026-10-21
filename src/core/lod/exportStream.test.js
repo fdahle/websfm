@@ -10,33 +10,81 @@ import initLaz from '../../wasm/lazcodec/lazcodec.js'
 import { makeLazCodec } from '../../workers/ops/laz.js'
 
 async function lodOf({ n, classMax = 6 }) {
-  const pos = new Float64Array(3 * n), col = new Uint8Array(3 * n)
-  const attrs = { intensity: new Uint16Array(n), classification: new Uint8Array(n), returnNumber: new Uint8Array(n), numberOfReturns: new Uint8Array(n) }
-  for (let i = 0; i < n; i++) {
-    pos[3 * i] = 650000 + (i % 400) * 0.25; pos[3 * i + 1] = 5100000 + Math.floor(i / 400) * 0.25; pos[3 * i + 2] = 300 + (i % 9) * 0.01
-    col[3 * i] = i & 255; col[3 * i + 1] = (i >> 8) & 255; col[3 * i + 2] = 9
-    attrs.intensity[i] = i & 0xffff; attrs.classification[i] = i % (classMax + 1); attrs.returnNumber[i] = 1 + (i % 2); attrs.numberOfReturns[i] = 2
+  const pos = new Float64Array(3 * n),
+    col = new Uint8Array(3 * n)
+  const attrs = {
+    intensity: new Uint16Array(n),
+    classification: new Uint8Array(n),
+    returnNumber: new Uint8Array(n),
+    numberOfReturns: new Uint8Array(n),
   }
-  const files = new Map(), data = []
+  for (let i = 0; i < n; i++) {
+    pos[3 * i] = 650000 + (i % 400) * 0.25
+    pos[3 * i + 1] = 5100000 + Math.floor(i / 400) * 0.25
+    pos[3 * i + 2] = 300 + (i % 9) * 0.01
+    col[3 * i] = i & 255
+    col[3 * i + 1] = (i >> 8) & 255
+    col[3 * i + 2] = 9
+    attrs.intensity[i] = i & 0xffff
+    attrs.classification[i] = i % (classMax + 1)
+    attrs.returnNumber[i] = 1 + (i % 2)
+    attrs.numberOfReturns[i] = 2
+  }
+  const files = new Map(),
+    data = []
   let size = 0
   const tmp = {
-    async append(name, u8) { (files.get(name) ?? files.set(name, []).get(name)).push(u8) },
-    async size(name) { return (files.get(name) ?? []).reduce((a, b) => a + b.length, 0) },
+    async append(name, u8) {
+      ;(files.get(name) ?? files.set(name, []).get(name)).push(u8)
+    },
+    async size(name) {
+      return (files.get(name) ?? []).reduce((a, b) => a + b.length, 0)
+    },
     async read(name, offset, length) {
       let o = 0
-      for (const b of files.get(name)) { if (offset < o + b.length) return b.subarray(offset - o, offset - o + length); o += b.length }
+      for (const b of files.get(name)) {
+        if (offset < o + b.length) return b.subarray(offset - o, offset - o + length)
+        o += b.length
+      }
       return new Uint8Array(0)
     },
-    async remove(name) { files.delete(name) },
+    async remove(name) {
+      files.delete(name)
+    },
   }
-  const out = { async write(u8) { const at = size; data.push(u8); size += u8.length; return at } }
-  const res = await buildLod({
-    count: n, bounds: { min: [650000, 5100000, 300], max: [650100, 5100000 + n / 400 * 0.25, 300.1] }, colour: true,
-    attributes: Object.entries(attrs).map(([name, a]) => ({ name, type: a instanceof Uint16Array ? 'uint16' : 'uint8' })),
-    async *batches() { yield { count: n, pos, col, attributes: attrs } },
-  }, tmp, out, { leafMax: 3000, layout: { offset: [650000, 5100000, 0], scale: [0.01, 0.01, 0.01] } })
+  const out = {
+    async write(u8) {
+      const at = size
+      data.push(u8)
+      size += u8.length
+      return at
+    },
+  }
+  const res = await buildLod(
+    {
+      count: n,
+      bounds: { min: [650000, 5100000, 300], max: [650100, 5100000 + (n / 400) * 0.25, 300.1] },
+      colour: true,
+      attributes: Object.entries(attrs).map(([name, a]) => ({
+        name,
+        type: a instanceof Uint16Array ? 'uint16' : 'uint8',
+      })),
+      async *batches() {
+        yield { count: n, pos, col, attributes: attrs }
+      },
+    },
+    tmp,
+    out,
+    { leafMax: 3000, layout: { offset: [650000, 5100000, 0], scale: [0.01, 0.01, 0.01] } },
+  )
   const { hierarchy, ...lod } = res
-  return { lod, reader: await openLodReader(lod, { data: new Blob(data), hierarchy: new Blob([hierarchy]) }), pos, col, attrs }
+  return {
+    lod,
+    reader: await openLodReader(lod, { data: new Blob(data), hierarchy: new Blob([hierarchy]) }),
+    pos,
+    col,
+    attrs,
+  }
 }
 
 const key = (x, y, z) => `${Math.round(x * 100)},${Math.round(y * 100)},${Math.round(z * 100)}`
@@ -57,8 +105,13 @@ describe('streamed cloud export', () => {
     for (let k = 0; k < n; k++) {
       const i = want.get(key(back.pos[3 * k], back.pos[3 * k + 1], back.pos[3 * k + 2]))
       if (i == null) continue
-      if (back.attributes.classification[k] === attrs.classification[i] && back.attributes.intensity[k] === attrs.intensity[i]
-          && back.col[3 * k] === col[3 * i] && back.attributes.returnNumber[k] === attrs.returnNumber[i]) matched++
+      if (
+        back.attributes.classification[k] === attrs.classification[i] &&
+        back.attributes.intensity[k] === attrs.intensity[i] &&
+        back.col[3 * k] === col[3 * i] &&
+        back.attributes.returnNumber[k] === attrs.returnNumber[i]
+      )
+        matched++
     }
     expect(matched).toBe(n)
     const dv = new DataView(bytes.buffer)
@@ -77,7 +130,9 @@ describe('streamed cloud export', () => {
   })
 
   it('keeps that extra-bytes class in a LAZ too', async () => {
-    await initLaz({ module_or_path: await readFile(fileURLToPath(new URL('../../wasm/lazcodec/lazcodec_bg.wasm', import.meta.url))) })
+    await initLaz({
+      module_or_path: await readFile(fileURLToPath(new URL('../../wasm/lazcodec/lazcodec_bg.wasm', import.meta.url))),
+    })
     const codec = makeLazCodec()
     const { lod, reader } = await lodOf({ n: 3000, classMax: 40 })
     const compressor = codec.createCompressor(2, lasPlanFor(lod).recordLength)
@@ -86,7 +141,9 @@ describe('streamed cloud export', () => {
     const parts = []
     for await (const p of laz.parts) parts.push(p)
     const { header, first, tail } = laz.lazEnds()
-    const back = parseLaz(new Uint8Array(await new Blob([header, first, ...parts, tail]).arrayBuffer()), { decompress: codec.decompress })
+    const back = parseLaz(new Uint8Array(await new Blob([header, first, ...parts, tail]).arrayBuffer()), {
+      decompress: codec.decompress,
+    })
     expect(back.count).toBe(3000)
     expect(Math.max(...back.attributes.classification)).toBe(40)
   })

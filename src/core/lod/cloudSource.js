@@ -29,7 +29,10 @@ export const lodFileNames = (lod) => [lod?.dataFile, lod?.hierarchyFile].filter(
  */
 export async function openCloudSource(lod, { data, hierarchy = null }, opts = {}) {
   if (isCopcLod(lod)) {
-    const source = { size: data.size, read: async (start, end) => new Uint8Array(await data.slice(start, end).arrayBuffer()) }
+    const source = {
+      size: data.size,
+      read: async (start, end) => new Uint8Array(await data.slice(start, end).arrayBuffer()),
+    }
     return openCopcSource(lod, source, opts)
   }
   const reader = await openLodReader(lod, { data, hierarchy })

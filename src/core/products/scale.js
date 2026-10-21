@@ -36,9 +36,11 @@
 export function fitScale(constraints) {
   if (!Array.isArray(constraints) || constraints.length === 0) return null
 
-  let num = 0, den = 0
+  let num = 0,
+    den = 0
   for (const c of constraints) {
-    const dm = c?.modelDistance, dk = c?.knownDistance
+    const dm = c?.modelDistance,
+      dk = c?.knownDistance
     if (!Number.isFinite(dm) || !Number.isFinite(dk)) return null
     if (!(dm > 0) || !(dk > 0)) return null
     const w = weightOf(c)
@@ -50,7 +52,8 @@ export function fitScale(constraints) {
   const scale = num / den
   if (!Number.isFinite(scale) || !(scale > 0)) return null
 
-  let weightedSumSq = 0, weightSum = 0
+  let weightedSumSq = 0,
+    weightSum = 0
   const rows = constraints.map((c) => {
     const residual = scale * c.modelDistance - c.knownDistance
     const weight = weightOf(c)
@@ -100,7 +103,7 @@ export function weightFromAccuracy(accuracyM) {
 export const LENGTH_UNITS = {
   mm: { label: 'mm', toM: 0.001 },
   cm: { label: 'cm', toM: 0.01 },
-  m:  { label: 'm',  toM: 1 },
+  m: { label: 'm', toM: 1 },
 }
 
 export function toMetres(value, unit) {
@@ -129,12 +132,16 @@ export function scaleEvidenceDigest(bars = [], markers = []) {
     .map((b) => [b.id, endpointKey(b.a), endpointKey(b.b), b.knownDistanceM ?? null, b.accuracyM ?? null])
     .sort(compareFirst)
   const markerPart = markers
-    .map((m) => [m.id, m.role ?? null, m.enabled !== false, (m.observations ?? [])
-      // Observation accuracy participates in triangulation, so changing it must
-      // invalidate the cached endpoint just as surely as moving the pixel does.
-      .map((o) => [o.imageId ?? null, o.px ?? null, o.py ?? null,
-        o.accuracyX ?? null, o.accuracyY ?? null])
-      .sort(compareFirst)])
+    .map((m) => [
+      m.id,
+      m.role ?? null,
+      m.enabled !== false,
+      (m.observations ?? [])
+        // Observation accuracy participates in triangulation, so changing it must
+        // invalidate the cached endpoint just as surely as moving the pixel does.
+        .map((o) => [o.imageId ?? null, o.px ?? null, o.py ?? null, o.accuracyX ?? null, o.accuracyY ?? null])
+        .sort(compareFirst),
+    ])
     .sort(compareFirst)
   return fnv1a(JSON.stringify([barPart, markerPart]))
 }

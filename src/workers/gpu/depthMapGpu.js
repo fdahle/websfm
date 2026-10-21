@@ -27,7 +27,8 @@ function getPipeline(device) {
 
 function uploadGray(device, gray, w, h) {
   const tex = device.createTexture({
-    size: [w, h], format: 'r8unorm',
+    size: [w, h],
+    format: 'r8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   })
   device.queue.writeTexture({ texture: tex }, gray, { bytesPerRow: w, rowsPerImage: h }, { width: w, height: h })
@@ -36,14 +37,26 @@ function uploadGray(device, gray, w, h) {
 
 // Pack one Src struct (96 bytes, std430) at byte offset `o` of DataView `dv`.
 function writeSrc(dv, o, s) {
-  dv.setUint32(o + 0, s.w, true); dv.setUint32(o + 4, s.h, true)
-  dv.setFloat32(o + 16, s.K.fx, true); dv.setFloat32(o + 20, s.K.fy, true)
-  dv.setFloat32(o + 24, s.K.cx, true); dv.setFloat32(o + 28, s.K.cy, true)
-  const R = s.R, t = s.t
-  dv.setFloat32(o + 32, R[0][0], true); dv.setFloat32(o + 36, R[0][1], true); dv.setFloat32(o + 40, R[0][2], true)
-  dv.setFloat32(o + 48, R[1][0], true); dv.setFloat32(o + 52, R[1][1], true); dv.setFloat32(o + 56, R[1][2], true)
-  dv.setFloat32(o + 64, R[2][0], true); dv.setFloat32(o + 68, R[2][1], true); dv.setFloat32(o + 72, R[2][2], true)
-  dv.setFloat32(o + 80, t[0], true); dv.setFloat32(o + 84, t[1], true); dv.setFloat32(o + 88, t[2], true)
+  dv.setUint32(o + 0, s.w, true)
+  dv.setUint32(o + 4, s.h, true)
+  dv.setFloat32(o + 16, s.K.fx, true)
+  dv.setFloat32(o + 20, s.K.fy, true)
+  dv.setFloat32(o + 24, s.K.cx, true)
+  dv.setFloat32(o + 28, s.K.cy, true)
+  const R = s.R,
+    t = s.t
+  dv.setFloat32(o + 32, R[0][0], true)
+  dv.setFloat32(o + 36, R[0][1], true)
+  dv.setFloat32(o + 40, R[0][2], true)
+  dv.setFloat32(o + 48, R[1][0], true)
+  dv.setFloat32(o + 52, R[1][1], true)
+  dv.setFloat32(o + 56, R[1][2], true)
+  dv.setFloat32(o + 64, R[2][0], true)
+  dv.setFloat32(o + 68, R[2][1], true)
+  dv.setFloat32(o + 72, R[2][2], true)
+  dv.setFloat32(o + 80, t[0], true)
+  dv.setFloat32(o + 84, t[1], true)
+  dv.setFloat32(o + 88, t[2], true)
 }
 
 export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opts = {}) {
@@ -54,8 +67,14 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   if (npix === 0 || !sources.length) return null
 
   const {
-    depthMin = 0, depthMax = 0, seedDepth = null,
-    window = 3, iterations = 3, bestK = 3, seed = 1, perturbStart = 1,
+    depthMin = 0,
+    depthMax = 0,
+    seedDepth = null,
+    window = 3,
+    iterations = 3,
+    bestK = 3,
+    seed = 1,
+    perturbStart = 1,
   } = opts
   // Mirror mvs.rs's depth-range guards (dmin ≥ 1e-4, dmax ≥ dmin·1.001) so the GPU
   // and WASM backends init PatchMatch over the same interval — a zero/degenerate
@@ -78,9 +97,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   const texCap = device.limits.maxTextureDimension2D ?? Infinity
   const maxSide = Math.max(refW, refH, maxW, maxH)
   if (maxSide > texCap) {
-    throw new Error(
-      `image ${maxSide}px exceeds GPU texture limit ${texCap}px — lower maxDim (working resolution)`,
-    )
+    throw new Error(`image ${maxSide}px exceeds GPU texture limit ${texCap}px — lower maxDim (working resolution)`)
   }
   const { pipeline, sampler } = getPipeline(device)
 
@@ -96,13 +113,15 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
 
   // ── Sources as a texture_2d_array: each in its own maxW×maxH layer ─────────
   const srcArrTex = device.createTexture({
-    size: [maxW, maxH, nSrc], format: 'r8unorm',
+    size: [maxW, maxH, nSrc],
+    format: 'r8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   })
   srcList.forEach((s, layer) => {
     device.queue.writeTexture(
       { texture: srcArrTex, origin: [0, 0, layer] },
-      s.gray, { bytesPerRow: s.w, rowsPerImage: s.h },
+      s.gray,
+      { bytesPerRow: s.w, rowsPerImage: s.h },
       { width: s.w, height: s.h, depthOrArrayLayers: 1 },
     )
   })
@@ -112,7 +131,8 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // stay zero. The 0/1 LUT is scaled to 0/255 so the shader's `> 0.5` test works
   // against the r8unorm-normalised texel.
   const srcMaskTex = device.createTexture({
-    size: [maxW, maxH, nSrc], format: 'r8unorm',
+    size: [maxW, maxH, nSrc],
+    format: 'r8unorm',
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   })
   srcList.forEach((s, layer) => {
@@ -121,7 +141,8 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     for (let k = 0; k < bytes.length; k++) bytes[k] = s.mask[k] ? 255 : 0
     device.queue.writeTexture(
       { texture: srcMaskTex, origin: [0, 0, layer] },
-      bytes, { bytesPerRow: s.w, rowsPerImage: s.h },
+      bytes,
+      { bytesPerRow: s.w, rowsPerImage: s.h },
       { width: s.w, height: s.h, depthOrArrayLayers: 1 },
     )
   })
@@ -129,14 +150,22 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // ── Params uniform (64 bytes) ──────────────────────────────────────────────
   const pbuf = new ArrayBuffer(64)
   const pv = new DataView(pbuf)
-  pv.setUint32(0, refW, true);  pv.setUint32(4, refH, true)
-  pv.setInt32(8, radius, true); pv.setUint32(12, hasSeed ? 1 : 0, true)
-  pv.setFloat32(16, refK.fx, true); pv.setFloat32(20, refK.fy, true)
-  pv.setFloat32(24, refK.cx, true); pv.setFloat32(28, refK.cy, true)
-  pv.setFloat32(32, dMin, true); pv.setFloat32(36, dMax, true)
-  pv.setUint32(40, seed >>> 0, true); pv.setUint32(44, iters, true)
-  pv.setUint32(48, nSrc, true); pv.setUint32(52, Math.max(1, bestK), true)
-  pv.setUint32(56, maxW, true); pv.setUint32(60, maxH, true)
+  pv.setUint32(0, refW, true)
+  pv.setUint32(4, refH, true)
+  pv.setInt32(8, radius, true)
+  pv.setUint32(12, hasSeed ? 1 : 0, true)
+  pv.setFloat32(16, refK.fx, true)
+  pv.setFloat32(20, refK.fy, true)
+  pv.setFloat32(24, refK.cx, true)
+  pv.setFloat32(28, refK.cy, true)
+  pv.setFloat32(32, dMin, true)
+  pv.setFloat32(36, dMax, true)
+  pv.setUint32(40, seed >>> 0, true)
+  pv.setUint32(44, iters, true)
+  pv.setUint32(48, nSrc, true)
+  pv.setUint32(52, Math.max(1, bestK), true)
+  pv.setUint32(56, maxW, true)
+  pv.setUint32(60, maxH, true)
   const paramsBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(paramsBuf, 0, pbuf)
 
@@ -152,8 +181,11 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // `scale` = the sweep's refinement scale (refineSchedule.js), the value mvs.rs
   // derives from the same perturbStart and iteration.
   const writeCtrl = (mode, parity, iter) => {
-    const b = new ArrayBuffer(16); const d = new DataView(b)
-    d.setUint32(0, mode, true); d.setUint32(4, parity, true); d.setUint32(8, iter, true)
+    const b = new ArrayBuffer(16)
+    const d = new DataView(b)
+    d.setUint32(0, mode, true)
+    d.setUint32(4, parity, true)
+    d.setUint32(8, iter, true)
     d.setFloat32(12, refineScale(perturbStart, iter), true)
     device.queue.writeBuffer(ctrlBuf, 0, b)
   }
@@ -161,7 +193,8 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // ── Seed (storage, read-only); dummy when absent ───────────────────────────
   const seedArr = hasSeed ? seedDepth : new Float32Array(1)
   const seedBuf = device.createBuffer({
-    size: Math.max(4, seedArr.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    size: Math.max(4, seedArr.byteLength),
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   })
   device.queue.writeBuffer(seedBuf, 0, seedArr)
 
@@ -184,7 +217,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   }
 
   const stateBuf = device.createBuffer({ size: stateBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC })
-  const costBuf  = device.createBuffer({ size: costBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC })
+  const costBuf = device.createBuffer({ size: costBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC })
 
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
@@ -202,7 +235,8 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     ],
   })
 
-  const gx = Math.ceil(refW / 8), gy = Math.ceil(refH / 8)
+  const gx = Math.ceil(refW / 8),
+    gy = Math.ceil(refH / 8)
   const dispatch = () => {
     const enc = device.createCommandEncoder()
     const pass = enc.beginComputePass()
@@ -215,7 +249,8 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
 
   // Init, then iterations × {parity 0, parity 1}. Each writeCtrl is ordered before
   // its dispatch's submit, so the GPU runs them in sequence on the queue.
-  writeCtrl(0, 0, 0); dispatch()
+  writeCtrl(0, 0, 0)
+  dispatch()
 
   // Resolve the error scopes now that every resource exists and the init pass has
   // been submitted. Throwing here (worker → WASM fallback) beats an opaque readback
@@ -239,13 +274,15 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   }
 
   for (let it = 0; it < iters; it++) {
-    writeCtrl(1, 0, it); dispatch()
-    writeCtrl(1, 1, it); dispatch()
+    writeCtrl(1, 0, it)
+    dispatch()
+    writeCtrl(1, 1, it)
+    dispatch()
   }
 
   // ── Readback ───────────────────────────────────────────────────────────────
   const stateRead = device.createBuffer({ size: stateBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
-  const costRead  = device.createBuffer({ size: costBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+  const costRead = device.createBuffer({ size: costBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
   const enc = device.createCommandEncoder()
   enc.copyBufferToBuffer(stateBuf, 0, stateRead, 0, stateBytes)
   enc.copyBufferToBuffer(costBuf, 0, costRead, 0, costBytes)
@@ -266,7 +303,20 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     normals[i * 3 + 2] = stateArr[i * 4 + 3]
   }
 
-  for (const r of [refTex, srcArrTex, srcMaskTex, paramsBuf, srcBuf, ctrlBuf, seedBuf, stateBuf, costBuf, stateRead, costRead]) r.destroy?.()
+  for (const r of [
+    refTex,
+    srcArrTex,
+    srcMaskTex,
+    paramsBuf,
+    srcBuf,
+    ctrlBuf,
+    seedBuf,
+    stateBuf,
+    costBuf,
+    stateRead,
+    costRead,
+  ])
+    r.destroy?.()
 
   return { depth, cost, width: refW, height: refH, normals }
 }

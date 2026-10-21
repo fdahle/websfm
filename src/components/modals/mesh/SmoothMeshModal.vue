@@ -22,8 +22,9 @@ const emit = defineEmits(['close', 'run'])
 const settings = ref({ ...SMOOTH_MESH_DEFAULTS })
 const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
 // μ must exceed λ in magnitude, or the second half-step cannot undo the shrink.
-const valid = computed(() => settings.value.iterations >= 1 && settings.value.lambda > 0
-  && settings.value.mu < -settings.value.lambda)
+const valid = computed(
+  () => settings.value.iterations >= 1 && settings.value.lambda > 0 && settings.value.mu < -settings.value.lambda,
+)
 
 function run() {
   const s = settings.value
@@ -40,24 +41,56 @@ function run() {
     <NoSourceWarn v-if="!meshes.length" kind="mesh" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SourcePicker id="smooth-src" v-model="sourceId" label="Mesh" :items="meshes" :option-label="meshOptionLabel"
-          hint="The result is a new mesh; this one is left untouched." />
+        <SourcePicker
+          id="smooth-src"
+          v-model="sourceId"
+          label="Mesh"
+          :items="meshes"
+          :option-label="meshOptionLabel"
+          hint="The result is a new mesh; this one is left untouched."
+        />
       </SettingsGroup>
       <SettingsGroup title="Smoothing">
-        <SettingsField label="Iterations" label-for="smooth-it" hint="Each pass removes finer noise; more passes also soften real edges.">
-          <input id="smooth-it" v-model.number="settings.iterations" type="number" min="1" max="200" step="1" class="field-input" />
+        <SettingsField
+          label="Iterations"
+          label-for="smooth-it"
+          hint="Each pass removes finer noise; more passes also soften real edges."
+        >
+          <input
+            id="smooth-it"
+            v-model.number="settings.iterations"
+            type="number"
+            min="1"
+            max="200"
+            step="1"
+            class="field-input"
+          />
         </SettingsField>
         <SettingsField hint="Keeps the outline of an open surface (a terrain edge) where it is.">
-          <label class="checkbox-row"><input v-model="settings.fixBoundary" type="checkbox" class="checkbox" /> Keep the boundary fixed</label>
+          <label class="checkbox-row"
+            ><input v-model="settings.fixBoundary" type="checkbox" class="checkbox" /> Keep the boundary fixed</label
+          >
         </SettingsField>
       </SettingsGroup>
       <AdvancedDisclosure label="Advanced settings">
         <SettingsGroup title="Taubin weights">
           <SettingsField label-for="smooth-l">
             <template #label><GlossaryTerm id="mesh-smoothing">λ (smooth)</GlossaryTerm></template>
-            <input id="smooth-l" v-model.number="settings.lambda" type="number" min="0.01" max="1" step="0.01" class="field-input" />
+            <input
+              id="smooth-l"
+              v-model.number="settings.lambda"
+              type="number"
+              min="0.01"
+              max="1"
+              step="0.01"
+              class="field-input"
+            />
           </SettingsField>
-          <SettingsField label="μ (inflate)" label-for="smooth-m" hint="Must be more negative than −λ, or the mesh shrinks.">
+          <SettingsField
+            label="μ (inflate)"
+            label-for="smooth-m"
+            hint="Must be more negative than −λ, or the mesh shrinks."
+          >
             <input id="smooth-m" v-model.number="settings.mu" type="number" max="0" step="0.01" class="field-input" />
           </SettingsField>
         </SettingsGroup>

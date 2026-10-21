@@ -12,7 +12,7 @@ const STORAGE_KEY = 'browserWarningDismissed'
 function detectChromium() {
   const brands = navigator.userAgentData?.brands
   if (Array.isArray(brands)) {
-    return brands.some(b => /Chromium|Google Chrome|Microsoft Edge/i.test(b.brand))
+    return brands.some((b) => /Chromium|Google Chrome|Microsoft Edge/i.test(b.brand))
   }
   const ua = navigator.userAgent || ''
   return /Chrome\/|Chromium\/|Edg\//.test(ua) && !/Firefox\//.test(ua)

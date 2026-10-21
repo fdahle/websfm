@@ -23,7 +23,10 @@ const emit = defineEmits(['close', 'run'])
 
 const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 const mode = ref('params')
-const MODES = [{ id: 'params', label: 'Move / rotate / scale' }, { id: 'matrix', label: '4×4 matrix' }]
+const MODES = [
+  { id: 'params', label: 'Move / rotate / scale' },
+  { id: 'matrix', label: '4×4 matrix' },
+]
 const p = ref({ tx: 0, ty: 0, tz: 0, rx: 0, ry: 0, rz: 0, scale: 1, pivot: 'centre' })
 const matrixText = ref('1 0 0 0\n0 1 0 0\n0 0 1 0\n0 0 0 1')
 
@@ -37,11 +40,16 @@ const parsed = computed(() => {
   try {
     if (mode.value === 'matrix') {
       const tf = parseMatrixText(matrixText.value)
-      return { matrix: tf.matrix, note: tf.isSimilarity ? '' : 'Not a pure move/rotate/scale: shear or uneven scaling will be applied as given.' }
+      return {
+        matrix: tf.matrix,
+        note: tf.isSimilarity ? '' : 'Not a pure move/rotate/scale: shear or uneven scaling will be applied as given.',
+      }
     }
     const v = p.value
     const tf = transformFromEuler({
-      translate: [v.tx, v.ty, v.tz], rotateDeg: [v.rx, v.ry, v.rz], scale: v.scale,
+      translate: [v.tx, v.ty, v.tz],
+      rotateDeg: [v.rx, v.ry, v.rz],
+      scale: v.scale,
       pivot: v.pivot === 'centre' ? centre.value : [0, 0, 0],
     })
     return { matrix: matrixFromTransform(tf), note: '' }
@@ -64,8 +72,13 @@ function run() {
     <NoSourceWarn v-if="!clouds.length" kind="cloud" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SourcePicker id="tf-src" v-model="sourceId" label="Cloud" :items="clouds"
-          hint="Adds a transformed copy; this one is left untouched." />
+        <SourcePicker
+          id="tf-src"
+          v-model="sourceId"
+          label="Cloud"
+          :items="clouds"
+          hint="Adds a transformed copy; this one is left untouched."
+        />
         <SettingsField label="Define by">
           <SegmentedControl v-model="mode" :options="MODES" />
         </SettingsField>
@@ -98,8 +111,11 @@ function run() {
       </SettingsGroup>
 
       <SettingsGroup v-else title="Matrix">
-        <SettingsField label="Row-major 4×4 (or 3×4)" label-for="tf-matrix"
-          hint="16 or 12 numbers, separated by spaces, commas or new lines — e.g. pasted from CloudCompare.">
+        <SettingsField
+          label="Row-major 4×4 (or 3×4)"
+          label-for="tf-matrix"
+          hint="16 or 12 numbers, separated by spaces, commas or new lines — e.g. pasted from CloudCompare."
+        >
           <textarea id="tf-matrix" v-model="matrixText" rows="4" class="field-input mono" spellcheck="false" />
         </SettingsField>
       </SettingsGroup>
@@ -116,5 +132,8 @@ function run() {
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.mono { font-family: ui-monospace, 'Cascadia Code', monospace; resize: vertical; }
+.mono {
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  resize: vertical;
+}
 </style>

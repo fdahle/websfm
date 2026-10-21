@@ -3,22 +3,40 @@ import GcpTable from '../../controls/GcpTable.vue'
 import ModalShell from '../ui/ModalShell.vue'
 
 defineProps({
-  gcps:          { type: Array,  required: true },
-  crs:           { type: String, default: null },
-  report:        { type: Array,  default: () => [] },
+  gcps: { type: Array, required: true },
+  crs: { type: String, default: null },
+  report: { type: Array, default: () => [] },
   selectedGcpId: { type: String, default: null },
   hasReferenceDem: { type: Boolean, default: false },
-  sceneType:       { type: String,  default: null },
+  sceneType: { type: String, default: null },
 })
 
 const emit = defineEmits([
-  'close', 'remove', 'update-accuracy', 'update-observation-accuracy', 'update-name', 'update-position',
-  'update-role', 'update-vertical-datum', 'refresh-report', 'select', 'add', 'fill-z', 'check-z',
+  'close',
+  'remove',
+  'update-accuracy',
+  'update-observation-accuracy',
+  'update-name',
+  'update-position',
+  'update-role',
+  'update-vertical-datum',
+  'refresh-report',
+  'select',
+  'add',
+  'fill-z',
+  'check-z',
 ])
 </script>
 
 <template>
-  <ModalShell title="Control &amp; Markers" aria-label="Control and Markers Table" width="min(90vw, 900px)" height="80vh" flush @close="emit('close')">
+  <ModalShell
+    title="Control &amp; Markers"
+    aria-label="Control and Markers Table"
+    width="min(90vw, 900px)"
+    height="80vh"
+    flush
+    @close="emit('close')"
+  >
     <template #header>
       <span class="gcp-title">Control &amp; Markers</span>
       <button class="modal-refresh" title="Refresh accuracy report" @click="emit('refresh-report')">⟳</button>
@@ -47,11 +65,18 @@ const emit = defineEmits([
 
 <style scoped>
 /* The table is absolutely positioned inside the (filling) body. */
-:deep(.modal-body) { position: relative; }
+:deep(.modal-body) {
+  position: relative;
+}
 
 /* #header replaces the shell's title, so the title look is restated here; it takes
    the free width so the refresh button sits beside the close button. */
-.gcp-title { flex: 1; font-size: 14px; font-weight: 600; color: var(--text); }
+.gcp-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
 
 .modal-refresh {
   background: none;
@@ -63,5 +88,8 @@ const emit = defineEmits([
   padding: 1px 6px;
   border-radius: 4px;
 }
-.modal-refresh:hover { background: var(--hover-bg); color: var(--text); }
+.modal-refresh:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
 </style>

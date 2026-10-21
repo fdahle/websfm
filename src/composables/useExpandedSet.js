@@ -9,6 +9,8 @@ export function useExpandedSet() {
     if (expanded.value.has(id)) expanded.value.delete(id)
     else expanded.value.add(id)
   }
-  function clear() { expanded.value.clear() }
+  function clear() {
+    expanded.value.clear()
+  }
   return { expanded, isExpanded, toggle, clear }
 }

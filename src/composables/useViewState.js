@@ -31,7 +31,7 @@ export function useViewState({ mapMode, mapFrame }) {
   const showMapCameras = ref(true)
   // Modes entered from the ribbon and left from there or the tool's floating
   // toolbox: the 3D selection tool (reported up by Viewer3D) and map GCP editing.
-  const selectTool3d = ref(null)   // null | 'rect' | 'lasso'
+  const selectTool3d = ref(null) // null | 'rect' | 'lasso'
   const mapGcpEdit = ref(false)
   const { pointSize, setPointSize, cameraScale, setCameraScale } = useViewerSettings()
   const { basemap: mapBasemap, setBasemap: setMapBasemap } = useMapSettings()
@@ -59,7 +59,17 @@ export function useViewState({ mapMode, mapFrame }) {
   }))
 
   return {
-    showCameras, showGrid, showLegend, showFootprints, showMapGrid, showMapCameras, selectTool3d, mapGcpEdit,
-    setPointSize, setCameraScale, setMapBasemap, ribbonViewState,
+    showCameras,
+    showGrid,
+    showLegend,
+    showFootprints,
+    showMapGrid,
+    showMapCameras,
+    selectTool3d,
+    mapGcpEdit,
+    setPointSize,
+    setCameraScale,
+    setMapBasemap,
+    ribbonViewState,
   }
 }

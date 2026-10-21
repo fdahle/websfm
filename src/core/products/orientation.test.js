@@ -26,7 +26,7 @@ describe('orientation', () => {
     expect(Math.abs(dot(b.north, b.east))).toBeLessThan(1e-12)
     cross(b.east, b.north).forEach((v, i) => expect(v).toBeCloseTo(b.up[i], 12))
     const b0 = orientationBasis({ ...tilted, headingDeg: 0 })
-    expect(Math.acos(dot(b0.east, b.east)) * 180 / Math.PI).toBeCloseTo(30, 9)
+    expect((Math.acos(dot(b0.east, b.east)) * 180) / Math.PI).toBeCloseTo(30, 9)
     // A frame built on it maps the origin to 0 and up to +Z.
     const f = makeFrame({ ...b, crs: 'local', unit: 'model' })
     expect(f.fromSfm([5, 5, 5])).toEqual([0, 0, 0])
@@ -34,7 +34,16 @@ describe('orientation', () => {
   })
 
   it('turns a ground-plane normal to the cameras’ side', () => {
-    expect(upFromPlane([0, 0, -1], [0, 0, 0], [[0, 0, 10], [1, 0, 12]])).toEqual([0, 0, 1])
+    expect(
+      upFromPlane(
+        [0, 0, -1],
+        [0, 0, 0],
+        [
+          [0, 0, 10],
+          [1, 0, 12],
+        ],
+      ),
+    ).toEqual([0, 0, 1])
     expect(upFromPlane([0, 0, 1], [0, 0, 0], [])).toEqual([0, 0, 1])
   })
 })

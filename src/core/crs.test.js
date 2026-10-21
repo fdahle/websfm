@@ -1,7 +1,14 @@
 import { beforeAll, describe, it, expect } from 'vitest'
 import proj4 from 'proj4'
-import { ensureProjection, transform, isGeographic, axisLabels, localMetricFrame,
-  metresPerCrsUnit, metresToCrsUnits } from './crs.js'
+import {
+  ensureProjection,
+  transform,
+  isGeographic,
+  axisLabels,
+  localMetricFrame,
+  metresPerCrsUnit,
+  metresToCrsUnits,
+} from './crs.js'
 
 // Catalog CRS resolve from their built-in proj4 def — no network or OPFS needed.
 // EPSG:3031 is the Antarctic Polar Stereographic case the project relies on.
@@ -53,7 +60,8 @@ describe('projected CRS linear units', () => {
 
 describe('localMetricFrame (used for footprints in a geographic CRS)', () => {
   // Central Iran — the geographic test-dataset case.
-  const lon0 = 53.5, lat0 = 32.5
+  const lon0 = 53.5,
+    lat0 = 32.5
 
   it('is metric: 1 unit ≈ 1 metre near the centre', () => {
     const code = localMetricFrame(lon0, lat0)

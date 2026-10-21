@@ -7,8 +7,8 @@ import { generateMesh } from '../../core/products/mesh.js'
 // layer. Measured on the depth-8 bench terrain (crates/mesh/tests/bench_phases.rs,
 // 2026-10-07): coarse layers ~0.6 s, finest 6.8 s, build 1.2 s, extraction 2.4 s.
 const LAYER_GROWTH = 3
-const BUILD_SHARE = 0.15    // × the finest layer's cost
-const EXTRACT_SHARE = 0.4   // × the finest layer's cost
+const BUILD_SHARE = 0.15 // × the finest layer's cost
+const EXTRACT_SHARE = 0.4 // × the finest layer's cost
 
 // Drive the staged Poisson solve, emitting progress between multigrid layers. Injected
 // into core `generateMesh` as its `poissonFn`. Runs synchronously — the worker thread
@@ -47,7 +47,6 @@ function stagedPoisson(emit) {
   }
 }
 
-
 // Mesh op (screened Poisson). Owns the mesh wasm module (lazy init, like
 // reconstruction.js gates its own wasm). Pure meshing lives in core/products/mesh.js;
 // the worker just marshals buffers and injects the wasm solver. No rasterise dep.
@@ -68,8 +67,12 @@ export function makeMeshOps() {
     emit('progress', [0, 1, 'Poisson solve…'])
     const t0 = performance.now()
     const mesh = generateMesh(dense, stagedPoisson(emit), settings, (m, l, c) => emit('log', [m, l, c]))
-    emit('log', [`Mesh: built ${mesh.nVerts} vertices / ${mesh.count} triangles `
-      + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'success', 'Products'])
+    emit('log', [
+      `Mesh: built ${mesh.nVerts} vertices / ${mesh.count} triangles ` +
+        `in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+      'success',
+      'Products',
+    ])
     emit('progress', [1, 1, 'Done'])
 
     // Transfer the mesh buffers out AND the dense buffers back home.

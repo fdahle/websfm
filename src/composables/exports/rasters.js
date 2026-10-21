@@ -1,8 +1,19 @@
 import { epsgToWkt } from '../../core/products/wkt.js'
-import { demToCog, demToGeoTiff, rasterWorldFile, demToAsciiGridParts, orthoToGeoTiff } from '../../core/products/exporters.js'
+import {
+  demToCog,
+  demToGeoTiff,
+  rasterWorldFile,
+  demToAsciiGridParts,
+  orthoToGeoTiff,
+} from '../../core/products/exporters.js'
 import { downloadBlob } from '../../utils/download.js'
 import { partsToBlob } from '../../utils/blobParts.js'
-import { exportOrthoFile, demTool as workerDemTool, demAscii as workerDemAscii, warpRaster as workerWarpRaster } from '../../workers/computeClient.js'
+import {
+  exportOrthoFile,
+  demTool as workerDemTool,
+  demAscii as workerDemAscii,
+  warpRaster as workerWarpRaster,
+} from '../../workers/computeClient.js'
 import { ensureProjection, projDefinition, isGeographic } from '../../core/crs.js'
 import { rasterGroundScale, rasterUnits } from '../../core/products/rasterUnits.js'
 import { productDescriptor } from '../../core/io/rasterSource.js'
@@ -14,9 +25,7 @@ import { demRef } from '../../core/products/demWindow.js'
 // terrain products and a polygon clip — computed in the worker from the DEM.
 //
 // Deps are useExports' injected refs and shared helpers.
-export function createRasterExports({
-  crsInfo, dem, log, ortho, projectBase,
-}) {
+export function createRasterExports({ crsInfo, dem, log, ortho, projectBase }) {
   async function deflateBytes(bytes) {
     const cs = new CompressionStream('deflate')
     const stream = new Blob([bytes]).stream().pipeThrough(cs)
@@ -40,16 +49,33 @@ export function createRasterExports({
   async function exportReprojected(kind, product, { outputCrs, resampling }) {
     const info = crsInfo(product)
     const label = kind === 'dem' ? 'DEM' : 'Ortho'
-    if (!info.crs) { log(`${label} export: a raster in the local frame has no CRS to reproject from`, 'warn', 'Export'); return }
+    if (!info.crs) {
+      log(`${label} export: a raster in the local frame has no CRS to reproject from`, 'warn', 'Export')
+      return
+    }
     await ensureProjection(info.crs)
     await ensureProjection(outputCrs)
-    const fromDef = projDefinition(info.crs), toDef = projDefinition(outputCrs)
+    const fromDef = projDefinition(info.crs),
+      toDef = projDefinition(outputCrs)
     if (!fromDef || !toDef) throw new Error(`no proj4 definition for ${fromDef ? outputCrs : info.crs}`)
     const blockDem = kind === 'dem' && product.cog
     const geo = blockDem
-      ? { width: product.fullWidth, height: product.fullHeight, gsd: product.fullGsd, originX: product.originX, originY: product.originY }
-      : { width: product.width, height: product.height, gsd: product.gsd, originX: product.originX, originY: product.originY }
-    let plane = null, transfer = []
+      ? {
+          width: product.fullWidth,
+          height: product.fullHeight,
+          gsd: product.fullGsd,
+          originX: product.originX,
+          originY: product.originY,
+        }
+      : {
+          width: product.width,
+          height: product.height,
+          gsd: product.gsd,
+          originX: product.originX,
+          originY: product.originY,
+        }
+    let plane = null,
+      transfer = []
     if (kind === 'dem' && !product.cog) {
       // The plane's mask can differ from its NaNs (a filled cell): what it masks is nodata.
       const data = Float32Array.from(product.data)
@@ -58,27 +84,44 @@ export function createRasterExports({
       transfer = [data.buffer]
     }
     const epsg = Number(/^EPSG:(\d+)$/i.exec(outputCrs)?.[1]) || null
-    const { blob, width, height } = await workerWarpRaster({
-      kind, file: product.cog ?? null, plane, geo, resampling,
-      from: { code: info.crs, def: fromDef }, to: { code: outputCrs, def: toDef, epsg, geographic: isGeographic(outputCrs) },
-    }, { transfer, onLog: (m, l, c) => log(m, l, c) })
+    const { blob, width, height } = await workerWarpRaster(
+      {
+        kind,
+        file: product.cog ?? null,
+        plane,
+        geo,
+        resampling,
+        from: { code: info.crs, def: fromDef },
+        to: { code: outputCrs, def: toDef, epsg, geographic: isGeographic(outputCrs) },
+      },
+      { transfer, onLog: (m, l, c) => log(m, l, c) },
+    )
     const tag = outputCrs.replace(/[^A-Za-z0-9]+/g, '')
     downloadBlob(`${projectBase()}-${kind}-${tag}.tif`, blob, 'image/tiff')
-    log(`${label} export: ${width}×${height} Cloud-Optimized GeoTIFF in ${outputCrs}, reprojected from ${info.crs}`
-      + (kind === 'dem' ? ' (nodata NaN; heights keep their vertical datum)' : ''), 'success', 'Export')
+    log(
+      `${label} export: ${width}×${height} Cloud-Optimized GeoTIFF in ${outputCrs}, reprojected from ${info.crs}` +
+        (kind === 'dem' ? ' (nodata NaN; heights keep their vertical datum)' : ''),
+      'success',
+      'Export',
+    )
   }
 
   async function doExportDem({ format, nodata, compression, outputCrs = null, resampling = 'bilinear' }) {
     if (!dem.value) return
-    if (outputCrs && (format === 'cog' || format === 'geotiff')) return exportReprojected('dem', dem.value, { outputCrs, resampling })
+    if (outputCrs && (format === 'cog' || format === 'geotiff'))
+      return exportReprojected('dem', dem.value, { outputCrs, resampling })
     const info = crsInfo(dem.value)
     // A DEM past one plane (SAT-3) is its stored COG: both TIFF formats hand that file
     // out as it is (DEFLATE, NaN for nodata), and the other formats are its overview.
     const full = dem.value.cog
     if (full && (format === 'cog' || format === 'geotiff')) {
       downloadBlob(`${projectBase()}-dem${format === 'cog' ? '-cog' : ''}.tif`, full, 'image/tiff')
-      log(`DEM export: the full ${dem.value.fullWidth}×${dem.value.fullHeight} grid as its stored Cloud-Optimized `
-        + 'GeoTIFF (DEFLATE, nodata NaN)', 'success', 'Export')
+      log(
+        `DEM export: the full ${dem.value.fullWidth}×${dem.value.fullHeight} grid as its stored Cloud-Optimized ` +
+          'GeoTIFF (DEFLATE, nodata NaN)',
+        'success',
+        'Export',
+      )
       return
     }
     if (full && format !== 'png') {
@@ -90,8 +133,12 @@ export function createRasterExports({
       return
     }
     if (full) {
-      log(`DEM export: the hillshade PNG is of the ${dem.value.width}×${dem.value.height} overview, not the full `
-        + `${dem.value.fullWidth}×${dem.value.fullHeight} grid; export a GeoTIFF for that`, 'warn', 'Export')
+      log(
+        `DEM export: the hillshade PNG is of the ${dem.value.width}×${dem.value.height} overview, not the full ` +
+          `${dem.value.fullWidth}×${dem.value.fullHeight} grid; export a GeoTIFF for that`,
+        'warn',
+        'Export',
+      )
     }
     if (format === 'cog') {
       // COG defaults to DEFLATE: an uncompressed tiled file is strictly larger
@@ -112,14 +159,20 @@ export function createRasterExports({
     }
     if (format === 'png') {
       // Hillshade PNG — the DEM's hillshaded preview canvas + world file + .prj.
-      if (!dem.value.previewBlob) { log('DEM: no hillshade preview to export', 'warn', 'Export'); return }
+      if (!dem.value.previewBlob) {
+        log('DEM: no hillshade preview to export', 'warn', 'Export')
+        return
+      }
       downloadBlob(`${projectBase()}-dem-hillshade.png`, dem.value.previewBlob)
       downloadBlob(`${projectBase()}-dem-hillshade.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
       if (info.crs) downloadBlob(`${projectBase()}-dem-hillshade.prj`, prjText(info), 'text/plain;charset=utf-8')
       log('DEM export: hillshade PNG + world file', 'success', 'Export')
       return
     }
-    downloadBlob(`${projectBase()}-dem.asc`, partsToBlob(demToAsciiGridParts(dem.value, { nodata }), 'text/plain;charset=utf-8'))
+    downloadBlob(
+      `${projectBase()}-dem.asc`,
+      partsToBlob(demToAsciiGridParts(dem.value, { nodata }), 'text/plain;charset=utf-8'),
+    )
     if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, prjText(info), 'text/plain;charset=utf-8')
   }
 
@@ -131,7 +184,8 @@ export function createRasterExports({
   async function doExportOrtho({ format, compression, jpegQuality, outputCrs = null, resampling = 'bilinear' }) {
     const o = ortho.value
     if (!o?.cog) return
-    if (outputCrs && (format === 'cog' || format === 'geotiff')) return exportReprojected('ortho', o, { outputCrs, resampling })
+    if (outputCrs && (format === 'cog' || format === 'geotiff'))
+      return exportReprojected('ortho', o, { outputCrs, resampling })
     const info = crsInfo(o)
     if (format === 'cog') {
       downloadBlob(`${projectBase()}-ortho-cog.tif`, o.cog, 'image/tiff')
@@ -141,7 +195,10 @@ export function createRasterExports({
     const onLog = (m, l, c) => log(m, l, c)
     if (format === 'geotiff') {
       const deflate = compression === 'deflate'
-      const { blob } = await exportOrthoFile({ file: o.cog, format, deflate, crs: { code: info.code, geographic: info.geographic } }, { onLog })
+      const { blob } = await exportOrthoFile(
+        { file: o.cog, format, deflate, crs: { code: info.code, geographic: info.geographic } },
+        { onLog },
+      )
       downloadBlob(`${projectBase()}-ortho.tif`, blob, 'image/tiff')
       log(`Ortho export: GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
       return
@@ -149,7 +206,10 @@ export function createRasterExports({
     const jpeg = format === 'jpeg'
     const ext = jpeg ? 'jpg' : 'png'
     // Full resolution, so the world file's cell size is the image's (the preview is not).
-    const { blob } = await exportOrthoFile({ file: o.cog, format: jpeg ? 'jpeg' : 'png', quality: jpegQuality ?? 0.9 }, { onLog })
+    const { blob } = await exportOrthoFile(
+      { file: o.cog, format: jpeg ? 'jpeg' : 'png', quality: jpegQuality ?? 0.9 },
+      { onLog },
+    )
     downloadBlob(`${projectBase()}-ortho.${ext}`, blob)
     // World file extension mirrors the image (.wld works for both; .jgw/.pgw are the
     // strict siblings — .wld is universally accepted, so keep it simple).
@@ -169,12 +229,20 @@ export function createRasterExports({
   async function gridScaleFactor(product) {
     try {
       return (await rasterGroundScale(productDescriptor(product), product?.crs)) ?? 1
-    } catch { return 1 }
+    } catch {
+      return 1
+    }
   }
 
   const gridCopy = (g) => ({
-    width: g.width, height: g.height, gsd: g.gsd, originX: g.originX, originY: g.originY,
-    data: g.data.slice(), mask: g.mask ? g.mask.slice() : null, crs: g.crs ?? null,
+    width: g.width,
+    height: g.height,
+    gsd: g.gsd,
+    originX: g.originX,
+    originY: g.originY,
+    data: g.data.slice(),
+    mask: g.mask ? g.mask.slice() : null,
+    crs: g.crs ?? null,
   })
   // A DEM tool's input: a block-built DEM (SAT-3) goes as its record and is read from
   // its COG in the worker; any other as a copy of its plane (transferred).
@@ -195,18 +263,29 @@ export function createRasterExports({
       { transfer, onLog: (m, l, c) => log(m, l, c) },
     )
     const dxf = format === 'dxf'
-    downloadBlob(`${projectBase()}-contours.${dxf ? 'dxf' : 'geojson'}`, text,
-      dxf ? 'application/dxf' : 'application/geo+json')
+    downloadBlob(
+      `${projectBase()}-contours.${dxf ? 'dxf' : 'geojson'}`,
+      text,
+      dxf ? 'application/dxf' : 'application/geo+json',
+    )
     if (dxf && info.crs) downloadBlob(`${projectBase()}-contours.prj`, prjText(info), 'text/plain;charset=utf-8')
-    log(`Contours: ${lines.toLocaleString()} lines over ${levels} levels every ${interval} ${unitLabelOf(grid)} → ${dxf ? 'DXF' : 'GeoJSON'}`,
-      'success', 'Export')
+    log(
+      `Contours: ${lines.toLocaleString()} lines over ${levels} levels every ${interval} ${unitLabelOf(grid)} → ${dxf ? 'DXF' : 'GeoJSON'}`,
+      'success',
+      'Export',
+    )
   }
 
   async function exportTerrain({ products, slopeUnits, azimuth, altitude, multidirectional, compression }) {
     const grid = dem.value
     if (!grid || !products?.length) return
     const k = await gridScaleFactor(grid)
-    if (k !== 1) log(`Terrain: point scale factor k = ${k.toFixed(6)} at the DEM centre — horizontal spacing is gsd/k`, 'info', 'Export')
+    if (k !== 1)
+      log(
+        `Terrain: point scale factor k = ${k.toFixed(6)} at the DEM centre — horizontal spacing is gsd/k`,
+        'info',
+        'Export',
+      )
     const { input, transfer } = demToolInput(grid)
     const { rasters } = await workerDemTool(
       { tool: 'terrain', ...input, settings: { products, units: slopeUnits, azimuth, altitude, multidirectional, k } },
@@ -219,8 +298,7 @@ export function createRasterExports({
       if (!r) continue
       // Float32 single band with GDAL nodata, like the DEM itself — hillshade's
       // 0..255 bytes fit exactly, and one writer keeps the georeferencing identical.
-      const data = name === 'hillshade'
-        ? Float32Array.from(r.data, (v, i) => (r.mask[i] ? v : NaN)) : r.data
+      const data = name === 'hillshade' ? Float32Array.from(r.data, (v, i) => (r.mask[i] ? v : NaN)) : r.data
       const tif = await demToGeoTiff({ ...r, data }, { crs: info, nodata: -9999, deflate })
       downloadBlob(`${projectBase()}-dem-${name}.tif`, tif, 'image/tiff')
     }
@@ -232,25 +310,58 @@ export function createRasterExports({
     if (!product || !polygons?.length || (kind === 'ortho' && !product.cog)) return
     const geo = product
     // An ortho is clipped from a window of its COG, read in the worker (no plane here).
-    const input = kind === 'ortho'
-      ? { tool: 'clip', kind, polygons, cog: product.cog,
-          geo: { width: product.width, height: product.height, gsd: product.gsd, originX: product.originX, originY: product.originY } }
-      : { tool: 'clip', kind, polygons, ...demToolInput(product).input }
-    const buffers = kind === 'ortho' || !input.grid ? []
-      : [input.grid.data.buffer, ...(input.grid.mask ? [input.grid.mask.buffer] : [])]
+    const input =
+      kind === 'ortho'
+        ? {
+            tool: 'clip',
+            kind,
+            polygons,
+            cog: product.cog,
+            geo: {
+              width: product.width,
+              height: product.height,
+              gsd: product.gsd,
+              originX: product.originX,
+              originY: product.originY,
+            },
+          }
+        : { tool: 'clip', kind, polygons, ...demToolInput(product).input }
+    const buffers =
+      kind === 'ortho' || !input.grid
+        ? []
+        : [input.grid.data.buffer, ...(input.grid.mask ? [input.grid.mask.buffer] : [])]
     const { raster } = await workerDemTool(input, { transfer: buffers, onLog: (m, l, c) => log(m, l, c) })
-    if (!raster) { log('Clip: the polygon does not overlap the raster', 'warn', 'Export'); return }
+    if (!raster) {
+      log('Clip: the polygon does not overlap the raster', 'warn', 'Export')
+      return
+    }
     const info = crsInfo(geo)
     const deflate = compression === 'none' ? null : deflateBytes
-    const tif = kind === 'ortho'
-      ? await orthoToGeoTiff({ width: raster.width, height: raster.height, rgba: raster.data }, raster, { crs: info, deflate })
-      : await demToGeoTiff(raster, { crs: info, nodata: -9999, deflate })
+    const tif =
+      kind === 'ortho'
+        ? await orthoToGeoTiff({ width: raster.width, height: raster.height, rgba: raster.data }, raster, {
+            crs: info,
+            deflate,
+          })
+        : await demToGeoTiff(raster, { crs: info, nodata: -9999, deflate })
     downloadBlob(`${projectBase()}-${kind}-clipped.tif`, tif, 'image/tiff')
-    log(`Clip: ${kind === 'ortho' ? 'orthophoto' : 'DEM'} clipped to ${pluralize(polygons.length, 'polygon')}, ${raster.width}×${raster.height} px`, 'success', 'Export')
+    log(
+      `Clip: ${kind === 'ortho' ? 'orthophoto' : 'DEM'} clipped to ${pluralize(polygons.length, 'polygon')}, ${raster.width}×${raster.height} px`,
+      'success',
+      'Export',
+    )
   }
 
   return {
-    deflateBytes, prjText, doExportDem, doExportOrtho, gridScaleFactor, exportContours,
-    exportTerrain, exportClipped, gridCopy, unitLabelOf,
+    deflateBytes,
+    prjText,
+    doExportDem,
+    doExportOrtho,
+    gridScaleFactor,
+    exportContours,
+    exportTerrain,
+    exportClipped,
+    gridCopy,
+    unitLabelOf,
   }
 }

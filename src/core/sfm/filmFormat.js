@@ -97,14 +97,16 @@ export function filmFormatStatus(sensor, entries) {
     const ids = new Set(picks.map((x) => x?.widthMm ?? null))
     if (ids.size === 1 && picks[0]) {
       const w = span(off.map((e) => e.K.impliedFilmWidthMm))
-      const wText = w.min.toFixed(0) === w.max.toFixed(0) ? `${w.min.toFixed(0)} mm` : `${w.min.toFixed(0)}–${w.max.toFixed(0)} mm`
+      const wText =
+        w.min.toFixed(0) === w.max.toFixed(0) ? `${w.min.toFixed(0)} mm` : `${w.min.toFixed(0)}–${w.max.toFixed(0)} mm`
       const gaps = off.map((e) => relGap(e.K.impliedFilmWidthMm, picks[0].widthMm) * 100)
       suggestion = {
         ...picks[0],
         gapPct: Math.max(...gaps),
-        reason: `pixel size ${sensor?.pixelSize} mm implies a ${wText} film width, not a standard aerial `
-          + `format; nearest standard is the ${picks[0].label} (${picks[0].widthMm} mm, `
-          + `${Math.max(...gaps).toFixed(1)}% away)`,
+        reason:
+          `pixel size ${sensor?.pixelSize} mm implies a ${wText} film width, not a standard aerial ` +
+          `format; nearest standard is the ${picks[0].label} (${picks[0].widthMm} mm, ` +
+          `${Math.max(...gaps).toFixed(1)}% away)`,
       }
     }
   }

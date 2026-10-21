@@ -6,17 +6,21 @@ import { sceneUpFromCameras, buildLocalFrame, aerialUpRotation } from '../produc
 // north) and pitch (deg, negative = down), no roll, in websfm's OpenCV convention:
 // rows of R are the camera x (right), y (down) and z (forward) axes; t = −R·C.
 function gimbalCam(C, yawDeg, pitchDeg) {
-  const y = yawDeg * Math.PI / 180, p = pitchDeg * Math.PI / 180
+  const y = (yawDeg * Math.PI) / 180,
+    p = (pitchDeg * Math.PI) / 180
   const z = [Math.cos(p) * Math.sin(y), Math.cos(p) * Math.cos(y), Math.sin(p)]
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-  const norm = (v) => { const n = Math.hypot(...v); return v.map((c) => c / n) }
+  const norm = (v) => {
+    const n = Math.hypot(...v)
+    return v.map((c) => c / n)
+  }
   const x = norm(cross(z, [0, 0, 1]))
   const yy = cross(z, x)
   const R = [x, yy, z]
   const t = R.map((row) => -(row[0] * C[0] + row[1] * C[1] + row[2] * C[2]))
   return { R, t }
 }
-const tiltDeg = (up) => Math.acos(Math.min(1, up[2] / Math.hypot(...up))) * 180 / Math.PI
+const tiltDeg = (up) => (Math.acos(Math.min(1, up[2] / Math.hypot(...up))) * 180) / Math.PI
 
 // St Nazaire's geometry (HANDOVER ▸ the 2026-10-09 up fix): a 50 × 45 m block at
 // one altitude, every frame facing south, 75 at −26° and 51 at −50° pitch.
@@ -34,18 +38,19 @@ it('an oblique block at one altitude is levelled by its camera plane, not its vi
   const scene = sceneUpFromCameras(cams)
   expect(scene.source).toBe('camera-plane')
   expect(tiltDeg(scene.up)).toBeLessThan(0.5)
-  expect(scene.viewTiltDeg).toBeGreaterThan(30)          // the old reading was this far off
-  expect(tiltDeg(estimateUpFromCameras(cams))).toBeLessThan(0.5)   // the 3D viewer agrees
-  expect(tiltDeg(buildLocalFrame(cams, []).up)).toBeLessThan(0.5)  // and the product frame
-  expect(aerialUpRotation(cams)[2][2]).toBeGreaterThan(0.9999)    // and the auto-orient
+  expect(scene.viewTiltDeg).toBeGreaterThan(30) // the old reading was this far off
+  expect(tiltDeg(estimateUpFromCameras(cams))).toBeLessThan(0.5) // the 3D viewer agrees
+  expect(tiltDeg(buildLocalFrame(cams, []).up)).toBeLessThan(0.5) // and the product frame
+  expect(aerialUpRotation(cams)[2][2]).toBeGreaterThan(0.9999) // and the auto-orient
 })
 
 it('a nadir flight over a slope keeps the viewing direction (terrain-following)', () => {
   // Centres follow a 20° slope; the gimbal points straight down.
-  const s = Math.tan(20 * Math.PI / 180)
+  const s = Math.tan((20 * Math.PI) / 180)
   const cams = []
   for (let i = 0; i < 40; i++) {
-    const x = (i % 8) * 10, y = Math.floor(i / 8) * 10
+    const x = (i % 8) * 10,
+      y = Math.floor(i / 8) * 10
     cams.push(gimbalCam([x, y, 60 + s * y], 0, -89.9))
   }
   expect(sceneUpFromCameras(cams).source).toBe('cameras')

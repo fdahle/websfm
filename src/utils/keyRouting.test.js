@@ -5,9 +5,16 @@ import { isModalOpen, isTypingTarget, viewerMayHandleKey, MODAL_SELECTOR } from 
 // elements (each "rendered" unless it says otherwise).
 const dialog = ({ rendered = true } = {}) => ({ getClientRects: () => (rendered ? [{}] : []) })
 const fakeDoc = (dialogs = []) => ({
-  querySelectorAll: (sel) => { expect(sel).toBe(MODAL_SELECTOR); return dialogs },
+  querySelectorAll: (sel) => {
+    expect(sel).toBe(MODAL_SELECTOR)
+    return dialogs
+  },
 })
-const key = (k, { target = { tagName: 'CANVAS' }, defaultPrevented = false } = {}) => ({ key: k, target, defaultPrevented })
+const key = (k, { target = { tagName: 'CANVAS' }, defaultPrevented = false } = {}) => ({
+  key: k,
+  target,
+  defaultPrevented,
+})
 
 describe('isModalOpen', () => {
   it('is false with no dialog, true with a rendered one', () => {
@@ -64,10 +71,14 @@ describe('viewerMayHandleKey', () => {
 // first (children register first) and consume what they act on; App's global
 // handler skips consumed events. One Escape does one thing, innermost first.
 describe('Escape routing between a viewer and App', () => {
-  function dispatch(e, listeners) { for (const l of listeners) l(e) }
+  function dispatch(e, listeners) {
+    for (const l of listeners) l(e)
+  }
   function makeEvent(k, opts) {
     const e = { ...key(k, opts) }
-    e.preventDefault = () => { e.defaultPrevented = true }
+    e.preventDefault = () => {
+      e.defaultPrevented = true
+    }
     return e
   }
   function setup({ modal = false, selection = true } = {}) {
@@ -75,12 +86,20 @@ describe('Escape routing between a viewer and App', () => {
     const state = { selection, modal, tool: true }
     const viewer = (e) => {
       if (!viewerMayHandleKey(e, doc)) return
-      if (e.key === 'Escape' && state.selection) { e.preventDefault(); state.selection = false }
-      else if ((e.key === 'Delete' || e.key === 'Backspace') && state.selection) { e.preventDefault(); state.deleted = true }
+      if (e.key === 'Escape' && state.selection) {
+        e.preventDefault()
+        state.selection = false
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && state.selection) {
+        e.preventDefault()
+        state.deleted = true
+      }
     }
     const app = (e) => {
       if (e.defaultPrevented) return
-      if (e.key === 'Escape') { if (state.modal) state.modal = false; else state.tool = false }
+      if (e.key === 'Escape') {
+        if (state.modal) state.modal = false
+        else state.tool = false
+      }
     }
     return { state, run: (k, o) => dispatch(makeEvent(k, o), [viewer, app]) }
   }

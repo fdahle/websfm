@@ -4,7 +4,12 @@ import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { measurementStale } from '../../core/products/measurementRecord.js'
 import {
-  describeMeasurement, geoJsonMode, is3dMeasurement, measurementsCsv, measurementsGeoJson, rasterRecordCrs,
+  describeMeasurement,
+  geoJsonMode,
+  is3dMeasurement,
+  measurementsCsv,
+  measurementsGeoJson,
+  rasterRecordCrs,
 } from '../../core/products/measurementExport.js'
 import { cloudUnits } from '../../core/products/cloudUnits.js'
 import { ensureProjection, transform } from '../../core/crs.js'
@@ -29,7 +34,8 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
     const src = record.source ?? ''
     if (src === 'product:dem') return recon.dem
     if (src === 'product:ortho') return recon.ortho
-    if (src.startsWith('reference:')) return external.rasters.find((r) => r.id === src.slice('reference:'.length)) ?? null
+    if (src.startsWith('reference:'))
+      return external.rasters.find((r) => r.id === src.slice('reference:'.length)) ?? null
     return null
   }
   function sourceName(record) {
@@ -57,8 +63,10 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
   function frameLabel(frame) {
     if (frame.source === 'georef') return frame.crs
     if (frame.source === 'orientation') return 'oriented local frame (Orient model; no CRS)'
-    if (frame.source === 'scalebars') return frame.oriented
-      ? 'oriented local frame in metres (Orient model, scale bars; no CRS)' : 'model frame in metres (scale bars; no CRS)'
+    if (frame.source === 'scalebars')
+      return frame.oriented
+        ? 'oriented local frame in metres (Orient model, scale bars; no CRS)'
+        : 'model frame in metres (scale bars; no CRS)'
     return 'model frame (SfM coordinates; no CRS)'
   }
 
@@ -70,7 +78,11 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
   function exportCrsFor(ids, georeferenced) {
     const records = recordsFor(ids)
     const crs = currentCrs.value && currentCrs.value !== 'local' ? currentCrs.value : null
-    const rasterCrs = records.filter((r) => !is3dMeasurement(r)).map(rasterRecordCrs).find(Boolean) ?? null
+    const rasterCrs =
+      records
+        .filter((r) => !is3dMeasurement(r))
+        .map(rasterRecordCrs)
+        .find(Boolean) ?? null
     const any3d = georeferenced && records.some((r) => is3dMeasurement(r) && !isImported3d(r))
     if (!rasterCrs && !any3d) return null
     return crs ?? rasterCrs
@@ -79,7 +91,10 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
 
   async function doExportMeasurements({ format = 'csv', measurementCoords = 'project', ids = null } = {}) {
     const records = recordsFor(ids)
-    if (!records.length) { log('Export: no saved measurements', 'warn', 'Export'); return }
+    if (!records.length) {
+      log('Export: no saved measurements', 'warn', 'Export')
+      return
+    }
     const resolved = await effectiveFrameSpec?.()
     const frame = await exportSimilarity()
     const signature = { source: resolved?.source ?? null, scale: resolved?.scale ?? 1 }
@@ -90,9 +105,16 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
       sourceName,
       stale,
       units3d: (r) => cloudUnits(cloudOf(r) ?? { imported: isImported3d(r) }, signature),
-      frame3d: (r) => (isImported3d(r)
-        ? { sim: null, crs: null, unit: 'file units', label: `file coordinates of "${sourceName(r)}"` }
-        : { sim: frame.sim, crs: frame.crs, unit: frame.unit === 'model' ? 'model units' : frame.unit, label: frameLabel(frame), up }),
+      frame3d: (r) =>
+        isImported3d(r)
+          ? { sim: null, crs: null, unit: 'file units', label: `file coordinates of "${sourceName(r)}"` }
+          : {
+              sim: frame.sim,
+              crs: frame.crs,
+              unit: frame.unit === 'model' ? 'model units' : frame.unit,
+              label: frameLabel(frame),
+              up,
+            },
     }
     const rows = records.map((r) => describeMeasurement(r, ctx))
     const base = `${projectBase()}-measurements`
@@ -111,8 +133,12 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
     const fc = measurementsGeoJson(rows, { mode, targetCrs, reproject })
     downloadBlob(`${base}.geojson`, JSON.stringify(fc), 'application/geo+json')
     const unplaced = fc.features.filter((f) => !f.geometry).length
-    log(`Exported ${pluralize(rows.length, 'measurement')} as GeoJSON — ${fc.coordinate_frame}`
-      + (unplaced ? `; ${unplaced} without a CRS kept unplaced (frame_coordinates)` : ''), 'success', 'Export')
+    log(
+      `Exported ${pluralize(rows.length, 'measurement')} as GeoJSON — ${fc.coordinate_frame}` +
+        (unplaced ? `; ${unplaced} without a CRS kept unplaced (frame_coordinates)` : ''),
+      'success',
+      'Export',
+    )
   }
 
   return { doExportMeasurements, exportCrsFor, measurementCount }

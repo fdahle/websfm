@@ -22,7 +22,11 @@ self.onmessage = async (e) => {
     }
     const bytes = new Uint8Array(await data.slice(node.offset, node.offset + node.length).arrayBuffer())
     const pts = decodeCopcRecords(d.decode_chunk(bytes, node.count), node.count, lod, { as })
-    const transfer = [pts.pos.buffer, ...(pts.col ? [pts.col.buffer] : []), ...new Set(Object.values(pts.attributes).map((a) => a.buffer))]
+    const transfer = [
+      pts.pos.buffer,
+      ...(pts.col ? [pts.col.buffer] : []),
+      ...new Set(Object.values(pts.attributes).map((a) => a.buffer)),
+    ]
     self.postMessage({ id, ok: true, result: pts }, transfer)
   } catch (err) {
     self.postMessage({ id, ok: false, error: err?.message ?? String(err) })

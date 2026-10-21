@@ -33,7 +33,11 @@
   border-bottom: 1px solid var(--panel-border);
 }
 
-.modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
 
 .modal-close {
   background: none;
@@ -45,7 +49,10 @@
   padding: 1px 6px;
   border-radius: 4px;
 }
-.modal-close:hover { background: var(--hover-bg); color: var(--text); }
+.modal-close:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
 
 .modal-body {
   padding: 16px;
@@ -65,11 +72,30 @@
 }
 
 /* Fields */
-.field { display: flex; flex-direction: column; gap: 5px; }
-.field-label { font-size: 12px; font-weight: 600; color: var(--text); }
-.field-hint { font-size: 11px; color: var(--text-dim); }
-.section-sep { height: 1px; background: var(--panel-border); margin: 2px 0; }
-.input-row { display: flex; align-items: center; gap: 6px; }
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.field-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.section-sep {
+  height: 1px;
+  background: var(--panel-border);
+  margin: 2px 0;
+}
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 
 /* `.field-select` carries the whole control look on its own, so a select written
    with only that class (as most tool dialogs do) is styled like one written
@@ -84,20 +110,43 @@
   font-size: 13px;
   padding: 4px 8px;
 }
-.field-input { width: 100px; }
+.field-input {
+  width: 100px;
+}
 .field-input:focus,
-.field-select:focus { outline: none; border-color: var(--accent); }
+.field-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 /* A numeric field the dialog's Run is blocked on (utils/numberFields.js) — stays red
    while focused, so the field being fixed keeps saying it is the problem. */
-.field-input[aria-invalid="true"] { border-color: #e0533d; }
-.field-select { width: auto; min-width: 180px; cursor: pointer; }
+.field-input[aria-invalid='true'] {
+  border-color: #e0533d;
+}
+.field-select {
+  width: auto;
+  min-width: 180px;
+  cursor: pointer;
+}
 .field-select:disabled,
-.field-input:disabled { opacity: 0.5; cursor: not-allowed; }
-.field-unit { font-size: 12px; color: var(--text-dim); }
-.field-input.range { width: 100%; padding: 0; accent-color: var(--accent); }
+.field-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.field-unit {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.field-input.range {
+  width: 100%;
+  padding: 0;
+  accent-color: var(--accent);
+}
 /* A plain button inside a field (e.g. "Across the middle") keeps its own width
    instead of stretching across the column. */
-.field > .btn { align-self: flex-start; }
+.field > .btn {
+  align-self: flex-start;
+}
 
 /* Checkbox / radio rows. Radios take the same class so they share the accent. */
 .checkbox-row {
@@ -108,12 +157,28 @@
   color: var(--text);
   cursor: pointer;
 }
-.checkbox-row:has(> input:disabled) { opacity: 0.5; cursor: not-allowed; }
-.checkbox { width: 14px; height: 14px; margin: 0; flex: none; cursor: pointer; accent-color: var(--accent); }
-.checkbox:disabled { cursor: not-allowed; }
+.checkbox-row:has(> input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex: none;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.checkbox:disabled {
+  cursor: not-allowed;
+}
 
 /* Segmented control / chips */
-.seg-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.seg-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
 .seg-btn {
   background: none;
   border: 1px solid var(--panel-border);
@@ -124,9 +189,18 @@
   padding: 4px 14px;
   cursor: pointer;
 }
-.seg-btn:hover:not(:disabled) { background: var(--hover-bg); }
-.seg-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-.seg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.seg-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+.seg-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.seg-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 /* Choice cards (ChoiceCards.vue) — a SegmentedControl with room for an example
    picture + a one-line blurb. Same card look as PresetCards, but these pick the
@@ -150,21 +224,33 @@
   color: var(--text);
   font: inherit;
 }
-.choice-card:hover:not(:disabled) { border-color: var(--text-dim); }
+.choice-card:hover:not(:disabled) {
+  border-color: var(--text-dim);
+}
 .choice-card.active {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
   color: var(--accent);
 }
-.choice-card:disabled { opacity: 0.4; cursor: not-allowed; }
+.choice-card:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 .choice-card-visual {
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 2px 0 4px;
 }
-.choice-card-label { font-size: 12px; font-weight: 600; }
-.choice-card-blurb { font-size: 11px; color: var(--text-dim); line-height: 1.35; }
+.choice-card-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+.choice-card-blurb {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
 
 /* Disclosure toggle */
 .link-btn {
@@ -177,7 +263,9 @@
   cursor: pointer;
   text-align: left;
 }
-.link-btn:hover { text-decoration: underline; }
+.link-btn:hover {
+  text-decoration: underline;
+}
 
 /* Warn box */
 .warn-box {
@@ -203,34 +291,102 @@
   border-radius: 6px;
   padding: 9px 11px;
 }
-.tile-value { font-size: 19px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-.tile-unit { font-size: 12px; font-weight: 400; color: var(--text-dim); }
-.tile-label { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
-.tile-hint { font-size: 10px; color: var(--text-dim); margin-top: 3px; opacity: 0.8; }
-.tile.tone-ok   .tile-value { color: var(--accent); }
-.tile.tone-warn .tile-value { color: #e6a01e; }
-.tile.tone-bad  .tile-value { color: #e0533d; }
+.tile-value {
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tile-unit {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.tile-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.tile-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  opacity: 0.8;
+}
+.tile.tone-ok .tile-value {
+  color: var(--accent);
+}
+.tile.tone-warn .tile-value {
+  color: #e6a01e;
+}
+.tile.tone-bad .tile-value {
+  color: #e0533d;
+}
 
 /* ── Evaluate views: data table (DataTable.vue) ─────────────────────────────── */
-.dt-wrap { width: 100%; overflow-x: auto; }
-.dt { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dt-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+.dt {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
 .dt thead th {
-  position: sticky; top: 0; z-index: 1;
-  background: var(--panel); text-align: left; padding: 8px 10px;
-  font-weight: 600; color: var(--text-dim); white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  text-align: left;
+  padding: 8px 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
   border-bottom: 1px solid var(--panel-border);
 }
-.dt thead th.sortable { cursor: pointer; user-select: none; }
-.dt thead th.sortable:hover { color: var(--text); }
-.dt-arrow { font-size: 9px; color: var(--accent); margin-left: 3px; }
-.dt tbody td {
-  padding: 7px 10px; border-bottom: 1px solid var(--panel-border);
-  white-space: nowrap; color: var(--text); font-variant-numeric: tabular-nums;
+.dt thead th.sortable {
+  cursor: pointer;
+  user-select: none;
 }
-.dt .align-right  { text-align: right; }
-.dt .align-center { text-align: center; }
-.dt-row { cursor: default; }
-.dt-row.expandable { cursor: pointer; }
-.dt-row:hover { background: rgba(255, 255, 255, 0.04); }
-.dt-detail > td { background: var(--bg); padding: 8px 12px; white-space: normal; }
-.dt-empty { padding: 32px; text-align: center; color: var(--text-dim); font-size: 13px; }
+.dt thead th.sortable:hover {
+  color: var(--text);
+}
+.dt-arrow {
+  font-size: 9px;
+  color: var(--accent);
+  margin-left: 3px;
+}
+.dt tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--panel-border);
+  white-space: nowrap;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.dt .align-right {
+  text-align: right;
+}
+.dt .align-center {
+  text-align: center;
+}
+.dt-row {
+  cursor: default;
+}
+.dt-row.expandable {
+  cursor: pointer;
+}
+.dt-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.dt-detail > td {
+  background: var(--bg);
+  padding: 8px 12px;
+  white-space: normal;
+}
+.dt-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}

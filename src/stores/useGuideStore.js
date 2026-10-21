@@ -9,7 +9,7 @@ import { defineStore } from 'pinia'
 // from. Pure UI state: not persisted.
 export const useGuideStore = defineStore('guide', () => {
   const isOpen = ref(false)
-  const tabs = ref([])         // operation ids, in the order opened
+  const tabs = ref([]) // operation ids, in the order opened
   const activeId = ref('home') // 'home' or an operation id
   const focusParam = ref(null) // param key to scroll to after opening, or null
 
@@ -38,7 +38,7 @@ export const useGuideStore = defineStore('guide', () => {
   function closeTab(id) {
     const i = tabs.value.indexOf(id)
     if (i === -1) return
-    tabs.value = tabs.value.filter(t => t !== id)
+    tabs.value = tabs.value.filter((t) => t !== id)
     if (activeId.value === id) activeId.value = tabs.value[i - 1] ?? tabs.value[i] ?? 'home'
   }
 

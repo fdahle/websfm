@@ -23,9 +23,10 @@ const median = (values) => {
 // UTM zone number (1–60) for a WGS 84 position, honouring the two standard
 // exceptions to the 6° grid.
 export function utmZone(lat, lon) {
-  const l = ((lon + 180) % 360 + 360) % 360 - 180 // normalise to [-180, 180)
+  const l = ((((lon + 180) % 360) + 360) % 360) - 180 // normalise to [-180, 180)
   if (lat >= 56 && lat < 64 && l >= 3 && l < 12) return 32 // south-west Norway
-  if (lat >= 72 && lat < 84) { // Svalbard: zones 31, 33, 35, 37 only
+  if (lat >= 72 && lat < 84) {
+    // Svalbard: zones 31, 33, 35, 37 only
     if (l >= 0 && l < 9) return 31
     if (l >= 9 && l < 21) return 33
     if (l >= 21 && l < 33) return 35
@@ -38,8 +39,9 @@ export function utmZone(lat, lon) {
 // Returns { code, name, lat, lon, count } for the median position, or null when
 // there is nothing usable.
 export function suggestProjectedCrs(positions) {
-  const pts = (positions || []).filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon)
-    && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 360)
+  const pts = (positions || []).filter(
+    (p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 360,
+  )
   if (!pts.length) return null
   const lat = median(pts.map((p) => p.lat))
   const lon = median(pts.map((p) => p.lon))

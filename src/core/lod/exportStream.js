@@ -27,16 +27,22 @@ const fromBase64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
  * with no extra-bytes type is listed as `dropped`.
  */
 export function lasPlanFor(lod) {
-  const native = [], extra = [], dropped = []
+  const native = [],
+    extra = [],
+    dropped = []
   let offset = 0
   for (const a of lod.layout.attributes) {
-    const r = lod.stats?.ranges?.[a.name], range = NATIVE[a.name]
+    const r = lod.stats?.ranges?.[a.name],
+      range = NATIVE[a.name]
     if (range && r && Number.isInteger(r.min) && Number.isInteger(r.max) && r.min >= range[0] && r.max <= range[1]) {
       native.push(a.name)
       continue
     }
     const dataType = EXTRA_TYPE[a.type]
-    if (!dataType) { dropped.push(a.name); continue }
+    if (!dataType) {
+      dropped.push(a.name)
+      continue
+    }
     extra.push({ name: a.name, source: a.name, dataType, size: EXTRA_SIZE[dataType], offset })
     offset += EXTRA_SIZE[dataType]
   }
@@ -63,11 +69,21 @@ export function lodToLas(reader, lod, { onProgress, compressor = null } = {}) {
     for await (const pts of nodes(reader)) {
       const native = Object.fromEntries(plan.native.map((n) => [n, pts.attributes[n]]))
       const rn = pts.attributes.returnNumber
-      for (let i = 0; i < pts.count; i++) { const k = (rn ? rn[i] : 1) - 1; if (k >= 0 && k < 5) byReturn[k]++ }
+      for (let i = 0; i < pts.count; i++) {
+        const k = (rn ? rn[i] : 1) - 1
+        if (k >= 0 && k < 5) byReturn[k]++
+      }
       const records = encodeLasPoints({
-        n: pts.count, getX: (i) => pts.pos[3 * i], getY: (i) => pts.pos[3 * i + 1], getZ: (i) => pts.pos[3 * i + 2],
+        n: pts.count,
+        getX: (i) => pts.pos[3 * i],
+        getY: (i) => pts.pos[3 * i + 1],
+        getZ: (i) => pts.pos[3 * i + 2],
         getC: pts.col ? (i) => [pts.col[3 * i], pts.col[3 * i + 1], pts.col[3 * i + 2]] : () => null,
-        scale, offset, format: plan.format, recordLength: plan.recordLength, native,
+        scale,
+        offset,
+        format: plan.format,
+        recordLength: plan.recordLength,
+        native,
         extra: plan.extra.map((e) => ({ ...e, values: pts.attributes[e.source] })),
       })
       if (compressor) {
@@ -84,10 +100,21 @@ export function lodToLas(reader, lod, { onProgress, compressor = null } = {}) {
   function header(lazVlr = null) {
     const vlrs = (lod.file?.projection ?? []).map((v) => ({ ...v, data: fromBase64(v.data) }))
     if (plan.extra.length) vlrs.push(extraBytesVlr(plan.extra))
-    if (lazVlr) vlrs.push({ userId: LASZIP_VLR_USER_ID, recordId: LASZIP_VLR_RECORD_ID, description: 'lazcodec', data: lazVlr })
-    const [minX, minY, minZ] = lod.bounds.min, [maxX, maxY, maxZ] = lod.bounds.max
-    return writeLasHeader({ n: written, vlrs, scale, offset, bbox: { minX, minY, minZ, maxX, maxY, maxZ }, compressed: !!lazVlr,
-      format: plan.format, recordLength: plan.recordLength, pointsByReturn: lod.layout.attributes.some((a) => a.name === 'returnNumber') ? byReturn : null })
+    if (lazVlr)
+      vlrs.push({ userId: LASZIP_VLR_USER_ID, recordId: LASZIP_VLR_RECORD_ID, description: 'lazcodec', data: lazVlr })
+    const [minX, minY, minZ] = lod.bounds.min,
+      [maxX, maxY, maxZ] = lod.bounds.max
+    return writeLasHeader({
+      n: written,
+      vlrs,
+      scale,
+      offset,
+      bbox: { minX, minY, minZ, maxX, maxY, maxZ },
+      compressed: !!lazVlr,
+      format: plan.format,
+      recordLength: plan.recordLength,
+      pointsByReturn: lod.layout.attributes.some((a) => a.name === 'returnNumber') ? byReturn : null,
+    })
   }
   // LAZ, once `parts` is exhausted: the header, then the stream's first 8 bytes (the
   // chunk-table offset, made absolute), then the parts, then `tail`.
@@ -104,7 +131,8 @@ export function lodToLas(reader, lod, { onProgress, compressor = null } = {}) {
 
 /** PLY (binary or 'ply-ascii') or XYZ: async iterator of parts (strings or Uint8Arrays), header first. */
 export async function* lodToText(reader, lod, { format, color = true, onProgress } = {}) {
-  let written = 0, first = true
+  let written = 0,
+    first = true
   for await (const pts of nodes(reader)) {
     const cloud = { count: pts.count, pos: pts.pos, ...(pts.col ? { col: pts.col } : {}), attributes: pts.attributes }
     if (format === 'xyz') {
@@ -114,7 +142,10 @@ export async function* lodToText(reader, lod, { format, color = true, onProgress
       // cloud's count.
       let headless = false
       for (const part of cloudToPlyParts(cloud, { binary: false, color })) {
-        if (headless) { yield part; continue }
+        if (headless) {
+          yield part
+          continue
+        }
         const end = part.indexOf('end_header\n') + 'end_header\n'.length
         if (first) yield part.slice(0, end).replace(/element vertex \d+/, `element vertex ${lod.points}`)
         yield part.slice(end)
@@ -124,7 +155,10 @@ export async function* lodToText(reader, lod, { format, color = true, onProgress
       const it = cloudToPlyParts(cloud, { binary: true, color })
       const head = it.next().value
       // One header for the whole file: this node's, with the cloud's count.
-      if (first) yield new TextEncoder().encode(new TextDecoder().decode(head).replace(/element vertex \d+/, `element vertex ${lod.points}`))
+      if (first)
+        yield new TextEncoder().encode(
+          new TextDecoder().decode(head).replace(/element vertex \d+/, `element vertex ${lod.points}`),
+        )
       for (let p = it.next(); !p.done; p = it.next()) yield p.value
     }
     first = false

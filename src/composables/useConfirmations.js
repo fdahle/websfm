@@ -86,7 +86,8 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
   const deleteMessage = computed(() => {
     const p = pendingImageDelete.value
     if (!p) return ''
-    if (p.ids.length === 1) return `Remove “${p.names[0] ?? 'this image'}”? This also deletes its keypoints, mask, depth map and matches. This can't be undone.`
+    if (p.ids.length === 1)
+      return `Remove “${p.names[0] ?? 'this image'}”? This also deletes its keypoints, mask, depth map and matches. This can't be undone.`
     return `Remove ${p.ids.length} images? This also deletes their keypoints, masks, depth maps and matches. This can't be undone.`
   })
 
@@ -141,10 +142,13 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
   // this is the one removal that can be told not to ask again (Settings ▸ General
   // turns the question back on).
   function confirmRemoveGcpObservation({ gcpId, imageId }) {
-    if (!confirmRemoveMark.value) { removeGcpObservation({ gcpId, imageId }); return }
+    if (!confirmRemoveMark.value) {
+      removeGcpObservation({ gcpId, imageId })
+      return
+    }
     const g = gcps.value.find((x) => x.id === gcpId)
-    const imageName = g?.observations.find((o) => o.imageId === imageId)?.imageName
-      ?? imageById(imageId)?.name ?? 'this image'
+    const imageName =
+      g?.observations.find((o) => o.imageId === imageId)?.imageName ?? imageById(imageId)?.name ?? 'this image'
     askConfirm({
       title: 'Remove mark?',
       message: `Remove the mark of “${g?.name ?? gcpId}” in “${imageName}”?`,
@@ -165,9 +169,10 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
   function confirmClearKeypoints(idOrIds) {
     const ids = (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).filter(Boolean)
     if (!ids.length) return
-    const msg = ids.length === 1
-      ? `Delete keypoints for “${imageById(ids[0])?.name ?? 'this image'}”? Its matches are dropped too and it must be re-detected before matching.`
-      : `Delete keypoints for ${ids.length} images? Their matches are dropped too and they must be re-detected before matching.`
+    const msg =
+      ids.length === 1
+        ? `Delete keypoints for “${imageById(ids[0])?.name ?? 'this image'}”? Its matches are dropped too and it must be re-detected before matching.`
+        : `Delete keypoints for ${ids.length} images? Their matches are dropped too and they must be re-detected before matching.`
     askConfirm({
       title: 'Delete keypoints?',
       message: msg,
@@ -188,10 +193,21 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
   }
 
   return {
-    pendingImageDelete, requestRemoveImages, confirmRemoveImages, deleteMessage,
-    pendingConfirm, askConfirm, runPendingConfirm, cancelPendingConfirm,
-    confirmRemoveSensor, confirmRemoveCloud, confirmRemoveRaster,
-    confirmRemoveGcp, confirmRemoveGcpObservation, confirmRemoveShapefile, confirmClearKeypoints,
+    pendingImageDelete,
+    requestRemoveImages,
+    confirmRemoveImages,
+    deleteMessage,
+    pendingConfirm,
+    askConfirm,
+    runPendingConfirm,
+    cancelPendingConfirm,
+    confirmRemoveSensor,
+    confirmRemoveCloud,
+    confirmRemoveRaster,
+    confirmRemoveGcp,
+    confirmRemoveGcpObservation,
+    confirmRemoveShapefile,
+    confirmClearKeypoints,
     confirmRemoveMatches,
   }
 }

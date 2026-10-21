@@ -45,10 +45,14 @@ export function readCopcInfo(header) {
   const v = header.vlrs?.[0]
   if (!v || v.userId !== COPC_USER_ID || v.recordId !== COPC_INFO_RECORD || v.data.length < 160) return null
   const dv = new DataView(v.data.buffer, v.data.byteOffset, v.data.byteLength)
-  const f = (o) => dv.getFloat64(o, true), u = (o) => Number(dv.getBigUint64(o, true))
+  const f = (o) => dv.getFloat64(o, true),
+    u = (o) => Number(dv.getBigUint64(o, true))
   return {
-    center: [f(0), f(8), f(16)], halfsize: f(24), spacing: f(32),
-    rootPage: { offset: u(40), length: u(48) }, gpsTime: [f(56), f(64)],
+    center: [f(0), f(8), f(16)],
+    halfsize: f(24),
+    spacing: f(32),
+    rootPage: { offset: u(40), length: u(48) },
+    gpsTime: [f(56), f(64)],
   }
 }
 
@@ -60,7 +64,11 @@ export function readCopcInfo(header) {
  */
 export function copcReadsInPlace(head, { minPoints = 0 } = {}) {
   let h
-  try { h = readLasHeader(head) } catch { return null }
+  try {
+    h = readLasHeader(head)
+  } catch {
+    return null
+  }
   return !!readCopcInfo(h) && h.count >= minPoints
 }
 
@@ -71,7 +79,9 @@ export function parseHierarchyPage(bytes) {
   for (let o = 0; o + ENTRY <= bytes.byteLength; o += ENTRY) {
     out.push({
       key: [dv.getInt32(o, true), dv.getInt32(o + 4, true), dv.getInt32(o + 8, true), dv.getInt32(o + 12, true)],
-      offset: Number(dv.getBigUint64(o + 16, true)), length: dv.getInt32(o + 24, true), count: dv.getInt32(o + 28, true),
+      offset: Number(dv.getBigUint64(o + 16, true)),
+      length: dv.getInt32(o + 24, true),
+      count: dv.getInt32(o + 28, true),
     })
   }
   return out
@@ -82,13 +92,23 @@ export function parseHierarchyPage(bytes) {
 // WKT (1 or 2) as a tree of { name, args: [string | number | node] }.
 function parseWkt(text) {
   let i = 0
-  const ws = () => { while (i < text.length && /\s/.test(text[i])) i++ }
+  const ws = () => {
+    while (i < text.length && /\s/.test(text[i])) i++
+  }
   function value() {
     ws()
     if (text[i] === '"') {
       let s = ''
       for (i++; i < text.length; i++) {
-        if (text[i] === '"') { if (text[i + 1] === '"') { s += '"'; i++; continue } i++; break }
+        if (text[i] === '"') {
+          if (text[i + 1] === '"') {
+            s += '"'
+            i++
+            continue
+          }
+          i++
+          break
+        }
         s += text[i]
       }
       return s
@@ -102,7 +122,10 @@ function parseWkt(text) {
         const args = []
         for (;;) {
           ws()
-          if (text[i] === ']' || text[i] === ')') { i++; break }
+          if (text[i] === ']' || text[i] === ')') {
+            i++
+            break
+          }
           args.push(value())
           ws()
           if (text[i] === ',') i++
@@ -113,14 +136,28 @@ function parseWkt(text) {
       return m[0]
     }
     const n = /^[-+0-9.eE]+/.exec(text.slice(i))
-    if (n) { i += n[0].length; return Number(n[0]) }
+    if (n) {
+      i += n[0].length
+      return Number(n[0])
+    }
     i = text.length
     return null
   }
   return value()
 }
 
-const HORIZONTAL = new Set(['PROJCS', 'GEOGCS', 'GEOCCS', 'PROJCRS', 'PROJECTEDCRS', 'GEOGCRS', 'GEOGRAPHICCRS', 'GEODCRS', 'GEODETICCRS', 'BASEGEOGCRS'])
+const HORIZONTAL = new Set([
+  'PROJCS',
+  'GEOGCS',
+  'GEOCCS',
+  'PROJCRS',
+  'PROJECTEDCRS',
+  'GEOGCRS',
+  'GEOGRAPHICCRS',
+  'GEODCRS',
+  'GEODETICCRS',
+  'BASEGEOGCRS',
+])
 
 /**
  * The horizontal CRS of an OGC WKT string: { name, epsg: 'EPSG:n' | null }, or null.
@@ -128,13 +165,23 @@ const HORIZONTAL = new Set(['PROJCS', 'GEOGCS', 'GEOCCS', 'PROJCRS', 'PROJECTEDC
  */
 export function crsFromWkt(wkt) {
   let node
-  try { node = parseWkt(String(wkt).replace(/\0+$/, '')) } catch { return null }
+  try {
+    node = parseWkt(String(wkt).replace(/\0+$/, ''))
+  } catch {
+    return null
+  }
   if (!node?.name) return null
-  if (node.name === 'COMPD_CS' || node.name === 'COMPOUNDCRS') node = node.args.find((a) => a?.name && HORIZONTAL.has(a.name)) ?? null
+  if (node.name === 'COMPD_CS' || node.name === 'COMPOUNDCRS')
+    node = node.args.find((a) => a?.name && HORIZONTAL.has(a.name)) ?? null
   if (!node || !HORIZONTAL.has(node.name)) return null
-  const auth = node.args.find((a) => (a?.name === 'AUTHORITY' || a?.name === 'ID') && String(a.args[0]).toUpperCase() === 'EPSG')
+  const auth = node.args.find(
+    (a) => (a?.name === 'AUTHORITY' || a?.name === 'ID') && String(a.args[0]).toUpperCase() === 'EPSG',
+  )
   const code = auth ? Number(auth.args[1]) : NaN
-  return { name: typeof node.args[0] === 'string' ? node.args[0] : null, epsg: Number.isInteger(code) && code > 0 ? `EPSG:${code}` : null }
+  return {
+    name: typeof node.args[0] === 'string' ? node.args[0] : null,
+    epsg: Number.isInteger(code) && code > 0 ? `EPSG:${code}` : null,
+  }
 }
 
 /** The horizontal EPSG code of a GeoKeyDirectory VLR payload (LASF_Projection 34735), or null. */
@@ -142,10 +189,13 @@ export function crsFromGeoKeys(data) {
   if (!data || data.length < 8) return null
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength)
   const n = dv.getUint16(6, true)
-  let projected = null, geographic = null
+  let projected = null,
+    geographic = null
   for (let k = 0; k < n && 8 + 8 * k + 8 <= data.length; k++) {
     const o = 8 + 8 * k
-    const id = dv.getUint16(o, true), loc = dv.getUint16(o + 2, true), value = dv.getUint16(o + 6, true)
+    const id = dv.getUint16(o, true),
+      loc = dv.getUint16(o + 2, true),
+      value = dv.getUint16(o + 6, true)
     if (loc !== 0 || value === 0 || value === 32767) continue
     if (id === 3072) projected = value
     if (id === 2048) geographic = value
@@ -177,9 +227,11 @@ async function readEvlrs(source, bytes) {
     const head = await source.read(at, at + 60)
     const hv = new DataView(head.buffer, head.byteOffset, head.byteLength)
     const userId = String.fromCharCode(...head.subarray(2, 18)).replace(/\0+$/, '')
-    const recordId = hv.getUint16(18, true), length = Number(hv.getBigUint64(20, true))
+    const recordId = hv.getUint16(18, true),
+      length = Number(hv.getBigUint64(20, true))
     // Only the projection records are read (the hierarchy is read through the info VLR).
-    if (userId === 'LASF_Projection' && length < 1 << 20) out.push({ userId, recordId, data: await source.read(at + 60, at + 60 + length) })
+    if (userId === 'LASF_Projection' && length < 1 << 20)
+      out.push({ userId, recordId, data: await source.read(at + 60, at + 60 + length) })
     at += 60 + length
   }
   return out
@@ -193,18 +245,23 @@ async function readEvlrs(source, bytes) {
  */
 export async function readCopcFile(source) {
   const first = await source.read(0, Math.min(source.size, 375))
-  const offsetToPoints = first.length >= 100 ? new DataView(first.buffer, first.byteOffset, first.byteLength).getUint32(96, true) : 0
+  const offsetToPoints =
+    first.length >= 100 ? new DataView(first.buffer, first.byteOffset, first.byteLength).getUint32(96, true) : 0
   const bytes = await source.read(0, Math.min(source.size, Math.max(offsetToPoints, 375)))
   const header = readLasHeader(bytes)
   const info = readCopcInfo(header)
   if (!info) throw new Error('Not a COPC file (no "copc" info VLR first)')
   if (!COPC_FORMATS.has(header.format)) throw new Error(`COPC: point format ${header.format} (COPC uses 6, 7 or 8)`)
-  if (!(info.halfsize > 0) || !(info.rootPage.length >= ENTRY) || info.rootPage.offset + info.rootPage.length > source.size) {
+  if (
+    !(info.halfsize > 0) ||
+    !(info.rootPage.length >= ENTRY) ||
+    info.rootPage.offset + info.rootPage.length > source.size
+  ) {
     throw new Error('COPC: invalid info VLR (root cube or hierarchy page outside the file)')
   }
   const laz = header.vlrs.find((v) => v.userId === LASZIP_VLR_USER_ID && v.recordId === LASZIP_VLR_RECORD_ID)
   if (!laz) throw new Error('COPC: no "laszip encoded" VLR (record 22204)')
-  const projection = [...header.vlrs.filter((v) => v.userId === 'LASF_Projection'), ...await readEvlrs(source, bytes)]
+  const projection = [...header.vlrs.filter((v) => v.userId === 'LASF_Projection'), ...(await readEvlrs(source, bytes))]
   return { header, info, lazVlr: laz.data.slice(), projection, crs: crsFromVlrs(projection) }
 }
 
@@ -214,7 +271,9 @@ export async function readCopcFile(source) {
  * (relative to it, Float32) stay precise even when a writer put the offset at 0.
  */
 function copcLayout(header, info, colour) {
-  const offset = [0, 1, 2].map((k) => header.offset[k] + Math.round((info.center[k] - header.offset[k]) / header.scale[k]) * header.scale[k])
+  const offset = [0, 1, 2].map(
+    (k) => header.offset[k] + Math.round((info.center[k] - header.offset[k]) / header.scale[k]) * header.scale[k],
+  )
   return { offset, scale: [...header.scale], colour, attributes: STREAM_ATTRIBUTES.map((a) => ({ ...a })) }
 }
 
@@ -225,7 +284,9 @@ function copcLayout(header, info, colour) {
  */
 export function decodeCopcRecords(records, count, lod, { as = 'render' } = {}) {
   const c = lod.copc
-  const dec = createLasDecoder(count, c.recordLength, c.pointFormat, lod.layout.scale, c.fileOffset, [], { rgbBits: c.rgbBits })
+  const dec = createLasDecoder(count, c.recordLength, c.pointFormat, lod.layout.scale, c.fileOffset, [], {
+    rgbBits: c.rgbBits,
+  })
   if (count) dec.decode(records, 0, count)
   const out = dec.finish()
   let pos = out.pos
@@ -233,10 +294,17 @@ export function decodeCopcRecords(records, count, lod, { as = 'render' } = {}) {
     const [ox, oy, oz] = lod.layout.offset
     pos = new Float32Array(3 * count)
     for (let i = 0; i < count; i++) {
-      pos[3 * i] = out.pos[3 * i] - ox; pos[3 * i + 1] = out.pos[3 * i + 1] - oy; pos[3 * i + 2] = out.pos[3 * i + 2] - oz
+      pos[3 * i] = out.pos[3 * i] - ox
+      pos[3 * i + 1] = out.pos[3 * i + 1] - oy
+      pos[3 * i + 2] = out.pos[3 * i + 2] - oz
     }
   }
-  return { count, pos, col: lod.layout.colour ? out.col ?? new Uint8Array(3 * count) : null, attributes: streamAttributes(out.attributes, count) }
+  return {
+    count,
+    pos,
+    col: lod.layout.colour ? (out.col ?? new Uint8Array(3 * count)) : null,
+    attributes: streamAttributes(out.attributes, count),
+  }
 }
 
 /**
@@ -247,22 +315,35 @@ export function decodeCopcRecords(records, count, lod, { as = 'render' } = {}) {
  * node read elsewhere, e.g. in a worker); hierarchy 'all' | 'lazy': the pages below the
  * root page are read as `read` reaches the nodes above them.
  */
-export async function openCopcSource(lod, source, { createChunkDecoder = null, readNode = null, hierarchy = 'all' } = {}) {
+export async function openCopcSource(
+  lod,
+  source,
+  { createChunkDecoder = null, readNode = null, hierarchy = 'all' } = {},
+) {
   const nodes = new Map()
-  const pages = new Map()   // keyString → { offset, length }: a page not read yet
+  const pages = new Map() // keyString → { offset, length }: a page not read yet
   const reading = new Map() // keyString → Promise
   async function readPage({ offset, length }) {
     if (offset + length > source.size || length < ENTRY) throw new Error('COPC: hierarchy page outside the file')
     for (const e of parseHierarchyPage(await source.read(offset, offset + length))) {
       const s = keyString(e.key)
-      if (e.count === -1) { if (!nodes.has(s)) pages.set(s, { offset: e.offset, length: e.length }) } else {
+      if (e.count === -1) {
+        if (!nodes.has(s)) pages.set(s, { offset: e.offset, length: e.length })
+      } else {
         nodes.set(s, { key: e.key, count: e.count, offset: e.offset, length: e.length })
         pages.delete(s)
       }
     }
   }
   function readPending(s) {
-    if (!reading.has(s)) reading.set(s, readPage(pages.get(s)).finally(() => { pages.delete(s); reading.delete(s) }))
+    if (!reading.has(s))
+      reading.set(
+        s,
+        readPage(pages.get(s)).finally(() => {
+          pages.delete(s)
+          reading.delete(s)
+        }),
+      )
     return reading.get(s)
   }
   async function loadAll() {
@@ -293,8 +374,12 @@ export async function openCopcSource(lod, source, { createChunkDecoder = null, r
 
   return {
     nodes,
-    get root() { return nodes.get('0-0-0-0') ?? null },
-    get complete() { return pages.size === 0 },
+    get root() {
+      return nodes.get('0-0-0-0') ?? null
+    },
+    get complete() {
+      return pages.size === 0
+    },
     loadAll,
     children(node) {
       const out = []
@@ -315,7 +400,10 @@ export async function openCopcSource(lod, source, { createChunkDecoder = null, r
       const [pts] = await Promise.all([points(node, as), childPages(node)])
       return pts
     },
-    close() { decoder?.free?.(); decoder = null },
+    close() {
+      decoder?.free?.()
+      decoder = null
+    },
   }
 }
 
@@ -336,25 +424,43 @@ export async function readCopcMeta(source, { createChunkDecoder, statsPoints = C
     layout: copcLayout(h, info, rgbOff != null),
     bounds: { min: [...h.bounds.min], max: [...h.bounds.max] },
     points: h.count,
-    copc: { pointFormat: h.format, recordLength: h.recordLength, fileOffset: [...h.offset], lazVlr: toBase64(lazVlr), rootPage: info.rootPage, rgbBits: null },
+    copc: {
+      pointFormat: h.format,
+      recordLength: h.recordLength,
+      fileOffset: [...h.offset],
+      lazVlr: toBase64(lazVlr),
+      rootPage: info.rootPage,
+      rgbBits: null,
+    },
   }
   const src = await openCopcSource(lod, source, { createChunkDecoder })
   try {
-    let nodeCount = 0, levels = 0, total = 0
+    let nodeCount = 0,
+      levels = 0,
+      total = 0
     const perLevel = []
     for (const n of src.nodes.values()) {
-      nodeCount++; total += n.count
+      nodeCount++
+      total += n.count
       levels = Math.max(levels, n.key[0] + 1)
       ;(perLevel[n.key[0]] ??= []).push(n)
     }
-    if (total !== h.count) onLog?.(`COPC: the hierarchy holds ${total.toLocaleString()} points, the header says ${h.count.toLocaleString()} — using the hierarchy`, 'warn', 'Import')
+    if (total !== h.count)
+      onLog?.(
+        `COPC: the hierarchy holds ${total.toLocaleString()} points, the header says ${h.count.toLocaleString()} — using the hierarchy`,
+        'warn',
+        'Import',
+      )
     lod.points = total
 
     // Colour depth from the root's raw records (the spec says 16-bit, many writers store 0–255).
     if (rgbOff != null && src.root?.count) {
       const recs = createChunkDecoder(lazVlr)
       try {
-        const records = recs.decode(await source.read(src.root.offset, src.root.offset + src.root.length), src.root.count)
+        const records = recs.decode(
+          await source.read(src.root.offset, src.root.offset + src.root.length),
+          src.root.count,
+        )
         const dv = new DataView(records.buffer, records.byteOffset, records.byteLength)
         let max = 0
         for (let i = 0, p = rgbOff; i < src.root.count && max <= 255; i++, p += h.recordLength) {
@@ -365,7 +471,9 @@ export async function readCopcMeta(source, { createChunkDecoder, statsPoints = C
           lod.layout.colour = false
           onLog?.('COPC: the colour fields are empty — read without colour', 'info', 'Import')
         }
-      } finally { recs.free?.() }
+      } finally {
+        recs.free?.()
+      }
     }
 
     // Statistics from the top levels, whole levels until statsPoints.
@@ -381,24 +489,47 @@ export async function readCopcMeta(source, { createChunkDecoder, statsPoints = C
         const pts = await src.read(node, { as: 'absolute' })
         for (const [name, r] of Object.entries(ranges)) {
           const arr = pts.attributes[name]
-          for (let i = 0; i < pts.count; i++) { const v = arr[i]; if (v < r.min) r.min = v; if (v > r.max) r.max = v }
-          if (name === 'classification') for (let i = 0; i < pts.count; i++) classes[arr[i]] = (classes[arr[i]] ?? 0) + 1
+          for (let i = 0; i < pts.count; i++) {
+            const v = arr[i]
+            if (v < r.min) r.min = v
+            if (v > r.max) r.max = v
+          }
+          if (name === 'classification')
+            for (let i = 0; i < pts.count; i++) classes[arr[i]] = (classes[arr[i]] ?? 0) + 1
         }
       }
       sampled += n
     }
-    for (const r of Object.values(ranges)) if (r.min > r.max) { r.min = 0; r.max = 1 }
-    if (sampled < total) for (const k of Object.keys(classes)) classes[k] = Math.round(classes[k] * total / sampled)
+    for (const r of Object.values(ranges))
+      if (r.min > r.max) {
+        r.min = 0
+        r.max = 1
+      }
+    if (sampled < total) for (const k of Object.keys(classes)) classes[k] = Math.round((classes[k] * total) / sampled)
     lod.stats = { ranges, classes, ...(sampled < total ? { sampled } : {}) }
     Object.assign(lod, {
-      nodeCount, levels, dataBytes: source.size, hierarchyBytes: ENTRY * nodeCount,
+      nodeCount,
+      levels,
+      dataBytes: source.size,
+      hierarchyBytes: ENTRY * nodeCount,
       file: {
-        version: `${h.versionMajor}.${h.versionMinor}`, format: h.format, laz: true, copc: true,
+        version: `${h.versionMajor}.${h.versionMinor}`,
+        format: h.format,
+        laz: true,
+        copc: true,
         // The projection records go back into a LAS written from the cloud.
-        projection: projection.map((v) => ({ userId: v.userId, recordId: v.recordId, description: '', data: toBase64(v.data) })),
-        crs: crs?.epsg ?? null, crsName: crs?.name ?? null,
+        projection: projection.map((v) => ({
+          userId: v.userId,
+          recordId: v.recordId,
+          description: '',
+          data: toBase64(v.data),
+        })),
+        crs: crs?.epsg ?? null,
+        crsName: crs?.name ?? null,
       },
     })
-  } finally { src.close() }
+  } finally {
+    src.close()
+  }
   return lod
 }

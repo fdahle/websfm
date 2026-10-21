@@ -12,23 +12,52 @@
 // pos, idx: Uint32Array(3T), col? }.
 
 const SCALAR_BYTES = {
-  char: 1, uchar: 1, int8: 1, uint8: 1,
-  short: 2, ushort: 2, int16: 2, uint16: 2,
-  int: 4, uint: 4, int32: 4, uint32: 4, float: 4, float32: 4,
-  double: 8, float64: 8,
+  char: 1,
+  uchar: 1,
+  int8: 1,
+  uint8: 1,
+  short: 2,
+  ushort: 2,
+  int16: 2,
+  uint16: 2,
+  int: 4,
+  uint: 4,
+  int32: 4,
+  uint32: 4,
+  float: 4,
+  float32: 4,
+  double: 8,
+  float64: 8,
 }
 
 function readScalar(dv, offset, type) {
   switch (type) {
-    case 'char': case 'int8': return dv.getInt8(offset)
-    case 'uchar': case 'uint8': return dv.getUint8(offset)
-    case 'short': case 'int16': return dv.getInt16(offset, true)
-    case 'ushort': case 'uint16': return dv.getUint16(offset, true)
-    case 'int': case 'int32': return dv.getInt32(offset, true)
-    case 'uint': case 'uint32': return dv.getUint32(offset, true)
-    case 'float': case 'float32': return dv.getFloat32(offset, true)
-    case 'double': case 'float64': return dv.getFloat64(offset, true)
-    default: throw new Error(`PLY: unknown scalar type "${type}"`)
+    case 'char':
+    case 'int8':
+      return dv.getInt8(offset)
+    case 'uchar':
+    case 'uint8':
+      return dv.getUint8(offset)
+    case 'short':
+    case 'int16':
+      return dv.getInt16(offset, true)
+    case 'ushort':
+    case 'uint16':
+      return dv.getUint16(offset, true)
+    case 'int':
+    case 'int32':
+      return dv.getInt32(offset, true)
+    case 'uint':
+    case 'uint32':
+      return dv.getUint32(offset, true)
+    case 'float':
+    case 'float32':
+      return dv.getFloat32(offset, true)
+    case 'double':
+    case 'float64':
+      return dv.getFloat64(offset, true)
+    default:
+      throw new Error(`PLY: unknown scalar type "${type}"`)
   }
 }
 
@@ -97,7 +126,11 @@ function plyState({ format, elements }) {
     else if (p.name === 'ny') layout.nrm[1] = slot
     else if (p.name === 'nz') layout.nrm[2] = slot
     else scalarFields.push({ name: p.name, ...slot })
-    stride += SCALAR_BYTES[p.type] ?? (() => { throw new Error(`PLY: unknown property type "${p.type}"`) })()
+    stride +=
+      SCALAR_BYTES[p.type] ??
+      (() => {
+        throw new Error(`PLY: unknown property type "${p.type}"`)
+      })()
   })
   if (!layout.x || !layout.y || !layout.z) throw new Error('PLY: vertex element lacks x/y/z')
   const hasCol = layout.col.every((s) => s !== null)
@@ -105,30 +138,51 @@ function plyState({ format, elements }) {
 
   const n = vertexEl.count
   return {
-    format, elements, faceEl, layout, scalarFields, stride, n,
+    format,
+    elements,
+    faceEl,
+    layout,
+    scalarFields,
+    stride,
+    n,
     pos: new Float64Array(n * 3),
     col: hasCol ? new Uint8Array(n * 3) : null,
     nrm: hasNrm ? new Float32Array(n * 3) : null,
-    attributes: Object.fromEntries(scalarFields.map(field => [field.name, new Float64Array(n)])),
+    attributes: Object.fromEntries(scalarFields.map((field) => [field.name, new Float64Array(n)])),
     tris: growableU32(), // flat triangle indices (fanned)
   }
 }
 
 function growableU32() {
-  let buf = new Uint32Array(1024), len = 0
+  let buf = new Uint32Array(1024),
+    len = 0
   return {
     push(v) {
-      if (len === buf.length) { const next = new Uint32Array(buf.length * 2); next.set(buf); buf = next }
+      if (len === buf.length) {
+        const next = new Uint32Array(buf.length * 2)
+        next.set(buf)
+        buf = next
+      }
       buf[len++] = v
     },
-    get length() { return len },
-    take() { return buf.slice(0, len) },
+    get length() {
+      return len
+    },
+    take() {
+      return buf.slice(0, len)
+    },
   }
 }
 
 // Color scale: uchar is the norm; float 0–1 colors appear in the wild.
 const colByte = (v, type) =>
-  Math.max(0, Math.min(255, Math.round(type === 'float' || type === 'double' || type === 'float32' || type === 'float64' ? v * 255 : v)))
+  Math.max(
+    0,
+    Math.min(
+      255,
+      Math.round(type === 'float' || type === 'double' || type === 'float32' || type === 'float64' ? v * 255 : v),
+    ),
+  )
 
 const isFaceList = (el) => el.name === 'face' && el.props.some((p) => p.type === 'list' && FACE_LIST_NAMES.has(p.name))
 
@@ -136,8 +190,15 @@ const isFaceList = (el) => el.name === 'face' && el.props.some((p) => p.type ===
 // number of times (partial lines are carried), then finish().
 function plyAsciiBody(st) {
   const { elements, layout, scalarFields, pos, col, nrm, attributes, tris } = st
-  let ei = 0, ri = 0, carry = ''
-  const advance = () => { while (ei < elements.length && ri >= elements[ei].count) { ei++; ri = 0 } }
+  let ei = 0,
+    ri = 0,
+    carry = ''
+  const advance = () => {
+    while (ei < elements.length && ri >= elements[ei].count) {
+      ei++
+      ri = 0
+    }
+  }
   advance()
   function line(l) {
     if (!l.trim() || l.startsWith('comment')) return
@@ -155,7 +216,11 @@ function plyAsciiBody(st) {
     } else if (isFaceList(el)) {
       const t = l.trim().split(/\s+/).map(Number)
       const k = t[0]
-      for (let v = 2; v < k; v++) { tris.push(t[1]); tris.push(t[v]); tris.push(t[v + 1]) }
+      for (let v = 2; v < k; v++) {
+        tris.push(t[1])
+        tris.push(t[v])
+        tris.push(t[v + 1])
+      }
     } // else: an element we do not read, skipped line by line
     ri++
     advance()
@@ -168,7 +233,8 @@ function plyAsciiBody(st) {
       for (const l of lines) line(strip(l))
     },
     finish() {
-      line(strip(carry)); carry = ''
+      line(strip(carry))
+      carry = ''
       // Running out inside a vertex or face element is a truncated file; trailing
       // elements we only skip are not read anyway.
       for (let k = ei; k < elements.length; k++) {
@@ -192,8 +258,11 @@ function plyBinaryBody(st, bytes, bodyOffset) {
         pos[i * 3] = readScalar(dv, p + layout.x.offset, layout.x.type)
         pos[i * 3 + 1] = readScalar(dv, p + layout.y.offset, layout.y.type)
         pos[i * 3 + 2] = readScalar(dv, p + layout.z.offset, layout.z.type)
-        if (col) for (let c = 0; c < 3; c++) col[i * 3 + c] = colByte(readScalar(dv, p + layout.col[c].offset, layout.col[c].type), layout.col[c].type)
-        if (nrm) for (let c = 0; c < 3; c++) nrm[i * 3 + c] = readScalar(dv, p + layout.nrm[c].offset, layout.nrm[c].type)
+        if (col)
+          for (let c = 0; c < 3; c++)
+            col[i * 3 + c] = colByte(readScalar(dv, p + layout.col[c].offset, layout.col[c].type), layout.col[c].type)
+        if (nrm)
+          for (let c = 0; c < 3; c++) nrm[i * 3 + c] = readScalar(dv, p + layout.nrm[c].offset, layout.nrm[c].type)
         for (const field of scalarFields) attributes[field.name][i] = readScalar(dv, p + field.offset, field.type)
         p += stride
       }
@@ -201,16 +270,29 @@ function plyBinaryBody(st, bytes, bodyOffset) {
       // Walk any list-bearing element record by record (fixed stride otherwise).
       const listProp = el.props.find((pr) => pr.type === 'list')
       const isFace = el.name === 'face' && listProp && FACE_LIST_NAMES.has(listProp.name)
-      if (!listProp) { p += el.count * el.props.reduce((s, pr) => s + SCALAR_BYTES[pr.type], 0); continue }
+      if (!listProp) {
+        p += el.count * el.props.reduce((s, pr) => s + SCALAR_BYTES[pr.type], 0)
+        continue
+      }
       for (let f = 0; f < el.count; f++) {
         for (const pr of el.props) {
-          if (pr.type !== 'list') { p += SCALAR_BYTES[pr.type]; continue }
+          if (pr.type !== 'list') {
+            p += SCALAR_BYTES[pr.type]
+            continue
+          }
           const k = readScalar(dv, p, pr.listCountType)
           p += SCALAR_BYTES[pr.listCountType]
           if (isFace && pr === listProp) {
             const idx = new Array(k)
-            for (let v = 0; v < k; v++) { idx[v] = readScalar(dv, p, pr.listItemType); p += SCALAR_BYTES[pr.listItemType] }
-            for (let v = 1; v + 1 < k; v++) { tris.push(idx[0]); tris.push(idx[v]); tris.push(idx[v + 1]) }
+            for (let v = 0; v < k; v++) {
+              idx[v] = readScalar(dv, p, pr.listItemType)
+              p += SCALAR_BYTES[pr.listItemType]
+            }
+            for (let v = 1; v + 1 < k; v++) {
+              tris.push(idx[0])
+              tris.push(idx[v])
+              tris.push(idx[v + 1])
+            }
           } else {
             p += k * SCALAR_BYTES[pr.listItemType]
           }
@@ -223,18 +305,29 @@ function plyBinaryBody(st, bytes, bodyOffset) {
 function plyResult(st, { onLog }) {
   const { format, faceEl, n, pos, col, nrm, attributes, tris } = st
   if (faceEl && tris.length) {
-    onLog?.(`PLY: read mesh — ${n.toLocaleString()} vertices, ${(tris.length / 3).toLocaleString()} triangles`
-      + `${col ? ', color' : ''}`, 'info', 'Import')
+    onLog?.(
+      `PLY: read mesh — ${n.toLocaleString()} vertices, ${(tris.length / 3).toLocaleString()} triangles` +
+        `${col ? ', color' : ''}`,
+      'info',
+      'Import',
+    )
     return { attributes, nVerts: n, count: tris.length / 3, pos, idx: tris.take(), ...(col ? { col } : {}) }
   }
-  onLog?.(`PLY: read ${n.toLocaleString()} points (${format}${col ? ', color' : ''}${nrm ? ', normals' : ''})`, 'info', 'Import')
+  onLog?.(
+    `PLY: read ${n.toLocaleString()} points (${format}${col ? ', color' : ''}${nrm ? ', normals' : ''})`,
+    'info',
+    'Import',
+  )
   return { attributes, count: n, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
 }
 
 export function parsePly(buffer, { onLog } = {}) {
-  const bytes = typeof buffer === 'string' ? new TextEncoder().encode(buffer)
-    : buffer instanceof Uint8Array ? buffer
-      : new Uint8Array(buffer)
+  const bytes =
+    typeof buffer === 'string'
+      ? new TextEncoder().encode(buffer)
+      : buffer instanceof Uint8Array
+        ? buffer
+        : new Uint8Array(buffer)
   const header = readPlyHeader(bytes)
   const st = plyState(header)
   if (header.format === 'ascii') {

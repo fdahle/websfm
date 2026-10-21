@@ -21,22 +21,30 @@
 import { asPairList } from './matchCodec.js'
 
 export const REGISTRATION_CHECK_DEFAULTS = {
-  topPairs: 5,          // a camera's strongest pairs to registered partners that are scored
-  samplesPerPair: 200,  // matches sampled per pair (evenly spaced)
-  factor: 10,           // flagged above factor × the model's median score …
-  minPx: 5,             // … and above this floor (detection px, × the run's scale factor)
+  topPairs: 5, // a camera's strongest pairs to registered partners that are scored
+  samplesPerPair: 200, // matches sampled per pair (evenly spaced)
+  factor: 10, // flagged above factor × the model's median score …
+  minPx: 5, // … and above this floor (detection px, × the run's scale factor)
 }
 
 const mul3 = (A, B) => A.map((r) => [0, 1, 2].map((j) => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]))
 const tr3 = (A) => [0, 1, 2].map((i) => [0, 1, 2].map((j) => A[j][i]))
-const kInv = (K) => [[1 / K.fx, 0, -K.cx / K.fx], [0, 1 / K.fy, -K.cy / K.fy], [0, 0, 1]]
+const kInv = (K) => [
+  [1 / K.fx, 0, -K.cx / K.fx],
+  [0, 1 / K.fy, -K.cy / K.fy],
+  [0, 0, 1],
+]
 
 // The fundamental matrix two registered cameras imply (x_b·F·x_a = 0, pixel coords).
 export function fundamentalFromPoses(a, b) {
   const R = mul3(b.R, tr3(a.R))
   const ta = R.map((r) => r[0] * a.t[0] + r[1] * a.t[1] + r[2] * a.t[2])
   const t = b.t.map((v, k) => v - ta[k])
-  const tx = [[0, -t[2], t[1]], [t[2], 0, -t[0]], [-t[1], t[0], 0]]
+  const tx = [
+    [0, -t[2], t[1]],
+    [t[2], 0, -t[0]],
+    [-t[1], t[0], 0],
+  ]
   return mul3(mul3(tr3(kInv(b.K)), mul3(tx, R)), kInv(a.K))
 }
 
@@ -49,8 +57,12 @@ export function pairSampsonMedianPx(F, kpA, kpB, matches, samples = REGISTRATION
   const step = Math.max(1, Math.floor(n / samples))
   const errs = []
   for (let i = 0; i < n; i += step) {
-    const a = m.a(i), b = m.b(i)
-    const x1 = kpA.xy[2 * a], y1 = kpA.xy[2 * a + 1], x2 = kpB.xy[2 * b], y2 = kpB.xy[2 * b + 1]
+    const a = m.a(i),
+      b = m.b(i)
+    const x1 = kpA.xy[2 * a],
+      y1 = kpA.xy[2 * a + 1],
+      x2 = kpB.xy[2 * b],
+      y2 = kpB.xy[2 * b + 1]
     // A keypoint dropped at ingest (fisheye, far off-axis) is NaN.
     // eslint-disable-next-line no-self-compare
     if (x1 !== x1 || x2 !== x2) continue
@@ -88,7 +100,13 @@ export function registrationOutliers({ cameras, pairs, keypointsAt, ids, scale =
     const v = []
     for (const e of top) {
       const F = fundamentalFromPoses(cameras.get(e.idA), cameras.get(e.idB))
-      const px = pairSampsonMedianPx(F, keypointsAt(ids.img(e.idA)), keypointsAt(ids.img(e.idB)), e.matches, c.samplesPerPair)
+      const px = pairSampsonMedianPx(
+        F,
+        keypointsAt(ids.img(e.idA)),
+        keypointsAt(ids.img(e.idB)),
+        e.matches,
+        c.samplesPerPair,
+      )
       if (px != null) v.push(px)
     }
     if (!v.length) continue
@@ -98,7 +116,10 @@ export function registrationOutliers({ cameras, pairs, keypointsAt, ids, scale =
   const all = [...scores.values()].sort((p, q) => p - q)
   const median = all.length ? all[all.length >> 1] : 0
   const limit = Math.max(c.factor * median, c.minPx * scale)
-  const flagged = [...scores].filter(([, px]) => px > limit).map(([uuid, px]) => ({ uuid, px })).sort((p, q) => q.px - p.px)
+  const flagged = [...scores]
+    .filter(([, px]) => px > limit)
+    .map(([uuid, px]) => ({ uuid, px }))
+    .sort((p, q) => q.px - p.px)
   return { scores, median, limit, flagged }
 }
 
@@ -108,11 +129,16 @@ export function registrationOutliers({ cameras, pairs, keypointsAt, ids, scale =
 export function deregisterCamera({ uuid, cameras, registeredUuids, tracks, ids }) {
   const img = ids.img(uuid)
   const touched = []
-  tracks.forEachPoint((p) => { if (tracks.viewKp(p, img) >= 0) touched.push(p) })
+  tracks.forEachPoint((p) => {
+    if (tracks.viewKp(p, img) >= 0) touched.push(p)
+  })
   let removed = 0
   for (const p of touched) {
     tracks.removeView(p, img)
-    if (tracks.viewCount(p) < 2) { tracks.removePoint(p); removed++ }
+    if (tracks.viewCount(p) < 2) {
+      tracks.removePoint(p)
+      removed++
+    }
   }
   cameras.delete(uuid)
   registeredUuids?.delete(uuid)

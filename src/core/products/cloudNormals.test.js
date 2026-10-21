@@ -21,7 +21,9 @@ function cloudOf(n, gen, Type = Float64Array) {
 // Every normal finite and unit length (Float32 rounding tolerance).
 function expectUnitFinite(nrm) {
   for (let i = 0; i < nrm.length / 3; i++) {
-    const x = nrm[i * 3], y = nrm[i * 3 + 1], z = nrm[i * 3 + 2]
+    const x = nrm[i * 3],
+      y = nrm[i * 3 + 1],
+      z = nrm[i * 3 + 2]
     expect(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)).toBe(true)
     expect(Math.abs(Math.hypot(x, y, z) - 1)).toBeLessThan(1e-6)
   }
@@ -50,7 +52,8 @@ describe('eigenSym3', () => {
   // A = R·diag(λ)·Rᵀ for a random rotation; recover λ and check A·v = λ·v.
   function randomRotation(r) {
     const q = [r() - 0.5, r() - 0.5, r() - 0.5, r() - 0.5]
-    const l = Math.hypot(...q); const [w, x, y, z] = q.map((v) => v / l)
+    const l = Math.hypot(...q)
+    const [w, x, y, z] = q.map((v) => v / l)
     return [
       [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
       [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
@@ -58,16 +61,29 @@ describe('eigenSym3', () => {
     ]
   }
   function compose(R, lam) {
-    const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
-    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
-      for (let k = 0; k < 3; k++) A[i][j] += R[i][k] * lam[k] * R[j][k]
-    }
+    const A = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ]
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 3; j++) {
+        for (let k = 0; k < 3; k++) A[i][j] += R[i][k] * lam[k] * R[j][k]
+      }
     return A
   }
 
   it('recovers eigenpairs of random symmetric matrices, incl. repeated and zero eigenvalues', () => {
     const r = rng(11)
-    const spectra = [[0.1, 0.5, 2], [0, 0, 1], [0, 1, 1], [1, 1, 1], [0, 0, 0], [1e-9, 0.3, 0.7], [-1, 0, 3]]
+    const spectra = [
+      [0.1, 0.5, 2],
+      [0, 0, 1],
+      [0, 1, 1],
+      [1, 1, 1],
+      [0, 0, 0],
+      [1e-9, 0.3, 0.7],
+      [-1, 0, 3],
+    ]
     for (let trial = 0; trial < 2000; trial++) {
       const lam = trial < spectra.length ? spectra[trial] : [r() * 4 - 1, r() * 4 - 1, r() * 4 - 1]
       const A = compose(randomRotation(r), lam)
@@ -110,7 +126,11 @@ describe('estimateNormals', () => {
   it('tilted plane → its normal', () => {
     const r = rng(3)
     // z = 0.5x + 0.2y  ⇒ normal ∝ (−0.5, −0.2, 1).
-    const cloud = cloudOf(3000, () => { const x = r() * 8, y = r() * 8; return [x, y, 0.5 * x + 0.2 * y + (r() - 0.5) * 1e-3] })
+    const cloud = cloudOf(3000, () => {
+      const x = r() * 8,
+        y = r() * 8
+      return [x, y, 0.5 * x + 0.2 * y + (r() - 0.5) * 1e-3]
+    })
     const l = Math.hypot(0.5, 0.2, 1)
     const expected = [-0.5 / l, -0.2 / l, 1 / l]
     const { nrm } = estimateNormals(cloud, { k: 12 })
@@ -129,7 +149,10 @@ describe('estimateNormals', () => {
   it('sphere with the centre as viewpoint → normals point inward', () => {
     const c = [3, -2, 5]
     const cloud = sphere(3000, 2, c)
-    const { nrm, stats } = estimateNormals(cloud, { k: 16, orient: { kind: 'viewpoints', points: new Float64Array(c) } })
+    const { nrm, stats } = estimateNormals(cloud, {
+      k: 16,
+      orient: { kind: 'viewpoints', points: new Float64Array(c) },
+    })
     expectUnitFinite(nrm)
     for (let i = 0; i < 3000; i++) {
       const p = [cloud.pos[i * 3] - c[0], cloud.pos[i * 3 + 1] - c[1], cloud.pos[i * 3 + 2] - c[2]]
@@ -171,7 +194,8 @@ describe('estimateNormals', () => {
     const r = rng(5)
     const pts = []
     for (let i = 0; i < 2000; i++) {
-      const x = r() * 20, y = r() * 20
+      const x = r() * 20,
+        y = r() * 20
       pts.push([x, y, Math.sin(x * 0.3) + 0.2 * y + (r() - 0.5) * 0.02])
     }
     const O = 2.5e6
@@ -276,18 +300,23 @@ describe('estimateNormals', () => {
     expect(up.flipped + down.flipped).toBe(400)
   })
 
-  it.skipIf(!process.env.BENCH)('bench: 1M-point terrain, k = 16', () => {
-    const r = rng(12)
-    const n = 1_000_000
-    const cloud = cloudOf(n, () => {
-      const x = r() * 1000, y = r() * 1000
-      return [x + 4.5e5, y + 1.3e6, 30 * Math.sin(x / 80) * Math.cos(y / 120) + (r() - 0.5) * 0.05]
-    })
-    const t0 = performance.now()
-    const { nrm, stats } = estimateNormals(cloud, { k: 16 })
-    const ms = performance.now() - t0
-    console.log(`estimateNormals 1M (k=16): ${(ms / 1000).toFixed(2)} s`, stats)
-    expect(nrm.length).toBe(3 * n)
-    expect(stats.estimated).toBe(n)
-  }, 600_000)
+  it.skipIf(!process.env.BENCH)(
+    'bench: 1M-point terrain, k = 16',
+    () => {
+      const r = rng(12)
+      const n = 1_000_000
+      const cloud = cloudOf(n, () => {
+        const x = r() * 1000,
+          y = r() * 1000
+        return [x + 4.5e5, y + 1.3e6, 30 * Math.sin(x / 80) * Math.cos(y / 120) + (r() - 0.5) * 0.05]
+      })
+      const t0 = performance.now()
+      const { nrm, stats } = estimateNormals(cloud, { k: 16 })
+      const ms = performance.now() - t0
+      console.log(`estimateNormals 1M (k=16): ${(ms / 1000).toFixed(2)} s`, stats)
+      expect(nrm.length).toBe(3 * n)
+      expect(stats.estimated).toBe(n)
+    },
+    600_000,
+  )
 })

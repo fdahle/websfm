@@ -22,23 +22,39 @@ const { useMaskEditor } = await import('./useMaskEditor.js')
 // can interleave them with edits the way a slow encode would.
 let decodes, exportsQ, canvases, blobSeq
 class FakeCanvas {
-  constructor(w, h) { this.width = w; this.height = h; this.filled = false; canvases.push(this) }
+  constructor(w, h) {
+    this.width = w
+    this.height = h
+    this.filled = false
+    canvases.push(this)
+  }
   getContext() {
     const c = this
     return {
       globalCompositeOperation: 'source-over',
       fillStyle: null,
-      clearRect() { c.filled = false },
-      drawImage(src) { c.filled = src.filled ?? true },
-      beginPath() {}, arc() {},
-      fill() { c.filled = this.globalCompositeOperation !== 'destination-out' },
-      fillRect() { c.filled = this.globalCompositeOperation !== 'destination-out' },
+      clearRect() {
+        c.filled = false
+      },
+      drawImage(src) {
+        c.filled = src.filled ?? true
+      },
+      beginPath() {},
+      arc() {},
+      fill() {
+        c.filled = this.globalCompositeOperation !== 'destination-out'
+      },
+      fillRect() {
+        c.filled = this.globalCompositeOperation !== 'destination-out'
+      },
       getImageData(x, y, w, h) {
         const data = new Uint8ClampedArray(w * h * 4)
         if (c.filled) for (let i = 3; i < data.length; i += 4) data[i] = 255
         return { data }
       },
-      putImageData(id) { c.filled = id.data.some((v, i) => i % 4 === 3 && v > 127) },
+      putImageData(id) {
+        c.filled = id.data.some((v, i) => i % 4 === 3 && v > 127)
+      },
     }
   }
   convertToBlob() {
@@ -52,18 +68,25 @@ const maskBlob = (filled = true) => markRaw({ filled, id: ++blobSeq })
 
 const saved = {}
 beforeEach(() => {
-  decodes = []; exportsQ = []; canvases = []; blobSeq = 0
+  decodes = []
+  exportsQ = []
+  canvases = []
+  blobSeq = 0
   saved.OffscreenCanvas = globalThis.OffscreenCanvas
   saved.createImageBitmap = globalThis.createImageBitmap
   globalThis.OffscreenCanvas = FakeCanvas
-  globalThis.createImageBitmap = vi.fn((blob) => new Promise((resolve) => decodes.push(() => resolve({ filled: blob.filled, close() {} }))))
+  globalThis.createImageBitmap = vi.fn(
+    (blob) => new Promise((resolve) => decodes.push(() => resolve({ filled: blob.filled, close() {} }))),
+  )
 })
 afterEach(() => {
   globalThis.OffscreenCanvas = saved.OffscreenCanvas
   globalThis.createImageBitmap = saved.createImageBitmap
 })
 
-const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve() }
+const flush = async () => {
+  for (let i = 0; i < 5; i++) await Promise.resolve()
+}
 
 // The viewer around the editor: a 100×50 native image at scale 1, and a parent
 // that stores whatever mask it is sent (the store's in-memory update), so the
@@ -71,7 +94,15 @@ const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve() 
 function setup({ mask = null, maskEdit = true, preview = false, largeScan = false, size = [100, 50] } = {}) {
   const image = reactive({ uuid: 'u1', mask })
   const edit = ref(maskEdit)
-  const frame = shallowRef({ width: size[0], height: size[1], naturalWidth: 100, naturalHeight: 50, bitmapScale: 1, preview, exact: true })
+  const frame = shallowRef({
+    width: size[0],
+    height: size[1],
+    naturalWidth: 100,
+    naturalHeight: 50,
+    bitmapScale: 1,
+    preview,
+    exact: true,
+  })
   const editable = ref(!preview)
   const visible = ref(true)
   const emitted = []
@@ -81,9 +112,13 @@ function setup({ mask = null, maskEdit = true, preview = false, largeScan = fals
   })
   const drawOverlay = vi.fn()
   const m = useMaskEditor({
-    image: () => image, maskEdit: () => edit.value,
+    image: () => image,
+    maskEdit: () => edit.value,
     viewport: { scale: ref(1), tx: ref(0), ty: ref(0), frame, editable },
-    drawOverlay, emit, isVisible: () => visible.value, largeScan: () => largeScan,
+    drawOverlay,
+    emit,
+    isVisible: () => visible.value,
+    largeScan: () => largeScan,
   })
   return { m, image, edit, frame, editable, visible, emitted, emit }
 }
@@ -165,7 +200,9 @@ describe('useMaskEditor: commits and persistence', () => {
     const { m, image, emitted } = setup()
     m.initMaskCanvas()
     await nextTick()
-    const p = stroke(m); exportsQ.shift()(); await p
+    const p = stroke(m)
+    exportsQ.shift()()
+    await p
     await nextTick()
     m.tool.value = 'erase'
     await nextTick()
@@ -182,7 +219,9 @@ describe('useMaskEditor: commits and persistence', () => {
     await nextTick()
     expect(m.tool.value).toBe('brush')
     m.initMaskCanvas()
-    const p = stroke(m); exportsQ.shift()(); await p
+    const p = stroke(m)
+    exportsQ.shift()()
+    await p
     await nextTick()
     edit.value = false
     await nextTick()
@@ -210,7 +249,7 @@ describe('useMaskEditor: races', () => {
     m.initMaskCanvas()
     await nextTick()
     const pending = stroke(m) // export in flight
-    m.undoMask()              // back to "no mask" before the PNG encoded
+    m.undoMask() // back to "no mask" before the PNG encoded
     expect(image.mask).toBeNull()
     expect(m.canvas().filled).toBe(false)
     exportsQ.shift()()
@@ -229,7 +268,7 @@ describe('useMaskEditor: races', () => {
     image.mask = { blob: maskBlob(true) } // external replace → decode starts
     await nextTick()
     expect(decodes).toHaveLength(1)
-    image.mask = null                     // …and an external clear before it lands
+    image.mask = null // …and an external clear before it lands
     await nextTick()
     decodes.shift()()
     await flush()
@@ -241,7 +280,9 @@ describe('useMaskEditor: races', () => {
     const { m, image } = setup()
     m.initMaskCanvas()
     await nextTick()
-    const p = stroke(m); exportsQ.shift()(); await p
+    const p = stroke(m)
+    exportsQ.shift()()
+    await p
     await nextTick()
     const committed = image.mask.blob
     m.undoMask()
@@ -329,7 +370,9 @@ describe('useMaskEditor: keyboard', () => {
     const { m, image } = setup()
     m.initMaskCanvas()
     await nextTick()
-    const p = stroke(m); exportsQ.shift()(); await p
+    const p = stroke(m)
+    exportsQ.shift()()
+    await p
     await nextTick()
     m.onKeydown(key('z', { ctrlKey: true }))
     expect(image.mask).toBeNull()

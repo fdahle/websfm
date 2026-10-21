@@ -33,8 +33,9 @@ const keepAwake = ref(localStorage.getItem(KEEP_AWAKE_KEY) !== 'false')
 // Default off: it needs the browser's permission, asked when the user turns it on.
 const NOTIFY_KEY = 'websfm.ui.notifyWhenDone'
 const notifySupported = typeof Notification !== 'undefined'
-const notifyWhenDone = ref(notifySupported && localStorage.getItem(NOTIFY_KEY) === 'true'
-  && Notification.permission === 'granted')
+const notifyWhenDone = ref(
+  notifySupported && localStorage.getItem(NOTIFY_KEY) === 'true' && Notification.permission === 'granted',
+)
 
 applyUiPreferences()
 
@@ -62,7 +63,11 @@ export function useUiSettings() {
   async function setNotifyWhenDone(v) {
     let permission = notifySupported ? Notification.permission : 'unsupported'
     if (v && permission === 'default') {
-      try { permission = await Notification.requestPermission() } catch { permission = 'denied' }
+      try {
+        permission = await Notification.requestPermission()
+      } catch {
+        permission = 'denied'
+      }
     }
     notifyWhenDone.value = !!v && permission === 'granted'
     localStorage.setItem(NOTIFY_KEY, String(notifyWhenDone.value))

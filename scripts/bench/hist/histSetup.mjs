@@ -44,16 +44,20 @@ function tiffSize(path) {
     const v16 = (o) => (le ? ifdBuf.readUInt16LE(o) : ifdBuf.readUInt16BE(o))
     const v32 = (o) => (le ? ifdBuf.readUInt32LE(o) : ifdBuf.readUInt32BE(o))
     const n = v16(0)
-    let w = null, h = null
+    let w = null,
+      h = null
     for (let i = 0; i < n; i++) {
       const e = 2 + 12 * i
-      const tag = v16(e), type = v16(e + 2)
+      const tag = v16(e),
+        type = v16(e + 2)
       const val = type === 3 ? v16(e + 8) : v32(e + 8)
       if (tag === 256) w = val
       if (tag === 257) h = val
     }
     return { w, h }
-  } finally { closeSync(fd) }
+  } finally {
+    closeSync(fd)
+  }
 }
 
 export async function histSetup(h, imageNames) {
@@ -80,9 +84,10 @@ export async function histSetup(h, imageNames) {
       // App convention (core/mask.js): excluded pixels opaque, kept ones transparent.
       // The sites disagree on the convention (Casa Grande 1 = keep, Iceland 0 = keep and
       // 255 = border): the frame centre is always terrain, so its value names the kept class.
-      const py = `import rasterio, numpy as np\nfrom PIL import Image\nr = rasterio.open(${JSON.stringify(h.mask)}).read(1)\n`
-        + `m = r == r[r.shape[0] // 2, r.shape[1] // 2]\n`
-        + `a = np.zeros(m.shape + (4,), np.uint8)\na[..., 3] = np.where(m, 0, 255)\nImage.fromarray(a, 'RGBA').save(${JSON.stringify(png)}, optimize=True)\n`
+      const py =
+        `import rasterio, numpy as np\nfrom PIL import Image\nr = rasterio.open(${JSON.stringify(h.mask)}).read(1)\n` +
+        `m = r == r[r.shape[0] // 2, r.shape[1] // 2]\n` +
+        `a = np.zeros(m.shape + (4,), np.uint8)\na[..., 3] = np.where(m, 0, 255)\nImage.fromarray(a, 'RGBA').save(${JSON.stringify(png)}, optimize=True)\n`
       const r = spawnSync(h.python ?? PY_DEFAULT, ['-c', py], { encoding: 'utf8' })
       if (r.status !== 0) throw new Error(`mask conversion failed: ${r.stderr}`)
     }
@@ -91,27 +96,51 @@ export async function histSetup(h, imageNames) {
   // Film fiducials: the certificate from the intrinsics CSV (corner_* / midside_* mm,
   // y up) and the per-image marks from detected_fiducial_markers.csv.
   if (h.fiducials) {
-    const SLOTS = { corner_top_left: 'corner-tl', corner_top_right: 'corner-tr', corner_bottom_right: 'corner-br',
-      corner_bottom_left: 'corner-bl', midside_top: 'side-top', midside_right: 'side-right', midside_bottom: 'side-bottom',
-      midside_left: 'side-left' }
+    const SLOTS = {
+      corner_top_left: 'corner-tl',
+      corner_top_right: 'corner-tr',
+      corner_bottom_right: 'corner-br',
+      corner_bottom_left: 'corner-bl',
+      midside_top: 'side-top',
+      midside_right: 'side-right',
+      midside_bottom: 'side-bottom',
+      midside_left: 'side-left',
+    }
     const r = csvRows(await readFile(h.intrinsics, 'utf8'))[0]
     const marks = []
     for (const [col, slot] of Object.entries(SLOTS)) {
-      const x = Number(r[`${col}_x_mm`]), y = Number(r[`${col}_y_mm`])
-      if (r[`${col}_x_mm`] !== '' && Number.isFinite(x) && Number.isFinite(y)) marks.push({ id: `F${marks.length + 1}`, xMm: x, yMm: y, slot })
+      const x = Number(r[`${col}_x_mm`]),
+        y = Number(r[`${col}_y_mm`])
+      if (r[`${col}_x_mm`] !== '' && Number.isFinite(x) && Number.isFinite(y))
+        marks.push({ id: `F${marks.length + 1}`, xMm: x, yMm: y, slot })
     }
     const provided = []
     for (const row of csvRows(await readFile(h.fiducials.csv, 'utf8'))) {
       for (const [col, slot] of Object.entries(SLOTS)) {
-        const px = Number(row[`${col}_x`]), py = Number(row[`${col}_y`])
-        if (row[`${col}_x`] !== '' && Number.isFinite(px) && Number.isFinite(py)) provided.push({ imageName: row.image_id, slot, px, py })
+        const px = Number(row[`${col}_x`]),
+          py = Number(row[`${col}_y`])
+        if (row[`${col}_x`] !== '' && Number.isFinite(px) && Number.isFinite(py))
+          provided.push({ imageName: row.image_id, slot, px, py })
       }
     }
-    out.fiducials = { certificate: { focalMm: Number(r.focal_length), ppxMm: Number(r.principal_point_x_mm) || 0,
-      ppyMm: Number(r.principal_point_y_mm) || 0, marks }, provided, mode: h.fiducials.mode ?? 'provided',
-    positions: h.fiducials.positions ?? 'corners+sides', frameMask: h.fiducials.frameMask !== false }
+    out.fiducials = {
+      certificate: {
+        focalMm: Number(r.focal_length),
+        ppxMm: Number(r.principal_point_x_mm) || 0,
+        ppyMm: Number(r.principal_point_y_mm) || 0,
+        marks,
+      },
+      provided,
+      mode: h.fiducials.mode ?? 'provided',
+      positions: h.fiducials.positions ?? 'corners+sides',
+      frameMask: h.fiducials.frameMask !== false,
+    }
     // The scan pitch comes from the fiducial fit; the preprocessed-frame cx/cy do not apply.
-    if (out.sensor) { delete out.sensor.cx; delete out.sensor.cy; delete out.sensor.pixelSize }
+    if (out.sensor) {
+      delete out.sensor.cx
+      delete out.sensor.cy
+      delete out.sensor.pixelSize
+    }
   }
   if (h.gcps && !h.noGcps) {
     const names = new Set(imageNames)
@@ -119,15 +148,28 @@ export async function histSetup(h, imageNames) {
     for (const r of csvRows(await readFile(h.gcps, 'utf8'))) {
       const label = r.gcp_label
       if (!by.has(label)) {
-        by.set(label, { name: label, x: Number(r.x_map), y: Number(r.y_map), z: Number(r.elev),
-          accuracyX: Number(r.x_map_acc) || 0.5, accuracyY: Number(r.y_map_acc) || 0.5, accuracyZ: Number(r.elev_acc) || 0.5,
-          role: 'control', observations: [] })
+        by.set(label, {
+          name: label,
+          x: Number(r.x_map),
+          y: Number(r.y_map),
+          z: Number(r.elev),
+          accuracyX: Number(r.x_map_acc) || 0.5,
+          accuracyY: Number(r.y_map_acc) || 0.5,
+          accuracyZ: Number(r.elev_acc) || 0.5,
+          role: 'control',
+          observations: [],
+        })
       }
-      if (names.has(r.image_file_name)) by.get(label).observations.push({ imageName: r.image_file_name, px: Number(r.x), py: Number(r.y) })
+      if (names.has(r.image_file_name))
+        by.get(label).observations.push({ imageName: r.image_file_name, px: Number(r.x), py: Number(r.y) })
     }
     const labels = [...by.keys()].sort()
     const every = Number(h.checkEvery ?? 4)
-    if (every > 0) for (let i = 0; i < labels.length; i += every) { by.get(labels[i]).role = 'check'; out.checks.push(labels[i]) }
+    if (every > 0)
+      for (let i = 0; i < labels.length; i += every) {
+        by.get(labels[i]).role = 'check'
+        out.checks.push(labels[i])
+      }
     out.gcps = labels.map((l) => by.get(l))
   }
   return out
@@ -135,7 +177,14 @@ export async function histSetup(h, imageNames) {
 
 export function scoreDem(file, ref, python = PY_DEFAULT) {
   const outJson = file.replace(/\.tif$/, '.score.json')
-  const r = spawnSync(python, [join(HERE, 'score_dem.py'), file, ref, '--out', outJson], { encoding: 'utf8', maxBuffer: 1 << 26 })
+  const r = spawnSync(python, [join(HERE, 'score_dem.py'), file, ref, '--out', outJson], {
+    encoding: 'utf8',
+    maxBuffer: 1 << 26,
+  })
   if (r.status !== 0) return { error: (r.stderr || '').slice(-2000) }
-  try { return JSON.parse(r.stdout.slice(r.stdout.indexOf('{'))) } catch { return { error: r.stdout.slice(-500) } }
+  try {
+    return JSON.parse(r.stdout.slice(r.stdout.indexOf('{')))
+  } catch {
+    return { error: r.stdout.slice(-500) }
+  }
 }

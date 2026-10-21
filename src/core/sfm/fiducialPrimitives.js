@@ -38,34 +38,42 @@ export function makeFiducialPrototype(family, size, variant = 0, { strokeFrac = 
   const S = size % 2 ? size : size + 1
   const h = (S - 1) / 2
   const data = new Float32Array(S * S).fill(1)
-  const dark = (x, y) => { if (x >= 0 && y >= 0 && x < S && y < S) data[y * S + x] = 0 }
-  const r = Math.max(1, Math.round(S * strokeFrac))
-  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    const dx = x - h, dy = y - h
-    if (family === 'generic') {
-      // Pick the variant FIRST, then test its own geometry. Folding the two into one
-      // condition (`variant === 0 && insideDot`) made every pixel *outside* a variant's
-      // shape fall through to the ring branch, so the dot and crosshair templates were
-      // each drawn inside a filled ring — three variations of a blob rather than the
-      // three distinct shapes this family exists to sweep.
-      const v = variant % 3
-      if (v === 0) { // dot
-        if (dx * dx + dy * dy <= (S * 0.18) ** 2) dark(x, y)
-      } else if (v === 1) { // crosshair
-        if (Math.abs(dx) <= r || Math.abs(dy) <= r) dark(x, y)
-      } else { // ring + centre
-        const d = Math.hypot(dx, dy), rr = S * 0.29
-        if (Math.abs(d - rr) <= r || d <= r) dark(x, y)
-      }
-    } else if (family === 'right-angle') {
-      const q = variant % 4
-      const sx = q === 0 || q === 3 ? 1 : -1
-      const sy = q < 2 ? 1 : -1
-      if ((Math.abs(dy) <= r && dx * sx >= 0) || (Math.abs(dx) <= r && dy * sy >= 0)) dark(x, y)
-    } else if (family === 'cut-45') {
-      if (Math.abs(dx + dy) <= r || (dx * dx + (dy + S * 0.25) ** 2 <= (S * 0.12) ** 2)) dark(x, y)
-    }
+  const dark = (x, y) => {
+    if (x >= 0 && y >= 0 && x < S && y < S) data[y * S + x] = 0
   }
+  const r = Math.max(1, Math.round(S * strokeFrac))
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      const dx = x - h,
+        dy = y - h
+      if (family === 'generic') {
+        // Pick the variant FIRST, then test its own geometry. Folding the two into one
+        // condition (`variant === 0 && insideDot`) made every pixel *outside* a variant's
+        // shape fall through to the ring branch, so the dot and crosshair templates were
+        // each drawn inside a filled ring — three variations of a blob rather than the
+        // three distinct shapes this family exists to sweep.
+        const v = variant % 3
+        if (v === 0) {
+          // dot
+          if (dx * dx + dy * dy <= (S * 0.18) ** 2) dark(x, y)
+        } else if (v === 1) {
+          // crosshair
+          if (Math.abs(dx) <= r || Math.abs(dy) <= r) dark(x, y)
+        } else {
+          // ring + centre
+          const d = Math.hypot(dx, dy),
+            rr = S * 0.29
+          if (Math.abs(d - rr) <= r || d <= r) dark(x, y)
+        }
+      } else if (family === 'right-angle') {
+        const q = variant % 4
+        const sx = q === 0 || q === 3 ? 1 : -1
+        const sy = q < 2 ? 1 : -1
+        if ((Math.abs(dy) <= r && dx * sx >= 0) || (Math.abs(dx) <= r && dy * sy >= 0)) dark(x, y)
+      } else if (family === 'cut-45') {
+        if (Math.abs(dx + dy) <= r || dx * dx + (dy + S * 0.25) ** 2 <= (S * 0.12) ** 2) dark(x, y)
+      }
+    }
   return { data, size: S }
 }
 
@@ -103,21 +111,36 @@ export function estimateFrameBounds(gray, maxFrac = 0.2) {
   }
   const edge = (p, fromStart) => {
     const limit = Math.max(2, Math.floor(p.length * maxFrac))
-    let bestI = fromStart ? 1 : p.length - 2, best = 0
+    let bestI = fromStart ? 1 : p.length - 2,
+      best = 0
     for (let q = 1; q < limit; q++) {
       const i = fromStart ? q : p.length - 1 - q
       const d = Math.abs(p[i] - p[i + (fromStart ? -1 : 1)])
-      if (d > best) { best = d; bestI = i }
+      if (d > best) {
+        best = d
+        bestI = i
+      }
     }
     return { at: bestI, strength: best }
   }
-  const xp = profile(true), yp = profile(false)
-  const l = edge(xp, true), r = edge(xp, false), t = edge(yp, true), b = edge(yp, false)
-  let lo = Infinity, hi = -Infinity
-  for (const v of gray.data) { if (v < lo) lo = v; if (v > hi) hi = v }
+  const xp = profile(true),
+    yp = profile(false)
+  const l = edge(xp, true),
+    r = edge(xp, false),
+    t = edge(yp, true),
+    b = edge(yp, false)
+  let lo = Infinity,
+    hi = -Infinity
+  for (const v of gray.data) {
+    if (v < lo) lo = v
+    if (v > hi) hi = v
+  }
   const range = hi - lo || 1
   return {
-    left: l.at, right: r.at, top: t.at, bottom: b.at,
+    left: l.at,
+    right: r.at,
+    top: t.at,
+    bottom: b.at,
     confidence: Math.min(l.strength, r.strength, t.strength, b.strength) / range,
   }
 }
@@ -147,8 +170,10 @@ export function bestPrototypeHit(gray, cx, cy, radius, family, cfg = {}) {
     // A prototype wider than the image leaves no legal centre. Skip it: clamping
     // to an inverted [lo, hi] would yield an out-of-bounds search box that reads
     // undefined pixels and scores a meaningless 0.
-    const xLo = half, xHi = gray.width - 1 - half
-    const yLo = half, yHi = gray.height - 1 - half
+    const xLo = half,
+      xHi = gray.width - 1 - half
+    const yLo = half,
+      yHi = gray.height - 1 - half
     if (xHi < xLo || yHi < yLo) continue
     const x0 = clamp(Math.round(cx - radius), xLo, xHi)
     const y0 = clamp(Math.round(cy - radius), yLo, yHi)
@@ -157,13 +182,18 @@ export function bestPrototypeHit(gray, cx, cy, radius, family, cfg = {}) {
     if (x1 < x0 || y1 < y0) continue
     // cfg.variants restricts the sweep to known orientations (the native refine
     // reuses the coarse winner's — re-sweeping all of them costs ~6× for nothing).
-    const variants = cfg.variants?.length ? cfg.variants
-      : Array.from({ length: variantsFor(family) }, (_, v) => v)
+    const variants = cfg.variants?.length ? cfg.variants : Array.from({ length: variantsFor(family) }, (_, v) => v)
     for (const v of variants) {
       const base = makeFiducialPrototype(family, size, v, protoOpts)
-      const templates = cfg.polarity === 'dark' ? [[base, 'dark']]
-        : cfg.polarity === 'light' ? [[invertPatch(base), 'light']]
-          : [[base, 'dark'], [invertPatch(base), 'light']]
+      const templates =
+        cfg.polarity === 'dark'
+          ? [[base, 'dark']]
+          : cfg.polarity === 'light'
+            ? [[invertPatch(base), 'light']]
+            : [
+                [base, 'dark'],
+                [invertPatch(base), 'light'],
+              ]
       for (const [tpl, polarity] of templates) {
         const hit = matchZNCC(gray, tpl, x0, y0, x1, y1)
         const rec = { ...hit, tpl, size, variant: v, polarity }

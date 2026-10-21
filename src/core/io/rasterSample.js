@@ -97,9 +97,14 @@ export function sampleRaster(desc, x, y, { strict = false } = {}) {
 // Are all four bilinear neighbours of world (x, y) valid?
 function bilinearComplete(desc, x, y) {
   const { originX, originY, scaleX, scaleY } = desc.geoTransform
-  const c0 = Math.floor((x - originX) / scaleX - 0.5), r0 = Math.floor((y - originY) / scaleY - 0.5)
-  return valueAt(desc, c0, r0) != null && valueAt(desc, c0 + 1, r0) != null
-    && valueAt(desc, c0, r0 + 1) != null && valueAt(desc, c0 + 1, r0 + 1) != null
+  const c0 = Math.floor((x - originX) / scaleX - 0.5),
+    r0 = Math.floor((y - originY) / scaleY - 0.5)
+  return (
+    valueAt(desc, c0, r0) != null &&
+    valueAt(desc, c0 + 1, r0) != null &&
+    valueAt(desc, c0, r0 + 1) != null &&
+    valueAt(desc, c0 + 1, r0 + 1) != null
+  )
 }
 
 /**
@@ -131,7 +136,8 @@ function f16round(v) {
   const e = Math.max(-14, Math.floor(Math.log2(a)))
   const q = 2 ** (e - 10)
   let r = a / q
-  const f = Math.floor(r), d = r - f
+  const f = Math.floor(r),
+    d = r - f
   r = d > 0.5 || (d === 0.5 && f % 2 === 1) ? f + 1 : f // ties to even
   return Math.sign(v) * r * q
 }
@@ -179,6 +185,9 @@ export function edgeOriginFromTags({ tiepoint = null, origin, scaleX, scaleY, ra
     x = tiepoint[3] - tiepoint[0] * scaleX
     y = tiepoint[4] - tiepoint[1] * scaleY
   }
-  if (rasterType === 2) { x -= 0.5 * scaleX; y -= 0.5 * scaleY }
+  if (rasterType === 2) {
+    x -= 0.5 * scaleX
+    y -= 0.5 * scaleY
+  }
   return [x, y]
 }

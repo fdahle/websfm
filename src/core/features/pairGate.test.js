@@ -20,7 +20,10 @@ const result = (inlierCount, hInlierCount = 0) => ({ inlierCount, hInlierCount, 
 describe('evaluatePairAcceptance', () => {
   it('accepts a strong pair (enough inliers, ratio clears the gate)', () => {
     const v = evaluatePairAcceptance({
-      result: result(60), rawCount: 100, spread: goodSpread(60), settings: SETTINGS,
+      result: result(60),
+      rawCount: 100,
+      spread: goodSpread(60),
+      settings: SETTINGS,
     })
     expect(v.classification).toBe('accept')
     expect(v.accept).toBe(true)
@@ -30,7 +33,10 @@ describe('evaluatePairAcceptance', () => {
   it('accepts via the absolute-inlier override below the ratio floor', () => {
     // 35/200 = 0.175 ratio (< 0.25) but ≥ overrideInliers (30).
     const v = evaluatePairAcceptance({
-      result: result(35), rawCount: 200, spread: goodSpread(35), settings: SETTINGS,
+      result: result(35),
+      rawCount: 200,
+      spread: goodSpread(35),
+      settings: SETTINGS,
     })
     expect(v.classification).toBe('accept')
     expect(v.overrode).toBe(true)
@@ -39,7 +45,10 @@ describe('evaluatePairAcceptance', () => {
   it('marks a ratio-failing pair with enough inliers as WEAK, not rejected', () => {
     // 20/200 = 0.10 ratio (< gate), 20 < 30 override → not accepted, but 20 ≥ weak floor.
     const v = evaluatePairAcceptance({
-      result: result(20), rawCount: 200, spread: goodSpread(20), settings: SETTINGS,
+      result: result(20),
+      rawCount: 200,
+      spread: goodSpread(20),
+      settings: SETTINGS,
     })
     expect(v.classification).toBe('weak')
     expect(v.weak).toBe(true)
@@ -49,7 +58,9 @@ describe('evaluatePairAcceptance', () => {
   it('marks a below-absolute-floor pair as WEAK when minMatches is raised high', () => {
     // The 227-inlier film chain link that a user-set minMatches=500 used to sever.
     const v = evaluatePairAcceptance({
-      result: result(227), rawCount: 300, spread: goodSpread(227),
+      result: result(227),
+      rawCount: 300,
+      spread: goodSpread(227),
       settings: { ...SETTINGS, minMatches: 500 },
     })
     expect(v.classification).toBe('weak')
@@ -59,7 +70,10 @@ describe('evaluatePairAcceptance', () => {
   it('rejects (never weak) when inliers collapse positionally', () => {
     const spread = { count: 40, uniqueA: 3, uniqueB: 40, extentA: 500, extentB: 500 } // many→one
     const v = evaluatePairAcceptance({
-      result: result(40), rawCount: 60, spread, settings: SETTINGS,
+      result: result(40),
+      rawCount: 60,
+      spread,
+      settings: SETTINGS,
     })
     expect(v.classification).toBe('reject')
     expect(v.spreadDegenerate).toBe(true)
@@ -69,7 +83,10 @@ describe('evaluatePairAcceptance', () => {
   it('rejects a pinhead-region inlier cluster (epipole degeneracy)', () => {
     const spread = { count: 40, uniqueA: 40, uniqueB: 40, extentA: 3, extentB: 500 } // tiny extent
     const v = evaluatePairAcceptance({
-      result: result(40), rawCount: 60, spread, settings: SETTINGS,
+      result: result(40),
+      rawCount: 60,
+      spread,
+      settings: SETTINGS,
     })
     expect(v.classification).toBe('reject')
     expect(v.spreadDegenerate).toBe(true)
@@ -84,7 +101,10 @@ describe('evaluatePairAcceptance', () => {
   it('rejects below the weak-pair floor', () => {
     // 10 inliers < weakMinInliers (15) → reject, not weak.
     const v = evaluatePairAcceptance({
-      result: result(10), rawCount: 100, spread: goodSpread(10), settings: SETTINGS,
+      result: result(10),
+      rawCount: 100,
+      spread: goodSpread(10),
+      settings: SETTINGS,
     })
     expect(v.classification).toBe('reject')
     expect(v.reason).toMatch(/weak-pair floor/)
@@ -92,7 +112,10 @@ describe('evaluatePairAcceptance', () => {
 
   it('flags H/F degeneracy as a quality label without rejecting', () => {
     const v = evaluatePairAcceptance({
-      result: result(60, 55), rawCount: 100, spread: goodSpread(60), settings: SETTINGS,
+      result: result(60, 55),
+      rawCount: 100,
+      spread: goodSpread(60),
+      settings: SETTINGS,
     })
     expect(v.degenerate).toBe(true)
     expect(v.classification).toBe('accept') // degeneracy is a seed-quality label, not a gate

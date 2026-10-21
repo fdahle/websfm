@@ -16,21 +16,24 @@ const { isOpen, tabs, activeId } = storeToRefs(glossary)
 const query = ref('')
 
 // Typing in search jumps to Home so the results are visible.
-function onSearch() { glossary.setActive('home') }
+function onSearch() {
+  glossary.setActive('home')
+}
 
 // No query: the pipeline map (stage cards joined by arrows, plus any plain
 // non-pipeline sections after). With a query: a flat ranked result list
 // (grouping ranked results would fight the ranking).
 const sections = computed(() => (query.value.trim() ? null : getGlossaryEntriesByTopic()))
-const pipelineSections = computed(() => sections.value?.filter(s => s.pipeline) ?? [])
-const extraSections = computed(() => sections.value?.filter(s => !s.pipeline) ?? [])
+const pipelineSections = computed(() => sections.value?.filter((s) => s.pipeline) ?? [])
+const extraSections = computed(() => sections.value?.filter((s) => !s.pipeline) ?? [])
 const results = computed(() => (query.value.trim() ? searchGlossary(query.value) : []))
 
 const activeEntry = computed(() => (activeId.value === 'home' ? null : getGlossaryEntry(activeId.value)))
 const activeHtml = computed(() =>
-  activeEntry.value ? renderHelpMarkdown(activeEntry.value.body, { selfId: activeEntry.value.id }) : '')
+  activeEntry.value ? renderHelpMarkdown(activeEntry.value.body, { selfId: activeEntry.value.id }) : '',
+)
 
-const tabEntries = computed(() => tabs.value.map(id => ({ id, entry: getGlossaryEntry(id) })))
+const tabEntries = computed(() => tabs.value.map((id) => ({ id, entry: getGlossaryEntry(id) })))
 
 const { onMouseOver: onPreviewOver, onMouseOut: onPreviewOut } = useHelpLinkPreview()
 
@@ -53,7 +56,10 @@ watch([activeId, tabs], async () => {
 // Internal [label](help:id) / auto-links open (or focus) a tab.
 function onBodyClick(e) {
   const link = helpLinkFrom(e.target)
-  if (link) { e.preventDefault(); followLink(link) }
+  if (link) {
+    e.preventDefault()
+    followLink(link)
+  }
 }
 </script>
 
@@ -63,13 +69,7 @@ function onBodyClick(e) {
       <div class="modal" role="dialog" aria-modal="true" aria-label="Glossary">
         <div class="modal-header">
           <span class="modal-title">Glossary</span>
-          <input
-            v-model="query"
-            class="search"
-            type="search"
-            placeholder="Search terms…"
-            @input="onSearch"
-          >
+          <input v-model="query" class="search" type="search" placeholder="Search terms…" @input="onSearch" />
           <button class="modal-close" title="Close" @click="glossary.close()">×</button>
         </div>
 
@@ -79,7 +79,9 @@ function onBodyClick(e) {
             :class="{ active: activeId === 'home' }"
             role="tab"
             @click="glossary.setActive('home')"
-          >Home</button>
+          >
+            Home
+          </button>
           <div ref="tabScroll" class="tab-scroll">
             <button
               v-for="t in tabEntries"
@@ -117,14 +119,18 @@ function onBodyClick(e) {
                       class="chip"
                       :title="e.summary"
                       @click="glossary.openTerm(e.id)"
-                    >{{ e.title }}</button>
+                    >
+                      {{ e.title }}
+                    </button>
                   </div>
                 </section>
                 <div v-if="i < pipelineSections.length - 1" class="connector" aria-hidden="true"></div>
               </template>
               <section v-for="s in extraSections" :key="s.topic" class="stage stage-extra">
                 <div class="stage-head">
-                  <div class="stage-text"><h3 class="stage-title">{{ s.label }}</h3></div>
+                  <div class="stage-text">
+                    <h3 class="stage-title">{{ s.label }}</h3>
+                  </div>
                 </div>
                 <div class="chips">
                   <button
@@ -133,7 +139,9 @@ function onBodyClick(e) {
                     class="chip"
                     :title="e.summary"
                     @click="glossary.openTerm(e.id)"
-                  >{{ e.title }}</button>
+                  >
+                    {{ e.title }}
+                  </button>
                 </div>
               </section>
             </template>
@@ -198,7 +206,11 @@ function onBodyClick(e) {
   border-bottom: 1px solid var(--panel-border);
   flex-shrink: 0;
 }
-.modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
 .search {
   margin-left: auto;
   width: 220px;
@@ -211,10 +223,19 @@ function onBodyClick(e) {
   padding: 5px 9px;
 }
 .modal-close {
-  background: none; border: none; color: var(--text-dim);
-  font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 4px;
 }
-.modal-close:hover { background: var(--hover-bg); color: var(--text); }
+.modal-close:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
 
 /* Home sits outside the scroll area (fixed); only the term tabs scroll. */
 .tab-strip {
@@ -257,13 +278,24 @@ function onBodyClick(e) {
   padding-left: 12px;
   border-right: 1px solid var(--panel-border);
 }
-.gtab:hover:not(.active) { color: var(--text); }
-.gtab.active { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
-.gtab-close {
-  font-size: 13px; line-height: 1; color: var(--text-dim);
-  border-radius: 3px; padding: 0 2px;
+.gtab:hover:not(.active) {
+  color: var(--text);
 }
-.gtab-close:hover { background: var(--hover-bg); color: var(--text); }
+.gtab.active {
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.gtab-close {
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.gtab-close:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
 
 .modal-body {
   flex: 1;
@@ -273,23 +305,56 @@ function onBodyClick(e) {
   line-height: 1.6;
   color: var(--text);
 }
-.empty { color: var(--text-dim); font-style: italic; }
+.empty {
+  color: var(--text-dim);
+  font-style: italic;
+}
 
 /* ── Pipeline map (home, no query) ── */
-.map-intro { margin: 0 0 12px; font-size: 12px; color: var(--text-dim); }
+.map-intro {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
 .stage {
   border: 1px solid var(--panel-border);
   border-radius: 8px;
   padding: 10px 12px;
   background: var(--hover-bg);
 }
-.stage-extra { margin-top: 14px; }
-.stage-head { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 8px; }
-.stage-icon { font-size: 17px; line-height: 1.25; }
-.stage-text { min-width: 0; }
-.stage-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
-.stage-blurb { margin: 1px 0 0; font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.stage-extra {
+  margin-top: 14px;
+}
+.stage-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+.stage-icon {
+  font-size: 17px;
+  line-height: 1.25;
+}
+.stage-text {
+  min-width: 0;
+}
+.stage-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.stage-blurb {
+  margin: 1px 0 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .chip {
   background: var(--panel);
   border: 1px solid var(--panel-border);
@@ -300,7 +365,10 @@ function onBodyClick(e) {
   padding: 3px 10px;
   cursor: pointer;
 }
-.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 /* Line + arrowhead both drawn inside the element's own height, so the tip
    can't overlap the stage card below. */
 .connector {
@@ -330,27 +398,66 @@ function onBodyClick(e) {
 }
 
 /* ── Flat ranked list (search results) ── */
-.index-list { list-style: none; margin: 0; padding: 0; }
-.index-item {
-  display: flex; flex-direction: column; gap: 2px;
-  width: 100%; text-align: left;
-  background: none; border: none; border-radius: 6px;
-  padding: 8px 10px; cursor: pointer; font: inherit;
+.index-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
-.index-item:hover { background: var(--hover-bg); }
-.index-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.index-summary { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
+.index-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+.index-item:hover {
+  background: var(--hover-bg);
+}
+.index-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.index-summary {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
 
-.term-body :deep(a.glossary-link) { color: var(--accent); cursor: pointer; text-decoration: underline dotted; }
-.term-body :deep(a) { color: var(--accent); }
-.term-body :deep(p) { margin: 0 0 10px; }
-.term-body :deep(h1), .term-body :deep(h2), .term-body :deep(h3) {
-  font-size: 14px; color: var(--text); margin: 16px 0 7px;
+.term-body :deep(a.glossary-link) {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.term-body :deep(a) {
+  color: var(--accent);
+}
+.term-body :deep(p) {
+  margin: 0 0 10px;
+}
+.term-body :deep(h1),
+.term-body :deep(h2),
+.term-body :deep(h3) {
+  font-size: 14px;
+  color: var(--text);
+  margin: 16px 0 7px;
 }
 .term-body :deep(code) {
-  background: var(--hover-bg); border-radius: 4px; padding: 1px 4px; font-size: 12px;
+  background: var(--hover-bg);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 12px;
 }
 .term-body :deep(img.glossary-img) {
-  max-width: 100%; height: auto; border-radius: 6px; margin: 6px 0;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 6px 0;
 }
 </style>

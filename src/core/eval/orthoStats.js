@@ -26,8 +26,13 @@ const GRAD_SCALE = 65536 / 8000 // sqrt(gx² + gy²) in luma thousandths → 2�
 //             the one-cell ring around it wherever the ortho has one. Each cell must
 //             be the core of exactly one add().
 export function createOrthoStats(width, height, hasLabels = false) {
-  let gradSum = 0, gradCells = 0
-  let seamSum = 0, seamPairs = 0, inSum = 0, inPairs = 0, labelled = 0
+  let gradSum = 0,
+    gradCells = 0
+  let seamSum = 0,
+    seamPairs = 0,
+    inSum = 0,
+    inPairs = 0,
+    labelled = 0
   const used = new Set()
   let luma = new Int32Array(0)
 
@@ -40,21 +45,36 @@ export function createOrthoStats(width, height, hasLabels = false) {
     for (let gr = Math.max(1, cy0); gr < Math.min(height - 1, cy0 + ch); gr++) {
       for (let gc = Math.max(1, cx0); gc < Math.min(width - 1, cx0 + cw); gc++) {
         const i = (gr - y0) * w + (gc - x0)
-        const a = luma[i - w - 1], b = luma[i - w], d = luma[i - w + 1]
-        const e = luma[i - 1], m = luma[i], f = luma[i + 1]
-        const g = luma[i + w - 1], k = luma[i + w], l = luma[i + w + 1]
+        const a = luma[i - w - 1],
+          b = luma[i - w],
+          d = luma[i - w + 1]
+        const e = luma[i - 1],
+          m = luma[i],
+          f = luma[i + 1]
+        const g = luma[i + w - 1],
+          k = luma[i + w],
+          l = luma[i + w + 1]
         if ((a | b | d | e | m | f | g | k | l) < 0) continue // any uncoloured cell in the 3×3
-        const gx = (d + 2 * f + l) - (a + 2 * e + g)
-        const gy = (g + 2 * k + l) - (a + 2 * b + d)
-        gradSum += Math.round(Math.sqrt(gx * gx + gy * gy) * GRAD_SCALE); gradCells++
+        const gx = d + 2 * f + l - (a + 2 * e + g)
+        const gy = g + 2 * k + l - (a + 2 * b + d)
+        gradSum += Math.round(Math.sqrt(gx * gx + gy * gy) * GRAD_SCALE)
+        gradCells++
       }
     }
     if (!labels || !hasLabels) return
-    const step = (p, q) => Math.abs(rgba[4 * p] - rgba[4 * q]) + Math.abs(rgba[4 * p + 1] - rgba[4 * q + 1])
-      + Math.abs(rgba[4 * p + 2] - rgba[4 * q + 2])
+    const step = (p, q) =>
+      Math.abs(rgba[4 * p] - rgba[4 * q]) +
+      Math.abs(rgba[4 * p + 1] - rgba[4 * q + 1]) +
+      Math.abs(rgba[4 * p + 2] - rgba[4 * q + 2])
     const pair = (p, q) => {
       if (labels[q] === NO_LABEL) return
-      if (labels[p] === labels[q]) { inSum += step(p, q); inPairs++ } else { seamSum += step(p, q); seamPairs++ }
+      if (labels[p] === labels[q]) {
+        inSum += step(p, q)
+        inPairs++
+      } else {
+        seamSum += step(p, q)
+        seamPairs++
+      }
     }
     for (let gr = cy0; gr < cy0 + ch; gr++) {
       for (let gc = cx0; gc < cx0 + cw; gc++) {
@@ -72,7 +92,13 @@ export function createOrthoStats(width, height, hasLabels = false) {
     const out = {
       sharpness: gradCells ? gradSum / 65536 / gradCells : null,
       sharpnessCells: gradCells,
-      labelled: 0, sources: 0, seamPairs: 0, seamStep: null, interiorStep: null, seamRatio: null, seamDensity: null,
+      labelled: 0,
+      sources: 0,
+      seamPairs: 0,
+      seamStep: null,
+      interiorStep: null,
+      seamRatio: null,
+      seamDensity: null,
     }
     if (!hasLabels) return out
     out.labelled = labelled
@@ -91,8 +117,13 @@ export function createOrthoStats(width, height, hasLabels = false) {
     return { gradSum, gradCells, seamSum, seamPairs, inSum, inPairs, labelled, used: [...used] }
   }
   function merge(o) {
-    gradSum += o.gradSum; gradCells += o.gradCells; seamSum += o.seamSum; seamPairs += o.seamPairs
-    inSum += o.inSum; inPairs += o.inPairs; labelled += o.labelled
+    gradSum += o.gradSum
+    gradCells += o.gradCells
+    seamSum += o.seamSum
+    seamPairs += o.seamPairs
+    inSum += o.inSum
+    inPairs += o.inPairs
+    labelled += o.labelled
     for (const l of o.used) used.add(l)
   }
 
@@ -109,8 +140,8 @@ export function orthoStats(rgba, width, height, labels = null) {
 export function describeOrthoStats(s) {
   const f = (v, d = 2) => (v == null ? '—' : v.toFixed(d))
   const seams = s.labelled
-    ? `; ${pluralize(s.sources, 'source image')}, seams: step ${f(s.seamStep)} vs interior ${f(s.interiorStep)} `
-      + `(×${f(s.seamRatio)}), ${f(100 * (s.seamDensity ?? 0), 1)} seam pairs per 100 cells`
+    ? `; ${pluralize(s.sources, 'source image')}, seams: step ${f(s.seamStep)} vs interior ${f(s.interiorStep)} ` +
+      `(×${f(s.seamRatio)}), ${f(100 * (s.seamDensity ?? 0), 1)} seam pairs per 100 cells`
     : ''
   return `sharpness ${f(s.sharpness)} grey levels/cell${seams}`
 }

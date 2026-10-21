@@ -32,37 +32,60 @@ export function fitSimilarity(pairs) {
   // of correspondences and a tiny residual while rotation about the strip is
   // still unconstrained, so point count / total variance alone is not enough.
   if (pairs.some(({ src, dst }) => !finiteVec3(src) || !finiteVec3(dst))) return null
-  if (!hasNonCollinearGeometry(pairs.map((p) => p.src))
-      || !hasNonCollinearGeometry(pairs.map((p) => p.dst))) return null
-  const weights = pairs.map((p) => Number.isFinite(p.weight) && p.weight > 0 ? p.weight : 1)
+  if (!hasNonCollinearGeometry(pairs.map((p) => p.src)) || !hasNonCollinearGeometry(pairs.map((p) => p.dst)))
+    return null
+  const weights = pairs.map((p) => (Number.isFinite(p.weight) && p.weight > 0 ? p.weight : 1))
   const weightSum = weights.reduce((sum, w) => sum + w, 0)
 
   // Centroids.
-  const cs = [0, 0, 0], cd = [0, 0, 0]
+  const cs = [0, 0, 0],
+    cd = [0, 0, 0]
   for (let k = 0; k < n; k++) {
-    const { src, dst } = pairs[k], w = weights[k]
-    cs[0] += w * src[0]; cs[1] += w * src[1]; cs[2] += w * src[2]
-    cd[0] += w * dst[0]; cd[1] += w * dst[1]; cd[2] += w * dst[2]
+    const { src, dst } = pairs[k],
+      w = weights[k]
+    cs[0] += w * src[0]
+    cs[1] += w * src[1]
+    cs[2] += w * src[2]
+    cd[0] += w * dst[0]
+    cd[1] += w * dst[1]
+    cd[2] += w * dst[2]
   }
-  for (let i = 0; i < 3; i++) { cs[i] /= weightSum; cd[i] /= weightSum }
+  for (let i = 0; i < 3; i++) {
+    cs[i] /= weightSum
+    cd[i] /= weightSum
+  }
 
   // Cross-covariance M[i][j] = Σ src'_i · dst'_j (Horn's S) and Σ|src'|².
-  const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  const M = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
   let srcVar = 0
-  const a = [], b = []
+  const a = [],
+    b = []
   for (let k = 0; k < n; k++) {
-    const { src, dst } = pairs[k], w = weights[k]
-    const s = sub(src, cs), d = sub(dst, cd)
-    a.push(s); b.push(d)
+    const { src, dst } = pairs[k],
+      w = weights[k]
+    const s = sub(src, cs),
+      d = sub(dst, cd)
+    a.push(s)
+    b.push(d)
     for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) M[i][j] += w * s[i] * d[j]
     srcVar += w * dot(s, s)
   }
   if (srcVar < 1e-20) return null
 
   // Horn's symmetric 4×4 N from M; its top eigenvector is the rotation quaternion.
-  const Sxx = M[0][0], Sxy = M[0][1], Sxz = M[0][2]
-  const Syx = M[1][0], Syy = M[1][1], Syz = M[1][2]
-  const Szx = M[2][0], Szy = M[2][1], Szz = M[2][2]
+  const Sxx = M[0][0],
+    Sxy = M[0][1],
+    Sxz = M[0][2]
+  const Syx = M[1][0],
+    Syy = M[1][1],
+    Syz = M[1][2]
+  const Szx = M[2][0],
+    Szy = M[2][1],
+    Szz = M[2][2]
   const N = [
     [Sxx + Syy + Szz, Syz - Szy, Szx - Sxz, Sxy - Syx],
     [Syz - Szy, Sxx - Syy - Szz, Sxy + Syx, Szx + Sxz],
@@ -112,8 +135,10 @@ export function fitSimilarity(pairs) {
   return { scale, R, t, rms: Math.sqrt(sse / weightSum), count: n }
 }
 
-const validM3 = (m) => Array.isArray(m) && m.length === 3
-  && m.every((row) => Array.isArray(row) && row.length === 3 && row.every(Number.isFinite))
+const validM3 = (m) =>
+  Array.isArray(m) &&
+  m.length === 3 &&
+  m.every((row) => Array.isArray(row) && row.length === 3 && row.every(Number.isFinite))
 
 function solveLinear(A, b) {
   const n = b.length
@@ -137,60 +162,93 @@ function solveLinear(A, b) {
   return x.every(Number.isFinite) ? x : null
 }
 
-const mul3 = (A, B) => A.map((row) => B[0].map((_, j) =>
-  row.reduce((sum, value, k) => sum + value * B[k][j], 0)))
-const skew3 = ([x,y,z]) => [[0,-z,y],[z,0,-x],[-y,x,0]]
+const mul3 = (A, B) => A.map((row) => B[0].map((_, j) => row.reduce((sum, value, k) => sum + value * B[k][j], 0)))
+const skew3 = ([x, y, z]) => [
+  [0, -z, y],
+  [z, 0, -x],
+  [-y, x, 0],
+]
 const so3 = (w) => {
   const a = Math.hypot(...w)
   if (a < 1e-12) {
     const K = skew3(w)
-    return [[1+K[0][0],K[0][1],K[0][2]],[K[1][0],1+K[1][1],K[1][2]],[K[2][0],K[2][1],1+K[2][2]]]
+    return [
+      [1 + K[0][0], K[0][1], K[0][2]],
+      [K[1][0], 1 + K[1][1], K[1][2]],
+      [K[2][0], K[2][1], 1 + K[2][2]],
+    ]
   }
-  const u = w.map((v) => v/a), K = skew3(u), c=Math.cos(a), s=Math.sin(a), q=1-c
+  const u = w.map((v) => v / a),
+    K = skew3(u),
+    c = Math.cos(a),
+    s = Math.sin(a),
+    q = 1 - c
   return [
-    [c+u[0]*u[0]*q, u[0]*u[1]*q-u[2]*s, u[0]*u[2]*q+u[1]*s],
-    [u[1]*u[0]*q+u[2]*s, c+u[1]*u[1]*q, u[1]*u[2]*q-u[0]*s],
-    [u[2]*u[0]*q-u[1]*s, u[2]*u[1]*q+u[0]*s, c+u[2]*u[2]*q],
+    [c + u[0] * u[0] * q, u[0] * u[1] * q - u[2] * s, u[0] * u[2] * q + u[1] * s],
+    [u[1] * u[0] * q + u[2] * s, c + u[1] * u[1] * q, u[1] * u[2] * q - u[0] * s],
+    [u[2] * u[0] * q - u[1] * s, u[2] * u[1] * q + u[0] * s, c + u[2] * u[2] * q],
   ]
 }
 
 function refineAnisotropicSimilarity(pairs, seed) {
   let state = { scale: seed.scale, R: seed.R.map((r) => r.slice()), t: seed.t.slice() }
-  const precisionOf = (p) => validM3(p.precision) ? p.precision
-    : [[p.weight ?? 1,0,0],[0,p.weight ?? 1,0],[0,0,p.weight ?? 1]]
-  const evaluate = (s) => pairs.reduce((sum, pair) => {
-    const r = sub(applySimilarity(s, pair.src), pair.dst), P = precisionOf(pair)
-    const pr = P.map((row) => dot(row, r))
-    return sum + dot(r, pr)
-  }, 0)
+  const precisionOf = (p) =>
+    validM3(p.precision)
+      ? p.precision
+      : [
+          [p.weight ?? 1, 0, 0],
+          [0, p.weight ?? 1, 0],
+          [0, 0, p.weight ?? 1],
+        ]
+  const evaluate = (s) =>
+    pairs.reduce((sum, pair) => {
+      const r = sub(applySimilarity(s, pair.src), pair.dst),
+        P = precisionOf(pair)
+      const pr = P.map((row) => dot(row, r))
+      return sum + dot(r, pr)
+    }, 0)
   let cost = evaluate(state)
   for (let iter = 0; iter < 15; iter++) {
-    const H = Array.from({length:7}, () => Array(7).fill(0)), g = Array(7).fill(0)
+    const H = Array.from({ length: 7 }, () => Array(7).fill(0)),
+      g = Array(7).fill(0)
     for (const pair of pairs) {
-      const v = matVec3(state.R, pair.src), sv = v.map((x) => state.scale*x)
-      const pred = sv.map((x,i) => x + state.t[i]), r = sub(pred, pair.dst), P = precisionOf(pair)
+      const v = matVec3(state.R, pair.src),
+        sv = v.map((x) => state.scale * x)
+      const pred = sv.map((x, i) => x + state.t[i]),
+        r = sub(pred, pair.dst),
+        P = precisionOf(pair)
       const S = skew3(sv)
-      const J = Array.from({length:3}, (_, row) => [
-        -S[row][0], -S[row][1], -S[row][2], sv[row],
-        row === 0 ? 1 : 0, row === 1 ? 1 : 0, row === 2 ? 1 : 0,
+      const J = Array.from({ length: 3 }, (_, row) => [
+        -S[row][0],
+        -S[row][1],
+        -S[row][2],
+        sv[row],
+        row === 0 ? 1 : 0,
+        row === 1 ? 1 : 0,
+        row === 2 ? 1 : 0,
       ])
-      for (let a=0;a<7;a++) for (let axis=0;axis<3;axis++) {
-        const pir = P[axis][0]*r[0]+P[axis][1]*r[1]+P[axis][2]*r[2]
-        g[a] += J[axis][a]*pir
-        for (let b=0;b<7;b++) for (let k=0;k<3;k++) H[a][b] += J[axis][a]*P[axis][k]*J[k][b]
-      }
+      for (let a = 0; a < 7; a++)
+        for (let axis = 0; axis < 3; axis++) {
+          const pir = P[axis][0] * r[0] + P[axis][1] * r[1] + P[axis][2] * r[2]
+          g[a] += J[axis][a] * pir
+          for (let b = 0; b < 7; b++) for (let k = 0; k < 3; k++) H[a][b] += J[axis][a] * P[axis][k] * J[k][b]
+        }
     }
-    for (let i=0;i<7;i++) H[i][i] += 1e-10 * Math.max(1, H[i][i])
-    const step = solveLinear(H, g.map((v) => -v))
+    for (let i = 0; i < 7; i++) H[i][i] += 1e-10 * Math.max(1, H[i][i])
+    const step = solveLinear(
+      H,
+      g.map((v) => -v),
+    )
     if (!step) break
     const candidate = {
-      R: mul3(so3(step.slice(0,3)), state.R),
+      R: mul3(so3(step.slice(0, 3)), state.R),
       scale: state.scale * Math.exp(step[3]),
-      t: state.t.map((v,i) => v + step[4+i]),
+      t: state.t.map((v, i) => v + step[4 + i]),
     }
     const next = evaluate(candidate)
     if (!(next < cost)) break
-    state = candidate; cost = next
+    state = candidate
+    cost = next
     if (Math.hypot(...step) < 1e-10) break
   }
   return state
@@ -201,15 +259,27 @@ const matVec3 = (m, v) => m.map((row) => dot(row, v))
 // The similarity's Jacobian at one source point, in refineAnisotropicSimilarity's
 // parameters (left rotation ω, log-scale, translation): 3 × 7.
 function similarityJacobian(fit, src) {
-  const sv = matVec3(fit.R, src).map((x) => fit.scale * x), S = skew3(sv)
-  return [0, 1, 2].map((row) => [-S[row][0], -S[row][1], -S[row][2], sv[row],
-    row === 0 ? 1 : 0, row === 1 ? 1 : 0, row === 2 ? 1 : 0])
+  const sv = matVec3(fit.R, src).map((x) => fit.scale * x),
+    S = skew3(sv)
+  return [0, 1, 2].map((row) => [
+    -S[row][0],
+    -S[row][1],
+    -S[row][2],
+    sv[row],
+    row === 0 ? 1 : 0,
+    row === 1 ? 1 : 0,
+    row === 2 ? 1 : 0,
+  ])
 }
 
 function invertSym(N) {
-  const n = N.length, cols = []
+  const n = N.length,
+    cols = []
   for (let j = 0; j < n; j++) {
-    const col = solveLinear(N, Array.from({ length: n }, (_, i) => (i === j ? 1 : 0)))
+    const col = solveLinear(
+      N,
+      Array.from({ length: n }, (_, i) => (i === j ? 1 : 0)),
+    )
     if (!col) return null
     cols.push(col)
   }
@@ -230,19 +300,30 @@ export function similarityPrecision(pairs, fit) {
   const local = fit.local ?? null
   const D = local ? [local.k, local.k, 1] : [1, 1, 1]
   const precisionOf = (p) => {
-    const m = validM3(p.precision) ? p.precision : [[p.weight ?? 1, 0, 0], [0, p.weight ?? 1, 0], [0, 0, p.weight ?? 1]]
+    const m = validM3(p.precision)
+      ? p.precision
+      : [
+          [p.weight ?? 1, 0, 0],
+          [0, p.weight ?? 1, 0],
+          [0, 0, p.weight ?? 1],
+        ]
     return local ? precisionToLocal(m, local) : m
   }
   const terms = pairs.map((p) => {
-    const J = similarityJacobian(fit, p.src), P = precisionOf(p)
-    const JtPJ = Array.from({ length: 7 }, (_, a) => Array.from({ length: 7 }, (_, b) => {
-      let v = 0
-      for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) v += J[i][a] * P[i][k] * J[k][b]
-      return v
-    }))
+    const J = similarityJacobian(fit, p.src),
+      P = precisionOf(p)
+    const JtPJ = Array.from({ length: 7 }, (_, a) =>
+      Array.from({ length: 7 }, (_, b) => {
+        let v = 0
+        for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) v += J[i][a] * P[i][k] * J[k][b]
+        return v
+      }),
+    )
     return JtPJ
   })
-  const N = Array.from({ length: 7 }, (_, a) => Array.from({ length: 7 }, (_, b) => terms.reduce((s, T) => s + T[a][b], 0)))
+  const N = Array.from({ length: 7 }, (_, a) =>
+    Array.from({ length: 7 }, (_, b) => terms.reduce((s, T) => s + T[a][b], 0)),
+  )
   const Q = invertSym(N)
   if (!Q) return null
   const propagate = (Qm, src) => {
@@ -259,26 +340,34 @@ export function similarityPrecision(pairs, fit) {
   }
 }
 
-const finiteVec3 = (v) => Array.isArray(v) && v.length >= 3
-  && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])
+const finiteVec3 = (v) =>
+  Array.isArray(v) && v.length >= 3 && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])
 
 // Translation-invariant collinearity test. Compare the largest squared cross
 // product with the squared cloud energy, making the threshold scale-independent.
 function hasNonCollinearGeometry(points) {
   const c = [0, 0, 0]
-  for (const p of points) { c[0] += p[0]; c[1] += p[1]; c[2] += p[2] }
-  c[0] /= points.length; c[1] /= points.length; c[2] /= points.length
+  for (const p of points) {
+    c[0] += p[0]
+    c[1] += p[1]
+    c[2] += p[2]
+  }
+  c[0] /= points.length
+  c[1] /= points.length
+  c[2] /= points.length
   const centred = points.map((p) => sub(p, c))
   const energy = centred.reduce((sum, p) => sum + dot(p, p), 0)
   if (!(energy > 1e-20)) return false
   let maxCross2 = 0
-  for (let i = 0; i < centred.length; i++) for (let j = i + 1; j < centred.length; j++) {
-    const a = centred[i], b = centred[j]
-    const cx = a[1] * b[2] - a[2] * b[1]
-    const cy = a[2] * b[0] - a[0] * b[2]
-    const cz = a[0] * b[1] - a[1] * b[0]
-    maxCross2 = Math.max(maxCross2, cx * cx + cy * cy + cz * cz)
-  }
+  for (let i = 0; i < centred.length; i++)
+    for (let j = i + 1; j < centred.length; j++) {
+      const a = centred[i],
+        b = centred[j]
+      const cx = a[1] * b[2] - a[2] * b[1]
+      const cy = a[2] * b[0] - a[0] * b[2]
+      const cz = a[0] * b[1] - a[1] * b[0]
+      maxCross2 = Math.max(maxCross2, cx * cx + cy * cy + cz * cz)
+    }
   return maxCross2 > energy * energy * 1e-12
 }
 
@@ -304,8 +393,13 @@ export function applySimilarity({ scale, R, t, local = null }, p) {
  */
 export function fitGeoreference(pairs, local = null) {
   if (!local) return fitSimilarity(pairs)
-  const fit = fitSimilarity(pairs.map((p) => ({ ...p, dst: gridToLocal(p.dst, local),
-    ...(p.precision ? { precision: precisionToLocal(p.precision, local) } : {}) })))
+  const fit = fitSimilarity(
+    pairs.map((p) => ({
+      ...p,
+      dst: gridToLocal(p.dst, local),
+      ...(p.precision ? { precision: precisionToLocal(p.precision, local) } : {}),
+    })),
+  )
   return fit ? { ...fit, local } : null
 }
 
@@ -324,7 +418,16 @@ export function frameFromSimilarity(sim, crs, { unit = 'm', metresPerUnit = 1 } 
       R[0][2] * d[0] + R[1][2] * d[1] + R[2][2] * d[2],
     ]
   }
-  return { ...makeFrame({ origin: [0, 0, 0], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1], crs, unit, source: 'georef' }), fromSfm, toSfm, scale, R, t, local, metresPerUnit }
+  return {
+    ...makeFrame({ origin: [0, 0, 0], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1], crs, unit, source: 'georef' }),
+    fromSfm,
+    toSfm,
+    scale,
+    R,
+    t,
+    local,
+    metresPerUnit,
+  }
 }
 
 // ── linear-algebra helpers (dependency-free) ─────────────────────────────────
@@ -337,26 +440,39 @@ function topEigenvector(A0) {
   const V = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)))
   for (let sweep = 0; sweep < 100; sweep++) {
     // Largest off-diagonal magnitude.
-    let p = 0, q = 1, off = 0
-    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-      if (Math.abs(A[i][j]) > off) { off = Math.abs(A[i][j]); p = i; q = j }
-    }
+    let p = 0,
+      q = 1,
+      off = 0
+    for (let i = 0; i < n; i++)
+      for (let j = i + 1; j < n; j++) {
+        if (Math.abs(A[i][j]) > off) {
+          off = Math.abs(A[i][j])
+          p = i
+          q = j
+        }
+      }
     if (off < 1e-14) break
-    const app = A[p][p], aqq = A[q][q], apq = A[p][q]
+    const app = A[p][p],
+      aqq = A[q][q],
+      apq = A[p][q]
     const phi = 0.5 * Math.atan2(2 * apq, aqq - app)
-    const c = Math.cos(phi), s = Math.sin(phi)
+    const c = Math.cos(phi),
+      s = Math.sin(phi)
     for (let k = 0; k < n; k++) {
-      const akp = A[k][p], akq = A[k][q]
+      const akp = A[k][p],
+        akq = A[k][q]
       A[k][p] = c * akp - s * akq
       A[k][q] = s * akp + c * akq
     }
     for (let k = 0; k < n; k++) {
-      const apk = A[p][k], aqk = A[q][k]
+      const apk = A[p][k],
+        aqk = A[q][k]
       A[p][k] = c * apk - s * aqk
       A[q][k] = s * apk + c * aqk
     }
     for (let k = 0; k < n; k++) {
-      const vkp = V[k][p], vkq = V[k][q]
+      const vkp = V[k][p],
+        vkq = V[k][q]
       V[k][p] = c * vkp - s * vkq
       V[k][q] = s * vkp + c * vkq
     }

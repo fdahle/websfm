@@ -30,7 +30,7 @@ describe('makeNameResolver', () => {
 
   it('matches case-insensitively and across extensions', () => {
     expect(resolve('dsc_0001.jpg')).toBe('a')
-    expect(resolve('DSC_0002.tiff')).toBe('b')  // transcoded extension
+    expect(resolve('DSC_0002.tiff')).toBe('b') // transcoded extension
     expect(resolve('DSC_0003')).toBe('c')
   })
 
@@ -74,7 +74,10 @@ describe('makeNameResolver', () => {
 })
 
 describe('relinkImageRecord', () => {
-  const images = [{ id: 'a', name: 'north-01' }, { id: 'b', name: 'DSC_0013.JPG' }]
+  const images = [
+    { id: 'a', name: 'north-01' },
+    { id: 'b', name: 'DSC_0013.JPG' },
+  ]
   const byId = new Map(images.map((i) => [i.id, i]))
   const resolve = makeNameResolver(images)
 

@@ -24,16 +24,14 @@ export function useWorkspaceState() {
 
   // Largest detected keypoint count over all images — lets the Match modal warn when
   // a LightGlue cap would discard most of them (P6 auto-hint).
-  const detectedMaxKeypoints = computed(() =>
-    images.value.reduce((m, img) => Math.max(m, img.kpCount || 0), 0))
+  const detectedMaxKeypoints = computed(() => images.value.reduce((m, img) => Math.max(m, img.kpCount || 0), 0))
   // The images matching will pair up — same filter as useMatchesStore.matchAll's `ready`.
-  const detectedImageCount = computed(() =>
-    images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount || 0) > 0).length)
-
+  const detectedImageCount = computed(
+    () => images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount || 0) > 0).length,
+  )
 
   // Total polygons across all sets — gates the ribbon's footprint layer toggle.
   const footprintCount = computed(() => shapefiles.value.reduce((n, s) => n + s.footprints.length, 0))
-
 
   // Sensor ids whose intrinsics fall back to the default-FOV guess for at least one
   // assigned image (or, with no images, on their own) — i.e. no usable calibration.
@@ -49,7 +47,6 @@ export function useWorkspaceState() {
     return bad
   })
 
-
   // Distinct current images that carry each preselect evidence source — the Match
   // modal gates its "Preselect by" methods on these (poses link by image.id, as do
   // footprints; count only links that resolve to a loaded image).
@@ -57,18 +54,17 @@ export function useWorkspaceState() {
     const ids = new Set(images.value.map((i) => i.id))
     const posed = new Set()
     for (const p of poses.value)
-      if (p.enabled !== false && p.imageId && Number.isFinite(p.x) && Number.isFinite(p.y) && ids.has(p.imageId)) posed.add(p.imageId)
+      if (p.enabled !== false && p.imageId && Number.isFinite(p.x) && Number.isFinite(p.y) && ids.has(p.imageId))
+        posed.add(p.imageId)
     return posed.size
   })
   const footprintImageCount = computed(() => {
     const ids = new Set(images.value.map((i) => i.id))
     const withFp = new Set()
     for (const s of shapefiles.value)
-      for (const fp of s.footprints)
-        if (fp.imageId && ids.has(fp.imageId)) withFp.add(fp.imageId)
+      for (const fp of s.footprints) if (fp.imageId && ids.has(fp.imageId)) withFp.add(fp.imageId)
     return withFp.size
   })
-
 
   // Dense pipeline gating for the Ribbon.
   const sparseReady = computed(() => clouds.value.some((c) => c.kind === 'sparse' && c.cameras.size >= 2))
@@ -78,8 +74,9 @@ export function useWorkspaceState() {
   // the preview needs a built product.
   // A mesh is not a cloud here (and has no `points`: a project whose only cloud is a
   // mesh, e.g. an imported PLY, used to throw in this check).
-  const cloudReady = computed(() => clouds.value.some((c) =>
-    c.kind === 'dense' ? c.count > 0 : c.kind !== 'mesh' && (c.points?.length ?? 0) > 0))
+  const cloudReady = computed(() =>
+    clouds.value.some((c) => (c.kind === 'dense' ? c.count > 0 : c.kind !== 'mesh' && (c.points?.length ?? 0) > 0)),
+  )
   // Mesh needs a dense cloud (Poisson input); the modal further checks it has normals.
   const denseReady = computed(() => clouds.value.some((c) => c.kind === 'dense' && c.count > 0))
   const meshReady = computed(() => clouds.value.some((c) => c.kind === 'mesh' && c.count > 0))
@@ -95,7 +92,6 @@ export function useWorkspaceState() {
   const orthoReady = computed(() => !!ortho.value)
   const productReady = computed(() => !!dem.value || !!ortho.value)
 
-
   const selected = computed(() => images.value.find((img) => img.id === selectedId.value) || null)
 
   const kpImageCount = computed(() => keypointReadyImages.value.length)
@@ -103,8 +99,7 @@ export function useWorkspaceState() {
   // True while any image is still decoding or transcoding (TIFF PNG encode /
   // preview pending). Pixel-reading compute ops (Detect, Auto-mask) gate on this so
   // they can't be launched mid-import against not-yet-ready images.
-  const imagesLoading = computed(() => images.value.some(img => img.loading || img.previewPending))
-
+  const imagesLoading = computed(() => images.value.some((img) => img.loading || img.previewPending))
 
   const hasSparse = computed(() => clouds.value.some((c) => c.kind === 'sparse'))
 
@@ -131,17 +126,17 @@ export function useWorkspaceState() {
       const imgB = byUuid.get(entry.idB)
       if (!imgA || !imgB) continue
       result.push({
-        pairId:      pid,
-        idA:         imgA.id,
-        idB:         imgB.id,
-        idAUuid:     imgA.uuid,
-        idBUuid:     imgB.uuid,
-        nameA:       imgA.name,
-        nameB:       imgB.name,
+        pairId: pid,
+        idA: imgA.id,
+        idB: imgB.id,
+        idAUuid: imgA.uuid,
+        idBUuid: imgB.uuid,
+        nameA: imgA.name,
+        nameB: imgB.name,
         inlierCount: entry.inlierCount,
-        rawCount:    entry.rawCount,
-        usedCount:   usedCountsByPair.value.get(pid) ?? 0,
-        enabled:     entry.enabled !== false,
+        rawCount: entry.rawCount,
+        usedCount: usedCountsByPair.value.get(pid) ?? 0,
+        enabled: entry.enabled !== false,
       })
     }
     return result
@@ -168,7 +163,12 @@ export function useWorkspaceState() {
   // `verified` mirrors matchSummaries.length (done + inliers), but we walk the store
   // once here to also surface in-flight and failed pairs at a glance.
   const matchStats = computed(() => {
-    let total = 0, verified = 0, running = 0, error = 0, excluded = 0, weak = 0
+    let total = 0,
+      verified = 0,
+      running = 0,
+      error = 0,
+      excluded = 0,
+      weak = 0
     for (const [, entry] of matchStore.value) {
       total++
       if (entry.status === 'running') running++
@@ -190,9 +190,29 @@ export function useWorkspaceState() {
   })
 
   return {
-    detectedMaxKeypoints, detectedImageCount, footprintCount, posedImageCount, footprintImageCount,
-    incompleteSensorIds, sparseReady, cloudReady, denseReady, meshReady, demReady, orthoReady, productReady,
-    editableClouds, meshClouds, selected, kpImageCount, imagesLoading, hasSparse, alignedUuids,
-    usedKeysOf, matchSummaries, matchNodePositions, matchStats,
+    detectedMaxKeypoints,
+    detectedImageCount,
+    footprintCount,
+    posedImageCount,
+    footprintImageCount,
+    incompleteSensorIds,
+    sparseReady,
+    cloudReady,
+    denseReady,
+    meshReady,
+    demReady,
+    orthoReady,
+    productReady,
+    editableClouds,
+    meshClouds,
+    selected,
+    kpImageCount,
+    imagesLoading,
+    hasSparse,
+    alignedUuids,
+    usedKeysOf,
+    matchSummaries,
+    matchNodePositions,
+    matchStats,
   }
 }

@@ -13,13 +13,15 @@ beforeAll(async () => {
 const run = async (settings) => {
   const scene = aerialBlock({ seed: 11, rows: 4, cols: 6, nPoints: 2500, calibrated: true, prefix: 'l' })
   const logs = []
-  const out = await reconstruct({ images: scene.images, pairs: scene.pairs, settings: { ...(scene.settings ?? {}), ...settings } },
-    { onLog: (m) => logs.push(m) })
+  const out = await reconstruct(
+    { images: scene.images, pairs: scene.pairs, settings: { ...(scene.settings ?? {}), ...settings } },
+    { onLog: (m) => logs.push(m) },
+  )
   return { out, logs }
 }
 
 describe('local bundle adjustment (localBaWindow)', () => {
-  it('refines each new camera\'s window with its neighbours fixed and keeps the model', async () => {
+  it("refines each new camera's window with its neighbours fixed and keeps the model", async () => {
     const base = await run({})
     const local = await run({ localBaWindow: 8, interimBaGrowth: 2 })
     expect(local.logs.some((m) => /^local BA \(.*free \+ \d+ fixed cameras/.test(m))).toBe(true)

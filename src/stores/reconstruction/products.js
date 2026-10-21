@@ -1,4 +1,9 @@
-import { resolveOrthoStyle, isDefaultOrthoStyle, resolveDemStyle, describeDemStyle } from '../../core/products/productStyle.js'
+import {
+  resolveOrthoStyle,
+  isDefaultOrthoStyle,
+  resolveDemStyle,
+  describeDemStyle,
+} from '../../core/products/productStyle.js'
 import { demPreview as workerDemPreview } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
 import { productMapBlocker } from '../../core/products/productLayers.js'
@@ -8,9 +13,7 @@ import { productMapBlocker } from '../../core/products/productLayers.js'
 // removal. Generating them is reconstruction/productRuns.js.
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
-export function createProducts({
-  dem, isPersisting, log, ortho, save, productLayers, projects, withPreviewUrl,
-}) {
+export function createProducts({ dem, isPersisting, log, ortho, save, productLayers, projects, withPreviewUrl }) {
   function productForKind(kind) {
     if (kind === 'dem') return dem.value
     if (kind === 'ortho') return ortho.value
@@ -49,17 +52,29 @@ export function createProducts({
       const next = resolveOrthoStyle(style)
       const { style: _old, ...rest } = product
       ortho.value = isDefaultOrthoStyle(next) ? rest : { ...rest, style: next }
-      log(`${label}: brightness ${next.brightness}, contrast ${next.contrast}, gamma ${next.gamma}`,
-        'info', 'Products', { channel: 'activity' })
+      log(
+        `${label}: brightness ${next.brightness}, contrast ${next.contrast}, gamma ${next.gamma}`,
+        'info',
+        'Products',
+        { channel: 'activity' },
+      )
       saveProductRecord('ortho', ortho.value)
       return true
     }
     const next = resolveDemStyle(style)
     try {
-      const { previewBlob } = await workerDemPreview({ style: next, grid: {
-        width: product.width, height: product.height, data: product.data, mask: product.mask,
-        gsd: product.gsd, zMin: product.zMin, zMax: product.zMax,
-      } })
+      const { previewBlob } = await workerDemPreview({
+        style: next,
+        grid: {
+          width: product.width,
+          height: product.height,
+          data: product.data,
+          mask: product.mask,
+          gsd: product.gsd,
+          zMin: product.zMin,
+          zMax: product.zMax,
+        },
+      })
       if (seq !== productStyleSeq.dem || dem.value?.createdAt !== product.createdAt) return false
       const { previewUrl: _url, ...rest } = dem.value
       dem.value = withPreviewUrl({ ...rest, style: next, previewBlob })
@@ -81,13 +96,18 @@ export function createProducts({
   const productSaveSeq = { dem: 0, ortho: 0 }
   function saveProductRecord(kind, record) {
     if (!isPersisting()) return
-    const projectId = projects.currentProjectId, seq = ++productSaveSeq[kind]
-    opfs.saveProduct(projectId, kind, record).then((saved) => {
-      if (!saved?.cogSaved || seq !== productSaveSeq[kind] || projectId !== projects.currentProjectId) return
-      const target = kind === 'ortho' ? ortho : dem
-      const now = target.value
-      if (now && now.createdAt === record.createdAt) target.value = { ...now, cog: saved.cog, cogSaved: saved.cogSaved }
-    }).catch(() => {})
+    const projectId = projects.currentProjectId,
+      seq = ++productSaveSeq[kind]
+    opfs
+      .saveProduct(projectId, kind, record)
+      .then((saved) => {
+        if (!saved?.cogSaved || seq !== productSaveSeq[kind] || projectId !== projects.currentProjectId) return
+        const target = kind === 'ortho' ? ortho : dem
+        const now = target.value
+        if (now && now.createdAt === record.createdAt)
+          target.value = { ...now, cog: saved.cog, cogSaved: saved.cogSaved }
+      })
+      .catch(() => {})
   }
 
   // Show/hide a computed DEM/ortho on the map. Refused (logged, false) when the
@@ -96,12 +116,19 @@ export function createProducts({
   function setProductVisible(kind, visible) {
     const product = productForKind(kind)
     const blocker = visible ? productMapBlocker(product) : null
-    if (blocker) { log(`Map: ${blocker}`, 'warn', 'Products'); return false }
+    if (blocker) {
+      log(`Map: ${blocker}`, 'warn', 'Products')
+      return false
+    }
     const prev = productLayers.value[kind] ?? { visible: false, opacity: 1 }
     if (prev.visible === !!visible) return true
     productLayers.value = { ...productLayers.value, [kind]: { ...prev, visible: !!visible } }
-    log(`${product?.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')} ${visible ? 'shown on' : 'hidden from'} the map`,
-      'info', 'Products', { channel: 'activity' })
+    log(
+      `${product?.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')} ${visible ? 'shown on' : 'hidden from'} the map`,
+      'info',
+      'Products',
+      { channel: 'activity' },
+    )
     save()
     return true
   }
@@ -130,7 +157,13 @@ export function createProducts({
   }
 
   return {
-    productForKind, renameProduct, setProductStyle, saveProductRecord, setProductVisible,
-    setProductOpacity, removeProduct, productSaveSeq,
+    productForKind,
+    renameProduct,
+    setProductStyle,
+    saveProductRecord,
+    setProductVisible,
+    setProductOpacity,
+    removeProduct,
+    productSaveSeq,
   }
 }

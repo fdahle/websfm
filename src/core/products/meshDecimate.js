@@ -115,9 +115,13 @@ const T_SNAP = 1e-12
 export function decimateMesh(mesh, opts = {}, onLog) {
   const t0 = nowMs()
   const {
-    targetTriangles, targetRatio,
-    preserveBoundary = true, boundaryWeight = 1000,
-    maxError = Infinity, preventFlips = true, locked = null,
+    targetTriangles,
+    targetRatio,
+    preserveBoundary = true,
+    boundaryWeight = 1000,
+    maxError = Infinity,
+    preventFlips = true,
+    locked = null,
   } = opts
   const hasCount = targetTriangles != null
   const hasRatio = targetRatio != null
@@ -126,24 +130,36 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   }
 
   if (mesh?.uv) {
-    if (locked) throw new Error('decimateMesh: `locked` needs an untextured mesh (joining the texture copies renumbers it)')
+    if (locked)
+      throw new Error('decimateMesh: `locked` needs an untextured mesh (joining the texture copies renumbers it)')
     mesh = joinTextureCopies(mesh, onLog)
   }
 
   const nT = mesh?.idx ? Math.floor(mesh.idx.length / 3) : 0
   const nV = mesh?.pos ? Math.floor(mesh.pos.length / 3) : 0
   const before = mesh?.count ?? nT
-  const srcPos = mesh?.pos, srcIdx = mesh?.idx, srcCol = mesh?.col || null
+  const srcPos = mesh?.pos,
+    srcIdx = mesh?.idx,
+    srcCol = mesh?.col || null
 
   // ── Working copies (input never mutated) ────────────────────────────────────
   // Local origin = bbox centre of the referenced vertices.
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity
   for (let i = 0; i < nV; i++) {
-    const x = srcPos[i * 3], y = srcPos[i * 3 + 1], z = srcPos[i * 3 + 2]
-    if (x < minX) minX = x; if (x > maxX) maxX = x
-    if (y < minY) minY = y; if (y > maxY) maxY = y
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+    const x = srcPos[i * 3],
+      y = srcPos[i * 3 + 1],
+      z = srcPos[i * 3 + 2]
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+    if (z < minZ) minZ = z
+    if (z > maxZ) maxZ = z
   }
   const ox = nV ? (minX + maxX) / 2 : 0
   const oy = nV ? (minY + maxY) / 2 : 0
@@ -162,7 +178,9 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   // (they carry no plane and would confuse the link condition).
   let live = 0
   for (let t = 0; t < nT; t++) {
-    const a = tri[t * 3], b = tri[t * 3 + 1], c = tri[t * 3 + 2]
+    const a = tri[t * 3],
+      b = tri[t * 3 + 1],
+      c = tri[t * 3 + 2]
     if (a === b || b === c || a === c || a >= nV || b >= nV || c >= nV) dead[t] = 1
     else live++
   }
@@ -186,7 +204,9 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   const alive = new Uint8Array(nV)
   for (let t = 0; t < nT; t++) {
     if (dead[t]) continue
-    alive[tri[t * 3]] = 1; alive[tri[t * 3 + 1]] = 1; alive[tri[t * 3 + 2]] = 1
+    alive[tri[t * 3]] = 1
+    alive[tri[t * 3 + 1]] = 1
+    alive[tri[t * 3 + 2]] = 1
   }
 
   // ── Quadrics ────────────────────────────────────────────────────────────────
@@ -195,20 +215,36 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   const Wt = new Float64Array(nV)
   const addPlane = (v, nx, ny, nz, d, w) => {
     const o = v * 10
-    Q[o] += w * nx * nx; Q[o + 1] += w * nx * ny; Q[o + 2] += w * nx * nz; Q[o + 3] += w * nx * d
-    Q[o + 4] += w * ny * ny; Q[o + 5] += w * ny * nz; Q[o + 6] += w * ny * d
-    Q[o + 7] += w * nz * nz; Q[o + 8] += w * nz * d
+    Q[o] += w * nx * nx
+    Q[o + 1] += w * nx * ny
+    Q[o + 2] += w * nx * nz
+    Q[o + 3] += w * nx * d
+    Q[o + 4] += w * ny * ny
+    Q[o + 5] += w * ny * nz
+    Q[o + 6] += w * ny * d
+    Q[o + 7] += w * nz * nz
+    Q[o + 8] += w * nz * d
     Q[o + 9] += w * d * d
   }
   for (let t = 0; t < nT; t++) {
     if (dead[t]) continue
-    const i0 = tri[t * 3] * 3, i1 = tri[t * 3 + 1] * 3, i2 = tri[t * 3 + 2] * 3
-    const ux = P[i1] - P[i0], uy = P[i1 + 1] - P[i0 + 1], uz = P[i1 + 2] - P[i0 + 2]
-    const vx = P[i2] - P[i0], vy = P[i2 + 1] - P[i0 + 1], vz = P[i2 + 2] - P[i0 + 2]
-    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx
+    const i0 = tri[t * 3] * 3,
+      i1 = tri[t * 3 + 1] * 3,
+      i2 = tri[t * 3 + 2] * 3
+    const ux = P[i1] - P[i0],
+      uy = P[i1 + 1] - P[i0 + 1],
+      uz = P[i1 + 2] - P[i0 + 2]
+    const vx = P[i2] - P[i0],
+      vy = P[i2 + 1] - P[i0 + 1],
+      vz = P[i2 + 2] - P[i0 + 2]
+    let nx = uy * vz - uz * vy,
+      ny = uz * vx - ux * vz,
+      nz = ux * vy - uy * vx
     const len = Math.sqrt(nx * nx + ny * ny + nz * nz)
     if (!(len > 0)) continue
-    nx /= len; ny /= len; nz /= len
+    nx /= len
+    ny /= len
+    nz /= len
     const d = -(nx * P[i0] + ny * P[i0 + 1] + nz * P[i0 + 2])
     const area = len / 2
     for (let k = 0; k < 3; k++) {
@@ -227,9 +263,11 @@ export function decimateMesh(mesh, opts = {}, onLog) {
 
   // Count live triangles holding edge (u,v) and the lowest such triangle id —
   // the deterministic owner that enumerates each undirected edge exactly once.
-  let edgeCnt = 0, edgeMinT = 0
+  let edgeCnt = 0,
+    edgeMinT = 0
   const edgeInfo = (u, v) => {
-    edgeCnt = 0; edgeMinT = 0x7fffffff
+    edgeCnt = 0
+    edgeMinT = 0x7fffffff
     for (let c = head[u]; c >= 0; c = next[c]) {
       const t = (c / 3) | 0
       if (dead[t] || !triHas(t, v)) continue
@@ -246,22 +284,36 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   for (let t = 0; t < nT; t++) {
     if (dead[t]) continue
     for (let k = 0; k < 3; k++) {
-      const u = tri[t * 3 + k], v = tri[t * 3 + ((k + 1) % 3)]
+      const u = tri[t * 3 + k],
+        v = tri[t * 3 + ((k + 1) % 3)]
       edgeInfo(u, v)
       if (edgeCnt !== 1) continue
       boundaryEdges++
-      isB[u] = 1; isB[v] = 1
+      isB[u] = 1
+      isB[v] = 1
       if (!preserveBoundary) continue
       const w2 = tri[t * 3 + ((k + 2) % 3)]
-      const iu = u * 3, iv = v * 3, iw = w2 * 3
-      const ex = P[iv] - P[iu], ey = P[iv + 1] - P[iu + 1], ez = P[iv + 2] - P[iu + 2]
-      const fx = P[iw] - P[iu], fy = P[iw + 1] - P[iu + 1], fz = P[iw + 2] - P[iu + 2]
+      const iu = u * 3,
+        iv = v * 3,
+        iw = w2 * 3
+      const ex = P[iv] - P[iu],
+        ey = P[iv + 1] - P[iu + 1],
+        ez = P[iv + 2] - P[iu + 2]
+      const fx = P[iw] - P[iu],
+        fy = P[iw + 1] - P[iu + 1],
+        fz = P[iw + 2] - P[iu + 2]
       // face normal n = e × f, constraint normal m = e × n (perpendicular to both).
-      const nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx
-      let mx = ey * nz - ez * ny, my = ez * nx - ex * nz, mz = ex * ny - ey * nx
+      const nx = ey * fz - ez * fy,
+        ny = ez * fx - ex * fz,
+        nz = ex * fy - ey * fx
+      let mx = ey * nz - ez * ny,
+        my = ez * nx - ex * nz,
+        mz = ex * ny - ey * nx
       const ml = Math.sqrt(mx * mx + my * my + mz * mz)
       if (!(ml > 0)) continue
-      mx /= ml; my /= ml; mz /= ml
+      mx /= ml
+      my /= ml
+      mz /= ml
       const d = -(mx * P[iu] + my * P[iu + 1] + mz * P[iu + 2])
       const w = boundaryWeight * (ex * ex + ey * ey + ez * ez)
       addPlane(u, mx, my, mz, d, w)
@@ -277,22 +329,38 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   // (a 1-D convex quadratic, clamped to [0,1] — endpoints included). On flat or
   // straight-border regions the 3×3 is singular and the segment placement keeps the
   // vertex exactly on the plane / border line.
-  let candX = 0, candY = 0, candZ = 0, candT = 0, candL2 = 0
+  let candX = 0,
+    candY = 0,
+    candZ = 0,
+    candT = 0,
+    candL2 = 0
   // A locked end: the collapse can only go into it, so it is priced there (the main
   // loop then collapses the other end into the locked one). Two locked ends: never.
   let candKeepB = false
   const evaluate = (a, b) => {
     candKeepB = false
     if (locked && (locked[a] || locked[b])) return evaluateLocked(a, b)
-    const oa = a * 10, ob = b * 10
-    const a11 = Q[oa] + Q[ob], a12 = Q[oa + 1] + Q[ob + 1], a13 = Q[oa + 2] + Q[ob + 2]
-    const a14 = Q[oa + 3] + Q[ob + 3], a22 = Q[oa + 4] + Q[ob + 4], a23 = Q[oa + 5] + Q[ob + 5]
-    const a24 = Q[oa + 6] + Q[ob + 6], a33 = Q[oa + 7] + Q[ob + 7], a34 = Q[oa + 8] + Q[ob + 8]
+    const oa = a * 10,
+      ob = b * 10
+    const a11 = Q[oa] + Q[ob],
+      a12 = Q[oa + 1] + Q[ob + 1],
+      a13 = Q[oa + 2] + Q[ob + 2]
+    const a14 = Q[oa + 3] + Q[ob + 3],
+      a22 = Q[oa + 4] + Q[ob + 4],
+      a23 = Q[oa + 5] + Q[ob + 5]
+    const a24 = Q[oa + 6] + Q[ob + 6],
+      a33 = Q[oa + 7] + Q[ob + 7],
+      a34 = Q[oa + 8] + Q[ob + 8]
     const a44 = Q[oa + 9] + Q[ob + 9]
     const W = Wt[a] + Wt[b]
-    const ia = a * 3, ib = b * 3
-    const pax = P[ia], pay = P[ia + 1], paz = P[ia + 2]
-    const ex = P[ib] - pax, ey = P[ib + 1] - pay, ez = P[ib + 2] - paz
+    const ia = a * 3,
+      ib = b * 3
+    const pax = P[ia],
+      pay = P[ia + 1],
+      paz = P[ia + 2]
+    const ex = P[ib] - pax,
+      ey = P[ib + 1] - pay,
+      ez = P[ib + 2] - paz
 
     // Segment minimiser: f(t) = f(0) + 2t·eᵀg + t²·eᵀAe with g = A·pa + q.
     const gx = a11 * pax + a12 * pay + a13 * paz + a14
@@ -332,39 +400,73 @@ export function decimateMesh(mesh, opts = {}, onLog) {
       const sx = -(c11 * a14 + c12 * a24 + c13 * a34) * inv
       const sy = -(c12 * a14 + c22 * a24 + c23 * a34) * inv
       const sz = -(c13 * a14 + c23 * a24 + c33 * a34) * inv
-      const mx = sx - (pax + ex / 2), my = sy - (pay + ey / 2), mz = sz - (paz + ez / 2)
+      const mx = sx - (pax + ex / 2),
+        my = sy - (pay + ey / 2),
+        mz = sz - (paz + ez / 2)
       const e2 = ex * ex + ey * ey + ez * ez
       if (Number.isFinite(sx + sy + sz) && mx * mx + my * my + mz * mz <= e2) {
         const se = quadricValue(a11, a12, a13, a14, a22, a23, a24, a33, a34, a44, sx, sy, sz)
         // Only when meaningfully better: on a corner or a straight border the two
         // agree up to rounding, and the segment placement is the bit-exact one.
         if (se < err - 1e-12 * (scale * e2 + Math.abs(err))) {
-          err = se; x = sx; y = sy; z = sz
+          err = se
+          x = sx
+          y = sy
+          z = sz
           // Colour parameter: projection onto the edge, clamped.
           const tp = e2 > 0 ? ((sx - pax) * ex + (sy - pay) * ey + (sz - paz) * ez) / e2 : 0
           t = tp < 0 ? 0 : tp > 1 ? 1 : tp
         }
       }
     }
-    candX = x; candY = y; candZ = z; candT = t; candL2 = ex * ex + ey * ey + ez * ez
+    candX = x
+    candY = y
+    candZ = z
+    candT = t
+    candL2 = ex * ex + ey * ey + ez * ez
     if (!(err > 0)) err = 0 // rounding can push a PSD form slightly negative
     return W > 0 ? err / W : err
   }
 
   // The error of `evaluate`'s locked case: the merged quadric at the locked end.
   const evaluateLocked = (a, b) => {
-    const ia = a * 3, ib = b * 3
-    const ex = P[ib] - P[ia], ey = P[ib + 1] - P[ia + 1], ez = P[ib + 2] - P[ia + 2]
+    const ia = a * 3,
+      ib = b * 3
+    const ex = P[ib] - P[ia],
+      ey = P[ib + 1] - P[ia + 1],
+      ez = P[ib + 2] - P[ia + 2]
     candL2 = ex * ex + ey * ey + ez * ez
-    if (locked[a] && locked[b]) { candX = P[ia]; candY = P[ia + 1]; candZ = P[ia + 2]; candT = 0; return Infinity }
+    if (locked[a] && locked[b]) {
+      candX = P[ia]
+      candY = P[ia + 1]
+      candZ = P[ia + 2]
+      candT = 0
+      return Infinity
+    }
     const keep = locked[a] ? a : b
     candKeepB = keep === b
     const ik = keep * 3
-    candX = P[ik]; candY = P[ik + 1]; candZ = P[ik + 2]; candT = keep === b ? 1 : 0
-    const oa = a * 10, ob = b * 10
-    let err = quadricValue(Q[oa] + Q[ob], Q[oa + 1] + Q[ob + 1], Q[oa + 2] + Q[ob + 2], Q[oa + 3] + Q[ob + 3],
-      Q[oa + 4] + Q[ob + 4], Q[oa + 5] + Q[ob + 5], Q[oa + 6] + Q[ob + 6], Q[oa + 7] + Q[ob + 7], Q[oa + 8] + Q[ob + 8],
-      Q[oa + 9] + Q[ob + 9], candX, candY, candZ)
+    candX = P[ik]
+    candY = P[ik + 1]
+    candZ = P[ik + 2]
+    candT = keep === b ? 1 : 0
+    const oa = a * 10,
+      ob = b * 10
+    let err = quadricValue(
+      Q[oa] + Q[ob],
+      Q[oa + 1] + Q[ob + 1],
+      Q[oa + 2] + Q[ob + 2],
+      Q[oa + 3] + Q[ob + 3],
+      Q[oa + 4] + Q[ob + 4],
+      Q[oa + 5] + Q[ob + 5],
+      Q[oa + 6] + Q[ob + 6],
+      Q[oa + 7] + Q[ob + 7],
+      Q[oa + 8] + Q[ob + 8],
+      Q[oa + 9] + Q[ob + 9],
+      candX,
+      candY,
+      candZ,
+    )
     if (!(err > 0)) err = 0
     const W = Wt[a] + Wt[b]
     return W > 0 ? err / W : err
@@ -404,10 +506,14 @@ export function decimateMesh(mesh, opts = {}, onLog) {
       if (dead[t]) continue
       for (let k = 0; k < 3; k++) {
         const w = tri[t * 3 + k]
-        if (w !== a && w !== b && mark[w] !== base) { mark[w] = base; nA++ }
+        if (w !== a && w !== b && mark[w] !== base) {
+          mark[w] = base
+          nA++
+        }
       }
     }
-    let common = 0, nBonly = 0
+    let common = 0,
+      nBonly = 0
     sharedTris = 0
     for (let c = head[b]; c >= 0; c = next[c]) {
       const t = (c / 3) | 0
@@ -417,8 +523,13 @@ export function decimateMesh(mesh, opts = {}, onLog) {
         const w = tri[t * 3 + k]
         if (w === a || w === b) continue
         const m = mark[w]
-        if (m === base) { mark[w] = base + 1; common++ }
-        else if (m !== base + 1 && m !== base + 2) { mark[w] = base + 2; nBonly++ }
+        if (m === base) {
+          mark[w] = base + 1
+          common++
+        } else if (m !== base + 1 && m !== base + 2) {
+          mark[w] = base + 2
+          nBonly++
+        }
       }
     }
     if (sharedTris < 1 || sharedTris > 2) return false // non-manifold (or no) edge
@@ -439,16 +550,29 @@ export function decimateMesh(mesh, opts = {}, onLog) {
         if (dead[t]) continue
         if (triHas(t, pass === 0 ? b : a)) continue // removed by the collapse
         const k = c - t * 3
-        const i1 = tri[t * 3 + ((k + 1) % 3)] * 3, i2 = tri[t * 3 + ((k + 2) % 3)] * 3
+        const i1 = tri[t * 3 + ((k + 1) % 3)] * 3,
+          i2 = tri[t * 3 + ((k + 2) % 3)] * 3
         const iv = v * 3
         // Old normal (orientation preserved: corner k, then k+1, k+2).
-        const ox1 = P[i1] - P[iv], oy1 = P[i1 + 1] - P[iv + 1], oz1 = P[i1 + 2] - P[iv + 2]
-        const ox2 = P[i2] - P[iv], oy2 = P[i2 + 1] - P[iv + 1], oz2 = P[i2 + 2] - P[iv + 2]
-        const onx = oy1 * oz2 - oz1 * oy2, ony = oz1 * ox2 - ox1 * oz2, onz = ox1 * oy2 - oy1 * ox2
+        const ox1 = P[i1] - P[iv],
+          oy1 = P[i1 + 1] - P[iv + 1],
+          oz1 = P[i1 + 2] - P[iv + 2]
+        const ox2 = P[i2] - P[iv],
+          oy2 = P[i2 + 1] - P[iv + 1],
+          oz2 = P[i2 + 2] - P[iv + 2]
+        const onx = oy1 * oz2 - oz1 * oy2,
+          ony = oz1 * ox2 - ox1 * oz2,
+          onz = ox1 * oy2 - oy1 * ox2
         // New normal with the vertex moved to (x,y,z).
-        const nx1 = P[i1] - x, ny1 = P[i1 + 1] - y, nz1 = P[i1 + 2] - z
-        const nx2 = P[i2] - x, ny2 = P[i2 + 1] - y, nz2 = P[i2 + 2] - z
-        const nnx = ny1 * nz2 - nz1 * ny2, nny = nz1 * nx2 - nx1 * nz2, nnz = nx1 * ny2 - ny1 * nx2
+        const nx1 = P[i1] - x,
+          ny1 = P[i1 + 1] - y,
+          nz1 = P[i1 + 2] - z
+        const nx2 = P[i2] - x,
+          ny2 = P[i2 + 1] - y,
+          nz2 = P[i2 + 2] - z
+        const nnx = ny1 * nz2 - nz1 * ny2,
+          nny = nz1 * nx2 - nx1 * nz2,
+          nnz = nx1 * ny2 - ny1 * nx2
         const nn2 = nnx * nnx + nny * nny + nnz * nnz
         const l1 = nx1 * nx1 + ny1 * ny1 + nz1 * nz1
         const l2 = nx2 * nx2 + ny2 * ny2 + nz2 * nz2
@@ -473,19 +597,34 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   // decimates a flat region uniformly. Float32 is ample for a tie-break. 4-ary: half
   // the depth of a binary heap, and most of a sift's cost is the 5-array move per level.
   let cap = 1024
-  let hk = new Float64Array(cap), hl = new Float32Array(cap)
-  let ha = new Uint32Array(cap), hb = new Uint32Array(cap), ht = new Uint32Array(cap)
+  let hk = new Float64Array(cap),
+    hl = new Float32Array(cap)
+  let ha = new Uint32Array(cap),
+    hb = new Uint32Array(cap),
+    ht = new Uint32Array(cap)
   let hn = 0
   let time = 0
   const modTime = new Uint32Array(nV)
   const entryValid = (i) => {
-    const a = ha[i], b = hb[i], T = ht[i]
+    const a = ha[i],
+      b = hb[i],
+      T = ht[i]
     return alive[a] === 1 && alive[b] === 1 && modTime[a] <= T && modTime[b] <= T
   }
   const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hl[i] < hl[j])
-  const move = (to, from) => { hk[to] = hk[from]; hl[to] = hl[from]; ha[to] = ha[from]; hb[to] = hb[from]; ht[to] = ht[from] }
+  const move = (to, from) => {
+    hk[to] = hk[from]
+    hl[to] = hl[from]
+    ha[to] = ha[from]
+    hb[to] = hb[from]
+    ht[to] = ht[from]
+  }
   const siftDown = (i) => {
-    const k = hk[i], l2 = hl[i], a = ha[i], b = hb[i], T = ht[i]
+    const k = hk[i],
+      l2 = hl[i],
+      a = ha[i],
+      b = hb[i],
+      T = ht[i]
     for (;;) {
       const l = i * 4 + 1
       if (l >= hn) break
@@ -496,7 +635,11 @@ export function decimateMesh(mesh, opts = {}, onLog) {
       move(i, m)
       i = m
     }
-    hk[i] = k; hl[i] = l2; ha[i] = a; hb[i] = b; ht[i] = T
+    hk[i] = k
+    hl[i] = l2
+    ha[i] = a
+    hb[i] = b
+    ht[i] = T
   }
   const ensureRoom = () => {
     if (hn < cap) return
@@ -507,11 +650,21 @@ export function decimateMesh(mesh, opts = {}, onLog) {
     for (let i = (hn - 2) >> 2; i >= 0; i--) siftDown(i)
     if (hn > cap * 0.6) {
       const nc = Math.ceil(cap * 1.5) + 16
-      const k2 = new Float64Array(nc); k2.set(hk.subarray(0, hn)); hk = k2
-      const l2 = new Float32Array(nc); l2.set(hl.subarray(0, hn)); hl = l2
-      const a2 = new Uint32Array(nc); a2.set(ha.subarray(0, hn)); ha = a2
-      const b2 = new Uint32Array(nc); b2.set(hb.subarray(0, hn)); hb = b2
-      const t2 = new Uint32Array(nc); t2.set(ht.subarray(0, hn)); ht = t2
+      const k2 = new Float64Array(nc)
+      k2.set(hk.subarray(0, hn))
+      hk = k2
+      const l2 = new Float32Array(nc)
+      l2.set(hl.subarray(0, hn))
+      hl = l2
+      const a2 = new Uint32Array(nc)
+      a2.set(ha.subarray(0, hn))
+      ha = a2
+      const b2 = new Uint32Array(nc)
+      b2.set(hb.subarray(0, hn))
+      hb = b2
+      const t2 = new Uint32Array(nc)
+      t2.set(ht.subarray(0, hn))
+      ht = t2
       cap = nc
     }
   }
@@ -526,11 +679,21 @@ export function decimateMesh(mesh, opts = {}, onLog) {
       move(i, p)
       i = p
     }
-    hk[i] = k; hl[i] = l2; ha[i] = a; hb[i] = b; ht[i] = time
+    hk[i] = k
+    hl[i] = l2
+    ha[i] = a
+    hb[i] = b
+    ht[i] = time
   }
-  let popK = 0, popA = 0, popB = 0, popT = 0
+  let popK = 0,
+    popA = 0,
+    popB = 0,
+    popT = 0
   const pop = () => {
-    popK = hk[0]; popA = ha[0]; popB = hb[0]; popT = ht[0]
+    popK = hk[0]
+    popA = ha[0]
+    popB = hb[0]
+    popT = ht[0]
     hn--
     if (hn > 0) {
       move(0, hn)
@@ -543,13 +706,17 @@ export function decimateMesh(mesh, opts = {}, onLog) {
     hn = 0
     if (cap < live * 1.5 + 1024) {
       cap = Math.ceil(live * 1.6) + 1024
-      hk = new Float64Array(cap); hl = new Float32Array(cap)
-      ha = new Uint32Array(cap); hb = new Uint32Array(cap); ht = new Uint32Array(cap)
+      hk = new Float64Array(cap)
+      hl = new Float32Array(cap)
+      ha = new Uint32Array(cap)
+      hb = new Uint32Array(cap)
+      ht = new Uint32Array(cap)
     }
     for (let t = 0; t < nT; t++) {
       if (dead[t]) continue
       for (let k = 0; k < 3; k++) {
-        const u = tri[t * 3 + k], v = tri[t * 3 + ((k + 1) % 3)]
+        const u = tri[t * 3 + k],
+          v = tri[t * 3 + ((k + 1) % 3)]
         edgeInfo(u, v)
         if (edgeMinT !== t || edgeCnt > 2) continue
         push(evaluate(u, v), u, v)
@@ -559,13 +726,17 @@ export function decimateMesh(mesh, opts = {}, onLog) {
 
   // ── Collapse b into a, at (x,y,z) with colour parameter t ───────────────────
   const collapse = (a, b, x, y, z, t) => {
-    const oa = a * 10, ob = b * 10
+    const oa = a * 10,
+      ob = b * 10
     for (let k = 0; k < 10; k++) Q[oa + k] += Q[ob + k]
     Wt[a] += Wt[b]
-    P[a * 3] = x; P[a * 3 + 1] = y; P[a * 3 + 2] = z
+    P[a * 3] = x
+    P[a * 3 + 1] = y
+    P[a * 3 + 2] = z
     if (C) {
       for (let k = 0; k < 3; k++) {
-        const ca = C[a * 3 + k], cb = C[b * 3 + k]
+        const ca = C[a * 3 + k],
+          cb = C[b * 3 + k]
         C[a * 3 + k] = Math.round(ca + (cb - ca) * t)
       }
     }
@@ -573,17 +744,22 @@ export function decimateMesh(mesh, opts = {}, onLog) {
     // Kill the triangles holding both endpoints.
     for (let c = head[b]; c >= 0; c = next[c]) {
       const tt = (c / 3) | 0
-      if (!dead[tt] && triHas(tt, a)) { dead[tt] = 1; live-- }
+      if (!dead[tt] && triHas(tt, a)) {
+        dead[tt] = 1
+        live--
+      }
     }
     // Rebuild a's list: its live corners, then b's live corners re-pointed at a.
-    let first = -1, tail = -1
+    let first = -1,
+      tail = -1
     for (let pass = 0; pass < 2; pass++) {
       let c = pass === 0 ? head[a] : head[b]
       while (c >= 0) {
         const nc = next[c]
         if (!dead[(c / 3) | 0]) {
           if (pass === 1) tri[c] = a
-          if (tail < 0) first = c; else next[tail] = c
+          if (tail < 0) first = c
+          else next[tail] = c
           tail = c
         }
         c = nc
@@ -614,7 +790,10 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   // re-push). A further pass re-enumerates the surviving edges to pick those up; it
   // runs only while the previous pass both made progress and left rejections.
   const MAX_PASSES = 8
-  let collapses = 0, worstErr2 = 0, passes = 0, rejected = 0
+  let collapses = 0,
+    worstErr2 = 0,
+    passes = 0,
+    rejected = 0
   let stoppedByError = false
   while (live > target && passes < MAX_PASSES && !stoppedByError) {
     passes++
@@ -623,18 +802,29 @@ export function decimateMesh(mesh, opts = {}, onLog) {
     rejected = 0
     while (hn > 0 && live > target) {
       pop()
-      const a = popA, b = popB
+      const a = popA,
+        b = popB
       if (alive[a] !== 1 || alive[b] !== 1 || modTime[a] > popT || modTime[b] > popT) continue
       if (popK === Infinity) break // only edges between two locked vertices are left
-      if (popK > maxErr2) { stoppedByError = true; break }
+      if (popK > maxErr2) {
+        stoppedByError = true
+        break
+      }
       evaluate(a, b)
-      const x = candX, y = candY, z = candZ, t = candT
-      if (!linkOk(a, b) || !geometryOk(a, b, x, y, z) || (locked && orphansLocked(a, b))) { rejected++; continue }
+      const x = candX,
+        y = candY,
+        z = candZ,
+        t = candT
+      if (!linkOk(a, b) || !geometryOk(a, b, x, y, z) || (locked && orphansLocked(a, b))) {
+        rejected++
+        continue
+      }
       // A locked `b` survives: `a` joins it (same edge, same placement, colour from b's side).
       if (candKeepB) collapse(b, a, x, y, z, 1 - t)
       else collapse(a, b, x, y, z, t)
       if (popK > worstErr2) worstErr2 = popK
-      collapses++; passCollapses++
+      collapses++
+      passCollapses++
     }
     if (passCollapses === 0 || rejected === 0) break
   }
@@ -644,9 +834,13 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   let outTris = 0
   for (let t = 0; t < nT; t++) {
     if (dead[t]) continue
-    const a = tri[t * 3], b = tri[t * 3 + 1], c = tri[t * 3 + 2]
+    const a = tri[t * 3],
+      b = tri[t * 3 + 1],
+      c = tri[t * 3 + 2]
     if (a === b || b === c || a === c) continue
-    remap[a] = 0; remap[b] = 0; remap[c] = 0
+    remap[a] = 0
+    remap[b] = 0
+    remap[c] = 0
     outTris++
   }
   let outVerts = 0
@@ -658,32 +852,55 @@ export function decimateMesh(mesh, opts = {}, onLog) {
     const r = remap[v]
     if (r < 0) continue
     sourceVertex[r] = v
-    pos[r * 3] = P[v * 3] + ox; pos[r * 3 + 1] = P[v * 3 + 1] + oy; pos[r * 3 + 2] = P[v * 3 + 2] + oz
-    if (col) { col[r * 3] = C[v * 3]; col[r * 3 + 1] = C[v * 3 + 1]; col[r * 3 + 2] = C[v * 3 + 2] }
+    pos[r * 3] = P[v * 3] + ox
+    pos[r * 3 + 1] = P[v * 3 + 1] + oy
+    pos[r * 3 + 2] = P[v * 3 + 2] + oz
+    if (col) {
+      col[r * 3] = C[v * 3]
+      col[r * 3 + 1] = C[v * 3 + 1]
+      col[r * 3 + 2] = C[v * 3 + 2]
+    }
   }
   const idx = new Uint32Array(outTris * 3)
   let o = 0
   for (let t = 0; t < nT; t++) {
     if (dead[t]) continue
-    const a = tri[t * 3], b = tri[t * 3 + 1], c = tri[t * 3 + 2]
+    const a = tri[t * 3],
+      b = tri[t * 3 + 1],
+      c = tri[t * 3 + 2]
     if (a === b || b === c || a === c) continue
-    idx[o++] = remap[a]; idx[o++] = remap[b]; idx[o++] = remap[c]
+    idx[o++] = remap[a]
+    idx[o++] = remap[b]
+    idx[o++] = remap[c]
   }
 
   const maxErr = Math.sqrt(worstErr2)
   const ms = Math.round(nowMs() - t0)
-  onLog?.(`Decimate: target ${target.toLocaleString()} triangles `
-    + `(${hasRatio ? `ratio ${targetRatio}` : 'absolute'}), ${boundaryEdges.toLocaleString()} boundary edges `
-    + `${preserveBoundary ? `constrained ×${boundaryWeight}` : 'unconstrained'}, origin `
-    + `(${ox.toFixed(3)}, ${oy.toFixed(3)}, ${oz.toFixed(3)})`, 'info', 'Products')
+  onLog?.(
+    `Decimate: target ${target.toLocaleString()} triangles ` +
+      `(${hasRatio ? `ratio ${targetRatio}` : 'absolute'}), ${boundaryEdges.toLocaleString()} boundary edges ` +
+      `${preserveBoundary ? `constrained ×${boundaryWeight}` : 'unconstrained'}, origin ` +
+      `(${ox.toFixed(3)}, ${oy.toFixed(3)}, ${oz.toFixed(3)})`,
+    'info',
+    'Products',
+  )
   if (outTris > target) {
-    onLog?.(`Decimate: stopped at ${outTris.toLocaleString()} of target ${target.toLocaleString()} — `
-      + (stoppedByError ? `next collapse exceeds maxError ${maxError}` : 'no further collapse passes the topology/fold checks'),
-    'warn', 'Products')
+    onLog?.(
+      `Decimate: stopped at ${outTris.toLocaleString()} of target ${target.toLocaleString()} — ` +
+        (stoppedByError
+          ? `next collapse exceeds maxError ${maxError}`
+          : 'no further collapse passes the topology/fold checks'),
+      'warn',
+      'Products',
+    )
   }
-  onLog?.(`Decimate: ${before.toLocaleString()} → ${outTris.toLocaleString()} triangles, `
-    + `${outVerts.toLocaleString()} vertices, ${collapses.toLocaleString()} collapses in ${pluralize(passes, 'pass', 'passes')}, `
-    + `max error ${maxErr.toPrecision(3)} (RMS plane distance) in ${ms} ms`, 'success', 'Products')
+  onLog?.(
+    `Decimate: ${before.toLocaleString()} → ${outTris.toLocaleString()} triangles, ` +
+      `${outVerts.toLocaleString()} vertices, ${collapses.toLocaleString()} collapses in ${pluralize(passes, 'pass', 'passes')}, ` +
+      `max error ${maxErr.toPrecision(3)} (RMS plane distance) in ${ms} ms`,
+    'success',
+    'Products',
+  )
 
   return {
     mesh: { nVerts: outVerts, count: outTris, pos, idx, col },
@@ -705,19 +922,35 @@ function joinTextureCopies(mesh, onLog) {
     }
   }
   const idx = new Uint32Array(mesh.idx.length)
-  for (let i = 0; i < idx.length; i++) { const v = mesh.idx[i]; idx[i] = v < nV ? id[v] : m + (v - nV) }
+  for (let i = 0; i < idx.length; i++) {
+    const v = mesh.idx[i]
+    idx[i] = v < nV ? id[v] : m + (v - nV)
+  }
   if (m < nV) {
-    onLog?.(`Decimate: textured mesh, ${(nV - m).toLocaleString()} per-chart vertex copies joined first; `
-      + 'the result has no texture', 'info', 'Products')
+    onLog?.(
+      `Decimate: textured mesh, ${(nV - m).toLocaleString()} per-chart vertex copies joined first; ` +
+        'the result has no texture',
+      'info',
+      'Products',
+    )
   }
   return { nVerts: m, count: mesh.count ?? idx.length / 3, pos, idx, col }
 }
 
 // vᵀAv for the homogeneous v = (x,y,z,1) and the symmetric 4×4 in upper-triangle form.
 function quadricValue(a11, a12, a13, a14, a22, a23, a24, a33, a34, a44, x, y, z) {
-  return a11 * x * x + 2 * a12 * x * y + 2 * a13 * x * z + 2 * a14 * x
-    + a22 * y * y + 2 * a23 * y * z + 2 * a24 * y
-    + a33 * z * z + 2 * a34 * z + a44
+  return (
+    a11 * x * x +
+    2 * a12 * x * y +
+    2 * a13 * x * z +
+    2 * a14 * x +
+    a22 * y * y +
+    2 * a23 * y * z +
+    2 * a24 * y +
+    a33 * z * z +
+    2 * a34 * z +
+    a44
+  )
 }
 
 function nowMs() {

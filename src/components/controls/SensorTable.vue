@@ -12,12 +12,20 @@ import { pluralize } from '../../core/textFormat.js'
 // cells are editable inputs (the source of truth); in 'estimated' mode they show
 // bundle-adjusted values aggregated from the reconstruction (read-only).
 const props = defineProps({
-  sensors: { type: Array,  required: true },
-  images:  { type: Array,  default: () => [] },
-  cameras: { type: Map,    default: () => new Map() }, // uuid → { R, t, K }
+  sensors: { type: Array, required: true },
+  images: { type: Array, default: () => [] },
+  cameras: { type: Map, default: () => new Map() }, // uuid → { R, t, K }
 })
 
-const emit = defineEmits(['update', 'apply-film-format', 'remove', 'toggle-fixed', 'set-fiducial-marks', 'detect-fiducials', 'calibrate-fiducials'])
+const emit = defineEmits([
+  'update',
+  'apply-film-format',
+  'remove',
+  'toggle-fixed',
+  'set-fiducial-marks',
+  'detect-fiducials',
+  'calibrate-fiducials',
+])
 
 const isFixed = (s, field) => !!s.fixed?.[field]
 
@@ -75,7 +83,8 @@ function applyPaste(s) {
   for (const cells of rows) {
     if (cells.length < 3) continue
     // Tolerate a header row: skip when the numeric columns aren't numbers.
-    const xMm = Number(cells[1]), yMm = Number(cells[2])
+    const xMm = Number(cells[1]),
+      yMm = Number(cells[2])
     if (!Number.isFinite(xMm) || !Number.isFinite(yMm)) continue
     marks.push({ id: cells[0] || `F${marks.length + 1}`, xMm, yMm })
   }
@@ -135,17 +144,22 @@ const fallbacks = computed(() => {
 function fallbackTitle(s) {
   const fb = fallbacks.value.get(s.id)
   const scope = fb.hasImages ? `${fb.count} of ${pluralize(fb.total, 'image')}` : 'this sensor'
-  return `No usable calibration for ${scope}: intrinsics fall back to a default ` +
+  return (
+    `No usable calibration for ${scope}: intrinsics fall back to a default ` +
     `field-of-view guess (focal ≈ image width), which distorts SfM and depth maps. ` +
     `Fix it below — set Focal in px, or Focal in mm plus either px size or film format.`
+  )
 }
 
-const hint = computed(() => ({
-  initial:   'Calibration priors — editable',
-  fixed:     'Tick a parameter to hold it constant during bundle adjustment',
-  estimated: 'Bundle-adjusted (read-only), averaged per sensor',
-  diff:      'Estimated − initial (Δ)',
-}[mode.value]))
+const hint = computed(
+  () =>
+    ({
+      initial: 'Calibration priors — editable',
+      fixed: 'Tick a parameter to hold it constant during bundle adjustment',
+      estimated: 'Bundle-adjusted (read-only), averaged per sensor',
+      diff: 'Estimated − initial (Δ)',
+    })[mode.value],
+)
 
 // Estimated − initial for an intrinsic, or null if either side is missing.
 function diff(sensorId, key) {
@@ -208,7 +222,8 @@ function initFx(s) {
 const estFx = (s) => estimated(s.id)?.focal ?? null
 // Estimated − initial fx (px).
 function fxDiff(s) {
-  const est = estFx(s), init = initFx(s)
+  const est = estFx(s),
+    init = initFx(s)
   return est != null && init != null ? est - init : null
 }
 // Initial-mode fx: blank when the focal was entered directly in px — it would just
@@ -241,9 +256,16 @@ const formatStatus = computed(() => {
   for (const s of props.sensors) {
     const imgs = props.images.filter((i) => i.sensorId === s.id)
     const probe = imgs.length ? imgs : [{ meta: null }]
-    m.set(s.id, filmFormatStatus(s, probe.map((img) => ({
-      widthPx: scanWidthPx(img.meta, s), K: resolveK(img.meta, s),
-    }))))
+    m.set(
+      s.id,
+      filmFormatStatus(
+        s,
+        probe.map((img) => ({
+          widthPx: scanWidthPx(img.meta, s),
+          K: resolveK(img.meta, s),
+        })),
+      ),
+    )
   }
   return m
 })
@@ -265,20 +287,20 @@ function formatTitle(s) {
   if (st?.source === 'pitch') {
     const w = `${spanText(st.impliedMm, fmtWidth)} mm`
     return st.warnCount
-      ? `The px size implies a ${w} wide film (px size × image width), which is no standard aerial `
-        + `format (230 mm frame, 240 mm roll). Enter the format width from the camera calibration `
-        + `certificate: it outranks the px size.`
-      : `Implied by px size × image width: ${w}. Enter a format width to use it instead `
-        + `(a format outranks a px size).`
+      ? `The px size implies a ${w} wide film (px size × image width), which is no standard aerial ` +
+          `format (230 mm frame, 240 mm roll). Enter the format width from the camera calibration ` +
+          `certificate: it outranks the px size.`
+      : `Implied by px size × image width: ${w}. Enter a format width to use it instead ` +
+          `(a format outranks a px size).`
   }
   if (s.sensorWidthMm == null && exifSensorWidth(s) != null) {
     return `Auto-derived from EXIF (FocalPlaneXResolution): ${exifSensorWidth(s)} mm. Type a value to override.`
   }
   return film
-    ? 'Film format width (mm) from the camera calibration certificate: the width the scan spans '
-      + 'across its pixel columns. It converts the focal to pixels and outranks a px size, whose '
-      + 'cell then shows the pitch derived from it. Once fiducials are calibrated, the fitted '
-      + 'interior orientation sets the pixel scale and this is the fallback.'
+    ? 'Film format width (mm) from the camera calibration certificate: the width the scan spans ' +
+        'across its pixel columns. It converts the focal to pixels and outranks a px size, whose ' +
+        'cell then shows the pitch derived from it. Once fiducials are calibrated, the fitted ' +
+        'interior orientation sets the pixel scale and this is the fallback.'
     : 'Physical sensor / film width (mm) — converts an mm focal to pixels; outranks a px size'
 }
 
@@ -289,11 +311,13 @@ function derivedPitchText(s) {
 function derivedPitchTitle(s) {
   const st = formatStatus.value.get(s.id)
   const um = spanText({ min: st.pitchMm.min * 1000, max: st.pitchMm.max * 1000 }, fmtSig)
-  return `Derived from the format: ${st.formatMm} mm ÷ image width = ${derivedPitchText(s)} mm/px `
-    + `(${um} µm). The format outranks a px size; clear the format to enter a pitch instead.`
-    + (st.ignoredPitchMm != null
+  return (
+    `Derived from the format: ${st.formatMm} mm ÷ image width = ${derivedPitchText(s)} mm/px ` +
+    `(${um} µm). The format outranks a px size; clear the format to enter a pitch instead.` +
+    (st.ignoredPitchMm != null
       ? ` The entered px size ${st.ignoredPitchMm} mm is kept but not used while the format is set.`
       : '')
+  )
 }
 
 const suggestionFor = (s) => formatStatus.value.get(s.id)?.suggestion ?? null
@@ -303,27 +327,47 @@ function applySuggestion(s) {
 }
 function suggestionTitle(s) {
   const sug = suggestionFor(s)
-  return `Set the format to ${sug.widthMm} mm (${sug.label}), ${sug.gapPct.toFixed(1)}% from the implied `
-    + `width. Right when the scan is cropped to the image frame and the scanner pitch is off. If the `
-    + `scan keeps the film margins, the pitch may be correct instead: check the fiducial-mark `
-    + `distances in the scan first.`
+  return (
+    `Set the format to ${sug.widthMm} mm (${sug.label}), ${sug.gapPct.toFixed(1)}% from the implied ` +
+    `width. Right when the scan is cropped to the image frame and the scanner pitch is off. If the ` +
+    `scan keeps the film margins, the pitch may be correct instead: check the fiducial-mark ` +
+    `distances in the scan first.`
+  )
 }
 
 // ── Per-cell content for the read-only Estimated / Δ modes (column-driven) ───────
 // Returns { text, unit? } so the two mode blocks can iterate NUM_COLS like the
 // editable modes — a hidden column then can't misalign a hardcoded <td> sequence.
 function estCell(s, key) {
-  if (key === 'width')  return { text: s.width ?? '—' }
+  if (key === 'width') return { text: s.width ?? '—' }
   if (key === 'height') return { text: s.height ?? '—' }
-  if (key === 'focal')  { const f = estFocal(s); return f ? { text: round(f.value), unit: f.unit } : { text: '—' } }
-  if (key === 'fx')     { const v = estFx(s); return v == null ? { text: '—' } : { text: round(v, 0), unit: 'px' } }
-  if (key === 'cx' || key === 'cy') { const v = estimated(s.id)?.[key]; return { text: v == null ? '—' : round(v) } }
+  if (key === 'focal') {
+    const f = estFocal(s)
+    return f ? { text: round(f.value), unit: f.unit } : { text: '—' }
+  }
+  if (key === 'fx') {
+    const v = estFx(s)
+    return v == null ? { text: '—' } : { text: round(v, 0), unit: 'px' }
+  }
+  if (key === 'cx' || key === 'cy') {
+    const v = estimated(s.id)?.[key]
+    return { text: v == null ? '—' : round(v) }
+  }
   return { text: '—' } // pixelSize / format / distortion — not estimated per sensor here
 }
 function diffCell(s, key) {
-  if (key === 'focal') { const d = focalDiff(s); return d ? { text: signed(d.value), unit: d.unit } : { text: '—' } }
-  if (key === 'fx')    { const d = fxDiff(s); return d == null ? { text: '—' } : { text: signed(d, 0), unit: 'px' } }
-  if (key === 'cx' || key === 'cy') { const d = diff(s.id, key); return { text: d == null ? '—' : signed(d) } }
+  if (key === 'focal') {
+    const d = focalDiff(s)
+    return d ? { text: signed(d.value), unit: d.unit } : { text: '—' }
+  }
+  if (key === 'fx') {
+    const d = fxDiff(s)
+    return d == null ? { text: '—' } : { text: signed(d, 0), unit: 'px' }
+  }
+  if (key === 'cx' || key === 'cy') {
+    const d = diff(s.id, key)
+    return { text: d == null ? '—' : signed(d) }
+  }
   return { text: '—' } // width / height / pixelSize / format / distortion — no Δ
 }
 
@@ -336,22 +380,22 @@ function diffCell(s, key) {
 // the initial-mode cell) rather than a whole-column hide, which caused chicken-and-egg
 // (couldn't reveal a hidden column to type into) and dropped px size on film scans.
 const NUM_COLS = [
-  { key: 'width',        label: 'W' },
-  { key: 'height',       label: 'H' },
-  { key: 'focal',        label: 'Focal', lockable: true },
-  { key: 'fx',           label: 'fx (px)', readonly: true },
+  { key: 'width', label: 'W' },
+  { key: 'height', label: 'H' },
+  { key: 'focal', label: 'Focal', lockable: true },
+  { key: 'fx', label: 'fx (px)', readonly: true },
   { key: 'sensorWidthMm', label: 'format (mm)' },
-  { key: 'pixelSize',    label: 'px size (mm)' },
-  { key: 'cx',           label: 'cx', lockable: true },
-  { key: 'cy',           label: 'cy', lockable: true },
-  { key: 'k1',           label: 'k1', lockable: true },
-  { key: 'k2',           label: 'k2', lockable: true },
-  { key: 'k3',           label: 'k3', lockable: true },
-  { key: 'k4',           label: 'k4', lockable: true },
-  { key: 'k5',           label: 'k5', lockable: true },
-  { key: 'k6',           label: 'k6', lockable: true },
-  { key: 'p1',           label: 'p1', lockable: true },
-  { key: 'p2',           label: 'p2', lockable: true },
+  { key: 'pixelSize', label: 'px size (mm)' },
+  { key: 'cx', label: 'cx', lockable: true },
+  { key: 'cy', label: 'cy', lockable: true },
+  { key: 'k1', label: 'k1', lockable: true },
+  { key: 'k2', label: 'k2', lockable: true },
+  { key: 'k3', label: 'k3', lockable: true },
+  { key: 'k4', label: 'k4', lockable: true },
+  { key: 'k5', label: 'k5', lockable: true },
+  { key: 'k6', label: 'k6', lockable: true },
+  { key: 'p1', label: 'p1', lockable: true },
+  { key: 'p2', label: 'p2', lockable: true },
 ]
 
 // 'mm' unless explicitly pixels — a focal in mm needs a pixel size or format
@@ -369,10 +413,10 @@ const coeffOff = (s, key) => COEFF_KEYS.has(key) && !activeCoeffs(s).has(key)
 const coeffTitle = (s, key) => {
   if (coeffOff(s, key)) return `Not used by the ${modelLabel(s)} model`
   return COEFF_KEYS.has(key) && isFisheyeModel(s.distortionModel)
-    ? `Fisheye term: θd = θ·(1 + k1·θ² + k2·θ⁴ + k3·θ⁶ + k4·θ⁸), θ the ray angle` : ''
+    ? `Fisheye term: θd = θ·(1 + k1·θ² + k2·θ⁴ + k3·θ⁶ + k4·θ⁸), θ the ray angle`
+    : ''
 }
-const modelLabel = (s) =>
-  DISTORTION_MODELS.find((m) => m.id === (s.distortionModel || 'pinhole'))?.label ?? '—'
+const modelLabel = (s) => DISTORTION_MODELS.find((m) => m.id === (s.distortionModel || 'pinhole'))?.label ?? '—'
 
 function onEdit(id, field, e) {
   emit('update', { id, field, value: e.target.value })
@@ -394,453 +438,778 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
           :disabled="!anyEstimated"
           :title="anyEstimated ? '' : 'Run a reconstruction to get estimated values'"
           @click="mode = 'estimated'"
-        >Estimated</button>
+        >
+          Estimated
+        </button>
         <button
           class="seg-btn"
           :class="{ active: mode === 'diff' }"
           :disabled="!anyEstimated"
           :title="anyEstimated ? '' : 'Run a reconstruction to compare values'"
           @click="mode = 'diff'"
-        >Difference</button>
+        >
+          Difference
+        </button>
         <button class="seg-btn" :class="{ active: mode === 'fixed' }" @click="mode = 'fixed'">Fixed</button>
       </div>
       <span class="hint">{{ hint }}</span>
     </div>
 
     <div class="table-scroll">
-    <table v-if="sensors.length">
-      <thead>
-        <tr>
-          <th>Label</th>
-          <th>Source</th>
-          <th><GlossaryTerm id="lens-distortion">Lens model</GlossaryTerm></th>
-          <th>Kind</th>
-          <th v-for="c in NUM_COLS" :key="c.key">{{ c.label }}</th>
-          <th>Images</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <template v-for="s in sensors" :key="s.id">
-        <tr>
-          <td class="label-cell">
-            <span class="label-wrap">
-              <span
-                v-if="fallbacks.get(s.id)?.count"
-                class="warn-badge"
-                :title="fallbackTitle(s)"
-              >⚠</span>
-              <input
-                v-if="mode === 'initial'"
-                class="cell-input label-input"
-                :value="s.label"
-                @change="onEdit(s.id, 'label', $event)"
-              />
-              <span v-else>{{ s.label }}</span>
-            </span>
-          </td>
-          <td class="dim">{{ s.source === 'exif' ? 'EXIF' : 'imported' }}</td>
+      <table v-if="sensors.length">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Source</th>
+            <th><GlossaryTerm id="lens-distortion">Lens model</GlossaryTerm></th>
+            <th>Kind</th>
+            <th v-for="c in NUM_COLS" :key="c.key">{{ c.label }}</th>
+            <th>Images</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template v-for="s in sensors" :key="s.id">
+            <tr>
+              <td class="label-cell">
+                <span class="label-wrap">
+                  <span v-if="fallbacks.get(s.id)?.count" class="warn-badge" :title="fallbackTitle(s)">⚠</span>
+                  <input
+                    v-if="mode === 'initial'"
+                    class="cell-input label-input"
+                    :value="s.label"
+                    @change="onEdit(s.id, 'label', $event)"
+                  />
+                  <span v-else>{{ s.label }}</span>
+                </span>
+              </td>
+              <td class="dim">{{ s.source === 'exif' ? 'EXIF' : 'imported' }}</td>
 
-          <!-- Distortion model: editable selector in Initial, read-only elsewhere.
+              <!-- Distortion model: editable selector in Initial, read-only elsewhere.
                Rendered once per row (outside the per-mode column templates). -->
-          <td>
-            <select
-              v-if="mode === 'initial'"
-              class="unit-select model-select"
-              :value="s.distortionModel || 'pinhole'"
-              title="Lens model — Brown, rational or fisheye, and which coefficients it uses (removed at ingest; the pipeline stays pinhole)"
-              @change="onEdit(s.id, 'distortionModel', $event)"
-            >
-              <option v-for="m in DISTORTION_MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
-            </select>
-            <span v-else class="dim">{{ modelLabel(s) }}</span>
-          </td>
+              <td>
+                <select
+                  v-if="mode === 'initial'"
+                  class="unit-select model-select"
+                  :value="s.distortionModel || 'pinhole'"
+                  title="Lens model — Brown, rational or fisheye, and which coefficients it uses (removed at ingest; the pipeline stays pinhole)"
+                  @change="onEdit(s.id, 'distortionModel', $event)"
+                >
+                  <option v-for="m in DISTORTION_MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
+                </select>
+                <span v-else class="dim">{{ modelLabel(s) }}</span>
+              </td>
 
-          <!-- Kind: digital (default) vs scanned film (fiducial interior orientation). -->
-          <td>
-            <span v-if="mode === 'initial'" class="kind-cell">
-              <select
-                class="unit-select"
-                :value="s.kind || 'digital'"
-                title="Camera kind — Film enables fiducial-mark interior orientation for scanned frames"
-                @change="onEdit(s.id, 'kind', $event)"
-              >
-                <option value="digital">Digital</option>
-                <option value="film">Film</option>
-              </select>
-              <button
-                v-if="isFilm(s)"
-                class="expand-btn"
-                :class="{ open: expanded.has(s.id) }"
-                :title="expanded.has(s.id) ? 'Hide fiducials' : `Edit fiducials (${fidCount(s)} mark${fidCount(s) === 1 ? '' : 's'})`"
-                @click="toggleExpand(s.id)"
-              >⛶ {{ fidCount(s) }}</button>
-              <button
-                class="expand-btn"
-                :class="{ open: armOpen.has(s.id) }"
-                :title="s.gnssLeverArm
-                  ? `GNSS antenna offset (${s.gnssLeverArm.join(', ')}) m`
-                  : 'GNSS antenna offset (none: GNSS positions are taken as the camera centre)'"
-                @click="toggleArm(s.id)"
-              >GNSS{{ s.gnssLeverArm ? ' ✓' : '' }}</button>
-            </span>
-            <span v-else class="dim">{{ isFilm(s) ? 'Film' : 'Digital' }}</span>
-          </td>
+              <!-- Kind: digital (default) vs scanned film (fiducial interior orientation). -->
+              <td>
+                <span v-if="mode === 'initial'" class="kind-cell">
+                  <select
+                    class="unit-select"
+                    :value="s.kind || 'digital'"
+                    title="Camera kind — Film enables fiducial-mark interior orientation for scanned frames"
+                    @change="onEdit(s.id, 'kind', $event)"
+                  >
+                    <option value="digital">Digital</option>
+                    <option value="film">Film</option>
+                  </select>
+                  <button
+                    v-if="isFilm(s)"
+                    class="expand-btn"
+                    :class="{ open: expanded.has(s.id) }"
+                    :title="
+                      expanded.has(s.id)
+                        ? 'Hide fiducials'
+                        : `Edit fiducials (${fidCount(s)} mark${fidCount(s) === 1 ? '' : 's'})`
+                    "
+                    @click="toggleExpand(s.id)"
+                  >
+                    ⛶ {{ fidCount(s) }}
+                  </button>
+                  <button
+                    class="expand-btn"
+                    :class="{ open: armOpen.has(s.id) }"
+                    :title="
+                      s.gnssLeverArm
+                        ? `GNSS antenna offset (${s.gnssLeverArm.join(', ')}) m`
+                        : 'GNSS antenna offset (none: GNSS positions are taken as the camera centre)'
+                    "
+                    @click="toggleArm(s.id)"
+                  >
+                    GNSS{{ s.gnssLeverArm ? ' ✓' : '' }}
+                  </button>
+                </span>
+                <span v-else class="dim">{{ isFilm(s) ? 'Film' : 'Digital' }}</span>
+              </td>
 
-          <template v-if="mode === 'initial'">
-            <td v-for="c in NUM_COLS" :key="c.key">
-              <!-- Focal: numeric input + px/mm unit toggle. For a film sensor the
+              <template v-if="mode === 'initial'">
+                <td v-for="c in NUM_COLS" :key="c.key">
+                  <!-- Focal: numeric input + px/mm unit toggle. For a film sensor the
                    focal lives in the fiducial editor (mm, authoritative for the
                    interior orientation) — show it read-only here to avoid two
                    editable focal fields that could drift. -->
-              <span v-if="c.key === 'focal'" class="focal-cell">
-                <template v-if="isFilm(s)">
-                  <input
-                    class="cell-input focal-input"
-                    type="number"
-                    disabled
-                    title="Film sensor: the focal (mm) is set in the fiducial editor below — open it with the ⛶ button in the Kind column. It lives there (alongside the fiducial marks) because interior orientation needs it; this field is read-only to avoid two focal values drifting apart."
-                    :value="s.fiducialCalibration?.focalMm ?? ''"
-                  />
-                  <span class="unit-static" title="Focal is in mm for a film sensor">mm</span>
-                </template>
-                <template v-else>
-                  <input
-                    class="cell-input focal-input"
-                    type="number"
-                    step="any"
-                    :value="s.focal ?? ''"
-                    @change="onEdit(s.id, 'focal', $event)"
-                  />
-                  <select
-                    class="unit-select"
-                    :value="s.focalUnit === 'px' ? 'px' : 'mm'"
-                    title="Focal length unit"
-                    @change="onEdit(s.id, 'focalUnit', $event)"
-                  >
-                    <option value="mm">mm</option>
-                    <option value="px">px</option>
-                  </select>
-                </template>
-              </span>
-              <!-- fx: the pixel focal, resolved read-only from the calibration
+                  <span v-if="c.key === 'focal'" class="focal-cell">
+                    <template v-if="isFilm(s)">
+                      <input
+                        class="cell-input focal-input"
+                        type="number"
+                        disabled
+                        title="Film sensor: the focal (mm) is set in the fiducial editor below — open it with the ⛶ button in the Kind column. It lives there (alongside the fiducial marks) because interior orientation needs it; this field is read-only to avoid two focal values drifting apart."
+                        :value="s.fiducialCalibration?.focalMm ?? ''"
+                      />
+                      <span class="unit-static" title="Focal is in mm for a film sensor">mm</span>
+                    </template>
+                    <template v-else>
+                      <input
+                        class="cell-input focal-input"
+                        type="number"
+                        step="any"
+                        :value="s.focal ?? ''"
+                        @change="onEdit(s.id, 'focal', $event)"
+                      />
+                      <select
+                        class="unit-select"
+                        :value="s.focalUnit === 'px' ? 'px' : 'mm'"
+                        title="Focal length unit"
+                        @change="onEdit(s.id, 'focalUnit', $event)"
+                      >
+                        <option value="mm">mm</option>
+                        <option value="px">px</option>
+                      </select>
+                    </template>
+                  </span>
+                  <!-- fx: the pixel focal, resolved read-only from the calibration
                    (Focal ÷ px size, or Focal/format × width). Blank when the focal was
                    entered directly in px (it would just echo the Focal cell), or until
                    there's a real scale — e.g. a film sensor before reconstruction. -->
-              <span
-                v-else-if="c.key === 'fx'"
-                :class="{ dim: initFxShown(s) == null }"
-                :title="!isFilm(s) && s.focalUnit === 'px'
-                  ? 'Focal is already in pixels — see the Focal column'
-                  : 'Focal in pixels (fx) — the parameter bundle adjustment optimises; derived from the Focal + px size / format'"
-              >{{ round(initFxShown(s), 0) ?? '—' }}</span>
-              <!-- Pixel size / format only convert an mm focal. On a px-focal (or EXIF)
+                  <span
+                    v-else-if="c.key === 'fx'"
+                    :class="{ dim: initFxShown(s) == null }"
+                    :title="
+                      !isFilm(s) && s.focalUnit === 'px'
+                        ? 'Focal is already in pixels — see the Focal column'
+                        : 'Focal in pixels (fx) — the parameter bundle adjustment optimises; derived from the Focal + px size / format'
+                    "
+                    >{{ round(initFxShown(s), 0) ?? '—' }}</span
+                  >
+                  <!-- Pixel size / format only convert an mm focal. On a px-focal (or EXIF)
                    sensor they don't apply, so show '—' rather than a dimmed stale value
                    that reads as "still used". -->
-              <!-- format (mm): the primary scale field (it outranks px size). When
+                  <!-- format (mm): the primary scale field (it outranks px size). When
                    empty, the placeholder shows the width resolveK is actually using —
                    implied by the px size, else EXIF-derived. An off-standard implied
                    width is flagged and, when a standard format is near, offered as a
                    one-click "Set to 230 mm?" (the only mutation; the store logs it). -->
-              <span v-else-if="c.key === 'sensorWidthMm' && usesMmScale(s)" class="format-cell">
-                <input
-                  class="cell-input"
-                  :class="{
-                    'exif-placeholder': s.sensorWidthMm == null && formatPlaceholder(s) !== '',
-                    'implied-warn': impliedWarn(s),
-                  }"
-                  type="number"
-                  step="any"
-                  :value="s.sensorWidthMm ?? ''"
-                  :placeholder="formatPlaceholder(s)"
-                  :title="formatTitle(s)"
-                  @change="onEdit(s.id, c.key, $event)"
-                />
-                <button
-                  v-if="suggestionFor(s)"
-                  class="suggest-btn"
-                  :title="suggestionTitle(s)"
-                  @click="applySuggestion(s)"
-                >Set to {{ suggestionFor(s).widthMm }} mm?</button>
-              </span>
-              <!-- px size while a format is in effect: derived (format ÷ width), read-only. -->
-              <span
-                v-else-if="c.key === 'pixelSize' && formatStatus.get(s.id)?.source === 'format'"
-                class="derived"
-                :title="derivedPitchTitle(s)"
-              >= {{ derivedPitchText(s) }}<span v-if="formatStatus.get(s.id).ignoredPitchMm != null" class="ignored-mark">*</span></span>
-              <input
-                v-else-if="c.key === 'pixelSize' && usesMmScale(s)"
-                class="cell-input"
-                type="number"
-                step="any"
-                :value="s[c.key] ?? ''"
-                @change="onEdit(s.id, c.key, $event)"
-              />
-              <span
-                v-else-if="c.key === 'pixelSize' || c.key === 'sensorWidthMm'"
-                class="dim"
-                title="Only used when the focal is in mm (converts it to pixels)"
-              >—</span>
-              <input
-                v-else
-                class="cell-input"
-                type="number"
-                step="any"
-                :disabled="coeffOff(s, c.key)"
-                :title="coeffTitle(s, c.key)"
-                :value="s[c.key] ?? ''"
-                @change="onEdit(s.id, c.key, $event)"
-              />
-            </td>
-          </template>
-          <template v-else-if="mode === 'fixed'">
-            <td v-for="c in NUM_COLS" :key="c.key" class="check-cell">
-              <input
-                v-if="c.lockable"
-                type="checkbox"
-                class="fix-check"
-                :checked="isFixed(s, c.key)"
-                :title="isFixed(s, c.key) ? 'Held constant by the solver' : 'Free to refine'"
-                @change="emit('toggle-fixed', { id: s.id, field: c.key })"
-              />
-              <span v-else class="dim">—</span>
-            </td>
-          </template>
-          <!-- Read-only modes iterate the SAME NUM_COLS as the editable ones, so a
+                  <span v-else-if="c.key === 'sensorWidthMm' && usesMmScale(s)" class="format-cell">
+                    <input
+                      class="cell-input"
+                      :class="{
+                        'exif-placeholder': s.sensorWidthMm == null && formatPlaceholder(s) !== '',
+                        'implied-warn': impliedWarn(s),
+                      }"
+                      type="number"
+                      step="any"
+                      :value="s.sensorWidthMm ?? ''"
+                      :placeholder="formatPlaceholder(s)"
+                      :title="formatTitle(s)"
+                      @change="onEdit(s.id, c.key, $event)"
+                    />
+                    <button
+                      v-if="suggestionFor(s)"
+                      class="suggest-btn"
+                      :title="suggestionTitle(s)"
+                      @click="applySuggestion(s)"
+                    >
+                      Set to {{ suggestionFor(s).widthMm }} mm?
+                    </button>
+                  </span>
+                  <!-- px size while a format is in effect: derived (format ÷ width), read-only. -->
+                  <span
+                    v-else-if="c.key === 'pixelSize' && formatStatus.get(s.id)?.source === 'format'"
+                    class="derived"
+                    :title="derivedPitchTitle(s)"
+                    >= {{ derivedPitchText(s)
+                    }}<span v-if="formatStatus.get(s.id).ignoredPitchMm != null" class="ignored-mark">*</span></span
+                  >
+                  <input
+                    v-else-if="c.key === 'pixelSize' && usesMmScale(s)"
+                    class="cell-input"
+                    type="number"
+                    step="any"
+                    :value="s[c.key] ?? ''"
+                    @change="onEdit(s.id, c.key, $event)"
+                  />
+                  <span
+                    v-else-if="c.key === 'pixelSize' || c.key === 'sensorWidthMm'"
+                    class="dim"
+                    title="Only used when the focal is in mm (converts it to pixels)"
+                    >—</span
+                  >
+                  <input
+                    v-else
+                    class="cell-input"
+                    type="number"
+                    step="any"
+                    :disabled="coeffOff(s, c.key)"
+                    :title="coeffTitle(s, c.key)"
+                    :value="s[c.key] ?? ''"
+                    @change="onEdit(s.id, c.key, $event)"
+                  />
+                </td>
+              </template>
+              <template v-else-if="mode === 'fixed'">
+                <td v-for="c in NUM_COLS" :key="c.key" class="check-cell">
+                  <input
+                    v-if="c.lockable"
+                    type="checkbox"
+                    class="fix-check"
+                    :checked="isFixed(s, c.key)"
+                    :title="isFixed(s, c.key) ? 'Held constant by the solver' : 'Free to refine'"
+                    @change="emit('toggle-fixed', { id: s.id, field: c.key })"
+                  />
+                  <span v-else class="dim">—</span>
+                </td>
+              </template>
+              <!-- Read-only modes iterate the SAME NUM_COLS as the editable ones, so a
                hidden column can't misalign a hardcoded <td> sequence. -->
-          <template v-else-if="mode === 'estimated'">
-            <td v-for="c in NUM_COLS" :key="c.key" :class="{ dim: estCell(s, c.key).text === '—' }">
-              {{ estCell(s, c.key).text }}<span v-if="estCell(s, c.key).unit" class="unit-dim"> {{ estCell(s, c.key).unit }}</span>
-            </td>
+              <template v-else-if="mode === 'estimated'">
+                <td v-for="c in NUM_COLS" :key="c.key" :class="{ dim: estCell(s, c.key).text === '—' }">
+                  {{ estCell(s, c.key).text
+                  }}<span v-if="estCell(s, c.key).unit" class="unit-dim"> {{ estCell(s, c.key).unit }}</span>
+                </td>
+              </template>
+              <template v-else>
+                <td v-for="c in NUM_COLS" :key="c.key" :class="{ dim: diffCell(s, c.key).text === '—' }">
+                  {{ diffCell(s, c.key).text
+                  }}<span v-if="diffCell(s, c.key).unit" class="unit-dim"> {{ diffCell(s, c.key).unit }}</span>
+                </td>
+              </template>
+
+              <td class="count">{{ imageCount(s.id) }}</td>
+              <td><button class="remove" title="Remove sensor" @click="emit('remove', s.id)">×</button></td>
+            </tr>
+
+            <!-- Fiducial editor: expandable detail row for a film sensor (Initial mode). -->
+            <tr v-if="mode === 'initial' && isFilm(s) && expanded.has(s.id)" class="fid-row">
+              <td :colspan="totalCols">
+                <div class="fid-editor">
+                  <div class="fid-io">
+                    <label
+                      >Focal (mm)
+                      <input
+                        class="cell-input"
+                        type="number"
+                        step="any"
+                        :value="s.fiducialCalibration?.focalMm ?? ''"
+                        @change="onEdit(s.id, 'focalMm', $event)"
+                    /></label>
+                    <label
+                      >Principal x (mm)
+                      <input
+                        class="cell-input"
+                        type="number"
+                        step="any"
+                        :value="s.fiducialCalibration?.ppxMm ?? ''"
+                        @change="onEdit(s.id, 'ppxMm', $event)"
+                    /></label>
+                    <label
+                      >Principal y (mm)
+                      <input
+                        class="cell-input"
+                        type="number"
+                        step="any"
+                        :value="s.fiducialCalibration?.ppyMm ?? ''"
+                        @change="onEdit(s.id, 'ppyMm', $event)"
+                    /></label>
+                    <span class="fid-note" :class="{ warn: fidCount(s) < 3 }">
+                      {{ fidCount(s) < 3 ? `≥3 marks needed (have ${fidCount(s)})` : `${fidCount(s)} marks` }}
+                    </span>
+                  </div>
+
+                  <table class="fid-marks">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>x (mm)</th>
+                        <th>y (mm)</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(m, i) in fidMarks(s)" :key="i">
+                        <td>
+                          <input
+                            class="cell-input mark-id"
+                            :value="m.id"
+                            @change="editMark(s, i, 'id', $event.target.value)"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            class="cell-input"
+                            type="number"
+                            step="any"
+                            :value="Number.isFinite(m.xMm) ? m.xMm : ''"
+                            @change="editMark(s, i, 'xMm', $event.target.value)"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            class="cell-input"
+                            type="number"
+                            step="any"
+                            :value="Number.isFinite(m.yMm) ? m.yMm : ''"
+                            @change="editMark(s, i, 'yMm', $event.target.value)"
+                          />
+                        </td>
+                        <td><button class="remove" title="Remove mark" @click="removeMark(s, i)">×</button></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <button class="add-mark" @click="addMark(s)">+ Add mark</button>
+
+                  <div class="fid-paste">
+                    <textarea
+                      class="paste-area"
+                      placeholder="Paste calibration: one line per mark — id, xMm, yMm"
+                      :value="pasteText[s.id] || ''"
+                      @input="pasteText = { ...pasteText, [s.id]: $event.target.value }"
+                    ></textarea>
+                    <button class="add-mark" @click="applyPaste(s)">Import pasted marks</button>
+                  </div>
+
+                  <!-- Detection is an image task and has no calibration prerequisite. -->
+                  <div class="fid-auto">
+                    <button
+                      class="add-mark"
+                      title="Detect anonymous fiducial spots without a calibration or marked reference"
+                      @click="emit('detect-fiducials', s.id)"
+                    >
+                      Detect fiducials…
+                    </button>
+                    <button
+                      class="add-mark"
+                      title="Map detected raster slots to a certificate or estimate a batch layout"
+                      @click="emit('calibrate-fiducials', s.id)"
+                    >
+                      Calibrate fiducials…
+                    </button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <!-- GNSS antenna offset: expandable detail row (Initial mode). -->
+            <tr v-if="mode === 'initial' && armOpen.has(s.id)" class="fid-row">
+              <td :colspan="totalCols">
+                <div class="fid-editor">
+                  <div class="fid-io">
+                    <label v-for="(axis, i) in ARM_AXES" :key="axis.field"
+                      >{{ axis.label }}
+                      <input
+                        class="cell-input"
+                        type="number"
+                        step="any"
+                        :value="s.gnssLeverArm?.[i] ?? ''"
+                        placeholder="0"
+                        @change="onEdit(s.id, axis.field, $event)"
+                    /></label>
+                    <span class="fid-note">metres, from the projection centre to the GNSS antenna</span>
+                  </div>
+                  <span class="fid-note">
+                    Camera axes: x right, y down (in the image), z forward along the view. With an offset, the camera's
+                    GNSS position is treated as the antenna's, not the lens's. Metashape's GNSS offset uses y up and z
+                    backward: enter its (x, y, z) as (x, −y, −z).
+                  </span>
+                </div>
+              </td>
+            </tr>
           </template>
-          <template v-else>
-            <td v-for="c in NUM_COLS" :key="c.key" :class="{ dim: diffCell(s, c.key).text === '—' }">
-              {{ diffCell(s, c.key).text }}<span v-if="diffCell(s, c.key).unit" class="unit-dim"> {{ diffCell(s, c.key).unit }}</span>
-            </td>
-          </template>
+        </tbody>
+      </table>
 
-          <td class="count">{{ imageCount(s.id) }}</td>
-          <td><button class="remove" title="Remove sensor" @click="emit('remove', s.id)">×</button></td>
-        </tr>
-
-        <!-- Fiducial editor: expandable detail row for a film sensor (Initial mode). -->
-        <tr v-if="mode === 'initial' && isFilm(s) && expanded.has(s.id)" class="fid-row">
-          <td :colspan="totalCols">
-            <div class="fid-editor">
-              <div class="fid-io">
-                <label>Focal (mm)
-                  <input class="cell-input" type="number" step="any" :value="s.fiducialCalibration?.focalMm ?? ''"
-                    @change="onEdit(s.id, 'focalMm', $event)" /></label>
-                <label>Principal x (mm)
-                  <input class="cell-input" type="number" step="any" :value="s.fiducialCalibration?.ppxMm ?? ''"
-                    @change="onEdit(s.id, 'ppxMm', $event)" /></label>
-                <label>Principal y (mm)
-                  <input class="cell-input" type="number" step="any" :value="s.fiducialCalibration?.ppyMm ?? ''"
-                    @change="onEdit(s.id, 'ppyMm', $event)" /></label>
-                <span class="fid-note" :class="{ warn: fidCount(s) < 3 }">
-                  {{ fidCount(s) < 3 ? `≥3 marks needed (have ${fidCount(s)})` : `${fidCount(s)} marks` }}
-                </span>
-              </div>
-
-              <table class="fid-marks">
-                <thead><tr><th>ID</th><th>x (mm)</th><th>y (mm)</th><th></th></tr></thead>
-                <tbody>
-                  <tr v-for="(m, i) in fidMarks(s)" :key="i">
-                    <td><input class="cell-input mark-id" :value="m.id"
-                      @change="editMark(s, i, 'id', $event.target.value)" /></td>
-                    <td><input class="cell-input" type="number" step="any" :value="Number.isFinite(m.xMm) ? m.xMm : ''"
-                      @change="editMark(s, i, 'xMm', $event.target.value)" /></td>
-                    <td><input class="cell-input" type="number" step="any" :value="Number.isFinite(m.yMm) ? m.yMm : ''"
-                      @change="editMark(s, i, 'yMm', $event.target.value)" /></td>
-                    <td><button class="remove" title="Remove mark" @click="removeMark(s, i)">×</button></td>
-                  </tr>
-                </tbody>
-              </table>
-              <button class="add-mark" @click="addMark(s)">+ Add mark</button>
-
-              <div class="fid-paste">
-                <textarea
-                  class="paste-area"
-                  placeholder="Paste calibration: one line per mark — id, xMm, yMm"
-                  :value="pasteText[s.id] || ''"
-                  @input="pasteText = { ...pasteText, [s.id]: $event.target.value }"
-                ></textarea>
-                <button class="add-mark" @click="applyPaste(s)">Import pasted marks</button>
-              </div>
-
-              <!-- Detection is an image task and has no calibration prerequisite. -->
-              <div class="fid-auto">
-                <button
-                  class="add-mark"
-                  title="Detect anonymous fiducial spots without a calibration or marked reference"
-                  @click="emit('detect-fiducials', s.id)"
-                >Detect fiducials…</button>
-                <button class="add-mark" title="Map detected raster slots to a certificate or estimate a batch layout"
-                  @click="emit('calibrate-fiducials', s.id)">Calibrate fiducials…</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-
-        <!-- GNSS antenna offset: expandable detail row (Initial mode). -->
-        <tr v-if="mode === 'initial' && armOpen.has(s.id)" class="fid-row">
-          <td :colspan="totalCols">
-            <div class="fid-editor">
-              <div class="fid-io">
-                <label v-for="(axis, i) in ARM_AXES" :key="axis.field">{{ axis.label }}
-                  <input class="cell-input" type="number" step="any" :value="s.gnssLeverArm?.[i] ?? ''"
-                    placeholder="0" @change="onEdit(s.id, axis.field, $event)" /></label>
-                <span class="fid-note">metres, from the projection centre to the GNSS antenna</span>
-              </div>
-              <span class="fid-note">
-                Camera axes: x right, y down (in the image), z forward along the view. With an offset,
-                the camera's GNSS position is treated as the antenna's, not the lens's. Metashape's
-                GNSS offset uses y up and z backward: enter its (x, y, z) as (x, −y, −z).
-              </span>
-            </div>
-          </td>
-        </tr>
-        </template>
-      </tbody>
-    </table>
-
-    <div v-else class="empty">No sensors yet — add images (auto-detected from EXIF) or import a calibration file.</div>
+      <div v-else class="empty">
+        No sensors yet — add images (auto-detected from EXIF) or import a calibration file.
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.table-wrap { position: absolute; inset: 0; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
+.table-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
 
 /* Only the table scrolls (both axes); the toolbar above stays put so a wide table
    can't push the mode buttons out of view horizontally. */
-.table-scroll { flex: 1; min-height: 0; overflow: auto; }
+.table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
 
 .toolbar {
   flex-shrink: 0;
-  display: flex; align-items: center; gap: 14px;
-  padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--panel-border);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
 }
 
-.seg { display: inline-flex; border: 1px solid var(--panel-border); border-radius: 5px; overflow: hidden; }
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  overflow: hidden;
+}
 .seg-btn {
-  background: var(--bg); border: none; color: var(--text-dim);
-  font: inherit; font-size: 12px; padding: 4px 12px; cursor: pointer;
+  background: var(--bg);
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
 }
-.seg-btn + .seg-btn { border-left: 1px solid var(--panel-border); }
-.seg-btn.active { background: var(--accent); color: #fff; }
-.seg-btn:disabled { opacity: 0.4; cursor: default; }
-.hint { font-size: 11px; color: var(--text-dim); }
+.seg-btn + .seg-btn {
+  border-left: 1px solid var(--panel-border);
+}
+.seg-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.seg-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
 
 thead th {
-  position: sticky; top: 0; z-index: 1;
-  background: var(--panel); text-align: left; padding: 8px 10px;
-  font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--panel-border); white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  text-align: left;
+  padding: 8px 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--panel-border);
+  white-space: nowrap;
 }
 
-tbody td { padding: 4px 10px; border-bottom: 1px solid var(--panel-border); white-space: nowrap; color: var(--text); }
-tbody td.dim { color: var(--text-dim); }
-.label-cell { min-width: 140px; }
-.label-wrap { display: inline-flex; align-items: center; gap: 6px; }
-.warn-badge {
-  flex: none; cursor: help; font-size: 13px; line-height: 1;
-  color: #e0a020; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.4));
+tbody td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--panel-border);
+  white-space: nowrap;
+  color: var(--text);
 }
-.count { text-align: center; font-variant-numeric: tabular-nums; }
+tbody td.dim {
+  color: var(--text-dim);
+}
+.label-cell {
+  min-width: 140px;
+}
+.label-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.warn-badge {
+  flex: none;
+  cursor: help;
+  font-size: 13px;
+  line-height: 1;
+  color: #e0a020;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.4));
+}
+.count {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 
 .cell-input {
-  width: 64px; background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
-  color: var(--text); font: inherit; font-size: 12px; padding: 3px 5px; outline: none;
+  width: 64px;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 5px;
+  outline: none;
 }
-.label-input { width: 130px; }
-.cell-input:focus { border-color: var(--accent); }
-.cell-input:disabled { opacity: 0.4; cursor: not-allowed; }
+.label-input {
+  width: 130px;
+}
+.cell-input:focus {
+  border-color: var(--accent);
+}
+.cell-input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 /* An empty format cell backed by an EXIF-derived width: dashed border + a muted,
    italic placeholder mark it as auto-filled (used-but-not-user-entered). */
-.cell-input.exif-placeholder { border-style: dashed; }
-.cell-input.exif-placeholder::placeholder { color: var(--text-dim); font-style: italic; opacity: 1; }
+.cell-input.exif-placeholder {
+  border-style: dashed;
+}
+.cell-input.exif-placeholder::placeholder {
+  color: var(--text-dim);
+  font-style: italic;
+  opacity: 1;
+}
 /* Implied film width that is no standard aerial format (resolveK's filmWidthOk false). */
-.cell-input.implied-warn { border-color: #e0a020; }
-.cell-input.implied-warn::placeholder { color: #e0a020; }
+.cell-input.implied-warn {
+  border-color: #e0a020;
+}
+.cell-input.implied-warn::placeholder {
+  color: #e0a020;
+}
 
 /* Format cell: input + the optional "Set to 230 mm?" suggestion. */
-.format-cell { display: inline-flex; gap: 4px; align-items: center; }
-.format-cell .cell-input { width: 88px; } /* fits a "253 (implied)" placeholder */
-.suggest-btn {
-  background: rgba(224, 160, 32, 0.12); border: 1px solid #e0a020; border-radius: 4px;
-  color: var(--text); font: inherit; font-size: 11px; padding: 2px 6px; cursor: pointer; white-space: nowrap;
+.format-cell {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
 }
-.suggest-btn:hover { background: rgba(224, 160, 32, 0.25); }
+.format-cell .cell-input {
+  width: 88px;
+} /* fits a "253 (implied)" placeholder */
+.suggest-btn {
+  background: rgba(224, 160, 32, 0.12);
+  border: 1px solid #e0a020;
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.suggest-btn:hover {
+  background: rgba(224, 160, 32, 0.25);
+}
 /* Pitch derived from the format: read-only, visibly not an input. */
-.derived { color: var(--text-dim); font-style: italic; font-variant-numeric: tabular-nums; cursor: help; }
-.ignored-mark { color: #e0a020; font-style: normal; margin-left: 1px; }
+.derived {
+  color: var(--text-dim);
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+.ignored-mark {
+  color: #e0a020;
+  font-style: normal;
+  margin-left: 1px;
+}
 
 /* Focal cell: numeric input + compact px/mm unit selector. */
-.focal-cell { display: inline-flex; gap: 4px; align-items: center; }
-.focal-input { width: 52px; }
-.unit-select {
-  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
-  color: var(--text); font: inherit; font-size: 11px; padding: 3px 2px; outline: none; cursor: pointer;
+.focal-cell {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
 }
-.unit-select:focus { border-color: var(--accent); }
-.unit-static { font-size: 11px; color: var(--text-dim); }
-.unit-dim { font-size: 11px; color: var(--text-dim); }
-.model-select { max-width: 180px; }
+.focal-input {
+  width: 52px;
+}
+.unit-select {
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 2px;
+  outline: none;
+  cursor: pointer;
+}
+.unit-select:focus {
+  border-color: var(--accent);
+}
+.unit-static {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.unit-dim {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.model-select {
+  max-width: 180px;
+}
 
 /* Numeric input without the up/down spinners — stepping makes no sense for
    calibration values, but we keep type=number for numeric keyboards/validation. */
-.cell-input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+.cell-input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
 .cell-input[type='number']::-webkit-outer-spin-button,
-.cell-input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.cell-input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 
 /* Fixed tab — checkbox per refinable intrinsic (held constant by the solver). */
-.check-cell { text-align: center; }
-.fix-check { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; margin: 0; vertical-align: middle; }
+.check-cell {
+  text-align: center;
+}
+.fix-check {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
+  vertical-align: middle;
+}
 
 .remove {
-  background: none; border: none; color: var(--text-dim); cursor: pointer;
-  font-size: 16px; line-height: 1; padding: 0 4px; border-radius: 4px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 4px;
 }
-.remove:hover { color: #e55; background: rgba(220, 80, 80, 0.12); }
+.remove:hover {
+  color: #e55;
+  background: rgba(220, 80, 80, 0.12);
+}
 
-.empty { padding: 40px; text-align: center; color: var(--text-dim); }
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-dim);
+}
 
 /* Film sensor: Kind cell + expandable fiducial editor (F4). */
-.kind-cell { display: inline-flex; gap: 6px; align-items: center; }
-.expand-btn {
-  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
-  color: var(--text-dim); font: inherit; font-size: 11px; padding: 2px 6px; cursor: pointer;
+.kind-cell {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
 }
-.expand-btn.open, .expand-btn:hover { border-color: var(--accent); color: var(--text); }
+.expand-btn {
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.expand-btn.open,
+.expand-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
 
-.fid-row td { background: var(--panel); }
-.fid-editor { display: flex; flex-direction: column; gap: 10px; padding: 10px 4px; max-width: 640px; }
-.fid-io { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-.fid-io label { display: inline-flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-dim); }
-.fid-note { font-size: 11px; color: var(--text-dim); align-self: center; }
-.fid-note.warn { color: #e0a020; }
+.fid-row td {
+  background: var(--panel);
+}
+.fid-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 4px;
+  max-width: 640px;
+}
+.fid-io {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.fid-io label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.fid-note {
+  font-size: 11px;
+  color: var(--text-dim);
+  align-self: center;
+}
+.fid-note.warn {
+  color: #e0a020;
+}
 
-.fid-marks { width: auto; border-collapse: collapse; }
-.fid-marks th { position: static; background: transparent; padding: 2px 8px 4px; font-size: 11px; }
-.fid-marks td { padding: 2px 8px; border-bottom: none; }
-.mark-id { width: 48px; }
+.fid-marks {
+  width: auto;
+  border-collapse: collapse;
+}
+.fid-marks th {
+  position: static;
+  background: transparent;
+  padding: 2px 8px 4px;
+  font-size: 11px;
+}
+.fid-marks td {
+  padding: 2px 8px;
+  border-bottom: none;
+}
+.mark-id {
+  width: 48px;
+}
 
 .add-mark {
   align-self: flex-start;
-  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
-  color: var(--text); font: inherit; font-size: 11px; padding: 4px 10px; cursor: pointer;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
 }
-.add-mark:hover:not(:disabled) { border-color: var(--accent); }
-.add-mark:disabled { opacity: 0.45; cursor: default; }
-.fid-auto { display: flex; }
-.fid-paste { display: flex; flex-direction: column; gap: 6px; }
+.add-mark:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.add-mark:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.fid-auto {
+  display: flex;
+}
+.fid-paste {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .paste-area {
-  width: 100%; min-height: 60px; resize: vertical;
-  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
-  color: var(--text); font: inherit; font-size: 11px; padding: 6px; outline: none;
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  padding: 6px;
+  outline: none;
 }
-.paste-area:focus { border-color: var(--accent); }
+.paste-area:focus {
+  border-color: var(--accent);
+}
 </style>

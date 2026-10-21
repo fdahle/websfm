@@ -18,7 +18,7 @@ describe('verifyFrame', () => {
 
   it('leaves out putatives past the ray limit and spreads the mask back', () => {
     const map = makeVerifyMapper(K, lens)
-    const far = (FISHEYE_MAX_RAY_DEG + 5) * Math.PI / 180
+    const far = ((FISHEYE_MAX_RAY_DEG + 5) * Math.PI) / 180
     const ptsA = Float32Array.of(500, 400, 500 + K.fx * far * 1.1, 400, 520, 410)
     const ptsB = Float32Array.of(510, 400, 600, 400, 530, 410)
     const { ptsA: a, ptsB: b, keep } = mapVerifyPoints(ptsA, ptsB, map, null)
@@ -29,7 +29,8 @@ describe('verifyFrame', () => {
   })
 
   it('passes points through untouched with no mapper', () => {
-    const ptsA = Float32Array.of(1, 2), ptsB = Float32Array.of(3, 4)
+    const ptsA = Float32Array.of(1, 2),
+      ptsB = Float32Array.of(3, 4)
     const out = mapVerifyPoints(ptsA, ptsB, null, null)
     expect(out.ptsA).toBe(ptsA)
     expect(out.keep).toBeNull()

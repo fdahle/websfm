@@ -50,9 +50,9 @@ export function useDepthOverlay({ frame, image, drawOverlay, emit }) {
     if (!canvas) return
     const t = rev.bump()
     try {
-      const bmp  = await createImageBitmap(blob)
+      const bmp = await createImageBitmap(blob)
       if (!rev.isCurrent(t) || depthCanvas.value !== canvas) return
-      const ctx  = canvas.getContext('2d')
+      const ctx = canvas.getContext('2d')
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height)
       hasDepth.value = true
@@ -73,16 +73,17 @@ export function useDepthOverlay({ frame, image, drawOverlay, emit }) {
     if (!file || !canvas) return
     const t = rev.bump()
     try {
-      const bmp    = await createImageBitmap(file)
+      const bmp = await createImageBitmap(file)
       if (!rev.isCurrent(t) || depthCanvas.value !== canvas) return
-      const tmp    = new OffscreenCanvas(canvas.width, canvas.height)
+      const tmp = new OffscreenCanvas(canvas.width, canvas.height)
       const tmpCtx = tmp.getContext('2d')
       tmpCtx.drawImage(bmp, 0, 0, tmp.width, tmp.height)
       const id = tmpCtx.getImageData(0, 0, tmp.width, tmp.height)
-      const d  = id.data
+      const d = id.data
 
       // Find min/max luminance over valid pixels for contrast normalization.
-      let lo = Infinity, hi = -Infinity
+      let lo = Infinity,
+        hi = -Infinity
       for (let i = 0; i < d.length; i += 4) {
         if (d[i + 3] === 0) continue
         const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
@@ -92,11 +93,17 @@ export function useDepthOverlay({ frame, image, drawOverlay, emit }) {
       const range = hi - lo || 1
 
       for (let i = 0; i < d.length; i += 4) {
-        if (d[i + 3] === 0) { d[i + 3] = 0; continue }
+        if (d[i + 3] === 0) {
+          d[i + 3] = 0
+          continue
+        }
         const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
         const t = (lum - lo) / range
         const [r, g, b] = depthColor(t)
-        d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255
+        d[i] = r
+        d[i + 1] = g
+        d[i + 2] = b
+        d[i + 3] = 255
       }
       const ctx = canvas.getContext('2d')
       ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -128,21 +135,29 @@ export function useDepthOverlay({ frame, image, drawOverlay, emit }) {
   }
 
   // Sync the canvas when the parent clears or replaces the depth map externally.
-  watch(() => image().depth, (depth, prev) => {
-    if (depth === prev) return
-    const canvas = depthCanvas.value
-    if (depth?.blob && canvas) {
-      loadDepthBlob(depth.blob)
-    } else if (!depth && canvas) {
-      rev.bump()
-      canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
-      hasDepth.value = false
-      drawOverlay()
-    }
-  })
+  watch(
+    () => image().depth,
+    (depth, prev) => {
+      if (depth === prev) return
+      const canvas = depthCanvas.value
+      if (depth?.blob && canvas) {
+        loadDepthBlob(depth.blob)
+      } else if (!depth && canvas) {
+        rev.bump()
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
+        hasDepth.value = false
+        drawOverlay()
+      }
+    },
+  )
 
   return {
-    depthFileInput, depthCanvas, hasDepth,
-    initDepthCanvas, triggerDepthImport, onDepthFileChange, clearDepth,
+    depthFileInput,
+    depthCanvas,
+    hasDepth,
+    initDepthCanvas,
+    triggerDepthImport,
+    onDepthFileChange,
+    clearDepth,
   }
 }

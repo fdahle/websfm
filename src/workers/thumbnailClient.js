@@ -19,7 +19,10 @@ function spawn() {
   }
   w.onerror = (e) => {
     const err = new Error(e.message || 'thumbnail worker error')
-    for (const [id, entry] of pending) { pending.delete(id); entry.reject(err) }
+    for (const [id, entry] of pending) {
+      pending.delete(id)
+      entry.reject(err)
+    }
     w.terminate()
     if (worker === w) worker = null
   }

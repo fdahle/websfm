@@ -27,7 +27,9 @@ function excludeRestrictedModels() {
         try {
           await rm(join(outDir, 'models', model.file))
           logger.info(`Left out models/${model.file} (${model.license})`)
-        } catch { /* not in public/models/: nothing to remove */ }
+        } catch {
+          /* not in public/models/: nothing to remove */
+        }
       }
     },
   }

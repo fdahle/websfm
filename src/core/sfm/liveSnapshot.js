@@ -15,7 +15,9 @@ export const SNAPSHOT_MAX_POINTS = 200_000
 // keypointsAt(img) → that image's KeypointSet (keypointSet.js), for colour.
 export function sparseSnapshot(cameras, tracks, { maxPoints = SNAPSHOT_MAX_POINTS, keypointsAt = null } = {}) {
   const ids = []
-  tracks.forEachPoint((p) => { if (tracks.viewCount(p) >= 2) ids.push(p) })
+  tracks.forEachPoint((p) => {
+    if (tracks.viewCount(p) >= 2) ids.push(p)
+  })
   const step = Math.max(1, ids.length / maxPoints)
   const n = Math.min(ids.length, Math.floor(ids.length / step))
   const pos = new Float64Array(3 * n)
@@ -23,12 +25,16 @@ export function sparseSnapshot(cameras, tracks, { maxPoints = SNAPSHOT_MAX_POINT
   let coloured = 0
   for (let i = 0; i < n; i++) {
     const p = ids[Math.floor(i * step)]
-    pos[3 * i] = tracks.x(p); pos[3 * i + 1] = tracks.y(p); pos[3 * i + 2] = tracks.z(p)
+    pos[3 * i] = tracks.x(p)
+    pos[3 * i + 1] = tracks.y(p)
+    pos[3 * i + 2] = tracks.z(p)
     if (col) {
       tracks.someView(p, (img, kp) => {
         const set = keypointsAt(img)
         if (!set?.hasColor?.[kp]) return false
-        col[3 * i] = set.rgb[3 * kp]; col[3 * i + 1] = set.rgb[3 * kp + 1]; col[3 * i + 2] = set.rgb[3 * kp + 2]
+        col[3 * i] = set.rgb[3 * kp]
+        col[3 * i + 1] = set.rgb[3 * kp + 1]
+        col[3 * i + 2] = set.rgb[3 * kp + 2]
         coloured++
         return true
       })
@@ -46,7 +52,11 @@ export function sparseSnapshot(cameras, tracks, { maxPoints = SNAPSHOT_MAX_POINT
 // as often as progress is reported. The first tick sends, so the view starts with the
 // initial pair; `tick({ force: true })` sends now, at the end of a phase that may have
 // finished inside one interval.
-export function createSnapshotPacer(send, snapshot, { intervalMs = SNAPSHOT_INTERVAL_MS, now = () => Date.now() } = {}) {
+export function createSnapshotPacer(
+  send,
+  snapshot,
+  { intervalMs = SNAPSHOT_INTERVAL_MS, now = () => Date.now() } = {},
+) {
   let last = -Infinity
   return {
     tick({ force = false } = {}) {

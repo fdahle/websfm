@@ -27,7 +27,13 @@ import { resolveK } from '../core/sfm/reconstruction.js'
 import { buildReportHtml } from '../core/products/report.js'
 import { buildProjectDigest, digestToMarkdown, digestToJson } from '../core/eval/summaryDigest.js'
 import { buildVerdict } from '../core/sfm/verdict.js'
-import { featureHasher, matchHasher, featureRows, matchRows, FINGERPRINT_ALGORITHM } from '../core/eval/runFingerprint.js'
+import {
+  featureHasher,
+  matchHasher,
+  featureRows,
+  matchRows,
+  FINGERPRINT_ALGORITHM,
+} from '../core/eval/runFingerprint.js'
 
 // Role → report label. 'marker' is a scale-bar endpoint (no surveyed position),
 // so a binary control/check ternary would silently mislabel it as ground control.
@@ -65,24 +71,32 @@ export function useQualityReport() {
 
   // Null before matching has produced any terminal result; an empty accepted
   // graph after a completed run remains a real (split) result.
-  const graph = computed(() =>
-    completedMatchGraphHealth(matchesStore.matchStore.values(), imageIds.value))
+  const graph = computed(() => completedMatchGraphHealth(matchesStore.matchStore.values(), imageIds.value))
 
   const selfCal = computed(() => recon.summary?.selfCalDistortion ?? null)
 
   // Per-sensor refined-vs-nominal focal (reused by the calibration section + health).
   const sensorRows = computed(() => {
     const cams = cameras.value
-    return sensorsStore.sensors.map((sensor) => {
-      const imgs = imagesStore.images.filter((im) => im.sensorId === sensor.id)
-      const cs = imgs.map((im) => cams.get(im.uuid)).filter(Boolean)
-      const fxs = cs.map((c) => estimatedIntrinsics(c)?.focal).filter((v) => v != null)
-      const refinedFx = fxs.length ? fxs.reduce((a, b) => a + b, 0) / fxs.length : null
-      const rep = imgs.find((im) => im.meta) ?? imgs[0]
-      const nominal = rep ? resolveK(rep.meta ?? {}, sensor) : null
-      const delta = focalDelta(refinedFx, nominal?.fx ?? null)
-      return { id: sensor.id, label: sensor.label, nCams: cs.length, refinedFx, nominalFx: nominal?.fx ?? null, delta }
-    }).filter((r) => r.nCams > 0)
+    return sensorsStore.sensors
+      .map((sensor) => {
+        const imgs = imagesStore.images.filter((im) => im.sensorId === sensor.id)
+        const cs = imgs.map((im) => cams.get(im.uuid)).filter(Boolean)
+        const fxs = cs.map((c) => estimatedIntrinsics(c)?.focal).filter((v) => v != null)
+        const refinedFx = fxs.length ? fxs.reduce((a, b) => a + b, 0) / fxs.length : null
+        const rep = imgs.find((im) => im.meta) ?? imgs[0]
+        const nominal = rep ? resolveK(rep.meta ?? {}, sensor) : null
+        const delta = focalDelta(refinedFx, nominal?.fx ?? null)
+        return {
+          id: sensor.id,
+          label: sensor.label,
+          nCams: cs.length,
+          refinedFx,
+          nominalFx: nominal?.fx ?? null,
+          delta,
+        }
+      })
+      .filter((r) => r.nCams > 0)
   })
   const focalDeltas = computed(() => sensorRows.value.map((r) => r.delta.deltaPct))
 
@@ -128,7 +142,9 @@ export function useQualityReport() {
       graph: graph.value,
       selfCal: selfCal.value,
       focalDeltas: focalDeltas.value.length ? focalDeltas.value : null,
-      gcpReport, poseReport, demCheck,
+      gcpReport,
+      poseReport,
+      demCheck,
       depth: depth.value,
       crsUnit: crsUnit.value,
     }
@@ -148,14 +164,26 @@ export function useQualityReport() {
     const meta = external.rasterById(rasterId)
     if (!dem || !meta || meta.kind !== 'dem') return Promise.resolve(null)
     demRefLastRasterId = rasterId
-    const key = [dem.createdAt, dem.width, dem.height, dem.crs, meta.id, meta.crs,
-      meta.vOffset || 0, meta.planeStyleStamp ?? '', dem.verticalDatum ?? '', meta.verticalDatum ?? ''].join('|')
+    const key = [
+      dem.createdAt,
+      dem.width,
+      dem.height,
+      dem.crs,
+      meta.id,
+      meta.crs,
+      meta.vOffset || 0,
+      meta.planeStyleStamp ?? '',
+      dem.verticalDatum ?? '',
+      meta.verticalDatum ?? '',
+    ].join('|')
     if (demRefCache?.key === key) return demRefCache.promise
     const promise = (async () => {
       // Strict: a reference hole is missing coverage, not a neighbour's height. In
       // the DEM's vertical datum when the reference's converts to it.
-      const { sample, conversion } = await external.referenceDemSampler(meta.id, dem.crs ?? null,
-        { strict: true, datum: dem.verticalDatum ?? null })
+      const { sample, conversion } = await external.referenceDemSampler(meta.id, dem.crs ?? null, {
+        strict: true,
+        datum: dem.verticalDatum ?? null,
+      })
       const cmp = await compareDemToReference(dem, sample)
       const demUnit = rasterUnits(dem).vertical
       const refUnit = rasterUnits(meta).vertical
@@ -164,29 +192,46 @@ export function useQualityReport() {
       // in EPSG:4326) has no linear unit to infer its heights from.
       const known = (u) => u === 'm' || u === 'ft' || u === 'US-ft'
       if (known(demUnit) && known(refUnit) && demUnit !== refUnit) {
-        warnings.push(`The DEM's heights are in ${demUnit} and the reference's in ${refUnit} — the differences mix units.`)
+        warnings.push(
+          `The DEM's heights are in ${demUnit} and the reference's in ${refUnit} — the differences mix units.`,
+        )
       }
-      const demDatum = dem.verticalDatum ?? 'unknown', refDatum = meta.verticalDatum || 'unknown'
+      const demDatum = dem.verticalDatum ?? 'unknown',
+        refDatum = meta.verticalDatum || 'unknown'
       // A DEM's datum is unknown unless its control declared one (most camera-GPS
       // fits), so only the reference's missing declaration is worth a warning.
       if (refDatum === 'unknown') {
-        warnings.push('The reference DEM declares no vertical datum: a constant bias may be a datum '
-          + 'offset (ellipsoidal vs geoid heights differ by tens of metres) rather than an error.')
+        warnings.push(
+          'The reference DEM declares no vertical datum: a constant bias may be a datum ' +
+            'offset (ellipsoidal vs geoid heights differ by tens of metres) rather than an error.',
+        )
       } else if (demDatum !== 'unknown' && !conversion && demDatum !== refDatum) {
-        warnings.push(`The DEM's heights are ${demDatum} and the reference's ${refDatum}, which cannot be converted: `
-          + 'a constant bias may be that datum offset.')
+        warnings.push(
+          `The DEM's heights are ${demDatum} and the reference's ${refDatum}, which cannot be converted: ` +
+            'a constant bias may be that datum offset.',
+        )
       }
-      if (!meta.crs) warnings.push('The reference DEM declares no CRS; it is read as if it were in the DEM\'s frame.')
+      if (!meta.crs) warnings.push("The reference DEM declares no CRS; it is read as if it were in the DEM's frame.")
       return {
-        ...cmp, demUnit, refUnit, warnings,
-        reference: { id: meta.id, name: meta.name, datum: meta.verticalDatum || 'unknown',
-          accuracy: meta.verticalAccuracy ?? null, vOffset: meta.vOffset || 0,
+        ...cmp,
+        demUnit,
+        refUnit,
+        warnings,
+        reference: {
+          id: meta.id,
+          name: meta.name,
+          datum: meta.verticalDatum || 'unknown',
+          accuracy: meta.verticalAccuracy ?? null,
+          vOffset: meta.vOffset || 0,
           // { from, to, min, max }: the geoid separation added to the reference heights.
-          conversion: conversion && Number.isFinite(conversion.min) ? { ...conversion } : null },
+          conversion: conversion && Number.isFinite(conversion.min) ? { ...conversion } : null,
+        },
       }
     })()
     demRefCache = { key, promise }
-    promise.catch(() => { if (demRefCache?.promise === promise) demRefCache = null })
+    promise.catch(() => {
+      if (demRefCache?.promise === promise) demRefCache = null
+    })
     return promise
   }
 
@@ -202,17 +247,30 @@ export function useQualityReport() {
     // spread of the differences and than what the reference itself claims.
     const biasLoud = s && Math.abs(s.median) > Math.max(s.nmad, sigma ?? 0)
     return [
-      { label: 'Median ΔZ', value: signed(s?.median), unit: u, tone: s ? (biasLoud ? 'warn' : undefined) : undefined,
-        hint: 'robust bias (DEM − reference)' },
-      { label: 'NMAD', value: f(s?.nmad), unit: u,
-        hint: sigma != null ? `robust spread · reference σ ${sigma}` : 'robust spread (≈σ)' },
+      {
+        label: 'Median ΔZ',
+        value: signed(s?.median),
+        unit: u,
+        tone: s ? (biasLoud ? 'warn' : undefined) : undefined,
+        hint: 'robust bias (DEM − reference)',
+      },
+      {
+        label: 'NMAD',
+        value: f(s?.nmad),
+        unit: u,
+        hint: sigma != null ? `robust spread · reference σ ${sigma}` : 'robust spread (≈σ)',
+      },
       { label: 'RMSE', value: f(s?.rmse), unit: u, hint: 'includes bias and blunders' },
       { label: 'Mean ± std', value: s ? `${signed(s.mean)} ± ${f(s.std)}` : '—', unit: u },
       { label: 'LE90', value: f(s?.le90), unit: u, hint: '90 % of |ΔZ| are below' },
       { label: 'Min / max', value: s ? `${signed(s.min)} / ${signed(s.max)}` : '—', unit: u },
-      { label: 'Overlap', value: overlap == null ? '—' : overlap.toFixed(1), unit: '%',
+      {
+        label: 'Overlap',
+        value: overlap == null ? '—' : overlap.toFixed(1),
+        unit: '%',
         tone: overlap != null && overlap < 50 ? 'warn' : undefined,
-        hint: `${(cmp?.compared ?? 0).toLocaleString()} of ${(cmp?.demCells ?? 0).toLocaleString()} DEM cells` },
+        hint: `${(cmp?.compared ?? 0).toLocaleString()} of ${(cmp?.demCells ?? 0).toLocaleString()} DEM cells`,
+      },
     ]
   }
 
@@ -236,12 +294,14 @@ export function useQualityReport() {
         { label: 'Observations', value: (d.n ?? 0).toLocaleString() },
       ],
       columns: [
-        { key: 'name', label: 'Image' }, { key: 'nObs', label: 'Obs', align: 'right' },
+        { key: 'name', label: 'Image' },
+        { key: 'nObs', label: 'Obs', align: 'right' },
         { key: 'rms', label: 'RMS px', align: 'right' },
       ],
       rows: perImage.value
         .filter((r) => r.rmsPx != null)
-        .sort((a, b) => b.rmsPx - a.rmsPx).slice(0, 20)
+        .sort((a, b) => b.rmsPx - a.rmsPx)
+        .slice(0, 20)
         .map((r) => ({ name: nameByUuid.value.get(r.uuid) ?? r.uuid, nObs: r.nObs, rms: f2(r.rmsPx) })),
       note: 'Top 20 images by reprojection RMS.',
     })
@@ -251,13 +311,17 @@ export function useQualityReport() {
       sections.push({
         title: 'Calibration',
         columns: [
-          { key: 'label', label: 'Sensor' }, { key: 'cams', label: 'Cams', align: 'right' },
+          { key: 'label', label: 'Sensor' },
+          { key: 'cams', label: 'Cams', align: 'right' },
           { key: 'refined', label: 'Refined fx', align: 'right' },
           { key: 'nominal', label: 'Nominal fx', align: 'right' },
           { key: 'delta', label: 'Δ%', align: 'right' },
         ],
         rows: sensorRows.value.map((s) => ({
-          label: s.label, cams: s.nCams, refined: f2(s.refinedFx, 1), nominal: f2(s.nominalFx, 1),
+          label: s.label,
+          cams: s.nCams,
+          refined: f2(s.refinedFx, 1),
+          nominal: f2(s.nominalFx, 1),
           delta: s.delta.deltaPct == null ? '—' : s.delta.deltaPct.toFixed(1),
         })),
       })
@@ -268,13 +332,21 @@ export function useQualityReport() {
       sections.push({
         title: 'Control and checkpoint accuracy',
         columns: [
-          { key: 'name', label: 'Point' }, { key: 'role', label: 'Role' }, { key: 'views', label: 'Views', align: 'right' },
-          { key: 'dTotal', label: 'Δ total', align: 'right' }, { key: 'normalized', label: 'Normalized', align: 'right' },
+          { key: 'name', label: 'Point' },
+          { key: 'role', label: 'Role' },
+          { key: 'views', label: 'Views', align: 'right' },
+          { key: 'dTotal', label: 'Δ total', align: 'right' },
+          { key: 'normalized', label: 'Normalized', align: 'right' },
           { key: 'loo', label: 'LOO Δ', align: 'right' },
         ],
-        rows: gcpReport.map((g) => ({ name: g.name, role: ROLE_LABEL[g.role] ?? 'Control', views: g.viewCount,
-          dTotal: f2(g.dTotal, 3), normalized: g.normalized == null ? '—' : `${g.normalized.toFixed(2)}σ`,
-          loo: f2(g.looTotal, 3) })),
+        rows: gcpReport.map((g) => ({
+          name: g.name,
+          role: ROLE_LABEL[g.role] ?? 'Control',
+          views: g.viewCount,
+          dTotal: f2(g.dTotal, 3),
+          normalized: g.normalized == null ? '—' : `${g.normalized.toFixed(2)}σ`,
+          loo: f2(g.looTotal, 3),
+        })),
         note: `Checkpoints are independent; leave-one-out (LOO) predicts each control from the others. Normalized residuals divide by the residual's own uncertainty (${crsUnit.value}): a control's declared covariance less what the fit absorbs, a checkpoint's or a LOO prediction's declared covariance plus the fit's own.`,
       })
     }
@@ -284,19 +356,25 @@ export function useQualityReport() {
     // including bars excluded from the fit or not measurable, each with its reason.
     // A bar that vanishes from the report takes the user's measurement with it.
     const resolvedFrame = await recon.effectiveFrameSpec()
-    const barRows = await recon.scaleBarReport(
-      resolvedFrame.unit !== 'model' ? resolvedFrame.scale : null)
+    const barRows = await recon.scaleBarReport(resolvedFrame.unit !== 'model' ? resolvedFrame.scale : null)
     if (barRows.length) {
       const src = resolvedFrame.source
       sections.push({
         title: 'Scale constraints',
         tiles: [
-          { label: 'Scale source', value: src === 'georef' ? 'Georeference' : (src === 'scalebars' ? 'Scale bars' : 'None') },
-          { label: 'Metres per model unit', value: resolvedFrame.unit !== 'model' ? resolvedFrame.scale.toPrecision(6) : '—' },
+          {
+            label: 'Scale source',
+            value: src === 'georef' ? 'Georeference' : src === 'scalebars' ? 'Scale bars' : 'None',
+          },
+          {
+            label: 'Metres per model unit',
+            value: resolvedFrame.unit !== 'model' ? resolvedFrame.scale.toPrecision(6) : '—',
+          },
           { label: 'Bars', value: String(barRows.length) },
         ],
         columns: [
-          { key: 'name', label: 'Bar' }, { key: 'used', label: 'In fit' },
+          { key: 'name', label: 'Bar' },
+          { key: 'used', label: 'In fit' },
           { key: 'known', label: 'Known', align: 'right' },
           { key: 'sigma', label: '± 1σ', align: 'right' },
           { key: 'measured', label: 'Measured', align: 'right' },
@@ -309,20 +387,23 @@ export function useQualityReport() {
           known: b.knownDistanceM == null ? '—' : `${b.knownDistanceM.toPrecision(6)} m`,
           sigma: b.accuracyM == null ? 'equal weight' : `${b.accuracyM.toPrecision(3)} m`,
           measured: b.measuredM == null ? '—' : `${b.measuredM.toPrecision(6)} m`,
-          residual: b.residualM == null ? (b.reason ?? '—')
-            : `${b.residualM >= 0 ? '+' : '−'}${Math.abs(b.residualM).toPrecision(3)} m`,
+          residual:
+            b.residualM == null
+              ? (b.reason ?? '—')
+              : `${b.residualM >= 0 ? '+' : '−'}${Math.abs(b.residualM).toPrecision(3)} m`,
           normalized: b.normalizedResidual == null ? '—' : `${b.normalizedResidual.toFixed(2)}σ`,
         })),
-        note: src === 'georef'
-          ? 'The georeference defines the scale; these bars are independent checks against it.'
-          : 'Residuals are measured minus entered. Bars with no declared 1σ are equally weighted, not surveyed.',
+        note:
+          src === 'georef'
+            ? 'The georeference defines the scale; these bars are independent checks against it.'
+            : 'Residuals are measured minus entered. Bars with no declared 1σ are equally weighted, not surveyed.',
       })
     }
 
     // DEM vs reference DEM — the one the hub last compared, else the only one. A
     // failed comparison is reported in place rather than failing the export.
-    const refId = demRefLastRasterId && external.rasterById(demRefLastRasterId)
-      ? demRefLastRasterId : external.defaultDem?.id
+    const refId =
+      demRefLastRasterId && external.rasterById(demRefLastRasterId) ? demRefLastRasterId : external.defaultDem?.id
     if (recon.dem && refId) {
       try {
         const cmp = await demReferenceComparison(refId)
@@ -330,11 +411,17 @@ export function useQualityReport() {
           sections.push({
             title: `DEM vs reference DEM (${cmp.reference.name})`,
             tiles: demReferenceTiles(cmp),
-            note: ['ΔZ = DEM − reference at each compared DEM cell'
-              + (cmp.step > 1 ? ` (every ${cmp.step}th cell each way)` : '')
-              + `; reference vertical datum: ${cmp.reference.datum}`
-              + (cmp.reference.conversion ? `, converted to the DEM's ${cmp.reference.conversion.to} by adding the geoid `
-                + `separation (${shiftRange(cmp.reference.conversion)})` : '') + '.', ...cmp.warnings].join(' '),
+            note: [
+              'ΔZ = DEM − reference at each compared DEM cell' +
+                (cmp.step > 1 ? ` (every ${cmp.step}th cell each way)` : '') +
+                `; reference vertical datum: ${cmp.reference.datum}` +
+                (cmp.reference.conversion
+                  ? `, converted to the DEM's ${cmp.reference.conversion.to} by adding the geoid ` +
+                    `separation (${shiftRange(cmp.reference.conversion)})`
+                  : '') +
+                '.',
+              ...cmp.warnings,
+            ].join(' '),
           })
         }
       } catch (err) {
@@ -343,8 +430,11 @@ export function useQualityReport() {
     }
 
     return buildReportHtml({
-      projectName, date: new Date().toISOString(), crsUnit: crsUnit.value,
-      health: rows, sections,
+      projectName,
+      date: new Date().toISOString(),
+      crsUnit: crsUnit.value,
+      health: rows,
+      sections,
     })
   }
 
@@ -371,17 +461,23 @@ export function useQualityReport() {
     // is the observation that matters and nobody reads two numbers for it. Only
     // computable per-image (each image's own recorded cap), so a mixed batch is still
     // counted correctly.
-    const capped = recorded.filter((im) =>
-      im.detectSettings.maxKeypoints > 0 && (im.kpCount ?? 0) >= im.detectSettings.maxKeypoints)
+    const capped = recorded.filter(
+      (im) => im.detectSettings.maxKeypoints > 0 && (im.kpCount ?? 0) >= im.detectSettings.maxKeypoints,
+    )
     return {
       detector: withKp[0].detector ?? 'sift',
       images: withKp.length,
       ...(first
-        ? { maxDim: first.maxDim, maxDimMode: first.maxDimMode, maxKeypoints: first.maxKeypoints,
-          contrastThreshold: first.contrastThreshold, tiling: first.tiling,
-          // Absent on pre-2026-10 detections ⇒ stays undefined ⇒ rendered as unknown.
-          ...(first.maxOrientations != null ? { maxOrientations: first.maxOrientations } : {}),
-          ...(first.capRule != null ? { capRule: first.capRule } : {}) }
+        ? {
+            maxDim: first.maxDim,
+            maxDimMode: first.maxDimMode,
+            maxKeypoints: first.maxKeypoints,
+            contrastThreshold: first.contrastThreshold,
+            tiling: first.tiling,
+            // Absent on pre-2026-10 detections ⇒ stays undefined ⇒ rendered as unknown.
+            ...(first.maxOrientations != null ? { maxOrientations: first.maxOrientations } : {}),
+            ...(first.capRule != null ? { capRule: first.capRule } : {}),
+          }
         : {}),
       medianKeypoints: med(withKp.map((im) => im.kpCount ?? null)),
       medianDetectScale: med(withKp.map((im) => im.detectScale ?? null)),
@@ -420,11 +516,12 @@ export function useQualityReport() {
       .filter((im) => !cameras.value.has(im.uuid))
       .map((im) => ({
         name: im.name,
-        reason: unregisteredReason({
-          kpCount: im.kpCount ?? null,
-          degree: g?.degrees?.get(im.uuid) ?? 0,
-          componentIndex: g?.componentIndex?.get(im.uuid) ?? null,
-        }) ?? 'unregistered',
+        reason:
+          unregisteredReason({
+            kpCount: im.kpCount ?? null,
+            degree: g?.degrees?.get(im.uuid) ?? 0,
+            componentIndex: g?.componentIndex?.get(im.uuid) ?? null,
+          }) ?? 'unregistered',
       }))
       .slice(0, 20)
 
@@ -432,34 +529,38 @@ export function useQualityReport() {
     // only what happened. Skipped before a sparse run exists (nothing to judge).
     const verdict = recon.summary
       ? buildVerdict({
-        imageCount: snapshot.imageCount,
-        registeredCount: snapshot.registeredCount,
-        nPoints: points.value.length,
-        reprojMedianPx: snapshot.reproj?.median ?? null,
-        reprojP95px: snapshot.reproj?.p95 ?? null,
-        track3ViewPct: recon.summary.pct3plusViewTracks ?? null,
-        graphComponents: snapshot.graph?.components ?? null,
-        focalDeltaPct: focalDeltas.value.length
-          ? focalDeltas.value.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a)) : null,
-        depthCoveragePct: snapshot.depth?.coveragePct ?? null,
-        selfCalResolved: recon.summary?.selfCal?.resolved ?? null,
-        separateSecondaryModels: recon.summary?.secondaryRecovery?.separate?.length ?? 0,
-        unregistered,
-        // Contributing-cause inputs (see verdict.js): the resolved gates and the
-        // detection/matching shape behind them. All optional — an older run that
-        // recorded none of these simply skips those rules.
-        filterMaxReprojPx: recon.summary?.gates?.filterMaxReprojPx ?? null,
-        detectScaleFactor: recon.summary?.gates?.detectScaleFactor ?? null,
-        maxDim: detectConfig.value?.maxDim ?? null,
-        maxKeypoints: detectConfig.value?.maxKeypoints ?? null,
-        kpCapHitPct: detectConfig.value?.kpCapHitPct ?? null,
-        guidedSkippedForMemory: !!recon.summary?.guidedExtension?.some?.((g) => g.skipped === 'memory'),
-      })
+          imageCount: snapshot.imageCount,
+          registeredCount: snapshot.registeredCount,
+          nPoints: points.value.length,
+          reprojMedianPx: snapshot.reproj?.median ?? null,
+          reprojP95px: snapshot.reproj?.p95 ?? null,
+          track3ViewPct: recon.summary.pct3plusViewTracks ?? null,
+          graphComponents: snapshot.graph?.components ?? null,
+          focalDeltaPct: focalDeltas.value.length
+            ? focalDeltas.value.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a))
+            : null,
+          depthCoveragePct: snapshot.depth?.coveragePct ?? null,
+          selfCalResolved: recon.summary?.selfCal?.resolved ?? null,
+          separateSecondaryModels: recon.summary?.secondaryRecovery?.separate?.length ?? 0,
+          unregistered,
+          // Contributing-cause inputs (see verdict.js): the resolved gates and the
+          // detection/matching shape behind them. All optional — an older run that
+          // recorded none of these simply skips those rules.
+          filterMaxReprojPx: recon.summary?.gates?.filterMaxReprojPx ?? null,
+          detectScaleFactor: recon.summary?.gates?.detectScaleFactor ?? null,
+          maxDim: detectConfig.value?.maxDim ?? null,
+          maxKeypoints: detectConfig.value?.maxKeypoints ?? null,
+          kpCapHitPct: detectConfig.value?.kpCapHitPct ?? null,
+          guidedSkippedForMemory: !!recon.summary?.guidedExtension?.some?.((g) => g.skipped === 'memory'),
+        })
       : null
 
     const digest = buildProjectDigest({
-      projectName, date: new Date().toISOString(), crsUnit: crsUnit.value,
-      rows, snapshot,
+      projectName,
+      date: new Date().toISOString(),
+      crsUnit: crsUnit.value,
+      rows,
+      snapshot,
       offenders: { residuals, unregistered },
       summary: recon.summary ?? null,
       denseSummary: recon.denseSummary ?? null,
@@ -469,7 +570,11 @@ export function useQualityReport() {
       detect: detectConfig.value,
       matchRun: matchesStore.matchRun ?? null,
       // Unreadable feature data leaves the fingerprints absent, never the digest.
-      fingerprints: await runFingerprints().catch(() => ({ algorithm: FINGERPRINT_ALGORITHM, features: null, matches: null })),
+      fingerprints: await runFingerprints().catch(() => ({
+        algorithm: FINGERPRINT_ALGORITHM,
+        features: null,
+        matches: null,
+      })),
       // Recorded as-is. A fit whose evidence has moved is still what this project
       // last computed, and the digest is the record; the *resolver* is what refuses
       // to hand stale metres to a product.
@@ -480,10 +585,27 @@ export function useQualityReport() {
   }
 
   return {
-    cameras, points, imageIds, nameByUuid, crsUnit,
-    reproj, histogram, perImage, coverage, graph, selfCal, sensorRows, focalDeltas, depth,
-    perImageResiduals, unregisteredReason,
-    detectConfig, computeHealth, buildExportReport, computeDigest,
-    demReferenceComparison, demReferenceTiles,
+    cameras,
+    points,
+    imageIds,
+    nameByUuid,
+    crsUnit,
+    reproj,
+    histogram,
+    perImage,
+    coverage,
+    graph,
+    selfCal,
+    sensorRows,
+    focalDeltas,
+    depth,
+    perImageResiduals,
+    unregisteredReason,
+    detectConfig,
+    computeHealth,
+    buildExportReport,
+    computeDigest,
+    demReferenceComparison,
+    demReferenceTiles,
   }
 }

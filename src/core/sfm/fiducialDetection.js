@@ -43,13 +43,17 @@ export function estimateDetectionFrame(gray, maxFrac = 0.22) {
  */
 export function nativeRefinePlan(d, scale, cfg = FIDUCIAL_DETECTION_TUNING) {
   if (d.family === 'frame' || d.reason === 'missing-slot' || !(scale > 0)) return null
-  const px0 = d.px / scale, py0 = d.py / scale
+  const px0 = d.px / scale,
+    py0 = d.py / scale
   const nativeSize = Math.max(7, Math.round((d.scale || 13) / scale)) | 1
   const radius = Math.max(4, Math.ceil((cfg.refineRadiusCoarsePx ?? 3) / scale))
   // Window: the template plus the search radius, so every candidate centre is legal.
   const half = ((nativeSize + 4) >> 1) + radius + 2
   return {
-    px0, py0, half, radius,
+    px0,
+    py0,
+    half,
+    radius,
     sizes: [nativeSize - 4, nativeSize, nativeSize + 4].map((s) => Math.max(5, s | 1)),
     variants: Number.isInteger(d.variant) ? [d.variant] : undefined,
     polarity: d.polarity === 'dark' || d.polarity === 'light' ? d.polarity : undefined,
@@ -73,27 +77,49 @@ export function detectFiducialSpots(gray, options = {}) {
   const tolerance = clamp(Number(options.tolerance ?? 0.5), 0, 1)
   cfg.minScore += (0.5 - tolerance) * 0.2
   cfg.minPeakMargin += (0.5 - tolerance) * 0.02
-  const family = options.family || 'generic', positions = options.positions || 'corners'
-  const slots = slotsForPositions(positions), frame = estimateDetectionFrame(gray)
+  const family = options.family || 'generic',
+    positions = options.positions || 'corners'
+  const slots = slotsForPositions(positions),
+    frame = estimateDetectionFrame(gray)
   const frameOk = frame.confidence >= cfg.minFrameConfidence && frame.right > frame.left && frame.bottom > frame.top
-  const bounds = frameOk ? frame : { left: gray.width * 0.025, right: gray.width * 0.975, top: gray.height * 0.025, bottom: gray.height * 0.975 }
+  const bounds = frameOk
+    ? frame
+    : { left: gray.width * 0.025, right: gray.width * 0.975, top: gray.height * 0.025, bottom: gray.height * 0.975 }
   const radius = Math.max(6, cfg.searchRadiusFrac * Math.max(gray.width, gray.height))
-  const accepted = [], drafts = []
+  const accepted = [],
+    drafts = []
   for (const slot of slots) {
-    const u = slotUnitPoint(slot), cx = bounds.left + u.x * (bounds.right - bounds.left), cy = bounds.top + u.y * (bounds.bottom - bounds.top)
+    const u = slotUnitPoint(slot),
+      cx = bounds.left + u.x * (bounds.right - bounds.left),
+      cy = bounds.top + u.y * (bounds.bottom - bounds.top)
     if (family === 'frame') {
       const d = { slot, px: cx, py: cy, family, source: 'frame', confidence: frame.confidence, reviewed: false }
       ;(frameOk ? accepted : drafts).push(frameOk ? d : { ...d, reason: 'frame-uncertain' })
       continue
     }
     const hit = bestPrototypeHit(gray, cx, cy, radius, family, cfg)
-    if (!hit) { drafts.push({ slot, px: cx, py: cy, family, source: 'shape', confidence: 0, reason: 'missing-slot' }); continue }
+    if (!hit) {
+      drafts.push({ slot, px: cx, py: cy, family, source: 'shape', confidence: 0, reason: 'missing-slot' })
+      continue
+    }
     const confidence = detectionConfidence(hit.score, cfg.minScore)
-    const d = { slot, px: hit.x, py: hit.y, family, source: 'shape', confidence,
-      score: hit.score, peakMargin: hit.margin, scale: hit.size,
-      variant: hit.variant, polarity: hit.polarity, reviewed: false }
+    const d = {
+      slot,
+      px: hit.x,
+      py: hit.y,
+      family,
+      source: 'shape',
+      confidence,
+      score: hit.score,
+      peakMargin: hit.margin,
+      scale: hit.size,
+      variant: hit.variant,
+      polarity: hit.polarity,
+      reviewed: false,
+    }
     if (hit.score >= cfg.minScore && hit.margin >= cfg.minPeakMargin && frameOk) accepted.push(d)
-    else drafts.push({ ...d, reason: !frameOk ? 'frame-uncertain' : hit.score < cfg.minScore ? 'weak-peak' : 'two-peaks' })
+    else
+      drafts.push({ ...d, reason: !frameOk ? 'frame-uncertain' : hit.score < cfg.minScore ? 'weak-peak' : 'two-peaks' })
   }
   return { accepted, drafts, frame, requested: slots.length, family, positions }
 }

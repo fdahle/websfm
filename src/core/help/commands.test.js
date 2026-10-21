@@ -19,9 +19,18 @@ import {
 
 // A state where every prerequisite is satisfied — start here and knock one out.
 const READY = {
-  imageCount: 5, kpImageCount: 5, matchCount: 10, sparseReady: true,
-  depthMapCount: 5, cloudReady: true, demReady: true, orthoReady: true,
-  productReady: true, gcpCount: 3, poseCount: 5, sensorCount: 1,
+  imageCount: 5,
+  kpImageCount: 5,
+  matchCount: 10,
+  sparseReady: true,
+  depthMapCount: 5,
+  cloudReady: true,
+  demReady: true,
+  orthoReady: true,
+  productReady: true,
+  gcpCount: 3,
+  poseCount: 5,
+  sensorCount: 1,
 }
 
 describe('tokenize', () => {
@@ -69,10 +78,8 @@ describe('guardReason', () => {
   })
 
   it('returns the first unmet prerequisite message', () => {
-    expect(guardReason(['depthMaps'], { ...READY, depthMapCount: 0 }))
-      .toBe('Compute depth maps first')
-    expect(guardReason(['dem', 'depthMaps'], { ...READY, demReady: false, depthMapCount: 0 }))
-      .toBe('Build a DEM first')
+    expect(guardReason(['depthMaps'], { ...READY, depthMapCount: 0 })).toBe('Compute depth maps first')
+    expect(guardReason(['dem', 'depthMaps'], { ...READY, demReady: false, depthMapCount: 0 })).toBe('Build a DEM first')
   })
 
   it('treats missing state fields as unmet', () => {
@@ -94,9 +101,7 @@ describe('completions', () => {
   })
 
   it('completes multi-word export subcommands', () => {
-    expect(completions('export c')).toEqual(
-      expect.arrayContaining(['export cameras', 'export cloud']),
-    )
+    expect(completions('export c')).toEqual(expect.arrayContaining(['export cameras', 'export cloud']))
   })
 })
 
@@ -113,7 +118,10 @@ describe('help', () => {
   it('lists every command under a group header with "help all"', () => {
     const lines = helpLines('all')
     for (const cmd of COMMANDS) {
-      expect(lines.some((l) => l.includes(cmd.name)), cmd.name).toBe(true)
+      expect(
+        lines.some((l) => l.includes(cmd.name)),
+        cmd.name,
+      ).toBe(true)
     }
     expect(lines.some((l) => l.startsWith('— '))).toBe(true)
   })
@@ -128,7 +136,7 @@ describe('help', () => {
     expect(helpLines('nonsense')).toBeNull()
   })
 
-  it('shows a verb\'s usage and a ribbon command\'s location', () => {
+  it("shows a verb's usage and a ribbon command's location", () => {
     expect(helpFor('set').join('\n')).toContain('usage: set <group>.<key> <value>')
     expect(helpFor('crop mesh').join('\n')).toContain('ribbon: Tools ▸ Mesh ▸ Crop…')
     expect(helpFor('point size').join('\n')).toContain('usage: point size <value>   (1 – 8)')
@@ -196,8 +204,9 @@ describe('console ↔ ribbon parity', () => {
     expect(getCommand('profile').dispatch).toBe('measure-profile')
     expect(getCommand('volume').dispatch).toBe('measure-volume')
     expect(getCommand('section').dispatch).toBe('cloud-section')
-    expect(consoleReason(getCommand('ruler'), { ...READY, frontView: 'viewer' }))
-      .toBe('Open a DEM or orthophoto, or show one on the map')
+    expect(consoleReason(getCommand('ruler'), { ...READY, frontView: 'viewer' })).toBe(
+      'Open a DEM or orthophoto, or show one on the map',
+    )
     expect(consoleReason(getCommand('ruler'), { ...READY, frontView: 'raster' })).toBe('')
   })
 })

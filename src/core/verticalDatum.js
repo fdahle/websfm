@@ -24,7 +24,9 @@ export const datumLabel = (id) => VERTICAL_DATUMS.find((d) => d.id === id)?.labe
 // The grids in public/geoid/ (scripts/build-geoid-grids.mjs): N at every 15′ node,
 // 721 rows from 90° N, 1440 columns from 180° W, Int16 centimetres, zlib.
 const GRID_FILES = { 'geoid:EGM96': 'egm96-15.i16.z', 'geoid:EGM2008': 'egm2008-15.i16.z' }
-const ROWS = 721, COLS = 1440, STEP = 0.25
+const ROWS = 721,
+  COLS = 1440,
+  STEP = 0.25
 
 export const isConvertible = (datum) => datum === 'ellipsoidal' || datum in GRID_FILES
 
@@ -35,8 +37,11 @@ export function geoidGrid(cm) {
     undulation(lon, lat) {
       const x = ((((lon + 180) / STEP) % COLS) + COLS) % COLS
       const y = Math.min(ROWS - 1, Math.max(0, (90 - lat) / STEP))
-      const c0 = Math.floor(x), r0 = Math.min(ROWS - 2, Math.floor(y))
-      const c1 = (c0 + 1) % COLS, fx = x - c0, fy = y - r0
+      const c0 = Math.floor(x),
+        r0 = Math.min(ROWS - 2, Math.floor(y))
+      const c1 = (c0 + 1) % COLS,
+        fx = x - c0,
+        fy = y - r0
       const at = (r, c) => cm[r * COLS + c]
       const top = at(r0, c0) * (1 - fx) + at(r0, c1) * fx
       const bottom = at(r0 + 1, c0) * (1 - fx) + at(r0 + 1, c1) * fx

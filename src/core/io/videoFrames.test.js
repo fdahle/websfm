@@ -1,24 +1,41 @@
 import { describe, it, expect } from 'vitest'
 import {
-  isVideoFile, frameTimestamp, frameFileName, estimateFps, intervalTimes, analysisTimes,
-  laplacianVariance, scoreFrame, measureMotion, motionPyramid, createMotionTracker,
-  relativeSharpness, selectKeyframes, fitSize,
+  isVideoFile,
+  frameTimestamp,
+  frameFileName,
+  estimateFps,
+  intervalTimes,
+  analysisTimes,
+  laplacianVariance,
+  scoreFrame,
+  measureMotion,
+  motionPyramid,
+  createMotionTracker,
+  relativeSharpness,
+  selectKeyframes,
+  fitSize,
 } from './videoFrames.js'
 
 // A smooth random texture (a "scene") and crops of it (the "frames" of a pan).
 function scene(w, h, seed = 7) {
   let s = seed
-  const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32)
+  const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32
   let d = new Float32Array(w * h).map(() => rnd())
   for (let pass = 0; pass < 3; pass++) {
     const out = new Float32Array(w * h)
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        let acc = 0, n = 0
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-          const xx = x + dx, yy = y + dy
-          if (xx >= 0 && yy >= 0 && xx < w && yy < h) { acc += d[yy * w + xx]; n++ }
-        }
+        let acc = 0,
+          n = 0
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx,
+              yy = y + dy
+            if (xx >= 0 && yy >= 0 && xx < w && yy < h) {
+              acc += d[yy * w + xx]
+              n++
+            }
+          }
         out[y * w + x] = acc / n
       }
     }
@@ -26,8 +43,12 @@ function scene(w, h, seed = 7) {
   }
   // Stretch to the full 0..1 range: a real frame has contrast, three blurs of
   // uniform noise hardly any.
-  let lo = Infinity, hi = -Infinity
-  for (const v of d) { lo = Math.min(lo, v); hi = Math.max(hi, v) }
+  let lo = Infinity,
+    hi = -Infinity
+  for (const v of d) {
+    lo = Math.min(lo, v)
+    hi = Math.max(hi, v)
+  }
   return { d: d.map((v) => (v - lo) / (hi - lo)), w, h }
 }
 function crop(sc, x0, y0, w, h) {
@@ -37,14 +58,19 @@ function crop(sc, x0, y0, w, h) {
 }
 function boxBlur(d, w, h, r) {
   const out = new Float32Array(w * h)
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    let acc = 0, n = 0
-    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-      const xx = Math.min(w - 1, Math.max(0, x + dx)), yy = Math.min(h - 1, Math.max(0, y + dy))
-      acc += d[yy * w + xx]; n++
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let acc = 0,
+        n = 0
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          const xx = Math.min(w - 1, Math.max(0, x + dx)),
+            yy = Math.min(h - 1, Math.max(0, y + dy))
+          acc += d[yy * w + xx]
+          n++
+        }
+      out[y * w + x] = acc / n
     }
-    out[y * w + x] = acc / n
-  }
   return out
 }
 
@@ -70,7 +96,8 @@ describe('video files and names', () => {
 
 describe('timing', () => {
   it('estimates the frame rate from presented media times, tolerating dropped frames', () => {
-    const t = [], fps = 29.97
+    const t = [],
+      fps = 29.97
     for (let i = 0; i < 40; i++) if (i % 7 !== 3) t.push(i / fps) // some frames dropped
     expect(estimateFps(t)).toBe(29.97)
     expect(estimateFps([0, 0.04, 0.08, 0.12, 0.16])).toBe(25)
@@ -79,7 +106,9 @@ describe('timing', () => {
 
   it('plans a fixed interval in seconds or frames', () => {
     expect(intervalTimes(5, { every: 2 })).toEqual([0, 2, 4])
-    expect(intervalTimes(1, { every: 10, unit: 'frames', fps: 30 })).toEqual([0, 1 / 3, 2 / 3].map((v) => Math.round(v * 1e6) / 1e6))
+    expect(intervalTimes(1, { every: 10, unit: 'frames', fps: 30 })).toEqual(
+      [0, 1 / 3, 2 / 3].map((v) => Math.round(v * 1e6) / 1e6),
+    )
     expect(intervalTimes(1, { every: 15, unit: 'frames' })).toEqual([0, 0.5]) // unknown rate → 30
     expect(intervalTimes(0, { every: 1 })).toEqual([])
     expect(intervalTimes(10, { every: 0 })).toEqual([])
@@ -120,7 +149,8 @@ describe('scores', () => {
 
 describe('motion', () => {
   const sc = scene(480, 160)
-  const W = 160, H = 90
+  const W = 160,
+    H = 90
 
   it('measures a pan as the shift over the frame width', () => {
     const a = motionPyramid(crop(sc, 40, 30, W, H), W, H)

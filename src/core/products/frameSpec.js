@@ -37,7 +37,12 @@ export function describeFrame(frame, spec) {
     // separately), so one descriptor shape covers both.
     kind: spec?.kind === 'scaled-local' ? 'scaled-local' : 'local',
     ...(spec?.kind === 'scaled-local' ? { scale: frame.scale ?? spec.scale } : {}),
-    origin: frame.origin, east: frame.east, north: frame.north, up: frame.up,
-    crs: frame.crs, unit: frame.unit, source: frame.source,
+    origin: frame.origin,
+    east: frame.east,
+    north: frame.north,
+    up: frame.up,
+    crs: frame.crs,
+    unit: frame.unit,
+    source: frame.source,
   }
 }

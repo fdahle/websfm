@@ -20,8 +20,10 @@ const E2 = F * (2 - F)
 const RAD = Math.PI / 180
 
 export function geodeticToEcef(latDeg, lonDeg, h) {
-  const lat = latDeg * RAD, lon = lonDeg * RAD
-  const s = Math.sin(lat), c = Math.cos(lat)
+  const lat = latDeg * RAD,
+    lon = lonDeg * RAD
+  const s = Math.sin(lat),
+    c = Math.cos(lat)
   const n = A / Math.sqrt(1 - E2 * s * s)
   return [(n + h) * c * Math.cos(lon), (n + h) * c * Math.sin(lon), (n * (1 - E2) + h) * s]
 }
@@ -29,8 +31,12 @@ export function geodeticToEcef(latDeg, lonDeg, h) {
 /** ECEF → ENU about a geodetic origin. */
 export function makeEnuFrame(lat0Deg, lon0Deg, h0) {
   const o = geodeticToEcef(lat0Deg, lon0Deg, h0)
-  const lat = lat0Deg * RAD, lon = lon0Deg * RAD
-  const sl = Math.sin(lat), cl = Math.cos(lat), so = Math.sin(lon), co = Math.cos(lon)
+  const lat = lat0Deg * RAD,
+    lon = lon0Deg * RAD
+  const sl = Math.sin(lat),
+    cl = Math.cos(lat),
+    so = Math.sin(lon),
+    co = Math.cos(lon)
   return (p) => {
     const d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]]
     return [
@@ -67,8 +73,15 @@ export function cameraPositionCheck(cameras, positions, { leverArm = null } = {}
     return p && Number.isFinite(p.lat) && Number.isFinite(p.lon) && Number.isFinite(p.alt)
   })
   if (ids.length < 3) return null
-  let lat0 = 0, lon0 = 0, h0 = 0
-  for (const u of ids) { const p = positions.get(u); lat0 += p.lat; lon0 += p.lon; h0 += p.alt }
+  let lat0 = 0,
+    lon0 = 0,
+    h0 = 0
+  for (const u of ids) {
+    const p = positions.get(u)
+    lat0 += p.lat
+    lon0 += p.lon
+    h0 += p.alt
+  }
   const origin = { lat: lat0 / ids.length, lon: lon0 / ids.length, h: h0 / ids.length }
   const toEnu = makeEnuFrame(origin.lat, origin.lon, origin.h)
   const pairs = ids.map((u) => {
@@ -81,25 +94,46 @@ export function cameraPositionCheck(cameras, positions, { leverArm = null } = {}
     for (let it = 0; it < 2; it++) {
       const k = 1 / sim.scale
       for (const pr of pairs) {
-        const { R } = cameras.get(pr.uuid), C = cameraCenter(cameras.get(pr.uuid))
-        pr.src = [0, 1, 2].map((i) => C[i] + k * (R[0][i] * leverArm[0] + R[1][i] * leverArm[1] + R[2][i] * leverArm[2]))
+        const { R } = cameras.get(pr.uuid),
+          C = cameraCenter(cameras.get(pr.uuid))
+        pr.src = [0, 1, 2].map(
+          (i) => C[i] + k * (R[0][i] * leverArm[0] + R[1][i] * leverArm[1] + R[2][i] * leverArm[2]),
+        )
       }
       sim = fitSimilarity(pairs) ?? sim
     }
   }
-  const h = [], v = [], d3 = []
+  const h = [],
+    v = [],
+    d3 = []
   for (const pr of pairs) {
     const q = applySimilarity(sim, pr.src)
-    const dh = Math.hypot(q[0] - pr.dst[0], q[1] - pr.dst[1]), dv = q[2] - pr.dst[2]
-    h.push(dh); v.push(Math.abs(dv)); d3.push(Math.hypot(dh, dv))
+    const dh = Math.hypot(q[0] - pr.dst[0], q[1] - pr.dst[1]),
+      dv = q[2] - pr.dst[2]
+    h.push(dh)
+    v.push(Math.abs(dv))
+    d3.push(Math.hypot(dh, dv))
   }
-  const worst = d3.map((r, i) => ({ uuid: pairs[i].uuid, m: r })).sort((a, b) => b.m - a.m).slice(0, 5)
+  const worst = d3
+    .map((r, i) => ({ uuid: pairs[i].uuid, m: r }))
+    .sort((a, b) => b.m - a.m)
+    .slice(0, 5)
   return {
-    count: ids.length, scale: sim.scale,
-    rms3d: rms(d3), rmsH: rms(h), rmsV: rms(v),
-    medianH: quantile(h, 0.5), p95H: quantile(h, 0.95), maxH: quantile(h, 1),
-    medianV: quantile(v, 0.5), p95V: quantile(v, 0.95), maxV: quantile(v, 1),
-    worst, sim, toEnu, origin,
+    count: ids.length,
+    scale: sim.scale,
+    rms3d: rms(d3),
+    rmsH: rms(h),
+    rmsV: rms(v),
+    medianH: quantile(h, 0.5),
+    p95H: quantile(h, 0.95),
+    maxH: quantile(h, 1),
+    medianV: quantile(v, 0.5),
+    p95V: quantile(v, 0.95),
+    maxV: quantile(v, 1),
+    worst,
+    sim,
+    toEnu,
+    origin,
   }
 }
 
@@ -120,9 +154,13 @@ export function gcpCheck(fit, gcps) {
   const ok = rows.filter((r) => r.dE != null)
   const mean = (f) => (ok.length ? ok.reduce((s, r) => s + f(r), 0) / ok.length : null)
   return {
-    count: ok.length, of: rows.length,
-    rmsH: rms(ok.map((r) => Math.hypot(r.dE, r.dN))), rmsV: rms(ok.map((r) => r.dU)),
-    meanE: mean((r) => r.dE), meanN: mean((r) => r.dN), meanU: mean((r) => r.dU),
+    count: ok.length,
+    of: rows.length,
+    rmsH: rms(ok.map((r) => Math.hypot(r.dE, r.dN))),
+    rmsV: rms(ok.map((r) => r.dU)),
+    meanE: mean((r) => r.dE),
+    meanN: mean((r) => r.dN),
+    meanU: mean((r) => r.dU),
     rows,
   }
 }

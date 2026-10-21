@@ -32,9 +32,13 @@ const args = {}
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i]
   if (!a.startsWith('--')) continue
-  const k = a.slice(2), v = process.argv[i + 1]
+  const k = a.slice(2),
+    v = process.argv[i + 1]
   if (v == null || v.startsWith('--')) args[k] = true
-  else { args[k] = v; i++ }
+  else {
+    args[k] = v
+    i++
+  }
 }
 const cfg = args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}
 // The binary: --colmap, else $COLMAP, else `colmap` on PATH.
@@ -71,54 +75,73 @@ const mapper = args.mapper ?? 'mapper'
 const preselect = cfg.match?.strategy === 'preselect'
 const ref = await loadReference(cfg.reference)
 if (!given) {
-await run('features', 'feature_extractor', {
-  image_path: images, database_path: db,
-  'ImageReader.single_camera': 1, 'ImageReader.camera_model': args.cameraModel ?? 'SIMPLE_RADIAL',
-})
-// The positions websfm's preselection pairs by (the config's reference file) become
-// COLMAP's pose priors, so its spatial matcher pairs by the same thing: ENU metres
-// around their centroid (coordinate_system 1 = CARTESIAN). Without a file COLMAP keeps
-// its EXIF GPS. Priors only steer pairing here — `mapper` does not constrain by them.
-if (preselect && ref?.positions) {
-  const pos = Object.values(ref.positions)
-  const o = pos.reduce((a, p) => ({ lat: a.lat + p.lat / pos.length, lon: a.lon + p.lon / pos.length, h: a.h + p.alt / pos.length }), { lat: 0, lon: 0, h: 0 })
-  const toEnu = makeEnuFrame(o.lat, o.lon, o.h)
-  const sql = new DatabaseSync(db)
-  const set = sql.prepare('UPDATE pose_priors SET position = ?, position_covariance = ?, coordinate_system = 1 WHERE corr_data_id = ?')
-  const cov = Buffer.from(new Float64Array([1, 0, 0, 0, 1, 0, 0, 0, 1]).buffer)
-  let n = 0
-  for (const { image_id: id, name: nm } of sql.prepare('SELECT image_id, name FROM images').all()) {
-    const p = ref.positions[stem(nm.split('/').pop())]
-    if (!p) continue
-    set.run(Buffer.from(new Float64Array(toEnu(geodeticToEcef(p.lat, p.lon, p.alt))).buffer), cov, id); n++
+  await run('features', 'feature_extractor', {
+    'image_path': images,
+    'database_path': db,
+    'ImageReader.single_camera': 1,
+    'ImageReader.camera_model': args.cameraModel ?? 'SIMPLE_RADIAL',
+  })
+  // The positions websfm's preselection pairs by (the config's reference file) become
+  // COLMAP's pose priors, so its spatial matcher pairs by the same thing: ENU metres
+  // around their centroid (coordinate_system 1 = CARTESIAN). Without a file COLMAP keeps
+  // its EXIF GPS. Priors only steer pairing here — `mapper` does not constrain by them.
+  if (preselect && ref?.positions) {
+    const pos = Object.values(ref.positions)
+    const o = pos.reduce(
+      (a, p) => ({ lat: a.lat + p.lat / pos.length, lon: a.lon + p.lon / pos.length, h: a.h + p.alt / pos.length }),
+      { lat: 0, lon: 0, h: 0 },
+    )
+    const toEnu = makeEnuFrame(o.lat, o.lon, o.h)
+    const sql = new DatabaseSync(db)
+    const set = sql.prepare(
+      'UPDATE pose_priors SET position = ?, position_covariance = ?, coordinate_system = 1 WHERE corr_data_id = ?',
+    )
+    const cov = Buffer.from(new Float64Array([1, 0, 0, 0, 1, 0, 0, 0, 1]).buffer)
+    let n = 0
+    for (const { image_id: id, name: nm } of sql.prepare('SELECT image_id, name FROM images').all()) {
+      const p = ref.positions[stem(nm.split('/').pop())]
+      if (!p) continue
+      set.run(Buffer.from(new Float64Array(toEnu(geodeticToEcef(p.lat, p.lon, p.alt))).buffer), cov, id)
+      n++
+    }
+    sql.close()
+    console.log(`   pose priors from the reference file: ${n} image(s)`)
   }
-  sql.close()
-  console.log(`   pose priors from the reference file: ${n} image(s)`)
-}
-if (preselect) {
-  await run('matching', 'spatial_matcher', { database_path: db, 'SpatialMatching.max_num_neighbors': cfg.match?.maxNeighbors ?? 50 })
-} else {
-  await run('matching', 'exhaustive_matcher', { database_path: db })
-}
-await mkdir(sparseDir, { recursive: true })
-await run('mapper', mapper, { image_path: images, database_path: db, output_path: sparseDir })
+  if (preselect) {
+    await run('matching', 'spatial_matcher', {
+      'database_path': db,
+      'SpatialMatching.max_num_neighbors': cfg.match?.maxNeighbors ?? 50,
+    })
+  } else {
+    await run('matching', 'exhaustive_matcher', { database_path: db })
+  }
+  await mkdir(sparseDir, { recursive: true })
+  await run('mapper', mapper, { image_path: images, database_path: db, output_path: sparseDir })
 }
 
 // The model with the most registered images (the mapper may split into several).
-const models = given ? [] : (await readdir(sparseDir, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name)
+const models = given
+  ? []
+  : (await readdir(sparseDir, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name)
 let best = null
 for (const m of models) {
   const txt = join(ws, `txt-${m}`)
   await mkdir(txt, { recursive: true })
   await run(`convert-${m}`, 'model_converter', { input_path: join(sparseDir, m), output_path: txt, output_type: 'TXT' })
-  const files = Object.fromEntries(await Promise.all(['cameras.txt', 'images.txt', 'points3D.txt']
-    .map(async (f) => [f, await readFile(join(txt, f), 'utf8')])))
+  const files = Object.fromEntries(
+    await Promise.all(
+      ['cameras.txt', 'images.txt', 'points3D.txt'].map(async (f) => [f, await readFile(join(txt, f), 'utf8')]),
+    ),
+  )
   const model = readColmapModel(parseColmapModel(files))
   if (!best || model.images.length > best.model.images.length) best = { id: m, dir: join(sparseDir, m), model }
 }
 if (given) {
-  const files = Object.fromEntries(await Promise.all(['cameras.txt', 'images.txt', 'points3D.txt']
-    .map(async (f) => [f, await readFile(join(given, f), 'utf8')])))
+  const files = Object.fromEntries(
+    await Promise.all(
+      ['cameras.txt', 'images.txt', 'points3D.txt'].map(async (f) => [f, await readFile(join(given, f), 'utf8')]),
+    ),
+  )
   best = { id: 'given', dir: given, model: readColmapModel(parseColmapModel(files)) }
 }
 if (!best) throw new Error('mapper produced no model')
@@ -132,9 +155,15 @@ if (!positions) {
   positions = new Map()
   for (const im of model.images) {
     const g = await exifr.gps(join(images, im.name.split('/').pop())).catch(() => null)
-    const alt = await exifr.parse(join(images, im.name.split('/').pop()), ['GPSAltitude', 'GPSAltitudeRef']).catch(() => null)
+    const alt = await exifr
+      .parse(join(images, im.name.split('/').pop()), ['GPSAltitude', 'GPSAltitudeRef'])
+      .catch(() => null)
     if (g && Number.isFinite(g.latitude) && alt?.GPSAltitude != null) {
-      positions.set(stem(im.name.split('/').pop()), { lat: g.latitude, lon: g.longitude, alt: (alt.GPSAltitudeRef === 1 ? -1 : 1) * alt.GPSAltitude })
+      positions.set(stem(im.name.split('/').pop()), {
+        lat: g.latitude,
+        lon: g.longitude,
+        alt: (alt.GPSAltitudeRef === 1 ? -1 : 1) * alt.GPSAltitude,
+      })
     }
   }
 }
@@ -151,23 +180,54 @@ if (args.dense) {
   // rescales the images but, for an already-undistorted PINHOLE model (ETH3D), writes the
   // full-size camera, and PatchMatch then aborts on the size mismatch.
   await run('undistort', 'image_undistorter', { image_path: images, input_path: best.dir, output_path: dd })
-  await run('patchmatch', 'patch_match_stereo', { workspace_path: dd, 'PatchMatchStereo.geom_consistency': 1, 'PatchMatchStereo.max_image_size': maxSize })
+  await run('patchmatch', 'patch_match_stereo', {
+    'workspace_path': dd,
+    'PatchMatchStereo.geom_consistency': 1,
+    'PatchMatchStereo.max_image_size': maxSize,
+  })
   const ply = join(dd, 'fused.ply')
   await run('fusion', 'stereo_fusion', { workspace_path: dd, output_path: ply })
   // Vertex count from the PLY header (the file itself can be GBs).
-  const fd = openSync(ply, 'r'), buf = Buffer.alloc(4096)
-  readSync(fd, buf, 0, 4096, 0); closeSync(fd)
+  const fd = openSync(ply, 'r'),
+    buf = Buffer.alloc(4096)
+  readSync(fd, buf, 0, 4096, 0)
+  closeSync(fd)
   const m = /element vertex (\d+)/.exec(buf.toString('latin1'))
-  dense = { points: m ? Number(m[1]) : null, maxImageSize: maxSize, ply: ply.split('\\').join('/'), bytes: (await stat(ply)).size }
+  dense = {
+    points: m ? Number(m[1]) : null,
+    maxImageSize: maxSize,
+    ply: ply.split('\\').join('/'),
+    bytes: (await stat(ply)).size,
+  }
 }
 
 const out = {
-  name, config: args.config ?? null, colmap: { exe: colmap, mapper, cameraModel: args.cameraModel ?? 'SIMPLE_RADIAL',
-    matcher: preselect ? `spatial (${cfg.match?.maxNeighbors ?? 50} neighbours)` : 'exhaustive' },
-  images: nFiles, registered: model.images.length, models: models.length, points: model.points.length, pointsGe3: ge3,
+  name,
+  config: args.config ?? null,
+  colmap: {
+    exe: colmap,
+    mapper,
+    cameraModel: args.cameraModel ?? 'SIMPLE_RADIAL',
+    matcher: preselect ? `spatial (${cfg.match?.maxNeighbors ?? 50} neighbours)` : 'exhaustive',
+  },
+  images: nFiles,
+  registered: model.images.length,
+  models: models.length,
+  points: model.points.length,
+  pointsGe3: ge3,
   seconds: { ...timings, sfmTotal: (timings.features ?? 0) + (timings.matching ?? 0) + (timings.mapper ?? 0) },
-  positionCheck: pc && { count: pc.count, scale: r4(pc.scale), rms3d: r4(pc.rms3d), rmsH: r4(pc.rmsH), rmsV: r4(pc.rmsV),
-    medianH: r4(pc.medianH), p95H: r4(pc.p95H), maxH: r4(pc.maxH), medianV: r4(pc.medianV), p95V: r4(pc.p95V) },
+  positionCheck: pc && {
+    count: pc.count,
+    scale: r4(pc.scale),
+    rms3d: r4(pc.rms3d),
+    rmsH: r4(pc.rmsH),
+    rmsV: r4(pc.rmsV),
+    medianH: r4(pc.medianH),
+    p95H: r4(pc.p95H),
+    maxH: r4(pc.maxH),
+    medianV: r4(pc.medianV),
+    p95V: r4(pc.p95V),
+  },
   positionSource: ref?.positions ? 'reference file' : 'EXIF GPS',
   dense,
 }

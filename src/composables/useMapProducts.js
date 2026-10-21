@@ -44,11 +44,14 @@ export function useMapProducts() {
 
   // Anything with a CRS position: a georeference, GPS, imported poses, GCPs with
   // coordinates, or an on-map reference raster.
-  const hasCrsContent = computed(() => recon.currentFrameSignature?.source === 'georef'
-    || imagesStore.images.some((img) => img.meta?.gpsLat != null)
-    || posesStore.poses.some((p) => p.enabled !== false)
-    || gcpsStore.gcps.some((g) => Number.isFinite(g.x) && Number.isFinite(g.y))
-    || external.mapRasters.length > 0)
+  const hasCrsContent = computed(
+    () =>
+      recon.currentFrameSignature?.source === 'georef' ||
+      imagesStore.images.some((img) => img.meta?.gpsLat != null) ||
+      posesStore.poses.some((p) => p.enabled !== false) ||
+      gcpsStore.gcps.some((g) => Number.isFinite(g.x) && Number.isFinite(g.y)) ||
+      external.mapRasters.length > 0,
+  )
 
   const mode = computed(() => {
     if (!hasModel.value) return 'crs'
@@ -64,19 +67,26 @@ export function useMapProducts() {
   // (frameSpec.js). Async because the resolver is; a token drops stale answers.
   const modelFrame = shallowRef(null) // { frame, unit } | null
   let token = 0
-  watch([() => recon.mainSparseCloud, () => recon.currentFrameSignature, () => recon.orientation], async () => {
-    const t = ++token
-    const cloud = recon.mainSparseCloud
-    if (!cloud?.cameras?.size) { modelFrame.value = null; return }
-    try {
-      const resolved = await recon.effectiveFrameSpec({ crs: 'local' })
-      if (t !== token) return
-      const frame = frameFromSpec(resolved.frameSpec, [...cloud.cameras.values()], cloud.points ?? [])
-      modelFrame.value = { frame, unit: resolved.unit === 'm' ? 'm' : 'model units' }
-    } catch {
-      if (t === token) modelFrame.value = null
-    }
-  }, { immediate: true })
+  watch(
+    [() => recon.mainSparseCloud, () => recon.currentFrameSignature, () => recon.orientation],
+    async () => {
+      const t = ++token
+      const cloud = recon.mainSparseCloud
+      if (!cloud?.cameras?.size) {
+        modelFrame.value = null
+        return
+      }
+      try {
+        const resolved = await recon.effectiveFrameSpec({ crs: 'local' })
+        if (t !== token) return
+        const frame = frameFromSpec(resolved.frameSpec, [...cloud.cameras.values()], cloud.points ?? [])
+        modelFrame.value = { frame, unit: resolved.unit === 'm' ? 'm' : 'model units' }
+      } catch {
+        if (t === token) modelFrame.value = null
+      }
+    },
+    { immediate: true },
+  )
 
   // Registered camera centres in the model frame (the model map's only vectors).
   const modelCameras = computed(() => {
@@ -110,24 +120,32 @@ export function useMapProducts() {
     return { mode: 'model', frame: modelFrame.value.frame, stale }
   })
 
-  const placements = computed(() => (view.value ? PRODUCT_KINDS.map((kind) => ({
-    kind, placed: placeProductLayer(kind, productOf(kind), recon.productLayers[kind], view.value),
-  })) : []))
+  const placements = computed(() =>
+    view.value
+      ? PRODUCT_KINDS.map((kind) => ({
+          kind,
+          placed: placeProductLayer(kind, productOf(kind), recon.productLayers[kind], view.value),
+        }))
+      : [],
+  )
 
   const productMapLayers = computed(() => placements.value.map((p) => p.placed?.layer).filter(Boolean))
 
-  const mapLayers = computed(() => (mode.value === 'crs'
-    ? [...external.mapRasters, ...productMapLayers.value]
-    : productMapLayers.value))
+  const mapLayers = computed(() =>
+    mode.value === 'crs' ? [...external.mapRasters, ...productMapLayers.value] : productMapLayers.value,
+  )
 
   // One line per thing the user asked for that this frame cannot show, so an
   // "On Map" layer never silently fails to appear.
   const notes = computed(() => {
-    const out = placements.value.filter((p) => p.placed?.reason)
+    const out = placements.value
+      .filter((p) => p.placed?.reason)
       .map((p) => `${productLabel(p.kind, productOf(p.kind))} is not shown: ${p.placed.reason}.`)
     if (mode.value === 'model') {
-      out.unshift(`Model frame (${modelFrame.value?.unit ?? 'model units'}, no CRS): GCPs, footprints, GPS positions `
-        + 'and reference rasters are hidden.')
+      out.unshift(
+        `Model frame (${modelFrame.value?.unit ?? 'model units'}, no CRS): GCPs, footprints, GPS positions ` +
+          'and reference rasters are hidden.',
+      )
     }
     return out
   })
@@ -144,9 +162,11 @@ export function useMapProducts() {
   // until the read lands it shows the overview's value, and `fullCell` (reactive) makes
   // the status bar re-probe when it does. One read in flight; the newest cell next.
   const fullCell = shallowRef(null) // { key, value }
-  let cellBusy = false, cellWanted = null
+  let cellBusy = false,
+    cellWanted = null
   function fullResolutionProbe(hit, dem, x, y) {
-    const col = Math.floor((x - dem.originX) / dem.fullGsd), row = Math.floor((dem.originY - y) / dem.fullGsd)
+    const col = Math.floor((x - dem.originX) / dem.fullGsd),
+      row = Math.floor((dem.originY - y) / dem.fullGsd)
     const key = `${dem.createdAt}:${col}:${row}`
     if (fullCell.value?.key === key) return { ...hit, value: fullCell.value.value }
     cellWanted = { key, dem, x: dem.originX + (col + 0.5) * dem.fullGsd, y: dem.originY - (row + 0.5) * dem.fullGsd }
@@ -163,7 +183,9 @@ export function useMapProducts() {
       try {
         const w = await readDemWindow({ dem: demRef(dem), rect: { minX: x, maxX: x, minY: y, maxY: y }, maxCells: 1 })
         value = w && Number.isFinite(w.data[0]) ? w.data[0] : null
-      } catch { value = null }
+      } catch {
+        value = null
+      }
       fullCell.value = { key, value }
     }
     cellBusy = false
@@ -177,17 +199,28 @@ export function useMapProducts() {
     const layers = productMapLayers.value
     for (let i = layers.length - 1; i >= 0; i--) {
       const layer = layers[i]
-      let rx = x, ry = y
+      let rx = x,
+        ry = y
       if (layer.offset) {
-        rx = x - layer.offset[0]; ry = y - layer.offset[1]
+        rx = x - layer.offset[0]
+        ry = y - layer.offset[1]
       } else if (layer.crs !== projects.currentCrs) {
-        try { [rx, ry] = transform([x, y], projects.currentCrs, layer.crs) } catch { continue }
+        try {
+          ;[rx, ry] = transform([x, y], projects.currentCrs, layer.crs)
+        } catch {
+          continue
+        }
       }
       const src = sources[layer.kind].value
       const px = src?.worldToPixel(rx, ry)
       if (!px || px.col < 0 || px.row < 0 || px.col >= layer.width || px.row >= layer.height) continue
-      const hit = { id: layer.id, name: layer.name, kind: layer.kind, loaded: true,
-        value: layer.kind === 'dem' ? src.cellValueAt(rx, ry) : null }
+      const hit = {
+        id: layer.id,
+        name: layer.name,
+        kind: layer.kind,
+        loaded: true,
+        value: layer.kind === 'dem' ? src.cellValueAt(rx, ry) : null,
+      }
       if (layer.kind === 'dem' && recon.dem?.cog) return fullResolutionProbe(hit, recon.dem, rx, ry)
       return hit
     }
@@ -197,16 +230,22 @@ export function useMapProducts() {
   // ── Measuring on the map ─────────────────────────────────────────────
   // Targets are the map's raster layers. Automatic choice: the first DEM, since
   // only a DEM serves every tool (profile, volume) — else the top layer.
-  const measureTargets = computed(() => mapLayers.value.map((l) => ({
-    id: l.id, name: l.name, kind: l.kind === 'dem' ? 'dem' : 'ortho',
-  })))
+  const measureTargets = computed(() =>
+    mapLayers.value.map((l) => ({
+      id: l.id,
+      name: l.name,
+      kind: l.kind === 'dem' ? 'dem' : 'ortho',
+    })),
+  )
   const measureTargetId = computed(() => {
     const ts = measureTargets.value
     if (!ts.length) return null
     if (measureChoice.value && ts.some((t) => t.id === measureChoice.value)) return measureChoice.value
     return (ts.find((t) => t.kind === 'dem') ?? ts[ts.length - 1]).id
   })
-  function setMeasureTarget(id) { measureChoice.value = id }
+  function setMeasureTarget(id) {
+    measureChoice.value = id
+  }
   // What RasterMeasurements needs for the target: the record it stamps and labels
   // measurements with, its RasterSource (computed or imported alike — an imported
   // one only once hydrated), and a computed product's frame status.
@@ -226,22 +265,42 @@ export function useMapProducts() {
   // the map frame. Only computed while the model map is showing.
   const modelMarkers = shallowRef([])
   let markerToken = 0
-  watch([() => mode.value, () => modelFrame.value, () => gcpsStore.gcps], async () => {
-    const t = ++markerToken
-    const f = modelFrame.value?.frame
-    if (mode.value !== 'model' || !f) { modelMarkers.value = []; return }
-    try {
-      const list = await recon.markerPositions()
-      if (t !== markerToken) return
-      modelMarkers.value = list.map((m) => { const [x, y] = f.fromSfm(m.pos); return { id: m.id, name: m.name, x, y } })
-    } catch {
-      if (t === markerToken) modelMarkers.value = []
-    }
-  }, { deep: true, immediate: true })
+  watch(
+    [() => mode.value, () => modelFrame.value, () => gcpsStore.gcps],
+    async () => {
+      const t = ++markerToken
+      const f = modelFrame.value?.frame
+      if (mode.value !== 'model' || !f) {
+        modelMarkers.value = []
+        return
+      }
+      try {
+        const list = await recon.markerPositions()
+        if (t !== markerToken) return
+        modelMarkers.value = list.map((m) => {
+          const [x, y] = f.fromSfm(m.pos)
+          return { id: m.id, name: m.name, x, y }
+        })
+      } catch {
+        if (t === markerToken) modelMarkers.value = []
+      }
+    },
+    { deep: true, immediate: true },
+  )
 
   return {
-    mapMode: mode, toggleModelFrame, mapFrame, modelCameras, modelMarkers, mapNotes: notes,
-    productMapLayers, mapLayers, probeAt,
-    measureTargets, measureTargetId, setMeasureTarget, measureTarget,
+    mapMode: mode,
+    toggleModelFrame,
+    mapFrame,
+    modelCameras,
+    modelMarkers,
+    mapNotes: notes,
+    productMapLayers,
+    mapLayers,
+    probeAt,
+    measureTargets,
+    measureTargetId,
+    setMeasureTarget,
+    measureTarget,
   }
 }

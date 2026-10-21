@@ -12,7 +12,8 @@ export const SOURCE_UNREADABLE = 'thumbnail source unreadable:'
 
 // Output size: the long side becomes `maxDim` (never upscaled), aspect kept, ≥ 1 px.
 export function thumbnailSize(width, height, maxDim = THUMB_MAX_DIM) {
-  const w = Math.max(1, Math.round(width || 1)), h = Math.max(1, Math.round(height || 1))
+  const w = Math.max(1, Math.round(width || 1)),
+    h = Math.max(1, Math.round(height || 1))
   const s = Math.min(1, maxDim / Math.max(w, h))
   return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)) }
 }
@@ -26,9 +27,7 @@ export function decodeResizeOptions(hint, maxDim = THUMB_MAX_DIM) {
   const portrait = hint?.width > 0 && hint?.height > 0 && hint.height > hint.width
   const longSide = portrait ? hint.height : hint?.width
   if (longSide > 0 && longSide <= maxDim) return { resizeQuality: 'medium' }
-  return portrait
-    ? { resizeHeight: maxDim, resizeQuality: 'medium' }
-    : { resizeWidth: maxDim, resizeQuality: 'medium' }
+  return portrait ? { resizeHeight: maxDim, resizeQuality: 'medium' } : { resizeWidth: maxDim, resizeQuality: 'medium' }
 }
 
 // source: a Blob, or a URL string (blob: URLs resolve in a worker of this origin).
@@ -39,7 +38,11 @@ export async function renderThumbnail(source, { maxDim = THUMB_MAX_DIM, quality 
     // Tagged so the caller can tell "the image's URL is dead" (heal the image) from
     // "this image will not decode" (give up on its thumbnail).
     let resp
-    try { resp = await fetch(source) } catch (err) { throw new Error(`${SOURCE_UNREADABLE} ${err?.message ?? err}`) }
+    try {
+      resp = await fetch(source)
+    } catch (err) {
+      throw new Error(`${SOURCE_UNREADABLE} ${err?.message ?? err}`)
+    }
     if (!resp.ok) throw new Error(`${SOURCE_UNREADABLE} HTTP ${resp.status}`)
     blob = await resp.blob()
   }

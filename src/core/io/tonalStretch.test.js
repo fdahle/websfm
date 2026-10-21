@@ -9,7 +9,10 @@ describe('percentileRange', () => {
     expect(r.lo).toBe(6000 + 49 * 3)
     expect(r.hi).toBe(6000 + 9949 * 3)
     const withAlpha = new Uint16Array(2 * n)
-    gray.forEach((v, i) => { withAlpha[2 * i] = v; withAlpha[2 * i + 1] = 65535 })
+    gray.forEach((v, i) => {
+      withAlpha[2 * i] = v
+      withAlpha[2 * i + 1] = 65535
+    })
     expect(percentileRange(withAlpha, 2)).toEqual(r)
     // Parity with crates/imagecodec gray16_ramp_stretch_matches_js: DN 20997 → 128.
     const out = stretch16ToRgba(gray, n, 1, 1, r)
@@ -47,7 +50,7 @@ describe('stretch16ToRgba', () => {
     const r = percentileRange(s, 1)
     const out = stretch16ToRgba(s, 1000, 1, 1, r)
     const highByteSpan = (37000 >> 8) - (6300 >> 8) // 120 levels
-    const stretchedSpan = out[(999) * 4] - out[0]
+    const stretchedSpan = out[999 * 4] - out[0]
     expect(highByteSpan).toBeLessThan(130)
     expect(stretchedSpan).toBe(255)
   })

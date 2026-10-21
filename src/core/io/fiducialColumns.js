@@ -6,14 +6,14 @@
 // fiducial importer (pixels).
 
 export const FIDUCIAL_POSITIONS = [
-  { slot: 'corner-tl', label: 'top-left',     corner: 'top_?left|upper_?left' },
-  { slot: 'corner-tr', label: 'top-right',    corner: 'top_?right|upper_?right' },
+  { slot: 'corner-tl', label: 'top-left', corner: 'top_?left|upper_?left' },
+  { slot: 'corner-tr', label: 'top-right', corner: 'top_?right|upper_?right' },
   { slot: 'corner-br', label: 'bottom-right', corner: 'bottom_?right|lower_?right' },
-  { slot: 'corner-bl', label: 'bottom-left',  corner: 'bottom_?left|lower_?left' },
-  { slot: 'side-top',    label: 'top midside',    side: 'top' },
-  { slot: 'side-right',  label: 'right midside',  side: 'right' },
+  { slot: 'corner-bl', label: 'bottom-left', corner: 'bottom_?left|lower_?left' },
+  { slot: 'side-top', label: 'top midside', side: 'top' },
+  { slot: 'side-right', label: 'right midside', side: 'right' },
   { slot: 'side-bottom', label: 'bottom midside', side: 'bottom' },
-  { slot: 'side-left',   label: 'left midside',   side: 'left' },
+  { slot: 'side-left', label: 'left midside', side: 'left' },
 ]
 
 // The header pattern for one position's x or y column. `unit` 'mm' requires the
@@ -34,7 +34,8 @@ export function fiducialColumns(headerCells, unit) {
       const i = headerCells.findIndex((c) => re.test(String(c ?? '').trim()))
       return i === -1 ? null : i
     }
-    const x = find('x'), y = find('y')
+    const x = find('x'),
+      y = find('y')
     if (x != null && y != null) out[p.slot] = { x, y }
   }
   return out

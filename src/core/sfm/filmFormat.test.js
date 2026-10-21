@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
-  isKnownAerialFilmWidth, suggestFilmFormat, filmFormatStatus, scanWidthPx, usesFormatWidth,
+  isKnownAerialFilmWidth,
+  suggestFilmFormat,
+  filmFormatStatus,
+  scanWidthPx,
+  usesFormatWidth,
 } from './filmFormat.js'
 import { resolveK } from './reconstruction.js'
 
@@ -37,7 +41,7 @@ describe('suggestFilmFormat', () => {
 
   it('offers nothing outside the ±15 % tolerance (a different mistake, not a pitch slip)', () => {
     expect(suggestFilmFormat(126.7)).toBeNull() // a halved pitch on a 253 mm scan
-    expect(suggestFilmFormat(36)).toBeNull()    // a full-frame digital sensor
+    expect(suggestFilmFormat(36)).toBeNull() // a full-frame digital sensor
     expect(suggestFilmFormat(264)).not.toBeNull()
     expect(suggestFilmFormat(266)).toBeNull()
   })

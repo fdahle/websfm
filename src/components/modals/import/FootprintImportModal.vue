@@ -6,12 +6,12 @@ import { geoJsonToFootprints, guessNameKey } from '../../../core/io/geojson.js'
 import { makeNameResolver } from '../../../core/io/nameMatch.js'
 
 const props = defineProps({
-  features:     { type: Array,  default: () => [] },
-  propertyKeys: { type: Array,  default: () => [] },
-  detectedCrs:  { type: String, default: 'EPSG:4326' },
-  fileName:     { type: String, default: 'footprint file' },
-  projectCrs:   { type: String, default: 'EPSG:4326' },
-  images:       { type: Array,  default: () => [] },
+  features: { type: Array, default: () => [] },
+  propertyKeys: { type: Array, default: () => [] },
+  detectedCrs: { type: String, default: 'EPSG:4326' },
+  fileName: { type: String, default: 'footprint file' },
+  projectCrs: { type: String, default: 'EPSG:4326' },
+  images: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['close', 'import'])
 
@@ -35,7 +35,7 @@ const preview = computed(() =>
     name: fp.name,
     vertices: fp.rings.reduce((n, r) => n + r.length, 0),
     matched: !!matchImage(fp.imageName),
-  }))
+  })),
 )
 
 const matchedCount = computed(() => built.value.filter((fp) => matchImage(fp.imageName)).length)
@@ -69,7 +69,11 @@ function doImport() {
       <div class="table-wrap">
         <table class="preview">
           <thead>
-            <tr><th>Name</th><th>Vertices</th><th>Matched image</th></tr>
+            <tr>
+              <th>Name</th>
+              <th>Vertices</th>
+              <th>Matched image</th>
+            </tr>
           </thead>
           <tbody>
             <tr v-for="(p, i) in preview" :key="i">
@@ -104,9 +108,23 @@ function doImport() {
 /* Only what differs from the shared import-preview styling (see ui/import-modal.css).
    This modal has no column-role assignment (no ColumnMappingTable): it styles its
    header row directly and keeps body cells in the UI font. */
-.controls { grid-template-columns: auto 1fr; }
-.preview th { background: var(--bg); color: var(--text-dim); font-weight: 600; position: sticky; top: 0; }
-.preview td { color: var(--text); }
-td .ok { color: #3fae6a; }
-td .dim { color: var(--text-dim); }
+.controls {
+  grid-template-columns: auto 1fr;
+}
+.preview th {
+  background: var(--bg);
+  color: var(--text-dim);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+.preview td {
+  color: var(--text);
+}
+td .ok {
+  color: #3fae6a;
+}
+td .dim {
+  color: var(--text-dim);
+}
 </style>

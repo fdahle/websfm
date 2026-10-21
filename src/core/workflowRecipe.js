@@ -20,8 +20,15 @@
 // JSON (strings quoted, arrays in brackets); a bare word that is not JSON reads as a
 // string. `#` starts a comment outside quotes.
 import {
-  BLOCK_NAME_RE, DISPLAY_LEVELS, REUSE_POLICIES, WARNING_POLICIES, WORKFLOW_BLOCK_BY_ID,
-  blockTargets, createWorkflowBlock, normalizeWorkflow, workflowSettingKeys,
+  BLOCK_NAME_RE,
+  DISPLAY_LEVELS,
+  REUSE_POLICIES,
+  WARNING_POLICIES,
+  WORKFLOW_BLOCK_BY_ID,
+  blockTargets,
+  createWorkflowBlock,
+  normalizeWorkflow,
+  workflowSettingKeys,
 } from './workflow.js'
 import { END_TARGET, GATE_METRIC_BY_ID, formatGateNumber } from './workflowGate.js'
 
@@ -29,8 +36,10 @@ const WORKFLOW_WARNING = ['pause', 'continue', 'stop']
 const WORKFLOW_REUSE = ['valid', 'ask', 'rerun']
 
 export function workflowRecipeText(workflow) {
-  const lines = [`workflow ${JSON.stringify(workflow.name)}`,
-    `defaults warning=${workflow.defaults.warningPolicy} reuse=${workflow.defaults.reusePolicy} display=${workflow.displayLevel ?? 'standard'}`]
+  const lines = [
+    `workflow ${JSON.stringify(workflow.name)}`,
+    `defaults warning=${workflow.defaults.warningPolicy} reuse=${workflow.defaults.reusePolicy} display=${workflow.displayLevel ?? 'standard'}`,
+  ]
   for (const block of workflow.blocks) {
     const spec = WORKFLOW_BLOCK_BY_ID.get(block.type)
     const parts = []
@@ -79,84 +88,90 @@ export function parseWorkflowRecipe(text, base = null) {
   let displayLevel = null
   const blocks = []
 
-  String(text ?? '').split(/\r?\n/).forEach((raw, i) => {
-    const line = i + 1
-    let tokens
-    try {
-      tokens = tokenize(raw)
-    } catch (err) {
-      fail(line, err.message)
-      return
-    }
-    if (!tokens.length) return
-    const head = tokens[0]
+  String(text ?? '')
+    .split(/\r?\n/)
+    .forEach((raw, i) => {
+      const line = i + 1
+      let tokens
+      try {
+        tokens = tokenize(raw)
+      } catch (err) {
+        fail(line, err.message)
+        return
+      }
+      if (!tokens.length) return
+      const head = tokens[0]
 
-    if (head.text === 'workflow' && !head.value) {
-      if (name != null) return fail(line, 'the workflow name is given twice')
-      if (blocks.length) return fail(line, '“workflow” must come before the first block')
-      if (tokens.length !== 2 || tokens[1].key != null || typeof tokens[1].value !== 'string') {
-        return fail(line, 'expected workflow "Name"')
+      if (head.text === 'workflow' && !head.value) {
+        if (name != null) return fail(line, 'the workflow name is given twice')
+        if (blocks.length) return fail(line, '“workflow” must come before the first block')
+        if (tokens.length !== 2 || tokens[1].key != null || typeof tokens[1].value !== 'string') {
+          return fail(line, 'expected workflow "Name"')
+        }
+        name = tokens[1].value
+        return
       }
-      name = tokens[1].value
-      return
-    }
-    if (head.text === 'defaults' && !head.value) {
-      if (defaults) return fail(line, 'defaults are given twice')
-      if (blocks.length) return fail(line, '“defaults” must come before the first block')
-      defaults = { warningPolicy: 'pause', reusePolicy: 'valid' }
-      for (const t of tokens.slice(1)) {
-        if (t.key === 'warning' && WORKFLOW_WARNING.includes(t.value)) defaults.warningPolicy = t.value
-        else if (t.key === 'reuse' && WORKFLOW_REUSE.includes(t.value)) defaults.reusePolicy = t.value
-        else if (t.key === 'display' && DISPLAY_LEVELS.includes(t.value)) displayLevel = t.value
-        else return fail(line, `defaults: “${t.text}” is not one of warning=${WORKFLOW_WARNING.join('|')}, reuse=${WORKFLOW_REUSE.join('|')}, display=${DISPLAY_LEVELS.join('|')}`)
+      if (head.text === 'defaults' && !head.value) {
+        if (defaults) return fail(line, 'defaults are given twice')
+        if (blocks.length) return fail(line, '“defaults” must come before the first block')
+        defaults = { warningPolicy: 'pause', reusePolicy: 'valid' }
+        for (const t of tokens.slice(1)) {
+          if (t.key === 'warning' && WORKFLOW_WARNING.includes(t.value)) defaults.warningPolicy = t.value
+          else if (t.key === 'reuse' && WORKFLOW_REUSE.includes(t.value)) defaults.reusePolicy = t.value
+          else if (t.key === 'display' && DISPLAY_LEVELS.includes(t.value)) displayLevel = t.value
+          else
+            return fail(
+              line,
+              `defaults: “${t.text}” is not one of warning=${WORKFLOW_WARNING.join('|')}, reuse=${WORKFLOW_REUSE.join('|')}, display=${DISPLAY_LEVELS.join('|')}`,
+            )
+        }
+        return
       }
-      return
-    }
 
-    // A block line.
-    let rest = tokens
-    let blockName = ''
-    if (rest[0].key == null && rest[0].text.endsWith(':')) {
-      blockName = rest[0].text.slice(0, -1)
-      if (!BLOCK_NAME_RE.test(blockName) || blockName === END_TARGET) {
-        return fail(line, `“${blockName}” is not a usable block name (letters, digits, - and _; not “end”)`)
+      // A block line.
+      let rest = tokens
+      let blockName = ''
+      if (rest[0].key == null && rest[0].text.endsWith(':')) {
+        blockName = rest[0].text.slice(0, -1)
+        if (!BLOCK_NAME_RE.test(blockName) || blockName === END_TARGET) {
+          return fail(line, `“${blockName}” is not a usable block name (letters, digits, - and _; not “end”)`)
+        }
+        rest = rest.slice(1)
       }
-      rest = rest.slice(1)
-    }
-    if (!rest.length) return fail(line, `“${blockName}:” names no block`)
-    const type = rest[0].text
-    const spec = rest[0].key == null ? WORKFLOW_BLOCK_BY_ID.get(type) : null
-    if (!spec) return fail(line, `unknown block “${type}”`)
-    const block = createWorkflowBlock(type, blockName)
-    const keys = workflowSettingKeys(type)
-    const seen = new Set()
-    for (const t of rest.slice(1)) {
-      if (t.text === '@off' && t.key == null) {
-        if (!block.enabled) return fail(line, '@off is given twice')
-        block.enabled = false
-        continue
-      }
-      if (t.key === '@reuse' || t.key === '@warning') {
-        const allowed = t.key === '@reuse' ? REUSE_POLICIES : WARNING_POLICIES
-        if (!allowed.includes(t.value)) return fail(line, `${t.key} must be one of ${allowed.join(', ')}`)
-        if (seen.has(t.key)) return fail(line, `${t.key} is given twice`)
+      if (!rest.length) return fail(line, `“${blockName}:” names no block`)
+      const type = rest[0].text
+      const spec = rest[0].key == null ? WORKFLOW_BLOCK_BY_ID.get(type) : null
+      if (!spec) return fail(line, `unknown block “${type}”`)
+      const block = createWorkflowBlock(type, blockName)
+      const keys = workflowSettingKeys(type)
+      const seen = new Set()
+      for (const t of rest.slice(1)) {
+        if (t.text === '@off' && t.key == null) {
+          if (!block.enabled) return fail(line, '@off is given twice')
+          block.enabled = false
+          continue
+        }
+        if (t.key === '@reuse' || t.key === '@warning') {
+          const allowed = t.key === '@reuse' ? REUSE_POLICIES : WARNING_POLICIES
+          if (!allowed.includes(t.value)) return fail(line, `${t.key} must be one of ${allowed.join(', ')}`)
+          if (seen.has(t.key)) return fail(line, `${t.key} is given twice`)
+          seen.add(t.key)
+          block[t.key === '@reuse' ? 'reusePolicy' : 'warningPolicy'] = t.value
+          continue
+        }
+        if (t.key == null) return fail(line, `“${t.text}” is not a setting (expected key=value)`)
+        if (!keys.has(t.key)) {
+          return fail(line, `${type} has no setting “${t.key}” (settings: ${[...keys].join(', ')})`)
+        }
+        if (seen.has(t.key)) return fail(line, `setting “${t.key}” is given twice`)
         seen.add(t.key)
-        block[t.key === '@reuse' ? 'reusePolicy' : 'warningPolicy'] = t.value
-        continue
+        const problem = settingProblem(spec, t.key, t.value)
+        if (problem) return fail(line, `${type} ${t.key}: ${problem}`)
+        block.settings[t.key] = t.value
       }
-      if (t.key == null) return fail(line, `“${t.text}” is not a setting (expected key=value)`)
-      if (!keys.has(t.key)) {
-        return fail(line, `${type} has no setting “${t.key}” (settings: ${[...keys].join(', ')})`)
-      }
-      if (seen.has(t.key)) return fail(line, `setting “${t.key}” is given twice`)
-      seen.add(t.key)
-      const problem = settingProblem(spec, t.key, t.value)
-      if (problem) return fail(line, `${type} ${t.key}: ${problem}`)
-      block.settings[t.key] = t.value
-    }
-    block.line = line
-    blocks.push(block)
-  })
+      block.line = line
+      blocks.push(block)
+    })
 
   // Jumps must name a block of this recipe (or `end`).
   const names = new Map()
@@ -205,7 +220,8 @@ function settingProblem(spec, key, value) {
   }
   if (type === 'number') return typeof value === 'number' ? null : 'expected a number'
   if (type === 'boolean') return typeof value === 'boolean' ? null : 'expected true or false'
-  if (type === 'text' || type === 'target' || type === 'string') return typeof value === 'string' ? null : 'expected a quoted string'
+  if (type === 'text' || type === 'target' || type === 'string')
+    return typeof value === 'string' ? null : 'expected a quoted string'
   if (type === 'array') return Array.isArray(value) ? null : 'expected a list'
   return null
 }
@@ -274,7 +290,10 @@ function scanBracket(line, i) {
   let j = i
   while (j < line.length) {
     const c = line[j]
-    if (c === '"') { j = scanString(line, j); continue }
+    if (c === '"') {
+      j = scanString(line, j)
+      continue
+    }
     if (c === '[' || c === '{') depth++
     else if (c === ']' || c === '}') {
       depth--

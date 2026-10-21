@@ -21,7 +21,8 @@ export function depthWorkerCount({ n, poolSize, budget, perWorkerBytes, minPerWo
  */
 export function contiguousChunks(n, parts) {
   return Array.from({ length: parts }, (_, w) => {
-    const a = Math.floor(w * n / parts), b = Math.floor((w + 1) * n / parts)
+    const a = Math.floor((w * n) / parts),
+      b = Math.floor(((w + 1) * n) / parts)
     return Array.from({ length: b - a }, (_, k) => a + k)
   })
 }

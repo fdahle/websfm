@@ -23,14 +23,20 @@ const emit = defineEmits(['close', 'run'])
 
 const kind = ref(props.dem ? 'dem' : 'ortho')
 const product = computed(() => (kind.value === 'ortho' ? props.ortho : props.dem))
-const candidates = computed(() => props.measurements.filter((m) => (m.kind === 'area' || m.kind === 'volume')
-  && m.source === `product:${kind.value}` && (m.world?.length ?? 0) >= 3))
+const candidates = computed(() =>
+  props.measurements.filter(
+    (m) =>
+      (m.kind === 'area' || m.kind === 'volume') && m.source === `product:${kind.value}` && (m.world?.length ?? 0) >= 3,
+  ),
+)
 const sourceMode = ref(candidates.value.length ? 'measurement' : 'file')
 // Always one of THIS product's measurements (the first, unless the user picked another).
 const { id: measurementId } = useSourcePick(candidates)
 // The measurements are per product: switching DEM ↔ orthophoto re-decides the polygon
 // source from the new product's own, instead of keeping a mode with nothing to pick.
-watch(kind, () => { sourceMode.value = candidates.value.length ? 'measurement' : 'file' })
+watch(kind, () => {
+  sourceMode.value = candidates.value.length ? 'measurement' : 'file'
+})
 const filePolygons = ref(null)
 const fileNote = ref('')
 const compression = ref('deflate')
@@ -58,7 +64,11 @@ const polygons = computed(() => {
 })
 
 function run() {
-  emit('run', { kind: kind.value, polygons: JSON.parse(JSON.stringify(polygons.value)), compression: compression.value })
+  emit('run', {
+    kind: kind.value,
+    polygons: JSON.parse(JSON.stringify(polygons.value)),
+    compression: compression.value,
+  })
 }
 </script>
 
@@ -76,17 +86,34 @@ function run() {
       </SettingsGroup>
       <SettingsGroup title="Polygon">
         <SettingsField>
-          <label class="checkbox-row"><input v-model="sourceMode" type="radio" value="measurement" class="checkbox" :disabled="!candidates.length" />
-            A saved area measurement on this {{ kind === 'ortho' ? 'orthophoto' : 'DEM' }}</label>
-          <label class="checkbox-row"><input v-model="sourceMode" type="radio" value="file" class="checkbox" /> A GeoJSON file</label>
+          <label class="checkbox-row"
+            ><input
+              v-model="sourceMode"
+              type="radio"
+              value="measurement"
+              class="checkbox"
+              :disabled="!candidates.length"
+            />
+            A saved area measurement on this {{ kind === 'ortho' ? 'orthophoto' : 'DEM' }}</label
+          >
+          <label class="checkbox-row"
+            ><input v-model="sourceMode" type="radio" value="file" class="checkbox" /> A GeoJSON file</label
+          >
         </SettingsField>
-        <SettingsField v-if="sourceMode === 'measurement'" label="Measurement" label-for="clip-m"
-          hint="Draw one with the raster's Measure ▸ Area tool and save it.">
+        <SettingsField
+          v-if="sourceMode === 'measurement'"
+          label="Measurement"
+          label-for="clip-m"
+          hint="Draw one with the raster's Measure ▸ Area tool and save it."
+        >
           <select id="clip-m" v-model="measurementId" class="field-select">
             <option v-for="m in candidates" :key="m.id" :value="m.id">{{ m.name }}</option>
           </select>
         </SettingsField>
-        <SettingsField v-else :hint="fileNote || 'Polygon / MultiPolygon in the product\'s own coordinates (holes supported).'">
+        <SettingsField
+          v-else
+          :hint="fileNote || 'Polygon / MultiPolygon in the product\'s own coordinates (holes supported).'"
+        >
           <input type="file" accept=".geojson,.json,application/geo+json" class="field-input" @change="onFile" />
         </SettingsField>
       </SettingsGroup>

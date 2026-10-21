@@ -2,13 +2,26 @@ import { describe, it, expect, vi } from 'vitest'
 import { runConsoleLine, splitArgs, findImage, statsLines, matchStatsLines, argCompletionsFor } from './console.js'
 import { completions } from './commands.js'
 import {
-  parseTuningKey, parseTuningValue, mergeOverrides, setPath, describeOverrides, tuningKeys,
+  parseTuningKey,
+  parseTuningValue,
+  mergeOverrides,
+  setPath,
+  describeOverrides,
+  tuningKeys,
 } from './consoleSettings.js'
 import { SFM_TUNING } from '../tuning.js'
 
 const READY = {
-  projectReady: true, imageCount: 3, kpImageCount: 3, matchCount: 2, sparseReady: true,
-  depthMapCount: 3, cloudReady: true, denseReady: true, meshReady: true, sceneType: 'aerial',
+  projectReady: true,
+  imageCount: 3,
+  kpImageCount: 3,
+  matchCount: 2,
+  sparseReady: true,
+  depthMapCount: 3,
+  cloudReady: true,
+  denseReady: true,
+  meshReady: true,
+  sceneType: 'aerial',
 }
 const IMAGES = [
   { id: 1, uuid: 'u1', name: 'DJI_0001.JPG' },
@@ -21,11 +34,16 @@ function fakeEnv(over = {}) {
   let overrides = {}
   const env = {
     lines: [],
-    log(m, level = 'info') { env.lines.push([level, m]) },
+    log(m, level = 'info') {
+      env.lines.push([level, m])
+    },
     clear: vi.fn(),
     state: () => READY,
     dispatch: vi.fn(),
-    workflows: () => [{ id: 'w1', name: 'Full pipeline', blocks: [] }, { id: 'w2', name: 'Products', blocks: [] }],
+    workflows: () => [
+      { id: 'w1', name: 'Full pipeline', blocks: [] },
+      { id: 'w2', name: 'Products', blocks: [] },
+    ],
     startWorkflow: vi.fn(async () => true),
     workflowStatus: () => ({ running: false, pause: null }),
     respond: vi.fn(),
@@ -34,7 +52,12 @@ function fakeEnv(over = {}) {
     pairState: vi.fn((a, b) => (a === 'u1' && b === 'u2' ? { pid: 'u1--u2', enabled: true, inliers: 120 } : null)),
     setPairEnabled: vi.fn(),
     selectImage: vi.fn(),
-    tuning: { get: (g) => overrides[g] ?? {}, set: (g, path, v) => { overrides = { ...overrides, [g]: setPath(overrides[g], path, v) } } },
+    tuning: {
+      get: (g) => overrides[g] ?? {},
+      set: (g, path, v) => {
+        overrides = { ...overrides, [g]: setPath(overrides[g], path, v) }
+      },
+    },
     ...over,
   }
   return env
@@ -50,7 +73,7 @@ describe('dispatch', () => {
     expect(env.dispatch).toHaveBeenCalledWith('decimate-mesh')
   })
 
-  it('guards with the ribbon\'s prerequisites', () => {
+  it("guards with the ribbon's prerequisites", () => {
     const env = fakeEnv({ state: () => ({ ...READY, meshReady: false }) })
     runConsoleLine('crop mesh', env)
     expect(env.dispatch).not.toHaveBeenCalled()
@@ -75,7 +98,7 @@ describe('dispatch', () => {
 })
 
 describe('help', () => {
-  it('prints a command\'s usage and a tab\'s commands', () => {
+  it("prints a command's usage and a tab's commands", () => {
     const env = fakeEnv()
     runConsoleLine('help pair', env)
     expect(text(env)).toContain('usage: pair disable <imageA> <imageB>')
@@ -116,7 +139,10 @@ describe('run', () => {
   it('reports a blocked preflight and clears it', async () => {
     let pause = null
     const env = fakeEnv({
-      startWorkflow: vi.fn(async () => { pause = { kind: 'blocked', message: 'Depth Maps: requires sparse' }; return false }),
+      startWorkflow: vi.fn(async () => {
+        pause = { kind: 'blocked', message: 'Depth Maps: requires sparse' }
+        return false
+      }),
       workflowStatus: () => ({ running: false, pause }),
     })
     runConsoleLine('run depth', env)
@@ -140,7 +166,9 @@ describe('set', () => {
   it('echoes old → new and validates the type against the default', () => {
     const env = fakeEnv()
     runConsoleLine('set sfm.minPnpInlierRatio 0.5', env)
-    expect(last(env)[1]).toBe(`sfm.minPnpInlierRatio: ${SFM_TUNING.minPnpInlierRatio} → 0.5 (default ${SFM_TUNING.minPnpInlierRatio}) — applies to the next Sparse Model run, this session only`)
+    expect(last(env)[1]).toBe(
+      `sfm.minPnpInlierRatio: ${SFM_TUNING.minPnpInlierRatio} → 0.5 (default ${SFM_TUNING.minPnpInlierRatio}) — applies to the next Sparse Model run, this session only`,
+    )
     expect(env.tuning.get('sfm')).toEqual({ minPnpInlierRatio: 0.5 })
     runConsoleLine('set sfm.minPnpInlierRatio lots', env)
     expect(last(env)).toEqual(['error', 'sfm.minPnpInlierRatio expects a number, got "lots"'])
@@ -219,15 +247,31 @@ describe('helpers', () => {
   })
 
   it('formats stats and match stats', () => {
-    const lines = statsLines({ images: 3, detected: 3, keypoints: 30000, pairs: { total: 3, verified: 2, excluded: 1 },
-      sparse: { cameras: 3, points: 1234 }, dense: [{ name: 'Dense', points: 1e6 }], meshes: [], dem: null, ortho: null,
-      frame: 'model units (no georeference or scale)' })
+    const lines = statsLines({
+      images: 3,
+      detected: 3,
+      keypoints: 30000,
+      pairs: { total: 3, verified: 2, excluded: 1 },
+      sparse: { cameras: 3, points: 1234 },
+      dense: [{ name: 'Dense', points: 1e6 }],
+      meshes: [],
+      dem: null,
+      ortho: null,
+      frame: 'model units (no georeference or scale)',
+    })
     expect(lines).toContain('Pairs: 2 verified of 3 matched, 1 excluded')
     expect(lines).toContain('Sparse model: 3 of 3 images registered, 1,234 points')
-    const m = matchStatsLines([
-      { nameA: 'a', nameB: 'b', idA: 1, idB: 2, inliers: 50, enabled: true },
-      { nameA: 'a', nameB: 'c', idA: 1, idB: 3, inliers: 10, enabled: false },
-    ], [{ id: 1, name: 'a' }, { id: 2, name: 'b' }, { id: 3, name: 'c' }])
+    const m = matchStatsLines(
+      [
+        { nameA: 'a', nameB: 'b', idA: 1, idB: 2, inliers: 50, enabled: true },
+        { nameA: 'a', nameB: 'c', idA: 1, idB: 3, inliers: 10, enabled: false },
+      ],
+      [
+        { id: 1, name: 'a' },
+        { id: 2, name: 'b' },
+        { id: 3, name: 'c' },
+      ],
+    )
     expect(m).toContain('No verified pair: c')
     expect(m).toContain('Excluded by you: a ↔ c')
   })
@@ -241,8 +285,12 @@ describe('helpers', () => {
 })
 
 describe('consoleSettings', () => {
-  it('parses keys and values by the default\'s type', () => {
-    expect(parseTuningKey('sfm.baSolver.pcgMinN')).toMatchObject({ group: 'sfm', path: ['baSolver', 'pcgMinN'], def: null })
+  it("parses keys and values by the default's type", () => {
+    expect(parseTuningKey('sfm.baSolver.pcgMinN')).toMatchObject({
+      group: 'sfm',
+      path: ['baSolver', 'pcgMinN'],
+      def: null,
+    })
     expect(parseTuningValue('null', null)).toEqual({ value: null })
     expect(parseTuningValue('600', null)).toEqual({ value: 600 })
     expect(parseTuningValue('"response"', 'coarse-first')).toEqual({ value: 'response' })
@@ -251,7 +299,11 @@ describe('consoleSettings', () => {
 
   it('merges nested overrides key by key and describes them', () => {
     const o = { baSolver: { pcgMaxIter: 400 }, minPnpInlierRatio: 0.5 }
-    expect(mergeOverrides({ baSolver: { direct: false }, x: 1 }, o)).toEqual({ baSolver: { direct: false, pcgMaxIter: 400 }, x: 1, minPnpInlierRatio: 0.5 })
+    expect(mergeOverrides({ baSolver: { direct: false }, x: 1 }, o)).toEqual({
+      baSolver: { direct: false, pcgMaxIter: 400 },
+      x: 1,
+      minPnpInlierRatio: 0.5,
+    })
     expect(describeOverrides(o)).toBe('baSolver.pcgMaxIter=400, minPnpInlierRatio=0.5')
     expect(setPath(o, ['baSolver', 'pcgMaxIter'], undefined)).toEqual({ minPnpInlierRatio: 0.5 })
     expect(tuningKeys('sfm')).toContain('sfm.baSolver.pcgRelTol')

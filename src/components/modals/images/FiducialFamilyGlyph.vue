@@ -52,7 +52,9 @@ defineProps({
 </template>
 
 <style scoped>
-.fid-glyph { display: block; }
+.fid-glyph {
+  display: block;
+}
 .film {
   fill: none;
   stroke: currentColor;
@@ -65,8 +67,20 @@ defineProps({
   stroke-width: 2.2;
   stroke-linecap: round;
 }
-.mark .thick, .mark.thick { stroke-width: 3.2; }
-.mark .edge { stroke-width: 1.4; opacity: 0.55; }
-.mark .area { fill: currentColor; fill-opacity: 0.13; }
-.mark .fill { fill: currentColor; stroke: none; }
+.mark .thick,
+.mark.thick {
+  stroke-width: 3.2;
+}
+.mark .edge {
+  stroke-width: 1.4;
+  opacity: 0.55;
+}
+.mark .area {
+  fill: currentColor;
+  fill-opacity: 0.13;
+}
+.mark .fill {
+  fill: currentColor;
+  stroke: none;
+}
 </style>

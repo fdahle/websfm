@@ -27,14 +27,35 @@ export { cameraCenter, scaleK, rgbaToGray } from '../sfm/geometry.js'
 
 export { relativePose } from './denseGeometry.js'
 export {
-  selectSourceViews, seedDepthFromSparse, depthMapForImage, filterDepthMap, qualityToMaxDim, fitDepthQuality, autoBestK, depthMapSettings,
+  selectSourceViews,
+  seedDepthFromSparse,
+  depthMapForImage,
+  filterDepthMap,
+  qualityToMaxDim,
+  fitDepthQuality,
+  autoBestK,
+  depthMapSettings,
 } from './depthMap.js'
 export {
-  filterCandidates, geomFilterLoopShare, filterDepthMapsGeometric, filterDepthMapsGeometricStreamed, logFilterCache,
-  applyPackedMask, filterSettings, filterConfig, logFilterTotals, requiredConsistentViews, emptyFilterTotals,
+  filterCandidates,
+  geomFilterLoopShare,
+  filterDepthMapsGeometric,
+  filterDepthMapsGeometricStreamed,
+  logFilterCache,
+  applyPackedMask,
+  filterSettings,
+  filterConfig,
+  logFilterTotals,
+  requiredConsistentViews,
+  emptyFilterTotals,
 } from './geomFilter.js'
 export { mergePointsSpatial, createVoxelAccumulator } from './voxelAccumulator.js'
 export { fusionCostStats, planFusionSlabs, fusionGates } from './fusionPlan.js'
 export {
-  fuseDepthMaps, fuseDepthMapsStreamed, streamedEligible, logFusionStream, mergeFusionCounters, finishFusion,
+  fuseDepthMaps,
+  fuseDepthMapsStreamed,
+  streamedEligible,
+  logFusionStream,
+  mergeFusionCounters,
+  finishFusion,
 } from './fusion.js'

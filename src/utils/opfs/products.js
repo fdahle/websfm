@@ -18,11 +18,19 @@ import { getProjectDir, getSubDir, readBin, readJson, writeBin, writeJson } from
 
 function validateProduct(kind, product) {
   const n = product.width * product.height
-  if (!Number.isSafeInteger(product.width) || product.width <= 0
-      || !Number.isSafeInteger(product.height) || product.height <= 0 || !Number.isSafeInteger(n)
-      || (kind === 'dem' ? !(product.data instanceof Float32Array) || product.data.length !== n
-        || !(product.mask instanceof Uint8Array) || product.mask.length !== n
-        : !(product.cog instanceof Blob) && !product.cogSaved)) {
+  if (
+    !Number.isSafeInteger(product.width) ||
+    product.width <= 0 ||
+    !Number.isSafeInteger(product.height) ||
+    product.height <= 0 ||
+    !Number.isSafeInteger(n) ||
+    (kind === 'dem'
+      ? !(product.data instanceof Float32Array) ||
+        product.data.length !== n ||
+        !(product.mask instanceof Uint8Array) ||
+        product.mask.length !== n
+      : !(product.cog instanceof Blob) && !product.cogSaved)
+  ) {
     throw new Error('Incomplete or invalid raster product')
   }
 }
@@ -88,10 +96,13 @@ export async function loadProduct(projectId, kind) {
       const cog = meta.binaryFiles?.cog ? await productFile(dir, meta, 'cog') : null
       if (meta.binaryFiles?.cog && !cog) return null
       const { cog: _cogFile, ...planeFiles } = meta.binaryFiles ?? {}
-      const buffers = meta.binaryFiles ? await readBinaryDocument(dir, { ...meta, binaryFiles: planeFiles }, readBin) : null
+      const buffers = meta.binaryFiles
+        ? await readBinaryDocument(dir, { ...meta, binaryFiles: planeFiles }, readBin)
+        : null
       delete meta.binaryFiles
       if (cog) Object.assign(meta, { cog: cog.file, cogSaved: cog.saved })
-      const product = { ...meta,
+      const product = {
+        ...meta,
         data: new Float32Array(buffers ? buffers.data : await readBin(dir, 'dem_data.bin')),
         mask: new Uint8Array(buffers ? buffers.mask : await readBin(dir, 'dem_mask.bin')),
       }
@@ -99,24 +110,33 @@ export async function loadProduct(projectId, kind) {
       // The store turns `previewBlob` into the record's preview URL. A product saved
       // before the sidecar carried its preview inline as a data URL.
       const { previewDataUrl, ...rest } = product
-      const previewBlob = buffers?.preview ? new Blob([buffers.preview], { type: 'image/png' })
-        : (typeof previewDataUrl === 'string' ? dataUrlToBlob(previewDataUrl) : null)
+      const previewBlob = buffers?.preview
+        ? new Blob([buffers.preview], { type: 'image/png' })
+        : typeof previewDataUrl === 'string'
+          ? dataUrlToBlob(previewDataUrl)
+          : null
       return previewBlob ? { ...rest, previewBlob } : rest
-    } catch { return null }
+    } catch {
+      return null
+    }
   })
 }
 
 export async function deleteProduct(projectId, kind) {
-  return trackPersistence('deleteProduct:' + String(projectId) + ':' + String(kind), () => persistenceLock(`product:${projectId}:${kind}`, async () => {
-    const dir = await getSubDir(projectId, 'products')
-    await dir.removeEntry(`${kind}.json`).catch(ignoreMissing)
-    for (const suffix of ['_data.bin', '_mask.bin', '_rgba.bin']) {
-      await dir.removeEntry(`${kind}${suffix}`).catch(ignoreMissing)
-    }
-    if (dir.keys) for await (const name of dir.keys()) {
-      if (name.startsWith(`${kind}.json.`) && name.endsWith('.bin')) await dir.removeEntry(name).catch(ignoreMissing)
-    }
-  }))
+  return trackPersistence('deleteProduct:' + String(projectId) + ':' + String(kind), () =>
+    persistenceLock(`product:${projectId}:${kind}`, async () => {
+      const dir = await getSubDir(projectId, 'products')
+      await dir.removeEntry(`${kind}.json`).catch(ignoreMissing)
+      for (const suffix of ['_data.bin', '_mask.bin', '_rgba.bin']) {
+        await dir.removeEntry(`${kind}${suffix}`).catch(ignoreMissing)
+      }
+      if (dir.keys)
+        for await (const name of dir.keys()) {
+          if (name.startsWith(`${kind}.json.`) && name.endsWith('.bin'))
+            await dir.removeEntry(name).catch(ignoreMissing)
+        }
+    }),
+  )
 }
 
 export async function deleteProducts(projectId) {
@@ -124,6 +144,8 @@ export async function deleteProducts(projectId) {
     try {
       const dir = await getProjectDir(projectId)
       await dir.removeEntry('products', { recursive: true })
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }

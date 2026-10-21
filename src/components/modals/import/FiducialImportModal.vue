@@ -14,8 +14,8 @@ import { planFiducialMarkTargets } from '../../../core/io/fiducialMarks.js'
 //                   sensor (by label, else the only film / only sensor), changeable here.
 const props = defineProps({
   // { kind: 'image', fileName, rows, layout } | { kind: 'camera', fileName, groups }
-  data:    { type: Object, required: true },
-  images:  { type: Array, default: () => [] },
+  data: { type: Object, required: true },
+  images: { type: Array, default: () => [] },
   sensors: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['close', 'import'])
@@ -47,17 +47,21 @@ const groups = computed(() => (props.data.kind === 'camera' ? props.data.groups 
 const planned = computed(() => planFiducialMarkTargets(groups.value, props.sensors))
 const targetChoice = ref({})
 const targetOf = (i) => (i in targetChoice.value ? targetChoice.value[i] || null : planned.value[i])
-const setTarget = (i, id) => { targetChoice.value = { ...targetChoice.value, [i]: id } }
+const setTarget = (i, id) => {
+  targetChoice.value = { ...targetChoice.value, [i]: id }
+}
 const targets = computed(() => groups.value.map((_, i) => targetOf(i)))
 
 // ── Result ──────────────────────────────────────────────────────────────────────
 
-const canImport = computed(() => (props.data.kind === 'image'
-  ? matchedMarks.value > 0
-  : targets.value.some((t, i) => t && groups.value[i].marks.length)))
-const importLabel = computed(() => (props.data.kind === 'image'
-  ? `Import ${plural(matchedMarks.value, 'mark')}`
-  : 'Import Marks'))
+const canImport = computed(() =>
+  props.data.kind === 'image'
+    ? matchedMarks.value > 0
+    : targets.value.some((t, i) => t && groups.value[i].marks.length),
+)
+const importLabel = computed(() =>
+  props.data.kind === 'image' ? `Import ${plural(matchedMarks.value, 'mark')}` : 'Import Marks',
+)
 
 function doImport() {
   if (!canImport.value) return
@@ -71,26 +75,39 @@ function doImport() {
 </script>
 
 <template>
-  <ModalShell :title="data.kind === 'image' ? 'Import Image Fiducials' : 'Import Camera Fiducials'"
-    :aria-label="data.kind === 'image' ? 'Import image fiducials' : 'Import camera fiducials'" width="640px" flush
-    @close="emit('close')">
+  <ModalShell
+    :title="data.kind === 'image' ? 'Import Image Fiducials' : 'Import Camera Fiducials'"
+    :aria-label="data.kind === 'image' ? 'Import image fiducials' : 'Import camera fiducials'"
+    width="640px"
+    flush
+    @close="emit('close')"
+  >
     <div class="import-body">
       <div class="filename">{{ data.fileName }}</div>
 
       <template v-if="data.kind === 'image'">
         <p class="kind-note">
           Fiducial positions in scan pixels, {{ data.layout === 'wide' ? 'one row per image' : 'one row per mark' }}.
-          Files are matched to project images by name. A mark named by its slot keeps it; any other id is placed
-          by its position on the scan. It replaces the image's mark in the same slot.
+          Files are matched to project images by name. A mark named by its slot keeps it; any other id is placed by its
+          position on the scan. It replaces the image's mark in the same slot.
         </p>
         <div class="table-wrap">
           <table class="preview">
-            <thead><tr><th>In file</th><th>Project image</th><th class="num">Marks</th><th>Slots</th></tr></thead>
+            <thead>
+              <tr>
+                <th>In file</th>
+                <th>Project image</th>
+                <th class="num">Marks</th>
+                <th>Slots</th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-for="g in preview" :key="g.fileName" :class="{ missing: g.imageId == null }">
                 <td class="mono">{{ g.fileName }}</td>
                 <td>{{ g.imageName ?? 'not in the project' }}</td>
-                <td class="num">{{ g.marks.length }}<span v-if="g.replaces" class="dim"> ({{ g.replaces }} replaced)</span></td>
+                <td class="num">
+                  {{ g.marks.length }}<span v-if="g.replaces" class="dim"> ({{ g.replaces }} replaced)</span>
+                </td>
                 <td class="slots">{{ g.marks.map(slotText).join(', ') }}</td>
               </tr>
             </tbody>
@@ -98,10 +115,13 @@ function doImport() {
         </div>
         <div class="summary">
           <span v-if="matchedMarks" class="ok">
-            {{ plural(matchedMarks, 'mark') }} for {{ plural(matched.length, 'image') }}<template v-if="replaced">, {{ replaced }} replacing existing marks</template>
+            {{ plural(matchedMarks, 'mark') }} for {{ plural(matched.length, 'image')
+            }}<template v-if="replaced">, {{ replaced }} replacing existing marks</template>
           </span>
           <span v-else class="warn">No file name matches an image in the project.</span>
-          <span v-if="unmatched.length" class="warn"> · {{ plural(unmatched.length, 'image') }} not in the project (skipped)</span>
+          <span v-if="unmatched.length" class="warn">
+            · {{ plural(unmatched.length, 'image') }} not in the project (skipped)</span
+          >
         </div>
         <p v-if="shared" class="kind-note warn-note">
           {{ plural(shared, 'mark') }} land in a slot another mark of the same image also takes; the last one in the
@@ -114,26 +134,44 @@ function doImport() {
       </template>
 
       <template v-else>
-        <p class="kind-note">Camera certificate marks in mm. Each group goes to a sensor, which becomes a film camera.</p>
+        <p class="kind-note">
+          Camera certificate marks in mm. Each group goes to a sensor, which becomes a film camera.
+        </p>
         <p v-if="!sensors.length" class="kind-note warn-note">The project has no sensor yet. Add images first.</p>
         <section v-for="(g, i) in groups" :key="i" class="group">
           <div class="group-head">
             <div>
               <strong>{{ g.sensor || 'Marks' }}</strong>
               <span class="dim">
-                {{ plural(g.marks.length, 'mark') }}<template v-if="g.focalMm != null"> · f {{ fmt(g.focalMm) }} mm</template><template
-                  v-if="g.ppxMm != null || g.ppyMm != null"> · principal point {{ fmt(g.ppxMm) }}, {{ fmt(g.ppyMm) }} mm</template>
+                {{ plural(g.marks.length, 'mark')
+                }}<template v-if="g.focalMm != null"> · f {{ fmt(g.focalMm) }} mm</template
+                ><template v-if="g.ppxMm != null || g.ppyMm != null">
+                  · principal point {{ fmt(g.ppxMm) }}, {{ fmt(g.ppyMm) }} mm</template
+                >
               </span>
             </div>
-            <select class="ctrl-input" :value="targets[i] ?? ''" :aria-label="`Sensor for ${g.sensor || 'these marks'}`"
-              @change="setTarget(i, $event.target.value)">
+            <select
+              class="ctrl-input"
+              :value="targets[i] ?? ''"
+              :aria-label="`Sensor for ${g.sensor || 'these marks'}`"
+              @change="setTarget(i, $event.target.value)"
+            >
               <option value="">Skip</option>
-              <option v-for="s in sensors" :key="s.id" :value="s.id">{{ s.label }}{{ s.kind === 'film' ? ' (film)' : '' }}</option>
+              <option v-for="s in sensors" :key="s.id" :value="s.id">
+                {{ s.label }}{{ s.kind === 'film' ? ' (film)' : '' }}
+              </option>
             </select>
           </div>
           <div class="table-wrap">
             <table class="preview">
-              <thead><tr><th>Mark</th><th class="num">x (mm)</th><th class="num">y (mm)</th><th>Slot</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Mark</th>
+                  <th class="num">x (mm)</th>
+                  <th class="num">y (mm)</th>
+                  <th>Slot</th>
+                </tr>
+              </thead>
               <tbody>
                 <tr v-for="m in g.marks" :key="m.id">
                   <td class="mono">{{ m.id }}</td>
@@ -144,7 +182,10 @@ function doImport() {
               </tbody>
             </table>
           </div>
-          <p v-if="targets[i] && sensorById.get(targets[i])?.fiducialCalibration?.marks?.length" class="kind-note warn-note">
+          <p
+            v-if="targets[i] && sensorById.get(targets[i])?.fiducialCalibration?.marks?.length"
+            class="kind-note warn-note"
+          >
             Replaces the {{ plural(sensorById.get(targets[i]).fiducialCalibration.marks.length, 'mark') }}
             {{ sensorById.get(targets[i]).label }} has now.
           </p>
@@ -161,22 +202,71 @@ function doImport() {
 
 <style scoped src="../ui/import-modal.css"></style>
 <style scoped>
-.table-wrap { max-height: 300px; overflow: auto; border: 1px solid var(--panel-border); border-radius: 6px; }
-.preview { width: 100%; border-collapse: collapse; font-size: 12px; }
-.preview th {
-  position: sticky; top: 0; background: var(--bg); text-align: left; font-weight: 600;
-  color: var(--text-dim); padding: 6px 10px; border-bottom: 1px solid var(--panel-border);
+.table-wrap {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
 }
-.preview td { padding: 5px 10px; border-bottom: 1px solid var(--panel-border); }
-.preview tr:last-child td { border-bottom: none; }
-.preview .num { text-align: right; white-space: nowrap; }
-.mono { font-family: monospace; }
-.slots { color: var(--text-dim); }
-.missing td { color: var(--text-dim); font-style: italic; }
-.dim { color: var(--text-dim); margin-left: 6px; }
-.warn { color: #d89a3a; }
-.warn-note { color: #d89a3a; margin-top: 10px; }
-.group + .group { margin-top: 18px; }
-.group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 13px; }
-.group-head .ctrl-input { min-width: 180px; }
+.preview {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.preview th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.preview td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.preview tr:last-child td {
+  border-bottom: none;
+}
+.preview .num {
+  text-align: right;
+  white-space: nowrap;
+}
+.mono {
+  font-family: monospace;
+}
+.slots {
+  color: var(--text-dim);
+}
+.missing td {
+  color: var(--text-dim);
+  font-style: italic;
+}
+.dim {
+  color: var(--text-dim);
+  margin-left: 6px;
+}
+.warn {
+  color: #d89a3a;
+}
+.warn-note {
+  color: #d89a3a;
+  margin-top: 10px;
+}
+.group + .group {
+  margin-top: 18px;
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.group-head .ctrl-input {
+  min-width: 180px;
+}
 </style>

@@ -13,8 +13,9 @@ const SRC = fileURLToPath(new URL('..', import.meta.url))
 function sources(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name)
-    if (statSync(path).isDirectory()) { if (!['wasm', 'workers'].includes(name)) sources(path, out) }
-    else if (/\.(js|vue)$/.test(name) && !/\.test\.js$/.test(name)) out.push(path)
+    if (statSync(path).isDirectory()) {
+      if (!['wasm', 'workers'].includes(name)) sources(path, out)
+    } else if (/\.(js|vue)$/.test(name) && !/\.test\.js$/.test(name)) out.push(path)
   }
   return out
 }
@@ -35,14 +36,18 @@ it('every store member used in src/ is one the store returns', async () => {
       const [, indent, v, factory] = m
       // The declaring block: up to the first line indented less than the declaration.
       const rest = text.slice(m.index).split('\n')
-      const end = rest.findIndex((line, i) => i > 0 && line.trim() && line.length - line.trimStart().length < indent.length)
+      const end = rest.findIndex(
+        (line, i) => i > 0 && line.trim() && line.length - line.trimStart().length < indent.length,
+      )
       const scope = rest.slice(0, end < 0 ? undefined : end).join('\n')
-      for (const [, member] of scope.matchAll(new RegExp(`(?<![\\w.$/'"])${v}\\.(\\w+)`, 'g'))) uses.push([factory, member])
+      for (const [, member] of scope.matchAll(new RegExp(`(?<![\\w.$/'"])${v}\\.(\\w+)`, 'g')))
+        uses.push([factory, member])
     }
     for (const [, factory, member] of text.matchAll(/(use\w+Store)\(\)\.(\w+)/g)) uses.push([factory, member])
     for (const [factory, member] of uses) {
       const store = stores.get(factory)
-      if (store && !member.startsWith('$') && !(member in store)) missing.push(`${relative(SRC, file)}: ${factory}().${member}`)
+      if (store && !member.startsWith('$') && !(member in store))
+        missing.push(`${relative(SRC, file)}: ${factory}().${member}`)
     }
   }
   expect([...new Set(missing)]).toEqual([])

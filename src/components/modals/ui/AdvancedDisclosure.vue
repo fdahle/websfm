@@ -14,9 +14,7 @@ const open = ref(props.defaultOpen || advancedSettingsExpanded.value)
 </script>
 
 <template>
-  <button class="link-btn" @click="open = !open">
-    {{ open ? '▾' : '▸' }} {{ label }}
-  </button>
+  <button class="link-btn" @click="open = !open">{{ open ? '▾' : '▸' }} {{ label }}</button>
   <template v-if="open"><slot /></template>
 </template>
 

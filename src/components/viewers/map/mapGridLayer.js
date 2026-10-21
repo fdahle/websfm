@@ -18,19 +18,21 @@ const GRID_LINE_STYLE = new Style({ stroke: GRID_STROKE })
 
 function makeGridLabel(coord, text, align) {
   const f = new Feature(new Point(coord))
-  f.setStyle(new Style({
-    text: new Text({
-      text,
-      font: '11px sans-serif',
-      textAlign: align,
-      textBaseline: 'bottom',
-      offsetX: align === 'left' ? 4 : 0,
-      offsetY: -3,
-      fill: new Fill({ color: 'rgba(140,140,140,0.95)' }),
-      // Halo: the grid runs over basemap imagery, which can be any brightness.
-      stroke: new Stroke({ color: 'rgba(0,0,0,0.55)', width: 3 }),
+  f.setStyle(
+    new Style({
+      text: new Text({
+        text,
+        font: '11px sans-serif',
+        textAlign: align,
+        textBaseline: 'bottom',
+        offsetX: align === 'left' ? 4 : 0,
+        offsetY: -3,
+        fill: new Fill({ color: 'rgba(140,140,140,0.95)' }),
+        // Halo: the grid runs over basemap imagery, which can be any brightness.
+        stroke: new Stroke({ color: 'rgba(0,0,0,0.55)', width: 3 }),
+      }),
     }),
-  }))
+  )
   return f
 }
 
@@ -65,9 +67,9 @@ export function makeGridLayer(info, projection, visible) {
 
   const layer = new VectorLayer({
     source,
-    style: GRID_LINE_STYLE,       // labels carry their own per-feature style
+    style: GRID_LINE_STYLE, // labels carry their own per-feature style
     visible,
-    updateWhileAnimating: true,   // the grid should track the map, not snap in after it
+    updateWhileAnimating: true, // the grid should track the map, not snap in after it
     updateWhileInteracting: true,
   })
 
@@ -88,16 +90,33 @@ export function makeGridLayer(info, projection, visible) {
     viewKey = key
 
     const grid = computeGrid({ viewExtent: view.calculateExtent(size), resolution, size, validExtent })
-    if (!grid) { source.clear(true); return }
+    if (!grid) {
+      source.clear(true)
+      return
+    }
     const { bounds, spacing, xs, ys, labelX, labelY } = grid
 
     const features = []
     for (const x of xs) {
-      features.push(new Feature(new LineString([[x, bounds[1]], [x, bounds[3]]])))
+      features.push(
+        new Feature(
+          new LineString([
+            [x, bounds[1]],
+            [x, bounds[3]],
+          ]),
+        ),
+      )
       features.push(makeGridLabel([x, labelY], formatGridLabel(x, spacing, axes[0], units), 'center'))
     }
     for (const y of ys) {
-      features.push(new Feature(new LineString([[bounds[0], y], [bounds[2], y]])))
+      features.push(
+        new Feature(
+          new LineString([
+            [bounds[0], y],
+            [bounds[2], y],
+          ]),
+        ),
+      )
       features.push(makeGridLabel([labelX, y], formatGridLabel(y, spacing, axes[1], units), 'left'))
     }
 

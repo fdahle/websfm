@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { coverageGrid } from './coverage.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
 
-const mv = (n) => Array.from({ length: n }, (_, k) => [`c${k}`, k])   // n views
+const mv = (n) => Array.from({ length: n }, (_, k) => [`c${k}`, k]) // n views
 
 describe('coverageGrid', () => {
   it('handles the empty case without dividing by zero', () => {
@@ -33,7 +33,14 @@ describe('coverageGrid', () => {
   })
 
   it('clamps edge points into the last cell (no out-of-range index)', () => {
-    const g = coverageGrid(SparsePoints.fromRecords([{ x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 0 }]), [], { targetCells: 4 })
+    const g = coverageGrid(
+      SparsePoints.fromRecords([
+        { x: 0, y: 0, z: 0 },
+        { x: 1, y: 1, z: 0 },
+      ]),
+      [],
+      { targetCells: 4 },
+    )
     let total = 0
     for (const c of g.count) total += c
     expect(total).toBe(2)

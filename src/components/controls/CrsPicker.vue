@@ -72,16 +72,24 @@ const results = computed(() => {
   const source = registry.value.length ? registry.value : presets
   const found = searchCrsRecords(source, query.value === selectedLabel.value ? '' : query.value)
   if (numericCode.value && !found.some((c) => c.code === numericCode.value)) {
-    found.unshift({ code: numericCode.value, name: 'Resolve EPSG code', area: 'Definition will be looked up when selected' })
+    found.unshift({
+      code: numericCode.value,
+      name: 'Resolve EPSG code',
+      area: 'Definition will be looked up when selected',
+    })
   }
   return found.slice(0, 12)
 })
 
-watch(() => props.modelValue, (value) => {
-  selectedLabel.value = labelFor(value)
-  if (!open.value) query.value = selectedLabel.value
-  nameFromRegistry()
-}, { immediate: true })
+watch(
+  () => props.modelValue,
+  (value) => {
+    selectedLabel.value = labelFor(value)
+    if (!open.value) query.value = selectedLabel.value
+    nameFromRegistry()
+  },
+  { immediate: true },
+)
 
 // A code outside the presets would otherwise show bare ("EPSG:6341") until the
 // field is focused; load the index for its name only then.
@@ -191,37 +199,43 @@ function onFocusout(event) {
       <span v-if="loading || applying" class="crs-spinner" aria-hidden="true"></span>
 
       <Teleport to="body">
-      <!-- data-modal-exempt: teleported out of its dialog, so the modal focus trap
+        <!-- data-modal-exempt: teleported out of its dialog, so the modal focus trap
            (utils/modalFocus.js) would otherwise make the list inert and unclickable. -->
-      <div
-        v-if="open && !disabled" ref="resultsEl" :id="listboxId" class="crs-results" role="listbox"
-        :style="listStyle" data-modal-exempt @mousedown.prevent
-      >
-        <button
-          v-for="(record, index) in results"
-          :id="`${listboxId}-option-${index}`"
-          :key="record.code"
-          type="button"
-          role="option"
-          class="crs-option"
-          :class="{ active: index === activeIndex, selected: record.code === modelValue }"
-          :aria-selected="record.code === modelValue"
-          @mousedown.prevent="choose(record)"
-          @mouseenter="activeIndex = index"
+        <div
+          v-if="open && !disabled"
+          ref="resultsEl"
+          :id="listboxId"
+          class="crs-results"
+          role="listbox"
+          :style="listStyle"
+          data-modal-exempt
+          @mousedown.prevent
         >
-          <span class="option-main">
-            <strong>{{ record.code }}</strong>
-            <span>{{ record.name }}</span>
-          </span>
-          <span v-if="record.area || record.unit" class="option-meta">
-            {{ [record.area, record.unit].filter(Boolean).join(' · ') }}
-          </span>
-        </button>
-        <p v-if="!results.length && !loading" class="crs-empty">
-          No matching horizontal CRS. You can also enter an EPSG code directly.
-        </p>
-        <p v-if="loading" class="crs-empty">Loading EPSG coordinate systems…</p>
-      </div>
+          <button
+            v-for="(record, index) in results"
+            :id="`${listboxId}-option-${index}`"
+            :key="record.code"
+            type="button"
+            role="option"
+            class="crs-option"
+            :class="{ active: index === activeIndex, selected: record.code === modelValue }"
+            :aria-selected="record.code === modelValue"
+            @mousedown.prevent="choose(record)"
+            @mouseenter="activeIndex = index"
+          >
+            <span class="option-main">
+              <strong>{{ record.code }}</strong>
+              <span>{{ record.name }}</span>
+            </span>
+            <span v-if="record.area || record.unit" class="option-meta">
+              {{ [record.area, record.unit].filter(Boolean).join(' · ') }}
+            </span>
+          </button>
+          <p v-if="!results.length && !loading" class="crs-empty">
+            No matching horizontal CRS. You can also enter an EPSG code directly.
+          </p>
+          <p v-if="loading" class="crs-empty">Loading EPSG coordinate systems…</p>
+        </div>
       </Teleport>
     </div>
 
@@ -238,8 +252,12 @@ function onFocusout(event) {
   width: 100%;
 }
 
-.crs-picker.disabled { opacity: 0.5; }
-.crs-combobox { position: relative; }
+.crs-picker.disabled {
+  opacity: 0.5;
+}
+.crs-combobox {
+  position: relative;
+}
 
 .crs-input {
   width: 100%;
@@ -254,8 +272,12 @@ function onFocusout(event) {
   outline: none;
 }
 
-.crs-input:focus { border-color: var(--accent); }
-.crs-input:disabled { cursor: not-allowed; }
+.crs-input:focus {
+  border-color: var(--accent);
+}
+.crs-input:disabled {
+  cursor: not-allowed;
+}
 
 .search-icon {
   position: absolute;
@@ -279,7 +301,11 @@ function onFocusout(event) {
   animation: crs-spin 0.7s linear infinite;
 }
 
-@keyframes crs-spin { to { transform: rotate(360deg); } }
+@keyframes crs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .crs-results {
   position: fixed;
@@ -309,8 +335,12 @@ function onFocusout(event) {
 }
 
 .crs-option:hover,
-.crs-option.active { background: var(--hover-bg); }
-.crs-option.selected { box-shadow: inset 2px 0 var(--accent); }
+.crs-option.active {
+  background: var(--hover-bg);
+}
+.crs-option.selected {
+  box-shadow: inset 2px 0 var(--accent);
+}
 
 .option-main {
   display: flex;
@@ -341,7 +371,14 @@ function onFocusout(event) {
   font-size: 11px;
 }
 
-.crs-hint { color: var(--text-dim); }
-.crs-error { color: #e06c6c; }
-.crs-empty { padding: 10px 8px; color: var(--text-dim); }
+.crs-hint {
+  color: var(--text-dim);
+}
+.crs-error {
+  color: #e06c6c;
+}
+.crs-empty {
+  padding: 10px 8px;
+  color: var(--text-dim);
+}
 </style>

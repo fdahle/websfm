@@ -40,13 +40,19 @@ export function needsPyramid(width, height, t = PYRAMID_TUNING) {
 }
 
 /** The level sizes and tile grids for a width × height image. */
-export function planPyramid(width, height, { tileSize = PYRAMID_TUNING.tileSize, minLong = PYRAMID_TUNING.minLong } = {}) {
+export function planPyramid(
+  width,
+  height,
+  { tileSize = PYRAMID_TUNING.tileSize, minLong = PYRAMID_TUNING.minLong } = {},
+) {
   const levels = []
-  let w = width, h = height
+  let w = width,
+    h = height
   for (;;) {
     levels.push({ width: w, height: h, cols: Math.ceil(w / tileSize), rows: Math.ceil(h / tileSize) })
     if (Math.max(w, h) <= minLong || (w === 1 && h === 1)) break
-    w = Math.ceil(w / 2); h = Math.ceil(h / 2)
+    w = Math.ceil(w / 2)
+    h = Math.ceil(h / 2)
   }
   return { width, height, tileSize, levels }
 }
@@ -73,16 +79,22 @@ export function levelFor(plan, scale, { slack = 0 } = {}) {
  * rect pixels.
  */
 export function tilesForRect(plan, k, { x0, y0, x1, y1 }) {
-  const L = plan.levels[k], ts = plan.tileSize
-  const ax0 = Math.max(0, Math.floor(x0)), ay0 = Math.max(0, Math.floor(y0))
-  const ax1 = Math.min(L.width, Math.ceil(x1)), ay1 = Math.min(L.height, Math.ceil(y1))
+  const L = plan.levels[k],
+    ts = plan.tileSize
+  const ax0 = Math.max(0, Math.floor(x0)),
+    ay0 = Math.max(0, Math.floor(y0))
+  const ax1 = Math.min(L.width, Math.ceil(x1)),
+    ay1 = Math.min(L.height, Math.ceil(y1))
   const out = []
   if (ax1 <= ax0 || ay1 <= ay0) return out
   for (let row = Math.floor(ay0 / ts); row <= Math.floor((ay1 - 1) / ts); row++) {
     for (let col = Math.floor(ax0 / ts); col <= Math.floor((ax1 - 1) / ts); col++) {
-      const tx0 = col * ts, ty0 = row * ts
-      const sx = Math.max(ax0, tx0) - tx0, sy = Math.max(ay0, ty0) - ty0
-      const sw = Math.min(ax1, tx0 + ts) - tx0 - sx, sh = Math.min(ay1, ty0 + ts) - ty0 - sy
+      const tx0 = col * ts,
+        ty0 = row * ts
+      const sx = Math.max(ax0, tx0) - tx0,
+        sy = Math.max(ay0, ty0) - ty0
+      const sw = Math.min(ax1, tx0 + ts) - tx0 - sx,
+        sh = Math.min(ay1, ty0 + ts) - ty0 - sy
       out.push({ col, row, sx, sy, sw, sh, dx: tx0 + sx - ax0, dy: ty0 + sy - ay0 })
     }
   }
@@ -91,27 +103,43 @@ export function tilesForRect(plan, k, { x0, y0, x1, y1 }) {
 
 /** A tile's size (the last column / row is partial). */
 export function tileSize(plan, k, col, row) {
-  const L = plan.levels[k], ts = plan.tileSize
+  const L = plan.levels[k],
+    ts = plan.tileSize
   return { width: Math.min(ts, L.width - col * ts), height: Math.min(ts, L.height - row * ts) }
 }
 
 /** Byte range of a tile in the container. */
 export function tileRange(index, k, col, row) {
-  const L = index.levels[k], i = row * L.cols + col
+  const L = index.levels[k],
+    i = row * L.cols + col
   return { offset: L.offsets[i], length: L.lengths[i] }
 }
 
 /** Index a container from the plan and the encoded tile sizes (level by level, row-major). */
 export function buildIndex(plan, tileLengths, channels) {
-  let offset = 0, t = 0
+  let offset = 0,
+    t = 0
   const levels = plan.levels.map((L) => {
     const n = L.cols * L.rows
-    const offsets = new Array(n), lengths = new Array(n)
-    for (let i = 0; i < n; i++, t++) { offsets[i] = offset; lengths[i] = tileLengths[t]; offset += tileLengths[t] }
+    const offsets = new Array(n),
+      lengths = new Array(n)
+    for (let i = 0; i < n; i++, t++) {
+      offsets[i] = offset
+      lengths[i] = tileLengths[t]
+      offset += tileLengths[t]
+    }
     return { ...L, offsets, lengths }
   })
   if (t !== tileLengths.length) throw new Error(`pyramid index: ${tileLengths.length} tiles for a plan of ${t}`)
-  return { version: PYRAMID_VERSION, width: plan.width, height: plan.height, tileSize: plan.tileSize, channels, levels, bytes: offset }
+  return {
+    version: PYRAMID_VERSION,
+    width: plan.width,
+    height: plan.height,
+    tileSize: plan.tileSize,
+    channels,
+    levels,
+    bytes: offset,
+  }
 }
 
 /**
@@ -121,13 +149,16 @@ export function buildIndex(plan, tileLengths, channels) {
  * image's end — callers keep rows paired until then (createLevelCascade does).
  */
 export function halveRows(src, width, rows, channels) {
-  const w2 = Math.ceil(width / 2), r2 = Math.ceil(rows / 2)
+  const w2 = Math.ceil(width / 2),
+    r2 = Math.ceil(rows / 2)
   const out = new Uint8Array(w2 * r2 * channels)
   const stride = width * channels
   for (let y = 0; y < r2; y++) {
-    const a = 2 * y * stride, b = Math.min(2 * y + 1, rows - 1) * stride
+    const a = 2 * y * stride,
+      b = Math.min(2 * y + 1, rows - 1) * stride
     for (let x = 0; x < w2; x++) {
-      const p = 2 * x * channels, q = Math.min(2 * x + 1, width - 1) * channels
+      const p = 2 * x * channels,
+        q = Math.min(2 * x + 1, width - 1) * channels
       for (let c = 0; c < channels; c++) {
         out[(y * w2 + x) * channels + c] = (src[a + p + c] + src[a + q + c] + src[b + p + c] + src[b + q + c] + 2) >> 2
       }
@@ -144,12 +175,19 @@ export function halveRows(src, width, rows, channels) {
  */
 export function createLevelCascade(plan, channels, onTileRow) {
   const ts = plan.tileSize
-  const state = plan.levels.map((L) => ({ L, buf: new Uint8Array(ts * L.width * channels), filled: 0, y0: 0, carry: null }))
+  const state = plan.levels.map((L) => ({
+    L,
+    buf: new Uint8Array(ts * L.width * channels),
+    filled: 0,
+    y0: 0,
+    carry: null,
+  }))
   const emit = (k) => {
     const s = state[k]
     if (!s.filled) return
     onTileRow(k, s.y0, s.filled, s.buf.subarray(0, s.filled * s.L.width * channels))
-    s.y0 += s.filled; s.filled = 0
+    s.y0 += s.filled
+    s.filled = 0
   }
   function push(k, data, rows) {
     const s = state[k]
@@ -158,16 +196,21 @@ export function createLevelCascade(plan, channels, onTileRow) {
     while (r < rows) {
       const take = Math.min(ts - s.filled, rows - r)
       s.buf.set(data.subarray(r * rowBytes, (r + take) * rowBytes), s.filled * rowBytes)
-      s.filled += take; r += take
+      s.filled += take
+      r += take
       if (s.filled === ts) emit(k)
     }
     if (k + 1 < state.length) {
       // Pair rows for the next level, carrying an odd one to the next push.
-      let src = data, n = rows
+      let src = data,
+        n = rows
       if (s.carry) {
         const joined = new Uint8Array((rows + 1) * rowBytes)
-        joined.set(s.carry); joined.set(data.subarray(0, rows * rowBytes), rowBytes)
-        src = joined; n = rows + 1; s.carry = null
+        joined.set(s.carry)
+        joined.set(data.subarray(0, rows * rowBytes), rowBytes)
+        src = joined
+        n = rows + 1
+        s.carry = null
       }
       const even = n - (n % 2)
       if (n % 2) s.carry = src.slice(even * rowBytes, (even + 1) * rowBytes)

@@ -26,35 +26,95 @@ const WorkflowBuilderModal = defineAsyncComponent(() => import('./pipeline/Workf
 // interactive workflow block opens its own dialog above it, then returns here.
 const { currentProject, currentProjectId, currentProjectName, projects } = storeToRefs(useProjectsStore())
 const { folderSupported, renameProject } = useProjectsStore()
-const { activeId: activeWorkflowId, runs: workflowRuns, templates: workflowTemplates, workflows } = storeToRefs(useWorkflowsStore())
-const { applyTemplate: applyWorkflowTemplate, duplicateWorkflow, removeWorkflow, removeTemplate: removeWorkflowTemplate, saveTemplate: saveWorkflowTemplate, setActive: setActiveWorkflow } = useWorkflowsStore()
+const {
+  activeId: activeWorkflowId,
+  runs: workflowRuns,
+  templates: workflowTemplates,
+  workflows,
+} = storeToRefs(useWorkflowsStore())
+const {
+  applyTemplate: applyWorkflowTemplate,
+  duplicateWorkflow,
+  removeWorkflow,
+  removeTemplate: removeWorkflowTemplate,
+  saveTemplate: saveWorkflowTemplate,
+  setActive: setActiveWorkflow,
+} = useWorkflowsStore()
 const reconstructionStore = useReconstructionStore()
 const { crsSuggestion, liveSparse } = storeToRefs(reconstructionStore)
 const {
-  aboutOpen, debugSummaryOpen, newProjectCanCancel, newProjectOpen, projectPickerOpen, projectSettingsOpen,
-  saveProjectOpen, settingsOpen, systemInfoOpen, workflowBuilderOpen,
+  aboutOpen,
+  debugSummaryOpen,
+  newProjectCanCancel,
+  newProjectOpen,
+  projectPickerOpen,
+  projectSettingsOpen,
+  saveProjectOpen,
+  settingsOpen,
+  systemInfoOpen,
+  workflowBuilderOpen,
 } = storeToRefs(useModalsStore())
 const { setTheme, theme, themePreference } = useTheme()
 const {
-  addNewWorkflow, applyCrsSuggestion, cancelPendingConfirm, cancelRun, clearCurrentProjectDerived,
-  closeWorkflowBuilder, confirmRemoveImages, deleteMessage, folderPrompt, folderPromptProject,
-  handleCancelNewProject, handleCreateProject, handleDeleteProject, handleSetCrs, handleSwitchProject,
-  moveCurrentProjectToBrowser, moveCurrentProjectToFolder, onFolderConnect, onFolderRepick, onSaveProject,
-  onWorkflowRun, onWorkflowUpdate, openExample, openProjectFolder, pendingConfirm, pendingImageDelete,
-  pickProjectFile, progressCancelling, progressComplete, progressCurrent, progressFraction,
-  progressIndeterminate, progressLabel, progressOpen, progressPhase, progressTitle, progressTotal,
-  progressUnit, projectLoading, projectLoadingLabel, projectLoadingProgress, runPendingConfirm,
-  workflowCurrentBlockId, workflowPause, workflowRunner, workflowRunning, workflowState,
-  workflowStatuses, activeTabId,
+  addNewWorkflow,
+  applyCrsSuggestion,
+  cancelPendingConfirm,
+  cancelRun,
+  clearCurrentProjectDerived,
+  closeWorkflowBuilder,
+  confirmRemoveImages,
+  deleteMessage,
+  folderPrompt,
+  folderPromptProject,
+  handleCancelNewProject,
+  handleCreateProject,
+  handleDeleteProject,
+  handleSetCrs,
+  handleSwitchProject,
+  moveCurrentProjectToBrowser,
+  moveCurrentProjectToFolder,
+  onFolderConnect,
+  onFolderRepick,
+  onSaveProject,
+  onWorkflowRun,
+  onWorkflowUpdate,
+  openExample,
+  openProjectFolder,
+  pendingConfirm,
+  pendingImageDelete,
+  pickProjectFile,
+  progressCancelling,
+  progressComplete,
+  progressCurrent,
+  progressFraction,
+  progressIndeterminate,
+  progressLabel,
+  progressOpen,
+  progressPhase,
+  progressTitle,
+  progressTotal,
+  progressUnit,
+  projectLoading,
+  projectLoadingLabel,
+  projectLoadingProgress,
+  runPendingConfirm,
+  workflowCurrentBlockId,
+  workflowPause,
+  workflowRunner,
+  workflowRunning,
+  workflowState,
+  workflowStatuses,
+  activeTabId,
 } = useAppContext()
 // A sparse run draws its model as it grows (liveSparse): over the 3D view, that view
 // stays lit and orbitable, the rest is dimmed and locked, and the bar docks in its corner.
-const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value === 'viewer' ? '[data-run-spotlight]' : ''))
+const progressSpotlight = computed(() =>
+  liveSparse.value && activeTabId.value === 'viewer' ? '[data-run-spotlight]' : '',
+)
 </script>
 
 <template>
   <div v-if="projectPickerOpen && !currentProjectId" class="project-backdrop" />
-
 
   <div v-if="projectLoading" class="loading-overlay">
     <div class="loading-card">
@@ -63,17 +123,22 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
         <span>{{ projectLoadingLabel }}</span>
         <template v-if="projectLoadingProgress">
           <span class="loading-detail">
-            {{ projectLoadingProgress.label }}<template v-if="projectLoadingProgress.total">
-              ({{ projectLoadingProgress.done }}/{{ projectLoadingProgress.total }})</template>
+            {{ projectLoadingProgress.label
+            }}<template v-if="projectLoadingProgress.total">
+              ({{ projectLoadingProgress.done }}/{{ projectLoadingProgress.total }})</template
+            >
           </span>
-          <progress v-if="projectLoadingProgress.total" class="loading-bar"
-            :max="projectLoadingProgress.total" :value="projectLoadingProgress.done" />
+          <progress
+            v-if="projectLoadingProgress.total"
+            class="loading-bar"
+            :max="projectLoadingProgress.total"
+            :value="projectLoadingProgress.done"
+          />
           <span v-if="projectLoadingProgress.detail" class="loading-detail">{{ projectLoadingProgress.detail }}</span>
         </template>
       </div>
     </div>
   </div>
-
 
   <ProjectPicker
     v-if="projectPickerOpen"
@@ -84,17 +149,47 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
     @switch="handleSwitchProject"
     @rename="(id, name) => renameProject(id, name)"
     @delete="handleDeleteProject"
-    @new="() => { projectPickerOpen = false; newProjectCanCancel = true; newProjectOpen = true }"
+    @new="
+      () => {
+        projectPickerOpen = false
+        newProjectCanCancel = true
+        newProjectOpen = true
+      }
+    "
     @open-file="pickProjectFile"
-    @open-folder="() => { projectPickerOpen = false; openProjectFolder() }"
-    @save-copy="() => { projectPickerOpen = false; saveProjectOpen = true }"
-    @move-to-folder="(id) => { projectPickerOpen = false; moveCurrentProjectToFolder(id) }"
-    @move-to-browser="(id) => { projectPickerOpen = false; moveCurrentProjectToBrowser(id) }"
-    @settings="() => { projectPickerOpen = false; projectSettingsOpen = true }"
+    @open-folder="
+      () => {
+        projectPickerOpen = false
+        openProjectFolder()
+      }
+    "
+    @save-copy="
+      () => {
+        projectPickerOpen = false
+        saveProjectOpen = true
+      }
+    "
+    @move-to-folder="
+      (id) => {
+        projectPickerOpen = false
+        moveCurrentProjectToFolder(id)
+      }
+    "
+    @move-to-browser="
+      (id) => {
+        projectPickerOpen = false
+        moveCurrentProjectToBrowser(id)
+      }
+    "
+    @settings="
+      () => {
+        projectPickerOpen = false
+        projectSettingsOpen = true
+      }
+    "
     @close="projectPickerOpen = false"
     @example="openExample"
   />
-
 
   <!-- Kept before the command modals in DOM order: an interactive workflow block
        opens its existing modal above the builder, then returns here to continue. -->
@@ -125,7 +220,6 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
     />
   </Teleport>
 
-
   <Teleport to="body">
     <ConfirmModal
       v-if="pendingImageDelete"
@@ -137,7 +231,6 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
       @cancel="pendingImageDelete = null"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <ConfirmModal
@@ -152,7 +245,6 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
       @cancel="cancelPendingConfirm"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <ProgressModal
@@ -172,7 +264,6 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
       @cancel="cancelRun"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <SettingsModal
@@ -194,12 +285,10 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
     />
   </Teleport>
 
-
   <Teleport to="body">
     <AboutModal v-if="aboutOpen" @close="aboutOpen = false" />
     <SystemInfoModal v-if="systemInfoOpen" @close="systemInfoOpen = false" />
   </Teleport>
-
 
   <Teleport to="body">
     <NewProjectModal
@@ -210,7 +299,6 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
       @example="openExample"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <FolderReconnectModal
@@ -225,7 +313,6 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
     />
   </Teleport>
 
-
   <Teleport to="body">
     <SaveProjectModal
       v-if="saveProjectOpen && currentProjectId"
@@ -235,7 +322,6 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
       @run="onSaveProject"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <DebugSummaryModal v-if="debugSummaryOpen" @close="debugSummaryOpen = false" />
@@ -308,12 +394,20 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
   background: rgba(255, 255, 255, 0.12);
 }
 
-.loading-bar::-webkit-progress-bar { background: rgba(255, 255, 255, 0.12); }
+.loading-bar::-webkit-progress-bar {
+  background: rgba(255, 255, 255, 0.12);
+}
 
-.loading-bar::-webkit-progress-value { background: var(--accent, #44aaff); }
+.loading-bar::-webkit-progress-value {
+  background: var(--accent, #44aaff);
+}
 
-.loading-bar::-moz-progress-bar { background: var(--accent, #44aaff); }
+.loading-bar::-moz-progress-bar {
+  background: var(--accent, #44aaff);
+}
 @keyframes loading-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

@@ -4,8 +4,12 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm'
 import { asKeypoints } from '../core/features/keypoints.js'
 import {
-  decodeColmapCamera, decodeColmapDescriptors, decodeColmapKeypoints,
-  decodeColmapMatches, decodeColmapMatrix, pairIdToImageIds,
+  decodeColmapCamera,
+  decodeColmapDescriptors,
+  decodeColmapKeypoints,
+  decodeColmapMatches,
+  decodeColmapMatrix,
+  pairIdToImageIds,
 } from '../core/io/colmapDatabase.js'
 
 let sqlitePromise
@@ -25,7 +29,11 @@ function hasTable(name) {
 }
 
 function closeDb() {
-  try { db?.close() } catch { /* worker teardown is the final fallback */ }
+  try {
+    db?.close()
+  } catch {
+    /* worker teardown is the final fallback */
+  }
   db = null
 }
 
@@ -40,33 +48,70 @@ async function inspect(buffer, sourceName) {
 
   const cameraRows = rows('SELECT camera_id, model, width, height, params FROM cameras ORDER BY camera_id')
   const cameras = cameraRows.map(decodeColmapCamera)
-  const images = rows('SELECT image_id, name, camera_id FROM images ORDER BY image_id')
-    .map((r) => ({ externalId: Number(r.image_id), name: r.name, cameraId: Number(r.camera_id) }))
+  const images = rows('SELECT image_id, name, camera_id FROM images ORDER BY image_id').map((r) => ({
+    externalId: Number(r.image_id),
+    name: r.name,
+    cameraId: Number(r.camera_id),
+  }))
   const featureCounts = new Map()
-  if (hasTable('keypoints')) for (const r of rows('SELECT image_id, rows, cols FROM keypoints ORDER BY image_id')) {
-    featureCounts.set(Number(r.image_id), { imageId: Number(r.image_id), keypointCount: Number(r.rows), keypointCols: Number(r.cols), descriptorType: null, descriptorDim: null })
-  }
-  if (hasTable('descriptors')) for (const r of rows('SELECT image_id, rows, cols FROM descriptors ORDER BY image_id')) {
-    const f = featureCounts.get(Number(r.image_id)) ?? { imageId: Number(r.image_id), keypointCount: 0, keypointCols: 0 }
-    const b = Number(r.cols)
-    Object.assign(f, { descriptorType: b === 128 ? 'SIFT uint8' : b === 512 ? 'ALIKED float32' : `Unknown (${b} bytes/row)`, descriptorDim: b === 128 || b === 512 ? 128 : null })
-    featureCounts.set(Number(r.image_id), f)
-  }
+  if (hasTable('keypoints'))
+    for (const r of rows('SELECT image_id, rows, cols FROM keypoints ORDER BY image_id')) {
+      featureCounts.set(Number(r.image_id), {
+        imageId: Number(r.image_id),
+        keypointCount: Number(r.rows),
+        keypointCols: Number(r.cols),
+        descriptorType: null,
+        descriptorDim: null,
+      })
+    }
+  if (hasTable('descriptors'))
+    for (const r of rows('SELECT image_id, rows, cols FROM descriptors ORDER BY image_id')) {
+      const f = featureCounts.get(Number(r.image_id)) ?? {
+        imageId: Number(r.image_id),
+        keypointCount: 0,
+        keypointCols: 0,
+      }
+      const b = Number(r.cols)
+      Object.assign(f, {
+        descriptorType: b === 128 ? 'SIFT uint8' : b === 512 ? 'ALIKED float32' : `Unknown (${b} bytes/row)`,
+        descriptorDim: b === 128 || b === 512 ? 128 : null,
+      })
+      featureCounts.set(Number(r.image_id), f)
+    }
   const pairTable = hasTable('two_view_geometries') ? 'two_view_geometries' : hasTable('matches') ? 'matches' : null
-  const pairs = pairTable ? rows(`SELECT pair_id, rows FROM ${pairTable} WHERE rows > 0 ORDER BY pair_id`)
-    .map((r) => ({ pairId: Number(r.pair_id), imageIds: pairIdToImageIds(Number(r.pair_id)), verifiedCount: pairTable === 'two_view_geometries' ? Number(r.rows) : 0, rawCount: pairTable === 'matches' ? Number(r.rows) : 0 })) : []
+  const pairs = pairTable
+    ? rows(`SELECT pair_id, rows FROM ${pairTable} WHERE rows > 0 ORDER BY pair_id`).map((r) => ({
+        pairId: Number(r.pair_id),
+        imageIds: pairIdToImageIds(Number(r.pair_id)),
+        verifiedCount: pairTable === 'two_view_geometries' ? Number(r.rows) : 0,
+        rawCount: pairTable === 'matches' ? Number(r.rows) : 0,
+      }))
+    : []
 
   return {
-    format: 'colmap-database', sourceName, bytes: buffer.byteLength,
+    format: 'colmap-database',
+    sourceName,
+    bytes: buffer.byteLength,
     userVersion: Number(scalar('PRAGMA user_version')),
-    cameras: cameras.map((c) => ({ externalId: c.cameraId, model: c.model, width: c.width, height: c.height, supported: c.supported, losses: c.losses })),
+    cameras: cameras.map((c) => ({
+      externalId: c.cameraId,
+      model: c.model,
+      width: c.width,
+      height: c.height,
+      supported: c.supported,
+      losses: c.losses,
+    })),
     unsupportedCameras: cameras.filter((c) => !c.supported).length,
-    images, features: [...featureCounts.values()], pairs,
+    images,
+    features: [...featureCounts.values()],
+    pairs,
     rigs: hasTable('rigs') ? Number(scalar('SELECT count(*) FROM rigs')) : 0,
     frames: hasTable('frames') ? Number(scalar('SELECT count(*) FROM frames')) : 0,
     posePriors: hasTable('pose_priors') ? Number(scalar('SELECT count(*) FROM pose_priors')) : 0,
-    hasKeypoints: hasTable('keypoints'), hasDescriptors: hasTable('descriptors'),
-    hasRawMatches: hasTable('matches'), hasVerifiedMatches: hasTable('two_view_geometries'),
+    hasKeypoints: hasTable('keypoints'),
+    hasDescriptors: hasTable('descriptors'),
+    hasRawMatches: hasTable('matches'),
+    hasVerifiedMatches: hasTable('two_view_geometries'),
   }
 }
 
@@ -74,18 +119,28 @@ function readSelected(options = {}) {
   if (!db) throw new Error('COLMAP database session is closed')
   const out = { cameras: [], images: [], features: [], pairs: [] }
   if (options.calibration) {
-    out.cameras = rows('SELECT camera_id, model, width, height, params FROM cameras ORDER BY camera_id').map(decodeColmapCamera)
-    out.images = rows('SELECT image_id, name, camera_id FROM images ORDER BY image_id')
-      .map((r) => ({ imageId: Number(r.image_id), name: r.name, cameraId: Number(r.camera_id) }))
+    out.cameras = rows('SELECT camera_id, model, width, height, params FROM cameras ORDER BY camera_id').map(
+      decodeColmapCamera,
+    )
+    out.images = rows('SELECT image_id, name, camera_id FROM images ORDER BY image_id').map((r) => ({
+      imageId: Number(r.image_id),
+      name: r.name,
+      cameraId: Number(r.camera_id),
+    }))
   }
   if (options.features && hasTable('keypoints')) {
     const descByImage = new Map()
     if (options.descriptors && hasTable('descriptors')) {
-      for (const r of rows('SELECT image_id, rows, cols, data FROM descriptors ORDER BY image_id')) descByImage.set(Number(r.image_id), decodeColmapDescriptors(r))
+      for (const r of rows('SELECT image_id, rows, cols, data FROM descriptors ORDER BY image_id'))
+        descByImage.set(Number(r.image_id), decodeColmapDescriptors(r))
     }
     for (const r of rows('SELECT image_id, rows, cols, data FROM keypoints ORDER BY image_id')) {
       const imageId = Number(r.image_id)
-      out.features.push({ imageId, keypoints: decodeColmapKeypoints(r), ...(descByImage.get(imageId) ?? { descriptors: null, descriptorType: null, descDim: null, compatible: false }) })
+      out.features.push({
+        imageId,
+        keypoints: decodeColmapKeypoints(r),
+        ...(descByImage.get(imageId) ?? { descriptors: null, descriptorType: null, descDim: null, compatible: false }),
+      })
     }
   }
   if (options.matches) {
@@ -96,8 +151,10 @@ function readSelected(options = {}) {
         ? 'SELECT pair_id, rows, cols, data, F, E, H, config FROM two_view_geometries WHERE rows > 0 ORDER BY pair_id'
         : 'SELECT pair_id, rows, cols, data FROM matches WHERE rows > 0 ORDER BY pair_id'
       out.pairs = rows(sql).map((r) => ({
-        pairId: Number(r.pair_id), imageIds: pairIdToImageIds(Number(r.pair_id)),
-        matches: decodeColmapMatches(r), verified,
+        pairId: Number(r.pair_id),
+        imageIds: pairIdToImageIds(Number(r.pair_id)),
+        matches: decodeColmapMatches(r),
+        verified,
         F: verified ? decodeColmapMatrix(r.F, `pair ${r.pair_id} F`) : null,
         E: verified ? decodeColmapMatrix(r.E, `pair ${r.pair_id} E`) : null,
         H: verified ? decodeColmapMatrix(r.H, `pair ${r.pair_id} H`) : null,
@@ -127,7 +184,10 @@ function f32Blob(values) {
 function u32Blob(pairs) {
   if (pairs instanceof Uint32Array) return new Uint8Array(pairs.buffer, pairs.byteOffset, pairs.byteLength)
   const a = new Uint32Array(pairs.length * 2)
-  pairs.forEach(([x, y], i) => { a[i * 2] = x; a[i * 2 + 1] = y })
+  pairs.forEach(([x, y], i) => {
+    a[i * 2] = x
+    a[i * 2 + 1] = y
+  })
   return new Uint8Array(a.buffer)
 }
 const matchRows = (pairs) => (pairs instanceof Uint32Array ? pairs.length / 2 : pairs.length)
@@ -147,26 +207,61 @@ async function exportDatabase(bundle) {
       CREATE TABLE two_view_geometries(pair_id INTEGER PRIMARY KEY NOT NULL, rows INTEGER NOT NULL, cols INTEGER NOT NULL, data BLOB, config INTEGER NOT NULL, F BLOB, E BLOB, H BLOB, qvec BLOB, tvec BLOB);
     `)
     outDb.exec('BEGIN')
-    for (const c of bundle.cameras) outDb.exec({ sql: 'INSERT INTO cameras(camera_id,model,width,height,params,prior_focal_length) VALUES(?,?,?,?,?,1)', bind: [c.cameraId, 1, c.width, c.height, f64Blob(c.params)] })
-    for (const im of bundle.images) outDb.exec({ sql: 'INSERT INTO images(image_id,name,camera_id) VALUES(?,?,?)', bind: [im.imageId, im.name, im.cameraId] })
+    for (const c of bundle.cameras)
+      outDb.exec({
+        sql: 'INSERT INTO cameras(camera_id,model,width,height,params,prior_focal_length) VALUES(?,?,?,?,?,1)',
+        bind: [c.cameraId, 1, c.width, c.height, f64Blob(c.params)],
+      })
+    for (const im of bundle.images)
+      outDb.exec({
+        sql: 'INSERT INTO images(image_id,name,camera_id) VALUES(?,?,?)',
+        bind: [im.imageId, im.name, im.cameraId],
+      })
     for (const f of bundle.features) {
       // Typed keypoints arrive structured-cloned ({ data, rgb }); rewrap to read them.
       const kps = asKeypoints(f.keypoints)
       const xy = new Float32Array(kps.length * 2)
-      for (let i = 0; i < kps.length; i++) { xy[i * 2] = kps.x(i); xy[i * 2 + 1] = kps.y(i) }
-      outDb.exec({ sql: 'INSERT INTO keypoints(image_id,rows,cols,data) VALUES(?,?,2,?)', bind: [f.imageId, kps.length, f32Blob(xy)] })
-      if (f.descriptors) outDb.exec({ sql: 'INSERT INTO descriptors(image_id,rows,cols,data) VALUES(?,?,128,?)', bind: [f.imageId, kps.length, f.descriptors] })
+      for (let i = 0; i < kps.length; i++) {
+        xy[i * 2] = kps.x(i)
+        xy[i * 2 + 1] = kps.y(i)
+      }
+      outDb.exec({
+        sql: 'INSERT INTO keypoints(image_id,rows,cols,data) VALUES(?,?,2,?)',
+        bind: [f.imageId, kps.length, f32Blob(xy)],
+      })
+      if (f.descriptors)
+        outDb.exec({
+          sql: 'INSERT INTO descriptors(image_id,rows,cols,data) VALUES(?,?,128,?)',
+          bind: [f.imageId, kps.length, f.descriptors],
+        })
     }
     for (const p of bundle.pairs) {
       const pairId = p.pairId
       const data = u32Blob(p.matches)
-      outDb.exec({ sql: 'INSERT INTO matches(pair_id,rows,cols,data) VALUES(?,?,2,?)', bind: [pairId, matchRows(p.matches), data] })
-      outDb.exec({ sql: 'INSERT INTO two_view_geometries(pair_id,rows,cols,data,config,F,E,H) VALUES(?,?,2,?,2,?,?,?)', bind: [pairId, matchRows(p.matches), data, p.F ? f64Blob(p.F.flat()) : null, p.E ? f64Blob(p.E.flat()) : null, p.H ? f64Blob(p.H.flat()) : null] })
+      outDb.exec({
+        sql: 'INSERT INTO matches(pair_id,rows,cols,data) VALUES(?,?,2,?)',
+        bind: [pairId, matchRows(p.matches), data],
+      })
+      outDb.exec({
+        sql: 'INSERT INTO two_view_geometries(pair_id,rows,cols,data,config,F,E,H) VALUES(?,?,2,?,2,?,?,?)',
+        bind: [
+          pairId,
+          matchRows(p.matches),
+          data,
+          p.F ? f64Blob(p.F.flat()) : null,
+          p.E ? f64Blob(p.E.flat()) : null,
+          p.H ? f64Blob(p.H.flat()) : null,
+        ],
+      })
     }
     outDb.exec('COMMIT')
     return s.capi.sqlite3_js_db_export(outDb)
   } catch (err) {
-    try { outDb.exec('ROLLBACK') } catch { /* no active transaction */ }
+    try {
+      outDb.exec('ROLLBACK')
+    } catch {
+      /* no active transaction */
+    }
     throw err
   } finally {
     outDb.close()
@@ -180,8 +275,10 @@ self.onmessage = async ({ data }) => {
     if (op === 'inspect') result = await inspect(...args)
     else if (op === 'read') result = readSelected(...args)
     else if (op === 'export') result = await exportDatabase(...args)
-    else if (op === 'close') { closeDb(); result = true }
-    else throw new Error(`Unknown COLMAP DB op: ${op}`)
+    else if (op === 'close') {
+      closeDb()
+      result = true
+    } else throw new Error(`Unknown COLMAP DB op: ${op}`)
     const transfer = result instanceof Uint8Array ? [result.buffer] : transferOf(result)
     self.postMessage({ id, ok: true, result }, transfer)
   } catch (err) {

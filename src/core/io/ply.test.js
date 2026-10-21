@@ -44,7 +44,8 @@ describe('parsePly — self-consistency with our writers', () => {
 
   it('round-trips a mesh with faces (meshToPly → parsePly)', () => {
     const mesh = {
-      nVerts: 4, count: 2,
+      nVerts: 4,
+      count: 2,
       pos: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]),
       idx: Uint32Array.from([0, 1, 2, 1, 3, 2]),
       col: Uint8Array.from([255, 0, 0, 0, 255, 0, 0, 0, 255, 128, 128, 128]),
@@ -58,7 +59,8 @@ describe('parsePly — self-consistency with our writers', () => {
 
   it('round-trips an ASCII mesh with faces', () => {
     const mesh = {
-      nVerts: 3, count: 1,
+      nVerts: 3,
+      count: 1,
       pos: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
       idx: Uint32Array.from([0, 1, 2]),
       col: Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9]),
@@ -82,9 +84,13 @@ describe('parsePly — spec edge cases', () => {
     const out = new Uint8Array(hb.length + stride)
     out.set(hb, 0)
     const dv = new DataView(out.buffer, hb.length)
-    dv.setFloat32(0, 7, true); dv.setFloat32(4, 8, true); dv.setFloat32(8, 9, true)
+    dv.setFloat32(0, 7, true)
+    dv.setFloat32(4, 8, true)
+    dv.setFloat32(8, 9, true)
     dv.setFloat32(12, 42.5, true) // quality — must be skipped
-    out[hb.length + 16] = 100; out[hb.length + 17] = 110; out[hb.length + 18] = 120
+    out[hb.length + 16] = 100
+    out[hb.length + 17] = 110
+    out[hb.length + 18] = 120
     const parsed = parsePly(out)
     expect([parsed.pos[0], parsed.pos[1], parsed.pos[2]]).toEqual([7, 8, 9])
     expect([...parsed.col]).toEqual([100, 110, 120])
@@ -101,7 +107,8 @@ describe('parsePly — spec edge cases', () => {
   })
 
   it('rejects big-endian binary with a clear error', () => {
-    const text = 'ply\nformat binary_big_endian 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n'
+    const text =
+      'ply\nformat binary_big_endian 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n'
     expect(() => parsePly(new TextEncoder().encode(text + '\0\0\0\0\0\0\0\0\0\0\0\0'))).toThrow(/big-endian/)
   })
 
@@ -126,8 +133,10 @@ describe('cloudToPly — point attributes', () => {
   it('declares one property per attribute in its own type', () => {
     const text = cloudToPly(flat, { binary: false })
     const header = text.slice(0, text.indexOf('end_header'))
-    expect(header).toContain('property uchar blue\nproperty float distance\nproperty uchar classification\n'
-      + 'property double gpsTime\nproperty short scalar_x\n')
+    expect(header).toContain(
+      'property uchar blue\nproperty float distance\nproperty uchar classification\n' +
+        'property double gpsTime\nproperty short scalar_x\n',
+    )
   })
 
   for (const binary of [true, false]) {
@@ -160,19 +169,27 @@ describe('parsePlySource — the streaming reader', () => {
   const plain = (r) => JSON.parse(JSON.stringify(r, (k, v) => (ArrayBuffer.isView(v) ? [v.constructor.name, ...v] : v)))
   const n = 500
   const flat = {
-    count: n, pos: Float32Array.from({ length: n * 3 }, (_, i) => Math.sin(i) * 1000),
-    col: Uint8Array.from({ length: n * 3 }, (_, i) => i % 256), nrm: Float32Array.from({ length: n * 3 }, (_, i) => Math.cos(i)),
+    count: n,
+    pos: Float32Array.from({ length: n * 3 }, (_, i) => Math.sin(i) * 1000),
+    col: Uint8Array.from({ length: n * 3 }, (_, i) => i % 256),
+    nrm: Float32Array.from({ length: n * 3 }, (_, i) => Math.cos(i)),
     attributes: { distance: Float32Array.from({ length: n }, (_, i) => i / 7) },
   }
-  const mesh = { nVerts: 4, count: 2, pos: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]), idx: Uint32Array.from([0, 1, 2, 1, 3, 2]) }
+  const mesh = {
+    nVerts: 4,
+    count: 2,
+    pos: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]),
+    idx: Uint32Array.from([0, 1, 2, 1, 3, 2]),
+  }
   const inputs = {
     'ascii cloud': cloudToPly(flat, { binary: false }),
     'binary cloud': cloudToPly(flat, { binary: true }),
     'ascii mesh': meshToPly(mesh, { binary: false }),
     'binary mesh': meshToPly(mesh, { binary: true }),
-    'CRLF, comments, skipped element, quad': 'ply\r\nformat ascii 1.0\r\nelement vertex 4\r\nproperty float x\r\nproperty float y\r\nproperty float z\r\n'
-      + 'element junk 2\r\nproperty int a\r\nelement face 1\r\nproperty list uchar int vertex_indices\r\nend_header\r\n'
-      + '0 0 0\r\n1 0 0\r\n\r\ncomment mid\r\n1 1 0\r\n0 1 0\r\n7\r\n8\r\n4 0 1 2 3\r\n',
+    'CRLF, comments, skipped element, quad':
+      'ply\r\nformat ascii 1.0\r\nelement vertex 4\r\nproperty float x\r\nproperty float y\r\nproperty float z\r\n' +
+      'element junk 2\r\nproperty int a\r\nelement face 1\r\nproperty list uchar int vertex_indices\r\nend_header\r\n' +
+      '0 0 0\r\n1 0 0\r\n\r\ncomment mid\r\n1 1 0\r\n0 1 0\r\n7\r\n8\r\n4 0 1 2 3\r\n',
   }
   for (const [name, input] of Object.entries(inputs)) {
     it(`${name}: identical to parsePly`, async () => {
@@ -182,7 +199,8 @@ describe('parsePlySource — the streaming reader', () => {
   }
 
   it('throws on an ASCII body that ends inside the vertex list', async () => {
-    const text = 'ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nend_header\n1 2 3\n'
+    const text =
+      'ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nend_header\n1 2 3\n'
     await expect(parsePlySource(source(new TextEncoder().encode(text)))).rejects.toThrow(/truncated/)
     expect(() => parsePly(text)).toThrow(/truncated/)
   })

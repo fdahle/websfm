@@ -94,9 +94,13 @@ export function pickSpreadIndices(kps, count) {
   const n = kps.length
   if (n <= count) return Array.from({ length: n }, (_, i) => i)
 
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity
   for (let i = 0; i < n; i++) {
-    const x = kps.x(i), y = kps.y(i) // typed keypoints (core/features/keypoints.js)
+    const x = kps.x(i),
+      y = kps.y(i) // typed keypoints (core/features/keypoints.js)
     if (x < minX) minX = x
     if (x > maxX) maxX = x
     if (y < minY) minY = y

@@ -19,23 +19,51 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   const { tabs: tabList, activateTab, openImageTab, setTabTitle } = tabs
   const { viewerRef, mapViewerRef } = viewers
   const {
-    addImagesRouted, openDroppedImport, confirmClearKeypoints, requestRemoveImages, downloadImageOriginal,
-    convertImageToRaster, confirmRemoveSensor, confirmRemoveMatches, exportMatches, confirmRemoveGcp, selectGcp,
-    jumpToImage, openGcpView, confirmRemoveShapefile, downloadShapefile, confirmRemoveCloud, openCloudExport,
-    openComputedProductTab, confirmRemoveProduct, renameProductFromSidebar, exportKind, openRasterTab,
-    confirmRemoveRaster, downloadRasterOriginal, renameRasterFromSidebar, onRasterImportAsImage,
+    addImagesRouted,
+    openDroppedImport,
+    confirmClearKeypoints,
+    requestRemoveImages,
+    downloadImageOriginal,
+    convertImageToRaster,
+    confirmRemoveSensor,
+    confirmRemoveMatches,
+    exportMatches,
+    confirmRemoveGcp,
+    selectGcp,
+    jumpToImage,
+    openGcpView,
+    confirmRemoveShapefile,
+    downloadShapefile,
+    confirmRemoveCloud,
+    openCloudExport,
+    openComputedProductTab,
+    confirmRemoveProduct,
+    renameProductFromSidebar,
+    exportKind,
+    openRasterTab,
+    confirmRemoveRaster,
+    downloadRasterOriginal,
+    renameRasterFromSidebar,
+    onRasterImportAsImage,
   } = actions
   const imagesStore = useImagesStore()
   const { imageById, selectImage, renameImage } = imagesStore
   const { imageCount: sensorImageCount, mergeSensors } = useSensorsStore()
-  const { selectCloud, setCloudVisible, renameCloud, setMainSparse, setProductVisible, setProductOpacity } = useReconstructionStore()
+  const { selectCloud, setCloudVisible, renameCloud, setMainSparse, setProductVisible, setProductOpacity } =
+    useReconstructionStore()
   const footprintsStore = useFootprintsStore()
   const { sets: shapefiles } = storeToRefs(footprintsStore)
   const { renameSet, setSetVisible } = footprintsStore
   const { setRasterKind, setRasterVisible, setRasterOpacity, rasterById } = useExternalStore()
   const {
-    infoImageId, sensorTableOpen, matchListOpen, symbologyCloudId, symbologyProductKind, rasterStyleId,
-    importRasterOpen, importRasterData,
+    infoImageId,
+    sensorTableOpen,
+    matchListOpen,
+    symbologyCloudId,
+    symbologyProductKind,
+    rasterStyleId,
+    importRasterOpen,
+    importRasterData,
   } = storeToRefs(useModalsStore())
 
   function renameImageFromSidebar({ id, name }) {
@@ -54,12 +82,24 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   // nothing here touches tabs or any pipeline state.
   function onImageGroupAction(a) {
     switch (a.op) {
-      case 'create':   imagesStore.createImageGroup({ id: a.id, imageIds: a.imageIds }); break
-      case 'rename':   imagesStore.renameImageGroup(a.id, a.name); break
-      case 'remove':   imagesStore.removeImageGroup(a.id); break
-      case 'assign':   imagesStore.setImagesGroup(a.imageIds, a.groupId); break
-      case 'collapse': imagesStore.setImageGroupCollapsed(a.id, a.collapsed); break
-      case 'move':     imagesStore.moveImageGroup(a.id, a.delta); break
+      case 'create':
+        imagesStore.createImageGroup({ id: a.id, imageIds: a.imageIds })
+        break
+      case 'rename':
+        imagesStore.renameImageGroup(a.id, a.name)
+        break
+      case 'remove':
+        imagesStore.removeImageGroup(a.id)
+        break
+      case 'assign':
+        imagesStore.setImagesGroup(a.imageIds, a.groupId)
+        break
+      case 'collapse':
+        imagesStore.setImageGroupCollapsed(a.id, a.collapsed)
+        break
+      case 'move':
+        imagesStore.moveImageGroup(a.id, a.delta)
+        break
     }
   }
 
@@ -85,13 +125,11 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     nextTick(() => viewerRef.value?.zoomToCloud(id))
   }
 
-
   // Switch to the map and centre it on an image's position (pose or EXIF GPS).
   function zoomToImagePosition(imgId) {
     activateTab('map')
     nextTick(() => mapViewerRef.value?.zoomToImage(imgId))
   }
-
 
   // Switch to the map and fit the view to a shapefile set's extent.
   function zoomToShapefile(id) {
@@ -102,14 +140,17 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   }
 
   const context = {
-    ...state, sensorImageCount,
+    ...state,
+    sensorImageCount,
     // Drops
     addImages: addImagesRouted,
     importFile: openDroppedImport,
     // Images
     selectImage,
     openImage: (id) => openImageTab(id),
-    showInfo: (id) => { infoImageId.value = id },
+    showInfo: (id) => {
+      infoImageId.value = id
+    },
     zoomToImage: zoomToImagePosition,
     deleteKeypoints: confirmClearKeypoints,
     removeImage: requestRemoveImages,
@@ -120,9 +161,13 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     // Sensors
     removeSensor: confirmRemoveSensor,
     mergeSensors: ({ target, source }) => mergeSensors(target, source),
-    openSensor: () => { sensorTableOpen.value = true },
+    openSensor: () => {
+      sensorTableOpen.value = true
+    },
     // Matches
-    openMatches: () => { matchListOpen.value = true },
+    openMatches: () => {
+      matchListOpen.value = true
+    },
     removeMatches: confirmRemoveMatches,
     downloadMatches: exportMatches,
     // GCPs
@@ -151,15 +196,21 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     renameProduct: renameProductFromSidebar,
     setProductVisible: ({ kind, visible }) => setProductVisible(kind, visible),
     setProductOpacity: ({ kind, opacity }) => setProductOpacity(kind, opacity),
-    productSymbology: (kind) => { symbologyProductKind.value = kind },
-    downloadProduct: (kind) => { exportKind.value = kind },
+    productSymbology: (kind) => {
+      symbologyProductKind.value = kind
+    },
+    downloadProduct: (kind) => {
+      exportKind.value = kind
+    },
     // Reference rasters
     openRaster: openRasterTab,
     removeRaster: confirmRemoveRaster,
     downloadRaster: downloadRasterOriginal,
     renameRaster: renameRasterFromSidebar,
     setRasterKind: ({ id, kind }) => setRasterKind(id, kind),
-    styleRaster: (id) => { rasterStyleId.value = id },
+    styleRaster: (id) => {
+      rasterStyleId.value = id
+    },
     rasterAccuracy: (id) => {
       const raster = rasterById(id)
       if (!raster) return

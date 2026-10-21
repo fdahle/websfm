@@ -120,23 +120,33 @@ function fmtSigned(v) {
   return `${v >= 0 ? '+' : '−'}${Math.abs(v).toPrecision(3)} m`
 }
 
-const barReady = (bar) => endpointReady(bar?.a) && endpointReady(bar?.b)
-  && Number.isFinite(bar?.knownDistanceM) && bar.knownDistanceM > 0
-const canApply = computed(() => !applying.value && recon.sparseCameras.size > 0
-  && scaleBars.bars.some((bar) => bar.enabled !== false && barReady(bar)))
+const barReady = (bar) =>
+  endpointReady(bar?.a) && endpointReady(bar?.b) && Number.isFinite(bar?.knownDistanceM) && bar.knownDistanceM > 0
+const canApply = computed(
+  () =>
+    !applying.value &&
+    recon.sparseCameras.size > 0 &&
+    scaleBars.bars.some((bar) => bar.enabled !== false && barReady(bar)),
+)
 const setupBar = computed(() => {
   const unfinished = [...scaleBars.bars].reverse().find((bar) => !barReady(bar))
   return unfinished ?? scaleBars.bars.at(-1) ?? null
 })
-const setupNeedsDistance = computed(() => setupBar.value
-  && endpointReady(setupBar.value.a) && endpointReady(setupBar.value.b)
-  && !(Number.isFinite(setupBar.value.knownDistanceM) && setupBar.value.knownDistanceM > 0))
+const setupNeedsDistance = computed(
+  () =>
+    setupBar.value &&
+    endpointReady(setupBar.value.a) &&
+    endpointReady(setupBar.value.b) &&
+    !(Number.isFinite(setupBar.value.knownDistanceM) && setupBar.value.knownDistanceM > 0),
+)
 const guidedAction = computed(() => {
   const bar = setupBar.value
-  if (!bar || barReady(bar)) return {
-    which: 'a', mode: 'new-bar',
-    label: scaleBars.bars.length ? 'Mark point 1 for another distance' : 'Mark point 1 in photos',
-  }
+  if (!bar || barReady(bar))
+    return {
+      which: 'a',
+      mode: 'new-bar',
+      label: scaleBars.bars.length ? 'Mark point 1 for another distance' : 'Mark point 1 in photos',
+    }
   for (const which of ['a', 'b']) {
     const endpoint = bar[which]
     if (endpointReady(endpoint)) continue
@@ -207,16 +217,22 @@ function remove(bar) {
 // that a number never appears without its provenance.
 const statusLine = computed(() => {
   if (resolved.value.source === 'georef') {
-    return `This project is georeferenced (${resolved.value.crs}), so the georeference defines the scale. `
-      + 'Bars below are reported as independent checks.'
+    return (
+      `This project is georeferenced (${resolved.value.crs}), so the georeference defines the scale. ` +
+      'Bars below are reported as independent checks.'
+    )
   }
   if (resolved.value.source === 'scalebars') {
-    return `Scale: ${recon.scaleFit.scale.toPrecision(6)} m per model unit `
-      + `from ${pluralize(recon.scaleFit.count, 'bar')}, RMS ${recon.scaleFit.rms.toPrecision(3)} m.`
+    return (
+      `Scale: ${recon.scaleFit.scale.toPrecision(6)} m per model unit ` +
+      `from ${pluralize(recon.scaleFit.count, 'bar')}, RMS ${recon.scaleFit.rms.toPrecision(3)} m.`
+    )
   }
   if (recon.scaleFit && !fitStatus.value.valid) {
-    return `The fitted scale is out of date (${fitStatus.value.reason}). Measurements are `
-      + 'shown in model units until you apply again.'
+    return (
+      `The fitted scale is out of date (${fitStatus.value.reason}). Measurements are ` +
+      'shown in model units until you apply again.'
+    )
   }
   return 'No scale yet — lengths in this project are up to scale (model units).'
 })
@@ -225,14 +241,14 @@ const statusLine = computed(() => {
 <template>
   <ModalShell title="Set Real-World Scale" @close="emit('close')">
     <WarnBox v-if="!recon.sparseCameras.size">
-      Build the sparse model first — a scale bar is measured <b>across the reconstruction</b>,
-      so its endpoints need camera poses.
+      Build the sparse model first — a scale bar is measured <b>across the reconstruction</b>, so its endpoints need
+      camera poses.
     </WarnBox>
 
     <p class="intro">
-      Use one distance that you measured on the real object to convert this reconstruction
-      from model units to metres. Pick two precise physical points—such as opposite corners
-      of a ruler or object edge—and enter the real distance between them.
+      Use one distance that you measured on the real object to convert this reconstruction from model units to metres.
+      Pick two precise physical points—such as opposite corners of a ruler or object edge—and enter the real distance
+      between them.
     </p>
 
     <div class="status" :class="{ stale: recon.scaleFit && !fitStatus.valid && resolved.source !== 'georef' }">
@@ -249,7 +265,13 @@ const statusLine = computed(() => {
             <small>{{ endpointProgress(setupBar?.a) }}</small>
           </div>
         </div>
-        <div class="workflow-step" :class="{ done: endpointReady(setupBar?.b), current: endpointReady(setupBar?.a) && !endpointReady(setupBar?.b) }">
+        <div
+          class="workflow-step"
+          :class="{
+            done: endpointReady(setupBar?.b),
+            current: endpointReady(setupBar?.a) && !endpointReady(setupBar?.b),
+          }"
+        >
           <span class="step-number">2</span>
           <div>
             <strong>Mark the second physical point</strong>
@@ -260,29 +282,44 @@ const statusLine = computed(() => {
           <span class="step-number">3</span>
           <div>
             <strong>Enter the real measured distance</strong>
-            <small>{{ barReady(setupBar) ? 'Ready to set the scale ✓' : (setupNeedsDistance ? 'Enter it in the highlighted row below' : 'After both points are marked') }}</small>
+            <small>{{
+              barReady(setupBar)
+                ? 'Ready to set the scale ✓'
+                : setupNeedsDistance
+                  ? 'Enter it in the highlighted row below'
+                  : 'After both points are marked'
+            }}</small>
           </div>
         </div>
       </div>
 
       <template v-if="guidedAction">
-        <button class="btn btn-primary workflow-action" :disabled="!recon.sparseCameras.size" @click="markGuidedEndpoint">
+        <button
+          class="btn btn-primary workflow-action"
+          :disabled="!recon.sparseCameras.size"
+          @click="markGuidedEndpoint"
+        >
           {{ guidedAction.label }}
         </button>
         <p class="workflow-hint">
-          This window will close. Click the <b>same physical point</b> in two different photos.
-          After the second mark, this setup will reopen automatically.
+          This window will close. Click the <b>same physical point</b> in two different photos. After the second mark,
+          this setup will reopen automatically.
         </p>
       </template>
       <p v-else-if="setupNeedsDistance" class="workflow-hint focus-hint">
-        Both points are ready. Enter the distance you measured in the <b>Real distance</b>
-        field below, choose its unit, then click <b>Set project scale</b>.
+        Both points are ready. Enter the distance you measured in the <b>Real distance</b> field below, choose its unit,
+        then click <b>Set project scale</b>.
       </p>
     </section>
 
     <SettingsGroup title="Known distances">
       <div class="bars-toolbar">
-        <button class="btn" :disabled="!recon.sparseCameras.size" title="Add a row and choose from points or registered camera centres that already exist" @click="addBarFromExisting">
+        <button
+          class="btn"
+          :disabled="!recon.sparseCameras.size"
+          title="Add a row and choose from points or registered camera centres that already exist"
+          @click="addBarFromExisting"
+        >
           + Use existing points
         </button>
         <span class="toolbar-note">Advanced: camera centres can also be selected as endpoints.</span>
@@ -301,7 +338,9 @@ const statusLine = computed(() => {
               <th>Point 1</th>
               <th>Point 2</th>
               <th title="The distance you measured in the real world">Real distance</th>
-              <th title="Optional 1σ uncertainty of your real-world measurement. Leave blank for equal weight.">Uncertainty</th>
+              <th title="Optional 1σ uncertainty of your real-world measurement. Leave blank for equal weight.">
+                Uncertainty
+              </th>
               <th>Unit</th>
               <th title="Distance between the points in the unscaled reconstruction">Model distance</th>
               <th title="Reconstructed distance after applying the current scale">Scaled result</th>
@@ -310,14 +349,16 @@ const statusLine = computed(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="bar in scaleBars.bars" :key="bar.id"
-              :class="{ off: bar.enabled === false, setup: setupBar?.id === bar.id && setupNeedsDistance }">
+            <tr
+              v-for="bar in scaleBars.bars"
+              :key="bar.id"
+              :class="{ off: bar.enabled === false, setup: setupBar?.id === bar.id && setupNeedsDistance }"
+            >
               <td class="mid">
                 <input type="checkbox" :checked="bar.enabled !== false" @change="toggle(bar, $event)" />
               </td>
               <td>
-                <input class="field-input name" type="text" :value="bar.name"
-                  @change="patch(bar, 'name', $event)" />
+                <input class="field-input name" type="text" :value="bar.name" @change="patch(bar, 'name', $event)" />
               </td>
               <td>
                 <select class="field-select" :value="endpointValue(bar.a)" @change="patchEndpoint(bar, 'a', $event)">
@@ -326,7 +367,9 @@ const statusLine = computed(() => {
                     <option v-for="m in markers" :key="m.id" :value="`marker:${m.id}`">{{ m.name }}</option>
                   </optgroup>
                   <optgroup v-if="registeredImages.length" label="Camera centres">
-                    <option v-for="im in registeredImages" :key="im.id" :value="`camera:${im.id}`">{{ im.name }}</option>
+                    <option v-for="im in registeredImages" :key="im.id" :value="`camera:${im.id}`">
+                      {{ im.name }}
+                    </option>
                   </optgroup>
                 </select>
               </td>
@@ -337,17 +380,32 @@ const statusLine = computed(() => {
                     <option v-for="m in markers" :key="m.id" :value="`marker:${m.id}`">{{ m.name }}</option>
                   </optgroup>
                   <optgroup v-if="registeredImages.length" label="Camera centres">
-                    <option v-for="im in registeredImages" :key="im.id" :value="`camera:${im.id}`">{{ im.name }}</option>
+                    <option v-for="im in registeredImages" :key="im.id" :value="`camera:${im.id}`">
+                      {{ im.name }}
+                    </option>
                   </optgroup>
                 </select>
               </td>
               <td>
-                <input class="field-input num" type="number" min="0" step="any"
-                  :value="shownDistance(bar)" @change="patch(bar, 'knownDistance', $event)" />
+                <input
+                  class="field-input num"
+                  type="number"
+                  min="0"
+                  step="any"
+                  :value="shownDistance(bar)"
+                  @change="patch(bar, 'knownDistance', $event)"
+                />
               </td>
               <td>
-                <input class="field-input num" type="number" min="0" step="any" placeholder="—"
-                  :value="shownAccuracy(bar)" @change="patch(bar, 'accuracy', $event)" />
+                <input
+                  class="field-input num"
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="—"
+                  :value="shownAccuracy(bar)"
+                  @change="patch(bar, 'accuracy', $event)"
+                />
               </td>
               <td>
                 <select class="field-select unit" :value="bar.displayUnit" @change="patch(bar, 'displayUnit', $event)">
@@ -360,10 +418,14 @@ const statusLine = computed(() => {
                 <span v-else class="dim">—</span>
               </td>
               <td class="num-cell">
-                <span v-if="rowFor(bar.id)?.residualM != null"
-                  :title="rowFor(bar.id).normalizedResidual != null
-                    ? `${rowFor(bar.id).normalizedResidual.toFixed(2)}σ · ${rowFor(bar.id).weighting}`
-                    : rowFor(bar.id).weighting">
+                <span
+                  v-if="rowFor(bar.id)?.residualM != null"
+                  :title="
+                    rowFor(bar.id).normalizedResidual != null
+                      ? `${rowFor(bar.id).normalizedResidual.toFixed(2)}σ · ${rowFor(bar.id).weighting}`
+                      : rowFor(bar.id).weighting
+                  "
+                >
                   {{ fmtSigned(rowFor(bar.id).residualM) }}
                   <small v-if="rowFor(bar.id).normalizedResidual != null" class="sigma">
                     · {{ rowFor(bar.id).normalizedResidual.toFixed(1) }}σ
@@ -385,12 +447,12 @@ const statusLine = computed(() => {
 
     <template #footer>
       <span class="footer-note">
-        Setting the scale applies one unit conversion to the whole project. It is re-checked against the
-        model and your marks each time it is used.
+        Setting the scale applies one unit conversion to the whole project. It is re-checked against the model and your
+        marks each time it is used.
       </span>
       <button class="btn" @click="emit('close')">Close</button>
       <button class="btn btn-primary" :disabled="!canApply" @click="apply">
-        {{ applying ? 'Working…' : (resolved.source === 'scalebars' ? 'Recalculate scale' : 'Set project scale') }}
+        {{ applying ? 'Working…' : resolved.source === 'scalebars' ? 'Recalculate scale' : 'Set project scale' }}
       </button>
     </template>
   </ModalShell>
@@ -398,9 +460,16 @@ const statusLine = computed(() => {
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.modal { width: min(96vw, 1100px); }
+.modal {
+  width: min(96vw, 1100px);
+}
 
-.intro { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+.intro {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
 
 .status {
   margin-bottom: 12px;
@@ -411,7 +480,10 @@ const statusLine = computed(() => {
   font-size: 12px;
   color: var(--text);
 }
-.status.stale { border-color: #b8860b; color: #e0a030; }
+.status.stale {
+  border-color: #b8860b;
+  color: #e0a030;
+}
 
 .workflow {
   display: flex;
@@ -422,8 +494,16 @@ const statusLine = computed(() => {
   border-radius: 7px;
   background: color-mix(in srgb, var(--accent) 6%, var(--bg));
 }
-.workflow-title { font-size: 12px; font-weight: 700; color: var(--text); }
-.workflow-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.workflow-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
 .workflow-step {
   display: flex;
   gap: 8px;
@@ -434,12 +514,34 @@ const statusLine = computed(() => {
   background: var(--panel);
   opacity: 0.62;
 }
-.workflow-step.current, .workflow-step.done { opacity: 1; }
-.workflow-step.current { border-color: var(--accent); }
-.workflow-step.done .step-number { background: var(--accent); color: #fff; }
-.workflow-step > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.workflow-step strong { font-size: 11px; line-height: 1.3; color: var(--text); }
-.workflow-step small { font-size: 10px; line-height: 1.3; color: var(--text-dim); overflow-wrap: anywhere; }
+.workflow-step.current,
+.workflow-step.done {
+  opacity: 1;
+}
+.workflow-step.current {
+  border-color: var(--accent);
+}
+.workflow-step.done .step-number {
+  background: var(--accent);
+  color: #fff;
+}
+.workflow-step > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.workflow-step strong {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text);
+}
+.workflow-step small {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
 .step-number {
   display: inline-flex;
   align-items: center;
@@ -453,18 +555,45 @@ const statusLine = computed(() => {
   font-size: 11px;
   font-weight: 700;
 }
-.workflow-action { align-self: flex-start; }
-.workflow-hint { margin: -2px 0 0; font-size: 11px; line-height: 1.45; color: var(--text-dim); }
-.focus-hint { color: var(--text); }
+.workflow-action {
+  align-self: flex-start;
+}
+.workflow-hint {
+  margin: -2px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+.focus-hint {
+  color: var(--text);
+}
 
-.bars-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.toolbar-note { font-size: 11px; color: var(--text-dim); }
+.bars-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.toolbar-note {
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
-.empty { font-size: 12px; color: var(--text-dim); padding: 10px 2px; }
+.empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 10px 2px;
+}
 
-.table-scroll { overflow-x: auto; }
+.table-scroll {
+  overflow-x: auto;
+}
 
-table.bars { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.bars {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
 table.bars th {
   text-align: left;
   font-weight: 600;
@@ -473,29 +602,73 @@ table.bars th {
   padding: 4px 6px;
   white-space: nowrap;
 }
-table.bars td { padding: 3px 6px; border-bottom: 1px solid var(--panel-border); vertical-align: middle; }
-table.bars tr.off { opacity: 0.5; }
-table.bars tr.setup { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+table.bars td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--panel-border);
+  vertical-align: middle;
+}
+table.bars tr.off {
+  opacity: 0.5;
+}
+table.bars tr.setup {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
 
-td.mid { text-align: center; }
-.num-cell { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.dim { color: var(--text-dim); }
-.sigma { color: var(--text-dim); }
-.reason { color: #e0a030; font-size: 11px; }
+td.mid {
+  text-align: center;
+}
+.num-cell {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.dim {
+  color: var(--text-dim);
+}
+.sigma {
+  color: var(--text-dim);
+}
+.reason {
+  color: #e0a030;
+  font-size: 11px;
+}
 
-.field-input.name { width: 110px; }
-.field-input.num { width: 84px; text-align: right; }
-.field-select.unit { width: 60px; min-width: 0; }
+.field-input.name {
+  width: 110px;
+}
+.field-input.num {
+  width: 84px;
+  text-align: right;
+}
+.field-select.unit {
+  width: 60px;
+  min-width: 0;
+}
 
 .row-remove {
-  background: none; border: none; color: var(--text-dim);
-  font-size: 15px; line-height: 1; cursor: pointer; padding: 0 4px; border-radius: 3px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
 }
-.row-remove:hover { background: var(--hover-bg); color: #e05555; }
+.row-remove:hover {
+  background: var(--hover-bg);
+  color: #e05555;
+}
 
-.footer-note { flex: 1; font-size: 11px; color: var(--text-dim); }
+.footer-note {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
 @media (max-width: 760px) {
-  .workflow-steps { grid-template-columns: 1fr; }
+  .workflow-steps {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

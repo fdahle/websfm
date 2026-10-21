@@ -16,15 +16,15 @@ import { TEXTURE_TUNING } from '../../tuning.js'
 // cand: faceCandidates output (scores sorted best first). adj/rev: faceAdjacency.
 // → Int32Array(F): the chosen view per face, −1 where no view sees it.
 export function selectViews(cand, adj, rev, opts = {}) {
-  const {
-    smoothness = 0.5, iterations = TEXTURE_TUNING.bpIterations, damping = TEXTURE_TUNING.bpDamping,
-  } = opts
+  const { smoothness = 0.5, iterations = TEXTURE_TUNING.bpIterations, damping = TEXTURE_TUNING.bpDamping } = opts
   const { K, count, view, score } = cand
   const F = count.length
   const labels = new Int32Array(F).fill(-1)
   const D = new Float32Array(F * K)
   for (let f = 0; f < F; f++) {
-    const n = count[f], base = f * K, best = score[base]
+    const n = count[f],
+      base = f * K,
+      best = score[base]
     for (let i = 0; i < n; i++) D[base + i] = 1 - score[base + i] / best
   }
   if (!(smoothness > 0) || iterations <= 0) {
@@ -44,7 +44,11 @@ export function selectViews(cand, adj, rev, opts = {}) {
       const mb = (3 * f + k) * K
       for (let j = 0; j < count[g]; j++) {
         const vj = view[g * K + j]
-        for (let i = 0; i < nf; i++) if (view[f * K + i] === vj) { map[mb + j] = i; break }
+        for (let i = 0; i < nf; i++)
+          if (view[f * K + i] === vj) {
+            map[mb + j] = i
+            break
+          }
       }
     }
   }
@@ -52,12 +56,14 @@ export function selectViews(cand, adj, rev, opts = {}) {
   // msg[(3f + k)·K + i]: the message into f from its neighbour across edge k, aligned
   // with f's candidates. All zero to start.
   const msg = new Float32Array(3 * F * K)
-  const h = new Float64Array(K), out = new Float64Array(K)
+  const h = new Float64Array(K),
+    out = new Float64Array(K)
   const update = (f) => {
     const nf = count[f]
     if (!nf) return
     const base = f * K
-    for (let i = 0; i < nf; i++) h[i] = D[base + i] + msg[(3 * f) * K + i] + msg[(3 * f + 1) * K + i] + msg[(3 * f + 2) * K + i]
+    for (let i = 0; i < nf; i++)
+      h[i] = D[base + i] + msg[3 * f * K + i] + msg[(3 * f + 1) * K + i] + msg[(3 * f + 2) * K + i]
     for (let k = 0; k < 3; k++) {
       const g = adj[3 * f + k]
       if (g < 0) continue
@@ -66,7 +72,10 @@ export function selectViews(cand, adj, rev, opts = {}) {
       const inb = (3 * f + k) * K
       // f's belief without what g told it.
       let minAll = Infinity
-      for (let i = 0; i < nf; i++) { const v = h[i] - msg[inb + i]; if (v < minAll) minAll = v }
+      for (let i = 0; i < nf; i++) {
+        const v = h[i] - msg[inb + i]
+        if (v < minAll) minAll = v
+      }
       const mb = (3 * f + k) * K
       let mn = Infinity
       for (let j = 0; j < ng; j++) {
@@ -88,10 +97,14 @@ export function selectViews(cand, adj, rev, opts = {}) {
   for (let f = 0; f < F; f++) {
     const nf = count[f]
     if (!nf) continue
-    let best = 0, bv = Infinity
+    let best = 0,
+      bv = Infinity
     for (let i = 0; i < nf; i++) {
-      const v = D[f * K + i] + msg[(3 * f) * K + i] + msg[(3 * f + 1) * K + i] + msg[(3 * f + 2) * K + i]
-      if (v < bv) { bv = v; best = i }
+      const v = D[f * K + i] + msg[3 * f * K + i] + msg[(3 * f + 1) * K + i] + msg[(3 * f + 2) * K + i]
+      if (v < bv) {
+        bv = v
+        best = i
+      }
     }
     labels[f] = view[f * K + best]
   }
@@ -108,25 +121,36 @@ export function selectViews(cand, adj, rev, opts = {}) {
 export function mergeSmallCharts(labels, adj, cand, { minFaces = TEXTURE_TUNING.minChartFaces, passes = 3 } = {}) {
   const { K, count, view } = cand
   const F = labels.length
-  const has = (f, v) => { for (let i = 0; i < count[f]; i++) if (view[f * K + i] === v) return true; return false }
+  const has = (f, v) => {
+    for (let i = 0; i < count[f]; i++) if (view[f * K + i] === v) return true
+    return false
+  }
   let total = 0
-  const chartOf = new Int32Array(F), stack = new Int32Array(F), members = []
+  const chartOf = new Int32Array(F),
+    stack = new Int32Array(F),
+    members = []
   for (let pass = 0; pass < passes; pass++) {
     chartOf.fill(-1)
-    let changed = 0, nCharts = 0
+    let changed = 0,
+      nCharts = 0
     for (let seed = 0; seed < F; seed++) {
       if (labels[seed] < 0 || chartOf[seed] >= 0) continue
       // Flood the chart of `seed`.
-      const L = labels[seed], c = nCharts++
+      const L = labels[seed],
+        c = nCharts++
       let sp = 0
       members.length = 0
-      stack[sp++] = seed; chartOf[seed] = c
+      stack[sp++] = seed
+      chartOf[seed] = c
       while (sp) {
         const f = stack[--sp]
         members.push(f)
         for (let k = 0; k < 3; k++) {
           const g = adj[3 * f + k]
-          if (g >= 0 && chartOf[g] < 0 && labels[g] === L) { chartOf[g] = c; stack[sp++] = g }
+          if (g >= 0 && chartOf[g] < 0 && labels[g] === L) {
+            chartOf[g] = c
+            stack[sp++] = g
+          }
         }
       }
       if (members.length >= minFaces) continue

@@ -15,19 +15,19 @@ function idealGrid() {
 describe('fitComposedRadial', () => {
   it('recovers a single known radial bag from pristine→folded pairs', () => {
     const bag = { k1: -0.12, k2: 0.03, k3: 0 }
-    const folded = idealGrid()                                  // ideal (folded) positions
+    const folded = idealGrid() // ideal (folded) positions
     const pristine = folded.map((p) => distortPixel(p.x, p.y, K, bag)) // as-observed (distorted)
     const fit = fitComposedRadial(pristine, folded, K, { k2: true, k3: false })
     expect(Math.abs(fit.k1 - bag.k1)).toBeLessThan(1e-3)
     expect(Math.abs(fit.k2 - bag.k2)).toBeLessThan(1e-3)
-    expect(fit.k3).toBe(0)                                      // column not fit ⇒ exactly 0
+    expect(fit.k3).toBe(0) // column not fit ⇒ exactly 0
     expect(fit.fitRmsPx).toBeLessThan(0.05)
   })
 
   it('approximates two sequential folds with one composed bag', () => {
     // Two passes: pristine → fold1 (undistort b1) → fold2 (undistort b2). The composed
     // fit from pristine → fold2 should reproduce the net map to sub-pixel.
-    const b1 = { k1: -0.10, k2: 0, k3: 0 }
+    const b1 = { k1: -0.1, k2: 0, k3: 0 }
     const b2 = { k1: -0.02, k2: 0.01, k3: 0 }
     const pristine = idealGrid().map((p) => distortPixel(p.x, p.y, K, { k1: -0.12, k2: 0.01, k3: 0 }))
     const fold1 = pristine.map((p) => undistortPixel(p.x, p.y, K, b1))
@@ -53,12 +53,20 @@ describe('fitComposedRadialSets', () => {
     const K2 = { ...K, fx: 1100, fy: 1100 }
     const sets = [K, K2].map((k) => {
       const folded = idealGrid()
-      return { pristine: keypointSetFrom(folded.map((p) => distortPixel(p.x, p.y, k, bag))), folded: keypointSetFrom(folded), K: k }
+      return {
+        pristine: keypointSetFrom(folded.map((p) => distortPixel(p.x, p.y, k, bag))),
+        folded: keypointSetFrom(folded),
+        K: k,
+      }
     })
     const own = fitComposedRadialSets(sets, K, {})
     expect(Math.abs(own.k1 - bag.k1)).toBeLessThan(1e-6)
     expect(own.fitRmsPx).toBeLessThan(1e-3)
-    const shared = fitComposedRadialSets(sets.map(({ pristine, folded }) => ({ pristine, folded })), K, {})
+    const shared = fitComposedRadialSets(
+      sets.map(({ pristine, folded }) => ({ pristine, folded })),
+      K,
+      {},
+    )
     expect(shared.fitRmsPx).toBeGreaterThan(0.1)
   })
 })
@@ -87,7 +95,7 @@ describe('radialCurveOk', () => {
     const res = radialCurveOk({ k1: -0.0852, k2: 0, k3: 0 }, maxNormR, fx)
     const cornerShiftPx = 0.0852 * maxNormR ** 3 * fx
     expect(cornerShiftPx).toBeGreaterThan(150) // the shift really is large in absolute px…
-    expect(res.ok).toBe(true)                  // …yet only ~7% of the corner radius
+    expect(res.ok).toBe(true) // …yet only ~7% of the corner radius
   })
 
   // The relative ceiling must still bite on an over-bent map. k1 is chosen to stay

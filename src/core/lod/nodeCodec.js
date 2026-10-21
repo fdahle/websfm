@@ -8,8 +8,14 @@
 // The point count lives in the hierarchy, not in the node.
 
 const TYPES = {
-  uint8: Uint8Array, int8: Int8Array, uint16: Uint16Array, int16: Int16Array,
-  uint32: Uint32Array, int32: Int32Array, float32: Float32Array, float64: Float64Array,
+  uint8: Uint8Array,
+  int8: Int8Array,
+  uint16: Uint16Array,
+  int16: Int16Array,
+  uint32: Uint32Array,
+  int32: Int32Array,
+  float32: Float32Array,
+  float64: Float64Array,
 }
 const pad4 = (n) => (n + 3) & ~3
 
@@ -36,9 +42,11 @@ export function encodeNode(cloud, idx, layout) {
   const n = idx.length
   const out = new Uint8Array(nodeBytes(n, layout))
   const dv = new DataView(out.buffer)
-  const [ox, oy, oz] = layout.offset, [sx, sy, sz] = layout.scale
+  const [ox, oy, oz] = layout.offset,
+    [sx, sy, sz] = layout.scale
   for (let k = 0; k < n; k++) {
-    const i = idx[k], o = 12 * k
+    const i = idx[k],
+      o = 12 * k
     dv.setInt32(o, Math.round((cloud.pos[3 * i] - ox) / sx), true)
     dv.setInt32(o + 4, Math.round((cloud.pos[3 * i + 1] - oy) / sy), true)
     dv.setInt32(o + 8, Math.round((cloud.pos[3 * i + 2] - oz) / sz), true)
@@ -48,12 +56,15 @@ export function encodeNode(cloud, idx, layout) {
     const col = cloud.col
     for (let k = 0; k < n; k++) {
       const i = idx[k]
-      out[off + 3 * k] = col ? col[3 * i] : 0; out[off + 3 * k + 1] = col ? col[3 * i + 1] : 0; out[off + 3 * k + 2] = col ? col[3 * i + 2] : 0
+      out[off + 3 * k] = col ? col[3 * i] : 0
+      out[off + 3 * k + 1] = col ? col[3 * i + 1] : 0
+      out[off + 3 * k + 2] = col ? col[3 * i + 2] : 0
     }
     off += pad4(3 * n)
   }
   for (const a of layout.attributes ?? []) {
-    const T = TYPES[a.type], src = cloud.attributes?.[a.name]
+    const T = TYPES[a.type],
+      src = cloud.attributes?.[a.name]
     const dst = new T(out.buffer, off, n)
     if (src) for (let k = 0; k < n; k++) dst[k] = src[idx[k]]
     off += pad4(T.BYTES_PER_ELEMENT * n)
@@ -71,7 +82,8 @@ export function decodeNode(bytes, count, layout, { as = 'render' } = {}) {
   // A fresh copy keeps every view aligned and independent of the source buffer.
   const buf = u8.slice().buffer
   const q = new Int32Array(buf, 0, 3 * count)
-  const [ox, oy, oz] = layout.offset, [sx, sy, sz] = layout.scale
+  const [ox, oy, oz] = layout.offset,
+    [sx, sy, sz] = layout.scale
   const absolute = as === 'absolute'
   const pos = absolute ? new Float64Array(3 * count) : new Float32Array(3 * count)
   for (let k = 0; k < count; k++) {
@@ -81,7 +93,10 @@ export function decodeNode(bytes, count, layout, { as = 'render' } = {}) {
   }
   let off = pad4(12 * count)
   let col = null
-  if (layout.colour) { col = new Uint8Array(buf, off, 3 * count); off += pad4(3 * count) }
+  if (layout.colour) {
+    col = new Uint8Array(buf, off, 3 * count)
+    off += pad4(3 * count)
+  }
   const attributes = {}
   for (const a of layout.attributes ?? []) {
     const T = TYPES[a.type]

@@ -28,8 +28,9 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
   function fitRegionDraft(what) {
     let positions = null
     if (what === 'dense') {
-      const dense = editableClouds.value.find((c) => c.id === selectedCloudId.value && !c.imported)
-        ?? editableClouds.value.find((c) => !c.imported)
+      const dense =
+        editableClouds.value.find((c) => c.id === selectedCloudId.value && !c.imported) ??
+        editableClouds.value.find((c) => !c.imported)
       positions = dense ? dense.pos.subarray(0, dense.count * 3) : null
     } else {
       const pts = reconstructionStore.mainSparseCloud?.points
@@ -41,7 +42,8 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
   function openRegionTool() {
     activateTab('viewer')
     const saved = normalizeRegion(reconstructionStore.region)
-    if (saved && reconstructionStore.regionState.active) regionDraft.value = { min: [...saved.min], max: [...saved.max] }
+    if (saved && reconstructionStore.regionState.active)
+      regionDraft.value = { min: [...saved.min], max: [...saved.max] }
     else fitRegionDraft('sparse')
     regionEdit.value = true
   }
@@ -55,22 +57,30 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
   // ── Tools ▸ Model ▾ ▸ Orient model ─────────────────────────────────────────────
   const orientEdit = ref(false)
   const orientDraft = ref({ up: [0, 0, 1], origin: [0, 0, 0], headingDeg: 0 })
-  const orientPicking = ref(null)        // null | 'plane' | 'origin'
-  const orientPlanePicks = ref([])       // up to 3 picked positions
+  const orientPicking = ref(null) // null | 'plane' | 'origin'
+  const orientPlanePicks = ref([]) // up to 3 picked positions
   const sparseCentre = () => {
     const pts = reconstructionStore.mainSparseCloud?.points
     if (!pts?.length) return [0, 0, 0]
-    let x = 0, y = 0, z = 0
-    for (const p of pts) { x += p.x; y += p.y; z += p.z }
+    let x = 0,
+      y = 0,
+      z = 0
+    for (const p of pts) {
+      x += p.x
+      y += p.y
+      z += p.z
+    }
     return [x / pts.length, y / pts.length, z / pts.length]
   }
-  const cameraCentres = () => [...(reconstructionStore.mainSparseCloud?.cameras?.values() ?? [])].map((c) => cameraCenter(c))
+  const cameraCentres = () =>
+    [...(reconstructionStore.mainSparseCloud?.cameras?.values() ?? [])].map((c) => cameraCenter(c))
   function openOrientTool() {
     activateTab('viewer')
     const saved = normalizeOrientation(reconstructionStore.orientation)
-    orientDraft.value = saved && reconstructionStore.orientationState.active
-      ? { up: [...saved.up], origin: [...saved.origin], headingDeg: saved.headingDeg }
-      : { up: [...(estimateUpFromCameras(sparseCameras.value) ?? [0, 0, 1])], origin: sparseCentre(), headingDeg: 0 }
+    orientDraft.value =
+      saved && reconstructionStore.orientationState.active
+        ? { up: [...saved.up], origin: [...saved.origin], headingDeg: saved.headingDeg }
+        : { up: [...(estimateUpFromCameras(sparseCameras.value) ?? [0, 0, 1])], origin: sparseCentre(), headingDeg: 0 }
     orientPicking.value = null
     orientPlanePicks.value = []
     orientEdit.value = true
@@ -108,7 +118,8 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
   const alignReferences = computed(() => [...editableClouds.value, ...meshClouds.value])
   function openAlignPairs() {
     activateTab('viewer')
-    const sourceId = editableClouds.value.find((c) => c.id === selectedCloudId.value)?.id ?? editableClouds.value[0]?.id ?? null
+    const sourceId =
+      editableClouds.value.find((c) => c.id === selectedCloudId.value)?.id ?? editableClouds.value[0]?.id ?? null
     const referenceId = alignReferences.value.find((c) => c.id !== sourceId)?.id ?? null
     alignPairs.value = { sourceId, referenceId, pairs: [], allowScale: false }
   }
@@ -128,7 +139,8 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
     const source = editableClouds.value.find((c) => c.id === a.sourceId)
     alignPairs.value = null
     await runEditClouds({
-      mode: 'transform', sourceIds: [a.sourceId],
+      mode: 'transform',
+      sourceIds: [a.sourceId],
       settings: { matrix: matrixFromTransform(transform) },
       name: `${source?.name ?? 'Cloud'} (aligned)`,
     })
@@ -166,7 +178,9 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
   })
 
   // What the 3D view draws: the draft while editing, else the saved box (dim if stale).
-  const viewerRegionBox = computed(() => (regionEdit.value ? regionDraft.value : normalizeRegion(reconstructionStore.region)))
+  const viewerRegionBox = computed(() =>
+    regionEdit.value ? regionDraft.value : normalizeRegion(reconstructionStore.region),
+  )
   const viewerRegionStale = computed(() => !regionEdit.value && reconstructionStore.regionState.reason === 'stale')
 
   // The orientation toolbox's controls.
@@ -177,24 +191,52 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
   function orientAutoUp() {
     orientDraft.value = { ...orientDraft.value, up: [...(estimateUpFromCameras(sparseCameras.value) ?? [0, 0, 1])] }
   }
-  function orientCentreOrigin() { orientDraft.value = { ...orientDraft.value, origin: sparseCentre() } }
-  function setOrientHeading(h) { if (Number.isFinite(h)) orientDraft.value = { ...orientDraft.value, headingDeg: h } }
+  function orientCentreOrigin() {
+    orientDraft.value = { ...orientDraft.value, origin: sparseCentre() }
+  }
+  function setOrientHeading(h) {
+    if (Number.isFinite(h)) orientDraft.value = { ...orientDraft.value, headingDeg: h }
+  }
 
   // Escape with nothing modal open leaves the innermost active tool step: a pending
   // pick before its tool. False when no tool was active.
   function exitModelTool() {
     if (regionEdit.value) regionEdit.value = false
-    else if (orientEdit.value) { if (orientPicking.value) orientPicking.value = null; else orientEdit.value = false }
-    else if (alignPairs.value) alignPairs.value = null
+    else if (orientEdit.value) {
+      if (orientPicking.value) orientPicking.value = null
+      else orientEdit.value = false
+    } else if (alignPairs.value) alignPairs.value = null
     else return false
     return true
   }
 
   return {
-    regionEdit, regionDraft, fitRegionDraft, openRegionTool, applyRegion, removeRegion,
-    orientEdit, orientDraft, orientPicking, orientPlanePicks, openOrientTool, applyOrientation, removeOrientation,
-    toggleOrientPick, orientAutoUp, orientCentreOrigin, setOrientHeading,
-    alignPairs, alignReferences, openAlignPairs, applyAlignPairs,
-    viewerPickMode, onViewerPick, viewerMarkers, viewerRegionBox, viewerRegionStale, exitModelTool,
+    regionEdit,
+    regionDraft,
+    fitRegionDraft,
+    openRegionTool,
+    applyRegion,
+    removeRegion,
+    orientEdit,
+    orientDraft,
+    orientPicking,
+    orientPlanePicks,
+    openOrientTool,
+    applyOrientation,
+    removeOrientation,
+    toggleOrientPick,
+    orientAutoUp,
+    orientCentreOrigin,
+    setOrientHeading,
+    alignPairs,
+    alignReferences,
+    openAlignPairs,
+    applyAlignPairs,
+    viewerPickMode,
+    onViewerPick,
+    viewerMarkers,
+    viewerRegionBox,
+    viewerRegionStale,
+    exitModelTool,
   }
 }

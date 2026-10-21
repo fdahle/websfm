@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { createGpuMatchRun } from './gpuMatchRun.js'
 
 const INIT = {
-  ok: true, adapter: 'test gpu', budgetBytes: 2 ** 30, macPerDispatch: 2 ** 33,
+  ok: true,
+  adapter: 'test gpu',
+  budgetBytes: 2 ** 30,
+  macPerDispatch: 2 ** 33,
   geometry: { tileA: 64, tileB: 64, workgroup: '16×16', microTile: '4×4', kChunk: 16 },
 }
 const PASS = { pass: true, nA: 10, nB: 10, nCpu: 5, nGpu: 5, common: 5, share: 1, countSlack: 5, gpuMs: 1, cpuMs: 9 }
@@ -13,8 +16,16 @@ function fakeClient({ init = INIT, gpu } = {}) {
   const calls = []
   const client = {
     begin: vi.fn(async () => init),
-    end: vi.fn(async () => ({ uploads: 2, uploadBytes: 8 * 2 ** 20, hits: 3, misses: 0, evictions: 0,
-      peakBytes: 8 * 2 ** 20, gpuMs: 50, selectMs: 5 })),
+    end: vi.fn(async () => ({
+      uploads: 2,
+      uploadBytes: 8 * 2 ** 20,
+      hits: 3,
+      misses: 0,
+      evictions: 0,
+      peakBytes: 8 * 2 ** 20,
+      gpuMs: 50,
+      selectMs: 5,
+    })),
     cpuMatch: vi.fn(async () => ({ matches: [{ ia: 0, ib: 0, dist: 1 }], count: 1, cpu: true })),
     gpuMatch: vi.fn(async (args) => {
       calls.push(args)
@@ -37,7 +48,7 @@ describe('createGpuMatchRun', () => {
     expect(log.mock.calls[0][1]).toBe('warn')
   })
 
-  it('validates the first full match, then sends each image\'s descriptors only once', async () => {
+  it("validates the first full match, then sends each image's descriptors only once", async () => {
     const log = vi.fn()
     const { client, calls } = fakeClient()
     const run = await createGpuMatchRun({ client, log, cacheBudgetBytes: 2 ** 30, runId: 'r1' })
@@ -59,8 +70,8 @@ describe('createGpuMatchRun', () => {
 
   it('resends with buffers when the worker reports a cache miss', async () => {
     const { client, calls } = fakeClient({
-      gpu: (args, n) => (n === 3 ? { needs: ['a'] }
-        : { matches: [], count: 0, ...(args.validate ? { validation: PASS } : {}) }),
+      gpu: (args, n) =>
+        n === 3 ? { needs: ['a'] } : { matches: [], count: 0, ...(args.validate ? { validation: PASS } : {}) },
     })
     const run = await createGpuMatchRun({ client, log: vi.fn(), cacheBudgetBytes: 2 ** 30 })
     await run.match(D, D, opts())
@@ -75,8 +86,8 @@ describe('createGpuMatchRun', () => {
   it('moves the rest of the run to WASM when validation fails', async () => {
     const log = vi.fn()
     const { client, calls } = fakeClient({
-      gpu: (args) => (args.validate ? { matches: [], count: 0, validation: FAIL, backend: 'wasm' }
-        : { matches: [], count: 0 }),
+      gpu: (args) =>
+        args.validate ? { matches: [], count: 0, validation: FAIL, backend: 'wasm' } : { matches: [], count: 0 },
     })
     const run = await createGpuMatchRun({ client, log, cacheBudgetBytes: 2 ** 30 })
     await Promise.all([run.match(D, D, opts()), run.match(D, D, opts({ idB: 'c' }))])
@@ -92,10 +103,15 @@ describe('createGpuMatchRun', () => {
   it('an inconclusive check (a pair with almost no matches) validates on the next pair instead', async () => {
     const log = vi.fn()
     const { client, calls } = fakeClient({
-      gpu: (args, n) => (args.validate ? { matches: [], count: 0, validation: n === 1 ? TINY : PASS } : { matches: [], count: 0 }),
+      gpu: (args, n) =>
+        args.validate ? { matches: [], count: 0, validation: n === 1 ? TINY : PASS } : { matches: [], count: 0 },
     })
     const run = await createGpuMatchRun({ client, log, cacheBudgetBytes: 2 ** 30 })
-    await Promise.all([run.match(D, D, opts()), run.match(D, D, opts({ idB: 'c' })), run.match(D, D, opts({ idB: 'd' }))])
+    await Promise.all([
+      run.match(D, D, opts()),
+      run.match(D, D, opts({ idB: 'c' })),
+      run.match(D, D, opts({ idB: 'd' })),
+    ])
     expect(calls.map((c) => c.validate)).toEqual([true, true, false])
     expect(client.cpuMatch).not.toHaveBeenCalled()
     expect(log.mock.calls.some(([m]) => /inconclusive/.test(m))).toBe(true)
@@ -123,7 +139,11 @@ describe('createGpuMatchRun', () => {
   })
 
   it('a GPU error on the validating pair disables the GPU for that run', async () => {
-    const { client, calls } = fakeClient({ gpu: () => { throw new Error('shader') } })
+    const { client, calls } = fakeClient({
+      gpu: () => {
+        throw new Error('shader')
+      },
+    })
     const run = await createGpuMatchRun({ client, log: vi.fn(), cacheBudgetBytes: 2 ** 30 })
     await Promise.all([run.match(D, D, opts()), run.match(D, D, opts())])
     expect(calls).toHaveLength(1)
@@ -148,11 +168,18 @@ describe('createGpuMatchRun', () => {
     const { client } = fakeClient({
       gpu: async (args, n) => {
         if (n === 1) return { matches: [], count: 0, validation: PASS }
-        await new Promise((resolve) => { finishFirst = resolve })
+        await new Promise((resolve) => {
+          finishFirst = resolve
+        })
         throw new Error('matching cancelled') // terminateAll rejects in-flight calls
       },
     })
-    const run = await createGpuMatchRun({ client, log: vi.fn(), cacheBudgetBytes: 2 ** 30, shouldCancel: () => cancelled })
+    const run = await createGpuMatchRun({
+      client,
+      log: vi.fn(),
+      cacheBudgetBytes: 2 ** 30,
+      shouldCancel: () => cancelled,
+    })
     await run.match(D, D, opts())
     const inFlight = run.match(D, D, opts({ idA: 'c', idB: 'd' }))
     await Promise.resolve()
@@ -171,13 +198,20 @@ describe('createGpuMatchRun', () => {
     const { client } = fakeClient({
       gpu: async (args) => {
         if (args.validate) {
-          await new Promise((resolve) => { releaseValidator = resolve })
+          await new Promise((resolve) => {
+            releaseValidator = resolve
+          })
           throw new Error('matching cancelled')
         }
         return { matches: [], count: 0 }
       },
     })
-    const run = await createGpuMatchRun({ client, log: vi.fn(), cacheBudgetBytes: 2 ** 30, shouldCancel: () => cancelled })
+    const run = await createGpuMatchRun({
+      client,
+      log: vi.fn(),
+      cacheBudgetBytes: 2 ** 30,
+      shouldCancel: () => cancelled,
+    })
     const first = run.match(D, D, opts())
     const waiting = run.match(D, D, opts({ idA: 'c', idB: 'd' }))
     await Promise.resolve()

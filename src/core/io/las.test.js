@@ -21,13 +21,13 @@ describe('cloudToLas (LAS 1.2 writer)', () => {
     expect(String.fromCharCode(las[0], las[1], las[2], las[3])).toBe('LASF')
     expect(las[24]).toBe(1) // version major
     expect(las[25]).toBe(2) // version minor
-    expect(dv.getUint16(94, true)).toBe(227)  // header size
-    expect(dv.getUint32(96, true)).toBe(227)  // offset to points (no VLR)
-    expect(dv.getUint32(100, true)).toBe(0)   // VLR count
-    expect(las[104]).toBe(2)                  // point format 2
-    expect(dv.getUint16(105, true)).toBe(26)  // record length
-    expect(dv.getUint32(107, true)).toBe(3)   // legacy point count
-    expect(dv.getUint32(111, true)).toBe(3)   // points by return[0]
+    expect(dv.getUint16(94, true)).toBe(227) // header size
+    expect(dv.getUint32(96, true)).toBe(227) // offset to points (no VLR)
+    expect(dv.getUint32(100, true)).toBe(0) // VLR count
+    expect(las[104]).toBe(2) // point format 2
+    expect(dv.getUint16(105, true)).toBe(26) // record length
+    expect(dv.getUint32(107, true)).toBe(3) // legacy point count
+    expect(dv.getUint32(111, true)).toBe(3) // points by return[0]
     // Real-world bbox: max x at 179, min x at 187.
     expect(dv.getFloat64(179, true)).toBeCloseTo(500250.5, 6)
     expect(dv.getFloat64(187, true)).toBeCloseTo(500000.123, 6)
@@ -74,7 +74,8 @@ describe('cloudToLas (LAS 1.2 writer)', () => {
   it('reads 8-bit colours stored in the 16-bit fields instead of turning them black', () => {
     const las = cloudToLas(PTS, { crsCode: 4326, geographic: true })
     const dv = new DataView(las.buffer)
-    const first = dv.getUint32(96, true), stride = dv.getUint16(105, true)
+    const first = dv.getUint32(96, true),
+      stride = dv.getUint16(105, true)
     // Rewrite every record's RGB as plain 0–255 values, as many writers do.
     PTS.forEach((p, i) => p.color.forEach((c, k) => dv.setUint16(first + i * stride + 20 + k * 2, c, true)))
     const out = parseLas(las)
@@ -108,19 +109,24 @@ describe('parseLas (reader)', () => {
     const buf = new Uint8Array(227 + 2 * RECORD)
     const dv = new DataView(buf.buffer)
     buf.set([0x4c, 0x41, 0x53, 0x46], 0) // LASF
-    buf[24] = 1; buf[25] = 2
+    buf[24] = 1
+    buf[25] = 2
     dv.setUint16(94, 227, true)
     dv.setUint32(96, 227, true)
     buf[104] = 3
     dv.setUint16(105, RECORD, true)
     dv.setUint32(107, 2, true)
-    dv.setFloat64(131, 0.01, true); dv.setFloat64(139, 0.01, true); dv.setFloat64(147, 0.01, true)
-    dv.setFloat64(155, 100, true); dv.setFloat64(163, 200, true); dv.setFloat64(171, 300, true)
+    dv.setFloat64(131, 0.01, true)
+    dv.setFloat64(139, 0.01, true)
+    dv.setFloat64(147, 0.01, true)
+    dv.setFloat64(155, 100, true)
+    dv.setFloat64(163, 200, true)
+    dv.setFloat64(171, 300, true)
     for (let i = 0; i < 2; i++) {
       const p = 227 + i * RECORD
-      dv.setInt32(p, 1000 * (i + 1), true)      // x = 100 + 10(i+1)
-      dv.setInt32(p + 4, 2000 * (i + 1), true)  // y = 200 + 20(i+1)
-      dv.setInt32(p + 8, 50, true)              // z = 300.5
+      dv.setInt32(p, 1000 * (i + 1), true) // x = 100 + 10(i+1)
+      dv.setInt32(p + 4, 2000 * (i + 1), true) // y = 200 + 20(i+1)
+      dv.setInt32(p + 8, 50, true) // z = 300.5
       dv.setUint16(p + 28, (40 + i) << 8, true) // R (format 3: after GPS time at 20)
       dv.setUint16(p + 30, 50 << 8, true)
       dv.setUint16(p + 32, 60 << 8, true)
@@ -143,7 +149,9 @@ describe('parseLas (reader)', () => {
   })
 
   it('rejects non-LAS bytes', () => {
-    expect(() => parseLas(new TextEncoder().encode('ply\nnot a las file at all — needs some length padding here'))).toThrow(/LASF/)
+    expect(() =>
+      parseLas(new TextEncoder().encode('ply\nnot a las file at all — needs some length padding here')),
+    ).toThrow(/LASF/)
   })
 
   it('reads a colorless format (0) without a col buffer', () => {
@@ -201,7 +209,9 @@ describe('point attributes in LAS', () => {
     for (let i = 0; i < k; i++) p += 54 + dv.getUint16(p + 20, true)
     return {
       userId: new TextDecoder().decode(bytes.slice(p + 2, p + 18)).replace(/\0+$/, ''),
-      recordId: dv.getUint16(p + 18, true), length: dv.getUint16(p + 20, true), body: p + 54,
+      recordId: dv.getUint16(p + 18, true),
+      length: dv.getUint16(p + 20, true),
+      body: p + 54,
     }
   }
 
@@ -209,19 +219,19 @@ describe('point attributes in LAS', () => {
     const distance = Float32Array.from([0.25, -1.5, NaN])
     const las = cloudToLas(flat({ distance }))
     const dv = new DataView(las.buffer)
-    expect(las[104]).toBe(2)                    // still point format 2
+    expect(las[104]).toBe(2) // still point format 2
     expect(dv.getUint16(105, true)).toBe(26 + 4) // + one float32
     expect(dv.getUint32(100, true)).toBe(1)
     const v = vlrAt(las)
     expect(v).toMatchObject({ userId: 'LASF_Spec', recordId: 4, length: 192 })
-    expect(las[v.body + 2]).toBe(9)              // data_type 9 = float
-    expect(las[v.body + 3]).toBe(0)              // options: none
+    expect(las[v.body + 2]).toBe(9) // data_type 9 = float
+    expect(las[v.body + 3]).toBe(0) // options: none
     expect(new TextDecoder().decode(las.slice(v.body + 4, v.body + 12))).toBe('distance')
-    expect(las[v.body + 12]).toBe(0)             // name is NUL-padded
+    expect(las[v.body + 12]).toBe(0) // name is NUL-padded
     const off = dv.getUint32(96, true)
     expect(off).toBe(227 + 54 + 192)
-    expect(dv.getFloat32(off + 26, true)).toBe(0.25)       // first record, after the 26 standard bytes
-    expect(dv.getFloat32(off + 30 + 26, true)).toBe(-1.5)  // second record (30-byte stride)
+    expect(dv.getFloat32(off + 26, true)).toBe(0.25) // first record, after the 26 standard bytes
+    expect(dv.getFloat32(off + 30 + 26, true)).toBe(-1.5) // second record (30-byte stride)
     expect(las.length).toBe(off + 3 * 30)
   })
 
@@ -248,14 +258,14 @@ describe('point attributes in LAS', () => {
     }
     const las = cloudToLas(flat(attrs))
     const dv = new DataView(las.buffer)
-    expect(dv.getUint32(100, true)).toBe(0)      // no extra-bytes VLR
+    expect(dv.getUint32(100, true)).toBe(0) // no extra-bytes VLR
     expect(dv.getUint16(105, true)).toBe(26)
-    expect(dv.getUint32(111, true)).toBe(2)      // points by return: 2 first returns
-    expect(dv.getUint32(115, true)).toBe(1)      // 1 second return
-    const p = 227 + 26                           // second record
+    expect(dv.getUint32(111, true)).toBe(2) // points by return: 2 first returns
+    expect(dv.getUint32(115, true)).toBe(1) // 1 second return
+    const p = 227 + 26 // second record
     expect(dv.getUint16(p + 12, true)).toBe(1000)
     expect(las[p + 14]).toBe(2 | (2 << 3))
-    expect(las[p + 15]).toBe(6 | (1 << 7))       // class 6, withheld flag
+    expect(las[p + 15]).toBe(6 | (1 << 7)) // class 6, withheld flag
     const out = parseLas(las)
     for (const [k, v] of Object.entries(attrs)) expect([...out.attributes[k]]).toEqual([...v])
   })
@@ -284,7 +294,9 @@ describe('point attributes in LAS', () => {
   })
 
   it('round-trips an imported LAS cloud (every attribute the reader made)', () => {
-    const first = parseLas(cloudToLas(flat({ gpsTime: Float64Array.from([1, 2, 3]), distance: Float32Array.from([1, 2, 3]) })))
+    const first = parseLas(
+      cloudToLas(flat({ gpsTime: Float64Array.from([1, 2, 3]), distance: Float32Array.from([1, 2, 3]) })),
+    )
     const again = parseLas(cloudToLas(first))
     expect(Object.keys(again.attributes).sort()).toEqual(Object.keys(first.attributes).sort())
     for (const [k, v] of Object.entries(first.attributes)) expect([...again.attributes[k]]).toEqual([...v])
@@ -294,7 +306,7 @@ describe('point attributes in LAS', () => {
     const las = cloudToLas(flat({ height: Int16Array.from([100, -200, 300]) }))
     const v = vlrAt(las)
     const dv = new DataView(las.buffer)
-    las[v.body + 3] = 8 | 16                     // options: scale + offset present
+    las[v.body + 3] = 8 | 16 // options: scale + offset present
     dv.setFloat64(v.body + 112, 0.01, true)
     dv.setFloat64(v.body + 136, 1000, true)
     const out = parseLas(las)
@@ -335,12 +347,18 @@ describe('cloudToLasParts / parseLasSource — chunked both ways', () => {
   for (const [name, bytes] of [
     ['plain', () => cloudToLas(flat())],
     ['attributes + extra bytes + GPS time', () => cloudToLas(flat(attrs))],
-    ['8-bit colour words', () => {
-      const b = cloudToLas(flat()).slice()
-      const dv = new DataView(b.buffer), off = dv.getUint32(96, true), rl = dv.getUint16(105, true)
-      for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) dv.setUint16(off + i * rl + 20 + c * 2, (i + c) % 256, true)
-      return b
-    }],
+    [
+      '8-bit colour words',
+      () => {
+        const b = cloudToLas(flat()).slice()
+        const dv = new DataView(b.buffer),
+          off = dv.getUint32(96, true),
+          rl = dv.getUint16(105, true)
+        for (let i = 0; i < n; i++)
+          for (let c = 0; c < 3; c++) dv.setUint16(off + i * rl + 20 + c * 2, (i + c) % 256, true)
+        return b
+      },
+    ],
     ['truncated', () => cloudToLas(flat()).slice(0, -100)],
   ]) {
     it(`${name}: parseLasSource (tiny slices) equals parseLas`, async () => {
@@ -361,14 +379,25 @@ describe('cloudToLasParts / parseLasSource — chunked both ways', () => {
 // 1 of 1), so the records written back are the records read — whatever the returns held.
 describe('LAS return numbers round trip', () => {
   const cloud = (attributes) => ({
-    count: 3, pos: Float64Array.from([0, 0, 0, 1, 1, 1, 2, 2, 2]),
-    col: Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9]), ...(attributes ? { attributes } : {}),
+    count: 3,
+    pos: Float64Array.from([0, 0, 0, 1, 1, 1, 2, 2, 2]),
+    col: Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    ...(attributes ? { attributes } : {}),
   })
   const records = (las) => [...las.subarray(new DataView(las.buffer, las.byteOffset).getUint32(96, true))]
-  const byReturn = (las) => { const dv = new DataView(las.buffer, las.byteOffset); return [0, 1, 2, 3, 4].map((k) => dv.getUint32(111 + 4 * k, true)) }
+  const byReturn = (las) => {
+    const dv = new DataView(las.buffer, las.byteOffset)
+    return [0, 1, 2, 3, 4].map((k) => dv.getUint32(111 + 4 * k, true))
+  }
 
   it('a file whose returns are all 0 keeps them, and writes 0 again', () => {
-    const first = cloudToLas(cloud({ returnNumber: new Uint8Array(3), numberOfReturns: new Uint8Array(3), intensity: Uint16Array.from([5, 6, 7]) }))
+    const first = cloudToLas(
+      cloud({
+        returnNumber: new Uint8Array(3),
+        numberOfReturns: new Uint8Array(3),
+        intensity: Uint16Array.from([5, 6, 7]),
+      }),
+    )
     expect(first[227 + 14]).toBe(0)
     expect(byReturn(first)).toEqual([0, 0, 0, 0, 0])
     const read = parseLas(first)
@@ -391,7 +420,8 @@ describe('LAS return numbers round trip', () => {
   })
 
   it('mixed returns read back exactly, the leading single returns included', () => {
-    const returnNumber = Uint8Array.from([1, 2, 0]), numberOfReturns = Uint8Array.from([1, 2, 3])
+    const returnNumber = Uint8Array.from([1, 2, 0]),
+      numberOfReturns = Uint8Array.from([1, 2, 3])
     const read = parseLas(cloudToLas(cloud({ returnNumber, numberOfReturns })))
     expect([...read.attributes.returnNumber]).toEqual([1, 2, 0])
     expect([...read.attributes.numberOfReturns]).toEqual([1, 2, 3])

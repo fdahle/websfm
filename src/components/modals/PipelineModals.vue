@@ -49,29 +49,91 @@ const FindGcpsModal = defineAsyncComponent(() => import('./georef/FindGcpsModal.
 // command (useCommandDispatch) and hands its settings to useDialogRuns on Run.
 const { currentCrs } = storeToRefs(useProjectsStore())
 const reconstructionStore = useReconstructionStore()
-const { canGeoreference, canGeoreferenceGcps, clouds, crsSuggestion, dem, demSource, groundSource, denseSummary, depthSummary, georef, georeferenceBlocker, meshSource, meshSources, ortho, orthoSurfaces } = storeToRefs(reconstructionStore)
+const {
+  canGeoreference,
+  canGeoreferenceGcps,
+  clouds,
+  crsSuggestion,
+  dem,
+  demSource,
+  groundSource,
+  denseSummary,
+  depthSummary,
+  georef,
+  georeferenceBlocker,
+  meshSource,
+  meshSources,
+  ortho,
+  orthoSurfaces,
+} = storeToRefs(reconstructionStore)
 const { images } = storeToRefs(useImagesStore())
 // Crop, filter and classify ground also take a streamed cloud (core/lod/streamed.js):
 // crop copies a box out of the octree into a resident cloud (or, inverted, rewrites the
 // octree); filter and classify run tile by tile into a new streamed cloud.
-const croppableClouds = computed(() => clouds.value.filter((c) => c.kind === 'dense' && c.count > 0 && (c.pos || c.lod)))
+const croppableClouds = computed(() =>
+  clouds.value.filter((c) => c.kind === 'dense' && c.count > 0 && (c.pos || c.lod)),
+)
 const { gcps } = storeToRefs(useGcpsStore())
 const { poses } = storeToRefs(usePosesStore())
 const { orthoRasters: referenceOrthos } = storeToRefs(useExternalStore())
 const {
-  cropCloudOpen, demOpen, denseOpen, depthMapsOpen, detectFeaturesOpen, filterCloudOpen,
-  filterCloudPreset, findGcpsOpen, georeferenceOpen, matchFeaturesOpen, mergeCloudsOpen, meshOpen,
-  orthoOpen, reconstructOpen, scaleBarsOpen, toolModal,
+  cropCloudOpen,
+  demOpen,
+  denseOpen,
+  depthMapsOpen,
+  detectFeaturesOpen,
+  filterCloudOpen,
+  filterCloudPreset,
+  findGcpsOpen,
+  georeferenceOpen,
+  matchFeaturesOpen,
+  mergeCloudsOpen,
+  meshOpen,
+  orthoOpen,
+  reconstructOpen,
+  scaleBarsOpen,
+  toolModal,
 } = storeToRefs(useModalsStore())
 const {
-  applyCrsSuggestion, closeReconstructModal, detectedImageCount, detectedMaxKeypoints, editableClouds,
-  exportClipped, exportContours, exportKind, exportMeasurementScope, exportTargetCloud, exportTerrain,
-  footprintImageCount, georeferenceAfterReconstruct, matchSummaries, measurementExportCrs, meshClouds, onCropCloudRun,
-  onDemRun, onDenseRun, onDepthMapsRun, onDetectRun, onExportRun,
-  onFilterCloudRun, onGeoreferenceRun, onGradualSelectionRun, onImageQualityEstimate, onImageQualityGroup,
-  onImageQualityRemove, onMatchRun, onMergeCloudsRun, onMeshRun, onOptimizeCamerasRun,
-  onOrthoRun, onProductToolRun, onReconstructRun, onSectionRun, onToolEditRun,
-  posedImageCount, startMarkingPoint,
+  applyCrsSuggestion,
+  closeReconstructModal,
+  detectedImageCount,
+  detectedMaxKeypoints,
+  editableClouds,
+  exportClipped,
+  exportContours,
+  exportKind,
+  exportMeasurementScope,
+  exportTargetCloud,
+  exportTerrain,
+  footprintImageCount,
+  georeferenceAfterReconstruct,
+  matchSummaries,
+  measurementExportCrs,
+  meshClouds,
+  onCropCloudRun,
+  onDemRun,
+  onDenseRun,
+  onDepthMapsRun,
+  onDetectRun,
+  onExportRun,
+  onFilterCloudRun,
+  onGeoreferenceRun,
+  onGradualSelectionRun,
+  onImageQualityEstimate,
+  onImageQualityGroup,
+  onImageQualityRemove,
+  onMatchRun,
+  onMergeCloudsRun,
+  onMeshRun,
+  onOptimizeCamerasRun,
+  onOrthoRun,
+  onProductToolRun,
+  onReconstructRun,
+  onSectionRun,
+  onToolEditRun,
+  posedImageCount,
+  startMarkingPoint,
 } = useAppContext()
 // Is the fitted scale still describing the current model + measurements? Read at
 // render time (not cached) because it depends on the marks, which the user edits
@@ -84,10 +146,13 @@ const toolInitialId = computed(() => reconstructionStore.selectedCloudId)
 // The mesh a mesh or 3D Tiles export writes: the sidebar's target, else the selected
 // mesh, else (mesh export only) the first mesh — as exports/clouds.js picks it.
 const exportMeshCloud = computed(() => {
-  const target = exportTargetCloud.value, sel = reconstructionStore.selectedCloud
+  const target = exportTargetCloud.value,
+    sel = reconstructionStore.selectedCloud
   if (target) return target.kind === 'mesh' ? target : null
   if (sel?.kind === 'mesh') return sel
-  return exportKind.value === 'mesh' ? reconstructionStore.clouds.find((c) => c.kind === 'mesh' && c.count > 0) ?? null : null
+  return exportKind.value === 'mesh'
+    ? (reconstructionStore.clouds.find((c) => c.kind === 'mesh' && c.count > 0) ?? null)
+    : null
 })
 // What a 3D Tiles export writes, with its size (exports/clouds.js picks it the same way).
 const exportTilesSubject = computed(() => {
@@ -99,7 +164,6 @@ const measurementsStore = useMeasurementsStore()
 </script>
 
 <template>
-
   <Teleport to="body">
     <DetectFeaturesModal
       v-if="detectFeaturesOpen"
@@ -108,7 +172,6 @@ const measurementsStore = useMeasurementsStore()
       @run="onDetectRun"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <MatchFeaturesModal
@@ -122,7 +185,6 @@ const measurementsStore = useMeasurementsStore()
     />
   </Teleport>
 
-
   <Teleport to="body">
     <ReconstructModal
       v-if="reconstructOpen"
@@ -132,7 +194,6 @@ const measurementsStore = useMeasurementsStore()
     />
   </Teleport>
 
-
   <Teleport to="body">
     <FindGcpsModal
       v-if="findGcpsOpen"
@@ -141,7 +202,6 @@ const measurementsStore = useMeasurementsStore()
       @close="findGcpsOpen = false"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <GeoreferenceModal
@@ -157,7 +217,6 @@ const measurementsStore = useMeasurementsStore()
     />
   </Teleport>
 
-
   <Teleport to="body">
     <!-- Scale bars read/write their stores directly (like the Quality hub), so
          this is one MODAL_COMMANDS line plus this block. The one thing it needs
@@ -165,10 +224,14 @@ const measurementsStore = useMeasurementsStore()
     <ScaleBarsModal
       v-if="scaleBarsOpen"
       @close="scaleBarsOpen = false"
-      @mark-point="(id) => { scaleBarsOpen = false; startMarkingPoint(id) }"
+      @mark-point="
+        (id) => {
+          scaleBarsOpen = false
+          startMarkingPoint(id)
+        }
+      "
     />
   </Teleport>
-
 
   <Teleport to="body">
     <ExportModal
@@ -180,7 +243,11 @@ const measurementsStore = useMeasurementsStore()
       :ortho-cells="reconstructionStore.ortho ? reconstructionStore.ortho.width * reconstructionStore.ortho.height : 0"
       :subject="exportTargetCloud?.name ?? exportMeasurementScope?.label ?? ''"
       :textured="!!exportMeshCloud?.texture"
-      :measurement-crs="exportKind === 'measurements' ? measurementExportCrs(exportMeasurementScope?.ids ?? null, georef?.crs === currentCrs) ?? '' : ''"
+      :measurement-crs="
+        exportKind === 'measurements'
+          ? (measurementExportCrs(exportMeasurementScope?.ids ?? null, georef?.crs === currentCrs) ?? '')
+          : ''
+      "
       :raster-crs="exportKind === 'dem' ? rasterCrsOf(dem) : exportKind === 'ortho' ? rasterCrsOf(ortho) : ''"
       :tiles-subject="exportTilesSubject"
       @close="exportKind = null"
@@ -188,24 +255,13 @@ const measurementsStore = useMeasurementsStore()
     />
   </Teleport>
 
-
   <Teleport to="body">
-    <DepthMapsModal
-      v-if="depthMapsOpen"
-      @close="depthMapsOpen = false"
-      @run="onDepthMapsRun"
-    />
+    <DepthMapsModal v-if="depthMapsOpen" @close="depthMapsOpen = false" @run="onDepthMapsRun" />
   </Teleport>
 
-
   <Teleport to="body">
-    <DenseModal
-      v-if="denseOpen"
-      @close="denseOpen = false"
-      @run="onDenseRun"
-    />
+    <DenseModal v-if="denseOpen" @close="denseOpen = false" @run="onDenseRun" />
   </Teleport>
-
 
   <Teleport to="body">
     <DemModal
@@ -223,7 +279,6 @@ const measurementsStore = useMeasurementsStore()
       @run="onDemRun"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <OrthoModal
@@ -243,7 +298,6 @@ const measurementsStore = useMeasurementsStore()
     />
   </Teleport>
 
-
   <Teleport to="body">
     <MeshModal
       v-if="meshOpen"
@@ -255,7 +309,6 @@ const measurementsStore = useMeasurementsStore()
     />
   </Teleport>
 
-
   <Teleport to="body">
     <FilterCloudModal
       v-if="filterCloudOpen"
@@ -263,11 +316,15 @@ const measurementsStore = useMeasurementsStore()
       :initial-id="toolInitialId"
       :merge-cell="denseSummary?.mergeCell ?? 0"
       :start-method="filterCloudPreset"
-      @close="() => { filterCloudOpen = false; filterCloudPreset = null }"
+      @close="
+        () => {
+          filterCloudOpen = false
+          filterCloudPreset = null
+        }
+      "
       @run="onFilterCloudRun"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <GradualSelectionModal
@@ -278,47 +335,142 @@ const measurementsStore = useMeasurementsStore()
     />
   </Teleport>
 
-
   <!-- Tools ▸ Point Cloud ▾ / Mesh ▾ / Products ▾ — one shared slot (toolModal). -->
   <Teleport to="body">
-    <NormalsModal v-if="toolModal === 'estimate-normals'" :clouds="editableClouds" :initial-id="toolInitialId"
-      :cameras="reconstructionStore.mainSparseCloud?.cameras ?? null" @close="toolModal = null" @run="onToolEditRun" />
-    <ClassifyGroundModal v-else-if="toolModal === 'classify-ground'" :clouds="croppableClouds" :initial-id="toolInitialId"
-      :frame-signature="reconstructionStore.currentFrameSignature" @close="toolModal = null" @run="onToolEditRun" />
-    <TransformCloudModal v-else-if="toolModal === 'transform-cloud'" :clouds="editableClouds" :initial-id="toolInitialId"
-      @close="toolModal = null" @run="onToolEditRun" />
-    <AlignIcpModal v-else-if="toolModal === 'align-icp'" :clouds="editableClouds" :references="[...editableClouds, ...meshClouds]"
-      :initial-id="toolInitialId" @close="toolModal = null" @run="onToolEditRun" />
-    <CloudDistanceModal v-else-if="toolModal === 'cloud-distance'" :clouds="editableClouds" :references="[...editableClouds, ...meshClouds]"
-      :initial-id="toolInitialId" @close="toolModal = null" @run="onToolEditRun" />
-    <SectionModal v-else-if="toolModal === 'cloud-section'" :clouds="editableClouds" :initial-id="toolInitialId"
-      :frame-signature="reconstructionStore.currentFrameSignature" @close="toolModal = null" @run="onSectionRun" />
-    <CleanMeshModal v-else-if="toolModal === 'clean-mesh'" :meshes="meshClouds" :initial-id="toolInitialId"
-      @close="toolModal = null" @run="onToolEditRun" />
-    <SmoothMeshModal v-else-if="toolModal === 'smooth-mesh'" :meshes="meshClouds" :initial-id="toolInitialId"
-      @close="toolModal = null" @run="onToolEditRun" />
-    <DecimateMeshModal v-else-if="toolModal === 'decimate-mesh'" :meshes="meshClouds" :initial-id="toolInitialId"
-      @close="toolModal = null" @run="onToolEditRun" />
-    <TextureMeshModal v-else-if="toolModal === 'texture-mesh'" :meshes="meshClouds" :initial-id="toolInitialId"
-      :camera-count="reconstructionStore.mainSparseCloud?.cameras?.size ?? 0" @close="toolModal = null" @run="onToolEditRun" />
-    <CropCloudModal v-else-if="toolModal === 'crop-mesh'" mesh :clouds="meshClouds" :initial-id="toolInitialId"
-      @close="toolModal = null" @run="onToolEditRun" />
-    <SampleMeshModal v-else-if="toolModal === 'mesh-to-points'" :meshes="meshClouds" :initial-id="toolInitialId"
-      @close="toolModal = null" @run="onToolEditRun" />
-    <MeshMeasureModal v-else-if="toolModal === 'mesh-measure'" :meshes="meshClouds" :initial-id="toolInitialId"
-      :frame-signature="reconstructionStore.currentFrameSignature" @close="toolModal = null" />
-    <ContoursModal v-else-if="toolModal === 'dem-contours'" :dem="dem"
-      @close="toolModal = null" @run="(s) => onProductToolRun(exportContours, s)" />
-    <TerrainModal v-else-if="toolModal === 'dem-derivatives'" :dem="dem"
-      @close="toolModal = null" @run="(s) => onProductToolRun(exportTerrain, s)" />
-    <OptimizeCamerasModal v-else-if="toolModal === 'optimize-cameras'" :cloud="reconstructionStore.mainSparseCloud"
-      :gcp-count="gcps.length" @close="toolModal = null" @run="onOptimizeCamerasRun" />
-    <ImageQualityModal v-else-if="toolModal === 'image-quality'" :images="images"
-      @close="toolModal = null" @estimate="onImageQualityEstimate" @group="onImageQualityGroup" @remove="onImageQualityRemove" />
-    <ClipRasterModal v-else-if="toolModal === 'clip-raster'" :dem="dem" :ortho="ortho" :measurements="measurementsStore.records"
-      @close="toolModal = null" @run="(s) => onProductToolRun(exportClipped, s)" />
+    <NormalsModal
+      v-if="toolModal === 'estimate-normals'"
+      :clouds="editableClouds"
+      :initial-id="toolInitialId"
+      :cameras="reconstructionStore.mainSparseCloud?.cameras ?? null"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <ClassifyGroundModal
+      v-else-if="toolModal === 'classify-ground'"
+      :clouds="croppableClouds"
+      :initial-id="toolInitialId"
+      :frame-signature="reconstructionStore.currentFrameSignature"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <TransformCloudModal
+      v-else-if="toolModal === 'transform-cloud'"
+      :clouds="editableClouds"
+      :initial-id="toolInitialId"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <AlignIcpModal
+      v-else-if="toolModal === 'align-icp'"
+      :clouds="editableClouds"
+      :references="[...editableClouds, ...meshClouds]"
+      :initial-id="toolInitialId"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <CloudDistanceModal
+      v-else-if="toolModal === 'cloud-distance'"
+      :clouds="editableClouds"
+      :references="[...editableClouds, ...meshClouds]"
+      :initial-id="toolInitialId"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <SectionModal
+      v-else-if="toolModal === 'cloud-section'"
+      :clouds="editableClouds"
+      :initial-id="toolInitialId"
+      :frame-signature="reconstructionStore.currentFrameSignature"
+      @close="toolModal = null"
+      @run="onSectionRun"
+    />
+    <CleanMeshModal
+      v-else-if="toolModal === 'clean-mesh'"
+      :meshes="meshClouds"
+      :initial-id="toolInitialId"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <SmoothMeshModal
+      v-else-if="toolModal === 'smooth-mesh'"
+      :meshes="meshClouds"
+      :initial-id="toolInitialId"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <DecimateMeshModal
+      v-else-if="toolModal === 'decimate-mesh'"
+      :meshes="meshClouds"
+      :initial-id="toolInitialId"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <TextureMeshModal
+      v-else-if="toolModal === 'texture-mesh'"
+      :meshes="meshClouds"
+      :initial-id="toolInitialId"
+      :camera-count="reconstructionStore.mainSparseCloud?.cameras?.size ?? 0"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <CropCloudModal
+      v-else-if="toolModal === 'crop-mesh'"
+      mesh
+      :clouds="meshClouds"
+      :initial-id="toolInitialId"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <SampleMeshModal
+      v-else-if="toolModal === 'mesh-to-points'"
+      :meshes="meshClouds"
+      :initial-id="toolInitialId"
+      @close="toolModal = null"
+      @run="onToolEditRun"
+    />
+    <MeshMeasureModal
+      v-else-if="toolModal === 'mesh-measure'"
+      :meshes="meshClouds"
+      :initial-id="toolInitialId"
+      :frame-signature="reconstructionStore.currentFrameSignature"
+      @close="toolModal = null"
+    />
+    <ContoursModal
+      v-else-if="toolModal === 'dem-contours'"
+      :dem="dem"
+      @close="toolModal = null"
+      @run="(s) => onProductToolRun(exportContours, s)"
+    />
+    <TerrainModal
+      v-else-if="toolModal === 'dem-derivatives'"
+      :dem="dem"
+      @close="toolModal = null"
+      @run="(s) => onProductToolRun(exportTerrain, s)"
+    />
+    <OptimizeCamerasModal
+      v-else-if="toolModal === 'optimize-cameras'"
+      :cloud="reconstructionStore.mainSparseCloud"
+      :gcp-count="gcps.length"
+      @close="toolModal = null"
+      @run="onOptimizeCamerasRun"
+    />
+    <ImageQualityModal
+      v-else-if="toolModal === 'image-quality'"
+      :images="images"
+      @close="toolModal = null"
+      @estimate="onImageQualityEstimate"
+      @group="onImageQualityGroup"
+      @remove="onImageQualityRemove"
+    />
+    <ClipRasterModal
+      v-else-if="toolModal === 'clip-raster'"
+      :dem="dem"
+      :ortho="ortho"
+      :measurements="measurementsStore.records"
+      @close="toolModal = null"
+      @run="(s) => onProductToolRun(exportClipped, s)"
+    />
   </Teleport>
-
 
   <Teleport to="body">
     <CropCloudModal
@@ -329,7 +481,6 @@ const measurementsStore = useMeasurementsStore()
       @run="onCropCloudRun"
     />
   </Teleport>
-
 
   <Teleport to="body">
     <MergeCloudsModal

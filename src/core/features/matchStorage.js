@@ -27,14 +27,19 @@ export const MATCH_HEAVY_KEYS = ['pairs', 'counts', 'F', 'matches']
 // The columns a project open reads (everything but the matches themselves).
 export const MATCH_INDEX_KEYS = ['pairs', 'counts', 'flags', 'F']
 
-const FLAG_EXCLUDED = 1, FLAG_WEAK = 2, FLAG_HAS_F = 4
+const FLAG_EXCLUDED = 1,
+  FLAG_WEAK = 2,
+  FLAG_HAS_F = 4
 
 /** The flat match array of a [[ia, ib], …] list (or an existing Uint32Array). */
 export function toMatchArray(matches) {
   if (matches instanceof Uint32Array) return matches
   const out = new Uint32Array((matches?.length ?? 0) * 2)
   let i = 0
-  for (const [a, b] of matches || []) { out[i++] = a; out[i++] = b }
+  for (const [a, b] of matches || []) {
+    out[i++] = a
+    out[i++] = b
+  }
   return out
 }
 
@@ -61,20 +66,31 @@ export const isPersistedMatchEntry = (e) => e.status === 'done' && countOf(e) > 
 export function packMatchDocument(entries, { matchesOf = (_pid, e) => toMatchArray(e.matches) } = {}) {
   const keep = []
   for (const [pairId, e] of entries) if (isPersistedMatchEntry(e)) keep.push([pairId, e])
-  const imageIndex = new Map(), images = []
+  const imageIndex = new Map(),
+    images = []
   const indexOf = (uuid) => {
     let i = imageIndex.get(uuid)
-    if (i === undefined) { i = images.length; imageIndex.set(uuid, i); images.push(uuid) }
+    if (i === undefined) {
+      i = images.length
+      imageIndex.set(uuid, i)
+      images.push(uuid)
+    }
     return i
   }
   const P = keep.length
-  const pairs = new Uint32Array(2 * P), counts = new Uint32Array(3 * P), F = new Float64Array(9 * P)
-  const matchParts = [], layout = []
+  const pairs = new Uint32Array(2 * P),
+    counts = new Uint32Array(3 * P),
+    F = new Float64Array(9 * P)
+  const matchParts = [],
+    layout = []
   let off = 0
   keep.forEach(([pairId, e], p) => {
-    pairs[2 * p] = indexOf(e.idA); pairs[2 * p + 1] = indexOf(e.idB)
+    pairs[2 * p] = indexOf(e.idA)
+    pairs[2 * p + 1] = indexOf(e.idB)
     const n = countOf(e)
-    counts[3 * p] = e.rawCount ?? 0; counts[3 * p + 1] = e.inlierCount ?? 0; counts[3 * p + 2] = n
+    counts[3 * p] = e.rawCount ?? 0
+    counts[3 * p + 1] = e.inlierCount ?? 0
+    counts[3 * p + 2] = n
     if (e.F) for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) F[9 * p + 3 * r + c] = e.F[r][c]
     const part = matchesOf(pairId, e)
     if (part instanceof Uint32Array && part.length !== 2 * n) {
@@ -99,7 +115,10 @@ export function concatMatchParts(parts) {
   for (const p of parts) n += p.length
   const out = new Uint32Array(n)
   let o = 0
-  for (const p of parts) { out.set(p, o); o += p.length }
+  for (const p of parts) {
+    out.set(p, o)
+    o += p.length
+  }
   return out
 }
 
@@ -120,9 +139,11 @@ export function packMatchFlags(keptEntries) {
  */
 export function unpackMatchIndex(meta, buffers, { matchBytes } = {}) {
   if (meta?.version !== MATCH_DOC_VERSION) throw new Error(`Unsupported match document version ${meta?.version}`)
-  const P = meta.count, images = meta.images
+  const P = meta.count,
+    images = meta.images
   const u32 = (b) => (b ? new Uint32Array(b) : new Uint32Array(0))
-  const pairs = u32(buffers.pairs), counts = u32(buffers.counts)
+  const pairs = u32(buffers.pairs),
+    counts = u32(buffers.counts)
   const flags = buffers.flags ? new Uint8Array(buffers.flags) : new Uint8Array(0)
   const F = buffers.F ? new Float64Array(buffers.F) : new Float64Array(0)
   if (pairs.length !== 2 * P || counts.length !== 3 * P || flags.length !== P || F.length !== 9 * P) {
@@ -134,15 +155,27 @@ export function unpackMatchIndex(meta, buffers, { matchBytes } = {}) {
   const out = []
   let o = 0
   for (let p = 0; p < P; p++) {
-    const idA = images[pairs[2 * p]], idB = images[pairs[2 * p + 1]]
+    const idA = images[pairs[2 * p]],
+      idB = images[pairs[2 * p + 1]]
     if (idA == null || idB == null) throw new Error('Incomplete match document')
-    const n = counts[3 * p + 2], f = flags[p]
+    const n = counts[3 * p + 2],
+      f = flags[p]
     const Fm = f & FLAG_HAS_F ? [0, 1, 2].map((r) => [0, 1, 2].map((c) => F[9 * p + 3 * r + c])) : null
-    out.push([`${idA}--${idB}`, {
-      idA, idB, rawCount: counts[3 * p], inlierCount: counts[3 * p + 1], F: Fm,
-      nMatches: n, off: o, status: 'done',
-      enabled: !(f & FLAG_EXCLUDED), weak: !!(f & FLAG_WEAK),
-    }])
+    out.push([
+      `${idA}--${idB}`,
+      {
+        idA,
+        idB,
+        rawCount: counts[3 * p],
+        inlierCount: counts[3 * p + 1],
+        F: Fm,
+        nMatches: n,
+        off: o,
+        status: 'done',
+        enabled: !(f & FLAG_EXCLUDED),
+        weak: !!(f & FLAG_WEAK),
+      },
+    ])
     o += 2 * n
   }
   return out
@@ -163,7 +196,8 @@ export function planMatchReads(items, { windowBytes = 32 * 2 ** 20, maxGapBytes 
   for (const it of items) {
     const [s, e] = matchByteRange(it.off, it.n)
     if (cur && cur.file === it.file && s >= cur.end && s - cur.end <= maxGapBytes && e - cur.start <= windowBytes) {
-      cur.end = e; cur.items.push(it)
+      cur.end = e
+      cur.items.push(it)
       continue
     }
     cur = { file: it.file, start: s, end: e, items: [it] }

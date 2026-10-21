@@ -15,8 +15,11 @@ export const MAX_FLOAT64_XYZ_POINTS = Math.floor(MAX_BUFFER_BYTES / 24)
 export const TAB_BUFFER_POOL_BYTES = 16 * 2 ** 30
 
 /** The engine refusing a buffer (V8: RangeError "Array buffer allocation failed" / "Invalid array length"). */
-export const isBufferAllocationFailure = (err) => err instanceof RangeError
-  && /array buffer allocation failed|invalid array buffer length|invalid typed array length|invalid array length/i.test(err.message ?? '')
+export const isBufferAllocationFailure = (err) =>
+  err instanceof RangeError &&
+  /array buffer allocation failed|invalid array buffer length|invalid typed array length|invalid array length/i.test(
+    err.message ?? '',
+  )
 
 // The same failure as it reaches the page: a worker's error crosses as its message only.
 const POOL_REFUSED = /array buffer allocation failed|invalid (typed )?array (buffer )?length/i
@@ -31,14 +34,18 @@ export function bufferFailureText(message, remedy) {
   const msg = String(message ?? '')
   const onRead = READ_REFUSED.test(msg)
   if (!onRead && !POOL_REFUSED.test(msg)) return msg
-  return `${msg} — ${onRead ? 'almost certainly not a permission problem: ' : ''}the browser tab ran out of `
-    + `buffer memory (it holds 16 GB for the page and all its workers, one buffer at most 2 GB). ${remedy}`
+  return (
+    `${msg} — ${onRead ? 'almost certainly not a permission problem: ' : ''}the browser tab ran out of ` +
+    `buffer memory (it holds 16 GB for the page and all its workers, one buffer at most 2 GB). ${remedy}`
+  )
 }
 
 /** The user-facing reason, for `what` (e.g. "this cloud") holding `points` points. */
 export function tooManyPointsMessage(what, points = null) {
-  return `${what}${points ? ` (${points.toLocaleString()} points)` : ''} is too large to hold at once: the browser `
-    + `caps one buffer at 2 GiB, about ${Math.floor(MAX_FLOAT64_XYZ_POINTS / 1e6)} million points at full precision.`
+  return (
+    `${what}${points ? ` (${points.toLocaleString()} points)` : ''} is too large to hold at once: the browser ` +
+    `caps one buffer at 2 GiB, about ${Math.floor(MAX_FLOAT64_XYZ_POINTS / 1e6)} million points at full precision.`
+  )
 }
 
 /** The user-facing refusal for a raster whose full plane (`bytesPerCell` per cell) would
@@ -46,8 +53,10 @@ export function tooManyPointsMessage(what, points = null) {
 export function rasterTooLargeMessage(name, width, height, bytesPerCell = 4) {
   const gb = (width * height * bytesPerCell) / 1e9
   const side = Math.floor(Math.sqrt(MAX_BUFFER_BYTES / bytesPerCell))
-  return `${name} is ${width.toLocaleString()} × ${height.toLocaleString()} cells: its full-resolution plane needs `
-    + `${gb.toFixed(2)} GB in one buffer, and the browser caps one buffer at 2 GiB (about ${side.toLocaleString()} × `
-    + `${side.toLocaleString()} cells). Import a coarser or cropped copy, e.g. gdal_translate -tr with twice the cell `
-    + 'size, or -projwin around your area.'
+  return (
+    `${name} is ${width.toLocaleString()} × ${height.toLocaleString()} cells: its full-resolution plane needs ` +
+    `${gb.toFixed(2)} GB in one buffer, and the browser caps one buffer at 2 GiB (about ${side.toLocaleString()} × ` +
+    `${side.toLocaleString()} cells). Import a coarser or cropped copy, e.g. gdal_translate -tr with twice the cell ` +
+    'size, or -projwin around your area.'
+  )
 }

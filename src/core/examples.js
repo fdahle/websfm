@@ -58,14 +58,21 @@ export function parseExampleManifest(json) {
 export async function downloadExample(id, { onProgress, signal, fetchFn = fetch } = {}) {
   if (!EXAMPLES[id]) throw new Error(`Unknown example: ${id}`)
   const base = `${exampleBaseUrl()}${id}/`
-  const missing = (url, why) => new Error(`${url}: ${why}. The example is probably not on this server `
-    + '(run npm run fetch:examples, or set VITE_EXAMPLE_BASE_URL).')
+  const missing = (url, why) =>
+    new Error(
+      `${url}: ${why}. The example is probably not on this server ` +
+        '(run npm run fetch:examples, or set VITE_EXAMPLE_BASE_URL).',
+    )
 
   const manifestUrl = `${base}manifest.json`
   const res = await fetchFn(manifestUrl, { signal })
   if (!res.ok) throw missing(manifestUrl, `HTTP ${res.status}`)
   let json
-  try { json = await res.json() } catch { throw missing(manifestUrl, 'not JSON') }
+  try {
+    json = await res.json()
+  } catch {
+    throw missing(manifestUrl, 'not JSON')
+  }
   const files = parseExampleManifest(json)
 
   const totalBytes = files.reduce((s, f) => s + f.bytes, 0)

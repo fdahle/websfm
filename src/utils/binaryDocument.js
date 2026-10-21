@@ -21,7 +21,10 @@ export async function writeBinaryDocument(dir, filename, metadata, buffers, { wr
   const files = {}
   for (const [key, buffer] of Object.entries(buffers)) {
     if (buffer == null) continue
-    if (buffer.reuse) { files[key] = { name: buffer.reuse.name, bytes: buffer.reuse.bytes }; continue }
+    if (buffer.reuse) {
+      files[key] = { name: buffer.reuse.name, bytes: buffer.reuse.bytes }
+      continue
+    }
     const name = `${filename}.${generation}.${key}.bin`
     await writeBin(dir, name, buffer)
     // A typed array / ArrayBuffer, or a Blob (written without copying it into memory).
@@ -29,7 +32,7 @@ export async function writeBinaryDocument(dir, filename, metadata, buffers, { wr
   }
   await writeJson(dir, filename, { ...metadata, binaryFiles: files })
   if (dir.keys) {
-    const keep = new Set(Object.values(files).map(f => f.name))
+    const keep = new Set(Object.values(files).map((f) => f.name))
     for await (const name of dir.keys()) {
       if (name.startsWith(`${filename}.`) && name.endsWith('.bin') && !keep.has(name)) {
         // Garbage collection is best effort; the committed document is already safe.

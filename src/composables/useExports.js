@@ -31,8 +31,21 @@ import { pluralize } from '../core/textFormat.js'
 // plus `progress` — usePipeline's progress handle, for the one export (undistorted
 // images) that is minutes of work rather than a serialization.
 export function useExports({
-  poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
-  georef, currentProjectName, currentCrs, summary, progress, effectiveFrameSpec,
+  poses,
+  sensors,
+  images,
+  matchStore,
+  clouds,
+  selectedCloud,
+  mainSparseCloud,
+  dem,
+  ortho,
+  georef,
+  currentProjectName,
+  currentCrs,
+  summary,
+  progress,
+  effectiveFrameSpec,
 }) {
   const { log } = useLog()
   const projects = useProjectsStore()
@@ -47,10 +60,14 @@ export function useExports({
   // A cloud's own name in its file name, so two exported clouds never collide.
   // "Imported (south.laz)" → "Imported_south": the source extension would read as
   // the export's format.
-  const fileSafe = (name) => String(name ?? '').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '')
-    .replace(/\.[a-z0-9]{2,4}$/i, '').slice(0, 80)
-  const cloudFileBase = (cloud, target) => (target && fileSafe(cloud.name)
-    ? `${projectBase()}-${fileSafe(cloud.name)}` : `${projectBase()}-${cloud.kind}`)
+  const fileSafe = (name) =>
+    String(name ?? '')
+      .replace(/[^\w.-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .replace(/\.[a-z0-9]{2,4}$/i, '')
+      .slice(0, 80)
+  const cloudFileBase = (cloud, target) =>
+    target && fileSafe(cloud.name) ? `${projectBase()}-${fileSafe(cloud.name)}` : `${projectBase()}-${cloud.kind}`
   // Parse the current DEM's CRS into an EPSG code + geographic flag for GeoTIFF /
   // .prj. The working CRS is a proj4 string or "EPSG:xxxx"; only the latter yields a
   // code (else the geotransform is still written, without a CRS).
@@ -63,10 +80,23 @@ export function useExports({
   }
   // Poses, sensors, fiducials, keypoints, matches (exports/tabular.js).
   const {
-    exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials, saveJson,
-    exportKeypoints, exportMatches, swapPairs,
+    exportPoses,
+    exportSensors,
+    exportCameraFiducials,
+    exportImageFiducials,
+    saveJson,
+    exportKeypoints,
+    exportMatches,
+    swapPairs,
   } = createTabularExports({
-    currentCrs, currentProjectName, images, imagesStore, log, matchStore, matchesStore, poses,
+    currentCrs,
+    currentProjectName,
+    images,
+    imagesStore,
+    log,
+    matchStore,
+    matchesStore,
+    poses,
     sensors,
   })
 
@@ -77,12 +107,16 @@ export function useExports({
   // ribbon's "the selected cloud, else the first". Cleared whenever the dialog closes,
   // so a later ribbon export never inherits it.
   const exportTarget = ref(null)
-  watch(exportKind, (kind) => { if (!kind) exportTarget.value = null })
+  watch(exportKind, (kind) => {
+    if (!kind) exportTarget.value = null
+  })
   const exportTargetCloud = computed(() => clouds.value.find((c) => c.id === exportTarget.value) ?? null)
   // Export ▸ Measurements from a saved-measurements list: that list's records
   // ({ ids, label }), or null for every saved measurement. Cleared with the dialog too.
   const exportMeasurementScope = ref(null)
-  watch(exportKind, (kind) => { if (kind !== 'measurements') exportMeasurementScope.value = null })
+  watch(exportKind, (kind) => {
+    if (kind !== 'measurements') exportMeasurementScope.value = null
+  })
   function openMeasurementExport(scope = null) {
     exportKind.value = 'measurements'
     exportMeasurementScope.value = scope?.ids ? { ids: [...scope.ids], label: scope.label ?? '' } : null
@@ -102,7 +136,11 @@ export function useExports({
     const meta = external.rasters.find((r) => r.id === id)
     const file = await external.originalFile(id).catch(() => null)
     if (!file) {
-      log(`${meta?.name ?? 'Raster'}: the original file is not stored in this project — re-import it to download it`, 'warn', 'Export')
+      log(
+        `${meta?.name ?? 'Raster'}: the original file is not stored in this project — re-import it to download it`,
+        'warn',
+        'Export',
+      )
       return
     }
     downloadBlob(file.name || meta?.name || 'raster.tif', file)
@@ -114,8 +152,14 @@ export function useExports({
     const img = images.value.find((i) => i.id === id)
     if (!img) return
     let blob = await opfs.loadImageBlob(projects.currentProjectId, img.uuid).catch(() => null)
-    if (!blob && img.url) blob = await fetch(img.url).then((r) => r.blob()).catch(() => null)
-    if (!blob) { log(`${img.name}: the image file is no longer available`, 'warn', 'Export'); return }
+    if (!blob && img.url)
+      blob = await fetch(img.url)
+        .then((r) => r.blob())
+        .catch(() => null)
+    if (!blob) {
+      log(`${img.name}: the image file is no longer available`, 'warn', 'Export')
+      return
+    }
     downloadBlob(img.name || `${img.uuid}.jpg`, blob)
   }
 
@@ -128,9 +172,9 @@ export function useExports({
     log(`Exported ${pluralize(set.footprints.length, 'polygon')} of "${set.name}" as GeoJSON`, 'success', 'Export')
   }
 
-
   async function onExportRun(settings) {
-    const kind = exportKind.value, target = exportTargetCloud.value
+    const kind = exportKind.value,
+      target = exportTargetCloud.value
     const measurementIds = exportMeasurementScope.value?.ids ?? null
     exportKind.value = null
     try {
@@ -151,36 +195,77 @@ export function useExports({
   }
 
   // Clouds, meshes, the model JSON and 3D Tiles (exports/clouds.js).
-  const {
-    sparseCloud, doExportCloud, doExportMesh, doExportModel, doExportTiles3d,
-  } = createCloudExports({
-    cloudFileBase, clouds, currentCrs, effectiveFrameSpec, exportSimilarity, images, log,
-    mainSparseCloud, projectBase, saveJson, selectedCloud, sensors, summary,
+  const { sparseCloud, doExportCloud, doExportMesh, doExportModel, doExportTiles3d } = createCloudExports({
+    cloudFileBase,
+    clouds,
+    currentCrs,
+    effectiveFrameSpec,
+    exportSimilarity,
+    images,
+    log,
+    mainSparseCloud,
+    projectBase,
+    saveJson,
+    selectedCloud,
+    sensors,
+    summary,
   })
 
   // COLMAP / interchange projects and undistorted images (exports/sfmProject.js).
-  const {
-    doExportColmap, doExportUndistorted,
-  } = createSfmProjectExports({
-    doExportModel, images, imagesStore, log, matchStore, matchesStore, progress, projectBase,
-    projects, saveJson, sensors, sparseCloud, summary, swapPairs,
+  const { doExportColmap, doExportUndistorted } = createSfmProjectExports({
+    doExportModel,
+    images,
+    imagesStore,
+    log,
+    matchStore,
+    matchesStore,
+    progress,
+    projectBase,
+    projects,
+    saveJson,
+    sensors,
+    sparseCloud,
+    summary,
+    swapPairs,
   })
 
   // DEM / orthophoto files and the Products ▾ derivatives (exports/rasters.js).
-  const {
-    doExportDem, doExportOrtho, exportContours, exportTerrain, exportClipped,
-  } = createRasterExports({
-    crsInfo, dem, log, ortho, projectBase,
+  const { doExportDem, doExportOrtho, exportContours, exportTerrain, exportClipped } = createRasterExports({
+    crsInfo,
+    dem,
+    log,
+    ortho,
+    projectBase,
   })
 
   // Saved measurements as CSV / GeoJSON (exports/measurements.js).
   const { doExportMeasurements, exportCrsFor: measurementExportCrs } = createMeasurementExports({
-    currentCrs, effectiveFrameSpec, exportSimilarity, log, projectBase,
+    currentCrs,
+    effectiveFrameSpec,
+    exportSimilarity,
+    log,
+    projectBase,
   })
 
   return {
-    exportKind, exportTargetCloud, exportMeasurementScope, openMeasurementExport, measurementExportCrs, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials, exportKeypoints, exportMatches, onExportRun,
-    openCloudExport, downloadRasterOriginal, downloadImageOriginal, downloadShapefile,
-    exportContours, exportTerrain, exportClipped,
+    exportKind,
+    exportTargetCloud,
+    exportMeasurementScope,
+    openMeasurementExport,
+    measurementExportCrs,
+    exportPoses,
+    exportSensors,
+    exportCameraFiducials,
+    exportImageFiducials,
+    exportKeypoints,
+    exportMatches,
+    onExportRun,
+    openCloudExport,
+    downloadRasterOriginal,
+    downloadImageOriginal,
+    downloadShapefile,
+    exportContours,
+    exportTerrain,
+    exportClipped,
   }
 }

@@ -5,8 +5,12 @@ import { beforeAll, describe, it, expect } from 'vitest'
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { RUN_BUDGET } from './progressPlan.js'
 import {
-  reconstruct, retriangulatePairs, mergeSplitTracks,
-  pruneFinalTwoViewTracks, completeTracks, cloneSfmInput,
+  reconstruct,
+  retriangulatePairs,
+  mergeSplitTracks,
+  pruneFinalTwoViewTracks,
+  completeTracks,
+  cloneSfmInput,
 } from './sfm.js'
 import { resolveK } from './reconstruction.js'
 import { distortPixel, undistortPixel } from './distortion.js'
@@ -24,23 +28,44 @@ beforeAll(async () => {
 
 // ── tiny linear algebra ───────────────────────────────────────────────────────
 const mul = (A, B) => {
-  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  const C = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
   for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) C[i][j] += A[i][k] * B[k][j]
   return C
 }
-const T = (M) => [[M[0][0], M[1][0], M[2][0]], [M[0][1], M[1][1], M[2][1]], [M[0][2], M[1][2], M[2][2]]]
+const T = (M) => [
+  [M[0][0], M[1][0], M[2][0]],
+  [M[0][1], M[1][1], M[2][1]],
+  [M[0][2], M[1][2], M[2][2]],
+]
 const mv = (M, v) => [
   M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2],
   M[1][0] * v[0] + M[1][1] * v[1] + M[1][2] * v[2],
   M[2][0] * v[0] + M[2][1] * v[1] + M[2][2] * v[2],
 ]
-const skew = (t) => [[0, -t[2], t[1]], [t[2], 0, -t[0]], [-t[1], t[0], 0]]
-const rotY = (a) => { const c = Math.cos(a), s = Math.sin(a); return [[c, 0, s], [0, 1, 0], [-s, 0, c]] }
+const skew = (t) => [
+  [0, -t[2], t[1]],
+  [t[2], 0, -t[0]],
+  [-t[1], t[0], 0],
+]
+const rotY = (a) => {
+  const c = Math.cos(a),
+    s = Math.sin(a)
+  return [
+    [c, 0, s],
+    [0, 1, 0],
+    [-s, 0, c],
+  ]
+}
 
 // Deterministic PRNG so the synthetic scene is fixed across runs.
 function mulberry32(seed) {
   return () => {
-    seed |= 0; seed = (seed + 0x6D2B79F5) | 0
+    seed |= 0
+    seed = (seed + 0x6d2b79f5) | 0
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
@@ -50,8 +75,16 @@ function mulberry32(seed) {
 // One sensor for all images → one known K (matches core resolveK from this meta).
 const META = { width: 1000, height: 800, focalLength35: 35 }
 const FX = resolveK(META).fx
-const K = [[FX, 0, META.width / 2], [0, FX, META.height / 2], [0, 0, 1]]
-const KINV = [[1 / FX, 0, -(META.width / 2) / FX], [0, 1 / FX, -(META.height / 2) / FX], [0, 0, 1]]
+const K = [
+  [FX, 0, META.width / 2],
+  [0, FX, META.height / 2],
+  [0, 0, 1],
+]
+const KINV = [
+  [1 / FX, 0, -(META.width / 2) / FX],
+  [0, 1 / FX, -(META.height / 2) / FX],
+  [0, 0, 1],
+]
 const Kobj = { fx: FX, fy: FX, cx: META.width / 2, cy: META.height / 2 }
 
 // Project a world point through pose [R|t] to pixel coords (or null if behind).
@@ -78,36 +111,52 @@ function fundamental(Ri, ti, Rj, tj) {
 function k1Scene(sensorId, { focal35 = [35, 35, 35] } = {}) {
   const rng = mulberry32(7)
   const N = 80
-  const world = Array.from({ length: N }, () => [
-    (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-  ])
-  const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+  const world = Array.from({ length: N }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+  const centers = [
+    [0, 0, 0],
+    [2, 0, 0],
+    [-2, 0, 0],
+  ]
   const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
   const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
   const uuids = ['c0', 'c1', 'c2']
   const metas = focal35.map((f) => ({ ...META, focalLength35: f }))
   const Ks = metas.map((m) => resolveK(m))
-  const Kinv = (k) => [[1 / k.fx, 0, -k.cx / k.fx], [0, 1 / k.fy, -k.cy / k.fy], [0, 0, 1]]
+  const Kinv = (k) => [
+    [1 / k.fx, 0, -k.cx / k.fx],
+    [0, 1 / k.fy, -k.cy / k.fy],
+    [0, 0, 1],
+  ]
   const dist = { k1: -0.05, k2: 0, k3: 0, p1: 0, p2: 0 }
   const distorted = uuids.map((uuid, ci) =>
     world.map((X) => {
       const c = mv(Rs[ci], X).map((v, i) => v + ts[ci][i])
       const k = Ks[ci]
       return distortPixel(k.fx * (c[0] / c[2]) + k.cx, k.fy * (c[1] / c[2]) + k.cy, k, dist)
-    }))
+    }),
+  )
   const matches = world.map((_, i) => [i, i])
   const pairs = []
-  for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-    const Rrel = mul(Rs[b], T(Rs[a]))
-    const trel = ts[b].map((v, k) => v - mv(Rrel, ts[a])[k])
-    pairs.push({
-      idA: uuids[a], idB: uuids[b],
-      F: mul(mul(T(Kinv(Ks[b])), mul(skew(trel), Rrel)), Kinv(Ks[a])),
-      matches, inlierCount: N, status: 'done',
-    })
-  }
+  for (let a = 0; a < 3; a++)
+    for (let b = a + 1; b < 3; b++) {
+      const Rrel = mul(Rs[b], T(Rs[a]))
+      const trel = ts[b].map((v, k) => v - mv(Rrel, ts[a])[k])
+      pairs.push({
+        idA: uuids[a],
+        idB: uuids[b],
+        F: mul(mul(T(Kinv(Ks[b])), mul(skew(trel), Rrel)), Kinv(Ks[a])),
+        matches,
+        inlierCount: N,
+        status: 'done',
+      })
+    }
   const images = uuids.map((uuid, ci) => ({
-    uuid, name: uuid, kpStatus: 'done', meta: metas[ci], sensor: null, sensorId,
+    uuid,
+    name: uuid,
+    kpStatus: 'done',
+    meta: metas[ci],
+    sensor: null,
+    sensorId,
     keypoints: distorted[ci].map((p) => ({ x: p.x, y: p.y })),
   }))
   return { images, pairs, uuids }
@@ -120,21 +169,28 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     // 60 non-planar world points well in front of the rig.
     const N = 60
     const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4,        // x ∈ [-2, 2]
-      (rng() - 0.5) * 3,        // y ∈ [-1.5, 1.5]
-      8 + rng() * 4,            // z ∈ [8, 12]
+      (rng() - 0.5) * 4, // x ∈ [-2, 2]
+      (rng() - 0.5) * 3, // y ∈ [-1.5, 1.5]
+      8 + rng() * 4, // z ∈ [8, 12]
     ])
 
     // True camera poses (x_cam = R·X + t, t = -R·C for centre C). A reference rig
     // with lateral baselines + small yaw → comfortable parallax.
-    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const centers = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [-2, 0, 0],
+    ]
     const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['c0', 'c1', 'c2']
 
     // Per-image keypoints: every point projects into every camera (verified > 0).
     const images = uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META,
+      uuid,
+      name: uuid,
+      kpStatus: 'done',
+      meta: META,
       keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
     }))
     for (const img of images) expect(img.keypoints.every(Boolean)).toBe(true)
@@ -142,13 +198,17 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     // All three pairs; matches are identity (point i ↔ point i), all inliers.
     const matches = world.map((_, i) => [i, i])
     const pairs = []
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      pairs.push({
-        idA: uuids[a], idB: uuids[b],
-        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-        matches, inlierCount: N, status: 'done',
-      })
-    }
+    for (let a = 0; a < 3; a++)
+      for (let b = a + 1; b < 3; b++) {
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: N,
+          status: 'done',
+        })
+      }
 
     const logs = []
     const progress = []
@@ -211,8 +271,8 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     for (let i = 0; i < out.points.length; i++) {
       const seen = []
       out.points.forEachView(i, (u) => seen.push(u))
-      expect(new Set(seen).size).toBe(seen.length)   // no camera twice in a track
-      expect(seen.length).toBeLessThanOrEqual(3)      // never more views than cameras
+      expect(new Set(seen).size).toBe(seen.length) // no camera twice in a track
+      expect(seen.length).toBeLessThanOrEqual(3) // never more views than cameras
     }
   })
 
@@ -222,15 +282,20 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
   it('registers a camera linked to the model only through weak PnP bridges', async () => {
     const rng = mulberry32(123)
     const N = 60
-    const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-    ])
-    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const world = Array.from({ length: N }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const centers = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [-2, 0, 0],
+    ]
     const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['c0', 'c1', 'c2']
     const images = uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META,
+      uuid,
+      name: uuid,
+      kpStatus: 'done',
+      meta: META,
       keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
     }))
     const matches = world.map((_, i) => [i, i])
@@ -238,16 +303,17 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     // are marked weak, so c2 can register only by PnP against points triangulated from
     // the strong pair.
     const mk = (a, b, weak) => ({
-      idA: uuids[a], idB: uuids[b],
+      idA: uuids[a],
+      idB: uuids[b],
       F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-      matches, inlierCount: N, status: 'done', weak,
+      matches,
+      inlierCount: N,
+      status: 'done',
+      weak,
     })
     const pairs = [mk(0, 1, false), mk(0, 2, true), mk(1, 2, true)]
 
-    const out = await reconstruct(
-      { images, pairs, settings: { baIterations: 0 } },
-      { onLog: () => {} },
-    )
+    const out = await reconstruct({ images, pairs, settings: { baIterations: 0 } }, { onLog: () => {} })
     expect(out.status).toBe('done')
     // All three register: c0/c1 from the strong seed, c2 via the weak PnP bridges.
     expect(new Set(out.cameras.map((c) => c.uuid))).toEqual(new Set(uuids))
@@ -256,27 +322,37 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
   it('cannot seed initialization from weak pairs alone', async () => {
     const rng = mulberry32(321)
     const N = 60
-    const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-    ])
-    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const world = Array.from({ length: N }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const centers = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [-2, 0, 0],
+    ]
     const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['c0', 'c1', 'c2']
     const images = uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META,
+      uuid,
+      name: uuid,
+      kpStatus: 'done',
+      meta: META,
       keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
     }))
     const matches = world.map((_, i) => [i, i])
     // Every pair weak → no strong pair to seed init. The reconstruction can't bootstrap.
     const pairs = []
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      pairs.push({
-        idA: uuids[a], idB: uuids[b],
-        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-        matches, inlierCount: N, status: 'done', weak: true,
-      })
-    }
+    for (let a = 0; a < 3; a++)
+      for (let b = a + 1; b < 3; b++) {
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: N,
+          status: 'done',
+          weak: true,
+        })
+      }
     const out = await reconstruct({ images, pairs, settings: { baIterations: 0 } }, { onLog: () => {} })
     // No strong pair ⇒ init returns 'idle', no cameras committed.
     expect(out.status).toBe('idle')
@@ -286,18 +362,23 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
   it('runs LM bundle adjustment end-to-end on a noisy scene', async () => {
     const rng = mulberry32(7)
     const N = 60
-    const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-    ])
-    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const world = Array.from({ length: N }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const centers = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [-2, 0, 0],
+    ]
     const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['c0', 'c1', 'c2']
 
     // ±~0.4px keypoint noise (sum of two uniforms) so BA + filtering has real work.
-    const noise = () => (rng() - 0.5 + rng() - 0.5)
+    const noise = () => rng() - 0.5 + rng() - 0.5
     const images = uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META,
+      uuid,
+      name: uuid,
+      kpStatus: 'done',
+      meta: META,
       keypoints: world.map((X) => {
         const p = project(Rs[ci], ts[ci], X)
         return { x: p.x + noise(), y: p.y + noise() }
@@ -305,18 +386,19 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     }))
     const matches = world.map((_, i) => [i, i])
     const pairs = []
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      pairs.push({
-        idA: uuids[a], idB: uuids[b],
-        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-        matches, inlierCount: N, status: 'done',
-      })
-    }
+    for (let a = 0; a < 3; a++)
+      for (let b = a + 1; b < 3; b++) {
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: N,
+          status: 'done',
+        })
+      }
 
-    const out = await reconstruct(
-      { images, pairs, settings: { baIterations: 25 } },
-      { onLog: () => {} },
-    )
+    const out = await reconstruct({ images, pairs, settings: { baIterations: 25 } }, { onLog: () => {} })
     expect(out.status).toBe('done')
     expect(out.cameras).toHaveLength(3)
 
@@ -332,10 +414,12 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
   it('undistorts keypoints from a sensor with known radial distortion', async () => {
     const rng = mulberry32(99)
     const N = 60
-    const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-    ])
-    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const world = Array.from({ length: N }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const centers = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [-2, 0, 0],
+    ]
     const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['c0', 'c1', 'c2']
@@ -344,26 +428,41 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
 
     // Observed keypoints = ideal pinhole projection pushed through the lens.
     const distorted = uuids.map((uuid, ci) =>
-      world.map((X) => distortPixel(project(Rs[ci], ts[ci], X).x, project(Rs[ci], ts[ci], X).y, Kobj, dist)))
+      world.map((X) => distortPixel(project(Rs[ci], ts[ci], X).x, project(Rs[ci], ts[ci], X).y, Kobj, dist)),
+    )
     const matches = world.map((_, i) => [i, i])
     const pairs = []
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      pairs.push({
-        idA: uuids[a], idB: uuids[b],
-        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),  // the ideal (pinhole) epipolar geometry
-        matches, inlierCount: N, status: 'done',
-      })
-    }
-    const build = (withSensor) => uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META,
-      sensor: withSensor ? sensor : null,
-      keypoints: distorted[ci].map((p) => ({ x: p.x, y: p.y })),
-    }))
+    for (let a = 0; a < 3; a++)
+      for (let b = a + 1; b < 3; b++) {
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]), // the ideal (pinhole) epipolar geometry
+          matches,
+          inlierCount: N,
+          status: 'done',
+        })
+      }
+    const build = (withSensor) =>
+      uuids.map((uuid, ci) => ({
+        uuid,
+        name: uuid,
+        kpStatus: 'done',
+        meta: META,
+        sensor: withSensor ? sensor : null,
+        keypoints: distorted[ci].map((p) => ({ x: p.x, y: p.y })),
+      }))
 
     // With the sensor's k1/k2, keypoints are undistorted at ingest → clean pinhole
     // model. Without it, the lens error leaks straight into the reconstruction.
-    const corrected = await reconstruct({ images: build(true), pairs, settings: { baIterations: 20 } }, { onLog: () => {} })
-    const uncorrected = await reconstruct({ images: build(false), pairs, settings: { baIterations: 20 } }, { onLog: () => {} })
+    const corrected = await reconstruct(
+      { images: build(true), pairs, settings: { baIterations: 20 } },
+      { onLog: () => {} },
+    )
+    const uncorrected = await reconstruct(
+      { images: build(false), pairs, settings: { baIterations: 20 } },
+      { onLog: () => {} },
+    )
 
     expect(corrected.status).toBe('done')
     expect(corrected.cameras).toHaveLength(3)
@@ -380,34 +479,62 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     const world = Array.from({ length: 90 }, () => [(rng() - 0.5) * 30, (rng() - 0.5) * 24, 8 + rng() * 4])
     for (let i = 0; i < 6; i++) world.push([40 + rng() * 5, (rng() - 0.5) * 4, 7 + rng()])
     const N = world.length
-    const centers = [[0, 0, 0], [1.5, 0, 0], [-1.5, 0.4, 0]]
+    const centers = [
+      [0, 0, 0],
+      [1.5, 0, 0],
+      [-1.5, 0.4, 0],
+    ]
     const Rs = [rotY(0), rotY(0.1), rotY(-0.1)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['f0', 'f1', 'f2']
     const f = 320 // ~180° across the 1000 px frame's width
     const K = { fx: f, fy: f, cx: META.width / 2, cy: META.height / 2 }
     const lens = { fisheye: true, k1: 0.04, k2: -0.006, k3: 0.001, k4: -0.0002 }
-    const sensor = { focal: f, focalUnit: 'px', cx: K.cx, cy: K.cy, width: META.width, height: META.height,
-      distortionModel: 'fisheye', k1: lens.k1, k2: lens.k2, k3: lens.k3, k4: lens.k4 }
+    const sensor = {
+      focal: f,
+      focalUnit: 'px',
+      cx: K.cx,
+      cy: K.cy,
+      width: META.width,
+      height: META.height,
+      distortionModel: 'fisheye',
+      k1: lens.k1,
+      k2: lens.k2,
+      k3: lens.k3,
+      k4: lens.k4,
+    }
     const projectK = (R, t, X) => {
       const c = mv(R, X).map((v, i) => v + t[i])
-      return { x: K.fx * c[0] / c[2] + K.cx, y: K.fy * c[1] / c[2] + K.cy }
+      return { x: (K.fx * c[0]) / c[2] + K.cx, y: (K.fy * c[1]) / c[2] + K.cy }
     }
-    const recorded = uuids.map((_, ci) => world.map((X) => {
-      const p = projectK(Rs[ci], ts[ci], X)
-      return distortPixel(p.x, p.y, K, lens)
-    }))
+    const recorded = uuids.map((_, ci) =>
+      world.map((X) => {
+        const p = projectK(Rs[ci], ts[ci], X)
+        return distortPixel(p.x, p.y, K, lens)
+      }),
+    )
     const matches = world.map((_, i) => [i, i])
     const pairs = []
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      pairs.push({ idA: uuids[a], idB: uuids[b], F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-        matches, inlierCount: N, status: 'done' })
-    }
-    const build = (withSensor) => uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META,
-      sensor: withSensor ? sensor : { focal: f, focalUnit: 'px', cx: K.cx, cy: K.cy },
-      keypoints: recorded[ci].map((p) => ({ x: p.x, y: p.y })),
-    }))
+    for (let a = 0; a < 3; a++)
+      for (let b = a + 1; b < 3; b++) {
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: N,
+          status: 'done',
+        })
+      }
+    const build = (withSensor) =>
+      uuids.map((uuid, ci) => ({
+        uuid,
+        name: uuid,
+        kpStatus: 'done',
+        meta: META,
+        sensor: withSensor ? sensor : { focal: f, focalUnit: 'px', cx: K.cx, cy: K.cy },
+        keypoints: recorded[ci].map((p) => ({ x: p.x, y: p.y })),
+      }))
     const logs = []
     const settings = { baIterations: 20, refineIntrinsics: 'none' }
     const fisheye = await reconstruct({ images: build(true), pairs, settings }, { onLog: (m) => logs.push(String(m)) })
@@ -429,38 +556,80 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     // model observation is the recorded keypoint undistorted about exactly those.
     const rng = mulberry32(11)
     const world = Array.from({ length: 300 }, () => {
-      const az = rng() * 2 * Math.PI, el = 0.2 + rng() * 1.1, d = 5 + rng() * 15
+      const az = rng() * 2 * Math.PI,
+        el = 0.2 + rng() * 1.1,
+        d = 5 + rng() * 15
       return [d * Math.cos(el) * Math.cos(az), d * Math.cos(el) * Math.sin(az), d * Math.sin(el)]
     })
     // Cameras look straight up (camera z = world z), each yawed and tilted a little.
-    const rotZ = (a) => { const c = Math.cos(a), s = Math.sin(a); return [[c, -s, 0], [s, c, 0], [0, 0, 1]] }
+    const rotZ = (a) => {
+      const c = Math.cos(a),
+        s = Math.sin(a)
+      return [
+        [c, -s, 0],
+        [s, c, 0],
+        [0, 0, 1],
+      ]
+    }
     const yaw = [0, 0.5, -0.5, 1.0, -1.0, 0.25]
     const Rs = yaw.map((a, i) => mul(rotY((i % 2 ? 1 : -1) * 0.2), rotZ(a)))
-    const centers = [[0, 0, 0], [1.2, 0, 0], [-1.2, 0.3, 0], [0.3, 1.3, 0], [0.6, -1.1, 0.2], [-0.8, -0.9, 0.1]]
+    const centers = [
+      [0, 0, 0],
+      [1.2, 0, 0],
+      [-1.2, 0.3, 0],
+      [0.3, 1.3, 0],
+      [0.6, -1.1, 0.2],
+      [-0.8, -0.9, 0.1],
+    ]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = centers.map((_, i) => `g${i}`)
     const f = 320
     const K = { fx: f, fy: f, cx: META.width / 2, cy: META.height / 2 }
     const lens = { fisheye: true, k1: 0.04, k2: -0.006, k3: 0, k4: 0 }
-    const sensor = { focal: f * 0.94, focalUnit: 'px', cx: K.cx, cy: K.cy, width: META.width, height: META.height,
-      distortionModel: 'fisheye2', k1: 0, k2: lens.k2 }
-    const recorded = uuids.map((_, ci) => world.map((X) => {
-      const c = mv(Rs[ci], X).map((v, i) => v + ts[ci][i])
-      return c[2] > 0.5 ? distortPixel(K.fx * c[0] / c[2] + K.cx, K.fy * c[1] / c[2] + K.cy, K, lens) : null
-    }))
+    const sensor = {
+      focal: f * 0.94,
+      focalUnit: 'px',
+      cx: K.cx,
+      cy: K.cy,
+      width: META.width,
+      height: META.height,
+      distortionModel: 'fisheye2',
+      k1: 0,
+      k2: lens.k2,
+    }
+    const recorded = uuids.map((_, ci) =>
+      world.map((X) => {
+        const c = mv(Rs[ci], X).map((v, i) => v + ts[ci][i])
+        return c[2] > 0.5 ? distortPixel((K.fx * c[0]) / c[2] + K.cx, (K.fy * c[1]) / c[2] + K.cy, K, lens) : null
+      }),
+    )
     const images = uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META, sensorId: 's1', sensor,
+      uuid,
+      name: uuid,
+      kpStatus: 'done',
+      meta: META,
+      sensorId: 's1',
+      sensor,
       keypoints: recorded[ci].map((p) => p ?? { x: NaN, y: NaN }),
     }))
     const pairs = []
-    for (let a = 0; a < uuids.length; a++) for (let b = a + 1; b < uuids.length; b++) {
-      const matches = world.map((_, i) => [i, i]).filter(([i]) => recorded[a][i] && recorded[b][i])
-      pairs.push({ idA: uuids[a], idB: uuids[b], F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-        matches, inlierCount: matches.length, status: 'done' })
-    }
+    for (let a = 0; a < uuids.length; a++)
+      for (let b = a + 1; b < uuids.length; b++) {
+        const matches = world.map((_, i) => [i, i]).filter(([i]) => recorded[a][i] && recorded[b][i])
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: matches.length,
+          status: 'done',
+        })
+      }
     const logs = []
-    const out = await reconstruct({ images, pairs, settings: { baIterations: 30, refineIntrinsics: 'f,k1' } },
-      { onLog: (m) => logs.push(String(m)) })
+    const out = await reconstruct(
+      { images, pairs, settings: { baIterations: 30, refineIntrinsics: 'f,k1' } },
+      { onLog: (m) => logs.push(String(m)) },
+    )
     expect(out.status).toBe('done')
     expect(logs.some((m) => /re-mapped \d+ fisheye image/.test(m))).toBe(true)
     expect(logs.some((m) => /folded self-calibrated distortion/.test(m))).toBe(false)
@@ -474,7 +643,8 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     const refinedLens = { fisheye: true, k1: row.k1, k2: row.k2, k3: row.k3, k4: row.k4 }
     // Each observation the model holds is the recorded keypoint undistorted about the
     // camera's FINAL K and the refined lens — what dense pairs them with.
-    let worst = 0, n = 0
+    let worst = 0,
+      n = 0
     for (let i = 0; i < out.points.length; i++) {
       out.points.forEachPixel(i, (uuid, px, py) => {
         const kpIdx = out.points.kpOf(i, uuid)
@@ -517,8 +687,8 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     expect(out.summary.selfCalDistortion).toHaveLength(1)
     const [scd] = out.summary.selfCalDistortion
     expect(scd.sensorId).toBe('sensorA')
-    expect(scd.k1).toBeLessThan(0)          // barrel, matching the injected sign
-    expect(Math.abs(scd.k1 - (-0.05))).toBeLessThan(0.02)
+    expect(scd.k1).toBeLessThan(0) // barrel, matching the injected sign
+    expect(Math.abs(scd.k1 - -0.05)).toBeLessThan(0.02)
     expect(scd.k2).toBe(0)
     expect(scd.k3).toBe(0)
     expect(scd.fitRmsPx).toBeLessThan(0.5)
@@ -527,10 +697,13 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
   it('self-calibrates and folds a 2-coefficient radial bag (k1,k2) (WS2)', async () => {
     const rng = mulberry32(11)
     const N = 90
-    const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-    ])
-    const centers = [[0, 0, 0], [2, 0.2, 0], [-2, -0.2, 0], [0.5, 1.5, 0.3]]
+    const world = Array.from({ length: N }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const centers = [
+      [0, 0, 0],
+      [2, 0.2, 0],
+      [-2, -0.2, 0],
+      [0.5, 1.5, 0.3],
+    ]
     const Rs = [rotY(0), rotY(0.15), rotY(-0.15), rotY(0.08)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['c0', 'c1', 'c2', 'c3']
@@ -539,18 +712,28 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
       world.map((X) => {
         const p = project(Rs[ci], ts[ci], X)
         return distortPixel(p.x, p.y, Kobj, dist)
-      }))
+      }),
+    )
     const matches = world.map((_, i) => [i, i])
     const pairs = []
-    for (let a = 0; a < 4; a++) for (let b = a + 1; b < 4; b++) {
-      pairs.push({
-        idA: uuids[a], idB: uuids[b],
-        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-        matches, inlierCount: N, status: 'done',
-      })
-    }
+    for (let a = 0; a < 4; a++)
+      for (let b = a + 1; b < 4; b++) {
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: N,
+          status: 'done',
+        })
+      }
     const images = uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META, sensor: null, sensorId: 'sensorA',
+      uuid,
+      name: uuid,
+      kpStatus: 'done',
+      meta: META,
+      sensor: null,
+      sensorId: 'sensorA',
       keypoints: distorted[ci].map((p) => ({ x: p.x, y: p.y })),
     }))
 
@@ -560,19 +743,26 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     )
     expect(out.status).toBe('done')
     // Model stays pinhole (all radial folded into keypoints).
-    for (const c of out.cameras) { expect(c.K.k1 || 0).toBe(0); expect(c.K.k2 || 0).toBe(0) }
+    for (const c of out.cameras) {
+      expect(c.K.k1 || 0).toBe(0)
+      expect(c.K.k2 || 0).toBe(0)
+    }
     expect(out.summary.postBaMedianPx).toBeLessThan(1.0)
     // Composed bag recovers both injected coefficients.
     expect(out.summary.selfCalDistortion).toHaveLength(1)
     const [scd] = out.summary.selfCalDistortion
-    expect(Math.abs(scd.k1 - (-0.12))).toBeLessThan(0.03)
+    expect(Math.abs(scd.k1 - -0.12)).toBeLessThan(0.03)
     expect(Math.abs(scd.k2 - 0.04)).toBeLessThan(0.03)
     expect(scd.fitRmsPx).toBeLessThan(0.5)
   })
 
   it('returns status "idle" when fewer than two images have keypoints', async () => {
     const out = await reconstruct(
-      { images: [{ uuid: 'c0', name: 'c0', kpStatus: 'done', meta: META, keypoints: [{ x: 1, y: 2 }] }], pairs: [], settings: {} },
+      {
+        images: [{ uuid: 'c0', name: 'c0', kpStatus: 'done', meta: META, keypoints: [{ x: 1, y: 2 }] }],
+        pairs: [],
+        settings: {},
+      },
       {},
     )
     expect(out.status).toBe('idle')
@@ -590,31 +780,44 @@ describe('reconstruct — GCP-anchored bundle adjustment (F2)', () => {
   it('runs the GCP-anchored BA pass end-to-end without regressing the model', async () => {
     const rng = mulberry32(42)
     const N = 60
-    const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-    ])
-    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const world = Array.from({ length: N }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const centers = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [-2, 0, 0],
+    ]
     const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['c0', 'c1', 'c2']
 
     const images = uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META,
+      uuid,
+      name: uuid,
+      kpStatus: 'done',
+      meta: META,
       keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
     }))
     const matches = world.map((_, i) => [i, i])
     const pairs = []
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      pairs.push({
-        idA: uuids[a], idB: uuids[b],
-        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-        matches, inlierCount: N, status: 'done',
-      })
-    }
+    for (let a = 0; a < 3; a++)
+      for (let b = a + 1; b < 3; b++) {
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: N,
+          status: 'done',
+        })
+      }
 
     const gcps = [0, 1, 2].map((i) => ({
-      x: world[i][0], y: world[i][1], z: world[i][2],
-      accuracyX: 0.1, accuracyY: 0.1, accuracyZ: 0.1,
+      x: world[i][0],
+      y: world[i][1],
+      z: world[i][2],
+      accuracyX: 0.1,
+      accuracyY: 0.1,
+      accuracyZ: 0.1,
       observations: [
         { uuid: 'c0', px: images[0].keypoints[i].x, py: images[0].keypoints[i].y },
         { uuid: 'c1', px: images[1].keypoints[i].x, py: images[1].keypoints[i].y },
@@ -653,31 +856,44 @@ describe('reconstruct — GCP-anchored bundle adjustment (F2)', () => {
   it('skips anchoring quietly with fewer than 3 qualifying GCPs', async () => {
     const rng = mulberry32(42)
     const N = 60
-    const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-    ])
-    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const world = Array.from({ length: N }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const centers = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [-2, 0, 0],
+    ]
     const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['c0', 'c1', 'c2']
     const images = uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META,
+      uuid,
+      name: uuid,
+      kpStatus: 'done',
+      meta: META,
       keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
     }))
     const matches = world.map((_, i) => [i, i])
     const pairs = []
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      pairs.push({
-        idA: uuids[a], idB: uuids[b],
-        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-        matches, inlierCount: N, status: 'done',
-      })
-    }
+    for (let a = 0; a < 3; a++)
+      for (let b = a + 1; b < 3; b++) {
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: N,
+          status: 'done',
+        })
+      }
     // Only 2 GCPs — below the ≥3 threshold to attempt a similarity fit.
     const gcps = [0, 1].map((i) => ({
-      x: world[i][0], y: world[i][1], z: world[i][2],
-      observations: [{ uuid: 'c0', px: images[0].keypoints[i].x, py: images[0].keypoints[i].y },
-        { uuid: 'c1', px: images[1].keypoints[i].x, py: images[1].keypoints[i].y }],
+      x: world[i][0],
+      y: world[i][1],
+      z: world[i][2],
+      observations: [
+        { uuid: 'c0', px: images[0].keypoints[i].x, py: images[0].keypoints[i].y },
+        { uuid: 'c1', px: images[1].keypoints[i].x, py: images[1].keypoints[i].y },
+      ],
     }))
     const logs = []
     const out = await reconstruct(
@@ -695,7 +911,11 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
   // exact projection, so reprojection is zero and gates always pass.
   const W = [0, 0, 10]
   const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
-  const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+  const centers = [
+    [0, 0, 0],
+    [2, 0, 0],
+    [-2, 0, 0],
+  ]
   const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
   const uuids = ['c0', 'c1', 'c2']
   const cameras = new Map(uuids.map((u, i) => [u, { R: Rs[i], t: ts[i], K: Kobj }]))
@@ -706,21 +926,34 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     const { tracks, ids } = tracksFrom([], uuids)
     const triangulate = async () => [{ x: W[0], y: W[1], z: W[2], srcIdx: 0 }]
     const { added } = await retriangulatePairs({
-      tracks, ids, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
-      keypointsAt, maxReprojPx: 2, triangulate,
+      tracks,
+      ids,
+      cameras,
+      pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+      keypointsAt,
+      maxReprojPx: 2,
+      triangulate,
     })
     expect(added).toBe(1)
     const pts = pointsOf(tracks, ids)
     expect(pts).toHaveLength(1)
-    expect([...pts[0].views.entries()].sort()).toEqual([['c0', 0], ['c1', 0]])
+    expect([...pts[0].views.entries()].sort()).toEqual([
+      ['c0', 0],
+      ['c1', 0],
+    ])
   })
 
   it('rejects a retriangulated point that reprojects outside the gate', async () => {
     const { tracks, ids } = tracksFrom([], uuids)
     const triangulate = async () => [{ x: 5, y: 5, z: 10, srcIdx: 0 }] // wrong position
     const { added } = await retriangulatePairs({
-      tracks, ids, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
-      keypointsAt, maxReprojPx: 2, triangulate,
+      tracks,
+      ids,
+      cameras,
+      pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+      keypointsAt,
+      maxReprojPx: 2,
+      triangulate,
     })
     expect(added).toBe(0)
     expect(tracks.liveCount()).toBe(0)
@@ -730,8 +963,14 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     const { tracks, ids } = tracksFrom([], uuids)
     const triangulate = async () => [{ x: W[0], y: W[1], z: W[2], srcIdx: 0 }]
     const { added, lowParallax } = await retriangulatePairs({
-      tracks, ids, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
-      keypointsAt, maxReprojPx: 2, minTriAngleDeg: 20, triangulate,
+      tracks,
+      ids,
+      cameras,
+      pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+      keypointsAt,
+      maxReprojPx: 2,
+      minTriAngleDeg: 20,
+      triangulate,
     })
     expect(added).toBe(0)
     expect(lowParallax).toBe(1)
@@ -739,13 +978,22 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
   })
 
   it('merges two points that are the same feature split across a match', () => {
-    const p1 = { ...ptAt(W), views: new Map([['c0', 0], ['c1', 0]]) }
+    const p1 = {
+      ...ptAt(W),
+      views: new Map([
+        ['c0', 0],
+        ['c1', 0],
+      ]),
+    }
     const p2 = { ...ptAt(W), views: new Map([['c2', 0]]) }
     const { tracks, ids } = tracksFrom([p1, p2], uuids)
     const res = mergeSplitTracks({
-      tracks, ids, cameras,
+      tracks,
+      ids,
+      cameras,
       pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 0]] }], // links p1(c0) ↔ p2(c2)
-      keypointsAt, maxReprojPx: 2,
+      keypointsAt,
+      maxReprojPx: 2,
     })
     expect(res.merged).toBe(1)
     const pts = pointsOf(tracks, ids)
@@ -754,15 +1002,23 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
   })
 
   it('does not merge when the union would put two keypoints in one image', () => {
-    const p1 = { ...ptAt(W), views: new Map([['c0', 0], ['c2', 0]]) }
+    const p1 = {
+      ...ptAt(W),
+      views: new Map([
+        ['c0', 0],
+        ['c2', 0],
+      ]),
+    }
     const p2 = { ...ptAt(W), views: new Map([['c2', 1]]) } // c2 already in p1 at kp 0
     const { tracks, ids } = tracksFrom([p1, p2], uuids)
     const res = mergeSplitTracks({
-      tracks, ids, cameras,
+      tracks,
+      ids,
+      cameras,
       pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 1]] }],
       // c2's keypoint 1 sits at W's projection too.
-      keypointsAt: (img) => (img === 2
-        ? keypointSetFrom([project(Rs[2], ts[2], W), project(Rs[2], ts[2], W)]) : keypointsAt(img)),
+      keypointsAt: (img) =>
+        img === 2 ? keypointSetFrom([project(Rs[2], ts[2], W), project(Rs[2], ts[2], W)]) : keypointsAt(img),
       maxReprojPx: 2,
     })
     expect(res.merged).toBe(0)
@@ -776,7 +1032,12 @@ describe('completeTracks', () => {
   // projection; keypoint 1 is a decoy 40 px away (a wrong match).
   const W = [0, 0, 10]
   const Rs = [rotY(0), rotY(0.15), rotY(-0.15), rotY(0.3)]
-  const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0], [4, 0, 1]]
+  const centers = [
+    [0, 0, 0],
+    [2, 0, 0],
+    [-2, 0, 0],
+    [4, 0, 1],
+  ]
   const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
   const uuids = ['c0', 'c1', 'c2', 'c3']
   const cameras = new Map(uuids.map((u, i) => [u, { R: Rs[i], t: ts[i], K: Kobj }]))
@@ -785,7 +1046,13 @@ describe('completeTracks', () => {
     return keypointSetFrom([k, { x: k.x + 40, y: k.y }])
   })
   const keypointsAt = (img) => kpSets[img] ?? null
-  const twoView = () => ({ ...ptAt(W), views: new Map([['c0', 0], ['c1', 0]]) })
+  const twoView = () => ({
+    ...ptAt(W),
+    views: new Map([
+      ['c0', 0],
+      ['c1', 0],
+    ]),
+  })
   // A store holding `points`, and completeTracks over it; returns the result and the
   // points read back.
   const run = (points, { pairs, cameras: cams = cameras, maxRounds, keypointsAt: kpAt = keypointsAt }) => {
@@ -797,12 +1064,19 @@ describe('completeTracks', () => {
   it('adds the unassigned endpoint of a one-endpoint match and counts the lift', () => {
     const { res, pts } = run([twoView()], { pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 0]] }] })
     expect(res).toMatchObject({ added: 1, lifted: 1 })
-    expect([...pts[0].views.entries()].sort()).toEqual([['c0', 0], ['c1', 0], ['c2', 0]])
+    expect([...pts[0].views.entries()].sort()).toEqual([
+      ['c0', 0],
+      ['c1', 0],
+      ['c2', 0],
+    ])
   })
 
   it('chains across rounds (A↔C enables C↔D) until nothing more is added', () => {
     // c2↔c3 comes first, so in round 1 neither endpoint is assigned yet.
-    const pairs = [{ idA: 'c2', idB: 'c3', matches: [[0, 0]] }, { idA: 'c0', idB: 'c2', matches: [[0, 0]] }]
+    const pairs = [
+      { idA: 'c2', idB: 'c3', matches: [[0, 0]] },
+      { idA: 'c0', idB: 'c2', matches: [[0, 0]] },
+    ]
     const one = run([twoView()], { pairs, maxRounds: 1 })
     expect(one.res.added).toBe(1)
     expect(one.pts[0].views.has('c3')).toBe(false)
@@ -818,7 +1092,13 @@ describe('completeTracks', () => {
   })
 
   it('never gives a track a second keypoint in the same image, and skips both/neither-assigned matches', () => {
-    const pt = { ...ptAt(W), views: new Map([['c0', 0], ['c2', 0]]) }
+    const pt = {
+      ...ptAt(W),
+      views: new Map([
+        ['c0', 0],
+        ['c2', 0],
+      ]),
+    }
     const other = { ...ptAt(W), views: new Map([['c1', 1]]) }
     const { res, pts } = run([pt, other], {
       pairs: [
@@ -827,8 +1107,8 @@ describe('completeTracks', () => {
         { idA: 'c1', idB: 'c3', matches: [[0, 0]] }, // neither assigned → retriangulation's job
       ],
       // c2's keypoint 1 is no decoy here: it sits on W's projection as well.
-      keypointsAt: (img) => (img === 2
-        ? mapPositions(kpSets[2], (x, y, k) => (k === 1 ? { x: x - 40, y } : { x, y })) : keypointsAt(img)),
+      keypointsAt: (img) =>
+        img === 2 ? mapPositions(kpSets[2], (x, y, k) => (k === 1 ? { x: x - 40, y } : { x, y })) : keypointsAt(img),
     })
     expect(res.added).toBe(0)
     expect(pts[0].views.get('c2')).toBe(0)
@@ -848,7 +1128,7 @@ describe('completeTracks', () => {
     expect(pts[0].views.get('c2')).toBe(0)
   })
 
-  it('claims the added keypoint in the store\'s live index', () => {
+  it("claims the added keypoint in the store's live index", () => {
     const { tracks, ids } = run([twoView()], { pairs: [{ idA: 'c1', idB: 'c2', matches: [[0, 0]] }] })
     expect(tracks.pointAt(ids.img('c2'), 0)).toBe(0)
   })
@@ -903,14 +1183,45 @@ describe('pruneFinalTwoViewTracks', () => {
     // 80 corroborated tracks all observed in the left half of every image; 20 two-view
     // points in the empty right half of image a, 20 more inside the covered half.
     const kpsByImg = { a: [], b: [], c: [] }
-    const at = (img, x, y) => { kpsByImg[img].push({ x, y }); return kpsByImg[img].length - 1 }
+    const at = (img, x, y) => {
+      kpsByImg[img].push({ x, y })
+      return kpsByImg[img].length - 1
+    }
     const pts = []
     for (let i = 0; i < 80; i++) {
-      const x = 10 + (i % 8) * 50, y = 10 + Math.floor(i / 8) * 90
-      pts.push({ x: 0, y: 0, z: 1, views: new Map([['a', at('a', x, y)], ['b', at('b', x, y)], ['c', at('c', x, y)]]) })
+      const x = 10 + (i % 8) * 50,
+        y = 10 + Math.floor(i / 8) * 90
+      pts.push({
+        x: 0,
+        y: 0,
+        z: 1,
+        views: new Map([
+          ['a', at('a', x, y)],
+          ['b', at('b', x, y)],
+          ['c', at('c', x, y)],
+        ]),
+      })
     }
-    for (let i = 0; i < 20; i++) pts.push({ x: 0, y: 0, z: 1, views: new Map([['a', at('a', 600 + i * 15, 400)], ['b', at('b', 600 + i * 15, 400)]]) })
-    for (let i = 0; i < 20; i++) pts.push({ x: 0, y: 0, z: 1, views: new Map([['a', at('a', 12 + (i % 8) * 50, 12 + Math.floor(i / 8) * 90)], ['b', at('b', 12 + (i % 8) * 50, 12 + Math.floor(i / 8) * 90)]]) })
+    for (let i = 0; i < 20; i++)
+      pts.push({
+        x: 0,
+        y: 0,
+        z: 1,
+        views: new Map([
+          ['a', at('a', 600 + i * 15, 400)],
+          ['b', at('b', 600 + i * 15, 400)],
+        ]),
+      })
+    for (let i = 0; i < 20; i++)
+      pts.push({
+        x: 0,
+        y: 0,
+        z: 1,
+        views: new Map([
+          ['a', at('a', 12 + (i % 8) * 50, 12 + Math.floor(i / 8) * 90)],
+          ['b', at('b', 12 + (i % 8) * 50, 12 + Math.floor(i / 8) * 90)],
+        ]),
+      })
     const { tracks, ids } = tracksFrom(pts, ['a', 'b', 'c'], { kpCount: 200 })
     const sets = Object.fromEntries(Object.entries(kpsByImg).map(([k, v]) => [k, keypointSetFrom(v)]))
     const keypointsAt = (img) => sets[ids.uuid(img)]
@@ -932,7 +1243,9 @@ describe('pruneFinalTwoViewTracks', () => {
   })
 })
 
-function ptAt([x, y, z]) { return { x, y, z } }
+function ptAt([x, y, z]) {
+  return { x, y, z }
+}
 
 // ── F4: fiducial interior orientation ─────────────────────────────────────────
 // A synthetic film scene: each "scan" is a rotated/offset copy of the same
@@ -942,18 +1255,29 @@ function ptAt([x, y, z]) { return { x, y, z } }
 describe('reconstruct (film scans, fiducial interior orientation)', () => {
   const FID = {
     marks: [
-      { id: 'F1', xMm: -106, yMm: -106 }, { id: 'F2', xMm: 106, yMm: -106 },
-      { id: 'F3', xMm: 106, yMm: 106 }, { id: 'F4', xMm: -106, yMm: 106 },
+      { id: 'F1', xMm: -106, yMm: -106 },
+      { id: 'F2', xMm: 106, yMm: -106 },
+      { id: 'F3', xMm: 106, yMm: 106 },
+      { id: 'F4', xMm: -106, yMm: 106 },
     ],
-    ppxMm: 0, ppyMm: 0, focalMm: 153,
+    ppxMm: 0,
+    ppyMm: 0,
+    focalMm: 153,
   }
   const SLOTS = ['corner-tl', 'corner-tr', 'corner-br', 'corner-bl']
-  const CAL = { ...FID, transform: 'affine',
-    slotMap: Object.fromEntries(SLOTS.map((slot, i) => [slot, FID.marks[i].id])) }
+  const CAL = {
+    ...FID,
+    transform: 'affine',
+    slotMap: Object.fromEntries(SLOTS.map((slot, i) => [slot, FID.marks[i].id])),
+  }
   const PITCH = 0.02 // mm/px
   const frame = canonicalFrame(FID, PITCH)
   const cK = frame.K // { fx = 153/0.02 = 7650, fy, cx, cy }
-  const cKINV = [[1 / cK.fx, 0, -cK.cx / cK.fx], [0, 1 / cK.fy, -cK.cy / cK.fy], [0, 0, 1]]
+  const cKINV = [
+    [1 / cK.fx, 0, -cK.cx / cK.fx],
+    [0, 1 / cK.fy, -cK.cy / cK.fy],
+    [0, 0, 1],
+  ]
 
   // Project world point through pose into the CANONICAL pixel frame.
   const projC = (R, t, X) => {
@@ -965,7 +1289,8 @@ describe('reconstruct (film scans, fiducial interior orientation)', () => {
   const c2mm = (p) => [frame.originX + p.x * PITCH, frame.originY + p.y * PITCH]
   // camera mm → scan px for a scanner placement (rotation θ, offset ox/oy).
   const mm2scan = (mm, th, ox, oy) => {
-    const c = Math.cos(th), s = Math.sin(th)
+    const c = Math.cos(th),
+      s = Math.sin(th)
     return { x: (c * mm[0] - s * mm[1]) / PITCH + ox, y: (s * mm[0] + c * mm[1]) / PITCH + oy }
   }
   // Fundamental in the canonical frame (keypoints land there after the fiducial move).
@@ -979,23 +1304,31 @@ describe('reconstruct (film scans, fiducial interior orientation)', () => {
   it('registers all film cameras and reports canonical K = focal ÷ pitch', async () => {
     const rng = mulberry32(11)
     const N = 60
-    const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-    ])
-    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const world = Array.from({ length: N }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const centers = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [-2, 0, 0],
+    ]
     const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
     const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
     const uuids = ['f0', 'f1', 'f2']
     // Each scan gets its own placement: rotation + offset (the scanner geometry
     // the fit must remove). Noise-free ⇒ the fit is exact, so post-move keypoints
     // land exactly in the canonical frame.
-    const scan = [{ th: 0.0, ox: 40, oy: -25 }, { th: 0.08, ox: -60, oy: 30 }, { th: -0.05, ox: 15, oy: 55 }]
+    const scan = [
+      { th: 0.0, ox: 40, oy: -25 },
+      { th: 0.08, ox: -60, oy: 30 },
+      { th: -0.05, ox: 15, oy: 55 },
+    ]
 
     const images = uuids.map((uuid, ci) => {
       const kpCanon = world.map((X) => projC(Rs[ci], ts[ci], X))
       const { th, ox, oy } = scan[ci]
       return {
-        uuid, name: uuid, kpStatus: 'done',
+        uuid,
+        name: uuid,
+        kpStatus: 'done',
         meta: { width: frame.width, height: frame.height },
         sensor: { kind: 'film', fiducialCalibration: CAL },
         // Keypoints are stored in SCAN space (what the app persists).
@@ -1011,9 +1344,17 @@ describe('reconstruct (film scans, fiducial interior orientation)', () => {
 
     const matches = world.map((_, i) => [i, i])
     const pairs = []
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      pairs.push({ idA: uuids[a], idB: uuids[b], F: fundC(Rs[a], ts[a], Rs[b], ts[b]), matches, inlierCount: N, status: 'done' })
-    }
+    for (let a = 0; a < 3; a++)
+      for (let b = a + 1; b < 3; b++) {
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundC(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: N,
+          status: 'done',
+        })
+      }
 
     const out = await reconstruct(
       { images, pairs, settings: { baIterations: 0 } },
@@ -1110,14 +1451,20 @@ describe('reconstruct — self-calibration propagation and bookkeeping', () => {
   for (const mode of ['f', 'f,cxcy']) {
     it(`propagates a '${mode}' self-calibration to every image of the sensor`, async () => {
       const sc = aerialBlock({ seed: 3, rows: 4, cols: 6, nPoints: 2500, dist: { k1: 0, k2: 0 }, focalError: 1.06 })
-      const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
-        settings: { refineIntrinsics: mode, secondaryModels: false } }, { onLog: () => {} })
+      const out = await reconstruct(
+        { images: sc.images, pairs: sc.pairs, settings: { refineIntrinsics: mode, secondaryModels: false } },
+        { onLog: () => {} },
+      )
       expect(out.status).toBe('done')
       expect(out.cameras.length).toBe(24)
-      const spread = (key) => Math.max(...out.cameras.map((c) => c.K[key])) - Math.min(...out.cameras.map((c) => c.K[key]))
+      const spread = (key) =>
+        Math.max(...out.cameras.map((c) => c.K[key])) - Math.min(...out.cameras.map((c) => c.K[key]))
       expect(spread('fx')).toBeLessThan(0.01)
       expect(spread('fy')).toBeLessThan(0.01)
-      if (mode.includes('cxcy')) { expect(spread('cx')).toBeLessThan(0.01); expect(spread('cy')).toBeLessThan(0.01) }
+      if (mode.includes('cxcy')) {
+        expect(spread('cx')).toBeLessThan(0.01)
+        expect(spread('cy')).toBeLessThan(0.01)
+      }
       const [rec] = out.summary.intrinsics
       expect(rec.fxFinal).toBeCloseTo(out.cameras[0].K.fx, 3)
       expect(Math.abs(rec.fxFinal - sc.truth.Ktrue.fx) / sc.truth.Ktrue.fx).toBeLessThan(0.02)
@@ -1148,7 +1495,7 @@ describe('reconstruct — self-calibration propagation and bookkeeping', () => {
     expect(recs.map((d) => d.imageUuid).sort()).toEqual([...uuids].sort())
     for (const d of recs) {
       expect(d.sensorId).toBeNull()
-      expect(Math.abs(d.k1 - (-0.05))).toBeLessThan(0.02)
+      expect(Math.abs(d.k1 - -0.05)).toBeLessThan(0.02)
     }
     expect(quantile(recordMismatch(out, pristineOf(images)), 0.95)).toBeLessThan(0.05)
   })
@@ -1180,12 +1527,20 @@ describe('reconstruct — self-calibration propagation and bookkeeping', () => {
   it('keeps the composed distortion record consistent with the final K', async () => {
     const sc = aerialBlock({ seed: 7, rows: 4, cols: 6, priors: true, focalError: 1.04 })
     const logs = []
-    const out = await reconstruct({ images: sc.images, pairs: sc.pairs, cameraPriors: sc.cameraPriors,
-      settings: { refineIntrinsics: 'f,k1', cameraPriorRefineIntrinsics: 'f', secondaryModels: false } },
-    { onLog: (m) => logs.push(m) })
+    const out = await reconstruct(
+      {
+        images: sc.images,
+        pairs: sc.pairs,
+        cameraPriors: sc.cameraPriors,
+        settings: { refineIntrinsics: 'f,k1', cameraPriorRefineIntrinsics: 'f', secondaryModels: false },
+      },
+      { onLog: (m) => logs.push(m) },
+    )
     expect(out.status).toBe('done')
     // The camera-prior pass did move the focal after the last fold.
-    expect(logs.some((m) => /camera-prior bundle adjustment \(round 1, intrinsics 'f'\) self-calibration/.test(m))).toBe(true)
+    expect(
+      logs.some((m) => /camera-prior bundle adjustment \(round 1, intrinsics 'f'\) self-calibration/.test(m)),
+    ).toBe(true)
     expect(out.summary.selfCalDistortion).toHaveLength(1)
     const err = recordMismatch(out, pristineOf(sc.images))
     expect(quantile(err, 0.95)).toBeLessThan(0.01)
@@ -1197,8 +1552,10 @@ describe('reconstruct — self-calibration propagation and bookkeeping', () => {
   it('judges film self-calibration in the canonical frame, not the scan', async () => {
     const sc = aerialBlock({ seed: 45, rows: 3, cols: 4, nPoints: 2000, film: true, prefix: 'fm' })
     for (const im of sc.images) im.meta = { width: 4000, height: 3000 }
-    const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
-      settings: { refineIntrinsics: 'f', secondaryModels: false } }, { onLog: () => {} })
+    const out = await reconstruct(
+      { images: sc.images, pairs: sc.pairs, settings: { refineIntrinsics: 'f', secondaryModels: false } },
+      { onLog: () => {} },
+    )
     expect(out.status).toBe('done')
     const adj = out.summary.selfCal.adjustments
     expect(adj.length).toBeGreaterThan(0)
@@ -1217,8 +1574,10 @@ describe('reconstruct — focal pre-solve', () => {
   it("leaves the intrinsics alone under refineIntrinsics 'none'", async () => {
     const sc = guessScene()
     const logs = []
-    const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
-      settings: { refineIntrinsics: 'none', secondaryModels: false } }, { onLog: (m) => logs.push(m) })
+    const out = await reconstruct(
+      { images: sc.images, pairs: sc.pairs, settings: { refineIntrinsics: 'none', secondaryModels: false } },
+      { onLog: (m) => logs.push(m) },
+    )
     expect(out.status).toBe('done')
     expect(logs.some((m) => /focal pre-solve/.test(m))).toBe(false)
     for (const c of out.cameras) expect(c.K.fx).toBe(1600)
@@ -1234,16 +1593,25 @@ describe('reconstruct — focal pre-solve', () => {
     sc.images.forEach((im, i) => {
       if (Math.floor(i / 6) % 2 === 0) {
         im.sensorId = 'cal'
-        im.sensor = { kind: 'digital', focal: Ktrue.fx, focalUnit: 'px', cx: Ktrue.cx, cy: Ktrue.cy,
-          width: im.meta.width, height: im.meta.height }
+        im.sensor = {
+          kind: 'digital',
+          focal: Ktrue.fx,
+          focalUnit: 'px',
+          cx: Ktrue.cx,
+          cy: Ktrue.cy,
+          width: im.meta.width,
+          height: im.meta.height,
+        }
       } else {
         im.sensorId = 'guess'
         im.meta = { width: im.meta.width, height: im.meta.height }
       }
     })
     const logs = []
-    const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
-      settings: { refineIntrinsics: 'f', secondaryModels: false } }, { onLog: (m) => logs.push(m) })
+    const out = await reconstruct(
+      { images: sc.images, pairs: sc.pairs, settings: { refineIntrinsics: 'f', secondaryModels: false } },
+      { onLog: (m) => logs.push(m) },
+    )
     expect(out.status).toBe('done')
     const pre = out.summary.selfCal.adjustments.filter((a) => /^focal pre-solve/.test(a.label))
     expect(pre.length).toBeGreaterThan(0)
@@ -1259,14 +1627,21 @@ describe('reconstruct — alternate-seed retries', () => {
   it('excludes the seed of a failed retry from the next one', async () => {
     const { images, pairs } = k1Scene('sensorA')
     const seeds = []
-    const out = await reconstruct({ images, pairs,
-      settings: { baIterations: 10, refineIntrinsics: 'none', seedRetryMax: 3, seedRetryMinFraction: 2 } },
-    { onLog: (m) => {
-      const hit = /^Seed retry (\d+): initial pair (\S+) ↔ (\S+)/.exec(m)
-      if (!hit) return
-      seeds.push([hit[2], hit[3]].sort().join('--'))
-      throw new Error('injected failure after seed selection')
-    } })
+    const out = await reconstruct(
+      {
+        images,
+        pairs,
+        settings: { baIterations: 10, refineIntrinsics: 'none', seedRetryMax: 3, seedRetryMinFraction: 2 },
+      },
+      {
+        onLog: (m) => {
+          const hit = /^Seed retry (\d+): initial pair (\S+) ↔ (\S+)/.exec(m)
+          if (!hit) return
+          seeds.push([hit[2], hit[3]].sort().join('--'))
+          throw new Error('injected failure after seed selection')
+        },
+      },
+    )
     expect(out.status).toBe('done')
     expect(seeds.length).toBeGreaterThan(1)
     expect(new Set(seeds).size).toBe(seeds.length)
@@ -1278,12 +1653,22 @@ describe('reconstruct — alternate-seed retries', () => {
   // the match graph already reconstructed (a PUTI sample spent three of four retries in
   // one 5-image group). A retry's seed must bring an image no earlier attempt registered.
   it('seeds a retry outside what earlier attempts registered', async () => {
-    const sc = aerialBlock({ seed: 5, rows: 2, cols: 4, nPoints: 1500,
-      blocks: [{ rows: 2, cols: 4, offsetX: 900, offsetY: 0 }] })
+    const sc = aerialBlock({
+      seed: 5,
+      rows: 2,
+      cols: 4,
+      nPoints: 1500,
+      blocks: [{ rows: 2, cols: 4, offsetX: 900, offsetY: 0 }],
+    })
     const blockOf = (name) => (Number(name.match(/(\d+)/)[1]) < 8 ? 'A' : 'B')
-    const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
-      settings: { baIterations: 5, refineIntrinsics: 'none', seedRetryMax: 1, seedRetryMinFraction: 2 } },
-    { onLog: () => {} })
+    const out = await reconstruct(
+      {
+        images: sc.images,
+        pairs: sc.pairs,
+        settings: { baIterations: 5, refineIntrinsics: 'none', seedRetryMax: 1, seedRetryMinFraction: 2 },
+      },
+      { onLog: () => {} },
+    )
     const [first, retry] = out.summary.attempts.seeds
     expect(retry?.pair).toBeTruthy()
     const blocks = (pair) => new Set(pair.split(' ↔ ').map(blockOf))

@@ -1,7 +1,12 @@
 import { it, expect } from 'vitest'
 import { EXAMPLES, downloadExample, exampleBaseUrl, parseExampleManifest } from './examples.js'
 
-const manifest = { files: [{ name: 'a.JPG', bytes: 3 }, { name: 'b.JPG', bytes: 2 }] }
+const manifest = {
+  files: [
+    { name: 'a.JPG', bytes: 3 },
+    { name: 'b.JPG', bytes: 2 },
+  ],
+}
 
 function fakeFetch(routes) {
   const calls = []
@@ -47,11 +52,17 @@ it('downloads the listed files in order, reporting progress', async () => {
 
 it('names the missing URL and the fix when the example is not hosted', async () => {
   const { fn } = fakeFetch({})
-  await expect(downloadExample('aukerman', { fetchFn: fn }))
-    .rejects.toThrow(/examples\/aukerman\/manifest\.json: HTTP 404.*fetch:examples/)
+  await expect(downloadExample('aukerman', { fetchFn: fn })).rejects.toThrow(
+    /examples\/aukerman\/manifest\.json: HTTP 404.*fetch:examples/,
+  )
 })
 
 it('refuses an unknown example id', async () => {
-  await expect(downloadExample('nope', { fetchFn: async () => { throw new Error('no fetch') } }))
-    .rejects.toThrow(/Unknown example/)
+  await expect(
+    downloadExample('nope', {
+      fetchFn: async () => {
+        throw new Error('no fetch')
+      },
+    }),
+  ).rejects.toThrow(/Unknown example/)
 })

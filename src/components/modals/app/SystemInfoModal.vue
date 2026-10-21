@@ -22,7 +22,6 @@ const opfsDurable = ref(false)
 const opfsUsed = ref(null)
 const opfsQuota = ref(null)
 
-
 onMounted(async () => {
   const canvas = document.createElement('canvas')
   const gl2 = canvas.getContext('webgl2')
@@ -36,8 +35,7 @@ onMounted(async () => {
     // Chrome also hides the extension behind privacy settings, hence the RENDERER
     // fallback (generic, but never empty).
     const ext = gl.getExtension('WEBGL_debug_renderer_info')
-    const renderer = (ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
-      || gl.getParameter(gl.RENDERER)
+    const renderer = (ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER)
     gpu.value = renderer || 'Unknown'
   } else {
     gpu.value = 'No WebGL'
@@ -48,21 +46,19 @@ onMounted(async () => {
   if (navigator.gpu) {
     try {
       const adapter = await navigator.gpu.requestAdapter()
-      const info = adapter && (adapter.info || (adapter.requestAdapterInfo && await adapter.requestAdapterInfo()))
-      const desc = [info?.description, info?.device, info?.vendor].find(s => s)
+      const info = adapter && (adapter.info || (adapter.requestAdapterInfo && (await adapter.requestAdapterInfo())))
+      const desc = [info?.description, info?.device, info?.vendor].find((s) => s)
       if (desc && (!gpu.value || gpu.value === 'Unknown')) gpu.value = desc
-    } catch { /* adapter info is best-effort */ }
+    } catch {
+      /* adapter info is best-effort */
+    }
   }
 
   // Minimal WASM module with a SIMD opcode (v128.const) to detect SIMD support.
   const simdBytes = new Uint8Array([
-    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
-    0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7b,
-    0x03, 0x02, 0x01, 0x00,
-    0x0a, 0x0a, 0x01, 0x08, 0x00, 0xfd, 0x0c,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x0b,
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7b, 0x03, 0x02, 0x01, 0x00,
+    0x0a, 0x0a, 0x01, 0x08, 0x00, 0xfd, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x0b,
   ])
   wasmSimd.value = WebAssembly.validate(simdBytes)
 
@@ -149,9 +145,22 @@ onMounted(async () => {
   row-gap: 8px;
   align-items: start;
 }
-.info-key { font-size: 12px; color: var(--text-dim); }
-.info-val { font-size: 12px; color: var(--text); }
-.gpu-val { word-break: break-word; font-size: 11px; }
-.ok { color: #4caf50; }
-.warn { color: #e8a820; }
+.info-key {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.info-val {
+  font-size: 12px;
+  color: var(--text);
+}
+.gpu-val {
+  word-break: break-word;
+  font-size: 11px;
+}
+.ok {
+  color: #4caf50;
+}
+.warn {
+  color: #e8a820;
+}
 </style>

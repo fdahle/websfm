@@ -23,8 +23,7 @@
 export function eigSymN(Ain) {
   const n = Ain.length
   const A = Ain.map((r) => r.slice())
-  const V = Array.from({ length: n }, (_, i) =>
-    Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)))
+  const V = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)))
   for (let sweep = 0; sweep < 100; sweep++) {
     let off = 0
     for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) off += A[p][q] * A[p][q]
@@ -37,17 +36,20 @@ export function eigSymN(Ain) {
         const c = 1 / Math.sqrt(t * t + 1)
         const s = t * c
         for (let k = 0; k < n; k++) {
-          const akp = A[k][p], akq = A[k][q]
+          const akp = A[k][p],
+            akq = A[k][q]
           A[k][p] = c * akp - s * akq
           A[k][q] = s * akp + c * akq
         }
         for (let k = 0; k < n; k++) {
-          const apk = A[p][k], aqk = A[q][k]
+          const apk = A[p][k],
+            aqk = A[q][k]
           A[p][k] = c * apk - s * aqk
           A[q][k] = s * apk + c * aqk
         }
         for (let k = 0; k < n; k++) {
-          const vkp = V[k][p], vkq = V[k][q]
+          const vkp = V[k][p],
+            vkq = V[k][q]
           V[k][p] = c * vkp - s * vkq
           V[k][q] = s * vkp + c * vkq
         }
@@ -64,29 +66,47 @@ export function eigSymN(Ain) {
 // Hartley normalization: translate centroid to origin, scale mean distance to √2.
 // Returns { T } (3×3) and the transformed points.
 function normalizePoints(pts) {
-  let mx = 0, my = 0
-  for (const p of pts) { mx += p.x; my += p.y }
-  mx /= pts.length; my /= pts.length
+  let mx = 0,
+    my = 0
+  for (const p of pts) {
+    mx += p.x
+    my += p.y
+  }
+  mx /= pts.length
+  my /= pts.length
   let dist = 0
   for (const p of pts) dist += Math.hypot(p.x - mx, p.y - my)
   dist /= pts.length
   const s = dist > 1e-12 ? Math.SQRT2 / dist : 1
   return {
-    T: [[s, 0, -s * mx], [0, s, -s * my], [0, 0, 1]],
+    T: [
+      [s, 0, -s * mx],
+      [0, s, -s * my],
+      [0, 0, 1],
+    ],
     pts: pts.map((p) => ({ x: s * (p.x - mx), y: s * (p.y - my) })),
   }
 }
 
 const mul3 = (A, B) => {
-  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
-  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
-    let v = 0
-    for (let k = 0; k < 3; k++) v += A[i][k] * B[k][j]
-    C[i][j] = v
-  }
+  const C = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 3; j++) {
+      let v = 0
+      for (let k = 0; k < 3; k++) v += A[i][k] * B[k][j]
+      C[i][j] = v
+    }
   return C
 }
-const t3 = (A) => [[A[0][0], A[1][0], A[2][0]], [A[0][1], A[1][1], A[2][1]], [A[0][2], A[1][2], A[2][2]]]
+const t3 = (A) => [
+  [A[0][0], A[1][0], A[2][0]],
+  [A[0][1], A[1][1], A[2][1]],
+  [A[0][2], A[1][2], A[2][2]],
+]
 
 // Project a 3×3 matrix to the nearest rank-2 matrix (zero the smallest singular
 // value) via SVD built from the Jacobi eigen decomposition of FᵀF.
@@ -95,7 +115,11 @@ function rank2(F) {
   const { values, vectors } = eigSymN(FtF)
   const sv = values.map((v) => Math.sqrt(Math.max(0, v)))
   // U columns: uᵢ = F·vᵢ / σᵢ (only the two we keep).
-  const out = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  const out = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
   for (let i = 0; i < 2; i++) {
     if (sv[i] < 1e-14) continue
     const v = vectors[i]
@@ -116,10 +140,7 @@ export function sampsonDistPx(F, pa, pb) {
     F[1][0] * pa.x + F[1][1] * pa.y + F[1][2],
     F[2][0] * pa.x + F[2][1] * pa.y + F[2][2],
   ]
-  const Ftb = [
-    F[0][0] * pb.x + F[1][0] * pb.y + F[2][0],
-    F[0][1] * pb.x + F[1][1] * pb.y + F[2][1],
-  ]
+  const Ftb = [F[0][0] * pb.x + F[1][0] * pb.y + F[2][0], F[0][1] * pb.x + F[1][1] * pb.y + F[2][1]]
   const err = pb.x * Fa[0] + pb.y * Fa[1] + Fa[2]
   const denom = Fa[0] * Fa[0] + Fa[1] * Fa[1] + Ftb[0] * Ftb[0] + Ftb[1] * Ftb[1]
   if (denom < 1e-20) return Infinity
@@ -145,14 +166,19 @@ function eightPoint(ptsA, ptsB) {
   // AᵀA accumulated directly (9×9) — rows never materialised.
   const M = Array.from({ length: 9 }, () => new Array(9).fill(0))
   for (let i = 0; i < ptsA.length; i++) {
-    const a = na.pts[i], b = nb.pts[i]
+    const a = na.pts[i],
+      b = nb.pts[i]
     const row = [b.x * a.x, b.x * a.y, b.x, b.y * a.x, b.y * a.y, b.y, a.x, a.y, 1]
     for (let r = 0; r < 9; r++) for (let c = r; c < 9; c++) M[r][c] += row[r] * row[c]
   }
   for (let r = 0; r < 9; r++) for (let c = 0; c < r; c++) M[r][c] = M[c][r]
   const { vectors } = eigSymN(M)
   const f = vectors[8] // smallest eigenvalue → least-squares null vector
-  const Fn = rank2([[f[0], f[1], f[2]], [f[3], f[4], f[5]], [f[6], f[7], f[8]]])
+  const Fn = rank2([
+    [f[0], f[1], f[2]],
+    [f[3], f[4], f[5]],
+    [f[6], f[7], f[8]],
+  ])
   // Denormalize: F = Tbᵀ · Fn · Ta.
   return mul3(t3(nb.T), mul3(Fn, na.T))
 }
@@ -198,25 +224,37 @@ export function fitFundamental(ptsA, ptsB, opts = {}) {
       const idx = new Set()
       while (idx.size < 9) idx.add(Math.floor(rnd() * A.length))
       const sel = [...idx]
-      const Ft = eightPoint(sel.map((i) => A[i]), sel.map((i) => B[i]))
+      const Ft = eightPoint(
+        sel.map((i) => A[i]),
+        sel.map((i) => B[i]),
+      )
       const med = medianSampson(Ft, A, B)
-      if (med < bestMed) { bestMed = med; F = Ft }
+      if (med < bestMed) {
+        bestMed = med
+        F = Ft
+      }
     }
   }
 
   // Trim-and-refit against the (robust) seed.
-  let ia = A, ib = B
+  let ia = A,
+    ib = B
   for (let round = 0; round < trimRounds; round++) {
     const d = ia.map((p, i) => sampsonDistPx(F, p, ib[i]))
     const sorted = [...d].sort((x, y) => x - y)
     const thresh = Math.max(minTrimPx, 3 * sorted[sorted.length >> 1])
-    const keepA = [], keepB = []
+    const keepA = [],
+      keepB = []
     for (let i = 0; i < ia.length; i++) {
-      if (d[i] <= thresh) { keepA.push(ia[i]); keepB.push(ib[i]) }
+      if (d[i] <= thresh) {
+        keepA.push(ia[i])
+        keepB.push(ib[i])
+      }
     }
     if (keepA.length < 8) break
     const changed = keepA.length !== ia.length
-    ia = keepA; ib = keepB
+    ia = keepA
+    ib = keepB
     F = eightPoint(ia, ib)
     if (!changed) break
   }

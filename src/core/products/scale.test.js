@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  fitScale, weightFromAccuracy, toMetres, fromMetres, scaleEvidenceDigest,
-} from './scale.js'
+import { fitScale, weightFromAccuracy, toMetres, fromMetres, scaleEvidenceDigest } from './scale.js'
 
 describe('fitScale', () => {
   it('is exact for a single constraint', () => {
@@ -15,7 +13,7 @@ describe('fitScale', () => {
   it('splits the difference between two disagreeing constraints (equal weight)', () => {
     // Same model length, 2 % apart in metres: the LSQ scale is the mean.
     const fit = fitScale([
-      { id: 'a', modelDistance: 1, knownDistance: 1.00 },
+      { id: 'a', modelDistance: 1, knownDistance: 1.0 },
       { id: 'b', modelDistance: 1, knownDistance: 1.02 },
     ])
     expect(fit.scale).toBeCloseTo(1.01, 12)
@@ -28,20 +26,22 @@ describe('fitScale', () => {
 
   it('pulls the fit toward the more accurate constraint', () => {
     const fit = fitScale([
-      { id: 'tight', modelDistance: 1, knownDistance: 1.00, weight: weightFromAccuracy(0.001) },
+      { id: 'tight', modelDistance: 1, knownDistance: 1.0, weight: weightFromAccuracy(0.001) },
       { id: 'loose', modelDistance: 1, knownDistance: 1.02, weight: weightFromAccuracy(0.01) },
     ])
     // 1e6 vs 1e4 ⇒ ~99 % of the pull from the tight bar.
     expect(fit.scale).toBeGreaterThan(1.0)
     expect(fit.scale).toBeLessThan(1.0002)
-    const expectedRms = Math.sqrt(fit.constraints.reduce((s, c) => s + c.weight * c.residual ** 2, 0)
-      / fit.constraints.reduce((s, c) => s + c.weight, 0))
+    const expectedRms = Math.sqrt(
+      fit.constraints.reduce((s, c) => s + c.weight * c.residual ** 2, 0) /
+        fit.constraints.reduce((s, c) => s + c.weight, 0),
+    )
     expect(fit.rms).toBeCloseTo(expectedRms, 12)
   })
 
   it('normalises a residual by the declared σ, and reports null without one', () => {
     const fit = fitScale([
-      { id: 'a', modelDistance: 1, knownDistance: 1.00, accuracy: 0.005, weight: weightFromAccuracy(0.005) },
+      { id: 'a', modelDistance: 1, knownDistance: 1.0, accuracy: 0.005, weight: weightFromAccuracy(0.005) },
       { id: 'b', modelDistance: 1, knownDistance: 1.02, weight: 1 },
     ])
     expect(fit.constraints[0].normalizedResidual).not.toBeNull()
@@ -51,7 +51,10 @@ describe('fitScale', () => {
   })
 
   it('is scale-only: doubling every known distance doubles the fit', () => {
-    const cs = [{ modelDistance: 3, knownDistance: 1 }, { modelDistance: 7, knownDistance: 2 }]
+    const cs = [
+      { modelDistance: 3, knownDistance: 1 },
+      { modelDistance: 7, knownDistance: 2 },
+    ]
     const a = fitScale(cs)
     const b = fitScale(cs.map((c) => ({ ...c, knownDistance: c.knownDistance * 2 })))
     expect(b.scale).toBeCloseTo(a.scale * 2, 12)
@@ -99,8 +102,14 @@ describe('length units', () => {
 
 describe('scaleEvidenceDigest', () => {
   const bars = [
-    { id: 'b1', a: { kind: 'marker', id: 'm1' }, b: { kind: 'marker', id: 'm2' },
-      knownDistanceM: 1, accuracyM: 0.002, enabled: true },
+    {
+      id: 'b1',
+      a: { kind: 'marker', id: 'm1' },
+      b: { kind: 'marker', id: 'm2' },
+      knownDistanceM: 1,
+      accuracyM: 0.002,
+      enabled: true,
+    },
   ]
   const markers = [
     { id: 'm1', observations: [{ imageId: 'i1', px: 10, py: 20 }] },
@@ -108,8 +117,7 @@ describe('scaleEvidenceDigest', () => {
   ]
 
   it('is stable across ordering', () => {
-    expect(scaleEvidenceDigest(bars, markers))
-      .toBe(scaleEvidenceDigest(bars, [...markers].reverse()))
+    expect(scaleEvidenceDigest(bars, markers)).toBe(scaleEvidenceDigest(bars, [...markers].reverse()))
   })
 
   it('changes when a distance changes', () => {
@@ -124,10 +132,13 @@ describe('scaleEvidenceDigest', () => {
 
   it('changes when marker eligibility or observation accuracy changes', () => {
     const disabled = [{ ...markers[0], enabled: false }, markers[1]]
-    const reweighted = [markers[0], {
-      ...markers[1],
-      observations: [{ ...markers[1].observations[0], accuracyX: 0.25 }],
-    }]
+    const reweighted = [
+      markers[0],
+      {
+        ...markers[1],
+        observations: [{ ...markers[1].observations[0], accuracyX: 0.25 }],
+      },
+    ]
     expect(scaleEvidenceDigest(bars, disabled)).not.toBe(scaleEvidenceDigest(bars, markers))
     expect(scaleEvidenceDigest(bars, reweighted)).not.toBe(scaleEvidenceDigest(bars, markers))
   })

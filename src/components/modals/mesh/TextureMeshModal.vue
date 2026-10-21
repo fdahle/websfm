@@ -26,8 +26,15 @@ const settings = ref({ ...TEXTURE_DEFAULTS })
 const { useGpu, memBudgetBytes } = useComputeSettings()
 const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
 const PAGE_SIZES = [2048, 4096, 8192]
-const UNSEEN = [{ value: 'colour', label: 'Flat colour' }, { value: 'remove', label: 'Remove' }]
-const RESOLUTIONS = [{ value: 1, label: 'Native photo pixels' }, { value: 0.5, label: 'Half' }, { value: 0.25, label: 'Quarter' }]
+const UNSEEN = [
+  { value: 'colour', label: 'Flat colour' },
+  { value: 'remove', label: 'Remove' },
+]
+const RESOLUTIONS = [
+  { value: 1, label: 'Native photo pixels' },
+  { value: 0.5, label: 'Half' },
+  { value: 0.25, label: 'Quarter' },
+]
 const valid = computed(() => source.value && props.cameraCount > 0 && settings.value.maxPages >= 1)
 const textured = computed(() => !!source.value?.texture)
 
@@ -36,10 +43,16 @@ function run() {
   emit('run', {
     sourceId: sourceId.value,
     settings: {
-      pageSize: s.pageSize, maxPages: Math.max(1, Math.round(s.maxPages)), maxScale: s.maxScale,
-      smoothness: Math.max(0, s.smoothness), levelColours: !!s.levelColours, useMasks: !!s.useMasks, unseen: s.unseen,
+      pageSize: s.pageSize,
+      maxPages: Math.max(1, Math.round(s.maxPages)),
+      maxScale: s.maxScale,
+      smoothness: Math.max(0, s.smoothness),
+      levelColours: !!s.levelColours,
+      useMasks: !!s.useMasks,
+      unseen: s.unseen,
       photoConsistency: !!s.photoConsistency,
-      useGpu: !!useGpu.value, memBudgetBytes: memBudgetBytes.value,
+      useGpu: !!useGpu.value,
+      memBudgetBytes: memBudgetBytes.value,
     },
     name: `${source.value?.name ?? 'Mesh'} (textured)`,
   })
@@ -51,9 +64,17 @@ function run() {
     <NoSourceWarn v-if="!meshes.length" kind="mesh" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SourcePicker id="tex-src" v-model="sourceId" label="Mesh" :items="meshes" :option-label="meshOptionLabel"
-          hint="The result is a new textured mesh; this one is left untouched." />
-        <p v-if="textured" class="field-hint">This mesh is already textured; texturing it again starts from its geometry.</p>
+        <SourcePicker
+          id="tex-src"
+          v-model="sourceId"
+          label="Mesh"
+          :items="meshes"
+          :option-label="meshOptionLabel"
+          hint="The result is a new textured mesh; this one is left untouched."
+        />
+        <p v-if="textured" class="field-hint">
+          This mesh is already textured; texturing it again starts from its geometry.
+        </p>
         <p v-if="!cameraCount" class="warn-box">Texturing needs registered cameras: build the sparse model first.</p>
       </SettingsGroup>
       <SettingsGroup title="Atlas">
@@ -70,22 +91,69 @@ function run() {
           </select>
         </SettingsField>
         <SettingsField label-for="tex-pages" unit="pages">
-          <template #label><FieldHelp op="texture-mesh" param="maxPages" :value="settings.maxPages" :default-value="TEXTURE_DEFAULTS.maxPages">Maximum pages</FieldHelp></template>
-          <input id="tex-pages" v-model.number="settings.maxPages" type="number" min="1" max="64" step="1" class="field-input" />
+          <template #label
+            ><FieldHelp
+              op="texture-mesh"
+              param="maxPages"
+              :value="settings.maxPages"
+              :default-value="TEXTURE_DEFAULTS.maxPages"
+              >Maximum pages</FieldHelp
+            ></template
+          >
+          <input
+            id="tex-pages"
+            v-model.number="settings.maxPages"
+            type="number"
+            min="1"
+            max="64"
+            step="1"
+            class="field-input"
+          />
         </SettingsField>
       </SettingsGroup>
       <SettingsGroup title="Colour">
         <SettingsField hint="Matches the exposure and white balance of neighbouring photos.">
-          <template #label><FieldHelp op="texture-mesh" param="levelColours" :value="settings.levelColours" :default-value="TEXTURE_DEFAULTS.levelColours">Level colours</FieldHelp></template>
-          <label class="checkbox-row"><input v-model="settings.levelColours" type="checkbox" class="checkbox" /> Balance the photos</label>
+          <template #label
+            ><FieldHelp
+              op="texture-mesh"
+              param="levelColours"
+              :value="settings.levelColours"
+              :default-value="TEXTURE_DEFAULTS.levelColours"
+              >Level colours</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.levelColours" type="checkbox" class="checkbox" /> Balance the photos</label
+          >
         </SettingsField>
         <SettingsField hint="Masked pixels (people, sky, the drone's legs) are never used.">
-          <template #label><FieldHelp op="texture-mesh" param="useMasks" :value="settings.useMasks" :default-value="TEXTURE_DEFAULTS.useMasks">Use masks</FieldHelp></template>
-          <label class="checkbox-row"><input v-model="settings.useMasks" type="checkbox" class="checkbox" /> Leave masked pixels out</label>
+          <template #label
+            ><FieldHelp
+              op="texture-mesh"
+              param="useMasks"
+              :value="settings.useMasks"
+              :default-value="TEXTURE_DEFAULTS.useMasks"
+              >Use masks</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.useMasks" type="checkbox" class="checkbox" /> Leave masked pixels out</label
+          >
         </SettingsField>
         <SettingsField hint="For people, vehicles or anything else that moved between photos.">
-          <template #label><FieldHelp op="texture-mesh" param="photoConsistency" :value="settings.photoConsistency" :default-value="TEXTURE_DEFAULTS.photoConsistency">Ignore what only some photos see</FieldHelp></template>
-          <label class="checkbox-row"><input v-model="settings.photoConsistency" type="checkbox" class="checkbox" /> Check each face's photos against each other</label>
+          <template #label
+            ><FieldHelp
+              op="texture-mesh"
+              param="photoConsistency"
+              :value="settings.photoConsistency"
+              :default-value="TEXTURE_DEFAULTS.photoConsistency"
+              >Ignore what only some photos see</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.photoConsistency" type="checkbox" class="checkbox" /> Check each face's photos
+            against each other</label
+          >
         </SettingsField>
         <SettingsField label-for="tex-unseen">
           <template #label><FieldHelp op="texture-mesh" param="unseen">Faces no photo sees</FieldHelp></template>
@@ -97,14 +165,30 @@ function run() {
       <AdvancedDisclosure label="Advanced settings">
         <SettingsGroup>
           <SettingsField label-for="tex-smooth">
-            <template #label><FieldHelp op="texture-mesh" param="smoothness" :value="settings.smoothness" :default-value="TEXTURE_DEFAULTS.smoothness">Seam penalty</FieldHelp></template>
-            <input id="tex-smooth" v-model.number="settings.smoothness" type="number" min="0" max="5" step="0.1" class="field-input" />
+            <template #label
+              ><FieldHelp
+                op="texture-mesh"
+                param="smoothness"
+                :value="settings.smoothness"
+                :default-value="TEXTURE_DEFAULTS.smoothness"
+                >Seam penalty</FieldHelp
+              ></template
+            >
+            <input
+              id="tex-smooth"
+              v-model.number="settings.smoothness"
+              type="number"
+              min="0"
+              max="5"
+              step="0.1"
+              class="field-input"
+            />
           </SettingsField>
         </SettingsGroup>
       </AdvancedDisclosure>
       <p v-if="source" class="field-hint">
-        {{ source.count.toLocaleString() }} triangles from {{ cameraCount }} cameras.
-        A mesh of a few hundred thousand triangles textures best: decimate a large mesh first.
+        {{ source.count.toLocaleString() }} triangles from {{ cameraCount }} cameras. A mesh of a few hundred thousand
+        triangles textures best: decimate a large mesh first.
       </p>
     </template>
     <template #footer>

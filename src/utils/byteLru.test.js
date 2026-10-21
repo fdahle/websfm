@@ -4,9 +4,10 @@ import { createByteLru } from './byteLru.js'
 describe('byte-bounded LRU', () => {
   it('evicts the least recently used clean entries past the budget', () => {
     const lru = createByteLru({ budgetBytes: 100 })
-    lru.set('a', 'A', 40); lru.set('b', 'B', 40)
+    lru.set('a', 'A', 40)
+    lru.set('b', 'B', 40)
     expect(lru.get('a')).toBe('A') // a is now the most recent
-    lru.set('c', 'C', 40)          // 120 > 100: b goes, not a
+    lru.set('c', 'C', 40) // 120 > 100: b goes, not a
     expect(lru.has('b')).toBe(false)
     expect([lru.peek('a'), lru.peek('c')]).toEqual(['A', 'C'])
     expect(lru.stats()).toMatchObject({ entries: 2, bytes: 80, evictions: 1, peakBytes: 120 })
@@ -28,7 +29,8 @@ describe('byte-bounded LRU', () => {
 
   it('replaces, deletes and clears with exact byte accounting', () => {
     const lru = createByteLru({ budgetBytes: 1000 })
-    lru.set('a', 1, 10); lru.set('a', 2, 30)
+    lru.set('a', 1, 10)
+    lru.set('a', 2, 30)
     expect(lru.stats().bytes).toBe(30)
     lru.set('b', 3, 5)
     expect(lru.delete('a')).toBe(true)

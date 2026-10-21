@@ -1,35 +1,87 @@
 import { describe, expect, it } from 'vitest'
-import { planimetricArea, polylineLength, sampleProfile, polygonVolume, fitBasePlane, groundVolume, polyline3d, polygon3d } from './measure.js'
+import {
+  planimetricArea,
+  polylineLength,
+  sampleProfile,
+  polygonVolume,
+  fitBasePlane,
+  groundVolume,
+  polyline3d,
+  polygon3d,
+} from './measure.js'
 import { sampleRaster } from '../io/rasterSample.js'
 
 describe('raster measurements', () => {
   it('measures a polyline and a concave polygon at large survey coordinates', () => {
-    const p = [[0,0],[2,0],[2,1],[1,1],[1,2],[0,2]].map(([x,y]) => ({ x: x + 7e6, y: y + 8e6 }))
+    const p = [
+      [0, 0],
+      [2, 0],
+      [2, 1],
+      [1, 1],
+      [1, 2],
+      [0, 2],
+    ].map(([x, y]) => ({ x: x + 7e6, y: y + 8e6 }))
     expect(planimetricArea(p)).toBe(3)
     expect(planimetricArea([...p].reverse())).toBe(3)
-    expect(planimetricArea([{x:0,y:0},{x:1,y:1},{x:0,y:1},{x:1,y:0}])).toBeNull()
-    expect(polylineLength([{ x: 0, y: 0 }, { x: 3, y: 4 }, { x: 6, y: 4 }])).toBe(8)
+    expect(
+      planimetricArea([
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+        { x: 0, y: 1 },
+        { x: 1, y: 0 },
+      ]),
+    ).toBeNull()
+    expect(
+      polylineLength([
+        { x: 0, y: 0 },
+        { x: 3, y: 4 },
+        { x: 6, y: 4 },
+      ]),
+    ).toBe(8)
   })
   it('includes vertices and endpoints and preserves DEM holes', () => {
-    const grid = { width: 5, height: 1, data: new Float32Array([1,2,3,4,5]), mask: new Uint8Array([1,1,0,1,1]), geoTransform: { originX: 0, originY: 1, scaleX: 1, scaleY: -1 } }
-    const result = sampleProfile(grid, [{ x: .5, y: .5 }, { x: 2.5, y: .5 }, { x: 4.5, y: .5 }])
-    expect(result.map(p => p.distance)).toEqual([0,1,2,3,4])
-    expect(result.map(p => p.z)).toEqual([1,2,null,4,5])
+    const grid = {
+      width: 5,
+      height: 1,
+      data: new Float32Array([1, 2, 3, 4, 5]),
+      mask: new Uint8Array([1, 1, 0, 1, 1]),
+      geoTransform: { originX: 0, originY: 1, scaleX: 1, scaleY: -1 },
+    }
+    const result = sampleProfile(grid, [
+      { x: 0.5, y: 0.5 },
+      { x: 2.5, y: 0.5 },
+      { x: 4.5, y: 0.5 },
+    ])
+    expect(result.map((p) => p.distance)).toEqual([0, 1, 2, 3, 4])
+    expect(result.map((p) => p.z)).toEqual([1, 2, null, 4, 5])
   })
 })
 
 describe('polygonVolume', () => {
   // 10×10 grid of 1-unit cells at survey-sized coordinates, z = 0 everywhere, with
   // a 2×2 block of height 3 at cells (4..5, 4..5).
-  const ox = 5e5, oy = 7e6
+  const ox = 5e5,
+    oy = 7e6
   function grid({ hole = false } = {}) {
     const data = new Float32Array(100)
-    for (const [c, r] of [[4, 4], [5, 4], [4, 5], [5, 5]]) data[r * 10 + c] = 3
+    for (const [c, r] of [
+      [4, 4],
+      [5, 4],
+      [4, 5],
+      [5, 5],
+    ])
+      data[r * 10 + c] = 3
     const mask = new Uint8Array(100).fill(1)
     if (hole) mask[4 * 10 + 4] = 0
     return { width: 10, height: 10, data, mask, geoTransform: { originX: ox, originY: oy, scaleX: 1, scaleY: -1 } }
   }
-  const square = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => ({ x: ox + x, y: oy - y }))
+  const square = (x0, y0, x1, y1) =>
+    [
+      [x0, y0],
+      [x1, y0],
+      [x1, y1],
+      [x0, y1],
+    ].map(([x, y]) => ({ x: ox + x, y: oy - y }))
 
   it('integrates a stockpile above a flat base', () => {
     const v = polygonVolume(grid(), square(1, 1, 9, 9), { base: 'plane' })
@@ -56,8 +108,11 @@ describe('polygonVolume', () => {
     const low = polygonVolume({ ...grid(), zOffset: 30 }, square(1, 1, 9, 9), { base: 'lowest' })
     expect(low.base.height).toBeCloseTo(30)
     expect(low.cut).toBeCloseTo(12)
-    const prof = sampleProfile({ ...grid(), zOffset: 30 }, [{ x: ox + 0.5, y: oy - 0.5 }, { x: ox + 1.5, y: oy - 0.5 }])
-    expect(prof.map(p => p.z)).toEqual([30, 30])
+    const prof = sampleProfile({ ...grid(), zOffset: 30 }, [
+      { x: ox + 0.5, y: oy - 0.5 },
+      { x: ox + 1.5, y: oy - 0.5 },
+    ])
+    expect(prof.map((p) => p.z)).toEqual([30, 30])
   })
 
   it('a missing custom height is a base error, never a base of zero', () => {
@@ -65,10 +120,20 @@ describe('polygonVolume', () => {
   })
 
   it('fits a tilted plane exactly through three vertices', () => {
-    const plane = fitBasePlane([{ x: 0, y: 0, z: 1 }, { x: 10, y: 0, z: 3 }, { x: 0, y: 10, z: -1 }])
+    const plane = fitBasePlane([
+      { x: 0, y: 0, z: 1 },
+      { x: 10, y: 0, z: 3 },
+      { x: 0, y: 10, z: -1 },
+    ])
     expect(plane.a).toBeCloseTo(0.2)
     expect(plane.b).toBeCloseTo(-0.2)
-    expect(fitBasePlane([{ x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 0 }, { x: 2, y: 2, z: 5 }])).toBeNull()
+    expect(
+      fitBasePlane([
+        { x: 0, y: 0, z: 0 },
+        { x: 1, y: 1, z: 0 },
+        { x: 2, y: 2, z: 5 },
+      ]),
+    ).toBeNull()
   })
 
   it('reports holes as missing coverage instead of filling them', () => {
@@ -86,16 +151,30 @@ describe('polygonVolume', () => {
 
   it('refuses an undetermined base or a self-intersecting polygon', () => {
     expect(polygonVolume(grid(), square(1, 1, 9, 9), { base: 'custom' }).error).toBe('base')
-    const bow = [[1, 1], [9, 9], [9, 1], [1, 9]].map(([x, y]) => ({ x: ox + x, y: oy - y }))
+    const bow = [
+      [1, 1],
+      [9, 9],
+      [9, 1],
+      [1, 9],
+    ].map(([x, y]) => ({ x: ox + x, y: oy - y }))
     expect(polygonVolume(grid(), bow).error).toBe('self-intersecting')
   })
 })
 
 describe('polygonVolume against a second surface', () => {
   it('sums gain and loss between the DEM and a reference, skipping where the reference has no height', () => {
-    const grid = { width: 4, height: 4, geoTransform: { originX: 0, originY: 4, scaleX: 1, scaleY: -1 },
-      data: new Float32Array(16).fill(10) }
-    const square = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }]
+    const grid = {
+      width: 4,
+      height: 4,
+      geoTransform: { originX: 0, originY: 4, scaleX: 1, scaleY: -1 },
+      data: new Float32Array(16).fill(10),
+    }
+    const square = [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 4, y: 4 },
+      { x: 0, y: 4 },
+    ]
     // Reference 8 on the left half (gain 2 per cell), 11 on the right (loss 1), nothing above y = 3.
     const surface = { name: 'lidar', sample: (x, y) => (y > 3 ? null : x < 2 ? 8 : 11) }
     const v = polygonVolume(grid, square, { base: 'surface', surface })
@@ -109,13 +188,27 @@ describe('polygonVolume against a second surface', () => {
   })
 
   it('estimates from a sub-grid above the sample cap, scaled to the whole polygon', () => {
-    const W = 300, H = 300
-    const data = Float32Array.from({ length: W * H }, (_, i) => 10 + Math.sin((i % W) / 17) + Math.cos(Math.floor(i / W) / 23))
+    const W = 300,
+      H = 300
+    const data = Float32Array.from(
+      { length: W * H },
+      (_, i) => 10 + Math.sin((i % W) / 17) + Math.cos(Math.floor(i / W) / 23),
+    )
     const grid = { width: W, height: H, geoTransform: { originX: 0, originY: H, scaleX: 1, scaleY: -1 }, data }
-    const poly = [{ x: 10, y: 10 }, { x: 290, y: 20 }, { x: 280, y: 290 }, { x: 15, y: 270 }]
+    const poly = [
+      { x: 10, y: 10 },
+      { x: 290, y: 20 },
+      { x: 280, y: 290 },
+      { x: 15, y: 270 },
+    ]
     // Reference: 10 except a hole in the west third.
     let calls = 0
-    const surface = { sample: (x) => { calls++; return x < 100 ? null : 10 } }
+    const surface = {
+      sample: (x) => {
+        calls++
+        return x < 100 ? null : 10
+      },
+    }
     const exact = polygonVolume(grid, poly, { base: 'surface', surface, maxSurfaceSamples: 0 })
     const exactCalls = calls
     calls = 0
@@ -131,15 +224,34 @@ describe('polygonVolume against a second surface', () => {
   })
 
   it('a strictly sampled reference counts its holes and edges unmeasured', () => {
-    const grid = { width: 4, height: 4, geoTransform: { originX: 0, originY: 4, scaleX: 1, scaleY: -1 },
-      data: new Float32Array(16).fill(10) }
-    const square = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }]
+    const grid = {
+      width: 4,
+      height: 4,
+      geoTransform: { originX: 0, originY: 4, scaleX: 1, scaleY: -1 },
+      data: new Float32Array(16).fill(10),
+    }
+    const square = [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 4, y: 4 },
+      { x: 0, y: 4 },
+    ]
     // Reference: 2-unit cells covering x 0…4, y 0…2 (the DEM's south half), all 9
     // except a hole at its south-west cell.
-    const ref = { width: 2, height: 1, data: Float32Array.of(NaN, 9),
-      geoTransform: { originX: 0, originY: 2, scaleX: 2, scaleY: -2 } }
-    const loose = polygonVolume(grid, square, { base: 'surface', surface: { sample: (x, y) => sampleRaster(ref, x, y) } })
-    const strict = polygonVolume(grid, square, { base: 'surface', surface: { sample: (x, y) => sampleRaster(ref, x, y, { strict: true }) } })
+    const ref = {
+      width: 2,
+      height: 1,
+      data: Float32Array.of(NaN, 9),
+      geoTransform: { originX: 0, originY: 2, scaleX: 2, scaleY: -2 },
+    }
+    const loose = polygonVolume(grid, square, {
+      base: 'surface',
+      surface: { sample: (x, y) => sampleRaster(ref, x, y) },
+    })
+    const strict = polygonVolume(grid, square, {
+      base: 'surface',
+      surface: { sample: (x, y) => sampleRaster(ref, x, y, { strict: true }) },
+    })
     // The default borrows the hole's neighbour (and half a cell past the north edge).
     expect(loose.validCells).toBeGreaterThan(4)
     // Strict: only the 4 DEM cells over the reference's valid cell.
@@ -163,36 +275,73 @@ describe('groundVolume', () => {
 
 describe('3D measurements', () => {
   it('splits a 3D polyline into horizontal and vertical parts', () => {
-    const r = polyline3d([[0, 0, 0], [3, 4, 0], [3, 4, 12]])
+    const r = polyline3d([
+      [0, 0, 0],
+      [3, 4, 0],
+      [3, 4, 12],
+    ])
     expect(r.length).toBeCloseTo(17)
     expect(r.horizontal).toBeCloseTo(5)
     expect(r.vertical).toBeCloseTo(12)
     expect(r.climb).toBeCloseTo(12)
     expect(r.segments.map((x) => +x.toFixed(6))).toEqual([5, 12])
     // A tilted scene up: the same points along a different vertical.
-    const tilted = polyline3d([[0, 0, 0], [0, 0, 10]], [0, Math.SQRT1_2, Math.SQRT1_2])
+    const tilted = polyline3d(
+      [
+        [0, 0, 0],
+        [0, 0, 10],
+      ],
+      [0, Math.SQRT1_2, Math.SQRT1_2],
+    )
     expect(tilted.vertical).toBeCloseTo(10 * Math.SQRT1_2)
     expect(polyline3d([[1, 2, 3]])).toBeNull()
   })
 
   it('gives a façade its true area and a near-zero footprint, a slope both', () => {
-    const wall = polygon3d([[500000, 7000000, 0], [500010, 7000000, 0], [500010, 7000000, 5], [500000, 7000000, 5]])
+    const wall = polygon3d([
+      [500000, 7000000, 0],
+      [500010, 7000000, 0],
+      [500010, 7000000, 5],
+      [500000, 7000000, 5],
+    ])
     expect(wall.area).toBeCloseTo(50, 6)
     expect(wall.footprint).toBeCloseTo(0, 6)
     expect(wall.perimeter).toBeCloseTo(30, 6)
     expect(wall.planarity).toBeCloseTo(0, 6)
     // A unit square tilted 45° about x: true area 1, footprint 1/√2.
     const c = Math.SQRT1_2
-    const slope = polygon3d([[0, 0, 0], [1, 0, 0], [1, c, c], [0, c, c]])
+    const slope = polygon3d([
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, c, c],
+      [0, c, c],
+    ])
     expect(slope.area).toBeCloseTo(1, 9)
     expect(slope.footprint).toBeCloseTo(c, 9)
     // Winding does not change the area.
-    expect(polygon3d([[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]]).area).toBeCloseTo(1, 9)
-    expect(polygon3d([[0, 0, 0], [1, 0, 0]])).toBeNull()
+    expect(
+      polygon3d([
+        [0, 0, 0],
+        [0, 1, 0],
+        [1, 1, 0],
+        [1, 0, 0],
+      ]).area,
+    ).toBeCloseTo(1, 9)
+    expect(
+      polygon3d([
+        [0, 0, 0],
+        [1, 0, 0],
+      ]),
+    ).toBeNull()
   })
 
   it('reports how far a picked outline is from planar', () => {
-    const r = polygon3d([[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0.4]])
+    const r = polygon3d([
+      [0, 0, 0],
+      [2, 0, 0],
+      [2, 2, 0],
+      [0, 2, 0.4],
+    ])
     expect(r.planarity).toBeGreaterThan(0.05)
   })
 })

@@ -12,7 +12,12 @@ describe('partsToBlob', () => {
   })
   it('consumes a generator lazily and accepts Blob parts', async () => {
     let drawn = 0
-    function* gen() { for (let i = 0; i < 5; i++) { drawn++; yield `${i}` } }
+    function* gen() {
+      for (let i = 0; i < 5; i++) {
+        drawn++
+        yield `${i}`
+      }
+    }
     const blob = partsToBlob([new Blob(['a']), ...gen()])
     expect(drawn).toBe(5)
     expect(await blob.text()).toBe('a01234')
@@ -28,7 +33,10 @@ describe('blobChunks / blobSource', () => {
     expect(chunks.every((c) => c.length <= 64)).toBe(true)
     const all = new Uint8Array(chunks.reduce((s, c) => s + c.length, 0))
     let o = 0
-    for (const c of chunks) { all.set(c, o); o += c.length }
+    for (const c of chunks) {
+      all.set(c, o)
+      o += c.length
+    }
     expect(all).toEqual(data.subarray(10))
   })
   it('exposes size, ranged reads and chunks', async () => {

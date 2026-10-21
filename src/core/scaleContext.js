@@ -87,10 +87,7 @@ function median(values) {
 //
 // Returns { n, medianScale, minScale, maxScale, factor, rawFactor, clamped, mixed }.
 export function buildScaleContext(entries, opts = {}) {
-  const {
-    maxFactor = SCALE_CONTEXT_DEFAULTS.maxFactor,
-    minFactor = SCALE_CONTEXT_DEFAULTS.minFactor,
-  } = opts
+  const { maxFactor = SCALE_CONTEXT_DEFAULTS.maxFactor, minFactor = SCALE_CONTEXT_DEFAULTS.minFactor } = opts
 
   const scales = (entries ?? []).map(detectScaleOf)
   if (scales.length === 0) {
@@ -98,8 +95,12 @@ export function buildScaleContext(entries, opts = {}) {
   }
 
   const medianScale = median(scales)
-  let minScale = scales[0], maxScale = scales[0]
-  for (const s of scales) { if (s < minScale) minScale = s; if (s > maxScale) maxScale = s }
+  let minScale = scales[0],
+    maxScale = scales[0]
+  for (const s of scales) {
+    if (s < minScale) minScale = s
+    if (s > maxScale) maxScale = s
+  }
 
   const rawFactor = 1 / medianScale
   const clamped = rawFactor > maxFactor
@@ -118,7 +119,8 @@ export function buildScaleContext(entries, opts = {}) {
 // correct direction here — this module exists to stop a gate sitting below the
 // noise floor, and a mean would leave it there whenever one image is sharp.
 export function pairScaleContext(a, b, opts = {}) {
-  const sa = detectScaleOf(a), sb = detectScaleOf(b)
+  const sa = detectScaleOf(a),
+    sb = detectScaleOf(b)
   return buildScaleContext([{ detectScale: Math.min(sa, sb) }], opts)
 }
 
@@ -138,9 +140,11 @@ export function describeScaleContext(ctx, label = 'thresholds') {
   if (!ctx || ctx.n === 0) return `${label}: no detection scale available — using values as given`
 
   const n = `${ctx.n} image${ctx.n === 1 ? '' : 's'}`
-  const parts = [ctx.factor === 1
-    ? `${label}: unscaled — detection scale ${ctx.medianScale.toFixed(3)} (${n})`
-    : `${label}: ×${ctx.factor.toFixed(2)} for detection scale ${ctx.medianScale.toFixed(3)} (${n})`]
+  const parts = [
+    ctx.factor === 1
+      ? `${label}: unscaled — detection scale ${ctx.medianScale.toFixed(3)} (${n})`
+      : `${label}: ×${ctx.factor.toFixed(2)} for detection scale ${ctx.medianScale.toFixed(3)} (${n})`,
+  ]
 
   // Both caveats must be reported independently of whether the factor engaged. A
   // set half at full resolution and half heavily downscaled has a median scale of
@@ -148,13 +152,17 @@ export function describeScaleContext(ctx, label = 'thresholds') {
   // needs to be told, and the case a "factor === 1 ⇒ nothing to say" early return
   // would have silently swallowed.
   if (ctx.clamped) {
-    parts.push(`— CLAMPED from ×${ctx.rawFactor.toFixed(2)}; detection discarded so much `
-      + `resolution that the gate cannot follow it — raise the detection resolution instead`)
+    parts.push(
+      `— CLAMPED from ×${ctx.rawFactor.toFixed(2)}; detection discarded so much ` +
+        `resolution that the gate cannot follow it — raise the detection resolution instead`,
+    )
   }
   if (ctx.mixed) {
-    parts.push(`— mixed detection scales ${ctx.minScale.toFixed(3)}…${ctx.maxScale.toFixed(3)}; `
-      + `one run-wide factor cannot suit every image (matching scales per pair, `
-      + `but the SfM gates are model-wide)`)
+    parts.push(
+      `— mixed detection scales ${ctx.minScale.toFixed(3)}…${ctx.maxScale.toFixed(3)}; ` +
+        `one run-wide factor cannot suit every image (matching scales per pair, ` +
+        `but the SfM gates are model-wide)`,
+    )
   }
   return parts.join(' ')
 }

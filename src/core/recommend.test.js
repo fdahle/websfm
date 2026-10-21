@@ -4,10 +4,18 @@ import { profileDataset } from './profile.js'
 
 // A minimal profile builder — recommend.js only reads these fields.
 const profile = (over = {}) => ({
-  nImages: 50, minDim: 4000, maxDim: 4000, medianMP: 12,
-  kind: 'unknown', hasGps: false, hasPoses: false,
-  hasCalibratedDistortion: false, sequentialNames: false,
-  scale: 'medium', notes: [], ...over,
+  nImages: 50,
+  minDim: 4000,
+  maxDim: 4000,
+  medianMP: 12,
+  kind: 'unknown',
+  hasGps: false,
+  hasPoses: false,
+  hasCalibratedDistortion: false,
+  sequentialNames: false,
+  scale: 'medium',
+  notes: [],
+  ...over,
 })
 
 describe('recommendSettings', () => {
@@ -33,7 +41,7 @@ describe('recommendSettings', () => {
   it('detect.maxDim = clamp(round(0.5·native), 1200, 3200)', () => {
     expect(recommendSettings(profile({ maxDim: 4000 })).detect.maxDim.value).toBe(2000)
     expect(recommendSettings(profile({ maxDim: 11000 })).detect.maxDim.value).toBe(3200) // clamped high
-    expect(recommendSettings(profile({ maxDim: 2000 })).detect.maxDim.value).toBe(1200)  // clamped low
+    expect(recommendSettings(profile({ maxDim: 2000 })).detect.maxDim.value).toBe(1200) // clamped low
     // No dimensions ⇒ keep the default (no maxDim recommendation).
     expect(recommendSettings(profile({ maxDim: null })).detect.maxDim).toBeUndefined()
   })
@@ -59,8 +67,12 @@ describe('recommendSettings', () => {
     expect(recommendSettings(profile({ hasGps: true })).match.strategy.value).toBe('exhaustive')
     // Sequential naming only downgrades to sequential matching on a LARGE set —
     // on a medium set contiguous filenames don't justify skipping exhaustive.
-    expect(recommendSettings(profile({ sequentialNames: true, scale: 'large' })).match.strategy.value).toBe('sequential')
-    expect(recommendSettings(profile({ sequentialNames: true, scale: 'medium' })).match.strategy.value).toBe('exhaustive')
+    expect(recommendSettings(profile({ sequentialNames: true, scale: 'large' })).match.strategy.value).toBe(
+      'sequential',
+    )
+    expect(recommendSettings(profile({ sequentialNames: true, scale: 'medium' })).match.strategy.value).toBe(
+      'exhaustive',
+    )
     expect(recommendSettings(profile()).match.strategy.value).toBe('exhaustive')
   })
 
@@ -71,10 +83,10 @@ describe('recommendSettings', () => {
 
   it('sfm.refineIntrinsics stays auto but reasons about calibration', () => {
     expect(recommendSettings(profile()).sfm.refineIntrinsics.value).toBe('auto')
-    expect(recommendSettings(profile({ hasCalibratedDistortion: true })).sfm.refineIntrinsics.reason)
-      .toMatch(/double-correct/)
-    expect(recommendSettings(profile({ hasCalibratedDistortion: false })).sfm.refineIntrinsics.reason)
-      .toMatch(/k1/)
+    expect(recommendSettings(profile({ hasCalibratedDistortion: true })).sfm.refineIntrinsics.reason).toMatch(
+      /double-correct/,
+    )
+    expect(recommendSettings(profile({ hasCalibratedDistortion: false })).sfm.refineIntrinsics.reason).toMatch(/k1/)
   })
 
   it('depthmap quality: budget and set size drive the pick', () => {

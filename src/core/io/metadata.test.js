@@ -24,10 +24,17 @@ describe('normalizeExifMetadata', () => {
   it('keeps no typed-array view into the file buffer', () => {
     const file = new Uint8Array(1_000_000)
     file[500] = 1
-    const out = normalizeExifMetadata({
-      latitude: 52, longitude: 4, GPSAltitude: 167,
-      GPSAltitudeRef: file.subarray(500, 501), OpcodeList3: file.subarray(600, 704),
-    }, { width: 4112, height: 3008 }, file.byteLength)
+    const out = normalizeExifMetadata(
+      {
+        latitude: 52,
+        longitude: 4,
+        GPSAltitude: 167,
+        GPSAltitudeRef: file.subarray(500, 501),
+        OpcodeList3: file.subarray(600, 704),
+      },
+      { width: 4112, height: 3008 },
+      file.byteLength,
+    )
     expect(out.gpsAltRef).toBe(1)
     expect(out.raw).toBeUndefined()
     const views = Object.values(out).filter((v) => ArrayBuffer.isView(v))
@@ -35,18 +42,35 @@ describe('normalizeExifMetadata', () => {
   })
 
   it('reads namespaced DJI gimbal and per-axis RTK metadata', () => {
-    const out = normalizeExifMetadata({
-      latitude: 48, longitude: 9, GPSAltitude: 120,
-      'drone-dji': {
-        GimbalYawDegree: '32.5', GimbalPitchDegree: '-90', GimbalRollDegree: '0',
-        RtkStdLon: '0.018', RtkStdLat: '0.024', RtkStdHgt: '0.041',
+    const out = normalizeExifMetadata(
+      {
+        'latitude': 48,
+        'longitude': 9,
+        'GPSAltitude': 120,
+        'drone-dji': {
+          GimbalYawDegree: '32.5',
+          GimbalPitchDegree: '-90',
+          GimbalRollDegree: '0',
+          RtkStdLon: '0.018',
+          RtkStdLat: '0.024',
+          RtkStdHgt: '0.041',
+        },
       },
-    }, { width: 4000, height: 3000 }, 1234)
+      { width: 4000, height: 3000 },
+      1234,
+    )
 
     expect(out).toMatchObject({
-      gpsLat: 48, gpsLon: 9, gpsAlt: 120,
-      gpsAccuracyX: 0.018, gpsAccuracyY: 0.024, gpsAccuracyZ: 0.041,
-      cameraOrientationSource: 'xmp-gimbal', width: 4000, height: 3000, fileSize: 1234,
+      gpsLat: 48,
+      gpsLon: 9,
+      gpsAlt: 120,
+      gpsAccuracyX: 0.018,
+      gpsAccuracyY: 0.024,
+      gpsAccuracyZ: 0.041,
+      cameraOrientationSource: 'xmp-gimbal',
+      width: 4000,
+      height: 3000,
+      fileSize: 1234,
     })
     expect(out.cameraOmega).toBeCloseTo(0, 10)
     expect(out.cameraPhi).toBeCloseTo(0, 10)
@@ -55,7 +79,8 @@ describe('normalizeExifMetadata', () => {
 
   it('does not mistake airframe attitude for camera attitude', () => {
     const out = normalizeExifMetadata({
-      latitude: 48, longitude: 9,
+      'latitude': 48,
+      'longitude': 9,
       'drone-dji': { FlightYawDegree: 20, FlightPitchDegree: 3, FlightRollDegree: 2 },
     })
     expect(out).toMatchObject({ cameraOmega: null, cameraPhi: null, cameraKappa: null })
@@ -66,7 +91,9 @@ describe('normalizeExifMetadata', () => {
       custom: { CameraOmega: 1, CameraPhi: 2, CameraKappa: 3 },
     })
     expect(out).toMatchObject({
-      cameraOmega: 1, cameraPhi: 2, cameraKappa: 3,
+      cameraOmega: 1,
+      cameraPhi: 2,
+      cameraKappa: 3,
       cameraOrientationSource: 'exif-opk',
     })
   })

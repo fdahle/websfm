@@ -35,11 +35,11 @@ export async function saveDepthPlanes(projectId, index, entries) {
         const buf = buffers?.[key]
         const name = `${uuid}.${key}.bin`
         if (buf && buf.byteLength) await writeBin(dir, name, buf)
-        else await dir.removeEntry(name).catch(ignoreMissing)   // e.g. nrm absent
+        else await dir.removeEntry(name).catch(ignoreMissing) // e.g. nrm absent
       }
     }
     await writeJson(dir, 'index.json', index)
-    await removeStaleDepthBins(dir, keep)   // drop planes of images no longer mapped
+    await removeStaleDepthBins(dir, keep) // drop planes of images no longer mapped
   })
 }
 
@@ -61,7 +61,8 @@ export async function saveDepthPlane(projectId, uuid, buffers) {
     const dir = await getSubDir(projectId, 'depthmaps')
     for (const key of DEPTH_BIN_KEYS) {
       if (!(key in buffers)) continue
-      const buf = buffers[key], name = `${uuid}.${key}.bin`
+      const buf = buffers[key],
+        name = `${uuid}.${key}.bin`
       if (buf && buf.byteLength) await writeBin(dir, name, buf)
       else await dir.removeEntry(name).catch(ignoreMissing)
     }
@@ -88,14 +89,19 @@ export async function loadDepthIndex(projectId) {
 
 // Read handles, not planes. Validate every required sidecar before computation.
 export async function loadDepthFiles(projectId, metas) {
-  const dir = await getSubDir(projectId, 'depthmaps'), out = []
+  const dir = await getSubDir(projectId, 'depthmaps'),
+    out = []
   for (const meta of metas) {
     const files = {}
     for (const key of DEPTH_BIN_KEYS) {
-      try { files[key] = await (await dir.getFileHandle(`${meta.uuid}.${key}.bin`)).getFile() }
-      catch (error) { ignoreMissing(error); files[key] = null }
+      try {
+        files[key] = await (await dir.getFileHandle(`${meta.uuid}.${key}.bin`)).getFile()
+      } catch (error) {
+        ignoreMissing(error)
+        files[key] = null
+      }
     }
-    if (['depth', 'cost', 'rgb'].every(k => !files[k]?.size)) continue
+    if (['depth', 'cost', 'rgb'].every((k) => !files[k]?.size)) continue
     for (const [key, size] of Object.entries(planeBytes(meta.width, meta.height))) {
       if (key === 'nrm' && !files.nrm?.size) continue
       if (files[key]?.size !== size) throw new Error(`Corrupt depth map ${meta.uuid} (${key}); recompute depth maps`)
@@ -111,6 +117,8 @@ export async function deleteDepthPlanes(projectId) {
       const dir = await getSubDir(projectId, 'depthmaps')
       await dir.removeEntry('index.json').catch(ignoreMissing)
       await removeStaleDepthBins(dir, new Set())
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }

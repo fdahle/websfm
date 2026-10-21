@@ -9,8 +9,12 @@
 
 /** Images with EXIF GPS and no enabled imported pose (a pose supersedes the GPS). */
 export function gpsImagesOf(images, poses) {
-  return images.filter((img) => img.meta?.gpsLat != null && img.meta?.gpsLon != null
-    && !poses.some((p) => p.imageId === img.id && p.enabled !== false))
+  return images.filter(
+    (img) =>
+      img.meta?.gpsLat != null &&
+      img.meta?.gpsLon != null &&
+      !poses.some((p) => p.imageId === img.id && p.enabled !== false),
+  )
 }
 
 // Copied to what a marker draws, so a computed over these also tracks name and
@@ -67,10 +71,15 @@ export function hoverText(feature, unaligned) {
   const fpName = feature.get('footprintName')
   const poseName = feature.get('poseName')
   const imgName = feature.get('name')
-  return gcpName ? `${feature.get('gcpRole') === 'marker' ? 'Marker' : 'GCP'}: ${gcpName}`
-    : fpName ? `Footprint: ${fpName}`
-    : poseName ? `Camera: ${poseName}`
-    : unaligned ? `${imgName} (not aligned)` : imgName
+  return gcpName
+    ? `${feature.get('gcpRole') === 'marker' ? 'Marker' : 'GCP'}: ${gcpName}`
+    : fpName
+      ? `Footprint: ${fpName}`
+      : poseName
+        ? `Camera: ${poseName}`
+        : unaligned
+          ? `${imgName} (not aligned)`
+          : imgName
 }
 
 /**
@@ -80,5 +89,5 @@ export function hoverText(feature, unaligned) {
  */
 export function linkedImageOf(feature, images) {
   const imgId = feature.get('imgId')
-  return imgId ? images.find((i) => i.id === imgId) ?? null : null
+  return imgId ? (images.find((i) => i.id === imgId) ?? null) : null
 }

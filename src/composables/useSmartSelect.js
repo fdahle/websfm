@@ -27,20 +27,21 @@ import { createRevision } from '../utils/revision.js'
 export function useSmartSelect({ image, nativeSize, drawOverlay }) {
   const modelsStore = useModelsStore()
 
-  const smartStatus = ref('')            // toolbar status line
-  const smartHasPreview = ref(false)     // a candidate segment is currently shown
+  const smartStatus = ref('') // toolbar status line
+  const smartHasPreview = ref(false) // a candidate segment is currently shown
   const smartPreviewCanvas = shallowRef(null) // cyan candidate overlay, drawn by renderOverlay
 
-  let smartEnc = null      // { width, height } of the encoded raster (aspect-preserved ≤ maxDim)
-  let smartPoints = []     // [{ x, y, positive }] in encoded-raster px
-  let smartResult = null   // { logits:Float32Array, mw, mh } last decode (raw low-res)
-  let smartBusy = false, smartDirty = false // coalesce overlapping decodes
+  let smartEnc = null // { width, height } of the encoded raster (aspect-preserved ≤ maxDim)
+  let smartPoints = [] // [{ x, y, positive }] in encoded-raster px
+  let smartResult = null // { logits:Float32Array, mw, mh } last decode (raw low-res)
+  let smartBusy = false,
+    smartDirty = false // coalesce overlapping decodes
   // Latest-wins tokens (utils/revision.js). A decode that resolves after the
   // candidate was discarded (Delete, tool switch, commit, image switch) must not
   // resurrect it — Enter would then commit a segment the user threw away. An
   // encode that resolves after a reset belongs to the previous image.
   const candidateRev = createRevision() // bumped by discardSmart (and so resetSmart)
-  const encodeRev = createRevision()    // bumped by resetSmart
+  const encodeRev = createRevision() // bumped by resetSmart
 
   // Build an OffscreenCanvas(w,h) painting `rgba` where the binary mask is 1, else
   // transparent. Used for both the cyan preview and the red commit blit.
@@ -50,7 +51,12 @@ export function useSmartSelect({ image, nativeSize, drawOverlay }) {
     const id = cx.createImageData(w, h)
     const d = id.data
     for (let i = 0; i < w * h; i++) {
-      if (mask[i]) { d[i * 4] = rgba[0]; d[i * 4 + 1] = rgba[1]; d[i * 4 + 2] = rgba[2]; d[i * 4 + 3] = rgba[3] }
+      if (mask[i]) {
+        d[i * 4] = rgba[0]
+        d[i * 4 + 1] = rgba[1]
+        d[i * 4 + 2] = rgba[2]
+        d[i * 4 + 3] = rgba[3]
+      }
     }
     cx.putImageData(id, 0, 0)
     return c
@@ -94,7 +100,10 @@ export function useSmartSelect({ image, nativeSize, drawOverlay }) {
   // clicks (one decode in flight; a click mid-decode re-runs afterward).
   async function runSmartDecode() {
     if (!smartEnc || !smartPoints.length) return
-    if (smartBusy) { smartDirty = true; return }
+    if (smartBusy) {
+      smartDirty = true
+      return
+    }
     smartBusy = true
     smartStatus.value = 'segmenting…'
     try {
@@ -127,11 +136,14 @@ export function useSmartSelect({ image, nativeSize, drawOverlay }) {
   // (independent). Alt-click refines the current candidate by adding a negative
   // point (carves the region back). Coords map native px → encoded-raster px.
   async function smartClick(px, py, negative) {
-    if (!smartEnc) { await ensureEncoded(); if (!smartEnc) return }
+    if (!smartEnc) {
+      await ensureEncoded()
+      if (!smartEnc) return
+    }
     const native = nativeSize()
     if (!(native?.width > 0) || !(native?.height > 0)) return
-    const ex = px * smartEnc.width / native.width
-    const ey = py * smartEnc.height / native.height
+    const ex = (px * smartEnc.width) / native.width
+    const ey = (py * smartEnc.height) / native.height
     if (negative && smartPoints.length) smartPoints.push({ x: ex, y: ey, positive: false })
     else smartPoints = [{ x: ex, y: ey, positive: true }]
     await runSmartDecode()
@@ -169,7 +181,13 @@ export function useSmartSelect({ image, nativeSize, drawOverlay }) {
   }
 
   return {
-    smartStatus, smartHasPreview, smartPreviewCanvas,
-    ensureEncoded, smartClick, buildCommitCanvas, discardSmart, resetSmart,
+    smartStatus,
+    smartHasPreview,
+    smartPreviewCanvas,
+    ensureEncoded,
+    smartClick,
+    buildCommitCanvas,
+    discardSmart,
+    resetSmart,
   }
 }

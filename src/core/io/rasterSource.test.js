@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { createFlatRasterSource, productDescriptor, createProductRasterSource, productTiledMeta } from './rasterSource.js'
+import {
+  createFlatRasterSource,
+  productDescriptor,
+  createProductRasterSource,
+  productTiledMeta,
+} from './rasterSource.js'
 import { rasterizeDem, cellCenter } from '../products/dem.js'
 
 const meta = {
@@ -22,7 +27,7 @@ describe('createFlatRasterSource', () => {
     }
   })
 
-  it('samples in the raster\'s own world coordinates', () => {
+  it("samples in the raster's own world coordinates", () => {
     const s = createFlatRasterSource(meta, ramp)
     expect(s.sampleAt(105, 195)).toBeCloseTo(0)
     expect(s.sampleAt(125, 185)).toBeCloseTo(6)
@@ -63,7 +68,8 @@ describe('createFlatRasterSource', () => {
   it('carries the preview and rgba through', () => {
     const rgba = new Uint8Array(4 * 3 * 4)
     const s = createFlatRasterSource({ ...meta, kind: 'ortho' }, null, {
-      rgba, previewDataUrl: 'data:image/png;base64,xxx',
+      rgba,
+      previewDataUrl: 'data:image/png;base64,xxx',
     })
     expect(s.previewDataUrl()).toBe('data:image/png;base64,xxx')
     expect(s.rgba()).toBe(rgba)
@@ -80,42 +86,81 @@ describe('createFlatRasterSource', () => {
 })
 
 describe('computed products as raster sources', () => {
-  const dem = rasterizeDem([{ x: 0, y: 0, z: 1 }, { x: 4, y: 0, z: 2 }, { x: 0, y: 3, z: 3 }, { x: 4, y: 3, z: 4 }],
-    { gsd: 1, fillRadius: 0 })
+  const dem = rasterizeDem(
+    [
+      { x: 0, y: 0, z: 1 },
+      { x: 4, y: 0, z: 2 },
+      { x: 0, y: 3, z: 3 },
+      { x: 4, y: 3, z: 4 },
+    ],
+    { gsd: 1, fillRadius: 0 },
+  )
 
   it('normalises a computed grid to a north-up corner geotransform', () => {
-    expect(productDescriptor(dem).geoTransform).toEqual({ originX: dem.originX, originY: dem.originY, scaleX: 1, scaleY: -1 })
-    expect(productDescriptor({ width: 2, height: 2, geoTransform: { originX: 5 } }).geoTransform).toEqual({ originX: 5 })
+    expect(productDescriptor(dem).geoTransform).toEqual({
+      originX: dem.originX,
+      originY: dem.originY,
+      scaleX: 1,
+      scaleY: -1,
+    })
+    expect(productDescriptor({ width: 2, height: 2, geoTransform: { originX: 5 } }).geoTransform).toEqual({
+      originX: 5,
+    })
     expect(productDescriptor({ width: 2, height: 2 })).toBeNull()
   })
 
   it('samples a DEM cell centre to that cell and agrees with dem.js on geometry', () => {
     const src = createProductRasterSource('dem', dem)
-    for (let row = 0; row < dem.height; row++) for (let col = 0; col < dem.width; col++) {
-      const i = row * dem.width + col
-      if (!dem.mask[i]) continue
-      const [x, y] = cellCenter(dem, col, row)
-      expect(src.sampleAt(x, y)).toBe(dem.data[i])
-      expect(src.worldToPixel(x, y)).toEqual({ col: col + 0.5, row: row + 0.5 })
-    }
+    for (let row = 0; row < dem.height; row++)
+      for (let col = 0; col < dem.width; col++) {
+        const i = row * dem.width + col
+        if (!dem.mask[i]) continue
+        const [x, y] = cellCenter(dem, col, row)
+        expect(src.sampleAt(x, y)).toBe(dem.data[i])
+        expect(src.worldToPixel(x, y)).toEqual({ col: col + 0.5, row: row + 0.5 })
+      }
     expect(src.unsafePlane()).toBe(dem.data)
     expect(src.rgba()).toBeNull()
   })
 
   it('reads an ortho through its injected window reader, never a plane', async () => {
     const calls = []
-    const readRawWindow = async (rect, level, opts) => { calls.push([rect, level, opts]); return { channels: [[1], [2], [3], [255]] } }
-    const src = createProductRasterSource('ortho', { width: 4, height: 3, gsd: 1, originX: 0, originY: 3 }, { readRawWindow })
+    const readRawWindow = async (rect, level, opts) => {
+      calls.push([rect, level, opts])
+      return { channels: [[1], [2], [3], [255]] }
+    }
+    const src = createProductRasterSource(
+      'ortho',
+      { width: 4, height: 3, gsd: 1, originX: 0, originY: 3 },
+      { readRawWindow },
+    )
     expect(src.rgba()).toBeNull()
     expect(src.unsafePlane()).toBeNull()
-    expect((await src.readWindow({ col: 2, row: 1, width: 1, height: 1 }, 0, { bands: [0, 1, 2, 3] })).channels[3]).toEqual([255])
+    expect(
+      (await src.readWindow({ col: 2, row: 1, width: 1, height: 1 }, 0, { bands: [0, 1, 2, 3] })).channels[3],
+    ).toEqual([255])
     expect(calls).toEqual([[{ col: 2, row: 1, width: 1, height: 1 }, 0, { bands: [0, 1, 2, 3] }]])
   })
 
-  it('describes a computed ortho\'s COG for the tiled layer, with its alpha band', () => {
-    const product = { width: 4, height: 3, gsd: 0.5, originX: 10, originY: 20, crs: 'EPSG:3031', createdAt: 7, cog: new Blob([]) }
-    expect(productTiledMeta('ortho', product)).toMatchObject({ id: 'product:ortho:7', crs: 'EPSG:3031', bands: 4, alphaBand: 3,
-      photometric: 2, geoTransform: { originX: 10, originY: 20, scaleX: 0.5, scaleY: -0.5 } })
+  it("describes a computed ortho's COG for the tiled layer, with its alpha band", () => {
+    const product = {
+      width: 4,
+      height: 3,
+      gsd: 0.5,
+      originX: 10,
+      originY: 20,
+      crs: 'EPSG:3031',
+      createdAt: 7,
+      cog: new Blob([]),
+    }
+    expect(productTiledMeta('ortho', product)).toMatchObject({
+      id: 'product:ortho:7',
+      crs: 'EPSG:3031',
+      bands: 4,
+      alphaBand: 3,
+      photometric: 2,
+      geoTransform: { originX: 10, originY: 20, scaleX: 0.5, scaleY: -0.5 },
+    })
     expect(productTiledMeta('ortho', { ...product, crs: 'local' }).crs).toBeNull()
     expect(productTiledMeta('ortho', { ...product, cog: null })).toBeNull()
     expect(productTiledMeta('dem', product)).toBeNull()
@@ -139,19 +184,44 @@ describe('cellValueAt (cursor readout)', () => {
   it('reads null off the raster and for a computed DEM hole', () => {
     expect(src.cellValueAt(-0.1, 0.5)).toBeNull()
     expect(src.cellValueAt(3, 0.5)).toBeNull()
-    const dem = createProductRasterSource('dem', { width: 2, height: 1, gsd: 1, originX: 0, originY: 1,
-      data: new Float32Array([5, NaN]) })
+    const dem = createProductRasterSource('dem', {
+      width: 2,
+      height: 1,
+      gsd: 1,
+      originX: 0,
+      originY: 1,
+      data: new Float32Array([5, NaN]),
+    })
     expect(dem.cellValueAt(1.5, 0.5)).toBeNull()
     expect(dem.cellValueAt(0.5, 0.5)).toBe(5)
   })
 })
 
 describe('productTiledMeta for a DEM past one plane (SAT-3)', () => {
-  it('draws the full-resolution COG with the DEM\'s symbology; a plane-only DEM stays on its preview', () => {
-    const dem = { width: 2500, height: 1200, gsd: 2, originX: 100, originY: 900, zMin: 10, zMax: 50, crs: 'EPSG:32612',
-      cog: new Blob([]), fullWidth: 5000, fullHeight: 2400, fullGsd: 1, createdAt: 9, style: { ramp: 'viridis' } }
+  it("draws the full-resolution COG with the DEM's symbology; a plane-only DEM stays on its preview", () => {
+    const dem = {
+      width: 2500,
+      height: 1200,
+      gsd: 2,
+      originX: 100,
+      originY: 900,
+      zMin: 10,
+      zMax: 50,
+      crs: 'EPSG:32612',
+      cog: new Blob([]),
+      fullWidth: 5000,
+      fullHeight: 2400,
+      fullGsd: 1,
+      createdAt: 9,
+      style: { ramp: 'viridis' },
+    }
     expect(productTiledMeta('dem', dem)).toMatchObject({
-      id: 'product:dem:9', width: 5000, height: 2400, bands: 1, bitsPerSample: 32, sampleFormat: 3,
+      id: 'product:dem:9',
+      width: 5000,
+      height: 2400,
+      bands: 1,
+      bitsPerSample: 32,
+      sampleFormat: 3,
       geoTransform: { originX: 100, originY: 900, scaleX: 1, scaleY: -1 },
       demRelief: { ramp: 'viridis', min: 10, max: 50, gsd: 1 },
     })

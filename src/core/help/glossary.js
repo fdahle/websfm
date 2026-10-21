@@ -18,27 +18,39 @@ function stripLeadingComment(raw) {
 // not listed here still shows up, appended after the pipeline as a plain section.
 export const GLOSSARY_TOPICS = [
   {
-    topic: 'camera-sensor', label: 'Camera & sensor', icon: '📷',
+    topic: 'camera-sensor',
+    label: 'Camera & sensor',
+    icon: '📷',
     blurb: 'How a physical camera maps the world onto pixels.',
   },
   {
-    topic: 'algorithms', label: 'Geometry & algorithms', icon: '📐',
+    topic: 'algorithms',
+    label: 'Geometry & algorithms',
+    icon: '📐',
     blurb: 'The two-view math relating overlapping image pairs.',
   },
   {
-    topic: 'core-sfm', label: 'Sparse SfM', icon: '🕸️',
+    topic: 'core-sfm',
+    label: 'Sparse SfM',
+    icon: '🕸️',
     blurb: 'Camera poses and tie points recovered from feature matches.',
   },
   {
-    topic: 'dense-reconstruction', label: 'Dense reconstruction', icon: '🧱',
+    topic: 'dense-reconstruction',
+    label: 'Dense reconstruction',
+    icon: '🧱',
     blurb: 'Per-pixel depth from the posed images, fused to a dense cloud.',
   },
   {
-    topic: 'georeferencing', label: 'Georeferencing', icon: '🌍',
+    topic: 'georeferencing',
+    label: 'Georeferencing',
+    icon: '🌍',
     blurb: 'Tying the scale-free reconstruction to real-world coordinates.',
   },
   {
-    topic: 'products', label: 'Products', icon: '🗺️',
+    topic: 'products',
+    label: 'Products',
+    icon: '🗺️',
     blurb: 'Mapping outputs derived from the reconstruction.',
   },
 ]
@@ -67,7 +79,11 @@ export function parseGlossaryEntry(raw, sourcePath = '<string>') {
   // aliases: comma-separated extra phrases that auto-link to this entry (the
   // title is always an alias). Lower-cased + de-duped for matching.
   const aliases = new Set([meta.title || meta.id])
-  if (meta.aliases) for (const a of meta.aliases.split(',')) { const t = a.trim(); if (t) aliases.add(t) }
+  if (meta.aliases)
+    for (const a of meta.aliases.split(',')) {
+      const t = a.trim()
+      if (t) aliases.add(t)
+    }
 
   return {
     id: meta.id,
@@ -98,14 +114,16 @@ function buildAliasIndex(entries, selfId) {
   return list.sort((a, b) => b.len - a.len)
 }
 
-function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 export function autoLinkHtml(html, selfId = null) {
   const entries = loadEntries()
   const index = buildAliasIndex(entries, selfId)
   if (!index.length) return html
   // An explicit [text](help:id) link anywhere counts: don't auto-link that term too.
-  const used = new Set([...html.matchAll(/data-help-id="([^"]+)"/g)].map(m => m[1]))
+  const used = new Set([...html.matchAll(/data-help-id="([^"]+)"/g)].map((m) => m[1]))
 
   // Split on tags; even indices are text, odd indices are the tag strings.
   const parts = html.split(/(<[^>]+>)/)
@@ -122,14 +140,13 @@ export function autoLinkHtml(html, selfId = null) {
       const name = rawName.toLowerCase()
       const selfClosing = /\/>\s*$/.test(part) || VOID_TAGS.has(name)
       if (closing) {
-        const idx = stack.map(f => f.name).lastIndexOf(name)
+        const idx = stack.map((f) => f.name).lastIndexOf(name)
         if (idx !== -1) {
           if (stack[idx].suppress) suppressDepth--
           stack.splice(idx, 1)
         }
       } else if (!selfClosing) {
-        const suppress = SUPPRESS_TAGS.has(name) ||
-          /class\s*=\s*"[^"]*\b(no-help|katex)\b[^"]*"/.test(part)
+        const suppress = SUPPRESS_TAGS.has(name) || /class\s*=\s*"[^"]*\b(no-help|katex)\b[^"]*"/.test(part)
         if (suppress) suppressDepth++
         stack.push({ name, suppress })
       }
@@ -153,10 +170,13 @@ function linkText(text, index, used) {
       const m = re.exec(parts[i])
       if (!m) continue
       used.add(id)
-      parts.splice(i, 1,
+      parts.splice(
+        i,
+        1,
         parts[i].slice(0, m.index),
         `<a href="#" class="glossary-link" data-help-id="${id}">${m[0]}</a>`,
-        parts[i].slice(m.index + m[0].length))
+        parts[i].slice(m.index + m[0].length),
+      )
       break
     }
   }
@@ -209,7 +229,10 @@ export function getGlossaryEntriesByTopic() {
   const sections = []
   for (const { topic, label, icon, blurb } of GLOSSARY_TOPICS) {
     const entries = byTopic.get(topic)
-    if (entries) { sections.push({ topic, label, icon, blurb, pipeline: true, entries }); byTopic.delete(topic) }
+    if (entries) {
+      sections.push({ topic, label, icon, blurb, pipeline: true, entries })
+      byTopic.delete(topic)
+    }
   }
   for (const [topic, entries] of byTopic) {
     sections.push({ topic, label: topic === 'other' ? 'Other' : topic, pipeline: false, entries })
@@ -224,11 +247,10 @@ export function searchGlossary(query) {
   if (!q) return getAllGlossaryEntries()
   const scored = []
   for (const e of loadEntries().values()) {
-    const inTitle = e.title.toLowerCase().includes(q) ||
-      e.aliases.some(a => a.toLowerCase().includes(q))
+    const inTitle = e.title.toLowerCase().includes(q) || e.aliases.some((a) => a.toLowerCase().includes(q))
     const inBody = e.summary.toLowerCase().includes(q) || e.body.toLowerCase().includes(q)
     if (inTitle) scored.push({ e, rank: 0 })
     else if (inBody) scored.push({ e, rank: 1 })
   }
-  return scored.sort((a, b) => a.rank - b.rank || a.e.title.localeCompare(b.e.title)).map(s => s.e)
+  return scored.sort((a, b) => a.rank - b.rank || a.e.title.localeCompare(b.e.title)).map((s) => s.e)
 }

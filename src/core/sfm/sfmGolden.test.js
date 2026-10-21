@@ -37,27 +37,31 @@ describe.skipIf(!MODE)('SfM golden output (bit-identical refactor gate)', () => 
     await initRecon({ module_or_path: await readFile(fileURLToPath(wasmUrl)) })
   })
 
-  it(`${MODE} ${FILE}`, async () => {
-    const got = {}
-    for (const name of Object.keys(goldenScenes())) {
-      got[name] = await runGoldenScene(name)
-      // WEBSFM_SFM_GOLDEN_ONCE=1 skips the determinism re-run (long real-data scenes).
-      if (MODE === 'write' && !process.env.WEBSFM_SFM_GOLDEN_ONCE) {
-        const again = await runGoldenScene(name)
-        const d = firstDiff(got[name], again)
-        expect(d, `scene ${name} is not deterministic: ${d}`).toBeNull()
+  it(
+    `${MODE} ${FILE}`,
+    async () => {
+      const got = {}
+      for (const name of Object.keys(goldenScenes())) {
+        got[name] = await runGoldenScene(name)
+        // WEBSFM_SFM_GOLDEN_ONCE=1 skips the determinism re-run (long real-data scenes).
+        if (MODE === 'write' && !process.env.WEBSFM_SFM_GOLDEN_ONCE) {
+          const again = await runGoldenScene(name)
+          const d = firstDiff(got[name], again)
+          expect(d, `scene ${name} is not deterministic: ${d}`).toBeNull()
+        }
       }
-    }
-    if (MODE === 'write') {
-      await writeFile(FILE, JSON.stringify(got))
-      return
-    }
-    const want = JSON.parse(await readFile(FILE, 'utf8'))
-    // Round-trip `got` through JSON so both sides have the same number encoding.
-    const norm = JSON.parse(JSON.stringify(got))
-    for (const name of Object.keys(goldenScenes())) {
-      const d = firstDiff(want[name], norm[name], name)
-      expect(d, `scene ${name} changed: ${d}`).toBeNull()
-    }
-  }, 4 * 3600_000) // real-data scenes (WEBSFM_SFM_GOLDEN_INPUTS) can take tens of minutes
+      if (MODE === 'write') {
+        await writeFile(FILE, JSON.stringify(got))
+        return
+      }
+      const want = JSON.parse(await readFile(FILE, 'utf8'))
+      // Round-trip `got` through JSON so both sides have the same number encoding.
+      const norm = JSON.parse(JSON.stringify(got))
+      for (const name of Object.keys(goldenScenes())) {
+        const d = firstDiff(want[name], norm[name], name)
+        expect(d, `scene ${name} changed: ${d}`).toBeNull()
+      }
+    },
+    4 * 3600_000,
+  ) // real-data scenes (WEBSFM_SFM_GOLDEN_INPUTS) can take tens of minutes
 })

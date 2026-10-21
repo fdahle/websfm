@@ -11,7 +11,9 @@ function fakeStore() {
   return {
     pending,
     resident: new Map(),
-    residentKeypoints(img) { return this.resident.get(img.id) ?? null },
+    residentKeypoints(img) {
+      return this.resident.get(img.id) ?? null
+    },
     ensureKeypoints: vi.fn((img) => new Promise((resolve) => pending.push({ id: img.id, resolve }))),
   }
 }
@@ -27,7 +29,8 @@ describe('useImageKeypoints', () => {
     await nextTick()
     expect(store.ensureKeypoints).toHaveBeenCalledTimes(1)
     store.pending[0].resolve(kpSet([2, 6]))
-    await Promise.resolve(); await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(k.keypoints.value.length).toBe(2)
     expect(k.keypointRange.value).toEqual({ minR: 2, range: 4 })
   })
@@ -39,10 +42,12 @@ describe('useImageKeypoints', () => {
     image.id = 'b'
     await nextTick()
     store.pending[0].resolve(kpSet([1])) // image a's set, now stale
-    await Promise.resolve(); await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(k.keypoints.value).toBeNull()
     store.pending[1].resolve(kpSet([1, 2, 3]))
-    await Promise.resolve(); await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(k.keypoints.value.length).toBe(3)
   })
 

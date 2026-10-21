@@ -12,18 +12,18 @@ import { estimatedIntrinsics, estimatedCenter, estimatedAngles } from '../../../
 // Intrinsics/Extrinsics carry an Initial⇄Estimated toggle. Initial = priors
 // (sensor calibration / imported pose); Estimated = bundle-adjusted reconstruction.
 const props = defineProps({
-  images:     { type: Array,  required: true },
-  sensors:    { type: Array,  default: () => [] },
-  poses:      { type: Array,  default: () => [] },
-  cameras:    { type: Map,    default: () => new Map() }, // uuid → { R, t, K }
-  crs:        { type: String, default: null },
+  images: { type: Array, required: true },
+  sensors: { type: Array, default: () => [] },
+  poses: { type: Array, default: () => [] },
+  cameras: { type: Map, default: () => new Map() }, // uuid → { R, t, K }
+  crs: { type: String, default: null },
   selectedId: { type: String, default: null },
 })
 
 const emit = defineEmits(['close', 'select', 'open', 'assign-sensor', 'open-sensor-table'])
 
-const tab = ref('metadata')  // 'metadata' | 'intrinsics' | 'extrinsics'
-const mode = ref('initial')  // 'initial' | 'estimated'
+const tab = ref('metadata') // 'metadata' | 'intrinsics' | 'extrinsics'
+const mode = ref('initial') // 'initial' | 'estimated'
 
 const round = (n, d = 3) => (n == null ? null : Number(n.toFixed(d)))
 const show = (n) => (n == null ? '—' : round(n))
@@ -50,12 +50,34 @@ function intrinsics(img) {
   if (mode.value === 'estimated') {
     const est = estimatedIntrinsics(props.cameras.get(img.uuid))
     return est
-      ? { focal: est.focal, unit: 'px', cx: est.cx, cy: est.cy, k1: null, k2: null, k3: null, p1: null, p2: null, estimated: true }
+      ? {
+          focal: est.focal,
+          unit: 'px',
+          cx: est.cx,
+          cy: est.cy,
+          k1: null,
+          k2: null,
+          k3: null,
+          p1: null,
+          p2: null,
+          estimated: true,
+        }
       : null
   }
   const s = sensorFor(img)
   if (!s) return null
-  return { focal: s.focal, unit: s.focalUnit || 'px', cx: s.cx, cy: s.cy, k1: s.k1, k2: s.k2, k3: s.k3, p1: s.p1, p2: s.p2, estimated: false }
+  return {
+    focal: s.focal,
+    unit: s.focalUnit || 'px',
+    cx: s.cx,
+    cy: s.cy,
+    k1: s.k1,
+    k2: s.k2,
+    k3: s.k3,
+    p1: s.p1,
+    p2: s.p2,
+    estimated: false,
+  }
 }
 
 // ── Extrinsics row ────────────────────────────────────────────────────────────
@@ -79,8 +101,12 @@ function poseStatus(img) {
   return '—'
 }
 
-function onSelect(id)  { emit('select', id) }
-function onOpen(id)    { emit('open', id) }
+function onSelect(id) {
+  emit('select', id)
+}
+function onOpen(id) {
+  emit('open', id)
+}
 
 // ── Header-click sorting (Intrinsics & Extrinsics) ────────────────────────────
 // One accessor covers both tabs (column keys are distinct); values resolve through
@@ -88,24 +114,42 @@ function onOpen(id)    { emit('open', id) }
 // mode. Sort resets when the tab changes so a stale column key never lingers.
 function rowVal(img, key) {
   switch (key) {
-    case 'name':   return img.name?.toLowerCase() ?? ''
-    case 'sensor': return sensorFor(img)?.label?.toLowerCase() ?? ''
-    case 'focal':  return intrinsics(img)?.focal
-    case 'cx':     return intrinsics(img)?.cx
-    case 'cy':     return intrinsics(img)?.cy
-    case 'k1':     return intrinsics(img)?.k1
-    case 'k2':     return intrinsics(img)?.k2
-    case 'k3':     return intrinsics(img)?.k3
-    case 'p1':     return intrinsics(img)?.p1
-    case 'p2':     return intrinsics(img)?.p2
-    case 'x':      return extrinsics(img)?.x
-    case 'y':      return extrinsics(img)?.y
-    case 'z':      return extrinsics(img)?.z
-    case 'omega':  return extrinsics(img)?.omega
-    case 'phi':    return extrinsics(img)?.phi
-    case 'kappa':  return extrinsics(img)?.kappa
-    case 'status': return mode.value === 'estimated' ? (extrinsics(img) ? 'estimated' : '') : poseStatus(img)
-    default:       return null
+    case 'name':
+      return img.name?.toLowerCase() ?? ''
+    case 'sensor':
+      return sensorFor(img)?.label?.toLowerCase() ?? ''
+    case 'focal':
+      return intrinsics(img)?.focal
+    case 'cx':
+      return intrinsics(img)?.cx
+    case 'cy':
+      return intrinsics(img)?.cy
+    case 'k1':
+      return intrinsics(img)?.k1
+    case 'k2':
+      return intrinsics(img)?.k2
+    case 'k3':
+      return intrinsics(img)?.k3
+    case 'p1':
+      return intrinsics(img)?.p1
+    case 'p2':
+      return intrinsics(img)?.p2
+    case 'x':
+      return extrinsics(img)?.x
+    case 'y':
+      return extrinsics(img)?.y
+    case 'z':
+      return extrinsics(img)?.z
+    case 'omega':
+      return extrinsics(img)?.omega
+    case 'phi':
+      return extrinsics(img)?.phi
+    case 'kappa':
+      return extrinsics(img)?.kappa
+    case 'status':
+      return mode.value === 'estimated' ? (extrinsics(img) ? 'estimated' : '') : poseStatus(img)
+    default:
+      return null
   }
 }
 const { toggleSort, sortArrow, resetSort, sorted: sortedImages } = useTableSort(() => props.images, rowVal)
@@ -132,14 +176,22 @@ watch(tab, resetSort)
           :disabled="!anyEstimated"
           :title="anyEstimated ? '' : 'Run a reconstruction to get estimated values'"
           @click="mode = 'estimated'"
-        >Estimated</button>
+        >
+          Estimated
+        </button>
       </div>
       <span v-if="tab === 'intrinsics' && mode === 'initial'" class="hint">
         Inherited from each image's sensor (read-only).
         <button class="link" @click="emit('open-sensor-table')">Edit in Sensor Table →</button>
       </span>
       <span v-else-if="tab === 'extrinsics'" class="hint">
-        {{ mode === 'estimated' ? 'Bundle-adjusted — model space (not georeferenced)' : (crs ? `Positions in ${crs}` : 'Imported priors') }}
+        {{
+          mode === 'estimated'
+            ? 'Bundle-adjusted — model space (not georeferenced)'
+            : crs
+              ? `Positions in ${crs}`
+              : 'Imported priors'
+        }}
       </span>
       <span v-else class="hint">Bundle-adjusted intrinsics (pixels).</span>
     </div>
@@ -159,16 +211,36 @@ watch(tab, resetSort)
         <table v-if="images.length" v-col-resize>
           <thead>
             <tr>
-              <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
-              <th class="sortable" @click="toggleSort('sensor')">Sensor <span class="arrow">{{ sortArrow('sensor') }}</span></th>
-              <th class="sortable" @click="toggleSort('focal')">Focal <span class="arrow">{{ sortArrow('focal') }}</span></th>
-              <th class="sortable" @click="toggleSort('cx')">cx <span class="arrow">{{ sortArrow('cx') }}</span></th>
-              <th class="sortable" @click="toggleSort('cy')">cy <span class="arrow">{{ sortArrow('cy') }}</span></th>
-              <th class="sortable" @click="toggleSort('k1')">k1 <span class="arrow">{{ sortArrow('k1') }}</span></th>
-              <th class="sortable" @click="toggleSort('k2')">k2 <span class="arrow">{{ sortArrow('k2') }}</span></th>
-              <th class="sortable" @click="toggleSort('k3')">k3 <span class="arrow">{{ sortArrow('k3') }}</span></th>
-              <th class="sortable" @click="toggleSort('p1')">p1 <span class="arrow">{{ sortArrow('p1') }}</span></th>
-              <th class="sortable" @click="toggleSort('p2')">p2 <span class="arrow">{{ sortArrow('p2') }}</span></th>
+              <th class="sortable" @click="toggleSort('name')">
+                Name <span class="arrow">{{ sortArrow('name') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('sensor')">
+                Sensor <span class="arrow">{{ sortArrow('sensor') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('focal')">
+                Focal <span class="arrow">{{ sortArrow('focal') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('cx')">
+                cx <span class="arrow">{{ sortArrow('cx') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('cy')">
+                cy <span class="arrow">{{ sortArrow('cy') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('k1')">
+                k1 <span class="arrow">{{ sortArrow('k1') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('k2')">
+                k2 <span class="arrow">{{ sortArrow('k2') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('k3')">
+                k3 <span class="arrow">{{ sortArrow('k3') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('p1')">
+                p1 <span class="arrow">{{ sortArrow('p1') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('p2')">
+                p2 <span class="arrow">{{ sortArrow('p2') }}</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -193,7 +265,9 @@ watch(tab, resetSort)
                 <span v-else class="dim">{{ sensorFor(img)?.label || '—' }}</span>
               </td>
               <template v-if="intrinsics(img)">
-                <td>{{ show(intrinsics(img).focal) }}<span class="unit"> {{ intrinsics(img).unit }}</span></td>
+                <td>
+                  {{ show(intrinsics(img).focal) }}<span class="unit"> {{ intrinsics(img).unit }}</span>
+                </td>
                 <td>{{ show(intrinsics(img).cx) }}</td>
                 <td>{{ show(intrinsics(img).cy) }}</td>
                 <td :class="{ dim: intrinsics(img).k1 == null }">{{ show(intrinsics(img).k1) }}</td>
@@ -216,14 +290,30 @@ watch(tab, resetSort)
         <table v-if="images.length" v-col-resize>
           <thead>
             <tr>
-              <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
-              <th class="sortable" @click="toggleSort('x')">X <span class="arrow">{{ sortArrow('x') }}</span></th>
-              <th class="sortable" @click="toggleSort('y')">Y <span class="arrow">{{ sortArrow('y') }}</span></th>
-              <th class="sortable" @click="toggleSort('z')">Z <span class="arrow">{{ sortArrow('z') }}</span></th>
-              <th class="sortable" @click="toggleSort('omega')">ω <span class="arrow">{{ sortArrow('omega') }}</span></th>
-              <th class="sortable" @click="toggleSort('phi')">φ <span class="arrow">{{ sortArrow('phi') }}</span></th>
-              <th class="sortable" @click="toggleSort('kappa')">κ <span class="arrow">{{ sortArrow('kappa') }}</span></th>
-              <th class="sortable" @click="toggleSort('status')">Status <span class="arrow">{{ sortArrow('status') }}</span></th>
+              <th class="sortable" @click="toggleSort('name')">
+                Name <span class="arrow">{{ sortArrow('name') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('x')">
+                X <span class="arrow">{{ sortArrow('x') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('y')">
+                Y <span class="arrow">{{ sortArrow('y') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('z')">
+                Z <span class="arrow">{{ sortArrow('z') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('omega')">
+                ω <span class="arrow">{{ sortArrow('omega') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('phi')">
+                φ <span class="arrow">{{ sortArrow('phi') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('kappa')">
+                κ <span class="arrow">{{ sortArrow('kappa') }}</span>
+              </th>
+              <th class="sortable" @click="toggleSort('status')">
+                Status <span class="arrow">{{ sortArrow('status') }}</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -257,57 +347,171 @@ watch(tab, resetSort)
 </template>
 
 <style scoped>
-
 /* The tabs are taller than a title line; the negative margin keeps the header as
    slim as it was before the shell's 13px padding (the tabs had 8px). */
-.tabs { display: flex; gap: 2px; margin: -5px 0; }
-.tab {
-  background: none; border: none; color: var(--text-dim);
-  font: inherit; font-size: 13px; padding: 7px 14px; cursor: pointer; border-radius: 5px;
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: -5px 0;
 }
-.tab:hover { background: var(--hover-bg); color: var(--text); }
-.tab.active { background: var(--bg); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.tab {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  cursor: pointer;
+  border-radius: 5px;
+}
+.tab:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+.tab.active {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 
 .subbar {
-  display: flex; align-items: center; gap: 14px;
-  padding: 8px 16px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
 }
-.seg { display: inline-flex; border: 1px solid var(--panel-border); border-radius: 5px; overflow: hidden; }
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  overflow: hidden;
+}
 .seg-btn {
-  background: var(--bg); border: none; color: var(--text-dim);
-  font: inherit; font-size: 12px; padding: 4px 12px; cursor: pointer;
+  background: var(--bg);
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
 }
-.seg-btn + .seg-btn { border-left: 1px solid var(--panel-border); }
-.seg-btn.active { background: var(--accent); color: #fff; }
-.seg-btn:disabled { opacity: 0.4; cursor: default; }
-.hint { font-size: 11px; color: var(--text-dim); }
-.link { background: none; border: none; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; padding: 0; }
-.link:hover { text-decoration: underline; }
+.seg-btn + .seg-btn {
+  border-left: 1px solid var(--panel-border);
+}
+.seg-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.seg-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+.link:hover {
+  text-decoration: underline;
+}
 
-.table-area { flex: 1; overflow: auto; min-height: 0; position: relative; }
+.table-area {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  position: relative;
+}
 
-.table-wrap { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
 thead th {
-  position: sticky; top: 0; background: var(--panel); text-align: left; padding: 10px 12px;
-  font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--panel-border); white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--panel-border);
+  white-space: nowrap;
 }
-thead th.sortable { cursor: pointer; user-select: none; }
-thead th.sortable:hover { color: var(--text); }
-.arrow { font-size: 9px; color: var(--accent); }
-tbody td { padding: 8px 12px; border-bottom: 1px solid var(--panel-border); white-space: nowrap; color: var(--text); font-variant-numeric: tabular-nums; }
-tbody tr { cursor: pointer; }
-tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
-tbody tr.selected { background: rgba(14, 99, 156, 0.25); }
-.name-cell { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
-.dim { color: var(--text-dim); }
-.unit { color: var(--text-dim); font-size: 11px; }
+thead th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+thead th.sortable:hover {
+  color: var(--text);
+}
+.arrow {
+  font-size: 9px;
+  color: var(--accent);
+}
+tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  white-space: nowrap;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+tbody tr {
+  cursor: pointer;
+}
+tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+tbody tr.selected {
+  background: rgba(14, 99, 156, 0.25);
+}
+.name-cell {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dim {
+  color: var(--text-dim);
+}
+.unit {
+  color: var(--text-dim);
+  font-size: 11px;
+}
 
 .sensor-select {
-  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
-  color: var(--text); font: inherit; font-size: 12px; padding: 3px 6px; outline: none; max-width: 160px;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  outline: none;
+  max-width: 160px;
 }
-.sensor-select:focus { border-color: var(--accent); }
+.sensor-select:focus {
+  border-color: var(--accent);
+}
 
-.empty { padding: 40px; text-align: center; color: var(--text-dim); }
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-dim);
+}
 </style>

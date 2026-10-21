@@ -27,7 +27,8 @@ export function filterStationaryMatches(kpsA, kpsB, matches, { tolPx }) {
   const t2 = tolPx * tolPx
   const kept = []
   for (const m of matches) {
-    const dx = kpsA.x(m.ia) - kpsB.x(m.ib), dy = kpsA.y(m.ia) - kpsB.y(m.ib)
+    const dx = kpsA.x(m.ia) - kpsB.x(m.ib),
+      dy = kpsA.y(m.ia) - kpsB.y(m.ib)
     if (dx * dx + dy * dy > t2) kept.push(m)
   }
   return { matches: kept, dropped: matches.length - kept.length }

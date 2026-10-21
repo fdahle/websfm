@@ -70,12 +70,19 @@ export function resolveRasterStyle(style, meta = {}) {
   // than emit three copies of band 0 and call it colour.
   if (s.mode === 'rgb' && nb < 3) s.mode = 'gray'
   if (s.mode === 'index' && nb < 2) s.mode = 'gray'
-  s.band = fix(s.band); s.bandR = fix(s.bandR); s.bandG = fix(s.bandG); s.bandB = fix(s.bandB)
-  s.bandA = fix(s.bandA ?? 0); s.bandB2 = fix(s.bandB2 ?? Math.min(1, nb - 1))
+  s.band = fix(s.band)
+  s.bandR = fix(s.bandR)
+  s.bandG = fix(s.bandG)
+  s.bandB = fix(s.bandB)
+  s.bandA = fix(s.bandA ?? 0)
+  s.bandB2 = fix(s.bandB2 ?? Math.min(1, nb - 1))
   s.gamma = Number.isFinite(s.gamma) && s.gamma > 0 ? s.gamma : 1
   s.loPct = Number.isFinite(s.loPct) ? clamp(s.loPct, 0, 100) : def.loPct
   s.hiPct = Number.isFinite(s.hiPct) ? clamp(s.hiPct, 0, 100) : def.hiPct
-  if (s.hiPct <= s.loPct) { s.loPct = def.loPct; s.hiPct = def.hiPct }
+  if (s.hiPct <= s.loPct) {
+    s.loPct = def.loPct
+    s.hiPct = def.hiPct
+  }
   if (!INDEX_PRESETS[s.index]) s.index = 'ndvi'
   return s
 }
@@ -93,15 +100,19 @@ export function bandsUsedBy(style) {
 // Nearest-rank percentile over a value list. Copies before sorting — the caller's
 // decimated sample is reused for the classifier and must not be reordered.
 export function percentileRange(values, loPct = 2, hiPct = 98) {
-  const v = Array.from(values || []).filter(Number.isFinite).sort((a, b) => a - b)
+  const v = Array.from(values || [])
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
   if (!v.length) return null
   const at = (p) => v[clamp(Math.round((p / 100) * (v.length - 1)), 0, v.length - 1)]
-  const lo = at(loPct), hi = at(hiPct)
+  const lo = at(loPct),
+    hi = at(hiPct)
   return hi > lo ? [lo, hi] : minMaxRange(v)
 }
 
 export function minMaxRange(values) {
-  let lo = Infinity, hi = -Infinity
+  let lo = Infinity,
+    hi = -Infinity
   for (const v of values || []) {
     if (!Number.isFinite(v)) continue
     if (v < lo) lo = v
@@ -116,9 +127,13 @@ export function minMaxRange(values) {
 // Resolve the display range for ONE channel from its sample values.
 // `manualRange` (when the style is manual) wins outright.
 export function resolveRange(values, style, manualRange = null) {
-  if (style?.stretch === 'manual' && manualRange
-      && Number.isFinite(manualRange[0]) && Number.isFinite(manualRange[1])
-      && manualRange[1] > manualRange[0]) {
+  if (
+    style?.stretch === 'manual' &&
+    manualRange &&
+    Number.isFinite(manualRange[0]) &&
+    Number.isFinite(manualRange[1]) &&
+    manualRange[1] > manualRange[0]
+  ) {
     return [manualRange[0], manualRange[1]]
   }
   if (style?.stretch === 'minmax') return minMaxRange(values)
@@ -157,14 +172,18 @@ export function composeStyledRgba({ width, height, style, channels, ranges = [],
     const [A, B] = channels
     const ramp = rampByName(s.ramp)
     for (let i = 0; i < n; i++) {
-      const a = A[i], b = B[i]
+      const a = A[i],
+        b = B[i]
       if (isNodata(a) || isNodata(b)) continue
       const nd = normalizedDifference(a, b)
       if (!Number.isFinite(nd)) continue
       // [-1,1] → [0,1] for the ramp; gamma still applies as a display curve.
       const t = gamma === 1 ? (nd + 1) / 2 : Math.pow(clamp((nd + 1) / 2, 0, 1), 1 / gamma)
       const [r, g, bl] = ramp(t)
-      out[i * 4] = r; out[i * 4 + 1] = g; out[i * 4 + 2] = bl; out[i * 4 + 3] = 255
+      out[i * 4] = r
+      out[i * 4 + 1] = g
+      out[i * 4 + 2] = bl
+      out[i * 4 + 3] = 255
     }
     return out
   }
@@ -172,7 +191,9 @@ export function composeStyledRgba({ width, height, style, channels, ranges = [],
   if (s.mode === 'rgb') {
     const [R, G, B] = channels
     for (let i = 0; i < n; i++) {
-      const r = R[i], g = G[i], b = B[i]
+      const r = R[i],
+        g = G[i],
+        b = B[i]
       if (isNodata(r) || isNodata(g) || isNodata(b)) continue
       out[i * 4] = stretchTo255(r, ranges[0], gamma)
       out[i * 4 + 1] = stretchTo255(g, ranges[1], gamma)
@@ -187,7 +208,10 @@ export function composeStyledRgba({ width, height, style, channels, ranges = [],
     const v = V[i]
     if (isNodata(v)) continue
     const g = stretchTo255(v, ranges[0], gamma)
-    out[i * 4] = g; out[i * 4 + 1] = g; out[i * 4 + 2] = g; out[i * 4 + 3] = 255
+    out[i * 4] = g
+    out[i * 4 + 1] = g
+    out[i * 4 + 2] = g
+    out[i * 4 + 3] = 255
   }
   return out
 }
@@ -202,10 +226,11 @@ export function styleStamp(style) {
   if (!style) return 'none'
   const s = style
   const parts = [
-    s.mode, s.stretch, s.gamma, s.ramp,
-    s.mode === 'rgb' ? [s.bandR, s.bandG, s.bandB]
-      : s.mode === 'index' ? [s.index, s.bandA, s.bandB2]
-        : [s.band],
+    s.mode,
+    s.stretch,
+    s.gamma,
+    s.ramp,
+    s.mode === 'rgb' ? [s.bandR, s.bandG, s.bandB] : s.mode === 'index' ? [s.index, s.bandA, s.bandB2] : [s.band],
     s.stretch === 'manual' ? JSON.stringify(s.manual ?? null) : [s.loPct, s.hiPct],
   ]
   return parts.flat().join('|')
@@ -214,12 +239,13 @@ export function styleStamp(style) {
 // One-line human summary of a style, for the log + the sidebar row.
 export function describeStyle(style) {
   const s = style || {}
-  const stretch = s.stretch === 'manual'
-    ? 'manual'
-    : s.stretch === 'minmax' ? 'min–max' : `${s.loPct ?? 2}–${s.hiPct ?? 98}%`
+  const stretch =
+    s.stretch === 'manual' ? 'manual' : s.stretch === 'minmax' ? 'min–max' : `${s.loPct ?? 2}–${s.hiPct ?? 98}%`
   if (s.mode === 'index') {
-    return `${(INDEX_PRESETS[s.index]?.label || s.index || 'index').split(' —')[0]}`
-      + ` (bands ${(s.bandA ?? 0) + 1}, ${(s.bandB2 ?? 1) + 1}), ${s.ramp || 'rdylgn'}`
+    return (
+      `${(INDEX_PRESETS[s.index]?.label || s.index || 'index').split(' —')[0]}` +
+      ` (bands ${(s.bandA ?? 0) + 1}, ${(s.bandB2 ?? 1) + 1}), ${s.ramp || 'rdylgn'}`
+    )
   }
   if (s.mode === 'rgb') {
     return `RGB ← bands ${(s.bandR ?? 0) + 1}, ${(s.bandG ?? 1) + 1}, ${(s.bandB ?? 2) + 1}, ${stretch}`

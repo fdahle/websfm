@@ -11,22 +11,33 @@ export function slotsForPositions(positions = 'corners') {
 }
 
 export function slotUnitPoint(slot) {
-  return {
-    'corner-tl': { x: 0, y: 0 }, 'corner-tr': { x: 1, y: 0 },
-    'corner-br': { x: 1, y: 1 }, 'corner-bl': { x: 0, y: 1 },
-    'side-top': { x: 0.5, y: 0 }, 'side-right': { x: 1, y: 0.5 },
-    'side-bottom': { x: 0.5, y: 1 }, 'side-left': { x: 0, y: 0.5 },
-  }[slot] ?? null
+  return (
+    {
+      'corner-tl': { x: 0, y: 0 },
+      'corner-tr': { x: 1, y: 0 },
+      'corner-br': { x: 1, y: 1 },
+      'corner-bl': { x: 0, y: 1 },
+      'side-top': { x: 0.5, y: 0 },
+      'side-right': { x: 1, y: 0.5 },
+      'side-bottom': { x: 0.5, y: 1 },
+      'side-left': { x: 0, y: 0.5 },
+    }[slot] ?? null
+  )
 }
 
 export function classifyDetectionSlot(px, py, width, height, allowed = [...CORNER_SLOTS, ...SIDE_SLOTS]) {
   if (!(width > 0) || !(height > 0)) return null
-  const x = px / width, y = py / height
-  let best = null, dist = Infinity
+  const x = px / width,
+    y = py / height
+  let best = null,
+    dist = Infinity
   for (const slot of allowed) {
     const p = slotUnitPoint(slot)
     const d = Math.hypot(x - p.x, y - p.y)
-    if (d < dist) { dist = d; best = slot }
+    if (d < dist) {
+      dist = d
+      best = slot
+    }
   }
   return best
 }
@@ -38,8 +49,17 @@ export function classifyDetectionSlot(px, py, width, height, allowed = [...CORNE
 // fiducials all edit the values reconstruction reads.
 export function emptyFiducialCalibration(focalMm = 0) {
   return {
-    version: 1, method: 'certificate', transform: 'affine', allowReflection: false,
-    slotMap: {}, marks: [], focalMm, ppxMm: 0, ppyMm: 0, scanPitchMm: null, fit: null,
+    version: 1,
+    method: 'certificate',
+    transform: 'affine',
+    allowReflection: false,
+    slotMap: {},
+    marks: [],
+    focalMm,
+    ppxMm: 0,
+    ppyMm: 0,
+    scanPitchMm: null,
+    fit: null,
   }
 }
 
@@ -54,7 +74,8 @@ export function calibratedFiducialPairs(image, sensor) {
   if (!cal?.marks?.length || !cal.slotMap) return []
   const byId = new Map(cal.marks.map((m) => [m.id, m]))
   return (image?.fiducialDetections || []).flatMap((d) => {
-    const fidId = cal.slotMap[d.slot], m = byId.get(fidId)
+    const fidId = cal.slotMap[d.slot],
+      m = byId.get(fidId)
     return m ? [{ slot: d.slot, fidId, px: d.px, py: d.py, xMm: m.xMm, yMm: m.yMm }] : []
   })
 }
@@ -72,7 +93,12 @@ export function observationsToDetections(obs, width, height, { family = 'generic
     const named = isSlotId(o.fidId)
     return {
       slot: named ? o.fidId : (classifyDetectionSlot(o.px, o.py, width, height, allowed) ?? `custom-${o.fidId}`),
-      px: o.px, py: o.py, family, source, confidence: 1, reviewed: true,
+      px: o.px,
+      py: o.py,
+      family,
+      source,
+      confidence: 1,
+      reviewed: true,
       ...(named ? {} : { markId: o.fidId }),
     }
   })

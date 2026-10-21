@@ -3,9 +3,14 @@ import { buildVerdict } from './verdict.js'
 
 // A healthy run (all thresholds cleared) as the baseline to perturb.
 const healthy = () => ({
-  imageCount: 50, registeredCount: 49, nPoints: 20000,
-  reprojMedianPx: 0.6, reprojP95px: 1.4, track3ViewPct: 55,
-  graphComponents: 1, focalDeltaPct: 1,
+  imageCount: 50,
+  registeredCount: 49,
+  nPoints: 20000,
+  reprojMedianPx: 0.6,
+  reprojP95px: 1.4,
+  track3ViewPct: 55,
+  graphComponents: 1,
+  focalDeltaPct: 1,
 })
 
 const codes = (v) => v.findings.map((f) => f.code)
@@ -26,8 +31,17 @@ describe('buildVerdict', () => {
 
   it('flags low registration and lists a few unregistered names', () => {
     const v = buildVerdict({
-      ...healthy(), imageCount: 50, registeredCount: 17,
-      unregistered: [{ name: 'a.jpg' }, { name: 'b.jpg' }, { name: 'c.jpg' }, { name: 'd.jpg' }, { name: 'e.jpg' }, { name: 'f.jpg' }],
+      ...healthy(),
+      imageCount: 50,
+      registeredCount: 17,
+      unregistered: [
+        { name: 'a.jpg' },
+        { name: 'b.jpg' },
+        { name: 'c.jpg' },
+        { name: 'd.jpg' },
+        { name: 'e.jpg' },
+        { name: 'f.jpg' },
+      ],
     })
     expect(v.level).toBe('red') // 34% < bad(70)
     const reg = v.findings.find((f) => f.code === 'registration')
@@ -83,22 +97,29 @@ describe('buildVerdict', () => {
     const v = buildVerdict({ ...healthy(), focalDeltaPct: 20 })
     expect(v.findings.find((f) => f.code === 'focal').title).toMatch(/20%/)
     // 7.4% (SB fingerprint) is a warn, still surfaced as yellow.
-    expect(buildVerdict({ ...healthy(), focalDeltaPct: 7.4 }).findings.find((f) => f.code === 'focal').level).toBe('yellow')
+    expect(buildVerdict({ ...healthy(), focalDeltaPct: 7.4 }).findings.find((f) => f.code === 'focal').level).toBe(
+      'yellow',
+    )
   })
 
   it('flags thin dense depth coverage (and stays silent when absent)', () => {
     // Absent (sparse-only run) → no finding, still green.
     expect(codes(buildVerdict(healthy()))).not.toContain('depth-coverage')
     // < warn(50) → yellow; < bad(25) → red.
-    expect(buildVerdict({ ...healthy(), depthCoveragePct: 40 }).findings.find((f) => f.code === 'depth-coverage').level).toBe('yellow')
-    expect(buildVerdict({ ...healthy(), depthCoveragePct: 15 }).findings.find((f) => f.code === 'depth-coverage').level).toBe('red')
+    expect(
+      buildVerdict({ ...healthy(), depthCoveragePct: 40 }).findings.find((f) => f.code === 'depth-coverage').level,
+    ).toBe('yellow')
+    expect(
+      buildVerdict({ ...healthy(), depthCoveragePct: 15 }).findings.find((f) => f.code === 'depth-coverage').level,
+    ).toBe('red')
   })
 
   it('orders findings worst-first and reports the overall level', () => {
     const v = buildVerdict({
-      ...healthy(), registeredCount: 17, // red
-      graphComponents: 2,                // yellow
-      track3ViewPct: 10,                 // yellow
+      ...healthy(),
+      registeredCount: 17, // red
+      graphComponents: 2, // yellow
+      track3ViewPct: 10, // yellow
     })
     expect(v.level).toBe('red')
     expect(v.findings[0].level).toBe('red')
@@ -119,8 +140,11 @@ describe('buildVerdict', () => {
   // leaves the track filter inert is still a good reconstruction. The unconditional
   // record is the digest's job; these only explain a finding that already fired.
   const contributing = () => ({
-    filterMaxReprojPx: 9.12, detectScaleFactor: 2.28, maxDim: 2400,
-    kpCapHitPct: 100, maxKeypoints: 10000,
+    filterMaxReprojPx: 9.12,
+    detectScaleFactor: 2.28,
+    maxDim: 2400,
+    kpCapHitPct: 100,
+    maxKeypoints: 10000,
   })
   // The 4.7× tail of the 2026-08-18 DJI run. selfCalResolved is what makes it code as
   // 'reprojection-tail' rather than 'distortion' — self-cal had already run.
@@ -136,19 +160,23 @@ describe('buildVerdict', () => {
   // tail, under a 9.12 px track filter that therefore removed nothing.
   it('explains a residual tail that the track filter never bit on', () => {
     const v = buildVerdict({
-      ...healthy(), ...tail(), ...contributing(),
+      ...healthy(),
+      ...tail(),
+      ...contributing(),
     })
     expect(codes(v)).toContain('reprojection-tail')
     const g = v.findings.find((f) => f.code === 'gate-headroom')
     expect(g.title).toMatch(/2\.3× above the observed p95/)
-    expect(g.fix).toMatch(/maxDim 2400/)      // names the actual cause of the ×2.28
+    expect(g.fix).toMatch(/maxDim 2400/) // names the actual cause of the ×2.28
     expect(g.fix).toMatch(/×2\.28/)
   })
 
   it('gate-headroom is silent when the gate is tight, tail or not', () => {
     const v = buildVerdict({
-      ...healthy(), ...tail(),
-      ...contributing(), filterMaxReprojPx: 4.5, // 1.1× headroom
+      ...healthy(),
+      ...tail(),
+      ...contributing(),
+      filterMaxReprojPx: 4.5, // 1.1× headroom
     })
     expect(codes(v)).toContain('reprojection-tail')
     expect(codes(v)).not.toContain('gate-headroom')
@@ -156,20 +184,27 @@ describe('buildVerdict', () => {
 
   it('omits the scale note when detection ran near native resolution', () => {
     const v = buildVerdict({
-      ...healthy(), ...tail(),
-      ...contributing(), detectScaleFactor: 1.05,
+      ...healthy(),
+      ...tail(),
+      ...contributing(),
+      detectScaleFactor: 1.05,
     })
     expect(v.findings.find((f) => f.code === 'gate-headroom').fix).not.toMatch(/maxDim/)
   })
 
   it('flags a saturated keypoint cap only alongside a structural finding', () => {
     const v = buildVerdict({
-      ...healthy(), ...tail(), ...contributing(),
+      ...healthy(),
+      ...tail(),
+      ...contributing(),
     })
     expect(v.findings.find((f) => f.code === 'keypoint-cap').title).toMatch(/100%.*10000 keypoint cap/)
     // 50% saturation is not the cap doing the selecting → silent.
     const v2 = buildVerdict({
-      ...healthy(), ...tail(), ...contributing(), kpCapHitPct: 50,
+      ...healthy(),
+      ...tail(),
+      ...contributing(),
+      kpCapHitPct: 50,
     })
     expect(codes(v2)).not.toContain('keypoint-cap')
   })

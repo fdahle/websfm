@@ -21,8 +21,11 @@
 
 import { createSession, tensor, resolveBackend } from './ort.js'
 import {
-  estimateHomographyRansac, planGuidedTiles, kptIndicesInRect,
-  dedupeGuidedMatches, marginFromResiduals,
+  estimateHomographyRansac,
+  planGuidedTiles,
+  kptIndicesInRect,
+  dedupeGuidedMatches,
+  marginFromResiduals,
 } from './guidedTiles.js'
 import { sliceDescriptorRows } from './subsetGate.js'
 import { modelUrl } from '../models/registry.js'
@@ -47,7 +50,10 @@ const pinnedWasm = new Set()
 let runChain = Promise.resolve()
 function serialized(fn) {
   const p = runChain.then(fn, fn)
-  runChain = p.then(() => {}, () => {})
+  runChain = p.then(
+    () => {},
+    () => {},
+  )
   return p
 }
 
@@ -84,16 +90,23 @@ async function chooseBackend(modelKey, preferGpu) {
 function getSession(model, modelKey, backend, onLog) {
   const key = `${modelKey}:${backend}`
   if (!sessions.has(key)) {
-    sessions.set(key, (async () => {
-      onLog?.(`LightGlue: first run — backend ${backend}`
-        + `${backend === 'webgpu'
-          ? ' (experimental GPU path; auto-falls back to CPU on failure)'
-          : ' (CPU WASM)'}; loading model…`)
-      const bytes = await loadModelBytes(model, onLog, 'LightGlue')
-      const session = await createSession(bytes, {}, onLog, backend)
-      onLog?.(`LightGlue: runtime ready — weights ${modelKey} (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`)
-      return session
-    })())
+    sessions.set(
+      key,
+      (async () => {
+        onLog?.(
+          `LightGlue: first run — backend ${backend}` +
+            `${
+              backend === 'webgpu' ? ' (experimental GPU path; auto-falls back to CPU on failure)' : ' (CPU WASM)'
+            }; loading model…`,
+        )
+        const bytes = await loadModelBytes(model, onLog, 'LightGlue')
+        const session = await createSession(bytes, {}, onLog, backend)
+        onLog?.(
+          `LightGlue: runtime ready — weights ${modelKey} (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`,
+        )
+        return session
+      })(),
+    )
   }
   return sessions.get(key)
 }
@@ -130,10 +143,12 @@ function num(data, i) {
 function normalizeKpts(kps, w, h, { n = kps.length, idx = null } = {}) {
   const m = idx ? idx.length : n
   const out = new Float32Array(m * 2)
-  const cx = w / 2, cy = h / 2, s = Math.max(w, h) / 2 || 1
+  const cx = w / 2,
+    cy = h / 2,
+    s = Math.max(w, h) / 2 || 1
   for (let i = 0; i < m; i++) {
     const k = idx ? idx[i] : i
-    out[i * 2]     = (kps.x(k) - cx) / s
+    out[i * 2] = (kps.x(k) - cx) / s
     out[i * 2 + 1] = (kps.y(k) - cy) / s
   }
   return out
@@ -189,17 +204,23 @@ async function runPair(session, backend, feedsSpec, { minConf = 0, first = false
     desc0: await tensor('float32', descsA, [1, nA, dim]),
     desc1: await tensor('float32', descsB, [1, nB, dim]),
   }
-  const watchdog = (first && backend === 'webgpu') ? setInterval(() => {
-    onLog?.(`LightGlue: still matching ${nA}×${nB} on ${backend}… if this drags for minutes, `
-      + 'the GPU warm-up will time out and fall back to CPU')
-  }, 15000) : null
+  const watchdog =
+    first && backend === 'webgpu'
+      ? setInterval(() => {
+          onLog?.(
+            `LightGlue: still matching ${nA}×${nB} on ${backend}… if this drags for minutes, ` +
+              'the GPU warm-up will time out and fall back to CPU',
+          )
+        }, 15000)
+      : null
   let out
   try {
     // Guard only the first WebGPU run with a timeout — that's where a bad JSEP
     // graph would hang; steady-state runs on a proven session run unguarded.
-    out = (backend === 'webgpu' && first)
-      ? await withTimeout(session.run(feeds), GPU_WARMUP_TIMEOUT_MS, 'LightGlue WebGPU warm-up')
-      : await session.run(feeds)
+    out =
+      backend === 'webgpu' && first
+        ? await withTimeout(session.run(feeds), GPU_WARMUP_TIMEOUT_MS, 'LightGlue WebGPU warm-up')
+        : await session.run(feeds)
   } finally {
     if (watchdog) clearInterval(watchdog)
   }
@@ -222,7 +243,9 @@ async function openRun(modelKey, model, useGpu, minConf, onLog) {
       if (backend !== 'webgpu') throw err
       // GPU path failed (hang→timeout, unsupported op, device lost). Disprove it
       // for this model, drop the bad session, and re-run this feed on CPU WASM.
-      onLog?.(`LightGlue: WebGPU path failed (${err?.message || err}) — falling back to CPU WASM for the rest of this run`)
+      onLog?.(
+        `LightGlue: WebGPU path failed (${err?.message || err}) — falling back to CPU WASM for the rest of this run`,
+      )
       pinnedWasm.add(modelKey)
       sessions.delete(`${modelKey}:webgpu`)
       backend = 'wasm'
@@ -248,7 +271,9 @@ function prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints) {
       kptsB: normalizeKpts(kpsB, wB, hB, { n: nB }),
       descsA: descA.subarray(0, nA * dim),
       descsB: descB.subarray(0, nB * dim),
-      nA, nB, dim,
+      nA,
+      nB,
+      dim,
     },
     capped: nA < kpsA.length || nB < kpsB.length,
   }
@@ -274,10 +299,7 @@ function prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints) {
  *          ia indexes kpsA, ib indexes kpsB (same convention as the brute-force path)
  */
 export async function matchLightGlue(args) {
-  const {
-    kpsA, descA, wA, hA, kpsB, descB, wB, hB, minConf = 0, maxKeypoints = 2048,
-    useGpu = false, onLog,
-  } = args
+  const { kpsA, descA, wA, hA, kpsB, descB, wB, hB, minConf = 0, maxKeypoints = 2048, useGpu = false, onLog } = args
   const { model, modelKey } = resolveModel(args)
   const { spec, capped } = prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints)
 
@@ -292,16 +314,20 @@ export async function matchLightGlue(args) {
     const first = !warmedUp.has(modelKey)
     if (first) {
       warmedUp.add(modelKey)
-      onLog?.(`LightGlue: first match ${spec.nA}×${spec.nB} keypoints`
-        + `${capped ? ` (capped from ${kpsA.length}×${kpsB.length}, strongest kept)` : ''}`
-        + ` — one-time graph warm-up${warmupHint(getBackend())}`)
+      onLog?.(
+        `LightGlue: first match ${spec.nA}×${spec.nB} keypoints` +
+          `${capped ? ` (capped from ${kpsA.length}×${kpsB.length}, strongest kept)` : ''}` +
+          ` — one-time graph warm-up${warmupHint(getBackend())}`,
+      )
     }
     const tRun = performance.now()
     const { matches, dims, sName, backend } = await run(spec, { first })
     const ms = Math.round(performance.now() - tRun)
     if (first) {
-      onLog?.(`LightGlue: first match ${spec.nA}×${spec.nB} kpts → ${matches.length} correspondences in `
-        + `${ms} ms on ${backend} (matches0 dims [${dims}]${sName ? '' : ', no score output'})`)
+      onLog?.(
+        `LightGlue: first match ${spec.nA}×${spec.nB} kpts → ${matches.length} correspondences in ` +
+          `${ms} ms on ${backend} (matches0 dims [${dims}]${sName ? '' : ', no score output'})`,
+      )
     }
     // Per-pair timing at 'debug' for EVERY pair — a slow-but-alive run is then
     // distinguishable from a hang in the console.
@@ -341,8 +367,16 @@ export async function matchLightGlue(args) {
  */
 export async function matchLightGlueTiled(args) {
   const {
-    kpsA, descA, wA, hA, kpsB, descB, wB, hB, minConf = 0,
-    maxKeypoints = 2048,       // cap for the plain fallback path
+    kpsA,
+    descA,
+    wA,
+    hA,
+    kpsB,
+    descB,
+    wB,
+    hB,
+    minConf = 0,
+    maxKeypoints = 2048, // cap for the plain fallback path
     coarseKeypoints = 1024,
     coarseGateMin = 8,
     tileBudget = 2048,
@@ -351,7 +385,8 @@ export async function matchLightGlueTiled(args) {
     guideMinInlierRatio = 0.15,
     guideRelThresh = 0.001,
     tileMinKps = 32,
-    useGpu = false, onLog,
+    useGpu = false,
+    onLog,
   } = args
   const { model, modelKey } = resolveModel(args)
   const dim = kpsA.length ? descA.length / kpsA.length : 256
@@ -365,7 +400,11 @@ export async function matchLightGlueTiled(args) {
     // Consume the one-time warm-up flag on the first sub-run of this invocation.
     let first = !warmedUp.has(modelKey)
     if (first) warmedUp.add(modelKey)
-    const consumeFirst = () => { const f = first; first = false; return f }
+    const consumeFirst = () => {
+      const f = first
+      first = false
+      return f
+    }
 
     // Plain prefix run through the already-open session (fallback + coarse pass).
     const runPrefix = async (cap) => {
@@ -378,8 +417,7 @@ export async function matchLightGlueTiled(args) {
     const nCoarseA = Math.min(kpsA.length, coarseKeypoints)
     const nCoarseB = Math.min(kpsB.length, coarseKeypoints)
     if (first) {
-      onLog?.(`LightGlue tiled: first match — one-time graph warm-up on the coarse pass`
-        + warmupHint(getBackend()))
+      onLog?.(`LightGlue tiled: first match — one-time graph warm-up on the coarse pass` + warmupHint(getBackend()))
     }
     const coarse = (await runPrefix(coarseKeypoints)).filter((m) => m.score >= minConf)
 
@@ -392,14 +430,20 @@ export async function matchLightGlueTiled(args) {
     //  - a moderate count ⇒ real overlap the coarse subset undersampled; that one
     //    earns the plain fallback.
     if (coarse.length < coarseGateMin) {
-      onLog?.(`LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches `
-        + `(< ${coarseGateMin}): no convincing overlap; skipping the full match`, 'info')
+      onLog?.(
+        `LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches ` +
+          `(< ${coarseGateMin}): no convincing overlap; skipping the full match`,
+        'info',
+      )
       return { matches: coarse }
     }
     if (coarse.length < guideMinMatches) {
-      onLog?.(`LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches; `
-        + `too few to guide tiles (need ≥${guideMinMatches}) — retrying unguided with the strongest `
-        + `${maxKeypoints} keypoints`, 'info')
+      onLog?.(
+        `LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches; ` +
+          `too few to guide tiles (need ≥${guideMinMatches}) — retrying unguided with the strongest ` +
+          `${maxKeypoints} keypoints`,
+        'info',
+      )
       return { matches: await runPrefix(maxKeypoints) }
     }
 
@@ -409,28 +453,31 @@ export async function matchLightGlueTiled(args) {
     // terrain relief would reject nearly every real aerial pair.
     const ptsA = coarse.map((m) => [kpsA.x(m.ia), kpsA.y(m.ia)])
     const ptsB = coarse.map((m) => [kpsB.x(m.ib), kpsB.y(m.ib)])
-    const guideThreshPx = Math.max(3, Math.ceil(
-      Math.hypot(Math.max(wA, wB), Math.max(hA, hB)) * guideRelThresh))
+    const guideThreshPx = Math.max(3, Math.ceil(Math.hypot(Math.max(wA, wB), Math.max(hA, hB)) * guideRelThresh))
     const fit = estimateHomographyRansac(ptsA, ptsB, { threshPx: guideThreshPx, iters: 500 })
     const ratio = fit ? fit.inlierCount / coarse.length : 0
     if (!fit || fit.inlierCount < guideMinInliers || ratio < guideMinInlierRatio) {
-      onLog?.(`LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches; `
-        + `H ${fit ? `${fit.inlierCount} inliers (ratio ${ratio.toFixed(2)})` : 'not estimable'} @ ${guideThreshPx}px — `
-        + `tile guide rejected (requires both ≥${guideMinInliers} inliers and ratio ≥${guideMinInlierRatio}); `
-        + `retrying unguided with the strongest ${maxKeypoints} keypoints`, 'info')
+      onLog?.(
+        `LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches; ` +
+          `H ${fit ? `${fit.inlierCount} inliers (ratio ${ratio.toFixed(2)})` : 'not estimable'} @ ${guideThreshPx}px — ` +
+          `tile guide rejected (requires both ≥${guideMinInliers} inliers and ratio ≥${guideMinInlierRatio}); ` +
+          `retrying unguided with the strongest ${maxKeypoints} keypoints`,
+        'info',
+      )
       return { matches: await runPrefix(maxKeypoints) }
     }
-    onLog?.(`LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches; `
-      + `${fit.inlierCount} H-inliers (ratio ${ratio.toFixed(2)} @ ${guideThreshPx}px), `
-      + `p95 err ${fit.p95ErrPx.toFixed(1)} px`, 'info')
+    onLog?.(
+      `LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches; ` +
+        `${fit.inlierCount} H-inliers (ratio ${ratio.toFixed(2)} @ ${guideThreshPx}px), ` +
+        `p95 err ${fit.p95ErrPx.toFixed(1)} px`,
+      'info',
+    )
 
     // 4. Plan tiles. Margin from the actual H fit; tile size from keypoint density
     // so an average tile holds ≤ tileBudget keypoints.
     const marginPx = marginFromResiduals(fit.p95ErrPx)
-    const density = (kpsA.length) / Math.max(1, wA * hA)
-    const tileSize = density > 0
-      ? Math.max(512, Math.min(4096, Math.round(Math.sqrt(tileBudget / density))))
-      : 4096
+    const density = kpsA.length / Math.max(1, wA * hA)
+    const tileSize = density > 0 ? Math.max(512, Math.min(4096, Math.round(Math.sqrt(tileBudget / density)))) : 4096
     const plan = planGuidedTiles({ wA, hA, wB, hB, H: fit.H, tileSize, marginPx })
     onLog?.(`LightGlue tiled: margin ${marginPx} px, tileSize ${tileSize} px → ${plan.length} tiles`, 'info')
 
@@ -441,7 +488,10 @@ export async function matchLightGlueTiled(args) {
       const { tileA, regionB } = plan[ti]
       let idxA = kptIndicesInRect(kpsA, tileA)
       let idxB = kptIndicesInRect(kpsB, regionB)
-      if (idxA.length < tileMinKps || idxB.length < tileMinKps) { skipped++; continue }
+      if (idxA.length < tileMinKps || idxB.length < tileMinKps) {
+        skipped++
+        continue
+      }
       // Cap each side to the attention budget (indices are score-ordered, so a
       // prefix keeps the strongest).
       if (idxA.length > tileBudget) idxA = idxA.slice(0, tileBudget)
@@ -452,7 +502,9 @@ export async function matchLightGlueTiled(args) {
         kptsB: normalizeKpts(kpsB, wB, hB, { idx: idxB }),
         descsA: sliceDescriptorRows(descA, idxA, dim),
         descsB: sliceDescriptorRows(descB, idxB, dim),
-        nA: idxA.length, nB: idxB.length, dim,
+        nA: idxA.length,
+        nB: idxB.length,
+        dim,
       }
       const { matches: tileMatches } = await run(spec, { first: consumeFirst() })
       // Remap tile-local indices back to full-array indices.
@@ -460,8 +512,11 @@ export async function matchLightGlueTiled(args) {
         if (m.score < minConf) continue
         all.push({ ia: idxA[m.ia], ib: idxB[m.ib], score: m.score })
       }
-      onLog?.(`LightGlue tiled: tile ${ti + 1}/${plan.length} — ${idxA.length}×${idxB.length} kps `
-        + `→ ${tileMatches.length} matches`, 'debug')
+      onLog?.(
+        `LightGlue tiled: tile ${ti + 1}/${plan.length} — ${idxA.length}×${idxB.length} kps ` +
+          `→ ${tileMatches.length} matches`,
+        'debug',
+      )
     }
 
     // 6. Merge tile matches + the coarse H-inliers (so skipped tiles still
@@ -472,8 +527,11 @@ export async function matchLightGlueTiled(args) {
     }
     const rawCount = all.length
     const matches = dedupeGuidedMatches(all)
-    onLog?.(`LightGlue tiled: ${rawCount} raw → ${matches.length} after dedupe `
-      + `(${plan.length - skipped} tiles matched, ${skipped} skipped; coarse-only would have been ${coarse.length})`, 'info')
+    onLog?.(
+      `LightGlue tiled: ${rawCount} raw → ${matches.length} after dedupe ` +
+        `(${plan.length - skipped} tiles matched, ${skipped} skipped; coarse-only would have been ${coarse.length})`,
+      'info',
+    )
     return { matches }
   })
 }

@@ -14,7 +14,7 @@ import { useSidebar } from './sidebarContext.js'
 // rasters. Split from Reference Data by *provenance*, not data type — everything
 // here is re-derivable from the model, so a re-fuse/re-mesh/rebuild may replace it.
 const props = defineProps({
-  open:  { type: Boolean, default: true },
+  open: { type: Boolean, default: true },
   // Computed (non-imported) kind:'dense' | 'mesh' clouds.
   clouds: { type: Array, default: () => [] },
 })
@@ -27,11 +27,20 @@ const { dem, ortho, productLayers } = storeToRefs(useReconstructionStore())
 // One row per built raster; opening (double-click) shows it in a tab like an image.
 const productRows = computed(() => {
   const rows = []
-  for (const [kind, product, fallback] of [['dem', dem.value, 'DEM'], ['ortho', ortho.value, 'Orthophoto']]) {
+  for (const [kind, product, fallback] of [
+    ['dem', dem.value, 'DEM'],
+    ['ortho', ortho.value, 'Orthophoto'],
+  ]) {
     if (!product) continue
     const layer = productLayers.value[kind]
-    rows.push({ kind, name: product.name || fallback, product, visible: !!layer?.visible,
-      opacity: layer?.opacity ?? 1, mapBlocked: productMapBlocker(product) })
+    rows.push({
+      kind,
+      name: product.name || fallback,
+      product,
+      visible: !!layer?.visible,
+      opacity: layer?.opacity ?? 1,
+      mapBlocked: productMapBlocker(product),
+    })
   }
   return rows
 })
@@ -43,19 +52,27 @@ const { isExpanded: isProductExpanded, toggle: toggleProductExpand } = useExpand
 
 // Tab id per useTabs.openProductTab. Opening focuses an existing tab either way;
 // only the wording changes.
-const openLabel = (kind) =>
-  (sidebar.openTabIds.has(`product:${kind}`) ? 'Switch to tab' : 'Open in tab')
+const openLabel = (kind) => (sidebar.openTabIds.has(`product:${kind}`) ? 'Switch to tab' : 'Open in tab')
 
 const productUnit = (p) => (p?.unit && p.unit !== 'model' ? p.unit : 'model units')
 const productCrs = (p) => (p?.crs === 'local' || !p?.crs ? 'Local' : p.crs)
 
 const {
-  editingId: editingKind, editingName, setInput: setRenameInput, start: startRename, commit: commitRename, cancel: cancelRename,
+  editingId: editingKind,
+  editingName,
+  setInput: setRenameInput,
+  start: startRename,
+  commit: commitRename,
+  cancel: cancelRename,
 } = useInlineRename((kind, name) => sidebar.renameProduct({ kind, name }))
 
 const { menu: productCtx, open: openProductCtx, close: closeProductCtx } = useContextMenu()
 // Run a menu item against the row it was opened on, then close.
-function fromMenu(fn) { const row = productCtx.value.row; closeProductCtx(); fn(row) }
+function fromMenu(fn) {
+  const row = productCtx.value.row
+  closeProductCtx()
+  fn(row)
+}
 // A greyed entry keeps its place and names why (.ctx-disabled swallows pointer
 // events, so a title tooltip would never show).
 // The product's frame never blocks the toggle: the map explains when its current
@@ -124,19 +141,26 @@ function toggleMap(row) {
             </div>
             <div class="detail-row">
               <span class="detail-label">Elevation</span>
-              <span class="detail-value">{{ row.product.zMin?.toPrecision(4) }}–{{ row.product.zMax?.toPrecision(4) }}</span>
+              <span class="detail-value"
+                >{{ row.product.zMin?.toPrecision(4) }}–{{ row.product.zMax?.toPrecision(4) }}</span
+              >
             </div>
           </template>
           <div v-else-if="row.product.covered != null" class="detail-row">
             <span class="detail-label">Coverage</span>
-            <span class="detail-value">{{ Math.round(100 * row.product.covered / (row.product.width * row.product.height)) }}%</span>
+            <span class="detail-value"
+              >{{ Math.round((100 * row.product.covered) / (row.product.width * row.product.height)) }}%</span
+            >
           </div>
           <!-- Opacity only matters while the layer is up (same rule as Reference Data). -->
           <div v-if="row.visible" class="detail-row">
             <span class="detail-label">Opacity</span>
             <span class="detail-value opacity-cell">
               <input
-                type="range" min="0" max="1" step="0.05"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
                 :value="row.opacity"
                 class="opacity-slider"
                 @click.stop
@@ -145,7 +169,9 @@ function toggleMap(row) {
               <span class="opacity-pct">{{ Math.round(row.opacity * 100) }}%</span>
             </span>
           </div>
-          <button class="link-btn products-open" @click.stop="sidebar.openProduct(row.kind)">{{ openLabel(row.kind) }}</button>
+          <button class="link-btn products-open" @click.stop="sidebar.openProduct(row.kind)">
+            {{ openLabel(row.kind) }}
+          </button>
         </li>
       </template>
       <li v-if="isEmpty" class="empty">No products — densify, or build a DEM or orthophoto</li>
@@ -155,10 +181,18 @@ function toggleMap(row) {
       <template #default="{ menu }">
         <!-- Groups: go there / display → change it → destructive. Same order as
              the cloud and reference-raster menus. -->
-        <button class="ctx-item" @click="fromMenu((r) => sidebar.openProduct(r.kind))">{{ openLabel(menu.row.kind) }}</button>
+        <button class="ctx-item" @click="fromMenu((r) => sidebar.openProduct(r.kind))">
+          {{ openLabel(menu.row.kind) }}
+        </button>
         <!-- Greyed with the reason (not hidden) when the product has no map position. -->
-        <button class="ctx-item" :class="{ 'ctx-disabled': !!menu.row.mapBlocked }"
-          :disabled="!!menu.row.mapBlocked" @click="fromMenu(toggleMap)">{{ mapCtxLabel(menu.row) }}</button>
+        <button
+          class="ctx-item"
+          :class="{ 'ctx-disabled': !!menu.row.mapBlocked }"
+          :disabled="!!menu.row.mapBlocked"
+          @click="fromMenu(toggleMap)"
+        >
+          {{ mapCtxLabel(menu.row) }}
+        </button>
         <button class="ctx-item" @click="fromMenu((r) => sidebar.productSymbology(r.kind))">Symbology…</button>
         <button class="ctx-item" @click="fromMenu((r) => sidebar.downloadProduct(r.kind))">Download…</button>
         <div class="ctx-sep"></div>

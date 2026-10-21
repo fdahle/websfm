@@ -17,13 +17,16 @@ export function createDescriptorCache({ pairs = [], budgetBytes = 1024 ** 3 } = 
     remaining.set(b.uuid, (remaining.get(b.uuid) ?? 0) + 1)
   }
   const entries = new Map() // uuid → { promise, bytes } in use order (LRU first)
-  let bytes = 0, loads = 0, peak = 0
+  let bytes = 0,
+    loads = 0,
+    peak = 0
 
   const evict = () => {
     for (const [uuid, e] of entries) {
       if (bytes <= budgetBytes) break
       if (e.bytes == null) continue // still loading
-      entries.delete(uuid); bytes -= e.bytes
+      entries.delete(uuid)
+      bytes -= e.bytes
     }
   }
   return {
@@ -31,20 +34,26 @@ export function createDescriptorCache({ pairs = [], budgetBytes = 1024 ** 3 } = 
     get(uuid) {
       const e = entries.get(uuid)
       if (!e) return undefined
-      entries.delete(uuid); entries.set(uuid, e) // most recently used
+      entries.delete(uuid)
+      entries.set(uuid, e) // most recently used
       return e.promise
     },
     set(uuid, promise) {
       loads++
       const e = { promise, bytes: null }
       entries.set(uuid, e)
-      promise.then((d) => {
-        if (entries.get(uuid) !== e) return
-        e.bytes = d?.byteLength ?? 0
-        bytes += e.bytes
-        if (bytes > peak) peak = bytes
-        evict()
-      }, () => { if (entries.get(uuid) === e) entries.delete(uuid) })
+      promise.then(
+        (d) => {
+          if (entries.get(uuid) !== e) return
+          e.bytes = d?.byteLength ?? 0
+          bytes += e.bytes
+          if (bytes > peak) peak = bytes
+          evict()
+        },
+        () => {
+          if (entries.get(uuid) === e) entries.delete(uuid)
+        },
+      )
     },
     // One of `uuid`'s pairs finished: drop it once no pair needs it any more.
     release(uuid) {
@@ -52,7 +61,10 @@ export function createDescriptorCache({ pairs = [], budgetBytes = 1024 ** 3 } = 
       remaining.set(uuid, n)
       if (n > 0) return
       const e = entries.get(uuid)
-      if (e) { entries.delete(uuid); if (e.bytes != null) bytes -= e.bytes }
+      if (e) {
+        entries.delete(uuid)
+        if (e.bytes != null) bytes -= e.bytes
+      }
     },
     stats: () => ({ loads, peakBytes: peak, residentBytes: bytes }),
   }

@@ -54,9 +54,16 @@ export function orthoGridFor(surface, settings = {}) {
  *  a fifth of the budget in cells). `dem`: the record. → a grid geometry | null */
 export function orthoDemSurface(dem, budgetBytes) {
   if (!dem) return null
-  if (!dem.cog) return dem.width > 0 ? { width: dem.width, height: dem.height, gsd: dem.gsd, originX: dem.originX, originY: dem.originY } : null
-  const plan = planDemWindow(dem, demCogLevels(dem.fullWidth, dem.fullHeight, dem.tileSize ?? DEM_TILE), null,
-    Math.floor(budgetBytes / 5 / 5))
+  if (!dem.cog)
+    return dem.width > 0
+      ? { width: dem.width, height: dem.height, gsd: dem.gsd, originX: dem.originX, originY: dem.originY }
+      : null
+  const plan = planDemWindow(
+    dem,
+    demCogLevels(dem.fullWidth, dem.fullHeight, dem.tileSize ?? DEM_TILE),
+    null,
+    Math.floor(budgetBytes / 5 / 5),
+  )
   return plan && { width: plan.width, height: plan.height, gsd: plan.gsd, originX: plan.originX, originY: plan.originY }
 }
 

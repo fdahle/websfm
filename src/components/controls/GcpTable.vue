@@ -4,17 +4,20 @@ import { ref } from 'vue'
 
 // Short labels for the cramped per-row datum select (core/verticalDatum.js ids).
 const DATUM_SHORT = [
-  { id: 'unknown', label: 'datum?' }, { id: 'ellipsoidal', label: 'ellipsoid' },
-  { id: 'geoid:EGM2008', label: 'EGM2008' }, { id: 'geoid:EGM96', label: 'EGM96' },
-  { id: 'orthometric', label: 'geoid (other)' }, { id: 'local', label: 'local' },
+  { id: 'unknown', label: 'datum?' },
+  { id: 'ellipsoidal', label: 'ellipsoid' },
+  { id: 'geoid:EGM2008', label: 'EGM2008' },
+  { id: 'geoid:EGM96', label: 'EGM96' },
+  { id: 'orthometric', label: 'geoid (other)' },
+  { id: 'local', label: 'local' },
 ]
 const CONVERTIBLE = VERTICAL_DATUMS.filter((d) => isConvertible(d.id))
 const props = defineProps({
-  gcps:   { type: Array,  required: true },
-  crs:    { type: String, default: null },
+  gcps: { type: Array, required: true },
+  crs: { type: String, default: null },
   // Per-GCP accuracy report (useReconstructionStore.gcpAccuracyReport()):
   // [{ gcpId, dTotal, viewCount, observations }] — empty until refreshed.
-  report:        { type: Array,  default: () => [] },
+  report: { type: Array, default: () => [] },
   selectedGcpId: { type: String, default: null },
   // Whether any reference DEM has been imported (useExternalStore.hasReferenceDem).
   // Reads the INDEX, never a loaded plane — the planes hydrate lazily, so a
@@ -26,8 +29,18 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'remove', 'update-accuracy', 'update-name', 'update-position', 'select', 'add',
-  'update-role', 'update-vertical-datum', 'fill-z', 'check-z', 'convert-heights', 'update-observation-accuracy',
+  'remove',
+  'update-accuracy',
+  'update-name',
+  'update-position',
+  'select',
+  'add',
+  'update-role',
+  'update-vertical-datum',
+  'fill-z',
+  'check-z',
+  'convert-heights',
+  'update-observation-accuracy',
 ])
 
 // Rows whose per-image observations are expanded (click the Observations count).
@@ -98,12 +111,28 @@ function onPositionInput(gcp, axis, e) {
            created as control and re-roled afterwards keeps the coordinates it was
            born with. Scene type orders them; both are always available. -->
       <template v-if="sceneType === 'object'">
-        <button class="add-gcp" title="A scale-bar endpoint: image marks, no surveyed position" @click="emit('add', 'marker')">+ Add marker</button>
-        <button class="add-gcp" title="A surveyed point that constrains georeferencing" @click="emit('add', 'control')">+ Add control</button>
+        <button
+          class="add-gcp"
+          title="A scale-bar endpoint: image marks, no surveyed position"
+          @click="emit('add', 'marker')"
+        >
+          + Add marker
+        </button>
+        <button class="add-gcp" title="A surveyed point that constrains georeferencing" @click="emit('add', 'control')">
+          + Add control
+        </button>
       </template>
       <template v-else>
-        <button class="add-gcp" title="A surveyed point that constrains georeferencing" @click="emit('add', 'control')">+ Add control</button>
-        <button class="add-gcp" title="A scale-bar endpoint: image marks, no surveyed position" @click="emit('add', 'marker')">+ Add marker</button>
+        <button class="add-gcp" title="A surveyed point that constrains georeferencing" @click="emit('add', 'control')">
+          + Add control
+        </button>
+        <button
+          class="add-gcp"
+          title="A scale-bar endpoint: image marks, no surveyed position"
+          @click="emit('add', 'marker')"
+        >
+          + Add marker
+        </button>
       </template>
       <!-- Only offered once a reference DEM is imported; a greyed-out button
            with no explanation is worse than no button. -->
@@ -113,19 +142,33 @@ function onPositionInput(gcp, axis, e) {
           class="tool-btn"
           title="Set Z (and its accuracy) from the imported reference DEM for every GCP that has no elevation yet"
           @click="emit('fill-z')"
-        >Fill Z from reference DEM</button>
+        >
+          Fill Z from reference DEM
+        </button>
         <button
           class="tool-btn"
           title="Report reference-DEM minus GCP elevation for every GCP — non-destructive"
           @click="emit('check-z')"
-        >Check Z</button>
+        >
+          Check Z
+        </button>
       </template>
       <!-- Re-expresses heights (adds the geoid separation); the per-row datum
            select only relabels what the numbers already are. -->
       <template v-if="gcps.some((g) => g.role !== 'marker')">
         <span class="toolbar-sep"></span>
-        <select class="tool-btn" aria-label="Convert heights" title="Convert every GCP's Z to this vertical datum: ellipsoidal and EGM96/EGM2008 heights convert, others are skipped"
-          value="" @change="($event) => { emit('convert-heights', $event.target.value); $event.target.value = '' }">
+        <select
+          class="tool-btn"
+          aria-label="Convert heights"
+          title="Convert every GCP's Z to this vertical datum: ellipsoidal and EGM96/EGM2008 heights convert, others are skipped"
+          value=""
+          @change="
+            ($event) => {
+              emit('convert-heights', $event.target.value)
+              $event.target.value = ''
+            }
+          "
+        >
           <option value="" disabled>Convert heights to…</option>
           <option v-for="d in CONVERTIBLE" :key="d.id" :value="d.id">{{ d.label }}</option>
         </select>
@@ -159,177 +202,228 @@ function onPositionInput(gcp, axis, e) {
       </thead>
       <tbody>
         <template v-for="gcp in gcps" :key="gcp.id">
-        <tr
-          :class="{ selected: gcp.id === selectedGcpId }"
-          @click="emit('select', gcp.id)"
-        >
-          <td class="name-cell">
-            <input
-              class="name-input"
-              type="text"
-              :value="gcp.name"
-              @change="onNameInput(gcp, $event)"
-            />
-          </td>
-          <td>
-            <select class="role-input" :value="gcp.role || 'control'"
-              @change="emit('update-role', { id: gcp.id, role: $event.target.value })" @click.stop>
-              <option value="control">Control</option>
-              <option value="check">Check</option>
-              <option value="marker">Marker</option>
-            </select>
-          </td>
-          <td v-if="isMarker(gcp)" class="marker-note" colspan="7"
-            title="A marker has no surveyed position — it exists to give a scale bar a reproducible endpoint">
-            no surveyed position
-          </td>
-          <td v-if="!isMarker(gcp)" class="uncertainty-cell" :class="{ unknown: !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' }"
-            :title="`Ground accuracy: ${gcp.accuracyStatus || 'unknown'}; height datum: ${gcp.verticalDatum || 'unknown'}`">
-            {{ !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' ? '⚠ unknown' : gcp.accuracyStatus.replace('preset:', '') }}
-            <select class="datum-select" :value="gcp.verticalDatum || 'unknown'" @click.stop
-              @change="emit('update-vertical-datum', { id: gcp.id, verticalDatum: $event.target.value })">
-              <option v-for="d in DATUM_SHORT" :key="d.id" :value="d.id">{{ d.label }}</option>
-            </select>
-          </td>
-          <td v-if="!isMarker(gcp)" class="num">
-            <input
-              class="coord-input"
-              type="number"
-              step="any"
-              :value="gcp.x"
-              @change="onPositionInput(gcp, 'x', $event)"
-            />
-          </td>
-          <td v-if="!isMarker(gcp)" class="num">
-            <input
-              class="coord-input"
-              type="number"
-              step="any"
-              :value="gcp.y"
-              @change="onPositionInput(gcp, 'y', $event)"
-            />
-          </td>
-          <td v-if="!isMarker(gcp)" class="num">
-            <input
-              class="coord-input"
-              type="number"
-              step="any"
-              :value="gcp.z ?? ''"
-              @change="onPositionInput(gcp, 'z', $event)"
-            />
-          </td>
-          <td v-if="!isMarker(gcp)" class="acc-cell">
-            <input
-              class="acc-input"
-              type="number"
-              min="0"
-              step="any"
-              :value="gcp.accuracyX"
-              @change="onAccuracyInput(gcp, 'x', $event)"
-            />
-          </td>
-          <td v-if="!isMarker(gcp)" class="acc-cell">
-            <input
-              class="acc-input"
-              type="number"
-              min="0"
-              step="any"
-              :value="gcp.accuracyY"
-              @change="onAccuracyInput(gcp, 'y', $event)"
-            />
-          </td>
-          <td v-if="!isMarker(gcp)" class="acc-cell">
-            <input
-              class="acc-input"
-              type="number"
-              min="0"
-              step="any"
-              :value="gcp.accuracyZ"
-              @change="onAccuracyInput(gcp, 'z', $event)"
-            />
-          </td>
-          <td class="acc-cell">
-            <input
-              class="acc-input"
-              type="number"
-              min="0"
-              step="any"
-              :value="gcp.accuracyImgX"
-              @change="onAccuracyInput(gcp, 'imgx', $event)"
-            />
-          </td>
-          <td class="acc-cell">
-            <input
-              class="acc-input"
-              type="number"
-              min="0"
-              step="any"
-              :value="gcp.accuracyImgY"
-              @change="onAccuracyInput(gcp, 'imgy', $event)"
-              @click.stop
-            />
-          </td>
-          <td class="num">
-            <button class="obs-toggle" :class="{ 'obs-low': obsCount(gcp) < 2 }" :disabled="!obsCount(gcp)"
-              :title="obsCount(gcp) < 2 ? 'Needs ≥2 marked images to be usable' : 'Show marked images and their accuracy'"
-              @click.stop="toggleObs(gcp.id)">
-              <span v-if="obsCount(gcp)" class="chevron">{{ obsExpanded[gcp.id] ? '▾' : '▸' }}</span>
-              {{ obsCount(gcp) }}<span v-if="obsCount(gcp) < 2"> ⚠</span>
-            </button>
-          </td>
-          <td class="num">
-            <span v-if="reportFor(gcp)?.dTotal != null" :title="reportFor(gcp).normalized == null ? '' : `Mahalanobis residual ${reportFor(gcp).normalized.toFixed(2)}σ`">
-              {{ fmtCoord(reportFor(gcp).dTotal) }}<small v-if="reportFor(gcp).normalized != null" class="sigma-tag"> · {{ reportFor(gcp).normalized.toFixed(1) }}σ</small>
-            </span>
-            <span v-else class="na">—</span>
-          </td>
-          <td class="num">
-            <span v-if="meanReprojPx(reportFor(gcp)) != null">{{ meanReprojPx(reportFor(gcp)).toFixed(2) }}</span>
-            <span v-else class="na">—</span>
-          </td>
-          <td class="action-cell">
-            <button class="row-remove" title="Remove point" @click.stop="emit('remove', gcp.id)">×</button>
-          </td>
-        </tr>
-        <tr v-if="obsExpanded[gcp.id] && obsCount(gcp)" class="obs-row">
-          <td :colspan="COLUMN_COUNT">
-            <table class="obs-table">
-              <thead>
-                <tr>
-                  <th>Marked image</th>
-                  <th title="Per-observation X marking accuracy (1σ pixels)">Image X σ (px)</th>
-                  <th title="Per-observation Y marking accuracy (1σ pixels)">Image Y σ (px)</th>
-                  <th title="Reprojection error of this mark">Reproj (px)</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="obs in gcp.observations" :key="obs.imageId ?? obs.imageName">
-                  <td :class="{ 'obs-missing': obs.imageId == null }"
-                    :title="obs.imageId == null ? `${obs.imageName} — not loaded yet` : obs.imageName">{{ obs.imageName }}</td>
-                  <td class="acc-cell">
-                    <input class="acc-input" type="number" min="0" step="any" :disabled="obs.imageId == null"
-                      :value="obs.accuracyX ?? gcp.accuracyImgX"
-                      @click.stop @change="onObsAccuracyInput(gcp, obs, 'x', $event)" />
-                  </td>
-                  <td class="acc-cell">
-                    <input class="acc-input" type="number" min="0" step="any" :disabled="obs.imageId == null"
-                      :value="obs.accuracyY ?? gcp.accuracyImgY"
-                      @click.stop @change="onObsAccuracyInput(gcp, obs, 'y', $event)" />
-                  </td>
-                  <td class="num">
-                    <span v-if="reprojFor(gcp, obs.imageId) != null">{{ reprojFor(gcp, obs.imageId).toFixed(2) }}</span>
-                    <span v-else class="na">—</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </td>
-        </tr>
+          <tr :class="{ selected: gcp.id === selectedGcpId }" @click="emit('select', gcp.id)">
+            <td class="name-cell">
+              <input class="name-input" type="text" :value="gcp.name" @change="onNameInput(gcp, $event)" />
+            </td>
+            <td>
+              <select
+                class="role-input"
+                :value="gcp.role || 'control'"
+                @change="emit('update-role', { id: gcp.id, role: $event.target.value })"
+                @click.stop
+              >
+                <option value="control">Control</option>
+                <option value="check">Check</option>
+                <option value="marker">Marker</option>
+              </select>
+            </td>
+            <td
+              v-if="isMarker(gcp)"
+              class="marker-note"
+              colspan="7"
+              title="A marker has no surveyed position — it exists to give a scale bar a reproducible endpoint"
+            >
+              no surveyed position
+            </td>
+            <td
+              v-if="!isMarker(gcp)"
+              class="uncertainty-cell"
+              :class="{ unknown: !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' }"
+              :title="`Ground accuracy: ${gcp.accuracyStatus || 'unknown'}; height datum: ${gcp.verticalDatum || 'unknown'}`"
+            >
+              {{
+                !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown'
+                  ? '⚠ unknown'
+                  : gcp.accuracyStatus.replace('preset:', '')
+              }}
+              <select
+                class="datum-select"
+                :value="gcp.verticalDatum || 'unknown'"
+                @click.stop
+                @change="emit('update-vertical-datum', { id: gcp.id, verticalDatum: $event.target.value })"
+              >
+                <option v-for="d in DATUM_SHORT" :key="d.id" :value="d.id">{{ d.label }}</option>
+              </select>
+            </td>
+            <td v-if="!isMarker(gcp)" class="num">
+              <input
+                class="coord-input"
+                type="number"
+                step="any"
+                :value="gcp.x"
+                @change="onPositionInput(gcp, 'x', $event)"
+              />
+            </td>
+            <td v-if="!isMarker(gcp)" class="num">
+              <input
+                class="coord-input"
+                type="number"
+                step="any"
+                :value="gcp.y"
+                @change="onPositionInput(gcp, 'y', $event)"
+              />
+            </td>
+            <td v-if="!isMarker(gcp)" class="num">
+              <input
+                class="coord-input"
+                type="number"
+                step="any"
+                :value="gcp.z ?? ''"
+                @change="onPositionInput(gcp, 'z', $event)"
+              />
+            </td>
+            <td v-if="!isMarker(gcp)" class="acc-cell">
+              <input
+                class="acc-input"
+                type="number"
+                min="0"
+                step="any"
+                :value="gcp.accuracyX"
+                @change="onAccuracyInput(gcp, 'x', $event)"
+              />
+            </td>
+            <td v-if="!isMarker(gcp)" class="acc-cell">
+              <input
+                class="acc-input"
+                type="number"
+                min="0"
+                step="any"
+                :value="gcp.accuracyY"
+                @change="onAccuracyInput(gcp, 'y', $event)"
+              />
+            </td>
+            <td v-if="!isMarker(gcp)" class="acc-cell">
+              <input
+                class="acc-input"
+                type="number"
+                min="0"
+                step="any"
+                :value="gcp.accuracyZ"
+                @change="onAccuracyInput(gcp, 'z', $event)"
+              />
+            </td>
+            <td class="acc-cell">
+              <input
+                class="acc-input"
+                type="number"
+                min="0"
+                step="any"
+                :value="gcp.accuracyImgX"
+                @change="onAccuracyInput(gcp, 'imgx', $event)"
+              />
+            </td>
+            <td class="acc-cell">
+              <input
+                class="acc-input"
+                type="number"
+                min="0"
+                step="any"
+                :value="gcp.accuracyImgY"
+                @change="onAccuracyInput(gcp, 'imgy', $event)"
+                @click.stop
+              />
+            </td>
+            <td class="num">
+              <button
+                class="obs-toggle"
+                :class="{ 'obs-low': obsCount(gcp) < 2 }"
+                :disabled="!obsCount(gcp)"
+                :title="
+                  obsCount(gcp) < 2 ? 'Needs ≥2 marked images to be usable' : 'Show marked images and their accuracy'
+                "
+                @click.stop="toggleObs(gcp.id)"
+              >
+                <span v-if="obsCount(gcp)" class="chevron">{{ obsExpanded[gcp.id] ? '▾' : '▸' }}</span>
+                {{ obsCount(gcp) }}<span v-if="obsCount(gcp) < 2"> ⚠</span>
+              </button>
+            </td>
+            <td class="num">
+              <span
+                v-if="reportFor(gcp)?.dTotal != null"
+                :title="
+                  reportFor(gcp).normalized == null
+                    ? ''
+                    : `Mahalanobis residual ${reportFor(gcp).normalized.toFixed(2)}σ`
+                "
+              >
+                {{ fmtCoord(reportFor(gcp).dTotal)
+                }}<small v-if="reportFor(gcp).normalized != null" class="sigma-tag">
+                  · {{ reportFor(gcp).normalized.toFixed(1) }}σ</small
+                >
+              </span>
+              <span v-else class="na">—</span>
+            </td>
+            <td class="num">
+              <span v-if="meanReprojPx(reportFor(gcp)) != null">{{ meanReprojPx(reportFor(gcp)).toFixed(2) }}</span>
+              <span v-else class="na">—</span>
+            </td>
+            <td class="action-cell">
+              <button class="row-remove" title="Remove point" @click.stop="emit('remove', gcp.id)">×</button>
+            </td>
+          </tr>
+          <tr v-if="obsExpanded[gcp.id] && obsCount(gcp)" class="obs-row">
+            <td :colspan="COLUMN_COUNT">
+              <table class="obs-table">
+                <thead>
+                  <tr>
+                    <th>Marked image</th>
+                    <th title="Per-observation X marking accuracy (1σ pixels)">Image X σ (px)</th>
+                    <th title="Per-observation Y marking accuracy (1σ pixels)">Image Y σ (px)</th>
+                    <th title="Reprojection error of this mark">Reproj (px)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="obs in gcp.observations" :key="obs.imageId ?? obs.imageName">
+                    <td
+                      :class="{ 'obs-missing': obs.imageId == null }"
+                      :title="obs.imageId == null ? `${obs.imageName} — not loaded yet` : obs.imageName"
+                    >
+                      {{ obs.imageName }}
+                    </td>
+                    <td class="acc-cell">
+                      <input
+                        class="acc-input"
+                        type="number"
+                        min="0"
+                        step="any"
+                        :disabled="obs.imageId == null"
+                        :value="obs.accuracyX ?? gcp.accuracyImgX"
+                        @click.stop
+                        @change="onObsAccuracyInput(gcp, obs, 'x', $event)"
+                      />
+                    </td>
+                    <td class="acc-cell">
+                      <input
+                        class="acc-input"
+                        type="number"
+                        min="0"
+                        step="any"
+                        :disabled="obs.imageId == null"
+                        :value="obs.accuracyY ?? gcp.accuracyImgY"
+                        @click.stop
+                        @change="onObsAccuracyInput(gcp, obs, 'y', $event)"
+                      />
+                    </td>
+                    <td class="num">
+                      <span v-if="reprojFor(gcp, obs.imageId) != null">{{
+                        reprojFor(gcp, obs.imageId).toFixed(2)
+                      }}</span>
+                      <span v-else class="na">—</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </td>
+          </tr>
         </template>
       </tbody>
     </table>
 
-    <div v-else class="empty">No ground control points — click "Add GCP" above, or import a GCP file. Mark image positions by right-clicking in an image tab.</div>
+    <div v-else class="empty">
+      No ground control points — click "Add GCP" above, or import a GCP file. Mark image positions by right-clicking in
+      an image tab.
+    </div>
   </div>
 </template>
 
@@ -399,7 +493,9 @@ tbody tr:hover {
   cursor: pointer;
 }
 
-.tool-btn:hover { background: var(--hover-bg); }
+.tool-btn:hover {
+  background: var(--hover-bg);
+}
 
 .add-gcp {
   padding: 4px 10px;
@@ -463,7 +559,10 @@ tbody tr:hover {
 .na {
   color: var(--text-dim);
 }
-.sigma-tag { color: var(--text-dim); font-size: 10px; }
+.sigma-tag {
+  color: var(--text-dim);
+  font-size: 10px;
+}
 
 .acc-cell {
   width: 120px;
@@ -499,23 +598,72 @@ tbody tr:hover {
   cursor: pointer;
   padding: 0;
 }
-.obs-toggle.obs-low { color: #e0a030; }
-.obs-toggle:disabled { cursor: default; }
-.obs-toggle .chevron { color: var(--text-dim); font-size: 10px; margin-right: 2px; }
+.obs-toggle.obs-low {
+  color: #e0a030;
+}
+.obs-toggle:disabled {
+  cursor: default;
+}
+.obs-toggle .chevron {
+  color: var(--text-dim);
+  font-size: 10px;
+  margin-right: 2px;
+}
 
-tbody tr.obs-row { cursor: default; background: rgba(255, 255, 255, 0.02); }
-tbody tr.obs-row:hover { background: rgba(255, 255, 255, 0.02); }
-tbody tr.obs-row > td { padding: 4px 12px 8px 36px; }
-.obs-table { width: auto; font-size: 12px; }
-.obs-table thead th { position: static; padding: 4px 12px 4px 0; background: none; font-size: 11px; }
-.obs-table tbody td { padding: 2px 12px 2px 0; border-bottom: none; }
-.obs-table tbody tr:hover { background: none; }
-.obs-missing { color: var(--text-dim); font-style: italic; }
+tbody tr.obs-row {
+  cursor: default;
+  background: rgba(255, 255, 255, 0.02);
+}
+tbody tr.obs-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+tbody tr.obs-row > td {
+  padding: 4px 12px 8px 36px;
+}
+.obs-table {
+  width: auto;
+  font-size: 12px;
+}
+.obs-table thead th {
+  position: static;
+  padding: 4px 12px 4px 0;
+  background: none;
+  font-size: 11px;
+}
+.obs-table tbody td {
+  padding: 2px 12px 2px 0;
+  border-bottom: none;
+}
+.obs-table tbody tr:hover {
+  background: none;
+}
+.obs-missing {
+  color: var(--text-dim);
+  font-style: italic;
+}
 
-.uncertainty-cell { max-width: 90px; font-size: 10px; color: var(--text-dim); }
-.uncertainty-cell.unknown { color: #e0a030; }
-.uncertainty-cell small { display: block; font-size: 9px; opacity: .75; }
-.datum-select { display: block; max-width: 78px; margin-top: 2px; font-size: 9px; color: var(--text); background: var(--bg); border: 1px solid var(--panel-border); }
+.uncertainty-cell {
+  max-width: 90px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.uncertainty-cell.unknown {
+  color: #e0a030;
+}
+.uncertainty-cell small {
+  display: block;
+  font-size: 9px;
+  opacity: 0.75;
+}
+.datum-select {
+  display: block;
+  max-width: 78px;
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+}
 
 .action-cell {
   width: 32px;
@@ -545,7 +693,9 @@ tbody tr.obs-row > td { padding: 4px 12px 8px 36px; }
   color: #e55;
 }
 
-tbody tr { cursor: pointer; }
+tbody tr {
+  cursor: pointer;
+}
 
 tbody tr.selected {
   background: rgba(80, 200, 255, 0.08);

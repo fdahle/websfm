@@ -1,9 +1,19 @@
 import { describe, it, expect } from 'vitest'
 import {
-  PROJECT_ARCHIVE_VERSION, ARCHIVE_DERIVED_DIRS,
-  shouldArchivePath, archiveCompression, buildManifest, validateManifest,
-  looksLikeZipHead, isProjectArchiveName, archiveFileName, importedProjectName,
-  archiveSizeVerdict, isSafeArchiveEntry, formatBytes, summarizeSections,
+  PROJECT_ARCHIVE_VERSION,
+  ARCHIVE_DERIVED_DIRS,
+  shouldArchivePath,
+  archiveCompression,
+  buildManifest,
+  validateManifest,
+  looksLikeZipHead,
+  isProjectArchiveName,
+  archiveFileName,
+  importedProjectName,
+  archiveSizeVerdict,
+  isSafeArchiveEntry,
+  formatBytes,
+  summarizeSections,
 } from './projectArchive.js'
 
 describe('shouldArchivePath', () => {
@@ -73,7 +83,7 @@ describe('manifest', () => {
 describe('sniffing', () => {
   it('recognises a ZIP local-header signature', () => {
     expect(looksLikeZipHead(new Uint8Array([0x50, 0x4b, 0x03, 0x04]))).toBe(true)
-    expect(looksLikeZipHead(new Uint8Array([0x50, 0x4b, 0x05, 0x06]))).toBe(true)  // empty archive
+    expect(looksLikeZipHead(new Uint8Array([0x50, 0x4b, 0x05, 0x06]))).toBe(true) // empty archive
     expect(looksLikeZipHead(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBe(false) // PNG
     expect(looksLikeZipHead(new Uint8Array([0x50]))).toBe(false)
   })
@@ -113,7 +123,7 @@ describe('isSafeArchiveEntry', () => {
     expect(isSafeArchiveEntry('images/../../x')).toBe(false)
     expect(isSafeArchiveEntry('/abs/path')).toBe(false)
     expect(isSafeArchiveEntry('C:\\win')).toBe(false)
-    expect(isSafeArchiveEntry('images/')).toBe(false)   // directory marker
+    expect(isSafeArchiveEntry('images/')).toBe(false) // directory marker
     expect(isSafeArchiveEntry('')).toBe(false)
   })
 })
@@ -126,10 +136,15 @@ describe('reporting helpers', () => {
   })
 
   it('sums by top-level section, largest first', () => {
-    expect(summarizeSections([
-      { relPath: 'project.json', size: 10 },
-      { relPath: 'images/a', size: 100 },
-      { relPath: 'images/b', size: 50 },
-    ])).toEqual([{ section: 'images', bytes: 150 }, { section: 'project', bytes: 10 }])
+    expect(
+      summarizeSections([
+        { relPath: 'project.json', size: 10 },
+        { relPath: 'images/a', size: 100 },
+        { relPath: 'images/b', size: 50 },
+      ]),
+    ).toEqual([
+      { section: 'images', bytes: 150 },
+      { section: 'project', bytes: 10 },
+    ])
   })
 })

@@ -10,10 +10,11 @@ async function createProject(page) {
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
 }
 
-const store = (page, fn) => page.evaluate(async (src) => {
-  const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-  return new Function('s', `return (${src})(s)`)(useReconstructionStore())
-}, fn.toString())
+const store = (page, fn) =>
+  page.evaluate(async (src) => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    return new Function('s', `return (${src})(s)`)(useReconstructionStore())
+  }, fn.toString())
 
 async function openTool(page, menu, row) {
   await page.getByRole('button', { name: 'Tools', exact: true }).click()
@@ -27,12 +28,30 @@ test('Region and Orient model store frame data from their toolboxes', async ({ p
   await createProject(page)
   // A small sparse model: 3 cameras looking down at 200 points.
   await store(page, async (s) => {
-    const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]], K = { fx: 500, fy: 500, cx: 250, cy: 250 }
+    const R = [
+        [1, 0, 0],
+        [0, -1, 0],
+        [0, 0, -1],
+      ],
+      K = { fx: 500, fy: 500, cx: 250, cy: 250 }
     const cameras = new Map([0, 1, 2].map((i) => [`cam${i}`, { R, t: [-i, 0, 10], K }]))
-    const points = Array.from({ length: 200 }, (_, i) => ({ x: (i % 20) / 2, y: Math.floor(i / 20) / 2, z: (i % 7) / 10,
-      color: [200, 200, 200], views: new Map(), viewsPx: new Map() }))
+    const points = Array.from({ length: 200 }, (_, i) => ({
+      x: (i % 20) / 2,
+      y: Math.floor(i / 20) / 2,
+      z: (i % 7) / 10,
+      color: [200, 200, 200],
+      views: new Map(),
+      viewsPx: new Map(),
+    }))
     const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
-    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points: SparsePoints.fromRecords(points) })
+    s.clouds.push({
+      id: 'sparse-1',
+      name: 'Sparse cloud',
+      kind: 'sparse',
+      createdAt: 42,
+      cameras,
+      points: SparsePoints.fromRecords(points),
+    })
     s.mainSparseId = 'sparse-1'
   })
 
@@ -69,10 +88,13 @@ test('Align by point pairs moves a cloud onto its reference from three picked pa
     const N = 10
     const make = (dx, dy, dz) => {
       const pos = new Float64Array(N * N * 3)
-      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-        const k = (j * N + i) * 3
-        pos[k] = i + dx; pos[k + 1] = j + dy; pos[k + 2] = 0.1 * i + 0.05 * j + dz
-      }
+      for (let j = 0; j < N; j++)
+        for (let i = 0; i < N; i++) {
+          const k = (j * N + i) * 3
+          pos[k] = i + dx
+          pos[k + 1] = j + dy
+          pos[k + 2] = 0.1 * i + 0.05 * j + dz
+        }
       return { count: N * N, pos, col: new Uint8Array(N * N * 3).fill(200) }
     }
     s.importCloud(make(0, 0, 0), 'a.ply')
@@ -82,33 +104,44 @@ test('Align by point pairs moves a cloud onto its reference from three picked pa
   await expect.poll(() => viewer.evaluate((el) => el.__vueParentComponent.setupState.cloudLayers.size)).toBe(2)
   await viewer.evaluate((el) => el.__vueParentComponent.setupState.setView('top'))
   await page.waitForTimeout(300)
-  const screenOf = (cloudName, x, y, z) => viewer.evaluate((el, [cloudName, x, y, z]) => {
-    const s = el.__vueParentComponent.setupState
-    const layer = [...s.cloudLayers.values()].find((l) => l.source.name.includes(cloudName))
-    const r = el.getBoundingClientRect()
-    s.camera.updateMatrixWorld()
-    const P = s.camera.position.constructor
-    const v = layer.object.localToWorld(new P(x - layer.object.position.x, y - layer.object.position.y, z - layer.object.position.z)).project(s.camera)
-    return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]
-  }, [cloudName, x, y, z])
+  const screenOf = (cloudName, x, y, z) =>
+    viewer.evaluate(
+      (el, [cloudName, x, y, z]) => {
+        const s = el.__vueParentComponent.setupState
+        const layer = [...s.cloudLayers.values()].find((l) => l.source.name.includes(cloudName))
+        const r = el.getBoundingClientRect()
+        s.camera.updateMatrixWorld()
+        const P = s.camera.position.constructor
+        const v = layer.object
+          .localToWorld(new P(x - layer.object.position.x, y - layer.object.position.y, z - layer.object.position.z))
+          .project(s.camera)
+        return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]
+      },
+      [cloudName, x, y, z],
+    )
 
   await openTool(page, /Point\s*Cloud/, /Align by point pairs/)
   const box = page.getByRole('toolbar', { name: 'Align by point pairs' })
   await expect(box).toBeVisible()
   await box.getByRole('combobox').first().selectOption({ label: 'Imported (a.ply)' })
   await box.getByRole('combobox').nth(1).selectOption({ label: 'Imported (b.ply)' })
-  for (const [i, j] of [[1, 1], [8, 2], [3, 8]]) {
+  for (const [i, j] of [
+    [1, 1],
+    [8, 2],
+    [3, 8],
+  ]) {
     const za = 0.1 * i + 0.05 * j
-    await page.mouse.click(...await screenOf('a.ply', i, j, za))
-    await page.mouse.click(...await screenOf('b.ply', i + 15, j + 3, za + 1))
+    await page.mouse.click(...(await screenOf('a.ply', i, j, za)))
+    await page.mouse.click(...(await screenOf('b.ply', i + 15, j + 3, za + 1)))
   }
   await expect(box.getByText(/RMS/)).toBeVisible()
   await box.getByRole('button', { name: 'Apply', exact: true }).click()
   // The transform runs in the worker; wait for the derived cloud to land.
-  const alignedFirst = () => store(page, (s) => {
-    const c = s.clouds.find((x) => x.name.endsWith('(aligned)'))
-    return c ? [...c.pos.subarray(0, 3)] : null
-  })
+  const alignedFirst = () =>
+    store(page, (s) => {
+      const c = s.clouds.find((x) => x.name.endsWith('(aligned)'))
+      return c ? [...c.pos.subarray(0, 3)] : null
+    })
   await expect.poll(alignedFirst).not.toBeNull()
   const aligned = await alignedFirst()
   expect(aligned[0]).toBeCloseTo(15, 3)
@@ -123,11 +156,29 @@ test('Region box handles drag a face and the whole box in the 3D view', async ({
   await createProject(page)
   await store(page, async (s) => {
     const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
-    const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]], K = { fx: 500, fy: 500, cx: 250, cy: 250 }
+    const R = [
+        [1, 0, 0],
+        [0, -1, 0],
+        [0, 0, -1],
+      ],
+      K = { fx: 500, fy: 500, cx: 250, cy: 250 }
     const cameras = new Map([0, 1, 2].map((i) => [`cam${i}`, { R, t: [-i, 0, 10], K }]))
-    const points = Array.from({ length: 200 }, (_, i) => ({ x: (i % 20) / 2, y: Math.floor(i / 20) / 2, z: (i % 7) / 10,
-      color: [200, 200, 200], views: new Map(), viewsPx: new Map() }))
-    s.clouds.push({ id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: 42, cameras, points: SparsePoints.fromRecords(points) })
+    const points = Array.from({ length: 200 }, (_, i) => ({
+      x: (i % 20) / 2,
+      y: Math.floor(i / 20) / 2,
+      z: (i % 7) / 10,
+      color: [200, 200, 200],
+      views: new Map(),
+      viewsPx: new Map(),
+    }))
+    s.clouds.push({
+      id: 'sparse-1',
+      name: 'Sparse cloud',
+      kind: 'sparse',
+      createdAt: 42,
+      cameras,
+      points: SparsePoints.fromRecords(points),
+    })
     s.mainSparseId = 'sparse-1'
   })
   const viewer = page.locator('.viewer')
@@ -136,18 +187,20 @@ test('Region box handles drag a face and the whole box in the 3D view', async ({
   await expect(region).toBeVisible()
   await viewer.evaluate((el) => el.__vueParentComponent.setupState.setView('top'))
   await page.waitForTimeout(300)
-  const draft = () => viewer.evaluate((el) => {
-    const b = el.__vueParentComponent.props.regionBox
-    return { min: [...b.min], max: [...b.max] }
-  })
+  const draft = () =>
+    viewer.evaluate((el) => {
+      const b = el.__vueParentComponent.props.regionBox
+      return { min: [...b.min], max: [...b.max] }
+    })
   // Model point → page pixels (the box is drawn in model coordinates).
-  const screenOf = (p) => viewer.evaluate((el, p) => {
-    const s = el.__vueParentComponent.setupState
-    const r = el.getBoundingClientRect()
-    s.camera.updateMatrixWorld()
-    const v = new s.camera.position.constructor(...p).project(s.camera)
-    return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]
-  }, p)
+  const screenOf = (p) =>
+    viewer.evaluate((el, p) => {
+      const s = el.__vueParentComponent.setupState
+      const r = el.getBoundingClientRect()
+      s.camera.updateMatrixWorld()
+      const v = new s.camera.position.constructor(...p).project(s.camera)
+      return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height]
+    }, p)
   const drag = async (from, to) => {
     await page.mouse.move(...from)
     await page.mouse.down()
@@ -169,14 +222,17 @@ test('Region box handles drag a face and the whole box in the 3D view', async ({
   // The centre handle moves the whole box in the plane facing the camera: the centre
   // lands under the pointer, the size stays.
   const c1 = [0, 1, 2].map((k) => (b1.min[k] + b1.max[k]) / 2)
-  const from = await screenOf(c1), to = [from[0] - 60, from[1] + 40]
+  const from = await screenOf(c1),
+    to = [from[0] - 60, from[1] + 40]
   await drag(from, to)
   const b2 = await draft()
   const c2 = [0, 1, 2].map((k) => (b2.min[k] + b2.max[k]) / 2)
   const landed = await screenOf(c2)
   expect(Math.hypot(landed[0] - to[0], landed[1] - to[1])).toBeLessThan(2)
   const forward = await viewer.evaluate((el) => {
-    const f = el.__vueParentComponent.setupState.camera.getWorldDirection(new (el.__vueParentComponent.setupState.camera.position.constructor)())
+    const f = el.__vueParentComponent.setupState.camera.getWorldDirection(
+      new el.__vueParentComponent.setupState.camera.position.constructor(),
+    )
     return [f.x, f.y, f.z]
   })
   const moved = c2.map((v, k) => v - c1[k])

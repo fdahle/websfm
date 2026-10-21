@@ -18,7 +18,9 @@ export function encodeHierarchy(nodes) {
   nodes.forEach(({ key, count, offset, length }, k) => {
     const o = ENTRY * k
     dv.setUint8(o, key[0])
-    dv.setUint32(o + 4, key[1], true); dv.setUint32(o + 8, key[2], true); dv.setUint32(o + 12, key[3], true)
+    dv.setUint32(o + 4, key[1], true)
+    dv.setUint32(o + 8, key[2], true)
+    dv.setUint32(o + 12, key[3], true)
     dv.setUint32(o + 16, count, true)
     dv.setFloat64(o + 20, offset, true)
     dv.setUint32(o + 28, length, true)
@@ -34,7 +36,10 @@ export function decodeHierarchy(bytes) {
   for (let o = 0; o + ENTRY <= u8.byteLength; o += ENTRY) {
     const key = [dv.getUint8(o), dv.getUint32(o + 4, true), dv.getUint32(o + 8, true), dv.getUint32(o + 12, true)]
     nodes.set(keyString(key), {
-      key, count: dv.getUint32(o + 16, true), offset: dv.getFloat64(o + 20, true), length: dv.getUint32(o + 28, true),
+      key,
+      count: dv.getUint32(o + 16, true),
+      offset: dv.getFloat64(o + 20, true),
+      length: dv.getUint32(o + 28, true),
     })
   }
   return nodes

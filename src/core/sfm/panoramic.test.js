@@ -2,19 +2,27 @@ import { describe, it, expect } from 'vitest'
 import { panoramicSegments, segmentToStrip, stripToSegment, segmentName } from './panoramic.js'
 
 // KH-9 PC at 56 µm: 1,524 mm over a 90° scan, 157 mm across.
-const strip = { width: Math.round(1524 * Math.PI / 2 / 0.056), height: Math.round(157 / 0.056), pitchMm: 0.056, focalMm: 1524 }
+const strip = {
+  width: Math.round((1524 * Math.PI) / 2 / 0.056),
+  height: Math.round(157 / 0.056),
+  pitchMm: 0.056,
+  focalMm: 1524,
+}
 
 // A point in the panoramic camera's frame (x along the scan, y down, z forward) → its
 // pixel-edge position on the strip: the film is a cylinder of radius f round y.
 function stripPixel(P, s = strip) {
-  const theta = Math.atan2(P[0], P[2]), t = s.focalMm * P[1] / Math.hypot(P[0], P[2])
-  return { u: s.width / 2 + s.focalMm * theta / s.pitchMm, v: s.height / 2 + t / s.pitchMm }
+  const theta = Math.atan2(P[0], P[2]),
+    t = (s.focalMm * P[1]) / Math.hypot(P[0], P[2])
+  return { u: s.width / 2 + (s.focalMm * theta) / s.pitchMm, v: s.height / 2 + t / s.pitchMm }
 }
 // The same point through segment k's pinhole: the camera turned by θk about y.
 function segmentPixel(P, seg, s = strip) {
-  const c = Math.cos(seg.thetaRad), sn = Math.sin(seg.thetaRad)
-  const x = P[0] * c - P[2] * sn, z = P[0] * sn + P[2] * c
-  return { a: seg.width / 2 + s.focalMm * x / z / s.pitchMm, b: seg.height / 2 + s.focalMm * P[1] / z / s.pitchMm }
+  const c = Math.cos(seg.thetaRad),
+    sn = Math.sin(seg.thetaRad)
+  const x = P[0] * c - P[2] * sn,
+    z = P[0] * sn + P[2] * c
+  return { a: seg.width / 2 + (s.focalMm * x) / z / s.pitchMm, b: seg.height / 2 + (s.focalMm * P[1]) / z / s.pitchMm }
 }
 
 describe('panoramic strips as frame-camera segments', () => {
@@ -36,11 +44,22 @@ describe('panoramic strips as frame-camera segments', () => {
     const layout = panoramicSegments(strip, { segments: 12 })
     let worst = 0
     for (const seg of layout.segments) {
-      for (const [x, y] of [[-0.5, -0.5], [0.5, 0.4], [0, 0], [0.3, -0.45], [-0.45, 0.1]]) {
+      for (const [x, y] of [
+        [-0.5, -0.5],
+        [0.5, 0.4],
+        [0, 0],
+        [0.3, -0.45],
+        [-0.45, 0.1],
+      ]) {
         // A ray inside the segment, at a far point on it.
         const ang = seg.thetaRad + x * 2 * seg.halfRad * 0.95
-        const P = [Math.sin(ang) * 2e5, y * 0.9 * strip.height * strip.pitchMm / strip.focalMm * 2e5, Math.cos(ang) * 2e5]
-        const want = stripPixel(P), at = segmentPixel(P, seg)
+        const P = [
+          Math.sin(ang) * 2e5,
+          ((y * 0.9 * strip.height * strip.pitchMm) / strip.focalMm) * 2e5,
+          Math.cos(ang) * 2e5,
+        ]
+        const want = stripPixel(P),
+          at = segmentPixel(P, seg)
         const got = segmentToStrip(seg, layout, strip, at.a, at.b)
         worst = Math.max(worst, Math.hypot(got.u - want.u, got.v - want.v))
         const back = stripToSegment(seg, layout, strip, want.u, want.v)
@@ -54,7 +73,7 @@ describe('panoramic strips as frame-camera segments', () => {
     const layout = panoramicSegments(strip, { segments: 5 })
     const seg = layout.segments[1]
     const { u, v } = segmentToStrip(seg, layout, strip, seg.width / 2, seg.height / 2)
-    expect(u).toBeCloseTo(strip.width / 2 + seg.thetaRad * strip.focalMm / strip.pitchMm, 6)
+    expect(u).toBeCloseTo(strip.width / 2 + (seg.thetaRad * strip.focalMm) / strip.pitchMm, 6)
     expect(v).toBeCloseTo(strip.height / 2, 6)
     expect(stripToSegment(seg, layout, strip, 0, 0)).not.toBeNull()
     // The strip's far end (θ = −45°) is 81° off the last segment's axis (+36°): not shown.
@@ -69,8 +88,9 @@ describe('panoramic strips as frame-camera segments', () => {
     const P = [Math.sin(seg.thetaRad) * 1e5, 0.01 * 1e5, Math.cos(seg.thetaRad) * 1e5]
     const at = segmentPixel(P, seg, tall)
     const got = segmentToStrip(seg, layout, tall, at.a, at.b)
-    const theta = Math.atan2(P[0], P[2]), t = tall.focalMm * P[1] / Math.hypot(P[0], P[2])
-    expect(got.v).toBeCloseTo(tall.height / 2 + tall.focalMm * theta / tall.pitchMm, 6)
+    const theta = Math.atan2(P[0], P[2]),
+      t = (tall.focalMm * P[1]) / Math.hypot(P[0], P[2])
+    expect(got.v).toBeCloseTo(tall.height / 2 + (tall.focalMm * theta) / tall.pitchMm, 6)
     expect(got.u).toBeCloseTo(tall.width / 2 + t / tall.pitchMm, 6)
   })
 

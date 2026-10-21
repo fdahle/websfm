@@ -116,13 +116,26 @@
   flex-shrink: 0;
 }
 
-.status-dot.error   { background: #e55; }
-.status-dot.running { background: #fa0; animation: pulse 0.9s ease-in-out infinite; }
-.status-dot.loading { background: #6aa9d9; animation: pulse 0.9s ease-in-out infinite; }
+.status-dot.error {
+  background: #e55;
+}
+.status-dot.running {
+  background: #fa0;
+  animation: pulse 0.9s ease-in-out infinite;
+}
+.status-dot.loading {
+  background: #6aa9d9;
+  animation: pulse 0.9s ease-in-out infinite;
+}
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.35; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .item-name {
@@ -134,14 +147,23 @@
 }
 
 /* Image not registered into the sparse model — dim it and flag with a warning tag. */
-.list-item.unaligned .item-name { color: var(--text-dim); opacity: 0.65; }
+.list-item.unaligned .item-name {
+  color: var(--text-dim);
+  opacity: 0.65;
+}
 
 /* Still decoding (e.g. a large TIFF being transcoded) — grey the row out so it
    reads as not-yet-ready rather than a fully loaded image. */
-.list-item.loading .item-name { color: var(--text-dim); opacity: 0.55; font-style: italic; }
+.list-item.loading .item-name {
+  color: var(--text-dim);
+  opacity: 0.55;
+  font-style: italic;
+}
 
 /* Decode failed — the image can never be shown; flag it distinctly in red. */
-.list-item.failed .item-name { color: #e06767; }
+.list-item.failed .item-name {
+  color: #e06767;
+}
 
 .unaligned-tag {
   flex-shrink: 0;
@@ -150,7 +172,9 @@
   line-height: 1;
 }
 
-.unaligned-tag.failed-tag { color: #e06767; }
+.unaligned-tag.failed-tag {
+  color: #e06767;
+}
 
 .load-tag {
   flex-shrink: 0;
@@ -173,7 +197,9 @@
   font-size: 12px;
 }
 
-.rename-input:focus { outline: none; }
+.rename-input:focus {
+  outline: none;
+}
 
 .empty {
   padding: 8px 12px;
@@ -235,8 +261,12 @@
   transition: transform 0.15s;
 }
 
-.expand-btn:hover { color: var(--text); }
-.expand-btn.open::before { transform: rotate(90deg); }
+.expand-btn:hover {
+  color: var(--text);
+}
+.expand-btn.open::before {
+  transform: rotate(90deg);
+}
 
 /* Image detail panel — raised card with dotted left connector */
 .img-details {
@@ -255,15 +285,22 @@
   line-height: 1.8;
 }
 
-.detail-label { color: var(--text-dim); }
+.detail-label {
+  color: var(--text-dim);
+}
 
 .detail-value {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
-.detail-dim   { color: var(--text-dim); opacity: 0.75; }
-.detail-error { color: var(--danger); }
+.detail-dim {
+  color: var(--text-dim);
+  opacity: 0.75;
+}
+.detail-error {
+  color: var(--danger);
+}
 
 /* GCP observation count pill */
 .obs-badge {
@@ -334,8 +371,12 @@
   background: var(--hover-bg);
 }
 
-.ctx-item.danger       { color: #e55; }
-.ctx-item.danger:hover { background: rgba(220, 80, 80, 0.12); }
+.ctx-item.danger {
+  color: #e55;
+}
+.ctx-item.danger:hover {
+  background: rgba(220, 80, 80, 0.12);
+}
 
 .ctx-disabled {
   opacity: 0.35;
@@ -350,10 +391,20 @@
 }
 
 /* Submenu (hover-reveal) */
-.ctx-sub-wrap { position: relative; }
+.ctx-sub-wrap {
+  position: relative;
+}
 
-.ctx-has-sub { display: flex; align-items: center; justify-content: space-between; }
-.ctx-arrow { color: var(--text-dim); font-size: 10px; margin-left: 10px; }
+.ctx-has-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ctx-arrow {
+  color: var(--text-dim);
+  font-size: 10px;
+  margin-left: 10px;
+}
 
 .ctx-submenu {
   position: absolute;
@@ -371,8 +422,12 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
-.ctx-sub-wrap:hover > .ctx-submenu { display: block; }
-.ctx-sub-wrap:hover > .ctx-has-sub { background: var(--hover-bg); }
+.ctx-sub-wrap:hover > .ctx-submenu {
+  display: block;
+}
+.ctx-sub-wrap:hover > .ctx-has-sub {
+  background: var(--hover-bg);
+}
 
 /* Map layers (Reference Data + Products): the on-map indicator and the opacity
    slider shown while a raster is on the map. */
@@ -399,7 +454,7 @@
 
 .opacity-pct {
   flex-shrink: 0;
-  min-width: 30px;          /* keeps the row from reflowing as the value changes */
+  min-width: 30px; /* keeps the row from reflowing as the value changes */
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

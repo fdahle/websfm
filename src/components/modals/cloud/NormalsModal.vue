@@ -59,18 +59,33 @@ function run() {
     <NoSourceWarn v-if="!clouds.length" kind="cloud" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SourcePicker id="nrm-src" v-model="sourceId" label="Cloud" :items="clouds" :option-label="normalsOptionLabel"
-          hint="Adds a new cloud with normals; this one is left untouched." />
+        <SourcePicker
+          id="nrm-src"
+          v-model="sourceId"
+          label="Cloud"
+          :items="clouds"
+          :option-label="normalsOptionLabel"
+          hint="Adds a new cloud with normals; this one is left untouched."
+        />
       </SettingsGroup>
       <SettingsGroup title="Estimation">
-        <SettingsField label="Neighbours" label-for="nrm-k"
-          hint="Points in each local plane fit. More is smoother and slower; fewer keeps sharp edges.">
+        <SettingsField
+          label="Neighbours"
+          label-for="nrm-k"
+          hint="Points in each local plane fit. More is smoother and slower; fewer keeps sharp edges."
+        >
           <input id="nrm-k" v-model.number="settings.k" type="number" min="6" max="64" step="1" class="field-input" />
         </SettingsField>
-        <SettingsField label-for="nrm-orient"
-          :hint="resolvedOrient === 'cameras' ? 'Each normal faces the nearest camera — right for walls and overhangs.'
-            : resolvedOrient === 'up' ? 'Each normal faces upward (+Z) — right for terrain from above.'
-            : 'Keeps the side the existing normals face, re-estimating only their direction.'">
+        <SettingsField
+          label-for="nrm-orient"
+          :hint="
+            resolvedOrient === 'cameras'
+              ? 'Each normal faces the nearest camera — right for walls and overhangs.'
+              : resolvedOrient === 'up'
+                ? 'Each normal faces upward (+Z) — right for terrain from above.'
+                : 'Keeps the side the existing normals face, re-estimating only their direction.'
+          "
+        >
           <template #label><GlossaryTerm id="surface-normal">Point normals</GlossaryTerm></template>
           <select id="nrm-orient" v-model="settings.orient" class="field-select">
             <option value="auto">Automatic</option>

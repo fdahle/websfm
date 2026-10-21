@@ -10,10 +10,19 @@ import { zipStream } from '../../utils/zip.js'
 // (origin, ECEF transform) comes from the page, which has the CRS registry.
 function zipBlob() {
   const zip = zipStream()
-  let blob = null, batch = [], size = 0
+  let blob = null,
+    batch = [],
+    size = 0
   const add = (parts) => {
-    for (const p of parts) { batch.push(p); size += p.length }
-    if (size >= 64 << 20) { blob = new Blob(blob ? [blob, ...batch] : batch); batch = []; size = 0 }
+    for (const p of parts) {
+      batch.push(p)
+      size += p.length
+    }
+    if (size >= 64 << 20) {
+      blob = new Blob(blob ? [blob, ...batch] : batch)
+      batch = []
+      size = 0
+    }
   }
   return {
     emit: (name, bytes) => add(zip.add(name, bytes)),
@@ -40,17 +49,27 @@ export function makeTiles3dOps({ lazCodec = null } = {}) {
       lod = input.lod
       reader = await openWorkerCloudSource(lod, { data: input.data, hierarchy: input.hierarchy ?? null }, lazCodec)
     } else {
-      ({ reader, lod } = memoryLodReader(input.cloud))
+      ;({ reader, lod } = memoryLodReader(input.cloud))
     }
     const out = zipBlob()
-    const res = await lodToTiles(reader, lod, { sim, origin, color, transform, emit: out.emit,
-      onProgress: (done, total) => emit('progress', [done, total, 'Writing tiles', done / Math.max(1, total)]) })
+    const res = await lodToTiles(reader, lod, {
+      sim,
+      origin,
+      color,
+      transform,
+      emit: out.emit,
+      onProgress: (done, total) => emit('progress', [done, total, 'Writing tiles', done / Math.max(1, total)]),
+    })
     const blob = out.finish(res.tileset, res.external)
     let levels = 0
     for (const n of reader.nodes.values()) levels = Math.max(levels, n.key[0] + 1)
-    emit('log', [`3D Tiles: ${res.points.toLocaleString()} points in ${res.contentTiles.toLocaleString()} tiles over ${levels} levels`
-      + `${res.external.length ? ` (${res.external.length} external tilesets)` : ''}, ${(blob.size / 1024 ** 2).toFixed(1)} MB in `
-      + `${((performance.now() - t0) / 1000).toFixed(1)} s`, 'info', 'Export'])
+    emit('log', [
+      `3D Tiles: ${res.points.toLocaleString()} points in ${res.contentTiles.toLocaleString()} tiles over ${levels} levels` +
+        `${res.external.length ? ` (${res.external.length} external tilesets)` : ''}, ${(blob.size / 1024 ** 2).toFixed(1)} MB in ` +
+        `${((performance.now() - t0) / 1000).toFixed(1)} s`,
+      'info',
+      'Export',
+    ])
     return { result: { blob, tiles: res.tiles, contentTiles: res.contentTiles, points: res.points, levels } }
   }
 
@@ -61,18 +80,34 @@ export function makeTiles3dOps({ lazCodec = null } = {}) {
     const { mesh, texture = null, sim = null, origin, transform = null, color = true, tileTriangles } = input
     const t0 = performance.now()
     const src = prepareMeshForExport(mesh, { sim })
-    const tex = texture && mesh.uv ? {
-      pages: texture.pages.map((p) => ({ type: p.type, bytes: texture.data.subarray(p.offset, p.offset + p.length) })),
-      groups: texture.groups,
-    } : null
+    const tex =
+      texture && mesh.uv
+        ? {
+            pages: texture.pages.map((p) => ({
+              type: p.type,
+              bytes: texture.data.subarray(p.offset, p.offset + p.length),
+            })),
+            groups: texture.groups,
+          }
+        : null
     const out = zipBlob()
-    const res = await meshToTiles(src, tex, { origin, color, transform, tileTriangles, emit: out.emit,
+    const res = await meshToTiles(src, tex, {
+      origin,
+      color,
+      transform,
+      tileTriangles,
+      emit: out.emit,
       onLog: (m, l, c) => emit('log', [m, l, c]),
-      onProgress: (done, total) => emit('progress', [done, total, 'Writing tiles', done / Math.max(1, total)]) })
+      onProgress: (done, total) => emit('progress', [done, total, 'Writing tiles', done / Math.max(1, total)]),
+    })
     const blob = out.finish(res.tileset, res.external)
-    emit('log', [`3D Tiles: ${(mesh.count ?? mesh.idx.length / 3).toLocaleString()} triangles in ${res.tiles.toLocaleString()} tiles `
-      + `over ${res.levels} levels${res.textured ? ' (textured leaves)' : ''}, ${(blob.size / 1024 ** 2).toFixed(1)} MB in `
-      + `${((performance.now() - t0) / 1000).toFixed(1)} s`, 'info', 'Export'])
+    emit('log', [
+      `3D Tiles: ${(mesh.count ?? mesh.idx.length / 3).toLocaleString()} triangles in ${res.tiles.toLocaleString()} tiles ` +
+        `over ${res.levels} levels${res.textured ? ' (textured leaves)' : ''}, ${(blob.size / 1024 ** 2).toFixed(1)} MB in ` +
+        `${((performance.now() - t0) / 1000).toFixed(1)} s`,
+      'info',
+      'Export',
+    ])
     return { result: { blob, tiles: res.tiles, levels: res.levels, textured: res.textured } }
   }
 

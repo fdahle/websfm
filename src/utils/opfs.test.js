@@ -23,15 +23,17 @@ function makeFile(name) {
     },
     async createWritable(opts) {
       if (this.open > 0) {
-        throw new Error("Failed to execute 'createWritable' on 'FileSystemHandle': "
-          + 'Failed to create swap file.')
+        throw new Error("Failed to execute 'createWritable' on 'FileSystemHandle': " + 'Failed to create swap file.')
       }
       this.open++
       const handle = this
       let buf = opts?.keepExistingData ? this.data : ''
       let pos = 0
       return {
-        async seek(p) { await tick(); pos = p },
+        async seek(p) {
+          await tick()
+          pos = p
+        },
         async write(chunk) {
           await tick()
           buf = buf.slice(0, pos) + String(chunk)
@@ -51,7 +53,9 @@ function makeDir(name) {
   const files = new Map()
   const dirs = new Map()
   return {
-    name, files, dirs,
+    name,
+    files,
+    dirs,
     async getDirectoryHandle(n, opts) {
       if (!dirs.has(n)) {
         if (!opts?.create) throw new Error(`no dir ${n}`)
@@ -66,7 +70,10 @@ function makeDir(name) {
       }
       return files.get(n)
     },
-    async removeEntry(n) { files.delete(n); dirs.delete(n) },
+    async removeEntry(n) {
+      files.delete(n)
+      dirs.delete(n)
+    },
   }
 }
 
@@ -99,7 +106,10 @@ describe('write serialization', () => {
     const realCreate = fh.createWritable.bind(fh)
     let first = true
     fh.createWritable = async function (opts) {
-      if (first) { first = false; throw new Error('disk full') }
+      if (first) {
+        first = false
+        throw new Error('disk full')
+      }
       return realCreate(opts)
     }
 
@@ -115,11 +125,20 @@ describe('write serialization', () => {
   it('says storage is full when a write exceeds the quota, and passes other errors through', async () => {
     await opfs.savePoses('p3', { poses: [] })
     const fh = projectDir('p3').files.get('poses.json')
-    const fail = (name, message) => { fh.createWritable = async () => { throw Object.assign(new Error(message), { name }) } }
-    fail('QuotaExceededError', 'The operation failed because it would cause the application to exceed its storage quota.')
+    const fail = (name, message) => {
+      fh.createWritable = async () => {
+        throw Object.assign(new Error(message), { name })
+      }
+    }
+    fail(
+      'QuotaExceededError',
+      'The operation failed because it would cause the application to exceed its storage quota.',
+    )
     const err = await opfs.savePoses('p3', { poses: [1] }).catch((e) => e)
     expect(opfs.isStorageFull(err)).toBe(true)
-    expect(err.message).toMatch(/^Storage is full: the browser or the disk refused to save project data\. Free space .*\(poses\.json\)$/)
+    expect(err.message).toMatch(
+      /^Storage is full: the browser or the disk refused to save project data\. Free space .*\(poses\.json\)$/,
+    )
     expect(err.cause.message).toMatch(/storage quota/)
     fail('NotAllowedError', 'denied')
     const other = await opfs.savePoses('p3', { poses: [2] }).catch((e) => e)
@@ -140,10 +159,7 @@ describe('write serialization', () => {
   })
 
   it('does not serialize unrelated files', async () => {
-    await Promise.all([
-      opfs.savePoses('p3', { poses: [1] }),
-      opfs.saveGcps('p3', [{ id: 'g1' }]),
-    ])
+    await Promise.all([opfs.savePoses('p3', { poses: [1] }), opfs.saveGcps('p3', [{ id: 'g1' }])])
     expect(JSON.parse(projectDir('p3').files.get('poses.json').data).poses).toEqual([1])
     expect(JSON.parse(projectDir('p3').files.get('gcps.json').data)).toEqual([{ id: 'g1' }])
   })
@@ -151,10 +167,7 @@ describe('write serialization', () => {
   it('appends without losing a concurrent entry', async () => {
     // The offset is read inside the lock: reading it outside would give both
     // appends the same start and one would overwrite the other.
-    await Promise.all([
-      opfs.appendLog('p4', [{ m: 'a' }]),
-      opfs.appendLog('p4', [{ m: 'b' }]),
-    ])
+    await Promise.all([opfs.appendLog('p4', [{ m: 'a' }]), opfs.appendLog('p4', [{ m: 'b' }])])
     const lines = projectDir('p4').files.get('log.ndjson').data.trim().split('\n')
     expect(lines.map((l) => JSON.parse(l).m).sort()).toEqual(['a', 'b'])
   })
@@ -185,7 +198,7 @@ describe('write serialization', () => {
 
 // The .websfm save archives each binary document under the lock its saves hold.
 describe('binary documents as one unit', () => {
-  it('names each document by its metadata path and its saves\' lock', () => {
+  it("names each document by its metadata path and its saves' lock", () => {
     expect(opfs.binaryDocumentLockKey('p', 'reconstruction.json')).toBe('reconstruction:p')
     expect(opfs.binaryDocumentLockKey('p', 'matches/matches.json')).toBe('matches:p')
     expect(opfs.binaryDocumentLockKey('p', 'products/ortho.json')).toBe('product:p:ortho')

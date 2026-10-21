@@ -19,7 +19,10 @@ describe('utmZone', () => {
 
 describe('suggestProjectedCrs', () => {
   it('suggests the UTM zone of the median position', () => {
-    const s = suggestProjectedCrs([{ lat: 44.5688, lon: 5.2755 }, { lat: 44.569, lon: 5.276 }])
+    const s = suggestProjectedCrs([
+      { lat: 44.5688, lon: 5.2755 },
+      { lat: 44.569, lon: 5.276 },
+    ])
     expect(s).toMatchObject({ code: 'EPSG:32631', name: 'WGS 84 / UTM zone 31N', count: 2 })
   })
 
@@ -42,7 +45,12 @@ describe('suggestProjectedCrs', () => {
   it('returns null without usable positions', () => {
     expect(suggestProjectedCrs([])).toBeNull()
     expect(suggestProjectedCrs(null)).toBeNull()
-    expect(suggestProjectedCrs([{ lat: NaN, lon: 3 }, { lat: 120, lon: 3 }])).toBeNull()
+    expect(
+      suggestProjectedCrs([
+        { lat: NaN, lon: 3 },
+        { lat: 120, lon: 3 },
+      ]),
+    ).toBeNull()
   })
 })
 

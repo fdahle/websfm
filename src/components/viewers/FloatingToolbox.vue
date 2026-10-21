@@ -20,7 +20,7 @@ import { ref, computed, onBeforeUnmount } from 'vue'
 // or opens a context menu through it.
 const props = defineProps({
   // Session-remembered position key; also the default title's aria label source.
-  id:    { type: String, required: true },
+  id: { type: String, required: true },
   title: { type: String, required: true },
   // Accessible toolbar name when the short visible title is not enough on its own.
   ariaLabel: { type: String, default: null },
@@ -60,13 +60,20 @@ function startDrag(e) {
   const parent = el?.offsetParent
   if (!el) return
   // Resolve an anchored (transform-centred) start into absolute px first.
-  const x = el.offsetLeft - (pos.value ? 0 : (props.anchor === 'top-center' ? el.offsetWidth / 2 : 0))
+  const x = el.offsetLeft - (pos.value ? 0 : props.anchor === 'top-center' ? el.offsetWidth / 2 : 0)
   const y = el.offsetTop
-  dragStart = { dx: e.clientX - x, dy: e.clientY - y, maxX: (parent?.clientWidth ?? 1e9) - 40, maxY: (parent?.clientHeight ?? 1e9) - 24 }
+  dragStart = {
+    dx: e.clientX - x,
+    dy: e.clientY - y,
+    maxX: (parent?.clientWidth ?? 1e9) - 40,
+    maxY: (parent?.clientHeight ?? 1e9) - 24,
+  }
   window.addEventListener('mousemove', onDragMove)
   window.addEventListener('mouseup', onDragUp)
 }
-function onHeaderDown(e) { if (e.button === 0) startDrag(e) }
+function onHeaderDown(e) {
+  if (e.button === 0) startDrag(e)
+}
 function onCardDown(e) {
   if (e.button !== 1) return
   e.preventDefault() // no middle-click autoscroll
@@ -103,7 +110,9 @@ onBeforeUnmount(onDragUp)
     <div class="ft-header" @mousedown.prevent="onHeaderDown">
       <span class="ft-title">{{ title }}</span>
       <slot name="header" />
-      <button v-if="closable" class="ft-close" :title="closeTitle" :aria-label="closeTitle" @click="emit('close')">×</button>
+      <button v-if="closable" class="ft-close" :title="closeTitle" :aria-label="closeTitle" @click="emit('close')">
+        ×
+      </button>
     </div>
     <div class="ft-body">
       <slot />
@@ -133,7 +142,9 @@ onBeforeUnmount(onDragUp)
   border-bottom: 1px solid var(--panel-border);
   cursor: grab;
 }
-.ft-header:active { cursor: grabbing; }
+.ft-header:active {
+  cursor: grabbing;
+}
 .ft-title {
   flex: 1;
   font-size: 11px;
@@ -151,6 +162,11 @@ onBeforeUnmount(onDragUp)
   cursor: pointer;
   border-radius: 4px;
 }
-.ft-close:hover { color: var(--text); background: var(--hover-bg); }
-.ft-body { padding: 6px 8px 8px; }
+.ft-close:hover {
+  color: var(--text);
+  background: var(--hover-bg);
+}
+.ft-body {
+  padding: 6px 8px 8px;
+}
 </style>

@@ -14,14 +14,14 @@ async function walk(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (['target', '.git', 'node_modules'].includes(entry.name)) continue
     const path = `${dir}/${entry.name}`
-    if (entry.isDirectory()) paths.push(...await walk(path))
+    if (entry.isDirectory()) paths.push(...(await walk(path)))
     else paths.push(path)
   }
   return paths
 }
-const sources = (await walk('crates')).filter(path => /\.(rs|toml)$|Cargo\.lock$/.test(path))
+const sources = (await walk('crates')).filter((path) => /\.(rs|toml)$|Cargo\.lock$/.test(path))
 sources.push('.cargo/config.toml')
-const artifacts = (await walk('src/wasm')).filter(path => /\.(wasm|js|ts)$/.test(path))
+const artifacts = (await walk('src/wasm')).filter((path) => /\.(wasm|js|ts)$/.test(path))
 const stamp = {}
 for (const path of [...sources, ...artifacts].sort()) {
   let bytes = await readFile(path)
@@ -34,8 +34,9 @@ if (process.argv.includes('--write')) {
   console.log(`Recorded ${sources.length} Rust inputs and ${artifacts.length} WASM artifacts`)
 } else {
   const previous = JSON.parse(await readFile(filename, 'utf8'))
-  const changed = [...new Set([...Object.keys(previous), ...Object.keys(stamp)])]
-    .filter(path => previous[path] !== stamp[path])
+  const changed = [...new Set([...Object.keys(previous), ...Object.keys(stamp)])].filter(
+    (path) => previous[path] !== stamp[path],
+  )
   if (changed.length) throw new Error(`WASM build is stale. Run npm run build:wasm.\n${changed.join('\n')}`)
   console.log('Rust source and committed WASM build stamp match')
 }

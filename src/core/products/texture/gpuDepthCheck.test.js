@@ -16,7 +16,8 @@ describe('compareDepth', () => {
   })
 
   it('agrees where both passes hold the same depth, within the tolerance', () => {
-    const cpu = view(1000, 500), gpu = view(1000, 500, 5 * (1 + 1e-3))
+    const cpu = view(1000, 500),
+      gpu = view(1000, 500, 5 * (1 + 1e-3))
     gpu[0] = 9 // one pixel off
     const r = compareDepth(gpu, cpu)
     expect(r.agree).toBeCloseTo(499 / 500, 9)

@@ -61,10 +61,13 @@ async function rasterize(url, maxDim) {
   try {
     bmp = await createImageBitmap(blob)
   } catch (err) {
-    throw new Error(`rasterize: decode failed for ${describeUrl(url)} `
-      + `(${blob.type || 'no content-type'}, ${blob.size} B) — ${err?.message ?? err}`)
+    throw new Error(
+      `rasterize: decode failed for ${describeUrl(url)} ` +
+        `(${blob.type || 'no content-type'}, ${blob.size} B) — ${err?.message ?? err}`,
+    )
   }
-  const natW = bmp.width, natH = bmp.height
+  const natW = bmp.width,
+    natH = bmp.height
   const scale = Math.min(1, maxDim / Math.max(natW, natH))
   const width = Math.round(natW * scale)
   const height = Math.round(natH * scale)

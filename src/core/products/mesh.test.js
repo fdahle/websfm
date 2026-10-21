@@ -24,8 +24,14 @@ function encodeMesh(pos, idx) {
   dv.setUint32(0, nVerts, true)
   dv.setUint32(4, nTris, true)
   let o = 8
-  for (let i = 0; i < pos.length; i++) { dv.setFloat32(o, pos[i], true); o += 4 }
-  for (let i = 0; i < idx.length; i++) { dv.setUint32(o, idx[i], true); o += 4 }
+  for (let i = 0; i < pos.length; i++) {
+    dv.setFloat32(o, pos[i], true)
+    o += 4
+  }
+  for (let i = 0; i < idx.length; i++) {
+    dv.setUint32(o, idx[i], true)
+    o += 4
+  }
   return new Uint8Array(buf)
 }
 
@@ -99,26 +105,39 @@ describe('transferVertexColors', () => {
     // The transfer indexes only the cells the vertices read; it must pick exactly what
     // a Map over every dense point (Map.set in index order, last writer wins) picked.
     let s = 7
-    const rnd = () => ((s = Math.imul(s, 1103515245) + 12345 >>> 0) / 4294967296)
-    const nd = 4000, nv = 300, cell = 0.5
-    const pos = Float32Array.from({ length: nd * 3 }, () => rnd() * 6)   // ~1.7k cells ⇒ shared cells
+    const rnd = () => (s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 4294967296
+    const nd = 4000,
+      nv = 300,
+      cell = 0.5
+    const pos = Float32Array.from({ length: nd * 3 }, () => rnd() * 6) // ~1.7k cells ⇒ shared cells
     const col = Uint8Array.from({ length: nd * 3 }, (_, i) => (i * 37) & 255)
     const meshPos = Float32Array.from({ length: nv * 3 }, () => rnd() * 7 - 0.5) // some outside the cloud
-    const { col: got, misses } = transferVertexColors(meshPos, { pos, col }, cell, { searchRadius: 1, grayFallback: [1, 2, 3] })
+    const { col: got, misses } = transferVertexColors(meshPos, { pos, col }, cell, {
+      searchRadius: 1,
+      grayFallback: [1, 2, 3],
+    })
     // Reference: the old implementation's semantics, written out.
     const key = (x, y, z) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`
     const rep = new Map()
     for (let i = 0; i < nd; i++) rep.set(key(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]), i)
     let refMisses = 0
     for (let v = 0; v < nv; v++) {
-      const vx = meshPos[v * 3], vy = meshPos[v * 3 + 1], vz = meshPos[v * 3 + 2]
-      let best = -1, bestD2 = Infinity
-      for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const i = rep.get(key(vx + dx * cell, vy + dy * cell, vz + dz * cell))
-        if (i === undefined) continue
-        const d2 = (pos[i * 3] - vx) ** 2 + (pos[i * 3 + 1] - vy) ** 2 + (pos[i * 3 + 2] - vz) ** 2
-        if (d2 < bestD2) { bestD2 = d2; best = i }
-      }
+      const vx = meshPos[v * 3],
+        vy = meshPos[v * 3 + 1],
+        vz = meshPos[v * 3 + 2]
+      let best = -1,
+        bestD2 = Infinity
+      for (let dz = -1; dz <= 1; dz++)
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const i = rep.get(key(vx + dx * cell, vy + dy * cell, vz + dz * cell))
+            if (i === undefined) continue
+            const d2 = (pos[i * 3] - vx) ** 2 + (pos[i * 3 + 1] - vy) ** 2 + (pos[i * 3 + 2] - vz) ** 2
+            if (d2 < bestD2) {
+              bestD2 = d2
+              best = i
+            }
+          }
       const want = best >= 0 ? [col[best * 3], col[best * 3 + 1], col[best * 3 + 2]] : (refMisses++, [1, 2, 3])
       expect(Array.from(got.slice(v * 3, v * 3 + 3))).toEqual(want)
     }
@@ -175,7 +194,10 @@ describe('generateMesh', () => {
 
   it('maps the cleanup settings onto the solver options', () => {
     let seen = null
-    const fn = (input) => { seen = input; return empty() }
+    const fn = (input) => {
+      seen = input
+      return empty()
+    }
     generateMesh(dense, fn, { mergeCell: 0.5 }, () => {})
     // Defaults: gentle trim, hole refill, floaters removed, no distance trim.
     expect(seen.densityRatio).toBe(MESH_TUNING.trimRatio.gentle)
@@ -196,7 +218,15 @@ describe('generateMesh', () => {
 
   it('ignores the retired trimFactor key (a saved workflow recipe still carries 6)', () => {
     let seen = null
-    generateMesh(dense, (i) => { seen = i; return empty() }, { mergeCell: 0.5, trimFactor: 6, fillHoles: false }, () => {})
+    generateMesh(
+      dense,
+      (i) => {
+        seen = i
+        return empty()
+      },
+      { mergeCell: 0.5, trimFactor: 6, fillHoles: false },
+      () => {},
+    )
     expect(seen.trimDist).toBe(0)
   })
 
@@ -210,9 +240,17 @@ describe('generateMesh', () => {
   })
   const plain = { robustMargin: Infinity, isolatedCellLeaves: 0, colorize: false }
 
-  it('subsamples to ~one point per leaf and carries each sample\'s point count as support', () => {
+  it("subsamples to ~one point per leaf and carries each sample's point count as support", () => {
     let seen = null
-    generateMesh(clustered(), (i) => { seen = i; return empty() }, { depth: 1, mergeCell: 0.001, ...plain }, () => {})
+    generateMesh(
+      clustered(),
+      (i) => {
+        seen = i
+        return empty()
+      },
+      { depth: 1, mergeCell: 0.001, ...plain },
+      () => {},
+    )
     expect(seen.pos.length / 3).toBe(2) // the four clustered points collapse to one
     expect([...seen.wgt].sort()).toEqual([1, 4])
   })
@@ -222,8 +260,15 @@ describe('generateMesh', () => {
     // delete nearly every vertex of the surface.
     const d = clustered()
     let seen = null
-    generateMesh(d, (i) => { seen = i; return empty() },
-      { depth: 1, mergeCell: 0.001, distanceTrim: 6, ...plain }, () => {})
+    generateMesh(
+      d,
+      (i) => {
+        seen = i
+        return empty()
+      },
+      { depth: 1, mergeCell: 0.001, distanceTrim: 6, ...plain },
+      () => {},
+    )
     expect(seen.trimDist).toBeCloseTo(6 * meshInputCell(d.pos, 1, MESH_TUNING.inputLeafCellsPerPoint), 9)
   })
 
@@ -232,8 +277,15 @@ describe('generateMesh', () => {
     const logs = []
     // Extent 1, spacing 0.1 ⇒ depth ceil(log2(10)) = 4 is all the spacing supports.
     const d = { count: 2, pos: Float32Array.from([0, 0, 0, 1, 0, 0]), nrm: Float32Array.from([0, 0, 1, 0, 0, 1]) }
-    generateMesh(d, (i) => { seen = i; return empty() }, { depth: 10, mergeCell: 0.1, ...plain, minDepth: 2 },
-      (m) => logs.push(m))
+    generateMesh(
+      d,
+      (i) => {
+        seen = i
+        return empty()
+      },
+      { depth: 10, mergeCell: 0.1, ...plain, minDepth: 2 },
+      (m) => logs.push(m),
+    )
     expect(seen.depth).toBe(4)
     expect(logs.some((l) => /depth 10 → 4/.test(l))).toBe(true)
   })
@@ -243,18 +295,32 @@ describe('generateMesh', () => {
     const n = 202
     const pos = new Float32Array(n * 3)
     const nrm = new Float32Array(n * 3)
-    for (let i = 0; i < 200; i++) { pos[i * 3] = (i % 20) / 20; pos[i * 3 + 1] = Math.floor(i / 20) / 10; nrm[i * 3 + 2] = 1 }
-    pos[200 * 3] = 1000; pos[201 * 3 + 1] = -1000
-    nrm[200 * 3 + 2] = 1; nrm[201 * 3 + 2] = 1
+    for (let i = 0; i < 200; i++) {
+      pos[i * 3] = (i % 20) / 20
+      pos[i * 3 + 1] = Math.floor(i / 20) / 10
+      nrm[i * 3 + 2] = 1
+    }
+    pos[200 * 3] = 1000
+    pos[201 * 3 + 1] = -1000
+    nrm[200 * 3 + 2] = 1
+    nrm[201 * 3 + 2] = 1
     let seen = null
-    generateMesh({ count: n, pos, nrm }, (i) => { seen = i; return empty() },
-      { depth: 4, mergeCell: 0.1, isolatedCellLeaves: 0, colorize: false }, () => {}) // leaf 1/16 < spacing: no subsample
+    generateMesh(
+      { count: n, pos, nrm },
+      (i) => {
+        seen = i
+        return empty()
+      },
+      { depth: 4, mergeCell: 0.1, isolatedCellLeaves: 0, colorize: false },
+      () => {},
+    ) // leaf 1/16 < spacing: no subsample
     expect(seen.pos.length / 3).toBe(200)
   })
 
   it('meshes a far-from-origin Float64 cloud in local coordinates and restores them exactly', () => {
     // Projected coordinates (UTM-like): f32 would round these to ~0.5 m.
-    const E = 512345.123, N = 6123456.789
+    const E = 512345.123,
+      N = 6123456.789
     const pos = Float64Array.from([E, N, 10, E + 1, N, 10, E, N + 1, 10, E + 1, N + 1, 10])
     const nrm = Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1])
     let seen = null
@@ -266,7 +332,12 @@ describe('generateMesh', () => {
     const m = generateMesh({ count: 4, pos, nrm }, fn, { depth: 2, mergeCell: 0.25, ...plain }, () => {})
     for (const v of seen.pos) expect(Math.abs(v)).toBeLessThan(2)
     expect(m.pos).toBeInstanceOf(Float64Array)
-    const want = [[E, N, 10], [E + 1, N, 10], [E, N + 1, 10], [E + 1, N + 1, 10]]
+    const want = [
+      [E, N, 10],
+      [E + 1, N, 10],
+      [E, N + 1, 10],
+      [E + 1, N + 1, 10],
+    ]
     for (let v = 0; v < 3; v++) {
       const got = [m.pos[v * 3], m.pos[v * 3 + 1], m.pos[v * 3 + 2]]
       expect(want.some((w) => w.every((c, k) => Math.abs(c - got[k]) < 1e-6))).toBe(true)
@@ -277,7 +348,11 @@ describe('generateMesh', () => {
     const n = 400
     const pos = new Float32Array(n * 3)
     const nrm = new Float32Array(n * 3)
-    for (let i = 0; i < n; i++) { pos[i * 3] = (i % 20) * 0.3; pos[i * 3 + 1] = Math.floor(i / 20) * 0.3; nrm[i * 3 + 2] = 1 }
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = (i % 20) * 0.3
+      pos[i * 3 + 1] = Math.floor(i / 20) * 0.3
+      nrm[i * 3 + 2] = 1
+    }
     const m = generateMesh({ count: n, pos, nrm }, empty, { depth: 6, ...plain }, () => {})
     expect(m.summary.spacingSource).toBe('estimated')
     expect(m.summary.spacing).toBeCloseTo(0.3, 5)
@@ -298,8 +373,12 @@ describe('resolveMeshDepth', () => {
 describe('robustBox', () => {
   it('excludes far stragglers but keeps a margin around the bulk', () => {
     const pos = new Float64Array(1000 * 3)
-    for (let i = 0; i < 998; i++) { pos[i * 3] = i / 998; pos[i * 3 + 1] = (i % 7) / 7 }
-    pos[998 * 3] = 500; pos[999 * 3 + 2] = -500
+    for (let i = 0; i < 998; i++) {
+      pos[i * 3] = i / 998
+      pos[i * 3 + 1] = (i % 7) / 7
+    }
+    pos[998 * 3] = 500
+    pos[999 * 3 + 2] = -500
     const b = robustBox(pos)
     expect(b.max[0]).toBeLessThan(2)
     expect(b.min[2]).toBeGreaterThan(-2)
@@ -308,7 +387,11 @@ describe('robustBox', () => {
   it('gives a thin axis the margin of the largest one', () => {
     // Near-planar: z noise of ±0.001 across a 10 × 10 extent.
     const pos = new Float64Array(500 * 3)
-    for (let i = 0; i < 500; i++) { pos[i * 3] = (i % 25) / 2.5; pos[i * 3 + 1] = Math.floor(i / 25) / 2; pos[i * 3 + 2] = ((i * 37) % 11 - 5) * 2e-4 }
+    for (let i = 0; i < 500; i++) {
+      pos[i * 3] = (i % 25) / 2.5
+      pos[i * 3 + 1] = Math.floor(i / 25) / 2
+      pos[i * 3 + 2] = (((i * 37) % 11) - 5) * 2e-4
+    }
     const b = robustBox(pos)
     expect(b.max[2] - b.min[2]).toBeGreaterThan(4)
   })
@@ -317,7 +400,10 @@ describe('robustBox', () => {
 describe('estimatePointSpacing', () => {
   it('returns the median nearest-neighbour distance of a regular grid', () => {
     const pos = new Float32Array(30 * 30 * 3)
-    for (let i = 0; i < 900; i++) { pos[i * 3] = (i % 30) * 0.02; pos[i * 3 + 1] = Math.floor(i / 30) * 0.02 }
+    for (let i = 0; i < 900; i++) {
+      pos[i * 3] = (i % 30) * 0.02
+      pos[i * 3 + 1] = Math.floor(i / 30) * 0.02
+    }
     expect(estimatePointSpacing(pos)).toBeCloseTo(0.02, 6)
   })
   it('returns 0 for fewer than two points', () => {
@@ -377,9 +463,9 @@ describe('subsampleForMesh', () => {
 
 describe('recommendMeshDepth', () => {
   it('grows ~½·log2(N) and clamps to [6, 12]', () => {
-    expect(recommendMeshDepth(0)).toBe(8)      // fallback
-    expect(recommendMeshDepth(100)).toBe(6)    // clamp low
+    expect(recommendMeshDepth(0)).toBe(8) // fallback
+    expect(recommendMeshDepth(100)).toBe(6) // clamp low
     expect(recommendMeshDepth(1_000_000)).toBe(10) // round(0.5·~19.9)
-    expect(recommendMeshDepth(1e12)).toBe(12)  // clamp high
+    expect(recommendMeshDepth(1e12)).toBe(12) // clamp high
   })
 })

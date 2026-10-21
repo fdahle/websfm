@@ -44,17 +44,25 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   const projectsStore = useProjectsStore()
   const { projects, currentProjectId, currentProjectName } = storeToRefs(projectsStore)
   const {
-    createProject, switchProject, deleteProjectById, exportProject, importProject,
-    openPlan, reconnectProjectFolder, relinkProjectFolder,
-    createFolderProject, adoptFolderProject, moveProjectToFolder, moveProjectToBrowser, setProjectCrs,
+    createProject,
+    switchProject,
+    deleteProjectById,
+    exportProject,
+    importProject,
+    openPlan,
+    reconnectProjectFolder,
+    relinkProjectFolder,
+    createFolderProject,
+    adoptFolderProject,
+    moveProjectToFolder,
+    moveProjectToBrowser,
+    setProjectCrs,
   } = projectsStore
   const gcpsStore = useGcpsStore()
   const footprintsStore = useFootprintsStore()
   const posesStore = usePosesStore()
   const reconstructionStore = useReconstructionStore()
-  const {
-    projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
-  } = storeToRefs(useModalsStore())
+  const { projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen } = storeToRefs(useModalsStore())
 
   const imagesStore = useImagesStore()
   const matchesStore = useMatchesStore()
@@ -134,13 +142,19 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     for (const img of images.value) keypoints += img.kpCount ?? 0
     let matches = 0
     for (const entry of matchesStore.matchStore.values()) matches += entry.nMatches ?? 0
-    const kc = imagesStore.keypointCacheStats(), mc = matchesStore.matchCacheStats()
+    const kc = imagesStore.keypointCacheStats(),
+      mc = matchesStore.matchCacheStats()
     const mem = globalThis.performance?.memory
-    log(`Heap inventory: ${keypoints.toLocaleString()} keypoints (${pluralize(kc.entries, 'image')} resident, `
-      + `${formatBytes(kc.bytes)} typed), ${matches.toLocaleString()} matches (${pluralize(mc.entries, 'pair')} resident, `
-      + `${formatBytes(mc.bytes)} typed)`
-      + (mem?.usedJSHeapSize ? ` · JS memory (heap + ArrayBuffers) ${formatBytes(mem.usedJSHeapSize)}, heap limit ${formatBytes(mem.jsHeapSizeLimit)}` : ''),
-    'info', 'Project')
+    log(
+      `Heap inventory: ${keypoints.toLocaleString()} keypoints (${pluralize(kc.entries, 'image')} resident, ` +
+        `${formatBytes(kc.bytes)} typed), ${matches.toLocaleString()} matches (${pluralize(mc.entries, 'pair')} resident, ` +
+        `${formatBytes(mc.bytes)} typed)` +
+        (mem?.usedJSHeapSize
+          ? ` · JS memory (heap + ArrayBuffers) ${formatBytes(mem.usedJSHeapSize)}, heap limit ${formatBytes(mem.jsHeapSizeLimit)}`
+          : ''),
+      'info',
+      'Project',
+    )
   }
 
   // ── Open ────────────────────────────────────────────────────────────────────
@@ -178,7 +192,9 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     if (!projectData) {
       log('Could not open project: project.json is missing or unreadable', 'error', 'Project')
       showToast('Could not open project', {
-        detail: 'project.json is missing or unreadable', kind: 'error', ms: 6000,
+        detail: 'project.json is missing or unreadable',
+        kind: 'error',
+        ms: 6000,
       })
       return false
     }
@@ -227,24 +243,37 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
         refreshQueued = true
         requestAnimationFrame(refreshProgress)
       }
-      const imagesDone = timed('images', () => restoreImages(projectData.images || [], id, (done, total, label) => {
-        imagesState = { done, total, label }
-        queueProgress()
-      }, { groups: projectData.imageGroups })).then(() => {
+      const imagesDone = timed('images', () =>
+        restoreImages(
+          projectData.images || [],
+          id,
+          (done, total, label) => {
+            imagesState = { done, total, label }
+            queueProgress()
+          },
+          { groups: projectData.imageGroups },
+        ),
+      ).then(() => {
         imagesState = null
         refreshProgress()
       })
-      const storesDone = timed('project stores', () => restoreProjectStores({
-        projectId: id, projectData, isCurrent: () => currentProjectId.value === id,
-        onProgress: (store, state) => { storeStates.set(store, state); queueProgress() },
-      }))
+      const storesDone = timed('project stores', () =>
+        restoreProjectStores({
+          projectId: id,
+          projectData,
+          isCurrent: () => currentProjectId.value === id,
+          onProgress: (store, state) => {
+            storeStates.set(store, state)
+            queueProgress()
+          },
+        }),
+      )
       const [, storeTimings] = await Promise.all([imagesDone, storesDone])
       const detail = [...timings, ...storeTimings.map(({ store, ms }) => ({ phase: store, ms }))]
         .sort((a, b) => b.ms - a.ms)
         .map(({ phase, ms }) => `${phase} ${Math.round(ms)} ms`)
         .join(' · ')
-      log(`Project load timing: ${Math.round(performance.now() - loadStarted)} ms total — ${detail}`,
-        'info', 'Project')
+      log(`Project load timing: ${Math.round(performance.now() - loadStarted)} ms total — ${detail}`, 'info', 'Project')
       logHeapInventory()
       // restore() sets selectedCloud, which the watcher pushes into the viewer.
     })
@@ -282,12 +311,15 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       } catch (err) {
         res = { ok: false, error: String(err?.message ?? err) }
       }
-      if (!res.ok && res.needsConfirm
-          && await confirmDialog({
-            title: 'Folder not empty',
-            message: `"${dirHandle.name}" is not empty. Create the project in it anyway?`,
-            confirmLabel: 'Create',
-          })) {
+      if (
+        !res.ok &&
+        res.needsConfirm &&
+        (await confirmDialog({
+          title: 'Folder not empty',
+          message: `"${dirHandle.name}" is not empty. Create the project in it anyway?`,
+          confirmLabel: 'Create',
+        }))
+      ) {
         try {
           res = await createFolderProject(name, sceneType, crs, dirHandle, { confirmed: true })
         } catch (err) {
@@ -318,13 +350,18 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     newProjectOpen.value = false
     let files
     try {
-      files = await withLoadingOverlay(`Downloading example "${example.title}"…`, () => downloadExample(id, {
-        onProgress: ({ done, total, bytes, totalBytes }) => {
-          projectLoadingProgress.value = {
-            done, total, label: 'Images', detail: `${formatBytes(bytes)} of ${formatBytes(totalBytes)}`,
-          }
-        },
-      }))
+      files = await withLoadingOverlay(`Downloading example "${example.title}"…`, () =>
+        downloadExample(id, {
+          onProgress: ({ done, total, bytes, totalBytes }) => {
+            projectLoadingProgress.value = {
+              done,
+              total,
+              label: 'Images',
+              detail: `${formatBytes(bytes)} of ${formatBytes(totalBytes)}`,
+            }
+          },
+        }),
+      )
     } catch (err) {
       const detail = String(err?.message ?? err)
       log(`Could not download the example: ${detail}`, 'error', 'Project')
@@ -332,15 +369,21 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       // Back to where the user came from, never to an empty, project-less app.
       if (!currentProjectId.value) {
         if (projects.value.length) projectPickerOpen.value = true
-        else { newProjectCanCancel.value = false; newProjectOpen.value = true }
+        else {
+          newProjectCanCancel.value = false
+          newProjectOpen.value = true
+        }
       }
       return
     }
     const before = currentProjectId.value
     await handleCreateProject({ name: example.title, sceneType: example.sceneType, crs: example.crs })
     if (!currentProjectId.value || currentProjectId.value === before) return
-    log(`Example "${example.title}": ${files.length} images from ${example.credit} (${example.license})`,
-      'info', 'Project')
+    log(
+      `Example "${example.title}": ${files.length} images from ${example.credit} (${example.license})`,
+      'info',
+      'Project',
+    )
     await imagesStore.addImages(files)
     if (example.tutorial) useGuideStore().openOp(example.tutorial)
   }
@@ -361,7 +404,8 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   const folderPrompt = ref(null)
 
   const folderPromptProject = computed(() =>
-    folderPrompt.value ? projects.value.find((p) => p.id === folderPrompt.value.id) || null : null)
+    folderPrompt.value ? projects.value.find((p) => p.id === folderPrompt.value.id) || null : null,
+  )
 
   async function pickDirectory() {
     try {
@@ -379,7 +423,10 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     const prompt = folderPrompt.value
     if (!prompt) return
     const res = await reconnectProjectFolder(prompt.id)
-    if (!res.ok) { folderPrompt.value = { ...prompt, action: 'repick', error: res.error }; return }
+    if (!res.ok) {
+      folderPrompt.value = { ...prompt, action: 'repick', error: res.error }
+      return
+    }
     folderPrompt.value = null
     await openProject(prompt.id)
   }
@@ -391,7 +438,10 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     const dirHandle = await pickDirectory()
     if (!dirHandle) return
     const res = await relinkProjectFolder(prompt.id, dirHandle)
-    if (!res.ok) { folderPrompt.value = { ...prompt, error: res.error }; return }
+    if (!res.ok) {
+      folderPrompt.value = { ...prompt, error: res.error }
+      return
+    }
     folderPrompt.value = null
     await openProject(prompt.id)
   }
@@ -435,12 +485,15 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     let moved = false
     await withLoadingOverlay('Moving project to folder…', async () => {
       let res = await moveProjectToFolder(id, dirHandle, { onProgress: fileProgress })
-      if (!res.ok && res.needsConfirm
-          && await confirmDialog({
-            title: 'Folder not empty',
-            message: `"${dirHandle.name}" is not empty. Move the project into it anyway?`,
-            confirmLabel: 'Move',
-          })) {
+      if (
+        !res.ok &&
+        res.needsConfirm &&
+        (await confirmDialog({
+          title: 'Folder not empty',
+          message: `"${dirHandle.name}" is not empty. Move the project into it anyway?`,
+          confirmLabel: 'Move',
+        }))
+      ) {
         res = await moveProjectToFolder(id, dirHandle, { confirmed: true })
       }
       if (res.ok) {
@@ -458,12 +511,16 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   async function moveCurrentProjectToBrowser(id = currentProjectId.value) {
     if (!id || refuseWhileBusy('Move project')) return
     await flushProjectWork()
-    if (!(await confirmDialog({
-      title: 'Move into browser storage?',
-      message: 'Copy this project into browser storage? The folder on disk is left in place, '
-        + 'and websfm will stop writing to it.',
-      confirmLabel: 'Copy',
-    }))) return
+    if (
+      !(await confirmDialog({
+        title: 'Move into browser storage?',
+        message:
+          'Copy this project into browser storage? The folder on disk is left in place, ' +
+          'and websfm will stop writing to it.',
+        confirmLabel: 'Copy',
+      }))
+    )
+      return
     let moved = false
     await withLoadingOverlay('Moving project into browser storage…', async () => {
       const res = await moveProjectToBrowser(id, { onProgress: fileProgress })
@@ -540,11 +597,14 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     const prevCrs = projects.value.find((p) => p.id === currentProjectId.value)?.crs || 'EPSG:4326'
     if (crs === prevCrs) return false
     await ensureProjection(crs).catch(() => {})
-    if (!(await confirmDialog({
-      title: 'Change the project CRS?',
-      message: crsChangeMessage(prevCrs, crs),
-      confirmLabel: 'Change CRS',
-    }))) return false
+    if (
+      !(await confirmDialog({
+        title: 'Change the project CRS?',
+        message: crsChangeMessage(prevCrs, crs),
+        confirmLabel: 'Change CRS',
+      }))
+    )
+      return false
     await setProjectCrs(currentProjectId.value, crs, async (fromCrs, toCrs) => {
       await gcpsStore.reprojectGcps(fromCrs, toCrs)
       await footprintsStore.reprojectFootprints(fromCrs, toCrs)
@@ -555,7 +615,10 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   }
 
   function crsChangeMessage(fromCrs, toCrs) {
-    const named = (code) => { const n = crsInfo(code).name; return n && n !== code ? `${code} (${n})` : code }
+    const named = (code) => {
+      const n = crsInfo(code).name
+      return n && n !== code ? `${code} (${n})` : code
+    }
     const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
     const polygons = footprintsStore.sets.reduce((n, s) => n + s.footprints.length, 0)
     const moved = [
@@ -563,10 +626,14 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       posesStore.poses.length && count(posesStore.poses.length, 'camera position'),
       polygons && count(polygons, 'footprint polygon'),
     ].filter(Boolean)
-    return `Switch from ${named(fromCrs)} to ${named(toCrs)}. `
-      + (moved.length ? `${moved.join(', ')} will be reprojected into the new CRS. ` : 'Nothing stored in the project needs reprojecting. ')
-      + (reconstructionStore.georef ? 'The current georeference is cleared; run Georeference again afterwards. ' : '')
-      + 'Imported rasters, DEMs and orthophotos keep the CRS they were made in.'
+    return (
+      `Switch from ${named(fromCrs)} to ${named(toCrs)}. ` +
+      (moved.length
+        ? `${moved.join(', ')} will be reprojected into the new CRS. `
+        : 'Nothing stored in the project needs reprojecting. ') +
+      (reconstructionStore.georef ? 'The current georeference is cleared; run Georeference again afterwards. ' : '') +
+      'Imported rasters, DEMs and orthophotos keep the CRS they were made in.'
+    )
   }
 
   // The one-click projected CRS offered while the project CRS is geographic
@@ -575,14 +642,20 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   async function applyCrsSuggestion(suggestion) {
     if (!suggestion?.code) return
     if (!(await handleSetCrs(suggestion.code))) return
-    log(`Project CRS ${suggestion.code} (${suggestion.name}) was suggested from the median of `
-      + `${pluralize(suggestion.count, 'camera position')} at ${suggestion.lat.toFixed(4)}, ${suggestion.lon.toFixed(4)} (lat, lon)`,
-    'info', 'Project')
+    log(
+      `Project CRS ${suggestion.code} (${suggestion.name}) was suggested from the median of ` +
+        `${pluralize(suggestion.count, 'camera position')} at ${suggestion.lat.toFixed(4)}, ${suggestion.lon.toFixed(4)} (lat, lon)`,
+      'info',
+      'Project',
+    )
   }
 
   // ── Project picker actions ──────────────────────────────────────────────────
   async function handleSwitchProject(id) {
-    if (id === currentProjectId.value) { projectPickerOpen.value = false; return }
+    if (id === currentProjectId.value) {
+      projectPickerOpen.value = false
+      return
+    }
     projectPickerOpen.value = false
     await openProject(id)
   }
@@ -614,12 +687,25 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   }
 
   return {
-    projectLoading, projectLoadingProgress, projectLoadingLabel,
-    handleCreateProject, handleCancelNewProject, openExample,
-    folderPrompt, folderPromptProject,
-    onFolderConnect, onFolderRepick, openProjectFolder,
-    moveCurrentProjectToFolder, moveCurrentProjectToBrowser,
-    onSaveProject, importProjectFile, onProjectFilePick,
-    handleSwitchProject, handleDeleteProject, handleSetCrs, applyCrsSuggestion,
+    projectLoading,
+    projectLoadingProgress,
+    projectLoadingLabel,
+    handleCreateProject,
+    handleCancelNewProject,
+    openExample,
+    folderPrompt,
+    folderPromptProject,
+    onFolderConnect,
+    onFolderRepick,
+    openProjectFolder,
+    moveCurrentProjectToFolder,
+    moveCurrentProjectToBrowser,
+    onSaveProject,
+    importProjectFile,
+    onProjectFilePick,
+    handleSwitchProject,
+    handleDeleteProject,
+    handleSetCrs,
+    applyCrsSuggestion,
   }
 }

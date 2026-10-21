@@ -1,5 +1,10 @@
-import init, { recover_pose, triangulate_dlt, solve_pnp, bundle_adjust, compute_depth_map }
-  from '../../wasm/reconstruction/reconstruction.js'
+import init, {
+  recover_pose,
+  triangulate_dlt,
+  solve_pnp,
+  bundle_adjust,
+  compute_depth_map,
+} from '../../wasm/reconstruction/reconstruction.js'
 import { isObservationList } from './baObservations.js'
 import { SFM_TUNING } from '../tuning.js'
 import { isKnownAerialFilmWidth, scanWidthPx, usesFormatWidth } from './filmFormat.js'
@@ -26,21 +31,26 @@ let threadedPromise = null
 function threadedWasm(cap) {
   if (!(cap > 0)) return Promise.resolve(null)
   if (threadedPromise) return threadedPromise
-  const usable = typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated === true
-    && typeof globalThis.WorkerGlobalScope === 'function' && globalThis instanceof globalThis.WorkerGlobalScope
-  threadedPromise = !usable ? Promise.resolve(null) : (async () => {
-    try {
-      const mt = await import('../../wasm/reconstruction-mt/reconstruction.js')
-      await mt.default()
-      const threads = Math.max(1, Math.min(cap, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1))
-      await mt.initThreadPool(threads)
-      threadedThreads = threads
-      return mt
-    } catch (err) {
-      console.warn(`Bundle adjustment: the threaded build did not start (${err?.message ?? err}); using one thread`)
-      return null
-    }
-  })()
+  const usable =
+    typeof SharedArrayBuffer !== 'undefined' &&
+    globalThis.crossOriginIsolated === true &&
+    typeof globalThis.WorkerGlobalScope === 'function' &&
+    globalThis instanceof globalThis.WorkerGlobalScope
+  threadedPromise = !usable
+    ? Promise.resolve(null)
+    : (async () => {
+        try {
+          const mt = await import('../../wasm/reconstruction-mt/reconstruction.js')
+          await mt.default()
+          const threads = Math.max(1, Math.min(cap, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1))
+          await mt.initThreadPool(threads)
+          threadedThreads = threads
+          return mt
+        } catch (err) {
+          console.warn(`Bundle adjustment: the threaded build did not start (${err?.message ?? err}); using one thread`)
+          return null
+        }
+      })()
   return threadedPromise
 }
 let threadedThreads = 0
@@ -50,14 +60,29 @@ let threadedThreads = 0
 // equivalent and no focal-plane resolution. Extend as needed.
 const SENSOR_WIDTH_MM = [
   // Full-frame (~36mm)
-  ['canon eos 5d', 35.8], ['canon eos 6d', 35.8], ['canon eos r', 36.0], ['canon eos-1d x', 36.0],
-  ['nikon d6', 35.9], ['nikon d8', 35.9], ['nikon z', 35.9],
-  ['sony ilce-7', 35.6], ['sony ilce-9', 35.6], ['sony dsc-rx1', 35.8],
+  ['canon eos 5d', 35.8],
+  ['canon eos 6d', 35.8],
+  ['canon eos r', 36.0],
+  ['canon eos-1d x', 36.0],
+  ['nikon d6', 35.9],
+  ['nikon d8', 35.9],
+  ['nikon z', 35.9],
+  ['sony ilce-7', 35.6],
+  ['sony ilce-9', 35.6],
+  ['sony dsc-rx1', 35.8],
   // APS-C (~23.5mm)
-  ['canon eos 7d', 22.3], ['canon eos 80d', 22.3], ['canon eos 90d', 22.3], ['canon eos m', 22.3],
-  ['nikon d3', 23.5], ['nikon d5', 23.5], ['nikon d7', 23.5], ['sony ilce-6', 23.5],
+  ['canon eos 7d', 22.3],
+  ['canon eos 80d', 22.3],
+  ['canon eos 90d', 22.3],
+  ['canon eos m', 22.3],
+  ['nikon d3', 23.5],
+  ['nikon d5', 23.5],
+  ['nikon d7', 23.5],
+  ['sony ilce-6', 23.5],
   // Micro-Four-Thirds
-  ['dmc-gh', 17.3], ['dc-gh', 17.3], ['e-m', 17.3],
+  ['dmc-gh', 17.3],
+  ['dc-gh', 17.3],
+  ['e-m', 17.3],
 ]
 
 function sensorWidthFromDb(meta) {
@@ -75,7 +100,7 @@ export function sensorWidthMm(meta) {
   if (res && w) {
     const unitMm = meta?.focalPlaneResUnit === 3 ? 10 : meta?.focalPlaneResUnit === 4 ? 1 : 25.4
     const mm = (w / res) * unitMm
-    if (mm > 1 && mm < 80) return mm   // reject implausible values from bad EXIF
+    if (mm > 1 && mm < 80) return mm // reject implausible values from bad EXIF
   }
   return sensorWidthFromDb(meta)
 }
@@ -107,7 +132,7 @@ export function resolveK(meta, sensor = null) {
   }
 
   // A focal in mm only — px focals are handled separately in path 1.
-  const sensorFocalMm = (sensor?.focal != null && sensor.focalUnit !== 'px') ? sensor.focal : null
+  const sensorFocalMm = sensor?.focal != null && sensor.focalUnit !== 'px' ? sensor.focal : null
 
   // 1. Sensor with an explicit pixel focal — the edited table wins outright.
   if (sensor?.focal != null && sensor.focalUnit === 'px') {
@@ -135,7 +160,10 @@ export function resolveK(meta, sensor = null) {
     // full-frame scan at the wrong pitch) silently distorts every focal downstream.
     const impliedFilmWidthMm = w * sensor.pixelSize
     return {
-      fx, fy: fx, cx, cy,
+      fx,
+      fy: fx,
+      cx,
+      cy,
       source: `sensor table (${sensorFocalMm}mm ÷ ${sensor.pixelSize}mm/px)`,
       impliedFilmWidthMm,
       filmWidthOk: isKnownAerialFilmWidth(impliedFilmWidthMm),
@@ -187,9 +215,18 @@ export function estimateK(meta) {
 // R is row-major 3×3, t is [tx, ty, tz].
 export function makeP34flat(R, t) {
   return new Float32Array([
-    R[0][0], R[0][1], R[0][2], t[0],
-    R[1][0], R[1][1], R[1][2], t[1],
-    R[2][0], R[2][1], R[2][2], t[2],
+    R[0][0],
+    R[0][1],
+    R[0][2],
+    t[0],
+    R[1][0],
+    R[1][1],
+    R[1][2],
+    t[1],
+    R[2][0],
+    R[2][1],
+    R[2][2],
+    t[2],
   ])
 }
 
@@ -198,18 +235,34 @@ export function makeP34flat(R, t) {
 // Returns 9-element Float32Array (row-major).
 export function fundamentalToEssential(F, Ka, Kb) {
   // K as 3×3
-  const ka = [[Ka.fx,0,Ka.cx],[0,Ka.fy,Ka.cy],[0,0,1]]
-  const kb = [[Kb.fx,0,Kb.cx],[0,Kb.fy,Kb.cy],[0,0,1]]
+  const ka = [
+    [Ka.fx, 0, Ka.cx],
+    [0, Ka.fy, Ka.cy],
+    [0, 0, 1],
+  ]
+  const kb = [
+    [Kb.fx, 0, Kb.cx],
+    [0, Kb.fy, Kb.cy],
+    [0, 0, 1],
+  ]
   // E = Kb^T * F * Ka
   const mul = (A, B) => {
-    const C = [[0,0,0],[0,0,0],[0,0,0]]
-    for (let i=0;i<3;i++) for (let j=0;j<3;j++) for (let k=0;k<3;k++) C[i][j]+=A[i][k]*B[k][j]
+    const C = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ]
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) C[i][j] += A[i][k] * B[k][j]
     return C
   }
-  const kbT = [[kb[0][0],kb[1][0],kb[2][0]],[kb[0][1],kb[1][1],kb[2][1]],[kb[0][2],kb[1][2],kb[2][2]]]
+  const kbT = [
+    [kb[0][0], kb[1][0], kb[2][0]],
+    [kb[0][1], kb[1][1], kb[2][1]],
+    [kb[0][2], kb[1][2], kb[2][2]],
+  ]
   const FKa = mul(F, ka)
   const E = mul(kbT, FKa)
-  return new Float32Array([E[0][0],E[0][1],E[0][2],E[1][0],E[1][1],E[1][2],E[2][0],E[2][1],E[2][2]])
+  return new Float32Array([E[0][0], E[0][1], E[0][2], E[1][0], E[1][1], E[1][2], E[2][0], E[2][1], E[2][2]])
 }
 
 // Recover camera B pose from essential matrix E via cheirality check.
@@ -227,15 +280,21 @@ export async function recoverPose(ptsA, ptsB, E, Ka, Kb = Ka) {
   const flatA = new Float32Array(n * 2)
   const flatB = new Float32Array(n * 2)
   for (let i = 0; i < n; i++) {
-    flatA[i*2] = (ptsA[i].x - Ka.cx) / Ka.fx; flatA[i*2+1] = (ptsA[i].y - Ka.cy) / Ka.fy
-    flatB[i*2] = (ptsB[i].x - Kb.cx) / Kb.fx; flatB[i*2+1] = (ptsB[i].y - Kb.cy) / Kb.fy
+    flatA[i * 2] = (ptsA[i].x - Ka.cx) / Ka.fx
+    flatA[i * 2 + 1] = (ptsA[i].y - Ka.cy) / Ka.fy
+    flatB[i * 2] = (ptsB[i].x - Kb.cx) / Kb.fx
+    flatB[i * 2 + 1] = (ptsB[i].y - Kb.cy) / Kb.fy
   }
 
   const raw = recover_pose(flatA, flatB, E, 1, 1, 0, 0)
   if (!raw || raw.length < 12) return null
 
   return {
-    R: [[raw[0],raw[1],raw[2]],[raw[3],raw[4],raw[5]],[raw[6],raw[7],raw[8]]],
+    R: [
+      [raw[0], raw[1], raw[2]],
+      [raw[3], raw[4], raw[5]],
+      [raw[6], raw[7], raw[8]],
+    ],
     t: [raw[9], raw[10], raw[11]],
   }
 }
@@ -252,14 +311,18 @@ export async function triangulateDlt(ptsA, ptsB, PA, PB) {
   const flatA = new Float32Array(n * 2)
   const flatB = new Float32Array(n * 2)
   for (let i = 0; i < n; i++) {
-    flatA[i*2] = ptsA[i].x; flatA[i*2+1] = ptsA[i].y
-    flatB[i*2] = ptsB[i].x; flatB[i*2+1] = ptsB[i].y
+    flatA[i * 2] = ptsA[i].x
+    flatA[i * 2 + 1] = ptsA[i].y
+    flatB[i * 2] = ptsB[i].x
+    flatB[i * 2 + 1] = ptsB[i].y
   }
 
   const raw = triangulate_dlt(flatA, flatB, PA, PB)
   const pts = []
   for (let i = 0; i < n; i++) {
-    const x = raw[i*3], y = raw[i*3+1], z = raw[i*3+2]
+    const x = raw[i * 3],
+      y = raw[i * 3 + 1],
+      z = raw[i * 3 + 2]
     if (!isNaN(x) && !isNaN(y) && !isNaN(z) && isFinite(x) && isFinite(y) && isFinite(z)) {
       pts.push({ x, y, z, srcIdx: i })
     }
@@ -279,15 +342,22 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
   const flat3 = new Float32Array(n * 3)
   const flat2 = new Float32Array(n * 2)
   for (let i = 0; i < n; i++) {
-    flat3[i*3] = pts3d[i].x; flat3[i*3+1] = pts3d[i].y; flat3[i*3+2] = pts3d[i].z
-    flat2[i*2] = pts2d[i].x; flat2[i*2+1] = pts2d[i].y
+    flat3[i * 3] = pts3d[i].x
+    flat3[i * 3 + 1] = pts3d[i].y
+    flat3[i * 3 + 2] = pts3d[i].z
+    flat2[i * 2] = pts2d[i].x
+    flat2[i * 2 + 1] = pts2d[i].y
   }
 
   const raw = solve_pnp(flat3, flat2, K.fx, K.fy, K.cx, K.cy, ransacThreshPx, maxIters)
   if (!raw || raw.length < 12 + n) return null
 
   return {
-    R: [[raw[0],raw[1],raw[2]],[raw[3],raw[4],raw[5]],[raw[6],raw[7],raw[8]]],
+    R: [
+      [raw[0], raw[1], raw[2]],
+      [raw[3], raw[4], raw[5]],
+      [raw[6], raw[7], raw[8]],
+    ],
     t: [raw[9], raw[10], raw[11]],
     inlierMask: Array.from(raw.slice(12)),
   }
@@ -339,19 +409,36 @@ export function refineModeMask(spec) {
   return mask
 }
 // The fixed solver-stats block bundle.rs writes after the four scalars (BA_STATS_LEN).
-export const BA_SOLVER_KEYS = ['n', 'solves', 'cholesky', 'pcgConverged', 'pcgPartial',
-  'pcgFallback', 'pcgNotPd', 'pcgIters', 'pcgItersMax']
+export const BA_SOLVER_KEYS = [
+  'n',
+  'solves',
+  'cholesky',
+  'pcgConverged',
+  'pcgPartial',
+  'pcgFallback',
+  'pcgNotPd',
+  'pcgIters',
+  'pcgItersMax',
+]
 
 // bundle.rs `solver_flat`; NaN keeps that slot's crate default.
 export function baSolverFlat(solver = {}) {
   const num = (v) => (v == null || v === '' ? NaN : Number(v))
-  const { pcgMinN, pcgRelTol, pcgMaxIter, pcgAcceptPartial, functionTolerance, pcgPreconditioner, direct, warm } = solver ?? {}
+  const { pcgMinN, pcgRelTol, pcgMaxIter, pcgAcceptPartial, functionTolerance, pcgPreconditioner, direct, warm } =
+    solver ?? {}
   // pcgPreconditioner: 'jacobi' (default) | 'ic0' (block incomplete Cholesky, opt-in).
   // direct: a sparse block Cholesky wherever PCG would run (bundle.rs, sparse_chol.rs).
   // warm: a re-solve of a converged model; the direct solve stops earlier (bundle.rs).
-  return Float32Array.of(num(pcgMinN), num(pcgRelTol), num(pcgMaxIter),
-    pcgAcceptPartial == null ? NaN : (pcgAcceptPartial ? 1 : 0), num(functionTolerance),
-    pcgPreconditioner === 'ic0' ? 1 : NaN, direct == null ? NaN : (direct ? 1 : 0), warm ? 1 : NaN)
+  return Float32Array.of(
+    num(pcgMinN),
+    num(pcgRelTol),
+    num(pcgMaxIter),
+    pcgAcceptPartial == null ? NaN : pcgAcceptPartial ? 1 : 0,
+    num(functionTolerance),
+    pcgPreconditioner === 'ic0' ? 1 : NaN,
+    direct == null ? NaN : direct ? 1 : 0,
+    warm ? 1 : NaN,
+  )
 }
 
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
@@ -359,8 +446,13 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const threaded = await threadedWasm((opts.solver ?? SFM_TUNING.baSolver)?.threads ?? 0)
   const adjust = threaded ? threaded.bundle_adjust : bundle_adjust
   const {
-    maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null,
-    gcpAnchors = [], cameraPriors = [], solver = SFM_TUNING.baSolver, flatPoints = false,
+    maxIters = 30,
+    refineIntrinsics = 'none',
+    sensorOfCam = null,
+    gcpAnchors = [],
+    cameraPriors = [],
+    solver = SFM_TUNING.baSolver,
+    flatPoints = false,
     fixedCams = null,
   } = opts
   const refineMode = refineModeMask(refineIntrinsics)
@@ -379,7 +471,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const camFlat = new Float32Array(nCam * 12)
   cameras.forEach(({ R, t }, c) => {
     const b = c * 12
-    camFlat.set([R[0][0],R[0][1],R[0][2],R[1][0],R[1][1],R[1][2],R[2][0],R[2][1],R[2][2],t[0],t[1],t[2]], b)
+    camFlat.set([R[0][0], R[0][1], R[0][2], R[1][0], R[1][1], R[1][2], R[2][0], R[2][1], R[2][2], t[0], t[1], t[2]], b)
   })
 
   const kFlat = new Float32Array(nCam * 4)
@@ -390,12 +482,16 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   // is a fisheye (the crate then runs exactly as before).
   const anyFisheye = intrinsics.some((k) => k?.fisheye)
   const fisheyeFlat = new Float32Array(anyFisheye ? nCam * 5 : 0)
-  if (anyFisheye) intrinsics.forEach((k, c) => {
-    if (k?.fisheye) fisheyeFlat.set([k.fisheyeTerms || 4, k.k1 || 0, k.k2 || 0, k.k3 || 0, k.k4 || 0], c * 5)
-  })
+  if (anyFisheye)
+    intrinsics.forEach((k, c) => {
+      if (k?.fisheye) fisheyeFlat.set([k.fisheyeTerms || 4, k.k1 || 0, k.k2 || 0, k.k3 || 0, k.k4 || 0], c * 5)
+    })
 
   const ptsFlat = flatIn ? Float32Array.from(points3d) : new Float32Array(nPts * 3)
-  if (!flatIn) points3d.forEach(({ x, y, z }, i) => { ptsFlat.set([x, y, z], i * 3) })
+  if (!flatIn)
+    points3d.forEach(({ x, y, z }, i) => {
+      ptsFlat.set([x, y, z], i * 3)
+    })
 
   // Indices as integers, pixels as floats: an f32 index is exact only to 2²⁴, so
   // above 16.7 M points observations attached to the wrong point (TODO ▸ SC-6).
@@ -406,37 +502,50 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   if (soa) {
     const { cam, pt, x, y, wx, wy } = observations
     for (let i = 0; i < nObs; i++) {
-      obsIdx[i * 2] = cam[i]; obsIdx[i * 2 + 1] = pt[i]; obsPx[i * 2] = x[i]; obsPx[i * 2 + 1] = y[i]
-      obsWFlat[i * 2] = wx ? weight(wx[i]) : 1; obsWFlat[i * 2 + 1] = wy ? weight(wy[i]) : 1
+      obsIdx[i * 2] = cam[i]
+      obsIdx[i * 2 + 1] = pt[i]
+      obsPx[i * 2] = x[i]
+      obsPx[i * 2 + 1] = y[i]
+      obsWFlat[i * 2] = wx ? weight(wx[i]) : 1
+      obsWFlat[i * 2 + 1] = wy ? weight(wy[i]) : 1
     }
   } else {
     observations.forEach(({ camIdx, ptIdx, x, y, weightX = 1, weightY = 1 }, i) => {
-      obsIdx[i * 2] = camIdx; obsIdx[i * 2 + 1] = ptIdx; obsPx[i * 2] = x; obsPx[i * 2 + 1] = y
+      obsIdx[i * 2] = camIdx
+      obsIdx[i * 2 + 1] = ptIdx
+      obsPx[i * 2] = x
+      obsPx[i * 2 + 1] = y
       obsWFlat.set([weightX, weightY].map(weight), i * 2)
     })
   }
 
   // Doubles: the point index exact at any size, the survey targets at full precision.
-  const anchorFlat  = new Float64Array(gcpAnchors.length * 4)
+  const anchorFlat = new Float64Array(gcpAnchors.length * 4)
   const anchorWFlat = new Float32Array(gcpAnchors.length * 9)
   gcpAnchors.forEach(({ ptIdx, target, precision, weights, weight }, i) => {
     anchorFlat.set([ptIdx, target[0], target[1], target[2]], i * 4)
     const axisWeights = weights ?? [weight, weight, weight]
-    const matrix = precision ?? [[axisWeights[0],0,0],[0,axisWeights[1],0],[0,0,axisWeights[2]]]
-    anchorWFlat.set(matrix.flat().map((value, j) => Number.isFinite(value)
-      ? value : (j % 4 === 0 ? 1 : 0)), i * 9)
+    const matrix = precision ?? [
+      [axisWeights[0], 0, 0],
+      [0, axisWeights[1], 0],
+      [0, 0, axisWeights[2]],
+    ]
+    anchorWFlat.set(
+      matrix.flat().map((value, j) => (Number.isFinite(value) ? value : j % 4 === 0 ? 1 : 0)),
+      i * 9,
+    )
   })
 
   // Row layout is shared with bundle.rs. A zero orientation-precision matrix
   // means position-only (EXIF or an imported row without complete OPK angles).
   const cameraPriorFlat = new Float32Array(cameraPriors.length * 25)
   cameraPriors.forEach(({ camIdx, target, weights, targetR, orientationPrecision }, i) => {
-    const R = targetR?.flat() ?? [1,0,0,0,1,0,0,0,1]
+    const R = targetR?.flat() ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
     const P = orientationPrecision?.flat() ?? Array(9).fill(0)
-    cameraPriorFlat.set([
-      camIdx, target[0], target[1], target[2], weights[0], weights[1], weights[2],
-      ...R, ...P,
-    ], i * 25)
+    cameraPriorFlat.set(
+      [camIdx, target[0], target[1], target[2], weights[0], weights[1], weights[2], ...R, ...P],
+      i * 25,
+    )
   })
 
   // sensor_of_cam: aligned to `cameras`; -1 (own group) where unknown. Empty/all-−1
@@ -454,8 +563,21 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
 
   const tCall = performance.now()
   const raw = adjust(
-    camFlat, kFlat, ptsFlat, obsIdx, obsPx, obsWFlat, anchorFlat, anchorWFlat, cameraPriorFlat,
-    maxIters, sensorFlat, refineMode, baSolverFlat(solver), fixedMask, fisheyeFlat,
+    camFlat,
+    kFlat,
+    ptsFlat,
+    obsIdx,
+    obsPx,
+    obsWFlat,
+    anchorFlat,
+    anchorWFlat,
+    cameraPriorFlat,
+    maxIters,
+    sensorFlat,
+    refineMode,
+    baSolverFlat(solver),
+    fixedMask,
+    fisheyeFlat,
   )
   const ms = performance.now() - tCall
   // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×8 = fx,fy,cx,cy,k1,k2,k3,k4),
@@ -466,36 +588,62 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const traceBase = base + 4 + BA_SOLVER_KEYS.length
   if (!raw || raw.length < traceBase) return null
   const costBefore = raw[base]
-  const costAfter  = raw[base + 1]
+  const costAfter = raw[base + 1]
   const anchorRmsAfter = raw[base + 2]
   const cameraPriorRmsAfter = raw[base + 3]
   const solverStats = Object.fromEntries(BA_SOLVER_KEYS.map((k, i) => [k, raw[base + 4 + i]]))
-  const costTrace  = raw.length > traceBase ? Array.from(raw.slice(traceBase)) : []
+  const costTrace = raw.length > traceBase ? Array.from(raw.slice(traceBase)) : []
 
   const outCameras = cameras.map((_, c) => {
     const b = c * 12
     return {
-      R: [[raw[b],raw[b+1],raw[b+2]],[raw[b+3],raw[b+4],raw[b+5]],[raw[b+6],raw[b+7],raw[b+8]]],
-      t: [raw[b+9], raw[b+10], raw[b+11]],
+      R: [
+        [raw[b], raw[b + 1], raw[b + 2]],
+        [raw[b + 3], raw[b + 4], raw[b + 5]],
+        [raw[b + 6], raw[b + 7], raw[b + 8]],
+      ],
+      t: [raw[b + 9], raw[b + 10], raw[b + 11]],
     }
   })
 
   const ptsBase = nCam * 12
   const outPos = flatPoints ? Float64Array.from(raw.subarray(ptsBase, ptsBase + nPts * 3)) : null
-  const outPoints = flatPoints ? null : Array.from({ length: nPts }, (_, i) => ({
-    x: raw[ptsBase + i*3], y: raw[ptsBase + i*3+1], z: raw[ptsBase + i*3+2],
-  }))
+  const outPoints = flatPoints
+    ? null
+    : Array.from({ length: nPts }, (_, i) => ({
+        x: raw[ptsBase + i * 3],
+        y: raw[ptsBase + i * 3 + 1],
+        z: raw[ptsBase + i * 3 + 2],
+      }))
 
   const outIntrinsics = cameras.map((_, c) => {
     const b = intrBase + c * 8
-    const k = { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3], k1: raw[b+4], k2: raw[b+5], k3: raw[b+6], k4: raw[b+7] }
+    const k = {
+      fx: raw[b],
+      fy: raw[b + 1],
+      cx: raw[b + 2],
+      cy: raw[b + 3],
+      k1: raw[b + 4],
+      k2: raw[b + 5],
+      k3: raw[b + 6],
+      k4: raw[b + 7],
+    }
     return intrinsics[c]?.fisheye ? { ...k, fisheye: true, fisheyeTerms: intrinsics[c].fisheyeTerms } : k
   })
 
   return {
-    cameras: outCameras, points3d: outPoints, pos: outPos, intrinsics: outIntrinsics,
-    costBefore, costAfter, costTrace, anchorRmsAfter, cameraPriorRmsAfter,
-    solver: solverStats, ms, threads: threaded ? threadedThreads : 1,
+    cameras: outCameras,
+    points3d: outPoints,
+    pos: outPos,
+    intrinsics: outIntrinsics,
+    costBefore,
+    costAfter,
+    costTrace,
+    anchorRmsAfter,
+    cameraPriorRmsAfter,
+    solver: solverStats,
+    ms,
+    threads: threaded ? threadedThreads : 1,
   }
 }
 
@@ -515,8 +663,14 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
 export async function computeDepthMap(refGray, refW, refH, refK, sources, opts = {}) {
   await ensureWasm()
   const {
-    depthMin, depthMax, seedDepth = new Float32Array(0),
-    window = 3, iterations = 3, bestK = 3, seed = 1, perturbStart = 1,
+    depthMin,
+    depthMax,
+    seedDepth = new Float32Array(0),
+    window = 3,
+    iterations = 3,
+    bestK = 3,
+    seed = 1,
+    perturbStart = 1,
   } = opts
   const n = sources.length
   if (n === 0 || refW * refH === 0) return null
@@ -534,19 +688,35 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     srcGray.set(s.gray, off)
     if (s.mask) srcMask.set(s.mask.subarray(0, s.w * s.h), off)
     off += s.w * s.h
-    srcDims[i*2] = s.w; srcDims[i*2+1] = s.h
+    srcDims[i * 2] = s.w
+    srcDims[i * 2 + 1] = s.h
     srcK.set([s.K.fx, s.K.fy, s.K.cx, s.K.cy], i * 4)
     const { R, t } = s
-    srcRel.set([R[0][0],R[0][1],R[0][2],R[1][0],R[1][1],R[1][2],R[2][0],R[2][1],R[2][2],t[0],t[1],t[2]], i * 12)
+    srcRel.set(
+      [R[0][0], R[0][1], R[0][2], R[1][0], R[1][1], R[1][2], R[2][0], R[2][1], R[2][2], t[0], t[1], t[2]],
+      i * 12,
+    )
   })
 
   const refKArr = new Float32Array([refK.fx, refK.fy, refK.cx, refK.cy])
   const raw = compute_depth_map(
-    refGray, refW, refH, refKArr,
-    srcGray, srcDims, srcK, srcRel, srcMask,
+    refGray,
+    refW,
+    refH,
+    refKArr,
+    srcGray,
+    srcDims,
+    srcK,
+    srcRel,
+    srcMask,
     seedDepth,
-    depthMin, depthMax,
-    window, iterations, bestK, seed >>> 0, perturbStart,
+    depthMin,
+    depthMax,
+    window,
+    iterations,
+    bestK,
+    seed >>> 0,
+    perturbStart,
   )
   const npix = refW * refH
   if (!raw || raw.length < npix * 5) return null
@@ -556,6 +726,7 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     // Per-pixel converged plane normals (camera-frame, unit, nz<0), same shape as
     // the GPU backend returns — reused by fusion → Poisson meshing.
     normals: raw.slice(npix * 2, npix * 5),
-    width: refW, height: refH,
+    width: refW,
+    height: refH,
   }
 }

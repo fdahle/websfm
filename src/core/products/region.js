@@ -19,7 +19,8 @@
 /** A usable box ({ min, max } finite, min < max on every axis), or null. */
 export function normalizeRegion(r) {
   if (!r || !Array.isArray(r.min) || !Array.isArray(r.max)) return null
-  const min = r.min.map(Number), max = r.max.map(Number)
+  const min = r.min.map(Number),
+    max = r.max.map(Number)
   for (let a = 0; a < 3; a++) {
     if (!Number.isFinite(min[a]) || !Number.isFinite(max[a]) || !(max[a] > min[a])) return null
   }
@@ -51,7 +52,10 @@ export function regionMask(pos, count, r) {
   const keep = new Uint8Array(count)
   let kept = 0
   for (let i = 0; i < count; i++) {
-    if (regionContains(r, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2])) { keep[i] = 1; kept++ }
+    if (regionContains(r, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2])) {
+      keep[i] = 1
+      kept++
+    }
   }
   return { keep, kept }
 }
@@ -70,15 +74,20 @@ export function regionFromPositions(positions, { quantile = 0.02, margin = 0.05,
   const axes = [new Float64Array(m), new Float64Array(m), new Float64Array(m)]
   let k = 0
   for (let i = 0; i < n && k < m; i += stride, k++) {
-    axes[0][k] = positions[i * 3]; axes[1][k] = positions[i * 3 + 1]; axes[2][k] = positions[i * 3 + 2]
+    axes[0][k] = positions[i * 3]
+    axes[1][k] = positions[i * 3 + 1]
+    axes[2][k] = positions[i * 3 + 2]
   }
-  const min = [], max = []
+  const min = [],
+    max = []
   for (const a of axes) {
     const v = a.subarray(0, k).sort()
     const at = (q) => v[Math.min(k - 1, Math.max(0, Math.round(q * (k - 1))))]
-    const lo = at(quantile), hi = at(1 - quantile)
+    const lo = at(quantile),
+      hi = at(1 - quantile)
     const grow = Math.max((hi - lo) * margin, 1e-9)
-    min.push(lo - grow); max.push(hi + grow)
+    min.push(lo - grow)
+    max.push(hi + grow)
   }
   return { min, max }
 }

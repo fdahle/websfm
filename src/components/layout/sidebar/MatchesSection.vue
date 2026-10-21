@@ -20,7 +20,10 @@ const matchesExpanded = ref(false)
 // dedicated modal; destructive removal is routed to App's shared confirmation.
 const { menu: matchesCtx, open: openMatchesCtx, close: closeMenu } = useContextMenu()
 // Close the menu, then run the item.
-function fromMenu(fn) { closeMenu(); fn() }
+function fromMenu(fn) {
+  closeMenu()
+  fn()
+}
 function ctxRemoveMatches() {
   if (sidebar.matchStats.running) return
   sidebar.removeMatches()
@@ -52,7 +55,11 @@ function ctxRemoveMatches() {
             :title="matchesExpanded ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">Verified pairs</span>
-          <span class="obs-badge" :title="`${sidebar.matchStats.verified} of ${pluralize(sidebar.matchStats.total, 'pair')}`">{{ sidebar.matchStats.verified }}</span>
+          <span
+            class="obs-badge"
+            :title="`${sidebar.matchStats.verified} of ${pluralize(sidebar.matchStats.total, 'pair')}`"
+            >{{ sidebar.matchStats.verified }}</span
+          >
         </li>
         <li v-if="matchesExpanded" class="img-details">
           <div class="detail-row">
@@ -92,7 +99,9 @@ function ctxRemoveMatches() {
         :disabled="!!sidebar.matchStats.running"
         :title="sidebar.matchStats.running ? 'Cancel matching before removing matches' : ''"
         @click="ctxRemoveMatches"
-      >Remove matches</button>
+      >
+        Remove matches
+      </button>
     </ContextMenu>
   </div>
 </template>

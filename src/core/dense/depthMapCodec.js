@@ -37,16 +37,23 @@ function bufferOf(ta) {
 // the map.
 export function depthCoverage(depth) {
   if (!depth || !depth.length) return { validPx: 0, depthMin: null, depthMax: null, depthMedian: null }
-  let min = Infinity, max = -Infinity
+  let min = Infinity,
+    max = -Infinity
   const vals = []
   for (let i = 0; i < depth.length; i++) {
     const d = depth[i]
-    if (d > 0) { vals.push(d); if (d < min) min = d; if (d > max) max = d }
+    if (d > 0) {
+      vals.push(d)
+      if (d < min) min = d
+      if (d > max) max = d
+    }
   }
   if (!vals.length) return { validPx: 0, depthMin: null, depthMax: null, depthMedian: null }
   vals.sort((a, b) => a - b)
   return {
-    validPx: vals.length, depthMin: min, depthMax: max,
+    validPx: vals.length,
+    depthMin: min,
+    depthMax: max,
     depthMedian: vals[vals.length >> 1],
   }
 }
@@ -149,8 +156,7 @@ export function isDepthIndexStale(index, sparseCloud) {
   if (!index || !Array.isArray(index.maps) || !index.maps.length) return false
   if (!sparseCloud) return true
   if (index.sparseCloudId == null || index.sparseCreatedAt == null) return true
-  return index.sparseCloudId !== sparseCloud.id
-    || index.sparseCreatedAt !== sparseCloud.createdAt
+  return index.sparseCloudId !== sparseCloud.id || index.sparseCreatedAt !== sparseCloud.createdAt
 }
 
 // Total bytes of the per-pixel planes across maps — for the "persisted N MB" log

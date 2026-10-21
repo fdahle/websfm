@@ -15,7 +15,10 @@ function snapshot(t, kpCounts) {
 }
 
 function rng(seed) {
-  return () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
+  return () => {
+    seed = (seed * 16807) % 2147483647
+    return seed / 2147483647
+  }
 }
 
 describe('TrackStore', () => {
@@ -23,15 +26,29 @@ describe('TrackStore', () => {
     for (const impl of ['map', 'typed']) {
       const t = createTrackStore([5, 5, 5], { impl })
       const p = t.addPoint(1, 2, 3)
-      t.addView(p, 2, 0); t.addView(p, 0, 1); t.addView(p, 1, 2)
+      t.addView(p, 2, 0)
+      t.addView(p, 0, 1)
+      t.addView(p, 1, 2)
       t.addView(p, 0, 3) // existing image: keypoint replaced in place
-      const views = () => { const v = []; t.forEachView(p, (img, kp) => v.push([img, kp])); return v }
-      expect(views()).toEqual([[2, 0], [0, 3], [1, 2]])
+      const views = () => {
+        const v = []
+        t.forEachView(p, (img, kp) => v.push([img, kp]))
+        return v
+      }
+      expect(views()).toEqual([
+        [2, 0],
+        [0, 3],
+        [1, 2],
+      ])
       expect(t.pointAt(0, 1)).toBe(-1) // the replaced keypoint is released
       expect(t.pointAt(0, 3)).toBe(p)
       t.removeView(p, 2)
       t.addView(p, 2, 4)
-      expect(views()).toEqual([[0, 3], [1, 2], [2, 4]])
+      expect(views()).toEqual([
+        [0, 3],
+        [1, 2],
+        [2, 4],
+      ])
       expect(t.viewKp(p, 1)).toBe(2)
       expect(t.viewKp(p, 9)).toBe(-1)
     }
@@ -40,8 +57,12 @@ describe('TrackStore', () => {
   it('compacts to dense ids in order and rebuilds the index', () => {
     for (const impl of ['map', 'typed']) {
       const t = createTrackStore([4], { impl })
-      const a = t.addPoint(0, 0, 0), b = t.addPoint(1, 1, 1), c = t.addPoint(2, 2, 2)
-      t.addView(a, 0, 0); t.addView(b, 0, 1); t.addView(c, 0, 2)
+      const a = t.addPoint(0, 0, 0),
+        b = t.addPoint(1, 1, 1),
+        c = t.addPoint(2, 2, 2)
+      t.addView(a, 0, 0)
+      t.addView(b, 0, 1)
+      t.addView(c, 0, 2)
       t.removePoint(b)
       expect(t.pointAt(0, 1)).toBe(-1)
       t.compact()
@@ -54,9 +75,14 @@ describe('TrackStore', () => {
     for (const impl of ['map', 'typed']) {
       const t = createTrackStore([3, 3, 3], { impl })
       const p = t.addPoint(0, 0, 0)
-      t.addView(p, 0, 0); t.addView(p, 1, 1); t.addView(p, 2, 2)
+      t.addView(p, 0, 0)
+      t.addView(p, 1, 1)
+      t.addView(p, 2, 2)
       const seen = []
-      t.forEachView(p, (img) => { seen.push(img); if (img !== 1) t.removeView(p, img) })
+      t.forEachView(p, (img) => {
+        seen.push(img)
+        if (img !== 1) t.removeView(p, img)
+      })
       expect(seen).toEqual([0, 1, 2])
       expect(t.viewCount(p)).toBe(1)
       expect(t.pointAt(1, 1)).toBe(p)
@@ -71,30 +97,41 @@ describe('TrackStore', () => {
     const pick = (n) => Math.floor(next() * n)
     // Ids differ between the two only after a compaction; map them by position.
     for (let step = 0; step < 6000; step++) {
-      const live = Array.from(ref.liveIds()), liveA = Array.from(arena.liveIds())
+      const live = Array.from(ref.liveIds()),
+        liveA = Array.from(arena.liveIds())
       const k = live.length ? pick(live.length) : -1
-      const pr = live[k], pa = liveA[k]
+      const pr = live[k],
+        pa = liveA[k]
       const r = next()
       if (r < 0.2 || !live.length) {
         const xyz = [next(), next(), next()]
-        ref.addPoint(...xyz); arena.addPoint(...xyz)
+        ref.addPoint(...xyz)
+        arena.addPoint(...xyz)
       } else if (r < 0.62) {
-        const img = pick(kpCounts.length), kp = pick(kpCounts[img])
-        ref.addView(pr, img, kp); arena.addView(pa, img, kp)
+        const img = pick(kpCounts.length),
+          kp = pick(kpCounts[img])
+        ref.addView(pr, img, kp)
+        arena.addView(pa, img, kp)
       } else if (r < 0.8) {
         const img = pick(kpCounts.length)
-        ref.removeView(pr, img); arena.removeView(pa, img)
+        ref.removeView(pr, img)
+        arena.removeView(pa, img)
       } else if (r < 0.9) {
-        ref.removePoint(pr); arena.removePoint(pa)
+        ref.removePoint(pr)
+        arena.removePoint(pa)
       } else if (r < 0.95) {
         const xyz = [next(), next(), next()]
-        ref.setPosition(pr, ...xyz); arena.setPosition(pa, ...xyz)
+        ref.setPosition(pr, ...xyz)
+        arena.setPosition(pa, ...xyz)
       } else if (r < 0.975) {
-        ref.reindex(); arena.reindex()
+        ref.reindex()
+        arena.reindex()
       } else {
-        ref.compact(); arena.compact()
+        ref.compact()
+        arena.compact()
       }
-      const a = snapshot(ref, kpCounts), b = snapshot(arena, kpCounts)
+      const a = snapshot(ref, kpCounts),
+        b = snapshot(arena, kpCounts)
       // Point ids are positions in creation order for both until a compaction, and
       // dense for both after one, so they must agree throughout.
       expect(b, `step ${step}`).toEqual(a)

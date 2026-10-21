@@ -5,9 +5,34 @@ import { makePackedPoints } from '../sfm/resultCodec.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
 
 const points = SparsePoints.fromRecords([
-  { x: 0, y: 0, z: 5, views: new Map([['a', 1], ['b', 2]]) },
-  { x: 1, y: 0, z: 5, views: new Map([['b', 3], ['c', 4]]) },
-  { x: 0, y: 1, z: 5, views: new Map([['a', 5], ['c', 6], ['b', 7]]) },
+  {
+    x: 0,
+    y: 0,
+    z: 5,
+    views: new Map([
+      ['a', 1],
+      ['b', 2],
+    ]),
+  },
+  {
+    x: 1,
+    y: 0,
+    z: 5,
+    views: new Map([
+      ['b', 3],
+      ['c', 4],
+    ]),
+  },
+  {
+    x: 0,
+    y: 1,
+    z: 5,
+    views: new Map([
+      ['a', 5],
+      ['c', 6],
+      ['b', 7],
+    ]),
+  },
 ])
 
 describe('packSparseForDense', () => {
@@ -24,8 +49,11 @@ describe('packSparseForDense', () => {
   it('reads a cloud’s packed CSR tracks directly, with the same result', () => {
     const viewUuids = ['a', 'b', 'c']
     const packed = makePackedPoints({
-      pos: Float64Array.from([0, 0, 5, 1, 0, 5, 0, 1, 5]), viewUuids,
-      vcount: Uint32Array.from([2, 2, 3]), vcam: Uint32Array.from([0, 1, 1, 2, 0, 2, 1]), vkp: new Uint32Array(7),
+      pos: Float64Array.from([0, 0, 5, 1, 0, 5, 0, 1, 5]),
+      viewUuids,
+      vcount: Uint32Array.from([2, 2, 3]),
+      vcam: Uint32Array.from([0, 1, 1, 2, 0, 2, 1]),
+      vkp: new Uint32Array(7),
     })
     const s = packSparseForDense(packed)
     expect([...s.vstart]).toEqual([0, 2, 4, 7])
@@ -41,8 +69,20 @@ describe('packSparseForDense', () => {
 })
 
 it('selectSourceViews ranks the views that share the reference’s points', () => {
-  const cam = (cx) => ({ R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [-cx, 0, 0], K: { fx: 100, fy: 100, cx: 50, cy: 50 } })
-  const cameras = new Map([['a', cam(0)], ['b', cam(1)], ['c', cam(2)]])
+  const cam = (cx) => ({
+    R: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    t: [-cx, 0, 0],
+    K: { fx: 100, fy: 100, cx: 50, cy: 50 },
+  })
+  const cameras = new Map([
+    ['a', cam(0)],
+    ['b', cam(1)],
+    ['c', cam(2)],
+  ])
   const s = packSparseForDense(points)
   // a shares points 0 and 2 with b, point 2 with c.
   expect(selectSourceViews(cameras, s, 'a', { minAngleDeg: 0, maxAngleDeg: 90 })).toEqual(['b', 'c'])

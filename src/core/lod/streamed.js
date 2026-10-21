@@ -4,5 +4,6 @@
 // memory must leave it out, or refuse it with this reason.
 export const isStreamed = (c) => c?.kind === 'dense' && !c.pos && !!c.lod
 
-export const streamedRefusal = (c, tool) => `${tool}: "${c?.name ?? 'cloud'}" is streamed from its octree `
-  + '(too large to hold in memory), and this tool needs all of its points in memory'
+export const streamedRefusal = (c, tool) =>
+  `${tool}: "${c?.name ?? 'cloud'}" is streamed from its octree ` +
+  '(too large to hold in memory), and this tool needs all of its points in memory'

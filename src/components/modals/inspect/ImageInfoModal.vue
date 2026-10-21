@@ -51,9 +51,11 @@ const gpsUrl = computed(() => {
         @error="imagesStore.reportImageLoadError(image.id)"
       />
       <div v-else-if="image.previewFailed" class="preview-img preview-pending">
-        {{ image.previewFailReason === 'source-lost'
-          ? 'Image file no longer available — re-add the file'
-          : 'Preview unavailable — decode failed' }}
+        {{
+          image.previewFailReason === 'source-lost'
+            ? 'Image file no longer available — re-add the file'
+            : 'Preview unavailable — decode failed'
+        }}
       </div>
       <div v-else class="preview-img preview-pending">Decoding image…</div>
     </div>
@@ -78,9 +80,7 @@ const gpsUrl = computed(() => {
       </template>
     </dl>
 
-    <a v-if="gpsUrl" class="map-link" :href="gpsUrl" target="_blank" rel="noopener">
-      Open location in map ↗
-    </a>
+    <a v-if="gpsUrl" class="map-link" :href="gpsUrl" target="_blank" rel="noopener"> Open location in map ↗ </a>
   </ModalShell>
 </template>
 
@@ -124,10 +124,20 @@ const gpsUrl = computed(() => {
   font-size: 12px;
 }
 
-.kp-info    { color: var(--text-dim); }
-.kp-running { color: var(--text-dim); font-style: italic; }
-.kp-error   { color: #e55; }
-.kp-none    { color: var(--text-dim); font-style: italic; }
+.kp-info {
+  color: var(--text-dim);
+}
+.kp-running {
+  color: var(--text-dim);
+  font-style: italic;
+}
+.kp-error {
+  color: #e55;
+}
+.kp-none {
+  color: var(--text-dim);
+  font-style: italic;
+}
 
 .loading {
   padding: 20px 16px;

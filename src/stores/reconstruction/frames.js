@@ -15,7 +15,13 @@ function plainCopy(v) {
 import { metresPerCrsUnit, linearCrsUnit } from '../../core/crs.js'
 
 export function createFrameResolver({
-  mainSparseCloud, validGeoref, currentCrs, georeference, scaleFit, scaleFitStatus, log,
+  mainSparseCloud,
+  validGeoref,
+  currentCrs,
+  georeference,
+  scaleFit,
+  scaleFitStatus,
+  log,
   // () => { origin, east, north, up } | null — the user's Orient model basis
   // (core/products/orientation.js) when one is set and current. It shapes the LOCAL
   // frame only: a georeference outranks it, exactly as it outranks scale bars.
@@ -45,7 +51,7 @@ export function createFrameResolver({
     const unit = linearCrsUnit(crs)
     return { unit, metresPerUnit }
   }
-  const metricScale = g => g.sim.scale * georefUnits(g.crs).metresPerUnit
+  const metricScale = (g) => g.sim.scale * georefUnits(g.crs).metresPerUnit
   // A local frame spec's explicit basis from the user orientation, or nothing (the
   // worker then derives the auto frame). makeFrame-ready: { origin, east, north, up }.
   function orientedBasis() {
@@ -78,7 +84,11 @@ export function createFrameResolver({
     if (g) {
       return {
         frameSpec: { kind: 'similarity', ...g.sim, crs: g.crs, ...georefUnits(g.crs) },
-        unit: georefUnits(g.crs).unit, scale: metricScale(g), source: 'georef', crs: g.crs, stamp,
+        unit: georefUnits(g.crs).unit,
+        scale: metricScale(g),
+        source: 'georef',
+        crs: g.crs,
+        stamp,
         verticalDatum: g.verticalDatum ?? 'unknown',
       }
     }
@@ -92,7 +102,11 @@ export function createFrameResolver({
     if (wantsLocal && existingGeoref) {
       return {
         frameSpec: { kind: 'scaled-local', scale: metricScale(existingGeoref) },
-        unit: 'm', scale: metricScale(existingGeoref), source: 'georef', crs: 'local', stamp,
+        unit: 'm',
+        scale: metricScale(existingGeoref),
+        source: 'georef',
+        crs: 'local',
+        stamp,
       }
     }
 
@@ -102,17 +116,32 @@ export function createFrameResolver({
     if (status.valid) {
       return {
         frameSpec: { kind: 'scaled-local', scale: scaleFit.value.scale, ...orientedBasis() },
-        unit: 'm', scale: scaleFit.value.scale, source: 'scalebars', crs: 'local', stamp,
+        unit: 'm',
+        scale: scaleFit.value.scale,
+        source: 'scalebars',
+        crs: 'local',
+        stamp,
       }
     }
     if (scaleFit.value && status.reason !== 'none') {
-      log(`Scale: the fitted scale no longer matches the project (${status.reason}) — `
-        + 'apply the scale bars again to restore metres', 'warn', 'Scale')
+      log(
+        `Scale: the fitted scale no longer matches the project (${status.reason}) — ` +
+          'apply the scale bars again to restore metres',
+        'warn',
+        'Scale',
+      )
     }
 
     // 3. Nothing. Up-to-scale model units — and every readout must SAY so rather
     //    than printing a bare number (D9).
-    return { frameSpec: { kind: 'local', ...orientedBasis() }, unit: 'model', scale: 1, source: null, crs: 'local', stamp }
+    return {
+      frameSpec: { kind: 'local', ...orientedBasis() },
+      unit: 'model',
+      scale: 1,
+      source: null,
+      crs: 'local',
+      stamp,
+    }
   }
 
   // A SYNC signature of what currently defines the unit — `{ source, scale, crs }`.
@@ -123,13 +152,11 @@ export function createFrameResolver({
     const g = validGeoref.value?.crs === currentCrs() ? validGeoref.value : null
     if (g) {
       const frameSpec = { kind: 'similarity', ...g.sim, crs: g.crs, ...georefUnits(g.crs) }
-      return { source: 'georef', scale: metricScale(g), crs: g.crs,
-        frameKey: JSON.stringify(frameSpec) }
+      return { source: 'georef', scale: metricScale(g), crs: g.crs, frameKey: JSON.stringify(frameSpec) }
     }
     if (scaleFitStatus().valid) {
       const frameSpec = { kind: 'scaled-local', scale: scaleFit.value.scale, ...orientedBasis() }
-      return { source: 'scalebars', scale: scaleFit.value.scale, crs: 'local',
-        frameKey: JSON.stringify(frameSpec) }
+      return { source: 'scalebars', scale: scaleFit.value.scale, crs: 'local', frameKey: JSON.stringify(frameSpec) }
     }
     return { source: null, scale: 1, crs: 'local', frameKey: JSON.stringify({ kind: 'local', ...orientedBasis() }) }
   })
@@ -145,8 +172,7 @@ export function createFrameResolver({
     const stamp = product.frameStamp
     if (!stamp) return { stale: false, reason: 'unknown' }
     const cloud = mainSparseCloud.value
-    if (stamp.cloudId && (!cloud || stamp.cloudId !== cloud.id
-        || stamp.cloudCreatedAt !== (cloud.createdAt ?? null))) {
+    if (stamp.cloudId && (!cloud || stamp.cloudId !== cloud.id || stamp.cloudCreatedAt !== (cloud.createdAt ?? null))) {
       return { stale: true, reason: 'the sparse model changed' }
     }
 
@@ -163,12 +189,16 @@ export function createFrameResolver({
       // frame using only its scalar. Compare the refit in the mode this product
       // actually recorded, rather than against whichever mode is the global default.
       let recordedKind = null
-      try { recordedKind = stamp.frameKey ? JSON.parse(stamp.frameKey)?.kind : null } catch {}
-      const frameSpec = recordedKind === 'scaled-local'
-        ? { kind: 'scaled-local', scale: metricScale(g) }
-        : { kind: 'similarity', ...g.sim, crs: g.crs, ...georefUnits(g.crs) }
+      try {
+        recordedKind = stamp.frameKey ? JSON.parse(stamp.frameKey)?.kind : null
+      } catch {}
+      const frameSpec =
+        recordedKind === 'scaled-local'
+          ? { kind: 'scaled-local', scale: metricScale(g) }
+          : { kind: 'similarity', ...g.sim, crs: g.crs, ...georefUnits(g.crs) }
       now = {
-        source: 'georef', scale: metricScale(g),
+        source: 'georef',
+        scale: metricScale(g),
         crs: recordedKind === 'scaled-local' ? 'local' : g.crs,
         frameKey: JSON.stringify(frameSpec),
       }
@@ -177,8 +207,10 @@ export function createFrameResolver({
     }
     if (stamp.source !== now.source) return { stale: true, reason: 'the scale source changed' }
     if (stamp.frameKey && stamp.frameKey !== now.frameKey) {
-      return { stale: true, reason: stamp.source === 'georef'
-        ? 'the georeference was refitted' : 'the scale was refitted' }
+      return {
+        stale: true,
+        reason: stamp.source === 'georef' ? 'the georeference was refitted' : 'the scale was refitted',
+      }
     }
     // Compatibility for the first stamped products, before `frameKey` recorded
     // the full georeference rotation/translation as well as its scalar.
@@ -191,9 +223,13 @@ export function createFrameResolver({
 
   // What a product should record about the frame it was built in (D8/D11).
   const frameStampOf = (resolved) => ({
-    source: resolved.source, scale: resolved.scale, crs: resolved.crs, unit: resolved.unit,
+    source: resolved.source,
+    scale: resolved.scale,
+    crs: resolved.crs,
+    unit: resolved.unit,
     frameKey: JSON.stringify(resolved.frameSpec),
-    cloudId: resolved.stamp?.id ?? null, cloudCreatedAt: resolved.stamp?.createdAt ?? null,
+    cloudId: resolved.stamp?.id ?? null,
+    cloudCreatedAt: resolved.stamp?.createdAt ?? null,
     at: new Date().toISOString(),
   })
 

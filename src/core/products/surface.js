@@ -31,7 +31,9 @@ export function gridGeometry(minX, minY, maxX, maxY, gsd, maxGrid = MAX_GRID) {
   const width = Math.max(1, Math.ceil((maxX - minX) / gsd) + 1)
   const height = Math.max(1, Math.ceil((maxY - minY) / gsd) + 1)
   return {
-    width, height, gsd,
+    width,
+    height,
+    gsd,
     originX: minX,
     originY: maxY, // top-left origin: row 0 is the max-Y edge
   }
@@ -49,16 +51,22 @@ function makeGrid(minX, minY, maxX, maxY, gsd, maxGrid = MAX_GRID) {
 function finalize(g, extra = {}) {
   const cells = g.width * g.height
   const mask = new Uint8Array(cells)
-  let zMin = Infinity, zMax = -Infinity, count = 0
+  let zMin = Infinity,
+    zMax = -Infinity,
+    count = 0
   for (let i = 0; i < cells; i++) {
     const v = g.data[i]
     if (!Number.isNaN(v)) {
-      mask[i] = 1; count++
+      mask[i] = 1
+      count++
       if (v < zMin) zMin = v
       if (v > zMax) zMax = v
     }
   }
-  if (zMin > zMax) { zMin = 0; zMax = 0 }
+  if (zMin > zMax) {
+    zMin = 0
+    zMax = 0
+  }
   return { ...g, mask, zMin, zMax, count, filled: 0, ...extra }
 }
 
@@ -87,12 +95,18 @@ export function meshSurface(mesh, opts = {}, onProgress = () => {}) {
   const nTri = Math.floor((idx?.length ?? 0) / 3)
   if (!pos || !nTri) return null
 
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity
   const nVerts = Math.floor(pos.length / 3)
   for (let i = 0; i < nVerts; i++) {
-    const x = pos[i * 3], y = pos[i * 3 + 1]
-    if (x < minX) minX = x; if (x > maxX) maxX = x
-    if (y < minY) minY = y; if (y > maxY) maxY = y
+    const x = pos[i * 3],
+      y = pos[i * 3 + 1]
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
   }
   if (opts.bounds) ({ minX, minY, maxX, maxY } = opts.bounds)
 
@@ -100,13 +114,23 @@ export function meshSurface(mesh, opts = {}, onProgress = () => {}) {
   const g = makeGrid(minX, minY, maxX, maxY, gsd, opts.maxGrid ?? MAX_GRID)
   if (!g) return null
   const { width, height, data } = g
-  const cell = g.gsd, ox = g.originX, oy = g.originY
+  const cell = g.gsd,
+    ox = g.originX,
+    oy = g.originY
 
   for (let t = 0; t < nTri; t++) {
-    const a = idx[t * 3] * 3, b = idx[t * 3 + 1] * 3, c = idx[t * 3 + 2] * 3
-    const x0 = pos[a], y0 = pos[a + 1], z0 = pos[a + 2]
-    const x1 = pos[b], y1 = pos[b + 1], z1 = pos[b + 2]
-    const x2 = pos[c], y2 = pos[c + 1], z2 = pos[c + 2]
+    const a = idx[t * 3] * 3,
+      b = idx[t * 3 + 1] * 3,
+      c = idx[t * 3 + 2] * 3
+    const x0 = pos[a],
+      y0 = pos[a + 1],
+      z0 = pos[a + 2]
+    const x1 = pos[b],
+      y1 = pos[b + 1],
+      z1 = pos[b + 2]
+    const x2 = pos[c],
+      y2 = pos[c + 1],
+      z2 = pos[c + 2]
 
     // Signed area × 2; a degenerate (edge-on from above) triangle covers no cell
     // centre, and its barycentric solve would divide by ~0.
@@ -115,8 +139,10 @@ export function meshSurface(mesh, opts = {}, onProgress = () => {}) {
 
     // Cell-centre convention: centre(col) = ox + (col+0.5)·cell, and
     // centre(row) = oy − (row+0.5)·cell, so invert for the covered index range.
-    const triMinX = Math.min(x0, x1, x2), triMaxX = Math.max(x0, x1, x2)
-    const triMinY = Math.min(y0, y1, y2), triMaxY = Math.max(y0, y1, y2)
+    const triMinX = Math.min(x0, x1, x2),
+      triMaxX = Math.max(x0, x1, x2)
+    const triMinY = Math.min(y0, y1, y2),
+      triMaxY = Math.max(y0, y1, y2)
     const colLo = Math.max(0, Math.ceil((triMinX - ox) / cell - 0.5))
     const colHi = Math.min(width - 1, Math.floor((triMaxX - ox) / cell - 0.5))
     const rowLo = Math.max(0, Math.ceil((oy - triMaxY) / cell - 0.5))
@@ -163,19 +189,37 @@ export function fitPlane(points, opts = {}) {
   const n0 = points?.length ?? 0
   if (n0 < 3) return null
 
-  let mx = 0, my = 0
-  for (const p of points) { mx += p.x; my += p.y }
-  mx /= n0; my /= n0
+  let mx = 0,
+    my = 0
+  for (const p of points) {
+    mx += p.x
+    my += p.y
+  }
+  mx /= n0
+  my /= n0
 
   // Solve over a subset (`use` = null ⇒ all points).
   const solve = (use) => {
-    let sxx = 0, sxy = 0, syy = 0, sxz = 0, syz = 0, sz = 0, n = 0
+    let sxx = 0,
+      sxy = 0,
+      syy = 0,
+      sxz = 0,
+      syz = 0,
+      sz = 0,
+      n = 0
     for (let i = 0; i < n0; i++) {
       if (use && !use[i]) continue
       const p = points[i]
-      const x = p.x - mx, y = p.y - my, z = p.z
-      sxx += x * x; sxy += x * y; syy += y * y
-      sxz += x * z; syz += y * z; sz += z; n++
+      const x = p.x - mx,
+        y = p.y - my,
+        z = p.z
+      sxx += x * x
+      sxy += x * y
+      syy += y * y
+      sxz += x * z
+      syz += y * z
+      sz += z
+      n++
     }
     if (n < 3) return null
     const det = sxx * syy - sxy * sxy
@@ -186,7 +230,8 @@ export function fitPlane(points, opts = {}) {
     return {
       a: (sxz * syy - syz * sxy) / det,
       b: (syz * sxx - sxz * sxy) / det,
-      cz, n,
+      cz,
+      n,
     }
   }
 
@@ -208,10 +253,17 @@ export function fitPlane(points, opts = {}) {
       const cut = 2.5 * 1.4826 * mad
       const use = new Uint8Array(n0)
       let kept = 0
-      for (let i = 0; i < n0; i++) if (abs[i] <= cut) { use[i] = 1; kept++ }
+      for (let i = 0; i < n0; i++)
+        if (abs[i] <= cut) {
+          use[i] = 1
+          kept++
+        }
       if (kept >= 3 && kept < n0) {
         const refit = solve(use)
-        if (refit) { fit = refit; dropped = n0 - kept }
+        if (refit) {
+          fit = refit
+          dropped = n0 - kept
+        }
       }
     }
   }
@@ -241,10 +293,15 @@ export function planeSurface(points, opts = {}) {
   const plane = fitPlane(points, opts)
   if (!plane) return null
 
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity
   for (const p of points) {
-    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x
-    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y
+    if (p.x < minX) minX = p.x
+    if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.y > maxY) maxY = p.y
   }
   if (opts.bounds) ({ minX, minY, maxX, maxY } = opts.bounds)
 
@@ -286,7 +343,14 @@ export function resampleSurface(grid, gsd, opts = {}) {
 // samples the heights a window at a time (sampleSurfaceWindow).
 export function resampledGeometry(grid, gsd, maxGrid = MAX_GRID) {
   if (!grid) return null
-  const own = { width: grid.width, height: grid.height, gsd: grid.gsd, originX: grid.originX, originY: grid.originY, identity: true }
+  const own = {
+    width: grid.width,
+    height: grid.height,
+    gsd: grid.gsd,
+    originX: grid.originX,
+    originY: grid.originY,
+    identity: true,
+  }
   if (!(gsd > 0) || Math.abs(gsd - grid.gsd) <= 1e-9 * grid.gsd) return own
   const minX = grid.originX
   const maxY = grid.originY
@@ -302,7 +366,10 @@ export function resampledGeometry(grid, gsd, maxGrid = MAX_GRID) {
 // full resample would; an identity geometry copies the surface's own cells (and its
 // own mask, which a DEM may set differently from its NaNs).
 export function sampleSurfaceWindow(grid, geom, col0, row0, w, h, data, mask) {
-  const sw = grid.width, sh = grid.height, sd = grid.data, sm = grid.mask
+  const sw = grid.width,
+    sh = grid.height,
+    sd = grid.data,
+    sm = grid.mask
   if (geom.identity) {
     for (let r = 0; r < h; r++) {
       const src = (row0 + r) * sw + col0
@@ -316,19 +383,27 @@ export function sampleSurfaceWindow(grid, geom, col0, row0, w, h, data, mask) {
     const y = geom.originY - (row + 0.5) * geom.gsd
     // Continuous source cell-centre coordinates of this target centre.
     const fy = (grid.originY - y) / grid.gsd - 0.5
-    const r0 = Math.floor(fy), wy = fy - r0
+    const r0 = Math.floor(fy),
+      wy = fy - r0
     const nr = Math.min(sh - 1, Math.max(0, Math.round(fy)))
     for (let c = 0; c < w; c++) {
-      const col = col0 + c, o = r * w + c
+      const col = col0 + c,
+        o = r * w + c
       const x = geom.originX + (col + 0.5) * geom.gsd
       const fx = (x - grid.originX) / grid.gsd - 0.5
-      const c0 = Math.floor(fx), wx = fx - c0
+      const c0 = Math.floor(fx),
+        wx = fx - c0
 
       const nc = Math.min(sw - 1, Math.max(0, Math.round(fx)))
       // Outside the surface — stays nodata.
-      if (!sm[nr * sw + nc]) { data[o] = NaN; mask[o] = 0; continue }
+      if (!sm[nr * sw + nc]) {
+        data[o] = NaN
+        mask[o] = 0
+        continue
+      }
 
-      let wsum = 0, vsum = 0
+      let wsum = 0,
+        vsum = 0
       for (let dr = 0; dr < 2; dr++) {
         const rr = r0 + dr
         if (rr < 0 || rr >= sh) continue
@@ -339,7 +414,8 @@ export function sampleSurfaceWindow(grid, geom, col0, row0, w, h, data, mask) {
           if (!sm[si]) continue
           const wt = (dr ? wy : 1 - wy) * (dc ? wx : 1 - wx)
           if (!(wt > 0)) continue
-          wsum += wt; vsum += wt * sd[si]
+          wsum += wt
+          vsum += wt * sd[si]
         }
       }
       // Stored as Float32 exactly like the resampled grid's plane, so a window's

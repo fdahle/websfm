@@ -3,7 +3,9 @@ import { createRevision } from './revision.js'
 
 function deferred() {
   let resolve
-  const promise = new Promise((r) => { resolve = r })
+  const promise = new Promise((r) => {
+    resolve = r
+  })
   return { promise, resolve }
 }
 
@@ -14,8 +16,14 @@ function deferred() {
 function maskModel() {
   const rev = createRevision()
   const m = { canvas: null, store: null, pendingDecodes: [], pendingExports: [] }
-  m.edit = (state) => { rev.bump(); m.canvas = state }
-  m.clear = () => { rev.bump(); m.canvas = null }
+  m.edit = (state) => {
+    rev.bump()
+    m.canvas = state
+  }
+  m.clear = () => {
+    rev.bump()
+    m.canvas = null
+  }
   m.load = async (blob) => {
     const t = rev.bump()
     const d = deferred()
@@ -59,26 +67,28 @@ describe('createRevision', () => {
 
   it('case A — two quick undos (B → A → none): the late decode of A is dropped', async () => {
     const m = maskModel()
-    m.canvas = 'B'; m.store = 'B'
-    const undo1 = m.restore('A')    // decode of A pending
-    const undo2 = m.restore(null)   // canvas cleared for "none"
+    m.canvas = 'B'
+    m.store = 'B'
+    const undo1 = m.restore('A') // decode of A pending
+    const undo2 = m.restore(null) // canvas cleared for "none"
     expect(m.canvas).toBeNull()
     m.pendingDecodes[0].resolve('A') // A's decode lands late
     expect(await undo1).toBe(false)
     await undo2
-    expect(m.canvas).toBeNull()      // not repainted with A
+    expect(m.canvas).toBeNull() // not repainted with A
     expect(m.store).toBeNull()
   })
 
   it('case B — undo while a stroke is encoding: the pending export does not revert the undo', async () => {
     const m = maskModel()
-    m.canvas = 'X'; m.store = 'X'
+    m.canvas = 'X'
+    m.store = 'X'
     m.edit('X+stroke')
-    const exp = m.export()           // stroke's PNG encode pending
-    const undo = m.restore('X')      // Ctrl+Z
+    const exp = m.export() // stroke's PNG encode pending
+    const undo = m.restore('X') // Ctrl+Z
     m.pendingDecodes[0].resolve('X')
     await undo
-    m.pendingExports[0].resolve()    // the stroke's blob lands now
+    m.pendingExports[0].resolve() // the stroke's blob lands now
     expect(await exp).toBe(false)
     expect(m.store).toBe('X')
     expect(m.canvas).toBe('X')
@@ -101,7 +111,7 @@ describe('createRevision', () => {
     m.edit('S1+S2')
     const e2 = m.export()
     m.pendingExports[1].resolve()
-    m.pendingExports[0].resolve()    // older encode finishing last must not win
+    m.pendingExports[0].resolve() // older encode finishing last must not win
     expect(await e2).toBe(true)
     expect(await e1).toBe(false)
     expect(m.store).toBe('S1+S2')

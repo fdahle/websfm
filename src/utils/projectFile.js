@@ -15,8 +15,14 @@
 import * as opfs from './opfs.js'
 import { zipLocalHeader, zipCentralHeader, zipEndRecords, crc32, crc32Blob, readZipIndex, zipEntryBlob } from './zip.js'
 import {
-  MANIFEST_NAME, shouldArchivePath, archiveCompression, archiveSizeVerdict,
-  isSafeArchiveEntry, validateManifest, formatBytes, summarizeSections,
+  MANIFEST_NAME,
+  shouldArchivePath,
+  archiveCompression,
+  archiveSizeVerdict,
+  isSafeArchiveEntry,
+  validateManifest,
+  formatBytes,
+  summarizeSections,
   ARCHIVE_DERIVED_DIRS,
 } from '../core/io/projectArchive.js'
 import { pluralize } from '../core/textFormat.js'
@@ -36,8 +42,8 @@ async function openArchiveSink(suggestedName) {
         types: [{ description: 'websfm project', accept: { 'application/zip': ['.websfm'] } }],
       })
     } catch (err) {
-      if (err?.name === 'AbortError') return null   // user cancelled — not an error
-      handle = null                                  // picker unavailable/blocked: buffer instead
+      if (err?.name === 'AbortError') return null // user cancelled — not an error
+      handle = null // picker unavailable/blocked: buffer instead
     }
     if (handle) {
       // The one createWritable outside opfs.js, deliberately: this is a file the
@@ -56,13 +62,22 @@ async function openArchiveSink(suggestedName) {
   // time, which the browser may keep on disk, rather than as copies held in the page —
   // an 18 GB project held as ArrayBuffers ran the page out of memory ~11 GB in, and
   // the next file read failed with NotReadableError (quarry, 2026-10-17).
-  let blob = new Blob([]), batch = [], batchBytes = 0
-  const seal = () => { if (batch.length) { blob = new Blob([blob, ...batch]); batch = []; batchBytes = 0 } }
+  let blob = new Blob([]),
+    batch = [],
+    batchBytes = 0
+  const seal = () => {
+    if (batch.length) {
+      blob = new Blob([blob, ...batch])
+      batch = []
+      batchBytes = 0
+    }
+  }
   return {
     streaming: false,
     // Copy: a stream reader may hand out views of a buffer it reuses.
     write: (chunk) => {
-      batch.push(chunk.slice()); batchBytes += chunk.byteLength
+      batch.push(chunk.slice())
+      batchBytes += chunk.byteLength
       if (batchBytes >= 64 * 1024 * 1024) seal()
     },
     close: async () => {
@@ -75,7 +90,11 @@ async function openArchiveSink(suggestedName) {
       a.click()
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
     },
-    abort: () => { blob = new Blob([]); batch = []; batchBytes = 0 },
+    abort: () => {
+      blob = new Blob([])
+      batch = []
+      batchBytes = 0
+    },
   }
 }
 
@@ -88,9 +107,7 @@ async function openArchiveSink(suggestedName) {
 const SNAPSHOT_IN_MEMORY_BYTES = 64 * 1024 * 1024
 
 async function collectEntries(projectId, includeDerived) {
-  const skip = includeDerived
-    ? null
-    : (relPath, kind) => kind === 'directory' && ARCHIVE_DERIVED_DIRS.includes(relPath)
+  const skip = includeDerived ? null : (relPath, kind) => kind === 'directory' && ARCHIVE_DERIVED_DIRS.includes(relPath)
   const entries = []
   let totalBytes = 0
   for await (const { relPath, file, handle } of opfs.walkProjectFiles(projectId, { skip })) {
@@ -108,7 +125,12 @@ async function collectEntries(projectId, includeDerived) {
  * { fileName, entryCount, sourceBytes, archiveBytes }.
  */
 export async function exportProjectArchive({
-  projectId, manifest, fileName, includeDerived = true, onProgress = null, onLog = null,
+  projectId,
+  manifest,
+  fileName,
+  includeDerived = true,
+  onProgress = null,
+  onLog = null,
   // Injected in tests (and by a future folder-target export) so the zip writer can
   // be exercised without a save dialog. Default: the File System Access picker,
   // falling back to a buffered download.
@@ -122,19 +144,27 @@ export async function exportProjectArchive({
   const verdict = archiveSizeVerdict(totalBytes)
   if (!verdict.ok) throw new Error(verdict.error)
 
-  log(`Saving project: ${entries.length} files, ${formatBytes(totalBytes)}`
-    + `${includeDerived ? '' : ' (cached/derived data excluded)'}`)
+  log(
+    `Saving project: ${entries.length} files, ${formatBytes(totalBytes)}` +
+      `${includeDerived ? '' : ' (cached/derived data excluded)'}`,
+  )
   for (const { section, bytes } of summarizeSections(entries)) {
     log(`  ${section}: ${formatBytes(bytes)}`, 'debug')
   }
 
   const sink = await openSink(fileName)
-  if (!sink) { log('Save cancelled'); return { cancelled: true } }
+  if (!sink) {
+    log('Save cancelled')
+    return { cancelled: true }
+  }
 
   let archiveBytes = 0
   const enc = new TextEncoder()
   const central = []
-  const write = async (bytes) => { await sink.write(bytes); archiveBytes += bytes.length }
+  const write = async (bytes) => {
+    await sink.write(bytes)
+    archiveBytes += bytes.length
+  }
 
   // One entry, in two halves. `prepareEntry` reads everything the entry needs before a
   // byte of it is written: sizes and CRC, and the bytes themselves of a deflated (JSON)
@@ -146,14 +176,26 @@ export async function exportProjectArchive({
     const method = archiveCompression(name)
     if (method === 8) {
       const raw = source instanceof Uint8Array ? source : new Uint8Array(await source.arrayBuffer())
-      const data = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer())
+      const data = new Uint8Array(
+        await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer(),
+      )
       return { name, method, crc: crc32(raw), size: raw.length, data }
     }
     // A file that fits in memory is read once, so its checksum and its bytes are the
     // same version even if the project writes it again meanwhile.
-    const data = source instanceof Uint8Array ? source
-      : source.size <= SNAPSHOT_IN_MEMORY_BYTES ? new Uint8Array(await source.arrayBuffer()) : source
-    return { name, method, crc: data instanceof Uint8Array ? crc32(data) : await crc32Blob(data), size: data.size ?? data.length, data }
+    const data =
+      source instanceof Uint8Array
+        ? source
+        : source.size <= SNAPSHOT_IN_MEMORY_BYTES
+          ? new Uint8Array(await source.arrayBuffer())
+          : source
+    return {
+      name,
+      method,
+      crc: data instanceof Uint8Array ? crc32(data) : await crc32Blob(data),
+      size: data.size ?? data.length,
+      data,
+    }
   }
 
   async function writeEntry({ name, method, crc, size, data }) {
@@ -172,8 +214,10 @@ export async function exportProjectArchive({
         }
       } catch (err) {
         if (!isStaleSnapshot(err)) throw err
-        const changed = new Error(`${name} was rewritten while the project was being saved, after part of it was `
-          + 'already written, so the project file cannot be finished. Save again once no step is running.')
+        const changed = new Error(
+          `${name} was rewritten while the project was being saved, after part of it was ` +
+            'already written, so the project file cannot be finished. Save again once no step is running.',
+        )
         changed.name = err.name
         changed.cause = err
         throw changed
@@ -200,7 +244,9 @@ export async function exportProjectArchive({
     for (let attempt = 0; ; attempt++) {
       let current = file
       if (handle) {
-        try { current = await handle.getFile() } catch (err) {
+        try {
+          current = await handle.getFile()
+        } catch (err) {
           if (err?.name !== 'NotFoundError') throw namedError(relPath, file.size, err)
           log(`  ${relPath} was removed while saving (superseded) — left out`, 'debug')
           return false
@@ -216,7 +262,11 @@ export async function exportProjectArchive({
         }
         throw namedError(relPath, current.size, err)
       }
-      try { await writeEntry(entry) } catch (err) { throw namedError(relPath, current.size, err) }
+      try {
+        await writeEntry(entry)
+      } catch (err) {
+        throw namedError(relPath, current.size, err)
+      }
       return true
     }
   }
@@ -236,24 +286,36 @@ export async function exportProjectArchive({
       }
       const metaBytes = new Uint8Array(await metaFile.arrayBuffer())
       let listed = []
-      try { listed = Object.values(JSON.parse(dec.decode(metaBytes))?.binaryFiles ?? {}) } catch { /* archived as it is */ }
+      try {
+        listed = Object.values(JSON.parse(dec.decode(metaBytes))?.binaryFiles ?? {})
+      } catch {
+        /* archived as it is */
+      }
       const dir = relPath.includes('/') ? relPath.slice(0, relPath.lastIndexOf('/') + 1) : ''
-      const files = [], seen = new Set()
+      const files = [],
+        seen = new Set()
       for (const f of listed) {
         if (!f?.name || /[/\\]/.test(f.name) || seen.has(f.name)) continue
         seen.add(f.name)
         const file = await opfs.getProjectFile(projectId, dir + f.name)
         if (!file || file.size !== f.bytes) {
           // Not a race (no save runs under this lock): the project itself lacks it.
-          log(`  ${relPath} names ${dir + f.name}, which is ${file ? `${file.size} bytes, not ${f.bytes}` : 'missing'} `
-            + 'in the project — saved as it is', 'warn')
+          log(
+            `  ${relPath} names ${dir + f.name}, which is ${file ? `${file.size} bytes, not ${f.bytes}` : 'missing'} ` +
+              'in the project — saved as it is',
+            'warn',
+          )
           if (!file) continue
         }
         files.push({ relPath: dir + f.name, file })
       }
       await writeEntry(await prepareEntry(relPath, metaBytes))
       for (const { relPath: p, file } of files) {
-        try { await writeEntry(await prepareEntry(p, file)) } catch (err) { throw namedError(p, file.size, err) }
+        try {
+          await writeEntry(await prepareEntry(p, file))
+        } catch (err) {
+          throw namedError(p, file.size, err)
+        }
       }
       return 1 + files.length
     })
@@ -265,7 +327,8 @@ export async function exportProjectArchive({
     await writeEntry(await prepareEntry(MANIFEST_NAME, enc.encode(JSON.stringify(manifest, null, 2))))
 
     const items = entries.filter((e) => !opfs.binaryDocumentOf(e.relPath))
-    let done = 0, skipped = 0
+    let done = 0,
+      skipped = 0
     for (const { relPath, file, handle } of items) {
       if (opfs.binaryDocumentLockKey(projectId, relPath)) {
         if (!(await archiveBinaryDocument(relPath))) skipped++
@@ -276,7 +339,10 @@ export async function exportProjectArchive({
     if (skipped) log(`Saving project: left out ${pluralize(skipped, 'file')} that changed while saving`, 'info')
     const cdOffset = archiveBytes
     let cdSize = 0
-    for (const h of central) { await write(h); cdSize += h.length }
+    for (const h of central) {
+      await write(h)
+      cdSize += h.length
+    }
     await write(zipEndRecords(central.length, cdOffset, cdSize))
     await sink.close()
   } catch (err) {
@@ -284,8 +350,10 @@ export async function exportProjectArchive({
     throw err
   }
 
-  log(`Project saved to ${fileName}: ${formatBytes(archiveBytes)} `
-    + `(${central.length} entries, from ${formatBytes(totalBytes)})`)
+  log(
+    `Project saved to ${fileName}: ${formatBytes(archiveBytes)} ` +
+      `(${central.length} entries, from ${formatBytes(totalBytes)})`,
+  )
   return { fileName, entryCount: central.length, sourceBytes: totalBytes, archiveBytes }
 }
 
@@ -300,7 +368,7 @@ const DEFAULT_IMPORT_LIMITS = Object.freeze({
   // central directory read, not the bomb guard — the size and ratio limits below are.
   maxEntries: 4_000_000,
   maxDeflatedEntryBytes: 1024 * 1024 * 1024, // a deflated entry is decompressed whole
-  maxTotalBytes: Infinity,                   // storage is checked by the writes themselves (see importProjectArchive)
+  maxTotalBytes: Infinity, // storage is checked by the writes themselves (see importProjectArchive)
   maxCompressionRatio: 1000,
   maxManifestBytes: 1024 * 1024,
 })
@@ -310,25 +378,38 @@ const DEFAULT_IMPORT_LIMITS = Object.freeze({
 async function archiveIndex(file, limits) {
   const cfg = { ...DEFAULT_IMPORT_LIMITS, ...limits }
   let entries
-  try { entries = await readZipIndex(file) } catch (err) { throw new Error(`not a readable project file (${err.message})`) }
+  try {
+    entries = await readZipIndex(file)
+  } catch (err) {
+    throw new Error(`not a readable project file (${err.message})`)
+  }
   if (entries.length > cfg.maxEntries) throw new Error(`project file has too many entries (limit ${cfg.maxEntries})`)
   let total = 0
   for (const e of entries) {
-    const limit = e.name === MANIFEST_NAME ? cfg.maxManifestBytes : e.method === 8 ? cfg.maxDeflatedEntryBytes : Infinity
-    if (e.size > limit) throw new Error(`archive entry "${e.name}" expands to ${formatBytes(e.size)} (limit ${formatBytes(limit)})`)
+    const limit =
+      e.name === MANIFEST_NAME ? cfg.maxManifestBytes : e.method === 8 ? cfg.maxDeflatedEntryBytes : Infinity
+    if (e.size > limit)
+      throw new Error(`archive entry "${e.name}" expands to ${formatBytes(e.size)} (limit ${formatBytes(limit)})`)
     if (e.method === 8 && e.compressedSize > 0 && e.size / e.compressedSize > cfg.maxCompressionRatio) {
       throw new Error(`archive entry "${e.name}" has an unsafe compression ratio`)
     }
     total += e.size
   }
-  if (total > cfg.maxTotalBytes) throw new Error(`project file expands to ${formatBytes(total)}, beyond the ${formatBytes(cfg.maxTotalBytes)} available`)
+  if (total > cfg.maxTotalBytes)
+    throw new Error(
+      `project file expands to ${formatBytes(total)}, beyond the ${formatBytes(cfg.maxTotalBytes)} available`,
+    )
   return { entries, total }
 }
 
 async function readManifest(file, entries) {
   const e = entries.find((x) => x.name === MANIFEST_NAME)
   if (!e) return null
-  try { return JSON.parse(await (await zipEntryBlob(file, e)).text()) } catch { return null }
+  try {
+    return JSON.parse(await (await zipEntryBlob(file, e)).text())
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -340,18 +421,17 @@ export async function peekArchiveManifest(file) {
   try {
     const entries = await readZipIndex(file)
     return await readManifest(file, entries)
-  } catch { return null }
+  } catch {
+    return null
+  }
 }
-
 
 /**
  * Unpack a `.websfm` file into `projectId`'s (fresh) OPFS directory.
  * Returns { manifest, entryCount, bytes }. Throws with a user-facing message on
  * a bad manifest — the caller is responsible for deleting the half-written dir.
  */
-export async function importProjectArchive({
-  file, projectId, onProgress = null, onLog = null, limits = {},
-}) {
+export async function importProjectArchive({ file, projectId, onProgress = null, onLog = null, limits = {} }) {
   const log = (m, level = 'info') => onLog?.(m, level, 'Project')
 
   // The browser's storage estimate is not a ceiling: Chrome reports quota = usage +
@@ -367,21 +447,31 @@ export async function importProjectArchive({
     const expanded = entries.reduce((n, e) => n + (e.size ?? 0), 0)
     const available = Number.isFinite(estimate?.quota) ? Math.max(0, estimate.quota - (estimate.usage || 0)) : Infinity
     if (expanded > available) {
-      log(`Opening project: it expands to ${formatBytes(expanded)}, more than the ${formatBytes(available)} the browser `
-        + 'reports free; continuing (the browser usually grants more as the project is written). If storage runs out, '
-        + 'the open stops and nothing is left behind.', 'warn')
+      log(
+        `Opening project: it expands to ${formatBytes(expanded)}, more than the ${formatBytes(available)} the browser ` +
+          'reports free; continuing (the browser usually grants more as the project is written). If storage runs out, ' +
+          'the open stops and nothing is left behind.',
+        'warn',
+      )
     }
-  } catch { /* no estimate: nothing to say */ }
+  } catch {
+    /* no estimate: nothing to say */
+  }
 
   const manifest = await readManifest(file, entries)
   if (!manifest) throw new Error('not a websfm project file (no manifest.json)')
   const v = validateManifest(manifest)
   if (!v.ok) throw new Error(v.error)
 
-  let entryCount = 0, bytes = 0, skipped = 0
+  let entryCount = 0,
+    bytes = 0,
+    skipped = 0
   for (const e of entries) {
     if (e.name === MANIFEST_NAME || e.name.endsWith('/')) continue
-    if (!isSafeArchiveEntry(e.name)) { skipped++; continue }
+    if (!isSafeArchiveEntry(e.name)) {
+      skipped++
+      continue
+    }
     // A stored entry goes to OPFS as a slice of the file: never read into memory.
     await opfs.writeProjectFile(projectId, e.name, await zipEntryBlob(file, e))
     entryCount++

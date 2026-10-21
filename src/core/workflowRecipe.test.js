@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
-  DISPLAY_LEVELS, REUSE_POLICIES, WARNING_POLICIES, WORKFLOW_BLOCKS,
-  createWorkflow, createWorkflowBlock, normalizeWorkflow,
+  DISPLAY_LEVELS,
+  REUSE_POLICIES,
+  WARNING_POLICIES,
+  WORKFLOW_BLOCKS,
+  createWorkflow,
+  createWorkflowBlock,
+  normalizeWorkflow,
 } from './workflow.js'
 import { parseWorkflowRecipe, tokenize, workflowRecipeText } from './workflowRecipe.js'
 import { getGuideDoc, getParam } from './help/guide.js'
@@ -45,23 +50,40 @@ function randomWorkflow(seed) {
   const r = rng(seed)
   const w = createWorkflow(pick(r, ['Survey', 'Survey "B" #2', 'tab\there', 'line\nbreak', 'ünïcode — ✓']))
   w.displayLevel = pick(r, DISPLAY_LEVELS)
-  w.defaults = { warningPolicy: pick(r, ['pause', 'continue', 'stop']), reusePolicy: pick(r, ['valid', 'ask', 'rerun']) }
+  w.defaults = {
+    warningPolicy: pick(r, ['pause', 'continue', 'stop']),
+    reusePolicy: pick(r, ['valid', 'ask', 'rerun']),
+  }
   const count = Math.floor(r() * 14)
   w.blocks = Array.from({ length: count }, (_, i) => {
-    const spec = r() < 0.25 ? pick(r, WORKFLOW_BLOCKS.filter((b) => b.control)) : pick(r, WORKFLOW_BLOCKS)
+    const spec =
+      r() < 0.25
+        ? pick(
+            r,
+            WORKFLOW_BLOCKS.filter((b) => b.control),
+          )
+        : pick(r, WORKFLOW_BLOCKS)
     const block = createWorkflowBlock(spec.id, r() < 0.4 ? pick(r, [`b${i}`, `step_${i}`, `X-${i}`]) : '')
     block.enabled = r() < 0.8
     block.reusePolicy = pick(r, REUSE_POLICIES)
     block.warningPolicy = pick(r, WARNING_POLICIES)
     for (const key of Object.keys(block.settings)) {
-      if (r() < 0.5) block.settings[key] = randomValue(r, spec.fields.find((f) => f.key === key), block.settings[key])
+      if (r() < 0.5)
+        block.settings[key] = randomValue(
+          r,
+          spec.fields.find((f) => f.key === key),
+          block.settings[key],
+        )
     }
     return block
   })
   // Jumps name a later block (or end); the recipe carries them whether or not
   // preflight would accept the result.
   w.blocks.forEach((block, i) => {
-    const later = w.blocks.slice(i + 1).filter((b) => b.name).map((b) => b.name)
+    const later = w.blocks
+      .slice(i + 1)
+      .filter((b) => b.name)
+      .map((b) => b.name)
     const target = () => pick(r, ['', 'end', ...later])
     if (block.type === 'gate') {
       block.settings.onFail = pick(r, ['pause', 'stop', 'continue', 'branch'])
@@ -75,7 +97,9 @@ function randomWorkflow(seed) {
 }
 
 const comparable = (w) => ({
-  name: w.name, displayLevel: w.displayLevel, defaults: w.defaults,
+  name: w.name,
+  displayLevel: w.displayLevel,
+  defaults: w.defaults,
   blocks: w.blocks.map(({ id, ...b }) => b),
 })
 
@@ -93,7 +117,10 @@ describe('recipe text round trip', () => {
   })
 
   it('covers every block type with its default settings', () => {
-    const w = createWorkflow('All', WORKFLOW_BLOCKS.map((b) => b.id))
+    const w = createWorkflow(
+      'All',
+      WORKFLOW_BLOCKS.map((b) => b.id),
+    )
     const { workflow } = parseWorkflowRecipe(workflowRecipeText(w))
     expect(comparable(workflow)).toEqual(comparable(normalizeWorkflow(w)))
   })
@@ -110,10 +137,18 @@ describe('recipe text round trip', () => {
     w.blocks[3].name = 'hq'
     w.blocks[3].reusePolicy = 'rerun'
     w.blocks[3].enabled = false
-    Object.assign(w.blocks[1].settings, { metric: 'reprojMedianPx', op: '<', threshold: 1, onFail: 'branch', failTarget: 'hq' })
+    Object.assign(w.blocks[1].settings, {
+      metric: 'reprojMedianPx',
+      op: '<',
+      threshold: 1,
+      onFail: 'branch',
+      failTarget: 'hq',
+    })
     w.blocks[2].settings.target = 'end'
     const lines = workflowRecipeText(w).split('\n')
-    expect(lines[3]).toMatch(/^gate metric="reprojMedianPx" op="<" threshold=1 onFail="branch" failTarget="hq" {2}# Quality Gate: Reprojection median < 1 px, else go to hq$/)
+    expect(lines[3]).toMatch(
+      /^gate metric="reprojMedianPx" op="<" threshold=1 onFail="branch" failTarget="hq" {2}# Quality Gate: Reprojection median < 1 px, else go to hq$/,
+    )
     expect(lines[4]).toMatch(/^goto target="end" {2}# Go to end$/)
     expect(lines[5]).toMatch(/^hq: reconstruct @off @reuse=rerun preset="medium"/)
   })
@@ -123,16 +158,18 @@ describe('recipe text parsing', () => {
   const parse = (text) => parseWorkflowRecipe(text)
 
   it('reads hand-written lines: bare words, defaults, comments', () => {
-    const { workflow, errors } = parse([
-      '# my survey',
-      'workflow "Hand"',
-      'defaults warning=continue reuse=rerun',
-      '',
-      'reconstruct preset=high   # trailing comment',
-      'sp: compute-depth quality=low geomConsistency=false',
-      'gate metric=depthCoveragePct op=">=" threshold=40 onFail=branch failTarget=end',
-      'filter-cloud methods=["voxel", "sor"] voxelCell=0.05',
-    ].join('\n'))
+    const { workflow, errors } = parse(
+      [
+        '# my survey',
+        'workflow "Hand"',
+        'defaults warning=continue reuse=rerun',
+        '',
+        'reconstruct preset=high   # trailing comment',
+        'sp: compute-depth quality=low geomConsistency=false',
+        'gate metric=depthCoveragePct op=">=" threshold=40 onFail=branch failTarget=end',
+        'filter-cloud methods=["voxel", "sor"] voxelCell=0.05',
+      ].join('\n'),
+    )
     expect(errors).toEqual([])
     expect(workflow.name).toBe('Hand')
     expect(workflow.defaults).toEqual({ warningPolicy: 'continue', reusePolicy: 'rerun' })
@@ -144,23 +181,25 @@ describe('recipe text parsing', () => {
   })
 
   it('reports every problem with its line number and drops nothing silently', () => {
-    const { workflow, errors } = parse([
-      'workflow "Bad"',          // 1
-      'reconstrct preset=high',  // 2 unknown block
-      'reconstruct presett=high', // 3 unknown setting
-      'reconstruct baIterations="ten"', // 4 wrong type
-      'compute-depth quality=extreme', // 5 not an option
-      'gate failTarget="nowhere" onFail=branch', // 6 dangling target
-      'dense minViews=2 minViews=3', // 7 duplicate setting
-      'dense stray',             // 8 bare word
-      'filter-cloud methods=["sor", "magic"]', // 9 bad list item
-      'detect-features maxDim="unterminated', // 10 broken quote
-      'a: dense',                // 11
-      'a: dense',                // 12 duplicate name
-      'end: dense',              // 13 reserved name
-      'dense @reuse=sometimes',  // 14 bad policy
-      'workflow "Again"',        // 15 header twice
-    ].join('\n'))
+    const { workflow, errors } = parse(
+      [
+        'workflow "Bad"', // 1
+        'reconstrct preset=high', // 2 unknown block
+        'reconstruct presett=high', // 3 unknown setting
+        'reconstruct baIterations="ten"', // 4 wrong type
+        'compute-depth quality=extreme', // 5 not an option
+        'gate failTarget="nowhere" onFail=branch', // 6 dangling target
+        'dense minViews=2 minViews=3', // 7 duplicate setting
+        'dense stray', // 8 bare word
+        'filter-cloud methods=["sor", "magic"]', // 9 bad list item
+        'detect-features maxDim="unterminated', // 10 broken quote
+        'a: dense', // 11
+        'a: dense', // 12 duplicate name
+        'end: dense', // 13 reserved name
+        'dense @reuse=sometimes', // 14 bad policy
+        'workflow "Again"', // 15 header twice
+      ].join('\n'),
+    )
     expect(workflow).toBeNull()
     const byLine = Object.fromEntries(errors.map((e) => [e.line, e.message]))
     expect(byLine[2]).toMatch(/unknown block “reconstrct”/)
@@ -190,7 +229,13 @@ describe('recipe text parsing', () => {
     const example = /```\n([\s\S]*?)```/.exec(doc.params.get('recipe-text').body)[1]
     const { workflow, errors } = parse(example)
     expect(errors).toEqual([])
-    expect(workflow.blocks.map((b) => b.type)).toEqual(['reconstruct', 'gate', 'reconstruct', 'compute-depth', 'filter-cloud'])
+    expect(workflow.blocks.map((b) => b.type)).toEqual([
+      'reconstruct',
+      'gate',
+      'reconstruct',
+      'compute-depth',
+      'filter-cloud',
+    ])
     for (const spec of WORKFLOW_BLOCKS) {
       for (const field of spec.fields.filter((f) => f.help)) {
         expect(getParam('workflow-builder', field.key), `${spec.id}.${field.key}`).not.toBeNull()
@@ -200,8 +245,12 @@ describe('recipe text parsing', () => {
   })
 
   it('tokenizes quoted values, brackets and comments', () => {
-    expect(tokenize('a: gate x="p # q" y=[1, "]"]  # c').map((t) => [t.key, t.value ?? t.text]))
-      .toEqual([[null, 'a:'], [null, 'gate'], ['x', 'p # q'], ['y', [1, ']']]])
+    expect(tokenize('a: gate x="p # q" y=[1, "]"]  # c').map((t) => [t.key, t.value ?? t.text])).toEqual([
+      [null, 'a:'],
+      [null, 'gate'],
+      ['x', 'p # q'],
+      ['y', [1, ']']],
+    ])
     expect(() => tokenize('dense y=[1, 2')).toThrow(/column 9: unclosed/)
   })
 })

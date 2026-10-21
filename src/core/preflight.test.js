@@ -4,8 +4,14 @@ import { preflight, hasBlockers } from './preflight.js'
 const GiB = 1024 ** 3
 // A clean, runnable project as the baseline to perturb.
 const ready = () => ({
-  nImages: 10, detectedImageCount: 10, verifiedPairCount: 30, totalPairCount: 45,
-  sensorsMissingFocal: [], filmSensorsMissingFiducials: [], dense: null, gpu: null,
+  nImages: 10,
+  detectedImageCount: 10,
+  verifiedPairCount: 30,
+  totalPairCount: 45,
+  sensorsMissingFocal: [],
+  filmSensorsMissingFiducials: [],
+  dense: null,
+  gpu: null,
 })
 const codes = (list) => list.map((c) => c.code)
 
@@ -54,15 +60,21 @@ describe('preflight', () => {
   })
 
   it('warns when the dense projection exceeds the budget', () => {
-    expect(codes(preflight({ ...ready(), dense: { projectedBytes: 5 * GiB, budgetBytes: 2 * GiB } }))).toContain('dense-over-budget')
+    expect(codes(preflight({ ...ready(), dense: { projectedBytes: 5 * GiB, budgetBytes: 2 * GiB } }))).toContain(
+      'dense-over-budget',
+    )
     // Under budget → no warning.
-    expect(codes(preflight({ ...ready(), dense: { projectedBytes: 1 * GiB, budgetBytes: 2 * GiB } }))).not.toContain('dense-over-budget')
+    expect(codes(preflight({ ...ready(), dense: { projectedBytes: 1 * GiB, budgetBytes: 2 * GiB } }))).not.toContain(
+      'dense-over-budget',
+    )
   })
 
   it('warns when GPU is requested but unavailable, not when available', () => {
     expect(codes(preflight({ ...ready(), gpu: { requested: true, available: false } }))).toContain('gpu-unavailable')
     expect(codes(preflight({ ...ready(), gpu: { requested: true, available: true } }))).not.toContain('gpu-unavailable')
-    expect(codes(preflight({ ...ready(), gpu: { requested: false, available: false } }))).not.toContain('gpu-unavailable')
+    expect(codes(preflight({ ...ready(), gpu: { requested: false, available: false } }))).not.toContain(
+      'gpu-unavailable',
+    )
   })
 
   it('orders blocks before warnings', () => {
@@ -75,8 +87,13 @@ describe('preflight', () => {
   })
 
   it('every check carries a non-empty msg and fix', () => {
-    const c = preflight({ nImages: 1, sensorsMissingFocal: [{ label: 'x' }], filmSensorsMissingFiducials: [{ label: 'y' }],
-      dense: { projectedBytes: 5 * GiB, budgetBytes: 1 * GiB }, gpu: { requested: true, available: false } })
+    const c = preflight({
+      nImages: 1,
+      sensorsMissingFocal: [{ label: 'x' }],
+      filmSensorsMissingFiducials: [{ label: 'y' }],
+      dense: { projectedBytes: 5 * GiB, budgetBytes: 1 * GiB },
+      gpu: { requested: true, available: false },
+    })
     for (const x of c) {
       expect(x.msg.length).toBeGreaterThan(0)
       expect(x.fix.length).toBeGreaterThan(0)

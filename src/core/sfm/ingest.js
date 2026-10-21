@@ -43,19 +43,32 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       const obs = calibratedFiducialPairs(img, s)
       const fit = fitFiducialTransform(obs, cal.transform || 'affine', { spacingMm: cal.reseau?.spacingMm })
       if (!fit) {
-        log(`${img.name} — fiducial fit failed (${pluralize(obs.length, 'usable mark')}, `
-          + `need ≥3); falling back to standard intrinsics`, 'warn', 'Reconstruction')
+        log(
+          `${img.name} — fiducial fit failed (${pluralize(obs.length, 'usable mark')}, ` +
+            `need ≥3); falling back to standard intrinsics`,
+          'warn',
+          'Reconstruction',
+        )
         continue
       }
       const pitchUm = fit.pitchMm * 1000
-      log(`${img.name} — fiducial ${cal.transform || 'affine'} fit: pitch ${pitchUm.toFixed(2)}µm/px, `
-        + `${fit.rotDeg == null ? '' : `rot ${fit.rotDeg.toFixed(2)}°, shear ${fit.shear.toFixed(4)}, `}RMS ${fit.rmsUm.toFixed(1)}µm`
-        + (fit.residual ? ` over ${pluralize(fit.crosses, 'reseau cross', 'reseau crosses')}, film deformation `
-          + `${fit.affineRmsUm.toFixed(1)}µm RMS corrected` : ''),
-        'info', 'Reconstruction')
+      log(
+        `${img.name} — fiducial ${cal.transform || 'affine'} fit: pitch ${pitchUm.toFixed(2)}µm/px, ` +
+          `${fit.rotDeg == null ? '' : `rot ${fit.rotDeg.toFixed(2)}°, shear ${fit.shear.toFixed(4)}, `}RMS ${fit.rmsUm.toFixed(1)}µm` +
+          (fit.residual
+            ? ` over ${pluralize(fit.crosses, 'reseau cross', 'reseau crosses')}, film deformation ` +
+              `${fit.affineRmsUm.toFixed(1)}µm RMS corrected`
+            : ''),
+        'info',
+        'Reconstruction',
+      )
       if (fit.rmsUm > 0.5 * pitchUm) {
-        log(`${img.name} — fiducial residual ${fit.rmsUm.toFixed(1)}µm exceeds `
-          + `½ pixel (${(0.5 * pitchUm).toFixed(1)}µm) — check the clicked marks`, 'warn', 'Reconstruction')
+        log(
+          `${img.name} — fiducial residual ${fit.rmsUm.toFixed(1)}µm exceeds ` +
+            `½ pixel (${(0.5 * pitchUm).toFixed(1)}µm) — check the clicked marks`,
+          'warn',
+          'Reconstruction',
+        )
       }
       const sid = img.sensorId ?? '__nosensor__'
       if (!filmGroups.has(sid)) filmGroups.set(sid, [])
@@ -69,26 +82,38 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       // reflection (det < 0). The canonical frame must undo it or the whole model
       // comes out mirrored (see canonicalFrame). Majority vote over the batch.
       const reflected = entries.filter(({ fit }) => {
-        const h = fit.forward ?? null, A = fit.A ?? null
+        const h = fit.forward ?? null,
+          A = fit.A ?? null
         const det = h ? h[0] * h[4] - h[1] * h[3] : A ? A[0] * A[4] - A[1] * A[3] : NaN
         return det < 0
       }).length
       const yUp = reflected * 2 > entries.length
       if (yUp) {
-        log(`sensor ${sid} — fiducial coordinates are y-up against y-down scan rows; `
-          + 'the canonical frame flips y so the camera stays proper (not mirrored)', 'info', 'Reconstruction')
+        log(
+          `sensor ${sid} — fiducial coordinates are y-up against y-down scan rows; ` +
+            'the canonical frame flips y so the camera stays proper (not mirrored)',
+          'info',
+          'Reconstruction',
+        )
       }
       const frame = canonicalFrame(fiducials, pitchMm, { yUp })
       if (!frame) {
-        log(`sensor ${sid} — could not build canonical frame (need ≥3 marks); `
-          + `film images fall back to standard intrinsics`, 'warn', 'Reconstruction')
+        log(
+          `sensor ${sid} — could not build canonical frame (need ≥3 marks); ` +
+            `film images fall back to standard intrinsics`,
+          'warn',
+          'Reconstruction',
+        )
         continue
       }
       const source = `fiducial interior orientation (${fiducials.focalMm}mm ÷ ${(pitchMm * 1000).toFixed(2)}µm/px)`
-      log(`sensor ${sid} — canonical frame ${frame.width}×${frame.height}px, `
-        + `K fx=${frame.K.fx.toFixed(1)} cx=${frame.K.cx.toFixed(1)} cy=${frame.K.cy.toFixed(1)} `
-        + `(median pitch ${(pitchMm * 1000).toFixed(2)}µm/px over ${pluralize(entries.length, 'image')})`,
-        'info', 'Reconstruction')
+      log(
+        `sensor ${sid} — canonical frame ${frame.width}×${frame.height}px, ` +
+          `K fx=${frame.K.fx.toFixed(1)} cx=${frame.K.cx.toFixed(1)} cy=${frame.K.cy.toFixed(1)} ` +
+          `(median pitch ${(pitchMm * 1000).toFixed(2)}µm/px over ${pluralize(entries.length, 'image')})`,
+        'info',
+        'Reconstruction',
+      )
       for (const { img, fit } of entries) {
         const scanTransform = fit.forward ? fit : fit.A
         img.sensor._fiducialK = { fx: frame.K.fx, fy: frame.K.fy, cx: frame.K.cx, cy: frame.K.cy, source }
@@ -106,12 +131,17 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
           const t = fiducialTransforms.get(o.uuid)
           if (!t) continue
           const c = scanToCanonical(o.px, o.py, t.transform ?? t.A, t.frame)
-          o.px = c.x; o.py = c.y; remapped++
+          o.px = c.x
+          o.py = c.y
+          remapped++
         }
       }
       if (remapped) {
-        log(`remapped ${pluralize(remapped, 'GCP observation')} on film images `
-          + `into the canonical frame`, 'info', 'Reconstruction')
+        log(
+          `remapped ${pluralize(remapped, 'GCP observation')} on film images ` + `into the canonical frame`,
+          'info',
+          'Reconstruction',
+        )
       }
     }
   }
@@ -134,15 +164,22 @@ export function resolveIntrinsics({ imgs, intrinsicsRecord, log }) {
     const sid = img.sensorId ?? `image:${img.uuid}`
     if (!intrinsicsRecord.has(sid)) {
       intrinsicsRecord.set(sid, {
-        sensorId: img.sensorId ?? null, label: img.sensor?.label ?? null,
-        fxNominal: K.fx, source: K.source, fxFinal: null, cx: null, cy: null,
+        sensorId: img.sensorId ?? null,
+        label: img.sensor?.label ?? null,
+        fxNominal: K.fx,
+        source: K.source,
+        fxFinal: null,
+        cx: null,
+        cy: null,
       })
     }
-    const implied = K.impliedFilmWidthMm != null
-      ? ` [implies ${K.impliedFilmWidthMm.toFixed(0)}mm film width]` : ''
-    log(`K[${img.name}] fx=${K.fx.toFixed(1)} fy=${K.fy.toFixed(1)} `
-      + `cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} — ${K.source}${implied}`,
-      'debug', 'Reconstruction')
+    const implied = K.impliedFilmWidthMm != null ? ` [implies ${K.impliedFilmWidthMm.toFixed(0)}mm film width]` : ''
+    log(
+      `K[${img.name}] fx=${K.fx.toFixed(1)} fy=${K.fy.toFixed(1)} ` +
+        `cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} — ${K.source}${implied}`,
+      'debug',
+      'Reconstruction',
+    )
     // A real principal point sits within a few % of the image centre. A cx/cy
     // far outside that is virtually always a convention mix-up — Metashape and
     // friends export cx/cy as OFFSETS from the centre, while websfm's sensor
@@ -154,19 +191,26 @@ export function resolveIntrinsics({ imgs, intrinsicsRecord, log }) {
       const key = img.sensorId ?? img.uuid
       if (!ppWarned.has(key)) {
         ppWarned.add(key)
-        log(`principal point cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} is far from `
-          + `the image centre (${(iw / 2).toFixed(0)}, ${(ih / 2).toFixed(0)}) — the sensor table takes `
-          + `ABSOLUTE pixels. If this calibration came from Metashape (which reports centre offsets), `
-          + `enter ${(iw / 2).toFixed(1)} + cx and ${(ih / 2).toFixed(1)} + cy instead.`,
-          'warn', 'Reconstruction')
+        log(
+          `principal point cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} is far from ` +
+            `the image centre (${(iw / 2).toFixed(0)}, ${(ih / 2).toFixed(0)}) — the sensor table takes ` +
+            `ABSOLUTE pixels. If this calibration came from Metashape (which reports centre offsets), ` +
+            `enter ${(iw / 2).toFixed(1)} + cx and ${(ih / 2).toFixed(1)} + cy instead.`,
+          'warn',
+          'Reconstruction',
+        )
       }
     }
     // The pixel-pitch path can silently produce an off-standard film width (a
     // ~9% focal error on the CA…V set). Flag it so the user checks pitch/format.
     if (K.impliedFilmWidthMm != null && K.filmWidthOk === false) {
-      log(`K[${img.name}] implied film width ${K.impliedFilmWidthMm.toFixed(0)}mm `
-        + `is not a standard aerial format (~230/240mm) — check the scan pixel pitch, or use the `
-        + `film/sensor-format (mm) field instead of pixel size.`, 'warn', 'Reconstruction')
+      log(
+        `K[${img.name}] implied film width ${K.impliedFilmWidthMm.toFixed(0)}mm ` +
+          `is not a standard aerial format (~230/240mm) — check the scan pixel pitch, or use the ` +
+          `film/sensor-format (mm) field instead of pixel size.`,
+        'warn',
+        'Reconstruction',
+      )
     }
   }
   return { Kmap, defaultKCount }
@@ -187,7 +231,11 @@ export function gcpObservationMover(gcps) {
     }
   }
   const moveGcpObs = (uuid, map) => {
-    for (const o of gcpObsByUuid.get(uuid) || []) { const u = map(o.px, o.py); o.px = u.x; o.py = u.y }
+    for (const o of gcpObsByUuid.get(uuid) || []) {
+      const u = map(o.px, o.py)
+      o.px = u.x
+      o.py = u.y
+    }
   }
   return moveGcpObs
 }
@@ -202,7 +250,11 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
   let undistortedImgs = 0
   let anyCalibratedDistortion = false
   const undistortedUuids = new Set()
-  let shiftSum = 0, shiftMax = 0, shiftN = 0, dropped = 0, fisheyeKps = 0
+  let shiftSum = 0,
+    shiftMax = 0,
+    shiftN = 0,
+    dropped = 0,
+    fisheyeKps = 0
   for (const img of imgs) {
     const dist = distortionOf(img.sensor)
     if (!dist || !img.kp?.n) continue
@@ -215,9 +267,14 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
     img.kp = mapPositions(img.kp, (x, y) => {
       const u = undistortKeypoint(x, y, K, dist)
       // eslint-disable-next-line no-self-compare
-      if (u.x !== u.x) { dropped++; return u }
+      if (u.x !== u.x) {
+        dropped++
+        return u
+      }
       const d = Math.hypot(u.x - x, u.y - y)
-      shiftSum += d; if (d > shiftMax) shiftMax = d; shiftN++
+      shiftSum += d
+      if (d > shiftMax) shiftMax = d
+      shiftN++
       return u
     })
     moveGcpObs(img.uuid, (x, y) => undistortPixel(x, y, K, dist))
@@ -225,14 +282,21 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
     undistortedUuids.add(img.uuid)
   }
   if (undistortedImgs > 0) {
-    log(`undistorted keypoints on ${undistortedImgs}/${pluralize(imgs.length, 'image')} `
-      + `(lens distortion removed at ingest — pipeline stays pinhole; `
-      + `mean shift ${(shiftSum / Math.max(1, shiftN)).toFixed(2)}px, max ${shiftMax.toFixed(2)}px)`,
-      'info', 'Reconstruction')
+    log(
+      `undistorted keypoints on ${undistortedImgs}/${pluralize(imgs.length, 'image')} ` +
+        `(lens distortion removed at ingest — pipeline stays pinhole; ` +
+        `mean shift ${(shiftSum / Math.max(1, shiftN)).toFixed(2)}px, max ${shiftMax.toFixed(2)}px)`,
+      'info',
+      'Reconstruction',
+    )
   }
   if (dropped > 0) {
-    log(`dropped ${dropped} of ${pluralize(fisheyeKps, 'fisheye keypoint')} more than ${FISHEYE_MAX_RAY_DEG}° off-axis `
-      + '(too stretched in the pinhole frame to measure reliably)', 'info', 'Reconstruction')
+    log(
+      `dropped ${dropped} of ${pluralize(fisheyeKps, 'fisheye keypoint')} more than ${FISHEYE_MAX_RAY_DEG}° off-axis ` +
+        '(too stretched in the pinhole frame to measure reliably)',
+      'info',
+      'Reconstruction',
+    )
   }
   return { anyCalibratedDistortion, undistortedUuids }
 }
@@ -256,18 +320,25 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
 // nothing reads their F.
 export function refitMovedPairs({ donePairs, bridgePairs = [], movedUuids, imageByUuid, log }) {
   if (movedUuids.size > 0) {
-    let pending = 0, skipped = 0, droppedMatches = 0
+    let pending = 0,
+      skipped = 0,
+      droppedMatches = 0
     const bridges = new Set(bridgePairs)
     for (const e of [...donePairs, ...bridgePairs]) {
       if (!movedUuids.has(e.idA) && !movedUuids.has(e.idB)) continue
-      const iA = imageByUuid(e.idA), iB = imageByUuid(e.idB)
-      if (!iA || !iB || !e.matches?.length) { if (e.F) skipped++; continue }
+      const iA = imageByUuid(e.idA),
+        iB = imageByUuid(e.idB)
+      if (!iA || !iB || !e.matches?.length) {
+        if (e.F) skipped++
+        continue
+      }
       // A keypoint dropped at ingest (a fisheye ray far off-axis) is NaN: its matches
       // leave the pair here, once, so no init/PnP/triangulation path ever reads one.
       const m = asPairList(e.matches)
       const kept = []
       for (let i = 0; i < m.length; i++) {
-        const xa = kpX(iA.kp, m.a(i)), xb = kpX(iB.kp, m.b(i))
+        const xa = kpX(iA.kp, m.a(i)),
+          xb = kpX(iB.kp, m.b(i))
         // eslint-disable-next-line no-self-compare
         if (xa !== xa || xb !== xb) continue
         kept.push(m.a(i), m.b(i))
@@ -279,16 +350,27 @@ export function refitMovedPairs({ donePairs, bridgePairs = [], movedUuids, image
         if (e.inlierCount != null) e.inlierCount = n
       }
       if (!e.F || bridges.has(e)) continue
-      if (n < 8) { skipped++; continue }
+      if (n < 8) {
+        skipped++
+        continue
+      }
       refitOnRead(e, iA, iB)
       pending++
     }
     if (droppedMatches > 0) {
-      log(`dropped ${pluralize(droppedMatches, 'match', 'matches')} on fisheye keypoints too far off-axis`, 'info', 'Reconstruction')
+      log(
+        `dropped ${pluralize(droppedMatches, 'match', 'matches')} on fisheye keypoints too far off-axis`,
+        'info',
+        'Reconstruction',
+      )
     }
     if (pending > 0) {
-      log(`F of ${pluralize(pending, 'pair')} re-fitted on the moved keypoints when first read`
-        + `${skipped ? ` (${skipped} skipped)` : ''} (the distorted-space fit is stale)`, 'info', 'Reconstruction')
+      log(
+        `F of ${pluralize(pending, 'pair')} re-fitted on the moved keypoints when first read` +
+          `${skipped ? ` (${skipped} skipped)` : ''} (the distorted-space fit is stale)`,
+        'info',
+        'Reconstruction',
+      )
     }
   }
 }
@@ -300,14 +382,17 @@ export function hasFundamental(e) {
 }
 
 function refitOnRead(e, iA, iB) {
-  let F = e.F, fresh = false
+  let F = e.F,
+    fresh = false
   Object.defineProperty(e, 'F', {
-    configurable: true, enumerable: true,
+    configurable: true,
+    enumerable: true,
     get() {
       if (!fresh) {
         fresh = true
         const m = asPairList(e.matches)
-        const ptsA = new Array(m.length), ptsB = new Array(m.length)
+        const ptsA = new Array(m.length),
+          ptsB = new Array(m.length)
         for (let i = 0; i < m.length; i++) {
           ptsA[i] = { x: kpX(iA.kp, m.a(i)), y: kpY(iA.kp, m.a(i)) }
           ptsB[i] = { x: kpX(iB.kp, m.b(i)), y: kpY(iB.kp, m.b(i)) }
@@ -317,6 +402,9 @@ function refitOnRead(e, iA, iB) {
       }
       return F
     },
-    set(v) { F = v; fresh = true },
+    set(v) {
+      F = v
+      fresh = true
+    },
   })
 }

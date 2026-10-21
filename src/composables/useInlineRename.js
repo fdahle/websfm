@@ -14,12 +14,17 @@ export function useInlineRename(onCommit) {
   const editingName = ref('')
   let input = null
 
-  function setInput(el) { if (el) input = el }
+  function setInput(el) {
+    if (el) input = el
+  }
 
   function start(id, name) {
     editingId.value = id
     editingName.value = name ?? ''
-    nextTick(() => { input?.focus(); input?.select() })
+    nextTick(() => {
+      input?.focus()
+      input?.select()
+    })
   }
 
   function commit() {
@@ -30,7 +35,9 @@ export function useInlineRename(onCommit) {
     if (name) onCommit(id, name)
   }
 
-  function cancel() { editingId.value = null }
+  function cancel() {
+    editingId.value = null
+  }
 
   return { editingId, editingName, setInput, start, commit, cancel }
 }

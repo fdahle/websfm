@@ -23,16 +23,26 @@ const round = (n, d = 1) => (n == null ? null : Number(n.toFixed(d)))
 function metaVal(img, key) {
   const m = img.meta || {}
   switch (key) {
-    case 'name':      return img.name?.toLowerCase() ?? ''
-    case 'dimensions': return m.width ? m.width * (m.height || 1) : null
-    case 'camera':    return m.model?.toLowerCase() ?? ''
-    case 'focal':     return m.focalLength
-    case 'aperture':  return m.fNumber
-    case 'iso':       return m.iso
-    case 'gps':       return m.gpsLat
-    case 'keypoints': return img.kpStatus === 'done' ? img.kpCount : null
-    case 'size':      return m.fileSize
-    default:          return null
+    case 'name':
+      return img.name?.toLowerCase() ?? ''
+    case 'dimensions':
+      return m.width ? m.width * (m.height || 1) : null
+    case 'camera':
+      return m.model?.toLowerCase() ?? ''
+    case 'focal':
+      return m.focalLength
+    case 'aperture':
+      return m.fNumber
+    case 'iso':
+      return m.iso
+    case 'gps':
+      return m.gpsLat
+    case 'keypoints':
+      return img.kpStatus === 'done' ? img.kpCount : null
+    case 'size':
+      return m.fileSize
+    default:
+      return null
   }
 }
 const { toggleSort, sortArrow, sorted: sortedImages } = useTableSort(() => props.images, metaVal)
@@ -40,7 +50,10 @@ const { toggleSort, sortArrow, sorted: sortedImages } = useTableSort(() => props
 // Thousands of rows: only those in view are in the DOM (composables/useVirtualList).
 // Rows have a fixed CSS height (tbody tr), measured once rendered.
 const {
-  listRef: bodyRef, visibleItems: visibleImages, padTop, padBottom,
+  listRef: bodyRef,
+  visibleItems: visibleImages,
+  padTop,
+  padBottom,
 } = useVirtualList({ items: () => sortedImages.value, itemHeight: 53, measure: true })
 </script>
 
@@ -50,19 +63,39 @@ const {
       <thead>
         <tr>
           <th></th>
-          <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
-          <th class="sortable" @click="toggleSort('dimensions')">Dimensions <span class="arrow">{{ sortArrow('dimensions') }}</span></th>
-          <th class="sortable" @click="toggleSort('camera')">Camera <span class="arrow">{{ sortArrow('camera') }}</span></th>
-          <th class="sortable" @click="toggleSort('focal')">Focal <span class="arrow">{{ sortArrow('focal') }}</span></th>
-          <th class="sortable" @click="toggleSort('aperture')">Aperture <span class="arrow">{{ sortArrow('aperture') }}</span></th>
-          <th class="sortable" @click="toggleSort('iso')">ISO <span class="arrow">{{ sortArrow('iso') }}</span></th>
-          <th class="sortable" @click="toggleSort('gps')">GPS <span class="arrow">{{ sortArrow('gps') }}</span></th>
-          <th class="sortable" @click="toggleSort('keypoints')">Keypoints <span class="arrow">{{ sortArrow('keypoints') }}</span></th>
-          <th class="sortable" @click="toggleSort('size')">Size <span class="arrow">{{ sortArrow('size') }}</span></th>
+          <th class="sortable" @click="toggleSort('name')">
+            Name <span class="arrow">{{ sortArrow('name') }}</span>
+          </th>
+          <th class="sortable" @click="toggleSort('dimensions')">
+            Dimensions <span class="arrow">{{ sortArrow('dimensions') }}</span>
+          </th>
+          <th class="sortable" @click="toggleSort('camera')">
+            Camera <span class="arrow">{{ sortArrow('camera') }}</span>
+          </th>
+          <th class="sortable" @click="toggleSort('focal')">
+            Focal <span class="arrow">{{ sortArrow('focal') }}</span>
+          </th>
+          <th class="sortable" @click="toggleSort('aperture')">
+            Aperture <span class="arrow">{{ sortArrow('aperture') }}</span>
+          </th>
+          <th class="sortable" @click="toggleSort('iso')">
+            ISO <span class="arrow">{{ sortArrow('iso') }}</span>
+          </th>
+          <th class="sortable" @click="toggleSort('gps')">
+            GPS <span class="arrow">{{ sortArrow('gps') }}</span>
+          </th>
+          <th class="sortable" @click="toggleSort('keypoints')">
+            Keypoints <span class="arrow">{{ sortArrow('keypoints') }}</span>
+          </th>
+          <th class="sortable" @click="toggleSort('size')">
+            Size <span class="arrow">{{ sortArrow('size') }}</span>
+          </th>
         </tr>
       </thead>
       <tbody ref="bodyRef">
-        <tr v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"><td colspan="10"></td></tr>
+        <tr v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }">
+          <td colspan="10"></td>
+        </tr>
         <tr
           v-for="img in visibleImages"
           :key="img.id"
@@ -103,7 +136,9 @@ const {
             <td>{{ formatFileSize(img.meta.fileSize) }}</td>
           </template>
         </tr>
-        <tr v-if="padBottom" class="v-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }"><td colspan="10"></td></tr>
+        <tr v-if="padBottom" class="v-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }">
+          <td colspan="10"></td>
+        </tr>
       </tbody>
     </table>
 
@@ -137,9 +172,17 @@ thead th {
   white-space: nowrap;
 }
 
-thead th.sortable { cursor: pointer; user-select: none; }
-thead th.sortable:hover { color: var(--text); }
-.arrow { font-size: 9px; color: var(--accent); }
+thead th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+thead th.sortable:hover {
+  color: var(--text);
+}
+.arrow {
+  font-size: 9px;
+  color: var(--accent);
+}
 
 tbody td {
   padding: 8px 12px;
@@ -154,8 +197,15 @@ tbody tr {
   height: 53px;
 }
 
-tbody tr.v-spacer, tbody tr.v-spacer:hover { cursor: default; background: none; }
-tbody tr.v-spacer > td { padding: 0; border: 0; }
+tbody tr.v-spacer,
+tbody tr.v-spacer:hover {
+  cursor: default;
+  background: none;
+}
+tbody tr.v-spacer > td {
+  padding: 0;
+  border: 0;
+}
 
 tbody tr:hover {
   background: rgba(255, 255, 255, 0.04);

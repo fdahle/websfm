@@ -16,15 +16,18 @@ export function relativePose(refCam, srcCam) {
   const { R: Rr, t: tr } = refCam
   const { R: Rs, t: ts } = srcCam
   // R_rel = Rs · Rrᵀ
-  const R = [[0,0,0],[0,0,0],[0,0,0]]
+  const R = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
   for (let i = 0; i < 3; i++)
-    for (let j = 0; j < 3; j++)
-      R[i][j] = Rs[i][0]*Rr[j][0] + Rs[i][1]*Rr[j][1] + Rs[i][2]*Rr[j][2]
+    for (let j = 0; j < 3; j++) R[i][j] = Rs[i][0] * Rr[j][0] + Rs[i][1] * Rr[j][1] + Rs[i][2] * Rr[j][2]
   // t_rel = ts − R_rel·tr
   const t = [
-    ts[0] - (R[0][0]*tr[0] + R[0][1]*tr[1] + R[0][2]*tr[2]),
-    ts[1] - (R[1][0]*tr[0] + R[1][1]*tr[1] + R[1][2]*tr[2]),
-    ts[2] - (R[2][0]*tr[0] + R[2][1]*tr[1] + R[2][2]*tr[2]),
+    ts[0] - (R[0][0] * tr[0] + R[0][1] * tr[1] + R[0][2] * tr[2]),
+    ts[1] - (R[1][0] * tr[0] + R[1][1] * tr[1] + R[1][2] * tr[2]),
+    ts[2] - (R[2][0] * tr[0] + R[2][1] * tr[1] + R[2][2] * tr[2]),
   ]
   return { R, t }
 }
@@ -38,14 +41,16 @@ export const project = projectWithDepth
 // inverse of `project`, and a divergence between them would silently misreport
 // cross-view agreement.
 export function unprojectPixel(m, u, v, depth) {
-  const xc = (u - m.K.cx) / m.K.fx * depth
-  const yc = (v - m.K.cy) / m.K.fy * depth
+  const xc = ((u - m.K.cx) / m.K.fx) * depth
+  const yc = ((v - m.K.cy) / m.K.fy) * depth
   const zc = depth
-  const ax = xc - m.t[0], ay = yc - m.t[1], az = zc - m.t[2]
+  const ax = xc - m.t[0],
+    ay = yc - m.t[1],
+    az = zc - m.t[2]
   return {
-    x: m.R[0][0]*ax + m.R[1][0]*ay + m.R[2][0]*az,
-    y: m.R[0][1]*ax + m.R[1][1]*ay + m.R[2][1]*az,
-    z: m.R[0][2]*ax + m.R[1][2]*ay + m.R[2][2]*az,
+    x: m.R[0][0] * ax + m.R[1][0] * ay + m.R[2][0] * az,
+    y: m.R[0][1] * ax + m.R[1][1] * ay + m.R[2][1] * az,
+    z: m.R[0][2] * ax + m.R[1][2] * ay + m.R[2][2] * az,
   }
 }
 
@@ -60,7 +65,12 @@ const CULL_MARGIN = 1
 
 export function sliceCorners(m, ua, ub, va, vb) {
   const { width: w, depth } = m
-  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity, d0 = Infinity, d1 = -Infinity
+  let u0 = Infinity,
+    u1 = -Infinity,
+    v0 = Infinity,
+    v1 = -Infinity,
+    d0 = Infinity,
+    d1 = -Infinity
   for (let v = va; v < vb; v++) {
     for (let u = ua; u < ub; u++) {
       const d = depth[v * w + u]
@@ -80,16 +90,25 @@ export function sliceCorners(m, ua, ub, va, vb) {
 }
 
 export function sliceMisses(corners, c, margin = CULL_MARGIN) {
-  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity, behind = 0
+  let minU = Infinity,
+    maxU = -Infinity,
+    minV = Infinity,
+    maxV = -Infinity,
+    behind = 0
   for (const P of corners) {
     const p = project(c, P.x, P.y, P.z)
-    if (!p) { behind++; continue }
+    if (!p) {
+      behind++
+      continue
+    }
     if (p.u < minU) minU = p.u
     if (p.u > maxU) maxU = p.u
     if (p.v < minV) minV = p.v
     if (p.v > maxV) maxV = p.v
   }
   if (behind === corners.length) return true
-  return !behind && (maxU < -0.5 - margin || minU > c.width - 0.5 + margin
-    || maxV < -0.5 - margin || minV > c.height - 0.5 + margin)
+  return (
+    !behind &&
+    (maxU < -0.5 - margin || minU > c.width - 0.5 + margin || maxV < -0.5 - margin || minV > c.height - 0.5 + margin)
+  )
 }

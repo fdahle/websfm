@@ -7,10 +7,12 @@ const SENSOR = { focal: 1000, cx: 500, cy: 400, width: 1000, height: 800 }
 describe('opkMatrix', () => {
   it('is the identity at zero rotation', () => {
     const M = opkMatrix(0, 0, 0)
-    const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-    for (let r = 0; r < 3; r++)
-      for (let c = 0; c < 3; c++)
-        expect(M[r][c]).toBeCloseTo(I[r][c], 12)
+    const I = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ]
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) expect(M[r][c]).toBeCloseTo(I[r][c], 12)
   })
 
   it('is orthonormal for a non-trivial rotation', () => {
@@ -47,7 +49,7 @@ describe('projectFootprint (nadir)', () => {
   it('returns a closed 4-corner ring', () => {
     expect(fp.error).toBeUndefined()
     expect(fp.rings).toHaveLength(1)
-    expect(fp.rings[0]).toHaveLength(5)            // 4 corners + repeated first
+    expect(fp.rings[0]).toHaveLength(5) // 4 corners + repeated first
     expect(fp.rings[0][0]).toEqual(fp.rings[0][4]) // closed
   })
 
@@ -65,7 +67,12 @@ describe('projectFootprint (nadir)', () => {
 
   it('puts the principal point directly below the camera', () => {
     const g = projectPixelToGround(500, 400, {
-      Mt: opkMatrix(0, 0, 0), center: [0, 0, 1000], focal: 1000, cx: 500, cy: 400, groundZ: 0,
+      Mt: opkMatrix(0, 0, 0),
+      center: [0, 0, 1000],
+      focal: 1000,
+      cx: 500,
+      cy: 400,
+      groundZ: 0,
     })
     expect(g[0]).toBeCloseTo(0, 9)
     expect(g[1]).toBeCloseTo(0, 9)
@@ -147,8 +154,8 @@ describe('projectFootprintOnTerrain', () => {
       expect(Math.abs(y)).toBeCloseTo(0.4 * (1000 - h), 0)
     }
     const xs = fp.rings[0].map((p) => p[0])
-    expect(Math.max(...xs)).toBeLessThan(500)      // uphill: shorter
-    expect(Math.min(...xs)).toBeLessThan(-500)     // downhill: longer
+    expect(Math.max(...xs)).toBeLessThan(500) // uphill: shorter
+    expect(Math.min(...xs)).toBeLessThan(-500) // downhill: longer
   })
 
   it('lands on ground rising faster than an oblique ray', async () => {
@@ -159,12 +166,25 @@ describe('projectFootprintOnTerrain', () => {
     const heightAt = (x, y) => 300 + Math.abs(x) + 0.5 * y
     const fp = await projectFootprintOnTerrain(tilted, SENSOR, heightAt)
     expect(fp.error).toBeUndefined()
-    const Mt = (() => { const M = opkMatrix(0, 40, 0); return M[0].map((_, c) => M.map((r) => r[c])) })()
-    const corners = [[0, 0], [1000, 0], [1000, 800], [0, 800]]
+    const Mt = (() => {
+      const M = opkMatrix(0, 40, 0)
+      return M[0].map((_, c) => M.map((r) => r[c]))
+    })()
+    const corners = [
+      [0, 0],
+      [1000, 0],
+      [1000, 800],
+      [0, 800],
+    ]
     fp.rings[0].slice(0, 4).forEach(([x, y], i) => {
       // Re-cast the corner onto the plane at the terrain height where it landed.
       const g = projectPixelToGround(...corners[i], {
-        Mt, center: [0, 0, 1000], focal: 1000, cx: 500, cy: 400, groundZ: heightAt(x, y),
+        Mt,
+        center: [0, 0, 1000],
+        focal: 1000,
+        cx: 500,
+        cy: 400,
+        groundZ: heightAt(x, y),
       })
       expect(Math.hypot(g[0] - x, g[1] - y)).toBeLessThan(1)
     })

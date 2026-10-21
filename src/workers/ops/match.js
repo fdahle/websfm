@@ -30,7 +30,13 @@ export function makeMatchOps() {
     const t0 = performance.now()
     const cpu = await matchDescriptors(descA, descB, { dim, ratioThreshold, crossCheck })
     const cpuMs = performance.now() - t0
-    const validation = { ...compareMatchSets(cpu.matches, res.matches), gpuMs: res.gpuMs, cpuMs, nA: res.nA, nB: res.nB }
+    const validation = {
+      ...compareMatchSets(cpu.matches, res.matches),
+      gpuMs: res.gpuMs,
+      cpuMs,
+      nA: res.nA,
+      nB: res.nB,
+    }
     return { result: validation.pass ? { ...res, validation } : { ...cpu, validation, backend: 'wasm' } }
   }
 

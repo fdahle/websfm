@@ -11,7 +11,9 @@ describe('estimatePairCount', () => {
   it('counts sequential pairs exactly, with and without loop closure', () => {
     // 10 images, 3 following: 9 + 8 + 7 = 24 open; closed adds the 3+2+1 wrap pairs.
     expect(estimatePairCount(10, { strategy: 'sequential', sequentialOverlap: 3 })).toEqual({ count: 24, exact: true })
-    expect(estimatePairCount(10, { strategy: 'sequential', sequentialOverlap: 3, sequentialLoopClosure: true }).count).toBe(30)
+    expect(
+      estimatePairCount(10, { strategy: 'sequential', sequentialOverlap: 3, sequentialLoopClosure: true }).count,
+    ).toBe(30)
   })
 
   it('gives an upper bound for position preselection and none for footprints', () => {

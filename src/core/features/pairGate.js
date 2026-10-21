@@ -66,21 +66,24 @@ export function evaluatePairAcceptance({ result, rawCount, spread, settings }) {
     reason = 'no fundamental matrix could be fit'
   } else if (spreadDegenerate) {
     classification = 'reject'
-    reason = `inliers collapse positionally — ${inlierCount} inliers map to only `
-      + `${spread.uniqueA}/${spread.uniqueB} unique spots (A/B), extent ${spread.extentA.toFixed(0)}/`
-      + `${spread.extentB.toFixed(0)}px — many-to-one / epipole degeneracy, not real geometry`
+    reason =
+      `inliers collapse positionally — ${inlierCount} inliers map to only ` +
+      `${spread.uniqueA}/${spread.uniqueB} unique spots (A/B), extent ${spread.extentA.toFixed(0)}/` +
+      `${spread.extentB.toFixed(0)}px — many-to-one / epipole degeneracy, not real geometry`
   } else if (inlierCount >= weakMinInliers) {
     // Valid F, enough inliers to constrain PnP, but failed the accept gate → weak.
     classification = 'weak'
-    reason = inlierCount < minMatches
-      ? `only ${inlierCount} inliers — below the ${minMatches} absolute floor `
-        + `(ratio ${ratio.toFixed(2)} cleared its ${minInlierRatio} gate); kept as a weak bridge for PnP`
-      : `inlier ratio ${ratio.toFixed(2)} below gate ${minInlierRatio} and ${inlierCount} < `
-        + `${overrideInliers} override; kept as a weak bridge for PnP`
+    reason =
+      inlierCount < minMatches
+        ? `only ${inlierCount} inliers — below the ${minMatches} absolute floor ` +
+          `(ratio ${ratio.toFixed(2)} cleared its ${minInlierRatio} gate); kept as a weak bridge for PnP`
+        : `inlier ratio ${ratio.toFixed(2)} below gate ${minInlierRatio} and ${inlierCount} < ` +
+          `${overrideInliers} override; kept as a weak bridge for PnP`
   } else {
     classification = 'reject'
-    reason = `only ${inlierCount} inliers — below the ${weakMinInliers} weak-pair floor `
-      + `(ratio ${ratio.toFixed(2)}); likely false match on repetitive structure`
+    reason =
+      `only ${inlierCount} inliers — below the ${weakMinInliers} weak-pair floor ` +
+      `(ratio ${ratio.toFixed(2)}); likely false match on repetitive structure`
   }
 
   return {

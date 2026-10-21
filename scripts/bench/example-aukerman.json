@@ -1,7 +1,7 @@
 {
- "name": "example-aukerman",
- "images": "public/examples/aukerman",
- "sceneType": "aerial",
- "crs": "EPSG:32617",
- "stages": "detect,match,recon,depth,dense,dem,ortho"
+  "name": "example-aukerman",
+  "images": "public/examples/aukerman",
+  "sceneType": "aerial",
+  "crs": "EPSG:32617",
+  "stages": "detect,match,recon,depth,dense,dem,ortho"
 }

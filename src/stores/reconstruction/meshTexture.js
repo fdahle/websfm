@@ -8,7 +8,15 @@ import { pluralize } from '../../core/textFormat.js'
 // UVs and JPEG atlas pages, textured from the registered photos. Like every mesh tool
 // it leaves its source alone.
 export function createMeshTexture({
-  addDerivedMesh, clouds, frameModelFor, images, imagesStore, log, mainSparseCloud, reconStatus, save,
+  addDerivedMesh,
+  clouds,
+  frameModelFor,
+  images,
+  imagesStore,
+  log,
+  mainSparseCloud,
+  reconStatus,
+  save,
 }) {
   // { sourceId, settings, name } → the new cloud, or null (refused, failed, empty).
   async function textureMesh({ sourceId, settings = {}, name } = {}, onProgress) {
@@ -30,16 +38,26 @@ export function createMeshTexture({
       const cam = cameras.get(im.uuid)
       if (!cam) continue
       // A TIFF's lossless compute source may still be encoding right after ingest.
-      try { await imagesStore.whenComputeReady(im) } catch { unready++; continue }
+      try {
+        await imagesStore.whenComputeReady(im)
+      } catch {
+        unready++
+        continue
+      }
       const { dist, selfCal, fiducial } = frameModel(im)
       views.push({
-        uuid: im.uuid, name: im.name, url: computeSourceOf(im),
-        R: cam.R.map((row) => [...row]), t: [...cam.t],
+        uuid: im.uuid,
+        name: im.name,
+        url: computeSourceOf(im),
+        R: cam.R.map((row) => [...row]),
+        t: [...cam.t],
         K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
         // The photo in scan pixels; without metadata, the extent K implies.
         width: im.meta?.width || Math.round(2 * (cam.K.cx + 0.5)),
         height: im.meta?.height || Math.round(2 * (cam.K.cy + 0.5)),
-        dist, selfCal, fiducial,
+        dist,
+        selfCal,
+        fiducial,
         mask: settings.useMasks !== false ? (im.mask?.blob ?? null) : null,
       })
     }
@@ -49,13 +67,25 @@ export function createMeshTexture({
     // resolution wins its faces. Never below 0.3: blur is not occlusion.
     const rel = relativeQuality(views.map((v) => imagesByUuid.get(v.uuid)?.quality?.sharpness ?? null))
     let weighted = 0
-    views.forEach((v, i) => { if (rel[i] != null && rel[i] < 1) { v.weight = Math.max(0.3, rel[i]); weighted++ } })
-    if (weighted) log(`Texture: ${pluralize(weighted, 'blurrier photo')} weighted down by their image-quality sharpness`, 'info', 'Products')
+    views.forEach((v, i) => {
+      if (rel[i] != null && rel[i] < 1) {
+        v.weight = Math.max(0.3, rel[i])
+        weighted++
+      }
+    })
+    if (weighted)
+      log(
+        `Texture: ${pluralize(weighted, 'blurrier photo')} weighted down by their image-quality sharpness`,
+        'info',
+        'Products',
+      )
     if (!views.length) {
       log('Texture: no registered photo is available', 'error', 'Products')
       return null
     }
-    const pos = source.pos.slice(), idx = source.idx.slice(), col = source.col?.slice() ?? null
+    const pos = source.pos.slice(),
+      idx = source.idx.slice(),
+      col = source.col?.slice() ?? null
     const transfer = [pos.buffer, idx.buffer]
     if (col) transfer.push(col.buffer)
     reconStatus.value = 'running'
@@ -64,9 +94,13 @@ export function createMeshTexture({
         { mesh: { pos, idx, col }, views, settings },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
-      const cloud = addDerivedMesh({ ...res.mesh, uv: res.mesh.uv, texture: res.texture }, {
-        name: name || `${source.name} (textured)`, imported: !!source.imported,
-      })
+      const cloud = addDerivedMesh(
+        { ...res.mesh, uv: res.mesh.uv, texture: res.texture },
+        {
+          name: name || `${source.name} (textured)`,
+          imported: !!source.imported,
+        },
+      )
       cloud.textureSummary = { ...res.summary, sourceId: source.id, sourceName: source.name, settings }
       // Show the result in place of its source; the source stays one toggle away.
       source.visible = false
@@ -91,6 +125,11 @@ export function texturePageBlobs(texture) {
 }
 
 // Plain-object form of the texture for in-memory clouds (markRaw: large typed data).
-export const rawTexture = (texture) => (texture ? markRaw({
-  data: texture.data, pages: texture.pages.map((p) => ({ ...p })), groups: texture.groups.map((g) => ({ ...g })),
-}) : null)
+export const rawTexture = (texture) =>
+  texture
+    ? markRaw({
+        data: texture.data,
+        pages: texture.pages.map((p) => ({ ...p })),
+        groups: texture.groups.map((g) => ({ ...g })),
+      })
+    : null

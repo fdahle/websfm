@@ -4,7 +4,9 @@ import { thumbnailSize, decodeResizeOptions } from './thumbnail.js'
 
 const deferred = () => {
   let resolve
-  const promise = new Promise((r) => { resolve = r })
+  const promise = new Promise((r) => {
+    resolve = r
+  })
   return { promise, resolve }
 }
 const flush = () => new Promise((r) => setTimeout(r, 0))
@@ -13,13 +15,17 @@ describe('createKeyedQueue', () => {
   it('bounds concurrency and runs everything', async () => {
     const q = createKeyedQueue({ concurrency: 2 })
     const gates = [deferred(), deferred(), deferred()]
-    let running = 0, peak = 0
-    const out = gates.map((g, i) => q.request(`k${i}`, async () => {
-      running++; peak = Math.max(peak, running)
-      await g.promise
-      running--
-      return i
-    }))
+    let running = 0,
+      peak = 0
+    const out = gates.map((g, i) =>
+      q.request(`k${i}`, async () => {
+        running++
+        peak = Math.max(peak, running)
+        await g.promise
+        running--
+        return i
+      }),
+    )
     await flush()
     expect(q.active).toBe(2)
     expect(q.pending).toBe(1)
@@ -31,8 +37,14 @@ describe('createKeyedQueue', () => {
   it('shares one promise per key while queued or running', async () => {
     const q = createKeyedQueue({ concurrency: 1 })
     let calls = 0
-    const a = q.request('x', async () => { calls++; return 'a' })
-    const b = q.request('x', async () => { calls++; return 'b' })
+    const a = q.request('x', async () => {
+      calls++
+      return 'a'
+    })
+    const b = q.request('x', async () => {
+      calls++
+      return 'b'
+    })
     expect(a).toBe(b)
     expect(await a).toBe('a')
     expect(calls).toBe(1)
@@ -45,8 +57,18 @@ describe('createKeyedQueue', () => {
     const gate = deferred()
     const order = []
     const first = q.request('busy', () => gate.promise)
-    const jobs = ['a', 'b', 'c'].map((k) => q.request(k, async () => { order.push(k) }))
-    const urgent = q.request('u', async () => { order.push('u') }, { urgent: true })
+    const jobs = ['a', 'b', 'c'].map((k) =>
+      q.request(k, async () => {
+        order.push(k)
+      }),
+    )
+    const urgent = q.request(
+      'u',
+      async () => {
+        order.push('u')
+      },
+      { urgent: true },
+    )
     q.request('b', async () => {}, { urgent: true }) // promote an already-queued key
     gate.resolve()
     await Promise.all([first, ...jobs, urgent])
@@ -68,7 +90,11 @@ describe('createKeyedQueue', () => {
 
   it('a failing task rejects its callers and frees the slot', async () => {
     const q = createKeyedQueue({ concurrency: 1 })
-    await expect(q.request('bad', async () => { throw new Error('boom') })).rejects.toThrow('boom')
+    await expect(
+      q.request('bad', async () => {
+        throw new Error('boom')
+      }),
+    ).rejects.toThrow('boom')
     expect(await q.request('good', async () => 1)).toBe(1)
   })
 })

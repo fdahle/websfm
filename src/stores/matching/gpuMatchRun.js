@@ -33,17 +33,25 @@ function newRunId() {
 
 function describeValidation(kind, v) {
   const pct = (v.share * 100).toFixed(2)
-  return `GPU validate (${kind === 'gate' ? 'subset-gate' : 'full'} match, ${v.nA}×${v.nB} kp): `
-    + `WASM ${v.nCpu} / GPU ${v.nGpu} matches, ${v.common} shared (${pct}% of the larger set; `
-    + `≥99% and count within ±${v.countSlack} required) — ${v.pass ? 'PASS' : 'FAIL'}; `
-    + `GPU ${v.gpuMs.toFixed(1)} ms vs WASM ${v.cpuMs.toFixed(0)} ms`
+  return (
+    `GPU validate (${kind === 'gate' ? 'subset-gate' : 'full'} match, ${v.nA}×${v.nB} kp): ` +
+    `WASM ${v.nCpu} / GPU ${v.nGpu} matches, ${v.common} shared (${pct}% of the larger set; ` +
+    `≥99% and count within ±${v.countSlack} required) — ${v.pass ? 'PASS' : 'FAIL'}; ` +
+    `GPU ${v.gpuMs.toFixed(1)} ms vs WASM ${v.cpuMs.toFixed(0)} ms`
+  )
 }
 
 /**
  * @returns {Promise<null | { match: Function, finish: Function }>} null when the GPU
  *   is unavailable (already logged) — the caller then matches on WASM as before.
  */
-export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId = newRunId(), shouldCancel = () => false }) {
+export async function createGpuMatchRun({
+  client,
+  log,
+  cacheBudgetBytes,
+  runId = newRunId(),
+  shouldCancel = () => false,
+}) {
   let init
   try {
     init = await client.begin({ runId, cacheBudgetBytes })
@@ -55,11 +63,14 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
     return null
   }
   const g = init.geometry
-  log(`Matching: backend = WebGPU (${init.adapter}) — brute-force NN on ${g.tileA}×${g.tileB} tiles `
-    + `(${g.workgroup} threads, ${g.microTile} per thread, k-chunk ${g.kChunk}), `
-    + `≤${(init.macPerDispatch / 1e9).toFixed(1)} GMAC per dispatch; descriptor cache ${Math.round(init.budgetBytes / MiB)} MB `
-    + `(requested ${Math.round(cacheBudgetBytes / MiB)} MB); ratio test + mutual NN in JS (nnSelect.js). `
-    + 'Verification stays on WASM.', 'info')
+  log(
+    `Matching: backend = WebGPU (${init.adapter}) — brute-force NN on ${g.tileA}×${g.tileB} tiles ` +
+      `(${g.workgroup} threads, ${g.microTile} per thread, k-chunk ${g.kChunk}), ` +
+      `≤${(init.macPerDispatch / 1e9).toFixed(1)} GMAC per dispatch; descriptor cache ${Math.round(init.budgetBytes / MiB)} MB ` +
+      `(requested ${Math.round(cacheBudgetBytes / MiB)} MB); ratio test + mutual NN in JS (nnSelect.js). ` +
+      'Verification stays on WASM.',
+    'info',
+  )
 
   const sent = new Set()
   const gates = { full: null, gate: null }
@@ -76,7 +87,9 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
     log(`Matching: ${reason} — the rest of this run matches on WASM (CPU)`, 'error')
   }
 
-  const checkCancel = () => { if (shouldCancel()) throw new Error('matching cancelled') }
+  const checkCancel = () => {
+    if (shouldCancel()) throw new Error('matching cancelled')
+  }
 
   // A failed check on a pair with almost no matches is too little evidence to judge the
   // GPU by (one match either way is 0 % or 100 % agreement), so it is inconclusive and
@@ -87,8 +100,16 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
   const conclusive = (v) => v.pass || Math.max(v.nCpu ?? 0, v.nGpu ?? 0) >= MIN_VALIDATE_MATCHES
   const validated = { full: false, gate: false }
 
-  async function match(descA, descB, { idA = null, idB = null, dim, ratioThreshold, crossCheck, kind = 'full' }, hooks) {
-    const cpu = () => { checkCancel(); return client.cpuMatch(descA, descB, { dim, ratioThreshold, crossCheck }, hooks) }
+  async function match(
+    descA,
+    descB,
+    { idA = null, idB = null, dim, ratioThreshold, crossCheck, kind = 'full' },
+    hooks,
+  ) {
+    const cpu = () => {
+      checkCancel()
+      return client.cpuMatch(descA, descB, { dim, ratioThreshold, crossCheck }, hooks)
+    }
     checkCancel()
     let validator = false
     let release = null
@@ -96,7 +117,9 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
       if (validated[kind] || disabledReason) break
       if (!gates[kind]) {
         validator = true
-        gates[kind] = new Promise((resolve) => { release = resolve })
+        gates[kind] = new Promise((resolve) => {
+          release = resolve
+        })
         break
       }
       await gates[kind]
@@ -106,9 +129,14 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
       if (disabledReason) return await cpu()
       const base = { runId, idA, idB, dim, ratioThreshold, crossCheck, validate: validator }
       const needsBuf = (id) => validator || id == null || !sent.has(id)
-      let res = await client.gpuMatch({
-        ...base, descA: needsBuf(idA) ? descA : null, descB: needsBuf(idB) ? descB : null,
-      }, hooks)
+      let res = await client.gpuMatch(
+        {
+          ...base,
+          descA: needsBuf(idA) ? descA : null,
+          descB: needsBuf(idB) ? descB : null,
+        },
+        hooks,
+      )
       if (res?.needs) {
         resends++
         res = await client.gpuMatch({ ...base, descA, descB }, hooks)
@@ -119,13 +147,17 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
       if (validator && res.validation) {
         validation[kind] = res.validation
         if (!conclusive(res.validation)) {
-          log(`${describeValidation(kind, res.validation)} — inconclusive (fewer than ${MIN_VALIDATE_MATCHES} matches), `
-            + 'validating on the next pair', 'info')
+          log(
+            `${describeValidation(kind, res.validation)} — inconclusive (fewer than ${MIN_VALIDATE_MATCHES} matches), ` +
+              'validating on the next pair',
+            'info',
+          )
           gates[kind] = null // the next caller (or a waiter) becomes the validator
         } else {
           validated[kind] = true
           log(describeValidation(kind, res.validation), res.validation.pass ? 'info' : 'error')
-          if (!res.validation.pass) disable(`GPU/WASM disagreement on the first ${kind === 'gate' ? 'subset-gate' : 'full'} match`)
+          if (!res.validation.pass)
+            disable(`GPU/WASM disagreement on the first ${kind === 'gate' ? 'subset-gate' : 'full'} match`)
         }
       } else if (validator) {
         validated[kind] = true
@@ -152,15 +184,21 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
   async function finish({ cancelled = false } = {}) {
     let cache = null
     if (!cancelled) cache = await client.end({ runId }).catch(() => null)
-    const backend = (fallbacks || disabledReason) ? 'gpu→wasm' : 'gpu'
-    const parts = [`${counts.full} full + ${counts.gate} subset-gate ${nounFor(counts.full + counts.gate, 'match', 'matches')} on GPU`]
+    const backend = fallbacks || disabledReason ? 'gpu→wasm' : 'gpu'
+    const parts = [
+      `${counts.full} full + ${counts.gate} subset-gate ${nounFor(counts.full + counts.gate, 'match', 'matches')} on GPU`,
+    ]
     if (fallbacks) parts.push(`${fallbacks} fell back to WASM after a GPU error (first: ${firstError})`)
     if (disabledReason) parts.push(`run moved to WASM: ${disabledReason}`)
     if (cache) {
-      parts.push(`cache ${pluralize(cache.uploads, 'upload')} / ${(cache.uploadBytes / MiB).toFixed(0)} MB, `
-        + `${pluralize(cache.hits, 'hit')}, ${pluralize(cache.misses, 'miss', 'misses')} → ${pluralize(resends, 'resend')}, ${pluralize(cache.evictions, 'eviction')}, `
-        + `peak ${(cache.peakBytes / MiB).toFixed(0)} MB`)
-      parts.push(`GPU kernel+readback ${(cache.gpuMs / 1000).toFixed(2)}s, JS selection ${(cache.selectMs / 1000).toFixed(2)}s (summed)`)
+      parts.push(
+        `cache ${pluralize(cache.uploads, 'upload')} / ${(cache.uploadBytes / MiB).toFixed(0)} MB, ` +
+          `${pluralize(cache.hits, 'hit')}, ${pluralize(cache.misses, 'miss', 'misses')} → ${pluralize(resends, 'resend')}, ${pluralize(cache.evictions, 'eviction')}, ` +
+          `peak ${(cache.peakBytes / MiB).toFixed(0)} MB`,
+      )
+      parts.push(
+        `GPU kernel+readback ${(cache.gpuMs / 1000).toFixed(2)}s, JS selection ${(cache.selectMs / 1000).toFixed(2)}s (summed)`,
+      )
     }
     log(`Matching GPU summary: ${parts.join('; ')}`, fallbacks || disabledReason ? 'warn' : 'info')
     return {

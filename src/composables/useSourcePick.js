@@ -27,8 +27,10 @@ export function useSourcePick(items, { initialId = null, exclude = null } = {}) 
     return skip == null ? list : list.filter((it) => it.id !== skip)
   })
   const id = computed({
-    get: () => (options.value.some((it) => it.id === chosen.value) ? chosen.value : options.value[0]?.id ?? null),
-    set: (v) => { chosen.value = v },
+    get: () => (options.value.some((it) => it.id === chosen.value) ? chosen.value : (options.value[0]?.id ?? null)),
+    set: (v) => {
+      chosen.value = v
+    },
   })
   const item = computed(() => options.value.find((it) => it.id === id.value) ?? null)
   return { id, item, options }

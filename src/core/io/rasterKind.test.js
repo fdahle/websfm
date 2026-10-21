@@ -4,8 +4,11 @@ import { classifyRasterKind, SAMPLE_FORMAT_IEEEFP, SAMPLE_FORMAT_INT } from './r
 // Fixture headers built by hand — the whole point of keeping the classifier pure
 // is that these need no geotiff.js decode.
 const float32Dem = {
-  bands: 1, sampleFormat: SAMPLE_FORMAT_IEEEFP, bitsPerSample: 32,
-  nodata: -9999, fileName: 'REMA_32m.tif',
+  bands: 1,
+  sampleFormat: SAMPLE_FORMAT_IEEEFP,
+  bitsPerSample: 32,
+  nodata: -9999,
+  fileName: 'REMA_32m.tif',
 }
 const rgbOrtho = { bands: 3, bitsPerSample: 8, fileName: 'mosaic.tif' }
 const panOrtho = { bands: 1, bitsPerSample: 8, fileName: 'scan.tif' }
@@ -51,7 +54,10 @@ describe('classifyRasterKind', () => {
 
   it('uses VerticalCSTypeGeoKey for a 16-bit single band', () => {
     const r = classifyRasterKind({
-      bands: 1, bitsPerSample: 16, geoKeys: { VerticalCSTypeGeoKey: 5773 }, fileName: 'x.tif',
+      bands: 1,
+      bitsPerSample: 16,
+      geoKeys: { VerticalCSTypeGeoKey: 5773 },
+      fileName: 'x.tif',
     })
     expect(r).toMatchObject({ kind: 'dem', confidence: 'high' })
   })
@@ -60,8 +66,11 @@ describe('classifyRasterKind', () => {
   it('reads negative-but-plausible values as elevation, at LOW confidence', () => {
     const values = Int16Array.from({ length: 500 }, (_, i) => -200 + i * 3)
     const r = classifyRasterKind({
-      bands: 1, bitsPerSample: 16, sampleFormat: SAMPLE_FORMAT_INT,
-      sampledValues: values, fileName: 'x.tif',
+      bands: 1,
+      bitsPerSample: 16,
+      sampleFormat: SAMPLE_FORMAT_INT,
+      sampledValues: values,
+      fileName: 'x.tif',
     })
     expect(r.kind).toBe('dem')
     expect(r.confidence).toBe('low') // ⇒ the import modal opens
@@ -88,10 +97,14 @@ describe('classifyRasterKind', () => {
 
   // ── Filename tier ───────────────────────────────────────────────────────────
   it('falls back to the filename when nothing structural decides', () => {
-    expect(classifyRasterKind({ bands: 1, bitsPerSample: 16, fileName: 'cop30_n70.tif' }))
-      .toMatchObject({ kind: 'dem', confidence: 'low' })
-    expect(classifyRasterKind({ bands: 1, bitsPerSample: 16, fileName: 'ortho_2019.tif' }))
-      .toMatchObject({ kind: 'ortho', confidence: 'low' })
+    expect(classifyRasterKind({ bands: 1, bitsPerSample: 16, fileName: 'cop30_n70.tif' })).toMatchObject({
+      kind: 'dem',
+      confidence: 'low',
+    })
+    expect(classifyRasterKind({ bands: 1, bitsPerSample: 16, fileName: 'ortho_2019.tif' })).toMatchObject({
+      kind: 'ortho',
+      confidence: 'low',
+    })
   })
 
   it('ignores a filename that reads both ways', () => {
@@ -101,8 +114,10 @@ describe('classifyRasterKind', () => {
   })
 
   it('defaults to DEM for an undecidable 1-band 16-bit raster', () => {
-    expect(classifyRasterKind({ bands: 1, bitsPerSample: 16, fileName: 'x.tif' }))
-      .toMatchObject({ kind: 'dem', confidence: 'low' })
+    expect(classifyRasterKind({ bands: 1, bitsPerSample: 16, fileName: 'x.tif' })).toMatchObject({
+      kind: 'dem',
+      confidence: 'low',
+    })
   })
 
   it('always returns at least one reason', () => {

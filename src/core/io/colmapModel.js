@@ -126,44 +126,53 @@ function* serializeCameras(cameras, partChars) {
     '# Camera list with one line of data per camera:\n' +
     '#   CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]\n' +
     `# Number of cameras: ${cameras.length}\n`
-  yield* lineParts(head, cameras.length, (i) => {
-    const c = cameras[i]
-    return [c.cameraId, c.model, c.width, c.height, ...c.params.map(fmt)].join(' ')
-  }, { partChars })
+  yield* lineParts(
+    head,
+    cameras.length,
+    (i) => {
+      const c = cameras[i]
+      return [c.cameraId, c.model, c.width, c.height, ...c.params.map(fmt)].join(' ')
+    },
+    { partChars },
+  )
 }
 
 function* serializeImages(images, partChars) {
-  const meanObs = images.length
-    ? images.reduce((s, im) => s + im.points2D.length, 0) / images.length
-    : 0
+  const meanObs = images.length ? images.reduce((s, im) => s + im.points2D.length, 0) / images.length : 0
   const head =
     '# Image list with two lines of data per image:\n' +
     '#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME\n' +
     '#   POINTS2D[] as (X, Y, POINT3D_ID)\n' +
     `# Number of images: ${images.length}, mean observations per image: ${fmt(meanObs)}\n`
-  yield* lineParts(head, images.length * 2, (k) => {
-    const im = images[k >> 1]
-    return k & 1
-      ? im.points2D.map(([x, y, id]) => `${fmt(x)} ${fmt(y)} ${id}`).join(' ')
-      : [im.imageId, ...im.q.map(fmt), ...im.t.map(fmt), im.cameraId, im.name].join(' ')
-  }, { partChars })
+  yield* lineParts(
+    head,
+    images.length * 2,
+    (k) => {
+      const im = images[k >> 1]
+      return k & 1
+        ? im.points2D.map(([x, y, id]) => `${fmt(x)} ${fmt(y)} ${id}`).join(' ')
+        : [im.imageId, ...im.q.map(fmt), ...im.t.map(fmt), im.cameraId, im.name].join(' ')
+    },
+    { partChars },
+  )
 }
 
 function* serializePoints3D(points, partChars) {
-  const meanTrack = points.length
-    ? points.reduce((s, p) => s + p.track.length, 0) / points.length
-    : 0
+  const meanTrack = points.length ? points.reduce((s, p) => s + p.track.length, 0) / points.length : 0
   const head =
     '# 3D point list with one line of data per point:\n' +
     '#   POINT3D_ID, X, Y, Z, R, G, B, ERROR, TRACK[] as (IMAGE_ID, POINT2D_IDX)\n' +
     `# Number of points: ${points.length}, mean track length: ${fmt(meanTrack)}\n`
-  yield* lineParts(head, points.length, (i) => {
-    const p = points[i]
-    const track = p.track.map(([imgId, idx]) => `${imgId} ${idx}`).join(' ')
-    return [p.point3dId, ...p.xyz.map(fmt), ...p.rgb, fmt(p.error ?? -1), track]
-      .join(' ')
-      .trimEnd()
-  }, { partChars })
+  yield* lineParts(
+    head,
+    points.length,
+    (i) => {
+      const p = points[i]
+      const track = p.track.map(([imgId, idx]) => `${imgId} ${idx}`).join(' ')
+      return [p.point3dId, ...p.xyz.map(fmt), ...p.rgb, fmt(p.error ?? -1), track].join(' ').trimEnd()
+    },
+    { partChars },
+  )
 }
 
 // Full round-trippable double precision; integers stay integer-looking. Throws on a
@@ -198,7 +207,8 @@ function* contentLines(src, chunkBytes = 8 * 1024 * 1024) {
   if (typeof src === 'string') {
     let start = 0
     for (let nl = src.indexOf('\n'); nl >= 0; nl = src.indexOf('\n', start)) {
-      const l = strip(src.slice(start, nl)); start = nl + 1
+      const l = strip(src.slice(start, nl))
+      start = nl + 1
       if (keep(l)) yield l
     }
     const last = strip(src.slice(start))
@@ -211,7 +221,10 @@ function* contentLines(src, chunkBytes = 8 * 1024 * 1024) {
   for (let off = 0; off < bytes.length; off += chunkBytes) {
     const lines = (carry + dec.decode(bytes.subarray(off, off + chunkBytes), { stream: true })).split('\n')
     carry = lines.pop()
-    for (const l of lines) { const s = strip(l); if (keep(s)) yield s }
+    for (const l of lines) {
+      const s = strip(l)
+      if (keep(s)) yield s
+    }
   }
   const last = strip(carry + dec.decode())
   if (keep(last)) yield last
@@ -236,17 +249,22 @@ function parseCameras(text) {
 function parseImages(text) {
   const images = []
   let header = null // a header line waiting for its POINTS2D line
-  const push = (tok, pts2dLine) => images.push({
-    imageId: Number(tok[0]),
-    q: [Number(tok[1]), Number(tok[2]), Number(tok[3]), Number(tok[4])],
-    t: [Number(tok[5]), Number(tok[6]), Number(tok[7])],
-    cameraId: Number(tok[8]),
-    name: tok.slice(9).join(' '), // names may contain spaces
-    points2D: parsePoints2D(pts2dLine),
-  })
+  const push = (tok, pts2dLine) =>
+    images.push({
+      imageId: Number(tok[0]),
+      q: [Number(tok[1]), Number(tok[2]), Number(tok[3]), Number(tok[4])],
+      t: [Number(tok[5]), Number(tok[6]), Number(tok[7])],
+      cameraId: Number(tok[8]),
+      name: tok.slice(9).join(' '), // names may contain spaces
+      points2D: parsePoints2D(pts2dLine),
+    })
   for (const line of contentLines(text)) {
     // The very next line (blank or not) after a header is its POINTS2D line.
-    if (header) { push(header, line); header = null; continue }
+    if (header) {
+      push(header, line)
+      header = null
+      continue
+    }
     if (!line.trim()) continue // skip blanks while seeking a header
     const tok = line.trim().split(/\s+/).filter(Boolean)
     if (tok.length < 10) continue // not a valid header line
@@ -323,7 +341,10 @@ function makeWriter(partBytes) {
   const w = chunkedByteWriter(partBytes)
   return {
     ...w,
-    f64(v) { if (!Number.isFinite(v)) throw new Error(`COLMAP bin serialize: non-finite value ${v}`); w.f64(v) },
+    f64(v) {
+      if (!Number.isFinite(v)) throw new Error(`COLMAP bin serialize: non-finite value ${v}`)
+      w.f64(v)
+    },
   }
 }
 
@@ -333,7 +354,10 @@ function serializeCamerasBin(cameras, partBytes) {
   for (const c of cameras) {
     const modelId = ID_BY_MODEL[c.model]
     if (modelId === undefined) throw new Error(`COLMAP bin serialize: unknown camera model ${c.model}`)
-    w.i32(c.cameraId); w.i32(modelId); w.u64(c.width); w.u64(c.height)
+    w.i32(c.cameraId)
+    w.i32(modelId)
+    w.u64(c.width)
+    w.u64(c.height)
     for (const p of c.params) w.f64(p)
   }
   return w.done()
@@ -348,9 +372,14 @@ function serializeImagesBin(images, partBytes) {
     for (const q of im.q) w.f64(q)
     for (const t of im.t) w.f64(t)
     w.i32(im.cameraId)
-    w.bytes(enc.encode(im.name)); w.u8(0) // NUL-terminated name
+    w.bytes(enc.encode(im.name))
+    w.u8(0) // NUL-terminated name
     w.u64(im.points2D.length)
-    for (const [x, y, id] of im.points2D) { w.f64(x); w.f64(y); w.i64(id) }
+    for (const [x, y, id] of im.points2D) {
+      w.f64(x)
+      w.f64(y)
+      w.i64(id)
+    }
   }
   return w.done()
 }
@@ -360,11 +389,18 @@ function serializePoints3DBin(points, partBytes) {
   w.u64(points.length)
   for (const p of points) {
     w.u64(p.point3dId)
-    w.f64(p.xyz[0]); w.f64(p.xyz[1]); w.f64(p.xyz[2])
-    w.u8(byte255(p.rgb[0])); w.u8(byte255(p.rgb[1])); w.u8(byte255(p.rgb[2]))
+    w.f64(p.xyz[0])
+    w.f64(p.xyz[1])
+    w.f64(p.xyz[2])
+    w.u8(byte255(p.rgb[0]))
+    w.u8(byte255(p.rgb[1]))
+    w.u8(byte255(p.rgb[2]))
     w.f64(p.error ?? -1)
     w.u64(p.track.length)
-    for (const [imageId, idx] of p.track) { w.i32(imageId); w.i32(idx) }
+    for (const [imageId, idx] of p.track) {
+      w.i32(imageId)
+      w.i32(idx)
+    }
   }
   return w.done()
 }
@@ -392,14 +428,41 @@ function makeReader(buffer) {
     return Number(big)
   }
   return {
-    get pos() { return p },
-    get length() { return bytes.length },
-    u8() { return bytes[p++] },
-    i32() { const v = dv.getInt32(p, true); p += 4; return v },
-    u64() { const v = num64(dv.getBigUint64(p, true)); p += 8; return v },
-    i64() { const v = num64Signed(dv.getBigInt64(p, true)); p += 8; return v },
-    f64() { const v = dv.getFloat64(p, true); p += 8; return v },
-    strZ() { let s = ''; while (p < bytes.length && bytes[p] !== 0) s += String.fromCharCode(bytes[p++]); p++; return s },
+    get pos() {
+      return p
+    },
+    get length() {
+      return bytes.length
+    },
+    u8() {
+      return bytes[p++]
+    },
+    i32() {
+      const v = dv.getInt32(p, true)
+      p += 4
+      return v
+    },
+    u64() {
+      const v = num64(dv.getBigUint64(p, true))
+      p += 8
+      return v
+    },
+    i64() {
+      const v = num64Signed(dv.getBigInt64(p, true))
+      p += 8
+      return v
+    },
+    f64() {
+      const v = dv.getFloat64(p, true)
+      p += 8
+      return v
+    },
+    strZ() {
+      let s = ''
+      while (p < bytes.length && bytes[p] !== 0) s += String.fromCharCode(bytes[p++])
+      p++
+      return s
+    },
   }
 }
 // point3D_id can be -1 (no track); keep the sign, guard the magnitude.
@@ -493,7 +556,10 @@ export function buildColmapModel({ images, points }) {
     // database + sparse-workspace round trip. Sparse-only callers omit it and
     // retain the compact observed-points behaviour.
     const kps = asKeypoints(im.keypoints ?? [])
-    points2D.set(im.uuid, Array.from({ length: kps.length }, (_, k) => [kps.x(k), kps.y(k), -1]))
+    points2D.set(
+      im.uuid,
+      Array.from({ length: kps.length }, (_, k) => [kps.x(k), kps.y(k), -1]),
+    )
   })
 
   const points3D = points.map((p, i) => {
@@ -504,7 +570,8 @@ export function buildColmapModel({ images, points }) {
       if (imageId === undefined) continue // observation in an image we're not exporting
       const arr = points2D.get(v.uuid)
       const requested = Number(v.featureIdx)
-      const point2dIdx = Number.isInteger(requested) && requested >= 0 && requested < arr.length ? requested : arr.length
+      const point2dIdx =
+        Number.isInteger(requested) && requested >= 0 && requested < arr.length ? requested : arr.length
       if (point2dIdx === arr.length) arr.push([v.x, v.y, point3dId])
       else arr[point2dIdx] = [v.x, v.y, point3dId]
       track.push([imageId, point2dIdx])
@@ -608,7 +675,10 @@ export function colmapToSparse({ images, points }, resolveUuid) {
 
   for (const im of images) {
     const uuid = resolveUuid(im.name)
-    if (!uuid) { unmatched.push(im.name); continue }
+    if (!uuid) {
+      unmatched.push(im.name)
+      continue
+    }
     uuidByImageId.set(im.imageId, uuid)
     kpNext.set(uuid, 0)
     cameras.set(uuid, { R: im.R, t: [...im.t], K: { ...im.K } })
@@ -618,7 +688,14 @@ export function colmapToSparse({ images, points }, resolveUuid) {
   // Straight into columns: an import can be millions of points.
   const viewUuids = [...cameras.keys()]
   const camIdx = new Map(viewUuids.map((u, i) => [u, i]))
-  const pos = [], col = [], mask = [], vcount = [], vcam = [], vkp = [], vx = [], vy = []
+  const pos = [],
+    col = [],
+    mask = [],
+    vcount = [],
+    vcam = [],
+    vkp = [],
+    vx = [],
+    vy = []
   let anyColor = false
   const seen = new Set()
   for (const p of points) {
@@ -628,20 +705,35 @@ export function colmapToSparse({ images, points }, resolveUuid) {
       const uuid = uuidByImageId.get(v.imageId)
       if (!uuid || seen.has(uuid)) continue // unmatched image, or a repeat obs
       seen.add(uuid)
-      const idx = kpNext.get(uuid); kpNext.set(uuid, idx + 1)
-      vcam.push(camIdx.get(uuid)); vkp.push(idx); vx.push(v.x); vy.push(v.y)
+      const idx = kpNext.get(uuid)
+      kpNext.set(uuid, idx + 1)
+      vcam.push(camIdx.get(uuid))
+      vkp.push(idx)
+      vx.push(v.x)
+      vy.push(v.y)
     }
     if (vcam.length === n0) continue // observed only in unmatched images
     vcount.push(vcam.length - n0)
     pos.push(p.xyz[0], p.xyz[1], p.xyz[2])
-    if (p.color) { anyColor = true; col.push(p.color[0], p.color[1], p.color[2]); mask.push(1) }
-    else { col.push(0, 0, 0); mask.push(0) }
+    if (p.color) {
+      anyColor = true
+      col.push(p.color[0], p.color[1], p.color[2])
+      mask.push(1)
+    } else {
+      col.push(0, 0, 0)
+      mask.push(0)
+    }
   }
   const outPoints = new SparsePoints({
-    pos: Float64Array.from(pos), viewUuids,
-    col: anyColor ? Uint8Array.from(col) : null, colorMask: anyColor ? Uint8Array.from(mask) : null,
-    vcount: Uint32Array.from(vcount), vcam: Uint32Array.from(vcam), vkp: Uint32Array.from(vkp),
-    vx: Float32Array.from(vx), vy: Float32Array.from(vy),
+    pos: Float64Array.from(pos),
+    viewUuids,
+    col: anyColor ? Uint8Array.from(col) : null,
+    colorMask: anyColor ? Uint8Array.from(mask) : null,
+    vcount: Uint32Array.from(vcount),
+    vcam: Uint32Array.from(vcam),
+    vkp: Uint32Array.from(vkp),
+    vx: Float32Array.from(vx),
+    vy: Float32Array.from(vy),
   })
 
   return { cameras, points: outPoints, matched, unmatched }

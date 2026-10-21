@@ -16,7 +16,8 @@ export function detectionConcurrency(images, settings, poolSize, deviceMemoryGB 
   const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : fallbackBudget(deviceMemoryGB)
   let largest = 1
   for (const image of images) {
-    const w = image.meta?.width, h = image.meta?.height
+    const w = image.meta?.width,
+      h = image.meta?.height
     if (!(w > 0 && h > 0)) return 1
     const maxDim = resolveDetectMaxDim(Math.max(w, h), settings).maxDim
     const scale = Math.min(1, maxDim > 0 ? maxDim / Math.max(w, h) : 1)
@@ -33,7 +34,8 @@ export function fiducialDetectionConcurrency(images, poolSize, deviceMemoryGB = 
   const budget = fallbackBudget(deviceMemoryGB)
   let largest = 1
   for (const image of images) {
-    const w = image.meta?.width, h = image.meta?.height
+    const w = image.meta?.width,
+      h = image.meta?.height
     if (!(w > 0 && h > 0)) return 1
     largest = Math.max(largest, w * h * 8)
   }

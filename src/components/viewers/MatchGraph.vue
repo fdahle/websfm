@@ -17,42 +17,45 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 const props = defineProps({
   // From App.vue matchSummaries: { pairId, idAUuid, idBUuid, nameA, nameB,
   //   inlierCount, enabled }.
-  matchSummaries: { type: Array,  default: () => [] },
-  alignedUuids:   { type: Object, default: () => new Set() },
-  hasSparse:      { type: Boolean, default: false },
+  matchSummaries: { type: Array, default: () => [] },
+  alignedUuids: { type: Object, default: () => new Set() },
+  hasSparse: { type: Boolean, default: false },
   selectedPairId: { type: String, default: null },
   // Imported camera positions keyed by uuid ({ x, y } in project CRS). When present,
   // the geographic layout places those nodes at their real-world location.
-  nodePositions:  { type: Object, default: () => ({}) },
+  nodePositions: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['select', 'toggle-pair'])
 
-const canvasEl  = ref(null)
-const wrapEl    = ref(null)
-const hoverText = ref(null)  // { text, x, y }
+const canvasEl = ref(null)
+const wrapEl = ref(null)
+const hoverText = ref(null) // { text, x, y }
 
 // Layout mode: 'force' (spring layout) or 'geo' (imported or EXIF-derived positions). Only
 // meaningful when positions exist; defaults to geo when they do.
-const layoutMode  = ref('force')
+const layoutMode = ref('force')
 const hasPositions = computed(() => Object.keys(props.nodePositions || {}).length > 0)
 
 let ctx = null
-let nodes = []   // { uuid, name, x, y, vx, vy, aligned, deg, pinned }
-let edges = []   // { a, b, pairId, inlierCount, enabled, w }
+let nodes = [] // { uuid, name, x, y, vx, vy, aligned, deg, pinned }
+let edges = [] // { a, b, pairId, inlierCount, enabled, w }
 let nodeByUuid = new Map()
-let topoKey = ''  // signature of the pair set; a change forces a full re-layout
+let topoKey = '' // signature of the pair set; a change forces a full re-layout
 let raf = null
-let settleFrames = 0   // remaining settle ticks to run inside the RAF loop (>0 ⇒ animating)
-let settleTick = 0     // ticks done in the current animated settle (for the early-exit gate)
+let settleFrames = 0 // remaining settle ticks to run inside the RAF loop (>0 ⇒ animating)
+let settleTick = 0 // ticks done in the current animated settle (for the early-exit gate)
 let dragNode = null
 let dragMoved = false
 let panning = false
 let panMoved = false
 let lastPan = { x: 0, y: 0 }
-let W = 0, H = 0
+let W = 0,
+  H = 0
 // View transform: screen = world * scale + offset.
-let scale = 1, ox = 0, oy = 0
+let scale = 1,
+  ox = 0,
+  oy = 0
 const DPR = () => window.devicePixelRatio || 1
 
 // ── World ⇄ screen ────────────────────────────────────────────────────────────
@@ -72,8 +75,12 @@ function build() {
     if (idx == null) {
       idx = nodes.length
       nodes.push({
-        uuid, name,
-        x: 0, y: 0, vx: 0, vy: 0,
+        uuid,
+        name,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
         aligned: props.alignedUuids.has(uuid),
         deg: 0,
         pinned: false,
@@ -89,13 +96,15 @@ function build() {
   for (const m of props.matchSummaries) {
     const a = ensureNode(m.idAUuid, m.nameA)
     const b = ensureNode(m.idBUuid, m.nameB)
-    nodes[a].deg++; nodes[b].deg++
+    nodes[a].deg++
+    nodes[b].deg++
     edges.push({
-      a, b,
+      a,
+      b,
       pairId: m.pairId,
       inlierCount: m.inlierCount,
       enabled: m.enabled !== false,
-      w: 0.8 + 3.2 * (m.inlierCount / maxInliers),  // 0.8–4 px
+      w: 0.8 + 3.2 * (m.inlierCount / maxInliers), // 0.8–4 px
     })
   }
   topoKey = pairSetKey()
@@ -107,18 +116,25 @@ function build() {
 // location and seeds the rest near their pinned neighbours; force mode scatters all
 // nodes on a golden-angle spiral so the spring layout unfolds cleanly.
 function seedPositions() {
-  const cx = W / 2, cy = H / 2
+  const cx = W / 2,
+    cy = H / 2
   const geo = layoutMode.value === 'geo' && hasPositions.value
 
   if (geo) {
-    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity
+    let minx = Infinity,
+      miny = Infinity,
+      maxx = -Infinity,
+      maxy = -Infinity
     for (const p of nodes) {
       const pos = props.nodePositions[p.uuid]
       if (!pos) continue
-      minx = Math.min(minx, pos.x); maxx = Math.max(maxx, pos.x)
-      miny = Math.min(miny, pos.y); maxy = Math.max(maxy, pos.y)
+      minx = Math.min(minx, pos.x)
+      maxx = Math.max(maxx, pos.x)
+      miny = Math.min(miny, pos.y)
+      maxy = Math.max(maxy, pos.y)
     }
-    const spanX = maxx - minx || 1, spanY = maxy - miny || 1
+    const spanX = maxx - minx || 1,
+      spanY = maxy - miny || 1
     // Fit the position cloud into 80% of the world box (fitView zooms it further).
     const s = Math.min((W * 0.8) / spanX, (H * 0.8) / spanY)
     for (const p of nodes) {
@@ -131,36 +147,55 @@ function seedPositions() {
       } else {
         p.pinned = false
       }
-      p.vx = 0; p.vy = 0
+      p.vx = 0
+      p.vy = 0
     }
     // Seed unpinned nodes near the centroid of their pinned neighbours.
     const acc = nodes.map(() => ({ x: 0, y: 0, n: 0 }))
     for (const e of edges) {
-      const a = nodes[e.a], b = nodes[e.b]
-      if (a.pinned && !b.pinned) { acc[e.b].x += a.x; acc[e.b].y += a.y; acc[e.b].n++ }
-      if (b.pinned && !a.pinned) { acc[e.a].x += b.x; acc[e.a].y += b.y; acc[e.a].n++ }
+      const a = nodes[e.a],
+        b = nodes[e.b]
+      if (a.pinned && !b.pinned) {
+        acc[e.b].x += a.x
+        acc[e.b].y += a.y
+        acc[e.b].n++
+      }
+      if (b.pinned && !a.pinned) {
+        acc[e.a].x += b.x
+        acc[e.a].y += b.y
+        acc[e.a].n++
+      }
     }
     nodes.forEach((p, i) => {
       if (p.pinned) return
       const s2 = acc[i]
-      if (s2.n) { p.x = s2.x / s2.n + (Math.random() - 0.5) * 30; p.y = s2.y / s2.n + (Math.random() - 0.5) * 30 }
-      else { p.x = cx + (Math.random() - 0.5) * 60; p.y = cy + (Math.random() - 0.5) * 60 }
+      if (s2.n) {
+        p.x = s2.x / s2.n + (Math.random() - 0.5) * 30
+        p.y = s2.y / s2.n + (Math.random() - 0.5) * 30
+      } else {
+        p.x = cx + (Math.random() - 0.5) * 60
+        p.y = cy + (Math.random() - 0.5) * 60
+      }
     })
     return
   }
 
   nodes.forEach((p, idx) => {
-    const a = idx * 2.399963   // golden-angle scatter
+    const a = idx * 2.399963 // golden-angle scatter
     p.x = cx + Math.cos(a) * 120 + (Math.random() - 0.5) * 20
     p.y = cy + Math.sin(a) * 120 + (Math.random() - 0.5) * 20
-    p.vx = 0; p.vy = 0
+    p.vx = 0
+    p.vy = 0
     p.pinned = false
   })
 }
 
 // Signature of the pair set — unchanged when only per-pair flags (enabled) toggle.
 function pairSetKey() {
-  return props.matchSummaries.map((m) => m.pairId).sort().join('|')
+  return props.matchSummaries
+    .map((m) => m.pairId)
+    .sort()
+    .join('|')
 }
 
 // Patch mutable per-pair/-node state (enabled, aligned) without disturbing the
@@ -188,9 +223,9 @@ function sync() {
 function applyLayout() {
   build()
   if (nodes.length > GRID_THRESHOLD) {
-    settleFrames = 200   // budget of ticks; the loop early-exits once it reaches rest
+    settleFrames = 200 // budget of ticks; the loop early-exits once it reaches rest
     settleTick = 0
-    fitView()            // frame the seeded scatter; re-framed each settle frame
+    fitView() // frame the seeded scatter; re-framed each settle frame
   } else {
     settleFrames = 0
     relax()
@@ -199,11 +234,11 @@ function applyLayout() {
 }
 
 // ── Force simulation ────────────────────────────────────────────────────────────
-const REPULSE = 6400      // node-node repulsion strength (raised → less overlap)
-const SPRING  = 0.008     // edge spring constant
-const REST    = 100       // spring rest length
-const CENTER  = 0.002     // pull toward centre
-const DAMP    = 0.86      // velocity damping
+const REPULSE = 6400 // node-node repulsion strength (raised → less overlap)
+const SPRING = 0.008 // edge spring constant
+const REST = 100 // spring rest length
+const CENTER = 0.002 // pull toward centre
+const DAMP = 0.86 // velocity damping
 const MAX_TICKS = 480
 
 // Above this node count the exact O(n²) repulsion loop gets expensive enough to stall
@@ -217,7 +252,7 @@ const GRID_THRESHOLD = 150
 // Repulsion is REPULSE/d², negligible past a few rest-lengths; only pairs within this
 // radius contribute meaningfully, so the grid can ignore everything farther. The
 // centre pull (CENTER) still holds disconnected components together globally.
-const REPULSE_CUTOFF = REST * 4   // 400px; f≈0.04 at the cutoff vs the spring's scale
+const REPULSE_CUTOFF = REST * 4 // 400px; f≈0.04 at the cutoff vs the spring's scale
 
 // Exact all-pairs repulsion (O(n²)) — accurate, used for small graphs.
 function repelExact(n) {
@@ -234,25 +269,30 @@ function repelExact(n) {
 function repelGrid(n) {
   const cell = REPULSE_CUTOFF
   const cutoff2 = REPULSE_CUTOFF * REPULSE_CUTOFF
-  const buckets = new Map()   // packed "gx,gy" key → array of node indices
+  const buckets = new Map() // packed "gx,gy" key → array of node indices
   for (let i = 0; i < n; i++) {
     const p = nodes[i]
     const key = Math.floor(p.x / cell) + ',' + Math.floor(p.y / cell)
     let arr = buckets.get(key)
-    if (!arr) { arr = []; buckets.set(key, arr) }
+    if (!arr) {
+      arr = []
+      buckets.set(key, arr)
+    }
     arr.push(i)
   }
   for (let i = 0; i < n; i++) {
     const a = nodes[i]
-    const gx = Math.floor(a.x / cell), gy = Math.floor(a.y / cell)
+    const gx = Math.floor(a.x / cell),
+      gy = Math.floor(a.y / cell)
     for (let ox = -1; ox <= 1; ox++) {
       for (let oy = -1; oy <= 1; oy++) {
-        const arr = buckets.get((gx + ox) + ',' + (gy + oy))
+        const arr = buckets.get(gx + ox + ',' + (gy + oy))
         if (!arr) continue
         for (const j of arr) {
-          if (j <= i) continue   // each unordered pair once (matches exact loop)
+          if (j <= i) continue // each unordered pair once (matches exact loop)
           const b = nodes[j]
-          const dx = a.x - b.x, dy = a.y - b.y
+          const dx = a.x - b.x,
+            dy = a.y - b.y
           if (dx * dx + dy * dy > cutoff2) continue
           applyRepulsion(a, b)
         }
@@ -263,14 +303,22 @@ function repelGrid(n) {
 
 // Symmetric repulsion between two nodes (shared by both paths).
 function applyRepulsion(a, b) {
-  let dx = a.x - b.x, dy = a.y - b.y
+  let dx = a.x - b.x,
+    dy = a.y - b.y
   let d2 = dx * dx + dy * dy
-  if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 0.25 }
+  if (d2 < 0.01) {
+    dx = Math.random() - 0.5
+    dy = Math.random() - 0.5
+    d2 = 0.25
+  }
   const f = REPULSE / d2
   const d = Math.sqrt(d2)
-  const fx = (dx / d) * f, fy = (dy / d) * f
-  a.vx += fx; a.vy += fy
-  b.vx -= fx; b.vy -= fy
+  const fx = (dx / d) * f,
+    fy = (dy / d) * f
+  a.vx += fx
+  a.vy += fy
+  b.vx -= fx
+  b.vy -= fy
 }
 
 // One integration step; returns total kinetic energy so relax() can detect rest.
@@ -279,23 +327,35 @@ function step() {
   if (n > GRID_THRESHOLD) repelGrid(n)
   else repelExact(n)
   for (const e of edges) {
-    const a = nodes[e.a], b = nodes[e.b]
-    const dx = b.x - a.x, dy = b.y - a.y
+    const a = nodes[e.a],
+      b = nodes[e.b]
+    const dx = b.x - a.x,
+      dy = b.y - a.y
     const d = Math.hypot(dx, dy) || 0.01
     const f = SPRING * (d - REST)
-    const fx = (dx / d) * f, fy = (dy / d) * f
-    a.vx += fx; a.vy += fy
-    b.vx -= fx; b.vy -= fy
+    const fx = (dx / d) * f,
+      fy = (dy / d) * f
+    a.vx += fx
+    a.vy += fy
+    b.vx -= fx
+    b.vy -= fy
   }
-  const cx = W / 2, cy = H / 2
+  const cx = W / 2,
+    cy = H / 2
   let ke = 0
   for (const p of nodes) {
     // Pinned (geo) nodes and the one being dragged stay put.
-    if (p === dragNode || p.pinned) { p.vx = 0; p.vy = 0; continue }
+    if (p === dragNode || p.pinned) {
+      p.vx = 0
+      p.vy = 0
+      continue
+    }
     p.vx += (cx - p.x) * CENTER
     p.vy += (cy - p.y) * CENTER
-    p.vx *= DAMP; p.vy *= DAMP
-    p.x += p.vx; p.y += p.vy
+    p.vx *= DAMP
+    p.vy *= DAMP
+    p.x += p.vx
+    p.y += p.vy
     ke += p.vx * p.vx + p.vy * p.vy
   }
   return ke
@@ -315,19 +375,30 @@ function relax() {
 
 // ── View fitting ─────────────────────────────────────────────────────────────────
 function nodeBounds() {
-  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity
+  let minx = Infinity,
+    miny = Infinity,
+    maxx = -Infinity,
+    maxy = -Infinity
   for (const p of nodes) {
-    minx = Math.min(minx, p.x); maxx = Math.max(maxx, p.x)
-    miny = Math.min(miny, p.y); maxy = Math.max(maxy, p.y)
+    minx = Math.min(minx, p.x)
+    maxx = Math.max(maxx, p.x)
+    miny = Math.min(miny, p.y)
+    maxy = Math.max(maxy, p.y)
   }
   return { minx, miny, maxx, maxy }
 }
 
 // Zoom/pan so the whole graph fits the viewport with padding.
 function fitView() {
-  if (!nodes.length) { scale = 1; ox = 0; oy = 0; return }
+  if (!nodes.length) {
+    scale = 1
+    ox = 0
+    oy = 0
+    return
+  }
   const { minx, miny, maxx, maxy } = nodeBounds()
-  const bw = maxx - minx || 1, bh = maxy - miny || 1
+  const bw = maxx - minx || 1,
+    bh = maxy - miny || 1
   const pad = 48
   scale = Math.max(0.05, Math.min((W - pad * 2) / bw, (H - pad * 2) / bh, 3))
   ox = (W - bw * scale) / 2 - minx * scale
@@ -337,7 +408,8 @@ function fitView() {
 // Zoom about a screen point, keeping that point fixed under the cursor.
 function zoomAt(x, y, factor) {
   const ns = Math.max(0.05, Math.min(scale * factor, 6))
-  const wx = wxFromScreen(x), wy = wyFromScreen(y)
+  const wx = wxFromScreen(x),
+    wy = wyFromScreen(y)
   scale = ns
   ox = x - wx * scale
   oy = y - wy * scale
@@ -348,17 +420,27 @@ function onWheel(e) {
   zoomAt(x, y, Math.exp(-e.deltaY * 0.0015))
 }
 
-function zoomButton(factor) { zoomAt(W / 2, H / 2, factor) }
+function zoomButton(factor) {
+  zoomAt(W / 2, H / 2, factor)
+}
 
 // ── Rendering ───────────────────────────────────────────────────────────────────
 // Redraw only when something changed: a settle step, any pointer/wheel/click on the
 // graph (captured on the wrapper), a data or selection change, a resize. Drawing every
 // frame cost ~0.3–1 s per frame at 200 k edges, for as long as the graph was open.
 let dirty = true
-const invalidate = () => { dirty = true }
+const invalidate = () => {
+  dirty = true
+}
 function loop() {
-  if (settleFrames > 0) { advanceSettle(); dirty = true }
-  if (dirty) { dirty = false; draw() }
+  if (settleFrames > 0) {
+    advanceSettle()
+    dirty = true
+  }
+  if (dirty) {
+    dirty = false
+    draw()
+  }
   raf = requestAnimationFrame(loop)
 }
 
@@ -371,7 +453,10 @@ function advanceSettle() {
     const ke = step()
     settleTick++
     settleFrames--
-    if (settleTick > 30 && ke < 0.05 * nodes.length) { settleFrames = 0; break }
+    if (settleTick > 30 && ke < 0.05 * nodes.length) {
+      settleFrames = 0
+      break
+    }
   }
   fitView()
 }
@@ -384,7 +469,8 @@ function draw() {
 
   // Edges
   for (const e of edges) {
-    const a = nodes[e.a], b = nodes[e.b]
+    const a = nodes[e.a],
+      b = nodes[e.b]
     const sel = e.pairId === props.selectedPairId
     ctx.beginPath()
     ctx.moveTo(sx(a.x), sy(a.y))
@@ -406,7 +492,7 @@ function draw() {
     ctx.beginPath()
     ctx.arc(sx(p.x), sy(p.y), 7, 0, Math.PI * 2)
     if (props.hasSparse && !p.aligned) {
-      ctx.fillStyle = 'rgba(120,130,140,0.55)'  // unaligned: faded grey
+      ctx.fillStyle = 'rgba(120,130,140,0.55)' // unaligned: faded grey
     } else {
       ctx.fillStyle = '#0e639c'
     }
@@ -433,20 +519,27 @@ function nodeAt(x, y) {
 
 // Distance from point to a segment, for edge hit-testing.
 function distToSeg(px, py, ax, ay, bx, by) {
-  const dx = bx - ax, dy = by - ay
+  const dx = bx - ax,
+    dy = by - ay
   const len2 = dx * dx + dy * dy || 1e-6
   let t = ((px - ax) * dx + (py - ay) * dy) / len2
   t = Math.max(0, Math.min(1, t))
-  const cx = ax + t * dx, cy = ay + t * dy
+  const cx = ax + t * dx,
+    cy = ay + t * dy
   return Math.hypot(px - cx, py - cy)
 }
 
 function edgeAt(x, y) {
-  let best = null, bestD = 6
+  let best = null,
+    bestD = 6
   for (const e of edges) {
-    const a = nodes[e.a], b = nodes[e.b]
+    const a = nodes[e.a],
+      b = nodes[e.b]
     const d = distToSeg(x, y, sx(a.x), sy(a.y), sx(b.x), sy(b.y))
-    if (d < bestD) { bestD = d; best = e }
+    if (d < bestD) {
+      bestD = d
+      best = e
+    }
   }
   return best
 }
@@ -455,21 +548,30 @@ function edgeAt(x, y) {
 function onDown(e) {
   const { x, y } = pos(e)
   const node = nodeAt(x, y)
-  if (node) { dragNode = node; dragMoved = false; return }
+  if (node) {
+    dragNode = node
+    dragMoved = false
+    return
+  }
   // Empty space → pan.
-  panning = true; panMoved = false; lastPan = { x, y }
+  panning = true
+  panMoved = false
+  lastPan = { x, y }
 }
 
 function onMove(e) {
   const { x, y } = pos(e)
   if (dragNode) {
-    dragNode.x = wxFromScreen(x); dragNode.y = wyFromScreen(y)
-    dragNode.vx = 0; dragNode.vy = 0
+    dragNode.x = wxFromScreen(x)
+    dragNode.y = wyFromScreen(y)
+    dragNode.vx = 0
+    dragNode.vy = 0
     dragMoved = true
     return
   }
   if (panning) {
-    ox += x - lastPan.x; oy += y - lastPan.y
+    ox += x - lastPan.x
+    oy += y - lastPan.y
     lastPan = { x, y }
     panMoved = true
     hoverText.value = null
@@ -485,8 +587,13 @@ function onMove(e) {
   }
   const edge = edgeAt(x, y)
   if (edge) {
-    const a = nodes[edge.a], b = nodes[edge.b]
-    hoverText.value = { text: `${a.name} ↔ ${b.name} · ${edge.inlierCount} matches${edge.enabled ? '' : ' · excluded'}`, x, y }
+    const a = nodes[edge.a],
+      b = nodes[edge.b]
+    hoverText.value = {
+      text: `${a.name} ↔ ${b.name} · ${edge.inlierCount} matches${edge.enabled ? '' : ' · excluded'}`,
+      x,
+      y,
+    }
     canvasEl.value.style.cursor = 'pointer'
   } else {
     hoverText.value = null
@@ -502,7 +609,7 @@ function onUp(e) {
   if (panning) {
     panning = false
     canvasEl.value.style.cursor = 'default'
-    if (panMoved) return   // a pan gesture, not a click
+    if (panMoved) return // a pan gesture, not a click
   }
   const { x, y } = pos(e)
   if (nodeAt(x, y)) return
@@ -517,7 +624,9 @@ function onDblClick(e) {
 }
 
 function onLeave() {
-  dragNode = null; panning = false; hoverText.value = null
+  dragNode = null
+  panning = false
+  hoverText.value = null
   if (canvasEl.value) canvasEl.value.style.cursor = 'default'
 }
 
@@ -528,14 +637,18 @@ function setMode(mode) {
   applyLayout()
 }
 
-function resetLayout() { applyLayout() }
+function resetLayout() {
+  applyLayout()
+}
 
 // ── Sizing / lifecycle ──────────────────────────────────────────────────────────
 function resize() {
   const el = wrapEl.value
   if (!el || !canvasEl.value) return
-  const prevW = W, prevH = H
-  W = el.clientWidth; H = el.clientHeight
+  const prevW = W,
+    prevH = H
+  W = el.clientWidth
+  H = el.clientHeight
   const dpr = DPR()
   canvasEl.value.width = Math.round(W * dpr)
   canvasEl.value.height = Math.round(H * dpr)
@@ -551,7 +664,10 @@ onMounted(() => {
   resize()
   if (hasPositions.value) layoutMode.value = 'geo'
   applyLayout()
-  ro = new ResizeObserver(() => { resize(); invalidate() })
+  ro = new ResizeObserver(() => {
+    resize()
+    invalidate()
+  })
   ro.observe(wrapEl.value)
   loop()
 })
@@ -566,20 +682,44 @@ onBeforeUnmount(() => {
 // (App.vue) that rebuilds the whole array on any change, so its identity moves on
 // every flag toggle too, and a deep watch traversed every field of every pair (10⁵
 // objects) on each trigger.
-watch(() => props.matchSummaries, () => { sync(); invalidate() })
-watch(() => props.alignedUuids, () => { patch(); invalidate() })
+watch(
+  () => props.matchSummaries,
+  () => {
+    sync()
+    invalidate()
+  },
+)
+watch(
+  () => props.alignedUuids,
+  () => {
+    patch()
+    invalidate()
+  },
+)
 watch([() => props.selectedPairId, () => props.hasSparse], invalidate)
 // Positions may arrive after the modal opens (poses import / restore); adopt a geo
 // layout the first time they show up.
 watch(hasPositions, (has) => {
-  if (has && layoutMode.value === 'force') { layoutMode.value = 'geo'; applyLayout(); invalidate() }
+  if (has && layoutMode.value === 'force') {
+    layoutMode.value = 'geo'
+    applyLayout()
+    invalidate()
+  }
 })
 </script>
 
 <template>
-  <div ref="wrapEl" class="graph-wrap"
-    @mousedown.capture="invalidate" @mousemove.capture="invalidate" @mouseup.capture="invalidate"
-    @mouseleave.capture="invalidate" @dblclick.capture="invalidate" @wheel.capture="invalidate" @click.capture="invalidate">
+  <div
+    ref="wrapEl"
+    class="graph-wrap"
+    @mousedown.capture="invalidate"
+    @mousemove.capture="invalidate"
+    @mouseup.capture="invalidate"
+    @mouseleave.capture="invalidate"
+    @dblclick.capture="invalidate"
+    @wheel.capture="invalidate"
+    @click.capture="invalidate"
+  >
     <canvas
       ref="canvasEl"
       class="graph-canvas"
@@ -609,7 +749,10 @@ watch(hasPositions, (has) => {
     <div v-if="hoverText" class="graph-hover" :style="{ left: hoverText.x + 12 + 'px', top: hoverText.y + 12 + 'px' }">
       {{ hoverText.text }}
     </div>
-    <div class="graph-hint">Click edge to preview · double-click to exclude/restore · drag node to move · drag background to pan · scroll to zoom</div>
+    <div class="graph-hint">
+      Click edge to preview · double-click to exclude/restore · drag node to move · drag background to pan · scroll to
+      zoom
+    </div>
   </div>
 </template>
 
@@ -621,7 +764,9 @@ watch(hasPositions, (has) => {
   background: var(--bg);
 }
 
-.graph-canvas { display: block; }
+.graph-canvas {
+  display: block;
+}
 
 .graph-empty {
   position: absolute;
@@ -661,8 +806,14 @@ watch(hasPositions, (has) => {
   padding: 3px 9px;
   cursor: pointer;
 }
-.mode-btn:hover { background: var(--hover-bg); color: var(--text); }
-.mode-btn.active { background: var(--accent); color: #fff; }
+.mode-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+.mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
 
 .tool-btn {
   background: var(--panel);
@@ -674,7 +825,10 @@ watch(hasPositions, (has) => {
   padding: 3px 9px;
   cursor: pointer;
 }
-.tool-btn:hover { background: var(--hover-bg); color: var(--text); }
+.tool-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
 
 .zoom-group {
   display: flex;

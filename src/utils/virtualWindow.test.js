@@ -30,8 +30,8 @@ describe('computeWindow', () => {
 
   it('fixed height: renders the viewport plus overscan and keeps the total', () => {
     const w = computeWindow({ count: 1000, itemHeight: 20, scrollTop: 400, viewportHeight: 200, overscan: 5 })
-    expect(w.start).toBe(15)            // row 20 is the first visible, minus 5
-    expect(w.end).toBe(35)              // rows 20..29 visible (+1 partial guard) + 5
+    expect(w.start).toBe(15) // row 20 is the first visible, minus 5
+    expect(w.end).toBe(35) // rows 20..29 visible (+1 partial guard) + 5
     expect(w.padTop).toBe(15 * 20)
     expect(w.padTop + (w.end - w.start) * 20 + w.padBottom).toBe(w.total)
     expect(w.total).toBe(20000)
@@ -64,7 +64,10 @@ describe('computeWindow', () => {
     // Every row intersecting [3000, 3300) is inside the window.
     for (let i = 0; i < 500; i++) {
       const visible = offsets[i + 1] > 3000 && offsets[i] < 3300
-      if (visible) { expect(i).toBeGreaterThanOrEqual(w.start); expect(i).toBeLessThan(w.end) }
+      if (visible) {
+        expect(i).toBeGreaterThanOrEqual(w.start)
+        expect(i).toBeLessThan(w.end)
+      }
     }
   })
 

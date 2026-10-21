@@ -21,7 +21,7 @@ export function sniffCloudFormat(bytes, name = '') {
     // A .laz carries the same LASF signature; the LASzip high bit on the point
     // format (byte 104) is what separates them. Extension is not evidence — LAZ
     // is regularly shipped named .las.
-    if (magic === 'LASF') return (head.length > 104 && (head[104] & 0x80)) ? 'laz' : 'las'
+    if (magic === 'LASF') return head.length > 104 && head[104] & 0x80 ? 'laz' : 'las'
     if (magic.startsWith('ply') && (head[3] === 0x0a || head[3] === 0x0d)) return 'ply'
   }
   const ext = String(name).split('.').pop()?.toLowerCase()
@@ -38,13 +38,18 @@ export function sniffCloudFormat(bytes, name = '') {
 // all-numeric row is more plausibly "numeric-name x y z" (a GCP/pose list),
 // which must keep flowing to the delimited-text detector / user chooser.
 export function looksLikeXyzText(text, minRows = 2) {
-  const lines = text.split(/\r?\n/).map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#')).slice(0, 5)
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))
+    .slice(0, 5)
   if (lines.length < minRows) return false
   return lines.every((l) => {
     const tok = l.split(/[\s,;]+/)
-    return (tok.length === 3 || tok.length === 6 || tok.length === 7)
-      && tok.every((t) => t !== '' && Number.isFinite(Number(t)))
+    return (
+      (tok.length === 3 || tok.length === 6 || tok.length === 7) &&
+      tok.every((t) => t !== '' && Number.isFinite(Number(t)))
+    )
   })
 }
 
@@ -80,16 +85,28 @@ export async function parseCloudSource(source, { onLog, lazDecompress = null } =
 // Basic stats for the import modal: point/face counts, bbox, carried attributes.
 export function cloudStats(parsed) {
   const n = parsed.nVerts ?? parsed.count ?? 0
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity
   const pos = parsed.pos
   for (let i = 0; i < n; i++) {
-    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
-    if (x < minX) minX = x; if (x > maxX) maxX = x
-    if (y < minY) minY = y; if (y > maxY) maxY = y
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+    const x = pos[i * 3],
+      y = pos[i * 3 + 1],
+      z = pos[i * 3 + 2]
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+    if (z < minZ) minZ = z
+    if (z > maxZ) maxZ = z
   }
-  if (!Number.isFinite(minX)) { minX = minY = minZ = 0; maxX = maxY = maxZ = 0 }
+  if (!Number.isFinite(minX)) {
+    minX = minY = minZ = 0
+    maxX = maxY = maxZ = 0
+  }
   return {
     points: parsed.idx ? parsed.nVerts : parsed.count,
     faces: parsed.idx ? parsed.count : 0,
@@ -112,15 +129,26 @@ export function applyImportTransform(parsed, { unitScale = 1, swapYZ = false, su
     const pos = new Float64Array(n * 3)
     const s = unitScale > 0 ? unitScale : 1
     for (let i = 0; i < n; i++) {
-      const x = parsed.pos[i * 3] * s, y = parsed.pos[i * 3 + 1] * s, z = parsed.pos[i * 3 + 2] * s
-      if (swapYZ) { pos[i * 3] = x; pos[i * 3 + 1] = -z; pos[i * 3 + 2] = y }
-      else { pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z }
+      const x = parsed.pos[i * 3] * s,
+        y = parsed.pos[i * 3 + 1] * s,
+        z = parsed.pos[i * 3 + 2] * s
+      if (swapYZ) {
+        pos[i * 3] = x
+        pos[i * 3 + 1] = -z
+        pos[i * 3 + 2] = y
+      } else {
+        pos[i * 3] = x
+        pos[i * 3 + 1] = y
+        pos[i * 3 + 2] = z
+      }
     }
     let nrm = parsed.nrm
     if (nrm && swapYZ) {
       const rn = new Float32Array(n * 3)
       for (let i = 0; i < n; i++) {
-        rn[i * 3] = nrm[i * 3]; rn[i * 3 + 1] = -nrm[i * 3 + 2]; rn[i * 3 + 2] = nrm[i * 3 + 1]
+        rn[i * 3] = nrm[i * 3]
+        rn[i * 3 + 1] = -nrm[i * 3 + 2]
+        rn[i * 3 + 2] = nrm[i * 3 + 1]
       }
       nrm = rn
     }

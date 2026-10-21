@@ -17,19 +17,14 @@ const { shouldWarn, acknowledge } = useMobileWarning()
       <div class="mg-icon">📱</div>
       <h2 id="mobile-gate-title" class="mg-title">websfm is not designed for mobile</h2>
       <p class="mg-text">
-        This is a desktop photogrammetry application. It runs feature detection,
-        bundle adjustment and dense reconstruction directly in your browser, and it
-        expects a large window, a mouse and plenty of memory.
+        This is a desktop photogrammetry application. It runs feature detection, bundle adjustment and dense
+        reconstruction directly in your browser, and it expects a large window, a mouse and plenty of memory.
       </p>
       <p class="mg-text">
-        <strong>Mobile layout is not supported.</strong> On a phone or tablet the
-        interface will be cramped or unusable, processing may be very slow, and
-        larger projects are likely to run out of memory and fail.
+        <strong>Mobile layout is not supported.</strong> On a phone or tablet the interface will be cramped or unusable,
+        processing may be very slow, and larger projects are likely to run out of memory and fail.
       </p>
-      <p class="mg-text">
-        For real work, please open websfm on a desktop or laptop in a
-        Chromium-based browser.
-      </p>
+      <p class="mg-text">For real work, please open websfm on a desktop or laptop in a Chromium-based browser.</p>
       <button class="btn btn-primary mg-ok" type="button" autofocus @click="acknowledge">
         I understand — continue anyway
       </button>
@@ -61,7 +56,10 @@ const { shouldWarn, acknowledge } = useMobileWarning()
   padding: 20px;
   text-align: center;
 }
-.mg-icon { font-size: 30px; line-height: 1; }
+.mg-icon {
+  font-size: 30px;
+  line-height: 1;
+}
 .mg-title {
   margin: 10px 0 12px;
   font-size: 17px;

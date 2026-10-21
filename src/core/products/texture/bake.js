@@ -28,18 +28,25 @@ export async function bakeAtlas(layout, hooks = {}, fallback = [128, 128, 128]) 
     byView.get(vi).push(p)
   }
   const failed = []
-  let decoded = 0, done = 0
+  let decoded = 0,
+    done = 0
   for (const [vi, list] of byView) {
     const photo = await hooks.loadPhoto(vi, layout.scale)
     if (!photo) {
       failed.push(vi)
-      for (const p of list) fillRect(pages[place.page[p]], P, place.x[p], place.y[p], pieces.w[p], pieces.h[p], fallback)
+      for (const p of list)
+        fillRect(pages[place.page[p]], P, place.x[p], place.y[p], pieces.w[p], pieces.h[p], fallback)
     } else {
       decoded++
       const { data, width, height, map } = photo
       for (const p of list) {
-        const page = pages[place.page[p]], ax = place.x[p], ay = place.y[p]
-        const x0 = pieces.x0[p], y0 = pieces.y0[p], w = pieces.w[p], h = pieces.h[p]
+        const page = pages[place.page[p]],
+          ax = place.x[p],
+          ay = place.y[p]
+        const x0 = pieces.x0[p],
+          y0 = pieces.y0[p],
+          w = pieces.w[p],
+          h = pieces.h[p]
         for (let j = 0; j < h; j++) {
           let o = ((ay + j) * P + ax) * 4
           for (let i = 0; i < w; i++, o += 4) {
@@ -57,8 +64,11 @@ export async function bakeAtlas(layout, hooks = {}, fallback = [128, 128, 128]) 
   }
   for (let c = 0; c < flat.count; c++) {
     const p = pieces.count + c
-    fillRect(pages[place.page[p]], P, place.x[p], place.y[p], flat.size, flat.size,
-      [flat.colour[3 * c], flat.colour[3 * c + 1], flat.colour[3 * c + 2]])
+    fillRect(pages[place.page[p]], P, place.x[p], place.y[p], flat.size, flat.size, [
+      flat.colour[3 * c],
+      flat.colour[3 * c + 1],
+      flat.colour[3 * c + 2],
+    ])
   }
   return { pages, decoded, failed }
 }
@@ -66,7 +76,12 @@ export async function bakeAtlas(layout, hooks = {}, fallback = [128, 128, 128]) 
 function fillRect(page, P, x, y, w, h, [r, g, b]) {
   for (let j = 0; j < h; j++) {
     let o = ((y + j) * P + x) * 4
-    for (let i = 0; i < w; i++, o += 4) { page[o] = r; page[o + 1] = g; page[o + 2] = b; page[o + 3] = 255 }
+    for (let i = 0; i < w; i++, o += 4) {
+      page[o] = r
+      page[o + 1] = g
+      page[o + 2] = b
+      page[o + 3] = 255
+    }
   }
 }
 
@@ -89,12 +104,18 @@ export function applyGains(pages, layout, gains) {
   for (let p = 0; p < pieces.count; p++) {
     const vi = pieces.view[p]
     if (gains[3 * vi] === 1 && gains[3 * vi + 1] === 1 && gains[3 * vi + 2] === 1) continue
-    const l = lutFor(vi), page = pages[place.page[p]]
-    const ax = place.x[p], ay = place.y[p], w = pieces.w[p], h = pieces.h[p]
+    const l = lutFor(vi),
+      page = pages[place.page[p]]
+    const ax = place.x[p],
+      ay = place.y[p],
+      w = pieces.w[p],
+      h = pieces.h[p]
     for (let j = 0; j < h; j++) {
       let o = ((ay + j) * P + ax) * 4
       for (let i = 0; i < w; i++, o += 4) {
-        page[o] = l[page[o]]; page[o + 1] = l[256 + page[o + 1]]; page[o + 2] = l[512 + page[o + 2]]
+        page[o] = l[page[o]]
+        page[o + 1] = l[256 + page[o + 1]]
+        page[o + 2] = l[512 + page[o + 2]]
       }
     }
   }

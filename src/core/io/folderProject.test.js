@@ -1,8 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import {
-  STORAGE_FOLDER, STORAGE_OPFS,
-  projectStorage, isFolderProject, folderStorageSupported, folderOpenPlan,
-  adoptFolderVerdict, newFolderVerdict, copyVerified, folderLabel,
+  STORAGE_FOLDER,
+  STORAGE_OPFS,
+  projectStorage,
+  isFolderProject,
+  folderStorageSupported,
+  folderOpenPlan,
+  adoptFolderVerdict,
+  newFolderVerdict,
+  copyVerified,
+  folderLabel,
 } from './folderProject.js'
 
 const opfsEntry = { id: 'a', storage: STORAGE_OPFS }

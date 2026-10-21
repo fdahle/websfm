@@ -40,14 +40,27 @@ export function cameraToWorldGl(R, t) {
 export function buildTransformsJson({ images }) {
   if (!images.length) return { camera_model: 'OPENCV', frames: [] }
   const first = images[0]
-  const same = images.every((im) =>
-    im.K.fx === first.K.fx && im.K.fy === first.K.fy && im.K.cx === first.K.cx
-    && im.K.cy === first.K.cy && im.width === first.width && im.height === first.height)
+  const same = images.every(
+    (im) =>
+      im.K.fx === first.K.fx &&
+      im.K.fy === first.K.fy &&
+      im.K.cx === first.K.cx &&
+      im.K.cy === first.K.cy &&
+      im.width === first.width &&
+      im.height === first.height,
+  )
 
   const intrinsics = (im) => ({
-    fl_x: im.K.fx, fl_y: im.K.fy, cx: im.K.cx, cy: im.K.cy,
-    w: im.width, h: im.height,
-    k1: 0, k2: 0, p1: 0, p2: 0, // pinhole post-ingest
+    fl_x: im.K.fx,
+    fl_y: im.K.fy,
+    cx: im.K.cx,
+    cy: im.K.cy,
+    w: im.width,
+    h: im.height,
+    k1: 0,
+    k2: 0,
+    p1: 0,
+    p2: 0, // pinhole post-ingest
   })
 
   const out = { camera_model: 'OPENCV' }

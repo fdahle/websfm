@@ -13,8 +13,13 @@
 export function packSparseForDense(points) {
   const n = points?.length ?? 0
   if (!n) return { n: 0, pos: new Float64Array(0), vstart: new Uint32Array(1), vcam: new Uint32Array(0), viewUuids: [] }
-  return { n, pos: points.pos.slice(0, 3 * n), vstart: points.vstart.slice(), vcam: points.vcam.slice(0, points.viewTotal),
-    viewUuids: [...points.viewUuids] }
+  return {
+    n,
+    pos: points.pos.slice(0, 3 * n),
+    vstart: points.vstart.slice(),
+    vcam: points.vcam.slice(0, points.viewTotal),
+    viewUuids: [...points.viewUuids],
+  }
 }
 
 /** The buffers to transfer. */
@@ -28,7 +33,10 @@ export function viewIndex(sparse) {
   const lists = Array.from(counts, (c) => new Uint32Array(c))
   const fill = new Uint32Array(viewUuids.length)
   for (let i = 0; i < n; i++) {
-    for (let k = vstart[i]; k < vstart[i + 1]; k++) { const c = vcam[k]; lists[c][fill[c]++] = i }
+    for (let k = vstart[i]; k < vstart[i + 1]; k++) {
+      const c = vcam[k]
+      lists[c][fill[c]++] = i
+    }
   }
   return new Map(viewUuids.map((u, c) => [u, lists[c]]))
 }
@@ -37,10 +45,16 @@ export function viewIndex(sparse) {
 export function positionsInRegion(pos, r) {
   const keep = []
   for (let i = 0; i < pos.length; i += 3) {
-    const x = pos[i], y = pos[i + 1], z = pos[i + 2]
+    const x = pos[i],
+      y = pos[i + 1],
+      z = pos[i + 2]
     if (x >= r.min[0] && x <= r.max[0] && y >= r.min[1] && y <= r.max[1] && z >= r.min[2] && z <= r.max[2]) keep.push(i)
   }
   const out = new Float64Array(3 * keep.length)
-  keep.forEach((i, j) => { out[3 * j] = pos[i]; out[3 * j + 1] = pos[i + 1]; out[3 * j + 2] = pos[i + 2] })
+  keep.forEach((i, j) => {
+    out[3 * j] = pos[i]
+    out[3 * j + 1] = pos[i + 1]
+    out[3 * j + 2] = pos[i + 2]
+  })
   return out
 }

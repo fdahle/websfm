@@ -47,9 +47,13 @@ export function createAppUpdate({ reload = () => window.location.reload() } = {}
     updateReady,
     updateActive,
     /** Hand over the plugin's `updateServiceWorker` (sends SKIP_WAITING). */
-    setApplyUpdate(fn) { applyUpdate = fn },
+    setApplyUpdate(fn) {
+      applyUpdate = fn
+    },
     /** A new version is installed and waiting. */
-    onNeedRefresh() { updateReady.value = true },
+    onNeedRefresh() {
+      updateReady.value = true
+    },
     /** The new worker took control of this tab (this tab's Reload, or another tab's). */
     onNeedReload() {
       updateActive.value = true
@@ -88,13 +92,20 @@ export async function registerServiceWorker() {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
   // A no-op stub in dev (vite-plugin-pwa only emits a worker for builds).
   const { registerSW } = await import('virtual:pwa-register')
-  app.setApplyUpdate(registerSW({
-    onNeedRefresh: app.onNeedRefresh,
-    // Replaces the plugin's unconditional reload when the new worker takes control.
-    onNeedReload: app.onNeedReload,
-    onOfflineReady() { showToast('websfm is ready to work offline', { ms: 5000 }) },
-    onRegisteredSW(_url, registration) {
-      if (registration) setInterval(() => { registration.update().catch(() => {}) }, UPDATE_CHECK_MS)
-    },
-  }))
+  app.setApplyUpdate(
+    registerSW({
+      onNeedRefresh: app.onNeedRefresh,
+      // Replaces the plugin's unconditional reload when the new worker takes control.
+      onNeedReload: app.onNeedReload,
+      onOfflineReady() {
+        showToast('websfm is ready to work offline', { ms: 5000 })
+      },
+      onRegisteredSW(_url, registration) {
+        if (registration)
+          setInterval(() => {
+            registration.update().catch(() => {})
+          }, UPDATE_CHECK_MS)
+      },
+    }),
+  )
 }

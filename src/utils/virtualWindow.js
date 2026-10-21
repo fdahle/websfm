@@ -24,7 +24,8 @@ export function indexAtOffset(offsets, y) {
   if (n <= 0) return 0
   if (y <= 0) return 0
   if (y >= offsets[n]) return n - 1
-  let lo = 0, hi = n - 1
+  let lo = 0,
+    hi = n - 1
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1
     if (offsets[mid] <= y) lo = mid
@@ -38,7 +39,15 @@ export function indexAtOffset(offsets, y) {
 //   { count, itemHeight?, offsets?, scrollTop, viewportHeight, overscan = 6 }
 // A non-positive viewport (not laid out yet, a hidden tab) still yields a first
 // screenful, so the initial paint is never empty and a measurement can be taken.
-export function computeWindow({ count, itemHeight, offsets, scrollTop = 0, viewportHeight = 0, overscan = 6, minRows = 30 }) {
+export function computeWindow({
+  count,
+  itemHeight,
+  offsets,
+  scrollTop = 0,
+  viewportHeight = 0,
+  overscan = 6,
+  minRows = 30,
+}) {
   const n = Math.max(0, count | 0)
   if (!n) return { start: 0, end: 0, padTop: 0, padBottom: 0, total: 0 }
   const fixed = !offsets

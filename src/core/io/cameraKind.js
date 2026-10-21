@@ -21,7 +21,9 @@ export function detectCameraMode(text) {
   // A per-row image name + position is the hallmark of a pose file. Distortion /
   // focal / sensor-dimension columns mark an intrinsics file.
   const poseHit = poseMap.image != null && (poseMap.omega != null || poseMap.kappa != null || poseMap.phi != null)
-  const sensorHit = ['focal', 'k1', 'k2', 'k3', 'p1', 'p2', 'cx', 'cy', 'ppxMm', 'ppyMm', 'pixelSize'].some((k) => sensorMap[k] != null)
+  const sensorHit = ['focal', 'k1', 'k2', 'k3', 'p1', 'p2', 'cx', 'cy', 'ppxMm', 'ppyMm', 'pixelSize'].some(
+    (k) => sensorMap[k] != null,
+  )
 
   if (poseHit) return 'pose'
   // Intrinsics with no per-row position are a calibration file, with or without an

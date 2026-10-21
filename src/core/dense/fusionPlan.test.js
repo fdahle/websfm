@@ -4,12 +4,25 @@ import { fuseDepthMaps } from './mvs.js'
 // Maps of varied depth (odd and even valid counts, holes), so the median's rank matters.
 function maps(n = 5) {
   return Array.from({ length: n }, (_, j) => {
-    const w = 24 + j, h = 20, px = w * h
-    return { uuid: String(j), name: `img${j}`, width: w, height: h, K: { fx: 30 + j, fy: 30 + j, cx: w / 2, cy: h / 2 },
-      R: [[1, 0, 0], [0, -1, 0], [0, 0, -1]], t: [-j / 4, 0, 10],
+    const w = 24 + j,
+      h = 20,
+      px = w * h
+    return {
+      uuid: String(j),
+      name: `img${j}`,
+      width: w,
+      height: h,
+      K: { fx: 30 + j, fy: 30 + j, cx: w / 2, cy: h / 2 },
+      R: [
+        [1, 0, 0],
+        [0, -1, 0],
+        [0, 0, -1],
+      ],
+      t: [-j / 4, 0, 10],
       depth: Float32Array.from({ length: px }, (_, i) => (i % 7 === j ? 0 : 9 + ((i * 37 + j * 11) % 101) / 50)),
       cost: Float32Array.from({ length: px }, (_, i) => (i % 13) / 30),
-      rgb: new Uint8Array(px * 3) }
+      rgb: new Uint8Array(px * 3),
+    }
   })
 }
 
@@ -32,7 +45,8 @@ describe('fusion plan', () => {
   })
 
   it('reports progress per map read, ending near the whole plan', () => {
-    const ms = maps(), calls = []
+    const ms = maps(),
+      calls = []
     fuseDepthMaps(ms, { planOnly: true }, () => {}, { onPlanProgress: (...a) => calls.push(a) })
     // Resident maps: cost count, cost samples, bounds, cell estimate.
     expect(calls).toHaveLength(4 * ms.length)

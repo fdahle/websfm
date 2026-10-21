@@ -4,7 +4,11 @@ import { SparsePoints } from './sparsePoints.js'
 
 const camera = (uuid) => ({
   uuid,
-  R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+  R: [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ],
   t: [1, 2, 3],
   K: { fx: 100, fy: 101, cx: 50, cy: 40 },
 })
@@ -14,7 +18,16 @@ function model(extra = {}) {
     status: 'done',
     cameras: [camera('a'), camera('b')],
     points: SparsePoints.fromRecords([
-      { x: 1, y: 2, z: 3, color: [10, 20, 30], views: [['a', 7, 1.25, 2.5], ['b', 9, 3.5, 4.75]] },
+      {
+        x: 1,
+        y: 2,
+        z: 3,
+        color: [10, 20, 30],
+        views: [
+          ['a', 7, 1.25, 2.5],
+          ['b', 9, 3.5, 4.75],
+        ],
+      },
       { x: -4, y: 5, z: 6, color: null, views: [['a', 2]] },
       { x: 0, y: 0, z: 0, color: [0, 0, 0], views: [] },
     ]),
@@ -39,11 +52,18 @@ describe('sparse reconstruction worker transport', () => {
     expect(out.status).toBe('done')
     expect(out.summary).toEqual({ nCameras: 2, nPoints: 3 })
     expect([...out.cameras.keys()]).toEqual(['a', 'b'])
-    const views = [], pixels = []
+    const views = [],
+      pixels = []
     out.points.forEachView(0, (uuid, kp) => views.push([uuid, kp]))
     out.points.forEachPixel(0, (uuid, px, py) => pixels.push([uuid, [px, py]]))
-    expect(views).toEqual([['a', 7], ['b', 9]])
-    expect(pixels).toEqual([['a', [1.25, 2.5]], ['b', [3.5, 4.75]]])
+    expect(views).toEqual([
+      ['a', 7],
+      ['b', 9],
+    ])
+    expect(pixels).toEqual([
+      ['a', [1.25, 2.5]],
+      ['b', [3.5, 4.75]],
+    ])
     expect(out.points.pixelCount(1)).toBe(0)
     expect(out.points.colorAt(1)).toBeNull()
     expect(out.points.colorAt(2)).toEqual([0, 0, 0])
@@ -64,7 +84,9 @@ describe('sparse reconstruction worker transport', () => {
   })
 
   it('handles empty and non-success results', () => {
-    const out = unpackReconstructionResult(packReconstructionResult({ status: 'error', cameras: [], points: SparsePoints.empty() }).result)
+    const out = unpackReconstructionResult(
+      packReconstructionResult({ status: 'error', cameras: [], points: SparsePoints.empty() }).result,
+    )
     expect(out.status).toBe('error')
     expect(out.cameras.size).toBe(0)
     expect(out.points).toBeInstanceOf(SparsePoints)
@@ -73,11 +95,19 @@ describe('sparse reconstruction worker transport', () => {
 
   it('compacts mutable solver points without observation tuples and can consume them', () => {
     const solverPoints = [
-      { x: 1, y: 2, z: 3, views: new Map([['a', 4], ['b', 5]]) },
+      {
+        x: 1,
+        y: 2,
+        z: 3,
+        views: new Map([
+          ['a', 4],
+          ['b', 5],
+        ]),
+      },
     ]
     const points = compactPointRecords(solverPoints, {
       colorOf: () => [7, 8, 9],
-      pixelOf: (uuid) => uuid === 'a' ? [10.5, 20.5] : [30.5, 40.5],
+      pixelOf: (uuid) => (uuid === 'a' ? [10.5, 20.5] : [30.5, 40.5]),
       consume: true,
     })
     expect(solverPoints).toEqual([null])

@@ -24,10 +24,25 @@ test('the size readout, a long side in px, and a DEM exported in a neighbouring 
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
     const projects = useProjectsStore()
     await projects.setProjectCrs(projects.currentProjectId, 'EPSG:32632')
-    const W = 300, H = 200, data = new Float32Array(W * H)
+    const W = 300,
+      H = 200,
+      data = new Float32Array(W * H)
     for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) data[r * W + c] = c / 100
-    useReconstructionStore().dem = { width: W, height: H, gsd: 1, originX: 690000, originY: 5340200, crs: 'EPSG:32632',
-      unit: 'm', data, mask: new Uint8Array(W * H).fill(1), zMin: 0, zMax: 3, name: 'DEM', createdAt: 1 }
+    useReconstructionStore().dem = {
+      width: W,
+      height: H,
+      gsd: 1,
+      originX: 690000,
+      originY: 5340200,
+      crs: 'EPSG:32632',
+      unit: 'm',
+      data,
+      mask: new Uint8Array(W * H).fill(1),
+      zMin: 0,
+      zMax: 3,
+      name: 'DEM',
+      createdAt: 1,
+    }
   })
 
   // Build Orthophoto over the DEM: the readout is exact, and follows a long side in px.
@@ -44,7 +59,10 @@ test('the size readout, a long side in px, and a DEM exported in a neighbouring 
   await ortho.getByRole('button', { name: 'Cancel' }).click()
 
   // Export the DEM reprojected into UTM 33.
-  await page.getByRole('button', { name: /Products/ }).first().click()
+  await page
+    .getByRole('button', { name: /Products/ })
+    .first()
+    .click()
   await page.locator('.item-name', { hasText: /^DEM$/ }).click({ button: 'right' })
   await page.locator('.ctx-menu').getByRole('button', { name: 'Download…' }).click()
   const dlg = page.getByRole('dialog', { name: 'Export DEM' })
@@ -53,12 +71,17 @@ test('the size readout, a long side in px, and a DEM exported in a neighbouring 
   await dlg.getByLabel('Coordinate system').selectOption('other')
   const crs = dlg.getByRole('combobox', { name: 'Coordinate reference system' })
   await crs.fill('32633')
-  await page.getByRole('option', { name: /EPSG:32633/ }).first().click()
+  await page
+    .getByRole('option', { name: /EPSG:32633/ })
+    .first()
+    .click()
   await expect(dlg.getByLabel('Resampling')).toHaveValue('bilinear')
   await page.screenshot({ path: test.info().outputPath('export-crs.png') })
   const tif = await download(page, () => dlg.getByRole('button', { name: 'Export', exact: true }).click())
   expect(tif.name).toMatch(/-dem-EPSG32633\.tif$/)
-  const image = await (await fromArrayBuffer(tif.bytes.buffer.slice(tif.bytes.byteOffset, tif.bytes.byteOffset + tif.bytes.byteLength))).getImage(0)
+  const image = await (
+    await fromArrayBuffer(tif.bytes.buffer.slice(tif.bytes.byteOffset, tif.bytes.byteOffset + tif.bytes.byteLength))
+  ).getImage(0)
   expect(image.getGeoKeys().ProjectedCSTypeGeoKey).toBe(32633)
   // The zones' grids are rotated here, so the box is a little larger than the DEM.
   expect(image.getWidth()).toBeGreaterThan(300)

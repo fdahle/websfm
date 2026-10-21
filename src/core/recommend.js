@@ -47,13 +47,19 @@ function recommendDetect(p) {
   // SIFT keypoint budget scales inversely with set size: a few images need every
   // tie point; hundreds pay O(N²) matching, so keep the per-image cap modest.
   const kp = { small: 8000, medium: 5000, large: 4000 }[p.scale]
-  out.maxKeypoints = rec(kp, `${pluralize(p.nImages, 'image')} (${p.scale} set) — SIFT budget; the learned detectors keep their own ~2048 cap.`)
+  out.maxKeypoints = rec(
+    kp,
+    `${pluralize(p.nImages, 'image')} (${p.scale} set) — SIFT budget; the learned detectors keep their own ~2048 cap.`,
+  )
 
   // Very large scans (film) tile so a single detector pass isn't downscaled to
   // nothing — maxDim already clamped to 3200, so an 11 000 px scan would lose
   // detail without tiling.
   if (p.maxDim != null && p.maxDim > 6000) {
-    out.tiling = rec('auto', `Native long edge ${p.maxDim} px > 6000 — automatic tiled detection preserves fine keypoints a single downscaled pass would miss.`)
+    out.tiling = rec(
+      'auto',
+      `Native long edge ${p.maxDim} px > 6000 — automatic tiled detection preserves fine keypoints a single downscaled pass would miss.`,
+    )
     out.tileSize = rec(1536, 'Larger tiles than the 1024 default for a high-resolution scan.')
   }
 
@@ -72,16 +78,25 @@ function recommendMatch(p) {
   } else if (p.kind === 'video') {
     // Frames extracted from a video are in capture order by construction, and the
     // keyframe selection spaced them so neighbours overlap — no naming guesswork.
-    out.strategy = rec('sequential', 'Frames extracted from a video, in capture order — match each to the next few; enable loop closure if the video returns to where it started.')
+    out.strategy = rec(
+      'sequential',
+      'Frames extracted from a video, in capture order — match each to the next few; enable loop closure if the video returns to where it started.',
+    )
   } else if (p.sequentialNames && p.scale === 'large') {
     // Contiguous filenames alone don't prove a strip — cameras number files
     // sequentially for any shoot — so sequential matching is only recommended
     // when the set is large enough that exhaustive is prohibitively expensive and
     // the naming at least gives an ordering to exploit. Enable loop closure by
     // hand if the sequence actually loops back.
-    out.strategy = rec('sequential', 'Large set with sequential filenames — match capture-order neighbours to avoid the O(N²) exhaustive cost; enable loop closure if the sequence returns to its start.')
+    out.strategy = rec(
+      'sequential',
+      'Large set with sequential filenames — match capture-order neighbours to avoid the O(N²) exhaustive cost; enable loop closure if the sequence returns to its start.',
+    )
   } else {
-    out.strategy = rec('exhaustive', 'No motion priors — match all pairs so no loop closure is missed (the subset gate still skips non-overlapping pairs cheaply).')
+    out.strategy = rec(
+      'exhaustive',
+      'No motion priors — match all pairs so no loop closure is missed (the subset gate still skips non-overlapping pairs cheaply).',
+    )
   }
 
   return out
@@ -95,9 +110,12 @@ function recommendSfm(p) {
   // auto-behaviour auditable in the banner. Value equals the default, so U3's
   // diff hides it unless the user has changed it away from 'auto'.
   return {
-    refineIntrinsics: rec('auto', p.hasCalibratedDistortion
-      ? 'A sensor carries calibrated distortion — self-cal stays off ("none") to avoid double-correcting.'
-      : 'No calibrated distortion — self-cal solves one shared focal + k1 during BA.'),
+    refineIntrinsics: rec(
+      'auto',
+      p.hasCalibratedDistortion
+        ? 'A sensor carries calibrated distortion — self-cal stays off ("none") to avoid double-correcting.'
+        : 'No calibrated distortion — self-cal solves one shared focal + k1 during BA.',
+    ),
   }
 }
 

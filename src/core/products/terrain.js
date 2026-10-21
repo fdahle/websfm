@@ -48,7 +48,15 @@ function checkPositive(name, v) {
 
 // Shape shared by every output raster: same geometry as the input DEM.
 function outGrid(grid, data, mask) {
-  return { width: grid.width, height: grid.height, gsd: grid.gsd, originX: grid.originX, originY: grid.originY, data, mask }
+  return {
+    width: grid.width,
+    height: grid.height,
+    gsd: grid.gsd,
+    originX: grid.originX,
+    originY: grid.originY,
+    data,
+    mask,
+  }
 }
 
 // Walk every cell once, handing `visit(i, p, q)` the Horn gradient — p = ∂z/∂x
@@ -71,13 +79,21 @@ function hornGradient(grid, k, zFactor, visit) {
   for (let r = 0; r < h; r++) {
     for (let c = 0; c < w; c++) {
       const i = r * w + c
-      if (!valid(i)) { visit(i, NaN, NaN); continue }
+      if (!valid(i)) {
+        visit(i, NaN, NaN)
+        continue
+      }
       const z = data[i]
-      const a = at(c - 1, r - 1, z), b = at(c, r - 1, z), cc = at(c + 1, r - 1, z)
-      const d = at(c - 1, r, z), f = at(c + 1, r, z)
-      const g = at(c - 1, r + 1, z), hh = at(c, r + 1, z), ii = at(c + 1, r + 1, z)
-      const p = ((cc + 2 * f + ii) - (a + 2 * d + g)) * s
-      const q = ((a + 2 * b + cc) - (g + 2 * hh + ii)) * s
+      const a = at(c - 1, r - 1, z),
+        b = at(c, r - 1, z),
+        cc = at(c + 1, r - 1, z)
+      const d = at(c - 1, r, z),
+        f = at(c + 1, r, z)
+      const g = at(c - 1, r + 1, z),
+        hh = at(c, r + 1, z),
+        ii = at(c + 1, r + 1, z)
+      const p = (cc + 2 * f + ii - (a + 2 * d + g)) * s
+      const q = (a + 2 * b + cc - (g + 2 * hh + ii)) * s
       visit(i, p, q)
     }
   }
@@ -103,7 +119,7 @@ function shadeByte(cang) {
 // direction) — i.e. (ĝ·û)² — so a slope is lit mostly along its fall line. Over
 // four axes 45° apart the weights sum to 2·|g|², which GDAL folds into a 0.5
 // (its "127"); a flat cell gets sin(altitude) from every sun.
-const MULTI_AZ = [225, 270, 315, 360].map(a => ({ s: Math.sin(a * RAD), c: Math.cos(a * RAD) }))
+const MULTI_AZ = [225, 270, 315, 360].map((a) => ({ s: Math.sin(a * RAD), c: Math.cos(a * RAD) }))
 function multiIllumination(p, q, sinH, cosH) {
   const g2 = p * p + q * q
   if (g2 === 0) return sinH
@@ -136,8 +152,16 @@ function multiIllumination(p, q, sinH, cosH) {
  */
 export function terrainProducts(grid, opts = {}) {
   const {
-    products = TERRAIN_PRODUCTS, k = 1, zFactor = 1, units = 'degrees',
-    flatValue = -1, flatSlope = 0, azimuth = 315, altitude = 45, multidirectional = false, onLog,
+    products = TERRAIN_PRODUCTS,
+    k = 1,
+    zFactor = 1,
+    units = 'degrees',
+    flatValue = -1,
+    flatSlope = 0,
+    azimuth = 315,
+    altitude = 45,
+    multidirectional = false,
+    onLog,
   } = opts
   checkGrid(grid)
   checkPositive('k', k)
@@ -152,8 +176,10 @@ export function terrainProducts(grid, opts = {}) {
   const aspectData = want.has('aspect') ? new Float32Array(n) : null
   const shadeData = want.has('hillshade') ? new Uint8Array(n) : null
   const percent = units === 'percent'
-  const sinA = Math.sin(azimuth * RAD), cosA = Math.cos(azimuth * RAD)
-  const sinH = Math.sin(altitude * RAD), cosH = Math.cos(altitude * RAD)
+  const sinA = Math.sin(azimuth * RAD),
+    cosA = Math.cos(azimuth * RAD)
+  const sinH = Math.sin(altitude * RAD),
+    cosH = Math.cos(altitude * RAD)
 
   let valid = 0
   hornGradient(grid, k, zFactor, (i, p, q) => {
@@ -162,7 +188,8 @@ export function terrainProducts(grid, opts = {}) {
       if (aspectData) aspectData[i] = NaN
       return // hillshade stays 0, mask stays 0
     }
-    mask[i] = 1; valid++
+    mask[i] = 1
+    valid++
     const tan = Math.hypot(p, q)
     if (slopeData) slopeData[i] = percent ? 100 * tan : Math.atan(tan) * DEG
     if (aspectData) {
@@ -174,9 +201,9 @@ export function terrainProducts(grid, opts = {}) {
       }
     }
     if (shadeData) {
-      shadeData[i] = shadeByte(multidirectional
-        ? multiIllumination(p, q, sinH, cosH)
-        : illumination(p, q, sinA, cosA, sinH, cosH))
+      shadeData[i] = shadeByte(
+        multidirectional ? multiIllumination(p, q, sinH, cosH) : illumination(p, q, sinA, cosA, sinH, cosH),
+      )
     }
   })
 
@@ -185,10 +212,12 @@ export function terrainProducts(grid, opts = {}) {
   if (aspectData) out.aspect = { ...outGrid(grid, aspectData, mask.slice()), flatValue }
   if (shadeData) out.hillshade = outGrid(grid, shadeData, mask.slice())
   onLog?.(
-    `Terrain: ${products.join(' + ')} over ${grid.width}×${grid.height} (${valid} valid cells), `
-    + `k=${k}, zFactor=${zFactor}, true spacing ${(grid.gsd / k).toPrecision(6)}`
-    + (shadeData ? `, sun ${multidirectional ? 'multidirectional' : `az ${azimuth}°`} alt ${altitude}°` : ''),
-    'info', 'Products')
+    `Terrain: ${products.join(' + ')} over ${grid.width}×${grid.height} (${valid} valid cells), ` +
+      `k=${k}, zFactor=${zFactor}, true spacing ${(grid.gsd / k).toPrecision(6)}` +
+      (shadeData ? `, sun ${multidirectional ? 'multidirectional' : `az ${azimuth}°`} alt ${altitude}°` : ''),
+    'info',
+    'Products',
+  )
   return out
 }
 

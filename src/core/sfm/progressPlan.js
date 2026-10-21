@@ -16,13 +16,13 @@
 // only need to be good enough that the bar does not stall or sprint. Registration
 // dominates; the post-filter passes are what the old bar hid entirely.
 export const SFM_PHASES = [
-  { key: 'initPair',       weight: 0.10, label: 'Choosing initial pair' },
-  { key: 'register',       weight: 0.45, label: 'Registering images' },
-  { key: 'bundle',         weight: 0.15, label: 'Bundle adjustment' },
-  { key: 'retriangulate',  weight: 0.08, label: 'Retriangulating' },
-  { key: 'trackFilter',    weight: 0.12, label: 'Filtering tracks' },
-  { key: 'gcpBundle',      weight: 0.05, label: 'Position-constrained bundle adjustment' },
-  { key: 'finalize',       weight: 0.05, label: 'Finalising' },
+  { key: 'initPair', weight: 0.1, label: 'Choosing initial pair' },
+  { key: 'register', weight: 0.45, label: 'Registering images' },
+  { key: 'bundle', weight: 0.15, label: 'Bundle adjustment' },
+  { key: 'retriangulate', weight: 0.08, label: 'Retriangulating' },
+  { key: 'trackFilter', weight: 0.12, label: 'Filtering tracks' },
+  { key: 'gcpBundle', weight: 0.05, label: 'Position-constrained bundle adjustment' },
+  { key: 'finalize', weight: 0.05, label: 'Finalising' },
 ]
 
 // Cumulative start offset of each phase, normalised so the weights sum to 1 even if
@@ -85,9 +85,9 @@ export function scopeProgress(onProgress, { start, end, decorate } = {}) {
 // (their count is not known until the primary finishes). The last sliver is the merge
 // and summary work after the final sub-run.
 export const RUN_BUDGET = {
-  primary:   [0, 0.75],
-  recovery:  [0.75, 0.97],
-  finalize:  [0.97, 1],
+  primary: [0, 0.75],
+  recovery: [0.75, 0.97],
+  finalize: [0.97, 1],
 }
 
 // Split `[start, end]` into `n` equal consecutive slices.

@@ -40,7 +40,11 @@ import { buildMeshClosest } from './cloudDistance.js'
 
 // ── Small linear-algebra helpers (3×3 row-major arrays) ──────────────────────
 
-const I3 = () => [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+const I3 = () => [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+]
 const mat3Mul = (A, B) => A.map((row) => [0, 1, 2].map((j) => row[0] * B[0][j] + row[1] * B[1][j] + row[2] * B[2][j]))
 const mat3Vec = (A, v) => [
   A[0][0] * v[0] + A[0][1] * v[1] + A[0][2] * v[2],
@@ -48,9 +52,9 @@ const mat3Vec = (A, v) => [
   A[2][0] * v[0] + A[2][1] * v[1] + A[2][2] * v[2],
 ]
 const det3 = (A) =>
-  A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1])
-  - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0])
-  + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0])
+  A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) -
+  A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) +
+  A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0])
 // Cofactor matrix: cof(A) = det(A)·A⁻ᵀ, the normal transform up to scale.
 const cof3 = (A) => [
   [A[1][1] * A[2][2] - A[1][2] * A[2][1], A[1][2] * A[2][0] - A[1][0] * A[2][2], A[1][0] * A[2][1] - A[1][1] * A[2][0]],
@@ -62,8 +66,12 @@ const cof3 = (A) => [
 function rodrigues(wx, wy, wz) {
   const a = Math.hypot(wx, wy, wz)
   if (a < 1e-300) return I3()
-  const x = wx / a, y = wy / a, z = wz / a
-  const c = Math.cos(a), s = Math.sin(a), q = 1 - c
+  const x = wx / a,
+    y = wy / a,
+    z = wz / a
+  const c = Math.cos(a),
+    s = Math.sin(a),
+    q = 1 - c
   return [
     [c + x * x * q, x * y * q - z * s, x * z * q + y * s],
     [y * x * q + z * s, c + y * y * q, y * z * q - x * s],
@@ -73,11 +81,20 @@ function rodrigues(wx, wy, wz) {
 
 /** Gram–Schmidt on the rows — keeps an accumulated rotation from drifting. */
 function orthonormalize(R) {
-  const r0 = R[0].slice(), r1 = R[1].slice()
-  let l = Math.hypot(r0[0], r0[1], r0[2]); r0[0] /= l; r0[1] /= l; r0[2] /= l
+  const r0 = R[0].slice(),
+    r1 = R[1].slice()
+  let l = Math.hypot(r0[0], r0[1], r0[2])
+  r0[0] /= l
+  r0[1] /= l
+  r0[2] /= l
   const d = r0[0] * r1[0] + r0[1] * r1[1] + r0[2] * r1[2]
-  r1[0] -= d * r0[0]; r1[1] -= d * r0[1]; r1[2] -= d * r0[2]
-  l = Math.hypot(r1[0], r1[1], r1[2]); r1[0] /= l; r1[1] /= l; r1[2] /= l
+  r1[0] -= d * r0[0]
+  r1[1] -= d * r0[1]
+  r1[2] -= d * r0[2]
+  l = Math.hypot(r1[0], r1[1], r1[2])
+  r1[0] /= l
+  r1[1] /= l
+  r1[2] /= l
   const r2 = [r0[1] * r1[2] - r0[2] * r1[1], r0[2] * r1[0] - r0[0] * r1[2], r0[0] * r1[1] - r0[1] * r1[0]]
   return [r0, r1, r2]
 }
@@ -85,7 +102,9 @@ function orthonormalize(R) {
 /** Rotation angle of R in radians (atan2 form — accurate for tiny angles too). */
 export function rotationAngle(R) {
   const tr = R[0][0] + R[1][1] + R[2][2]
-  const vx = R[2][1] - R[1][2], vy = R[0][2] - R[2][0], vz = R[1][0] - R[0][1]
+  const vx = R[2][1] - R[1][2],
+    vy = R[0][2] - R[2][0],
+    vz = R[1][0] - R[0][1]
   return Math.atan2(0.5 * Math.hypot(vx, vy, vz), 0.5 * (tr - 1))
 }
 
@@ -97,8 +116,14 @@ function solveSmall(A, b, n) {
     for (let r = c + 1; r < n; r++) if (Math.abs(A[r * n + c]) > Math.abs(A[piv * n + c])) piv = r
     if (!(Math.abs(A[piv * n + c]) > 0)) return null
     if (piv !== c) {
-      for (let k = 0; k < n; k++) { const t = A[c * n + k]; A[c * n + k] = A[piv * n + k]; A[piv * n + k] = t }
-      const t = b[c]; b[c] = b[piv]; b[piv] = t
+      for (let k = 0; k < n; k++) {
+        const t = A[c * n + k]
+        A[c * n + k] = A[piv * n + k]
+        A[piv * n + k] = t
+      }
+      const t = b[c]
+      b[c] = b[piv]
+      b[piv] = t
     }
     for (let r = c + 1; r < n; r++) {
       const f = A[r * n + c] / A[c * n + c]
@@ -149,7 +174,10 @@ function similarityOf(tf, what = 'transform') {
   if (tf.R && !tf.linear) return { scale: tf.scale ?? 1, R: tf.R.map((r) => r.slice()), t: (tf.t ?? [0, 0, 0]).slice() }
   const m = Array.isArray(tf) || ArrayBuffer.isView(tf) ? tf : (tf.matrix ?? matrixFromTransform(tf))
   const s = transformFromMatrix(m)
-  if (!s.isSimilarity) throw new Error(`The ${what} must be a rotation + uniform scale + translation; this one shears, scales unevenly or mirrors.`)
+  if (!s.isSimilarity)
+    throw new Error(
+      `The ${what} must be a rotation + uniform scale + translation; this one shears, scales unevenly or mirrors.`,
+    )
   return { scale: s.scale, R: s.R, t: s.t }
 }
 
@@ -187,7 +215,11 @@ export function transformFromMatrix(m, { requireSimilarity = false, tolerance = 
     if (!(Math.abs(m[15]) > 0)) throw new Error('The 4×4 matrix has 0 in its bottom-right entry.')
     w = m[15]
   }
-  const A = [[m[0] / w, m[1] / w, m[2] / w], [m[4] / w, m[5] / w, m[6] / w], [m[8] / w, m[9] / w, m[10] / w]]
+  const A = [
+    [m[0] / w, m[1] / w, m[2] / w],
+    [m[4] / w, m[5] / w, m[6] / w],
+    [m[8] / w, m[9] / w, m[10] / w],
+  ]
   const t = [m[3] / w, m[7] / w, m[11] / w]
   const det = det3(A)
   const norm = Math.max(...A.flat().map(Math.abs))
@@ -195,23 +227,48 @@ export function transformFromMatrix(m, { requireSimilarity = false, tolerance = 
     throw new Error('The matrix is singular (it flattens space) — not a usable transform.')
   }
   let isSimilarity = false
-  let R = null, scale = null
+  let R = null,
+    scale = null
   if (det > 0) {
     const s = Math.cbrt(det)
     const Rc = A.map((r) => r.map((v) => v / s))
     let dev = 0
-    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
-      const d = Rc[i][0] * Rc[j][0] + Rc[i][1] * Rc[j][1] + Rc[i][2] * Rc[j][2] - (i === j ? 1 : 0)
-      dev = Math.max(dev, Math.abs(d))
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 3; j++) {
+        const d = Rc[i][0] * Rc[j][0] + Rc[i][1] * Rc[j][1] + Rc[i][2] * Rc[j][2] - (i === j ? 1 : 0)
+        dev = Math.max(dev, Math.abs(d))
+      }
+    if (dev <= tolerance) {
+      isSimilarity = true
+      R = Rc
+      scale = s
     }
-    if (dev <= tolerance) { isSimilarity = true; R = Rc; scale = s }
   }
   if (requireSimilarity && !isSimilarity) {
-    throw new Error(det < 0
-      ? 'The matrix mirrors space (negative determinant) — not a rotation + scale + translation.'
-      : 'The matrix shears or scales unevenly — not a rotation + uniform scale + translation.')
+    throw new Error(
+      det < 0
+        ? 'The matrix mirrors space (negative determinant) — not a rotation + scale + translation.'
+        : 'The matrix shears or scales unevenly — not a rotation + uniform scale + translation.',
+    )
   }
-  const matrix = [A[0][0], A[0][1], A[0][2], t[0], A[1][0], A[1][1], A[1][2], t[1], A[2][0], A[2][1], A[2][2], t[2], 0, 0, 0, 1]
+  const matrix = [
+    A[0][0],
+    A[0][1],
+    A[0][2],
+    t[0],
+    A[1][0],
+    A[1][1],
+    A[1][2],
+    t[1],
+    A[2][0],
+    A[2][1],
+    A[2][2],
+    t[2],
+    0,
+    0,
+    0,
+    1,
+  ]
   return isSimilarity
     ? { scale, R, t, isSimilarity, matrix }
     : { scale: null, R: null, t, isSimilarity, linear: A, matrix }
@@ -228,9 +285,11 @@ export function matrixFromTransform(tf) {
  * { scale, R, t } exactly; anything else goes through the general affine form.
  */
 export function composeTransforms(a, b) {
-  const simA = a?.R && !a.linear, simB = b?.R && !b.linear
+  const simA = a?.R && !a.linear,
+    simB = b?.R && !b.linear
   if (simA && simB) {
-    const sa = a.scale ?? 1, sb = b.scale ?? 1
+    const sa = a.scale ?? 1,
+      sb = b.scale ?? 1
     const Rtb = mat3Vec(a.R, b.t ?? [0, 0, 0])
     const ta = a.t ?? [0, 0, 0]
     return {
@@ -239,11 +298,25 @@ export function composeTransforms(a, b) {
       t: [sa * Rtb[0] + ta[0], sa * Rtb[1] + ta[1], sa * Rtb[2] + ta[2]],
     }
   }
-  const fa = affineOf(a), fb = affineOf(b)
+  const fa = affineOf(a),
+    fb = affineOf(b)
   const A = mat3Mul(fa.A, fb.A)
   const At = mat3Vec(fa.A, fb.t)
   const t = [At[0] + fa.t[0], At[1] + fa.t[1], At[2] + fa.t[2]]
-  return transformFromMatrix([A[0][0], A[0][1], A[0][2], t[0], A[1][0], A[1][1], A[1][2], t[1], A[2][0], A[2][1], A[2][2], t[2]])
+  return transformFromMatrix([
+    A[0][0],
+    A[0][1],
+    A[0][2],
+    t[0],
+    A[1][0],
+    A[1][1],
+    A[1][2],
+    t[1],
+    A[2][0],
+    A[2][1],
+    A[2][2],
+    t[2],
+  ])
 }
 
 /**
@@ -254,7 +327,10 @@ export function composeTransforms(a, b) {
  * @param {{ requireSimilarity?: boolean, tolerance?: number }} [opts] see transformFromMatrix
  */
 export function parseMatrixText(text, opts = {}) {
-  const tokens = String(text ?? '').replace(/[[\]{}()]/g, ' ').split(/[\s,;]+/).filter(Boolean)
+  const tokens = String(text ?? '')
+    .replace(/[[\]{}()]/g, ' ')
+    .split(/[\s,;]+/)
+    .filter(Boolean)
   const nums = tokens.map((tok) => {
     const v = Number(tok)
     if (!Number.isFinite(v)) throw new Error(`Could not read "${tok}" as a number.`)
@@ -278,15 +354,35 @@ export function parseMatrixText(text, opts = {}) {
  * @param {{ translate?:number[], rotateDeg?:number[], scale?:number, pivot?:number[] }} params
  * @returns {{ scale:number, R:number[][], t:number[] }}
  */
-export function transformFromEuler({ translate = [0, 0, 0], rotateDeg = [0, 0, 0], scale = 1, pivot = [0, 0, 0] } = {}) {
+export function transformFromEuler({
+  translate = [0, 0, 0],
+  rotateDeg = [0, 0, 0],
+  scale = 1,
+  pivot = [0, 0, 0],
+} = {}) {
   if (!(scale > 0) || !Number.isFinite(scale)) throw new Error('Scale must be a positive number.')
-  const [ax, ay, az] = rotateDeg.map((d) => (Number(d) || 0) * Math.PI / 180)
-  const cx = Math.cos(ax), sx = Math.sin(ax)
-  const cy = Math.cos(ay), sy = Math.sin(ay)
-  const cz = Math.cos(az), sz = Math.sin(az)
-  const Rx = [[1, 0, 0], [0, cx, -sx], [0, sx, cx]]
-  const Ry = [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]]
-  const Rz = [[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]]
+  const [ax, ay, az] = rotateDeg.map((d) => ((Number(d) || 0) * Math.PI) / 180)
+  const cx = Math.cos(ax),
+    sx = Math.sin(ax)
+  const cy = Math.cos(ay),
+    sy = Math.sin(ay)
+  const cz = Math.cos(az),
+    sz = Math.sin(az)
+  const Rx = [
+    [1, 0, 0],
+    [0, cx, -sx],
+    [0, sx, cx],
+  ]
+  const Ry = [
+    [cy, 0, sy],
+    [0, 1, 0],
+    [-sy, 0, cy],
+  ]
+  const Rz = [
+    [cz, -sz, 0],
+    [sz, cz, 0],
+    [0, 0, 1],
+  ]
   const R = mat3Mul(Rz, mat3Mul(Ry, Rx))
   const Rp = mat3Vec(R, pivot)
   const t = [0, 1, 2].map((i) => pivot[i] + (Number(translate[i]) || 0) - scale * Rp[i])
@@ -316,10 +412,22 @@ export function transformCloud(cloud, tf) {
   const n = vertexCount(cloud)
   const src = cloud.pos
   const pos = new Float64Array(n * 3)
-  const a00 = A[0][0], a01 = A[0][1], a02 = A[0][2], a10 = A[1][0], a11 = A[1][1], a12 = A[1][2]
-  const a20 = A[2][0], a21 = A[2][1], a22 = A[2][2], t0 = t[0], t1 = t[1], t2 = t[2]
+  const a00 = A[0][0],
+    a01 = A[0][1],
+    a02 = A[0][2],
+    a10 = A[1][0],
+    a11 = A[1][1],
+    a12 = A[1][2]
+  const a20 = A[2][0],
+    a21 = A[2][1],
+    a22 = A[2][2],
+    t0 = t[0],
+    t1 = t[1],
+    t2 = t[2]
   for (let i = 0; i < n; i++) {
-    const x = src[i * 3], y = src[i * 3 + 1], z = src[i * 3 + 2]
+    const x = src[i * 3],
+      y = src[i * 3 + 1],
+      z = src[i * 3 + 2]
     pos[i * 3] = a00 * x + a01 * y + a02 * z + t0
     pos[i * 3 + 1] = a10 * x + a11 * y + a12 * z + t1
     pos[i * 3 + 2] = a20 * x + a21 * y + a22 * z + t2
@@ -328,21 +436,33 @@ export function transformCloud(cloud, tf) {
   const out = { ...cloud, pos }
   if (cloud.nrm && cloud.nrm.length >= n * 3) {
     // A⁻ᵀ = cof(A)/det; only the direction matters, so cof(A)·sign(det).
-    const C = cof3(A), sg = det < 0 ? -1 : 1
-    const nrm = new Float32Array(n * 3), sn = cloud.nrm
+    const C = cof3(A),
+      sg = det < 0 ? -1 : 1
+    const nrm = new Float32Array(n * 3),
+      sn = cloud.nrm
     for (let i = 0; i < n; i++) {
-      const x = sn[i * 3], y = sn[i * 3 + 1], z = sn[i * 3 + 2]
+      const x = sn[i * 3],
+        y = sn[i * 3 + 1],
+        z = sn[i * 3 + 2]
       const nx = sg * (C[0][0] * x + C[0][1] * y + C[0][2] * z)
       const ny = sg * (C[1][0] * x + C[1][1] * y + C[1][2] * z)
       const nz = sg * (C[2][0] * x + C[2][1] * y + C[2][2] * z)
       const l = Math.sqrt(nx * nx + ny * ny + nz * nz)
-      if (l > 0) { nrm[i * 3] = nx / l; nrm[i * 3 + 1] = ny / l; nrm[i * 3 + 2] = nz / l }
+      if (l > 0) {
+        nrm[i * 3] = nx / l
+        nrm[i * 3 + 1] = ny / l
+        nrm[i * 3 + 2] = nz / l
+      }
     }
     out.nrm = nrm
   }
   if (cloud.idx && det < 0) {
     const idx = new Uint32Array(cloud.idx)
-    for (let f = 0; f + 2 < idx.length; f += 3) { const v = idx[f + 1]; idx[f + 1] = idx[f + 2]; idx[f + 2] = v }
+    for (let f = 0; f + 2 < idx.length; f += 3) {
+      const v = idx[f + 1]
+      idx[f + 1] = idx[f + 2]
+      idx[f + 2] = v
+    }
     out.idx = idx
   }
   return out
@@ -350,7 +470,8 @@ export function transformCloud(cloud, tf) {
 
 // ── Point-pair fit ───────────────────────────────────────────────────────────
 
-const finite3 = (v) => v != null && v.length >= 3 && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])
+const finite3 = (v) =>
+  v != null && v.length >= 3 && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])
 
 /**
  * Fit the transform mapping each `src` onto its `dst` (picked point pairs).
@@ -373,8 +494,14 @@ export function fitPointPairs(pairs, { scale = true } = {}) {
   })
   const w = pairs.map((p) => (Number.isFinite(p.weight) && p.weight > 0 ? p.weight : 1))
   const W = w.reduce((a, b) => a + b, 0)
-  const cs = [0, 0, 0], cd = [0, 0, 0]
-  pairs.forEach((p, k) => { for (let i = 0; i < 3; i++) { cs[i] += w[k] * p.src[i] / W; cd[i] += w[k] * p.dst[i] / W } })
+  const cs = [0, 0, 0],
+    cd = [0, 0, 0]
+  pairs.forEach((p, k) => {
+    for (let i = 0; i < 3; i++) {
+      cs[i] += (w[k] * p.src[i]) / W
+      cd[i] += (w[k] * p.dst[i]) / W
+    }
+  })
   const local = pairs.map((p, k) => ({
     src: [p.src[0] - cs[0], p.src[1] - cs[1], p.src[2] - cs[2]],
     dst: [p.dst[0] - cd[0], p.dst[1] - cd[1], p.dst[2] - cd[2]],
@@ -382,15 +509,24 @@ export function fitPointPairs(pairs, { scale = true } = {}) {
   }))
   const fit = fitSimilarity(local)
   if (!fit) {
-    throw new Error('The point pairs are degenerate: pick at least 3 points that do not lie on one line, in both clouds.')
+    throw new Error(
+      'The point pairs are degenerate: pick at least 3 points that do not lie on one line, in both clouds.',
+    )
   }
   const R = fit.R
-  let s = fit.scale, tl = fit.t
+  let s = fit.scale,
+    tl = fit.t
   if (!scale) {
     // Rigid: same rotation, scale 1, t = mean(dst') − R·mean(src') (both ≈ 0 here).
     s = 1
-    const ms = [0, 0, 0], md = [0, 0, 0]
-    local.forEach((p, k) => { for (let i = 0; i < 3; i++) { ms[i] += w[k] * p.src[i] / W; md[i] += w[k] * p.dst[i] / W } })
+    const ms = [0, 0, 0],
+      md = [0, 0, 0]
+    local.forEach((p, k) => {
+      for (let i = 0; i < 3; i++) {
+        ms[i] += (w[k] * p.src[i]) / W
+        md[i] += (w[k] * p.dst[i]) / W
+      }
+    })
     const Rms = mat3Vec(R, ms)
     tl = [md[0] - Rms[0], md[1] - Rms[1], md[2] - Rms[2]]
   }
@@ -416,33 +552,43 @@ export function fitPointPairs(pairs, { scale = true } = {}) {
 // Unit eigenvector of the largest eigenvalue of a symmetric 4×4 (cyclic Jacobi).
 function topEigen4(N) {
   const A = Float64Array.from(N)
-  const V = new Float64Array(16); V[0] = V[5] = V[10] = V[15] = 1
+  const V = new Float64Array(16)
+  V[0] = V[5] = V[10] = V[15] = 1
   for (let sweep = 0; sweep < 50; sweep++) {
-    let off = 0, diag = 0
+    let off = 0,
+      diag = 0
     for (let i = 0; i < 4; i++) {
       diag += A[i * 5] * A[i * 5]
       for (let j = i + 1; j < 4; j++) off += A[i * 4 + j] * A[i * 4 + j]
     }
     if (off === 0 || off <= 1e-32 * diag) break
-    for (let p = 0; p < 3; p++) for (let q = p + 1; q < 4; q++) {
-      const apq = A[p * 4 + q]
-      if (apq === 0) continue
-      const theta = (A[q * 5] - A[p * 5]) / (2 * apq)
-      const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1))
-      const c = 1 / Math.sqrt(t * t + 1), s = t * c
-      for (let k = 0; k < 4; k++) {
-        const akp = A[k * 4 + p], akq = A[k * 4 + q]
-        A[k * 4 + p] = c * akp - s * akq; A[k * 4 + q] = s * akp + c * akq
+    for (let p = 0; p < 3; p++)
+      for (let q = p + 1; q < 4; q++) {
+        const apq = A[p * 4 + q]
+        if (apq === 0) continue
+        const theta = (A[q * 5] - A[p * 5]) / (2 * apq)
+        const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1))
+        const c = 1 / Math.sqrt(t * t + 1),
+          s = t * c
+        for (let k = 0; k < 4; k++) {
+          const akp = A[k * 4 + p],
+            akq = A[k * 4 + q]
+          A[k * 4 + p] = c * akp - s * akq
+          A[k * 4 + q] = s * akp + c * akq
+        }
+        for (let k = 0; k < 4; k++) {
+          const apk = A[p * 4 + k],
+            aqk = A[q * 4 + k]
+          A[p * 4 + k] = c * apk - s * aqk
+          A[q * 4 + k] = s * apk + c * aqk
+        }
+        for (let k = 0; k < 4; k++) {
+          const vkp = V[k * 4 + p],
+            vkq = V[k * 4 + q]
+          V[k * 4 + p] = c * vkp - s * vkq
+          V[k * 4 + q] = s * vkp + c * vkq
+        }
       }
-      for (let k = 0; k < 4; k++) {
-        const apk = A[p * 4 + k], aqk = A[q * 4 + k]
-        A[p * 4 + k] = c * apk - s * aqk; A[q * 4 + k] = s * apk + c * aqk
-      }
-      for (let k = 0; k < 4; k++) {
-        const vkp = V[k * 4 + p], vkq = V[k * 4 + q]
-        V[k * 4 + p] = c * vkp - s * vkq; V[k * 4 + q] = s * vkp + c * vkq
-      }
-    }
   }
   let best = 0
   for (let i = 1; i < 4; i++) if (A[i * 5] > A[best * 5]) best = i
@@ -456,24 +602,63 @@ function topEigen4(N) {
  * @returns {{scale,R,t}|null}
  */
 function hornArrays(a, b, m, withScale) {
-  const ca = [0, 0, 0], cb = [0, 0, 0]
-  for (let k = 0; k < m; k++) for (let i = 0; i < 3; i++) { ca[i] += a[k * 3 + i]; cb[i] += b[k * 3 + i] }
-  for (let i = 0; i < 3; i++) { ca[i] /= m; cb[i] /= m }
-  let Sxx = 0, Sxy = 0, Sxz = 0, Syx = 0, Syy = 0, Syz = 0, Szx = 0, Szy = 0, Szz = 0, va = 0
+  const ca = [0, 0, 0],
+    cb = [0, 0, 0]
+  for (let k = 0; k < m; k++)
+    for (let i = 0; i < 3; i++) {
+      ca[i] += a[k * 3 + i]
+      cb[i] += b[k * 3 + i]
+    }
+  for (let i = 0; i < 3; i++) {
+    ca[i] /= m
+    cb[i] /= m
+  }
+  let Sxx = 0,
+    Sxy = 0,
+    Sxz = 0,
+    Syx = 0,
+    Syy = 0,
+    Syz = 0,
+    Szx = 0,
+    Szy = 0,
+    Szz = 0,
+    va = 0
   for (let k = 0; k < m; k++) {
-    const ax = a[k * 3] - ca[0], ay = a[k * 3 + 1] - ca[1], az = a[k * 3 + 2] - ca[2]
-    const bx = b[k * 3] - cb[0], by = b[k * 3 + 1] - cb[1], bz = b[k * 3 + 2] - cb[2]
-    Sxx += ax * bx; Sxy += ax * by; Sxz += ax * bz
-    Syx += ay * bx; Syy += ay * by; Syz += ay * bz
-    Szx += az * bx; Szy += az * by; Szz += az * bz
+    const ax = a[k * 3] - ca[0],
+      ay = a[k * 3 + 1] - ca[1],
+      az = a[k * 3 + 2] - ca[2]
+    const bx = b[k * 3] - cb[0],
+      by = b[k * 3 + 1] - cb[1],
+      bz = b[k * 3 + 2] - cb[2]
+    Sxx += ax * bx
+    Sxy += ax * by
+    Sxz += ax * bz
+    Syx += ay * bx
+    Syy += ay * by
+    Syz += ay * bz
+    Szx += az * bx
+    Szy += az * by
+    Szz += az * bz
     va += ax * ax + ay * ay + az * az
   }
   if (!(va > 0)) return null
   const q = topEigen4([
-    Sxx + Syy + Szz, Syz - Szy, Szx - Sxz, Sxy - Syx,
-    Syz - Szy, Sxx - Syy - Szz, Sxy + Syx, Szx + Sxz,
-    Szx - Sxz, Sxy + Syx, -Sxx + Syy - Szz, Syz + Szy,
-    Sxy - Syx, Szx + Sxz, Syz + Szy, -Sxx - Syy + Szz,
+    Sxx + Syy + Szz,
+    Syz - Szy,
+    Szx - Sxz,
+    Sxy - Syx,
+    Syz - Szy,
+    Sxx - Syy - Szz,
+    Sxy + Syx,
+    Szx + Sxz,
+    Szx - Sxz,
+    Sxy + Syx,
+    -Sxx + Syy - Szz,
+    Syz + Szy,
+    Sxy - Syx,
+    Szx + Sxz,
+    Syz + Szy,
+    -Sxx - Syy + Szz,
   ])
   if (!q) return null
   const [w, x, y, z] = q
@@ -485,7 +670,11 @@ function hornArrays(a, b, m, withScale) {
   let s = 1
   if (withScale) {
     // s = Σ b'·(R·a') / Σ|a'|² — the same estimator as fitSimilarity.
-    const M = [[Sxx, Sxy, Sxz], [Syx, Syy, Syz], [Szx, Szy, Szz]]
+    const M = [
+      [Sxx, Sxy, Sxz],
+      [Syx, Syy, Syz],
+      [Szx, Szy, Szz],
+    ]
     let num = 0
     for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) num += R[j][i] * M[i][j]
     s = num / va
@@ -532,17 +721,27 @@ function referenceGeometry(reference) {
   const isMesh = !!reference.idx
   const m = vertexCount(reference)
   const src = reference.pos
-  let cx = 0, cy = 0, cz = 0, valid = 0
+  let cx = 0,
+    cy = 0,
+    cz = 0,
+    valid = 0
   for (let i = 0; i < m; i++) {
-    const x = src[i * 3], y = src[i * 3 + 1], z = src[i * 3 + 2]
+    const x = src[i * 3],
+      y = src[i * 3 + 1],
+      z = src[i * 3 + 2]
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue
-    cx += x; cy += y; cz += z; valid++
+    cx += x
+    cy += y
+    cz += z
+    valid++
   }
   if (!valid) return null
   const c = [cx / valid, cy / valid, cz / valid]
   const pos = new Float64Array(m * 3)
   for (let i = 0; i < m; i++) {
-    pos[i * 3] = src[i * 3] - c[0]; pos[i * 3 + 1] = src[i * 3 + 1] - c[1]; pos[i * 3 + 2] = src[i * 3 + 2] - c[2]
+    pos[i * 3] = src[i * 3] - c[0]
+    pos[i * 3 + 1] = src[i * 3 + 1] - c[1]
+    pos[i * 3 + 2] = src[i * 3 + 2] - c[2]
   }
   if (isMesh) {
     // The closest-point search over the local-frame triangles; normals are per face.
@@ -554,9 +753,15 @@ function referenceGeometry(reference) {
   if (nrm) {
     unitN = new Float64Array(m * 3)
     for (let i = 0; i < m; i++) {
-      const x = nrm[i * 3], y = nrm[i * 3 + 1], z = nrm[i * 3 + 2]
+      const x = nrm[i * 3],
+        y = nrm[i * 3 + 1],
+        z = nrm[i * 3 + 2]
       const l = Math.sqrt(x * x + y * y + z * z)
-      if (l > 0 && Number.isFinite(l)) { unitN[i * 3] = x / l; unitN[i * 3 + 1] = y / l; unitN[i * 3 + 2] = z / l }
+      if (l > 0 && Number.isFinite(l)) {
+        unitN[i * 3] = x / l
+        unitN[i * 3 + 1] = y / l
+        unitN[i * 3 + 2] = z / l
+      }
     }
   }
   return { c, pos, nrm: unitN, count: m, isMesh }
@@ -598,8 +803,15 @@ function referenceGeometry(reference) {
 export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
   const log = (msg, level = 'info') => onLog?.(msg, level, 'Products')
   const {
-    maxIterations = 30, maxDistance, sampleCount = 50000, pointToPlane = true,
-    estimateScale = false, tolerance = 1e-6, initial = null, seed = 1, trim = 0.9,
+    maxIterations = 30,
+    maxDistance,
+    sampleCount = 50000,
+    pointToPlane = true,
+    estimateScale = false,
+    tolerance = 1e-6,
+    initial = null,
+    seed = 1,
+    trim = 0.9,
   } = opts
   if (!(maxDistance > 0)) throw new Error('ICP needs a positive maxDistance (the correspondence rejection radius).')
   const nSrc = vertexCount(source)
@@ -623,32 +835,45 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
   let m = 0
   for (let k = 0; k < pick.length; k++) {
     const i = pick[k] * 3
-    const x = source.pos[i] - c[0], y = source.pos[i + 1] - c[1], z = source.pos[i + 2] - c[2]
+    const x = source.pos[i] - c[0],
+      y = source.pos[i + 1] - c[1],
+      z = source.pos[i + 2] - c[2]
     if (!Number.isFinite(x + y + z)) continue
-    sp[m * 3] = x; sp[m * 3 + 1] = y; sp[m * 3 + 2] = z; m++
+    sp[m * 3] = x
+    sp[m * 3 + 1] = y
+    sp[m * 3 + 2] = z
+    m++
   }
   if (!m) throw new Error('ICP: the source has no finite points.')
 
   // Current transform in the local frame: q = s·R·p + t (p, q relative to c).
   const init = similarityOf(initial, 'initial transform')
-  let s = init.scale, R = init.R
+  let s = init.scale,
+    R = init.R
   const Rc = mat3Vec(R, c)
   let t = [0, 1, 2].map((i) => s * Rc[i] + init.t[i] - c[i])
 
-  log(`ICP: ${nSrc.toLocaleString()} source pts → sample ${m.toLocaleString()} (seed ${seed}) · ` +
-    `reference ${ref.isMesh ? `${ref.surface.nValid.toLocaleString()} mesh triangles (closest surface point)` : `${ref.count.toLocaleString()} pts`} · ${method} · ` +
-    `maxDistance ${maxDistance} · trim ${Math.round(trimFrac * 100)}% · scale ${estimateScale ? 'estimated' : 'fixed'} · ` +
-    `≤ ${maxIterations} iterations, tolerance ${tolerance}`)
+  log(
+    `ICP: ${nSrc.toLocaleString()} source pts → sample ${m.toLocaleString()} (seed ${seed}) · ` +
+      `reference ${ref.isMesh ? `${ref.surface.nValid.toLocaleString()} mesh triangles (closest surface point)` : `${ref.count.toLocaleString()} pts`} · ${method} · ` +
+      `maxDistance ${maxDistance} · trim ${Math.round(trimFrac * 100)}% · scale ${estimateScale ? 'estimated' : 'fixed'} · ` +
+      `≤ ${maxIterations} iterations, tolerance ${tolerance}`,
+  )
 
-  const q = new Float64Array(m * 3), prevQ = new Float64Array(m * 3)
-  const pairSrc = new Int32Array(m), pairD2 = new Float64Array(m)
+  const q = new Float64Array(m * 3),
+    prevQ = new Float64Array(m * 3)
+  const pairSrc = new Int32Array(m),
+    pairD2 = new Float64Array(m)
   // Each sample's current match: the reference point (cloud) or the closest point on
   // the surface (mesh), and its unit normal for point-to-plane.
-  const tp = new Float64Array(m * 3), tn = usePlane ? new Float64Array(m * 3) : null
-  const nnI = new Int32Array(1), nnD = new Float64Array(1)
+  const tp = new Float64Array(m * 3),
+    tn = usePlane ? new Float64Array(m * 3) : null
+  const nnI = new Int32Array(1),
+    nnD = new Float64Array(1)
   // Mesh: each sample's last triangle, tested first next time (a tight bound, still exact).
   const hint = ref.isMesh ? new Int32Array(m).fill(-1) : null
-  const cp = new Float64Array(3), fn = new Float64Array(3)
+  const cp = new Float64Array(3),
+    fn = new Float64Array(3)
   const maxD2 = maxDistance * maxDistance
   const minPairs = usePlane ? 6 + (estimateScale ? 1 : 0) : 3
   let radius = 0
@@ -656,25 +881,48 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
   // Transform the sample, find correspondences, trim. Returns the pair count kept.
   const evaluate = () => {
     let found = 0
-    const R0 = R[0], R1 = R[1], R2 = R[2]
+    const R0 = R[0],
+      R1 = R[1],
+      R2 = R[2]
     for (let k = 0; k < m; k++) {
-      const x = sp[k * 3], y = sp[k * 3 + 1], z = sp[k * 3 + 2]
+      const x = sp[k * 3],
+        y = sp[k * 3 + 1],
+        z = sp[k * 3 + 2]
       const qx = s * (R0[0] * x + R0[1] * y + R0[2] * z) + t[0]
       const qy = s * (R1[0] * x + R1[1] * y + R1[2] * z) + t[1]
       const qz = s * (R2[0] * x + R2[1] * y + R2[2] * z) + t[2]
-      q[k * 3] = qx; q[k * 3 + 1] = qy; q[k * 3 + 2] = qz
+      q[k * 3] = qx
+      q[k * 3 + 1] = qy
+      q[k * 3 + 2] = qz
       if (ref.isMesh) {
         const f = ref.surface.closest(qx, qy, qz, maxDistance, hint[k], cp)
         if (f < 0) continue
         hint[k] = f
-        tp[k * 3] = cp[0]; tp[k * 3 + 1] = cp[1]; tp[k * 3 + 2] = cp[2]
-        if (tn) { ref.surface.faceNormal(f, fn); tn[k * 3] = fn[0]; tn[k * 3 + 1] = fn[1]; tn[k * 3 + 2] = fn[2] }
-        pairSrc[found] = k; pairD2[found] = ref.surface.distance ** 2; found++
+        tp[k * 3] = cp[0]
+        tp[k * 3 + 1] = cp[1]
+        tp[k * 3 + 2] = cp[2]
+        if (tn) {
+          ref.surface.faceNormal(f, fn)
+          tn[k * 3] = fn[0]
+          tn[k * 3 + 1] = fn[1]
+          tn[k * 3 + 2] = fn[2]
+        }
+        pairSrc[found] = k
+        pairD2[found] = ref.surface.distance ** 2
+        found++
       } else if (knnQuery(index, qx, qy, qz, 1, nnI, nnD, -1, maxD2)) {
         const r = nnI[0] * 3
-        tp[k * 3] = ref.pos[r]; tp[k * 3 + 1] = ref.pos[r + 1]; tp[k * 3 + 2] = ref.pos[r + 2]
-        if (tn) { tn[k * 3] = ref.nrm[r]; tn[k * 3 + 1] = ref.nrm[r + 1]; tn[k * 3 + 2] = ref.nrm[r + 2] }
-        pairSrc[found] = k; pairD2[found] = nnD[0]; found++
+        tp[k * 3] = ref.pos[r]
+        tp[k * 3 + 1] = ref.pos[r + 1]
+        tp[k * 3 + 2] = ref.pos[r + 2]
+        if (tn) {
+          tn[k * 3] = ref.nrm[r]
+          tn[k * 3 + 1] = ref.nrm[r + 1]
+          tn[k * 3 + 2] = ref.nrm[r + 2]
+        }
+        pairSrc[found] = k
+        pairD2[found] = nnD[0]
+        found++
       }
     }
     let kept = found
@@ -684,7 +932,11 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
       cut = sorted[Math.max(0, Math.ceil(trimFrac * found) - 1)]
       kept = 0
       for (let j = 0; j < found; j++) {
-        if (pairD2[j] <= cut) { pairSrc[kept] = pairSrc[j]; pairD2[kept] = pairD2[j]; kept++ }
+        if (pairD2[j] <= cut) {
+          pairSrc[kept] = pairSrc[j]
+          pairD2[kept] = pairD2[j]
+          kept++
+        }
       }
     }
     let sse = 0
@@ -694,9 +946,17 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
 
   // Sample radius (convergence scale) at the initial pose.
   {
-    let mx = 0, my = 0, mz = 0
-    for (let k = 0; k < m; k++) { mx += sp[k * 3]; my += sp[k * 3 + 1]; mz += sp[k * 3 + 2] }
-    mx /= m; my /= m; mz /= m
+    let mx = 0,
+      my = 0,
+      mz = 0
+    for (let k = 0; k < m; k++) {
+      mx += sp[k * 3]
+      my += sp[k * 3 + 1]
+      mz += sp[k * 3 + 2]
+    }
+    mx /= m
+    my /= m
+    mz /= m
     let r2 = 0
     for (let k = 0; k < m; k++) r2 += (sp[k * 3] - mx) ** 2 + (sp[k * 3 + 1] - my) ** 2 + (sp[k * 3 + 2] - mz) ** 2
     radius = s * Math.sqrt(r2 / m) || 1
@@ -704,16 +964,24 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
   const tol = tolerance * radius
 
   const history = []
-  let iterations = 0, converged = false
+  let iterations = 0,
+    converged = false
   let ev = evaluate()
   history.push({ rms: ev.rms, inliers: ev.inliers })
   if (ev.kept < minPairs) {
-    throw new Error(`ICP: only ${ev.inliers} of ${m} sampled source points lie within maxDistance (${maxDistance}) ` +
-      'of the reference — increase maxDistance or start from a closer initial alignment.')
+    throw new Error(
+      `ICP: only ${ev.inliers} of ${m} sampled source points lie within maxDistance (${maxDistance}) ` +
+        'of the reference — increase maxDistance or start from a closer initial alignment.',
+    )
   }
-  log(`ICP iter 0: rms ${ev.rms.toPrecision(4)}, ${ev.inliers.toLocaleString()} in range (${(100 * ev.inliers / m).toFixed(1)}%)`, 'debug')
+  log(
+    `ICP iter 0: rms ${ev.rms.toPrecision(4)}, ${ev.inliers.toLocaleString()} in range (${((100 * ev.inliers) / m).toFixed(1)}%)`,
+    'debug',
+  )
 
-  const H = new Float64Array(49), g = new Float64Array(7), row = new Float64Array(7)
+  const H = new Float64Array(49),
+    g = new Float64Array(7),
+    row = new Float64Array(7)
   while (iterations < maxIterations) {
     // ── Solve one step from the kept pairs ──
     let next = null
@@ -721,18 +989,36 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
       const dim = estimateScale ? 7 : 6
       // Linearise about the correspondence centroid (decouples rotation from
       // translation): q' = cq + e^σ·Rδ·(q − cq) + tδ, Rδ ≈ I + [ω]×.
-      let cx = 0, cy = 0, cz = 0
-      for (let j = 0; j < ev.kept; j++) { const k = pairSrc[j] * 3; cx += q[k]; cy += q[k + 1]; cz += q[k + 2] }
-      cx /= ev.kept; cy /= ev.kept; cz /= ev.kept
-      H.fill(0); g.fill(0)
+      let cx = 0,
+        cy = 0,
+        cz = 0
       for (let j = 0; j < ev.kept; j++) {
         const k = pairSrc[j] * 3
-        const nx = tn[k], ny = tn[k + 1], nz = tn[k + 2]
+        cx += q[k]
+        cy += q[k + 1]
+        cz += q[k + 2]
+      }
+      cx /= ev.kept
+      cy /= ev.kept
+      cz /= ev.kept
+      H.fill(0)
+      g.fill(0)
+      for (let j = 0; j < ev.kept; j++) {
+        const k = pairSrc[j] * 3
+        const nx = tn[k],
+          ny = tn[k + 1],
+          nz = tn[k + 2]
         if (nx === 0 && ny === 0 && nz === 0) continue
-        const ux = q[k] - cx, uy = q[k + 1] - cy, uz = q[k + 2] - cz
+        const ux = q[k] - cx,
+          uy = q[k + 1] - cy,
+          uz = q[k + 2] - cz
         // residual(δ) = (q − p)·n + ω·(u × n) + tδ·n + σ·(u·n)
-        row[0] = uy * nz - uz * ny; row[1] = uz * nx - ux * nz; row[2] = ux * ny - uy * nx
-        row[3] = nx; row[4] = ny; row[5] = nz
+        row[0] = uy * nz - uz * ny
+        row[1] = uz * nx - ux * nz
+        row[2] = ux * ny - uy * nx
+        row[3] = nx
+        row[4] = ny
+        row[5] = nz
         if (dim === 7) row[6] = ux * nx + uy * ny + uz * nz
         const r0 = (q[k] - tp[k]) * nx + (q[k + 1] - tp[k + 1]) * ny + (q[k + 2] - tp[k + 2]) * nz
         for (let a = 0; a < dim; a++) {
@@ -762,11 +1048,16 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
       }
     } else {
       // Full Horn re-solve from the ORIGINAL sample points to their matches.
-      const a = new Float64Array(ev.kept * 3), b = new Float64Array(ev.kept * 3)
+      const a = new Float64Array(ev.kept * 3),
+        b = new Float64Array(ev.kept * 3)
       for (let j = 0; j < ev.kept; j++) {
         const k = pairSrc[j] * 3
-        a[j * 3] = sp[k]; a[j * 3 + 1] = sp[k + 1]; a[j * 3 + 2] = sp[k + 2]
-        b[j * 3] = tp[k]; b[j * 3 + 1] = tp[k + 1]; b[j * 3 + 2] = tp[k + 2]
+        a[j * 3] = sp[k]
+        a[j * 3 + 1] = sp[k + 1]
+        a[j * 3 + 2] = sp[k + 2]
+        b[j * 3] = tp[k]
+        b[j * 3 + 1] = tp[k + 1]
+        b[j * 3 + 2] = tp[k + 2]
       }
       const fit = hornArrays(a, b, ev.kept, estimateScale)
       if (fit) next = { s: fit.scale, R: fit.R, t: fit.t }
@@ -775,42 +1066,65 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
       log(`ICP: the ${method} step was singular at iteration ${iterations + 1}; stopping`, 'warn')
       break
     }
-    s = next.s; R = next.R; t = next.t
+    s = next.s
+    R = next.R
+    t = next.t
     iterations++
     prevQ.set(q)
     const prevRms = ev.rms
     ev = evaluate()
     history.push({ rms: ev.rms, inliers: ev.inliers })
     let disp = 0
-    for (let k = 0; k < m * 3; k++) { const d = q[k] - prevQ[k]; disp += d * d }
+    for (let k = 0; k < m * 3; k++) {
+      const d = q[k] - prevQ[k]
+      disp += d * d
+    }
     disp = Math.sqrt(disp / m)
-    log(`ICP iter ${iterations}: rms ${ev.rms.toPrecision(4)}, ${ev.inliers.toLocaleString()} in range, ` +
-      `moved ${disp.toPrecision(3)}`, 'debug')
+    log(
+      `ICP iter ${iterations}: rms ${ev.rms.toPrecision(4)}, ${ev.inliers.toLocaleString()} in range, ` +
+        `moved ${disp.toPrecision(3)}`,
+      'debug',
+    )
     onProgress?.(iterations / (maxIterations + 1))
     if (ev.kept < minPairs) {
       log(`ICP: only ${ev.kept} correspondences left within maxDistance; stopping`, 'warn')
       break
     }
-    if (disp < tol && Math.abs(ev.rms - prevRms) < tol) { converged = true; break }
+    if (disp < tol && Math.abs(ev.rms - prevRms) < tol) {
+      converged = true
+      break
+    }
   }
 
   // Back to world: p' = s·R·(p − c) + t + c  ⇒  t_world = t + c − s·R·c.
   const Rcw = mat3Vec(R, c)
   const transform = { scale: s, R, t: [0, 1, 2].map((i) => t[i] + c[i] - s * Rcw[i]) }
   const result = {
-    transform, rms: ev.rms, inlierFraction: ev.inliers / m, iterations, converged, history,
-    method, sampleCount: m, pivot: c.slice(),
+    transform,
+    rms: ev.rms,
+    inlierFraction: ev.inliers / m,
+    iterations,
+    converged,
+    history,
+    method,
+    sampleCount: m,
+    pivot: c.slice(),
   }
   onProgress?.(1)
-  log(`ICP: ${converged ? 'converged' : 'stopped'} after ${iterations} iteration${iterations === 1 ? '' : 's'} in ` +
-    `${((Date.now() - t0) / 1000).toFixed(1)} s · ${alignmentReport(result).slice(0, 3).join(' · ')}`,
-  converged ? 'info' : 'warn')
+  log(
+    `ICP: ${converged ? 'converged' : 'stopped'} after ${iterations} iteration${iterations === 1 ? '' : 's'} in ` +
+      `${((Date.now() - t0) / 1000).toFixed(1)} s · ${alignmentReport(result).slice(0, 3).join(' · ')}`,
+    converged ? 'info' : 'warn',
+  )
   return result
 }
 
 // ── Report ───────────────────────────────────────────────────────────────────
 
-const fmt = (v) => (Number.isFinite(v) ? (Math.abs(v) >= 1e4 || (Math.abs(v) < 1e-3 && v !== 0) ? v.toExponential(3) : +v.toPrecision(4)).toString() : '—')
+const fmt = (v) =>
+  Number.isFinite(v)
+    ? (Math.abs(v) >= 1e4 || (Math.abs(v) < 1e-3 && v !== 0) ? v.toExponential(3) : +v.toPrecision(4)).toString()
+    : '—'
 
 /**
  * Short human-readable summary of an `icpAlign` or `fitPointPairs` result.
@@ -824,28 +1138,38 @@ const fmt = (v) => (Number.isFinite(v) ? (Math.abs(v) >= 1e4 || (Math.abs(v) < 1
 export function alignmentReport(result, { unit = 'units' } = {}) {
   const lines = []
   const tf = result.transform
-  const inl = result.inlierFraction != null
-    ? ` over ${(100 * result.inlierFraction).toFixed(1)}% of the sample in range`
-    : (result.count != null ? ` over ${result.count} pairs` : '')
+  const inl =
+    result.inlierFraction != null
+      ? ` over ${(100 * result.inlierFraction).toFixed(1)}% of the sample in range`
+      : result.count != null
+        ? ` over ${result.count} pairs`
+        : ''
   lines.push(`RMS ${fmt(result.rms)} ${unit}${inl}`)
   if (tf?.R) {
-    lines.push(`rotation ${(rotationAngle(tf.R) * 180 / Math.PI).toFixed(4)}°`)
+    lines.push(`rotation ${((rotationAngle(tf.R) * 180) / Math.PI).toFixed(4)}°`)
     let shift
     if (result.pivot) {
-      const p = result.pivot, q = applyTransform(tf, p)
+      const p = result.pivot,
+        q = applyTransform(tf, p)
       shift = [q[0] - p[0], q[1] - p[1], q[2] - p[2]]
     } else shift = tf.t
-    lines.push(`shift ${fmt(Math.hypot(shift[0], shift[1], shift[2]))} ${unit} ` +
-      `(${shift.map(fmt).join(', ')})${result.pivot ? ' at the centroid' : ''}`)
+    lines.push(
+      `shift ${fmt(Math.hypot(shift[0], shift[1], shift[2]))} ${unit} ` +
+        `(${shift.map(fmt).join(', ')})${result.pivot ? ' at the centroid' : ''}`,
+    )
     lines.push(`scale ${(tf.scale ?? 1).toFixed(6)}`)
   }
   if (result.iterations != null) {
-    lines.push(`${result.method ?? 'ICP'}: ${result.converged ? 'converged' : 'not converged'} after ` +
-      `${result.iterations} iteration${result.iterations === 1 ? '' : 's'}`)
+    lines.push(
+      `${result.method ?? 'ICP'}: ${result.converged ? 'converged' : 'not converged'} after ` +
+        `${result.iterations} iteration${result.iterations === 1 ? '' : 's'}`,
+    )
   }
   if (Array.isArray(result.residuals) && result.residuals.length) {
     let worst = 0
-    result.residuals.forEach((r, i) => { if (r > result.residuals[worst]) worst = i })
+    result.residuals.forEach((r, i) => {
+      if (r > result.residuals[worst]) worst = i
+    })
     lines.push(`largest pair residual ${fmt(result.residuals[worst])} ${unit} (pair ${worst + 1})`)
   }
   return lines

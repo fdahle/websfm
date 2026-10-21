@@ -3,7 +3,9 @@ import { createGeneration } from './generation.js'
 
 const deferred = () => {
   let resolve
-  const promise = new Promise((r) => { resolve = r })
+  const promise = new Promise((r) => {
+    resolve = r
+  })
   return { promise, resolve }
 }
 
@@ -35,10 +37,12 @@ describe('createGeneration', () => {
 
   it('overlapping builds create one map: the newest', async () => {
     const { created, build } = harness()
-    const first = deferred(), second = deferred()
+    const first = deferred(),
+      second = deferred()
     const a = build('crs A', first.promise)
     const b = build('crs B', second.promise)
-    second.resolve(); first.resolve()
+    second.resolve()
+    first.resolve()
     await Promise.all([a, b])
     expect(created).toEqual(['crs B'])
   })

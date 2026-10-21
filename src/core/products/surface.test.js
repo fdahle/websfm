@@ -61,7 +61,8 @@ describe('meshSurface', () => {
   })
 
   it('keeps the higher surface where two triangles overlap (DSM convention)', () => {
-    const low = flatQuad(2), high = flatQuad(7)
+    const low = flatQuad(2),
+      high = flatQuad(7)
     const mesh = {
       pos: new Float32Array([...low.pos, ...high.pos]),
       idx: new Uint32Array([...low.idx, ...[...high.idx].map((i) => i + 4)]),
@@ -116,7 +117,8 @@ describe('fitPlane', () => {
     const pts = []
     for (let i = 0; i < 20; i++) {
       for (let j = 0; j < 20; j++) {
-        const x = 500000 + i, y = 7000000 + j
+        const x = 500000 + i,
+          y = 7000000 + j
         pts.push({ x, y, z: f(x, y) })
       }
     }
@@ -129,7 +131,7 @@ describe('fitPlane', () => {
   it('rejects blunders when robust (and is dragged by them when not)', () => {
     const pts = []
     for (let x = 0; x < 12; x++) for (let y = 0; y < 12; y++) pts.push({ x, y, z: 0 })
-    for (let i = 0; i < 12; i++) pts.push({ x: 11, y: i, z: 400 })  // a wall at the edge
+    for (let i = 0; i < 12; i++) pts.push({ x: 11, y: i, z: 400 }) // a wall at the edge
     const robust = fitPlane(pts, { robust: true })
     const plain = fitPlane(pts, { robust: false })
     expect(robust.dropped).toBeGreaterThan(0)
@@ -138,7 +140,11 @@ describe('fitPlane', () => {
   })
 
   it('falls back to a horizontal plane on collinear support', () => {
-    const pts = [{ x: 0, y: 0, z: 1 }, { x: 1, y: 0, z: 3 }, { x: 2, y: 0, z: 5 }]
+    const pts = [
+      { x: 0, y: 0, z: 1 },
+      { x: 1, y: 0, z: 3 },
+      { x: 2, y: 0, z: 5 },
+    ]
     const p = fitPlane(pts, { robust: false })
     // y is unconstrained, so no gradient may be invented in either axis.
     expect(Number.isFinite(p.a)).toBe(true)
@@ -147,7 +153,12 @@ describe('fitPlane', () => {
   })
 
   it('needs at least three points', () => {
-    expect(fitPlane([{ x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 1 }])).toBeNull()
+    expect(
+      fitPlane([
+        { x: 0, y: 0, z: 0 },
+        { x: 1, y: 1, z: 1 },
+      ]),
+    ).toBeNull()
   })
 })
 
@@ -168,10 +179,11 @@ describe('planeSurface', () => {
 })
 
 describe('resampleSurface', () => {
-  const src = () => planeSurface(
-    Array.from({ length: 100 }, (_, i) => ({ x: i % 10, y: Math.floor(i / 10), z: 0.5 * (i % 10) + 1 })),
-    { gsd: 1 },
-  )
+  const src = () =>
+    planeSurface(
+      Array.from({ length: 100 }, (_, i) => ({ x: i % 10, y: Math.floor(i / 10), z: 0.5 * (i % 10) + 1 })),
+      { gsd: 1 },
+    )
 
   it('is a no-op at the same cell size', () => {
     const g = src()
@@ -202,7 +214,10 @@ describe('resampleSurface', () => {
     const g = src()
     for (let row = 0; row < g.height; row++) {
       for (let col = 0; col < g.width; col++) {
-        if (col >= g.width / 2) { g.data[row * g.width + col] = NaN; g.mask[row * g.width + col] = 0 }
+        if (col >= g.width / 2) {
+          g.data[row * g.width + col] = NaN
+          g.mask[row * g.width + col] = 0
+        }
       }
     }
     const fine = resampleSurface(g, 0.5)

@@ -1,5 +1,12 @@
 import { attributeBuffers } from '../../core/io/cloudAttributes.js'
-import { cropCloud, filterCloud, mergeClouds, maskCloud, classifySelection, cloudCount } from '../../core/products/cloudEdit.js'
+import {
+  cropCloud,
+  filterCloud,
+  mergeClouds,
+  maskCloud,
+  classifySelection,
+  cloudCount,
+} from '../../core/products/cloudEdit.js'
 import { cleanMesh, taubinSmooth, cropMesh, sampleMesh } from '../../core/products/meshEdit.js'
 import { sectionCloud } from '../../core/products/cloudSection.js'
 import { estimateNormals } from '../../core/products/cloudNormals.js'
@@ -39,26 +46,34 @@ export function makeCloudOps() {
 
   // A texture's JPEG pages ({ data, pages }) → [{ width, height, data: RGBA }].
   async function decodePages(texture) {
-    return Promise.all(texture.pages.map(async (p) => {
-      const bmp = await createImageBitmap(new Blob([texture.data.subarray(p.offset, p.offset + p.length)], { type: p.type }))
-      const canvas = new OffscreenCanvas(bmp.width, bmp.height)
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })
-      ctx.drawImage(bmp, 0, 0)
-      bmp.close()
-      return { width: canvas.width, height: canvas.height, data: ctx.getImageData(0, 0, canvas.width, canvas.height).data }
-    }))
+    return Promise.all(
+      texture.pages.map(async (p) => {
+        const bmp = await createImageBitmap(
+          new Blob([texture.data.subarray(p.offset, p.offset + p.length)], { type: p.type }),
+        )
+        const canvas = new OffscreenCanvas(bmp.width, bmp.height)
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        ctx.drawImage(bmp, 0, 0)
+        bmp.close()
+        return {
+          width: canvas.width,
+          height: canvas.height,
+          data: ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+        }
+      }),
+    )
   }
 
   // One entry per mode: (clouds, settings, log, progress) → { out, extra? }.
   // `extra` carries small non-buffer results (a report) back to the store.
   const MODES = {
-    crop:   ([c], s, log) => ({ out: cropCloud(c, s, log) }),
-    filter: ([c], s, log) => ({ out: filterCloud(c, s, log) }),
-    merge:  (cs, s, log) => ({ out: mergeClouds(cs, s, log) }),
-    mask:   ([c], s, log) => ({ out: maskCloud(c, s, log) }),
-    classify: ([c], s, log) => ({ out: classifySelection(c, s, log) }),
+    'crop': ([c], s, log) => ({ out: cropCloud(c, s, log) }),
+    'filter': ([c], s, log) => ({ out: filterCloud(c, s, log) }),
+    'merge': (cs, s, log) => ({ out: mergeClouds(cs, s, log) }),
+    'mask': ([c], s, log) => ({ out: maskCloud(c, s, log) }),
+    'classify': ([c], s, log) => ({ out: classifySelection(c, s, log) }),
     // The same points with (re-)estimated normals; colour and attributes pass through.
-    normals: ([c], s, log, progress) => {
+    'normals': ([c], s, log, progress) => {
       const { nrm } = estimateNormals(c, s, log, (f) => progress(f, 'Estimating normals…'))
       return { out: { count: c.count, pos: c.pos, col: c.col, nrm, attributes: c.attributes } }
     },
@@ -68,71 +83,107 @@ export function makeCloudOps() {
     // z is up, an imported survey cloud); `cameras` lets a local spec derive up.
     'classify-ground': ([c], s, log, progress) => {
       const frame = s.frame
-        ? frameFromSpec(s.frame, (s.cameras ?? []).map((cam) => ({ R: cam.R, t: cam.t })), pointView(c))
+        ? frameFromSpec(
+            s.frame,
+            (s.cameras ?? []).map((cam) => ({ R: cam.R, t: cam.t })),
+            pointView(c),
+          )
         : null
-      if (c.attributes?.classification) log('Ground filter: replacing the cloud\'s existing classification', 'warn', 'Products')
+      if (c.attributes?.classification)
+        log("Ground filter: replacing the cloud's existing classification", 'warn', 'Products')
       const result = classifyCloudGround(c, frame, {
-        ...s, budgetBytes: s.memBudgetBytes > 0 ? s.memBudgetBytes : Infinity,
+        ...s,
+        budgetBytes: s.memBudgetBytes > 0 ? s.memBudgetBytes : Infinity,
         onLog: (m) => log(m, 'info', 'Products'),
         onProgress: (f) => progress(f, 'Simulating the cloth…'),
       })
       if (!result) throw new Error('no point lies inside the classified extent')
       return {
-        out: { count: c.count, pos: c.pos, col: c.col, nrm: c.nrm ?? null,
-          attributes: { ...(c.attributes || {}), classification: result.classes } },
+        out: {
+          count: c.count,
+          pos: c.pos,
+          col: c.col,
+          nrm: c.nrm ?? null,
+          attributes: { ...(c.attributes || {}), classification: result.classes },
+        },
         extra: result.counts,
       }
     },
     // Move/rotate/scale by a transform ({ scale, R, t }) or a 4×4 `matrix`. The
     // only keys kept are the cloud's own buffers (transformCloud copies every field).
-    transform: ([c], s) => {
+    'transform': ([c], s) => {
       const t = transformCloud(c, s.matrix ?? s.transform)
       return { out: { count: c.count, pos: t.pos, col: c.col, nrm: t.nrm ?? null, attributes: c.attributes } }
     },
     // ICP: [source, reference]. The source moves; the reference is only read.
-    icp: ([src, ref], s, log, progress) => {
-      const maxDistance = s.maxDistance > 0 ? s.maxDistance
-        : 10 * (estimateSpacing(cloudBounds(src), src.count) || 1)
-      if (!(s.maxDistance > 0)) log(`ICP: correspondence radius auto = ${maxDistance.toPrecision(3)} (10× the source spacing)`, 'info', 'Products')
+    'icp': ([src, ref], s, log, progress) => {
+      const maxDistance = s.maxDistance > 0 ? s.maxDistance : 10 * (estimateSpacing(cloudBounds(src), src.count) || 1)
+      if (!(s.maxDistance > 0))
+        log(
+          `ICP: correspondence radius auto = ${maxDistance.toPrecision(3)} (10× the source spacing)`,
+          'info',
+          'Products',
+        )
       const reference = ref.kind === 'mesh' ? { ...ref, count: ref.count } : ref
       const result = icpAlign(src, reference, { ...s, maxDistance }, log, (f) => progress(f, 'Aligning…'))
-      for (const line of alignmentReport(result, { unit: s.unitLabel || 'units' })) log(`ICP: ${line}`, 'info', 'Products')
+      for (const line of alignmentReport(result, { unit: s.unitLabel || 'units' }))
+        log(`ICP: ${line}`, 'info', 'Products')
       if (!result.converged) log('ICP: did not converge — the result may be only partly aligned', 'warn', 'Products')
       const t = transformCloud(src, result.transform)
       return {
         out: { count: src.count, pos: t.pos, col: src.col, nrm: t.nrm ?? null, attributes: src.attributes },
-        extra: { rms: result.rms, inlierFraction: result.inlierFraction, iterations: result.iterations, converged: result.converged },
+        extra: {
+          rms: result.rms,
+          inlierFraction: result.inlierFraction,
+          iterations: result.iterations,
+          converged: result.converged,
+        },
       }
     },
     // Distance: [source, reference] → the source with a per-point `distance`
     // attribute (NaN beyond the cutoff), coloured by it in the viewer.
-    distance: ([src, ref], s, log, progress) => {
-      const opts = { maxDistance: s.maxDistance > 0 ? s.maxDistance : Infinity, signed: s.signed ? (ref.kind === 'mesh' ? true : 'auto') : false }
-      const { distance, stats } = ref.kind === 'mesh'
-        ? cloudToMeshDistance(src, ref, opts, log, (f) => progress(f, 'Measuring distances…'))
-        : cloudToCloudDistance(src, ref, opts, log, (f) => progress(f, 'Measuring distances…'))
+    'distance': ([src, ref], s, log, progress) => {
+      const opts = {
+        maxDistance: s.maxDistance > 0 ? s.maxDistance : Infinity,
+        signed: s.signed ? (ref.kind === 'mesh' ? true : 'auto') : false,
+      }
+      const { distance, stats } =
+        ref.kind === 'mesh'
+          ? cloudToMeshDistance(src, ref, opts, log, (f) => progress(f, 'Measuring distances…'))
+          : cloudToCloudDistance(src, ref, opts, log, (f) => progress(f, 'Measuring distances…'))
       const fmt = (v) => (Number.isFinite(v) ? v.toPrecision(4) : '—')
-      log(`Distance: mean ${fmt(stats.mean)}, median ${fmt(stats.median)}, RMS ${fmt(stats.rms)}, `
-        + `95% |d| ≤ ${fmt(stats.p95Abs)} (${stats.validCount.toLocaleString()} of ${src.count.toLocaleString()} points)`, 'info', 'Products')
+      log(
+        `Distance: mean ${fmt(stats.mean)}, median ${fmt(stats.median)}, RMS ${fmt(stats.rms)}, ` +
+          `95% |d| ≤ ${fmt(stats.p95Abs)} (${stats.validCount.toLocaleString()} of ${src.count.toLocaleString()} points)`,
+        'info',
+        'Products',
+      )
       return {
-        out: { count: src.count, pos: src.pos, col: src.col, nrm: src.nrm ?? null,
-          attributes: { ...(src.attributes || {}), distance } },
+        out: {
+          count: src.count,
+          pos: src.pos,
+          col: src.col,
+          nrm: src.nrm ?? null,
+          attributes: { ...(src.attributes || {}), distance },
+        },
         extra: stats,
       }
     },
-    section: ([c], s, log) => {
+    'section': ([c], s, log) => {
       const { cloud } = sectionCloud(c, s, log)
       return { out: cloud }
     },
-    'mesh-clean':  ([m], s, log) => ({ out: cleanMesh(m, s, log).mesh }),
+    'mesh-clean': ([m], s, log) => ({ out: cleanMesh(m, s, log).mesh }),
     'mesh-smooth': ([m], s, log) => ({ out: taubinSmooth(m, s, log) }),
-    'mesh-crop':   ([m], s, log) => ({ out: cropMesh(m, s, log) }),
+    'mesh-crop': ([m], s, log) => ({ out: cropMesh(m, s, log) }),
     'mesh-decimate': ([m], s, log) => {
       const { mesh, stats } = decimateMesh(m, s, log)
       return { out: mesh, extra: stats }
     },
     // A textured mesh samples its colour from the atlas: decode the JPEG pages first.
-    'mesh-sample': async ([m], s, log) => ({ out: sampleMesh(m, { ...s, texture: m.texture ? { pages: await decodePages(m.texture) } : null }, log) }),
+    'mesh-sample': async ([m], s, log) => ({
+      out: sampleMesh(m, { ...s, texture: m.texture ? { pages: await decodePages(m.texture) } : null }, log),
+    }),
   }
 
   // input: { mode, clouds: [{ id, kind, count, pos, col, nrm?, idx?, nVerts?, attributes? }],
@@ -147,7 +198,9 @@ export function makeCloudOps() {
     const log = (m, l, c) => emit('log', [m, l, c])
     const progress = (f, label) => emit('progress', [f, 1, label, f])
     const transfer = []
-    let out = null, error = null, extra = null
+    let out = null,
+      error = null,
+      extra = null
     try {
       if (!clouds.length) throw new Error('no source cloud')
       const run = MODES[mode]
@@ -159,9 +212,12 @@ export function makeCloudOps() {
       const unit = isMesh ? 'triangles' : 'points'
       const size = isMesh ? out.count : cloudCount(out)
       const before = clouds[0].kind === 'mesh' ? clouds[0].count : clouds.reduce((s, c) => s + cloudCount(c), 0)
-      log(`${mode[0].toUpperCase()}${mode.slice(1)}: ${size.toLocaleString()} ${unit} `
-        + `from ${before.toLocaleString()} in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
-      size ? 'success' : 'warn', 'Products')
+      log(
+        `${mode[0].toUpperCase()}${mode.slice(1)}: ${size.toLocaleString()} ${unit} ` +
+          `from ${before.toLocaleString()} in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+        size ? 'success' : 'warn',
+        'Products',
+      )
       emit('progress', [1, 1, 'Done'])
       outward(out, transfer)
     } catch (err) {

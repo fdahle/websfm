@@ -35,10 +35,18 @@ export class SparsePoints {
     this._cameraIndex = null
   }
 
-  get length() { return this.vcount.length }
-  get count() { return this.vcount.length }
-  get viewTotal() { return this.vstart[this.vcount.length] }
-  get hasColor() { return !!this.col }
+  get length() {
+    return this.vcount.length
+  }
+  get count() {
+    return this.vcount.length
+  }
+  get viewTotal() {
+    return this.vstart[this.vcount.length]
+  }
+  get hasColor() {
+    return !!this.col
+  }
 
   /** Whether any view carries a BA-frame pixel (a reconstructed cloud; not a legacy one). */
   get hasPixels() {
@@ -48,12 +56,22 @@ export class SparsePoints {
     return false
   }
 
-  x(i) { return this.pos[3 * i] }
-  y(i) { return this.pos[3 * i + 1] }
-  z(i) { return this.pos[3 * i + 2] }
-  xyz(i) { return [this.pos[3 * i], this.pos[3 * i + 1], this.pos[3 * i + 2]] }
+  x(i) {
+    return this.pos[3 * i]
+  }
+  y(i) {
+    return this.pos[3 * i + 1]
+  }
+  z(i) {
+    return this.pos[3 * i + 2]
+  }
+  xyz(i) {
+    return [this.pos[3 * i], this.pos[3 * i + 1], this.pos[3 * i + 2]]
+  }
 
-  hasColorAt(i) { return !!this.col && (!this.colorMask || this.colorMask[i] === 1) }
+  hasColorAt(i) {
+    return !!this.col && (!this.colorMask || this.colorMask[i] === 1)
+  }
   /** [r, g, b], or null when the point has no colour. Allocates: not for hot loops. */
   colorAt(i) {
     if (!this.hasColorAt(i)) return null
@@ -61,7 +79,9 @@ export class SparsePoints {
     return [c[3 * i], c[3 * i + 1], c[3 * i + 2]]
   }
 
-  viewCount(i) { return this.vcount[i] }
+  viewCount(i) {
+    return this.vcount[i]
+  }
   /** Views carrying a finite pixel. */
   pixelCount(i) {
     const { vx } = this
@@ -94,7 +114,10 @@ export class SparsePoints {
     for (let k = this.vstart[i], end = this.vstart[i + 1]; k < end; k++) if (viewUuids[vcam[k]] === uuid) return k
     return -1
   }
-  kpOf(i, uuid) { const k = this.slotOf(i, uuid); return k < 0 ? undefined : this.vkp[k] }
+  kpOf(i, uuid) {
+    const k = this.slotOf(i, uuid)
+    return k < 0 ? undefined : this.vkp[k]
+  }
   pixelOf(i, uuid) {
     const k = this.slotOf(i, uuid)
     return k >= 0 && this.vx && Number.isFinite(this.vx[k]) ? [this.vx[k], this.vy[k]] : undefined
@@ -103,14 +126,21 @@ export class SparsePoints {
   /** Per camera, the views that name it: CSR over camera indices, built once. */
   cameraIndex() {
     if (this._cameraIndex) return this._cameraIndex
-    const nCam = this.viewUuids.length, total = this.viewTotal, { vcam, vstart } = this
+    const nCam = this.viewUuids.length,
+      total = this.viewTotal,
+      { vcam, vstart } = this
     const start = new Uint32Array(nCam + 1)
     for (let k = 0; k < total; k++) start[vcam[k] + 1]++
     for (let c = 0; c < nCam; c++) start[c + 1] += start[c]
     const fill = start.slice(0, nCam)
-    const point = new Uint32Array(total), slot = new Uint32Array(total)
+    const point = new Uint32Array(total),
+      slot = new Uint32Array(total)
     for (let i = 0, n = this.length; i < n; i++) {
-      for (let k = vstart[i]; k < vstart[i + 1]; k++) { const at = fill[vcam[k]]++; point[at] = i; slot[at] = k }
+      for (let k = vstart[i]; k < vstart[i + 1]; k++) {
+        const at = fill[vcam[k]]++
+        point[at] = i
+        slot[at] = k
+      }
     }
     const byUuid = new Map(this.viewUuids.map((u, c) => [u, c]))
     this._cameraIndex = { start, point, slot, byUuid }
@@ -127,9 +157,12 @@ export class SparsePoints {
 
   /** Reiterable xyz, one scratch record per iterator (pointView.ts's contract). */
   *[Symbol.iterator]() {
-    const p = { x: 0, y: 0, z: 0 }, { pos } = this
+    const p = { x: 0, y: 0, z: 0 },
+      { pos } = this
     for (let i = 0, n = this.length; i < n; i++) {
-      p.x = pos[3 * i]; p.y = pos[3 * i + 1]; p.z = pos[3 * i + 2]
+      p.x = pos[3 * i]
+      p.y = pos[3 * i + 1]
+      p.z = pos[3 * i + 2]
       yield p
     }
   }
@@ -146,22 +179,40 @@ export class SparsePoints {
     const colorMask = this.col && this.colorMask ? new Uint8Array(m) : null
     const vcount = new Uint32Array(m)
     let total = 0
-    for (let j = 0; j < m; j++) { vcount[j] = this.vcount[indices[j]]; total += vcount[j] }
-    const vcam = new Uint32Array(total), vkp = new Uint32Array(total)
-    const vx = this.vx ? new Float32Array(total) : null, vy = this.vy ? new Float32Array(total) : null
+    for (let j = 0; j < m; j++) {
+      vcount[j] = this.vcount[indices[j]]
+      total += vcount[j]
+    }
+    const vcam = new Uint32Array(total),
+      vkp = new Uint32Array(total)
+    const vx = this.vx ? new Float32Array(total) : null,
+      vy = this.vy ? new Float32Array(total) : null
     let o = 0
     for (let j = 0; j < m; j++) {
       const i = indices[j]
-      if (!pos) { outPos[3 * j] = this.pos[3 * i]; outPos[3 * j + 1] = this.pos[3 * i + 1]; outPos[3 * j + 2] = this.pos[3 * i + 2] }
-      if (col) { col[3 * j] = this.col[3 * i]; col[3 * j + 1] = this.col[3 * i + 1]; col[3 * j + 2] = this.col[3 * i + 2] }
+      if (!pos) {
+        outPos[3 * j] = this.pos[3 * i]
+        outPos[3 * j + 1] = this.pos[3 * i + 1]
+        outPos[3 * j + 2] = this.pos[3 * i + 2]
+      }
+      if (col) {
+        col[3 * j] = this.col[3 * i]
+        col[3 * j + 1] = this.col[3 * i + 1]
+        col[3 * j + 2] = this.col[3 * i + 2]
+      }
       if (colorMask) colorMask[j] = this.colorMask[i]
       for (let k = this.vstart[i]; k < this.vstart[i + 1]; k++, o++) {
-        vcam[o] = this.vcam[k]; vkp[o] = this.vkp[k]
+        vcam[o] = this.vcam[k]
+        vkp[o] = this.vkp[k]
         if (vx) {
-          vx[o] = this.vx[k]; vy[o] = this.vy[k]
+          vx[o] = this.vx[k]
+          vy[o] = this.vy[k]
           if (pixel && Number.isFinite(vx[o])) {
             const q = pixel(this.viewUuids[this.vcam[k]], vx[o], vy[o], i)
-            if (q) { vx[o] = q[0]; vy[o] = q[1] }
+            if (q) {
+              vx[o] = q[0]
+              vy[o] = q[1]
+            }
           }
         }
       }
@@ -186,7 +237,8 @@ export class SparsePoints {
    * array a copy (callers transfer it). A point without colour gets `grey`.
    */
   flatCopy(grey = 200) {
-    const n = this.length, pos = this.pos.slice(0, 3 * n)
+    const n = this.length,
+      pos = this.pos.slice(0, 3 * n)
     if (!this.col) return { count: n, pos }
     const col = this.col.slice(0, 3 * n)
     if (this.colorMask) for (let i = 0; i < n; i++) if (!this.colorMask[i]) col.fill(grey, 3 * i, 3 * i + 3)
@@ -204,18 +256,30 @@ export class SparsePoints {
     const parts = clouds.filter((c) => c && c.length)
     if (parts.length === 1) return parts[0]
     if (!parts.length) return SparsePoints.empty()
-    const uuids = [], index = new Map()
-    const n = parts.reduce((s, c) => s + c.length, 0), total = parts.reduce((s, c) => s + c.viewTotal, 0)
-    const anyColor = parts.some((c) => c.col), anyPx = parts.some((c) => c.vx)
-    const pos = new Float64Array(3 * n), vcount = new Uint32Array(n)
-    const col = anyColor ? new Uint8Array(3 * n) : null, colorMask = anyColor ? new Uint8Array(n) : null
-    const vcam = new Uint32Array(total), vkp = new Uint32Array(total)
-    const vx = anyPx ? new Float32Array(total).fill(NaN) : null, vy = anyPx ? new Float32Array(total).fill(NaN) : null
-    let p0 = 0, v0 = 0
+    const uuids = [],
+      index = new Map()
+    const n = parts.reduce((s, c) => s + c.length, 0),
+      total = parts.reduce((s, c) => s + c.viewTotal, 0)
+    const anyColor = parts.some((c) => c.col),
+      anyPx = parts.some((c) => c.vx)
+    const pos = new Float64Array(3 * n),
+      vcount = new Uint32Array(n)
+    const col = anyColor ? new Uint8Array(3 * n) : null,
+      colorMask = anyColor ? new Uint8Array(n) : null
+    const vcam = new Uint32Array(total),
+      vkp = new Uint32Array(total)
+    const vx = anyPx ? new Float32Array(total).fill(NaN) : null,
+      vy = anyPx ? new Float32Array(total).fill(NaN) : null
+    let p0 = 0,
+      v0 = 0
     for (const c of parts) {
       const remap = c.viewUuids.map((u) => {
         let ci = index.get(u)
-        if (ci === undefined) { ci = uuids.length; index.set(u, ci); uuids.push(u) }
+        if (ci === undefined) {
+          ci = uuids.length
+          index.set(u, ci)
+          uuids.push(u)
+        }
         return ci
       })
       pos.set(c.pos.subarray(0, 3 * c.length), 3 * p0)
@@ -226,14 +290,23 @@ export class SparsePoints {
       }
       for (let k = 0; k < c.viewTotal; k++) vcam[v0 + k] = remap[c.vcam[k]]
       vkp.set(c.vkp.subarray(0, c.viewTotal), v0)
-      if (vx && c.vx) { vx.set(c.vx.subarray(0, c.viewTotal), v0); vy.set(c.vy.subarray(0, c.viewTotal), v0) }
-      p0 += c.length; v0 += c.viewTotal
+      if (vx && c.vx) {
+        vx.set(c.vx.subarray(0, c.viewTotal), v0)
+        vy.set(c.vy.subarray(0, c.viewTotal), v0)
+      }
+      p0 += c.length
+      v0 += c.viewTotal
     }
     return new SparsePoints({ pos, col, colorMask, viewUuids: uuids, vcount, vcam, vkp, vx, vy })
   }
 
   static empty() {
-    return new SparsePoints({ pos: new Float64Array(0), vcount: new Uint32Array(0), vcam: new Uint32Array(0), vkp: new Uint32Array(0) })
+    return new SparsePoints({
+      pos: new Float64Array(0),
+      vcount: new Uint32Array(0),
+      vcam: new Uint32Array(0),
+      vkp: new Uint32Array(0),
+    })
   }
 
   /**
@@ -243,9 +316,11 @@ export class SparsePoints {
    */
   static fromRecords(records) {
     const n = records.length
-    const pos = new Float64Array(3 * n), vcount = new Uint32Array(n)
+    const pos = new Float64Array(3 * n),
+      vcount = new Uint32Array(n)
     const hasColor = records.some((p) => p.color)
-    const col = hasColor ? new Uint8Array(3 * n) : null, colorMask = hasColor ? new Uint8Array(n) : null
+    const col = hasColor ? new Uint8Array(3 * n) : null,
+      colorMask = hasColor ? new Uint8Array(n) : null
     const views = records.map((p) => {
       const out = []
       for (const v of p.views ?? []) {
@@ -257,22 +332,38 @@ export class SparsePoints {
     })
     const total = views.reduce((s, v) => s + v.length, 0)
     const anyPx = views.some((v) => v.some((x) => x[2]))
-    const vcam = new Uint32Array(total), vkp = new Uint32Array(total)
-    const vx = anyPx ? new Float32Array(total).fill(NaN) : null, vy = anyPx ? new Float32Array(total).fill(NaN) : null
-    const uuids = [], index = new Map()
+    const vcam = new Uint32Array(total),
+      vkp = new Uint32Array(total)
+    const vx = anyPx ? new Float32Array(total).fill(NaN) : null,
+      vy = anyPx ? new Float32Array(total).fill(NaN) : null
+    const uuids = [],
+      index = new Map()
     let k = 0
     for (let i = 0; i < n; i++) {
       const p = records[i]
-      pos[3 * i] = p.x; pos[3 * i + 1] = p.y; pos[3 * i + 2] = p.z
+      pos[3 * i] = p.x
+      pos[3 * i + 1] = p.y
+      pos[3 * i + 2] = p.z
       if (col && p.color) {
-        col[3 * i] = p.color[0]; col[3 * i + 1] = p.color[1]; col[3 * i + 2] = p.color[2]; colorMask[i] = 1
+        col[3 * i] = p.color[0]
+        col[3 * i + 1] = p.color[1]
+        col[3 * i + 2] = p.color[2]
+        colorMask[i] = 1
       }
       vcount[i] = views[i].length
       for (const [u, kp, px] of views[i]) {
         let ci = index.get(u)
-        if (ci === undefined) { ci = uuids.length; index.set(u, ci); uuids.push(u) }
-        vcam[k] = ci; vkp[k] = kp
-        if (vx && px) { vx[k] = px[0]; vy[k] = px[1] }
+        if (ci === undefined) {
+          ci = uuids.length
+          index.set(u, ci)
+          uuids.push(u)
+        }
+        vcam[k] = ci
+        vkp[k] = kp
+        if (vx && px) {
+          vx[k] = px[0]
+          vy[k] = px[1]
+        }
         k++
       }
     }

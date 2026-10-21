@@ -20,11 +20,15 @@ function glbPositions(bytes) {
   const { json, bin } = parseGlb(bytes)
   const acc = json.accessors[json.meshes[0].primitives[0].attributes.POSITION]
   const view = json.bufferViews[acc.bufferView]
-  const f = new Float32Array(bin.buffer.slice(bin.byteOffset + view.byteOffset, bin.byteOffset + view.byteOffset + 12 * acc.count))
+  const f = new Float32Array(
+    bin.buffer.slice(bin.byteOffset + view.byteOffset, bin.byteOffset + view.byteOffset + 12 * acc.count),
+  )
   const t = json.nodes[0].translation ?? [0, 0, 0]
   const out = []
   for (let i = 0; i < acc.count; i++) {
-    const x = f[3 * i] + t[0], y = f[3 * i + 1] + t[1], z = f[3 * i + 2] + t[2]
+    const x = f[3 * i] + t[0],
+      y = f[3 * i + 1] + t[1],
+      z = f[3 * i + 2] + t[2]
     out.push([x, -z, y]) // glTF Y-up → tile Z-up
   }
   return { json, bin, out }
@@ -33,11 +37,18 @@ function glbPositions(bytes) {
 function terrain(n) {
   let s = 7
   const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647
-  const pos = new Float64Array(3 * n), col = new Uint8Array(3 * n), cls = new Uint8Array(n)
+  const pos = new Float64Array(3 * n),
+    col = new Uint8Array(3 * n),
+    cls = new Uint8Array(n)
   for (let i = 0; i < n; i++) {
-    const x = 500000 + rnd() * 400, y = 6000000 + rnd() * 300
-    pos[3 * i] = x; pos[3 * i + 1] = y; pos[3 * i + 2] = 40 + 5 * Math.sin(x / 30) + rnd() * 0.05
-    col[3 * i] = i & 255; col[3 * i + 1] = i >> 8 & 255; col[3 * i + 2] = i >> 16 & 255
+    const x = 500000 + rnd() * 400,
+      y = 6000000 + rnd() * 300
+    pos[3 * i] = x
+    pos[3 * i + 1] = y
+    pos[3 * i + 2] = 40 + 5 * Math.sin(x / 30) + rnd() * 0.05
+    col[3 * i] = i & 255
+    col[3 * i + 1] = (i >> 8) & 255
+    col[3 * i + 2] = (i >> 16) & 255
     cls[i] = i % 3 ? 2 : 6
   }
   return { count: n, pos, col, attributes: { classification: cls } }
@@ -45,7 +56,12 @@ function terrain(n) {
 
 async function collect(reader, lod, opts) {
   const files = new Map()
-  const res = await lodToTiles(reader, lod, { ...opts, emit: async (name, bytes) => { files.set(name, bytes) } })
+  const res = await lodToTiles(reader, lod, {
+    ...opts,
+    emit: async (name, bytes) => {
+      files.set(name, bytes)
+    },
+  })
   return { files, ...res }
 }
 
@@ -60,7 +76,10 @@ function walk(tile, files, visit, parent = null, depth = 0, dir = '') {
   visit(tile, parent, depth, dir)
   for (const c of tile.children ?? []) walk(c, files, visit, tile, depth + 1, dir)
 }
-const boxMinMax = (b) => ({ min: [b[0] - b[3], b[1] - b[7], b[2] - b[11]], max: [b[0] + b[3], b[1] + b[7], b[2] + b[11]] })
+const boxMinMax = (b) => ({
+  min: [b[0] - b[3], b[1] - b[7], b[2] - b[11]],
+  max: [b[0] + b[3], b[1] + b[7], b[2] + b[11]],
+})
 
 describe('lodToTiles', () => {
   it('writes every point once, ADD-refined, with halving errors and nested boxes', async () => {
@@ -74,13 +93,20 @@ describe('lodToTiles', () => {
     expect(tileset.root.refine).toBe('ADD')
     files.set('tileset.json', JSON.stringify(tileset))
     const seen = new Uint8Array(60000)
-    let tiles = 0, classes = 0, misplaced = 0, outside = 0
+    let tiles = 0,
+      classes = 0,
+      misplaced = 0,
+      outside = 0
     walk(tileset.root, files, (tile, parent) => {
       tiles++
       if (parent) {
         expect(tile.geometricError).toBeLessThanOrEqual(parent.geometricError)
-        const a = boxMinMax(tile.boundingVolume.box), b = boxMinMax(parent.boundingVolume.box)
-        for (let k = 0; k < 3; k++) { expect(a.min[k]).toBeGreaterThanOrEqual(b.min[k] - 1e-6); expect(a.max[k]).toBeLessThanOrEqual(b.max[k] + 1e-6) }
+        const a = boxMinMax(tile.boundingVolume.box),
+          b = boxMinMax(parent.boundingVolume.box)
+        for (let k = 0; k < 3; k++) {
+          expect(a.min[k]).toBeGreaterThanOrEqual(b.min[k] - 1e-6)
+          expect(a.max[k]).toBeLessThanOrEqual(b.max[k] + 1e-6)
+        }
       }
       if (!tile.children) expect(tile.geometricError).toBe(0)
       else expect(tile.geometricError).toBeGreaterThan(0)
@@ -93,7 +119,7 @@ describe('lodToTiles', () => {
       const clsView = json.bufferViews[json.accessors[prim.attributes._CLASSIFICATION].bufferView]
       out.forEach((p, k) => {
         const c = bin.subarray(colView.byteOffset + 4 * k, colView.byteOffset + 4 * k + 3)
-        const i = c[0] | c[1] << 8 | c[2] << 16
+        const i = c[0] | (c[1] << 8) | (c[2] << 16)
         seen[i]++
         for (let a = 0; a < 3; a++) {
           if (!(Math.abs(p[a] + origin[a] - cloud.pos[3 * i + a]) < 1e-3)) misplaced++
@@ -119,28 +145,59 @@ describe('lodToTiles', () => {
     const cloud = terrain(30000)
     const n = cloud.count
     const source = {
-      count: n, colour: true, attributes: [{ name: 'classification', type: 'uint8' }],
-      bounds: (() => { const r = memoryLodReader({ count: n, pos: cloud.pos }); return r.lod.bounds })(),
-      async *batches() { yield { count: n, pos: cloud.pos, col: cloud.col, attributes: cloud.attributes } },
+      count: n,
+      colour: true,
+      attributes: [{ name: 'classification', type: 'uint8' }],
+      bounds: (() => {
+        const r = memoryLodReader({ count: n, pos: cloud.pos })
+        return r.lod.bounds
+      })(),
+      async *batches() {
+        yield { count: n, pos: cloud.pos, col: cloud.col, attributes: cloud.attributes }
+      },
     }
     const chunks = []
     let size = 0
     const tmpFiles = new Map()
     const tmp = {
-      async append(name, u8) { (tmpFiles.get(name) ?? tmpFiles.set(name, []).get(name)).push(u8) },
-      async size(name) { return (tmpFiles.get(name) ?? []).reduce((a, b) => a + b.length, 0) },
+      async append(name, u8) {
+        ;(tmpFiles.get(name) ?? tmpFiles.set(name, []).get(name)).push(u8)
+      },
+      async size(name) {
+        return (tmpFiles.get(name) ?? []).reduce((a, b) => a + b.length, 0)
+      },
       async read(name, offset, length) {
         let o = 0
-        for (const b of tmpFiles.get(name)) { if (offset < o + b.length) return b.subarray(offset - o, offset - o + length); o += b.length }
+        for (const b of tmpFiles.get(name)) {
+          if (offset < o + b.length) return b.subarray(offset - o, offset - o + length)
+          o += b.length
+        }
         return new Uint8Array(0)
       },
-      async remove(name) { tmpFiles.delete(name) },
+      async remove(name) {
+        tmpFiles.delete(name)
+      },
     }
-    const out = { async write(u8) { const at = size; chunks.push(u8); size += u8.length; return at } }
+    const out = {
+      async write(u8) {
+        const at = size
+        chunks.push(u8)
+        size += u8.length
+        return at
+      },
+    }
     const meta = await buildLod(source, tmp, out, { leafMax: 3000 })
     const reader = await openLodReader(meta, { data: new Blob(chunks), hierarchy: new Blob([meta.hierarchy]) })
     // A quarter turn and ×2: the tile frame's x is the source's −y.
-    const sim = { scale: 2, R: [[0, -1, 0], [1, 0, 0], [0, 0, 1]], t: [10, 20, 30] }
+    const sim = {
+      scale: 2,
+      R: [
+        [0, -1, 0],
+        [1, 0, 0],
+        [0, 0, 1],
+      ],
+      t: [10, 20, 30],
+    }
     const origin = exportOrigin(meta.bounds, sim)
     const { files, tileset, points } = await collect(reader, meta, { sim, origin })
     expect(points).toBe(n)
@@ -168,12 +225,19 @@ describe('lasEpsg', () => {
     expect(lasEpsg({})).toBe(null)
   })
   it('reads a LAS 1.4 WKT record: the projected CRS, not its datum or a compound CRS', () => {
-    const utm = 'PROJCS["WGS 84 / UTM zone 18N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,'
-      + 'AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],AUTHORITY["EPSG","4326"]],PROJECTION["Transverse_Mercator"],'
-      + 'UNIT["metre",1,AUTHORITY["EPSG","9001"]],AUTHORITY["EPSG","32618"]]'
+    const utm =
+      'PROJCS["WGS 84 / UTM zone 18N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,' +
+      'AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],AUTHORITY["EPSG","4326"]],PROJECTION["Transverse_Mercator"],' +
+      'UNIT["metre",1,AUTHORITY["EPSG","9001"]],AUTHORITY["EPSG","32618"]]'
     const rec = (s) => ({ userId: 'LASF_Projection', recordId: 2112, data: btoa(s + '\0') })
     expect(lasEpsg({ file: { projection: [rec(utm)] } })).toBe(32618)
-    expect(lasEpsg({ file: { projection: [rec(`COMPD_CS["x",${utm},VERT_CS["h",AUTHORITY["EPSG","5703"]],AUTHORITY["EPSG","9999"]]`)] } })).toBe(32618)
+    expect(
+      lasEpsg({
+        file: {
+          projection: [rec(`COMPD_CS["x",${utm},VERT_CS["h",AUTHORITY["EPSG","5703"]],AUTHORITY["EPSG","9999"]]`)],
+        },
+      }),
+    ).toBe(32618)
     expect(wktEpsg('GEOGCRS["WGS 84",DATUM["x"],ID["EPSG",4326]]')).toBe(4326)
     expect(wktEpsg('LOCAL_CS["x"]')).toBe(null)
   })
@@ -183,7 +247,8 @@ describe('tilesSubject / defaultTiling', () => {
   const dense = (count, extra = {}) => ({ kind: 'dense', count, pos: new Float32Array(0), ...extra })
   it('takes the selected mesh, else the selected cloud, else the first with points', () => {
     const mesh = { kind: 'mesh', count: 300000 }
-    const a = dense(10), b = dense(0)
+    const a = dense(10),
+      b = dense(0)
     expect(tilesSubject(mesh, [a]).cloud).toBe(mesh)
     expect(tilesSubject(b, [b, a]).cloud).toBe(a)
     expect(tilesSubject(null, [])).toBe(null)
@@ -200,12 +265,20 @@ describe('tilesSubject / defaultTiling', () => {
 describe('buildTileTree', () => {
   // A full 4-ary tree of `depth` levels below the root.
   const tree = (depth, id = 'r', d = 0) => ({
-    id, content: true, min: [0, 0, 0], max: [1, 1, 1], geometricError: depth - d,
+    id,
+    content: true,
+    min: [0, 0, 0],
+    max: [1, 1, 1],
+    geometricError: depth - d,
     children: d < depth ? [0, 1, 2, 3].map((c) => tree(depth, `${id}${c}`, d + 1)) : [],
   })
 
   it('splits a large hierarchy into external tilesets every few levels', () => {
-    const { tileset, external, tiles } = buildTileTree(tree(6), { externalEvery: 3, externalAbove: 100, refine: 'REPLACE' })
+    const { tileset, external, tiles } = buildTileTree(tree(6), {
+      externalEvery: 3,
+      externalAbove: 100,
+      refine: 'REPLACE',
+    })
     expect(tiles).toBe((4 ** 7 - 1) / 3)
     expect(external.length).toBe(4 ** 3) // level 3 starts files; level 6's tiles are leaves, not split off
     const ref = tileset.root.children[0].children[0].children[0]

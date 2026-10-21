@@ -26,7 +26,13 @@ const emit = defineEmits(['close'])
 const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
 const units = computed(() => cloudUnits(source.value, props.frameSignature))
 const result = ref(null)
-watch(source, (m) => { result.value = m ? meshMeasure(m) : null }, { immediate: true })
+watch(
+  source,
+  (m) => {
+    result.value = m ? meshMeasure(m) : null
+  },
+  { immediate: true },
+)
 
 const tiles = computed(() => {
   const r = result.value
@@ -54,22 +60,30 @@ const whyNoVolume = computed(() => {
     <NoSourceWarn v-if="!meshes.length" kind="mesh" />
     <template v-else>
       <SettingsGroup title="Mesh">
-        <SourcePicker id="measure-src" v-model="sourceId" label="Mesh" :items="meshes" :option-label="meshOptionLabel" />
+        <SourcePicker
+          id="measure-src"
+          v-model="sourceId"
+          label="Mesh"
+          :items="meshes"
+          :option-label="meshOptionLabel"
+        />
       </SettingsGroup>
       <StatTiles :tiles="tiles" />
       <WarnBox v-if="whyNoVolume">
-        No volume: the surface is not closed — {{ whyNoVolume }}. <strong>Mesh ▸ Clean mesh</strong> with
-        “Close all holes” makes it watertight.
+        No volume: the surface is not closed — {{ whyNoVolume }}. <strong>Mesh ▸ Clean mesh</strong> with “Close all
+        holes” makes it watertight.
       </WarnBox>
       <!-- A textured mesh's joined vertices are its per-piece UV copies: nothing to clean. -->
       <p v-if="result?.weldedVertices && !source?.uv" class="field-hint">
-        {{ result.weldedVertices.toLocaleString() }} duplicate vertices were joined to read the topology
-        (each triangle carried its own corners). <strong>Mesh ▸ Clean mesh</strong> welds them in a new mesh.
+        {{ result.weldedVertices.toLocaleString() }} duplicate vertices were joined to read the topology (each triangle
+        carried its own corners). <strong>Mesh ▸ Clean mesh</strong> welds them in a new mesh.
       </p>
       <p v-if="units.unit !== 'm'" class="field-hint">
-        {{ units.unit === 'model'
-          ? 'In model units: the project has no georeference or scale bars yet, so these are not metres.'
-          : 'In the imported file’s own units.' }}
+        {{
+          units.unit === 'model'
+            ? 'In model units: the project has no georeference or scale bars yet, so these are not metres.'
+            : 'In the imported file’s own units.'
+        }}
       </p>
     </template>
     <template #footer>

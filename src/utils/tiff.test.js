@@ -18,27 +18,21 @@ describe('isDegenerateGeoTransform', () => {
 
   it('flags the TMA scanner placeholder written as a ModelTransformation', () => {
     // Header from CA213732V0032.tif: pixel coordinates at 0/0, no CRS.
-    expect(isDegenerateGeoTransform({
-      transformation: [
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 0, 0,
-        0, 0, 0, 1,
-      ],
-      hasCrs: false,
-    })).toBe(true)
+    expect(
+      isDegenerateGeoTransform({
+        transformation: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        hasCrs: false,
+      }),
+    ).toBe(true)
   })
 
   it('keeps a ModelTransformation with a real-world origin', () => {
-    expect(isDegenerateGeoTransform({
-      transformation: [
-        1, 0, 0, 500000,
-        0, -1, 0, 4000000,
-        0, 0, 1, 0,
-        0, 0, 0, 1,
-      ],
-      hasCrs: false,
-    })).toBe(false)
+    expect(
+      isDegenerateGeoTransform({
+        transformation: [1, 0, 0, 500000, 0, -1, 0, 4000000, 0, 0, 1, 0, 0, 0, 0, 1],
+        hasCrs: false,
+      }),
+    ).toBe(false)
   })
 
   it('flags absent or zero scale', () => {
@@ -53,29 +47,28 @@ describe('isDegenerateGeoTransform', () => {
 
   it('a real ground sample distance is georeferencing even without a CRS', () => {
     // The benchmark Sentinel-2 scene's shape: 10 m pixels, real origin.
-    expect(isDegenerateGeoTransform({
-      pixelScale: [10, 10, 0],
-      tiepoint: [0, 0, 0, -2500000, 1300000, 0],
-      hasCrs: false,
-    })).toBe(false)
+    expect(
+      isDegenerateGeoTransform({
+        pixelScale: [10, 10, 0],
+        tiepoint: [0, 0, 0, -2500000, 1300000, 0],
+        hasCrs: false,
+      }),
+    ).toBe(false)
   })
 
   it('a non-zero origin at unit scale is kept — 1 m pixels are legitimate', () => {
-    expect(isDegenerateGeoTransform({
-      pixelScale: [1, 1, 0],
-      tiepoint: [0, 0, 0, 500000, 4000000, 0],
-      hasCrs: false,
-    })).toBe(false)
+    expect(
+      isDegenerateGeoTransform({
+        pixelScale: [1, 1, 0],
+        tiepoint: [0, 0, 0, 500000, 4000000, 0],
+        hasCrs: false,
+      }),
+    ).toBe(false)
   })
 })
 
 describe('isAxisAlignedModelTransformation', () => {
-  const axisAligned = [
-    10, 0, 0, 500000,
-    0, -10, 0, 4000000,
-    0, 0, 1, 0,
-    0, 0, 0, 1,
-  ]
+  const axisAligned = [10, 0, 0, 500000, 0, -10, 0, 4000000, 0, 0, 1, 0, 0, 0, 0, 1]
 
   it('accepts a finite axis-aligned affine matrix', () => {
     expect(isAxisAlignedModelTransformation(axisAligned)).toBe(true)

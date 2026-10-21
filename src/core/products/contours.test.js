@@ -5,10 +5,11 @@ import { cellCenter } from './dem.js'
 // Build a DEM grid from z = f(x, y) evaluated at cell centres.
 function makeGrid(width, height, f, { gsd = 1, originX = 0, originY = height * gsd, nodata } = {}) {
   const grid = { width, height, gsd, originX, originY, data: new Float32Array(width * height) }
-  for (let r = 0; r < height; r++) for (let c = 0; c < width; c++) {
-    const [x, y] = cellCenter(grid, c, r)
-    grid.data[r * width + c] = nodata?.(c, r) ? NaN : f(x, y)
-  }
+  for (let r = 0; r < height; r++)
+    for (let c = 0; c < width; c++) {
+      const [x, y] = cellCenter(grid, c, r)
+      grid.data[r * width + c] = nodata?.(c, r) ? NaN : f(x, y)
+    }
   return grid
 }
 const vertices = (line) => {
@@ -26,7 +27,10 @@ const segmentsOf = (line) => {
 // Proper crossing (interiors intersect, not merely touching at endpoints).
 function crosses([p1, p2], [p3, p4]) {
   const d = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-  const d1 = d(p3, p4, p1), d2 = d(p3, p4, p2), d3 = d(p1, p2, p3), d4 = d(p1, p2, p4)
+  const d1 = d(p3, p4, p1),
+    d2 = d(p3, p4, p2),
+    d3 = d(p1, p2, p3),
+    d4 = d(p1, p2, p4)
   const eps = 1e-12
   return ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) && ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps))
 }
@@ -50,7 +54,8 @@ describe('contourLevels', () => {
 
 describe('traceContours', () => {
   it('a cone z = r gives concentric closed rings at radius = level', () => {
-    const cx = 20.5, cy = 20.5
+    const cx = 20.5,
+      cy = 20.5
     const grid = makeGrid(41, 41, (x, y) => Math.hypot(x - cx, y - cy))
     const logs = []
     const res = traceContours(grid, { interval: 5, indexEvery: 2 }, (m) => logs.push(m))
@@ -127,7 +132,18 @@ describe('traceContours', () => {
   })
 
   it('resolves a 2×2 saddle into two non-crossing segments', () => {
-    expect(crosses([[0, 0], [1, 1]], [[0, 1], [1, 0]])).toBe(true) // the checker itself works
+    expect(
+      crosses(
+        [
+          [0, 0],
+          [1, 1],
+        ],
+        [
+          [0, 1],
+          [1, 0],
+        ],
+      ),
+    ).toBe(true) // the checker itself works
     const grid = { width: 2, height: 2, gsd: 1, originX: 0, originY: 2, data: new Float32Array([1, 0, 0, 1]) }
     for (const level of [0.4, 0.5, 0.6]) {
       const res = traceContours(grid, { interval: 1, base: level })
@@ -144,13 +160,15 @@ describe('traceContours', () => {
     for (const level of res.levels) {
       const segs = res.lines.filter((l) => l.level === level).flatMap(segmentsOf)
       let crossings = 0
-      for (let i = 0; i < segs.length; i++) for (let j = i + 1; j < segs.length; j++) if (crosses(segs[i], segs[j])) crossings++
+      for (let i = 0; i < segs.length; i++)
+        for (let j = i + 1; j < segs.length; j++) if (crosses(segs[i], segs[j])) crossings++
       expect(crossings).toBe(0)
     }
   })
 
   it('drops lines shorter than minLength and smooths with endpoints kept', () => {
-    const cx = 20.5, cy = 20.5
+    const cx = 20.5,
+      cy = 20.5
     const grid = makeGrid(41, 41, (x, y) => Math.hypot(x - cx, y - cy))
     const res = traceContours(grid, { interval: 5, minLength: 2 * Math.PI * 7 })
     expect(res.lines.some((l) => l.level === 5)).toBe(false)
@@ -161,7 +179,8 @@ describe('traceContours', () => {
     const sm = traceContours(plane, { interval: 4, smooth: 3 })
     expect(sm.lines).toHaveLength(raw.lines.length)
     for (let i = 0; i < raw.lines.length; i++) {
-      const a = raw.lines[i].points, b = sm.lines[i].points
+      const a = raw.lines[i].points,
+        b = sm.lines[i].points
       expect(b.length).toBe(a.length)
       expect([b[0], b[1]]).toEqual([a[0], a[1]])
       expect([b[b.length - 2], b[b.length - 1]]).toEqual([a[a.length - 2], a[a.length - 1]])
@@ -180,7 +199,8 @@ describe('traceContours', () => {
 })
 
 describe('exports', () => {
-  const cx = 10.5, cy = 10.5
+  const cx = 10.5,
+    cy = 10.5
   const grid = makeGrid(21, 21, (x, y) => Math.hypot(x - cx, y - cy))
   const res = traceContours(grid, { interval: 2, indexEvery: 5 })
 

@@ -80,7 +80,15 @@ export const SFM_TUNING = {
   // `threads`: the bundle adjustment's pool size cap (core/sfm/reconstruction.js
   // threadedWasm; one fewer than the machine's cores), 0 = the single-threaded build.
   // The result is the same bits either way. Fixed by the first call in a worker.
-  baSolver: { pcgMinN: null, pcgRelTol: 1e-6, pcgMaxIter: 200, pcgAcceptPartial: true, functionTolerance: 1e-6, direct: true, threads: 16 },
+  baSolver: {
+    pcgMinN: null,
+    pcgRelTol: 1e-6,
+    pcgMaxIter: 200,
+    pcgAcceptPartial: true,
+    functionTolerance: 1e-6,
+    direct: true,
+    threads: 16,
+  },
   // ── Interleaved bundle-adjustment / track filtering ──
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
   // native px against the run's detection scale (core/scaleContext.js, which owns
@@ -124,7 +132,7 @@ export const SFM_TUNING = {
   // elsewhere; 0.9 ratio and running in both passes changed nothing).
   guidedQuantile: 0.9,
   guidedRatio: 0.8,
-  interimBaEvery: 5,        // run a global BA after this many newly-registered cameras
+  interimBaEvery: 5, // run a global BA after this many newly-registered cameras
   // …and only once the model has also grown by this factor since the last one (COLMAP's
   // ba_global_images_ratio is 1.1). Each solve costs the whole model, so every-5 alone
   // is quadratic: quarry (347 images) registration 1,005 → 143 s, SB 106 → 45 s, points
@@ -134,7 +142,7 @@ export const SFM_TUNING = {
   // checkpoint accuracy unchanged, and the hard sets (building's weak bridge, eagle) lose
   // nothing either. Local BA between the solves bought nothing on top.
   interimBaGrowth: 2,
-  interimBaIterations: 12,   // fewer iters for the interim solves than the final BA
+  interimBaIterations: 12, // fewer iters for the interim solves than the final BA
   // Local BA after each registration (sfm.js runLocalBundleAdjust): the new camera + its
   // localBaWindow − 1 most co-visible cameras free, their neighbours fixed. 0 = off: on six
   // bench sets it only added 5–10 % time at growth 2 (B-parity); kept opt-in for a
@@ -152,7 +160,7 @@ export const SFM_TUNING = {
   // A position-constrained solution may trade a little image residual for better
   // geometry. Bound that trade so noisy GPS cannot visibly damage tie-point fit.
   cameraPriorMaxReprojIncreasePx: 0.25,
-  cameraPriorMaxReprojIncreaseFrac: 0.10,
+  cameraPriorMaxReprojIncreaseFrac: 0.1,
   // Intrinsics the camera-prior BA refines: 'auto' = the last post-filter pass's
   // self-cal terms, 'none' = fixed K, or a comma list. Fixed K cannot undo a dome caused
   // by slightly wrong f/k (nadir focal–height correlation): RTK benches quarry camera
@@ -179,7 +187,7 @@ export const SFM_TUNING = {
   // distortion is destructively folded into every image's keypoints.
   selfCalMaxFocalStepFrac: 0.25,
   selfCalMaxFocalNominalFrac: 0.35,
-  selfCalMaxPrincipalOffsetFrac: 0.10,
+  selfCalMaxPrincipalOffsetFrac: 0.1,
   selfCalMaxCornerShiftFrac: 0.25,
   // The same two focal bounds when the starting focal is only resolveK's default-FOV
   // guess (no EXIF focal, no sensor format). That guess is not evidence: a 153 mm lens
@@ -188,8 +196,8 @@ export const SFM_TUNING = {
   selfCalGuessFocalStepFrac: 0.6,
   selfCalGuessFocalNominalFrac: 0.7,
   // ── PnP registration gate ──
-  pnpGateScale: 2,           // fixed inlier gate = reprjThreshold × min(pnpGateScale, 2)
-  minPnpInliers: 15,         // absolute PnP-inlier floor to accept a pose
+  pnpGateScale: 2, // fixed inlier gate = reprjThreshold × min(pnpGateScale, 2)
+  minPnpInliers: 15, // absolute PnP-inlier floor to accept a pose
   // …and a fraction of the correspondences. Raised 0.15 → 0.3: on the 2026-07-10
   // building run every mis-registration was admitted in the 10–25% band. With
   // self-calibration on by default (refineIntrinsics 'auto' → 'f,k1'), true poses
@@ -209,12 +217,12 @@ export const SFM_TUNING = {
   // filter clean any loose observations, so this only rescues genuinely-linked
   // end images, never manufactures a pose. Set false to restore the strict sweep.
   rescueStalled: true,
-  rescueRefineRatio: 0.2,    // relaxed refine-recheck ratio used on the rescue retry
+  rescueRefineRatio: 0.2, // relaxed refine-recheck ratio used on the rescue retry
   // ── Secondary-model recovery ──
-  secondaryModels: true,      // reconstruct coherent blocks stranded outside the primary
-  secondaryMinImages: 8,      // avoid recursively solving tiny/noisy leftovers
+  secondaryModels: true, // reconstruct coherent blocks stranded outside the primary
+  secondaryMinImages: 8, // avoid recursively solving tiny/noisy leftovers
   secondaryBoundaryImages: 12, // registered overlap halo used to align arbitrary frames
-  seedRetryMax: 4,          // retry alternate initial pairs when the primary stalls tiny
+  seedRetryMax: 4, // retry alternate initial pairs when the primary stalls tiny
   seedRetryMinFraction: 0.5, // below this registered share, seed choice is still suspect
 }
 
@@ -226,11 +234,11 @@ export const MATCH_TUNING = {
   // holds a whole 128-image SIFT run at ~8.4k kp (≈ 4.3 MB/image); a smaller budget
   // only costs re-uploads (the worker answers a miss and the store resends).
   gpuDescCacheMiB: 1024,
-  lgMinConf: 0,            // LightGlue min match confidence
-  overrideInliers: 30,     // inlier count that overrides a failed ratio/H-F gate
-  hfDegenerateRatio: 0.8,  // homography-vs-fundamental ratio flagging a degenerate fit
+  lgMinConf: 0, // LightGlue min match confidence
+  overrideInliers: 30, // inlier count that overrides a failed ratio/H-F gate
+  hfDegenerateRatio: 0.8, // homography-vs-fundamental ratio flagging a degenerate fit
   minInlierUniqueFrac: 0.5, // reject a pair whose inliers collapse to few unique locations
-  minInlierSpreadPx: 8,    // …or into a pinhead region (epipole degeneracy), in px
+  minInlierSpreadPx: 8, // …or into a pinhead region (epipole degeneracy), in px
   // ── Decoupled match-acceptance floors (WS1) ──
   // `minMatches` (defaults.user.js, user-facing) is the ACCEPT floor + the H-skip floor.
   // These two are the other two gates it used to conflate, split out so raising minMatches
@@ -238,28 +246,28 @@ export const MATCH_TUNING = {
   // filterStationary: a match moving at most this % of the image diagonal between
   // the two images is stationary (1 % = 130 px on a 9139² film scan).
   stationaryTolPct: 1,
-  rawSkipFloor: 15,        // skip verification below this many RAW putatives (clamped to ≤ minMatches)
-  weakMinInliers: 15,      // valid-F pairs with ≥ this many inliers but below the accept gate → WEAK
-                           // (kept for PnP registration only; never seed init or triangulate)
+  rawSkipFloor: 15, // skip verification below this many RAW putatives (clamped to ≤ minMatches)
+  weakMinInliers: 15, // valid-F pairs with ≥ this many inliers but below the accept gate → WEAK
+  // (kept for PnP registration only; never seed init or triangulate)
   // ── Tiled guided matching (core/features/guidedTiles.js, gated by lgTiled) ──
-  lgCoarseKeypoints: 1024,   // per-image cap for the coarse pass that fits the guide H
+  lgCoarseKeypoints: 1024, // per-image cap for the coarse pass that fits the guide H
   // The coarse pass doubles as the LightGlue pair GATE (the brute-force subset gate
   // is skipped for LightGlue): a near-empty coarse result on 1024×1024 strong
   // keypoints means the pair doesn't overlap, so it's returned as-is (~0.3 s, the
   // store's minMatches then skips it) instead of escalating to the plain capped
   // match — the single most expensive path — just to confirm the non-overlap.
-  lgCoarseGateMin: 8,        // coarse matches below this ⇒ no overlap, skip (don't fall back)
-  lgGuideMinMatches: 24,     // min coarse matches before attempting a homography guide
-  lgGuideMinInliers: 15,     // min H-inliers for the guide to be trusted (else fall back)
+  lgCoarseGateMin: 8, // coarse matches below this ⇒ no overlap, skip (don't fall back)
+  lgGuideMinMatches: 24, // min coarse matches before attempting a homography guide
+  lgGuideMinInliers: 15, // min H-inliers for the guide to be trusted (else fall back)
   // The guide H only needs to predict *where a tile lands* (locality), not fit the
   // scene tightly — the residual-derived margin absorbs looseness by design. So the
   // guide RANSAC threshold scales with image size (a fixed ~3 px on a 10k-px aerial
   // frame with terrain relief rejects nearly every real pair: the 2026-07-10 CA…V
   // run fell back on 9/10 pairs at ratio 0.04–0.21 while F-RANSAC showed 0.5–0.84
   // inlier ratios), and the inlier-fraction gate is correspondingly permissive.
-  lgGuideRelThresh: 0.001,   // guide-H RANSAC threshold as a fraction of image diagonal (≥3 px)
+  lgGuideRelThresh: 0.001, // guide-H RANSAC threshold as a fraction of image diagonal (≥3 px)
   lgGuideMinInlierRatio: 0.15, // min H-inlier fraction (scene too 3D / no overlap ⇒ fall back)
-  lgTileMinKps: 32,          // skip a tile with fewer keypoints than this on either side
+  lgTileMinKps: 32, // skip a tile with fewer keypoints than this on either side
   // ── Subset gate applicability ──
   // The gate trades a small false-negative rate for skipping O(Na·Nb) matches, which is
   // only a good trade when there are many pairs to skip. Below this count the full
@@ -283,10 +291,10 @@ export const MATCH_TUNING = {
 // DenseModal — the user-facing dense defaults live in defaults.user.js
 // (DEPTHMAP_DEFAULTS / DENSE_FUSE_DEFAULTS). `settings`/`opts` from the caller override.
 export const DENSE_TUNING = {
-  coarseLong: 600,    // longest-side px at the coarsest pyramid level (sets level count)
-  minAngleDeg: 3,     // source-view triangulation angle floor (too small = degenerate)
-  maxAngleDeg: 60,    // …and ceiling (too wide = poor photo-consistency)
-  consistencyPx: 2,   // fusion reprojection agreement threshold (px)
+  coarseLong: 600, // longest-side px at the coarsest pyramid level (sets level count)
+  minAngleDeg: 3, // source-view triangulation angle floor (too small = degenerate)
+  maxAngleDeg: 60, // …and ceiling (too wide = poor photo-consistency)
+  consistencyPx: 2, // fusion reprojection agreement threshold (px)
   // Stage A progress split (workers/ops/dense.js): the cross-view filter's expected
   // cost per depth-map pixel, weighed against the measured per-image loop time to give
   // the filter its share of the bar. 0.3–0.5 µs/px measured on synthetic 1.25 MP nadir
@@ -298,10 +306,10 @@ export const DENSE_TUNING = {
   // raw per-pixel point list — that was the OOM). The scene bbox that sizes the
   // packed cell keys is estimated from a coarse pixel grid: every Nth row/col of
   // each depth map (~few k unprojections/map, negligible vs the full fuse).
-  fuseBboxStride: 16,     // coarse-grid stride for the scene-bbox estimate
-  fuseProgressMs: 250,    // min ms between fusion progress emits (~4/s; no postMessage spam)
+  fuseBboxStride: 16, // coarse-grid stride for the scene-bbox estimate
+  fuseProgressMs: 250, // min ms between fusion progress emits (~4/s; no postMessage spam)
   fuseCostMaxSamples: 2_000_000, // cost-histogram sample budget (stride-subsampled, sorted once)
-  fuseMaxCells: 2 ** 50,  // packed-key exactness ceiling (float64); clamp cellSize up past this
+  fuseMaxCells: 2 ** 50, // packed-key exactness ceiling (float64); clamp cellSize up past this
   // Measured pre-flight (fusionCellEstimateSteps): distinct merge cells counted by hash
   // sampling. The cap bounds the tracked set (~1/√cap ≈ 0.4% relative error once the
   // scene exceeds it); the margin covers that error so the accumulator presized from
@@ -319,16 +327,16 @@ export const DENSE_TUNING = {
   // Only low-support cells are tested (a ≥3-pixel cell is never a floater), so this stays
   // O(noise tail). A tested cell survives if ≥ isolatedMinNeighbors of its 26 (radius 1)
   // neighbour cells are occupied; otherwise it's a lone flyer (sky/vegetation) and dropped.
-  isolatedRadius: 1,        // neighbour search radius in cells (26-neighbourhood)
-  isolatedMinNeighbors: 2,  // min occupied neighbours to keep a low-support cell
-  isolatedMaxSupport: 2,    // only cells with ≤ this many contributing pixels are tested
+  isolatedRadius: 1, // neighbour search radius in cells (26-neighbourhood)
+  isolatedMinNeighbors: 2, // min occupied neighbours to keep a low-support cell
+  isolatedMaxSupport: 2, // only cells with ≤ this many contributing pixels are tested
 }
 
 // Mesh (screened Poisson) internals read in core/products/mesh.js but NOT exposed in
 // MeshModal — the user-facing knobs (depth/screening/trim/fillHoles/removeFloaters/
 // colorize) live in defaults.user.js (MESH_DEFAULTS). `settings` from the caller override.
 export const MESH_TUNING = {
-  colorSearchRadius: 1,        // vertex-colour transfer: search ±N voxel cells (3³ nhood)
+  colorSearchRadius: 1, // vertex-colour transfer: search ±N voxel cells (3³ nhood)
   grayFallback: [180, 180, 180], // colour for a vertex with no dense point nearby
   // Poisson input downsample. A depth-D octree can't resolve detail finer than one leaf
   // cell (extent / 2^D), so feeding it a much denser cloud is wasted work — octree build,
@@ -354,7 +362,7 @@ export const MESH_TUNING = {
   // keeps the object's real extremities (they are inside the 1–99 % box ± 25 %).
   robustQuantiles: [0.01, 0.99],
   robustMargin: 0.25,
-  robustSampleMax: 200000,      // positions sampled to estimate the quantiles
+  robustSampleMax: 200000, // positions sampled to estimate the quantiles
   // Pre-solve floater filter (cloudEdit `removeIsolated` at this many leaf widths): a cell
   // holding ≤ 2 points with < 2 occupied neighbours is a stray. A converged solve ignores
   // lone strays geometrically, but each still costs ~125 finest-layer octree nodes.
@@ -374,9 +382,9 @@ export const TEXTURE_TUNING = {
   // Visibility z-buffer: the mesh is rasterised per view onto a grid of at most this
   // many pixels on the long side. Visibility needs occlusion, not texel detail.
   bufferSide: 1536,
-  maxCandidates: 8,     // best views kept per face for the view selection
-  minCos: 0.1,          // faces seen at more than ~84° from their normal are not candidates
-  depthTolRel: 0.01,    // depth-test slack as a share of depth, on top of the pixel-footprint term
+  maxCandidates: 8, // best views kept per face for the view selection
+  minCos: 0.1, // faces seen at more than ~84° from their normal are not candidates
+  depthTolRel: 0.01, // depth-test slack as a share of depth, on top of the pixel-footprint term
   // A face no view sees whole is textured from the view that hides least of it (else
   // it would get a flat colour).
   occludedFallback: true,
@@ -391,7 +399,7 @@ export const TEXTURE_TUNING = {
   padding: 2,
   minFill: 0.35,
   minSplitTexels: 1024,
-  gainSamples: 65536,   // faces sampled for the colour-levelling fit
+  gainSamples: 65536, // faces sampled for the colour-levelling fit
   consistencyMinTol: 0.25, // photo consistency never rejects within ±28 % (log colour)
   // Seam levelling (texture/seamLevel.js): weight of keeping a chart's offset smooth
   // along its edges, relative to a seam's two sides meeting; seams far beyond the
@@ -399,17 +407,17 @@ export const TEXTURE_TUNING = {
   // pull to 0.
   seamLevelling: true,
   seamSmoothWeight: 1,
-  seamDelta: 2,           // Cauchy scale, × the model's median seam difference
+  seamDelta: 2, // Cauchy scale, × the model's median seam difference
   seamEpsilon: 1e-3,
-  seamChromaWeight: 0,    // colour-difference offsets pull at this share of brightness (0: brightness only)
-  seamMaxOffset: 40,      // levels; colour differences get half
+  seamChromaWeight: 0, // colour-difference offsets pull at this share of brightness (0: brightness only)
+  seamMaxOffset: 40, // levels; colour differences get half
   seamMaxIterations: 2000,
   // Faces no view sees get a flat colour from a palette of cellSize² cells, the colour
   // quantised to `paletteBits` per channel.
   cellSize: 4,
   paletteBits: 5,
   grayFallback: [128, 128, 128],
-  jpegQuality: 0.9,     // atlas pages are stored as JPEG
+  jpegQuality: 0.9, // atlas pages are stored as JPEG
   // A mesh with more open edges than this share is taken as unwelded (an STL: every
   // face its own corners) and welded first; without shared vertices every face would
   // be a chart of its own.

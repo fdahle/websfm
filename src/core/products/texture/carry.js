@@ -28,12 +28,16 @@ export function regroupByPage(mesh) {
   const start = new Int32Array(pages + 1)
   for (let f = 0; f < F; f++) start[page[f] + 1]++
   for (let p = 0; p < pages; p++) start[p + 1] += start[p]
-  const fill = start.slice(0, pages), out = new Uint32Array(idx.length)
+  const fill = start.slice(0, pages),
+    out = new Uint32Array(idx.length)
   for (let f = 0; f < F; f++) {
     const o = 3 * fill[page[f]]++
-    out[o] = idx[3 * f]; out[o + 1] = idx[3 * f + 1]; out[o + 2] = idx[3 * f + 2]
+    out[o] = idx[3 * f]
+    out[o + 1] = idx[3 * f + 1]
+    out[o + 2] = idx[3 * f + 2]
   }
   const groups = []
-  for (let p = 0; p < pages; p++) if (start[p + 1] > start[p]) groups.push({ page: p, start: start[p], count: start[p + 1] - start[p] })
+  for (let p = 0; p < pages; p++)
+    if (start[p + 1] > start[p]) groups.push({ page: p, start: start[p], count: start[p + 1] - start[p] })
   return { idx: out, groups }
 }

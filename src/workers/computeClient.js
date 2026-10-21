@@ -13,12 +13,10 @@ import { isLearnedDetector } from '../core/features/learnedDetectors.js'
 // One worker per core (minus one for the UI thread), capped so we don't spawn a
 // pile of workers that each load their own wasm copy on first use.
 export const MAX_POOL_SIZE = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1))
-const storedPoolSize = typeof localStorage === 'undefined'
-  ? 0
-  : Number(localStorage.getItem('websfm.compute.workerCount'))
-export let POOL_SIZE = storedPoolSize > 0
-  ? Math.max(1, Math.min(MAX_POOL_SIZE, Math.round(storedPoolSize)))
-  : MAX_POOL_SIZE
+const storedPoolSize =
+  typeof localStorage === 'undefined' ? 0 : Number(localStorage.getItem('websfm.compute.workerCount'))
+export let POOL_SIZE =
+  storedPoolSize > 0 ? Math.max(1, Math.min(MAX_POOL_SIZE, Math.round(storedPoolSize))) : MAX_POOL_SIZE
 
 let workers = null
 let rr = 0
@@ -30,10 +28,16 @@ function handleMessage(e) {
   const entry = pending.get(id)
   if (!entry) return
   // Intermediate streaming event (e.g. reconstruct log/progress) — not terminal.
-  if (ev) { entry.onEvent?.(ev, args); return }
+  if (ev) {
+    entry.onEvent?.(ev, args)
+    return
+  }
   pending.delete(id)
-  entry.onTiming?.({ postMessageMs: entry.postMessageMs,
-    workerMs: e.data.workerMs ?? 0, roundTripMs: performance.now() - entry.started })
+  entry.onTiming?.({
+    postMessageMs: entry.postMessageMs,
+    workerMs: e.data.workerMs ?? 0,
+    roundTripMs: performance.now() - entry.started,
+  })
   if (ok) entry.resolve(result)
   else entry.reject(new Error(error))
 }
@@ -73,7 +77,10 @@ export function terminateAll(reason = 'cancelled') {
   const oldWorkers = workers
   workers = null
   if (oldWorkers) for (const w of oldWorkers) w.terminate()
-  for (const [id, entry] of pending) { pending.delete(id); entry.reject(new Error(reason)) }
+  for (const [id, entry] of pending) {
+    pending.delete(id)
+    entry.reject(new Error(reason))
+  }
 }
 
 // Drop an idle pool so its workers' memory is returned before a run that needs a lot
@@ -96,9 +103,7 @@ export function releaseIdleWorkers() {
 // when a run is active; the persisted choice still takes effect after reload.
 export function configureWorkerPoolSize(value) {
   const requested = Number(value)
-  const next = requested > 0
-    ? Math.max(1, Math.min(MAX_POOL_SIZE, Math.round(requested)))
-    : MAX_POOL_SIZE
+  const next = requested > 0 ? Math.max(1, Math.min(MAX_POOL_SIZE, Math.round(requested))) : MAX_POOL_SIZE
   if (next === POOL_SIZE) return true
   if (pending.size) return false
   const oldWorkers = workers
@@ -147,7 +152,11 @@ export function detectKeypoints(url, options = {}, { onLog } = {}) {
   const learned = isLearnedDetector(options.detector)
   return call('detect', [url, options], {
     worker: learned ? 0 : undefined,
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
   })
 }
 
@@ -161,7 +170,11 @@ export function imageQuality(url, options = {}) {
 // per run; round-robin is fine (no heavy per-worker runtime to warm up).
 export function prepareFiducialTemplates(url, obs, options = {}, { onLog } = {}) {
   return call('prepareFiducialTemplates', [url, obs, options], {
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
   })
 }
 
@@ -173,23 +186,41 @@ export function prepareFiducialTemplates(url, obs, options = {}, { onLog } = {})
 // halves' agreement under candidate fits, and the stitched frame (a TIFF Blob).
 export const growReseau = (url, options) => call('growReseau', [url, options])
 export const reseauOverlapScore = (urlA, urlB, options) => call('reseauOverlapScore', [urlA, urlB, options])
-export const stitchReseauFrame = (urlA, urlB, options, { onLog, onProgress } = {}) => call('stitchReseauFrame', [urlA, urlB, options], {
-  onEvent: (ev, args) => { if (ev === 'log') onLog?.(...args); else if (ev === 'progress') onProgress?.(...args) },
-})
+export const stitchReseauFrame = (urlA, urlB, options, { onLog, onProgress } = {}) =>
+  call('stitchReseauFrame', [urlA, urlB, options], {
+    onEvent: (ev, args) => {
+      if (ev === 'log') onLog?.(...args)
+      else if (ev === 'progress') onProgress?.(...args)
+    },
+  })
 // Panoramic strips (core/sfm/panoramic.js, workers/ops/detect.js): one strip's segments
 // as frame images, [TIFF Blob] in segment order.
-export const splitPanoramicStrip = (url, options, { onLog, onProgress } = {}) => call('splitPanoramicStrip', [url, options], {
-  onEvent: (ev, args) => { if (ev === 'log') onLog?.(...args); else if (ev === 'progress') onProgress?.(...args) },
-})
+export const splitPanoramicStrip = (url, options, { onLog, onProgress } = {}) =>
+  call('splitPanoramicStrip', [url, options], {
+    onEvent: (ev, args) => {
+      if (ev === 'log') onLog?.(...args)
+      else if (ev === 'progress') onProgress?.(...args)
+    },
+  })
 
 // Reseau crosses in one scan (SAT-5, workers/ops/detect.js detectReseau).
 export function detectReseau(url, options, { onLog } = {}) {
-  return call('detectReseau', [url, options], { onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined })
+  return call('detectReseau', [url, options], {
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
+  })
 }
 
 export function detectFiducials(url, templates, predictions, options = {}, { onLog } = {}) {
   return call('detectFiducials', [url, templates, predictions, options], {
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
   })
 }
 
@@ -198,7 +229,11 @@ export function detectFiducialSpots(url, options = {}, { onLog } = {}) {
   // by the browser's structured-clone algorithm, so materialize the small,
   // primitive-only options bag before it crosses postMessage.
   return call('detectFiducialSpots', [url, { ...options }], {
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
   })
 }
 
@@ -228,7 +263,11 @@ export function matchLightGlue(args, { onLog, onTiming } = {}) {
   return call('matchLightGlue', [args], {
     onTiming,
     worker: 0,
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
   })
 }
 
@@ -240,20 +279,29 @@ export function verifyMatches(kpsA, kpsB, matches, options = {}, { onTiming, avo
 // coordinate buffers are TRANSFERRED — they are built per call and never reused.
 export function verifyPointPairs(ptsA, ptsB, options = {}, { onTiming, avoidWorker } = {}) {
   return call('verifyPoints', [ptsA, ptsB, options], {
-    onTiming, avoid: avoidWorker, transfer: [ptsA.buffer, ptsB.buffer],
+    onTiming,
+    avoid: avoidWorker,
+    transfer: [ptsA.buffer, ptsB.buffer],
   })
 }
 
 export const sparseMetrics = (packed) => call('sparseMetrics', [packed])
-export const refineSparse = (packed, settings, constraints = {}) => call('refineSparse', [packed, settings, constraints])
+export const refineSparse = (packed, settings, constraints = {}) =>
+  call('refineSparse', [packed, settings, constraints])
 // Tools ▸ Model ▾ ▸ Optimize cameras (core/sfm/gradualSelection.js optimizeCameras).
-export const optimizeSparse = (packed, settings, constraints = {}) => call('optimizeSparse', [packed, settings, constraints])
+export const optimizeSparse = (packed, settings, constraints = {}) =>
+  call('optimizeSparse', [packed, settings, constraints])
 export const readRasterWindow = (file, options = {}) => call('readRasterWindow', [{ file, ...options }])
 // Find GCPs (workers/ops/referenceGcps.js): the ortho's COG / preview and the
 // reference's original File go over as handles; the worker reads windows itself.
-export const findReferenceMatches = (request, { onLog } = {}) => call('findReferenceMatches', [request], {
-  onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
-})
+export const findReferenceMatches = (request, { onLog } = {}) =>
+  call('findReferenceMatches', [request], {
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
+  })
 
 // SAM2 smart-mask selection (F12). All three ops pin worker 0 so the heavy ORT
 // encoder/decoder sessions load once AND the per-uuid embedding cache (held in
@@ -264,7 +312,11 @@ export const findReferenceMatches = (request, { onLog } = {}) => call('findRefer
 export function segmentEncode(uuid, url, options = {}, { onLog } = {}) {
   return call('segmentEncode', [uuid, url, options], {
     worker: 0,
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
   })
 }
 
@@ -274,7 +326,11 @@ export function segmentEncode(uuid, url, options = {}, { onLog } = {}) {
 export function segmentDecode(uuid, points, options = {}, { onLog } = {}) {
   return call('segmentDecode', [uuid, points, options], {
     worker: 0,
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
   })
 }
 
@@ -290,12 +346,13 @@ export function segmentForget(uuid = null) {
 // the full-res result resolves, so callers can show a preview early.
 export function transcodeTiff(blob, jpegQuality, { onThumbnail, onDisplay } = {}) {
   return call('transcodeTiff', [blob, jpegQuality], {
-    onEvent: (onThumbnail || onDisplay)
-      ? (ev, a) => {
-          if (ev === 'thumbnail') onThumbnail?.(...a)
-          else if (ev === 'display') onDisplay?.(...a)
-        }
-      : undefined,
+    onEvent:
+      onThumbnail || onDisplay
+        ? (ev, a) => {
+            if (ev === 'thumbnail') onThumbnail?.(...a)
+            else if (ev === 'display') onDisplay?.(...a)
+          }
+        : undefined,
   })
 }
 
@@ -303,7 +360,11 @@ export function transcodeTiff(blob, jpegQuality, { onThumbnail, onDisplay } = {}
 // → { kind: 'pyramid', index, blob, displayBlob, thumbBlob, srcInfo, ms }
 export function buildPyramid(blob, { onProgress } = {}) {
   return call('buildPyramid', [blob], {
-    onEvent: onProgress ? (ev, a) => { if (ev === 'progress') onProgress(...a) } : undefined,
+    onEvent: onProgress
+      ? (ev, a) => {
+          if (ev === 'progress') onProgress(...a)
+        }
+      : undefined,
   })
 }
 
@@ -315,7 +376,8 @@ export function buildPyramid(blob, { onProgress } = {}) {
 function streamingOp(op) {
   return (input, { onLog, onProgress, onEvent, transfer = [], worker } = {}) =>
     call(op, [input], {
-      transfer, worker,
+      transfer,
+      worker,
       onEvent: (ev, args) => {
         if (ev === 'log') onLog?.(...args)
         else if (ev === 'progress') onProgress?.(...args)
@@ -371,13 +433,19 @@ export const orthoShare = (input, plan, groupIndices, workers, claims, { onLog, 
       else if (ev === 'block') onBlock?.(args[0])
     },
   })
-export const orthoCogAdd = (block, { worker }) => call('orthoCogAdd', [block], {
-  worker, transfer: [block.rgba.buffer, ...(block.labels ? [block.labels.buffer] : [])],
-})
-export const orthoFinish = (parts, { onLog, onProgress, worker } = {}) => call('orthoFinish', [parts], {
-  worker,
-  onEvent: (ev, args) => { if (ev === 'log') onLog?.(...args); else if (ev === 'progress') onProgress?.(...args) },
-})
+export const orthoCogAdd = (block, { worker }) =>
+  call('orthoCogAdd', [block], {
+    worker,
+    transfer: [block.rgba.buffer, ...(block.labels ? [block.labels.buffer] : [])],
+  })
+export const orthoFinish = (parts, { onLog, onProgress, worker } = {}) =>
+  call('orthoFinish', [parts], {
+    worker,
+    onEvent: (ev, args) => {
+      if (ev === 'log') onLog?.(...args)
+      else if (ev === 'progress') onProgress?.(...args)
+    },
+  })
 
 // Tools ▸ Products ▾ — contours / terrain derivatives / polygon clip of a DEM or
 // ortho (see workers/ops/products.js `demTool`). A DEM plane is a copy, transferred
@@ -448,7 +516,11 @@ export const editCloud = streamingOp('editCloud')
 // buffers transferred back.
 export function parseCloudFile(file, { onLog } = {}) {
   return call('parseCloud', [{ file, name: file.name }], {
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
   })
 }
 
@@ -457,10 +529,18 @@ export function parseCloudFile(file, { onLog } = {}) {
 // parseCloudFile exists to avoid. `forceKind` ('dem'|'ortho') skips the sniff.
 // Resolves to { meta, plane }; `plane` is transferred both ways (no clone).
 export function parseRasterFile(buffer, name, { forceKind = null, style = null, previewOnly = false, onLog } = {}) {
-  return call('parseRaster', [{ ...(buffer instanceof Blob ? { file: buffer } : { buffer }), name, forceKind, style, previewOnly }], {
-    transfer: buffer instanceof Blob ? [] : [buffer],
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
-  })
+  return call(
+    'parseRaster',
+    [{ ...(buffer instanceof Blob ? { file: buffer } : { buffer }), name, forceKind, style, previewOnly }],
+    {
+      transfer: buffer instanceof Blob ? [] : [buffer],
+      onEvent: onLog
+        ? (ev, a) => {
+            if (ev === 'log') onLog(...a)
+          }
+        : undefined,
+    },
+  )
 }
 
 // Recompute only a styled raster's ≤1024 px preview PNG for a new style — no
@@ -469,11 +549,19 @@ export function parseRasterFile(buffer, name, { forceKind = null, style = null, 
 // re-decoded lazily on the next sample. Resolves to { style, previewDataUrl }.
 export function restyleRasterPreview(source, name, style, { onLog, cacheKey, rangesOnly = false } = {}) {
   const isFile = source instanceof Blob
-  return call('restyleRasterPreview', [{ ...(isFile ? { file: source } : { buffer: source }), name, style, cacheKey, rangesOnly }], {
-    worker: POOL_SIZE - 1,
-    transfer: isFile ? [] : [source],
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
-  })
+  return call(
+    'restyleRasterPreview',
+    [{ ...(isFile ? { file: source } : { buffer: source }), name, style, cacheKey, rangesOnly }],
+    {
+      worker: POOL_SIZE - 1,
+      transfer: isFile ? [] : [source],
+      onEvent: onLog
+        ? (ev, a) => {
+            if (ev === 'log') onLog(...a)
+          }
+        : undefined,
+    },
+  )
 }
 
 // Undistorted-image export — resample one image into the pinhole frame the sparse
@@ -482,7 +570,11 @@ export function restyleRasterPreview(source, name, style, { onLog, cacheKey, ran
 // { bytes, width, height, K, rect, mime }; `bytes` is transferred back.
 export function undistortImage(args, { onLog } = {}) {
   return call('undistortImage', [args], {
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
   })
 }
 
@@ -491,10 +583,15 @@ export function undistortImage(args, { onLog } = {}) {
 // of a shared buffer): they are transferred in. Resolves to { blob, count }; the
 // Blob posts back as a handle, whatever its size.
 function exportOp(op, key) {
-  return (input, { onLog } = {}) => call(op, [input], {
-    transfer: transferList(input[key]),
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
-  })
+  return (input, { onLog } = {}) =>
+    call(op, [input], {
+      transfer: transferList(input[key]),
+      onEvent: onLog
+        ? (ev, a) => {
+            if (ev === 'log') onLog(...a)
+          }
+        : undefined,
+    })
 }
 // cloud: { count, pos, col?, nrm?, attributes? } (flat); format 'ply' | 'ply-ascii' |
 // 'xyz' | 'las' | 'laz'; plus { color, sim, cell, crsCode, geographic }.

@@ -23,20 +23,23 @@ const STORAGE_KEY = 'imageViewToggles'
 
 const DEFAULTS = {
   showKeypoints: true,
-  showMask:      false,
-  showDepth:     false,
-  showGcps:      false,
+  showMask: false,
+  showDepth: false,
+  showGcps: false,
   showFiducials: true,
-  showResiduals: false,   // per-observation reprojection residual vectors (WS3)
-  maskEdit:      false,
-  gcpEdit:       false,
+  showResiduals: false, // per-observation reprojection residual vectors (WS3)
+  maskEdit: false,
+  gcpEdit: false,
 }
 
 function normalize(p) {
   const out = {}
   for (const k of Object.keys(DEFAULTS)) out[k] = typeof p?.[k] === 'boolean' ? p[k] : DEFAULTS[k]
   if (out.showMask) out.showDepth = false
-  if (out.maskEdit) { out.gcpEdit = false; out.showDepth = false }
+  if (out.maskEdit) {
+    out.gcpEdit = false
+    out.showDepth = false
+  }
   if (out.gcpEdit) out.showGcps = true
   return out
 }

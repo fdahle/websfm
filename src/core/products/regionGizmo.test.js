@@ -5,7 +5,8 @@ const box = { min: [0, 0, 0], max: [4, 2, 6] }
 const handle = (id) => regionHandles(box).find((h) => h.id === id)
 // A ray from `origin` through `target`.
 const ray = (origin, target) => {
-  const d = target.map((v, k) => v - origin[k]), l = Math.hypot(...d)
+  const d = target.map((v, k) => v - origin[k]),
+    l = Math.hypot(...d)
   return { origin, dir: d.map((v) => v / l) }
 }
 

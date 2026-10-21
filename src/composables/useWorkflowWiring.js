@@ -30,14 +30,24 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   // Lazy: the profile is only computed when a Match block resolves 'auto' pairing.
   const { profile: datasetProfile } = useDatasetRecommendations()
   const {
-    runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
-    runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, cancelRun,
+    runDetect,
+    runMatch,
+    runReconstruct,
+    runComputeDepthMaps,
+    runDensify,
+    runGenerateDem,
+    runGenerateOrtho,
+    runGenerateMesh,
+    runEditClouds,
+    runTextureMesh,
+    cancelRun,
   } = pipeline
   const imagesStore = useImagesStore()
   const { images } = storeToRefs(imagesStore)
   const { matchRun, usableMatchCount } = storeToRefs(useMatchesStore())
   const { currentSceneType } = storeToRefs(useProjectsStore())
-  const { clouds, mainSparseCloud, depthMaps, depthMapCount, dem, ortho, denseSummary, meshSources } = storeToRefs(useReconstructionStore())
+  const { clouds, mainSparseCloud, depthMaps, depthMapCount, dem, ortho, denseSummary, meshSources } =
+    storeToRefs(useReconstructionStore())
   const { computeHealth } = useQualityReport()
   const workflowsStore = useWorkflowsStore()
   const { addWorkflow, updateWorkflow, recordRun: recordWorkflowRun } = workflowsStore
@@ -68,9 +78,15 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   async function checkImageSources() {
     const lost = await imagesStore.probeImageSources()
     if (!lost.length) return null
-    const names = lost.slice(0, 3).map((img) => img.name).join(', ') + (lost.length > 3 ? ', …' : '')
-    return `${pluralize(lost.length, 'image')} can no longer be read (${names}): the file was moved, `
-      + 'renamed or deleted. Re-add the files, or remove those images; stages that read pixels fail for them.'
+    const names =
+      lost
+        .slice(0, 3)
+        .map((img) => img.name)
+        .join(', ') + (lost.length > 3 ? ', …' : '')
+    return (
+      `${pluralize(lost.length, 'image')} can no longer be read (${names}): the file was moved, ` +
+      'renamed or deleted. Re-add the files, or remove those images; stages that read pixels fail for them.'
+    )
   }
 
   async function runAutomatedWorkflowBlock(type, rawSettings, context = {}) {
@@ -79,16 +95,20 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
       useGpu: workflowUseGpu.value,
       memBudgetBytes: workflowMemBudgetBytes.value,
       mergeCell: denseSummary.value?.mergeCell ?? 0,
-      ...(autoPairing ? { posedImageCount: posedImageCount?.value ?? 0, video: datasetProfile.value.kind === 'video' } : {}),
+      ...(autoPairing
+        ? { posedImageCount: posedImageCount?.value ?? 0, video: datasetProfile.value.kind === 'video' }
+        : {}),
     })
     if (autoPairing) log(`Workflow: Match Features pairing is automatic → ${settings.strategy}`, 'info', 'Workflow')
     if (WORKFLOW_BLOCK_BY_ID.get(type)?.tool) return runToolBlock(type, settings, context)
-    const targets = type === 'detect-features'
-      ? (settings.overwrite ? [...images.value] : images.value.filter((img) => img.kpStatus !== 'done'))
-      : []
-    const before = type === 'detect-features'
-      ? new Map(targets.map((img) => [img.uuid, img.kpRev ?? 0]))
-      : workflowOutputToken(type)
+    const targets =
+      type === 'detect-features'
+        ? settings.overwrite
+          ? [...images.value]
+          : images.value.filter((img) => img.kpStatus !== 'done')
+        : []
+    const before =
+      type === 'detect-features' ? new Map(targets.map((img) => [img.uuid, img.kpRev ?? 0])) : workflowOutputToken(type)
 
     let result
     if (type === 'detect-features') result = await runDetect(settings)
@@ -103,11 +123,16 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     else throw new Error(`Workflow block is not automated: ${type}`)
 
     if (result?.ok === false || result?.unchanged) return result
-    const changed = type === 'detect-features'
-      ? targets.every((img) => img.kpStatus === 'done' && (img.kpRev ?? 0) !== before.get(img.uuid))
-      : workflowOutputToken(type) !== before
+    const changed =
+      type === 'detect-features'
+        ? targets.every((img) => img.kpStatus === 'done' && (img.kpRev ?? 0) !== before.get(img.uuid))
+        : workflowOutputToken(type) !== before
     if (!changed) {
-      return { ok: false, cancelled: false, reason: `${WORKFLOW_BLOCK_BY_ID.get(type)?.label ?? type} did not replace its output` }
+      return {
+        ok: false,
+        cancelled: false,
+        reason: `${WORKFLOW_BLOCK_BY_ID.get(type)?.label ?? type} did not replace its output`,
+      }
     }
     // A fresh dense cloud or mesh restarts the cleanup chain from it.
     if (type === 'dense') context.cloudId = workflowOutputToken('dense')?.id ?? null
@@ -121,9 +146,7 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   function chainSource(kind, context) {
     const list = clouds.value.filter((c) => c.kind === kind && c.count > 0)
     const id = kind === 'mesh' ? context.meshId : context.cloudId
-    return list.find((c) => c.id === id)
-      ?? list.find((c) => !c.imported && !c.derived)
-      ?? list[list.length - 1] ?? null
+    return list.find((c) => c.id === id) ?? list.find((c) => !c.imported && !c.derived) ?? list[list.length - 1] ?? null
   }
   // Build Mesh meshes the chain's cloud when a cleanup block produced one (and it
   // still has normals); otherwise the dialog's own default source.
@@ -138,37 +161,75 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     const spec = WORKFLOW_BLOCK_BY_ID.get(type)
     const { kind, mode } = spec.tool
     const source = chainSource(kind === 'mesh' ? 'mesh' : 'dense', context)
-    if (!source) return { ok: false, cancelled: false, reason: `${spec.label}: no ${kind === 'mesh' ? 'mesh' : 'dense cloud'} to work on` }
+    if (!source)
+      return {
+        ok: false,
+        cancelled: false,
+        reason: `${spec.label}: no ${kind === 'mesh' ? 'mesh' : 'dense cloud'} to work on`,
+      }
     let request = { settings, sourceIds: [source.id] }
     if (type === 'estimate-normals') request = { ...request, settings: normalsSettings(settings, source) }
     if (type === 'align-icp') {
       const { reference, ...rest } = settings
-      const matches = clouds.value.filter((c) => c.id !== source.id && (c.kind === 'dense' || c.kind === 'mesh')
-        && c.count > 0 && (c.name ?? '') === reference)
+      const matches = clouds.value.filter(
+        (c) =>
+          c.id !== source.id &&
+          (c.kind === 'dense' || c.kind === 'mesh') &&
+          c.count > 0 &&
+          (c.name ?? '') === reference,
+      )
       if (matches.length !== 1) {
-        return { ok: false, cancelled: false, reason: matches.length
-          ? `${spec.label}: ${matches.length} clouds are named “${reference}” — rename one`
-          : `${spec.label}: no cloud or mesh is named “${reference}”` }
+        return {
+          ok: false,
+          cancelled: false,
+          reason: matches.length
+            ? `${spec.label}: ${matches.length} clouds are named “${reference}” — rename one`
+            : `${spec.label}: no cloud or mesh is named “${reference}”`,
+        }
       }
-      request = { sourceIds: [source.id, matches[0].id], settings: { ...rest, unitLabel: source.imported ? 'file units' : 'model units' } }
+      request = {
+        sourceIds: [source.id, matches[0].id],
+        settings: { ...rest, unitLabel: source.imported ? 'file units' : 'model units' },
+      }
     }
     if (type === 'decimate-mesh') {
       const target = settings.targetTriangles ?? Math.round(source.count * settings.targetRatio)
       if (!(target >= 4 && target < source.count)) {
-        return { ok: true, cancelled: false, detail: `Kept ${source.name ?? 'the mesh'}: already at or below the target` }
+        return {
+          ok: true,
+          cancelled: false,
+          detail: `Kept ${source.name ?? 'the mesh'}: already at or below the target`,
+        }
       }
     }
-    const suffix = { filter: 'filtered', normals: 'normals', icp: 'aligned', 'mesh-clean': 'cleaned', 'mesh-smooth': 'smoothed', 'mesh-decimate': 'decimated' }[mode]
+    const suffix = {
+      'filter': 'filtered',
+      'normals': 'normals',
+      'icp': 'aligned',
+      'mesh-clean': 'cleaned',
+      'mesh-smooth': 'smoothed',
+      'mesh-decimate': 'decimated',
+    }[mode]
     const before = new Set(clouds.value.map((c) => c.id))
-    const result = await runEditClouds({ ...request, mode, name: `${source.name ?? (kind === 'mesh' ? 'Mesh' : 'Cloud')} (${suffix})` })
+    const result = await runEditClouds({
+      ...request,
+      mode,
+      name: `${source.name ?? (kind === 'mesh' ? 'Mesh' : 'Cloud')} (${suffix})`,
+    })
     if (result?.ok === false || result?.cancelled) {
-      return result?.cancelled ? result : { ok: false, cancelled: false, reason: result?.reason || `${spec.label} produced no result (see the log)` }
+      return result?.cancelled
+        ? result
+        : { ok: false, cancelled: false, reason: result?.reason || `${spec.label} produced no result (see the log)` }
     }
     const made = clouds.value.find((c) => !before.has(c.id) && c.kind === source.kind)
     if (!made) return { ok: false, cancelled: false, reason: `${spec.label} produced no result (see the log)` }
     if (kind === 'mesh') context.meshId = made.id
     else context.cloudId = made.id
-    return { ok: true, cancelled: false, detail: `${made.name ?? 'Result'}: ${made.count.toLocaleString('en-US')} ${kind === 'mesh' ? 'triangles' : 'points'}` }
+    return {
+      ok: true,
+      cancelled: false,
+      detail: `${made.name ?? 'Result'}: ${made.count.toLocaleString('en-US')} ${kind === 'mesh' ? 'triangles' : 'points'}`,
+    }
   }
   // Estimate Normals' "auto" orientation, as its dialog resolves it: towards the
   // cameras for a computed cloud, up (+Z) for an imported one.
@@ -202,13 +263,19 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   // (else the newest untextured one), decimated first when asked and larger than the target.
   async function runTextureBlock({ decimateTo, ...settings }, context = {}) {
     const meshes = clouds.value.filter((c) => c.kind === 'mesh' && c.count > 0 && !c.texture)
-    let source = meshes.find((c) => c.id === context.meshId)
-      ?? meshes.find((c) => !c.imported && !c.derived) ?? meshes[meshes.length - 1]
+    let source =
+      meshes.find((c) => c.id === context.meshId) ??
+      meshes.find((c) => !c.imported && !c.derived) ??
+      meshes[meshes.length - 1]
     if (!source) return { ok: false, cancelled: false, reason: 'Texture Mesh: no mesh to texture' }
     if (decimateTo > 0 && source.count > decimateTo) {
       const before = new Set(clouds.value.map((c) => c.id))
-      const dec = await runEditClouds({ mode: 'mesh-decimate', sourceIds: [source.id],
-        settings: { targetTriangles: decimateTo, preserveBoundary: true }, name: `${source.name} (decimated)` })
+      const dec = await runEditClouds({
+        mode: 'mesh-decimate',
+        sourceIds: [source.id],
+        settings: { targetTriangles: decimateTo, preserveBoundary: true },
+        name: `${source.name} (decimated)`,
+      })
       if (dec?.ok === false) return dec
       source = clouds.value.find((c) => c.kind === 'mesh' && !before.has(c.id)) ?? source
     }
@@ -238,7 +305,9 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     checkSources: checkImageSources,
   })
   const {
-    running: workflowRunning, pause: workflowPause, statuses: workflowStatuses,
+    running: workflowRunning,
+    pause: workflowPause,
+    statuses: workflowStatuses,
     currentBlockId: workflowCurrentBlockId,
   } = workflowRunner
 
@@ -264,7 +333,15 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   }
 
   return {
-    workflowState, workflowRunner, workflowRunning, workflowPause, workflowStatuses, workflowCurrentBlockId,
-    addNewWorkflow, onWorkflowUpdate, closeWorkflowBuilder, onWorkflowRun,
+    workflowState,
+    workflowRunner,
+    workflowRunning,
+    workflowPause,
+    workflowStatuses,
+    workflowCurrentBlockId,
+    addNewWorkflow,
+    onWorkflowUpdate,
+    closeWorkflowBuilder,
+    onWorkflowRun,
   }
 }

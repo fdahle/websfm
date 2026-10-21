@@ -22,11 +22,11 @@
 export const CLEANUP_THRESHOLD_DEFAULTS = {
   // Pre-BA gross cleanup: explicitly only a tail-strip ahead of the first solve,
   // so it is held to a tenth of the observations.
-  preBaMaxRemovedFrac: 0.10,
+  preBaMaxRemovedFrac: 0.1,
   // Post-BA track filter passes: these ARE the real filter and a hard block can
   // legitimately lose a lot, so the bound is loose — it exists solely to stop the
   // pass from annihilating the model, not to shape ordinary filtering.
-  filterMaxRemovedFrac: 0.50,
+  filterMaxRemovedFrac: 0.5,
 }
 
 // Resolve the reprojection threshold a cleanup pass should actually use.

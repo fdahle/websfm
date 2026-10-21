@@ -27,12 +27,21 @@ const linkedCount = (set) => set.footprints.filter((fp) => fp.imageId).length
 const sourceLabel = (set) => (set.source === 'imported' ? 'Imported' : 'Computed')
 
 const {
-  editingId, editingName, setInput: setRenameInput, start: startRename, commit: commitRename, cancel: cancelRename,
+  editingId,
+  editingName,
+  setInput: setRenameInput,
+  start: startRename,
+  commit: commitRename,
+  cancel: cancelRename,
 } = useInlineRename((id, name) => sidebar.renameShapefile({ id, name }))
 
 const { menu: ctx, open: openCtx, close: closeMenu } = useContextMenu()
 // Run a menu item against the row it was opened on, then close.
-function fromMenu(fn) { const set = ctx.value.set; closeMenu(); fn(set) }
+function fromMenu(fn) {
+  const set = ctx.value.set
+  closeMenu()
+  fn(set)
+}
 </script>
 
 <template>
@@ -68,12 +77,10 @@ function fromMenu(fn) { const set = ctx.value.set; closeMenu(); fn(set) }
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ set.name }}</span>
-          <span
-            v-if="set.visible !== false"
-            class="map-flag"
-            title="Shown on the map — right-click to hide"
-          >◉</span>
-          <span class="obs-badge" :title="`${pluralize(set.footprints.length, 'polygon')}`">{{ set.footprints.length }}</span>
+          <span v-if="set.visible !== false" class="map-flag" title="Shown on the map — right-click to hide">◉</span>
+          <span class="obs-badge" :title="`${pluralize(set.footprints.length, 'polygon')}`">{{
+            set.footprints.length
+          }}</span>
         </li>
         <li v-if="isExpanded(set.id)" class="img-details" @contextmenu.stop>
           <div class="detail-row">
@@ -92,14 +99,15 @@ function fromMenu(fn) { const set = ctx.value.set; closeMenu(); fn(set) }
         </li>
       </template>
 
-      <li v-if="!sets.length" class="empty">
-        No shapefiles — compute footprints from poses, or import a polygon file
-      </li>
+      <li v-if="!sets.length" class="empty">No shapefiles — compute footprints from poses, or import a polygon file</li>
     </ul>
 
     <ContextMenu :menu="ctx">
       <template #default="{ menu }">
-        <button class="ctx-item" @click="fromMenu((s) => sidebar.setShapefileVisible({ id: s.id, visible: s.visible === false }))">
+        <button
+          class="ctx-item"
+          @click="fromMenu((s) => sidebar.setShapefileVisible({ id: s.id, visible: s.visible === false }))"
+        >
           {{ menu.set.visible === false ? 'Show on map' : 'Hide from map' }}
         </button>
         <button class="ctx-item" @click="fromMenu((s) => sidebar.zoomToShapefile(s.id))">Zoom to</button>

@@ -44,34 +44,54 @@ function asciiField(dst, offset, text, width) {
 // written; without one (local frame) no CRS VLR is emitted. A flat cloud's
 // `attributes` are written as described at the top (attributes:false skips them).
 // Yields Uint8Array parts: the header (+ VLRs), then whole-record chunks.
-export function* cloudToLasParts(points, { crsCode = null, geographic = false, attributes = true, onLog,
-  partBytes = PART_BYTES } = {}) {
+export function* cloudToLasParts(
+  points,
+  { crsCode = null, geographic = false, attributes = true, onLog, partBytes = PART_BYTES } = {},
+) {
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
   const [getX, getY, getZ] = flat ? flatAxes(flat) : [(i) => points[i].x, (i) => points[i].y, (i) => points[i].z]
   const getC = flat
-    ? (flat.col ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]] : () => null)
+    ? flat.col
+      ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]]
+      : () => null
     : (i) => points[i].color
 
   // Real-world bbox (header min/max fields + quantization offsets).
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity
   for (let i = 0; i < n; i++) {
-    const x = getX(i), y = getY(i), z = getZ(i)
-    if (x < minX) minX = x; if (x > maxX) maxX = x
-    if (y < minY) minY = y; if (y > maxY) maxY = y
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+    const x = getX(i),
+      y = getY(i),
+      z = getZ(i)
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+    if (z < minZ) minZ = z
+    if (z > maxZ) maxZ = z
   }
-  if (!Number.isFinite(minX)) { minX = minY = minZ = 0; maxX = maxY = maxZ = 0 }
+  if (!Number.isFinite(minX)) {
+    minX = minY = minZ = 0
+    maxX = maxY = maxZ = 0
+  }
 
   // Per-axis quantization: offset at bbox min so the i32 range starts at 0; scale
   // keeps the span inside i32 with margin while staying ≥ 0.1 mm (survey precision).
   const scaleFor = (span) => Math.max((span / 2 ** 31) * 1.01, 1e-4)
   const scale = [scaleFor(maxX - minX), scaleFor(maxY - minY), scaleFor(maxZ - minZ)]
   const offset = [minX, minY, minZ]
-  onLog?.(`LAS export: ${n.toLocaleString()} points, scale [${scale.map((s) => s.toPrecision(3)).join(', ')}], `
-    + `offset [${offset.map((o) => o.toPrecision(6)).join(', ')}]`
-    + (crsCode ? `, EPSG:${crsCode} GeoKey VLR` : ', no CRS VLR (local frame)'), 'info', 'Export')
+  onLog?.(
+    `LAS export: ${n.toLocaleString()} points, scale [${scale.map((s) => s.toPrecision(3)).join(', ')}], ` +
+      `offset [${offset.map((o) => o.toPrecision(6)).join(', ')}]` +
+      (crsCode ? `, EPSG:${crsCode} GeoKey VLR` : ', no CRS VLR (local frame)'),
+    'info',
+    'Export',
+  )
 
   // Optional CRS VLR: GeoKeyDirectory (record 34735) serialized as a u16 array
   // [1,1,0,nKeys, then 4 u16 per key] — same entries the GeoTIFF writer uses.
@@ -85,23 +105,36 @@ export function* cloudToLasParts(points, { crsCode = null, geographic = false, a
     dir.forEach((v, i) => bv.setUint16(i * 2, v, true))
     vlr = body
   }
-  const vlrs = vlr
-    ? [{ userId: 'LASF_Projection', recordId: 34735, description: 'GeoKeyDirectory', data: vlr }]
-    : []
+  const vlrs = vlr ? [{ userId: 'LASF_Projection', recordId: 34735, description: 'GeoKeyDirectory', data: vlr }] : []
   const plan = planLasAttributes(attributes && flat ? flat.attributes : null, n, { onLog })
   if (plan.extra.length) vlrs.push(extraBytesVlr(plan.extra))
 
-  yield writeLasHeader({ n, vlrs, scale, offset, bbox: { minX, minY, minZ, maxX, maxY, maxZ },
-    format: plan.format, recordLength: plan.recordLength, pointsByReturn: pointsByReturn(plan.native, n) })
+  yield writeLasHeader({
+    n,
+    vlrs,
+    scale,
+    offset,
+    bbox: { minX, minY, minZ, maxX, maxY, maxZ },
+    format: plan.format,
+    recordLength: plan.recordLength,
+    pointsByReturn: pointsByReturn(plan.native, n),
+  })
   // Point records, in the exact on-disk layout, a chunk at a time. encodeLasPoints
   // is the one definition of a record — the LAZ writer (core/io/laz.js) feeds the
   // same chunks to its compressor.
   const per = Math.max(1, Math.floor(partBytes / plan.recordLength))
   for (let start = 0; start < n; start += per) {
     const len = Math.min(per, n - start)
-    yield encodeLasPoints({ n: len,
-      getX: (i) => getX(start + i), getY: (i) => getY(start + i), getZ: (i) => getZ(start + i),
-      getC: (i) => getC(start + i), scale, offset, ...sliceLasPlan(plan, start, len) })
+    yield encodeLasPoints({
+      n: len,
+      getX: (i) => getX(start + i),
+      getY: (i) => getY(start + i),
+      getZ: (i) => getZ(start + i),
+      getC: (i) => getC(start + i),
+      scale,
+      offset,
+      ...sliceLasPlan(plan, start, len),
+    })
   }
 }
 
@@ -117,15 +150,37 @@ export function sliceLasPlan(plan, start, len) {
 // plus any extra bytes. `native` maps standard field names to typed arrays already
 // checked to fit (planLasAttributes); `extra` is the extra-bytes field list. With
 // neither, every point is "return 1 of 1, never classified", as before.
-export function encodeLasPoints({ n, getX, getY, getZ, getC, scale, offset,
-  format = 2, recordLength = LAS_RECORD_F2, native = {}, extra = [] }) {
+export function encodeLasPoints({
+  n,
+  getX,
+  getY,
+  getZ,
+  getC,
+  scale,
+  offset,
+  format = 2,
+  recordLength = LAS_RECORD_F2,
+  native = {},
+  extra = [],
+}) {
   const out = new Uint8Array(n * recordLength)
   const dv = new DataView(out.buffer)
   const rgbOff = format === 3 ? 28 : 20
   const base = format === 3 ? LAS_RECORD_F3 : LAS_RECORD_F2
   const {
-    intensity, returnNumber, numberOfReturns, scanDirection, edgeOfFlightLine,
-    classification, synthetic, keyPoint, withheld, scanAngle, userData, pointSourceId, gpsTime,
+    intensity,
+    returnNumber,
+    numberOfReturns,
+    scanDirection,
+    edgeOfFlightLine,
+    classification,
+    synthetic,
+    keyPoint,
+    withheld,
+    scanAngle,
+    userData,
+    pointSourceId,
+    gpsTime,
   } = native
   const writers = extra.map((e) => [e.values, base + e.offset, EXTRA_SETTERS[e.dataType]])
   let p = 0
@@ -135,11 +190,17 @@ export function encodeLasPoints({ n, getX, getY, getZ, getC, scale, offset,
     dv.setInt32(p + 8, Math.round((getZ(i) - offset[2]) / scale[2]), true)
     if (intensity) dv.setUint16(p + 12, intensity[i], true)
     // Return byte: return number (3 bits), number of returns (3), scan direction, edge.
-    out[p + 14] = ((returnNumber ? returnNumber[i] : 1) & 7) | (((numberOfReturns ? numberOfReturns[i] : 1) & 7) << 3)
-      | ((scanDirection ? scanDirection[i] & 1 : 0) << 6) | ((edgeOfFlightLine ? edgeOfFlightLine[i] & 1 : 0) << 7)
+    out[p + 14] =
+      ((returnNumber ? returnNumber[i] : 1) & 7) |
+      (((numberOfReturns ? numberOfReturns[i] : 1) & 7) << 3) |
+      ((scanDirection ? scanDirection[i] & 1 : 0) << 6) |
+      ((edgeOfFlightLine ? edgeOfFlightLine[i] & 1 : 0) << 7)
     // Classification byte: class (5 bits) + synthetic / key-point / withheld flags.
-    out[p + 15] = ((classification ? classification[i] : 0) & 31) | ((synthetic ? synthetic[i] & 1 : 0) << 5)
-      | ((keyPoint ? keyPoint[i] & 1 : 0) << 6) | ((withheld ? withheld[i] & 1 : 0) << 7)
+    out[p + 15] =
+      ((classification ? classification[i] : 0) & 31) |
+      ((synthetic ? synthetic[i] & 1 : 0) << 5) |
+      ((keyPoint ? keyPoint[i] & 1 : 0) << 6) |
+      ((withheld ? withheld[i] & 1 : 0) << 7)
     if (scanAngle) dv.setInt8(p + 16, scanAngle[i])
     if (userData) out[p + 17] = userData[i]
     if (pointSourceId) dv.setUint16(p + 18, pointSourceId[i], true)
@@ -157,8 +218,17 @@ export function encodeLasPoints({ n, getX, getY, getZ, getC, scale, offset,
 // LAS 1.2 public header block + a VLR list. `compressed` sets the LASzip high bit
 // on the point format — the ONLY header difference between a .las and a .laz, since
 // the record length field keeps describing the *uncompressed* record either way.
-export function writeLasHeader({ n, vlrs = [], scale, offset, bbox, compressed = false,
-  format = 2, recordLength = LAS_RECORD_F2, pointsByReturn = null }) {
+export function writeLasHeader({
+  n,
+  vlrs = [],
+  scale,
+  offset,
+  bbox,
+  compressed = false,
+  format = 2,
+  recordLength = LAS_RECORD_F2,
+  pointsByReturn = null,
+}) {
   const { minX, minY, minZ, maxX, maxY, maxZ } = bbox
   const vlrBytes = vlrs.reduce((sum, v) => sum + VLR_HEADER_SIZE + v.data.length, 0)
   const offsetToPoints = HEADER_SIZE_12 + vlrBytes
@@ -167,34 +237,42 @@ export function writeLasHeader({ n, vlrs = [], scale, offset, bbox, compressed =
 
   asciiField(out, 0, 'LASF', 4)
   // 4 fileSourceId u16 = 0, 6 globalEncoding u16 = 0, 8–23 GUID = 0 (already zeroed)
-  out[24] = 1; out[25] = 2 // version 1.2
+  out[24] = 1
+  out[25] = 2 // version 1.2
   asciiField(out, 26, 'websfm', 32) // system identifier
   asciiField(out, 58, 'websfm', 32) // generating software
   const now = new Date()
   const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000)
   dv.setUint16(90, dayOfYear, true)
   dv.setUint16(92, now.getFullYear(), true)
-  dv.setUint16(94, HEADER_SIZE_12, true)     // header size
-  dv.setUint32(96, offsetToPoints, true)     // offset to point data
-  dv.setUint32(100, vlrs.length, true)       // number of VLRs
-  out[104] = compressed ? (format | 0x80) : format // point data format (high bit = LASzip)
-  dv.setUint16(105, recordLength, true)      // point data record length (uncompressed)
-  dv.setUint32(107, n, true)                 // legacy number of point records
+  dv.setUint16(94, HEADER_SIZE_12, true) // header size
+  dv.setUint32(96, offsetToPoints, true) // offset to point data
+  dv.setUint32(100, vlrs.length, true) // number of VLRs
+  out[104] = compressed ? format | 0x80 : format // point data format (high bit = LASzip)
+  dv.setUint16(105, recordLength, true) // point data record length (uncompressed)
+  dv.setUint32(107, n, true) // legacy number of point records
   // Points by return 1–5 (all first-return unless the cloud carries return numbers).
   if (pointsByReturn) pointsByReturn.forEach((c, k) => dv.setUint32(111 + k * 4, c, true))
   else dv.setUint32(111, n, true)
-  dv.setFloat64(131, scale[0], true); dv.setFloat64(139, scale[1], true); dv.setFloat64(147, scale[2], true)
-  dv.setFloat64(155, offset[0], true); dv.setFloat64(163, offset[1], true); dv.setFloat64(171, offset[2], true)
-  dv.setFloat64(179, maxX, true); dv.setFloat64(187, minX, true)
-  dv.setFloat64(195, maxY, true); dv.setFloat64(203, minY, true)
-  dv.setFloat64(211, maxZ, true); dv.setFloat64(219, minZ, true)
+  dv.setFloat64(131, scale[0], true)
+  dv.setFloat64(139, scale[1], true)
+  dv.setFloat64(147, scale[2], true)
+  dv.setFloat64(155, offset[0], true)
+  dv.setFloat64(163, offset[1], true)
+  dv.setFloat64(171, offset[2], true)
+  dv.setFloat64(179, maxX, true)
+  dv.setFloat64(187, minX, true)
+  dv.setFloat64(195, maxY, true)
+  dv.setFloat64(203, minY, true)
+  dv.setFloat64(211, maxZ, true)
+  dv.setFloat64(219, minZ, true)
 
   let p = HEADER_SIZE_12
   for (const v of vlrs) {
     // reserved u16 = 0
     asciiField(out, p + 2, v.userId, 16)
     dv.setUint16(p + 18, v.recordId, true)
-    dv.setUint16(p + 20, v.data.length, true)  // record length after header
+    dv.setUint16(p + 20, v.data.length, true) // record length after header
     asciiField(out, p + 22, v.description ?? '', 32)
     out.set(v.data, p + VLR_HEADER_SIZE)
     p += VLR_HEADER_SIZE + v.data.length
@@ -212,32 +290,55 @@ const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 // written as extra bytes under its own name, unchanged. Silently clamping an
 // imported class 40 to 8 would be worse than a field the reader has to look for.
 const NATIVE_FIELDS = {
-  intensity: [0, 65535], returnNumber: [0, 7], numberOfReturns: [0, 7],
-  scanDirection: [0, 1], edgeOfFlightLine: [0, 1], classification: [0, 31],
-  synthetic: [0, 1], keyPoint: [0, 1], withheld: [0, 1],
+  intensity: [0, 65535],
+  returnNumber: [0, 7],
+  numberOfReturns: [0, 7],
+  scanDirection: [0, 1],
+  edgeOfFlightLine: [0, 1],
+  classification: [0, 31],
+  synthetic: [0, 1],
+  keyPoint: [0, 1],
+  withheld: [0, 1],
   // Format 0–5 store whole degrees in an int8 (spec range ±90).
-  scanAngle: [-90, 90], userData: [0, 255], pointSourceId: [0, 65535],
+  scanAngle: [-90, 90],
+  userData: [0, 255],
+  pointSourceId: [0, 65535],
   gpsTime: null,
 }
 
 // LAS 1.4 R15 extra-bytes data types (single values): id, byte size, DataView
 // getter, and the typed array a reader hands back. 7/8 (u64/i64) read as doubles.
 const EXTRA_TYPES = {
-  1: [1, 'getUint8', Uint8Array], 2: [1, 'getInt8', Int8Array],
-  3: [2, 'getUint16', Uint16Array], 4: [2, 'getInt16', Int16Array],
-  5: [4, 'getUint32', Uint32Array], 6: [4, 'getInt32', Int32Array],
-  7: [8, 'getBigUint64', Float64Array], 8: [8, 'getBigInt64', Float64Array],
-  9: [4, 'getFloat32', Float32Array], 10: [8, 'getFloat64', Float64Array],
+  1: [1, 'getUint8', Uint8Array],
+  2: [1, 'getInt8', Int8Array],
+  3: [2, 'getUint16', Uint16Array],
+  4: [2, 'getInt16', Int16Array],
+  5: [4, 'getUint32', Uint32Array],
+  6: [4, 'getInt32', Int32Array],
+  7: [8, 'getBigUint64', Float64Array],
+  8: [8, 'getBigInt64', Float64Array],
+  9: [4, 'getFloat32', Float32Array],
+  10: [8, 'getFloat64', Float64Array],
 }
 const EXTRA_TYPE_OF = {
-  Uint8Array: 1, Int8Array: 2, Uint16Array: 3, Int16Array: 4,
-  Uint32Array: 5, Int32Array: 6, Float32Array: 9, Float64Array: 10,
+  Uint8Array: 1,
+  Int8Array: 2,
+  Uint16Array: 3,
+  Int16Array: 4,
+  Uint32Array: 5,
+  Int32Array: 6,
+  Float32Array: 9,
+  Float64Array: 10,
 }
 const EXTRA_SETTERS = {
-  1: (dv, o, v) => dv.setUint8(o, v), 2: (dv, o, v) => dv.setInt8(o, v),
-  3: (dv, o, v) => dv.setUint16(o, v, true), 4: (dv, o, v) => dv.setInt16(o, v, true),
-  5: (dv, o, v) => dv.setUint32(o, v, true), 6: (dv, o, v) => dv.setInt32(o, v, true),
-  9: (dv, o, v) => dv.setFloat32(o, v, true), 10: (dv, o, v) => dv.setFloat64(o, v, true),
+  1: (dv, o, v) => dv.setUint8(o, v),
+  2: (dv, o, v) => dv.setInt8(o, v),
+  3: (dv, o, v) => dv.setUint16(o, v, true),
+  4: (dv, o, v) => dv.setInt16(o, v, true),
+  5: (dv, o, v) => dv.setUint32(o, v, true),
+  6: (dv, o, v) => dv.setInt32(o, v, true),
+  9: (dv, o, v) => dv.setFloat32(o, v, true),
+  10: (dv, o, v) => dv.setFloat64(o, v, true),
 }
 export const EXTRA_BYTES_DESCRIPTOR_SIZE = 192
 const EXTRA_NAME_BYTES = 32
@@ -268,18 +369,26 @@ function extraName(name, used) {
  * Attributes no extra-bytes type can hold (or past the VLR's 341 fields) are dropped.
  */
 export function planLasAttributes(attributes, n, { onLog } = {}) {
-  const native = {}, extra = [], dropped = []
+  const native = {},
+    extra = [],
+    dropped = []
   const used = new Set()
   let offset = 0
   for (const [name, values] of Object.entries(attributes || {})) {
-    if (!values || !(values.length >= n)) { dropped.push(name); continue }
+    if (!values || !(values.length >= n)) {
+      dropped.push(name)
+      continue
+    }
     if (Object.hasOwn(NATIVE_FIELDS, name) && fitsNative(values, n, NATIVE_FIELDS[name])) {
       native[name] = values
       continue
     }
     const dataType = EXTRA_TYPE_OF[values.constructor?.name]
     // A VLR payload is at most 65535 bytes: 341 descriptors.
-    if (!dataType || extra.length >= MAX_EXTRA_FIELDS) { dropped.push(name); continue }
+    if (!dataType || extra.length >= MAX_EXTRA_FIELDS) {
+      dropped.push(name)
+      continue
+    }
     const size = EXTRA_TYPES[dataType][0]
     extra.push({ name: extraName(name, used), source: name, values, dataType, size, offset })
     offset += size
@@ -287,10 +396,14 @@ export function planLasAttributes(attributes, n, { onLog } = {}) {
   const format = native.gpsTime ? 3 : 2
   const recordLength = (format === 3 ? LAS_RECORD_F3 : LAS_RECORD_F2) + offset
   if (Object.keys(native).length || extra.length || dropped.length) {
-    onLog?.(`LAS attributes: point format ${format}, ${recordLength}-byte records`
-      + (Object.keys(native).length ? `; in standard fields: ${Object.keys(native).join(', ')}` : '')
-      + (extra.length ? `; as extra bytes: ${extra.map((e) => e.name).join(', ')}` : '')
-      + (dropped.length ? `; not written: ${dropped.join(', ')}` : ''), dropped.length ? 'warn' : 'info', 'Export')
+    onLog?.(
+      `LAS attributes: point format ${format}, ${recordLength}-byte records` +
+        (Object.keys(native).length ? `; in standard fields: ${Object.keys(native).join(', ')}` : '') +
+        (extra.length ? `; as extra bytes: ${extra.map((e) => e.name).join(', ')}` : '') +
+        (dropped.length ? `; not written: ${dropped.join(', ')}` : ''),
+      dropped.length ? 'warn' : 'info',
+      'Export',
+    )
   }
   return { format, recordLength, native, extra, dropped }
 }
@@ -332,8 +445,12 @@ export function parseExtraBytes(vlrs = []) {
   const dv = new DataView(v.data.buffer, v.data.byteOffset, v.data.byteLength)
   let offset = 0
   for (let o = 0; o + EXTRA_BYTES_DESCRIPTOR_SIZE <= v.data.length; o += EXTRA_BYTES_DESCRIPTOR_SIZE) {
-    const type = v.data[o + 2], options = v.data[o + 3]
-    if (type === 0) { offset += options; continue }
+    const type = v.data[o + 2],
+      options = v.data[o + 3]
+    if (type === 0) {
+      offset += options
+      continue
+    }
     if (type > 30) break
     const single = type <= 10
     const base = EXTRA_TYPES[((type - 1) % 10) + 1]
@@ -343,7 +460,10 @@ export function parseExtraBytes(vlrs = []) {
       while (end < 4 + EXTRA_NAME_BYTES && v.data[o + end]) end++
       const name = String.fromCharCode(...v.data.subarray(o + 4, o + end))
       out.push({
-        name: name || `extra${out.length}`, dataType: type, size, offset,
+        name: name || `extra${out.length}`,
+        dataType: type,
+        size,
+        offset,
         scale: options & 8 ? dv.getFloat64(o + 112, true) : null,
         add: options & 16 ? dv.getFloat64(o + 136, true) : null,
       })
@@ -352,7 +472,6 @@ export function parseExtraBytes(vlrs = []) {
   }
   return out
 }
-
 
 // RGB byte offset within a point record, per point data format. Formats without
 // an entry carry no RGB. (0/1/6: no RGB; 2: after xyz+intensity+flags; 3/5: after
@@ -363,9 +482,14 @@ const SUPPORTED_FORMATS = new Set(Object.keys(RECORD_MIN).map(Number))
 export const LAS_IMPORT_BUDGET = 1024 ** 3
 
 export function validateLasAllocation(count, recordLength, extraBytes = 0) {
-  if (!Number.isSafeInteger(count) || count < 0 || count > 0xffffffff
-      || !Number.isSafeInteger(recordLength) || recordLength <= 0
-      || count * (recordLength * 2 + 64) + extraBytes > LAS_IMPORT_BUDGET) {
+  if (
+    !Number.isSafeInteger(count) ||
+    count < 0 ||
+    count > 0xffffffff ||
+    !Number.isSafeInteger(recordLength) ||
+    recordLength <= 0 ||
+    count * (recordLength * 2 + 64) + extraBytes > LAS_IMPORT_BUDGET
+  ) {
     throw new Error('LAS/LAZ import exceeds the 1 GiB working-memory limit; split or subsample the cloud first')
   }
 }
@@ -380,8 +504,10 @@ export function parseLas(buffer, { onLog } = {}) {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
   const h = readLasHeader(bytes)
   if (h.isLaz) {
-    throw new Error('This file is LAZ (compressed LAS) — open it through the LAZ reader '
-      + '(core/io/laz.js), which needs the lazcodec WASM module')
+    throw new Error(
+      'This file is LAZ (compressed LAS) — open it through the LAZ reader ' +
+        '(core/io/laz.js), which needs the lazcodec WASM module',
+    )
   }
   let count = h.count
   // The record count must fit the buffer; trust the smaller of header vs bytes.
@@ -391,10 +517,21 @@ export function parseLas(buffer, { onLog } = {}) {
     count = Math.max(0, avail)
   }
   const cloud = decodeLasPoints(
-    bytes.subarray(h.offsetToPoints), count, h.recordLength, h.format, h.scale, h.offset, h.extraBytes)
-  onLog?.(`LAS: read ${count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `
-    + `format ${h.format}${cloud.col ? ', RGB' : ''}`
-    + `${h.extraBytes.length ? `, extra bytes: ${h.extraBytes.map((e) => e.name).join(', ')}` : ''})`, 'info', 'Import')
+    bytes.subarray(h.offsetToPoints),
+    count,
+    h.recordLength,
+    h.format,
+    h.scale,
+    h.offset,
+    h.extraBytes,
+  )
+  onLog?.(
+    `LAS: read ${count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, ` +
+      `format ${h.format}${cloud.col ? ', RGB' : ''}` +
+      `${h.extraBytes.length ? `, extra bytes: ${h.extraBytes.map((e) => e.name).join(', ')}` : ''})`,
+    'info',
+    'Import',
+  )
   return cloud
 }
 
@@ -406,13 +543,18 @@ export function readLasHeader(bytes) {
   if (bytes.length < HEADER_SIZE_12 || String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) !== 'LASF') {
     throw new Error('Not a LAS file (missing LASF signature)')
   }
-  const versionMajor = bytes[24], versionMinor = bytes[25]
+  const versionMajor = bytes[24],
+    versionMinor = bytes[25]
   const headerSize = dv.getUint16(94, true)
   const offsetToPoints = dv.getUint32(96, true)
   if (versionMajor !== 1 || versionMinor > 4) throw new Error('Unsupported LAS version')
   const minimumHeader = versionMinor >= 4 ? 375 : versionMinor === 3 ? 235 : HEADER_SIZE_12
-  if (headerSize < minimumHeader || headerSize > bytes.length
-      || offsetToPoints < headerSize || offsetToPoints > bytes.length) {
+  if (
+    headerSize < minimumHeader ||
+    headerSize > bytes.length ||
+    offsetToPoints < headerSize ||
+    offsetToPoints > bytes.length
+  ) {
     throw new Error('Invalid LAS header size or point-data offset')
   }
   const nVlrs = dv.getUint32(100, true)
@@ -452,7 +594,7 @@ export function readLasHeader(bytes) {
   if (recordLength < RECORD_MIN[format]) throw new Error('Invalid LAS point record length')
   const scale = [dv.getFloat64(131, true), dv.getFloat64(139, true), dv.getFloat64(147, true)]
   const offset = [dv.getFloat64(155, true), dv.getFloat64(163, true), dv.getFloat64(171, true)]
-  if (scale.some(v => !Number.isFinite(v) || v <= 0) || offset.some(v => !Number.isFinite(v))) {
+  if (scale.some((v) => !Number.isFinite(v) || v <= 0) || offset.some((v) => !Number.isFinite(v))) {
     throw new Error('Invalid LAS coordinate scale or offset')
   }
   // The header's extent (max then min per axis); some writers leave it zero.
@@ -461,8 +603,18 @@ export function readLasHeader(bytes) {
     max: [dv.getFloat64(179, true), dv.getFloat64(195, true), dv.getFloat64(211, true)],
   }
   return {
-    versionMajor, versionMinor, headerSize, offsetToPoints, formatRaw, format, recordLength,
-    count, isLaz, vlrs, extraBytes: parseExtraBytes(vlrs), bounds,
+    versionMajor,
+    versionMinor,
+    headerSize,
+    offsetToPoints,
+    formatRaw,
+    format,
+    recordLength,
+    count,
+    isLaz,
+    vlrs,
+    extraBytes: parseExtraBytes(vlrs),
+    bounds,
     scale: [dv.getFloat64(131, true), dv.getFloat64(139, true), dv.getFloat64(147, true)],
     offset: [dv.getFloat64(155, true), dv.getFloat64(163, true), dv.getFloat64(171, true)],
   }
@@ -476,8 +628,12 @@ export function readLasHeader(bytes) {
 // from class ids.
 export function decodeLasPoints(pointBytes, count, recordLength, format, scale, offset, extraBytes = []) {
   validateLasAllocation(count, recordLength)
-  if (!SUPPORTED_FORMATS.has(format) || recordLength < RECORD_MIN[format]
-      || count * recordLength > pointBytes.byteLength) throw new Error('Truncated or invalid LAS point records')
+  if (
+    !SUPPORTED_FORMATS.has(format) ||
+    recordLength < RECORD_MIN[format] ||
+    count * recordLength > pointBytes.byteLength
+  )
+    throw new Error('Truncated or invalid LAS point records')
   const decoder = createLasDecoder(count, recordLength, format, scale, offset, extraBytes)
   decoder.decode(pointBytes, 0, count)
   return decoder.finish()
@@ -511,9 +667,18 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
   // and leaving it out still writes the same records back. A file whose return numbers
   // are all 0 keeps them, so it is written with 0 again.
   const std = {
-    intensity: null, classification: null, returnNumber: null, numberOfReturns: null,
-    scanAngle: null, pointSourceId: null, userData: null, synthetic: null, keyPoint: null,
-    withheld: null, scanDirection: null, edgeOfFlightLine: null,
+    intensity: null,
+    classification: null,
+    returnNumber: null,
+    numberOfReturns: null,
+    scanAngle: null,
+    pointSourceId: null,
+    userData: null,
+    synthetic: null,
+    keyPoint: null,
+    withheld: null,
+    scanDirection: null,
+    edgeOfFlightLine: null,
     ...(modern || format === 1 || format === 3 ? { gpsTime: null } : {}),
     ...(modern ? { overlap: null, scannerChannel: null } : {}),
     ...(format === 8 ? { nir: null } : {}),
@@ -534,7 +699,12 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
     const values = new (transform ? Float64Array : ArrayType)(count)
     extras.push({ at, getter, big: getter.startsWith('getBig'), transform, k: e.scale ?? 1, add: e.add ?? 0, values })
     // Own data property even for a hostile name like "__proto__".
-    Object.defineProperty(extraAttributes, e.name, { value: values, enumerable: true, writable: true, configurable: true })
+    Object.defineProperty(extraAttributes, e.name, {
+      value: values,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
   }
   let rgbMax = 0
 
@@ -558,20 +728,32 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
       if ((classFlags >> 2) & 1) U8('withheld')[i] = 1
       if (((modern ? flags : returns) >> 6) & 1) U8('scanDirection')[i] = 1
       if (((modern ? flags : returns) >> 7) & 1) U8('edgeOfFlightLine')[i] = 1
-      if ((v = modern ? dv.getInt16(p + 18, true) * 0.006 : dv.getInt8(p + 16))) (std.scanAngle ??= new Float32Array(count))[i] = v
+      if ((v = modern ? dv.getInt16(p + 18, true) * 0.006 : dv.getInt8(p + 16)))
+        (std.scanAngle ??= new Float32Array(count))[i] = v
       if ((v = dv.getUint8(p + 17))) U8('userData')[i] = v
       if ((v = dv.getUint16(p + (modern ? 20 : 18), true))) U16('pointSourceId')[i] = v
-      if ('gpsTime' in std && (v = dv.getFloat64(p + (modern ? 22 : 20), true))) (std.gpsTime ??= new Float64Array(count))[i] = v
+      if ('gpsTime' in std && (v = dv.getFloat64(p + (modern ? 22 : 20), true)))
+        (std.gpsTime ??= new Float64Array(count))[i] = v
       if (modern) {
         if ((flags >> 3) & 1) U8('overlap')[i] = 1
         if ((v = (flags >> 4) & 3)) U8('scannerChannel')[i] = v
       }
       if ('nir' in std && (v = dv.getUint16(p + 36, true))) U16('nir')[i] = v
       if (col) {
-        const r = dv.getUint16(p + rgbOff, true), g = dv.getUint16(p + rgbOff + 2, true), b = dv.getUint16(p + rgbOff + 4, true)
-        if (r > rgbMax) rgbMax = r; if (g > rgbMax) rgbMax = g; if (b > rgbMax) rgbMax = b
-        col[i * 3] = r >> 8; col[i * 3 + 1] = g >> 8; col[i * 3 + 2] = b >> 8
-        if (low) { low[i * 3] = r; low[i * 3 + 1] = g; low[i * 3 + 2] = b }
+        const r = dv.getUint16(p + rgbOff, true),
+          g = dv.getUint16(p + rgbOff + 2, true),
+          b = dv.getUint16(p + rgbOff + 4, true)
+        if (r > rgbMax) rgbMax = r
+        if (g > rgbMax) rgbMax = g
+        if (b > rgbMax) rgbMax = b
+        col[i * 3] = r >> 8
+        col[i * 3 + 1] = g >> 8
+        col[i * 3 + 2] = b >> 8
+        if (low) {
+          low[i * 3] = r
+          low[i * 3 + 1] = g
+          low[i * 3 + 2] = b
+        }
       }
       p += recordLength
     }
@@ -591,7 +773,9 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
     const eightBit = rgbBits ? rgbBits === 8 : rgbMax > 0 && rgbMax <= 255
     const outCol = col && eightBit ? low : col
     const attributes = Object.assign(
-      Object.fromEntries(Object.entries(std).filter(([, values]) => values)), extraAttributes)
+      Object.fromEntries(Object.entries(std).filter(([, values]) => values)),
+      extraAttributes,
+    )
     return { count, pos, ...(outCol ? { col: outCol } : {}), attributes }
   }
 
@@ -603,11 +787,14 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
 // the file is never one buffer next to the decoded cloud.
 export async function parseLasSource(source, { onLog, chunkBytes = 8 * 1024 * 1024 } = {}) {
   const first = await source.read(0, Math.min(source.size, HEADER_SIZE_12))
-  const offsetToPoints = first.length >= 100 ? new DataView(first.buffer, first.byteOffset, first.byteLength).getUint32(96, true) : 0
+  const offsetToPoints =
+    first.length >= 100 ? new DataView(first.buffer, first.byteOffset, first.byteLength).getUint32(96, true) : 0
   const h = readLasHeader(await source.read(0, Math.min(source.size, Math.max(offsetToPoints, 375))))
   if (h.isLaz) {
-    throw new Error('This file is LAZ (compressed LAS) — open it through the LAZ reader '
-      + '(core/io/laz.js), which needs the lazcodec WASM module')
+    throw new Error(
+      'This file is LAZ (compressed LAS) — open it through the LAZ reader ' +
+        '(core/io/laz.js), which needs the lazcodec WASM module',
+    )
   }
   let count = h.count
   const avail = Math.floor((source.size - h.offsetToPoints) / h.recordLength)
@@ -624,8 +811,12 @@ export async function parseLasSource(source, { onLog, chunkBytes = 8 * 1024 * 10
     decoder.decode(await source.read(at, at + n * h.recordLength), start, n)
   }
   const cloud = decoder.finish()
-  onLog?.(`LAS: read ${count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `
-    + `format ${h.format}${cloud.col ? ', RGB' : ''}`
-    + `${h.extraBytes.length ? `, extra bytes: ${h.extraBytes.map((e) => e.name).join(', ')}` : ''})`, 'info', 'Import')
+  onLog?.(
+    `LAS: read ${count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, ` +
+      `format ${h.format}${cloud.col ? ', RGB' : ''}` +
+      `${h.extraBytes.length ? `, extra bytes: ${h.extraBytes.map((e) => e.name).join(', ')}` : ''})`,
+    'info',
+    'Import',
+  )
   return cloud
 }

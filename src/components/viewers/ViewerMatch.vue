@@ -48,16 +48,16 @@ const hideUnused = ref(false)
 const spillPoints = ref(false)
 
 // Colour palette, mirroring Metashape's aligned/not-aligned convention.
-const C_USED = '#00e676'     // green — became a tie-point
-const C_UNUSED = '#ff5252'   // red — verified inlier, not in the model
-const C_NEUTRAL = '#ffd700'  // gold — no sparse model to judge against
+const C_USED = '#00e676' // green — became a tie-point
+const C_UNUSED = '#ff5252' // red — verified inlier, not in the model
+const C_NEUTRAL = '#ffd700' // gold — no sparse model to judge against
 
-const panelsEl       = ref(null)
-const leftContainer  = ref(null)
+const panelsEl = ref(null)
+const leftContainer = ref(null)
 const rightContainer = ref(null)
-const leftImg        = ref(null)
-const rightImg       = ref(null)
-const overlayCanvas  = ref(null)
+const leftImg = ref(null)
+const rightImg = ref(null)
+const overlayCanvas = ref(null)
 
 // Per-panel pan/zoom state
 const L = ref({ scale: 1, tx: 0, ty: 0 })
@@ -65,20 +65,22 @@ const R = ref({ scale: 1, tx: 0, ty: 0 })
 
 const MIN_SCALE = 0.05
 const MAX_SCALE = 40
-function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)) }
+function clamp(v, lo, hi) {
+  return Math.min(hi, Math.max(lo, v))
+}
 
-let dragging = null  // null | { panel: 'L'|'R', startX, startY, startTx, startTy }
+let dragging = null // null | { panel: 'L'|'R', startX, startY, startTx, startTy }
 
 // ── Fit ───────────────────────────────────────────────────────────────────────
 
 function fit(side) {
-  const c   = side === 'L' ? leftContainer.value  : rightContainer.value
-  const img = side === 'L' ? leftImg.value        : rightImg.value
-  const s   = side === 'L' ? L.value              : R.value
+  const c = side === 'L' ? leftContainer.value : rightContainer.value
+  const img = side === 'L' ? leftImg.value : rightImg.value
+  const s = side === 'L' ? L.value : R.value
   if (!c || !img?.naturalWidth) return
   const sc = Math.min(c.clientWidth / img.naturalWidth, c.clientHeight / img.naturalHeight, 1)
   s.scale = sc
-  s.tx = (c.clientWidth  - img.naturalWidth  * sc) / 2
+  s.tx = (c.clientWidth - img.naturalWidth * sc) / 2
   s.ty = (c.clientHeight - img.naturalHeight * sc) / 2
   drawOverlay()
 }
@@ -101,10 +103,10 @@ function applyZoom(side, factor, cx, cy) {
 }
 
 function onWheel(e, side) {
-  const c    = side === 'L' ? leftContainer.value : rightContainer.value
+  const c = side === 'L' ? leftContainer.value : rightContainer.value
   const rect = c.getBoundingClientRect()
-  const cx   = e.clientX - rect.left
-  const cy   = e.clientY - rect.top
+  const cx = e.clientX - rect.left
+  const cy = e.clientY - rect.top
   applyZoom(side, e.deltaY < 0 ? 1.15 : 1 / 1.15, cx, cy)
 }
 
@@ -124,17 +126,19 @@ function onMouseMove(e) {
   drawOverlay()
 }
 
-function onMouseUp() { dragging = null }
+function onMouseUp() {
+  dragging = null
+}
 
 // ── Overlay drawing ───────────────────────────────────────────────────────────
 
 function drawOverlay() {
-  const canvas  = overlayCanvas.value
-  const panels  = panelsEl.value
-  const lc      = leftContainer.value
-  const rc      = rightContainer.value
-  const li      = leftImg.value
-  const ri      = rightImg.value
+  const canvas = overlayCanvas.value
+  const panels = panelsEl.value
+  const lc = leftContainer.value
+  const rc = rightContainer.value
+  const li = leftImg.value
+  const ri = rightImg.value
   if (!canvas || !panels || !lc || !rc) return
 
   const panelsRect = panels.getBoundingClientRect()
@@ -143,12 +147,12 @@ function drawOverlay() {
   if (!w || !h) return
 
   const dpr = window.devicePixelRatio || 1
-  const pw  = Math.round(w * dpr)
-  const ph  = Math.round(h * dpr)
+  const pw = Math.round(w * dpr)
+  const ph = Math.round(h * dpr)
   if (canvas.width !== pw || canvas.height !== ph) {
-    canvas.width  = pw
+    canvas.width = pw
     canvas.height = ph
-    canvas.style.width  = `${w}px`
+    canvas.style.width = `${w}px`
     canvas.style.height = `${h}px`
   }
 
@@ -160,28 +164,37 @@ function drawOverlay() {
   const rcRect = rc.getBoundingClientRect()
 
   const lOx = lcRect.left - panelsRect.left
-  const lOy = lcRect.top  - panelsRect.top
+  const lOy = lcRect.top - panelsRect.top
   const rOx = rcRect.left - panelsRect.left
-  const rOy = rcRect.top  - panelsRect.top
+  const rOy = rcRect.top - panelsRect.top
 
   // Typed keypoints (core/features/keypoints.js), read by index.
-  const kpsA   = props.keypointsA
-  const kpsB   = props.keypointsB
-  const pairs  = pairList.value
+  const kpsA = props.keypointsA
+  const kpsB = props.keypointsB
+  const pairs = pairList.value
 
   if (!li?.naturalWidth || !ri?.naturalWidth || !pairs.length || !kpsA?.length || !kpsB?.length) return
 
-  const lNW = li.naturalWidth,  lNH = li.naturalHeight
-  const rNW = ri.naturalWidth,  rNH = ri.naturalHeight
-  const ls = L.value.scale, ltx = L.value.tx + lOx, lty = L.value.ty + lOy
-  const rs = R.value.scale, rtx = R.value.tx + rOx, rty = R.value.ty + rOy
+  const lNW = li.naturalWidth,
+    lNH = li.naturalHeight
+  const rNW = ri.naturalWidth,
+    rNH = ri.naturalHeight
+  const ls = L.value.scale,
+    ltx = L.value.tx + lOx,
+    lty = L.value.ty + lOy
+  const rs = R.value.scale,
+    rtx = R.value.tx + rOx,
+    rty = R.value.ty + rOy
 
-  function lPos(i) { return { x: kpsA.nx(i) * lNW * ls + ltx, y: kpsA.ny(i) * lNH * ls + lty } }
-  function rPos(i) { return { x: kpsB.nx(i) * rNW * rs + rtx, y: kpsB.ny(i) * rNH * rs + rty } }
+  function lPos(i) {
+    return { x: kpsA.nx(i) * lNW * ls + ltx, y: kpsA.ny(i) * lNH * ls + lty }
+  }
+  function rPos(i) {
+    return { x: kpsB.nx(i) * rNW * rs + rtx, y: kpsB.ny(i) * rNH * rs + rty }
+  }
 
   const used = props.usedKeys
-  const colorOf = (ia, ib) =>
-    used ? (used.has(`${ia}:${ib}`) ? C_USED : C_UNUSED) : C_NEUTRAL
+  const colorOf = (ia, ib) => (used ? (used.has(`${ia}:${ib}`) ? C_USED : C_UNUSED) : C_NEUTRAL)
 
   // Lines (drawn under dots). Draw unused (red) first so aligned (green) lands on
   // top — the aligned tie-points are the signal, and shouldn't be occluded.
@@ -195,14 +208,15 @@ function drawOverlay() {
       ctx.globalAlpha = used ? (isUsed ? 0.45 : 0.2) : 0.35
       ctx.strokeStyle = colorOf(ia, ib)
       ctx.beginPath()
-      const a = lPos(ia), b = rPos(ib)
+      const a = lPos(ia),
+        b = rPos(ib)
       ctx.moveTo(a.x, a.y)
       ctx.lineTo(b.x, b.y)
       ctx.stroke()
     }
   }
   if (used) {
-    if (!hideUnused.value) drawLines(false)  // unused (red) — suppressed when hiding
+    if (!hideUnused.value) drawLines(false) // unused (red) — suppressed when hiding
     drawLines(true)
   } else drawLines(true)
   ctx.restore()
@@ -212,8 +226,8 @@ function drawOverlay() {
   const DOT = 4
   const drawDots = (side) => {
     const rect = side === 'L' ? lcRect : rcRect
-    const kps  = side === 'L' ? kpsA   : kpsB
-    const pos  = side === 'L' ? lPos   : rPos
+    const kps = side === 'L' ? kpsA : kpsB
+    const pos = side === 'L' ? lPos : rPos
     ctx.save()
     if (!spillPoints.value) {
       ctx.beginPath()
@@ -247,7 +261,8 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(() => {
     const el = panelsEl.value
     if (!el) return
-    const w = el.clientWidth, h = el.clientHeight
+    const w = el.clientWidth,
+      h = el.clientHeight
     if (!w || !h) return
     if (lastSize && lastSize.w === w && lastSize.h === h) return
     lastSize = { w, h }
@@ -258,12 +273,25 @@ onMounted(() => {
 
 onBeforeUnmount(() => resizeObserver?.disconnect())
 
-watch(() => props.matches,          () => drawOverlay(), { deep: false })
-watch(() => props.usedKeys,         () => drawOverlay())
-watch(hideUnused,                   () => drawOverlay())
-watch(spillPoints,                  () => drawOverlay())
-watch(() => props.keypointsA,       () => drawOverlay())
-watch(() => props.keypointsB,       () => drawOverlay())
+watch(
+  () => props.matches,
+  () => drawOverlay(),
+  { deep: false },
+)
+watch(
+  () => props.usedKeys,
+  () => drawOverlay(),
+)
+watch(hideUnused, () => drawOverlay())
+watch(spillPoints, () => drawOverlay())
+watch(
+  () => props.keypointsA,
+  () => drawOverlay(),
+)
+watch(
+  () => props.keypointsB,
+  () => drawOverlay(),
+)
 
 function onImgLoad(side) {
   fit(side)
@@ -272,13 +300,7 @@ function onImgLoad(side) {
 
 <template>
   <div class="match-viewer">
-    <div
-      ref="panelsEl"
-      class="panels"
-      @mousemove="onMouseMove"
-      @mouseup="onMouseUp"
-      @mouseleave="onMouseUp"
-    >
+    <div ref="panelsEl" class="panels" @mousemove="onMouseMove" @mouseup="onMouseUp" @mouseleave="onMouseUp">
       <!-- Left panel -->
       <div
         ref="leftContainer"
@@ -328,8 +350,8 @@ function onImgLoad(side) {
     <div class="status-bar">
       <span class="panel-label">{{ imageA.name }}</span>
       <span v-if="usedStats" class="match-legend">
-        <span class="swatch used" /> {{ usedStats.used }} aligned
-        <span class="swatch unused" /> {{ usedStats.unused }} unused
+        <span class="swatch used" /> {{ usedStats.used }} aligned <span class="swatch unused" />
+        {{ usedStats.unused }} unused
         <template v-if="usedStats.viaPnp"><span class="swatch pnp" /> {{ usedStats.viaPnp }} via PnP</template>
         <button
           v-if="usedStats.unused"
@@ -337,7 +359,9 @@ function onImgLoad(side) {
           :class="{ on: hideUnused }"
           :title="hideUnused ? 'Show unused matches' : 'Hide unused (red) matches'"
           @click="hideUnused = !hideUnused"
-        >{{ hideUnused ? 'Show unused' : 'Hide unused' }}</button>
+        >
+          {{ hideUnused ? 'Show unused' : 'Hide unused' }}
+        </button>
       </span>
       <span v-else class="match-count">{{ matches.length }} tie points</span>
       <label class="spill-toggle" title="Draw a panned image's points even where they overlap the other photo">
@@ -374,7 +398,9 @@ function onImgLoad(side) {
   cursor: grab;
 }
 
-.panel:active { cursor: grabbing; }
+.panel:active {
+  cursor: grabbing;
+}
 
 .panel-img {
   position: absolute;
@@ -432,10 +458,18 @@ function onImgLoad(side) {
   margin-left: 6px;
 }
 
-.match-legend .swatch:first-child { margin-left: 0; }
-.match-legend .swatch.used   { background: #00e676; }
-.match-legend .swatch.unused { background: #ff5252; }
-.match-legend .swatch.pnp    { background: #40a0ff; }
+.match-legend .swatch:first-child {
+  margin-left: 0;
+}
+.match-legend .swatch.used {
+  background: #00e676;
+}
+.match-legend .swatch.unused {
+  background: #ff5252;
+}
+.match-legend .swatch.pnp {
+  background: #40a0ff;
+}
 
 .legend-toggle {
   margin-left: 10px;
@@ -448,8 +482,14 @@ function onImgLoad(side) {
   padding: 1px 7px;
   cursor: pointer;
 }
-.legend-toggle:hover { background: var(--hover-bg); color: var(--text); }
-.legend-toggle.on { border-color: var(--accent); color: var(--accent); }
+.legend-toggle:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+.legend-toggle.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 .spill-toggle {
   display: flex;
@@ -458,8 +498,13 @@ function onImgLoad(side) {
   cursor: pointer;
   white-space: nowrap;
 }
-.spill-toggle input { margin: 0; cursor: pointer; }
-.spill-toggle:hover { color: var(--text); }
+.spill-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+.spill-toggle:hover {
+  color: var(--text);
+}
 
 .panel-label {
   max-width: 40%;

@@ -10,13 +10,18 @@ import { NO_LABEL } from './orthoWindow.js'
 // `streamed`: an entry is a depth map's planes and its photo, else the photo alone.
 export function orthoCacheLog(cacheBytes, entryBytes, maxMaps, { mosaic = false, streamed = true } = {}) {
   const fit = Math.floor(cacheBytes / entryBytes)
-  const head = `Ortho: the map/photo cache (${formatBytes(cacheBytes)}) holds about ${fit} `
-    + `${streamed ? 'depth maps with their photos' : 'decoded photos'} (up to ${formatBytes(entryBytes)} each); `
-    + `one block sees up to ${maxMaps} maps`
+  const head =
+    `Ortho: the map/photo cache (${formatBytes(cacheBytes)}) holds about ${fit} ` +
+    `${streamed ? 'depth maps with their photos' : 'decoded photos'} (up to ${formatBytes(entryBytes)} each); ` +
+    `one block sees up to ${maxMaps} maps`
   if (fit >= maxMaps) return [head, 'info', 'Products']
-  return [`${head}, so ${mosaic ? 'its passes re-read and re-decode' : 'it re-reads and re-decodes'} the photos `
-    + 'of the busiest blocks. A coarser GSD (smaller photo decodes) or a higher memory budget '
-    + '(Settings ▸ Compute) avoids it', 'warn', 'Products']
+  return [
+    `${head}, so ${mosaic ? 'its passes re-read and re-decode' : 'it re-reads and re-decodes'} the photos ` +
+      'of the busiest blocks. A coarser GSD (smaller photo decodes) or a higher memory budget ' +
+      '(Settings ▸ Compute) avoids it',
+    'warn',
+    'Products',
+  ]
 }
 
 // Blocks in groups of about `size`: a rectangle of neighbouring blocks (squarer is
@@ -34,7 +39,8 @@ export function blockGroups(nbx, nby, size) {
     if (row % 2) xs.reverse()
     for (const tx of xs) {
       const g = []
-      for (let by = ty; by < Math.min(nby, ty + gy); by++) for (let bx = tx; bx < Math.min(nbx, tx + gx); bx++) g.push(by * nbx + bx)
+      for (let by = ty; by < Math.min(nby, ty + gy); by++)
+        for (let bx = tx; bx < Math.min(nbx, tx + gx); bx++) g.push(by * nbx + bx)
       groups.push(g)
     }
   }
@@ -53,7 +59,8 @@ export function visitSequence(groupMaps, passes) {
 
 // Relative cost of a cache miss: a photo read and decode against a map's planes read
 // (quarry-347, 2026-10-20: ~0.2–0.3 s against ~0.07 s).
-const PHOTO_COST = 3, MAP_COST = 1
+const PHOTO_COST = 3,
+  MAP_COST = 1
 
 // P6: the group size that costs the fewest reads — each candidate's visit sequence
 // replayed through a farthest-next-use cache (the run's own policy) of what the cache
@@ -68,7 +75,14 @@ const PHOTO_COST = 3, MAP_COST = 1
 // passes decode only those maps' photos — of the 238 maps that see a quarry block at long
 // side 12,000 a few dozen own any of it — so without them every visible map would count
 // as a decode, which overrated both plans (10,302 predicted against ~4,000 run).
-export function chooseGroupSize(nbx, nby, blocks, passes, mosaic, { cacheBytes, blockBytes, entryBytes, mapsResident = false, entrySizes = null, owners = null }) {
+export function chooseGroupSize(
+  nbx,
+  nby,
+  blocks,
+  passes,
+  mosaic,
+  { cacheBytes, blockBytes, entryBytes, mapsResident = false, entrySizes = null, owners = null },
+) {
   const nBlocks = nbx * nby
   const predicted = {}
   let best = { size: 1, cost: Infinity }
@@ -87,7 +101,8 @@ export function chooseGroupSize(nbx, nby, blocks, passes, mosaic, { cacheBytes, 
     for (let gi = 0; gi < groupMaps.length; gi++) {
       const own = owners ? new Set(groupList[gi].flatMap((bi) => [...owners[bi]])) : null
       for (let k = 0; k < passes; k++) {
-        for (const mi of passOrder(groupMaps[gi], k)) kinds.push(!mosaic ? 2 : k === 0 ? 1 : own && !own.has(mi) ? 0 : 2)
+        for (const mi of passOrder(groupMaps[gi], k))
+          kinds.push(!mosaic ? 2 : k === 0 ? 1 : own && !own.has(mi) ? 0 : 2)
       }
     }
     const cost = replayCache(seq, kinds, entrySizes ? room : cap, mapsResident ? 0 : MAP_COST, entrySizes)
@@ -102,10 +117,15 @@ export function chooseGroupSize(nbx, nby, blocks, passes, mosaic, { cacheBytes, 
 // the cached entry already has it. The cache holds `cap` entries, or with `sizes`
 // (per map { map, photo } bytes) `cap` bytes.
 function replayCache(seq, kinds, cap, mapCost, sizes = null) {
-  const next = new Float64Array(seq.length), seen = new Map()
-  for (let p = seq.length - 1; p >= 0; p--) { next[p] = seen.get(seq[p]) ?? Infinity; seen.set(seq[p], p) }
+  const next = new Float64Array(seq.length),
+    seen = new Map()
+  for (let p = seq.length - 1; p >= 0; p--) {
+    next[p] = seen.get(seq[p]) ?? Infinity
+    seen.set(seq[p], p)
+  }
   const cache = new Map() // mi → { next, photo, bytes }
-  let cost = 0, held = 0
+  let cost = 0,
+    held = 0
   const over = () => (sizes ? held > cap : cache.size > cap)
   for (let p = 0; p < seq.length; p++) {
     const mi = seq[p]
@@ -114,17 +134,36 @@ function replayCache(seq, kinds, cap, mapCost, sizes = null) {
       if (e) e.next = next[p]
       continue
     }
-    if (!e) { cost += mapCost; e = { next: 0, photo: false, bytes: sizes ? sizes[mi].map : 1 }; cache.set(mi, e); held += e.bytes }
+    if (!e) {
+      cost += mapCost
+      e = { next: 0, photo: false, bytes: sizes ? sizes[mi].map : 1 }
+      cache.set(mi, e)
+      held += e.bytes
+    }
     if (kinds[p] === 2 && !e.photo) {
-      cost += PHOTO_COST; e.photo = true
-      if (sizes) { e.bytes += sizes[mi].photo; held += sizes[mi].photo }
+      cost += PHOTO_COST
+      e.photo = true
+      if (sizes) {
+        e.bytes += sizes[mi].photo
+        held += sizes[mi].photo
+      }
     }
     e.next = next[p]
-    for (const [k, v] of cache) if (v.next === Infinity) { cache.delete(k); held -= v.bytes }
+    for (const [k, v] of cache)
+      if (v.next === Infinity) {
+        cache.delete(k)
+        held -= v.bytes
+      }
     while (over() && cache.size) {
-      let worst = -1, far = -Infinity
-      for (const [k, v] of cache) if (v.next > far) { far = v.next; worst = k }
-      held -= cache.get(worst).bytes; cache.delete(worst)
+      let worst = -1,
+        far = -Infinity
+      for (const [k, v] of cache)
+        if (v.next > far) {
+          far = v.next
+          worst = k
+        }
+      held -= cache.get(worst).bytes
+      cache.delete(worst)
     }
   }
   return cost
@@ -133,13 +172,17 @@ function replayCache(seq, kinds, cap, mapCost, sizes = null) {
 // The maps the graph cut (its coarse label grid) gives a part of block b's window, of
 // those the block sees.
 export function ownersFromCut({ labels, grid: { f, cw } }, b) {
-  const sees = new Set(b.maps), own = new Set()
-  const c0 = Math.floor(b.ex0 / f), c1 = Math.floor((b.ex0 + b.ew - 1) / f)
-  const r0 = Math.floor(b.ey0 / f), r1 = Math.floor((b.ey0 + b.eh - 1) / f)
-  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-    const l = labels[r * cw + c]
-    if (l !== NO_LABEL && sees.has(l)) own.add(l)
-  }
+  const sees = new Set(b.maps),
+    own = new Set()
+  const c0 = Math.floor(b.ex0 / f),
+    c1 = Math.floor((b.ex0 + b.ew - 1) / f)
+  const r0 = Math.floor(b.ey0 / f),
+    r1 = Math.floor((b.ey0 + b.eh - 1) / f)
+  for (let r = r0; r <= r1; r++)
+    for (let c = c0; c <= c1; c++) {
+      const l = labels[r * cw + c]
+      if (l !== NO_LABEL && sees.has(l)) own.add(l)
+    }
   return own
 }
 

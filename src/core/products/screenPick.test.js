@@ -7,10 +7,18 @@ const M = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0.1, 0, 0, 0, 0, 1]
 
 describe('pickNearestPoint', () => {
   const pos = Float32Array.from([
-    0, 0, 5, // far, under the cursor
-    0.01, 0, 1, // near, under the cursor → wins
-    0.5, 0.5, 0, // outside the radius
-    0, 0, 50, // outside the clip volume (|z| > w)
+    0,
+    0,
+    5, // far, under the cursor
+    0.01,
+    0,
+    1, // near, under the cursor → wins
+    0.5,
+    0.5,
+    0, // outside the radius
+    0,
+    0,
+    50, // outside the clip volume (|z| > w)
   ])
 
   it('returns the point nearest the camera within the radius', () => {
@@ -22,7 +30,10 @@ describe('pickNearestPoint', () => {
   })
 
   it('only considers drawn indices', () => {
-    expect(pickNearestPoint(pos, 4, { matrix: M, x: 0, y: 0, tolX: 0.05, tolY: 0.05, indices: Uint32Array.from([0, 2]) })?.index).toBe(0)
+    expect(
+      pickNearestPoint(pos, 4, { matrix: M, x: 0, y: 0, tolX: 0.05, tolY: 0.05, indices: Uint32Array.from([0, 2]) })
+        ?.index,
+    ).toBe(0)
   })
 })
 

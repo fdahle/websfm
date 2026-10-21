@@ -79,12 +79,14 @@ export function isAxisAlignedModelTransformation(matrix, epsilon = 1e-12) {
   if (!m.every(Number.isFinite)) return false
   // x = m0*col + m1*row + m3; y = m4*col + m5*row + m7.
   // The final row must describe an affine (not perspective) transform.
-  return Math.abs(m[1]) <= epsilon
-    && Math.abs(m[4]) <= epsilon
-    && Math.abs(m[12]) <= epsilon
-    && Math.abs(m[13]) <= epsilon
-    && Math.abs(m[14]) <= epsilon
-    && Math.abs(m[15] - 1) <= epsilon
+  return (
+    Math.abs(m[1]) <= epsilon &&
+    Math.abs(m[4]) <= epsilon &&
+    Math.abs(m[12]) <= epsilon &&
+    Math.abs(m[13]) <= epsilon &&
+    Math.abs(m[14]) <= epsilon &&
+    Math.abs(m[15] - 1) <= epsilon
+  )
 }
 
 // Is this TIFF a *georeferenced raster* (a reference DEM / orthophoto) rather
@@ -132,16 +134,18 @@ export function isDegenerateGeoTransform({ pixelScale, tiepoint, transformation,
   if (transformation?.length >= 16) {
     const m = Array.from(transformation, Number)
     const near = (a, b = 0) => Number.isFinite(a) && Math.abs(a - b) <= 1e-12
-    return near(Math.abs(m[0]), 1)
-      && near(Math.abs(m[5]), 1)
-      && near(m[1])
-      && near(m[4])
-      && near(m[3])
-      && near(m[7])
-      && near(m[12])
-      && near(m[13])
-      && near(m[14])
-      && near(m[15], 1)
+    return (
+      near(Math.abs(m[0]), 1) &&
+      near(Math.abs(m[5]), 1) &&
+      near(m[1]) &&
+      near(m[4]) &&
+      near(m[3]) &&
+      near(m[7]) &&
+      near(m[12]) &&
+      near(m[13]) &&
+      near(m[14]) &&
+      near(m[15], 1)
+    )
   }
 
   const sx = pixelScale?.[0]
@@ -177,8 +181,9 @@ export async function probeTiffGeoTags(blob) {
     const hasTransformation = !!transformation?.length
     // getGeoKeys is an accessor method, so it resolves the deferred field itself.
     const hasCrs = geoKeysDeclareCrs(image.getGeoKeys?.())
-    const degenerate = (hasTransformation || (hasTiepoint && hasPixelScale))
-      && isDegenerateGeoTransform({
+    const degenerate =
+      (hasTransformation || (hasTiepoint && hasPixelScale)) &&
+      isDegenerateGeoTransform({
         pixelScale,
         tiepoint,
         transformation,
@@ -249,10 +254,13 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
 
   if (decoder) {
     try {
-      const dec = await decoder(blob)               // { width, height, rgba: Uint8Array(RGBA), bitsPerSample, samplesPerPixel, stretch }
+      const dec = await decoder(blob) // { width, height, rgba: Uint8Array(RGBA), bitsPerSample, samplesPerPixel, stretch }
       width = dec.width
       height = dec.height
-      rgba = dec.rgba instanceof Uint8ClampedArray ? dec.rgba : new Uint8ClampedArray(dec.rgba.buffer, dec.rgba.byteOffset, dec.rgba.byteLength)
+      rgba =
+        dec.rgba instanceof Uint8ClampedArray
+          ? dec.rgba
+          : new Uint8ClampedArray(dec.rgba.buffer, dec.rgba.byteOffset, dec.rgba.byteLength)
       if (dec.bitsPerSample) srcInfo.bitsPerSample = dec.bitsPerSample
       if (dec.samplesPerPixel) srcInfo.samplesPerPixel = dec.samplesPerPixel
       if (dec.stretch) srcInfo.stretch = dec.stretch
@@ -269,7 +277,9 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
         const fd = (await (await openTiff(blob)).getImage()).getFileDirectory?.() || {}
         srcInfo.photometric = await readTiffTag(fd, 'PhotometricInterpretation')
         srcInfo.compression = await readTiffTag(fd, 'Compression')
-      } catch { /* leave them out of the log */ }
+      } catch {
+        /* leave them out of the log */
+      }
     }
   }
 
@@ -285,25 +295,33 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
     // some IFDs); fall back to the raw directory for the compression tag.
     const fd = (typeof image.getFileDirectory === 'function' ? image.getFileDirectory() : image.fileDirectory) || {}
     const bps = typeof image.getBitsPerSample === 'function' ? image.getBitsPerSample() : fd.BitsPerSample
-    srcInfo.photometric = typeof image.getPhotometricInterpretation === 'function'
-      ? image.getPhotometricInterpretation() : fd.PhotometricInterpretation // 1=gray, 2=RGB, 3=palette, 6=YCbCr…
-    srcInfo.samplesPerPixel = typeof image.getSamplesPerPixel === 'function' ? image.getSamplesPerPixel() : fd.SamplesPerPixel
+    srcInfo.photometric =
+      typeof image.getPhotometricInterpretation === 'function'
+        ? image.getPhotometricInterpretation()
+        : fd.PhotometricInterpretation // 1=gray, 2=RGB, 3=palette, 6=YCbCr…
+    srcInfo.samplesPerPixel =
+      typeof image.getSamplesPerPixel === 'function' ? image.getSamplesPerPixel() : fd.SamplesPerPixel
     srcInfo.bitsPerSample = Array.isArray(bps) ? bps[0] : bps
-    srcInfo.compression = fd.Compression             // 1=none, 5=LZW, 8=Deflate, 32773=PackBits, 7=JPEG…
+    srcInfo.compression = fd.Compression // 1=none, 5=LZW, 8=Deflate, 32773=PackBits, 7=JPEG…
 
     // 16-bit gray / RGB(A): stretch between the 0.5 / 99.5 % levels instead of letting
     // readRGB cut to the high byte — the same mapping as the wasm decoder
     // (core/io/tonalStretch.js; parity pinned on both sides).
     const sampleFormat = await readTiffTag(fd, 'SampleFormat')
     const isUint = sampleFormat == null || (Array.isArray(sampleFormat) ? sampleFormat[0] : sampleFormat) === 1
-    if (srcInfo.bitsPerSample === 16 && isUint && [0, 1, 2].includes(srcInfo.photometric)
-        && [1, 2, 3, 4].includes(srcInfo.samplesPerPixel)) {
+    if (
+      srcInfo.bitsPerSample === 16 &&
+      isUint &&
+      [0, 1, 2].includes(srcInfo.photometric) &&
+      [1, 2, 3, 4].includes(srcInfo.samplesPerPixel)
+    ) {
       const samples = await image.readRasters({ interleave: true })
       timings.decodeMs = performance.now() - t0
       const tRepack = performance.now()
       const range = percentileRange(samples, srcInfo.samplesPerPixel)
-      rgba = stretch16ToRgba(samples, width, height, srcInfo.samplesPerPixel, range,
-        { invert: srcInfo.photometric === 0 && srcInfo.samplesPerPixel <= 2 })
+      rgba = stretch16ToRgba(samples, width, height, srcInfo.samplesPerPixel, range, {
+        invert: srcInfo.photometric === 0 && srcInfo.samplesPerPixel <= 2,
+      })
       srcInfo.stretch = range
       timings.repackMs = performance.now() - tRepack
     } else {
@@ -314,7 +332,7 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
       const spp = rgb.length / (width * height) // 3 (RGB) or 4 (RGBA)
       rgba = new Uint8ClampedArray(width * height * 4)
       for (let px = 0, s = 0; px < width * height; px++, s += spp) {
-        rgba[px * 4]     = rgb[s]
+        rgba[px * 4] = rgb[s]
         rgba[px * 4 + 1] = rgb[s + 1]
         rgba[px * 4 + 2] = rgb[s + 2]
         rgba[px * 4 + 3] = spp === 4 ? rgb[s + 3] : 255
@@ -349,13 +367,19 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
   // lossy ever reaches detection/dense.
   const tEncode = performance.now()
   // One retry per encode: a transient codec/readback failure must not lose the image.
-  const encode = (opts) => canvas.convertToBlob(opts)
-    .catch(() => new Promise((r) => setTimeout(r, 250)).then(() => canvas.convertToBlob(opts)))
+  const encode = (opts) =>
+    canvas
+      .convertToBlob(opts)
+      .catch(() => new Promise((r) => setTimeout(r, 250)).then(() => canvas.convertToBlob(opts)))
   const displayPromise = encode({ type: 'image/jpeg', quality: jpegQuality })
   const computePromise = encode({ type: 'image/png' })
   let jpegDoneAt = null
   if (onDisplay) displayPromise.then(onDisplay).catch(() => {})
-  displayPromise.then(() => { jpegDoneAt = performance.now() }).catch(() => {})
+  displayPromise
+    .then(() => {
+      jpegDoneAt = performance.now()
+    })
+    .catch(() => {})
   const [displayBlob, computeBlob] = await Promise.all([displayPromise, computePromise])
   // JPEG and PNG encode concurrently, so these overlap rather than sum: jpegMs
   // is time-to-JPEG, pngMs is total encode time (dominated by the slower PNG).

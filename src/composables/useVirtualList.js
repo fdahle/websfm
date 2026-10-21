@@ -28,10 +28,16 @@ import { computeWindow, prefixOffsets, scrollToReveal } from '../utils/virtualWi
 // Returns { listRef, enabled, start, visibleItems, padTop, padBottom, scrollToIndex, refresh }.
 // Render `visibleItems` (absolute index = start + i) between two spacers.
 export function useVirtualList({
-  items, itemHeight = 24, heightOf = null, threshold = 120, overscan = 8, scroller = null, measure = false,
+  items,
+  itemHeight = 24,
+  heightOf = null,
+  threshold = 120,
+  overscan = 8,
+  scroller = null,
+  measure = false,
 } = {}) {
   const listRef = ref(null)
-  const scrollTop = ref(0)      // list space: px from the top of row 0
+  const scrollTop = ref(0) // list space: px from the top of row 0
   const viewport = ref(0)
   const measured = ref(0)
 
@@ -50,8 +56,12 @@ export function useVirtualList({
     const n = rows.value.length
     if (!enabled.value) return { start: 0, end: n, padTop: 0, padBottom: 0 }
     return computeWindow({
-      count: n, itemHeight: rowHeight.value, offsets: offsets.value,
-      scrollTop: scrollTop.value, viewportHeight: viewport.value, overscan,
+      count: n,
+      itemHeight: rowHeight.value,
+      offsets: offsets.value,
+      scrollTop: scrollTop.value,
+      viewportHeight: viewport.value,
+      overscan,
     })
   })
   const start = computed(() => win.value.start)
@@ -64,7 +74,7 @@ export function useVirtualList({
   const padBottom = computed(() => win.value.padBottom)
 
   // ── DOM side ──
-  let el = null            // the scroll container
+  let el = null // the scroll container
   let ro = null
   let raf = 0
 
@@ -101,7 +111,9 @@ export function useVirtualList({
     viewport.value = isDocument(el) ? window.innerHeight : el.clientHeight
     scrollTop.value = el.scrollTop - listOffset()
   }
-  function schedule() { if (!raf) raf = requestAnimationFrame(update) }
+  function schedule() {
+    if (!raf) raf = requestAnimationFrame(update)
+  }
 
   let scrollTarget = null
   function detach() {
@@ -110,7 +122,10 @@ export function useVirtualList({
     ro?.disconnect()
     ro = null
     el = null
-    if (raf) { cancelAnimationFrame(raf); raf = 0 }
+    if (raf) {
+      cancelAnimationFrame(raf)
+      raf = 0
+    }
   }
   function attach() {
     detach()
@@ -136,7 +151,14 @@ export function useVirtualList({
     if (h > 0 && Math.abs(h - rowHeight.value) > 0.5) measured.value = h
   }
 
-  watch([listRef, enabled], () => { attach(); nextTick(remeasure) }, { flush: 'post' })
+  watch(
+    [listRef, enabled],
+    () => {
+      attach()
+      nextTick(remeasure)
+    },
+    { flush: 'post' },
+  )
   watch(win, () => nextTick(remeasure), { flush: 'post' })
   onBeforeUnmount(detach)
 
@@ -144,8 +166,12 @@ export function useVirtualList({
   function scrollToIndex(index) {
     if (!enabled.value || !el) return
     const target = scrollToReveal({
-      index, count: rows.value.length, itemHeight: rowHeight.value, offsets: offsets.value,
-      scrollTop: el.scrollTop - listOffset(), viewportHeight: isDocument(el) ? window.innerHeight : el.clientHeight,
+      index,
+      count: rows.value.length,
+      itemHeight: rowHeight.value,
+      offsets: offsets.value,
+      scrollTop: el.scrollTop - listOffset(),
+      viewportHeight: isDocument(el) ? window.innerHeight : el.clientHeight,
     })
     if (target == null) return
     el.scrollTop = target + listOffset()

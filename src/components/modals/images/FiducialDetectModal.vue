@@ -21,7 +21,10 @@ const props = defineProps({
 const emit = defineEmits(['close', 'open-image'])
 const imagesStore = useImagesStore()
 const settings = ref({ ...FIDUCIAL_SPOT_DEFAULTS })
-const running = ref(false), error = ref(''), results = ref(null), drafts = ref([])
+const running = ref(false),
+  error = ref(''),
+  results = ref(null),
+  drafts = ref([])
 const masksGenerated = ref(0)
 const progress = ref({ done: 0, total: 0 })
 
@@ -36,10 +39,12 @@ const FAMILIES = [
 ]
 // Long prose lives here, one selection at a time, instead of overflowing the card.
 const FAMILY_HINTS = {
-  generic: 'Sweeps dot, crosshair and ring templates at several sizes — the safest choice, and the one to start with when you are unsure what the marks look like.',
+  'generic':
+    'Sweeps dot, crosshair and ring templates at several sizes — the safest choice, and the one to start with when you are unsure what the marks look like.',
   'right-angle': 'Two strokes meeting at a right angle, as on corner-notch cameras. All four orientations are tried.',
   'cut-45': 'A 45° diagonal across the corner with a small offset dot.',
-  frame: 'No mark template at all — the corner of the detected film frame is measured directly. For scans whose marks are missing, cropped or unreadable.',
+  'frame':
+    'No mark template at all — the corner of the detected film frame is measured directly. For scans whose marks are missing, cropped or unreadable.',
 }
 const familyHint = computed(() => FAMILY_HINTS[settings.value.family] ?? '')
 
@@ -54,15 +59,18 @@ const POLARITY_OPTIONS = [
   { id: 'light', label: 'Light marks' },
 ]
 
-const existingCount = computed(() =>
-  props.images.reduce((n, i) => n + (i.fiducialDetections?.length ?? 0), 0))
+const existingCount = computed(() => props.images.reduce((n, i) => n + (i.fiducialDetections?.length ?? 0), 0))
 
 const pct = (v) => (v == null ? '—' : `${Math.round(v * 100)}%`)
 const SLOT_LABELS = {
-  'corner-tl': 'Top-left corner', 'corner-tr': 'Top-right corner',
-  'corner-br': 'Bottom-right corner', 'corner-bl': 'Bottom-left corner',
-  'side-top': 'Top edge', 'side-right': 'Right edge',
-  'side-bottom': 'Bottom edge', 'side-left': 'Left edge',
+  'corner-tl': 'Top-left corner',
+  'corner-tr': 'Top-right corner',
+  'corner-br': 'Bottom-right corner',
+  'corner-bl': 'Bottom-left corner',
+  'side-top': 'Top edge',
+  'side-right': 'Right edge',
+  'side-bottom': 'Bottom edge',
+  'side-left': 'Left edge',
 }
 const REASON_LABELS = {
   'missing-slot': 'Nothing found here',
@@ -73,25 +81,39 @@ const REASON_LABELS = {
   'shape-inconsistent': 'Breaks the layout symmetry',
 }
 
-const summary = computed(() => results.value ? {
-  complete: results.value.filter((r) => r.accepted === r.requested && !r.drafts).length,
-  accepted: results.value.reduce((n, r) => n + r.accepted, 0),
-  draft: drafts.value.length,
-} : null)
+const summary = computed(() =>
+  results.value
+    ? {
+        complete: results.value.filter((r) => r.accepted === r.requested && !r.drafts).length,
+        accepted: results.value.reduce((n, r) => n + r.accepted, 0),
+        draft: drafts.value.length,
+      }
+    : null,
+)
 
-const summaryTiles = computed(() => summary.value ? [
-  { label: 'Marks accepted', value: summary.value.accepted, hint: `${existingCount.value} existed before this run` },
-  {
-    label: 'Images complete', value: `${summary.value.complete}/${results.value.length}`,
-    tone: summary.value.complete === results.value.length ? 'ok' : 'warn',
-  },
-  {
-    label: 'Need review', value: summary.value.draft,
-    tone: summary.value.draft ? 'warn' : 'ok',
-    hint: summary.value.draft ? 'Not stored until accepted' : undefined,
-  },
-  ...(masksGenerated.value ? [{ label: 'Masks generated', value: masksGenerated.value }] : []),
-] : [])
+const summaryTiles = computed(() =>
+  summary.value
+    ? [
+        {
+          label: 'Marks accepted',
+          value: summary.value.accepted,
+          hint: `${existingCount.value} existed before this run`,
+        },
+        {
+          label: 'Images complete',
+          value: `${summary.value.complete}/${results.value.length}`,
+          tone: summary.value.complete === results.value.length ? 'ok' : 'warn',
+        },
+        {
+          label: 'Need review',
+          value: summary.value.draft,
+          tone: summary.value.draft ? 'warn' : 'ok',
+          hint: summary.value.draft ? 'Not stored until accepted' : undefined,
+        },
+        ...(masksGenerated.value ? [{ label: 'Masks generated', value: masksGenerated.value }] : []),
+      ]
+    : [],
+)
 
 const RESULT_COLUMNS = [
   { key: 'name', label: 'Image' },
@@ -108,40 +130,62 @@ const DRAFT_COLUMNS = [
   { key: 'confidence', label: 'Confidence', align: 'right', format: pct },
   { key: 'actions', label: '', align: 'right', sortable: false },
 ]
-const resultRows = computed(() => (results.value ?? []).map((r) => ({
-  ...r, found: r.requested ? r.accepted / r.requested : null,
-})))
+const resultRows = computed(() =>
+  (results.value ?? []).map((r) => ({
+    ...r,
+    found: r.requested ? r.accepted / r.requested : null,
+  })),
+)
 
 // DataTable needs a stable row id, and the accept/reject actions need the original
 // draft object back — so carry it on the row rather than reconstructing it.
-const draftRows = computed(() => drafts.value.map((d) => ({
-  id: `${d.imageId}:${d.slot}`,
-  imageId: d.imageId, imageName: d.imageName, slot: d.slot,
-  reason: d.reason, confidence: d.confidence, draft: d,
-})))
+const draftRows = computed(() =>
+  drafts.value.map((d) => ({
+    id: `${d.imageId}:${d.slot}`,
+    imageId: d.imageId,
+    imageName: d.imageName,
+    slot: d.slot,
+    reason: d.reason,
+    confidence: d.confidence,
+    draft: d,
+  })),
+)
 
 // Every way out of the dialog — the footer's Cancel, ×, Escape, the backdrop, the
 // global Escape closer — unmounts it, so cancelling here makes each of them a real
 // cancel: the store stops starting images and stores nothing from this run.
 let cancelRequested = false
-onBeforeUnmount(() => { cancelRequested = true })
+onBeforeUnmount(() => {
+  cancelRequested = true
+})
 
 async function run() {
   if (running.value || !props.images.length) return
-  running.value = true; error.value = ''; results.value = null; drafts.value = []; masksGenerated.value = 0
+  running.value = true
+  error.value = ''
+  results.value = null
+  drafts.value = []
+  masksGenerated.value = 0
   progress.value = { done: 0, total: props.images.length }
   try {
     const out = await imagesStore.detectFiducialsForSensor({
       sensor: props.sensor,
       settings: settings.value,
       overwrite: settings.value.overwrite,
-      onProgress: (done, total) => { progress.value = { done, total } },
+      onProgress: (done, total) => {
+        progress.value = { done, total }
+      },
       shouldCancel: () => cancelRequested,
     })
     if (out.cancelled) return
-    results.value = out.perImage; drafts.value = out.drafts; masksGenerated.value = out.masksGenerated ?? 0
-  } catch (err) { error.value = err.message }
-  finally { running.value = false }
+    results.value = out.perImage
+    drafts.value = out.drafts
+    masksGenerated.value = out.masksGenerated ?? 0
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    running.value = false
+  }
 }
 
 // A missing-slot draft's position is only where the slot was expected — nothing
@@ -151,11 +195,17 @@ const canAccept = (draft) => draft.reason !== 'missing-slot'
 
 function acceptDraft(draft) {
   if (!canAccept(draft)) return
-  imagesStore.setFiducialDetection(draft.imageId, { ...draft, reviewed: true, source: `${draft.source || 'shape'}-review` })
+  imagesStore.setFiducialDetection(draft.imageId, {
+    ...draft,
+    reviewed: true,
+    source: `${draft.source || 'shape'}-review`,
+  })
   drafts.value = drafts.value.filter((d) => d !== draft)
 }
 
-function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== draft) }
+function rejectDraft(draft) {
+  drafts.value = drafts.value.filter((d) => d !== draft)
+}
 </script>
 
 <template>
@@ -176,23 +226,33 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
         <template #label>Fiducial positions</template>
         <SegmentedControl v-model="settings.positions" :options="POSITION_OPTIONS" />
       </SettingsField>
-      <SettingsField label="Tolerance" label-for="fidTolerance"
-        :hint="`${Math.round(settings.tolerance * 100)}% — higher values send weaker candidates to review instead of dropping them.`">
+      <SettingsField
+        label="Tolerance"
+        label-for="fidTolerance"
+        :hint="`${Math.round(settings.tolerance * 100)}% — higher values send weaker candidates to review instead of dropping them.`"
+      >
         <input
-          id="fidTolerance" v-model.number="settings.tolerance" type="range"
-          min="0" max="1" step="0.05" class="field-input range" :disabled="running"
+          id="fidTolerance"
+          v-model.number="settings.tolerance"
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          class="field-input range"
+          :disabled="running"
         />
       </SettingsField>
       <span class="field-hint">
-        {{ images.length }} image{{ images.length === 1 ? '' : 's' }} will be searched.
-        Calibration is not required.
+        {{ images.length }} image{{ images.length === 1 ? '' : 's' }} will be searched. Calibration is not required.
       </span>
     </SettingsGroup>
 
     <AdvancedDisclosure label="Advanced settings">
       <SettingsGroup title="Matching">
-        <SettingsField label="Polarity"
-          hint="Whether marks are darker or lighter than the surrounding film. Auto tries both.">
+        <SettingsField
+          label="Polarity"
+          hint="Whether marks are darker or lighter than the surrounding film. Auto tries both."
+        >
           <SegmentedControl v-model="settings.polarity" :options="POLARITY_OPTIONS" />
         </SettingsField>
       </SettingsGroup>
@@ -204,7 +264,9 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
             <input v-model="settings.overwrite" type="checkbox" class="checkbox" :disabled="running" /> Enabled
           </label>
         </SettingsField>
-        <SettingsField hint="Uses the detected film frame to exclude scanner background, merging with an existing mask unless overwrite is enabled.">
+        <SettingsField
+          hint="Uses the detected film frame to exclude scanner background, merging with an existing mask unless overwrite is enabled."
+        >
           <template #label>Generate background masks</template>
           <label class="checkbox-row">
             <input v-model="settings.generateMasks" type="checkbox" class="checkbox" :disabled="running" /> Enabled
@@ -215,7 +277,10 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
 
     <div v-if="running" class="fid-progress">
       <div class="progress-track">
-        <div class="progress-fill" :style="{ width: `${progress.total ? progress.done / progress.total * 100 : 0}%` }" />
+        <div
+          class="progress-fill"
+          :style="{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }"
+        />
       </div>
       <span class="field-hint">Detecting {{ progress.done }} / {{ progress.total }}…</span>
     </div>
@@ -225,7 +290,10 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
       <SettingsGroup title="Results">
         <StatTiles :tiles="summaryTiles" />
         <DataTable
-          :columns="RESULT_COLUMNS" :rows="resultRows" sort-key="confidence" sort-dir="asc"
+          :columns="RESULT_COLUMNS"
+          :rows="resultRows"
+          sort-key="confidence"
+          sort-dir="asc"
           empty-text="No images were searched."
           @row-click="(r) => emit('open-image', r.id)"
         />
@@ -242,9 +310,15 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
               <button
                 class="btn btn-sm"
                 :disabled="!canAccept(row.draft)"
-                :title="canAccept(row.draft) ? '' : 'Nothing was measured here — open the image and place this mark by hand (right-click ▸ Mark fiducial)'"
+                :title="
+                  canAccept(row.draft)
+                    ? ''
+                    : 'Nothing was measured here — open the image and place this mark by hand (right-click ▸ Mark fiducial)'
+                "
                 @click.stop="acceptDraft(row.draft)"
-              >Accept</button>
+              >
+                Accept
+              </button>
               <button class="btn btn-sm" @click.stop="rejectDraft(row.draft)">Reject</button>
             </span>
           </template>
@@ -253,8 +327,13 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
     </template>
 
     <template #footer>
-      <button class="btn" :title="running ? 'Stop detecting and close — nothing from this run is stored' : ''"
-        @click="emit('close')">{{ results ? 'Done' : 'Cancel' }}</button>
+      <button
+        class="btn"
+        :title="running ? 'Stop detecting and close — nothing from this run is stored' : ''"
+        @click="emit('close')"
+      >
+        {{ results ? 'Done' : 'Cancel' }}
+      </button>
       <button class="btn btn-primary" :disabled="running || !images.length" @click="run">
         {{ running ? 'Detecting…' : 'Detect Fiducials' }}
       </button>
@@ -267,14 +346,29 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
      to be imported here too (SettingsField's scoped styles don't reach slotted content). -->
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.fid-progress { display: flex; flex-direction: column; gap: 5px; }
-.progress-track { height: 6px; background: var(--hover-bg); border-radius: 3px; overflow: hidden; }
+.fid-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.progress-track {
+  height: 6px;
+  background: var(--hover-bg);
+  border-radius: 3px;
+  overflow: hidden;
+}
 .progress-fill {
   height: 100%;
   background: var(--accent);
   border-radius: 3px;
   transition: width 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.fid-actions { display: inline-flex; gap: 4px; }
-.btn-sm { padding: 2px 6px; font-size: 10px; }
+.fid-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+.btn-sm {
+  padding: 2px 6px;
+  font-size: 10px;
+}
 </style>

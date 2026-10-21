@@ -25,23 +25,43 @@ const pts = (list) => list.map((p) => p.map(f).join(',')).join(' ')
 
 // A 2D camera frustum: apex at the camera centre, opening `len` units toward `target`.
 function wedge([ax, ay], [tx, ty], len, half) {
-  const dx = tx - ax, dy = ty - ay, L = Math.hypot(dx, dy)
-  const ux = dx / L, uy = dy / L, px = -uy, py = ux
-  const cx = ax + ux * len, cy = ay + uy * len
-  return { poly: [[ax, ay], [cx + px * half, cy + py * half], [cx - px * half, cy - py * half]], plane: [cx, cy] }
+  const dx = tx - ax,
+    dy = ty - ay,
+    L = Math.hypot(dx, dy)
+  const ux = dx / L,
+    uy = dy / L,
+    px = -uy,
+    py = ux
+  const cx = ax + ux * len,
+    cy = ay + uy * len
+  return {
+    poly: [
+      [ax, ay],
+      [cx + px * half, cy + py * half],
+      [cx - px * half, cy - py * half],
+    ],
+    plane: [cx, cy],
+  }
 }
 
-const GRADIENT = `<defs><linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">`
-  + `<stop stop-color="${C.g0}"/><stop offset="1" stop-color="${C.g1}"/></linearGradient></defs>`
+const GRADIENT =
+  `<defs><linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">` +
+  `<stop stop-color="${C.g0}"/><stop offset="1" stop-color="${C.g1}"/></linearGradient></defs>`
 
 // The drawing on a 64-unit canvas. `ink`/`hot` are attribute strings, so the
 // favicon can pass classes instead of colours.
 function triangulation({ ink, hot, rayOpacity = 0.6, r = 5, len = 20, half = 8 }) {
-  const P = [32, 15], a = wedge([10, 52], P, len, half), b = wedge([54, 52], P, len, half)
-  const ray = (w) => `<line x1="${f(w.plane[0])}" y1="${f(w.plane[1])}" x2="${P[0]}" y2="${P[1]}" ${ink} stroke-opacity="${rayOpacity}" stroke-width="2" stroke-linecap="round"/>`
-  const cam = (w) => `<polygon points="${pts(w.poly)}" fill="url(#g)" ${ink} stroke-width="2.5" stroke-linejoin="round"/>`
-  return `${ray(a)}${ray(b)}${cam(a)}${cam(b)}`
-    + `<circle cx="32" cy="15" r="${r + 4}" ${hot} fill-opacity=".22"/><circle cx="32" cy="15" r="${r}" ${hot}/>`
+  const P = [32, 15],
+    a = wedge([10, 52], P, len, half),
+    b = wedge([54, 52], P, len, half)
+  const ray = (w) =>
+    `<line x1="${f(w.plane[0])}" y1="${f(w.plane[1])}" x2="${P[0]}" y2="${P[1]}" ${ink} stroke-opacity="${rayOpacity}" stroke-width="2" stroke-linecap="round"/>`
+  const cam = (w) =>
+    `<polygon points="${pts(w.poly)}" fill="url(#g)" ${ink} stroke-width="2.5" stroke-linejoin="round"/>`
+  return (
+    `${ray(a)}${ray(b)}${cam(a)}${cam(b)}` +
+    `<circle cx="32" cy="15" r="${r + 4}" ${hot} fill-opacity=".22"/><circle cx="32" cy="15" r="${r}" ${hot}/>`
+  )
 }
 
 const svg = (body) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${GRADIENT}${body}</svg>\n`
@@ -53,9 +73,9 @@ const TAB = { len: 23, half: 9, r: 6 }
 const tabArt = (ink, hot, rayOpacity) => scaled(1.2, 30, triangulation({ ink, hot, rayOpacity, ...TAB }))
 
 const favicon = svg(
-  `<style>.ink{stroke:${C.tile}}.ray{stroke-opacity:.45}.pt{fill:${C.hotLight}}`
-  + `@media (prefers-color-scheme:dark){.ink{stroke:${C.white}}.ray{stroke-opacity:.6}.pt{fill:${C.hot}}}</style>`
-  + tabArt('class="ink"', 'class="pt"', 0.45).replace(/class="ink" stroke-opacity="0.45"/g, 'class="ink ray"'),
+  `<style>.ink{stroke:${C.tile}}.ray{stroke-opacity:.45}.pt{fill:${C.hotLight}}` +
+    `@media (prefers-color-scheme:dark){.ink{stroke:${C.white}}.ray{stroke-opacity:.6}.pt{fill:${C.hot}}}</style>` +
+    tabArt('class="ink"', 'class="pt"', 0.45).replace(/class="ink" stroke-opacity="0.45"/g, 'class="ink ray"'),
 )
 const faviconLight = svg(tabArt(`stroke="${C.tile}"`, `fill="${C.hotLight}"`, 0.45))
 
@@ -82,7 +102,10 @@ try {
     await page.setViewportSize({ width: size, height: size })
     const sized = source.replace('<svg ', `<svg width="${size}" height="${size}" `)
     await page.setContent(`<style>html,body{margin:0;background:transparent}svg{display:block}</style>${sized}`)
-    await writeFile(new URL(file, OUT), await page.screenshot({ omitBackground: true, clip: { x: 0, y: 0, width: size, height: size } }))
+    await writeFile(
+      new URL(file, OUT),
+      await page.screenshot({ omitBackground: true, clip: { x: 0, y: 0, width: size, height: size } }),
+    )
     console.log(`wrote public/${file} (${size}×${size})`)
   }
 } finally {

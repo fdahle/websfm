@@ -29,25 +29,53 @@ const fmt = (v) => Number(v.toPrecision(6))
 </script>
 
 <template>
-  <FloatingToolbox id="region" title="Region" :width="300" close-title="Close the region tool (Esc)" @close="emit('close')">
+  <FloatingToolbox
+    id="region"
+    title="Region"
+    :width="300"
+    close-title="Close the region tool (Esc)"
+    @close="emit('close')"
+  >
     <div class="tb-hint">
-      Depth maps, fusion, mesh and DEM use only what lies inside the box. Drag a coloured
-      square in the 3D view to move a face, or the orange centre one to move the box.
-      <template v-if="savedState === 'stale'"> The saved box was drawn on an older model and is ignored until reapplied.</template>
+      Depth maps, fusion, mesh and DEM use only what lies inside the box. Drag a coloured square in the 3D view to move
+      a face, or the orange centre one to move the box.
+      <template v-if="savedState === 'stale'">
+        The saved box was drawn on an older model and is ignored until reapplied.</template
+      >
     </div>
     <div class="grid">
       <span></span><span class="head">min</span><span class="head">max</span>
       <template v-for="(a, i) in AXES" :key="a">
         <span class="axis">{{ a }}</span>
-        <input class="tb-input" type="number" step="any" :value="fmt(modelValue.min[i])" :aria-label="`${a} min`"
-          @change="set('min', i, $event.target.value)" />
-        <input class="tb-input" type="number" step="any" :value="fmt(modelValue.max[i])" :aria-label="`${a} max`"
-          @change="set('max', i, $event.target.value)" />
+        <input
+          class="tb-input"
+          type="number"
+          step="any"
+          :value="fmt(modelValue.min[i])"
+          :aria-label="`${a} min`"
+          @change="set('min', i, $event.target.value)"
+        />
+        <input
+          class="tb-input"
+          type="number"
+          step="any"
+          :value="fmt(modelValue.max[i])"
+          :aria-label="`${a} max`"
+          @change="set('max', i, $event.target.value)"
+        />
       </template>
     </div>
     <div class="tb-row">
-      <button class="tb-textbtn" title="Around the sparse points (ignoring the farthest 2 %)" @click="emit('fit', 'sparse')">Fit to sparse</button>
-      <button class="tb-textbtn" :disabled="!canFitDense" title="Around the dense cloud" @click="emit('fit', 'dense')">Fit to dense</button>
+      <button
+        class="tb-textbtn"
+        title="Around the sparse points (ignoring the farthest 2 %)"
+        @click="emit('fit', 'sparse')"
+      >
+        Fit to sparse
+      </button>
+      <button class="tb-textbtn" :disabled="!canFitDense" title="Around the dense cloud" @click="emit('fit', 'dense')">
+        Fit to dense
+      </button>
     </div>
     <div class="tb-row">
       <button class="tb-textbtn primary" :disabled="!valid" @click="emit('apply')">Apply</button>
@@ -66,6 +94,12 @@ const fmt = (v) => Number(v.toPrecision(6))
   margin: 8px 0;
   font-size: 11px;
 }
-.head { color: var(--text-dim); text-align: center; }
-.axis { color: var(--text-dim); font-weight: 600; }
+.head {
+  color: var(--text-dim);
+  text-align: center;
+}
+.axis {
+  color: var(--text-dim);
+  font-weight: 600;
+}
 </style>

@@ -7,13 +7,16 @@
 // of strings on the heap, and the browser keeps the bytes in blob storage (which it
 // may page to disk). Byte-identical to `new Blob([...parts])`.
 export function partsToBlob(parts, type = '', { batchBytes = 64 * 1024 * 1024 } = {}) {
-  let blob = null, batch = [], size = 0
+  let blob = null,
+    batch = [],
+    size = 0
   for (const p of parts) {
     batch.push(p)
     size += typeof p === 'string' ? p.length : (p.byteLength ?? p.size ?? 0)
     if (size >= batchBytes) {
       blob = new Blob(blob ? [blob, ...batch] : batch, { type })
-      batch = []; size = 0
+      batch = []
+      size = 0
     }
   }
   return new Blob(blob ? [blob, ...batch] : batch, { type })

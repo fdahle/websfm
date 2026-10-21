@@ -29,10 +29,16 @@ function readNumber(key, min, max, fallback) {
     if (raw == null) return fallback
     const v = Number(raw)
     return Number.isFinite(v) && v >= min && v <= max ? v : fallback
-  } catch { return fallback }
+  } catch {
+    return fallback
+  }
 }
 function writeValue(key, v) {
-  try { localStorage.setItem(key, String(v)) } catch { /* private mode: session only */ }
+  try {
+    localStorage.setItem(key, String(v))
+  } catch {
+    /* private mode: session only */
+  }
 }
 const pointSize = ref(readNumber(POINT_SIZE_KEY, 1, 8, 3))
 // Level-of-detail clouds (plan-lod): at most this many million points drawn at once.
@@ -76,7 +82,17 @@ export function useViewerSettings() {
     writeValue(CAMERA_SCALE_KEY, v)
   }
   return {
-    gridZ, setGridZ, background, setBackground, nearClip, setNearClip,
-    pointSize, setPointSize, cameraScale, setCameraScale, pointBudget, setPointBudget,
+    gridZ,
+    setGridZ,
+    background,
+    setBackground,
+    nearClip,
+    setNearClip,
+    pointSize,
+    setPointSize,
+    cameraScale,
+    setCameraScale,
+    pointBudget,
+    setPointBudget,
   }
 }

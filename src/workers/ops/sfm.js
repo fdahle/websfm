@@ -17,9 +17,12 @@ export function makeSfmOps() {
       // done/total ride along as the numeric readout only.
       onProgress: (done, total, label, fraction) => emit('progress', [done, total, label, fraction]),
       // The model so far, for the live 3D view; its positions are transferred.
-      ...(input.liveSnapshots ? {
-        onSnapshot: (snap) => emit('snapshot', [snap], snap.col ? [snap.pos.buffer, snap.col.buffer] : [snap.pos.buffer]),
-      } : {}),
+      ...(input.liveSnapshots
+        ? {
+            onSnapshot: (snap) =>
+              emit('snapshot', [snap], snap.col ? [snap.pos.buffer, snap.col.buffer] : [snap.pos.buffer]),
+          }
+        : {}),
     })
     // Do not structured-clone the object-per-point/object-per-observation result.
     // Large surveys contain millions of those tuples; cloning them while the worker
@@ -28,7 +31,7 @@ export function makeSfmOps() {
     // Packing is a consuming boundary: make the tuple graph collectible before
     // postMessage hands the buffers to the browser process.
     result.points = []
-    for (const model of (result.secondaryModels || [])) model.points = []
+    for (const model of result.secondaryModels || []) model.points = []
     // This is the worker's structured-cloned input, never the store's source data.
     // Release keypoints and pair matches before the final cross-process message too.
     input.images = []
@@ -36,8 +39,7 @@ export function makeSfmOps() {
     input.gcps = []
     input.cameraPriors = []
     const bytes = packed.transfer.reduce((sum, buffer) => sum + buffer.byteLength, 0)
-    emit('log', [`Compact result ready for transfer (${(bytes / 1024 ** 2).toFixed(1)} MiB)`,
-      'info', 'Reconstruction'])
+    emit('log', [`Compact result ready for transfer (${(bytes / 1024 ** 2).toFixed(1)} MiB)`, 'info', 'Reconstruction'])
     return packed
   }
 
@@ -52,8 +54,12 @@ export function makeSfmOps() {
     const model = unpackReconstructionResult(packed)
     const refined = await refineSparseSelection(model.cameras, model.points, settings, bundleAdjust, constraints)
     const packedResult = packSparseCloud(refined)
-    Object.assign(packedResult.result, { removed: refined.removed, costBefore: refined.costBefore,
-      costAfter: refined.costAfter, constraints: refined.constraints })
+    Object.assign(packedResult.result, {
+      removed: refined.removed,
+      costBefore: refined.costBefore,
+      costAfter: refined.costAfter,
+      constraints: refined.constraints,
+    })
     return packedResult
   }
   // Tools ▸ Model ▾ ▸ Optimize cameras: same disposable copy and survey constraints
@@ -62,8 +68,13 @@ export function makeSfmOps() {
     const model = unpackReconstructionResult(packed)
     const refined = await optimizeCameras(model.cameras, model.points, settings, bundleAdjust, constraints)
     const packedResult = packSparseCloud(refined)
-    Object.assign(packedResult.result, { removed: refined.dropped, costBefore: refined.costBefore,
-      costAfter: refined.costAfter, constraints: refined.constraints, focalChange: refined.focalChange })
+    Object.assign(packedResult.result, {
+      removed: refined.dropped,
+      costBefore: refined.costBefore,
+      costAfter: refined.costAfter,
+      constraints: refined.constraints,
+      focalChange: refined.focalChange,
+    })
     return packedResult
   }
   return { reconstruct, sparseMetrics, refineSparse, optimizeSparse }

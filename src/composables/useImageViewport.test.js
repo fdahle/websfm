@@ -7,20 +7,35 @@ import { useImageViewport } from './useImageViewport.js'
 // the test can fire it.
 let observers
 class FakeResizeObserver {
-  constructor(cb) { this.cb = cb; this.observed = []; observers.push(this) }
-  observe(el) { this.observed.push(el) }
-  disconnect() { this.disconnected = true }
+  constructor(cb) {
+    this.cb = cb
+    this.observed = []
+    observers.push(this)
+  }
+  observe(el) {
+    this.observed.push(el)
+  }
+  disconnect() {
+    this.disconnected = true
+  }
 }
 let savedRO
-beforeEach(() => { observers = []; savedRO = globalThis.ResizeObserver; globalThis.ResizeObserver = FakeResizeObserver })
-afterEach(() => { globalThis.ResizeObserver = savedRO })
+beforeEach(() => {
+  observers = []
+  savedRO = globalThis.ResizeObserver
+  globalThis.ResizeObserver = FakeResizeObserver
+})
+afterEach(() => {
+  globalThis.ResizeObserver = savedRO
+})
 
 function setup({ natural = [1000, 500], meta = [1000, 500], box = [500, 500], lowRes = false } = {}) {
   const el = { clientWidth: box[0], clientHeight: box[1], getBoundingClientRect: () => ({ left: 100, top: 50 }) }
   const container = ref(el)
   const imgEl = ref({ naturalWidth: natural[0], naturalHeight: natural[1] })
   const image = reactive({
-    url: lowRes ? 'blob:preview' : 'blob:full', lowResUrl: lowRes ? 'blob:preview' : null,
+    url: lowRes ? 'blob:preview' : 'blob:full',
+    lowResUrl: lowRes ? 'blob:preview' : null,
     meta: meta ? { width: meta[0], height: meta[1] } : null,
   })
   const onViewChange = vi.fn()
@@ -52,7 +67,8 @@ describe('useImageViewport', () => {
     expect(ro.observed).toEqual([el])
     ro.cb() // still 0×0: nothing
     expect(v.imageReady.value).toBe(false)
-    el.clientWidth = 500; el.clientHeight = 500
+    el.clientWidth = 500
+    el.clientHeight = 500
     ro.cb()
     expect(v.imageReady.value).toBe(true)
     expect(v.scale.value).toBe(0.5)
@@ -60,16 +76,18 @@ describe('useImageViewport', () => {
     expect(ro.disconnected).toBe(true)
   })
 
-  it('keeps the user\'s zoom when a tab springs back to the size it was fitted at', () => {
+  it("keeps the user's zoom when a tab springs back to the size it was fitted at", () => {
     const { v, el } = setup()
     v.observeResize()
     v.refreshFrame()
     v.fit()
     v.zoomIn()
     const zoomed = v.scale.value
-    el.clientWidth = 0; el.clientHeight = 0 // hidden
+    el.clientWidth = 0
+    el.clientHeight = 0 // hidden
     observers[0].cb()
-    el.clientWidth = 500; el.clientHeight = 500 // shown again
+    el.clientWidth = 500
+    el.clientHeight = 500 // shown again
     observers[0].cb()
     expect(v.scale.value).toBe(zoomed)
     el.clientWidth = 1000 // a real resize refits
@@ -79,7 +97,8 @@ describe('useImageViewport', () => {
 
   it('zooms about a viewport point, and maps the event position to native pixels', () => {
     const { v } = setup()
-    v.refreshFrame(); v.fit()
+    v.refreshFrame()
+    v.fit()
     const before = v.toImagePixel(250, 250)
     v.zoomAt(2, 250, 250)
     expect(v.toImagePixel(250, 250)).toEqual(before)
@@ -88,7 +107,8 @@ describe('useImageViewport', () => {
 
   it('works in native pixels over a preview, and stays read-only until full resolution', () => {
     const { v } = setup({ natural: [100, 50], meta: [1000, 500], lowRes: true })
-    v.refreshFrame(); v.fit()
+    v.refreshFrame()
+    v.fit()
     expect(v.frame.value).toMatchObject({ width: 1000, height: 500, preview: true })
     expect(v.scale.value).toBe(0.5)
     expect(v.editable.value).toBe(false)
@@ -97,7 +117,8 @@ describe('useImageViewport', () => {
 
   it('a new url hides the frame until the new bitmap loads', async () => {
     const { v, image } = setup()
-    v.refreshFrame(); v.fit()
+    v.refreshFrame()
+    v.fit()
     image.url = 'blob:other'
     await nextTick()
     expect(v.frame.value).toBeNull()
@@ -107,7 +128,8 @@ describe('useImageViewport', () => {
 
   it('late metadata re-derives the frame, refits and reports it; an unchanged one does not', async () => {
     const { v, image, onFrameChange } = setup({ natural: [100, 50], meta: null, lowRes: true })
-    v.refreshFrame(); v.fit()
+    v.refreshFrame()
+    v.fit()
     expect(v.frame.value).toMatchObject({ width: 100, exact: false })
     expect(v.toImagePixel(10, 10)).toBeNull() // native size unknown: no coordinates
     image.meta = { width: 1000, height: 500 }

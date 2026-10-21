@@ -37,11 +37,15 @@ function fillDefaultLine() {
   if (!c) return
   const b = cloudBounds(c)
   const r = (v) => Number(v.toFixed(3))
-  const midX = (b.minX + b.maxX) / 2, midY = (b.minY + b.maxY) / 2
+  const midX = (b.minX + b.maxX) / 2,
+    midY = (b.minY + b.maxY) / 2
   const alongX = b.maxX - b.minX >= b.maxY - b.minY
-  Object.assign(settings.value, alongX
-    ? { ax: r(b.minX), ay: r(midY), bx: r(b.maxX), by: r(midY) }
-    : { ax: r(midX), ay: r(b.minY), bx: r(midX), by: r(b.maxY) })
+  Object.assign(
+    settings.value,
+    alongX
+      ? { ax: r(b.minX), ay: r(midY), bx: r(b.maxX), by: r(midY) }
+      : { ax: r(midX), ay: r(b.minY), bx: r(midX), by: r(b.maxY) },
+  )
   spacing.value = estimateSpacing(b, c.count)
 }
 watch(source, fillDefaultLine, { immediate: true })
@@ -84,16 +88,33 @@ function run() {
         <SettingsField :hint="`Line length ${length.toPrecision(4)} ${unitLabel}${inMetres(length)}.`">
           <button type="button" class="btn" @click="fillDefaultLine">Across the middle</button>
         </SettingsField>
-        <SettingsField label="Slice thickness" label-for="sec-thick" :unit="unitLabel"
-          :hint="`0 = auto (${thicknessAuto.toPrecision(3)} ${unitLabel}${inMetres(thicknessAuto)}, about three point spacings).`">
-          <input id="sec-thick" v-model.number="settings.thickness" type="number" min="0" step="any" class="field-input" />
+        <SettingsField
+          label="Slice thickness"
+          label-for="sec-thick"
+          :unit="unitLabel"
+          :hint="`0 = auto (${thicknessAuto.toPrecision(3)} ${unitLabel}${inMetres(thicknessAuto)}, about three point spacings).`"
+        >
+          <input
+            id="sec-thick"
+            v-model.number="settings.thickness"
+            type="number"
+            min="0"
+            step="any"
+            class="field-input"
+          />
         </SettingsField>
         <SettingsField hint="Also keep points beyond A and B along the same line.">
-          <label class="checkbox-row"><input v-model="settings.extend" type="checkbox" class="checkbox" /> Extend past the ends</label>
+          <label class="checkbox-row"
+            ><input v-model="settings.extend" type="checkbox" class="checkbox" /> Extend past the ends</label
+          >
         </SettingsField>
       </SettingsGroup>
       <SettingsGroup title="Profile download">
-        <SettingsField label="Format" label-for="sec-fmt" hint="Station (distance from A) and height, plus the original X/Y in CSV.">
+        <SettingsField
+          label="Format"
+          label-for="sec-fmt"
+          hint="Station (distance from A) and height, plus the original X/Y in CSV."
+        >
           <select id="sec-fmt" v-model="settings.format" class="field-select">
             <option value="csv">CSV</option>
             <option value="dxf">DXF (points)</option>

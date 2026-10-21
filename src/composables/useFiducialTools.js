@@ -16,7 +16,11 @@ export function useFiducialTools() {
   const { imageById, setFiducialDetection } = imagesStore
   const { sensors } = storeToRefs(useSensorsStore())
   const {
-    sensorTableOpen, fiducialDetectOpen, fiducialDetectSensorId, fiducialCalibrateOpen, fiducialCalibrateSensorId,
+    sensorTableOpen,
+    fiducialDetectOpen,
+    fiducialDetectSensorId,
+    fiducialCalibrateOpen,
+    fiducialCalibrateSensorId,
   } = storeToRefs(useModalsStore())
 
   // Resolve the (film) sensor for an image id — feeds the viewer's fiducial menu.
@@ -28,20 +32,27 @@ export function useFiducialTools() {
   // Detection and calibration target one film sensor independently. Detection only
   // sees that sensor's images; calibration joins the stored anonymous slots later.
   const fiducialDetectSensor = computed(() =>
-    fiducialDetectSensorId.value ? sensors.value.find((s) => s.id === fiducialDetectSensorId.value) ?? null : null)
+    fiducialDetectSensorId.value ? (sensors.value.find((s) => s.id === fiducialDetectSensorId.value) ?? null) : null,
+  )
   const fiducialDetectImages = computed(() =>
-    fiducialDetectSensor.value ? images.value.filter((i) => i.sensorId === fiducialDetectSensor.value.id) : [])
+    fiducialDetectSensor.value ? images.value.filter((i) => i.sensorId === fiducialDetectSensor.value.id) : [],
+  )
   const fiducialCalibrateSensor = computed(() =>
-    fiducialCalibrateSensorId.value ? sensors.value.find((s) => s.id === fiducialCalibrateSensorId.value) ?? null : null)
+    fiducialCalibrateSensorId.value
+      ? (sensors.value.find((s) => s.id === fiducialCalibrateSensorId.value) ?? null)
+      : null,
+  )
   const fiducialCalibrateImages = computed(() =>
-    fiducialCalibrateSensor.value ? images.value.filter((i) => i.sensorId === fiducialCalibrateSensor.value.id) : [])
+    fiducialCalibrateSensor.value ? images.value.filter((i) => i.sensorId === fiducialCalibrateSensor.value.id) : [],
+  )
 
   // Both entry points stay reachable for every film sensor. Calibration directs the
   // user to detection when no accepted spots exist yet.
   const filmSensors = computed(() => sensors.value.filter((s) => s.kind === 'film'))
 
   function fiducialDisplayForImage(imageId) {
-    const img = imageById(imageId), sensor = sensorForImage(imageId)
+    const img = imageById(imageId),
+      sensor = sensorForImage(imageId)
     const detections = img?.fiducialDetections || []
     const cal = sensor?.fiducialCalibration
     if (isFiducialCalibrated(cal)) {
@@ -49,7 +60,10 @@ export function useFiducialTools() {
       return {
         marks: cal.marks,
         transform: cal.transform || 'affine',
-        obs: detections.flatMap((d) => { const fidId = cal.slotMap?.[d.slot]; return byId.has(fidId) ? [{ fidId, px: d.px, py: d.py, slot: d.slot }] : [] }),
+        obs: detections.flatMap((d) => {
+          const fidId = cal.slotMap?.[d.slot]
+          return byId.has(fidId) ? [{ fidId, px: d.px, py: d.py, slot: d.slot }] : []
+        }),
       }
     }
     // Before calibration a mark IS its slot. Offer every slot, not only the ones
@@ -57,13 +71,18 @@ export function useFiducialTools() {
     // found nothing) could never be placed by hand.
     const slots = [...CORNER_SLOTS, ...SIDE_SLOTS]
     for (const d of detections) if (!slots.includes(d.slot)) slots.push(d.slot)
-    return { marks: slots.map((id) => ({ id })), transform: 'affine', obs: detections.map((d) => ({ fidId: d.slot, px: d.px, py: d.py, slot: d.slot })) }
+    return {
+      marks: slots.map((id) => ({ id })),
+      transform: 'affine',
+      obs: detections.map((d) => ({ fidId: d.slot, px: d.px, py: d.py, slot: d.slot })),
+    }
   }
 
   function markDisplayedFiducial(imageId, { fidId, px, py }) {
     const cal = sensorForImage(imageId)?.fiducialCalibration
     const slot = isFiducialCalibrated(cal) ? Object.keys(cal.slotMap).find((s) => cal.slotMap[s] === fidId) : fidId
-    if (slot) setFiducialDetection(imageId, { slot, px, py, family: 'manual', source: 'manual', confidence: 1, reviewed: true })
+    if (slot)
+      setFiducialDetection(imageId, { slot, px, py, family: 'manual', source: 'manual', confidence: 1, reviewed: true })
   }
 
   // Ribbon entry. With one candidate sensor go straight to the modal; with several
@@ -77,8 +96,7 @@ export function useFiducialTools() {
       return
     }
     sensorTableOpen.value = true
-    log(`${candidates.length} film sensors available — pick one and use "Detect fiducials…"`,
-      'info', 'Fiducial')
+    log(`${candidates.length} film sensors available — pick one and use "Detect fiducials…"`, 'info', 'Fiducial')
   }
 
   function openFiducialCalibrate() {
@@ -93,7 +111,15 @@ export function useFiducialTools() {
   }
 
   return {
-    fiducialDetectSensor, fiducialDetectImages, fiducialCalibrateSensor, fiducialCalibrateImages, filmSensors,
-    sensorForImage, fiducialDisplayForImage, markDisplayedFiducial, openFiducialDetect, openFiducialCalibrate,
+    fiducialDetectSensor,
+    fiducialDetectImages,
+    fiducialCalibrateSensor,
+    fiducialCalibrateImages,
+    filmSensors,
+    sensorForImage,
+    fiducialDisplayForImage,
+    markDisplayedFiducial,
+    openFiducialDetect,
+    openFiducialCalibrate,
   }
 }

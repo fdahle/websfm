@@ -38,13 +38,16 @@ export function planImageDetection(natW, natH, settings = {}) {
   const { maxDim } = resolveDetectMaxDim(nativeMax, settings)
   // Same arithmetic as the worker's rasterize (downscaleBitmap).
   const scale = nativeMax > 0 ? Math.min(1, maxDim / nativeMax) : 1
-  const width = Math.round(natW * scale), height = Math.round(natH * scale)
+  const width = Math.round(natW * scale),
+    height = Math.round(natH * scale)
   const tile = plannedTileSize(settings)
-  let tilesX = 1, tilesY = 1
+  let tilesX = 1,
+    tilesY = 1
   if (tile.size > 0 && (width > tile.size || height > tile.size)) {
     const spec = learnedDetector(settings.detector)
-    const tiles = planTiles(width, height, tile.size, settings.overlap ?? 64,
-      { align: spec ? spec.tileAlign : SIFT_TILE_ALIGN })
+    const tiles = planTiles(width, height, tile.size, settings.overlap ?? 64, {
+      align: spec ? spec.tileAlign : SIFT_TILE_ALIGN,
+    })
     tilesX = new Set(tiles.map((t) => t.x)).size
     tilesY = new Set(tiles.map((t) => t.y)).size
   }

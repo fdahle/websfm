@@ -1,14 +1,24 @@
-export interface ProjectIndexEntry { id: string; [key: string]: unknown }
+export interface ProjectIndexEntry {
+  id: string
+  [key: string]: unknown
+}
 
 /** Apply only this session's edits to the latest index, preserving other tabs. */
-export function mergeProjectIndex(latest: ProjectIndexEntry[], baseline: ProjectIndexEntry[], snapshot: ProjectIndexEntry[]): ProjectIndexEntry[] {
-  const before = new Map(baseline.map(p => [p.id, p]))
-  const after = new Map(snapshot.map(p => [p.id, p]))
-  const merged = new Map(latest.map(p => [p.id, p]))
+export function mergeProjectIndex(
+  latest: ProjectIndexEntry[],
+  baseline: ProjectIndexEntry[],
+  snapshot: ProjectIndexEntry[],
+): ProjectIndexEntry[] {
+  const before = new Map(baseline.map((p) => [p.id, p]))
+  const after = new Map(snapshot.map((p) => [p.id, p]))
+  const merged = new Map(latest.map((p) => [p.id, p]))
   for (const id of before.keys()) if (!after.has(id)) merged.delete(id)
   for (const [id, value] of after) {
     const old = before.get(id)
-    if (!old) { merged.set(id, value); continue }
+    if (!old) {
+      merged.set(id, value)
+      continue
+    }
     // A project deleted elsewhere must never be resurrected by a stale tab.
     const current = merged.get(id)
     if (!current) continue

@@ -1,8 +1,18 @@
 import { describe, it, expect } from 'vitest'
 import {
-  cloudBounds, cloudCount, cropCloud, filterRange, removeIsolated,
-  statisticalOutlierFilter, voxelDownsample, filterCloud, mergeClouds,
-  estimateSpacing, clampGridCell, maskCloud, classifySelection,
+  cloudBounds,
+  cloudCount,
+  cropCloud,
+  filterRange,
+  removeIsolated,
+  statisticalOutlierFilter,
+  voxelDownsample,
+  filterCloud,
+  mergeClouds,
+  estimateSpacing,
+  clampGridCell,
+  maskCloud,
+  classifySelection,
 } from './cloudEdit.js'
 
 // Build a flat cloud from [[x,y,z], …] plus optional colours/normals.
@@ -11,19 +21,24 @@ function makeCloud(xyz, { col = null, nrm = null } = {}) {
   const pos = new Float32Array(n * 3)
   xyz.forEach((p, i) => pos.set(p, i * 3))
   const out = { count: n, pos }
-  if (col) { out.col = new Uint8Array(n * 3); col.forEach((c, i) => out.col.set(c, i * 3)) }
-  if (nrm) { out.nrm = new Float32Array(n * 3); nrm.forEach((v, i) => out.nrm.set(v, i * 3)) }
+  if (col) {
+    out.col = new Uint8Array(n * 3)
+    col.forEach((c, i) => out.col.set(c, i * 3))
+  }
+  if (nrm) {
+    out.nrm = new Float32Array(n * 3)
+    nrm.forEach((v, i) => out.nrm.set(v, i * 3))
+  }
   return out
 }
 
-const xyzOf = (c) => Array.from({ length: cloudCount(c) },
-  (_, i) => [c.pos[i * 3], c.pos[i * 3 + 1], c.pos[i * 3 + 2]])
+const xyzOf = (c) => Array.from({ length: cloudCount(c) }, (_, i) => [c.pos[i * 3], c.pos[i * 3 + 1], c.pos[i * 3 + 2]])
 
 // A dense-ish 6×6×6 lattice at unit spacing — the "real surface" every filter must keep.
 function lattice(n = 6, step = 1) {
   const pts = []
-  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) for (let k = 0; k < n; k++)
-    pts.push([i * step, j * step, k * step])
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++) for (let k = 0; k < n; k++) pts.push([i * step, j * step, k * step])
   return pts
 }
 
@@ -37,18 +52,38 @@ describe('cloudBounds / cloudCount', () => {
   })
 
   it('spans every axis', () => {
-    const b = cloudBounds(makeCloud([[-1, 2, 3], [4, -5, 6]]))
+    const b = cloudBounds(
+      makeCloud([
+        [-1, 2, 3],
+        [4, -5, 6],
+      ]),
+    )
     expect(b).toEqual({ minX: -1, minY: -5, minZ: 3, maxX: 4, maxY: 2, maxZ: 6 })
   })
 })
 
 describe('cropCloud', () => {
-  const cloud = makeCloud([[0, 0, 0], [5, 5, 5], [10, 10, 10]],
-    { col: [[1, 2, 3], [4, 5, 6], [7, 8, 9]] })
+  const cloud = makeCloud(
+    [
+      [0, 0, 0],
+      [5, 5, 5],
+      [10, 10, 10],
+    ],
+    {
+      col: [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9],
+      ],
+    },
+  )
 
   it('keeps points inside the box, inclusive of the bounds', () => {
     const out = cropCloud(cloud, { min: [0, 0, 0], max: [5, 5, 5] })
-    expect(xyzOf(out)).toEqual([[0, 0, 0], [5, 5, 5]])
+    expect(xyzOf(out)).toEqual([
+      [0, 0, 0],
+      [5, 5, 5],
+    ])
   })
 
   it('carries colour through, aligned to the kept points', () => {
@@ -58,12 +93,18 @@ describe('cropCloud', () => {
 
   it('inverts to keep everything outside the box', () => {
     const out = cropCloud(cloud, { min: [4, 4, 4], max: [6, 6, 6], invert: true })
-    expect(xyzOf(out)).toEqual([[0, 0, 0], [10, 10, 10]])
+    expect(xyzOf(out)).toEqual([
+      [0, 0, 0],
+      [10, 10, 10],
+    ])
   })
 
   it('treats a missing component as unbounded (Z-only crop)', () => {
     const out = cropCloud(cloud, { min: [null, null, 4], max: [null, null, null] })
-    expect(xyzOf(out)).toEqual([[5, 5, 5], [10, 10, 10]])
+    expect(xyzOf(out)).toEqual([
+      [5, 5, 5],
+      [10, 10, 10],
+    ])
   })
 
   it('never mutates or aliases the source buffers', () => {
@@ -80,8 +121,20 @@ describe('cropCloud', () => {
 })
 
 describe('filterRange', () => {
-  const cloud = makeCloud([[0, 0, 0], [0, 0, 5], [0, 0, 10]],
-    { col: [[0, 0, 0], [128, 128, 128], [255, 255, 255]] })
+  const cloud = makeCloud(
+    [
+      [0, 0, 0],
+      [0, 0, 5],
+      [0, 0, 10],
+    ],
+    {
+      col: [
+        [0, 0, 0],
+        [128, 128, 128],
+        [255, 255, 255],
+      ],
+    },
+  )
 
   it('keeps an elevation band', () => {
     expect(xyzOf(filterRange(cloud, { zMin: 1, zMax: 9 }))).toEqual([[0, 0, 5]])
@@ -92,7 +145,10 @@ describe('filterRange', () => {
   })
 
   it('ignores brightness bounds on a colourless cloud rather than dropping everything', () => {
-    const bare = makeCloud([[0, 0, 0], [0, 0, 5]])
+    const bare = makeCloud([
+      [0, 0, 0],
+      [0, 0, 5],
+    ])
     const logs = []
     const out = filterRange(bare, { lumaMin: 200 }, (m, l) => logs.push(l))
     expect(out.count).toBe(2)
@@ -103,37 +159,74 @@ describe('filterRange', () => {
 describe('voxelDownsample', () => {
   it('keeps the first real point of each cell when the cloud has attributes', () => {
     let s = 7
-    const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647)
-    const n = 4000, pos = new Float64Array(n * 3), cls = new Uint8Array(n)
-    for (let i = 0; i < n * 3; i++) pos[i] = rnd() * 20 - 7   // negative and positive cells
+    const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647
+    const n = 4000,
+      pos = new Float64Array(n * 3),
+      cls = new Uint8Array(n)
+    for (let i = 0; i < n * 3; i++) pos[i] = rnd() * 20 - 7 // negative and positive cells
     for (let i = 0; i < n; i++) cls[i] = i % 7
     const out = voxelDownsample({ count: n, pos, attributes: { classification: cls } }, { cell: 1.3 })
     // The reference rule: floor(pos / cell) per axis, the first point of each key wins.
-    const seen = new Set(), kept = []
+    const seen = new Set(),
+      kept = []
     for (let i = 0; i < n; i++) {
       const key = [0, 1, 2].map((a) => Math.floor(pos[i * 3 + a] / 1.3)).join(',')
-      if (!seen.has(key)) { seen.add(key); kept.push(i) }
+      if (!seen.has(key)) {
+        seen.add(key)
+        kept.push(i)
+      }
     }
     expect(out.count).toBe(kept.length)
     expect(Array.from(out.attributes.classification)).toEqual(kept.map((i) => cls[i]))
-    expect(Array.from(out.pos.subarray(0, 6))).toEqual(Array.from(pos.subarray(kept[0] * 3, kept[0] * 3 + 3)).concat(Array.from(pos.subarray(kept[1] * 3, kept[1] * 3 + 3))))
+    expect(Array.from(out.pos.subarray(0, 6))).toEqual(
+      Array.from(pos.subarray(kept[0] * 3, kept[0] * 3 + 3)).concat(
+        Array.from(pos.subarray(kept[1] * 3, kept[1] * 3 + 3)),
+      ),
+    )
   })
 
   it('collapses coincident points into one averaged point', () => {
-    const cloud = makeCloud([[0, 0, 0], [0.1, 0, 0], [0.2, 0, 0], [10, 0, 0]])
+    const cloud = makeCloud([
+      [0, 0, 0],
+      [0.1, 0, 0],
+      [0.2, 0, 0],
+      [10, 0, 0],
+    ])
     const out = voxelDownsample(cloud, { cell: 1 })
     expect(out.count).toBe(2)
     expect(out.pos[0]).toBeCloseTo(0.1, 5)
   })
 
   it('averages colour across the cell', () => {
-    const cloud = makeCloud([[0, 0, 0], [0.1, 0, 0]], { col: [[0, 0, 0], [100, 200, 40]] })
+    const cloud = makeCloud(
+      [
+        [0, 0, 0],
+        [0.1, 0, 0],
+      ],
+      {
+        col: [
+          [0, 0, 0],
+          [100, 200, 40],
+        ],
+      },
+    )
     const out = voxelDownsample(cloud, { cell: 1 })
     expect(Array.from(out.col)).toEqual([50, 100, 20])
   })
 
   it('averages and renormalizes normals', () => {
-    const cloud = makeCloud([[0, 0, 0], [0.1, 0, 0]], { nrm: [[1, 0, 0], [0, 1, 0]] })
+    const cloud = makeCloud(
+      [
+        [0, 0, 0],
+        [0.1, 0, 0],
+      ],
+      {
+        nrm: [
+          [1, 0, 0],
+          [0, 1, 0],
+        ],
+      },
+    )
     const out = voxelDownsample(cloud, { cell: 1 })
     expect(Math.hypot(out.nrm[0], out.nrm[1], out.nrm[2])).toBeCloseTo(1, 5)
   })
@@ -180,7 +273,10 @@ describe('statisticalOutlierFilter', () => {
   })
 
   it('passes through clouds too small to have statistics', () => {
-    const cloud = makeCloud([[0, 0, 0], [1, 1, 1]])
+    const cloud = makeCloud([
+      [0, 0, 0],
+      [1, 1, 1],
+    ])
     expect(statisticalOutlierFilter(cloud, {}).count).toBe(2)
   })
 })
@@ -204,7 +300,11 @@ describe('removeIsolated', () => {
 
 describe('filterCloud dispatch', () => {
   it('chains methods in the given order', () => {
-    const pts = [[0, 0, 0], [0.1, 0, 0], [0, 0, 50]]
+    const pts = [
+      [0, 0, 0],
+      [0.1, 0, 0],
+      [0, 0, 50],
+    ]
     const out = filterCloud(makeCloud(pts), {
       methods: ['range', 'voxel'],
       range: { zMax: 10 },
@@ -232,8 +332,15 @@ describe('filterCloud dispatch', () => {
 describe('mergeClouds', () => {
   it('concatenates points in input order', () => {
     const a = makeCloud([[0, 0, 0]])
-    const b = makeCloud([[1, 1, 1], [2, 2, 2]])
-    expect(xyzOf(mergeClouds([a, b]))).toEqual([[0, 0, 0], [1, 1, 1], [2, 2, 2]])
+    const b = makeCloud([
+      [1, 1, 1],
+      [2, 2, 2],
+    ])
+    expect(xyzOf(mergeClouds([a, b]))).toEqual([
+      [0, 0, 0],
+      [1, 1, 1],
+      [2, 2, 2],
+    ])
   })
 
   it('fills neutral grey for an input without colour when any other has it', () => {
@@ -252,8 +359,14 @@ describe('mergeClouds', () => {
   })
 
   it('dedupes the overlap seam when a cell is given', () => {
-    const a = makeCloud([[0, 0, 0], [1, 0, 0]])
-    const b = makeCloud([[0.05, 0, 0], [1.05, 0, 0]])
+    const a = makeCloud([
+      [0, 0, 0],
+      [1, 0, 0],
+    ])
+    const b = makeCloud([
+      [0.05, 0, 0],
+      [1.05, 0, 0],
+    ])
     expect(mergeClouds([a, b], { cell: 0.5 }).count).toBe(2)
   })
 
@@ -294,12 +407,28 @@ it('keeps survey precision when filtering, merging and downsampling imported clo
 })
 
 describe('maskCloud', () => {
-  const src = makeCloud([[0, 0, 0], [1, 0, 0], [2, 0, 0]], { col: [[1, 1, 1], [2, 2, 2], [3, 3, 3]] })
+  const src = makeCloud(
+    [
+      [0, 0, 0],
+      [1, 0, 0],
+      [2, 0, 0],
+    ],
+    {
+      col: [
+        [1, 1, 1],
+        [2, 2, 2],
+        [3, 3, 3],
+      ],
+    },
+  )
   const mask = new Uint8Array([0, 1, 0])
 
   it('deletes the selected points, carrying colour', () => {
     const out = maskCloud(src, { mask })
-    expect(xyzOf(out)).toEqual([[0, 0, 0], [2, 0, 0]])
+    expect(xyzOf(out)).toEqual([
+      [0, 0, 0],
+      [2, 0, 0],
+    ])
     expect(Array.from(out.col)).toEqual([1, 1, 1, 3, 3, 3])
   })
 
@@ -314,7 +443,12 @@ describe('maskCloud', () => {
 
 describe('classifySelection', () => {
   it('sets the selected points to a class in a new array and keeps everything else', () => {
-    const src = { count: 4, pos: new Float64Array(12), col: new Uint8Array(12), attributes: { intensity: Uint16Array.of(1, 2, 3, 4) } }
+    const src = {
+      count: 4,
+      pos: new Float64Array(12),
+      col: new Uint8Array(12),
+      attributes: { intensity: Uint16Array.of(1, 2, 3, 4) },
+    }
     const a = classifySelection(src, { mask: Uint8Array.of(1, 0, 1, 0), classValue: 2 })
     expect([...a.attributes.classification]).toEqual([2, 0, 2, 0])
     expect(a.attributes.intensity).toBe(src.attributes.intensity)

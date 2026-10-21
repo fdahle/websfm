@@ -52,10 +52,15 @@ export function makeTiffOps() {
     const t0 = performance.now()
     let last = 0
     const out = await buildPyramidFromTiff(blob, {
-      onProgress: emit ? (done, total) => {
-        const now = performance.now()
-        if (now - last > 500 || done === total) { last = now; emit('progress', [done, total]) }
-      } : undefined,
+      onProgress: emit
+        ? (done, total) => {
+            const now = performance.now()
+            if (now - last > 500 || done === total) {
+              last = now
+              emit('progress', [done, total])
+            }
+          }
+        : undefined,
     })
     return { result: { ...out, ms: performance.now() - t0 } }
   }

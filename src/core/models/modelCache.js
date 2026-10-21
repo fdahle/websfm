@@ -41,12 +41,18 @@ export function modelBytesProblem({ head, size, contentType = '' }) {
 
 /** The error to throw when `url` did not serve a model; names the likely fix. */
 export function badModelError(label, url, problem) {
-  return new Error(`${label}: ${url} is not an ONNX model (${problem}). The file is probably `
-    + 'missing on the server: place the .onnx files in public/models/ or set VITE_MODEL_BASE_URL.')
+  return new Error(
+    `${label}: ${url} is not an ONNX model (${problem}). The file is probably ` +
+      'missing on the server: place the .onnx files in public/models/ or set VITE_MODEL_BASE_URL.',
+  )
 }
 
 async function evictCachedModel(url) {
-  try { await (await caches.open(MODEL_CACHE_NAME)).delete(url) } catch { /* best effort */ }
+  try {
+    await (await caches.open(MODEL_CACHE_NAME)).delete(url)
+  } catch {
+    /* best effort */
+  }
 }
 
 /**
@@ -104,7 +110,7 @@ export async function loadModelBytes(model, onLog, label = 'model') {
     onLog?.(`${label}: loaded ${(cached.byteLength / 1e6).toFixed(1)} MB from cache`)
     return cached
   }
-  const t = (typeof performance !== 'undefined' ? performance.now() : 0)
+  const t = typeof performance !== 'undefined' ? performance.now() : 0
   const resp = await fetch(model)
   if (!resp.ok) throw new Error(`${label} fetch failed: HTTP ${resp.status} for ${model}`)
   const buf = await resp.arrayBuffer()

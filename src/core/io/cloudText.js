@@ -18,18 +18,25 @@ export function* cloudToXyzParts(points, { color = true, partChars = PART_CHARS 
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
   const [getX, getY, getZ] = flat ? flatAxes(flat) : [(i) => points[i].x, (i) => points[i].y, (i) => points[i].z]
   const getC = flat
-    ? (flat.col ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]] : () => null)
+    ? flat.col
+      ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]]
+      : () => null
     : (i) => points[i].color
   const withColor = color && (flat ? !!flat.col : n > 0 && !!points[0]?.color)
   // An empty cloud is a lone newline, as `lines.join('\n') + '\n'` always wrote.
-  yield* lineParts('', n, (i) => {
-    let s = `${getX(i)} ${getY(i)} ${getZ(i)}`
-    if (withColor) {
-      const c = getC(i) || [200, 200, 200]
-      s += ` ${byte(c[0])} ${byte(c[1])} ${byte(c[2])}`
-    }
-    return s
-  }, { emptyBody: '\n', partChars })
+  yield* lineParts(
+    '',
+    n,
+    (i) => {
+      let s = `${getX(i)} ${getY(i)} ${getZ(i)}`
+      if (withColor) {
+        const c = getC(i) || [200, 200, 200]
+        s += ` ${byte(c[0])} ${byte(c[1])} ${byte(c[2])}`
+      }
+      return s
+    },
+    { emptyBody: '\n', partChars },
+  )
 }
 
 const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
@@ -62,8 +69,14 @@ export async function parseXyzChunks(chunks, { onLog } = {}) {
 export function createXyzParser({ onLog } = {}) {
   // Positions in full precision; colour (0–1, 0–255 or 0–65535) and intensity need no
   // more than Float32 — half the memory of the cloud's largest companions.
-  const xs = growable(Float64Array), cols = growable(Float32Array), intensities = growable(Float32Array)
-  let carry = '', delim = null, skipped = 0, colMax = 0, anyIntensity = false
+  const xs = growable(Float64Array),
+    cols = growable(Float32Array),
+    intensities = growable(Float32Array)
+  let carry = '',
+    delim = null,
+    skipped = 0,
+    colMax = 0,
+    anyIntensity = false
 
   function row(raw) {
     const l = raw.trimEnd()
@@ -71,22 +84,38 @@ export function createXyzParser({ onLog } = {}) {
     if (delim === null) delim = sniffDelimiter(l)
     const cells = splitRow(l, delim)
     const k = cells.length
-    if (k < 3 || k > 7) { skipped++; return }
-    const x = Number(cells[0]), y = Number(cells[1]), z = Number(cells[2])
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) { skipped++; return }
-    xs.push(x); xs.push(y); xs.push(z)
+    if (k < 3 || k > 7) {
+      skipped++
+      return
+    }
+    const x = Number(cells[0]),
+      y = Number(cells[1]),
+      z = Number(cells[2])
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      skipped++
+      return
+    }
+    xs.push(x)
+    xs.push(y)
+    xs.push(z)
     if (k === 4 || k === 7) {
       const v = Number(cells[3])
       intensities.push(v)
       if (Number.isFinite(v)) anyIntensity = true
     } else intensities.push(NaN)
     if (k >= 6) {
-      const r = Number(cells[k - 3]), g = Number(cells[k - 2]), b = Number(cells[k - 1])
+      const r = Number(cells[k - 3]),
+        g = Number(cells[k - 2]),
+        b = Number(cells[k - 1])
       if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
-        cols.push(r); cols.push(g); cols.push(b)
+        cols.push(r)
+        cols.push(g)
+        cols.push(b)
         colMax = Math.max(colMax, r, g, b)
       } else {
-        cols.push(200); cols.push(200); cols.push(200)
+        cols.push(200)
+        cols.push(200)
+        cols.push(200)
         colMax = Math.max(colMax, 200)
       }
     }
@@ -99,7 +128,8 @@ export function createXyzParser({ onLog } = {}) {
       for (const l of lines) row(l)
     },
     finish() {
-      row(carry); carry = ''
+      row(carry)
+      carry = ''
       const count = xs.length / 3
       const pos = xs.take()
       // Only emit color when every point carried one (a partial column would misalign).
@@ -110,11 +140,20 @@ export function createXyzParser({ onLog } = {}) {
         col = new Uint8Array(count * 3)
         for (let i = 0; i < col.length; i++) col[i] = byte(scale01 ? raw[i] * 255 : raw[i])
       }
-      onLog?.(`XYZ: read ${count.toLocaleString()} points`
-        + `${col ? ` with color (${colMax <= 1.0001 ? '0–1' : '0–255'} range)` : ''}`
-        + `${skipped ? `, skipped ${pluralize(skipped, 'non-numeric row')}` : ''}`, 'info', 'Import')
-      return { count, pos, ...(col ? { col } : {}), skipped,
-        ...(anyIntensity ? { attributes: { intensity: intensities.take() } } : {}) }
+      onLog?.(
+        `XYZ: read ${count.toLocaleString()} points` +
+          `${col ? ` with color (${colMax <= 1.0001 ? '0–1' : '0–255'} range)` : ''}` +
+          `${skipped ? `, skipped ${pluralize(skipped, 'non-numeric row')}` : ''}`,
+        'info',
+        'Import',
+      )
+      return {
+        count,
+        pos,
+        ...(col ? { col } : {}),
+        skipped,
+        ...(anyIntensity ? { attributes: { intensity: intensities.take() } } : {}),
+      }
     },
   }
 }
@@ -125,17 +164,26 @@ export function createXyzParser({ onLog } = {}) {
 // engine's own RangeError, which the import turns into its "too large" message.
 export function growable(Type, initial = 1024) {
   const maxLength = Math.floor(MAX_BUFFER_BYTES / Type.BYTES_PER_ELEMENT)
-  let buf = new Type(initial), len = 0
+  let buf = new Type(initial),
+    len = 0
   return {
     push(v) {
       if (len === buf.length) {
         if (len >= maxLength) throw new RangeError('Array buffer allocation failed')
-        const next = new Type(Math.min(buf.length * 2, maxLength)); next.set(buf); buf = next
+        const next = new Type(Math.min(buf.length * 2, maxLength))
+        next.set(buf)
+        buf = next
       }
       buf[len++] = v
     },
-    get length() { return len },
-    view() { return buf.subarray(0, len) },
-    take() { return buf.slice(0, len) },
+    get length() {
+      return len
+    },
+    view() {
+      return buf.subarray(0, len)
+    },
+    take() {
+      return buf.slice(0, len)
+    },
   }
 }

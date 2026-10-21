@@ -13,14 +13,18 @@ import { keypointResponseRange } from '../utils/imageOverlay.js'
 export function useImageKeypoints({ image, show, store }) {
   const keypoints = shallowRef(null)
   let keypointRequest = 0
-  watch([() => image().id, () => image().kpRev, () => image().kpStatus, show], async () => {
-    const req = ++keypointRequest
-    // Never draw the previous image's (or the replaced) set while the new one loads.
-    keypoints.value = store.residentKeypoints(image())
-    if (keypoints.value || !show() || image().kpStatus !== 'done') return
-    const kps = await store.ensureKeypoints(image())
-    if (req === keypointRequest) keypoints.value = kps
-  }, { immediate: true })
+  watch(
+    [() => image().id, () => image().kpRev, () => image().kpStatus, show],
+    async () => {
+      const req = ++keypointRequest
+      // Never draw the previous image's (or the replaced) set while the new one loads.
+      keypoints.value = store.residentKeypoints(image())
+      if (keypoints.value || !show() || image().kpStatus !== 'done') return
+      const kps = await store.ensureKeypoints(image())
+      if (req === keypointRequest) keypoints.value = kps
+    },
+    { immediate: true },
+  )
 
   // Keypoint response range, for the cold→hot colour ramp. Recomputed only when the
   // keypoint array itself is replaced (re-detect / image switch), not on every draw —

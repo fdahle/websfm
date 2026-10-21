@@ -3,15 +3,29 @@ import { openLasStream, STREAM_ATTRIBUTES } from './lasStream.js'
 import { cloudToLasParts, parseLas } from './las.js'
 import { joinParts } from './parts.js'
 
-const bytesSource = (bytes) => ({ size: bytes.length, async read(a, b) { return bytes.slice(a, b) } })
+const bytesSource = (bytes) => ({
+  size: bytes.length,
+  async read(a, b) {
+    return bytes.slice(a, b)
+  },
+})
 
 function cloud(n, { colour = true } = {}) {
-  const pos = new Float64Array(3 * n), col = colour ? new Uint8Array(3 * n) : null
-  const classification = new Uint8Array(n), intensity = new Uint16Array(n)
+  const pos = new Float64Array(3 * n),
+    col = colour ? new Uint8Array(3 * n) : null
+  const classification = new Uint8Array(n),
+    intensity = new Uint16Array(n)
   for (let i = 0; i < n; i++) {
-    pos[3 * i] = 650000 + (i % 1000) * 0.05; pos[3 * i + 1] = 5100000 + Math.floor(i / 1000) * 0.05; pos[3 * i + 2] = 300 + (i % 7)
-    if (col) { col[3 * i] = i & 255; col[3 * i + 1] = 40; col[3 * i + 2] = 200 }
-    classification[i] = i % 3 ? 2 : 6; intensity[i] = i & 0xffff
+    pos[3 * i] = 650000 + (i % 1000) * 0.05
+    pos[3 * i + 1] = 5100000 + Math.floor(i / 1000) * 0.05
+    pos[3 * i + 2] = 300 + (i % 7)
+    if (col) {
+      col[3 * i] = i & 255
+      col[3 * i + 1] = 40
+      col[3 * i + 2] = 200
+    }
+    classification[i] = i % 3 ? 2 : 6
+    intensity[i] = i & 0xffff
   }
   return { count: n, pos, col, attributes: { classification, intensity } }
 }
@@ -56,11 +70,13 @@ describe('LAS as a stream of batches', () => {
     const bytes = joinParts(cloudToLasParts(c))
     // The writer stores 8-bit colour as 16-bit (×257): rewrite the words to raw 0–255.
     const view = new DataView(bytes.buffer)
-    const at = view.getUint32(96, true), size = view.getUint16(105, true)
-    for (let i = 0; i < 20_000; i++) for (let k = 0; k < 3; k++) {
-      const p = at + i * size + 20 + 2 * k
-      view.setUint16(p, i < 10_000 ? 3 : c.col[3 * i + k], true) // first half nearly black
-    }
+    const at = view.getUint32(96, true),
+      size = view.getUint16(105, true)
+    for (let i = 0; i < 20_000; i++)
+      for (let k = 0; k < 3; k++) {
+        const p = at + i * size + 20 + 2 * k
+        view.setUint16(p, i < 10_000 ? 3 : c.col[3 * i + k], true) // first half nearly black
+      }
     const batches = await readAll(await openLasStream(bytesSource(bytes), { batchPoints: 10_000 }))
     expect(batches[0].col[0]).toBe(3) // not 3 >> 8 = 0
     expect(batches[1].col[3]).toBe(c.col[3 * 10_001])

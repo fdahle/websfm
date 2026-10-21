@@ -25,20 +25,23 @@ export const useModelsStore = defineStore('models', () => {
   const request = ref(null)
   // Downloading phase (after the user approves). Per-id progress { loaded, total }.
   const downloading = ref(false)
-  const progress = ref({})            // id → { loaded, total }
+  const progress = ref({}) // id → { loaded, total }
   const errorMsg = ref('')
 
   // Set while a request is open so a second caller (e.g. a queued op) awaits the
   // same modal rather than opening a second one for overlapping ids.
-  let pending = null                  // { promise, resolve, ids }
-  let decision = null                 // resolver for approve()/decline()
+  let pending = null // { promise, resolve, ids }
+  let decision = null // resolver for approve()/decline()
 
   const totalLoaded = computed(() => {
-    let l = 0, t = 0
+    let l = 0,
+      t = 0
     for (const id of (request.value?.ids ?? []).filter((i) => isRedistributable(i))) {
       const p = progress.value[id]
-      if (p) { l += p.loaded; t += p.total }
-      else t += MODELS[id]?.approxBytes ?? 0
+      if (p) {
+        l += p.loaded
+        t += p.total
+      } else t += MODELS[id]?.approxBytes ?? 0
     }
     return { loaded: l, total: t }
   })
@@ -82,9 +85,12 @@ export const useModelsStore = defineStore('models', () => {
     if (problem) throw badModelError(MODELS[id].label, url, problem)
 
     const cache = await caches.open(MODEL_CACHE_NAME)
-    await cache.put(url, new Response(bytes, {
-      headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes.size) },
-    }))
+    await cache.put(
+      url,
+      new Response(bytes, {
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes.size) },
+      }),
+    )
     log(`Model cached: ${MODELS[id].label} (${toMB(bytes.size * 1)} MB)`, 'info', 'Models')
   }
 
@@ -119,9 +125,16 @@ export const useModelsStore = defineStore('models', () => {
     const items = missing.map((id) => {
       const m = MODELS[id]
       return {
-        id, label: m.label, approxBytes: m.approxBytes, license: m.license, licenseUrl: m.licenseUrl,
-        userSupplied: !isRedistributable(id), sourceUrl: m.sourceUrl, sourceFile: m.sourceFile ?? m.file,
-        ready: false, fileError: '',
+        id,
+        label: m.label,
+        approxBytes: m.approxBytes,
+        license: m.license,
+        licenseUrl: m.licenseUrl,
+        userSupplied: !isRedistributable(id),
+        sourceUrl: m.sourceUrl,
+        sourceFile: m.sourceFile ?? m.file,
+        ready: false,
+        fileError: '',
       }
     })
     const totalBytes = items.filter((m) => !m.userSupplied).reduce((s, m) => s + m.approxBytes, 0)
@@ -129,7 +142,9 @@ export const useModelsStore = defineStore('models', () => {
     progress.value = {}
     request.value = { ids: missing, items, totalBytes }
 
-    const promise = new Promise((resolve) => { decision = resolve }).then(async (approved) => {
+    const promise = new Promise((resolve) => {
+      decision = resolve
+    }).then(async (approved) => {
       if (!approved) {
         log('Model download declined — this feature needs its weights to run.', 'warn', 'Models')
         request.value = null
@@ -154,15 +169,21 @@ export const useModelsStore = defineStore('models', () => {
     })
 
     pending = { promise, ids: missing }
-    promise.finally(() => { if (pending?.promise === promise) pending = null })
+    promise.finally(() => {
+      if (pending?.promise === promise) pending = null
+    })
     return promise
   }
 
   // Every user-supplied item of the open request has been handed over.
   const suppliedAll = computed(() => (request.value?.items ?? []).every((m) => !m.userSupplied || m.ready))
 
-  function approve() { if (!downloading.value && suppliedAll.value) decision?.(true) }
-  function decline() { if (!downloading.value) decision?.(false) }
+  function approve() {
+    if (!downloading.value && suppliedAll.value) decision?.(true)
+  }
+  function decline() {
+    if (!downloading.value) decision?.(false)
+  }
 
   /**
    * Accept a model file the user downloaded themselves (a non-redistributable
@@ -176,14 +197,18 @@ export const useModelsStore = defineStore('models', () => {
     if (item) item.fileError = ''
     try {
       const head = new Uint8Array(await file.slice(0, 64).arrayBuffer())
-      const problem = modelBytesProblem({ head, size: file.size })
+      const problem =
+        modelBytesProblem({ head, size: file.size }) ??
         // An ONNX ModelProto opens with field 1 (ir_version) as a varint: 0x08.
-        ?? (head[0] !== 0x08 ? 'it does not start like an ONNX model' : null)
+        (head[0] !== 0x08 ? 'it does not start like an ONNX model' : null)
       if (problem) throw new Error(`"${file.name}" is not an ONNX model (${problem})`)
       const cache = await caches.open(MODEL_CACHE_NAME)
-      await cache.put(modelUrl(id), new Response(file, {
-        headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(file.size) },
-      }))
+      await cache.put(
+        modelUrl(id),
+        new Response(file, {
+          headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(file.size) },
+        }),
+      )
       log(`Model provided: ${MODELS[id].label} from "${file.name}" (${toMB(file.size)} MB)`, 'info', 'Models')
     } catch (err) {
       const msg = String(err?.message ?? err)
@@ -197,7 +222,16 @@ export const useModelsStore = defineStore('models', () => {
   }
 
   return {
-    request, downloading, progress, errorMsg, totalLoaded, suppliedAll,
-    ensureReady, approve, decline, provideModelFile, toMB,
+    request,
+    downloading,
+    progress,
+    errorMsg,
+    totalLoaded,
+    suppliedAll,
+    ensureReady,
+    approve,
+    decline,
+    provideModelFile,
+    toMB,
   }
 })

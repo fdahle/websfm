@@ -46,9 +46,12 @@ export function normalizeMaskPixels(data) {
   const byAlpha = hasMaskTransparency(data)
   for (let i = 0; i < data.length; i += 4) {
     const lum = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
-    const excluded = byAlpha ? (lum > 127 || data[i + 3] > 127) : lum < 128
+    const excluded = byAlpha ? lum > 127 || data[i + 3] > 127 : lum < 128
     if (excluded) {
-      data[i] = 255; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 255
+      data[i] = 255
+      data[i + 1] = 0
+      data[i + 2] = 0
+      data[i + 3] = 255
     } else {
       data[i + 3] = 0
     }
@@ -75,7 +78,10 @@ export function invertMaskPixels(data) {
     if (data[i + 3] > 127) {
       data[i + 3] = 0
     } else {
-      data[i] = 255; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 255
+      data[i] = 255
+      data[i + 1] = 0
+      data[i + 2] = 0
+      data[i + 3] = 255
       excluded++
     }
   }
@@ -88,16 +94,19 @@ export function invertMaskPixels(data) {
 // masks everything inward rather than wrapping. Mutates and returns `data`.
 // Pure: the unit-testable core of the Auto-Mask "border" strategy.
 export function paintBorderExclude(data, w, h, { top = 0, right = 0, bottom = 0, left = 0 } = {}) {
-  const t = Math.max(0, Math.min(Math.round(top),    Math.floor(h / 2)))
+  const t = Math.max(0, Math.min(Math.round(top), Math.floor(h / 2)))
   const b = Math.max(0, Math.min(Math.round(bottom), Math.floor(h / 2)))
-  const l = Math.max(0, Math.min(Math.round(left),   Math.floor(w / 2)))
-  const r = Math.max(0, Math.min(Math.round(right),  Math.floor(w / 2)))
+  const l = Math.max(0, Math.min(Math.round(left), Math.floor(w / 2)))
+  const r = Math.max(0, Math.min(Math.round(right), Math.floor(w / 2)))
   for (let y = 0; y < h; y++) {
-    const inV = y >= t && y < h - b   // inside the top/bottom bands?
+    const inV = y >= t && y < h - b // inside the top/bottom bands?
     for (let x = 0; x < w; x++) {
-      if (inV && x >= l && x < w - r) continue   // interior — leave untouched
+      if (inV && x >= l && x < w - r) continue // interior — leave untouched
       const o = (y * w + x) * 4
-      data[o] = 255; data[o + 1] = 0; data[o + 2] = 0; data[o + 3] = 255
+      data[o] = 255
+      data[o + 1] = 0
+      data[o + 2] = 0
+      data[o + 3] = 255
     }
   }
   return data
@@ -128,9 +137,9 @@ export function scaleBorderSides(sides, scale) {
 export function upsampleLookupNearest(lut, sw, sh, w, h) {
   const out = new Uint8Array(w * h)
   const xs = new Uint32Array(w)
-  for (let x = 0; x < w; x++) xs[x] = Math.min(sw - 1, Math.floor((x + 0.5) * sw / w))
+  for (let x = 0; x < w; x++) xs[x] = Math.min(sw - 1, Math.floor(((x + 0.5) * sw) / w))
   for (let y = 0; y < h; y++) {
-    const row = Math.min(sh - 1, Math.floor((y + 0.5) * sh / h)) * sw
+    const row = Math.min(sh - 1, Math.floor(((y + 0.5) * sh) / h)) * sw
     const o = y * w
     for (let x = 0; x < w; x++) out[o + x] = lut[row + xs[x]]
   }

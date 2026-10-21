@@ -69,7 +69,9 @@ export async function deleteExternalPlane(projectId, id) {
       await dir.removeEntry(`${id}.bin`).catch(ignoreMissing)
       await dir.removeEntry(`${id}.src`).catch(ignoreMissing)
       await dir.removeEntry(`${id}.cog`).catch(ignoreMissing)
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -87,8 +89,11 @@ export async function saveExternalCog(projectId, id, blob) {
   })
 }
 export async function loadExternalCog(projectId, id) {
-  try { return await (await (await getSubDir(projectId, 'external')).getFileHandle(`${id}.cog`)).getFile() }
-  catch { return null }
+  try {
+    return await (await (await getSubDir(projectId, 'external')).getFileHandle(`${id}.cog`)).getFile()
+  } catch {
+    return null
+  }
 }
 
 export async function loadExternalSource(projectId, id) {
@@ -112,7 +117,9 @@ export async function pruneExternalPlanes(projectId, keepIds) {
         if (m && !keepIds.has(m[1])) stale.push(name)
       }
       for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -122,6 +129,8 @@ export async function deleteExternalAll(projectId) {
       const dir = await getSubDir(projectId, 'external')
       await dir.removeEntry('index.json').catch(ignoreMissing)
       await pruneExternalPlanes(projectId, new Set())
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }

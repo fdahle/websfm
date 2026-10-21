@@ -15,10 +15,12 @@ const props = defineProps({
 })
 const emit = defineEmits(['apply'])
 
-const where = computed(() => props.suggestion
-  ? `${props.suggestion.count.toLocaleString()} camera position${props.suggestion.count === 1 ? '' : 's'} around `
-    + formatLatLon(props.suggestion.lat, props.suggestion.lon)
-  : '')
+const where = computed(() =>
+  props.suggestion
+    ? `${props.suggestion.count.toLocaleString()} camera position${props.suggestion.count === 1 ? '' : 's'} around ` +
+      formatLatLon(props.suggestion.lat, props.suggestion.lon)
+    : '',
+)
 </script>
 
 <template>
@@ -28,9 +30,7 @@ const where = computed(() => props.suggestion
         {{ currentCrs }} is in degrees, so the model cannot be fitted to it.
         {{ suggestion ? '' : 'Choose a projected CRS in Project Settings.' }}
       </template>
-      <template v-else>
-        DEMs and orthophotos can only be georeferenced in a projected CRS.
-      </template>
+      <template v-else> DEMs and orthophotos can only be georeferenced in a projected CRS. </template>
     </span>
     <template v-if="suggestion">
       <button type="button" class="link-btn" @click="emit('apply', suggestion)">
@@ -42,11 +42,28 @@ const where = computed(() => props.suggestion
 </template>
 
 <style scoped>
-.crs-suggestion { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
-.reason { font-size: 11px; line-height: 1.4; color: var(--text-dim); }
-.link-btn {
-  background: none; border: none; color: var(--accent); font: inherit; font-size: 11px;
-  padding: 0; cursor: pointer; text-align: left;
+.crs-suggestion {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.link-btn:hover { text-decoration: underline; }
+.reason {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
 </style>

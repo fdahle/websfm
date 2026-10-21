@@ -1,9 +1,26 @@
 import { describe, it, expect } from 'vitest'
 import {
-  filterDepthMap, depthMapForImage, qualityToMaxDim, fitDepthQuality, autoBestK, fusionCostStats,
-  fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric, filterCandidates, geomFilterLoopShare,
-  filterDepthMapsGeometricStreamed, applyPackedMask, fuseDepthMapsStreamed, fusionGates, filterConfig, filterSettings,
-  depthMapSettings, streamedEligible, requiredConsistentViews,
+  filterDepthMap,
+  depthMapForImage,
+  qualityToMaxDim,
+  fitDepthQuality,
+  autoBestK,
+  fusionCostStats,
+  fuseDepthMaps,
+  mergePointsSpatial,
+  createVoxelAccumulator,
+  filterDepthMapsGeometric,
+  filterCandidates,
+  geomFilterLoopShare,
+  filterDepthMapsGeometricStreamed,
+  applyPackedMask,
+  fuseDepthMapsStreamed,
+  fusionGates,
+  filterConfig,
+  filterSettings,
+  depthMapSettings,
+  streamedEligible,
+  requiredConsistentViews,
 } from './mvs.js'
 import { packSparseForDense } from './sparseInput.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
@@ -15,7 +32,8 @@ const plane = (rows) => Float32Array.from(rows.flat())
 
 describe('filterDepthMap', () => {
   it('leaves a uniform field untouched', () => {
-    const w = 4, h = 4
+    const w = 4,
+      h = 4
     const depth = plane(Array.from({ length: h }, () => Array(w).fill(5)))
     const { depth: out, removed } = filterDepthMap(depth, w, h, { radius: 1 })
     expect(removed).toBe(0)
@@ -23,7 +41,8 @@ describe('filterDepthMap', () => {
   })
 
   it('drops a speckle (flying pixel) that disagrees with its neighbours', () => {
-    const w = 3, h = 3
+    const w = 3,
+      h = 3
     // Centre pixel is a flying point (100) in an otherwise-uniform field (5).
     const depth = plane([
       [5, 5, 5],
@@ -31,36 +50,51 @@ describe('filterDepthMap', () => {
       [5, 5, 5],
     ])
     const { depth: out, removed } = filterDepthMap(depth, w, h, { radius: 1, relTol: 0.1 })
-    expect(out[4]).toBe(0)      // centre dropped
+    expect(out[4]).toBe(0) // centre dropped
     expect(removed).toBe(1)
-    expect(out[0]).toBe(5)      // a corner survives, set to its local median (5)
+    expect(out[0]).toBe(5) // a corner survives, set to its local median (5)
   })
 
   it('drops an isolated valid pixel with too few valid neighbours', () => {
-    const w = 5, h = 5
+    const w = 5,
+      h = 5
     const depth = new Float32Array(w * h) // all holes
-    depth[12] = 7                          // a single lone valid pixel at the centre
+    depth[12] = 7 // a single lone valid pixel at the centre
     const { depth: out, removed } = filterDepthMap(depth, w, h, { radius: 1, minValidNeighbors: 4 })
     expect(out[12]).toBe(0)
     expect(removed).toBe(1)
   })
 
   it('does not mutate the input buffer', () => {
-    const w = 3, h = 3
-    const depth = plane([[5, 5, 5], [5, 100, 5], [5, 5, 5]])
+    const w = 3,
+      h = 3
+    const depth = plane([
+      [5, 5, 5],
+      [5, 100, 5],
+      [5, 5, 5],
+    ])
     filterDepthMap(depth, w, h, { radius: 1 })
     expect(depth[4]).toBe(100) // original untouched
   })
 })
 
 describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
-  const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const I = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]
   const K = { fx: 40, fy: 40, cx: 20, cy: 20 }
-  const W = 40, H = 40
+  const W = 40,
+    H = 40
   // Sparse points spread across depth 5..9, near the image centre (project in front).
   const points = SparsePoints.fromRecords([
-    { x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 6 }, { x: 0, y: 0.1, z: 7 },
-    { x: 0.1, y: 0.1, z: 8 }, { x: -0.1, y: 0, z: 9 }, { x: 0, y: -0.1, z: 6.5 },
+    { x: 0, y: 0, z: 5 },
+    { x: 0.1, y: 0, z: 6 },
+    { x: 0, y: 0.1, z: 7 },
+    { x: 0.1, y: 0.1, z: 8 },
+    { x: -0.1, y: 0, z: 9 },
+    { x: 0, y: -0.1, z: 6.5 },
   ])
   const ref = { gray: new Uint8Array(W * H), width: W, height: H, K, cam: { R: I, t: [0, 0, 0] } }
   const sources = [{ gray: new Uint8Array(W * H), w: W, h: H, K, cam: { R: I, t: [-1, 0, 0] } }]
@@ -90,7 +124,7 @@ describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
     const { fn, calls } = makeMock()
     await depthMapForImage(ref, sources, packSparseForDense(points).pos, { coarseLong: 10, iterations: 3 }, fn)
     expect(calls[0].iters).toBeGreaterThan(calls[2].iters) // coarsest > finest
-    expect(calls[2].iters).toBe(3)                          // finest honours the user setting
+    expect(calls[2].iters).toBe(3) // finest honours the user setting
   })
 
   it('seeds coarser levels sparsely but finer levels at full coverage', async () => {
@@ -114,10 +148,10 @@ describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
 
 describe('quality presets & derived params (Step 3)', () => {
   it('qualityToMaxDim scales the native long side by the preset fraction', () => {
-    expect(qualityToMaxDim('low', 8000)).toBe(1000)     // ⅛
-    expect(qualityToMaxDim('medium', 8000)).toBe(2000)  // ¼
-    expect(qualityToMaxDim('high', 8000)).toBe(4000)    // ½
-    expect(qualityToMaxDim('ultra', 8000)).toBe(8000)   // full
+    expect(qualityToMaxDim('low', 8000)).toBe(1000) // ⅛
+    expect(qualityToMaxDim('medium', 8000)).toBe(2000) // ¼
+    expect(qualityToMaxDim('high', 8000)).toBe(4000) // ½
+    expect(qualityToMaxDim('ultra', 8000)).toBe(8000) // full
   })
 
   it('fitDepthQuality keeps the requested level when it fits and steps down when not', () => {
@@ -136,8 +170,8 @@ describe('quality presets & derived params (Step 3)', () => {
   })
 
   it('qualityToMaxDim floors at 200px and defaults unknown presets to medium', () => {
-    expect(qualityToMaxDim('low', 400)).toBe(200)       // 50 → floored to 200
-    expect(qualityToMaxDim('bogus', 8000)).toBe(2000)   // unknown → medium (¼)
+    expect(qualityToMaxDim('low', 400)).toBe(200) // 50 → floored to 200
+    expect(qualityToMaxDim('bogus', 8000)).toBe(2000) // unknown → medium (¼)
   })
 
   it('autoBestK is ceil(nSources/2) clamped to [1,4]', () => {
@@ -170,8 +204,16 @@ describe('quality presets & derived params (Step 3)', () => {
     // kept under half; the fixed default keeps every pixel up to it.
     const n = 64
     const map = {
-      uuid: 'm', width: 8, height: 8,
-      K: { fx: 8, fy: 8, cx: 4, cy: 4 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+      uuid: 'm',
+      width: 8,
+      height: 8,
+      K: { fx: 8, fy: 8, cx: 4, cy: 4 },
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, 0],
       depth: new Float32Array(n).fill(5),
       cost: Float32Array.from({ length: n }, (_, i) => i / (n - 1)),
       rgb: new Uint8Array(n * 3),
@@ -184,8 +226,16 @@ describe('quality presets & derived params (Step 3)', () => {
   it('fuseDepthMaps warns when the cost p70 signals a weak distribution', () => {
     // A single 2×2 map of high-cost valid pixels ⇒ p70 > 0.55 ⇒ warn logged.
     const map = {
-      uuid: 'test', width: 2, height: 2,
-      K: { fx: 1, fy: 1, cx: 1, cy: 1 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+      uuid: 'test',
+      width: 2,
+      height: 2,
+      K: { fx: 1, fy: 1, cx: 1, cy: 1 },
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, 0],
       depth: Float32Array.from([1, 1, 1, 1]),
       cost: Float32Array.from([0.6, 0.7, 0.8, 0.9]),
       rgb: new Uint8Array(2 * 2 * 3),
@@ -206,9 +256,10 @@ describe('quality presets & derived params (Step 3)', () => {
     const depth = new Float32Array(N).fill(1)
     const cost = new Float32Array(N)
     for (let i = 0; i < N; i++) cost[i] = i / (N - 1) // uniform 0..1
-    const exactMedian = 0.5, exactP70 = 0.7
+    const exactMedian = 0.5,
+      exactP70 = 0.7
     const { median, p70, n } = fusionCostStats([{ depth, cost }], { maxSamples: 2000 })
-    expect(n).toBe(N)                         // true valid count, not the sample size
+    expect(n).toBe(N) // true valid count, not the sample size
     expect(median).toBeCloseTo(exactMedian, 2)
     expect(p70).toBeCloseTo(exactP70, 2)
   })
@@ -219,16 +270,16 @@ describe('mergePointsSpatial (fusion dedupe)', () => {
     // Three duplicate-shell points (same surface from three views) within one cell,
     // plus one distinct point a cell away.
     const pts = [
-      { x: 0.00, y: 0.0, z: 0.0, color: [90, 0, 0] },
+      { x: 0.0, y: 0.0, z: 0.0, color: [90, 0, 0] },
       { x: 0.01, y: 0.0, z: 0.0, color: [120, 0, 0] },
       { x: 0.02, y: 0.0, z: 0.0, color: [150, 0, 0] },
-      { x: 5.00, y: 0.0, z: 0.0, color: [0, 200, 0] },
+      { x: 5.0, y: 0.0, z: 0.0, color: [0, 200, 0] },
     ]
     const out = mergePointsSpatial(pts, 1.0)
     expect(out.length).toBe(2)
     const merged = out.find((p) => p.x < 1)
-    expect(merged.x).toBeCloseTo(0.01, 6)          // averaged position
-    expect(merged.color).toEqual([120, 0, 0])       // averaged colour
+    expect(merged.x).toBeCloseTo(0.01, 6) // averaged position
+    expect(merged.color).toEqual([120, 0, 0]) // averaged colour
   })
 
   it('is order-independent (same cells regardless of input order)', () => {
@@ -251,8 +302,16 @@ describe('mergePointsSpatial (fusion dedupe)', () => {
     // poses: every kept pixel in map B coincides in world space with map A's, so the
     // spatial merge must roughly halve the raw fused count.
     const mk = (uuid) => ({
-      uuid, width: 2, height: 2,
-      K: { fx: 100, fy: 100, cx: 1, cy: 1 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+      uuid,
+      width: 2,
+      height: 2,
+      K: { fx: 100, fy: 100, cx: 1, cy: 1 },
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, 0],
       depth: Float32Array.from([1, 1, 1, 1]),
       cost: Float32Array.from([0.1, 0.1, 0.1, 0.1]),
       rgb: new Uint8Array(2 * 2 * 3).fill(128),
@@ -260,13 +319,17 @@ describe('mergePointsSpatial (fusion dedupe)', () => {
     // Disable the WS4 geometric filters: this fixture's two cameras share a pose
     // (zero parallax), which the min-triangulation-angle gate would correctly cull —
     // but here we're exercising only the spatial merge.
-    const out = fuseDepthMaps([mk('a'), mk('b')], { minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false }, () => {})
+    const out = fuseDepthMaps(
+      [mk('a'), mk('b')],
+      { minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false },
+      () => {},
+    )
     // 8 candidate px kept (both maps agree everywhere) but 4 distinct world cells.
     expect(out.summary.keptPct).toBeGreaterThan(0)
     expect(out.summary.mergedPct).toBeGreaterThan(0)
     expect(out).toBeInstanceOf(Float32Array)
-    expect(out.count).toBeLessThanOrEqual(4)   // merged cell count
-    expect(out.length).toBe(out.count * 6)      // flat [x,y,z,r,g,b] per point
+    expect(out.count).toBeLessThanOrEqual(4) // merged cell count
+    expect(out.length).toBe(out.count * 6) // flat [x,y,z,r,g,b] per point
   })
 })
 
@@ -275,9 +338,12 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
   const boundsOf = (pts) => {
     const b = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
     for (const p of pts) {
-      b.minX = Math.min(b.minX, p.x); b.maxX = Math.max(b.maxX, p.x)
-      b.minY = Math.min(b.minY, p.y); b.maxY = Math.max(b.maxY, p.y)
-      b.minZ = Math.min(b.minZ, p.z); b.maxZ = Math.max(b.maxZ, p.z)
+      b.minX = Math.min(b.minX, p.x)
+      b.maxX = Math.max(b.maxX, p.x)
+      b.minY = Math.min(b.minY, p.y)
+      b.maxY = Math.max(b.maxY, p.y)
+      b.minZ = Math.min(b.minZ, p.z)
+      b.maxZ = Math.max(b.maxZ, p.z)
     }
     return b
   }
@@ -285,12 +351,19 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
   it('streaming accumulation produces the same cells + averages as mergePointsSpatial', () => {
     // Random point set spread over a few cells, with colours.
     let seed = 12345
-    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed / 0x7fffffff
+    }
     const pts = Array.from({ length: 4000 }, () => {
-      const nx = rnd() * 2 - 1, ny = rnd() * 2 - 1, nz = rnd() * 2 - 1
+      const nx = rnd() * 2 - 1,
+        ny = rnd() * 2 - 1,
+        nz = rnd() * 2 - 1
       const m = Math.hypot(nx, ny, nz) || 1
       return {
-        x: rnd() * 10 - 5, y: rnd() * 10 - 5, z: rnd() * 10 - 5,
+        x: rnd() * 10 - 5,
+        y: rnd() * 10 - 5,
+        z: rnd() * 10 - 5,
         color: [Math.floor(rnd() * 256), Math.floor(rnd() * 256), Math.floor(rnd() * 256)],
         normal: [nx / m, ny / m, nz / m],
       }
@@ -299,7 +372,8 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
 
     const ref = mergePointsSpatial(pts, cell)
     const acc = createVoxelAccumulator(cell, boundsOf(pts))
-    for (const p of pts) acc.add(p.x, p.y, p.z, p.color[0], p.color[1], p.color[2], p.normal[0], p.normal[1], p.normal[2])
+    for (const p of pts)
+      acc.add(p.x, p.y, p.z, p.color[0], p.color[1], p.color[2], p.normal[0], p.normal[1], p.normal[2])
     const flat = acc.finalizeFlat()
     const { nrm } = acc.finalizeNormals()
 
@@ -329,9 +403,15 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
 
   it('finalizeCloud gives the cloud layout of finalizeFlat + finalizeNormals, isolated cells and all', () => {
     let seed = 7
-    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed / 0x7fffffff
+    }
     const pts = Array.from({ length: 3000 }, () => ({
-      x: rnd() * 20, y: rnd() * 20, z: rnd() * 2, c: [rnd() * 255, rnd() * 255, rnd() * 255].map(Math.floor),
+      x: rnd() * 20,
+      y: rnd() * 20,
+      z: rnd() * 2,
+      c: [rnd() * 255, rnd() * 255, rnd() * 255].map(Math.floor),
       // Some zero normals, so the (0,0,1) fallback is exercised too.
       n: rnd() < 0.1 ? [0, 0, 0] : [rnd() - 0.5, rnd() - 0.5, rnd() - 0.5],
     }))
@@ -341,8 +421,10 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
       acc.filterIsolated({ radius: 1, minNeighbors: 3, maxSupport: 1 })
       return acc
     }
-    const a = make(), b = make()
-    const flat = a.finalizeFlat(), { nrm, degenerate } = a.finalizeNormals()
+    const a = make(),
+      b = make()
+    const flat = a.finalizeFlat(),
+      { nrm, degenerate } = a.finalizeNormals()
     const cloud = b.finalizeCloud()
     expect(cloud.count).toBe(flat.length / 6)
     expect(cloud.degenerate).toBe(degenerate)
@@ -372,7 +454,8 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
     // Clamping put every spire point above the slab into one border cell; the overflow
     // map must keep one cell per unit of height, matching mergePointsSpatial.
     const base = []
-    for (let x = 0; x < 4; x++) for (let y = 0; y < 4; y++) base.push({ x: x + 0.5, y: y + 0.5, z: 0.5, color: [9, 9, 9] })
+    for (let x = 0; x < 4; x++)
+      for (let y = 0; y < 4; y++) base.push({ x: x + 0.5, y: y + 0.5, z: 0.5, color: [9, 9, 9] })
     const spire = Array.from({ length: 20 }, (_, k) => ({ x: 1.5, y: 1.5, z: k + 1.5, color: [200, 0, 0] }))
     const below = { x: 1.5, y: 1.5, z: -7.5, color: [0, 0, 200] } // and one past the other face
     const pts = [...base, ...spire, below]
@@ -414,8 +497,8 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
     // far-away lone cell. filterIsolated must drop only the lone cell, and finalizeFlat/
     // finalizeNormals must compact around it (stay row-aligned).
     const block = []
-    for (let x = 0; x < 2; x++) for (let y = 0; y < 2; y++) for (let z = 0; z < 2; z++)
-      block.push({ x: x + 0.5, y: y + 0.5, z: z + 0.5 })
+    for (let x = 0; x < 2; x++)
+      for (let y = 0; y < 2; y++) for (let z = 0; z < 2; z++) block.push({ x: x + 0.5, y: y + 0.5, z: z + 0.5 })
     const lone = { x: 50.5, y: 50.5, z: 50.5 }
     const pts = [...block, lone]
     const acc = createVoxelAccumulator(1.0, boundsOf(pts))
@@ -426,8 +509,8 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
     expect(acc.count).toBe(8)
     const flat = acc.finalizeFlat()
     const { nrm } = acc.finalizeNormals()
-    expect(flat.length).toBe(8 * 6)   // compacted, lone cell gone
-    expect(nrm.length).toBe(8 * 3)    // row-aligned with flat
+    expect(flat.length).toBe(8 * 6) // compacted, lone cell gone
+    expect(nrm.length).toBe(8 * 3) // row-aligned with flat
     // The surviving points are all in the block (none near the lone cell's 50,50,50).
     for (let s = 0; s < 8; s++) expect(flat[s * 6]).toBeLessThan(10)
   })
@@ -437,7 +520,11 @@ describe('createVoxelAccumulator index', () => {
   it('grows its slot arrays and hash table from a tiny capacity without losing cells', () => {
     // 50k distinct cells from capacity 16 forces many slot doublings and table rehashes;
     // every re-added point must land back in its own cell.
-    const acc = createVoxelAccumulator(1.0, { minX: 0, minY: 0, minZ: 0, maxX: 500, maxY: 100, maxZ: 0 }, { capacity: 16 })
+    const acc = createVoxelAccumulator(
+      1.0,
+      { minX: 0, minY: 0, minZ: 0, maxX: 500, maxY: 100, maxZ: 0 },
+      { capacity: 16 },
+    )
     for (let pass = 0; pass < 2; pass++) {
       for (let i = 0; i < 50000; i++) acc.add((i % 500) + 0.5, Math.floor(i / 500) + 0.5, 0.5, i % 256, 1, 2)
     }
@@ -451,28 +538,50 @@ describe('createVoxelAccumulator index', () => {
   })
 
   it('presizing leaves the reported footprint at the requested capacity', () => {
-    const acc = createVoxelAccumulator(1.0, { minX: 0, minY: 0, minZ: 0, maxX: 10, maxY: 10, maxZ: 10 }, { capacity: 1000 })
-    for (let i = 0; i < 1000; i++) acc.add(i % 10 + 0.5, Math.floor(i / 10) % 10 + 0.5, Math.floor(i / 100) + 0.5, 0, 0, 0)
+    const acc = createVoxelAccumulator(
+      1.0,
+      { minX: 0, minY: 0, minZ: 0, maxX: 10, maxY: 10, maxZ: 10 },
+      { capacity: 1000 },
+    )
+    for (let i = 0; i < 1000; i++)
+      acc.add((i % 10) + 0.5, (Math.floor(i / 10) % 10) + 0.5, Math.floor(i / 100) + 0.5, 0, 0, 0)
     expect(acc.count).toBe(1000)
     expect(acc.bytes).toBe(1000 * 60 + 2048 * 4) // no slot growth; table 2048 ≥ 2·1000
   })
 
   // V8 caps a Map at 2^24 entries; the old Map index threw "Map maximum size exceeded"
   // here. ~1.3 GB and several seconds, so opt-in.
-  it.skipIf(!process.env.WEBSFM_SLOW_TESTS)('holds more than 2^24 cells', () => {
-    const N = 2 ** 24 + 1000, side = 4200
-    const acc = createVoxelAccumulator(1.0, { minX: 0, minY: 0, minZ: 0, maxX: side, maxY: side, maxZ: 0 }, { capacity: N })
-    for (let i = 0; i < N; i++) acc.add((i % side) + 0.5, Math.floor(i / side) + 0.5, 0.5, 0, 0, 0)
-    expect(acc.count).toBe(N)
-  }, 120_000)
+  it.skipIf(!process.env.WEBSFM_SLOW_TESTS)(
+    'holds more than 2^24 cells',
+    () => {
+      const N = 2 ** 24 + 1000,
+        side = 4200
+      const acc = createVoxelAccumulator(
+        1.0,
+        { minX: 0, minY: 0, minZ: 0, maxX: side, maxY: side, maxZ: 0 },
+        { capacity: N },
+      )
+      for (let i = 0; i < N; i++) acc.add((i % side) + 0.5, Math.floor(i / side) + 0.5, 0.5, 0, 0, 0)
+      expect(acc.count).toBe(N)
+    },
+    120_000,
+  )
 })
 
 describe('fusion pre-flight (measured cell count)', () => {
   // Two identical fronto-parallel views of a plane at depth 1 (fx 100 ⇒ GSD 0.01).
   const mk = (uuid, W = 40, H = 40) => ({
-    uuid, width: W, height: H,
+    uuid,
+    width: W,
+    height: H,
     // cx/cy off the pixel grid by ½ so no pixel lands exactly on a cell boundary.
-    K: { fx: 100, fy: 100, cx: W / 2 + 0.5, cy: H / 2 + 0.5 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+    K: { fx: 100, fy: 100, cx: W / 2 + 0.5, cy: H / 2 + 0.5 },
+    R: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    t: [0, 0, 0],
     depth: new Float32Array(W * H).fill(1),
     cost: new Float32Array(W * H).fill(0.1),
     rgb: new Uint8Array(W * H * 3).fill(128),
@@ -495,19 +604,25 @@ describe('fusion pre-flight (measured cell count)', () => {
   })
 
   it('hash sampling stays close to the exact count once the scene exceeds the sample cap', () => {
-    const exact = fuseDepthMaps([mk('a', 240, 240), mk('b', 240, 240)], { ...opts, mergeCell: 0.01 }, () => {}).summary.estimatedCells
+    const exact = fuseDepthMaps([mk('a', 240, 240), mk('b', 240, 240)], { ...opts, mergeCell: 0.01 }, () => {}).summary
+      .estimatedCells
     expect(exact).toBe(240 * 240)
     const cap = DENSE_TUNING.fuseEstimateSampleCap
     DENSE_TUNING.fuseEstimateSampleCap = 1024
     try {
-      const sampled = fuseDepthMaps([mk('a', 240, 240), mk('b', 240, 240)], { ...opts, mergeCell: 0.01 }, () => {}).summary.estimatedCells
+      const sampled = fuseDepthMaps([mk('a', 240, 240), mk('b', 240, 240)], { ...opts, mergeCell: 0.01 }, () => {})
+        .summary.estimatedCells
       expect(Math.abs(sampled / (exact * DENSE_TUNING.fuseEstimateMargin) - 1)).toBeLessThan(0.15)
-    } finally { DENSE_TUNING.fuseEstimateSampleCap = cap }
+    } finally {
+      DENSE_TUNING.fuseEstimateSampleCap = cap
+    }
   })
 
   it('refuses over budget before fusing, without throwing', () => {
     const logs = []
-    const out = fuseDepthMaps([mk('a'), mk('b')], { ...opts, memBudgetBytes: 1000, autoStep: false }, (m, l) => logs.push([m, l]))
+    const out = fuseDepthMaps([mk('a'), mk('b')], { ...opts, memBudgetBytes: 1000, autoStep: false }, (m, l) =>
+      logs.push([m, l]),
+    )
     expect(out.length).toBe(0)
     expect(out.refused.cells).toBe(441)
     expect(out.refused.total).toBeGreaterThan(1000)
@@ -536,10 +651,19 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
   // Two cameras offset along x by 0.1, both viewing a fronto-parallel plane at depth 1.
   // The reprojection is an exact 10 px shift (fx·b/D = 100·0.1/1), so a pixel on the
   // true surface round-trips back to itself with 0 error and only the filter decides.
-  const W = 32, H = 32
+  const W = 32,
+    H = 32
   const mkPlane = (uuid, tx) => ({
-    uuid, width: W, height: H,
-    K: { fx: 100, fy: 100, cx: 16, cy: 16 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [tx, 0, 0],
+    uuid,
+    width: W,
+    height: H,
+    K: { fx: 100, fy: 100, cx: 16, cy: 16 },
+    R: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    t: [tx, 0, 0],
     depth: new Float32Array(W * H).fill(1),
     cost: new Float32Array(W * H).fill(0.1),
     rgb: new Uint8Array(W * H * 3).fill(120),
@@ -595,7 +719,7 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
     maps[0].cost.fill(0.95) // every pixel of A fails the NCC floor
     filterDepthMapsGeometric(maps, { minConsistent: 1, minNcc: 0.1 }, () => {})
-    expect(maps[0].depth[CENTER]).toBe(0)        // A dropped on NCC
+    expect(maps[0].depth[CENTER]).toBe(0) // A dropped on NCC
     expect(maps[1].depth[CENTER]).toBeGreaterThan(0) // B still vouched for by A's real surface
 
     // And the verdict must not depend on which map is listed first.
@@ -611,18 +735,27 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     // ×0.5–2), holes, and low-NCC pixels. Far-apart cameras share no ground, so the cull
     // must drop them — and must never drop a map the full walk would have used.
     let seed = 7
-    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32)
-    const S = 24, K = { fx: 24, fy: 24, cx: 12, cy: 12 }
-    const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]] // looking straight down
+    const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32
+    const S = 24,
+      K = { fx: 24, fy: 24, cx: 12, cy: 12 }
+    const R = [
+      [1, 0, 0],
+      [0, -1, 0],
+      [0, 0, -1],
+    ] // looking straight down
     const mk = (cx, cy, cz) => {
       const t = [-cx, cy, cz] // t = −R·C
-      const depth = new Float32Array(S * S), cost = new Float32Array(S * S).fill(0.2)
+      const depth = new Float32Array(S * S),
+        cost = new Float32Array(S * S).fill(0.2)
       for (let v = 0; v < S; v++) {
         for (let u = 0; u < S; u++) {
           // ray (world) = Rᵀ·((u−cx)/fx, (v−cy)/fy, 1); ground z = 0.05·x
-          const dx = (u - K.cx) / K.fx, dy = -(v - K.cy) / K.fy, dz = -1
+          const dx = (u - K.cx) / K.fx,
+            dy = -(v - K.cy) / K.fy,
+            dz = -1
           const s = (0.05 * cx - cz) / (dz - 0.05 * dx)
-          const r = rnd(), k = v * S + u
+          const r = rnd(),
+            k = v * S + u
           depth[k] = r < 0.05 ? 0 : r < 0.15 ? s * (0.5 + 1.5 * rnd()) : s
           if (rnd() < 0.05) cost[k] = 0.95
         }
@@ -635,7 +768,8 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
       for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) out.push(mk(i * 6, j * 6, 10))
       return out
     }
-    const a = build(), b = build()
+    const a = build(),
+      b = build()
     const sa = filterDepthMapsGeometric(a, { minConsistent: 2 }, () => {})
     const sb = filterDepthMapsGeometric(b, { minConsistent: 2, cull: false }, () => {})
     expect(sa).toEqual(sb)
@@ -649,9 +783,17 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     let reads = 0
     const io = {
       loadReference: async (i) => ({ depth: c[i].depth, cost: c[i].cost }),
-      loadDepth: async (i) => { reads++; return c[i].depth },
+      loadDepth: async (i) => {
+        reads++
+        return c[i].depth
+      },
     }
-    const sc = await filterDepthMapsGeometricStreamed(metas, io, { minConsistent: 2, cacheBytes: 3 * S * S * 4 }, () => {})
+    const sc = await filterDepthMapsGeometricStreamed(
+      metas,
+      io,
+      { minConsistent: 2, cacheBytes: 3 * S * S * 4 },
+      () => {},
+    )
     expect(sc.totals).toEqual(sa)
     expect(reads).toBeGreaterThan(c.length) // the cache really evicted
     for (let i = 0; i < c.length; i++) {
@@ -661,10 +803,19 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
 
     // Split over workers (disjoint contiguous reference chunks, as the store does):
     // the merged masks, stats and totals are the single run's.
-    const chunks = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9, 10], [11, 12, 13, 14, 15, 16, 17]]
+    const chunks = [
+      [0, 1, 2, 3, 4],
+      [5, 6, 7, 8, 9, 10],
+      [11, 12, 13, 14, 15, 16, 17],
+    ]
     const merged = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0, clampedMaps: 0 }
     for (const refs of chunks) {
-      const p = await filterDepthMapsGeometricStreamed(metas, io, { minConsistent: 2, cacheBytes: S * S * 4, refs, summaryLogs: false }, () => {})
+      const p = await filterDepthMapsGeometricStreamed(
+        metas,
+        io,
+        { minConsistent: 2, cacheBytes: S * S * 4, refs, summaryLogs: false },
+        () => {},
+      )
       for (const k of Object.keys(merged)) merged[k] += p.totals[k]
       for (const i of refs) {
         expect(applyPackedMask(Float32Array.from(c[i].depth), p.masks[i])).toEqual(a[i].depth)
@@ -730,7 +881,10 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     const fresh = [mkPlane('a', 0), mkPlane('b', -0.1)]
     fresh[0].depth[CENTER] = 2
     const metas = fresh.map(({ depth, cost, rgb, ...meta }) => meta)
-    const io = { loadReference: async (i) => ({ depth: fresh[i].depth, cost: fresh[i].cost }), loadDepth: async (i) => fresh[i].depth }
+    const io = {
+      loadReference: async (i) => ({ depth: fresh[i].depth, cost: fresh[i].cost }),
+      loadDepth: async (i) => fresh[i].depth,
+    }
     const st = await filterDepthMapsGeometricStreamed(metas, io, { minConsistent: 2 }, () => {})
     expect(st.totals).toEqual(s)
   })
@@ -794,15 +948,27 @@ describe('fuseDepthMaps geometric filters (WS4)', () => {
   // `normal` (camera-frame) is optional; omit for the view-direction fallback.
   const mk = (uuid, normal) => {
     const m = {
-      uuid, width: 4, height: 4,
-      K: { fx: 100, fy: 100, cx: 2, cy: 2 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+      uuid,
+      width: 4,
+      height: 4,
+      K: { fx: 100, fy: 100, cx: 2, cy: 2 },
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, 0],
       depth: new Float32Array(16).fill(1),
       cost: new Float32Array(16).fill(0.1),
       rgb: new Uint8Array(16 * 3).fill(120),
     }
     if (normal) {
       m.normals = new Float32Array(16 * 3)
-      for (let i = 0; i < 16; i++) { m.normals[i*3] = normal[0]; m.normals[i*3+1] = normal[1]; m.normals[i*3+2] = normal[2] }
+      for (let i = 0; i < 16; i++) {
+        m.normals[i * 3] = normal[0]
+        m.normals[i * 3 + 1] = normal[1]
+        m.normals[i * 3 + 2] = normal[2]
+      }
     }
     return m
   }
@@ -810,10 +976,10 @@ describe('fuseDepthMaps geometric filters (WS4)', () => {
   it('min triangulation angle culls zero-parallax agreement, but keeps it at 0°', () => {
     const maps = () => [mk('a'), mk('b')] // coincident cameras ⇒ 0° parallax
     const culled = fuseDepthMaps(maps(), { minTriAngleDeg: 2.0, maxIncidenceDeg: 0, removeIsolated: false }, () => {})
-    expect(culled.count).toBe(0)               // everything culled as low-parallax
+    expect(culled.count).toBe(0) // everything culled as low-parallax
     expect(culled.summary.cullBreakdown.lowParallaxPct).toBeGreaterThan(0)
     const kept = fuseDepthMaps(maps(), { minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false }, () => {})
-    expect(kept.count).toBeGreaterThan(0)      // disabled ⇒ points survive
+    expect(kept.count).toBeGreaterThan(0) // disabled ⇒ points survive
   })
 
   it('keeps genuine wide-parallax agreement (reference centre passed as array, not object)', () => {
@@ -824,8 +990,16 @@ describe('fuseDepthMaps geometric filters (WS4)', () => {
     // plane at world z=1 reprojects with an exact 10 px shift (fx·b/D = 100·0.1/1), so
     // agreement is exact and only the (correct) angle decides survival.
     const plane = (uuid, tx) => ({
-      uuid, width: 32, height: 32,
-      K: { fx: 100, fy: 100, cx: 16, cy: 16 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [tx, 0, 0],
+      uuid,
+      width: 32,
+      height: 32,
+      K: { fx: 100, fy: 100, cx: 16, cy: 16 },
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [tx, 0, 0],
       depth: new Float32Array(32 * 32).fill(1),
       cost: new Float32Array(32 * 32).fill(0.1),
       rgb: new Uint8Array(32 * 32 * 3).fill(120),
@@ -837,13 +1011,19 @@ describe('fuseDepthMaps geometric filters (WS4)', () => {
 
   it('grazing-angle reject culls edge-on normals but leaves fallback normals untouched', () => {
     // Edge-on: world normal (1,0,0) ⊥ the near-(0,0,1) viewing ray ⇒ ~90° incidence.
-    const edgeOn = fuseDepthMaps([mk('a', [1, 0, 0]), mk('b', [1, 0, 0])],
-      { minTriAngleDeg: 0, maxIncidenceDeg: 80, removeIsolated: false }, () => {})
+    const edgeOn = fuseDepthMaps(
+      [mk('a', [1, 0, 0]), mk('b', [1, 0, 0])],
+      { minTriAngleDeg: 0, maxIncidenceDeg: 80, removeIsolated: false },
+      () => {},
+    )
     expect(edgeOn.count).toBe(0)
     expect(edgeOn.summary.cullBreakdown.grazingPct).toBeGreaterThan(0)
     // No per-pixel normals ⇒ view-direction fallback ⇒ cosInc = 1 ⇒ never culled.
-    const fallback = fuseDepthMaps([mk('a'), mk('b')],
-      { minTriAngleDeg: 0, maxIncidenceDeg: 80, removeIsolated: false }, () => {})
+    const fallback = fuseDepthMaps(
+      [mk('a'), mk('b')],
+      { minTriAngleDeg: 0, maxIncidenceDeg: 80, removeIsolated: false },
+      () => {},
+    )
     expect(fallback.count).toBeGreaterThan(0)
     expect(fallback.summary.cullBreakdown.grazingPct).toBe(0)
   })
@@ -863,8 +1043,16 @@ describe('fuseDepthMaps progress emits', () => {
   it('emits monotonic, throttled progress bounded by the map count', () => {
     // Several maps of valid pixels; collect onProgress calls.
     const mk = (uuid) => ({
-      uuid, width: 8, height: 8,
-      K: { fx: 100, fy: 100, cx: 4, cy: 4 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+      uuid,
+      width: 8,
+      height: 8,
+      K: { fx: 100, fy: 100, cx: 4, cy: 4 },
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, 0],
       depth: new Float32Array(64).fill(1),
       cost: new Float32Array(64).fill(0.1),
       rgb: new Uint8Array(64 * 3).fill(100),
@@ -875,9 +1063,9 @@ describe('fuseDepthMaps progress emits', () => {
     expect(emits.length).toBeGreaterThan(0)
     let prev = -Infinity
     for (const e of emits) {
-      expect(e.t).toBe(maps.length)          // total is the map count
+      expect(e.t).toBe(maps.length) // total is the map count
       expect(e.d).toBeGreaterThanOrEqual(prev) // monotonic non-decreasing
-      expect(e.d).toBeLessThanOrEqual(e.t)     // never exceeds total
+      expect(e.d).toBeLessThanOrEqual(e.t) // never exceeds total
       prev = e.d
     }
   })
@@ -888,8 +1076,16 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
   // defaults only replace undefined, so '' used to reach the loops: `v += ''` made the
   // row index the string "0" and fusion never finished.
   const mk = (uuid, tx) => ({
-    uuid, width: 24, height: 24,
-    K: { fx: 100, fy: 100, cx: 12.5, cy: 12.5 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [tx, 0, 0],
+    uuid,
+    width: 24,
+    height: 24,
+    K: { fx: 100, fy: 100, cx: 12.5, cy: 12.5 },
+    R: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    t: [tx, 0, 0],
     depth: new Float32Array(24 * 24).fill(1),
     cost: new Float32Array(24 * 24).fill(0.1),
     rgb: new Uint8Array(24 * 24 * 3).fill(128),
@@ -898,12 +1094,22 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
   it('fusionGates falls back to the documented defaults for blank / non-finite / out-of-range values', () => {
     const defaults = fusionGates({})
     expect(defaults).toMatchObject({
-      step: DENSE_FUSE_DEFAULTS.step, depthTolRel: DENSE_FUSE_DEFAULTS.depthTolPct / 100,
-      consistencyPx: DENSE_TUNING.consistencyPx, minTriAngleDeg: DENSE_FUSE_DEFAULTS.minTriAngleDeg,
-      maxIncidenceDeg: DENSE_FUSE_DEFAULTS.maxIncidenceDeg, removeIsolated: DENSE_FUSE_DEFAULTS.removeIsolated,
+      step: DENSE_FUSE_DEFAULTS.step,
+      depthTolRel: DENSE_FUSE_DEFAULTS.depthTolPct / 100,
+      consistencyPx: DENSE_TUNING.consistencyPx,
+      minTriAngleDeg: DENSE_FUSE_DEFAULTS.minTriAngleDeg,
+      maxIncidenceDeg: DENSE_FUSE_DEFAULTS.maxIncidenceDeg,
+      removeIsolated: DENSE_FUSE_DEFAULTS.removeIsolated,
     })
     for (const bad of ['', '  ', NaN, null, undefined, Infinity, -Infinity, 'abc', {}, []]) {
-      const g = fusionGates({ step: bad, depthTolRel: bad, consistencyPx: bad, minTriAngleDeg: bad, maxIncidenceDeg: bad, removeIsolated: bad })
+      const g = fusionGates({
+        step: bad,
+        depthTolRel: bad,
+        consistencyPx: bad,
+        minTriAngleDeg: bad,
+        maxIncidenceDeg: bad,
+        removeIsolated: bad,
+      })
       expect(g).toEqual(defaults)
     }
     // Out of range: a zero/negative step, a zero tolerance (a cleared % field ÷ 100).
@@ -917,18 +1123,35 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
     // Valid values pass through; a step is an integer.
     expect(fusionGates({ step: 2.7 }).step).toBe(2)
     expect(fusionGates({ step: '3' }).step).toBe(3)
-    expect(fusionGates({ depthTolRel: 0.05, minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false }))
-      .toMatchObject({ depthTolRel: 0.05, minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false, incidenceOn: false })
+    expect(
+      fusionGates({ depthTolRel: 0.05, minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false }),
+    ).toMatchObject({
+      depthTolRel: 0.05,
+      minTriAngleDeg: 0,
+      maxIncidenceDeg: 0,
+      removeIsolated: false,
+      incidenceOn: false,
+    })
   })
 
   it('a fusion with blank fields terminates and fuses exactly what the defaults fuse', () => {
     const maps = () => [mk('a', 0), mk('b', -0.1), mk('c', -0.2)]
     const expected = fuseDepthMaps(maps(), {}, () => {})
     expect(expected.length).toBeGreaterThan(0)
-    const blank = fuseDepthMaps(maps(), {
-      step: '', depthTolRel: '' / 100, minViews: '', maxCost: '', minTriAngleDeg: '', maxIncidenceDeg: NaN,
-      removeIsolated: '', mergeCell: '',
-    }, () => {})
+    const blank = fuseDepthMaps(
+      maps(),
+      {
+        step: '',
+        depthTolRel: '' / 100,
+        minViews: '',
+        maxCost: '',
+        minTriAngleDeg: '',
+        maxIncidenceDeg: NaN,
+        removeIsolated: '',
+        mergeCell: '',
+      },
+      () => {},
+    )
     expect([...blank]).toEqual([...expected])
     expect(blank.summary).toEqual(expected.summary)
   })
@@ -936,7 +1159,12 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
   it('the streamed runner terminates on a blank step too', async () => {
     const ms = [mk('a', 0), mk('b', -0.1)]
     const expected = fuseDepthMaps(ms, {}, () => {})
-    const out = await fuseDepthMapsStreamed(ms, async (i) => ms[i], { step: '', depthTolRel: NaN }, () => {})
+    const out = await fuseDepthMapsStreamed(
+      ms,
+      async (i) => ms[i],
+      { step: '', depthTolRel: NaN },
+      () => {},
+    )
     expect([...out]).toEqual([...expected])
   })
 
@@ -955,42 +1183,92 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
 
   it('filterConfig / filterSettings fall back to DEPTHMAP_DEFAULTS', () => {
     const blank = { minNcc: '', maxGeomCost: NaN, minConsistent: '', minGeomAngleDeg: '', cull: '' }
-    const want = { minNcc: DEPTHMAP_DEFAULTS.minNcc, maxGeomCost: DEPTHMAP_DEFAULTS.maxGeomCost,
-      minConsistent: DEPTHMAP_DEFAULTS.minConsistent, minGeomAngleDeg: DEPTHMAP_DEFAULTS.minGeomAngleDeg }
+    const want = {
+      minNcc: DEPTHMAP_DEFAULTS.minNcc,
+      maxGeomCost: DEPTHMAP_DEFAULTS.maxGeomCost,
+      minConsistent: DEPTHMAP_DEFAULTS.minConsistent,
+      minGeomAngleDeg: DEPTHMAP_DEFAULTS.minGeomAngleDeg,
+    }
     expect(filterSettings(blank)).toEqual(want)
     expect(filterConfig(blank)).toEqual(filterConfig({}))
-    expect(filterConfig({ maxGeomCost: 0, minConsistent: -1, minNcc: 2, minGeomAngleDeg: -5 })).toEqual(filterConfig({}))
+    expect(filterConfig({ maxGeomCost: 0, minConsistent: -1, minNcc: 2, minGeomAngleDeg: -5 })).toEqual(
+      filterConfig({}),
+    )
     // 0 consistent views is the documented "off" switch, not out of range.
     expect(filterConfig({ minConsistent: 0 }).minConsistent).toBe(0)
-    expect(filterConfig({ minConsistent: 3, minNcc: 0.3, cull: false })).toMatchObject({ minConsistent: 3, minNcc: 0.3, cull: false })
+    expect(filterConfig({ minConsistent: 3, minNcc: 0.3, cull: false })).toMatchObject({
+      minConsistent: 3,
+      minNcc: 0.3,
+      cull: false,
+    })
   })
 
   it('depthMapSettings falls back to the defaults for the Stage A knobs', () => {
     const d = depthMapSettings({})
     expect(d).toMatchObject({
-      quality: DEPTHMAP_DEFAULTS.quality, maxSources: DEPTHMAP_DEFAULTS.maxSources, window: DEPTHMAP_DEFAULTS.window,
-      iterations: DEPTHMAP_DEFAULTS.iterations, bestK: null, filterRelTol: DEPTHMAP_DEFAULTS.filterRelTol / 100,
-      filterRadius: 1, coarseLong: DENSE_TUNING.coarseLong, minAngleDeg: DENSE_TUNING.minAngleDeg,
-      speckleFilter: true, geomConsistency: true, streamMaps: false,
-      maxGeomCost: DEPTHMAP_DEFAULTS.maxGeomCost, minConsistent: DEPTHMAP_DEFAULTS.minConsistent,
-      minNcc: DEPTHMAP_DEFAULTS.minNcc, minGeomAngleDeg: DEPTHMAP_DEFAULTS.minGeomAngleDeg,
+      quality: DEPTHMAP_DEFAULTS.quality,
+      maxSources: DEPTHMAP_DEFAULTS.maxSources,
+      window: DEPTHMAP_DEFAULTS.window,
+      iterations: DEPTHMAP_DEFAULTS.iterations,
+      bestK: null,
+      filterRelTol: DEPTHMAP_DEFAULTS.filterRelTol / 100,
+      filterRadius: 1,
+      coarseLong: DENSE_TUNING.coarseLong,
+      minAngleDeg: DENSE_TUNING.minAngleDeg,
+      speckleFilter: true,
+      geomConsistency: true,
+      streamMaps: false,
+      maxGeomCost: DEPTHMAP_DEFAULTS.maxGeomCost,
+      minConsistent: DEPTHMAP_DEFAULTS.minConsistent,
+      minNcc: DEPTHMAP_DEFAULTS.minNcc,
+      minGeomAngleDeg: DEPTHMAP_DEFAULTS.minGeomAngleDeg,
     })
     const blank = depthMapSettings({
-      quality: '', maxDim: '', maxSources: '', minAngleDeg: NaN, window: '', iterations: '', bestK: '',
-      filterRadius: '', filterRelTol: '' / 100, coarseLong: '', maxGeomCost: '', minConsistent: '', minNcc: '',
-      minGeomAngleDeg: '', speckleFilter: '', geomConsistency: '', streamMaps: '',
+      quality: '',
+      maxDim: '',
+      maxSources: '',
+      minAngleDeg: NaN,
+      window: '',
+      iterations: '',
+      bestK: '',
+      filterRadius: '',
+      filterRelTol: '' / 100,
+      coarseLong: '',
+      maxGeomCost: '',
+      minConsistent: '',
+      minNcc: '',
+      minGeomAngleDeg: '',
+      speckleFilter: '',
+      geomConsistency: '',
+      streamMaps: '',
     })
     expect(blank).toEqual(d)
     expect(depthMapSettings({ iterations: 0, window: -1, maxSources: 0, bestK: 0, maxDim: 0 })).toEqual(d)
-    expect(depthMapSettings({ window: 4, iterations: 5, bestK: 2, maxDim: 1200, quality: 'high' }))
-      .toMatchObject({ window: 4, iterations: 5, bestK: 2, maxDim: 1200, quality: 'high' })
+    expect(depthMapSettings({ window: 4, iterations: 5, bestK: 2, maxDim: 1200, quality: 'high' })).toMatchObject({
+      window: 4,
+      iterations: 5,
+      bestK: 2,
+      maxDim: 1200,
+      quality: 'high',
+    })
   })
 
   it('depthMapForImage hands the kernel numbers even when the knobs arrive blank', async () => {
-    const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], K = { fx: 40, fy: 40, cx: 20, cy: 20 }
+    const I = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      K = { fx: 40, fy: 40, cx: 20, cy: 20 }
     const ref = { gray: new Uint8Array(1600), width: 40, height: 40, K, cam: { R: I, t: [0, 0, 0] } }
     const src = [{ gray: new Uint8Array(1600), w: 40, h: 40, K, cam: { R: I, t: [-1, 0, 0] } }]
-    const pos = packSparseForDense(SparsePoints.fromRecords([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 7 }, { x: 0, y: 0.1, z: 9 }])).pos
+    const pos = packSparseForDense(
+      SparsePoints.fromRecords([
+        { x: 0, y: 0, z: 5 },
+        { x: 0.1, y: 0, z: 7 },
+        { x: 0, y: 0.1, z: 9 },
+      ]),
+    ).pos
     const seen = []
     const fn = async (g, w, h, k, srcs, opts) => {
       seen.push(opts)
@@ -998,25 +1276,46 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
     }
     await depthMapForImage(ref, src, pos, { window: '', iterations: '', bestK: NaN, coarseLong: '' }, fn)
     expect(seen.length).toBe(1) // 40 px ≤ the default coarseLong: one level
-    expect(seen[0]).toMatchObject({ window: DEPTHMAP_DEFAULTS.window, iterations: DEPTHMAP_DEFAULTS.iterations, bestK: 3 })
+    expect(seen[0]).toMatchObject({
+      window: DEPTHMAP_DEFAULTS.window,
+      iterations: DEPTHMAP_DEFAULTS.iterations,
+      bestK: 3,
+    })
   })
 
   it('filterDepthMap treats blank radius / tolerance as the defaults', () => {
-    const depth = plane([[5, 5, 5], [5, 100, 5], [5, 5, 5]])
-    expect(filterDepthMap(depth, 3, 3, { radius: '', relTol: NaN, minValidNeighbors: '' }))
-      .toEqual(filterDepthMap(depth, 3, 3, {}))
+    const depth = plane([
+      [5, 5, 5],
+      [5, 100, 5],
+      [5, 5, 5],
+    ])
+    expect(filterDepthMap(depth, 3, 3, { radius: '', relTol: NaN, minValidNeighbors: '' })).toEqual(
+      filterDepthMap(depth, 3, 3, {}),
+    )
   })
 })
 
 describe('depthMapForImage — odd-sized pyramid levels', () => {
   // 41×40 with coarseLong 20 ⇒ two levels, 41×40 → 20×20. The box downsample drops the
   // last odd column, so the coarse grid is the fine one at exactly ½ — not 20/41.
-  const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const I = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]
   const K = { fx: 40, fy: 40, cx: 20, cy: 20 }
-  const W = 41, H = 40
+  const W = 41,
+    H = 40
   const ref = { gray: new Uint8Array(W * H), width: W, height: H, K, cam: { R: I, t: [0, 0, 0] } }
   const sources = [{ gray: new Uint8Array(W * H), w: W, h: H, K, cam: { R: I, t: [-1, 0, 0] } }]
-  const pos = packSparseForDense(SparsePoints.fromRecords([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 6 }, { x: 0, y: 0.1, z: 7 }, { x: -0.1, y: 0, z: 8 }])).pos
+  const pos = packSparseForDense(
+    SparsePoints.fromRecords([
+      { x: 0, y: 0, z: 5 },
+      { x: 0.1, y: 0, z: 6 },
+      { x: 0, y: 0.1, z: 7 },
+      { x: -0.1, y: 0, z: 8 },
+    ]),
+  ).pos
 
   it('projects a point onto the coarse pixel the box filter put its fine pixel in', async () => {
     const calls = []
@@ -1029,14 +1328,18 @@ describe('depthMapForImage — odd-sized pyramid levels', () => {
       return { depth, cost: new Float32Array(w * h).fill(0.1), width: w, height: h }
     }
     await depthMapForImage(ref, sources, pos, { coarseLong: 20 }, fn)
-    expect(calls.map((c) => [c.w, c.h])).toEqual([[20, 20], [41, 40]])
+    expect(calls.map((c) => [c.w, c.h])).toEqual([
+      [20, 20],
+      [41, 40],
+    ])
     // A world point that projects onto fine pixel u = 38 (centre). Fine columns 38–39 are
     // box-averaged into coarse column 19, at coarse coordinate (38 + ½)·½ − ½ = 18.75.
-    const z = 4, x = (38 - K.cx) / K.fx * z
+    const z = 4,
+      x = ((38 - K.cx) / K.fx) * z
     for (const Kc of [calls[0].K, calls[0].srcK]) {
       expect(Kc.fx).toBe(K.fx / 2)
       expect(Kc.fy).toBe(K.fy / 2)
-      const u = Kc.fx * x / z + Kc.cx
+      const u = (Kc.fx * x) / z + Kc.cx
       expect(u).toBeCloseTo(18.75, 10)
       expect(Math.round(u)).toBe(19)
     }
@@ -1048,36 +1351,63 @@ describe('depthMapForImage — odd-sized pyramid levels', () => {
 })
 
 describe('depthMapForImage — Region seeding', () => {
-  const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const I = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]
   const K = { fx: 40, fy: 40, cx: 20, cy: 20 }
-  const W = 40, H = 40
+  const W = 40,
+    H = 40
   const ref = { gray: new Uint8Array(W * H), width: W, height: H, K, cam: { R: I, t: [0, 0, 0] } }
   const sources = [{ gray: new Uint8Array(W * H), w: W, h: H, K, cam: { R: I, t: [-1, 0, 0] } }]
 
   it('seeds only from the sparse points inside the Region', async () => {
     // Two points inside the Region (depth 5–5.5) and one behind it on the same ray as
     // the first — listed last, so it used to overwrite the good seed at the centre pixel.
-    const pos = packSparseForDense(SparsePoints.fromRecords([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 5.5 }, { x: 0, y: 0, z: 9 }])).pos
+    const pos = packSparseForDense(
+      SparsePoints.fromRecords([
+        { x: 0, y: 0, z: 5 },
+        { x: 0.1, y: 0, z: 5.5 },
+        { x: 0, y: 0, z: 9 },
+      ]),
+    ).pos
     const region = { min: [-1, -1, 4], max: [1, 1, 6] }
-    let seed = null, range = null
+    let seed = null,
+      range = null
     const fn = async (g, w, h, k, srcs, opts) => {
-      seed = opts.seedDepth; range = [opts.depthMin, opts.depthMax]
+      seed = opts.seedDepth
+      range = [opts.depthMin, opts.depthMax]
       return { depth: new Float32Array(w * h).fill(5), cost: new Float32Array(w * h).fill(0.1), width: w, height: h }
     }
     await depthMapForImage(ref, sources, pos, { coarseLong: 100, region }, fn)
     expect(seed[20 * W + 20]).toBe(5)
-    for (const d of seed) if (d > 0) { expect(d).toBeGreaterThanOrEqual(range[0]); expect(d).toBeLessThanOrEqual(range[1]) }
+    for (const d of seed)
+      if (d > 0) {
+        expect(d).toBeGreaterThanOrEqual(range[0])
+        expect(d).toBeLessThanOrEqual(range[1])
+      }
   })
 })
 
 describe('filterDepthMapsGeometricStreamed — candidate cache bound', () => {
   // Eight mutually visible maps of a plane, so every reference's candidates are the seven
   // others; a cache of 2.5 planes can never hold them, and must never hold more.
-  const W = 32, H = 32
+  const W = 32,
+    H = 32
   const mk = (j) => ({
-    uuid: `m${j}`, width: W, height: H,
-    K: { fx: 100, fy: 100, cx: 16, cy: 16 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [-0.02 * j, 0, 0],
-    depth: new Float32Array(W * H).fill(1), cost: new Float32Array(W * H).fill(0.1),
+    uuid: `m${j}`,
+    width: W,
+    height: H,
+    K: { fx: 100, fy: 100, cx: 16, cy: 16 },
+    R: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    t: [-0.02 * j, 0, 0],
+    depth: new Float32Array(W * H).fill(1),
+    cost: new Float32Array(W * H).fill(0.1),
   })
   const run = async (maps, cacheBytes) => {
     const metas = maps.map(({ depth, cost, ...meta }) => meta)
@@ -1085,13 +1415,16 @@ describe('filterDepthMapsGeometricStreamed — candidate cache bound', () => {
     const io = {
       loadReference: async (i) => ({ depth: maps[i].depth, cost: maps[i].cost }),
       // A fresh copy per read: only the filter's own cache can keep a plane alive.
-      loadDepth: async (i) => { loads++; return Float32Array.from(maps[i].depth) },
+      loadDepth: async (i) => {
+        loads++
+        return Float32Array.from(maps[i].depth)
+      },
     }
     const out = await filterDepthMapsGeometricStreamed(metas, io, { minConsistent: 2, cacheBytes }, () => {})
     return { ...out, counted: loads }
   }
 
-  it('never holds more than max(bound, the current reference\'s candidates)', async () => {
+  it("never holds more than max(bound, the current reference's candidates)", async () => {
     const maps = Array.from({ length: 8 }, (_, j) => mk(j))
     const plane = W * H * 4
     const cand = filterCandidates(maps)
@@ -1115,23 +1448,44 @@ describe('filterDepthMapsGeometricStreamed — candidate cache bound', () => {
 
 describe('fuseDepthMapsStreamed — eligible-pixel buffers', () => {
   const mk = (W, H) => {
-    const depth = new Float32Array(W * H).fill(2), cost = new Float32Array(W * H).fill(0.1)
+    const depth = new Float32Array(W * H).fill(2),
+      cost = new Float32Array(W * H).fill(0.1)
     for (let i = 0; i < W * H; i += 7) depth[i] = 0
     for (let i = 3; i < W * H; i += 11) cost[i] = 0.95
-    return { width: W, height: H, K: { fx: 50, fy: 50, cx: W / 2, cy: H / 2 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], depth, cost }
+    return {
+      width: W,
+      height: H,
+      K: { fx: 50, fy: 50, cx: W / 2, cy: H / 2 },
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, 0],
+      depth,
+      cost,
+    }
   }
   // The reference loop it replaces: every pixel on the step grid with valid depth, past
   // the cost gate and (tiled) inside the slab, in row-major order.
   const brute = (m, { step, maxCost, slab }) => {
-    const idx = [], wp = []
-    for (let v = 0; v < m.height; v += step) for (let u = 0; u < m.width; u += step) {
-      const i = v * m.width + u, d = m.depth[i]
-      if (!(d > 0) || m.cost[i] > maxCost) continue
-      const x = (u - m.K.cx) / m.K.fx * d, y = (v - m.K.cy) / m.K.fy * d
-      const P = { x, y, z: d }
-      if (slab) { const ca = Math.floor(P[slab.key] * slab.inv); if (ca < slab.lo || ca >= slab.hi) continue }
-      idx.push(i); wp.push(P.x, P.y, P.z)
-    }
+    const idx = [],
+      wp = []
+    for (let v = 0; v < m.height; v += step)
+      for (let u = 0; u < m.width; u += step) {
+        const i = v * m.width + u,
+          d = m.depth[i]
+        if (!(d > 0) || m.cost[i] > maxCost) continue
+        const x = ((u - m.K.cx) / m.K.fx) * d,
+          y = ((v - m.K.cy) / m.K.fy) * d
+        const P = { x, y, z: d }
+        if (slab) {
+          const ca = Math.floor(P[slab.key] * slab.inv)
+          if (ca < slab.lo || ca >= slab.hi) continue
+        }
+        idx.push(i)
+        wp.push(P.x, P.y, P.z)
+      }
     return { idx, wp }
   }
 

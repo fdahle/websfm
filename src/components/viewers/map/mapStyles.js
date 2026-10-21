@@ -10,7 +10,7 @@ import { Style, Circle as CircleStyle, RegularShape, Fill, Stroke } from 'ol/sty
 const normalStyle = new Style({
   image: new CircleStyle({
     radius: 6,
-    fill:   new Fill({ color: '#0e639c' }),
+    fill: new Fill({ color: '#0e639c' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),
 })
@@ -18,7 +18,7 @@ const normalStyle = new Style({
 const selectedStyle = new Style({
   image: new CircleStyle({
     radius: 8,
-    fill:   new Fill({ color: '#f0a500' }),
+    fill: new Fill({ color: '#f0a500' }),
     stroke: new Stroke({ color: '#fff', width: 2 }),
   }),
 })
@@ -27,7 +27,7 @@ const selectedStyle = new Style({
 const unalignedStyle = new Style({
   image: new CircleStyle({
     radius: 6,
-    fill:   new Fill({ color: 'rgba(120, 130, 140, 0.5)' }),
+    fill: new Fill({ color: 'rgba(120, 130, 140, 0.5)' }),
     stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.6)', width: 1.5 }),
   }),
 })
@@ -45,14 +45,16 @@ const controlStyle = new Style({
     points: 4,
     radius: 7,
     angle: Math.PI / 4,
-    fill:   new Fill({ color: '#3fae6a' }),
+    fill: new Fill({ color: '#3fae6a' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),
 })
 
 const checkStyle = new Style({
   image: new RegularShape({
-    points: 4, radius: 7, angle: Math.PI / 4,
+    points: 4,
+    radius: 7,
+    angle: Math.PI / 4,
     fill: new Fill({ color: '#38a9c7' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),
@@ -62,7 +64,9 @@ const checkStyle = new Style({
 // triangulate.
 const markerStyle = new Style({
   image: new RegularShape({
-    points: 4, radius: 7, angle: Math.PI / 4,
+    points: 4,
+    radius: 7,
+    angle: Math.PI / 4,
     fill: new Fill({ color: '#e0a030' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),
@@ -79,7 +83,7 @@ const poseStyleImported = new Style({
   image: new RegularShape({
     points: 3,
     radius: 7,
-    fill:   new Fill({ color: '#b06ad9' }),
+    fill: new Fill({ color: '#b06ad9' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),
 })
@@ -97,7 +101,7 @@ const poseSelectedStyle = new Style({
   image: new RegularShape({
     points: 3,
     radius: 9,
-    fill:   new Fill({ color: '#f0a500' }),
+    fill: new Fill({ color: '#f0a500' }),
     stroke: new Stroke({ color: '#fff', width: 2 }),
   }),
 })
@@ -110,17 +114,15 @@ export function poseStyle(feature, selectedId) {
 // ── Footprint polygons: translucent; brighter when the linked image is selected ─
 
 const footprintNormalStyle = new Style({
-  fill:   new Fill({ color: 'rgba(14, 99, 156, 0.12)' }),
+  fill: new Fill({ color: 'rgba(14, 99, 156, 0.12)' }),
   stroke: new Stroke({ color: 'rgba(14, 99, 156, 0.8)', width: 1.5 }),
 })
 
 const footprintSelectedStyle = new Style({
-  fill:   new Fill({ color: 'rgba(240, 165, 0, 0.22)' }),
+  fill: new Fill({ color: 'rgba(240, 165, 0, 0.22)' }),
   stroke: new Stroke({ color: '#f0a500', width: 2.5 }),
 })
 
 export function footprintStyle(feature, selectedId) {
-  return feature.get('imgId') && feature.get('imgId') === selectedId
-    ? footprintSelectedStyle
-    : footprintNormalStyle
+  return feature.get('imgId') && feature.get('imgId') === selectedId ? footprintSelectedStyle : footprintNormalStyle
 }

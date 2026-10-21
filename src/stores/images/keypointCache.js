@@ -9,9 +9,7 @@ import { Keypoints } from '../../core/features/keypoints.js'
 // reads, and an epoch that drops a read which straddles a restore or clear.
 //
 // Deps are the store's own refs and helpers; the store keeps the image records.
-export function createKeypointCache({
-  hasKeypoints, imageById, isPersisting, log, projects, save,
-}) {
+export function createKeypointCache({ hasKeypoints, imageById, isPersisting, log, projects, save }) {
   // ── Keypoints: on disk, read per image on demand (TODO ▸ SC-3) ──────────────
   // An image record carries `kpCount`/`kpStatus` (reactive, persisted) and `kpRev`
   // (bumped whenever its keypoints are replaced, session-only); the Keypoints
@@ -46,16 +44,23 @@ export function createKeypointCache({
     const held = markRaw(kps)
     img.kpRev = (img.kpRev ?? 0) + 1
     keypointCache.set(img.uuid, held, keypointBytes(held), { pinned: true })
-    persist?.then(() => keypointCache.unpin(img.uuid, held))
-      .catch((err) => log(`Keypoints for ${img.name} could not be saved — kept in memory (${err?.message ?? err})`,
-        'warn', 'Detection'))
+    persist
+      ?.then(() => keypointCache.unpin(img.uuid, held))
+      .catch((err) =>
+        log(
+          `Keypoints for ${img.name} could not be saved — kept in memory (${err?.message ?? err})`,
+          'warn',
+          'Detection',
+        ),
+      )
     return held
   }
 
   // One image's keypoints from OPFS, or null. Not cached here.
   async function readKeypointsFromDisk(img) {
     const projectId = projects.currentProjectId
-    const epoch = keypointEpoch, rev = img.kpRev
+    const epoch = keypointEpoch,
+      rev = img.kpRev
     const data = projectId ? await opfs.loadKeypoints(projectId, img.uuid) : null
     const rgb = data ? await opfs.loadColors(projectId, img.uuid) : null
     // Replaced (re-detected, cleared) or the project changed while reading.
@@ -70,8 +75,11 @@ export function createKeypointCache({
     if (rgb?.length === 3 * kps.length) kps.rgb = rgb
     // The file is what match indices refer to, so it wins over a disagreeing count.
     if (kps.length !== img.kpCount) {
-      log(`Keypoints for ${img.name}: the file holds ${kps.length}, the project said ${img.kpCount} — using the file`,
-        'warn', 'Project')
+      log(
+        `Keypoints for ${img.name}: the file holds ${kps.length}, the project said ${img.kpCount} — using the file`,
+        'warn',
+        'Project',
+      )
       img.kpCount = kps.length
       if (isPersisting()) save()
     }
@@ -82,14 +90,19 @@ export function createKeypointCache({
     let p = keypointLoads.get(img.uuid)
     if (!p) {
       const epoch = keypointEpoch
-      p = readKeypointsFromDisk(img).finally(() => { if (keypointLoads.get(img.uuid) === p) keypointLoads.delete(img.uuid) })
+      p = readKeypointsFromDisk(img).finally(() => {
+        if (keypointLoads.get(img.uuid) === p) keypointLoads.delete(img.uuid)
+      })
       keypointLoads.set(img.uuid, p)
       if (cache) {
-        p.then((r) => {
-          if (r.kps && epoch === keypointEpoch && !keypointCache.has(img.uuid)) {
-            keypointCache.set(img.uuid, r.kps, keypointBytes(r.kps))
-          }
-        }, () => {})
+        p.then(
+          (r) => {
+            if (r.kps && epoch === keypointEpoch && !keypointCache.has(img.uuid)) {
+              keypointCache.set(img.uuid, r.kps, keypointBytes(r.kps))
+            }
+          },
+          () => {},
+        )
       }
     }
     return p.then((r) => (r.stale ? (keypointCache.get(img.uuid) ?? null) : r.kps))
@@ -122,8 +135,17 @@ export function createKeypointCache({
   }
 
   return {
-    residentKeypoints, holdKeypoints, readKeypointsFromDisk, loadKeypointsShared, ensureKeypoints,
-    readKeypoints, resetKeypointCache, keypointCache, keypointLoads, keypointBytes, resolveImage,
+    residentKeypoints,
+    holdKeypoints,
+    readKeypointsFromDisk,
+    loadKeypointsShared,
+    ensureKeypoints,
+    readKeypoints,
+    resetKeypointCache,
+    keypointCache,
+    keypointLoads,
+    keypointBytes,
+    resolveImage,
     keypointCacheStats,
   }
 }

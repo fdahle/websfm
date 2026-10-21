@@ -30,7 +30,9 @@ export function loadProgressView(images, stores) {
   if (images) {
     return {
       label: `Loading images${images.label ? ` — ${images.label}` : ''}`,
-      done: images.done ?? 0, total: images.total ?? 0, detail: null,
+      done: images.done ?? 0,
+      total: images.total ?? 0,
+      detail: null,
     }
   }
   if (!pending.length) return null
@@ -43,7 +45,8 @@ export function loadProgressView(images, stores) {
   const rest = others(id)
   return {
     label: `${storeDisplayName(id)}: ${s.label}`,
-    done: s.done ?? 0, total: s.total ?? 0,
+    done: s.done ?? 0,
+    total: s.total ?? 0,
     detail: rest.length ? `Also restoring: ${rest.join(', ')}` : null,
   }
 }

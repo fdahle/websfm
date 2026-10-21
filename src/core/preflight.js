@@ -53,57 +53,81 @@ export function preflight(state = {}) {
 
   // ── Blocks (hard prerequisites) ────────────────────────────────────────────
   if ((s.nImages ?? 0) < 2) {
-    add('block', 'too-few-images',
+    add(
+      'block',
+      'too-few-images',
       `Only ${pluralize(s.nImages ?? 0, 'image')} loaded.`,
-      'Add at least two overlapping images before running the pipeline.')
+      'Add at least two overlapping images before running the pipeline.',
+    )
     // With no images nothing else is meaningful — but keep going so the caller
     // still sees any sensor warnings it wants to surface; the block alone gates Run.
   }
 
   if ((s.nImages ?? 0) >= 2 && s.detectedImageCount != null && s.detectedImageCount === 0) {
-    add('block', 'no-keypoints',
+    add(
+      'block',
+      'no-keypoints',
       'No image has keypoints yet.',
-      'Run Detect Features first — matching and reconstruction have nothing to work from otherwise.')
+      'Run Detect Features first — matching and reconstruction have nothing to work from otherwise.',
+    )
   }
 
   // Only a real blocker once detection has produced something to match.
   if ((s.detectedImageCount ?? 0) > 0 && s.verifiedPairCount != null && s.verifiedPairCount === 0) {
     if ((s.totalPairCount ?? 0) > 0) {
-      add('block', 'all-pairs-disabled',
+      add(
+        'block',
+        'all-pairs-disabled',
         `${s.totalPairCount === 1 ? 'The only match pair is' : `All ${s.totalPairCount} match pairs are`} excluded or rejected.`,
-        'Re-enable pairs in the match list, or lower the matching gates (minMatches / inlier ratio) and re-run matching.')
+        'Re-enable pairs in the match list, or lower the matching gates (minMatches / inlier ratio) and re-run matching.',
+      )
     } else {
-      add('block', 'no-matches',
+      add(
+        'block',
+        'no-matches',
         'No verified match pairs.',
-        'Run Match Features; if it finds nothing, lower minMatches or raise detection resolution/keypoints so images share features.')
+        'Run Match Features; if it finds nothing, lower minMatches or raise detection resolution/keypoints so images share features.',
+      )
     }
   }
 
   // ── Warnings (degraded but runnable) ───────────────────────────────────────
   const noFocal = labelList(s.sensorsMissingFocal)
   if (noFocal) {
-    add('warn', 'missing-focal',
+    add(
+      'warn',
+      'missing-focal',
       `No focal length on ${nounFor(s.sensorsMissingFocal.length, 'sensor')}: ${noFocal}.`,
-      'Enter the focal length or film/sensor width; self-calibration will estimate it, but a good starting value gives a cleaner solve.')
+      'Enter the focal length or film/sensor width; self-calibration will estimate it, but a good starting value gives a cleaner solve.',
+    )
   }
 
   const noFid = labelList(s.filmSensorsMissingFiducials)
   if (noFid) {
-    add('warn', 'film-no-fiducials',
+    add(
+      'warn',
+      'film-no-fiducials',
       `Film ${nounFor(s.filmSensorsMissingFiducials.length, 'sensor')} without calibrated fiducials: ${noFid}.`,
-      'Detect and calibrate fiducial marks so interior orientation is removed at ingest — otherwise the scan geometry biases the reconstruction.')
+      'Detect and calibrate fiducial marks so interior orientation is removed at ingest — otherwise the scan geometry biases the reconstruction.',
+    )
   }
 
   if (s.dense && s.dense.projectedBytes > s.dense.budgetBytes) {
-    add('warn', 'dense-over-budget',
+    add(
+      'warn',
+      'dense-over-budget',
       `Dense run is projected to need ${formatBytes(s.dense.projectedBytes)}, over the ${formatBytes(s.dense.budgetBytes)} budget.`,
-      'Lower the depth-map quality or the number of source views, or process fewer images at once, to avoid an out-of-memory tab crash.')
+      'Lower the depth-map quality or the number of source views, or process fewer images at once, to avoid an out-of-memory tab crash.',
+    )
   }
 
   if (s.gpu && s.gpu.requested && !s.gpu.available) {
-    add('warn', 'gpu-unavailable',
+    add(
+      'warn',
+      'gpu-unavailable',
       'GPU acceleration is requested but no WebGPU adapter is available.',
-      'The run will fall back to the (slower) CPU backend. Use a Chromium browser with WebGPU enabled for the GPU path.')
+      'The run will fall back to the (slower) CPU backend. Use a Chromium browser with WebGPU enabled for the GPU path.',
+    )
   }
 
   // Blocks first, warnings after; stable within each level (insertion order).

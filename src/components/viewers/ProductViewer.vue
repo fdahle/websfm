@@ -16,8 +16,12 @@ const gpuMeta = computed(() => (computedProduct.value ? productTiledMeta(props.k
 const gpuFile = computed(() => (computedProduct.value && props.product?.cog ? () => props.product.cog : null))
 const gpuCapable = computed(() => {
   const m = gpuMeta.value
-  return !!(m?.id && (m.crs || computedProduct.value) && !m.crsUnresolved
-    && Math.abs(m.geoTransform?.scaleX + m.geoTransform?.scaleY) < 1e-9)
+  return !!(
+    m?.id &&
+    (m.crs || computedProduct.value) &&
+    !m.crsUnresolved &&
+    Math.abs(m.geoTransform?.scaleX + m.geoTransform?.scaleY) < 1e-9
+  )
 })
 
 // Tab viewer for ANY georeferenced raster — a computed DEM/orthophoto product,
@@ -30,8 +34,8 @@ const gpuCapable = computed(() => {
 // `geoTransform`, so both are normalised to one descriptor below and the two
 // tab kinds become one call site of this component.
 const props = defineProps({
-  kind: { type: String, required: true },   // 'dem' | 'ortho'
-  product: { type: Object, default: null },  // dem/ortho product, RasterMeta, or null
+  kind: { type: String, required: true }, // 'dem' | 'ortho'
+  product: { type: Object, default: null }, // dem/ortho product, RasterMeta, or null
   // For an imported raster: the hydrated RasterSource, so the cursor can read
   // real values. Absent ⇒ the preview still renders, values read as "—".
   source: { type: Object, default: null },
@@ -51,7 +55,12 @@ const props = defineProps({
 const emit = defineEmits(['command', 'pick-gcp'])
 // The canvas only reports readiness from its own load(); when it unmounts (the CRS
 // became unresolved) nothing would un-hide the preview, leaving a blank viewer.
-watch(() => !!gpuCapable.value, (capable) => { if (!capable) gpuReady.value = false })
+watch(
+  () => !!gpuCapable.value,
+  (capable) => {
+    if (!capable) gpuReady.value = false
+  },
+)
 
 // One descriptor for both shapes (core/io/rasterSource.js productDescriptor).
 const desc = computed(() => productDescriptor(props.product))
@@ -62,8 +71,8 @@ const toolSource = computed(() => {
   if (props.source) return props.source
   const p = props.product
   if (!p || p.geoTransform) return null
-  const readRawWindow = props.kind === 'ortho' && p.cog
-    ? (rect, _level, opts = {}) => readRasterWindow(p.cog, { rect, ...opts }) : null
+  const readRawWindow =
+    props.kind === 'ortho' && p.cog ? (rect, _level, opts = {}) => readRasterWindow(p.cog, { rect, ...opts }) : null
   return createProductRasterSource(props.kind, p, { readRawWindow })
 })
 
@@ -84,7 +93,10 @@ const ty = ref(0)
 const dragging = ref(false)
 const hover = ref(null)
 
-let startX = 0, startY = 0, startTx = 0, startTy = 0
+let startX = 0,
+  startY = 0,
+  startTx = 0,
+  startTy = 0
 let resizeObserver = null
 
 const MIN_SCALE = 0.02
@@ -129,10 +141,12 @@ function onContextMenu(e) {
   e.preventDefault()
   const rect = container.value?.getBoundingClientRect()
   if (!rect || !desc.value) return
-  const x = e.clientX - rect.left, y = e.clientY - rect.top
+  const x = e.clientX - rect.left,
+    y = e.clientY - rect.top
   updateHover(x, y)
   if (!hover.value) return // outside the grid
-  const cw = container.value.clientWidth, ch = container.value.clientHeight
+  const cw = container.value.clientWidth,
+    ch = container.value.clientHeight
   menu.value = {
     x: Math.min(x, Math.max(0, cw - 200)),
     y: Math.min(y, Math.max(0, ch - 240)),
@@ -158,7 +172,9 @@ function menuPickGcp(gcpId) {
   closeMenu()
 }
 
-function closeMenu() { menu.value = null }
+function closeMenu() {
+  menu.value = null
+}
 
 function menuCopyPixel() {
   const r = menu.value?.read
@@ -183,21 +199,30 @@ function menuZoomIn() {
   if (menu.value) applyZoom(1.8, menu.value.x, menu.value.y)
   closeMenu()
 }
-function menuFit() { fit(); closeMenu() }
+function menuFit() {
+  fit()
+  closeMenu()
+}
 
 function onMouseDown(e) {
-  if (menu.value && e.button === 0) { closeMenu(); return }
+  if (menu.value && e.button === 0) {
+    closeMenu()
+    return
+  }
   if (e.button !== 0) return
   const rect = container.value.getBoundingClientRect()
   if (!e.shiftKey && measurements.value?.pick(e.clientX - rect.left, e.clientY - rect.top)) return
   dragging.value = true
-  startX = e.clientX; startY = e.clientY
-  startTx = tx.value; startTy = ty.value
+  startX = e.clientX
+  startY = e.clientY
+  startTx = tx.value
+  startTy = ty.value
 }
 
 function onMouseMove(e) {
   const rect = container.value.getBoundingClientRect()
-  const x = e.clientX - rect.left, y = e.clientY - rect.top
+  const x = e.clientX - rect.left,
+    y = e.clientY - rect.top
   if (dragging.value) {
     tx.value = startTx + (e.clientX - startX)
     ty.value = startTy + (e.clientY - startY)
@@ -205,20 +230,32 @@ function onMouseMove(e) {
   updateHover(x, y)
 }
 
-function onMouseUp() { dragging.value = false }
+function onMouseUp() {
+  dragging.value = false
+}
 
 // The measuring tools' view adapter: raster world ↔ viewport pixels through this
 // tab's pan/zoom. A new object per transform change re-renders their overlay.
 const view = computed(() => {
   const d = desc.value
   if (!d) return null
-  const s = scale.value, x0 = tx.value, y0 = ty.value
+  const s = scale.value,
+    x0 = tx.value,
+    y0 = ty.value
   return {
-    toScreen(wx, wy) { const p = worldToPixel(d, wx, wy); return { x: x0 + p.col * s, y: y0 + p.row * s } },
-    fromScreen(sx, sy) { return pixelToWorld(d, (sx - x0) / s, (sy - y0) / s) },
+    toScreen(wx, wy) {
+      const p = worldToPixel(d, wx, wy)
+      return { x: x0 + p.col * s, y: y0 + p.row * s }
+    },
+    fromScreen(sx, sy) {
+      return pixelToWorld(d, (sx - x0) / s, (sy - y0) / s)
+    },
   }
 })
-function onMouseLeave() { dragging.value = false; hover.value = null }
+function onMouseLeave() {
+  dragging.value = false
+  hover.value = null
+}
 
 // Read out the raster value under viewport coords (x,y).
 //
@@ -228,10 +265,16 @@ function onMouseLeave() { dragging.value = false; hover.value = null }
 function updateHover(x, y) {
   const p = props.product
   const d = desc.value
-  if (!p || !d) { hover.value = null; return }
+  if (!p || !d) {
+    hover.value = null
+    return
+  }
   const px = Math.floor((x - tx.value) / scale.value)
   const py = Math.floor((y - ty.value) / scale.value)
-  if (px < 0 || py < 0 || px >= p.width || py >= p.height) { hover.value = null; return }
+  if (px < 0 || py < 0 || px >= p.width || py >= p.height) {
+    hover.value = null
+    return
+  }
 
   // Cell-centre world coordinates, one code path for both shapes.
   const world = pixelToWorld(d, px + 0.5, py + 0.5)
@@ -241,8 +284,12 @@ function updateHover(x, y) {
     // A DEM past one plane (SAT-3): the full-resolution cell under the cursor, read
     // from its COG — the plane is only the overview.
     const wx = pixelToWorld(d, (x - tx.value) / scale.value, (y - ty.value) / scale.value)
-    const col = Math.floor((wx.x - p.originX) / p.fullGsd), row = Math.floor((p.originY - wx.y) / p.fullGsd)
-    if (col < 0 || row < 0 || col >= p.fullWidth || row >= p.fullHeight) { hover.value = null; return }
+    const col = Math.floor((wx.x - p.originX) / p.fullGsd),
+      row = Math.floor((p.originY - wx.y) / p.fullGsd)
+    if (col < 0 || row < 0 || col >= p.fullWidth || row >= p.fullHeight) {
+      hover.value = null
+      return
+    }
     readHeight(col, row, p)
   } else if (props.kind === 'dem') {
     // The cell's own value, never a neighbour's: a hole reads "no data". A reference
@@ -256,7 +303,10 @@ function updateHover(x, y) {
     // An imported ortho decoded into memory before tiled display reads its plane;
     // every other ortho reads the cell from its file.
     const rgba = props.source?.rgba() ?? null
-    if (!rgba) { readColour(px, py); return }
+    if (!rgba) {
+      readColour(px, py)
+      return
+    }
     const o = idx * 4
     hover.value = { px, py, r: rgba[o + 3] > 0 ? rgba[o] : null, g: rgba[o + 1], b: rgba[o + 2] }
   }
@@ -264,10 +314,12 @@ function updateHover(x, y) {
 
 // A block-built DEM's height under the cursor: a 1×1 window of its COG, read like the
 // colour below (one read in flight, the newest cell next, a stale answer dropped).
-let heightBusy = false, heightWanted = null
+let heightBusy = false,
+  heightWanted = null
 function readHeight(col, row, p) {
   if (hover.value?.px === col && hover.value?.py === row) return
-  const fx = p.originX + (col + 0.5) * p.fullGsd, fy = p.originY - (row + 0.5) * p.fullGsd
+  const fx = p.originX + (col + 0.5) * p.fullGsd,
+    fy = p.originY - (row + 0.5) * p.fullGsd
   hover.value = { px: col, py: row, fx, fy, z: null, pending: true }
   heightWanted = { col, row, cog: p.cog, vOffset: p.vOffset || 0 }
   if (!heightBusy) pumpHeight()
@@ -282,7 +334,9 @@ async function pumpHeight() {
       const w = await readRasterWindow(cog, { rect: { col, row, width: 1, height: 1 }, bands: [0] })
       const v = w?.channels?.[0]?.[0]
       z = Number.isFinite(v) ? v + vOffset : null
-    } catch { z = null }
+    } catch {
+      z = null
+    }
     if (hover.value?.px === col && hover.value?.py === row) hover.value = { ...hover.value, z, pending: false }
   }
   heightBusy = false
@@ -292,7 +346,8 @@ async function pumpHeight() {
 // worker read). Mouse moves outrun it, so at most one read is in flight and the
 // newest cell is read next; a stale answer is dropped. A transparent cell (alpha 0)
 // reads "no data".
-let colourBusy = false, colourWanted = null
+let colourBusy = false,
+  colourWanted = null
 function readColour(px, py) {
   if (hover.value?.px === px && hover.value?.py === py && (hover.value.pending || hover.value.r !== undefined)) return
   hover.value = { px, py, r: null, pending: !!toolSource.value }
@@ -313,8 +368,12 @@ async function pumpColour() {
       const w = nb ? await src.readWindow({ col: px, row: py, width: 1, height: 1 }, 0, { bands }) : null
       const ch = w?.channels ?? []
       const alpha = nb === 4 ? ch[3]?.[0] : 255
-      read = ch.length ? { r: alpha > 0 ? ch[0][0] : null, g: (ch[1] ?? ch[0])[0], b: (ch[2] ?? ch[0])[0] } : { r: null }
-    } catch { read = { r: null } }
+      read = ch.length
+        ? { r: alpha > 0 ? ch[0][0] : null, g: (ch[1] ?? ch[0])[0], b: (ch[2] ?? ch[0])[0] }
+        : { r: null }
+    } catch {
+      read = { r: null }
+    }
     if (hover.value?.px === px && hover.value?.py === py) hover.value = { px, py, ...read }
   }
   colourBusy = false
@@ -328,11 +387,18 @@ const units = computed(() => rasterUnits(props.product))
 const previewSrc = computed(() => props.product?.previewUrl ?? props.product?.previewDataUrl ?? null)
 // A computed ortho's brightness/contrast/gamma, matching what the GPU tiles draw
 // (an imported raster's `style` is band math, already baked into its preview).
-const previewFilter = computed(() => (computedProduct.value && props.kind === 'ortho'
-  ? orthoAdjustFilter(props.product?.style) : null))
-const fmt = (v, d = 3) => (v == null ? '—' : (Math.abs(v) >= 1000 ? v.toFixed(2) : Number(v.toPrecision(d))))
+const previewFilter = computed(() =>
+  computedProduct.value && props.kind === 'ortho' ? orthoAdjustFilter(props.product?.style) : null,
+)
+const fmt = (v, d = 3) => (v == null ? '—' : Math.abs(v) >= 1000 ? v.toFixed(2) : Number(v.toPrecision(d)))
 
-watch(() => props.product, () => { hover.value = null; requestAnimationFrame(fit) })
+watch(
+  () => props.product,
+  () => {
+    hover.value = null
+    requestAnimationFrame(fit)
+  },
+)
 
 let lastSize = null // { w, h } last non-zero container size the observer fitted to
 
@@ -342,7 +408,8 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(() => {
     const c = container.value
     if (!c) return
-    const w = c.clientWidth, h = c.clientHeight
+    const w = c.clientWidth,
+      h = c.clientHeight
     if (!w || !h) return
     if (lastSize && lastSize.w === w && lastSize.h === h) return
     lastSize = { w, h }
@@ -362,8 +429,12 @@ function zoomBy(factor) {
 // Measure group handles: the tool lives in RasterMeasurements; the Ribbon reads
 // `measureState` (via App's activeRasterTab) to render which tool is on.
 const measureState = computed(() => measurements.value?.state ?? null)
-function setMeasureTool(tool, opts) { measurements.value?.setTool(tool, opts) }
-function toggleSavedMeasurements() { measurements.value?.toggleSaved() }
+function setMeasureTool(tool, opts) {
+  measurements.value?.setTool(tool, opts)
+}
+function toggleSavedMeasurements() {
+  measurements.value?.toggleSaved()
+}
 defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurements })
 </script>
 
@@ -409,7 +480,15 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
         {{ source === null && product?.geoTransform ? 're-import it.' : 'rebuild it.' }}
       </div>
 
-      <GpuRasterCanvas v-if="gpuCapable" :product="gpuMeta" :file="gpuFile" :scale="scale" :tx="tx" :ty="ty" @ready="gpuReady = $event" />
+      <GpuRasterCanvas
+        v-if="gpuCapable"
+        :product="gpuMeta"
+        :file="gpuFile"
+        :scale="scale"
+        :tx="tx"
+        :ty="ty"
+        @ready="gpuReady = $event"
+      />
       <div
         v-if="menu"
         class="ctx-menu"
@@ -425,7 +504,11 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
         <template v-if="canPickGcp">
           <div class="ctx-sep"></div>
           <button class="ctx-item" @click="menuPickGcp(null)">Add GCP here</button>
-          <button v-if="selectedGcp && selectedGcp.role !== 'marker'" class="ctx-item" @click="menuPickGcp(selectedGcp.id)">
+          <button
+            v-if="selectedGcp && selectedGcp.role !== 'marker'"
+            class="ctx-item"
+            @click="menuPickGcp(selectedGcp.id)"
+          >
             Move {{ selectedGcp.name }} here
           </button>
         </template>
@@ -434,8 +517,16 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
         <button class="ctx-item" @click="menuFit">Fit to view</button>
       </div>
 
-      <RasterMeasurements ref="measurements" :product="product" :source="toolSource" :descriptor="desc"
-        :frame-status="frameStatus" :kind="kind" :view="view" @command="(...a) => emit('command', ...a)" />
+      <RasterMeasurements
+        ref="measurements"
+        :product="product"
+        :source="toolSource"
+        :descriptor="desc"
+        :frame-status="frameStatus"
+        :kind="kind"
+        :view="view"
+        @command="(...a) => emit('command', ...a)"
+      />
     </div>
 
     <!-- Layout mirrors the image view: live cursor readout on the left, static
@@ -512,16 +603,24 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
   overflow: hidden;
   cursor: grab;
 }
-.viewport.grabbing { cursor: grabbing; }
-.viewport.measuring:not(.grabbing) { cursor: crosshair; }
+.viewport.grabbing {
+  cursor: grabbing;
+}
+.viewport.measuring:not(.grabbing) {
+  cursor: crosshair;
+}
 .viewport.checker {
   background-image:
-    linear-gradient(45deg, rgba(128,128,128,0.10) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(128,128,128,0.10) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(128,128,128,0.10) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(128,128,128,0.10) 75%);
+    linear-gradient(45deg, rgba(128, 128, 128, 0.1) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.1) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.1) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.1) 75%);
   background-size: 20px 20px;
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
 }
 .raster {
   position: absolute;
@@ -569,7 +668,9 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
   cursor: pointer;
   white-space: nowrap;
 }
-.ctx-item:hover { background: var(--hover-bg); }
+.ctx-item:hover {
+  background: var(--hover-bg);
+}
 .status-bar {
   flex-shrink: 0;
   height: 24px;
@@ -583,12 +684,25 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
   background: var(--panel);
   border-top: 1px solid var(--panel-border);
 }
-.spacer { flex: 1; }
-.meta { color: var(--text-dim); }
-.coord { color: var(--text); letter-spacing: 0.02em; }
-.value { color: var(--text); }
-.value.dim { color: var(--text-dim); }
-.sep { color: var(--panel-border); }
+.spacer {
+  flex: 1;
+}
+.meta {
+  color: var(--text-dim);
+}
+.coord {
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.value {
+  color: var(--text);
+}
+.value.dim {
+  color: var(--text-dim);
+}
+.sep {
+  color: var(--panel-border);
+}
 .swatch {
   display: inline-block;
   width: 11px;
@@ -597,8 +711,16 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
   border: 1px solid rgba(255, 255, 255, 0.18);
   flex-shrink: 0;
 }
-.channel { letter-spacing: 0.02em; }
-.channel.r { color: #e07070; }
-.channel.g { color: #70c070; }
-.channel.b { color: #6090e0; }
+.channel {
+  letter-spacing: 0.02em;
+}
+.channel.r {
+  color: #e07070;
+}
+.channel.g {
+  color: #70c070;
+}
+.channel.b {
+  color: #6090e0;
+}
 </style>

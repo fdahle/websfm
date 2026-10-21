@@ -233,11 +233,21 @@ export function analyzeImageQuality(raster, opts = {}) {
     const row = y * aw
     for (let x = 1; x < aw - 1; x++) {
       const i = row + x
-      if (valid && !(
-        valid[i - aw - 1] && valid[i - aw] && valid[i - aw + 1] &&
-        valid[i - 1] && valid[i] && valid[i + 1] &&
-        valid[i + aw - 1] && valid[i + aw] && valid[i + aw + 1]
-      )) continue
+      if (
+        valid &&
+        !(
+          valid[i - aw - 1] &&
+          valid[i - aw] &&
+          valid[i - aw + 1] &&
+          valid[i - 1] &&
+          valid[i] &&
+          valid[i + 1] &&
+          valid[i + aw - 1] &&
+          valid[i + aw] &&
+          valid[i + aw + 1]
+        )
+      )
+        continue
       const lap = luma[i - aw] + luma[i + aw] + luma[i - 1] + luma[i + 1] - 4 * luma[i]
       lSum += lap
       lSq += lap * lap
@@ -287,9 +297,7 @@ export function relativeQuality(scores) {
   const finite = []
   for (const s of scores) if (typeof s === 'number' && Number.isFinite(s)) finite.push(s)
   const med = percentile(finite, 0.5)
-  return scores.map((s) =>
-    med != null && med > 0 && typeof s === 'number' && Number.isFinite(s) ? s / med : null,
-  )
+  return scores.map((s) => (med != null && med > 0 && typeof s === 'number' && Number.isFinite(s) ? s / med : null))
 }
 
 /**
@@ -305,10 +313,7 @@ export function relativeQuality(scores) {
  * @returns {Array<{ id:any, relative:number|null, flags:Array<'blurry'|'overexposed'|'underexposed'>, ok:boolean }>}
  */
 export function qualityVerdicts(results, opts = {}) {
-  const {
-    minRelative = QUALITY_VERDICT_DEFAULTS.minRelative,
-    maxClipped = QUALITY_VERDICT_DEFAULTS.maxClipped,
-  } = opts
+  const { minRelative = QUALITY_VERDICT_DEFAULTS.minRelative, maxClipped = QUALITY_VERDICT_DEFAULTS.maxClipped } = opts
   const rel = relativeQuality(results.map((r) => r.sharpness))
   return results.map((r, i) => {
     const flags = []

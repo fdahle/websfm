@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import {
-  createMemLedger, projectDensePeakBytes, projectDensifyPeakBytes, densifyInputBytes, DENSIFY_CELL_BYTES, formatBytes, DEFAULT_BUDGET_BYTES,
-  deviceBudget, DENSIFY_STREAMED_REF_BYTES_PER_PX, workingPixels,
+  createMemLedger,
+  projectDensePeakBytes,
+  projectDensifyPeakBytes,
+  densifyInputBytes,
+  DENSIFY_CELL_BYTES,
+  formatBytes,
+  DEFAULT_BUDGET_BYTES,
+  deviceBudget,
+  DENSIFY_STREAMED_REF_BYTES_PER_PX,
+  workingPixels,
 } from './memBudget.js'
 
 const GiB = 1024 ** 3
@@ -15,8 +23,8 @@ describe('deviceBudget', () => {
   })
 
   it('clamps the device-derived budget into [1, 6] GB', () => {
-    expect(deviceBudget({ deviceMemoryGB: 2 }).budgetBytes).toBe(1 * GiB)  // 50%·2 = 1, at floor
-    expect(deviceBudget({ deviceMemoryGB: 1 }).budgetBytes).toBe(1 * GiB)  // below floor → clamped
+    expect(deviceBudget({ deviceMemoryGB: 2 }).budgetBytes).toBe(1 * GiB) // 50%·2 = 1, at floor
+    expect(deviceBudget({ deviceMemoryGB: 1 }).budgetBytes).toBe(1 * GiB) // below floor → clamped
     expect(deviceBudget({ deviceMemoryGB: 32 }).budgetBytes).toBe(6 * GiB) // above ceiling → clamped
   })
 
@@ -88,7 +96,13 @@ describe('projectDensePeakBytes', () => {
     const real = projectDensePeakBytes({ nImages: 4, maxDim: 8000, backend: 'gpu', pixels: px })
     expect(real.total).toBe(sq.total / 2)
     // Streaming holds one map: the largest, whatever the mix of sizes.
-    const mixed = projectDensePeakBytes({ nImages: 2, maxDim: 1000, retainedMaps: 1, filterMaps: 0, pixels: [100, 400] })
+    const mixed = projectDensePeakBytes({
+      nImages: 2,
+      maxDim: 1000,
+      retainedMaps: 1,
+      filterMaps: 0,
+      pixels: [100, 400],
+    })
     expect(mixed.store).toBe(23 * 400)
     expect(mixed.raster).toBe(4 * 500)
   })
@@ -114,7 +128,7 @@ describe('projectDensePeakBytes', () => {
     expect(p.total).toBeGreaterThan(DEFAULT_BUDGET_BYTES) // the reported tab-kill case
   })
 
-  it('charges the cross-view filter\'s 1 B/px drop mask per map it judges in memory', () => {
+  it("charges the cross-view filter's 1 B/px drop mask per map it judges in memory", () => {
     const npix = 1000 * 1000
     const p = projectDensePeakBytes({ nImages: 5, maxDim: 1000 })
     expect(p.filter).toBe(5 * npix) // in-memory filter: every map's mask at once
@@ -145,7 +159,8 @@ describe('projectDensifyPeakBytes', () => {
 describe('densifyInputBytes', () => {
   // 2×2 maps.
   const mk = () => ({
-    width: 2, height: 2,
+    width: 2,
+    height: 2,
     depth: Float32Array.from([1, 1, 0, 1]),
     cost: Float32Array.from([0.1, 0.1, 0, 0.1]),
     rgb: new Uint8Array(4 * 3),

@@ -7,12 +7,29 @@ import { demPreview } from '../../workers/computeClient.js'
 vi.mock('../../workers/computeClient.js', () => ({ demPreview: vi.fn() }))
 
 function setup() {
-  const dem = { value: { name: 'DEM', createdAt: 1, width: 1, height: 1, data: new Float32Array([1]),
-    mask: new Uint8Array([1]), gsd: 1, zMin: 0, zMax: 10, previewUrl: 'blob:old' } }
+  const dem = {
+    value: {
+      name: 'DEM',
+      createdAt: 1,
+      width: 1,
+      height: 1,
+      data: new Float32Array([1]),
+      mask: new Uint8Array([1]),
+      gsd: 1,
+      zMin: 0,
+      zMax: 10,
+      previewUrl: 'blob:old',
+    },
+  }
   const log = vi.fn()
   const api = createProducts({
-    dem, ortho: { value: null }, isPersisting: () => false, log, save: vi.fn(),
-    productLayers: { value: {} }, projects: { currentProjectId: 'p' },
+    dem,
+    ortho: { value: null },
+    isPersisting: () => false,
+    log,
+    save: vi.fn(),
+    productLayers: { value: {} },
+    projects: { currentProjectId: 'p' },
     withPreviewUrl: (record) => ({ ...record, previewUrl: `blob:${record.style.ramp}` }),
   })
   return { dem, log, api }

@@ -19,8 +19,7 @@ export const SAMPLE_FORMAT_IEEEFP = 3
 // The classic sentinel nodata values. Orthos use an alpha band, not a nodata
 // value, so *any* nodata tag leans DEM — these just make the reason specific.
 const CLASSIC_NODATA = [-9999, -32768, -32767, -3.4028234663852886e38, -1e10]
-const isClassicNodata = (v) =>
-  CLASSIC_NODATA.some((c) => (c === 0 ? v === 0 : Math.abs((v - c) / c) < 1e-6))
+const isClassicNodata = (v) => CLASSIC_NODATA.some((c) => (c === 0 ? v === 0 : Math.abs((v - c) / c) < 1e-6))
 
 const DEM_NAME = /(^|[^a-z])(dem|dsm|dtm|elev|elevation|height|rema|cop30|copernicus|srtm|arcticdem|bedmap)([^a-z]|$)/i
 const ORTHO_NAME = /(^|[^a-z])(ortho|orthophoto|rgb|mosaic|pan|image|imagery|basemap|sentinel|landsat)([^a-z]|$)/i
@@ -100,8 +99,11 @@ export function classifyRasterKind(input = {}) {
   const hist = describeSample(sampledValues)
   if (hist) {
     if (hist.min < 0 && hist.min >= ELEV_MIN && hist.max <= ELEV_MAX) {
-      return decide('dem', 'low',
-        `values ${fmt(hist.min)}…${fmt(hist.max)} include negatives within elevation range ⇒ elevation`)
+      return decide(
+        'dem',
+        'low',
+        `values ${fmt(hist.min)}…${fmt(hist.max)} include negatives within elevation range ⇒ elevation`,
+      )
     }
     if (hist.max <= 255 && hist.min >= 0) {
       return decide('ortho', 'low', `values ${fmt(hist.min)}…${fmt(hist.max)} confined to 0–255 ⇒ imagery`)
@@ -109,12 +111,14 @@ export function classifyRasterKind(input = {}) {
     // A saturating histogram (a big pile at the top of the dtype range) is the
     // signature of imagery stretched to fill 16 bits; elevation doesn't clip.
     if (hist.saturated) {
-      return decide('ortho', 'low',
-        `values saturate at the top of the ${bitsPerSample}-bit range ⇒ imagery`)
+      return decide('ortho', 'low', `values saturate at the top of the ${bitsPerSample}-bit range ⇒ imagery`)
     }
     if (hist.min >= ELEV_MIN && hist.max <= ELEV_MAX) {
-      return decide('dem', 'low',
-        `values ${fmt(hist.min)}…${fmt(hist.max)} sit inside the plausible elevation range ⇒ elevation`)
+      return decide(
+        'dem',
+        'low',
+        `values ${fmt(hist.min)}…${fmt(hist.max)} sit inside the plausible elevation range ⇒ elevation`,
+      )
     }
     reasons.push(`values ${fmt(hist.min)}…${fmt(hist.max)} are inconclusive`)
   }

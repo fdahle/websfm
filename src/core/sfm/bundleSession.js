@@ -17,7 +17,11 @@
 import { bundleAdjust } from './reconstruction.js'
 import { validateSelfCalUpdate } from './selfCalGuard.js'
 import { distortPixel } from './distortion.js'
-import { buildCameraPriorConstraints as buildSurveyPriorConstraints, qualifyingGcps, buildGcpAnchors } from './surveyConstraints.js'
+import {
+  buildCameraPriorConstraints as buildSurveyPriorConstraints,
+  qualifyingGcps,
+  buildGcpAnchors,
+} from './surveyConstraints.js'
 import { compareRobustCost, projectFullXYZ } from './baAcceptance.js'
 import { buildBaObservations, appendObservations, trackPositions, mapObservations } from './baObservations.js'
 import { fmtStats } from './modelStats.js'
@@ -25,8 +29,20 @@ import { pluralize } from '../textFormat.js'
 
 export function createBundleSession(ctx) {
   const {
-    cfg, cameras, tracks, ids, keypointsAt, imageByUuid, sensorIntByUuid,
-    intrinsicsRecord, selfCalRecord, selfCal, cameraPriors, gcps, modelReprojStats, log,
+    cfg,
+    cameras,
+    tracks,
+    ids,
+    keypointsAt,
+    imageByUuid,
+    sensorIntByUuid,
+    intrinsicsRecord,
+    selfCalRecord,
+    selfCal,
+    cameraPriors,
+    gcps,
+    modelReprojStats,
+    log,
   } = ctx
   // Defaults + rationale for these live in defaults.user.js (baIterations,
   // refineIntrinsics); `cfg` already merged them.
@@ -41,21 +57,42 @@ export function createBundleSession(ctx) {
 
   // What every bundle adjustment's linear solves did (bundle.rs SolveStats), summed for
   // the run record: the PCG-vs-Cholesky decision (TODO ▸ MEM ▸ PCG) is made from these.
-  const baSolverTotals = { calls: 0, ms: 0, maxN: 0, solves: 0, cholesky: 0, pcgConverged: 0,
-    pcgPartial: 0, pcgFallback: 0, pcgNotPd: 0, pcgIters: 0, pcgItersMax: 0, threads: 1 }
+  const baSolverTotals = {
+    calls: 0,
+    ms: 0,
+    maxN: 0,
+    solves: 0,
+    cholesky: 0,
+    pcgConverged: 0,
+    pcgPartial: 0,
+    pcgFallback: 0,
+    pcgNotPd: 0,
+    pcgIters: 0,
+    pcgItersMax: 0,
+    threads: 1,
+  }
   const noteBaSolver = (label, result) => {
     const s = result?.solver
     if (!s) return
     const T = baSolverTotals
-    T.calls++; T.ms += result.ms ?? 0; T.maxN = Math.max(T.maxN, s.n)
-    for (const k of ['solves', 'cholesky', 'pcgConverged', 'pcgPartial', 'pcgFallback', 'pcgNotPd', 'pcgIters']) T[k] += s[k]
+    T.calls++
+    T.ms += result.ms ?? 0
+    T.maxN = Math.max(T.maxN, s.n)
+    for (const k of ['solves', 'cholesky', 'pcgConverged', 'pcgPartial', 'pcgFallback', 'pcgNotPd', 'pcgIters'])
+      T[k] += s[k]
     T.pcgItersMax = Math.max(T.pcgItersMax, s.pcgItersMax)
     T.threads = Math.max(T.threads, result.threads ?? 1)
     const pcg = s.pcgConverged + s.pcgPartial + s.pcgFallback + s.pcgNotPd
-    log(`${label} solver — n ${s.n}, ${pluralize(s.solves, 'solve')}: `
-      + (pcg ? `PCG ${s.pcgConverged} converged / ${s.pcgPartial} partial / ${s.pcgFallback} → Cholesky / `
-        + `${s.pcgNotPd} not PD, ${s.pcgIters} CG it (max ${s.pcgItersMax})` : `${s.cholesky} Cholesky`)
-      + `; ${((result.ms ?? 0) / 1000).toFixed(1)}s`, 'debug', 'Reconstruction')
+    log(
+      `${label} solver — n ${s.n}, ${pluralize(s.solves, 'solve')}: ` +
+        (pcg
+          ? `PCG ${s.pcgConverged} converged / ${s.pcgPartial} partial / ${s.pcgFallback} → Cholesky / ` +
+            `${s.pcgNotPd} not PD, ${s.pcgIters} CG it (max ${s.pcgItersMax})`
+          : `${s.cholesky} Cholesky`) +
+        `; ${((result.ms ?? 0) / 1000).toFixed(1)}s`,
+      'debug',
+      'Reconstruction',
+    )
   }
 
   // The frame a solve runs in. A pinhole camera's observations are its (undistorted)
@@ -69,12 +106,22 @@ export function createBundleSession(ctx) {
     const lenses = uuidList.map((u) => selfCal.lensOf(u))
     if (!lenses.some(Boolean)) return { kList, observations }
     return {
-      kList: kList.map((K, ci) => (lenses[ci]
-        ? { ...K, fisheye: true, fisheyeTerms: lenses[ci].terms,
-            k1: lenses[ci].k1, k2: lenses[ci].k2, k3: lenses[ci].k3, k4: lenses[ci].k4 }
-        : K)),
+      kList: kList.map((K, ci) =>
+        lenses[ci]
+          ? {
+              ...K,
+              fisheye: true,
+              fisheyeTerms: lenses[ci].terms,
+              k1: lenses[ci].k1,
+              k2: lenses[ci].k2,
+              k3: lenses[ci].k3,
+              k4: lenses[ci].k4,
+            }
+          : K,
+      ),
       observations: mapObservations(observations, (ci) => {
-        const lens = lenses[ci], K = kList[ci]
+        const lens = lenses[ci],
+          K = kList[ci]
         return lens ? (x, y) => distortPixel(x, y, K, lens) : null
       }),
     }
@@ -97,22 +144,35 @@ export function createBundleSession(ctx) {
     }
     if (ptSet.size < 10) return
     const shared = new Map() // camera uuid → points shared with the new camera
-    for (const p of ptSet) tracks.forEachView(p, (vi) => {
-      const u = ids.uuid(vi)
-      if (u !== uuid && cameras.has(u)) shared.set(u, (shared.get(u) ?? 0) + 1)
-    })
-    const free = [uuid, ...[...shared].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, window - 1).map(([u]) => u)]
+    for (const p of ptSet)
+      tracks.forEachView(p, (vi) => {
+        const u = ids.uuid(vi)
+        if (u !== uuid && cameras.has(u)) shared.set(u, (shared.get(u) ?? 0) + 1)
+      })
+    const free = [
+      uuid,
+      ...[...shared]
+        .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+        .slice(0, window - 1)
+        .map(([u]) => u),
+    ]
     const freeSet = new Set(free)
     const fixed = [...shared.keys()].filter((u) => !freeSet.has(u))
     const uuidList = [...free, ...fixed]
     const camList = uuidList.map((u) => cameras.get(u))
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
     const ptIds = [...ptSet]
-    const { kList, observations } = lensFrame(uuidList, camList.map((c) => c.K),
-      buildBaObservations(tracks, ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1, keypointsAt))
+    const { kList, observations } = lensFrame(
+      uuidList,
+      camList.map((c) => c.K),
+      buildBaObservations(tracks, ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1, keypointsAt),
+    )
     const posBefore = trackPositions(tracks, ptIds)
     const result = await bundleAdjust(camList, kList, posBefore, observations, {
-      maxIters: iters, refineIntrinsics: 'none', solver: cfg.baSolver, flatPoints: true,
+      maxIters: iters,
+      refineIntrinsics: 'none',
+      solver: cfg.baSolver,
+      flatPoints: true,
       fixedCams: fixed.map((_, k) => free.length + k),
     })
     noteBaSolver('local BA', result)
@@ -120,14 +180,22 @@ export function createBundleSession(ctx) {
     if (result.costAfter > result.costBefore) {
       const robust = compareRobustCost({
         before: { cams: camList, Ks: kList, points: posBefore },
-        after: { cams: result.cameras, Ks: kList, points: result.pos }, observations,
+        after: { cams: result.cameras, Ks: kList, points: result.pos },
+        observations,
       })
       if (!robust.improved) return
     }
-    free.forEach((u, ci) => { const old = cameras.get(u); cameras.set(u, { ...old, ...result.cameras[ci], K: old.K }) })
+    free.forEach((u, ci) => {
+      const old = cameras.get(u)
+      cameras.set(u, { ...old, ...result.cameras[ci], K: old.K })
+    })
     setTrackPositions(ptIds, result.pos)
-    log(`local BA (${imageByUuid(uuid)?.name ?? uuid}) — ${free.length} free + ${fixed.length} fixed cameras, `
-      + `${ptIds.length} points: RMS ${result.costBefore.toFixed(2)} → ${result.costAfter.toFixed(2)}px`, 'debug', 'Reconstruction')
+    log(
+      `local BA (${imageByUuid(uuid)?.name ?? uuid}) — ${free.length} free + ${fixed.length} fixed cameras, ` +
+        `${ptIds.length} points: RMS ${result.costBefore.toFixed(2)} → ${result.costAfter.toFixed(2)}px`,
+      'debug',
+      'Reconstruction',
+    )
   }
 
   // Convert project-CRS camera poses into targets in the current arbitrary SfM
@@ -135,12 +203,20 @@ export function createBundleSession(ctx) {
   // orientations are then composed through its rotation into the same frame.
   // Constraint construction lives in surveyConstraints.js (shared with gradual
   // selection, so a refinement can never drop what this solve was held to).
-  const buildCameraPriorConstraints = (uuidList, reference = null) => buildSurveyPriorConstraints({
-    cameras, cameraPriors, uuidList, minCameras: cfg.cameraPriorBaMinCameras, reference })
+  const buildCameraPriorConstraints = (uuidList, reference = null) =>
+    buildSurveyPriorConstraints({
+      cameras,
+      cameraPriors,
+      uuidList,
+      minCameras: cfg.cameraPriorBaMinCameras,
+      reference,
+    })
 
   const cameraPriorReprojectionAccepts = (result) => {
-    const allowance = Math.max(cfg.cameraPriorMaxReprojIncreasePx,
-      result.costBefore * cfg.cameraPriorMaxReprojIncreaseFrac)
+    const allowance = Math.max(
+      cfg.cameraPriorMaxReprojIncreasePx,
+      result.costBefore * cfg.cameraPriorMaxReprojIncreaseFrac,
+    )
     return result.costAfter <= result.costBefore + allowance
   }
 
@@ -163,17 +239,25 @@ export function createBundleSession(ctx) {
   let lastSolve = null // see runBundleAdjust
   // `warm`: the model is already converged (a re-solve after a filter, a
   // retriangulation or with survey constraints added), so the solve may stop earlier.
-  async function runBundleAdjust(label, iters, refineMode = refineIntrinsics, { cameraPriors = null, refineOnly = null, gcp = null, warm = false } = {}) {
+  async function runBundleAdjust(
+    label,
+    iters,
+    refineMode = refineIntrinsics,
+    { cameraPriors = null, refineOnly = null, gcp = null, warm = false } = {},
+  ) {
     // Any solve replaces the record of the last one; it is set again below only when
     // this one leaves a converged model (refinePipeline.js skips a re-solve of it).
     lastSolve = null
     if (!(cameras.size >= 2 && tracks.liveCount() >= 10 && iters > 0)) {
-      log(`${label} skipped (cameras=${cameras.size}, `
-        + `points=${tracks.liveCount()}, iters=${iters})`, 'debug', 'Reconstruction')
+      log(
+        `${label} skipped (cameras=${cameras.size}, ` + `points=${tracks.liveCount()}, iters=${iters})`,
+        'debug',
+        'Reconstruction',
+      )
       return
     }
     const uuidList = [...cameras.keys()]
-    const camList  = uuidList.map((u) => cameras.get(u))
+    const camList = uuidList.map((u) => cameras.get(u))
     const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
     // Point rank in this solve → point id; the solve's point i is ptIds[i].
@@ -182,14 +266,21 @@ export function createBundleSession(ctx) {
     // kList / observations in the solve's frame: a fisheye camera's in recorded pixels
     // with its lens on K (lensFrame). Everything below — the diagnostic, the robust
     // acceptance, the validation — judges the solve in that same frame.
-    const { kList, observations } = lensFrame(uuidList, camList.map((c) => c.K),
-      gcp ? appendObservations(tieObs, gcp.observations) : tieObs)
+    const { kList, observations } = lensFrame(
+      uuidList,
+      camList.map((c) => c.K),
+      gcp ? appendObservations(tieObs, gcp.observations) : tieObs,
+    )
     const posBefore = gcp ? trackPositions(tracks, ptIds, gcp.anchorPts) : trackPositions(tracks, ptIds)
     // A survey-constrained solve (camera priors or GCP anchors) is judged by the
     // bounded-increase rule, not "cost must fall".
     const constrained = !!(cameraPriors || gcp)
-    log(`${label} — ${camList.length} cameras, ${ptIds.length} points, `
-      + `${observations.n} observations, ${iters} iters`, 'info', 'Reconstruction')
+    log(
+      `${label} — ${camList.length} cameras, ${ptIds.length} points, ` +
+        `${observations.n} observations, ${iters} iters`,
+      'info',
+      'Reconstruction',
+    )
     // Diagnostic: where do the gross pre-solve residuals sit? Grouped by camera, split
     // by the observed point's track length (2 = freshly triangulated, ≥3 = extended).
     {
@@ -197,7 +288,13 @@ export function createBundleSession(ctx) {
       const errs = new Array(observations.n)
       for (let i = 0; i < observations.n; i++) {
         const j = oPt[i]
-        const q = projectFullXYZ(camList[oCam[i]], kList[oCam[i]], posBefore[3 * j], posBefore[3 * j + 1], posBefore[3 * j + 2])
+        const q = projectFullXYZ(
+          camList[oCam[i]],
+          kList[oCam[i]],
+          posBefore[3 * j],
+          posBefore[3 * j + 1],
+          posBefore[3 * j + 2],
+        )
         errs[i] = q ? Math.hypot(q.x - oX[i], q.y - oY[i]) : Infinity
       }
       const sorted = errs.filter(Number.isFinite).sort((a, b) => a - b)
@@ -209,30 +306,50 @@ export function createBundleSession(ctx) {
         const ci = oCam[i]
         const rec = byCam.get(ci) ?? { n: 0, fresh: 0, max: 0 }
         const pid = ptIds[oPt[i]]
-        rec.n++; if (pid != null && tracks.viewCount(pid) <= 2) rec.fresh++
+        rec.n++
+        if (pid != null && tracks.viewCount(pid) <= 2) rec.fresh++
         rec.max = Math.max(rec.max, e)
         byCam.set(ci, rec)
       })
       if (byCam.size) {
-        const top = [...byCam].sort((a, b) => b[1].n - a[1].n).slice(0, 6)
-          .map(([ci, r]) => `${imageByUuid(uuidList[ci])?.name ?? ci} ${r.n} (${r.fresh} on 2-view pts, max ${r.max.toFixed(0)}px)`)
+        const top = [...byCam]
+          .sort((a, b) => b[1].n - a[1].n)
+          .slice(0, 6)
+          .map(
+            ([ci, r]) =>
+              `${imageByUuid(uuidList[ci])?.name ?? ci} ${r.n} (${r.fresh} on 2-view pts, max ${r.max.toFixed(0)}px)`,
+          )
         const total = [...byCam.values()].reduce((s, r) => s + r.n, 0)
-        log(`${label} pre-solve gross residuals (>${gross.toFixed(0)}px): ${total} obs on ${pluralize(byCam.size, 'camera')}; `
-          + `top: ${top.join('; ')}`, 'debug', 'Reconstruction')
+        log(
+          `${label} pre-solve gross residuals (>${gross.toFixed(0)}px): ${total} obs on ${pluralize(byCam.size, 'camera')}; ` +
+            `top: ${top.join('; ')}`,
+          'debug',
+          'Reconstruction',
+        )
       }
     }
 
-    const result = await bundleAdjust(camList, kList, posBefore, observations,
-      { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam, solver: warm ? { ...cfg.baSolver, warm: true } : cfg.baSolver, flatPoints: true,
-        ...(cameraPriors ? { cameraPriors } : {}), ...(gcp ? { gcpAnchors: gcp.anchors } : {}) })
+    const result = await bundleAdjust(camList, kList, posBefore, observations, {
+      maxIters: iters,
+      refineIntrinsics: refineMode,
+      sensorOfCam,
+      solver: warm ? { ...cfg.baSolver, warm: true } : cfg.baSolver,
+      flatPoints: true,
+      ...(cameraPriors ? { cameraPriors } : {}),
+      ...(gcp ? { gcpAnchors: gcp.anchors } : {}),
+    })
     noteBaSolver(label, result)
     if (!result) {
       log(`${label} returned no result (skipped)`, 'warn', 'Reconstruction')
       return
     }
     if (constrained && result.costAfter > result.costBefore + 0.01 && !cameraPriorReprojectionAccepts(result)) {
-      log(`${label} REJECTED — reprojection RMS ${result.costBefore.toFixed(2)}px → `
-        + `${result.costAfter.toFixed(2)}px exceeds the survey-constraint safety bound`, 'warn', 'Reconstruction')
+      log(
+        `${label} REJECTED — reprojection RMS ${result.costBefore.toFixed(2)}px → ` +
+          `${result.costAfter.toFixed(2)}px exceeds the survey-constraint safety bound`,
+        'warn',
+        'Reconstruction',
+      )
       return
     }
     // A correct bundle adjustment can only lower the cost; reject a worsening
@@ -248,37 +365,49 @@ export function createBundleSession(ctx) {
     // robust cost rose too.
     if (!constrained && result.costBefore != null && result.costAfter != null && result.costAfter > result.costBefore) {
       const delta = result.costAfter - result.costBefore
-      const afterKs = refineMode !== 'none' && result.intrinsics
-        ? kList.map((k, ci) => ({ ...k, ...result.intrinsics[ci] })) : kList
+      const afterKs =
+        refineMode !== 'none' && result.intrinsics ? kList.map((k, ci) => ({ ...k, ...result.intrinsics[ci] })) : kList
       const robust = compareRobustCost({
         before: { cams: camList, Ks: kList, points: posBefore },
         after: { cams: result.cameras, Ks: afterKs, points: result.pos },
         observations,
       })
       if (delta < 0.01) {
-        log(`${label} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); `
-          + `keeping the pre-BA estimate`, 'debug', 'Reconstruction')
+        log(
+          `${label} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); ` +
+            `keeping the pre-BA estimate`,
+          'debug',
+          'Reconstruction',
+        )
         lastSolve = { mode: refineMode, converged: true }
         return
       }
       if (!robust.improved) {
-        log(`${label} REJECTED — RMS ${result.costBefore.toFixed(2)}px → `
-          + `${result.costAfter.toFixed(2)}px and robust cost ${robust.before.toFixed(2)} → `
-          + `${robust.after.toFixed(2)}px (Huber δ ${robust.delta.toFixed(1)}px) would worsen the model; `
-          + 'keeping the pre-BA estimate', 'warn', 'Reconstruction')
+        log(
+          `${label} REJECTED — RMS ${result.costBefore.toFixed(2)}px → ` +
+            `${result.costAfter.toFixed(2)}px and robust cost ${robust.before.toFixed(2)} → ` +
+            `${robust.after.toFixed(2)}px (Huber δ ${robust.delta.toFixed(1)}px) would worsen the model; ` +
+            'keeping the pre-BA estimate',
+          'warn',
+          'Reconstruction',
+        )
         return
       }
-      log(`${label} accepted — plain RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px rose, `
-        + `but the robust cost it minimises fell ${robust.before.toFixed(2)} → ${robust.after.toFixed(2)}px `
-        + `(Huber δ ${robust.delta.toFixed(1)}px): outliers were down-weighted, not the fit worsened`,
-      'info', 'Reconstruction')
+      log(
+        `${label} accepted — plain RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px rose, ` +
+          `but the robust cost it minimises fell ${robust.before.toFixed(2)} → ${robust.after.toFixed(2)}px ` +
+          `(Huber δ ${robust.delta.toFixed(1)}px): outliers were down-weighted, not the fit worsened`,
+        'info',
+        'Reconstruction',
+      )
     }
 
     // The refined intrinsics this solve proposes, per camera; null where none are
     // kept (no self-calibration, or a camera `refineOnly` excludes).
-    const refined = refineMode !== 'none' && result.intrinsics
-      ? result.intrinsics.map((rk, ci) => (!refineOnly || refineOnly(uuidList[ci]) ? rk : null))
-      : null
+    const refined =
+      refineMode !== 'none' && result.intrinsics
+        ? result.intrinsics.map((rk, ci) => (!refineOnly || refineOnly(uuidList[ci]) ? rk : null))
+        : null
 
     // Self-calibration is destructive only after this point: accepted radial terms
     // are folded into every image's keypoints. Validate the detached BA result first,
@@ -302,29 +431,45 @@ export function createBundleSession(ctx) {
         const focalIsGuess = !!rec?.source?.startsWith('default')
         const { width, height } = selfCal.kFrameDims(img)
         const proposed = refined[ci]
-        const verdict = validateSelfCalUpdate({
-          before: kList[ci], proposed, nominalFx, width, height, focalIsGuess,
-        }, {
-          maxFocalStepFrac: cfg.selfCalMaxFocalStepFrac,
-          maxFocalNominalFrac: cfg.selfCalMaxFocalNominalFrac,
-          maxGuessFocalStepFrac: cfg.selfCalGuessFocalStepFrac,
-          maxGuessFocalNominalFrac: cfg.selfCalGuessFocalNominalFrac,
-          maxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
-          maxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
-        })
+        const verdict = validateSelfCalUpdate(
+          {
+            before: kList[ci],
+            proposed,
+            nominalFx,
+            width,
+            height,
+            focalIsGuess,
+          },
+          {
+            maxFocalStepFrac: cfg.selfCalMaxFocalStepFrac,
+            maxFocalNominalFrac: cfg.selfCalMaxFocalNominalFrac,
+            maxGuessFocalStepFrac: cfg.selfCalGuessFocalStepFrac,
+            maxGuessFocalNominalFrac: cfg.selfCalGuessFocalNominalFrac,
+            maxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
+            maxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
+          },
+        )
         proposals.push({
           sensorId: img?.sensorId ?? null,
           fxBefore: kList[ci]?.fx ?? null,
           fxProposed: proposed?.fx ?? null,
-          k1: proposed?.k1 ?? 0, k2: proposed?.k2 ?? 0, k3: proposed?.k3 ?? 0,
-          accepted: verdict.ok, rejectionCode: verdict.code, rejectionReason: verdict.reason,
+          k1: proposed?.k1 ?? 0,
+          k2: proposed?.k2 ?? 0,
+          k3: proposed?.k3 ?? 0,
+          accepted: verdict.ok,
+          rejectionCode: verdict.code,
+          rejectionReason: verdict.reason,
         })
         if (!verdict.ok && !rejected) rejected = verdict
       }
       selfCalRecord.adjustments.push({ label, mode: refineMode, accepted: !rejected, sensors: proposals })
       if (rejected) {
-        log(`${label} self-calibration REJECTED before commit — ${rejected.reason}; `
-          + 'keeping cameras, points, intrinsics, and keypoints unchanged', 'warn', 'Reconstruction')
+        log(
+          `${label} self-calibration REJECTED before commit — ${rejected.reason}; ` +
+            'keeping cameras, points, intrinsics, and keypoints unchanged',
+          'warn',
+          'Reconstruction',
+        )
         return
       }
     }
@@ -358,30 +503,39 @@ export function createBundleSession(ctx) {
       for (const [key, ci] of solvedGroups) {
         const g = sensorOfCam[ci]
         const rk = refined[ci]
-        const fx0 = kList[ci].fx, fx1 = rk.fx
-        const pct = fx0 ? (100 * (fx1 - fx0) / fx0) : 0
+        const fx0 = kList[ci].fx,
+          fx1 = rk.fx
+        const pct = fx0 ? (100 * (fx1 - fx0)) / fx0 : 0
         let implied = ''
         const w0 = kList[ci].impliedFilmWidthMm
-        if (w0 != null && fx1) implied = `, implied film width ${w0.toFixed(0)}mm → ${(w0 * fx0 / fx1).toFixed(0)}mm`
+        if (w0 != null && fx1) implied = `, implied film width ${w0.toFixed(0)}mm → ${((w0 * fx0) / fx1).toFixed(0)}mm`
         const cxcy = wantsCxcy
-          ? `, cx ${kList[ci].cx.toFixed(1)}→${rk.cx.toFixed(1)}, cy ${kList[ci].cy.toFixed(1)}→${rk.cy.toFixed(1)}` : ''
+          ? `, cx ${kList[ci].cx.toFixed(1)}→${rk.cx.toFixed(1)}, cy ${kList[ci].cy.toFixed(1)}→${rk.cy.toFixed(1)}`
+          : ''
         // Refined shared radial coeffs (copy the non-zero ones into the sensor table);
         // a fisheye's are its whole Kannala–Brandt lens, before → after.
         const kterms = rk.fisheye
-          ? ['k1', 'k2', 'k3', 'k4'].slice(0, rk.fisheyeTerms || 4)
-            .map((k) => `${k} ${(kList[ci][k] ?? 0).toFixed(5)}→${(rk[k] ?? 0).toFixed(5)}`)
+          ? ['k1', 'k2', 'k3', 'k4']
+              .slice(0, rk.fisheyeTerms || 4)
+              .map((k) => `${k} ${(kList[ci][k] ?? 0).toFixed(5)}→${(rk[k] ?? 0).toFixed(5)}`)
           : ['k1', 'k2', 'k3'].filter((k) => rk[k]).map((k) => `${k} ${rk[k].toFixed(5)}`)
         const kdist = kterms.length ? `, ${rk.fisheye ? 'fisheye ' : ''}${kterms.join(', ')}` : ''
         // A sensorless camera is a group of its own: one line each, so debug-level
         // (a sensorless set would otherwise print a line per image per pass).
         const who = g >= 0 ? `sensor group ${g}` : `camera ${imageByUuid(uuidList[ci])?.name ?? key} (no sensor)`
-        log(`${label} self-calibration — ${who}: `
-          + `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${kdist}${implied}`,
-          g >= 0 ? 'info' : 'debug', 'Reconstruction')
+        log(
+          `${label} self-calibration — ${who}: ` +
+            `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${kdist}${implied}`,
+          g >= 0 ? 'info' : 'debug',
+          'Reconstruction',
+        )
       }
-      log(`${label} self-calibration is weakly observed on short/single strips `
-        + `(needs ≥2° tilt variation for a trustworthy focal); review before updating the sensor table.`,
-        'debug', 'Reconstruction')
+      log(
+        `${label} self-calibration is weakly observed on short/single strips ` +
+          `(needs ≥2° tilt variation for a trustworthy focal); review before updating the sensor table.`,
+        'debug',
+        'Reconstruction',
+      )
     }
 
     // Propagate the refined calibration to every image of each solved group and fold
@@ -389,25 +543,31 @@ export function createBundleSession(ctx) {
     if (solvedGroups.size) selfCal.fold({ label, refineMode, solvedGroups, refined, kList, camIdxOf })
 
     if (result.costBefore != null && result.costAfter != null) {
-      log(`${label} RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px `
-        + `(${result.costAfter <= result.costBefore ? '−' : '+'}${Math.abs(result.costBefore - result.costAfter).toFixed(2)}px)`, 'success', 'Reconstruction')
+      log(
+        `${label} RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px ` +
+          `(${result.costAfter <= result.costBefore ? '−' : '+'}${Math.abs(result.costBefore - result.costAfter).toFixed(2)}px)`,
+        'success',
+        'Reconstruction',
+      )
     }
     const trace = result.costTrace ?? []
     if (trace.length >= 2) {
-      const fmtTrace = trace.length <= 8
-        ? trace.map((c) => c.toFixed(1))
-        : [...trace.slice(0, 3), '…', ...trace.slice(-3)].map((c) => typeof c === 'number' ? c.toFixed(1) : c)
-      const last = trace[trace.length - 1], prev = trace[trace.length - 2]
+      const fmtTrace =
+        trace.length <= 8
+          ? trace.map((c) => c.toFixed(1))
+          : [...trace.slice(0, 3), '…', ...trace.slice(-3)].map((c) => (typeof c === 'number' ? c.toFixed(1) : c))
+      const last = trace[trace.length - 1],
+        prev = trace[trace.length - 2]
       const lastDrop = prev > 0 ? (prev - last) / prev : 0
-      const verdict = lastDrop > 0.02
-        ? `still descending (${(lastDrop * 100).toFixed(1)}% on last iter — raising baIterations may help)`
-        // Saying "converged" at the cap hid that every BA ran all its iterations
-        // (St Nazaire: 30 × ~4 s each after the first had already converged).
-        : trace.length >= iters
-          ? `plateaued, but ran all ${trace.length} iterations (no stopping rule fired)`
-          : `converged in ${trace.length} iter`
-      log(`${label} convergence (RMS px) — ${fmtTrace.join(' → ')}; ${verdict}`,
-        'debug', 'Reconstruction')
+      const verdict =
+        lastDrop > 0.02
+          ? `still descending (${(lastDrop * 100).toFixed(1)}% on last iter — raising baIterations may help)`
+          : // Saying "converged" at the cap hid that every BA ran all its iterations
+            // (St Nazaire: 30 × ~4 s each after the first had already converged).
+            trace.length >= iters
+            ? `plateaued, but ran all ${trace.length} iterations (no stopping rule fired)`
+            : `converged in ${trace.length} iter`
+      log(`${label} convergence (RMS px) — ${fmtTrace.join(' → ')}; ${verdict}`, 'debug', 'Reconstruction')
     }
     log(`${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
     // Converged: LM stopped on its own rule before the iteration cap.
@@ -416,22 +576,33 @@ export function createBundleSession(ctx) {
   }
 
   async function runCameraPriorBundleAdjust() {
-    if (!(cameraPriors.length >= cfg.cameraPriorBaMinCameras
-        && cameras.size >= cfg.cameraPriorBaMinCameras
-        && tracks.liveCount() >= 10 && baIterations > 0)) return
+    if (!(
+      cameraPriors.length >= cfg.cameraPriorBaMinCameras &&
+      cameras.size >= cfg.cameraPriorBaMinCameras &&
+      tracks.liveCount() >= 10 &&
+      baIterations > 0
+    ))
+      return
     for (let round = 0; round < cfg.cameraPriorBaRounds; round++) {
       const uuidList = [...cameras.keys()]
       const constrained = buildCameraPriorConstraints(uuidList)
       if (!constrained) {
-        log(`camera-prior bundle adjustment skipped — fewer than ${cfg.cameraPriorBaMinCameras} `
-          + 'registered, non-collinear 3D camera positions', 'debug', 'Reconstruction')
+        log(
+          `camera-prior bundle adjustment skipped — fewer than ${cfg.cameraPriorBaMinCameras} ` +
+            'registered, non-collinear 3D camera positions',
+          'debug',
+          'Reconstruction',
+        )
         return
       }
       const camList = uuidList.map((u) => cameras.get(u))
       const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
-      log(`camera-prior bundle adjustment (round ${round + 1}/${cfg.cameraPriorBaRounds}) — `
-        + `${pluralize(constrained.priors.length, 'camera')}, seed RMS ${constrained.fit.rms.toPrecision(3)} project units`,
-      'info', 'Reconstruction')
+      log(
+        `camera-prior bundle adjustment (round ${round + 1}/${cfg.cameraPriorBaRounds}) — ` +
+          `${pluralize(constrained.priors.length, 'camera')}, seed RMS ${constrained.fit.rms.toPrecision(3)} project units`,
+        'info',
+        'Reconstruction',
+      )
       // Experiment (cameraPriorRefineIntrinsics): let the GNSS-constrained solve re-estimate
       // focal / principal point / distortion. With fixed K a self-calibration that is
       // slightly wrong (the nadir focal–height correlation that domes a block) cannot be
@@ -440,37 +611,59 @@ export function createBundleSession(ctx) {
       // self-cal record and the self-cal validation all apply exactly as elsewhere.
       // 'auto' takes the mode of the last post-filter pass (refinePipeline.js records it).
       if (cfg.cameraPriorRefineIntrinsics && cfg.cameraPriorRefineIntrinsics !== 'none') {
-        const mode = cfg.cameraPriorRefineIntrinsics === 'auto'
-          ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics) : cfg.cameraPriorRefineIntrinsics
-        const r = await runBundleAdjust(`camera-prior bundle adjustment (round ${round + 1}, intrinsics '${mode}')`,
-          baIterations, mode, { cameraPriors: constrained.priors, warm: true })
+        const mode =
+          cfg.cameraPriorRefineIntrinsics === 'auto'
+            ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics)
+            : cfg.cameraPriorRefineIntrinsics
+        const r = await runBundleAdjust(
+          `camera-prior bundle adjustment (round ${round + 1}, intrinsics '${mode}')`,
+          baIterations,
+          mode,
+          { cameraPriors: constrained.priors, warm: true },
+        )
         if (!r) return
-        log(`camera-prior bundle adjustment centre residual → `
-          + `${(r.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`, 'success', 'Reconstruction')
+        log(
+          `camera-prior bundle adjustment centre residual → ` +
+            `${(r.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`,
+          'success',
+          'Reconstruction',
+        )
         continue
       }
       const ptIds = tracks.liveIds()
-      const lf = lensFrame(uuidList, camList.map((c) => c.K),
-        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt))
+      const lf = lensFrame(
+        uuidList,
+        camList.map((c) => c.K),
+        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt),
+      )
       const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds), lf.observations, {
-        maxIters: baIterations, refineIntrinsics: 'none', flatPoints: true,
+        maxIters: baIterations,
+        refineIntrinsics: 'none',
+        flatPoints: true,
         sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
-        cameraPriors: constrained.priors, solver: cfg.baSolver,
+        cameraPriors: constrained.priors,
+        solver: cfg.baSolver,
       })
       noteBaSolver(`camera-prior bundle adjustment (round ${round + 1})`, result)
       if (!result) return
       if (!cameraPriorReprojectionAccepts(result)) {
-        log(`camera-prior bundle adjustment REJECTED — reprojection RMS `
-          + `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px exceeds the safety bound`,
-        'warn', 'Reconstruction')
+        log(
+          `camera-prior bundle adjustment REJECTED — reprojection RMS ` +
+            `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px exceeds the safety bound`,
+          'warn',
+          'Reconstruction',
+        )
         return
       }
       uuidList.forEach((uuid, ci) => cameras.set(uuid, { ...cameras.get(uuid), ...result.cameras[ci] }))
       setTrackPositions(ptIds, result.pos)
-      log(`camera-prior bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
-        + `${result.costAfter.toFixed(2)}px; centre residual → `
-        + `${(result.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`,
-      'success', 'Reconstruction')
+      log(
+        `camera-prior bundle adjustment RMS ${result.costBefore.toFixed(2)}px → ` +
+          `${result.costAfter.toFixed(2)}px; centre residual → ` +
+          `${(result.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`,
+        'success',
+        'Reconstruction',
+      )
     }
   }
 
@@ -491,8 +684,11 @@ export function createBundleSession(ctx) {
     const qualifying = qualifyingGcps(gcps, cameras)
     if (qualifying.length < 3) {
       if (gcps.length) {
-        log(`GCP anchoring skipped (${qualifying.length}/3 GCPs `
-          + `with ≥2 registered views)`, 'debug', 'Reconstruction')
+        log(
+          `GCP anchoring skipped (${qualifying.length}/3 GCPs ` + `with ≥2 registered views)`,
+          'debug',
+          'Reconstruction',
+        )
       }
       return
     }
@@ -514,9 +710,13 @@ export function createBundleSession(ctx) {
       // in this joint pass, keeping point and camera targets in the same gauge.
       const constrainedCameras = buildCameraPriorConstraints(uuidList, { fit, frame })
 
-      log(`GCP-anchored bundle adjustment (round ${round + 1}/2) — `
-        + `${pluralize(anchors.length, 'GCP')}, seed scale ${fit.scale.toPrecision(4)}, `
-        + `seed RMS ${fit.rms.toPrecision(3)}`, 'info', 'Reconstruction')
+      log(
+        `GCP-anchored bundle adjustment (round ${round + 1}/2) — ` +
+          `${pluralize(anchors.length, 'GCP')}, seed scale ${fit.scale.toPrecision(4)}, ` +
+          `seed RMS ${fit.rms.toPrecision(3)}`,
+        'info',
+        'Reconstruction',
+      )
 
       // With enough control, let the anchored solve re-estimate the intrinsics, as
       // Metashape's GCP optimisation does. Fixed K cannot undo a focal error: over a
@@ -526,23 +726,41 @@ export function createBundleSession(ctx) {
       // left checkpoints at 8.6 m vertical RMS. Routed through runBundleAdjust, so the
       // self-cal validation, the distortion fold (GCP marks move with it) and the
       // composed self-cal record apply exactly as in every other pass.
-      const gcpMode = cfg.gcpRefineIntrinsics === 'auto'
-        ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics) : (cfg.gcpRefineIntrinsics ?? 'none')
+      const gcpMode =
+        cfg.gcpRefineIntrinsics === 'auto'
+          ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics)
+          : (cfg.gcpRefineIntrinsics ?? 'none')
       if (gcpMode && gcpMode !== 'none' && anchors.length >= (cfg.gcpRefineIntrinsicsMinGcps ?? 5)) {
-        const r = await runBundleAdjust(`GCP-anchored bundle adjustment (round ${round + 1}, intrinsics '${gcpMode}')`,
-          baIterations, gcpMode, { cameraPriors: constrainedCameras?.priors ?? null, gcp: setup })
+        const r = await runBundleAdjust(
+          `GCP-anchored bundle adjustment (round ${round + 1}, intrinsics '${gcpMode}')`,
+          baIterations,
+          gcpMode,
+          { cameraPriors: constrainedCameras?.priors ?? null, gcp: setup },
+        )
         if (!r) return
-        log(`GCP-anchored bundle adjustment anchor residual → ${(r.anchorRmsAfter * fit.scale).toPrecision(3)} project units`,
-          'success', 'Reconstruction')
+        log(
+          `GCP-anchored bundle adjustment anchor residual → ${(r.anchorRmsAfter * fit.scale).toPrecision(3)} project units`,
+          'success',
+          'Reconstruction',
+        )
         continue
       }
 
-      const lf = lensFrame(uuidList, kList, appendObservations(
-        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt), setup.observations))
+      const lf = lensFrame(
+        uuidList,
+        kList,
+        appendObservations(buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt), setup.observations),
+      )
 
-      const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds, anchorPts), lf.observations,
-        { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors, flatPoints: true,
-          cameraPriors: constrainedCameras?.priors ?? [], solver: cfg.baSolver })
+      const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds, anchorPts), lf.observations, {
+        maxIters: baIterations,
+        refineIntrinsics: 'none',
+        sensorOfCam,
+        gcpAnchors: anchors,
+        flatPoints: true,
+        cameraPriors: constrainedCameras?.priors ?? [],
+        solver: cfg.baSolver,
+      })
       noteBaSolver(`GCP-anchored bundle adjustment (round ${round + 1})`, result)
       if (!result) {
         log('GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Reconstruction')
@@ -554,9 +772,12 @@ export function createBundleSession(ctx) {
       // rule, not "cost must fall". The old 0.01 px gate rejected Casa Grande's 1978
       // block at 1.69 → 1.71 px and left its checkpoints at 10.6 m vertical RMS.
       if (result.costAfter > result.costBefore + 0.01 && !cameraPriorReprojectionAccepts(result)) {
-        log(`GCP-anchored bundle adjustment REJECTED — reprojection RMS `
-          + `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px exceeds the survey-constraint safety bound`,
-        'warn', 'Reconstruction')
+        log(
+          `GCP-anchored bundle adjustment REJECTED — reprojection RMS ` +
+            `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px exceeds the survey-constraint safety bound`,
+          'warn',
+          'Reconstruction',
+        )
         return
       }
       uuidList.forEach((uuid, ci) => {
@@ -565,16 +786,23 @@ export function createBundleSession(ctx) {
       // Only the original (non-anchor) points are kept — the synthetic anchor
       // points were scratch space for this BA pass, not real SIFT tracks.
       setTrackPositions(ptIds, result.pos)
-      log(`GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
-        + `${result.costAfter.toFixed(2)}px, anchor residual → ${(result.anchorRmsAfter * fit.scale).toPrecision(3)} project units`
-        + (constrainedCameras ? `, camera-centre residual → `
-          + `${(result.cameraPriorRmsAfter * fit.scale).toPrecision(3)} project units` : ''),
-        'success', 'Reconstruction')
+      log(
+        `GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → ` +
+          `${result.costAfter.toFixed(2)}px, anchor residual → ${(result.anchorRmsAfter * fit.scale).toPrecision(3)} project units` +
+          (constrainedCameras
+            ? `, camera-centre residual → ` + `${(result.cameraPriorRmsAfter * fit.scale).toPrecision(3)} project units`
+            : ''),
+        'success',
+        'Reconstruction',
+      )
     }
   }
 
   return {
-    runBundleAdjust, runLocalBundleAdjust, runCameraPriorBundleAdjust, runGcpAnchoredBundleAdjust,
+    runBundleAdjust,
+    runLocalBundleAdjust,
+    runCameraPriorBundleAdjust,
+    runGcpAnchoredBundleAdjust,
     // { mode, converged } of the last runBundleAdjust, or null (none, rejected, skipped).
     lastSolve: () => lastSolve,
     solverTotals: baSolverTotals,

@@ -15,12 +15,13 @@ beforeEach(() => {
 
 function twoGcps() {
   const store = useGcpsStore()
-  const a = store.addGcp(), b = store.addGcp()
+  const a = store.addGcp(),
+    b = store.addGcp()
   store.setGcpVerticalDatum(a, 'ellipsoidal')
   return { store, a, b, gcp: (id) => store.gcps.find((g) => g.id === id) }
 }
 
-it('fills Z in the GCP\'s declared datum when the DEM converts to it, else takes the DEM\'s', async () => {
+it("fills Z in the GCP's declared datum when the DEM converts to it, else takes the DEM's", async () => {
   const { store, a, b, gcp } = twoGcps()
   const asked = []
   // An EGM2008 DEM at 100 m; where the geoid lies 52 m below the ellipsoid.
@@ -38,7 +39,8 @@ it('fills Z in the GCP\'s declared datum when the DEM converts to it, else takes
 
 it('converts heights only between datums it can convert, and leaves the rest', async () => {
   const { store, a, b, gcp } = twoGcps()
-  store.setGcpPosition(a, 'z', 10); store.setGcpPosition(b, 'z', 20)
+  store.setGcpPosition(a, 'z', 10)
+  store.setGcpPosition(b, 'z', 20)
   store.setGcpVerticalDatum(b, 'orthometric')
   const shiftAt = async (g, from) => (from === 'ellipsoidal' ? 53.4 : null)
   expect(await store.convertGcpHeights('geoid:EGM96', shiftAt)).toEqual({ converted: 1, skipped: 1 })

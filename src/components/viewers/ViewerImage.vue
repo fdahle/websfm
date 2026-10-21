@@ -12,46 +12,58 @@ import { useFiducialFit } from '../../composables/useFiducialFit.js'
 import { bitmapPixel } from '../../utils/imageViewport.js'
 import { needsPyramid } from '../../core/io/rasterPyramid.js'
 import {
-  overlayView, beginOverlayFrame, paintRaster, paintRampLegend, paintResidualLegend,
-  paintKeypoints, paintResiduals, paintGcpGuides, paintGcps, paintFiducials,
-  paintLoupe, paintBrushCursor, paintRectPreview, KEYPOINT_LEGEND, DEPTH_LEGEND,
+  overlayView,
+  beginOverlayFrame,
+  paintRaster,
+  paintRampLegend,
+  paintResidualLegend,
+  paintKeypoints,
+  paintResiduals,
+  paintGcpGuides,
+  paintGcps,
+  paintFiducials,
+  paintLoupe,
+  paintBrushCursor,
+  paintRectPreview,
+  KEYPOINT_LEGEND,
+  DEPTH_LEGEND,
 } from '../../utils/imageOverlay.js'
 import MaskToolbar from './MaskToolbar.vue'
 import GcpToolbar from './GcpToolbar.vue'
 import ImageContextMenu from './ImageContextMenu.vue'
 
 const props = defineProps({
-  image:         { type: Object,  required: true },
+  image: { type: Object, required: true },
   showKeypoints: { type: Boolean, default: false },
-  showMask:      { type: Boolean, default: false },
-  showDepth:     { type: Boolean, default: false },
-  showGcps:      { type: Boolean, default: false },
-  gcps:          { type: Array,   default: () => [] }, // [{ id, name, px, py, reprojPx? }] observations on this image
+  showMask: { type: Boolean, default: false },
+  showDepth: { type: Boolean, default: false },
+  showGcps: { type: Boolean, default: false },
+  gcps: { type: Array, default: () => [] }, // [{ id, name, px, py, reprojPx? }] observations on this image
   // Guided marking (core/sfm/gcpGuides.js): predicted position of GCPs *not yet*
   // marked on this image — [{ gcpId, name, kind:'point', u, v } | { gcpId, name,
   // kind:'line', line:[a,b,c] }], all in native image pixels.
-  gcpGuides:     { type: Array,   default: () => [] },
-  allGcps:       { type: Array,   default: () => [] }, // [{ id, name }] every GCP, for the right-click "assign" menu
-  selectedGcpId: { type: String,  default: null },
-  maskEdit:      { type: Boolean, default: false }, // mask-edit mode (floating toolbar)
-  gcpEdit:       { type: Boolean, default: false }, // GCP-edit mode: click to add/mark a GCP
+  gcpGuides: { type: Array, default: () => [] },
+  allGcps: { type: Array, default: () => [] }, // [{ id, name }] every GCP, for the right-click "assign" menu
+  selectedGcpId: { type: String, default: null },
+  maskEdit: { type: Boolean, default: false }, // mask-edit mode (floating toolbar)
+  gcpEdit: { type: Boolean, default: false }, // GCP-edit mode: click to add/mark a GCP
   // Film sensor (F4): the sensor's calibrated fiducial marks + this image's
   // clicked observations. isFilm gates the "Mark fiducial…" menu + overlay.
-  isFilm:        { type: Boolean, default: false },
+  isFilm: { type: Boolean, default: false },
   showFiducials: { type: Boolean, default: false }, // overlay toggle for fiducial marks
-  fiducialMarks: { type: Array,   default: () => [] }, // [{ id, xMm, yMm }]
-  fiducialObs:   { type: Array,   default: () => [] }, // [{ fidId, px, py }]
+  fiducialMarks: { type: Array, default: () => [] }, // [{ id, xMm, yMm }]
+  fiducialObs: { type: Array, default: () => [] }, // [{ fidId, px, py }]
   // The calibration's scan→mm model: reconstruction fits exactly this one, so the
   // live residuals must too (an affine readout misreports a conformal/projective fit).
   fiducialTransform: { type: String, default: 'affine' },
   // Reprojection residual overlay (WS3): per-observation vectors in native image
   // pixels — [{ px, py, du, dv, mag }] (du,dv = observation − projection).
   showResiduals: { type: Boolean, default: false },
-  residuals:     { type: Array,   default: () => [] },
+  residuals: { type: Array, default: () => [] },
   // Project scene type ('aerial' | 'object' | null). It only orders the two
   // create actions in the right-click chooser — an object project has no
   // georeference, so a marker is what it is almost always marking.
-  sceneType:     { type: String,  default: null },
+  sceneType: { type: String, default: null },
 })
 
 // Which point kind this scene type creates by default. Never a gate: both kinds
@@ -62,7 +74,9 @@ const defaultPointRole = computed(() => (props.sceneType === 'object' ? 'marker'
 // the viewport (it is a pointer mode, not project state) and re-seeded from the
 // scene type whenever that changes.
 const pendingNewRole = ref(defaultPointRole.value)
-watch(defaultPointRole, (r) => { pendingNewRole.value = r })
+watch(defaultPointRole, (r) => {
+  pendingNewRole.value = r
+})
 // The toolbar's "＋ New control" / "＋ New marker" both mean "deselect, and create
 // THIS kind next" — so they set the mode and clear the target in one action.
 function onSelectNewRole(role) {
@@ -77,7 +91,17 @@ function onSelectNewRole(role) {
 //           rather than always creating a GCP.
 // mark-fiducial: assign this pixel to a fiducial mark { fidId, px, py }.
 // exit-mask-edit: user closed the mask toolbar (×) — parent owns the maskEdit flag.
-const emit = defineEmits(['update-mask', 'update-depth', 'mark-gcp', 'add-gcp', 'select-gcp', 'delete-gcp', 'mark-fiducial', 'exit-mask-edit', 'exit-gcp-edit'])
+const emit = defineEmits([
+  'update-mask',
+  'update-depth',
+  'mark-gcp',
+  'add-gcp',
+  'select-gcp',
+  'delete-gcp',
+  'mark-fiducial',
+  'exit-mask-edit',
+  'exit-gcp-edit',
+])
 
 // The <img>'s @error (a blob: URL can outlive the file behind it, and the store
 // heals it from OPFS or flags the image — see reportImageLoadError), and the
@@ -86,9 +110,7 @@ const imagesStore = useImagesStore()
 
 // Ids of GCPs already marked on this image, shown with a dot in the GCP-edit
 // toolbar's target list.
-const markedGcpIds = computed(() =>
-  (props.gcps ?? []).map((g) => g.id).filter((id) => id != null)
-)
+const markedGcpIds = computed(() => (props.gcps ?? []).map((g) => g.id).filter((id) => id != null))
 
 // ── Pieces ────────────────────────────────────────────────────────────────────
 // Pan/zoom + native frame (useImageViewport), the mask editor with Smart Select
@@ -104,16 +126,30 @@ const markedGcpIds = computed(() =>
 // so that, e.g., an image switch has cleared the frame before the uuid watcher
 // decides whether to re-encode for Smart Select.
 
-const container     = ref(null)
-const imgEl         = ref(null)
+const container = ref(null)
+const imgEl = ref(null)
 const overlayCanvas = ref(null)
 
 const {
-  scale, tx, ty, imageReady, frame, editable,
-  refreshFrame, fit, zoomAt, zoomIn, zoomOut, getViewportCoords, toImagePixel,
-  observeResize, disconnectResize,
+  scale,
+  tx,
+  ty,
+  imageReady,
+  frame,
+  editable,
+  refreshFrame,
+  fit,
+  zoomAt,
+  zoomIn,
+  zoomOut,
+  getViewportCoords,
+  toImagePixel,
+  observeResize,
+  disconnectResize,
 } = useImageViewport({
-  container, imgEl, image: () => props.image,
+  container,
+  imgEl,
+  image: () => props.image,
   onViewChange: drawOverlay,
   // Late TIFF metadata re-derived the frame: rebuild the (native-sized) mask canvas.
   onFrameChange: () => initMaskCanvas(),
@@ -122,8 +158,9 @@ const {
 // A very large scan (a tiled pyramid, core/io/rasterPyramid.js): the view only
 // ever has its reduced display copy, so `editable` never turns on. Painting and
 // marking by hand are unavailable; the mask is shown and whole-mask actions work.
-const largeScan = computed(() => !!frame.value?.exact
-  && (!!props.image.pyramidIndex || needsPyramid(frame.value.width, frame.value.height)))
+const largeScan = computed(
+  () => !!frame.value?.exact && (!!props.image.pyramidIndex || needsPyramid(frame.value.width, frame.value.height)),
+)
 
 const { fidResidual, markedFidIds, fidMarkPos, fidGhosts } = useFiducialFit({
   isFilm: () => props.isFilm,
@@ -134,29 +171,55 @@ const { fidResidual, markedFidIds, fidMarkPos, fidGhosts } = useFiducialFit({
 
 // Depth-map overlay (its own native-sized canvas + import/export/clear).
 // `depthCanvas` is what renderOverlay blits; the rest is the ribbon's depth buttons.
-const {
-  depthFileInput, depthCanvas, hasDepth,
-  initDepthCanvas, triggerDepthImport, onDepthFileChange, clearDepth,
-} = useDepthOverlay({ frame, image: () => props.image, drawOverlay, emit })
+const { depthFileInput, depthCanvas, hasDepth, initDepthCanvas, triggerDepthImport, onDepthFileChange, clearDepth } =
+  useDepthOverlay({ frame, image: () => props.image, drawOverlay, emit })
 
 const { keypoints, keypointRange } = useImageKeypoints({
-  image: () => props.image, show: () => props.showKeypoints, store: imagesStore,
+  image: () => props.image,
+  show: () => props.showKeypoints,
+  store: imagesStore,
 })
 
 const {
-  maskFileInput, hasMask, tool, brushRadius, maskOpacity, canUndo, canRedo,
-  smartStatus, smartHasPreview, smartPreviewCanvas, smartClick, discardSmart,
-  canvas: maskCanvas, rect: maskRect, isDrawing,
-  initMaskCanvas, maskedAt, flushMask,
-  beginStroke, continueStroke, endStroke,
-  beginRect, updateRect, cancelRect, commitRect,
-  undoMask, redoMask, invertMask, clearMask, commitSmart,
-  triggerMaskImport, onMaskFileChange, onKeydown,
+  maskFileInput,
+  hasMask,
+  tool,
+  brushRadius,
+  maskOpacity,
+  canUndo,
+  canRedo,
+  smartStatus,
+  smartHasPreview,
+  smartPreviewCanvas,
+  smartClick,
+  discardSmart,
+  canvas: maskCanvas,
+  rect: maskRect,
+  isDrawing,
+  initMaskCanvas,
+  maskedAt,
+  flushMask,
+  beginStroke,
+  continueStroke,
+  endStroke,
+  beginRect,
+  updateRect,
+  cancelRect,
+  commitRect,
+  undoMask,
+  redoMask,
+  invertMask,
+  clearMask,
+  commitSmart,
+  triggerMaskImport,
+  onMaskFileChange,
+  onKeydown,
 } = useMaskEditor({
   image: () => props.image,
   maskEdit: () => props.maskEdit,
   viewport: { scale, tx, ty, frame, editable },
-  drawOverlay, emit,
+  drawOverlay,
+  emit,
   // Instances are kept alive per tab via v-show: offsetParent is null while hidden.
   isVisible: () => container.value?.offsetParent !== null,
   largeScan: () => largeScan.value,
@@ -167,13 +230,24 @@ const {
 // residual set is replaced, never edited in place). All getters, never a ref/reactive source: one of those would force the whole
 // group to fire on any dep trigger (e.g. a record replaced with the same
 // kpStatus), not only on a changed value as the separate watchers did.
-watch([
-  () => keypoints.value, () => props.image.kpStatus, () => props.showKeypoints,
-  () => props.showMask, () => props.showDepth,
-  () => props.showGcps, () => props.gcpGuides, () => props.gcpEdit, () => props.selectedGcpId, // gcpEdit gates the guides too
-  () => props.isFilm, () => props.showFiducials,
-  () => props.showResiduals, () => props.residuals,
-], drawOverlay)
+watch(
+  [
+    () => keypoints.value,
+    () => props.image.kpStatus,
+    () => props.showKeypoints,
+    () => props.showMask,
+    () => props.showDepth,
+    () => props.showGcps,
+    () => props.gcpGuides,
+    () => props.gcpEdit,
+    () => props.selectedGcpId, // gcpEdit gates the guides too
+    () => props.isFilm,
+    () => props.showFiducials,
+    () => props.showResiduals,
+    () => props.residuals,
+  ],
+  drawOverlay,
+)
 watch([() => props.gcps, () => props.fiducialObs, () => props.fiducialMarks], drawOverlay, { deep: true })
 
 // ── Overlay canvas ────────────────────────────────────────────────────────────
@@ -287,14 +361,17 @@ function renderOverlay() {
 // state as a plain pan; a move past the click threshold turns them into a pan.
 
 const dragging = ref(false)
-const hoverPx  = ref(null)
+const hoverPx = ref(null)
 
-let smartDown = null   // { x, y, alt } pending click-vs-drag while Smart tool active
+let smartDown = null // { x, y, alt } pending click-vs-drag while Smart tool active
 let smartMoved = false // pointer moved past the click threshold → it's a pan, not a click
-let gcpDown = null     // { x, y } pending click-vs-drag while GCP-edit mode active
-let gcpMoved = false   // pointer moved past the click threshold → it's a pan, not a GCP click
-let mousePos = null    // { x, y } screen coords for brush cursor / loupe
-let startX = 0, startY = 0, startTx = 0, startTy = 0
+let gcpDown = null // { x, y } pending click-vs-drag while GCP-edit mode active
+let gcpMoved = false // pointer moved past the click threshold → it's a pan, not a GCP click
+let mousePos = null // { x, y } screen coords for brush cursor / loupe
+let startX = 0,
+  startY = 0,
+  startTx = 0,
+  startTy = 0
 let offscreenCtx = null // the displayed bitmap, for colour sampling
 
 // Right-click context menu (ImageContextMenu.vue): { x, y, sx, sy, px, py, mode } | null.
@@ -312,12 +389,17 @@ function onContextMenu(e) {
   menu.value = {
     x: Math.min(x, Math.max(0, cw - 200)),
     y: Math.min(y, Math.max(0, ch - 240)),
-    sx: x, sy: y,
-    px: pix.px, py: pix.py, mode: 'main',
+    sx: x,
+    sy: y,
+    px: pix.px,
+    py: pix.py,
+    mode: 'main',
   }
 }
 
-function closeMenu() { menu.value = null }
+function closeMenu() {
+  menu.value = null
+}
 
 // "Copy color (RGB)": the bitmap pixel holding the clicked native pixel.
 function onMenuCopyColor({ px, py }) {
@@ -329,7 +411,10 @@ function onMenuCopyColor({ px, py }) {
 }
 
 function onMouseDown(e) {
-  if (menu.value && e.button === 0) { closeMenu(); return }
+  if (menu.value && e.button === 0) {
+    closeMenu()
+    return
+  }
   // Until the full-resolution bitmap is in (`editable`), presses just pan.
   const activeTool = props.maskEdit && editable.value ? tool.value : null
   if (activeTool === 'rect' && e.button === 0) {
@@ -348,7 +433,10 @@ function onMouseDown(e) {
     smartDown = { x, y, alt: e.altKey }
     smartMoved = false
     dragging.value = true
-    startX = e.clientX; startY = e.clientY; startTx = tx.value; startTy = ty.value
+    startX = e.clientX
+    startY = e.clientY
+    startTx = tx.value
+    startTy = ty.value
   } else if (props.gcpEdit && editable.value && e.button === 0) {
     // Like the Smart tool: arm a pending click AND a pan; a real drag pans, a click
     // (no movement past the threshold, decided in onMouseUp) places/marks a GCP.
@@ -356,11 +444,14 @@ function onMouseDown(e) {
     gcpDown = { x, y }
     gcpMoved = false
     dragging.value = true
-    startX = e.clientX; startY = e.clientY; startTx = tx.value; startTy = ty.value
+    startX = e.clientX
+    startY = e.clientY
+    startTx = tx.value
+    startTy = ty.value
   } else if (e.button === 0) {
     dragging.value = true
-    startX  = e.clientX
-    startY  = e.clientY
+    startX = e.clientX
+    startY = e.clientY
     startTx = tx.value
     startTy = ty.value
   }
@@ -390,8 +481,11 @@ function onMouseMove(e) {
 async function onMouseUp() {
   // Smart tool: a press that didn't drag is a segment click; a drag was a pan.
   if (smartDown) {
-    const down = smartDown, moved = smartMoved
-    smartDown = null; smartMoved = false; dragging.value = false
+    const down = smartDown,
+      moved = smartMoved
+    smartDown = null
+    smartMoved = false
+    dragging.value = false
     if (!moved && editable.value) {
       const pix = toImagePixel(down.x, down.y)
       if (pix) await smartClick(pix.px, pix.py, down.alt) // Alt-click = refine (negative)
@@ -400,8 +494,11 @@ async function onMouseUp() {
   }
   // GCP-edit: a press that didn't drag places a GCP; a drag was a pan.
   if (gcpDown) {
-    const down = gcpDown, moved = gcpMoved
-    gcpDown = null; gcpMoved = false; dragging.value = false
+    const down = gcpDown,
+      moved = gcpMoved
+    gcpDown = null
+    gcpMoved = false
+    dragging.value = false
     if (!moved && editable.value) {
       const pix = toImagePixel(down.x, down.y)
       if (pix) {
@@ -415,7 +512,10 @@ async function onMouseUp() {
     }
     return
   }
-  if (maskRect()) { await commitRect(); return }
+  if (maskRect()) {
+    await commitRect()
+    return
+  }
   if (isDrawing()) {
     const exporting = endStroke() // null when the stroke never touched the image
     if (exporting) await exporting
@@ -426,10 +526,12 @@ async function onMouseUp() {
 function onMouseLeave() {
   dragging.value = false
   cancelRect() // cancel an in-flight rectangle rather than guessing its corner
-  smartDown = null; smartMoved = false // cancel a pending Smart click/pan
-  gcpDown = null; gcpMoved = false     // cancel a pending GCP click/pan
+  smartDown = null
+  smartMoved = false // cancel a pending Smart click/pan
+  gcpDown = null
+  gcpMoved = false // cancel a pending GCP click/pan
   if (isDrawing()) endStroke()
-  mousePos      = null
+  mousePos = null
   hoverPx.value = null
   drawOverlay()
 }
@@ -448,13 +550,15 @@ function onWheel(e) {
 function updateHover(x, y) {
   const px = Math.floor((x - tx.value) / scale.value)
   const py = Math.floor((y - ty.value) / scale.value)
-  const f  = frame.value
+  const f = frame.value
   if (f?.exact && px >= 0 && py >= 0 && px < f.width && py < f.height) {
     const info = { x: px, y: py, r: null, g: null, b: null, masked: null }
     if (offscreenCtx) {
       const b = bitmapPixel(px, py, f)
       const pixel = offscreenCtx.getImageData(b.x, b.y, 1, 1).data
-      info.r = pixel[0]; info.g = pixel[1]; info.b = pixel[2]
+      info.r = pixel[0]
+      info.g = pixel[1]
+      info.b = pixel[2]
     }
     // Whether this pixel is excluded by the mask (opaque on the mask canvas).
     info.masked = maskedAt(px, py)
@@ -468,7 +572,7 @@ function setupOffscreenCanvas() {
   const img = imgEl.value
   if (!img || !img.naturalWidth) return
   try {
-    const c    = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
+    const c = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
     offscreenCtx = c.getContext('2d')
     offscreenCtx.drawImage(img, 0, 0)
   } catch {
@@ -544,9 +648,11 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
       <div
         v-else-if="image.previewFailed"
         class="image-pending image-error"
-        :title="image.previewFailReason === 'source-lost'
-          ? 'The file this image was loaded from is no longer readable, and project storage has no usable copy. Re-add the file.'
-          : 'Preview unavailable — decode failed'"
+        :title="
+          image.previewFailReason === 'source-lost'
+            ? 'The file this image was loaded from is no longer readable, and project storage has no usable copy. Re-add the file.'
+            : 'Preview unavailable — decode failed'
+        "
       >
         {{ image.previewFailReason === 'source-lost' ? 'Image file no longer available' : 'Preview unavailable' }}
       </div>
@@ -580,7 +686,12 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         :paintable="editable || !largeScan"
         @set-tool="(t) => (tool = t)"
         @update:brush-radius="(r) => (brushRadius = r)"
-        @update:opacity="(o) => { maskOpacity = o; drawOverlay() }"
+        @update:opacity="
+          (o) => {
+            maskOpacity = o
+            drawOverlay()
+          }
+        "
         @invert="invertMask"
         @undo="undoMask"
         @redo="redoMask"
@@ -629,10 +740,7 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         <span class="coord">Y&nbsp;{{ hoverPx.y }}</span>
         <template v-if="hoverPx.r !== null">
           <span class="sep">|</span>
-          <span
-            class="swatch"
-            :style="{ background: `rgb(${hoverPx.r},${hoverPx.g},${hoverPx.b})` }"
-          ></span>
+          <span class="swatch" :style="{ background: `rgb(${hoverPx.r},${hoverPx.g},${hoverPx.b})` }"></span>
           <span class="channel r">R&nbsp;{{ hoverPx.r }}</span>
           <span class="channel g">G&nbsp;{{ hoverPx.g }}</span>
           <span class="channel b">B&nbsp;{{ hoverPx.b }}</span>
@@ -667,17 +775,27 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
   overflow: hidden;
   cursor: grab;
   background-image:
-    linear-gradient(45deg, rgba(128,128,128,0.10) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(128,128,128,0.10) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(128,128,128,0.10) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(128,128,128,0.10) 75%);
+    linear-gradient(45deg, rgba(128, 128, 128, 0.1) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.1) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.1) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.1) 75%);
   background-size: 20px 20px;
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
 }
 
-.viewport.grabbing  { cursor: grabbing; }
-.viewport.drawing   { cursor: none; }
-.viewport.crosshair { cursor: crosshair; }
+.viewport.grabbing {
+  cursor: grabbing;
+}
+.viewport.drawing {
+  cursor: none;
+}
+.viewport.crosshair {
+  cursor: crosshair;
+}
 
 .image {
   position: absolute;
@@ -718,7 +836,9 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .overlay-canvas {
@@ -742,7 +862,9 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
   white-space: nowrap;
 }
 
-.spacer { flex: 1; }
+.spacer {
+  flex: 1;
+}
 .zoom-level {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
@@ -762,8 +884,13 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
   border-top: 1px solid var(--panel-border);
 }
 
-.coord { color: var(--text); letter-spacing: 0.02em; }
-.sep   { color: var(--panel-border); }
+.coord {
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.sep {
+  color: var(--panel-border);
+}
 
 .swatch {
   display: inline-block;
@@ -774,10 +901,23 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
   flex-shrink: 0;
 }
 
-.channel     { letter-spacing: 0.02em; }
-.channel.r   { color: #e07070; }
-.channel.g   { color: #70c070; }
-.channel.b   { color: #6090e0; }
-.masked      { color: var(--text-dim); letter-spacing: 0.02em; }
-.masked.on   { color: #ff8a8a; }
+.channel {
+  letter-spacing: 0.02em;
+}
+.channel.r {
+  color: #e07070;
+}
+.channel.g {
+  color: #70c070;
+}
+.channel.b {
+  color: #6090e0;
+}
+.masked {
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}
+.masked.on {
+  color: #ff8a8a;
+}
 </style>

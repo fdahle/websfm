@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
-  classifyGround, classifyCloudGround, CLASS_GROUND, CLASS_UNCLASSIFIED, CLASS_LOW_POINT, CLASS_NEVER,
+  classifyGround,
+  classifyCloudGround,
+  CLASS_GROUND,
+  CLASS_UNCLASSIFIED,
+  CLASS_LOW_POINT,
+  CLASS_NEVER,
 } from './groundFilter.js'
 import { makeFrame, frameFromScaledLocal } from './projection.js'
 
@@ -27,10 +32,12 @@ const terrain = (x, y) => 0.05 * x + 2 * Math.sin(x / 20) * Math.cos(y / 25)
 // truth[i]: 2 ground, 1 object, 7 low noise.
 function scene({ step = 0.25, seed = 1, jitter = 0 } = {}) {
   const rand = rng(seed)
-  const xyz = [], truth = []
+  const xyz = [],
+    truth = []
   const push = (x, y, z, cls) => {
     // Jitter moves points off the regular grid (and so off the cloth's cell edges).
-    xyz.push(x + jitter * (rand() - 0.5), y + jitter * (rand() - 0.5), z); truth.push(cls)
+    xyz.push(x + jitter * (rand() - 0.5), y + jitter * (rand() - 0.5), z)
+    truth.push(cls)
   }
   const buildings = [
     { x0: 20, x1: 40, y0: 20, y1: 32, h: 8 },
@@ -61,27 +68,37 @@ function scene({ step = 0.25, seed = 1, jitter = 0 } = {}) {
   }
   // Trees: canopy hemispheres 4–9 m up (ground below them is still seen).
   for (let k = 0; k < 8; k++) {
-    const cx = 10 + k * 11, cy = 90, r = 3
+    const cx = 10 + k * 11,
+      cy = 90,
+      r = 3
     for (let i = 0; i < 600; i++) {
-      const a = rand() * 2 * Math.PI, rr = r * Math.sqrt(rand())
-      const x = cx + rr * Math.cos(a), y = cy + rr * Math.sin(a)
+      const a = rand() * 2 * Math.PI,
+        rr = r * Math.sqrt(rand())
+      const x = cx + rr * Math.cos(a),
+        y = cy + rr * Math.sin(a)
       push(x, y, terrain(x, y) + 4 + 5 * Math.sqrt(1 - (rr / r) ** 2), 1)
     }
     for (let h = 0.8; h < 4; h += 0.2) push(cx, cy, terrain(cx, cy) + h, 1)
   }
   // Isolated below-ground noise (matching blunders).
   for (let k = 0; k < 20; k++) {
-    const x = 5 + rand() * 90, y = 5 + rand() * 10
+    const x = 5 + rand() * 90,
+      y = 5 + rand() * 10
     push(x, y, terrain(x, y) - 3 - rand() * 4, 7)
   }
   return { pos: Float64Array.from(xyz), count: truth.length, truth: Uint8Array.from(truth) }
 }
 
 function score(classes, truth, cls) {
-  let tp = 0, fp = 0, fn = 0
+  let tp = 0,
+    fp = 0,
+    fn = 0
   for (let i = 0; i < truth.length; i++) {
-    const p = classes[i] === cls, t = truth[i] === cls
-    if (p && t) tp++; else if (p) fp++; else if (t) fn++
+    const p = classes[i] === cls,
+      t = truth[i] === cls
+    if (p && t) tp++
+    else if (p) fp++
+    else if (t) fn++
   }
   return { precision: tp / (tp + fp), recall: tp / (tp + fn) }
 }
@@ -115,7 +132,10 @@ describe('classifyGround', () => {
     const { pos, count } = scene({ step: 0.5, seed: 3 })
     const a = classifyGround(pos, count, { clothResolution: 1 })
     const shifted = Float64Array.from(pos)
-    for (let i = 0; i < count; i++) { shifted[i * 3] += 500_000; shifted[i * 3 + 1] += 4_300_000 }
+    for (let i = 0; i < count; i++) {
+      shifted[i * 3] += 500_000
+      shifted[i * 3 + 1] += 4_300_000
+    }
     const b = classifyGround(shifted, count, { clothResolution: 1 })
     let diff = 0
     for (let i = 0; i < count; i++) if (a.classes[i] !== b.classes[i]) diff++
@@ -167,12 +187,18 @@ describe('classifyCloudGround', () => {
   // The frame below maps it back, so the classes must match the metric scene's.
   function tiltedScene() {
     const { pos, count, truth } = scene({ step: 0.5, seed: 5, jitter: 0.2 })
-    const c = Math.cos(Math.PI / 6), s = Math.sin(Math.PI / 6), k = 1 / 20
+    const c = Math.cos(Math.PI / 6),
+      s = Math.sin(Math.PI / 6),
+      k = 1 / 20
     const origin = [3, -2, 7]
-    const east = [1, 0, 0], north = [0, c, s], up = [0, -s, c]
+    const east = [1, 0, 0],
+      north = [0, c, s],
+      up = [0, -s, c]
     const sfm = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
-      const x = pos[i * 3] * k, y = pos[i * 3 + 1] * k, z = pos[i * 3 + 2] * k
+      const x = pos[i * 3] * k,
+        y = pos[i * 3 + 1] * k,
+        z = pos[i * 3 + 2] * k
       for (let a = 0; a < 3; a++) sfm[i * 3 + a] = origin[a] + x * east[a] + y * north[a] + z * up[a]
     }
     const frame = frameFromScaledLocal(makeFrame({ origin, east, north, up }), 20)
@@ -196,7 +222,11 @@ describe('classifyCloudGround', () => {
     const logs = []
     const m = classifyCloudGround({ count, pos }, null, { clothResolution: 1, extent: 'all' })
     const f = classifyCloudGround({ count, pos: inFeet }, null, {
-      clothResolution: 1, extent: 'all', metresPerUnit: ft, unitLabel: 'ft', onLog: (x) => logs.push(x),
+      clothResolution: 1,
+      extent: 'all',
+      metresPerUnit: ft,
+      unitLabel: 'ft',
+      onLog: (x) => logs.push(x),
     })
     expect(f.cloth.res).toBeCloseTo(1 / ft, 6)
     expect(Math.abs(f.counts.ground - m.counts.ground)).toBeLessThan(count * 2e-3)
@@ -204,8 +234,9 @@ describe('classifyCloudGround', () => {
   })
 
   it('refuses a cloud over the memory budget', () => {
-    expect(() => classifyCloudGround({ count: 1000, pos: new Float32Array(3000) }, null, { budgetBytes: 1000 }))
-      .toThrow(/memory budget/)
+    expect(() =>
+      classifyCloudGround({ count: 1000, pos: new Float32Array(3000) }, null, { budgetBytes: 1000 }),
+    ).toThrow(/memory budget/)
   })
 })
 
@@ -235,10 +266,12 @@ describe('classifyGround on steep ground', () => {
         xyz.push(x, y, 0.2 * x + (roof ? 6 : 0))
       }
     }
-    const pos = Float64Array.from(xyz), count = xyz.length / 3
+    const pos = Float64Array.from(xyz),
+      count = xyz.length / 3
     const res = classifyGround(pos, count, { clothResolution: 1 })
     for (let i = 0; i < count; i++) {
-      const x = pos[i * 3], y = pos[i * 3 + 1]
+      const x = pos[i * 3],
+        y = pos[i * 3 + 1]
       if (x > 21 && x < 39 && y > 21 && y < 39) expect(res.classes[i]).toBe(CLASS_UNCLASSIFIED)
     }
   })

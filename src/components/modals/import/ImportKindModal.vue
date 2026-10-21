@@ -10,12 +10,16 @@ defineProps({
 const emit = defineEmits(['close', 'select'])
 
 const OPTIONS = [
-  { kind: 'gcp',    title: 'Ground Control Points', desc: 'Named survey points with absolute coordinates.' },
-  { kind: 'pose',   title: 'Camera Positions',      desc: 'Per-image exterior orientation (position, optionally angles).' },
-  { kind: 'sensor', title: 'Camera Intrinsics',     desc: 'Shared sensor parameters (focal length, distortion…).' },
+  { kind: 'gcp', title: 'Ground Control Points', desc: 'Named survey points with absolute coordinates.' },
+  { kind: 'pose', title: 'Camera Positions', desc: 'Per-image exterior orientation (position, optionally angles).' },
+  { kind: 'sensor', title: 'Camera Intrinsics', desc: 'Shared sensor parameters (focal length, distortion…).' },
   { kind: 'fiducialObs', title: 'Image Fiducials', desc: 'Fiducial-mark pixel positions per image (film scans).' },
-  { kind: 'fiducialMarks', title: 'Camera Fiducials', desc: 'Calibrated fiducial-mark positions in mm (camera certificate).' },
-  { kind: 'cloud',  title: 'Point Cloud',            desc: 'Bare X/Y/Z (optionally RGB) points to view or mesh.' },
+  {
+    kind: 'fiducialMarks',
+    title: 'Camera Fiducials',
+    desc: 'Calibrated fiducial-mark positions in mm (camera certificate).',
+  },
+  { kind: 'cloud', title: 'Point Cloud', desc: 'Bare X/Y/Z (optionally RGB) points to view or mesh.' },
 ]
 </script>
 
@@ -48,9 +52,17 @@ const OPTIONS = [
   font-family: monospace;
 }
 
-.intro { font-size: 13px; color: var(--text-dim); margin: 0 0 14px; }
+.intro {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0 0 14px;
+}
 
-.choices { display: flex; flex-direction: column; gap: 8px; }
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .choice {
   display: flex;
@@ -63,14 +75,33 @@ const OPTIONS = [
   padding: 11px 13px;
   cursor: pointer;
 }
-.choice:hover { border-color: var(--accent); background: var(--hover-bg); }
+.choice:hover {
+  border-color: var(--accent);
+  background: var(--hover-bg);
+}
 
-.choice-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.choice-desc { font-size: 12px; color: var(--text-dim); }
+.choice-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.choice-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+}
 
 .btn-secondary {
-  background: none; border: 1px solid var(--panel-border); border-radius: 5px;
-  color: var(--text-dim); font: inherit; font-size: 12px; padding: 6px 14px; cursor: pointer;
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
 }
-.btn-secondary:hover { background: var(--hover-bg); color: var(--text); }
+.btn-secondary:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
 </style>

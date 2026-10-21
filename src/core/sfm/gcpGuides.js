@@ -43,10 +43,13 @@ function transpose3(M) {
 }
 
 function mul3(A, B) {
-  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  const C = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
   for (let i = 0; i < 3; i++)
-    for (let j = 0; j < 3; j++)
-      C[i][j] = A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]
+    for (let j = 0; j < 3; j++) C[i][j] = A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]
   return C
 }
 
@@ -122,8 +125,14 @@ export function clipLineToRect(line, w, h) {
     if (pts.some((p) => Math.abs(p.x - x) < 1e-6 && Math.abs(p.y - y) < 1e-6)) return
     pts.push({ x, y })
   }
-  if (Math.abs(b) > eps) { push(0, -c / b); push(w, -(a * w + c) / b) }
-  if (Math.abs(a) > eps) { push(-c / a, 0); push(-(b * h + c) / a, h) }
+  if (Math.abs(b) > eps) {
+    push(0, -c / b)
+    push(w, -(a * w + c) / b)
+  }
+  if (Math.abs(a) > eps) {
+    push(-c / a, 0)
+    push(-(b * h + c) / a, h)
+  }
   return pts.length >= 2 ? [pts[0], pts[1]] : null
 }
 
@@ -132,7 +141,8 @@ export function clipLineToRect(line, w, h) {
 // Euclidean camera-centre distance — the parallax proxy used to pick the most
 // informative source view (same rationale as gcpTriangulation's pair choice).
 function baseline(camA, camB) {
-  const Ca = cameraCenter(camA), Cb = cameraCenter(camB)
+  const Ca = cameraCenter(camA),
+    Cb = cameraCenter(camB)
   return Math.hypot(Ca[0] - Cb[0], Ca[1] - Cb[1], Ca[2] - Cb[2])
 }
 
@@ -152,7 +162,7 @@ function baseline(camA, camB) {
 export async function gcpGuideForImage(observations, targetImageId, targetCam, camerasByImageId) {
   if (!targetCam) return null
   const views = (observations || []).filter(
-    (o) => o.imageId !== targetImageId && o.px != null && o.py != null && camerasByImageId.get(o.imageId)
+    (o) => o.imageId !== targetImageId && o.px != null && o.py != null && camerasByImageId.get(o.imageId),
   )
   if (!views.length) return null
 
@@ -169,8 +179,11 @@ export async function gcpGuideForImage(observations, targetImageId, targetCam, c
       const p = projectWithDepth(targetCam, tri.x, tri.y, tri.z)
       if (p) {
         return {
-          kind: 'point', u: p.u, v: p.v,
-          viewCount: views.length, rejectedCount: tri.rejectedImageIds.length,
+          kind: 'point',
+          u: p.u,
+          v: p.v,
+          viewCount: views.length,
+          rejectedCount: tri.rejectedImageIds.length,
         }
       }
     }
@@ -180,10 +193,14 @@ export async function gcpGuideForImage(observations, targetImageId, targetCam, c
 
   // 1 view — or a triangulation we couldn't use — → epipolar line. Pick the
   // widest-baseline source: the most stable line, and the least foreshortened.
-  let src = null, best = -1
+  let src = null,
+    best = -1
   for (const v of views) {
     const d = baseline(camerasByImageId.get(v.imageId), targetCam)
-    if (d > best) { best = d; src = v }
+    if (d > best) {
+      best = d
+      src = v
+    }
   }
   const F = fundamentalFromCams(camerasByImageId.get(src.imageId), targetCam)
   const line = epipolarLine(F, src.px, src.py)
@@ -208,9 +225,7 @@ export async function gcpGuideForImage(observations, targetImageId, targetCam, c
 // triangulation, or an estimate behind the target camera).
 export async function gcpEstimateForImage(observations, targetCam, camerasByImageId) {
   if (!targetCam) return null
-  const views = (observations || []).filter(
-    (o) => o.px != null && o.py != null && camerasByImageId.get(o.imageId)
-  )
+  const views = (observations || []).filter((o) => o.px != null && o.py != null && camerasByImageId.get(o.imageId))
   if (views.length < 2) return null
   // Robust, to match the guide: a mark the guide would reject must not appear to
   // move the estimate just because this call weighted it differently.

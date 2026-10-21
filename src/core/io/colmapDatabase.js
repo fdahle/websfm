@@ -9,34 +9,56 @@ export const COLMAP_MAX_IMAGE_ID = 2147483647
 // Current COLMAP camera model ids (sensor/models.h). `names` is the parameter
 // order in the database's float64 blob.
 export const COLMAP_CAMERA_MODELS = {
-  0:  { model: 'SIMPLE_PINHOLE', names: ['f', 'cx', 'cy'] },
-  1:  { model: 'PINHOLE', names: ['fx', 'fy', 'cx', 'cy'] },
-  2:  { model: 'SIMPLE_RADIAL', names: ['f', 'cx', 'cy', 'k1'] },
-  3:  { model: 'RADIAL', names: ['f', 'cx', 'cy', 'k1', 'k2'] },
-  4:  { model: 'OPENCV', names: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2'] },
-  5:  { model: 'OPENCV_FISHEYE', names: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'k3', 'k4'] },
-  6:  { model: 'FULL_OPENCV', names: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2', 'k3', 'k4', 'k5', 'k6'] },
-  7:  { model: 'FOV', names: ['fx', 'fy', 'cx', 'cy', 'omega'] },
-  8:  { model: 'SIMPLE_RADIAL_FISHEYE', names: ['f', 'cx', 'cy', 'k1'] },
-  9:  { model: 'RADIAL_FISHEYE', names: ['f', 'cx', 'cy', 'k1', 'k2'] },
-  10: { model: 'THIN_PRISM_FISHEYE', names: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2', 'k3', 'k4', 'sx1', 'sy1'] },
-  11: { model: 'RAD_TAN_THIN_PRISM_FISHEYE', names: ['fx', 'fy', 'cx', 'cy', 'k0', 'k1', 'k2', 'k3', 'p0', 'p1', 'sx0', 'sy0'] },
+  0: { model: 'SIMPLE_PINHOLE', names: ['f', 'cx', 'cy'] },
+  1: { model: 'PINHOLE', names: ['fx', 'fy', 'cx', 'cy'] },
+  2: { model: 'SIMPLE_RADIAL', names: ['f', 'cx', 'cy', 'k1'] },
+  3: { model: 'RADIAL', names: ['f', 'cx', 'cy', 'k1', 'k2'] },
+  4: { model: 'OPENCV', names: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2'] },
+  5: { model: 'OPENCV_FISHEYE', names: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'k3', 'k4'] },
+  6: { model: 'FULL_OPENCV', names: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2', 'k3', 'k4', 'k5', 'k6'] },
+  7: { model: 'FOV', names: ['fx', 'fy', 'cx', 'cy', 'omega'] },
+  8: { model: 'SIMPLE_RADIAL_FISHEYE', names: ['f', 'cx', 'cy', 'k1'] },
+  9: { model: 'RADIAL_FISHEYE', names: ['f', 'cx', 'cy', 'k1', 'k2'] },
+  10: {
+    model: 'THIN_PRISM_FISHEYE',
+    names: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2', 'k3', 'k4', 'sx1', 'sy1'],
+  },
+  11: {
+    model: 'RAD_TAN_THIN_PRISM_FISHEYE',
+    names: ['fx', 'fy', 'cx', 'cy', 'k0', 'k1', 'k2', 'k3', 'p0', 'p1', 'sx0', 'sy0'],
+  },
 }
 
 export function imageIdsToPairId(imageId1, imageId2) {
-  const a = Number(imageId1), b = Number(imageId2)
-  if (!Number.isInteger(a) || !Number.isInteger(b) || a <= 0 || b <= 0 || a >= COLMAP_MAX_IMAGE_ID || b >= COLMAP_MAX_IMAGE_ID || a === b)
+  const a = Number(imageId1),
+    b = Number(imageId2)
+  if (
+    !Number.isInteger(a) ||
+    !Number.isInteger(b) ||
+    a <= 0 ||
+    b <= 0 ||
+    a >= COLMAP_MAX_IMAGE_ID ||
+    b >= COLMAP_MAX_IMAGE_ID ||
+    a === b
+  )
     throw new Error('COLMAP pair ids require two distinct positive 31-bit image ids')
-  const lo = Math.min(a, b), hi = Math.max(a, b)
+  const lo = Math.min(a, b),
+    hi = Math.max(a, b)
   const pair = BigInt(COLMAP_MAX_IMAGE_ID) * BigInt(lo) + BigInt(hi)
   return pair <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(pair) : pair
 }
 
 export function pairIdToImageIds(pairId) {
   let pair
-  try { pair = typeof pairId === 'bigint' ? pairId : BigInt(pairId) } catch { throw new Error('Invalid COLMAP pair_id') }
+  try {
+    pair = typeof pairId === 'bigint' ? pairId : BigInt(pairId)
+  } catch {
+    throw new Error('Invalid COLMAP pair_id')
+  }
   if (pair <= 0n) throw new Error('Invalid COLMAP pair_id')
-  const max = BigInt(COLMAP_MAX_IMAGE_ID), imageId2 = pair % max, imageId1 = (pair - imageId2) / max
+  const max = BigInt(COLMAP_MAX_IMAGE_ID),
+    imageId2 = pair % max,
+    imageId1 = (pair - imageId2) / max
   if (imageId1 <= 0n || imageId2 <= 0n || imageId1 >= imageId2 || imageId2 >= max)
     throw new Error('Invalid COLMAP pair_id')
   return [Number(imageId1), Number(imageId2)]
@@ -60,15 +82,31 @@ function typedBlob(blob, Type, count, label) {
 
 export function decodeColmapCamera(row) {
   const spec = COLMAP_CAMERA_MODELS[Number(row.model)]
-  if (!spec) return { cameraId: Number(row.camera_id), modelId: Number(row.model), model: `UNKNOWN_${row.model}`, width: Number(row.width), height: Number(row.height), params: [], named: {}, supported: false, losses: ['unsupported camera model'] }
+  if (!spec)
+    return {
+      cameraId: Number(row.camera_id),
+      modelId: Number(row.model),
+      model: `UNKNOWN_${row.model}`,
+      width: Number(row.width),
+      height: Number(row.height),
+      params: [],
+      named: {},
+      supported: false,
+      losses: ['unsupported camera model'],
+    }
   const params = [...typedBlob(row.params, Float64Array, spec.names.length, `camera ${row.camera_id} params`)]
   const named = Object.fromEntries(spec.names.map((name, i) => [name, params[i]]))
   // Every model with a websfm lens model (distortion.js DISTORTION_MODELS `colmap`)
   // maps losslessly; the rest (FOV, the thin-prism fisheyes) are reported by name.
   const supported = parseDistortionModelName(spec.model) != null
   return {
-    cameraId: Number(row.camera_id), modelId: Number(row.model), model: spec.model,
-    width: Number(row.width), height: Number(row.height), params, named,
+    cameraId: Number(row.camera_id),
+    modelId: Number(row.model),
+    model: spec.model,
+    width: Number(row.width),
+    height: Number(row.height),
+    params,
+    named,
     supported,
     losses: supported ? [] : [`${spec.model} lens model is not supported`],
   }
@@ -79,31 +117,42 @@ export function cameraToWebsfmSensor(camera) {
   const p = camera.named
   const distortionModel = parseDistortionModelName(camera.model)
   const live = new Set(coeffsForModel(distortionModel))
-  const coeff = (k) => (live.has(k) ? p[k] ?? null : null)
+  const coeff = (k) => (live.has(k) ? (p[k] ?? null) : null)
   return {
     externalId: camera.cameraId,
     label: `COLMAP Camera ${camera.cameraId}`,
-    width: camera.width, height: camera.height,
-    focal: p.fx ?? p.f ?? null, focalUnit: 'px',
-    fx: p.fx ?? p.f ?? null, fy: p.fy ?? p.f ?? null,
-    cx: p.cx ?? null, cy: p.cy ?? null,
-    k1: coeff('k1'), k2: coeff('k2'), k3: coeff('k3'),
-    k4: coeff('k4'), k5: coeff('k5'), k6: coeff('k6'),
-    p1: coeff('p1'), p2: coeff('p2'),
+    width: camera.width,
+    height: camera.height,
+    focal: p.fx ?? p.f ?? null,
+    focalUnit: 'px',
+    fx: p.fx ?? p.f ?? null,
+    fy: p.fy ?? p.f ?? null,
+    cx: p.cx ?? null,
+    cy: p.cy ?? null,
+    k1: coeff('k1'),
+    k2: coeff('k2'),
+    k3: coeff('k3'),
+    k4: coeff('k4'),
+    k5: coeff('k5'),
+    k6: coeff('k6'),
+    p1: coeff('p1'),
+    p2: coeff('p2'),
     distortionModel,
     source: 'colmap',
   }
 }
 
 export function decodeColmapKeypoints(row) {
-  const rows = Number(row.rows), cols = Number(row.cols)
+  const rows = Number(row.rows),
+    cols = Number(row.cols)
   if (![2, 4, 6].includes(cols)) throw new Error(`image ${row.image_id} keypoints: unsupported ${cols}-column layout`)
   const values = typedBlob(row.data, Float32Array, rows * cols, `image ${row.image_id} keypoints`)
   const keypoints = new Array(rows)
   for (let i = 0; i < rows; i++) {
     const o = i * cols
     keypoints[i] = {
-      x: values[o], y: values[o + 1],
+      x: values[o],
+      y: values[o + 1],
       scale: cols === 4 ? values[o + 2] : 1,
       orientation: cols === 4 ? values[o + 3] : null,
       affine: cols === 6 ? [values[o + 2], values[o + 3], values[o + 4], values[o + 5]] : null,
@@ -114,7 +163,8 @@ export function decodeColmapKeypoints(row) {
 }
 
 export function decodeColmapDescriptors(row) {
-  const rows = Number(row.rows), bytesPerRow = Number(row.cols)
+  const rows = Number(row.rows),
+    bytesPerRow = Number(row.cols)
   const bytes = bytesOf(row.data)
   if (bytes.byteLength !== rows * bytesPerRow) throw new Error(`image ${row.image_id} descriptors: invalid blob length`)
   if (bytesPerRow === 128) {
@@ -132,7 +182,8 @@ export function decodeColmapDescriptors(row) {
 }
 
 export function decodeColmapMatches(row) {
-  const rows = Number(row.rows), cols = Number(row.cols)
+  const rows = Number(row.rows),
+    cols = Number(row.cols)
   if (cols !== 2) throw new Error(`pair ${row.pair_id}: matches must have two columns`)
   const raw = typedBlob(row.data, Uint32Array, rows * 2, `pair ${row.pair_id} matches`)
   const matches = new Array(rows)
@@ -143,18 +194,31 @@ export function decodeColmapMatches(row) {
 export function decodeColmapMatrix(blob, label = 'matrix') {
   if (blob == null) return null
   const a = typedBlob(blob, Float64Array, 9, label)
-  return [[a[0], a[1], a[2]], [a[3], a[4], a[5]], [a[6], a[7], a[8]]]
+  return [
+    [a[0], a[1], a[2]],
+    [a[3], a[4], a[5]],
+    [a[6], a[7], a[8]],
+  ]
 }
 
 export function buildColmapDatabaseManifest(summary, sourceName = 'database.db') {
   const warnings = []
   if (summary.unsupportedCameras) warnings.push(`${pluralize(summary.unsupportedCameras, 'unsupported camera model')}`)
-  if (summary.rigs || summary.frames) warnings.push('Camera rigs/frames are inspected but websfm does not yet preserve rig constraints')
+  if (summary.rigs || summary.frames)
+    warnings.push('Camera rigs/frames are inspected but websfm does not yet preserve rig constraints')
   return {
-    format: 'colmap-database', version: summary.userVersion || null, sourceName,
-    images: summary.images || [], cameras: summary.cameras || [],
-    features: summary.features || [], pairs: summary.pairs || [], models: [],
-    rigs: summary.rigs || 0, frames: summary.frames || 0, posePriors: summary.posePriors || 0,
-    warnings, estimatedBytes: summary.bytes || 0,
+    format: 'colmap-database',
+    version: summary.userVersion || null,
+    sourceName,
+    images: summary.images || [],
+    cameras: summary.cameras || [],
+    features: summary.features || [],
+    pairs: summary.pairs || [],
+    models: [],
+    rigs: summary.rigs || 0,
+    frames: summary.frames || 0,
+    posePriors: summary.posePriors || 0,
+    warnings,
+    estimatedBytes: summary.bytes || 0,
   }
 }

@@ -19,14 +19,22 @@ beforeAll(async () => {
 })
 
 function cloud(n) {
-  const pos = new Float64Array(3 * n), col = new Uint8Array(3 * n)
+  const pos = new Float64Array(3 * n),
+    col = new Uint8Array(3 * n)
   const attributes = {
-    intensity: new Uint16Array(n), classification: new Uint8Array(n),
-    distance: new Float32Array(n), segment: new Int32Array(n), height: new Float64Array(n),
+    intensity: new Uint16Array(n),
+    classification: new Uint8Array(n),
+    distance: new Float32Array(n),
+    segment: new Int32Array(n),
+    height: new Float64Array(n),
   }
   for (let i = 0; i < n; i++) {
-    pos[3 * i] = 650000 + (i % 500) * 0.05; pos[3 * i + 1] = 5100000 + Math.floor(i / 500) * 0.05; pos[3 * i + 2] = 300 + Math.sin(i * 0.01)
-    col[3 * i] = i & 255; col[3 * i + 1] = 40; col[3 * i + 2] = (i * 7) & 255
+    pos[3 * i] = 650000 + (i % 500) * 0.05
+    pos[3 * i + 1] = 5100000 + Math.floor(i / 500) * 0.05
+    pos[3 * i + 2] = 300 + Math.sin(i * 0.01)
+    col[3 * i] = i & 255
+    col[3 * i + 1] = 40
+    col[3 * i + 2] = (i * 7) & 255
     attributes.intensity[i] = i & 0xffff
     attributes.classification[i] = i % 45 // > 31 ⇒ an extra-bytes field
     attributes.distance[i] = i % 97 === 0 ? NaN : Math.cos(i * 0.003) * 2.5
@@ -42,10 +50,13 @@ describe('LAZ with extra bytes, real codec', () => {
   it('writes the LAS records exactly and reads every attribute back', () => {
     const c = cloud(130_001) // three LASzip chunks
     const logs = []
-    const laz = joinParts(cloudToLaz(c, { createCompressor: codec.createCompressor, parts: true, onLog: (m, l) => logs.push([m, l]) }))
+    const laz = joinParts(
+      cloudToLaz(c, { createCompressor: codec.createCompressor, parts: true, onLog: (m, l) => logs.push([m, l]) }),
+    )
     expect(logs.some(([, l]) => l === 'warn')).toBe(false)
     const las = joinParts(cloudToLasParts(c))
-    const hz = readLasHeader(laz), hs = readLasHeader(las)
+    const hz = readLasHeader(laz),
+      hs = readLasHeader(las)
     expect(hz.recordLength).toBe(hs.recordLength)
     expect(hz.recordLength).toBe(26 + 1 + 4 + 4 + 8)
     expect(hz.extraBytes).toEqual(hs.extraBytes)
@@ -62,13 +73,20 @@ describe('LAZ with extra bytes, real codec', () => {
     const c = cloud(70_000)
     const laz = joinParts(cloudToLaz(c, { createCompressor: codec.createCompressor, parts: true }))
     const las = joinParts(cloudToLasParts(c))
-    const source = (bytes) => ({ size: bytes.length, async read(a, b) { return bytes.slice(a, b) } })
+    const source = (bytes) => ({
+      size: bytes.length,
+      async read(a, b) {
+        return bytes.slice(a, b)
+      },
+    })
     const read = async (stream) => {
       const out = []
       for await (const b of stream.batches()) out.push(b)
       return out
     }
-    const a = await read(await openLasStream(source(laz), { createLazDecoder: codec.createDecoder, batchPoints: 30_000 }))
+    const a = await read(
+      await openLasStream(source(laz), { createLazDecoder: codec.createDecoder, batchPoints: 30_000 }),
+    )
     const b = await read(await openLasStream(source(las), { batchPoints: 30_000 }))
     const cat = (bs, f) => bs.flatMap((x) => [...f(x)])
     expect(cat(a, (x) => x.pos)).toEqual(cat(b, (x) => x.pos))

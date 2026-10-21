@@ -11,29 +11,50 @@ import { SparsePoints } from '../sfm/sparsePoints.js'
 // a camera and a point without viewsPx — every branch the reference functions skip.
 function rng(seed) {
   let s = seed >>> 0
-  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0
+    return s / 2 ** 32
+  }
 }
 function model() {
   const rand = rng(7)
   const cameras = new Map()
   for (let c = 0; c < 6; c++) {
     cameras.set(`cam${c}`, {
-      R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
       t: [-c * 0.5, 0.2 * c, 5],
       K: { fx: 800, fy: 800, cx: 320, cy: 240 },
     })
   }
-  cameras.set('lonely', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 5], K: { fx: 800, fy: 800, cx: 320, cy: 240 } })
+  cameras.set('lonely', {
+    R: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    t: [0, 0, 5],
+    K: { fx: 800, fy: 800, cx: 320, cy: 240 },
+  })
   const points = []
   for (let i = 0; i < 400; i++) {
-    const x = rand() * 4 - 2, y = rand() * 3 - 1.5, z = rand() * 2 - 1
-    const views = new Map(), viewsPx = new Map()
+    const x = rand() * 4 - 2,
+      y = rand() * 3 - 1.5,
+      z = rand() * 2 - 1
+    const views = new Map(),
+      viewsPx = new Map()
     for (let c = 0; c < 6; c++) {
       if (rand() < 0.4) continue
       views.set(`cam${c}`, i)
       viewsPx.set(`cam${c}`, [320 + rand() * 200, 240 + rand() * 200])
     }
-    if (i % 50 === 0) { views.set('not-loaded', 0); viewsPx.set('not-loaded', [1, 2]) }
+    if (i % 50 === 0) {
+      views.set('not-loaded', 0)
+      viewsPx.set('not-loaded', [1, 2])
+    }
     points.push({ x, y, z: i === 3 ? -50 : z, views, viewsPx: i === 5 ? undefined : viewsPx })
   }
   return { cameras, points: SparsePoints.fromRecords(points) }
@@ -46,11 +67,30 @@ describe('sparseResidualStats', () => {
     expect(reproj.n).toBeGreaterThan(500) // not vacuous
     expect(reproj).toEqual(reprojectionStats(cameras, points))
     expect(perImage).toEqual(perImageResiduals(cameras, points))
-    expect(perImage.find((r) => r.uuid === 'lonely')).toEqual({ uuid: 'lonely', nObs: 0, rmsPx: null, medianPx: null, maxPx: null })
+    expect(perImage.find((r) => r.uuid === 'lonely')).toEqual({
+      uuid: 'lonely',
+      nObs: 0,
+      rmsPx: null,
+      medianPx: null,
+      maxPx: null,
+    })
   })
 
   it('handles an empty model', () => {
-    const cameras = new Map([['a', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: { fx: 1, fy: 1, cx: 0, cy: 0 } }]])
+    const cameras = new Map([
+      [
+        'a',
+        {
+          R: [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+          ],
+          t: [0, 0, 0],
+          K: { fx: 1, fy: 1, cx: 0, cy: 0 },
+        },
+      ],
+    ])
     const empty = SparsePoints.empty()
     expect(sparseResidualStats(cameras, empty)).toEqual({
       reproj: reprojectionStats(cameras, empty),
@@ -62,7 +102,10 @@ describe('sparseResidualStats', () => {
 describe('sparseCoverage', () => {
   it('equals coverageGrid over the points and camera centres', () => {
     const { cameras, points } = model()
-    const cams = [...cameras.values()].map(cameraCenter).filter(Boolean).map((c) => ({ x: c[0], y: c[1] }))
+    const cams = [...cameras.values()]
+      .map(cameraCenter)
+      .filter(Boolean)
+      .map((c) => ({ x: c[0], y: c[1] }))
     expect(sparseCoverage(cameras, points)).toEqual(coverageGrid(points, cams, { targetCells: 64 }))
   })
 })

@@ -1,6 +1,11 @@
 import { it, expect, describe } from 'vitest'
 import {
-  LEARNED_DETECTORS, DETECTOR_IDS, learnedDetector, isLearnedDetector, detectorLabel, lightGlueModelFor,
+  LEARNED_DETECTORS,
+  DETECTOR_IDS,
+  learnedDetector,
+  isLearnedDetector,
+  detectorLabel,
+  lightGlueModelFor,
 } from './learnedDetectors.js'
 import { MODELS } from '../models/registry.js'
 import { DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR } from '../defaults.user.js'
@@ -33,23 +38,32 @@ describe('learned detector registry', () => {
 describe('lightGlueModelFor', () => {
   const im = (name, detector, descDim) => ({ name, detector, descDim })
 
-  it('picks the LightGlue trained for the images\' detector', () => {
-    expect(lightGlueModelFor([im('a', 'superpoint', 256), im('b', 'superpoint', 256)]))
-      .toMatchObject({ ok: true, modelId: 'lightglue' })
-    expect(lightGlueModelFor([im('a', 'disk', 128), im('b', 'disk', 128)]))
-      .toMatchObject({ ok: true, modelId: 'lightglue_disk' })
-    expect(lightGlueModelFor([im('a', 'aliked', 128), im('b', 'aliked', 128)]))
-      .toMatchObject({ ok: true, detector: 'aliked', modelId: 'lightglue_aliked' })
+  it("picks the LightGlue trained for the images' detector", () => {
+    expect(lightGlueModelFor([im('a', 'superpoint', 256), im('b', 'superpoint', 256)])).toMatchObject({
+      ok: true,
+      modelId: 'lightglue',
+    })
+    expect(lightGlueModelFor([im('a', 'disk', 128), im('b', 'disk', 128)])).toMatchObject({
+      ok: true,
+      modelId: 'lightglue_disk',
+    })
+    expect(lightGlueModelFor([im('a', 'aliked', 128), im('b', 'aliked', 128)])).toMatchObject({
+      ok: true,
+      detector: 'aliked',
+      modelId: 'lightglue_aliked',
+    })
   })
 
-  it('never matches two 128-d learned detectors with each other\'s LightGlue', () => {
+  it("never matches two 128-d learned detectors with each other's LightGlue", () => {
     const r = lightGlueModelFor([im('a', 'aliked', 128), im('b', 'aliked', 128), im('c', 'disk', 128)])
     expect(r.ok).toBe(false)
     expect(r.bad.map((x) => x.name)).toEqual(['c'])
   })
 
   it('names every learned detector when none was used', () => {
-    expect(lightGlueModelFor([im('a', 'sift', 128)]).reason).toBe('LightGlue needs a learned detector (SuperPoint, DISK or ALIKED)')
+    expect(lightGlueModelFor([im('a', 'sift', 128)]).reason).toBe(
+      'LightGlue needs a learned detector (SuperPoint, DISK or ALIKED)',
+    )
   })
 
   it('refuses SIFT, and names the odd ones out of a mix', () => {

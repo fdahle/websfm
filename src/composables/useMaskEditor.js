@@ -40,7 +40,9 @@ import { useSmartSelect } from './useSmartSelect.js'
 // never is.
 const UNDO_MAX = 10
 
-function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)) }
+function clamp(v, lo, hi) {
+  return Math.min(hi, Math.max(lo, v))
+}
 
 export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, isVisible, largeScan = () => false }) {
   const { scale, tx, ty, frame, editable } = viewport
@@ -52,17 +54,23 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   // per-tab persistence comes free from v-show-kept instances).
   // 'brush' | 'erase' | 'rect' | 'smart' | null (pan while editing). A tab opened
   // while mask edit is already on starts armed, as entering the mode does.
-  const tool        = ref(maskEdit() ? 'brush' : null)
-  const brushRadius = ref(20)     // screen pixels — constant on screen, ÷scale in image space
-  const maskOpacity = ref(0.45)   // red-overlay alpha while editing/viewing
+  const tool = ref(maskEdit() ? 'brush' : null)
+  const brushRadius = ref(20) // screen pixels — constant on screen, ÷scale in image space
+  const maskOpacity = ref(0.45) // red-overlay alpha while editing/viewing
 
   // Smart Select (SAM2 click-to-segment). The image is encoded once when the tool
   // is activated; each click decodes a *fresh* candidate segment (clicks are
   // independent — a plain click resets to one positive point at that spot), which
   // is previewed (cyan) until the user commits it into the red mask or discards it.
   const {
-    smartStatus, smartHasPreview, smartPreviewCanvas,
-    ensureEncoded, smartClick, buildCommitCanvas, discardSmart, resetSmart,
+    smartStatus,
+    smartHasPreview,
+    smartPreviewCanvas,
+    ensureEncoded,
+    smartClick,
+    buildCommitCanvas,
+    discardSmart,
+    resetSmart,
   } = useSmartSelect({ image, nativeSize: () => frame.value, drawOverlay })
 
   // Undo/redo as stacks of persisted mask Blobs (null = no mask). Snapshots are
@@ -77,7 +85,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   let strokeHit = false // did the in-flight brush/erase stroke touch the image?
 
   let maskOffscreen = null // OffscreenCanvas at native image resolution (reduced for a large scan)
-  let maskReduced = false  // maskOffscreen is a large scan's reduced, view/whole-mask-only canvas
+  let maskReduced = false // maskOffscreen is a large scan's reduced, view/whole-mask-only canvas
   const maskRev = createRevision()
   let canvasSource = null
 
@@ -93,7 +101,10 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     canvasSource = null
     const f = frame.value
     maskReduced = !!f && f.preview && f.exact && largeScan()
-    if (!f || (f.preview && !maskReduced)) { maskOffscreen = null; return }
+    if (!f || (f.preview && !maskReduced)) {
+      maskOffscreen = null
+      return
+    }
     const s = maskReduced ? maskStorageSize(f.width, f.height) : { w: f.width, h: f.height }
     maskOffscreen = new OffscreenCanvas(s.w, s.h)
     if (image().mask?.blob) loadMaskBlob(image().mask.blob)
@@ -119,7 +130,10 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     canvasSource = blob
     try {
       const bmp = await createImageBitmap(blob)
-      if (!maskRev.isCurrent(rev) || !maskOffscreen) { bmp.close?.(); return false }
+      if (!maskRev.isCurrent(rev) || !maskOffscreen) {
+        bmp.close?.()
+        return false
+      }
       const ctx = maskOffscreen.getContext('2d')
       ctx.clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
       ctx.drawImage(bmp, 0, 0, maskOffscreen.width, maskOffscreen.height)
@@ -151,10 +165,10 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     if (!maskOffscreen || !editable.value) return false // native canvas only (not a large scan's)
     const imgX = (sx - tx.value) / scale.value
     const imgY = (sy - ty.value) / scale.value
-    const r    = brushRadius.value / scale.value
+    const r = brushRadius.value / scale.value
     if (!circleIntersectsImage(imgX, imgY, r)) return false
     markMaskEdited()
-    const ctx  = maskOffscreen.getContext('2d')
+    const ctx = maskOffscreen.getContext('2d')
 
     if (tool.value === 'brush') {
       ctx.globalCompositeOperation = 'source-over'
@@ -180,8 +194,8 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     if (!maskOffscreen || !hasMask.value) return null
     const f = frame.value
     if (maskReduced && f) {
-      px = Math.min(maskOffscreen.width - 1, Math.floor(px * maskOffscreen.width / f.width))
-      py = Math.min(maskOffscreen.height - 1, Math.floor(py * maskOffscreen.height / f.height))
+      px = Math.min(maskOffscreen.width - 1, Math.floor((px * maskOffscreen.width) / f.width))
+      py = Math.min(maskOffscreen.height - 1, Math.floor((py * maskOffscreen.height) / f.height))
     }
     return maskOffscreen.getContext('2d').getImageData(px, py, 1, 1).data[3] > 127
   }
@@ -211,8 +225,10 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   // live) and we mark it dirty; the single flush happens when editing closes
   // (flushMask). Outside edit mode (ribbon/sidebar clear/import) we persist at once.
   function persistMask(blob) {
-    if (maskEdit()) { maskDirty = true; emit('update-mask', blob, false) }
-    else emit('update-mask', blob, true)
+    if (maskEdit()) {
+      maskDirty = true
+      emit('update-mask', blob, false)
+    } else emit('update-mask', blob, true)
   }
 
   // Persist the current in-memory mask once (on closing edit / unmount) if any
@@ -258,7 +274,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   function maskCanvasEmpty() {
     if (!maskOffscreen) return true
     const ctx = maskOffscreen.getContext('2d')
-    const id  = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
+    const id = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
     return !anyExcluded(id.data)
   }
 
@@ -310,17 +326,31 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     if (pix) rectDrag = { x0: pix.px, y0: pix.py, x1: pix.px, y1: pix.py, erase }
   }
   function updateRect(pix, erase) {
-    if (pix) { rectDrag.x1 = pix.px; rectDrag.y1 = pix.py; rectDrag.erase = erase }
+    if (pix) {
+      rectDrag.x1 = pix.px
+      rectDrag.y1 = pix.py
+      rectDrag.erase = erase
+    }
   }
-  function cancelRect() { rectDrag = null }
+  function cancelRect() {
+    rectDrag = null
+  }
 
   async function commitRect() {
-    if (!rectDrag || !maskOffscreen || !editable.value) { rectDrag = null; return }
+    if (!rectDrag || !maskOffscreen || !editable.value) {
+      rectDrag = null
+      return
+    }
     const { x0, y0, x1, y1, erase } = rectDrag
     rectDrag = null
-    const x = Math.min(x0, x1), y = Math.min(y0, y1)
-    const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0)
-    if (w < 1 || h < 1) { drawOverlay(); return }
+    const x = Math.min(x0, x1),
+      y = Math.min(y0, y1)
+    const w = Math.abs(x1 - x0),
+      h = Math.abs(y1 - y0)
+    if (w < 1 || h < 1) {
+      drawOverlay()
+      return
+    }
     snapshotForUndo()
     markMaskEdited()
     const ctx = maskOffscreen.getContext('2d')
@@ -343,14 +373,17 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     if (!maskOffscreen || !wholeMaskOk()) return
     markMaskEdited()
     const ctx = maskOffscreen.getContext('2d')
-    const id  = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
+    const id = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
     const excluded = invertMaskPixels(id.data)
     ctx.putImageData(id, 0, 0)
     snapshotForUndo()
     hasMask.value = excluded > 0
     drawOverlay()
     if (excluded > 0) await exportMask()
-    else { canvasSource = null; persistMask(null) }
+    else {
+      canvasSource = null
+      persistMask(null)
+    }
   }
 
   // Clear is undoable (snapshot first) — no confirm dialog needed anymore.
@@ -423,15 +456,31 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     const k = e.key.toLowerCase()
     // A large scan's reduced canvas: no painting tools, only the whole-mask keys.
     if (!editable.value && !(k === 'i' || ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')))) return
-    if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redoMask() : undoMask(); return }
-    if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redoMask(); return }
+    if ((e.ctrlKey || e.metaKey) && k === 'z') {
+      e.preventDefault()
+      e.shiftKey ? redoMask() : undoMask()
+      return
+    }
+    if ((e.ctrlKey || e.metaKey) && k === 'y') {
+      e.preventDefault()
+      redoMask()
+      return
+    }
     // Smart Select: Enter commits the previewed segment, Del/Backspace discards it.
     if (tool.value === 'smart') {
-      if (e.key === 'Enter') { e.preventDefault(); if (smartHasPreview.value) commitSmart(); return }
-      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); discardSmart(); return }
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        if (smartHasPreview.value) commitSmart()
+        return
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        discardSmart()
+        return
+      }
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return
-    if      (k === 'b') tool.value = 'brush'
+    if (k === 'b') tool.value = 'brush'
     else if (k === 'e') tool.value = 'erase'
     else if (k === 'r') tool.value = 'rect'
     else if (k === 's') tool.value = 'smart'
@@ -459,49 +508,86 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   // and clears any Smart Select candidate.
   watch(maskEdit, (on) => {
     tool.value = on ? 'brush' : null
-    if (!on) { rectDrag = null; discardSmart(); flushMask() } // persist the session's edits once
+    if (!on) {
+      rectDrag = null
+      discardSmart()
+      flushMask()
+    } // persist the session's edits once
     drawOverlay()
   })
   watch(tool, (t, prev) => {
     rectDrag = null
-    if (t === 'smart' && editable.value) ensureEncoded() // encode this image (once) so clicks are ready
+    if (t === 'smart' && editable.value)
+      ensureEncoded() // encode this image (once) so clicks are ready
     else if (prev === 'smart') discardSmart() // dropped Smart Select — clear its preview
     drawOverlay()
   })
 
   // Switching the viewed image invalidates the SAM2 embedding — reset + free the
   // old one, and re-encode if Smart Select is the active tool.
-  watch(() => image()?.uuid, (uuid, prev) => {
-    resetSmart(prev)
-    if (maskEdit() && tool.value === 'smart' && editable.value) ensureEncoded()
-  })
+  watch(
+    () => image()?.uuid,
+    (uuid, prev) => {
+      resetSmart(prev)
+      if (maskEdit() && tool.value === 'smart' && editable.value) ensureEncoded()
+    },
+  )
 
   // Sync mask canvas when parent clears or replaces the mask externally
   // (and skip the echo of the canvas's own export/undo — it already shows that).
-  watch(() => image().mask, (mask, prev) => {
-    if (mask === prev) return
-    if (mask?.blob && maskOffscreen) {
-      if (mask.blob !== canvasSource) loadMaskBlob(mask.blob)
-    } else if (!mask && maskOffscreen) {
-      if (canvasSource === null) { hasMask.value = false; return }
-      markMaskEdited()
-      canvasSource = null
-      maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
-      hasMask.value = false
-      drawOverlay()
-    }
-  })
+  watch(
+    () => image().mask,
+    (mask, prev) => {
+      if (mask === prev) return
+      if (mask?.blob && maskOffscreen) {
+        if (mask.blob !== canvasSource) loadMaskBlob(mask.blob)
+      } else if (!mask && maskOffscreen) {
+        if (canvasSource === null) {
+          hasMask.value = false
+          return
+        }
+        markMaskEdited()
+        canvasSource = null
+        maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
+        hasMask.value = false
+        drawOverlay()
+      }
+    },
+  )
 
   return {
-    maskFileInput, hasMask, tool, brushRadius, maskOpacity, canUndo, canRedo,
-    smartStatus, smartHasPreview, smartPreviewCanvas, smartClick, discardSmart,
+    maskFileInput,
+    hasMask,
+    tool,
+    brushRadius,
+    maskOpacity,
+    canUndo,
+    canRedo,
+    smartStatus,
+    smartHasPreview,
+    smartPreviewCanvas,
+    smartClick,
+    discardSmart,
     canvas: () => maskOffscreen,
     rect: () => rectDrag,
     isDrawing: () => isDrawing,
-    initMaskCanvas, maskedAt, flushMask,
-    beginStroke, continueStroke, endStroke,
-    beginRect, updateRect, cancelRect, commitRect,
-    undoMask, redoMask, invertMask, clearMask, commitSmart,
-    triggerMaskImport, onMaskFileChange, onKeydown,
+    initMaskCanvas,
+    maskedAt,
+    flushMask,
+    beginStroke,
+    continueStroke,
+    endStroke,
+    beginRect,
+    updateRect,
+    cancelRect,
+    commitRect,
+    undoMask,
+    redoMask,
+    invertMask,
+    clearMask,
+    commitSmart,
+    triggerMaskImport,
+    onMaskFileChange,
+    onKeydown,
   }
 }

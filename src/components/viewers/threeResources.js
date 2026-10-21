@@ -10,14 +10,20 @@
 // program (Three keys programs on onBeforeCompile's source).
 export function srgbVertexColors(shader) {
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', `#include <common>
+    .replace(
+      '#include <common>',
+      `#include <common>
 vec3 websfmSrgbToLinear(vec3 c) {
   return mix(c * 0.0773993808, pow(c * 0.9478672986 + 0.0521327014, vec3(2.4)), step(vec3(0.04045), c));
-}`)
-    .replace('#include <color_vertex>', `#include <color_vertex>
+}`,
+    )
+    .replace(
+      '#include <color_vertex>',
+      `#include <color_vertex>
 #ifdef USE_COLOR
   vColor.rgb = websfmSrgbToLinear(vColor.rgb);
-#endif`)
+#endif`,
+    )
 }
 
 export function disposeMaterial(material, textures = new Set(), materials = new Set()) {
@@ -26,7 +32,8 @@ export function disposeMaterial(material, textures = new Set(), materials = new 
     materials.add(mat)
     for (const value of Object.values(mat)) {
       if (value?.isTexture && !textures.has(value)) {
-        textures.add(value); value.dispose()
+        textures.add(value)
+        value.dispose()
       }
     }
     mat.dispose()
@@ -45,11 +52,17 @@ export function disposeObject(root) {
 // A cloud layer's object plus the material it is not showing right now (a textured
 // mesh swaps between its lit base material and one unlit material per atlas page).
 export function disposeLayer(layer) {
-  if (layer.lod) { layer.dispose(); return }
+  if (layer.lod) {
+    layer.dispose()
+    return
+  }
   disposeObject(layer.object)
-  const textures = new Set(), materials = new Set()
-  if (layer.baseMaterial && layer.baseMaterial !== layer.object.material) disposeMaterial(layer.baseMaterial, textures, materials)
-  if (layer.pageMaterials && layer.pageMaterials !== layer.object.material) disposeMaterial(layer.pageMaterials, textures, materials)
+  const textures = new Set(),
+    materials = new Set()
+  if (layer.baseMaterial && layer.baseMaterial !== layer.object.material)
+    disposeMaterial(layer.baseMaterial, textures, materials)
+  if (layer.pageMaterials && layer.pageMaterials !== layer.object.material)
+    disposeMaterial(layer.pageMaterials, textures, materials)
 }
 
 // Free the GPU buffers of the style-owned attributes (colour, a point cloud's

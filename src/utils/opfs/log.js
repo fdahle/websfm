@@ -14,7 +14,7 @@ export async function appendLog(projectId, entries) {
   return trackPersistence('appendLog:' + String(projectId), async () => {
     if (!entries || entries.length === 0) return
     const dir = await getProjectDir(projectId, true)
-    await writeFileIn(dir, 'log.ndjson', entries.map(e => JSON.stringify(e)).join('\n') + '\n', { append: true })
+    await writeFileIn(dir, 'log.ndjson', entries.map((e) => JSON.stringify(e)).join('\n') + '\n', { append: true })
   })
 }
 
@@ -26,7 +26,11 @@ export async function readLog(projectId) {
     const out = []
     for (const line of text.split('\n')) {
       if (!line) continue
-      try { out.push(JSON.parse(line)) } catch (error) { ignoreMissing(error) }
+      try {
+        out.push(JSON.parse(line))
+      } catch (error) {
+        ignoreMissing(error)
+      }
     }
     return out
   } catch {
@@ -51,7 +55,11 @@ export async function readLogTail(projectId, limit) {
       const out = []
       for (const line of lines) {
         if (!line) continue
-        try { out.push(JSON.parse(line)) } catch (error) { ignoreMissing(error) }
+        try {
+          out.push(JSON.parse(line))
+        } catch (error) {
+          ignoreMissing(error)
+        }
       }
       if (out.length >= limit || start === 0) return out.slice(-limit)
       bytes = Math.min(file.size, bytes * 2)
@@ -66,7 +74,9 @@ export async function truncateLog(projectId) {
     try {
       const dir = await getProjectDir(projectId, true)
       await writeFileIn(dir, 'log.ndjson', null) // no keepExistingData ⇒ truncates
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }
 
@@ -75,6 +85,8 @@ export async function deleteLog(projectId) {
     try {
       const dir = await getProjectDir(projectId)
       await dir.removeEntry('log.ndjson')
-    } catch (error) { ignoreMissing(error) }
+    } catch (error) {
+      ignoreMissing(error)
+    }
   })
 }

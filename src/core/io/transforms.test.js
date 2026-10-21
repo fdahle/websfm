@@ -2,12 +2,16 @@ import { describe, it, expect } from 'vitest'
 import { cameraToWorldGl, buildTransformsJson } from './transforms.js'
 
 // Multiply a 4×4 (nested rows) by a 4-vector.
-const mul4 = (M, v) => M.map((row) => row[0]*v[0] + row[1]*v[1] + row[2]*v[2] + row[3]*v[3])
+const mul4 = (M, v) => M.map((row) => row[0] * v[0] + row[1] * v[1] + row[2] * v[2] + row[3] * v[3])
 
 describe('cameraToWorldGl', () => {
   it('maps the camera centre to the world origin offset (identity R)', () => {
     // Camera at C = (2,3,4): world-to-cam t = −R·C = −C for R = I.
-    const R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    const R = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ]
     const t = [-2, -3, -4]
     const c2w = cameraToWorldGl(R, t)
     // The translation column is the camera centre.
@@ -19,12 +23,16 @@ describe('cameraToWorldGl', () => {
 
   it('c2w_gl · diag(1,−1,−1,1) inverts back to [Rᵀ | C]', () => {
     // A non-trivial rotation (90° about Z), world-to-cam.
-    const R = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    const R = [
+      [0, -1, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+    ]
     const t = [1, 2, 3]
     const C = [
-      -(R[0][0]*t[0] + R[1][0]*t[1] + R[2][0]*t[2]),
-      -(R[0][1]*t[0] + R[1][1]*t[1] + R[2][1]*t[2]),
-      -(R[0][2]*t[0] + R[1][2]*t[1] + R[2][2]*t[2]),
+      -(R[0][0] * t[0] + R[1][0] * t[1] + R[2][0] * t[2]),
+      -(R[0][1] * t[0] + R[1][1] * t[1] + R[2][1] * t[2]),
+      -(R[0][2] * t[0] + R[1][2] * t[1] + R[2][2] * t[2]),
     ]
     const c2w = cameraToWorldGl(R, t)
     // Undo the OpenGL flip: negate columns 1,2 again → OpenCV c2w = [Rᵀ | C].
@@ -40,7 +48,11 @@ describe('cameraToWorldGl', () => {
     // camera at origin → world point (0,0,5). In OpenGL c2w that camera-space
     // point becomes (0,0,−5) after the axis flip; feeding it through c2w must land
     // back at the OpenCV world point (0,0,5).
-    const R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    const R = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ]
     const t = [0, 0, 0]
     const c2w = cameraToWorldGl(R, t)
     const world = mul4(c2w, [0, 0, -5, 1]) // OpenGL cam-space z is negated
@@ -50,7 +62,11 @@ describe('cameraToWorldGl', () => {
 
 describe('buildTransformsJson', () => {
   const K = { fx: 1000, fy: 1000, cx: 320, cy: 240 }
-  const R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const R = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]
 
   it('writes shared intrinsics at the top level when all cameras match', () => {
     const out = buildTransformsJson({

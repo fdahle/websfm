@@ -32,8 +32,11 @@ import { fromBlob } from 'geotiff'
 // memory at ImageData creation", a Blob read's NotReadableError (core/bufferLimit.js), or
 // an image decode that "could not be decoded" under the same pressure (quarry run 2; a
 // truly broken photo then fails its one retry too and falls back as before).
-const isOutOfMemory = (err) => isBufferAllocationFailure(err)
-  || /out of memory|array buffer allocation failed|requested file could not be read|could not be decoded/i.test(err?.message ?? '')
+const isOutOfMemory = (err) =>
+  isBufferAllocationFailure(err) ||
+  /out of memory|array buffer allocation failed|requested file could not be read|could not be decoded/i.test(
+    err?.message ?? '',
+  )
 
 // The ortho's source photos (plan-ortho-mosaic O1). `images` comes from the store, one
 // per depth map: { uuid, name, url, K (the camera's full-resolution K), dist, selfCal,
@@ -49,18 +52,27 @@ function makePhotoLoader(images, rasterize, emit) {
   // instead of falling back, so the caller can make room and try again.
   const load = async (mi, m, mapPxPerCell, { rethrowOutOfMemory = false } = {}) => {
     const im = byUuid.get(m.uuid)
-    if (!im) { load.fellBack++; return null }
+    if (!im) {
+      load.fellBack++
+      return null
+    }
     try {
       // Decode no finer than ~2 photo pixels per ortho cell (bilinear needs no more),
       // never above native: a coarse ortho then pays a fraction of the decode.
-      const s = m.K.fx / im.K.fx   // depth-map pixels per native photo pixel
+      const s = m.K.fx / im.K.fx // depth-map pixels per native photo pixel
       const scale = mapPxPerCell > 0 ? Math.min(1, (2 * s) / mapPxPerCell) : 1
       const nativeMax = Math.max(m.width, m.height) / s
       const r = await rasterize(im.url, scale < 1 ? Math.ceil(nativeMax * scale) : Infinity)
       load.scaleSum += r.scale
       const outScale = [m.K.fx / im.K.fx, m.K.fy / im.K.fy]
-      const base = makeSampleMap({ K: im.K, dist: im.dist, selfCal: im.selfCal, fiducial: im.fiducial,
-        outScale, srcScale: r.scaleXY ?? r.scale })
+      const base = makeSampleMap({
+        K: im.K,
+        dist: im.dist,
+        selfCal: im.selfCal,
+        fiducial: im.fiducial,
+        outScale,
+        srcScale: r.scaleXY ?? r.scale,
+      })
       // A fisheye's depth map sits on a widened canvas (dense undistortRaster): its
       // principal point is shifted by the pad, so shift its pixels back first.
       const ox = im.dist?.fisheye ? m.K.cx - ((im.K.cx + 0.5) * outScale[0] - 0.5) : 0
@@ -69,9 +81,14 @@ function makePhotoLoader(images, rasterize, emit) {
       load.decoded++
       return { data: packRgb(r.data), channels: 3, width: r.width, height: r.height, map }
     } catch (err) {
-      if (rethrowOutOfMemory && isOutOfMemory(err)) throw Object.assign(new Error(err?.message ?? String(err)), { outOfMemory: true })
-      emit('log', [`Ortho: ${im.name ?? m.uuid} — source photo unavailable (${err?.message ?? err}); `
-        + 'using its depth-map colour', 'warn', 'Products'])
+      if (rethrowOutOfMemory && isOutOfMemory(err))
+        throw Object.assign(new Error(err?.message ?? String(err)), { outOfMemory: true })
+      emit('log', [
+        `Ortho: ${im.name ?? m.uuid} — source photo unavailable (${err?.message ?? err}); ` +
+          'using its depth-map colour',
+        'warn',
+        'Products',
+      ])
       load.fellBack++
       return null
     }
@@ -94,12 +111,15 @@ const MAX_CLIP_CELLS = 8192 * 8192
 
 // Cells whose source label differs from their right or lower neighbour's, in magenta.
 function paintSeams(rgba, labels, w, h) {
-  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
-    const i = r * w + c, l = labels[i]
-    if (l === 0xffff) continue
-    const right = c + 1 < w ? labels[i + 1] : l, down = r + 1 < h ? labels[i + w] : l
-    if ((right !== l && right !== 0xffff) || (down !== l && down !== 0xffff)) rgba.set([255, 0, 255, 255], 4 * i)
-  }
+  for (let r = 0; r < h; r++)
+    for (let c = 0; c < w; c++) {
+      const i = r * w + c,
+        l = labels[i]
+      if (l === 0xffff) continue
+      const right = c + 1 < w ? labels[i + 1] : l,
+        down = r + 1 < h ? labels[i + w] : l
+      if ((right !== l && right !== 0xffff) || (down !== l && down !== 0xffff)) rgba.set([255, 0, 255, 255], 4 * i)
+    }
 }
 
 // A block-built DEM (SAT-3) read back as a plain height grid: the finest COG level
@@ -115,8 +135,16 @@ export async function readDemGrid(dem, rect, maxCells) {
   const [c0, r0, c1, r1] = plan.window
   const [data] = await image.readRasters({ window: [c0, r0, c1, r1], samples: [0], interleave: false })
   const plane = data instanceof Float32Array ? data : Float32Array.from(data)
-  return { width: plan.width, height: plan.height, gsd: plan.gsd, originX: plan.originX, originY: plan.originY,
-    data: plane, mask: maskFromNaN(plane), level: plan.level }
+  return {
+    width: plan.width,
+    height: plan.height,
+    gsd: plan.gsd,
+    originX: plan.originX,
+    originY: plan.originY,
+    data: plane,
+    mask: maskFromNaN(plane),
+    level: plan.level,
+  }
 }
 
 // Cells a DEM tool may read from a COG in one piece (contours, terrain): Float32 +
@@ -158,7 +186,8 @@ export function makeProductsOps({ rasterize } = {}) {
   // Frames carry closures, so they can't cross postMessage — the store sends a
   // spec, the worker resolves it (core/products/frameSpec.js, shared with the
   // main thread's map placement). `cameras` is the uuid → { R, t } Map here.
-  const rebuildFrame = (spec, cameras, points) => frameFromSpec(spec, cameras ? [...cameras.values()] : [], points ?? [])
+  const rebuildFrame = (spec, cameras, points) =>
+    frameFromSpec(spec, cameras ? [...cameras.values()] : [], points ?? [])
   const frameDescriptor = describeFrame
 
   // The product extent (dem.js coreExtent): the cloud's dense footprint unless the
@@ -170,9 +199,14 @@ export function makeProductsOps({ rasterize } = {}) {
     if (!core) return undefined
     const out = count - core.inside
     const f = (v) => v.toPrecision(4)
-    emit('log', [`${label}: extent is the cloud's dense core, ${f(core.maxX - core.minX)} × ${f(core.maxY - core.minY)} ${unit}`
-      + (out ? ` — ${out.toLocaleString()} of ${count.toLocaleString()} points (${(100 * out / count).toFixed(1)}%) lie outside and are left out; choose Extent ▸ All points to keep them` : ''),
-    out / count > 0.05 ? 'warn' : 'info', 'Products'])
+    emit('log', [
+      `${label}: extent is the cloud's dense core, ${f(core.maxX - core.minX)} × ${f(core.maxY - core.minY)} ${unit}` +
+        (out
+          ? ` — ${out.toLocaleString()} of ${count.toLocaleString()} points (${((100 * out) / count).toFixed(1)}%) lie outside and are left out; choose Extent ▸ All points to keep them`
+          : ''),
+      out / count > 0.05 ? 'warn' : 'info',
+      'Products',
+    ])
     return core
   }
 
@@ -206,7 +240,9 @@ export function makeProductsOps({ rasterize } = {}) {
     let i = 0
     for (const p of view) {
       const projected = frame.fromSfm(p)
-      pos[i++] = projected[0]; pos[i++] = projected[1]; pos[i++] = projected[2]
+      pos[i++] = projected[0]
+      pos[i++] = projected[1]
+      pos[i++] = projected[2]
     }
     const framed = pointView({ pos, count: view.length })
 
@@ -233,21 +269,36 @@ export function makeProductsOps({ rasterize } = {}) {
     // heights; a manual one is the user's and stays).
     const previewBlob = await demPreviewPng(grid, settings.style)
     const unitLabel = frameUnitName(frame.unit)
-    emit('log', [`${label}: ${grid.width}×${grid.height} @ ${grid.gsd.toPrecision(3)} ${unitLabel}/px, `
-      + `z ${grid.zMin.toPrecision(4)}–${grid.zMax.toPrecision(4)}, `
-      + `${grid.count} measured + ${grid.filled} filled cells`
-      + `${grid.holesFilled ? ` (${grid.holesFilled} in enclosed gaps)` : ''} (${frame.crs}`
-      // A local frame's vertical is an estimate; say which camera signal set it.
-      + `${frame.crs === 'local' && frame.source ? `, up from ${frame.source}` : ''})`, 'success', 'Products'])
+    emit('log', [
+      `${label}: ${grid.width}×${grid.height} @ ${grid.gsd.toPrecision(3)} ${unitLabel}/px, ` +
+        `z ${grid.zMin.toPrecision(4)}–${grid.zMax.toPrecision(4)}, ` +
+        `${grid.count} measured + ${grid.filled} filled cells` +
+        `${grid.holesFilled ? ` (${grid.holesFilled} in enclosed gaps)` : ''} (${frame.crs}` +
+        // A local frame's vertical is an estimate; say which camera signal set it.
+        `${frame.crs === 'local' && frame.source ? `, up from ${frame.source}` : ''})`,
+      'success',
+      'Products',
+    ])
     emit('progress', [1, 1, 'Done'])
 
     const result = {
-      width: grid.width, height: grid.height, gsd: grid.gsd,
-      originX: grid.originX, originY: grid.originY,
-      data: grid.data, mask: grid.mask, zMin: grid.zMin, zMax: grid.zMax,
-      count: grid.count, filled: grid.filled, holesFilled: grid.holesFilled,
-      frame: frameDescriptor(frame, frameSpec), crs: frame.crs, unit: frame.unit,
-      previewBlob, ...(settings.style && { style: settings.style }),
+      width: grid.width,
+      height: grid.height,
+      gsd: grid.gsd,
+      originX: grid.originX,
+      originY: grid.originY,
+      data: grid.data,
+      mask: grid.mask,
+      zMin: grid.zMin,
+      zMax: grid.zMax,
+      count: grid.count,
+      filled: grid.filled,
+      holesFilled: grid.holesFilled,
+      frame: frameDescriptor(frame, frameSpec),
+      crs: frame.crs,
+      unit: frame.unit,
+      previewBlob,
+      ...(settings.style && { style: settings.style }),
     }
     return { result, transfer: [grid.data.buffer, grid.mask.buffer] }
   }
@@ -262,44 +313,76 @@ export function makeProductsOps({ rasterize } = {}) {
     // past 4 GiB the stored COG is a BigTIFF. Coarsened never silently.
     const geom = full
     if (geom.gsd > full.requestedGsd * (1 + 1e-6)) {
-      emit('log', [`${label}: ${full.requestedGsd.toPrecision(3)} ${unit}/px would need more than `
-        + `${MAX_ORTHO_SIDE.toLocaleString()} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px`, 'warn', 'Products'])
+      emit('log', [
+        `${label}: ${full.requestedGsd.toPrecision(3)} ${unit}/px would need more than ` +
+          `${MAX_ORTHO_SIDE.toLocaleString()} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px`,
+        'warn',
+        'Products',
+      ])
     }
     const tags = crsTagInfo({ crs: frame.crs, unit: frame.unit })
-    const builder = createCogBuilder({
-      width: geom.width, height: geom.height, tileSize: DEM_TILE, ArrayType: Float32Array,
-      samples: [{ bits: 32, format: 3 }], photometric: 1, gdalNoData: 'nan',
-      pixelScale: [geom.gsd, geom.gsd, 0], tiepoint: [0, 0, 0, geom.originX, geom.originY, 0],
-      geoKeys: geoKeysForEpsg(tags.code, tags.geographic),
-    }, { blockSize: DEM_BLOCK, compress: deflateTile, previewMaxDim: DEM_PLANE_MAX })
-    const t0 = performance.now()
-    const blockProgress = createBlockProgress(Math.ceil(geom.width / DEM_BLOCK) * Math.ceil(geom.height / DEM_BLOCK),
-      { prefix: `${label}: ` })
-    emit('progress', [0, 1, `Rasterising grid… ${blockProgress.label()}`])
-    const res = await rasterizeDemBlocks(pos, count, geom, { ...settings, bounds, blockSize: DEM_BLOCK }, {
-      onBlock: async (b) => {
-        await builder.addBlock(b)
-        const line = blockProgress.finished()
-        if (line) emit('log', [line, 'info', 'Products'])
+    const builder = createCogBuilder(
+      {
+        width: geom.width,
+        height: geom.height,
+        tileSize: DEM_TILE,
+        ArrayType: Float32Array,
+        samples: [{ bits: 32, format: 3 }],
+        photometric: 1,
+        gdalNoData: 'nan',
+        pixelScale: [geom.gsd, geom.gsd, 0],
+        tiepoint: [0, 0, 0, geom.originX, geom.originY, 0],
+        geoKeys: geoKeysForEpsg(tags.code, tags.geographic),
       },
-      onProgress: (done, total) => emit('progress', [done, total, `Rasterising grid… ${blockProgress.label()}`, 0.95 * done / total]),
+      { blockSize: DEM_BLOCK, compress: deflateTile, previewMaxDim: DEM_PLANE_MAX },
+    )
+    const t0 = performance.now()
+    const blockProgress = createBlockProgress(Math.ceil(geom.width / DEM_BLOCK) * Math.ceil(geom.height / DEM_BLOCK), {
+      prefix: `${label}: `,
     })
+    emit('progress', [0, 1, `Rasterising grid… ${blockProgress.label()}`])
+    const res = await rasterizeDemBlocks(
+      pos,
+      count,
+      geom,
+      { ...settings, bounds, blockSize: DEM_BLOCK },
+      {
+        onBlock: async (b) => {
+          await builder.addBlock(b)
+          const line = blockProgress.finished()
+          if (line) emit('log', [line, 'info', 'Products'])
+        },
+        onProgress: (done, total) =>
+          emit('progress', [done, total, `Rasterising grid… ${blockProgress.label()}`, (0.95 * done) / total]),
+      },
+    )
     emit('progress', [1, 1, 'Writing the GeoTIFF…', 0.96])
     const { parts, preview, levels } = await builder.finish()
     const cog = new Blob(parts, { type: 'image/tiff' })
 
     // The overview plane: level k of the COG, k halvings of the grid, same origin.
     const k = levels.findIndex((l) => l.width === preview.width && l.height === preview.height)
-    const ov = { width: preview.width, height: preview.height, gsd: geom.gsd * 2 ** k,
-      originX: geom.originX, originY: geom.originY, data: preview.data }
+    const ov = {
+      width: preview.width,
+      height: preview.height,
+      gsd: geom.gsd * 2 ** k,
+      originX: geom.originX,
+      originY: geom.originY,
+      data: preview.data,
+    }
     let holesFilled = 0
     if (settings.fillHoles) {
       holesFilled = fillEnclosedGaps(ov.data, ov.width, ov.height)
-      emit('log', [`${label}: enclosed gaps are filled in the ${ov.width}×${ov.height} overview only; `
-        + `the full-resolution grid keeps them open`, 'warn', 'Products'])
+      emit('log', [
+        `${label}: enclosed gaps are filled in the ${ov.width}×${ov.height} overview only; ` +
+          `the full-resolution grid keeps them open`,
+        'warn',
+        'Products',
+      ])
     }
     const mask = new Uint8Array(ov.width * ov.height)
-    let zMin = Infinity, zMax = -Infinity
+    let zMin = Infinity,
+      zMax = -Infinity
     for (let i = 0; i < mask.length; i++) {
       const z = ov.data[i]
       if (Number.isNaN(z)) continue
@@ -307,22 +390,45 @@ export function makeProductsOps({ rasterize } = {}) {
       if (z < zMin) zMin = z
       if (z > zMax) zMax = z
     }
-    if (zMin > zMax) { zMin = res.zMin; zMax = res.zMax }
+    if (zMin > zMax) {
+      zMin = res.zMin
+      zMax = res.zMax
+    }
     const grid = { ...ov, mask, zMin, zMax }
     const previewBlob = await demPreviewPng(grid, settings.style)
-    emit('log', [`${label}: ${geom.width}×${geom.height} @ ${geom.gsd.toPrecision(3)} ${unit}/px in `
-      + `${pluralize(res.blocks, 'block')} of ${DEM_BLOCK}², z ${res.zMin.toPrecision(4)}–${res.zMax.toPrecision(4)}, `
-      + `${res.count} measured + ${res.filled} filled cells (${frame.crs}); GeoTIFF ${formatBytes(cog.size)} `
-      + `in ${((performance.now() - t0) / 1000).toFixed(1)} s, overview ${ov.width}×${ov.height} @ `
-      + `${ov.gsd.toPrecision(3)} ${unit}/px`, 'success', 'Products'])
+    emit('log', [
+      `${label}: ${geom.width}×${geom.height} @ ${geom.gsd.toPrecision(3)} ${unit}/px in ` +
+        `${pluralize(res.blocks, 'block')} of ${DEM_BLOCK}², z ${res.zMin.toPrecision(4)}–${res.zMax.toPrecision(4)}, ` +
+        `${res.count} measured + ${res.filled} filled cells (${frame.crs}); GeoTIFF ${formatBytes(cog.size)} ` +
+        `in ${((performance.now() - t0) / 1000).toFixed(1)} s, overview ${ov.width}×${ov.height} @ ` +
+        `${ov.gsd.toPrecision(3)} ${unit}/px`,
+      'success',
+      'Products',
+    ])
     emit('progress', [1, 1, 'Done'])
     const result = {
-      width: ov.width, height: ov.height, gsd: ov.gsd, originX: ov.originX, originY: ov.originY,
-      data: ov.data, mask, zMin: res.zMin, zMax: res.zMax,
-      count: res.count, filled: res.filled + holesFilled, holesFilled,
-      cog, fullWidth: geom.width, fullHeight: geom.height, fullGsd: geom.gsd, tileSize: DEM_TILE,
-      frame: frameDescriptor(frame, frameSpec), crs: frame.crs, unit: frame.unit,
-      previewBlob, ...(settings.style && { style: settings.style }),
+      width: ov.width,
+      height: ov.height,
+      gsd: ov.gsd,
+      originX: ov.originX,
+      originY: ov.originY,
+      data: ov.data,
+      mask,
+      zMin: res.zMin,
+      zMax: res.zMax,
+      count: res.count,
+      filled: res.filled + holesFilled,
+      holesFilled,
+      cog,
+      fullWidth: geom.width,
+      fullHeight: geom.height,
+      fullGsd: geom.gsd,
+      tileSize: DEM_TILE,
+      frame: frameDescriptor(frame, frameSpec),
+      crs: frame.crs,
+      unit: frame.unit,
+      previewBlob,
+      ...(settings.style && { style: settings.style }),
     }
     return { result, transfer: [ov.data.buffer, mask.buffer] }
   }
@@ -346,13 +452,11 @@ export function makeProductsOps({ rasterize } = {}) {
     // Only an unresolved spec needs the scene; a descriptor resolves on its own.
     const needsScene = !(surface.frame?.kind === 'similarity' || surface.frame?.origin)
     const fp = surface.framePoints
-    const framePts = new Array(needsScene ? surface.framePointCount ?? 0 : 0)
+    const framePts = new Array(needsScene ? (surface.framePointCount ?? 0) : 0)
     for (let i = 0; i < framePts.length; i++) {
       framePts[i] = { x: fp[i * 3], y: fp[i * 3 + 1], z: fp[i * 3 + 2] }
     }
-    const camMap = new Map(needsScene
-      ? (surface.cameras ?? []).map((c) => [c.uuid, { R: c.R, t: c.t, K: c.K }])
-      : [])
+    const camMap = new Map(needsScene ? (surface.cameras ?? []).map((c) => [c.uuid, { R: c.R, t: c.t, K: c.K }]) : [])
     const frame = rebuildFrame(surface.frame, camMap, framePts)
     if (kind === 'mesh') {
       emit('progress', [0, 1, 'Rasterising mesh surface…'])
@@ -362,17 +466,25 @@ export function makeProductsOps({ rasterize } = {}) {
       const framed = new Float64Array(surface.pos.length)
       for (let i = 0; i < n; i++) {
         const [x, y, z] = frame.fromSfm([surface.pos[i * 3], surface.pos[i * 3 + 1], surface.pos[i * 3 + 2]])
-        framed[i * 3] = x; framed[i * 3 + 1] = y; framed[i * 3 + 2] = z
+        framed[i * 3] = x
+        framed[i * 3 + 1] = y
+        framed[i * 3 + 2] = z
       }
       const unitName = frameUnitName(frame.unit)
       const bounds = productBounds(framed, n, surface.settings?.extent, 'Ortho (mesh surface)', unitName, emit)
-      const grid = meshSurface({ pos: framed, idx: surface.idx }, { ...(surface.settings ?? {}), bounds },
-        (done, total) => emit('progress', [done, total, 'Rasterising mesh surface…']))
+      const grid = meshSurface(
+        { pos: framed, idx: surface.idx },
+        { ...(surface.settings ?? {}), bounds },
+        (done, total) => emit('progress', [done, total, 'Rasterising mesh surface…']),
+      )
       if (!grid) throw new Error('Ortho: the mesh has no triangles to rasterise')
-      emit('log', [`Ortho: mesh surface ${grid.width}×${grid.height} @ `
-        + `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px from `
-        + `${grid.triangles.toLocaleString()} triangles, ${grid.count} cells with height`,
-      'info', 'Products'])
+      emit('log', [
+        `Ortho: mesh surface ${grid.width}×${grid.height} @ ` +
+          `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px from ` +
+          `${grid.triangles.toLocaleString()} triangles, ${grid.count} cells with height`,
+        'info',
+        'Products',
+      ])
       return { grid: { ...grid, frame: frameDescriptor(frame, surface.frame) }, frame, label: 'mesh' }
     }
     if (kind === 'plane') {
@@ -383,18 +495,31 @@ export function makeProductsOps({ rasterize } = {}) {
         framed[i] = { x, y, z }
       }
       const flat = new Float64Array(surface.count * 3)
-      for (let i = 0; i < surface.count; i++) { flat[i * 3] = framed[i].x; flat[i * 3 + 1] = framed[i].y }
+      for (let i = 0; i < surface.count; i++) {
+        flat[i * 3] = framed[i].x
+        flat[i * 3 + 1] = framed[i].y
+      }
       const unitName = frameUnitName(frame.unit)
-      const bounds = productBounds(flat, surface.count, surface.settings?.extent, 'Ortho (plane surface)', unitName, emit)
+      const bounds = productBounds(
+        flat,
+        surface.count,
+        surface.settings?.extent,
+        'Ortho (plane surface)',
+        unitName,
+        emit,
+      )
       const grid = planeSurface(framed, { ...(surface.settings ?? {}), bounds })
       if (!grid) throw new Error('Ortho: could not fit a plane (need ≥3 spread points)')
       const p = grid.plane
-      emit('log', [`Ortho: plane surface ${grid.width}×${grid.height} @ `
-        + `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px — `
-        + `slope ${(Math.hypot(p.a, p.b) * 100).toFixed(1)}%, residual RMS `
-        + `${p.rms.toPrecision(3)} over ${p.n.toLocaleString()} points`
-        + (p.dropped ? ` (${p.dropped.toLocaleString()} outliers dropped)` : ''),
-      'info', 'Products'])
+      emit('log', [
+        `Ortho: plane surface ${grid.width}×${grid.height} @ ` +
+          `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px — ` +
+          `slope ${(Math.hypot(p.a, p.b) * 100).toFixed(1)}%, residual RMS ` +
+          `${p.rms.toPrecision(3)} over ${p.n.toLocaleString()} points` +
+          (p.dropped ? ` (${p.dropped.toLocaleString()} outliers dropped)` : ''),
+        'info',
+        'Products',
+      ])
       return { grid: { ...grid, frame: frameDescriptor(frame, surface.frame) }, frame, label: 'plane' }
     }
     throw new Error(`Ortho: unknown surface "${kind}"`)
@@ -429,9 +554,11 @@ export function makeProductsOps({ rasterize } = {}) {
       const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : 2 * 1024 ** 3
       const g = surface.grid
       const read = await readDemGrid(g, null, Math.floor(budget / 5 / 5))
-      say(`Ortho: DEM surface read from its GeoTIFF at ${read.width}×${read.height} @ ${read.gsd.toPrecision(3)}`
-        + `${read.level ? ` (level ${read.level}; the full ${g.fullWidth}×${g.fullHeight} grid exceeds the memory budget)` : ' (full resolution)'}`,
-      read.level ? 'warn' : 'info')
+      say(
+        `Ortho: DEM surface read from its GeoTIFF at ${read.width}×${read.height} @ ${read.gsd.toPrecision(3)}` +
+          `${read.level ? ` (level ${read.level}; the full ${g.fullWidth}×${g.fullHeight} grid exceeds the memory budget)` : ' (full resolution)'}`,
+        read.level ? 'warn' : 'info',
+      )
       surface.grid = { ...read, frame: g.frame }
     }
     const built = buildSurfaceGrid(surface, quiet ? () => {} : emit)
@@ -445,39 +572,65 @@ export function makeProductsOps({ rasterize } = {}) {
     // a BigTIFF. rasterSize.js orthoGridFor, as the dialog's readout computes it.
     const { geom, want } = orthoGridFor(built.grid, settings)
     if (!geom.identity) {
-      say(`Ortho: ${geom.width.toLocaleString()}×${geom.height.toLocaleString()} @ ${geom.gsd.toPrecision(3)} ${unit}/px `
-        + `over the ${label} surface (${built.grid.width}×${built.grid.height} @ ${built.grid.gsd.toPrecision(3)} ${unit}/px)`)
+      say(
+        `Ortho: ${geom.width.toLocaleString()}×${geom.height.toLocaleString()} @ ${geom.gsd.toPrecision(3)} ${unit}/px ` +
+          `over the ${label} surface (${built.grid.width}×${built.grid.height} @ ${built.grid.gsd.toPrecision(3)} ${unit}/px)`,
+      )
     }
     if (want > 0 && geom.gsd > want * (1 + 1e-6)) {
-      const side = Math.ceil(Math.max(geom.width, geom.height) * geom.gsd / want)
-      say(`Ortho: the requested ${want.toPrecision(3)} ${unit}/px would need ~${side.toLocaleString()} px on the long side; `
-        + `a raster is at most ${MAX_ORTHO_SIDE.toLocaleString()} px a side, so this one is ${geom.gsd.toPrecision(3)} ${unit}/px. `
-        + 'Limit the area (Tools ▸ Model ▸ Region, then rebuild the surface) for a finer GSD.', 'warn')
+      const side = Math.ceil((Math.max(geom.width, geom.height) * geom.gsd) / want)
+      say(
+        `Ortho: the requested ${want.toPrecision(3)} ${unit}/px would need ~${side.toLocaleString()} px on the long side; ` +
+          `a raster is at most ${MAX_ORTHO_SIDE.toLocaleString()} px a side, so this one is ${geom.gsd.toPrecision(3)} ${unit}/px. ` +
+          'Limit the area (Tools ▸ Model ▸ Region, then rebuild the surface) for a finer GSD.',
+        'warn',
+      )
     }
 
     // Preflight. Resident at once: one block's working planes, the COG's accumulated
     // overview level and preview, and at least one map with its decoded photo. What
     // the budget leaves after the first two is the map/photo cache.
     const { width, height } = geom
-    const blockBytes = orthoTiledWorkingBytes({ width, height, blend: settings.blend, fillRadius: settings.fillRadius ?? 2,
-      seamWidth: settings.seamWidth ?? 0, seamline: settings.seamline, seamBlend: settings.seamBlend })
+    const blockBytes = orthoTiledWorkingBytes({
+      width,
+      height,
+      blend: settings.blend,
+      fillRadius: settings.fillRadius ?? 2,
+      seamWidth: settings.seamWidth ?? 0,
+      seamline: settings.seamline,
+      seamBlend: settings.seamBlend,
+    })
     const pyramidBytes = Math.ceil(width / 8) * Math.ceil(height / 8) * 4 + 2048 * 2048 * 4
     // A map's planes as the ortho reads them: depth, cost and rgb, 11 B/px (not its normals).
     const photoOf = new Map((input.images ?? []).map((im) => [im.uuid, im]))
-    let zSum = 0, zN = 0
-    for (let i = 0; i < built.grid.data.length; i += 97) { const z = built.grid.data[i]; if (Number.isFinite(z)) { zSum += z; zN++ } }
+    let zSum = 0,
+      zN = 0
+    for (let i = 0; i < built.grid.data.length; i += 97) {
+      const z = built.grid.data[i]
+      if (Number.isFinite(z)) {
+        zSum += z
+        zN++
+      }
+    }
     const pxPerCell = orthoMapPxPerCell(geom, frame.toSfm, zN ? zSum / zN : 0)
     // A cache entry: the map's planes when streamed (resident maps are not counted) and its
     // decoded photo.
-    const entryBytes = (m) => (streamed ? m.width * m.height * ORTHO_MAP_PX_BYTES : 0) + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))
-    const maxEntry = maps.reduce((n, m) => Math.max(n, m.width * m.height * ORTHO_MAP_PX_BYTES + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))), 0)
+    const entryBytes = (m) =>
+      (streamed ? m.width * m.height * ORTHO_MAP_PX_BYTES : 0) + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))
+    const maxEntry = maps.reduce(
+      (n, m) =>
+        Math.max(n, m.width * m.height * ORTHO_MAP_PX_BYTES + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))),
+      0,
+    )
     const maxCacheEntry = maps.reduce((n, m) => Math.max(n, entryBytes(m)), 0)
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : Infinity
     const fixed = blockBytes + pyramidBytes
     if (fixed + maxEntry > budget) {
-      throw new Error(`the orthophoto needs ~${formatBytes(fixed + maxEntry)} at once (one ${ORTHO_BLOCK}² block `
-        + `${formatBytes(blockBytes)}, overviews ${formatBytes(pyramidBytes)}, one depth map + photo ${formatBytes(maxEntry)}) `
-        + `and the memory budget is ${formatBytes(budget)} — raise it in Settings ▸ Compute, or build at a coarser GSD`)
+      throw new Error(
+        `the orthophoto needs ~${formatBytes(fixed + maxEntry)} at once (one ${ORTHO_BLOCK}² block ` +
+          `${formatBytes(blockBytes)}, overviews ${formatBytes(pyramidBytes)}, one depth map + photo ${formatBytes(maxEntry)}) ` +
+          `and the memory budget is ${formatBytes(budget)} — raise it in Settings ▸ Compute, or build at a coarser GSD`,
+      )
     }
     // The cache evicts after a visit, so a miss loads its entry on top of a full cache:
     // leave room for one. The budget is the run's; the tab's buffer pool also holds what
@@ -500,9 +653,11 @@ export function makeProductsOps({ rasterize } = {}) {
     }
     const { bytes: cacheBytes, tabBound } = cacheFor(shares)
     if (tabBound) {
-      say(`Ortho: the map/photo cache is held to ${formatBytes(cacheBytes)}${shares > 1 ? ` per worker (${shares} workers)` : ''}, `
-        + 'below what the memory budget allows, so the browser tab keeps room for the '
-        + `${formatBytes(settings.pageBytes ?? 0)} the open project already holds (16 GB is all a tab gets, page and workers together)`)
+      say(
+        `Ortho: the map/photo cache is held to ${formatBytes(cacheBytes)}${shares > 1 ? ` per worker (${shares} workers)` : ''}, ` +
+          'below what the memory budget allows, so the browser tab keeps room for the ' +
+          `${formatBytes(settings.pageBytes ?? 0)} the open project already holds (16 GB is all a tab gets, page and workers together)`,
+      )
     }
     // Each map's planes and source photo are cached across the blocks that see it.
     const loadMap = streamed ? (i) => readDepthFiles(maps[i], { normals: false }) : async (i) => maps[i]
@@ -510,33 +665,71 @@ export function makeProductsOps({ rasterize } = {}) {
     // The mosaic's gain fit and graph-cut survey read every photo once more, coarse (a
     // gain needs means, a coarse seam grid no detail); their own loader keeps the decode
     // figures below about the colour pass.
-    const loadStatsImage = settings.blend === 'mosaic' && (settings.colourBalance || settings.seamline === 'graphcut')
-      ? makePhotoLoader(input.images, rasterize, emit) : null
-    return { settings, maps, streamed, built, frame, label, unit, geom, width, height, blockBytes, pyramidBytes,
-      maxCacheEntry, cacheBytes, cacheFor, photoPrefetch, photoOf, pxPerCell, loadMap, loadImage, loadStatsImage }
+    const loadStatsImage =
+      settings.blend === 'mosaic' && (settings.colourBalance || settings.seamline === 'graphcut')
+        ? makePhotoLoader(input.images, rasterize, emit)
+        : null
+    return {
+      settings,
+      maps,
+      streamed,
+      built,
+      frame,
+      label,
+      unit,
+      geom,
+      width,
+      height,
+      blockBytes,
+      pyramidBytes,
+      maxCacheEntry,
+      cacheBytes,
+      cacheFor,
+      photoPrefetch,
+      photoOf,
+      pxPerCell,
+      loadMap,
+      loadImage,
+      loadStatsImage,
+    }
   }
 
   // The options orthorectifyTiled runs with: blocks in groups, map-major inside (P6),
   // sized by replaying the visits through the cache; each block of a group takes its
   // working planes from the cache.
   const orthoTiledOpts = (ctx) => ({
-    ...ctx.settings, blockSize: ORTHO_BLOCK, cacheBytes: ctx.cacheBytes, mapsResident: !ctx.streamed,
-    photoPrefetch: ctx.photoPrefetch, groupBlocks: ctx.settings.groupBlocks ?? 'auto', blockBytes: ctx.blockBytes,
+    ...ctx.settings,
+    blockSize: ORTHO_BLOCK,
+    cacheBytes: ctx.cacheBytes,
+    mapsResident: !ctx.streamed,
+    photoPrefetch: ctx.photoPrefetch,
+    groupBlocks: ctx.settings.groupBlocks ?? 'auto',
+    blockBytes: ctx.blockBytes,
     entryBytes: ctx.maxCacheEntry,
-    entrySizes: ctx.maps.map((m) => ({ map: ctx.streamed ? m.width * m.height * ORTHO_MAP_PX_BYTES : 0,
-      photo: photoBytesExpected(ctx.photoOf.get(m.uuid), m, ctx.pxPerCell(m)) })),
+    entrySizes: ctx.maps.map((m) => ({
+      map: ctx.streamed ? m.width * m.height * ORTHO_MAP_PX_BYTES : 0,
+      photo: photoBytesExpected(ctx.photoOf.get(m.uuid), m, ctx.pxPerCell(m)),
+    })),
   })
 
   // The GeoTIFF the blocks are written into.
   const orthoBuilder = (ctx) => {
     const tags = crsTagInfo({ crs: ctx.frame.crs, unit: ctx.frame.unit })
-    return createCogBuilder({
-      width: ctx.width, height: ctx.height, tileSize: ORTHO_TILE, ArrayType: Uint8ClampedArray,
-      samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
-      photometric: 2, extraSamples: [2], // RGB + unassociated alpha (transparent = no colour)
-      pixelScale: [ctx.geom.gsd, ctx.geom.gsd, 0], tiepoint: [0, 0, 0, ctx.geom.originX, ctx.geom.originY, 0],
-      geoKeys: geoKeysForEpsg(tags.code, tags.geographic),
-    }, { blockSize: ORTHO_BLOCK, compress: deflateTile, previewMaxDim: PREVIEW_MAX })
+    return createCogBuilder(
+      {
+        width: ctx.width,
+        height: ctx.height,
+        tileSize: ORTHO_TILE,
+        ArrayType: Uint8ClampedArray,
+        samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
+        photometric: 2,
+        extraSamples: [2], // RGB + unassociated alpha (transparent = no colour)
+        pixelScale: [ctx.geom.gsd, ctx.geom.gsd, 0],
+        tiepoint: [0, 0, 0, ctx.geom.originX, ctx.geom.originY, 0],
+        geoKeys: geoKeysForEpsg(tags.code, tags.geographic),
+      },
+      { blockSize: ORTHO_BLOCK, compress: deflateTile, previewMaxDim: PREVIEW_MAX },
+    )
   }
   const addOrthoBlock = async (builder, settings, b) => {
     // `debugSeams` (bench only, not in the dialog): paint the seams magenta, so
@@ -554,81 +747,137 @@ export function makeProductsOps({ rasterize } = {}) {
     emit('progress', [1, 1, 'Writing the GeoTIFF…', 0.96])
     const { parts, preview } = await builder.finish()
     const cog = new Blob(parts, { type: 'image/tiff' })
-    const previewBlob = await rasterToPng(new ImageData(preview.data, preview.width, preview.height), preview.width, preview.height)
+    const previewBlob = await rasterToPng(
+      new ImageData(preview.data, preview.width, preview.height),
+      preview.width,
+      preview.height,
+    )
 
     const { covered, sampled, filled, surfaceCells, stats } = res
     if (decode) {
       const meanScale = decode.decoded ? decode.scaleSum / decode.decoded : 0
-      emit('log', [`Ortho: colour from the source photos, decoded at `
-        + `${(100 * meanScale).toFixed(0)}% of native on average (≈ 2 photo px per ortho cell, at most native)`
-        + `${decode.fellBack ? `, ${decode.fellBack} from depth-map colour (photo unavailable)` : ''}`, 'info', 'Products'])
+      emit('log', [
+        `Ortho: colour from the source photos, decoded at ` +
+          `${(100 * meanScale).toFixed(0)}% of native on average (≈ 2 photo px per ortho cell, at most native)` +
+          `${decode.fellBack ? `, ${decode.fellBack} from depth-map colour (photo unavailable)` : ''}`,
+        'info',
+        'Products',
+      ])
     }
-    const blocksX = Math.ceil(width / ORTHO_BLOCK), blocksY = Math.ceil(height / ORTHO_BLOCK)
-    emit('log', [`Ortho: ${pluralize(res.blocks, 'block')} of ${ORTHO_BLOCK}² (${blocksX}×${blocksY}), ${pluralize(res.visits, 'map visit')} `
-      + `after culling (of ${res.blocks * maps.length}); ${pluralize(res.mapLoads, 'map read')}, ${pluralize(res.photoLoads, 'photo decode')}, `
-      + `${pluralize(res.cacheHits, 'cache hit')} in a ${Number.isFinite(res.grouping?.cacheBytes) ? formatBytes(res.grouping.cacheBytes) : 'default'} cache`
-      + `${workers > 1 ? ` per worker, ${workers} workers` : ''}`, 'info', 'Products'])
+    const blocksX = Math.ceil(width / ORTHO_BLOCK),
+      blocksY = Math.ceil(height / ORTHO_BLOCK)
+    emit('log', [
+      `Ortho: ${pluralize(res.blocks, 'block')} of ${ORTHO_BLOCK}² (${blocksX}×${blocksY}), ${pluralize(res.visits, 'map visit')} ` +
+        `after culling (of ${res.blocks * maps.length}); ${pluralize(res.mapLoads, 'map read')}, ${pluralize(res.photoLoads, 'photo decode')}, ` +
+        `${pluralize(res.cacheHits, 'cache hit')} in a ${Number.isFinite(res.grouping?.cacheBytes) ? formatBytes(res.grouping.cacheBytes) : 'default'} cache` +
+        `${workers > 1 ? ` per worker, ${workers} workers` : ''}`,
+      'info',
+      'Products',
+    ])
     if (res.cacheShrinks) {
-      emit('log', [`Ortho: the browser refused memory for a photo ${pluralize(res.cacheShrinks, 'time')}; each time the `
-        + `map/photo cache gave up a quarter (to ${formatBytes(res.cacheLimit)} in the end) and the photo was decoded again. A lower memory `
-        + 'budget (Settings ▸ Compute) starts the run there', 'warn', 'Products'])
+      emit('log', [
+        `Ortho: the browser refused memory for a photo ${pluralize(res.cacheShrinks, 'time')}; each time the ` +
+          `map/photo cache gave up a quarter (to ${formatBytes(res.cacheLimit)} in the end) and the photo was decoded again. A lower memory ` +
+          'budget (Settings ▸ Compute) starts the run there',
+        'warn',
+        'Products',
+      ])
     }
     if (res.grouping?.predicted && Object.keys(res.grouping.predicted).length) {
-      emit('log', [`Ortho: group sizes, predicted read cost — ${Object.entries(res.grouping.predicted)
-        .map(([g, c]) => `${g}: ${Math.round(c)}`).join(', ')}; chose ${res.grouping.size}`, 'debug', 'Products'])
+      emit('log', [
+        `Ortho: group sizes, predicted read cost — ${Object.entries(res.grouping.predicted)
+          .map(([g, c]) => `${g}: ${Math.round(c)}`)
+          .join(', ')}; chose ${res.grouping.size}`,
+        'debug',
+        'Products',
+      ])
     }
     if (res.grouping?.size > 1) {
       const p = res.grouping.predicted ?? {}
-      emit('log', [`Ortho: blocks in ${pluralize(res.grouping.groups, 'group')} of up to ${res.grouping.size}, each pass reading a map `
-        + `once for the whole group; predicted read cost ${Math.round(p[res.grouping.size] ?? 0)} against `
-        + `${Math.round(p[1] ?? 0)} block by block (a map read 1, a photo decode 3)`, 'info', 'Products'])
+      emit('log', [
+        `Ortho: blocks in ${pluralize(res.grouping.groups, 'group')} of up to ${res.grouping.size}, each pass reading a map ` +
+          `once for the whole group; predicted read cost ${Math.round(p[res.grouping.size] ?? 0)} against ` +
+          `${Math.round(p[1] ?? 0)} block by block (a map read 1, a photo decode 3)`,
+        'info',
+        'Products',
+      ])
     }
     const cells = width * height
-    emit('log', [`Ortho: ${width}×${height}, ${covered}/${cells} cells coloured `
-      + `(${(100 * covered / cells).toFixed(0)}%) from ${pluralize(maps.length, 'view')} over the `
-      + `${label} surface (${surfaceCells}/${cells} cells had a height) `
-      + `— ${sampled} sampled + ${filled} interpolated; GeoTIFF ${formatBytes(cog.size)} `
-      + `in ${((performance.now() - t0) / 1000).toFixed(1)}s${workers > 1 ? ` on ${workers} workers` : ''}`, 'success', 'Products'])
+    emit('log', [
+      `Ortho: ${width}×${height}, ${covered}/${cells} cells coloured ` +
+        `(${((100 * covered) / cells).toFixed(0)}%) from ${pluralize(maps.length, 'view')} over the ` +
+        `${label} surface (${surfaceCells}/${cells} cells had a height) ` +
+        `— ${sampled} sampled + ${filled} interpolated; GeoTIFF ${formatBytes(cog.size)} ` +
+        `in ${((performance.now() - t0) / 1000).toFixed(1)}s${workers > 1 ? ` on ${workers} workers` : ''}`,
+      'success',
+      'Products',
+    ])
     // The ortho's quality figures travel with it (its run record): sharpness, and
     // with a source label per cell, how visible the seams between images are.
     if (res.mosaic) {
       const { seamline, seamBlend, seamCells, smoothPasses, levels, seamCut, balance } = res.mosaic
-      const seams = seamBlend === 'multiband'
-        ? `blended in ${levels} frequency bands (multiband; the coarsest fades over ~±${3 << levels} cells)`
-        : seamCells
-          ? `feathered over ${pluralize(seamCells, 'cell')} (${settings.seamWidth}% of the short side${seamCells === MAX_SEAM_CELLS ? ', capped' : ''})`
-          : 'hard (no feathering)'
-      const where = seamline === 'graphcut'
-        ? 'seamlines by graph cut (colour difference + nadir cost)'
-        : `each cell from its most nadir view (finest foreshortened footprint), labels smoothed by ${pluralize(smoothPasses, 'majority pass', 'majority passes')}`
+      const seams =
+        seamBlend === 'multiband'
+          ? `blended in ${levels} frequency bands (multiband; the coarsest fades over ~±${3 << levels} cells)`
+          : seamCells
+            ? `feathered over ${pluralize(seamCells, 'cell')} (${settings.seamWidth}% of the short side${seamCells === MAX_SEAM_CELLS ? ', capped' : ''})`
+            : 'hard (no feathering)'
+      const where =
+        seamline === 'graphcut'
+          ? 'seamlines by graph cut (colour difference + nadir cost)'
+          : `each cell from its most nadir view (finest foreshortened footprint), labels smoothed by ${pluralize(smoothPasses, 'majority pass', 'majority passes')}`
       emit('log', [`Ortho: mosaic — ${where}; seams ${seams}`, 'info', 'Products'])
       if (seamCut) {
         const pct = (v) => (100 * v).toFixed(1)
-        emit('log', [`Ortho: graph cut on a ${seamCut.width}×${seamCut.height} grid (every ${pluralize(seamCut.factor, 'cell')}), `
-          + `${pluralize(seamCut.cycles, 'expansion cycle')}, ${pluralize(seamCut.accepted, 'accepted move')}; ${pct(seamCut.changedCells / Math.max(1, seamCut.labelled))}% `
-          + `of the cells moved off their most nadir view; energy ${seamCut.energy.toLocaleString()} (nearest-nadir ${seamCut.energyNadir.toLocaleString()}, `
-          + `−${pct(1 - seamCut.energy / Math.max(1, seamCut.energyNadir))}%)`
-          + (res.seamCutMs ? `; survey ${((res.seamCutMs.read + res.seamCutMs.sample) / 1000).toFixed(1)} s (photo reads ${(res.seamCutMs.read / 1000).toFixed(1)} s), cut ${(res.seamCutMs.solve / 1000).toFixed(1)} s` : ''),
-        'info', 'Products'])
+        emit('log', [
+          `Ortho: graph cut on a ${seamCut.width}×${seamCut.height} grid (every ${pluralize(seamCut.factor, 'cell')}), ` +
+            `${pluralize(seamCut.cycles, 'expansion cycle')}, ${pluralize(seamCut.accepted, 'accepted move')}; ${pct(seamCut.changedCells / Math.max(1, seamCut.labelled))}% ` +
+            `of the cells moved off their most nadir view; energy ${seamCut.energy.toLocaleString()} (nearest-nadir ${seamCut.energyNadir.toLocaleString()}, ` +
+            `−${pct(1 - seamCut.energy / Math.max(1, seamCut.energyNadir))}%)` +
+            (res.seamCutMs
+              ? `; survey ${((res.seamCutMs.read + res.seamCutMs.sample) / 1000).toFixed(1)} s (photo reads ${(res.seamCutMs.read / 1000).toFixed(1)} s), cut ${(res.seamCutMs.solve / 1000).toFixed(1)} s`
+              : ''),
+          'info',
+          'Products',
+        ])
       }
       if (balance) {
         const f = (v) => (v == null ? '—' : v.toFixed(3))
-        const surveyDecode = (statsDecode?.decoded
-          ? `; photos decoded at ${(100 * statsDecode.scaleSum / statsDecode.decoded).toFixed(0)}% of native for the fit${seamCut ? ' and the seams' : ''}` : '')
-          + (res.surveyFromMapRgb ? `; ${res.surveyFromMapRgb} of ${maps.length} images sampled from their depth maps' own colour (as fine as the survey needs, no decode)` : '')
-        emit('log', [`Ortho: colour balance — gains for ${balance.images} of ${pluralize(maps.length, 'image')} from `
-          + `${pluralize(balance.pairs, 'overlapping pair')} over ${balance.latticeCells.toLocaleString()} lattice cells (every `
-          + `${balance.latticeStep}th; ${balance.clippedObservations.toLocaleString()} ${nounFor(balance.clippedObservations, 'clipped sample')} left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}`
-          + (balance.clamped ? `, ${pluralize(balance.clamped, 'channel gain')} clamped to ${GAIN_MIN}–${GAIN_MAX}` : '') + surveyDecode,
-        balance.clamped ? 'warn' : 'info', 'Products'])
+        const surveyDecode =
+          (statsDecode?.decoded
+            ? `; photos decoded at ${((100 * statsDecode.scaleSum) / statsDecode.decoded).toFixed(0)}% of native for the fit${seamCut ? ' and the seams' : ''}`
+            : '') +
+          (res.surveyFromMapRgb
+            ? `; ${res.surveyFromMapRgb} of ${maps.length} images sampled from their depth maps' own colour (as fine as the survey needs, no decode)`
+            : '')
+        emit('log', [
+          `Ortho: colour balance — gains for ${balance.images} of ${pluralize(maps.length, 'image')} from ` +
+            `${pluralize(balance.pairs, 'overlapping pair')} over ${balance.latticeCells.toLocaleString()} lattice cells (every ` +
+            `${balance.latticeStep}th; ${balance.clippedObservations.toLocaleString()} ${nounFor(balance.clippedObservations, 'clipped sample')} left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}` +
+            (balance.clamped
+              ? `, ${pluralize(balance.clamped, 'channel gain')} clamped to ${GAIN_MIN}–${GAIN_MAX}`
+              : '') +
+            surveyDecode,
+          balance.clamped ? 'warn' : 'info',
+          'Products',
+        ])
         if (res.gains) {
           const name = (m) => photoOf.get(m.uuid)?.name ?? m.uuid
-          const list = maps.map((m, i) => `${name(m)} ${[0, 1, 2].map((c) => res.gains[3 * i + c].toFixed(3)).join('/')}`)
+          const list = maps.map(
+            (m, i) => `${name(m)} ${[0, 1, 2].map((c) => res.gains[3 * i + c].toFixed(3)).join('/')}`,
+          )
           emit('log', [`Ortho: gains per image (R/G/B): ${list.join(', ')}`, 'debug', 'Products'])
         }
       }
     }
-    if (res.timings) emit('log', [`Ortho: time (s)${workers > 1 ? ', summed over the workers' : ''} — ${Object.entries(res.timings).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`).join(', ')}`, 'debug', 'Products'])
+    if (res.timings)
+      emit('log', [
+        `Ortho: time (s)${workers > 1 ? ', summed over the workers' : ''} — ${Object.entries(res.timings)
+          .map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`)
+          .join(', ')}`,
+        'debug',
+        'Products',
+      ])
     emit('log', [`Ortho: ${describeOrthoStats(stats)}`, 'info', 'Products'])
     emit('progress', [1, 1, 'Done'])
 
@@ -636,32 +885,55 @@ export function makeProductsOps({ rasterize } = {}) {
     // DEM's, so the exporters/viewer must read it here, not off the DEM. Its frame is
     // the SURFACE's frame, whatever the GSD (a resampled grid used to drop it).
     return {
-      width, height, covered, sampled, filled, previewBlob, cog, tileSize: ORTHO_TILE,
-      gsd: ctx.geom.gsd, originX: ctx.geom.originX, originY: ctx.geom.originY,
-      surface: label, surfaceCells,
-      frame: ctx.built.grid.frame, crs: ctx.frame.crs, unit: ctx.frame.unit, stats,
+      width,
+      height,
+      covered,
+      sampled,
+      filled,
+      previewBlob,
+      cog,
+      tileSize: ORTHO_TILE,
+      gsd: ctx.geom.gsd,
+      originX: ctx.geom.originX,
+      originY: ctx.geom.originY,
+      surface: label,
+      surfaceCells,
+      frame: ctx.built.grid.frame,
+      crs: ctx.frame.crs,
+      unit: ctx.frame.unit,
+      stats,
       // How the pixels were chosen: the blend, and for a mosaic its seam band and gains.
-      blend: settings.blend ?? 'best', mosaic: res.mosaic ?? null,
+      blend: settings.blend ?? 'best',
+      mosaic: res.mosaic ?? null,
     }
   }
 
   // The log's progress lines for an ortho's blocks and map visits (one pace).
   function orthoProgress(emit) {
-    let blockProgress = null, groupLabel = ''
+    let blockProgress = null,
+      groupLabel = ''
     const pacer = createLogPacer()
     const heartbeat = createStepProgress({ prefix: 'Ortho: ', unit: 'map visit', pacer })
-    const label = () => (groupLabel ? `Orthorectifying… ${groupLabel}`
-      : blockProgress ? `Orthorectifying… ${blockProgress.label()}` : 'Orthorectifying…')
+    const label = () =>
+      groupLabel
+        ? `Orthorectifying… ${groupLabel}`
+        : blockProgress
+          ? `Orthorectifying… ${blockProgress.label()}`
+          : 'Orthorectifying…'
     return {
       // Grouped (P6), no block finishes until its whole group has: the label names the group.
-      group(gi, n, size) { groupLabel = size > 1 ? `group ${gi + 1} of ${n} (${pluralize(size, 'block')})` : '' },
+      group(gi, n, size) {
+        groupLabel = size > 1 ? `group ${gi + 1} of ${n} (${pluralize(size, 'block')})` : ''
+      },
       progress(done, total) {
-        emit('progress', [done, total, label(), 0.95 * done / total])
+        emit('progress', [done, total, label(), (0.95 * done) / total])
         // A group of blocks finishes only when all of them have: the visits say it is moving.
         const line = heartbeat.step(done, total, groupLabel || (blockProgress ? '' : 'survey'))
         if (line) emit('log', [line, 'info', 'Products'])
       },
-      blocksStart(count) { blockProgress = createBlockProgress(count, { prefix: 'Ortho: ', pacer }) },
+      blocksStart(count) {
+        blockProgress = createBlockProgress(count, { prefix: 'Ortho: ', pacer })
+      },
       blockDone() {
         const line = blockProgress?.finished()
         if (line) emit('log', [line, 'info', 'Products'])
@@ -675,21 +947,45 @@ export function makeProductsOps({ rasterize } = {}) {
     const builder = orthoBuilder(ctx)
     emit('progress', [0, 1, 'Orthorectifying…'])
     const prog = orthoProgress(emit)
-    const res = await orthorectifyTiled(ctx.built.grid, ctx.geom, ctx.maps, ctx.loadMap, ctx.frame.toSfm, orthoTiledOpts(ctx), {
-      loadImage: ctx.loadImage, loadStatsImage: ctx.loadStatsImage,
-      onProgress: (d, t) => prog.progress(d, t),
-      onGroup: (gi, n, size) => prog.group(gi, n, size),
-      onBlocksStart: (count, { maxMaps = 0, groupSize = 1, cacheBytes: used = ctx.cacheBytes } = {}) => {
-        prog.blocksStart(count)
-        // Grouped, a pass reads each map once per group: the cache then only carries
-        // maps from one pass or group to the next, so the per-block warning is moot.
-        if (ctx.maxCacheEntry > 0 && maxMaps > 0 && groupSize === 1) {
-          emit('log', orthoCacheLog(used, ctx.maxCacheEntry, maxMaps, { mosaic: ctx.settings.blend === 'mosaic', streamed: ctx.streamed }))
-        }
+    const res = await orthorectifyTiled(
+      ctx.built.grid,
+      ctx.geom,
+      ctx.maps,
+      ctx.loadMap,
+      ctx.frame.toSfm,
+      orthoTiledOpts(ctx),
+      {
+        loadImage: ctx.loadImage,
+        loadStatsImage: ctx.loadStatsImage,
+        onProgress: (d, t) => prog.progress(d, t),
+        onGroup: (gi, n, size) => prog.group(gi, n, size),
+        onBlocksStart: (count, { maxMaps = 0, groupSize = 1, cacheBytes: used = ctx.cacheBytes } = {}) => {
+          prog.blocksStart(count)
+          // Grouped, a pass reads each map once per group: the cache then only carries
+          // maps from one pass or group to the next, so the per-block warning is moot.
+          if (ctx.maxCacheEntry > 0 && maxMaps > 0 && groupSize === 1) {
+            emit(
+              'log',
+              orthoCacheLog(used, ctx.maxCacheEntry, maxMaps, {
+                mosaic: ctx.settings.blend === 'mosaic',
+                streamed: ctx.streamed,
+              }),
+            )
+          }
+        },
+        onBlock: async (b) => {
+          await addOrthoBlock(builder, ctx.settings, b)
+          prog.blockDone()
+        },
       },
-      onBlock: async (b) => { await addOrthoBlock(builder, ctx.settings, b); prog.blockDone() },
-    })
-    const result = await orthoSummary(ctx, builder, res, { decode: ctx.loadImage, statsDecode: ctx.loadStatsImage, t0 }, emit)
+    )
+    const result = await orthoSummary(
+      ctx,
+      builder,
+      res,
+      { decode: ctx.loadImage, statsDecode: ctx.loadStatsImage, t0 },
+      emit,
+    )
     return { result }
   }
 
@@ -717,14 +1013,29 @@ export function makeProductsOps({ rasterize } = {}) {
     const t0 = performance.now()
     emit('progress', [0, 1, 'Orthorectifying…'])
     const prog = orthoProgress(emit)
-    const { plan } = await orthorectifyTiled(ctx.built.grid, ctx.geom, ctx.maps, ctx.loadMap, ctx.frame.toSfm,
+    const { plan } = await orthorectifyTiled(
+      ctx.built.grid,
+      ctx.geom,
+      ctx.maps,
+      ctx.loadMap,
+      ctx.frame.toSfm,
       { ...orthoTiledOpts(ctx), planOnly: true, planShares },
-      { loadImage: ctx.loadImage, loadStatsImage: ctx.loadStatsImage, onProgress: (d, t) => prog.progress(d, t) })
+      { loadImage: ctx.loadImage, loadStatsImage: ctx.loadStatsImage, onProgress: (d, t) => prog.progress(d, t) },
+    )
     const want = plan.shareModel?.workers ?? 1
     ctx.cacheBytes = ctx.cacheFor(want).bytes
     if (plan.shareModel) {
-      emit('log', [`Ortho: workers vs predicted time — ${plan.shareModel.candidates.map((c) => `${c.k}: ${Math.round(c.seconds)} s `
-        + `(${formatBytes(c.cacheBytes)} cache, ${Math.round(c.reads)} reads)`).join(', ')}; chose ${want}`, 'debug', 'Products'])
+      emit('log', [
+        `Ortho: workers vs predicted time — ${plan.shareModel.candidates
+          .map(
+            (c) =>
+              `${c.k}: ${Math.round(c.seconds)} s ` +
+              `(${formatBytes(c.cacheBytes)} cache, ${Math.round(c.reads)} reads)`,
+          )
+          .join(', ')}; chose ${want}`,
+        'debug',
+        'Products',
+      ])
     }
     orthoSession = { ctx, builder: orthoBuilder(ctx), t0 }
     // Contiguous runs (neighbouring groups share maps, so each worker's cache carries
@@ -732,14 +1043,23 @@ export function makeProductsOps({ rasterize } = {}) {
     const work = plan.groupVisits
     const total = work.reduce((a, b) => a + b, 0)
     const shares = []
-    let cur = [], acc = 0
+    let cur = [],
+      acc = 0
     for (let gi = 0; gi < work.length; gi++) {
-      cur.push(gi); acc += work[gi]
-      if (shares.length < want - 1 && acc >= total * (shares.length + 1) / want) { shares.push(cur); cur = [] }
+      cur.push(gi)
+      acc += work[gi]
+      if (shares.length < want - 1 && acc >= (total * (shares.length + 1)) / want) {
+        shares.push(cur)
+        cur = []
+      }
     }
     if (cur.length) shares.push(cur)
-    emit('log', [`Ortho: ${pluralize(plan.groups, 'group')} of up to ${pluralize(plan.groupBlocks, 'block')} dealt to `
-      + `${pluralize(shares.length, 'worker')}, a ${formatBytes(ctx.cacheBytes)} map/photo cache each`, 'info', 'Products'])
+    emit('log', [
+      `Ortho: ${pluralize(plan.groups, 'group')} of up to ${pluralize(plan.groupBlocks, 'block')} dealt to ` +
+        `${pluralize(shares.length, 'worker')}, a ${formatBytes(ctx.cacheBytes)} map/photo cache each`,
+      'info',
+      'Products',
+    ])
     // Fewer groups than workers: as many shares as groups.
     return { result: { plan, shares, workers: want, width: ctx.width, height: ctx.height, cacheBytes: ctx.cacheBytes } }
   }
@@ -751,16 +1071,25 @@ export function makeProductsOps({ rasterize } = {}) {
   // can share memory: a group of this list that another worker claimed first is skipped.
   async function orthoShare([input, plan, groupIndices, shares, claims = null], { emit }) {
     const ctx = await orthoSetup(input, emit, { shares, quiet: true })
-    const res = await orthorectifyTiled(ctx.built.grid, ctx.geom, ctx.maps, ctx.loadMap, ctx.frame.toSfm,
-      { ...orthoTiledOpts(ctx), survey: plan.survey, groupBlocks: plan.groupBlocks, groupIndices, claims }, {
+    const res = await orthorectifyTiled(
+      ctx.built.grid,
+      ctx.geom,
+      ctx.maps,
+      ctx.loadMap,
+      ctx.frame.toSfm,
+      { ...orthoTiledOpts(ctx), survey: plan.survey, groupBlocks: plan.groupBlocks, groupIndices, claims },
+      {
         loadImage: ctx.loadImage,
         onProgress: (d, t) => emit('progress', [d, t]),
         onBlock: async (b) => emit('block', [b], [b.rgba.buffer, ...(b.labels ? [b.labels.buffer] : [])]),
-      })
+      },
+    )
     const { stats: _s, ...rest } = res
     const fig = (l) => (l ? { decoded: l.decoded, scaleSum: l.scaleSum, fellBack: l.fellBack } : null)
     // The group size was the plan's choice, and so are its predictions.
-    return { result: { ...rest, grouping: { ...rest.grouping, predicted: plan.predicted }, decode: fig(ctx.loadImage) } }
+    return {
+      result: { ...rest, grouping: { ...rest.grouping, predicted: plan.predicted }, decode: fig(ctx.loadImage) },
+    }
   }
 
   // A block of a split ortho, into the planning worker's GeoTIFF.
@@ -777,22 +1106,45 @@ export function makeProductsOps({ rasterize } = {}) {
     const session = orthoSession
     orthoSession = null
     if (!session) throw new Error('orthoFinish: no ortho in progress on this worker')
-    const stats = createOrthoStats(session.ctx.width, session.ctx.height, parts.some((p) => p.labelled))
+    const stats = createOrthoStats(
+      session.ctx.width,
+      session.ctx.height,
+      parts.some((p) => p.labelled),
+    )
     for (const p of parts) stats.merge(p.statsState)
     const sum = (k) => parts.reduce((n, p) => n + (p[k] ?? 0), 0)
     const first = parts[0] ?? {}
     const timings = {}
     for (const p of parts) for (const [k, v] of Object.entries(p.timings ?? {})) timings[k] = (timings[k] ?? 0) + v
     const res = {
-      ...first, stats: stats.finish(), timings,
-      covered: sum('covered'), sampled: sum('sampled'), filled: sum('filled'), blocks: sum('blocks'), visits: sum('visits'),
-      mapLoads: sum('mapLoads'), photoLoads: sum('photoLoads'), cacheHits: sum('cacheHits'), cacheShrinks: sum('cacheShrinks'),
+      ...first,
+      stats: stats.finish(),
+      timings,
+      covered: sum('covered'),
+      sampled: sum('sampled'),
+      filled: sum('filled'),
+      blocks: sum('blocks'),
+      visits: sum('visits'),
+      mapLoads: sum('mapLoads'),
+      photoLoads: sum('photoLoads'),
+      cacheHits: sum('cacheHits'),
+      cacheShrinks: sum('cacheShrinks'),
       grouping: { ...first.grouping, groups: sum('groups') },
     }
     const decode = { decoded: 0, scaleSum: 0, fellBack: 0 }
     for (const p of parts) for (const k of Object.keys(decode)) decode[k] += p.decode?.[k] ?? 0
-    const result = await orthoSummary(session.ctx, session.builder, res,
-      { decode, statsDecode: session.ctx.loadStatsImage, t0: session.t0, workers: new Set(parts.map((p, i) => p.worker ?? i)).size }, emit)
+    const result = await orthoSummary(
+      session.ctx,
+      session.builder,
+      res,
+      {
+        decode,
+        statsDecode: session.ctx.loadStatsImage,
+        t0: session.t0,
+        workers: new Set(parts.map((p, i) => p.worker ?? i)).size,
+      },
+      emit,
+    )
     return { result }
   }
 
@@ -812,16 +1164,24 @@ export function makeProductsOps({ rasterize } = {}) {
     if (input.dem && tool !== 'clip') {
       const d = input.dem
       input.grid = { ...(await readDemGrid(d, null, DEM_TOOL_CELLS)), crs: d.crs ?? null }
-      log(`${tool === 'contours' ? 'Contours' : 'Terrain'}: DEM read at ${input.grid.width}×${input.grid.height} @ `
-        + `${input.grid.gsd.toPrecision(3)}${input.grid.level ? ` (level ${input.grid.level} of its GeoTIFF; the full `
-          + `${d.fullWidth}×${d.fullHeight} grid is past ${DEM_TOOL_CELLS.toLocaleString()} cells)` : ' (full resolution)'}`,
-      input.grid.level ? 'warn' : 'info', 'Products')
+      log(
+        `${tool === 'contours' ? 'Contours' : 'Terrain'}: DEM read at ${input.grid.width}×${input.grid.height} @ ` +
+          `${input.grid.gsd.toPrecision(3)}${
+            input.grid.level
+              ? ` (level ${input.grid.level} of its GeoTIFF; the full ` +
+                `${d.fullWidth}×${d.fullHeight} grid is past ${DEM_TOOL_CELLS.toLocaleString()} cells)`
+              : ' (full resolution)'
+          }`,
+        input.grid.level ? 'warn' : 'info',
+        'Products',
+      )
     }
     if (tool === 'contours') {
       const result = traceContours(input.grid, settings, log)
-      const text = input.format === 'dxf'
-        ? contoursToDxf(result)
-        : JSON.stringify(contoursToGeoJSON(result, { crs: input.crs || undefined }))
+      const text =
+        input.format === 'dxf'
+          ? contoursToDxf(result)
+          : JSON.stringify(contoursToGeoJSON(result, { crs: input.crs || undefined }))
       return { result: { text, lines: result.lines.length, levels: result.levels.length } }
     }
     if (tool === 'terrain') {
@@ -836,10 +1196,15 @@ export function makeProductsOps({ rasterize } = {}) {
       if (input.kind === 'ortho') {
         const { geo, cog } = input
         const win = polygonPixelWindow(geo, input.polygons)
-        if (!win) { log('Clip ortho: no clip polygon overlaps the orthophoto', 'warn', 'Products'); return { result: { raster: null } } }
+        if (!win) {
+          log('Clip ortho: no clip polygon overlaps the orthophoto', 'warn', 'Products')
+          return { result: { raster: null } }
+        }
         if (win.width * win.height > MAX_CLIP_CELLS) {
-          throw new Error(`the clip area spans ${win.width.toLocaleString()}×${win.height.toLocaleString()} px of the orthophoto; `
-            + `a clip holds at most ${MAX_CLIP_CELLS.toLocaleString()} px — clip a smaller area, or export the COG and clip it in a GIS`)
+          throw new Error(
+            `the clip area spans ${win.width.toLocaleString()}×${win.height.toLocaleString()} px of the orthophoto; ` +
+              `a clip holds at most ${MAX_CLIP_CELLS.toLocaleString()} px — clip a smaller area, or export the COG and clip it in a GIS`,
+          )
         }
         const image = await openRaster(cog)
         const data = await readWindowBytes(image, win.col0, win.row0, win.col0 + win.width, win.row0 + win.height)
@@ -848,20 +1213,34 @@ export function makeProductsOps({ rasterize } = {}) {
       if (input.kind === 'dem' && input.dem) {
         const d = input.dem
         // The polygons' window in full-resolution cells (any polygon shape), as a frame rectangle.
-        const win = polygonPixelWindow({ width: d.fullWidth, height: d.fullHeight, gsd: d.fullGsd, originX: d.originX, originY: d.originY },
-          input.polygons)
-        const rect = win && { minX: d.originX + win.col0 * d.fullGsd, maxX: d.originX + (win.col0 + win.width) * d.fullGsd,
-          maxY: d.originY - win.row0 * d.fullGsd, minY: d.originY - (win.row0 + win.height) * d.fullGsd }
+        const win = polygonPixelWindow(
+          { width: d.fullWidth, height: d.fullHeight, gsd: d.fullGsd, originX: d.originX, originY: d.originY },
+          input.polygons,
+        )
+        const rect = win && {
+          minX: d.originX + win.col0 * d.fullGsd,
+          maxX: d.originX + (win.col0 + win.width) * d.fullGsd,
+          maxY: d.originY - win.row0 * d.fullGsd,
+          minY: d.originY - (win.row0 + win.height) * d.fullGsd,
+        }
         input.grid = rect ? await readDemGrid(d, rect, MAX_CLIP_CELLS) : null
-        if (!input.grid) { log('Clip DEM: no clip polygon overlaps the DEM', 'warn', 'Products'); return { result: { raster: null } } }
+        if (!input.grid) {
+          log('Clip DEM: no clip polygon overlaps the DEM', 'warn', 'Products')
+          return { result: { raster: null } }
+        }
         if (input.grid.level) {
-          log(`Clip DEM: the clip area is past ${MAX_CLIP_CELLS.toLocaleString()} cells at full resolution; clipped at `
-            + `${input.grid.gsd.toPrecision(3)} (level ${input.grid.level} of its GeoTIFF)`, 'warn', 'Products')
+          log(
+            `Clip DEM: the clip area is past ${MAX_CLIP_CELLS.toLocaleString()} cells at full resolution; clipped at ` +
+              `${input.grid.gsd.toPrecision(3)} (level ${input.grid.level} of its GeoTIFF)`,
+            'warn',
+            'Products',
+          )
         }
       }
-      const raster = input.kind === 'ortho'
-        ? clipOrtho(ortho, input.polygons, { onLog: log })
-        : clipDem(input.grid, input.polygons, { onLog: log })
+      const raster =
+        input.kind === 'ortho'
+          ? clipOrtho(ortho, input.polygons, { onLog: log })
+          : clipDem(input.grid, input.polygons, { onLog: log })
       const transfer = raster ? [raster.data.buffer, ...(raster.mask ? [raster.mask.buffer] : [])] : []
       return { result: { raster }, transfer }
     }
@@ -880,16 +1259,23 @@ export function makeProductsOps({ rasterize } = {}) {
   async function demAscii([{ dem, nodata = -9999 }], { emit }) {
     const tiff = await fromBlob(dem.cog)
     const image = await tiff.getImage(0)
-    const W = dem.fullWidth, H = dem.fullHeight, BAND = 256
-    const parts = [`ncols ${W}\nnrows ${H}\nxllcorner ${dem.originX}\nyllcorner ${dem.originY - H * dem.fullGsd}\n`
-      + `cellsize ${dem.fullGsd}\nNODATA_value ${nodata}\n`]
+    const W = dem.fullWidth,
+      H = dem.fullHeight,
+      BAND = 256
+    const parts = [
+      `ncols ${W}\nnrows ${H}\nxllcorner ${dem.originX}\nyllcorner ${dem.originY - H * dem.fullGsd}\n` +
+        `cellsize ${dem.fullGsd}\nNODATA_value ${nodata}\n`,
+    ]
     const row = new Array(W)
     for (let r0 = 0; r0 < H; r0 += BAND) {
       const r1 = Math.min(H, r0 + BAND)
       const [band] = await image.readRasters({ window: [0, r0, W, r1], samples: [0], interleave: false })
       let text = ''
       for (let r = 0; r < r1 - r0; r++) {
-        for (let c = 0; c < W; c++) { const v = band[r * W + c]; row[c] = Number.isFinite(v) ? v : nodata }
+        for (let c = 0; c < W; c++) {
+          const v = band[r * W + c]
+          row[c] = Number.isFinite(v) ? v : nodata
+        }
         text += row.join(' ') + '\n'
       }
       parts.push(text)
@@ -898,5 +1284,16 @@ export function makeProductsOps({ rasterize } = {}) {
     return { result: new Blob(parts, { type: 'text/plain' }) }
   }
 
-  return { generateDem, generateOrtho, orthoPlan, orthoShare, orthoCogAdd, orthoFinish, demTool, demPreview, readDemWindow, demAscii }
+  return {
+    generateDem,
+    generateOrtho,
+    orthoPlan,
+    orthoShare,
+    orthoCogAdd,
+    orthoFinish,
+    demTool,
+    demPreview,
+    readDemWindow,
+    demAscii,
+  }
 }

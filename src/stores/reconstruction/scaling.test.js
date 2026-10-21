@@ -11,30 +11,48 @@ beforeAll(async () => {
   await initRecon({ module_or_path: await readFile(fileURLToPath(wasmUrl)) })
 })
 
-const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+const I3 = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+]
 const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
 
 // Four cameras along +X at model-unit spacing, all looking down +Z. Centres are
 // C = −Rᵀt = −t, so t = −C.
 const cam = (cx) => ({ R: I3, t: [-cx, 0, 0], K })
 const CAMS = new Map([
-  ['uA', cam(0)], ['uB', cam(1)], ['uC', cam(0.3)], ['uD', cam(0.6)],
+  ['uA', cam(0)],
+  ['uB', cam(1)],
+  ['uC', cam(0.3)],
+  ['uD', cam(0.6)],
 ])
 const IMAGES = [
-  { id: 'iA', uuid: 'uA', name: 'A.jpg' }, { id: 'iB', uuid: 'uB', name: 'B.jpg' },
-  { id: 'iC', uuid: 'uC', name: 'C.jpg' }, { id: 'iD', uuid: 'uD', name: 'D.jpg' },
+  { id: 'iA', uuid: 'uA', name: 'A.jpg' },
+  { id: 'iB', uuid: 'uB', name: 'B.jpg' },
+  { id: 'iC', uuid: 'uC', name: 'C.jpg' },
+  { id: 'iD', uuid: 'uD', name: 'D.jpg' },
 ]
 
 // Project a world point into a camera, so a marker's marks are exactly consistent.
 function mark(imageId, uuid, P) {
   const c = CAMS.get(uuid)
-  const x = P[0] + c.t[0], y = P[1] + c.t[1], z = P[2] + c.t[2]
-  return { imageId, px: K.fx * x / z + K.cx, py: K.fy * y / z + K.cy }
+  const x = P[0] + c.t[0],
+    y = P[1] + c.t[1],
+    z = P[2] + c.t[2]
+  return { imageId, px: (K.fx * x) / z + K.cx, py: (K.fy * y) / z + K.cy }
 }
 function marker(id, name, P) {
   return {
-    id, name, role: 'marker', enabled: true, x: null, y: null, z: null,
-    accuracyImgX: 1, accuracyImgY: 1,
+    id,
+    name,
+    role: 'marker',
+    enabled: true,
+    x: null,
+    y: null,
+    z: null,
+    accuracyImgX: 1,
+    accuracyImgY: 1,
     observations: IMAGES.map((im) => ({ ...mark(im.id, im.uuid, P), imageName: im.name })),
   }
 }
@@ -61,8 +79,15 @@ function harness({ bars = [], gcps = [M1, M2], cloud = { id: 'c1', createdAt: 't
 }
 
 const bar = (over) => ({
-  id: 'b1', name: 'Bar 1', a: { kind: 'marker', id: 'm1' }, b: { kind: 'marker', id: 'm2' },
-  knownDistanceM: 0.5, accuracyM: null, displayUnit: 'm', enabled: true, ...over,
+  id: 'b1',
+  name: 'Bar 1',
+  a: { kind: 'marker', id: 'm1' },
+  b: { kind: 'marker', id: 'm2' },
+  knownDistanceM: 0.5,
+  accuracyM: null,
+  displayUnit: 'm',
+  enabled: true,
+  ...over,
 })
 
 describe('createScaling · measuring', () => {
@@ -78,21 +103,25 @@ describe('createScaling · measuring', () => {
       bars: [bar({ a: { kind: 'camera', id: 'iA' }, b: { kind: 'camera', id: 'iB' }, knownDistanceM: 3 })],
     })
     const [m] = await h.measureBars()
-    expect(m.modelDistance).toBeCloseTo(1, 9)   // centres 0 and 1 apart
+    expect(m.modelDistance).toBeCloseTo(1, 9) // centres 0 and 1 apart
   })
 
   it('reports WHY an unmeasurable bar cannot be measured, and keeps the row', async () => {
-    const h = harness({ bars: [
-      bar({ id: 'x1', b: null }),
-      bar({ id: 'x2', b: { kind: 'marker', id: 'm1' } }),        // same endpoint twice
-      bar({ id: 'x3', knownDistanceM: 0 }),
-      bar({ id: 'x4', b: { kind: 'camera', id: 'gone' } }),
-    ] })
+    const h = harness({
+      bars: [
+        bar({ id: 'x1', b: null }),
+        bar({ id: 'x2', b: { kind: 'marker', id: 'm1' } }), // same endpoint twice
+        bar({ id: 'x3', knownDistanceM: 0 }),
+        bar({ id: 'x4', b: { kind: 'camera', id: 'gone' } }),
+      ],
+    })
     const rows = await h.measureBars()
-    expect(rows).toHaveLength(4)                                  // nothing dropped
+    expect(rows).toHaveLength(4) // nothing dropped
     expect(rows.map((r) => r.reason)).toEqual([
-      'endpoint missing', 'both endpoints are the same point',
-      'distance must be > 0', 'image removed',
+      'endpoint missing',
+      'both endpoints are the same point',
+      'distance must be > 0',
+      'image removed',
     ])
   })
 
@@ -117,7 +146,7 @@ describe('createScaling · the fit', () => {
   it('fits the scale that makes the bar its entered length', async () => {
     const h = harness({ bars: [bar({ knownDistanceM: 0.5 })] })
     const fit = await h.fitScaleBars()
-    expect(fit.scale).toBeCloseTo(0.25, 4)      // 2 model units = 0.5 m
+    expect(fit.scale).toBeCloseTo(0.25, 4) // 2 model units = 0.5 m
     expect(fit.count).toBe(1)
     expect(fit.method).toBe('scalebars')
     expect(fit.rms).toBeCloseTo(0, 6)
@@ -134,25 +163,21 @@ describe('createScaling · the fit', () => {
   })
 
   it('excludes a disabled bar from the fit but still reports its residual', async () => {
-    const bars = [
-      bar({ id: 'on', knownDistanceM: 0.5 }),
-      bar({ id: 'off', knownDistanceM: 1.0, enabled: false }),
-    ]
+    const bars = [bar({ id: 'on', knownDistanceM: 0.5 }), bar({ id: 'off', knownDistanceM: 1.0, enabled: false })]
     const h = harness({ bars })
     const fit = await h.fitScaleBars()
-    expect(fit.count).toBe(1)                                        // only the enabled one
+    expect(fit.count).toBe(1) // only the enabled one
     const rows = await h.scaleBarReport(fit.scale)
     expect(rows).toHaveLength(2)
     const off = rows.find((r) => r.id === 'off')
     expect(off.enabled).toBe(false)
-    expect(off.residualM).toBeCloseTo(0.5 - 1.0, 6)                  // 2 u × 0.25 = 0.5 m
+    expect(off.residualM).toBeCloseTo(0.5 - 1.0, 6) // 2 u × 0.25 = 0.5 m
   })
 
   it('reports both residuals when two bars disagree, dropping neither', async () => {
     const bars = [
-      bar({ id: 'b1', knownDistanceM: 1.00 }),
-      bar({ id: 'b2', a: { kind: 'camera', id: 'iA' }, b: { kind: 'camera', id: 'iB' },
-        knownDistanceM: 0.51 }),   // 1 model unit; disagrees ~2 % with 2 u = 1.00 m
+      bar({ id: 'b1', knownDistanceM: 1.0 }),
+      bar({ id: 'b2', a: { kind: 'camera', id: 'iA' }, b: { kind: 'camera', id: 'iB' }, knownDistanceM: 0.51 }), // 1 model unit; disagrees ~2 % with 2 u = 1.00 m
     ]
     const h = harness({ bars })
     const fit = await h.fitScaleBars()

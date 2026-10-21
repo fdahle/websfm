@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
-  serializeDepthMap, deserializeDepthMap, depthPlanesMissing,
-  buildDepthIndex, isDepthIndexStale, depthMapBytes,
+  serializeDepthMap,
+  deserializeDepthMap,
+  depthPlanesMissing,
+  buildDepthIndex,
+  isDepthIndexStale,
+  depthMapBytes,
 } from './depthMapCodec.js'
 
 // A 2×3 depth map with distinct values per plane so a mix-up is visible.
@@ -12,7 +16,11 @@ function makeMap(overrides = {}) {
     width: 2,
     height: 3,
     K: { fx: 100, fy: 101, cx: 1, cy: 1.5 },
-    R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    R: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
     t: [1, 2, 3],
     depth: Float32Array.from({ length: px }, (_, i) => i + 0.5),
     cost: Float32Array.from({ length: px }, (_, i) => i * 0.1),
@@ -37,7 +45,11 @@ describe('serialize/deserializeDepthMap', () => {
     expect(back.width).toBe(2)
     expect(back.height).toBe(3)
     expect(back.K).toEqual({ fx: 100, fy: 101, cx: 1, cy: 1.5 })
-    expect(back.R).toEqual([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    expect(back.R).toEqual([
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ])
     expect(back.t).toEqual([1, 2, 3])
     expect(Array.from(back.depth)).toEqual(Array.from(m.depth))
     expect(Array.from(back.cost)).toEqual(Array.from(m.cost))
@@ -100,8 +112,10 @@ describe('depthPlanesMissing', () => {
 describe('buildDepthIndex', () => {
   it('stamps the sparse cloud identity and lists map metadata', () => {
     const cloud = { id: 'cloud-1', createdAt: 1000 }
-    const index = buildDepthIndex([makeMap(), makeMap({ uuid: 'img-b' })],
-      { sparseCloud: cloud, settings: { quality: 'high' } })
+    const index = buildDepthIndex([makeMap(), makeMap({ uuid: 'img-b' })], {
+      sparseCloud: cloud,
+      settings: { quality: 'high' },
+    })
     expect(index.version).toBe(3)
     expect(index.sparseCloudId).toBe('cloud-1')
     expect(index.sparseCreatedAt).toBe(1000)

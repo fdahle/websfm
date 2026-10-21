@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
-  parseGlossaryEntry, autoLinkHtml, searchGlossary,
-  getGlossaryEntriesByTopic, GLOSSARY_TOPICS, getAllGlossaryEntries,
+  parseGlossaryEntry,
+  autoLinkHtml,
+  searchGlossary,
+  getGlossaryEntriesByTopic,
+  GLOSSARY_TOPICS,
+  getAllGlossaryEntries,
 } from './glossary.js'
 import { renderHelpMarkdown } from './helpMarkdown.js'
 
@@ -40,7 +44,9 @@ describe('parseGlossaryEntry', () => {
   })
 
   it('tolerates a leading HTML comment before the frontmatter', () => {
-    const raw = ['<!--', '  schema docs', '-->', '---', 'id: focal-length', 'title: Focal Length', '---', 'body'].join('\n')
+    const raw = ['<!--', '  schema docs', '-->', '---', 'id: focal-length', 'title: Focal Length', '---', 'body'].join(
+      '\n',
+    )
     const entry = parseGlossaryEntry(raw)
     expect(entry.id).toBe('focal-length')
     expect(entry.body).toBe('body')
@@ -65,19 +71,19 @@ describe('getGlossaryEntriesByTopic', () => {
   it('groups entries into non-empty sections in GLOSSARY_TOPICS order', () => {
     const sections = getGlossaryEntriesByTopic()
     expect(sections.length).toBeGreaterThan(0)
-    const order = GLOSSARY_TOPICS.map(t => t.topic)
-    const known = sections.map(s => s.topic).filter(t => order.includes(t))
-    expect(known).toEqual(order.filter(t => known.includes(t)))
+    const order = GLOSSARY_TOPICS.map((t) => t.topic)
+    const known = sections.map((s) => s.topic).filter((t) => order.includes(t))
+    expect(known).toEqual(order.filter((t) => known.includes(t)))
     for (const s of sections) {
       expect(s.entries.length).toBeGreaterThan(0)
-      const titles = s.entries.map(e => e.title)
+      const titles = s.entries.map((e) => e.title)
       expect(titles).toEqual([...titles].sort((a, b) => a.localeCompare(b)))
     }
   })
 
   it('marks pipeline sections and carries their stage card metadata', () => {
     for (const s of getGlossaryEntriesByTopic()) {
-      if (GLOSSARY_TOPICS.some(t => t.topic === s.topic)) {
+      if (GLOSSARY_TOPICS.some((t) => t.topic === s.topic)) {
         expect(s.pipeline).toBe(true)
         expect(s.icon).toBeTruthy()
         expect(s.blurb).toBeTruthy()
@@ -88,7 +94,7 @@ describe('getGlossaryEntriesByTopic', () => {
   })
 
   it('covers every entry exactly once', () => {
-    const ids = getGlossaryEntriesByTopic().flatMap(s => s.entries.map(e => e.id))
+    const ids = getGlossaryEntriesByTopic().flatMap((s) => s.entries.map((e) => e.id))
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids).toContain('bundle-adjustment')
   })
@@ -140,7 +146,9 @@ describe('autoLinkHtml', () => {
   })
 
   it('does not auto-link a term the text already links explicitly', () => {
-    const html = autoLinkHtml('<p>bundle adjustment, then <a href="#" class="glossary-link" data-help-id="bundle-adjustment">BA</a></p>')
+    const html = autoLinkHtml(
+      '<p>bundle adjustment, then <a href="#" class="glossary-link" data-help-id="bundle-adjustment">BA</a></p>',
+    )
     expect(html.match(/data-help-id="bundle-adjustment"/g)).toHaveLength(1)
   })
 
@@ -161,7 +169,7 @@ describe('autoLinkHtml', () => {
 describe('shipped glossary content', () => {
   const raws = import.meta.glob('/src/glossary/**/*.md', { eager: true, query: '?raw', import: 'default' })
   const entries = getAllGlossaryEntries()
-  const ids = new Set(entries.map(e => e.id))
+  const ids = new Set(entries.map((e) => e.id))
 
   it('parses every file (no entry silently skipped)', () => {
     expect(entries.length).toBe(Object.keys(raws).length)
@@ -186,7 +194,7 @@ describe('shipped glossary content', () => {
   })
 
   it('files every entry under a known topic folder', () => {
-    const topics = new Set(GLOSSARY_TOPICS.map(t => t.topic))
+    const topics = new Set(GLOSSARY_TOPICS.map((t) => t.topic))
     for (const e of entries) expect(topics.has(e.topic), `${e.id} in topic ${e.topic}`).toBe(true)
   })
 
@@ -212,7 +220,7 @@ describe('searchGlossary', () => {
   })
 
   it('finds an entry by title', () => {
-    const ids = searchGlossary('bundle').map(e => e.id)
+    const ids = searchGlossary('bundle').map((e) => e.id)
     expect(ids).toContain('bundle-adjustment')
   })
 })

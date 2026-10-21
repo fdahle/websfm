@@ -47,7 +47,10 @@ async function pickFolder() {
 function submit() {
   const n = name.value.trim()
   if (!n) return
-  if (storage.value === 'folder' && !folderHandle.value) { folderError.value = 'Choose a folder first.'; return }
+  if (storage.value === 'folder' && !folderHandle.value) {
+    folderError.value = 'Choose a folder first.'
+    return
+  }
   // Object-capture projects have no geographic CRS (scale is set manually).
   const crsValue = sceneType.value === 'object' ? null : crs.value
   emit('create', {
@@ -76,20 +79,12 @@ function submit() {
 
       <label class="field-label" style="margin-top: 20px">Scene type</label>
       <div class="scene-cards">
-        <button
-          class="scene-card"
-          :class="{ active: sceneType === 'aerial' }"
-          @click="sceneType = 'aerial'"
-        >
+        <button class="scene-card" :class="{ active: sceneType === 'aerial' }" @click="sceneType = 'aerial'">
           <span class="scene-icon"><Icon name="plane" /></span>
           <span class="scene-name">Aerial survey</span>
           <span class="scene-desc">Drone or aerial imagery with GPS coordinates, geo-referenced output</span>
         </button>
-        <button
-          class="scene-card"
-          :class="{ active: sceneType === 'object' }"
-          @click="sceneType = 'object'"
-        >
+        <button class="scene-card" :class="{ active: sceneType === 'object' }" @click="sceneType = 'object'">
           <span class="scene-icon"><Icon name="cube" /></span>
           <span class="scene-name">Object capture</span>
           <span class="scene-desc">Objects or scenes without GPS — scale set manually</span>
@@ -99,25 +94,20 @@ function submit() {
       <template v-if="canUseFolder">
         <label class="field-label" style="margin-top: 20px">Where to keep the files</label>
         <div class="scene-cards">
-          <button
-            class="scene-card"
-            :class="{ active: storage === 'browser' }"
-            @click="storage = 'browser'"
-          >
+          <button class="scene-card" :class="{ active: storage === 'browser' }" @click="storage = 'browser'">
             <span class="scene-icon"><Icon name="browser" /></span>
             <span class="scene-name">In this browser</span>
-            <span class="scene-desc">Private browser storage. Nothing to manage — save a
-              <code>.websfm</code> file when you want a copy.</span>
+            <span class="scene-desc"
+              >Private browser storage. Nothing to manage — save a <code>.websfm</code> file when you want a copy.</span
+            >
           </button>
-          <button
-            class="scene-card"
-            :class="{ active: storage === 'folder' }"
-            @click="pickFolder"
-          >
+          <button class="scene-card" :class="{ active: storage === 'folder' }" @click="pickFolder">
             <span class="scene-icon"><Icon name="folder" /></span>
             <span class="scene-name">In a folder…</span>
             <span class="scene-desc">
-              <template v-if="folderHandle">Chosen: <code>{{ folderHandle.name }}</code></template>
+              <template v-if="folderHandle"
+                >Chosen: <code>{{ folderHandle.name }}</code></template
+              >
               <template v-else>A folder on this computer, so the project lives with your other files.</template>
             </span>
           </button>
@@ -140,7 +130,9 @@ function submit() {
         class="example-link"
         :title="`${example.imageCount} drone photos and a step-by-step walkthrough (${formatBytes(example.approxBytes)} download)`"
         @click="emit('example', exampleId)"
-      >New here? Open the example project</button>
+      >
+        New here? Open the example project
+      </button>
       <button v-if="canCancel" class="btn-secondary" @click="emit('cancel')">Cancel</button>
       <button class="btn-primary" :disabled="!name.trim()" @click="submit">Create project</button>
     </template>
@@ -150,11 +142,16 @@ function submit() {
 <style scoped>
 /* The CRS search list drops below the last field; the shell's scrolling body would
    clip it, so this body does not scroll (it never did — the dialog is short). */
-.new-project :deep(.modal-body) { overflow: visible; }
+.new-project :deep(.modal-body) {
+  overflow: visible;
+}
 
 /* One column so the shell's 12px body gap does not apply; spacing below is the
    dialog's own (label margins). */
-.form { display: flex; flex-direction: column; }
+.form {
+  display: flex;
+  flex-direction: column;
+}
 
 /* The way in for someone without photos: left of the buttons, in the footer, so it
    never adds height to a dialog that already nearly fills a small window. */
@@ -169,7 +166,9 @@ function submit() {
   cursor: pointer;
 }
 
-.example-link:hover { text-decoration: underline; }
+.example-link:hover {
+  text-decoration: underline;
+}
 
 .field-label {
   font-size: 11px;
@@ -267,7 +266,9 @@ function submit() {
   line-height: 1.4;
 }
 
-.crs-hint.error { color: #e55; }
+.crs-hint.error {
+  color: #e55;
+}
 
 .scene-desc code {
   font-size: 10px;

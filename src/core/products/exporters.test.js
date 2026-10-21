@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { cloudToPlyParts, meshToPlyParts, meshToGlbParts, meshToObjParts, meshToStlParts, reconstructionToJson, demToAsciiGridParts, rasterWorldFile, prepareCloudForExport, prepareMeshForExport, objMaterialLibrary } from './exporters.js'
+import {
+  cloudToPlyParts,
+  meshToPlyParts,
+  meshToGlbParts,
+  meshToObjParts,
+  meshToStlParts,
+  reconstructionToJson,
+  demToAsciiGridParts,
+  rasterWorldFile,
+  prepareCloudForExport,
+  prepareMeshForExport,
+  objMaterialLibrary,
+} from './exporters.js'
 import { joinParts, jsonParts } from '../io/parts.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
 
@@ -14,7 +26,8 @@ const demToAsciiGrid = (...a) => joinParts(demToAsciiGridParts(...a))
 describe('meshToPly', () => {
   // A single triangle with per-vertex colour.
   const mesh = {
-    nVerts: 3, count: 1,
+    nVerts: 3,
+    count: 1,
     pos: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
     idx: Uint32Array.from([0, 1, 2]),
     col: Uint8Array.from([255, 0, 0, 0, 255, 0, 0, 0, 255]),
@@ -39,7 +52,8 @@ describe('meshToPly', () => {
 
 describe('meshToGlb', () => {
   const mesh = {
-    nVerts: 3, count: 1,
+    nVerts: 3,
+    count: 1,
     pos: Float32Array.from([0, 0, 0, 2, 0, 0, 0, 4, 0]),
     idx: Uint32Array.from([0, 1, 2]),
     col: Uint8Array.from([255, 0, 0, 0, 255, 0, 0, 0, 255]),
@@ -153,7 +167,18 @@ describe('cloudToPly', () => {
 
 describe('reconstructionToJson', () => {
   it('emits cameras with centres (C = −Rᵀt) + tracks + crs', () => {
-    const cameras = [{ uuid: 'a', R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [1, 2, 3], K: { fx: 100, fy: 100, cx: 50, cy: 40, extra: 9 } }]
+    const cameras = [
+      {
+        uuid: 'a',
+        R: [
+          [1, 0, 0],
+          [0, 1, 0],
+          [0, 0, 1],
+        ],
+        t: [1, 2, 3],
+        K: { fx: 100, fy: 100, cx: 50, cy: 40, extra: 9 },
+      },
+    ]
     const points = SparsePoints.fromRecords([{ x: 1, y: 2, z: 3, color: [10, 20, 30], views: [['a', 5]] }])
     // points is a lazyArray: read the document the way the export writes it.
     const j = JSON.parse(joinParts(jsonParts(reconstructionToJson(cameras, points, 'EPSG:3031'))))
@@ -166,7 +191,11 @@ describe('reconstructionToJson', () => {
 
 describe('demToAsciiGrid', () => {
   const dem = {
-    width: 2, height: 2, gsd: 10, originX: 100, originY: 200,
+    width: 2,
+    height: 2,
+    gsd: 10,
+    originX: 100,
+    originY: 200,
     data: Float32Array.from([1, 2, NaN, 4]), // row-major, top→bottom; NaN = hole
   }
 
@@ -194,7 +223,11 @@ describe('rasterWorldFile', () => {
 })
 
 describe('prepareCloudForExport', () => {
-  const IDENTITY = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const IDENTITY = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]
 
   it('returns the input untouched when neither option is active', () => {
     const pts = [{ x: 1, y: 2, z: 3, color: [1, 2, 3] }]
@@ -232,7 +265,11 @@ describe('prepareCloudForExport', () => {
   it('downsamples the flat dense shape and keeps survey-coordinate precision', () => {
     const n = 4
     const pos = new Float32Array(n * 3)
-    for (let i = 0; i < n; i++) { pos[i * 3] = i * 0.01; pos[i * 3 + 1] = 0; pos[i * 3 + 2] = 0 }
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = i * 0.01
+      pos[i * 3 + 1] = 0
+      pos[i * 3 + 2] = 0
+    }
     const sim = { scale: 1, R: IDENTITY, t: [500000, 7100000, 800] }
     const out = prepareCloudForExport({ count: n, pos, col: new Uint8Array(n * 3).fill(100) }, { sim, cell: 1.0 })
     expect(out.count).toBe(1)
@@ -244,7 +281,10 @@ describe('prepareCloudForExport', () => {
   it('carries attributes through a transform unchanged', () => {
     const sim = { scale: 2, R: IDENTITY, t: [100, 0, 0] }
     const distance = Float32Array.from([0.5, NaN])
-    const out = prepareCloudForExport({ count: 2, pos: new Float64Array([0, 0, 0, 1, 1, 1]), attributes: { distance } }, { sim })
+    const out = prepareCloudForExport(
+      { count: 2, pos: new Float64Array([0, 0, 0, 1, 1, 1]), attributes: { distance } },
+      { sim },
+    )
     expect(out.pos[3]).toBeCloseTo(102, 12)
     expect([...out.attributes.distance]).toEqual([0.5, NaN])
   })
@@ -256,8 +296,10 @@ describe('prepareCloudForExport', () => {
     const classification = Uint8Array.from([2, 6, 9, 6])
     const distance = Float32Array.from([1, 2, 3, 4])
     const logs = []
-    const out = prepareCloudForExport({ count: 4, pos, col, attributes: { classification, distance } },
-      { cell: 1, onLog: (m) => logs.push(m) })
+    const out = prepareCloudForExport(
+      { count: 4, pos, col, attributes: { classification, distance } },
+      { cell: 1, onLog: (m) => logs.push(m) },
+    )
     expect(out.count).toBe(2)
     expect([...out.pos]).toEqual([0.1, 0.1, 0.1, 5.5, 5.5, 5.5])
     expect([...out.col]).toEqual([10, 10, 10, 30, 30, 30])
@@ -273,11 +315,21 @@ describe('prepareCloudForExport', () => {
 describe('prepareMeshForExport', () => {
   it('transforms vertices without changing topology or colours', () => {
     const mesh = {
-      nVerts: 2, count: 0,
+      nVerts: 2,
+      count: 0,
       pos: Float32Array.from([1, 2, 3, 4, 5, 6]),
-      idx: new Uint32Array(), col: Uint8Array.from([1, 2, 3, 4, 5, 6]),
+      idx: new Uint32Array(),
+      col: Uint8Array.from([1, 2, 3, 4, 5, 6]),
     }
-    const sim = { scale: 2, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [10, 20, 30] }
+    const sim = {
+      scale: 2,
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [10, 20, 30],
+    }
     const out = prepareMeshForExport(mesh, { sim })
     expect([...out.pos]).toEqual([12, 24, 36, 18, 30, 42])
     expect(out.idx).toBe(mesh.idx)
@@ -292,7 +344,8 @@ describe('prepareMeshForExport', () => {
 
 describe('meshToObj', () => {
   const mesh = {
-    nVerts: 3, count: 1,
+    nVerts: 3,
+    count: 1,
     pos: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
     idx: Uint32Array.from([0, 1, 2]),
     col: Uint8Array.from([255, 0, 0, 0, 255, 0, 0, 0, 255]),
@@ -317,7 +370,8 @@ describe('meshToObj', () => {
 
 describe('meshToStl', () => {
   const mesh = {
-    nVerts: 3, count: 1,
+    nVerts: 3,
+    count: 1,
     pos: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
     idx: Uint32Array.from([0, 1, 2]),
   }
@@ -337,7 +391,8 @@ describe('meshToStl', () => {
 
   it('writes a zero normal for a degenerate triangle (no NaN)', () => {
     const degen = {
-      nVerts: 3, count: 1,
+      nVerts: 3,
+      count: 1,
       pos: Float32Array.from([0, 0, 0, 0, 0, 0, 1, 1, 1]), // two coincident verts
       idx: Uint32Array.from([0, 1, 2]),
     }
@@ -350,24 +405,35 @@ describe('part writers — chunking never changes the bytes', () => {
   // Deterministic pseudo-random fixtures, big enough that tiny part sizes split them
   // many times.
   let seed = 7
-  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
   const n = 2000
   const cloud = {
     count: n,
     pos: Float32Array.from({ length: n * 3 }, () => (rand() - 0.5) * 1e4),
     col: Uint8Array.from({ length: n * 3 }, () => rand() * 256),
     nrm: Float32Array.from({ length: n * 3 }, () => rand() - 0.5),
-    attributes: { distance: Float32Array.from({ length: n }, () => rand()), classification: Uint8Array.from({ length: n }, () => rand() * 20) },
+    attributes: {
+      distance: Float32Array.from({ length: n }, () => rand()),
+      classification: Uint8Array.from({ length: n }, () => rand() * 20),
+    },
   }
-  const nV = 600, nF = 1100
+  const nV = 600,
+    nF = 1100
   const mesh = {
-    nVerts: nV, count: nF,
+    nVerts: nV,
+    count: nF,
     pos: Float64Array.from({ length: nV * 3 }, () => rand() * 1e5),
     idx: Uint32Array.from({ length: nF * 3 }, () => Math.floor(rand() * nV)),
     col: Uint8Array.from({ length: nV * 3 }, () => rand() * 256),
   }
-  const dem = { width: 16, height: 400, gsd: 0.5, originX: 1000, originY: 2000,
-    data: Float32Array.from({ length: 16 * 400 }, () => (rand() < 0.1 ? NaN : rand() * 100)) }
+  const dem = {
+    width: 16,
+    height: 400,
+    gsd: 0.5,
+    originX: 1000,
+    originY: 2000,
+    data: Float32Array.from({ length: 16 * 400 }, () => (rand() < 0.1 ? NaN : rand() * 100)),
+  }
   const tiny = { partBytes: 512, partChars: 512 }
   const writers = {
     'cloud PLY binary': (o) => cloudToPlyParts(cloud, { binary: true, ...o }),
@@ -393,8 +459,11 @@ describe('part writers — chunking never changes the bytes', () => {
   it('an empty cloud keeps the historical lone newline after an ASCII header', () => {
     const text = cloudToPly([], { binary: false })
     expect(text.endsWith('end_header\n\n')).toBe(true)
-    expect(demToAsciiGrid({ width: 0, height: 0, gsd: 1, originX: 0, originY: 0, data: new Float32Array(0) })
-      .endsWith('NODATA_value -9999\n\n')).toBe(true)
+    expect(
+      demToAsciiGrid({ width: 0, height: 0, gsd: 1, originX: 0, originY: 0, data: new Float32Array(0) }).endsWith(
+        'NODATA_value -9999\n\n',
+      ),
+    ).toBe(true)
   })
 
   it('GLB total length and BIN chunk length match the bytes written', () => {
@@ -410,21 +479,35 @@ describe('part writers — chunking never changes the bytes', () => {
 describe('textured mesh export', () => {
   // A quad split over two atlas pages: triangle 0 on page 0, triangle 1 on page 1.
   const mesh = {
-    nVerts: 6, count: 2,
+    nVerts: 6,
+    count: 2,
     pos: Float64Array.from([10, 20, 1, 11, 20, 1, 11, 21, 1, 10, 20, 1, 11, 21, 1, 10, 21, 1]),
     idx: Uint32Array.of(0, 1, 2, 3, 4, 5),
     col: new Uint8Array(18).fill(200),
     uv: Float32Array.from([0.1, 0.9, 0.9, 0.9, 0.9, 0.1, 0.1, 0.9, 0.9, 0.1, 0.1, 0.1]),
   }
-  const jpegA = Uint8Array.of(0xff, 0xd8, 1, 2, 3), jpegB = Uint8Array.of(0xff, 0xd8, 4, 5, 6, 7, 8)
-  const texture = { pages: [{ bytes: jpegA, type: 'image/jpeg' }, { bytes: jpegB, type: 'image/jpeg' }],
-    groups: [{ page: 0, start: 0, count: 1 }, { page: 1, start: 1, count: 1 }] }
+  const jpegA = Uint8Array.of(0xff, 0xd8, 1, 2, 3),
+    jpegB = Uint8Array.of(0xff, 0xd8, 4, 5, 6, 7, 8)
+  const texture = {
+    pages: [
+      { bytes: jpegA, type: 'image/jpeg' },
+      { bytes: jpegB, type: 'image/jpeg' },
+    ],
+    groups: [
+      { page: 0, start: 0, count: 1 },
+      { page: 1, start: 1, count: 1 },
+    ],
+  }
   const parse = (bytes) => {
     const dv = new DataView(bytes.buffer, bytes.byteOffset)
     const jsonLen = dv.getUint32(12, true)
     const json = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLen)))
     const binOff = 20 + jsonLen + 8
-    return { json, bin: bytes.subarray(binOff, binOff + dv.getUint32(20 + jsonLen, true)), total: dv.getUint32(8, true) }
+    return {
+      json,
+      bin: bytes.subarray(binOff, binOff + dv.getUint32(20 + jsonLen, true)),
+      total: dv.getUint32(8, true),
+    }
   }
 
   it('GLB: UVs, one unlit primitive per page over its index range, pages embedded, no COLOR_0', () => {
@@ -443,7 +526,10 @@ describe('textured mesh export', () => {
     expect(json.materials[1].pbrMetallicRoughness.baseColorTexture.index).toBe(1)
     // Every bufferView offset is 4-byte aligned, and the images are the page bytes.
     for (const v of json.bufferViews) expect(v.byteOffset % 4).toBe(0)
-    const img = (k) => { const v = json.bufferViews[json.images[k].bufferView]; return [...bin.subarray(v.byteOffset, v.byteOffset + v.byteLength)] }
+    const img = (k) => {
+      const v = json.bufferViews[json.images[k].bufferView]
+      return [...bin.subarray(v.byteOffset, v.byteOffset + v.byteLength)]
+    }
     expect(img(0)).toEqual([...jpegA])
     expect(img(1)).toEqual([...jpegB])
     // UVs as written.

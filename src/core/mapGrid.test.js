@@ -102,6 +102,9 @@ describe('computeGrid', () => {
     const g = computeGrid({ viewExtent: [0, 0, 1, 1], resolution: 0.001, size: [1000, 1000], validExtent: null })
     expect(g.spacing).toBeCloseTo(0.2, 12)
     let x = Math.ceil(g.bounds[0] / g.spacing) * g.spacing + 0
-    for (const v of g.xs) { expect(v).toBe(x); x += g.spacing }
+    for (const v of g.xs) {
+      expect(v).toBe(x)
+      x += g.spacing
+    }
   })
 })

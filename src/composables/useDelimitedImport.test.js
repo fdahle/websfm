@@ -4,12 +4,33 @@ import { guessMapping as guessGcps } from '../core/io/gcp.js'
 import { SENSOR_ROLES, guessMapping as guessSensors } from '../core/io/sensor.js'
 import { POSE_ROLES, guessMapping as guessPoses } from '../core/io/pose.js'
 import {
-  useDelimitedImport, rolesFromMapping, assignRole, mappingFromRoles, PREVIEW_ROW_COUNT,
+  useDelimitedImport,
+  rolesFromMapping,
+  assignRole,
+  mappingFromRoles,
+  PREVIEW_ROW_COUNT,
 } from './useDelimitedImport.js'
 
 // The role ids GcpImportModal offers (its role <select>, minus 'ignore'), in order.
-const GCP_ROLES = ['name', 'x', 'y', 'z', 'image', 'px', 'py', 'role', 'accuracyX', 'accuracyY', 'accuracyZ',
-  'accuracyXY', 'accuracyImgX', 'accuracyImgY', 'correlationXY', 'correlationXZ', 'correlationYZ']
+const GCP_ROLES = [
+  'name',
+  'x',
+  'y',
+  'z',
+  'image',
+  'px',
+  'py',
+  'role',
+  'accuracyX',
+  'accuracyY',
+  'accuracyZ',
+  'accuracyXY',
+  'accuracyImgX',
+  'accuracyImgY',
+  'correlationXY',
+  'correlationXZ',
+  'correlationYZ',
+]
 
 function gcpImport(text) {
   const rawText = ref(text)
@@ -42,7 +63,7 @@ describe('useDelimitedImport — parsing', () => {
     expect(imp.delimiter.value).toBe('comma')
     expect(imp.hasHeader.value).toBe(true)
     expect(imp.rows.value).toHaveLength(4)
-    expect(imp.columnCount.value).toBe(8)   // widest row, not the first data row
+    expect(imp.columnCount.value).toBe(8) // widest row, not the first data row
     expect(imp.headerCells.value).toEqual(['Name', 'East', 'North', 'Height', 'photo', 'u', 'v', 'sigma_x'])
     expect(imp.dataRows.value.map((r) => r[0])).toEqual(['A', 'B', 'C'])
     expect(imp.previewRows.value).toEqual(imp.dataRows.value)
@@ -133,7 +154,16 @@ describe('useDelimitedImport — role guessing', () => {
     await nextTick()
     // With a header, only recognised columns get a role: x/y/z are not guessed as
     // width/height/focal by position.
-    expect(imp.columnRoles.value).toEqual(['image', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore'])
+    expect(imp.columnRoles.value).toEqual([
+      'image',
+      'ignore',
+      'ignore',
+      'ignore',
+      'ignore',
+      'ignore',
+      'ignore',
+      'ignore',
+    ])
     expect(Object.keys(imp.mapping.value)).toEqual(SENSOR_ROLES)
   })
 
@@ -149,7 +179,18 @@ describe('useDelimitedImport — role assignment and mapping', () => {
   it('maps every offered role, null when unassigned', () => {
     const imp = gcpImport(GCP_FILE)
     expect(Object.keys(imp.mapping.value)).toEqual(GCP_ROLES)
-    expect(imp.mapping.value).toMatchObject({ name: 0, x: 1, y: 2, z: 3, image: 4, px: 5, py: 6, accuracyX: 7, role: null, accuracyXY: null })
+    expect(imp.mapping.value).toMatchObject({
+      name: 0,
+      x: 1,
+      y: 2,
+      z: 3,
+      image: 4,
+      px: 5,
+      py: 6,
+      accuracyX: 7,
+      role: null,
+      accuracyXY: null,
+    })
   })
 
   it('each role is used at most once: assigning it elsewhere clears the old column', () => {
@@ -178,7 +219,7 @@ describe('useDelimitedImport — role assignment and mapping', () => {
     expect(rolesFromMapping({ name: 2, x: 0, y: null }, 4)).toEqual(['x', 'ignore', 'name', 'ignore'])
     const roles = ['name', 'x', 'ignore']
     expect(assignRole(roles, 2, 'name')).toEqual(['ignore', 'x', 'name'])
-    expect(roles).toEqual(['name', 'x', 'ignore'])   // not mutated
+    expect(roles).toEqual(['name', 'x', 'ignore']) // not mutated
     expect(assignRole(roles, 0, 'ignore')).toEqual(['ignore', 'x', 'ignore'])
     // The first column carrying a role wins (setRole never produces duplicates,
     // but a hand-built role list may).

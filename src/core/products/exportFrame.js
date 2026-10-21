@@ -21,7 +21,12 @@
 export function similarityForExport(resolved) {
   if (resolved?.source === 'georef') {
     const f = resolved.frameSpec
-    return { sim: { scale: f.scale, R: f.R, t: f.t, local: f.local ?? null }, unit: resolved.unit, crs: resolved.crs, source: 'georef' }
+    return {
+      sim: { scale: f.scale, R: f.R, t: f.t, local: f.local ?? null },
+      unit: resolved.unit,
+      crs: resolved.crs,
+      source: 'georef',
+    }
   }
   const f = resolved?.frameSpec
   const oriented = f?.east && f?.north && f?.up && f?.origin
@@ -29,13 +34,28 @@ export function similarityForExport(resolved) {
   if (oriented) {
     const R = [f.east, f.north, f.up]
     const t = R.map((row) => -s * (row[0] * f.origin[0] + row[1] * f.origin[1] + row[2] * f.origin[2]))
-    return { sim: { scale: s, R, t }, unit: resolved.source === 'scalebars' ? 'm' : 'model', crs: null,
-      source: resolved.source === 'scalebars' ? 'scalebars' : 'orientation', oriented: true }
+    return {
+      sim: { scale: s, R, t },
+      unit: resolved.source === 'scalebars' ? 'm' : 'model',
+      crs: null,
+      source: resolved.source === 'scalebars' ? 'scalebars' : 'orientation',
+      oriented: true,
+    }
   }
   if (resolved?.source === 'scalebars') {
     return {
-      sim: { scale: resolved.scale, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] },
-      unit: 'm', crs: null, source: 'scalebars',
+      sim: {
+        scale: resolved.scale,
+        R: [
+          [1, 0, 0],
+          [0, 1, 0],
+          [0, 0, 1],
+        ],
+        t: [0, 0, 0],
+      },
+      unit: 'm',
+      crs: null,
+      source: 'scalebars',
     }
   }
   return { sim: null, unit: 'model', crs: null, source: null }

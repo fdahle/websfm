@@ -4,8 +4,12 @@ import { watchTileFailures } from './tileFailures.js'
 function fakeSource() {
   const listeners = {}
   return {
-    on(type, fn) { (listeners[type] ??= []).push(fn) },
-    emit(type) { for (const fn of listeners[type] ?? []) fn() },
+    on(type, fn) {
+      ;(listeners[type] ??= []).push(fn)
+    },
+    emit(type) {
+      for (const fn of listeners[type] ?? []) fn()
+    },
   }
 }
 
@@ -15,7 +19,13 @@ describe('watchTileFailures', () => {
     const changes = []
     let t = 0
     watchTileFailures(source, (v) => changes.push(v), { threshold: 3, windowMs: 1000, now: () => t })
-    return { source, changes, advance: (ms) => { t += ms } }
+    return {
+      source,
+      changes,
+      advance: (ms) => {
+        t += ms
+      },
+    }
   }
 
   it('reports failing after enough errors within the window', () => {
@@ -29,7 +39,11 @@ describe('watchTileFailures', () => {
 
   it('stays failing while cached tiles keep loading between errors', () => {
     const { source, changes, advance } = setup()
-    for (let i = 0; i < 3; i++) { source.emit('tileloaderror'); source.emit('tileloadend'); advance(100) }
+    for (let i = 0; i < 3; i++) {
+      source.emit('tileloaderror')
+      source.emit('tileloadend')
+      advance(100)
+    }
     source.emit('tileloadend')
     expect(changes).toEqual([true])
   })
@@ -44,7 +58,10 @@ describe('watchTileFailures', () => {
 
   it('ignores errors spread out beyond the window', () => {
     const { source, changes, advance } = setup()
-    for (let i = 0; i < 5; i++) { source.emit('tileloaderror'); advance(600) }
+    for (let i = 0; i < 5; i++) {
+      source.emit('tileloaderror')
+      advance(600)
+    }
     expect(changes).toEqual([])
   })
 })

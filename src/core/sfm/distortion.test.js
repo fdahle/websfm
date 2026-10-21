@@ -1,9 +1,18 @@
 import { describe, it, expect } from 'vitest'
 import {
-  hasDistortion, distortNormalized, undistortNormalized,
-  undistortPixel, distortPixel, distortionOf,
-  coeffsForModel, inferDistortionModel, DISTORTION_MODELS,
-  isFisheyeModel, parseDistortionModelName, undistortKeypoint, FISHEYE_MAX_RAY_DEG,
+  hasDistortion,
+  distortNormalized,
+  undistortNormalized,
+  undistortPixel,
+  distortPixel,
+  distortionOf,
+  coeffsForModel,
+  inferDistortionModel,
+  DISTORTION_MODELS,
+  isFisheyeModel,
+  parseDistortionModelName,
+  undistortKeypoint,
+  FISHEYE_MAX_RAY_DEG,
 } from './distortion.js'
 
 // A realistic mid-frame camera (1920×1080) with moderate barrel distortion + a
@@ -30,11 +39,9 @@ describe('distortion (Brown–Conrady)', () => {
     // Pinhole ignores every coefficient (a model switch can't leave a term applied).
     expect(distortionOf({ ...full, distortionModel: 'pinhole' })).toBeNull()
     // Radial(k1) applies only k1; k2/k3/p1/p2 are zeroed even though present.
-    expect(distortionOf({ ...full, distortionModel: 'radial' }))
-      .toEqual({ k1: -0.1, k2: 0, k3: 0, p1: 0, p2: 0 })
+    expect(distortionOf({ ...full, distortionModel: 'radial' })).toEqual({ k1: -0.1, k2: 0, k3: 0, p1: 0, p2: 0 })
     // Radial(k1,k2) keeps k1,k2 only.
-    expect(distortionOf({ ...full, distortionModel: 'radial2' }))
-      .toEqual({ k1: -0.1, k2: 0.02, k3: 0, p1: 0, p2: 0 })
+    expect(distortionOf({ ...full, distortionModel: 'radial2' })).toEqual({ k1: -0.1, k2: 0.02, k3: 0, p1: 0, p2: 0 })
     // Brown keeps all five.
     expect(distortionOf({ ...full, distortionModel: 'brown' })).toEqual(full)
   })
@@ -59,8 +66,8 @@ describe('distortion (Brown–Conrady)', () => {
     let maxErr = 0
     for (let v = 0; v <= 1080; v += 60) {
       for (let u = 0; u <= 1920; u += 60) {
-        const dp = distortPixel(u, v, K, D)                 // ideal → distorted
-        const up = undistortPixel(dp.x, dp.y, K, D)         // distorted → ideal
+        const dp = distortPixel(u, v, K, D) // ideal → distorted
+        const up = undistortPixel(dp.x, dp.y, K, D) // distorted → ideal
         maxErr = Math.max(maxErr, Math.hypot(up.x - u, up.y - v))
       }
     }
@@ -73,7 +80,13 @@ describe('distortion (Brown–Conrady)', () => {
     const K = { fx: 3000, fy: 3000, cx: 2000, cy: 1500 }
     for (const d of [{ k1: -0.18 }, { k1: -0.2, k2: 0.02 }, { k1: -0.12, k2: -0.01, p1: 0.002, p2: -0.001 }]) {
       let maxErr = 0
-      for (const [u, v] of [[0, 0], [4000, 3000], [0, 3000], [4000, 0], [1000, 2500]]) {
+      for (const [u, v] of [
+        [0, 0],
+        [4000, 3000],
+        [0, 3000],
+        [4000, 0],
+        [1000, 2500],
+      ]) {
         const dp = distortPixel(u, v, K, d)
         const up = undistortPixel(dp.x, dp.y, K, d)
         maxErr = Math.max(maxErr, Math.hypot(up.x - u, up.y - v))
@@ -100,7 +113,9 @@ describe('distortion (rational, OpenCV CALIB_RATIONAL_MODEL)', () => {
   const R = { k1: 0.3, k2: -0.05, k3: 0.01, k4: 0.4, k5: -0.02, k6: 0.005, p1: 5e-4, p2: -3e-4 }
 
   it('forward matches the rational formula and reduces to Brown without k4…k6', () => {
-    const x = 0.5, y = -0.4, r2 = x * x + y * y
+    const x = 0.5,
+      y = -0.4,
+      r2 = x * x + y * y
     const radial = (1 + R.k1 * r2 + R.k2 * r2 ** 2 + R.k3 * r2 ** 3) / (1 + R.k4 * r2 + R.k5 * r2 ** 2 + R.k6 * r2 ** 3)
     const [xd, yd] = distortNormalized(x, y, R)
     expect(xd).toBeCloseTo(x * radial + 2 * R.p1 * x * y + R.p2 * (r2 + 2 * x * x), 12)
@@ -111,7 +126,13 @@ describe('distortion (rational, OpenCV CALIB_RATIONAL_MODEL)', () => {
   it('inverts exactly across a wide frame', () => {
     const K = { fx: 1200, fy: 1200, cx: 2000, cy: 1500 }
     let maxErr = 0
-    for (const [u, v] of [[0, 0], [4000, 3000], [0, 3000], [3100, 200], [2000, 1500]]) {
+    for (const [u, v] of [
+      [0, 0],
+      [4000, 3000],
+      [0, 3000],
+      [3100, 200],
+      [2000, 1500],
+    ]) {
       const dp = distortPixel(u, v, K, R)
       const up = undistortPixel(dp.x, dp.y, K, R)
       maxErr = Math.max(maxErr, Math.hypot(up.x - u, up.y - v))
@@ -123,8 +144,13 @@ describe('distortion (rational, OpenCV CALIB_RATIONAL_MODEL)', () => {
     const sensor = { ...R, distortionModel: 'rational' }
     expect(distortionOf(sensor)).toEqual(R)
     // Brown ignores the denominator terms entirely (bag shape unchanged).
-    expect(distortionOf({ ...sensor, distortionModel: 'brown' }))
-      .toEqual({ k1: R.k1, k2: R.k2, k3: R.k3, p1: R.p1, p2: R.p2 })
+    expect(distortionOf({ ...sensor, distortionModel: 'brown' })).toEqual({
+      k1: R.k1,
+      k2: R.k2,
+      k3: R.k3,
+      p1: R.p1,
+      p2: R.p2,
+    })
     expect(inferDistortionModel({ k1: 0.1, k5: 0.01 })).toBe('rational')
   })
 })
@@ -149,8 +175,13 @@ describe('distortion (Kannala–Brandt fisheye)', () => {
     expect(hasDistortion({ fisheye: true, k1: 0, k2: 0, k3: 0, k4: 0 })).toBe(true)
     expect(distortionOf({ distortionModel: 'fisheye' })).toEqual({ fisheye: true, k1: 0, k2: 0, k3: 0, k4: 0 })
     // Only the model's own terms are live.
-    expect(distortionOf({ distortionModel: 'fisheye2', k1: 0.1, k2: 0.2, k3: 0.3, k4: 0.4, p1: 0.01 }))
-      .toEqual({ fisheye: true, k1: 0.1, k2: 0.2, k3: 0, k4: 0 })
+    expect(distortionOf({ distortionModel: 'fisheye2', k1: 0.1, k2: 0.2, k3: 0.3, k4: 0.4, p1: 0.01 })).toEqual({
+      fisheye: true,
+      k1: 0.1,
+      k2: 0.2,
+      k3: 0,
+      k4: 0,
+    })
     expect(isFisheyeModel('fisheye1')).toBe(true)
     expect(isFisheyeModel('brown')).toBe(false)
     expect(isFisheyeModel(undefined)).toBe(false)
@@ -159,7 +190,13 @@ describe('distortion (Kannala–Brandt fisheye)', () => {
   it('inverts exactly out to a wide ray', () => {
     let maxErr = 0
     // Pinhole pixels up to tan(80°)·f off-centre.
-    for (const [u, v] of [[2000, 1500], [3000, 1500], [2000 + 1700 * 3, 1500 + 1700 * 2], [100, 2900], [-6000, -4000]]) {
+    for (const [u, v] of [
+      [2000, 1500],
+      [3000, 1500],
+      [2000 + 1700 * 3, 1500 + 1700 * 2],
+      [100, 2900],
+      [-6000, -4000],
+    ]) {
       const dp = distortPixel(u, v, K, F)
       const up = undistortPixel(dp.x, dp.y, K, F)
       maxErr = Math.max(maxErr, Math.hypot(up.x - u, up.y - v))
@@ -185,7 +222,7 @@ describe('distortion (Kannala–Brandt fisheye)', () => {
 })
 
 describe('parseDistortionModelName', () => {
-  it('reads our ids, COLMAP names and other tools\' spellings', () => {
+  it("reads our ids, COLMAP names and other tools' spellings", () => {
     expect(parseDistortionModelName('fisheye')).toBe('fisheye')
     expect(parseDistortionModelName('OPENCV_FISHEYE')).toBe('fisheye')
     expect(parseDistortionModelName('fisheye_opencv')).toBe('fisheye')

@@ -26,21 +26,23 @@ export const ACKNOWLEDGMENTS = [
   {
     name: 'COLMAP',
     url: 'https://colmap.github.io/',
-    note: 'The incremental Structure-from-Motion structure (next-best-view registration, ' +
+    note:
+      'The incremental Structure-from-Motion structure (next-best-view registration, ' +
       'two-gate PnP, interleaved bundle adjustment) and the cross-view depth-consistency ' +
       'fusion filter in the dense pipeline follow COLMAP’s design.',
   },
   {
     name: 'PatchMatch Stereo / Gipuma',
     url: 'https://github.com/kysucix/gipuma',
-    note: 'The dense multi-view stereo uses slanted-plane PatchMatch with red–black ' +
+    note:
+      'The dense multi-view stereo uses slanted-plane PatchMatch with red–black ' +
       'checkerboard propagation, after Bleyer et al. and Galliani et al.',
   },
   {
     name: 'Screened Poisson Surface Reconstruction',
     url: 'https://www.cs.jhu.edu/~misha/Code/PoissonRecon/',
-    note: 'Meshing follows Kazhdan & Hoppe’s screened-Poisson method, via Dimforge’s ' +
-      'Rust implementation (see below).',
+    note:
+      'Meshing follows Kazhdan & Hoppe’s screened-Poisson method, via Dimforge’s ' + 'Rust implementation (see below).',
   },
   {
     name: 'SIFT (D. Lowe)',
@@ -50,7 +52,8 @@ export const ACKNOWLEDGMENTS = [
   {
     name: 'Agisoft Metashape',
     url: 'https://www.agisoft.com/',
-    note: 'General photogrammetry workflow and UI conventions took inspiration from ' +
+    note:
+      'General photogrammetry workflow and UI conventions took inspiration from ' +
       'established desktop tools such as Metashape.',
   },
 ]
@@ -65,36 +68,73 @@ export const THIRD_PARTY = [
   {
     group: 'Application (JavaScript)',
     items: [
-      { name: 'Vue',                    version: '3.5.38',  license: 'MIT',          url: 'https://github.com/vuejs/core' },
-      { name: 'Pinia',                  version: '3.0.4',   license: 'MIT',          url: 'https://github.com/vuejs/pinia' },
-      { name: 'OpenLayers',             version: '10.9.0',  license: 'BSD-2-Clause', url: 'https://github.com/openlayers/openlayers' },
-      { name: 'Three.js',               version: '0.171.0', license: 'MIT',          url: 'https://github.com/mrdoob/three.js' },
-      { name: 'proj4js',                version: '2.20.9',  license: 'MIT',          url: 'https://github.com/proj4js/proj4js' },
-      { name: 'geotiff.js',             version: '3.0.5',   license: 'MIT',          url: 'https://github.com/geotiffjs/geotiff.js' },
-      { name: 'ONNX Runtime Web',       version: '1.27.0',  license: 'MIT',          url: 'https://github.com/microsoft/onnxruntime' },
-      { name: 'KaTeX',                  version: '0.17.0',  license: 'MIT',          url: 'https://github.com/KaTeX/KaTeX' },
-      { name: 'marked',                 version: '18.0.5',  license: 'MIT',          url: 'https://github.com/markedjs/marked' },
-      { name: 'marked-katex-extension', version: '5.1.10',  license: 'MIT',          url: 'https://github.com/UziTech/marked-katex-extension' },
-      { name: 'exifr',                  version: '7.1.3',   license: 'MIT',          url: 'https://github.com/MikeKovarik/exifr' },
-      { name: 'fflate',                 version: '0.8.3',   license: 'MIT',          url: 'https://github.com/101arrowz/fflate' },
-      { name: 'SQLite Wasm',            version: '3.53.0',  license: 'Apache-2.0',   url: 'https://github.com/sqlite/sqlite-wasm' },
+      { name: 'Vue', version: '3.5.38', license: 'MIT', url: 'https://github.com/vuejs/core' },
+      { name: 'Pinia', version: '3.0.4', license: 'MIT', url: 'https://github.com/vuejs/pinia' },
+      {
+        name: 'OpenLayers',
+        version: '10.9.0',
+        license: 'BSD-2-Clause',
+        url: 'https://github.com/openlayers/openlayers',
+      },
+      { name: 'Three.js', version: '0.171.0', license: 'MIT', url: 'https://github.com/mrdoob/three.js' },
+      { name: 'proj4js', version: '2.20.9', license: 'MIT', url: 'https://github.com/proj4js/proj4js' },
+      { name: 'geotiff.js', version: '3.0.5', license: 'MIT', url: 'https://github.com/geotiffjs/geotiff.js' },
+      { name: 'ONNX Runtime Web', version: '1.27.0', license: 'MIT', url: 'https://github.com/microsoft/onnxruntime' },
+      { name: 'KaTeX', version: '0.17.0', license: 'MIT', url: 'https://github.com/KaTeX/KaTeX' },
+      { name: 'marked', version: '18.0.5', license: 'MIT', url: 'https://github.com/markedjs/marked' },
+      {
+        name: 'marked-katex-extension',
+        version: '5.1.10',
+        license: 'MIT',
+        url: 'https://github.com/UziTech/marked-katex-extension',
+      },
+      { name: 'exifr', version: '7.1.3', license: 'MIT', url: 'https://github.com/MikeKovarik/exifr' },
+      { name: 'fflate', version: '0.8.3', license: 'MIT', url: 'https://github.com/101arrowz/fflate' },
+      { name: 'SQLite Wasm', version: '3.53.0', license: 'Apache-2.0', url: 'https://github.com/sqlite/sqlite-wasm' },
     ],
   },
   {
     group: 'Compute (Rust → WASM)',
     items: [
-      { name: 'wasm-bindgen',            version: '0.2.125', license: 'MIT OR Apache-2.0', url: 'https://github.com/rustwasm/wasm-bindgen' },
-      { name: 'nalgebra',                version: '0.33.3',  license: 'Apache-2.0',        url: 'https://github.com/dimforge/nalgebra' },
-      { name: 'tiff',                    version: '0.9.1',   license: 'MIT',               url: 'https://github.com/image-rs/image-tiff' },
-      { name: 'poisson_reconstruction',  version: '0.4.0',   license: 'MIT OR Apache-2.0', url: 'https://github.com/dimforge/poisson_reconstruction',
-        notice: 'Vendored under crates/mesh/vendor/ (rayon stripped for threadless WASM, ' +
-          'with a marching-cubes iso patch).' },
-      { name: 'laz',                     version: '0.12.2',  license: 'Apache-2.0',        url: 'https://github.com/laz-rs/laz-rs',
-        notice: 'Rust port of LASzip, compiled into crates/lazcodec for LAZ point-cloud ' +
+      {
+        name: 'wasm-bindgen',
+        version: '0.2.125',
+        license: 'MIT OR Apache-2.0',
+        url: 'https://github.com/rustwasm/wasm-bindgen',
+      },
+      { name: 'nalgebra', version: '0.33.3', license: 'Apache-2.0', url: 'https://github.com/dimforge/nalgebra' },
+      { name: 'tiff', version: '0.9.1', license: 'MIT', url: 'https://github.com/image-rs/image-tiff' },
+      {
+        name: 'poisson_reconstruction',
+        version: '0.4.0',
+        license: 'MIT OR Apache-2.0',
+        url: 'https://github.com/dimforge/poisson_reconstruction',
+        notice:
+          'Vendored under crates/mesh/vendor/ (rayon stripped for threadless WASM, ' +
+          'with a marching-cubes iso patch).',
+      },
+      {
+        name: 'laz',
+        version: '0.12.2',
+        license: 'Apache-2.0',
+        url: 'https://github.com/laz-rs/laz-rs',
+        notice:
+          'Rust port of LASzip, compiled into crates/lazcodec for LAZ point-cloud ' +
           'compression. Licensed under the Apache License, Version 2.0; a copy is at ' +
-          'https://www.apache.org/licenses/LICENSE-2.0' },
-      { name: 'byteorder',               version: '1.5.0',   license: 'Unlicense OR MIT',  url: 'https://github.com/BurntSushi/byteorder' },
-      { name: 'num-traits',              version: '0.2.19',  license: 'MIT OR Apache-2.0', url: 'https://github.com/rust-num/num-traits' },
+          'https://www.apache.org/licenses/LICENSE-2.0',
+      },
+      {
+        name: 'byteorder',
+        version: '1.5.0',
+        license: 'Unlicense OR MIT',
+        url: 'https://github.com/BurntSushi/byteorder',
+      },
+      {
+        name: 'num-traits',
+        version: '0.2.19',
+        license: 'MIT OR Apache-2.0',
+        url: 'https://github.com/rust-num/num-traits',
+      },
     ],
   },
   {
@@ -104,13 +144,20 @@ export const THIRD_PARTY = [
     // Leap's non-commercial license, so the user supplies the file themselves.
     group: 'Learned models (downloaded on demand)',
     items: [
-      { name: 'SuperPoint (user-supplied, not distributed)', license: 'Magic Leap academic / non-commercial research license',
-        url: 'https://github.com/magicleap/SuperPointPretrainedNetwork' },
-      { name: 'DISK',      license: 'Apache-2.0', url: 'https://github.com/cvlab-epfl/disk' },
-      { name: 'ALIKED',    license: 'BSD-3-Clause', url: 'https://github.com/Shiaoming/ALIKED' },
+      {
+        name: 'SuperPoint (user-supplied, not distributed)',
+        license: 'Magic Leap academic / non-commercial research license',
+        url: 'https://github.com/magicleap/SuperPointPretrainedNetwork',
+      },
+      { name: 'DISK', license: 'Apache-2.0', url: 'https://github.com/cvlab-epfl/disk' },
+      { name: 'ALIKED', license: 'BSD-3-Clause', url: 'https://github.com/Shiaoming/ALIKED' },
       { name: 'LightGlue', license: 'Apache-2.0', url: 'https://github.com/cvg/LightGlue' },
-      { name: 'LightGlue-ONNX (ONNX exports)', license: 'Apache-2.0', url: 'https://github.com/fabio-sim/LightGlue-ONNX' },
-      { name: 'SAM 2',     license: 'Apache-2.0', url: 'https://github.com/facebookresearch/sam2' },
+      {
+        name: 'LightGlue-ONNX (ONNX exports)',
+        license: 'Apache-2.0',
+        url: 'https://github.com/fabio-sim/LightGlue-ONNX',
+      },
+      { name: 'SAM 2', license: 'Apache-2.0', url: 'https://github.com/facebookresearch/sam2' },
     ],
   },
 ]

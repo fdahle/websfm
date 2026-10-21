@@ -1,5 +1,11 @@
 import {
-  VIDEO_ANALYSIS, createMotionTracker, estimateFps, fitSize, frameFileName, lumaOf, scoreFrame,
+  VIDEO_ANALYSIS,
+  createMotionTracker,
+  estimateFps,
+  fitSize,
+  frameFileName,
+  lumaOf,
+  scoreFrame,
 } from '../core/io/videoFrames.js'
 import { THUMB_MAX_DIM, THUMB_QUALITY, thumbnailSize } from './thumbnail.js'
 
@@ -19,11 +25,16 @@ const SEEK_TIMEOUT_MS = 15000
 
 function mediaErrorMessage(err) {
   switch (err?.code) {
-    case 1: return 'reading the video was aborted'
-    case 2: return 'a network error interrupted reading the video'
-    case 3: return 'the video could not be decoded (damaged, or a codec variant this browser cannot play)'
-    case 4: return 'this browser cannot play this video format or codec'
-    default: return err?.message || 'the video could not be read'
+    case 1:
+      return 'reading the video was aborted'
+    case 2:
+      return 'a network error interrupted reading the video'
+    case 3:
+      return 'the video could not be decoded (damaged, or a codec variant this browser cannot play)'
+    case 4:
+      return 'this browser cannot play this video format or codec'
+    default:
+      return err?.message || 'the video could not be read'
   }
 }
 
@@ -87,8 +98,14 @@ export async function openVideoSource(file, { probeRate = true } = {}) {
   // Kept in the document (invisibly): some engines neither load nor present frames
   // for a detached element.
   Object.assign(video.style, {
-    position: 'fixed', left: '0', top: '0', width: '2px', height: '2px',
-    opacity: '0', pointerEvents: 'none', zIndex: '-1',
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: '2px',
+    height: '2px',
+    opacity: '0',
+    pointerEvents: 'none',
+    zIndex: '-1',
   })
   document.body.appendChild(video)
   const close = () => {
@@ -114,7 +131,8 @@ export async function openVideoSource(file, { probeRate = true } = {}) {
       video.currentTime = 0
       await back
     }
-    const width = video.videoWidth, height = video.videoHeight
+    const width = video.videoWidth,
+      height = video.videoHeight
     if (!width || !height) throw new Error('the file has no video track this browser can show')
     if (!(duration > 0) || !Number.isFinite(duration)) throw new Error('the video length could not be read')
     const fps = probeRate ? await probeFps(video) : null
@@ -142,7 +160,10 @@ function makeSource({ video, name, duration, width, height, fps, close }) {
   function luma(maxDim = VIDEO_ANALYSIS.sharpDim) {
     const { width: w, height: h } = fitSize(width, height, maxDim)
     small ??= document.createElement('canvas')
-    if (small.width !== w || small.height !== h) { small.width = w; small.height = h }
+    if (small.width !== w || small.height !== h) {
+      small.width = w
+      small.height = h
+    }
     const ctx = small.getContext('2d', { willReadFrequently: true })
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(video, 0, 0, w, h)
@@ -150,8 +171,9 @@ function makeSource({ video, name, duration, width, height, fps, close }) {
   }
 
   function toBlob(canvas, type, quality) {
-    return new Promise((resolve, reject) => canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error('the frame could not be encoded'))), type, quality))
+    return new Promise((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('the frame could not be encoded'))), type, quality),
+    )
   }
 
   // The current frame encoded as an image file, plus a list thumbnail of it (so
@@ -159,7 +181,10 @@ function makeSource({ video, name, duration, width, height, fps, close }) {
   async function encode({ maxDim = 0, format = 'jpeg', quality = 0.95 } = {}) {
     const { width: w, height: h } = fitSize(width, height, maxDim)
     full ??= document.createElement('canvas')
-    if (full.width !== w || full.height !== h) { full.width = w; full.height = h }
+    if (full.width !== w || full.height !== h) {
+      full.width = w
+      full.height = h
+    }
     const ctx = full.getContext('2d')
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(video, 0, 0, w, h)
@@ -167,7 +192,8 @@ function makeSource({ video, name, duration, width, height, fps, close }) {
     const blob = await toBlob(full, type, format === 'png' ? undefined : quality)
     const ts = thumbnailSize(w, h, THUMB_MAX_DIM)
     const thumbCanvas = document.createElement('canvas')
-    thumbCanvas.width = ts.width; thumbCanvas.height = ts.height
+    thumbCanvas.width = ts.width
+    thumbCanvas.height = ts.height
     const tctx = thumbCanvas.getContext('2d')
     tctx.imageSmoothingQuality = 'high'
     tctx.drawImage(full, 0, 0, ts.width, ts.height)
@@ -212,7 +238,14 @@ const EXTRACT_BATCH = 4
  * → { added, cancelled }
  */
 export async function extractVideoFrames({
-  file, times, duration, fps = null, settings, addImages, onProgress = null, shouldCancel = null,
+  file,
+  times,
+  duration,
+  fps = null,
+  settings,
+  addImages,
+  onProgress = null,
+  shouldCancel = null,
 }) {
   const source = await openVideoSource(file, { probeRate: false })
   const ext = settings.format === 'png' ? 'png' : 'jpg'
@@ -225,17 +258,25 @@ export async function extractVideoFrames({
     const items = batch
     batch = []
     await pending
-    pending = addImages(items.map((i) => i.file), null, {
-      extras: new Map(items.map((i) => [i.file, i.extra])),
-      fromStorage: true,
-    })
+    pending = addImages(
+      items.map((i) => i.file),
+      null,
+      {
+        extras: new Map(items.map((i) => [i.file, i.extra])),
+        fromStorage: true,
+      },
+    )
   }
   try {
     for (let i = 0; i < times.length; i++) {
       if (shouldCancel?.()) break
       const t = times[i]
       await source.seek(t)
-      const enc = await source.encode({ maxDim: settings.maxDim, format: settings.format, quality: settings.jpegQuality })
+      const enc = await source.encode({
+        maxDim: settings.maxDim,
+        format: settings.format,
+        quality: settings.jpegQuality,
+      })
       const name = frameFileName(file.name, t, length, ext)
       const frame = new File([enc.blob], name, { type: enc.type, lastModified: file.lastModified })
       batch.push({

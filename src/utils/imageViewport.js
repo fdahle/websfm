@@ -32,15 +32,18 @@ const ASPECT_TOL_PX = 1.5
  */
 export function imageFrame({ naturalWidth, naturalHeight, metaWidth, metaHeight, lowRes = false }) {
   if (!(naturalWidth > 0) || !(naturalHeight > 0)) return null
-  const metaOk = metaWidth > 0 && metaHeight > 0
-    && Math.abs(naturalWidth * metaHeight / metaWidth - naturalHeight) <= ASPECT_TOL_PX
+  const metaOk =
+    metaWidth > 0 &&
+    metaHeight > 0 &&
+    Math.abs((naturalWidth * metaHeight) / metaWidth - naturalHeight) <= ASPECT_TOL_PX
   // A bitmap smaller than the recorded native size is a reduced copy even when the
   // store didn't flag it (belt and braces: the mapping must never assume 1:1 then).
   const reduced = metaOk && naturalWidth < metaWidth - 0.5
   const preview = !!lowRes || reduced
   const base = { naturalWidth, naturalHeight, preview }
   if (!preview) return { ...base, width: naturalWidth, height: naturalHeight, bitmapScale: 1, exact: true }
-  if (metaOk) return { ...base, width: metaWidth, height: metaHeight, bitmapScale: naturalWidth / metaWidth, exact: true }
+  if (metaOk)
+    return { ...base, width: metaWidth, height: metaHeight, bitmapScale: naturalWidth / metaWidth, exact: true }
   return { ...base, width: naturalWidth, height: naturalHeight, bitmapScale: 1, exact: false }
 }
 
@@ -76,7 +79,7 @@ export function zoomAbout(view, factor, cx, cy, min, max) {
 export function screenToImage(sx, sy, view, frame) {
   if (!frame?.exact || !(view.scale > 0)) return null
   return {
-    px: Math.min(frame.width,  Math.max(0, (sx - view.tx) / view.scale)),
+    px: Math.min(frame.width, Math.max(0, (sx - view.tx) / view.scale)),
     py: Math.min(frame.height, Math.max(0, (sy - view.ty) / view.scale)),
   }
 }
@@ -87,7 +90,7 @@ export function screenToImage(sx, sy, view, frame) {
  */
 export function bitmapPixel(px, py, frame) {
   return {
-    x: Math.min(frame.naturalWidth - 1,  Math.max(0, Math.floor(px * frame.naturalWidth / frame.width))),
-    y: Math.min(frame.naturalHeight - 1, Math.max(0, Math.floor(py * frame.naturalHeight / frame.height))),
+    x: Math.min(frame.naturalWidth - 1, Math.max(0, Math.floor((px * frame.naturalWidth) / frame.width))),
+    y: Math.min(frame.naturalHeight - 1, Math.max(0, Math.floor((py * frame.naturalHeight) / frame.height))),
   }
 }

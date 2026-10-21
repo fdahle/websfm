@@ -20,10 +20,10 @@ import { IMAGE_COLUMN, makeNameResolver } from './nameMatch.js'
 import { observationsToDetections } from '../sfm/fiducialModel.js'
 
 const PATTERNS = {
-  image:    IMAGE_COLUMN,
+  image: IMAGE_COLUMN,
   fiducial: /^(fiducial|fid|fidid|fiducialid|mark|markid|corner)$/i,
-  px:       /^(px|pixelx|pixel_x|imx|u|col|column|x)$/i,
-  py:       /^(py|pixely|pixel_y|imy|v|row|line|y)$/i,
+  px: /^(px|pixelx|pixel_x|imx|u|col|column|x)$/i,
+  py: /^(py|pixely|pixel_y|imy|v|row|line|y)$/i,
 }
 const ROLES = ['image', 'fiducial', 'px', 'py']
 
@@ -34,17 +34,32 @@ export function guessMapping(headerCells, columnCount, hasHeader, { positional =
   if (hasHeader) {
     headerCells.forEach((cell, i) => {
       for (const role of ROLES) {
-        if (mapping[role] == null && PATTERNS[role].test(String(cell ?? '').trim())) { mapping[role] = i; break }
+        if (mapping[role] == null && PATTERNS[role].test(String(cell ?? '').trim())) {
+          mapping[role] = i
+          break
+        }
       }
     })
   }
   if (!positional) return mapping
   const used = new Set(Object.values(mapping).filter((v) => v != null))
   const freeAt = (i) => i < columnCount && !used.has(i)
-  if (mapping.image == null && freeAt(0)) { mapping.image = 0; used.add(0) }
-  if (mapping.fiducial == null && freeAt(1)) { mapping.fiducial = 1; used.add(1) }
-  if (mapping.px == null && freeAt(2)) { mapping.px = 2; used.add(2) }
-  if (mapping.py == null && freeAt(3)) { mapping.py = 3; used.add(3) }
+  if (mapping.image == null && freeAt(0)) {
+    mapping.image = 0
+    used.add(0)
+  }
+  if (mapping.fiducial == null && freeAt(1)) {
+    mapping.fiducial = 1
+    used.add(1)
+  }
+  if (mapping.px == null && freeAt(2)) {
+    mapping.px = 2
+    used.add(2)
+  }
+  if (mapping.py == null && freeAt(3)) {
+    mapping.py = 3
+    used.add(3)
+  }
   return mapping
 }
 
@@ -99,7 +114,8 @@ function parseWide(body, { image, columns }) {
     const imageName = String(cells[image] ?? '').trim()
     if (!imageName) continue
     for (const [slot, { x, y }] of Object.entries(columns)) {
-      const px = num(cells[x]), py = num(cells[y])
+      const px = num(cells[x]),
+        py = num(cells[y])
       if (Number.isFinite(px) && Number.isFinite(py)) rows.push({ imageName, fidId: slot, px, py })
     }
   }
@@ -126,7 +142,13 @@ export function previewFiducialObs(rows, images) {
   for (const r of rows || []) {
     if (!groups.has(r.imageName)) {
       const img = byId.get(resolve(r.imageName)) ?? null
-      groups.set(r.imageName, { fileName: r.imageName, imageId: img?.id ?? null, imageName: img?.name ?? null, marks: [], img })
+      groups.set(r.imageName, {
+        fileName: r.imageName,
+        imageId: img?.id ?? null,
+        imageName: img?.name ?? null,
+        marks: [],
+        img,
+      })
     }
     groups.get(r.imageName).marks.push({ fidId: r.fidId, px: r.px, py: r.py, slot: null })
   }

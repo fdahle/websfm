@@ -58,8 +58,8 @@ function copy() {
 <template>
   <ModalShell title="Project Summary" aria-label="Project summary" @close="emit('close')">
     <p class="lede">
-      A compact, classified digest of this project's reconstruction health — copy it to
-      share a run's outcome without the full log. Same numbers as the Quality Report.
+      A compact, classified digest of this project's reconstruction health — copy it to share a run's outcome without
+      the full log. Same numbers as the Quality Report.
     </p>
 
     <div class="toolbar">
@@ -79,10 +79,24 @@ function copy() {
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.lede { font-size: 12.5px; color: var(--text-dim); line-height: 1.55; margin: 0 0 14px; }
-.toolbar { margin-bottom: 12px; }
-.state { padding: 24px 0; text-align: center; color: var(--text-dim); font-size: 13px; }
-.state.err { color: var(--danger, #e05252); }
+.lede {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin: 0 0 14px;
+}
+.toolbar {
+  margin-bottom: 12px;
+}
+.state {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.state.err {
+  color: var(--danger, #e05252);
+}
 .digest {
   margin: 0;
   padding: 12px 14px;

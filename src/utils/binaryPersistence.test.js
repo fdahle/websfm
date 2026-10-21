@@ -3,9 +3,14 @@ import * as opfs from './opfs.js'
 import { retryPersistence } from './persistence.js'
 
 function memoryDirectory(control) {
-  const files = new Map(), dirs = new Map()
-  const dir = { name: 'binary-test', files,
-    async *keys() { yield* files.keys() },
+  const files = new Map(),
+    dirs = new Map()
+  const dir = {
+    name: 'binary-test',
+    files,
+    async *keys() {
+      yield* files.keys()
+    },
     async getDirectoryHandle(name) {
       if (!dirs.has(name)) dirs.set(name, memoryDirectory(control))
       return dirs.get(name)
@@ -20,18 +25,25 @@ function memoryDirectory(control) {
         createWritable: async () => {
           let staged
           return {
-            write: async value => {
+            write: async (value) => {
               if (control.fail?.test(name)) throw new Error('disk full')
               control.written?.push(name)
               staged = new Uint8Array(await new Blob([value]).arrayBuffer())
             },
-            close: async () => { files.set(name, staged) },
-            abort: async () => { control.aborted++ },
+            close: async () => {
+              files.set(name, staged)
+            },
+            abort: async () => {
+              control.aborted++
+            },
           }
         },
       }
     },
-    async removeEntry(name) { files.delete(name); dirs.delete(name) },
+    async removeEntry(name) {
+      files.delete(name)
+      dirs.delete(name)
+    },
   }
   return dir
 }
@@ -46,9 +58,14 @@ afterEach(async () => {
   await retryPersistence()
   opfs.clearProjectRoot('binary-test')
 })
-const dem = n => ({ width: n, height: 1, data: Float32Array.from({ length: n }, (_, i) => i + n), mask: new Uint8Array(n).fill(1) })
+const dem = (n) => ({
+  width: n,
+  height: 1,
+  data: Float32Array.from({ length: n }, (_, i) => i + n),
+  mask: new Uint8Array(n).fill(1),
+})
 
-it.each([/\.data\.bin$/, /^dem\.json$/])('keeps the previous DEM intact when writing %s fails', async fail => {
+it.each([/\.data\.bin$/, /^dem\.json$/])('keeps the previous DEM intact when writing %s fails', async (fail) => {
   await opfs.saveProduct('binary-test', 'dem', dem(1))
   control.fail = fail
   await expect(opfs.saveProduct('binary-test', 'dem', dem(2))).rejects.toThrow('disk full')
@@ -73,7 +90,9 @@ it('removes generation files on product deletion', async () => {
   expect((await dir.getDirectoryHandle('products')).files.size).toBe(0)
 })
 it('commits cloud buffers atomically when replacing an existing cloud id', async () => {
-  const model = n => ({ clouds: [{ id: 'cloud', kind: 'dense', pointCount: n, buffers: { pos: new Float64Array(n * 3).fill(n).buffer } }] })
+  const model = (n) => ({
+    clouds: [{ id: 'cloud', kind: 'dense', pointCount: n, buffers: { pos: new Float64Array(n * 3).fill(n).buffer } }],
+  })
   await opfs.saveReconstruction('binary-test', model(1))
   control.fail = /\.pos\.bin$/
   await expect(opfs.saveReconstruction('binary-test', model(2))).rejects.toThrow('disk full')
@@ -91,10 +110,9 @@ describe('cloud buffer reuse', () => {
     expect(first.ok).toBe(true)
     const aFile = first.files.a.pos
     control.written = []
-    const second = await opfs.saveReconstruction('binary-test', { clouds: [
-      { id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: first.files.a },
-      cloud('b', 2, 3),
-    ] })
+    const second = await opfs.saveReconstruction('binary-test', {
+      clouds: [{ id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: first.files.a }, cloud('b', 2, 3)],
+    })
     expect(second.ok).toBe(true)
     // Only b's new buffer and the metadata were written; a kept its file through GC.
     expect(control.written.filter((n) => n.endsWith('.bin'))).toEqual([second.files.b.pos.name])
@@ -113,16 +131,18 @@ describe('cloud buffer reuse', () => {
     const first = await opfs.saveReconstruction('binary-test', { clouds: [cloud('a', 1, 1)] })
     dir.files.delete(first.files.a.pos.name) // e.g. another tab's save collected it
     const before = dir.files.get('reconstruction.json')
-    const res = await opfs.saveReconstruction('binary-test', { clouds: [
-      { id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: first.files.a },
-    ] })
+    const res = await opfs.saveReconstruction('binary-test', {
+      clouds: [{ id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: first.files.a }],
+    })
     expect(res).toEqual({ ok: false, stale: ['a'] })
     expect(dir.files.get('reconstruction.json')).toBe(before)
     // A size mismatch is stale too.
     const again = await opfs.saveReconstruction('binary-test', { clouds: [cloud('a', 1, 1)] })
-    const res2 = await opfs.saveReconstruction('binary-test', { clouds: [
-      { id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: { pos: { ...again.files.a.pos, bytes: 1 } } },
-    ] })
+    const res2 = await opfs.saveReconstruction('binary-test', {
+      clouds: [
+        { id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: { pos: { ...again.files.a.pos, bytes: 1 } } },
+      ],
+    })
     expect(res2.ok).toBe(false)
   })
 })
@@ -141,9 +161,19 @@ it('stores a product preview as a PNG sidecar, never inline in the JSON', async 
 
 describe('orthophoto (a COG file, never a plane)', () => {
   const cogBytes = Uint8Array.from({ length: 300 }, (_, i) => i % 251)
-  const ortho = (extra = {}) => ({ width: 3000, height: 2000, gsd: 0.1, originX: 0, originY: 0, covered: 5, name: 'Orthophoto',
-    cog: new Blob([cogBytes], { type: 'image/tiff' }), previewBlob: new Blob([new Uint8Array([137, 80])], { type: 'image/png' }),
-    previewUrl: 'blob:x', ...extra })
+  const ortho = (extra = {}) => ({
+    width: 3000,
+    height: 2000,
+    gsd: 0.1,
+    originX: 0,
+    originY: 0,
+    covered: 5,
+    name: 'Orthophoto',
+    cog: new Blob([cogBytes], { type: 'image/tiff' }),
+    previewBlob: new Blob([new Uint8Array([137, 80])], { type: 'image/png' }),
+    previewUrl: 'blob:x',
+    ...extra,
+  })
 
   it('saves the COG as a generation file and loads it back as a handle, with nothing read', async () => {
     const saved = await opfs.saveProduct('binary-test', 'ortho', ortho())
@@ -151,7 +181,9 @@ describe('orthophoto (a COG file, never a plane)', () => {
     expect(new Uint8Array(await saved.cog.arrayBuffer())).toEqual(cogBytes)
     const products = await dir.getDirectoryHandle('products')
     const meta = JSON.parse(new TextDecoder().decode(products.files.get('ortho.json')))
-    expect(meta.cog).toBeUndefined(); expect(meta.cogSaved).toBeUndefined(); expect(meta.rgba).toBeUndefined()
+    expect(meta.cog).toBeUndefined()
+    expect(meta.cogSaved).toBeUndefined()
+    expect(meta.rgba).toBeUndefined()
     const back = await opfs.loadProduct('binary-test', 'ortho')
     expect(back.width).toBe(3000)
     expect(back.cogSaved).toEqual(saved.cogSaved)
@@ -185,9 +217,9 @@ describe('loading a reconstruction', () => {
     await expect(opfs.loadReconstruction('binary-test')).rejects.toThrow()
   })
   it('throws when a cloud buffer the document names is missing', async () => {
-    const res = await opfs.saveReconstruction('binary-test', { clouds: [
-      { id: 'a', kind: 'dense', pointCount: 1, buffers: { pos: new Float64Array(3).buffer } },
-    ] })
+    const res = await opfs.saveReconstruction('binary-test', {
+      clouds: [{ id: 'a', kind: 'dense', pointCount: 1, buffers: { pos: new Float64Array(3).buffer } }],
+    })
     dir.files.delete(res.files.a.pos.name)
     await expect(opfs.loadReconstruction('binary-test')).rejects.toThrow()
   })

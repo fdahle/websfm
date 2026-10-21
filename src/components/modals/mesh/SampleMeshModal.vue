@@ -38,15 +38,32 @@ function run() {
         <SourcePicker id="sample-src" v-model="sourceId" label="Mesh" :items="meshes" :option-label="meshOptionLabel" />
       </SettingsGroup>
       <SettingsGroup title="Points">
-        <SettingsField label="Number of points" label-for="sample-n"
-          hint="Spread evenly by surface area. The same mesh and count always give the same points.">
-          <input id="sample-n" v-model.number="settings.count" type="number" min="1000" :max="MAX" step="100000" class="field-input" />
+        <SettingsField
+          label="Number of points"
+          label-for="sample-n"
+          hint="Spread evenly by surface area. The same mesh and count always give the same points."
+        >
+          <input
+            id="sample-n"
+            v-model.number="settings.count"
+            type="number"
+            min="1000"
+            :max="MAX"
+            step="100000"
+            class="field-input"
+          />
         </SettingsField>
       </SettingsGroup>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || !(settings.count >= 1000 && settings.count <= MAX)" @click="run">Sample</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || !(settings.count >= 1000 && settings.count <= MAX)"
+        @click="run"
+      >
+        Sample
+      </button>
     </template>
   </ModalShell>
 </template>

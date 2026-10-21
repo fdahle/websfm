@@ -26,7 +26,9 @@ const R30 = (() => {
     const n = Math.hypot(1, 2, 3)
     return [1 / n, 2 / n, 3 / n]
   })()
-  const c = Math.cos(a), s = Math.sin(a), t = 1 - c
+  const c = Math.cos(a),
+    s = Math.sin(a),
+    t = 1 - c
   return [
     [c + ux * ux * t, ux * uy * t - uz * s, ux * uz * t + uy * s],
     [uy * ux * t + uz * s, c + uy * uy * t, uy * uz * t - ux * s],
@@ -35,13 +37,16 @@ const R30 = (() => {
 })()
 
 function expectMatClose(A, B, tol = 1e-12) {
-  for (let r = 0; r < 3; r++)
-    for (let cc = 0; cc < 3; cc++) expect(A[r][cc]).toBeCloseTo(B[r][cc], 10)
+  for (let r = 0; r < 3; r++) for (let cc = 0; cc < 3; cc++) expect(A[r][cc]).toBeCloseTo(B[r][cc], 10)
 }
 
 describe('rotation ↔ quaternion', () => {
   it('round-trips identity', () => {
-    const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    const I = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ]
     expect(rotationToQuat(I)).toEqual([1, 0, 0, 0])
     expectMatClose(quatToRotation(rotationToQuat(I)), I)
   })
@@ -52,9 +57,21 @@ describe('rotation ↔ quaternion', () => {
 
   it('round-trips 180° rotations (trace ≤ 0 branches)', () => {
     for (const R of [
-      [[1, 0, 0], [0, -1, 0], [0, 0, -1]], // 180° about x
-      [[-1, 0, 0], [0, 1, 0], [0, 0, -1]], // 180° about y
-      [[-1, 0, 0], [0, -1, 0], [0, 0, 1]], // 180° about z
+      [
+        [1, 0, 0],
+        [0, -1, 0],
+        [0, 0, -1],
+      ], // 180° about x
+      [
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, 0, -1],
+      ], // 180° about y
+      [
+        [-1, 0, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+      ], // 180° about z
     ]) {
       expectMatClose(quatToRotation(rotationToQuat(R)), R)
     }
@@ -102,7 +119,11 @@ describe('serialize → parse round-trip', () => {
         t: [0.5, -1.5, 8],
         cameraId: 1,
         name: 'img with space.jpg',
-        points2D: [[100.5, 200.25, 1], [50, 60, -1], [10, 20, 2]],
+        points2D: [
+          [100.5, 200.25, 1],
+          [50, 60, -1],
+          [10, 20, 2],
+        ],
       },
       {
         imageId: 2,
@@ -191,29 +212,54 @@ describe('COLMAP binary — non-PINHOLE cameras (warn+ignore distortion)', () =>
 describe('parse tolerance', () => {
   it('parses a hand-written fixture, ignoring comments and blank lines', () => {
     const files = {
-      'cameras.txt':
-        '# comment\n1 SIMPLE_RADIAL 640 480 900 320 240 0.01\n',
-      'images.txt':
-        '# header comment\n' +
-        '1 1 0 0 0 0 0 5 1 photo.jpg\n' +
-        '100 200 1 300 400 -1\n',
-      'points3D.txt':
-        '# comment\n1 1 2 3 200 100 50 0.5 1 0\n',
+      'cameras.txt': '# comment\n1 SIMPLE_RADIAL 640 480 900 320 240 0.01\n',
+      'images.txt': '# header comment\n' + '1 1 0 0 0 0 0 5 1 photo.jpg\n' + '100 200 1 300 400 -1\n',
+      'points3D.txt': '# comment\n1 1 2 3 200 100 50 0.5 1 0\n',
     }
     const m = parseColmapModel(files)
     expect(m.cameras[0]).toMatchObject({ model: 'SIMPLE_RADIAL', width: 640, params: [900, 320, 240, 0.01] })
-    expect(m.images[0].points2D).toEqual([[100, 200, 1], [300, 400, -1]])
+    expect(m.images[0].points2D).toEqual([
+      [100, 200, 1],
+      [300, 400, -1],
+    ])
     expect(m.points3D[0].track).toEqual([[1, 0]])
   })
 })
 
 describe('buildColmapModel / readColmapModel', () => {
   const images = [
-    { uuid: 'ua', name: 'a.jpg', width: 640, height: 480, K: { fx: 1000, fy: 1000, cx: 320, cy: 240 }, R: R30, t: [1, 2, 3] },
-    { uuid: 'ub', name: 'b.jpg', width: 640, height: 480, K: { fx: 900, fy: 900, cx: 320, cy: 240 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [4, 5, 6] },
+    {
+      uuid: 'ua',
+      name: 'a.jpg',
+      width: 640,
+      height: 480,
+      K: { fx: 1000, fy: 1000, cx: 320, cy: 240 },
+      R: R30,
+      t: [1, 2, 3],
+    },
+    {
+      uuid: 'ub',
+      name: 'b.jpg',
+      width: 640,
+      height: 480,
+      K: { fx: 900, fy: 900, cx: 320, cy: 240 },
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [4, 5, 6],
+    },
   ]
   const points = [
-    { xyz: [0.1, 0.2, 0.3], color: [10, 20, 30], views: [{ uuid: 'ua', x: 100, y: 200 }, { uuid: 'ub', x: 110, y: 210 }] },
+    {
+      xyz: [0.1, 0.2, 0.3],
+      color: [10, 20, 30],
+      views: [
+        { uuid: 'ua', x: 100, y: 200 },
+        { uuid: 'ub', x: 110, y: 210 },
+      ],
+    },
     { xyz: [1, 1, 1], color: [200, 100, 50], views: [{ uuid: 'ua', x: 5, y: 6 }] },
   ]
 
@@ -222,10 +268,16 @@ describe('buildColmapModel / readColmapModel', () => {
     expect(m.cameras).toHaveLength(2)
     expect(m.cameras[0]).toMatchObject({ cameraId: 1, model: 'PINHOLE', params: [1000, 1000, 320, 240] })
     // point 1 observed in both images; point 2 only in image ua
-    expect(m.points3D[0].track).toEqual([[1, 0], [2, 0]])
+    expect(m.points3D[0].track).toEqual([
+      [1, 0],
+      [2, 0],
+    ])
     expect(m.points3D[1].track).toEqual([[1, 1]])
     // image ua's POINTS2D holds both of its observations in track order
-    expect(m.images[0].points2D).toEqual([[100, 200, 1], [5, 6, 2]])
+    expect(m.images[0].points2D).toEqual([
+      [100, 200, 1],
+      [5, 6, 2],
+    ])
     expect(m.images[1].points2D).toEqual([[110, 210, 1]])
   })
 
@@ -247,7 +299,16 @@ describe('buildColmapModel / readColmapModel', () => {
   it('drops views into images not being exported', () => {
     const m = buildColmapModel({
       images: [images[0]],
-      points: [{ xyz: [0, 0, 0], color: [1, 2, 3], views: [{ uuid: 'ua', x: 1, y: 2 }, { uuid: 'ghost', x: 9, y: 9 }] }],
+      points: [
+        {
+          xyz: [0, 0, 0],
+          color: [1, 2, 3],
+          views: [
+            { uuid: 'ua', x: 1, y: 2 },
+            { uuid: 'ghost', x: 9, y: 9 },
+          ],
+        },
+      ],
     })
     expect(m.points3D[0].track).toEqual([[1, 0]]) // ghost view omitted
   })
@@ -272,11 +333,11 @@ describe('makeNameResolver', () => {
   const resolve = makeNameResolver(loaded)
 
   it('matches exact, basename, case-insensitive, and extension-stripped', () => {
-    expect(resolve('IMG_0001.JPG')).toBe('u1')          // exact
-    expect(resolve('images/IMG_0001.JPG')).toBe('u1')   // basename of a path
-    expect(resolve('img_0001.jpg')).toBe('u1')          // case-insensitive basename
-    expect(resolve('photo_2.tif')).toBe('u2')           // basename of a stored path
-    expect(resolve('photo_2.png')).toBe('u2')           // stem match, different extension
+    expect(resolve('IMG_0001.JPG')).toBe('u1') // exact
+    expect(resolve('images/IMG_0001.JPG')).toBe('u1') // basename of a path
+    expect(resolve('img_0001.jpg')).toBe('u1') // case-insensitive basename
+    expect(resolve('photo_2.tif')).toBe('u2') // basename of a stored path
+    expect(resolve('photo_2.png')).toBe('u2') // stem match, different extension
   })
 
   it('returns null for an unmatched or nullish name', () => {
@@ -289,11 +350,38 @@ describe('colmapToSparse', () => {
   // Round-trip a real reconstruction: build → read → colmapToSparse recovers the
   // store shapes, matching COLMAP image names to uuids.
   const images = [
-    { uuid: 'ua', name: 'a.jpg', width: 640, height: 480, K: { fx: 1000, fy: 1000, cx: 320, cy: 240 }, R: R30, t: [1, 2, 3] },
-    { uuid: 'ub', name: 'b.jpg', width: 640, height: 480, K: { fx: 900, fy: 900, cx: 320, cy: 240 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [4, 5, 6] },
+    {
+      uuid: 'ua',
+      name: 'a.jpg',
+      width: 640,
+      height: 480,
+      K: { fx: 1000, fy: 1000, cx: 320, cy: 240 },
+      R: R30,
+      t: [1, 2, 3],
+    },
+    {
+      uuid: 'ub',
+      name: 'b.jpg',
+      width: 640,
+      height: 480,
+      K: { fx: 900, fy: 900, cx: 320, cy: 240 },
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [4, 5, 6],
+    },
   ]
   const points = [
-    { xyz: [0.1, 0.2, 0.3], color: [10, 20, 30], views: [{ uuid: 'ua', x: 100, y: 200 }, { uuid: 'ub', x: 110, y: 210 }] },
+    {
+      xyz: [0.1, 0.2, 0.3],
+      color: [10, 20, 30],
+      views: [
+        { uuid: 'ua', x: 100, y: 200 },
+        { uuid: 'ub', x: 110, y: 210 },
+      ],
+    },
     { xyz: [1, 1, 1], color: [200, 100, 50], views: [{ uuid: 'ua', x: 5, y: 6 }] },
   ]
   const read = readColmapModel(buildColmapModel({ images, points }))
@@ -322,10 +410,12 @@ describe('colmapToSparse', () => {
   it('drops unmatched images, their observations, and now-empty points', () => {
     // Only 'a.jpg' is loaded; the point seen solely by 'b.jpg' must vanish.
     const partial = makeNameResolver([{ uuid: 'ua', name: 'a.jpg' }])
-    const onlyB = readColmapModel(buildColmapModel({
-      images,
-      points: [{ xyz: [7, 8, 9], color: [0, 0, 0], views: [{ uuid: 'ub', x: 1, y: 2 }] }],
-    }))
+    const onlyB = readColmapModel(
+      buildColmapModel({
+        images,
+        points: [{ xyz: [7, 8, 9], color: [0, 0, 0], views: [{ uuid: 'ub', x: 1, y: 2 }] }],
+      }),
+    )
     const { cameras, points: pts, matched, unmatched } = colmapToSparse(onlyB, partial)
     expect(matched.map((m) => m.name)).toEqual(['a.jpg'])
     expect(unmatched).toEqual(['b.jpg'])
@@ -336,10 +426,28 @@ describe('colmapToSparse', () => {
 
 describe('COLMAP text — parts and byte input', () => {
   const big = {
-    cameras: Array.from({ length: 30 }, (_, i) => ({ cameraId: i + 1, model: 'PINHOLE', width: 4000, height: 3000, params: [1000 + i, 1000, 2000, 1500] })),
-    images: Array.from({ length: 30 }, (_, i) => ({ imageId: i + 1, q: [1, 0, 0, 0], t: [i, 0.5, -i - 1], cameraId: i + 1, name: `img ${i}.jpg`,
-      points2D: Array.from({ length: 50 }, (_, k) => [k * 1.5, k * 0.25, k % 3 ? -1 : k + 1]) })),
-    points3D: Array.from({ length: 200 }, (_, i) => ({ point3dId: i + 1, xyz: [i, i / 2, -i - 1], rgb: [i % 256, 1, 2], error: 0.5, track: [[1 + (i % 30), i % 50]] })),
+    cameras: Array.from({ length: 30 }, (_, i) => ({
+      cameraId: i + 1,
+      model: 'PINHOLE',
+      width: 4000,
+      height: 3000,
+      params: [1000 + i, 1000, 2000, 1500],
+    })),
+    images: Array.from({ length: 30 }, (_, i) => ({
+      imageId: i + 1,
+      q: [1, 0, 0, 0],
+      t: [i, 0.5, -i - 1],
+      cameraId: i + 1,
+      name: `img ${i}.jpg`,
+      points2D: Array.from({ length: 50 }, (_, k) => [k * 1.5, k * 0.25, k % 3 ? -1 : k + 1]),
+    })),
+    points3D: Array.from({ length: 200 }, (_, i) => ({
+      point3dId: i + 1,
+      xyz: [i, i / 2, -i - 1],
+      rgb: [i % 256, 1, 2],
+      error: 0.5,
+      track: [[1 + (i % 30), i % 50]],
+    })),
   }
   it('every file arrives in bounded parts that join to the one-part text', () => {
     const small = serializeColmapModelParts(big, { partChars: 256 })
@@ -355,7 +463,9 @@ describe('COLMAP text — parts and byte input', () => {
   })
   it('parses UTF-8 bytes (CRLF, any slice size) exactly like the string', () => {
     const text = serializeColmapModel(big)
-    const bytes = Object.fromEntries(Object.entries(text).map(([k, v]) => [k, new TextEncoder().encode(v.replace(/\n/g, '\r\n'))]))
+    const bytes = Object.fromEntries(
+      Object.entries(text).map(([k, v]) => [k, new TextEncoder().encode(v.replace(/\n/g, '\r\n'))]),
+    )
     expect(parseColmapModel(bytes)).toEqual(parseColmapModel(text))
     expect(parseColmapModel(bytes)).toEqual(big)
   })

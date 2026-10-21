@@ -40,12 +40,17 @@ function solveSmall(A, b) {
 // column absent from the fit stays exactly 0). Returns { k1, k2, k3, fitRmsPx, n }.
 export function fitComposedRadial(pristineKps, foldedKps, K, active = {}) {
   const n = Math.min(pristineKps.length, foldedKps.length)
-  return fitComposed((visit) => {
-    for (let i = 0; i < n; i++) {
-      const p = pristineKps[i], f = foldedKps[i]
-      if (p && f) visit(p.x, p.y, f.x, f.y)
-    }
-  }, K, active)
+  return fitComposed(
+    (visit) => {
+      for (let i = 0; i < n; i++) {
+        const p = pristineKps[i],
+          f = foldedKps[i]
+        if (p && f) visit(p.x, p.y, f.x, f.y)
+      }
+    },
+    K,
+    active,
+  )
 }
 
 // The same fit over KeypointSets (keypointSet.js): `pairs` = [{ pristine, folded, K? }],
@@ -53,18 +58,23 @@ export function fitComposedRadial(pristineKps, foldedKps, K, active = {}) {
 // A pair's own `K` (else the shared `K`) normalises its keypoints: images of one sensor
 // can carry different K (per-image EXIF focal), and each was folded about its own.
 export function fitComposedRadialSets(pairs, K, active = {}) {
-  return fitComposed((visit) => {
-    for (const { pristine, folded, K: Kp } of pairs) {
-      const k = Kp ?? K
-      const n = Math.min(pristine.n, folded.n)
-      const P = pristine.xy, F = folded.xy
-      for (let i = 0; i < n; i++) {
-        // A missing (NaN) keypoint is skipped, as a missing object was.
-        // eslint-disable-next-line no-self-compare
-        if (P[2 * i] === P[2 * i] && F[2 * i] === F[2 * i]) visit(P[2 * i], P[2 * i + 1], F[2 * i], F[2 * i + 1], k)
+  return fitComposed(
+    (visit) => {
+      for (const { pristine, folded, K: Kp } of pairs) {
+        const k = Kp ?? K
+        const n = Math.min(pristine.n, folded.n)
+        const P = pristine.xy,
+          F = folded.xy
+        for (let i = 0; i < n; i++) {
+          // A missing (NaN) keypoint is skipped, as a missing object was.
+          // eslint-disable-next-line no-self-compare
+          if (P[2 * i] === P[2 * i] && F[2 * i] === F[2 * i]) visit(P[2 * i], P[2 * i + 1], F[2 * i], F[2 * i + 1], k)
+        }
       }
-    }
-  }, K, active)
+    },
+    K,
+    active,
+  )
 }
 
 // `forEachPair(visit)` calls visit(pristineX, pristineY, foldedX, foldedY, K?) per pair,
@@ -82,13 +92,16 @@ function fitComposed(forEachPair, K, active) {
   const Atb = new Array(m).fill(0)
   let used = 0
   forEachPair((px, py, fX, fY, { fx, fy, cx, cy } = K) => {
-    const fxn = (fX - cx) / fx, fyn = (fY - cy) / fy       // ideal (folded) normalised
-    const pxn = (px - cx) / fx, pyn = (py - cy) / fy       // distorted (pristine) normalised
+    const fxn = (fX - cx) / fx,
+      fyn = (fY - cy) / fy // ideal (folded) normalised
+    const pxn = (px - cx) / fx,
+      pyn = (py - cy) / fy // distorted (pristine) normalised
     const r2 = fxn * fxn + fyn * fyn
     // Basis value for each column at this point (per axis: coord · r²^pow).
     const basisX = pow.map((k) => fxn * r2 ** k)
     const basisY = pow.map((k) => fyn * r2 ** k)
-    const tx = pxn - fxn, ty = pyn - fyn                     // forward-distortion displacement
+    const tx = pxn - fxn,
+      ty = pyn - fyn // forward-distortion displacement
     for (let a = 0; a < m; a++) {
       Atb[a] += basisX[a] * tx + basisY[a] * ty
       for (let b = 0; b < m; b++) AtA[a][b] += basisX[a] * basisX[b] + basisY[a] * basisY[b]
@@ -98,16 +111,22 @@ function fitComposed(forEachPair, K, active) {
   if (used < m) return { k1: 0, k2: 0, k3: 0, fitRmsPx: 0, n: used }
   const sol = solveSmall(AtA, Atb) || new Array(m).fill(0)
   const bag = { k1: 0, k2: 0, k3: 0 }
-  cols.forEach((c, i) => { bag[c] = sol[i] })
+  cols.forEach((c, i) => {
+    bag[c] = sol[i]
+  })
 
   // Fit RMS in pixels: predicted pristine vs actual over the same points.
-  let sse = 0, cnt = 0
+  let sse = 0,
+    cnt = 0
   forEachPair((px, py, fX, fY, { fx, fy, cx, cy } = K) => {
-    const fxn = (fX - cx) / fx, fyn = (fY - cy) / fy
+    const fxn = (fX - cx) / fx,
+      fyn = (fY - cy) / fy
     const r2 = fxn * fxn + fyn * fyn
     const d = 1 + bag.k1 * r2 + bag.k2 * r2 * r2 + bag.k3 * r2 * r2 * r2
-    const predX = (fxn * d) * fx + cx, predY = (fyn * d) * fy + cy
-    sse += (predX - px) ** 2 + (predY - py) ** 2; cnt++
+    const predX = fxn * d * fx + cx,
+      predY = fyn * d * fy + cy
+    sse += (predX - px) ** 2 + (predY - py) ** 2
+    cnt++
   })
   const fitRmsPx = cnt ? Math.sqrt(sse / cnt) : 0
   return { ...bag, fitRmsPx, n: used }
@@ -145,8 +164,9 @@ export function radialCurveOk(bag, maxNormR, fxApprox, maxShiftFrac = 0.25) {
     const cornerShiftPx = shiftFrac * maxNormR * fxApprox
     return {
       ok: false,
-      reason: `corner shift ${cornerShiftPx.toFixed(0)}px is ${(100 * shiftFrac).toFixed(0)}% of the corner `
-        + `radius, over the ${(100 * maxShiftFrac).toFixed(0)}% ceiling (runaway distortion)`,
+      reason:
+        `corner shift ${cornerShiftPx.toFixed(0)}px is ${(100 * shiftFrac).toFixed(0)}% of the corner ` +
+        `radius, over the ${(100 * maxShiftFrac).toFixed(0)}% ceiling (runaway distortion)`,
     }
   }
   return { ok: true, reason: '' }

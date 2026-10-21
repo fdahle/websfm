@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { jsonParts, lazyArray, joinParts, lineParts, recordParts, chunkedByteWriter, textBuffer, jsonArrayItemParts, jsonArrayEnd } from './parts.js'
+import {
+  jsonParts,
+  lazyArray,
+  joinParts,
+  lineParts,
+  recordParts,
+  chunkedByteWriter,
+  textBuffer,
+  jsonArrayItemParts,
+  jsonArrayEnd,
+} from './parts.js'
 
 const json = (v, opts) => joinParts(jsonParts(v, opts))
 
@@ -44,8 +54,13 @@ describe('jsonParts — byte-identical to JSON.stringify', () => {
   })
 
   it('materializes a lazy element only while writing it', () => {
-    let live = 0, peak = 0
-    const doc = lazyArray(1000, (i) => { live++; peak = Math.max(peak, live); return { i } })
+    let live = 0,
+      peak = 0
+    const doc = lazyArray(1000, (i) => {
+      live++
+      peak = Math.max(peak, live)
+      return { i }
+    })
     const gen = jsonParts(doc, { partChars: 64 })
     for (const _ of gen) live = 0 // a drained part releases what it wrote
     expect(peak).toBeLessThan(20)
@@ -90,7 +105,13 @@ describe('part helpers', () => {
 
   it('chunkedByteWriter never splits a value and matches one contiguous write', () => {
     const w = chunkedByteWriter(10)
-    w.u8(1); w.i32(-2); w.f64(Math.PI); w.u64(2 ** 40); w.i64(-1); w.bytes(new Uint8Array(25).fill(7)); w.u8(9)
+    w.u8(1)
+    w.i32(-2)
+    w.f64(Math.PI)
+    w.u64(2 ** 40)
+    w.i64(-1)
+    w.bytes(new Uint8Array(25).fill(7))
+    w.u8(9)
     const parts = w.done()
     expect(parts.length).toBeGreaterThan(2)
     const all = joinParts(parts)
@@ -101,7 +122,9 @@ describe('part helpers', () => {
     expect(dv.getFloat64(5, true)).toBe(Math.PI)
     expect(Number(dv.getBigUint64(13, true))).toBe(2 ** 40)
     expect(Number(dv.getBigInt64(21, true))).toBe(-1)
-    expect(all[29]).toBe(7); expect(all[53]).toBe(7); expect(all[54]).toBe(9)
+    expect(all[29]).toBe(7)
+    expect(all[53]).toBe(7)
+    expect(all[54]).toBe(9)
   })
 
   it('joinParts returns a string for text parts and bytes otherwise', () => {
@@ -120,10 +143,11 @@ describe('part helpers', () => {
 })
 
 describe('jsonArrayItemParts — an array written one element at a time', () => {
-  const whole = (items, space) => joinParts([
-    ...items.flatMap((v, i) => [...jsonArrayItemParts(v, i, { space, partChars: 7 })]),
-    jsonArrayEnd(items.length, { space }),
-  ])
+  const whole = (items, space) =>
+    joinParts([
+      ...items.flatMap((v, i) => [...jsonArrayItemParts(v, i, { space, partChars: 7 })]),
+      jsonArrayEnd(items.length, { space }),
+    ])
   const items = [
     { image: 'a.jpg', kpCount: 2, keypoints: lazyArray(2, (i) => ({ x: i, y: 2 * i })) },
     { image: 'b.jpg', nested: { list: [1, [2, 3]], empty: [], obj: {} } },

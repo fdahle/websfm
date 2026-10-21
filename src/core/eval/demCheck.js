@@ -18,7 +18,7 @@ export function sampleDemAtGcps(dem, gcps) {
   return (gcps || []).map((g) => {
     const demZ = sampleDem(dem, g.x, g.y)
     const gcpZ = g.z ?? null
-    const dz = (demZ != null && gcpZ != null) ? demZ - gcpZ : null
+    const dz = demZ != null && gcpZ != null ? demZ - gcpZ : null
     return { gcpId: g.id, name: g.name, x: g.x, y: g.y, demZ, gcpZ, dz }
   })
 }
@@ -52,6 +52,10 @@ export function toRasterDesc(dem) {
       scaleY: -dem.gsd, // row 0 is the northern edge
     },
   }
-  try { Object.defineProperty(dem, '_rasterDesc', { value: desc, enumerable: false }) } catch { /* frozen */ }
+  try {
+    Object.defineProperty(dem, '_rasterDesc', { value: desc, enumerable: false })
+  } catch {
+    /* frozen */
+  }
   return desc
 }

@@ -35,8 +35,7 @@ export function captureRunConfig({ cfg, settings, cameraPriors }) {
     selfCalMaxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
     selfCalMaxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
     cameraPositionPriors: cameraPriors.length,
-    cameraOrientationPriors: cameraPriors.filter((p) =>
-      [p.omega, p.phi, p.kappa].every(Number.isFinite)).length,
+    cameraOrientationPriors: cameraPriors.filter((p) => [p.omega, p.phi, p.kappa].every(Number.isFinite)).length,
   }
 }
 
@@ -60,22 +59,22 @@ export function resolveGates({ cfg, settings, images, log }) {
   // secondary frames would make the merge gates incomparable. The fallback
   // covers direct callers (tests, a dev harness) that skip that entry point.
   const injected = Number.isFinite(settings.detectScaleFactor)
-  const scaleCtx = injected
-    ? { n: images.length, factor: settings.detectScaleFactor }
-    : buildScaleContext(images)
+  const scaleCtx = injected ? { n: images.length, factor: settings.detectScaleFactor } : buildScaleContext(images)
   cfg.detectScaleFactor = scaleCtx.factor
 
   if (scaleCtx.factor !== 1 || scaleCtx.mixed) {
     // Only the deriving run reports the inputs behind the factor; an inheriting
     // sub-run has no set of its own to describe and would be fabricating them.
-    if (!injected) log(describeScaleContext(scaleCtx, 'Reprojection gates'),
-      scaleCtx.clamped ? 'warn' : 'info', 'SfM')
-    log(`Gates resolved (detect-px → native px, ×${scaleCtx.factor.toFixed(2)}): `
-      + `PnP/BA ${cfg.reprjThreshold} → ${resolveScaledPx(cfg.reprjThreshold, scaleCtx).toFixed(2)}px, `
-      + `track filter ${cfg.filterMaxReprojPx} → ${resolveScaledPx(cfg.filterMaxReprojPx, scaleCtx).toFixed(2)}px`,
-    'info', 'SfM')
+    if (!injected) log(describeScaleContext(scaleCtx, 'Reprojection gates'), scaleCtx.clamped ? 'warn' : 'info', 'SfM')
+    log(
+      `Gates resolved (detect-px → native px, ×${scaleCtx.factor.toFixed(2)}): ` +
+        `PnP/BA ${cfg.reprjThreshold} → ${resolveScaledPx(cfg.reprjThreshold, scaleCtx).toFixed(2)}px, ` +
+        `track filter ${cfg.filterMaxReprojPx} → ${resolveScaledPx(cfg.filterMaxReprojPx, scaleCtx).toFixed(2)}px`,
+      'info',
+      'SfM',
+    )
   }
-  cfg.reprjThreshold    = resolveScaledPx(cfg.reprjThreshold, scaleCtx)
+  cfg.reprjThreshold = resolveScaledPx(cfg.reprjThreshold, scaleCtx)
   cfg.filterMaxReprojPx = resolveScaledPx(cfg.filterMaxReprojPx, scaleCtx)
   // Recorded even when the factor is 1: "no correction applied" is itself the
   // measurement the data-relative-gates work needs from a full-resolution set.
@@ -108,18 +107,31 @@ export function resolveGates({ cfg, settings, images, log }) {
 // distortion against a short strip of wide-angle frames bowed the block instead
 // (synthetic KH-9, 28 µm: checkpoints V 5.5 m with a +20 m bowl at 125 km under 'auto',
 // 3.5 m and none held; plan-satellite ▸ SAT-5).
-export function resolveRefineIntrinsics({ cfg, anyCalibratedDistortion, anyReseauCalibrated = false, selfCalRecord, log }) {
+export function resolveRefineIntrinsics({
+  cfg,
+  anyCalibratedDistortion,
+  anyReseauCalibrated = false,
+  selfCalRecord,
+  log,
+}) {
   if (cfg.refineIntrinsics === 'auto') {
     if (anyCalibratedDistortion) {
       cfg.refineIntrinsics = 'none'
-      log(`refineIntrinsics 'auto' → 'none' `
-        + '(a calibrated distortion model exists — self-cal off to avoid double-correcting)',
-        'info', 'Reconstruction')
+      log(
+        `refineIntrinsics 'auto' → 'none' ` +
+          '(a calibrated distortion model exists — self-cal off to avoid double-correcting)',
+        'info',
+        'Reconstruction',
+      )
     } else if (anyReseauCalibrated) {
       cfg.refineIntrinsics = 'none'
-      log(`refineIntrinsics 'auto' → 'none' (a reseau-calibrated film camera, half frames stitched through `
-        + 'their reseau, or panoramic strip segments: the film\'s geometry is corrected and the certificate holds; '
-        + 'choose a self-calibration explicitly to refine it)', 'info', 'Reconstruction')
+      log(
+        `refineIntrinsics 'auto' → 'none' (a reseau-calibrated film camera, half frames stitched through ` +
+          "their reseau, or panoramic strip segments: the film's geometry is corrected and the certificate holds; " +
+          'choose a self-calibration explicitly to refine it)',
+        'info',
+        'Reconstruction',
+      )
     } else {
       // Staged self-cal (WS2): registration + rescue solve the base 'f,k1'; the
       // post-filter passes escalate to k2 / principal-point / k3 as the camera and
@@ -127,9 +139,12 @@ export function resolveRefineIntrinsics({ cfg, anyCalibratedDistortion, anyResea
       // post-filter refineMode is computed per pass rather than fixed.
       cfg.refineIntrinsics = SELF_CAL_BASE_TERMS
       cfg.selfCalStaged = true
-      log(`refineIntrinsics 'auto' → staged (base '${SELF_CAL_BASE_TERMS}', `
-        + 'escalating to cx,cy / k2 / k3, then k4 on a four-term fisheye, in post-filter passes as the model grows)',
-        'info', 'Reconstruction')
+      log(
+        `refineIntrinsics 'auto' → staged (base '${SELF_CAL_BASE_TERMS}', ` +
+          'escalating to cx,cy / k2 / k3, then k4 on a four-term fisheye, in post-filter passes as the model grows)',
+        'info',
+        'Reconstruction',
+      )
     }
   }
   selfCalRecord.resolved = cfg.refineIntrinsics
@@ -143,7 +158,13 @@ export function resolveRefineIntrinsics({ cfg, anyCalibratedDistortion, anyResea
 // per-image connectivity (low pairs/image) also makes the chain fragile.
 export function logMatchGraphHealth({ imgs, donePairs, log }) {
   const parent = new Map(imgs.map((im) => [im.uuid, im.uuid]))
-  const find = (a) => { while (parent.get(a) !== a) { parent.set(a, parent.get(parent.get(a))); a = parent.get(a) } return a }
+  const find = (a) => {
+    while (parent.get(a) !== a) {
+      parent.set(a, parent.get(parent.get(a)))
+      a = parent.get(a)
+    }
+    return a
+  }
   const deg = new Map(imgs.map((im) => [im.uuid, 0]))
   for (const e of donePairs) {
     if (!parent.has(e.idA) || !parent.has(e.idB)) continue
@@ -152,14 +173,20 @@ export function logMatchGraphHealth({ imgs, donePairs, log }) {
     parent.set(find(e.idA), find(e.idB))
   }
   const comps = new Map()
-  for (const im of imgs) { const r = find(im.uuid); comps.set(r, (comps.get(r) || 0) + 1) }
+  for (const im of imgs) {
+    const r = find(im.uuid)
+    comps.set(r, (comps.get(r) || 0) + 1)
+  }
   const sizes = [...comps.values()].sort((a, b) => b - a)
   const med = (arr) => (arr.length ? [...arr].sort((a, b) => a - b)[arr.length >> 1] : 0)
   const isolated = [...deg.values()].filter((d) => d === 0).length
-  log(`match graph — ${pluralize(sizes.length, 'component')}, largest ${sizes[0] ?? 0}/${imgs.length} images`
-    + `${isolated ? `, ${isolated} isolated` : ''}; median ${med([...deg.values()])} pairs/image, `
-    + `median ${med(donePairs.map((e) => e.inlierCount))} inliers/pair`,
-    (sizes[0] ?? 0) < imgs.length ? 'warn' : 'info', 'Reconstruction')
+  log(
+    `match graph — ${pluralize(sizes.length, 'component')}, largest ${sizes[0] ?? 0}/${imgs.length} images` +
+      `${isolated ? `, ${isolated} isolated` : ''}; median ${med([...deg.values()])} pairs/image, ` +
+      `median ${med(donePairs.map((e) => e.inlierCount))} inliers/pair`,
+    (sizes[0] ?? 0) < imgs.length ? 'warn' : 'info',
+    'Reconstruction',
+  )
 }
 
 // Per-camera median-residual table (flags cameras > 2× the global median). The
@@ -168,26 +195,35 @@ export function logMatchGraphHealth({ imgs, donePairs, log }) {
 // surfaces them by name so a bad registration is diagnosable at a glance.
 export function logPerCameraResiduals({ tracks, ids, cameras, keypointsAt, imageByUuid, modelResiduals, log }) {
   const perCam = new Map() // uuid → residuals[]
-  tracks.forEachPoint((p) => tracks.forEachView(p, (img, kpIdx) => {
-    const uuid = ids.uuid(img)
-    const cam = cameras.get(uuid), set = keypointsAt(img)
-    if (!cam || !hasKp(set, kpIdx)) return
-    const proj = projectPoint(cam, tracks.x(p), tracks.y(p), tracks.z(p))
-    if (!proj) return
-    if (!perCam.has(uuid)) perCam.set(uuid, [])
-    perCam.get(uuid).push(Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)))
-  }))
+  tracks.forEachPoint((p) =>
+    tracks.forEachView(p, (img, kpIdx) => {
+      const uuid = ids.uuid(img)
+      const cam = cameras.get(uuid),
+        set = keypointsAt(img)
+      if (!cam || !hasKp(set, kpIdx)) return
+      const proj = projectPoint(cam, tracks.x(p), tracks.y(p), tracks.z(p))
+      if (!proj) return
+      if (!perCam.has(uuid)) perCam.set(uuid, [])
+      perCam.get(uuid).push(Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)))
+    }),
+  )
   const globalMed = numStats(modelResiduals()).median || 0
   const rows = [...perCam.entries()]
     .map(([uuid, rs]) => ({ uuid, name: imageByUuid(uuid)?.name ?? uuid, s: numStats(rs) }))
     .sort((a, b) => b.s.median - a.s.median)
   const flagged = rows.filter((r) => globalMed > 0 && r.s.median > 2 * globalMed)
-  log(`per-camera residuals — global median ${globalMed.toFixed(2)}px; `
-    + `${flagged.length}/${pluralize(rows.length, 'camera')} over 2× (${(2 * globalMed).toFixed(2)}px)`,
-    flagged.length ? 'warn' : 'info', 'Reconstruction')
+  log(
+    `per-camera residuals — global median ${globalMed.toFixed(2)}px; ` +
+      `${flagged.length}/${pluralize(rows.length, 'camera')} over 2× (${(2 * globalMed).toFixed(2)}px)`,
+    flagged.length ? 'warn' : 'info',
+    'Reconstruction',
+  )
   for (const r of flagged) {
-    log(`  ⚠ ${r.name} — median ${r.s.median.toFixed(2)}px, `
-      + `p95 ${r.s.p95.toFixed(2)}px (${r.s.count} obs)`, 'warn', 'Reconstruction')
+    log(
+      `  ⚠ ${r.name} — median ${r.s.median.toFixed(2)}px, ` + `p95 ${r.s.p95.toFixed(2)}px (${r.s.count} obs)`,
+      'warn',
+      'Reconstruction',
+    )
   }
 }
 
@@ -197,15 +233,25 @@ export function logPerCameraResiduals({ tracks, ids, cameras, keypointsAt, image
 export function logRunTotals({ hist, totalMs, stageTimes, solverTotals, baSolver, log }) {
   const { t2: tracks2, t3: tracks3, t4: tracks4 } = hist
   log(`track lengths — ${tracks2} ×2-view, ${tracks3} ×3-view, ${tracks4} ×4+-view`, 'info', 'Reconstruction')
-  log(`total time ${(totalMs / 1000).toFixed(1)}s `
-    + `(${Object.entries(stageTimes).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`).join(', ')})`, 'info', 'Reconstruction')
+  log(
+    `total time ${(totalMs / 1000).toFixed(1)}s ` +
+      `(${Object.entries(stageTimes)
+        .map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`)
+        .join(', ')})`,
+    'info',
+    'Reconstruction',
+  )
   if (solverTotals.calls) {
     const T = solverTotals
-    log(`bundle adjustment solver — ${pluralize(T.calls, 'BA call')}, ${(T.ms / 1000).toFixed(1)}s`
-      + `${T.threads > 1 ? ` on ${T.threads} threads` : ''}, largest n ${T.maxN}; `
-      + `${T.solves} solves: ${T.cholesky} Cholesky, PCG ${T.pcgConverged} converged / ${T.pcgPartial} partial / `
-      + `${T.pcgFallback} → Cholesky / ${T.pcgNotPd} not PD (${T.pcgIters} CG it, max ${T.pcgItersMax}); `
-      + `policy ${JSON.stringify(baSolver ?? {})}`, 'info', 'Reconstruction')
+    log(
+      `bundle adjustment solver — ${pluralize(T.calls, 'BA call')}, ${(T.ms / 1000).toFixed(1)}s` +
+        `${T.threads > 1 ? ` on ${T.threads} threads` : ''}, largest n ${T.maxN}; ` +
+        `${T.solves} solves: ${T.cholesky} Cholesky, PCG ${T.pcgConverged} converged / ${T.pcgPartial} partial / ` +
+        `${T.pcgFallback} → Cholesky / ${T.pcgNotPd} not PD (${T.pcgIters} CG it, max ${T.pcgItersMax}); ` +
+        `policy ${JSON.stringify(baSolver ?? {})}`,
+      'info',
+      'Reconstruction',
+    )
   }
 }
 
@@ -235,15 +281,23 @@ export function unregisteredComponents({ imgs, cameras, donePairs, imageByUuid, 
     // all promised a recovery that never ran (eagle: 6, 4, 4 images vs a floor of 8).
     const floor = cfg.secondaryMinImages ?? 8
     const viable = remainingComponents.filter((c) => c.size >= floor).length
-    const routing = cfg.secondaryModels === false ? 'secondary-model recovery is off'
-      : viable === remainingComponents.length ? 'all go to secondary-model recovery'
-        : viable ? `${viable} reach the ${floor}-image floor for secondary-model recovery; the rest stay unregistered`
-          : `none reaches the ${floor}-image floor for secondary-model recovery, so they stay unregistered`
-    log(`${pluralize(remainingComponents.length, 'unregistered component')} ${remainingComponents.length === 1 ? 'remains' : 'remain'} `
-      + `(${remainingComponents.map((c) => c.size).join(', ')} images); largest starts `
-      + `${remainingComponents[0].imageNames.slice(0, 4).join(', ')}`
-      + `${remainingComponents[0].size > 4 ? ', …' : ''}. ${routing[0].toUpperCase()}${routing.slice(1)}; `
-      + `looser global PnP gates are not used.`, 'warn', 'Reconstruction')
+    const routing =
+      cfg.secondaryModels === false
+        ? 'secondary-model recovery is off'
+        : viable === remainingComponents.length
+          ? 'all go to secondary-model recovery'
+          : viable
+            ? `${viable} reach the ${floor}-image floor for secondary-model recovery; the rest stay unregistered`
+            : `none reaches the ${floor}-image floor for secondary-model recovery, so they stay unregistered`
+    log(
+      `${pluralize(remainingComponents.length, 'unregistered component')} ${remainingComponents.length === 1 ? 'remains' : 'remain'} ` +
+        `(${remainingComponents.map((c) => c.size).join(', ')} images); largest starts ` +
+        `${remainingComponents[0].imageNames.slice(0, 4).join(', ')}` +
+        `${remainingComponents[0].size > 4 ? ', …' : ''}. ${routing[0].toUpperCase()}${routing.slice(1)}; ` +
+        `looser global PnP gates are not used.`,
+      'warn',
+      'Reconstruction',
+    )
   }
   return remainingComponents
 }
@@ -276,11 +330,32 @@ export function finaliseIntrinsics({ imgs, cameras, Kmap, intrinsicsRecord }) {
 // ("did it improve" becomes a number, not a feeling). Persisted next to
 // georef in reconstruction.json by the store.
 export function assembleSummary({
-  cameras, nPoints, pct3plusViewTracks, preBaStats, finalStats,
-  bestPair, imgA, imgB, best, seedPointCount, perPairInitReproj,
-  runConfig, gateRecord, guidedRecord, selfCalRecord, trackCompletionRecord, intrinsicsRecord,
-  stageTimes, t0, solverTotals, baSolver, finalTrackPrune, finalMinTrackViews,
-  remainingComponents, selfCalDistortion, fiducialTransforms,
+  cameras,
+  nPoints,
+  pct3plusViewTracks,
+  preBaStats,
+  finalStats,
+  bestPair,
+  imgA,
+  imgB,
+  best,
+  seedPointCount,
+  perPairInitReproj,
+  runConfig,
+  gateRecord,
+  guidedRecord,
+  selfCalRecord,
+  trackCompletionRecord,
+  intrinsicsRecord,
+  stageTimes,
+  t0,
+  solverTotals,
+  baSolver,
+  finalTrackPrune,
+  finalMinTrackViews,
+  remainingComponents,
+  selfCalDistortion,
+  fiducialTransforms,
 }) {
   return {
     date: new Date().toISOString(),
@@ -290,10 +365,15 @@ export function assembleSummary({
     preBaP95px: preBaStats.p95,
     postBaMedianPx: finalStats.median,
     initPair: {
-      idA: bestPair.idA, idB: bestPair.idB, nameA: imgA.name, nameB: imgB.name,
+      idA: bestPair.idA,
+      idB: bestPair.idB,
+      nameA: imgA.name,
+      nameB: imgB.name,
       // The seed record IS the SB acceptance test (TODO ▸ SB): which pair won, on
       // what evidence, and how close the runner-up was.
-      angleDeg: best.angle, inliers: best.inliers, points: seedPointCount,
+      angleDeg: best.angle,
+      inliers: best.inliers,
+      points: seedPointCount,
       score: best.score ?? null,
       // Graph degree + PnP-ready third views come from the candidate table (the
       // scorer computes them there); they are the two signals the 2026-07-22
@@ -319,7 +399,7 @@ export function assembleSummary({
     trackCompletion: trackCompletionRecord,
     intrinsics: [...intrinsicsRecord.values()].map((r) => ({
       ...r,
-      deltaPct: r.fxNominal && r.fxFinal != null ? (100 * (r.fxFinal - r.fxNominal) / r.fxNominal) : null,
+      deltaPct: r.fxNominal && r.fxFinal != null ? (100 * (r.fxFinal - r.fxNominal)) / r.fxNominal : null,
     })),
     // Per-stage wall clock. Already measured for the debug log; persisted because
     // "is Stage X negligible?" is a question several TODO items ask of real runs.
@@ -345,6 +425,11 @@ export function assembleSummary({
     // F4: per-image scan→canonical transform for each film image, so the dense
     // stage reproduces the exact same frame (it must NOT re-fit — the sparse run
     // defines the frame). Empty for all-digital projects.
-    fiducialTransforms: [...fiducialTransforms].map(([uuid, t]) => ({ uuid, A: t.A, transform: t.transform, frame: t.frame })),
+    fiducialTransforms: [...fiducialTransforms].map(([uuid, t]) => ({
+      uuid,
+      A: t.A,
+      transform: t.transform,
+      frame: t.frame,
+    })),
   }
 }

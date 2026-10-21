@@ -31,12 +31,12 @@ import { toasts, clickToast } from '../../composables/useToasts.js'
   position: fixed;
   right: 16px;
   bottom: 16px;
-  z-index: 4000;              /* above modals — a copy can be triggered from one */
+  z-index: 4000; /* above modals — a copy can be triggered from one */
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-  pointer-events: none;       /* never blocks the viewport underneath */
+  pointer-events: none; /* never blocks the viewport underneath */
 }
 
 .toast {
@@ -64,7 +64,10 @@ import { toasts, clickToast } from '../../composables/useToasts.js'
   background: color-mix(in srgb, #c05252 16%, var(--panel));
 }
 
-.toast-title { font-weight: 600; color: var(--text); }
+.toast-title {
+  font-weight: 600;
+  color: var(--text);
+}
 
 .toast-detail {
   font-family: ui-monospace, 'Cascadia Code', 'Fira Mono', monospace;
@@ -93,7 +96,14 @@ import { toasts, clickToast } from '../../composables/useToasts.js'
 }
 
 .toast-enter-active,
-.toast-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
+.toast-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
 .toast-enter-from,
-.toast-leave-to { opacity: 0; transform: translateY(6px); }
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
 </style>

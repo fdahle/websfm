@@ -1,7 +1,11 @@
 <script setup>
 import { computed, watch } from 'vue'
 import {
-  updateReady, updateActive, reloadIntoUpdate, postponeUpdate, setUpdateBusy,
+  updateReady,
+  updateActive,
+  reloadIntoUpdate,
+  postponeUpdate,
+  setUpdateBusy,
 } from '../../composables/useAppUpdate.js'
 
 // "A new version is available": shown once a newly deployed service worker is
@@ -12,10 +16,15 @@ import {
 const props = defineProps({ busy: { type: Boolean, default: false } })
 
 // The tab's busy state drives the deferred reload, so report it even while hidden.
-watch(() => props.busy, (busy) => setUpdateBusy(busy), { immediate: true })
+watch(
+  () => props.busy,
+  (busy) => setUpdateBusy(busy),
+  { immediate: true },
+)
 
 const detail = computed(() => {
-  if (updateActive.value) return 'It is already active in another tab, so this tab reloads once the current task has finished.'
+  if (updateActive.value)
+    return 'It is already active in another tab, so this tab reloads once the current task has finished.'
   return props.busy ? 'You can reload once the current task has finished.' : 'Reload to switch to it.'
 })
 </script>
@@ -25,16 +34,16 @@ const detail = computed(() => {
        inside .app it would sit under modal overlays, the start-up project dialog
        among them, and could not be clicked. -->
   <Teleport to="body">
-  <div v-if="updateReady" class="update-prompt" role="status" data-modal-exempt>
-    <div class="up-text">
-      <span class="up-title">A new version of websfm is available</span>
-      <span class="up-detail">{{ detail }}</span>
+    <div v-if="updateReady" class="update-prompt" role="status" data-modal-exempt>
+      <div class="up-text">
+        <span class="up-title">A new version of websfm is available</span>
+        <span class="up-detail">{{ detail }}</span>
+      </div>
+      <div class="up-actions">
+        <button v-if="!updateActive" class="up-later" @click="postponeUpdate">Later</button>
+        <button class="up-reload" :disabled="busy" @click="reloadIntoUpdate">Reload</button>
+      </div>
     </div>
-    <div class="up-actions">
-      <button v-if="!updateActive" class="up-later" @click="postponeUpdate">Later</button>
-      <button class="up-reload" :disabled="busy" @click="reloadIntoUpdate">Reload</button>
-    </div>
-  </div>
   </Teleport>
 </template>
 
@@ -43,7 +52,7 @@ const detail = computed(() => {
   position: fixed;
   left: 16px;
   bottom: 16px;
-  z-index: 3900;              /* just below toasts */
+  z-index: 3900; /* just below toasts */
   max-width: 360px;
   display: flex;
   flex-wrap: wrap;
@@ -58,19 +67,48 @@ const detail = computed(() => {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   font-size: 12px;
 }
-.up-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 200px; min-width: 0; }
-.up-title { font-weight: 600; }
-.up-detail { color: var(--text-dim); }
-.up-actions { display: flex; gap: 6px; margin-left: auto; }
+.up-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.up-title {
+  font-weight: 600;
+}
+.up-detail {
+  color: var(--text-dim);
+}
+.up-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
 .update-prompt button {
   padding: 4px 10px;
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
 }
-.up-later { background: none; border: 1px solid var(--panel-border); color: var(--text); }
-.up-later:hover { background: var(--hover-bg); }
-.up-reload { background: var(--accent); border: 1px solid var(--accent); color: #fff; }
-.up-reload:hover:not(:disabled) { background: var(--accent-hover); }
-.up-reload:disabled { opacity: 0.5; cursor: default; }
+.up-later {
+  background: none;
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+}
+.up-later:hover {
+  background: var(--hover-bg);
+}
+.up-reload {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+}
+.up-reload:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.up-reload:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 </style>

@@ -17,7 +17,9 @@ describe('region', () => {
     expect(regionStatus(box, { id: 's', createdAt: 8 }).reason).toBe('stale')
     expect(regionStatus(box, null).reason).toBe('no-model')
     expect(regionStatus(null, { id: 's' }).reason).toBe('none')
-    expect(regionStatus({ min: [0, 0, 0], max: [0, 1, 1], sourceStamp: box.sourceStamp }, { id: 's', createdAt: 7 }).reason).toBe('invalid')
+    expect(
+      regionStatus({ min: [0, 0, 0], max: [0, 1, 1], sourceStamp: box.sourceStamp }, { id: 's', createdAt: 7 }).reason,
+    ).toBe('invalid')
   })
 
   it('tests containment inclusively and masks flat buffers and point objects', () => {
@@ -31,8 +33,13 @@ describe('region', () => {
   })
 
   it('fits a robust box that ignores a few strays', () => {
-    const n = 1000, pos = new Float64Array(n * 3)
-    for (let i = 0; i < n; i++) { pos[i * 3] = i % 100; pos[i * 3 + 1] = (i * 7) % 50; pos[i * 3 + 2] = (i % 10) / 10 }
+    const n = 1000,
+      pos = new Float64Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = i % 100
+      pos[i * 3 + 1] = (i * 7) % 50
+      pos[i * 3 + 2] = (i % 10) / 10
+    }
     pos.set([1e6, 1e6, 1e6], 0) // one far stray
     const r = regionFromPositions(pos, { quantile: 0.01, margin: 0 })
     expect(r.max[0]).toBeLessThan(100)

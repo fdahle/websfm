@@ -13,16 +13,25 @@ test('a running workflow holds a wake lock, titles the tab and notifies from a h
     window.__calls = []
     window.__visible = true
     Object.defineProperty(document, 'visibilityState', { get: () => (window.__visible ? 'visible' : 'hidden') })
-    Object.defineProperty(navigator, 'wakeLock', { value: { request: async (type) => {
-      window.__calls.push(`lock ${type}`)
-      const target = new EventTarget()
-      target.release = async () => { window.__calls.push('release'); target.dispatchEvent(new Event('release')) }
-      return target
-    } } })
+    Object.defineProperty(navigator, 'wakeLock', {
+      value: {
+        request: async (type) => {
+          window.__calls.push(`lock ${type}`)
+          const target = new EventTarget()
+          target.release = async () => {
+            window.__calls.push('release')
+            target.dispatchEvent(new Event('release'))
+          }
+          return target
+        },
+      },
+    })
     window.Notification = class {
       static permission = 'granted'
       static requestPermission = async () => 'granted'
-      constructor(title, opts) { window.__calls.push(`notify ${title} | ${opts?.body ?? ''}`) }
+      constructor(title, opts) {
+        window.__calls.push(`notify ${title} | ${opts?.body ?? ''}`)
+      }
       close() {}
     }
   })
@@ -41,15 +50,23 @@ test('a running workflow holds a wake lock, titles the tab and notifies from a h
   await page.locator('body').click({ position: { x: 5, y: 300 } })
   await page.keyboard.press('Control+k')
   const prompt = page.locator('.prompt-input')
-  const type = async (line) => { await prompt.fill(line); await prompt.press('Enter') }
-  await page.evaluate(() => { window.__visible = false })
+  const type = async (line) => {
+    await prompt.fill(line)
+    await prompt.press('Enter')
+  }
+  await page.evaluate(() => {
+    window.__visible = false
+  })
   await type('run workflow review')
   await expect(page.locator('.console-body')).toContainText('Workflow waiting: Quality Report needs your input.')
   await expect(page).toHaveTitle(`Waiting for you · ${base}`)
   await expect.poll(calls).toContain('notify A workflow is waiting for you | Quality Report needs your input.')
   // Hidden: no lock yet (the browser would drop it). Visible again: taken.
   expect(await calls()).not.toContain('lock screen')
-  await page.evaluate(() => { window.__visible = true; document.dispatchEvent(new Event('visibilitychange')) })
+  await page.evaluate(() => {
+    window.__visible = true
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
   await expect.poll(calls).toContain('lock screen')
 
   await page.keyboard.press('Escape')

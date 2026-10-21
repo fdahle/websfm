@@ -17,7 +17,11 @@ defineProps({
 
 <style scoped src="./modal.css"></style>
 <style scoped>
-.settings-group { display: flex; flex-direction: column; gap: 10px; }
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 .settings-group-title {
   font-size: 10px;
   font-weight: 700;
@@ -25,5 +29,9 @@ defineProps({
   text-transform: uppercase;
   color: var(--text-dim);
 }
-.settings-group-fields { display: flex; flex-direction: column; gap: 12px; }
+.settings-group-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 </style>

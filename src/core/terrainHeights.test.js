@@ -3,7 +3,11 @@ import { tileCoords, terrainZoom, terrainSampler, TERRAIN_MAX_ZOOM, TERRAIN_MAX_
 
 // A 4×4 tile whose height is 10·column + 1000·row (pixel centres).
 const W = 4
-const ramp = () => ({ elev: Float32Array.from({ length: W * W }, (_, i) => 10 * (i % W) + 1000 * Math.floor(i / W)), w: W, h: W })
+const ramp = () => ({
+  elev: Float32Array.from({ length: W * W }, (_, i) => 10 * (i % W) + 1000 * Math.floor(i / W)),
+  w: W,
+  h: W,
+})
 
 describe('tileCoords', () => {
   it('puts lon/lat 0/0 at the centre of the world', () => {
@@ -30,7 +34,12 @@ describe('terrainZoom', () => {
 describe('terrainSampler', () => {
   it('interpolates between pixel centres and fetches each tile once', async () => {
     let loads = 0
-    const s = terrainSampler(0, { loadTile: () => { loads++; return ramp() } })
+    const s = terrainSampler(0, {
+      loadTile: () => {
+        loads++
+        return ramp()
+      },
+    })
     // Level 0 is one tile; lon 0 is its middle column edge (pixel x = 2 → between centres 1 and 2).
     const h = await s.heightAt(0, 0)
     expect(h).toBeCloseTo(15 + 1500, 6)
@@ -44,14 +53,23 @@ describe('terrainSampler', () => {
   })
 
   it('returns null and keeps the first error for a tile that fails', async () => {
-    const s = terrainSampler(2, { loadTile: () => { throw new Error('offline') } })
+    const s = terrainSampler(2, {
+      loadTile: () => {
+        throw new Error('offline')
+      },
+    })
     expect(await s.heightAt(0, 0)).toBeNull()
     expect(s.error).toBe('offline')
   })
 
   it('prefetches every tile of a box', async () => {
     const seen = new Set()
-    const s = terrainSampler(3, { loadTile: (z, x, y) => { seen.add(`${x}/${y}`); return ramp() } })
+    const s = terrainSampler(3, {
+      loadTile: (z, x, y) => {
+        seen.add(`${x}/${y}`)
+        return ramp()
+      },
+    })
     await s.prefetch([-10, -10, 10, 10])
     expect(seen.size).toBe(4)
     expect(s.tileCount).toBe(4)

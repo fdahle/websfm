@@ -18,44 +18,59 @@ export { sniffDelimiter, parseRows }
 
 const PATTERNS = {
   // Image file names, plus generic name columns: in a pose file a row is an image.
-  image:   new RegExp(`${IMAGE_COLUMN.source}|^(label|name|id)$`, 'i'),
-  x:       /^(x|easting|east|e|lon|long|longitude|xs|x_s|xc)$/i,
-  y:       /^(y|northing|north|n|lat|latitude|ys|y_s|yc)$/i,
-  z:       /^(z|elev|elevation|alt|altitude|height|h|zs|z_s|zc)$/i,
-  omega:   /^(omega|om|roll|r|rx|rot_x)$/i,
-  phi:     /^(phi|ph|pitch|p|ry|rot_y)$/i,
-  kappa:   /^(kappa|ka|yaw|heading|k|rz|rot_z)$/i,
-  accXYZ:  /^(acc|accuracy|acc_xyz|sigma|sxyz|posacc)$/i,
+  image: new RegExp(`${IMAGE_COLUMN.source}|^(label|name|id)$`, 'i'),
+  x: /^(x|easting|east|e|lon|long|longitude|xs|x_s|xc)$/i,
+  y: /^(y|northing|north|n|lat|latitude|ys|y_s|yc)$/i,
+  z: /^(z|elev|elevation|alt|altitude|height|h|zs|z_s|zc)$/i,
+  omega: /^(omega|om|roll|r|rx|rot_x)$/i,
+  phi: /^(phi|ph|pitch|p|ry|rot_y)$/i,
+  kappa: /^(kappa|ka|yaw|heading|k|rz|rot_z)$/i,
+  accXYZ: /^(acc|accuracy|acc_xyz|sigma|sxyz|posacc)$/i,
   accuracyX: /^(accuracyx|accuracy_x|accx|acc_x|sigmax|sigma_x|stdx|std_x|xaccuracy|x_accuracy|posaccx|pos_acc_x)$/i,
   accuracyY: /^(accuracyy|accuracy_y|accy|acc_y|sigmay|sigma_y|stdy|std_y|yaccuracy|y_accuracy|posaccy|pos_acc_y)$/i,
   accuracyZ: /^(accuracyz|accuracy_z|accz|acc_z|sigmaz|sigma_z|stdz|std_z|zaccuracy|z_accuracy|posaccz|pos_acc_z)$/i,
-  accAngle:/^(accangle|acc_angle|sangle|angacc|rotacc)$/i,
-  accuracyOmega: /^(accuracyomega|accuracy_omega|accomega|acc_omega|sigmaomega|sigma_omega|stdomega|std_omega|omegaaccuracy|omega_accuracy|rollaccuracy|roll_accuracy)$/i,
-  accuracyPhi: /^(accuracyphi|accuracy_phi|accphi|acc_phi|sigmaphi|sigma_phi|stdphi|std_phi|phiaccuracy|phi_accuracy|pitchaccuracy|pitch_accuracy)$/i,
-  accuracyKappa: /^(accuracykappa|accuracy_kappa|acckappa|acc_kappa|sigmakappa|sigma_kappa|stdkappa|std_kappa|kappaaccuracy|kappa_accuracy|yawaccuracy|yaw_accuracy|headingaccuracy|heading_accuracy)$/i,
+  accAngle: /^(accangle|acc_angle|sangle|angacc|rotacc)$/i,
+  accuracyOmega:
+    /^(accuracyomega|accuracy_omega|accomega|acc_omega|sigmaomega|sigma_omega|stdomega|std_omega|omegaaccuracy|omega_accuracy|rollaccuracy|roll_accuracy)$/i,
+  accuracyPhi:
+    /^(accuracyphi|accuracy_phi|accphi|acc_phi|sigmaphi|sigma_phi|stdphi|std_phi|phiaccuracy|phi_accuracy|pitchaccuracy|pitch_accuracy)$/i,
+  accuracyKappa:
+    /^(accuracykappa|accuracy_kappa|acckappa|acc_kappa|sigmakappa|sigma_kappa|stdkappa|std_kappa|kappaaccuracy|kappa_accuracy|yawaccuracy|yaw_accuracy|headingaccuracy|heading_accuracy)$/i,
 }
 
 export const POSE_ROLES = [
-  'image', 'x', 'y', 'z', 'omega', 'phi', 'kappa',
-  'accuracyX', 'accuracyY', 'accuracyZ', 'accXYZ',
-  'accuracyOmega', 'accuracyPhi', 'accuracyKappa', 'accAngle',
+  'image',
+  'x',
+  'y',
+  'z',
+  'omega',
+  'phi',
+  'kappa',
+  'accuracyX',
+  'accuracyY',
+  'accuracyZ',
+  'accXYZ',
+  'accuracyOmega',
+  'accuracyPhi',
+  'accuracyKappa',
+  'accAngle',
 ]
 
 export const POSE_ROLE_LABELS = {
-  ignore:   'Ignore',
-  image:    'Image name',
-  x:        'Abs X',
-  y:        'Abs Y',
-  z:        'Abs Z',
-  omega:    'Omega (°)',
-  phi:      'Phi (°)',
-  kappa:    'Kappa (°)',
+  ignore: 'Ignore',
+  image: 'Image name',
+  x: 'Abs X',
+  y: 'Abs Y',
+  z: 'Abs Z',
+  omega: 'Omega (°)',
+  phi: 'Phi (°)',
+  kappa: 'Kappa (°)',
   accuracyX: 'X accuracy (σ)',
   accuracyY: 'Y accuracy (σ)',
   accuracyZ: 'Z accuracy (σ)',
-  accXYZ:   'Position accuracy (all axes)',
+  accXYZ: 'Position accuracy (all axes)',
   accuracyOmega: 'Omega accuracy (σ)',
-  accuracyPhi:   'Phi accuracy (σ)',
+  accuracyPhi: 'Phi accuracy (σ)',
   accuracyKappa: 'Kappa accuracy (σ)',
   accAngle: 'Angle accuracy (all axes)',
 }
@@ -77,7 +92,10 @@ export function guessMapping(headerCells, columnCount, hasHeader, { positional =
   if (hasHeader) {
     headerCells.forEach((cell, i) => {
       for (const role of POSE_ROLES) {
-        if (mapping[role] == null && PATTERNS[role].test(String(cell ?? '').trim())) { mapping[role] = i; break }
+        if (mapping[role] == null && PATTERNS[role].test(String(cell ?? '').trim())) {
+          mapping[role] = i
+          break
+        }
       }
     })
     return mapping
@@ -88,7 +106,10 @@ export function guessMapping(headerCells, columnCount, hasHeader, { positional =
   const used = new Set(Object.values(mapping).filter((v) => v != null))
   const order = ['image', 'x', 'y', 'z', 'omega', 'phi', 'kappa']
   order.forEach((role, i) => {
-    if (mapping[role] == null && i < columnCount && !used.has(i)) { mapping[role] = i; used.add(i) }
+    if (mapping[role] == null && i < columnCount && !used.has(i)) {
+      mapping[role] = i
+      used.add(i)
+    }
   })
   return mapping
 }
@@ -111,21 +132,25 @@ export function buildPoses(dataRows, mapping) {
     const imageName = mapping.image != null ? row[mapping.image]?.trim() : ''
     const x = mapping.x != null ? num(row[mapping.x]) : null
     const y = mapping.y != null ? num(row[mapping.y]) : null
-    if (!imageName || x == null || y == null) { skipped++; continue }
+    if (!imageName || x == null || y == null) {
+      skipped++
+      continue
+    }
 
     byImage.set(imageName, {
       imageName,
-      x, y,
-      z:        mapping.z     != null ? num(row[mapping.z])     : null,
-      omega:    mapping.omega != null ? num(row[mapping.omega]) : null,
-      phi:      mapping.phi   != null ? num(row[mapping.phi])   : null,
-      kappa:    mapping.kappa != null ? num(row[mapping.kappa]) : null,
+      x,
+      y,
+      z: mapping.z != null ? num(row[mapping.z]) : null,
+      omega: mapping.omega != null ? num(row[mapping.omega]) : null,
+      phi: mapping.phi != null ? num(row[mapping.phi]) : null,
+      kappa: mapping.kappa != null ? num(row[mapping.kappa]) : null,
       accuracyX: mapping.accuracyX != null ? num(row[mapping.accuracyX]) : null,
       accuracyY: mapping.accuracyY != null ? num(row[mapping.accuracyY]) : null,
       accuracyZ: mapping.accuracyZ != null ? num(row[mapping.accuracyZ]) : null,
-      accXYZ:   mapping.accXYZ   != null ? num(row[mapping.accXYZ])   : null,
+      accXYZ: mapping.accXYZ != null ? num(row[mapping.accXYZ]) : null,
       accuracyOmega: mapping.accuracyOmega != null ? num(row[mapping.accuracyOmega]) : null,
-      accuracyPhi:   mapping.accuracyPhi   != null ? num(row[mapping.accuracyPhi])   : null,
+      accuracyPhi: mapping.accuracyPhi != null ? num(row[mapping.accuracyPhi]) : null,
       accuracyKappa: mapping.accuracyKappa != null ? num(row[mapping.accuracyKappa]) : null,
       accAngle: mapping.accAngle != null ? num(row[mapping.accAngle]) : null,
     })

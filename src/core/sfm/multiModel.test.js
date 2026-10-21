@@ -3,10 +3,20 @@ import { secondaryJobs, alignSecondary, mergeAligned } from './multiModel.js'
 import { applySimilarity } from '../products/georef.js'
 import { SparsePoints } from './sparsePoints.js'
 
-const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-const rotZ = (a) => [[Math.cos(a), -Math.sin(a), 0], [Math.sin(a), Math.cos(a), 0], [0, 0, 1]]
-const mul = (A, B) => Array.from({ length: 3 }, (_, i) => Array.from({ length: 3 }, (_, j) =>
-  A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]))
+const I = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1],
+]
+const rotZ = (a) => [
+  [Math.cos(a), -Math.sin(a), 0],
+  [Math.sin(a), Math.cos(a), 0],
+  [0, 0, 1],
+]
+const mul = (A, B) =>
+  Array.from({ length: 3 }, (_, i) =>
+    Array.from({ length: 3 }, (_, j) => A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]),
+  )
 const mv = (R, p) => R.map((r) => r[0] * p[0] + r[1] * p[1] + r[2] * p[2])
 const camAt = (uuid, C, R = I) => ({ uuid, R, t: mv(R, C).map((v) => -v), K: { fx: 1000 } })
 
@@ -18,9 +28,12 @@ describe('secondaryJobs', () => {
     for (let i = 0; i < 7; i++) pairs.push({ idA: `s${i}`, idB: `s${i + 1}`, status: 'done', inlierCount: 50 })
     pairs.push({ idA: 'p1', idB: 's0', status: 'done', inlierCount: 200 })
     pairs.push({ idA: 'p2', idB: 's1', status: 'done', inlierCount: 100 })
-    const primary = { cameras: [{ uuid: 'p1' }, { uuid: 'p2' }], summary: {
-      unregisteredComponents: [{ imageUuids: ids.slice(2) }],
-    } }
+    const primary = {
+      cameras: [{ uuid: 'p1' }, { uuid: 'p2' }],
+      summary: {
+        unregisteredComponents: [{ imageUuids: ids.slice(2) }],
+      },
+    }
     const [job] = secondaryJobs({ images, pairs }, primary)
     expect(job.componentIds).toHaveLength(8)
     expect(job.boundaryIds).toEqual(['p1', 'p2'])
@@ -30,7 +43,12 @@ describe('secondaryJobs', () => {
 
 describe('alignSecondary', () => {
   const sim = { scale: 2.5, R: rotZ(0.4), t: [7, -3, 2] }
-  const centresS = [[0, 0, 0], [2, 0, 0], [0, 3, 1], [2, 2, 2]]
+  const centresS = [
+    [0, 0, 0],
+    [2, 0, 0],
+    [0, 3, 1],
+    [2, 2, 2],
+  ]
   const primaryCams = centresS.map((C, i) => camAt(`c${i}`, applySimilarity(sim, C)))
   // Inverse of transformCamera used by alignSecondary for primary R=I.
   const secondaryCams = centresS.map((C, i) => {
@@ -41,10 +59,17 @@ describe('alignSecondary', () => {
     return { uuid: `c${i}`, R, t, K: { fx: 1000 } }
   })
   secondaryCams.push(camAt('new', [1, 1, 1], sim.R))
-  const primary = { status: 'done', cameras: primaryCams, points: SparsePoints.empty(), summary: { selfCalDistortion: [] } }
+  const primary = {
+    status: 'done',
+    cameras: primaryCams,
+    points: SparsePoints.empty(),
+    summary: { selfCalDistortion: [] },
+  }
   const secondary = {
-    status: 'done', cameras: secondaryCams,
-    points: SparsePoints.fromRecords([{ x: 1, y: 2, z: 3, views: [['new', 0]] }]), summary: { selfCalDistortion: [] },
+    status: 'done',
+    cameras: secondaryCams,
+    points: SparsePoints.fromRecords([{ x: 1, y: 2, z: 3, views: [['new', 0]] }]),
+    summary: { selfCalDistortion: [] },
   }
 
   it('aligns and merges a secondary model supported by shared cameras', () => {

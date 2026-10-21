@@ -35,15 +35,32 @@ export function hasDistortion(d) {
 // The fisheye family reuses k1…k4 for its own polynomial in the ray angle θ, as
 // COLMAP and OpenCV do: θd = θ·(1 + k1·θ² + k2·θ⁴ + k3·θ⁶ + k4·θ⁸).
 export const DISTORTION_MODELS = [
-  { id: 'pinhole',  label: 'Pinhole (none)',            family: 'brown',   coeffs: [], colmap: 'PINHOLE' },
-  { id: 'radial',   label: 'Radial (k1)',               family: 'brown',   coeffs: ['k1'], colmap: 'SIMPLE_RADIAL' },
-  { id: 'radial2',  label: 'Radial (k1,k2)',            family: 'brown',   coeffs: ['k1', 'k2'], colmap: 'RADIAL' },
-  { id: 'brown',    label: 'Brown (k1,k2,k3,p1,p2)',    family: 'brown',   coeffs: ['k1', 'k2', 'k3', 'p1', 'p2'], colmap: 'OPENCV' },
-  { id: 'rational', label: 'Rational (k1–k6,p1,p2)',    family: 'brown',
-    coeffs: ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'p1', 'p2'], colmap: 'FULL_OPENCV' },
-  { id: 'fisheye1', label: 'Fisheye (k1)',              family: 'fisheye', coeffs: ['k1'], colmap: 'SIMPLE_RADIAL_FISHEYE' },
-  { id: 'fisheye2', label: 'Fisheye (k1,k2)',           family: 'fisheye', coeffs: ['k1', 'k2'], colmap: 'RADIAL_FISHEYE' },
-  { id: 'fisheye',  label: 'Fisheye (k1–k4)',           family: 'fisheye', coeffs: ['k1', 'k2', 'k3', 'k4'], colmap: 'OPENCV_FISHEYE' },
+  { id: 'pinhole', label: 'Pinhole (none)', family: 'brown', coeffs: [], colmap: 'PINHOLE' },
+  { id: 'radial', label: 'Radial (k1)', family: 'brown', coeffs: ['k1'], colmap: 'SIMPLE_RADIAL' },
+  { id: 'radial2', label: 'Radial (k1,k2)', family: 'brown', coeffs: ['k1', 'k2'], colmap: 'RADIAL' },
+  {
+    id: 'brown',
+    label: 'Brown (k1,k2,k3,p1,p2)',
+    family: 'brown',
+    coeffs: ['k1', 'k2', 'k3', 'p1', 'p2'],
+    colmap: 'OPENCV',
+  },
+  {
+    id: 'rational',
+    label: 'Rational (k1–k6,p1,p2)',
+    family: 'brown',
+    coeffs: ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'p1', 'p2'],
+    colmap: 'FULL_OPENCV',
+  },
+  { id: 'fisheye1', label: 'Fisheye (k1)', family: 'fisheye', coeffs: ['k1'], colmap: 'SIMPLE_RADIAL_FISHEYE' },
+  { id: 'fisheye2', label: 'Fisheye (k1,k2)', family: 'fisheye', coeffs: ['k1', 'k2'], colmap: 'RADIAL_FISHEYE' },
+  {
+    id: 'fisheye',
+    label: 'Fisheye (k1–k4)',
+    family: 'fisheye',
+    coeffs: ['k1', 'k2', 'k3', 'k4'],
+    colmap: 'OPENCV_FISHEYE',
+  },
 ]
 const MODEL_BY_ID = new Map(DISTORTION_MODELS.map((m) => [m.id, m]))
 const BROWN_COEFFS = ['k1', 'k2', 'k3', 'p1', 'p2']
@@ -79,11 +96,21 @@ export function inferDistortionModel(sensor) {
 // common spellings of other tools (OpenSfM, Metashape, ODM) — as a model id, or
 // null when the text names no model this pipeline knows.
 const MODEL_NAME_ALIASES = {
-  perspective: 'pinhole', frame: 'pinhole', simple_pinhole: 'pinhole', none: 'pinhole',
-  simple_radial: 'radial', opencv: 'brown', brown_conrady: 'brown',
-  full_opencv: 'rational', opencv_rational: 'rational',
-  simple_radial_fisheye: 'fisheye1', radial_fisheye: 'fisheye2',
-  opencv_fisheye: 'fisheye', fisheye_opencv: 'fisheye', kannala_brandt: 'fisheye', equidistant: 'fisheye',
+  perspective: 'pinhole',
+  frame: 'pinhole',
+  simple_pinhole: 'pinhole',
+  none: 'pinhole',
+  simple_radial: 'radial',
+  opencv: 'brown',
+  brown_conrady: 'brown',
+  full_opencv: 'rational',
+  opencv_rational: 'rational',
+  simple_radial_fisheye: 'fisheye1',
+  radial_fisheye: 'fisheye2',
+  opencv_fisheye: 'fisheye',
+  fisheye_opencv: 'fisheye',
+  kannala_brandt: 'fisheye',
+  equidistant: 'fisheye',
 }
 // COLMAP's names win when the text is written the COLMAP way (upper case): its
 // RADIAL is k1,k2 where our own `radial` id is k1 alone.
@@ -132,7 +159,8 @@ function undistortBrown(xd, yd, d, iters) {
     const [fx, fy] = distortBrown(x, y, d)
     return [fx - xd, fy - yd]
   }
-  let x = xd, y = yd
+  let x = xd,
+    y = yd
   let [ex, ey] = residual(x, y)
   let err = ex * ex + ey * ey
   for (let i = 0; i < iters && err > 1e-26; i++) {
@@ -148,12 +176,22 @@ function undistortBrown(xd, yd, d, iters) {
     const sy = (a * ey - c * ex) / det
     // Backtrack: never accept a step that increases the residual (keeps Newton
     // from jumping across a fold of a strongly distorting model).
-    let t = 1, improved = false
+    let t = 1,
+      improved = false
     for (let h = 0; h < 8; h++, t *= 0.5) {
-      const nx = x - t * sx, ny = y - t * sy
+      const nx = x - t * sx,
+        ny = y - t * sy
       const [rx, ry] = residual(nx, ny)
       const nerr = rx * rx + ry * ry
-      if (nerr < err) { x = nx; y = ny; ex = rx; ey = ry; err = nerr; improved = true; break }
+      if (nerr < err) {
+        x = nx
+        y = ny
+        ex = rx
+        ey = ry
+        err = nerr
+        improved = true
+        break
+      }
     }
     if (!improved) break
   }

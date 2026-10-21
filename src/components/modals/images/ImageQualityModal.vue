@@ -28,21 +28,27 @@ const emit = defineEmits(['close', 'estimate', 'group', 'remove'])
 const minRelative = ref(IMAGE_QUALITY_DEFAULTS.minRelative)
 const scored = computed(() => props.images.filter((img) => img.quality?.sharpness != null))
 const verdicts = computed(() => {
-  const list = qualityVerdicts(scored.value.map((img) => ({ id: img.id, ...img.quality })), { minRelative: minRelative.value })
+  const list = qualityVerdicts(
+    scored.value.map((img) => ({ id: img.id, ...img.quality })),
+    { minRelative: minRelative.value },
+  )
   return new Map(list.map((v) => [v.id, v]))
 })
-const rows = computed(() => props.images.map((img) => {
-  const v = verdicts.value.get(img.id)
-  const q = img.quality
-  return {
-    id: img.id, name: img.name,
-    relative: v?.relative ?? null,
-    sharpness: q?.sharpness ?? null,
-    exposure: q ? `${Math.round((q.underexposed ?? 0) * 100)}% / ${Math.round((q.overexposed ?? 0) * 100)}%` : '—',
-    flags: v ? (v.flags.length ? v.flags.join(', ') : 'ok') : 'not scored',
-    ok: v?.ok ?? null,
-  }
-}))
+const rows = computed(() =>
+  props.images.map((img) => {
+    const v = verdicts.value.get(img.id)
+    const q = img.quality
+    return {
+      id: img.id,
+      name: img.name,
+      relative: v?.relative ?? null,
+      sharpness: q?.sharpness ?? null,
+      exposure: q ? `${Math.round((q.underexposed ?? 0) * 100)}% / ${Math.round((q.overexposed ?? 0) * 100)}%` : '—',
+      flags: v ? (v.flags.length ? v.flags.join(', ') : 'ok') : 'not scored',
+      ok: v?.ok ?? null,
+    }
+  }),
+)
 const columns = [
   { key: 'name', label: 'Image' },
   { key: 'relative', label: 'Sharpness vs median', align: 'right' },
@@ -69,31 +75,60 @@ function groupFlagged() {
     <WarnBox v-if="!images.length">Import images first.</WarnBox>
     <template v-else>
       <SettingsGroup title="Score">
-        <SettingsField :hint="unscored ? `${unscored} of ${images.length} images not scored yet.` : 'All images scored. Rescore after changing masks.'">
+        <SettingsField
+          :hint="
+            unscored
+              ? `${unscored} of ${images.length} images not scored yet.`
+              : 'All images scored. Rescore after changing masks.'
+          "
+        >
           <button type="button" class="btn" @click="emit('estimate', null)">
             {{ scored.length ? 'Rescore all images' : 'Score all images' }}
           </button>
         </SettingsField>
-        <SettingsField label-for="iq-min" unit="× median sharpness"
-          hint="Relative to this batch: 0.5 flags images half as sharp as the typical one.">
+        <SettingsField
+          label-for="iq-min"
+          unit="× median sharpness"
+          hint="Relative to this batch: 0.5 flags images half as sharp as the typical one."
+        >
           <template #label><GlossaryTerm id="image-sharpness">Blurry below</GlossaryTerm></template>
-          <input id="iq-min" v-model.number="minRelative" type="number" min="0.05" max="1" step="0.05" class="field-input" />
+          <input
+            id="iq-min"
+            v-model.number="minRelative"
+            type="number"
+            min="0.05"
+            max="1"
+            step="0.05"
+            class="field-input"
+          />
         </SettingsField>
       </SettingsGroup>
       <DataTable v-if="scored.length" :rows="rows" :columns="columns" sort-key="relative" sort-dir="asc">
         <template #cell-relative="{ row }">{{ row.relative == null ? '—' : row.relative.toFixed(2) }}</template>
-        <template #cell-flags="{ row }"><span :class="{ bad: row.ok === false }">{{ row.flags }}</span></template>
+        <template #cell-flags="{ row }"
+          ><span :class="{ bad: row.ok === false }">{{ row.flags }}</span></template
+        >
       </DataTable>
       <p v-if="scored.length" class="field-hint">
         {{ flagged.length }} of {{ pluralize(scored.length, 'scored image') }} flagged.
       </p>
     </template>
     <template #footer>
-      <button class="btn" :disabled="!flagged.length || grouped"
-        :title="grouped ? 'The flagged images are in the “Low image quality” image group'
-          : 'Put the flagged images in the “Low image quality” image group (display only)'"
-        @click="groupFlagged">{{ grouped ? 'Grouped ✓' : 'Group flagged' }}</button>
-      <button class="btn btn-danger" :disabled="!flagged.length" @click="emit('remove', flagged)">Remove flagged…</button>
+      <button
+        class="btn"
+        :disabled="!flagged.length || grouped"
+        :title="
+          grouped
+            ? 'The flagged images are in the “Low image quality” image group'
+            : 'Put the flagged images in the “Low image quality” image group (display only)'
+        "
+        @click="groupFlagged"
+      >
+        {{ grouped ? 'Grouped ✓' : 'Group flagged' }}
+      </button>
+      <button class="btn btn-danger" :disabled="!flagged.length" @click="emit('remove', flagged)">
+        Remove flagged…
+      </button>
       <button class="btn btn-primary" @click="emit('close')">Close</button>
     </template>
   </ModalShell>
@@ -101,5 +136,7 @@ function groupFlagged() {
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.bad { color: var(--danger); }
+.bad {
+  color: var(--danger);
+}
 </style>

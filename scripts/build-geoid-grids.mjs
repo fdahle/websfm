@@ -15,7 +15,9 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { zlibSync } from 'fflate'
 import { fromArrayBuffer } from 'geotiff'
 
-const ROWS = 721, COLS = 1440, STEP = 0.25
+const ROWS = 721,
+  COLS = 1440,
+  STEP = 0.25
 
 async function nodes(path) {
   const buf = await readFile(path)
@@ -31,12 +33,14 @@ async function nodes(path) {
     throw new Error(`${path}: unexpected grid (origin ${x0}, ${y0}, step ${res})`)
   }
   const [band] = await image.readRasters()
-  const width = image.getWidth(), out = new Int16Array(ROWS * COLS)
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-    const v = band[r * stride * width + c * stride]
-    if (!Number.isFinite(v) || Math.abs(v) > 300) throw new Error(`${path}: bad value ${v} at row ${r}, col ${c}`)
-    out[r * COLS + c] = Math.round(v * 100)
-  }
+  const width = image.getWidth(),
+    out = new Int16Array(ROWS * COLS)
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      const v = band[r * stride * width + c * stride]
+      if (!Number.isFinite(v) || Math.abs(v) > 300) throw new Error(`${path}: bad value ${v} at row ${r}, col ${c}`)
+      out[r * COLS + c] = Math.round(v * 100)
+    }
   return out
 }
 
@@ -47,7 +51,10 @@ if (!egm96 || !egm2008) {
 }
 const dir = new URL('../public/geoid/', import.meta.url)
 await mkdir(dir, { recursive: true })
-for (const [name, path] of [['egm96-15', egm96], ['egm2008-15', egm2008]]) {
+for (const [name, path] of [
+  ['egm96-15', egm96],
+  ['egm2008-15', egm2008],
+]) {
   const grid = await nodes(path)
   const bytes = zlibSync(new Uint8Array(grid.buffer), { level: 9 })
   await writeFile(new URL(`${name}.i16.z`, dir), bytes)

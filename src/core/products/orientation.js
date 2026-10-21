@@ -58,7 +58,8 @@ export function orientationBasis(o) {
   if (!n) return null
   const { east, north, up } = basisFromUp(n.up)
   const h = (n.headingDeg * Math.PI) / 180
-  const c = Math.cos(h), s = Math.sin(h)
+  const c = Math.cos(h),
+    s = Math.sin(h)
   const e = unit([c * east[0] + s * north[0], c * east[1] + s * north[1], c * east[2] + s * north[2]])
   return { origin: [...n.origin], east: e, north: unit(cross(up, e)), up }
 }

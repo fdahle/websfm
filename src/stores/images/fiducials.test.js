@@ -17,14 +17,23 @@ const SENSOR = { id: 's1' }
 const spot = () => ({
   accepted: [{ slot: 'corner-tl', px: 10, py: 12, family: 'generic', source: 'shape', confidence: 0.9 }],
   drafts: [{ slot: 'corner-br', px: 90, py: 88, family: 'generic', confidence: 0.3, reason: 'weak-peak' }],
-  requested: 1, frame: { left: 2, top: 2, right: 97, bottom: 97, confidence: 0.5 },
-  natW: 100, natH: 100, ms: 1,
+  requested: 1,
+  frame: { left: 2, top: 2, right: 97, bottom: 97, confidence: 0.5 },
+  natW: 100,
+  natH: 100,
+  ms: 1,
 })
 
 function setup(n = 3) {
-  const images = { value: Array.from({ length: n }, (_, i) => ({
-    id: `i${i}`, name: `${i}.tif`, url: `blob:${i}`, sensorId: SENSOR.id, meta: { width: 100, height: 100 },
-  })) }
+  const images = {
+    value: Array.from({ length: n }, (_, i) => ({
+      id: `i${i}`,
+      name: `${i}.tif`,
+      url: `blob:${i}`,
+      sensorId: SENSOR.id,
+      meta: { width: 100, height: 100 },
+    })),
+  }
   const deps = {
     images,
     imageById: (id) => images.value.find((img) => img.id === id),
@@ -46,7 +55,11 @@ beforeEach(() => {
 
 it('stores detections and masks and saves when the run is not cancelled', async () => {
   const { images, deps, api } = setup()
-  const out = await api.detectFiducialsForSensor({ sensor: SENSOR, settings: { generateMasks: true }, shouldCancel: () => false })
+  const out = await api.detectFiducialsForSensor({
+    sensor: SENSOR,
+    settings: { generateMasks: true },
+    shouldCancel: () => false,
+  })
   expect(out.cancelled).toBeUndefined()
   expect(out.applied).toBe(3)
   expect(out.masksGenerated).toBe(3)
@@ -59,9 +72,14 @@ it('stores detections and masks and saves when the run is not cancelled', async 
 it('starts no further image and writes nothing once cancelled between images', async () => {
   const { images, deps, api } = setup(4)
   let cancel = false
-  const onProgress = vi.fn((done) => { if (done === 1) cancel = true })
+  const onProgress = vi.fn((done) => {
+    if (done === 1) cancel = true
+  })
   const out = await api.detectFiducialsForSensor({
-    sensor: SENSOR, settings: { generateMasks: true }, onProgress, shouldCancel: () => cancel,
+    sensor: SENSOR,
+    settings: { generateMasks: true },
+    onProgress,
+    shouldCancel: () => cancel,
   })
   expect(out).toMatchObject({ cancelled: true, perImage: [], drafts: [], applied: 0, masksGenerated: 0 })
   expect(detectFiducialSpots).toHaveBeenCalledTimes(1)
@@ -74,7 +92,10 @@ it('starts no further image and writes nothing once cancelled between images', a
 it('discards the result of an image that was in flight when the cancel came', async () => {
   const { images, deps, api } = setup(2)
   let cancel = false
-  detectFiducialSpots.mockImplementation(async () => { cancel = true; return spot() })
+  detectFiducialSpots.mockImplementation(async () => {
+    cancel = true
+    return spot()
+  })
   const onProgress = vi.fn()
   const out = await api.detectFiducialsForSensor({ sensor: SENSOR, onProgress, shouldCancel: () => cancel })
   expect(out.cancelled).toBe(true)
@@ -90,8 +111,15 @@ it('discards the result of an image that was in flight when the cancel came', as
 it('writes nothing when cancelled while the frame masks are being built', async () => {
   const { images, deps, api } = setup(3)
   let cancel = false
-  buildBorderMask.mockImplementation(async () => { cancel = true; return new Blob(['mask']) })
-  const out = await api.detectFiducialsForSensor({ sensor: SENSOR, settings: { generateMasks: true }, shouldCancel: () => cancel })
+  buildBorderMask.mockImplementation(async () => {
+    cancel = true
+    return new Blob(['mask'])
+  })
+  const out = await api.detectFiducialsForSensor({
+    sensor: SENSOR,
+    settings: { generateMasks: true },
+    shouldCancel: () => cancel,
+  })
   expect(out.cancelled).toBe(true)
   expect(buildBorderMask).toHaveBeenCalledTimes(1)
   expect(deps.updateMask).not.toHaveBeenCalled()

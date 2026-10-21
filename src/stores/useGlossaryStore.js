@@ -8,7 +8,7 @@ import { defineStore } from 'pinia'
 // action modal the user opened it from. Pure UI state: not persisted.
 export const useGlossaryStore = defineStore('glossary', () => {
   const isOpen = ref(false)
-  const tabs = ref([])        // term entry ids, in the order opened
+  const tabs = ref([]) // term entry ids, in the order opened
   const activeId = ref('home') // 'home' or an entry id
 
   // Open the modal on the home/index page.
@@ -32,7 +32,7 @@ export const useGlossaryStore = defineStore('glossary', () => {
   function closeTab(id) {
     const i = tabs.value.indexOf(id)
     if (i === -1) return
-    tabs.value = tabs.value.filter(t => t !== id)
+    tabs.value = tabs.value.filter((t) => t !== id)
     // If the closed tab was active, fall back to its left neighbour or home.
     if (activeId.value === id) activeId.value = tabs.value[i - 1] ?? tabs.value[i] ?? 'home'
   }

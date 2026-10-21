@@ -19,9 +19,7 @@ export const MAX_BUDGET_GB = MAX_BUDGET_BYTES / GiB
 // injected numbers and remains DOM-free. Both APIs are intentionally optional.
 const deviceBudgetInfo = deviceBudget({
   deviceMemoryGB: typeof navigator !== 'undefined' ? Number(navigator.deviceMemory) : null,
-  jsHeapLimitBytes: typeof performance !== 'undefined'
-    ? Number(performance.memory?.jsHeapSizeLimit)
-    : null,
+  jsHeapLimitBytes: typeof performance !== 'undefined' ? Number(performance.memory?.jsHeapSizeLimit) : null,
 })
 
 const storedBudgetGb = Number(localStorage.getItem(BUDGET_KEY))
@@ -30,7 +28,9 @@ const memBudgetGb = ref(hasStoredBudget ? Math.min(MAX_BUDGET_GB, storedBudgetGb
 const memBudgetAuto = ref(!hasStoredBudget)
 // Never past what a Chrome tab can hold (memBudget.js MAX_BUDGET_BYTES), whatever was
 // entered: a budget above it only moved the failure to the end of a long run.
-const memBudgetBytes = computed(() => Math.min(MAX_BUDGET_BYTES, Math.max(0.25, Number(memBudgetGb.value) || DEFAULT_BUDGET_GB) * GiB))
+const memBudgetBytes = computed(() =>
+  Math.min(MAX_BUDGET_BYTES, Math.max(0.25, Number(memBudgetGb.value) || DEFAULT_BUDGET_GB) * GiB),
+)
 
 // U2/U3 consume the real device-memory reading, not the user's safety-limit
 // override: recommendation quality describes hardware, while memBudgetBytes is a
@@ -71,8 +71,12 @@ export function useComputeSettings() {
       : ' Using it as the automatic dense-run safety limit.'
     log(`${deviceBudgetInfo.note}${suffix}`, 'info', 'Compute')
     if (hasStoredBudget && storedBudgetGb > MAX_BUDGET_GB) {
-      log(`Memory budget: the saved ${storedBudgetGb} GB is more than a Chrome tab can hold (16 GB of buffers for the page `
-        + `and all its workers together); using ${MAX_BUDGET_GB} GB.`, 'warn', 'Compute')
+      log(
+        `Memory budget: the saved ${storedBudgetGb} GB is more than a Chrome tab can hold (16 GB of buffers for the page ` +
+          `and all its workers together); using ${MAX_BUDGET_GB} GB.`,
+        'warn',
+        'Compute',
+      )
     }
     budgetLogged = true
   }
@@ -95,7 +99,9 @@ export function useComputeSettings() {
   function recommendForDataset(profile) {
     return recommendSettings(profile, recommendationBudget)
   }
-  function setUseGpu(v) { useGpu.value = !!v }
+  function setUseGpu(v) {
+    useGpu.value = !!v
+  }
   function setWorkerCount(v) {
     const n = Number(v)
     const next = n > 0 ? Math.max(1, Math.min(MAX_POOL_SIZE, Math.round(n))) : 0
@@ -104,10 +110,20 @@ export function useComputeSettings() {
     return configureWorkerPoolSize(next)
   }
   return {
-    memBudgetGb, memBudgetBytes, memBudgetAuto,
-    setMemBudgetGb, resetMemBudgetAuto, DEFAULT_BUDGET_GB, MAX_BUDGET_GB,
-    deviceBudgetInfo, recommendationBudget, recommendForDataset,
-    useGpu, setUseGpu,
-    workerCount, setWorkerCount, MAX_POOL_SIZE,
+    memBudgetGb,
+    memBudgetBytes,
+    memBudgetAuto,
+    setMemBudgetGb,
+    resetMemBudgetAuto,
+    DEFAULT_BUDGET_GB,
+    MAX_BUDGET_GB,
+    deviceBudgetInfo,
+    recommendationBudget,
+    recommendForDataset,
+    useGpu,
+    setUseGpu,
+    workerCount,
+    setWorkerCount,
+    MAX_POOL_SIZE,
   }
 }

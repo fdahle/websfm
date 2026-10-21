@@ -7,7 +7,12 @@ import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { estimateUpFromCameras } from '../../core/sfm/geometry.js'
 import CloudLegend from './CloudLegend.vue'
 import FloatingToolbox from './FloatingToolbox.vue'
-import { buildCloudStyle, scalarRange, sharedElevationRange, resolveCloudStyle } from '../../core/products/cloudStyle.js'
+import {
+  buildCloudStyle,
+  scalarRange,
+  sharedElevationRange,
+  resolveCloudStyle,
+} from '../../core/products/cloudStyle.js'
 import { viewerClipping } from '../../core/products/viewerClipping.js'
 import { pickNearestPoint } from '../../core/products/screenPick.js'
 import { settleEditLatch } from '../../core/products/editFraming.js'
@@ -16,7 +21,13 @@ import { texturePageBlobs } from '../../stores/reconstruction/meshTexture.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { createLodLayer, LOD_VIEW_MIN } from './lodLayer.js'
 import { robustBounds } from './viewerFraming.js'
-import { srgbVertexColors, disposeMaterial, disposeObject, disposeLayer, releaseStyleBuffers } from './threeResources.js'
+import {
+  srgbVertexColors,
+  disposeMaterial,
+  disposeObject,
+  disposeLayer,
+  releaseStyleBuffers,
+} from './threeResources.js'
 import { useCameraFrustums } from './useCameraFrustums.js'
 import { useCloudSelection } from './useCloudSelection.js'
 import { useMeasure3d } from './useMeasure3d.js'
@@ -109,11 +120,15 @@ function pageMaterials(layer, cloud) {
       let bmp = await createImageBitmap(blob)
       if (bmp.width > max || bmp.height > max) {
         const s = max / Math.max(bmp.width, bmp.height)
-        const w = Math.floor(bmp.width * s), h = Math.floor(bmp.height * s)
+        const w = Math.floor(bmp.width * s),
+          h = Math.floor(bmp.height * s)
         bmp.close()
         bmp = await createImageBitmap(blob, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' })
       }
-      if (unmounted || layer.pageMaterials !== mats) { bmp.close(); return }
+      if (unmounted || layer.pageMaterials !== mats) {
+        bmp.close()
+        return
+      }
       const tex = new THREE.Texture(bmp)
       tex.flipY = false
       tex.colorSpace = THREE.SRGBColorSpace
@@ -139,42 +154,110 @@ let sceneRadius = 5
 const sceneUp = new THREE.Vector3(0, 0, 1)
 // Signed extent of the cloud/mesh *along sceneUp*, relative to sceneCenter — drives
 // the grid's min/avg/max placement (see updateGrid). 0 until a cloud loads.
-let sceneAlongMin = 0, sceneAlongMax = 0
+let sceneAlongMin = 0,
+  sceneAlongMax = 0
 
 // The parts of the view that live in their own modules. They read the renderer state
 // through `view`, live: the renderer, scene and camera exist only after init().
 const view = {
-  get renderer() { return renderer },
-  get scene() { return scene },
-  get camera() { return camera },
-  get unmounted() { return unmounted },
+  get renderer() {
+    return renderer
+  },
+  get scene() {
+    return scene
+  },
+  get camera() {
+    return camera
+  },
+  get unmounted() {
+    return unmounted
+  },
 }
-const { frustumGroup, setCameras, afterFrame: frustumsAfterFrame, dispose: disposeFrustums } = useCameraFrustums({
-  view, images: () => props.images, requestRender,
+const {
+  frustumGroup,
+  setCameras,
+  afterFrame: frustumsAfterFrame,
+  dispose: disposeFrustums,
+} = useCameraFrustums({
+  view,
+  images: () => props.images,
+  requestRender,
 })
 const {
-  selectTool, selectionCount, selectionStreamed, selectionClouds, drawShape, assignClass, ASSIGN_CLASSES,
-  selectableLayers, toggleSelectTool, exitSelection, clearSelection, pruneSelections, commitSelection,
-  onSelectPointerDown, onSelectPointerMove, onSelectPointerUp, abortStroke, setOverlaySize,
+  selectTool,
+  selectionCount,
+  selectionStreamed,
+  selectionClouds,
+  drawShape,
+  assignClass,
+  ASSIGN_CLASSES,
+  selectableLayers,
+  toggleSelectTool,
+  exitSelection,
+  clearSelection,
+  pruneSelections,
+  commitSelection,
+  onSelectPointerDown,
+  onSelectPointerMove,
+  onSelectPointerUp,
+  abortStroke,
+  setOverlaySize,
   // Not used here: kept on the component so the browser tests can draw a shape.
   applySelectionShape,
 } = useCloudSelection({
-  view, container, cloudLayers, pointerPx, requestRender, emit, onEditPending: (ids) => { editPendingIds = ids },
+  view,
+  container,
+  cloudLayers,
+  pointerPx,
+  requestRender,
+  emit,
+  onEditPending: (ids) => {
+    editPendingIds = ids
+  },
 })
 // How close to the pointer (px) a pick lands, for point picking and 3D measuring.
 const PICK_RADIUS_PX = 8
 const {
-  measureTool, measurePts, measureDone, measureNote, measureResult, saved3d, measurementsStore, fmt,
-  toggleMeasureTool, exitMeasure, clearMeasure, measureClick, finishMeasure, undoMeasure,
-  savedValue, savedStale, saveMeasure,
+  measureTool,
+  measurePts,
+  measureDone,
+  measureNote,
+  measureResult,
+  saved3d,
+  measurementsStore,
+  fmt,
+  toggleMeasureTool,
+  exitMeasure,
+  clearMeasure,
+  measureClick,
+  finishMeasure,
+  undoMeasure,
+  savedValue,
+  savedStale,
+  saveMeasure,
 } = useMeasure3d({
-  view, props, container, cloudLayers, sceneUp, pointerPx, pickRadiusPx: PICK_RADIUS_PX, requestRender, emit,
-  selectTool, exitSelection,
+  view,
+  props,
+  container,
+  cloudLayers,
+  sceneUp,
+  pointerPx,
+  pickRadiusPx: PICK_RADIUS_PX,
+  requestRender,
+  emit,
+  selectTool,
+  exitSelection,
 })
-const { regionHover, updateRegionBox, onRegionPointerDown, onRegionPointerMove, onRegionPointerUp, abortRegionDrag } = useRegionGizmo({
-  view, props, container, pointerPx, requestRender, emit,
-  otherToolActive: () => !!selectTool.value || !!measureTool.value || !!props.pickMode,
-})
+const { regionHover, updateRegionBox, onRegionPointerDown, onRegionPointerMove, onRegionPointerUp, abortRegionDrag } =
+  useRegionGizmo({
+    view,
+    props,
+    container,
+    pointerPx,
+    requestRender,
+    emit,
+    otherToolActive: () => !!selectTool.value || !!measureTool.value || !!props.pickMode,
+  })
 
 const BG = { dark: 0x1a1a1a, light: 0xf0f0f0, black: 0x000000 }
 function backgroundColor() {
@@ -182,7 +265,7 @@ function backgroundColor() {
   return BG[key] ?? BG.dark
 }
 const GRID = {
-  dark:  [0x444444, 0x2a2a2a],
+  dark: [0x444444, 0x2a2a2a],
   light: [0xb8b8b8, 0xd8d8d8],
 }
 
@@ -208,15 +291,19 @@ function updateGrid() {
   const span = Math.max(sceneRadius * 2, 1)
   grid.scale.setScalar(span / 10) // GridHelper(10,…) is 10 world units wide by default
   grid.quaternion.setFromUnitVectors(GRID_NORMAL, sceneUp) // lay it perpendicular to up
-  const off = gridZ.value === 'min' ? sceneAlongMin
-            : gridZ.value === 'max' ? sceneAlongMax
-            : 0.5 * (sceneAlongMin + sceneAlongMax) // 'avg' → middle of the extent
+  const off =
+    gridZ.value === 'min'
+      ? sceneAlongMin
+      : gridZ.value === 'max'
+        ? sceneAlongMax
+        : 0.5 * (sceneAlongMin + sceneAlongMax) // 'avg' → middle of the extent
   grid.position.copy(sceneCenter).addScaledVector(sceneUp, off)
 }
 
 function init() {
   const el = container.value
-  const w = el.clientWidth, h = el.clientHeight
+  const w = el.clientWidth,
+    h = el.clientHeight
 
   // Create the WebGL renderer FIRST: if the context can't be created (sandboxed /
   // GPU-disabled / headless), the constructor throws — catch it and bail before any
@@ -228,9 +315,10 @@ function init() {
     renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true })
   } catch (e) {
     // three.js has already logged the GL details to the console; this is the reader's version.
-    glError.value = 'The 3D view is unavailable: this browser or environment could not '
-      + 'create a WebGL context. This often happens over Remote Desktop, or when hardware '
-      + 'acceleration is turned off in the browser settings. The rest of the app is unaffected.'
+    glError.value =
+      'The 3D view is unavailable: this browser or environment could not ' +
+      'create a WebGL context. This often happens over Remote Desktop, or when hardware ' +
+      'acceleration is turned off in the browser settings. The rest of the app is unaffected.'
     console.warn('[Viewer3D] WebGL unavailable — 3D view disabled:', e)
     return
   }
@@ -276,8 +364,8 @@ function init() {
 // whose points are in memory is drawn whole again (a streamed one cannot be).
 const reconStore = useReconstructionStore()
 const needsAllPoints = () => !!selectTool.value || !!props.pickMode
-const usesLod = (cloud) => cloud.kind === 'dense' && !!cloud.lod
-  && (!cloud.pos || (cloud.count >= LOD_VIEW_MIN && !needsAllPoints()))
+const usesLod = (cloud) =>
+  cloud.kind === 'dense' && !!cloud.lod && (!cloud.pos || (cloud.count >= LOD_VIEW_MIN && !needsAllPoints()))
 function createLodCloudLayer(cloud) {
   const material = new THREE.PointsMaterial({ size: pointSize.value, sizeAttenuation: false })
   material.onBeforeCompile = srgbVertexColors
@@ -289,7 +377,8 @@ function createLodCloudLayer(cloud) {
       if (layer.rootPoints && !layer.rootBounds && cloudLayers.get(cloud.id) === layer) {
         layer.rootBounds = true
         layer.bounds = layerBounds(layer)
-        updateLayerBounds(); updateGrid()
+        updateLayerBounds()
+        updateGrid()
       }
       requestRender()
     },
@@ -298,7 +387,8 @@ function createLodCloudLayer(cloud) {
   scene.add(layer.object)
   return layer
 }
-const layerBounds = (layer) => (layer.lod ? layer.boundsFor(sceneUp, robustBounds) : robustBounds(layer.positions, layer.count, sceneUp))
+const layerBounds = (layer) =>
+  layer.lod ? layer.boundsFor(sceneUp, robustBounds) : robustBounds(layer.positions, layer.count, sceneUp)
 
 function createCloudLayer(cloud) {
   if (usesLod(cloud)) return createLodCloudLayer(cloud)
@@ -328,7 +418,14 @@ function createCloudLayer(cloud) {
   object.position.set(...origin)
   object.userData.cloudId = cloud.id
   scene.add(object)
-  return { object, baseMaterial: material, positions, count, source: cloud, bounds: robustBounds(positions, count, sceneUp) }
+  return {
+    object,
+    baseMaterial: material,
+    positions,
+    count,
+    source: cloud,
+    bounds: robustBounds(positions, count, sceneUp),
+  }
 }
 
 function styleLayer(layer, cloud, elevationRange) {
@@ -352,7 +449,10 @@ function styleLayer(layer, cloud, elevationRange) {
   } else if (layer.baseMaterial) layer.object.material = layer.baseMaterial
   const isMesh = cloud.kind === 'mesh'
   const colors = visual.colors
-    ? (visual.colors instanceof Uint8Array ? visual.colors : Uint8Array.from(visual.colors)) : null
+    ? visual.colors instanceof Uint8Array
+      ? visual.colors
+      : Uint8Array.from(visual.colors)
+    : null
   const indices = isMesh ? null : (visual.indices ?? null)
   // A restyle that keeps the same colour bytes (an RGB cloud's own `col`) and the same
   // index keeps its buffers; only what changed is replaced (and only that re-uploads).
@@ -381,12 +481,15 @@ function styleLayer(layer, cloud, elevationRange) {
 
 function updateLayerBounds() {
   if (!cloudLayers.size) {
-    sceneCenter.set(0, 0, 0); sceneRadius = 5
-    sceneAlongMin = 0; sceneAlongMax = 0
+    sceneCenter.set(0, 0, 0)
+    sceneRadius = 5
+    sceneAlongMin = 0
+    sceneAlongMax = 0
     return
   }
   const box = new THREE.Box3()
-  let low = Infinity, high = -Infinity
+  let low = Infinity,
+    high = -Infinity
   for (const { bounds: b } of cloudLayers.values()) {
     box.expandByPoint(b.center.clone().addScalar(-b.radius))
     box.expandByPoint(b.center.clone().addScalar(b.radius))
@@ -411,19 +514,24 @@ function setCloudLayers(clouds, { follow = false } = {}) {
   lastClouds = clouds
   if (!scene) return
   const hadContent = cloudLayers.size > 0 || frustumGroup.children.length > 0
-  const addedCloud = clouds.some(c => c.visible !== false && !knownCloudIds.has(c.id))
+  const addedCloud = clouds.some((c) => c.visible !== false && !knownCloudIds.has(c.id))
   // Read against the layers as last drawn, before this update reconciles them.
   const edit = settleEditLatch(editPendingIds, clouds, (id) => cloudLayers.get(id)?.source, addedCloud)
   editPendingIds = edit.pending
-  knownCloudIds = new Set(clouds.map(c => c.id))
-  const visible = clouds.filter(c => c.visible !== false)
+  knownCloudIds = new Set(clouds.map((c) => c.id))
+  const visible = clouds.filter((c) => c.visible !== false)
   const elevationRange = sharedElevationRange(clouds, cachedElevationRange)
-  const ids = new Set(visible.map(c => c.id))
+  const ids = new Set(visible.map((c) => c.id))
   for (const [id, layer] of cloudLayers) {
-    if (!ids.has(id)) { scene.remove(layer.object); disposeLayer(layer); cloudLayers.delete(id) }
+    if (!ids.has(id)) {
+      scene.remove(layer.object)
+      disposeLayer(layer)
+      cloudLayers.delete(id)
+    }
   }
-  const cameraMaps = visible.map(c => c.cameras).filter(Boolean)
-  const camerasChanged = cameraMaps.length !== lastCameraMaps.length || cameraMaps.some((m, i) => m !== lastCameraMaps[i])
+  const cameraMaps = visible.map((c) => c.cameras).filter(Boolean)
+  const camerasChanged =
+    cameraMaps.length !== lastCameraMaps.length || cameraMaps.some((m, i) => m !== lastCameraMaps[i])
   const cameras = new Map()
   for (const map of cameraMaps) for (const [id, cam] of map) cameras.set(id, cam)
   const up = props.sceneUp || estimateUpFromCameras(cameras)
@@ -435,10 +543,21 @@ function setCloudLayers(clouds, { follow = false } = {}) {
   const upChanged = !prevUp.equals(sceneUp)
   for (const cloud of visible) {
     let layer = cloudLayers.get(cloud.id)
-    if (layer && (layer.source.pos !== cloud.pos || layer.source.points !== cloud.points || layer.source.idx !== cloud.idx
-        || layer.source.uv !== cloud.uv || layer.source.count !== cloud.count || layer.source.kind !== cloud.kind
-        || !!layer.lod !== usesLod(cloud) || (layer.lod && layer.source.lod !== cloud.lod))) {
-      scene.remove(layer.object); disposeLayer(layer); cloudLayers.delete(cloud.id); layer = null
+    if (
+      layer &&
+      (layer.source.pos !== cloud.pos ||
+        layer.source.points !== cloud.points ||
+        layer.source.idx !== cloud.idx ||
+        layer.source.uv !== cloud.uv ||
+        layer.source.count !== cloud.count ||
+        layer.source.kind !== cloud.kind ||
+        !!layer.lod !== usesLod(cloud) ||
+        (layer.lod && layer.source.lod !== cloud.lod))
+    ) {
+      scene.remove(layer.object)
+      disposeLayer(layer)
+      cloudLayers.delete(cloud.id)
+      layer = null
     }
     if (!layer) {
       layer = createCloudLayer(cloud)
@@ -450,8 +569,14 @@ function setCloudLayers(clouds, { follow = false } = {}) {
     const style = resolveCloudStyle(cloud)
     const sharedRange = style.field === 'elevation' && style.range === 'auto' ? elevationRange : null
     const rangeKey = sharedRange ? `${sharedRange.min}:${sharedRange.max}` : ''
-    if (!layer.legend || layer.style !== cloud.style || layer.source.col !== cloud.col || layer.source.attributes !== cloud.attributes
-        || layer.elevationRangeKey !== rangeKey) styleLayer(layer, cloud, sharedRange)
+    if (
+      !layer.legend ||
+      layer.style !== cloud.style ||
+      layer.source.col !== cloud.col ||
+      layer.source.attributes !== cloud.attributes ||
+      layer.elevationRangeKey !== rangeKey
+    )
+      styleLayer(layer, cloud, sharedRange)
     layer.source = cloud
   }
   legendLayers.value = [...cloudLayers].map(([id, layer]) => ({ id, name: layer.source.name, legend: layer.legend }))
@@ -466,7 +591,10 @@ function setCloudLayers(clouds, { follow = false } = {}) {
   const fit = (!hadContent || (addedCloud && !edit.editResult)) && cloudLayers.size
   // An up estimated from more cameras turns the grid: refit, or the view is left tilted.
   const outgrown = follow && cloudLayers.size && (sceneRadius > 1.3 * fittedRadius || upChanged)
-  if (fit || outgrown) { resetView(); fittedRadius = sceneRadius }
+  if (fit || outgrown) {
+    resetView()
+    fittedRadius = sceneRadius
+  }
   updateClipping()
   pruneSelections()
   requestRender()
@@ -475,10 +603,13 @@ function setCloudLayers(clouds, { follow = false } = {}) {
 function zoomToCloud(id) {
   const layer = cloudLayers.get(id)
   if (!layer) return
-  const center = sceneCenter.clone(), radius = sceneRadius
-  sceneCenter.copy(layer.bounds.center); sceneRadius = layer.bounds.radius
+  const center = sceneCenter.clone(),
+    radius = sceneRadius
+  sceneCenter.copy(layer.bounds.center)
+  sceneRadius = layer.bounds.radius
   resetView()
-  sceneCenter.copy(center); sceneRadius = radius
+  sceneCenter.copy(center)
+  sceneRadius = radius
   updateClipping()
   requestRender()
 }
@@ -487,7 +618,8 @@ function updateClipping() {
   if (!camera || !controls) return
   const { near, far } = viewerClipping(sceneRadius, camera.position.distanceTo(controls.target), nearClip.value)
   if (Math.abs(camera.near - near) > near * 0.01 || Math.abs(camera.far - far) > far * 0.01) {
-    camera.near = near; camera.far = far
+    camera.near = near
+    camera.far = far
     camera.updateProjectionMatrix()
   }
 }
@@ -508,11 +640,27 @@ function pointerPx(e) {
 function onSelectKey(e) {
   if (!container.value?.offsetParent) return // tab hidden (v-show)
   if (!viewerMayHandleKey(e)) return
-  if (e.key === 'Escape' && abortRegionDrag()) { e.preventDefault(); return }
+  if (e.key === 'Escape' && abortRegionDrag()) {
+    e.preventDefault()
+    return
+  }
   if (measureTool.value) {
-    if (e.key === 'Escape') { e.preventDefault(); if (measurePts.value.length) clearMeasure(); else exitMeasure(); return }
-    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); undoMeasure(); return }
-    if (e.key === 'Enter') { e.preventDefault(); finishMeasure(); return }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      if (measurePts.value.length) clearMeasure()
+      else exitMeasure()
+      return
+    }
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      e.preventDefault()
+      undoMeasure()
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      finishMeasure()
+      return
+    }
   }
   if (e.key === 'Escape' && abortStroke()) {
     e.preventDefault()
@@ -582,13 +730,31 @@ function setView(dir) {
   switch (dir) {
     // Top/bottom look along the up axis, so use an in-plane up (fwd) to avoid
     // OrbitControls gimbal-locking.
-    case 'top':    dirVec = up.clone();            camUp = fwd.clone(); break
-    case 'bottom': dirVec = up.clone().negate();   camUp = fwd.clone(); break
-    case 'back':   dirVec = fwd.clone();           camUp = up.clone(); break
-    case 'left':   dirVec = right.clone().negate(); camUp = up.clone(); break
-    case 'right':  dirVec = right.clone();         camUp = up.clone(); break
+    case 'top':
+      dirVec = up.clone()
+      camUp = fwd.clone()
+      break
+    case 'bottom':
+      dirVec = up.clone().negate()
+      camUp = fwd.clone()
+      break
+    case 'back':
+      dirVec = fwd.clone()
+      camUp = up.clone()
+      break
+    case 'left':
+      dirVec = right.clone().negate()
+      camUp = up.clone()
+      break
+    case 'right':
+      dirVec = right.clone()
+      camUp = up.clone()
+      break
     case 'front':
-    default:       dirVec = fwd.clone().negate();  camUp = up.clone(); break
+    default:
+      dirVec = fwd.clone().negate()
+      camUp = up.clone()
+      break
   }
   camera.up.copy(camUp)
   syncControlsUp()
@@ -607,7 +773,8 @@ function resetView() {
   controls.target.copy(sceneCenter)
   // Oblique bird's-eye: behind + to the side + above the scene centre, all relative
   // to the estimated up so the horizon is level.
-  camera.position.copy(sceneCenter)
+  camera.position
+    .copy(sceneCenter)
     .addScaledVector(fwd, -sceneRadius * 1.8)
     .addScaledVector(right, sceneRadius * 1.2)
     .addScaledVector(up, sceneRadius * 1.2)
@@ -617,14 +784,27 @@ function resetView() {
 }
 
 // Leave selecting and measuring (a run's live view keeps orbit and zoom only).
-function exitTools() { exitSelection(); exitMeasure() }
+function exitTools() {
+  exitSelection()
+  exitMeasure()
+}
 
-defineExpose({ setCloudLayers, clearReconstructionData, setView, resetView, zoomToCloud, toggleSelectTool, toggleMeasureTool, exitTools })
+defineExpose({
+  setCloudLayers,
+  clearReconstructionData,
+  setView,
+  resetView,
+  zoomToCloud,
+  toggleSelectTool,
+  toggleMeasureTool,
+  exitTools,
+})
 
 function onResize() {
   const el = container.value
   if (!el || !renderer) return
-  const w = el.clientWidth, h = el.clientHeight
+  const w = el.clientWidth,
+    h = el.clientHeight
   // A tab hidden under v-show measures 0×0; keep the last real size (the observer
   // fires again, with the real size, when the tab comes back to the front).
   if (!w || !h) return
@@ -659,42 +839,65 @@ function renderFrame() {
   updateClipping()
   // Level-of-detail layers choose their nodes for this view (and fetch missing ones).
   for (const layer of cloudLayers.values()) {
-    if (layer.lod && layer.object.visible) layer.update(camera, renderer.domElement.clientHeight || 1, pointBudget.value * 1e6)
+    if (layer.lod && layer.object.visible)
+      layer.update(camera, renderer.domElement.clientHeight || 1, pointBudget.value * 1e6)
   }
   renderer.render(scene, camera)
   frustumsAfterFrame()
 }
 
-watch(() => props.theme, (t) => {
-  if (!scene) return
-  scene.background = new THREE.Color(backgroundColor())
-  scene.remove(grid)
-  disposeObject(grid)
-  grid = makeGrid(t)
-  updateGrid()
-  scene.add(grid)
-  requestRender()
-})
+watch(
+  () => props.theme,
+  (t) => {
+    if (!scene) return
+    scene.background = new THREE.Color(backgroundColor())
+    scene.remove(grid)
+    disposeObject(grid)
+    grid = makeGrid(t)
+    updateGrid()
+    scene.add(grid)
+    requestRender()
+  },
+)
 
 watch(background, () => {
   if (scene) scene.background = new THREE.Color(backgroundColor())
   requestRender()
 })
 
-watch(() => props.showCameras, (v) => { if (frustumGroup) frustumGroup.visible = v; requestRender() })
-watch(() => props.showGrid, (v) => { if (grid) grid.visible = v; requestRender() })
-watch(gridZ, () => { updateGrid(); requestRender() })
+watch(
+  () => props.showCameras,
+  (v) => {
+    if (frustumGroup) frustumGroup.visible = v
+    requestRender()
+  },
+)
+watch(
+  () => props.showGrid,
+  (v) => {
+    if (grid) grid.visible = v
+    requestRender()
+  },
+)
+watch(gridZ, () => {
+  updateGrid()
+  requestRender()
+})
 // The reconstruction's up estimate can arrive/refine after content is already shown
 // (e.g. a dense cloud selected before the sparse cameras are pushed). Re-orient the
 // grid to it without yanking the user's current viewpoint.
-watch(() => props.sceneUp, (u) => {
-  if (u && u.length === 3) {
-    sceneUp.set(u[0], u[1], u[2]).normalize()
-    for (const layer of cloudLayers.values()) layer.bounds = layerBounds(layer)
-    updateLayerBounds(); updateGrid()
-    requestRender()
-  }
-})
+watch(
+  () => props.sceneUp,
+  (u) => {
+    if (u && u.length === 3) {
+      sceneUp.set(u[0], u[1], u[2]).normalize()
+      for (const layer of cloudLayers.values()) layer.bounds = layerBounds(layer)
+      updateLayerBounds()
+      updateGrid()
+      requestRender()
+    }
+  },
+)
 
 // ── Point picking (tool-driven) ───────────────────────────────────────────────
 // While `pickMode` is set, a click WITHOUT a drag (a drag still orbits) picks the
@@ -703,18 +906,27 @@ watch(() => props.sceneUp, (u) => {
 // Float64 source coordinates: { cloudId, index, position:[x,y,z] }.
 let pickDown = null
 function onPickPointerDown(e) {
-  if ((!props.pickMode && !measureTool.value) || e.button !== 0 || !renderer || e.target !== renderer.domElement) { pickDown = null; return }
+  if ((!props.pickMode && !measureTool.value) || e.button !== 0 || !renderer || e.target !== renderer.domElement) {
+    pickDown = null
+    return
+  }
   pickDown = { x: e.clientX, y: e.clientY }
 }
 function onPickPointerUp(e) {
   const down = pickDown
   pickDown = null
   if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return
-  if (!props.pickMode) { if (measureTool.value) measureClick(e); return }
+  if (!props.pickMode) {
+    if (measureTool.value) measureClick(e)
+    return
+  }
   const [px, py] = pointerPx(e)
-  const w = container.value.clientWidth, h = container.value.clientHeight
-  const x = (px / w) * 2 - 1, y = 1 - (py / h) * 2
-  const tolX = (2 * PICK_RADIUS_PX) / w, tolY = (2 * PICK_RADIUS_PX) / h
+  const w = container.value.clientWidth,
+    h = container.value.clientHeight
+  const x = (px / w) * 2 - 1,
+    y = 1 - (py / h) * 2
+  const tolX = (2 * PICK_RADIUS_PX) / w,
+    tolY = (2 * PICK_RADIUS_PX) / h
   camera.updateMatrixWorld()
   const viewProj = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
   const allowed = props.pickMode.cloudIds ? new Set(props.pickMode.cloudIds) : null
@@ -727,7 +939,14 @@ function onPickPointerUp(e) {
     const geometry = layer.object.geometry
     // A mesh's index lists triangle corners; any drawn vertex may be picked.
     const indices = layer.object.isPoints ? (geometry.index?.array ?? null) : null
-    const hit = pickNearestPoint(geometry.getAttribute('position').array, layer.count, { matrix, x, y, tolX, tolY, indices })
+    const hit = pickNearestPoint(geometry.getAttribute('position').array, layer.count, {
+      matrix,
+      x,
+      y,
+      tolX,
+      tolY,
+      indices,
+    })
     if (hit && (!best || hit.depth < best.depth)) best = { ...hit, id, layer }
   }
   if (!best) return
@@ -740,20 +959,35 @@ function onPickPointerUp(e) {
 // so a survey-coordinate pick keeps its precision in the Float32 GPU buffer.
 let markerObject = null
 function updateMarkers(markers) {
-  if (markerObject) { scene?.remove(markerObject); disposeObject(markerObject); markerObject = null }
+  if (markerObject) {
+    scene?.remove(markerObject)
+    disposeObject(markerObject)
+    markerObject = null
+  }
   requestRender()
   if (!scene || !markers?.length) return
   const o = markers[0].position
-  const pos = new Float32Array(markers.length * 3), col = new Float32Array(markers.length * 3)
+  const pos = new Float32Array(markers.length * 3),
+    col = new Float32Array(markers.length * 3)
   markers.forEach((m, k) => {
-    pos[k * 3] = m.position[0] - o[0]; pos[k * 3 + 1] = m.position[1] - o[1]; pos[k * 3 + 2] = m.position[2] - o[2]
+    pos[k * 3] = m.position[0] - o[0]
+    pos[k * 3 + 1] = m.position[1] - o[1]
+    pos[k * 3 + 2] = m.position[2] - o[2]
     const c = new THREE.Color(m.color || '#ffb020')
-    col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b
+    col[k * 3] = c.r
+    col[k * 3 + 1] = c.g
+    col[k * 3 + 2] = c.b
   })
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3))
   geometry.setAttribute('color', new THREE.BufferAttribute(col, 3))
-  const material = new THREE.PointsMaterial({ size: 11, sizeAttenuation: false, vertexColors: true, depthTest: false, transparent: true })
+  const material = new THREE.PointsMaterial({
+    size: 11,
+    sizeAttenuation: false,
+    vertexColors: true,
+    depthTest: false,
+    transparent: true,
+  })
   markerObject = new THREE.Points(geometry, material)
   markerObject.position.set(o[0], o[1], o[2])
   markerObject.renderOrder = 12
@@ -769,7 +1003,10 @@ watch(pointSize, (v) => {
   setOverlaySize(v)
   requestRender()
 })
-watch(nearClip, () => { updateClipping(); requestRender() })
+watch(nearClip, () => {
+  updateClipping()
+  requestRender()
+})
 watch(pointBudget, () => requestRender())
 
 // No right-click context menu here on purpose: OrbitControls uses the right mouse
@@ -790,7 +1027,10 @@ onBeforeUnmount(() => {
   disposeFrustums()
   for (const layer of cloudLayers.values()) disposeLayer(layer)
   cloudLayers.clear()
-  if (grid) { disposeObject(grid); grid = null }
+  if (grid) {
+    disposeObject(grid)
+    grid = null
+  }
   controls?.dispose()
   renderer?.dispose()
   renderer?.domElement.remove()
@@ -798,12 +1038,39 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="viewer" :class="{ selecting: !!selectTool || !!pickMode || !!measureTool, 'region-handle': !!regionHover }" @contextmenu.prevent
+  <div
+    ref="container"
+    class="viewer"
+    :class="{ 'selecting': !!selectTool || !!pickMode || !!measureTool, 'region-handle': !!regionHover }"
+    @contextmenu.prevent
     @dblclick="measureTool && finishMeasure()"
-    @pointerdown.capture="(e) => { onRegionPointerDown(e); onPickPointerDown(e); onSelectPointerDown(e) }"
-    @pointermove="(e) => { onRegionPointerMove(e); onSelectPointerMove(e) }"
-    @pointerup="(e) => { onRegionPointerUp(e); onSelectPointerUp(e); onPickPointerUp(e) }"
-    @pointercancel="(e) => { onRegionPointerUp(e); onSelectPointerUp(e) }">
+    @pointerdown.capture="
+      (e) => {
+        onRegionPointerDown(e)
+        onPickPointerDown(e)
+        onSelectPointerDown(e)
+      }
+    "
+    @pointermove="
+      (e) => {
+        onRegionPointerMove(e)
+        onSelectPointerMove(e)
+      }
+    "
+    @pointerup="
+      (e) => {
+        onRegionPointerUp(e)
+        onSelectPointerUp(e)
+        onPickPointerUp(e)
+      }
+    "
+    @pointercancel="
+      (e) => {
+        onRegionPointerUp(e)
+        onSelectPointerUp(e)
+      }
+    "
+  >
     <!-- WebGL unavailable: degrade gracefully instead of crashing app mount. -->
     <div v-if="glError" class="gl-error">
       <div class="gl-error-box">{{ glError }}</div>
@@ -812,9 +1079,13 @@ onBeforeUnmount(() => {
     <CloudLegend v-if="showLegend" :layers="legendLayers" />
 
     <svg v-if="drawShape" class="select-shape" aria-hidden="true">
-      <rect v-if="drawShape.kind === 'rect'"
-        :x="Math.min(drawShape.points[0], drawShape.points[2])" :y="Math.min(drawShape.points[1], drawShape.points[3])"
-        :width="Math.abs(drawShape.points[2] - drawShape.points[0])" :height="Math.abs(drawShape.points[3] - drawShape.points[1])" />
+      <rect
+        v-if="drawShape.kind === 'rect'"
+        :x="Math.min(drawShape.points[0], drawShape.points[2])"
+        :y="Math.min(drawShape.points[1], drawShape.points[3])"
+        :width="Math.abs(drawShape.points[2] - drawShape.points[0])"
+        :height="Math.abs(drawShape.points[3] - drawShape.points[1])"
+      />
       <polygon v-else :points="drawShape.points.join(' ')" />
     </svg>
 
@@ -823,75 +1094,156 @@ onBeforeUnmount(() => {
     <slot name="toolbox" />
 
     <!-- 3D measuring (Tools ▸ Measure ▸ Measure in 3D). -->
-    <FloatingToolbox v-if="measureTool" id="measure-3d" title="Measure in 3D" anchor="top-center" :width="300"
-      close-title="Stop measuring (Esc)" @close="exitMeasure">
+    <FloatingToolbox
+      v-if="measureTool"
+      id="measure-3d"
+      title="Measure in 3D"
+      anchor="top-center"
+      :width="300"
+      close-title="Stop measuring (Esc)"
+      @close="exitMeasure"
+    >
       <div class="tb-row" role="group" aria-label="Measure">
-        <button v-for="t in [['distance', 'Distance'], ['polyline', 'Polyline'], ['area', 'Area']]" :key="t[0]"
-          class="tb-textbtn" :class="{ active: measureTool === t[0] }" :aria-pressed="measureTool === t[0]"
-          @click="() => { measureTool = t[0]; clearMeasure() }">{{ t[1] }}</button>
+        <button
+          v-for="t in [
+            ['distance', 'Distance'],
+            ['polyline', 'Polyline'],
+            ['area', 'Area'],
+          ]"
+          :key="t[0]"
+          class="tb-textbtn"
+          :class="{ active: measureTool === t[0] }"
+          :aria-pressed="measureTool === t[0]"
+          @click="
+            () => {
+              measureTool = t[0]
+              clearMeasure()
+            }
+          "
+        >
+          {{ t[1] }}
+        </button>
       </div>
       <template v-if="measureResult?.line">
-        <div class="tb-line"><span class="tb-count">{{ fmt(measureResult.line.length, measureResult.units) }}</span>
-          <template v-if="measureResult.line.segments.length > 1"> over {{ measureResult.line.segments.length }} segments</template></div>
-        <div class="tb-hint">Horizontal {{ fmt(measureResult.line.horizontal, measureResult.units) }} ·
-          height change {{ fmt(measureResult.line.vertical, measureResult.units) }}</div>
+        <div class="tb-line">
+          <span class="tb-count">{{ fmt(measureResult.line.length, measureResult.units) }}</span>
+          <template v-if="measureResult.line.segments.length > 1">
+            over {{ measureResult.line.segments.length }} segments</template
+          >
+        </div>
+        <div class="tb-hint">
+          Horizontal {{ fmt(measureResult.line.horizontal, measureResult.units) }} · height change
+          {{ fmt(measureResult.line.vertical, measureResult.units) }}
+        </div>
       </template>
       <template v-else-if="measureResult?.area">
-        <div class="tb-line"><span class="tb-count">{{ fmt(measureResult.area.area, measureResult.units, 2) }}</span> surface area</div>
-        <div class="tb-hint">Footprint {{ fmt(measureResult.area.footprint, measureResult.units, 2) }} ·
-          perimeter {{ fmt(measureResult.area.perimeter, measureResult.units) }}
-          <template v-if="measureResult.area.planarity > 0.02 * measureResult.area.perimeter"> · the outline is far from flat</template></div>
+        <div class="tb-line">
+          <span class="tb-count">{{ fmt(measureResult.area.area, measureResult.units, 2) }}</span> surface area
+        </div>
+        <div class="tb-hint">
+          Footprint {{ fmt(measureResult.area.footprint, measureResult.units, 2) }} · perimeter
+          {{ fmt(measureResult.area.perimeter, measureResult.units) }}
+          <template v-if="measureResult.area.planarity > 0.02 * measureResult.area.perimeter">
+            · the outline is far from flat</template
+          >
+        </div>
       </template>
       <div v-else class="tb-hint">
-        Click on a cloud or mesh to place points{{ measureTool === 'distance' ? '' : ' · Enter or double-click finishes' }} · Backspace undoes · Esc exits
+        Click on a cloud or mesh to place points{{
+          measureTool === 'distance' ? '' : ' · Enter or double-click finishes'
+        }}
+        · Backspace undoes · Esc exits
       </div>
       <div v-if="measureNote" class="tb-hint warn">{{ measureNote }}</div>
       <div v-if="measureResult" class="tb-row">
-        <button class="tb-textbtn" :disabled="!measureDone" title="Keep this measurement with the project" @click="saveMeasure">Save</button>
-        <button v-if="!measureDone && measureTool !== 'distance'" class="tb-textbtn" @click="finishMeasure">Finish</button>
+        <button
+          class="tb-textbtn"
+          :disabled="!measureDone"
+          title="Keep this measurement with the project"
+          @click="saveMeasure"
+        >
+          Save
+        </button>
+        <button v-if="!measureDone && measureTool !== 'distance'" class="tb-textbtn" @click="finishMeasure">
+          Finish
+        </button>
         <button class="tb-textbtn" title="Start again (Esc)" @click="clearMeasure">Clear</button>
       </div>
       <template v-if="saved3d.length">
-        <div class="tb-hint tb-row">Saved
-          <button class="tb-textbtn" title="Export these measurements as CSV or GeoJSON"
-            @click="emit('command', 'export-measurements', { ids: saved3d.map((r) => r.id), label: `${saved3d.length} 3D measurement${saved3d.length === 1 ? '' : 's'}` })">Export…</button>
+        <div class="tb-hint tb-row">
+          Saved
+          <button
+            class="tb-textbtn"
+            title="Export these measurements as CSV or GeoJSON"
+            @click="
+              emit('command', 'export-measurements', {
+                ids: saved3d.map((r) => r.id),
+                label: `${saved3d.length} 3D measurement${saved3d.length === 1 ? '' : 's'}`,
+              })
+            "
+          >
+            Export…
+          </button>
         </div>
         <div v-for="r in saved3d" :key="r.id" class="tb-line saved-measure">
           <span :title="r.cloudName ? `Measured on ${r.cloudName}` : ''">{{ r.name }}</span>
           <span>{{ savedValue(r) }}<template v-if="savedStale(r)"> · layer changed</template></span>
-          <button class="tb-textbtn danger" :aria-label="`Delete ${r.name}`" @click="measurementsStore.remove(r.id)">×</button>
+          <button class="tb-textbtn danger" :aria-label="`Delete ${r.name}`" @click="measurementsStore.remove(r.id)">
+            ×
+          </button>
         </div>
       </template>
     </FloatingToolbox>
 
     <!-- The selection tool's toolbox. The ribbon (View ▸ Select) chooses the tool;
          what you do with the selection lives here. -->
-    <FloatingToolbox v-if="selectTool || selectionCount" id="select-3d" title="Select points" anchor="top-center"
-      :width="260" close-title="Stop selecting (Esc)" @close="exitSelection">
+    <FloatingToolbox
+      v-if="selectTool || selectionCount"
+      id="select-3d"
+      title="Select points"
+      anchor="top-center"
+      :width="260"
+      close-title="Stop selecting (Esc)"
+      @close="exitSelection"
+    >
       <template v-if="selectionCount">
         <div class="tb-line">
           <span class="tb-count">{{ selectionCount.toLocaleString() }}</span>
-          point{{ selectionCount === 1 ? '' : 's' }} selected<template v-if="selectionClouds > 1"> in {{ selectionClouds }} clouds</template>
+          point{{ selectionCount === 1 ? '' : 's' }} selected<template v-if="selectionClouds > 1">
+            in {{ selectionClouds }} clouds</template
+          >
         </div>
         <div v-if="selectionStreamed" class="tb-hint tb-row">
           Of the points drawn now: on a streamed cloud the edit takes every point inside the shape, at full detail.
         </div>
         <div class="tb-row">
-          <button class="tb-textbtn danger" title="Delete the selected points (Delete)" @click="commitSelection(false)">Delete</button>
-          <button class="tb-textbtn" title="Keep only the selected points" @click="commitSelection(true)">Keep only</button>
+          <button class="tb-textbtn danger" title="Delete the selected points (Delete)" @click="commitSelection(false)">
+            Delete
+          </button>
+          <button class="tb-textbtn" title="Keep only the selected points" @click="commitSelection(true)">
+            Keep only
+          </button>
           <button class="tb-textbtn" title="Clear the selection (Esc)" @click="clearSelection">Clear</button>
         </div>
         <div class="tb-row">
           <select v-model.number="assignClass" class="tb-input assign-class" aria-label="Class to assign">
             <option v-for="[c, label] in ASSIGN_CLASSES" :key="c" :value="c">{{ c }} · {{ label }}</option>
           </select>
-          <button class="tb-textbtn" title="Set the selected points to this LAS class" @click="commitSelection(false, assignClass)">Assign class</button>
+          <button
+            class="tb-textbtn"
+            title="Set the selected points to this LAS class"
+            @click="commitSelection(false, assignClass)"
+          >
+            Assign class
+          </button>
         </div>
       </template>
       <div v-else class="tb-hint">
-        {{ selectableLayers().length
-          ? `Drag a ${selectTool === 'lasso' ? 'lasso' : 'rectangle'} over dense-cloud points · Shift adds · Alt subtracts · Esc exits`
-          : 'Show a dense cloud to select its points' }}
+        {{
+          selectableLayers().length
+            ? `Drag a ${selectTool === 'lasso' ? 'lasso' : 'rectangle'} over dense-cloud points · Shift adds · Alt subtracts · Esc exits`
+            : 'Show a dense cloud to select its points'
+        }}
       </div>
     </FloatingToolbox>
   </div>
@@ -906,11 +1258,30 @@ onBeforeUnmount(() => {
 }
 
 /* 3D measuring toolbox. */
-.tb-textbtn.active { background: rgba(14, 99, 156, 0.25); border-color: var(--accent); }
-.tb-hint.warn { color: #e0a040; margin-top: 4px; }
-.saved-measure { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; margin: 2px 0 0; }
-.assign-class { flex: 1; width: auto; }
-.saved-measure span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-textbtn.active {
+  background: rgba(14, 99, 156, 0.25);
+  border-color: var(--accent);
+}
+.tb-hint.warn {
+  color: #e0a040;
+  margin-top: 4px;
+}
+.saved-measure {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  margin: 2px 0 0;
+}
+.assign-class {
+  flex: 1;
+  width: auto;
+}
+.saved-measure span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .gl-error {
   position: absolute;

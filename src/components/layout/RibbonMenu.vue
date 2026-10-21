@@ -19,9 +19,9 @@ import Icon from '../Icon.vue'
 // `overflow-x: auto` forces `overflow-y` to auto too, so an absolutely positioned
 // child would be clipped at the ribbon's bottom edge.
 const props = defineProps({
-  label:  { type: String, required: true },
-  icon:   { type: String, required: true },
-  rows:   { type: Array,  required: true },
+  label: { type: String, required: true },
+  icon: { type: String, required: true },
+  rows: { type: Array, required: true },
   // Non-empty ⇒ every row is blocked. The button dims and shows this as its
   // tooltip, but still OPENS: the menu is how a user learns which tools exist,
   // and each greyed row prints its own prerequisite.
@@ -46,7 +46,9 @@ function onOutside(e) {
   if (btn.value?.contains(e.target) || menuEl.value?.contains(e.target)) return
   close()
 }
-function onViewportChange() { close() }
+function onViewportChange() {
+  close()
+}
 
 function show() {
   if (closeOpenMenu && closeOpenMenu !== close) closeOpenMenu()
@@ -86,16 +88,30 @@ function focusRow(i) {
 function onMenuKey(e) {
   const rows = rowButtons()
   const i = rows.indexOf(document.activeElement)
-  if (e.key === 'ArrowDown') { e.preventDefault(); focusRow(i + 1) }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); focusRow(i - 1) }
-  else if (e.key === 'Home') { e.preventDefault(); focusRow(0) }
-  else if (e.key === 'End') { e.preventDefault(); focusRow(rows.length - 1) }
-  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true) }
-  else if (e.key === 'Tab') close()
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    focusRow(i + 1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    focusRow(i - 1)
+  } else if (e.key === 'Home') {
+    e.preventDefault()
+    focusRow(0)
+  } else if (e.key === 'End') {
+    e.preventDefault()
+    focusRow(rows.length - 1)
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    close(true)
+  } else if (e.key === 'Tab') close()
 }
 
 function onButtonKey(e) {
-  if (e.key === 'ArrowDown' && !open.value) { e.preventDefault(); toggle() }
+  if (e.key === 'ArrowDown' && !open.value) {
+    e.preventDefault()
+    toggle()
+  }
 }
 
 function run(row) {
@@ -183,7 +199,9 @@ onBeforeUnmount(() => close())
 }
 /* Every row blocked: dimmed like a disabled command, yet still clickable. */
 .cmd.blocked .cmd-icon,
-.cmd.blocked .cmd-label { opacity: 0.45; }
+.cmd.blocked .cmd-label {
+  opacity: 0.45;
+}
 .cmd-icon {
   width: 18px;
   height: 18px;
@@ -242,15 +260,21 @@ onBeforeUnmount(() => close())
   background: var(--hover-bg);
   outline: none;
 }
-.rm-row:focus-visible { outline: 1px solid var(--accent); }
-.rm-row.disabled { cursor: default; }
+.rm-row:focus-visible {
+  outline: 1px solid var(--accent);
+}
+.rm-row.disabled {
+  cursor: default;
+}
 /* A running mode / the chosen option: same accent as an active ribbon button. */
 .rm-row.on {
   background: rgba(14, 99, 156, 0.25);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 .rm-row.disabled .rm-icon,
-.rm-row.disabled .rm-label { opacity: 0.45; }
+.rm-row.disabled .rm-label {
+  opacity: 0.45;
+}
 .rm-icon {
   flex: 0 0 auto;
   width: 18px;
@@ -263,7 +287,9 @@ onBeforeUnmount(() => close())
   gap: 1px;
   min-width: 0;
 }
-.rm-label { font-size: 12px; }
+.rm-label {
+  font-size: 12px;
+}
 .rm-blurb {
   font-size: 11px;
   color: var(--text-dim);

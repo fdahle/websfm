@@ -25,8 +25,14 @@ export function settleEditLatch(pending, clouds, previous, addedCloud) {
   for (const id of pending) {
     const cloud = byId.get(id)
     const prev = previous(id)
-    const settled = !cloud || cloud.visible === false
-      || (!!prev && (prev.pos !== cloud.pos || prev.points !== cloud.points || prev.idx !== cloud.idx || prev.count !== cloud.count))
+    const settled =
+      !cloud ||
+      cloud.visible === false ||
+      (!!prev &&
+        (prev.pos !== cloud.pos ||
+          prev.points !== cloud.points ||
+          prev.idx !== cloud.idx ||
+          prev.count !== cloud.count))
     if (settled) editResult = true
     else remaining.add(id)
   }

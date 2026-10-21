@@ -25,15 +25,18 @@ export function makeVerifyMapper(K, dist) {
 export function mapVerifyPoints(ptsA, ptsB, mapA, mapB) {
   if (!mapA && !mapB) return { ptsA, ptsB, keep: null }
   const n = ptsA.length / 2
-  const outA = new Float32Array(n * 2), outB = new Float32Array(n * 2)
+  const outA = new Float32Array(n * 2),
+    outB = new Float32Array(n * 2)
   const keep = new Int32Array(n)
   let m = 0
   for (let i = 0; i < n; i++) {
     const a = mapA ? mapA(ptsA[2 * i], ptsA[2 * i + 1]) : { x: ptsA[2 * i], y: ptsA[2 * i + 1] }
     const b = mapB ? mapB(ptsB[2 * i], ptsB[2 * i + 1]) : { x: ptsB[2 * i], y: ptsB[2 * i + 1] }
     if (!(Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(b.x) && Number.isFinite(b.y))) continue
-    outA[2 * m] = a.x; outA[2 * m + 1] = a.y
-    outB[2 * m] = b.x; outB[2 * m + 1] = b.y
+    outA[2 * m] = a.x
+    outA[2 * m + 1] = a.y
+    outB[2 * m] = b.x
+    outB[2 * m + 1] = b.y
     keep[m++] = i
   }
   if (m === n) return { ptsA: outA, ptsB: outB, keep: null }

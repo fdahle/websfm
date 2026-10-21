@@ -17,11 +17,10 @@ const mixString = (h, s) => {
   return h
 }
 const hex = (h) => h.toString(16).padStart(8, '0')
-const q = (v) => Number.isFinite(v) ? Math.round(v * 1000) : 0x7fffffff
+const q = (v) => (Number.isFinite(v) ? Math.round(v * 1000) : 0x7fffffff)
 
 /** The images in the order the feature fingerprint visits them. */
-export const featureRows = (images = []) =>
-  [...images].sort((a, b) => String(a.uuid).localeCompare(String(b.uuid)))
+export const featureRows = (images = []) => [...images].sort((a, b) => String(a.uuid).localeCompare(String(b.uuid)))
 
 /** The match entries in the order the match fingerprint visits them. */
 export const matchRows = (entries = []) =>
@@ -33,9 +32,13 @@ export function featureHasher() {
   return {
     add(im, keypoints) {
       const kps = keypoints ? asKeypoints(keypoints) : null
-      h = mixString(h, im.uuid); h = mixString(h, im.name)
+      h = mixString(h, im.uuid)
+      h = mixString(h, im.name)
       h = mix(h, kps?.length ?? im.kpCount ?? 0)
-      for (let k = 0; k < (kps?.length ?? 0); k++) { h = mix(h, q(kps.x(k))); h = mix(h, q(kps.y(k))) }
+      for (let k = 0; k < (kps?.length ?? 0); k++) {
+        h = mix(h, q(kps.x(k)))
+        h = mix(h, q(kps.y(k)))
+      }
     },
     digest: () => `fnv1a32:${hex(h)}`,
   }
@@ -46,12 +49,20 @@ export function matchHasher() {
   let h = OFFSET
   return {
     add(e, matches) {
-      h = mixString(h, e.idA); h = mixString(h, e.idB); h = mixString(h, e.status)
-      h = mix(h, e.rawCount ?? 0); h = mix(h, e.inlierCount ?? 0)
-      h = mix(h, e.weak ? 1 : 0); h = mix(h, e.enabled === false ? 1 : 0)
+      h = mixString(h, e.idA)
+      h = mixString(h, e.idB)
+      h = mixString(h, e.status)
+      h = mix(h, e.rawCount ?? 0)
+      h = mix(h, e.inlierCount ?? 0)
+      h = mix(h, e.weak ? 1 : 0)
+      h = mix(h, e.enabled === false ? 1 : 0)
       // Flat [ia, ib, …] (the store's shape) hashes the same sequence as [[ia, ib], …].
       if (matches instanceof Uint32Array) for (let i = 0; i < matches.length; i++) h = mix(h, matches[i])
-      else for (const pair of matches || []) { h = mix(h, pair[0] ?? 0); h = mix(h, pair[1] ?? 0) }
+      else
+        for (const pair of matches || []) {
+          h = mix(h, pair[0] ?? 0)
+          h = mix(h, pair[1] ?? 0)
+        }
     },
     digest: () => `fnv1a32:${hex(h)}`,
   }

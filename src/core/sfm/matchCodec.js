@@ -4,11 +4,19 @@
 // surface used by the solver while storing exactly 8 bytes per match.
 
 export class Uint32PairList {
-  constructor(data) { this.data = data }
-  get length() { return this.data.length >>> 1 }
+  constructor(data) {
+    this.data = data
+  }
+  get length() {
+    return this.data.length >>> 1
+  }
   // Hot loops read the packed indices directly: no [a, b] array per match.
-  a(i) { return this.data[2 * i] }
-  b(i) { return this.data[2 * i + 1] }
+  a(i) {
+    return this.data[2 * i]
+  }
+  b(i) {
+    return this.data[2 * i + 1]
+  }
   at(index) {
     const i = index < 0 ? this.length + index : index
     return i >= 0 && i < this.length ? [this.data[i * 2], this.data[i * 2 + 1]] : undefined
@@ -45,7 +53,7 @@ export function packMatchPairs(matches) {
   if (matches instanceof Uint32Array) return matches.slice()
   const data = new Uint32Array((matches?.length ?? 0) * 2)
   let i = 0
-  for (const pair of (matches || [])) {
+  for (const pair of matches || []) {
     data[i++] = pair[0]
     data[i++] = pair[1]
   }
@@ -53,7 +61,7 @@ export function packMatchPairs(matches) {
 }
 
 export function wrapPackedMatches(pairs) {
-  for (const pair of (pairs || [])) {
+  for (const pair of pairs || []) {
     if (pair.matches instanceof Uint32Array) pair.matches = new Uint32PairList(pair.matches)
     // structuredClone preserves the typed array but not the class prototype.
     else if (pair.matches?.data instanceof Uint32Array) pair.matches = new Uint32PairList(pair.matches.data)
@@ -65,7 +73,10 @@ export function wrapPackedMatches(pairs) {
 // [ib0, ia0, ib1, ia1, …]. A new array; the input is not touched.
 export function swapMatchRoles(matches) {
   const out = new Uint32Array(matches.length)
-  for (let i = 0; i < matches.length; i += 2) { out[i] = matches[i + 1]; out[i + 1] = matches[i] }
+  for (let i = 0; i < matches.length; i += 2) {
+    out[i] = matches[i + 1]
+    out[i + 1] = matches[i]
+  }
   return out
 }
 
@@ -87,9 +98,16 @@ export function transposeF(F) {
 export function inNameOrder(pairs, nameOf) {
   const name = (id) => String(nameOf(id) ?? id)
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
-  return pairs.map((p) => {
-    if (cmp(name(p.idB), name(p.idA)) >= 0) return p
-    return { ...p, idA: p.idB, idB: p.idA, F: p.F ? transposeF(p.F) : p.F,
-      matches: p.matches ? swapMatchRoles(p.matches) : p.matches }
-  }).sort((a, b) => cmp(name(a.idA), name(b.idA)) || cmp(name(a.idB), name(b.idB)))
+  return pairs
+    .map((p) => {
+      if (cmp(name(p.idB), name(p.idA)) >= 0) return p
+      return {
+        ...p,
+        idA: p.idB,
+        idB: p.idA,
+        F: p.F ? transposeF(p.F) : p.F,
+        matches: p.matches ? swapMatchRoles(p.matches) : p.matches,
+      }
+    })
+    .sort((a, b) => cmp(name(a.idA), name(b.idA)) || cmp(name(a.idB), name(b.idB)))
 }

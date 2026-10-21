@@ -20,25 +20,29 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
   // selection. Selection is not reactive state: per-layer masks live here, keyed by
   // cloud id and stamped with the source buffer, and are dropped whenever that
   // layer's geometry is rebuilt.
-  const selectTool = ref(null)       // null | 'rect' | 'lasso'
+  const selectTool = ref(null) // null | 'rect' | 'lasso'
   const selectionCount = ref(0)
   const selectionStreamed = ref(false) // a streamed cloud's count is of the points drawn now
   const selectionClouds = ref(0)
-  const drawShape = ref(null)        // { kind, points:[x,y,…] } in container px, for the SVG
-  const selections = new Map()       // cloudId → { mask, selected, pos, overlay }
-  let drawing = null                 // { op, startX, startY, pts }
+  const drawShape = ref(null) // { kind, points:[x,y,…] } in container px, for the SVG
+  const selections = new Map() // cloudId → { mask, selected, pos, overlay }
+  let drawing = null // { op, startX, startY, pts }
 
   // A streamed cloud (no points in memory) is selectable through its octree layer: its
   // selection is the shapes drawn, replayed on every point by the edit.
   const streamedLayer = (l) => !!l.lod && !l.source.pos
   function selectableLayers() {
-    return [...cloudLayers].filter(([, l]) => l.source.kind === 'dense' && (l.object.isPoints || streamedLayer(l)) && l.object.visible)
+    return [...cloudLayers].filter(
+      ([, l]) => l.source.kind === 'dense' && (l.object.isPoints || streamedLayer(l)) && l.object.visible,
+    )
   }
   // The classes a classification style hides: a shape drawn then cannot select them.
   function hiddenClasses(cloud) {
     const style = resolveCloudStyle(cloud)
     if (style.field !== 'attribute:classification') return []
-    return Object.entries(style.classes ?? {}).filter(([, c]) => c?.visible === false).map(([v]) => Number(v))
+    return Object.entries(style.classes ?? {})
+      .filter(([, c]) => c?.visible === false)
+      .map(([v]) => Number(v))
   }
   function lodSelectionOverlay(layer, entry, pos) {
     disposeSelectionOverlay(entry)
@@ -46,8 +50,13 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3))
     const material = new THREE.PointsMaterial({
-      color: 0xff3d71, size: pointSize.value + 1, sizeAttenuation: false,
-      depthTest: false, depthWrite: false, transparent: true, opacity: 0.9,
+      color: 0xff3d71,
+      size: pointSize.value + 1,
+      sizeAttenuation: false,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0.9,
     })
     const overlay = new THREE.Points(geometry, material)
     overlay.position.copy(layer.object.position)
@@ -64,8 +73,13 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
   }
 
   function refreshSelectionSummary() {
-    let total = 0, clouds = 0
-    for (const e of selections.values()) if (e.selected) { total += e.selected; clouds++ }
+    let total = 0,
+      clouds = 0
+    for (const e of selections.values())
+      if (e.selected) {
+        total += e.selected
+        clouds++
+      }
     selectionCount.value = total
     selectionStreamed.value = [...selections.values()].some((e) => e.ops)
     selectionClouds.value = clouds
@@ -85,13 +99,20 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
     const pos = new Float32Array(idx.length * 3)
     for (let k = 0; k < idx.length; k++) {
       const i = idx[k] * 3
-      pos[k * 3] = src[i]; pos[k * 3 + 1] = src[i + 1]; pos[k * 3 + 2] = src[i + 2]
+      pos[k * 3] = src[i]
+      pos[k * 3 + 1] = src[i + 1]
+      pos[k * 3 + 2] = src[i + 2]
     }
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3))
     const material = new THREE.PointsMaterial({
-      color: 0xff3d71, size: pointSize.value + 1, sizeAttenuation: false,
-      depthTest: false, depthWrite: false, transparent: true, opacity: 0.9,
+      color: 0xff3d71,
+      size: pointSize.value + 1,
+      sizeAttenuation: false,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0.9,
     })
     const overlay = new THREE.Points(geometry, material)
     overlay.position.copy(layer.object.position)
@@ -112,8 +133,12 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
       const layer = cloudLayers.get(id)
       // A restyle that hides classes swaps the index buffer: a point selected while
       // drawn may now be hidden, and must not be deleted unseen.
-      const stale = e.ops ? !layer || layer.source.lod !== e.lod || !layer.object.visible
-        : !layer || layer.source.pos !== e.pos || !layer.object.visible || (layer.object.geometry.index ?? null) !== e.index
+      const stale = e.ops
+        ? !layer || layer.source.lod !== e.lod || !layer.object.visible
+        : !layer ||
+          layer.source.pos !== e.pos ||
+          !layer.object.visible ||
+          (layer.object.geometry.index ?? null) !== e.index
       if (stale) {
         disposeSelectionOverlay(e)
         selections.delete(id)
@@ -133,7 +158,6 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
   }
   watch(selectTool, (t) => emit('select-tool', t))
 
-
   // Capture-phase on the container: runs before OrbitControls' own pointerdown on
   // the canvas, so a left-drag with a tool active never starts an orbit.
   function onSelectPointerDown(e) {
@@ -143,8 +167,10 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
     e.preventDefault()
     const [x, y] = pointerPx(e)
     drawing = {
-      op: e.shiftKey ? 'add' : (e.altKey || e.ctrlKey || e.metaKey) ? 'subtract' : 'replace',
-      startX: x, startY: y, pts: [x, y],
+      op: e.shiftKey ? 'add' : e.altKey || e.ctrlKey || e.metaKey ? 'subtract' : 'replace',
+      startX: x,
+      startY: y,
+      pts: [x, y],
     }
     container.value.setPointerCapture?.(e.pointerId)
     drawShape.value = { kind: selectTool.value, points: [x, y, x, y] }
@@ -170,11 +196,13 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
     drawShape.value = null
     container.value.releasePointerCapture?.(e.pointerId)
     if (!shapePx || !view.camera) return
-    const w = container.value.clientWidth, h = container.value.clientHeight
+    const w = container.value.clientWidth,
+      h = container.value.clientHeight
     const ndc = shapePx.points.map((v, i) => (i % 2 === 0 ? (v / w) * 2 - 1 : 1 - (v / h) * 2))
-    const shape = shapePx.kind === 'rect'
-      ? { kind: 'rect', x0: ndc[0], y0: ndc[1], x1: ndc[2], y1: ndc[3] }
-      : { kind: 'lasso', points: ndc }
+    const shape =
+      shapePx.kind === 'rect'
+        ? { kind: 'rect', x0: ndc[0], y0: ndc[1], x1: ndc[2], y1: ndc[3] }
+        : { kind: 'lasso', points: ndc }
     applySelectionShape(shape, op)
   }
 
@@ -184,32 +212,53 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
     const layers = selectableLayers()
     const ids = new Set(layers.map(([id]) => id))
     if (op === 'replace') {
-      for (const [id, e] of selections) if (!ids.has(id)) { disposeSelectionOverlay(e); selections.delete(id) }
+      for (const [id, e] of selections)
+        if (!ids.has(id)) {
+          disposeSelectionOverlay(e)
+          selections.delete(id)
+        }
     }
     for (const [id, layer] of layers) {
       layer.object.updateMatrixWorld()
       const matrix = viewProj.clone().multiply(layer.object.matrixWorld).elements
       if (streamedLayer(layer)) {
         const prev = selections.get(id)
-        const ops = [...(op !== 'replace' && prev?.ops ? prev.ops : []), { shape, matrix: [...matrix], op, hidden: hiddenClasses(layer.source) }]
+        const ops = [
+          ...(op !== 'replace' && prev?.ops ? prev.ops : []),
+          { shape, matrix: [...matrix], op, hidden: hiddenClasses(layer.source) },
+        ]
         const { selected, pos } = layer.selectDrawn(ops)
         const entry = prev ?? { overlay: null }
         Object.assign(entry, { ops, selected, lod: layer.source.lod })
         // Kept while the shapes may select points not drawn now; dropped when nothing is.
-        if (selected || ops.some((o) => o.op !== 'subtract')) { selections.set(id, entry); lodSelectionOverlay(layer, entry, pos) }
-        else { disposeSelectionOverlay(entry); selections.delete(id) }
+        if (selected || ops.some((o) => o.op !== 'subtract')) {
+          selections.set(id, entry)
+          lodSelectionOverlay(layer, entry, pos)
+        } else {
+          disposeSelectionOverlay(entry)
+          selections.delete(id)
+        }
         continue
       }
       const geometry = layer.object.geometry
       const prev = selections.get(id)
       const base = prev && prev.pos === layer.source.pos ? prev.mask : null
       const { mask, selected } = screenSelectMask(geometry.getAttribute('position').array, layer.count, {
-        matrix, shape, indices: geometry.index?.array ?? null, base, op,
+        matrix,
+        shape,
+        indices: geometry.index?.array ?? null,
+        base,
+        op,
       })
       const entry = prev ?? { overlay: null }
       Object.assign(entry, { mask, selected, pos: layer.source.pos, index: geometry.index ?? null })
-      if (selected) { selections.set(id, entry); buildSelectionOverlay(layer, entry) }
-      else { disposeSelectionOverlay(entry); selections.delete(id) }
+      if (selected) {
+        selections.set(id, entry)
+        buildSelectionOverlay(layer, entry)
+      } else {
+        disposeSelectionOverlay(entry)
+        selections.delete(id)
+      }
     }
     refreshSelectionSummary()
   }
@@ -217,7 +266,8 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
   // Hand the masks to App (and on to the store). The masks are transferred to the
   // worker there, so the local selection is cleared immediately.
   function commitSelection(keepSelected, classValue = null) {
-    const edits = [...selections].filter(([, e]) => e.selected || e.ops)
+    const edits = [...selections]
+      .filter(([, e]) => e.selected || e.ops)
       .map(([cloudId, e]) => (e.ops ? { cloudId, selection: e.ops } : { cloudId, mask: e.mask }))
     if (!edits.length) return
     clearSelection()
@@ -225,8 +275,17 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
     emit('edit-selection', { edits, keepSelected, classValue })
   }
   // Manual reclassification: the LAS classes offered for a selection (TODO ▸ F14).
-  const ASSIGN_CLASSES = [[2, 'Ground'], [1, 'Unclassified'], [3, 'Low vegetation'], [4, 'Medium vegetation'],
-    [5, 'High vegetation'], [6, 'Building'], [9, 'Water'], [7, 'Low noise'], [18, 'High noise']]
+  const ASSIGN_CLASSES = [
+    [2, 'Ground'],
+    [1, 'Unclassified'],
+    [3, 'Low vegetation'],
+    [4, 'Medium vegetation'],
+    [5, 'High vegetation'],
+    [6, 'Building'],
+    [9, 'Water'],
+    [7, 'Low noise'],
+    [18, 'High noise'],
+  ]
   const assignClass = ref(2)
 
   // Esc during a stroke: drop it; the pointerup that follows finds nothing.
@@ -243,8 +302,24 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
   }
 
   return {
-    selectTool, selectionCount, selectionStreamed, selectionClouds, drawShape, assignClass, ASSIGN_CLASSES,
-    selectableLayers, toggleSelectTool, exitSelection, clearSelection, pruneSelections, commitSelection,
-    onSelectPointerDown, onSelectPointerMove, onSelectPointerUp, abortStroke, setOverlaySize, applySelectionShape,
+    selectTool,
+    selectionCount,
+    selectionStreamed,
+    selectionClouds,
+    drawShape,
+    assignClass,
+    ASSIGN_CLASSES,
+    selectableLayers,
+    toggleSelectTool,
+    exitSelection,
+    clearSelection,
+    pruneSelections,
+    commitSelection,
+    onSelectPointerDown,
+    onSelectPointerMove,
+    onSelectPointerUp,
+    abortStroke,
+    setOverlaySize,
+    applySelectionShape,
   }
 }

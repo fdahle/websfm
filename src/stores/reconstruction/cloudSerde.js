@@ -36,16 +36,37 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
   // A streamed cloud (core/lod/streamed.js): its points live only in its octree.
   if (!c.pos && c.lod) {
     return {
-      id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt, streamed: true, posType: 'f64',
-      imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
-      cameras: [], pointCount: N, hasColor: false, hasNormals: false, viewUuids: [], buffers: null,
+      id: c.id,
+      name: c.name,
+      kind: 'dense',
+      createdAt: c.createdAt,
+      streamed: true,
+      posType: 'f64',
+      imported: !!c.imported,
+      derived: !!c.derived,
+      secondary: !!c.secondary,
+      cameras: [],
+      pointCount: N,
+      hasColor: false,
+      hasNormals: false,
+      viewUuids: [],
+      buffers: null,
     }
   }
   const meta = {
-    id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt,
+    id: c.id,
+    name: c.name,
+    kind: 'dense',
+    createdAt: c.createdAt,
     posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
-    imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
-    cameras: [], pointCount: N, hasColor: !!c.col, hasNormals: !!c.nrm, viewUuids: [],
+    imported: !!c.imported,
+    derived: !!c.derived,
+    secondary: !!c.secondary,
+    cameras: [],
+    pointCount: N,
+    hasColor: !!c.col,
+    hasNormals: !!c.nrm,
+    viewUuids: [],
   }
   if (!buffers) return { ...meta, buffers: null }
   const pos = c.pos.slice(0, N * 3)
@@ -55,8 +76,16 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
   const nrm = c.nrm ? c.nrm.slice(0, N * 3) : null
   return {
     ...meta,
-    buffers: { pos: pos.buffer, col: col ? col.buffer : null, nrm: nrm ? nrm.buffer : null,
-      vcount: null, vcam: null, vkp: null, vx: null, vy: null },
+    buffers: {
+      pos: pos.buffer,
+      col: col ? col.buffer : null,
+      nrm: nrm ? nrm.buffer : null,
+      vcount: null,
+      vcam: null,
+      vkp: null,
+      vx: null,
+      vy: null,
+    },
   }
 }
 
@@ -65,20 +94,31 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
 export function serializeMeshCloud(c, { buffers = true } = {}) {
   const nVerts = c.nVerts || 0
   const meta = {
-    id: c.id, name: c.name, kind: 'mesh', createdAt: c.createdAt,
+    id: c.id,
+    name: c.name,
+    kind: 'mesh',
+    createdAt: c.createdAt,
     posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
-    imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
-    cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
-    hasColor: !!c.col, viewUuids: [],
+    imported: !!c.imported,
+    derived: !!c.derived,
+    secondary: !!c.secondary,
+    cameras: [],
+    pointCount: nVerts,
+    nVerts,
+    triCount: c.count || 0,
+    hasColor: !!c.col,
+    viewUuids: [],
     ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
     // A textured mesh: UVs (Float32, 2 per vertex) and the atlas pages (JPEG bytes in
     // one buffer, each page's slice here) are sidecars; the page table and the
     // face groups per page are metadata.
-    ...(c.uv && c.texture ? {
-      hasUv: true,
-      texture: { pages: c.texture.pages, groups: c.texture.groups, bytes: c.texture.data.byteLength },
-      ...(c.textureSummary ? { textureSummary: c.textureSummary } : {}),
-    } : {}),
+    ...(c.uv && c.texture
+      ? {
+          hasUv: true,
+          texture: { pages: c.texture.pages, groups: c.texture.groups, bytes: c.texture.data.byteLength },
+          ...(c.textureSummary ? { textureSummary: c.textureSummary } : {}),
+        }
+      : {}),
   }
   if (!buffers) return { ...meta, buffers: null }
   const pos = c.pos.slice(0, nVerts * 3)
@@ -86,9 +126,17 @@ export function serializeMeshCloud(c, { buffers = true } = {}) {
   const idx = c.idx ? Uint32Array.from(c.idx) : new Uint32Array(0)
   return {
     ...meta,
-    buffers: { pos: pos.buffer, col: col ? col.buffer : null, idx: idx.buffer,
+    buffers: {
+      pos: pos.buffer,
+      col: col ? col.buffer : null,
+      idx: idx.buffer,
       ...(meta.hasUv ? { uv: c.uv.slice(0, nVerts * 2).buffer, texture: c.texture.data.slice().buffer } : {}),
-      vcount: null, vcam: null, vkp: null, vx: null, vy: null },
+      vcount: null,
+      vcam: null,
+      vkp: null,
+      vx: null,
+      vy: null,
+    },
   }
 }
 
@@ -101,10 +149,16 @@ function serializeCloudData(c, opts) {
   const own = (a) => (a.byteOffset !== 0 || a.byteLength !== a.buffer.byteLength ? a.slice() : a)
   const { pos, col, colorMask, viewUuids, vcount, vcam, vkp, vx, vy } = pts.columns()
   return {
-    id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
-    imported: !!c.imported, secondary: !!c.secondary,
+    id: c.id,
+    name: c.name,
+    kind: c.kind,
+    createdAt: c.createdAt,
+    imported: !!c.imported,
+    secondary: !!c.secondary,
     cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
-    pointCount: pts.length, hasColor: pts.hasColor, viewUuids: [...viewUuids],
+    pointCount: pts.length,
+    hasColor: pts.hasColor,
+    viewUuids: [...viewUuids],
     buffers: {
       pos: own(pos).buffer,
       col: col ? own(col).buffer : null,
@@ -135,9 +189,16 @@ function deserializeCloudData(c, makeCloudId) {
   // Retain Float64 precision in memory, including imported projected coordinates.
   if (c.kind === 'dense' && c.streamed) {
     return {
-      id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense', createdAt: c.createdAt ?? Date.now(),
-      cameras: markRaw(new Map()), ...(c.imported ? { imported: true } : {}), ...(c.derived ? { derived: true } : {}),
-      count: N, pos: null, col: null,
+      id: c.id ?? makeCloudId(),
+      name: c.name ?? 'Dense cloud',
+      kind: 'dense',
+      createdAt: c.createdAt ?? Date.now(),
+      cameras: markRaw(new Map()),
+      ...(c.imported ? { imported: true } : {}),
+      ...(c.derived ? { derived: true } : {}),
+      count: N,
+      pos: null,
+      col: null,
     }
   }
   if (c.kind === 'dense') {
@@ -146,12 +207,17 @@ function deserializeCloudData(c, makeCloudId) {
     // Normals stay Float32 on disk; undefined when the run produced none (no heal).
     const nrm = c.hasNormals && b.nrm ? new Float32Array(b.nrm) : null
     return {
-      id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense',
-      createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
+      id: c.id ?? makeCloudId(),
+      name: c.name ?? 'Dense cloud',
+      kind: 'dense',
+      createdAt: c.createdAt ?? Date.now(),
+      cameras: markRaw(new Map()),
       ...(c.imported ? { imported: true } : {}),
       // Absent on projects saved before cloud editing existed ⇒ not derived.
       ...(c.derived ? { derived: true } : {}),
-      count: N, pos: markRaw(posF), col: col ? markRaw(col) : null,
+      count: N,
+      pos: markRaw(posF),
+      col: col ? markRaw(col) : null,
       ...(nrm ? { nrm: markRaw(nrm) } : {}),
     }
   }
@@ -161,21 +227,29 @@ function deserializeCloudData(c, makeCloudId) {
     const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
     const idx = b.idx ? new Uint32Array(b.idx) : new Uint32Array(0)
     return {
-      id: c.id ?? makeCloudId(), name: c.name ?? 'Mesh', kind: 'mesh',
-      createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
+      id: c.id ?? makeCloudId(),
+      name: c.name ?? 'Mesh',
+      kind: 'mesh',
+      createdAt: c.createdAt ?? Date.now(),
+      cameras: markRaw(new Map()),
       ...(c.imported ? { imported: true } : {}),
       // A Mesh ▾ tool output; a re-mesh must never replace it. Absent on meshes
       // saved before mesh editing existed ⇒ not derived.
       ...(c.derived ? { derived: true } : {}),
-      count: c.triCount ?? (idx.length / 3), nVerts,
-      pos: markRaw(posF), idx: markRaw(idx), col: col ? markRaw(col) : null,
+      count: c.triCount ?? idx.length / 3,
+      nVerts,
+      pos: markRaw(posF),
+      idx: markRaw(idx),
+      col: col ? markRaw(col) : null,
       // The mesh run record; absent on meshes saved before it existed ⇒ unknown.
       ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
-      ...(c.hasUv && b.uv && b.texture ? {
-        uv: markRaw(new Float32Array(b.uv)),
-        texture: markRaw({ data: new Uint8Array(b.texture), pages: c.texture.pages, groups: c.texture.groups }),
-        ...(c.textureSummary ? { textureSummary: c.textureSummary } : {}),
-      } : {}),
+      ...(c.hasUv && b.uv && b.texture
+        ? {
+            uv: markRaw(new Float32Array(b.uv)),
+            texture: markRaw({ data: new Uint8Array(b.texture), pages: c.texture.pages, groups: c.texture.groups }),
+            ...(c.textureSummary ? { textureSummary: c.textureSummary } : {}),
+          }
+        : {}),
     }
   }
   const pos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
@@ -189,11 +263,23 @@ function deserializeCloudData(c, makeCloudId) {
   const viewUuids = c.viewUuids || []
 
   const cameras = new Map()
-  for (const cam of c.cameras || []) { const { uuid, R, t, K } = cam; cameras.set(uuid, { R, t, K }) }
+  for (const cam of c.cameras || []) {
+    const { uuid, R, t, K } = cam
+    cameras.set(uuid, { R, t, K })
+  }
 
   // A cloud saved without tracks (none in practice) restores with no views.
-  const points = makePackedPoints({ pos, col, colorMask, viewUuids, vx, vy,
-    vcount: vcount ?? new Uint32Array(N), vcam: vcam ?? new Uint32Array(0), vkp: vkp ?? new Uint32Array(0) })
+  const points = makePackedPoints({
+    pos,
+    col,
+    colorMask,
+    viewUuids,
+    vx,
+    vy,
+    vcount: vcount ?? new Uint32Array(N),
+    vcam: vcam ?? new Uint32Array(0),
+    vkp: vkp ?? new Uint32Array(0),
+  })
   return {
     id: c.id ?? makeCloudId(),
     name: c.name ?? 'Sparse cloud',
@@ -218,11 +304,26 @@ export function serializeCloud(c, { reuse = null } = {}) {
   if (reuse && (c.kind === 'dense' || c.kind === 'mesh')) {
     const data = serializeCloudData(c, { buffers: false })
     const { fields } = attributeLayout(c.attributes, count)
-    return { ...data, visible: c.visible !== false, style, attributeFields: fields, ...lodMeta(c), buffers: null, reuse }
+    return {
+      ...data,
+      visible: c.visible !== false,
+      style,
+      attributeFields: fields,
+      ...lodMeta(c),
+      buffers: null,
+      reuse,
+    }
   }
   const data = serializeCloudData(c)
   const { fields, buffer } = packAttributes(c.attributes, count)
-  return { ...data, visible: c.visible !== false, style, attributeFields: fields, ...lodMeta(c), buffers: { ...data.buffers, attributes: buffer } }
+  return {
+    ...data,
+    visible: c.visible !== false,
+    style,
+    attributeFields: fields,
+    ...lodMeta(c),
+    buffers: { ...data.buffers, attributes: buffer },
+  }
 }
 
 // A dense cloud's level-of-detail octree (reconstruction/cloudLod.js): metadata only,
@@ -235,7 +336,8 @@ const lodMeta = (c) => (c.kind === 'dense' && c.lod ? { lod: JSON.parse(JSON.str
 // reason rides along as `attributeError` (not persisted) for the restore log.
 export function deserializeCloud(c, makeCloudId) {
   const cloud = deserializeCloudData(c, makeCloudId)
-  let attributes = {}, attributeError = null
+  let attributes = {},
+    attributeError = null
   try {
     attributes = unpackAttributes(c.attributeFields, c.buffers?.attributes, c.pointCount ?? 0)
   } catch (err) {
@@ -246,10 +348,19 @@ export function deserializeCloud(c, makeCloudId) {
   // generation (`createdAt`, which every edit renews; reconstruction/cloudLod.js
   // stamps it) and count. An edit that keeps the count (a reclassify) must not bring
   // the old octree back.
-  const lod = c.kind === 'dense' && c.lod && (c.streamed || (c.lod.points === (c.pointCount ?? 0)
-    && c.lod.cloudCreatedAt != null && c.lod.cloudCreatedAt === c.createdAt)) ? markRaw(c.lod) : null
-  return { ...cloud, visible: c.visible !== false, style: c.style ?? null,
+  const lod =
+    c.kind === 'dense' &&
+    c.lod &&
+    (c.streamed ||
+      (c.lod.points === (c.pointCount ?? 0) && c.lod.cloudCreatedAt != null && c.lod.cloudCreatedAt === c.createdAt))
+      ? markRaw(c.lod)
+      : null
+  return {
+    ...cloud,
+    visible: c.visible !== false,
+    style: c.style ?? null,
     ...(lod ? { lod } : {}),
     ...(Object.keys(attributes).length ? { attributes: markRaw(attributes) } : {}),
-    ...(attributeError ? { attributeError } : {}) }
+    ...(attributeError ? { attributeError } : {}),
+  }
 }

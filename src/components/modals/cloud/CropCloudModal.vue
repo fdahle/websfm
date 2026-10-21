@@ -29,8 +29,9 @@ const emit = defineEmits(['close', 'run'])
 const settings = ref({ ...CROP_CLOUD_DEFAULTS })
 const { id: sourceId, item: picked } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 // The points the box is tested against: a cloud's points, or a mesh's vertices.
-const source = computed(() => (picked.value && props.mesh
-  ? { count: picked.value.nVerts, pos: picked.value.pos } : picked.value))
+const source = computed(() =>
+  picked.value && props.mesh ? { count: picked.value.nVerts, pos: picked.value.pos } : picked.value,
+)
 // A streamed cloud (core/lod/streamed.js): no points in memory, its octree has the
 // extent, and the crop copies the box out of the octree into a new cloud.
 const streamed = computed(() => !!(source.value && !source.value.pos && source.value.lod))
@@ -46,14 +47,21 @@ const AXES = [
 // everything" and the user shrinks from there rather than guessing coordinates.
 function fillFromBounds() {
   const lb = streamed.value ? source.value.lod.bounds : null
-  const b = lb ? { minX: lb.min[0], minY: lb.min[1], minZ: lb.min[2], maxX: lb.max[0], maxY: lb.max[1], maxZ: lb.max[2] }
-    : source.value ? cloudBounds(source.value) : null
+  const b = lb
+    ? { minX: lb.min[0], minY: lb.min[1], minZ: lb.min[2], maxX: lb.max[0], maxY: lb.max[1], maxZ: lb.max[2] }
+    : source.value
+      ? cloudBounds(source.value)
+      : null
   if (!b) return
   const r = (v) => Number(v.toFixed(3))
   settings.value = {
     ...settings.value,
-    minX: r(b.minX), minY: r(b.minY), minZ: r(b.minZ),
-    maxX: r(b.maxX), maxY: r(b.maxY), maxZ: r(b.maxZ),
+    minX: r(b.minX),
+    minY: r(b.minY),
+    minZ: r(b.minZ),
+    maxX: r(b.maxX),
+    maxY: r(b.maxY),
+    maxZ: r(b.maxZ),
   }
 }
 watch(source, fillFromBounds, { immediate: true })
@@ -64,11 +72,16 @@ watch(source, fillFromBounds, { immediate: true })
 // every keystroke would jank the UI — so we say "run to see" rather than freeze.
 const LIVE_COUNT_LIMIT = 20_000_000
 const liveKept = ref(null)
-const countable = computed(() => !streamed.value && cloudCount(source.value) > 0 && cloudCount(source.value) <= LIVE_COUNT_LIMIT)
+const countable = computed(
+  () => !streamed.value && cloudCount(source.value) > 0 && cloudCount(source.value) <= LIVE_COUNT_LIMIT,
+)
 let timer = null
 
 function recount() {
-  if (!countable.value) { liveKept.value = null; return }
+  if (!countable.value) {
+    liveKept.value = null
+    return
+  }
   const { pos } = source.value
   const n = cloudCount(source.value)
   const s = settings.value
@@ -76,17 +89,25 @@ function recount() {
   const hi = [s.maxX, s.maxY, s.maxZ].map((v) => (Number.isFinite(v) ? v : Infinity))
   let kept = 0
   for (let i = 0; i < n; i++) {
-    const inside = pos[i * 3] >= lo[0] && pos[i * 3] <= hi[0]
-      && pos[i * 3 + 1] >= lo[1] && pos[i * 3 + 1] <= hi[1]
-      && pos[i * 3 + 2] >= lo[2] && pos[i * 3 + 2] <= hi[2]
+    const inside =
+      pos[i * 3] >= lo[0] &&
+      pos[i * 3] <= hi[0] &&
+      pos[i * 3 + 1] >= lo[1] &&
+      pos[i * 3 + 1] <= hi[1] &&
+      pos[i * 3 + 2] >= lo[2] &&
+      pos[i * 3 + 2] <= hi[2]
     if (inside !== s.invert) kept++
   }
   liveKept.value = kept
 }
-watch([settings, source], () => {
-  clearTimeout(timer)
-  timer = setTimeout(recount, 250)
-}, { deep: true, immediate: true })
+watch(
+  [settings, source],
+  () => {
+    clearTimeout(timer)
+    timer = setTimeout(recount, 250)
+  },
+  { deep: true, immediate: true },
+)
 onBeforeUnmount(() => clearTimeout(timer))
 
 const sourceCount = computed(() => cloudCount(source.value))
@@ -110,21 +131,33 @@ function run() {
   <ModalShell :title="mesh ? 'Crop Mesh' : 'Crop Cloud'" @close="emit('close')">
     <NoSourceWarn v-if="!clouds.length && mesh" kind="mesh" />
     <WarnBox v-else-if="!clouds.length">
-      No editable point cloud. Run <strong>Densify</strong> or import a cloud first — cropping
-      applies to dense clouds; a sparse cloud carries the view-tracks the later stages read
-      and is left intact on purpose.
+      No editable point cloud. Run <strong>Densify</strong> or import a cloud first — cropping applies to dense clouds;
+      a sparse cloud carries the view-tracks the later stages read and is left intact on purpose.
     </WarnBox>
 
     <template v-else>
       <SettingsGroup title="Source">
-        <SourcePicker id="crop-src" v-model="sourceId" :label="mesh ? 'Mesh' : 'Cloud'" :items="clouds"
+        <SourcePicker
+          id="crop-src"
+          v-model="sourceId"
+          :label="mesh ? 'Mesh' : 'Cloud'"
+          :items="clouds"
           :option-label="mesh ? meshOptionLabel : cloudOptionLabel"
-          :hint="mesh ? 'The crop adds a new mesh; this one is left untouched.' : 'The crop adds a new cloud; this one is left untouched.'" />
+          :hint="
+            mesh
+              ? 'The crop adds a new mesh; this one is left untouched.'
+              : 'The crop adds a new cloud; this one is left untouched.'
+          "
+        />
       </SettingsGroup>
 
       <SettingsGroup title="Bounds">
-        <SettingsField v-for="a in AXES" :key="a.key" :label="a.key"
-          hint="Leave a field empty to leave that side unbounded.">
+        <SettingsField
+          v-for="a in AXES"
+          :key="a.key"
+          :label="a.key"
+          hint="Leave a field empty to leave that side unbounded."
+        >
           <div class="input-row">
             <input v-model.number="settings[a.min]" type="number" step="any" class="field-input" placeholder="min" />
             <input v-model.number="settings[a.max]" type="number" step="any" class="field-input" placeholder="max" />
@@ -147,13 +180,11 @@ function run() {
 
       <p class="field-hint">
         <template v-if="streamed && settings.invert">
-          A streamed cloud: the points outside the box go into a new streamed cloud, at full
-          detail.
+          A streamed cloud: the points outside the box go into a new streamed cloud, at full detail.
         </template>
         <template v-else-if="streamed">
-          A streamed cloud: the points inside the box are copied out of its octree into a new
-          cloud that every tool can use. Past 25 million points the copy is thinned evenly;
-          crop a smaller box for full detail.
+          A streamed cloud: the points inside the box are copied out of its octree into a new cloud that every tool can
+          use. Past 25 million points the copy is thinned evenly; crop a smaller box for full detail.
         </template>
         <template v-else-if="liveKept !== null">
           Keeps {{ liveKept.toLocaleString() }} of {{ sourceCount.toLocaleString() }} {{ noun }}.

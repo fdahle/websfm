@@ -1,8 +1,17 @@
 import { describe, it, expect } from 'vitest'
 import {
-  needsStyling, defaultRasterStyle, resolveRasterStyle, bandsUsedBy,
-  percentileRange, minMaxRange, resolveRange, stretchTo255,
-  normalizedDifference, composeStyledRgba, describeStyle, styleStamp,
+  needsStyling,
+  defaultRasterStyle,
+  resolveRasterStyle,
+  bandsUsedBy,
+  percentileRange,
+  minMaxRange,
+  resolveRange,
+  stretchTo255,
+  normalizedDifference,
+  composeStyledRgba,
+  describeStyle,
+  styleStamp,
 } from './rasterStyle.js'
 
 describe('needsStyling', () => {
@@ -110,12 +119,16 @@ describe('normalizedDifference', () => {
 })
 
 describe('composeStyledRgba', () => {
-  const width = 2, height = 1
+  const width = 2,
+    height = 1
 
   it('greyscale writes the same value to all three channels', () => {
     const out = composeStyledRgba({
-      width, height, style: { mode: 'gray', gamma: 1 },
-      channels: [[0, 100]], ranges: [[0, 100]],
+      width,
+      height,
+      style: { mode: 'gray', gamma: 1 },
+      channels: [[0, 100]],
+      ranges: [[0, 100]],
     })
     expect([...out.slice(0, 4)]).toEqual([0, 0, 0, 255])
     expect([...out.slice(4, 8)]).toEqual([255, 255, 255, 255])
@@ -123,9 +136,19 @@ describe('composeStyledRgba', () => {
 
   it('rgb stretches each channel on its OWN range', () => {
     const out = composeStyledRgba({
-      width, height, style: { mode: 'rgb', gamma: 1 },
-      channels: [[10, 20], [100, 200], [1000, 2000]],
-      ranges: [[10, 20], [100, 200], [1000, 2000]],
+      width,
+      height,
+      style: { mode: 'rgb', gamma: 1 },
+      channels: [
+        [10, 20],
+        [100, 200],
+        [1000, 2000],
+      ],
+      ranges: [
+        [10, 20],
+        [100, 200],
+        [1000, 2000],
+      ],
     })
     expect([...out.slice(0, 4)]).toEqual([0, 0, 0, 255])
     expect([...out.slice(4, 8)]).toEqual([255, 255, 255, 255])
@@ -133,17 +156,33 @@ describe('composeStyledRgba', () => {
 
   it('makes a nodata pixel transparent in every mode', () => {
     const gray = composeStyledRgba({
-      width, height, style: { mode: 'gray' },
-      channels: [[0, 50]], ranges: [[0, 100]], nodata: 0,
+      width,
+      height,
+      style: { mode: 'gray' },
+      channels: [[0, 50]],
+      ranges: [[0, 100]],
+      nodata: 0,
     })
-    expect(gray[3]).toBe(0)   // nodata → transparent
+    expect(gray[3]).toBe(0) // nodata → transparent
     expect(gray[7]).toBe(255)
 
     // One nodata band poisons the whole RGB pixel — a stack's collar must not
     // render as spurious colour.
     const rgb = composeStyledRgba({
-      width, height, style: { mode: 'rgb' },
-      channels: [[0, 5], [5, 5], [5, 5]], ranges: [[0, 10], [0, 10], [0, 10]], nodata: 0,
+      width,
+      height,
+      style: { mode: 'rgb' },
+      channels: [
+        [0, 5],
+        [5, 5],
+        [5, 5],
+      ],
+      ranges: [
+        [0, 10],
+        [0, 10],
+        [0, 10],
+      ],
+      nodata: 0,
     })
     expect(rgb[3]).toBe(0)
     expect(rgb[7]).toBe(255)
@@ -153,11 +192,15 @@ describe('composeStyledRgba', () => {
     // NDVI = 0 must land mid-ramp regardless of the input magnitudes, so the
     // zero crossing stays where it means something.
     const a = composeStyledRgba({
-      width: 1, height: 1, style: { mode: 'index', ramp: 'gray', gamma: 1 },
+      width: 1,
+      height: 1,
+      style: { mode: 'index', ramp: 'gray', gamma: 1 },
       channels: [[5], [5]],
     })
     const b = composeStyledRgba({
-      width: 1, height: 1, style: { mode: 'index', ramp: 'gray', gamma: 1 },
+      width: 1,
+      height: 1,
+      style: { mode: 'index', ramp: 'gray', gamma: 1 },
       channels: [[5000], [5000]],
     })
     expect([...a.slice(0, 4)]).toEqual([...b.slice(0, 4)])
@@ -166,7 +209,11 @@ describe('composeStyledRgba', () => {
 
   it('treats a non-finite sample as nodata even without a nodata tag', () => {
     const out = composeStyledRgba({
-      width: 1, height: 1, style: { mode: 'gray' }, channels: [[NaN]], ranges: [[0, 1]],
+      width: 1,
+      height: 1,
+      style: { mode: 'gray' },
+      channels: [[NaN]],
+      ranges: [[0, 1]],
     })
     expect(out[3]).toBe(0)
   })
@@ -174,8 +221,9 @@ describe('composeStyledRgba', () => {
 
 describe('describeStyle', () => {
   it('reports bands 1-indexed, as the UI shows them', () => {
-    expect(describeStyle({ mode: 'rgb', bandR: 2, bandG: 1, bandB: 0, stretch: 'percentile', loPct: 2, hiPct: 98 }))
-      .toBe('RGB ← bands 3, 2, 1, 2–98%')
+    expect(
+      describeStyle({ mode: 'rgb', bandR: 2, bandG: 1, bandB: 0, stretch: 'percentile', loPct: 2, hiPct: 98 }),
+    ).toBe('RGB ← bands 3, 2, 1, 2–98%')
     expect(describeStyle({ mode: 'gray', band: 0, stretch: 'minmax' })).toBe('grey ← band 1, min–max')
   })
 })
@@ -207,8 +255,9 @@ describe('styleStamp', () => {
 
   it('does not confuse a band index across modes', () => {
     // gray band 1 and an index whose A band is 1 must not collide.
-    expect(styleStamp({ ...base, band: 1 }))
-      .not.toBe(styleStamp({ ...base, mode: 'index', index: 'ndvi', bandA: 1, bandB2: 0 }))
+    expect(styleStamp({ ...base, band: 1 })).not.toBe(
+      styleStamp({ ...base, mode: 'index', index: 'ndvi', bandA: 1, bandB2: 0 }),
+    )
   })
 
   it('is stable for an unstyled raster (DEM / 8-bit fast path)', () => {

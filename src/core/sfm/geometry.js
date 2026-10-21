@@ -40,12 +40,17 @@ export function projectWithDepth(cam, x, y, z) {
 // Triangulation (parallax) angle in degrees at world point `p`, between the two
 // camera centres Ca and Cb. Small angle ⇒ ill-conditioned depth.
 export function triangulationAngle(Ca, Cb, p) {
-  const ax = p.x - Ca[0], ay = p.y - Ca[1], az = p.z - Ca[2]
-  const bx = p.x - Cb[0], by = p.y - Cb[1], bz = p.z - Cb[2]
-  const na = Math.hypot(ax, ay, az), nb = Math.hypot(bx, by, bz)
+  const ax = p.x - Ca[0],
+    ay = p.y - Ca[1],
+    az = p.z - Ca[2]
+  const bx = p.x - Cb[0],
+    by = p.y - Cb[1],
+    bz = p.z - Cb[2]
+  const na = Math.hypot(ax, ay, az),
+    nb = Math.hypot(bx, by, bz)
   if (na === 0 || nb === 0) return 0
   const c = Math.max(-1, Math.min(1, (ax * bx + ay * by + az * bz) / (na * nb)))
-  return Math.acos(c) * 180 / Math.PI
+  return (Math.acos(c) * 180) / Math.PI
 }
 
 // Median parallax angle (deg) between two cameras over a set of 3D points.
@@ -90,18 +95,25 @@ export function medianTriangulationAngle(camA, camB, pts) {
 // Returns null with < 2 cameras or a degenerate mean (e.g. a pure pano spin), so
 // callers fall back to world +Z. Accepts a Map<*, {R,t}> or an array of { R, t }.
 export function estimateUpFromCameras(cameras) {
-  const list = cameras && typeof cameras.values === 'function'
-    ? [...cameras.values()] : (cameras || [])
+  const list = cameras && typeof cameras.values === 'function' ? [...cameras.values()] : cameras || []
   if (list.length < 2) return null
 
-  let ax = 0, ay = 0, az = 0   // Σ image-up axes
-  let vx = 0, vy = 0, vz = 0   // Σ viewing directions
+  let ax = 0,
+    ay = 0,
+    az = 0 // Σ image-up axes
+  let vx = 0,
+    vy = 0,
+    vz = 0 // Σ viewing directions
   let n = 0
   for (const cam of list) {
     const R = cam?.R
     if (!R) continue
-    ax -= R[1][0]; ay -= R[1][1]; az -= R[1][2]
-    vx += R[2][0]; vy += R[2][1]; vz += R[2][2]
+    ax -= R[1][0]
+    ay -= R[1][1]
+    az -= R[1][2]
+    vx += R[2][0]
+    vy += R[2][1]
+    vz += R[2][2]
     n++
   }
   if (!n) return null
@@ -109,9 +121,7 @@ export function estimateUpFromCameras(cameras) {
   const axisUp = unit([ax, ay, az])
   // |mean viewing dir| ≪ 1 ⇒ the directions largely cancel (convergent rig): no
   // coherent nadir reading, so there is nothing to weigh against the image axes.
-  const viewUp = Math.hypot(vx, vy, vz) / n >= 0.3
-    ? unit([-vx, -vy, -vz])
-    : null
+  const viewUp = Math.hypot(vx, vy, vz) / n >= 0.3 ? unit([-vx, -vy, -vz]) : null
   // A level camera plane seen obliquely outranks both readings (planeUpOverride).
   const plane = planeUpOverride(list, viewUp, axisUp)
   if (plane) return plane.up
@@ -120,11 +130,9 @@ export function estimateUpFromCameras(cameras) {
 
   const b = baselineAxes(list)
   if (!b) return axisUp
-  const score = (c) =>
-    (b.thin ? Math.abs(dot3(c, b.thin)) : 0) -
-    (b.travel ? Math.abs(dot3(c, b.travel)) : 0)
+  const score = (c) => (b.thin ? Math.abs(dot3(c, b.thin)) : 0) - (b.travel ? Math.abs(dot3(c, b.travel)) : 0)
   // Only switch on a clear margin, so an ambiguous rig keeps the historical answer.
-  return (score(viewUp) - score(axisUp) > 0.3) ? viewUp : axisUp
+  return score(viewUp) - score(axisUp) > 0.3 ? viewUp : axisUp
 }
 
 // ── Up from the camera-centre PLANE ──────────────────────────────────────────
@@ -146,8 +154,8 @@ export function estimateUpFromCameras(cameras) {
 // facade is planar with cameras looking along the normal, exactly like a nadir
 // block turned 90°; nothing here can tell them apart.
 export const PLANE_UP_OBLIQUE_DEG = 25
-const PLANE_THIN_RATIO = 0.05   // thinnest std ≤ 5% of the middle one ⇒ planar
-const PLANE_SPREAD_RATIO = 0.2  // middle std ≥ 20% of the largest ⇒ not a single strip
+const PLANE_THIN_RATIO = 0.05 // thinnest std ≤ 5% of the middle one ⇒ planar
+const PLANE_SPREAD_RATIO = 0.2 // middle std ≥ 20% of the largest ⇒ not a single strip
 
 // The signed plane normal, or null when the centres are not a usable plane, the
 // cameras look near-perpendicular at it (nadir: keep `viewUp`), or no candidate
@@ -155,23 +163,47 @@ const PLANE_SPREAD_RATIO = 0.2  // middle std ≥ 20% of the largest ⇒ not a s
 // readings (either may be null); the sign follows the first one present.
 // → { up, viewTiltDeg } — viewTiltDeg = angle between viewUp and the plane normal.
 export function planeUpOverride(cameras, viewUp = null, axisUp = null) {
-  const list = cameras && typeof cameras.values === 'function' ? [...cameras.values()] : (cameras || [])
+  const list = cameras && typeof cameras.values === 'function' ? [...cameras.values()] : cameras || []
   const C = []
   for (const cam of list) if (cam?.R && cam?.t) C.push(cameraCenter(cam))
   if (C.length < 4) return null
-  let mx = 0, my = 0, mz = 0
-  for (const c of C) { mx += c[0]; my += c[1]; mz += c[2] }
-  mx /= C.length; my /= C.length; mz /= C.length
-  let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0
+  let mx = 0,
+    my = 0,
+    mz = 0
   for (const c of C) {
-    const dx = c[0] - mx, dy = c[1] - my, dz = c[2] - mz
-    xx += dx * dx; xy += dx * dy; xz += dx * dz
-    yy += dy * dy; yz += dy * dz; zz += dz * dz
+    mx += c[0]
+    my += c[1]
+    mz += c[2]
+  }
+  mx /= C.length
+  my /= C.length
+  mz /= C.length
+  let xx = 0,
+    xy = 0,
+    xz = 0,
+    yy = 0,
+    yz = 0,
+    zz = 0
+  for (const c of C) {
+    const dx = c[0] - mx,
+      dy = c[1] - my,
+      dz = c[2] - mz
+    xx += dx * dx
+    xy += dx * dy
+    xz += dx * dz
+    yy += dy * dy
+    yz += dy * dz
+    zz += dz * dz
   }
   if (!(xx + yy + zz > 1e-12)) return null
-  const { values, vectors } = jacobiEigen3([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]])
+  const { values, vectors } = jacobiEigen3([
+    [xx, xy, xz],
+    [xy, yy, yz],
+    [xz, yz, zz],
+  ])
   const [hi, mid, lo] = [0, 1, 2].sort((a, c) => values[c] - values[a])
-  const s1 = Math.sqrt(Math.max(0, values[hi])), s2 = Math.sqrt(Math.max(0, values[mid]))
+  const s1 = Math.sqrt(Math.max(0, values[hi])),
+    s2 = Math.sqrt(Math.max(0, values[mid]))
   const s3 = Math.sqrt(Math.max(0, values[lo]))
   if (!(s2 >= PLANE_SPREAD_RATIO * s1) || !(s3 <= PLANE_THIN_RATIO * s2)) return null
   let n = unit(vectors[lo])
@@ -179,7 +211,7 @@ export function planeUpOverride(cameras, viewUp = null, axisUp = null) {
   const ref = viewUp ?? axisUp
   if (!ref) return null
   if (dot3(n, ref) < 0) n = [-n[0], -n[1], -n[2]]
-  const viewTiltDeg = viewUp ? Math.acos(Math.min(1, Math.abs(dot3(n, viewUp)))) * 180 / Math.PI : null
+  const viewTiltDeg = viewUp ? (Math.acos(Math.min(1, Math.abs(dot3(n, viewUp)))) * 180) / Math.PI : null
   if (viewTiltDeg != null && viewTiltDeg <= PLANE_UP_OBLIQUE_DEG) return null
   return { up: n, viewTiltDeg }
 }
@@ -205,26 +237,47 @@ function baselineAxes(list) {
     C.push(cameraCenter(cam))
   }
   if (C.length < 2) return null
-  let mx = 0, my = 0, mz = 0
-  for (const c of C) { mx += c[0]; my += c[1]; mz += c[2] }
-  mx /= C.length; my /= C.length; mz /= C.length
-  let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0
+  let mx = 0,
+    my = 0,
+    mz = 0
   for (const c of C) {
-    const dx = c[0] - mx, dy = c[1] - my, dz = c[2] - mz
-    xx += dx * dx; xy += dx * dy; xz += dx * dz
-    yy += dy * dy; yz += dy * dz; zz += dz * dz
+    mx += c[0]
+    my += c[1]
+    mz += c[2]
+  }
+  mx /= C.length
+  my /= C.length
+  mz /= C.length
+  let xx = 0,
+    xy = 0,
+    xz = 0,
+    yy = 0,
+    yz = 0,
+    zz = 0
+  for (const c of C) {
+    const dx = c[0] - mx,
+      dy = c[1] - my,
+      dz = c[2] - mz
+    xx += dx * dx
+    xy += dx * dy
+    xz += dx * dz
+    yy += dy * dy
+    yz += dy * dz
+    zz += dz * dz
   }
   const trace = xx + yy + zz
   if (!(trace > 1e-12)) return null
 
-  const { values, vectors } = jacobiEigen3([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]])
+  const { values, vectors } = jacobiEigen3([
+    [xx, xy, xz],
+    [xy, yy, yz],
+    [xz, yz, zz],
+  ])
   const order = [0, 1, 2].sort((a, c) => values[c] - values[a]) // descending λ
   const [lo, mid, hi] = order
   return {
     travel: unit(vectors[lo]),
-    thin: values[mid] > 1e-12 && values[hi] < 0.15 * values[mid]
-      ? unit(vectors[hi])
-      : null,
+    thin: values[mid] > 1e-12 && values[hi] < 0.15 * values[mid] ? unit(vectors[hi]) : null,
   }
 }
 
@@ -233,28 +286,45 @@ function baselineAxes(list) {
 // Dependency-free and plenty accurate for a covariance this small.
 function jacobiEigen3(M) {
   const a = [M[0].slice(), M[1].slice(), M[2].slice()]
-  const v = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const v = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]
   for (let sweep = 0; sweep < 24; sweep++) {
     let off = 0
-    for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) off += a[p][q] * a[p][q]
+    for (const [p, q] of [
+      [0, 1],
+      [0, 2],
+      [1, 2],
+    ])
+      off += a[p][q] * a[p][q]
     if (off < 1e-24) break
-    for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) {
+    for (const [p, q] of [
+      [0, 1],
+      [0, 2],
+      [1, 2],
+    ]) {
       if (Math.abs(a[p][q]) < 1e-18) continue
       const theta = (a[q][q] - a[p][p]) / (2 * a[p][q])
       const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1))
-      const c = 1 / Math.sqrt(t * t + 1), s = t * c
+      const c = 1 / Math.sqrt(t * t + 1),
+        s = t * c
       for (let k = 0; k < 3; k++) {
-        const akp = a[k][p], akq = a[k][q]
+        const akp = a[k][p],
+          akq = a[k][q]
         a[k][p] = c * akp - s * akq
         a[k][q] = s * akp + c * akq
       }
       for (let k = 0; k < 3; k++) {
-        const apk = a[p][k], aqk = a[q][k]
+        const apk = a[p][k],
+          aqk = a[q][k]
         a[p][k] = c * apk - s * aqk
         a[q][k] = s * apk + c * aqk
       }
       for (let k = 0; k < 3; k++) {
-        const vkp = v[k][p], vkq = v[k][q]
+        const vkp = v[k][p],
+          vkq = v[k][q]
         v[k][p] = c * vkp - s * vkq
         v[k][q] = s * vkp + c * vkq
       }

@@ -6,11 +6,11 @@ const kp = (scale, response) => ({ scale, response })
 
 describe('capOrder', () => {
   const items = [
-    kp(1.6, 0.90), // 0 fine, strongest
+    kp(1.6, 0.9), // 0 fine, strongest
     kp(12.0, 0.02), // 1 coarse, weak
-    kp(3.0, 0.50), // 2
+    kp(3.0, 0.5), // 2
     kp(25.0, 0.05), // 3 coarsest
-    kp(1.8, 0.70), // 4 fine, strong
+    kp(1.8, 0.7), // 4 fine, strong
   ]
 
   it("'response' keeps the strongest, as the crate's own cap did", () => {

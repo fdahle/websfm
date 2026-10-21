@@ -70,12 +70,18 @@ function setCollapsed(groupKey, collapsed) {
   if (groupKey === UNGROUPED) ungroupedCollapsed.value = collapsed
   else sidebar.imageGroup({ op: 'collapse', id: groupKey, collapsed })
 }
-function toggleGroup(row) { setCollapsed(row.groupKey, !row.collapsed) }
+function toggleGroup(row) {
+  setCollapsed(row.groupKey, !row.collapsed)
+}
 
 // Inline group rename (same interaction as an image rename).
 const {
-  editingId: editingGroupId, editingName: editingGroupName, setInput: setGroupRenameInput,
-  start: beginGroupRename, commit: commitGroupRename, cancel: cancelGroupRename,
+  editingId: editingGroupId,
+  editingName: editingGroupName,
+  setInput: setGroupRenameInput,
+  start: beginGroupRename,
+  commit: commitGroupRename,
+  cancel: cancelGroupRename,
 } = useInlineRename((id, name) => sidebar.imageGroup({ op: 'rename', id, name }))
 function startGroupRename(id) {
   const group = imageGroups.value.find((g) => g.id === id)
@@ -94,13 +100,13 @@ function startGroupRename(id) {
 const DRAG_TYPE = 'application/x-websfm-image-ids'
 const dropTarget = ref(null)
 function onRowDragStart(e, img) {
-  const ids = selectedSet.value.has(img.id)
-    ? visibleIds.value.filter((id) => selectedSet.value.has(id))
-    : [img.id]
+  const ids = selectedSet.value.has(img.id) ? visibleIds.value.filter((id) => selectedSet.value.has(id)) : [img.id]
   e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids))
   e.dataTransfer.effectAllowed = 'move'
 }
-function isImageDrag(e) { return !!e.dataTransfer?.types?.includes(DRAG_TYPE) }
+function isImageDrag(e) {
+  return !!e.dataTransfer?.types?.includes(DRAG_TYPE)
+}
 function onDragOver(e, groupKey) {
   if (!groupKey || !isImageDrag(e)) return
   e.preventDefault()
@@ -116,16 +122,25 @@ function onDrop(e, groupKey) {
   e.stopPropagation()
   dropTarget.value = null
   let imageIds = []
-  try { imageIds = JSON.parse(e.dataTransfer.getData(DRAG_TYPE)) } catch { return }
+  try {
+    imageIds = JSON.parse(e.dataTransfer.getData(DRAG_TYPE))
+  } catch {
+    return
+  }
   sidebar.imageGroup({ op: 'assign', imageIds, groupId: groupKey === UNGROUPED ? null : groupKey })
 }
 
 // Group header context menu. { x, y, row }
 const { menu: groupCtx, open: openGroupCtx, close: closeGroupMenu } = useContextMenu()
 const groupCtxIndex = computed(() =>
-  groupCtx.value?.row.group ? imageGroups.value.findIndex((g) => g.id === groupCtx.value.row.groupKey) : -1)
+  groupCtx.value?.row.group ? imageGroups.value.findIndex((g) => g.id === groupCtx.value.row.groupKey) : -1,
+)
 // Run a group menu item against the header it was opened on, then close.
-function fromGroupMenu(fn) { const { row } = groupCtx.value; closeGroupMenu(); fn(row) }
+function fromGroupMenu(fn) {
+  const { row } = groupCtx.value
+  closeGroupMenu()
+  fn(row)
+}
 function groupCtxSelect() {
   const { row } = groupCtx.value
   const ids = membersOf(row.groupKey).map((i) => i.id)
@@ -232,7 +247,10 @@ function handleItemClick(e, img) {
 }
 
 watch(selectedId, (newId) => {
-  if (suppressWatch) { suppressWatch = false; return }
+  if (suppressWatch) {
+    suppressWatch = false
+    return
+  }
   localSelected.value = newId ? [newId] : []
   anchor.value = newId
 })
@@ -250,7 +268,7 @@ const ctxTargets = computed(() => {
   return [img]
 })
 const ctxIsMulti = computed(() => ctxTargets.value.length > 1)
-const ctxHasKp   = computed(() => ctxTargets.value.some((i) => i.kpStatus === 'done'))
+const ctxHasKp = computed(() => ctxTargets.value.some((i) => i.kpStatus === 'done'))
 // Can we point at this image on the map? True if it has a pose or an EXIF GPS fix.
 const ctxHasPosition = computed(() => {
   const img = ctxMenu.value?.img
@@ -263,14 +281,19 @@ const ctxHasPosition = computed(() => {
 // is that the ingest-time sniff already said "no" and the user disagrees; the
 // import itself is what decides, and it fails loudly if there is no
 // geotransform.
-const ctxIsTiff = computed(() => !ctxIsMulti.value
-  && isTiff(ctxMenu.value?.img?.sourceName ?? ctxMenu.value?.img?.name))
+const ctxIsTiff = computed(
+  () => !ctxIsMulti.value && isTiff(ctxMenu.value?.img?.sourceName ?? ctxMenu.value?.img?.name),
+)
 
 // Inline rename. Multi-selection deliberately cannot be renamed as one action;
 // the context menu leaves Rename disabled until it targets a single image.
 const {
-  editingId: editingImageId, editingName, setInput: setRenameInput,
-  start: startRename, commit: commitRename, cancel: cancelRename,
+  editingId: editingImageId,
+  editingName,
+  setInput: setRenameInput,
+  start: startRename,
+  commit: commitRename,
+  cancel: cancelRename,
 } = useInlineRename((id, name) => sidebar.renameImage({ id, name }))
 
 function onRightClick(e, img) {
@@ -287,10 +310,15 @@ function onRightClick(e, img) {
 // The action is the same either way (openImageTab focuses an existing tab), but
 // the label should tell you which one you'll get. Tab id per useTabs.openImageTab.
 const ctxOpenLabel = computed(() =>
-  sidebar.openTabIds.has(`img:${ctxMenu.value?.img?.id}`) ? 'Switch to tab' : 'Open in tab')
+  sidebar.openTabIds.has(`img:${ctxMenu.value?.img?.id}`) ? 'Switch to tab' : 'Open in tab',
+)
 
 // Run a menu item against the image it was opened on, then close.
-function fromMenu(fn) { const { img } = ctxMenu.value; closeMenu(); fn(img) }
+function fromMenu(fn) {
+  const { img } = ctxMenu.value
+  closeMenu()
+  fn(img)
+}
 function ctxDeleteKp() {
   // Pass the whole target set at once so App confirms a batch with a single
   // prompt (matches the remove-image path).
@@ -299,10 +327,12 @@ function ctxDeleteKp() {
   closeMenu()
 }
 // Grouping acts on the whole target set, like remove/delete-keypoints.
-const ctxMoveTargets = computed(() => imageGroups.value.filter((g) =>
-  ctxTargets.value.some((img) => img.groupId !== g.id)))
-const ctxInGroup = computed(() => ctxTargets.value.some((img) =>
-  img.groupId != null && imageGroups.value.some((g) => g.id === img.groupId)))
+const ctxMoveTargets = computed(() =>
+  imageGroups.value.filter((g) => ctxTargets.value.some((img) => img.groupId !== g.id)),
+)
+const ctxInGroup = computed(() =>
+  ctxTargets.value.some((img) => img.groupId != null && imageGroups.value.some((g) => g.id === img.groupId)),
+)
 function ctxNewGroup() {
   const id = crypto.randomUUID()
   sidebar.imageGroup({ op: 'create', id, imageIds: ctxTargets.value.map((img) => img.id) })
@@ -339,7 +369,11 @@ function rowHeight(row) {
   return row.kind === 'details' ? 8 + DETAIL_ROW_PX * detailLines(row.img) + 4 : ROW_PX
 }
 const {
-  listRef: listEl, visibleItems: visibleRows, padTop, padBottom, scrollToIndex,
+  listRef: listEl,
+  visibleItems: visibleRows,
+  padTop,
+  padBottom,
+  scrollToIndex,
 } = useVirtualList({ items: () => rows.value, heightOf: rowHeight, threshold: 150 })
 // Scroll a row into the rendered window (a rename on a header that is off-screen).
 function revealRow(key) {
@@ -361,7 +395,7 @@ function revealRow(key) {
       :title="`Reading image metadata — ${metaDone} of ${images.length} done`"
     >
       <div class="meta-progress-track">
-        <div class="meta-progress-fill" :style="{ width: (metaDone / images.length * 100) + '%' }"></div>
+        <div class="meta-progress-fill" :style="{ width: (metaDone / images.length) * 100 + '%' }"></div>
       </div>
       <span class="meta-progress-label">Reading metadata… {{ metaDone }}/{{ images.length }}</span>
     </div>
@@ -372,7 +406,9 @@ function revealRow(key) {
           v-if="row.kind === 'group'"
           class="group-hd"
           :class="{ 'drop-target': dropTarget === row.groupKey, 'group-ungrouped': !row.group }"
-          :title="row.group ? `${row.group.name} — ${row.count} image${row.count !== 1 ? 's' : ''}` : 'Images in no group'"
+          :title="
+            row.group ? `${row.group.name} — ${row.count} image${row.count !== 1 ? 's' : ''}` : 'Images in no group'
+          "
           @click="toggleGroup(row)"
           @contextmenu="openGroupCtx($event, { row })"
           @dragover="onDragOver($event, row.groupKey)"
@@ -395,7 +431,14 @@ function revealRow(key) {
         <li
           v-else-if="row.kind === 'image'"
           class="list-item"
-          :class="{ selected: selectedSet.has(row.img.id), unaligned: isUnaligned(row.img), loading: row.img.previewPending, failed: row.img.previewFailed, 'in-group': row.groupKey, 'drop-target': row.groupKey && dropTarget === row.groupKey }"
+          :class="{
+            'selected': selectedSet.has(row.img.id),
+            'unaligned': isUnaligned(row.img),
+            'loading': row.img.previewPending,
+            'failed': row.img.previewFailed,
+            'in-group': row.groupKey,
+            'drop-target': row.groupKey && dropTarget === row.groupKey,
+          }"
           :title="rowTitle(row.img)"
           :draggable="imageGroups.length > 0 && editingImageId !== row.img.id"
           @click="handleItemClick($event, row.img)"
@@ -429,7 +472,12 @@ function revealRow(key) {
           <span v-else class="item-name">{{ row.img.name }}</span>
           <span v-if="row.img.previewPending" class="load-tag" title="Decoding image…">decoding…</span>
           <span v-else-if="row.img.previewFailed" class="unaligned-tag failed-tag" :title="failReason(row.img)">⚠</span>
-          <span v-else-if="isUnaligned(row.img)" class="unaligned-tag" title="Not aligned — no camera in the sparse model">⚠</span>
+          <span
+            v-else-if="isUnaligned(row.img)"
+            class="unaligned-tag"
+            title="Not aligned — no camera in the sparse model"
+            >⚠</span
+          >
         </li>
         <li v-else class="img-details" :class="{ 'in-group': row.groupKey }" @contextmenu.stop>
           <div class="detail-row">
@@ -452,11 +500,15 @@ function revealRow(key) {
           </div>
           <div class="detail-row">
             <span class="detail-label">Sensor</span>
-            <span class="detail-value" :class="{ 'detail-dim': !row.img.sensorId }" :title="sensorLabel(row.img)">{{ sensorLabel(row.img) }}</span>
+            <span class="detail-value" :class="{ 'detail-dim': !row.img.sensorId }" :title="sensorLabel(row.img)">{{
+              sensorLabel(row.img)
+            }}</span>
           </div>
           <div class="detail-row">
             <span class="detail-label">Pose</span>
-            <span class="detail-value" :class="{ 'detail-dim': poseStatus(row.img) === '—' }">{{ poseStatus(row.img) }}</span>
+            <span class="detail-value" :class="{ 'detail-dim': poseStatus(row.img) === '—' }">{{
+              poseStatus(row.img)
+            }}</span>
           </div>
           <div v-if="filmSensor(row.img)" class="detail-row">
             <span class="detail-label">Fiducials</span>
@@ -464,11 +516,14 @@ function revealRow(key) {
               class="detail-value"
               :class="{ 'detail-error': fiducialCount(row.img) < 3 }"
               :title="fiducialCount(row.img) < 3 ? 'Interior orientation incomplete — mark ≥3 fiducials' : ''"
-            >{{ fiducialCount(row.img) }}{{ fiducialCount(row.img) < 3 ? ' (incomplete)' : '' }}</span>
+              >{{ fiducialCount(row.img) }}{{ fiducialCount(row.img) < 3 ? ' (incomplete)' : '' }}</span
+            >
           </div>
           <div v-if="sidebar.hasSparse" class="detail-row">
             <span class="detail-label">Registered</span>
-            <span class="detail-value" :class="{ 'detail-error': isUnaligned(row.img) }">{{ isUnaligned(row.img) ? 'no' : 'yes' }}</span>
+            <span class="detail-value" :class="{ 'detail-error': isUnaligned(row.img) }">{{
+              isUnaligned(row.img) ? 'no' : 'yes'
+            }}</span>
           </div>
         </li>
       </template>
@@ -481,18 +536,57 @@ function revealRow(key) {
       <template #default>
         <!-- Groups, in the order every sidebar menu uses: go there → inspect →
              change what it is → destructive. -->
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="fromMenu((img) => sidebar.openImage(img.id))">{{ ctxOpenLabel }}</button>
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }" :disabled="ctxIsMulti || !ctxHasPosition" @click="fromMenu((img) => sidebar.zoomToImage(img.id))">Locate on map</button>
+        <button
+          class="ctx-item"
+          :class="{ 'ctx-disabled': ctxIsMulti }"
+          :disabled="ctxIsMulti"
+          @click="fromMenu((img) => sidebar.openImage(img.id))"
+        >
+          {{ ctxOpenLabel }}
+        </button>
+        <button
+          class="ctx-item"
+          :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }"
+          :disabled="ctxIsMulti || !ctxHasPosition"
+          @click="fromMenu((img) => sidebar.zoomToImage(img.id))"
+        >
+          Locate on map
+        </button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="fromMenu((img) => sidebar.showInfo(img.id))">Show information</button>
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="fromMenu((img) => sidebar.downloadImage(img.id))">Download original</button>
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="fromMenu((img) => startRename(img.id, img.name))">Rename</button>
+        <button
+          class="ctx-item"
+          :class="{ 'ctx-disabled': ctxIsMulti }"
+          :disabled="ctxIsMulti"
+          @click="fromMenu((img) => sidebar.showInfo(img.id))"
+        >
+          Show information
+        </button>
+        <button
+          class="ctx-item"
+          :class="{ 'ctx-disabled': ctxIsMulti }"
+          :disabled="ctxIsMulti"
+          @click="fromMenu((img) => sidebar.downloadImage(img.id))"
+        >
+          Download original
+        </button>
+        <button
+          class="ctx-item"
+          :class="{ 'ctx-disabled': ctxIsMulti }"
+          :disabled="ctxIsMulti"
+          @click="fromMenu((img) => startRename(img.id, img.name))"
+        >
+          Rename
+        </button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item" @click="ctxNewGroup">{{ ctxIsMulti ? 'New group from selection' : 'New group with this image' }}</button>
+        <button class="ctx-item" @click="ctxNewGroup">
+          {{ ctxIsMulti ? 'New group from selection' : 'New group with this image' }}
+        </button>
         <div v-if="ctxMoveTargets.length" class="ctx-sub-wrap">
           <button class="ctx-item ctx-has-sub">Move to group<span class="ctx-arrow">▸</span></button>
           <div class="ctx-submenu">
-            <button v-for="g in ctxMoveTargets" :key="g.id" class="ctx-item" @click="ctxMoveTo(g.id)">{{ g.name }}</button>
+            <button v-for="g in ctxMoveTargets" :key="g.id" class="ctx-item" @click="ctxMoveTo(g.id)">
+              {{ g.name }}
+            </button>
           </div>
         </div>
         <button v-if="ctxInGroup" class="ctx-item" @click="ctxUngroup">Remove from group</button>
@@ -502,7 +596,9 @@ function revealRow(key) {
             class="ctx-item"
             title="Re-import this GeoTIFF as an imported DEM / orthophoto"
             @click="fromMenu((img) => sidebar.convertImageToRaster(img.id))"
-          >Convert to reference data</button>
+          >
+            Convert to reference data
+          </button>
         </template>
         <div class="ctx-sep"></div>
         <button v-if="ctxHasKp" class="ctx-item danger" @click="ctxDeleteKp">Delete keypoints</button>
@@ -513,18 +609,45 @@ function revealRow(key) {
     <!-- Group header context menu -->
     <ContextMenu :menu="groupCtx">
       <template #default="{ menu }">
-        <button class="ctx-item" :class="{ 'ctx-disabled': !menu.row.count }" :disabled="!menu.row.count" @click="groupCtxSelect">Select images</button>
+        <button
+          class="ctx-item"
+          :class="{ 'ctx-disabled': !menu.row.count }"
+          :disabled="!menu.row.count"
+          @click="groupCtxSelect"
+        >
+          Select images
+        </button>
         <template v-if="menu.row.group">
           <button class="ctx-item" @click="fromGroupMenu((row) => startGroupRename(row.groupKey))">Rename</button>
-          <button class="ctx-item" :class="{ 'ctx-disabled': groupCtxIndex <= 0 }" :disabled="groupCtxIndex <= 0" @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: -1 }))">Move up</button>
-          <button class="ctx-item" :class="{ 'ctx-disabled': groupCtxIndex >= imageGroups.length - 1 }" :disabled="groupCtxIndex >= imageGroups.length - 1" @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: 1 }))">Move down</button>
+          <button
+            class="ctx-item"
+            :class="{ 'ctx-disabled': groupCtxIndex <= 0 }"
+            :disabled="groupCtxIndex <= 0"
+            @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: -1 }))"
+          >
+            Move up
+          </button>
+          <button
+            class="ctx-item"
+            :class="{ 'ctx-disabled': groupCtxIndex >= imageGroups.length - 1 }"
+            :disabled="groupCtxIndex >= imageGroups.length - 1"
+            @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: 1 }))"
+          >
+            Move down
+          </button>
         </template>
         <div class="ctx-sep"></div>
         <button class="ctx-item" @click="groupCtxCollapseAll(true)">Collapse all</button>
         <button class="ctx-item" @click="groupCtxCollapseAll(false)">Expand all</button>
         <template v-if="menu.row.group">
           <div class="ctx-sep"></div>
-          <button class="ctx-item" title="The images stay in the project, ungrouped" @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'remove', id: row.groupKey }))">Remove group</button>
+          <button
+            class="ctx-item"
+            title="The images stay in the project, ungrouped"
+            @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'remove', id: row.groupKey }))"
+          >
+            Remove group
+          </button>
         </template>
       </template>
     </ContextMenu>
@@ -545,19 +668,63 @@ function revealRow(key) {
   font-weight: 600;
   color: var(--text);
 }
-.group-hd:hover { background: var(--hover-bg); }
-.group-hd.group-ungrouped .group-name { color: var(--text-dim); font-style: italic; font-weight: 400; }
-.group-chevron { width: 10px; font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
-.group-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.group-count { font-size: 11px; font-weight: 400; color: var(--text-dim); flex-shrink: 0; }
-.list-item.in-group { padding-left: 24px; }
+.group-hd:hover {
+  background: var(--hover-bg);
+}
+.group-hd.group-ungrouped .group-name {
+  color: var(--text-dim);
+  font-style: italic;
+  font-weight: 400;
+}
+.group-chevron {
+  width: 10px;
+  font-size: 10px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.group-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.group-count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.list-item.in-group {
+  padding-left: 24px;
+}
 /* Fixed line height: the virtual list computes a details card's height from it
    (ImagesSection DETAIL_ROW_PX) instead of measuring. */
-.img-details .detail-row { height: 20px; line-height: 20px; gap: 8px; }
-.img-details .detail-label { flex-shrink: 0; }
-.img-details .detail-value { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.v-spacer { list-style: none; pointer-events: none; }
-.img-details.in-group { margin-left: 31px; }
-.drop-target { background: rgba(14, 99, 156, 0.18); }
-.group-hd.drop-target { box-shadow: inset 0 0 0 1px var(--accent); }
+.img-details .detail-row {
+  height: 20px;
+  line-height: 20px;
+  gap: 8px;
+}
+.img-details .detail-label {
+  flex-shrink: 0;
+}
+.img-details .detail-value {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v-spacer {
+  list-style: none;
+  pointer-events: none;
+}
+.img-details.in-group {
+  margin-left: 31px;
+}
+.drop-target {
+  background: rgba(14, 99, 156, 0.18);
+}
+.group-hd.drop-target {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 </style>

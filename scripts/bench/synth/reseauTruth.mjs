@@ -6,18 +6,31 @@ import { applyFiducialTransform } from '../../../src/core/sfm/fiducialCalibratio
 
 function filmWarp(film, s, x, y) {
   if (!film || !film.amp_mm) return [0, 0]
-  const A = film.amp_mm, [p0, p1] = film.phase
-  const u = x / (s.film_w / 2), v = y / (s.film_h / 2)
-  return [A * (0.6 * Math.sin(Math.PI * u + p0) * Math.cos(0.5 * Math.PI * v) + 0.4 * u * v),
-    A * (0.6 * Math.cos(0.5 * Math.PI * u) * Math.sin(Math.PI * v + p1) + 0.3 * (u * u - 1 / 3))]
+  const A = film.amp_mm,
+    [p0, p1] = film.phase
+  const u = x / (s.film_w / 2),
+    v = y / (s.film_h / 2)
+  return [
+    A * (0.6 * Math.sin(Math.PI * u + p0) * Math.cos(0.5 * Math.PI * v) + 0.4 * u * v),
+    A * (0.6 * Math.cos(0.5 * Math.PI * u) * Math.sin(Math.PI * v + p1) + 0.3 * (u * u - 1 / 3)),
+  ]
 }
 function scanToFilm(film, s, u, v) {
-  const th = (film?.rot_deg ?? 0) * Math.PI / 180, [sx, sy] = film?.shift_px ?? [0, 0]
-  const cu = film?.cu ?? s.W / 2, cv = film?.cv ?? s.H / 2
-  const xr = (u - cu - sx) * s.pitch, yr = -(v - cv - sy) * s.pitch
-  const qx = Math.cos(th) * xr + Math.sin(th) * yr, qy = -Math.sin(th) * xr + Math.cos(th) * yr
-  let x = qx, y = qy
-  for (let k = 0; k < 4; k++) { const [dx, dy] = filmWarp(film, s, x, y); x = qx - dx; y = qy - dy }
+  const th = ((film?.rot_deg ?? 0) * Math.PI) / 180,
+    [sx, sy] = film?.shift_px ?? [0, 0]
+  const cu = film?.cu ?? s.W / 2,
+    cv = film?.cv ?? s.H / 2
+  const xr = (u - cu - sx) * s.pitch,
+    yr = -(v - cv - sy) * s.pitch
+  const qx = Math.cos(th) * xr + Math.sin(th) * yr,
+    qy = -Math.sin(th) * xr + Math.cos(th) * yr
+  let x = qx,
+    y = qy
+  for (let k = 0; k < 4; k++) {
+    const [dx, dy] = filmWarp(film, s, x, y)
+    x = qx - dx
+    y = qy - dy
+  }
   return [x, y]
 }
 
@@ -26,15 +39,22 @@ export async function reseauTruthCheck(truthPath, fits, { samples = 2000, inset 
   const s = { W: t.W, H: t.H, pitch: t.config.pitch_mm, film_w: t.config.film_w_mm, film_h: t.config.film_h_mm }
   const out = {}
   let seed = 11
-  const rnd = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296 }
+  const rnd = () => {
+    seed = (1664525 * seed + 1013904223) >>> 0
+    return seed / 4294967296
+  }
   for (const fit of fits) {
     // A scan (whole frame or half, synth_sat.py `scans`), else an older block's camera.
     const scan = t.scans?.find((c) => c.name === fit.name) ?? t.cameras.find((c) => c.name === fit.name)
     if (!scan) continue
     const ss = { ...s, W: scan.W ?? s.W, H: scan.H ?? s.H }
-    let sum = 0, worst = 0, sumAffine = 0, n = 0
+    let sum = 0,
+      worst = 0,
+      sumAffine = 0,
+      n = 0
     for (let k = 0; k < samples; k++) {
-      const u = (inset + (1 - 2 * inset) * rnd()) * ss.W, v = (inset + (1 - 2 * inset) * rnd()) * ss.H
+      const u = (inset + (1 - 2 * inset) * rnd()) * ss.W,
+        v = (inset + (1 - 2 * inset) * rnd()) * ss.H
       const [x, y] = scanToFilm(scan.film, ss, u, v)
       // Only points on the film (a half's margin is dark border, with no crosses).
       if (Math.abs(x) > s.film_w / 2 || Math.abs(y) > s.film_h / 2) continue
@@ -42,7 +62,8 @@ export async function reseauTruthCheck(truthPath, fits, { samples = 2000, inset 
       const m = applyFiducialTransform({ x: u, y: v }, fit)
       const a = applyFiducialTransform({ x: u, y: v }, { forward: fit.forward })
       const e = Math.hypot(m.x - x, m.y - y) / s.pitch
-      sum += e * e; worst = Math.max(worst, e)
+      sum += e * e
+      worst = Math.max(worst, e)
       sumAffine += (Math.hypot(a.x - x, a.y - y) / s.pitch) ** 2
     }
     out[fit.name] = { rmsPx: Math.sqrt(sum / n), maxPx: worst, affineOnlyRmsPx: Math.sqrt(sumAffine / n) }

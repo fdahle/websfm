@@ -15,22 +15,29 @@
 // lie off the raster (the volume counts those as unmeasured, lowering coverage).
 
 export function polygonSpans(rings, onSpan, bounds = null) {
-  let minRow = Infinity, maxRow = -Infinity
-  for (const ring of rings) for (const p of ring) {
-    if (p[1] < minRow) minRow = p[1]
-    if (p[1] > maxRow) maxRow = p[1]
-  }
+  let minRow = Infinity,
+    maxRow = -Infinity
+  for (const ring of rings)
+    for (const p of ring) {
+      if (p[1] < minRow) minRow = p[1]
+      if (p[1] > maxRow) maxRow = p[1]
+    }
   if (!(maxRow > minRow)) return
   let r0 = Math.ceil(minRow - 0.5)
   let r1 = Math.ceil(maxRow - 0.5) - 1
-  if (bounds) { r0 = Math.max(0, r0); r1 = Math.min(bounds.height - 1, r1) }
+  if (bounds) {
+    r0 = Math.max(0, r0)
+    r1 = Math.min(bounds.height - 1, r1)
+  }
   if (r1 < r0) return
   const rows = new Array(r1 - r0 + 1)
   for (const ring of rings) {
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const a = ring[j], b = ring[i]
+      const a = ring[j],
+        b = ring[i]
       if (a[1] === b[1]) continue // horizontal: never crosses a centre line
-      const lo = a[1] < b[1] ? a : b, hi = a[1] < b[1] ? b : a
+      const lo = a[1] < b[1] ? a : b,
+        hi = a[1] < b[1] ? b : a
       // Centre lines yc = r + ½ with lo.y ≤ yc < hi.y.
       const ra = Math.max(r0, Math.ceil(lo[1] - 0.5))
       const rb = Math.min(r1, Math.ceil(hi[1] - 0.5) - 1)
@@ -38,7 +45,8 @@ export function polygonSpans(rings, onSpan, bounds = null) {
       for (let r = ra; r <= rb; r++) {
         const x = lo[0] + (r + 0.5 - lo[1]) * dxdy
         const k = r - r0
-        if (rows[k]) rows[k].push(x); else rows[k] = [x]
+        if (rows[k]) rows[k].push(x)
+        else rows[k] = [x]
       }
     }
   }

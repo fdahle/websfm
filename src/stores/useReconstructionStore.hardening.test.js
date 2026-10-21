@@ -51,7 +51,16 @@ it('drops the on-map flag with a removed product, so a rebuilt one starts off th
   setActivePinia(createPinia())
   useProjectsStore().persistenceAvailable = false
   const store = useReconstructionStore()
-  store.dem = { width: 2, height: 2, gsd: 1, originX: 0, originY: 2, data: new Float32Array(4), previewUrl: 'data:x', crs: 'local' }
+  store.dem = {
+    width: 2,
+    height: 2,
+    gsd: 1,
+    originX: 0,
+    originY: 2,
+    data: new Float32Array(4),
+    previewUrl: 'data:x',
+    crs: 'local',
+  }
   store.setProductVisible('dem', true)
   store.setProductOpacity('dem', 0.4)
   expect(await store.removeProduct('dem')).toBe(true)

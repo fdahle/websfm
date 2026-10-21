@@ -1,5 +1,11 @@
 import { computed, ref } from 'vue'
-import { blockOutputValid, PIXEL_BLOCKS, WORKFLOW_BLOCK_BY_ID, workflowPreflight, workflowTargetIndex } from '../core/workflow.js'
+import {
+  blockOutputValid,
+  PIXEL_BLOCKS,
+  WORKFLOW_BLOCK_BY_ID,
+  workflowPreflight,
+  workflowTargetIndex,
+} from '../core/workflow.js'
 import { evaluateGate } from '../core/workflowGate.js'
 
 // Executes a workflow block by block. Injected: `state` (the semantic readiness the
@@ -9,8 +15,14 @@ import { evaluateGate } from '../core/workflowGate.js'
 // Optional `checkSources()` → a warning message or null: whether every image can still
 // be read, asked once before a run that has a block reading pixels.
 export function useWorkflowRunner({
-  state, runAutomated, openInteractive, recordRun,
-  cancelAutomated = () => {}, onLog = () => {}, measure = async () => null, checkSources = null,
+  state,
+  runAutomated,
+  openInteractive,
+  recordRun,
+  cancelAutomated = () => {},
+  onLog = () => {},
+  measure = async () => null,
+  checkSources = null,
 }) {
   const running = ref(false)
   const currentBlockId = ref(null)
@@ -26,12 +38,17 @@ export function useWorkflowRunner({
   const paused = computed(() => !!pause.value)
 
   function setStatus(id, status, detail = '', gate = null) {
-    statuses.value = { ...statuses.value, [id]: { status, detail, at: new Date().toISOString(), ...(gate ? { gate } : {}) } }
+    statuses.value = {
+      ...statuses.value,
+      [id]: { status, detail, at: new Date().toISOString(), ...(gate ? { gate } : {}) },
+    }
   }
 
   function waitForDecision(value) {
     pause.value = value
-    return new Promise((resolve) => { decide = resolve })
+    return new Promise((resolve) => {
+      decide = resolve
+    })
   }
 
   function respond(action) {
@@ -59,7 +76,10 @@ export function useWorkflowRunner({
     const initial = state.value ?? state()
     const blocks = workflow.blocks
     const active = blocks.map((b, i) => b.enabled && i >= fromIndex && (!onlyIds || onlyIds.has(b.id)))
-    const nextActive = (i) => { while (i < blocks.length && !active[i]) i++; return i }
+    const nextActive = (i) => {
+      while (i < blocks.length && !active[i]) i++
+      return i
+    }
     const checks = workflowPreflight(workflow, initial, { fromIndex, onlyIds })
     const errors = checks.filter((x) => x.level === 'error')
     if (errors.length) {
@@ -74,12 +94,16 @@ export function useWorkflowRunner({
       const message = await checkSources()
       if (message) checks.push({ level: 'warning', blockId: firstPixelBlock.id, message })
     }
-    const warnings = checks.filter((x) => x.level === 'warning').map((warning) => {
-      const block = workflow.blocks.find((b) => b.id === warning.blockId)
-      const policy = block?.warningPolicy && block.warningPolicy !== 'inherit'
-        ? block.warningPolicy : workflow.defaults.warningPolicy
-      return { ...warning, policy }
-    })
+    const warnings = checks
+      .filter((x) => x.level === 'warning')
+      .map((warning) => {
+        const block = workflow.blocks.find((b) => b.id === warning.blockId)
+        const policy =
+          block?.warningPolicy && block.warningPolicy !== 'inherit'
+            ? block.warningPolicy
+            : workflow.defaults.warningPolicy
+        return { ...warning, policy }
+      })
     const stoppingWarning = warnings.find((x) => x.policy === 'stop')
     if (stoppingWarning) {
       pause.value = { kind: 'blocked', message: stoppingWarning.message }
@@ -88,8 +112,14 @@ export function useWorkflowRunner({
     }
     const pausingWarnings = warnings.filter((x) => x.policy === 'pause')
     if (pausingWarnings.length) {
-      const answer = await waitForDecision({ kind: 'warning', message: pausingWarnings.map((x) => x.message).join(' · ') })
-      if (answer !== 'continue') { running.value = false; return false }
+      const answer = await waitForDecision({
+        kind: 'warning',
+        message: pausingWarnings.map((x) => x.message).join(' · '),
+      })
+      if (answer !== 'continue') {
+        running.value = false
+        return false
+      }
     }
     let outcome = 'completed'
     let error = null
@@ -108,7 +138,10 @@ export function useWorkflowRunner({
       for (let index = nextActive(fromIndex); index < blocks.length; index = jumpTo ?? nextActive(index + 1)) {
         jumpTo = null
         const block = blocks[index]
-        if (stopRequested) { outcome = 'stopped'; break }
+        if (stopRequested) {
+          outcome = 'stopped'
+          break
+        }
         const spec = WORKFLOW_BLOCK_BY_ID.get(block.type)
         if (!spec) continue
         currentBlockId.value = block.id
@@ -121,16 +154,32 @@ export function useWorkflowRunner({
         if (block.type === 'gate') {
           const s = block.settings
           setStatus(block.id, 'running', 'Measuring')
-          let value = null, why = ''
-          try { value = await measure(s.metric, context) } catch (err) { why = ` (${err?.message ?? err})` }
-          if (stopRequested) { setStatus(block.id, 'stopped'); outcome = 'stopped'; break }
+          let value = null,
+            why = ''
+          try {
+            value = await measure(s.metric, context)
+          } catch (err) {
+            why = ` (${err?.message ?? err})`
+          }
+          if (stopRequested) {
+            setStatus(block.id, 'stopped')
+            outcome = 'stopped'
+            break
+          }
           const result = evaluateGate(s, value)
           const pass = result.outcome === 'pass'
-          const target = pass ? (s.passTarget || null) : (s.onFail === 'branch' ? s.failTarget : null)
+          const target = pass ? s.passTarget || null : s.onFail === 'branch' ? s.failTarget : null
           const record = {
-            blockId: block.id, name: block.name || null, metric: s.metric, op: s.op, threshold: s.threshold,
-            value: result.value, outcome: result.outcome, action: pass ? (target ? 'branch' : 'continue') : s.onFail,
-            target, at: new Date().toISOString(),
+            blockId: block.id,
+            name: block.name || null,
+            metric: s.metric,
+            op: s.op,
+            threshold: s.threshold,
+            value: result.value,
+            outcome: result.outcome,
+            action: pass ? (target ? 'branch' : 'continue') : s.onFail,
+            target,
+            at: new Date().toISOString(),
           }
           gates.push(record)
           const message = `${result.message}${why}`
@@ -140,7 +189,10 @@ export function useWorkflowRunner({
             if (target) jumpTo = jump(index, target, spec.label)
             continue
           }
-          if (s.onFail === 'branch') { jumpTo = jump(index, target, spec.label); continue }
+          if (s.onFail === 'branch') {
+            jumpTo = jump(index, target, spec.label)
+            continue
+          }
           if (s.onFail === 'stop') {
             outcome = 'failed'
             error = `Quality gate failed — ${message}`
@@ -149,7 +201,10 @@ export function useWorkflowRunner({
           }
           const answer = await waitForDecision({ kind: 'gate', blockId: block.id, message })
           record.decision = answer === 'continue' ? 'continue' : 'stop'
-          if (answer !== 'continue') { outcome = 'stopped'; break }
+          if (answer !== 'continue') {
+            outcome = 'stopped'
+            break
+          }
           continue
         }
 
@@ -162,17 +217,34 @@ export function useWorkflowRunner({
           }
           if (reuse === 'ask') {
             setStatus(block.id, 'paused', 'Existing output is valid')
-            const answer = await waitForDecision({ kind: 'reuse', blockId: block.id, message: `${spec.label} already has valid output.` })
-            if (answer === 'stop') { outcome = 'stopped'; break }
-            if (answer === 'reuse') { setStatus(block.id, 'reused', 'User chose existing output'); continue }
+            const answer = await waitForDecision({
+              kind: 'reuse',
+              blockId: block.id,
+              message: `${spec.label} already has valid output.`,
+            })
+            if (answer === 'stop') {
+              outcome = 'stopped'
+              break
+            }
+            if (answer === 'reuse') {
+              setStatus(block.id, 'reused', 'User chose existing output')
+              continue
+            }
           }
         }
 
         if (!spec.automated) {
           setStatus(block.id, 'waiting', 'Complete the opened command, then continue')
           openInteractive(block.type)
-          const answer = await waitForDecision({ kind: 'interactive', blockId: block.id, message: `${spec.label} needs your input.` })
-          if (answer !== 'continue') { outcome = 'stopped'; break }
+          const answer = await waitForDecision({
+            kind: 'interactive',
+            blockId: block.id,
+            message: `${spec.label} needs your input.`,
+          })
+          if (answer !== 'continue') {
+            outcome = 'stopped'
+            break
+          }
           setStatus(block.id, 'completed', 'Confirmed by user')
           continue
         }
@@ -180,7 +252,11 @@ export function useWorkflowRunner({
         setStatus(block.id, 'running')
         onLog(`Workflow: ${spec.label} started`, 'info', 'Workflow')
         const result = await runAutomated(block.type, { ...block.settings }, context)
-        if (stopRequested || result?.cancelled) { setStatus(block.id, 'stopped'); outcome = 'stopped'; break }
+        if (stopRequested || result?.cancelled) {
+          setStatus(block.id, 'stopped')
+          outcome = 'stopped'
+          break
+        }
         if (result?.ok === false) {
           throw new Error(result.error || result.reason || `${spec.label} did not complete`)
         }
@@ -197,7 +273,15 @@ export function useWorkflowRunner({
       onLog(`Workflow failed — ${error}`, 'error', 'Workflow')
     } finally {
       const finishedAt = new Date().toISOString()
-      recordRun({ workflow: JSON.parse(JSON.stringify(workflow)), startedAt: startedAt.value, finishedAt, outcome, error, statuses: statuses.value, gates })
+      recordRun({
+        workflow: JSON.parse(JSON.stringify(workflow)),
+        startedAt: startedAt.value,
+        finishedAt,
+        outcome,
+        error,
+        statuses: statuses.value,
+        gates,
+      })
       lastOutcome.value = { name: workflow.name, outcome, error, startedAt: startedAt.value, finishedAt }
       currentBlockId.value = null
       running.value = false

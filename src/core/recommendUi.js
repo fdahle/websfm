@@ -42,8 +42,8 @@ export function formatRecommendationValue(value) {
 export function recommendationLines(items = [], labels = {}) {
   return items.map(
     (item) =>
-      `${recommendationLabel(item.key, labels)} = ${formatRecommendationValue(item.value)}`
-      + (item.reason ? ` — ${item.reason}` : ''),
+      `${recommendationLabel(item.key, labels)} = ${formatRecommendationValue(item.value)}` +
+      (item.reason ? ` — ${item.reason}` : ''),
   )
 }
 

@@ -21,8 +21,17 @@ import { showToast } from './useToasts.js'
 // `refreshGcpReport` (useGcpEditing), `requestRemoveImages` (useConfirmations).
 export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refreshGcpReport, requestRemoveImages }) {
   const {
-    runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
-    runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, exportProgress,
+    runDetect,
+    runMatch,
+    runReconstruct,
+    runComputeDepthMaps,
+    runDensify,
+    runGenerateDem,
+    runGenerateOrtho,
+    runGenerateMesh,
+    runEditClouds,
+    runTextureMesh,
+    exportProgress,
   } = pipeline
   const { log } = useLog()
   const imagesStore = useImagesStore()
@@ -32,14 +41,32 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   const { georeference } = reconstructionStore
   const { currentProjectName } = storeToRefs(useProjectsStore())
   const {
-    detectFeaturesOpen, matchFeaturesOpen, reconstructOpen, georeferenceOpen, maskManagerOpen,
-    depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen, cropCloudOpen, filterCloudOpen, filterCloudPreset,
-    mergeCloudsOpen, toolModal,
+    detectFeaturesOpen,
+    matchFeaturesOpen,
+    reconstructOpen,
+    georeferenceOpen,
+    maskManagerOpen,
+    depthMapsOpen,
+    denseOpen,
+    demOpen,
+    orthoOpen,
+    meshOpen,
+    cropCloudOpen,
+    filterCloudOpen,
+    filterCloudPreset,
+    mergeCloudsOpen,
+    toolModal,
   } = storeToRefs(useModalsStore())
   const { imageViewPrefs, patchImageView } = useImageViewSettings()
 
-  function onDetectRun(settings)      { detectFeaturesOpen.value = false;  runDetect(settings)      }
-  function onMatchRun(settings)       { matchFeaturesOpen.value  = false;  runMatch(settings)       }
+  function onDetectRun(settings) {
+    detectFeaturesOpen.value = false
+    runDetect(settings)
+  }
+  function onMatchRun(settings) {
+    matchFeaturesOpen.value = false
+    runMatch(settings)
+  }
   // A Georeference request may hand off to the normal reconstruction dialog so the
   // user retains control over its settings. Only after a successful sparse run do we
   // fit the final SfM→project-CRS similarity.
@@ -81,16 +108,34 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
     openImageTab(id)
     patchImageView({ showDepth: false, maskEdit: true, gcpEdit: false })
   }
-  function onDepthMapsRun(settings)   { depthMapsOpen.value      = false;  runComputeDepthMaps(settings) }
-  function onDenseRun(settings)       { denseOpen.value          = false;  runDensify(settings) }
+  function onDepthMapsRun(settings) {
+    depthMapsOpen.value = false
+    runComputeDepthMaps(settings)
+  }
+  function onDenseRun(settings) {
+    denseOpen.value = false
+    runDensify(settings)
+  }
   // Products: generation just produces the product; the user opens it via the
   // Products sidebar section (double-click / "Open in tab") when they want to inspect it.
-  async function onDemRun(settings)   { demOpen.value = false;   await runGenerateDem(settings) }
-  async function onOrthoRun(settings) { orthoOpen.value = false; await runGenerateOrtho(settings) }
-  async function onMeshRun(settings)  { meshOpen.value = false;  await runGenerateMesh(settings) }
+  async function onDemRun(settings) {
+    demOpen.value = false
+    await runGenerateDem(settings)
+  }
+  async function onOrthoRun(settings) {
+    orthoOpen.value = false
+    await runGenerateOrtho(settings)
+  }
+  async function onMeshRun(settings) {
+    meshOpen.value = false
+    await runGenerateMesh(settings)
+  }
   // Cloud editing. Each modal emits a ready-made request ({ sourceIds, settings, name });
   // the mode is fixed by which modal sent it. Always adds a new cloud — non-destructive.
-  async function onCropCloudRun(req)   { cropCloudOpen.value = false;   await runEditClouds({ ...req, mode: 'crop' }) }
+  async function onCropCloudRun(req) {
+    cropCloudOpen.value = false
+    await runEditClouds({ ...req, mode: 'crop' })
+  }
   async function onFilterCloudRun(req) {
     filterCloudOpen.value = false
     filterCloudPreset.value = null
@@ -105,7 +150,10 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
       closeProductTabs()
     }
   }
-  async function onMergeCloudsRun(req) { mergeCloudsOpen.value = false; await runEditClouds({ ...req, mode: 'merge' }) }
+  async function onMergeCloudsRun(req) {
+    mergeCloudsOpen.value = false
+    await runEditClouds({ ...req, mode: 'merge' })
+  }
   // 3D-viewer rectangle/lasso selection: one masked edit per selected cloud. The
   // store refines a derived cloud in place and forks a derived copy of anything else.
   async function onEditSelection({ edits, keepSelected, classValue = null }) {
@@ -114,13 +162,13 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
       // With a class, the selection is reclassified instead of kept or deleted. A
       // streamed cloud's selection is its recorded shapes (core/lod/transform.js).
       const pick = selection ? { selection } : { mask }
-      const result = classValue != null
-        ? await runEditClouds({ mode: 'classify', sourceIds: [cloudId], settings: { ...pick, classValue } })
-        : await runEditClouds({ mode: 'mask', sourceIds: [cloudId], settings: { ...pick, keepSelected } })
+      const result =
+        classValue != null
+          ? await runEditClouds({ mode: 'classify', sourceIds: [cloudId], settings: { ...pick, classValue } })
+          : await runEditClouds({ mode: 'mask', sourceIds: [cloudId], settings: { ...pick, keepSelected } })
       if (result?.cancelled) break
     }
   }
-
 
   async function onOptimizeCamerasRun(req) {
     toolModal.value = null
@@ -134,9 +182,13 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   // underneath and fills in as the scores land.
   async function onImageQualityEstimate(ids) {
     const total = ids?.length ?? images.value.length
-    exportProgress.open('Scoring Image Quality', total, () => terminateAll('image quality cancelled'), { unit: 'images' })
+    exportProgress.open('Scoring Image Quality', total, () => terminateAll('image quality cancelled'), {
+      unit: 'images',
+    })
     try {
-      await imagesStore.estimateImageQuality(ids, { onProgress: (d, t) => exportProgress.report(d, t, 'Scoring images') })
+      await imagesStore.estimateImageQuality(ids, {
+        onProgress: (d, t) => exportProgress.report(d, t, 'Scoring images'),
+      })
     } finally {
       await exportProgress.close()
     }
@@ -165,7 +217,11 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   }
   async function onToolEditRun(req) {
     // Texture is a mesh tool, but it reads the photos: its own store run, not an edit.
-    if (toolModal.value === 'texture-mesh') { toolModal.value = null; await runTextureMesh(req); return }
+    if (toolModal.value === 'texture-mesh') {
+      toolModal.value = null
+      await runTextureMesh(req)
+      return
+    }
     const mode = TOOL_EDIT_MODES[toolModal.value]
     toolModal.value = null
     if (mode === 'distance') req = { ...req, style: distanceStyle(req.settings.signed) }
@@ -180,9 +236,15 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   async function groundRequest(req) {
     const source = reconstructionStore.clouds.find((c) => c.id === req.sourceIds?.[0])
     if (!source) return null
-    let frame = null, metresPerUnit = 1, unitLabel = 'm'
+    let frame = null,
+      metresPerUnit = 1,
+      unitLabel = 'm'
     if (source.imported) {
-      log('Ground filter: an imported cloud is classified in its own coordinates (z up, lengths taken as metres)', 'info', 'Products')
+      log(
+        'Ground filter: an imported cloud is classified in its own coordinates (z up, lengths taken as metres)',
+        'info',
+        'Products',
+      )
     } else {
       const resolved = await reconstructionStore.effectiveFrameSpec({})
       if (resolved.unit === 'model') {
@@ -195,8 +257,10 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
       metresPerUnit = resolved.frameSpec.metresPerUnit ?? 1
       unitLabel = resolved.unit
     }
-    const cameras = [...(reconstructionStore.mainSparseCloud?.cameras ?? new Map()).values()]
-      .map((cam) => ({ R: cam.R.map((r) => [...r]), t: [...cam.t] }))
+    const cameras = [...(reconstructionStore.mainSparseCloud?.cameras ?? new Map()).values()].map((cam) => ({
+      R: cam.R.map((r) => [...r]),
+      t: [...cam.t],
+    }))
     return {
       ...req,
       settings: { ...req.settings, frame, metresPerUnit, unitLabel, cameras },
@@ -208,7 +272,7 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   // The range is the 95th-percentile magnitude so a few far points don't wash it out.
   function distanceStyle(signed) {
     return (stats) => {
-      const m = stats?.p95Abs > 0 ? stats.p95Abs : (Math.max(Math.abs(stats?.min ?? 0), Math.abs(stats?.max ?? 0)) || 1)
+      const m = stats?.p95Abs > 0 ? stats.p95Abs : Math.max(Math.abs(stats?.min ?? 0), Math.abs(stats?.max ?? 0)) || 1
       return signed
         ? { field: 'attribute:distance', ramp: 'rdbu', range: 'manual', min: -m, max: m }
         : { field: 'attribute:distance', ramp: 'viridis', range: 'manual', min: 0, max: m }
@@ -230,16 +294,38 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   }
   async function onProductToolRun(fn, settings) {
     toolModal.value = null
-    try { await fn(settings) } catch (err) {
+    try {
+      await fn(settings)
+    } catch (err) {
       log(`${err?.message ?? err}`, 'error', 'Export')
       showToast('Export failed', { detail: String(err?.message ?? err), kind: 'error', ms: 6000 })
     }
   }
 
   return {
-    onDetectRun, onMatchRun, georeferenceAfterReconstruct, closeReconstructModal, onReconstructRun, onGeoreferenceRun,
-    editMask, onDepthMapsRun, onDenseRun, onDemRun, onOrthoRun, onMeshRun,
-    onCropCloudRun, onFilterCloudRun, onGradualSelectionRun, onMergeCloudsRun, onEditSelection, onOptimizeCamerasRun,
-    onImageQualityEstimate, onImageQualityGroup, onImageQualityRemove, onToolEditRun, onSectionRun, onProductToolRun,
+    onDetectRun,
+    onMatchRun,
+    georeferenceAfterReconstruct,
+    closeReconstructModal,
+    onReconstructRun,
+    onGeoreferenceRun,
+    editMask,
+    onDepthMapsRun,
+    onDenseRun,
+    onDemRun,
+    onOrthoRun,
+    onMeshRun,
+    onCropCloudRun,
+    onFilterCloudRun,
+    onGradualSelectionRun,
+    onMergeCloudsRun,
+    onEditSelection,
+    onOptimizeCamerasRun,
+    onImageQualityEstimate,
+    onImageQualityGroup,
+    onImageQualityRemove,
+    onToolEditRun,
+    onSectionRun,
+    onProductToolRun,
   }
 }

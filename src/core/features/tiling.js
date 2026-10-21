@@ -167,7 +167,10 @@ export function nmsByPosition(items, radius) {
           if (scale !== undefined && o.x === x && o.y === y && o.scale === scale) continue // sibling
           const dx = items[j].x - x
           const dy = items[j].y - y
-          if (dx * dx + dy * dy < r2) { dup = true; break }
+          if (dx * dx + dy * dy < r2) {
+            dup = true
+            break
+          }
         }
       }
     }

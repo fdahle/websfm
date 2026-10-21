@@ -30,7 +30,15 @@ import { pluralize } from '../../core/textFormat.js'
 //   bars(), gcps() — snapshot getters over the other stores
 //   save(), log() — store side effects
 export function createScaling({
-  sparseCameras, images, mainSparseCloud, scaleFit, healthDirty, bars, gcps, save, log,
+  sparseCameras,
+  images,
+  mainSparseCloud,
+  scaleFit,
+  healthDirty,
+  bars,
+  gcps,
+  save,
+  log,
   frameModel = () => null, // see georeferencing.js: marks → the cameras' pinhole frame
 }) {
   const imagesById = () => new Map(images.value.map((im) => [im.id, im]))
@@ -54,8 +62,7 @@ export function createScaling({
     }
     const markers = gcps()
       .filter((g) => referenced.has(g.id))
-      .map((g) => ({ id: g.id, role: g.role, enabled: g.enabled,
-        observations: g.observations ?? [] }))
+      .map((g) => ({ id: g.id, role: g.role, enabled: g.enabled, observations: g.observations ?? [] }))
     return scaleEvidenceDigest(bars(), markers)
   }
 
@@ -106,7 +113,10 @@ export function createScaling({
     const out = []
     for (const bar of bars()) {
       const invalid = validate(bar)
-      if (invalid) { out.push({ bar, modelDistance: null, reason: invalid }); continue }
+      if (invalid) {
+        out.push({ bar, modelDistance: null, reason: invalid })
+        continue
+      }
       const a = await endpointPosition(bar.a)
       const b = await endpointPosition(bar.b)
       if (!a.pos || !b.pos) {
@@ -124,9 +134,13 @@ export function createScaling({
   }
 
   // True when a scale could be fitted at all — cheap, does not triangulate.
-  const canFitScale = computed(() => sparseCameras.value.size > 0
-    && bars().some((b) => b.enabled !== false && b.a?.id && b.b?.id
-      && Number.isFinite(b.knownDistanceM) && b.knownDistanceM > 0))
+  const canFitScale = computed(
+    () =>
+      sparseCameras.value.size > 0 &&
+      bars().some(
+        (b) => b.enabled !== false && b.a?.id && b.b?.id && Number.isFinite(b.knownDistanceM) && b.knownDistanceM > 0,
+      ),
+  )
 
   // Is the cached fit still describing the current evidence? A fit whose model or
   // measurements have moved is refused rather than shown — see D11. An older fit
@@ -148,7 +162,11 @@ export function createScaling({
   // whose inputs are not in the log is not reproducible.
   async function fitScaleBars() {
     const clearFit = () => {
-      if (scaleFit.value) { scaleFit.value = null; healthDirty.value++; save() }
+      if (scaleFit.value) {
+        scaleFit.value = null
+        healthDirty.value++
+        save()
+      }
     }
     if (!sparseCameras.value.size) {
       log('Scale: build the sparse model first', 'warn', 'Scale')
@@ -163,17 +181,22 @@ export function createScaling({
     }
     if (!usable.length) {
       clearFit()
-      log('Scale: no usable scale bar (need one with two resolvable endpoints and a positive distance)',
-        'warn', 'Scale')
+      log(
+        'Scale: no usable scale bar (need one with two resolvable endpoints and a positive distance)',
+        'warn',
+        'Scale',
+      )
       return null
     }
-    const fit = fitScale(usable.map(({ bar, modelDistance }) => ({
-      id: bar.id,
-      modelDistance,
-      knownDistance: bar.knownDistanceM,
-      accuracy: bar.accuracyM,
-      weight: weightFromAccuracy(bar.accuracyM),
-    })))
+    const fit = fitScale(
+      usable.map(({ bar, modelDistance }) => ({
+        id: bar.id,
+        modelDistance,
+        knownDistance: bar.knownDistanceM,
+        accuracy: bar.accuracyM,
+        weight: weightFromAccuracy(bar.accuracyM),
+      })),
+    )
     if (!fit) {
       clearFit()
       log('Scale: fit failed (degenerate input)', 'warn', 'Scale')
@@ -199,12 +222,19 @@ export function createScaling({
       })),
     }
     const weighted = usable.some((m) => m.bar.accuracyM != null)
-    log(`Scale: ${pluralize(fit.count, 'bar')} → ${fit.scale.toPrecision(6)} m per model unit, `
-      + `RMS ${fit.rms.toPrecision(3)} m (${weighted ? 'inverse-variance weighted' : 'equal weight'}); `
-      + usable.map(({ bar, modelDistance }) =>
-        `"${bar.name}" ${modelDistance.toPrecision(6)} u = ${bar.knownDistanceM} m`
-        + (bar.accuracyM != null ? ` ±${bar.accuracyM}` : '')).join(', '),
-    'success', 'Scale')
+    log(
+      `Scale: ${pluralize(fit.count, 'bar')} → ${fit.scale.toPrecision(6)} m per model unit, ` +
+        `RMS ${fit.rms.toPrecision(3)} m (${weighted ? 'inverse-variance weighted' : 'equal weight'}); ` +
+        usable
+          .map(
+            ({ bar, modelDistance }) =>
+              `"${bar.name}" ${modelDistance.toPrecision(6)} u = ${bar.knownDistanceM} m` +
+              (bar.accuracyM != null ? ` ±${bar.accuracyM}` : ''),
+          )
+          .join(', '),
+      'success',
+      'Scale',
+    )
     healthDirty.value++
     save()
     return scaleFit.value
@@ -222,10 +252,8 @@ export function createScaling({
   async function scaleBarReport(scale = null) {
     const measured = await measureBars()
     return measured.map(({ bar, modelDistance, reason }) => {
-      const measuredM = modelDistance != null && Number.isFinite(scale) && scale > 0
-        ? modelDistance * scale : null
-      const residualM = measuredM != null && Number.isFinite(bar.knownDistanceM)
-        ? measuredM - bar.knownDistanceM : null
+      const measuredM = modelDistance != null && Number.isFinite(scale) && scale > 0 ? modelDistance * scale : null
+      const residualM = measuredM != null && Number.isFinite(bar.knownDistanceM) ? measuredM - bar.knownDistanceM : null
       return {
         id: bar.id,
         name: bar.name,

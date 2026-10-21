@@ -62,9 +62,13 @@ describe('checkNumberFields', () => {
 
   // A hidden field (e.g. min views while Auto is on) is not sent, so it cannot block the run.
   it('skips fields whose `when` is false', () => {
-    const r = checkNumberFields({ minViews: '', depthTolPct: 1 }, {
-      ...rules, minViews: { ...rules.minViews, when: false },
-    })
+    const r = checkNumberFields(
+      { minViews: '', depthTolPct: 1 },
+      {
+        ...rules,
+        minViews: { ...rules.minViews, when: false },
+      },
+    )
     expect(r.valid).toBe(true)
     expect('minViews' in r.bad).toBe(false)
   })

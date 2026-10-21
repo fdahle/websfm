@@ -77,12 +77,18 @@ describe('parseRows', () => {
 
   it('drops blank lines and trailing newlines', () => {
     const rows = parseRows('A,1\n\nB,2\n', 'comma')
-    expect(rows).toEqual([['A', '1'], ['B', '2']])
+    expect(rows).toEqual([
+      ['A', '1'],
+      ['B', '2'],
+    ])
   })
 
   it('drops #-comment lines', () => {
     const rows = parseRows('# a comment\nA,1\n   # indented comment\nB,2', 'comma')
-    expect(rows).toEqual([['A', '1'], ['B', '2']])
+    expect(rows).toEqual([
+      ['A', '1'],
+      ['B', '2'],
+    ])
   })
 
   it('collapses runs of whitespace for the space delimiter', () => {
@@ -137,10 +143,32 @@ describe('guessMapping', () => {
 
   // casa_grande's gcp.csv: pixel x/y per image, ground in UTM and lon/lat, accuracies.
   it('reads image observations with several ground coordinate pairs', () => {
-    const header = ['gcp_label', 'image_file_name', 'x', 'y', 'x_map', 'y_map', 'lon', 'lat', 'elev', 'x_map_acc', 'y_map_acc', 'elev_acc']
+    const header = [
+      'gcp_label',
+      'image_file_name',
+      'x',
+      'y',
+      'x_map',
+      'y_map',
+      'lon',
+      'lat',
+      'elev',
+      'x_map_acc',
+      'y_map_acc',
+      'elev_acc',
+    ]
     const m = guessMapping(header, header.length, true)
     expect(m).toMatchObject({
-      name: 0, image: 1, px: 2, py: 3, x: 6, y: 7, z: 8, accuracyX: 9, accuracyY: 10, accuracyZ: 11,
+      name: 0,
+      image: 1,
+      px: 2,
+      py: 3,
+      x: 6,
+      y: 7,
+      z: 8,
+      accuracyX: 9,
+      accuracyY: 10,
+      accuracyZ: 11,
     })
     expect(guessGcpCrs(header, m)).toBe('EPSG:4326')
   })
@@ -167,17 +195,42 @@ describe('buildGcps', () => {
 
   it('builds numeric GCPs from valid rows', () => {
     const { gcps, skipped } = buildGcps(
-      [['A', '10.5', '20.5', '5'], ['B', '1', '2', '3']],
+      [
+        ['A', '10.5', '20.5', '5'],
+        ['B', '1', '2', '3'],
+      ],
       mapping,
     )
     expect(skipped).toBe(0)
     expect(gcps).toEqual([
-      { name: 'A', role: 'control', x: 10.5, y: 20.5, z: 5,
-        accuracyX: null, accuracyY: null, accuracyZ: null,
-        correlationXY: null, correlationXZ: null, correlationYZ: null, observations: [] },
-      { name: 'B', role: 'control', x: 1, y: 2, z: 3,
-        accuracyX: null, accuracyY: null, accuracyZ: null,
-        correlationXY: null, correlationXZ: null, correlationYZ: null, observations: [] },
+      {
+        name: 'A',
+        role: 'control',
+        x: 10.5,
+        y: 20.5,
+        z: 5,
+        accuracyX: null,
+        accuracyY: null,
+        accuracyZ: null,
+        correlationXY: null,
+        correlationXZ: null,
+        correlationYZ: null,
+        observations: [],
+      },
+      {
+        name: 'B',
+        role: 'control',
+        x: 1,
+        y: 2,
+        z: 3,
+        accuracyX: null,
+        accuracyY: null,
+        accuracyZ: null,
+        correlationXY: null,
+        correlationXZ: null,
+        correlationYZ: null,
+        observations: [],
+      },
     ])
   })
 
@@ -188,10 +241,7 @@ describe('buildGcps', () => {
   })
 
   it('skips GCPs missing a valid X/Y position', () => {
-    const { gcps, skipped } = buildGcps(
-      [['A', 'not-a-number', '2', '3']],
-      mapping,
-    )
+    const { gcps, skipped } = buildGcps([['A', 'not-a-number', '2', '3']], mapping)
     expect(gcps).toHaveLength(0)
     expect(skipped).toBe(1)
   })
@@ -220,7 +270,10 @@ describe('buildGcps', () => {
 
   it('takes the first coordinates seen for a merged name', () => {
     const { gcps } = buildGcps(
-      [['A', '1', '2', '3'], ['A', '9', '9', '9']],
+      [
+        ['A', '1', '2', '3'],
+        ['A', '9', '9', '9'],
+      ],
       mapping,
     )
     expect(gcps).toHaveLength(1)
@@ -229,21 +282,32 @@ describe('buildGcps', () => {
 
   it('imports a role column and lets checkpoint win across repeated rows', () => {
     const withRole = { ...mapping, role: 4 }
-    const { gcps } = buildGcps([
-      ['A', '1', '2', '3', 'control'],
-      ['A', '', '', '', 'check point'],
-      ['B', '4', '5', '6', 'gcp'],
-    ], withRole)
-    expect(gcps.map((g) => [g.name, g.role])).toEqual([['A', 'check'], ['B', 'control']])
+    const { gcps } = buildGcps(
+      [
+        ['A', '1', '2', '3', 'control'],
+        ['A', '', '', '', 'check point'],
+        ['B', '4', '5', '6', 'gcp'],
+      ],
+      withRole,
+    )
+    expect(gcps.map((g) => [g.name, g.role])).toEqual([
+      ['A', 'check'],
+      ['B', 'control'],
+    ])
   })
 
   it('imports marker observations without surveyed coordinates', () => {
     const withMarker = {
-      name: 0, role: 1, x: 2, y: 3, z: 4, image: 5, px: 6, py: 7,
+      name: 0,
+      role: 1,
+      x: 2,
+      y: 3,
+      z: 4,
+      image: 5,
+      px: 6,
+      py: 7,
     }
-    const { gcps, skipped } = buildGcps([
-      ['scale-a', 'marker', '', '', '', 'img.jpg', '100.5', '200.5'],
-    ], withMarker)
+    const { gcps, skipped } = buildGcps([['scale-a', 'marker', '', '', '', 'img.jpg', '100.5', '200.5']], withMarker)
     expect(skipped).toBe(0)
     expect(gcps).toHaveLength(1)
     expect(gcps[0]).toMatchObject({ name: 'scale-a', role: 'marker', x: null, y: null, z: null })
@@ -253,37 +317,50 @@ describe('buildGcps', () => {
   })
 
   it('rejects marker rows that have neither coordinates nor an observation', () => {
-    const { gcps, skipped } = buildGcps([
-      ['scale-a', 'marker', '', '', '', '', '', ''],
-    ], { name: 0, role: 1, x: 2, y: 3, z: 4, image: 5, px: 6, py: 7 })
+    const { gcps, skipped } = buildGcps([['scale-a', 'marker', '', '', '', '', '', '']], {
+      name: 0,
+      role: 1,
+      x: 2,
+      y: 3,
+      z: 4,
+      image: 5,
+      px: 6,
+      py: 7,
+    })
     expect(gcps).toEqual([])
     expect(skipped).toBe(1)
   })
 
   it('maps positive per-axis accuracy and ignores invalid values', () => {
     const withAccuracy = { ...mapping, accuracyX: 4, accuracyY: 5, accuracyZ: 6 }
-    const { gcps } = buildGcps([
-      ['A', '1', '2', '3', '0.02', '0.03', '0.05'],
-      ['B', '4', '5', '6', '0', '-1', 'nope'],
-    ], withAccuracy)
+    const { gcps } = buildGcps(
+      [
+        ['A', '1', '2', '3', '0.02', '0.03', '0.05'],
+        ['B', '4', '5', '6', '0', '-1', 'nope'],
+      ],
+      withAccuracy,
+    )
     expect(gcps[0]).toMatchObject({ accuracyX: 0.02, accuracyY: 0.03, accuracyZ: 0.05 })
     expect(gcps[1]).toMatchObject({ accuracyX: null, accuracyY: null, accuracyZ: null })
   })
 
   it('drops an observation with a non-numeric pixel coordinate', () => {
     const withObs = { name: 0, x: 1, y: 2, z: 3, image: 4, px: 5, py: 6 }
-    const { gcps } = buildGcps(
-      [['A', '1', '2', '3', 'img.jpg', 'x', '200']],
-      withObs,
-    )
+    const { gcps } = buildGcps([['A', '1', '2', '3', 'img.jpg', 'x', '200']], withObs)
     expect(gcps[0].observations).toHaveLength(0)
   })
 })
 
 describe('isGroundControl', () => {
   const surveyed = {
-    role: 'control', enabled: true, x: 1, y: 2, z: 3,
-    accuracyX: 0.01, accuracyY: 0.01, accuracyZ: 0.02,
+    role: 'control',
+    enabled: true,
+    x: 1,
+    y: 2,
+    z: 3,
+    accuracyX: 0.01,
+    accuracyY: 0.01,
+    accuracyZ: 0.02,
   }
   const precision = (g) => (g.accuracyX > 0 && g.accuracyY > 0 && g.accuracyZ > 0 ? {} : null)
 
@@ -319,7 +396,13 @@ describe('isGroundControl', () => {
 describe('buildGcps — image observations only', () => {
   it('keeps points with observations when the file has no ground columns', () => {
     const mapping = guessMapping(['point_label', 'image_file_name', 'x', 'y'], 4, true)
-    const { gcps, skipped } = buildGcps([['AA44', 'a.tif', '917.79', '3075.5'], ['AA44', 'b.tif', '4812.94', '3198.71']], mapping)
+    const { gcps, skipped } = buildGcps(
+      [
+        ['AA44', 'a.tif', '917.79', '3075.5'],
+        ['AA44', 'b.tif', '4812.94', '3198.71'],
+      ],
+      mapping,
+    )
     expect(skipped).toBe(0)
     expect(gcps).toHaveLength(1)
     expect(gcps[0]).toMatchObject({ name: 'AA44', x: null, y: null })
