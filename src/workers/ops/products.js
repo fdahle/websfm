@@ -701,15 +701,26 @@ export function makeProductsOps({ rasterize } = {}) {
   const ORTHO_SHARE_MIN_ENTRIES = 6
   async function orthoPlan([input], { emit }) {
     const ctx = await orthoSetup(input, emit, { quiet: false })
-    let want = Math.max(1, input.settings?.orthoShares ?? 1)
-    while (want > 1 && ctx.cacheFor(want).bytes < ORTHO_SHARE_MIN_ENTRIES * ctx.maxCacheEntry) want--
-    ctx.cacheBytes = ctx.cacheFor(want).bytes
+    // Every worker count that leaves each its minimum cache; the plan picks the one with
+    // the least predicted time (ortho.js planShares).
+    const most = Math.max(1, input.settings?.orthoShares ?? 1)
+    const planShares = []
+    for (let k = 1; k <= most; k++) {
+      const { bytes } = ctx.cacheFor(k)
+      if (k === 1 || bytes >= ORTHO_SHARE_MIN_ENTRIES * ctx.maxCacheEntry) planShares.push({ k, cacheBytes: bytes })
+    }
     const t0 = performance.now()
     emit('progress', [0, 1, 'Orthorectifying…'])
     const prog = orthoProgress(emit)
     const { plan } = await orthorectifyTiled(ctx.built.grid, ctx.geom, ctx.maps, ctx.loadMap, ctx.frame.toSfm,
-      { ...orthoTiledOpts(ctx), planOnly: true },
+      { ...orthoTiledOpts(ctx), planOnly: true, planShares },
       { loadImage: ctx.loadImage, loadStatsImage: ctx.loadStatsImage, onProgress: (d, t) => prog.progress(d, t) })
+    const want = plan.shareModel?.workers ?? 1
+    ctx.cacheBytes = ctx.cacheFor(want).bytes
+    if (plan.shareModel) {
+      emit('log', [`Ortho: workers vs predicted time — ${plan.shareModel.candidates.map((c) => `${c.k}: ${Math.round(c.seconds)} s `
+        + `(${formatBytes(c.cacheBytes)} cache, ${Math.round(c.reads)} reads)`).join(', ')}; chose ${want}`, 'debug', 'Products'])
+    }
     orthoSession = { ctx, builder: orthoBuilder(ctx), t0 }
     // Contiguous runs (neighbouring groups share maps, so each worker's cache carries
     // over), cut where the visit count reaches each share's part.

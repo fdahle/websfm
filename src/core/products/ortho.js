@@ -998,11 +998,12 @@ export function orthoSeamSurveyBytes(width, height) {
 //     blocks, visits, mapLoads, photoLoads, cacheHits, mosaic?, gains? }
 //
 // Split over workers (workers/ops/products.js): `opts.planOnly` stops after the survey
-// and the grouping and returns { plan: { survey, groupBlocks, groups, predicted, groupVisits } };
-// a worker then runs with `opts.survey` (the plan's, instead of surveying again),
-// `groupBlocks` (the plan's size) and `opts.groupIndices` (its share of the groups, in
-// order). Every block computes what it computes in one run, so the blocks of all the
-// shares are the single run's; their `statsState`s merge (core/eval/orthoStats.js).
+// and the grouping and returns { plan: { survey, groupBlocks, groups, predicted,
+// shareModel, groupVisits } }; a worker then runs with `opts.survey` (the plan's, instead
+// of surveying again), `groupBlocks` (the plan's size), `opts.groupIndices` (its share of
+// the groups, in order) and `opts.claims` (shared: a group goes to whichever worker
+// claims it first). Every block computes what it computes in one run, so the blocks of
+// all the shares are the single run's; their `statsState`s merge (core/eval/orthoStats.js).
 export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, opts = {}, hooks = {}) {
   const { onProgress = () => {}, onBlock = null, loadImage = null } = hooks
   const { width: W, height: H } = geom
@@ -1093,16 +1094,31 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   // per-pass order, so a block computes exactly what it computes alone.
   // `groupBlocks: 'auto'` picks the size (chooseGroupSize) from the cache it leaves:
   // each block of a group holds `opts.blockBytes` of working planes, taken from the cache.
-  const grouping = opts.groupBlocks === 'auto'
-    ? chooseGroupSize(nbx, nby, blocks, passes, mosaic, { cacheBytes: opts.cacheBytes ?? 1024 ** 3,
-      blockBytes: opts.blockBytes ?? 0, entryBytes: opts.entryBytes ?? 0, mapsResident: !!opts.mapsResident,
-      entrySizes: opts.entrySizes ?? null, owners: seams ? blocks.map((b) => ownersFromCut(seams, b)) : null })
-    : { size: Math.max(1, Math.floor(opts.groupBlocks ?? 1)) }
+  const owners = seams ? blocks.map((b) => ownersFromCut(seams, b)) : null
+  const groupingFor = (cacheBytes) => (opts.groupBlocks === 'auto'
+    ? chooseGroupSize(nbx, nby, blocks, passes, mosaic, { cacheBytes, blockBytes: opts.blockBytes ?? 0,
+      entryBytes: opts.entryBytes ?? 0, mapsResident: !!opts.mapsResident, entrySizes: opts.entrySizes ?? null, owners })
+    : { size: Math.max(1, Math.floor(opts.groupBlocks ?? 1)) })
+  // Planning a split (`opts.planShares`: [{ k, cacheBytes }], a worker count and each
+  // worker's cache): the count whose predicted time is least, each worker doing 1/k of the
+  // visits' work and of the reads its cache size predicts (chooseGroupSize's replay).
+  // More workers split the work but each holds a smaller cache and decodes more.
+  let grouping, shareModel = null
+  if (opts.planOnly && opts.planShares?.length) {
+    const visits = blocks.reduce((n, b) => n + b.maps.length, 0)
+    shareModel = opts.planShares.map(({ k, cacheBytes }) => {
+      const g = groupingFor(cacheBytes), reads = g.predicted?.[g.size] ?? 0
+      return { k, cacheBytes, grouping: g, reads, seconds: (ORTHO_VISIT_S * visits + ORTHO_READ_S * reads) / k }
+    })
+    const best = shareModel.reduce((a, b) => (b.seconds < a.seconds ? b : a))
+    grouping = best.grouping
+    shareModel = { workers: best.k, candidates: shareModel.map(({ grouping: _g, ...c }) => c) }
+  } else grouping = groupingFor(opts.cacheBytes ?? 1024 ** 3)
   const groups = blockGroups(nbx, nby, grouping.size)
   if (opts.planOnly) {
     // groupVisits: each group's map visits, the work a split deals out.
     return { plan: { survey: mosaic ? { balance, seams, fromMapRgb: surveyFromMapRgb } : null,
-      groupBlocks: grouping.size, groups: groups.length, predicted: grouping.predicted ?? null,
+      groupBlocks: grouping.size, groups: groups.length, predicted: grouping.predicted ?? null, shareModel,
       groupVisits: groups.map((g) => unionMaps(g.map((bi) => blocks[bi])).length * passes) } }
   }
   // This run's share of the groups (all of them unless the work is split), in order.
@@ -1553,6 +1569,12 @@ function visitSequence(groupMaps, passes) {
   for (const maps of groupMaps) for (let k = 0; k < passes; k++) for (const mi of passOrder(maps, k)) seq.push(mi)
   return seq
 }
+
+// The split's time model (opts.planShares), measured on quarry-347 at long side 12,000
+// (2026-10-21, one and five workers alike): a map visit's work (labels, colour, seams;
+// a 2048² block) ~0.2 s, and a unit of predicted reads (a map read 1, a photo decode 3)
+// ~0.05 s.
+const ORTHO_VISIT_S = 0.2, ORTHO_READ_S = 0.05
 
 // Relative cost of a cache miss: a photo read and decode against a map's planes read
 // (quarry-347, 2026-10-20: ~0.2–0.3 s against ~0.07 s).
