@@ -1,0 +1,81 @@
+<script setup>
+import { ref, computed, watch } from 'vue'
+import ModalShell from '../ui/ModalShell.vue'
+import SettingsGroup from '../ui/SettingsGroup.vue'
+import WarnBox from '../ui/WarnBox.vue'
+import NoSourceWarn from '../ui/NoSourceWarn.vue'
+import SourcePicker from '../ui/SourcePicker.vue'
+import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
+import StatTiles from '../ui/StatTiles.vue'
+import { meshMeasure } from '../../../core/products/meshEdit.js'
+import { cloudUnits, formatMeasure } from '../../../core/products/cloudUnits.js'
+
+// Area & Volume (Tools ▸ Mesh ▾) — read-only. One linear pass over the triangles
+// (core/products/meshEdit.js `meshMeasure`, topology read on a welded copy so an
+// STL-style import is not all boundary), cheap enough to run on open. Volume is
+// reported only for a watertight, consistently wound mesh; anything else would be
+// a number with no meaning, so the dialog says why instead.
+const props = defineProps({
+  meshes: { type: Array, default: () => [] },
+  initialId: { type: String, default: null },
+  // The store's currentFrameSignature: what a model unit means right now.
+  frameSignature: { type: Object, default: null },
+})
+const emit = defineEmits(['close'])
+
+const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
+const units = computed(() => cloudUnits(source.value, props.frameSignature))
+const result = ref(null)
+watch(source, (m) => { result.value = m ? meshMeasure(m) : null }, { immediate: true })
+
+const tiles = computed(() => {
+  const r = result.value
+  if (!r) return []
+  return [
+    { label: 'Surface area', value: formatMeasure(r.area, units.value, 2) },
+    { label: 'Volume', value: r.volume == null ? 'not closed' : formatMeasure(r.volume, units.value, 3) },
+    { label: 'Triangles', value: r.triangles.toLocaleString() },
+    { label: 'Pieces', value: r.components.toLocaleString() },
+  ]
+})
+const whyNoVolume = computed(() => {
+  const r = result.value
+  if (!r || r.volume != null) return ''
+  const parts = []
+  if (r.boundaryEdges) parts.push(`${r.boundaryEdges.toLocaleString()} open edges (holes)`)
+  if (r.nonManifoldEdges) parts.push(`${r.nonManifoldEdges.toLocaleString()} non-manifold edges`)
+  if (r.inconsistentEdges) parts.push(`${r.inconsistentEdges.toLocaleString()} inconsistently wound edges`)
+  return parts.join(', ')
+})
+</script>
+
+<template>
+  <ModalShell title="Mesh Area & Volume" @close="emit('close')">
+    <NoSourceWarn v-if="!meshes.length" kind="mesh" />
+    <template v-else>
+      <SettingsGroup title="Mesh">
+        <SourcePicker id="measure-src" v-model="sourceId" label="Mesh" :items="meshes" :option-label="meshOptionLabel" />
+      </SettingsGroup>
+      <StatTiles :tiles="tiles" />
+      <WarnBox v-if="whyNoVolume">
+        No volume: the surface is not closed — {{ whyNoVolume }}. <strong>Mesh ▸ Clean mesh</strong> with
+        “Close all holes” makes it watertight.
+      </WarnBox>
+      <!-- A textured mesh's joined vertices are its per-piece UV copies: nothing to clean. -->
+      <p v-if="result?.weldedVertices && !source?.uv" class="field-hint">
+        {{ result.weldedVertices.toLocaleString() }} duplicate vertices were joined to read the topology
+        (each triangle carried its own corners). <strong>Mesh ▸ Clean mesh</strong> welds them in a new mesh.
+      </p>
+      <p v-if="units.unit !== 'm'" class="field-hint">
+        {{ units.unit === 'model'
+          ? 'In model units: the project has no georeference or scale bars yet, so these are not metres.'
+          : 'In the imported file’s own units.' }}
+      </p>
+    </template>
+    <template #footer>
+      <button class="btn btn-primary" @click="emit('close')">Close</button>
+    </template>
+  </ModalShell>
+</template>
+
+<style scoped src="../ui/modal.css"></style>

@@ -87,7 +87,7 @@ to the algorithm; the other steps differ only in file names.
 | --- | --- | --- |
 | Ribbon button | `core/help/ribbonTabs.js` (`gen-dem`) | label, icon, and the prerequisites that grey it out |
 | Command | `composables/useCommandDispatch.js` | the button's id opens the dialog |
-| Dialog | `components/modals/DemModal.vue` | the settings, starting from `DEM_DEFAULTS` in `core/defaults.user.js` |
+| Dialog | `components/modals/products/DemModal.vue` | the settings, starting from `DEM_DEFAULTS` in `core/defaults.user.js` |
 | Run | `composables/useDialogRuns.js` → `composables/usePipeline.js` | closes the dialog, opens the progress bar, wires up Cancel |
 | Store | `stores/reconstruction/productRuns.js` (`generateDem`) | gathers the inputs as plain arrays, saves the result to the project |
 | Worker call | `workers/computeClient.js` | a typed async call into the worker pool |
@@ -104,7 +104,7 @@ to the algorithm; the other steps differ only in file names.
 | tune an internal threshold | `core/tuning.js` | the test that pins it |
 | add a ribbon command | `core/help/ribbonTabs.js` | `composables/useCommandDispatch.js`; it becomes a console command automatically (`core/help/commands.js`) |
 | add an import format | a reader in `core/io/` | `composables/useImportRouting.js` (and `core/io/importKind.js` for dropped files) |
-| add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/ExportModal.vue`, `workers/ops/export.js` |
+| add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/products/ExportModal.vue`, `workers/ops/export.js` |
 | add per-project state | a store in `stores/` | register it with `registerProjectStore` (`stores/projectStores.js`) so it saves and reopens with the project |
 | change a WebGPU kernel | `workers/gpu/` | the PatchMatch cost exists three times (WGSL, JS, Rust) and changes in all three ([`workers/gpu/README.md`](src/workers/gpu/README.md)) |
 | explain a concept | a new entry in `src/glossary/<category>/` | aliases auto-link it in all help text |

@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import ConfirmModal from '/src/components/modals/ConfirmModal.vue'
+import ConfirmModal from '/src/components/modals/app/ConfirmModal.vue'
 import ModalShell from '/src/components/modals/ui/ModalShell.vue'
 const open = ref(false), nested = ref(false), confirmed = ref(false)
 </script>

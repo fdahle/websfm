@@ -1,9 +1,9 @@
 <script setup>
 import { ref } from 'vue'
 import ProductViewer from '/src/components/viewers/ProductViewer.vue'
-import FindGcpsModal from '/src/components/modals/FindGcpsModal.vue'
-import GradualSelectionModal from '/src/components/modals/GradualSelectionModal.vue'
-import FootprintFromPosesModal from '/src/components/modals/FootprintFromPosesModal.vue'
+import FindGcpsModal from '/src/components/modals/georef/FindGcpsModal.vue'
+import GradualSelectionModal from '/src/components/modals/model/GradualSelectionModal.vue'
+import FootprintFromPosesModal from '/src/components/modals/model/FootprintFromPosesModal.vue'
 import { useReconstructionStore } from '/src/stores/useReconstructionStore.js'
 import { useExternalStore } from '/src/stores/useExternalStore.js'
 import { useProjectsStore } from '/src/stores/useProjectsStore.js'

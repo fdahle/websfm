@@ -7,18 +7,18 @@ import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { useModalsStore } from '../../stores/useModalsStore.js'
 import { useTheme } from '../../composables/useTheme.js'
 import { useAppContext } from '../../appContext.js'
-import AboutModal from '../modals/AboutModal.vue'
-import ConfirmModal from '../modals/ConfirmModal.vue'
-import FolderReconnectModal from '../modals/FolderReconnectModal.vue'
-import NewProjectModal from '../modals/NewProjectModal.vue'
-import ProgressModal from '../modals/ProgressModal.vue'
+import AboutModal from './app/AboutModal.vue'
+import ConfirmModal from './app/ConfirmModal.vue'
+import FolderReconnectModal from './project/FolderReconnectModal.vue'
+import NewProjectModal from './project/NewProjectModal.vue'
+import ProgressModal from './app/ProgressModal.vue'
 import ProjectPicker from '../layout/ProjectPicker.vue'
-import ProjectSettingsModal from '../modals/ProjectSettingsModal.vue'
-import SaveProjectModal from '../modals/SaveProjectModal.vue'
-import SettingsModal from '../modals/SettingsModal.vue'
-const DebugSummaryModal = defineAsyncComponent(() => import('../modals/DebugSummaryModal.vue'))
-const SystemInfoModal = defineAsyncComponent(() => import('../modals/SystemInfoModal.vue'))
-const WorkflowBuilderModal = defineAsyncComponent(() => import('../modals/WorkflowBuilderModal.vue'))
+import ProjectSettingsModal from './project/ProjectSettingsModal.vue'
+import SaveProjectModal from './project/SaveProjectModal.vue'
+import SettingsModal from './app/SettingsModal.vue'
+const DebugSummaryModal = defineAsyncComponent(() => import('./app/DebugSummaryModal.vue'))
+const SystemInfoModal = defineAsyncComponent(() => import('./app/SystemInfoModal.vue'))
+const WorkflowBuilderModal = defineAsyncComponent(() => import('./pipeline/WorkflowBuilderModal.vue'))
 
 // The project-level dialogs, lifted out of App.vue: the project picker and its
 // load overlay, the workflow builder, settings, the shared confirm dialogs and the
