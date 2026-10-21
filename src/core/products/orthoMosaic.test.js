@@ -438,3 +438,30 @@ describe('a photo decode the browser refuses memory for', () => {
     expect(Buffer.from(res.rgba).equals(Buffer.from(clean.rgba))).toBe(true)
   })
 })
+
+describe('a frame with no exact affine (a projected CRS, the curvature restored)', () => {
+  // The surface sinks with the square of the distance from its centre: smooth, never
+  // affine, as a projected CRS with the Earth's curvature restored is.
+  const curved = (p) => [p[0], p[1], p[2] - (p[0] * p[0] + p[1] * p[1]) / 4e4]
+  // The fourth camera, 30 units off, sees none of the plane: every block culls it.
+  const maps = () => [nadirMap(-3, [200, 40, 40]), nadirMap(-1, [40, 200, 40]), nadirMap(2, [40, 40, 200]), nadirMap(30, [9, 9, 9])]
+  for (const blend of ['best', 'average']) {
+    it(`takes tile affines for the cells and culls with them, as the exact frame colours (${blend})`, async () => {
+      const surface = plane(40, 24), geom = resampledGeometry(surface, 0)
+      const exact = await orthorectifyStreamed(surface, maps(), async (i) => maps()[i], curved, { blend, fillRadius: 0 })
+      const blocks = []
+      const tiled = await orthorectifyTiled(surface, geom, maps(), async (i) => maps()[i], curved,
+        { blend, fillRadius: 0, mapsResident: true, blockSize: 8 }, { onBlock: (b) => blocks.push(b) })
+      const rgba = new Uint8ClampedArray(40 * 24 * 4)
+      for (const b of blocks) for (let r = 0; r < b.height; r++) {
+        rgba.set(b.rgba.subarray(r * b.width * 4, (r + 1) * b.width * 4), ((b.row0 + r) * 40 + b.col0) * 4)
+      }
+      let worst = 0
+      for (let i = 0; i < rgba.length; i++) worst = Math.max(worst, Math.abs(rgba[i] - exact.rgba[i]))
+      expect(worst).toBeLessThanOrEqual(1)
+      expect(tiled.covered).toBe(exact.covered)
+      // Culled with the blocks' own affines: 15 blocks × the 3 cameras that see them.
+      expect(tiled.visits).toBe(15 * 3)
+    })
+  }
+})

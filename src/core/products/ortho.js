@@ -204,6 +204,15 @@ export function orthorectify(grid, maps, toSfm, opts = {}, onProgress = () => {}
  * affine to within 1e-9 of the box size, in which case the caller calls it directly.
  */
 export function affineToSfm(toSfm, lo, hi) {
+  const fit = fitAffineToSfm(toSfm, lo, hi)
+  return fit.err <= 1e-9 * Math.max(1, fit.size) ? { c0: fit.c0, P0: fit.P0, A: fit.A } : null
+}
+
+// The affine of toSfm at the centre of box lo..hi (its finite-difference Jacobian),
+// with its largest miss at the box's corners (`err`, SfM units: for a smooth frame such
+// as a projected CRS with the curvature restored, the miss grows with the square of the
+// distance from the centre, so the corners hold it) and the box's extent in SfM (`size`).
+function fitAffineToSfm(toSfm, lo, hi) {
   const c0 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2]
   const P0 = toSfm(c0)
   const A = new Float64Array(9)
@@ -212,17 +221,17 @@ export function affineToSfm(toSfm, lo, hi) {
     const Pk = toSfm(c)
     for (let r = 0; r < 3; r++) A[r * 3 + k] = Pk[r] - P0[r]
   }
-  let size = 0, worst = 0
+  let size = 0, err = 0
   for (let corner = 0; corner < 8; corner++) {
     const c = [corner & 1 ? hi[0] : lo[0], corner & 2 ? hi[1] : lo[1], corner & 4 ? hi[2] : lo[2]]
     const P = toSfm(c), d = [c[0] - c0[0], c[1] - c0[1], c[2] - c0[2]]
     for (let r = 0; r < 3; r++) {
       const lin = P0[r] + A[r * 3] * d[0] + A[r * 3 + 1] * d[1] + A[r * 3 + 2] * d[2]
-      worst = Math.max(worst, Math.abs(lin - P[r]))
+      err = Math.max(err, Math.abs(lin - P[r]))
       size = Math.max(size, Math.abs(P[r] - P0[r]))
     }
   }
-  return worst <= 1e-9 * Math.max(1, size) ? { c0, P0, A } : null
+  return { c0, P0, A, err, size }
 }
 
 // Map-major counterpart: identical selection/weights, one decoded map resident.
@@ -296,7 +305,22 @@ function gridProjection({ width, height, gsd, originX, originY }, toSfm, zLo, zH
   if (affine) up = [affine.A[2], affine.A[5], affine.A[8]]
   else { const Pz = toSfm([cx, cy, zMid + 1]); up = [Pz[0] - P0[0], Pz[1] - P0[1], Pz[2] - P0[2]] }
   const un = Math.hypot(up[0], up[1], up[2]) || 1
-  return { affine, mapPxPerCell, up: [up[0] / un, up[1] / un, up[2] / un] }
+  // A frame with no exact affine (a projected CRS, the Earth's curvature restored) is
+  // smooth: over a block or a 64-cell tile an affine fitted there misses by far less than
+  // a cell. `local(box)` fits one at a grid box ([x0, x1, y0, y1, z0, z1]) → { c0, P0, A,
+  // err, pad, box }: `box` grown by `pad` in every grid unit, enough that the affine image
+  // of the grown box holds every true point of the box (err over the affine's least
+  // stretch, doubled), so a cull with it skips nothing the exact frame would see. An
+  // exact frame returns its affine with no pad.
+  const local = ([x0, x1, y0, y1, z0, z1]) => {
+    if (affine) return { ...affine, err: 0, pad: 0, box: [x0, x1, y0, y1, z0, z1] }
+    const fit = fitAffineToSfm(toSfm, [x0, y0, z0], [x1, y1, z1])
+    const col = (k) => Math.hypot(fit.A[k], fit.A[3 + k], fit.A[6 + k])
+    const pad = (2 * fit.err) / Math.max(1e-12, Math.min(col(0), col(1), col(2)))
+    return { c0: fit.c0, P0: fit.P0, A: fit.A, err: fit.err, pad, stretch: col(0),
+      box: [x0 - pad, x1 + pad, y0 - pad, y1 + pad, z0 - pad, z1 + pad] }
+  }
+  return { affine, local, mapPxPerCell, up: [up[0] / un, up[1] / un, up[2] / un] }
 }
 
 // The map-major kernel: colour the cells of one window of the ortho grid from map m
@@ -315,8 +339,10 @@ function colourFromMap(win, grid, m, photo, mi, affine, toSfm, opts, scratch) {
     if (!mask[idx]) continue
     const col = x0 + c, row = y0 + r
     const x = originX + (col + 0.5) * gsd, y = originY - (row + 0.5) * gsd, z = data[idx]
-    if (affine) {
-      const { c0, P0, A } = affine, dx = x - c0[0], dy = y - c0[1], dz = z - c0[2]
+    // The frame's affine, else the cell's tile's (winTiles), else the exact frame.
+    const aff = affine ?? win.tiles?.cellAff?.[Math.floor(r / WIN_TILE) * win.tiles.nx + Math.floor(c / WIN_TILE)] ?? null
+    if (aff) {
+      const { c0, P0, A } = aff, dx = x - c0[0], dy = y - c0[1], dz = z - c0[2]
       P[0] = P0[0] + A[0] * dx + A[1] * dy + A[2] * dz
       P[1] = P0[1] + A[3] * dx + A[4] * dy + A[5] * dz
       P[2] = P0[2] + A[6] * dx + A[7] * dy + A[8] * dz
@@ -559,7 +585,7 @@ function labelFromMap(win, grid, m, mi, gp, toSfm, opts, scratch) {
     for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
       const idx = r * w + c
       if (!mask[idx]) continue
-      cellToSfm(grid, gp.affine, toSfm, x0 + c, y0 + r, data[idx], P)
+      winCellToSfm(win, grid, gp, toSfm, c, r, data[idx], P)
       if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g)) continue
       const s = g.depth / (fx * g.cos * g.cos)
       if (s < score[idx]) { score[idx] = s; raw[idx] = mi }
@@ -572,7 +598,12 @@ function labelFromMap(win, grid, m, mi, gp, toSfm, opts, scratch) {
 // exact box test, per tile with its own height range), so it computes exactly what a
 // loop over every cell would. `winTiles` sets the ranges up once per window.
 const WIN_TILE = 64
-function winTiles(win) {
+// Per tile, the frame without an exact affine (gp.local): the affine for its culls, and
+// for its cells when it misses by under CELL_AFFINE_TOL of a cell (else the cells take
+// the exact frame). The transform does not depend on the map, so a window's tiles are
+// fitted once for all the maps that visit it.
+const CELL_AFFINE_TOL = 1e-3
+function winTiles(win, grid = null, gp = null) {
   const { w, h, data, mask } = win, nx = Math.ceil(w / WIN_TILE), ny = Math.ceil(h / WIN_TILE)
   const lo = new Float64Array(nx * ny).fill(Infinity), hi = new Float64Array(nx * ny).fill(-Infinity)
   for (let r = 0; r < h; r++) {
@@ -585,8 +616,30 @@ function winTiles(win) {
       if (z > hi[t]) hi[t] = z
     }
   }
-  win.tiles = { nx, ny, lo, hi }
+  let near = null, cellAff = null
+  if (gp && !gp.affine && gp.local) {
+    near = new Array(nx * ny).fill(null); cellAff = new Array(nx * ny).fill(null)
+    const { gsd, originX, originY } = grid
+    for (let t = 0; t < nx * ny; t++) {
+      if (!(lo[t] <= hi[t])) continue
+      const tx = t % nx, ty = Math.floor(t / nx)
+      const c0 = tx * WIN_TILE, r0 = ty * WIN_TILE, c1 = Math.min(w, c0 + WIN_TILE), r1 = Math.min(h, r0 + WIN_TILE)
+      const fit = gp.local([originX + (win.x0 + c0 + 0.5) * gsd, originX + (win.x0 + c1 - 0.5) * gsd,
+        originY - (win.y0 + r1 - 0.5) * gsd, originY - (win.y0 + r0 + 0.5) * gsd, lo[t], hi[t]])
+      near[t] = fit
+      if (fit.err <= CELL_AFFINE_TOL * gsd * fit.stretch) cellAff[t] = fit
+    }
+  }
+  win.tiles = { nx, ny, lo, hi, near, cellAff }
 }
+
+// A window cell (c, r) into SfM: the frame's exact affine, else its tile's (winTiles),
+// else the exact frame.
+function winCellToSfm(win, grid, gp, toSfm, c, r, z, P) {
+  const aff = gp.affine ?? win.tiles?.cellAff?.[Math.floor(r / WIN_TILE) * win.tiles.nx + Math.floor(c / WIN_TILE)] ?? null
+  cellToSfm(grid, aff, toSfm, win.x0 + c, win.y0 + r, z, P)
+}
+
 // Call fn(c0, r0, c1, r1) for the part of window box [bx0, bx1) × [by0, by1) in each tile
 // that map m can see (every tile when the frame is not affine).
 function forTilesReaching(win, grid, m, affine, bx0, by0, bx1, by1, fn) {
@@ -600,6 +653,10 @@ function forTilesReaching(win, grid, m, affine, bx0, by0, bx1, by1, fn) {
       const box = [originX + (win.x0 + c0 + 0.5) * gsd, originX + (win.x0 + c1 - 0.5) * gsd,
         originY - (win.y0 + r1 - 0.5) * gsd, originY - (win.y0 + r0 + 0.5) * gsd, lo[t], hi[t]]
       if (!boxReachesMap(m, affine, box)) continue
+    } else if (win.tiles.near?.[t]) {
+      // The tile's own affine, its whole (grown) box: never culls what the frame sees.
+      const near = win.tiles.near[t]
+      if (!boxReachesMap(m, near, near.box)) continue
     }
     fn(c0, r0, c1, r1)
   }
@@ -704,7 +761,7 @@ function blendFromMap(win, grid, m, photo, mi, gp, toSfm, opts, scratch, box, se
     const inBand = d === 0 || d < seam3
     const isFallback = !own && raw[idx] === mi
     if (!inBand && !isFallback) continue
-    cellToSfm(grid, gp.affine, toSfm, x0 + c, y0 + r, data[idx], P)
+    winCellToSfm(win, grid, gp, toSfm, c, r, data[idx], P)
     if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g)) continue
     if (!sampleColour(m, photo, g, px)) continue
     const l0 = g0 * srgbToLinear(px[0]), l1 = g1 * srgbToLinear(px[1]), l2 = g2 * srgbToLinear(px[2])
@@ -797,7 +854,7 @@ async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toSfm, gp,
       const r0 = seamSampleCol(sg, j0, H), r1 = seamSampleCol(sg, j1 - 1, H)
       const box = [geom.originX + (c0 + 0.5) * geom.gsd, geom.originX + (c1 + 0.5) * geom.gsd,
         geom.originY - (r1 + 0.5) * geom.gsd, geom.originY - (r0 + 0.5) * geom.gsd, lo, hi]
-      tiles.push({ i0, j0, i1, j1, box })
+      tiles.push({ i0, j0, i1, j1, box, near: gp.local(box) })
     }
   }
   const obsPt = growable(Int32Array), obsImg = growable(Int32Array), obsRgb = growable(Float32Array)
@@ -829,7 +886,7 @@ async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toSfm, gp,
     if (cut) {
       const { cw } = sg, fx = m.K.fx
       for (const t of tiles) {
-        if (gp.affine && !boxReachesMap(m, gp.affine, t.box)) continue
+        if (!boxReachesMap(m, t.near, t.near.box)) continue
         for (let j = t.j0; j < t.j1; j++) {
           const row = seamSampleCol(sg, j, H)
           for (let i = t.i0; i < t.i1; i++) {
@@ -978,9 +1035,10 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     }
     const maps = []
     if (lo <= hi) {
-      const box = [geom.originX + (ex0 + 0.5) * geom.gsd, geom.originX + (ex1 - 0.5) * geom.gsd,
-        geom.originY - (ey1 - 0.5) * geom.gsd, geom.originY - (ey0 + 0.5) * geom.gsd, lo, hi]
-      for (let mi = 0; mi < metas.length; mi++) if (!affine || boxReachesMap(metas[mi], affine, box)) maps.push(mi)
+      // The cull with the block's own affine (and its grown box) when the frame has none.
+      const near = gp.local([geom.originX + (ex0 + 0.5) * geom.gsd, geom.originX + (ex1 - 0.5) * geom.gsd,
+        geom.originY - (ey1 - 0.5) * geom.gsd, geom.originY - (ey0 + 0.5) * geom.gsd, lo, hi])
+      for (let mi = 0; mi < metas.length; mi++) if (boxReachesMap(metas[mi], near, near.box)) maps.push(mi)
     }
     blocks.push({ col0, row0, bw, bh, ex0, ey0, ew: ex1 - ex0, eh: ey1 - ey0, maps, empty: !(lo <= hi) })
   }
@@ -1141,8 +1199,8 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       b.maps.forEach((mi, j) => { st.slot[mi] = j })
       active.push({ b, win, n, st })
     })
+    for (const a of active) winTiles(a.win, geom, gp)
     if (mosaic) {
-      for (const a of active) winTiles(a.win)
       await mosaicGroup(active)
     } else {
       for (const mi of unionMaps(active.map((a) => a.b))) {
@@ -1345,7 +1403,7 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
           for (let wr = r0; wr < r1; wr++) for (let wc = c0; wc < c1; wc++) {
             const wi = wr * ew + wc, dd = win.dist[wi]
             if (dd === 0 || dd > ring3 || eff[wi] === NO_LABEL) continue
-            cellToSfm(geom, gp.affine, toSfm, b.ex0 + wc, b.ey0 + wr, win.data[wi], P)
+            winCellToSfm(win, geom, gp, toSfm, wc, wr, win.data[wi], P)
             if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, e.photo, g, px)) continue
             const q = 3 * ((wr - y0) * bw + wc - x0), wo = 4 * wi
             d[q] = g0 * srgbToLinear(px[0]) - msums[wo]
