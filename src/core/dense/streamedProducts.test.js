@@ -173,6 +173,16 @@ describe('bounded map loading', () => {
     const entry = files(maps())[0]; entry.files.depth = new Blob([new Uint8Array(8)])
     await expect(readDepthOnly(entry)).rejects.toThrow('Corrupt depth map')
   })
+  it('a load without normals leaves their plane unread and keeps the rest', async () => {
+    const entry = files(maps())[0]
+    let nrmRead = false
+    const nrm = entry.files.nrm
+    entry.files.nrm = { arrayBuffer: () => { nrmRead = true; return nrm.arrayBuffer() } }
+    const m = await readDepthFiles(entry, { normals: false }), full = await readDepthFiles(files(maps())[0])
+    expect(nrmRead).toBe(false)
+    expect(m.normals).toBeNull()
+    expect([...m.depth]).toEqual([...full.depth]); expect([...m.cost]).toEqual([...full.cost]); expect([...m.rgb]).toEqual([...full.rgb])
+  })
   it.each(['best', 'average'])('orthorectification agrees including gap filling: %s', async blend => {
     const ms = maps(), entries = files(ms)
     const grid = { width: 30, height: 30, originX: -5, originY: 5, gsd: 0.3,

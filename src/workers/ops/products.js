@@ -119,6 +119,8 @@ export async function readDemGrid(dem, rect, maxCells) {
 // Cells a DEM tool may read from a COG in one piece (contours, terrain): Float32 +
 // mask + the tool's own planes stay within a few hundred MB.
 const DEM_TOOL_CELLS = 48 * 1024 ** 2
+// A depth map's planes in the ortho's cache: depth and cost (4 B each), rgb (3 B).
+const ORTHO_MAP_PX_BYTES = 11
 
 // Upper bound on a source photo's decoded RGBA: its full-resolution K puts the
 // principal point near the centre, so 2·cx × 2·cy is about the native size.
@@ -457,15 +459,15 @@ export function makeProductsOps({ rasterize } = {}) {
     const blockBytes = orthoTiledWorkingBytes({ width, height, blend: settings.blend, fillRadius: settings.fillRadius ?? 2,
       seamWidth: settings.seamWidth ?? 0, seamline: settings.seamline, seamBlend: settings.seamBlend })
     const pyramidBytes = Math.ceil(width / 8) * Math.ceil(height / 8) * 4 + 2048 * 2048 * 4
-    // A map's planes are 23 B/px (depth, cost, rgb, normals).
+    // A map's planes as the ortho reads them: depth, cost and rgb, 11 B/px (not its normals).
     const photoOf = new Map((input.images ?? []).map((im) => [im.uuid, im]))
     let zSum = 0, zN = 0
     for (let i = 0; i < built.grid.data.length; i += 97) { const z = built.grid.data[i]; if (Number.isFinite(z)) { zSum += z; zN++ } }
     const pxPerCell = orthoMapPxPerCell(geom, frame.toSfm, zN ? zSum / zN : 0)
     // A cache entry: the map's planes when streamed (resident maps are not counted) and its
     // decoded photo.
-    const entryBytes = (m) => (streamed ? m.width * m.height * 23 : 0) + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))
-    const maxEntry = maps.reduce((n, m) => Math.max(n, m.width * m.height * 23 + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))), 0)
+    const entryBytes = (m) => (streamed ? m.width * m.height * ORTHO_MAP_PX_BYTES : 0) + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))
+    const maxEntry = maps.reduce((n, m) => Math.max(n, m.width * m.height * ORTHO_MAP_PX_BYTES + photoBytesBound(photoOf.get(m.uuid), m, pxPerCell(m))), 0)
     const maxCacheEntry = maps.reduce((n, m) => Math.max(n, entryBytes(m)), 0)
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : Infinity
     const fixed = blockBytes + pyramidBytes
@@ -500,7 +502,7 @@ export function makeProductsOps({ rasterize } = {}) {
         + `${formatBytes(settings.pageBytes ?? 0)} the open project already holds (16 GB is all a tab gets, page and workers together)`)
     }
     // Each map's planes and source photo are cached across the blocks that see it.
-    const loadMap = streamed ? (i) => readDepthFiles(maps[i]) : async (i) => maps[i]
+    const loadMap = streamed ? (i) => readDepthFiles(maps[i], { normals: false }) : async (i) => maps[i]
     const loadImage = makePhotoLoader(input.images, rasterize, emit)
     // The mosaic's gain fit and graph-cut survey read every photo once more, coarse (a
     // gain needs means, a coarse seam grid no detail); their own loader keeps the decode
@@ -518,7 +520,7 @@ export function makeProductsOps({ rasterize } = {}) {
     ...ctx.settings, blockSize: ORTHO_BLOCK, cacheBytes: ctx.cacheBytes, mapsResident: !ctx.streamed,
     photoPrefetch: ctx.photoPrefetch, groupBlocks: ctx.settings.groupBlocks ?? 'auto', blockBytes: ctx.blockBytes,
     entryBytes: ctx.maxCacheEntry,
-    entrySizes: ctx.maps.map((m) => ({ map: ctx.streamed ? m.width * m.height * 23 : 0,
+    entrySizes: ctx.maps.map((m) => ({ map: ctx.streamed ? m.width * m.height * ORTHO_MAP_PX_BYTES : 0,
       photo: photoBytesExpected(ctx.photoOf.get(m.uuid), m, ctx.pxPerCell(m)) })),
   })
 
