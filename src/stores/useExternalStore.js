@@ -34,7 +34,7 @@ import { useProjectsStore } from './useProjectsStore.js'
 //     `sampleAt` reprojects the single query point into raster space — exact,
 //     free, survives `handleSetCrs`, and it's the polar-correct choice.
 //
-// See METHODS.md §? and plan-external-reference-data.md §A3/§A4/§A6.
+// See docs/METHODS.md and plan-external-reference-data.md §A3/§A4/§A6.
 export const useExternalStore = registerProjectStore(defineStore('external', () => {
   const { log } = useLog()
   const projects = useProjectsStore()

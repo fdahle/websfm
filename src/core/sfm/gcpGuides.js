@@ -27,7 +27,7 @@
 // through `canonicalToScan`. Guides are therefore consistent with the
 // reprojection errors shown next to each marker, but on a strongly distorted
 // lens the true epipolar "line" is a slight curve and the guide is an
-// approximation. See METHODS.md.
+// approximation. See docs/METHODS.md.
 
 import { triangulateGcp } from './gcpTriangulation.js'
 import { cameraCenter, projectWithDepth } from './geometry.js'

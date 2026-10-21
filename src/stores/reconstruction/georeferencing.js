@@ -28,7 +28,7 @@ const inverseVariance3d = (p) => {
 // built on it. Split out of useReconstructionStore: this is post-hoc *measurement*
 // against an already-built model, not state management or worker orchestration.
 //
-// Two rules from METHODS.md that this file must not quietly break:
+// Two rules from docs/METHODS.md that this file must not quietly break:
 //
 //  • GCPs beat poses. When ≥3 GCPs triangulate they define the fit; imported camera
 //    poses are the fallback. GCPs are the accuracy-defining source.

@@ -101,7 +101,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // exists until the click lands.
   //
   // The info line reports the gap between where the model predicted the mark and
-  // where the user actually clicked. That gap is the diagnostic (METHODS.md §6.4) —
+  // where the user actually clicked. That gap is the diagnostic (docs/METHODS.md §6.4) —
   // it should shrink as marks accumulate, and a large one means the reconstruction
   // and the user disagree. Logging the guides themselves instead (on every recompute)
   // reported the app re-rendering, not the user working.

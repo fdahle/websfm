@@ -8,7 +8,7 @@
 // Output: one 15′ grid per model, 721 rows (90° N → 90° S) × 1440 columns (180° W
 // eastwards), N in whole centimetres as little-endian Int16, zlib-compressed. Every
 // value is a NODE of the source grid (EGM2008: every 6th of its 2.5′ nodes), so the
-// only error is the bilinear interpolation between 15′ nodes; METHODS.md §geoid
+// only error is the bilinear interpolation between 15′ nodes; docs/METHODS.md §9.1
 // gives its size. The source grids are point-registered (GDAL reports their origin
 // half a cell outside the first node; geotiff.js the tiepoint, i.e. the node).
 import { readFile, writeFile, mkdir } from 'node:fs/promises'

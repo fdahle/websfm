@@ -5,7 +5,7 @@
 // applied to the whole reconstruction leaves every residual unchanged. So fitting
 // the scale *after* bundle adjustment produces exactly the same model as
 // constraining it inside BA would — for a single bar the two are identical, and
-// they diverge only with ≥2 mutually disagreeing bars (see METHODS.md §"Scale").
+// they diverge only with ≥2 mutually disagreeing bars (see docs/METHODS.md §6.6).
 // That is why this file is a four-line weighted least squares and not Rust.
 //
 // Conventions:
