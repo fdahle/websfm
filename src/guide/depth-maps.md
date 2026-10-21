@@ -129,7 +129,10 @@ depths spread further and improve weakly textured areas, at a roughly linear tim
 cost. The default three is a good first pass.
 
 ## Compute and memory
-WebGPU acceleration is experimental and configured under Settings → Compute. The
+WebGPU acceleration is experimental and configured under Settings → Compute. With it,
+one worker feeds the graphics card. Without it, the depth maps run on the processor,
+spread over the parallel workers (Settings → Compute), each with its share of the
+memory budget; the log says how many. The maps are the same either way. The
 memory a run needs is estimated before it starts. If the chosen **Quality** would
 exceed the memory budget (Settings → Compute), the run steps down to the highest
 quality that fits (High → Medium → Low) and the log gives both estimates. A

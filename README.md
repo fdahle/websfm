@@ -32,7 +32,7 @@ example project**. It downloads 42 drone photos of a park in Ohio (about 50 MB, 
 domain, from [OpenDroneMap](https://github.com/OpenDroneMap/odm_data_aukerman)) and
 opens a step-by-step walkthrough in the guide, from feature detection to a 3D point
 cloud, an elevation model and an orthophoto. With a graphics card (WebGPU) the
-computing takes about two minutes; without one, about ten at lower quality.
+computing takes about two minutes; without one, about four at lower quality.
 
 With your own photos: create a project, drop the images onto the sidebar, and
 follow **Other ▸ Guide ▸ Getting Started**. Hover a setting's underlined label for what

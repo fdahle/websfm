@@ -63,10 +63,10 @@ stage and points out weak spots, such as images with few matches. See
 **Reconstruct ▸ Depth Maps**, keep **Medium**, **Run**. For every photo, websfm now
 estimates the distance to every pixel, using its neighbours ([depth map](help:depth-map)).
 This is the slowest step. With a graphics card (WebGPU, available in current Chrome
-and Edge) it takes under a minute. Without one it runs on the processor, and the log
-says *using WASM (CPU)*: then choose **Low**, which takes about 7 minutes rather than over
-half an hour at Medium. Low still makes a usable cloud, DEM and orthophoto, at
-about 40 cm per pixel instead of 18 cm.
+and Edge) it takes under a minute. Without one it runs on the processor's cores, and the
+log says *using WASM (CPU)*: then choose **Low**, which takes about a minute on an
+eight-core machine instead of several at Medium. Low still makes a usable cloud, DEM
+and orthophoto, at about 40 cm per pixel instead of 18 cm.
 
 See [Depth Maps](guide:depth-maps).
 
