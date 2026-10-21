@@ -34,6 +34,31 @@ export function sampleRgbaBilinear(data, w, h, x, y, out, oi) {
   }
 }
 
+// The same for packed RGB (3 bytes a pixel): the same three values, writing 3.
+export function sampleRgbBilinear(data, w, h, x, y, out, oi) {
+  const x0 = Math.max(0, Math.min(w - 1, Math.floor(x)))
+  const y0 = Math.max(0, Math.min(h - 1, Math.floor(y)))
+  const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1)
+  const fx = x - x0, fy = y - y0
+  const i00 = (y0 * w + x0) * 3, i10 = (y0 * w + x1) * 3
+  const i01 = (y1 * w + x0) * 3, i11 = (y1 * w + x1) * 3
+  for (let c = 0; c < 3; c++) {
+    const top = data[i00 + c] * (1 - fx) + data[i10 + c] * fx
+    const bot = data[i01 + c] * (1 - fx) + data[i11 + c] * fx
+    out[oi + c] = top * (1 - fy) + bot * fy
+  }
+}
+
+// RGBA → packed RGB in the same memory, the buffer then cut to its new length (moved,
+// so `rgba` is spent). A decoded photo held for sampling needs no alpha: a quarter less.
+export function packRgb(rgba) {
+  const n = rgba.length >> 2
+  for (let i = 0, j = 0; i < n; i++, j += 4) { const o = 3 * i; rgba[o] = rgba[j]; rgba[o + 1] = rgba[j + 1]; rgba[o + 2] = rgba[j + 2] }
+  const whole = rgba.byteOffset === 0 && rgba.byteLength === rgba.buffer.byteLength
+  const buf = whole && rgba.buffer.transfer ? rgba.buffer.transfer(3 * n) : rgba.buffer.slice(rgba.byteOffset, rgba.byteOffset + 3 * n)
+  return new Uint8ClampedArray(buf)
+}
+
 // Resample an RGBA source into an ow×oh output grid through `map` (output px →
 // source px). A null map means the identity, i.e. the source is already in the
 // output frame — returned as-is when the sizes agree, so the common

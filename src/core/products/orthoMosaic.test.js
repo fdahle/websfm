@@ -4,6 +4,7 @@ import {
   mosaicSeamCells, orthoHalo, orthoTiledWorkingBytes, orthoCacheLog, chooseGroupSize, NO_LABEL,
 } from './ortho.js'
 import { resampledGeometry } from './surface.js'
+import { packRgb } from './undistort.js'
 import { createOrthoStats } from '../eval/orthoStats.js'
 
 // Two nadir cameras 10 units above the z = 0 plane at x = ∓2, each map seeing the
@@ -342,6 +343,19 @@ describe('blocks in groups (P6)', () => {
         expect(Buffer.from(grouped.labels).equals(Buffer.from(one.labels))).toBe(true)
         expect(grouped.covered).toBe(one.covered)
       }
+    })
+  }
+
+  // Photos packed to RGB (the products worker's loader): the same ortho as from RGBA.
+  for (const v of variants) {
+    it(`computes the same ortho from packed RGB photos (${v.blend}${v.seamBlend ? ` · ${v.seamBlend}` : ''})`, async () => {
+      const surface = plane(40, 24), o = { ...v, blockSize: 8, fillRadius: 1, groupBlocks: 2 }
+      const rgba = await run(surface, views(), o, { loadImage: photos(views()) })
+      const inner = photos(views())
+      const loadImage = async (mi, ...rest) => { const p = await inner(mi, ...rest); return { ...p, data: packRgb(p.data), channels: 3 } }
+      const rgb = await run(surface, views(), o, { loadImage })
+      expect(Buffer.from(rgb.rgba).equals(Buffer.from(rgba.rgba))).toBe(true)
+      expect(Buffer.from(rgb.labels).equals(Buffer.from(rgba.labels))).toBe(true)
     })
   }
 

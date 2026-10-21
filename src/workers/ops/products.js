@@ -8,6 +8,7 @@ import { rasterizeDem, coreExtent, demGeometry, rasterizeDemBlocks, fillEnclosed
 import { orthorectifyTiled, orthoTiledWorkingBytes, orthoMapPxPerCell, orthoCacheLog, ORTHO_BLOCK, MAX_SEAM_CELLS } from '../../core/products/ortho.js'
 import { GAIN_MIN, GAIN_MAX } from '../../core/products/colourGains.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
+import { packRgb } from '../../core/products/undistort.js'
 import { describeOrthoStats, createOrthoStats } from '../../core/eval/orthoStats.js'
 import { meshSurface, planeSurface } from '../../core/products/surface.js'
 import { createCogBuilder, geoKeysForEpsg, crsTagInfo } from '../../core/products/geotiff.js'
@@ -64,7 +65,7 @@ function makePhotoLoader(images, rasterize, emit) {
       const oy = im.dist?.fisheye ? m.K.cy - ((im.K.cy + 0.5) * outScale[1] - 0.5) : 0
       const map = ox || oy ? (u, v) => base(u - ox, v - oy) : base
       load.decoded++
-      return { data: r.data, width: r.width, height: r.height, map }
+      return { data: packRgb(r.data), channels: 3, width: r.width, height: r.height, map }
     } catch (err) {
       if (rethrowOutOfMemory && isOutOfMemory(err)) throw Object.assign(new Error(err?.message ?? String(err)), { outOfMemory: true })
       emit('log', [`Ortho: ${im.name ?? m.uuid} — source photo unavailable (${err?.message ?? err}); `
@@ -137,15 +138,15 @@ const photoBytesBound = (im, m = null, mapPxPerCell = null) => {
   const scale = s > 0 && mapPxPerCell > 0 ? Math.min(1, (2 * s) / mapPxPerCell) : 1
   return Math.min(native, Math.ceil(4 * native * scale * scale)) * 4
 }
-// What that decode is expected to hold: the photo at its decode scale, RGBA (the bound
-// above allows 4× for a pyramid read one level finer). For predicting the cache, not
-// for gating it.
+// What that decode is expected to hold: the photo at its decode scale, packed RGB once
+// decoded (the bound above, RGBA as decoded, allows 4× for a pyramid read one level
+// finer). For predicting the cache, not for gating it.
 const photoBytesExpected = (im, m, mapPxPerCell) => {
   if (!im?.K) return 0
   const native = Math.ceil(2 * im.K.cx) * Math.ceil(2 * im.K.cy)
   const s = m?.K ? m.K.fx / im.K.fx : 0
   const scale = s > 0 && mapPxPerCell > 0 ? Math.min(1, (2 * s) / mapPxPerCell) : 1
-  return Math.ceil(native * scale * scale) * 4
+  return Math.ceil(native * scale * scale) * 3
 }
 
 // Product ops (DEM + orthophoto). The frame rebuild/descriptor + raster→dataURL

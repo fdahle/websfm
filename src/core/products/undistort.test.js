@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  sampleRgbaBilinear, resampleRgba, resampleMaskLut, pinholeFrameSize,
+  sampleRgbaBilinear, sampleRgbBilinear, packRgb, resampleRgba, resampleMaskLut, pinholeFrameSize,
   validSampleRect, cropRgba, shiftPrincipalPoint, fisheyeCanvas, resampleRgbaMarked,
 } from './undistort.js'
 import { makeSampleMap } from '../sfm/displayFrame.js'
@@ -224,5 +224,25 @@ describe('fisheyeCanvas', () => {
     expect(outside[1 * 6 + 1]).toBe(0)      // (1,1) → (0,0)
     expect(data[(1 * 6 + 1) * 4]).toBe(200)
     expect(outside[5 * 6 + 5]).toBe(1)      // (5,5) → (4,4): past the last pixel
+  })
+})
+
+describe('packed RGB photos', () => {
+  it('pack in place and sample to the same three values as RGBA', () => {
+    const w = 7, h = 5, rgba = Uint8ClampedArray.from({ length: w * h * 4 }, (_, i) => (i * 37 + 11) % 256)
+    const ref = rgba.slice()
+    const rgb = packRgb(rgba)
+    expect(rgb.length).toBe(w * h * 3)
+    for (let i = 0; i < w * h; i++) for (let c = 0; c < 3; c++) expect(rgb[3 * i + c]).toBe(ref[4 * i + c])
+    const a = new Float64Array(4), b = new Float64Array(4)
+    for (const [x, y] of [[0, 0], [2.3, 1.7], [6.4, 4.9], [-0.5, 3.2], [5.99, 0.01]]) {
+      sampleRgbaBilinear(ref, w, h, x, y, a, 0); sampleRgbBilinear(rgb, w, h, x, y, b, 0)
+      expect([...b.subarray(0, 3)]).toEqual([...a.subarray(0, 3)])
+    }
+  })
+  it('copies when the view does not own its whole buffer', () => {
+    const buf = new Uint8ClampedArray(4 + 8), view = buf.subarray(4)
+    view.set([1, 2, 3, 255, 4, 5, 6, 255])
+    expect([...packRgb(view)]).toEqual([1, 2, 3, 4, 5, 6])
   })
 })

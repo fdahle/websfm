@@ -16,7 +16,7 @@
 // Each map: { uuid, width, height, K:{fx,fy,cx,cy}, R, t,
 //             depth:Float32Array, cost:Float32Array, rgb:Uint8Array(w*h*3) }.
 // Conventions match geometry.js (x_cam = R·x_world + t; K working-res).
-import { sampleRgbaBilinear } from './undistort.js'
+import { sampleRgbaBilinear, sampleRgbBilinear } from './undistort.js'
 import { srgbToLinear, linearToSrgb, fitGains, gainSampleClipped, growable } from './colourGains.js'
 import { sampleSurfaceWindow } from './surface.js'
 import { createOrthoStats } from '../eval/orthoStats.js'
@@ -360,7 +360,7 @@ function colourFromMap(win, grid, m, photo, mi, affine, toSfm, opts, scratch) {
       const q = photo.map ? photo.map(p.u, p.v) : { x: p.u, y: p.v }
       // Pixel centres at integers: the photo spans [−½, size − ½].
       if (!(q.x >= -0.5 && q.y >= -0.5 && q.x <= photo.width - 0.5 && q.y <= photo.height - 0.5)) continue
-      sampleRgbaBilinear(photo.data, photo.width, photo.height, q.x, q.y, px, 0)
+      samplePhoto(photo, q.x, q.y, px)
     } else {
       const c3 = i * 3
       px[0] = m.rgb[c3]; px[1] = m.rgb[c3 + 1]; px[2] = m.rgb[c3 + 2]
@@ -554,13 +554,16 @@ function holeMatch(m, ui, vi, zc, tol) {
   return -1
 }
 
+// A decoded photo: RGBA, or packed RGB with `channels: 3` (the products worker's loader).
+const samplePhoto = (photo, x, y, px) => (photo.channels === 3 ? sampleRgbBilinear : sampleRgbaBilinear)(photo.data, photo.width, photo.height, x, y, px, 0)
+
 // The colour of a visible sample: bilinear from the source photo (O1), else nearest
 // from the map's own rgb plane. False when the photo does not cover the point.
 function sampleColour(m, photo, g, px) {
   if (photo) {
     const q = photo.map ? photo.map(g.u, g.v) : { x: g.u, y: g.v }
     if (!(q.x >= -0.5 && q.y >= -0.5 && q.x <= photo.width - 0.5 && q.y <= photo.height - 0.5)) return false
-    sampleRgbaBilinear(photo.data, photo.width, photo.height, q.x, q.y, px, 0)
+    samplePhoto(photo, q.x, q.y, px)
     return true
   }
   const c3 = g.i * 3
