@@ -494,10 +494,11 @@ function mosaicMode(opts) {
 // sRGB ↔ linear light: core/products/colourGains.js (re-exported for existing callers).
 export { srgbToLinear, linearToSrgb }
 
-// The visibility test every mosaic pass shares: P in front of map m (camera centre C),
-// on a map pixel whose stored depth agrees (z-buffer), within the cost gate, and seen
-// from above the surface (the ray to the camera leans less than 90° from `up`).
-// Fills g = { u, v, i, depth, cos } and returns whether P is visible.
+// The visibility test every mosaic pass shares: P in front of map m, on a map pixel
+// whose stored depth agrees (z-buffer), within the cost gate, and seen from above the
+// surface (the ray to the camera centre leans less than 90° from `up`).
+// mapSight(m, up, tol, maxCost) → see(P, g): fills g = { u, v, i, depth, cos } and
+// returns whether P is visible. The map's constants are read once, not per cell.
 //
 // A pixel without depth says nothing: the cross-view filter removes weakly matched
 // pixels (a uniform roof, foliage), so a depth map is full of small holes, and a photo
@@ -507,39 +508,50 @@ export { srgbToLinear, linearToSrgb }
 // map pixels that agrees stands in. Where the stored depth is nearer, something
 // occludes the point: that is never overridden.
 export const MOSAIC_HOLE_REACH = 2
-function seenFrom(m, C, P, up, tol, maxCost, g) {
-  const { R, t, K } = m
-  const zc = R[2][0] * P[0] + R[2][1] * P[1] + R[2][2] * P[2] + t[2]
-  if (!(zc > 1e-9)) return false
-  const u = K.fx * ((R[0][0] * P[0] + R[0][1] * P[1] + R[0][2] * P[2] + t[0]) / zc) + K.cx
-  const v = K.fy * ((R[1][0] * P[0] + R[1][1] * P[1] + R[1][2] * P[2] + t[1]) / zc) + K.cy
-  const ui = Math.round(u), vi = Math.round(v)
-  if (ui < 0 || vi < 0 || ui >= m.width || vi >= m.height) return false
-  let i = vi * m.width + ui
-  const stored = m.depth[i]
-  if (stored > 0) {
-    if (Math.abs(stored - zc) > tol * zc) return false
-  } else {
-    // A hole: the agreeing depth nearest to (ui, vi), rings outwards, first in row order.
-    let found = -1
-    for (let rr = 1; rr <= MOSAIC_HOLE_REACH && found < 0; rr++) {
-      for (let dv = -rr; dv <= rr && found < 0; dv++) for (let du = -rr; du <= rr; du++) {
-        if (Math.max(Math.abs(du), Math.abs(dv)) !== rr) continue
-        const uu = ui + du, vv = vi + dv
-        if (uu < 0 || vv < 0 || uu >= m.width || vv >= m.height) continue
-        const j = vv * m.width + uu, sj = m.depth[j]
-        if (sj > 0 && Math.abs(sj - zc) <= tol * zc) { found = j; break }
-      }
+function mapSight(m, up, tol, maxCost) {
+  const { R, t: tr, K, width: mw, height: mh, depth, cost } = m
+  const r00 = R[0][0], r01 = R[0][1], r02 = R[0][2], r10 = R[1][0], r11 = R[1][1], r12 = R[1][2]
+  const r20 = R[2][0], r21 = R[2][1], r22 = R[2][2], t0 = tr[0], t1 = tr[1], t2 = tr[2]
+  const kfx = K.fx, kfy = K.fy, kcx = K.cx, kcy = K.cy
+  const [up0, up1, up2] = up, [c0x, c0y, c0z] = cameraCentre(m)
+  return (P, g) => {
+    const p0 = P[0], p1 = P[1], p2 = P[2]
+    const zc = r20 * p0 + r21 * p1 + r22 * p2 + t2
+    if (!(zc > 1e-9)) return false
+    const u = kfx * ((r00 * p0 + r01 * p1 + r02 * p2 + t0) / zc) + kcx
+    const v = kfy * ((r10 * p0 + r11 * p1 + r12 * p2 + t1) / zc) + kcy
+    const ui = Math.round(u), vi = Math.round(v)
+    if (ui < 0 || vi < 0 || ui >= mw || vi >= mh) return false
+    let i = vi * mw + ui
+    const stored = depth[i]
+    if (stored > 0) {
+      if (Math.abs(stored - zc) > tol * zc) return false
+    } else {
+      i = holeMatch(m, ui, vi, zc, tol)
+      if (i < 0) return false
     }
-    if (found < 0) return false
-    i = found
+    if (cost && cost[i] > maxCost) return false
+    const dx = c0x - p0, dy = c0y - p1, dz = c0z - p2
+    const cos = (up0 * dx + up1 * dy + up2 * dz) / Math.sqrt(dx * dx + dy * dy + dz * dz)
+    if (!(cos > 1e-3)) return false
+    g.u = u; g.v = v; g.i = i; g.depth = zc; g.cos = cos
+    return true
   }
-  if (m.cost && m.cost[i] > maxCost) return false
-  const dx = C[0] - P[0], dy = C[1] - P[1], dz = C[2] - P[2]
-  const cos = (up[0] * dx + up[1] * dy + up[2] * dz) / Math.hypot(dx, dy, dz)
-  if (!(cos > 1e-3)) return false
-  g.u = u; g.v = v; g.i = i; g.depth = zc; g.cos = cos
-  return true
+}
+
+// A hole in map m at (ui, vi): the agreeing depth nearest to it, rings outwards, first in
+// row order → its index, or −1.
+function holeMatch(m, ui, vi, zc, tol) {
+  for (let rr = 1; rr <= MOSAIC_HOLE_REACH; rr++) {
+    for (let dv = -rr; dv <= rr; dv++) for (let du = -rr; du <= rr; du++) {
+      if (Math.max(Math.abs(du), Math.abs(dv)) !== rr) continue
+      const uu = ui + du, vv = vi + dv
+      if (uu < 0 || vv < 0 || uu >= m.width || vv >= m.height) continue
+      const j = vv * m.width + uu, sj = m.depth[j]
+      if (sj > 0 && Math.abs(sj - zc) <= tol * zc) return j
+    }
+  }
+  return -1
 }
 
 // The colour of a visible sample: bilinear from the source photo (O1), else nearest
@@ -580,15 +592,52 @@ function cellToSfm(grid, affine, toSfm, col, row, z, P) {
 function labelFromMap(win, grid, m, mi, gp, toSfm, opts, scratch) {
   const { x0, y0, w, data, mask, raw, score } = win
   const { depthTolRel = 0.02, maxCost = Infinity } = opts
-  const { P, g } = scratch, C = cameraCentre(m), fx = m.K.fx
-  forTilesReaching(win, grid, m, gp.affine, 0, 0, w, win.h, (c0, r0, c1, r1) => {
-    for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
+  const C = cameraCentre(m), fx = m.K.fx
+  // mapSight and cellToSfm written out for the cells of a tile: the label pass is the
+  // ortho's largest (a third of a fine one's time) and the calls cost more than their
+  // work. The same expressions in the same order, so the same bits.
+  const { R, t: tr, K, width: mw, height: mh, depth, cost } = m
+  const r00 = R[0][0], r01 = R[0][1], r02 = R[0][2], r10 = R[1][0], r11 = R[1][1], r12 = R[1][2]
+  const r20 = R[2][0], r21 = R[2][1], r22 = R[2][2], t0 = tr[0], t1 = tr[1], t2 = tr[2]
+  const kfx = K.fx, kfy = K.fy, kcx = K.cx, kcy = K.cy
+  const [up0, up1, up2] = gp.up, [c0x, c0y, c0z] = C
+  const { gsd, originX, originY } = grid
+  const tiles = win.tiles
+  forTilesReaching(win, grid, m, gp.affine, 0, 0, w, win.h, (tc0, tr0, tc1, tr1) => {
+    const aff = gp.affine ?? tiles.cellAff?.[Math.floor(tr0 / WIN_TILE) * tiles.nx + Math.floor(tc0 / WIN_TILE)] ?? null
+    for (let r = tr0; r < tr1; r++) for (let c = tc0; c < tc1; c++) {
       const idx = r * w + c
       if (!mask[idx]) continue
-      winCellToSfm(win, grid, gp, toSfm, c, r, data[idx], P)
-      if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g)) continue
-      const s = g.depth / (fx * g.cos * g.cos)
-      if (s < score[idx]) { score[idx] = s; raw[idx] = mi }
+      const x = originX + (x0 + c + 0.5) * gsd, y = originY - (y0 + r + 0.5) * gsd, z = data[idx]
+      let p0, p1, p2
+      if (aff) {
+        const { c0, P0, A } = aff, dx = x - c0[0], dy = y - c0[1], dz = z - c0[2]
+        p0 = P0[0] + A[0] * dx + A[1] * dy + A[2] * dz
+        p1 = P0[1] + A[3] * dx + A[4] * dy + A[5] * dz
+        p2 = P0[2] + A[6] * dx + A[7] * dy + A[8] * dz
+      } else {
+        const q = toSfm([x, y, z]); p0 = q[0]; p1 = q[1]; p2 = q[2]
+      }
+      const zc = r20 * p0 + r21 * p1 + r22 * p2 + t2
+      if (!(zc > 1e-9)) continue
+      const u = kfx * ((r00 * p0 + r01 * p1 + r02 * p2 + t0) / zc) + kcx
+      const v = kfy * ((r10 * p0 + r11 * p1 + r12 * p2 + t1) / zc) + kcy
+      const ui = Math.round(u), vi = Math.round(v)
+      if (ui < 0 || vi < 0 || ui >= mw || vi >= mh) continue
+      let i = vi * mw + ui
+      const stored = depth[i]
+      if (stored > 0) {
+        if (Math.abs(stored - zc) > depthTolRel * zc) continue
+      } else {
+        i = holeMatch(m, ui, vi, zc, depthTolRel)
+        if (i < 0) continue
+      }
+      if (cost && cost[i] > maxCost) continue
+      const dx = c0x - p0, dy = c0y - p1, dz = c0z - p2
+      const cos = (up0 * dx + up1 * dy + up2 * dz) / Math.sqrt(dx * dx + dy * dy + dz * dz)
+      if (!(cos > 1e-3)) continue
+      const sc = zc / (fx * cos * cos)
+      if (sc < score[idx]) { score[idx] = sc; raw[idx] = mi }
     }
   })
 }
@@ -750,7 +799,7 @@ export function chamferTo(labels, w, x0, y0, x1, y1, target, dist) {
 function blendFromMap(win, grid, m, photo, mi, gp, toSfm, opts, scratch, box, seam3, gains) {
   const { x0, y0, w, data, mask, raw, label, dist, sums, fallback, flags } = win
   const { depthTolRel = 0.02, maxCost = Infinity } = opts
-  const { P, g, px } = scratch, C = cameraCentre(m)
+  const { P, g, px } = scratch, see = mapSight(m, gp.up, depthTolRel, maxCost)
   const g0 = gains ? gains[mi * 3] : 1, g1 = gains ? gains[mi * 3 + 1] : 1, g2 = gains ? gains[mi * 3 + 2] : 1
   const [bx0, by0, bx1, by1] = box
   for (let r = by0; r < by1; r++) for (let c = bx0; c < bx1; c++) {
@@ -762,7 +811,7 @@ function blendFromMap(win, grid, m, photo, mi, gp, toSfm, opts, scratch, box, se
     const isFallback = !own && raw[idx] === mi
     if (!inBand && !isFallback) continue
     winCellToSfm(win, grid, gp, toSfm, c, r, data[idx], P)
-    if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g)) continue
+    if (!see(P, g)) continue
     if (!sampleColour(m, photo, g, px)) continue
     const l0 = g0 * srgbToLinear(px[0]), l1 = g1 * srgbToLinear(px[1]), l2 = g2 * srgbToLinear(px[2])
     if (inBand) {
@@ -888,10 +937,10 @@ async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toSfm, gp,
     loads.delete(mi)
     if (ownColour) fromMapRgb++
     readMs += performance.now() - tr
-    const C = cameraCentre(m)
+    const see = mapSight(m, gp.up, depthTolRel, maxCost)
     for (let p = 0; p < L; p++) {
       P[0] = xyz[3 * p]; P[1] = xyz[3 * p + 1]; P[2] = xyz[3 * p + 2]
-      if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, photo, g, px)) continue
+      if (!see(P, g) || !sampleColour(m, photo, g, px)) continue
       if (gainSampleClipped(px[0], px[1], px[2])) { clippedObs++; continue }
       obsPt.push(p); obsImg.push(mi)
       obsRgb.push(srgbToLinear(px[0])); obsRgb.push(srgbToLinear(px[1])); obsRgb.push(srgbToLinear(px[2]))
@@ -906,7 +955,7 @@ async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toSfm, gp,
             const p = j * cw + i
             if (!cm[p]) continue
             cellToSfm(geom, gp.affine, toSfm, seamSampleCol(sg, i, W), row, cz[p], P)
-            if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, photo, g, px)) continue
+            if (!see(P, g) || !sampleColour(m, photo, g, px)) continue
             addSeamCandidate(sv, p, mi, g.depth / (fx * g.cos * g.cos), Math.round(px[0]), Math.round(px[1]), Math.round(px[2]))
           }
         }
@@ -1490,7 +1539,7 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     for (const [u, mi] of union.entries()) {
       const users = usersOf[u]
       if (!users.length) { visited(mi, null); continue }
-      const e = await fetch(mi, true), m = e.m, C = cameraCentre(m)
+      const e = await fetch(mi, true), m = e.m, see = mapSight(m, gp.up, depthTolRel, maxCost)
       const g0 = gains ? gains[mi * 3] : 1, g1 = gains ? gains[mi * 3 + 1] : 1, g2 = gains ? gains[mi * 3 + 2] : 1
       for (const a of users) {
         const { b, win, eff, mbox, st, step } = a, { ew, eh } = b, o = 4 * st.slot[mi]
@@ -1509,7 +1558,7 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
             const wi = wr * ew + wc, dd = win.dist[wi]
             if (dd === 0 || dd > ring3 || eff[wi] === NO_LABEL) continue
             winCellToSfm(win, geom, gp, toSfm, wc, wr, win.data[wi], P)
-            if (!seenFrom(m, C, P, gp.up, depthTolRel, maxCost, g) || !sampleColour(m, e.photo, g, px)) continue
+            if (!see(P, g) || !sampleColour(m, e.photo, g, px)) continue
             const q = 3 * ((wr - y0) * bw + wc - x0), wo = 4 * wi
             d[q] = g0 * srgbToLinear(px[0]) - msums[wo]
             d[q + 1] = g1 * srgbToLinear(px[1]) - msums[wo + 1]

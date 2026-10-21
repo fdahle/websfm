@@ -43,55 +43,80 @@ export function multibandReach(levels = MULTIBAND_LEVELS) {
 const W0 = 1 / 16, W1 = 4 / 16, W2 = 6 / 16
 
 // REDUCE: blur with the 5-tap kernel and keep every other cell, zero outside [w × h].
-// dst is ceil(w/2) × ceil(h/2); tmp holds h × ceil(w/2).
+// dst is ceil(w/2) × ceil(h/2); tmp holds h × ceil(w/2). The interior runs without the
+// edge tests; every cell adds its taps in the same order either way.
 function reduce(src, so, w, h, dst, dO, tmp) {
   const w2 = (w + 1) >> 1, h2 = (h + 1) >> 1
+  const mIn = Math.max(1, Math.min(w2, (w - 1) >> 1)) // cells 1 ≤ m < mIn have all four taps
   for (let r = 0; r < h; r++) {
     const row = so + r * w, t = r * w2
-    for (let m = 0; m < w2; m++) {
-      const c = 2 * m
-      let s = W2 * src[row + c]
-      if (c >= 1) s += W1 * src[row + c - 1]
-      if (c >= 2) s += W0 * src[row + c - 2]
-      if (c + 1 < w) s += W1 * src[row + c + 1]
-      if (c + 2 < w) s += W0 * src[row + c + 2]
-      tmp[t + m] = s
+    if (w2 > 0) reduceCell(src, row, w, tmp, t, 0)
+    for (let m = 1, c = row + 2; m < mIn; m++, c += 2) {
+      tmp[t + m] = W2 * src[c] + W1 * src[c - 1] + W0 * src[c - 2] + W1 * src[c + 1] + W0 * src[c + 2]
     }
+    for (let m = mIn; m < w2; m++) reduceCell(src, row, w, tmp, t, m)
   }
   for (let m = 0; m < h2; m++) {
-    const r = 2 * m, o = dO + m * w2
+    const r = 2 * m, o = dO + m * w2, t = r * w2
+    if (r >= 2 && r + 2 < h) {
+      for (let c = 0; c < w2; c++) {
+        dst[o + c] = W2 * tmp[t + c] + W1 * tmp[t - w2 + c] + W0 * tmp[t - 2 * w2 + c] + W1 * tmp[t + w2 + c] + W0 * tmp[t + 2 * w2 + c]
+      }
+      continue
+    }
     for (let c = 0; c < w2; c++) {
-      let s = W2 * tmp[r * w2 + c]
-      if (r >= 1) s += W1 * tmp[(r - 1) * w2 + c]
-      if (r >= 2) s += W0 * tmp[(r - 2) * w2 + c]
-      if (r + 1 < h) s += W1 * tmp[(r + 1) * w2 + c]
-      if (r + 2 < h) s += W0 * tmp[(r + 2) * w2 + c]
+      let s = W2 * tmp[t + c]
+      if (r >= 1) s += W1 * tmp[t - w2 + c]
+      if (r >= 2) s += W0 * tmp[t - 2 * w2 + c]
+      if (r + 1 < h) s += W1 * tmp[t + w2 + c]
+      if (r + 2 < h) s += W0 * tmp[t + 2 * w2 + c]
       dst[o + c] = s
     }
   }
 }
+function reduceCell(src, row, w, tmp, t, m) {
+  const c = 2 * m
+  let s = W2 * src[row + c]
+  if (c >= 1) s += W1 * src[row + c - 1]
+  if (c >= 2) s += W0 * src[row + c - 2]
+  if (c + 1 < w) s += W1 * src[row + c + 1]
+  if (c + 2 < w) s += W0 * src[row + c + 2]
+  tmp[t + m] = s
+}
 
 // EXPAND as a weighted sum (no ×4: it is always used as a ratio of two expands):
 // out[i] = Σ_m w(i − 2m)·in[m] per axis, from sw × sh into dw × dh (sw = ceil(dw/2)).
-// tmp holds sh × dw.
+// tmp holds sh × dw. Edge cells keep their `+ 0` so a −0 rounds as before.
 function expandSum(src, so, sw, sh, dst, dO, dw, dh, tmp) {
+  const mIn = Math.max(1, Math.min(sw - 1, dw >> 1)) // 1 ≤ m < mIn: m ± 1 inside, both outputs exist
   for (let r = 0; r < sh; r++) {
     const row = so + r * sw, t = r * dw
-    for (let i = 0; i < dw; i++) {
-      const m = i >> 1
-      tmp[t + i] = i & 1
-        ? W1 * src[row + m] + (m + 1 < sw ? W1 * src[row + m + 1] : 0)
-        : W2 * src[row + m] + (m >= 1 ? W0 * src[row + m - 1] : 0) + (m + 1 < sw ? W0 * src[row + m + 1] : 0)
+    if (dw > 0) expandCell(src, row, sw, tmp, t, dw, 0)
+    for (let m = 1, x = row + 1, i = t + 2; m < mIn; m++, x++, i += 2) {
+      tmp[i] = W2 * src[x] + W0 * src[x - 1] + W0 * src[x + 1]
+      tmp[i + 1] = W1 * src[x] + W1 * src[x + 1]
     }
+    for (let m = mIn; 2 * m < dw; m++) expandCell(src, row, sw, tmp, t, dw, m)
   }
   for (let i = 0; i < dh; i++) {
-    const m = i >> 1, o = dO + i * dw
-    for (let c = 0; c < dw; c++) {
-      dst[o + c] = i & 1
-        ? W1 * tmp[m * dw + c] + (m + 1 < sh ? W1 * tmp[(m + 1) * dw + c] : 0)
-        : W2 * tmp[m * dw + c] + (m >= 1 ? W0 * tmp[(m - 1) * dw + c] : 0) + (m + 1 < sh ? W0 * tmp[(m + 1) * dw + c] : 0)
+    const m = i >> 1, o = dO + i * dw, t = m * dw
+    if (i & 1) {
+      if (m + 1 < sh) for (let c = 0; c < dw; c++) dst[o + c] = W1 * tmp[t + c] + W1 * tmp[t + dw + c]
+      else for (let c = 0; c < dw; c++) dst[o + c] = W1 * tmp[t + c] + 0
+    } else if (m >= 1 && m + 1 < sh) {
+      for (let c = 0; c < dw; c++) dst[o + c] = W2 * tmp[t + c] + W0 * tmp[t - dw + c] + W0 * tmp[t + dw + c]
+    } else {
+      for (let c = 0; c < dw; c++) {
+        dst[o + c] = W2 * tmp[t + c] + (m >= 1 ? W0 * tmp[t - dw + c] : 0) + (m + 1 < sh ? W0 * tmp[t + dw + c] : 0)
+      }
     }
   }
+}
+// The two outputs 2m, 2m + 1 of source cell m (where they exist), with the edge tests.
+function expandCell(src, row, sw, tmp, t, dw, m) {
+  const i = 2 * m
+  tmp[t + i] = W2 * src[row + m] + (m >= 1 ? W0 * src[row + m - 1] : 0) + (m + 1 < sw ? W0 * src[row + m + 1] : 0)
+  if (i + 1 < dw) tmp[t + i + 1] = W1 * src[row + m] + (m + 1 < sw ? W1 * src[row + m + 1] : 0)
 }
 
 // Level offsets and sizes of a pyramid over w × h.
