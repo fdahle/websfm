@@ -7,6 +7,9 @@ import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { estimateUpFromCameras } from '../../core/sfm/geometry.js'
 import CloudLegend from './CloudLegend.vue'
 import FloatingToolbox from './FloatingToolbox.vue'
+import FieldHelp from '../guide/FieldHelp.vue'
+import { TURNTABLE_DEFAULTS } from '../../core/defaults.user.js'
+import { TURNTABLE_TUNING } from '../../core/tuning.js'
 import {
   buildCloudStyle,
   scalarRange,
@@ -32,6 +35,7 @@ import { useCameraFrustums } from './useCameraFrustums.js'
 import { useCloudSelection } from './useCloudSelection.js'
 import { useMeasure3d } from './useMeasure3d.js'
 import { useRegionGizmo } from './useRegionGizmo.js'
+import { useTurntable } from './useTurntable.js'
 
 // pointSize is set from the ribbon's View ▸ Scene steppers.
 const { gridZ, background, nearClip, pointSize, pointBudget } = useViewerSettings()
@@ -68,8 +72,17 @@ const props = defineProps({
 // `edit-selection` carries { edits: [{ cloudId, mask }], keepSelected } for App to
 // apply through the store's non-destructive cloud-edit path. `select-tool` reports
 // the active selection tool (null | 'rect' | 'lasso') so the ribbon's View ▸ Select
-// toggles can show it — the same up-reporting raster measuring uses.
-const emit = defineEmits(['command', 'edit-selection', 'select-tool', 'pick', 'measure-tool', 'region-change'])
+// toggles can show it — the same up-reporting raster measuring uses. `turntable`
+// reports the turntable on or off, for View ▸ Camera ▸ Turntable.
+const emit = defineEmits([
+  'command',
+  'edit-selection',
+  'select-tool',
+  'pick',
+  'measure-tool',
+  'region-change',
+  'turntable',
+])
 
 const container = ref(null)
 // Set when WebGL is unavailable (headless/sandboxed/GPU-disabled). We degrade to an
@@ -258,6 +271,26 @@ const { regionHover, updateRegionBox, onRegionPointerDown, onRegionPointerMove, 
     emit,
     otherToolActive: () => !!selectTool.value || !!measureTool.value || !!props.pickMode,
   })
+const {
+  turntableOn,
+  turntableSeconds,
+  setTurntableSeconds,
+  recording,
+  recordProgress,
+  recordError,
+  setTurntable,
+  toggleTurntable,
+  stepTurntable,
+  recordTurn,
+  stopRecording,
+} = useTurntable({
+  view,
+  controls: () => controls,
+  alignUp: alignUpToScene,
+  container,
+  requestRender,
+  emit,
+})
 
 const BG = { dark: 0x1a1a1a, light: 0xf0f0f0, black: 0x000000 }
 function backgroundColor() {
@@ -722,6 +755,14 @@ function syncControlsUp() {
   controls.update()
 }
 
+// The turntable turns about the scene's up axis, which needs the camera's up on it:
+// the Top and Bottom presets tilt it into the ground plane.
+function alignUpToScene() {
+  if (!camera || camera.up.angleTo(sceneUp) < 1e-6) return
+  camera.up.copy(sceneUp)
+  syncControlsUp()
+}
+
 function setView(dir) {
   if (!camera || !controls) return
   const { up, right, fwd } = upBasis()
@@ -798,6 +839,7 @@ defineExpose({
   toggleSelectTool,
   toggleMeasureTool,
   exitTools,
+  toggleTurntable,
 })
 
 function onResize() {
@@ -833,6 +875,8 @@ function renderFrame() {
   frameRequested = false
   if (!renderer || !scene || !camera || !controls) return
   if (!container.value?.offsetParent) return // hidden: the resize on show re-requests
+  // The turntable turns the camera first, and keeps frames coming while it runs.
+  const turning = stepTurntable(performance.now())
   // Damping: update() keeps moving the camera for a while after the gesture ends and
   // returns true while it does; its 'change' event re-requests the next frame.
   controls.update()
@@ -844,6 +888,7 @@ function renderFrame() {
   }
   renderer.render(scene, camera)
   frustumsAfterFrame()
+  if (turning) requestRender()
 }
 
 watch(
@@ -1195,6 +1240,55 @@ onBeforeUnmount(() => {
       </template>
     </FloatingToolbox>
 
+    <!-- The turntable (View ▸ Camera ▸ Turntable): its speed, and one turn recorded as
+         a video. -->
+    <FloatingToolbox
+      v-if="turntableOn"
+      id="turntable-3d"
+      title="Turntable"
+      :width="236"
+      close-title="Stop the turntable"
+      @close="setTurntable(false)"
+    >
+      <label class="tb-field turn-field">
+        <FieldHelp
+          op="3d-view"
+          param="secondsPerTurn"
+          :value="turntableSeconds"
+          :default-value="TURNTABLE_DEFAULTS.secondsPerTurn"
+          >Seconds per turn</FieldHelp
+        >
+        <input
+          type="number"
+          class="tb-input"
+          :min="TURNTABLE_TUNING.minSecondsPerTurn"
+          :max="TURNTABLE_TUNING.maxSecondsPerTurn"
+          step="1"
+          :value="turntableSeconds"
+          :disabled="recording"
+          @change="(e) => setTurntableSeconds(e.target.value)"
+        />
+      </label>
+      <div class="tb-row">
+        <button
+          v-if="!recording"
+          class="tb-textbtn"
+          title="Save one full turn of the 3D view as a video"
+          @click="recordTurn"
+        >
+          Record one turn
+        </button>
+        <template v-else>
+          <span class="tb-count">Recording {{ Math.round(recordProgress * 100) }} %</span>
+          <button class="tb-textbtn" title="Stop and discard the video" @click="stopRecording(false)">Cancel</button>
+        </template>
+      </div>
+      <div v-if="recordError" class="tb-hint warn">{{ recordError }}</div>
+      <div v-else class="tb-hint tb-row">
+        {{ recording ? 'The view is locked until the turn is done.' : 'Drag to steer; it turns on when you let go.' }}
+      </div>
+    </FloatingToolbox>
+
     <!-- The selection tool's toolbox. The ribbon (View ▸ Select) chooses the tool;
          what you do with the selection lives here. -->
     <FloatingToolbox
@@ -1272,6 +1366,9 @@ onBeforeUnmount(() => {
   gap: 6px;
   align-items: center;
   margin: 2px 0 0;
+}
+.turn-field {
+  grid-template-columns: 1fr 64px;
 }
 .assign-class {
   flex: 1;

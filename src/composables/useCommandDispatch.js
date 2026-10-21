@@ -394,6 +394,9 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'reset-view':
         viewerRef.value?.resetView()
         break
+      case 'view-toggle-turntable':
+        viewerRef.value?.toggleTurntable()
+        break
       case 'view-toggle-cameras':
         showCameras.value = !showCameras.value
         break

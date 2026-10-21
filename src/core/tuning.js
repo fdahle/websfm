@@ -438,3 +438,14 @@ export const RESIDENT_TUNING = {
   // (core/features/matchStorage.js planMatchReads).
   matchReadWindowMiB: 32,
 }
+
+// The turntable video (components/viewers/useTurntable.js): MediaRecorder bitrate from
+// the canvas size. Point clouds are all fine detail, which a low bitrate smears into
+// blocks; 4 bits per pixel and second is ~8 Mbit/s for a 1920×1080 view.
+export const TURNTABLE_TUNING = {
+  bitsPerPixel: 4,
+  minBitrate: 4e6,
+  maxBitrate: 25e6,
+  minSecondsPerTurn: 5,
+  maxSecondsPerTurn: 600,
+}

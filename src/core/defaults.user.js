@@ -632,3 +632,9 @@ export const AUTO_MASK_DEFAULTS = {
   linked: true, // editing one side sets all four
   existing: 'merge', // 'merge' (union with the image's mask) | 'replace'
 }
+
+// The 3D view's turntable (View ▸ Camera ▸ Turntable; src/guide/3d-view.md). Persisted
+// per browser by useViewerSettings.
+export const TURNTABLE_DEFAULTS = {
+  secondsPerTurn: 24, // one full turn; also the length of a recorded video
+}

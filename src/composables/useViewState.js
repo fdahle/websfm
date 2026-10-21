@@ -30,8 +30,10 @@ export function useViewState({ mapMode, mapFrame }) {
   // the model frame) and the GPS markers of images without a pose.
   const showMapCameras = ref(true)
   // Modes entered from the ribbon and left from there or the tool's floating
-  // toolbox: the 3D selection tool (reported up by Viewer3D) and map GCP editing.
+  // toolbox: the 3D selection tool and the turntable (both reported up by Viewer3D),
+  // and map GCP editing.
   const selectTool3d = ref(null) // null | 'rect' | 'lasso'
+  const turntable3d = ref(false)
   const mapGcpEdit = ref(false)
   const { pointSize, setPointSize, cameraScale, setCameraScale } = useViewerSettings()
   const { basemap: mapBasemap, setBasemap: setMapBasemap } = useMapSettings()
@@ -53,6 +55,7 @@ export function useViewState({ mapMode, mapFrame }) {
     cameraScale: cameraScale.value,
     selectRect: selectTool3d.value === 'rect',
     selectLasso: selectTool3d.value === 'lasso',
+    turntable: turntable3d.value,
     mapGcpEdit: mapGcpEdit.value,
     mapBasemap: mapBasemap.value,
     mapBasemapReasons: mapBasemapReasons.value,
@@ -66,6 +69,7 @@ export function useViewState({ mapMode, mapFrame }) {
     showMapGrid,
     showMapCameras,
     selectTool3d,
+    turntable3d,
     mapGcpEdit,
     setPointSize,
     setCameraScale,

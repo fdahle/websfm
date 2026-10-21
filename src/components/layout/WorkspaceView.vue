@@ -69,6 +69,7 @@ const {
   showMapGrid,
   showMapCameras,
   selectTool3d,
+  turntable3d,
   mapGcpEdit,
   mapLayers,
   probeMapLayersAt,
@@ -309,6 +310,11 @@ onBeforeUnmount(() => {
         @select-tool="
           (t) => {
             selectTool3d = t
+          }
+        "
+        @turntable="
+          (on) => {
+            turntable3d = on
           }
         "
         :region-box="viewerRegionBox"

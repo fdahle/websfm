@@ -797,6 +797,8 @@ export const CAMERA_GROUP = {
       ],
     },
     { id: 'reset-view', label: 'Reset\nView', icon: 'view-reset' },
+    // The camera circles the scene; its toolbox holds the speed and the recording.
+    { id: 'view-toggle-turntable', label: 'Turntable', icon: 'turntable', activeKey: 'turntable' },
   ],
 }
 

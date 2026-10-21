@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Turntable (View ▸ Camera ▸ Turntable).** The 3D view turns the model slowly about
+  its up direction, for presenting a result or checking a dense cloud; dragging steers
+  it, and it carries on when you let go. Its toolbox sets the seconds per turn and
+  **Record one turn** saves exactly one turn of the view as a looping video (WebM, or
+  MP4 in Safari). A new guide article, **The 3D View**, covers navigation, the view
+  presets and the turntable.
 - **Example project and tutorial.** New users without photos of their own can open an
   example from the New Project dialog (**New here? Open the example project**) or the
   project picker (**Try an example**): 42 drone photos of Aukerman Park, Ohio, from

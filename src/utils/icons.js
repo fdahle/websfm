@@ -40,6 +40,14 @@ export const icons = {
   'view-reset': `
     <path d="M4 11a8 8 0 1 1 1.5 5" />
     <path d="M4 17v-5h5" />`,
+  // A turntable: an object on a platter (its back edge hidden behind the object),
+  // with the turn's arrow above.
+  'turntable': `
+    <path d="M4 17a8 2.5 0 0 0 16 0" />
+    <path d="M4 17a8 2.5 0 0 1 5-2.3M15 14.7a8 2.5 0 0 1 5 2.3" />
+    <rect x="9" y="9" width="6" height="7.5" rx="1" />
+    <path d="M5 7.5a8 3 0 0 1 14 0" />
+    <path d="M19.7 5l-.7 2.5-2.2-1.5" />`,
   'grid': `
     <rect x="4" y="4" width="16" height="16" rx="1.5" />
     <path d="M4 10h16M4 14h16M10 4v16M14 4v16" />`,

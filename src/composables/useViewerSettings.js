@@ -1,4 +1,6 @@
 import { ref } from 'vue'
+import { TURNTABLE_DEFAULTS } from '../core/defaults.user.js'
+import { TURNTABLE_TUNING } from '../core/tuning.js'
 
 // 3D-viewer display preferences. Persisted to localStorage (like useTheme /
 // useGlossarySettings) so they survive reloads, held in a single shared ref so the
@@ -45,6 +47,10 @@ const pointSize = ref(readNumber(POINT_SIZE_KEY, 1, 8, 3))
 const POINT_BUDGET_KEY = 'viewer3dPointBudget'
 const pointBudget = ref(readNumber(POINT_BUDGET_KEY, 1, 30, 5))
 const cameraScale = ref(readNumber(CAMERA_SCALE_KEY, 0.2, 3, 1))
+// The turntable's speed (View ▸ Camera ▸ Turntable), set in its toolbox.
+const TURNTABLE_KEY = 'viewer3dTurntableSeconds'
+const { minSecondsPerTurn: TURN_MIN, maxSecondsPerTurn: TURN_MAX } = TURNTABLE_TUNING
+const turntableSeconds = ref(readNumber(TURNTABLE_KEY, TURN_MIN, TURN_MAX, TURNTABLE_DEFAULTS.secondsPerTurn))
 
 export function useViewerSettings() {
   function setGridZ(v) {
@@ -81,6 +87,12 @@ export function useViewerSettings() {
     cameraScale.value = v
     writeValue(CAMERA_SCALE_KEY, v)
   }
+  function setTurntableSeconds(value) {
+    const v = Number(value)
+    if (!Number.isFinite(v) || v < TURN_MIN || v > TURN_MAX) return
+    turntableSeconds.value = v
+    writeValue(TURNTABLE_KEY, v)
+  }
   return {
     gridZ,
     setGridZ,
@@ -94,5 +106,7 @@ export function useViewerSettings() {
     setCameraScale,
     pointBudget,
     setPointBudget,
+    turntableSeconds,
+    setTurntableSeconds,
   }
 }
