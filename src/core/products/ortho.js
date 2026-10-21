@@ -1623,10 +1623,9 @@ function visitSequence(groupMaps, passes) {
 }
 
 // The split's time model (opts.planShares), measured on quarry-347 at long side 12,000
-// (2026-10-21, one and five workers alike): a map visit's work (labels, colour, seams;
-// a 2048² block) ~0.2 s, and a unit of predicted reads (a map read 1, a photo decode 3)
-// ~0.05 s.
-const ORTHO_VISIT_S = 0.2, ORTHO_READ_S = 0.05
+// (2026-10-21, six workers): a map visit's work (labels, colour, seams; a 2048² block)
+// ~0.17 s, and a unit of predicted reads (a map read 1, a photo decode 3) ~0.08 s.
+const ORTHO_VISIT_S = 0.17, ORTHO_READ_S = 0.08
 
 // Relative cost of a cache miss: a photo read and decode against a map's planes read
 // (quarry-347, 2026-10-20: ~0.2–0.3 s against ~0.07 s).
