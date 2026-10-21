@@ -1,0 +1,16 @@
+Aukerman Park — the example project of websfm
+=============================================
+
+Photos: OpenDroneMap, example dataset "odm_data_aukerman"
+        https://github.com/OpenDroneMap/odm_data_aukerman
+Licence: CC0 1.0 Universal (public domain dedication)
+        https://creativecommons.org/publicdomain/zero/1.0/
+
+Thank you to OpenDroneMap and the contributors of its example datasets for making
+real survey data free to use.
+
+What websfm changed: 42 of the 77 photos (DSC00268–DSC00311, the flight's second
+lap, without DSC00270 and DSC00271), downscaled to 2,400 px on the long side, with
+the EXIF image size updated and FocalLengthIn35mmFormat = 25 added (Sony DSC-WX220:
+4.45 mm = 25 mm equivalent). Built with scripts/examples/make-example.py in
+https://github.com/fdahle/websfm.

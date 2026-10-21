@@ -14,7 +14,7 @@ import { EXAMPLES } from '../src/core/examples.js'
 const RELEASE = 'https://github.com/fdahle/websfm/releases/download/examples-v1/'
 // Bump the release tag + these together when an example changes.
 const SHA256 = {
-  aukerman: 'ac61d63f08c69843015776f71c5f2f360623b37a74aac5cd49b59c135f2bf69d',
+  aukerman: 'c48230f4dea9f51e3661d863bc6e05db2719541a785c5aef1c61f65d17e8c986',
 }
 
 const root = new URL('../public/examples/', import.meta.url)

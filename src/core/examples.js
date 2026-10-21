@@ -9,7 +9,8 @@
 // and hands the Files to the normal image import.
 
 // id → what the picker shows and how the project is set up. `tutorial` is the
-// guide article that walks through this set (src/guide/).
+// guide article that walks through this set (src/guide/). `credit` names whose photos
+// they are: the picker, About ▸ Licenses and the CREDITS.txt in the download all show it.
 export const EXAMPLES = {
   aukerman: {
     title: 'Aukerman Park',
@@ -19,9 +20,13 @@ export const EXAMPLES = {
     imageCount: 42,
     approxBytes: 51_000_000,
     tutorial: 'tutorial',
-    credit: 'OpenDroneMap odm_data_aukerman',
-    license: 'CC0 1.0 (public domain)',
+    credit: 'OpenDroneMap',
+    dataset: 'odm_data_aukerman',
     sourceUrl: 'https://github.com/OpenDroneMap/odm_data_aukerman',
+    license: 'CC0 1.0',
+    licenseId: 'CC0-1.0',
+    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+    changes: "42 of the 77 photos (the flight's second lap), downscaled to 2,400 px",
   },
 }
 

@@ -380,7 +380,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     await handleCreateProject({ name: example.title, sceneType: example.sceneType, crs: example.crs })
     if (!currentProjectId.value || currentProjectId.value === before) return
     log(
-      `Example "${example.title}": ${files.length} images from ${example.credit} (${example.license})`,
+      `Example "${example.title}": ${files.length} photos by ${example.credit} (${example.dataset}, ${example.license})`,
       'info',
       'Project',
     )

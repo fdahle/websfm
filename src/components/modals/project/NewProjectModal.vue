@@ -128,7 +128,7 @@ function submit() {
       <button
         type="button"
         class="example-link"
-        :title="`${example.imageCount} drone photos and a step-by-step walkthrough (${formatBytes(example.approxBytes)} download)`"
+        :title="`${example.imageCount} drone photos by ${example.credit} (${example.license}) and a step-by-step walkthrough, ${formatBytes(example.approxBytes)} download`"
         @click="emit('example', exampleId)"
       >
         New here? Open the example project

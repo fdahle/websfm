@@ -65,7 +65,7 @@ const tabs = [
 
     <!-- Third-party licenses (obligation) -->
     <div v-show="tab === 'licenses'" class="pane">
-      <p class="lede">Bundled third-party software and models, with their licenses:</p>
+      <p class="lede">Bundled third-party software, models and example data, with their licenses:</p>
       <div v-for="g in THIRD_PARTY" :key="g.group" class="lic-group">
         <div class="group-head">{{ g.group }}</div>
         <div v-for="it in g.items" :key="it.name" class="lic-item">

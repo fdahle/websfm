@@ -21,6 +21,8 @@
 // modal renders this list; there is no build-time scanner, so this file is the
 // source of truth and going stale means shipping an incomplete notice.
 
+import { EXAMPLES } from '../examples.js'
+
 /** Pure-credit acknowledgments — prior art / architectural inspiration. */
 export const ACKNOWLEDGMENTS = [
   {
@@ -159,5 +161,17 @@ export const THIRD_PARTY = [
       },
       { name: 'SAM 2', license: 'Apache-2.0', url: 'https://github.com/facebookresearch/sam2' },
     ],
+  },
+  {
+    // The example projects' photos (core/examples.js), downloaded when one is opened.
+    // CC0 asks for nothing, but the people who flew and shared them are credited here,
+    // in the project picker and in each download's CREDITS.txt.
+    group: 'Example data',
+    items: Object.values(EXAMPLES).map((e) => ({
+      name: `${e.title} photos — ${e.credit} (${e.dataset})`,
+      license: e.licenseId,
+      url: e.sourceUrl,
+      notice: `Thank you to ${e.credit} for sharing these photos. websfm uses ${e.changes}.`,
+    })),
   },
 ]

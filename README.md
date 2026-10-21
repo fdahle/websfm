@@ -28,11 +28,14 @@ app runs on your machine and keeps your projects in your browser.
 ## Your first project
 
 No photos at hand? In the first dialog (or the project picker), choose **Open the
-example project**. It downloads 42 drone photos of a park in Ohio (about 50 MB, public
-domain, from [OpenDroneMap](https://github.com/OpenDroneMap/odm_data_aukerman)) and
+example project**. It downloads 42 drone photos of a park in Ohio (about 50 MB) and
 opens a step-by-step walkthrough in the guide, from feature detection to a 3D point
 cloud, an elevation model and an orthophoto. With a graphics card (WebGPU) the
 computing takes about two minutes; without one, about four at lower quality.
+
+The photos are [OpenDroneMap's Aukerman dataset](https://github.com/OpenDroneMap/odm_data_aukerman),
+which they share as public domain (CC0 1.0). Many thanks to OpenDroneMap and its
+contributors for making real survey data free to use.
 
 With your own photos: create a project, drop the images onto the sidebar, and
 follow **Other ▸ Guide ▸ Getting Started**. Hover a setting's underlined label for what

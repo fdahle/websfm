@@ -212,7 +212,10 @@ onBeforeUnmount(() => {
         <span class="open-icon"><Icon :name="ex.sceneType === 'aerial' ? 'map-pin' : 'cube'" /></span>
         <span class="open-text">
           <span class="open-title">{{ ex.title }}</span>
-          <span class="open-sub">{{ ex.summary }} {{ formatBytes(ex.approxBytes) }} download.</span>
+          <span class="open-sub"
+            >{{ ex.summary }} Photos: {{ ex.credit }} ({{ ex.license }}).
+            {{ formatBytes(ex.approxBytes) }} download.</span
+          >
         </span>
       </button>
     </div>

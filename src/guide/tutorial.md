@@ -6,7 +6,9 @@ category: Start here
 order: 0
 ---
 This walkthrough uses the example project: 42 photos of Aukerman Park in Ohio, taken
-from a small drone about 70 m above the ground (public domain, from OpenDroneMap). To
+from a small drone about 70 m above the ground. They come from
+[OpenDroneMap's example data](https://github.com/OpenDroneMap/odm_data_aukerman),
+shared as public domain (CC0 1.0); thank you, OpenDroneMap. To
 open it, choose **Open the example project** in the New Project dialog, or **Try an
 example** in the project picker (click the project name at the top left). Each step
 below says what to click, what to expect, and what to look at before going on. The

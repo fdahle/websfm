@@ -10,12 +10,15 @@ Needs Pillow and exiftool:
 
     python scripts/examples/make-example.py SRC_DIR OUT_DIR \
         [--max-dim 2400] [--first A.JPG --last B.JPG] [--exclude C.JPG ...] [--focal35 25]
+        [--credits CREDITS.txt]
 
 The Aukerman example is SRC_DIR = OpenDroneMap/odm_data_aukerman/images (CC0) with
 --first DSC00268.JPG --last DSC00311.JPG (the second of the flight's two laps),
 --exclude DSC00270.JPG DSC00271.JPG (two corner shots with one weak pair each, which
-do not register) and --focal35 25 (Sony DSC-WX220: 4.45 mm = 25 mm equivalent, per
-Sony's spec sheet).
+do not register), --focal35 25 (Sony DSC-WX220: 4.45 mm = 25 mm equivalent, per
+Sony's spec sheet) and --credits scripts/examples/aukerman-CREDITS.txt.
+
+Every example carries a CREDITS.txt naming whose photos they are and their licence.
 """
 import argparse
 import json
@@ -35,6 +38,7 @@ def main():
     ap.add_argument('--last', help='last file name to include (sorted order)')
     ap.add_argument('--exclude', nargs='*', default=[], help='file names to leave out')
     ap.add_argument('--focal35', type=float, help='write FocalLengthIn35mmFormat')
+    ap.add_argument('--credits', type=Path, required=True, help='whose photos, and their licence (copied as CREDITS.txt)')
     args = ap.parse_args()
 
     names = sorted(p.name for p in args.src.iterdir() if p.suffix.lower() in ('.jpg', '.jpeg'))
@@ -63,6 +67,7 @@ def main():
         files.append({'name': name, 'bytes': target.stat().st_size})
         print(f'{name}: {size[0]}×{size[1]}, {files[-1]["bytes"] / 1e6:.2f} MB')
 
+    (args.out / 'CREDITS.txt').write_text(args.credits.read_text())
     (args.out / 'manifest.json').write_text(json.dumps({'files': files}, indent=1) + '\n')
     total = sum(f['bytes'] for f in files)
     print(f'{len(files)} images, {total / 1e6:.1f} MB → {args.out}')
