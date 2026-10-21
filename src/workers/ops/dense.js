@@ -173,9 +173,21 @@ export function makeDenseOps({ rasterize }) {
   // neighbours), runs PatchMatch MVS, and returns one depth map per reference image
   // (raw depth/cost planes + colours for fusion, plus a display PNG). Pure compute
   // lives in core/dense/mvs.js; pixel decoding is worker-only (OffscreenCanvas).
+  // Whether this worker's depth maps would run on the GPU (the same test as
+  // computeDepthMaps), so the store keeps a GPU run on one worker and splits a CPU run
+  // over the pool. The main thread cannot tell: headless Chrome, for one, exposes
+  // navigator.gpu with no adapter, and a worker's adapter can differ from the page's.
+  async function depthBackend() {
+    return { result: { gpu: isGpuAvailable() && !!(await ensureDevice()) } }
+  }
+
   async function computeDepthMaps([input], { emit }) {
     // `sparse`: the packed sparse model (core/dense/sparseInput.js), transferred.
+    // `refs`: the indices of `images` this call computes (default all). A run split over
+    // the pool (core/dense/depthSplit.js) gives each worker every image, so source views
+    // are chosen among all cameras as in a single run, and its own share to compute.
     const { images, sparse, settings = {} } = input
+    const order = input.refs ?? images.map((_, i) => i)
     // Every knob through the engine-boundary checks (core/dense/mvs.js depthMapSettings):
     // a blank / non-finite / out-of-range value takes its default.
     const {
@@ -226,7 +238,8 @@ export function makeDenseOps({ rasterize }) {
     }
 
     const t0 = performance.now()
-    emit('log', [`Depth maps: ${pluralize(images.length, 'image')} — working ≤${maxDim}px, `
+    const share = input.refs ? `${order.length} of ${images.length} images on this worker` : pluralize(images.length, 'image')
+    emit('log', [`Depth maps: ${share} — working ≤${maxDim}px, `
       + `≤${maxSources} sources (best-${autoBestKMode ? 'auto' : bestK}), window ${window} (${2 * window + 1}×${2 * window + 1}), `
       + `${iterations} PatchMatch iters`, 'info', 'Dense'])
 
@@ -264,16 +277,16 @@ export function makeDenseOps({ rasterize }) {
     // image's own size (maxDim² when unknown); source count uses maxSources.
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     const proj = projectDensePeakBytes({
-      nImages: images.length, maxDim, nSources: maxSources, backend: backend ? 'gpu' : 'wasm',
+      nImages: order.length, maxDim, nSources: maxSources, backend: backend ? 'gpu' : 'wasm',
       // A fisheye's widened canvas (undistortRaster) at the photo's working scale.
-      pixels: images.map((im) => {
+      pixels: order.map((i) => images[i]).map((im) => {
         const px = workingPixels(im.width, im.height, maxDim)
         const c = !im.fid && !hasDistortion(im.selfCal) ? fisheyeCanvas(im.K, im.dist, im.width, im.height) : null
         return c ? Math.round(px * (c.width * c.height) / (im.width * im.height)) : px
       }),
-      retainedMaps: streamMaps ? 1 : images.length,
+      retainedMaps: streamMaps ? 1 : order.length,
       // The in-memory cross-view filter below; streamed maps are filtered by its own pass.
-      filterMaps: geomConsistency && !streamMaps ? images.length : 0,
+      filterMaps: geomConsistency && !streamMaps ? order.length : 0,
     })
     emit('log', [`Dense: projected peak memory ≈ ${formatBytes(proj.total)} `
       + `(store ${formatBytes(proj.store)} + raster ${formatBytes(proj.raster)}`
@@ -289,21 +302,21 @@ export function makeDenseOps({ rasterize }) {
     // so the cache can evict a raster the moment it's no longer needed — keeping the
     // resident working set small instead of holding every image's pixels at once.
     const sparseIndex = viewIndex(sparse) // image → the points it sees, once per run
-    const srcUuidsByImg = images.map((img) =>
-      selectSourceViews(cameras, sparse, img.uuid, { maxSources, minAngleDeg }, sparseIndex))
+    const srcUuidsByImg = new Map(order.map((i) =>
+      [i, selectSourceViews(cameras, sparse, images[i].uuid, { maxSources, minAngleDeg }, sparseIndex)]))
     const urlByUuid = new Map(images.map((im) => [im.uuid, im.url]))
     // Per-url intrinsics + distortion, so getRaster can undistort each source once
     // (url↔image is 1:1, and undistortion is independent of ref/source role).
     const metaByUrl = new Map(images.map((im) =>
       [im.url, { K: im.K, dist: im.dist || null, selfCal: im.selfCal || null, fid: im.fid || null,
         photo: im.width > 0 && im.height > 0 ? { width: im.width, height: im.height } : null }]))
-    const usedSets = srcUuidsByImg.map((srcUuids, i) => {
+    const usedSets = new Map(order.map((i) => {
       const set = new Set([images[i].url])
-      for (const u of srcUuids) { const url = urlByUuid.get(u); if (url) set.add(url) }
-      return set
-    })
+      for (const u of srcUuidsByImg.get(i)) { const url = urlByUuid.get(u); if (url) set.add(url) }
+      return [i, set]
+    }))
     const useCount = new Map()
-    for (const set of usedSets) for (const url of set) useCount.set(url, (useCount.get(url) || 0) + 1)
+    for (const set of usedSets.values()) for (const url of set) useCount.set(url, (useCount.get(url) || 0) + 1)
 
     const ledger = createMemLedger()
     const rasterCache = new Map() // url → { data, width, height, scale }
@@ -326,7 +339,7 @@ export function makeDenseOps({ rasterize }) {
     // Drop every raster this image was the last consumer of (decrement its remaining
     // uses; delete + untrack at zero). Runs on every path out of the loop body.
     const releaseAfter = (i) => {
-      for (const url of usedSets[i]) {
+      for (const url of usedSets.get(i)) {
         const c = (useCount.get(url) || 0) - 1
         useCount.set(url, c)
         if (c <= 0) { rasterCache.delete(url); ledger.release(`raster:${srcKey(url)}`) }
@@ -349,16 +362,18 @@ export function makeDenseOps({ rasterize }) {
     const tLoop = performance.now()
     const updateLoopShare = (done) => {
       if (!geomConsistency) return
-      const s = geomFilterLoopShare({ loopMs: performance.now() - tLoop, done, total: images.length, pxDone })
+      const s = geomFilterLoopShare({ loopMs: performance.now() - tLoop, done, total: order.length, pxDone })
       if (s != null) loopShare = s
     }
-    const loopFraction = (v) => (images.length > 0 ? loopShare * (v / images.length) : 0)
-    for (let i = 0; i < images.length; i++) {
+    const total = order.length
+    const loopFraction = (v) => (total > 0 ? loopShare * (v / total) : 0)
+    for (let k = 0; k < total; k++) {
+      const i = order[k]
       const img = images[i]
-      if (i > 0) updateLoopShare(i)
-      emit('progress', [i, images.length, img.name, loopFraction(i)])
+      if (k > 0) updateLoopShare(k)
+      emit('progress', [k, total, img.name, loopFraction(k)])
 
-      const srcUuids = srcUuidsByImg[i]
+      const srcUuids = srcUuidsByImg.get(i)
       if (srcUuids.length === 0) {
         emit('log', [`Depth maps: ${img.name} skipped (no overlapping views)`, 'warn', 'Dense'])
         releaseAfter(i)
@@ -401,8 +416,8 @@ export function makeDenseOps({ rasterize }) {
         onLog: (m, l, c) => emit('log', [`${img.name}: ${m}`, l, c]),
         // Fractional within-image progress (0..1 across pyramid levels), folded into
         // the per-image emit so the bar glides through a minute-long WASM image.
-        onProgress: (f) => emit('progress', [i + f, images.length, img.name, loopFraction(i + f)]),
-        validate: backend && i === 0,
+        onProgress: (f) => emit('progress', [k + f, total, img.name, loopFraction(k + f)]),
+        validate: backend && k === 0,
       }
       let dm
       try {
@@ -509,7 +524,7 @@ export function makeDenseOps({ rasterize }) {
       releaseAfter(i) // evict rasters this image was the last consumer of
     }
 
-    emit('log', [`Depth maps: ${streamMaps ? streamed : maps.length}/${images.length} computed in ${((performance.now() - t0) / 1000).toFixed(1)}s; `
+    emit('log', [`Depth maps: ${streamMaps ? streamed : maps.length}/${total} computed in ${((performance.now() - t0) / 1000).toFixed(1)}s; `
       + `raster cache peak ${formatBytes(ledger.peak())}`, 'success', 'Dense'])
 
     // Cross-view geometric consistency — the only filter that sees sky/vegetation for
@@ -520,7 +535,7 @@ export function makeDenseOps({ rasterize }) {
     // preview, so they intentionally still show the raw plane.
     let geomFilterMs = null
     if (geomConsistency && maps.length && !streamMaps) {
-      updateLoopShare(images.length)
+      updateLoopShare(total)
       const LOOP_SHARE = loopShare
       const loopMs = performance.now() - tLoop
       emit('progress', [0, maps.length, 'Filtering depth maps…', LOOP_SHARE])
@@ -549,7 +564,7 @@ export function makeDenseOps({ rasterize }) {
     }
 
     // Streaming: the caller's filter pass owns the rest of the bar, from `loopShare`.
-    if (!streamMaps) emit('progress', [images.length, images.length, 'Depth maps complete', 1])
+    if (!streamMaps) emit('progress', [total, total, 'Depth maps complete', 1])
     // Stage A summary — settings + throughput + the cross-view filter's cost and bite.
     // Persisted by the store (reconstruction.json) so a dense baseline survives a reload.
     const med = (vals) => {
@@ -561,7 +576,7 @@ export function makeDenseOps({ rasterize }) {
     const summary = {
       date: new Date().toISOString(),
       nMaps: streamMaps ? streamed : maps.length,
-      nImages: images.length,
+      nImages: total,
       backend: startedOnGpu ? (gpuFallbacks ? 'gpu→wasm' : 'gpu') : 'wasm',
       gpuRequested: !!settings.useGpu,
       gpuFallbacks,
@@ -590,8 +605,8 @@ export function makeDenseOps({ rasterize }) {
       streamed: !!streamMaps,
     }
     // Streaming: the bar share the cross-view filter pass should take over from.
-    if (geomConsistency && streamMaps) updateLoopShare(images.length)
-    return { result: { maps, summary, loopShare: streamMaps && geomConsistency ? loopShare : 1 }, transfer }
+    if (geomConsistency && streamMaps) updateLoopShare(total)
+    return { result: { maps, summary, perImage, loopShare: streamMaps && geomConsistency ? loopShare : 1 }, transfer }
   }
 
   // The cross-view consistency filter over SAVED depth maps: file handles in, read on
@@ -751,5 +766,5 @@ export function makeDenseOps({ rasterize }) {
     return out
   }
 
-  return { computeDepthMaps, filterDepthMaps, densify }
+  return { depthBackend, computeDepthMaps, filterDepthMaps, densify }
 }

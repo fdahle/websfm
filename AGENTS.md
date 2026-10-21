@@ -16,6 +16,12 @@ Rules that are easy to miss:
   `src/core/tuning.js`; nothing else hard-codes them.
 - After a change under `crates/`, run `npm run build:wasm` and commit `src/wasm/`
   with it.
+- Use every core for heavy CPU work. Spread independent items (images, pairs, maps,
+  blocks) over the worker pool (`POOL_SIZE`, `worker:` pins a call; split as in
+  `core/dense/depthSplit.js`, each worker with its share of the memory budget), or run
+  inner loops on the threaded WASM build (rayon, `src/wasm/reconstruction-mt`). One
+  worker is right only where it is measured to be faster (a GPU path; fusion, which is
+  bound by reads): say so in a comment. Log how many workers a run used.
 - Run `npm test` and `npm run typecheck` before calling a change done.
 - In the final summary, say which help files (`src/guide/`, `src/glossary/`) were
   updated, or that none needed it.

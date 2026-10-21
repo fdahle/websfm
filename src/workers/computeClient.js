@@ -335,6 +335,8 @@ export const reconstruct = streamingOp('reconstruct')
 // (its planes transferred) and the result carries no maps: the caller persists and
 // drops them, and runs the cross-view filter itself (filterDepthMaps).
 export const computeDepthMaps = streamingOp('computeDepthMaps')
+// Whether a depth-map run on `worker` would use the GPU: resolves to { gpu }.
+export const depthBackend = (worker = 0) => call('depthBackend', [], { worker })
 
 // The cross-view filter over SAVED depth maps (file handles, read on demand). Emits
 // one 'filtered' event per map ({ uuid, depth, coverage }, the filtered plane

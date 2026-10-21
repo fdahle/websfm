@@ -3,9 +3,10 @@ import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { qualityToMaxDim, fitDepthQuality, filterConfig, filterSettings, logFilterCache, logFilterTotals, emptyFilterTotals, mergeFusionCounters, logFusionStream, finishFusion } from '../../core/dense/mvs.js'
 import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
-import { computeDepthMaps as workerComputeDepthMaps, POOL_SIZE, terminateAll, releaseIdleWorkers, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
+import { computeDepthMaps as workerComputeDepthMaps, depthBackend as workerDepthBackend, POOL_SIZE, terminateAll, releaseIdleWorkers, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
-import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
+import { DEFAULT_BUDGET_BYTES, formatBytes, projectDensePeakBytes, workingPixels } from '../../core/dense/memBudget.js'
+import { contiguousChunks, depthWorkerCount, mergeDepthSummaries } from '../../core/dense/depthSplit.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
 import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
@@ -170,14 +171,17 @@ export function createDense({
           + `(¼-scale presets of ${nativeLong}px native)`, 'info', 'Dense')
       }
       settings = resolved
-      const { maps, summary: aSummary, loopShare } = await workerComputeDepthMaps(
-        { images: inputImages, sparse, settings: withRegion({ ...settings, streamMaps: !!run }) },
-        { transfer: sparseInputTransfer(sparse), onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
-          onEvent: (ev, [m]) => { if (ev === 'map' && run) { takePreview(m); run.add(m) } } },
-      )
+      const { maps, summary: aSummary, loopShare } = await runDepthMaps(inputImages, sparse,
+        withRegion({ ...settings, streamMaps: !!run }), onProgress,
+        run ? (m) => { takePreview(m); run.add(m) } : null)
       let stageSummary = aSummary ?? null
       if (run) {
         await run.settled()
+        // A split run's maps arrive in finishing order. Keep the input order, so the
+        // filter and fusion (which keeps the first point per cell) see the maps as one
+        // worker would have written them, and the result does not depend on the split.
+        const at = new Map(inputImages.map((im, k) => [im.uuid, k]))
+        run.metas.sort((a, b) => at.get(a.uuid) - at.get(b.uuid))
         if (settings.geomConsistency !== false && run.metas.length) {
           stageSummary = await filterSavedDepthMaps(run, settings, stageSummary, loopShare, onProgress)
         }
@@ -197,6 +201,52 @@ export function createDense({
     } catch (err) {
       log(`Depth-map error: ${(writeFailure ?? err)?.message ?? err}`, 'error', 'Dense')
       reconStatus.value = 'error'
+    }
+  }
+
+  // Stage A on the pool. On the CPU each map is one single-threaded WASM PatchMatch, so a
+  // streamed run splits its images over the workers (core/dense/depthSplit.js), each
+  // with its share of the memory budget. A GPU run stays on one worker (the device is
+  // the bottleneck), and so does an in-memory run, whose filter needs every map at once.
+  // `onMap` takes each streamed map; null for an in-memory run.
+  async function runDepthMaps(images, sparse, settings, onProgress, onMap) {
+    const onLog = (m, l, c) => log(m, l, c)
+    const onEvent = (ev, [m]) => { if (ev === 'map' && onMap) onMap(m) }
+    const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+    let workers = 1
+    if (onMap && images.length > 1 && !(settings.useGpu && (await workerDepthBackend(0)).gpu)) {
+      const nSources = Math.min(16, settings.maxSources ?? 6)
+      // One worker's peak: its raster cache plus the run's shared inputs (counted whole).
+      const perWorkerBytes = projectDensePeakBytes({
+        nImages: images.length, maxDim: settings.maxDim, nSources, backend: 'wasm',
+        pixels: images.map((im) => workingPixels(im.width, im.height, settings.maxDim)),
+        retainedMaps: 1, filterMaps: 0,
+      }).total
+      workers = depthWorkerCount({ n: images.length, poolSize: POOL_SIZE, budget, perWorkerBytes })
+    }
+    if (workers === 1) {
+      return workerComputeDepthMaps({ images, sparse, settings }, {
+        worker: 0, transfer: sparseInputTransfer(sparse), onLog, onEvent,
+        onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+      })
+    }
+    log(`Depth maps: on the CPU, split over ${workers} workers (${formatBytes(budget / workers)} of the `
+      + `memory budget each)`, 'info', 'Dense')
+    const chunks = contiguousChunks(images.length, workers)
+    const counts = new Array(workers).fill(0), fractions = new Array(workers).fill(0)
+    const t0 = performance.now()
+    // Each worker gets its own copy of the sparse inputs (no transfer: there are several).
+    const parts = await Promise.all(chunks.map((refs, w) => workerComputeDepthMaps(
+      { images, sparse, refs, settings: { ...settings, memBudgetBytes: budget / workers } },
+      { worker: w, onLog, onEvent,
+        onProgress: (d, t, lbl, f) => {
+          counts[w] = d; fractions[w] = f
+          onProgress?.(counts.reduce((x, y) => x + y, 0), images.length, lbl, fractions.reduce((x, y) => x + y, 0) / workers)
+        } }))).catch((err) => { terminateAll(String(err?.message ?? err)); throw err })
+    return {
+      maps: [],
+      summary: mergeDepthSummaries(parts, { totalMs: performance.now() - t0, nImages: images.length }),
+      loopShare: parts.reduce((x, p) => x + p.loopShare, 0) / workers,
     }
   }
 
@@ -235,10 +285,7 @@ export function createDense({
     } else {
       const t0 = performance.now()
       const fractions = new Array(workers).fill(from), counts = new Array(workers).fill(0)
-      const chunks = Array.from({ length: workers }, (_, w) => {
-        const a = Math.floor(w * n / workers), b = Math.floor((w + 1) * n / workers)
-        return Array.from({ length: b - a }, (_, k) => a + k)
-      })
+      const chunks = contiguousChunks(n, workers)
       const parts = await Promise.all(chunks.map((refs, w) => workerFilterDepthMaps(
         { maps: entries, settings, from, refs, workers },
         { worker: w, onLog: (m, l, c) => log(m, l, c), onEvent,

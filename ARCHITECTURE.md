@@ -123,6 +123,12 @@ to the algorithm; the other steps differ only in file names.
   The dialogs and the core code read the same objects.
 - **The Ribbon chooses; a floating toolbox runs.** Ribbon commands open a dialog or
   start a tool. The controls for a running tool live in its toolbox over the view.
+- **Heavy CPU work uses every core.** `workers/computeClient.js` runs a pool of up to
+  eight workers. A stage made of independent items spreads them over the pool (matching
+  by pair, detection by image, depth maps and the ortho by chunks, each worker with its
+  share of the memory budget), and bundle adjustment runs on WASM threads. Where a stage
+  stays on one worker (a GPU path, or fusion, which is bound by reads), a comment says
+  why.
 - **Log derived values with their inputs.** Every automatically chosen value gets a
   log line, so a run can be reproduced from its log.
 - **User-visible changes update the user guide** in `src/guide/` in the same change.
