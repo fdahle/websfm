@@ -531,7 +531,27 @@ try {
   // reconstruction's points are scored against it here, in node.
   const lidarCfg = cfg.reference?.lidar ?? null
   let lidarGrid = null
+  // `profileWorkers: { stage, afterSeconds, seconds }`: during that stage (its config key,
+  // e.g. "ortho:small"), CPU-profile every worker for `seconds` from `afterSeconds` in;
+  // the top functions by self time go to the console, the profiles to
+  // <prefix>.<stage>.worker<k>.cpuprofile (DevTools ▸ Performance loads them).
+  const profileDuring = (key) => {
+    const pw = cfg.profileWorkers
+    if (!pw || pw.stage !== key || !heap) return null
+    const NL = String.fromCharCode(10)
+    return (async () => {
+      await new Promise((r) => setTimeout(r, (pw.afterSeconds ?? 60) * 1000))
+      const out = await heap.profile(pw.seconds ?? 60)
+      for (const [k, w] of out.entries()) {
+        if (!w.totalMs) continue
+        await writeFile(`${outPrefix}.${key.replace(/[^a-z0-9]+/gi, '_')}.worker${k}.cpuprofile`, JSON.stringify(w.profile))
+        console.log(`== worker CPU profile ${key} #${k} (${w.worker.split('/').pop()}), ${w.totalMs.toFixed(0)} ms sampled, self ms:` + NL
+          + w.top.map(([f, us]) => `   ${(us / 1000).toFixed(0).padStart(7)}  ${f}`).join(NL))
+      }
+    })().catch((err) => console.log(`== worker CPU profile failed: ${err?.message ?? err}`))
+  }
   const runStage = async (stage, settings, key = stage) => {
+    profileDuring(key)
     const s = stage === 'recon' && lidarCfg ? { ...settings, exportPoints: true } : settings
     lastLogAt = Date.now()
     heap.mark('(before stage)'); heap.take()

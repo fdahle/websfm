@@ -71,6 +71,37 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
       const out = { segments: segments.splice(0), workers: [...workers.values()].map((w) => ({ ...w })) }
       return out
     },
+    // CPU profiles of every worker for `seconds` (Profiler over the same sessions): each
+    // worker's top functions by self time, and the raw profiles for DevTools.
+    async profile(seconds, { interval = 1000 } = {}) {
+      const ids = [...workers.keys()]
+      await Promise.all(ids.map(async (sid) => {
+        await send(sid, 'Profiler.enable')
+        await send(sid, 'Profiler.setSamplingInterval', { interval })
+        await send(sid, 'Profiler.start')
+      }))
+      await new Promise((r) => setTimeout(r, seconds * 1000))
+      return Promise.all(ids.map(async (sid) => {
+        const r = await send(sid, 'Profiler.stop')
+        const profile = r?.profile
+        const self = new Map()
+        if (profile) {
+          const dt = new Map()
+          for (let i = 1; i < (profile.samples ?? []).length; i++) {
+            dt.set(profile.samples[i], (dt.get(profile.samples[i]) ?? 0) + (profile.timeDeltas[i] ?? 0))
+          }
+          for (const n of profile.nodes) {
+            const us = dt.get(n.id) ?? 0
+            if (!us) continue
+            const { functionName, url, lineNumber } = n.callFrame
+            const key = `${functionName || '(anonymous)'} ${url.split('/').pop()}:${lineNumber + 1}`
+            self.set(key, (self.get(key) ?? 0) + us)
+          }
+        }
+        const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 25)
+        return { worker: workers.get(sid)?.url ?? sid, totalMs: [...self.values()].reduce((a, b) => a + b, 0) / 1000, top, profile }
+      }))
+    },
     async stop() { clearInterval(timer); await cdp.detach().catch(() => {}) },
   }
 }
