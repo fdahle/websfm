@@ -39,14 +39,16 @@ strips the generated `.gitignore` files so the output stays tracked.
 `src/wasm/reconstruction-mt` is the same crate with `--features threads`
 (`scripts/build-wasm-mt.mjs`, run by `build:wasm`): wasm atomics, a shared memory of
 up to 4 GiB, and a rayon pool that `initThreadPool(n)` starts as Web Workers sharing
-that memory (wasm-bindgen-rayon). The bundle adjustment's assembly, Schur step, cost
-and back-substitution run on it (`par.rs`); the sparse Cholesky is still one thread
-(spreading a supernode's updates over its targets was measured slower: 0.81 → 1.13 s
-at 1,600 cameras, native).
+that memory (wasm-bindgen-rayon). The bundle adjustment's assembly, Schur step, cost,
+back-substitution and sparse Cholesky run on it (`par.rs`). The Cholesky is
+left-looking: a supernode gathers its sources' updates in ascending order, the same
+subtractions a right-looking factor makes, and a big one is cut into row chunks
+(`sparse_chol.rs`; a test holds it to the old right-looking factor bit for bit).
+Spreading a right-looking supernode's updates over its targets instead was slower.
 
 `core/sfm/reconstruction.js` uses the threaded build for `bundleAdjust` only in a
 worker of a cross-origin isolated page (shared memory, and a thread may block in
-`Atomics.wait`, which a page's main thread may not), up to `SFM_TUNING.baThreads`
+`Atomics.wait`, which a page's main thread may not), up to `SFM_TUNING.baSolver.threads`
 threads; anywhere else, Node tests included, it uses the plain build. Both give the
 **same bits**, whatever the thread count: the work is cut into ranges fixed by the
 camera count alone, every element of the reduced system has one writing range and gets

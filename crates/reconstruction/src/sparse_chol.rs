@@ -13,7 +13,9 @@
 //! - `Symbolic::new`: a minimum-degree elimination order on the block graph; the
 //!   columns of L grouped into supernodes (consecutive columns with nearly the same
 //!   rows below them, a few explicit zeros allowed), and each supernode's rows;
-//! - `Symbolic::factor`: right-looking numeric factorisation of dense supernode panels.
+//! - `Symbolic::factor`: left-looking numeric factorisation of dense supernode panels
+//!   (each takes its sources' updates in ascending order, which is what a right-looking
+//!   factor applies; a big one in row chunks on the pool, see `factor_panels`).
 //!   An update is a run of long dot products over a panel's contiguous rows, where a
 //!   column-by-column factor did many separate 6×6 products (1,600 aerial cameras,
 //!   native: 0.83 s by columns); `None` when the matrix is not positive-definite, the
@@ -21,6 +23,7 @@
 //! - `Factor::solve`: forward and back substitution.
 
 use crate::bundle::BlockPattern;
+use crate::par::{for_each_index, SyncPtr};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -30,6 +33,14 @@ use std::collections::BinaryHeap;
 const RELAX_ZERO_BLOCKS: usize = 4;
 const RELAX_ZERO_SHARE: f64 = 0.08;
 const MAX_SUPERNODE_BLOCKS: usize = 96;
+// A supernode's updates and row solves go to the pool from about this much work (a
+// rough multiply count), below it the pool's dispatch would cost more than it saves.
+const PAR_UPDATE_FLOPS: f64 = 2.0e6;
+
+thread_local! {
+    // A pool thread's product buffer, kept between tasks.
+    static SCRATCH: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
+}
 
 pub(crate) struct Symbolic {
     order: Vec<usize>,      // position → block
@@ -43,6 +54,10 @@ pub(crate) struct Symbolic {
     width: Vec<usize>,      // scalar columns of supernode s
     height: Vec<usize>,     // scalar rows below them
     panel_at: Vec<usize>,   // value offset of supernode s's panel ((width + height) × width, row-major)
+    // The updates each supernode t receives, in ascending source order: (s, i, j), s's
+    // rows i..j being t's columns (src_ptr[t]..src_ptr[t+1] into src).
+    src_ptr: Vec<usize>,
+    src: Vec<(u32, u32, u32)>,
     n_vals: usize,
     #[allow(dead_code)] // reported by the timing test
     pub(crate) fill_blocks: usize, // blocks of L below the diagonal blocks, explicit zeros included
@@ -152,7 +167,22 @@ impl Symbolic {
             panel_at.push(n_vals);
             n_vals += (w + h) * w;
         }
-        Some(Symbolic { order, dims, off, sn_start, sn_of, rows_ptr, rows, rows_soff, width, height, panel_at, n_vals, fill_blocks: blocks })
+        let mut by_t: Vec<Vec<(u32, u32, u32)>> = vec![Vec::new(); n_sn];
+        for s in 0..n_sn {
+            let (lo, hi) = (rows_ptr[s], rows_ptr[s + 1]);
+            let mut i = lo;
+            while i < hi {
+                let t = sn_of[rows[i] as usize];
+                let mut j = i;
+                while j < hi && sn_of[rows[j] as usize] == t { j += 1 }
+                by_t[t].push((s as u32, i as u32, j as u32));
+                i = j;
+            }
+        }
+        let mut src_ptr = vec![0usize];
+        let mut src = Vec::new();
+        for list in by_t { src.extend(list); src_ptr.push(src.len()) }
+        Some(Symbolic { order, dims, off, sn_start, sn_of, rows_ptr, rows, rows_soff, width, height, panel_at, src_ptr, src, n_vals, fill_blocks: blocks })
     }
 
     /// Floating-point operations of one numeric factorisation (the timing test).
@@ -196,7 +226,75 @@ impl Symbolic {
         self.width[t] + self.rows_soff[self.rows_ptr[t] + e]
     }
 
+    // Supernode t's panel rows cut at its block boundaries into up to 32 chunks of about
+    // equal height (a source's update to one block of t then lies in one chunk).
+    fn row_chunks(&self, t: usize) -> Vec<(usize, usize)> {
+        let (w, h) = (self.width[t], self.height[t]);
+        let mut cuts = Vec::new();
+        for k in self.sn_start[t]..self.sn_start[t + 1] { cuts.push(self.off[k] - self.off[self.sn_start[t]]) }
+        for e in self.rows_ptr[t]..self.rows_ptr[t + 1] { cuts.push(w + self.rows_soff[e]) }
+        let step = (w + h).div_ceil(32).max(1);
+        let mut out = Vec::new();
+        let mut lo = 0;
+        for &c in &cuts[1..] {
+            if c - lo >= step { out.push((lo, c)); lo = c }
+        }
+        out.push((lo, w + h));
+        out
+    }
+
+    // Source s's update to supernode t (its rows i..j are t's columns), on t's panel rows
+    // rows.0..rows.1 only: the dense product of s's rows from i on with rows i..j, then
+    // scattered into t. `left` holds every panel before t's; `dst` is t's panel.
+    #[allow(clippy::too_many_arguments)]
+    fn update(&self, left: &[f64], s: usize, i: usize, j: usize, t: usize, dst: SyncPtr<f64>, rows: (usize, usize), tmp: &mut Vec<f64>) {
+        let (w, h, p) = (self.width[s], self.height[s], self.panel_at[s]);
+        let hi = self.rows_ptr[s + 1];
+        let src = &left[p..p + (w + h) * w];
+        let wt = self.width[t];
+        let t0 = self.off[self.sn_start[t]];
+        // The source rows whose destination lies in `rows` (ascending, so a run).
+        let mut e_lo = i;
+        while e_lo < hi && self.panel_row(t, self.rows[e_lo] as usize) < rows.0 { e_lo += 1 }
+        let mut e_hi = e_lo;
+        while e_hi < hi && self.panel_row(t, self.rows[e_hi] as usize) < rows.1 { e_hi += 1 }
+        if e_lo == e_hi { return }
+        let r0 = self.rows_soff[i];
+        let c_end = if j < hi { self.rows_soff[j] } else { h };
+        let gc = c_end - r0;
+        let a_lo = (self.rows_soff[e_lo] - r0) & !1; // the row pairs of the whole product
+        let a_hi = if e_hi < hi { self.rows_soff[e_hi] } else { h } - r0;
+        tmp.clear();
+        tmp.resize((a_hi - a_lo) * gc, 0.0);
+        gemm_nt_rows(tmp, &src[w * w + r0 * w..w * w + h * w], &src[w * w + r0 * w..w * w + c_end * w], gc, w, a_lo, a_hi);
+        for ec in i..j {
+            let cb = self.rows[ec] as usize;
+            let (cd, coff, cc) = (self.dims[cb], self.off[cb] - t0, self.rows_soff[ec] - r0);
+            for er in ec.max(e_lo)..e_hi {
+                let rd = self.dims[self.rows[er] as usize];
+                let (rr, drow) = (self.rows_soff[er] - r0 - a_lo, self.panel_row(t, self.rows[er] as usize));
+                for ii in 0..rd {
+                    let out = (drow + ii) * wt + coff;
+                    let from = (rr + ii) * gc + cc;
+                    // SAFETY: t's rows `rows` are written by this call alone.
+                    for jj in 0..cd { unsafe { *dst.at(out + jj) -= tmp[from + jj] } }
+                }
+            }
+        }
+    }
+
     pub(crate) fn factor(&self, pat: &BlockPattern, a: &[f64]) -> Option<Factor<'_>> {
+        self.factor_with(pat, a, PAR_UPDATE_FLOPS)
+    }
+
+    // `par_flops`: the work from which a supernode is cut into row chunks (tests: 0).
+    fn factor_with(&self, pat: &BlockPattern, a: &[f64], par_flops: f64) -> Option<Factor<'_>> {
+        let mut v = self.scatter(pat, a);
+        self.factor_panels(&mut v, par_flops)?;
+        Some(Factor { sym: self, vals: v })
+    }
+
+    fn scatter(&self, pat: &BlockPattern, a: &[f64]) -> Vec<f64> {
         let nb = self.order.len();
         let mut v = vec![0f64; self.n_vals];
         let mut pos = vec![0usize; nb];
@@ -228,58 +326,56 @@ impl Symbolic {
                 }
             }
         }
+        // Left-looking: each supernode t takes its updates from its sources s < t, in
+        // ascending s, then factors. That is the sequence of subtractions a right-looking
+        // factor applies to t's elements (each source's update, as soon as the source is
+        // done), so the bits are the same. A big t is cut into row chunks on the pool:
+        // a chunk takes every source's update to its own rows, in the same order.
+        v
+    }
+
+    fn factor_panels(&self, v: &mut [f64], par_flops: f64) -> Option<()> {
         let n_sn = self.width.len();
-        let mut dest: Vec<usize> = Vec::new();
         let mut tmp: Vec<f64> = Vec::new();
-        for s in 0..n_sn {
-            let (w, h, p) = (self.width[s], self.height[s], self.panel_at[s]);
+        for t in 0..n_sn {
+            let (w, h, p) = (self.width[t], self.height[t], self.panel_at[t]);
+            let (left, right) = v.split_at_mut(p);
+            let panel = &mut right[..(w + h) * w];
+            let sources = &self.src[self.src_ptr[t]..self.src_ptr[t + 1]];
+            // t's panel rows in blocks: its own columns, then its rows below.
+            let work: f64 = sources.iter().map(|&(s, i, _)| {
+                let (hs, ws) = (self.height[s as usize], self.width[s as usize]);
+                ((hs - self.rows_soff[i as usize]) * ws) as f64
+            }).sum::<f64>() * (w + h) as f64;
+            let chunks = if work >= par_flops { self.row_chunks(t) } else { vec![(0, w + h)] };
+            if chunks.len() > 1 {
+                let dst = SyncPtr::of(panel);
+                for_each_index(chunks.len(), |k| SCRATCH.with(|sc| {
+                    let tmp = &mut *sc.borrow_mut();
+                    for &(s, i, j) in sources { self.update(left, s as usize, i as usize, j as usize, t, dst, chunks[k], tmp) }
+                }));
+            } else {
+                let dst = SyncPtr::of(panel);
+                for &(s, i, j) in sources { self.update(left, s as usize, i as usize, j as usize, t, dst, (0, w + h), &mut tmp) }
+            }
             // The diagonal part: a dense Cholesky.
-            if !chol_in_place(w, &mut v[p..p + w * w]) { return None }
-            // The rows below: x ← x · L⁻ᵀ.
-            {
-                let (diag, below) = v[p..p + (w + h) * w].split_at_mut(w * w);
+            if !chol_in_place(w, &mut panel[..w * w]) { return None }
+            // The rows below: x ← x · L⁻ᵀ, each row on its own.
+            let (diag, below) = panel.split_at_mut(w * w);
+            if work >= par_flops && h >= 64 {
+                let (bp, n_chunk) = (SyncPtr::of(below), h.div_ceil(32));
+                for_each_index(h.div_ceil(n_chunk), |k| {
+                    for r in k * n_chunk..((k + 1) * n_chunk).min(h) {
+                        // SAFETY: row r belongs to chunk k alone.
+                        let row = unsafe { bp.slice(r * w, w) };
+                        trsv_lower_row(w, diag, row)
+                    }
+                });
+            } else {
                 for r in 0..h { trsv_lower_row(w, diag, &mut below[r * w..(r + 1) * w]) }
             }
-            // Updates: for each target supernode t met by the rows, every row at or after
-            // t's first one, against t's own columns among them.
-            let (lo, hi) = (self.rows_ptr[s], self.rows_ptr[s + 1]);
-            let (left, right) = v.split_at_mut(p + (w + h) * w);
-            let src = &left[p..];
-            let mut i = lo;
-            while i < hi {
-                let t = self.sn_of[self.rows[i] as usize];
-                let mut j = i;
-                while j < hi && self.sn_of[self.rows[j] as usize] == t { j += 1 }
-                let wt = self.width[t];
-                let tb = self.panel_at[t] - (p + (w + h) * w); // panel t within `right`
-                // Destination rows in t's panel for every source row block from i on.
-                dest.clear();
-                for e in i..hi { dest.push(self.panel_row(t, self.rows[e] as usize)) }
-                let t0 = self.off[self.sn_start[t]];
-                // One dense product for the whole group: rows from i on × the group's rows
-                // as columns, both contiguous in the panel; then scattered into t.
-                let (r0, c_end) = (self.rows_soff[i], if j < hi { self.rows_soff[j] } else { h });
-                let (m, gc) = (h - r0, c_end - r0);
-                tmp.clear();
-                tmp.resize(m * gc, 0.0);
-                gemm_nt(&mut tmp, &src[w * w + r0 * w..w * w + h * w], &src[w * w + r0 * w..w * w + c_end * w], m, gc, w);
-                for ec in i..j {
-                    let cb = self.rows[ec] as usize;
-                    let (cd, coff, cc) = (self.dims[cb], self.off[cb] - t0, self.rows_soff[ec] - r0);
-                    for er in ec..hi {
-                        let rd = self.dims[self.rows[er] as usize];
-                        let (rr, drow) = (self.rows_soff[er] - r0, dest[er - i]);
-                        for ii in 0..rd {
-                            let out = tb + (drow + ii) * wt + coff;
-                            let from = (rr + ii) * gc + cc;
-                            for jj in 0..cd { right[out + jj] -= tmp[from + jj] }
-                        }
-                    }
-                }
-                i = j;
-            }
         }
-        Some(Factor { sym: self, vals: v })
+        Some(())
     }
 }
 
@@ -390,30 +486,39 @@ fn union(a: &[u32], b: &[u32]) -> Vec<u32> {
 // product of a supernode, a and b runs of its panel's rows starting at the same row,
 // so only the lower part is needed (the target reads nothing above its diagonal).
 // 2×4 tiles share their loads; on wasm the k loop runs two at a time in SIMD lanes.
+#[cfg(test)]
 fn gemm_nt(c: &mut [f64], a: &[f64], b: &[f64], m: usize, n: usize, w: usize) {
-    let mut i = 0;
-    while i + 2 <= m {
+    gemm_nt_rows(c, a, b, n, w, 0, m)
+}
+
+// Rows lo..hi of gemm_nt's product (c holds them from its row 0), computed exactly as the
+// whole product computes them: `lo` must be even, so the row pairs are the same pairs.
+fn gemm_nt_rows(c: &mut [f64], a: &[f64], b: &[f64], n: usize, w: usize, lo: usize, hi: usize) {
+    debug_assert!(lo % 2 == 0);
+    let mut i = lo;
+    while i + 2 <= hi {
         let (x0, x1) = (&a[i * w..(i + 1) * w], &a[(i + 1) * w..(i + 2) * w]);
+        let (r0, r1) = ((i - lo) * n, (i + 1 - lo) * n);
         let mut j = 0;
         let n_row = n.min(i + 2); // columns this row pair needs (j ≤ i + 1)
         while j + 4 <= n_row {
             let y = [&b[j * w..(j + 1) * w], &b[(j + 1) * w..(j + 2) * w], &b[(j + 2) * w..(j + 3) * w], &b[(j + 3) * w..(j + 4) * w]];
             let s = tile_2x4(x0, x1, y, w);
-            c[i * n + j..i * n + j + 4].copy_from_slice(&s[0]);
-            c[(i + 1) * n + j..(i + 1) * n + j + 4].copy_from_slice(&s[1]);
+            c[r0 + j..r0 + j + 4].copy_from_slice(&s[0]);
+            c[r1 + j..r1 + j + 4].copy_from_slice(&s[1]);
             j += 4;
         }
         while j < n_row {
             let y = &b[j * w..(j + 1) * w];
-            c[i * n + j] = dot(x0, y);
-            c[(i + 1) * n + j] = dot(x1, y);
+            c[r0 + j] = dot(x0, y);
+            c[r1 + j] = dot(x1, y);
             j += 1;
         }
         i += 2;
     }
-    while i < m {
+    while i < hi {
         let x = &a[i * w..(i + 1) * w];
-        for j in 0..n.min(i + 1) { c[i * n + j] = dot(x, &b[j * w..(j + 1) * w]) }
+        for j in 0..n.min(i + 1) { c[(i - lo) * n + j] = dot(x, &b[j * w..(j + 1) * w]) }
         i += 1;
     }
 }
@@ -536,4 +641,123 @@ pub fn bench_sparse_chol(rows: usize, cols: usize, radius: isize, reps: usize) -
     let mut check = 0.0;
     for _ in 0..reps { check += sym.factor(&pat, &vals).map_or(0.0, |f| f.vals[0]) }
     check
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The right-looking factor this file had before the left-looking one (2026-10-17):
+    // the reference the new one must match bit for bit.
+    fn factor_right_looking(sym: &Symbolic, pat: &BlockPattern, a: &[f64]) -> Option<Vec<f64>> {
+        let this = sym;
+        let mut v = this.scatter(pat, a);
+        {
+        let s_ = this;
+        let _ = s_;
+        }
+        let n_sn = this.width.len();
+        let mut dest: Vec<usize> = Vec::new();
+        let mut tmp: Vec<f64> = Vec::new();
+        for s in 0..n_sn {
+            let (w, h, p) = (this.width[s], this.height[s], this.panel_at[s]);
+            // The diagonal part: a dense Cholesky.
+            if !chol_in_place(w, &mut v[p..p + w * w]) { return None }
+            // The rows below: x ← x · L⁻ᵀ.
+            {
+                let (diag, below) = v[p..p + (w + h) * w].split_at_mut(w * w);
+                for r in 0..h { trsv_lower_row(w, diag, &mut below[r * w..(r + 1) * w]) }
+            }
+            // Updates: for each target supernode t met by the rows, every row at or after
+            // t's first one, against t's own columns among them.
+            let (lo, hi) = (this.rows_ptr[s], this.rows_ptr[s + 1]);
+            let (left, right) = v.split_at_mut(p + (w + h) * w);
+            let src = &left[p..];
+            let mut i = lo;
+            while i < hi {
+                let t = this.sn_of[this.rows[i] as usize];
+                let mut j = i;
+                while j < hi && this.sn_of[this.rows[j] as usize] == t { j += 1 }
+                let wt = this.width[t];
+                let tb = this.panel_at[t] - (p + (w + h) * w); // panel t within `right`
+                // Destination rows in t's panel for every source row block from i on.
+                dest.clear();
+                for e in i..hi { dest.push(this.panel_row(t, this.rows[e] as usize)) }
+                let t0 = this.off[this.sn_start[t]];
+                // One dense product for the whole group: rows from i on × the group's rows
+                // as columns, both contiguous in the panel; then scattered into t.
+                let (r0, c_end) = (this.rows_soff[i], if j < hi { this.rows_soff[j] } else { h });
+                let (m, gc) = (h - r0, c_end - r0);
+                tmp.clear();
+                tmp.resize(m * gc, 0.0);
+                gemm_nt(&mut tmp, &src[w * w + r0 * w..w * w + h * w], &src[w * w + r0 * w..w * w + c_end * w], m, gc, w);
+                for ec in i..j {
+                    let cb = this.rows[ec] as usize;
+                    let (cd, coff, cc) = (this.dims[cb], this.off[cb] - t0, this.rows_soff[ec] - r0);
+                    for er in ec..hi {
+                        let rd = this.dims[this.rows[er] as usize];
+                        let (rr, drow) = (this.rows_soff[er] - r0, dest[er - i]);
+                        for ii in 0..rd {
+                            let out = tb + (drow + ii) * wt + coff;
+                            let from = (rr + ii) * gc + cc;
+                            for jj in 0..cd { right[out + jj] -= tmp[from + jj] }
+                        }
+                    }
+                }
+                i = j;
+            }
+        }
+
+        Some(v)
+    }
+
+    // An aerial block's reduced system: rows × cols cameras coupled within `radius`, plus
+    // one intrinsics group of `kdim` unknowns (odd, so the row pairs meet odd offsets).
+    fn aerial(rows: usize, cols: usize, radius: isize, kdim: usize, seed0: u64) -> (BlockPattern, Vec<f64>) {
+        let n_cam = rows * cols;
+        let mut dims = vec![6usize; n_cam];
+        dims.push(kdim);
+        let pat = BlockPattern::new(dims, |r, touch| {
+            if r == n_cam { for c in 0..=n_cam { touch(c) } return }
+            let (y, x) = ((r / cols) as isize, (r % cols) as isize);
+            for dy in -radius..=radius { for dx in -radius..=radius {
+                let (yy, xx) = (y + dy, x + dx);
+                if yy >= 0 && xx >= 0 && (yy as usize) < rows && (xx as usize) < cols { touch(yy as usize * cols + xx as usize) }
+            }}
+            touch(n_cam);
+        });
+        let mut vals = vec![0f64; pat.n_vals];
+        let mut seed = seed0;
+        for r in 0..pat.dims.len() {
+            for k in pat.row_ptr[r]..pat.row_ptr[r + 1] {
+                let c = pat.cols[k] as usize;
+                if c > r { continue }
+                let (rd, cd) = (pat.dims[r], pat.dims[c]);
+                let (rc, cr) = (pat.val_at[k], pat.at(c, r));
+                for i in 0..rd { for j in 0..cd {
+                    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    let v = if c == r && j < i { vals[rc + j * cd + i] } else { ((seed >> 40) as f64 / (1u64 << 24) as f64 - 0.5) * 0.1 };
+                    vals[rc + i * cd + j] = v;
+                    vals[cr + j * rd + i] = v;
+                }}
+            }
+        }
+        for r in 0..pat.dims.len() { let (d, b) = (pat.dims[r], pat.diag_at[r]); for i in 0..d { vals[b + i * d + i] += 400.0 } }
+        (pat, vals)
+    }
+
+    #[test]
+    fn left_looking_factor_is_the_right_looking_one_bit_for_bit() {
+        for &(rows, cols, radius, kdim, seed) in &[(6, 7, 1, 7, 1u64), (12, 12, 2, 3, 2), (20, 18, 2, 6, 3), (25, 25, 3, 5, 4)] {
+            let (pat, vals) = aerial(rows, cols, radius, kdim, seed);
+            let sym = Symbolic::new(&pat, usize::MAX).unwrap();
+            let want = factor_right_looking(&sym, &pat, &vals).unwrap();
+            // As the app runs it, and with every supernode cut into row chunks.
+            for par in [PAR_UPDATE_FLOPS, 0.0] {
+                let got = sym.factor_with(&pat, &vals, par).unwrap();
+                assert!(got.vals.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "{rows}×{cols} r{radius} k{kdim}, par_flops {par}: the factors differ");
+            }
+        }
+    }
 }

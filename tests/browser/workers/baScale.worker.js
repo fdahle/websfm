@@ -6,7 +6,7 @@ import { SFM_TUNING } from '/src/core/tuning.js'
 
 self.onmessage = async ({ data: { seed, side, threads } }) => {
   try {
-    SFM_TUNING.baThreads = threads
+    SFM_TUNING.baSolver.threads = threads
     const sc = aerialBlock({ seed, rows: side, cols: side, nPoints: 40 * side * side, calibrated: true })
     const t0 = performance.now()
     const out = await reconstruct({ images: sc.images, pairs: sc.pairs, settings: { secondaryModels: false } }, { onLog: () => {} })

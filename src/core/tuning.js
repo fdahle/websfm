@@ -77,11 +77,10 @@ export const SFM_TUNING = {
   // 2026-10-16 on identical matches: quarry SfM 259 → 189 s, South Building 85 → 63 s,
   // same cameras, points, final reprojection and RTK camera fit (13.24 / 18.17 vs
   // 18.26 cm); synthetic 1,600 cameras 273 → 218 s. { direct: false } is the PCG path.
-  baSolver: { pcgMinN: null, pcgRelTol: 1e-6, pcgMaxIter: 200, pcgAcceptPartial: true, functionTolerance: 1e-6, direct: true },
-  // Threads for the bundle adjustment (core/sfm/reconstruction.js threadedWasm): the
-  // pool size cap (one fewer than the machine's cores), 0 = the single-threaded build.
-  // The result is the same bits either way.
-  baThreads: 16,
+  // `threads`: the bundle adjustment's pool size cap (core/sfm/reconstruction.js
+  // threadedWasm; one fewer than the machine's cores), 0 = the single-threaded build.
+  // The result is the same bits either way. Fixed by the first call in a worker.
+  baSolver: { pcgMinN: null, pcgRelTol: 1e-6, pcgMaxIter: 200, pcgAcceptPartial: true, functionTolerance: 1e-6, direct: true, threads: 16 },
   // ── Interleaved bundle-adjustment / track filtering ──
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
   // native px against the run's detection scale (core/scaleContext.js, which owns

@@ -20,13 +20,13 @@ function ensureWasm() {
 // build's, whatever the thread count (crates/reconstruction/src/par.rs). It needs
 // shared memory (a cross-origin isolated page) and a worker (a rayon thread blocks in
 // Atomics.wait, which the page's main thread may not); anywhere else, and if it fails to
-// start, bundleAdjust uses the single-threaded build. SFM_TUNING.baThreads: 0 = off,
-// else the pool size cap.
+// start, bundleAdjust uses the single-threaded build. `cap` (solver policy `threads`):
+// the pool size cap, set by the first call; 0 = this call on one thread.
 let threadedPromise = null
-function threadedWasm() {
+function threadedWasm(cap) {
+  if (!(cap > 0)) return Promise.resolve(null)
   if (threadedPromise) return threadedPromise
-  const cap = SFM_TUNING.baThreads ?? 0
-  const usable = cap > 0 && typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated === true
+  const usable = typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated === true
     && typeof globalThis.WorkerGlobalScope === 'function' && globalThis instanceof globalThis.WorkerGlobalScope
   threadedPromise = !usable ? Promise.resolve(null) : (async () => {
     try {
@@ -356,7 +356,7 @@ export function baSolverFlat(solver = {}) {
 
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
-  const threaded = await threadedWasm()
+  const threaded = await threadedWasm((opts.solver ?? SFM_TUNING.baSolver)?.threads ?? 0)
   const adjust = threaded ? threaded.bundle_adjust : bundle_adjust
   const {
     maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null,

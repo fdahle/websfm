@@ -32,6 +32,10 @@ impl<T> SyncPtr<T> {
     /// `i` is in bounds and no other thread accesses element `i` meanwhile.
     #[inline(always)]
     pub(crate) unsafe fn at<'a>(self, i: usize) -> &'a mut T { &mut *self.0.add(i) }
+    /// # Safety
+    /// `i..i + len` is in bounds and no other thread accesses it meanwhile.
+    #[inline(always)]
+    pub(crate) unsafe fn slice<'a>(self, i: usize, len: usize) -> &'a mut [T] { std::slice::from_raw_parts_mut(self.0.add(i), len) }
 }
 
 /// Items per task for the per-observation and per-point loops: big enough that the pool's
