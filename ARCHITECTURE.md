@@ -2,8 +2,9 @@
 
 A map of the codebase for anyone who wants to read it or send a pull request. For
 what the app does, see the [README](README.md). For the methods behind each stage,
-see the in-app glossary (**Other ▸ Glossary**), whose source is in
-[`src/glossary/`](src/glossary/).
+see [docs/METHODS.md](docs/METHODS.md) and the in-app glossary (**Other ▸ Glossary**),
+whose source is in [`src/glossary/`](src/glossary/). How to run and test the code is
+in [docs/development.md](docs/development.md).
 
 ## The big picture
 
@@ -76,6 +77,38 @@ files, …) *is* the project format. A `.websfm` file is a streamed zip of that
 directory, and a folder-backed project is the same layout written to a folder the
 user picked. Anything that can be recomputed cheaply is recomputed on open rather
 than stored.
+
+## Following one operation through the code
+
+Every pipeline step takes the same path. Here is **Products ▸ DEM**, from the button
+to the algorithm; the other steps differ only in file names.
+
+| Layer | File | What it does there |
+| --- | --- | --- |
+| Ribbon button | `core/help/ribbonTabs.js` (`gen-dem`) | label, icon, and the prerequisites that grey it out |
+| Command | `composables/useCommandDispatch.js` | the button's id opens the dialog |
+| Dialog | `components/modals/DemModal.vue` | the settings, starting from `DEM_DEFAULTS` in `core/defaults.user.js` |
+| Run | `composables/useDialogRuns.js` → `composables/usePipeline.js` | closes the dialog, opens the progress bar, wires up Cancel |
+| Store | `stores/reconstruction/productRuns.js` (`generateDem`) | gathers the inputs as plain arrays, saves the result to the project |
+| Worker call | `workers/computeClient.js` | a typed async call into the worker pool |
+| Worker op | `workers/ops/products.js` | unpacks the message, reports progress |
+| Algorithm | `core/products/dem.js` (+ `dem.test.js`) | the computation: plain data in, plain data out |
+| Help | `src/guide/dem.md`, `src/glossary/` | the guide article and the concepts it links |
+
+## Where to change what
+
+| To … | Start in | Also touch |
+| --- | --- | --- |
+| change an algorithm | `core/<stage>/` or `crates/<crate>/` | its `*.test.js`; `npm run build:wasm` for Rust; [docs/METHODS.md](docs/METHODS.md) if the method changes |
+| add or change a setting | the `*_DEFAULTS` in `core/defaults.user.js` and the dialog in `components/modals/` | the guide section in `src/guide/` (see [CONTRIBUTING](CONTRIBUTING.md#keep-the-in-app-help-in-step)) |
+| tune an internal threshold | `core/tuning.js` | the test that pins it |
+| add a ribbon command | `core/help/ribbonTabs.js` | `composables/useCommandDispatch.js`; it becomes a console command automatically (`core/help/commands.js`) |
+| add an import format | a reader in `core/io/` | `composables/useImportRouting.js` (and `core/io/importKind.js` for dropped files) |
+| add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/ExportModal.vue`, `workers/ops/export.js` |
+| add per-project state | a store in `stores/` | register it with `registerProjectStore` (`stores/projectStores.js`) so it saves and reopens with the project |
+| change a WebGPU kernel | `workers/gpu/` | the PatchMatch cost exists three times (WGSL, JS, Rust) and changes in all three ([`workers/gpu/README.md`](src/workers/gpu/README.md)) |
+| explain a concept | a new entry in `src/glossary/<category>/` | aliases auto-link it in all help text |
+| add an example dataset | `core/examples.js` | `scripts/examples/make-example.py`, `scripts/fetch-examples.mjs`, a walkthrough in `src/guide/` |
 
 ## Conventions worth knowing
 

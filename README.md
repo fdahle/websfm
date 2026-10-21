@@ -14,6 +14,9 @@ It is built with a focus on **polar / non-WGS84 projects** (e.g. historical
 aerial imagery of Antarctica), so coordinate-reference-system handling and ground
 control are first-class throughout.
 
+**Try it at [websfm.fdahle.de](https://websfm.fdahle.de).** Nothing to install; the
+app runs on your machine and keeps your projects in your browser.
+
 > ⚠️ **Early test release.** This is a first public build put out to gather
 > feedback. Expect rough edges. Please report anything that breaks or feels wrong
 > using the **🐞 button** in the bottom-right corner of the app, or open an issue
@@ -21,6 +24,19 @@ control are first-class throughout.
 > [github.com/fdahle/websfm/issues](https://github.com/fdahle/websfm/issues).
 
 ---
+
+## Your first project
+
+No photos at hand? In the first dialog (or the project picker), choose **Open the
+example project**. It downloads 42 drone photos of a park in Ohio (about 50 MB, public
+domain, from [OpenDroneMap](https://github.com/OpenDroneMap/odm_data_aukerman)) and
+opens a step-by-step walkthrough in the guide, from feature detection to a 3D point
+cloud, an elevation model and an orthophoto. With a graphics card (WebGPU) the
+computing takes about two minutes; without one, about ten at lower quality.
+
+With your own photos: create a project, drop the images onto the sidebar, and
+follow **Other ▸ Guide ▸ Getting Started**. Hover a setting's underlined label for what
+it does, and the glossary explains the methods behind each stage.
 
 ## What it does
 
@@ -33,13 +49,15 @@ A full photogrammetry pipeline, stage by stage:
    adjustment, self-calibration, and track filtering.
 4. **Dense MVS** – PatchMatch depth maps fused into a dense point cloud
    (CPU/WASM, or an experimental WebGPU backend).
-5. **Products** – DEM, true orthophoto, and screened-Poisson mesh.
+5. **Products** – DEM and bare-earth DTM, true orthophoto, and a screened-Poisson
+   mesh, optionally textured.
 6. **Georeferencing** – ground control points, camera poses, and reference DEMs,
    with reprojection into any project CRS (proj4).
 
-There's also an in-app glossary, a quality-report hub, point-cloud editing, video
-import (frames picked by camera motion and sharpness), COLMAP / PLY / LAS / LAZ /
-GeoTIFF import & export, COPC import and 3D Tiles export.
+There's also an in-app guide and glossary, a quality-report hub, point-cloud
+editing, 2D and 3D measurement, video import (frames picked by camera motion and
+sharpness), historical film scans (fiducials, reseau grids), COLMAP / PLY / LAS /
+LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
 
 ## Browser requirements
 
@@ -49,216 +67,29 @@ GeoTIFF import & export, COPC import and 3D Tiles export.
   Chromium-only. Firefox and Safari work with reduced acceleration.
 - The learned backends (ALIKED, DISK, SuperPoint, LightGlue, Smart Select) download their model
   weights on first use — you'll be asked to confirm, and each file is cached
-  locally afterwards (see [Model files](#model-files)).
+  locally afterwards (see [Model files](docs/deployment.md#model-files)).
 
 ---
 
-## Running it locally
+## Documentation
 
-The generated WASM bindings in `src/wasm/**` are committed, so you do **not** need
-a Rust toolchain just to run or develop the front end:
+| For | Read |
+| --- | --- |
+| Using the app | the in-app guide and glossary (source: [`src/guide/`](src/guide/), [`src/glossary/`](src/glossary/)) |
+| Running and testing from source | [docs/development.md](docs/development.md) |
+| How the code is organised | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| The algorithms and why they were chosen | [docs/METHODS.md](docs/METHODS.md) |
+| Hosting your own copy | [docs/deployment.md](docs/deployment.md) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| What changed | [CHANGELOG.md](CHANGELOG.md) |
+
+Quick start from source (no Rust needed, the compiled WASM is committed):
 
 ```bash
 npm install
+npm run fetch:examples   # optional: the example dataset
 npm run dev
 ```
-
-The ONNX model files are **not** committed (they are large). To exercise the
-learned backends locally, drop the `.onnx` files into `public/models/` — see
-[Model files](#model-files).
-
-### Tests & type-checking
-
-```bash
-npm test                # unit and store regression tests
-npm run typecheck       # TypeScript, Vue bindings, JavaScript correctness lint
-npm run test:wasm       # real LAZ WASM round-trip across compressor chunks
-npm run check:wasm      # Rust source / committed WASM freshness
-npx playwright install chromium
-npm run test:browser    # browser storage, keyboard, import/export and multi-tab tests
-```
-
-Type checking is incremental: executable TypeScript currently includes packed-point
-views and project-index merging, alongside the shared data types and migrated
-confirmation/modal-shell components. Every Vue template is checked for undeclared
-bindings; JavaScript implementations are checked for undefined variables and
-unreachable code. This does not yet provide full static typing of every store.
-GitHub Actions runs these checks, native Rust tests, a production build and Chromium
-regressions. To use an installed Chrome locally, set `PLAYWRIGHT_CHANNEL=chrome`.
-After Rust changes, run `npm run build:wasm`; its final step updates the build stamp.
-
-Persistence uses immutable buffer generations with a final metadata commit for
-reconstructions and raster products. Existing projects remain readable; new
-reconstruction saves use version 3 and require this application version or newer.
-Failed saves remain visible and block project switching/export until retried.
-Tabs coordinate index edits and, where Web Locks are available, allow one editing
-session per project. These locks do not coordinate separate browsers or devices
-writing a shared folder.
-
-SfM ZIP extraction runs in a worker with limits of 1 GiB compressed, 512 MiB
-selected output, 256 MiB per entry, 20,000 entries and a 200:1 expansion ratio.
-LAS/LAZ imports have a 1 GiB estimated working-memory budget; the WASM decompressor
-also caps raw records at 512 MiB. DEM point staging (24 B per in-region point) and
-the DEM grid share the memory budget set in Settings ▸ Compute. Split or subsample
-larger inputs. CSV exports prefix potentially
-executable **text** with an apostrophe; numerical coordinates remain numbers.
-That protective apostrophe is part of the exported value when reimported.
-
----
-
-## Building & self-hosting
-
-```bash
-npm ci
-npm run build:release  # build dist/ and verify all release assets
-npm run preview    # serve the production build locally
-```
-
-`dist/` is a static site and can be hosted on any static file server. Deploy it
-over **HTTPS**: the browser storage APIs used for projects require a secure context
-(plain HTTP is only suitable for local development on `localhost`).
-
-The default build is for the domain root, such as `https://websfm.example/`. If the
-app will live below a path, include that path at build time, with both slashes:
-
-```bash
-VITE_BASE_PATH=/websfm/ npm run build:release
-# deploy dist/ at https://example.com/websfm/
-```
-
-Configure the production host as follows:
-
-- **Model files.** Serve the redistributable `.onnx` weights (see below) at `<site>/models/`,
-  or point the app elsewhere at build time with
-  `VITE_MODEL_BASE_URL=https://your-cdn/models/ npm run build`.
-
-  A separate model host must allow browser requests from the app origin, for
-  example with `Access-Control-Allow-Origin: https://websfm.example`. Serve ONNX
-  files as `application/octet-stream`.
-
-- **Cross-origin isolation (optional, for speed).** For multi-threaded ONNX
-  (~3× faster matching) the host must send these two response headers:
-
-  ```
-  Cross-Origin-Opener-Policy: same-origin
-  Cross-Origin-Embedder-Policy: credentialless
-  ```
-
-  These are already set for `npm run dev` / `npm run preview`. Without them the
-  app still works, single-threaded (the same graceful path as Safari).
-
-- **Static file types.** Serve `.wasm` as `application/wasm` and `.mjs` as
-  `text/javascript`. An incorrect WASM type disables streaming compilation and an
-  incorrect MJS type prevents ONNX Runtime from loading.
-
-- **Caching and compression.** The files below `assets/` have content hashes and
-  can use `Cache-Control: public, max-age=31536000, immutable`. Keep `index.html`,
-  `sw.js` and `manifest.webmanifest` on `no-cache` so a release can point browsers
-  at its new hashes. ORT runtime files
-  live under `ort/<installed-onnxruntime-version>/`; revalidate unversioned `.mjs`,
-  `.wasm` and `.onnx` files. When replacing model weights under the same name, also
-  bump `MODEL_CACHE_NAME` in `src/core/models/registry.js` to invalidate Cache Storage.
-  Enable Brotli or
-  gzip for HTML, JavaScript and CSS; do not recompress `.wasm` or `.onnx` unless the
-  server is configured to do so efficiently.
-
-- **Installable app and offline use.** The build includes a web app manifest and a
-  service worker (`sw.js`) that stores the app in the browser, so it can be
-  installed and started without a connection. Model weights are stored separately,
-  after the user's download consent. Viewed basemap tiles up to zoom 12 are kept
-  for offline use (about 50 MB at most; `src/core/offlineCache.js`). A new release
-  installs in the background and asks the user to reload; it never reloads during
-  a running task. The service worker only works over HTTPS (or on `localhost`).
-
-Before sharing a release, verify the real production URL rather than only the Vite
-preview server:
-
-```bash
-curl -I https://websfm.example/
-curl -I https://websfm.example/assets/NAME.wasm
-curl -I https://websfm.example/ort/1.27.0/ort-wasm-simd-threaded.wasm
-curl -I https://websfm.example/models/disk.onnx
-```
-
-Then perform one cold browser smoke test: create a project, import photographs, run
-SIFT detection/matching/reconstruction, refresh and reopen the project, download a
-learned model, and export/re-import a `.websfm` project.
-
-### Model files
-
-The learned-model weights are downloaded on demand and cached in the browser
-(Cache Storage), so they are **not** part of the repository. The app fetches them
-from `<site>/models/` by default. The redistributable files are published as
-assets of the [`models-v1` release](https://github.com/fdahle/websfm/releases/tag/models-v1);
-on the host, run this before the release build:
-
-```bash
-npm run fetch:models   # downloads into public/models/ and verifies SHA-256
-npm run build:release
-```
-
-Release assets send no CORS headers, so the app cannot load them from GitHub
-directly; the host must serve its own copy. The files are:
-
-| File | Used by | Size | Source (rename to the file name) |
-| --- | --- | --- | --- |
-| `disk.onnx` | DISK detector | 4 MB | [LightGlue-ONNX v1.0.0](https://github.com/fabio-sim/LightGlue-ONNX/releases/tag/v1.0.0) `disk.onnx` |
-| `lightglue_disk.onnx` | LightGlue for DISK | 46 MB | same release, `disk_lightglue_fused_cpu.onnx` |
-| `lightglue.onnx` | LightGlue for SuperPoint | 46 MB | same release, `superpoint_lightglue_fused_cpu.onnx` |
-| `aliked.onnx` | ALIKED detector | 3 MB | exported by `scripts/models/export-aliked.py` from [cvg/LightGlue](https://github.com/cvg/LightGlue)'s ALIKED (aliked-n16) |
-| `lightglue_aliked.onnx` | LightGlue for ALIKED | 46 MB | same script, cvg/LightGlue `aliked_lightglue` weights |
-| `sam2_encoder.onnx` | Smart Select (SAM2) | 134 MB | [onnx-community/sam2-hiera-tiny](https://huggingface.co/onnx-community/sam2-hiera-tiny) `onnx/vision_encoder.onnx` |
-| `sam2_decoder.onnx` | Smart Select (SAM2) | 21 MB | same repo, `onnx/prompt_encoder_mask_decoder.onnx` |
-
-The two SAM2 files need their internal `value_info` entries removed before ONNX
-Runtime accepts them (see `src/core/segment/README.md`). The two ALIKED files are
-websfm's own export (fabio-sim ships ALIKED only fused with its matcher); the script's
-header says how to reproduce them and checks them against the PyTorch models.
-
-**SuperPoint is not distributed.** Its pretrained weights carry Magic Leap's
-academic / non-commercial research license, so do not host `superpoint.onnx`: users
-who qualify download it themselves from the link in the app's download dialog and
-hand the file over once. A local copy in `public/models/` is fine for development:
-the build leaves it out, and `npm run check:release` fails if a build contains it.
-
-Place them wherever `VITE_MODEL_BASE_URL` (or the default `public/models/`)
-points. The first time a user runs a learned backend, a modal asks to download
-the required file(s) and shows progress; nothing is fetched until they agree.
-
----
-
-## Rebuilding the WASM crates
-
-You only need this when you change Rust code under `crates/`. It requires the Rust
-toolchain plus [`wasm-pack`](https://rustwasm.github.io/wasm-pack/).
-
-```bash
-# one-time, per machine:
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # macOS/Linux
-cargo install wasm-pack
-
-# build all crates into src/wasm/<crate>/:
-npm run build:wasm
-```
-
-On Windows, install Rust via [`rustup-init.exe`](https://rustup.rs), then
-`cargo install wasm-pack`. Commit the regenerated `src/wasm/*` bindings alongside
-the Rust change so fresh clones keep working without a toolchain.
-
----
-
-## Tech stack
-
-- **UI:** Vue 3 (`<script setup>`), Pinia, OpenLayers (map), Three.js (3D).
-- **Compute:** six Rust crates (`sift`, `matching`, `reconstruction`, `mesh`,
-  `imagecodec`, `lazcodec`) compiled to WASM and run off the main thread.
-- **Learned models:** ONNX Runtime Web (WebGPU + WASM backends).
-- **Storage:** OPFS; projects are self-contained on-disk directories, also
-  exportable as `.websfm` archives.
-- **Build/test:** Vite, Vitest.
-
-How the code is organised is described in [ARCHITECTURE.md](ARCHITECTURE.md).
-What changed between versions is in [CHANGELOG.md](CHANGELOG.md).
 
 ## How it's tested
 
@@ -303,39 +134,30 @@ Not yet verified:
 
 ## Roadmap
 
+Recently shipped: automatic ground control from a reference orthophoto, bare-earth
+DTMs, fisheye lenses, textured meshes, 3D measurement and DEM-of-difference volumes,
+ALIKED and LightGlue, Workflow Builder gates, satellite film cameras (reseau grids,
+half-frame scans), and multi-threaded bundle adjustment.
+
 **Now**
+- Checking recent features in real browsers on real datasets, so "shipped" also
+  means "verified", then the next beta
 - Parity with established SfM tools (COLMAP, Metashape) on standard benchmarks,
   measured for accuracy, robustness and speed
-- Larger projects (1,000+ images) that stay fast and within browser memory, from
-  sparse reconstruction through dense fusion and viewing
-- Checking recent features in real browsers on real datasets, so "shipped" also
-  means "verified"
-- Better georeferenced accuracy, including less dome-shaped distortion when no
-  ground control points are available
-- Dense filtering and meshing tuned on real data (sky, vegetation, snow and ice)
 
 **Next**
-- Automatic ground control points found by matching against a reference
-  orthophoto, so historical imagery can be georeferenced without survey data
-- More robust fiducial detection for large historical film-scan batches (rotated or
-  mirrored scans, sub-pixel marks, faster review)
-- Faster feature detection and matching on large image sets
-- Denser, more complete depth maps on weakly textured surfaces, with smaller
-  depth-map storage
-- Content-based automatic masking (film frames, colour keys, low-texture areas)
-- Importing large LiDAR and reference point clouds, and comparing your DEM against a
-  reference DEM
+- Dense reconstruction of large projects beyond one browser tab's memory
+  (out-of-core fusion, tiled meshing)
+- Projects past the 4 GB WebAssembly memory limit, once 64-bit WebAssembly is
+  available in the toolchain
+- Better georeferenced accuracy without ground control (less dome-shaped distortion)
+- Denser depth maps on weakly textured surfaces (snow, ice, water edges)
 
 **Later**
-- 3D measurement tools: 3D rulers, true surface area and DEM-of-difference volumes
-  for change detection
-- Ground classification and bare-earth terrain models (DTM)
 - Bundle adjustment constrained by a reference DEM, to correct long strips without
   ground control
-- Fisheye lens support
-- Textured meshes (textured OBJ, glTF and 3D Tiles)
-- More learned feature detectors and matchers, plus quality gates and branching in
-  the Workflow Builder
+- The motion of panoramic satellite cameras during the scan
+- Content-based automatic masking (film frames, colour keys, low-texture areas)
 
 Priorities follow real use: if something here matters to you, or something is
 missing, please open an issue to discuss it.
