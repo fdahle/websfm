@@ -469,7 +469,11 @@ export function makeProductsOps({ rasterize } = {}) {
     // the 16 GiB pool, as the 80 MB photo buffers came and went; the quarter is that slack.
     const forBudget = Number.isFinite(budget) ? budget - fixed - maxCacheEntry : 2 * 1024 ** 3
     const forTab = 0.75 * TAB_BUFFER_POOL_BYTES - (settings.pageBytes ?? 0) - fixed - 2 * maxCacheEntry
-    const cacheBytes = Math.max(maxCacheEntry, Math.min(forBudget, forTab))
+    // Photos load ahead of their visit (ortho.js planPhotos; `photoPrefetch`, 4): the
+    // decodes overlap. Each one in flight holds an entry beyond the cache, so the cache
+    // gives way for them.
+    const photoPrefetch = settings.photoPrefetch ?? 4
+    const cacheBytes = Math.max(maxCacheEntry, Math.min(forBudget, forTab) - photoPrefetch * maxCacheEntry)
     if (forTab < forBudget) {
       emit('log', [`Ortho: the map/photo cache is held to ${formatBytes(cacheBytes)}, below what the memory budget allows, `
         + `so the browser tab keeps room for the ${formatBytes(settings.pageBytes ?? 0)} the open project already holds `
@@ -508,7 +512,7 @@ export function makeProductsOps({ rasterize } = {}) {
     const res = await orthorectifyTiled(built.grid, geom, maps, loadMap, frame.toSfm,
       // Blocks in groups, map-major inside (P6), sized by replaying the visits through the
       // cache: each block of a group takes its working planes from the cache.
-      { ...settings, blockSize: ORTHO_BLOCK, cacheBytes, mapsResident: !streamed,
+      { ...settings, blockSize: ORTHO_BLOCK, cacheBytes, mapsResident: !streamed, photoPrefetch,
         groupBlocks: settings.groupBlocks ?? 'auto', blockBytes, entryBytes: maxCacheEntry,
         entrySizes: maps.map((m) => ({ map: streamed ? m.width * m.height * 23 : 0,
           photo: photoBytesExpected(photoOf.get(m.uuid), m, pxPerCell(m)) })) }, {

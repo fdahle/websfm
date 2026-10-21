@@ -16,7 +16,8 @@ fit, neighbouring blocks are built together in groups, so each photo is read onc
 pass for the whole group instead of once per block; the log names the groups and the
 reads it predicted. A very fine orthophoto may still decode some photos more than once.
 If even one block, its photos and the overviews do not fit the budget, the build stops
-and the log gives the figures.
+and the log gives the figures. Photos are decoded a few at a time, ahead of when they
+are needed, so the browser decodes them alongside the work.
 
 A fine orthophoto takes a while: about twenty minutes for 12,000 pixels across from a
 few hundred photos. Blocks built in a group all finish together, so the log may not

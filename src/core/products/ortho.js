@@ -863,17 +863,30 @@ async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toSfm, gp,
   const t0 = performance.now()
   // Photo decode: ~2 px per step of the finer of the two samplings.
   const stepCells = Math.min(gainsOn ? k : Infinity, cut ? sg.f : Infinity)
+  // Each map with its photo where one is needed, `opts.photoPrefetch` maps ahead (the
+  // decodes overlap, as in the block passes).
+  const ahead = Math.max(0, opts.photoPrefetch ?? 0)
+  const loads = new Map()
+  const startLoad = (i) => {
+    if (i >= n || loads.has(i)) return
+    loads.set(i, (async () => {
+      const m = await loadMap(i)
+      const per = gp.mapPxPerCell(m)
+      // The map's own colour plane is its photo resampled to the depth map's scale. Where a
+      // survey step spans ≥ 2 map px, that is as fine as the decode would be (≈ 2 photo px
+      // per step), so the photo is not decoded at all: on quarry-347 the survey decoded
+      // every photo at ~8 % of native, ~0.3 s each, for colour the map already had at 25 %.
+      const ownColour = !!m.rgb && per > 0 && per * stepCells >= 2
+      const photo = loadImage && !ownColour ? await loadImage(i, m, per > 0 ? per * stepCells : null) : null
+      return { m, ownColour, photo }
+    })())
+  }
   for (let mi = 0; mi < n; mi++) {
     const tr = performance.now()
-    const m = await loadMap(mi)
-    const per = gp.mapPxPerCell(m)
-    // The map's own colour plane is its photo resampled to the depth map's scale. Where a
-    // survey step spans ≥ 2 map px, that is as fine as the decode would be (≈ 2 photo px
-    // per step), so the photo is not decoded at all: on quarry-347 the survey decoded
-    // every photo at ~8 % of native, ~0.3 s each, for colour the map already had at 25 %.
-    const ownColour = !!m.rgb && per > 0 && per * stepCells >= 2
+    for (let j = mi; j <= mi + ahead; j++) startLoad(j)
+    const { m, ownColour, photo } = await loads.get(mi)
+    loads.delete(mi)
     if (ownColour) fromMapRgb++
-    const photo = loadImage && !ownColour ? await loadImage(mi, m, per > 0 ? per * stepCells : null) : null
     readMs += performance.now() - tr
     const C = cameraCentre(m)
     for (let p = 0; p < L; p++) {
@@ -1090,11 +1103,13 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   let cached = 0, mapLoads = 0, photoLoads = 0, cacheHits = 0
   // The cache's limit: `cacheBytes`, until a photo decode runs out of memory (below).
   let cacheLimit = cacheBytes, shrinks = 0
+  // A prefetched entry (`pinned`, below) stays until its visit.
   const evict = (keep = -1) => {
-    for (const [mi, e] of cache) if (e.next === Infinity && mi !== keep) { cache.delete(mi); cached -= e.bytes }
+    for (const [mi, e] of cache) if (e.next === Infinity && mi !== keep && !e.pinned) { cache.delete(mi); cached -= e.bytes }
     while (cached > cacheLimit && cache.size > (cache.has(keep) ? 1 : 0)) {
       let worst = -1, far = -Infinity
-      for (const [mi, e] of cache) if (e.next > far && mi !== keep) { far = e.next; worst = mi }
+      for (const [mi, e] of cache) if (e.next > far && mi !== keep && !e.pinned) { far = e.next; worst = mi }
+      if (worst < 0) break
       cached -= cache.get(worst).bytes; cache.delete(worst)
     }
   }
@@ -1121,24 +1136,58 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
   // the label pass, the colour pass, and a multiband blend's ring samples and pyramids.
   const ms = { read: 0, label: 0, colour: 0, ring: 0, pyramid: 0 }
   const clock = (key, t) => { ms[key] += performance.now() - t }
+  // A pass that needs photos names its maps in visit order first (planPhotos), and up to
+  // `opts.photoPrefetch` of the next ones load ahead: the browser decodes a photo off the
+  // worker's thread (createImageBitmap), so several decodes then run while this one
+  // computes, where one at a time they ran end to end. The photos are the same either
+  // way; the caller leaves room in the cache budget for the extra entries.
+  const prefetchDepth = loadImage ? Math.max(0, opts.photoPrefetch ?? 0) : 0
+  let plan = [], planPos = 0
+  const pending = new Map() // mi → its entry's load
+  const topUp = () => {
+    while (pending.size < prefetchDepth && planPos < plan.length) {
+      const mi = plan[planPos++]
+      if (cache.get(mi)?.hasPhoto || pending.has(mi)) continue
+      pending.set(mi, fetchEntry(mi, true, true))
+    }
+  }
+  const planPhotos = (list) => { plan = list; planPos = 0; topUp() }
   const fetch = async (mi, wantPhoto) => {
     const t = performance.now()
-    try { return await fetchEntry(mi, wantPhoto) } finally { clock('read', t) }
+    try {
+      if (wantPhoto && pending.has(mi)) {
+        const e = await pending.get(mi)
+        pending.delete(mi)
+        e.pinned = false
+        cacheHits++
+        topUp()
+        return e
+      }
+      return await fetchEntry(mi, wantPhoto)
+    } finally { clock('read', t) }
   }
-  const fetchEntry = async (mi, wantPhoto) => {
+  const fetchEntry = async (mi, wantPhoto, prefetch = false) => {
     let e = cache.get(mi)
-    if (e && (!wantPhoto || e.hasPhoto)) cacheHits++
+    if (e && (!wantPhoto || e.hasPhoto) && !prefetch) cacheHits++
     if (!e) {
-      const m = await loadMap(mi)
-      mapLoads++
-      e = { m, photo: null, hasPhoto: false, bytes: opts.mapsResident ? 0 : viewBytes(m), next: Infinity }
-      cache.set(mi, e); cached += e.bytes
+      const entry = { m: null, photo: null, hasPhoto: false, bytes: 0, next: Infinity, pinned: prefetch }
+      e = entry
+      cache.set(mi, e)
+      e.mapLoad = loadMap(mi).then((m) => {
+        mapLoads++
+        entry.m = m; entry.bytes = opts.mapsResident ? 0 : viewBytes(m); cached += entry.bytes
+      })
+      await e.mapLoad
+    } else {
+      if (prefetch) e.pinned = true
+      if (!e.m) await e.mapLoad // a prefetch is reading it
     }
     if (wantPhoto && !e.hasPhoto) {
-      e.photo = loadImage ? await loadPhoto(mi, e) : null
-      e.hasPhoto = true
+      e.hasPhoto = true // claimed before the await: a second request waits on the first
+      e.photoLoad = loadImage ? loadPhoto(mi, e) : Promise.resolve(null)
+      e.photo = await e.photoLoad
       if (e.photo) { photoLoads++; const b = e.photo.data?.byteLength ?? 0; e.bytes += b; cached += b }
-    }
+    } else if (wantPhoto && e.photoLoad) await e.photoLoad
     return e
   }
   let pos = 0
@@ -1203,7 +1252,9 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
     if (mosaic) {
       await mosaicGroup(active)
     } else {
-      for (const mi of unionMaps(active.map((a) => a.b))) {
+      const union = unionMaps(active.map((a) => a.b))
+      planPhotos(union)
+      for (const mi of union) {
         const e = await fetch(mi, true)
         const t = performance.now()
         for (const a of active) if (a.st.slot[mi] >= 0) colourFromMap(a.win, geom, e.m, e.photo, mi, affine, toSfm, opts, scratch)
@@ -1311,7 +1362,9 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       a.step = { ...scratch, P: [0, 0, 0] }
       a.viewWin = { ...win, sums: win.msums }
     }
-    // Pass 2: colour, descending (see passOrder).
+    // Pass 2: colour, descending (see passOrder). Each map's boxes first, so the photos
+    // the pass will read are known (and load ahead).
+    const colourVisits = []
     for (let u = union.length - 1; u >= 0; u--) {
       const mi = union[u]
       const boxes = []
@@ -1331,6 +1384,10 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
         }
         boxes.push({ a, hasOwn, box: [x0, y0, x1, y1] })
       }
+      colourVisits.push({ mi, boxes })
+    }
+    planPhotos(colourVisits.filter((v) => v.boxes.length).map((v) => v.mi))
+    for (const { mi, boxes } of colourVisits) {
       if (!boxes.length) { visited(mi, null); continue }
       const e = await fetch(mi, true)
       const t = performance.now()
@@ -1382,8 +1439,10 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       a.eff = eff; a.mbox = box
     }
     const { depthTolRel = 0.02, maxCost = Infinity } = opts
-    for (const mi of union) {
-      const users = active.filter((a) => a.st.slot[mi] >= 0 && a.mbox[4 * a.st.slot[mi] + 2] >= 0)
+    const usersOf = union.map((mi) => active.filter((a) => a.st.slot[mi] >= 0 && a.mbox[4 * a.st.slot[mi] + 2] >= 0))
+    planPhotos(union.filter((_, u) => usersOf[u].length))
+    for (const [u, mi] of union.entries()) {
+      const users = usersOf[u]
       if (!users.length) { visited(mi, null); continue }
       const e = await fetch(mi, true), m = e.m, C = cameraCentre(m)
       const g0 = gains ? gains[mi * 3] : 1, g1 = gains ? gains[mi * 3 + 1] : 1, g2 = gains ? gains[mi * 3 + 2] : 1

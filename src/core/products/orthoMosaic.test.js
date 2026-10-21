@@ -4,6 +4,7 @@ import {
   mosaicSeamCells, orthoHalo, orthoTiledWorkingBytes, orthoCacheLog, chooseGroupSize, NO_LABEL,
 } from './ortho.js'
 import { resampledGeometry } from './surface.js'
+import { createOrthoStats } from '../eval/orthoStats.js'
 
 // Two nadir cameras 10 units above the z = 0 plane at x = ∓2, each map seeing the
 // whole plane at depth 10 (2 map px per unit).
@@ -340,6 +341,34 @@ describe('blocks in groups (P6)', () => {
         expect(Buffer.from(grouped.rgba).equals(Buffer.from(one.rgba))).toBe(true)
         expect(Buffer.from(grouped.labels).equals(Buffer.from(one.labels))).toBe(true)
         expect(grouped.covered).toBe(one.covered)
+      }
+    })
+  }
+
+  // Photos loaded ahead (photoPrefetch), finishing out of order: the same ortho, and no
+  // photo decoded more often than without.
+  for (const v of variants) {
+    it(`computes the same ortho with photos loaded ahead (${v.blend}${v.seamBlend ? ` · ${v.seamBlend}` : ''})`, async () => {
+      const surface = plane(40, 24)
+      const slow = (maps) => {
+        const inner = photos(maps)
+        let k = 0
+        const load = async (mi, ...rest) => {
+          load.calls++
+          await new Promise((r) => setTimeout(r, (k++ * 7) % 5))
+          return inner(mi, ...rest)
+        }
+        load.calls = 0
+        return load
+      }
+      for (const [g, cacheBytes] of [[1, undefined], [4, 1], [15, undefined]]) {
+        const opts = { ...v, blockSize: 8, fillRadius: 1, groupBlocks: g, cacheBytes, mapsResident: cacheBytes === 1 ? false : undefined }
+        const plain = slow(views()), ahead = slow(views())
+        const a = await run(surface, views(), opts, { loadImage: plain })
+        const b = await run(surface, views(), { ...opts, photoPrefetch: 3 }, { loadImage: ahead })
+        expect(Buffer.from(b.rgba).equals(Buffer.from(a.rgba))).toBe(true)
+        expect(Buffer.from(b.labels).equals(Buffer.from(a.labels))).toBe(true)
+        expect(ahead.calls).toBeLessThanOrEqual(plain.calls + 3)
       }
     })
   }
