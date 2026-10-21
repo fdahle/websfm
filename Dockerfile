@@ -3,13 +3,16 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 # Where the app is mounted on the host (must start and end with "/"), and where
-# the .onnx weights are served from. Leave VITE_MODEL_BASE_URL empty to
-# bundle public/models/*.onnx into the image instead (`npm run fetch:models`
-# downloads the redistributable ones; superpoint.onnx must never be bundled).
+# the .onnx weights and the example datasets are served from. Leave the two base
+# URLs empty to bundle public/models/*.onnx and public/examples/ into the image
+# instead (`npm run fetch:models` and `npm run fetch:examples` download them;
+# superpoint.onnx must never be bundled).
 ARG VITE_BASE_PATH=/
 ARG VITE_MODEL_BASE_URL=
+ARG VITE_EXAMPLE_BASE_URL=
 ENV VITE_BASE_PATH=$VITE_BASE_PATH
 ENV VITE_MODEL_BASE_URL=$VITE_MODEL_BASE_URL
+ENV VITE_EXAMPLE_BASE_URL=$VITE_EXAMPLE_BASE_URL
 
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -21,9 +24,9 @@ COPY . .
 
 # Opt in with --build-arg RUN_RELEASE_CHECK=1 to also run
 # scripts/check-release.mjs, which verifies the artifact is actually deployable
-# (LICENSE, favicon, the ORT runtime, and — unless VITE_MODEL_BASE_URL is set —
-# the redistributable model weights). It is off by default because the weights are
-# gitignored: a fresh clone has no public/models/*.onnx and would fail the check.
+# (LICENSE, favicon, the ORT runtime, and, unless their base URLs are set, the
+# redistributable model weights and the example datasets). It is off by default
+# because both are gitignored: a fresh clone has neither and would fail the check.
 ARG RUN_RELEASE_CHECK=0
 RUN npm run build \
  && if [ "$RUN_RELEASE_CHECK" = "1" ]; then npm run check:release; fi

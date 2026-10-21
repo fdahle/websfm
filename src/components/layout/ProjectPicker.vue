@@ -1,6 +1,8 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { isFolderProject, folderLabel } from '../../core/io/folderProject.js'
+import { EXAMPLES } from '../../core/examples.js'
+import { formatBytes } from '../../core/formatBytes.js'
 import { version as appVersion } from '../../../package.json'
 import Icon from '../Icon.vue'
 import { useInlineRename } from '../../composables/useInlineRename.js'
@@ -18,7 +20,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'switch', 'rename', 'delete', 'new', 'open-file', 'open-folder', 'close',
-  'settings', 'save-copy', 'move-to-folder', 'move-to-browser',
+  'settings', 'save-copy', 'move-to-folder', 'move-to-browser', 'example',
 ])
 
 // Per-project actions live in one row menu rather than a row of icon buttons:
@@ -174,6 +176,17 @@ onBeforeUnmount(() => {
         <span class="open-text">
           <span class="open-title">Project folder…</span>
           <span class="open-sub">A folder on your disk, edited in place</span>
+        </span>
+      </button>
+
+      <!-- A ready-made set with a walkthrough (core/examples.js), for a first look
+           at the whole pipeline without photos of one's own. -->
+      <div class="footer-label">Try an example</div>
+      <button v-for="(ex, id) in EXAMPLES" :key="id" class="open-btn" @click="emit('example', id)">
+        <span class="open-icon"><Icon :name="ex.sceneType === 'aerial' ? 'map-pin' : 'cube'" /></span>
+        <span class="open-text">
+          <span class="open-title">{{ ex.title }}</span>
+          <span class="open-sub">{{ ex.summary }} {{ formatBytes(ex.approxBytes) }} download.</span>
         </span>
       </button>
     </div>

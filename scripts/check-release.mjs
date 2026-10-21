@@ -1,10 +1,12 @@
 import { ortVersion } from './ort-version.mjs'
 import { access, readFile, stat } from 'node:fs/promises'
 import { MODELS, isRedistributable } from '../src/core/models/registry.js'
+import { EXAMPLES } from '../src/core/examples.js'
 
 const dist = new URL('../dist/', import.meta.url)
 const base = process.env.VITE_BASE_PATH || '/'
 const externalModels = process.env.VITE_MODEL_BASE_URL
+const externalExamples = process.env.VITE_EXAMPLE_BASE_URL
 
 const errors = []
 
@@ -49,6 +51,11 @@ const shippable = Object.entries(MODELS).filter(([id]) => isRedistributable(id))
 const restricted = Object.entries(MODELS).filter(([id]) => !isRedistributable(id))
 if (!externalModels) {
   await Promise.all(shippable.map(([, m]) => requireFile(`models/${m.file}`, Math.round(m.approxBytes / 2))))
+}
+// The example datasets of the project picker (npm run fetch:examples), unless they
+// are served from elsewhere.
+if (!externalExamples) {
+  await Promise.all(Object.keys(EXAMPLES).map((id) => requireFile(`examples/${id}/manifest.json`, 20)))
 }
 for (const [, m] of restricted) {
   try {

@@ -9,6 +9,9 @@ websfm runs the whole photogrammetry pipeline locally in your browser. Your sour
 images are not uploaded. Start with the balanced defaults, inspect the result after
 each major stage, and only tune a setting when the evidence tells you why.
 
+New to photogrammetry, or no photos at hand? The [Tutorial](guide:tutorial) walks
+through an example drone survey from start to finish.
+
 ## 1 · Create a project
 Choose **Aerial survey** when you need a map, real-world coordinates, a DEM, or an
 orthophoto. Choose **Object capture** for a standalone object or local scene; you can

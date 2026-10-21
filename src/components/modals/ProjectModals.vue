@@ -40,7 +40,7 @@ const {
   closeWorkflowBuilder, confirmRemoveImages, deleteMessage, folderPrompt, folderPromptProject,
   handleCancelNewProject, handleCreateProject, handleDeleteProject, handleSetCrs, handleSwitchProject,
   moveCurrentProjectToBrowser, moveCurrentProjectToFolder, onFolderConnect, onFolderRepick, onSaveProject,
-  onWorkflowRun, onWorkflowUpdate, openProjectFolder, pendingConfirm, pendingImageDelete,
+  onWorkflowRun, onWorkflowUpdate, openExample, openProjectFolder, pendingConfirm, pendingImageDelete,
   pickProjectFile, progressCancelling, progressComplete, progressCurrent, progressFraction,
   progressIndeterminate, progressLabel, progressOpen, progressPhase, progressTitle, progressTotal,
   progressUnit, projectLoading, projectLoadingLabel, projectLoadingProgress, runPendingConfirm,
@@ -92,6 +92,7 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
     @move-to-browser="(id) => { projectPickerOpen = false; moveCurrentProjectToBrowser(id) }"
     @settings="() => { projectPickerOpen = false; projectSettingsOpen = true }"
     @close="projectPickerOpen = false"
+    @example="openExample"
   />
 
 
@@ -206,6 +207,7 @@ const progressSpotlight = computed(() => (liveSparse.value && activeTabId.value 
       :can-cancel="newProjectCanCancel"
       @create="handleCreateProject"
       @cancel="handleCancelNewProject"
+      @example="openExample"
     />
   </Teleport>
 

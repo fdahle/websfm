@@ -7,6 +7,13 @@ gets a fresh on-disk browser profile, deleted afterwards, so it starts from an e
 The profile is on disk because an incognito context keeps OPFS and blobs in memory, and
 a multi-GB dataset exhausts that.
 
+To try it without a dataset of your own, fetch the example (`npm run fetch:examples`)
+and run the one committed config, which takes it from detection to the orthophoto:
+
+```sh
+node scripts/bench/run-bench.mjs --config scripts/bench/example-aukerman.json
+```
+
 ```sh
 node scripts/bench/run-bench.mjs --config scripts/bench/configs/sb-default.json
 node scripts/bench/run-bench.mjs --images C:/data/set --limit 20 --detect '{"maxDim":3200}'

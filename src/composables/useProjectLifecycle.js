@@ -21,6 +21,8 @@ import { showToast } from './useToasts.js'
 import { confirmDialog } from './useConfirmations.js'
 import { rememberNewProjectDraft } from './newProjectDraft.js'
 import { pluralize } from '../core/textFormat.js'
+import { EXAMPLES, downloadExample } from '../core/examples.js'
+import { useGuideStore } from '../stores/useGuideStore.js'
 
 // Everything that opens, creates, switches, moves, saves or deletes a project,
 // lifted out of App.vue. Owns the blocking load overlay (`projectLoading` +
@@ -305,6 +307,44 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     })
   }
 
+  // ── Example project ─────────────────────────────────────────────────────────
+  // Download first (core/examples.js), so a failed download leaves no empty project
+  // behind; then create the project, import the images as a drop would, and open
+  // the example's walkthrough in the guide.
+  async function openExample(id) {
+    if (refuseWhileBusy('Open example')) return
+    const example = EXAMPLES[id]
+    projectPickerOpen.value = false
+    newProjectOpen.value = false
+    let files
+    try {
+      files = await withLoadingOverlay(`Downloading example "${example.title}"…`, () => downloadExample(id, {
+        onProgress: ({ done, total, bytes, totalBytes }) => {
+          projectLoadingProgress.value = {
+            done, total, label: 'Images', detail: `${formatBytes(bytes)} of ${formatBytes(totalBytes)}`,
+          }
+        },
+      }))
+    } catch (err) {
+      const detail = String(err?.message ?? err)
+      log(`Could not download the example: ${detail}`, 'error', 'Project')
+      showToast('Could not download the example', { detail, kind: 'error', ms: 8000 })
+      // Back to where the user came from, never to an empty, project-less app.
+      if (!currentProjectId.value) {
+        if (projects.value.length) projectPickerOpen.value = true
+        else { newProjectCanCancel.value = false; newProjectOpen.value = true }
+      }
+      return
+    }
+    const before = currentProjectId.value
+    await handleCreateProject({ name: example.title, sceneType: example.sceneType, crs: example.crs })
+    if (!currentProjectId.value || currentProjectId.value === before) return
+    log(`Example "${example.title}": ${files.length} images from ${example.credit} (${example.license})`,
+      'info', 'Project')
+    await imagesStore.addImages(files)
+    if (example.tutorial) useGuideStore().openOp(example.tutorial)
+  }
+
   // Cancelling the New Project dialog falls back to the picker when no project is
   // open yet, so the user is never left in an empty, project-less state.
   function handleCancelNewProject() {
@@ -575,7 +615,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
 
   return {
     projectLoading, projectLoadingProgress, projectLoadingLabel,
-    handleCreateProject, handleCancelNewProject,
+    handleCreateProject, handleCancelNewProject, openExample,
     folderPrompt, folderPromptProject,
     onFolderConnect, onFolderRepick, openProjectFolder,
     moveCurrentProjectToFolder, moveCurrentProjectToBrowser,

@@ -5,12 +5,17 @@ import Icon from '../Icon.vue'
 import ModalShell from './ui/ModalShell.vue'
 import { folderStorageSupported } from '../../core/io/folderProject.js'
 import { takeNewProjectDraft } from '../../composables/newProjectDraft.js'
+import { EXAMPLES } from '../../core/examples.js'
+import { formatBytes } from '../../core/formatBytes.js'
 
 defineProps({
   canCancel: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['create', 'cancel'])
+const emit = defineEmits(['create', 'cancel', 'example'])
+
+// The first example is offered as a way in for someone without photos of their own.
+const [exampleId, example] = Object.entries(EXAMPLES)[0]
 
 // Defaults, or — when this mount is the reopen after a failed create — what the
 // user submitted then (composables/newProjectDraft.js), folder choice included.
@@ -130,6 +135,12 @@ function submit() {
     </div>
 
     <template #footer>
+      <button
+        type="button"
+        class="example-link"
+        :title="`${example.imageCount} drone photos and a step-by-step walkthrough (${formatBytes(example.approxBytes)} download)`"
+        @click="emit('example', exampleId)"
+      >New here? Open the example project</button>
       <button v-if="canCancel" class="btn-secondary" @click="emit('cancel')">Cancel</button>
       <button class="btn-primary" :disabled="!name.trim()" @click="submit">Create project</button>
     </template>
@@ -144,6 +155,21 @@ function submit() {
 /* One column so the shell's 12px body gap does not apply; spacing below is the
    dialog's own (label margins). */
 .form { display: flex; flex-direction: column; }
+
+/* The way in for someone without photos: left of the buttons, in the footer, so it
+   never adds height to a dialog that already nearly fills a small window. */
+.example-link {
+  margin-right: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.example-link:hover { text-decoration: underline; }
 
 .field-label {
   font-size: 11px;

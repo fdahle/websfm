@@ -6,6 +6,15 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Example project and tutorial.** New users without photos of their own can open an
+  example from the New Project dialog (**New here? Open the example project**) or the
+  project picker (**Try an example**): 42 drone photos of Aukerman Park, Ohio, from
+  OpenDroneMap (public domain, about 50 MB). The images are imported as a drop would
+  import them, and the guide opens a new **Tutorial: Your First Reconstruction** that
+  walks through every stage to a DEM and an orthophoto, with what to expect at each.
+  Hosts put the examples on their server with `npm run fetch:examples`
+  (`VITE_EXAMPLE_BASE_URL` points elsewhere); a missing example says so and leaves no
+  empty project behind.
 - **Detect reseau (Tools ▸ Images ▾ ▸ Film scans).** For cameras that expose a grid of
   crosses onto every frame, such as the KH-9 mapping camera, the crosses are found in
   every scan and each scan is corrected for how it sat on the scanner and how its film

@@ -261,7 +261,7 @@ const {
 // 3D scene live here, so those two resets are injected.
 const {
   projectLoading, projectLoadingProgress, projectLoadingLabel,
-  handleCreateProject, handleCancelNewProject,
+  handleCreateProject, handleCancelNewProject, openExample,
   folderPrompt, folderPromptProject,
   onFolderConnect, onFolderRepick, openProjectFolder,
   moveCurrentProjectToFolder, moveCurrentProjectToBrowser,
@@ -504,7 +504,7 @@ provideAppContext({
   onImageQualityRemove, onImportKindChosen, onImportSwitchKind, onMatchRun, onMergeCloudsRun,
   onMeshRun, onOptimizeCamerasRun, onOrthoRun, onProductToolRun, onRasterImportAsImage,
   onRasterStyleApply, onReconstructRun, onSaveProject, onSectionRun, onToolEditRun, onVideoImport, onViewerPick,
-  onWorkflowRun, onWorkflowUpdate, openImageTab, openImageWithResiduals, openProjectFolder,
+  onWorkflowRun, onWorkflowUpdate, openExample, openImageTab, openImageWithResiduals, openProjectFolder,
   orientAutoUp, orientCentreOrigin, orientDraft, orientEdit, orientPicking, orientPlanePicks,
   pendingConfirm, pendingImageDelete, pickGcpFromReference, pickProjectFile, pickSfmFiles, pickSfmFolder,
   posedImageCount, probeMapLayersAt, productViewerRefs, progressCancelling, progressComplete,
