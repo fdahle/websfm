@@ -17,13 +17,31 @@ data/
 # committing them.
 public/models/*.onnx
 
+# Example datasets for "Try an example": hosted like the models, fetched with
+# `npm run fetch:examples` (see src/core/examples.js).
+public/examples/
+
 # Editor / OS
 .DS_Store
+Thumbs.db
+.idea/
+*.swp
 .vscode/*
 !.vscode/extensions.json
 
-# Local Claude Code settings (machine-specific permissions allowlist)
+# Environment files (build settings such as VITE_MODEL_BASE_URL; may hold secrets)
+.env
+.env.*
+!.env.example
+
+# Logs and coverage
+*.log
+coverage/
+
+# Local Claude Code state (machine-specific permissions, worktrees, task locks)
 .claude/settings.local.json
+.claude/worktrees/
+.claude/scheduled_tasks.lock
 
 # Note: src/wasm/** (the generated WASM bindings) is intentionally NOT ignored,
 # so the app runs on a fresh clone without needing the Rust toolchain.
@@ -36,11 +54,12 @@ bench-out/
 # Bench configs name datasets by local path (only meaningful on the machine that has them).
 scripts/bench/configs/
 
-# Internal development docs, kept locally and never published: CLAUDE.md (Claude Code
-# loads it from the repo root) and everything under dev/ (plan, done log, methods,
-# verification register, planning specs).
-/CLAUDE.md
+# Internal development docs, kept locally and never published: everything under
+# dev/ (plan, done log, verification register, planning specs) and personal Claude
+# Code notes. CLAUDE.md itself is public: it imports AGENTS.md and CONTRIBUTING.md.
 /dev/
+CLAUDE.local.md
 
-# Python bytecode (scripts/bench/hist)
+# Python (scripts/bench, scripts/examples)
 __pycache__/
+.venv/
