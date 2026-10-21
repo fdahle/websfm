@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { fillOrthoGaps, sampleOrtho, orthorectify, orthorectifyStreamed, affineToSfm, orthoCostCeiling, NO_LABEL } from './ortho.js'
+import { fillOrthoGaps, sampleOrtho, orthorectify, orthorectifyStreamed, affineToSfm, orthoCostCeiling } from './ortho.js'
+import { NO_LABEL } from './orthoWindow.js'
 import { filterDepthMapsGeometric } from '../dense/geomFilter.js'
 import { makeSampleMap } from '../sfm/displayFrame.js'
 import { scaleK } from '../sfm/geometry.js'

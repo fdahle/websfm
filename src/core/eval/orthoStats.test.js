@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { orthoStats, describeOrthoStats } from './orthoStats.js'
-import { NO_LABEL } from '../products/ortho.js'
+import { NO_LABEL } from '../products/orthoWindow.js'
 
 // RGBA plane from a grey-level function (alpha 255 where it returns a number).
 function plane(w, h, grey) {

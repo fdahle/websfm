@@ -15,7 +15,7 @@
 // a double below 2⁵³ and so independent of the order the blocks arrive in — a tiled
 // run reproduces the whole-image figures bit for bit. The gradient is the only
 // rounding, at 1.5e-5 grey levels per cell.
-import { NO_LABEL } from '../products/ortho.js'
+import { NO_LABEL } from '../products/orthoWindow.js'
 import { pluralize } from '../textFormat.js'
 
 const GRAD_SCALE = 65536 / 8000 // sqrt(gx² + gy²) in luma thousandths → 2⁻¹⁶ grey levels, incl. Sobel's /8

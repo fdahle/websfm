@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import {
-  orthorectify, orthorectifyStreamed, orthorectifyTiled, smoothLabels, chamferTo, srgbToLinear, linearToSrgb,
-  mosaicSeamCells, orthoHalo, orthoTiledWorkingBytes, orthoCacheLog, chooseGroupSize, NO_LABEL,
-} from './ortho.js'
+import { orthorectify, orthorectifyStreamed, orthorectifyTiled, orthoTiledWorkingBytes } from './ortho.js'
+import { smoothLabels, chamferTo, mosaicSeamCells, orthoHalo } from './orthoMosaic.js'
+import { orthoCacheLog, chooseGroupSize } from './orthoPlan.js'
+import { NO_LABEL } from './orthoWindow.js'
+import { srgbToLinear, linearToSrgb } from './colourGains.js'
 import { resampledGeometry } from './surface.js'
 import { packRgb } from './undistort.js'
 import { createOrthoStats } from '../eval/orthoStats.js'
