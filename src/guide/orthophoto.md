@@ -24,8 +24,8 @@ Over saved depth maps the blocks are shared among several workers (Settings ▸ 
 room for; the log says how many. The result is the same, pixel for pixel, as one
 worker would build.
 
-A fine orthophoto takes a while: about twenty minutes for 12,000 pixels across from a
-few hundred photos. Blocks built in a group all finish together, so the log may not
+A fine orthophoto takes a while: for 12,000 pixels across from a few hundred photos,
+about 8 minutes on five workers, 18 on one. Blocks built in a group all finish together, so the log may not
 report a finished block for minutes. It says how far the run has got (blocks done, or
 map visits while a group is open) and roughly how long is left: after half a minute,
 then after 1, 2 and 4 minutes, then every 5. The progress bar moves throughout and
