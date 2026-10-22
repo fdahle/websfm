@@ -450,6 +450,11 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- **The map legend matches the map.** It listed one purple camera triangle while camera
+  positions from EXIF draw as blue triangles, and drew GCPs as diamonds while the map
+  drew squares. The legend now lists exactly the symbols on the map, cameras by the
+  source of their position (EXIF, imported, model), control and check points apart,
+  and leaves out what a ribbon toggle hides; GCPs draw as diamonds on the map too.
 - An orthophoto over a DEM or mesh in a projected CRS was up to ten times slower than
   one in the model's local frame: the georeferenced frame is not exactly affine, so
   every cell took the full transform and no part of a photo was skipped as out of view.

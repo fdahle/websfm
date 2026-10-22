@@ -91,3 +91,41 @@ export function linkedImageOf(feature, images) {
   const imgId = feature.get('imgId')
   return imgId ? (images.find((i) => i.id === imgId) ?? null) : null
 }
+
+/**
+ * The map legend: one entry per kind of symbol the map draws right now, in the
+ * colours mapStyles.js gives it (the swatch CSS in ViewerMap.vue is keyed by `kind`).
+ * Cameras split by where their position came from, as their colour does: EXIF
+ * (blue), imported (purple), or the sparse model on the model map (purple). Image
+ * GPS circles are drawn only for images without a camera position. A layer switched
+ * off in the ribbon leaves the legend too.
+ */
+export function mapLegend({
+  gpsImages = [],
+  poses = [],
+  gcps = [],
+  footprints = [],
+  showCameras = true,
+  showGcps = true,
+  showFootprints = true,
+}) {
+  const out = []
+  if (showCameras && gpsImages.length) out.push({ kind: 'img', label: 'Image GPS' })
+  if (showCameras) {
+    if (poses.some((p) => p.source === 'exif')) out.push({ kind: 'pose-exif', label: 'Camera (EXIF)' })
+    if (poses.some((p) => p.source === 'sfm')) out.push({ kind: 'pose', label: 'Camera (model)' })
+    if (poses.some((p) => p.source !== 'exif' && p.source !== 'sfm'))
+      out.push({ kind: 'pose', label: 'Camera (imported)' })
+  }
+  if (showGcps) {
+    const roles = new Set(gcps.map((g) => g.role ?? 'control'))
+    if ([...roles].some((r) => r !== 'check' && r !== 'marker')) out.push({ kind: 'gcp', label: 'GCP' })
+    if (roles.has('check')) out.push({ kind: 'gcp-check', label: 'Check point' })
+    if (roles.has('marker')) out.push({ kind: 'marker', label: 'Marker' })
+  }
+  if (showFootprints) {
+    if (footprints.some((f) => f.rings?.length)) out.push({ kind: 'footprint', label: 'Footprint' })
+    if (footprints.some((f) => f.lines?.length)) out.push({ kind: 'contour', label: 'Contours' })
+  }
+  return out
+}

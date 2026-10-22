@@ -24,6 +24,7 @@ import {
   modelMarkerGcps,
   gcpPlacement,
   plottedFootprints,
+  mapLegend,
   plottedPoses,
   modelCameraPoses,
   isUnaligned,
@@ -285,17 +286,11 @@ function toggleSavedMeasurements() {
 const gpsImages = computed(() => (isModel.value ? [] : gpsImagesOf(props.images, props.poses)))
 
 const mapGcps = computed(() => (isModel.value ? modelMarkerGcps(props.modelMarkers) : plottedGcps(props.gcps)))
-const hasGcps = computed(() => mapGcps.value.length > 0)
 
 const mapFootprints = computed(() => (isModel.value ? [] : plottedFootprints(props.footprints)))
-// The legend names polygons and contour lines apart (a contour layer holds lines).
-const hasFootprints = computed(() => mapFootprints.value.length > 0)
-const hasFootprintPolygons = computed(() => mapFootprints.value.some((f) => f.rings?.length))
-const hasContourLines = computed(() => mapFootprints.value.some((f) => f.lines?.length))
 
 // On the model map the cameras are the SfM centres in the model frame instead.
 const mapPoses = computed(() => (isModel.value ? modelCameraPoses(props.modelCameras) : plottedPoses(props.poses)))
-const hasPoses = computed(() => mapPoses.value.length > 0)
 
 // Read by the style functions at render time.
 const featureUnaligned = (feature) => isUnaligned(feature.get('uuid'), props.hasSparse, props.alignedUuids)
@@ -570,6 +565,19 @@ watch(
 const gcpsVisible = computed(() => props.showGcps || editMode.value)
 watch(gcpsVisible, (v) => ctx.gcpLayer?.setVisible(v))
 
+// The legend: exactly the symbols drawn now, in their colours (core/mapData.js).
+const legend = computed(() =>
+  mapLegend({
+    gpsImages: gpsImages.value,
+    poses: mapPoses.value,
+    gcps: mapGcps.value,
+    footprints: mapFootprints.value,
+    showCameras: props.showCameras,
+    showGcps: gcpsVisible.value,
+    showFootprints: props.showFootprints,
+  }),
+)
+
 // Show/hide the grid from the ribbon toggle.
 watch(
   () => props.showGrid,
@@ -758,17 +766,10 @@ defineExpose({
         {{ hover.text }}
       </div>
 
-      <div v-if="hasGcps || hasFootprints || hasPoses" class="legend">
-        <span v-if="!isModel" class="legend-item"><span class="legend-dot img"></span>Image GPS</span>
-        <span v-if="hasGcps && gcpsVisible && !isModel" class="legend-item"
-          ><span class="legend-dot gcp"></span>GCP</span
+      <div v-if="legend.length" class="legend">
+        <span v-for="e in legend" :key="e.label" class="legend-item"
+          ><span class="legend-dot" :class="e.kind"></span>{{ e.label }}</span
         >
-        <span v-if="hasGcps && gcpsVisible && isModel" class="legend-item"
-          ><span class="legend-dot marker"></span>Marker</span
-        >
-        <span v-if="hasPoses" class="legend-item"><span class="legend-dot pose"></span>Camera</span>
-        <span v-if="hasFootprintPolygons" class="legend-item"><span class="legend-dot footprint"></span>Footprint</span>
-        <span v-if="hasContourLines" class="legend-item"><span class="legend-line contour"></span>Contours</span>
       </div>
     </div>
 
@@ -948,6 +949,10 @@ defineExpose({
   background: #e0a030;
   transform: rotate(45deg);
 }
+.legend-dot.gcp-check {
+  background: #38a9c7;
+  transform: rotate(45deg);
+}
 .legend-dot.pose {
   width: 0;
   height: 0;
@@ -956,15 +961,22 @@ defineExpose({
   border-right: 5px solid transparent;
   border-bottom: 9px solid #b06ad9;
 }
+.legend-dot.pose-exif {
+  width: 0;
+  height: 0;
+  background: none;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid #297fb8;
+}
 .legend-dot.footprint {
   background: rgba(14, 99, 156, 0.2);
   border: 1.5px solid rgba(14, 99, 156, 0.8);
 }
-.legend-line.contour {
-  display: inline-block;
+.legend-dot.contour {
+  height: 0;
   width: 14px;
   border-top: 2px solid rgba(160, 90, 30, 0.95);
-  vertical-align: middle;
 }
 </style>
 

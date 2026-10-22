@@ -44,7 +44,7 @@ const controlStyle = new Style({
   image: new RegularShape({
     points: 4,
     radius: 7,
-    angle: Math.PI / 4,
+    angle: 0, // a point on top: a diamond (π/4 would draw a square)
     fill: new Fill({ color: '#3fae6a' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),
@@ -54,7 +54,7 @@ const checkStyle = new Style({
   image: new RegularShape({
     points: 4,
     radius: 7,
-    angle: Math.PI / 4,
+    angle: 0, // a point on top: a diamond (π/4 would draw a square)
     fill: new Fill({ color: '#38a9c7' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),
@@ -66,7 +66,7 @@ const markerStyle = new Style({
   image: new RegularShape({
     points: 4,
     radius: 7,
-    angle: Math.PI / 4,
+    angle: 0, // a point on top: a diamond (π/4 would draw a square)
     fill: new Fill({ color: '#e0a030' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),

@@ -10,6 +10,7 @@ import {
   isUnaligned,
   hoverText,
   linkedImageOf,
+  mapLegend,
 } from './mapData.js'
 // The map's OL feature factories and style functions: what they set is what
 // hoverText / linkedImageOf / the click handler read back, so the property names
@@ -252,5 +253,31 @@ describe('style functions', () => {
     const loose = makeFootprintFeature({ rings: ring })
     expect(footprintStyle(linked, 'a')).not.toBe(footprintStyle(linked, 'b'))
     expect(footprintStyle(loose, undefined)).toBe(footprintStyle(linked, 'b'))
+  })
+})
+
+describe('mapLegend', () => {
+  it('names each symbol the map draws, cameras by the source of their position', () => {
+    const legend = mapLegend({
+      gpsImages: [{}],
+      poses: [{ source: 'exif' }, { source: 'exif' }],
+      gcps: [{ role: 'control' }, { role: 'check' }],
+      footprints: [{ lines: [[[0, 0]]] }],
+    })
+    expect(legend.map((e) => e.label)).toEqual(['Image GPS', 'Camera (EXIF)', 'GCP', 'Check point', 'Contours'])
+    expect(legend.find((e) => e.label === 'Camera (EXIF)').kind).toBe('pose-exif')
+  })
+
+  it('leaves out what a ribbon toggle hides, and what is not there', () => {
+    const legend = mapLegend({
+      gpsImages: [{}],
+      poses: [{ source: 'imported' }],
+      gcps: [{ role: 'control' }],
+      footprints: [{ rings: [[[0, 0]]] }],
+      showCameras: false,
+      showGcps: false,
+    })
+    expect(legend.map((e) => e.label)).toEqual(['Footprint'])
+    expect(mapLegend({})).toEqual([])
   })
 })
