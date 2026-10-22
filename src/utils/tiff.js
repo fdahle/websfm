@@ -235,7 +235,7 @@ export async function decodeTiffRgba(blob, { decoder } = {}) {
   // (exotic photometric / JPEG-in-TIFF / float the `tiff` crate can't handle)
   // fall back to the pure-JS geotiff path so no input regresses. `srcInfo` is
   // diagnostic only (compression/bit-depth for the baseline log).
-  let width, height, rgba
+  let width, height, rgba, nativeError
   const srcInfo = { srcBytes: blob.size }
   timings.backend = 'geotiff'
 
@@ -254,8 +254,9 @@ export async function decodeTiffRgba(blob, { decoder } = {}) {
       timings.backend = 'wasm'
       timings.decodeMs = performance.now() - t0
       timings.repackMs = 0
-    } catch {
-      // fall through to geotiff below
+    } catch (err) {
+      // fall through to geotiff below, which says why if it cannot read the file either
+      nativeError = err
     }
     // The wasm decoder reports bit depth and band count only; take photometric /
     // compression from the first IFD (header read, no pixel decode). Diagnostic only.
@@ -270,6 +271,15 @@ export async function decodeTiffRgba(blob, { decoder } = {}) {
     }
   }
 
+  if (!rgba && nativeError) {
+    // geotiff.js reads less than the native decoder (no CCITT fax, for one): when it
+    // fails too, the native decoder's reason is the one that matters (often memory).
+    try {
+      return await decodeTiffRgba(blob)
+    } catch (err) {
+      throw new Error(`${nativeError?.message ?? nativeError} (the fallback decoder: ${err?.message ?? err})`)
+    }
+  }
   if (!rgba) {
     const tiff = await openTiff(blob)
     const image = await tiff.getImage()
