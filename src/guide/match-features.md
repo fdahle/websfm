@@ -291,6 +291,33 @@ dropping questionable pairs. A pair with 30 or more verified inliers passes rega
 of its ratio: that many inliers is real geometry, not the small spurious fit this
 gate targets.
 
+## Repair a split graph
+<!-- param: repairSplits  default: on -->
+Images taken from very different directions match poorly with each other: the
+vertical and oblique cameras of an aerial mapping flight, a facade and the roof above
+it, two strips flown at different heights. One matching pass can then leave the block
+in pieces that are connected inside but not to each other, and
+[sparse reconstruction](guide:sparse-reconstruction) can only place them apart.
+
+With this on, matching checks the [match graph](help:match-graph) when it has run. For
+each piece of at least two images it takes the most promising pairs between that piece
+and the largest one, and matches them again:
+
+1. pairs that were rejected with at least 8 putative matches, the closest misses first;
+2. pairs never tried, because preselection left them out, whose footprints overlap
+   most (or whose cameras are closest);
+3. the other rejected pairs.
+
+Up to 12 pairs per piece and 48 in all are matched again, without the subset gate, with
+a ratio test of 0.9 instead of 0.8, a minimum inlier ratio of 8 %, and the MAGSAC++
+estimator; LightGlue gets twice the keypoints. F-RANSAC still verifies every pair, so a
+pair is accepted only when its matches fit one epipolar geometry. While the main block
+keeps growing this repeats, up to three rounds, each with pairs not tried before. The
+log says how many pieces there were, how many pairs each round tried, and how large the
+main block is afterwards.
+A pair you excluded is never tried. Single images that match nothing are left alone:
+they are usually blurred or show no overlapping ground.
+
 ## GPU acceleration
 With **Use GPU** on (Settings → Compute; on by default when the browser offers
 WebGPU), the brute-force matcher computes descriptor distances on the graphics

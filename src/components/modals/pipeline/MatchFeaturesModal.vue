@@ -16,6 +16,7 @@ import { MATCH_DEFAULTS, MATCH_PRESETS, MATCH_PRESET_META } from '../../../core/
 import { initialMatchStrategy } from '../../../core/recommend.js'
 import { MATCH_TUNING } from '../../../core/tuning.js'
 import { estimatePairCount, subsetGateStatus } from '../../../core/features/matchPlan.js'
+import { repairEffect } from '../../../core/stepEffects/match.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
 const props = defineProps({
@@ -196,6 +197,7 @@ const verifyEffect = computed(() =>
     ? `Matches that do not fit one epipolar geometry (within ${settings.value.ransacThreshPx} px at detection resolution) are discarded.`
     : 'Off — every putative match is kept, including the wrong ones.',
 )
+const repairLine = computed(() => repairEffect(settings.value))
 const acceptFloor = computed(() => Math.min(MATCH_TUNING.rawSkipFloor, settings.value.minMatches))
 const acceptEffect = computed(() =>
   settings.value.geometricVerification
@@ -773,6 +775,23 @@ function run() {
             step="0.05"
             class="field-input"
           />
+        </SettingsField>
+      </SettingsStep>
+
+      <SettingsStep step="5" title="Repair a split graph" :effect="repairLine" :inactive="!settings.repairSplits">
+        <SettingsField hint="Match the most promising pairs between the pieces again, with looser gates.">
+          <template #label
+            ><FieldHelp
+              op="match-features"
+              param="repairSplits"
+              :value="settings.repairSplits"
+              :default-value="MATCH_DEFAULTS.repairSplits"
+              >Repair a split graph</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.repairSplits" type="checkbox" class="checkbox" /> Enabled</label
+          >
         </SettingsField>
       </SettingsStep>
     </AdvancedDisclosure>

@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Matching repairs a split graph.** When matching leaves the block in pieces (the
+  vertical and oblique cameras of a mapping flight, a facade and its roof), the most
+  promising pairs between each piece and the main block are matched again with looser
+  gates: near misses first, then pairs preselection skipped whose footprints overlap.
+  On by default (Detect and Match Features ▸ step 5); the log says how many pieces
+  joined.
 - **DEM support layer.** Every DEM records which cells points landed in and which the
   gap interpolation filled. **Export ▸ DEM ▸ Support layer** writes it as a GeoTIFF
   (percentage measured per cell), and **Quality Report ▸ Products** gives the RMSE of

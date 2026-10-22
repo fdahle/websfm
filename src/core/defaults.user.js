@@ -176,6 +176,10 @@ export const MATCH_DEFAULTS = {
   // with a stable sampling fraction (see subsetGateSize) — this is a count drawn
   // from a sample, not from the full keypoint sets.
   subsetGateThreshold: 8,
+  // When matching leaves the block in pieces, match the most promising pairs between
+  // each piece and the main block again with looser gates (core/features/bridgeRepair.js;
+  // limits in tuning.js ▸ bridge*).
+  repairSplits: true,
 }
 // Matching quality presets — tune the geometric-verification strictness (deltas over
 // the defaults; medium ≡ defaults). Strategy/matcher are separate primary choices, not

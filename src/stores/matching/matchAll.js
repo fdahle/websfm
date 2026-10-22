@@ -13,7 +13,14 @@ import {
 } from '../../workers/computeClient.js'
 import { createGpuMatchRun } from './gpuMatchRun.js'
 import { createDescriptorCache } from './descriptorCache.js'
-import { preselectPairs, positionsForProximity, preselectByFootprintOverlap } from '../../core/features/preselect.js'
+import {
+  preselectPairs,
+  positionsForProximity,
+  preselectByFootprintOverlap,
+  footprintOverlap,
+} from '../../core/features/preselect.js'
+import { planBridgeRepair, bridgeKey } from '../../core/features/bridgeRepair.js'
+import { graphHealth } from '../../core/eval/matchGraph.js'
 import { sequentialPairs } from '../../core/features/sequentialPairs.js'
 import { lightGlueModelFor } from '../../core/features/learnedDetectors.js'
 import { MATCH_DEFAULTS } from '../../core/defaults.user.js'
@@ -74,6 +81,117 @@ export function createMatchAll({
       if (e) m.set(img.uuid, e.ring)
     }
     return m
+  }
+
+  // A pair's overlap evidence for bridge repair when it was never matched: footprint
+  // overlap (0–1), else camera proximity relative to the block's typical spacing.
+  function unmatchedPairScore(ready) {
+    const rings = footprintRingsByUuid(ready)
+    if (rings.size >= 2)
+      return (a, b) => (rings.has(a) && rings.has(b) ? footprintOverlap(rings.get(a), rings.get(b)) : 0)
+    const pos = positionsByUuid(ready)
+    if (pos.size < 2) return null
+    const pts = [...pos.values()]
+    const nearest = pts
+      .map((p) => Math.min(...pts.filter((q) => q !== p).map((q) => Math.hypot(p[0] - q[0], p[1] - q[1]))))
+      .sort((x, y) => x - y)
+    const spacing = nearest[nearest.length >> 1] || 1
+    return (a, b) => {
+      const p = pos.get(a),
+        q = pos.get(b)
+      return p && q ? Math.exp(-Math.hypot(p[0] - q[0], p[1] - q[1]) / (3 * spacing)) : 0
+    }
+  }
+
+  // Match again the pairs planBridgeRepair proposes, then log whether the pieces
+  // joined. Pairs never matched before join `pairs`, so the run's totals include them.
+  async function repairSplits(
+    ready,
+    pairs,
+    settings,
+    { round, tried, tally, untally, gpuRun, concurrency, isCancelled, onPair },
+  ) {
+    const byUuid = new Map(ready.map((im) => [im.uuid, im]))
+    const ids = [...byUuid.keys()]
+    const entriesOf = () =>
+      [...matchStore.value.values()]
+        .filter((e) => byUuid.has(e.idA) && byUuid.has(e.idB))
+        .map((e) => ({ ...e, disabled: e.enabled === false }))
+    const plan = planBridgeRepair({
+      imageIds: ids,
+      entries: entriesOf(),
+      scoreUnmatched: unmatchedPairScore(ready),
+      tried,
+      opts: {
+        minComponent: settings.bridgeMinComponent,
+        maxPairs: settings.bridgeMaxPairs,
+        perComponent: settings.bridgePerComponent,
+        retryMinRaw: settings.bridgeRetryMinRaw,
+      },
+    })
+    if (plan.components < 2) return {}
+    if (!plan.pairs.length) {
+      log(
+        `Matching: the match graph is in ${plan.components} pieces (largest ${plan.mainSize}/${ids.length} images)` +
+          (plan.pieces ? '; no pair between them is worth matching again' : '; only single images are cut off'),
+        'info',
+        'Matching',
+      )
+      return {}
+    }
+    const nNew = plan.pairs.filter((p) => p.source === 'new').length
+    for (const p of plan.pairs) tried.add(bridgeKey(p.idA, p.idB))
+    log(
+      `Matching: the match graph is in ${plan.components} pieces (largest ${plan.mainSize}/${ids.length} images, ` +
+        `${plan.detached} outside). Bridge repair${round > 1 ? ` round ${round}` : ''}: matching ` +
+        `${pluralize(plan.pairs.length, 'pair')} between the main block ` +
+        `and ${pluralize(plan.pieces, 'piece')} again (${plan.pairs.length - nNew} retried, ${nNew} not tried before), ` +
+        `without the subset gate, ratio ${settings.bridgeRatioThreshold}, min inlier ratio ${settings.bridgeMinInlierRatio}, ` +
+        `${settings.bridgeVerifier === 'magsac' ? 'MAGSAC++' : 'RANSAC'}`,
+      'info',
+      'Matching',
+    )
+    const repairSettings = {
+      ...settings,
+      _skipSubsetGate: true,
+      ratioThreshold: Math.max(settings.ratioThreshold, settings.bridgeRatioThreshold),
+      minInlierRatio: Math.min(settings.minInlierRatio, settings.bridgeMinInlierRatio),
+      verifier: settings.bridgeVerifier ?? settings.verifier,
+      lgMaxKeypoints: Math.round(settings.lgMaxKeypoints * (settings.bridgeLgKeypointScale ?? 1)),
+    }
+    const work = plan.pairs.map(({ idA, idB }) => [byUuid.get(idA), byUuid.get(idB)])
+    for (const [a, b] of work) {
+      const known = matchStore.value.get(pairId(a.uuid, b.uuid))
+      if (known) untally(known)
+      else pairs.push([a, b])
+    }
+    const cache = createDescriptorCache({ pairs: work, budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20 })
+    let cursor = 0
+    let joined = 0
+    const drain = async () => {
+      while (cursor < work.length) {
+        if (isCancelled()) return
+        const [a, b] = work[cursor++]
+        await matchPair(a, b, repairSettings, tally, cache, gpuRun)
+        cache.release(a.uuid)
+        cache.release(b.uuid)
+        const e = matchStore.value.get(pairId(a.uuid, b.uuid))
+        if (e?.status === 'done' && e.inlierCount > 0 && !e.weak) joined++
+        onPair()
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, work.length) }, drain))
+    if (isCancelled()) return { cancelled: true }
+    const accepted = entriesOf().filter((e) => e.status === 'done' && e.inlierCount > 0 && !e.weak && !e.disabled)
+    const after = graphHealth(accepted, ids).components
+    log(
+      `Matching: bridge repair accepted ${joined}/${pluralize(work.length, 'pair')}; the graph is now in ` +
+        `${pluralize(after.length, 'piece')}, the largest ${after[0]?.length ?? 0}/${ids.length} images ` +
+        `(was ${plan.mainSize})`,
+      after[0]?.length > plan.mainSize ? 'success' : 'info',
+      'Matching',
+    )
+    return { joined, grew: (after[0]?.length ?? 0) > plan.mainSize && after.length > 1 }
   }
 
   async function matchAll(images, settings = {}, onProgress, shouldCancel) {
@@ -307,6 +425,15 @@ export function createMatchAll({
       } else stats.rejected++
     }
 
+    // A pair matched again (bridge repair) leaves its first outcome's count first.
+    const untally = (entry) => {
+      if (entry?.status !== 'done') return
+      if (entry.gated) stats.gated--
+      else if (entry.skipped) stats.skipped--
+      else if (entry.weak) stats.weak--
+      else if (!(entry.inlierCount > 0)) stats.rejected--
+    }
+
     // WebGPU brute-force (Settings ▸ Compute "Use GPU"): one router per run, which
     // validates against WASM on the first pair and falls back per pair. LightGlue
     // has its own GPU path (ORT WebGPU EP) and never comes through here.
@@ -437,6 +564,29 @@ export function createMatchAll({
             'Matching',
           )
         }
+      }
+      // Bridge repair (core/features/bridgeRepair.js): a match graph left in pieces gets
+      // its most promising pairs between each piece and the main block matched again,
+      // without the subset gate and with looser gates. F-RANSAC still verifies them.
+      // Rounds repeat while the main block grows; no pair is tried twice.
+      const tried = new Set()
+      for (let round = 1; round <= (settings.bridgeRounds ?? 1); round++) {
+        if (cancelled || shouldCancel?.() || settings.repairSplits === false) break
+        const repaired = await repairSplits(ready, pairs, settings, {
+          round,
+          tried,
+          tally,
+          untally,
+          gpuRun,
+          concurrency,
+          isCancelled: () => cancelled || !!shouldCancel?.(),
+          onPair: () => {
+            done++
+            onProgress?.(done, Math.max(done, pairs.length))
+          },
+        })
+        if (repaired.cancelled) cancelled = true
+        if (!repaired.grew) break
       }
     } finally {
       endBatch()

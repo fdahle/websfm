@@ -285,6 +285,21 @@ export const MATCH_TUNING = {
   // (scale² more expected putatives). 0 = off. Iceland 1980 film: 7 images stranded.
   subsetGateRescueDegree: 6,
   subsetGateRescueScale: 4,
+  // Bridge repair (MATCH_DEFAULTS.repairSplits; core/features/bridgeRepair.js): a match
+  // graph left in pieces of at least bridgeMinComponent images gets up to
+  // bridgePerComponent pairs per piece (bridgeMaxPairs in all) between it and the main
+  // block matched again, without the subset gate and with these looser gates. F-RANSAC
+  // still verifies every pair; LightGlue gets bridgeLgKeypointScale× the keypoints.
+  // Pairs rejected with at least bridgeRetryMinRaw putatives are tried first.
+  bridgeRounds: 3, // again while the main block grows, each round with fresh pairs
+  bridgeMinComponent: 2,
+  bridgeMaxPairs: 48,
+  bridgePerComponent: 12,
+  bridgeRetryMinRaw: 8,
+  bridgeRatioThreshold: 0.9,
+  bridgeMinInlierRatio: 0.08,
+  bridgeVerifier: 'magsac',
+  bridgeLgKeypointScale: 2,
 }
 
 // Dense MVS knobs read in core/dense/mvs.js but NOT exposed in DepthMapsModal /
