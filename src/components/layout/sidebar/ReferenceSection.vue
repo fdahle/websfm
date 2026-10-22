@@ -38,6 +38,15 @@ const datumWarn = (r) => r.kind === 'dem' && (!r.verticalDatum || r.verticalDatu
 // preview, never the lazily-loaded plane — see useExternalStore.mapRasters), so
 // the toggle is hidden rather than offered and silently doing nothing.
 const canMap = (r) => !!r.previewDataUrl && !!r.crs && !r.crsUnresolved
+// Why a raster cannot go on the map (its map checkbox's tooltip); its own tab still opens.
+const mapBlocker = (r) =>
+  !r.crs
+    ? 'No coordinate system: the map cannot place it (double-click opens it in its own tab)'
+    : r.crsUnresolved
+      ? `Its coordinate system (${r.crs}) could not be resolved`
+      : !r.previewDataUrl
+        ? 'No preview image yet'
+        : ''
 
 const {
   editingId: editingRasterId,
@@ -106,7 +115,7 @@ const ctxOpenLabel = computed(() =>
             :checked="!!r.visible"
             :disabled="!canMap(r) && !r.visible"
             :aria-label="`Show ${r.name} on the map`"
-            :title="canMap(r) ? 'Shown on the 2D map' : 'No coordinate system to place it on the map'"
+            :title="canMap(r) ? 'Shown on the 2D map' : mapBlocker(r)"
             @click.stop
             @change="sidebar.setRasterVisible({ id: r.id, visible: $event.target.checked })"
           />
