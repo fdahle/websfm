@@ -347,8 +347,9 @@ export const useFootprintsStore = registerProjectStore(
         })
       }
 
-      // One computed set at a time — a re-run replaces the previous one.
-      sets.value = sets.value.filter((s) => s.source !== 'computed')
+      // One computed footprint set at a time — a re-run replaces the previous one.
+      // Contour line layers are computed too, and stay.
+      sets.value = sets.value.filter((s) => s.source !== 'computed' || s.kind === 'lines')
       let setId = null
       if (footprints.length) {
         setId = crypto.randomUUID()
