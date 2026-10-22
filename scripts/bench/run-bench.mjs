@@ -388,6 +388,13 @@ try {
       console.log(`== hist sensor: ${JSON.stringify(await page.evaluate((f) => window.bench.setSensor(f), h.sensor))}`)
     if (h.maskDataUrl)
       console.log(`== hist mask: ${await page.evaluate((u) => window.bench.setMask(u), h.maskDataUrl)} image(s)`)
+    if (cfg.hist.footprints) {
+      const fp = await page.evaluate((x) => window.bench.importPolygons(x), {
+        text: await readFile(cfg.hist.footprints, 'utf8'),
+        name: 'footprints',
+      })
+      console.log(`== hist footprints: ${JSON.stringify(fp)}`)
+    }
     if (h.maskFiles) {
       const m = await page.evaluate((x) => window.bench.importMasks(x), {
         files: h.maskFiles.map((f) => ({ url: `${base}/__bench_masks/${encodeURIComponent(f)}`, name: f })),

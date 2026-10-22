@@ -9,6 +9,7 @@
 //     "masks": ".../masks",                              a folder of per-image masks, paired by name
 //                                                         (Masks ▸ Import folder); TIFF is fine
 //     "maskExisting": "merge",                           with "mask" too: add each file to the static mask
+//     "footprints": ".../footprints.geojson",            approximate image footprints (polygons named by image)
 //     "gcps": ".../gcp.csv",                             gcp_label, image_file_name, x, y (pixel-edge),
 //                                                         x_map, y_map, elev, *_acc  (in cfg.crs)
 //     "checkEvery": 4,                                   every 4th label (sorted) is a checkpoint; 0 = none

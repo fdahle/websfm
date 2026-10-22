@@ -16,7 +16,8 @@ import { useReconstructionStore } from '/src/stores/useReconstructionStore.js'
 import { usePosesStore } from '/src/stores/usePosesStore.js'
 // Every other registered project store, so a reopen restores what the app restores.
 import '/src/stores/useExternalStore.js'
-import '/src/stores/useFootprintsStore.js'
+import { useFootprintsStore } from '/src/stores/useFootprintsStore.js'
+import { parseGeoJson, geoJsonToFootprints, guessNameKey } from '/src/core/io/geojson.js'
 import { useGcpsStore } from '/src/stores/useGcpsStore.js'
 import '/src/stores/useLogStore.js'
 import '/src/stores/useMeasurementsStore.js'
@@ -1154,6 +1155,15 @@ window.bench = {
     const blob = await (await fetch(dataUrl)).blob()
     for (const img of images.images) images.updateMask(img.id, blob, true)
     return images.images.filter((i) => i.mask).length
+  },
+  // A GeoJSON polygon file (config `hist.footprints` and other polygon layers), as
+  // Import ▸ polygons does: linked to images by the name field when it has one.
+  async importPolygons({ text, name }) {
+    const parsed = parseGeoJson(text)
+    if (parsed.kind !== 'polygons') return { error: `not a polygon file (${parsed.kind})` }
+    const fps = geoJsonToFootprints(parsed.features, guessNameKey(parsed.propertyKeys))
+    const n = await useFootprintsStore().addFootprints(fps, parsed.sourceCrs, name)
+    return { polygons: fps.length, added: n, crs: parsed.sourceCrs }
   },
   // A folder of per-image masks (config `hist.masks`), paired by name through
   // Masks ▸ Import folder: files = [{ url, name }].
