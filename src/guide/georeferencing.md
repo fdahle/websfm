@@ -162,9 +162,13 @@ works [coarse to fine](help:coarse-to-fine):
 
 1. **Where to look.** If the orthophoto is already georeferenced, the search starts
    from its footprint in the reference. Otherwise it starts from the registered
+   photos' image footprints, imported (**Import**, a polygon file with image names,
+   as archives such as USGS EarthExplorer supply them) or computed from poses,
+   padded by a quarter of their extent. Footprints say where an oblique photo looks,
+   which its camera position does not. Without footprints it starts from the
    photos' GPS positions, padded by half their spread and at least 300 m. Without
-   either, it searches the whole reference. A footprint that misses the reference
-   stops the search with that message.
+   any of these, it searches the whole reference. A footprint that misses the
+   reference stops the search with that message.
 2. **Coarse.** SIFT runs on a 1,536-pixel look at the whole orthophoto and at the
    search area, and one RANSAC [homography](help:homography) aligns them. If that
    fails, the search area is tried again as 3 × 3 overlapping windows of half its
@@ -220,6 +224,20 @@ Choose **Checkpoint** to reserve a point for checking rather than fitting.
 **Add reviewed candidates** imports only checked rows. Unknown elevation and
 accuracy stay unknown; incomplete controls cannot constrain adjustment. Photo
 marks can still be refined later in Control & Markers.
+
+## Stable ground
+<!-- param: stableArea  default: Anywhere -->
+A polygon layer that marks ground which has not changed between the photos and the
+reference: rock outcrops beside a glacier, built-up areas, bedrock. With one chosen,
+only candidates whose reference position lies inside a polygon are kept, and the
+spread over the block picks from those. **Anywhere** keeps every candidate.
+
+Use it whenever the photos are older than the reference. A candidate on a glacier,
+a river bank or a pit face matches a feature that has since moved or a surface whose
+height has changed, so both its position and the height filled from a reference DEM
+are wrong. Import the outlines as a polygon file (**Import**, GeoJSON) in any CRS;
+they are converted to the project CRS. The result line says how many matches fell
+outside.
 
 Some scenes defeat this matcher: a heavily changed historical scene, a reference
 whose radiometry differs strongly (film against a multispectral band), or a block

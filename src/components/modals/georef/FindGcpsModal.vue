@@ -6,28 +6,25 @@ import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
-import { useSensorsStore } from '../../../stores/useSensorsStore.js'
 import { useGcpsStore } from '../../../stores/useGcpsStore.js'
 import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 import { useLog } from '../../../composables/useLog.js'
-import { findReferenceMatches } from '../../../workers/computeClient.js'
-import { referenceGcpCandidates, candidateCoverage, referencePick } from '../../../core/sfm/referenceGcps.js'
-import { gpsSearchOutline, searchRegion } from '../../../core/sfm/referenceMatch.js'
-import { worldToPixel } from '../../../core/io/rasterSample.js'
-import { makePinholeToMark, makeFrameModelResolver } from '../../../core/sfm/displayFrame.js'
-import { ensureProjection, transform, isGeographic, metresToCrsUnits } from '../../../core/crs.js'
+import FieldHelp from '../../guide/FieldHelp.vue'
+import { candidateCoverage } from '../../../core/sfm/referenceGcps.js'
+import { findGcpCandidates, stableAreaLayers } from '../../../composables/useFindGcps.js'
 
 const props = defineProps({ hasRelativeOrtho: Boolean, referenceOrthos: { type: Array, default: () => [] } })
 const emit = defineEmits(['close'])
 const external = useExternalStore(),
   recon = useReconstructionStore(),
   images = useImagesStore()
-const sensors = useSensorsStore(),
-  gcps = useGcpsStore(),
+const gcps = useGcpsStore(),
   projects = useProjectsStore()
 const { log } = useLog()
 const selectedReferenceId = ref(props.referenceOrthos[0]?.id ?? ''),
-  band = ref(1)
+  band = ref(1),
+  stableSetId = ref('')
+const stableLayers = computed(() => stableAreaLayers())
 const reference = computed(() => external.rasterById(selectedReferenceId.value))
 const ready = computed(
   () =>
@@ -84,6 +81,7 @@ watch(
   [
     selectedReferenceId,
     band,
+    stableSetId,
     () => recon.ortho,
     () => recon.mainSparseCloud,
     () => projects.currentProjectId,
@@ -96,117 +94,28 @@ onBeforeUnmount(() => {
   dropTileUrls()
 })
 
-// Where in the reference to look: the ortho's own footprint when it is already
-// georeferenced, else the registered photos' GPS positions, else everywhere.
-async function searchArea(ortho, cloud, refRaster) {
-  const toPixels = (pts, crs) =>
-    pts
-      .map((p) => transform(p, crs, refRaster.crs))
-      .map(([x, y]) => {
-        const px = worldToPixel(refRaster, x, y)
-        return [px.col, px.row]
-      })
-  if (ortho.crs && ortho.crs !== 'local') {
-    await ensureProjection(ortho.crs)
-    const x1 = ortho.originX + ortho.width * ortho.gsd,
-      y1 = ortho.originY - ortho.height * ortho.gsd
-    const pts = [
-      [ortho.originX, ortho.originY],
-      [x1, ortho.originY],
-      [x1, y1],
-      [ortho.originX, y1],
-    ]
-    return {
-      region: searchRegion(toPixels(pts, ortho.crs), refRaster.width, refRaster.height),
-      source: 'the georeferenced orthophoto',
-    }
-  }
-  const outline = gpsSearchOutline(
-    images.images
-      .filter((im) => cloud.cameras.get(im.uuid))
-      .map((im) => [Number(im.meta?.gpsLon), Number(im.meta?.gpsLat)]),
-  )
-  if (outline)
-    return {
-      region: searchRegion(toPixels(outline, 'EPSG:4326'), refRaster.width, refRaster.height),
-      source: "the photos' GPS positions",
-    }
-  return { region: null, source: null }
-}
-
 async function find() {
-  const token = ++generation,
-    ortho = recon.ortho,
-    cloud = recon.mainSparseCloud,
-    refRaster = reference.value
+  const token = ++generation
   busy.value = true
   error.value = ''
   message.value = ''
   candidates.value = []
   dropTileUrls()
   try {
-    const file = await external.originalFile(refRaster.id)
-    if (!file) throw new Error('The original reference raster is unavailable — re-import it')
-    await Promise.all([ensureProjection(refRaster.crs), ensureProjection(projects.currentCrs)])
-    const area = await searchArea(ortho, cloud, refRaster)
+    const {
+      candidates: found,
+      result,
+      area,
+      stable,
+    } = await findGcpCandidates({
+      referenceId: selectedReferenceId.value,
+      band: band.value,
+      stableSetId: stableSetId.value || null,
+      onLog: (m, level, ctx) => log(m, level, ctx),
+    })
     if (token !== generation) return
-    const result = await findReferenceMatches(
-      {
-        local: { cog: ortho.cog ?? null, previewUrl: ortho.previewUrl, width: ortho.width, height: ortho.height },
-        reference: {
-          file,
-          width: refRaster.width,
-          height: refRaster.height,
-          band: band.value - 1,
-          region: area.region,
-        },
-      },
-      { onLog: (m, level, ctx) => log(m, level, ctx) },
-    )
-    if (token !== generation) return
-    const frameModel = makeFrameModelResolver({ summary: recon.summary, sensors: sensors.sensors })
-    const sourceImages = images.images.flatMap((image) => {
-      const camera = cloud.cameras.get(image.uuid)
-      if (!camera) return []
-      const { dist, selfCal, fiducial, filmMissing } = frameModel(image)
-      if (filmMissing) return []
-      return [
-        { uuid: image.uuid, name: image.name, toScan: makePinholeToMark({ K: camera.K, dist, selfCal, fiducial }) },
-      ] // candidates become marks
-    })
-    const toProject = (p) => transform(p, refRaster.crs, projects.currentCrs)
-    const found = referenceGcpCandidates({
-      points: cloud.points,
-      images: sourceImages,
-      ortho,
-      reference: refRaster,
-      ...result,
-    })
-    const geographic = isGeographic(projects.currentCrs),
-      declared = metresToCrsUnits(refRaster.horizontalAccuracy, projects.currentCrs)
-    candidates.value = found.map((c) => {
-      // Position and planimetric σ from the reference pixel, widened by the match's
-      // own residual (core/sfm/referenceGcps.js referencePick).
-      const { x, y, sigma } = referencePick(refRaster, ...c.reference, {
-        toProject,
-        geographic,
-        declared,
-        displayFactor: c.residualRefPx,
-      })
-      const round = (v) => (v == null ? null : Number(v.toPrecision(3)))
-      return {
-        ...c,
-        x,
-        y,
-        selected: false,
-        role: 'control',
-        z: null,
-        accuracyX: round(sigma),
-        accuracyY: round(sigma),
-        accuracyZ: null,
-        verticalDatum: 'unknown',
-      }
-    })
+    const ortho = recon.ortho
+    candidates.value = found
     const tiles = result.tiles.map((t) =>
       t.localImage
         ? {
@@ -233,7 +142,8 @@ async function find() {
         ? ` in ${result.tiles.length} fine tiles (single-plane p95 ${result.fine.p95.toFixed(2)} working px)`
         : ` (coarse alignment only${ortho.cog ? ': no fine tile aligned' : ''})`) +
       `; ${candidates.value.length} candidates with measured photo tracks, covering ${cover.cells} of ${cover.of} cells of the block (hull ${(100 * cover.hull).toFixed(0)} %).` +
-      (area.source ? ` Searched around ${area.source}.` : '')
+      (area.source ? ` Searched around ${area.source}.` : '') +
+      (stable ? ` ${stable.rejected} matches off the stable ground of "${stable.name}" left out.` : '')
     if (!candidates.value.length)
       message.value += ' No nearby sparse tracks were suitable; try another reference band or mark control manually.'
     else if (cover.cells < 4) message.value += ' The candidates are bunched: control there fits that area only.'
@@ -332,6 +242,13 @@ const k = (side) => (side === 'local' ? preview.value.kl : preview.value.kr)
     <label
       >Reference band <input v-model.number="band" type="number" min="1" :max="reference?.bands || 1" :disabled="busy"
     /></label>
+    <label
+      ><FieldHelp op="georeferencing" param="stableArea">Stable ground</FieldHelp>
+      <select v-model="stableSetId" :disabled="busy">
+        <option value="">Anywhere</option>
+        <option v-for="s in stableLayers" :key="s.id" :value="s.id">{{ s.name }}</option>
+      </select></label
+    >
     <WarnBox v-if="!ready">Build a current orthophoto and import a reference raster with a resolved CRS first.</WarnBox>
     <WarnBox
       >Reference locations are estimated near verified matches, using sparse tracks observed in at least two photos.

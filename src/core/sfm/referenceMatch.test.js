@@ -11,6 +11,7 @@ import {
   gpsSearchOutline,
   searchRegion,
   matchConfidence,
+  footprintSearchPoints,
 } from './referenceMatch.js'
 
 // Rotation by 30°, scale 0.25 (the reference is 4× coarser), translation.
@@ -169,4 +170,33 @@ it('scores confidence from tile agreement, fit residual and track length', () =>
     0.5 * 0.5 * Math.exp(-0.5) * 0.8,
     9,
   )
+})
+
+it("footprintSearchPoints takes the outer rings of the registered images' footprints from every polygon set", () => {
+  const sets = [
+    {
+      kind: 'polygons',
+      footprints: [
+        {
+          imageId: 1,
+          rings: [
+            [
+              [0, 0],
+              [1, 0],
+              [1, 1],
+            ],
+            [[0.2, 0.2]],
+          ],
+        },
+      ],
+    },
+    { footprints: [{ imageId: 2, rings: [[[5, 5]]] }, { imageId: 3, rings: [[[9, 9]]] }, { rings: [[[7, 7]]] }] },
+    { kind: 'lines', footprints: [{ imageId: 1, rings: [[[8, 8]]] }] },
+  ]
+  expect(footprintSearchPoints(sets, new Set([1, 2]))).toEqual([
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [5, 5],
+  ])
 })

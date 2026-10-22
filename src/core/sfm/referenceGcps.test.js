@@ -6,6 +6,7 @@ import {
   referenceSigma,
   pixelSizeAt,
   referencePick,
+  polygonAreaTest,
 } from './referenceGcps.js'
 import { SparsePoints } from './sparsePoints.js'
 function fixture() {
@@ -116,4 +117,22 @@ it('measures σ in metres for a geographic project', () => {
   const pick = referencePick(ref, 0.5, 0.5, { toProject, geographic: true })
   expect(pick.x).toBeCloseTo(10.0005, 12)
   expect(pick.gsd).toBeCloseTo((111.32 + 111.32 * Math.cos((-60.0005 * Math.PI) / 180)) / 2, 6)
+})
+it('keeps only candidates the area test accepts (stable ground)', () => {
+  // The candidate lands at reference (1051, 1929).
+  expect(referenceGcpCandidates({ ...fixture(), accept: (x, y) => x > 1100 })).toEqual([])
+  expect(referenceGcpCandidates({ ...fixture(), accept: (x, y) => x > 1000 && y < 2000 })).toHaveLength(1)
+})
+it('tests points against polygons with holes', () => {
+  const square = (x0, y0, s) => [
+    [x0, y0],
+    [x0 + s, y0],
+    [x0 + s, y0 + s],
+    [x0, y0 + s],
+  ]
+  const inside = polygonAreaTest([[square(0, 0, 10), square(4, 4, 2)], [square(20, 0, 5)]])
+  expect(inside(1, 1)).toBe(true)
+  expect(inside(5, 5)).toBe(false) // in the hole
+  expect(inside(22, 2)).toBe(true)
+  expect(inside(15, 2)).toBe(false)
 })

@@ -258,6 +258,22 @@ export function gpsSearchOutline(lonLats, { minPadMetres = 300, perEdge = 8 } = 
   return out
 }
 
+// The outer-ring vertices of the footprint polygons linked to `imageIds` (any
+// vector set that holds image footprints: computed from poses or imported), in
+// the sets' own CRS (the project CRS). An archive's approximate footprints say
+// where an oblique photo looks, which its camera position does not.
+export function footprintSearchPoints(sets, imageIds) {
+  const out = []
+  for (const set of sets || []) {
+    if (set.kind === 'lines') continue
+    for (const fp of set.footprints || []) {
+      if (fp.imageId == null || !imageIds.has(fp.imageId)) continue
+      for (const p of fp.rings?.[0] || []) if (Number.isFinite(p[0]) && Number.isFinite(p[1])) out.push(p)
+    }
+  }
+  return out
+}
+
 // A native search rect from footprint points already in reference PIXELS; null
 // when it covers (nearly) the whole raster anyway, so the caller searches it all.
 // Throws when the footprint misses the raster: no amount of matching finds a

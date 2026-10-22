@@ -36,6 +36,8 @@ function orthoFrame(ortho) {
  *
  * match: { a, b, tile, residual } native pixel-edge coordinates (ortho a,
  * reference b); tiles[k]: { H, inliers, ratio }; kl/kr: native px per working px.
+ * `accept(x, y)` (reference CRS), when given, keeps only candidates it accepts —
+ * stable ground — before the spread, so the grid fills from accepted candidates.
  */
 export function referenceGcpCandidates({
   points,
@@ -48,6 +50,7 @@ export function referenceGcpCandidates({
   kr = 1,
   maxDistance = 2,
   limit = 30,
+  accept = null,
 }) {
   const frame = orthoFrame(ortho)
   const imageByUuid = new Map(images.map((image) => [image.uuid, image]))
@@ -106,6 +109,7 @@ export function referenceGcpCandidates({
     )
       continue
     const world = pixelToWorld(reference, ...referencePixel)
+    if (accept && !accept(world.x, world.y)) continue
     used.add(nearest.index)
     pool.push({
       pointIndex: nearest.index,
@@ -237,4 +241,40 @@ export function referencePick(
     : toProject
   const gsd = pixelSizeAt(reference, col, row, toAccuracy)
   return { x, y, gsd, sigma: referenceSigma({ gsd, residualPx: displayFactor, declared }) }
+}
+
+/**
+ * An even-odd inside test over a set of polygons (each `rings`: outer ring, then
+ * holes, as [[x, y], …]), for keeping candidates on stable ground. Bounding boxes
+ * first: a regional rock outline has thousands of polygons.
+ */
+export function polygonAreaTest(polygons) {
+  const items = []
+  for (const rings of polygons) {
+    let x0 = Infinity,
+      y0 = Infinity,
+      x1 = -Infinity,
+      y1 = -Infinity
+    for (const [x, y] of rings[0] || []) {
+      x0 = Math.min(x0, x)
+      y0 = Math.min(y0, y)
+      x1 = Math.max(x1, x)
+      y1 = Math.max(y1, y)
+    }
+    if (x0 <= x1) items.push({ rings, x0, y0, x1, y1 })
+  }
+  return (x, y) => {
+    for (const it of items) {
+      if (x < it.x0 || x > it.x1 || y < it.y0 || y > it.y1) continue
+      let inside = false
+      for (const ring of it.rings)
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const [xi, yi] = ring[i],
+            [xj, yj] = ring[j]
+          if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+        }
+      if (inside) return true
+    }
+    return false
+  }
 }

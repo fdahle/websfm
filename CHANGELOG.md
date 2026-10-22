@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Find GCPs: stable ground and footprints.** A polygon layer (rock outcrops, built-up
+  areas) can limit candidates to ground that has not changed since the photos, so
+  candidates on a glacier or a pit face no longer reach the control. Without a
+  georeferenced orthophoto, the search now starts from the photos' imported or
+  computed footprints before their GPS positions, which places scans from an archive
+  that come with footprints but no GPS.
 - **Import a folder of masks (View ▸ Masks ▸ Import folder…).** One mask file per
   image, paired by name: the image's own name in a mask folder, COLMAP's
   `IMG_0001.jpg.png` or Metashape's `{filename}_mask`. The dialog shows what pairs
