@@ -94,6 +94,31 @@ describe('compareDemToReference', () => {
     expect(res.stats.max).toBeCloseTo(0.25, 5)
   })
 
+  it('compares only the cells `include` accepts, and counts the rest', async () => {
+    const dem = makeDem(4, 4, () => 10)
+    // Left half: an error of 5; right half: none. Include only x < 2.
+    const r = await compareDemToReference(dem, (x) => (x < 2 ? 5 : 10), { include: (x) => x < 2 })
+    expect(r.compared).toBe(8)
+    expect(r.excluded).toBe(8)
+    expect(r.stats.median).toBeCloseTo(5, 6)
+  })
+
+  it('splits the statistics by direct support when the DEM has a support layer', async () => {
+    const dem = makeDem(4, 1, () => 10)
+    dem.support = Uint8Array.from([255, 128, 127, 0])
+    const r = await compareDemToReference(dem, (x) => (x < 2 ? 9 : 4))
+    expect(r.bySupport.direct).toMatchObject({ n: 2, median: 1 })
+    expect(r.bySupport.interpolated).toMatchObject({ n: 2, median: 6 })
+    expect(
+      (
+        await compareDemToReference(
+          makeDem(2, 1, () => 0),
+          () => 0,
+        )
+      ).bySupport,
+    ).toBeNull()
+  })
+
   it('stops when the signal is aborted', async () => {
     const dem = makeDem(50, 50, () => 0)
     const signal = { aborted: true }

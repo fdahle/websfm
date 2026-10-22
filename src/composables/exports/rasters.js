@@ -2,6 +2,7 @@ import { epsgToWkt } from '../../core/products/wkt.js'
 import {
   demToCog,
   demToGeoTiff,
+  demSupportToGeoTiff,
   rasterWorldFile,
   demToAsciiGridParts,
   orthoToGeoTiff,
@@ -114,6 +115,21 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       return exportReprojected('dem', dem.value, { outputCrs, resampling, fileName })
     const info = crsInfo(dem.value)
     const name = exportFileName(fileName, defaultExportName('dem', { format, base: projectBase() }))
+    if (format === 'support') {
+      // On the plane grid: a DEM past one plane records support on its overview.
+      const tif = await demSupportToGeoTiff(dem.value, {
+        crs: info,
+        deflate: compression === 'deflate' ? deflateBytes : null,
+      })
+      downloadBlob(`${name}.tif`, tif, 'image/tiff')
+      log(
+        `DEM export: support layer, ${dem.value.width}×${dem.value.height}` +
+          (dem.value.cog ? ` (the overview of the ${dem.value.fullWidth}×${dem.value.fullHeight} grid)` : ''),
+        'success',
+        'Export',
+      )
+      return
+    }
     // A DEM past one plane (SAT-3) is its stored COG: both TIFF formats hand that file
     // out as it is (DEFLATE, NaN for nodata), and the other formats are its overview.
     const full = dem.value.cog

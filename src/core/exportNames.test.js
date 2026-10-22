@@ -24,6 +24,7 @@ describe('defaultExportName', () => {
     expect(defaultExportName('dem', { format: 'geotiff', base })).toBe('proj-dem')
     expect(defaultExportName('dem', { format: 'cog', base })).toBe('proj-dem-cog')
     expect(defaultExportName('dem', { format: 'png', base })).toBe('proj-dem-hillshade')
+    expect(defaultExportName('dem', { format: 'support', base })).toBe('proj-dem-support')
     expect(defaultExportName('ortho', { format: 'png', base })).toBe('proj-ortho')
     expect(defaultExportName('ortho', { format: 'cog', base, crs: 'EPSG:3031' })).toBe('proj-ortho-EPSG3031')
     expect(defaultExportName('clip', { base, product: 'ortho' })).toBe('proj-ortho-clipped')

@@ -20,17 +20,28 @@
 
 const NMAD_K = 1.4826 // NMAD = 1.4826 · median |ΔZ − median|; equals σ for a normal
 
-// dem: { width, height, gsd, originX, originY, data:Float32(NaN = nodata), mask? }
+// dem: { width, height, gsd, originX, originY, data:Float32(NaN = nodata), mask?,
+//        support?:Uint8Array (the share of the cell measured, 0–255: 255 = points
+//        landed in it, 0 = filled by interpolation; core/products/dem.js) }
 // sampleRef: (x, y) → z | null, in the DEM's frame.
+// include: (x, y) → bool, in the DEM's frame: only cells it accepts are compared
+//   (stable ground, an area of interest); `excluded` counts the DEM cells it refused.
 // → { step, width, height, diff:Float32Array (NaN = not compared), demOnly:Uint8Array,
-//     demCells, compared, stats } — `diff` is the sub-grid, row 0 north, for the
-//     map image; `demOnly` marks its cells with a DEM height but no reference one
-//     (drawn grey, so missing reference coverage is not mistaken for a DEM hole).
-//   `demCells` counts sampled cells with a DEM height; `compared` those that also
-//   had a reference height. Async only to yield to the UI every ~`sliceMs`;
-//   `signal.aborted` stops it (returns null).
-export async function compareDemToReference(dem, sampleRef, { maxSide = 512, sliceMs = 30, signal = null } = {}) {
-  const { width: w, height: h, gsd, originX, originY, data, mask } = dem
+//     demCells, compared, excluded, stats, bySupport } — `diff` is the sub-grid, row 0
+//     north, for the map image; `demOnly` marks its cells with a DEM height but no
+//     reference one (drawn grey, so missing reference coverage is not mistaken for a
+//     DEM hole). `demCells` counts sampled cells with a DEM height; `compared` those
+//     that also had a reference height. With `dem.support`, `bySupport` is
+//     { direct, interpolated }: the statistics of the cells at least half measured
+//     and of the rest, apart (null
+//     without a support layer). Async only to yield to the UI every ~`sliceMs`;
+//     `signal.aborted` stops it (returns null).
+export async function compareDemToReference(
+  dem,
+  sampleRef,
+  { maxSide = 512, sliceMs = 30, signal = null, include = null } = {},
+) {
+  const { width: w, height: h, gsd, originX, originY, data, mask, support } = dem
   const step = Math.max(1, Math.ceil(Math.max(w, h) / maxSide))
   const gw = Math.ceil(w / step),
     gh = Math.ceil(h / step)
@@ -38,7 +49,10 @@ export async function compareDemToReference(dem, sampleRef, { maxSide = 512, sli
   const demOnly = new Uint8Array(gw * gh)
   const half = step >> 1
   let demCells = 0,
-    compared = 0
+    compared = 0,
+    excluded = 0
+  // Per compared sub-grid cell: 1 = direct, 0 = interpolated (with a support layer).
+  const direct = support ? new Uint8Array(gw * gh) : null
   let sliceStart = now()
 
   for (let gr = 0; gr < gh; gr++) {
@@ -50,13 +64,19 @@ export async function compareDemToReference(dem, sampleRef, { maxSide = 512, sli
       if (mask && !mask[i]) continue
       const z = data[i]
       if (!Number.isFinite(z)) continue
+      const x = originX + (c + 0.5) * gsd
+      if (include && !include(x, y)) {
+        excluded++
+        continue
+      }
       demCells++
-      const ref = sampleRef(originX + (c + 0.5) * gsd, y)
+      const ref = sampleRef(x, y)
       if (ref == null || !Number.isFinite(ref)) {
         demOnly[gr * gw + gc] = 1
         continue
       }
       diff[gr * gw + gc] = z - ref
+      if (direct) direct[gr * gw + gc] = support[i] >= 128 ? 1 : 0
       compared++
     }
     if (now() - sliceStart > sliceMs) {
@@ -70,7 +90,24 @@ export async function compareDemToReference(dem, sampleRef, { maxSide = 512, sli
   const values = new Float32Array(compared)
   let k = 0
   for (let i = 0; i < diff.length; i++) if (!Number.isNaN(diff[i])) values[k++] = diff[i]
-  return { step, width: gw, height: gh, diff, demOnly, demCells, compared, stats: summarizeDifferences(values) }
+  let bySupport = null
+  if (direct) {
+    const split = [[], []]
+    for (let i = 0; i < diff.length; i++) if (!Number.isNaN(diff[i])) split[direct[i]].push(diff[i])
+    bySupport = { direct: summarizeDifferences(split[1]), interpolated: summarizeDifferences(split[0]) }
+  }
+  return {
+    step,
+    width: gw,
+    height: gh,
+    diff,
+    demOnly,
+    demCells,
+    compared,
+    excluded,
+    stats: summarizeDifferences(values),
+    bySupport,
+  }
 }
 
 // Summary of signed differences. Sorts a copy; NaN-free input expected.

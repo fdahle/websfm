@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { fromArrayBuffer } from 'geotiff'
 import {
+  demSupportToGeoTiff,
+  SUPPORT_NODATA,
   cloudToPlyParts,
   meshToPlyParts,
   meshToGlbParts,
@@ -569,5 +572,30 @@ describe('textured mesh export', () => {
     expect(mtl).toContain('newmtl atlas-1\n')
     expect(mtl).toContain('map_Kd quad_atlas1.jpg\n')
     expect(mtl.match(/illum 0/g)).toHaveLength(2)
+  })
+})
+
+describe('demSupportToGeoTiff', () => {
+  it('writes the measured percentage per cell and nodata where the DEM is empty', async () => {
+    const dem = {
+      width: 3,
+      height: 1,
+      gsd: 2,
+      originX: 100,
+      originY: 50,
+      mask: Uint8Array.from([1, 1, 0]),
+      support: Uint8Array.from([255, 128, 0]),
+    }
+    const bytes = await demSupportToGeoTiff(dem, { crs: { code: 3031, geographic: false } })
+    const img = await (
+      await fromArrayBuffer(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+    ).getImage()
+    expect(Array.from((await img.readRasters())[0])).toEqual([100, 50, SUPPORT_NODATA])
+    expect(img.getOrigin().slice(0, 2)).toEqual([100, 50])
+    expect(img.getGDALNoData()).toBe(SUPPORT_NODATA)
+  })
+
+  it('refuses a DEM built before support was recorded', async () => {
+    await expect(demSupportToGeoTiff({ width: 1, height: 1, mask: Uint8Array.of(1) })).rejects.toThrow(/support/)
   })
 })

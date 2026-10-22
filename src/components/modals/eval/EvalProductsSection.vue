@@ -5,6 +5,8 @@ import StatTiles from '../ui/StatTiles.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
+import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { useQualityReport } from '../../../composables/useQualityReport.js'
 import { differenceHistogram, differenceRange, differenceRgba } from '../../../core/eval/demCompare.js'
 import { rdBuColor } from '../../../core/products/colormap.js'
@@ -23,6 +25,14 @@ watch(refs, (list) => {
   if (!list.some((r) => r.id === refId.value)) refId.value = list[0]?.id ?? null
 })
 
+// Polygon layers that can limit the comparison: stable ground, an area of interest.
+const layers = computed(() => useFootprintsStore().sets.filter((s) => s.kind !== 'lines'))
+const stableSetId = ref('')
+const areaSetId = ref('')
+watch(layers, (list) => {
+  if (stableSetId.value && !list.some((s) => s.id === stableSetId.value)) stableSetId.value = ''
+  if (areaSetId.value && !list.some((s) => s.id === areaSetId.value)) areaSetId.value = ''
+})
 const result = ref(null)
 const error = ref('')
 const loading = ref(false)
@@ -34,7 +44,10 @@ async function run() {
   if (!recon.dem || !refId.value) return
   loading.value = true
   try {
-    const cmp = await demReferenceComparison(refId.value)
+    const cmp = await demReferenceComparison(refId.value, {
+      stableSetId: stableSetId.value || null,
+      areaSetId: areaSetId.value || null,
+    })
     if (seq === runSeq) result.value = cmp
   } catch (err) {
     if (seq === runSeq) error.value = err?.message ?? String(err)
@@ -44,7 +57,13 @@ async function run() {
 }
 // The vertical offset is part of the cache key, so editing it in the raster's
 // settings re-runs the comparison here too.
-watch(() => [recon.dem, refId.value, external.rasterById(refId.value)?.vOffset], run, { immediate: true })
+watch(
+  () => [recon.dem, refId.value, external.rasterById(refId.value)?.vOffset, stableSetId.value, areaSetId.value],
+  run,
+  {
+    immediate: true,
+  },
+)
 
 const tiles = computed(() => demReferenceTiles(result.value))
 const unit = computed(() => result.value?.demUnit ?? '')
@@ -110,6 +129,24 @@ const hist = computed(() => {
           · converted to {{ result.reference.conversion.to }} ({{ shiftRange(result.reference.conversion) }})</template
         >
       </span>
+    </div>
+
+    <div v-if="layers.length" class="ref-row">
+      <label class="field-label" for="eval-stable"
+        ><FieldHelp op="quality-report" param="stableArea">Stable ground</FieldHelp></label
+      >
+      <select id="eval-stable" v-model="stableSetId" class="field-select">
+        <option value="">All cells</option>
+        <option v-for="l in layers" :key="l.id" :value="l.id">{{ l.name }}</option>
+      </select>
+      <label class="field-label" for="eval-area"><FieldHelp op="quality-report" param="area">Area</FieldHelp></label>
+      <select id="eval-area" v-model="areaSetId" class="field-select">
+        <option value="">Whole DEM</option>
+        <option v-for="l in layers" :key="l.id" :value="l.id">{{ l.name }}</option>
+      </select>
+      <span v-if="result?.filters?.excluded" class="ref-meta">
+        {{ result.filters.excluded.toLocaleString() }} DEM cells outside left out</span
+      >
     </div>
 
     <div v-if="loading" class="eval-loading">Comparing…</div>

@@ -6,6 +6,14 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **DEM support layer.** Every DEM records which cells points landed in and which the
+  gap interpolation filled. **Export ▸ DEM ▸ Support layer** writes it as a GeoTIFF
+  (percentage measured per cell), and **Quality Report ▸ Products** gives the RMSE of
+  measured and interpolated cells apart against a reference DEM.
+- **DEM vs reference on stable ground.** **Quality Report ▸ Products** can limit the
+  comparison to a polygon layer of stable ground (rock, roads) and to an area of
+  interest, so a historical DEM is judged on terrain that has not changed. The
+  exported report names both layers.
 - **Find GCPs: stable ground and footprints.** A polygon layer (rock outcrops, built-up
   areas) can limit candidates to ground that has not changed since the photos, so
   candidates on a glacier or a pit face no longer reach the control. Without a

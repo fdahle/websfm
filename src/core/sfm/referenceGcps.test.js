@@ -6,8 +6,8 @@ import {
   referenceSigma,
   pixelSizeAt,
   referencePick,
-  polygonAreaTest,
 } from './referenceGcps.js'
+import { polygonAreaTest } from '../products/vectorLayers.js'
 import { SparsePoints } from './sparsePoints.js'
 function fixture() {
   return {

@@ -131,6 +131,22 @@ the grid are the edge of the survey and stay nodata. The filled heights are an
 estimate, not a measurement: a building on a slope gets the slope continued under
 it. On by default for Ground only, off otherwise.
 
+## Support layer
+<!-- param: supportExport default: — -->
+Every DEM records which of its cells points landed in and which the gap
+interpolation filled: its **direct support**. A filled cell looks like any other in
+the DEM, but its height is a guess from the measured cells around it, and on snow,
+water, shadow or a weakly matched block margin those guesses carry most of the large
+errors. Coverage alone overstates how much of a surface was reconstructed; the
+support layer shows it.
+
+**Export ▸ DEM ▸ Support layer** writes it as a one-band GeoTIFF on the DEM's grid:
+for each cell the percentage that points landed in (100 = measured, 0 = filled),
+255 where the DEM is empty. A DEM too large for one plane records it on its
+overview, where a cell can be partly measured. **Quality Report ▸ Products** uses it
+to give the error of measured and filled cells apart. A DEM built before
+23 October 2026 has no support layer; build it again to get one.
+
 ## Show on the 2D map
 A newly built DEM goes on the 2D map by itself. The checkbox on its row in the
 Products section, or **In Layers** in the DEM's ribbon tab, takes it off the map and

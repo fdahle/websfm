@@ -931,6 +931,37 @@ export async function demToGeoTiff(dem, { crs = {}, nodata = -9999, deflate = nu
   })
 }
 
+// ── DEM support → GeoTIFF (single-band uint8) ────────────────────────────────
+// The DEM's direct-support layer on its plane grid (a tiled DEM's overview): the
+// percentage of each cell that points landed in, 0–100 (a single-plane DEM's cells
+// are 0 or 100), and `SUPPORT_NODATA` where the DEM has no height. dem.support is
+// the 0–255 share core/products/dem.js records.
+export const SUPPORT_NODATA = 255
+export async function demSupportToGeoTiff(dem, { crs = {}, deflate = null } = {}) {
+  const { width, height, gsd, originX, originY, mask, support } = dem
+  if (!support) throw new Error('This DEM has no support layer; rebuild it to record one')
+  let strip = new Uint8Array(width * height)
+  for (let i = 0; i < strip.length; i++) strip[i] = mask[i] ? Math.round((support[i] * 100) / 255) : SUPPORT_NODATA
+  let compression = 1
+  if (deflate) {
+    strip = await deflate(strip)
+    compression = 8
+  }
+  return writeGeoTiff({
+    width,
+    height,
+    samples: [{ bits: 8, format: 1 }],
+    photometric: 1,
+    extraSamples: null,
+    data: strip,
+    compression,
+    pixelScale: [gsd, gsd, 0],
+    tiepoint: [0, 0, 0, originX, originY, 0],
+    geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
+    gdalNoData: SUPPORT_NODATA,
+  })
+}
+
 // ── DEM → Cloud-Optimized GeoTIFF ────────────────────────────────────────────
 // Same pixels, internally tiled with halving overviews, so a viewer can pull a
 // preview (or one window) with a couple of range requests instead of the whole

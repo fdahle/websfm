@@ -49,6 +49,7 @@ export function defaultExportName(kind, { format = null, base, crs = null, produ
       if (tag) return `${base}-${kind}-${tag}`
       if (format === 'cog') return `${base}-${kind}-cog`
       if (kind === 'dem' && format === 'png') return `${base}-dem-hillshade`
+      if (kind === 'dem' && format === 'support') return `${base}-dem-support`
       return `${base}-${kind}`
     case 'measurements':
       return `${base}-measurements`

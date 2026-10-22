@@ -1,4 +1,4 @@
-import { linearCrsUnit } from '../core/crs.js'
+import { linearCrsUnit, ensureProjection, transform } from '../core/crs.js'
 import { shiftRange } from '../core/verticalDatum.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 // Shared assembly for the Quality Report hub (PLAN-eval-quality-hub). Marshals the
@@ -14,6 +14,8 @@ import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
 import { useExternalStore } from '../stores/useExternalStore.js'
+import { useFootprintsStore } from '../stores/useFootprintsStore.js'
+import { polygonAreaTest } from '../core/products/vectorLayers.js'
 import { sparseModelStats } from '../core/eval/sparseStats.js'
 import { completedMatchGraphHealth } from '../core/eval/matchGraph.js'
 import { perImageResiduals, unregisteredReason } from '../core/eval/imageStats.js'
@@ -44,6 +46,7 @@ const ROLE_LABEL = { control: 'Control', check: 'Check', marker: 'Marker' }
 // the numbers: the DEM build, the reference raster, its vertical offset and CRS.
 let demRefCache = null // { key, promise }
 let demRefLastRasterId = null
+let demRefLastFilters = {} // { stableSetId, areaSetId }: the hub's last choice, for the export
 
 export function useQualityReport() {
   const recon = useReconstructionStore()
@@ -159,12 +162,22 @@ export function useQualityReport() {
   // Throws with a user-facing reason (model-frame DEM, unreadable reference).
   // → null without a DEM or that raster, else { ...comparison, demUnit, refUnit,
   //   reference: { id, name, datum, accuracy, vOffset, conversion }, warnings: string[] }
-  function demReferenceComparison(rasterId) {
+  //   `filters`: { stableSetId, areaSetId } — polygon layers (useFootprintsStore) that
+  //   limit the comparison to stable ground and to an area of interest; the result's
+  //   `filters` names them and counts the cells they left out.
+  function demReferenceComparison(rasterId, filters = demRefLastFilters) {
     const dem = recon.dem
     const meta = external.rasterById(rasterId)
     if (!dem || !meta || meta.kind !== 'dem') return Promise.resolve(null)
     demRefLastRasterId = rasterId
+    demRefLastFilters = filters
+    const footprints = useFootprintsStore()
+    const layer = (id) => (id ? (footprints.sets.find((s) => s.id === id) ?? null) : null)
+    const stable = layer(filters.stableSetId),
+      area = layer(filters.areaSetId)
     const key = [
+      stable ? `${stable.id}:${stable.footprints.length}` : '',
+      area ? `${area.id}:${area.footprints.length}` : '',
       dem.createdAt,
       dem.width,
       dem.height,
@@ -184,7 +197,8 @@ export function useQualityReport() {
         strict: true,
         datum: dem.verticalDatum ?? null,
       })
-      const cmp = await compareDemToReference(dem, sample)
+      const include = await demLayerTest(dem, [stable, area])
+      const cmp = await compareDemToReference(dem, sample, { include })
       const demUnit = rasterUnits(dem).vertical
       const refUnit = rasterUnits(meta).vertical
       const warnings = []
@@ -217,6 +231,7 @@ export function useQualityReport() {
         demUnit,
         refUnit,
         warnings,
+        filters: { stable: stable?.name ?? null, area: area?.name ?? null, excluded: cmp.excluded },
         reference: {
           id: meta.id,
           name: meta.name,
@@ -233,6 +248,24 @@ export function useQualityReport() {
       if (demRefCache?.promise === promise) demRefCache = null
     })
     return promise
+  }
+
+  // A cell test for the comparison: inside every given polygon layer (null entries
+  // skipped). Layers are stored in the project CRS; the DEM may be in another one.
+  async function demLayerTest(dem, layers) {
+    const tests = []
+    const crs = projects.currentCrs
+    for (const set of layers) {
+      if (!set) continue
+      if (!dem.crs || dem.crs === 'local') throw new Error('Limiting the comparison to a layer needs a DEM in a CRS')
+      let polygons = set.footprints.map((f) => f.rings)
+      if (crs && dem.crs !== crs) {
+        await Promise.all([ensureProjection(crs), ensureProjection(dem.crs)])
+        polygons = polygons.map((rings) => rings.map((ring) => ring.map((p) => transform(p, crs, dem.crs))))
+      }
+      tests.push(polygonAreaTest(polygons))
+    }
+    return tests.length ? (x, y) => tests.every((t) => t(x, y)) : null
   }
 
   // The headline tiles for a comparison — the hub section and the export share them.
@@ -271,6 +304,18 @@ export function useQualityReport() {
         tone: overlap != null && overlap < 50 ? 'warn' : undefined,
         hint: `${(cmp?.compared ?? 0).toLocaleString()} of ${(cmp?.demCells ?? 0).toLocaleString()} DEM cells`,
       },
+      // A DEM with a support layer: the error where points landed against where the
+      // gaps were interpolated, which is usually where the large errors are.
+      ...(cmp?.bySupport
+        ? [
+            {
+              label: 'RMSE direct / interp.',
+              value: `${f(cmp.bySupport.direct?.rmse)} / ${f(cmp.bySupport.interpolated?.rmse)}`,
+              unit: u,
+              hint: `${(cmp.bySupport.direct?.n ?? 0).toLocaleString()} cells with points, ${(cmp.bySupport.interpolated?.n ?? 0).toLocaleString()} interpolated`,
+            },
+          ]
+        : []),
     ]
   }
 
@@ -414,6 +459,8 @@ export function useQualityReport() {
             note: [
               'ΔZ = DEM − reference at each compared DEM cell' +
                 (cmp.step > 1 ? ` (every ${cmp.step}th cell each way)` : '') +
+                (cmp.filters.stable ? `, on the stable ground of "${cmp.filters.stable}"` : '') +
+                (cmp.filters.area ? `, inside "${cmp.filters.area}"` : '') +
                 `; reference vertical datum: ${cmp.reference.datum}` +
                 (cmp.reference.conversion
                   ? `, converted to the DEM's ${cmp.reference.conversion.to} by adding the geoid ` +

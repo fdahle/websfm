@@ -115,6 +115,7 @@ const CONFIG = {
       { value: 'cog', label: 'Cloud-Optimized GeoTIFF — tiled + overviews' },
       { value: 'asc', label: 'ESRI ASCII grid (.asc)' },
       { value: 'png', label: 'Hillshade PNG + world file' },
+      { value: 'support', label: 'Support layer GeoTIFF (.tif) — % of each cell measured' },
     ],
   },
   measurements: {
@@ -434,16 +435,25 @@ const orthoNodataApplies = computed(
         Internally tiled with halving overviews, so a viewer can fetch a preview or one window with a few range requests
         instead of the whole file. Readable anywhere a normal GeoTIFF is.
       </p>
-      <!-- The hillshade PNG is a rendered preview: it has no elevation cells to flag. -->
+      <p v-if="settings.format === 'support'" class="field-hint">
+        <FieldHelp op="dem" param="supportExport">Support layer</FieldHelp>: for each DEM cell, the percentage that
+        points landed in (0 = filled by interpolation), 255 where the DEM is empty. On the DEM's grid, or its overview
+        for a DEM too large for one plane.
+      </p>
+      <!-- The hillshade PNG is a rendered preview, the support layer a percentage: no elevation cells to flag. -->
       <SettingsField
-        v-if="settings.format !== 'png' && !reprojecting"
+        v-if="settings.format !== 'png' && settings.format !== 'support' && !reprojecting"
         label="NODATA value"
         label-for="nodata"
         hint="Written for empty cells (holes with no measurement)."
       >
         <input id="nodata" v-model.number="settings.nodata" type="number" step="any" class="field-input" />
       </SettingsField>
-      <SettingsField v-if="isTiff && !reprojecting" label="Compression" label-for="comp">
+      <SettingsField
+        v-if="(isTiff || settings.format === 'support') && !reprojecting"
+        label="Compression"
+        label-for="comp"
+      >
         <select id="comp" v-model="settings.compression" class="field-input field-select">
           <option value="none">None (uncompressed)</option>
           <option value="deflate">DEFLATE (lossless)</option>

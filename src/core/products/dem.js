@@ -257,8 +257,9 @@ export function demGeometry(allPoints, opts = {}) {
 //     memBudgetBytes — working-memory budget for the grid (+ median buffers);
 //                  the caller subtracts anything it already holds (the points)
 // Returns { width, height, gsd, originX, originY, data:Float32Array (NaN=nodata),
-//           mask:Uint8Array (1=has data, incl. filled), zMin, zMax, count, filled,
-//           holesFilled (of `filled`, the cells `fillHoles` interpolated) }.
+//           mask:Uint8Array (1=has data, incl. filled), support:Uint8Array (255 = a
+//           cell points landed in, 0 = filled by interpolation or empty), zMin, zMax,
+//           count, filled, holesFilled (of `filled`, the cells `fillHoles` interpolated) }.
 //     fillHoles  — after the radius fill, also interpolate every enclosed nodata
 //                  area (fillEnclosedGaps): the ground under removed buildings
 export function rasterizeDem(allPoints, opts = {}) {
@@ -282,9 +283,13 @@ export function rasterizeDem(allPoints, opts = {}) {
   }
   const {
     data,
+    measured,
     count,
     filled: radiusFilled,
   } = rasterizeWindow(points, { width, height, gsd, originX, originY }, { aggregate, fillMethod, fillRadius })
+  // Direct support, the DEM's record of where it was measured rather than filled.
+  const support = measured
+  for (let i = 0; i < cells; i++) if (support[i]) support[i] = 255
   let filled = radiusFilled
   const holesFilled = fillHoles ? fillEnclosedGaps(data, width, height) : 0
   filled += holesFilled
@@ -304,7 +309,39 @@ export function rasterizeDem(allPoints, opts = {}) {
     zMax = 0
   }
 
-  return { width, height, gsd, originX, originY, data, mask, zMin, zMax, count, filled, holesFilled }
+  return { width, height, gsd, originX, originY, data, mask, support, zMin, zMax, count, filled, holesFilled }
+}
+
+// The support plane of a tiled DEM's overview: each overview cell gets the share of
+// its full-resolution DEM cells that points landed in, 0–255 (255 = all measured).
+// `scale` full cells per overview cell a side (2^k for COG level k, whose size halves
+// with floor, so the last odd row and column fall outside, as in the COG's own level).
+// add() takes rasterizeDemBlocks' blocks ({ col0, row0, width, height, data, measured }).
+export function createSupportOverview(ovWidth, ovHeight, scale) {
+  const measured = new Uint32Array(ovWidth * ovHeight)
+  const valid = new Uint32Array(ovWidth * ovHeight)
+  return {
+    add({ col0, row0, width, height, data, measured: m }) {
+      for (let r = 0; r < height; r++) {
+        const oy = Math.floor((row0 + r) / scale)
+        if (oy >= ovHeight) break
+        for (let c = 0; c < width; c++) {
+          const ox = Math.floor((col0 + c) / scale)
+          if (ox >= ovWidth) break
+          const i = r * width + c
+          if (Number.isNaN(data[i])) continue
+          const o = oy * ovWidth + ox
+          valid[o]++
+          if (m[i]) measured[o]++
+        }
+      }
+    },
+    finish() {
+      const out = new Uint8Array(ovWidth * ovHeight)
+      for (let i = 0; i < out.length; i++) if (valid[i]) out[i] = Math.round((255 * measured[i]) / valid[i])
+      return out
+    },
+  }
 }
 
 // Aggregate `points` into the cells of one grid window ({ width, height, gsd, originX,
@@ -393,8 +430,8 @@ export function rasterizeWindow(points, geom, { aggregate = 'max', fillMethod = 
 // `count` points; those outside `opts.bounds` left out, as demGeometry does) is binned
 // by block once; each block's window is its core plus a halo
 // of `fillRadius` cells, rasterised by rasterizeWindow, and its core handed to
-// `onBlock({ col0, row0, width, height, data })` (awaited, Float32 heights, NaN =
-// nodata) in row-major block order. `geom` is demGeometry's grid (any size). Enclosed
+// `onBlock({ col0, row0, width, height, data, measured })` (awaited, Float32 heights,
+// NaN = nodata; measured 1 where points landed) in row-major block order. `geom` is demGeometry's grid (any size). Enclosed
 // gaps (fillHoles) need the whole grid and are not filled here.
 // → { width, height, gsd, originX, originY, count, filled, zMin, zMax, blocks }
 export async function rasterizeDemBlocks(pos, count, geom, opts = {}, { onBlock, onProgress = () => {} } = {}) {
@@ -475,11 +512,13 @@ export async function rasterizeDemBlocks(pos, count, geom, opts = {}, { onBlock,
         { aggregate, fillMethod, fillRadius },
       )
       const core = new Float32Array(bw * bh)
+      const coreMeasured = new Uint8Array(bw * bh)
       const cx = col0 - ex0,
         cy = row0 - ey0
       for (let r = 0; r < bh; r++) {
         const src = (cy + r) * ew + cx
         core.set(win.data.subarray(src, src + bw), r * bw)
+        coreMeasured.set(win.measured.subarray(src, src + bw), r * bw)
         for (let c = 0; c < bw; c++) {
           const z = core[r * bw + c]
           if (Number.isNaN(z)) continue
@@ -489,7 +528,7 @@ export async function rasterizeDemBlocks(pos, count, geom, opts = {}, { onBlock,
           if (z > zMax) zMax = z
         }
       }
-      await onBlock?.({ col0, row0, width: bw, height: bh, data: core })
+      await onBlock?.({ col0, row0, width: bw, height: bh, data: core, measured: coreMeasured })
       onProgress(by * nbx + bx + 1, nBlocks)
     }
   if (zMin > zMax) {

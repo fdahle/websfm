@@ -39,6 +39,31 @@ in the fit.
 Review depth-map completion, valid-pixel fractions, and consistency before fusion.
 One weak image is often cheaper to exclude or mask than to make every threshold loose.
 
+## DEM vs reference DEM
+**Products** compares the current DEM with an imported reference DEM: ΔZ = DEM −
+reference at every DEM cell the reference covers (on a sub-grid for a large DEM).
+Median and NMAD describe the bulk, RMSE includes the blunders. When the DEM records
+which cells were interpolated (see [DEM ▸ Gap interpolation](guide:dem)), a tile
+gives the RMSE of the cells with points and of the interpolated cells apart; the
+interpolated ones usually carry most of the large errors.
+
+## Stable ground
+<!-- param: stableArea  default: All cells -->
+A polygon layer of ground that has not changed between the two DEMs, such as rock
+outcrops, roads or buildings. Only cells inside it are compared. Without it, a
+comparison of a historical DEM with a modern one mixes the reconstruction error with
+real change: a thinning glacier, an eroded bank or a filled pit. Import the outlines
+as a polygon file (**Import**, GeoJSON); the panel says how many DEM cells fell
+outside.
+
+## Area
+<!-- param: area  default: Whole DEM -->
+A polygon layer that limits the comparison to an area of interest, for example a
+glacier outline or the study area plus a buffer. It combines with **Stable ground**:
+a cell must lie inside both. The margins of a block are usually its weakest part,
+so the statistics inside the area of interest can differ a lot from those of the
+whole DEM. The exported report names both layers.
+
 ## Export report
 Export produces a self-contained HTML report with no external assets or scripts. Open
 it in a browser and print to PDF if needed. It captures the current state, so export it

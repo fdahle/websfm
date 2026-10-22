@@ -8,6 +8,7 @@ import {
   fillEnclosedGaps,
   demGeometry,
   rasterizeDemBlocks,
+  createSupportOverview,
 } from './dem.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
 
@@ -362,5 +363,51 @@ describe('rasterizeDemBlocks (a DEM past one plane, SAT-3)', () => {
       if (Number.isNaN(whole.data[i])) expect(out[i]).toBeNaN()
       else expect(out[i]).toBeCloseTo(whole.data[i], 5)
     }
+  })
+})
+
+describe('DEM support', () => {
+  it('marks the cells points landed in, not the ones the fill interpolated', () => {
+    // A 10×10 sheet with no points in one column; the radius fill closes it.
+    const pts = []
+    for (let x = 0; x <= 10; x++)
+      for (let y = 0; y <= 10; y++) if (x !== 5) pts.push({ x: x + 0.01, y: y + 0.01, z: 1 })
+    const dem = rasterizeDem(pts, { gsd: 1, fillRadius: 2, fillMethod: 'idw' })
+    const col = Math.floor(5.01 - dem.originX)
+    const at = (c) => 3 * dem.width + c
+    expect(dem.mask[at(col)]).toBe(1)
+    expect([dem.support[at(col - 1)], dem.support[at(col)], dem.support[at(col + 1)]]).toEqual([255, 0, 255])
+  })
+
+  it('gives each overview cell the share of its DEM cells with points', () => {
+    // A 4×2 grid at scale 2 → a 2×1 overview; left half all measured, right half one
+    // of three valid cells (one cell is nodata and does not count).
+    const ov = createSupportOverview(2, 1, 2)
+    ov.add({
+      col0: 0,
+      row0: 0,
+      width: 4,
+      height: 2,
+      data: Float32Array.from([1, 1, 1, NaN, 1, 1, 1, 1]),
+      measured: Uint8Array.from([1, 1, 1, 0, 1, 1, 0, 0]),
+    })
+    expect(Array.from(ov.finish())).toEqual([255, 85])
+  })
+
+  it('hands each block its measured cells', async () => {
+    const pos = Float64Array.from([0.5, 0.5, 1, 3.5, 0.5, 2])
+    const geom = { width: 4, height: 1, gsd: 1, originX: 0, originY: 1 }
+    const seen = []
+    await rasterizeDemBlocks(
+      pos,
+      2,
+      geom,
+      { fillRadius: 0, blockSize: 2 },
+      { onBlock: (b) => seen.push(Array.from(b.measured)) },
+    )
+    expect(seen).toEqual([
+      [1, 0],
+      [0, 1],
+    ])
   })
 })

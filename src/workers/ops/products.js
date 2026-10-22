@@ -4,7 +4,14 @@ import { hillshadeRgba } from '../../core/products/colormap.js'
 import { demRenderOptions } from '../../core/products/productStyle.js'
 import { rasterToPng } from '../rasterPreview.js'
 import { frameFromSpec, describeFrame } from '../../core/products/frameSpec.js'
-import { rasterizeDem, coreExtent, demGeometry, rasterizeDemBlocks, fillEnclosedGaps } from '../../core/products/dem.js'
+import {
+  rasterizeDem,
+  coreExtent,
+  demGeometry,
+  rasterizeDemBlocks,
+  fillEnclosedGaps,
+  createSupportOverview,
+} from '../../core/products/dem.js'
 import { orthorectifyTiled, orthoTiledWorkingBytes, orthoMapPxPerCell, ORTHO_BLOCK } from '../../core/products/ortho.js'
 import { orthoCacheLog } from '../../core/products/orthoPlan.js'
 import { MAX_SEAM_CELLS } from '../../core/products/orthoMosaic.js'
@@ -13,7 +20,7 @@ import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import { packRgb } from '../../core/products/undistort.js'
 import { describeOrthoStats, createOrthoStats } from '../../core/eval/orthoStats.js'
 import { meshSurface, planeSurface } from '../../core/products/surface.js'
-import { createCogBuilder, geoKeysForEpsg, crsTagInfo } from '../../core/products/geotiff.js'
+import { createCogBuilder, geoKeysForEpsg, crsTagInfo, planCogFromTiles } from '../../core/products/geotiff.js'
 import { DEM_PLANE_MAX, DEM_TILE, ORTHO_TILE, MAX_RASTER_SIDE, orthoGridFor } from '../../core/products/rasterSize.js'
 import { TAB_BUFFER_POOL_BYTES, isBufferAllocationFailure } from '../../core/bufferLimit.js'
 import { formatBytes } from '../../core/dense/memBudget.js'
@@ -289,6 +296,7 @@ export function makeProductsOps({ rasterize } = {}) {
       originY: grid.originY,
       data: grid.data,
       mask: grid.mask,
+      support: grid.support,
       zMin: grid.zMin,
       zMax: grid.zMax,
       count: grid.count,
@@ -300,7 +308,7 @@ export function makeProductsOps({ rasterize } = {}) {
       previewBlob,
       ...(settings.style && { style: settings.style }),
     }
-    return { result, transfer: [grid.data.buffer, grid.mask.buffer] }
+    return { result, transfer: [grid.data.buffer, grid.mask.buffer, grid.support.buffer] }
   }
 
   // A DEM whose grid is past DEM_PLANE_MAX on a side: rasterizeDemBlocks feeds a Float32
@@ -336,6 +344,11 @@ export function makeProductsOps({ rasterize } = {}) {
       },
       { blockSize: DEM_BLOCK, compress: deflateTile, previewMaxDim: DEM_PLANE_MAX },
     )
+    // The support plane at the overview the builder keeps (its first level that fits
+    // DEM_PLANE_MAX, sized as the COG halves it): the share of measured cells in each.
+    const ovLevels = planCogFromTiles({ width: geom.width, height: geom.height, tileSize: DEM_TILE }).levels
+    const ovIndex = ovLevels.findIndex((l) => Math.max(l.width, l.height) <= DEM_PLANE_MAX)
+    const supportOv = createSupportOverview(ovLevels[ovIndex].width, ovLevels[ovIndex].height, 2 ** ovIndex)
     const t0 = performance.now()
     const blockProgress = createBlockProgress(Math.ceil(geom.width / DEM_BLOCK) * Math.ceil(geom.height / DEM_BLOCK), {
       prefix: `${label}: `,
@@ -348,6 +361,7 @@ export function makeProductsOps({ rasterize } = {}) {
       { ...settings, bounds, blockSize: DEM_BLOCK },
       {
         onBlock: async (b) => {
+          supportOv.add(b)
           await builder.addBlock(b)
           const line = blockProgress.finished()
           if (line) emit('log', [line, 'info', 'Products'])
@@ -395,6 +409,9 @@ export function makeProductsOps({ rasterize } = {}) {
       zMax = res.zMax
     }
     const grid = { ...ov, mask, zMin, zMax }
+    // The builder's overview must be the level the support was binned to.
+    const support =
+      ovLevels[ovIndex].width === ov.width && ovLevels[ovIndex].height === ov.height ? supportOv.finish() : null
     const previewBlob = await demPreviewPng(grid, settings.style)
     emit('log', [
       `${label}: ${geom.width}×${geom.height} @ ${geom.gsd.toPrecision(3)} ${unit}/px in ` +
@@ -414,6 +431,7 @@ export function makeProductsOps({ rasterize } = {}) {
       originY: ov.originY,
       data: ov.data,
       mask,
+      ...(support && { support }),
       zMin: res.zMin,
       zMax: res.zMax,
       count: res.count,
@@ -430,7 +448,7 @@ export function makeProductsOps({ rasterize } = {}) {
       previewBlob,
       ...(settings.style && { style: settings.style }),
     }
-    return { result, transfer: [ov.data.buffer, mask.buffer] }
+    return { result, transfer: [ov.data.buffer, mask.buffer, ...(support ? [support.buffer] : [])] }
   }
 
   // Build the height grid the ortho walks, from whichever surface the user chose.

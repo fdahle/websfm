@@ -8,7 +8,8 @@ import { getProjectDir, getSubDir, readBin, readJson, writeBin, writeJson } from
 // Recomputable but expensive, so persisted like other project data. Metadata
 // (dimensions, geotransform, CRS) goes in products/{kind}.json; the binary parts
 // are generation files of that document (binaryDocument.js), the preview PNG among
-// them. DEM: Float32 heights (`data`) + Uint8 validity (`mask`), read at open (≤ 4,096²);
+// them. DEM: Float32 heights (`data`) + Uint8 validity (`mask`), read at open (≤ 4,096²),
+// and Uint8 direct support (`support`, 0–255 measured share; absent on older DEMs);
 // a DEM finer than that (SAT-3) also has its full grid as a Float32 COG (`cog`), kept
 // like the ortho's, and `data`/`mask` are that COG's overview.
 // Ortho: its Cloud-Optimized GeoTIFF (`cog`, RGBA, any size) — opened as a File
@@ -28,7 +29,8 @@ function validateProduct(kind, product) {
       ? !(product.data instanceof Float32Array) ||
         product.data.length !== n ||
         !(product.mask instanceof Uint8Array) ||
-        product.mask.length !== n
+        product.mask.length !== n ||
+        (product.support != null && (!(product.support instanceof Uint8Array) || product.support.length !== n))
       : !(product.cog instanceof Blob) && !product.cogSaved)
   ) {
     throw new Error('Incomplete or invalid raster product')
@@ -43,10 +45,13 @@ export async function saveProduct(projectId, kind, product) {
       const dir = await getSubDir(projectId, 'products')
       // The preview PNG is a sidecar file (a Blob, written as is), never a string in
       // the JSON: a 4096² preview was ~100 MB of base64 parsed back at every open.
-      const { data, mask, cog, cogSaved, previewBlob, previewUrl: _url, ...meta } = product
+      const { data, mask, support, cog, cogSaved, previewBlob, previewUrl: _url, ...meta } = product
       // Pass views, not their underlying buffer: subarrays may have a nonzero offset.
       const cogPart = cogSaved ? { reuse: cogSaved } : cog
-      const buffers = kind === 'dem' ? { data, mask, ...(cogPart ? { cog: cogPart } : {}) } : { cog: cogPart }
+      const buffers =
+        kind === 'dem'
+          ? { data, mask, ...(support ? { support } : {}), ...(cogPart ? { cog: cogPart } : {}) }
+          : { cog: cogPart }
       buffers.preview = previewBlob ?? null
       let res = await writeBinaryDocument(dir, `${kind}.json`, meta, buffers, { writeJson, writeBin })
       // The reused file went missing (another tab's save collected it): write it out.
@@ -105,6 +110,7 @@ export async function loadProduct(projectId, kind) {
         ...meta,
         data: new Float32Array(buffers ? buffers.data : await readBin(dir, 'dem_data.bin')),
         mask: new Uint8Array(buffers ? buffers.mask : await readBin(dir, 'dem_mask.bin')),
+        ...(buffers?.support ? { support: new Uint8Array(buffers.support) } : {}),
       }
       validateProduct(kind, product)
       // The store turns `previewBlob` into the record's preview URL. A product saved
