@@ -145,7 +145,7 @@ function run() {
         <p class="field-hint">
           {{
             onMap
-              ? 'The lines go on the 2D map as a layer under Shapefiles in the sidebar; its right-click menu downloads them as GeoJSON later.'
+              ? 'The lines go on the 2D map as a layer, listed under Products in the sidebar; its right-click menu downloads them as GeoJSON later.'
               : 'This DEM has no coordinate system, so the lines cannot go on the map: they are downloaded.'
           }}
         </p>

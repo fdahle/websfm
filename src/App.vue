@@ -216,7 +216,7 @@ function openImageWithResiduals(imageId) {
   qualityOpen.value = false
 }
 
-// ── Shapefiles (vector polygon layers: computed footprints + imported polygons) ───
+// ── Vector sets (image footprints, contour lines, imported polygon files) ──────────
 const footprintsStore = useFootprintsStore()
 const { addFootprints, computeFootprints } = footprintsStore
 // ── Sensors (shared intrinsics) ───────────────────────────────────────────────────
@@ -603,7 +603,7 @@ const {
 async function onFootprintFromPoses(settings) {
   footprintFromPosesOpen.value = false
   const { computed: n, setId } = await computeFootprints(settings)
-  if (n > 0 && setId) zoomToShapefile(setId)
+  if (n > 0 && setId) zoomToVectorSet(setId)
 }
 
 // ── Export (camera params + products) ───────────────────────────────────────────
@@ -620,7 +620,8 @@ const {
   openCloudExport,
   downloadRasterOriginal,
   downloadImageOriginal,
-  downloadShapefile,
+  downloadVectorSet,
+  downloadFootprints,
   exportContours,
   exportTerrain,
   exportClipped,
@@ -709,7 +710,8 @@ const {
   confirmRemoveRaster,
   confirmRemoveGcp,
   confirmRemoveGcpObservation,
-  confirmRemoveShapefile,
+  confirmRemoveVectorSet,
+  confirmRemoveFootprints,
   confirmClearKeypoints,
   confirmRemoveMatches,
 } = useConfirmations({ closeTabForImage, closeTabForRaster, removeGcpAndCloseTab, removeGcpObservation })
@@ -835,9 +837,10 @@ const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useComma
     exportKeypoints,
     exportMatches,
     downloadRasterOriginal,
+    downloadFootprints,
     openMeasurementExport,
   },
-  removals: { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages },
+  removals: { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages, confirmRemoveFootprints },
   imports: {
     cameraPickMode,
     addImagesRouted,
@@ -1065,7 +1068,7 @@ provideAppContext({
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 // The sections read store data themselves; this is everything else they need —
 // App-level state and what each row action does (sidebar/sidebarContext.js).
-const { context: sidebarContext, zoomToShapefile } = useSidebarActions({
+const { context: sidebarContext, zoomToVectorSet } = useSidebarActions({
   tabs: { tabs, activateTab, openImageTab, setTabTitle },
   viewers: { viewerRef, mapViewerRef },
   state: { gcpReport, selectedGcpId, matchStats, incompleteSensorIds, alignedUuids, hasSparse, openTabIds },
@@ -1083,8 +1086,8 @@ const { context: sidebarContext, zoomToShapefile } = useSidebarActions({
     selectGcp,
     jumpToImage,
     openGcpView,
-    confirmRemoveShapefile,
-    downloadShapefile,
+    confirmRemoveVectorSet,
+    downloadVectorSet,
     confirmRemoveCloud,
     openCloudExport,
     openComputedProductTab,

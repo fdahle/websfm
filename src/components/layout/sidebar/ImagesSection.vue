@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { useSensorsStore } from '../../../stores/useSensorsStore.js'
 import { usePosesStore } from '../../../stores/usePosesStore.js'
+import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
 import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import { useInlineRename } from '../../../composables/useInlineRename.js'
@@ -28,6 +29,7 @@ const sidebar = useSidebar()
 const { images, imageGroups, selectedId } = storeToRefs(useImagesStore())
 const { sensors } = storeToRefs(useSensorsStore())
 const { poses } = storeToRefs(usePosesStore())
+const { footprintSet } = storeToRefs(useFootprintsStore())
 
 // ── Groups ───────────────────────────────────────────────────────────────────
 // With no groups the list is flat, exactly as before groups existed. Once one
@@ -181,6 +183,8 @@ function poseStatus(img) {
   if (img.meta?.gpsLat != null && img.meta?.gpsLon != null) return 'GPS'
   return '—'
 }
+// The images with a computed footprint (the footprints have no sidebar row of their own).
+const footprintImageIds = computed(() => new Set((footprintSet.value?.footprints ?? []).map((fp) => fp.imageId)))
 // Label of the sensor an image is bound to.
 function sensorLabel(img) {
   return sensorById.value.get(img.sensorId)?.label || '—'
@@ -509,6 +513,13 @@ function revealRow(key) {
             <span class="detail-value" :class="{ 'detail-dim': poseStatus(row.img) === '—' }">{{
               poseStatus(row.img)
             }}</span>
+          </div>
+          <div v-if="footprintSet" class="detail-row">
+            <span class="detail-label">Footprint</span>
+            <span v-if="footprintImageIds.has(row.img.id)" class="detail-value">
+              <button class="link-btn" @click.stop="sidebar.zoomToImage(row.img.id)">Show on map</button>
+            </span>
+            <span v-else class="detail-value detail-dim">—</span>
           </div>
           <div v-if="filmSensor(row.img)" class="detail-row">
             <span class="detail-label">Fiducials</span>

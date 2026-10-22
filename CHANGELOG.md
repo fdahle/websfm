@@ -25,9 +25,9 @@ Notable changes to websfm. The format follows
   export writes, the .wld / .prj beside an image included. Cloud names in file names
   keep letters of any script now (Süd, not S_d).
 - **Contours go on the map.** Tools ▸ Products ▾ ▸ Contours adds the lines to the 2D
-  map as a layer in the sidebar's Shapefiles section (index contours heavier, the
-  height in the hover label, "Contours" in the legend), with a map checkbox and a
-  GeoJSON download in its right-click menu. Downloading straight away (GeoJSON or
+  map as a layer of its own, listed in the sidebar's Products section and in the Layers
+  panel (index contours heavier, the height in the hover label, "Contours" in the
+  legend), with a map checkbox and a GeoJSON download in its right-click menu. Downloading straight away (GeoJSON or
   DXF) is now an option of the dialog, off by default; a DEM without a CRS is still
   always downloaded. Before, the lines only went to the browser's downloads folder.
 - **Orthophoto export without an alpha band.** Export Orthophoto has an **Alpha band**
@@ -286,13 +286,21 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
-- **Layers panel: stack and fade the rasters on the map.** View ▸ Map ▸ Layers opens a
-  small panel over the 2D map listing every raster it can draw (imported reference
-  rasters, the DEM and the orthophoto) in one stack, top first. Drag a row or use ▲ ▼
+- **Layers panel: stack and fade the layers on the map.** View ▸ Map ▸ Layers opens a
+  small panel over the 2D map listing every layer it can draw (imported reference
+  rasters and polygon files, the DEM, the orthophoto and contour lines) in one stack,
+  top first. Drag a row or use ▲ ▼
   to change what draws on top, fade a layer with its opacity slider, and show or hide
   it with its checkbox. The order is saved with the project; a layer added later goes
   on top. Before, the order was fixed (reference rasters, then the DEM, then the
   orthophoto).
+- **Footprints are an overlay; the Shapefiles section is gone.** The image footprints
+  from Footprints from poses are drawn above every layer, and View ▸ Map ▸ Footprints
+  shows and hides only them (it hid contour lines and imported polygons too). They
+  have no sidebar row: an image's expanded row says whether it has one, and a
+  right-click on a footprint or Export ▸ Footprints downloads them as GeoJSON or
+  removes them. Contour lines are listed in Products and imported polygon files in
+  Reference Data, each a layer with its own checkbox and opacity.
 - **GCPs toggle on the map.** View ▸ Map ▸ GCPs shows or hides the GCP and marker
   symbols, as Cameras does for the camera positions. Editing GCPs always shows them.
 - **Every processing dialog reads in steps.** Sparse Model, Depth Maps, Dense Cloud,

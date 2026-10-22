@@ -11,8 +11,11 @@ order: 25
 the camera and placed where they meet the ground. It needs positions with a height,
 so it is for imported poses or EXIF GPS, and it runs before any reconstruction.
 
-The result is one layer, *footprints*, under **Shapefiles**; a new run replaces it.
-The map opens on it, so footprints that land in the wrong place are obvious at once.
+The footprints are drawn on the 2D map above every layer, and a new run replaces
+them. The map opens on them, so footprints that land in the wrong place are obvious at
+once. **View ▸ Map ▸ Footprints** shows and hides them, an image's expanded row in the
+sidebar says whether it has one, and a right-click on a footprint (or **Export ▸
+Footprints**) downloads them as GeoJSON or removes them.
 [Preselect by footprint overlap](guide:match-features) uses them to choose which
 image pairs to match.
 

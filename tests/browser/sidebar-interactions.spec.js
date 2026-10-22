@@ -73,8 +73,7 @@ test('sidebar rows rename, expand and confirm through the shared primitives', as
   await expect(input).toHaveCount(0)
   expect(await cloudNames(page)).not.toContain('discarded')
 
-  // Expand toggles the detail card.
-  await page.getByRole('button', { name: /Shapefiles/ }).click()
+  // Expand toggles the detail card (an imported polygon file sits in Reference Data).
   const outline = page.locator('.list-item').filter({ hasText: 'Site outline' })
   await outline.locator('.expand-btn').click()
   await expect(page.locator('.img-details').filter({ hasText: 'Polygons' })).toBeVisible()

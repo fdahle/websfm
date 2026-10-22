@@ -262,7 +262,7 @@ describe('mapLegend', () => {
       gpsImages: [{}],
       poses: [{ source: 'exif' }, { source: 'exif' }],
       gcps: [{ role: 'control' }, { role: 'check' }],
-      footprints: [{ lines: [[[0, 0]]] }],
+      vectorLayers: [{ kind: 'lines' }],
     })
     expect(legend.map((e) => e.label)).toEqual(['Image GPS', 'Camera (EXIF)', 'GCP', 'Check point', 'Contours'])
     expect(legend.find((e) => e.label === 'Camera (EXIF)').kind).toBe('pose-exif')
@@ -274,10 +274,12 @@ describe('mapLegend', () => {
       poses: [{ source: 'imported' }],
       gcps: [{ role: 'control' }],
       footprints: [{ rings: [[[0, 0]]] }],
+      vectorLayers: [{ kind: 'polygons' }],
       showCameras: false,
       showGcps: false,
     })
-    expect(legend.map((e) => e.label)).toEqual(['Footprint'])
+    expect(legend.map((e) => e.label)).toEqual(['Footprint', 'Polygons'])
+    expect(mapLegend({ footprints: [{ rings: [[[0, 0]]] }], showFootprints: false })).toEqual([])
     expect(mapLegend({})).toEqual([])
   })
 })

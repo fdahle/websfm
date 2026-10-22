@@ -9,18 +9,20 @@ import ImagesSection from './sidebar/ImagesSection.vue'
 import SensorsSection from './sidebar/SensorsSection.vue'
 import MatchesSection from './sidebar/MatchesSection.vue'
 import GcpsSection from './sidebar/GcpsSection.vue'
-import ShapefilesSection from './sidebar/ShapefilesSection.vue'
 import ReconstructionSection from './sidebar/ReconstructionSection.vue'
 import ProductsSection from './sidebar/ProductsSection.vue'
 import ReferenceSection from './sidebar/ReferenceSection.vue'
 import { useSidebar } from './sidebar/sidebarContext.js'
+import { vectorSection } from '../../core/products/vectorLayers.js'
 
 // The sections read their data from the stores and act through the sidebar
 // context App.vue provides (sidebar/sidebarContext.js); this shell only owns
 // which sections are open, the cloud split between three of them, and drops.
 const sidebar = useSidebar()
 const { clouds } = storeToRefs(useReconstructionStore())
-const { sets: shapefiles } = storeToRefs(useFootprintsStore())
+const { sets: vectorSets } = storeToRefs(useFootprintsStore())
+// Imported polygon files go in Reference Data (core/products/vectorLayers.js).
+const hasPolygonFiles = computed(() => vectorSets.value.some((s) => vectorSection(s) === 'reference'))
 const { rasters, pendingRasters } = storeToRefs(useExternalStore())
 
 // The provenance+role split behind the three cloud sections. Sparse is the model
@@ -72,7 +74,6 @@ function allClosed() {
   return {
     images: false,
     gcps: false,
-    footprints: false,
     sensors: false,
     matches: false,
     reconstruction: false,
@@ -121,16 +122,13 @@ watch(
     <MatchesSection :open="open.matches" @toggle="toggle('matches')" />
     <GcpsSection :open="open.gcps" @toggle="toggle('gcps')" />
 
-    <!-- Shapefiles (vector polygon layers) are optional: only show when some exist. -->
-    <ShapefilesSection v-if="shapefiles.length" :open="open.footprints" @toggle="toggle('footprints')" />
-
     <ReconstructionSection :open="open.reconstruction" :clouds="sparseClouds" @toggle="toggle('reconstruction')" />
     <ProductsSection :open="open.products" :clouds="productClouds" @toggle="toggle('products')" />
 
     <!-- Only shown once something imported exists — an always-empty section is
          noise in a sidebar this dense. -->
     <ReferenceSection
-      v-if="referenceClouds.length || rasters.length || pendingRasters.length"
+      v-if="referenceClouds.length || rasters.length || pendingRasters.length || hasPolygonFiles"
       :open="open.reference"
       :clouds="referenceClouds"
       @toggle="toggle('reference')"

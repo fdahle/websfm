@@ -276,7 +276,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
   }
   const unitLabelOf = (g) => rasterUnits(g).vertical
 
-  // Contours go on the map as a line layer (Shapefiles) when the DEM has a CRS, and
+  // Contours go on the map as a line layer (listed in Products) when the DEM has a CRS, and
   // are downloaded in `format` unless it is 'none'. A DEM in the local frame has no
   // place on the map's layers, so it is always downloaded (ContoursModal).
   async function exportContours({ interval, indexEvery, smooth, minLength, format, fileName }) {
@@ -314,7 +314,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     )
     if (layer)
       showToast('Contours added to the map', {
-        detail: `Sidebar ▸ Shapefiles ▸ ${layer.name}. Its right-click menu downloads them as GeoJSON.`,
+        detail: `Sidebar ▸ Products ▸ ${layer.name}, and View ▸ Map ▸ Layers. Its right-click menu downloads them as GeoJSON.`,
       })
     else if (!paths.length)
       showToast('No contour lines', { detail: 'No level crosses the DEM at this interval.', kind: 'error' })

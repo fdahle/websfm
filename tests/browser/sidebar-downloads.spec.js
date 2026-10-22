@@ -101,11 +101,7 @@ test('sidebar context menus download clouds, products and polygon layers', async
   const asc = await download(page, () => demDialog.getByRole('button', { name: 'Export', exact: true }).click())
   expect(asc.name).toBe('terrain.asc')
 
-  // A polygon layer as GeoJSON in the project CRS.
-  await page
-    .getByRole('button', { name: /Shapefiles/ })
-    .first()
-    .click()
+  // A polygon file (in Reference Data, open already) as GeoJSON in the project CRS.
   await page.locator('.list-item').filter({ hasText: 'Site outline' }).click({ button: 'right' })
   const gj = await download(page, () =>
     page.locator('.ctx-menu').getByRole('button', { name: 'Download GeoJSON' }).click(),

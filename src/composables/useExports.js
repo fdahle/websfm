@@ -158,13 +158,18 @@ export function useExports({
     downloadBlob(img.name || `${img.uuid}.jpg`, blob)
   }
 
-  // Sidebar ▸ Download (GeoJSON) on a polygon layer: its polygons in the project CRS.
-  function downloadShapefile(id) {
+  // Download GeoJSON on a vector layer's sidebar row (and Export ▸ Footprints for the
+  // image footprints): its polygons or lines in the project CRS.
+  function downloadVectorSet(id) {
     const set = footprints.sets.find((s) => s.id === id)
     if (!set) return
     const fc = polygonSetToGeoJson(set, { crs: currentCrs.value })
     downloadBlob(`${fileSafe(set.name) || 'polygons'}.geojson`, JSON.stringify(fc), 'application/geo+json')
-    log(`Exported ${pluralize(set.footprints.length, 'polygon')} of "${set.name}" as GeoJSON`, 'success', 'Export')
+    const noun = set.kind === 'lines' ? 'line' : 'polygon'
+    log(`Exported ${pluralize(set.footprints.length, noun)} of "${set.name}" as GeoJSON`, 'success', 'Export')
+  }
+  function downloadFootprints() {
+    if (footprints.footprintSet) downloadVectorSet(footprints.footprintSet.id)
   }
 
   async function onExportRun(settings) {
@@ -269,7 +274,8 @@ export function useExports({
     openCloudExport,
     downloadRasterOriginal,
     downloadImageOriginal,
-    downloadShapefile,
+    downloadVectorSet,
+    downloadFootprints,
     exportContours,
     exportTerrain,
     exportClipped,

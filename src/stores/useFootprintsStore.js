@@ -16,17 +16,18 @@ import { usePosesStore } from './usePosesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useExternalStore } from './useExternalStore.js'
 import { pluralize } from '../core/textFormat.js'
+import { isFootprintSet } from '../core/products/vectorLayers.js'
 
-// Project-scoped store: vector polygon layers ("shapefiles"), stored in the
-// project working CRS and re-projected when it changes.
+// Project-scoped store: the project's vector sets, stored in the project working
+// CRS and re-projected when it changes.
 //
-// A **set** is one vector layer the user manages as a unit (toggle on the map,
-// rename, zoom to, delete) — created either by computing footprints from poses
-// (one run = one set) or by importing a polygon file. Each set holds many
-// **polygons**, and every polygon keeps its own image link (`imageId`/
-// `imageName`), so the geometry stays associated with a specific image (used for
-// spatial match preselection). Reads the image list / sensors / poses / project
-// CRS from their stores; restore/clear run through the project-store registry.
+// A **set** is one unit of vector data: the image footprints computed from poses
+// (one run = one set, at most one), contour lines from the DEM, or an imported
+// polygon file. The footprints are an overlay of the cameras; every other set is a
+// map layer (core/products/vectorLayers.js). Each polygon keeps its own image link
+// (`imageId`/`imageName`), so the geometry stays associated with a specific image
+// (used for spatial match preselection). Reads the image list / sensors / poses /
+// project CRS from their stores; restore/clear run through the project-store registry.
 export const useFootprintsStore = registerProjectStore(
   defineStore('footprints', () => {
     const { log } = useLog()
@@ -36,21 +37,21 @@ export const useFootprintsStore = registerProjectStore(
     const { poses } = storeToRefs(usePosesStore())
     const { currentCrs } = storeToRefs(projects)
 
-    // [{ id, name, source: 'computed' | 'imported', visible, footprints: [
+    // [{ id, name, source: 'computed' | 'imported', visible, opacity, footprints: [
     //     { id, imageId, imageName, rings: [[ [x,y], ... ], ...] } ] }]
     // rings are stored in the project CRS. A line layer (contours: kind 'lines') holds
     //     { id, name, level, index, lines: [[ [x,y], ... ]] }
     // instead: open paths, no image link, the same CRS.
     const sets = ref([])
 
-    // Flat list of every polygon in every set that is shown on the map — what the
-    // map viewer renders. Each carries its `setId` so a per-set toggle/zoom can find
-    // its polygons without re-flattening.
-    const mapPolygons = computed(() =>
-      sets.value
-        .filter((s) => s.visible !== false)
-        .flatMap((s) => s.footprints.map((fp) => ({ ...fp, setId: s.id, setName: s.name }))),
-    )
+    // The computed image footprints, and their polygons as the map's footprint overlay
+    // draws them (View ▸ Map ▸ Footprints shows and hides them). Each carries its
+    // `setId` and `setName` for the hover label.
+    const footprintSet = computed(() => sets.value.find(isFootprintSet) ?? null)
+    const footprintPolygons = computed(() => {
+      const s = footprintSet.value
+      return s ? s.footprints.map((fp) => ({ ...fp, setId: s.id, setName: s.name })) : []
+    })
 
     // Persist only when a project is open and OPFS is usable (see useProjectsStore).
     const isPersisting = () => projects.isPersisting
@@ -61,7 +62,7 @@ export const useFootprintsStore = registerProjectStore(
       isPersisting,
       build: () => ({ crs: currentCrs.value, sets: sets.value }),
       write: opfs.saveFootprints,
-      onError: (err) => log(`Shapefile save failed — ${err?.message ?? err}`, 'error', 'Footprint'),
+      onError: (err) => log(`Vector layer save failed — ${err?.message ?? err}`, 'error', 'Footprint'),
     })
 
     // Name → image-id matching is shared with GCP observations / poses / COLMAP
@@ -118,7 +119,7 @@ export const useFootprintsStore = registerProjectStore(
         await ensureProjection(sourceCrs)
         await ensureProjection(projCrs)
       } catch (err) {
-        log(`Shapefile import failed — could not resolve CRS (${err?.message ?? err})`, 'error', 'Footprint')
+        log(`Polygon import failed — could not resolve CRS (${err?.message ?? err})`, 'error', 'Footprint')
         return 0
       }
 
@@ -130,7 +131,7 @@ export const useFootprintsStore = registerProjectStore(
         return { id: crypto.randomUUID(), imageId, imageName: raw.imageName ?? raw.name ?? null, rings }
       })
       if (!footprints.length) {
-        log('Shapefile import: no polygons found', 'warn', 'Footprint')
+        log('Polygon import: no polygons found', 'warn', 'Footprint')
         return 0
       }
 
@@ -142,7 +143,7 @@ export const useFootprintsStore = registerProjectStore(
         footprints,
       })
       log(
-        `Shapefile imported: ${pluralize(footprints.length, 'polygon')}${matched ? `, ${matched} matched to images` : ''} (from ${sourceCrs})`,
+        `Polygons imported: ${pluralize(footprints.length, 'polygon')}${matched ? `, ${matched} matched to images` : ''} (from ${sourceCrs})`,
         'success',
         'Footprint',
       )
@@ -347,9 +348,9 @@ export const useFootprintsStore = registerProjectStore(
         })
       }
 
-      // One computed footprint set at a time — a re-run replaces the previous one.
-      // Contour line layers are computed too, and stay.
-      sets.value = sets.value.filter((s) => s.source !== 'computed' || s.kind === 'lines')
+      // One footprint set at a time — a re-run replaces the previous one. Contour
+      // line layers are computed too, and stay.
+      sets.value = sets.value.filter((s) => !isFootprintSet(s))
       let setId = null
       if (footprints.length) {
         setId = crypto.randomUUID()
@@ -464,7 +465,7 @@ export const useFootprintsStore = registerProjectStore(
       const idx = sets.value.findIndex((s) => s.id === id)
       if (idx === -1) return false
       const [removed] = sets.value.splice(idx, 1)
-      log(`Shapefile removed: ${removed.name}`, 'info', 'Footprint', { channel: 'activity' })
+      log(`Layer removed: ${removed.name}`, 'info', 'Footprint', { channel: 'activity' })
       save()
       return true
     }
@@ -475,7 +476,7 @@ export const useFootprintsStore = registerProjectStore(
       const clean = String(name ?? '').trim()
       if (!clean || clean === set.name) return false
       set.name = clean
-      log(`Shapefile renamed to ${clean}`, 'info', 'Footprint', { channel: 'activity' })
+      log(`Layer renamed to ${clean}`, 'info', 'Footprint', { channel: 'activity' })
       save()
       return true
     }
@@ -484,9 +485,17 @@ export const useFootprintsStore = registerProjectStore(
       const set = sets.value.find((s) => s.id === id)
       if (!set) return
       set.visible = !!visible
-      log(`Shapefile ${set.name} ${set.visible ? 'shown on' : 'hidden from'} map`, 'info', 'Footprint', {
+      log(`Layer ${set.name} ${set.visible ? 'shown on' : 'hidden from'} map`, 'info', 'Footprint', {
         channel: 'activity',
       })
+      save()
+    }
+
+    // A layer's opacity on the map, 0–1.
+    function setSetOpacity(id, opacity) {
+      const set = sets.value.find((s) => s.id === id)
+      if (!set) return
+      set.opacity = Math.max(0, Math.min(1, Number(opacity)))
       save()
     }
 
@@ -523,7 +532,7 @@ export const useFootprintsStore = registerProjectStore(
       resolveImageMatches()
       const polys = sets.value.reduce((n, s) => n + s.footprints.length, 0)
       log(
-        `Shapefiles restored: ${pluralize(sets.value.length, 'layer')}, ${pluralize(polys, 'polygon')}`,
+        `Vector layers restored: ${pluralize(sets.value.length, 'layer')}, ${pluralize(polys, 'polygon')}`,
         'success',
         'Footprint',
       )
@@ -542,12 +551,13 @@ export const useFootprintsStore = registerProjectStore(
         footprints: s.footprints.map((fp) => transformFeature(fp, fromCrs, toCrs)),
       }))
       await save()
-      log(`Shapefiles re-projected to ${toCrs}`, 'info', 'Footprint')
+      log(`Vector layers re-projected to ${toCrs}`, 'info', 'Footprint')
     }
 
     return {
       sets,
-      mapPolygons,
+      footprintSet,
+      footprintPolygons,
       addFootprints,
       addLineSet,
       computeFootprints,
@@ -555,6 +565,7 @@ export const useFootprintsStore = registerProjectStore(
       removeSet,
       renameSet,
       setSetVisible,
+      setSetOpacity,
       setRings,
       reprojectFootprints,
       restore,

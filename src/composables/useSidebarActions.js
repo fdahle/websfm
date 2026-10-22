@@ -32,8 +32,8 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     selectGcp,
     jumpToImage,
     openGcpView,
-    confirmRemoveShapefile,
-    downloadShapefile,
+    confirmRemoveVectorSet,
+    downloadVectorSet,
     confirmRemoveCloud,
     openCloudExport,
     openComputedProductTab,
@@ -52,8 +52,8 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   const { selectCloud, setCloudVisible, renameCloud, setMainSparse, setProductVisible, setProductOpacity } =
     useReconstructionStore()
   const footprintsStore = useFootprintsStore()
-  const { sets: shapefiles } = storeToRefs(footprintsStore)
-  const { renameSet, setSetVisible } = footprintsStore
+  const { sets: vectorSets } = storeToRefs(footprintsStore)
+  const { renameSet, setSetVisible, setSetOpacity } = footprintsStore
   const { setRasterKind, setRasterVisible, setRasterOpacity, rasterById } = useExternalStore()
   const {
     infoImageId,
@@ -131,9 +131,9 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     nextTick(() => mapViewerRef.value?.zoomToImage(imgId))
   }
 
-  // Switch to the map and fit the view to a shapefile set's extent.
-  function zoomToShapefile(id) {
-    const set = shapefiles.value.find((s) => s.id === id)
+  // Switch to the map and fit the view to a vector set's extent.
+  function zoomToVectorSet(id) {
+    const set = vectorSets.value.find((s) => s.id === id)
     if (!set) return
     activateTab('map')
     nextTick(() => mapViewerRef.value?.zoomToFootprints(set.footprints))
@@ -175,12 +175,13 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     selectGcp,
     jumpToImage,
     openGcp: openGcpView,
-    // Shapefiles
-    removeShapefile: confirmRemoveShapefile,
-    renameShapefile: ({ id, name }) => renameSet(id, name),
-    setShapefileVisible: ({ id, visible }) => setSetVisible(id, visible),
-    zoomToShapefile,
-    downloadShapefile,
+    // Vector layers (contours in Products, polygon files in Reference Data)
+    removeVectorSet: confirmRemoveVectorSet,
+    renameVectorSet: ({ id, name }) => renameSet(id, name),
+    setVectorVisible: ({ id, visible }) => setSetVisible(id, visible),
+    setVectorOpacity: ({ id, opacity }) => setSetOpacity(id, opacity),
+    zoomToVectorSet,
+    downloadVectorSet,
     // Clouds (Reconstruction, Products and Reference rows)
     selectCloud: showCloud,
     cloudSymbology: openCloudSymbology,
@@ -222,5 +223,5 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     convertRasterToImage: (id) => onRasterImportAsImage({ id }),
   }
 
-  return { context, zoomToShapefile }
+  return { context, zoomToVectorSet }
 }

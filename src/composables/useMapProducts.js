@@ -5,6 +5,7 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
 import { usePosesStore } from '../stores/usePosesStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
+import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { PRODUCT_KINDS, placeProductLayer, productLabel } from '../core/products/productLayers.js'
 import { MODEL_MAP_CRS, modelMapCameras, modelMapExtent } from '../core/products/modelMap.js'
 import { frameFromSpec } from '../core/products/frameSpec.js'
@@ -13,18 +14,20 @@ import { transform } from '../core/crs.js'
 import { demRef } from '../core/products/demWindow.js'
 import { readDemWindow } from '../workers/computeClient.js'
 import { stackMapLayers } from '../core/products/mapOrder.js'
+import { vectorMapLayers } from '../core/products/vectorLayers.js'
 
 // What the 2D map shows, in which frame (CLAUDE.md ▸ map raster layers).
 //
 // Two frames. The CRS map is the project CRS: basemap, GPS, GCPs, footprints,
-// reference rasters and CRS products. The MODEL map is a top-down view of the
+// reference rasters, CRS products and the vector layers (contours, polygon files). The MODEL map is a top-down view of the
 // sparse model's local frame — the same frame local products are built in — for
 // a project with no CRS position: camera centres and local products, nothing else.
 // The user picks with View ▸ Map ▸ Model Frame; until they do, the map uses the
 // model frame only when a sparse model exists and nothing could be placed in a CRS.
 //
-// Raster layer list order is draw order, bottom first, so computed products draw
-// above the reference data they are usually compared against.
+// Layer list order is draw order, bottom first: by default the reference rasters,
+// then the computed products, then the vector layers, until the Layers panel
+// restacks them (core/products/mapOrder.js).
 
 // The user's explicit choice ('crs' | 'model'), null = automatic. Session-scoped
 // and shared by every caller, like the other map view toggles.
@@ -39,6 +42,7 @@ export function useMapProducts() {
   const imagesStore = useImagesStore()
   const posesStore = usePosesStore()
   const gcpsStore = useGcpsStore()
+  const footprintsStore = useFootprintsStore()
 
   const productOf = (kind) => (kind === 'dem' ? recon.dem : recon.ortho)
   const hasModel = computed(() => !!recon.mainSparseCloud?.cameras?.size)
@@ -132,13 +136,17 @@ export function useMapProducts() {
 
   const productMapLayers = computed(() => placements.value.map((p) => p.placed?.layer).filter(Boolean))
 
-  // Bottom first, in the order Sidebar ▸ Map layers sets (core/products/mapOrder.js).
+  // Bottom first, in the order View ▸ Map ▸ Layers sets (core/products/mapOrder.js).
+  // Vector layers are in the project CRS, so only the CRS map has them.
   const mapLayers = computed(() =>
     stackMapLayers(
-      mode.value === 'crs' ? [...external.mapRasters, ...productMapLayers.value] : productMapLayers.value,
+      mode.value === 'crs'
+        ? [...external.mapRasters, ...productMapLayers.value, ...vectorMapLayers(footprintsStore.sets)]
+        : productMapLayers.value,
       recon.mapOrder,
     ),
   )
+  const rasterMapLayers = computed(() => mapLayers.value.filter((l) => !l.vector))
 
   // One line per thing the user asked for that this frame cannot show, so an
   // "On Map" layer never silently fails to appear.
@@ -148,8 +156,8 @@ export function useMapProducts() {
       .map((p) => `${productLabel(p.kind, productOf(p.kind))} is not shown: ${p.placed.reason}.`)
     if (mode.value === 'model') {
       out.unshift(
-        `Model frame (${modelFrame.value?.unit ?? 'model units'}, no CRS): GCPs, footprints, GPS positions ` +
-          'and reference rasters are hidden.',
+        `Model frame (${modelFrame.value?.unit ?? 'model units'}, no CRS): GCPs, footprints, GPS positions, ` +
+          'reference rasters and vector layers are hidden.',
       )
     }
     return out
@@ -236,7 +244,7 @@ export function useMapProducts() {
   // Targets are the map's raster layers. Automatic choice: the first DEM, since
   // only a DEM serves every tool (profile, volume) — else the top layer.
   const measureTargets = computed(() =>
-    mapLayers.value.map((l) => ({
+    rasterMapLayers.value.map((l) => ({
       id: l.id,
       name: l.name,
       kind: l.kind === 'dem' ? 'dem' : 'ortho',
@@ -255,7 +263,7 @@ export function useMapProducts() {
   // measurements with, its RasterSource (computed or imported alike — an imported
   // one only once hydrated), and a computed product's frame status.
   const measureTarget = computed(() => {
-    const layer = mapLayers.value.find((l) => l.id === measureTargetId.value)
+    const layer = rasterMapLayers.value.find((l) => l.id === measureTargetId.value)
     if (!layer) return null
     const kind = layer.kind === 'dem' ? 'dem' : 'ortho'
     if (layer.product) {

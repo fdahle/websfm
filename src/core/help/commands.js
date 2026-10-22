@@ -50,7 +50,10 @@ export const NEED_CHECKS = {
   products: { ok: (s) => s.productReady, reason: 'Build a DEM or orthophoto first' },
   poses: { ok: (s) => s.poseCount > 0, reason: 'Import camera poses first' },
   measurements: { ok: (s) => s.measurementCount > 0, reason: 'Save a measurement first (Tools ▸ Measure)' },
-  footprints: { ok: (s) => s.footprintCount > 0, reason: 'Import or generate footprints first' },
+  footprints: {
+    ok: (s) => s.footprintCount > 0,
+    reason: 'Compute footprints first (Tools ▸ Model ▸ Footprints from poses)',
+  },
   gcps: {
     ok: (s) => s.gcpCount > 0,
     reason: 'No GCPs yet — import a GCP file, or right-click the map or an image to add one',

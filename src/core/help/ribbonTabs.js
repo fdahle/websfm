@@ -690,6 +690,8 @@ export const TABS = [
           { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera-pose', needs: ['poses'] },
           { id: 'export-sensors', label: 'Calibration', icon: 'calibration', needs: ['sensors'] },
           { id: 'export-camera-fiducials', label: 'Camera\nFiducials', icon: 'camera', needs: ['fiducialMarks'] },
+          // The image footprints as GeoJSON (they have no sidebar row to download from).
+          { id: 'export-footprints', label: 'Foot-\nprints', icon: 'footprint', needs: ['footprints'] },
         ],
       },
       {

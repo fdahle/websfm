@@ -143,10 +143,11 @@ describe('command dispatch', () => {
     const reachable = new Set([
       ...ribbon.map((c) => c.id),
       ...COMMANDS.map((c) => c.dispatch),
-      // Emitted outside the ribbon tables: Ribbon.vue's project button, and the
-      // image tab's own GCP-edit toggle.
+      // Emitted outside the ribbon tables: Ribbon.vue's project button, the
+      // image tab's own GCP-edit toggle, and the map's right-click on a footprint.
       'open-project-picker',
       'img-gcp-edit',
+      'remove-footprints',
     ])
     expect([...ids].filter((id) => !reachable.has(id))).toEqual([])
   })

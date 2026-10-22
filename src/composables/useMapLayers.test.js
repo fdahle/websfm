@@ -30,7 +30,7 @@ vi.mock('../components/viewers/raster/gpuRaster.js', () => ({
   },
 }))
 
-const { useMapRasterLayers } = await import('./useMapRasterLayers.js')
+const { useMapLayers } = await import('./useMapLayers.js')
 
 const deferred = () => {
   let resolve
@@ -55,7 +55,7 @@ const preview = (id, extra = {}) => ({
 function setup(list) {
   const state = { rasters: list }
   const ctx = { map: { getView: () => ({ getProjection: () => getOlProjection('EPSG:4326') }) } }
-  const r = useMapRasterLayers(ctx, { rasters: () => state.rasters, modelCode: () => undefined })
+  const r = useMapLayers(ctx, { layers: () => state.rasters, modelCode: () => undefined })
   const group = r.createGroup()
   const ids = () =>
     group
@@ -74,7 +74,7 @@ beforeEach(() => {
   ensureProjection.mockImplementation(() => Promise.resolve())
 })
 
-describe('useMapRasterLayers', () => {
+describe('useMapLayers', () => {
   it('draws the list in order and restacks when it is reordered', async () => {
     const s = setup([preview('a'), preview('b')])
     await s.sync()
@@ -169,7 +169,7 @@ describe('useMapRasterLayers', () => {
 
   it('does nothing without a map or before createGroup()', async () => {
     const ctx = { map: null }
-    const r = useMapRasterLayers(ctx, { rasters: () => [preview('a')], modelCode: () => undefined })
+    const r = useMapLayers(ctx, { layers: () => [preview('a')], modelCode: () => undefined })
     const group = r.createGroup()
     await r.sync()
     expect(group.getLayers().getLength()).toBe(0)
@@ -181,8 +181,8 @@ describe('useMapRasterLayers', () => {
 
   it('never looks the model frame code up remotely', async () => {
     const s = setup([])
-    const r = useMapRasterLayers(s.ctx, {
-      rasters: () => [preview('a', { crs: 'MODEL:1' })],
+    const r = useMapLayers(s.ctx, {
+      layers: () => [preview('a', { crs: 'MODEL:1' })],
       modelCode: () => 'MODEL:1',
     })
     r.createGroup()
@@ -195,5 +195,33 @@ describe('useMapRasterLayers', () => {
     expect(s.extents()).toEqual([[0, 0, 10, 10]])
     s.ctx.map = null
     expect(s.extents()).toEqual([])
+  })
+  it('stacks a vector layer with the rasters, and swaps its features only on a new rev', async () => {
+    const ring = [
+      [2, 2],
+      [4, 2],
+      [4, 4],
+    ]
+    const vec = { id: 'vector:v', vector: true, opacity: 1, rev: '1:0', features: () => [{ id: 'p', rings: [ring] }] }
+    const s = setup([preview('a'), vec])
+    await s.sync()
+    const [, lv] = s.group.getLayers().getArray()
+    expect(lv.get('vector')).toBe(true)
+    expect(lv.getSource().getFeatures()).toHaveLength(1)
+    const first = lv.getSource().getFeatures()[0]
+
+    vec.opacity = 0.3
+    await s.sync()
+    expect(s.group.getLayers().item(1)).toBe(lv)
+    expect(lv.getOpacity()).toBe(0.3)
+    expect(lv.getSource().getFeatures()[0]).toBe(first)
+
+    vec.rev = '2:0'
+    await s.sync()
+    expect(lv.getSource().getFeatures()[0]).not.toBe(first)
+    expect(s.extents()).toEqual([
+      [0, 0, 10, 10],
+      [2, 2, 4, 4],
+    ])
   })
 })

@@ -34,8 +34,8 @@ export async function deleteGcps(projectId) {
   })
 }
 
-// ── Shapefiles (footprint / polygon vector layers) ────────────────────────────────
-// JSON: { crs, sets: [{ id, name, source, visible,
+// ── Vector sets (image footprints, contour lines, polygon files) ───────────────────
+// JSON: { crs, sets: [{ id, name, source, kind?, visible, opacity?,
 //         footprints: [{ id, imageId, imageName, rings }] }] }
 
 export async function saveFootprints(projectId, data) {

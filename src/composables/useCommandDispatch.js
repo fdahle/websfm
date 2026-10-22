@@ -63,9 +63,10 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     exportKeypoints,
     exportMatches,
     downloadRasterOriginal,
+    downloadFootprints,
     openMeasurementExport,
   } = exports
-  const { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages } = removals
+  const { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages, confirmRemoveFootprints } = removals
   const {
     cameraPickMode,
     addImagesRouted,
@@ -382,6 +383,13 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         break
       case 'export-matches':
         exportMatches()
+        break
+      case 'export-footprints':
+        downloadFootprints()
+        break
+      // The map's right-click on a footprint (not a ribbon command).
+      case 'remove-footprints':
+        confirmRemoveFootprints()
         break
       // `value` from a saved-measurements list: { ids, label } exports just its records.
       case 'export-measurements':

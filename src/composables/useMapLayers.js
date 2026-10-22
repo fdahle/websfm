@@ -1,6 +1,7 @@
-// The 2D map's raster layers: imported DEMs/orthos and computed products drawn
-// under the project's own vectors (ViewerMap.vue). Two things make this cheap
-// enough to be a toggle rather than a heavyweight mode:
+// The 2D map's layer stack: imported DEMs/orthos, computed products and the vector
+// layers (contours, imported polygon files), drawn in one list under the project's
+// own markers (ViewerMap.vue). Two things make the rasters cheap enough to be a
+// toggle rather than a heavyweight mode:
 //
 //  1. **The fallback renders `previewDataUrl`, never the pixel plane.** The ≤1024 px
 //     PNG is already in the index from restore, so showing a REMA tile costs no
@@ -12,11 +13,16 @@
 //     the fly, so this survives `handleSetCrs` with no resampling — the same
 //     reason the sampler reprojects the query instead of warping the raster.
 //
+// A vector entry (`vector: true`, core/products/vectorLayers.js) is in the project
+// CRS, the view's, and becomes an OpenLayers vector layer at its place in the stack.
+//
 // Lifecycle (driven by ViewerMap's build/destroy): `createGroup()` per build,
-// before the map exists; `sync()` whenever `rasters()` changes; `dispose()` on
+// before the map exists; `sync()` whenever `layers()` changes; `dispose()` on
 // destroy. The map itself is read from `ctx.map` at call time.
 
 import ImageLayer from 'ol/layer/Image'
+import VectorLayer from 'ol/layer/Vector'
+import VectorSource from 'ol/source/Vector'
 import Static from 'ol/source/ImageStatic'
 import LayerGroup from 'ol/layer/Group'
 import { get as getOlProjection, transformExtent } from 'ol/proj'
@@ -25,22 +31,41 @@ import { createGpuRasterLayer, gpuRasterStyle, disposeRasterLayer } from '../com
 import { orthoAdjustFilter } from '../utils/orthoFilter.js'
 import { ensureProjection } from '../core/crs.js'
 import { rasterBounds } from '../core/io/rasterSample.js'
+import { makeFootprintFeature } from '../components/viewers/map/mapFeatures.js'
+import { footprintStyle } from '../components/viewers/map/mapStyles.js'
 
 /**
- * `ctx`: the map context (components/viewers/map/mapContext.js). `rasters()`: the
- * layers flagged "On map", in stacking order. `modelCode()`: the model frame's
+ * `ctx`: the map context (components/viewers/map/mapContext.js). `layers()`: the
+ * layers on the map, in stacking order, bottom first. `modelCode()`: the model frame's
  * projection code while the map shows it (registered by build(), so never looked
- * up remotely), else undefined.
+ * up remotely), else undefined. `selectedId()`: the selected image, which a polygon
+ * linked to it is highlighted for.
  */
-export function useMapRasterLayers(ctx, { rasters, modelCode }) {
+export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () => null }) {
   const external = useExternalStore()
   let group = null
-  const layers = new Map() // id → layer
+  const layers = new Map() // id → OpenLayers layer
   // Bumped per sync and by dispose(): a sync resuming after an await abandons
   // itself once a newer sync or a teardown has happened.
   let generation = 0
 
+  // A vector layer, tagged with the revision of the features it was built from.
+  function makeVectorLayer(v) {
+    const layer = new VectorLayer({
+      source: new VectorSource({ features: v.features().map(makeFootprintFeature) }),
+      style: (f) => footprintStyle(f, selectedId()),
+      opacity: v.opacity ?? 1,
+    })
+    tagVector(layer, v)
+    return layer
+  }
+  function tagVector(layer, v) {
+    layer.set('vector', true)
+    layer.set('rev', v.rev)
+  }
+
   async function makeRasterLayer(r) {
+    if (r.vector) return makeVectorLayer(r)
     // An imported raster draws its tiled display file; a computed ortho (`product:
     // true`, core/products/productLayers.js) its stored COG when the layer carries one.
     // A computed DEM, or a product the COG cannot place here, draws its preview.
@@ -94,8 +119,8 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
   }
 
   /**
-   * A fresh, empty group for a new map. Reference rasters sit above the basemap
-   * but below everything the project owns; a Group (rather than loose layers)
+   * A fresh, empty group for a new map. The stack sits above the basemap but below
+   * the project's markers; a Group (rather than loose layers)
    * keeps that position fixed no matter when the async basemap resolves and
    * inserts itself at index 0.
    */
@@ -111,9 +136,9 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
   async function sync() {
     if (!ctx.map || !group) return
     const run = ++generation
-    const want = [...(rasters() ?? [])]
+    const want = [...(wanted() ?? [])]
     for (const r of want) {
-      if (r.crs && r.crs !== modelCode()) await ensureProjection(r.crs).catch(() => {})
+      if (!r.vector && r.crs && r.crs !== modelCode()) await ensureProjection(r.crs).catch(() => {})
     }
 
     if (run !== generation || !ctx.map) return
@@ -123,6 +148,15 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
       const existing = layers.get(r.id)
       if (existing) {
         existing.setOpacity(r.opacity ?? 1)
+        if (r.vector) {
+          // The same features stay; new ones (a re-projection, a relink) are swapped in.
+          if (existing.get('rev') !== r.rev) {
+            existing.getSource().clear(true)
+            existing.getSource().addFeatures(r.features().map(makeFootprintFeature))
+            tagVector(existing, r)
+          }
+          continue
+        }
         if (existing.get('gpuRaster')) {
           // A GPU layer restyles in place while it draws the same file; a rebuilt
           // product (new fileKey), or one that must now draw its preview, is rebuilt.
@@ -157,8 +191,8 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
       layers.delete(id)
     }
 
-    // Rewrite the collection in list order — the sidebar's order IS the draw order,
-    // so a raster moved in the list restacks on the map.
+    // Rewrite the collection in list order — the Layers panel's order IS the draw
+    // order, so a layer moved in the list restacks on the map.
     const ordered = want.map((r) => layers.get(r.id)).filter(Boolean)
     group.getLayers().clear()
     for (const layer of ordered) group.getLayers().push(layer)
@@ -176,13 +210,19 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
     group = null
   }
 
-  // Extents of the on-map raster layers in the VIEW projection. Each raster keeps
-  // its native CRS (see makeRasterLayer), so its bounds are transformed here; one
-  // whose CRS OL does not know is skipped rather than guessed.
+  // Extents of the on-map layers in the VIEW projection. Each raster keeps its
+  // native CRS (see makeRasterLayer), so its bounds are transformed here; one whose
+  // CRS OL does not know is skipped rather than guessed. A vector layer is in the
+  // view's CRS already.
   function extents() {
     const view = ctx.map?.getView().getProjection()
     const out = []
-    for (const r of rasters() ?? []) {
+    for (const r of wanted() ?? []) {
+      if (r.vector) {
+        const e = layers.get(r.id)?.getSource().getExtent()
+        if (e && Number.isFinite(e[0])) out.push(e)
+        continue
+      }
       const b = rasterBounds({ width: r.width, height: r.height, geoTransform: r.geoTransform })
       const proj = r.crs ? getOlProjection(r.crs) : null
       if (!b || !proj || !view) continue
@@ -195,5 +235,10 @@ export function useMapRasterLayers(ctx, { rasters, modelCode }) {
     return out
   }
 
-  return { createGroup, sync, dispose, extents }
+  // Re-style the vector layers (the selected image changed).
+  function restyle() {
+    for (const layer of layers.values()) if (layer.get('vector')) layer.changed()
+  }
+
+  return { createGroup, sync, dispose, extents, restyle }
 }

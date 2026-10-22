@@ -34,7 +34,7 @@ import {
 import { useContextMenu } from '../../composables/useContextMenu.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
 import { useMapSettings } from '../../composables/useMapSettings.js'
-import { useMapRasterLayers } from '../../composables/useMapRasterLayers.js'
+import { useMapLayers } from '../../composables/useMapLayers.js'
 import { createMapContext, clearMapContext } from './map/mapContext.js'
 import { imageStyle, gcpStyle, poseStyle, footprintStyle } from './map/mapStyles.js'
 import {
@@ -59,7 +59,7 @@ import RasterMeasurements from './RasterMeasurements.vue'
 //   map/mapFeatures.js             marker features
 //   map/mapBasemaps.js             base layers      (choice: core/basemapChoice.js)
 //   map/mapGridLayer.js            grid layer       (lines/labels: core/mapGrid.js)
-//   composables/useMapRasterLayers raster layer reconcile
+//   composables/useMapLayers       layer stack reconcile (rasters + vector layers)
 //   core/mapData.js                what gets plotted, hover text
 
 const { basemap, satelliteUrl, satelliteAttribution } = useMapSettings()
@@ -67,6 +67,8 @@ const { basemap, satelliteUrl, satelliteAttribution } = useMapSettings()
 const props = defineProps({
   images: { type: Array, default: () => [] },
   gcps: { type: Array, default: () => [] },
+  // The image footprints (the overlay View ▸ Map ▸ Footprints toggles), not the
+  // vector layers: those come in `layers`.
   footprints: { type: Array, default: () => [] },
   poses: { type: Array, default: () => [] },
   selectedId: { type: String, default: null },
@@ -86,10 +88,10 @@ const props = defineProps({
   showGcps: { type: Boolean, default: true },
   // The floating Layers panel (View ▸ Map ▸ Layers); its × sends the same command.
   showLayersPanel: { type: Boolean, default: false },
-  // Raster layers flagged "On map", in the order they should stack: imported
-  // reference rasters and computed DEM/ortho (`product: true`) alike
-  // (composables/useMapProducts.js). Metadata only — see useMapRasterLayers.
-  rasters: { type: Array, default: () => [] },
+  // The layer stack, bottom first: imported reference rasters, computed DEM/ortho
+  // (`product: true`) and vector layers (`vector: true`) alike
+  // (composables/useMapProducts.js). Metadata only — see useMapLayers.
+  layers: { type: Array, default: () => [] },
   // Status-bar value readout: a SYNC probe of the on-map layers (useMapProducts
   // probeAt, falling through to useExternalStore.probeRasterAt) plus the hydrator
   // behind the "load" button, injected by the host (WorkspaceView via useMapProducts).
@@ -174,10 +176,11 @@ const hover = ref(null) // { text, x, y }
 // as `ctx.<handle>` at call time everywhere else — see map/mapContext.js.
 const ctx = createMapContext()
 
-// Raster layers (imported + computed), reconciled against `props.rasters`.
-const rasterLayers = useMapRasterLayers(ctx, {
-  rasters: () => props.rasters,
+// The layer stack (rasters and vector layers), reconciled against `props.layers`.
+const stackLayers = useMapLayers(ctx, {
+  layers: () => props.layers,
   modelCode: () => props.modelFrame?.code,
+  selectedId: () => props.selectedId,
 })
 
 // ── Status bar ────────────────────────────────────────────────────────────────
@@ -208,14 +211,25 @@ const { menu: ctxMenu, open: openCtx, close: closeCtx } = useContextMenu()
 const ctxCoord = ref(null)
 // Loaded image linked to the feature under the right-click, or null.
 const ctxImage = ref(null)
+// The right-click landed on an image footprint (the overlay, not a polygon layer).
+const ctxFootprint = ref(false)
 function onContextMenu(e) {
   ctxCoord.value = ctx.map ? ctx.map.getEventCoordinate(e) : null
   const hit = ctx.map && !measuring.value ? pickFeature(ctx.map.getEventPixel(e)) : null
   ctxImage.value = hit ? linkedImageOf(hit, props.images) : null
+  ctxFootprint.value = !!hit?.get('footprint')
   openCtx(e)
 }
 const ctxItems = computed(() => [
   ...(ctxImage.value ? [{ id: 'open-image', label: `Open image ${ctxImage.value.name}` }, { separator: true }] : []),
+  // The footprints have no sidebar row: this, and Export ▸ Footprints, is where they go.
+  ...(ctxFootprint.value
+    ? [
+        { id: 'export-footprints', label: 'Download footprints (GeoJSON)' },
+        { id: 'remove-footprints', label: 'Remove footprints' },
+        { separator: true },
+      ]
+    : []),
   // A GCP is stored in the project CRS; the model frame has no CRS position.
   {
     id: 'add-gcp-here',
@@ -229,6 +243,8 @@ function onCtxSelect(id) {
   const coord = ctxCoord.value
   if (id === 'open-image' && ctxImage.value) {
     emit('open-image', ctxImage.value.id)
+  } else if (id === 'export-footprints' || id === 'remove-footprints') {
+    emit('command', id)
   } else if (id === 'add-gcp-here' && coord) {
     // Map coordinates are already in the project CRS (= GCP storage CRS).
     emit('add-gcp-at', { x: coord[0], y: coord[1] })
@@ -288,6 +304,12 @@ const gpsImages = computed(() => (isModel.value ? [] : gpsImagesOf(props.images,
 const mapGcps = computed(() => (isModel.value ? modelMarkerGcps(props.modelMarkers) : plottedGcps(props.gcps)))
 
 const mapFootprints = computed(() => (isModel.value ? [] : plottedFootprints(props.footprints)))
+// An overlay feature is marked, so a right-click can tell it from a polygon layer's.
+function footprintFeature(fp) {
+  const f = makeFootprintFeature(fp)
+  f.set('footprint', true)
+  return f
+}
 
 // On the model map the cameras are the SfM centres in the model frame instead.
 const mapPoses = computed(() => (isModel.value ? modelCameraPoses(props.modelCameras) : plottedPoses(props.poses)))
@@ -324,7 +346,7 @@ function refreshGcps() {
 function refreshFootprints() {
   if (!ctx.footprintSource) return
   ctx.footprintSource.clear(true)
-  ctx.footprintSource.addFeatures(mapFootprints.value.map(makeFootprintFeature))
+  ctx.footprintSource.addFeatures(mapFootprints.value.map(footprintFeature))
   fitToMarkers()
 }
 
@@ -335,7 +357,7 @@ function refreshPoses() {
   fitToMarkers()
 }
 
-// Fit View: every marker AND every on-map raster, so a project whose only map
+// Fit View: every marker AND every layer on the map, so a project whose only map
 // content is a DEM or orthophoto still has something to fit to.
 function fitToMarkers() {
   const map = ctx.map
@@ -346,7 +368,7 @@ function fitToMarkers() {
     ...(ctx.footprintSource?.getFeatures() || []),
     ...(ctx.poseSource?.getFeatures() || []),
   ]
-  const rasters = rasterLayers.extents()
+  const rasters = stackLayers.extents()
   if (!features.length && !rasters.length) return
   const geom = features.length === 1 && !rasters.length ? features[0].getGeometry() : null
   if (geom?.getType() === 'Point') {
@@ -406,7 +428,7 @@ async function build() {
   ctx.vSource = new VectorSource({ features: gpsImages.value.map(imageFeature) })
   ctx.gcpSource = new VectorSource({ features: mapGcps.value.map(makeGcpFeature) })
   gcpPlacementKey = gcpPlacement(mapGcps.value)
-  ctx.footprintSource = new VectorSource({ features: mapFootprints.value.map(makeFootprintFeature) })
+  ctx.footprintSource = new VectorSource({ features: mapFootprints.value.map(footprintFeature) })
   ctx.footprintLayer = new VectorLayer({
     source: ctx.footprintSource,
     style: (f) => footprintStyle(f, props.selectedId),
@@ -427,13 +449,13 @@ async function build() {
 
   ctx.grid = makeGridLayer(info, projection, props.showGrid)
 
-  // Raster layers sit above the basemap but below everything the project owns, so
-  // GCPs/footprints/poses always stay legible on top of them.
-  const rasterGroup = rasterLayers.createGroup()
+  // The layer stack sits above the basemap but below the project's markers, so
+  // GCPs/footprints/poses always stay legible on top of it.
+  const stackGroup = stackLayers.createGroup()
 
   ctx.map = new OlMap({
     target: mapEl.value,
-    layers: [rasterGroup, ctx.grid.layer, ctx.footprintLayer, ctx.vLayer, ctx.gcpLayer, ctx.poseLayer],
+    layers: [stackGroup, ctx.grid.layer, ctx.footprintLayer, ctx.vLayer, ctx.gcpLayer, ctx.poseLayer],
     view: new View({
       projection: projection || 'EPSG:3857',
       center: viewExtent ? [(viewExtent[0] + viewExtent[2]) / 2, (viewExtent[1] + viewExtent[3]) / 2] : [0, 0],
@@ -465,7 +487,7 @@ async function build() {
     addBasemap(builtMap, makeBasemapLayer(kind, { url: satelliteUrl.value, attribution: satelliteAttribution.value }))
   }
 
-  rasterLayers.sync()
+  stackLayers.sync()
 
   // The projected grid is view-dependent (spacing + edge-pinned labels follow the
   // view), so it regenerates per frame while the map moves; its update self-skips
@@ -533,7 +555,7 @@ function destroy() {
   mapBuild.invalidate()
   ctx.map?.setTarget(null)
   clearMapContext(ctx)
-  rasterLayers.dispose()
+  stackLayers.dispose()
   resetBasemapState()
   hover.value = null
   cursor.value = null
@@ -572,6 +594,7 @@ const legend = computed(() =>
     poses: mapPoses.value,
     gcps: mapGcps.value,
     footprints: mapFootprints.value,
+    vectorLayers: isModel.value ? [] : props.layers.filter((l) => l.vector),
     showCameras: props.showCameras,
     showGcps: gcpsVisible.value,
     showFootprints: props.showFootprints,
@@ -600,6 +623,7 @@ watch(
     ctx.vSource?.changed()
     ctx.footprintSource?.changed()
     ctx.poseSource?.changed()
+    stackLayers.restyle()
   },
 )
 
@@ -622,10 +646,11 @@ function syncDoubleClickZoom() {
 }
 watch(measuring, syncDoubleClickZoom)
 
-// Add/remove/restack raster layers and follow opacity changes. Deep, because
+// Add/remove/restack the layers and follow opacity changes. Deep, because
 // `opacity` is edited in place on the raster record (the id list alone wouldn't
-// change when the slider moves).
-watch(() => props.rasters, rasterLayers.sync, { deep: true })
+// change when the slider moves). A vector entry's features are behind a function,
+// so this never walks their coordinates.
+watch(() => props.layers, stackLayers.sync, { deep: true })
 
 // Rebuild the whole map when its frame changes: the project CRS, a switch to or
 // from the model frame, or a new model frame (`key`).
@@ -698,7 +723,7 @@ function zoomToImage(imgId) {
   ctx.map.getView().animate({ center: coord, zoom: 17, duration: 300 })
 }
 
-// Fit the view to one shapefile set's polygons (its combined extent). `polygons`
+// Fit the view to one vector set's polygons (its combined extent). `polygons`
 // is the set's flat polygon list ([{ rings }], or [{ lines }] for a line layer);
 // ignores any without geometry.
 function zoomToFootprints(polygons) {

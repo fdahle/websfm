@@ -2,18 +2,21 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
+import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
+import { vectorSection } from '../../../core/products/vectorLayers.js'
 import CloudRows from './CloudRows.vue'
+import VectorRows from './VectorRows.vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
 import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import { useInlineRename } from '../../../composables/useInlineRename.js'
 import ContextMenu from './ContextMenu.vue'
 import { useSidebar } from './sidebarContext.js'
 
-// Evidence you brought in: imported dense/mesh clouds and imported georeferenced
-// rasters (reference DEM / orthophoto). The pipeline never overwrites anything
+// Evidence you brought in: imported dense/mesh clouds, imported georeferenced
+// rasters (reference DEM / orthophoto) and imported polygon files. The pipeline never overwrites anything
 // in here — that's the whole point of the section, and it's the one thing the
 // old type-split "Clouds vs Products" taxonomy could not express.
-defineProps({
+const props = defineProps({
   open: { type: Boolean, default: true },
   // Imported (imported:true) kind:'dense' | 'mesh' clouds.
   clouds: { type: Array, default: () => [] },
@@ -23,6 +26,11 @@ const sidebar = useSidebar()
 // External rasters (metadata only — the pixel plane is loaded lazily, so a row
 // renders long before any plane is in memory).
 const { rasters, pendingRasters } = storeToRefs(useExternalStore())
+const { sets: vectorSets } = storeToRefs(useFootprintsStore())
+const polygonSets = computed(() => vectorSets.value.filter((s) => vectorSection(s) === 'reference'))
+const itemCount = computed(
+  () => props.clouds.length + rasters.value.length + pendingRasters.value.length + polygonSets.value.length,
+)
 
 const { isExpanded: isRasterExpanded, toggle: toggleRasterExpand } = useExpandedSet()
 
@@ -77,9 +85,7 @@ const ctxOpenLabel = computed(() =>
     <button class="section-hd" @click="emit('toggle')">
       <span class="chevron">{{ open ? '▾' : '▸' }}</span>
       <span class="section-name">Reference Data</span>
-      <span v-if="clouds.length + rasters.length + pendingRasters.length" class="badge">
-        {{ clouds.length + rasters.length + pendingRasters.length }}
-      </span>
+      <span v-if="itemCount" class="badge">{{ itemCount }}</span>
     </button>
     <ul v-if="open" class="item-list">
       <CloudRows :clouds="clouds" />
@@ -198,8 +204,10 @@ const ctxOpenLabel = computed(() =>
         </li>
       </template>
 
-      <li v-if="!clouds.length && !rasters.length && !pendingRasters.length" class="empty">
-        No reference data — drop a GeoTIFF DEM/ortho or a point cloud
+      <VectorRows :sets="polygonSets" />
+
+      <li v-if="!itemCount" class="empty">
+        No reference data — drop a GeoTIFF DEM/ortho, a point cloud or a polygon file
       </li>
     </ul>
 

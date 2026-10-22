@@ -2,7 +2,10 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
+import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
+import { vectorSection } from '../../../core/products/vectorLayers.js'
 import CloudRows from './CloudRows.vue'
+import VectorRows from './VectorRows.vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
 import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import { useInlineRename } from '../../../composables/useInlineRename.js'
@@ -10,8 +13,8 @@ import { productMapBlocker } from '../../../core/products/productLayers.js'
 import ContextMenu from './ContextMenu.vue'
 import { useSidebar } from './sidebarContext.js'
 
-// Deliverables the app produced: computed dense/mesh clouds plus the DEM/ortho
-// rasters. Split from Reference Data by *provenance*, not data type — everything
+// Deliverables the app produced: computed dense/mesh clouds, the DEM/ortho rasters
+// and the contour lines traced from the DEM. Split from Reference Data by *provenance*, not data type — everything
 // here is re-derivable from the model, so a re-fuse/re-mesh/rebuild may replace it.
 const props = defineProps({
   open: { type: Boolean, default: true },
@@ -23,6 +26,8 @@ const sidebar = useSidebar()
 // productLayers: map-layer state per raster product ({ dem: { visible, opacity }, … })
 // — the same controls Reference Data has for its rasters.
 const { dem, ortho, productLayers } = storeToRefs(useReconstructionStore())
+const { sets: vectorSets } = storeToRefs(useFootprintsStore())
+const contourSets = computed(() => vectorSets.value.filter((s) => vectorSection(s) === 'products'))
 
 // One row per built raster; opening (double-click) shows it in a tab like an image.
 const productRows = computed(() => {
@@ -45,8 +50,8 @@ const productRows = computed(() => {
   return rows
 })
 
-const isEmpty = computed(() => !productRows.value.length && !props.clouds.length)
-const badgeCount = computed(() => productRows.value.length + props.clouds.length)
+const isEmpty = computed(() => !productRows.value.length && !props.clouds.length && !contourSets.value.length)
+const badgeCount = computed(() => productRows.value.length + props.clouds.length + contourSets.value.length)
 
 const { isExpanded: isProductExpanded, toggle: toggleProductExpand } = useExpandedSet()
 
@@ -183,6 +188,7 @@ function toggleMap(row) {
           </button>
         </li>
       </template>
+      <VectorRows :sets="contourSets" />
       <li v-if="isEmpty" class="empty">No products — densify, or build a DEM or orthophoto</li>
     </ul>
 

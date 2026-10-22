@@ -64,7 +64,7 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
   const externalStore = useExternalStore()
   const { gcps } = storeToRefs(useGcpsStore())
   const footprintsStore = useFootprintsStore()
-  const { sets: shapefiles } = storeToRefs(footprintsStore)
+  const { sets: vectorSets, footprintSet } = storeToRefs(footprintsStore)
   const { confirmRemoveMark, setConfirmRemoveMark } = useUiSettings()
 
   // ── Image removal ───────────────────────────────────────────────────────────
@@ -157,12 +157,24 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
     })
   }
 
-  function confirmRemoveShapefile(id) {
-    const set = shapefiles.value.find((s) => s.id === id)
+  function confirmRemoveVectorSet(id) {
+    const set = vectorSets.value.find((s) => s.id === id)
+    const noun = set?.kind === 'lines' ? 'line' : 'polygon'
     askConfirm({
-      title: 'Remove shapefile?',
-      message: `Remove “${set?.name ?? 'this layer'}” and its ${pluralize(set?.footprints.length ?? 0, 'polygon')}? This can't be undone.`,
+      title: 'Remove layer?',
+      message: `Remove “${set?.name ?? 'this layer'}” and its ${pluralize(set?.footprints.length ?? 0, noun)}? This can't be undone.`,
       onConfirm: () => footprintsStore.removeSet(id),
+    })
+  }
+
+  // The image footprints (map right-click); Footprints from poses builds them again.
+  function confirmRemoveFootprints() {
+    const set = footprintSet.value
+    if (!set) return
+    askConfirm({
+      title: 'Remove footprints?',
+      message: `Remove the ${pluralize(set.footprints.length, 'image footprint')}? Tools ▸ Model ▸ Footprints from poses computes them again.`,
+      onConfirm: () => footprintsStore.removeSet(set.id),
     })
   }
 
@@ -206,7 +218,8 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
     confirmRemoveRaster,
     confirmRemoveGcp,
     confirmRemoveGcpObservation,
-    confirmRemoveShapefile,
+    confirmRemoveVectorSet,
+    confirmRemoveFootprints,
     confirmClearKeypoints,
     confirmRemoveMatches,
   }

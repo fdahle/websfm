@@ -17,7 +17,7 @@ export function useWorkspaceState() {
   const imagesStore = useImagesStore()
   const { images, selectedId, keypointReadyImages } = storeToRefs(imagesStore)
   const { matchStore } = storeToRefs(useMatchesStore())
-  const { sets: shapefiles } = storeToRefs(useFootprintsStore())
+  const { sets: vectorSets, footprintSet } = storeToRefs(useFootprintsStore())
   const { sensors } = storeToRefs(useSensorsStore())
   const { poses } = storeToRefs(usePosesStore())
   const { clouds, sparseCameras, mainSparseCloud, dem, ortho } = storeToRefs(useReconstructionStore())
@@ -30,8 +30,8 @@ export function useWorkspaceState() {
     () => images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount || 0) > 0).length,
   )
 
-  // Total polygons across all sets — gates the ribbon's footprint layer toggle.
-  const footprintCount = computed(() => shapefiles.value.reduce((n, s) => n + s.footprints.length, 0))
+  // The image footprints' polygon count — gates the ribbon's Footprints toggle and export.
+  const footprintCount = computed(() => footprintSet.value?.footprints.length ?? 0)
 
   // Sensor ids whose intrinsics fall back to the default-FOV guess for at least one
   // assigned image (or, with no images, on their own) — i.e. no usable calibration.
@@ -61,7 +61,7 @@ export function useWorkspaceState() {
   const footprintImageCount = computed(() => {
     const ids = new Set(images.value.map((i) => i.id))
     const withFp = new Set()
-    for (const s of shapefiles.value)
+    for (const s of vectorSets.value)
       for (const fp of s.footprints) if (fp.imageId && ids.has(fp.imageId)) withFp.add(fp.imageId)
     return withFp.size
   })

@@ -98,13 +98,15 @@ export function linkedImageOf(feature, images) {
  * Cameras split by where their position came from, as their colour does: EXIF
  * (blue), imported (purple), or the sparse model on the model map (purple). Image
  * GPS circles are drawn only for images without a camera position. A layer switched
- * off in the ribbon leaves the legend too.
+ * off in the ribbon leaves the legend too. `footprints` is the footprint overlay;
+ * `vectorLayers` the vector layers in the stack ([{ kind: 'lines' | 'polygons' }]).
  */
 export function mapLegend({
   gpsImages = [],
   poses = [],
   gcps = [],
   footprints = [],
+  vectorLayers = [],
   showCameras = true,
   showGcps = true,
   showFootprints = true,
@@ -123,9 +125,8 @@ export function mapLegend({
     if (roles.has('check')) out.push({ kind: 'gcp-check', label: 'Check point' })
     if (roles.has('marker')) out.push({ kind: 'marker', label: 'Marker' })
   }
-  if (showFootprints) {
-    if (footprints.some((f) => f.rings?.length)) out.push({ kind: 'footprint', label: 'Footprint' })
-    if (footprints.some((f) => f.lines?.length)) out.push({ kind: 'contour', label: 'Contours' })
-  }
+  if (showFootprints && footprints.length) out.push({ kind: 'footprint', label: 'Footprint' })
+  if (vectorLayers.some((l) => l.kind === 'polygons')) out.push({ kind: 'footprint', label: 'Polygons' })
+  if (vectorLayers.some((l) => l.kind === 'lines')) out.push({ kind: 'contour', label: 'Contours' })
   return out
 }

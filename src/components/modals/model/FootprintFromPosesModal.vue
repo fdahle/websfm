@@ -236,7 +236,9 @@ function run() {
         angles</label
       >
     </SettingsField>
-    <p class="intro">Runs into one “footprints” layer under Shapefiles, replacing any previous computed one.</p>
+    <p class="intro">
+      The footprints are drawn on the map (View ▸ Map ▸ Footprints shows and hides them); a new run replaces them.
+    </p>
 
     <p v-if="geographicCrs" class="intro">
       Working CRS {{ projectCrs }} is geographic — footprints are computed in a local metric frame and stored back in

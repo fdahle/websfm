@@ -127,3 +127,64 @@ test('View ▸ Map ▸ GCPs hides the GCP symbols', async ({ page }) => {
   await expect.poll(gcpLayerVisible).toBe(false)
   await expect(gcps).not.toHaveClass(/active/)
 })
+
+test('contours are a layer in the stack; View ▸ Map ▸ Footprints hides only the footprints', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await page.evaluate(async () => {
+    const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+    const { useFootprintsStore } = await import('/src/stores/useFootprintsStore.js')
+    const projects = useProjectsStore()
+    await projects.setProjectCrs(projects.currentProjectId, 'EPSG:32632')
+    const store = useFootprintsStore()
+    const ring = [
+      [500000, 5000000],
+      [500020, 5000000],
+      [500020, 5000020],
+    ]
+    await store.addLineSet([{ path: ring, level: 5, index: false }], 'EPSG:32632', 'Contours 5 m')
+    store.sets.push({
+      id: 'fp',
+      name: 'footprints',
+      source: 'computed',
+      visible: true,
+      footprints: [{ id: 'a', imageName: 'IMG_1.jpg', rings: [ring] }],
+    })
+  })
+  await page.locator('.tab', { hasText: /^2D$/ }).click()
+
+  // [footprint overlay visible, vector layers in the stack and their visibility]
+  const state = () =>
+    page.locator('.map-viewer').evaluate((el) => {
+      const ctx = el.__vueParentComponent.setupState.ctx
+      const group = ctx.map
+        .getLayers()
+        .getArray()
+        .find((l) => l.getLayers)
+      const vectors = group
+        .getLayers()
+        .getArray()
+        .filter((l) => l.get('vector'))
+      return [ctx.footprintLayer.getVisible(), vectors.map((l) => l.getVisible())]
+    })
+  await expect.poll(state).toEqual([true, [true]])
+  await expect(page.locator('.legend')).toContainText('Footprint')
+  await expect(page.locator('.legend')).toContainText('Contours')
+
+  await page.locator('.ribbon').getByRole('button', { name: 'View', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'Footprints', exact: true }).click()
+  await expect.poll(state).toEqual([false, [true]])
+  await expect(page.locator('.legend')).not.toContainText('Footprint')
+  await expect(page.locator('.legend')).toContainText('Contours')
+
+  // The contours have their own row in the Layers panel, and none for the footprints.
+  await page.locator('.ribbon').getByRole('button', { name: 'Layers', exact: true }).click()
+  const list = page.getByRole('list', { name: 'Map layers, top first' })
+  await expect(list.locator('.item-name')).toHaveText(['Contours 5 m'])
+  await list.getByRole('checkbox', { name: 'Show Contours 5 m on the map' }).uncheck()
+  await expect.poll(state).toEqual([false, []])
+  expect(errors).toEqual([])
+})

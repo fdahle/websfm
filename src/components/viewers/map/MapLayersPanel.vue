@@ -4,20 +4,24 @@ import { storeToRefs } from 'pinia'
 import FloatingToolbox from '../FloatingToolbox.vue'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
+import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
 import { productLabel, productMapBlocker } from '../../../core/products/productLayers.js'
 import { mapLayerIds, moveMapLayer } from '../../../core/products/mapOrder.js'
+import { isFootprintSet, vectorKind, vectorLayerId } from '../../../core/products/vectorLayers.js'
 
-// View ▸ Map ▸ Layers: a floating panel over the 2D map listing every raster the map
+// View ▸ Map ▸ Layers: a floating panel over the 2D map listing every layer the map
 // can draw, in one stack whatever sidebar section it lives in: the imported reference
-// rasters and the computed DEM / orthophoto. Top of the list draws on top
-// (core/products/mapOrder.js); a row is dragged (or moved with ↑ ↓) to restack, and
-// carries the same map checkbox and opacity as its own sidebar row. Vectors
-// (contours, footprints, GCPs, cameras) always draw above every raster.
+// rasters and polygon files, the computed DEM / orthophoto and the contour lines. Top
+// of the list draws on top (core/products/mapOrder.js); a row is dragged (or moved
+// with ↑ ↓) to restack, and carries the same map checkbox and opacity as its own
+// sidebar row. The markers (footprints, GCPs, cameras) always draw above the stack.
 const emit = defineEmits(['close'])
 const external = useExternalStore()
 const { rasters } = storeToRefs(external)
 const recon = useReconstructionStore()
 const { dem, ortho, productLayers, mapOrder } = storeToRefs(recon)
+const vectors = useFootprintsStore()
+const { sets: vectorSets } = storeToRefs(vectors)
 
 const canMapRaster = (r) => !!r.previewDataUrl && !!r.crs && !r.crsUnresolved
 const kindLabel = (k) => (k === 'dem' ? 'DEM' : 'Ortho')
@@ -54,10 +58,23 @@ const rowsById = computed(() => {
       fade: (opacity) => recon.setProductOpacity(kind, opacity),
     })
   }
+  for (const s of vectorSets.value) {
+    if (isFootprintSet(s)) continue
+    rows.set(vectorLayerId(s.id), {
+      id: vectorLayerId(s.id),
+      name: s.name,
+      badge: vectorKind(s) === 'lines' ? 'Lines' : 'Polygons',
+      visible: s.visible !== false,
+      opacity: s.opacity ?? 1,
+      blocked: '',
+      set: (visible) => vectors.setSetVisible(s.id, visible),
+      fade: (opacity) => vectors.setSetOpacity(s.id, opacity),
+    })
+  }
   return rows
 })
 // Top first. The default order (bottom first) is the reference rasters, then the DEM,
-// then the orthophoto: what the map drew before anything was reordered.
+// the orthophoto and the vector layers: what the map draws before anything is reordered.
 const ids = computed(() => mapLayerIds([...rowsById.value.keys()], mapOrder.value))
 const rows = computed(() => ids.value.map((id) => rowsById.value.get(id)))
 
@@ -97,7 +114,7 @@ function onDragEnd() {
     @close="emit('close')"
   >
     <p v-if="!rows.length" class="layer-note">
-      Nothing to stack yet: build a DEM or an orthophoto, or import a raster.
+      Nothing to stack yet: build a DEM, an orthophoto or contours, or import a raster or a polygon file.
     </p>
     <ul v-else class="item-list" aria-label="Map layers, top first">
       <li
@@ -164,9 +181,7 @@ function onDragEnd() {
           <span class="opacity-pct">{{ Math.round(row.opacity * 100) }}%</span>
         </div>
       </li>
-      <li class="layer-note">
-        Top draws on top. Contours, footprints, GCPs and cameras always draw above the rasters.
-      </li>
+      <li class="layer-note">Top draws on top. Footprints, GCPs and cameras always draw above the layers.</li>
     </ul>
   </FloatingToolbox>
 </template>

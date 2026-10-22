@@ -165,7 +165,8 @@ test('contours of a georeferenced DEM go on the map as a line layer', async ({ p
       levels: [...new Set(set.footprints.map((f) => f.level))].sort((a, b) => a - b),
       index: set.footprints.filter((f) => f.index).map((f) => f.level),
       minX: Math.min(...xs),
-      onMap: useFootprintsStore().mapPolygons.length === set.footprints.length,
+      // A layer of its own, not part of the footprint overlay.
+      onMap: set.visible !== false && useFootprintsStore().footprintPolygons.length === 0,
     }
   })
   expect(layer.name).toBe('Contours 5 m')
@@ -177,8 +178,8 @@ test('contours of a georeferenced DEM go on the map as a line layer', async ({ p
   expect(layer.onMap).toBe(true)
   expect(downloaded).toBe(false)
 
-  // The sidebar row: a map checkbox, and a GeoJSON download of the lines.
-  await page.getByRole('button', { name: /Shapefiles/ }).click()
+  // The row in Products: a map checkbox, and a GeoJSON download of the lines.
+  await page.locator('.section-hd', { hasText: 'Products' }).click()
   await expect(page.getByRole('checkbox', { name: 'Show Contours 5 m on the map' })).toBeChecked()
   await page.locator('.item-name', { hasText: 'Contours 5 m' }).click({ button: 'right' })
   const geo = await download(page, () => page.getByRole('button', { name: 'Download GeoJSON' }).click())

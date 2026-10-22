@@ -138,12 +138,12 @@ map draws the DEM's hillshade preview under GCPs and footprints, and by default 
 imported reference rasters (see Layers below); **Fit View** includes it. With the cursor over it, the map's status
 bar shows the height of the cell under the cursor, and "no data" over a hole.
 
-When several rasters are on the map, **View ▸ Map ▸ Layers** opens a small panel over
-the map that lists them all in one stack, imported reference rasters included: the top
-of the list draws on top. Drag a row by ⠿ (or use ▲ ▼) to restack, tick it to show it,
-and use its slider to fade it; the order is saved with the project. Contours,
-footprints, GCPs and cameras always draw above the rasters; **View ▸ Map ▸ GCPs** hides
-the GCP symbols (they stay while you edit GCPs).
+When several layers are on the map, **View ▸ Map ▸ Layers** opens a small panel over
+the map that lists them all in one stack: imported reference rasters, contour lines and
+polygon files included. The top of the list draws on top. Drag a row by ⠿ (or use ▲ ▼)
+to restack, tick it to show it, and use its slider to fade it; the order is saved with
+the project. Footprints, GCPs and cameras always draw above the layers; **View ▸ Map ▸
+GCPs** hides the GCP symbols (they stay while you edit GCPs).
 
 The 2D map has two frames, switched with **View ▸ Map ▸ Model Frame**:
 - **Project CRS** (Model Frame off): the basemap, GPS positions, GCPs, footprints,
@@ -332,9 +332,9 @@ orthophoto. None of them changes the stored product.
 
 - **Contours…** traces contour lines at an interval in the DEM's vertical unit
   (*0* picks a round interval for about 25 levels) and adds them to the 2D map as a
-  layer in the sidebar's **Shapefiles** section, the index contours drawn heavier.
-  Its checkbox shows and hides it, and its right-click menu zooms to it or downloads
-  it as GeoJSON. **Download** also saves them straight away as **GeoJSON** (GIS) or
+  layer, listed in the sidebar's **Products** section and in **View ▸ Map ▸ Layers**,
+  the index contours drawn heavier. Its checkbox shows and hides it, and its
+  right-click menu zooms to it or downloads it as GeoJSON. **Download** also saves them straight away as **GeoJSON** (GIS) or
   **DXF** (CAD, with index contours on their own layer). A DEM without a coordinate
   system cannot go on the map's layers, so its contours are always downloaded. Lines
   stop at nodata holes rather than cutting across them. Smoothing passes round the
