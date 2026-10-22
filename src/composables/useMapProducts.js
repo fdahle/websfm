@@ -15,6 +15,7 @@ import { demRef } from '../core/products/demWindow.js'
 import { readDemWindow } from '../workers/computeClient.js'
 import { stackMapLayers } from '../core/products/mapOrder.js'
 import { vectorMapLayers } from '../core/products/vectorLayers.js'
+import { IMAGE_LAYER_ID, imageOverlayItems } from '../core/products/imageOverlay.js'
 
 // What the 2D map shows, in which frame (CLAUDE.md ▸ map raster layers).
 //
@@ -146,21 +147,46 @@ export function useMapProducts() {
       .filter(shown),
   )
 
+  // View ▸ Map ▸ Photos: the source images drawn into their footprints
+  // (core/products/imageOverlay.js), as one entry of the stack. `items` is a function
+  // so the map's deep watch never walks the quads; `rev` changes with what is drawn.
+  const photosLayer = computed(() => {
+    const state = recon.imageLayer
+    if (!state?.visible || hidden.value.has(IMAGE_LAYER_ID)) return null
+    const items = imageOverlayItems(footprintsStore.footprintPolygons, imagesStore.images, {
+      mode: state.mode,
+      selectedId: imagesStore.selectedId,
+    })
+    return {
+      id: IMAGE_LAYER_ID,
+      images: true,
+      name: 'Photos',
+      opacity: state.opacity ?? 1,
+      rev: items.map((i) => `${i.imageId}:${i.url}:${i.quad.flat().join(',')}`).join('|'),
+      items: () => items,
+      request: (id) => {
+        const img = imagesStore.images.find((i) => i.id === id)
+        if (img) imagesStore.requestThumbnail(img)
+      },
+    }
+  })
+
   // Bottom first, in the order View ▸ Map ▸ Layers sets (core/products/mapOrder.js).
-  // Vector layers are in the project CRS, so only the CRS map has them.
+  // Vector layers and photos are in the project CRS, so only the CRS map has them.
   const mapLayers = computed(() =>
     stackMapLayers(
       mode.value === 'crs'
         ? [
             ...external.mapRasters.filter(shown),
             ...productMapLayers.value,
+            ...(photosLayer.value ? [photosLayer.value] : []),
             ...vectorMapLayers(footprintsStore.sets).filter(shown),
           ]
         : productMapLayers.value,
       recon.mapOrder,
     ),
   )
-  const rasterMapLayers = computed(() => mapLayers.value.filter((l) => !l.vector))
+  const rasterMapLayers = computed(() => mapLayers.value.filter((l) => !l.vector && !l.images))
 
   // One line per thing the user asked for that this frame cannot show, so an
   // layer put "In Layers" never silently fails to appear.

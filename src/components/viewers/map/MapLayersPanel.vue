@@ -6,16 +6,19 @@ import Icon from '../../Icon.vue'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
+import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { useMapSettings } from '../../../composables/useMapSettings.js'
 import { BASEMAPS } from '../../../core/basemaps.js'
 import { productLabel, productMapBlocker } from '../../../core/products/productLayers.js'
 import { mapLayerIds, moveMapLayer } from '../../../core/products/mapOrder.js'
 import { isFootprintSet, vectorKind, vectorLayerId } from '../../../core/products/vectorLayers.js'
+import { IMAGE_LAYER_ID } from '../../../core/products/imageOverlay.js'
 
 // View ▸ Map ▸ Layers: the layers on the 2D map, as a GIS's layer list. The sidebar
 // is the catalogue of everything the project holds; a layer is put on the map (and so
-// listed here) with its sidebar checkbox or In Layers on its ribbon tab, and a newly
-// built DEM, orthophoto or contour set is put there on its own. Here the stack is
+// listed here) with its sidebar checkbox or In Layers on its ribbon tab (the photos
+// with View ▸ Map ▸ Photos), and a newly built DEM, orthophoto or contour set is put
+// there on its own. Here the stack is
 // arranged, whatever sidebar section a layer lives in:
 //   • a row's checkbox hides the layer for a while and keeps it listed
 //     (useReconstructionStore.mapHidden); its ✕ takes it off the map;
@@ -29,14 +32,16 @@ const emit = defineEmits(['close', 'zoom-to'])
 const external = useExternalStore()
 const { rasters } = storeToRefs(external)
 const recon = useReconstructionStore()
-const { dem, ortho, productLayers, mapOrder, mapHidden } = storeToRefs(recon)
+const { dem, ortho, productLayers, mapOrder, mapHidden, imageLayer } = storeToRefs(recon)
+const { selectedId: selectedImageId } = storeToRefs(useImagesStore())
 const vectors = useFootprintsStore()
 const { sets: vectorSets } = storeToRefs(vectors)
 const { basemap, setBasemap } = useMapSettings()
 
 const canMapRaster = (r) => !!r.previewDataUrl && !!r.crs && !r.crsUnresolved
 
-// One row per layer on the map: { id, name, icon, kind, opacity, blocked, remove(), fade(opacity) }.
+// One row per layer on the map: { id, name, icon, kind, opacity, blocked, remove(),
+// fade(opacity) }, and the Photos row's `mode` (which photos it draws).
 const rowsById = computed(() => {
   const rows = new Map()
   for (const r of rasters.value) {
@@ -83,10 +88,24 @@ const rowsById = computed(() => {
       fade: (opacity) => vectors.setSetOpacity(s.id, opacity),
     })
   }
+  if (imageLayer.value?.visible) {
+    rows.set(IMAGE_LAYER_ID, {
+      id: IMAGE_LAYER_ID,
+      name: 'Photos',
+      icon: 'image',
+      kind: 'Source images in their footprints',
+      opacity: imageLayer.value.opacity ?? 1,
+      blocked: '',
+      mode: imageLayer.value.mode,
+      remove: () => recon.setImageLayer({ visible: false }),
+      fade: (opacity) => recon.setImageLayer({ opacity }),
+    })
+  }
   return rows
 })
 // Top first. The default order (bottom first) is the reference rasters, then the DEM,
-// the orthophoto and the vector layers: what the map draws before anything is reordered.
+// the orthophoto, the photos and the vector layers: what the map draws before anything
+// is reordered.
 const ids = computed(() => mapLayerIds([...rowsById.value.keys()], mapOrder.value))
 const hidden = computed(() => new Set(mapHidden.value))
 const rows = computed(() => ids.value.map((id) => ({ ...rowsById.value.get(id), shown: !hidden.value.has(id) })))
@@ -229,6 +248,21 @@ function onDragEnd() {
           Zoom to
         </button>
       </div>
+      <div v-if="selected.mode" class="settings-row">
+        <label for="map-layers-photos" class="basemap-label">Show</label>
+        <select
+          id="map-layers-photos"
+          class="basemap-select"
+          :value="selected.mode"
+          @change="recon.setImageLayer({ mode: $event.target.value })"
+        >
+          <option value="selected">The selected image</option>
+          <option value="all">Every image (thumbnails)</option>
+        </select>
+      </div>
+      <p v-if="selected.mode === 'selected' && !selectedImageId" class="settings-hint">
+        Click a footprint (or an image in the sidebar) to show its photo.
+      </p>
     </div>
 
     <!-- The basemap draws under every layer, so it is the list's fixed last row. -->
@@ -343,6 +377,11 @@ function onDragEnd() {
   color: var(--text-dim);
   cursor: default;
   text-decoration: none;
+}
+.settings-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 .basemap-row {
   display: flex;

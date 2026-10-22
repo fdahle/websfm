@@ -141,8 +141,8 @@ footprints, and by default above imported reference rasters (see Layers below);
 height of the cell under the cursor, and "no data" over a hole.
 
 **View ▸ Map ▸ Layers** opens a small panel over the map that lists the layers on it
-in one stack, as a GIS does: imported reference rasters, contour lines and polygon
-files included. The sidebar holds everything in the project; the panel only what you
+in one stack, as a GIS does: imported reference rasters, contour lines, polygon files
+and the photos (**View ▸ Map ▸ Photos**) included. The sidebar holds everything in the project; the panel only what you
 put on the map. The top of the list draws on top: drag a row by ⠿ (or use ▲ ▼) to
 restack. A row's checkbox hides the layer for a while and keeps it in the list; its
 ✕ takes it off the map. Click a row to set its **Opacity** or **Zoom to** it in the

@@ -24,6 +24,13 @@ Notable changes to websfm. The format follows
   named as before, and the field shows that name; a typed one names every file the
   export writes, the .wld / .prj beside an image included. Cloud names in file names
   keep letters of any script now (Süd, not S_d).
+- **Photos on the map (View ▸ Map ▸ Photos).** The source images are drawn on the 2D
+  map, each warped into its footprint from Footprints from poses (a projective map of
+  the image onto the footprint's corners, drawn as a mesh of triangles), to check a
+  camera's position and angles at a glance and see the area before reconstructing.
+  The Photos layer sits in the Layers panel with an opacity and a choice between the
+  selected image (the default, from its display image) and every image (from the
+  thumbnails); only the photos in view are drawn.
 - **Contours go on the map.** Tools ▸ Products ▾ ▸ Contours adds the lines to the 2D
   map as a layer of its own, listed in the sidebar's Products section and in the Layers
   panel (index contours heavier, the height in the hover label, "Contours" in the

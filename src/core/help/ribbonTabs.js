@@ -859,6 +859,8 @@ export const MAP_GROUP = {
       activeKey: 'showFootprints',
       needs: ['footprints'],
     },
+    // The source images drawn into their footprints: a layer of the stack (Layers).
+    { id: 'map-toggle-photos', label: 'Photos', icon: 'image', activeKey: 'showMapPhotos', needs: ['footprints'] },
     // `map-basemap:<value>` rows pick the base layer (core/basemaps.js); App
     // dispatches the prefix. A layer the frame cannot show is greyed with its reason.
     {

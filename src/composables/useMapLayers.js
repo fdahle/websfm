@@ -14,7 +14,9 @@
 //     reason the sampler reprojects the query instead of warping the raster.
 //
 // A vector entry (`vector: true`, core/products/vectorLayers.js) is in the project
-// CRS, the view's, and becomes an OpenLayers vector layer at its place in the stack.
+// CRS, the view's, and becomes an OpenLayers vector layer at its place in the stack;
+// the Photos entry (`images: true`) a canvas layer drawing the source images into
+// their footprints (components/viewers/map/mapImageLayer.js).
 //
 // Lifecycle (driven by ViewerMap's build/destroy): `createGroup()` per build,
 // before the map exists; `sync()` whenever `layers()` changes; `dispose()` on
@@ -33,6 +35,7 @@ import { ensureProjection } from '../core/crs.js'
 import { rasterBounds } from '../core/io/rasterSample.js'
 import { makeFootprintFeature } from '../components/viewers/map/mapFeatures.js'
 import { footprintStyle } from '../components/viewers/map/mapStyles.js'
+import { createImageOverlay } from '../components/viewers/map/mapImageLayer.js'
 
 /**
  * `ctx`: the map context (components/viewers/map/mapContext.js). `layers()`: the
@@ -64,8 +67,24 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
     layer.set('rev', v.rev)
   }
 
+  // The Photos layer, carrying its overlay handle (items, extent, dispose).
+  function makeImagesLayer(entry) {
+    const overlay = createImageOverlay({ opacity: entry.opacity ?? 1, request: entry.request })
+    overlay.setItems(entry.items())
+    overlay.layer.set('overlay', overlay)
+    overlay.layer.set('rev', entry.rev)
+    return overlay.layer
+  }
+
+  // Every layer leaves through here: the Photos layer releases its decoded images.
+  function disposeLayer(layer) {
+    layer?.get('overlay')?.dispose()
+    disposeRasterLayer(layer)
+  }
+
   async function makeRasterLayer(r) {
     if (r.vector) return makeVectorLayer(r)
+    if (r.images) return makeImagesLayer(r)
     // An imported raster draws its tiled display file; a computed ortho (`product:
     // true`, core/products/productLayers.js) its stored COG when the layer carries one.
     // A computed DEM, or a product the COG cannot place here, draws its preview.
@@ -157,6 +176,13 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
           }
           continue
         }
+        if (r.images) {
+          if (existing.get('rev') !== r.rev) {
+            existing.get('overlay').setItems(r.items())
+            existing.set('rev', r.rev)
+          }
+          continue
+        }
         if (existing.get('gpuRaster')) {
           // A GPU layer restyles in place while it draws the same file; a rebuilt
           // product (new fileKey), or one that must now draw its preview, is rebuilt.
@@ -175,19 +201,19 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
           // down, which is exactly the "reload the view to see it" bug.
           continue
         }
-        disposeRasterLayer(existing)
+        disposeLayer(existing)
         layers.delete(r.id)
       }
       const layer = await makeRasterLayer(r)
       if (run !== generation || !ctx.map) {
-        disposeRasterLayer(layer)
+        disposeLayer(layer)
         return
       }
       if (layer) layers.set(r.id, layer)
     }
     for (const [id, layer] of [...layers]) {
       if (seen.has(id)) continue
-      disposeRasterLayer(layer)
+      disposeLayer(layer)
       layers.delete(id)
     }
 
@@ -205,7 +231,7 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
    */
   function dispose() {
     generation++
-    for (const layer of layers.values()) disposeRasterLayer(layer)
+    for (const layer of layers.values()) disposeLayer(layer)
     layers.clear()
     group = null
   }
@@ -215,6 +241,7 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
   // does not know is skipped rather than guessed. A vector layer is in the view's CRS
   // already.
   function extentOfEntry(r) {
+    if (r.images) return layers.get(r.id)?.get('overlay').extent() ?? null
     if (r.vector) {
       const e = layers.get(r.id)?.getSource().getExtent()
       return e && Number.isFinite(e[0]) ? e : null

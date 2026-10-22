@@ -131,6 +131,7 @@ const VIEW_KEYS = new Set([
   'showMapGcps',
   'mapLayersPanel',
   'showFootprints',
+  'showMapPhotos',
   'selectRect',
   'selectLasso',
   'mapModelFrame',

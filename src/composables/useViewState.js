@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
+import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { crsInfo } from '../core/crs.js'
 import { BASEMAPS, basemapReason } from '../core/basemaps.js'
 import { useMapSettings } from './useMapSettings.js'
@@ -8,22 +9,22 @@ import { useViewerSettings } from './useViewerSettings.js'
 
 // The views' display toggles and ribbon-entered modes, lifted out of App.vue, plus
 // the one object the ribbon's View tab reads to show what is on. Session state
-// (not persisted), unlike the point size, camera scale and basemap it also reports.
+// (not persisted), unlike the point size, camera scale, basemap and Photos layer it
+// also reports.
 //
 // Injected from useMapProducts: mapMode, mapFrame (the map's current frame).
 export function useViewState({ mapMode, mapFrame }) {
   const { currentCrs } = storeToRefs(useProjectsStore())
+  const { imageLayer } = storeToRefs(useReconstructionStore())
 
   // ── 3D scene display toggles ───────────────────────────────────────────────────
   const showCameras = ref(true)
   const showGrid = ref(true)
   const showLegend = ref(false)
   // ── Map display toggles ────────────────────────────────────────────────────────
-  // The footprint layer master toggle (ribbon). Defaults on so a freshly computed
-  // or imported shapefile set is visible immediately; per-set visibility is the
-  // finer control (each set's `visible` flag, toggled from its sidebar row). The
-  // layer only ever holds polygons from sets the user has kept on the map, so this
-  // no longer clutters a bare basemap.
+  // The image footprints overlay (ribbon). Defaults on so freshly computed footprints
+  // are visible at once. Contour and polygon layers are not footprints: they are
+  // shown and hidden as layers (View ▸ Map ▸ Layers).
   const showFootprints = ref(true)
   const showMapGrid = ref(true)
   // Camera positions on the map: pose markers (imported / EXIF, or the SfM centres in
@@ -57,6 +58,8 @@ export function useViewState({ mapMode, mapFrame }) {
     mapLayersPanel: mapLayersPanel.value,
     mapModelFrame: mapMode.value === 'model',
     showFootprints: showFootprints.value,
+    // A layer of the stack, persisted with the project (useReconstructionStore).
+    showMapPhotos: !!imageLayer.value?.visible,
     pointSize: pointSize.value,
     cameraScale: cameraScale.value,
     selectRect: selectTool3d.value === 'rect',

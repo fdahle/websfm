@@ -16,6 +16,7 @@ import { yieldToPaint } from '../utils/concurrency.js'
 import { normalizeRegion, regionStatus, regionMask } from '../core/products/region.js'
 import { normalizeProductLayers, productMapBlocker } from '../core/products/productLayers.js'
 import { normalizeMapOrder } from '../core/products/mapOrder.js'
+import { IMAGE_LAYER_ID, normalizeImageLayer } from '../core/products/imageOverlay.js'
 import { selectPoints } from '../core/products/cloudEdit.js'
 import { normalizeOrientation, orientationStatus, orientationBasis } from '../core/products/orientation.js'
 import { formatBytes } from '../core/dense/memBudget.js'
@@ -291,6 +292,16 @@ export const useReconstructionStore = registerProjectStore(
       mapHidden.value = next
       save()
     }
+    // The Photos layer (View ▸ Map ▸ Photos, core/products/imageOverlay.js):
+    // { visible, opacity, mode: 'selected' | 'all' }, null until first put on the map.
+    const imageLayer = ref(null)
+    function setImageLayer(patch) {
+      const next = normalizeImageLayer({ visible: false, opacity: 1, mode: 'selected', ...imageLayer.value, ...patch })
+      // Put back on the map, it is listed ticked, as any layer added from the sidebar.
+      if (next.visible && !imageLayer.value?.visible) setMapLayerHidden(IMAGE_LAYER_ID, false)
+      imageLayer.value = next
+      save()
+    }
 
     let cloudSeq = 0
     const makeCloudId = () => `cloud-${Date.now()}-${cloudSeq++}`
@@ -523,6 +534,7 @@ export const useReconstructionStore = registerProjectStore(
         productLayers: productLayers.value,
         mapOrder: mapOrder.value,
         mapHidden: mapHidden.value,
+        imageLayer: imageLayer.value,
         // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
         summary: summary.value,
         denseSummary: denseSummary.value,
@@ -997,6 +1009,7 @@ export const useReconstructionStore = registerProjectStore(
       productLayers.value = {}
       mapOrder.value = []
       mapHidden.value = []
+      imageLayer.value = null
       summary.value = null
       denseSummary.value = null
       depthSummary.value = null
@@ -1128,6 +1141,7 @@ export const useReconstructionStore = registerProjectStore(
       productLayers.value = normalizeProductLayers(data.productLayers) // absent ⇒ nothing on the map
       mapOrder.value = normalizeMapOrder(data.mapOrder) // absent ⇒ the default stack
       mapHidden.value = normalizeMapOrder(data.mapHidden) // a list of ids, as the order
+      imageLayer.value = normalizeImageLayer(data.imageLayer)
       summary.value = data.summary ?? null
       denseSummary.value = data.denseSummary ?? null
       depthSummary.value = data.depthSummary ?? null
@@ -1292,6 +1306,8 @@ export const useReconstructionStore = registerProjectStore(
       setMapOrder,
       mapHidden,
       setMapLayerHidden,
+      imageLayer,
+      setImageLayer,
       // Triangulated marker positions (SfM frame) for the model-frame map.
       markerPositions,
     }

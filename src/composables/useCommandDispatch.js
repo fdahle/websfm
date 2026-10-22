@@ -434,6 +434,12 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'map-toggle-layers':
         mapLayersPanel.value = !mapLayersPanel.value
         break
+      // Puts the Photos layer on the map (into Layers) or takes it off.
+      case 'map-toggle-photos': {
+        const recon = useReconstructionStore()
+        recon.setImageLayer({ visible: !recon.imageLayer?.visible })
+        break
+      }
       // Tools ▸ Images ▾ ▸ Edit GCPs: the mode of the view in front.
       case 'edit-gcps':
         if (activeView.value === 'map') mapGcpEdit.value = !mapGcpEdit.value

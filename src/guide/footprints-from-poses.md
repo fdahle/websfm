@@ -16,6 +16,17 @@ them. The map opens on them, so footprints that land in the wrong place are obvi
 once. **View ▸ Map ▸ Footprints** shows and hides them, an image's expanded row in the
 sidebar says whether it has one, and a right-click on a footprint (or **Export ▸
 Footprints**) downloads them as GeoJSON or removes them.
+
+**View ▸ Map ▸ Photos** draws the images themselves on the map, each stretched into
+its footprint the way a flat-ground projection of the photo would land: the corners
+on the footprint's corners, the far side of a tilted view compressed as in the photo.
+It is a quick check that a camera's position and angles are right, and a rough
+picture of the area before any reconstruction; it is not an orthophoto, so relief
+leans and the photos do not join up exactly. The photos are a layer in **View ▸ Map
+▸ Layers**, where the selected row chooses what is drawn: **The selected image**
+(click a footprint or an image in the sidebar; the default) or **Every image**, from
+the small thumbnails. Fade them there, or switch the footprints off to see them
+untinted.
 [Preselect by footprint overlap](guide:match-features) uses them to choose which
 image pairs to match.
 
