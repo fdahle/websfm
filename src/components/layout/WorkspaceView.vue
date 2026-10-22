@@ -68,6 +68,8 @@ const {
   showFootprints,
   showMapGrid,
   showMapCameras,
+  showMapGcps,
+  mapLayersPanel,
   selectTool3d,
   turntable3d,
   mapGcpEdit,
@@ -395,6 +397,8 @@ onBeforeUnmount(() => {
         :show-footprints="showFootprints"
         :show-grid="showMapGrid"
         :show-cameras="showMapCameras"
+        :show-gcps="showMapGcps"
+        :show-layers-panel="mapLayersPanel"
         :rasters="mapLayers"
         :probe-raster="probeMapLayersAt"
         :model-frame="mapFrame"

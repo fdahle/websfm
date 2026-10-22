@@ -40,6 +40,7 @@ test('the turntable turns the view and records one turn', async ({ page }) => {
   await turntable.click()
   const toolbox = page.locator('.viewer').getByText('Seconds per turn')
   await expect(toolbox).toBeVisible()
+  await expect(turntable).toHaveClass(/active/)
 
   const before = await heading()
   await page.waitForTimeout(800)
@@ -61,6 +62,7 @@ test('the turntable turns the view and records one turn', async ({ page }) => {
   // The ribbon button turns it off again, and the view stays where it stopped.
   await turntable.click()
   await expect(toolbox).toHaveCount(0)
+  await expect(turntable).not.toHaveClass(/active/)
   const stopped = await heading()
   await page.waitForTimeout(400)
   expect(Math.abs((await heading()) - stopped)).toBeLessThan(1e-3)

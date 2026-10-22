@@ -49,6 +49,7 @@ import { online } from '../../composables/useOnlineStatus.js'
 import { makeGridLayer } from './map/mapGridLayer.js'
 import ViewerContextMenu from './ViewerContextMenu.vue'
 import GcpToolbar from './GcpToolbar.vue'
+import MapLayersPanel from './map/MapLayersPanel.vue'
 import RasterMeasurements from './RasterMeasurements.vue'
 
 // Module map (this file keeps the lifecycle, interactions and watchers):
@@ -80,6 +81,10 @@ const props = defineProps({
   showGrid: { type: Boolean, default: true },
   // Camera positions: the pose layer and the GPS markers of images without a pose.
   showCameras: { type: Boolean, default: true },
+  // GCP / marker symbols (View ▸ Map ▸ GCPs); always shown while GCPs are edited.
+  showGcps: { type: Boolean, default: true },
+  // The floating Layers panel (View ▸ Map ▸ Layers); its × sends the same command.
+  showLayersPanel: { type: Boolean, default: false },
   // Raster layers flagged "On map", in the order they should stack: imported
   // reference rasters and computed DEM/ortho (`product: true`) alike
   // (composables/useMapProducts.js). Metadata only — see useMapRasterLayers.
@@ -423,7 +428,7 @@ async function build() {
     style: (f) => poseStyle(f, props.selectedId),
     visible: props.showCameras,
   })
-  ctx.gcpLayer = new VectorLayer({ source: ctx.gcpSource, style: gcpStyle })
+  ctx.gcpLayer = new VectorLayer({ source: ctx.gcpSource, style: gcpStyle, visible: gcpsVisible.value })
 
   ctx.grid = makeGridLayer(info, projection, props.showGrid)
 
@@ -560,6 +565,10 @@ watch(
   () => props.showFootprints,
   (v) => ctx.footprintLayer?.setVisible(v),
 )
+
+// Show/hide the GCP symbols from the ribbon toggle; editing GCPs always shows them.
+const gcpsVisible = computed(() => props.showGcps || editMode.value)
+watch(gcpsVisible, (v) => ctx.gcpLayer?.setVisible(v))
 
 // Show/hide the grid from the ribbon toggle.
 watch(
@@ -727,6 +736,8 @@ defineExpose({
         @command="(...a) => emit('command', ...a)"
       />
 
+      <MapLayersPanel v-if="showLayersPanel" @close="emit('command', 'map-toggle-layers')" />
+
       <GcpToolbar
         v-if="editMode"
         noun="map"
@@ -749,8 +760,12 @@ defineExpose({
 
       <div v-if="hasGcps || hasFootprints || hasPoses" class="legend">
         <span v-if="!isModel" class="legend-item"><span class="legend-dot img"></span>Image GPS</span>
-        <span v-if="hasGcps && !isModel" class="legend-item"><span class="legend-dot gcp"></span>GCP</span>
-        <span v-if="hasGcps && isModel" class="legend-item"><span class="legend-dot marker"></span>Marker</span>
+        <span v-if="hasGcps && gcpsVisible && !isModel" class="legend-item"
+          ><span class="legend-dot gcp"></span>GCP</span
+        >
+        <span v-if="hasGcps && gcpsVisible && isModel" class="legend-item"
+          ><span class="legend-dot marker"></span>Marker</span
+        >
         <span v-if="hasPoses" class="legend-item"><span class="legend-dot pose"></span>Camera</span>
         <span v-if="hasFootprintPolygons" class="legend-item"><span class="legend-dot footprint"></span>Footprint</span>
         <span v-if="hasContourLines" class="legend-item"><span class="legend-line contour"></span>Contours</span>

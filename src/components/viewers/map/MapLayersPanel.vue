@@ -1,20 +1,19 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import FloatingToolbox from '../FloatingToolbox.vue'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { productLabel, productMapBlocker } from '../../../core/products/productLayers.js'
 import { mapLayerIds, moveMapLayer } from '../../../core/products/mapOrder.js'
-import { useSidebar } from './sidebarContext.js'
 
-// Every raster the 2D map can draw, in one list whatever section it lives in: the
-// imported reference rasters and the computed DEM / orthophoto. Top of the list draws
-// on top (core/products/mapOrder.js); a row is dragged (or moved with ↑ ↓) to restack,
-// and carries the same map checkbox and opacity as its own section's row. Vectors
+// View ▸ Map ▸ Layers: a floating panel over the 2D map listing every raster the map
+// can draw, in one stack whatever sidebar section it lives in: the imported reference
+// rasters and the computed DEM / orthophoto. Top of the list draws on top
+// (core/products/mapOrder.js); a row is dragged (or moved with ↑ ↓) to restack, and
+// carries the same map checkbox and opacity as its own sidebar row. Vectors
 // (contours, footprints, GCPs, cameras) always draw above every raster.
-defineProps({ open: { type: Boolean, default: false } })
-const emit = defineEmits(['toggle'])
-const sidebar = useSidebar()
+const emit = defineEmits(['close'])
 const external = useExternalStore()
 const { rasters } = storeToRefs(external)
 const recon = useReconstructionStore()
@@ -34,8 +33,8 @@ const rowsById = computed(() => {
       visible: !!r.visible,
       opacity: r.opacity ?? 1,
       blocked: canMapRaster(r) ? '' : 'No coordinate system or preview: the map cannot place it',
-      set: (visible) => sidebar.setRasterVisible({ id: r.id, visible }),
-      fade: (opacity) => sidebar.setRasterOpacity({ id: r.id, opacity }),
+      set: (visible) => external.setRasterVisible(r.id, visible),
+      fade: (opacity) => external.setRasterOpacity(r.id, opacity),
     })
   }
   for (const [kind, product] of [
@@ -51,8 +50,8 @@ const rowsById = computed(() => {
       visible: !!layer?.visible,
       opacity: layer?.opacity ?? 1,
       blocked: productMapBlocker(product) ?? '',
-      set: (visible) => sidebar.setProductVisible({ kind, visible }),
-      fade: (opacity) => sidebar.setProductOpacity({ kind, opacity }),
+      set: (visible) => recon.setProductVisible(kind, visible),
+      fade: (opacity) => recon.setProductOpacity(kind, opacity),
     })
   }
   return rows
@@ -90,13 +89,17 @@ function onDragEnd() {
 </script>
 
 <template>
-  <div class="section">
-    <button class="section-hd" @click="emit('toggle')">
-      <span class="chevron">{{ open ? '▾' : '▸' }}</span>
-      <span class="section-name">Map layers</span>
-      <span v-if="rows.length" class="badge">{{ rows.length }}</span>
-    </button>
-    <ul v-if="open" class="item-list" aria-label="Map layers, top first">
+  <FloatingToolbox
+    id="map-layers"
+    title="Layers"
+    :width="268"
+    close-title="Close the layers panel"
+    @close="emit('close')"
+  >
+    <p v-if="!rows.length" class="layer-note">
+      Nothing to stack yet: build a DEM or an orthophoto, or import a raster.
+    </p>
+    <ul v-else class="item-list" aria-label="Map layers, top first">
       <li
         v-for="(row, i) in rows"
         :key="row.id"
@@ -145,7 +148,7 @@ function onDragEnd() {
             ▼
           </button>
         </span>
-        <!-- Second line: the sidebar is too narrow for a slider beside the name. -->
+        <!-- Second line: the panel is too narrow for a slider beside the name. -->
         <div class="layer-opacity">
           <input
             type="range"
@@ -165,10 +168,10 @@ function onDragEnd() {
         Top draws on top. Contours, footprints, GCPs and cameras always draw above the rasters.
       </li>
     </ul>
-  </div>
+  </FloatingToolbox>
 </template>
 
-<style scoped src="./sidebar-sections.css"></style>
+<style scoped src="../../layout/sidebar/sidebar-sections.css"></style>
 <style scoped>
 .layer-row {
   height: auto;

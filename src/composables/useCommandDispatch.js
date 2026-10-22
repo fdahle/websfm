@@ -36,6 +36,8 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     showFootprints,
     showMapGrid,
     showMapCameras,
+    showMapGcps,
+    mapLayersPanel,
     selectTool3d,
     mapGcpEdit,
     setPointSize,
@@ -417,6 +419,12 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         break
       case 'map-toggle-cameras':
         showMapCameras.value = !showMapCameras.value
+        break
+      case 'map-toggle-gcps':
+        showMapGcps.value = !showMapGcps.value
+        break
+      case 'map-toggle-layers':
+        mapLayersPanel.value = !mapLayersPanel.value
         break
       // Tools ▸ Images ▾ ▸ Edit GCPs: the mode of the view in front.
       case 'edit-gcps':

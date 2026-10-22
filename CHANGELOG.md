@@ -286,12 +286,15 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
-- **Map layers: stack and fade the rasters on the map.** A new sidebar section lists
-  every raster the 2D map can draw (imported reference rasters, the DEM and the
-  orthophoto) in one stack, top first. Drag a row or use ▲ ▼ to change what draws on
-  top, fade a layer with its opacity slider, and show or hide it with its checkbox.
-  The order is saved with the project; a layer added later goes on top. Before, the
-  order was fixed (reference rasters, then the DEM, then the orthophoto).
+- **Layers panel: stack and fade the rasters on the map.** View ▸ Map ▸ Layers opens a
+  small panel over the 2D map listing every raster it can draw (imported reference
+  rasters, the DEM and the orthophoto) in one stack, top first. Drag a row or use ▲ ▼
+  to change what draws on top, fade a layer with its opacity slider, and show or hide
+  it with its checkbox. The order is saved with the project; a layer added later goes
+  on top. Before, the order was fixed (reference rasters, then the DEM, then the
+  orthophoto).
+- **GCPs toggle on the map.** View ▸ Map ▸ GCPs shows or hides the GCP and marker
+  symbols, as Cameras does for the camera positions. Editing GCPs always shows them.
 - **Every processing dialog reads in steps.** Sparse Model, Depth Maps, Dense Cloud,
   DEM, Orthophoto, Mesh and Texture now show their settings as numbered steps in the
   order the run applies them, like Detect and Match Features, each with a line on what

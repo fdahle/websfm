@@ -13,14 +13,13 @@ import ShapefilesSection from './sidebar/ShapefilesSection.vue'
 import ReconstructionSection from './sidebar/ReconstructionSection.vue'
 import ProductsSection from './sidebar/ProductsSection.vue'
 import ReferenceSection from './sidebar/ReferenceSection.vue'
-import MapLayersSection from './sidebar/MapLayersSection.vue'
 import { useSidebar } from './sidebar/sidebarContext.js'
 
 // The sections read their data from the stores and act through the sidebar
 // context App.vue provides (sidebar/sidebarContext.js); this shell only owns
 // which sections are open, the cloud split between three of them, and drops.
 const sidebar = useSidebar()
-const { clouds, dem, ortho } = storeToRefs(useReconstructionStore())
+const { clouds } = storeToRefs(useReconstructionStore())
 const { sets: shapefiles } = storeToRefs(useFootprintsStore())
 const { rasters, pendingRasters } = storeToRefs(useExternalStore())
 
@@ -79,7 +78,6 @@ function allClosed() {
     reconstruction: false,
     products: false,
     reference: false,
-    mapLayers: false,
   }
 }
 
@@ -137,9 +135,6 @@ watch(
       :clouds="referenceClouds"
       @toggle="toggle('reference')"
     />
-
-    <!-- Every raster the 2D map can draw, in one stacking list (shown once one exists). -->
-    <MapLayersSection v-if="rasters.length || dem || ortho" :open="open.mapLayers" @toggle="toggle('mapLayers')" />
   </aside>
 </template>
 

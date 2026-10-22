@@ -844,8 +844,11 @@ export const MAP_GROUP = {
   dynamic: '2D',
   commands: [
     { id: 'map-fit-view', label: 'Fit\nView', icon: 'fit-view' },
+    // The floating Layers panel: stack, show and fade the rasters on the map.
+    { id: 'map-toggle-layers', label: 'Layers', icon: 'layers', activeKey: 'mapLayersPanel' },
     { id: 'map-toggle-grid', label: 'Grid', icon: 'grid', activeKey: 'showMapGrid' },
     { id: 'map-toggle-cameras', label: 'Cameras', icon: 'camera', activeKey: 'showMapCameras' },
+    { id: 'map-toggle-gcps', label: 'GCPs', icon: 'map-pin', activeKey: 'showMapGcps' },
     {
       id: 'map-toggle-footprints',
       label: 'Footprints',

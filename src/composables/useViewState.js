@@ -29,6 +29,10 @@ export function useViewState({ mapMode, mapFrame }) {
   // Camera positions on the map: pose markers (imported / EXIF, or the SfM centres in
   // the model frame) and the GPS markers of images without a pose.
   const showMapCameras = ref(true)
+  // GCP and marker symbols on the map (shown while GCPs are being edited regardless).
+  const showMapGcps = ref(true)
+  // The map's floating Layers panel (View ▸ Map ▸ Layers).
+  const mapLayersPanel = ref(false)
   // Modes entered from the ribbon and left from there or the tool's floating
   // toolbox: the 3D selection tool and the turntable (both reported up by Viewer3D),
   // and map GCP editing.
@@ -49,6 +53,8 @@ export function useViewState({ mapMode, mapFrame }) {
     showLegend: showLegend.value,
     showMapGrid: showMapGrid.value,
     showMapCameras: showMapCameras.value,
+    showMapGcps: showMapGcps.value,
+    mapLayersPanel: mapLayersPanel.value,
     mapModelFrame: mapMode.value === 'model',
     showFootprints: showFootprints.value,
     pointSize: pointSize.value,
@@ -68,6 +74,8 @@ export function useViewState({ mapMode, mapFrame }) {
     showFootprints,
     showMapGrid,
     showMapCameras,
+    showMapGcps,
+    mapLayersPanel,
     selectTool3d,
     turntable3d,
     mapGcpEdit,

@@ -265,3 +265,26 @@ describe('one home per tool', () => {
     }
   })
 })
+
+describe('View tab toggles', () => {
+  // A 3D or map toggle shows as on only when Ribbon.vue answers its key from the view
+  // state (VIEW_KEYS) and useViewState provides it; a key missing from either falls
+  // through to the image view's state, and the button never lights up.
+  const ribbon = readFileSync(new URL('../../components/layout/Ribbon.vue', import.meta.url), 'utf8')
+  const viewKeys = new Set(
+    [...ribbon.match(/const VIEW_KEYS = new Set\(\[([\s\S]*?)\]\)/)[1].matchAll(/'(\w+)'/g)].map((m) => m[1]),
+  )
+  const viewState = readFileSync(new URL('../../composables/useViewState.js', import.meta.url), 'utf8')
+  const provided = new Set(
+    [...viewState.match(/ribbonViewState = computed\(\(\) => \(\{([\s\S]*?)\}\)\)/)[1].matchAll(/^\s*(\w+):/gm)].map(
+      (m) => m[1],
+    ),
+  )
+  it('answers every 3D and map toggle from the view state', () => {
+    const keys = leafCommands([CAMERA_GROUP, SCENE_GROUP, MAP_GROUP])
+      .map((c) => c.activeKey)
+      .filter(Boolean)
+    expect(keys.filter((k) => !viewKeys.has(k))).toEqual([])
+    expect(keys.filter((k) => !provided.has(k))).toEqual([])
+  })
+})

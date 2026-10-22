@@ -274,16 +274,17 @@ transparent pixels, Bilinear also takes the nearest pixel, so edges don't bleed.
 Tick the orthophoto's checkbox in the Products section, or choose **On Map** in the
 orthophoto's ribbon tab. While it is on the map, the expanded row has an **Opacity**
 slider. The map draws the orthophoto at full resolution from its tiles, under GCPs
-and footprints and, by default, above the DEM and imported reference rasters (see Map
-layers below); **Fit View** includes it.
+and footprints and, by default, above the DEM and imported reference rasters (see Layers
+below); **Fit View** includes it.
 Transparent (uncovered) pixels stay transparent. In the model frame, an orthophoto
 whose local frame is shifted from the map's draws its preview image instead.
 
-When several rasters are on the map, **Map layers** at the bottom of the sidebar lists
-them all in one stack, imported reference rasters included: the top of the list draws
-on top. Drag a row by ⠿ (or use ▲ ▼) to restack, and use its slider to fade it; the
-order is saved with the project. Contours, footprints, GCPs and cameras always draw
-above the rasters.
+When several rasters are on the map, **View ▸ Map ▸ Layers** opens a small panel over
+the map that lists them all in one stack, imported reference rasters included: the top
+of the list draws on top. Drag a row by ⠿ (or use ▲ ▼) to restack, tick it to show it,
+and use its slider to fade it; the order is saved with the project. Contours,
+footprints, GCPs and cameras always draw above the rasters; **View ▸ Map ▸ GCPs** hides
+the GCP symbols (they stay while you edit GCPs).
 
 The 2D map has two frames, switched with **View ▸ Map ▸ Model Frame**:
 - **Project CRS** (Model Frame off): the basemap, GPS positions, GCPs, footprints,

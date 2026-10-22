@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-// Sidebar ▸ Map layers: one stacking list for every raster the map can draw. The
+// View ▸ Map ▸ Layers: a floating panel with one stacking list for every raster the map can draw. The
 // list's top draws on top, a move restacks the map's raster group, the opacity
 // reaches the layer, and the order is saved with the project.
 
@@ -65,7 +65,10 @@ test('the Map layers list restacks the map and fades a layer', async ({ page }) 
     ['ortho', 1],
   ])
 
-  await page.getByRole('button', { name: /Map layers/ }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'View', exact: true }).click()
+  const layersBtn = page.locator('.ribbon').getByRole('button', { name: 'Layers', exact: true })
+  await layersBtn.click()
+  await expect(layersBtn).toHaveClass(/active/)
   const list = page.getByRole('list', { name: 'Map layers, top first' })
   await expect(list.locator('.item-name')).toHaveText(['Orthophoto', 'DEM'])
   await list.getByRole('button', { name: 'Move DEM up' }).click()
@@ -88,6 +91,33 @@ test('the Map layers list restacks the map and fades a layer', async ({ page }) 
       async () => (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore().mapOrder,
     ),
   ).toEqual(['product:dem', 'product:ortho'])
-  if (process.env.SHOT) await page.locator('.sidebar').screenshot({ path: process.env.SHOT })
+  if (process.env.SHOT) await page.locator('.map-viewer').screenshot({ path: process.env.SHOT })
+  // The panel's × is the ribbon toggle.
+  await page.getByRole('button', { name: 'Close the layers panel' }).click()
+  await expect(list).toHaveCount(0)
+  await expect(layersBtn).not.toHaveClass(/active/)
   expect(errors).toEqual([])
+})
+
+test('View ▸ Map ▸ GCPs hides the GCP symbols', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await page.evaluate(async () => {
+    const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+    const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
+    const projects = useProjectsStore()
+    await projects.setProjectCrs(projects.currentProjectId, 'EPSG:32632')
+    await useGcpsStore().addGcps([{ name: 'G1', x: 500010, y: 5000010, z: 5 }], 'EPSG:32632')
+  })
+  await page.locator('.tab', { hasText: /^2D$/ }).click()
+  const gcpLayerVisible = () =>
+    page.locator('.map-viewer').evaluate((el) => el.__vueParentComponent.setupState.ctx.gcpLayer?.getVisible())
+  await expect.poll(gcpLayerVisible).toBe(true)
+  await page.locator('.ribbon').getByRole('button', { name: 'View', exact: true }).click()
+  const gcps = page.locator('.ribbon').getByRole('button', { name: 'GCPs', exact: true })
+  await expect(gcps).toHaveClass(/active/)
+  await gcps.click()
+  await expect.poll(gcpLayerVisible).toBe(false)
+  await expect(gcps).not.toHaveClass(/active/)
 })
