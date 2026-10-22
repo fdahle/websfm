@@ -119,7 +119,8 @@ const listImages = async (dir, prefix = '') => {
   for (const e of await readdir(join(dir, prefix), { withFileTypes: true })) {
     const rel = prefix ? `${prefix}/${e.name}` : e.name
     if (e.isDirectory() && cfg.recursive) out.push(...(await listImages(dir, rel)))
-    else if (e.isFile() && IMAGE_EXT.has(extname(e.name).toLowerCase())) out.push(rel)
+    // A symlinked file counts (a dataset of links to an archive, e.g. hist/tma_prep.py).
+    else if ((e.isFile() || e.isSymbolicLink()) && IMAGE_EXT.has(extname(e.name).toLowerCase())) out.push(rel)
   }
   return out
 }
@@ -209,8 +210,10 @@ if (cfg.dev) {
     const path = decodeURIComponent(new URL(req.url, base).pathname)
     // Dataset files stream straight from disk: routing gigabytes through Playwright's
     // page.route (one CDP message per file) failed on the 2.9 GB quarry set.
-    if (path.startsWith('/__bench_data/')) {
-      const file = join(cfg.images, path.slice('/__bench_data/'.length))
+    // `hist.masks`: a folder of per-image mask files, served the same way.
+    const dataRoot = path.startsWith('/__bench_masks/') ? cfg.hist?.masks : cfg.images
+    if (path.startsWith('/__bench_data/') || (dataRoot && path.startsWith('/__bench_masks/'))) {
+      const file = join(dataRoot, path.slice(path.indexOf('/', 1) + 1))
       res.writeHead(200, { 'Content-Type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream' })
       createReadStream(file)
         .on('error', () => res.destroy())
@@ -327,11 +330,16 @@ try {
     console.error('[page exception]', err.message)
   })
   if (cfg.dev)
-    await page.route(`${base}/__bench_data/**`, async (route) => {
-      const file = decodeURIComponent(new URL(route.request().url()).pathname.replace('/__bench_data/', ''))
-      const body = await readFile(join(cfg.images, file))
-      await route.fulfill({ body, contentType: MIME[extname(file).toLowerCase()] ?? 'application/octet-stream' })
-    })
+    for (const [prefix, root] of [
+      ['__bench_data', cfg.images],
+      ['__bench_masks', cfg.hist?.masks],
+    ])
+      if (root)
+        await page.route(`${base}/${prefix}/**`, async (route) => {
+          const file = decodeURIComponent(new URL(route.request().url()).pathname.replace(`/${prefix}/`, ''))
+          const body = await readFile(join(root, file))
+          await route.fulfill({ body, contentType: MIME[extname(file).toLowerCase()] ?? 'application/octet-stream' })
+        })
   await page.goto(benchUrl)
   await page.waitForFunction(() => window.benchReady === true, null, { timeout: 120_000 })
 
@@ -380,6 +388,14 @@ try {
       console.log(`== hist sensor: ${JSON.stringify(await page.evaluate((f) => window.bench.setSensor(f), h.sensor))}`)
     if (h.maskDataUrl)
       console.log(`== hist mask: ${await page.evaluate((u) => window.bench.setMask(u), h.maskDataUrl)} image(s)`)
+    if (h.maskFiles) {
+      const m = await page.evaluate((x) => window.bench.importMasks(x), {
+        files: h.maskFiles.map((f) => ({ url: `${base}/__bench_masks/${encodeURIComponent(f)}`, name: f })),
+        existing: cfg.hist.maskExisting,
+      })
+      console.log(`== hist masks: ${JSON.stringify(m)}`)
+      result.masks = m
+    }
     if (h.fiducials) {
       const f = await page.evaluate((x) => window.bench.setFiducials(x), h.fiducials)
       console.log(`== hist fiducials: ${JSON.stringify(f)}`)

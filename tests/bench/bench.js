@@ -1155,6 +1155,26 @@ window.bench = {
     for (const img of images.images) images.updateMask(img.id, blob, true)
     return images.images.filter((i) => i.mask).length
   },
+  // A folder of per-image masks (config `hist.masks`), paired by name through
+  // Masks ▸ Import folder: files = [{ url, name }].
+  async importMasks({ files, existing }) {
+    const t0 = performance.now()
+    const objs = []
+    for (const f of files) {
+      const blob = await fetchRetry(f.url)
+      objs.push(new File([blob], f.name, { type: blob.type, lastModified: 0 }))
+    }
+    const { imported, failed, noSize, plan } = await images.importMaskFiles(objs, existing ? { existing } : {})
+    return {
+      seconds: (performance.now() - t0) / 1000,
+      imported,
+      failed,
+      noSize,
+      unmatched: plan.unmatched.length,
+      imagesWithout: plan.imagesWithout,
+      masked: images.images.filter((i) => i.mask).length,
+    }
+  },
   // Film scans (config `hist.fiducials`): the camera certificate on the one sensor and,
   // in mode 'provided', the per-image fiducial marks from the benchmark's CSV;
   // mode 'detect' runs the app's own detector (Detect Fiducials) instead and reports

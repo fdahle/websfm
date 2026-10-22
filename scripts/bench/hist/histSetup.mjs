@@ -6,6 +6,9 @@
 //                                                         principal_point_x/y_mm (y up)
 //     "mask": ".../image_mask.tif",                      one for all images; keep class = the centre's
 //     "maskPng": ".../websfm_eval/masks/cg.png",         where the app-convention PNG is cached
+//     "masks": ".../masks",                              a folder of per-image masks, paired by name
+//                                                         (Masks ▸ Import folder); TIFF is fine
+//     "maskExisting": "merge",                           with "mask" too: add each file to the static mask
 //     "gcps": ".../gcp.csv",                             gcp_label, image_file_name, x, y (pixel-edge),
 //                                                         x_map, y_map, elev, *_acc  (in cfg.crs)
 //     "checkEvery": 4,                                   every 4th label (sorted) is a checkpoint; 0 = none
@@ -16,7 +19,7 @@
 //
 // The checkpoint choice (sorted labels, every Nth from the first) is the same as
 // metashape_hist.py's, so the three tools are scored on the same points.
-import { readFile, mkdir } from 'node:fs/promises'
+import { readFile, readdir, mkdir } from 'node:fs/promises'
 import { openSync, readSync, closeSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -61,7 +64,8 @@ function tiffSize(path) {
 }
 
 export async function histSetup(h, imageNames) {
-  const out = { sensor: null, maskDataUrl: null, gcps: null, checks: [], fiducials: null }
+  const out = { sensor: null, maskDataUrl: null, maskFiles: null, gcps: null, checks: [], fiducials: null }
+  if (h.masks) out.maskFiles = (await readdir(h.masks)).sort()
   if (h.intrinsics) {
     const r = csvRows(await readFile(h.intrinsics, 'utf8'))[0]
     const pitch = Number(r.pixel_pitch)

@@ -277,7 +277,8 @@ mesh as GLB and OBJ.
 reference DEMs) the same way for websfm, COLMAP and Metashape:
 
 - config key `hist` (`hist/histSetup.mjs`): the certificate focal + scan pitch on one
-  sensor, the static mask on every image, GCPs as control with every Nth as a
+  sensor, the static mask on every image (or `hist.masks`, a folder of per-image masks
+  imported through Masks ▸ Import folder), GCPs as control with every Nth as a
   checkpoint, and after the `dem` stage the DEM as `<out>.dem.tif`, scored against
   `hist.refDem`. The recon result carries `gcpResiduals` (control / checkpoint RMS in
   the CRS). Set `crs` to the GCPs' projected CRS and `dem: { "crs": "project" }`.
