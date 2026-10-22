@@ -6,8 +6,10 @@ explains how the code is organised, [METHODS.md](METHODS.md) the algorithms, and
 
 ## Running it locally
 
-The generated WASM bindings in `src/wasm/**` are committed, so you do **not** need
-a Rust toolchain just to run or develop the front end:
+You need [Node.js](https://nodejs.org/) 22, the version CI uses. 20.19 or later and
+24 work too (`engines` in `package.json`; `.nvmrc` selects 22 for nvm users). The
+generated WASM bindings in `src/wasm/**` are committed, so you do **not** need a Rust
+toolchain just to run or develop the front end:
 
 ```bash
 npm install

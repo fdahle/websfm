@@ -86,7 +86,8 @@ LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | What changed | [CHANGELOG.md](CHANGELOG.md) |
 
-Quick start from source (no Rust needed, the compiled WASM is committed):
+Quick start from source, with [Node.js](https://nodejs.org/) 22 (20.19 or later works;
+CI uses 22). No Rust is needed: the compiled WASM is committed.
 
 ```bash
 npm install
