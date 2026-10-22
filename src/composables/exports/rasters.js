@@ -7,6 +7,7 @@ import {
   orthoToGeoTiff,
 } from '../../core/products/exporters.js'
 import { downloadBlob } from '../../utils/download.js'
+import { showToast } from '../useToasts.js'
 import { partsToBlob } from '../../utils/blobParts.js'
 import {
   exportOrthoFile,
@@ -25,7 +26,7 @@ import { demRef } from '../../core/products/demWindow.js'
 // terrain products and a polygon clip — computed in the worker from the DEM.
 //
 // Deps are useExports' injected refs and shared helpers.
-export function createRasterExports({ crsInfo, dem, log, ortho, projectBase }) {
+export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, projectBase }) {
   async function deflateBytes(bytes) {
     const cs = new CompressionStream('deflate')
     const stream = new Blob([bytes]).stream().pipeThrough(cs)
@@ -274,27 +275,51 @@ export function createRasterExports({ crsInfo, dem, log, ortho, projectBase }) {
   }
   const unitLabelOf = (g) => rasterUnits(g).vertical
 
+  // Contours go on the map as a line layer (Shapefiles) when the DEM has a CRS, and
+  // are downloaded in `format` unless it is 'none'. A DEM in the local frame has no
+  // place on the map's layers, so it is always downloaded (ContoursModal).
   async function exportContours({ interval, indexEvery, smooth, minLength, format }) {
     const grid = dem.value
     if (!grid) return
     const { input, transfer } = demToolInput(grid)
     const info = crsInfo(grid)
-    const { text, lines, levels } = await workerDemTool(
-      { tool: 'contours', ...input, settings: { interval, indexEvery, smooth, minLength }, format, crs: info.crs },
+    const download = info.crs ? format : format === 'none' ? 'geojson' : format
+    const { text, paths, lines, levels } = await workerDemTool(
+      {
+        tool: 'contours',
+        ...input,
+        settings: { interval, indexEvery, smooth, minLength },
+        format: download,
+        crs: info.crs,
+      },
       { transfer, onLog: (m, l, c) => log(m, l, c) },
     )
-    const dxf = format === 'dxf'
-    downloadBlob(
-      `${projectBase()}-contours.${dxf ? 'dxf' : 'geojson'}`,
-      text,
-      dxf ? 'application/dxf' : 'application/geo+json',
-    )
-    if (dxf && info.crs) downloadBlob(`${projectBase()}-contours.prj`, prjText(info), 'text/plain;charset=utf-8')
+    const unit = unitLabelOf(grid)
+    let layer = null
+    if (info.crs && paths.length) layer = await addLineSet(paths, info.crs, `Contours ${interval} ${unit}`)
+    const dxf = download === 'dxf'
+    if (download !== 'none') {
+      downloadBlob(
+        `${projectBase()}-contours.${dxf ? 'dxf' : 'geojson'}`,
+        text,
+        dxf ? 'application/dxf' : 'application/geo+json',
+      )
+      if (dxf && info.crs) downloadBlob(`${projectBase()}-contours.prj`, prjText(info), 'text/plain;charset=utf-8')
+    }
+    const where = [layer && `on the map (${layer.name})`, download !== 'none' && (dxf ? 'DXF' : 'GeoJSON')]
+      .filter(Boolean)
+      .join(' and ')
     log(
-      `Contours: ${lines.toLocaleString()} lines over ${levels} levels every ${interval} ${unitLabelOf(grid)} → ${dxf ? 'DXF' : 'GeoJSON'}`,
+      `Contours: ${lines.toLocaleString()} lines over ${levels} levels every ${interval} ${unit} → ${where}`,
       'success',
       'Export',
     )
+    if (layer)
+      showToast('Contours added to the map', {
+        detail: `Sidebar ▸ Shapefiles ▸ ${layer.name}. Its right-click menu downloads them as GeoJSON.`,
+      })
+    else if (!paths.length)
+      showToast('No contour lines', { detail: 'No level crosses the DEM at this interval.', kind: 'error' })
   }
 
   async function exportTerrain({ products, slopeUnits, azimuth, altitude, multidirectional, compression }) {

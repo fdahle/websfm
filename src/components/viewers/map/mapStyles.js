@@ -123,6 +123,12 @@ const footprintSelectedStyle = new Style({
   stroke: new Stroke({ color: '#f0a500', width: 2.5 }),
 })
 
+// Contour lines: thin, the index contours heavier.
+const lineStyle = new Style({ stroke: new Stroke({ color: 'rgba(160, 90, 30, 0.85)', width: 1 }) })
+const lineIndexStyle = new Style({ stroke: new Stroke({ color: 'rgba(160, 90, 30, 0.95)', width: 2 }) })
+
 export function footprintStyle(feature, selectedId) {
+  const index = feature.get('lineIndex')
+  if (index != null) return index ? lineIndexStyle : lineStyle
   return feature.get('imgId') && feature.get('imgId') === selectedId ? footprintSelectedStyle : footprintNormalStyle
 }

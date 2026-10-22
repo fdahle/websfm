@@ -74,7 +74,9 @@ test('Products ▾ exports contours, terrain derivatives and a polygon clip of t
   await openTool(page, 'Products', /Contours/)
   const ct = page.getByRole('dialog', { name: 'Contour Lines' })
   await ct.getByLabel('Interval').fill('5')
-  const geo = await download(page, () => ct.getByRole('button', { name: 'Export contours', exact: true }).click())
+  // A local-frame DEM has no place on the map's layers: its contours are downloaded.
+  await expect(ct.getByLabel('Download')).toHaveValue('geojson')
+  const geo = await download(page, () => ct.getByRole('button', { name: 'Create contours', exact: true }).click())
   expect(geo.name).toMatch(/contours\.geojson$/)
   const fc = JSON.parse(geo.bytes.toString('utf8'))
   expect(fc.type).toBe('FeatureCollection')
@@ -104,6 +106,78 @@ test('Products ▾ exports contours, terrain derivatives and a polygon clip of t
   )
   expect(tags[256]).toBe(20)
   expect(tags[257]).toBe(20)
+  expect(errors).toEqual([])
+})
+
+test('contours of a georeferenced DEM go on the map as a line layer', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await createProject(page)
+  await page.evaluate(async () => {
+    const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const projects = useProjectsStore()
+    await projects.setProjectCrs(projects.currentProjectId, 'EPSG:32632')
+    const W = 60,
+      data = new Float32Array(W * W),
+      mask = new Uint8Array(W * W).fill(1)
+    for (let r = 0; r < W; r++) for (let c = 0; c < W; c++) data[r * W + c] = 30 - Math.hypot(c - 29.5, r - 29.5)
+    useReconstructionStore().dem = {
+      width: W,
+      height: W,
+      gsd: 1,
+      originX: 500000,
+      originY: 5000060,
+      data,
+      mask,
+      zMin: Math.min(...data),
+      zMax: 30,
+      unit: 'm',
+      crs: 'EPSG:32632',
+      name: 'DEM',
+    }
+  })
+
+  await openTool(page, 'Products', /Contours/)
+  const ct = page.getByRole('dialog', { name: 'Contour Lines' })
+  await ct.getByLabel('Interval').fill('5')
+  await expect(ct.getByLabel('Download')).toHaveValue('none')
+  let downloaded = false
+  page.on('download', () => (downloaded = true))
+  await ct.getByRole('button', { name: 'Create contours', exact: true }).click()
+  await expect(page.getByText('Contours added to the map')).toBeVisible()
+
+  // One line layer, in the project CRS, with heavier index contours (every 5th level).
+  const layer = await page.evaluate(async () => {
+    const { useFootprintsStore } = await import('/src/stores/useFootprintsStore.js')
+    const set = useFootprintsStore().sets[0]
+    const xs = set.footprints.flatMap((f) => f.lines[0].map((c) => c[0]))
+    return {
+      name: set.name,
+      kind: set.kind,
+      levels: [...new Set(set.footprints.map((f) => f.level))].sort((a, b) => a - b),
+      index: set.footprints.filter((f) => f.index).map((f) => f.level),
+      minX: Math.min(...xs),
+      onMap: useFootprintsStore().mapPolygons.length === set.footprints.length,
+    }
+  })
+  expect(layer.name).toBe('Contours 5 m')
+  expect(layer.kind).toBe('lines')
+  // The cone runs from 30 m down to −11.7 m in its corners.
+  expect(layer.levels).toEqual([-10, -5, 0, 5, 10, 15, 20, 25])
+  expect([...new Set(layer.index)].sort((a, b) => a - b)).toEqual([0, 25])
+  expect(layer.minX).toBeGreaterThan(500000)
+  expect(layer.onMap).toBe(true)
+  expect(downloaded).toBe(false)
+
+  // The sidebar row: a map checkbox, and a GeoJSON download of the lines.
+  await page.getByRole('button', { name: /Shapefiles/ }).click()
+  await expect(page.getByRole('checkbox', { name: 'Show Contours 5 m on the map' })).toBeChecked()
+  await page.locator('.item-name', { hasText: 'Contours 5 m' }).click({ button: 'right' })
+  const geo = await download(page, () => page.getByRole('button', { name: 'Download GeoJSON' }).click())
+  const fc = JSON.parse(geo.bytes.toString('utf8'))
+  expect(fc.features[0].geometry.type).toBe('LineString')
+  expect(new Set(fc.features.map((f) => f.properties.elevation)).size).toBe(8)
   expect(errors).toEqual([])
 })
 

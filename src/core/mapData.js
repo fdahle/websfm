@@ -41,9 +41,9 @@ export function gcpPlacement(list) {
   return list.map((g) => `${g.id}:${g.x}:${g.y}`).join('|')
 }
 
-/** Enabled footprints that have geometry. */
+/** Enabled footprints (polygons, or a line layer's paths) that have geometry. */
 export function plottedFootprints(footprints) {
-  return footprints.filter((f) => f.enabled !== false && f.rings?.length)
+  return footprints.filter((f) => f.enabled !== false && (f.rings?.length || f.lines?.length))
 }
 
 /** Enabled imported / EXIF poses with a valid position. */

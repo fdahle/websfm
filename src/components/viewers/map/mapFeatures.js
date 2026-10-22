@@ -7,6 +7,7 @@
 import Feature from 'ol/Feature'
 import Point from 'ol/geom/Point'
 import Polygon from 'ol/geom/Polygon'
+import MultiLineString from 'ol/geom/MultiLineString'
 import { transform } from '../../../core/crs.js'
 
 /** Image GPS is always WGS84 (from EXIF); project it into the view CRS. */
@@ -31,9 +32,15 @@ export function makeGcpFeature(g) {
 }
 
 export function makeFootprintFeature(fp) {
-  const f = new Feature({ geometry: new Polygon(fp.rings) })
-  // Hover label: the image the polygon belongs to, else the layer name.
-  f.set('footprintName', fp.imageName ?? fp.setName ?? fp.name)
+  // A line layer's feature (a contour) is open paths, not a polygon.
+  const f = new Feature({ geometry: fp.lines ? new MultiLineString(fp.lines) : new Polygon(fp.rings) })
+  if (fp.lines) f.set('lineIndex', !!fp.index)
+  // Hover label: the image the polygon belongs to, else the layer name; a contour
+  // adds its height.
+  f.set(
+    'footprintName',
+    fp.lines ? `${fp.setName ?? 'Contours'} · ${fp.level}` : (fp.imageName ?? fp.setName ?? fp.name),
+  )
   if (fp.imageId) f.set('imgId', fp.imageId)
   return f
 }

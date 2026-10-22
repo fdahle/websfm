@@ -10,14 +10,18 @@ import { contourLevels, MAX_CONTOUR_LEVELS } from '../../../core/products/contou
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
 // Contours (Tools ▸ Products ▾) — contour lines traced from the DEM (marching
-// squares, core/products/contours.js), downloaded as GeoJSON or DXF. The DEM itself
-// is not changed. Heights and the interval are in the DEM's own vertical unit.
+// squares, core/products/contours.js), added to the map as a line layer and, if
+// asked, downloaded as GeoJSON or DXF. A DEM without a CRS cannot go on the map's
+// layers, so its contours are always downloaded. The DEM itself is not changed.
+// Heights and the interval are in the DEM's own vertical unit.
 const props = defineProps({
   dem: { type: Object, default: null },
 })
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...CONTOUR_DEFAULTS })
+const onMap = computed(() => !!props.dem?.crs && props.dem.crs !== 'local')
+if (!onMap.value && settings.value.format === 'none') settings.value.format = 'geojson'
 const unit = computed(() => (props.dem?.unit === 'model' ? 'model units' : props.dem?.unit || 'units'))
 
 // ≈ 25 levels over the height range, rounded to a 1·2·5 × 10ⁿ step — the interval a
@@ -128,9 +132,17 @@ function run() {
           />
         </SettingsField>
       </SettingsGroup>
-      <SettingsGroup title="Download">
-        <SettingsField label="Format" label-for="ct-fmt">
+      <SettingsGroup title="Result">
+        <p class="field-hint">
+          {{
+            onMap
+              ? 'The lines go on the 2D map as a layer under Shapefiles in the sidebar; its right-click menu downloads them as GeoJSON later.'
+              : 'This DEM has no coordinate system, so the lines cannot go on the map: they are downloaded.'
+          }}
+        </p>
+        <SettingsField label="Download" label-for="ct-fmt">
           <select id="ct-fmt" v-model="settings.format" class="field-select">
+            <option v-if="onMap" value="none">No download</option>
             <option value="geojson">GeoJSON (GIS)</option>
             <option value="dxf">DXF R12 (CAD)</option>
           </select>
@@ -147,7 +159,7 @@ function run() {
         :title="numbers.reason"
         @click="run"
       >
-        Export contours
+        Create contours
       </button>
     </template>
   </ModalShell>

@@ -231,6 +231,7 @@ export function useExports({
 
   // DEM / orthophoto files and the Products ▾ derivatives (exports/rasters.js).
   const { doExportDem, doExportOrtho, exportContours, exportTerrain, exportClipped } = createRasterExports({
+    addLineSet: footprints.addLineSet,
     crsInfo,
     dem,
     log,

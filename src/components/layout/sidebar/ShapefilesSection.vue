@@ -24,7 +24,10 @@ const { sets } = storeToRefs(useFootprintsStore())
 const { isExpanded, toggle: toggleExpand } = useExpandedSet()
 
 const linkedCount = (set) => set.footprints.filter((fp) => fp.imageId).length
-const sourceLabel = (set) => (set.source === 'imported' ? 'Imported' : 'Computed')
+const sourceLabel = (set) =>
+  set.source === 'imported' ? 'Imported' : set.kind === 'lines' ? 'Contours from the DEM' : 'Computed'
+// A contour layer holds lines, every other layer polygons.
+const featureNoun = (set) => (set.kind === 'lines' ? 'line' : 'polygon')
 
 const {
   editingId,
@@ -86,7 +89,7 @@ function fromMenu(fn) {
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ set.name }}</span>
-          <span class="obs-badge" :title="`${pluralize(set.footprints.length, 'polygon')}`">{{
+          <span class="obs-badge" :title="`${pluralize(set.footprints.length, featureNoun(set))}`">{{
             set.footprints.length
           }}</span>
         </li>
@@ -96,10 +99,10 @@ function fromMenu(fn) {
             <span class="detail-value">{{ sourceLabel(set) }}</span>
           </div>
           <div class="detail-row">
-            <span class="detail-label">Polygons</span>
+            <span class="detail-label">{{ set.kind === 'lines' ? 'Lines' : 'Polygons' }}</span>
             <span class="detail-value">{{ set.footprints.length.toLocaleString() }}</span>
           </div>
-          <div class="detail-row">
+          <div v-if="set.kind !== 'lines'" class="detail-row">
             <span class="detail-label">Linked to images</span>
             <span class="detail-value">{{ linkedCount(set) }} / {{ set.footprints.length }}</span>
           </div>

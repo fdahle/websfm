@@ -274,6 +274,45 @@ describe('geoJsonToFootprints', () => {
 })
 
 describe('polygonSetToGeoJson', () => {
+  it('writes a line layer (contours) as LineStrings with elevation and index', () => {
+    const lines = {
+      name: 'Contours 5 m',
+      kind: 'lines',
+      footprints: [
+        {
+          id: 'c',
+          level: 25,
+          index: true,
+          lines: [
+            [
+              [0, 0],
+              [1, 0],
+              [1, 1],
+            ],
+          ],
+        },
+        {
+          id: 'd',
+          level: 20,
+          index: false,
+          lines: [
+            [
+              [2, 2],
+              [3, 3],
+            ],
+          ],
+        },
+      ],
+    }
+    const fc = polygonSetToGeoJson(lines, { crs: 'EPSG:32632' })
+    expect(fc.features.map((f) => f.geometry.type)).toEqual(['LineString', 'LineString'])
+    expect(fc.features[0].properties).toEqual({ elevation: 25, index: true })
+    expect(fc.features[1].geometry.coordinates).toEqual([
+      [2, 2],
+      [3, 3],
+    ])
+  })
+
   const set = {
     name: 'Footprints',
     footprints: [

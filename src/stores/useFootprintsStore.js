@@ -38,7 +38,9 @@ export const useFootprintsStore = registerProjectStore(
 
     // [{ id, name, source: 'computed' | 'imported', visible, footprints: [
     //     { id, imageId, imageName, rings: [[ [x,y], ... ], ...] } ] }]
-    // rings are stored in the project CRS.
+    // rings are stored in the project CRS. A line layer (contours: kind 'lines') holds
+    //     { id, name, level, index, lines: [[ [x,y], ... ]] }
+    // instead: open paths, no image link, the same CRS.
     const sets = ref([])
 
     // Flat list of every polygon in every set that is shown on the map — what the
@@ -69,6 +71,11 @@ export const useFootprintsStore = registerProjectStore(
 
     function transformRings(rings, from, to) {
       return rings.map((ring) => ring.map((c) => transform([c[0], c[1]], from, to)))
+    }
+    // A polygon's rings or a line feature's paths, moved to another CRS.
+    function transformFeature(fp, from, to) {
+      if (fp.lines) return { ...fp, lines: transformRings(fp.lines, from, to) }
+      return { ...fp, rings: transformRings(fp.rings, from, to) }
     }
 
     // Re-resolve every polygon's imageId across every set against the current image
@@ -141,6 +148,37 @@ export const useFootprintsStore = registerProjectStore(
       )
       await save()
       return footprints.length
+    }
+
+    // Contour lines (Tools ▸ Products ▾ ▸ Contours) as ONE new line layer. `lines`:
+    // [{ path: [[x,y], …], level, index }] in `sourceCrs` (the DEM's).
+    async function addLineSet(lines, sourceCrs, name) {
+      const projCrs = currentCrs.value
+      try {
+        await ensureProjection(sourceCrs)
+        await ensureProjection(projCrs)
+      } catch (err) {
+        log(`Line layer not added — could not resolve CRS (${err?.message ?? err})`, 'error', 'Footprint')
+        return null
+      }
+      const footprints = lines.map((l) => ({
+        id: crypto.randomUUID(),
+        name: String(l.level),
+        level: l.level,
+        index: !!l.index,
+        lines: sourceCrs === projCrs ? [l.path] : transformRings([l.path], sourceCrs, projCrs),
+      }))
+      const set = {
+        id: crypto.randomUUID(),
+        name: uniqueSetName(name),
+        source: 'computed',
+        kind: 'lines',
+        visible: true,
+        footprints,
+      }
+      sets.value.push(set)
+      await save()
+      return set
     }
 
     // Resolve usable intrinsics for a pose, preferring its matched image's sensor
@@ -451,9 +489,9 @@ export const useFootprintsStore = registerProjectStore(
       save()
     }
 
-    // The combined polygon rings of a set (used by the map to zoom to its extent).
+    // The combined polygon rings (or line paths) of a set: the map zooms to their extent.
     function setRings(id) {
-      return sets.value.find((s) => s.id === id)?.footprints.flatMap((fp) => fp.rings) ?? []
+      return sets.value.find((s) => s.id === id)?.footprints.flatMap((fp) => fp.rings ?? fp.lines ?? []) ?? []
     }
 
     // Only { purge: true } deletes persisted data; a plain clear (project
@@ -475,7 +513,7 @@ export const useFootprintsStore = registerProjectStore(
         await ensureProjection(projectCrs).catch(() => {})
         sets.value = stored.map((s) => ({
           ...s,
-          footprints: s.footprints.map((fp) => ({ ...fp, rings: transformRings(fp.rings, data.crs, projectCrs) })),
+          footprints: s.footprints.map((fp) => transformFeature(fp, data.crs, projectCrs)),
         }))
         await opfs.saveFootprints(projectId, { crs: projectCrs, sets: sets.value }).catch(() => {})
       } else {
@@ -500,7 +538,7 @@ export const useFootprintsStore = registerProjectStore(
       await ensureProjection(toCrs).catch(() => {})
       sets.value = sets.value.map((s) => ({
         ...s,
-        footprints: s.footprints.map((fp) => ({ ...fp, rings: transformRings(fp.rings, fromCrs, toCrs) })),
+        footprints: s.footprints.map((fp) => transformFeature(fp, fromCrs, toCrs)),
       }))
       await save()
       log(`Shapefiles re-projected to ${toCrs}`, 'info', 'Footprint')
@@ -510,6 +548,7 @@ export const useFootprintsStore = registerProjectStore(
       sets,
       mapPolygons,
       addFootprints,
+      addLineSet,
       computeFootprints,
       resolveIntrinsics,
       removeSet,

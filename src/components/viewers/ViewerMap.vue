@@ -7,6 +7,7 @@ import View from 'ol/View'
 import VectorLayer from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
 import Polygon from 'ol/geom/Polygon'
+import MultiLineString from 'ol/geom/MultiLineString'
 import { get as getOlProjection, addProjection } from 'ol/proj'
 import Projection from 'ol/proj/Projection'
 import { Attribution } from 'ol/control'
@@ -282,7 +283,10 @@ const mapGcps = computed(() => (isModel.value ? modelMarkerGcps(props.modelMarke
 const hasGcps = computed(() => mapGcps.value.length > 0)
 
 const mapFootprints = computed(() => (isModel.value ? [] : plottedFootprints(props.footprints)))
+// The legend names polygons and contour lines apart (a contour layer holds lines).
 const hasFootprints = computed(() => mapFootprints.value.length > 0)
+const hasFootprintPolygons = computed(() => mapFootprints.value.some((f) => f.rings?.length))
+const hasContourLines = computed(() => mapFootprints.value.some((f) => f.lines?.length))
 
 // On the model map the cameras are the SfM centres in the model frame instead.
 const mapPoses = computed(() => (isModel.value ? modelCameraPoses(props.modelCameras) : plottedPoses(props.poses)))
@@ -678,12 +682,14 @@ function zoomToImage(imgId) {
 }
 
 // Fit the view to one shapefile set's polygons (its combined extent). `polygons`
-// is the set's flat polygon list ([{ rings }]); ignores any without geometry.
+// is the set's flat polygon list ([{ rings }], or [{ lines }] for a line layer);
+// ignores any without geometry.
 function zoomToFootprints(polygons) {
   if (!ctx.map || !polygons?.length) return
   let extent = createEmpty()
   for (const p of polygons) {
     if (p.rings?.length) extend(extent, new Polygon(p.rings).getExtent())
+    else if (p.lines?.length) extend(extent, new MultiLineString(p.lines).getExtent())
   }
   if (!extentIsEmpty(extent)) {
     ctx.map.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 18, duration: 300 })
@@ -746,7 +752,8 @@ defineExpose({
         <span v-if="hasGcps && !isModel" class="legend-item"><span class="legend-dot gcp"></span>GCP</span>
         <span v-if="hasGcps && isModel" class="legend-item"><span class="legend-dot marker"></span>Marker</span>
         <span v-if="hasPoses" class="legend-item"><span class="legend-dot pose"></span>Camera</span>
-        <span v-if="hasFootprints" class="legend-item"><span class="legend-dot footprint"></span>Footprint</span>
+        <span v-if="hasFootprintPolygons" class="legend-item"><span class="legend-dot footprint"></span>Footprint</span>
+        <span v-if="hasContourLines" class="legend-item"><span class="legend-line contour"></span>Contours</span>
       </div>
     </div>
 
@@ -937,6 +944,12 @@ defineExpose({
 .legend-dot.footprint {
   background: rgba(14, 99, 156, 0.2);
   border: 1.5px solid rgba(14, 99, 156, 0.8);
+}
+.legend-line.contour {
+  display: inline-block;
+  width: 14px;
+  border-top: 2px solid rgba(160, 90, 30, 0.95);
+  vertical-align: middle;
 }
 </style>
 

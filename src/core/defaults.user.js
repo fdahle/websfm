@@ -590,7 +590,9 @@ export const CONTOUR_DEFAULTS = {
   indexEvery: 5,
   smooth: 1,
   minLength: 0,
-  format: 'geojson', // 'geojson' | 'dxf'
+  // The lines always go on the map (when the DEM has a CRS); this is the download too:
+  // 'none' | 'geojson' | 'dxf'. A DEM without a CRS is always downloaded.
+  format: 'none',
 }
 export const TERRAIN_DEFAULTS = {
   products: ['slope', 'hillshade'],

@@ -30,7 +30,7 @@ times a power of ten) that gives about 25 levels. No line enters a square with a
 nodata corner, so lines stop at holes and stay open rather than bridging them.
 **Smoothing** passes (a moving average along each line) round off the corners of the
 grid crossings; strong smoothing pulls closed rings slightly inwards, and 0 keeps the
-exact crossings. Lines shorter than a set length can be dropped. The result downloads
-as GeoJSON, each line carrying its elevation and an index flag, or as DXF for CAD,
-with index contours on their own layer. The DEM itself is not changed. See
+exact crossings. Lines shorter than a set length can be dropped. The result goes on
+the 2D map as a line layer, and downloads as GeoJSON, each line carrying its elevation
+and an index flag, or as DXF for CAD, with index contours on their own layer. The DEM itself is not changed. See
 [Build a DEM](guide:dem).

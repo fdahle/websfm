@@ -161,6 +161,8 @@ export function geoJsonToFootprints(features, nameKey) {
 // A polygon layer (useFootprintsStore set) → a GeoJSON FeatureCollection, one
 // Polygon feature per footprint (outer ring + holes, each ring closed), named by its
 // image so a re-import links the polygons back up (geoJsonToFootprints reads `name`).
+// A line layer (contours) writes LineStrings with their `elevation` and `index`, as
+// the contour download does.
 // Coordinates are the stored ones (the project CRS), named in the legacy `crs`
 // member as the contour export does — the import reads it to seed its CRS picker.
 export function polygonSetToGeoJson(set, { crs = null } = {}) {
@@ -168,14 +170,23 @@ export function polygonSetToGeoJson(set, { crs = null } = {}) {
     const [a, b] = [ring[0], ring[ring.length - 1]]
     return a && b && (a[0] !== b[0] || a[1] !== b[1]) ? [...ring, [a[0], a[1]]] : ring
   }
-  const features = (set?.footprints ?? [])
+  const lineFeatures = (set?.footprints ?? [])
+    .filter((fp) => fp.lines?.length)
+    .flatMap((fp) =>
+      fp.lines.map((path) => ({
+        type: 'Feature',
+        properties: { elevation: fp.level ?? null, index: !!fp.index },
+        geometry: { type: 'LineString', coordinates: path.map((c) => [c[0], c[1]]) },
+      })),
+    )
+  const polygonFeatures = (set?.footprints ?? [])
     .filter((fp) => fp.rings?.length)
     .map((fp) => ({
       type: 'Feature',
       properties: { name: fp.imageName ?? fp.name ?? null },
       geometry: { type: 'Polygon', coordinates: fp.rings.map((ring) => close(ring.map((c) => [c[0], c[1]]))) },
     }))
-  const fc = { type: 'FeatureCollection', name: set?.name ?? null, features }
+  const fc = { type: 'FeatureCollection', name: set?.name ?? null, features: [...polygonFeatures, ...lineFeatures] }
   if (crs && /^EPSG:\d+$/i.test(crs)) fc.crs = { type: 'name', properties: { name: crs.toUpperCase() } }
   return fc
 }

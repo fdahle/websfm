@@ -12,6 +12,12 @@ Notable changes to websfm. The format follows
   **Record one turn** saves exactly one turn of the view as a looping video (WebM, or
   MP4 in Safari). A new guide article, **The 3D View**, covers navigation, the view
   presets and the turntable.
+- **Contours go on the map.** Tools ▸ Products ▾ ▸ Contours adds the lines to the 2D
+  map as a layer in the sidebar's Shapefiles section (index contours heavier, the
+  height in the hover label, "Contours" in the legend), with a map checkbox and a
+  GeoJSON download in its right-click menu. Downloading straight away (GeoJSON or
+  DXF) is now an option of the dialog, off by default; a DEM without a CRS is still
+  always downloaded. Before, the lines only went to the browser's downloads folder.
 - **Orthophoto export without an alpha band.** Export Orthophoto has an **Alpha band**
   checkbox (on by default) for GeoTIFF and PNG; unticked, the file has three bands and
   the empty pixels take a **NODATA value** (0–255), which a GeoTIFF records as GDAL

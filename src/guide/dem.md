@@ -309,14 +309,18 @@ measurements are recomputed in the project's current unit (metres once there is 
 georeference or scale bars) and written in the same frame as a point-cloud export.
 
 ## Contours, slope and clipping
-The **Tools → Products ▾** menu derives files from the DEM and orthophoto. None of
-them changes the stored product.
+The **Tools → Products ▾** menu derives contours and files from the DEM and
+orthophoto. None of them changes the stored product.
 
 - **Contours…** traces contour lines at an interval in the DEM's vertical unit
-  (*0* picks a round interval for about 25 levels) and downloads them as **GeoJSON**
-  (GIS) or **DXF** (CAD, with index contours on their own layer). Lines stop at
-  nodata holes rather than cutting across them. Smoothing passes round the corners of
-  the grid crossings; *0* keeps them exact.
+  (*0* picks a round interval for about 25 levels) and adds them to the 2D map as a
+  layer in the sidebar's **Shapefiles** section, the index contours drawn heavier.
+  Its checkbox shows and hides it, and its right-click menu zooms to it or downloads
+  it as GeoJSON. **Download** also saves them straight away as **GeoJSON** (GIS) or
+  **DXF** (CAD, with index contours on their own layer). A DEM without a coordinate
+  system cannot go on the map's layers, so its contours are always downloaded. Lines
+  stop at nodata holes rather than cutting across them. Smoothing passes round the
+  corners of the grid crossings; *0* keeps them exact.
 - **Slope, aspect, hillshade…** writes each as a GeoTIFF on the DEM's grid and CRS
   (Horn's method, as in GDAL). Slope is in degrees or percent, aspect in degrees
   clockwise from north. In a projected CRS the grid spacing carries the projection's

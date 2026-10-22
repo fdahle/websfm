@@ -1150,7 +1150,8 @@ export function makeProductsOps({ rasterize } = {}) {
 
   // Tools ▸ Products ▾ — derived outputs of an existing DEM/ortho, all of which end
   // as a download (nothing here changes a stored product).
-  //   contours: { grid, settings, format:'geojson'|'dxf', crs } → { text, lines, levels }
+  //   contours: { grid, settings, format:'geojson'|'dxf'|'none', crs }
+  //             → { text (null for 'none'), paths: [{ path, level, index }], lines, levels }
   //   terrain:  { grid, settings } → { rasters: { slope?, aspect?, hillshade? } }
   //   clip:     { kind:'dem', grid, polygons } | { kind:'ortho', cog, geo, polygons } → { raster }
   // A DEM plane arrives as a COPY (transferred), so nothing is round-tripped; an
@@ -1178,11 +1179,15 @@ export function makeProductsOps({ rasterize } = {}) {
     }
     if (tool === 'contours') {
       const result = traceContours(input.grid, settings, log)
-      const text =
-        input.format === 'dxf'
-          ? contoursToDxf(result)
-          : JSON.stringify(contoursToGeoJSON(result, { crs: input.crs || undefined }))
-      return { result: { text, lines: result.lines.length, levels: result.levels.length } }
+      const fc = contoursToGeoJSON(result, { crs: input.crs || undefined })
+      const text = input.format === 'dxf' ? contoursToDxf(result) : input.format === 'none' ? null : JSON.stringify(fc)
+      // The lines for the map layer: the GeoJSON's coordinates, closed rings closed.
+      const paths = fc.features.map((f) => ({
+        path: f.geometry.coordinates,
+        level: f.properties.elevation,
+        index: f.properties.index,
+      }))
+      return { result: { text, paths, lines: result.lines.length, levels: result.levels.length } }
     }
     if (tool === 'terrain') {
       const rasters = terrainProducts(input.grid, { ...settings, onLog: log })
