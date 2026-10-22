@@ -848,7 +848,8 @@ export const MAP_GROUP = {
     { id: 'map-toggle-layers', label: 'Layers', icon: 'layers', activeKey: 'mapLayersPanel' },
     { id: 'map-toggle-grid', label: 'Grid', icon: 'grid', activeKey: 'showMapGrid' },
     { id: 'map-toggle-cameras', label: 'Cameras', icon: 'camera', activeKey: 'showMapCameras' },
-    { id: 'map-toggle-gcps', label: 'GCPs', icon: 'map-pin', activeKey: 'showMapGcps' },
+    // Greyed (and never shown as on) until the project has a GCP or marker, as Footprints.
+    { id: 'map-toggle-gcps', label: 'GCPs', icon: 'map-pin', activeKey: 'showMapGcps', needs: ['gcps'] },
     {
       id: 'map-toggle-footprints',
       label: 'Footprints',

@@ -103,6 +103,12 @@ test('View ▸ Map ▸ GCPs hides the GCP symbols', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Create project', exact: true }).click()
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  // With no GCP yet the toggle is greyed and off, like Footprints.
+  await page.locator('.tab', { hasText: /^2D$/ }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'View', exact: true }).click()
+  const gcpsBtn = page.locator('.ribbon').getByRole('button', { name: 'GCPs', exact: true })
+  await expect(gcpsBtn).toBeDisabled()
+  await expect(gcpsBtn).not.toHaveClass(/active/)
   await page.evaluate(async () => {
     const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
     const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
