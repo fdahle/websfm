@@ -109,6 +109,16 @@ function toggleMap(row) {
             :title="isProductExpanded(row.kind) ? 'Collapse' : 'Expand'"
           ></button>
           <input
+            class="map-visibility"
+            type="checkbox"
+            :checked="row.visible"
+            :disabled="row.mapBlocked && !row.visible"
+            :aria-label="`Show ${row.name} on the map`"
+            :title="row.mapBlocked && !row.visible ? 'Rebuild it first to show it on the map' : 'Shown on the 2D map'"
+            @click.stop
+            @change="sidebar.setProductVisible({ kind: row.kind, visible: $event.target.checked })"
+          />
+          <input
             v-if="editingKind === row.kind"
             :ref="setRenameInput"
             v-model="editingName"
@@ -120,7 +130,6 @@ function toggleMap(row) {
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ row.name }}</span>
-          <span v-if="row.visible" class="map-flag" title="Shown on the map — right-click to hide">◉</span>
           <span class="obs-badge" :title="`${row.product.width}×${row.product.height} px`">
             {{ row.product.width }}×{{ row.product.height }}
           </span>

@@ -87,6 +87,13 @@ test('a computed DEM in the project CRS goes on the map, fits, and probes cell v
     )
     .toBe(true)
   await expect(onMapButton(page)).toHaveClass(/active/)
+  // The Products row's checkbox is the same switch.
+  const rowCheck = page.getByRole('checkbox', { name: /on the map$/ })
+  await expect(rowCheck).toBeChecked()
+  await rowCheck.uncheck()
+  await expect(onMapButton(page)).not.toHaveClass(/active/)
+  await rowCheck.check()
+  await expect(onMapButton(page)).toHaveClass(/active/)
 
   await page.locator('.tab', { hasText: /^2D$/ }).click()
   await page.locator('.ribbon').getByRole('button', { name: 'View', exact: true }).click()

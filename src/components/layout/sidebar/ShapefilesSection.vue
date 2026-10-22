@@ -66,6 +66,15 @@ function fromMenu(fn) {
             :title="isExpanded(set.id) ? 'Collapse' : 'Expand'"
           ></button>
           <input
+            class="map-visibility"
+            type="checkbox"
+            :checked="set.visible !== false"
+            :aria-label="`Show ${set.name} on the map`"
+            title="Shown on the 2D map"
+            @click.stop
+            @change="sidebar.setShapefileVisible({ id: set.id, visible: $event.target.checked })"
+          />
+          <input
             v-if="editingId === set.id"
             :ref="setRenameInput"
             v-model="editingName"
@@ -77,7 +86,6 @@ function fromMenu(fn) {
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ set.name }}</span>
-          <span v-if="set.visible !== false" class="map-flag" title="Shown on the map — right-click to hide">◉</span>
           <span class="obs-badge" :title="`${pluralize(set.footprints.length, 'polygon')}`">{{
             set.footprints.length
           }}</span>
@@ -121,11 +129,3 @@ function fromMenu(fn) {
 </template>
 
 <style scoped src="./sidebar-sections.css"></style>
-<style scoped>
-.map-flag {
-  flex-shrink: 0;
-  font-size: 10px;
-  line-height: 15px;
-  color: var(--accent, #4a9eff);
-}
-</style>

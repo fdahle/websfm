@@ -263,6 +263,11 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Map layers have a checkbox in the sidebar.** DEM, orthophoto, reference rasters and
+  polygon sets show and hide on the 2D map with a checkbox on their row, like a cloud's
+  3D checkbox, instead of the ◉ marker and the right-click menu alone (which stays).
+  A layer the map cannot place yet (a product to rebuild, a raster without a CRS) has
+  it greyed, with the reason as its tooltip.
 - **Sparse Reconstruction uses every core for its bundle adjustment.** Where the page
   can share memory with its workers (it can when served as the app is: Chrome,
   cross-origin isolated), the bundle adjustment runs on up to 16 threads, and gives the

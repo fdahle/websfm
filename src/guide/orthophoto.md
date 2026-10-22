@@ -254,9 +254,9 @@ pixels, which is smoother. **Nearest** keeps each pixel's colour exactly. Next t
 transparent pixels, Bilinear also takes the nearest pixel, so edges don't bleed.
 
 ## Show on the 2D map
-Choose **On Map** in the orthophoto's ribbon tab, or **Display on map** in the
-Products row's right-click menu. The row then shows ◉ and an **Opacity** slider while
-expanded. The map draws the orthophoto at full resolution from its tiles, under GCPs
+Tick the orthophoto's checkbox in the Products section, or choose **On Map** in the
+orthophoto's ribbon tab. While it is on the map, the expanded row has an **Opacity**
+slider. The map draws the orthophoto at full resolution from its tiles, under GCPs
 and footprints and above imported reference rasters; **Fit View** includes it.
 Transparent (uncovered) pixels stay transparent. In the model frame, an orthophoto
 whose local frame is shifted from the map's draws its preview image instead.

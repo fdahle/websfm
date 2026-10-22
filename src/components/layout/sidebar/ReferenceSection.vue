@@ -101,6 +101,16 @@ const ctxOpenLabel = computed(() =>
             :title="isRasterExpanded(r.id) ? 'Collapse' : 'Expand'"
           ></button>
           <input
+            class="map-visibility"
+            type="checkbox"
+            :checked="!!r.visible"
+            :disabled="!canMap(r) && !r.visible"
+            :aria-label="`Show ${r.name} on the map`"
+            :title="canMap(r) ? 'Shown on the 2D map' : 'No coordinate system to place it on the map'"
+            @click.stop
+            @change="sidebar.setRasterVisible({ id: r.id, visible: $event.target.checked })"
+          />
+          <input
             v-if="editingRasterId === r.id"
             :ref="setRenameInput"
             v-model="editingName"
@@ -112,9 +122,6 @@ const ctxOpenLabel = computed(() =>
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ r.name }}</span>
-          <!-- On-map indicator: the toggle lives in the right-click menu, so
-               without this the state is invisible until you open the menu again. -->
-          <span v-if="r.visible" class="map-flag" title="Shown on the map — right-click to hide">◉</span>
           <span
             v-if="datumWarn(r)"
             class="warn-flag"

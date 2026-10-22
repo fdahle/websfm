@@ -132,8 +132,8 @@ estimate, not a measurement: a building on a slope gets the slope continued unde
 it. On by default for Ground only, off otherwise.
 
 ## Show on the 2D map
-Choose **On Map** in the DEM's ribbon tab, or **Display on map** in the Products row's
-right-click menu. The row then shows ◉ and an **Opacity** slider while expanded. The
+Tick the DEM's checkbox in the Products section, or choose **On Map** in the DEM's
+ribbon tab. While it is on the map, the expanded row has an **Opacity** slider. The
 map draws the DEM's hillshade preview under GCPs and footprints, and above imported
 reference rasters; **Fit View** includes it. With the cursor over it, the map's status
 bar shows the height of the cell under the cursor, and "no data" over a hole.
