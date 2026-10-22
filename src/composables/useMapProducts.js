@@ -12,6 +12,7 @@ import { createProductRasterSource } from '../core/io/rasterSource.js'
 import { transform } from '../core/crs.js'
 import { demRef } from '../core/products/demWindow.js'
 import { readDemWindow } from '../workers/computeClient.js'
+import { stackMapLayers } from '../core/products/mapOrder.js'
 
 // What the 2D map shows, in which frame (CLAUDE.md ▸ map raster layers).
 //
@@ -131,8 +132,12 @@ export function useMapProducts() {
 
   const productMapLayers = computed(() => placements.value.map((p) => p.placed?.layer).filter(Boolean))
 
+  // Bottom first, in the order Sidebar ▸ Map layers sets (core/products/mapOrder.js).
   const mapLayers = computed(() =>
-    mode.value === 'crs' ? [...external.mapRasters, ...productMapLayers.value] : productMapLayers.value,
+    stackMapLayers(
+      mode.value === 'crs' ? [...external.mapRasters, ...productMapLayers.value] : productMapLayers.value,
+      recon.mapOrder,
+    ),
   )
 
   // One line per thing the user asked for that this frame cannot show, so an

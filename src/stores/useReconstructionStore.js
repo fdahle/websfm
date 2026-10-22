@@ -15,6 +15,7 @@ import * as opfs from '../utils/opfs.js'
 import { yieldToPaint } from '../utils/concurrency.js'
 import { normalizeRegion, regionStatus, regionMask } from '../core/products/region.js'
 import { normalizeProductLayers } from '../core/products/productLayers.js'
+import { normalizeMapOrder } from '../core/products/mapOrder.js'
 import { selectPoints } from '../core/products/cloudEdit.js'
 import { normalizeOrientation, orientationStatus, orientationBasis } from '../core/products/orientation.js'
 import { formatBytes } from '../core/dense/memBudget.js'
@@ -260,6 +261,13 @@ export const useReconstructionStore = registerProjectStore(
     // product record: saving a product rewrites its raster buffers, and a map
     // toggle must not. It survives a rebuild, so a DEM on the map stays there.
     const productLayers = ref({})
+    // The 2D map's raster stacking order, top first (core/products/mapOrder.js): the
+    // ids of reference rasters and `product:dem` / `product:ortho`. Empty = the default.
+    const mapOrder = ref([])
+    function setMapOrder(ids) {
+      mapOrder.value = normalizeMapOrder(ids)
+      save()
+    }
 
     let cloudSeq = 0
     const makeCloudId = () => `cloud-${Date.now()}-${cloudSeq++}`
@@ -490,6 +498,7 @@ export const useReconstructionStore = registerProjectStore(
         region: region.value,
         orientation: orientation.value,
         productLayers: productLayers.value,
+        mapOrder: mapOrder.value,
         // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
         summary: summary.value,
         denseSummary: denseSummary.value,
@@ -962,6 +971,7 @@ export const useReconstructionStore = registerProjectStore(
       region.value = null
       orientation.value = null
       productLayers.value = {}
+      mapOrder.value = []
       summary.value = null
       denseSummary.value = null
       depthSummary.value = null
@@ -1091,6 +1101,7 @@ export const useReconstructionStore = registerProjectStore(
       region.value = normalizeRegion(data.region) ?? null
       orientation.value = normalizeOrientation(data.orientation) ?? null
       productLayers.value = normalizeProductLayers(data.productLayers) // absent ⇒ nothing on the map
+      mapOrder.value = normalizeMapOrder(data.mapOrder) // absent ⇒ the default stack
       summary.value = data.summary ?? null
       denseSummary.value = data.denseSummary ?? null
       depthSummary.value = data.depthSummary ?? null
@@ -1251,6 +1262,8 @@ export const useReconstructionStore = registerProjectStore(
       productLayers,
       setProductVisible,
       setProductOpacity,
+      mapOrder,
+      setMapOrder,
       // Triangulated marker positions (SfM frame) for the model-frame map.
       markerPositions,
     }

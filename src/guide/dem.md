@@ -134,9 +134,15 @@ it. On by default for Ground only, off otherwise.
 ## Show on the 2D map
 Tick the DEM's checkbox in the Products section, or choose **On Map** in the DEM's
 ribbon tab. While it is on the map, the expanded row has an **Opacity** slider. The
-map draws the DEM's hillshade preview under GCPs and footprints, and above imported
-reference rasters; **Fit View** includes it. With the cursor over it, the map's status
+map draws the DEM's hillshade preview under GCPs and footprints, and by default above
+imported reference rasters (see Map layers below); **Fit View** includes it. With the cursor over it, the map's status
 bar shows the height of the cell under the cursor, and "no data" over a hole.
+
+When several rasters are on the map, **Map layers** at the bottom of the sidebar lists
+them all in one stack, imported reference rasters included: the top of the list draws
+on top. Drag a row by ⠿ (or use ▲ ▼) to restack, and use its slider to fade it; the
+order is saved with the project. Contours, footprints, GCPs and cameras always draw
+above the rasters.
 
 The 2D map has two frames, switched with **View ▸ Map ▸ Model Frame**:
 - **Project CRS** (Model Frame off): the basemap, GPS positions, GCPs, footprints,
