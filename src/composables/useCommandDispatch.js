@@ -123,7 +123,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
   const { setRasterVisible } = useExternalStore()
-  const { setProductVisible } = useReconstructionStore()
+  const { setProductVisible, setMapLayerHidden } = useReconstructionStore()
   const { cycleTheme } = useTheme()
   const { imageViewPrefs, patchImageView } = useImageViewSettings()
 
@@ -515,10 +515,14 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'raster-style':
         if (activeRasterTab.value?.rasterId) rasterStyleId.value = activeRasterTab.value.rasterId
         break
+      // In Layers: adds the raster to the map's Layers (ticked there), or takes it off.
       case 'raster-toggle-map': {
         const r = activeRasterTab.value
-        if (r?.rasterId) setRasterVisible(r.rasterId, !r.visible)
-        else if (r && !r.imported) setProductVisible(r.kind, !r.visible)
+        const id = r?.rasterId ?? (r && !r.imported ? `product:${r.kind}` : null)
+        if (!id) break
+        if (!r.visible) setMapLayerHidden(id, false)
+        if (r.rasterId) setRasterVisible(r.rasterId, !r.visible)
+        else setProductVisible(r.kind, !r.visible)
         break
       }
       case 'raster-symbology':

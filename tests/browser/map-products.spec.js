@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 // Computed DEM on the 2D map (CLAUDE.md ▸ map raster layers),
-// against the full app: the ribbon's On Map toggle, Fit View over a raster-only
+// against the full app: the ribbon's In Layers toggle, Fit View over a raster-only
 // map, the status-bar probe (a value, and "no data" over a hole — never a
 // neighbour's height), and the greyed toggle for a local-frame product.
 
@@ -57,7 +57,7 @@ async function setup(page, crs) {
   await page.locator('.item-name', { hasText: /^DEM$/ }).dblclick()
 }
 
-const onMapButton = (page) => page.locator('.ribbon').getByRole('button', { name: /On\s*Map/ })
+const onMapButton = (page) => page.locator('.ribbon').getByRole('button', { name: /In\s*Layers/ })
 
 // Tools ▸ Measure ▾ ▸ <row>: the measuring tools are checkable menu rows.
 async function measureTool(page, row) {
@@ -77,18 +77,22 @@ test('a computed DEM in the project CRS goes on the map, fits, and probes cell v
   await page.mouse.move(vb.x + vb.width / 2, vb.y + vb.height / 2)
   await expect(page.locator('.product-viewer .status-bar')).toContainText('no data')
 
+  // A first-built DEM is on the map (In Layers) on its own; the ribbon toggle takes it
+  // off and puts it back.
+  const demOnMap = () =>
+    page.evaluate(async () => {
+      const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+      return useReconstructionStore().productLayers.dem?.visible
+    })
+  await expect.poll(demOnMap).toBe(true)
+  await expect(onMapButton(page)).toHaveClass(/active/)
   await onMapButton(page).click()
-  await expect
-    .poll(() =>
-      page.evaluate(async () => {
-        const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-        return useReconstructionStore().productLayers.dem?.visible
-      }),
-    )
-    .toBe(true)
+  await expect.poll(demOnMap).toBe(false)
+  await onMapButton(page).click()
+  await expect.poll(demOnMap).toBe(true)
   await expect(onMapButton(page)).toHaveClass(/active/)
   // The Products row's checkbox is the same switch.
-  const rowCheck = page.getByRole('checkbox', { name: /on the map$/ })
+  const rowCheck = page.getByRole('checkbox', { name: /to the map's layers$/ })
   await expect(rowCheck).toBeChecked()
   await rowCheck.uncheck()
   await expect(onMapButton(page)).not.toHaveClass(/active/)

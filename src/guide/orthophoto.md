@@ -271,20 +271,25 @@ pixels, which is smoother. **Nearest** keeps each pixel's colour exactly. Next t
 transparent pixels, Bilinear also takes the nearest pixel, so edges don't bleed.
 
 ## Show on the 2D map
-Tick the orthophoto's checkbox in the Products section, or choose **On Map** in the
-orthophoto's ribbon tab. While it is on the map, the expanded row has an **Opacity**
-slider. The map draws the orthophoto at full resolution from its tiles, under GCPs
+A newly built orthophoto goes on the 2D map by itself. The checkbox on its row in the
+Products section, or **In Layers** in the orthophoto's ribbon tab, takes it off the
+map and puts it back; a rebuild keeps the choice. While it is on the map, the
+expanded row has an **Opacity** slider. The map draws the orthophoto at full resolution from its tiles, under GCPs
 and footprints and, by default, above the DEM and imported reference rasters (see Layers
 below); **Fit View** includes it.
 Transparent (uncovered) pixels stay transparent. In the model frame, an orthophoto
 whose local frame is shifted from the map's draws its preview image instead.
 
-When several layers are on the map, **View ▸ Map ▸ Layers** opens a small panel over
-the map that lists them all in one stack: imported reference rasters, contour lines and
-polygon files included. The top of the list draws on top. Drag a row by ⠿ (or use ▲ ▼)
-to restack, tick it to show it, and use its slider to fade it; the order is saved with
-the project. Footprints, GCPs and cameras always draw above the layers; **View ▸ Map ▸
-GCPs** hides the GCP symbols (they stay while you edit GCPs).
+**View ▸ Map ▸ Layers** opens a small panel over the map that lists the layers on it
+in one stack, as a GIS does: imported reference rasters, contour lines and polygon
+files included. The sidebar holds everything in the project; the panel only what you
+put on the map. The top of the list draws on top: drag a row by ⠿ (or use ▲ ▼) to
+restack. A row's checkbox hides the layer for a while and keeps it in the list; its
+✕ takes it off the map. Click a row to set its **Opacity** or **Zoom to** it in the
+strip below the list. The last row is the **Basemap**, which draws under everything.
+The order and what is hidden are saved with the project. Footprints, GCPs and cameras
+always draw above the layers; **View ▸ Map ▸ GCPs** hides the GCP symbols (they stay
+while you edit GCPs).
 
 The 2D map has two frames, switched with **View ▸ Map ▸ Model Frame**:
 - **Project CRS** (Model Frame off): the basemap, GPS positions, GCPs, footprints,

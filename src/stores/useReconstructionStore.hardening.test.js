@@ -1,4 +1,5 @@
 import { it, expect, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useReconstructionStore } from './useReconstructionStore.js'
@@ -47,11 +48,11 @@ it('puts a computed product on the map unless it has no preview, whatever its fr
   expect(store.productLayers.dem.visible).toBe(false)
 })
 
-it('drops the on-map flag with a removed product, so a rebuilt one starts off the map', async () => {
+it('puts a first-built product on the map, and a rebuild after removal again', async () => {
   setActivePinia(createPinia())
   useProjectsStore().persistenceAvailable = false
   const store = useReconstructionStore()
-  store.dem = {
+  const dem = {
     width: 2,
     height: 2,
     gsd: 1,
@@ -61,10 +62,32 @@ it('drops the on-map flag with a removed product, so a rebuilt one starts off th
     previewUrl: 'data:x',
     crs: 'local',
   }
-  store.setProductVisible('dem', true)
-  store.setProductOpacity('dem', 0.4)
+  store.dem = dem
+  await nextTick()
+  expect(store.productLayers.dem).toEqual({ visible: true, opacity: 1 })
+  // Taken off the map, a rebuild keeps it off.
+  store.setProductVisible('dem', false)
+  store.dem = { ...dem }
+  await nextTick()
+  expect(store.productLayers.dem.visible).toBe(false)
+  // Removed, its layer state goes with it, and the next build is on the map again.
   expect(await store.removeProduct('dem')).toBe(true)
-  expect(store.productLayers.dem).toEqual({ visible: false, opacity: 0.4 })
+  expect(store.productLayers.dem).toBeUndefined()
+  store.dem = { ...dem }
+  await nextTick()
+  expect(store.productLayers.dem).toEqual({ visible: true, opacity: 1 })
+})
+
+it('remembers which listed layers the Layers panel hides', () => {
+  setActivePinia(createPinia())
+  useProjectsStore().persistenceAvailable = false
+  const store = useReconstructionStore()
+  store.setMapLayerHidden('product:dem', true)
+  store.setMapLayerHidden('vector:a', true)
+  store.setMapLayerHidden('product:dem', true)
+  expect(store.mapHidden).toEqual(['product:dem', 'vector:a'])
+  store.setMapLayerHidden('product:dem', false)
+  expect(store.mapHidden).toEqual(['vector:a'])
 })
 
 it('keeps an unreadable saved model on disk instead of saving an empty one over it', async () => {

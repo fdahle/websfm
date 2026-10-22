@@ -134,14 +134,28 @@ export function useMapProducts() {
       : [],
   )
 
-  const productMapLayers = computed(() => placements.value.map((p) => p.placed?.layer).filter(Boolean))
+  // A layer unticked in View ▸ Map ▸ Layers stays listed there but is not drawn,
+  // probed or measured.
+  const hidden = computed(() => new Set(recon.mapHidden))
+  const shown = (l) => !hidden.value.has(l.id)
+
+  const productMapLayers = computed(() =>
+    placements.value
+      .map((p) => p.placed?.layer)
+      .filter(Boolean)
+      .filter(shown),
+  )
 
   // Bottom first, in the order View ▸ Map ▸ Layers sets (core/products/mapOrder.js).
   // Vector layers are in the project CRS, so only the CRS map has them.
   const mapLayers = computed(() =>
     stackMapLayers(
       mode.value === 'crs'
-        ? [...external.mapRasters, ...productMapLayers.value, ...vectorMapLayers(footprintsStore.sets)]
+        ? [
+            ...external.mapRasters.filter(shown),
+            ...productMapLayers.value,
+            ...vectorMapLayers(footprintsStore.sets).filter(shown),
+          ]
         : productMapLayers.value,
       recon.mapOrder,
     ),
@@ -149,7 +163,7 @@ export function useMapProducts() {
   const rasterMapLayers = computed(() => mapLayers.value.filter((l) => !l.vector))
 
   // One line per thing the user asked for that this frame cannot show, so an
-  // "On Map" layer never silently fails to appear.
+  // layer put "In Layers" never silently fails to appear.
   const notes = computed(() => {
     const out = placements.value
       .filter((p) => p.placed?.reason)
@@ -237,7 +251,7 @@ export function useMapProducts() {
       if (layer.kind === 'dem' && recon.dem?.cog) return fullResolutionProbe(hit, recon.dem, rx, ry)
       return hit
     }
-    return mode.value === 'crs' ? external.probeRasterAt(x, y) : null
+    return mode.value === 'crs' ? external.probeRasterAt(x, y, hidden.value) : null
   }
 
   // ── Measuring on the map ─────────────────────────────────────────────

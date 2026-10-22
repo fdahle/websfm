@@ -180,7 +180,7 @@ test('contours of a georeferenced DEM go on the map as a line layer', async ({ p
 
   // The row in Products: a map checkbox, and a GeoJSON download of the lines.
   await page.locator('.section-hd', { hasText: 'Products' }).click()
-  await expect(page.getByRole('checkbox', { name: 'Show Contours 5 m on the map' })).toBeChecked()
+  await expect(page.getByRole('checkbox', { name: "Add Contours 5 m to the map's layers" })).toBeChecked()
   await page.locator('.item-name', { hasText: 'Contours 5 m' }).click({ button: 'right' })
   const geo = await download(page, () => page.getByRole('button', { name: 'Download GeoJSON' }).click())
   const fc = JSON.parse(geo.bytes.toString('utf8'))

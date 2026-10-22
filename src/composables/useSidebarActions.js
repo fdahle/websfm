@@ -6,6 +6,7 @@ import { useImagesStore } from '../stores/useImagesStore.js'
 import { useModalsStore } from '../stores/useModalsStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
+import { vectorLayerId } from '../core/products/vectorLayers.js'
 
 // The sidebar's context (components/layout/sidebar/sidebarContext.js), lifted out of
 // App.vue: what each row action does, plus the App-level state the sections show.
@@ -49,8 +50,20 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   const imagesStore = useImagesStore()
   const { imageById, selectImage, renameImage } = imagesStore
   const { imageCount: sensorImageCount, mergeSensors } = useSensorsStore()
-  const { selectCloud, setCloudVisible, renameCloud, setMainSparse, setProductVisible, setProductOpacity } =
-    useReconstructionStore()
+  const {
+    selectCloud,
+    setCloudVisible,
+    renameCloud,
+    setMainSparse,
+    setProductVisible,
+    setProductOpacity,
+    setMapLayerHidden,
+  } = useReconstructionStore()
+  // A layer put on the map is listed ticked in View ▸ Map ▸ Layers, even one that was
+  // unticked there before it was taken off.
+  const unhide = (id, visible) => {
+    if (visible) setMapLayerHidden(id, false)
+  }
   const footprintsStore = useFootprintsStore()
   const { sets: vectorSets } = storeToRefs(footprintsStore)
   const { renameSet, setSetVisible, setSetOpacity } = footprintsStore
@@ -178,7 +191,10 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     // Vector layers (contours in Products, polygon files in Reference Data)
     removeVectorSet: confirmRemoveVectorSet,
     renameVectorSet: ({ id, name }) => renameSet(id, name),
-    setVectorVisible: ({ id, visible }) => setSetVisible(id, visible),
+    setVectorVisible: ({ id, visible }) => {
+      unhide(vectorLayerId(id), visible)
+      setSetVisible(id, visible)
+    },
     setVectorOpacity: ({ id, opacity }) => setSetOpacity(id, opacity),
     zoomToVectorSet,
     downloadVectorSet,
@@ -195,7 +211,10 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     openProduct: openComputedProductTab,
     removeProduct: confirmRemoveProduct,
     renameProduct: renameProductFromSidebar,
-    setProductVisible: ({ kind, visible }) => setProductVisible(kind, visible),
+    setProductVisible: ({ kind, visible }) => {
+      unhide(`product:${kind}`, visible)
+      setProductVisible(kind, visible)
+    },
     setProductOpacity: ({ kind, opacity }) => setProductOpacity(kind, opacity),
     productSymbology: (kind) => {
       symbologyProductKind.value = kind
@@ -218,7 +237,10 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
       importRasterData.value = { raster, fileName: raster.name, mode: 'accuracy' }
       importRasterOpen.value = true
     },
-    setRasterVisible: ({ id, visible }) => setRasterVisible(id, visible),
+    setRasterVisible: ({ id, visible }) => {
+      unhide(id, visible)
+      setRasterVisible(id, visible)
+    },
     setRasterOpacity: ({ id, opacity }) => setRasterOpacity(id, opacity),
     convertRasterToImage: (id) => onRasterImportAsImage({ id }),
   }

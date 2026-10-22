@@ -83,8 +83,8 @@ function fromMenu(fn) {
 // The product's frame never blocks the toggle: the map explains when its current
 // frame cannot place a product (useMapProducts notes).
 function mapCtxLabel(row) {
-  if (row.mapBlocked) return 'Show on map (rebuild first)'
-  return row.visible ? 'Hide from map' : 'Show on map'
+  if (row.mapBlocked) return 'Add to Layers (rebuild first)'
+  return row.visible ? 'Remove from Layers' : 'Add to Layers'
 }
 function toggleMap(row) {
   if (!row.mapBlocked) sidebar.setProductVisible({ kind: row.kind, visible: !row.visible })
@@ -118,8 +118,12 @@ function toggleMap(row) {
             type="checkbox"
             :checked="row.visible"
             :disabled="row.mapBlocked && !row.visible"
-            :aria-label="`Show ${row.name} on the map`"
-            :title="row.mapBlocked && !row.visible ? 'Rebuild it first to show it on the map' : 'Shown on the 2D map'"
+            :aria-label="`Add ${row.name} to the map's layers`"
+            :title="
+              row.mapBlocked && !row.visible
+                ? 'Rebuild it first to show it on the map'
+                : 'On the 2D map, listed in View ▸ Map ▸ Layers'
+            "
             @click.stop
             @change="sidebar.setProductVisible({ kind: row.kind, visible: $event.target.checked })"
           />

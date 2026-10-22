@@ -14,7 +14,7 @@ import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
 import { yieldToPaint } from '../utils/concurrency.js'
 import { normalizeRegion, regionStatus, regionMask } from '../core/products/region.js'
-import { normalizeProductLayers } from '../core/products/productLayers.js'
+import { normalizeProductLayers, productMapBlocker } from '../core/products/productLayers.js'
 import { normalizeMapOrder } from '../core/products/mapOrder.js'
 import { selectPoints } from '../core/products/cloudEdit.js'
 import { normalizeOrientation, orientationStatus, orientationBasis } from '../core/products/orientation.js'
@@ -261,11 +261,34 @@ export const useReconstructionStore = registerProjectStore(
     // product record: saving a product rewrites its raster buffers, and a map
     // toggle must not. It survives a rebuild, so a DEM on the map stays there.
     const productLayers = ref({})
-    // The 2D map's raster stacking order, top first (core/products/mapOrder.js): the
-    // ids of reference rasters and `product:dem` / `product:ortho`. Empty = the default.
+    // A product built for the first time goes on the map (into View ▸ Map ▸ Layers),
+    // as a new layer does in a GIS. One taken off the map has an entry, and stays off.
+    for (const [kind, product] of [
+      ['dem', dem],
+      ['ortho', ortho],
+    ]) {
+      watch(product, (now) => {
+        if (!now || productLayers.value[kind] || productMapBlocker(now)) return
+        productLayers.value = { ...productLayers.value, [kind]: { visible: true, opacity: 1 } }
+      })
+    }
+    // The 2D map's layer stack, top first (core/products/mapOrder.js): the ids of
+    // reference rasters, `product:dem` / `product:ortho` and `vector:<set id>`. Empty =
+    // the default.
     const mapOrder = ref([])
     function setMapOrder(ids) {
       mapOrder.value = normalizeMapOrder(ids)
+      save()
+    }
+    // The ids of layers on the map that are unticked in View ▸ Map ▸ Layers: still
+    // listed there, not drawn. Being on the map at all is the layer's own `visible`
+    // (a raster record, productLayers, a vector set), which the sidebar sets.
+    const mapHidden = ref([])
+    function setMapLayerHidden(id, hidden) {
+      const rest = mapHidden.value.filter((x) => x !== id)
+      const next = hidden ? [...rest, id] : rest
+      if (next.length === mapHidden.value.length) return
+      mapHidden.value = next
       save()
     }
 
@@ -499,6 +522,7 @@ export const useReconstructionStore = registerProjectStore(
         orientation: orientation.value,
         productLayers: productLayers.value,
         mapOrder: mapOrder.value,
+        mapHidden: mapHidden.value,
         // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
         summary: summary.value,
         denseSummary: denseSummary.value,
@@ -972,6 +996,7 @@ export const useReconstructionStore = registerProjectStore(
       orientation.value = null
       productLayers.value = {}
       mapOrder.value = []
+      mapHidden.value = []
       summary.value = null
       denseSummary.value = null
       depthSummary.value = null
@@ -1102,6 +1127,7 @@ export const useReconstructionStore = registerProjectStore(
       orientation.value = normalizeOrientation(data.orientation) ?? null
       productLayers.value = normalizeProductLayers(data.productLayers) // absent ⇒ nothing on the map
       mapOrder.value = normalizeMapOrder(data.mapOrder) // absent ⇒ the default stack
+      mapHidden.value = normalizeMapOrder(data.mapHidden) // a list of ids, as the order
       summary.value = data.summary ?? null
       denseSummary.value = data.denseSummary ?? null
       depthSummary.value = data.depthSummary ?? null
@@ -1264,6 +1290,8 @@ export const useReconstructionStore = registerProjectStore(
       setProductOpacity,
       mapOrder,
       setMapOrder,
+      mapHidden,
+      setMapLayerHidden,
       // Triangulated marker positions (SfM frame) for the model-frame map.
       markerPositions,
     }

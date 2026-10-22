@@ -625,10 +625,12 @@ export const useExternalStore = registerProjectStore(
     // lazy load of a hundreds-of-MB tile, so an un-hydrated hit reports
     // `loaded:false` and the caller offers to load it.
     // → { id, name, kind, loaded, value } | null
-    function probeRasterAt(x, y) {
+    // `skip`: ids not to answer for (layers the Layers panel hides), or null.
+    function probeRasterAt(x, y, skip = null) {
       const list = mapRasters.value
       for (let i = list.length - 1; i >= 0; i--) {
         const meta = list[i]
+        if (skip?.has(meta.id)) continue
         const coords = toRasterCoords(meta, x, y)
         if (!coords) continue
         const [rx, ry] = coords

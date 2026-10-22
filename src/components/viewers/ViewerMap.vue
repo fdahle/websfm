@@ -738,6 +738,12 @@ function zoomToFootprints(polygons) {
   }
 }
 
+// Fit the view to one layer of the stack (the Layers panel's Zoom to).
+function zoomToLayer(id) {
+  const extent = stackLayers.extentOf(id)
+  if (ctx.map && extent) ctx.map.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 18, duration: 300 })
+}
+
 defineExpose({
   zoomToImage,
   fitView: fitToMarkers,
@@ -769,7 +775,7 @@ defineExpose({
         @command="(...a) => emit('command', ...a)"
       />
 
-      <MapLayersPanel v-if="showLayersPanel" @close="emit('command', 'map-toggle-layers')" />
+      <MapLayersPanel v-if="showLayersPanel" @close="emit('command', 'map-toggle-layers')" @zoom-to="zoomToLayer" />
 
       <GcpToolbar
         v-if="editMode"

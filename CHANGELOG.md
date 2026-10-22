@@ -286,14 +286,17 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
-- **Layers panel: stack and fade the layers on the map.** View ▸ Map ▸ Layers opens a
-  small panel over the 2D map listing every layer it can draw (imported reference
-  rasters and polygon files, the DEM, the orthophoto and contour lines) in one stack,
-  top first. Drag a row or use ▲ ▼
-  to change what draws on top, fade a layer with its opacity slider, and show or hide
-  it with its checkbox. The order is saved with the project; a layer added later goes
-  on top. Before, the order was fixed (reference rasters, then the DEM, then the
-  orthophoto).
+- **Layers panel: the layers on the map, as in a GIS.** View ▸ Map ▸ Layers opens a
+  small panel over the 2D map listing the layers on it (imported reference rasters
+  and polygon files, the DEM, the orthophoto and contour lines) in one stack, top
+  first. The sidebar holds everything; a layer goes into the panel with its sidebar
+  checkbox or In Layers on its ribbon tab (formerly On Map), and a newly built DEM,
+  orthophoto or contour set goes there by itself. In the panel, drag a row or use
+  ▲ ▼ to change what draws on top, untick it to hide it without taking it off, or
+  take it off with ✕. Each row is one line; the selected one's opacity slider and
+  Zoom to sit in a strip below the list, and the basemap is the last row. The order
+  and what is hidden are saved with the project; a layer added later goes on top.
+  Before, the order was fixed (reference rasters, then the DEM, then the orthophoto).
 - **Footprints are an overlay; the Shapefiles section is gone.** The image footprints
   from Footprints from poses are drawn above every layer, and View ▸ Map ▸ Footprints
   shows and hides only them (it hid contour lines and imported polygons too). They
@@ -310,11 +313,12 @@ Notable changes to websfm. The format follows
   to 1,500 px" or "About 3 points per cell"). A step that cannot matter is dimmed and
   says why. Depth Maps had its groups in reverse order, and DEM and Orthophoto had none.
   The guide articles follow the same order.
-- **Map layers have a checkbox in the sidebar.** DEM, orthophoto, reference rasters and
-  polygon sets show and hide on the 2D map with a checkbox on their row, like a cloud's
-  3D checkbox, instead of the ◉ marker and the right-click menu alone (which stays).
-  A layer the map cannot place yet (a product to rebuild, a raster without a CRS) has
-  it greyed, with the reason as its tooltip.
+- **Map layers have a checkbox in the sidebar.** DEM, orthophoto, reference rasters,
+  contour lines and polygon files go on the 2D map (into its Layers panel) with a
+  checkbox on their row, like a cloud's 3D checkbox, instead of the ◉ marker and the
+  right-click menu alone (which stays, as Add to / Remove from Layers). A layer the
+  map cannot place yet (a product to rebuild, a raster without a CRS) has it greyed,
+  with the reason as its tooltip.
 - **Sparse Reconstruction uses every core for its bundle adjustment.** Where the page
   can share memory with its workers (it can when served as the app is: Chrome,
   cross-origin isolated), the bundle adjustment runs on up to 16 threads, and gives the

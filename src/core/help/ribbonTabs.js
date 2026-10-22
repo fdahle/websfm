@@ -939,8 +939,8 @@ export const PICTURE_TAB = {
 // can also be rebuilt, and exports through the Export tab's dialog; an *imported*
 // reference raster downloads as the file it was (the pipeline never rebuilds
 // one), and its Style… is band math (greyed when there is nothing to choose).
-// The map toggle is one command; a product the map cannot place greys it with
-// the reason. Same entries as the sidebar's right-click menus.
+// The map toggle (In Layers: on the map, listed in View ▸ Map ▸ Layers) is one
+// command; a product the map cannot place greys it with the reason. Same entries as the sidebar's right-click menus.
 export function rasterTab(r) {
   const isOrtho = r?.kind === 'ortho'
   return {
@@ -962,7 +962,7 @@ export function rasterTab(r) {
             commands: [
               { id: 'raster-download', label: 'Download', icon: 'download' },
               { id: 'raster-style', label: 'Style…', icon: 'settings' },
-              { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterVisible' },
+              { id: 'raster-toggle-map', label: 'In\nLayers', icon: 'layers', activeKey: 'rasterVisible' },
               { id: 'raster-remove', label: 'Remove', icon: 'remove', danger: true },
             ],
           }
@@ -973,7 +973,7 @@ export function rasterTab(r) {
               { ...(isOrtho ? GEN_ORTHO : GEN_DEM), label: 'Rebuild' },
               { ...(isOrtho ? EXPORT_ORTHO : EXPORT_DEM), label: 'Export', icon: 'download' },
               { id: 'raster-symbology', label: 'Symbology…', icon: 'settings' },
-              { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterVisible' },
+              { id: 'raster-toggle-map', label: 'In\nLayers', icon: 'layers', activeKey: 'rasterVisible' },
               { id: 'raster-remove', label: 'Remove', icon: 'remove', danger: true },
             ],
           },

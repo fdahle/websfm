@@ -146,9 +146,11 @@ export function createProducts({ dem, isPersisting, log, ortho, save, productLay
     const name = product.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
     if (kind === 'dem') dem.value = null
     else ortho.value = null
-    // A product built later starts off the map rather than inheriting this one's flag.
-    if (productLayers.value[kind]?.visible) {
-      productLayers.value = { ...productLayers.value, [kind]: { ...productLayers.value[kind], visible: false } }
+    // A product built later starts afresh rather than inheriting this one's layer
+    // state: it goes on the map, as a first build does (useReconstructionStore).
+    if (productLayers.value[kind]) {
+      const { [kind]: _removed, ...rest } = productLayers.value
+      productLayers.value = rest
       save()
     }
     if (isPersisting()) await opfs.deleteProduct(projects.currentProjectId, kind).catch(() => {})

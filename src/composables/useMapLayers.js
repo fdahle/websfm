@@ -210,29 +210,32 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
     group = null
   }
 
-  // Extents of the on-map layers in the VIEW projection. Each raster keeps its
-  // native CRS (see makeRasterLayer), so its bounds are transformed here; one whose
-  // CRS OL does not know is skipped rather than guessed. A vector layer is in the
-  // view's CRS already.
-  function extents() {
-    const view = ctx.map?.getView().getProjection()
-    const out = []
-    for (const r of wanted() ?? []) {
-      if (r.vector) {
-        const e = layers.get(r.id)?.getSource().getExtent()
-        if (e && Number.isFinite(e[0])) out.push(e)
-        continue
-      }
-      const b = rasterBounds({ width: r.width, height: r.height, geoTransform: r.geoTransform })
-      const proj = r.crs ? getOlProjection(r.crs) : null
-      if (!b || !proj || !view) continue
-      try {
-        out.push(transformExtent(b, proj, view))
-      } catch {
-        /* unknown transform */
-      }
+  // A layer's extent in the VIEW projection, or null. Each raster keeps its native
+  // CRS (see makeRasterLayer), so its bounds are transformed here; one whose CRS OL
+  // does not know is skipped rather than guessed. A vector layer is in the view's CRS
+  // already.
+  function extentOfEntry(r) {
+    if (r.vector) {
+      const e = layers.get(r.id)?.getSource().getExtent()
+      return e && Number.isFinite(e[0]) ? e : null
     }
-    return out
+    const view = ctx.map?.getView().getProjection()
+    const b = rasterBounds({ width: r.width, height: r.height, geoTransform: r.geoTransform })
+    const proj = r.crs ? getOlProjection(r.crs) : null
+    if (!b || !proj || !view) return null
+    try {
+      return transformExtent(b, proj, view)
+    } catch {
+      return null // unknown transform
+    }
+  }
+  // Every on-map layer's extent (Fit View), and one layer's (the Layers panel's Zoom to).
+  function extents() {
+    return (wanted() ?? []).map(extentOfEntry).filter(Boolean)
+  }
+  function extentOf(id) {
+    const r = (wanted() ?? []).find((l) => l.id === id)
+    return r ? extentOfEntry(r) : null
   }
 
   // Re-style the vector layers (the selected image changed).
@@ -240,5 +243,5 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
     for (const layer of layers.values()) if (layer.get('vector')) layer.changed()
   }
 
-  return { createGroup, sync, dispose, extents, restyle }
+  return { createGroup, sync, dispose, extents, extentOf, restyle }
 }

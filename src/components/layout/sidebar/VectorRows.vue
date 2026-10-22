@@ -9,7 +9,7 @@ import { pluralize } from '../../../core/textFormat.js'
 // The vector layer rows, shared by Products (contour lines from the DEM) and
 // Reference Data (imported polygon files), as CloudRows is for clouds. Renders a
 // fragment of <li>s for the section's own <ul>. Each set is managed as a unit, like
-// a raster: show/hide on the map, opacity, zoom to, download, rename, remove. The
+// a raster: on the map (in its Layers) or not, opacity, zoom to, download, rename, remove. The
 // polygons of an imported file keep their own image link (used for spatial match
 // preselection), counted in the details. The image footprints are not a layer and
 // have no row (core/products/vectorLayers.js).
@@ -62,8 +62,8 @@ function fromMenu(fn) {
         class="map-visibility"
         type="checkbox"
         :checked="set.visible !== false"
-        :aria-label="`Show ${set.name} on the map`"
-        title="Shown on the 2D map"
+        :aria-label="`Add ${set.name} to the map's layers`"
+        :title="'On the 2D map, listed in View ▸ Map ▸ Layers'"
         @click.stop
         @change="sidebar.setVectorVisible({ id: set.id, visible: $event.target.checked })"
       />
@@ -126,7 +126,7 @@ function fromMenu(fn) {
         class="ctx-item"
         @click="fromMenu((s) => sidebar.setVectorVisible({ id: s.id, visible: s.visible === false }))"
       >
-        {{ menu.set.visible === false ? 'Show on map' : 'Hide from map' }}
+        {{ menu.set.visible === false ? 'Add to Layers' : 'Remove from Layers' }}
       </button>
       <button class="ctx-item" @click="fromMenu((s) => sidebar.downloadVectorSet(s.id))">Download GeoJSON</button>
       <div class="ctx-sep"></div>

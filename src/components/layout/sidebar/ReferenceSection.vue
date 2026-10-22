@@ -120,8 +120,8 @@ const ctxOpenLabel = computed(() =>
             type="checkbox"
             :checked="!!r.visible"
             :disabled="!canMap(r) && !r.visible"
-            :aria-label="`Show ${r.name} on the map`"
-            :title="canMap(r) ? 'Shown on the 2D map' : mapBlocker(r)"
+            :aria-label="`Add ${r.name} to the map's layers`"
+            :title="canMap(r) ? 'On the 2D map, listed in View ▸ Map ▸ Layers' : mapBlocker(r)"
             @click.stop
             @change="sidebar.setRasterVisible({ id: r.id, visible: $event.target.checked })"
           />
@@ -216,7 +216,7 @@ const ctxOpenLabel = computed(() =>
         <!-- Groups: get at it / how it's displayed → change what it is →
              destructive. Same order as the Products and cloud menus; the map
              toggle and styling join the first group, so an unstyleable raster
-             never leaves "Show on map" alone between two lines. -->
+             never leaves "Add to Layers" alone between two lines. -->
         <button class="ctx-item" @click="fromMenu((r) => sidebar.openRaster(r.id))">{{ ctxOpenLabel }}</button>
         <!-- The file exactly as imported, not a re-encode. -->
         <button class="ctx-item" @click="fromMenu((r) => sidebar.downloadRaster(r.id))">Download original</button>
@@ -227,7 +227,7 @@ const ctxOpenLabel = computed(() =>
           class="ctx-item"
           @click="fromMenu((r) => sidebar.setRasterVisible({ id: r.id, visible: !r.visible }))"
         >
-          {{ menu.raster.visible ? 'Hide from map' : 'Show on map' }}
+          {{ menu.raster.visible ? 'Remove from Layers' : 'Add to Layers' }}
         </button>
         <!-- Only for rasters band math can actually change: >3 bands or deeper
              than 8-bit. An 8-bit RGB ortho has nothing to choose. -->

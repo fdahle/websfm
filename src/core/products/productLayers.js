@@ -26,7 +26,7 @@ export function normalizeProductLayers(raw) {
 }
 
 // Why a product can never be drawn on a map, or null. Its FRAME is not a reason:
-// "On Map" is a request, honoured whenever the map's current frame can place the
+// "In Layers" is a request, honoured whenever the map's current frame can place the
 // product (placeProductLayer) and explained on the map when it cannot.
 export function productMapBlocker(product) {
   if (!product) return 'Build the product first'

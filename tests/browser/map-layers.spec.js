@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test'
 
-// View ▸ Map ▸ Layers: a floating panel with one stacking list for every raster the map can draw. The
-// list's top draws on top, a move restacks the map's raster group, the opacity
-// reaches the layer, and the order is saved with the project.
+// View ▸ Map ▸ Layers: a floating panel listing the layers on the map in one stack. The
+// list's top draws on top, a move restacks the map's layer group, the selected row's
+// opacity reaches the layer, a row's checkbox hides it and its ✕ takes it off the map,
+// and the order is saved with the project.
 
 const W = 40
 
@@ -77,7 +78,8 @@ test('the Map layers list restacks the map and fades a layer', async ({ page }) 
     ['ortho', 1],
     ['dem', 1],
   ])
-  await list.getByRole('slider', { name: 'Opacity of DEM' }).fill('0.4')
+  // The settings strip shows the top row until another is clicked.
+  await page.getByRole('slider', { name: 'Opacity of DEM' }).fill('0.4')
   await expect.poll(stack).toEqual([
     ['ortho', 1],
     ['dem', 0.4],
@@ -86,11 +88,25 @@ test('the Map layers list restacks the map and fades a layer', async ({ page }) 
   await list.getByRole('checkbox', { name: 'Show Orthophoto on the map' }).uncheck()
   await expect.poll(stack).toEqual([['dem', 0.4]])
   await expect(list.locator('.item-name')).toHaveText(['DEM', 'Orthophoto'])
-  expect(
-    await page.evaluate(
-      async () => (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore().mapOrder,
-    ),
-  ).toEqual(['product:dem', 'product:ortho'])
+  const mapState = () =>
+    page.evaluate(async () => {
+      const recon = (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore()
+      return { order: recon.mapOrder, hidden: recon.mapHidden, ortho: !!recon.productLayers.ortho?.visible }
+    })
+  expect(await mapState()).toEqual({ order: ['product:dem', 'product:ortho'], hidden: ['product:ortho'], ortho: true })
+
+  // ✕ takes it off the map; the sidebar checkbox puts it back, ticked.
+  await list.getByRole('button', { name: 'Remove Orthophoto from the map' }).click()
+  await expect(list.locator('.item-name')).toHaveText(['DEM'])
+  expect((await mapState()).ortho).toBe(false)
+  await page.locator('.section-hd', { hasText: 'Products' }).click()
+  await page.getByRole('checkbox', { name: "Add Orthophoto to the map's layers" }).check()
+  await expect(list.locator('.item-name')).toHaveText(['DEM', 'Orthophoto'])
+  await expect.poll(stack).toEqual([
+    ['ortho', 1],
+    ['dem', 0.4],
+  ])
+  expect((await mapState()).hidden).toEqual([])
   if (process.env.SHOT) await page.locator('.map-viewer').screenshot({ path: process.env.SHOT })
   // The panel's × is the ribbon toggle.
   await page.getByRole('button', { name: 'Close the layers panel' }).click()
