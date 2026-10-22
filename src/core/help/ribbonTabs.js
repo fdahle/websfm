@@ -140,8 +140,8 @@ export function measureMenu(m = null) {
       id: 'dem-difference',
       label: 'DEM of difference',
       icon: 'volume',
-      needs: ['dem', 'referenceDem'],
-      blurb: 'Gain and loss between the DEM and a reference DEM inside a polygon',
+      needs: ['dem', 'demCrs'],
+      blurb: 'Gain and loss inside a polygon against a reference DEM or the background terrain',
     },
   ]
 }

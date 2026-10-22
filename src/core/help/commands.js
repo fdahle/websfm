@@ -38,6 +38,8 @@ export const NEED_CHECKS = {
   twoClouds: { ok: (s) => s.editableCloudCount >= 2, reason: 'Needs at least two dense clouds' },
   mesh: { ok: (s) => s.meshReady, reason: 'Build a mesh first' },
   dem: { ok: (s) => s.demReady, reason: 'Build a DEM first' },
+  // Only a DEM placed on the Earth has a reference DEM or a terrain under it.
+  demCrs: { ok: (s) => !!s.demInCrs, reason: 'Georeference the model and rebuild the DEM first' },
   referenceDem: {
     ok: (s) => !!s.referenceDemReady,
     reason: 'Import a reference DEM first (Import ▸ Reference DEM / Ortho)',

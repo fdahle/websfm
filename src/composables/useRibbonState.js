@@ -51,7 +51,7 @@ export function useRibbonState({
   const { gcps } = storeToRefs(useGcpsStore())
   const { poses } = storeToRefs(usePosesStore())
   const { sensors } = storeToRefs(useSensorsStore())
-  const { depthMapCount } = storeToRefs(useReconstructionStore())
+  const { depthMapCount, dem } = storeToRefs(useReconstructionStore())
   const { hasReferenceDem } = storeToRefs(useExternalStore())
   const { records: measurementRecords } = storeToRefs(useMeasurementsStore())
   const { imageViewPrefs, showKeypointsFor } = useImageViewSettings()
@@ -86,6 +86,7 @@ export function useRibbonState({
     denseReady: denseReady.value,
     editableCloudCount: editableClouds.value.length,
     demReady: demReady.value,
+    demInCrs: !!dem.value?.crs && dem.value.crs !== 'local',
     meshReady: meshReady.value,
     orthoReady: orthoReady.value,
     productReady: productReady.value,

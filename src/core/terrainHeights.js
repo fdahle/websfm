@@ -46,15 +46,35 @@ export async function fetchTerrariumTile(z, x, y, { signal } = {}) {
   return { elev: decodeTerrarium(ctx.getImageData(0, 0, w, h).data, w, h), w, h }
 }
 
+// Bilinear height between pixel centres of one tile (clamped at its edge), at the
+// fractional tile coordinates `tx`, `ty` of tile column `x`, row `y`.
+function tileHeight({ elev, w, h }, tx, ty, x, y) {
+  const px = Math.max(0, Math.min(w - 1, (tx - x) * w - 0.5))
+  const py = Math.max(0, Math.min(h - 1, (ty - y) * h - 0.5))
+  const c0 = Math.floor(px),
+    r0 = Math.floor(py)
+  const c1 = Math.min(w - 1, c0 + 1),
+    r1 = Math.min(h - 1, r0 + 1)
+  const fx = px - c0,
+    fy = py - r0
+  const at = (r, c) => elev[r * w + c]
+  const top = at(r0, c0) * (1 - fx) + at(r0, c1) * fx
+  const bottom = at(r1, c0) * (1 - fx) + at(r1, c1) * fx
+  return top * (1 - fy) + bottom * fy
+}
+
 /**
  * Heights of the global terrain at level `zoom`: `heightAt(lon, lat)` → metres
  * above EGM96, bilinear between pixel centres (clamped at a tile's edge), or
  * null where the tile could not be read. Each tile is fetched once; the first
- * failure is kept in `error` for the caller's report. `loadTile(z, x, y)` →
+ * failure is kept in `error` for the caller's report. `heightAtLoaded` answers at
+ * once from the tiles already read (after `prefetch`), null elsewhere: for a caller
+ * that samples thousands of cells synchronously. `loadTile(z, x, y)` →
  * { elev, w, h } is injectable for tests.
  */
 export function terrainSampler(zoom, { loadTile = fetchTerrariumTile } = {}) {
   const tiles = new Map()
+  const loaded = new Map()
   const tileAt = (x, y) => {
     const key = `${x}/${y}`
     if (!tiles.has(key)) {
@@ -62,6 +82,10 @@ export function terrainSampler(zoom, { loadTile = fetchTerrariumTile } = {}) {
         key,
         Promise.resolve()
           .then(() => loadTile(zoom, x, y))
+          .then((tile) => {
+            if (tile) loaded.set(key, tile)
+            return tile
+          })
           .catch((err) => {
             sampler.error ??= err?.message ?? String(err)
             return null
@@ -86,23 +110,20 @@ export function terrainSampler(zoom, { loadTile = fetchTerrariumTile } = {}) {
       const x = Math.floor(tx),
         y = Math.floor(ty)
       const tile = await tileAt(x, y)
-      if (!tile) return null
-      const { elev, w, h } = tile
-      const px = Math.max(0, Math.min(w - 1, (tx - x) * w - 0.5))
-      const py = Math.max(0, Math.min(h - 1, (ty - y) * h - 0.5))
-      const c0 = Math.floor(px),
-        r0 = Math.floor(py)
-      const c1 = Math.min(w - 1, c0 + 1),
-        r1 = Math.min(h - 1, r0 + 1)
-      const fx = px - c0,
-        fy = py - r0
-      const at = (r, c) => elev[r * w + c]
-      const top = at(r0, c0) * (1 - fx) + at(r0, c1) * fx
-      const bottom = at(r1, c0) * (1 - fx) + at(r1, c1) * fx
-      return top * (1 - fy) + bottom * fy
+      return tile ? tileHeight(tile, tx, ty, x, y) : null
+    },
+    heightAtLoaded(lon, lat) {
+      const [tx, ty] = tileCoords(lon, lat, zoom)
+      const x = Math.floor(tx),
+        y = Math.floor(ty)
+      const tile = loaded.get(`${x}/${y}`)
+      return tile ? tileHeight(tile, tx, ty, x, y) : null
     },
     get tileCount() {
       return tiles.size
+    },
+    get loadedCount() {
+      return loaded.size
     },
   }
   return sampler

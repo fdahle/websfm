@@ -238,6 +238,17 @@ the feature's toe, then choose the **Base** in the measuring toolbox:
   declared and convertible (ellipsoidal, EGM96, EGM2008). The DEM has the datum of the
   control it was georeferenced with, when all of it shares one. Otherwise both
   DEMs must use the same datum.
+- **Background terrain (~30 m)**: the global elevation model the **Terrain** basemap
+  shades (Mapzen Terrain Tiles: SRTM, NOAA ETOPO1 and others) as the base, for a DEM
+  of difference without a reference DEM of your own. Its cells are about 30 m at best,
+  coarser in places, and its heights are metres accurate, so it shows only large
+  changes, a vertical offset or a tilt of the whole DEM; import a reference DEM for
+  anything finer. It is offered for the computed DEM in a CRS, and **Tools ▸ Measure ▸
+  DEM of difference** chooses it when the project has no reference DEM. The tiles under
+  the DEM are read once (from the browser's cache when the map has shown the area
+  before) and sampled at each DEM cell like a reference DEM. Its heights (EGM96 geoid)
+  are converted to the DEM's vertical datum when that is declared and convertible.
+  The tiles stop at 85° latitude, so a DEM nearer a pole has no terrain under it.
 
 On an imported reference DEM, heights, profiles and volumes include the raster's
 declared **vertical offset** (Reference Data ▸ right-click ▸ **Accuracy & datum…**), the same correction

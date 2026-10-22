@@ -12,6 +12,12 @@ Notable changes to websfm. The format follows
   **Record one turn** saves exactly one turn of the view as a looping video (WebM, or
   MP4 in Safari). A new guide article, **The 3D View**, covers navigation, the view
   presets and the turntable.
+- **DEM of difference against the background terrain.** The Volume tool's base can be
+  the global terrain the Terrain basemap shades (Mapzen Terrain Tiles, about 30 m
+  cells, EGM96 converted to the DEM's datum where it can be), so a DEM in a CRS can be
+  compared without importing a reference DEM. Tools ▸ Measure ▸ DEM of difference now
+  needs only a DEM in a CRS and picks the terrain when there is no reference DEM. The
+  result names the coarse base and says what it can show; tiles stop at 85° latitude.
 - **File name for exports.** Every export dialog (point cloud, mesh, model, COLMAP,
   3D Tiles, undistorted images, DEM, orthophoto, measurements) and the contour,
   terrain, clip and section tools have an optional **File name**. Empty, the file is

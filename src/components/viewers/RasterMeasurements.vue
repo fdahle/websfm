@@ -20,6 +20,7 @@ import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 import { demRef } from '../../core/products/demWindow.js'
 import { productDescriptor } from '../../core/io/rasterSource.js'
 import { readDemWindow } from '../../workers/computeClient.js'
+import { terrainSurface, TERRAIN_SURFACE_NAME } from '../../core/terrainSurface.js'
 
 // Raster measurements over the active ProductViewer. The tool is CHOSEN from the
 // Ribbon's contextual DEM/Orthophoto tab (Measure group) — this component only
@@ -198,18 +199,36 @@ const baseKind = ref('plane')
 const baseHeight = ref(null)
 // DEM of difference: the computed DEM (no `id`; a reference raster has one) in a CRS
 // against an imported reference DEM, sampled through the external store's
-// reprojected query in the DEM's own CRS. Base value `ref:<rasterId>`.
+// reprojected query in the DEM's own CRS (base value `ref:<rasterId>`), or against the
+// background terrain under it (base 'terrain', core/terrainSurface.js: ~30 m tiles).
 const external = useExternalStore()
-const referenceBases = computed(() =>
-  props.kind === 'dem' && !props.product?.id && props.product?.crs && props.product.crs !== 'local'
-    ? external.demRasters
-    : [],
+const differenceOk = computed(
+  () => props.kind === 'dem' && !props.product?.id && !!props.product?.crs && props.product.crs !== 'local',
 )
+const referenceBases = computed(() => (differenceOk.value ? external.demRasters : []))
+const isSurfaceBase = (kind) => kind.startsWith('ref:') || kind === 'terrain'
+// The DEM's extent in its CRS: the terrain tiles under it are read once.
+function demBounds() {
+  const g = props.descriptor?.geoTransform
+  if (!g) return null
+  const xs = [g.originX, g.originX + props.descriptor.width * g.scaleX]
+  const ys = [g.originY, g.originY + props.descriptor.height * g.scaleY]
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
+}
 const refSampler = shallowRef(null)
 const refError = ref('')
 watch([baseKind, () => props.product?.crs, () => props.product?.verticalDatum], async ([kind, crs]) => {
   refSampler.value = null
   refError.value = ''
+  if (kind === 'terrain') {
+    try {
+      const t = await terrainSurface({ crs, bounds: demBounds(), datum: props.product?.verticalDatum ?? null })
+      if (baseKind.value === kind) refSampler.value = { name: t.name, sample: t.sample, note: t.datumNote }
+    } catch (err) {
+      if (baseKind.value === kind) refError.value = err?.message ?? String(err)
+    }
+    return
+  }
   if (!kind.startsWith('ref:')) return
   try {
     // Strict: a reference hole, or a cell centre off the reference, is unmeasured;
@@ -230,7 +249,7 @@ const volume = computed(() => {
   if (tool.value !== 'volume' || !grid.value || vertices.value.length < 3) return null
   // An empty custom-height field is "no base", never 0: Number(null/'') is 0, and a
   // cut/fill against sea level on a plateau looks plausible enough to be saved.
-  if (baseKind.value.startsWith('ref:')) {
+  if (isSurfaceBase(baseKind.value)) {
     if (refError.value) return { error: 'reference' }
     if (!refSampler.value) return null
     // Each compared cell reprojects into the reference: a sub-grid of at most 64 k
@@ -256,7 +275,7 @@ const VOLUME_ERRORS = {
   'base':
     'Base undetermined: the plane needs three non-collinear vertices on valid DEM cells, the lowest point needs one, a custom base needs a height.',
   'no-data': 'No valid DEM cells inside the polygon (where a reference DEM is the base: none it covers too).',
-  'reference': 'The reference DEM cannot be sampled here.',
+  'reference': 'The base surface cannot be sampled here.',
   'polygon': 'Add at least three vertices.',
 }
 const num = (v, digits = 2) =>
@@ -332,13 +351,18 @@ const baseResult = computed(() => {
   }
   if (k === 'volume') {
     const v = volume.value
+    // A base surface that could not be read says why (offline, past 85° latitude …).
+    if (v?.error === 'reference' && refError.value) return { error: `${VOLUME_ERRORS.reference} ${refError.value}` }
     if (!v || v.error) return { error: VOLUME_ERRORS[v?.error] ?? 'Volume unavailable.' }
     const diff = v.base.kind === 'surface'
-    const base = diff
-      ? `Reference DEM "${v.base.name}"`
-      : v.base.kind === 'plane'
-        ? 'Best-fit plane'
-        : `${v.base.kind === 'lowest' ? 'Lowest vertex' : 'Custom'}, ${num(v.base.height)} ${verticalUnit.value}`
+    const terrain = diff && v.base.name === TERRAIN_SURFACE_NAME
+    const base = terrain
+      ? 'Background terrain (about 30 m cells)'
+      : diff
+        ? `Reference DEM "${v.base.name}"`
+        : v.base.kind === 'plane'
+          ? 'Best-fit plane'
+          : `${v.base.kind === 'lowest' ? 'Lowest vertex' : 'Custom'}, ${num(v.base.height)} ${verticalUnit.value}`
     // Against another epoch, "cut/fill" reads as gain and loss.
     return {
       label: diff ? 'Net change' : 'Net volume',
@@ -357,7 +381,13 @@ const baseResult = computed(() => {
             ? 'Holes in either DEM and parts outside the reference are excluded, not interpolated.'
             : 'Holes and off-raster parts are excluded, not interpolated.'
           : '',
-        diff ? "Both DEMs must use the same vertical datum; a reference's declared offset is applied." : '',
+        terrain
+          ? 'The background terrain is a global model of about 30 m cells, metres accurate at best: only ' +
+            'changes much larger than that mean something. Import a reference DEM for a finer comparison.'
+          : diff
+            ? "Both DEMs must use the same vertical datum; a reference's declared offset is applied."
+            : '',
+        terrain && !selected.value ? (refSampler.value?.note ?? '') : '',
       ]
         .filter(Boolean)
         .join(' '),
@@ -402,7 +432,11 @@ function choose(value) {
 function setTool(value, opts = {}) {
   if (opts.base === 'reference' && value === 'volume') {
     choose('volume')
-    baseKind.value = referenceBases.value.length ? `ref:${referenceBases.value[0].id}` : 'plane'
+    baseKind.value = referenceBases.value.length
+      ? `ref:${referenceBases.value[0].id}`
+      : differenceOk.value
+        ? 'terrain'
+        : 'plane'
     return
   }
   choose(tool.value === value ? 'pan' : value)
@@ -573,6 +607,7 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
               <option v-for="r in referenceBases" :key="r.id" :value="`ref:${r.id}`">
                 Reference DEM: {{ r.name }}
               </option>
+              <option v-if="differenceOk" value="terrain">Background terrain (~30 m)</option>
             </select>
           </label>
           <input

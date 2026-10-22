@@ -22,5 +22,7 @@ noise. Comparing the two DEMs on stable ground first (Evaluate ▸ DEM vs Refere
 shows both the offset and the noise level.
 
 In WebSfM, the **Volume** tool on the computed DEM can take an imported reference DEM
-as its base, so the result is gain, loss and net change inside a polygon. See
+as its base, so the result is gain, loss and net change inside a polygon. Without one,
+the global background terrain (about 30 m cells) can be the base: enough to see a
+large change or an offset of the whole DEM, not a small one. See
 [Build a DEM](guide:dem).

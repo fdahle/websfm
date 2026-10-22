@@ -326,6 +326,60 @@ test('Find GCPs matches real pixels and imports only explicitly reviewed candida
   ).toEqual([{ z: 42, accuracy: 2, accuracyZ: 1.5, role: 'check', observations: 2 }])
 })
 
+test('a DEM of difference against the background terrain', async ({ page }) => {
+  // Every terrain tile flat at 40 m: Terrarium height = R·256 + G + B/256 − 32768.
+  await page.goto(harness)
+  const png = await page.evaluate(() => {
+    const c = document.createElement('canvas')
+    c.width = c.height = 256
+    const ctx = c.getContext('2d')
+    ctx.fillStyle = 'rgb(128, 40, 0)'
+    ctx.fillRect(0, 0, 256, 256)
+    return c.toDataURL('image/png').split(',')[1]
+  })
+  let tiles = 0
+  await page.route('**/elevation-tiles-prod/terrarium/**', (route) => {
+    tiles++
+    return route.fulfill({ body: Buffer.from(png, 'base64'), contentType: 'image/png' })
+  })
+  // A flat 42 m DEM in UTM 32N, on the zone's central meridian at 45° N.
+  await page.evaluate(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 100
+    canvas.getContext('2d').fillRect(0, 0, 100, 100)
+    window.workflowTools.recon.dem = {
+      width: 100,
+      height: 100,
+      originX: 500000,
+      originY: 4983100,
+      gsd: 1,
+      unit: 'm',
+      crs: 'EPSG:32632',
+      data: new Float32Array(10000).fill(42),
+      previewDataUrl: canvas.toDataURL(),
+    }
+  })
+  const result = page.getByRole('region', { name: 'Measurement result' })
+  const headline = result.locator('.mp-value')
+  const viewport = page.locator('.viewport'),
+    box = await viewport.boundingBox()
+  const at = (x, y) => viewport.click({ position: { x: box.width / 2 + x, y: box.height / 2 + y } })
+  await page.getByRole('button', { name: 'measure-volume', exact: true }).click()
+  for (const [x, y] of [
+    [-20, -20],
+    [20, -20],
+    [20, 20],
+    [-20, 20],
+  ])
+    await at(x, y)
+  await page.getByRole('combobox', { name: 'Volume base surface' }).selectOption('terrain')
+  // 2 m above the terrain over 1,600 m² of grid, divided back to ground by UTM's k.
+  await expect(headline).toHaveText('3,202.56 m³')
+  await expect(result).toContainText('Background terrain (about 30 m cells)')
+  await expect(result).toContainText('vertical datum is unknown')
+  expect(tiles).toBeGreaterThan(0)
+})
+
 // 3000 m: the first whole-reference look aligns. 6000 m: the block is 1/10 of the
 // reference side, 8× smaller than the ortho's own look, and is found by the
 // sub-window search.
