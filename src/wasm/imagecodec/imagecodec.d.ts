@@ -16,7 +16,7 @@ export class DecodedTiff {
      */
     rgba(): Uint8Array;
     /**
-     * Source bit depth (8 or 16), for the ingest log.
+     * Source bit depth (1, 8 or 16), for the ingest log.
      */
     readonly bitsPerSample: number;
     readonly height: number;

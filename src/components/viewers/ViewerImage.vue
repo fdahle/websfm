@@ -614,7 +614,7 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
 
 <template>
   <div class="image-viewer">
-    <input ref="maskFileInput" type="file" accept="image/*" hidden @change="onMaskFileChange" />
+    <input ref="maskFileInput" type="file" accept="image/*,.tif,.tiff" hidden @change="onMaskFileChange" />
     <input ref="depthFileInput" type="file" accept="image/*" hidden @change="onDepthFileChange" />
 
     <div

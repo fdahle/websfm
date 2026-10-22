@@ -1,5 +1,6 @@
 import { ref, computed, watch } from 'vue'
-import { maskFromSource, invertMaskPixels, anyExcluded, maskStorageSize } from '../core/mask.js'
+import { invertMaskPixels, anyExcluded, maskStorageSize } from '../core/mask.js'
+import { maskFromFile } from '../workers/computeClient.js'
 import { createRevision } from '../utils/revision.js'
 import { viewerMayHandleKey } from '../utils/keyRouting.js'
 import { useSmartSelect } from './useSmartSelect.js'
@@ -431,7 +432,8 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     if (!file || !maskOffscreen) return
     try {
       // The canvas is already at the mask's storage size, which maps to itself.
-      const blob = await maskFromSource(file, maskOffscreen.width, maskOffscreen.height)
+      // Decoded on a worker, so a TIFF mask works too.
+      const blob = await maskFromFile(file, maskOffscreen.width, maskOffscreen.height)
       // Superseded (undo/stroke/reload while it decoded) → nothing was drawn, so
       // nothing to snapshot or persist.
       if (!(await loadMaskBlob(blob))) return

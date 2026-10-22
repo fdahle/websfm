@@ -1,14 +1,17 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
-import { maskFromSource } from '../../../core/mask.js'
+import { maskFromFile } from '../../../workers/computeClient.js'
 import ImageThumb from '../../controls/ImageThumb.vue'
 import ModalShell from '../ui/ModalShell.vue'
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { maskGroups } from '../../../utils/maskGroups.js'
+import { MASK_IMPORT_DEFAULTS } from '../../../core/defaults.user.js'
 
 // Central mask manager. Lists every image grouped by resolution and lets you
-// import a file as a mask, apply one mask to a whole resolution group (or all
-// images), edit in the viewer, or clear. Painted/red regions are EXCLUDED — they
+// import a file as a mask, import a folder of per-image masks paired by name,
+// apply one mask to a whole resolution group (or all images), edit in the viewer,
+// or clear. Files are decoded on the worker pool, so TIFF masks work too. Painted/red regions are EXCLUDED — they
 // are dropped by SIFT detection and excluded from the dense/MVS cloud. Masks
 // take effect on the next detect/dense run.
 const emit = defineEmits(['close', 'edit'])
@@ -17,8 +20,16 @@ const imagesStore = useImagesStore()
 const { updateMask } = imagesStore
 
 const fileInput = ref(null)
+const folderInput = ref(null)
 const busy = ref(false)
 let fileResolver = null
+
+// Import folder: the chosen files, how they pair with the images (shown before
+// anything is written), and the progress of the import.
+const folderFiles = ref(null)
+const folderPlan = ref(null)
+const existing = ref(MASK_IMPORT_DEFAULTS.existing)
+const progress = ref(null)
 
 // Images by resolution (utils/maskGroups.js, shared with Auto Mask); images
 // without known dims fall into 'unknown'.
@@ -52,7 +63,7 @@ async function importForImage(img) {
   busy.value = true
   try {
     const { w, h } = await dimsOf(img)
-    updateMask(img.id, await maskFromSource(f, w, h))
+    updateMask(img.id, await maskFromFile(f, w, h))
   } finally {
     busy.value = false
   }
@@ -64,8 +75,8 @@ async function importForGroup(group) {
   if (!f) return
   busy.value = true
   try {
-    const dataUrl = await maskFromSource(f, group.w, group.h)
-    for (const img of group.images) updateMask(img.id, dataUrl)
+    const mask = await maskFromFile(f, group.w, group.h)
+    for (const img of group.images) updateMask(img.id, mask)
   } finally {
     busy.value = false
   }
@@ -78,12 +89,45 @@ async function importForAll() {
   busy.value = true
   try {
     for (const g of grouping.value.sizedGroups) {
-      const dataUrl = await maskFromSource(f, g.w, g.h)
-      for (const img of g.images) updateMask(img.id, dataUrl)
+      const mask = await maskFromFile(f, g.w, g.h)
+      for (const img of g.images) updateMask(img.id, mask)
     }
   } finally {
     busy.value = false
   }
+}
+
+function pickFolder() {
+  folderInput.value.value = ''
+  folderInput.value.click()
+}
+function onFolder(e) {
+  const files = Array.from(e.target.files || [])
+  if (!files.length) return
+  folderFiles.value = files
+  folderPlan.value = imagesStore.planMaskImport(files)
+}
+function cancelFolder() {
+  folderFiles.value = null
+  folderPlan.value = null
+}
+async function runFolderImport() {
+  busy.value = true
+  progress.value = { done: 0, total: folderPlan.value.pairs.length }
+  try {
+    await imagesStore.importMaskFiles(folderFiles.value, {
+      existing: existing.value,
+      onProgress: (done, total) => (progress.value = { done, total }),
+    })
+  } finally {
+    busy.value = false
+    progress.value = null
+    cancelFolder()
+  }
+}
+// "12 files matched no image: a.png, b.png, c.png …"
+function fileList(names, max = 3) {
+  return names.slice(0, max).join(', ') + (names.length > max ? ' …' : '')
 }
 
 function clearGroup(group) {
@@ -112,7 +156,41 @@ function edit(img) {
       <button class="btn" :disabled="busy || !grouping.sizedGroups.length" @click="importForAll">
         Import &amp; apply to all…
       </button>
+      <button
+        class="btn"
+        :disabled="busy || !imagesStore.images.length"
+        title="One mask file per image, paired by file name"
+        @click="pickFolder"
+      >
+        Import folder…
+      </button>
       <span class="hint">{{ grouping.hint }}</span>
+    </div>
+
+    <div v-if="folderPlan" class="folder-plan">
+      <div class="plan-line">
+        <strong>{{ folderPlan.pairs.length }}</strong> of {{ imagesStore.images.length }} images have a mask file
+        <template v-if="folderPlan.imagesWithout"> · {{ folderPlan.imagesWithout }} without</template>
+      </div>
+      <div v-if="folderPlan.unmatched.length" class="plan-note">
+        {{ folderPlan.unmatched.length }} file{{ folderPlan.unmatched.length !== 1 ? 's' : '' }} matched no image:
+        {{ fileList(folderPlan.unmatched) }}
+      </div>
+      <div v-if="folderPlan.duplicates.length" class="plan-note">
+        {{ folderPlan.duplicates.length }} further file{{ folderPlan.duplicates.length !== 1 ? 's' : '' }} for an image
+        left out: {{ fileList(folderPlan.duplicates) }}
+      </div>
+      <div class="plan-actions">
+        <span class="opt-label"><FieldHelp op="masks" param="importExisting">If a mask exists</FieldHelp>:</span>
+        <label class="opt"><input v-model="existing" type="radio" value="replace" :disabled="busy" /> Replace</label>
+        <label class="opt"><input v-model="existing" type="radio" value="merge" :disabled="busy" /> Merge</label>
+        <span class="spacer"></span>
+        <span v-if="progress" class="hint">{{ progress.done }} / {{ progress.total }}</span>
+        <button class="btn sm ghost" :disabled="busy" @click="cancelFolder">Cancel</button>
+        <button class="btn sm" :disabled="busy || !folderPlan.pairs.length" @click="runFolderImport">
+          Import {{ folderPlan.pairs.length }} mask{{ folderPlan.pairs.length !== 1 ? 's' : '' }}
+        </button>
+      </div>
     </div>
 
     <div class="list">
@@ -150,7 +228,8 @@ function edit(img) {
       </div>
     </div>
 
-    <input ref="fileInput" type="file" accept="image/*" hidden @change="onFile" />
+    <input ref="fileInput" type="file" accept="image/*,.tif,.tiff" hidden @change="onFile" />
+    <input ref="folderInput" type="file" webkitdirectory multiple hidden @change="onFolder" />
   </ModalShell>
 </template>
 
@@ -165,6 +244,41 @@ function edit(img) {
 }
 .hint {
   font-size: 11px;
+  color: var(--text-dim);
+}
+.folder-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.plan-note {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+.plan-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+.plan-actions .spacer {
+  flex: 1;
+}
+.opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.opt input {
+  accent-color: var(--accent);
+}
+.opt-label {
   color: var(--text-dim);
 }
 

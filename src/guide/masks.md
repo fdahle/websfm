@@ -114,11 +114,37 @@ can mask many images at once:
 - **Import & apply to all…** loads one mask file and gives it to every image, scaled
   to each size group.
 - **Import & apply to group…** gives one file to the images of that size.
+- **Import folder…** gives each image its own file, paired by name (below).
 - Per image, **Import…** loads a file, **Edit** opens the image to paint, and
   **Clear** removes the mask. **Clear group** clears the whole group.
 
 A fixed obstruction that sits in the same place in every frame (a landing gear, a
 camera rig) is a good case for one shared file.
+
+## Import a folder of masks
+**Import folder…** reads a folder with one mask file per image, as Metashape,
+COLMAP and most preprocessing scripts write them, and pairs each file with its
+image by name. Three naming schemes are recognised:
+
+- the image's own name, in a separate folder (`CA214732V0046.tif`);
+- the image's full name plus an extension, as COLMAP writes them (`IMG_0001.jpg.png`);
+- the image's name plus `_mask`, `-mask` or `.mask`, as Metashape's `{filename}_mask`
+  template writes them (`IMG_0001_mask.png`).
+
+Case and the file extension do not matter. Before anything is written, the dialog
+shows how many images have a file, and lists the files that matched no image. When a
+folder holds the photos and their masks side by side, each photo takes the file
+named as a mask, not itself. The files are decoded on all workers at once, so a
+folder of a thousand full-size scan masks takes minutes, not hours. The log names
+every image that could not be masked and why.
+
+## Folder import over existing masks
+<!-- param: importExisting  default: Replace -->
+What **Import folder…** does with an image that already has a mask:
+
+- **Replace** stores the file in place of the existing mask.
+- **Merge** keeps the existing mask and adds the file's masked pixels to it, for
+  example a film-border mask from one folder and a horizon mask from another.
 
 ## Mask file format
 An imported file is stretched to the image's size and read one of two ways:
@@ -131,4 +157,8 @@ An imported file is stretched to the image's size and read one of two ways:
 - **A file without transparency** (a JPEG, or a plain black-and-white PNG): by
   brightness, **black is masked and white is kept**, with mid-grey as the cut-off.
   This is the convention of Metashape and COLMAP mask files, so their masks import
-  as they are.
+  as they are. A file that holds only the values 0 and 1 (a boolean raster, as
+  numpy or GDAL save one) is read the same way, with 1 as white.
+
+TIFF masks import like any other file, including 1-bit (bilevel) files with
+CCITT Group 4 compression, the usual format for scan masks.

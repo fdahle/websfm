@@ -41,12 +41,14 @@ export function hasMaskTransparency(data) {
 //   • Opaque everywhere (JPEG, plain black-and-white PNG): by brightness, BLACK
 //     (luminance < 128) is excluded and white is kept, as in Metashape and COLMAP
 //     mask files. An all-red stored mask (fully masked, so no transparency) is dark
-//     and stays fully masked.
+//     and stays fully masked. A 0/1 file (every channel ≤ 1, as numpy and GDAL
+//     write a boolean raster) is read the same way with 1 as white.
 export function normalizeMaskPixels(data) {
   const byAlpha = hasMaskTransparency(data)
+  const cut = !byAlpha && isZeroOneMask(data) ? 0.5 : 128
   for (let i = 0; i < data.length; i += 4) {
     const lum = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
-    const excluded = byAlpha ? lum > 127 || data[i + 3] > 127 : lum < 128
+    const excluded = byAlpha ? lum > 127 || data[i + 3] > 127 : lum < cut
     if (excluded) {
       data[i] = 255
       data[i + 1] = 0
@@ -54,6 +56,26 @@ export function normalizeMaskPixels(data) {
       data[i + 3] = 255
     } else {
       data[i + 3] = 0
+    }
+  }
+  return data
+}
+
+// Is every colour channel 0 or 1 (a boolean raster saved as 8-bit)?
+export function isZeroOneMask(data) {
+  for (let i = 0; i < data.length; i += 4) if (data[i] > 1 || data[i + 1] > 1 || data[i + 2] > 1) return false
+  return true
+}
+
+// Union of two normalized masks of the same size, into `data`: a pixel excluded in
+// `base` becomes excluded. Merging an imported mask into the image's own.
+export function unionMaskPixels(data, base) {
+  for (let i = 0; i < data.length; i += 4) {
+    if (base[i + 3] > 127) {
+      data[i] = 255
+      data[i + 1] = 0
+      data[i + 2] = 0
+      data[i + 3] = 255
     }
   }
   return data
@@ -171,21 +193,40 @@ export async function maskBlob(source) {
   return source.startsWith('data:') ? dataUrlToBlob(source) : (await fetch(source)).blob()
 }
 
-// Decode any mask source (File/Blob or a URL string), draw it into a canvas for a
-// w×h image (maskStorageSize: w×h itself unless the image is a very large scan),
-// normalize to the exclude convention, and return the PNG Blob. Used for importing
-// a file as a mask and for rescaling a mask across images of a different resolution.
-export async function maskFromSource(source, nativeW, nativeH) {
-  const { w, h } = maskStorageSize(nativeW, nativeH)
-  const blob = await maskBlob(source)
-  const bmp = await createImageBitmap(blob)
+// Any mask source drawn at w×h as ImageData: a File/Blob or URL string, or
+// already-decoded pixels `{ width, height, rgba }` (a TIFF, which the browser
+// cannot decode: workers/ops/tiff.js decodes it first).
+async function rasterizeAt(source, w, h) {
+  if (source?.rgba) {
+    const rgba =
+      source.rgba instanceof Uint8ClampedArray
+        ? source.rgba
+        : new Uint8ClampedArray(source.rgba.buffer, source.rgba.byteOffset, source.rgba.byteLength)
+    const decoded = new ImageData(rgba, source.width, source.height)
+    if (source.width === w && source.height === h) return decoded
+    source = await createImageBitmap(decoded)
+  } else {
+    source = await createImageBitmap(await maskBlob(source))
+  }
   const canvas = new OffscreenCanvas(w, h)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  ctx.drawImage(bmp, 0, 0, w, h)
-  bmp.close()
-  const id = ctx.getImageData(0, 0, w, h)
+  ctx.drawImage(source, 0, 0, w, h)
+  source.close()
+  return ctx.getImageData(0, 0, w, h)
+}
+
+// Decode any mask source (see rasterizeAt), draw it for a w×h image
+// (maskStorageSize: w×h itself unless the image is a very large scan), normalize
+// to the exclude convention, and return the PNG Blob. With `base` (the image's
+// stored mask) the result is the union of the two. Used for importing a file as a
+// mask and for rescaling a mask across images of a different resolution.
+export async function maskFromSource(source, nativeW, nativeH, { base = null } = {}) {
+  const { w, h } = maskStorageSize(nativeW, nativeH)
+  const id = await rasterizeAt(source, w, h)
   normalizeMaskPixels(id.data)
-  ctx.putImageData(id, 0, 0)
+  if (base) unionMaskPixels(id.data, (await rasterizeAt(base, w, h)).data)
+  const canvas = new OffscreenCanvas(w, h)
+  canvas.getContext('2d').putImageData(id, 0, 0)
   return canvas.convertToBlob({ type: 'image/png' })
 }
 

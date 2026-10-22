@@ -9,6 +9,7 @@ import {
   maskStorageSize,
   scaleBorderSides,
   upsampleLookupNearest,
+  unionMaskPixels,
   MASK_LARGE_LONG_SIDE,
 } from './mask.js'
 
@@ -88,6 +89,16 @@ describe('normalizeMaskPixels: files without transparency', () => {
       ]),
     )
     expect(Array.from(maskLookupFromRgba(black, 2, 1))).toEqual([1, 1])
+  })
+
+  it('reads a 0/1 file (a boolean raster) with 1 as white', () => {
+    const data = rgba([
+      [0, 0, 0, 255],
+      [1, 1, 1, 255],
+      [1, 1, 1, 255],
+    ])
+    normalizeMaskPixels(data)
+    expect(Array.from(maskLookupFromRgba(data, 3, 1))).toEqual([1, 0, 0])
   })
 
   it("one transparent pixel switches to the alpha rule (the app's own masks round-trip)", () => {
@@ -260,5 +271,22 @@ describe('paintBorderExclude', () => {
     const d = filled(w, h)
     paintBorderExclude(d, w, h, {})
     expect(Array.from(d)).toEqual(Array.from(filled(w, h)))
+  })
+})
+
+describe('unionMaskPixels', () => {
+  it('excludes a pixel excluded in either mask', () => {
+    const data = rgba([
+      [255, 0, 0, 255],
+      [0, 0, 0, 0],
+      [0, 0, 0, 0],
+    ])
+    const base = rgba([
+      [0, 0, 0, 0],
+      [255, 0, 0, 255],
+      [0, 0, 0, 0],
+    ])
+    unionMaskPixels(data, base)
+    expect(Array.from(maskLookupFromRgba(data, 3, 1))).toEqual([1, 1, 0])
   })
 })

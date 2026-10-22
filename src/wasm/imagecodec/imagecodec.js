@@ -24,7 +24,7 @@ export class DecodedTiff {
         wasm.__wbg_decodedtiff_free(ptr, 0);
     }
     /**
-     * Source bit depth (8 or 16), for the ingest log.
+     * Source bit depth (1, 8 or 16), for the ingest log.
      * @returns {number}
      */
     get bitsPerSample() {

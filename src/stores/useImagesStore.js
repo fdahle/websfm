@@ -5,6 +5,7 @@ import { createIngest } from './images/ingest.js'
 import { createDetection } from './images/detection.js'
 import { createImageFiducials } from './images/fiducials.js'
 import { createImageGroups } from './images/imageGroups.js'
+import { createMaskImport } from './images/maskImport.js'
 import { createKeypointCache } from './images/keypointCache.js'
 import { defineStore } from 'pinia'
 import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult } from '../utils/tiff.js'
@@ -538,6 +539,9 @@ export const useImagesStore = defineStore('images', () => {
     removeImage: (id) => removeImage(id),
   })
 
+  // Masks ▸ Import folder (images/maskImport.js).
+  const { planMaskImport, importMaskFiles } = createMaskImport({ imageById, images, log, updateMask })
+
   // Keypoint detection and feature import (images/detection.js).
   const { detectOne, detectAll, importFeatures, clearKeypoints } = createDetection({
     holdKeypoints,
@@ -873,6 +877,8 @@ export const useImagesStore = defineStore('images', () => {
     reportThumbnailError: thumbnails.reportThumbnailError,
     thumbsVersion: thumbnails.version,
     updateMask,
+    planMaskImport,
+    importMaskFiles,
     updateDepth,
     addFiducialObservations,
     setFiducialDetection,

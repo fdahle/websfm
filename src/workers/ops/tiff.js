@@ -1,5 +1,6 @@
 import init, { decode_tiff } from '../../wasm/imagecodec/imagecodec.js'
-import { tiffToDisplayBlob } from '../../utils/tiff.js'
+import { tiffToDisplayBlob, decodeTiffRgba, isTiff } from '../../utils/tiff.js'
+import { maskFromSource } from '../../core/mask.js'
 import { buildPyramidFromTiff } from '../rasterSource.js'
 
 // TIFF transcode (decode + JPEG/PNG re-encode) runs here so a batch of large
@@ -64,5 +65,12 @@ export function makeTiffOps() {
     })
     return { result: { ...out, ms: performance.now() - t0 } }
   }
-  return { transcodeTiff, buildPyramid }
+  // A mask file for one image (core/mask.js maskFromSource): a TIFF is decoded
+  // here, since no browser decodes one, then drawn at the image's mask size,
+  // normalized and, with `base` (the image's stored mask), merged into it. → PNG Blob.
+  async function maskFromFile([file, w, h, base]) {
+    const source = isTiff(file) ? await decodeTiffRgba(file, { decoder: decodeNative }) : file
+    return { result: await maskFromSource(source, w, h, { base }) }
+  }
+  return { transcodeTiff, buildPyramid, maskFromFile }
 }

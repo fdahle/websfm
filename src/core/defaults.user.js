@@ -639,6 +639,12 @@ export const AUTO_MASK_DEFAULTS = {
   existing: 'merge', // 'merge' (union with the image's mask) | 'replace'
 }
 
+// Masks ▸ Import folder (MaskManagerModal.vue; src/guide/masks.md importExisting):
+// one mask file per image, paired by name.
+export const MASK_IMPORT_DEFAULTS = {
+  existing: 'replace', // 'replace' the image's mask with the file | 'merge' (union)
+}
+
 // The 3D view's turntable (View ▸ Camera ▸ Turntable; src/guide/3d-view.md). Persisted
 // per browser by useViewerSettings.
 export const TURNTABLE_DEFAULTS = {

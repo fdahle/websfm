@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Import a folder of masks (View ▸ Masks ▸ Import folder…).** One mask file per
+  image, paired by name: the image's own name in a mask folder, COLMAP's
+  `IMG_0001.jpg.png` or Metashape's `{filename}_mask`. The dialog shows what pairs
+  before importing, can replace or merge with existing masks, and decodes the files on
+  every worker. TIFF masks now import everywhere (1-bit CCITT Group 4 included), and a
+  0/1 file reads 1 as kept.
 - **Turntable (View ▸ Camera ▸ Turntable).** The 3D view turns the model slowly about
   its up direction, for presenting a result or checking a dense cloud; dragging steers
   it, and it carries on when you let go. Its toolbox sets the seconds per turn and
@@ -469,6 +475,9 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- **16-bit WhiteIsZero TIFFs no longer import as negatives.** The native decoder
+  inverted them twice; it now matches the JavaScript fallback bit for bit. 1-bit
+  (bilevel) TIFF scans, CCITT Group 4 included, now import through the native decoder.
 - **The map legend matches the map.** It listed one purple camera triangle while camera
   positions from EXIF draw as blue triangles, and drew GCPs as diamonds while the map
   drew squares. The legend now lists exactly the symbols on the map, cameras by the

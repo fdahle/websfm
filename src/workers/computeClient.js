@@ -356,6 +356,12 @@ export function transcodeTiff(blob, jpegQuality, { onThumbnail, onDisplay } = {}
   })
 }
 
+// One mask file → the stored mask PNG for a w×h image (TIFF included), merged into
+// `base` when given. Dispatched over the pool like the TIFF transcode.
+export function maskFromFile(file, w, h, base = null) {
+  return call('maskFromFile', [file, w, h, base])
+}
+
 // A TIFF past the canvas limit → its tiled pyramid (workers/rasterSource.js).
 // → { kind: 'pyramid', index, blob, displayBlob, thumbBlob, srcInfo, ms }
 export function buildPyramid(blob, { onProgress } = {}) {

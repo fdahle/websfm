@@ -220,22 +220,9 @@ export async function readTiffDimensions(blob) {
   return { width: image.getWidth(), height: image.getHeight() }
 }
 
-// Decode a TIFF blob (handles BigTIFF / tiled / compressed / geo, via geotiff),
-// once, then encode it two ways from the same decoded pixels: a JPEG for
-// display (fast + small — this is what the viewer shows) and a lossless PNG
-// for compute (SIFT detection, dense MVS both read pixels back out of the
-// image, not the original TIFF — see useImagesStore's `computeUrl`), so the
-// JPEG's quantization never reaches the reconstruction pipeline. readRGB()
-// resolves photometric interpretation (RGB / grayscale / palette / CMYK /
-// YCbCr) to 8-bit RGB, so we just pack it into RGBA and re-encode both.
-//
-// The full-res decode is unavoidably the dominant cost (geotiff.js decodes
-// every compressed tile/strip at native resolution — there's no pyramid/
-// overview to read a cheap low-res version from). Once decoded, though, an
-// `onThumbnail` callback fires with a small (≤512px) preview blob *before*
-// the two full-res encodes run, so callers can show something well before
-// the (comparatively slow) full JPEG+PNG encode finishes.
-export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail, onDisplay, decoder } = {}) {
+// Decode a TIFF to interleaved 8-bit RGBA: { width, height, rgba, srcInfo, timings }.
+// The ingest transcode and the mask import share it.
+export async function decodeTiffRgba(blob, { decoder } = {}) {
   // Per-stage wall-clock timings (ms), surfaced in the returned result so the
   // caller can log the decode/repack/JPEG/PNG split — the baseline that showed
   // decode (pure-JS geotiff) is ~87% of ingest and drove the native decoder. See
@@ -340,6 +327,28 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
       timings.repackMs = performance.now() - tRepack
     }
   }
+
+  return { width, height, rgba, srcInfo, timings }
+}
+
+// Decode a TIFF blob (handles BigTIFF / tiled / compressed / geo, via geotiff),
+// once, then encode it two ways from the same decoded pixels: a JPEG for
+// display (fast + small — this is what the viewer shows) and a lossless PNG
+// for compute (SIFT detection, dense MVS both read pixels back out of the
+// image, not the original TIFF — see useImagesStore's `computeUrl`), so the
+// JPEG's quantization never reaches the reconstruction pipeline. readRGB()
+// resolves photometric interpretation (RGB / grayscale / palette / CMYK /
+// YCbCr) to 8-bit RGB, so we just pack it into RGBA and re-encode both.
+//
+// The full-res decode is unavoidably the dominant cost (geotiff.js decodes
+// every compressed tile/strip at native resolution — there's no pyramid/
+// overview to read a cheap low-res version from). Once decoded, though, an
+// `onThumbnail` callback fires with a small (≤512px) preview blob *before*
+// the two full-res encodes run, so callers can show something well before
+// the (comparatively slow) full JPEG+PNG encode finishes.
+export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail, onDisplay, decoder } = {}) {
+  const t0 = performance.now()
+  const { width, height, rgba, srcInfo, timings } = await decodeTiffRgba(blob, { decoder })
 
   // A CPU-backed canvas (willReadFrequently): it exists only to be encoded, and a
   // GPU-backed one has to be read back for every convertToBlob. With GPU canvas on

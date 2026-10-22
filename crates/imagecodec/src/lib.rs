@@ -44,7 +44,7 @@ impl DecodedTiff {
         self.height
     }
 
-    /// Source bit depth (8 or 16), for the ingest log.
+    /// Source bit depth (1, 8 or 16), for the ingest log.
     #[wasm_bindgen(getter, js_name = bitsPerSample)]
     pub fn bits_per_sample(&self) -> u32 {
         self.bits_per_sample
@@ -88,8 +88,9 @@ pub fn decode_tiff(bytes: &[u8]) -> Result<DecodedTiff, JsError> {
     let color = decoder
         .colortype()
         .map_err(|e| JsError::new(&format!("tiff colortype: {e}")))?;
-    // PhotometricInterpretation 0 = WhiteIsZero. Only the 16-bit stretch honours it
-    // (as the JS fallback does); the 8-bit path is unchanged.
+    // PhotometricInterpretation 0 = WhiteIsZero. The `tiff` crate already inverts a
+    // WhiteIsZero gray image while decoding; the 16-bit stretch undoes that and inverts
+    // in its lookup instead, so it matches the JS fallback bit for bit.
     let white_is_zero = decoder
         .get_tag_u32(tiff::tags::Tag::PhotometricInterpretation)
         .map(|p| p == 0)
@@ -102,7 +103,7 @@ pub fn decode_tiff(bytes: &[u8]) -> Result<DecodedTiff, JsError> {
         .checked_mul(height as usize)
         .ok_or_else(|| JsError::new("tiff dims overflow"))?;
     let spp = samples_per_pixel(color).unwrap_or(0);
-    let (rgba, bits, stretch) = to_rgba(image, color, npx, white_is_zero)?;
+    let (rgba, bits, stretch) = to_rgba(image, color, width as usize, npx, white_is_zero)?;
     let (stretch_lo, stretch_hi) = stretch.map_or((-1, -1), |(lo, hi)| (lo as i32, hi as i32));
 
     Ok(DecodedTiff {
@@ -189,23 +190,32 @@ fn stretch_lut(lo: u16, hi: u16, invert: bool) -> Vec<u8> {
 /// 16-bit sources are **stretched** between their 0.5 / 99.5 % levels rather than
 /// cut to the high byte: a sensor that fills half its range (MicaSense pan: DN
 /// ~6,300–37,000) otherwise reaches SIFT with half the contrast and ~120 grey levels.
-/// Alpha is scaled by its full range. Anything outside the common gray/RGB(A)
-/// 8/16-bit set errors so the caller falls back to geotiff.js.
+/// Alpha is scaled by its full range. 1-bit gray (a bilevel scan or mask) unpacks to
+/// 0/255. Anything outside the common gray/RGB(A) 8/16-bit set errors so the caller falls back to geotiff.js.
 /// Returns (rgba, source bits, Some((lo, hi)) for a stretched source).
 #[allow(clippy::type_complexity)]
 fn to_rgba(
     image: DecodingResult,
     color: ColorType,
+    width: usize,
     npx: usize,
     white_is_zero: bool,
 ) -> Result<(Vec<u8>, u32, Option<(u16, u16)>), JsError> {
     let mut out = vec![0u8; npx * 4];
     match image {
+        DecodingResult::U8(buf) if color == ColorType::Gray(1) => {
+            unpack_bilevel(&mut out, &buf, width)?;
+            Ok((out, 1, None))
+        }
         DecodingResult::U8(buf) => {
             pack(&mut out, npx, color, |i| buf.get(i).copied())?;
             Ok((out, 8, None))
         }
-        DecodingResult::U16(buf) => {
+        DecodingResult::U16(mut buf) => {
+            if white_is_zero && color == ColorType::Gray(16) {
+                // Back to the file's own values (see decode_tiff); stretch_lut inverts.
+                buf.iter_mut().for_each(|v| *v = 65535 - *v);
+            }
             let spp = samples_per_pixel(color)
                 .ok_or_else(|| JsError::new(&format!("unsupported TIFF color type: {color:?}")))?;
             let used = npx
@@ -228,6 +238,29 @@ fn to_rgba(
         }
         _ => Err(JsError::new("unsupported bit depth (not 8/16-bit integer)")),
     }
+}
+
+/// A bilevel (1-bit) image, as CCITT Group 3/4 scans and mask files store it: rows
+/// packed MSB first, each padded to a whole byte. A set bit is white (255). The
+/// decoder has already inverted a WhiteIsZero file (the usual fax convention).
+fn unpack_bilevel(out: &mut [u8], buf: &[u8], width: usize) -> Result<(), JsError> {
+    let height = out.len() / 4 / width.max(1);
+    let row_bytes = width.div_ceil(8);
+    if buf.len() < row_bytes * height {
+        return Err(JsError::new("tiff buffer too short"));
+    }
+    for y in 0..height {
+        let row = &buf[y * row_bytes..(y + 1) * row_bytes];
+        for x in 0..width {
+            let g = if row[x >> 3] & (0x80 >> (x & 7)) != 0 { 255 } else { 0 };
+            let o = (y * width + x) * 4;
+            out[o] = g;
+            out[o + 1] = g;
+            out[o + 2] = g;
+            out[o + 3] = 255;
+        }
+    }
+    Ok(())
 }
 
 /// Fill `out` (RGBA, `npx` pixels) by pulling samples through `get` (already
@@ -361,6 +394,74 @@ mod tests {
         let d = decode_tiff(&buf).unwrap();
         assert_eq!((d.stretch_lo, d.stretch_hi), (6000, 36000));
         assert_eq!(d.rgba(), vec![0, 128, 255, 128, 0, 128, 255, 255]);
+    }
+
+    // A minimal uncompressed one-sample TIFF with any photometric interpretation (the
+    // encoder writes neither 1-bit nor WhiteIsZero images): little-endian header, one
+    // strip, the tags the decoder requires.
+    fn gray_tiff(w: u32, h: u32, bits: u32, photometric: u16, rows: &[u8]) -> Vec<u8> {
+        let tags: [(u16, u16, u32); 9] = [
+            (256, 4, w),
+            (257, 4, h),
+            (258, 3, bits),
+            (259, 3, 1),
+            (262, 3, photometric as u32),
+            (273, 4, 0), // strip offset, patched below
+            (277, 3, 1),
+            (278, 4, h),
+            (279, 4, rows.len() as u32),
+        ];
+        let ifd_len = 2 + tags.len() * 12 + 4;
+        let data_at = (8 + ifd_len) as u32;
+        let mut b = vec![b'I', b'I', 42, 0, 8, 0, 0, 0];
+        b.extend_from_slice(&(tags.len() as u16).to_le_bytes());
+        for (tag, kind, value) in tags {
+            let value = if tag == 273 { data_at } else { value };
+            b.extend_from_slice(&tag.to_le_bytes());
+            b.extend_from_slice(&kind.to_le_bytes());
+            b.extend_from_slice(&1u32.to_le_bytes());
+            if kind == 3 {
+                b.extend_from_slice(&(value as u16).to_le_bytes());
+                b.extend_from_slice(&[0, 0]);
+            } else {
+                b.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(rows);
+        b
+    }
+
+    #[test]
+    fn bilevel_unpacks_to_black_and_white() {
+        // 10 × 2: rows padded to 2 bytes. Row 0 = 1000000001, row 1 = 0111111110.
+        let rows = [0b1000_0000, 0b0100_0000, 0b0111_1111, 0b1000_0000];
+        let gray = |rgba: &[u8]| rgba.chunks_exact(4).map(|p| p[0]).collect::<Vec<_>>();
+        let d = decode_tiff(&gray_tiff(10, 2, 1, 1, &rows)).unwrap(); // BlackIsZero
+        assert_eq!((d.width, d.height, d.bits_per_sample), (10, 2, 1));
+        let rgba = d.rgba();
+        let g = gray(&rgba);
+        assert_eq!(&g[..10], &[255, 0, 0, 0, 0, 0, 0, 0, 0, 255]);
+        assert_eq!(&g[10..], &[0, 255, 255, 255, 255, 255, 255, 255, 255, 0]);
+        assert!(rgba.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2] && p[3] == 255));
+        // WhiteIsZero, the fax default: a set bit is black.
+        let g = gray(&decode_tiff(&gray_tiff(10, 2, 1, 0, &rows)).unwrap().rgba());
+        assert_eq!(&g[..10], &[0, 255, 255, 255, 255, 255, 255, 255, 255, 0]);
+    }
+
+    // A WhiteIsZero 16-bit ramp is the BlackIsZero one inverted, with the same
+    // percentile bounds: what the JS fallback (tonalStretch.js) gives. The decoder's
+    // own inversion must not be applied a second time.
+    #[test]
+    fn gray16_white_is_zero_inverts_once() {
+        let ramp: Vec<u8> = (0..400u16).flat_map(|i| (6000 + i * 70).to_le_bytes()).collect();
+        let black = decode_tiff(&gray_tiff(20, 20, 16, 1, &ramp)).unwrap();
+        let white = decode_tiff(&gray_tiff(20, 20, 16, 0, &ramp)).unwrap();
+        assert_eq!((white.stretch_lo, white.stretch_hi), (black.stretch_lo, black.stretch_hi));
+        let (b, w) = (black.rgba(), white.rgba());
+        for p in 0..400 {
+            assert_eq!(w[p * 4], 255 - b[p * 4], "pixel {p}");
+        }
     }
 
     #[test]
