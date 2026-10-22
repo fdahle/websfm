@@ -65,6 +65,7 @@ const baseLabel = computed(() => props.presets.find((p) => p.id === props.baseId
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
   text-align: left;
   background: var(--bg);
   border: 1px solid var(--panel-border);
@@ -84,10 +85,13 @@ const baseLabel = computed(() => props.presets.find((p) => p.id === props.baseId
 .preset-card.modified {
   box-shadow: none;
 }
+/* The badge drops under the label when a narrow card (four in a row) has no room
+   beside it, rather than running past the card's edge. */
 .preset-card-label {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  gap: 3px 5px;
   font-size: 13px;
   font-weight: 600;
 }
@@ -104,6 +108,7 @@ const baseLabel = computed(() => props.presets.find((p) => p.id === props.baseId
   font-weight: 650;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .preset-note {
   margin-top: 7px;
