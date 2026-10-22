@@ -7,6 +7,9 @@ import WarnBox from '../ui/WarnBox.vue'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
 import { polygonsFromGeoJSON } from '../../../core/products/rasterClip.js'
 import { pluralize } from '../../../core/textFormat.js'
+import FileNameField from '../ui/FileNameField.vue'
+import { defaultExportName } from '../../../core/exportNames.js'
+import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 
 // Clip to Polygon (Tools ▸ Products ▾) — export the DEM or orthophoto with every
 // pixel outside a polygon set to nodata/transparent, cropped to the polygon
@@ -63,8 +66,16 @@ const polygons = computed(() => {
   return m ? [[m.world.map((p) => [p.x, p.y])]] : null
 })
 
+// The optional File name, and the name the export gets without one.
+const fileName = ref('')
+const projects = useProjectsStore()
+const defaultName = computed(() =>
+  defaultExportName('clip', { base: projects.currentProjectName || 'project', product: kind.value }),
+)
+
 function run() {
   emit('run', {
+    fileName: fileName.value,
     kind: kind.value,
     polygons: JSON.parse(JSON.stringify(polygons.value)),
     compression: compression.value,
@@ -124,6 +135,7 @@ function run() {
             <option value="none">None</option>
           </select>
         </SettingsField>
+        <FileNameField v-model="fileName" :default-name="defaultName" />
       </SettingsGroup>
       <p v-if="product?.crs && product.crs !== 'local'" class="field-hint">Coordinates in {{ product.crs }}.</p>
     </template>

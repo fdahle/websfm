@@ -17,6 +17,7 @@ import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { polygonSetToGeoJson } from '../core/io/geojson.js'
 import { similarityForExport } from '../core/products/exportFrame.js'
 import { pluralize } from '../core/textFormat.js'
+import { fileSafe } from '../core/exportNames.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
 // (which export dialog is open); the Ribbon command dispatch sets it and the
@@ -59,13 +60,7 @@ export function useExports({
   const projectBase = () => currentProjectName.value || 'project'
   // A cloud's own name in its file name, so two exported clouds never collide.
   // "Imported (south.laz)" → "Imported_south": the source extension would read as
-  // the export's format.
-  const fileSafe = (name) =>
-    String(name ?? '')
-      .replace(/[^\w.-]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .replace(/\.[a-z0-9]{2,4}$/i, '')
-      .slice(0, 80)
+  // the export's format (core/exportNames.js fileSafe).
   const cloudFileBase = (cloud, target) =>
     target && fileSafe(cloud.name) ? `${projectBase()}-${fileSafe(cloud.name)}` : `${projectBase()}-${cloud.kind}`
   // Parse the current DEM's CRS into an EPSG code + geographic flag for GeoTIFF /
@@ -195,21 +190,22 @@ export function useExports({
   }
 
   // Clouds, meshes, the model JSON and 3D Tiles (exports/clouds.js).
-  const { sparseCloud, doExportCloud, doExportMesh, doExportModel, doExportTiles3d } = createCloudExports({
-    cloudFileBase,
-    clouds,
-    currentCrs,
-    effectiveFrameSpec,
-    exportSimilarity,
-    images,
-    log,
-    mainSparseCloud,
-    projectBase,
-    saveJson,
-    selectedCloud,
-    sensors,
-    summary,
-  })
+  const { sparseCloud, doExportCloud, doExportMesh, doExportModel, doExportTiles3d, cloudExportBase } =
+    createCloudExports({
+      cloudFileBase,
+      clouds,
+      currentCrs,
+      effectiveFrameSpec,
+      exportSimilarity,
+      images,
+      log,
+      mainSparseCloud,
+      projectBase,
+      saveJson,
+      selectedCloud,
+      sensors,
+      summary,
+    })
 
   // COLMAP / interchange projects and undistorted images (exports/sfmProject.js).
   const { doExportColmap, doExportUndistorted } = createSfmProjectExports({
@@ -248,8 +244,17 @@ export function useExports({
     projectBase,
   })
 
+  // What the open export dialog's names start from (core/exportNames.js
+  // defaultExportName): the cloud's or mesh's own export name, else the project's.
+  const exportNameBase = computed(() => {
+    const kind = exportKind.value
+    if (kind === 'cloud' || kind === 'mesh') return cloudExportBase(kind, exportTargetCloud.value)
+    return projectBase()
+  })
+
   return {
     exportKind,
+    exportNameBase,
     exportTargetCloud,
     exportMeasurementScope,
     openMeasurementExport,

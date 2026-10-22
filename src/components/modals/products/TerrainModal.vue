@@ -7,6 +7,9 @@ import WarnBox from '../ui/WarnBox.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { TERRAIN_DEFAULTS } from '../../../core/defaults.user.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
+import FileNameField from '../ui/FileNameField.vue'
+import { defaultExportName } from '../../../core/exportNames.js'
+import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 
 // Slope, Aspect, Hillshade (Tools ▸ Products ▾) — terrain derivatives of the DEM
 // (Horn's method, as gdaldem; core/products/terrain.js), each downloaded as a
@@ -39,9 +42,15 @@ const numbers = computed(() =>
   }),
 )
 
+// The optional File name, and the name the export gets without one.
+const fileName = ref('')
+const projects = useProjectsStore()
+const defaultName = computed(() => defaultExportName('terrain', { base: projects.currentProjectName || 'project' }))
+
 function run() {
   const s = settings.value
   emit('run', {
+    fileName: fileName.value,
     products: [...s.products],
     slopeUnits: s.slopeUnits,
     azimuth: s.azimuth,
@@ -119,6 +128,7 @@ function run() {
             <option value="none">None</option>
           </select>
         </SettingsField>
+        <FileNameField v-model="fileName" :default-name="defaultName" />
       </SettingsGroup>
     </template>
     <template #footer>

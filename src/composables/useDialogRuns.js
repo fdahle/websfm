@@ -10,6 +10,7 @@ import { terminateAll } from '../workers/computeClient.js'
 import { useImageViewSettings } from './useImageViewSettings.js'
 import { useLog } from './useLog.js'
 import { showToast } from './useToasts.js'
+import { defaultExportName, exportFileName } from '../core/exportNames.js'
 
 // What each run-style dialog does on Run, lifted out of App.vue: close the dialog,
 // then hand the settings to the pipeline (usePipeline) — and, for the few that
@@ -281,14 +282,14 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   // Section: the slice is added as a cloud, then its 2D profile downloaded. The
   // profile is recomputed from the (small) slice itself, so the worker result stays
   // a plain cloud like every other edit.
-  async function onSectionRun({ download, ...req }) {
+  async function onSectionRun({ download, fileName, ...req }) {
     toolModal.value = null
     const result = await runEditClouds({ ...req, mode: 'section' })
     if (!result.ok || download === 'none') return
     const slice = reconstructionStore.selectedCloud
     if (!slice?.count) return
     const section = sectionCloud(slice, { ...req.settings, thickness: req.settings.thickness * 1.000001 })
-    const base = `${currentProjectName.value || 'project'}-section`
+    const base = exportFileName(fileName, defaultExportName('section', { base: currentProjectName.value || 'project' }))
     if (download === 'dxf') downloadBlob(`${base}.dxf`, sectionToDxf(section), 'application/dxf')
     else downloadBlob(`${base}.csv`, sectionToCsv(section), 'text/csv;charset=utf-8')
   }

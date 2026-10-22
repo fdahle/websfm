@@ -104,6 +104,7 @@ const {
   exportContours,
   exportKind,
   exportMeasurementScope,
+  exportNameBase,
   exportTargetCloud,
   exportTerrain,
   footprintImageCount,
@@ -250,6 +251,7 @@ const measurementsStore = useMeasurementsStore()
       "
       :raster-crs="exportKind === 'dem' ? rasterCrsOf(dem) : exportKind === 'ortho' ? rasterCrsOf(ortho) : ''"
       :tiles-subject="exportTilesSubject"
+      :name-base="exportNameBase"
       @close="exportKind = null"
       @run="onExportRun"
     />

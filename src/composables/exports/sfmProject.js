@@ -14,6 +14,7 @@ import { buildTransformsJson } from '../../core/io/transforms.js'
 import { undistortImage } from '../../workers/computeClient.js'
 import { toScaledPx } from '../../core/sfm/geometry.js'
 import { pluralize } from '../../core/textFormat.js'
+import { defaultExportName, exportFileName } from '../../core/exportNames.js'
 
 // The SfM project exports, split out of useExports: a COLMAP model (text or
 // binary, optionally with its database and images) and the other interchange
@@ -37,13 +38,14 @@ export function createSfmProjectExports({
   summary,
   swapPairs,
 }) {
-  async function doExportColmap({ format, includeImages = false } = {}) {
+  async function doExportColmap({ format, includeImages = false, fileName } = {}) {
     const cloud = sparseCloud()
     if (!cloud) return
     if (format === 'transforms') {
-      doExportModel({ format: 'transforms' })
+      doExportModel({ format: 'transforms', fileName })
       return
     }
+    const name = exportFileName(fileName, defaultExportName('colmap', { format, base: projectBase() }))
     const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
     const sensorById = new Map(sensors.value.map((sensor) => [sensor.id, sensor]))
 
@@ -115,12 +117,12 @@ export function createSfmProjectExports({
       im.height = exportImages[i].height
     })
     if (format === 'nvm') {
-      downloadBlob(`${projectBase()}.nvm`, partsToBlob(buildNvmParts(model), 'text/plain;charset=utf-8'))
+      downloadBlob(`${name}.nvm`, partsToBlob(buildNvmParts(model), 'text/plain;charset=utf-8'))
       log(`NVM export: ${model.images.length} cameras, ${model.points3D.length} points`, 'success', 'Export')
       return
     }
     if (format === 'openmvg') {
-      saveJson(buildOpenMvg(model), `${projectBase()}-sfm_data.json`)
+      saveJson(buildOpenMvg(model), `${name}.json`)
       log(`OpenMVG export: ${model.images.length} cameras, ${model.points3D.length} points`, 'success', 'Export')
       return
     }
@@ -185,7 +187,7 @@ export function createSfmProjectExports({
       })
       const database = await exportColmapDatabase({ cameras: model.cameras, images: model.images, features, pairs })
       if (format === 'database') {
-        downloadBlob(`${projectBase()}-database.db`, database, 'application/vnd.sqlite3')
+        downloadBlob(`${name}.db`, database, 'application/vnd.sqlite3')
         log(`COLMAP database export: ${model.images.length} images, ${pairs.length} match pairs`, 'success', 'Export')
         return
       }
@@ -199,10 +201,7 @@ export function createSfmProjectExports({
       if (includeImages) {
         for (const im of exportImages) if (im.file) entries.push({ name: `images/${im.name}`, data: im.file })
       }
-      downloadBlob(
-        `${projectBase()}-colmap-workspace.zip`,
-        new Blob(await zipParts(entries), { type: 'application/zip' }),
-      )
+      downloadBlob(`${name}.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
       log(`COLMAP workspace export: database + sparse model${includeImages ? ' + images' : ''}`, 'success', 'Export')
       return
     }
@@ -211,10 +210,7 @@ export function createSfmProjectExports({
     // zip writer UTF-8 encodes one at a time).
     const files = format === 'bin' ? serializeColmapModelBinParts(model) : serializeColmapModelParts(model)
     const entries = Object.entries(files).map(([name, data]) => ({ name, data }))
-    downloadBlob(
-      `${projectBase()}-colmap-${format === 'bin' ? 'bin' : 'txt'}.zip`,
-      new Blob(await zipParts(entries), { type: 'application/zip' }),
-    )
+    downloadBlob(`${name}.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
     log(
       `COLMAP export: ${exportImages.length} cameras, ${points.length} points → ${format === 'bin' ? '.bin' : '.txt'} zip`,
       'success',
@@ -241,7 +237,7 @@ export function createSfmProjectExports({
   // Layout mirrors COLMAP's undistorter so downstream tools need no arguments:
   //   images/<name>.<ext>
   //   sparse/{cameras,images,points3D}.bin
-  async function doExportUndistorted({ mode = 'crop', format = 'jpeg', quality = 0.92, maxDim = 0 } = {}) {
+  async function doExportUndistorted({ mode = 'crop', format = 'jpeg', quality = 0.92, maxDim = 0, fileName } = {}) {
     const cloud = sparseCloud()
     if (!cloud || !cloud.cameras?.size) return
     const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
@@ -382,7 +378,10 @@ export function createSfmProjectExports({
         ),
       })
 
-      downloadBlob(`${projectBase()}-undistorted.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
+      downloadBlob(
+        `${exportFileName(fileName, defaultExportName('undistorted', { base: projectBase() }))}.zip`,
+        new Blob(await zipParts(entries), { type: 'application/zip' }),
+      )
       const cropped = outImages.filter((o) => o.rect.x || o.rect.y).length
       log(
         `Undistorted export: ${outImages.length} images (${ext.toUpperCase()}, ${mode}` +

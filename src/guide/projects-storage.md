@@ -66,6 +66,17 @@ the match preview, a matching or reconstruction run, an export. The first overla
 preview after opening can therefore take a moment. An image whose keypoint file is
 missing shows an error status as soon as the project opens; detect it again.
 
+## File name
+<!-- param: fileName  default: the project's name and what is exported -->
+Exports are downloads: the browser saves them in its downloads folder, or asks where
+when it is set to. Each export dialog has an optional **File name**. Left empty, the
+file is named after the project and what it holds (for example *Aukerman-ortho.tif*,
+shown greyed in the field). A typed name replaces that for every file the export
+writes: the extension is the format's, a world file (.wld) or projection file (.prj)
+beside an image takes the same name, and an export of several rasters adds each one's
+suffix (*site-slope.tif*, *site-hillshade.tif*). Characters a file name cannot hold
+become `_`.
+
 ## Safe backup routine
 At important milestones, save a `.websfm` archive and copy it outside the browser.
 For folder-backed work, back up the entire closed project folder as one unit. Keep an

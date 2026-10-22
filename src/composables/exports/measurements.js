@@ -15,6 +15,7 @@ import { cloudUnits } from '../../core/products/cloudUnits.js'
 import { ensureProjection, transform } from '../../core/crs.js'
 import { downloadBlob } from '../../utils/download.js'
 import { pluralize } from '../../core/textFormat.js'
+import { defaultExportName, exportFileName } from '../../core/exportNames.js'
 
 // Saved measurements → CSV / GeoJSON (Export ▸ Measurements, and the Export button
 // of a saved-measurements list). The pure half is core/products/measurementExport.js;
@@ -89,7 +90,7 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
   }
   const measurementCount = computed(() => measurements.records.length)
 
-  async function doExportMeasurements({ format = 'csv', measurementCoords = 'project', ids = null } = {}) {
+  async function doExportMeasurements({ format = 'csv', measurementCoords = 'project', ids = null, fileName } = {}) {
     const records = recordsFor(ids)
     if (!records.length) {
       log('Export: no saved measurements', 'warn', 'Export')
@@ -117,7 +118,7 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
             },
     }
     const rows = records.map((r) => describeMeasurement(r, ctx))
-    const base = `${projectBase()}-measurements`
+    const base = exportFileName(fileName, defaultExportName('measurements', { base: projectBase() }))
     if (format === 'csv') {
       downloadBlob(`${base}.csv`, measurementsCsv(rows), 'text/csv')
       log(`Exported ${pluralize(rows.length, 'measurement')} as CSV`, 'success', 'Export')

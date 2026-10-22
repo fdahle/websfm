@@ -77,6 +77,8 @@ test('sidebar context menus download clouds, products and polygon layers', async
   const cloudDialog = page.getByRole('dialog', { name: 'Export Point Cloud' })
   await expect(cloudDialog).toContainText('south.laz')
   await cloudDialog.getByLabel('Format').selectOption('xyz')
+  // The File name field shows the name the file gets when it is left empty.
+  await expect(cloudDialog.getByLabel('File name')).toHaveAttribute('placeholder', /-Imported_south$/)
   const cloud = await download(page, () => cloudDialog.getByRole('button', { name: 'Export', exact: true }).click())
   expect(cloud.name).toMatch(/-Imported_south\.xyz$/)
   expect(cloud.bytes.toString().trim().split('\n')).toHaveLength(2)
@@ -91,8 +93,13 @@ test('sidebar context menus download clouds, products and polygon layers', async
   const demDialog = page.getByRole('dialog', { name: 'Export DEM' })
   await expect(demDialog).not.toContainText('Exporting')
   await demDialog.getByLabel('Format').selectOption('asc')
+  await expect(demDialog.getByLabel('File name')).toHaveAttribute('placeholder', /-dem$/)
+  await demDialog.getByLabel('Format').selectOption('png')
+  await expect(demDialog.getByLabel('File name')).toHaveAttribute('placeholder', /-dem-hillshade$/)
+  await demDialog.getByLabel('Format').selectOption('asc')
+  await demDialog.getByLabel('File name').fill('terrain.asc')
   const asc = await download(page, () => demDialog.getByRole('button', { name: 'Export', exact: true }).click())
-  expect(asc.name).toMatch(/-dem\.asc$/)
+  expect(asc.name).toBe('terrain.asc')
 
   // A polygon layer as GeoJSON in the project CRS.
   await page

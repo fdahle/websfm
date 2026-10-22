@@ -85,8 +85,15 @@ test('Products ▾ exports contours, terrain derivatives and a polygon clip of t
 
   await openTool(page, 'Products', /Slope, aspect, hillshade/)
   const tr = page.getByRole('dialog', { name: 'Slope, Aspect, Hillshade' })
+  // A typed File name names every raster, each with its own suffix.
+  const nameField = tr.getByLabel('File name')
+  await expect(nameField).toHaveAttribute('placeholder', /-dem$/)
+  await nameField.fill('Gletscher Süd')
+  const names = []
+  page.on('download', (d) => names.push(d.suggestedFilename()))
   const slope = await download(page, () => tr.getByRole('button', { name: 'Export', exact: true }).click())
-  expect(slope.name).toMatch(/dem-slope\.tif$/)
+  expect(slope.name).toBe('Gletscher_Süd-slope.tif')
+  await expect.poll(() => names).toContain('Gletscher_Süd-hillshade.tif')
   expect(slope.bytes.subarray(0, 2).toString('latin1')).toBe('II') // little-endian TIFF
 
   await openTool(page, 'Products', /Clip to polygon/)

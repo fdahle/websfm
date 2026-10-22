@@ -7,6 +7,8 @@ import CrsPicker from '../../controls/CrsPicker.vue'
 import { EXPORT_DEFAULTS } from '../../../core/defaults.user.js'
 import { MAX_ORTHO_IMAGE_CELLS } from '../../../core/products/exporters.js'
 import { defaultTiling, singleTileFits } from '../../../core/products/tiles3d.js'
+import { defaultExportName } from '../../../core/exportNames.js'
+import FileNameField from '../ui/FileNameField.vue'
 
 // One reusable export dialog, parameterised by `kind`. It collects a format + a
 // few settings and emits them on run; App.vue maps the result to the right
@@ -40,6 +42,9 @@ const props = defineProps({
   // What a 3D Tiles export writes (core/products/tiles3d.js tilesSubject): { kind:
   // 'mesh' | 'cloud', count, streamed, textured }, or null. Sets the tiling default.
   tilesSubject: { type: Object, default: null },
+  // What the default file name starts from (useExports exportNameBase): the cloud's
+  // or mesh's own export name, else the project's.
+  nameBase: { type: String, default: 'project' },
 })
 
 const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
@@ -149,6 +154,7 @@ const settings = ref({
   format: (props.kind === 'mesh' && props.textured ? 'glb' : null) ?? cfg.value.formats.find((f) => !f.disabled)?.value,
   includeImages: false,
   includeTexture: true,
+  fileName: '',
   ...EXPORT_DEFAULTS,
   // 3D Tiles: a hierarchy for a big model, one tile for a small one (defaultTiling).
   tiling: EXPORT_DEFAULTS.tiling ?? defaultTiling(props.tilesSubject),
@@ -178,6 +184,7 @@ function run() {
   if (props.kind === 'undistorted') {
     emit('run', {
       format: settings.value.format,
+      fileName: settings.value.fileName,
       mode: settings.value.undistortMode,
       quality: settings.value.undistortQuality,
       maxDim: settings.value.undistortMaxDim,
@@ -203,6 +210,14 @@ const reprojecting = computed(
   () => isRaster.value && isTiff.value && !!props.rasterCrs && settings.value.rasterCrs === 'other',
 )
 const rasterOp = computed(() => (props.kind === 'dem' ? 'dem' : 'orthophoto'))
+// The name an export without a typed File name gets (the same function names the file).
+const defaultName = computed(() =>
+  defaultExportName(props.kind, {
+    format: settings.value.format,
+    base: props.nameBase,
+    crs: reprojecting.value && outputCrs.value !== props.rasterCrs ? outputCrs.value : null,
+  }),
+)
 // The ortho's empty pixels: a GeoTIFF or PNG may keep the alpha band; a JPEG has none.
 // The COG (the stored file) and a reprojected copy always keep it.
 const orthoAlphaApplies = computed(
@@ -229,6 +244,7 @@ const orthoNodataApplies = computed(
         </option>
       </select>
     </SettingsField>
+    <FileNameField v-model="settings.fileName" :default-name="defaultName" />
 
     <!-- Point cloud -->
     <template v-if="kind === 'cloud'">

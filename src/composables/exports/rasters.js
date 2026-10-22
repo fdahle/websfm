@@ -8,6 +8,7 @@ import {
 } from '../../core/products/exporters.js'
 import { downloadBlob } from '../../utils/download.js'
 import { showToast } from '../useToasts.js'
+import { defaultExportName, exportFileName } from '../../core/exportNames.js'
 import { partsToBlob } from '../../utils/blobParts.js'
 import {
   exportOrthoFile,
@@ -47,7 +48,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
   // A DEM / ortho GeoTIFF in another CRS (`outputCrs`): reprojected block by block in
   // the export worker (workers/ops/export.js warpRaster) from the stored GeoTIFF, or a
   // DEM's plane when it has none; always a DEFLATE COG. The product stays as built.
-  async function exportReprojected(kind, product, { outputCrs, resampling }) {
+  async function exportReprojected(kind, product, { outputCrs, resampling, fileName }) {
     const info = crsInfo(product)
     const label = kind === 'dem' ? 'DEM' : 'Ortho'
     if (!info.crs) {
@@ -97,8 +98,8 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       },
       { transfer, onLog: (m, l, c) => log(m, l, c) },
     )
-    const tag = outputCrs.replace(/[^A-Za-z0-9]+/g, '')
-    downloadBlob(`${projectBase()}-${kind}-${tag}.tif`, blob, 'image/tiff')
+    const name = exportFileName(fileName, defaultExportName(kind, { base: projectBase(), crs: outputCrs }))
+    downloadBlob(`${name}.tif`, blob, 'image/tiff')
     log(
       `${label} export: ${width}×${height} Cloud-Optimized GeoTIFF in ${outputCrs}, reprojected from ${info.crs}` +
         (kind === 'dem' ? ' (nodata NaN; heights keep their vertical datum)' : ''),
@@ -107,16 +108,17 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     )
   }
 
-  async function doExportDem({ format, nodata, compression, outputCrs = null, resampling = 'bilinear' }) {
+  async function doExportDem({ format, nodata, compression, outputCrs = null, resampling = 'bilinear', fileName }) {
     if (!dem.value) return
     if (outputCrs && (format === 'cog' || format === 'geotiff'))
-      return exportReprojected('dem', dem.value, { outputCrs, resampling })
+      return exportReprojected('dem', dem.value, { outputCrs, resampling, fileName })
     const info = crsInfo(dem.value)
+    const name = exportFileName(fileName, defaultExportName('dem', { format, base: projectBase() }))
     // A DEM past one plane (SAT-3) is its stored COG: both TIFF formats hand that file
     // out as it is (DEFLATE, NaN for nodata), and the other formats are its overview.
     const full = dem.value.cog
     if (full && (format === 'cog' || format === 'geotiff')) {
-      downloadBlob(`${projectBase()}-dem${format === 'cog' ? '-cog' : ''}.tif`, full, 'image/tiff')
+      downloadBlob(`${name}.tif`, full, 'image/tiff')
       log(
         `DEM export: the full ${dem.value.fullWidth}×${dem.value.fullHeight} grid as its stored Cloud-Optimized ` +
           'GeoTIFF (DEFLATE, nodata NaN)',
@@ -128,8 +130,8 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     if (full && format !== 'png') {
       // The ASCII grid of the full grid, written from the COG in row bands.
       const blob = await workerDemAscii({ dem: demRef(dem.value), nodata }, { onLog: (m, l, c) => log(m, l, c) })
-      downloadBlob(`${projectBase()}-dem.asc`, blob, 'text/plain;charset=utf-8')
-      if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, prjText(info), 'text/plain;charset=utf-8')
+      downloadBlob(`${name}.asc`, blob, 'text/plain;charset=utf-8')
+      if (info.crs) downloadBlob(`${name}.prj`, prjText(info), 'text/plain;charset=utf-8')
       log(`DEM export: ASCII grid of the full ${dem.value.fullWidth}×${dem.value.fullHeight} grid`, 'success', 'Export')
       return
     }
@@ -147,14 +149,14 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       // is cheap partial reads.
       const deflate = compression === 'none' ? null : deflateBytes
       const tif = await demToCog(dem.value, { crs: info, nodata, deflate })
-      downloadBlob(`${projectBase()}-dem-cog.tif`, tif, 'image/tiff')
+      downloadBlob(`${name}.tif`, tif, 'image/tiff')
       log(`DEM export: Cloud-Optimized GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
       return
     }
     if (format === 'geotiff') {
       const deflate = compression === 'deflate' ? deflateBytes : null
       const tif = await demToGeoTiff(dem.value, { crs: info, nodata, deflate })
-      downloadBlob(`${projectBase()}-dem.tif`, tif, 'image/tiff')
+      downloadBlob(`${name}.tif`, tif, 'image/tiff')
       log(`DEM export: GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
       return
     }
@@ -164,17 +166,14 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
         log('DEM: no hillshade preview to export', 'warn', 'Export')
         return
       }
-      downloadBlob(`${projectBase()}-dem-hillshade.png`, dem.value.previewBlob)
-      downloadBlob(`${projectBase()}-dem-hillshade.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
-      if (info.crs) downloadBlob(`${projectBase()}-dem-hillshade.prj`, prjText(info), 'text/plain;charset=utf-8')
+      downloadBlob(`${name}.png`, dem.value.previewBlob)
+      downloadBlob(`${name}.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
+      if (info.crs) downloadBlob(`${name}.prj`, prjText(info), 'text/plain;charset=utf-8')
       log('DEM export: hillshade PNG + world file', 'success', 'Export')
       return
     }
-    downloadBlob(
-      `${projectBase()}-dem.asc`,
-      partsToBlob(demToAsciiGridParts(dem.value, { nodata }), 'text/plain;charset=utf-8'),
-    )
-    if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, prjText(info), 'text/plain;charset=utf-8')
+    downloadBlob(`${name}.asc`, partsToBlob(demToAsciiGridParts(dem.value, { nodata }), 'text/plain;charset=utf-8'))
+    if (info.crs) downloadBlob(`${name}.prj`, prjText(info), 'text/plain;charset=utf-8')
   }
 
   // Ortho → COG, GeoTIFF (optional DEFLATE), or PNG/JPEG + world file (.wld) + .prj.
@@ -190,14 +189,16 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     orthoNodata = 0,
     outputCrs = null,
     resampling = 'bilinear',
+    fileName,
   }) {
     const o = ortho.value
     if (!o?.cog) return
     if (outputCrs && (format === 'cog' || format === 'geotiff'))
-      return exportReprojected('ortho', o, { outputCrs, resampling })
+      return exportReprojected('ortho', o, { outputCrs, resampling, fileName })
     const info = crsInfo(o)
+    const name = exportFileName(fileName, defaultExportName('ortho', { format, base: projectBase() }))
     if (format === 'cog') {
-      downloadBlob(`${projectBase()}-ortho-cog.tif`, o.cog, 'image/tiff')
+      downloadBlob(`${name}.tif`, o.cog, 'image/tiff')
       log('Ortho export: Cloud-Optimized GeoTIFF (the stored file, DEFLATE)', 'success', 'Export')
       return
     }
@@ -215,7 +216,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
         },
         { onLog },
       )
-      downloadBlob(`${projectBase()}-ortho.tif`, blob, 'image/tiff')
+      downloadBlob(`${name}.tif`, blob, 'image/tiff')
       log(`Ortho export: GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
       return
     }
@@ -232,11 +233,11 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       },
       { onLog },
     )
-    downloadBlob(`${projectBase()}-ortho.${ext}`, blob)
+    downloadBlob(`${name}.${ext}`, blob)
     // World file extension mirrors the image (.wld works for both; .jgw/.pgw are the
     // strict siblings — .wld is universally accepted, so keep it simple).
-    downloadBlob(`${projectBase()}-ortho.wld`, rasterWorldFile(o), 'text/plain;charset=utf-8')
-    if (info.crs) downloadBlob(`${projectBase()}-ortho.prj`, prjText(info), 'text/plain;charset=utf-8')
+    downloadBlob(`${name}.wld`, rasterWorldFile(o), 'text/plain;charset=utf-8')
+    if (info.crs) downloadBlob(`${name}.prj`, prjText(info), 'text/plain;charset=utf-8')
     log(`Ortho export: ${jpeg ? 'JPEG' : 'PNG'} + world file`, 'success', 'Export')
   }
 
@@ -278,7 +279,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
   // Contours go on the map as a line layer (Shapefiles) when the DEM has a CRS, and
   // are downloaded in `format` unless it is 'none'. A DEM in the local frame has no
   // place on the map's layers, so it is always downloaded (ContoursModal).
-  async function exportContours({ interval, indexEvery, smooth, minLength, format }) {
+  async function exportContours({ interval, indexEvery, smooth, minLength, format, fileName }) {
     const grid = dem.value
     if (!grid) return
     const { input, transfer } = demToolInput(grid)
@@ -298,13 +299,10 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     let layer = null
     if (info.crs && paths.length) layer = await addLineSet(paths, info.crs, `Contours ${interval} ${unit}`)
     const dxf = download === 'dxf'
+    const name = exportFileName(fileName, defaultExportName('contours', { base: projectBase() }))
     if (download !== 'none') {
-      downloadBlob(
-        `${projectBase()}-contours.${dxf ? 'dxf' : 'geojson'}`,
-        text,
-        dxf ? 'application/dxf' : 'application/geo+json',
-      )
-      if (dxf && info.crs) downloadBlob(`${projectBase()}-contours.prj`, prjText(info), 'text/plain;charset=utf-8')
+      downloadBlob(`${name}.${dxf ? 'dxf' : 'geojson'}`, text, dxf ? 'application/dxf' : 'application/geo+json')
+      if (dxf && info.crs) downloadBlob(`${name}.prj`, prjText(info), 'text/plain;charset=utf-8')
     }
     const where = [layer && `on the map (${layer.name})`, download !== 'none' && (dxf ? 'DXF' : 'GeoJSON')]
       .filter(Boolean)
@@ -322,7 +320,8 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       showToast('No contour lines', { detail: 'No level crosses the DEM at this interval.', kind: 'error' })
   }
 
-  async function exportTerrain({ products, slopeUnits, azimuth, altitude, multidirectional, compression }) {
+  async function exportTerrain({ products, slopeUnits, azimuth, altitude, multidirectional, compression, fileName }) {
+    const base = exportFileName(fileName, defaultExportName('terrain', { base: projectBase() }))
     const grid = dem.value
     if (!grid || !products?.length) return
     const k = await gridScaleFactor(grid)
@@ -346,12 +345,12 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       // 0..255 bytes fit exactly, and one writer keeps the georeferencing identical.
       const data = name === 'hillshade' ? Float32Array.from(r.data, (v, i) => (r.mask[i] ? v : NaN)) : r.data
       const tif = await demToGeoTiff({ ...r, data }, { crs: info, nodata: -9999, deflate })
-      downloadBlob(`${projectBase()}-dem-${name}.tif`, tif, 'image/tiff')
+      downloadBlob(`${base}-${name}.tif`, tif, 'image/tiff')
     }
     log(`Terrain: exported ${products.join(', ')} as GeoTIFF`, 'success', 'Export')
   }
 
-  async function exportClipped({ kind, polygons, compression }) {
+  async function exportClipped({ kind, polygons, compression, fileName }) {
     const product = kind === 'ortho' ? ortho.value : dem.value
     if (!product || !polygons?.length || (kind === 'ortho' && !product.cog)) return
     const geo = product
@@ -390,7 +389,8 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
             deflate,
           })
         : await demToGeoTiff(raster, { crs: info, nodata: -9999, deflate })
-    downloadBlob(`${projectBase()}-${kind}-clipped.tif`, tif, 'image/tiff')
+    const name = exportFileName(fileName, defaultExportName('clip', { base: projectBase(), product: kind }))
+    downloadBlob(`${name}.tif`, tif, 'image/tiff')
     log(
       `Clip: ${kind === 'ortho' ? 'orthophoto' : 'DEM'} clipped to ${pluralize(polygons.length, 'polygon')}, ${raster.width}×${raster.height} px`,
       'success',

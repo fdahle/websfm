@@ -12,6 +12,12 @@ Notable changes to websfm. The format follows
   **Record one turn** saves exactly one turn of the view as a looping video (WebM, or
   MP4 in Safari). A new guide article, **The 3D View**, covers navigation, the view
   presets and the turntable.
+- **File name for exports.** Every export dialog (point cloud, mesh, model, COLMAP,
+  3D Tiles, undistorted images, DEM, orthophoto, measurements) and the contour,
+  terrain, clip and section tools have an optional **File name**. Empty, the file is
+  named as before, and the field shows that name; a typed one names every file the
+  export writes, the .wld / .prj beside an image included. Cloud names in file names
+  keep letters of any script now (Süd, not S_d).
 - **Contours go on the map.** Tools ▸ Products ▾ ▸ Contours adds the lines to the 2D
   map as a layer in the sidebar's Shapefiles section (index contours heavier, the
   height in the hover label, "Contours" in the legend), with a map checkbox and a

@@ -623,6 +623,7 @@ const {
   exportTerrain,
   exportClipped,
   exportMeasurementScope,
+  exportNameBase,
   openMeasurementExport,
   measurementExportCrs,
 } = useExports({
@@ -905,6 +906,7 @@ provideAppContext({
   exportContours,
   exportKind,
   exportMeasurementScope,
+  exportNameBase,
   exportTargetCloud,
   exportTerrain,
   fiducialCalibrateImages,

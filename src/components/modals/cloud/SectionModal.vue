@@ -9,6 +9,9 @@ import { useSourcePick } from '../../../composables/useSourcePick.js'
 import { SECTION_DEFAULTS } from '../../../core/defaults.user.js'
 import { cloudBounds, estimateSpacing } from '../../../core/products/cloudEdit.js'
 import { cloudUnits } from '../../../core/products/cloudUnits.js'
+import FileNameField from '../ui/FileNameField.vue'
+import { defaultExportName } from '../../../core/exportNames.js'
+import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 
 // Section (Tools ▸ Point Cloud ▾) — a vertical slice along a line A→B, `thickness`
 // wide (core/products/cloudSection.js). Adds the slice as a NEW cloud and, if asked,
@@ -53,6 +56,11 @@ watch(source, fillDefaultLine, { immediate: true })
 const thicknessAuto = computed(() => 3 * spacing.value)
 const length = computed(() => Math.hypot(settings.value.bx - settings.value.ax, settings.value.by - settings.value.ay))
 
+// The optional File name, and the name the export gets without one.
+const fileName = ref('')
+const projects = useProjectsStore()
+const defaultName = computed(() => defaultExportName('section', { base: projects.currentProjectName || 'project' }))
+
 function run() {
   const s = settings.value
   const thickness = s.thickness > 0 ? s.thickness : thicknessAuto.value
@@ -61,6 +69,7 @@ function run() {
     settings: { a: [s.ax, s.ay], b: [s.bx, s.by], thickness, extend: !!s.extend },
     name: `${source.value?.name ?? 'Cloud'} (section)`,
     download: s.format,
+    fileName: fileName.value,
   })
 }
 </script>
@@ -121,6 +130,7 @@ function run() {
             <option value="none">No download — just add the slice</option>
           </select>
         </SettingsField>
+        <FileNameField v-if="settings.format !== 'none'" v-model="fileName" :default-name="defaultName" />
       </SettingsGroup>
     </template>
     <template #footer>

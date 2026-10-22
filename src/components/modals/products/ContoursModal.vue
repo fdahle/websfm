@@ -8,6 +8,9 @@ import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { CONTOUR_DEFAULTS } from '../../../core/defaults.user.js'
 import { contourLevels, MAX_CONTOUR_LEVELS } from '../../../core/products/contours.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
+import FileNameField from '../ui/FileNameField.vue'
+import { defaultExportName } from '../../../core/exportNames.js'
+import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 
 // Contours (Tools ▸ Products ▾) — contour lines traced from the DEM (marching
 // squares, core/products/contours.js), added to the map as a line layer and, if
@@ -53,6 +56,11 @@ const numbers = computed(() =>
   }),
 )
 
+// The optional File name, and the name the export gets without one.
+const fileName = ref('')
+const projects = useProjectsStore()
+const defaultName = computed(() => defaultExportName('contours', { base: projects.currentProjectName || 'project' }))
+
 function run() {
   const s = settings.value
   emit('run', {
@@ -61,6 +69,7 @@ function run() {
     smooth: s.smooth,
     minLength: s.minLength,
     format: s.format,
+    fileName: fileName.value,
   })
 }
 </script>
@@ -147,6 +156,7 @@ function run() {
             <option value="dxf">DXF R12 (CAD)</option>
           </select>
         </SettingsField>
+        <FileNameField v-if="settings.format !== 'none'" v-model="fileName" :default-name="defaultName" />
       </SettingsGroup>
       <WarnBox v-if="levelCount > MAX_CONTOUR_LEVELS">That interval gives too many levels — use a larger one.</WarnBox>
       <p v-else class="field-hint">{{ levelCount.toLocaleString() }} levels every {{ interval }} {{ unit }}.</p>
