@@ -9,6 +9,8 @@ import { usePosesStore } from '../../stores/usePosesStore.js'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useModalsStore } from '../../stores/useModalsStore.js'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
+import { useMatchesStore } from '../../stores/useMatchesStore.js'
+import { useSensorsStore } from '../../stores/useSensorsStore.js'
 import { useAppContext } from '../../appContext.js'
 import { tilesSubject } from '../../core/products/tiles3d.js'
 import AlignIcpModal from './cloud/AlignIcpModal.vue'
@@ -67,6 +69,21 @@ const {
   orthoSurfaces,
 } = storeToRefs(reconstructionStore)
 const { images } = storeToRefs(useImagesStore())
+const { sensors } = storeToRefs(useSensorsStore())
+// What Sparse Reconstruction can build on: the usable matched pairs and the images
+// they link (the same filter as the store's usableMatchCount).
+const { matchStore } = storeToRefs(useMatchesStore())
+const matchedLinks = computed(() => {
+  const ids = new Set()
+  let pairs = 0
+  for (const e of matchStore.value.values()) {
+    if (e.status !== 'done' || e.enabled === false || !(e.inlierCount > 0)) continue
+    pairs++
+    ids.add(e.idA)
+    ids.add(e.idB)
+  }
+  return { images: ids.size, pairs }
+})
 // Crop, filter and classify ground also take a streamed cloud (core/lod/streamed.js):
 // crop copies a box out of the octree into a resident cloud (or, inverted, rewrites the
 // octree); filter and classify run tile by tile into a new streamed cloud.
@@ -190,6 +207,9 @@ const measurementsStore = useMeasurementsStore()
     <ReconstructModal
       v-if="reconstructOpen"
       :ground-control-adjustment="georeferenceAfterReconstruct"
+      :linked-images="matchedLinks.images"
+      :pairs="matchedLinks.pairs"
+      :sensors="sensors.length"
       @close="closeReconstructModal"
       @run="onReconstructRun"
     />
@@ -258,11 +278,22 @@ const measurementsStore = useMeasurementsStore()
   </Teleport>
 
   <Teleport to="body">
-    <DepthMapsModal v-if="depthMapsOpen" @close="depthMapsOpen = false" @run="onDepthMapsRun" />
+    <DepthMapsModal
+      v-if="depthMapsOpen"
+      :images="images"
+      :registered="reconstructionStore.mainSparseCloud?.cameras?.size ?? 0"
+      @close="depthMapsOpen = false"
+      @run="onDepthMapsRun"
+    />
   </Teleport>
 
   <Teleport to="body">
-    <DenseModal v-if="denseOpen" @close="denseOpen = false" @run="onDenseRun" />
+    <DenseModal
+      v-if="denseOpen"
+      :maps="reconstructionStore.depthMapCount"
+      @close="denseOpen = false"
+      @run="onDenseRun"
+    />
   </Teleport>
 
   <Teleport to="body">

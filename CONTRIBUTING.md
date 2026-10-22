@@ -98,6 +98,26 @@ adds, removes or renames a setting, operation or user-visible feature:
 3. A new concept gets a new glossary entry. Keep aliases specific: a generic alias
    such as "projection" or "3D point" links in the wrong places.
 
+## Dialogs of a processing step
+
+A dialog that runs a processing step (Detect and Match Features, Sparse Model, Depth
+Maps, Dense Cloud, DEM, Orthophoto, Mesh, Texture, and any new one) lays out its settings
+as numbered steps, in the order the run applies them:
+
+1. Each stage is a `<SettingsStep step="n" title="…" :effect="…">` holding the
+   settings that act there. Presets, the source and mode choices may sit above the
+   steps; an Advanced part repeats the step's number (*2 · Trim — advanced*).
+2. Each step has a one-line **effect**: what it does to *this* project with the
+   current values ("42 depth maps at up to 1,500 px …", "Off: lone points stay in the
+   cloud"), from the same rules the run applies. Write it as a pure function in
+   `src/core/stepEffects/<dialog>.js`, with a unit test, and pass the project data the
+   line needs into the dialog as props.
+3. A step that cannot matter in the current configuration is `inactive` (dimmed), and
+   its effect says why.
+4. The guide article lists its setting sections in the same order as the steps.
+
+Adding or moving a setting means updating its step's effect and its test too.
+
 ## License
 
 By contributing, you agree that your contribution is released under the project's

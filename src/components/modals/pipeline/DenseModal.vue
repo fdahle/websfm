@@ -2,13 +2,16 @@
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
-import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { DENSE_FUSE_DEFAULTS } from '../../../core/defaults.user.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
+import { denseEffects } from '../../../core/stepEffects/dense.js'
 
+// The depth maps fusion reads, for the steps' effect lines.
+const props = defineProps({ maps: { type: Number, default: 0 } })
 const emit = defineEmits(['close', 'run'])
 
 // Memory budget for the fusion pre-flight is machine-level (Settings ▸ Compute).
@@ -35,6 +38,9 @@ const numbers = computed(() =>
   }),
 )
 
+// What each step does to this project (core/stepEffects/dense.js).
+const effects = computed(() => denseEffects(settings.value, { maps: props.maps }))
+
 function run() {
   const { auto, minViews, depthTolPct, maxCost, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated } = settings.value
   emit('run', {
@@ -52,7 +58,31 @@ function run() {
 
 <template>
   <ModalShell title="Build Dense Cloud" @close="emit('close')">
-    <SettingsGroup title="Consistency">
+    <SettingsStep step="1" title="Sample the depth maps" :effect="effects.sample">
+      <SettingsField
+        label-for="step"
+        unit="px"
+        hint="Emit one point every N pixels. 1 = densest (largest cloud); higher = decimated."
+      >
+        <template #label>
+          <FieldHelp op="dense-cloud" param="step" :value="settings.step" :default-value="DENSE_FUSE_DEFAULTS.step"
+            >Point density (sample step)</FieldHelp
+          >
+        </template>
+        <input
+          id="step"
+          v-model.number="settings.step"
+          :aria-invalid="numbers.bad.step"
+          type="number"
+          min="1"
+          max="8"
+          step="1"
+          class="field-input"
+        />
+      </SettingsField>
+    </SettingsStep>
+
+    <SettingsStep step="2" title="Agree across depth maps" :effect="effects.agree">
       <SettingsField hint="Min-views from the image count, the default cost gate. Turn off to set them by hand.">
         <template #label
           ><FieldHelp op="dense-cloud" param="auto" :value="settings.auto" :default-value="DENSE_FUSE_DEFAULTS.auto"
@@ -140,34 +170,10 @@ function run() {
           class="field-input"
         />
       </SettingsField>
-    </SettingsGroup>
-
-    <SettingsGroup title="Density">
-      <SettingsField
-        label-for="step"
-        unit="px"
-        hint="Emit one point every N pixels. 1 = densest (largest cloud); higher = decimated."
-      >
-        <template #label>
-          <FieldHelp op="dense-cloud" param="step" :value="settings.step" :default-value="DENSE_FUSE_DEFAULTS.step"
-            >Point density (sample step)</FieldHelp
-          >
-        </template>
-        <input
-          id="step"
-          v-model.number="settings.step"
-          :aria-invalid="numbers.bad.step"
-          type="number"
-          min="1"
-          max="8"
-          step="1"
-          class="field-input"
-        />
-      </SettingsField>
-    </SettingsGroup>
+    </SettingsStep>
 
     <AdvancedDisclosure label="Geometric outlier filters">
-      <SettingsGroup title="Outlier removal">
+      <SettingsStep step="3" title="Geometric gates" :effect="effects.gates">
         <SettingsField
           label-for="minTriAngle"
           unit="°"
@@ -219,7 +225,14 @@ function run() {
             class="field-input"
           />
         </SettingsField>
+      </SettingsStep>
 
+      <SettingsStep
+        step="4"
+        title="Remove isolated points"
+        :effect="effects.isolated"
+        :inactive="!settings.removeIsolated"
+      >
         <SettingsField hint="Drop lone low-support cells with too few neighbours (fusion flyers).">
           <template #label
             ><FieldHelp
@@ -234,7 +247,7 @@ function run() {
             ><input v-model="settings.removeIsolated" type="checkbox" class="checkbox" /> Enabled</label
           >
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
     </AdvancedDisclosure>
 
     <template #footer>

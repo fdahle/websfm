@@ -6,10 +6,12 @@ import SettingsField from '../ui/SettingsField.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
 import RasterSizeField from '../ui/RasterSizeField.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { DEM_DEFAULTS } from '../../../core/defaults.user.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
+import { demEffects, frameText } from '../../../core/stepEffects/raster.js'
 
 // Build DEM (Digital Surface Model). Rasterises the point cloud into a height
 // grid in the chosen frame. Defaults are the single source of truth in
@@ -56,14 +58,6 @@ const activeSource = computed(() => (groundOnly.value ? props.groundSource : pro
 const isSparseSource = computed(() => activeSource.value?.kind === 'sparse')
 const localUnit = computed(() => (props.hasScale ? 'm/px' : 'model units/px'))
 
-const sourceLabel = computed(() => {
-  const s = activeSource.value
-  if (!s) return groundOnly.value ? 'No classified cloud yet' : 'No point cloud yet'
-  const kind = s.kind === 'dense' ? 'Dense cloud' : 'Sparse cloud'
-  // A streamed cloud is read from its octree, as finely as the cell size needs.
-  const streamed = s.cloud && !s.cloud.pos && s.cloud.lod ? ' · streamed' : ''
-  return `${kind}${s.name ? ` · ${s.name}` : ''} · ${s.count.toLocaleString()} points${streamed}${groundOnly.value ? ' · ground class' : ''}`
-})
 // The machine-level memory budget (Settings ▸ Compute), injected at run() like
 // the dense modals: it bounds the staged points and the grid.
 const { memBudgetBytes } = useComputeSettings()
@@ -122,142 +116,157 @@ watch(
   { immediate: true },
 )
 onBeforeUnmount(() => clearTimeout(estimateTimer))
+
+// What each step does to this project (core/stepEffects/raster.js).
+const cellUnit = computed(() =>
+  settings.value.crs === 'project' ? `${linearCrsUnit(props.projectCrs)}/px` : localUnit.value,
+)
+const effects = computed(() => {
+  const s = activeSource.value
+  return demEffects(settings.value, {
+    // A streamed cloud is read from its octree, as finely as the cell size needs.
+    source: s && { kind: s.kind, name: s.name, count: s.count, streamed: !!(s.cloud && !s.cloud.pos && s.cloud.lod) },
+    estimate: estimate.value,
+    unit: cellUnit.value,
+    frame: frameText(settings.value.crs, { projectCrs: props.projectCrs, hasScale: props.hasScale }),
+  })
+})
 </script>
 
 <template>
   <ModalShell title="Build DEM" @close="emit('close')">
-    <!-- Read-only: which cloud the run will rasterise. The pick lives in the
-         store's demSource getter; showing it here is what makes a sparse-source
-         DEM a visible choice instead of a silent fallback. -->
-    <div class="source-row">
-      <span class="field-label">Source</span>
-      <span class="field-hint source-value">{{ sourceLabel }}</span>
-    </div>
-
-    <SettingsField
-      label-for="dem-points"
-      :hint="
-        groundSource
-          ? 'Ground only rasterises the ground class of a classified cloud: a bare-earth DTM.'
-          : 'Ground only needs a classified cloud: Tools ▸ Point Cloud ▸ Classify ground.'
-      "
-    >
-      <template #label><FieldHelp op="dem" param="points">Points</FieldHelp></template>
-      <select id="dem-points" v-model="settings.points" class="field-input field-select">
-        <option value="all">All points (DSM)</option>
-        <option value="ground" :disabled="!groundSource">Ground only (DTM)</option>
-      </select>
-    </SettingsField>
-
-    <WarnBox v-if="isSparseSource">
-      Building from the <b>sparse</b> cloud — cells are interpolated from tie points, so the surface is approximate. Run
-      <b>Depth maps → Densify</b> for a true DSM.
-    </WarnBox>
-
-    <FrameCrsField
-      id="dem-crs"
-      v-model="settings.crs"
-      real-world="heights"
-      help-op="dem"
-      :can-georeference="canGeoreference"
-      :has-scale="hasScale"
-      :project-crs="projectCrs"
-      :georeference-blocker="georeferenceBlocker"
-      :crs-suggestion="crsSuggestion"
-      @apply-crs-suggestion="(s) => emit('apply-crs-suggestion', s)"
-    />
-
-    <RasterSizeField
-      id="dem"
-      op="dem"
-      :defaults="DEM_DEFAULTS"
-      v-model:size-by="settings.sizeBy"
-      v-model:gsd="settings.gsd"
-      v-model:long-side="settings.longSide"
-      :unit="settings.crs === 'project' ? `${linearCrsUnit(projectCrs)}/px` : localUnit"
-      gsd-hint="Cell size. 0 = auto (≈ one point per cell). Smaller = finer & slower."
-      :invalid="numbers.bad"
-      :estimate="estimate"
-      auto-capped="Auto keeps a DEM to 4,096 px a side, so this one is coarser than one point per cell. Set a cell size or a long side for a finer DEM."
-    />
-
-    <!-- The raw min/max lets far background (an oblique capture sees almost to the
-         horizon) set the raster size; the dense core keeps the site. The run logs
-         how many points the core leaves out. -->
-    <SettingsField
-      label-for="dem-extent"
-      hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent."
-    >
-      <template #label><FieldHelp op="dem" param="extent">Extent</FieldHelp></template>
-      <select id="dem-extent" v-model="settings.extent" class="field-input field-select">
-        <option value="core">Dense core of the cloud</option>
-        <option value="all">All points</option>
-      </select>
-    </SettingsField>
-
-    <SettingsField label-for="dem-agg" hint="How multiple points in one cell collapse to a single height.">
-      <template #label><FieldHelp op="dem" param="aggregate">Surface aggregation</FieldHelp></template>
-      <select id="dem-agg" v-model="settings.aggregate" class="field-input field-select">
-        <option value="max">Max (DSM — top surface)</option>
-        <option value="median">Median (robust)</option>
-        <option value="mean">Mean</option>
-        <option value="min">Min (ground-ish)</option>
-      </select>
-    </SettingsField>
-
-    <SettingsField
-      label-for="dem-fill-method"
-      hint="IDW blends nearby heights smoothly; nearest neighbour preserves steps. Disable to keep nodata gaps."
-    >
-      <template #label><FieldHelp op="dem" param="fillMethod">Gap interpolation</FieldHelp></template>
-      <select id="dem-fill-method" v-model="settings.fillMethod" class="field-input field-select">
-        <option value="idw">Inverse distance (smooth)</option>
-        <option value="nearest">Nearest neighbour</option>
-        <option value="none">None (keep gaps)</option>
-      </select>
-    </SettingsField>
-
-    <!-- The radius never expands the raster extent; it only fills cells with a
-         measured neighbour inside this search distance. -->
-    <SettingsField
-      v-if="settings.fillMethod !== 'none'"
-      label-for="dem-fill"
-      unit="px"
-      :hint="
-        isSparseSource
-          ? 'Fill empty cells with measured neighbours inside this radius. On a sparse source, a large radius invents surface between distant tie points.'
-          : 'Fill empty cells only when an original measured cell lies within this radius.'
-      "
-    >
-      <template #label
-        ><FieldHelp op="dem" param="fillRadius" :value="settings.fillRadius" :default-value="DEM_DEFAULTS.fillRadius"
-          >Interpolation radius</FieldHelp
-        ></template
+    <SettingsStep step="1" title="Points" :effect="effects.points">
+      <SettingsField
+        label-for="dem-points"
+        :hint="
+          groundSource
+            ? 'Ground only rasterises the ground class of a classified cloud: a bare-earth DTM.'
+            : 'Ground only needs a classified cloud: Tools ▸ Point Cloud ▸ Classify ground.'
+        "
       >
-      <input
-        id="dem-fill"
-        v-model.number="settings.fillRadius"
-        :aria-invalid="numbers.bad.fillRadius"
-        type="number"
-        min="1"
-        max="32"
-        step="1"
-        class="field-input"
+        <template #label><FieldHelp op="dem" param="points">Points</FieldHelp></template>
+        <select id="dem-points" v-model="settings.points" class="field-input field-select">
+          <option value="all">All points (DSM)</option>
+          <option value="ground" :disabled="!groundSource">Ground only (DTM)</option>
+        </select>
+      </SettingsField>
+
+      <WarnBox v-if="isSparseSource">
+        Building from the <b>sparse</b> cloud — cells are interpolated from tie points, so the surface is approximate.
+        Run <b>Depth maps → Densify</b> for a true DSM.
+      </WarnBox>
+    </SettingsStep>
+
+    <SettingsStep step="2" title="Grid" :effect="effects.grid">
+      <FrameCrsField
+        id="dem-crs"
+        v-model="settings.crs"
+        real-world="heights"
+        help-op="dem"
+        :can-georeference="canGeoreference"
+        :has-scale="hasScale"
+        :project-crs="projectCrs"
+        :georeference-blocker="georeferenceBlocker"
+        :crs-suggestion="crsSuggestion"
+        @apply-crs-suggestion="(s) => emit('apply-crs-suggestion', s)"
       />
-    </SettingsField>
 
-    <SettingsField
-      hint="Interpolate every gap the survey surrounds, such as the ground under a removed building. Gaps at the edge stay empty."
-    >
-      <template #label>
-        <FieldHelp op="dem" param="fillHoles" :value="settings.fillHoles" :default-value="DEM_DEFAULTS.fillHoles"
-          >Fill enclosed gaps</FieldHelp
-        >
-      </template>
-      <label class="checkbox-row"
-        ><input v-model="settings.fillHoles" type="checkbox" class="checkbox" /> Enabled</label
+      <!-- The raw min/max lets far background (an oblique capture sees almost to the
+           horizon) set the raster size; the dense core keeps the site. The run logs
+           how many points the core leaves out. -->
+      <SettingsField
+        label-for="dem-extent"
+        hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent."
       >
-    </SettingsField>
+        <template #label><FieldHelp op="dem" param="extent">Extent</FieldHelp></template>
+        <select id="dem-extent" v-model="settings.extent" class="field-input field-select">
+          <option value="core">Dense core of the cloud</option>
+          <option value="all">All points</option>
+        </select>
+      </SettingsField>
+
+      <RasterSizeField
+        id="dem"
+        op="dem"
+        :defaults="DEM_DEFAULTS"
+        v-model:size-by="settings.sizeBy"
+        v-model:gsd="settings.gsd"
+        v-model:long-side="settings.longSide"
+        :unit="cellUnit"
+        gsd-hint="Cell size. 0 = auto (≈ one point per cell). Smaller = finer & slower."
+        :invalid="numbers.bad"
+        :estimate="estimate"
+        auto-capped="Auto keeps a DEM to 4,096 px a side, so this one is coarser than one point per cell. Set a cell size or a long side for a finer DEM."
+      />
+    </SettingsStep>
+
+    <SettingsStep step="3" title="Height per cell" :effect="effects.cell">
+      <SettingsField label-for="dem-agg" hint="How multiple points in one cell collapse to a single height.">
+        <template #label><FieldHelp op="dem" param="aggregate">Surface aggregation</FieldHelp></template>
+        <select id="dem-agg" v-model="settings.aggregate" class="field-input field-select">
+          <option value="max">Max (DSM — top surface)</option>
+          <option value="median">Median (robust)</option>
+          <option value="mean">Mean</option>
+          <option value="min">Min (ground-ish)</option>
+        </select>
+      </SettingsField>
+    </SettingsStep>
+
+    <SettingsStep step="4" title="Fill gaps" :effect="effects.fill">
+      <SettingsField
+        label-for="dem-fill-method"
+        hint="IDW blends nearby heights smoothly; nearest neighbour preserves steps. Disable to keep nodata gaps."
+      >
+        <template #label><FieldHelp op="dem" param="fillMethod">Gap interpolation</FieldHelp></template>
+        <select id="dem-fill-method" v-model="settings.fillMethod" class="field-input field-select">
+          <option value="idw">Inverse distance (smooth)</option>
+          <option value="nearest">Nearest neighbour</option>
+          <option value="none">None (keep gaps)</option>
+        </select>
+      </SettingsField>
+
+      <!-- The radius never expands the raster extent; it only fills cells with a
+           measured neighbour inside this search distance. -->
+      <SettingsField
+        v-if="settings.fillMethod !== 'none'"
+        label-for="dem-fill"
+        unit="px"
+        :hint="
+          isSparseSource
+            ? 'Fill empty cells with measured neighbours inside this radius. On a sparse source, a large radius invents surface between distant tie points.'
+            : 'Fill empty cells only when an original measured cell lies within this radius.'
+        "
+      >
+        <template #label
+          ><FieldHelp op="dem" param="fillRadius" :value="settings.fillRadius" :default-value="DEM_DEFAULTS.fillRadius"
+            >Interpolation radius</FieldHelp
+          ></template
+        >
+        <input
+          id="dem-fill"
+          v-model.number="settings.fillRadius"
+          :aria-invalid="numbers.bad.fillRadius"
+          type="number"
+          min="1"
+          max="32"
+          step="1"
+          class="field-input"
+        />
+      </SettingsField>
+
+      <SettingsField
+        hint="Interpolate every gap the survey surrounds, such as the ground under a removed building. Gaps at the edge stay empty."
+      >
+        <template #label>
+          <FieldHelp op="dem" param="fillHoles" :value="settings.fillHoles" :default-value="DEM_DEFAULTS.fillHoles"
+            >Fill enclosed gaps</FieldHelp
+          >
+        </template>
+        <label class="checkbox-row"
+          ><input v-model="settings.fillHoles" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
+    </SettingsStep>
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
@@ -278,14 +287,5 @@ onBeforeUnmount(() => clearTimeout(estimateTimer))
 /* DEM/aggregation selects read better full-width. */
 .field-select {
   width: 100%;
-}
-/* Source is a read-only statement, not a field: label and value on one line. */
-.source-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.source-value {
-  color: var(--text);
 }
 </style>

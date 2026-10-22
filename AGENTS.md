@@ -22,6 +22,9 @@ Rules that are easy to miss:
   inner loops on the threaded WASM build (rayon, `src/wasm/reconstruction-mt`). One
   worker is right only where it is measured to be faster (a GPU path; fusion, which is
   bound by reads): say so in a comment. Log how many workers a run used.
+- A dialog that runs a processing step shows its settings as numbered `SettingsStep`s
+  in run order, each with a live effect line from `src/core/stepEffects/`
+  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Dialogs of a processing step*).
 - Run `npm test` and `npm run typecheck` before calling a change done.
 - In the final summary, say which help files (`src/guide/`, `src/glossary/`) were
   updated, or that none needed it.

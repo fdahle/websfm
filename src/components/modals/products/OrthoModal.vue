@@ -6,11 +6,13 @@ import SettingsField from '../ui/SettingsField.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
 import RasterSizeField from '../ui/RasterSizeField.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { ORTHO_DEFAULTS } from '../../../core/defaults.user.js'
 import { orthoCostCeiling } from '../../../core/products/ortho.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
+import { orthoEffects, frameText } from '../../../core/stepEffects/raster.js'
 
 // Build Orthophoto. Reprojects each cell of a SURFACE through the cached depth
 // maps (occlusion via their depth planes, colour from their RGB planes). The
@@ -171,242 +173,265 @@ watch(
   { immediate: true },
 )
 onBeforeUnmount(() => clearTimeout(estimateTimer))
+
+// What each step does to this project (core/stepEffects/raster.js).
+const effects = computed(() =>
+  orthoEffects(settings.value, {
+    surface: chosen.value,
+    estimate: estimate.value,
+    unit: outputUnit.value,
+    frame: framePicked.value
+      ? frameText(settings.value.crs, { projectCrs: props.projectCrs, hasScale: props.hasScale })
+      : null,
+    costCeiling: costCeiling.value,
+  }),
+)
 </script>
 
 <template>
   <ModalShell title="Build Orthophoto" @close="emit('close')">
-    <SettingsField
-      label-for="ortho-surface"
-      :hint="chosen?.hint ?? 'The height per ground cell that each pixel is reprojected onto.'"
-    >
-      <template #label><FieldHelp op="orthophoto" param="surface">Surface</FieldHelp></template>
-      <select id="ortho-surface" v-model="settings.surface" class="field-input field-select">
-        <option v-for="s in surfaces" :key="s.id" :value="s.id" :disabled="!s.available">
-          {{ s.label }}{{ s.detail ? ` — ${s.detail}` : '' }}{{ s.available ? '' : ' — unavailable' }}
-        </option>
-      </select>
-    </SettingsField>
-
-    <WarnBox v-if="!canRun">
-      No surface available yet. Build a <b>DEM</b> or a <b>mesh</b> first — an orthophoto needs a height for every
-      ground cell to reproject the images onto.
-    </WarnBox>
-
-    <WarnBox v-else-if="settings.surface === 'dem'">
-      The ortho can only cover cells where the DEM has a height, so DEM holes become transparent pixels. Use the
-      <b>mesh</b> surface (watertight) or raise the DEM's hole-fill radius for a fuller image.
-    </WarnBox>
-
-    <!-- A DEM already fixes the frame; mesh/plane surfaces are built here, so
-         they need the same choice Build DEM offers. v-show, not v-if: the field
-         keeps the frame valid (and remembers an applied CRS suggestion) while a
-         DEM surface hides it. -->
-    <FrameCrsField
-      v-show="framePicked"
-      id="ortho-crs"
-      v-model="settings.crs"
-      help-op="orthophoto"
-      :can-georeference="canGeoreference"
-      :has-scale="hasScale"
-      :project-crs="projectCrs"
-      :georeference-blocker="georeferenceBlocker"
-      :crs-suggestion="crsSuggestion"
-      @apply-crs-suggestion="(s) => emit('apply-crs-suggestion', s)"
-    />
-
-    <!-- The raw min/max lets far background (an oblique capture sees almost to the
-         horizon) set the raster size; the dense core keeps the site. The run logs
-         how many points the core leaves out. -->
-    <SettingsField
-      v-if="framePicked"
-      label-for="ortho-extent"
-      hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent."
-    >
-      <template #label><FieldHelp op="orthophoto" param="extent">Extent</FieldHelp></template>
-      <select id="ortho-extent" v-model="settings.extent" class="field-input field-select">
-        <option value="core">Dense core of the surface</option>
-        <option value="all">All points</option>
-      </select>
-    </SettingsField>
-
-    <RasterSizeField
-      id="ortho"
-      op="orthophoto"
-      :defaults="ORTHO_DEFAULTS"
-      v-model:size-by="settings.sizeBy"
-      v-model:gsd="settings.gsd"
-      v-model:long-side="settings.longSide"
-      :unit="outputUnit"
-      gsd-hint="Ortho cell size. 0 = the surface's own resolution. Finer than the surface is fine — down to the photos' own GSD."
-      :invalid="numbers.bad"
-      :estimate="estimate"
-    />
-
-    <SettingsField label-for="ortho-blend" :hint="blendHint">
-      <template #label><FieldHelp op="orthophoto" param="blend">View blending</FieldHelp></template>
-      <select id="ortho-blend" v-model="settings.blend" class="field-input field-select">
-        <option value="mosaic">Mosaic (most nadir view, balanced seams)</option>
-        <option value="best">Best match (lowest matching cost per pixel)</option>
-        <option value="average">Average (all visible views)</option>
-      </select>
-    </SettingsField>
-
-    <!-- These act only on a mosaic: best/average have no regions to place, balance or blend. -->
-    <template v-if="settings.blend === 'mosaic'">
-      <SettingsField label-for="ortho-seamline" :hint="seamlineHint">
-        <template #label><FieldHelp op="orthophoto" param="seamline">Seamlines</FieldHelp></template>
-        <select id="ortho-seamline" v-model="settings.seamline" class="field-input field-select">
-          <option value="graphcut">Graph cut (avoid buildings and trees)</option>
-          <option value="nadir">Most nadir photo</option>
-        </select>
-      </SettingsField>
+    <SettingsStep step="1" title="Surface" :effect="effects.surface">
       <SettingsField
-        label-for="ortho-balance"
-        hint="Evens out exposure between photos with one brightness gain per photo and colour, fitted where photos overlap."
+        label-for="ortho-surface"
+        :hint="chosen?.hint ?? 'The height per ground cell that each pixel is reprojected onto.'"
       >
-        <template #label
-          ><FieldHelp
-            op="orthophoto"
-            param="colourBalance"
-            :value="settings.colourBalance"
-            :default-value="ORTHO_DEFAULTS.colourBalance"
-            >Colour balance</FieldHelp
-          ></template
-        >
-        <label class="checkbox-row">
-          <input id="ortho-balance" v-model="settings.colourBalance" type="checkbox" class="checkbox" /> Enabled
-        </label>
-      </SettingsField>
-      <SettingsField label-for="ortho-seam-blend" :hint="seamBlendHint">
-        <template #label><FieldHelp op="orthophoto" param="seamBlend">Seam blending</FieldHelp></template>
-        <select id="ortho-seam-blend" v-model="settings.seamBlend" class="field-input field-select">
-          <option value="multiband">Multiband (by frequency)</option>
-          <option value="feather">Feather (cross-fade)</option>
+        <template #label><FieldHelp op="orthophoto" param="surface">Surface</FieldHelp></template>
+        <select id="ortho-surface" v-model="settings.surface" class="field-input field-select">
+          <option v-for="s in surfaces" :key="s.id" :value="s.id" :disabled="!s.available">
+            {{ s.label }}{{ s.detail ? ` — ${s.detail}` : '' }}{{ s.available ? '' : ' — unavailable' }}
+          </option>
         </select>
       </SettingsField>
+
+      <WarnBox v-if="!canRun">
+        No surface available yet. Build a <b>DEM</b> or a <b>mesh</b> first — an orthophoto needs a height for every
+        ground cell to reproject the images onto.
+      </WarnBox>
+
+      <WarnBox v-else-if="settings.surface === 'dem'">
+        The ortho can only cover cells where the DEM has a height, so DEM holes become transparent pixels. Use the
+        <b>mesh</b> surface (watertight) or raise the DEM's hole-fill radius for a fuller image.
+      </WarnBox>
+    </SettingsStep>
+
+    <SettingsStep step="2" title="Grid" :effect="effects.grid">
+      <!-- A DEM already fixes the frame; mesh/plane surfaces are built here, so
+           they need the same choice Build DEM offers. v-show, not v-if: the field
+           keeps the frame valid (and remembers an applied CRS suggestion) while a
+           DEM surface hides it. -->
+      <FrameCrsField
+        v-show="framePicked"
+        id="ortho-crs"
+        v-model="settings.crs"
+        help-op="orthophoto"
+        :can-georeference="canGeoreference"
+        :has-scale="hasScale"
+        :project-crs="projectCrs"
+        :georeference-blocker="georeferenceBlocker"
+        :crs-suggestion="crsSuggestion"
+        @apply-crs-suggestion="(s) => emit('apply-crs-suggestion', s)"
+      />
+
+      <!-- The raw min/max lets far background (an oblique capture sees almost to the
+           horizon) set the raster size; the dense core keeps the site. The run logs
+           how many points the core leaves out. -->
       <SettingsField
-        v-if="settings.seamBlend === 'feather'"
-        label-for="ortho-seam"
+        v-if="framePicked"
+        label-for="ortho-extent"
+        hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent."
+      >
+        <template #label><FieldHelp op="orthophoto" param="extent">Extent</FieldHelp></template>
+        <select id="ortho-extent" v-model="settings.extent" class="field-input field-select">
+          <option value="core">Dense core of the surface</option>
+          <option value="all">All points</option>
+        </select>
+      </SettingsField>
+
+      <RasterSizeField
+        id="ortho"
+        op="orthophoto"
+        :defaults="ORTHO_DEFAULTS"
+        v-model:size-by="settings.sizeBy"
+        v-model:gsd="settings.gsd"
+        v-model:long-side="settings.longSide"
+        :unit="outputUnit"
+        gsd-hint="Ortho cell size. 0 = the surface's own resolution. Finer than the surface is fine — down to the photos' own GSD."
+        :invalid="numbers.bad"
+        :estimate="estimate"
+      />
+    </SettingsStep>
+
+    <SettingsStep step="3" title="Which photos see each cell" :effect="effects.visibility">
+      <SettingsField
+        label-for="ortho-tol"
         unit="%"
-        hint="Width of the cross-fade at each seam, as a % of the orthophoto's shorter side (at most 128 px). 0 = hard seams."
+        hint="How closely a cell's depth must match a view's depth map to count as visible."
       >
-        <template #label
-          ><FieldHelp
+        <template #label>
+          <FieldHelp
             op="orthophoto"
-            param="seamWidth"
-            :value="settings.seamWidth"
-            :default-value="ORTHO_DEFAULTS.seamWidth"
-            >Seam blending width</FieldHelp
-          ></template
-        >
+            param="depthTolRel"
+            :value="settings.depthTolRel"
+            :default-value="ORTHO_DEFAULTS.depthTolRel"
+            >Occlusion tolerance</FieldHelp
+          >
+        </template>
         <input
-          id="ortho-seam"
-          v-model.number="settings.seamWidth"
-          :aria-invalid="numbers.bad.seamWidth"
+          id="ortho-tol"
+          v-model.number="settings.depthTolRel"
+          :aria-invalid="numbers.bad.depthTolRel"
           type="number"
-          min="0"
-          max="5"
-          step="0.25"
+          min="0.5"
+          max="10"
+          step="0.5"
           class="field-input"
         />
       </SettingsField>
-    </template>
 
-    <SettingsField
-      label-for="ortho-tol"
-      unit="%"
-      hint="How closely a cell's depth must match a view's depth map to count as visible."
-    >
-      <template #label>
-        <FieldHelp
-          op="orthophoto"
-          param="depthTolRel"
-          :value="settings.depthTolRel"
-          :default-value="ORTHO_DEFAULTS.depthTolRel"
-          >Occlusion tolerance</FieldHelp
-        >
-      </template>
-      <input
-        id="ortho-tol"
-        v-model.number="settings.depthTolRel"
-        :aria-invalid="numbers.bad.depthTolRel"
-        type="number"
-        min="0.5"
-        max="10"
-        step="0.5"
-        class="field-input"
-      />
-    </SettingsField>
-
-    <SettingsField
-      label-for="ortho-cost"
-      hint="Never take colour where the depth map matched poorly (high cost), in every blending mode. 0 = keep all."
-    >
-      <template #label>
-        <FieldHelp
-          op="orthophoto"
-          param="maxCost"
-          :value="settings.maxCost || 'Off'"
-          :default-value="ORTHO_DEFAULTS.maxCost || 'Off'"
-          >Max match cost</FieldHelp
-        >
-      </template>
-      <input
-        id="ortho-cost"
-        v-model.number="settings.maxCost"
-        :aria-invalid="numbers.bad.maxCost"
-        type="number"
-        min="0"
-        max="2"
-        step="0.1"
-        class="field-input"
-      />
-    </SettingsField>
-
-    <WarnBox v-if="costIneffective">
-      No effect: the depth maps were built with Cross-view consistency at Minimum NCC
-      {{ fmtCost(depthSettings.minNcc) }}, which already removed every pixel with a cost above
-      {{ fmtCost(costCeiling) }}. Set a value below {{ fmtCost(costCeiling) }} to drop more.
-    </WarnBox>
-
-    <SettingsField
-      label-for="ortho-fill-method"
-      hint="Fills small transparent pixels from nearby successfully projected colours, but never outside the selected surface."
-    >
-      <template #label><FieldHelp op="orthophoto" param="fillMethod">Colour gap interpolation</FieldHelp></template>
-      <select id="ortho-fill-method" v-model="settings.fillMethod" class="field-input field-select">
-        <option value="idw">Inverse distance (smooth)</option>
-        <option value="nearest">Nearest neighbour</option>
-        <option value="none">None (keep transparent)</option>
-      </select>
-    </SettingsField>
-
-    <SettingsField
-      v-if="settings.fillMethod !== 'none'"
-      label-for="ortho-fill"
-      unit="px"
-      hint="Maximum distance to an originally sampled colour. Small values close speckles without bridging large unseen areas."
-    >
-      <template #label
-        ><FieldHelp
-          op="orthophoto"
-          param="fillRadius"
-          :value="settings.fillRadius"
-          :default-value="ORTHO_DEFAULTS.fillRadius"
-          >Colour fill radius</FieldHelp
-        ></template
+      <SettingsField
+        label-for="ortho-cost"
+        hint="Never take colour where the depth map matched poorly (high cost), in every blending mode. 0 = keep all."
       >
-      <input
-        id="ortho-fill"
-        v-model.number="settings.fillRadius"
-        :aria-invalid="numbers.bad.fillRadius"
-        type="number"
-        min="1"
-        max="16"
-        step="1"
-        class="field-input"
-      />
-    </SettingsField>
+        <template #label>
+          <FieldHelp
+            op="orthophoto"
+            param="maxCost"
+            :value="settings.maxCost || 'Off'"
+            :default-value="ORTHO_DEFAULTS.maxCost || 'Off'"
+            >Max match cost</FieldHelp
+          >
+        </template>
+        <input
+          id="ortho-cost"
+          v-model.number="settings.maxCost"
+          :aria-invalid="numbers.bad.maxCost"
+          type="number"
+          min="0"
+          max="2"
+          step="0.1"
+          class="field-input"
+        />
+      </SettingsField>
+
+      <WarnBox v-if="costIneffective">
+        No effect: the depth maps were built with Cross-view consistency at Minimum NCC
+        {{ fmtCost(depthSettings.minNcc) }}, which already removed every pixel with a cost above
+        {{ fmtCost(costCeiling) }}. Set a value below {{ fmtCost(costCeiling) }} to drop more.
+      </WarnBox>
+    </SettingsStep>
+
+    <SettingsStep step="4" title="Combine the photos" :effect="effects.blend">
+      <SettingsField label-for="ortho-blend" :hint="blendHint">
+        <template #label><FieldHelp op="orthophoto" param="blend">View blending</FieldHelp></template>
+        <select id="ortho-blend" v-model="settings.blend" class="field-input field-select">
+          <option value="mosaic">Mosaic (most nadir view, balanced seams)</option>
+          <option value="best">Best match (lowest matching cost per pixel)</option>
+          <option value="average">Average (all visible views)</option>
+        </select>
+      </SettingsField>
+
+      <!-- These act only on a mosaic: best/average have no regions to place, balance or blend. -->
+      <template v-if="settings.blend === 'mosaic'">
+        <SettingsField label-for="ortho-seamline" :hint="seamlineHint">
+          <template #label><FieldHelp op="orthophoto" param="seamline">Seamlines</FieldHelp></template>
+          <select id="ortho-seamline" v-model="settings.seamline" class="field-input field-select">
+            <option value="graphcut">Graph cut (avoid buildings and trees)</option>
+            <option value="nadir">Most nadir photo</option>
+          </select>
+        </SettingsField>
+        <SettingsField
+          label-for="ortho-balance"
+          hint="Evens out exposure between photos with one brightness gain per photo and colour, fitted where photos overlap."
+        >
+          <template #label
+            ><FieldHelp
+              op="orthophoto"
+              param="colourBalance"
+              :value="settings.colourBalance"
+              :default-value="ORTHO_DEFAULTS.colourBalance"
+              >Colour balance</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row">
+            <input id="ortho-balance" v-model="settings.colourBalance" type="checkbox" class="checkbox" /> Enabled
+          </label>
+        </SettingsField>
+        <SettingsField label-for="ortho-seam-blend" :hint="seamBlendHint">
+          <template #label><FieldHelp op="orthophoto" param="seamBlend">Seam blending</FieldHelp></template>
+          <select id="ortho-seam-blend" v-model="settings.seamBlend" class="field-input field-select">
+            <option value="multiband">Multiband (by frequency)</option>
+            <option value="feather">Feather (cross-fade)</option>
+          </select>
+        </SettingsField>
+        <SettingsField
+          v-if="settings.seamBlend === 'feather'"
+          label-for="ortho-seam"
+          unit="%"
+          hint="Width of the cross-fade at each seam, as a % of the orthophoto's shorter side (at most 128 px). 0 = hard seams."
+        >
+          <template #label
+            ><FieldHelp
+              op="orthophoto"
+              param="seamWidth"
+              :value="settings.seamWidth"
+              :default-value="ORTHO_DEFAULTS.seamWidth"
+              >Seam blending width</FieldHelp
+            ></template
+          >
+          <input
+            id="ortho-seam"
+            v-model.number="settings.seamWidth"
+            :aria-invalid="numbers.bad.seamWidth"
+            type="number"
+            min="0"
+            max="5"
+            step="0.25"
+            class="field-input"
+          />
+        </SettingsField>
+      </template>
+    </SettingsStep>
+
+    <SettingsStep step="5" title="Fill gaps" :effect="effects.fill" :inactive="settings.fillMethod === 'none'">
+      <SettingsField
+        label-for="ortho-fill-method"
+        hint="Fills small transparent pixels from nearby successfully projected colours, but never outside the selected surface."
+      >
+        <template #label><FieldHelp op="orthophoto" param="fillMethod">Colour gap interpolation</FieldHelp></template>
+        <select id="ortho-fill-method" v-model="settings.fillMethod" class="field-input field-select">
+          <option value="idw">Inverse distance (smooth)</option>
+          <option value="nearest">Nearest neighbour</option>
+          <option value="none">None (keep transparent)</option>
+        </select>
+      </SettingsField>
+
+      <SettingsField
+        v-if="settings.fillMethod !== 'none'"
+        label-for="ortho-fill"
+        unit="px"
+        hint="Maximum distance to an originally sampled colour. Small values close speckles without bridging large unseen areas."
+      >
+        <template #label
+          ><FieldHelp
+            op="orthophoto"
+            param="fillRadius"
+            :value="settings.fillRadius"
+            :default-value="ORTHO_DEFAULTS.fillRadius"
+            >Colour fill radius</FieldHelp
+          ></template
+        >
+        <input
+          id="ortho-fill"
+          v-model.number="settings.fillRadius"
+          :aria-invalid="numbers.bad.fillRadius"
+          type="number"
+          min="1"
+          max="16"
+          step="1"
+          class="field-input"
+        />
+      </SettingsField>
+    </SettingsStep>
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

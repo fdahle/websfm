@@ -30,6 +30,12 @@ cloud is too sparse for the depth you choose, the depth is lowered automatically
 and the log says why. A depth that is high relative to the point count mostly
 creates empty detail, and the modal warns you.
 
+## Screening weight
+<!-- param: screening default: 4 -->
+Higher values pull the surface more tightly toward samples; lower values favour
+smoothness. Excessive screening can reproduce noise, while too little can round edges
+and erase small details.
+
 ## Surface trimming
 <!-- param: trim default: Gentle -->
 **Gentle** removes surface that no points support: the hull Poisson extrapolates
@@ -37,6 +43,12 @@ past the data, and the shells around stray specks. **Strong** also removes thinl
 observed surface, which can open holes where coverage is sparse. **Off** keeps the
 whole closed Poisson surface, which is useful when you need a watertight solid and
 accept invented geometry where nothing was seen.
+
+## Distance trim
+<!-- param: distanceTrim default: 0 -->
+An optional extra trim: triangles farther than this many sample spacings from any
+point are cut. Surface trimming already covers most cases. Use this only to cut
+smooth extrapolated sheets that Gentle keeps.
 
 ## Fill small holes
 <!-- param: fillHoles default: true -->
@@ -61,18 +73,6 @@ speck into a closed ball that can look sizeable, yet only a handful of points re
 it; a piece no point lies near, such as an extrapolated sheet, has no support and
 always goes. Raise the value to clear larger clutter; lower it when a real, separate,
 thinly covered object disappears.
-
-## Screening weight
-<!-- param: screening default: 4 -->
-Higher values pull the surface more tightly toward samples; lower values favour
-smoothness. Excessive screening can reproduce noise, while too little can round edges
-and erase small details.
-
-## Distance trim
-<!-- param: distanceTrim default: 0 -->
-An optional extra trim: triangles farther than this many sample spacings from any
-point are cut. Surface trimming already covers most cases. Use this only to cut
-smooth extrapolated sheets that Gentle keeps.
 
 ## Transfer colour from the dense cloud
 <!-- param: colorize default: on -->

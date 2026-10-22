@@ -8,6 +8,13 @@ order: 60
 Fusion is Stage B of dense reconstruction. It cross-checks depth maps, merges agreeing
 samples, and emits a coloured [point cloud](help:point-cloud) with normals for meshing.
 
+## Point density
+<!-- param: step default: 1 px -->
+Emit one point every N depth-map pixels. `1` keeps full available density. A larger
+step is a direct, predictable way to make a smaller point cloud for preview or export. If
+the cloud would not fit the memory budget, fusion raises the step on its own (up to
+4 px) and says so in the log.
+
 ## Auto thresholds
 <!-- param: auto default: Enabled -->
 Auto picks the minimum view count from the number of depth maps and uses the default
@@ -40,13 +47,6 @@ is above this are skipped before the consistency check. Auto uses the same 0.8. 
 depth maps' **Minimum NCC** floor has already vetted the photometry, so this gate is
 deliberately loose: lowering it mostly removes real but weakly textured surface and
 leaves holes. Tighten it only to test whether noise comes from poorly matched pixels.
-
-## Point density
-<!-- param: step default: 1 px -->
-Emit one point every N depth-map pixels. `1` keeps full available density. A larger
-step is a direct, predictable way to make a smaller point cloud for preview or export. If
-the cloud would not fit the memory budget, fusion raises the step on its own (up to
-4 px) and says so in the log.
 
 ## Geometric outlier filters
 These three filters run during fusion, after the consistency check, and remove

@@ -9,6 +9,17 @@ A [digital elevation model](help:digital-elevation-model) collapses 3D points in
 one height per grid cell. A dense cloud produces a useful DSM; the sparse tie-point
 cloud is acceptable only for a coarse preview.
 
+## Points
+<!-- param: points default: All points -->
+**All points** (default) builds a surface model (DSM) from the whole cloud, roofs and
+canopy included. **Ground only** builds a bare-earth terrain model (DTM) from the
+ground class of a classified cloud: run [Classify Ground](guide:classify-ground)
+first. It uses the cloud selected in the 3D view when that one is classified,
+otherwise the newest classified cloud, and the line under **Points** names it. Choosing
+Ground only turns on Fill enclosed gaps, because the ground under a removed
+building is a hole the radius fill cannot close. A classified LiDAR survey imported
+as a *streamed* cloud (too large for memory) is a ground source too.
+
 ## Coordinate frame
 <!-- param: crs default: Local -->
 **Local** uses the model orientation and its best available scale. **Project CRS**
@@ -24,6 +35,15 @@ in degrees (WGS 84): use the projected CRS suggested under the field, or choose 
 Project Settings; the frame switches to it once the fit is possible. "Needs ≥3 camera
 positions or GCPs" means there is not enough evidence yet.
 
+## Extent
+<!-- param: extent default: Dense core -->
+**Dense core** (default) grids only the area where the cloud is dense. Oblique photos
+see far past the site, almost to the horizon, and those thin distant points would
+otherwise make the DEM huge, coarse and mostly empty. The log says how many points
+fall outside and are left out; a warning appears when that is more than 5%. Choose
+**All points** to grid the full extent of the cloud. A Region (Tools ▸ Model ▸ Region)
+limits the input before either.
+
 ## Raster size by
 <!-- param: sizeBy default: Cell size -->
 Set the DEM's size either as a **Cell size** (the ground sample distance below) or as
@@ -33,13 +53,6 @@ size, estimated from a sample of the cloud in the chosen frame (marked ≈). In 
 project CRS it appears once the georeference is fitted. When Auto stops at 4,096 cells
 a side, or a size would pass 65,535 cells a side, the warning shows there before the
 run.
-
-## Long side
-<!-- param: longSide default: Auto -->
-The number of cells on the DEM's longer side. The cell size is then the extent divided
-by it, and the readout shows it. **0** (Auto) means one point per cell, as Auto does for
-the cell size. Past 4,096 the DEM is built block by block, as a set cell size is (see
-below).
 
 ## Ground sample distance
 <!-- param: gsd default: Auto -->
@@ -70,25 +83,12 @@ The hillshade PNG export and the comparison with a reference DEM use its overvie
 first level of at most 4,096 cells a side, and **Fill enclosed gaps** is applied to the
 overview only.
 
-## Extent
-<!-- param: extent default: Dense core -->
-**Dense core** (default) grids only the area where the cloud is dense. Oblique photos
-see far past the site, almost to the horizon, and those thin distant points would
-otherwise make the DEM huge, coarse and mostly empty. The log says how many points
-fall outside and are left out; a warning appears when that is more than 5%. Choose
-**All points** to grid the full extent of the cloud. A Region (Tools ▸ Model ▸ Region)
-limits the input before either.
-
-## Points
-<!-- param: points default: All points -->
-**All points** (default) builds a surface model (DSM) from the whole cloud, roofs and
-canopy included. **Ground only** builds a bare-earth terrain model (DTM) from the
-ground class of a classified cloud: run [Classify Ground](guide:classify-ground)
-first. It uses the cloud selected in the 3D view when that one is classified,
-otherwise the newest classified cloud, and the Source line shows which. Choosing
-Ground only turns on Fill enclosed gaps, because the ground under a removed
-building is a hole the radius fill cannot close. A classified LiDAR survey imported
-as a *streamed* cloud (too large for memory) is a ground source too.
+## Long side
+<!-- param: longSide default: Auto -->
+The number of cells on the DEM's longer side. The cell size is then the extent divided
+by it, and the readout shows it. **0** (Auto) means one point per cell, as Auto does for
+the cell size. Past 4,096 the DEM is built block by block, as a set cell size is (see
+above).
 
 ## Surface aggregation
 <!-- param: aggregate default: Max -->

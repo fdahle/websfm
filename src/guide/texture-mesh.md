@@ -37,6 +37,45 @@ takes the photo that hides least of it: Poisson closes trees into solid shapes, 
 the photos see the wall between the leaves. Only triangles that face away from every
 photo, such as an underside, are left without one (see **Faces no photo sees**).
 
+## Use masks
+<!-- param: useMasks default: true -->
+Leaves out the pixels the [image masks](guide:masks) exclude, so people, vehicles,
+the sky or the aircraft's own legs never end up in the texture. A triangle that only
+masked pixels see falls back to another photo, or to a flat colour.
+
+## Ignore what only some photos see
+<!-- param: photoConsistency default: false -->
+A person walking past, a parked car that drove off, a bird: something in some photos
+but not in others would end up in the texture wherever one of those photos is chosen.
+With this on, the colours every photo shows for each triangle are compared after the
+exposure levelling, and a photo that disagrees with what the others agree on is not
+used for that triangle. A triangle needs at least three photos for this: with two, no
+one can say which is wrong. It costs one extra low-resolution read of every photo.
+
+It is off by default because on a scene where nothing moved it mostly removes views
+of things that genuinely look different from different angles, such as a vine standing
+off a wall or a reflective window, and the texture becomes patchier for it. Turn it
+on for streets, squares and sites with traffic or people.
+
+If you scored **Tools ▸ Images ▸ Image quality**, blurrier photos are also used less:
+a photo less sharp than the median of the set counts proportionally fewer pixels when
+the photos are chosen.
+
+## Faces no photo sees
+<!-- param: unseen default: Flat colour -->
+Triangles that face away from every photo, such as the underside of an object or the
+back of a wall nobody photographed, cannot be textured. **Flat colour** keeps them,
+each in one colour from the mesh's vertex colours (grey without), so the mesh stays
+closed. **Remove** leaves them out of the textured mesh, which suits a model for
+viewing where those surfaces would only show as blotches.
+
+## Seam penalty
+<!-- param: smoothness default: 0.5 -->
+How strongly view selection keeps neighbouring triangles on the same photo. Higher
+values give fewer, larger charts, so fewer seams, at the price of using a slightly less
+direct photo here and there. **0** takes the best photo for every triangle on its own,
+which scatters seams across the surface.
+
 ## Texture resolution
 <!-- param: maxScale default: Native photo pixels -->
 The finest texel size, measured in photo pixels. **Native photo pixels** keeps all the
@@ -66,45 +105,6 @@ photo shows something the others do not (a branch in front) are left out of that
 Then [seam levelling](help:seam-levelling) brightens or darkens each chart smoothly so
 the two sides of every seam meet. Switch it off only to see the photos as they were
 taken.
-
-## Ignore what only some photos see
-<!-- param: photoConsistency default: false -->
-A person walking past, a parked car that drove off, a bird: something in some photos
-but not in others would end up in the texture wherever one of those photos is chosen.
-With this on, the colours every photo shows for each triangle are compared after the
-exposure levelling, and a photo that disagrees with what the others agree on is not
-used for that triangle. A triangle needs at least three photos for this: with two, no
-one can say which is wrong. It costs one extra low-resolution read of every photo.
-
-It is off by default because on a scene where nothing moved it mostly removes views
-of things that genuinely look different from different angles, such as a vine standing
-off a wall or a reflective window, and the texture becomes patchier for it. Turn it
-on for streets, squares and sites with traffic or people.
-
-If you scored **Tools ▸ Images ▸ Image quality**, blurrier photos are also used less:
-a photo less sharp than the median of the set counts proportionally fewer pixels when
-the photos are chosen.
-
-## Faces no photo sees
-<!-- param: unseen default: Flat colour -->
-Triangles that face away from every photo, such as the underside of an object or the
-back of a wall nobody photographed, cannot be textured. **Flat colour** keeps them,
-each in one colour from the mesh's vertex colours (grey without), so the mesh stays
-closed. **Remove** leaves them out of the textured mesh, which suits a model for
-viewing where those surfaces would only show as blotches.
-
-## Use masks
-<!-- param: useMasks default: true -->
-Leaves out the pixels the [image masks](guide:masks) exclude, so people, vehicles,
-the sky or the aircraft's own legs never end up in the texture. A triangle that only
-masked pixels see falls back to another photo, or to a flat colour.
-
-## Seam penalty
-<!-- param: smoothness default: 0.5 -->
-How strongly view selection keeps neighbouring triangles on the same photo. Higher
-values give fewer, larger charts, so fewer seams, at the price of using a slightly less
-direct photo here and there. **0** takes the best photo for every triangle on its own,
-which scatters seams across the surface.
 
 ## Viewing and export
 The 3D view shows the texture by default (**Colour by ▸ Texture** in the layer's

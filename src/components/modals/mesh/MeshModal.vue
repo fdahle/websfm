@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
-import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
@@ -14,6 +14,7 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import { MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META } from '../../../core/defaults.user.js'
 import { recommendMeshDepth } from '../../../core/products/mesh.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
+import { meshEffects } from '../../../core/stepEffects/mesh.js'
 
 // Build Mesh (screened Poisson over a dense cloud). Defaults are the single source of
 // truth in core/defaults.user.js (core/products/mesh.js keeps matching fallbacks).
@@ -42,19 +43,16 @@ const { baseId, activePreset, selectPreset } = usePresetSettings({
   cards: MESH_PRESET_META,
 })
 
+// What each step does to this project (core/stepEffects/mesh.js).
+const effects = computed(() =>
+  meshEffects(settings.value, { source: source.value && { name: source.value.name, count: source.value.count } }),
+)
+
 const TRIM_OPTIONS = [
   { id: 'off', label: 'Off' },
   { id: 'gentle', label: 'Gentle' },
   { id: 'strong', label: 'Strong' },
 ]
-const trimHint = computed(
-  () =>
-    ({
-      off: 'Keep the whole closed Poisson surface, including the hull it extrapolates past the data.',
-      gentle: 'Remove surface no points support: the extrapolated hull and the shells around stray specks.',
-      strong: 'Also remove thinly observed surface. Can open holes where coverage is sparse.',
-    })[settings.value.trim],
-)
 
 // Flag an octree depth that's high for this cloud's point count: too high mostly builds
 // empty octree cells — slow and RAM-hungry with no real detail gain (see mesh.js).
@@ -100,11 +98,16 @@ function run() {
 
     <PresetCards :model-value="activePreset" :base-id="baseId" :presets="MESH_PRESET_META" @select="selectPreset" />
 
-    <SettingsGroup title="Cleanup">
-      <SettingsField :hint="trimHint">
+    <SettingsStep step="1" title="Solve the surface" :effect="effects.solve" />
+
+    <SettingsStep step="2" title="Trim" :effect="effects.trim">
+      <SettingsField hint="How much of the closed Poisson surface is cut back to where the points are.">
         <template #label><FieldHelp op="mesh" param="trim">Surface trimming</FieldHelp></template>
         <SegmentedControl v-model="settings.trim" :options="TRIM_OPTIONS" />
       </SettingsField>
+    </SettingsStep>
+
+    <SettingsStep step="3" title="Fill small holes" :effect="effects.holes" :inactive="settings.trim === 'off'">
       <SettingsField
         v-if="settings.trim !== 'off'"
         hint="Close small holes the trimming opened, where the surrounding surface is solid."
@@ -118,6 +121,14 @@ function run() {
           ><input v-model="settings.fillHoles" type="checkbox" class="checkbox" /> Enabled</label
         >
       </SettingsField>
+    </SettingsStep>
+
+    <SettingsStep
+      step="4"
+      title="Remove floating pieces"
+      :effect="effects.floaters"
+      :inactive="!settings.removeFloaters"
+    >
       <SettingsField
         hint="Drop disconnected pieces that explain only a few of the cloud's points — stray specks and leftover clutter."
       >
@@ -134,10 +145,10 @@ function run() {
           ><input v-model="settings.removeFloaters" type="checkbox" class="checkbox" /> Enabled</label
         >
       </SettingsField>
-    </SettingsGroup>
+    </SettingsStep>
 
     <AdvancedDisclosure label="Advanced settings">
-      <SettingsGroup title="Surface">
+      <SettingsStep step="1" title="Solve the surface — advanced">
         <SettingsField
           label-for="mesh-depth"
           unit="levels"
@@ -184,32 +195,9 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-        <SettingsField
-          v-if="settings.removeFloaters"
-          label-for="mesh-minpiece"
-          unit="%"
-          hint="Pieces supported by less than this share of the main surface's points are removed."
-        >
-          <template #label
-            ><FieldHelp
-              op="mesh"
-              param="minPiecePct"
-              :value="settings.minPiecePct"
-              :default-value="MESH_DEFAULTS.minPiecePct"
-              >Floating piece size</FieldHelp
-            ></template
-          >
-          <input
-            id="mesh-minpiece"
-            v-model.number="settings.minPiecePct"
-            :aria-invalid="numbers.bad.minPiecePct"
-            type="number"
-            min="0"
-            max="50"
-            step="0.5"
-            class="field-input"
-          />
-        </SettingsField>
+      </SettingsStep>
+
+      <SettingsStep step="2" title="Trim — advanced">
         <SettingsField
           label-for="mesh-dist"
           unit="× spacing"
@@ -235,8 +223,37 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsGroup>
-      <SettingsGroup title="Colour">
+      </SettingsStep>
+
+      <SettingsStep v-if="settings.removeFloaters" step="4" title="Remove floating pieces — advanced">
+        <SettingsField
+          label-for="mesh-minpiece"
+          unit="%"
+          hint="Pieces supported by less than this share of the main surface's points are removed."
+        >
+          <template #label
+            ><FieldHelp
+              op="mesh"
+              param="minPiecePct"
+              :value="settings.minPiecePct"
+              :default-value="MESH_DEFAULTS.minPiecePct"
+              >Floating piece size</FieldHelp
+            ></template
+          >
+          <input
+            id="mesh-minpiece"
+            v-model.number="settings.minPiecePct"
+            :aria-invalid="numbers.bad.minPiecePct"
+            type="number"
+            min="0"
+            max="50"
+            step="0.5"
+            class="field-input"
+          />
+        </SettingsField>
+      </SettingsStep>
+
+      <SettingsStep step="5" title="Colour" :effect="effects.colour" :inactive="!settings.colorize">
         <SettingsField hint="Colour each mesh vertex from the nearest dense point.">
           <template #label
             ><FieldHelp op="mesh" param="colorize" :value="settings.colorize" :default-value="MESH_DEFAULTS.colorize"
@@ -247,7 +264,7 @@ function run() {
             ><input v-model="settings.colorize" type="checkbox" class="checkbox" /> Enabled</label
           >
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
     </AdvancedDisclosure>
 
     <template #footer>

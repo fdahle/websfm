@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
@@ -10,6 +11,7 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { TEXTURE_DEFAULTS } from '../../../core/defaults.user.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
+import { textureEffects } from '../../../core/stepEffects/texture.js'
 
 // Texture Mesh (Tools ▸ Mesh ▾): a photo texture from the registered cameras
 // (core/products/texture/, dev/planning/plan-texture.md). Non-destructive: adds a NEW
@@ -37,6 +39,10 @@ const RESOLUTIONS = [
 ]
 const valid = computed(() => source.value && props.cameraCount > 0 && settings.value.maxPages >= 1)
 const textured = computed(() => !!source.value?.texture)
+// What each step does to this project (core/stepEffects/texture.js).
+const effects = computed(() =>
+  textureEffects(settings.value, { triangles: source.value?.count ?? 0, cameras: props.cameraCount }),
+)
 
 function run() {
   const s = settings.value
@@ -70,14 +76,53 @@ function run() {
           label="Mesh"
           :items="meshes"
           :option-label="meshOptionLabel"
-          hint="The result is a new textured mesh; this one is left untouched."
+          hint="The result is a new textured mesh; this one is left untouched. A few hundred thousand triangles texture best: decimate a large mesh first."
         />
         <p v-if="textured" class="field-hint">
           This mesh is already textured; texturing it again starts from its geometry.
         </p>
         <p v-if="!cameraCount" class="warn-box">Texturing needs registered cameras: build the sparse model first.</p>
       </SettingsGroup>
-      <SettingsGroup title="Atlas">
+      <SettingsStep step="1" title="Which photos see each triangle" :effect="effects.visibility">
+        <SettingsField hint="Masked pixels (people, sky, the drone's legs) are never used.">
+          <template #label
+            ><FieldHelp
+              op="texture-mesh"
+              param="useMasks"
+              :value="settings.useMasks"
+              :default-value="TEXTURE_DEFAULTS.useMasks"
+              >Use masks</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.useMasks" type="checkbox" class="checkbox" /> Leave masked pixels out</label
+          >
+        </SettingsField>
+        <SettingsField hint="For people, vehicles or anything else that moved between photos.">
+          <template #label
+            ><FieldHelp
+              op="texture-mesh"
+              param="photoConsistency"
+              :value="settings.photoConsistency"
+              :default-value="TEXTURE_DEFAULTS.photoConsistency"
+              >Ignore what only some photos see</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.photoConsistency" type="checkbox" class="checkbox" /> Check each face's photos
+            against each other</label
+          >
+        </SettingsField>
+      </SettingsStep>
+      <SettingsStep step="2" title="Choose one photo per triangle" :effect="effects.selection">
+        <SettingsField label-for="tex-unseen">
+          <template #label><FieldHelp op="texture-mesh" param="unseen">Faces no photo sees</FieldHelp></template>
+          <select id="tex-unseen" v-model="settings.unseen" class="field-input field-select">
+            <option v-for="u in UNSEEN" :key="u.value" :value="u.value">{{ u.label }}</option>
+          </select>
+        </SettingsField>
+      </SettingsStep>
+      <SettingsStep step="3" title="Pack the atlas" :effect="effects.atlas">
         <SettingsField label-for="tex-res">
           <template #label><FieldHelp op="texture-mesh" param="maxScale">Texture resolution</FieldHelp></template>
           <select id="tex-res" v-model.number="settings.maxScale" class="field-input field-select">
@@ -110,8 +155,8 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsGroup>
-      <SettingsGroup title="Colour">
+      </SettingsStep>
+      <SettingsStep step="4" title="Level colours" :effect="effects.colour" :inactive="!settings.levelColours">
         <SettingsField hint="Matches the exposure and white balance of neighbouring photos.">
           <template #label
             ><FieldHelp
@@ -126,44 +171,9 @@ function run() {
             ><input v-model="settings.levelColours" type="checkbox" class="checkbox" /> Balance the photos</label
           >
         </SettingsField>
-        <SettingsField hint="Masked pixels (people, sky, the drone's legs) are never used.">
-          <template #label
-            ><FieldHelp
-              op="texture-mesh"
-              param="useMasks"
-              :value="settings.useMasks"
-              :default-value="TEXTURE_DEFAULTS.useMasks"
-              >Use masks</FieldHelp
-            ></template
-          >
-          <label class="checkbox-row"
-            ><input v-model="settings.useMasks" type="checkbox" class="checkbox" /> Leave masked pixels out</label
-          >
-        </SettingsField>
-        <SettingsField hint="For people, vehicles or anything else that moved between photos.">
-          <template #label
-            ><FieldHelp
-              op="texture-mesh"
-              param="photoConsistency"
-              :value="settings.photoConsistency"
-              :default-value="TEXTURE_DEFAULTS.photoConsistency"
-              >Ignore what only some photos see</FieldHelp
-            ></template
-          >
-          <label class="checkbox-row"
-            ><input v-model="settings.photoConsistency" type="checkbox" class="checkbox" /> Check each face's photos
-            against each other</label
-          >
-        </SettingsField>
-        <SettingsField label-for="tex-unseen">
-          <template #label><FieldHelp op="texture-mesh" param="unseen">Faces no photo sees</FieldHelp></template>
-          <select id="tex-unseen" v-model="settings.unseen" class="field-input field-select">
-            <option v-for="u in UNSEEN" :key="u.value" :value="u.value">{{ u.label }}</option>
-          </select>
-        </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
       <AdvancedDisclosure label="Advanced settings">
-        <SettingsGroup>
+        <SettingsStep step="2" title="Choose one photo per triangle — advanced">
           <SettingsField label-for="tex-smooth">
             <template #label
               ><FieldHelp
@@ -184,12 +194,8 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-        </SettingsGroup>
+        </SettingsStep>
       </AdvancedDisclosure>
-      <p v-if="source" class="field-hint">
-        {{ source.count.toLocaleString() }} triangles from {{ cameraCount }} cameras. A mesh of a few hundred thousand
-        triangles textures best: decimate a large mesh first.
-      </p>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

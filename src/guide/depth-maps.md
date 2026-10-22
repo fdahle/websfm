@@ -25,6 +25,42 @@ does (see **Compute and memory** below). A **Working resolution override** under
 Advanced settings replaces the resolution the quality card would choose; the cards then
 say so. Picking a card clears the override.
 
+## Working resolution override
+<!-- param: maxDim  default: auto -->
+Fixes the long side of the images PatchMatch works on, in pixels, instead of deriving
+it from **Quality**. Leave it blank normally. Unlike Quality, an override is not
+stepped down to fit the memory budget: if the estimate exceeds the budget, the run
+stops before it starts. Use it to reproduce an earlier run exactly, or to pick a
+resolution between two quality steps.
+
+## Source views per image
+<!-- param: maxSources  default: 6 -->
+How many neighbouring cameras may support each reference image. More sources improve
+the chance of finding useful baselines but cost more. Very oblique, distant, or
+non-overlapping sources add little.
+
+## Sources aggregated (best-K)
+<!-- param: bestK  default: auto -->
+For each pixel and depth hypothesis, PatchMatch scores every source view and averages
+only the K best scores. A small K tolerates occlusion: a source that cannot see the
+point does not drag the score down. A larger K averages more evidence and is less
+noisy where every source sees the surface. Blank picks about half of each image's sources, between 1 and
+4; set it only when diagnosing occlusion artefacts or noise.
+
+## Patch window radius
+<!-- param: window  default: 3 -->
+Half-size of the patch PatchMatch compares between images (its
+[photometric consistency](help:photometric-consistency) score): radius 3 compares 7×7 pixels.
+A larger window is steadier on weak texture but smooths small detail and costs more
+time per pixel. A smaller one keeps sharp edges but is noisier on plain surfaces.
+
+## Iterations (per level)
+<!-- param: iterations  default: 3 -->
+How many propagation and refinement sweeps [PatchMatch](help:patchmatch) runs at the
+finest resolution level; each coarser level gets one more. More iterations let good
+depths spread further and improve weakly textured areas, at a roughly linear time
+cost. The default three is a good first pass.
+
 ## Speckle / median filter
 <!-- param: speckleFilter  default: on -->
 Cleans each depth map on its own, right after it is computed. Every depth is compared
@@ -91,42 +127,6 @@ is only a loose backstop above it. Raising it removes weakly textured surfaces
 (water, shadows, plain roofs) along with genuine mismatches, so raise it in small steps.
 Vegetation and sky often correlate well, so this floor cannot remove them; the
 cross-view vote does.
-
-## Working resolution override
-<!-- param: maxDim  default: auto -->
-Fixes the long side of the images PatchMatch works on, in pixels, instead of deriving
-it from **Quality**. Leave it blank normally. Unlike Quality, an override is not
-stepped down to fit the memory budget: if the estimate exceeds the budget, the run
-stops before it starts. Use it to reproduce an earlier run exactly, or to pick a
-resolution between two quality steps.
-
-## Source views per image
-<!-- param: maxSources  default: 6 -->
-How many neighbouring cameras may support each reference image. More sources improve
-the chance of finding useful baselines but cost more. Very oblique, distant, or
-non-overlapping sources add little.
-
-## Sources aggregated (best-K)
-<!-- param: bestK  default: auto -->
-For each pixel and depth hypothesis, PatchMatch scores every source view and averages
-only the K best scores. A small K tolerates occlusion: a source that cannot see the
-point does not drag the score down. A larger K averages more evidence and is less
-noisy where every source sees the surface. Blank picks about half of each image's sources, between 1 and
-4; set it only when diagnosing occlusion artefacts or noise.
-
-## Patch window radius
-<!-- param: window  default: 3 -->
-Half-size of the patch PatchMatch compares between images (its
-[photometric consistency](help:photometric-consistency) score): radius 3 compares 7×7 pixels.
-A larger window is steadier on weak texture but smooths small detail and costs more
-time per pixel. A smaller one keeps sharp edges but is noisier on plain surfaces.
-
-## Iterations (per level)
-<!-- param: iterations  default: 3 -->
-How many propagation and refinement sweeps [PatchMatch](help:patchmatch) runs at the
-finest resolution level; each coarser level gets one more. More iterations let good
-depths spread further and improve weakly textured areas, at a roughly linear time
-cost. The default three is a good first pass.
 
 ## Compute and memory
 WebGPU acceleration is experimental and configured under Settings → Compute. With it,

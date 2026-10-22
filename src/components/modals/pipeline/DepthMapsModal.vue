@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
-import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
@@ -11,7 +11,14 @@ import { useDatasetRecommendations } from '../../../composables/useDatasetRecomm
 import { DEPTHMAP_DEFAULTS, DEPTHMAP_QUALITY_META } from '../../../core/defaults.user.js'
 import { badgePreset } from '../../../core/recommendUi.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
+import { depthMapEffects } from '../../../core/stepEffects/depthMaps.js'
 
+const props = defineProps({
+  // Every image (the largest original sets what Quality means) and how many have a
+  // pose in the sparse model (one depth map each), for the steps' effect lines.
+  images: { type: Array, default: () => [] },
+  registered: { type: Number, default: 0 },
+})
 const emit = defineEmits(['close', 'run'])
 
 // Memory budget + GPU are machine-level (Settings ▸ Compute); read here, apply on run.
@@ -70,6 +77,14 @@ const qualityNote = computed(() => {
   return `Recommended: ${label} — ${rec.reason}`
 })
 
+// What each step does to this project (core/stepEffects/depthMaps.js).
+const nativeLong = computed(() =>
+  props.images.reduce((m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0),
+)
+const effects = computed(() =>
+  depthMapEffects(settings.value, { registered: props.registered, nativeLong: nativeLong.value }),
+)
+
 function run() {
   const { filterRelTol, maxDim, bestK, ...rest } = settings.value
   const out = {
@@ -99,7 +114,135 @@ function run() {
     />
 
     <AdvancedDisclosure label="Advanced settings">
-      <SettingsGroup title="Filtering">
+      <SettingsStep step="1" title="Working resolution and source views" :effect="effects.resolution">
+        <SettingsField
+          label-for="maxDim"
+          unit="px"
+          hint="Leave blank to derive from Quality. A memory pre-flight guards very large values."
+        >
+          <template #label
+            ><FieldHelp
+              op="depth-maps"
+              param="maxDim"
+              :value="settings.maxDim || 'auto'"
+              :default-value="DEPTHMAP_DEFAULTS.maxDim || 'auto'"
+              >Working resolution override</FieldHelp
+            ></template
+          >
+          <input
+            id="maxDim"
+            v-model.number="settings.maxDim"
+            :aria-invalid="numbers.bad.maxDim"
+            type="number"
+            min="200"
+            step="100"
+            placeholder="auto"
+            class="field-input"
+          />
+        </SettingsField>
+
+        <SettingsField
+          label-for="maxSources"
+          hint="Neighbouring images compared against each reference (chosen by shared tie-points)."
+        >
+          <template #label
+            ><FieldHelp
+              op="depth-maps"
+              param="maxSources"
+              :value="settings.maxSources"
+              :default-value="DEPTHMAP_DEFAULTS.maxSources"
+              >Source views per image</FieldHelp
+            ></template
+          >
+          <input
+            id="maxSources"
+            v-model.number="settings.maxSources"
+            :aria-invalid="numbers.bad.maxSources"
+            type="number"
+            min="1"
+            max="16"
+            step="1"
+            class="field-input"
+          />
+        </SettingsField>
+
+        <SettingsField
+          label-for="bestK"
+          hint="Average the K best-matching sources per pixel. Blank = auto (≈half the sources, 1–4)."
+        >
+          <template #label
+            ><FieldHelp
+              op="depth-maps"
+              param="bestK"
+              :value="settings.bestK || 'auto'"
+              :default-value="DEPTHMAP_DEFAULTS.bestK || 'auto'"
+              >Sources aggregated (best-K)</FieldHelp
+            ></template
+          >
+          <input
+            id="bestK"
+            v-model.number="settings.bestK"
+            :aria-invalid="numbers.bad.bestK"
+            type="number"
+            min="1"
+            max="16"
+            step="1"
+            placeholder="auto"
+            class="field-input"
+          />
+        </SettingsField>
+      </SettingsStep>
+
+      <SettingsStep step="2" title="PatchMatch" :effect="effects.patchMatch">
+        <SettingsField
+          label-for="window"
+          unit="px"
+          hint="Half-size of the correlation window (1–5 ⇒ 3×3…11×11). Larger helps low-texture surfaces."
+        >
+          <template #label>
+            <FieldHelp op="depth-maps" param="window" :value="settings.window" :default-value="DEPTHMAP_DEFAULTS.window"
+              >Patch window radius</FieldHelp
+            >
+          </template>
+          <input
+            id="window"
+            v-model.number="settings.window"
+            :aria-invalid="numbers.bad.window"
+            type="number"
+            min="1"
+            max="5"
+            step="1"
+            class="field-input"
+          />
+        </SettingsField>
+
+        <SettingsField
+          label-for="iterations"
+          hint="Propagation/refinement sweeps at the finest pyramid level (coarser levels get more)."
+        >
+          <template #label
+            ><FieldHelp
+              op="depth-maps"
+              param="iterations"
+              :value="settings.iterations"
+              :default-value="DEPTHMAP_DEFAULTS.iterations"
+              >Iterations (per level)</FieldHelp
+            ></template
+          >
+          <input
+            id="iterations"
+            v-model.number="settings.iterations"
+            :aria-invalid="numbers.bad.iterations"
+            type="number"
+            min="1"
+            max="8"
+            step="1"
+            class="field-input"
+          />
+        </SettingsField>
+      </SettingsStep>
+
+      <SettingsStep step="3" title="Clean each depth map" :effect="effects.speckle" :inactive="!settings.speckleFilter">
         <SettingsField
           hint="Cleans per-image depth noise (drops flying pixels, smooths to the local median) before fusion."
         >
@@ -143,7 +286,14 @@ function run() {
             class="field-input"
           />
         </SettingsField>
+      </SettingsStep>
 
+      <SettingsStep
+        step="4"
+        title="Check across views"
+        :effect="effects.crossView"
+        :inactive="!settings.geomConsistency"
+      >
         <SettingsField
           hint="Keeps only pixels whose depth other views independently agree with. Removes sky and vegetation, which no photometric gate can catch."
         >
@@ -266,135 +416,7 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Resolution & sources">
-        <SettingsField
-          label-for="maxDim"
-          unit="px"
-          hint="Leave blank to derive from Quality. A memory pre-flight guards very large values."
-        >
-          <template #label
-            ><FieldHelp
-              op="depth-maps"
-              param="maxDim"
-              :value="settings.maxDim || 'auto'"
-              :default-value="DEPTHMAP_DEFAULTS.maxDim || 'auto'"
-              >Working resolution override</FieldHelp
-            ></template
-          >
-          <input
-            id="maxDim"
-            v-model.number="settings.maxDim"
-            :aria-invalid="numbers.bad.maxDim"
-            type="number"
-            min="200"
-            step="100"
-            placeholder="auto"
-            class="field-input"
-          />
-        </SettingsField>
-
-        <SettingsField
-          label-for="maxSources"
-          hint="Neighbouring images compared against each reference (chosen by shared tie-points)."
-        >
-          <template #label
-            ><FieldHelp
-              op="depth-maps"
-              param="maxSources"
-              :value="settings.maxSources"
-              :default-value="DEPTHMAP_DEFAULTS.maxSources"
-              >Source views per image</FieldHelp
-            ></template
-          >
-          <input
-            id="maxSources"
-            v-model.number="settings.maxSources"
-            :aria-invalid="numbers.bad.maxSources"
-            type="number"
-            min="1"
-            max="16"
-            step="1"
-            class="field-input"
-          />
-        </SettingsField>
-
-        <SettingsField
-          label-for="bestK"
-          hint="Average the K best-matching sources per pixel. Blank = auto (≈half the sources, 1–4)."
-        >
-          <template #label
-            ><FieldHelp
-              op="depth-maps"
-              param="bestK"
-              :value="settings.bestK || 'auto'"
-              :default-value="DEPTHMAP_DEFAULTS.bestK || 'auto'"
-              >Sources aggregated (best-K)</FieldHelp
-            ></template
-          >
-          <input
-            id="bestK"
-            v-model.number="settings.bestK"
-            :aria-invalid="numbers.bad.bestK"
-            type="number"
-            min="1"
-            max="16"
-            step="1"
-            placeholder="auto"
-            class="field-input"
-          />
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="PatchMatch">
-        <SettingsField
-          label-for="window"
-          unit="px"
-          hint="Half-size of the correlation window (1–5 ⇒ 3×3…11×11). Larger helps low-texture surfaces."
-        >
-          <template #label>
-            <FieldHelp op="depth-maps" param="window" :value="settings.window" :default-value="DEPTHMAP_DEFAULTS.window"
-              >Patch window radius</FieldHelp
-            >
-          </template>
-          <input
-            id="window"
-            v-model.number="settings.window"
-            :aria-invalid="numbers.bad.window"
-            type="number"
-            min="1"
-            max="5"
-            step="1"
-            class="field-input"
-          />
-        </SettingsField>
-
-        <SettingsField
-          label-for="iterations"
-          hint="Propagation/refinement sweeps at the finest pyramid level (coarser levels get more)."
-        >
-          <template #label
-            ><FieldHelp
-              op="depth-maps"
-              param="iterations"
-              :value="settings.iterations"
-              :default-value="DEPTHMAP_DEFAULTS.iterations"
-              >Iterations (per level)</FieldHelp
-            ></template
-          >
-          <input
-            id="iterations"
-            v-model.number="settings.iterations"
-            :aria-invalid="numbers.bad.iterations"
-            type="number"
-            min="1"
-            max="8"
-            step="1"
-            class="field-input"
-          />
-        </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
     </AdvancedDisclosure>
 
     <template #footer>

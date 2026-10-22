@@ -286,6 +286,13 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Every processing dialog reads in steps.** Sparse Model, Depth Maps, Dense Cloud,
+  DEM, Orthophoto, Mesh and Texture now show their settings as numbered steps in the
+  order the run applies them, like Detect and Match Features, each with a line on what
+  it does to this project with the current values (for example "42 depth maps at up
+  to 1,500 px" or "About 3 points per cell"). A step that cannot matter is dimmed and
+  says why. Depth Maps had its groups in reverse order, and DEM and Orthophoto had none.
+  The guide articles follow the same order.
 - **Map layers have a checkbox in the sidebar.** DEM, orthophoto, reference rasters and
   polygon sets show and hide on the 2D map with a checkbox on their row, like a cloud's
   3D checkbox, instead of the ◉ marker and the right-click menu alone (which stays).

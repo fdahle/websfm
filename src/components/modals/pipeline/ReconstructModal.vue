@@ -3,18 +3,23 @@ import { ref, computed } from 'vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
-import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import { useDatasetRecommendations } from '../../../composables/useDatasetRecommendations.js'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import { RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, RECONSTRUCT_PRESET_META } from '../../../core/defaults.user.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
+import { sparseEffects } from '../../../core/stepEffects/sparse.js'
 
 const props = defineProps({
   // Set when Georeference hands off here for its GCP-constrained adjustment path.
   // The reconstruction settings remain identical; only the framing and final action differ.
   groundControlAdjustment: { type: Boolean, default: false },
+  // For the steps' effect lines: images in a usable matched pair, those pairs, sensors.
+  linkedImages: { type: Number, default: 0 },
+  pairs: { type: Number, default: 0 },
+  sensors: { type: Number, default: 0 },
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -61,16 +66,17 @@ const SELF_CAL_HINTS = {
   'f,cxcy,k1,k2,k3,k4':
     'Solve focal, principal point and all four fisheye terms of a Fisheye (k1–k4) lens; on any other lens the same as k1,k2,k3.',
 }
-// U2 derives nothing to override here — `auto` already resolves per project inside
-// core/sfm/sfm.js — but it does know WHICH branch this project will take. That is
-// worth saying, so it extends the hint of the field it describes instead of
-// occupying a banner that could never offer an action.
-const selfCalHint = computed(() => {
-  const base = SELF_CAL_HINTS[settings.value.refineIntrinsics] ?? ''
-  const reason = recommendations.value.sfm?.refineIntrinsics?.reason
-  if (settings.value.refineIntrinsics !== 'auto' || !reason) return base
-  return `${base} This project: ${reason}`
-})
+// What each step does to this project (core/stepEffects/sparse.js). U2 derives
+// nothing to override for self-calibration — `auto` resolves per project inside
+// core/sfm/sfm.js — but it knows WHICH branch this project takes, so the step says it.
+const effects = computed(() =>
+  sparseEffects(settings.value, {
+    linkedImages: props.linkedImages,
+    pairs: props.pairs,
+    sensors: props.sensors,
+    autoReason: recommendations.value.sfm?.refineIntrinsics?.reason ?? null,
+  }),
+)
 
 function run() {
   emit('run', { ...settings.value })
@@ -94,7 +100,7 @@ function run() {
     />
 
     <AdvancedDisclosure label="Advanced settings">
-      <SettingsGroup title="Registration">
+      <SettingsStep step="1" title="Register images" :effect="effects.register">
         <SettingsField
           label-for="minMatches"
           unit="pts"
@@ -147,9 +153,9 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
 
-      <SettingsGroup title="Optimization">
+      <SettingsStep step="2" title="Bundle adjustment" :effect="effects.ba" :inactive="!(settings.baIterations > 0)">
         <SettingsField
           label-for="baIter"
           hint="Bundle-adjustment iterations per pass. 0 skips bundle adjustment — and with it self-calibration."
@@ -174,9 +180,14 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
 
-      <SettingsGroup title="Calibration">
+      <SettingsStep
+        step="3"
+        title="Self-calibration"
+        :effect="effects.calibration"
+        :inactive="!(settings.baIterations > 0) || settings.refineIntrinsics === 'none'"
+      >
         <SettingsField label-for="refineIntr">
           <template #label>
             <FieldHelp op="sparse-reconstruction" param="refineIntrinsics">Self-calibration</FieldHelp>
@@ -196,13 +207,9 @@ function run() {
             <option value="f,cxcy,k1,k2,k3">Focal + principal point + k1,k2,k3</option>
             <option value="f,cxcy,k1,k2,k3,k4">Focal + principal point + k1–k4 (fisheye)</option>
           </select>
-          <template #hint>{{
-            settings.baIterations > 0
-              ? selfCalHint
-              : 'Not used: bundle adjustment is off (0 iterations), and self-calibration runs inside it.'
-          }}</template>
+          <template #hint>{{ SELF_CAL_HINTS[settings.refineIntrinsics] ?? '' }}</template>
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
     </AdvancedDisclosure>
 
     <template #footer>

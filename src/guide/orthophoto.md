@@ -71,13 +71,6 @@ size and the uncompressed size. Over a DEM it's exact; over a mesh or plane it's
 estimated from a sample of the surface (marked ≈). A size past 65,535 pixels a side
 shows its warning there, before the run.
 
-## Long side
-<!-- param: longSide default: Auto -->
-The number of pixels on the orthophoto's longer side. The cell size is then the
-surface's extent divided by it, and the readout shows it. **0** (Auto) uses the
-surface's own cell size, as Auto does for the cell size. The same 65,535-pixel limit
-applies as for a cell size.
-
 ## Ground sample distance
 <!-- param: gsd default: Auto -->
 The orthophoto's pixel size on the ground
@@ -91,6 +84,42 @@ GeoTIFF of at most 65,535 pixels a side, a BigTIFF past 4 GiB (GDAL and QGIS rea
 a pixel size that would exceed that over the surface's area is coarsened to fit. The
 size readout warns before the run, and the log says so. To go finer, limit the area
 with Region and rebuild the surface.
+
+## Long side
+<!-- param: longSide default: Auto -->
+The number of pixels on the orthophoto's longer side. The cell size is then the
+surface's extent divided by it, and the readout shows it. **0** (Auto) uses the
+surface's own cell size, as Auto does for the cell size. The same 65,535-pixel limit
+applies as for a cell size.
+
+## Occlusion tolerance
+<!-- param: depthTolRel default: 2 % -->
+Decides whether a photo really sees a surface cell, using that photo's
+[depth map](help:depth-map) as a z-buffer: the cell's distance from the camera must
+agree with the depth map at that pixel to within this percentage of the distance (2 %
+of 100 m is 2 m). A cell hidden behind something nearer, such as the ground behind a
+wall, fails the test, so the photo cannot paint the wall's colour onto it. Too tight,
+and errors in the surface or the depth maps make cells fail for every photo, which
+leaves holes; too loose, and hidden surface takes the colour of whatever stands in
+front of it, which shows as doubled edges beside tall objects. A pixel where the depth
+map has no depth never counts as seeing a cell, whatever the tolerance, except in a
+**Mosaic**: depth maps have many small holes where matching was weak (a plain roof,
+foliage), so there a hole up to two depth-map pixels across takes the depth of its
+nearest neighbour that agrees, and the photo keeps colouring its own region instead
+of leaving scattered pixels to other photos.
+
+## Max match cost
+<!-- param: maxCost default: 0 (off) -->
+An optional second gate: a photo's colour is not used where its depth map matched
+poorly, that is where the depth map's matching cost (1 − NCC, from 0 for a perfect
+match to 2) is above this value. It applies in every blending mode. **0** (the
+default) turns the gate off, which is normally the right start: with Cross-view
+consistency on, the depth maps' **Minimum NCC** filter has already removed every pixel
+with a cost above 1 − Minimum NCC (0.9 at the default 0.1). A value at or above that
+ceiling therefore changes nothing, and the dialog says so, naming the ceiling of the
+depth maps you built. Set a value below it, such as 0.6, when weakly matched areas
+(water, blank walls, moving objects) paint wrong colour. Lower values open holes where
+the only views of a cell matched weakly.
 
 ## View blending
 <!-- param: blend default: Mosaic -->
@@ -168,35 +197,6 @@ Feather only. Cross-fades neighbouring photos over a band at each
 the orthophoto's shorter side (at most 128 pixels). Wider bands hide exposure and
 colour steps better, but small misalignments show as a soft double image inside the
 band. **0** gives hard seams.
-
-## Occlusion tolerance
-<!-- param: depthTolRel default: 2 % -->
-Decides whether a photo really sees a surface cell, using that photo's
-[depth map](help:depth-map) as a z-buffer: the cell's distance from the camera must
-agree with the depth map at that pixel to within this percentage of the distance (2 %
-of 100 m is 2 m). A cell hidden behind something nearer, such as the ground behind a
-wall, fails the test, so the photo cannot paint the wall's colour onto it. Too tight,
-and errors in the surface or the depth maps make cells fail for every photo, which
-leaves holes; too loose, and hidden surface takes the colour of whatever stands in
-front of it, which shows as doubled edges beside tall objects. A pixel where the depth
-map has no depth never counts as seeing a cell, whatever the tolerance, except in a
-**Mosaic**: depth maps have many small holes where matching was weak (a plain roof,
-foliage), so there a hole up to two depth-map pixels across takes the depth of its
-nearest neighbour that agrees, and the photo keeps colouring its own region instead
-of leaving scattered pixels to other photos.
-
-## Max match cost
-<!-- param: maxCost default: 0 (off) -->
-An optional second gate: a photo's colour is not used where its depth map matched
-poorly, that is where the depth map's matching cost (1 − NCC, from 0 for a perfect
-match to 2) is above this value. It applies in every blending mode. **0** (the
-default) turns the gate off, which is normally the right start: with Cross-view
-consistency on, the depth maps' **Minimum NCC** filter has already removed every pixel
-with a cost above 1 − Minimum NCC (0.9 at the default 0.1). A value at or above that
-ceiling therefore changes nothing, and the dialog says so, naming the ceiling of the
-depth maps you built. Set a value below it, such as 0.6, when weakly matched areas
-(water, blank walls, moving objects) paint wrong colour. Lower values open holes where
-the only views of a cell matched weakly.
 
 ## Colour gap interpolation
 <!-- param: fillMethod default: Inverse distance -->
