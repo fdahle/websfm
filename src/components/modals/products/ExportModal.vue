@@ -203,6 +203,18 @@ const reprojecting = computed(
   () => isRaster.value && isTiff.value && !!props.rasterCrs && settings.value.rasterCrs === 'other',
 )
 const rasterOp = computed(() => (props.kind === 'dem' ? 'dem' : 'orthophoto'))
+// The ortho's empty pixels: a GeoTIFF or PNG may keep the alpha band; a JPEG has none.
+// The COG (the stored file) and a reprojected copy always keep it.
+const orthoAlphaApplies = computed(
+  () =>
+    props.kind === 'ortho' &&
+    (settings.value.format === 'png' || (settings.value.format === 'geotiff' && !reprojecting.value)),
+)
+const orthoNodataApplies = computed(
+  () =>
+    (orthoAlphaApplies.value && !settings.value.orthoAlpha) ||
+    (props.kind === 'ortho' && settings.value.format === 'jpeg'),
+)
 </script>
 
 <template>
@@ -454,6 +466,31 @@ const rasterOp = computed(() => (props.kind === 'dem' ? 'dem' : 'orthophoto'))
           <option value="none">None (uncompressed)</option>
           <option value="deflate">DEFLATE (lossless)</option>
         </select>
+      </SettingsField>
+      <!-- Empty pixels: an alpha band, or (unticked, and in a JPEG) a NODATA value. -->
+      <label v-if="orthoAlphaApplies" class="checkbox-row">
+        <input type="checkbox" v-model="settings.orthoAlpha" class="checkbox" />
+        <FieldHelp op="orthophoto" param="orthoAlpha">Alpha band (transparent empty pixels)</FieldHelp>
+      </label>
+      <SettingsField v-if="orthoNodataApplies" label-for="onodata">
+        <template #label
+          ><FieldHelp
+            op="orthophoto"
+            param="orthoNodata"
+            :value="settings.orthoNodata"
+            :default-value="EXPORT_DEFAULTS.orthoNodata"
+            >NODATA value</FieldHelp
+          ></template
+        >
+        <input
+          id="onodata"
+          v-model.number="settings.orthoNodata"
+          type="number"
+          min="0"
+          max="255"
+          step="1"
+          class="field-input"
+        />
       </SettingsField>
       <SettingsField
         v-if="settings.format === 'jpeg'"

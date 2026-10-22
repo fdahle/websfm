@@ -12,6 +12,11 @@ Notable changes to websfm. The format follows
   **Record one turn** saves exactly one turn of the view as a looping video (WebM, or
   MP4 in Safari). A new guide article, **The 3D View**, covers navigation, the view
   presets and the turntable.
+- **Orthophoto export without an alpha band.** Export Orthophoto has an **Alpha band**
+  checkbox (on by default) for GeoTIFF and PNG; unticked, the file has three bands and
+  the empty pixels take a **NODATA value** (0–255), which a GeoTIFF records as GDAL
+  NODATA. A real pixel equal to it moves one level, so it never reads as a hole. A JPEG
+  uses the value for its empty pixels, which were always black before.
 - **Example project and tutorial.** New users without photos of their own can open an
   example from the New Project dialog (**New here? Open the example project**) or the
   project picker (**Try an example**): 42 drone photos of Aukerman Park, Ohio, from

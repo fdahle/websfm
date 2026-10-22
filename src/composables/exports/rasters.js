@@ -181,7 +181,15 @@ export function createRasterExports({ crsInfo, dem, log, ortho, projectBase }) {
   // its CRS tagged): the COG export is that file, and the other forms are streamed
   // out of it in the export worker (workers/ops/export.js exportOrtho), so no export
   // ever holds the ortho as one array. The geotransform is the ORTHO's own.
-  async function doExportOrtho({ format, compression, jpegQuality, outputCrs = null, resampling = 'bilinear' }) {
+  async function doExportOrtho({
+    format,
+    compression,
+    jpegQuality,
+    orthoAlpha = true,
+    orthoNodata = 0,
+    outputCrs = null,
+    resampling = 'bilinear',
+  }) {
     const o = ortho.value
     if (!o?.cog) return
     if (outputCrs && (format === 'cog' || format === 'geotiff'))
@@ -196,7 +204,14 @@ export function createRasterExports({ crsInfo, dem, log, ortho, projectBase }) {
     if (format === 'geotiff') {
       const deflate = compression === 'deflate'
       const { blob } = await exportOrthoFile(
-        { file: o.cog, format, deflate, crs: { code: info.code, geographic: info.geographic } },
+        {
+          file: o.cog,
+          format,
+          deflate,
+          alpha: orthoAlpha,
+          nodata: orthoNodata,
+          crs: { code: info.code, geographic: info.geographic },
+        },
         { onLog },
       )
       downloadBlob(`${projectBase()}-ortho.tif`, blob, 'image/tiff')
@@ -207,7 +222,13 @@ export function createRasterExports({ crsInfo, dem, log, ortho, projectBase }) {
     const ext = jpeg ? 'jpg' : 'png'
     // Full resolution, so the world file's cell size is the image's (the preview is not).
     const { blob } = await exportOrthoFile(
-      { file: o.cog, format: jpeg ? 'jpeg' : 'png', quality: jpegQuality ?? 0.9 },
+      {
+        file: o.cog,
+        format: jpeg ? 'jpeg' : 'png',
+        quality: jpegQuality ?? 0.9,
+        alpha: !jpeg && orthoAlpha,
+        nodata: orthoNodata,
+      },
       { onLog },
     )
     downloadBlob(`${projectBase()}-ortho.${ext}`, blob)

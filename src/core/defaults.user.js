@@ -351,6 +351,10 @@ export const EXPORT_DEFAULTS = {
   applyGeoref: true, // cloud: transform into the project CRS when a georef fit exists
   downsampleCell: 0, // cloud: voxel downsample cell in world units; 0 = off
   jpegQuality: 0.9, // ortho JPEG quality (0–1)
+  // Ortho GeoTIFF / PNG: transparent empty pixels (an alpha band), or, unticked, three
+  // bands with empty pixels at `orthoNodata` (0–255; a JPEG always uses it).
+  orthoAlpha: true,
+  orthoNodata: 0,
   // DEM/ortho GeoTIFF in another CRS (core/products/warp.js): 'product' = as built,
   // 'other' = reprojected to the CRS picked in the dialog; how cells are resampled.
   rasterCrs: 'product', // 'product' | 'other'

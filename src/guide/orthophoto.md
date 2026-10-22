@@ -228,7 +228,7 @@ one larger than 4 GiB is refused (choose DEFLATE or the COG). PNG and JPEG expor
 are full resolution and paired with a world file and `.prj`; keep those sidecars
 beside the image when moving it into GIS. They are offered up to 8,192 × 8,192
 pixels; a larger orthophoto exports as a GeoTIFF. JPEG has no transparency, so
-uncovered pixels become black.
+uncovered pixels take the **NODATA value** (black by default).
 
 The GeoTIFF and COG exports can be written in another
 [CRS](help:coordinate-reference-system), set below.
@@ -238,6 +238,23 @@ resolution before using the result: the orthophoto's tab draws full-resolution t
 as you zoom in, and its status bar reads the colour of the pixel under the cursor.
 **Clip** reads only the part of the orthophoto the polygons cover, up to 8,192 ×
 8,192 pixels.
+
+## Alpha band
+<!-- param: orthoAlpha  default: on -->
+Where nothing was seen, the orthophoto is transparent: a fourth, alpha band marks the
+empty pixels. QGIS, GDAL and most GIS read that as no data, and it never hides a real
+pixel. Untick it for software that wants three bands (RGB) with a NODATA value
+instead; the empty pixels then take the **NODATA value** below. GeoTIFF and PNG offer
+the choice. The COG export is the stored file and a reprojected copy is made from it,
+so both keep the alpha band.
+
+## NODATA value
+<!-- param: orthoNodata  default: 0 -->
+The grey level (0–255) of the empty pixels when there is no alpha band, in all three
+bands: 0 is black, 255 white. A GeoTIFF records it as its NODATA value. GDAL reads
+NODATA per band, so a real pixel whose red, green or blue equals it would read as a
+hole in that band; such a value is moved one level toward the middle, which no eye
+sees. A JPEG has no alpha band, so it always uses this value.
 
 ## Export coordinate system
 <!-- param: rasterCrs default: As built -->
