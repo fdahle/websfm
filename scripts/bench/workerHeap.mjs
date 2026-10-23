@@ -62,6 +62,7 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
           const r = await send(sessionId, 'Runtime.getHeapUsage')
           if (!r) return
           const withBuf = r.usedSize + (r.backingStorageSize ?? 0)
+          w.last = { heap: r.usedSize, buffers: r.backingStorageSize ?? 0 }
           if (r.usedSize > w.peak) w.peak = r.usedSize
           if (withBuf > w.peakWithBuffers) w.peakWithBuffers = withBuf
           if (r.usedSize > segPeak) {
@@ -84,6 +85,10 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
       segPeak = 0
       segWorker = null
       segPeakBuf = 0
+    },
+    // Each live worker's latest sample: { url, heap, buffers } (bytes).
+    current() {
+      return [...workers.values()].filter((w) => w.last).map((w) => ({ url: w.url, ...w.last }))
     },
     // Segments since the last take(), plus each live worker's overall peak.
     take() {

@@ -281,6 +281,21 @@ try {
   // Worker heap per SfM segment: closed by the solver's `stage "…" took` and
   // `memory mark "…"` debug lines (sfm.js), reported with each recon stage.
   heap = await startWorkerHeapSampler(page)
+  // `memTrace: <seconds>`: every so often, the ArrayBuffer memory the page and each
+  // worker hold now (the tab's one 16 GiB pool), to see which side grows during a run.
+  if (cfg.memTrace > 0) {
+    const pageCdp = await page.context().newCDPSession(page)
+    const gb = (b) => (b / 2 ** 30).toFixed(2)
+    setInterval(async () => {
+      const p = await pageCdp.send('Runtime.getHeapUsage').catch(() => null)
+      const ws = heap.current().filter((w) => w.buffers > 64 * 2 ** 20)
+      const total = (p?.backingStorageSize ?? 0) + ws.reduce((a, w) => a + w.buffers, 0)
+      console.log(
+        `== memtrace ${new Date().toTimeString().slice(0, 8)}: buffers ${gb(total)} GB — page ${gb(p?.backingStorageSize ?? 0)}` +
+          ws.map((w, i) => `, worker ${i} ${gb(w.buffers)} (heap ${gb(w.heap)})`).join(''),
+      )
+    }, cfg.memTrace * 1000).unref?.()
+  }
   const heapMark = /(?:^|: )(?:stage "([^"]+)" took|memory mark "([^"]+)")|^(Compact result ready)/
   // Stall/crash watchdog. A worker or renderer that dies of memory can leave
   // page.evaluate pending forever (a 2026-10-07 Monster run sat silent for 5 h after
