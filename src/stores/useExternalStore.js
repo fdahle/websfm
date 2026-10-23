@@ -4,6 +4,8 @@ import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform, transformer, isGeographic, metresToCrsUnits } from '../core/crs.js'
 import { createFlatRasterSource } from '../core/io/rasterSource.js'
 import { rasterBounds } from '../core/io/rasterSample.js'
+import { projectRasterWindow } from '../core/io/projectRasterWindow.js'
+import { usePosesStore } from './usePosesStore.js'
 import { referencePick } from '../core/sfm/referenceGcps.js'
 import { heightShifter } from '../core/verticalDatum.js'
 import { describeStyle, styleStamp, resolveRasterStyle, bandsUsedBy } from '../core/io/rasterStyle.js'
@@ -203,6 +205,40 @@ export const useExternalStore = registerProjectStore(
       }
     }
 
+    // The window of a raster too large for one plane (meta.tooLarge, workers/ops/io.js)
+    // over the project: its images' positions with a margin (core/io/rasterWindow.js), in
+    // pixels of the raster. Null when no image has a position or the CRS cannot be resolved.
+    async function rasterWindowFor(meta) {
+      const crs = meta.crs ?? currentCrs.value
+      const projCrs = currentCrs.value
+      try {
+        if (crs) await ensureProjection(crs)
+        if (projCrs) await ensureProjection(projCrs)
+      } catch {
+        return null
+      }
+      const points = []
+      for (const p of usePosesStore().poses) {
+        if (Number.isFinite(p.lon) && Number.isFinite(p.lat)) points.push([p.lon, p.lat])
+        else if (projCrs && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+          try {
+            points.push(projCrs === 'EPSG:4326' ? [p.x, p.y] : transform([p.x, p.y], projCrs, 'EPSG:4326'))
+          } catch {
+            /* a position outside the CRS's domain adds nothing */
+          }
+        }
+      }
+      if (!points.length || !crs) return null
+      return projectRasterWindow({
+        points,
+        toRaster: (lon, lat) => (crs === 'EPSG:4326' ? [lon, lat] : transform([lon, lat], 'EPSG:4326', crs)),
+        geoTransform: meta.geoTransform,
+        width: meta.width,
+        height: meta.height,
+        cellBytes: meta.cellBytes,
+      })
+    }
+
     async function importRasterNow(file, { forceKind = null } = {}) {
       if (!file) return null
       const projectId = projects.currentProjectId
@@ -220,6 +256,30 @@ export const useExternalStore = registerProjectStore(
           previewOnly: true,
           onLog: (m, l, c) => log(m, l, c),
         }))
+        // Too large for one plane: read the window over the project's images instead.
+        if (meta?.tooLarge) {
+          const window = await rasterWindowFor(meta)
+          if (!window) {
+            throw new Error(
+              `${meta.message} The project's images have no positions yet to crop it to; import them ` +
+                '(or their GPS) first, or crop the raster.',
+            )
+          }
+          log(
+            `Reference raster ${file.name}: ${meta.width.toLocaleString()} × ${meta.height.toLocaleString()} cells ` +
+              `is too large for one plane — reading the ${(window[2] - window[0]).toLocaleString()} × ` +
+              `${(window[3] - window[1]).toLocaleString()} window over the project's images (half their extent ` +
+              'around them, at least 1 km)',
+            'info',
+            'Import',
+          )
+          ;({ meta, plane } = await parseRasterFile(file, file.name, {
+            forceKind,
+            previewOnly: true,
+            window,
+            onLog: (m, l, c) => log(m, l, c),
+          }))
+        }
       } catch (err) {
         removePending()
         log(`Reference raster: could not read ${file.name} — ${err?.message ?? err}`, 'error', 'Import')
@@ -443,6 +503,8 @@ export const useExternalStore = registerProjectStore(
         const buffer = await file.arrayBuffer()
         const { plane } = await parseRasterFile(buffer, meta.name, {
           forceKind: meta.kind,
+          // A raster read as a window over the project (importRasterNow) re-reads that window.
+          window: meta.window ? [meta.window.x0, meta.window.y0, meta.window.x1, meta.window.y1] : null,
           // A plain copy: the record is reactive, and a proxy cannot be posted to the worker.
           style: JSON.parse(JSON.stringify(meta.style ?? null)),
           onLog: (m, l, c) => log(m, l, c),

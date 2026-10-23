@@ -101,9 +101,12 @@ DEM looks shifted by half a cell, remove it and import it again.
 A reference DEM is held at full resolution in one buffer of 4 bytes per cell, and the
 browser caps one buffer at 2 GiB: about 23,000 × 23,000 cells. A 64-bit (Float64) DEM
 is first read at 8 bytes per cell, so its limit is about 16,000 × 16,000. A larger DEM
-(a REMA 2 m tile is 25,100 × 25,100) is refused with its size. Import a coarser copy (for
-example `gdal_translate -tr 4 4`) or crop it to your area with `-projwin`. Orthophotos
-are drawn as tiles and have no such limit for display.
+(a REMA 2 m tile is 25,100 × 25,100) is read only over the project: the area of its
+images' positions (GPS or imported camera positions), grown by half its extent and by at
+least 1 km on each side; the log names the window. The map still draws the whole file.
+Without image positions, or when even that window is too large, the DEM is refused with
+its size: import a coarser copy (for example `gdal_translate -tr 4 4`) or crop it to your
+area with `-projwin`. Orthophotos are drawn as tiles and have no such limit for display.
 
 ## Pick GCPs off a reference raster
 Without survey data, a georeferenced orthophoto and DEM of the area can stand in

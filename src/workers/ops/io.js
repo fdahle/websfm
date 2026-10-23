@@ -106,7 +106,13 @@ export function makeIoOps({ lazCodec = null } = {}) {
   //     DEM   — Float32Array(width·height), nodata folded to NaN
   //     ortho — Uint8Array(width·height·4) RGBA (this IS the display data; an
   //             ortho needs no separate value plane, only geometry)
-  async function parseRaster([{ buffer, file, name, forceKind = null, style = null, previewOnly = false }], { emit }) {
+  // `window` ([x0, y0, x1, y1], pixels of the full raster): read only that part (a raster
+  // too large for one plane, cropped to the project: useExternalStore importRasterNow).
+  // The meta then describes the window (its size, its geotransform) and names it.
+  async function parseRaster(
+    [{ buffer, file, name, forceKind = null, style = null, previewOnly = false, window = null }],
+    { emit },
+  ) {
     const t0 = performance.now()
     const log = (m, l = 'info') => emit('log', [m, l, 'Import'])
 
@@ -115,8 +121,8 @@ export function makeIoOps({ lazCodec = null } = {}) {
     const fd = image.getFileDirectory()
     const geoKeys = image.getGeoKeys() || {}
 
-    const width = image.getWidth()
-    const height = image.getHeight()
+    const fullWidth = image.getWidth()
+    const fullHeight = image.getHeight()
     const bands = image.getSamplesPerPixel()
     // Tags must be read through readTiffTag — geotiff 3.x IFDs are lazy, and
     // plain `fd.SampleFormat` reads undefined, collapsing every raster to the
@@ -126,8 +132,29 @@ export function makeIoOps({ lazCodec = null } = {}) {
     // As the band stores it (a Float32 band holds fround(−9999.9), not −9999.9).
     const nodata = nodataForSampleType(parseNodata(await readTiffTag(fd, 'GDAL_NODATA')), sampleFormat, bitsPerSample)
 
-    const geoTransform = await readGeoTransform(image, fd)
-    if (!geoTransform) throw new Error(`${name} carries no geotransform — not a georeferenced raster`)
+    const fullTransform = await readGeoTransform(image, fd)
+    if (!fullTransform) throw new Error(`${name} carries no geotransform — not a georeferenced raster`)
+    // The part read: the whole raster, or `window` clamped to it, its origin moved to the
+    // window's corner.
+    const win = window
+      ? [
+          Math.max(0, Math.floor(window[0])),
+          Math.max(0, Math.floor(window[1])),
+          Math.min(fullWidth, Math.ceil(window[2])),
+          Math.min(fullHeight, Math.ceil(window[3])),
+        ]
+      : null
+    if (win && !(win[2] > win[0] && win[3] > win[1])) throw new Error(`${name}: the project lies outside the raster`)
+    const width = win ? win[2] - win[0] : fullWidth
+    const height = win ? win[3] - win[1] : fullHeight
+    const geoTransform = win
+      ? {
+          ...fullTransform,
+          originX: fullTransform.originX + win[0] * fullTransform.scaleX,
+          originY: fullTransform.originY + win[1] * fullTransform.scaleY,
+        }
+      : fullTransform
+    const rd = win ? { window: win } : {}
     const crs = readCrs(geoKeys)
 
     // Decimated sample from band 0 for the classifier's histogram tier. geotiff
@@ -159,8 +186,14 @@ export function makeIoOps({ lazCodec = null } = {}) {
     // (Float32 elevations or RGBA), and first reads each band whole in its native type
     // (a Float64 DEM: 8 bytes a cell). Refuse before reading rather than fail on the buffer.
     const cellBytes = Math.max(4, sampleBytes(bitsPerSample))
+    // Too large for one plane: say so with what the caller needs to ask for a window (the
+    // full size, geotransform and CRS), rather than throw (a worker's error crosses as its
+    // message only).
     if (!(kind === 'ortho' && previewOnly) && width * height * cellBytes > MAX_BUFFER_BYTES) {
-      throw new Error(rasterTooLargeMessage(name, width, height, cellBytes))
+      const message = rasterTooLargeMessage(name, width, height, cellBytes)
+      if (win) throw new Error(message)
+      const meta = { name, kind, crs, width, height, geoTransform, cellBytes, tooLarge: true, message }
+      return { result: { meta, plane: null }, transfer: [] }
     }
 
     let plane,
@@ -183,7 +216,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
         const ratio = Math.min(1, PREVIEW_MAX / Math.max(width, height))
         const w = Math.max(1, Math.round(width * ratio)),
           h = Math.max(1, Math.round(height * ratio))
-        const rgb = await image.readRGB({ width: w, height: h, interleave: true })
+        const rgb = await image.readRGB({ width: w, height: h, interleave: true, ...rd })
         const rgba = new Uint8ClampedArray(w * h * 4)
         for (let i = 0; i < w * h; i++) {
           rgba.set(rgb.subarray(i * 3, i * 3 + 3), i * 4)
@@ -193,7 +226,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
       }
     } else if (kind === 'dem') {
       dtype = 'float32'
-      const [band] = await image.readRasters({ samples: [0], interleave: false })
+      const [band] = await image.readRasters({ samples: [0], interleave: false, ...rd })
       plane = new Float32Array(width * height)
       let lo = Infinity,
         hi = -Infinity,
@@ -235,7 +268,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
       // Fast path, unchanged: an 8-bit 1–3 band image is already display-ready.
       // readRGB resolves photometric interpretation (RGB / grey / palette / CMYK
       // / YCbCr) to 8-bit RGB — the same call utils/tiff.js leans on.
-      const rgb = await image.readRGB({ interleave: true })
+      const rgb = await image.readRGB({ interleave: true, ...rd })
       plane = new Uint8Array(width * height * 4)
       for (let i = 0, n = width * height; i < n; i++) {
         plane[i * 4] = rgb[i * 3]
@@ -252,7 +285,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
       // from its own decimated sample, compose.
       resolvedStyle = resolveRasterStyle(style, { bands, bitsPerSample, sampleFormat })
       const used = bandsUsedBy(resolvedStyle)
-      const channels = await image.readRasters({ samples: used, interleave: false })
+      const channels = await image.readRasters({ samples: used, interleave: false, ...rd })
 
       // Ranges come from a DECIMATED sample per band, not the full plane: the
       // percentile needs a sort, and sorting 25 M values per channel to pick two
@@ -305,6 +338,8 @@ export function makeIoOps({ lazCodec = null } = {}) {
       styleable: kind !== 'dem' && needsStyling({ bands, bitsPerSample, sampleFormat }),
       crs,
       geoTransform,
+      // The part of the file this describes, when it is a window of a larger raster.
+      ...(win ? { window: { x0: win[0], y0: win[1], x1: win[2], y1: win[3], fullWidth, fullHeight } } : {}),
       rawNodata: nodata,
       nodata: kind === 'dem' ? null : nodata, // folded to NaN for DEMs
       zMin,

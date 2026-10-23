@@ -62,6 +62,28 @@ describe('parseRaster buffer wall', () => {
     // band read does not.
     const values = Array.from({ length: 900 }, (_, i) => i)
     await expect(parse(demTiff(values, 30, 30, { bits: 32 }))).resolves.toBeTruthy()
-    await expect(parse(demTiff(values, 30, 30, { bits: 64 }))).rejects.toThrow(/caps one buffer at 2 GiB/)
+    // Too large: no plane, but what the caller needs to ask for a window.
+    const { result } = await parse(demTiff(values, 30, 30, { bits: 64 }))
+    expect(result.plane).toBeNull()
+    expect(result.meta).toMatchObject({ tooLarge: true, width: 30, height: 30, cellBytes: 8 })
+    expect(result.meta.message).toMatch(/caps one buffer at 2 GiB/)
+    expect(result.meta.geoTransform).toMatchObject({ originX: 1000, originY: 2000 })
+  })
+
+  it('reads a window of a raster too large for one plane', async () => {
+    const values = Array.from({ length: 900 }, (_, i) => i)
+    const { result } = await parse(demTiff(values, 30, 30, { bits: 64 }), { window: [5, 10, 15, 18] })
+    expect(result.meta.tooLarge).toBeUndefined()
+    expect([result.meta.width, result.meta.height]).toEqual([10, 8])
+    expect(result.meta.window).toEqual({ x0: 5, y0: 10, x1: 15, y1: 18, fullWidth: 30, fullHeight: 30 })
+    // The origin moves to the window's corner (1-unit cells, y down from 2000).
+    expect(result.meta.geoTransform).toMatchObject({ originX: 1005, originY: 1990 })
+    expect(result.plane.length).toBe(80)
+    expect(result.plane[0]).toBe(10 * 30 + 5) // row 10, column 5 of the full raster
+    expect(result.plane[79]).toBe(17 * 30 + 14)
+    // A window that is itself too large is refused.
+    await expect(parse(demTiff(values, 30, 30, { bits: 64 }), { window: [0, 0, 30, 30] })).rejects.toThrow(
+      /caps one buffer/,
+    )
   })
 })
