@@ -22,6 +22,9 @@ function excludeRestrictedModels() {
       logger = config.logger
     },
     async writeBundle() {
+      // A headless bench build (scripts/bench/vite.bench.config.mjs) is a local snapshot,
+      // never published, and needs the developer's own copy (scripts/bench/README.md).
+      if (process.env.BENCH_OUT_DIR) return
       for (const [id, model] of Object.entries(MODELS)) {
         if (isRedistributable(id)) continue
         try {
