@@ -1495,6 +1495,24 @@ describe('filterDepthMapsGeometricStreamed — candidate cache bound', () => {
     const totals = filterDepthMapsGeometric(resident, { minConsistent: 2 }, () => {})
     expect(out.totals).toEqual(totals)
   })
+
+  it('judges each reference against at most maxViews candidates, those with parallax first', async () => {
+    const maps = Array.from({ length: 8 }, (_, j) => mk(j))
+    const plane = W * H * 4
+    const metas = maps.map(({ depth, cost, ...meta }) => meta)
+    const io = {
+      loadReference: async (i) => ({ depth: maps[i].depth, cost: maps[i].cost }),
+      loadDepth: async (i) => Float32Array.from(maps[i].depth),
+    }
+    const opts = { minConsistent: 2, cacheBytes: plane, maxViews: 3 }
+    const out = await filterDepthMapsGeometricStreamed(metas, io, opts, () => {})
+    expect(out.nCand).toBe(8 * 3)
+    expect(out.peakCached).toBeLessThanOrEqual(3 * plane)
+    // The cap takes views with enough parallax, not the nearest (whose 1–2° baselines
+    // vouch for nothing), and here keeps exactly the pixels judging every view keeps.
+    const all = await filterDepthMapsGeometricStreamed(metas, io, { ...opts, maxViews: 0 }, () => {})
+    expect([out.totals.kept, out.totals.considered]).toEqual([all.totals.kept, all.totals.considered])
+  })
 })
 
 describe('fuseDepthMapsStreamed — eligible-pixel buffers', () => {

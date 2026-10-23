@@ -48,6 +48,21 @@ import { DENSE_TUNING } from '../../core/tuning.js'
 // depth-map colourising) live here next to the two dense handlers. The GPU backend
 // swap + first-image GPU↔CPU A/B validation live inside computeDepthMaps.
 export function makeDenseOps({ rasterize }) {
+  // Saved-map acks per streamed run (`settings.ackToken`), from the page's depthAck:
+  // { acked, wake } — the run waits while too many of its maps are unsaved.
+  const acks = new Map()
+  function depthAck([token]) {
+    const a = acks.get(token) ?? { acked: 0, wake: null }
+    a.acked++
+    acks.set(token, a)
+    a.wake?.()
+    return { result: a.acked }
+  }
+  async function untilSaved(token, streamed) {
+    const a = acks.get(token) ?? acks.set(token, { acked: 0, wake: null }).get(token)
+    while (streamed - a.acked > DENSE_TUNING.depthMapsUnsaved) await new Promise((r) => (a.wake = r))
+    a.wake = null
+  }
   // ── Raster → pinhole frame ──────────────────────────────────────────────────
   // Every raster dense reads must live in the same pinhole frame as the sparse
   // cloud: distortion folded out, and for a film scan the scan→canonical affine
@@ -430,7 +445,7 @@ export function makeDenseOps({ rasterize }) {
       ]),
     )
     const urlByUuid = new Map(images.map((im) => [im.uuid, im.url]))
-    // Per-url intrinsics + distortion, so getRaster can undistort each source once
+    // Per-url intrinsics + distortion, so decodeRaster can undistort each source once
     // (url↔image is 1:1, and undistortion is independent of ref/source role).
     const metaByUrl = new Map(
       images.map((im) => [
@@ -460,54 +475,70 @@ export function makeDenseOps({ rasterize }) {
     const ledger = createMemLedger()
     // Where the loop's time goes, beside the matching itself (logged at the end): the
     // decode + warp of each raster, its mask, its grey plane.
-    const prepMs = { raster: 0, mask: 0, gray: 0, post: 0 }
-    const rasterCache = new Map() // url → { data, width, height, scale }
-    const getRaster = async (url) => {
-      if (!rasterCache.has(url)) {
-        const tR = performance.now()
-        let r = await rasterize(url, maxDim)
-        // Undistort at ingest so every dense consumer stays pinhole (mirrors sparse).
-        const meta = metaByUrl.get(url)
-        if (meta?.fid) {
-          // Film scan: warp into the canonical frame (composes calibrated + self-cal).
-          r = warpFilmRaster(r, meta.K, meta.dist, meta.fid, maxDim, meta.selfCal)
-        } else if (meta?.dist || meta?.selfCal) {
-          r = undistortRaster(r, meta.K, meta.dist, meta.selfCal, meta.photo)
-        }
-        // A greyscale raster (a film scan) is held as its one channel: four bytes a
-        // pixel for every raster still needed filled the tab's buffer pool on a film
-        // block at High (7.5 GB). Grey plane and colours come out bit for bit the same.
-        if (isGreyRgba(r.data)) r = { ...r, data: null, channel: firstChannel(r.data) }
-        rasterCache.set(url, r)
-        ledger.track(`raster:${srcKey(url)}`, r.width * r.height * (r.channel ? 1 : 4))
-        prepMs.raster += performance.now() - tR
+    const prepMs = { raster: 0, mask: 0, gray: 0, post: 0, saveWait: 0, waited: 0 }
+    const decodeRaster = async (url) => {
+      const tR = performance.now()
+      let r = await rasterize(url, maxDim)
+      // Undistort at ingest so every dense consumer stays pinhole (mirrors sparse).
+      const meta = metaByUrl.get(url)
+      if (meta?.fid) {
+        // Film scan: warp into the canonical frame (composes calibrated + self-cal).
+        r = warpFilmRaster(r, meta.K, meta.dist, meta.fid, maxDim, meta.selfCal)
+      } else if (meta?.dist || meta?.selfCal) {
+        r = undistortRaster(r, meta.K, meta.dist, meta.selfCal, meta.photo)
       }
-      return rasterCache.get(url)
+      // A greyscale raster (a film scan) is held as its one channel: four bytes a
+      // pixel for every raster still needed filled the tab's buffer pool on a film
+      // block at High (7.5 GB). Grey plane and colours come out bit for bit the same.
+      if (isGreyRgba(r.data)) r = { ...r, data: null, channel: firstChannel(r.data) }
+      prepMs.raster += performance.now() - tR
+      return r
     }
-    // An image's mask on its raster's working grid, and the raster's grey plane: built
-    // once and kept as long as the raster. Each source used to rebuild both for every
-    // map it served: decoding a full-size scan mask and warping it into the film frame,
-    // up to seven times per map, was most of the loop's time on the TMA film blocks.
-    const maskCache = new Map() // url → Uint8Array | null
-    const grayCache = new Map() // url → Uint8Array
-    const getMask = async (url, mask, r) => {
-      if (!maskCache.has(url)) {
-        const tM = performance.now()
-        const lut = r.fid ? (mask ? await filmMaskLut(mask, r) : null) : await undistortedMask(mask, r)
-        maskCache.set(url, lut)
-        if (lut) ledger.track(`mask:${srcKey(url)}`, lut.length)
-        prepMs.mask += performance.now() - tM
+    // An image's working raster with its mask on that grid and its grey plane, built
+    // once and kept as long as any later map needs it (useCount). Each source used to
+    // rebuild mask and grey for every map it served: decoding a full-size scan mask and
+    // warping it into the film frame, up to seven times per map, was most of the loop's
+    // time on the TMA film blocks. A promise, so the next map's images can be prepared
+    // while this map matches (the worker's thread is idle while the GPU works).
+    const prepared = new Map() // url → Promise<{ r, mask, gray }>
+    const prepare = (im) => {
+      if (!prepared.has(im.url)) {
+        const job = (async () => {
+          const r = await decodeRaster(im.url)
+          const tM = performance.now()
+          const mask = r.fid ? (im.mask ? await filmMaskLut(im.mask, r) : null) : await undistortedMask(im.mask, r)
+          prepMs.mask += performance.now() - tM
+          const tG = performance.now()
+          const gray = r.channel ? greyFromChannel(r.channel) : rgbaToGray(r.data, r.width, r.height)
+          prepMs.gray += performance.now() - tG
+          ledger.track(
+            `raster:${srcKey(im.url)}`,
+            r.width * r.height * ((r.channel ? 1 : 4) + 1) + (mask ? mask.length : 0),
+          )
+          return { r, mask, gray }
+        })()
+        job.catch(() => {}) // a prefetch nobody awaits yet must not be an unhandled rejection
+        prepared.set(im.url, job)
       }
-      return maskCache.get(url)
+      return prepared.get(im.url)
     }
-    const getGray = (url, r) => {
-      if (!grayCache.has(url)) {
-        const tG = performance.now()
-        grayCache.set(url, r.channel ? greyFromChannel(r.channel) : rgbaToGray(r.data, r.width, r.height))
-        ledger.track(`gray:${srcKey(url)}`, r.width * r.height)
-        prepMs.gray += performance.now() - tG
+    // Waits on a preparation, timing only what the loop could not overlap.
+    const ready = async (im) => {
+      const t = performance.now()
+      const p = await prepare(im)
+      prepMs.waited += performance.now() - t
+      return p
+    }
+    const imageByUuid = new Map(images.map((im) => [im.uuid, im]))
+    // Start preparing map k's reference and sources (not awaited).
+    const prefetch = (k) => {
+      if (k >= order.length) return
+      const i = order[k]
+      prepare(images[i])
+      for (const u of srcUuidsByImg.get(i)) {
+        const s = imageByUuid.get(u)
+        if (s) prepare(s)
       }
-      return grayCache.get(url)
     }
     // Drop every raster this image was the last consumer of (decrement its remaining
     // uses; delete + untrack at zero). Runs on every path out of the loop body.
@@ -515,13 +546,7 @@ export function makeDenseOps({ rasterize }) {
       for (const url of usedSets.get(i)) {
         const c = (useCount.get(url) || 0) - 1
         useCount.set(url, c)
-        if (c <= 0) {
-          rasterCache.delete(url)
-          ledger.release(`raster:${srcKey(url)}`)
-          if (maskCache.get(url)) ledger.release(`mask:${srcKey(url)}`)
-          maskCache.delete(url)
-          if (grayCache.delete(url)) ledger.release(`gray:${srcKey(url)}`)
-        }
+        if (c <= 0 && prepared.delete(url)) ledger.release(`raster:${srcKey(url)}`)
       }
     }
 
@@ -560,9 +585,9 @@ export function makeDenseOps({ rasterize }) {
       }
       const imgBestK = autoBestKMode ? autoBestK(srcUuids.length) : bestK
 
-      const rRef = await getRaster(img.url)
+      const { r: rRef, gray: refGray, mask: refMask } = await ready(img)
       const ref = {
-        gray: getGray(img.url, rRef),
+        gray: refGray,
         width: rRef.width,
         height: rRef.height,
         K: scaleK(paddedK(img.K, rRef), gridScale(rRef)),
@@ -570,8 +595,8 @@ export function makeDenseOps({ rasterize }) {
       }
       const sources = []
       for (const u of srcUuids) {
-        const s = images.find((im) => im.uuid === u)
-        const rs = await getRaster(s.url)
+        const s = imageByUuid.get(u)
+        const { r: rs, gray: srcGray, mask: srcMask } = await ready(s)
         // Source masks (film frame / fiducials) must be excluded from the ZNCC match,
         // not just from the reference's own depth: otherwise a reference pixel finds a
         // spurious low-cost match against a neighbour's high-contrast border, leaking
@@ -579,9 +604,8 @@ export function makeDenseOps({ rasterize }) {
         // The mask is drawn in scan space; move it the same way the raster moved —
         // the film scan→canonical warp, or the plain distortion map.
         // A widened fisheye canvas also excludes its pixels off the photo.
-        const srcMask = await getMask(s.url, s.mask, rs)
         sources.push({
-          gray: getGray(s.url, rs),
+          gray: srcGray,
           w: rs.width,
           h: rs.height,
           K: scaleK(paddedK(s.K, rs), gridScale(rs)),
@@ -590,6 +614,8 @@ export function makeDenseOps({ rasterize }) {
         })
       }
 
+      // The next map's images decode and warp while this one matches.
+      prefetch(k + 1)
       const tImg = performance.now()
       // Always stream depthMapForImage's own log (coarse-to-fine plan, debug level);
       // validate the GPU cost kernel against the CPU reference on the first image only.
@@ -680,7 +706,7 @@ export function makeDenseOps({ rasterize }) {
       // (which treats depth <= 0 as "no data") skips those pixels.
       // The mask moves with the raster (undistortion, or the fisheye canvas, whose pixels
       // off the photo are dropped too).
-      const maskLut = await getMask(img.url, img.mask, rRef)
+      const maskLut = refMask
       if (maskLut && maskLut.length === dm.depth.length) {
         for (let k = 0; k < dm.depth.length; k++) if (maskLut[k]) dm.depth[k] = 0
       }
@@ -748,6 +774,9 @@ export function makeDenseOps({ rasterize }) {
       if (streamMaps) {
         emit('map', [map], planes)
         streamed++
+        const tWait = performance.now()
+        if (input.settings?.ackToken) await untilSaved(input.settings.ackToken, streamed)
+        prepMs.saveWait += performance.now() - tWait
       } else {
         maps.push(map)
         transfer.push(...planes)
@@ -761,11 +790,14 @@ export function makeDenseOps({ rasterize }) {
       'success',
       'Dense',
     ])
+    if (input.settings?.ackToken) acks.delete(input.settings.ackToken)
     const sec = (ms) => `${(ms / 1000).toFixed(1)} s`
     emit('log', [
       `Depth maps: time — matching ${sec(perImage.reduce((a, p) => a + p.ms, 0))}, rasters decoded + warped ` +
-        `${sec(prepMs.raster)}, masks ${sec(prepMs.mask)}, grey planes ${sec(prepMs.gray)}, ` +
-        `filtering + previews ${sec(prepMs.post)}`,
+        `${sec(prepMs.raster)}, masks ${sec(prepMs.mask)}, grey planes ${sec(prepMs.gray)} ` +
+        `(of the preparation, ${sec(prepMs.waited)} not hidden behind matching), ` +
+        `filtering + previews ${sec(prepMs.post)}` +
+        (prepMs.saveWait > 1000 ? `, waiting for saves ${sec(prepMs.saveWait)}` : ''),
       'info',
       'Dense',
     ])
@@ -1093,5 +1125,5 @@ export function makeDenseOps({ rasterize }) {
     return out
   }
 
-  return { depthBackend, computeDepthMaps, filterDepthMaps, densify }
+  return { depthBackend, computeDepthMaps, depthAck, filterDepthMaps, densify }
 }

@@ -17,6 +17,7 @@ import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
 import {
   computeDepthMaps as workerComputeDepthMaps,
+  depthAck as workerDepthAck,
   depthBackend as workerDepthBackend,
   POOL_SIZE,
   terminateAll,
@@ -256,9 +257,9 @@ export function createDense({
         withRegion({ ...settings, streamMaps: !!run }),
         onProgress,
         run
-          ? (m) => {
+          ? (m, ack) => {
               takePreview(m)
-              run.add(m)
+              run.add(m).finally(ack)
             }
           : null,
       )
@@ -271,6 +272,9 @@ export function createDense({
         const at = new Map(inputImages.map((im, k) => [im.uuid, k]))
         run.metas.sort((a, b) => at.get(a.uuid) - at.get(b.uuid))
         if (settings.geomConsistency !== false && run.metas.length) {
+          // The depth workers hold their last rasters until a collection that may not
+          // come: start the filter on a fresh pool, so they cannot crowd the tab's buffers.
+          releaseIdleWorkers()
           stageSummary = await filterSavedDepthMaps(run, settings, stageSummary, loopShare, onProgress)
         }
         await run.commit(settings)
@@ -296,12 +300,20 @@ export function createDense({
   // streamed run splits its images over the workers (core/dense/depthSplit.js), each
   // with its share of the memory budget. A GPU run stays on one worker (the device is
   // the bottleneck), and so does an in-memory run, whose filter needs every map at once.
-  // `onMap` takes each streamed map; null for an in-memory run.
+  // `onMap(map, ack)` takes each streamed map and calls `ack` once it is saved; null
+  // for an in-memory run. A worker keeps at most DENSE_TUNING.depthMapsUnsaved maps
+  // unsaved and waits for the acks beyond that: a disk slower than the maps (the last
+  // maps of a film block at High, raster cache warm) otherwise queued 0.6 GB per map
+  // on the page until the tab's buffer pool ran out.
   async function runDepthMaps(images, sparse, settings, onProgress, onMap) {
     const onLog = (m, l, c) => log(m, l, c)
-    const onEvent = (ev, [m]) => {
-      if (ev === 'map' && onMap) onMap(m)
-    }
+    const runToken = crypto.randomUUID()
+    const onEventFor =
+      (w) =>
+      (ev, [m]) => {
+        if (ev === 'map' && onMap) onMap(m, () => workerDepthAck(`${runToken}:${w}`, w).catch(() => {}))
+      }
+    const withAck = (s, w) => (onMap ? { ...s, ackToken: `${runToken}:${w}` } : s)
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     let workers = 1
     if (onMap && images.length > 1 && !(settings.useGpu && (await workerDepthBackend(0)).gpu)) {
@@ -320,12 +332,12 @@ export function createDense({
     }
     if (workers === 1) {
       return workerComputeDepthMaps(
-        { images, sparse, settings },
+        { images, sparse, settings: withAck(settings, 0) },
         {
           worker: 0,
           transfer: sparseInputTransfer(sparse),
           onLog,
-          onEvent,
+          onEvent: onEventFor(0),
           onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
         },
       )
@@ -344,11 +356,11 @@ export function createDense({
     const parts = await Promise.all(
       chunks.map((refs, w) =>
         workerComputeDepthMaps(
-          { images, sparse, refs, settings: { ...settings, memBudgetBytes: budget / workers } },
+          { images, sparse, refs, settings: withAck({ ...settings, memBudgetBytes: budget / workers }, w) },
           {
             worker: w,
             onLog,
-            onEvent,
+            onEvent: onEventFor(w),
             onProgress: (d, t, lbl, f) => {
               counts[w] = d
               fractions[w] = f
@@ -404,7 +416,21 @@ export function createDense({
     // split over the pool in contiguous chunks (neighbouring captures share candidate
     // views, which keeps each worker's cache warm) give the single run's verdicts.
     const n = entries.length
-    const workers = Math.max(1, Math.min(POOL_SIZE, Math.floor(n / 16)))
+    // Memory, not only the map count, bounds the split: each reference is judged with
+    // all its candidate views resident at once (core/dense/geomFilter.js), up to
+    // DENSE_TUNING.filterMaxViews depth planes. 3 workers at High on 58 film maps (27 MP, 108 MB a plane)
+    // filled the tab's buffer pool in 35 s.
+    const planeBytes = run.metas.reduce((m, x) => Math.max(m, 4 * x.width * x.height), 0)
+    const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+    const views = DENSE_TUNING.filterMaxViews > 0 ? Math.min(n - 1, DENSE_TUNING.filterMaxViews) : n - 1
+    const perWorker = Math.max(1, views * planeBytes * 1.25)
+    const workers = Math.max(1, Math.min(POOL_SIZE, Math.floor(n / 16), Math.floor(budget / perWorker)))
+    log(
+      `Depth filter: ${pluralize(workers, 'worker')} (up to ${formatBytes(perWorker)} of candidate planes each, ` +
+        `budget ${formatBytes(budget)})`,
+      'info',
+      'Dense',
+    )
     let stats, ms
     if (workers === 1) {
       ;({ stats, ms } = await workerFilterDepthMaps(

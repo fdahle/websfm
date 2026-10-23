@@ -316,6 +316,12 @@ export const DENSE_TUNING = {
   // sets of 24–60 maps (Node/V8, dev machine, 2026-10-07); it rises slowly with map
   // count and sky share. The run logs the measured value — retune from those.
   geomFilterUsPerPx: 0.4,
+  // The cross-view filter checks each reference against at most this many overlapping
+  // views, nearest cameras first (0 = all). Every candidate plane is resident while a
+  // reference is judged, and a pixel that fails is tested against all of them: with
+  // ~50 overlapping views a map on a 58-scan film block at High, that was 5.4 GB per
+  // worker and 25 min on the one worker it allowed.
+  filterMaxViews: 12,
   // ── Stage B streaming fusion (core/dense/mvs.js fuseDepthMaps) ──
   // Fusion accumulates kept pixels directly into a voxel-merge structure (never a
   // raw per-pixel point list — that was the OOM). The scene bbox that sizes the
@@ -349,6 +355,9 @@ export const DENSE_TUNING = {
   // rendered at most this many pixels on its long side: a full 27 MP PNG per map was
   // seconds of encode each for a picture nobody sees at that size.
   depthPreviewMaxDim: 2048,
+  // A worker streaming depth maps waits while more than this many of its maps are not
+  // saved yet (each is ~23 B/px held on the page until its write lands).
+  depthMapsUnsaved: 2,
 }
 
 // Mesh (screened Poisson) internals read in core/products/mesh.js but NOT exposed in

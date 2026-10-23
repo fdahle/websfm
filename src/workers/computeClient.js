@@ -397,6 +397,12 @@ function streamingOp(op) {
 // with resultCodec after ownership of the buffers reaches the main thread.
 export const reconstruct = streamingOp('reconstruct')
 
+// A streamed depth map of run `token` was saved: the worker computing it may go on
+// (workers/ops/dense.js backpressure). Pinned to that worker.
+export function depthAck(token, worker) {
+  return call('depthAck', [token], { worker })
+}
+
 // Dense Stage A — Build Depth Maps (PatchMatch MVS, see core/dense/mvs.js). Resolves to
 // { maps: [{ uuid, width, height, K, R, t, depth, cost, rgb, displayBlob }] }.
 // With `settings.streamMaps` each finished map is instead emitted as a 'map' event

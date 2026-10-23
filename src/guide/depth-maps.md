@@ -85,8 +85,10 @@ estimate into the other maps and back, and removes pixels that the other views d
 confirm (see [geometric consistency](help:geometric-consistency)). This is particularly
 important for sky, foliage, water, haze, and silhouettes, where a photometric score
 alone can look deceptively good. Rejected pixels are removed from the saved maps
-themselves, so the orthophoto benefits too. The four settings below tune the check;
-switching it off also skips the **Minimum NCC** floor.
+themselves, so the orthophoto benefits too. Each map is checked against at most 12
+of the maps that overlap it: the nearest ones that see it from a different enough
+angle, since a camera right beside it can confirm nothing. The four settings below
+tune the check; switching it off also skips the **Minimum NCC** floor.
 
 ## Agreement tolerance
 <!-- param: maxGeomCost  default: 1.0 px -->

@@ -1313,6 +1313,17 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   has *some* pixel near the right depth by chance, so it passes. That is why freckles
   survived fusion before this stage existed.
 
+  **Candidate views**: each reference is judged against at most
+  `DENSE_TUNING.filterMaxViews` (12) of the maps that overlap it. They are the nearest
+  cameras whose baseline reaches the parallax gate at the reference's median depth,
+  then the nearest of the rest: plain nearest-first picks cameras that can vouch for
+  nothing (the three cameras of one aerial station sit within metres of each other).
+  Every candidate plane is resident while a reference is judged, and a pixel that
+  fails is tested against all of them, so on a 58-scan film block at High (~50
+  overlapping maps each, 108 MB a plane) the uncapped filter needed 5.4 GB per worker
+  and 30 min on the one worker that fitted; capped, 4.4 min on 3 workers, with the
+  DEM's error against REMA and a reference DEM unchanged (coverage −3 %).
+
   **Order-independence**: all maps are judged against the *unfiltered* planes
   (rejections are staged in per-map masks and applied afterwards). Filtering in place
   would let map *i*'s rejections remove the evidence map *i+1* is judged against,

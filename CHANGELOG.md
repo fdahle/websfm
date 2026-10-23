@@ -468,6 +468,13 @@ Notable changes to websfm. The format follows
   non-commercial license. You can supply the file yourself.
 
 ### Performance
+- **Depth maps on large scans, and the cross-view filter.** On a block of 58 film
+  scans (97 MP) at High: masks and grey planes are built once per image instead of for
+  every map they serve, the speckle filter is 5.7× faster (same output), previews are
+  at most 2,048 px, greyscale scans are cached as one channel, and the next map's
+  images are prepared while the current one matches. The cross-view filter checks each
+  map against at most 12 overlapping views with enough parallax, and sizes its workers
+  by memory: 30 → 4.4 min. Depth maps and filter together: 54 → 26 min.
 - **SfM on big blocks**: bundle adjustment solves its camera system exactly with a
   sparse Cholesky factorisation instead of a capped iterative solve, wherever the
   block has more than about 100 cameras. Registration scans only the image pairs a new
@@ -495,6 +502,15 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- **High-quality depth maps on big blocks no longer run the tab out of memory.** A
+  worker now waits while more than two of its finished maps are still being saved (a
+  slow disk queued 0.6 GB per map on the page), the cross-view filter starts on a
+  fresh pool and splits by memory, not by map count.
+- **Film scans in dense, orthophoto and exports.** Depth maps and orthophotos of a
+  film block failed at once with "could not be cloned": the fiducial transforms
+  reached the workers as Vue proxies.
+- **A DEM from a large georeferenced cloud read only the top of its octree** (the cell
+  size was compared in metres against model units): 8,270 of 60 M points.
 - **16-bit WhiteIsZero TIFFs no longer import as negatives.** The native decoder
   inverted them twice; it now matches the JavaScript fallback bit for bit. 1-bit
   (bilevel) TIFF scans, CCITT Group 4 included, now import through the native decoder.

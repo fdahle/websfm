@@ -372,8 +372,12 @@ export function filterSettings(settings = {}) {
 export function filterConfig(opts = {}) {
   const { minNcc, maxGeomCost, minConsistent, minGeomAngleDeg } = filterSettings(opts)
   const cull = boolOpt(opts.cull, true)
+  // At most this many candidate views per reference, the nearest cameras first (0 =
+  // every view that overlaps it): see DENSE_TUNING.filterMaxViews.
+  const maxViews = numOpt(opts.maxViews, DENSE_TUNING.filterMaxViews, { int: true, min: 0 })
   return {
     minNcc,
+    maxViews,
     maxGeomCost,
     minConsistent,
     minGeomAngleDeg,
@@ -408,9 +412,29 @@ export function requiredConsistentViews(minConsistent, nOverlapping) {
 // many of them must agree (`need`). A lone map has no cross-view evidence — the test
 // is meaningless, not "everything fails". `need` is taken from the culled candidate
 // count also when the cull is off, so the cull still never changes a verdict.
+// The `cfg.maxViews` candidates a reference is judged against: the nearest cameras
+// whose baseline gives at least the filter's parallax at the reference's median depth
+// first (nearer views see the same surface most alike), then the nearest of the rest.
+// Plain nearest-first would pick the views that can vouch for nothing: cameras at
+// almost the reference's own position (the three cameras of one aerial station).
+function capViews(ref, mi, cand, centres, cfg) {
+  const step = Math.max(1, Math.floor(ref.depth.length / 4096))
+  const sample = []
+  for (let k = 0; k < ref.depth.length; k += step) if (ref.depth[k] > 0) sample.push(ref.depth[k])
+  sample.sort((a, b) => a - b)
+  const depth = sample.length ? sample[sample.length >> 1] : 0
+  const C = centres[mi]
+  const minBase = cfg.angleOn && depth > 0 ? 2 * depth * Math.tan((cfg.minGeomAngleDeg * Math.PI) / 360) : 0
+  const base = (ci) => Math.hypot(centres[ci][0] - C[0], centres[ci][1] - C[1], centres[ci][2] - C[2])
+  const wide = cand.filter((ci) => base(ci) >= minBase)
+  const narrow = cand.filter((ci) => base(ci) < minBase)
+  return [...wide, ...narrow].slice(0, cfg.maxViews)
+}
+
 function referencePlan(ref, mi, others, centres, cfg, checkViews) {
   if (!checkViews) return { cand: [], lists: null, need: cfg.minConsistent }
-  const culled = referenceCandidates(ref, mi, others, centres)
+  const all = referenceCandidates(ref, mi, others, centres)
+  const culled = cfg.maxViews > 0 && all.length > cfg.maxViews ? capViews(ref, mi, all, centres, cfg) : all
   const need = requiredConsistentViews(cfg.minConsistent, culled.length)
   if (!cfg.cull) return { cand: others.map((_, ci) => ci).filter((ci) => ci !== mi), lists: null, need }
   return { cand: culled, lists: blockCandidates(ref, others, culled), need }

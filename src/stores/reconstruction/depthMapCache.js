@@ -74,16 +74,17 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
     return {
       projectId,
       metas,
+      // → the write, settled (never rejects): the run's backpressure waits on it.
       add(m) {
         const { meta, buffers } = serializeDepthMap(m)
         metas.push(meta)
-        writes.push(
-          opfs.saveDepthPlane(projectId, m.uuid, buffers).catch((err) => {
-            if (failure) return
-            failure = err
-            onWriteFailure?.(err)
-          }),
-        )
+        const write = opfs.saveDepthPlane(projectId, m.uuid, buffers).catch((err) => {
+          if (failure) return
+          failure = err
+          onWriteFailure?.(err)
+        })
+        writes.push(write)
+        return write
       },
       settled,
       async commit(settings) {
