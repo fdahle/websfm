@@ -83,6 +83,9 @@ project:
   prints what the page holds per item (keypoints, match tuples, clouds, depth maps) and
   its memory: the **V8 heap** and the ArrayBuffers apart (DevTools `Runtime.getHeapUsage`),
   plus `performance.memory`, which counts both together.
+- `procTrace: <seconds>` (Linux): the resident memory (VmRSS) of the bench's Chrome
+  renderer processes every so often, and its peak (`procPeakGB` in the summary). Unlike
+  `memTrace` it counts WebAssembly memory, where fusion keeps its accumulators.
 - `profileReopen: true`: a CPU profile of the `reopen` restore, saved as
   `<out>.reopen.cpuprofile` (load it in DevTools) with its top self-time functions on the
   console.

@@ -287,6 +287,39 @@ try {
   // Worker heap per SfM segment: closed by the solver's `stage "…" took` and
   // `memory mark "…"` debug lines (sfm.js), reported with each recon stage.
   heap = await startWorkerHeapSampler(page)
+  // `procTrace: <seconds>` (Linux): every so often, the resident memory (VmRSS) of this
+  // Chrome's renderer processes, found by the profile directory on their command line.
+  // Unlike memTrace it counts WebAssembly memory (core/bigArray.js keeps a run's big
+  // arrays there), so it is what a run's projected peak is compared with. The peak is
+  // logged at the end and kept in the summary (`procPeakGB`).
+  if (cfg.procTrace > 0) {
+    const { readFileSync, readdirSync } = await import('node:fs')
+    const rssOf = () => {
+      let max = 0,
+        total = 0
+      for (const pid of readdirSync('/proc').filter((d) => /^\d+$/.test(d))) {
+        try {
+          const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+          if (!cmd.includes('--type=renderer') || !cmd.includes(profileDir)) continue
+          const kb = Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1] ?? 0)
+          max = Math.max(max, kb)
+          total += kb
+        } catch {
+          /* the process ended */
+        }
+      }
+      return { max: max / 2 ** 20, total: total / 2 ** 20 }
+    }
+    result.procPeakGB = 0
+    setInterval(() => {
+      const r = rssOf()
+      result.procPeakGB = Math.max(result.procPeakGB, r.max)
+      console.log(
+        `== proctrace ${new Date().toTimeString().slice(0, 8)}: renderer RSS ${r.max.toFixed(2)} GB ` +
+          `(all renderers ${r.total.toFixed(2)} GB), peak ${result.procPeakGB.toFixed(2)} GB`,
+      )
+    }, cfg.procTrace * 1000).unref?.()
+  }
   // `memTrace: <seconds>`: every so often, the ArrayBuffer memory the page and each
   // worker hold now (the tab's one 16 GiB pool), to see which side grows during a run.
   if (cfg.memTrace > 0) {
