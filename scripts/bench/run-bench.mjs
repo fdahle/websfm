@@ -199,7 +199,13 @@ if (cfg.dev) {
           '--logLevel',
           'warn',
         ],
-        { cwd: repo, stdio: 'inherit', env: { ...process.env, BENCH_OUT_DIR: buildDir } },
+        // `unminified: true`: no minification, so worker CPU profiles (profileWorkers) name
+        // the app's functions.
+        {
+          cwd: repo,
+          stdio: 'inherit',
+          env: { ...process.env, BENCH_OUT_DIR: buildDir, ...(cfg.unminified ? { BENCH_UNMINIFIED: '1' } : {}) },
+        },
       )
       p.on('exit', (code) => (code === 0 ? ok() : fail(new Error(`bench build failed (${code})`))))
     })

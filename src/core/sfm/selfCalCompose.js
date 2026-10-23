@@ -91,15 +91,21 @@ function fitComposed(forEachPair, K, active) {
   const AtA = Array.from({ length: m }, () => new Array(m).fill(0))
   const Atb = new Array(m).fill(0)
   let used = 0
+  // Basis values for each column at a point (per axis: coord · r²^pow), reused: this runs
+  // over every keypoint of a sensor on every self-calibration pass (2.5 M on quarry), and
+  // two arrays per keypoint were most of the reconstruction's garbage.
+  const basisX = new Float64Array(m),
+    basisY = new Float64Array(m)
   forEachPair((px, py, fX, fY, { fx, fy, cx, cy } = K) => {
     const fxn = (fX - cx) / fx,
       fyn = (fY - cy) / fy // ideal (folded) normalised
     const pxn = (px - cx) / fx,
       pyn = (py - cy) / fy // distorted (pristine) normalised
     const r2 = fxn * fxn + fyn * fyn
-    // Basis value for each column at this point (per axis: coord · r²^pow).
-    const basisX = pow.map((k) => fxn * r2 ** k)
-    const basisY = pow.map((k) => fyn * r2 ** k)
+    for (let a = 0; a < m; a++) {
+      basisX[a] = fxn * r2 ** pow[a]
+      basisY[a] = fyn * r2 ** pow[a]
+    }
     const tx = pxn - fxn,
       ty = pyn - fyn // forward-distortion displacement
     for (let a = 0; a < m; a++) {

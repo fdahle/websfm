@@ -2,7 +2,6 @@
 // the stages it wires): residual summaries, the per-observation reprojection residuals
 // and the track-length histogram. Pure — every input is passed in; nothing is mutated.
 
-import { projectPoint } from './geometry.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 
 // Summary statistics for an array of numbers (e.g. reprojection residuals, px).
@@ -31,20 +30,52 @@ export function fmtStats(s) {
 // the model: project each 3D point into each camera that sees it and compare
 // to the detected keypoint. The single clearest health signal for the model.
 // `images` is the run's image list, indexed as the track store indexes images.
+// It runs after every bundle adjustment and registration pass, over every observation
+// (813 k on quarry), so each image's camera is unpacked once (a uuid Map lookup per
+// observation, and projectPoint's result object, were seconds a run and most of its
+// garbage). The arithmetic is projectPoint's, in the same order: the same residuals.
 export function modelResiduals({ tracks, cameras, ids, images }) {
   const residuals = []
+  const camAt = new Array(images.length).fill(null)
+  for (let img = 0; img < images.length; img++) {
+    const cam = images[img] ? cameras.get(ids.uuid(img)) : null
+    if (!cam || !cam.K) continue
+    const { R, t, K } = cam
+    camAt[img] = [
+      R[0][0],
+      R[0][1],
+      R[0][2],
+      R[1][0],
+      R[1][1],
+      R[1][2],
+      R[2][0],
+      R[2][1],
+      R[2][2],
+      t[0],
+      t[1],
+      t[2],
+      K.fx,
+      K.fy,
+      K.cx,
+      K.cy,
+    ]
+  }
   tracks.forEachPoint((p) => {
     const x = tracks.x(p),
       y = tracks.y(p),
       z = tracks.z(p)
     tracks.forEachView(p, (img, kpIdx) => {
-      const cam = cameras.get(ids.uuid(img))
-      if (!cam || !cam.K || !images[img]) return
+      const c = camAt[img]
+      if (!c) return
       const set = images[img].kp
       if (!hasKp(set, kpIdx)) return
-      const proj = projectPoint(cam, x, y, z)
-      if (!proj) return
-      residuals.push(Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)))
+      const xc = c[0] * x + c[1] * y + c[2] * z + c[9]
+      const yc = c[3] * x + c[4] * y + c[5] * z + c[10]
+      const zc = c[6] * x + c[7] * y + c[8] * z + c[11]
+      if (!isFinite(zc) || Math.abs(zc) < 1e-9) return
+      residuals.push(
+        Math.hypot(c[12] * (xc / zc) + c[14] - kpX(set, kpIdx), c[13] * (yc / zc) + c[15] - kpY(set, kpIdx)),
+      )
     })
   })
   return residuals

@@ -12,6 +12,8 @@ export default (env) => {
       outDir: process.env.BENCH_OUT_DIR,
       emptyOutDir: true,
       rollupOptions: { input: 'tests/bench/bench.html' },
+      // A config's `unminified: true` (run-bench.mjs): readable names in CPU profiles.
+      ...(process.env.BENCH_UNMINIFIED ? { minify: false } : {}),
     },
   }
 }

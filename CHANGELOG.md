@@ -504,6 +504,10 @@ Notable changes to websfm. The format follows
   non-commercial license. You can supply the file yourself.
 
 ### Performance
+- **Sparse reconstruction outside bundle adjustment.** The model's reprojection
+  statistics, the self-calibration fit and guided track extension stopped allocating per
+  observation, and guided extension only tries the cameras that can see a point. Quarry
+  (347 images): 82 → 77 s, the identical model.
 - **Depth maps on large scans, and the cross-view filter.** On a block of 58 film
   scans (97 MP) at High: masks and grey planes are built once per image instead of for
   every map they serve, the speckle filter is 5.7× faster (same output), previews are
