@@ -128,14 +128,17 @@ export function createProductRuns({
       if (fromOctree) {
         // From the octree (core/lod): down to half the cell size when one is set (finer
         // levels add nothing to a cell), within half the budget (the grid gets the
-        // rest), the ground class for a DTM, the region as the read box.
+        // rest), the ground class for a DTM, the region as the read box. The cell size
+        // is in the output frame's units and the octree in the model's: a georeferenced
+        // 10 m DEM of a TMA block (scale 3,339 m a unit) read 8,270 of 60 M points.
+        const unitsPerModel = frameSpec?.scale > 0 ? frameSpec.scale : 1
         const { cloud: flat, plan } = await extractCloudPoints(
           src,
           {
             classes: groundOnly ? [2] : null,
             fields: 'xyz',
             maxPoints,
-            minSpacing: settings.gsd > 0 ? settings.gsd / 2 : 0,
+            minSpacing: settings.gsd > 0 ? settings.gsd / 2 / unitsPerModel : 0,
             ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}),
           },
           (d, t, lbl, f) => onProgress?.(d, t, 'Reading the octree', f),
