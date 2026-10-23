@@ -6,6 +6,7 @@ import { createFlatRasterSource } from '../core/io/rasterSource.js'
 import { rasterBounds } from '../core/io/rasterSample.js'
 import { projectRasterWindow } from '../core/io/projectRasterWindow.js'
 import { usePosesStore } from './usePosesStore.js'
+import { useGcpsStore } from './useGcpsStore.js'
 import { referencePick } from '../core/sfm/referenceGcps.js'
 import { heightShifter } from '../core/verticalDatum.js'
 import { describeStyle, styleStamp, resolveRasterStyle, bandsUsedBy } from '../core/io/rasterStyle.js'
@@ -206,8 +207,9 @@ export const useExternalStore = registerProjectStore(
     }
 
     // The window of a raster too large for one plane (meta.tooLarge, workers/ops/io.js)
-    // over the project: its images' positions with a margin (core/io/rasterWindow.js), in
-    // pixels of the raster. Null when no image has a position or the CRS cannot be resolved.
+    // over the project: its images' positions and surveyed GCPs with a margin
+    // (core/io/projectRasterWindow.js), in pixels of the raster. Null when neither is there
+    // or the CRS cannot be resolved.
     async function rasterWindowFor(meta) {
       const crs = meta.crs ?? currentCrs.value
       const projCrs = currentCrs.value
@@ -218,7 +220,10 @@ export const useExternalStore = registerProjectStore(
         return null
       }
       const points = []
-      for (const p of usePosesStore().poses) {
+      // Image positions, and surveyed GCPs (a film block has GCPs and no GPS): the area
+      // the project covers.
+      const surveyed = useGcpsStore().gcps.filter((g) => g.role !== 'marker' && g.enabled !== false)
+      for (const p of [...usePosesStore().poses, ...surveyed]) {
         if (Number.isFinite(p.lon) && Number.isFinite(p.lat)) points.push([p.lon, p.lat])
         else if (projCrs && Number.isFinite(p.x) && Number.isFinite(p.y)) {
           try {
@@ -258,25 +263,34 @@ export const useExternalStore = registerProjectStore(
         }))
         // Too large for one plane: read the window over the project's images instead.
         if (meta?.tooLarge) {
-          const window = await rasterWindowFor(meta)
-          if (!window) {
+          const fit = await rasterWindowFor(meta)
+          if (!fit?.window) {
             throw new Error(
-              `${meta.message} The project's images have no positions yet to crop it to; import them ` +
-                '(or their GPS) first, or crop the raster.',
+              `${meta.message} ` +
+                (fit?.reason === 'outside'
+                  ? "The project's images and GCPs lie outside it."
+                  : 'The project has no image positions or GCPs yet to crop it to; import them first, or crop the raster.'),
             )
           }
+          const { window, factor } = fit
+          const cell = Math.abs(meta.geoTransform.scaleX)
           log(
             `Reference raster ${file.name}: ${meta.width.toLocaleString()} × ${meta.height.toLocaleString()} cells ` +
               `is too large for one plane — reading the ${(window[2] - window[0]).toLocaleString()} × ` +
-              `${(window[3] - window[1]).toLocaleString()} window over the project's images (half their extent ` +
-              'around them, at least 1 km)',
-            'info',
+              `${(window[3] - window[1]).toLocaleString()} window over the project's images and GCPs (half ` +
+              'their extent around them, at least 1 km)' +
+              (factor > 1
+                ? `, at ${factor}× its cell size (${(cell * factor).toPrecision(3)} instead of ${cell.toPrecision(3)}) ` +
+                  'to fit one buffer'
+                : ''),
+            factor > 1 ? 'warn' : 'info',
             'Import',
           )
           ;({ meta, plane } = await parseRasterFile(file, file.name, {
             forceKind,
             previewOnly: true,
             window,
+            factor,
             onLog: (m, l, c) => log(m, l, c),
           }))
         }
@@ -505,6 +519,7 @@ export const useExternalStore = registerProjectStore(
           forceKind: meta.kind,
           // A raster read as a window over the project (importRasterNow) re-reads that window.
           window: meta.window ? [meta.window.x0, meta.window.y0, meta.window.x1, meta.window.y1] : null,
+          factor: meta.window?.factor ?? 1,
           // A plain copy: the record is reactive, and a proxy cannot be posted to the worker.
           style: JSON.parse(JSON.stringify(meta.style ?? null)),
           onLog: (m, l, c) => log(m, l, c),

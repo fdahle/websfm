@@ -75,12 +75,17 @@ describe('parseRaster buffer wall', () => {
     const { result } = await parse(demTiff(values, 30, 30, { bits: 64 }), { window: [5, 10, 15, 18] })
     expect(result.meta.tooLarge).toBeUndefined()
     expect([result.meta.width, result.meta.height]).toEqual([10, 8])
-    expect(result.meta.window).toEqual({ x0: 5, y0: 10, x1: 15, y1: 18, fullWidth: 30, fullHeight: 30 })
+    expect(result.meta.window).toEqual({ x0: 5, y0: 10, x1: 15, y1: 18, factor: 1, fullWidth: 30, fullHeight: 30 })
     // The origin moves to the window's corner (1-unit cells, y down from 2000).
     expect(result.meta.geoTransform).toMatchObject({ originX: 1005, originY: 1990 })
     expect(result.plane.length).toBe(80)
     expect(result.plane[0]).toBe(10 * 30 + 5) // row 10, column 5 of the full raster
     expect(result.plane[79]).toBe(17 * 30 + 14)
+    // Read at twice the cell size: half the cells a side, the cell twice as large.
+    const coarse = (await parse(demTiff(values, 30, 30, { bits: 64 }), { window: [0, 0, 20, 20], factor: 2 })).result
+    expect([coarse.meta.width, coarse.meta.height]).toEqual([10, 10])
+    expect(coarse.meta.geoTransform).toMatchObject({ originX: 1000, originY: 2000, scaleX: 2, scaleY: -2 })
+    expect(coarse.plane.length).toBe(100)
     // A window that is itself too large is refused.
     await expect(parse(demTiff(values, 30, 30, { bits: 64 }), { window: [0, 0, 30, 30] })).rejects.toThrow(
       /caps one buffer/,

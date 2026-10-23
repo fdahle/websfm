@@ -107,10 +107,11 @@ export function makeIoOps({ lazCodec = null } = {}) {
   //     ortho — Uint8Array(width·height·4) RGBA (this IS the display data; an
   //             ortho needs no separate value plane, only geometry)
   // `window` ([x0, y0, x1, y1], pixels of the full raster): read only that part (a raster
-  // too large for one plane, cropped to the project: useExternalStore importRasterNow).
-  // The meta then describes the window (its size, its geotransform) and names it.
+  // too large for one plane, cropped to the project: useExternalStore importRasterNow),
+  // `factor` cells as one (resampled bilinearly) when even that part needs it to fit one
+  // plane. The meta then describes what was read (its size, its geotransform) and names it.
   async function parseRaster(
-    [{ buffer, file, name, forceKind = null, style = null, previewOnly = false, window = null }],
+    [{ buffer, file, name, forceKind = null, style = null, previewOnly = false, window = null, factor = 1 }],
     { emit },
   ) {
     const t0 = performance.now()
@@ -145,16 +146,21 @@ export function makeIoOps({ lazCodec = null } = {}) {
         ]
       : null
     if (win && !(win[2] > win[0] && win[3] > win[1])) throw new Error(`${name}: the project lies outside the raster`)
-    const width = win ? win[2] - win[0] : fullWidth
-    const height = win ? win[3] - win[1] : fullHeight
+    const f = win ? Math.max(1, Math.floor(factor)) : 1
+    const width = win ? Math.ceil((win[2] - win[0]) / f) : fullWidth
+    const height = win ? Math.ceil((win[3] - win[1]) / f) : fullHeight
     const geoTransform = win
       ? {
-          ...fullTransform,
           originX: fullTransform.originX + win[0] * fullTransform.scaleX,
           originY: fullTransform.originY + win[1] * fullTransform.scaleY,
+          scaleX: (fullTransform.scaleX * (win[2] - win[0])) / width,
+          scaleY: (fullTransform.scaleY * (win[3] - win[1])) / height,
         }
       : fullTransform
-    const rd = win ? { window: win } : {}
+    // Full-plane reads: the window at the read size. A preview read sizes itself, so it
+    // takes only the window.
+    const rd = win ? { window: win, ...(f > 1 ? { width, height, resampleMethod: 'bilinear' } : {}) } : {}
+    const rdWindow = win ? { window: win } : {}
     const crs = readCrs(geoKeys)
 
     // Decimated sample from band 0 for the classifier's histogram tier. geotiff
@@ -216,7 +222,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
         const ratio = Math.min(1, PREVIEW_MAX / Math.max(width, height))
         const w = Math.max(1, Math.round(width * ratio)),
           h = Math.max(1, Math.round(height * ratio))
-        const rgb = await image.readRGB({ width: w, height: h, interleave: true, ...rd })
+        const rgb = await image.readRGB({ width: w, height: h, interleave: true, ...rdWindow })
         const rgba = new Uint8ClampedArray(w * h * 4)
         for (let i = 0; i < w * h; i++) {
           rgba.set(rgb.subarray(i * 3, i * 3 + 3), i * 4)
@@ -339,7 +345,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
       crs,
       geoTransform,
       // The part of the file this describes, when it is a window of a larger raster.
-      ...(win ? { window: { x0: win[0], y0: win[1], x1: win[2], y1: win[3], fullWidth, fullHeight } } : {}),
+      ...(win ? { window: { x0: win[0], y0: win[1], x1: win[2], y1: win[3], factor: f, fullWidth, fullHeight } } : {}),
       rawNodata: nodata,
       nodata: kind === 'dem' ? null : nodata, // folded to NaN for DEMs
       zMin,

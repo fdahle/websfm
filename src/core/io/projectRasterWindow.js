@@ -8,13 +8,14 @@ import { MAX_BUFFER_BYTES } from '../bufferLimit.js'
 const M_PER_DEG = 111320
 
 /**
- * `points`: [[lon, lat], …] of the project's images. `toRaster(lon, lat)` → [x, y] in
- * the raster's CRS. `geoTransform`, `width`, `height`: the full raster. The area is the
- * points' box grown on each side by `marginFrac` of its extent, and by at least
- * `minMarginM` metres (an aerial image sees well past its camera; one image alone has
- * no extent). Returns [x0, y0, x1, y1] in pixels of the full raster, clamped to it, or
- * null: no points, the area outside the raster, or a window still too large for one
- * plane at `cellBytes` a cell.
+ * `points`: [[lon, lat], …] of the project's images (and GCPs). `toRaster(lon, lat)` →
+ * [x, y] in the raster's CRS. `geoTransform`, `width`, `height`: the full raster. The
+ * area is the points' box grown on each side by `marginFrac` of its extent, and by at
+ * least `minMarginM` metres (an aerial image sees well past its camera; one image alone
+ * has no extent). Returns { window: [x0, y0, x1, y1] in pixels of the full raster,
+ * clamped to it, factor } — `factor` the whole number of cells read as one so the window
+ * fits one plane at `cellBytes` a cell (1 = full resolution; a block of GCPs spanning a
+ * 30 km DEM at 1 m reads at 2 m) — or { reason: 'no-points' | 'outside' }.
  */
 export function projectRasterWindow({
   points,
@@ -27,7 +28,7 @@ export function projectRasterWindow({
   minMarginM = 1000,
 }) {
   const ok = (points ?? []).filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat))
-  if (!ok.length) return null
+  if (!ok.length) return { reason: 'no-points' }
   let lon0 = Infinity,
     lon1 = -Infinity,
     lat0 = Infinity,
@@ -76,7 +77,8 @@ export function projectRasterWindow({
     y0 = Math.max(0, Math.floor(r0)),
     x1 = Math.min(width, Math.ceil(c1)),
     y1 = Math.min(height, Math.ceil(r1))
-  if (!(x1 > x0 && y1 > y0)) return null
-  if ((x1 - x0) * (y1 - y0) * cellBytes > MAX_BUFFER_BYTES) return null
-  return [x0, y0, x1, y1]
+  if (!(x1 > x0 && y1 > y0)) return { reason: 'outside' }
+  let factor = 1
+  while (Math.ceil((x1 - x0) / factor) * Math.ceil((y1 - y0) / factor) * cellBytes > MAX_BUFFER_BYTES) factor++
+  return { window: [x0, y0, x1, y1], factor }
 }

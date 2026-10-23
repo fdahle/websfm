@@ -549,15 +549,26 @@ export function parseCloudFile(file, { onLog } = {}) {
 // main thread — a 200 MB REMA tile decoded on the UI thread is the same trap
 // parseCloudFile exists to avoid. `forceKind` ('dem'|'ortho') skips the sniff.
 // Resolves to { meta, plane }; `plane` is transferred both ways (no clone).
-// `window` ([x0, y0, x1, y1] pixels): read only that part of the raster (workers/ops/io.js).
+// `window` ([x0, y0, x1, y1] pixels): read only that part of the raster, `factor` cells as
+// one (workers/ops/io.js).
 export function parseRasterFile(
   buffer,
   name,
-  { forceKind = null, style = null, previewOnly = false, window = null, onLog } = {},
+  { forceKind = null, style = null, previewOnly = false, window = null, factor = 1, onLog } = {},
 ) {
   return call(
     'parseRaster',
-    [{ ...(buffer instanceof Blob ? { file: buffer } : { buffer }), name, forceKind, style, previewOnly, window }],
+    [
+      {
+        ...(buffer instanceof Blob ? { file: buffer } : { buffer }),
+        name,
+        forceKind,
+        style,
+        previewOnly,
+        window,
+        factor,
+      },
+    ],
     {
       transfer: buffer instanceof Blob ? [] : [buffer],
       onEvent: onLog

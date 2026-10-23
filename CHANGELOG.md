@@ -329,8 +329,10 @@ Notable changes to websfm. The format follows
 ### Changed
 - **Reference DEMs past 2 GB are read over the project.** A DEM too large for one buffer
   (a REMA 2 m tile, 25,100² cells) is no longer refused when the project's images have
-  positions: only the window over them (half their extent around them, at least 1 km)
-  is read, and the map still draws the whole file.
+  positions or it has GCPs: only the window over them (half their extent around them, at
+  least 1 km) is read, at a coarser cell size if even that does not fit (Casa Grande's
+  30,000 × 36,990 reference at 2 m instead of 1 m), and the map still draws the whole
+  file.
 - **Fusion on all workers.** Over saved depth maps, fusion spreads its slabs over up
   to 8 workers, as many as the memory budget holds; the finished slabs wait in
   WebAssembly memory, outside the tab's buffers. Quarry, 347 maps: 478 → 308 s at
