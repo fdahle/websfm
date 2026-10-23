@@ -386,6 +386,15 @@ try {
     const h = await histSetup({ imagesDir: cfg.images, ...cfg.hist }, files)
     if (h.sensor)
       console.log(`== hist sensor: ${JSON.stringify(await page.evaluate((f) => window.bench.setSensor(f), h.sensor))}`)
+    if (h.sensorGroups)
+      console.log(
+        `== hist sensors: ${JSON.stringify(await page.evaluate((b) => window.bench.groupSensors(b), h.sensorGroups))}`,
+      )
+    if (h.fiducialsBatch) {
+      const f = await page.evaluate((x) => window.bench.setFiducialsBatch(x), h.fiducialsBatch)
+      console.log(`== hist fiducials (batch layout): ${JSON.stringify(f.sensors)} · ${f.applied} marks`)
+      result.fiducials = f
+    }
     if (h.maskDataUrl)
       console.log(`== hist mask: ${await page.evaluate((u) => window.bench.setMask(u), h.maskDataUrl)} image(s)`)
     if (cfg.hist.footprints) {

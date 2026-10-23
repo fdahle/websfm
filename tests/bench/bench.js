@@ -53,7 +53,11 @@ import { encodeSfmInput } from './sfmInputDump.js'
 import { demToGeoTiff } from '/src/core/products/exporters.js'
 import { crsTagInfo } from '/src/core/products/geotiff.js'
 import { emptyFiducialCalibration, calibratedFiducialPairs } from '/src/core/sfm/fiducialModel.js'
-import { fitFiducialTransform } from '/src/core/sfm/fiducialCalibration.js'
+import {
+  fitFiducialTransform,
+  estimateBatchFiducialLayout,
+  validateFiducialCalibration,
+} from '/src/core/sfm/fiducialCalibration.js'
 import { RESEAU_DEFAULTS, PANORAMIC_DEFAULTS } from '/src/core/defaults.user.js'
 import { buildBorderMask } from '/src/core/mask.js'
 import { FIDUCIAL_SPOT_DEFAULTS, VIDEO_IMPORT_DEFAULTS } from '/src/core/defaults.user.js'
@@ -1165,6 +1169,57 @@ window.bench = {
     const n = await useFootprintsStore().addFootprints(fps, parsed.sourceCrs, name)
     return { polygons: fps.length, added: n, crs: parsed.sourceCrs }
   },
+  // Sensors by group (config `hist.sensors`: a CSV of image, role, focal_mm, as
+  // hist/tma_prep.py writes it): one sensor per group, as an imported camera group,
+  // replacing the size-grouped ones. bindings = [{ name, group }].
+  async groupSensors(bindings) {
+    const byName = new Map(images.images.map((i) => [i.name, i]))
+    const groups = [...new Set(bindings.map((b) => b.group))].sort()
+    const before = sensorsStore.sensors.map((s) => s.id)
+    await sensorsStore.importCameraGroups(
+      groups.map((g) => ({ externalId: g, label: `Camera ${g}`, source: 'bench' })),
+      bindings.flatMap((b) => (byName.has(b.name) ? [{ uuid: byName.get(b.name).uuid, cameraId: b.group }] : [])),
+    )
+    for (const id of before) if (!images.images.some((i) => i.sensorId === id)) sensorsStore.removeSensor(id)
+    return sensorsStore.sensors.map((s) => ({
+      label: s.label,
+      images: images.images.filter((i) => i.sensorId === s.id).length,
+    }))
+  },
+  // Film scans without a calibration certificate (config `hist.fiducials.batchPitchMm`):
+  // the provided marks on every image, then per sensor the layout estimated from its
+  // own scans at that pitch (Calibrate Fiducials ▸ batch). focalMm = { <sensor label>: mm }.
+  async setFiducialsBatch({ provided, pitchMm, focalMm = {}, transform = 'affine' }) {
+    const byName = new Map(images.images.map((i) => [i.name, i]))
+    let applied = 0
+    for (const d of provided) {
+      const img = byName.get(d.imageName)
+      if (!img) continue
+      images.setFiducialDetection(img.id, { slot: d.slot, px: d.px, py: d.py, source: 'import' })
+      applied++
+    }
+    const out = { applied, sensors: [] }
+    for (const sensor of sensorsStore.sensors) {
+      const imgs = images.images.filter((i) => i.sensorId === sensor.id)
+      const cal = estimateBatchFiducialLayout(imgs, pitchMm, { focalMm: focalMm[sensor.label], transform })
+      if (!cal) {
+        out.sensors.push({ label: sensor.label, error: 'no layout' })
+        continue
+      }
+      sensorsStore.setFiducialCalibration(sensor.id, cal)
+      const v = validateFiducialCalibration(imgs, cal)
+      out.sensors.push({
+        label: sensor.label,
+        images: imgs.length,
+        focalMm: cal.focalMm,
+        marks: cal.marks.length,
+        rmsUm: v.rmsUm,
+        p95Um: v.p95Um,
+        failed: v.failed,
+      })
+    }
+    return out
+  },
   // A folder of per-image masks (config `hist.masks`), paired by name through
   // Masks ▸ Import folder: files = [{ url, name }].
   async importMasks({ files, existing }) {
@@ -1596,7 +1651,11 @@ window.bench = {
 
   // Georeferencing ▸ Georeference: the SfM → project-CRS similarity from GCPs, else the
   // camera positions (EXIF GNSS / imported poses).
-  async georef() {
+  // `enablePoses`: turn the imported camera poses back on for the fit only, after a
+  // recon with `posePriors: false` kept them out of bundle adjustment: a similarity
+  // from the free block's camera centres to reference positions (a shape check).
+  async georef({ enablePoses = false } = {}) {
+    if (enablePoses) for (const p of poses.poses) p.enabled = true
     const t0 = performance.now()
     const g = await recon.georeference()
     return {

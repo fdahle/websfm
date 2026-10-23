@@ -10,6 +10,9 @@
 //                                                         (Masks ▸ Import folder); TIFF is fine
 //     "maskExisting": "merge",                           with "mask" too: add each file to the static mask
 //     "footprints": ".../footprints.geojson",            approximate image footprints (polygons named by image)
+//     "sensors": ".../sensors.csv",                      image, role, focal_mm: one sensor per role
+//     "fiducials": { "csv": …, "batchPitchMm": 0.025 }   no certificate: each sensor's layout estimated
+//                                                         from its scans at that pitch (no intrinsics needed)
 //     "gcps": ".../gcp.csv",                             gcp_label, image_file_name, x, y (pixel-edge),
 //                                                         x_map, y_map, elev, *_acc  (in cfg.crs)
 //     "checkEvery": 4,                                   every 4th label (sorted) is a checkpoint; 0 = none
@@ -27,6 +30,17 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
+// detected_fiducial_markers.csv column → the app's fiducial slot.
+const FIDUCIAL_SLOTS = {
+  corner_top_left: 'corner-tl',
+  corner_top_right: 'corner-tr',
+  corner_bottom_right: 'corner-br',
+  corner_bottom_left: 'corner-bl',
+  midside_top: 'side-top',
+  midside_right: 'side-right',
+  midside_bottom: 'side-bottom',
+  midside_left: 'side-left',
+}
 const PY_DEFAULT = '/home/fdahle/miniconda3/envs/hist_env3/bin/python'
 
 function csvRows(text) {
@@ -100,17 +114,29 @@ export async function histSetup(h, imageNames) {
   }
   // Film fiducials: the certificate from the intrinsics CSV (corner_* / midside_* mm,
   // y up) and the per-image marks from detected_fiducial_markers.csv.
-  if (h.fiducials) {
-    const SLOTS = {
-      corner_top_left: 'corner-tl',
-      corner_top_right: 'corner-tr',
-      corner_bottom_right: 'corner-br',
-      corner_bottom_left: 'corner-bl',
-      midside_top: 'side-top',
-      midside_right: 'side-right',
-      midside_bottom: 'side-bottom',
-      midside_left: 'side-left',
-    }
+  if (h.sensors) {
+    const rows = csvRows(await readFile(h.sensors, 'utf8'))
+    out.sensorGroups = rows.map((r) => ({ name: r.image, group: r.role }))
+    // Each group's focal: the median of its images' values.
+    const byGroup = new Map()
+    for (const r of rows)
+      if (Number(r.focal_mm) > 0) (byGroup.get(r.role) ?? byGroup.set(r.role, []).get(r.role)).push(Number(r.focal_mm))
+    out.groupFocalMm = Object.fromEntries(
+      [...byGroup].map(([g, v]) => [`Camera ${g}`, v.sort((a, b) => a - b)[v.length >> 1]]),
+    )
+  }
+  if (h.fiducials?.batchPitchMm) {
+    const provided = []
+    for (const row of csvRows(await readFile(h.fiducials.csv, 'utf8')))
+      for (const [col, slot] of Object.entries(FIDUCIAL_SLOTS)) {
+        const px = Number(row[`${col}_x`]),
+          py = Number(row[`${col}_y`])
+        if (row[`${col}_x`] !== '' && Number.isFinite(px) && Number.isFinite(py))
+          provided.push({ imageName: row.image_id, slot, px, py })
+      }
+    out.fiducialsBatch = { provided, pitchMm: h.fiducials.batchPitchMm, focalMm: out.groupFocalMm ?? {} }
+  } else if (h.fiducials) {
+    const SLOTS = FIDUCIAL_SLOTS
     const r = csvRows(await readFile(h.intrinsics, 'utf8'))[0]
     const marks = []
     for (const [col, slot] of Object.entries(SLOTS)) {
