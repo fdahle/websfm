@@ -5,6 +5,7 @@
 // so a multi-GB .xyz never becomes one string.
 
 import { MAX_BUFFER_BYTES } from '../bufferLimit.js'
+import { maxShareableArrayBytes, shareableArray } from '../bigArray.js'
 import { flatAxes } from '../products/flatAxes.js'
 import { sniffDelimiter, splitRow } from './gcp.js'
 import { PART_CHARS, lineParts } from './parts.js'
@@ -137,7 +138,7 @@ export function createXyzParser({ onLog } = {}) {
       if (count > 0 && cols.length === count * 3) {
         const scale01 = colMax <= 1.0001
         const raw = cols.view()
-        col = new Uint8Array(count * 3)
+        col = shareableArray(Uint8Array, count * 3)
         for (let i = 0; i < col.length; i++) col[i] = byte(scale01 ? raw[i] * 255 : raw[i])
       }
       onLog?.(
@@ -158,19 +159,23 @@ export function createXyzParser({ onLog } = {}) {
   }
 }
 
-// A typed array that doubles as it fills; take() returns an exact-length copy. It never
-// grows past the browser's buffer wall (core/bufferLimit.js): doubling a 1.1 GB buffer
-// would ask for 2.2 GB although the data fits in less. Full at the wall, it throws the
-// engine's own RangeError, which the import turns into its "too large" message.
-export function growable(Type, initial = 1024) {
-  const maxLength = Math.floor(MAX_BUFFER_BYTES / Type.BYTES_PER_ELEMENT)
+// A typed array that doubles as it fills; take() returns an exact-length copy. Past the
+// browser's 2 GiB buffer wall (core/bufferLimit.js) it continues in shared wasm memory
+// (core/bigArray.js shareableArray, which the page receives uncopied), up to the largest
+// array that allows (16 GiB with Memory64: 715 M points of Float64 xyz); where shared
+// memory is not available, the wall stays. It never grows past that limit (doubling
+// would ask for more than the data needs); full there, it throws the engine's own
+// RangeError, which the import turns into its "too large" message.
+// `plainBytes` (tests) lowers the wall where shared memory takes over.
+export function growable(Type, initial = 1024, { plainBytes = MAX_BUFFER_BYTES } = {}) {
+  const maxLength = Math.floor(Math.max(MAX_BUFFER_BYTES, maxShareableArrayBytes()) / Type.BYTES_PER_ELEMENT)
   let buf = new Type(initial),
     len = 0
   return {
     push(v) {
       if (len === buf.length) {
         if (len >= maxLength) throw new RangeError('Array buffer allocation failed')
-        const next = new Type(Math.min(buf.length * 2, maxLength))
+        const next = shareableArray(Type, Math.min(buf.length * 2, maxLength), { maxPlainBytes: plainBytes })
         next.set(buf)
         buf = next
       }
@@ -183,7 +188,9 @@ export function growable(Type, initial = 1024) {
       return buf.subarray(0, len)
     },
     take() {
-      return buf.slice(0, len)
+      const out = shareableArray(Type, len, { maxPlainBytes: plainBytes })
+      out.set(buf.subarray(0, len))
+      return out
     },
   }
 }

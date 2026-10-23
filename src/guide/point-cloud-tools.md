@@ -118,9 +118,12 @@ Cloud and mesh files are written in the background and streamed into the downloa
 so the app stays responsive and size is not limited by the format: an ASCII PLY or
 XYZ of tens of millions of points works the same as a binary one, only larger.
 Importing works the same way: XYZ, ASCII PLY and LAS files are read in pieces, so a
-multi-gigabyte text cloud does not have to fit in memory as text. Its points do: the
-browser holds at most about 89 million points of a PLY or XYZ at full precision (it caps
-one buffer at 2 GiB), so import a larger cloud as LAS or LAZ, which streams (below). A LAS field that is
+multi-gigabyte text cloud does not have to fit in memory as text. Its points do: past
+about 89 million points of a PLY or XYZ at full precision (the browser caps one buffer
+at 2 GiB) they are held in WebAssembly memory instead, up to about 715 million points in
+Chrome, Edge and Firefox; a page that is not cross-origin isolated keeps the 89 million.
+A larger cloud, or one you want on disk rather than in memory, imports as LAS or LAZ,
+which streams (below). A LAS field that is
 zero for every point (no intensity, never classified, no GPS time), or return numbers that
 are all "1 of 1", is not kept, so it takes no memory and is not offered for styling.
 Exporting writes the same value back, as the file had.

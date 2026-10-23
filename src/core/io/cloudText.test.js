@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { cloudToXyzParts, parseXyzText, parseXyzChunks } from './cloudText.js'
+import { cloudToXyzParts, growable, parseXyzText, parseXyzChunks } from './cloudText.js'
+import { isSharedArray } from '../bigArray.js'
 import { joinParts } from './parts.js'
 
 // The writers yield bounded parts (core/io/parts.js); these join them for small fixtures.
@@ -88,5 +89,20 @@ describe('parseXyzChunks — the streaming reader', () => {
     expect(out.count).toBe(n)
     expect([...out.pos]).toEqual([...flat.pos])
     expect([...out.col]).toEqual([...flat.col])
+  })
+})
+
+describe('growable', () => {
+  it('past the plain wall continues in shared memory, values and order kept', () => {
+    const g = growable(Float64Array, 4, { plainBytes: 64 })
+    for (let i = 0; i < 100; i++) g.push(i)
+    expect(isSharedArray(g.view())).toBe(true)
+    const out = g.take()
+    expect(out.length).toBe(100)
+    expect(isSharedArray(out)).toBe(true)
+    expect(out[0] + out[99]).toBe(99)
+    const small = growable(Float64Array, 4)
+    small.push(1)
+    expect(isSharedArray(small.take())).toBe(false) // below the wall: plain, as before
   })
 })
