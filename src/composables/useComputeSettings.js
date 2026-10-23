@@ -13,7 +13,8 @@ import { configureWorkerPoolSize, MAX_POOL_SIZE } from '../workers/computeClient
 const BUDGET_KEY = 'websfm.dense.memBudgetGb'
 const GiB = 1024 ** 3
 const DEFAULT_BUDGET_GB = DEFAULT_BUDGET_BYTES / GiB
-export const MAX_BUDGET_GB = MAX_BUDGET_BYTES / GiB
+// What runs held in ArrayBuffers may use (a Chrome tab holds 16 GB of them).
+export const POOL_BUDGET_GB = MAX_BUDGET_BYTES / GiB
 
 // Read browser-only hardware signals here, on the main thread; core receives only
 // injected numbers and remains DOM-free. Both APIs are intentionally optional.
@@ -22,15 +23,23 @@ const deviceBudgetInfo = deviceBudget({
   jsHeapLimitBytes: typeof performance !== 'undefined' ? Number(performance.memory?.jsHeapSizeLimit) : null,
 })
 
+// The limit may go up to the RAM the browser reports (deviceMemory, itself rounded down
+// and capped at 32), at least the pool's share where it reports nothing.
+export const MAX_BUDGET_GB = Math.max(POOL_BUDGET_GB, deviceBudgetInfo.deviceMemoryGB ?? 0)
+
 const storedBudgetGb = Number(localStorage.getItem(BUDGET_KEY))
 const hasStoredBudget = Number.isFinite(storedBudgetGb) && storedBudgetGb > 0
 const memBudgetGb = ref(hasStoredBudget ? Math.min(MAX_BUDGET_GB, storedBudgetGb) : deviceBudgetInfo.budgetBytes / GiB)
 const memBudgetAuto = ref(!hasStoredBudget)
-// Never past what a Chrome tab can hold (memBudget.js MAX_BUDGET_BYTES), whatever was
-// entered: a budget above it only moved the failure to the end of a long run.
-const memBudgetBytes = computed(() =>
-  Math.min(MAX_BUDGET_BYTES, Math.max(0.25, Number(memBudgetGb.value) || DEFAULT_BUDGET_GB) * GiB),
-)
+const limitBytes = () => Math.max(0.25, Number(memBudgetGb.value) || DEFAULT_BUDGET_GB) * GiB
+// What every run held in ArrayBuffers gets: never past what a Chrome tab can hold
+// (memBudget.js MAX_BUDGET_BYTES), whatever was entered; a budget above it only moved
+// the failure to the end of a long run.
+const memBudgetBytes = computed(() => Math.min(MAX_BUDGET_BYTES, limitBytes()))
+// The whole limit, for the runs that keep their big arrays in wasm memory outside the
+// pool (fusion: core/bigArray.js, fusionPlan.js). They still keep their ArrayBuffers
+// within memBudgetBytes.
+const memBudgetRamBytes = computed(() => limitBytes())
 
 // U2/U3 consume the real device-memory reading, not the user's safety-limit
 // override: recommendation quality describes hardware, while memBudgetBytes is a
@@ -72,8 +81,8 @@ export function useComputeSettings() {
     log(`${deviceBudgetInfo.note}${suffix}`, 'info', 'Compute')
     if (hasStoredBudget && storedBudgetGb > MAX_BUDGET_GB) {
       log(
-        `Memory budget: the saved ${storedBudgetGb} GB is more than a Chrome tab can hold (16 GB of buffers for the page ` +
-          `and all its workers together); using ${MAX_BUDGET_GB} GB.`,
+        `Memory budget: the saved ${storedBudgetGb} GB is more than the ${MAX_BUDGET_GB} GB this browser reports; ` +
+          `using ${MAX_BUDGET_GB} GB.`,
         'warn',
         'Compute',
       )
@@ -112,11 +121,13 @@ export function useComputeSettings() {
   return {
     memBudgetGb,
     memBudgetBytes,
+    memBudgetRamBytes,
     memBudgetAuto,
     setMemBudgetGb,
     resetMemBudgetAuto,
     DEFAULT_BUDGET_GB,
     MAX_BUDGET_GB,
+    POOL_BUDGET_GB,
     deviceBudgetInfo,
     recommendationBudget,
     recommendForDataset,

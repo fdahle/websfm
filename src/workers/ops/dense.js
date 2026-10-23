@@ -42,6 +42,7 @@ import {
 } from '../../core/dense/memBudget.js'
 import { pluralize } from '../../core/textFormat.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
+import { shareableArray } from '../../core/bigArray.js'
 
 // Dense MVS ops (Stage A depth maps + Stage B fusion). `rasterize` (OffscreenCanvas
 // pixel decode) is injected; the raster-space helpers (undistortion, RGB packing,
@@ -1116,7 +1117,13 @@ export function makeDenseOps({ rasterize }) {
   function joinDenseParts(parts) {
     if (parts.length === 1) return parts[0]
     const n = parts.reduce((s, p) => s + p.count, 0)
-    const out = { count: n, pos: new Float32Array(n * 3), col: new Uint8Array(n * 3), nrm: new Float32Array(n * 3) }
+    // Shareable (core/bigArray.js): past 2 GiB, shared wasm memory that reaches the page uncopied.
+    const out = {
+      count: n,
+      pos: shareableArray(Float32Array, n * 3),
+      col: shareableArray(Uint8Array, n * 3),
+      nrm: shareableArray(Float32Array, n * 3),
+    }
     let o = 0
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i]

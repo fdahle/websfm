@@ -3,10 +3,14 @@ import {
   createMemLedger,
   projectDensePeakBytes,
   projectDensifyPeakBytes,
+  projectDensifyPoolBytes,
+  accumulatorCellLimit,
+  cloudPointLimit,
   densifyInputBytes,
   DENSIFY_CELL_BYTES,
   formatBytes,
   DEFAULT_BUDGET_BYTES,
+  MAX_BUDGET_BYTES,
   deviceBudget,
   DENSIFY_STREAMED_REF_BYTES_PER_PX,
   workingPixels,
@@ -22,10 +26,13 @@ describe('deviceBudget', () => {
     expect(b.source).toBe('navigator.deviceMemory')
   })
 
-  it('clamps the device-derived budget into [1, 6] GB', () => {
+  it('derives at least 1 GB, and half of what the browser reports past the pool', () => {
     expect(deviceBudget({ deviceMemoryGB: 2 }).budgetBytes).toBe(1 * GiB) // 50%·2 = 1, at floor
     expect(deviceBudget({ deviceMemoryGB: 1 }).budgetBytes).toBe(1 * GiB) // below floor → clamped
-    expect(deviceBudget({ deviceMemoryGB: 32 }).budgetBytes).toBe(6 * GiB) // above ceiling → clamped
+    expect(deviceBudget({ deviceMemoryGB: 16 }).budgetBytes).toBe(8 * GiB) // 50% of 16
+    // Past the tab's buffer pool: runs held in ArrayBuffers take at most MAX_BUDGET_BYTES of it.
+    expect(deviceBudget({ deviceMemoryGB: 32 }).budgetBytes).toBe(16 * GiB)
+    expect(deviceBudget({ jsHeapLimitBytes: 64 * GiB }).budgetBytes).toBe(MAX_BUDGET_BYTES)
   })
 
   it('falls back to the JS-heap limit when deviceMemory is absent (deviceMemoryGB stays null)', () => {
@@ -198,5 +205,31 @@ describe('formatBytes', () => {
     expect(formatBytes(0)).toBe('0 B')
     expect(formatBytes(null)).toBe('—')
     expect(formatBytes(NaN)).toBe('—')
+  })
+})
+
+describe('limits past ArrayBuffers', () => {
+  it('the accumulator holds 2^27 cells in plain buffers, 2^29 in 4 GiB, 2^30 with Memory64', () => {
+    expect(accumulatorCellLimit(2 ** 31 - 2 ** 21)).toBe(2 ** 27)
+    expect(accumulatorCellLimit(4 * GiB)).toBe(2 ** 29)
+    expect(accumulatorCellLimit(16 * GiB)).toBe(2 ** 30)
+  })
+
+  it('the cloud holds 12 B a point of its largest array', () => {
+    expect(cloudPointLimit(2 ** 31 - 2 ** 21)).toBe(178782208)
+    expect(cloudPointLimit(16 * GiB)).toBe(1431655765)
+  })
+
+  it('counts in the pool what stays in ArrayBuffers', () => {
+    const plan = { inputBytes: 1000, cells: 1000, tileCells: 250, workers: 2 }
+    const all = projectDensifyPeakBytes(plan)
+    expect(projectDensifyPoolBytes(plan).total).toBe(all.total)
+    const offPool = projectDensifyPoolBytes({ ...plan, accumulatorsInPool: false })
+    expect(offPool.fusing).toBe(all.input + all.finished)
+    // A cloud whose arrays pass 2 GiB goes to shared memory: only the colour stays.
+    const big = { inputBytes: 0, cells: 2e8 }
+    expect(projectDensifyPoolBytes({ ...big, accumulatorsInPool: false, sharedPastPlain: true }).total).toBe(0)
+    const tiled = projectDensifyPoolBytes({ ...big, tileCells: 1e8, accumulatorsInPool: false, sharedPastPlain: true })
+    expect(tiled.assemble).toBe(2 * 1e8 * 27 + 3 * 2e8)
   })
 })

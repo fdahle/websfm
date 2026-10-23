@@ -117,7 +117,12 @@ to the algorithm; the other steps differ only in file names.
   nerfstudio/3DGS `transforms.json`) each live in one place with a round-trip test.
 - **Large data lives in typed arrays**, never in one JavaScript object per point,
   keypoint or match. The V8 heap has a limit of about 4 GB per page or worker;
-  typed-array storage and WASM memory don't count against it.
+  typed-array storage and WASM memory don't count against it. Chrome caps one
+  ArrayBuffer at 2 GiB and a tab's ArrayBuffers at 16 GiB together; an array that may
+  pass either comes from `core/bigArray.js` (`localArray` for one that stays in its
+  worker, `shareableArray` for one that crosses), which puts it in WebAssembly memory,
+  where neither limit applies. Its `.buffer` is longer than the array, and a shared one
+  must not be in a transfer list (the compute client and worker filter them out).
 - **Default settings have one home.** User-facing defaults are in
   `src/core/defaults.user.js` and internal tuning values in `src/core/tuning.js`.
   The dialogs and the core code read the same objects.

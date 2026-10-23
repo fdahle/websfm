@@ -633,7 +633,7 @@ window.bench = {
 
   // Dense Stage B, settings resolved exactly as DenseModal.run() does.
   async dense({ ...overrides } = {}) {
-    const { memBudgetBytes } = useComputeSettings()
+    const { memBudgetBytes, memBudgetRamBytes } = useComputeSettings()
     const v = { ...DENSE_FUSE_DEFAULTS, ...overrides }
     const settings = {
       minViews: v.auto ? null : v.minViews,
@@ -644,6 +644,11 @@ window.bench = {
       maxIncidenceDeg: v.maxIncidenceDeg,
       removeIsolated: v.removeIsolated,
       memBudgetBytes: overrides.memBudgetBytes ?? memBudgetBytes.value,
+      // The whole limit, which fusion's wasm-held arrays may use (Settings ▸ Compute);
+      // `ramBudgetBytes` in the stage config overrides it.
+      ramBudgetBytes: overrides.ramBudgetBytes ?? Math.max(memBudgetRamBytes.value, overrides.memBudgetBytes ?? 0),
+      // `mergeCell` (world units) overrides fusion's GSD-derived merge cell.
+      ...(v.mergeCell > 0 ? { mergeCell: v.mergeCell } : {}),
     }
     const t0 = performance.now()
     await recon.densify(settings, report)

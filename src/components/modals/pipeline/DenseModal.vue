@@ -15,7 +15,7 @@ const props = defineProps({ maps: { type: Number, default: 0 } })
 const emit = defineEmits(['close', 'run'])
 
 // Memory budget for the fusion pre-flight is machine-level (Settings ▸ Compute).
-const { memBudgetBytes } = useComputeSettings()
+const { memBudgetBytes, memBudgetRamBytes } = useComputeSettings()
 
 // Stage B — Build Dense Cloud (fuse depth maps). `depthTolPct` is exposed as a
 // percentage; converted to the fraction core/dense/mvs.js fuseDepthMaps expects. In
@@ -52,6 +52,7 @@ function run() {
     maxIncidenceDeg,
     removeIsolated,
     memBudgetBytes: memBudgetBytes.value,
+    ramBudgetBytes: memBudgetRamBytes.value,
   })
 }
 </script>

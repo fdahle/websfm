@@ -1,6 +1,7 @@
 import { markRaw } from 'vue'
 import { packAttributes, unpackAttributes, attributeLayout } from '../../core/io/cloudAttributes.js'
 import { makePackedPoints } from '../../core/sfm/resultCodec.js'
+import { isSharedArray, viewAs } from '../../core/bigArray.js'
 
 // Cloud ↔ on-disk shape. Lifted out of useReconstructionStore so the format has one
 // home and can be round-tripped in tests (it handles three cloud kinds and a CSR
@@ -69,17 +70,14 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
     viewUuids: [],
   }
   if (!buffers) return { ...meta, buffers: null }
-  const pos = c.pos.slice(0, N * 3)
-  const col = c.col ? c.col.slice(0, N * 3) : null
   // World-space normals stay Float32 on disk (unit scale — no precision gain from
   // widening). Absent on normal-less/legacy runs; the reader leaves nrm undefined.
-  const nrm = c.nrm ? c.nrm.slice(0, N * 3) : null
   return {
     ...meta,
     buffers: {
-      pos: pos.buffer,
-      col: col ? col.buffer : null,
-      nrm: nrm ? nrm.buffer : null,
+      pos: savedBuffer(c.pos, N * 3),
+      col: c.col ? savedBuffer(c.col, N * 3) : null,
+      nrm: c.nrm ? savedBuffer(c.nrm, N * 3) : null,
       vcount: null,
       vcam: null,
       vkp: null,
@@ -88,6 +86,12 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
     },
   }
 }
+
+// The first `n` elements to save: a copy's ArrayBuffer, so the save holds data that
+// later edits cannot change. A shared array (core/bigArray.js, a cloud past 2 GiB) is
+// saved as a view of itself: a copy would need one buffer past the browser's limit, and
+// the cloud is replaced, never edited in place, so the view stays what was saved.
+const savedBuffer = (a, n) => (isSharedArray(a) ? a.subarray(0, n) : a.slice(0, n).buffer)
 
 // Mesh cloud on-disk shape: pos (per-vertex, its in-memory width as for dense) + col
 // (Uint8, per-vertex) + idx (Uint32, 3·triangles). nVerts + count(=tris) in metadata.
@@ -175,10 +179,12 @@ function serializeCloudData(c, opts) {
 // A dense/mesh pos sidecar as stored: 12 bytes per point is Float32 (a view, no
 // copy), 24 is Float64 — narrowed to Float32 only for an older computed cloud that
 // was Float32 in memory when saved. Imported Float64 coordinates are never narrowed.
+// A saved buffer is an ArrayBuffer, or past 2 GiB a shareable Uint8Array (opfs readBin):
+// viewAs reads either without a copy.
 function posArray(c, buffer, n) {
   if (!buffer) return new Float64Array(0)
-  if (n > 0 && buffer.byteLength === n * 12) return new Float32Array(buffer)
-  const stored = new Float64Array(buffer)
+  if (n > 0 && buffer.byteLength === n * 12) return viewAs(Float32Array, buffer)
+  const stored = viewAs(Float64Array, buffer)
   return c.posType === 'f32' && !c.imported ? new Float32Array(stored) : stored
 }
 
@@ -203,9 +209,9 @@ function deserializeCloudData(c, makeCloudId) {
   }
   if (c.kind === 'dense') {
     const posF = posArray(c, b.pos, N)
-    const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
+    const col = c.hasColor && b.col ? viewAs(Uint8Array, b.col) : null
     // Normals stay Float32 on disk; undefined when the run produced none (no heal).
-    const nrm = c.hasNormals && b.nrm ? new Float32Array(b.nrm) : null
+    const nrm = c.hasNormals && b.nrm ? viewAs(Float32Array, b.nrm) : null
     return {
       id: c.id ?? makeCloudId(),
       name: c.name ?? 'Dense cloud',

@@ -319,6 +319,18 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Dense clouds past the browser's buffer limits.** Fusion keeps its merge cells, and
+  a finished cloud past 2 GB, in WebAssembly memory, which Chrome's 2 GB per-buffer cap
+  and 16 GB of buffers per tab do not apply to. One piece of fusion holds up to about
+  1.07 billion merge cells (was 134 million) and a cloud up to about 1.4 billion points
+  (was 178 million); such a cloud saves, reopens and gets its octree like any other, and
+  is drawn through the octree. The merge cells no longer count against the tab's
+  buffers, so fusion may use the whole memory budget.
+- **The memory budget follows the machine.** Settings ▸ Compute ▸ Memory safety limit is
+  half the memory the browser reports by default and can be raised to all of it; it
+  stopped at 6 GB by default and 12 GB by hand, written when Chrome reported at most
+  8 GB (Chrome 156 reports up to 32). Runs keep at most 12 GB of it in buffers, as
+  before; fusion may use the rest. A saved manual limit is kept.
 - **Layers panel: the layers on the map, as in a GIS.** View ▸ Map ▸ Layers opens a
   small panel over the 2D map listing the layers on it (imported reference rasters
   and polygon files, the DEM, the orthophoto and contour lines) in one stack, top

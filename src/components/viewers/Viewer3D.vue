@@ -1,5 +1,6 @@
 <script setup>
 import { relativePositions } from '../../core/products/pointView.ts'
+import { MAX_BUFFER_BYTES } from '../../core/bufferLimit.js'
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -397,8 +398,14 @@ function init() {
 // whose points are in memory is drawn whole again (a streamed one cannot be).
 const reconStore = useReconstructionStore()
 const needsAllPoints = () => !!selectTool.value || !!props.pickMode
+// A cloud past 178 M points (its positions in shared memory, core/bigArray.js) cannot be
+// drawn whole: the GPU copy would be one Float32 buffer over the browser's 2 GiB. It is
+// drawn through its octree only, and not at all until the octree is built.
+const tooLargeToDrawWhole = (cloud) => cloud.kind === 'dense' && 12 * (cloud.count ?? 0) > MAX_BUFFER_BYTES
 const usesLod = (cloud) =>
-  cloud.kind === 'dense' && !!cloud.lod && (!cloud.pos || (cloud.count >= LOD_VIEW_MIN && !needsAllPoints()))
+  cloud.kind === 'dense' &&
+  !!cloud.lod &&
+  (!cloud.pos || tooLargeToDrawWhole(cloud) || (cloud.count >= LOD_VIEW_MIN && !needsAllPoints()))
 function createLodCloudLayer(cloud) {
   const material = new THREE.PointsMaterial({ size: pointSize.value, sizeAttenuation: false })
   material.onBeforeCompile = srgbVertexColors
@@ -425,6 +432,7 @@ const layerBounds = (layer) =>
 
 function createCloudLayer(cloud) {
   if (usesLod(cloud)) return createLodCloudLayer(cloud)
+  if (tooLargeToDrawWhole(cloud)) return null
   const isMesh = cloud.kind === 'mesh'
   const count = isMesh ? cloud.nVerts : (cloud.count ?? cloud.points?.length ?? 0)
   if (!count || (!cloud.pos && !cloud.points)) return null

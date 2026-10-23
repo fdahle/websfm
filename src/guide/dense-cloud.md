@@ -157,10 +157,16 @@ line "Fusion timing" shows where the time went: reading maps, the consistency ch
 the fusion pass and finishing.
 
 The browser sets limits of its own, however much memory the machine has. A Chrome tab
-holds at most 16 GB of buffers, shared by the page and all its workers, so the memory
-budget is capped at 12 GB, leaving the rest for the images, clouds and viewer. A single
-buffer can hold at most 2 GB. One piece of fusion therefore holds at most about 134
-million merged cells; a larger cloud is built in slabs even when the budget would allow
-one piece. A finished cloud holds at most about 178 million points; a larger one is
-re-planned at a coarser step, as above. Fusion starts with fresh workers, so memory
-the previous steps left behind is returned first.
+holds at most 16 GB of buffers, shared by the page and all its workers, and a single
+buffer at most 2 GB, so every run keeps at most 12 GB of the memory budget in buffers,
+leaving the rest for the images, clouds and viewer. Fusion keeps its merge cells, and a
+finished cloud past 2 GB, in WebAssembly memory instead, which neither limit applies
+to: it may use the whole budget (Settings ▸ Compute, up to the memory the browser
+reports). In Chrome one piece of fusion then holds up to about 1.07 billion merge cells
+and a finished cloud up to about 1.4 billion points, as far as the budget allows; a
+larger cloud is re-planned at a coarser step, as above. A browser without 64-bit
+WebAssembly memory holds about half the cells and a quarter of the points, and a page
+that is not cross-origin isolated keeps the cloud to about 178 million points. A cloud
+of more than 178 million points is drawn through its octree, so it shows once the octree
+is built. Fusion starts with fresh workers, so memory the previous steps left behind is
+returned first.

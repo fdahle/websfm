@@ -11,6 +11,7 @@ import {
 import { readCopcNode } from '../../workers/copcNodeClient.js'
 import { openCloudSource, isCopcLod, lodFileNames } from '../../core/lod/cloudSource.js'
 import { LOD_MIN_POINTS } from '../../core/lod/build.js'
+import { postableCopy } from '../../core/bigArray.js'
 
 // Level-of-detail octrees of dense clouds (dev/planning/plan-lod.md). The octree is
 // built in the compute worker straight into the project's lod/ folder; the cloud keeps
@@ -66,10 +67,12 @@ export function createCloudLod({
     const pid = projectId()
     if (!cloud || cloud.kind !== 'dense' || !cloud.count || !pid) return null
     const name = `${cloud.id}-${Date.now().toString(36)}`
-    const pos = cloud.pos.slice(0, 3 * cloud.count),
-      col = cloud.col?.slice(0, 3 * cloud.count) ?? null
+    // Copies the worker may keep; a shared cloud (core/bigArray.js, past 2 GiB) is sent as
+    // a view of itself, which a copy could not be.
+    const pos = postableCopy(cloud.pos, 3 * cloud.count),
+      col = cloud.col ? postableCopy(cloud.col, 3 * cloud.count) : null
     const attributes = {}
-    for (const [k, a] of Object.entries(cloud.attributes ?? {})) attributes[k] = a.slice(0, cloud.count)
+    for (const [k, a] of Object.entries(cloud.attributes ?? {})) attributes[k] = postableCopy(a, cloud.count)
     const transfer = [pos.buffer, ...(col ? [col.buffer] : []), ...Object.values(attributes).map((a) => a.buffer)]
     building.add(name)
     try {

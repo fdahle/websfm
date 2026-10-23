@@ -33,6 +33,7 @@ import { DENSE_TUNING } from '../../core/tuning.js'
 import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
+import { shareableArray } from '../../core/bigArray.js'
 
 // The dense pipeline, split out of useReconstructionStore: Stage A depth maps
 // (PatchMatch MVS in the workers, persisted per image), the saved-map filter,
@@ -619,7 +620,13 @@ export function createDense({
     const { summary } = finishFusion(plan, merged, [], onLog)
     // Join the slabs (in slab order, so a run is deterministic for a given plan).
     const n = parts.reduce((s, p) => s + p.count, 0)
-    const cloud = { count: n, pos: new Float32Array(n * 3), col: new Uint8Array(n * 3), nrm: new Float32Array(n * 3) }
+    // Shareable (core/bigArray.js): past 2 GiB, shared wasm memory, outside the tab's pool.
+    const cloud = {
+      count: n,
+      pos: shareableArray(Float32Array, n * 3),
+      col: shareableArray(Uint8Array, n * 3),
+      nrm: shareableArray(Float32Array, n * 3),
+    }
     let o = 0
     for (let i = 0; i < nT; i++) {
       const p = parts[i]

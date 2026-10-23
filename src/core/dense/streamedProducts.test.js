@@ -1,3 +1,4 @@
+import { setBigArrayCaps } from '../bigArray.js'
 import { describe, it, expect } from 'vitest'
 import { fuseDepthMaps, fuseDepthMapsStreamed, finishFusion, mergeFusionCounters } from './mvs.js'
 import { orthorectify, orthorectifyStreamed, orthorectifyTiled } from '../products/ortho.js'
@@ -265,6 +266,25 @@ describe('bounded map loading', () => {
     const out = fuseDepthMaps(ms, { memBudgetBytes: 2 * 27 * cells - 1 }, (m, l) => logs.push([m, l]))
     expect(out.refused).toBeTruthy()
     expect(logs.some(([m, l]) => l === 'error' && m.includes('even in slabs'))).toBe(true)
+  })
+
+  it('with wasm accumulators, the whole limit holds them and the buffer share only the rest', () => {
+    const ms = maps()
+    const one = fuseDepthMaps(ms, {})
+    const { input, accumulator } = fuseDepthMaps(ms, { memBudgetBytes: 1, autoStep: false }).refused
+    expect(accumulator).toBeGreaterThan(1000)
+    // The buffer share holds the input only; the accumulator is outside the pool.
+    const opts = { memBudgetBytes: input + 1000, ramBudgetBytes: 1e12, autoStep: false }
+    const fused = fuseDepthMaps(ms, opts)
+    expect(fused.summary.slabs).toBe(1)
+    expect(rows(fused)).toEqual(rows(one))
+    // Where the accumulators would be ArrayBuffers, the same limits refuse.
+    setBigArrayCaps({ wasm: false, memory64: false, shared: false, maxLocalBytes: 2 ** 31, maxShareableBytes: 2 ** 31 })
+    try {
+      expect(fuseDepthMaps(ms, opts).refused).toBeTruthy()
+    } finally {
+      setBigArrayCaps(null)
+    }
   })
 
   it('depth-only comparison loads give the identical cloud and a monotonic bar', async () => {

@@ -5,6 +5,7 @@
 // Math.floor(coord / cell), everywhere.
 
 import { DENSE_TUNING } from '../tuning.js'
+import { localArray, shareableArray } from '../bigArray.js'
 
 /**
  * Spatial (voxel) merge of a fused point set: collapse points that fall in the same
@@ -89,6 +90,9 @@ export function mix32(h) {
 // channels, as every caller passes) and normal sums Float32 (renormalized on output).
 // `capacity` presizes the slot arrays and the table (fusion passes its measured cell
 // count), so a run that stays within it never reallocates.
+// The sums and the index stay in this worker, so they are local arrays (core/bigArray.js):
+// past 64 MiB each is wasm memory, outside the tab's 16 GiB ArrayBuffer pool, and may
+// pass 2 GiB. The finished cloud crosses to the page, so its arrays are shareable.
 export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {}) {
   const inv = 1 / cellSize
   const ix0 = Math.floor(bounds.minX * inv),
@@ -113,26 +117,26 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     n = 0,
     nGrid = 0
   // keyOf[s]: the packed key of an in-grid slot, −1 for an overflow slot.
-  let keyOf = new Float64Array(cap)
-  let sx = new Float64Array(cap),
-    sy = new Float64Array(cap),
-    sz = new Float64Array(cap)
-  let sr = new Uint32Array(cap),
-    sg = new Uint32Array(cap),
-    sb = new Uint32Array(cap)
+  let keyOf = localArray(Float64Array, cap)
+  let sx = localArray(Float64Array, cap),
+    sy = localArray(Float64Array, cap),
+    sz = localArray(Float64Array, cap)
+  let sr = localArray(Uint32Array, cap),
+    sg = localArray(Uint32Array, cap),
+    sb = localArray(Uint32Array, cap)
   // World-space normal sums (Phase: Poisson meshing). Averaging unit normals then
   // renormalizing is a valid orientation estimate; the k coincident shell points a
   // surface produces all carry ~the same normal, so the sum stays well-conditioned.
-  let snx = new Float32Array(cap),
-    sny = new Float32Array(cap),
-    snz = new Float32Array(cap)
-  let cnt = new Uint32Array(cap)
+  let snx = localArray(Float32Array, cap),
+    sny = localArray(Float32Array, cap),
+    snz = localArray(Float32Array, cap)
+  let cnt = localArray(Uint32Array, cap)
   let removed = 0 // cells zeroed by filterIsolated (WS4); excluded from count + finalize
   // Open-addressing index (linear probing): table[i] = slot, −1 = empty. Power-of-two
   // size, load kept ≤ ½.
   let tsize = 1
   while (tsize < 2 * cap) tsize *= 2
-  let table = new Int32Array(tsize).fill(-1),
+  let table = localArray(Int32Array, tsize).fill(-1),
     tmask = tsize - 1
   // Table position holding `key`, or −1 − (the empty position where it belongs).
   const find = (key) => {
@@ -147,7 +151,7 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
   }
   const growTable = () => {
     tsize *= 2
-    table = new Int32Array(tsize).fill(-1)
+    table = localArray(Int32Array, tsize).fill(-1)
     tmask = tsize - 1
     for (let s = 0; s < n; s++) if (keyOf[s] >= 0) table[-1 - find(keyOf[s])] = s
   }
@@ -164,7 +168,7 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
   const grow = () => {
     cap *= 2
     const g = (a, T) => {
-      const b = new T(cap)
+      const b = localArray(T, cap)
       b.set(a)
       return b
     } // tail zero-filled
@@ -330,7 +334,7 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
       table = null
       keyOf = null
       overflow.clear()
-      const pos = new Float32Array(3 * m)
+      const pos = shareableArray(Float32Array, 3 * m)
       for (let s = 0, o = 0; s < n; s++) {
         if (cnt[s] === 0) continue
         const k = 1 / cnt[s]
@@ -340,7 +344,7 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
         o += 3
       }
       sx = sy = sz = null
-      const col = new Uint8Array(3 * m)
+      const col = shareableArray(Uint8Array, 3 * m)
       for (let s = 0, o = 0; s < n; s++) {
         if (cnt[s] === 0) continue
         const k = 1 / cnt[s]
@@ -350,7 +354,7 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
         o += 3
       }
       sr = sg = sb = null
-      const nrm = new Float32Array(3 * m)
+      const nrm = shareableArray(Float32Array, 3 * m)
       let degenerate = 0
       for (let s = 0, o = 0; s < n; s++) {
         if (cnt[s] === 0) continue
@@ -378,7 +382,7 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     // Float32Array of [x,y,z,r,g,b] per merged cell (no intermediate objects). Cells
     // zeroed by filterIsolated (cnt === 0) are skipped and the output is compacted.
     finalizeFlat() {
-      const out = new Float32Array((n - removed) * 6)
+      const out = shareableArray(Float32Array, (n - removed) * 6)
       let o = 0
       for (let s = 0; s < n; s++) {
         if (cnt[s] === 0) continue
@@ -399,7 +403,7 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     // Iterates in the SAME order as finalizeFlat (skipping cnt === 0), so the two
     // arrays stay row-aligned.
     finalizeNormals() {
-      const out = new Float32Array((n - removed) * 3)
+      const out = shareableArray(Float32Array, (n - removed) * 3)
       let degenerate = 0,
         o = 0
       for (let s = 0; s < n; s++) {

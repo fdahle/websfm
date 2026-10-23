@@ -12,6 +12,7 @@
 
 import { formatBytes } from '../formatBytes.js'
 import { MAX_BUFFER_BYTES, TAB_BUFFER_POOL_BYTES } from '../bufferLimit.js'
+import { maxLocalArrayBytes, maxShareableArrayBytes } from '../bigArray.js'
 
 // Default budget: ~2 GB. Conservative for a browser tab on unified-memory Macs
 // (the GPU competes for the same RAM Safari polices).
@@ -23,18 +24,25 @@ const GiB = 1024 ** 3
 // ArrayBuffer of at most 2 GiB − 2 MiB, and 16 GiB of them for the page and all its
 // workers together. A 103 M-point fusion died at its very end on one 2.48 GB output
 // array, and a 16 GB budget promised memory the tab can never have.
-// The most a budget may claim: the pool less room for the rest of the tab (images,
-// clouds, the viewer, other workers).
+// The most a budget may claim in ArrayBuffers: the pool less room for the rest of the
+// tab (images, clouds, the viewer, other workers). Every run whose data sits in
+// ArrayBuffers takes at most this of the user's budget. Fusion keeps its accumulators
+// and a cloud past 2 GiB in wasm memory (core/bigArray.js), outside the pool: it may use
+// the whole budget, as long as its ArrayBuffers stay within this (fusionPlan.js).
 export const MAX_BUDGET_BYTES = TAB_BUFFER_POOL_BYTES - 4 * GiB
-// The cloud keeps its positions in one Float32Array (12 B a point).
-export const MAX_CLOUD_POINTS = Math.floor(MAX_BUFFER_BYTES / 12)
+// The most points a fused cloud may have: it keeps its positions in one Float32Array
+// (12 B a point), which crosses to the page (core/bigArray.js shareableArray). 178 M with
+// plain buffers only; 1.4 G in a cross-origin isolated page with Memory64.
+export const cloudPointLimit = (maxArrayBytes = maxShareableArrayBytes()) => Math.floor(maxArrayBytes / 12)
 
-// A device-derived budget is clamped to this window: never trust a tab with more
-// than 6 GB (the OS, the GPU and other tabs all compete for it), never gate below
-// 1 GB (even a small machine can run a modest dense job, and the per-run pre-flight
-// is the real guard).
+// A device-derived budget never gates below 1 GB (even a small machine can run a modest
+// dense job, and the per-run pre-flight is the real guard). It has no ceiling of its own:
+// runs held in ArrayBuffers take at most MAX_BUDGET_BYTES of it. The ceiling was 6 GB
+// while deviceMemory read at most 8; Chrome 156 reads up to 32 (61 GB machine, probed
+// 2026-10-23), and the 6 GB clamp had stepped a High run down to Medium on a machine
+// with room for it.
 const MIN_DEVICE_BUDGET_BYTES = 1 * GiB
-const MAX_DEVICE_BUDGET_BYTES = 6 * GiB
+const MAX_DEVICE_BUDGET_BYTES = Infinity
 // Fraction of total device memory a single tab may claim for a dense run.
 const DEVICE_MEMORY_FRACTION = 0.5
 // Fraction of the JS-heap ceiling to use when that is the only signal (weaker: it
@@ -68,13 +76,14 @@ export function deviceBudget({ deviceMemoryGB = null, jsHeapLimitBytes = null } 
       budgetBytes,
       deviceMemoryGB,
       source: 'navigator.deviceMemory',
-      // deviceMemory is browser-capped at 8 GB for fingerprinting resistance, so a
-      // high-RAM machine reads 8 and lands at the clamp — that is expected, not a bug.
-      note: `Device budget ${formatBytes(budgetBytes)} — ${DEVICE_MEMORY_FRACTION * 100}% of ${deviceMemoryGB} GB device memory (browser-capped at 8).`,
+      // deviceMemory is rounded down to a power of two and capped (at 32 in Chrome 156,
+      // at 8 in older versions) for fingerprinting resistance, so a high-RAM machine
+      // reads the cap and lands at the clamp — that is expected, not a bug.
+      note: `Device budget ${formatBytes(budgetBytes)} — ${DEVICE_MEMORY_FRACTION * 100}% of ${deviceMemoryGB} GB device memory (as the browser reports it); runs held in ArrayBuffers use at most ${formatBytes(Math.min(budgetBytes, MAX_BUDGET_BYTES))} of it.`,
     }
   }
   if (Number.isFinite(jsHeapLimitBytes) && jsHeapLimitBytes > 0) {
-    const budgetBytes = clamp(jsHeapLimitBytes * HEAP_LIMIT_FRACTION, MIN_DEVICE_BUDGET_BYTES, MAX_DEVICE_BUDGET_BYTES)
+    const budgetBytes = clamp(jsHeapLimitBytes * HEAP_LIMIT_FRACTION, MIN_DEVICE_BUDGET_BYTES, MAX_BUDGET_BYTES)
     return {
       budgetBytes,
       deviceMemoryGB: null,
@@ -180,10 +189,14 @@ export function workingPixels(width, height, maxDim) {
 // Finishing a slab writes the cloud's own layout while it releases the accumulator
 // (voxelAccumulator finalizeCloud), so it peaks below this and needs no term of its own.
 export const DENSIFY_CELL_BYTES = 76
-// The most cells one accumulator may hold. Its largest array is the index table, an
-// Int32 power of two at least twice the capacity: 2^28 entries (1 GiB) serve 2^27
-// cells, and the next size, 2 GiB, is over MAX_BUFFER_BYTES.
-export const MAX_ACCUMULATOR_CELLS = 2 ** Math.floor(Math.log2(MAX_BUFFER_BYTES / 4)) / 2
+// The most cells one accumulator may hold. Its largest arrays are the index table, an
+// Int32 power of two at least twice the capacity, and the Float64 sums (8 B a cell, as
+// large). They stay in the worker (core/bigArray.js localArray): with plain buffers
+// only, 2^28 table entries (1 GiB) serve 2^27 cells, and the next size, 2 GiB, is over
+// MAX_BUFFER_BYTES; in a 4 GiB wasm memory 2^29 cells; with Memory64 2^30, where the
+// table's 2^31 entries are as many as its Int32 probe mask can address.
+export const accumulatorCellLimit = (maxArrayBytes = maxLocalArrayBytes()) =>
+  2 ** Math.floor(Math.log2(Math.min(maxArrayBytes / 4, 2 ** 31))) / 2
 
 // What the streamed consistency check (mvs.js fuseDepthMapsStreamed) allocates per
 // reference pixel beside the map itself: the agree (Uint32) + angle (Float64) scratch
@@ -244,6 +257,30 @@ export function projectDensifyPeakBytes({ inputBytes, cells, tileCells = cells, 
 // The dense cloud's own arrays per point: Float32 position (12) + Uint8 colour (3) +
 // Float32 normal (12) — what a finished slab is converted to.
 export const DENSIFY_CLOUD_BYTES_PER_CELL = 27
+
+// The share of a fusion run's peak held in ArrayBuffers, the tab's 16 GiB pool, for the
+// same plan as projectDensifyPeakBytes. The inputs always are; the accumulators are not
+// when they are wasm memory (`accumulatorsInPool: false`, core/bigArray.js localArray);
+// a cloud's array is not when it passes 2 GiB and shared memory takes it
+// (`sharedPastPlain`, shareableArray). Returns { fusing, assemble, total }.
+export function projectDensifyPoolBytes({
+  inputBytes,
+  cells,
+  tileCells = cells,
+  workers = 1,
+  accumulatorsInPool = true,
+  sharedPastPlain = false,
+}) {
+  const p = projectDensifyPeakBytes({ inputBytes, cells, tileCells, workers })
+  const t = p.tileCells
+  const plain = (bytes) => (sharedPastPlain && bytes > MAX_BUFFER_BYTES ? 0 : bytes)
+  const cloud = (n) => plain(12 * n) + plain(3 * n) + plain(12 * n)
+  // Finished slabs are clouds of up to `t` cells each.
+  const finished = t > 0 ? (p.finished / (DENSIFY_CLOUD_BYTES_PER_CELL * t)) * cloud(t) : 0
+  const fusing = p.input + (accumulatorsInPool ? p.accumulator : 0) + finished
+  const assemble = t < cells ? (cells / t) * cloud(t) + cloud(cells) : 0
+  return { fusing, assemble, total: Math.max(fusing, assemble) }
+}
 
 // The largest slab (in cells) that keeps a tiled fusion run within `budget`; 0 when
 // no slab size does (the cloud itself, held twice while joining, is over budget).

@@ -10,19 +10,21 @@ import { normalizeRegion, regionContains } from '../products/region.js'
 import { DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
 import {
   projectDensifyPeakBytes,
+  projectDensifyPoolBytes,
   densifyInputBytes,
   formatBytes,
   maxFusionTileCells,
   DENSIFY_CLOUD_BYTES_PER_CELL,
   MAX_BUDGET_BYTES,
-  MAX_ACCUMULATOR_CELLS,
-  MAX_CLOUD_POINTS,
+  accumulatorCellLimit,
+  cloudPointLimit,
 } from './memBudget.js'
 import { unprojectPixel, sliceCorners, sliceMisses } from './denseGeometry.js'
 import { cameraCenter } from '../sfm/geometry.js'
 import { mix32, clampCellForBounds } from './voxelAccumulator.js'
 import { numOpt, boolOpt } from './denseOptions.js'
 import { pluralize } from '../textFormat.js'
+import { bigArrayCaps } from '../bigArray.js'
 
 // The valid-pixel cost distribution across all depth maps: its median (the run
 // summary) and p70 (the weak-signal warning: a genuine ZNCC match is ≥ ~0.55, cost
@@ -460,8 +462,24 @@ function* planSteps(maps, opts, onLog, hooks) {
   const inputBytes =
     densifyInputBytes(maps, { streamed: !!hooks.streaming }) + (hooks.streaming ? (opts.cacheBytes ?? 0) : 0)
   let proj = projectDensifyPeakBytes({ inputBytes, cells: estCells })
-  // Never more than a tab can hold (memBudget.js), whatever the caller passed.
-  const budget = opts.memBudgetBytes > 0 ? Math.min(opts.memBudgetBytes, MAX_BUDGET_BYTES) : 0
+  // Two limits. The run's whole peak against the budget, and its ArrayBuffers against
+  // what the tab's pool can hold (`poolCap`, at most memBudget.js MAX_BUDGET_BYTES).
+  // Accumulators in wasm memory (core/bigArray.js) and a cloud past 2 GiB in shared
+  // memory are outside the pool, so the budget may be the user's whole limit
+  // (`ramBudgetBytes`, Settings ▸ Compute); without wasm memories both are the pool's.
+  const caps = bigArrayCaps()
+  const poolCap = opts.memBudgetBytes > 0 ? Math.min(opts.memBudgetBytes, MAX_BUDGET_BYTES) : 0
+  const budget = poolCap && caps.wasm ? Math.max(poolCap, opts.ramBudgetBytes ?? 0) : poolCap
+  const poolOf = (p) =>
+    projectDensifyPoolBytes({
+      inputBytes,
+      cells: estCells,
+      tileCells: p.tileCells,
+      workers: p.workers,
+      accumulatorsInPool: !caps.wasm,
+      sharedPastPlain: caps.shared,
+    }).total
+  const fits = (p) => (!budget || p.total <= budget) && (!poolCap || poolOf(p) <= poolCap)
   onLog(
     `Fusion: measured ${est.candidates.toLocaleString()} candidate px → ≤ ${estCells.toLocaleString()} ` +
       `merge cells at ${mergeCell.toExponential(2)}${est.level ? ` (hash-sampled 1/${2 ** est.level}, +${Math.round((DENSE_TUNING.fuseEstimateMargin - 1) * 100)}% margin)` : ' (exact)'}; ` +
@@ -474,12 +492,12 @@ function* planSteps(maps, opts, onLog, hooks) {
   const scaledHist = () => new Map([...est.hist].map(([ia, c]) => [ia, c * margin]))
   let slabs = [{ lo: -Infinity, hi: Infinity, cells: estCells }]
   let workers = 1
-  // Whatever the budget, no slab may need an accumulator past MAX_ACCUMULATOR_CELLS (its
-  // index table would pass the browser's largest ArrayBuffer); a tiled slab's capacity
+  // Whatever the budget, no slab may need an accumulator past accumulatorCellLimit (its
+  // index table would pass the largest array this browser can make); a tiled slab's capacity
   // carries a 5% margin over its estimate (fusionSlabSteps). Both browser limits can be
   // lowered through `opts.limits` (tests: no test scene reaches the real ones).
-  const maxAccCells = opts.limits?.accumulatorCells ?? MAX_ACCUMULATOR_CELLS
-  const maxCloudPoints = opts.limits?.cloudPoints ?? MAX_CLOUD_POINTS
+  const maxAccCells = opts.limits?.accumulatorCells ?? accumulatorCellLimit()
+  const maxCloudPoints = opts.limits?.cloudPoints ?? cloudPointLimit()
   const slabMax = Math.floor(maxAccCells / 1.05)
   const onePieceFits = estCells <= maxAccCells
   // Parallel (`opts.parallel` workers, each running whole slabs): about one slab per
@@ -499,7 +517,7 @@ function* planSteps(maps, opts, onLog, hooks) {
         tileCells: largest,
         workers: Math.min(parallel, planned.length),
       })
-      if (!budget || parProj.total <= budget) {
+      if (fits(parProj)) {
         slabs = planned
         proj = parProj
         workers = Math.min(parallel, planned.length)
@@ -516,13 +534,13 @@ function* planSteps(maps, opts, onLog, hooks) {
   // Over budget in one piece: build the cloud slab by slab, so only one slab's
   // accumulator is resident beside the finished slabs (already in the cloud's 27 B
   // layout). The cloud itself still has to fit, twice while the slabs are joined.
-  if (workers === 1 && ((budget && proj.total > budget) || !onePieceFits)) {
+  if (workers === 1 && (!fits(proj) || !onePieceFits)) {
     const cap = Math.min(budget ? maxFusionTileCells({ inputBytes, cells: estCells, budget }) : estCells, slabMax)
     if (cap > 0) {
       const planned = planFusionSlabs(scaledHist(), cap)
       const largest = Math.max(...planned.map((s) => s.cells))
       const tiledProj = projectDensifyPeakBytes({ inputBytes, cells: estCells, tileCells: largest })
-      if (planned.length > 1 && (!budget || tiledProj.total <= budget)) {
+      if (planned.length > 1 && fits(tiledProj)) {
         slabs = planned
         proj = tiledProj
         onLog(
@@ -544,12 +562,16 @@ function* planSteps(maps, opts, onLog, hooks) {
   // pixels is the useful outcome. Each doubling quarters the candidates; the plan is
   // re-measured, not extrapolated, because overlapping views share merge cells.
   // `autoStep: false` keeps the old refusal.
-  const overBudget = budget && proj.total > budget
+  const overPool = poolCap > 0 && poolOf(proj) > poolCap
+  const overBudget = (budget && proj.total > budget) || overPool
   const tooLarge = estCells > maxCloudPoints || (!onePieceFits && slabs.length === 1)
   const why = tooLarge
     ? `${estCells.toLocaleString()} merge cells are more than the browser can hold in one cloud ` +
       `(${maxCloudPoints.toLocaleString()} points; one piece at most ${maxAccCells.toLocaleString()} cells)`
-    : `projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)}`
+    : budget && proj.total > budget
+      ? `projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)}`
+      : `projected buffer memory ${formatBytes(poolOf(proj))} exceeds the ${formatBytes(poolCap)} the tab's ` +
+        'buffer pool may take'
   const autoStepMax = DENSE_TUNING.fuseAutoStepMax ?? 4
   if ((overBudget || tooLarge) && opts.autoStep !== false && step * 2 <= autoStepMax) {
     onLog(
@@ -571,8 +593,7 @@ function* planSteps(maps, opts, onLog, hooks) {
   }
   if (overBudget) {
     onLog(
-      `Fusion: projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)} even in slabs ` +
-        `(the cloud alone is ${formatBytes(estCells * DENSIFY_CLOUD_BYTES_PER_CELL)}).`,
+      `Fusion: ${why} even in slabs ` + `(the cloud alone is ${formatBytes(estCells * DENSIFY_CLOUD_BYTES_PER_CELL)}).`,
       'error',
       'Dense',
     )
@@ -580,7 +601,7 @@ function* planSteps(maps, opts, onLog, hooks) {
       'Fusion: aborting before the consistency pass — projected memory exceeds the budget. ' +
         'Raise the point-density sample step to 2 (¼ the pixels), set a Region around the subject ' +
         '(Tools ▸ Model), or build depth maps at a lower Quality; or raise the memory budget ' +
-        `(Settings ▸ Compute, at most ${formatBytes(MAX_BUDGET_BYTES)}) if the machine has the RAM.`,
+        '(Settings ▸ Compute) if the machine has the RAM.',
       'error',
       'Dense',
     )

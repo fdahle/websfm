@@ -30,6 +30,7 @@ const {
   resetMemBudgetAuto,
   deviceBudgetInfo,
   MAX_BUDGET_GB,
+  POOL_BUDGET_GB,
   useGpu,
   setUseGpu,
   workerCount,
@@ -435,8 +436,9 @@ onMounted(refreshStorage)
           <div class="setting-info">
             <span class="setting-label">Memory safety limit</span>
             <span class="setting-desc">
-              Dense runs stop before starting when estimated peak memory exceeds this amount. At most 12 GB: a Chrome
-              tab holds 16 GB of buffers, shared by the page and all its workers.
+              Dense runs stop before starting when estimated peak memory exceeds this amount. Runs use at most
+              {{ POOL_BUDGET_GB }} GB of it in buffers (a Chrome tab holds 16 GB of them, shared by the page and all its
+              workers); fusion keeps its largest arrays in WebAssembly memory and may use the rest.
               {{ memBudgetAuto ? `Automatically derived from ${deviceBudgetInfo.source}.` : 'Manually overridden.' }}
             </span>
           </div>

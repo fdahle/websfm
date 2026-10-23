@@ -52,7 +52,11 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   const workflowsStore = useWorkflowsStore()
   const { addWorkflow, updateWorkflow, recordRun: recordWorkflowRun } = workflowsStore
   const { workflowBuilderOpen } = storeToRefs(useModalsStore())
-  const { useGpu: workflowUseGpu, memBudgetBytes: workflowMemBudgetBytes } = useComputeSettings()
+  const {
+    useGpu: workflowUseGpu,
+    memBudgetBytes: workflowMemBudgetBytes,
+    memBudgetRamBytes: workflowRamBudgetBytes,
+  } = useComputeSettings()
 
   // Workflow preflight/execution state uses semantic output names rather than UI
   // counter names. The runner re-reads this computed before every block, so outputs
@@ -94,6 +98,7 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     const settings = resolveWorkflowSettings(type, rawSettings, {
       useGpu: workflowUseGpu.value,
       memBudgetBytes: workflowMemBudgetBytes.value,
+      ramBudgetBytes: workflowRamBudgetBytes.value,
       mergeCell: denseSummary.value?.mergeCell ?? 0,
       ...(autoPairing
         ? { posedImageCount: posedImageCount?.value ?? 0, video: datasetProfile.value.kind === 'video' }

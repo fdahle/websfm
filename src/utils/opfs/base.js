@@ -1,6 +1,10 @@
 // The storage plumbing every other opfs module builds on: the OPFS root, a
 // project's directory (OPFS or a picked folder), and serialized, quota-aware writes.
 
+import { MAX_BUFFER_BYTES } from '../../core/bufferLimit.js'
+import { chunksOf, isSharedArray, shareableArray } from '../../core/bigArray.js'
+import { blobChunks } from '../blobParts.js'
+
 export const FLOATS_PER_KP = 6 // x, y, nx, ny, scale, response
 
 export async function getRoot() {
@@ -78,7 +82,10 @@ export async function writeFileIn(dir, filename, data, { append = false } = {}) 
       const writable = await fh.createWritable(append ? { keepExistingData: true } : undefined)
       try {
         if (append) await writable.seek(size)
-        if (data != null) await writable.write(data)
+        // A shared array (core/bigArray.js, a cloud past 2 GiB) is refused by write():
+        // it goes in plain chunks.
+        if (ArrayBuffer.isView(data) && isSharedArray(data)) for (const c of chunksOf(data)) await writable.write(c)
+        else if (data != null) await writable.write(data)
         await writable.close()
       } catch (error) {
         await writable.abort?.().catch(() => {})
@@ -132,10 +139,20 @@ export async function writeBin(dir, filename, buffer) {
   await writeFileIn(dir, filename, buffer)
 }
 
+// An ArrayBuffer; a file past the browser's largest ArrayBuffer (a cloud of more than
+// 178 M points) comes as a shareable Uint8Array (core/bigArray.js) read in chunks, which
+// readers take with viewAs.
 export async function readBin(dir, filename) {
   const fh = await dir.getFileHandle(filename)
   const file = await fh.getFile()
-  return file.arrayBuffer()
+  if (file.size <= MAX_BUFFER_BYTES) return file.arrayBuffer()
+  const out = shareableArray(Uint8Array, file.size)
+  let off = 0
+  for await (const chunk of blobChunks(file, { chunkBytes: 64 * 2 ** 20 })) {
+    out.set(chunk, off)
+    off += chunk.byteLength
+  }
+  return out
 }
 
 // ── Pluggable project root ────────────────────────────────────────────────────

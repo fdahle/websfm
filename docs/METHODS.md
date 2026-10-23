@@ -1340,7 +1340,12 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   is nearly empty (fusion flyers). Every cell is judged against the unfiltered
   occupancy, so the result does not depend on cell order. That is also what lets a
   large cloud be fused in slabs along the scene's long axis (one slab's accumulator
-  resident at a time) with a one-cell halo and give the identical cloud. The prior gates (per-pixel cost `maxCost`,
+  resident at a time) with a one-cell halo and give the identical cloud. The
+  accumulator's arrays, and a finished cloud past 2 GiB, live in WebAssembly memories
+  (`core/bigArray.js`; shared ones for the cloud), which neither Chrome's 2 GiB
+  per-ArrayBuffer cap nor its 16 GiB ArrayBuffer pool per tab applies to: with Memory64
+  one accumulator holds 2³⁰ cells and a cloud 1.4 G points, and only the inputs and the
+  finished slabs count against the pool. The prior gates (per-pixel cost `maxCost`,
   cross-view agreement count `minViews`) still run first. Like the cross-view filter,
   the consistency check compares each map with at most `DENSE_TUNING.fuseMaxViews` (12)
   of the maps whose frustum reaches it, those with the gate's parallax at its mean

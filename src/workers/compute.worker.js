@@ -12,6 +12,7 @@
 // SIFT needs pixel rasterisation, which on a worker uses OffscreenCanvas +
 // createImageBitmap instead of the DOM <canvas>/<img> path — hence rasterize here.
 
+import { transferList } from '../core/bigArray.js'
 import { makeDetectOps } from './ops/detect.js'
 import { makeMatchOps } from './ops/match.js'
 import { makeSfmOps } from './ops/sfm.js'
@@ -111,12 +112,13 @@ self.onmessage = async (e) => {
     return
   }
   // Intermediate events for streaming ops, tagged with the request id. `transfer`
-  // hands buffers over without a copy (Stage A streams each finished depth map).
-  const emit = (ev, evArgs, transfer) => self.postMessage({ id, ev, args: evArgs }, transfer ?? [])
+  // hands buffers over without a copy (Stage A streams each finished depth map); a
+  // shared one (core/bigArray.js) is left out of the list, as it crosses uncopied anyway.
+  const emit = (ev, evArgs, transfer) => self.postMessage({ id, ev, args: evArgs }, transferList(transfer))
   try {
     const started = performance.now()
     const { result, transfer } = await handler(args, { emit })
-    self.postMessage({ id, ok: true, result, workerMs: performance.now() - started }, transfer ?? [])
+    self.postMessage({ id, ok: true, result, workerMs: performance.now() - started }, transferList(transfer))
   } catch (err) {
     self.postMessage({ id, ok: false, error: err?.message ?? String(err) })
   }

@@ -664,6 +664,8 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
       maxIncidenceDeg: v.maxIncidenceDeg,
       removeIsolated: v.removeIsolated,
       memBudgetBytes: runtime.memBudgetBytes,
+      // The whole limit: fusion keeps its accumulators in wasm memory (fusionPlan.js).
+      ...(runtime.ramBudgetBytes > 0 ? { ramBudgetBytes: runtime.ramBudgetBytes } : {}),
     }
   }
   if (type === 'gen-dem') {

@@ -9,6 +9,7 @@
 // single-call ops (reconstruct/dense/products) still use one worker at a time.
 
 import { isLearnedDetector } from '../core/features/learnedDetectors.js'
+import { transferList as postableTransfer } from '../core/bigArray.js'
 
 // One worker per core (minus one for the UI thread), capped so we don't spawn a
 // pile of workers that each load their own wasm copy on first use.
@@ -132,7 +133,8 @@ function call(op, args, { transfer = [], onEvent, onTiming, worker: pinned, avoi
     const entry = { resolve, reject, onEvent, onTiming, worker, started: performance.now(), postMessageMs: 0 }
     pending.set(id, entry)
     try {
-      worker.postMessage({ id, op, args }, transfer)
+      // A shared buffer (core/bigArray.js) cannot be in the list; it crosses uncopied.
+      worker.postMessage({ id, op, args }, postableTransfer(transfer))
       entry.postMessageMs = performance.now() - entry.started
     } catch (err) {
       pending.delete(id)
