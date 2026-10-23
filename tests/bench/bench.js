@@ -1339,6 +1339,82 @@ window.bench = {
   },
 
   // Control and checkpoint residuals against the current georeference.
+  // Reconstruct ▸ Find GCPs without the dialog (config stage `findgcps`): candidates
+  // from the orthophoto against the reference raster named `reference` (band `band`),
+  // kept to the polygon layer named `stable`; heights from the reference DEM named
+  // `dem` (declared `datum`, σ `demSigma`), then added as GCPs and the model
+  // georeferenced. `holdout: 'tma'` marks the hist_sfm2 paper's withheld blocks as
+  // checkpoints: 3 km cells (bx, by) of the project CRS with (3 bx + 2 by) mod 5 = 0.
+  // `disablePoses` turns imported camera poses off first, so only this control places it.
+  async findGcps({
+    reference,
+    band = 1,
+    stable = null,
+    dem,
+    datum = 'ellipsoidal',
+    demSigma = 5,
+    refSigma = null,
+    minConfidence = 0,
+    holdout = null,
+    disablePoses = true,
+  } = {}) {
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const { findGcpCandidates } = await import('/src/composables/useFindGcps.js')
+    const ext = useExternalStore()
+    const byName = (n) => ext.rasters.find((r) => r.name === n || r.name.startsWith(n))
+    const ref = byName(reference),
+      refDem = byName(dem)
+    if (!ref || !refDem) return { error: `reference ${reference} or DEM ${dem} not imported` }
+    if (disablePoses) for (const p of poses.poses) p.enabled = false
+    await ext.setRasterAccuracy(refDem.id, { verticalDatum: datum, verticalAccuracy: demSigma })
+    if (refSigma) await ext.setRasterAccuracy(ref.id, { horizontalAccuracy: refSigma })
+    const stableSet = stable ? useFootprintsStore().sets.find((s) => s.name === stable) : null
+    const t0 = performance.now()
+    const {
+      candidates,
+      result,
+      area,
+      stable: kept,
+    } = await findGcpCandidates({
+      referenceId: ref.id,
+      band,
+      stableSetId: stableSet?.id ?? null,
+    })
+    const chosen = candidates.filter((c) => c.confidence >= minConfidence)
+    let filled = 0
+    for (const c of chosen) {
+      const hit = await ext.sampleReferenceDem(c.x, c.y, { rasterId: refDem.id })
+      if (!hit || !(hit.accuracy > 0)) continue
+      Object.assign(c, { z: hit.z, accuracyZ: hit.accuracy, verticalDatum: hit.datum })
+      filled++
+    }
+    const withZ = chosen.filter((c) => c.z != null)
+    const withheld = (c) => (3 * Math.floor(c.x / 3000) + 2 * Math.floor(c.y / 3000)) % 5 === 0
+    for (const c of withZ) c.role = holdout === 'tma' && withheld(c) ? 'check' : 'control'
+    const added = await gcpsStore.addGcps(
+      withZ.map((c, i) => ({ ...c, name: `FG${i + 1}` })),
+      projects.currentCrs,
+      {},
+      { rememberDefaults: false },
+    )
+    const report = await window.bench.gcpReport()
+    return {
+      seconds: (performance.now() - t0) / 1000,
+      searched: area.source,
+      matches: result.matches.length,
+      fineTiles: result.tiles.length,
+      refined: !!result.refined,
+      candidates: candidates.length,
+      offStable: kept?.rejected ?? null,
+      chosen: chosen.length,
+      heights: filled,
+      added,
+      control: report.control,
+      check: report.check,
+      georef: report.georef,
+      rows: report.rows,
+    }
+  },
   async gcpReport() {
     if (!recon.validGeoref) await recon.georeference()
     const rows = await recon.gcpAccuracyReport()

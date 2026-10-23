@@ -381,7 +381,9 @@ try {
   result.stages.ingest = { images: added, seconds: (Date.now() - t0) / 1000, ...(video ? { video } : {}) }
   // `hist` (scripts/bench/hist/README.md): a historical block's certificate focal +
   // scan pitch on one sensor, a static mask, and the surveyed GCPs (gcp.csv).
-  if (cfg.hist) {
+  // A reused profile already holds all of this; the project is restored by `reopen`
+  // afterwards, which would replace anything imported here.
+  if (cfg.hist && !reuse) {
     const { histSetup } = await import('./hist/histSetup.mjs')
     const h = await histSetup({ imagesDir: cfg.images, ...cfg.hist }, files)
     if (h.sensor)
@@ -470,6 +472,7 @@ try {
     togglepair: 'togglePair',
     aligncheck: 'alignCheck',
     georef: 'georef',
+    findgcps: 'findGcps',
     rastersample: 'rasterSample',
     rasterstyle: 'rasterRestyle',
     meshtools: 'meshTools',
@@ -937,6 +940,21 @@ try {
         result.stages[entry] = r
         console.log(`== ${entry}: ${JSON.stringify({ ...r, stats: undefined })}`)
         await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+        continue
+      }
+      if (entry === 'layers') {
+        // `layers`: polygon files (stable ground, outlines) as map layers, cfg.layers =
+        // [{ path, name }]; a stage, so it can follow `reopen`.
+        const out = []
+        for (const layer of cfg.layers ?? []) {
+          const r = await page.evaluate((x) => window.bench.importPolygons(x), {
+            text: await readFile(layer.path, 'utf8'),
+            name: layer.name,
+          })
+          out.push({ name: layer.name, ...r })
+        }
+        result.stages.layers = out
+        console.log(`== layers: ${JSON.stringify(out)}`)
         continue
       }
       if (entry.startsWith('importraster:')) {
