@@ -682,7 +682,14 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
       memBudgetBytes: runtime.memBudgetBytes,
     }
   }
-  if (type === 'gen-mesh') return { ...MESH_DEFAULTS, ...value, ...(MESH_PRESETS[value.preset] || {}) }
+  if (type === 'gen-mesh')
+    return {
+      ...MESH_DEFAULTS,
+      ...value,
+      ...(MESH_PRESETS[value.preset] || {}),
+      // The whole memory limit: how many tiles of a tiled mesh solve at once.
+      ...(runtime.ramBudgetBytes > 0 ? { ramBudgetBytes: runtime.ramBudgetBytes } : {}),
+    }
   if (type === 'texture-mesh') {
     const { decimateTo, ...rest } = { ...TEXTURE_DEFAULTS, ...value }
     return {

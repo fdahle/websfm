@@ -25,6 +25,9 @@ import {
   filterDepthMaps as workerFilterDepthMaps,
   densify as workerDensify,
   meshify as workerMeshify,
+  meshPrepare as workerMeshPrepare,
+  meshTile as workerMeshTile,
+  meshFinish as workerMeshFinish,
 } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes, projectDensePeakBytes, workingPixels } from '../../core/dense/memBudget.js'
@@ -34,6 +37,7 @@ import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
 import { postableCopy, shareableArray } from '../../core/bigArray.js'
+import { poissonHeapBytes } from '../../core/products/mesh.js'
 
 // The dense pipeline, split out of useReconstructionStore: Stage A depth maps
 // (PatchMatch MVS in the workers, persisted per image), the saved-map filter,
@@ -846,11 +850,14 @@ export function createDense({
     // module unusable, and idle workers keep their last run's garbage in the pool.
     releaseIdleWorkers()
     try {
-      const { mesh } = await workerMeshify(input, {
-        onLog: (m, l, c) => log(m, l, c),
-        onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
-        transfer,
-      })
+      const { mesh } =
+        POOL_SIZE > 1 && meshSettings.tiles !== 'off'
+          ? await meshOnPool(input, transfer, meshSettings, onProgress)
+          : await workerMeshify(input, {
+              onLog: (m, l, c) => log(m, l, c),
+              onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+              transfer,
+            })
       if (!mesh || !mesh.nVerts) {
         log('Mesh: Poisson produced no surface — try a lower depth or check the cloud/normals', 'warn', 'Products')
         reconStatus.value = 'done'
@@ -863,6 +870,60 @@ export function createDense({
       log(`Mesh error: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
     }
+  }
+
+  // Build Mesh with its tiles over the pool (workers/ops/mesh.js meshPrepare / meshTile /
+  // meshFinish): worker 0 conditions the input and plans — and solves at once when one
+  // solve fits — then the tiles go to as many workers as the memory budget holds solves of
+  // the largest tile (each a wasm heap that keeps its high-water mark), and worker 0 joins
+  // them. Resolves to { mesh }.
+  async function meshOnPool(input, transfer, settings, onProgress) {
+    const onLog = (m, l, c) => log(m, l, c)
+    const runId = `mesh-${Date.now().toString(36)}`
+    const prep = await workerMeshPrepare({ ...input, runId }, { worker: 0, onLog, onProgress, transfer })
+    if (prep.mesh) return prep
+    const { share, tiles: n } = prep
+    const tiles = share.tiling.tiles
+    const perTile = poissonHeapBytes(Math.max(...tiles.map((t) => t.samples)), share.solveArgs.depth)
+    const budget = settings.ramBudgetBytes > 0 ? settings.ramBudgetBytes : DEFAULT_BUDGET_BYTES
+    const workers = Math.max(1, Math.min(POOL_SIZE, n, Math.floor(budget / perTile)))
+    log(
+      `Mesh: ${n} tiles on ${pluralize(workers, 'worker')} (a solve ≤ ${formatBytes(perTile)} each, memory ` +
+        `budget ${formatBytes(budget)})`,
+      'info',
+      'Products',
+    )
+    const JOIN = 0.05
+    const done = new Float64Array(n)
+    const report = (lbl) => {
+      const f = done.reduce((a, b) => a + b, 0) / n
+      onProgress?.(Math.round(f * n), n, lbl, (1 - JOIN) * f)
+    }
+    // Largest tiles first, so the pool does not end on one long straggler.
+    const queue = tiles.map((_, i) => i).sort((a, b) => tiles[b].samples - tiles[a].samples)
+    const results = new Array(n)
+    const runner = async (w) => {
+      while (queue.length) {
+        const i = queue.shift()
+        results[i] = await workerMeshTile(
+          { share, index: i },
+          {
+            worker: w,
+            onLog,
+            // The worker reports a tile's progress as its share of the whole bar.
+            onProgress: (d, t, lbl, f) => {
+              done[i] = Math.min(1, Math.max(0, (f ?? 0) * n - i))
+              report(lbl)
+            },
+          },
+        )
+        done[i] = 1
+        report(`Tile ${i + 1}/${n} done`)
+      }
+    }
+    await Promise.all(Array.from({ length: workers }, (_, w) => runner(w)))
+    onProgress?.(n, n, 'Joining the tiles…', 1 - JOIN)
+    return workerMeshFinish({ runId, results }, { worker: 0, onLog })
   }
 
   return {

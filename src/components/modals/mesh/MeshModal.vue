@@ -15,6 +15,7 @@ import { MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META } from '../../../core/def
 import { recommendMeshDepth } from '../../../core/products/mesh.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { meshEffects } from '../../../core/stepEffects/mesh.js'
+import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 
 // Build Mesh (screened Poisson over a dense cloud). Defaults are the single source of
 // truth in core/defaults.user.js (core/products/mesh.js keeps matching fallbacks).
@@ -76,8 +77,11 @@ const numbers = computed(() =>
   }),
 )
 
+// The machine's whole memory limit (Settings ▸ Compute): how many tiles solve at once.
+const { memBudgetRamBytes } = useComputeSettings()
+
 function run() {
-  emit('run', { ...settings.value, sourceId: sourceId.value })
+  emit('run', { ...settings.value, sourceId: sourceId.value, ramBudgetBytes: memBudgetRamBytes.value })
 }
 </script>
 

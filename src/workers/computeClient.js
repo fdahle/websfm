@@ -484,6 +484,13 @@ export const warpRaster = streamingOp('warpRaster')
 // Input { dense:{ count, pos, col, nrm }, settings }; resolves to
 // { mesh:{ nVerts, count, pos, idx, col }, denseHome:{ pos, col, nrm } }.
 export const meshify = streamingOp('meshify')
+// Build Mesh in tiles over the pool (workers/ops/mesh.js): meshPrepare { dense, settings,
+// runId } on one worker → { mesh } when one solve fits, else { share, tiles }; meshTile
+// { share, index } anywhere → { part, stats }; meshFinish { runId, results } on the
+// preparing worker → { mesh }.
+export const meshPrepare = streamingOp('meshPrepare')
+export const meshTile = streamingOp('meshTile')
+export const meshFinish = streamingOp('meshFinish')
 // Mesh texture (workers/ops/texture.js): { mesh, views, settings } →
 // { mesh: { pos, idx, uv, col, nVerts, count }, texture: { data, pages, groups }, summary }.
 export const textureMesh = streamingOp('textureMesh')

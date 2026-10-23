@@ -54,7 +54,9 @@ the whole scene would use. Each tile keeps the surface of its own cells, and nei
 tiles are welded where they meet, on the grid edges they share, and every tile trims
 against the whole scene's support level. Continuous surface joins without cracks. Where a
 trimmed area or a hole crosses a seam, the two tiles can end it slightly differently, which
-leaves short open edges along that border; the log counts the open edges along the seams. Small
+leaves short open edges along that border; the log counts the open edges along the seams.
+The tiles are solved on several workers at once, as many as the memory budget (Settings ▸
+Compute) holds solves of the largest tile. Small
 floating pieces are judged after the tiles are joined, so a piece a tile border cuts is
 not mistaken for one. On a synthetic terrain the tiled surface lies within a hundredth of
 a leaf of the one-piece solve (median). **Off** always solves in one piece, and a scene too

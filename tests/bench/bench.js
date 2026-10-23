@@ -700,7 +700,13 @@ window.bench = {
 
   // Mesh, settings resolved exactly as MeshModal.run() does (source: meshSource).
   async mesh({ ...overrides } = {}) {
-    const settings = { ...MESH_DEFAULTS, ...overrides, sourceId: overrides.sourceId ?? recon.meshSource?.id ?? null }
+    const { memBudgetRamBytes } = useComputeSettings()
+    const settings = {
+      ...MESH_DEFAULTS,
+      ramBudgetBytes: memBudgetRamBytes.value,
+      ...overrides,
+      sourceId: overrides.sourceId ?? recon.meshSource?.id ?? null,
+    }
     const t0 = performance.now()
     await recon.generateMesh(settings, report)
     const m = recon.clouds.find((c) => c.kind === 'mesh' && !c.imported && !c.derived)

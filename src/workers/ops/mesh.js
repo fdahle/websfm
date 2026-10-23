@@ -1,5 +1,15 @@
 import init, * as mesh32 from '../../wasm/mesh/mesh.js'
-import { generateMesh, poissonHeapBytes } from '../../core/products/mesh.js'
+import {
+  completeMesh,
+  generateMesh,
+  poissonHeapBytes,
+  prepareMesh,
+  solveMeshTile,
+  stitchMeshTiles,
+  tileShare,
+  parseMeshBuffer,
+  parseMeshStats,
+} from '../../core/products/mesh.js'
 import { bigArrayCaps } from '../../core/bigArray.js'
 
 // Relative cost of the staged phases, for an honest progress fraction. A multigrid
@@ -197,5 +207,68 @@ export function makeMeshOps() {
     return { result: { mesh, denseHome }, transfer }
   }
 
-  return { meshify }
+  // The mesh and the buffers to hand over with it (the dense cloud is left to the GC: the
+  // store sent a copy, or a shared view of its own).
+  const meshResult = (mesh) => ({ result: { mesh }, transfer: [mesh.pos, mesh.idx, mesh.col] })
+
+  // Tiles over the pool (store dense.js generateMesh): this worker conditions the input and
+  // plans; one solve that fits is done here at once ({ mesh }). Otherwise it keeps the
+  // dense cloud and the context under `runId` and returns what each tile worker needs
+  // ({ share, tiles }); meshTile solves tiles anywhere, meshFinish joins them here.
+  const runs = new Map()
+  async function meshPrepare([input], { emit }) {
+    await ensureWasm()
+    const wasm64 = bigArrayCaps().memory64 ? await ensureWasm64().catch(() => null) : null
+    const { dense, settings = {}, runId } = input
+    if (!dense?.pos || !(dense.count > 0)) throw new Error('meshify: empty dense cloud')
+    const log = (m, l, c) => emit('log', [m, l, c])
+    const oneSolveBytes = wasm64 ? HEAP64_BYTES : HEAP32_BYTES
+    const t0 = performance.now()
+    const ctx = prepareMesh(dense, { ...settings, oneSolveBytes }, log)
+    if (!ctx.tiling) {
+      const t = performance.now()
+      const mesh = completeMesh(dense, ctx, poissonOnce(emit, wasm64, ctx), performance.now() - t, log)
+      log(
+        `Mesh: built ${mesh.nVerts} vertices / ${mesh.count} triangles in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+        'success',
+        'Products',
+      )
+      return meshResult(mesh)
+    }
+    const share = tileShare(ctx, log)
+    runs.clear() // one mesh run at a time; a cancelled one's context goes
+    runs.set(runId, { dense, ctx, share, t0 })
+    return { result: { share, tiles: share.tiling.tiles.length }, transfer: [] }
+  }
+  // One tile of a run's share → { part, stats } (the part's buffers handed over).
+  async function meshTile([{ share, index }], { emit }) {
+    await ensureWasm()
+    const wasm64 = bigArrayCaps().memory64 ? await ensureWasm64().catch(() => null) : null
+    const r = solveMeshTile(share, index, poissonFor(emit, wasm64))
+    return { result: r, transfer: [r.part.pos, r.part.idx] }
+  }
+  async function meshFinish([{ runId, results }], { emit }) {
+    const run = runs.get(runId)
+    if (!run) throw new Error('meshFinish: this worker holds no such mesh run')
+    runs.delete(runId)
+    const log = (m, l, c) => emit('log', [m, l, c])
+    const t = performance.now()
+    const solved = stitchMeshTiles(run.share, results, log)
+    const mesh = completeMesh(run.dense, run.ctx, solved, performance.now() - run.t0, log)
+    log(
+      `Mesh: built ${mesh.nVerts} vertices / ${mesh.count} triangles in ${((performance.now() - run.t0) / 1000).toFixed(1)}s ` +
+        `(joining ${((performance.now() - t) / 1000).toFixed(1)}s)`,
+      'success',
+      'Products',
+    )
+    return meshResult(mesh)
+  }
+  // The whole solve, as generateMesh's (prepareMesh said one solve fits).
+  function poissonOnce(emit, wasm64, ctx) {
+    const { sub, solveArgs } = ctx
+    const out = poissonFor(emit, wasm64)({ pos: sub.pos, nrm: sub.nrm, wgt: sub.wgt, ...solveArgs })
+    return { ...parseMeshBuffer(out?.bytes ?? out), stats: parseMeshStats(out?.stats) }
+  }
+
+  return { meshify, meshPrepare, meshTile, meshFinish }
 }

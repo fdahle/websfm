@@ -9,8 +9,10 @@ Notable changes to websfm. The format follows
 - **Meshes in tiles.** Build Mesh ▸ Advanced ▸ Tiles (Auto by default): a scene whose
   Poisson solve would not fit in memory is solved in tiles on the scene's own octree
   grid and welded along the grid edges the tiles share; every tile trims against the
-  scene's support level, and floating pieces are judged on the joined mesh. The quarry
-  at depth 10 (95 M points; one solve ≈ 18 GB) now builds: 2.8 M triangles in 14 min.
+  scene's support level, and floating pieces are judged on the joined mesh. The tiles
+  solve on as many workers as the memory budget holds. The quarry at depth 10 (95 M
+  points; one solve ≈ 18 GB) now builds: 2.8 M triangles in 4.5 min on 7 workers (14 min
+  on one).
   Where a trimmed area or hole crosses a seam the tiles can end it slightly differently.
 - **Matching repairs a split graph.** When matching leaves the block in pieces (the
   vertical and oblique cameras of a mapping flight, a facade and its roof), the most

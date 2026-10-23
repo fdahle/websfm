@@ -494,49 +494,61 @@ export const POISSON_BYTES_PER_SAMPLE = 10 * 1024
 export const poissonHeapBytes = (points, depth) =>
   POISSON_BASE_BYTES + POISSON_BYTES_PER_SAMPLE * Math.min(points, 2 * 4 ** depth)
 
-// The solve in tiles (meshTiles.js): each tile on the scene's grid with its overlap,
-// floaters kept (a piece a border cuts is none), cut to its core; then the tiles welded
-// along their seams and the small pieces dropped over the whole. Returns the mesh in
+// The solve in tiles (meshTiles.js), in three steps so the tiles can run on several
+// workers (workers/ops/mesh.js meshPrepare / meshTile / meshFinish): tileShare (what a tile
+// worker needs: the samples, the grid and the plan, the solve's arguments and the scene's
+// median support), solveMeshTile (one tile on the scene's grid, floaters kept — a piece a
+// border cuts is none — cut to its core), stitchMeshTiles (the tiles welded along their
+// seams and the small pieces dropped over the whole). The result is the mesh in
 // parseMeshBuffer's shape plus summed stats and { count, seamEdges, openSeamEdges,
 // medianSupport } as `summary`.
-function solveTiled({ sub, grid, tiling, solveArgs, poissonFn, minComponentShare, onLog }) {
-  const g = [...grid.origin, grid.leaf]
-  const nT = tiling.tiles.length
+export function tileShare(ctx, onLog = () => {}) {
+  const { sub, grid, tiling, solveArgs } = ctx
   onLog(
     `Mesh: one solve over ${(sub.pos.length / 3).toLocaleString()} samples would need ≈ ` +
-      `${(poissonHeapBytes(sub.pos.length / 3, solveArgs.depth) / 2 ** 30).toFixed(1)} GB — solving in ${nT} tiles ` +
-      `(up to ${Math.max(...tiling.tiles.map((t) => t.samples)).toLocaleString()} samples each, ` +
-      `${tiling.overlap} leaves of overlap, along ${'xyz'[tiling.axes[0]]}/${'xyz'[tiling.axes[1]]})`,
+      `${(poissonHeapBytes(sub.pos.length / 3, solveArgs.depth) / 2 ** 30).toFixed(1)} GB — solving in ` +
+      `${tiling.tiles.length} tiles (up to ${Math.max(...tiling.tiles.map((t) => t.samples)).toLocaleString()} ` +
+      `samples each, ${tiling.overlap} leaves of overlap, along ${'xyz'[tiling.axes[0]]}/${'xyz'[tiling.axes[1]]})`,
     'info',
     'Products',
   )
   // Every tile trims against the whole scene's median support, as one solve would.
   const medianSupport =
     solveArgs.densityRatio > 0 ? supportMedian(sub.pos, sub.wgt, grid.leaf * 2 ** TRIM_DENSITY_BACKOFF) : 0
-  const parts = []
-  const sum = { extractedTris: 0, distanceRemovedTris: 0, densityRemovedTris: 0, holesFilled: 0, holeTris: 0 }
-  tiling.tiles.forEach((tile, i) => {
-    const input = tileInput(sub, tiling, tile, grid)
-    const out = poissonFn({
-      ...input,
-      ...solveArgs,
-      minComponentShare: 0,
-      medianSupport,
-      grid: g,
-      tile: { index: i, count: nT },
-    })
-    const mesh = parseMeshBuffer(out?.bytes ?? out)
-    const st = parseMeshStats(out?.stats)
-    if (st) {
-      for (const k of Object.keys(sum)) sum[k] += st[k]
-    }
-    parts.push(cutToCore(mesh, tiling, tile, grid))
+  return { sub, grid, tiling, solveArgs, medianSupport }
+}
+
+// Tile `i` of `share`: { part: its cut mesh, stats: the solver's stats }.
+export function solveMeshTile(share, i, poissonFn) {
+  const { sub, grid, tiling, solveArgs, medianSupport } = share
+  const tile = tiling.tiles[i]
+  const out = poissonFn({
+    ...tileInput(sub, tiling, tile, grid),
+    ...solveArgs,
+    minComponentShare: 0,
+    medianSupport,
+    grid: [...grid.origin, grid.leaf],
+    tile: { index: i, count: tiling.tiles.length },
   })
-  const stitched = stitchTiles(parts, tiling, grid)
+  return { part: cutToCore(parseMeshBuffer(out?.bytes ?? out), tiling, tile, grid), stats: parseMeshStats(out?.stats) }
+}
+
+// The tiles' results, in tile order, joined into one mesh.
+export function stitchMeshTiles(share, results, onLog = () => {}) {
+  const { sub, grid, tiling, solveArgs, medianSupport } = share
+  const nT = tiling.tiles.length
+  const sum = { extractedTris: 0, distanceRemovedTris: 0, densityRemovedTris: 0, holesFilled: 0, holeTris: 0 }
+  for (const { stats: st } of results) if (st) for (const k of Object.keys(sum)) sum[k] += st[k]
+  const stitched = stitchTiles(
+    results.map((r) => r.part),
+    tiling,
+    grid,
+  )
   // Two leaves, as the crate: a sample on the surface is within a leaf of a vertex.
+  const minShare = solveArgs.minComponentShare
   const pieces =
-    minComponentShare > 0
-      ? dropSmallPieces(stitched.pos, stitched.idx, minComponentShare, {
+    minShare > 0
+      ? dropSmallPieces(stitched.pos, stitched.idx, minShare, {
           samples: sub.pos,
           weights: sub.wgt,
           reach: 2 * grid.leaf,
@@ -544,11 +556,11 @@ function solveTiled({ sub, grid, tiling, solveArgs, poissonFn, minComponentShare
       : null
   const pos = pieces ? pieces.pos : stitched.pos
   const idx = pieces ? pieces.idx : stitched.idx
-  const share = stitched.seamEdges ? stitched.openSeamEdges / stitched.seamEdges : 0
+  const openShare = stitched.seamEdges ? stitched.openSeamEdges / stitched.seamEdges : 0
   onLog(
     `Mesh: ${nT} tiles stitched — ${stitched.openSeamEdges.toLocaleString()} of ` +
-      `${stitched.seamEdges.toLocaleString()} seam edges open (${(100 * share).toFixed(2)} %: the surface's own borders ` +
-      'where they cross a seam, and where two tiles end a trimmed area differently)' +
+      `${stitched.seamEdges.toLocaleString()} seam edges open (${(100 * openShare).toFixed(2)} %: the surface's own ` +
+      'borders where they cross a seam, and where two tiles end a trimmed area differently)' +
       (medianSupport ? `; trimmed against the scene's median support ${fmt(medianSupport)}` : ''),
     'info',
     'Products',
@@ -568,13 +580,15 @@ function solveTiled({ sub, grid, tiling, solveArgs, poissonFn, minComponentShare
     pos,
     idx,
     stats,
-    summary: {
-      count: nT,
-      seamEdges: stitched.seamEdges,
-      openSeamEdges: stitched.openSeamEdges,
-      medianSupport,
-    },
+    summary: { count: nT, seamEdges: stitched.seamEdges, openSeamEdges: stitched.openSeamEdges, medianSupport },
   }
+}
+
+// All tiles in this worker, one after another.
+function solveTiled(ctx, poissonFn, onLog) {
+  const share = tileShare(ctx, onLog)
+  const results = share.tiling.tiles.map((_, i) => solveMeshTile(share, i, poissonFn))
+  return stitchMeshTiles(share, results, onLog)
 }
 
 // Generate a triangle mesh from a flat dense cloud via screened Poisson. `poissonFn` is
@@ -599,6 +613,16 @@ function solveTiled({ sub, grid, tiling, solveArgs, poissonFn, minComponentShare
 // col, summary } — `pos` keeps the source's precision (Float64 in ⇒ Float64 out) and
 // `summary` is the run record persisted with the mesh. Errors loudly if nrm is missing.
 export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) {
+  const ctx = prepareMesh(dense, settings, onLog)
+  const tSolve = now()
+  const solved = ctx.tiling ? solveTiled(ctx, poissonFn, onLog) : solveWhole(ctx, poissonFn)
+  return completeMesh(dense, ctx, solved, now() - tSolve, onLog)
+}
+
+// generateMesh's input conditioning (steps 1–5 above) and its plan: the solve's arguments,
+// the scene's leaf grid and, when one solve would not fit, the tiles. Returns the context
+// solveWhole / tileShare and completeMesh read.
+export function prepareMesh(dense, settings = {}, onLog = () => {}) {
   if (!dense || !dense.pos || !(dense.count > 0)) throw new Error('generateMesh: empty dense cloud')
   if (!dense.nrm || dense.nrm.length < dense.count * 3) {
     throw new Error('generateMesh: dense cloud has no per-point normals — re-run Densify to compute normals')
@@ -756,7 +780,6 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
     'Products',
   )
 
-  const tSolve = now()
   const solveArgs = { depth, screening: cfg.screening, trimDist, densityRatio, holeAreaRatio, minComponentShare }
   const grid = poissonGrid(sub.pos, depth)
   const tiling =
@@ -768,17 +791,42 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
           heapTarget: cfg.tileHeapBytes,
           overlapCells: cfg.tileOverlapCells,
         })
-  let tilesSummary = null
-  let solved
-  if (tiling) {
-    solved = solveTiled({ sub, grid, tiling, solveArgs, poissonFn, minComponentShare, onLog })
-    tilesSummary = solved.summary
-  } else {
-    const out = poissonFn({ pos: sub.pos, nrm: sub.nrm, wgt: sub.wgt, ...solveArgs })
-    solved = { ...parseMeshBuffer(out?.bytes ?? out), stats: parseMeshStats(out?.stats) }
+  return {
+    cfg,
+    t0,
+    n0,
+    spacing,
+    spacingSource,
+    depth,
+    leaf,
+    origin,
+    sub,
+    inCount,
+    densityRatio,
+    holeAreaRatio,
+    minComponentShare,
+    trimDist,
+    solveArgs,
+    grid,
+    tiling,
   }
+}
+
+// One solve over all of prepareMesh's samples.
+function solveWhole(ctx, poissonFn) {
+  const { sub, solveArgs } = ctx
+  const out = poissonFn({ pos: sub.pos, nrm: sub.nrm, wgt: sub.wgt, ...solveArgs })
+  return { ...parseMeshBuffer(out?.bytes ?? out), stats: parseMeshStats(out?.stats) }
+}
+
+// The solved surface ({ nVerts, nTris, pos, idx, stats, summary? }, relative to the
+// input's origin) back in the source frame, coloured, with its run record: the end of
+// generateMesh, wherever the solve ran.
+export function completeMesh(dense, ctx, solved, solveMs, onLog = () => {}) {
+  const { cfg, t0, n0, spacing, spacingSource, depth, leaf, origin, inCount } = ctx
+  const { densityRatio, holeAreaRatio, minComponentShare, trimDist } = ctx
+  const tilesSummary = solved.summary ?? null
   const { nVerts, nTris, pos: rel, idx, stats } = solved
-  const solveMs = now() - tSolve
   onLog(
     `Mesh: solve produced ${nVerts.toLocaleString()} verts / ${nTris.toLocaleString()} tris in ` +
       `${(solveMs / 1000).toFixed(1)}s`,
