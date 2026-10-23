@@ -322,6 +322,11 @@ export const DENSE_TUNING = {
   // ~50 overlapping views a map on a 58-scan film block at High, that was 5.4 GB per
   // worker and 25 min on the one worker it allowed.
   filterMaxViews: 12,
+  // The cross-view filter over saved maps takes at most one worker per this many maps
+  // (and no more than the pool or the memory budget holds): contiguous chunks keep each
+  // worker's candidate planes warm. It hardly matters on the sets where it binds: 48 quarry
+  // maps at Medium, 3 workers, filter 16.8 s of a 1,872 s depth run (2026-10-24).
+  filterMapsPerWorker: 16,
   // Fusion's consistency check, likewise (core/dense/fusionPlan.js fusionViews): at most
   // this many overlapping views per map, those with enough parallax first (0 = all).
   fuseMaxViews: 12,

@@ -429,7 +429,10 @@ export function createDense({
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     const views = DENSE_TUNING.filterMaxViews > 0 ? Math.min(n - 1, DENSE_TUNING.filterMaxViews) : n - 1
     const perWorker = Math.max(1, views * planeBytes * 1.25)
-    const workers = Math.max(1, Math.min(POOL_SIZE, Math.floor(n / 16), Math.floor(budget / perWorker)))
+    const workers = Math.max(
+      1,
+      Math.min(POOL_SIZE, Math.floor(n / (DENSE_TUNING.filterMapsPerWorker ?? 16)), Math.floor(budget / perWorker)),
+    )
     log(
       `Depth filter: ${pluralize(workers, 'worker')} (up to ${formatBytes(perWorker)} of candidate planes each, ` +
         `budget ${formatBytes(budget)})`,

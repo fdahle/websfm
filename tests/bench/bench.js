@@ -627,8 +627,15 @@ window.bench = {
     }
     if (maxDim > 0) settings.maxDim = maxDim
     if (bestK > 0) settings.bestK = bestK
+    // `filterMapsPerWorker` overrides DENSE_TUNING's for this run (the depth filter's split).
+    const perWorker0 = DENSE_TUNING.filterMapsPerWorker
+    if (overrides.filterMapsPerWorker > 0) DENSE_TUNING.filterMapsPerWorker = overrides.filterMapsPerWorker
     const t0 = performance.now()
-    await recon.computeDepthMaps(settings, report)
+    try {
+      await recon.computeDepthMaps(settings, report)
+    } finally {
+      DENSE_TUNING.filterMapsPerWorker = perWorker0
+    }
     return { settings, seconds: (performance.now() - t0) / 1000, depthMaps: recon.depthMapCount }
   },
 
