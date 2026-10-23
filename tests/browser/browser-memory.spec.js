@@ -51,7 +51,7 @@ test('the Memory64 Poisson build gives the 32-bit build’s mesh, byte for byte'
       await mod.default()
       const me = mod.PoissonMesher.build(pos, nrm, new Float32Array(0), 7, 4)
       for (let L = me.num_layers(), i = 0; i < L; i++) me.solve_step()
-      const bytes = me.finish(0, 0.1, 0.05, 0.01)
+      const bytes = me.finish(0, 0.1, 0.05, 0.01, 0)
       me.free()
       return bytes
     }

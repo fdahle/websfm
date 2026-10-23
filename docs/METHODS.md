@@ -1617,10 +1617,29 @@ own shell. The cleanup below is part of the method, not a cosmetic option.
   nearest dense-cloud voxel cell (3³ neighbourhood search), then retried on a
   leaf-sized grid for vertices farther out (refilled holes, smoothed creases) before
   falling back to gray.
+- **Tiles** (`tiles: auto`, `core/products/meshTiles.js`): a scene whose solve would
+  not fit one heap (projected 768 MB + 10 KB a sample; ~12 GiB with Memory64) is solved
+  in tiles on a 2-D grid over its two longest axes, each holding ≤ 3 GiB of samples plus
+  ≥ 12 leaves of overlap (the trim's support cell is 4 leaves and reaches 2 cells, plus
+  a cell of lattice rounding). Every tile is solved on
+  the scene's own leaf grid (`build_on_grid`), so marching cubes puts the vertices of
+  neighbouring tiles on the same lattice edges; a tile keeps the triangles whose
+  centroid's cell is in its core, and vertices on a seam are welded by lattice edge,
+  found exactly from the position (two coordinates on the lattice). Every tile trims
+  against the scene's median support (computed as the crate does, over all samples);
+  floating pieces are judged on the stitched mesh by the samples they explain. On a
+  synthetic terrain in 4 tiles: median 0.007 leaf from the one-piece solve, triangle
+  count within 0.4 %, and open edges along the seams as in the one-piece solve (28 vs
+  23 of ~3,340, where the seams meet the scene's edge). With holes crossing the seams
+  the tiles add open edges there (+1.7 % of the seam band at an 8-leaf overlap, +0.6 % at
+  12): hole refill is decided per tile, and a hole only partly inside a tile's domain
+  is not closed there. Moving the trim and refill after the stitch would remove that.
+  Quarry, 95 M points at depth 10 (one solve ≈ 17.7 GB): 16 tiles, 2,831,258 triangles
+  in 834 s, 2.2 % of seam edges open (its trim removes a quarter of the surface).
 - **Knobs**: octree `depth` (detail vs cost/RAM, auto-capped by the spacing),
   `screening` weight (fit tightness; **not** PoissonRecon's samples-per-node, which
   this library does not expose), `trim`, `fillHoles`, `removeFloaters` /
-  `minPiecePct`, `distanceTrim`.
+  `minPiecePct`, `distanceTrim`, `tiles`.
 - **Implementation note**: the solver is a **vendored, rayon-stripped** copy of
   Dimforge's `poisson_reconstruction` (rayon's worker threads panic on threadless
   wasm). Its assembly is restructured without changing the system it solves. The

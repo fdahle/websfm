@@ -60,6 +60,10 @@ pub struct MeshOptions {
     pub hole_area_ratio: f64,
     /// Drop a connected component smaller than this fraction of the largest one's area.
     pub min_component_share: f64,
+    /// The median support the density trim is relative to, when it is given (> 0): a tile
+    /// of a larger scene trims against the whole scene's median, not its own
+    /// (core/products/meshTiles.js supportMedian). 0 = the median over these samples.
+    pub median_support: f64,
 }
 
 /// What each cleanup stage did, for the caller's log and run record. Exposed to JS as a
@@ -129,6 +133,27 @@ fn new_builder(
 ) -> PoissonBuilder {
     let density_depth = max_depth.saturating_sub(DENSITY_DEPTH_BACKOFF).max(1).min(max_depth);
     PoissonBuilder::new(points, normals, screening, density_depth, max_depth, RELAXATION_ITERS)
+}
+
+// As new_builder, on the leaf grid `[ox, oy, oz, leaf]` (a tile of a larger scene).
+fn new_builder_on_grid(
+    points: &[Point3<f64>],
+    normals: &[Vector3<f64>],
+    max_depth: usize,
+    screening: f64,
+    grid: &[f64],
+) -> PoissonBuilder {
+    let density_depth = max_depth.saturating_sub(DENSITY_DEPTH_BACKOFF).max(1).min(max_depth);
+    PoissonBuilder::new_on_grid(
+        points,
+        normals,
+        screening,
+        density_depth,
+        max_depth,
+        RELAXATION_ITERS,
+        Point3::new(grid[0], grid[1], grid[2]),
+        grid[3],
+    )
 }
 
 /// Screened Poisson mesh from oriented points, distance trim only. `pos`/`nrm` are flat
@@ -245,7 +270,7 @@ fn finalize_mesh(
 
     // Density trim, then refill the holes it opened.
     if let Some(s) = &support {
-        let median = s.median_at(points);
+        let median = if opts.median_support > 0.0 { opts.median_support } else { s.median_at(points) };
         stats.median_support = median;
         let thr = opts.density_ratio * median;
         let vs: Vec<f64> = verts.iter().map(|v| s.eval(v[0], v[1], v[2])).collect();
@@ -309,7 +334,7 @@ pub fn last_panic() -> String {
 /// ```text
 ///   let m = PoissonMesher.build(pos, nrm, wgt, depth, screening) // octree + field
 ///   for _ in 0..m.num_layers() { m.solve_step() }                 // solve, report progress
-///   let bytes = m.finish(trim, densityRatio, holeRatio, minShare)  // extract + clean + encode
+///   let bytes = m.finish(trim, densityRatio, holeRatio, minShare, median) // extract + clean + encode
 ///   let stats = m.stats()                                          // MeshStats::to_vec
 ///   m.free()
 /// ```
@@ -338,6 +363,30 @@ impl PoissonMesher {
         PoissonMesher { builder: Some(builder), weights: to_weights(wgt, n), stats: MeshStats::default() }
     }
 
+    /// As [`Self::build`], on a given leaf grid `grid = [ox, oy, oz, leaf]` rather than the
+    /// samples' own bounding box: a tile of a larger scene, solved on the scene's grid so
+    /// neighbouring tiles' vertices fall on the same lattice edges. `max_depth` is the
+    /// number of coarser layers above the leaf. A grid that is not 4 finite numbers with a
+    /// positive leaf builds an empty mesher.
+    pub fn build_on_grid(
+        pos: &[f32],
+        nrm: &[f32],
+        wgt: &[f32],
+        max_depth: u32,
+        screening: f32,
+        grid: &[f64],
+    ) -> PoissonMesher {
+        keep_panic_messages();
+        let n = pos.len() / 3;
+        let grid_ok = grid.len() == 4 && grid.iter().all(|v| v.is_finite()) && grid[3] > 0.0;
+        if n == 0 || nrm.len() < n * 3 || max_depth == 0 || !grid_ok {
+            return PoissonMesher { builder: None, weights: Vec::new(), stats: MeshStats::default() };
+        }
+        let (points, normals) = to_nalgebra(pos, nrm);
+        let builder = new_builder_on_grid(&points, &normals, max_depth as usize, screening as f64, grid);
+        PoissonMesher { builder: Some(builder), weights: to_weights(wgt, n), stats: MeshStats::default() }
+    }
+
     /// Number of multigrid layers to solve (`== max_depth + 1`, or 0 for a degenerate
     /// build). Drives the caller's progress denominator.
     pub fn num_layers(&self) -> usize {
@@ -359,6 +408,7 @@ impl PoissonMesher {
         density_ratio: f32,
         hole_area_ratio: f32,
         min_component_share: f32,
+        median_support: f64,
     ) -> Vec<u8> {
         let Some(builder) = self.builder.take() else {
             return empty_mesh();
@@ -368,6 +418,7 @@ impl PoissonMesher {
             density_ratio: density_ratio as f64,
             hole_area_ratio: hole_area_ratio as f64,
             min_component_share: min_component_share as f64,
+            median_support: if median_support.is_finite() { median_support } else { 0.0 },
         };
         let (poisson, points, iso) = builder.finish_weighted(&self.weights);
         let (bytes, stats) = finalize_mesh(&poisson, &points, &self.weights, iso, &opts);
@@ -863,6 +914,47 @@ mod tests {
     // closed surface centred at the origin whose vertices sit near radius 1. Run in
     // release (`cargo test -p mesh --release`) — the multigrid solve is far too slow
     // unoptimized. Kept small (depth 5, ~2k pts) so release runtime is a few seconds.
+    // On the grid the crate would choose itself (the samples' box, loosened by a leaf),
+    // build_on_grid is build: the same mesh, triangle for triangle. That is what makes a
+    // tile solved on the scene's grid comparable with the untiled solve.
+    #[test]
+    fn build_on_grid_with_the_own_grid_is_build() {
+        let (mut pos, mut nrm) = (Vec::new(), Vec::new());
+        let n = 1500usize;
+        let ga = std::f64::consts::PI * (3.0 - 5.0_f64.sqrt());
+        for i in 0..n {
+            let y = 1.0 - (i as f64 / (n - 1) as f64) * 2.0;
+            let r = (1.0 - y * y).max(0.0).sqrt();
+            let (x, z) = ((ga * i as f64).cos() * r, (ga * i as f64).sin() * r);
+            pos.extend_from_slice(&[x as f32, y as f32, z as f32]);
+            nrm.extend_from_slice(&[x as f32, y as f32, z as f32]);
+        }
+        let depth = 5u32;
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for p in pos.chunks_exact(3) {
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k] as f64);
+                hi[k] = hi[k].max(p[k] as f64);
+            }
+        }
+        let ext = (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f64::max);
+        let leaf = ext / 2f64.powi(depth as i32);
+        let grid = [lo[0] - leaf, lo[1] - leaf, lo[2] - leaf, leaf];
+        let run = |m: &mut PoissonMesher| {
+            for _ in 0..m.num_layers() {
+                m.solve_step();
+            }
+            decode(&m.finish(0.0, 0.1, 0.05, 0.01, 0.0))
+        };
+        let a = run(&mut PoissonMesher::build(&pos, &nrm, &[], depth, 4.0));
+        let b = run(&mut PoissonMesher::build_on_grid(&pos, &nrm, &[], depth, 4.0, &grid));
+        assert!(a.1 > 100);
+        assert_eq!(canonical_triangles(&a.2, &a.3), canonical_triangles(&b.2, &b.3));
+        // A grid that is not one is refused, not solved.
+        let bad = PoissonMesher::build_on_grid(&pos, &nrm, &[], depth, 4.0, &[0.0, 0.0, 0.0]);
+        assert_eq!(bad.num_layers(), 0);
+    }
+
     #[test]
     fn reconstructs_sphere_near_unit_radius() {
         let mut pos: Vec<f32> = Vec::new();

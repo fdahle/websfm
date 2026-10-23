@@ -370,6 +370,17 @@ export const DENSE_TUNING = {
 // colorize) live in defaults.user.js (MESH_DEFAULTS). `settings` from the caller override.
 export const MESH_TUNING = {
   colorSearchRadius: 1, // vertex-colour transfer: search ±N voxel cells (3³ nhood)
+  // Tiled Poisson (meshTiles.js, MESH_DEFAULTS.tiles 'auto'): a scene whose solve would
+  // pass what one solve holds (the worker's `oneSolveBytes`: ~12 GiB with Memory64, the
+  // 32-bit heap otherwise) is solved in tiles of at most `tileHeapBytes` each, which the
+  // faster 32-bit build holds, with at least `tileOverlapCells` leaves of overlap: the
+  // density trim's support cell is 4 leaves and reaches 2 cells, plus a cell of lattice
+  // rounding. Where a trimmed border (a hole) crosses a seam, the tiles can still decide
+  // the refill differently and leave short open edges there (synthetic terrain with holes:
+  // +1.7 % open seam-band edges at 8 leaves, +0.6 % at 12; none without holes).
+  tileHeapBytes: 3 * 2 ** 30,
+  tileOverlapCells: 12,
+  oneSolveBytes: 3.5 * 2 ** 30,
   grayFallback: [180, 180, 180], // colour for a vertex with no dense point nearby
   // Poisson input downsample. A depth-D octree can't resolve detail finer than one leaf
   // cell (extent / 2^D), so feeding it a much denser cloud is wasted work — octree build,

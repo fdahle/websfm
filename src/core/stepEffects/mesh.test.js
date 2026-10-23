@@ -14,5 +14,7 @@ describe('meshEffects', () => {
     expect(off.holes).toMatch(/^Not used/)
     expect(off.floaters).toMatch(/^Off/)
     expect(meshEffects(MESH_DEFAULTS).solve).toMatch(/^No dense cloud/)
+    expect(e.solve).toMatch(/In tiles, welded at their seams, if one solve would not fit/)
+    expect(meshEffects({ ...MESH_DEFAULTS, tiles: 'off' }, { source }).solve).toMatch(/Always in one piece/)
   })
 })

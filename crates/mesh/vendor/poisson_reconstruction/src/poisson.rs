@@ -318,7 +318,39 @@ impl PoissonBuilder {
         let leaf_cell_width = max_extent / (2.0 as Real).powi(max_depth as i32);
         root_aabb.loosen(leaf_cell_width);
         let grid_origin = root_aabb.mins;
+        Self::new_on_grid(
+            points,
+            normals,
+            screening,
+            density_estimation_depth,
+            max_depth,
+            max_relaxation_iters,
+            grid_origin,
+            leaf_cell_width,
+        )
+    }
 
+    /// As [`Self::new`], on a given leaf grid (`grid_origin`, `leaf_cell_width`) instead of
+    /// the points' own bounding box. Solves of neighbouring tiles of one scene on the same
+    /// grid extract vertices on the same lattice edges, which is what lets them be welded
+    /// (websfm: core/products/meshTiles.js). `new` is this grid for the points' own box.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_on_grid(
+        points: &[Point3<Real>],
+        normals: &[Vector3<Real>],
+        screening: Real,
+        density_estimation_depth: usize,
+        max_depth: usize,
+        max_relaxation_iters: usize,
+        grid_origin: Point3<Real>,
+        leaf_cell_width: Real,
+    ) -> Self {
+        assert_eq!(
+            points.len(),
+            normals.len(),
+            "Exactly one normal per point must be provided."
+        );
+        assert!(density_estimation_depth <= max_depth);
         let mut layers = vec![];
         layers.push(PoissonLayer::from_points(points, grid_origin, leaf_cell_width));
 

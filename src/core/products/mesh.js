@@ -10,6 +10,16 @@ import { removeIsolated } from './cloudEdit.js'
 import { createCellIndex } from './cellIndex.js'
 import { pluralize } from '../textFormat.js'
 import { localArray } from '../bigArray.js'
+import {
+  TRIM_DENSITY_BACKOFF,
+  cutToCore,
+  dropSmallPieces,
+  planMeshTiles,
+  poissonGrid,
+  stitchTiles,
+  supportMedian,
+  tileInput,
+} from './meshTiles.js'
 
 // Parse the wasm byte buffer into typed arrays. Layout (little-endian):
 //   header [u32 nVerts, u32 nTris] + f32 positions (3·nVerts) + u32 indices (3·nTris).
@@ -484,6 +494,89 @@ export const POISSON_BYTES_PER_SAMPLE = 10 * 1024
 export const poissonHeapBytes = (points, depth) =>
   POISSON_BASE_BYTES + POISSON_BYTES_PER_SAMPLE * Math.min(points, 2 * 4 ** depth)
 
+// The solve in tiles (meshTiles.js): each tile on the scene's grid with its overlap,
+// floaters kept (a piece a border cuts is none), cut to its core; then the tiles welded
+// along their seams and the small pieces dropped over the whole. Returns the mesh in
+// parseMeshBuffer's shape plus summed stats and { count, seamEdges, openSeamEdges,
+// medianSupport } as `summary`.
+function solveTiled({ sub, grid, tiling, solveArgs, poissonFn, minComponentShare, onLog }) {
+  const g = [...grid.origin, grid.leaf]
+  const nT = tiling.tiles.length
+  onLog(
+    `Mesh: one solve over ${(sub.pos.length / 3).toLocaleString()} samples would need ≈ ` +
+      `${(poissonHeapBytes(sub.pos.length / 3, solveArgs.depth) / 2 ** 30).toFixed(1)} GB — solving in ${nT} tiles ` +
+      `(up to ${Math.max(...tiling.tiles.map((t) => t.samples)).toLocaleString()} samples each, ` +
+      `${tiling.overlap} leaves of overlap, along ${'xyz'[tiling.axes[0]]}/${'xyz'[tiling.axes[1]]})`,
+    'info',
+    'Products',
+  )
+  // Every tile trims against the whole scene's median support, as one solve would.
+  const medianSupport =
+    solveArgs.densityRatio > 0 ? supportMedian(sub.pos, sub.wgt, grid.leaf * 2 ** TRIM_DENSITY_BACKOFF) : 0
+  const parts = []
+  const sum = { extractedTris: 0, distanceRemovedTris: 0, densityRemovedTris: 0, holesFilled: 0, holeTris: 0 }
+  tiling.tiles.forEach((tile, i) => {
+    const input = tileInput(sub, tiling, tile, grid)
+    const out = poissonFn({
+      ...input,
+      ...solveArgs,
+      minComponentShare: 0,
+      medianSupport,
+      grid: g,
+      tile: { index: i, count: nT },
+    })
+    const mesh = parseMeshBuffer(out?.bytes ?? out)
+    const st = parseMeshStats(out?.stats)
+    if (st) {
+      for (const k of Object.keys(sum)) sum[k] += st[k]
+    }
+    parts.push(cutToCore(mesh, tiling, tile, grid))
+  })
+  const stitched = stitchTiles(parts, tiling, grid)
+  // Two leaves, as the crate: a sample on the surface is within a leaf of a vertex.
+  const pieces =
+    minComponentShare > 0
+      ? dropSmallPieces(stitched.pos, stitched.idx, minComponentShare, {
+          samples: sub.pos,
+          weights: sub.wgt,
+          reach: 2 * grid.leaf,
+        })
+      : null
+  const pos = pieces ? pieces.pos : stitched.pos
+  const idx = pieces ? pieces.idx : stitched.idx
+  const share = stitched.seamEdges ? stitched.openSeamEdges / stitched.seamEdges : 0
+  onLog(
+    `Mesh: ${nT} tiles stitched — ${stitched.openSeamEdges.toLocaleString()} of ` +
+      `${stitched.seamEdges.toLocaleString()} seam edges open (${(100 * share).toFixed(2)} %: the surface's own borders ` +
+      'where they cross a seam, and where two tiles end a trimmed area differently)' +
+      (medianSupport ? `; trimmed against the scene's median support ${fmt(medianSupport)}` : ''),
+    'info',
+    'Products',
+  )
+  const stats = {
+    ...sum,
+    components: pieces?.pieces ?? 0,
+    componentsDropped: pieces?.dropped ?? 0,
+    componentDroppedTris: pieces?.droppedTris ?? 0,
+    keptTris: idx.length / 3,
+    medianSupport,
+    leafWidth: grid.leaf,
+  }
+  return {
+    nVerts: pos.length / 3,
+    nTris: idx.length / 3,
+    pos,
+    idx,
+    stats,
+    summary: {
+      count: nT,
+      seamEdges: stitched.seamEdges,
+      openSeamEdges: stitched.openSeamEdges,
+      medianSupport,
+    },
+  }
+}
+
 // Generate a triangle mesh from a flat dense cloud via screened Poisson. `poissonFn` is
 // the injected solver: `poissonFn({ pos, nrm, wgt, depth, screening, trimDist,
 // densityRatio, holeAreaRatio, minComponentShare }) → { bytes, stats }` (the worker wires
@@ -664,19 +757,27 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
   )
 
   const tSolve = now()
-  const out = poissonFn({
-    pos: sub.pos,
-    nrm: sub.nrm,
-    wgt: sub.wgt,
-    depth,
-    screening: cfg.screening,
-    trimDist,
-    densityRatio,
-    holeAreaRatio,
-    minComponentShare,
-  })
-  const { nVerts, nTris, pos: rel, idx } = parseMeshBuffer(out?.bytes ?? out)
-  const stats = parseMeshStats(out?.stats)
+  const solveArgs = { depth, screening: cfg.screening, trimDist, densityRatio, holeAreaRatio, minComponentShare }
+  const grid = poissonGrid(sub.pos, depth)
+  const tiling =
+    cfg.tiles === 'off'
+      ? null
+      : planMeshTiles(sub.pos, depth, grid, {
+          heapFor: poissonHeapBytes,
+          oneSolveBytes: cfg.oneSolveBytes,
+          heapTarget: cfg.tileHeapBytes,
+          overlapCells: cfg.tileOverlapCells,
+        })
+  let tilesSummary = null
+  let solved
+  if (tiling) {
+    solved = solveTiled({ sub, grid, tiling, solveArgs, poissonFn, minComponentShare, onLog })
+    tilesSummary = solved.summary
+  } else {
+    const out = poissonFn({ pos: sub.pos, nrm: sub.nrm, wgt: sub.wgt, ...solveArgs })
+    solved = { ...parseMeshBuffer(out?.bytes ?? out), stats: parseMeshStats(out?.stats) }
+  }
+  const { nVerts, nTris, pos: rel, idx, stats } = solved
   const solveMs = now() - tSolve
   onLog(
     `Mesh: solve produced ${nVerts.toLocaleString()} verts / ${nTris.toLocaleString()} tris in ` +
@@ -711,6 +812,7 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
     minComponentShare,
     trimDist,
     stats,
+    ...(tilesSummary ? { tiles: tilesSummary } : {}),
     solveMs: Math.round(solveMs),
     totalMs: 0,
   }

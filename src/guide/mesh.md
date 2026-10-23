@@ -44,6 +44,21 @@ Higher values pull the surface more tightly toward samples; lower values favour
 smoothness. Excessive screening can reproduce noise, while too little can round edges
 and erase small details.
 
+
+## Tiles
+<!-- param: tiles default: Auto -->
+A scene whose solve would not fit in memory (more than about 12 GB with 64-bit
+WebAssembly memory, 3.5 GB without) is solved in tiles: a grid over the scene's two
+longest axes, each tile with an overlap of at least 8 leaves, all on the same octree grid
+the whole scene would use. Each tile keeps the surface of its own cells, and neighbouring
+tiles are welded where they meet, on the grid edges they share, and every tile trims
+against the whole scene's support level. Continuous surface joins without cracks. Where a
+trimmed area or a hole crosses a seam, the two tiles can end it slightly differently, which
+leaves short open edges along that border; the log counts the open edges along the seams. Small
+floating pieces are judged after the tiles are joined, so a piece a tile border cuts is
+not mistaken for one. On a synthetic terrain the tiled surface lies within a hundredth of
+a leaf of the one-piece solve (median). **Off** always solves in one piece, and a scene too
+large for that stops with a message.
 ## Surface trimming
 <!-- param: trim default: Gentle -->
 **Gentle** removes surface that no points support: the hull Poisson extrapolates

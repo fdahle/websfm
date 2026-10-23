@@ -48,6 +48,11 @@ const effects = computed(() =>
   meshEffects(settings.value, { source: source.value && { name: source.value.name, count: source.value.count } }),
 )
 
+const TILE_OPTIONS = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'off', label: 'Off' },
+]
+
 const TRIM_OPTIONS = [
   { id: 'off', label: 'Off' },
   { id: 'gentle', label: 'Gentle' },
@@ -194,6 +199,10 @@ function run() {
             step="0.5"
             class="field-input"
           />
+        </SettingsField>
+        <SettingsField hint="Auto: in tiles only when one solve would not fit in memory.">
+          <template #label><FieldHelp op="mesh" param="tiles">Tiles</FieldHelp></template>
+          <SegmentedControl v-model="settings.tiles" :options="TILE_OPTIONS" />
         </SettingsField>
       </SettingsStep>
 

@@ -427,6 +427,7 @@ export const MESH_DEFAULTS = {
   minPiecePct: 1, // … below this % of the best-supported piece's support
   distanceTrim: 0, // proximity trim radius in input-sample cells; 0 = off
   colorize: true, // transfer dense-cloud colour onto the mesh vertices
+  tiles: 'auto', // 'auto' | 'off' — solve in tiles when one solve would not fit (meshTiles.js)
 }
 // Mesh quality presets — octree depth is the detail/cost lever (deltas; medium ≡ defaults).
 export const MESH_PRESETS = {

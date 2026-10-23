@@ -10,7 +10,7 @@
  * ```text
  *   let m = PoissonMesher.build(pos, nrm, wgt, depth, screening) // octree + field
  *   for _ in 0..m.num_layers() { m.solve_step() }                 // solve, report progress
- *   let bytes = m.finish(trim, densityRatio, holeRatio, minShare)  // extract + clean + encode
+ *   let bytes = m.finish(trim, densityRatio, holeRatio, minShare, median) // extract + clean + encode
  *   let stats = m.stats()                                          // MeshStats::to_vec
  *   m.free()
  * ```
@@ -28,11 +28,19 @@ export class PoissonMesher {
      */
     static build(pos: Float32Array, nrm: Float32Array, wgt: Float32Array, max_depth: number, screening: number): PoissonMesher;
     /**
+     * As [`Self::build`], on a given leaf grid `grid = [ox, oy, oz, leaf]` rather than the
+     * samples' own bounding box: a tile of a larger scene, solved on the scene's grid so
+     * neighbouring tiles' vertices fall on the same lattice edges. `max_depth` is the
+     * number of coarser layers above the leaf. A grid that is not 4 finite numbers with a
+     * positive leaf builds an empty mesher.
+     */
+    static build_on_grid(pos: Float32Array, nrm: Float32Array, wgt: Float32Array, max_depth: number, screening: number, grid: Float64Array): PoissonMesher;
+    /**
      * Solve any remaining layers, then extract, clean up (see [`MeshOptions`]; each
      * argument ≤ 0 disables its stage) and encode the mesh to the little-endian wire
      * buffer described on [`poisson_mesh`]. Consumes the internal builder — call once.
      */
-    finish(trim_dist: number, density_ratio: number, hole_area_ratio: number, min_component_share: number): Uint8Array;
+    finish(trim_dist: number, density_ratio: number, hole_area_ratio: number, min_component_share: number, median_support: number): Uint8Array;
     /**
      * Number of multigrid layers to solve (`== max_depth + 1`, or 0 for a degenerate
      * build). Drives the caller's progress denominator.
@@ -75,7 +83,8 @@ export interface InitOutput {
     readonly last_panic: () => [number, number];
     readonly poisson_mesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly poissonmesher_build: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
-    readonly poissonmesher_finish: (a: number, b: number, c: number, d: number, e: number) => [number, number];
+    readonly poissonmesher_build_on_grid: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => number;
+    readonly poissonmesher_finish: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly poissonmesher_num_layers: (a: number) => number;
     readonly poissonmesher_solve_step: (a: number) => number;
     readonly poissonmesher_stats: (a: number) => [number, number];

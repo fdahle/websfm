@@ -15,7 +15,10 @@ export function meshEffects(s, { source = null } = {}) {
     ? 'No dense cloud with normals yet: run Densify first.'
     : `Screened Poisson over the ${plural(source.count, 'point')} of "${source.name}", at octree depth ` +
       `${s.depth} (lowered when the cloud is too sparse for it), fitting the points with screening weight ` +
-      `${s.screening}${s.screening === 0 ? ', the smoothest' : ''}.`
+      `${s.screening}${s.screening === 0 ? ', the smoothest' : ''}.` +
+      (s.tiles === 'off'
+        ? ' Always in one piece: a scene too large for one solve stops with a message.'
+        : ' In tiles, welded at their seams, if one solve would not fit in memory.')
 
   const dist = s.distanceTrim > 0 ? `triangles farther than ${s.distanceTrim} sample spacings from any point` : ''
   const trim =

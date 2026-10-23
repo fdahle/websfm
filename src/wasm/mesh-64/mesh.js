@@ -9,7 +9,7 @@
  * ```text
  *   let m = PoissonMesher.build(pos, nrm, wgt, depth, screening) // octree + field
  *   for _ in 0..m.num_layers() { m.solve_step() }                 // solve, report progress
- *   let bytes = m.finish(trim, densityRatio, holeRatio, minShare)  // extract + clean + encode
+ *   let bytes = m.finish(trim, densityRatio, holeRatio, minShare, median) // extract + clean + encode
  *   let stats = m.stats()                                          // MeshStats::to_vec
  *   m.free()
  * ```
@@ -55,6 +55,32 @@ export class PoissonMesher {
         return PoissonMesher.__wrap(ret);
     }
     /**
+     * As [`Self::build`], on a given leaf grid `grid = [ox, oy, oz, leaf]` rather than the
+     * samples' own bounding box: a tile of a larger scene, solved on the scene's grid so
+     * neighbouring tiles' vertices fall on the same lattice edges. `max_depth` is the
+     * number of coarser layers above the leaf. A grid that is not 4 finite numbers with a
+     * positive leaf builds an empty mesher.
+     * @param {Float32Array} pos
+     * @param {Float32Array} nrm
+     * @param {Float32Array} wgt
+     * @param {number} max_depth
+     * @param {number} screening
+     * @param {Float64Array} grid
+     * @returns {PoissonMesher}
+     */
+    static build_on_grid(pos, nrm, wgt, max_depth, screening, grid) {
+        const ptr0 = passArrayF32ToWasm0(pos, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(nrm, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF32ToWasm0(wgt, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArrayF64ToWasm0(grid, wasm.__wbindgen_malloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.poissonmesher_build_on_grid(ptr0, len0, ptr1, len1, ptr2, len2, max_depth, screening, ptr3, len3);
+        return PoissonMesher.__wrap(ret);
+    }
+    /**
      * Solve any remaining layers, then extract, clean up (see [`MeshOptions`]; each
      * argument ≤ 0 disables its stage) and encode the mesh to the little-endian wire
      * buffer described on [`poisson_mesh`]. Consumes the internal builder — call once.
@@ -62,10 +88,11 @@ export class PoissonMesher {
      * @param {number} density_ratio
      * @param {number} hole_area_ratio
      * @param {number} min_component_share
+     * @param {number} median_support
      * @returns {Uint8Array}
      */
-    finish(trim_dist, density_ratio, hole_area_ratio, min_component_share) {
-        const ret = wasm.poissonmesher_finish(this.__wbg_ptr, trim_dist, density_ratio, hole_area_ratio, min_component_share);
+    finish(trim_dist, density_ratio, hole_area_ratio, min_component_share, median_support) {
+        const ret = wasm.poissonmesher_finish(this.__wbg_ptr, trim_dist, density_ratio, hole_area_ratio, min_component_share, median_support);
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
@@ -212,6 +239,13 @@ function getUint8ArrayMemory0() {
 function passArrayF32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4);
     getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayF64ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 8, 8);
+    getFloat64ArrayMemory0().set(arg, ptr / 8);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }
