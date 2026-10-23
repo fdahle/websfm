@@ -1365,6 +1365,9 @@ window.bench = {
     const ref = byName(reference),
       refDem = byName(dem)
     if (!ref || !refDem) return { error: `reference ${reference} or DEM ${dem} not imported` }
+    // A one-band image (a single Sentinel-2 band) imports as a DEM; read it as an
+    // orthophoto, as the raster's kind menu does.
+    if (ref.kind !== 'ortho') await ext.setRasterKind(ref.id, 'ortho')
     if (disablePoses) for (const p of poses.poses) p.enabled = false
     await ext.setRasterAccuracy(refDem.id, { verticalDatum: datum, verticalAccuracy: demSigma })
     if (refSigma) await ext.setRasterAccuracy(ref.id, { horizontalAccuracy: refSigma })
