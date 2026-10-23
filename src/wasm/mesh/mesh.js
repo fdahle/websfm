@@ -102,6 +102,23 @@ export class PoissonMesher {
 if (Symbol.dispose) PoissonMesher.prototype[Symbol.dispose] = PoissonMesher.prototype.free;
 
 /**
+ * Why the solver last panicked ("" if it never did), for the error the caller reports.
+ * @returns {string}
+ */
+export function last_panic() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.last_panic();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * Screened Poisson mesh from oriented points, distance trim only. `pos`/`nrm` are flat
  * `3·N` f32 (world-space; `nrm` unit). `max_depth` is the octree depth (detail vs cost),
  * `screening` the point-fitting weight (0 disables), `trim_dist` the world-unit radius

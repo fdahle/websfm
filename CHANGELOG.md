@@ -326,6 +326,13 @@ Notable changes to websfm. The format follows
   (was 178 million); such a cloud saves, reopens and gets its octree like any other, and
   is drawn through the octree. The merge cells no longer count against the tab's
   buffers, so fusion may use the whole memory budget.
+- **Meshes past 4 GB.** A Poisson solve too large for a 32-bit WebAssembly heap (4 GB)
+  runs on a 64-bit build of the solver (16 GB) in browsers with 64-bit WebAssembly
+  memory, and a 32-bit solve that runs out is retried there. The 64-bit build gives the
+  same mesh and is about a sixth slower, so it runs only when needed; the log says
+  which one ran. A dense cloud past 178 million points can be meshed (quarry, 208 M
+  points, depth 9: 586 k triangles in 3.6 min). A solve past 16 GB stops with a message
+  that says so, instead of a bare "unreachable".
 - **The memory budget follows the machine.** Settings ▸ Compute ▸ Memory safety limit is
   half the memory the browser reports by default and can be raised to all of it; it
   stopped at 6 GB by default and 12 GB by hand, written when Chrome reported at most

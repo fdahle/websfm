@@ -9,6 +9,7 @@ import { MESH_TUNING } from '../tuning.js'
 import { removeIsolated } from './cloudEdit.js'
 import { createCellIndex } from './cellIndex.js'
 import { pluralize } from '../textFormat.js'
+import { localArray } from '../bigArray.js'
 
 // Parse the wasm byte buffer into typed arrays. Layout (little-endian):
 //   header [u32 nVerts, u32 nTris] + f32 positions (3·nVerts) + u32 indices (3·nTris).
@@ -262,7 +263,7 @@ export function subsampleForMesh(pos, nrm, cell, origin = [0, 0, 0]) {
   const n = pos.length / 3
   const [ox, oy, oz] = origin
   if (!(cell > 0)) {
-    const rel = new Float32Array(n * 3)
+    const rel = localArray(Float32Array, n * 3)
     for (let i = 0; i < n; i++) {
       rel[i * 3] = pos[i * 3] - ox
       rel[i * 3 + 1] = pos[i * 3 + 1] - oy
@@ -378,7 +379,7 @@ export function estimatePointSpacing(pos, sampleMax = 20000) {
     const inv = 1 / cell
     // Up to one cell per point: typed, since an imported cloud can pass a Map's 2^24.
     const head = pack.packed ? createCellIndex(Math.min(n, 1 << 22)) : mapIndex()
-    const next = new Int32Array(n)
+    const next = localArray(Int32Array, n)
     const keyOf = (i) =>
       cellKey(
         pack,
@@ -469,6 +470,20 @@ export function recommendMeshDepth(pointCount) {
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 const fmt = (v) => (Math.abs(v) >= 1e-2 && Math.abs(v) < 1e4 ? v.toFixed(3) : v.toExponential(2))
 
+// The Poisson solver's peak heap (crates/mesh) for `points` input samples at `depth`: a
+// fixed part and a share per leaf the surface covers. generateMesh sends about one sample
+// per covered leaf, so it is charged per sample, at most 2·4^depth of them. A smooth
+// terrain spanning the box needs ~4 KB a sample (32-bit build, Chrome 156: 980 MB at
+// depth 8, 1,742 MB at depth 9, 2,860 MB for ~550 k samples at depth 10); a real scene
+// with walls and overhangs more octree per sample: the quarry's 1,477,940 samples at
+// depth 10 peaked at 14.5 GB (the same solve natively). Charged at the real scene's rate,
+// so a smooth one is over-counted. It decides which build runs (workers/ops/mesh.js); the
+// 32-bit one running out still falls back to the 64-bit one.
+export const POISSON_BASE_BYTES = 768 * 2 ** 20
+export const POISSON_BYTES_PER_SAMPLE = 10 * 1024
+export const poissonHeapBytes = (points, depth) =>
+  POISSON_BASE_BYTES + POISSON_BYTES_PER_SAMPLE * Math.min(points, 2 * 4 ** depth)
+
 // Generate a triangle mesh from a flat dense cloud via screened Poisson. `poissonFn` is
 // the injected solver: `poissonFn({ pos, nrm, wgt, depth, screening, trimDist,
 // densityRatio, holeAreaRatio, minComponentShare }) → { bytes, stats }` (the worker wires
@@ -545,8 +560,9 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
       }
     }
     if (kept < n0) {
-      const pos = new dense.pos.constructor(kept * 3)
-      const nrm = new Float32Array(kept * 3)
+      // Local arrays (core/bigArray.js): a cloud past 178 M points makes these over 2 GiB.
+      const pos = localArray(dense.pos.constructor, kept * 3)
+      const nrm = localArray(Float32Array, kept * 3)
       for (let i = 0, o = 0; i < n0; i++) {
         if (!keep[i]) continue
         for (let d = 0; d < 3; d++) {

@@ -1,5 +1,6 @@
-import init, { PoissonMesher } from '../../wasm/mesh/mesh.js'
-import { generateMesh } from '../../core/products/mesh.js'
+import init, * as mesh32 from '../../wasm/mesh/mesh.js'
+import { generateMesh, poissonHeapBytes } from '../../core/products/mesh.js'
+import { bigArrayCaps } from '../../core/bigArray.js'
 
 // Relative cost of the staged phases, for an honest progress fraction. A multigrid
 // layer costs ~3× the one before it (nodes grow with the surface area at each level);
@@ -17,11 +18,16 @@ const EXTRACT_SHARE = 0.4 // × the finest layer's cost
 // is still a hard `terminateAll` (the worker can't service messages mid-solve); staging
 // just bounds each blocking chunk to one layer. `mesher.free()` releases the wasm-side
 // octree in a finally. Returns { bytes, stats } (stats: crates/mesh `MeshStats`).
-function stagedPoisson(emit) {
+// `wasm` is the module of the build that runs it (32- or 64-bit). A panic aborts the solve
+// as a bare `RuntimeError: unreachable`; the error then carries the crate's own message
+// (`last_panic`). After a trap the mesher is still marked borrowed and free() throws: that
+// must not hide the error that matters.
+function stagedPoisson(emit, wasm) {
   return ({ pos, nrm, wgt, depth, screening, trimDist, densityRatio, holeAreaRatio, minComponentShare }) => {
     emit('progress', [0, 1, `Building octree (depth ${depth})…`, 0])
-    const mesher = PoissonMesher.build(pos, nrm, wgt ?? new Float32Array(0), depth >>> 0, screening)
+    let mesher = null
     try {
+      mesher = wasm.PoissonMesher.build(pos, nrm, wgt ?? new Float32Array(0), depth >>> 0, screening)
       const n = mesher.num_layers()
       const finest = Math.pow(LAYER_GROWTH, Math.max(0, n - 1))
       const layerCost = (i) => Math.pow(LAYER_GROWTH, i)
@@ -41,24 +47,96 @@ function stagedPoisson(emit) {
       const stats = mesher.stats()
       emit('progress', [n + 1, n + 1, 'Surface extracted', 1])
       return { bytes, stats }
+    } catch (err) {
+      const why = err instanceof WebAssembly.RuntimeError ? wasm.last_panic?.() : ''
+      if (why) err.message = `${err.message} (${why})`
+      throw err
     } finally {
-      mesher.free()
+      try {
+        mesher?.free()
+      } catch {
+        /* a trapped mesher stays borrowed; the instance is dropped below */
+      }
     }
   }
 }
 
-// Mesh op (screened Poisson). Owns the mesh wasm module (lazy init, like
+// The 32-bit solver's heap stops at 4 GiB, a little of it taken by the module itself.
+const HEAP32_BYTES = 3.5 * 2 ** 30
+
+// Mesh op (screened Poisson). Owns the mesh wasm modules (lazy init, like
 // reconstruction.js gates its own wasm). Pure meshing lives in core/products/mesh.js;
 // the worker just marshals buffers and injects the wasm solver. No rasterise dep.
+// Two builds of the solver: the 32-bit one (crates/mesh), and the Memory64 one
+// (src/wasm/mesh-64, heap up to 16 GiB) where the browser has Memory64. The 64-bit one is
+// ~17 % slower (Poisson 100 k points 30.2 vs 25.6 s, Chrome 156), so it runs only a solve
+// whose projected heap (core/products/mesh.js poissonHeapBytes) passes the 32-bit heap, or
+// one the 32-bit build ran out of memory on. A trap leaves a wasm instance unusable, so
+// after one this worker keeps to the 64-bit build (and the store starts every mesh run on
+// fresh workers). Past the 64-bit heap too, the error says so with the numbers: the
+// quarry's 208 M-point cloud at depth 10 needs 14.5 GB (natively), more than the 16 GiB
+// heap holds once the allocator's growth is counted (tiled Poisson, plan D5, is the fix).
 export function makeMeshOps() {
   let initPromise = null
   const ensureWasm = () => (initPromise ??= init())
+  let init64 = null
+  const ensureWasm64 = () =>
+    (init64 ??= import('../../wasm/mesh-64/mesh.js').then(async (m) => {
+      await m.default()
+      return m
+    }))
+  let broken32 = false
+
+  // The solver for one generateMesh call: picks the build when the solve's size is known.
+  function poissonFor(emit, wasm64) {
+    return (args) => {
+      const need = poissonHeapBytes(args.pos.length / 3, args.depth)
+      const big = !!wasm64 && (broken32 || need > HEAP32_BYTES)
+      if (wasm64) {
+        emit('log', [
+          `Mesh: Poisson heap ≈ ${(need / 2 ** 30).toFixed(1)} GB → ${big ? '64-bit (Memory64)' : '32-bit'} solver` +
+            (broken32 ? ' (the 32-bit one ran out of memory earlier in this worker)' : ''),
+          'info',
+          'Products',
+        ])
+      }
+      const run64 = () => {
+        try {
+          return stagedPoisson(emit, wasm64)(args)
+        } catch (err) {
+          if (!(err instanceof WebAssembly.RuntimeError) || wasm64.last_panic()) throw err
+          throw new Error(
+            `the Poisson solve needs more memory than the 16 GB a 64-bit WebAssembly module holds ` +
+              `(≈ ${(need / 2 ** 30).toFixed(1)} GB projected, ${(args.pos.length / 3).toLocaleString()} samples at ` +
+              `depth ${args.depth}). Lower the quality (depth), or set a Region around part of the scene.`,
+          )
+        }
+      }
+      if (big) return run64()
+      try {
+        return stagedPoisson(emit, mesh32)(args)
+      } catch (err) {
+        // Out of memory aborts without a panic message; a panic is a bug that the other
+        // build would only repeat.
+        if (!wasm64 || !(err instanceof WebAssembly.RuntimeError) || mesh32.last_panic()) throw err
+        broken32 = true
+        emit('log', [
+          `Mesh: the 32-bit solver stopped (${err.message}, most likely out of its 4 GB heap) — solving again ` +
+            'on the 64-bit one',
+          'warn',
+          'Products',
+        ])
+        return run64()
+      }
+    }
+  }
 
   // Build a triangle mesh from the dense cloud. Input carries the dense buffers
   // (transferred in by the store); we round-trip them home (same convention as
   // densify) so the store keeps its dense cloud usable afterwards.
   async function meshify([input], { emit }) {
     await ensureWasm()
+    const wasm64 = bigArrayCaps().memory64 ? await ensureWasm64().catch(() => null) : null
     const { dense, settings = {} } = input
     if (!dense?.pos || !(dense.count > 0)) {
       emit('log', ['Mesh: no dense cloud to mesh', 'warn', 'Products'])
@@ -66,7 +144,7 @@ export function makeMeshOps() {
     }
     emit('progress', [0, 1, 'Poisson solve…'])
     const t0 = performance.now()
-    const mesh = generateMesh(dense, stagedPoisson(emit), settings, (m, l, c) => emit('log', [m, l, c]))
+    const mesh = generateMesh(dense, poissonFor(emit, wasm64), settings, (m, l, c) => emit('log', [m, l, c]))
     emit('log', [
       `Mesh: built ${mesh.nVerts} vertices / ${mesh.count} triangles ` +
         `in ${((performance.now() - t0) / 1000).toFixed(1)}s`,

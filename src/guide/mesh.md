@@ -30,6 +30,14 @@ cloud is too sparse for the depth you choose, the depth is lowered automatically
 and the log says why. A depth that is high relative to the point count mostly
 creates empty detail, and the modal warns you.
 
+The solve's memory grows with the surface it covers and quadruples with each level:
+about 1 GB at depth 8 over a smooth terrain, and 14 GB at depth 10 over a 1 km quarry
+with pit walls. A solve too large for the 4 GB a 32-bit WebAssembly module can hold runs
+on the 64-bit build instead, which holds 16 GB, in browsers with 64-bit WebAssembly
+memory (Chrome, Edge, Firefox). It is about a sixth slower, so it runs only when needed;
+the log says which build a mesh used. A solve past 16 GB stops with a message saying so:
+lower the quality, or set a Region around part of the scene.
+
 ## Screening weight
 <!-- param: screening default: 4 -->
 Higher values pull the surface more tightly toward samples; lower values favour

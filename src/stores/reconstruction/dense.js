@@ -33,7 +33,7 @@ import { DENSE_TUNING } from '../../core/tuning.js'
 import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
-import { shareableArray } from '../../core/bigArray.js'
+import { postableCopy, shareableArray } from '../../core/bigArray.js'
 
 // The dense pipeline, split out of useReconstructionStore: Stage A depth maps
 // (PatchMatch MVS in the workers, persisted per image), the saved-map filter,
@@ -830,9 +830,11 @@ export function createDense({
       log('Mesh: no point of the source lies inside the region', 'warn', 'Products')
       return
     }
-    const posCopy = clipped ? clipped.pos : dense.pos.slice()
-    const colCopy = clipped ? (clipped.col ?? null) : dense.col?.slice() || null
-    const nrmCopy = clipped ? clipped.nrm : dense.nrm.slice()
+    // A shared cloud (core/bigArray.js, past 178 M points) goes as a view of itself:
+    // nothing can detach it, and a copy would be one buffer over 2 GiB.
+    const posCopy = clipped ? clipped.pos : postableCopy(dense.pos)
+    const colCopy = clipped ? (clipped.col ?? null) : dense.col ? postableCopy(dense.col) : null
+    const nrmCopy = clipped ? clipped.nrm : postableCopy(dense.nrm)
     const input = {
       dense: { count: clipped ? clipped.count : dense.count, pos: posCopy, col: colCopy, nrm: nrmCopy },
       settings: { ...meshSettings, mergeCell },
@@ -841,6 +843,9 @@ export function createDense({
     if (colCopy) transfer.push(colCopy.buffer)
     transfer.push(nrmCopy.buffer)
     reconStatus.value = 'running'
+    // Fresh workers: a solve that trapped (out of a wasm heap) leaves its worker's mesh
+    // module unusable, and idle workers keep their last run's garbage in the pool.
+    releaseIdleWorkers()
     try {
       const { mesh } = await workerMeshify(input, {
         onLog: (m, l, c) => log(m, l, c),

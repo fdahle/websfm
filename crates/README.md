@@ -72,6 +72,23 @@ Built with `rustc 1.101.0-nightly (2026-10-20)`. The link flags (shared, importe
 memory; the TLS and heap symbols) are in the script because recent Rust no longer adds
 them for `+atomics`, and wasm-bindgen refuses the module without them.
 
+## Memory64
+
+`mesh` is also built for `wasm64-unknown-unknown` (`scripts/build-wasm64.mjs`, run by
+`build:wasm`) into `src/wasm/mesh-64`: the same solver with a heap of up to 16 GiB instead
+of 4. The 32-bit build's heap is what limits a Poisson solve (depth 8 over a terrain
+already takes about 1 GB). wasm64 has no prebuilt standard library, so this too needs
+nightly with `rust-src` (`-Z build-std`), and wasm-pack does not take the target, so the
+script runs cargo and the `wasm-bindgen` CLI of the `Cargo.lock` version (on `PATH`, or the
+copy wasm-pack downloaded). It is built without `simd128`: `wide` 0.7 (under nalgebra)
+imports `core::arch::wasm32` whenever SIMD is on, and the solver doesn't gain from it.
+
+The 64-bit build is about 17 % slower (Poisson, 100 k points, Chrome 156), so the mesh op
+(`workers/ops/mesh.js`) runs it only for a solve whose projected heap passes the 32-bit
+one, or after the 32-bit one ran out, and only where the browser has Memory64. The
+threaded `reconstruction` cannot be built for wasm64 yet: `js-sys`'s threaded futures
+call `core::arch::wasm32` atomics.
+
 ## Profiles
 
 Release profile (`opt-level=3`, `lto`, `codegen-units=1`, `panic="abort"`) lives

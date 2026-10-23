@@ -280,6 +280,27 @@ fn finalize_mesh(
     (encode_mesh(&verts, &tris), stats)
 }
 
+// The message of the last panic. The release build aborts on panic, which reaches JS as a
+// bare `RuntimeError: unreachable`; the hook keeps the reason for `last_panic`.
+static LAST_PANIC: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+fn keep_panic_messages() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        std::panic::set_hook(Box::new(|info| {
+            if let Ok(mut last) = LAST_PANIC.lock() {
+                *last = info.to_string();
+            }
+        }))
+    });
+}
+
+/// Why the solver last panicked ("" if it never did), for the error the caller reports.
+#[wasm_bindgen]
+pub fn last_panic() -> String {
+    LAST_PANIC.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
 /// Staged, JS-driven wrapper around the screened-Poisson solve. Exposes the phases the
 /// worker steps through so it can paint per-layer progress (the whole solve is a single
 /// blocking wasm call otherwise — the "stuck at Poisson solve" symptom) and keep the
@@ -307,6 +328,7 @@ impl PoissonMesher {
     /// [`poisson_mesh`]. An empty / degenerate input yields a mesher with zero layers
     /// whose `finish` returns an empty mesh.
     pub fn build(pos: &[f32], nrm: &[f32], wgt: &[f32], max_depth: u32, screening: f32) -> PoissonMesher {
+        keep_panic_messages();
         let n = pos.len() / 3;
         if n == 0 || nrm.len() < n * 3 || max_depth == 0 {
             return PoissonMesher { builder: None, weights: Vec::new(), stats: MeshStats::default() };

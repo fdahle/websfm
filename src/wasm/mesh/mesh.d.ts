@@ -50,6 +50,11 @@ export class PoissonMesher {
 }
 
 /**
+ * Why the solver last panicked ("" if it never did), for the error the caller reports.
+ */
+export function last_panic(): string;
+
+/**
  * Screened Poisson mesh from oriented points, distance trim only. `pos`/`nrm` are flat
  * `3·N` f32 (world-space; `nrm` unit). `max_depth` is the octree depth (detail vs cost),
  * `screening` the point-fitting weight (0 disables), `trim_dist` the world-unit radius
@@ -67,6 +72,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_poissonmesher_free: (a: number, b: number) => void;
+    readonly last_panic: () => [number, number];
     readonly poisson_mesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly poissonmesher_build: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
     readonly poissonmesher_finish: (a: number, b: number, c: number, d: number, e: number) => [number, number];
@@ -74,8 +80,8 @@ export interface InitOutput {
     readonly poissonmesher_solve_step: (a: number) => number;
     readonly poissonmesher_stats: (a: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
-    readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_start: () => void;
 }
 

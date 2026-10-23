@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  poissonHeapBytes,
   parseMeshBuffer,
   transferVertexColors,
   generateMesh,
@@ -467,5 +468,26 @@ describe('recommendMeshDepth', () => {
     expect(recommendMeshDepth(100)).toBe(6) // clamp low
     expect(recommendMeshDepth(1_000_000)).toBe(10) // round(0.5·~19.9)
     expect(recommendMeshDepth(1e12)).toBe(12) // clamp high
+  })
+})
+
+describe('poissonHeapBytes', () => {
+  it('covers the measured heaps, the real scene within a fifth', () => {
+    // Peak heaps (MB) for the samples generateMesh sends (about one per covered leaf):
+    // smooth synthetic terrains on the 32-bit build (Chrome 156), and the quarry's dense
+    // cloud at depth 10 (the same solve run natively).
+    for (const [samples, depth, mb] of [
+      [4 ** 8, 8, 980],
+      [4 ** 9, 9, 1742],
+      [550000, 10, 2860],
+      [1477940, 10, 14117],
+    ])
+      expect(poissonHeapBytes(samples, depth)).toBeGreaterThan(mb * 2 ** 20)
+    expect(poissonHeapBytes(1477940, 10)).toBeLessThan(1.2 * 14117 * 2 ** 20)
+  })
+
+  it('grows with the samples, up to what the depth can hold', () => {
+    expect(poissonHeapBytes(2e5, 9)).toBeGreaterThan(poissonHeapBytes(1e5, 9))
+    expect(poissonHeapBytes(1e9, 8)).toBe(poissonHeapBytes(2 * 4 ** 8, 8))
   })
 })
