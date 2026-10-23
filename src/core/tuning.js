@@ -343,10 +343,12 @@ export const DENSE_TUNING = {
   // Over budget at the requested sample step: re-plan at 2× (then 4×) the step before
   // refusing (fusionPlan.js). 1 = never coarsen.
   fuseAutoStepMax: 4,
-  // Workers fusion splits over (store densifyParallel). 1 = one worker: fusion is bound by
-  // plane reads, and 8 workers on quarry took 630 s vs 557 s (plan 262 s of re-reads +
-  // slabs contending for OPFS). Kept for machines / storage where that turns around.
-  fuseWorkers: 1,
+  // Most workers fusion splits over (store densifyParallel; at most POOL_SIZE, fewer when
+  // the plan cannot hold their inputs in the budget and the tab's buffer pool). It was 1
+  // while 8 workers ran slower (quarry 630 vs 557 s, bound by plane reads); with the view
+  // cap, light pre-passes and slabs in shared memory, quarry at Medium (347 maps, 95 M
+  // points) 478 → 308 s, at half the merge cell (208 M points) 922 → 200 s, the same cloud.
+  fuseWorkers: 8,
   // ── Post-fusion isolated-cell removal (WS4, gated by removeIsolated) ──
   // Only low-support cells are tested (a ≥3-pixel cell is never a floater), so this stays
   // O(noise tail). A tested cell survives if ≥ isolatedMinNeighbors of its 26 (radius 1)

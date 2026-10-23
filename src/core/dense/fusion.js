@@ -638,7 +638,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
     const slabCells = acc.count
     counters.cells += slabCells
     // Straight into the cloud's layout, releasing the accumulator on the way.
-    const { degenerate, ...part } = acc.finalizeCloud()
+    const { degenerate, ...part } = acc.finalizeCloud({ shared: tiled })
     counters.degenerate += degenerate
     acc = null
     counters.finishMs += now() - tFinish

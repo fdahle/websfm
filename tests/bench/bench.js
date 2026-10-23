@@ -43,6 +43,7 @@ import {
 } from '/src/core/defaults.user.js'
 import { learnedDetector } from '/src/core/features/learnedDetectors.js'
 import { LOD_MIN_POINTS } from '/src/core/lod/build.js'
+import { DENSE_TUNING } from '/src/core/tuning.js'
 import { MODEL_CACHE_NAME, modelUrl } from '/src/core/models/registry.js'
 import { cameraPositionCheck, gcpCheck } from '/src/core/eval/positionCheck.js'
 import { applySimilarity } from '/src/core/products/georef.js'
@@ -650,8 +651,15 @@ window.bench = {
       // `mergeCell` (world units) overrides fusion's GSD-derived merge cell.
       ...(v.mergeCell > 0 ? { mergeCell: v.mergeCell } : {}),
     }
+    // `fuseWorkers` overrides DENSE_TUNING.fuseWorkers for this run (parallel fusion).
+    const fuseWorkers0 = DENSE_TUNING.fuseWorkers
+    if (overrides.fuseWorkers > 0) DENSE_TUNING.fuseWorkers = overrides.fuseWorkers
     const t0 = performance.now()
-    await recon.densify(settings, report)
+    try {
+      await recon.densify(settings, report)
+    } finally {
+      DENSE_TUNING.fuseWorkers = fuseWorkers0
+    }
     const dense = recon.clouds.filter((c) => c.kind === 'dense')
     return { settings, seconds: (performance.now() - t0) / 1000, points: dense.reduce((n, c) => n + (c.count ?? 0), 0) }
   },

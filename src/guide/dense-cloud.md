@@ -141,6 +141,9 @@ in one piece would exceed the memory budget (Settings ▸ Compute), fusion build
 slabs along the scene's longest axis instead ("fusing in N slabs"), keeping only one
 slab's working memory at a time. The cloud is identical either way; the slabs only
 cost extra reading time, because a depth map that reaches two slabs is read for both.
+Over saved depth maps (16 or more), fusion spreads its slabs over up to 8 workers, as
+many as the memory budget holds ("N slabs on K workers"): on 347 maps at Medium that
+took 5 instead of 8 minutes, and the cloud is the same.
 If the finished cloud itself cannot fit (it is held twice while the slabs are
 joined), fusion re-plans at double the sample step, a quarter of the pixels, and
 warns in the log; it tries again up to a step of 4 px. Only if that still does not fit

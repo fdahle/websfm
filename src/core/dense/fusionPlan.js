@@ -478,6 +478,7 @@ function* planSteps(maps, opts, onLog, hooks) {
       workers: p.workers,
       accumulatorsInPool: !caps.wasm,
       sharedPastPlain: caps.shared,
+      slabsShared: caps.shared,
     }).total
   const fits = (p) => (!budget || p.total <= budget) && (!poolCap || poolOf(p) <= poolCap)
   onLog(

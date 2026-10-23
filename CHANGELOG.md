@@ -319,6 +319,13 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Fusion on all workers.** Over saved depth maps, fusion spreads its slabs over up
+  to 8 workers, as many as the memory budget holds; the finished slabs wait in
+  WebAssembly memory, outside the tab's buffers. Quarry, 347 maps: 478 → 308 s at
+  Medium, 922 → 200 s at half the merge cell (208 M points), the same cloud.
+- **WebAssembly memories are shared out.** A tab holds only about 125 of them (Chrome
+  reserves address space for each), so arrays made together share one, and an
+  allocation the browser refuses falls back to an ordinary buffer where it fits.
 - **Dense clouds past the browser's buffer limits.** Fusion keeps its merge cells, and
   a finished cloud past 2 GB, in WebAssembly memory, which Chrome's 2 GB per-buffer cap
   and 16 GB of buffers per tab do not apply to. One piece of fusion holds up to about

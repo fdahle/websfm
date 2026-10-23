@@ -231,5 +231,8 @@ describe('limits past ArrayBuffers', () => {
     expect(projectDensifyPoolBytes({ ...big, accumulatorsInPool: false, sharedPastPlain: true }).total).toBe(0)
     const tiled = projectDensifyPoolBytes({ ...big, tileCells: 1e8, accumulatorsInPool: false, sharedPastPlain: true })
     expect(tiled.assemble).toBe(2 * 1e8 * 27 + 3 * 2e8)
+    // Slabs in shared memory: only the joined cloud's plain colour is left.
+    const shared = { ...big, tileCells: 1e8, accumulatorsInPool: false, sharedPastPlain: true, slabsShared: true }
+    expect(projectDensifyPoolBytes(shared).assemble).toBe(3 * 2e8)
   })
 })

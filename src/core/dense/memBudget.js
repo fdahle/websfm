@@ -185,10 +185,11 @@ export function workingPixels(width, height, maxDim) {
 // sums (12) + Uint32 count (4) + Float64 packed key (8) = 60 B, plus the
 // open-addressing index — an Int32 table kept at load ≤ ½, so ≤ 16 B/cell. Fusion
 // presizes the accumulator from the measured cell count, so there is no doubling
-// slack to charge for.
-// Finishing a slab writes the cloud's own layout while it releases the accumulator
-// (voxelAccumulator finalizeCloud), so it peaks below this and needs no term of its own.
-export const DENSIFY_CELL_BYTES = 76
+// slack to charge for. That is 76 B while accumulating. Finishing a slab drops the index
+// and writes the cloud's own layout (27 B) beside the sums, which are one memory freed
+// as a whole (voxelAccumulator finalizeCloud: wasm memories are few, core/bigArray.js),
+// so the peak is 60 + 27 = 87 B a cell.
+export const DENSIFY_CELL_BYTES = 87
 // The most cells one accumulator may hold. Its largest arrays are the index table, an
 // Int32 power of two at least twice the capacity, and the Float64 sums (8 B a cell, as
 // large). They stay in the worker (core/bigArray.js localArray): with plain buffers
@@ -262,7 +263,9 @@ export const DENSIFY_CLOUD_BYTES_PER_CELL = 27
 // same plan as projectDensifyPeakBytes. The inputs always are; the accumulators are not
 // when they are wasm memory (`accumulatorsInPool: false`, core/bigArray.js localArray);
 // a cloud's array is not when it passes 2 GiB and shared memory takes it
-// (`sharedPastPlain`, shareableArray). Returns { fusing, assemble, total }.
+// (`sharedPastPlain`, shareableArray), and the slabs of a tiled run are not when they are
+// in shared memory whatever their size (`slabsShared`, voxelAccumulator finalizeCloud).
+// Returns { fusing, assemble, total }.
 export function projectDensifyPoolBytes({
   inputBytes,
   cells,
@@ -270,15 +273,17 @@ export function projectDensifyPoolBytes({
   workers = 1,
   accumulatorsInPool = true,
   sharedPastPlain = false,
+  slabsShared = false,
 }) {
   const p = projectDensifyPeakBytes({ inputBytes, cells, tileCells, workers })
   const t = p.tileCells
   const plain = (bytes) => (sharedPastPlain && bytes > MAX_BUFFER_BYTES ? 0 : bytes)
   const cloud = (n) => plain(12 * n) + plain(3 * n) + plain(12 * n)
   // Finished slabs are clouds of up to `t` cells each.
-  const finished = t > 0 ? (p.finished / (DENSIFY_CLOUD_BYTES_PER_CELL * t)) * cloud(t) : 0
+  const slab = t < cells && slabsShared ? 0 : cloud(t)
+  const finished = t > 0 ? (p.finished / (DENSIFY_CLOUD_BYTES_PER_CELL * t)) * slab : 0
   const fusing = p.input + (accumulatorsInPool ? p.accumulator : 0) + finished
-  const assemble = t < cells ? (cells / t) * cloud(t) + cloud(cells) : 0
+  const assemble = t < cells ? (cells / t) * slab + cloud(cells) : 0
   return { fusing, assemble, total: Math.max(fusing, assemble) }
 }
 

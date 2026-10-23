@@ -85,7 +85,22 @@ export function setBigArrayCaps(next = null) {
 const refused = (bytes) =>
   new RangeError(`Array buffer allocation failed (${bytes.toLocaleString()} bytes in one array)`)
 
-function wasmBacked(T, n, bytes, shared) {
+// Address space, not bytes, is what wasm memories run out of. V8 reserves ~8 GiB for each
+// wasm32 memory (its guard region) and 16 GiB for each Memory64 one, out of ~1 TiB for
+// the process, page and workers together: Chrome 156 made 125 wasm32 or 62 Memory64
+// memories of 64 MiB, then refused ("could not allocate memory"), and the app's own wasm
+// modules hold some. So arrays made together share one memory (`localArrays`,
+// `shareableArrays`, `sharedArrays`): a memory is freed once all its arrays are
+// unreachable. A refused memory falls back to plain arrays where they fit.
+const wasmBuffers = new WeakSet() // non-shared wasm memories: cannot be transferred
+const ALIGN = 16
+const sizeOf = ([T, n]) => n * T.BYTES_PER_ELEMENT
+const padded = (bytes) => Math.ceil(bytes / ALIGN) * ALIGN
+const totalOf = (specs) => specs.reduce((t, s) => t + padded(sizeOf(s)), 0)
+
+// The arrays of `specs` ([[T, n], …]) in one new memory, or null when the engine refuses it.
+function wasmGroup(specs, shared) {
+  const bytes = totalOf(specs)
   const pages = Math.max(1, Math.ceil(bytes / PAGE))
   let mem
   try {
@@ -94,34 +109,64 @@ function wasmBacked(T, n, bytes, shared) {
         ? new WebAssembly.Memory({ address: 'i64', initial: BigInt(pages), maximum: BigInt(pages), shared })
         : new WebAssembly.Memory({ initial: pages, maximum: pages, shared })
   } catch {
-    throw refused(bytes)
+    return null
   }
-  if (mem.buffer.byteLength < bytes) throw refused(bytes) // `address` ignored: no Memory64
-  return new T(mem.buffer, 0, n)
+  if (mem.buffer.byteLength < bytes) return null // `address` ignored: no Memory64
+  if (!shared) wasmBuffers.add(mem.buffer)
+  let off = 0
+  return specs.map(([T, n]) => {
+    const a = new T(mem.buffer, off, n)
+    off += padded(n * T.BYTES_PER_ELEMENT)
+    return a
+  })
 }
 
-/** A typed array of `n` zeroed elements that stays in this worker; from LOCAL_MIN_BYTES
- *  it is wasm memory, outside the ArrayBuffer pool. */
-export function localArray(T, n, { minBytes = LOCAL_MIN_BYTES } = {}) {
-  const bytes = n * T.BYTES_PER_ELEMENT
-  const c = bigArrayCaps()
-  if (!c.wasm || bytes < minBytes) {
-    if (bytes > MAX_BUFFER_BYTES) throw refused(bytes)
+const plainAll = (specs) =>
+  specs.map(([T, n]) => {
+    if (n * T.BYTES_PER_ELEMENT > MAX_BUFFER_BYTES) throw refused(n * T.BYTES_PER_ELEMENT)
     return new T(n)
-  }
-  if (bytes > c.maxLocalBytes) throw refused(bytes)
-  return wasmBacked(T, n, bytes, false)
+  })
+
+// One memory for the group where it fits one, else one per array; plain arrays where the
+// engine refuses a memory (and they fit a plain buffer).
+function inWasm(specs, shared, maxBytes) {
+  if (totalOf(specs) <= maxBytes) return wasmGroup(specs, shared) ?? plainAll(specs)
+  if (specs.length > 1) return specs.map((s) => inWasm([s], shared, maxBytes)[0])
+  throw refused(sizeOf(specs[0]))
 }
 
-/** A typed array of `n` zeroed elements that may be posted to the page or another
- *  worker: plain up to MAX_BUFFER_BYTES (as before), shared wasm memory past it. */
-export function shareableArray(T, n, { maxPlainBytes = MAX_BUFFER_BYTES } = {}) {
-  const bytes = n * T.BYTES_PER_ELEMENT
-  if (bytes <= maxPlainBytes) return new T(n)
+/** Typed arrays ([[T, n], …], zeroed) that stay in this worker: from LOCAL_MIN_BYTES
+ *  together, they share one wasm memory, outside the ArrayBuffer pool. */
+export function localArrays(specs, { minBytes = LOCAL_MIN_BYTES } = {}) {
   const c = bigArrayCaps()
-  if (!c.shared || bytes > c.maxShareableBytes) throw refused(bytes)
-  return wasmBacked(T, n, bytes, true)
+  if (!c.wasm || totalOf(specs) < minBytes) return plainAll(specs)
+  return inWasm(specs, false, c.maxLocalBytes)
 }
+
+/** Typed arrays that may be posted to the page or another worker: plain while each fits
+ *  `maxPlainBytes` (MAX_BUFFER_BYTES, as before), else together in shared wasm memory. */
+export function shareableArrays(specs, { maxPlainBytes = MAX_BUFFER_BYTES } = {}) {
+  if (specs.every((s) => sizeOf(s) <= maxPlainBytes)) return plainAll(specs)
+  const c = bigArrayCaps()
+  if (!c.shared) return plainAll(specs)
+  return inWasm(specs, true, c.maxShareableBytes)
+}
+
+/** Typed arrays in shared memory from LOCAL_MIN_BYTES together, whatever their size, where
+ *  the page is cross-origin isolated: posted uncopied and outside the ArrayBuffer pool.
+ *  As shareableArrays where shared memory is not available. */
+export function sharedArrays(specs) {
+  const c = bigArrayCaps()
+  if (!c.shared || totalOf(specs) < LOCAL_MIN_BYTES) return shareableArrays(specs)
+  return inWasm(specs, true, c.maxShareableBytes)
+}
+
+/** One typed array of `n` zeroed elements; see localArrays. */
+export const localArray = (T, n, opts) => localArrays([[T, n]], opts)[0]
+/** One typed array of `n` zeroed elements; see shareableArrays. */
+export const shareableArray = (T, n, opts) => shareableArrays([[T, n]], opts)[0]
+/** One typed array of `n` zeroed elements; see sharedArrays. */
+export const sharedArray = (T, n) => sharedArrays([[T, n]])[0]
 
 /** The largest single array `localArray` / `shareableArray` can make here, in bytes. */
 export const maxLocalArrayBytes = () => bigArrayCaps().maxLocalBytes
@@ -138,13 +183,14 @@ export const isSharedArray = (arr) => !!arr && isShared(arr.buffer)
 export const postableCopy = (arr, n = arr.length) => (isSharedArray(arr) ? arr.subarray(0, n) : arr.slice(0, n))
 
 /** A postMessage transfer list from buffers, typed arrays, other transferables (ports,
- *  bitmaps) or nulls: views by their buffer, shared buffers left out (they cannot be
- *  transferred, and are shared anyway), each item once. */
+ *  bitmaps) or nulls: views by their buffer, each item once. Shared buffers are left out
+ *  (they cannot be transferred, and are shared anyway), and so are local arrays' wasm
+ *  memories, which cannot be detached: those are copied. */
 export function transferList(items) {
   const out = new Set()
   for (const x of items ?? []) {
     const b = ArrayBuffer.isView(x) ? x.buffer : x
-    if (b && !isShared(b)) out.add(b)
+    if (b && !isShared(b) && !wasmBuffers.has(b)) out.add(b)
   }
   return [...out]
 }

@@ -5,7 +5,7 @@
 // Math.floor(coord / cell), everywhere.
 
 import { DENSE_TUNING } from '../tuning.js'
-import { localArray, shareableArray } from '../bigArray.js'
+import { localArray, localArrays, shareableArray, shareableArrays, sharedArrays } from '../bigArray.js'
 
 /**
  * Spatial (voxel) merge of a fused point set: collapse points that fall in the same
@@ -91,8 +91,10 @@ export function mix32(h) {
 // `capacity` presizes the slot arrays and the table (fusion passes its measured cell
 // count), so a run that stays within it never reallocates.
 // The sums and the index stay in this worker, so they are local arrays (core/bigArray.js):
-// past 64 MiB each is wasm memory, outside the tab's 16 GiB ArrayBuffer pool, and may
-// pass 2 GiB. The finished cloud crosses to the page, so its arrays are shareable.
+// past 64 MiB, wasm memory outside the tab's 16 GiB ArrayBuffer pool, which may pass
+// 2 GiB. The 11 per-cell arrays share one memory and the index another (wasm memories are
+// few: core/bigArray.js), and the finished cloud's three arrays one, shareable, as it
+// crosses to the page.
 export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {}) {
   const inv = 1 / cellSize
   const ix0 = Math.floor(bounds.minX * inv),
@@ -117,20 +119,24 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     n = 0,
     nGrid = 0
   // keyOf[s]: the packed key of an in-grid slot, −1 for an overflow slot.
-  let keyOf = localArray(Float64Array, cap)
-  let sx = localArray(Float64Array, cap),
-    sy = localArray(Float64Array, cap),
-    sz = localArray(Float64Array, cap)
-  let sr = localArray(Uint32Array, cap),
-    sg = localArray(Uint32Array, cap),
-    sb = localArray(Uint32Array, cap)
+  // keyOf, the position (F64), colour (U32) and normal (F32) sums, the count: one group.
   // World-space normal sums (Phase: Poisson meshing). Averaging unit normals then
   // renormalizing is a valid orientation estimate; the k coincident shell points a
   // surface produces all carry ~the same normal, so the sum stays well-conditioned.
-  let snx = localArray(Float32Array, cap),
-    sny = localArray(Float32Array, cap),
-    snz = localArray(Float32Array, cap)
-  let cnt = localArray(Uint32Array, cap)
+  const slotTypes = [
+    Float64Array,
+    Float64Array,
+    Float64Array,
+    Float64Array,
+    Uint32Array,
+    Uint32Array,
+    Uint32Array,
+    Float32Array,
+    Float32Array,
+    Float32Array,
+    Uint32Array,
+  ]
+  let [keyOf, sx, sy, sz, sr, sg, sb, snx, sny, snz, cnt] = localArrays(slotTypes.map((T) => [T, cap]))
   let removed = 0 // cells zeroed by filterIsolated (WS4); excluded from count + finalize
   // Open-addressing index (linear probing): table[i] = slot, −1 = empty. Power-of-two
   // size, load kept ≤ ½.
@@ -167,22 +173,10 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
         : undefined
   const grow = () => {
     cap *= 2
-    const g = (a, T) => {
-      const b = localArray(T, cap)
-      b.set(a)
-      return b
-    } // tail zero-filled
-    keyOf = g(keyOf, Float64Array)
-    sx = g(sx, Float64Array)
-    sy = g(sy, Float64Array)
-    sz = g(sz, Float64Array)
-    sr = g(sr, Uint32Array)
-    sg = g(sg, Uint32Array)
-    sb = g(sb, Uint32Array)
-    snx = g(snx, Float32Array)
-    sny = g(sny, Float32Array)
-    snz = g(snz, Float32Array)
-    cnt = g(cnt, Uint32Array)
+    const next = localArrays(slotTypes.map((T) => [T, cap])) // tail zero-filled
+    const old = [keyOf, sx, sy, sz, sr, sg, sb, snx, sny, snz, cnt]
+    for (let k = 0; k < next.length; k++) next[k].set(old[k])
+    ;[keyOf, sx, sy, sz, sr, sg, sb, snx, sny, snz, cnt] = next
   }
   // Occupied 26-neighbours of a cell, stopping at `need` (filterIsolated's probe).
   const neighbours = (dix, diy, diz, radius, need) => {
@@ -324,17 +318,22 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     },
     // Finalize into the dense cloud's own layout: Float32 position, Uint8 colour and
     // Float32 unit normal per merged cell, 27 B, the same values finalizeFlat and
-    // finalizeNormals give. The accumulator is released while it goes (the index and
-    // keys first, then each sum as soon as its output is written), so the finished
-    // cloud never sits beside a whole accumulator: finishing peaks below what
-    // accumulating already held. The accumulator is spent afterwards.
-    // Returns { count, pos, col, nrm, degenerate }.
-    finalizeCloud() {
+    // finalizeNormals give. The index goes first; the per-cell sums are one memory, so
+    // the cloud sits beside them while it is written (60 + 27 B a cell:
+    // memBudget.js DENSIFY_CELL_BYTES). The accumulator is spent afterwards.
+    // Returns { count, pos, col, nrm, degenerate }. `shared`: the arrays in shared memory
+    // whatever their size (core/bigArray.js sharedArrays) — a slab of a tiled run, which the
+    // page joins: plain slabs held the tab's buffer pool while K workers fused beside them.
+    finalizeCloud({ shared = false } = {}) {
       const m = n - removed
       table = null
       keyOf = null
       overflow.clear()
-      const pos = shareableArray(Float32Array, 3 * m)
+      const [pos, col, nrm] = (shared ? sharedArrays : shareableArrays)([
+        [Float32Array, 3 * m],
+        [Uint8Array, 3 * m],
+        [Float32Array, 3 * m],
+      ])
       for (let s = 0, o = 0; s < n; s++) {
         if (cnt[s] === 0) continue
         const k = 1 / cnt[s]
@@ -344,7 +343,6 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
         o += 3
       }
       sx = sy = sz = null
-      const col = shareableArray(Uint8Array, 3 * m)
       for (let s = 0, o = 0; s < n; s++) {
         if (cnt[s] === 0) continue
         const k = 1 / cnt[s]
@@ -354,7 +352,6 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
         o += 3
       }
       sr = sg = sb = null
-      const nrm = shareableArray(Float32Array, 3 * m)
       let degenerate = 0
       for (let s = 0, o = 0; s < n; s++) {
         if (cnt[s] === 0) continue

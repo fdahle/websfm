@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   bigArrayCaps,
+  localArrays,
+  sharedArrays,
   chunksOf,
   isSharedArray,
   localArray,
@@ -74,9 +76,10 @@ describe('shareableArray', () => {
     expect(a.length).toBe(30)
   })
 
-  it('without shared memory (no cross-origin isolation), refuses past the plain limit', () => {
+  it('without shared memory (no cross-origin isolation), stays plain, as far as plain goes', () => {
     setBigArrayCaps({ wasm: true, memory64: false, shared: false, maxLocalBytes: 2 ** 32, maxShareableBytes: 0 })
-    expect(() => shareableArray(Uint8Array, 10, { maxPlainBytes: 0 })).toThrow(RangeError)
+    expect(isSharedArray(shareableArray(Uint8Array, 10, { maxPlainBytes: 0 }))).toBe(false)
+    expect(() => shareableArray(Uint8Array, MAX_BUFFER_BYTES + 1, { maxPlainBytes: 0 })).toThrow(RangeError)
   })
 })
 
@@ -126,5 +129,59 @@ describe('chunksOf / viewAs', () => {
     f[1] = 2
     expect(viewAs(Float32Array, s.buffer)[1]).toBe(2)
     expect(viewAs(Float32Array, new ArrayBuffer(8)).length).toBe(2)
+  })
+})
+
+describe('groups', () => {
+  it('arrays made together share one memory, each at its own aligned offset', () => {
+    const [a, b, c] = localArrays(
+      [
+        [Float64Array, 3],
+        [Uint8Array, 5],
+        [Float32Array, 7],
+      ],
+      { minBytes: 0 },
+    )
+    expect(a.buffer).toBe(b.buffer)
+    expect(b.buffer).toBe(c.buffer)
+    expect([a.byteOffset, b.byteOffset, c.byteOffset]).toEqual([0, 32, 48])
+    a.fill(1)
+    b.fill(2)
+    c.fill(3)
+    expect([...a, ...b, ...c]).toEqual([1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3])
+  })
+
+  it('a shared group goes to shared memory once it is large, whatever each array is', () => {
+    const [p, q] = sharedArrays([
+      [Float32Array, 2 ** 24],
+      [Uint8Array, 2 ** 24],
+    ])
+    expect(isSharedArray(p) && p.buffer === q.buffer).toBe(true)
+    expect(isSharedArray(sharedArrays([[Float32Array, 10]])[0])).toBe(false) // small: plain
+  })
+
+  it('falls back to plain arrays when the engine refuses another memory', () => {
+    const spy = vi.spyOn(WebAssembly, 'Memory').mockImplementation(() => {
+      throw new RangeError('WebAssembly.Memory(): could not allocate memory')
+    })
+    try {
+      const [a, b] = localArrays(
+        [
+          [Float32Array, 4],
+          [Uint32Array, 4],
+        ],
+        { minBytes: 0 },
+      )
+      expect(a.buffer).not.toBe(b.buffer)
+      expect(a.buffer.byteLength).toBe(16)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('a local array is copied, never transferred (its memory cannot be detached)', () => {
+    const a = localArray(Float32Array, 4, { minBytes: 0 })
+    const p = new Float32Array(4)
+    expect(transferList([a, p])).toEqual([p.buffer])
   })
 })

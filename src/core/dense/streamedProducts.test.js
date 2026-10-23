@@ -1,4 +1,5 @@
 import { setBigArrayCaps } from '../bigArray.js'
+import { DENSIFY_CELL_BYTES } from './memBudget.js'
 import { describe, it, expect } from 'vitest'
 import { fuseDepthMaps, fuseDepthMapsStreamed, finishFusion, mergeFusionCounters } from './mvs.js'
 import { orthorectify, orthorectifyStreamed, orthorectifyTiled } from '../products/ortho.js'
@@ -148,9 +149,9 @@ describe('bounded map loading', () => {
     Array.from({ length: flat.length / 6 }, (_, i) =>
       [...flat.subarray(i * 6, i * 6 + 6), ...flat.nrm.subarray(i * 3, i * 3 + 3)].join(','),
     ).sort()
-  // The cloud (27 B/cell) beside one slab's accumulator less its own share of the cloud (76 − 27).
+  // The cloud (27 B/cell) beside one slab's accumulator less its own share of the cloud.
   const slabBudget = (refused, slabsWanted) =>
-    refused.input + 27 * refused.cells + 49 * Math.ceil(refused.cells / slabsWanted)
+    refused.input + 27 * refused.cells + (DENSIFY_CELL_BYTES - 27) * Math.ceil(refused.cells / slabsWanted)
   it.each([
     {},
     { step: 2 },

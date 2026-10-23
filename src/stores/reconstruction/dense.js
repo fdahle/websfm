@@ -712,8 +712,7 @@ export function createDense({
     // Saved maps can be read by every worker, so fusion CAN split over the pool: one
     // worker plans (pre-passes + slab layout), then the slabs run in parallel, each
     // exact on its own (core/dense/mvs.js fusionSteps), and are joined in slab order.
-    // Off by default (DENSE_TUNING.fuseWorkers): fusion is bound by plane reads, and on
-    // quarry 8 workers took 630 s against one worker's 557 s (HANDOVER ▸ B-parity).
+    // Up to DENSE_TUNING.fuseWorkers (quarry at Medium: 8 workers 308 s, one 478 s).
     const workers = streamed && maps.length >= 16 ? Math.min(POOL_SIZE, DENSE_TUNING.fuseWorkers ?? 1) : 1
     if (workers > 1) {
       try {
