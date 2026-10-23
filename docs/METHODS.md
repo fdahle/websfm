@@ -1341,7 +1341,14 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   occupancy, so the result does not depend on cell order. That is also what lets a
   large cloud be fused in slabs along the scene's long axis (one slab's accumulator
   resident at a time) with a one-cell halo and give the identical cloud. The prior gates (per-pixel cost `maxCost`,
-  cross-view agreement count `minViews`) still run first.
+  cross-view agreement count `minViews`) still run first. Like the cross-view filter,
+  the consistency check compares each map with at most `DENSE_TUNING.fuseMaxViews` (12)
+  of the maps whose frustum reaches it, those with the gate's parallax at its mean
+  depth first (`fusionViews`, chosen once in the plan, so resident and streamed fusion
+  give the identical cloud). Over saved maps the pre-passes (cost statistics, bounds,
+  cloud size, slab outlines) read only depth and cost, and the valid count comes from
+  the saved index: on 58 film maps at High fusion went from 22 to 7.8 min, most of it
+  plane reads from disk.
 - **Oriented normals for free**: PatchMatch already estimates a per-pixel plane
   `(depth, normal)`. Rather than re-estimating normals later (k-NN PCA +
   orientation propagation, the usual Poisson prerequisite), both backends export

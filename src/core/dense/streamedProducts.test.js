@@ -4,7 +4,7 @@ import { orthorectify, orthorectifyStreamed, orthorectifyTiled } from '../produc
 import { resampleSurface, resampledGeometry } from '../products/surface.js'
 import { orthoStats } from '../eval/orthoStats.js'
 import { serializeDepthMap } from './depthMapCodec.js'
-import { readDepthFiles, readDepthOnly } from './depthFileReader.js'
+import { readDepthFiles, readDepthOnly, readDepthCostMap } from './depthFileReader.js'
 
 function maps() {
   return Array.from({ length: 4 }, (_, j) => {
@@ -50,6 +50,46 @@ describe('bounded map loading', () => {
       expect(actual.summary).toEqual(expected.summary)
     },
   )
+  it('reads only depth and cost for the pre-passes, and fuses the identical cloud', async () => {
+    const ms = maps(),
+      entries = files(ms),
+      expected = fuseDepthMaps(ms, {})
+    let full = 0,
+      light = 0
+    const actual = await fuseDepthMapsStreamed(
+      entries,
+      (i) => (full++, readDepthFiles(entries[i])),
+      {},
+      () => {},
+      { loadLight: (i) => (light++, readDepthCostMap(entries[i])), loadDepth: (i) => readDepthOnly(entries[i]) },
+    )
+    expect([...actual]).toEqual([...expected])
+    expect(actual.summary).toEqual(expected.summary)
+    expect(light).toBeGreaterThanOrEqual(3 * entries.length) // every pre-pass (saved maps skip the count)
+    expect(full).toBe(entries.length) // the fusion pass: each reference once
+  })
+
+  it('caps the views per map identically in both runners, and reads fewer planes', async () => {
+    // Four maps all see each other: with maxViews 1 each compares with one view only.
+    const opts = { maxViews: 1, minViews: 1, minTriAngleDeg: 0 }
+    const ms = maps(),
+      entries = files(ms),
+      expected = fuseDepthMaps(ms, opts)
+    let reads = 0
+    const load = { loadDepth: (i) => (reads++, readDepthOnly(entries[i])) }
+    const actual = await fuseDepthMapsStreamed(
+      entries,
+      (i) => readDepthFiles(entries[i]),
+      opts,
+      () => {},
+      load,
+    )
+    expect(actual.length).toBeGreaterThan(0)
+    expect([...actual]).toEqual([...expected])
+    expect(actual.summary).toEqual(expected.summary)
+    expect(reads).toBeLessThanOrEqual(4)
+  })
+
   it('culls maps out of view and caches planes, and still fuses the identical cloud', async () => {
     // Two groups 1 km apart: neither sees the other, so every cross-group pair is culled.
     const ms = [...maps(), ...maps().map((m, j) => ({ ...m, uuid: `far${j}`, t: [m.t[0] - 1000, 0, 10] }))]

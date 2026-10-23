@@ -1,4 +1,4 @@
-import { readDepthFiles, readDepthOnly, readDepthAndCost } from '../../core/dense/depthFileReader.js'
+import { readDepthFiles, readDepthOnly, readDepthAndCost, readDepthCostMap } from '../../core/dense/depthFileReader.js'
 import {
   selectSourceViews,
   scaleK,
@@ -1030,9 +1030,11 @@ export function makeDenseOps({ rasterize }) {
       const log = (m, l, c) => emit('log', [m, l, c])
       const load = (i) => readDepthFiles(maps[i])
       const loadDepth = (i) => readDepthOnly(maps[i])
+      const loadLight = (i) => readDepthCostMap(maps[i])
       if (mode === 'plan') {
         const res = await fuseDepthMapsStreamed(maps, load, { ...settings, planOnly: true }, log, {
           loadDepth,
+          loadLight,
           onPlanProgress: (d, t, lbl, f) => emit('progress', [d, t, lbl, f, 'plan']),
         })
         return {
@@ -1043,6 +1045,7 @@ export function makeDenseOps({ rasterize }) {
       const parts = []
       const run = await fuseDepthMapsStreamed(maps, load, { ...settings, plan, slabIndices: [slab] }, log, {
         loadDepth,
+        loadLight,
         onTile: (p) => parts.push(p),
         onProgress: (d, t, lbl) => emit('progress', [d, t, lbl, undefined, 'fuse']),
       })
@@ -1062,6 +1065,7 @@ export function makeDenseOps({ rasterize }) {
           fuseDepthMapsStreamed(ms, (i) => readDepthFiles(ms[i]), options, log, {
             ...hooks,
             loadDepth: (i) => readDepthOnly(ms[i]),
+            loadLight: (i) => readDepthCostMap(ms[i]),
           })
       : fuseDepthMaps
     // Each finished slab (one, unless fusion tiles to fit the budget) comes in the

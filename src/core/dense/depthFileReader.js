@@ -53,3 +53,20 @@ export async function readDepthAndCost(entry) {
   }
   return { depth: await read('depth'), cost: await read('cost') }
 }
+
+// A map for fusion's pre-passes (core/dense/fusionPlan.js `{ light }` requests): its
+// camera, depth and cost, never its rgb or normals (2/3 of its bytes).
+export async function readDepthCostMap(entry) {
+  const { depth, cost } = await readDepthAndCost(entry)
+  return {
+    uuid: entry.uuid,
+    name: entry.name,
+    width: entry.width,
+    height: entry.height,
+    K: entry.K,
+    R: entry.R,
+    t: entry.t,
+    depth,
+    cost,
+  }
+}

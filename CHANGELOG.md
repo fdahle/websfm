@@ -474,7 +474,9 @@ Notable changes to websfm. The format follows
   at most 2,048 px, greyscale scans are cached as one channel, and the next map's
   images are prepared while the current one matches. The cross-view filter checks each
   map against at most 12 overlapping views with enough parallax, and sizes its workers
-  by memory: 30 → 4.4 min. Depth maps and filter together: 54 → 26 min.
+  by memory: 30 → 4.4 min. Depth maps and filter together: 54 → 26 min. Fusion
+  compares each map with at most 12 views too, and its planning passes read only depth
+  and cost: 22 → 7.8 min, the same cloud for the planning change.
 - **SfM on big blocks**: bundle adjustment solves its camera system exactly with a
   sparse Cholesky factorisation instead of a capped iterative solve, wherever the
   block has more than about 100 cameras. Registration scans only the image pairs a new

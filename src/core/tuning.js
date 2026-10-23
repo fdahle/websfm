@@ -322,6 +322,9 @@ export const DENSE_TUNING = {
   // ~50 overlapping views a map on a 58-scan film block at High, that was 5.4 GB per
   // worker and 25 min on the one worker it allowed.
   filterMaxViews: 12,
+  // Fusion's consistency check, likewise (core/dense/fusionPlan.js fusionViews): at most
+  // this many overlapping views per map, those with enough parallax first (0 = all).
+  fuseMaxViews: 12,
   // ── Stage B streaming fusion (core/dense/mvs.js fuseDepthMaps) ──
   // Fusion accumulates kept pixels directly into a voxel-merge structure (never a
   // raw per-pixel point list — that was the OOM). The scene bbox that sizes the

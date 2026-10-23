@@ -78,10 +78,12 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
   // pixel passes when enough views agree and one of them has the parallax, whichever
   // view comes first, and a failing pixel is compared with every view either way.
   const centres = metas.map((m) => cameraCenter(m))
+  let viewSets = null // per map, the views the plan allows (fusionViews), or null for all
   const candidatesOf = (mi, corners, rad) => {
     const cand = []
+    const allowed = viewSets?.[mi]
     for (let ci = 0; ci < metas.length; ci++) {
-      if (ci === mi) continue
+      if (ci === mi || (allowed && !allowed.has(ci))) continue
       if (!corners[mi] || sliceMisses(corners[mi], metas[ci], rad + 1)) continue
       cand.push(ci)
     }
@@ -94,7 +96,8 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
     candByRef = null,
     nextUse = null,
     pos = 0
-  const planSequence = ({ visits, corners }, rad) => {
+  const planSequence = ({ visits, corners, views }, rad) => {
+    viewSets ??= views ? views.map((v) => (v ? new Set(v) : null)) : null
     candByRef = new Map(visits.map((mi) => [mi, candidatesOf(mi, corners, rad)]))
     const seq = []
     for (const mi of visits) for (const ci of candByRef.get(mi)) seq.push(ci)
@@ -109,9 +112,10 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
   let next = iterator.next()
   while (!next.done) {
     const request = next.value
-    if (typeof request === 'number') {
+    if (typeof request === 'number' || request.light !== undefined) {
+      const light = typeof request !== 'number'
       const t = now(),
-        map = await loadMap(request)
+        map = light ? await (hooks.loadLight ?? loadMap)(request.light) : await loadMap(request)
       loadMs += now() - t
       next = iterator.next(map)
     } else {
@@ -367,6 +371,8 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
   const cams = maps.map((m) => ({ R: m.R, t: m.t, K: m.K, m }))
   // Precompute each camera centre for the triangulation-angle check (WS4).
   const camCenters = cams.map((c) => cameraCenter(c))
+  // The views each reference may compare with (fusionViews; null = every map).
+  const viewSets = plan.views ? plan.views.map((v) => (v ? new Set(v) : null)) : null
   let lastEmit = 0
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
@@ -406,7 +412,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
             slab: tiled ? { key: axKey, inv, lo: loH, hi: hiH } : null,
             slabIndex: ti,
             slabCount: nT,
-            plan: { visits: visits[ti], corners: plan.slabCorners?.[ti] ?? est.corners },
+            plan: { visits: visits[ti], corners: plan.slabCorners?.[ti] ?? est.corners, views: plan.views },
           }
         : null
       const { width: w, height: h, depth, cost, rgb, normals } = m
@@ -474,9 +480,10 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
           const rad = Math.max(0, Math.round(consistencyPx))
           let agree = checks ? checks.agree[idx] : 0,
             maxAngle = checks ? checks.angle[idx] : 0
+          const allowed = viewSets?.[mi]
           for (let ci = 0; ci < cams.length && !checks; ci++) {
             const c = cams[ci]
-            if (c.m === m) continue
+            if (c.m === m || (allowed && !allowed.has(ci))) continue
             const p = project(c, P.x, P.y, P.z)
             if (!p) continue
             const cu = Math.round(p.u),
