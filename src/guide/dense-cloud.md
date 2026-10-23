@@ -172,4 +172,6 @@ WebAssembly memory holds about half the cells and a quarter of the points, and a
 that is not cross-origin isolated keeps the cloud to about 178 million points. A cloud
 of more than 178 million points is drawn through its octree, so it shows once the octree
 is built. Fusion starts with fresh workers, so memory the previous steps left behind is
-returned first.
+returned first. It plans with what the open project leaves of the budget: the clouds
+already open (the previous dense cloud among them, until the new one replaces it) come
+off it first.

@@ -288,6 +288,20 @@ describe('bounded map loading', () => {
     }
   })
 
+  it('plans with what the open project leaves of the budget and the buffer share', () => {
+    const ms = maps()
+    const { input, total } = fuseDepthMaps(ms, { memBudgetBytes: 1, autoStep: false }).refused
+    const opts = { memBudgetBytes: input + 1000, ramBudgetBytes: total + 1000, autoStep: false }
+    expect(fuseDepthMaps(ms, opts).refused).toBeUndefined()
+    // The page's clouds come off the whole budget …
+    const logs = []
+    const held = fuseDepthMaps(ms, { ...opts, pageBytes: 2000, pagePoolBytes: 0 }, (m) => logs.push(m))
+    expect(logs.some((m) => m.includes('the open project holds'))).toBe(true)
+    expect(held.refused ?? held.summary.slabs > 1).toBeTruthy()
+    // … and their plain arrays off the buffer share.
+    expect(fuseDepthMaps(ms, { ...opts, pagePoolBytes: 2000 }).refused).toBeTruthy()
+  })
+
   it('depth-only comparison loads give the identical cloud and a monotonic bar', async () => {
     const ms = maps(),
       entries = files(ms),

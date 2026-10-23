@@ -36,7 +36,7 @@ import { DENSE_TUNING } from '../../core/tuning.js'
 import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
-import { postableCopy, shareableArray } from '../../core/bigArray.js'
+import { isSharedArray, postableCopy, shareableArray } from '../../core/bigArray.js'
 import { poissonHeapBytes } from '../../core/products/mesh.js'
 
 // The dense pipeline, split out of useReconstructionStore: Stage A depth maps
@@ -672,6 +672,23 @@ export function createDense({
     // pass, returning the transferred buffers home — a pixel-count guess here could
     // not see the merge cell, the step or the view overlap. Same budget knob as Stage A.
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+    // What the open project already holds in this tab (its clouds, the previous dense
+    // cloud among them until the new one replaces it): fusion plans with the rest of the
+    // budget, and with the rest of the buffer pool for its plain arrays (shared ones are
+    // wasm memory, outside the pool). Quarry: projected 12 GB, the renderer peaked at
+    // 17.7 GB with the previous 95 M-point cloud open.
+    let pageBytes = 0,
+      pagePoolBytes = 0
+    for (const c of clouds.value ?? [])
+      for (const v of [c, c.attributes, c.points])
+        for (const a of Object.values(v ?? {}))
+          if (ArrayBuffer.isView(a)) {
+            pageBytes += a.byteLength
+            if (!isSharedArray(a)) pagePoolBytes += a.byteLength
+          }
+    if (pageBytes > 0)
+      log(`Dense: the open project holds ${formatBytes(pageBytes)} of point data in this tab`, 'debug', 'Dense')
+    settings = { ...settings, pageBytes, pagePoolBytes }
     if (streamed)
       log(
         'Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use',

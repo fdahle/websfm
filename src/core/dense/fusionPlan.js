@@ -467,9 +467,20 @@ function* planSteps(maps, opts, onLog, hooks) {
   // Accumulators in wasm memory (core/bigArray.js) and a cloud past 2 GiB in shared
   // memory are outside the pool, so the budget may be the user's whole limit
   // (`ramBudgetBytes`, Settings ▸ Compute); without wasm memories both are the pool's.
+  // What the page already holds (`pageBytes`, of it `pagePoolBytes` in ArrayBuffers: the
+  // store's open clouds) comes off both.
   const caps = bigArrayCaps()
-  const poolCap = opts.memBudgetBytes > 0 ? Math.min(opts.memBudgetBytes, MAX_BUDGET_BYTES) : 0
-  const budget = poolCap && caps.wasm ? Math.max(poolCap, opts.ramBudgetBytes ?? 0) : poolCap
+  const held = Math.max(0, opts.pageBytes ?? 0),
+    heldPool = Math.max(0, opts.pagePoolBytes ?? 0)
+  const poolCap = opts.memBudgetBytes > 0 ? Math.max(1, Math.min(opts.memBudgetBytes, MAX_BUDGET_BYTES) - heldPool) : 0
+  const budget = poolCap && caps.wasm ? Math.max(poolCap, (opts.ramBudgetBytes ?? 0) - held) : poolCap
+  if (held > 0 && budget)
+    onLog(
+      `Fusion: the open project holds ${formatBytes(held)} in this tab — planning with ${formatBytes(budget)} ` +
+        `of the budget (${formatBytes(poolCap)} of it in buffers)`,
+      'info',
+      'Dense',
+    )
   const poolOf = (p) =>
     projectDensifyPoolBytes({
       inputBytes,
