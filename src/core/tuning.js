@@ -345,6 +345,10 @@ export const DENSE_TUNING = {
   isolatedRadius: 1, // neighbour search radius in cells (26-neighbourhood)
   isolatedMinNeighbors: 2, // min occupied neighbours to keep a low-support cell
   isolatedMaxSupport: 2, // only cells with ≤ this many contributing pixels are tested
+  // The depth-map preview (the image viewer's overlay, stretched to the image) is
+  // rendered at most this many pixels on its long side: a full 27 MP PNG per map was
+  // seconds of encode each for a picture nobody sees at that size.
+  depthPreviewMaxDim: 2048,
 }
 
 // Mesh (screened Poisson) internals read in core/products/mesh.js but NOT exposed in

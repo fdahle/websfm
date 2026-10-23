@@ -30,7 +30,58 @@ import { DENSE_FUSE_DEFAULTS, DEPTHMAP_DEFAULTS } from '../defaults.user.js'
 // Build a w×h Float32Array depth plane from a 2-D array of numbers (0 = hole).
 const plane = (rows) => Float32Array.from(rows.flat())
 
+// The filter as first written (array push + comparator sort per pixel): the fast
+// version must give exactly its output.
+function filterDepthMapReference(depth, w, h, { radius, relTol, minValidNeighbors = 4 }) {
+  const out = new Float32Array(depth.length)
+  let removed = 0,
+    smoothed = 0
+  for (let v = 0; v < h; v++)
+    for (let u = 0; u < w; u++) {
+      const d = depth[v * w + u]
+      if (!(d > 0)) continue
+      const win = []
+      for (let dv = -radius; dv <= radius; dv++)
+        for (let du = -radius; du <= radius; du++) {
+          const vv = v + dv,
+            uu = u + du
+          if (vv < 0 || vv >= h || uu < 0 || uu >= w) continue
+          if (depth[vv * w + uu] > 0) win.push(depth[vv * w + uu])
+        }
+      if (win.length < minValidNeighbors) {
+        removed++
+        continue
+      }
+      win.sort((a, b) => a - b)
+      const med = win[win.length >> 1]
+      if (Math.abs(d - med) > relTol * med) {
+        removed++
+        continue
+      }
+      out[v * w + u] = med
+      if (med !== d) smoothed++
+    }
+  return { depth: out, removed, smoothed }
+}
+
 describe('filterDepthMap', () => {
+  it('matches the reference filter bit for bit on noisy data with holes', () => {
+    const w = 37,
+      h = 29
+    let seed = 7
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31
+    const depth = Float32Array.from({ length: w * h }, () =>
+      rnd() < 0.2 ? 0 : 5 + 3 * rnd() + (rnd() < 0.05 ? 50 : 0),
+    )
+    for (const radius of [1, 2]) {
+      const opts = { radius, relTol: 0.1 }
+      const a = filterDepthMap(depth, w, h, opts)
+      const b = filterDepthMapReference(depth, w, h, opts)
+      expect([a.removed, a.smoothed]).toEqual([b.removed, b.smoothed])
+      expect(Array.from(a.depth)).toEqual(Array.from(b.depth))
+    }
+  })
+
   it('leaves a uniform field untouched', () => {
     const w = 4,
       h = 4

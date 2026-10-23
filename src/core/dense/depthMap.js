@@ -367,7 +367,10 @@ export function filterDepthMap(depth, w, h, opts = {}) {
   const minValidNeighbors = numOpt(opts.minValidNeighbors, 4, { int: true, min: 0 })
   const smooth = boolOpt(opts.smooth, true)
   const out = new Float32Array(depth.length)
-  const win = []
+  // The window's valid depths, kept sorted as they arrive (insertion into a fixed
+  // buffer): a JS array pushed and comparator-sorted per pixel cost ~15 s on each
+  // 27 MP map of a film block at High.
+  const win = new Float64Array((2 * radius + 1) ** 2)
   let removed = 0,
     smoothed = 0
   for (let v = 0; v < h; v++) {
@@ -375,7 +378,7 @@ export function filterDepthMap(depth, w, h, opts = {}) {
       const idx = v * w + u
       const d = depth[idx]
       if (!(d > 0)) continue // already a hole
-      win.length = 0
+      let n = 0
       for (let dv = -radius; dv <= radius; dv++) {
         const vv = v + dv
         if (vv < 0 || vv >= h) continue
@@ -383,15 +386,21 @@ export function filterDepthMap(depth, w, h, opts = {}) {
           const uu = u + du
           if (uu < 0 || uu >= w) continue
           const nd = depth[vv * w + uu]
-          if (nd > 0) win.push(nd)
+          if (nd > 0) {
+            let j = n++
+            while (j > 0 && win[j - 1] > nd) {
+              win[j] = win[j - 1]
+              j--
+            }
+            win[j] = nd
+          }
         }
       }
-      if (win.length < minValidNeighbors) {
+      if (n < minValidNeighbors) {
         removed++
         continue
       } // isolated → drop
-      win.sort((a, b) => a - b)
-      const med = win[win.length >> 1]
+      const med = win[n >> 1]
       if (Math.abs(d - med) > relTol * med) {
         removed++
         continue
