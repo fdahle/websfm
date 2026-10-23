@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import initMesh, { PoissonMesher } from '../../wasm/mesh/mesh.js'
-import { parseMeshBuffer } from './mesh.js'
+import { POISSON_BASE_BYTES, POISSON_BYTES_PER_SAMPLE, generateMesh, parseMeshBuffer } from './mesh.js'
 import {
   TRIM_DENSITY_BACKOFF,
   cutToCore,
@@ -163,5 +163,84 @@ describe('tiled Poisson', () => {
     expect(out.dropped).toBe(1)
     expect(Array.from(out.idx)).toEqual([0, 1, 2])
     expect(out.pos[0]).toBe(20)
+  })
+})
+
+// The real solver as generateMesh's poissonFn (the worker's stagedPoisson, unstaged).
+const poissonFn = ({
+  pos,
+  nrm,
+  wgt,
+  depth,
+  screening,
+  trimDist,
+  densityRatio,
+  holeAreaRatio,
+  minComponentShare,
+  medianSupport = 0,
+  grid,
+}) => {
+  const w = wgt ?? new Float32Array(0)
+  const m = grid
+    ? PoissonMesher.build_on_grid(pos, nrm, w, depth, screening, Float64Array.from(grid))
+    : PoissonMesher.build(pos, nrm, w, depth, screening)
+  for (let L = m.num_layers(), i = 0; i < L; i++) m.solve_step()
+  const bytes = m.finish(trimDist, densityRatio, holeAreaRatio, minComponentShare, medianSupport)
+  const stats = m.stats()
+  m.free()
+  return { bytes, stats }
+}
+
+const openEdges = (idx) => {
+  const uses = new Map()
+  for (let t = 0; t < idx.length; t += 3)
+    for (let e = 0; e < 3; e++) {
+      const p = idx[t + e],
+        q = idx[t + ((e + 1) % 3)]
+      const k = p < q ? `${p},${q}` : `${q},${p}`
+      uses.set(k, (uses.get(k) ?? 0) + 1)
+    }
+  let open = 0
+  for (const c of uses.values()) if (c === 1) open++
+  return open
+}
+
+describe('generateMesh in tiles', () => {
+  // Each tile trims and refills against the scene's median support. Moving the trim and
+  // refill after the stitch was tried (2026-10-24) and is worse on this scene: the untrimmed
+  // tiles disagree more where support is weak (221 open seam edges vs 77), so a hole that
+  // crosses a seam reads as open and is not refilled (2 of 3), triangles −0.9 % vs −0.17 %.
+  it('matches the one-piece mesh where holes cross the seams', () => {
+    // A terrain with three holes in the samples, as dense input.
+    let s = 11
+    const rnd = () => (s = (s * 1103515245 + 12345) >>> 0) / 2 ** 32
+    const pos = [],
+      nrm = []
+    while (pos.length < 3 * 20000) {
+      const x = rnd() * 40,
+        y = rnd() * 30
+      if ((x - 13) ** 2 + (y - 15) ** 2 < 9 || (x - 27) ** 2 + (y - 9) ** 2 < 6 || (x - 20) ** 2 + (y - 22) ** 2 < 8)
+        continue
+      const gx = (2 / 6) * Math.cos(x / 6) * Math.cos(y / 8),
+        gy = (-2 / 8) * Math.sin(x / 6) * Math.sin(y / 8)
+      const m = Math.hypot(gx, gy, 1)
+      pos.push(x, y, 2 * Math.sin(x / 6) * Math.cos(y / 8))
+      nrm.push(-gx / m, -gy / m, 1 / m)
+    }
+    const dense = { count: pos.length / 3, pos: Float32Array.from(pos), nrm: Float32Array.from(nrm) }
+    const base = { depth: 7, colorize: false }
+    const whole = generateMesh(dense, poissonFn, { ...base, tiles: 'off' })
+    const tiled = generateMesh(dense, poissonFn, {
+      ...base,
+      oneSolveBytes: 1,
+      tileHeapBytes: POISSON_BASE_BYTES + POISSON_BYTES_PER_SAMPLE * 1200,
+    })
+    const [o1, o2] = [openEdges(whole.idx), openEdges(tiled.idx)]
+    expect(tiled.summary.tiles.count).toBeGreaterThanOrEqual(4)
+    expect(tiled.summary.stats.holesFilled).toBe(whole.summary.stats.holesFilled)
+    expect(Math.abs(tiled.count - whole.count) / whole.count).toBeLessThan(0.01)
+    // Open edges: the surface's own borders (the holes, the scene's edge) in both; the
+    // tiles add some where a hole crosses a seam (measured 759 vs 692, 12 tiles).
+    expect(o2 - o1).toBeLessThan(0.15 * o1)
   })
 })
