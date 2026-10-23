@@ -1,3 +1,4 @@
+import { toRaw } from 'vue'
 import { isStreamed } from '../../core/lod/streamed.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import {
@@ -254,7 +255,10 @@ export function createCloudExports({
       // self-calibrated radial term or a film scan's fiducial frame means the photos
       // are NOT that pinhole image: the poses would be right and every pixel wrong.
       // Those projects get transforms.json from Export ▸ Undistorted images instead.
-      const frameModel = makeFrameModelResolver({ summary: summary?.value ?? null, sensors: sensors?.value ?? [] })
+      const frameModel = makeFrameModelResolver({
+        summary: toRaw(summary?.value ?? null),
+        sensors: sensors?.value ?? [],
+      })
       let warped = 0
       const transformImages = [...cloud.cameras.entries()]
         .map(([uuid, cam]) => {

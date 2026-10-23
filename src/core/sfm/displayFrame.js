@@ -157,6 +157,8 @@ export function makeScanToPinhole({ K, dist = null, selfCal = null, fiducial = n
 // passed it raw). Returns image → { dist, selfCal, fiducial, filmMissing }.
 //   summary  — the sparse run summary ({ selfCalDistortion, fiducialTransforms })
 //   sensors  — the sensor list (plain or reactive)
+// `summary` must be plain (a store passes toRaw of its reactive summary): the
+// fiducial records built here go to workers, and a Proxy cannot be posted.
 export function makeFrameModelResolver({ summary = null, sensors = [] } = {}) {
   const sensorById = new Map((sensors || []).map((s) => [s.id, s]))
   // A row is a sensor's, or — `sensorId` null — one sensorless image's (`imageUuid`):

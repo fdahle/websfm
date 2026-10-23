@@ -1,5 +1,5 @@
 import { isStreamed, streamedRefusal } from '../../core/lod/streamed.js'
-import { markRaw } from 'vue'
+import { markRaw, toRaw } from 'vue'
 import { rawTexture } from './meshTexture.js'
 import { facePages, regroupByPage } from '../../core/products/texture/carry.js'
 import { isFisheyeModel } from '../../core/sfm/distortion.js'
@@ -254,7 +254,7 @@ export function createCloudEdits({
     const cams = mainSparseCloud.value?.cameras
     const fisheyeIds = new Set((sensors?.value ?? []).filter((s) => isFisheyeModel(s.distortionModel)).map((s) => s.id))
     if (!cams || !fisheyeIds.size) return {}
-    const frameModel = makeFrameModelResolver({ summary: summary.value, sensors: sensors.value })
+    const frameModel = makeFrameModelResolver({ summary: toRaw(summary.value), sensors: sensors.value })
     const out = {}
     for (const img of imagesStore.images) {
       if (!fisheyeIds.has(img.sensorId) || !cams.has(img.uuid)) continue

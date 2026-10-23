@@ -8,7 +8,7 @@ import { createCloudLod } from './reconstruction/cloudLod.js'
 import { createDense } from './reconstruction/dense.js'
 import { createProducts } from './reconstruction/products.js'
 import { createImporters } from './reconstruction/importers.js'
-import { ref, shallowRef, computed, markRaw, nextTick, watch } from 'vue'
+import { ref, shallowRef, computed, markRaw, nextTick, watch, toRaw } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
@@ -868,7 +868,9 @@ export const useReconstructionStore = registerProjectStore(
     // Each image's frame model (calibrated bag, composed self-cal bag, film
     // transform) from the run record — the one join displayFrame.js owns. GCP and
     // marker triangulation map raw marks through it into the cameras' frame.
-    const frameModelFor = computed(() => makeFrameModelResolver({ summary: summary.value, sensors: sensors.value }))
+    const frameModelFor = computed(() =>
+      makeFrameModelResolver({ summary: toRaw(summary.value), sensors: sensors.value }),
+    )
 
     const {
       imagesById,

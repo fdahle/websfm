@@ -99,7 +99,7 @@ export function createDense({
       // reproduces the same pinhole frame as the sparse cloud. The one lookup that
       // knows both row kinds is the frame-model resolver (core/sfm/displayFrame.js).
       const selfCalRows = summary.value?.selfCalDistortion ?? []
-      const frameModel = makeFrameModelResolver({ summary: summary.value, sensors: sensors.value })
+      const frameModel = makeFrameModelResolver({ summary: toRaw(summary.value), sensors: sensors.value })
       // F4: per-image scan→canonical transform from the sparse run. The dense
       // stage reproduces that exact frame (it must NOT re-fit) — the sparse run
       // defines it. Fail loudly if a film image is in the cloud but its transform

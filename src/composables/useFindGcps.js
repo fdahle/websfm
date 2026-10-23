@@ -1,3 +1,4 @@
+import { toRaw } from 'vue'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
@@ -104,7 +105,7 @@ export async function findGcpCandidates({ referenceId, band = 1, stableSetId = n
     },
     { onLog },
   )
-  const frameModel = makeFrameModelResolver({ summary: recon.summary, sensors: sensors.sensors })
+  const frameModel = makeFrameModelResolver({ summary: toRaw(recon.summary), sensors: sensors.sensors })
   const sourceImages = images.images.flatMap((image) => {
     const camera = cloud.cameras.get(image.uuid)
     if (!camera) return []
