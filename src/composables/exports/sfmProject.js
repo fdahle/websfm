@@ -1,3 +1,4 @@
+import { toRaw } from 'vue'
 import { computeSourceOf } from '../../utils/image.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { distortionOf } from '../../core/sfm/distortion.js'
@@ -245,8 +246,13 @@ export function createSfmProjectExports({
     const sum = summary?.value ?? null
     // Self-cal bags per sensor or per sensorless image (core/sfm/displayFrame.js).
     const frameModel = makeFrameModelResolver({ summary: sum, sensors: sensors.value })
+    // Copied out of the raw rows: read through the reactive summary they are Proxies,
+    // which cannot be posted to a worker.
     const fidByUuid = new Map(
-      (sum?.fiducialTransforms ?? []).map((t) => [t.uuid, { A: t.A, transform: t.transform ?? null, frame: t.frame }]),
+      (toRaw(sum)?.fiducialTransforms ?? []).map((t) => [
+        t.uuid,
+        structuredClone({ A: t.A, transform: t.transform ?? null, frame: t.frame }),
+      ]),
     )
 
     // The observations must be in the BA (pinhole) frame — that is the only frame

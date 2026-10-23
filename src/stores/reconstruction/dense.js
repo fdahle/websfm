@@ -1,3 +1,4 @@
+import { toRaw } from 'vue'
 import { computeSourceOf } from '../../utils/image.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import {
@@ -103,10 +104,12 @@ export function createDense({
       // stage reproduces that exact frame (it must NOT re-fit) — the sparse run
       // defines it. Fail loudly if a film image is in the cloud but its transform
       // is missing (a stale/partial summary would silently mis-warp its raster).
+      // Copied out of the raw rows: the summary is reactive state, and its nested
+      // A / frame read through it are Proxies the worker cannot receive.
       const fidByUuid = new Map(
-        (summary.value?.fiducialTransforms ?? []).map((t) => [
+        (toRaw(summary.value)?.fiducialTransforms ?? []).map((t) => [
           t.uuid,
-          { A: t.A, transform: t.transform ?? null, frame: t.frame },
+          structuredClone({ A: t.A, transform: t.transform ?? null, frame: t.frame }),
         ]),
       )
       const inputImages = []
