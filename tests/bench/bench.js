@@ -1429,7 +1429,8 @@ window.bench = {
     // the report scores this run's control only and no name collides.
     const stale = gcpsStore.gcps.filter((g) => /^FG\d+$/.test(g.name)).map((g) => g.id)
     for (const id of stale) gcpsStore.removeGcp(id)
-    // The surveyed camera poses (cameras.csv) as truth: a georeference from them,
+    // The imported camera poses as a reference (for the TMA blocks, cameras.csv is
+    // hist-sfm's Metashape solution, not survey data): a georeference from them,
     // fitted before they are turned off, places each candidate's own sparse point.
     // (An earlier run on this profile may have left them off: they go on for the fit.)
     for (const p of poses.poses) p.enabled = true

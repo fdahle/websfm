@@ -268,13 +268,13 @@ What aligns the whole orthophoto with the reference at first.
   footprints); without one it stops and says so. Candidates are tracks seen in at
   least two photos whose aligned position lies within three times the fit's RMS of
   the DEM, and their σ XY is that RMS. On Rachel Glacier the fit's RMS was 9.5 m and
-  its candidates lay a median 13 m from the surveyed camera solution, against 7 m for
+  its candidates lay a median 13 m from an independent Metashape solution, against 7 m for
   DISK + LightGlue: prefer an image matcher when a reference image works.
 
 On Rachel Glacier (1960s film against Sentinel-2), DISK and SuperPoint found 100–150
 agreeing matches at under a reference pixel; SIFT found too few to align it. With
-DISK, the candidates on Rachel, Stubb and Pequod lay a median 6–7 m from the
-surveyed camera solution.
+DISK, the candidates on Rachel, Stubb and Pequod lay a median 6–7 m from where an
+independent Metashape solution of each block puts them.
 
 ## Stable ground
 <!-- param: stableArea  default: Anywhere -->

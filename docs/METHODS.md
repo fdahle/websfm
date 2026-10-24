@@ -1213,7 +1213,8 @@ reference pixels whatever resolution either was read at (overview reads included
    mean of bands 1–3 when it has three or more (film is panchromatic). Rachel (1960s
    film vs Sentinel-2 RGB): prior 199° (true 199.1°), 130 inliers on the first look;
    SIFT at the same scale 8 inliers, 11 of 105 matches true. Candidates against a
-   georeference from the surveyed camera positions (bench `vsPoses`): Rachel median
+   georeference from hist-sfm's Metashape camera centres (bench `vsPoses`; agreement
+   with that solution, not survey accuracy): Rachel median
    7.1 m / max 23.5 m, Stubb 5.6 / 13.6 m, Pequod 5.8 / 22.4 m; none over 100 m.
    **Terrain** (`matcher: 'terrain'`, `core/sfm/terrainControl.js` + `alignTerrain`):
    no image matching. The prior, turned into a 3D similarity frame → DEM CRS
@@ -1226,7 +1227,7 @@ reference pixels whatever resolution either was read at (overview reads included
    Rachel (sparse points vs REMA at 16 m, offline): from 390 m and 1° off to 14 m
    RMS, the same end point as from the truth; from 1.9 km and 3° it does not
    converge. In the app (REMA 4 m read at ≤ 2,048 samples): RMS 9.5 m, candidates a
-   median 13 m from the surveyed camera solution (DISK + LightGlue: 7 m).
+   median 13 m from the Metashape solution (DISK + LightGlue: 7 m).
    **Coarse, SIFT** (`matcher: 'sift'`): SIFT (contrast 0.01, ≤ 2 orientations) on a 1,536-px look at the whole
    ortho and the search region; mutual ratio 0.75; homography RANSAC (3 px, 2,000
    iterations; ≥ 10 inliers and ≥ 25 %). On failure, 3×3 half-size then 5×5
@@ -1470,7 +1471,7 @@ nadir block turned 90° and cannot be told apart from camera geometry alone.
 
 The trim came from a historical (TMA) block, Rachel Glacier: 30 vertical frames with 12
 left and 16 right obliques about 60° off nadir. The obliques do not balance, so the
-plain mean was 21° off vertical (against the surveyed camera positions), under the 25°
+plain mean was 21° off vertical (against hist-sfm's Metashape camera centres), under the 25°
 gate. The local DEM and ortho were projected onto that tilted plane, which shears the
 relief by hundreds of metres, and Find GCPs could not align either with a map. The
 trimmed mean keeps the 30 verticals and is 0.3° off. A nadir block, a nadir block with
