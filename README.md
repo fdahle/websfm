@@ -51,6 +51,8 @@ it does, and the glossary explains the methods behind each stage.
 
 ## What it does
 
+![The example project's orthophoto on the 2D map, with the camera positions](docs/images/orthophoto.webp)
+
 A full photogrammetry pipeline, stage by stage:
 
 1. **Detect** – SIFT (Rust/WASM) or a learned detector (ALIKED, DISK, SuperPoint).
@@ -64,6 +66,17 @@ A full photogrammetry pipeline, stage by stage:
    mesh, optionally textured.
 6. **Georeferencing** – ground control points, camera poses, and reference DEMs,
    with reprojection into any project CRS (proj4).
+
+<table>
+  <tr>
+    <td width="60%"><img src="docs/images/matches.webp" alt="The match graph, with one image pair's verified matches"></td>
+    <td width="40%"><img src="docs/images/glossary.webp" alt="The in-app glossary explaining focal length"></td>
+  </tr>
+  <tr>
+    <td>Every image pair's matches, as a graph and side by side</td>
+    <td>Each method explained in the app, with linked terms</td>
+  </tr>
+</table>
 
 There's also an in-app guide and glossary, a quality-report hub, point-cloud
 editing, 2D and 3D measurement, video import (frames picked by camera motion and
@@ -171,8 +184,9 @@ half-frame scans), and multi-threaded bundle adjustment.
 - The motion of panoramic satellite cameras during the scan
 - Content-based automatic masking (film frames, colour keys, low-texture areas)
 
-Priorities follow real use: if something here matters to you, or something is
-missing, please open an issue to discuss it.
+Priorities follow real use: the [roadmap board](https://github.com/users/fdahle/projects/1)
+has an issue for each item, so comment on the one that matters to you, or open an
+issue for something missing.
 
 ## How it is developed
 
