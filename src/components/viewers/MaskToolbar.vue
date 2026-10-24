@@ -1,6 +1,7 @@
 <script setup>
 import Icon from '../Icon.vue'
 import FloatingToolbox from './FloatingToolbox.vue'
+import { keyLabel } from '../../utils/shortcutLabels.js'
 
 // Floating mask-editing toolbar shown over the image viewport while the tab is
 // in mask-edit mode. Pure presentation: tool/brush/opacity state lives in the
@@ -38,10 +39,18 @@ const emit = defineEmits([
 ])
 
 const TOOLS = [
-  { id: 'brush', icon: 'brush', title: 'Brush — paint mask (B)' },
-  { id: 'erase', icon: 'eraser', title: 'Eraser — unpaint mask (E)' },
-  { id: 'rect', icon: 'rect', title: 'Rectangle — drag to mask, hold Alt to erase (R)' },
-  { id: 'smart', icon: 'sparkles', title: 'Smart Select — click an object to segment it (SAM2) (S)' },
+  { id: 'brush', icon: 'brush', title: `Brush — paint mask (${keyLabel('mask.brush')})` },
+  { id: 'erase', icon: 'eraser', title: `Eraser — unpaint mask (${keyLabel('mask.erase')})` },
+  {
+    id: 'rect',
+    icon: 'rect',
+    title: `Rectangle — drag to mask, ${keyLabel('mask.rectErase')} to erase (${keyLabel('mask.rect')})`,
+  },
+  {
+    id: 'smart',
+    icon: 'sparkles',
+    title: `Smart Select — click an object to segment it (SAM2) (${keyLabel('mask.smart')})`,
+  },
 ]
 
 // Clicking the active tool deselects it → pan/zoom without leaving edit mode.
@@ -52,7 +61,14 @@ function pickTool(id) {
 </script>
 
 <template>
-  <FloatingToolbox id="mask" title="Mask" :width="168" close-title="Exit mask editing (Esc)" @close="emit('close')">
+  <FloatingToolbox
+    id="mask"
+    title="Mask"
+    :width="168"
+    close-title="Exit mask editing"
+    close-key="app.escape"
+    @close="emit('close')"
+  >
     <div class="mt-row">
       <button
         v-for="t in TOOLS"
@@ -65,13 +81,18 @@ function pickTool(id) {
         <Icon :name="t.icon" class="mt-icon" />
       </button>
       <span class="mt-gap" />
-      <button class="mt-btn" :class="{ disabled: !canUndo }" title="Undo (Ctrl+Z)" @click="canUndo && emit('undo')">
+      <button
+        class="mt-btn"
+        :class="{ disabled: !canUndo }"
+        :title="`Undo (${keyLabel('mask.undo')})`"
+        @click="canUndo && emit('undo')"
+      >
         <Icon name="undo" class="mt-icon" />
       </button>
       <button
         class="mt-btn"
         :class="{ disabled: !canRedo }"
-        title="Redo (Ctrl+Shift+Z)"
+        :title="`Redo (${keyLabel('mask.redo')})`"
         @click="canRedo && emit('redo')"
       >
         <Icon name="redo" class="mt-icon" />
@@ -86,7 +107,7 @@ function pickTool(id) {
         <button
           class="mt-textbtn add"
           :class="{ disabled: !smartHasPreview }"
-          title="Add the previewed segment to the mask (Enter)"
+          :title="`Add the previewed segment to the mask (${keyLabel('mask.smartAdd')})`"
           @click="smartHasPreview && emit('smart-commit')"
         >
           Add to mask
@@ -94,7 +115,7 @@ function pickTool(id) {
         <button
           class="mt-textbtn"
           :class="{ disabled: !smartHasPreview }"
-          title="Discard the previewed segment (Del)"
+          :title="`Discard the previewed segment (${keyLabel('mask.smartDiscard')})`"
           @click="smartHasPreview && emit('smart-discard')"
         >
           Clear
@@ -103,7 +124,7 @@ function pickTool(id) {
     </div>
 
     <div class="mt-row">
-      <button class="mt-btn" title="Invert mask (I)" @click="emit('invert')">
+      <button class="mt-btn" :title="`Invert mask (${keyLabel('mask.invert')})`" @click="emit('invert')">
         <Icon name="invert" class="mt-icon" />
       </button>
       <button class="mt-btn" title="Import an image as mask" @click="emit('import')">
@@ -119,7 +140,7 @@ function pickTool(id) {
       </button>
     </div>
 
-    <label class="mt-slider" title="Brush size ([ / ])">
+    <label class="mt-slider" :title="`Brush size (${keyLabel('mask.smaller')} / ${keyLabel('mask.larger')})`">
       <span class="mt-label">Size</span>
       <input
         type="range"

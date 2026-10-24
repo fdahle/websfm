@@ -33,7 +33,8 @@ const emit = defineEmits(['close', 'select', 'delete', 'select-new'])
     :id="`points-${noun}`"
     title="Points"
     :width="180"
-    close-title="Exit point editing (Esc)"
+    close-title="Exit point editing"
+    close-key="app.escape"
     @close="emit('close')"
   >
     <div>

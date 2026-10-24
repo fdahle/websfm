@@ -17,6 +17,8 @@ import {
 import { isGeographic } from '../../core/crs.js'
 import { rasterGroundScale, rasterUnits, volumeUnitLabel } from '../../core/products/rasterUnits.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
+import { matches } from '../../core/help/shortcuts.js'
+import { keyLabel } from '../../utils/shortcutLabels.js'
 import { demRef } from '../../core/products/demWindow.js'
 import { productDescriptor } from '../../core/io/rasterSource.js'
 import { readDemWindow } from '../../workers/computeClient.js'
@@ -408,7 +410,7 @@ const hint = computed(() => {
   const need = (TOOLS[tool.value]?.min ?? 2) - vertices.value.length
   return need > 0
     ? `Click ${need === 1 ? 'one more point' : `${need} points`} · ${props.panHint}`
-    : `Click to add points · Enter finishes · ${props.panHint}`
+    : `Click to add points · ${keyLabel('measure2d.finish')} finishes · ${props.panHint}`
 })
 const screenVertices = computed(() => (props.view ? vertices.value.map((p) => props.view.toScreen(p.x, p.y)) : []))
 const screenPoints = computed(() => screenVertices.value.map((p) => `${p.x},${p.y}`).join(' '))
@@ -536,13 +538,13 @@ function exportProfile() {
 function onKey(e) {
   if (tool.value === 'pan' || !root.value?.offsetParent) return
   if (!viewerMayHandleKey(e)) return
-  if (e.key === 'Enter') {
+  if (matches(e, 'measure2d.finish')) {
     finish()
     e.preventDefault()
-  } else if (e.key === 'Backspace' && vertices.value.length && !finished.value) {
+  } else if (matches(e, 'measure2d.undo') && vertices.value.length && !finished.value) {
     vertices.value.pop()
     e.preventDefault()
-  } else if (e.key === 'Escape') {
+  } else if (matches(e, 'measure2d.clear')) {
     e.preventDefault()
     if (vertices.value.length) reset()
     else choose('pan')
@@ -593,7 +595,8 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
       :title="TOOLS[tool].label"
       :aria-label="`${TOOLS[tool].label} measurement`"
       anchor="top-center"
-      close-title="Stop measuring (Esc)"
+      close-title="Stop measuring"
+      close-key="measure2d.clear"
       @close="choose('pan')"
     >
       <div class="mb-row">
@@ -624,7 +627,7 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
         <span class="mb-hint">{{ hint }}</span>
         <button
           class="mb-btn"
-          title="Remove the last point (Backspace)"
+          :title="`Remove the last point (${keyLabel('measure2d.undo')})`"
           :disabled="!vertices.length || finished"
           @click="vertices.pop()"
         >
@@ -633,12 +636,17 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
         <button
           class="mb-btn"
           :disabled="finished || vertices.length < TOOLS[tool].min"
-          title="Finish (Enter)"
+          :title="`Finish (${keyLabel('measure2d.finish')})`"
           @click="finish"
         >
           Finish
         </button>
-        <button class="mb-btn" :disabled="!vertices.length" title="Clear the drawing (Esc)" @click="reset">
+        <button
+          class="mb-btn"
+          :disabled="!vertices.length"
+          :title="`Clear the drawing (${keyLabel('measure2d.clear')})`"
+          @click="reset"
+        >
           Clear
         </button>
       </div>

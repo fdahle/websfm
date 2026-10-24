@@ -21,6 +21,8 @@ import { viewerClipping } from '../../core/products/viewerClipping.js'
 import { pickNearestPoint } from '../../core/products/screenPick.js'
 import { settleEditLatch } from '../../core/products/editFraming.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
+import { matches } from '../../core/help/shortcuts.js'
+import { keyLabel } from '../../utils/shortcutLabels.js'
 import { texturePageBlobs } from '../../stores/reconstruction/meshTexture.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { createLodLayer, LOD_VIEW_MIN } from './lodLayer.js'
@@ -681,35 +683,35 @@ function pointerPx(e) {
 function onSelectKey(e) {
   if (!container.value?.offsetParent) return // tab hidden (v-show)
   if (!viewerMayHandleKey(e)) return
-  if (e.key === 'Escape' && abortRegionDrag()) {
+  if (matches(e, 'region3d.abort') && abortRegionDrag()) {
     e.preventDefault()
     return
   }
   if (measureTool.value) {
-    if (e.key === 'Escape') {
+    if (matches(e, 'measure3d.clear')) {
       e.preventDefault()
       if (measurePts.value.length) clearMeasure()
       else exitMeasure()
       return
     }
-    if (e.key === 'Backspace' || e.key === 'Delete') {
+    if (matches(e, 'measure3d.undo')) {
       e.preventDefault()
       undoMeasure()
       return
     }
-    if (e.key === 'Enter') {
+    if (matches(e, 'measure3d.finish')) {
       e.preventDefault()
       finishMeasure()
       return
     }
   }
-  if (e.key === 'Escape' && abortStroke()) {
+  if (matches(e, 'select3d.clear') && abortStroke()) {
     e.preventDefault()
-  } else if (e.key === 'Escape' && (selectionCount.value || selectTool.value)) {
+  } else if (matches(e, 'select3d.clear') && (selectionCount.value || selectTool.value)) {
     e.preventDefault()
     if (selectionCount.value) clearSelection()
     else selectTool.value = null
-  } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectionCount.value) {
+  } else if (matches(e, 'select3d.delete') && selectionCount.value) {
     e.preventDefault()
     commitSelection(false)
   }
@@ -1153,7 +1155,8 @@ onBeforeUnmount(() => {
       title="Measure in 3D"
       anchor="top-center"
       :width="300"
-      close-title="Stop measuring (Esc)"
+      close-title="Stop measuring"
+      close-key="measure3d.clear"
       @close="exitMeasure"
     >
       <div class="tb-row" role="group" aria-label="Measure">
@@ -1203,9 +1206,9 @@ onBeforeUnmount(() => {
       </template>
       <div v-else class="tb-hint">
         Click on a cloud or mesh to place points{{
-          measureTool === 'distance' ? '' : ' · Enter or double-click finishes'
+          measureTool === 'distance' ? '' : ` · ${keyLabel('measure3d.finish')} or double-click finishes`
         }}
-        · Backspace undoes · Esc exits
+        · {{ keyLabel('measure3d.undo') }} undoes · {{ keyLabel('measure3d.clear') }} exits
       </div>
       <div v-if="measureNote" class="tb-hint warn">{{ measureNote }}</div>
       <div v-if="measureResult" class="tb-row">
@@ -1220,7 +1223,9 @@ onBeforeUnmount(() => {
         <button v-if="!measureDone && measureTool !== 'distance'" class="tb-textbtn" @click="finishMeasure">
           Finish
         </button>
-        <button class="tb-textbtn" title="Start again (Esc)" @click="clearMeasure">Clear</button>
+        <button class="tb-textbtn" :title="`Start again (${keyLabel('measure3d.clear')})`" @click="clearMeasure">
+          Clear
+        </button>
       </div>
       <template v-if="saved3d.length">
         <div class="tb-hint tb-row">
@@ -1305,7 +1310,8 @@ onBeforeUnmount(() => {
       title="Select points"
       anchor="top-center"
       :width="260"
-      close-title="Stop selecting (Esc)"
+      close-title="Stop selecting"
+      close-key="select3d.clear"
       @close="exitSelection"
     >
       <template v-if="selectionCount">
@@ -1319,13 +1325,23 @@ onBeforeUnmount(() => {
           Of the points drawn now: on a streamed cloud the edit takes every point inside the shape, at full detail.
         </div>
         <div class="tb-row">
-          <button class="tb-textbtn danger" title="Delete the selected points (Delete)" @click="commitSelection(false)">
+          <button
+            class="tb-textbtn danger"
+            :title="`Delete the selected points (${keyLabel('select3d.delete')})`"
+            @click="commitSelection(false)"
+          >
             Delete
           </button>
           <button class="tb-textbtn" title="Keep only the selected points" @click="commitSelection(true)">
             Keep only
           </button>
-          <button class="tb-textbtn" title="Clear the selection (Esc)" @click="clearSelection">Clear</button>
+          <button
+            class="tb-textbtn"
+            :title="`Clear the selection (${keyLabel('select3d.clear')})`"
+            @click="clearSelection"
+          >
+            Clear
+          </button>
         </div>
         <div class="tb-row">
           <select v-model.number="assignClass" class="tb-input assign-class" aria-label="Class to assign">
@@ -1343,7 +1359,7 @@ onBeforeUnmount(() => {
       <div v-else class="tb-hint">
         {{
           selectableLayers().length
-            ? `Drag a ${selectTool === 'lasso' ? 'lasso' : 'rectangle'} over dense-cloud points · Shift adds · Alt subtracts · Esc exits`
+            ? `Drag a ${selectTool === 'lasso' ? 'lasso' : 'rectangle'} over dense-cloud points · ${keyLabel('select3d.add')} adds · ${keyLabel('select3d.subtract')} subtracts · ${keyLabel('select3d.clear')} exits`
             : 'Show a dense cloud to select its points'
         }}
       </div>

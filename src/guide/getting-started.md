@@ -139,7 +139,8 @@ prerequisite is missing stays in its menu, greyed, with the reason. Interactive 
 (selecting points, editing masks or ground control, measuring, region, orientation,
 point-pair alignment) act on the view in front and open a small floating toolbox over
 it; while one runs, its menu button stays lit. You can drag the toolbox by its title,
-and close it with × or Esc.
+and close it with × or Esc. Hovering a button shows its keyboard shortcut, if it has
+one; **?** (or Other → **Shortcuts**) lists them all, grouped by where they work.
 
 ## If something goes wrong
 When a stage logs an error, a red note at the bottom right says so; click it to open

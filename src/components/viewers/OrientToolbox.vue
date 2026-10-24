@@ -24,7 +24,8 @@ const fmt = (v) => v.map((x) => x.toFixed(3)).join(', ')
     id="orient"
     title="Orient model"
     :width="290"
-    close-title="Close the orient tool (Esc)"
+    close-title="Close the orient tool"
+    close-key="app.escape"
     @close="emit('close')"
   >
     <div v-if="georeferenced" class="tb-hint warn">

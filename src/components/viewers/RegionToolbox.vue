@@ -33,7 +33,8 @@ const fmt = (v) => Number(v.toPrecision(6))
     id="region"
     title="Region"
     :width="300"
-    close-title="Close the region tool (Esc)"
+    close-title="Close the region tool"
+    close-key="app.escape"
     @close="emit('close')"
   >
     <div class="tb-hint">

@@ -57,6 +57,8 @@ import './stores/useLogStore.js' // registers the console as a project-scoped st
 import * as opfs from './utils/opfs.js'
 import { useSfmInterop } from './composables/useSfmInterop.js'
 import HelpPopupStack from './components/glossary/HelpPopupStack.vue'
+import { matches } from './core/help/shortcuts.js'
+import { viewerMayHandleKey } from './utils/keyRouting.js'
 
 // These dialogs pull in large reports, Markdown/KaTeX, or diagnostic code and are
 // not needed for the initial workspace. Load them on first open instead of putting
@@ -242,6 +244,7 @@ const {
   footprintFromPosesOpen,
   qualityOpen,
   qualitySection,
+  shortcutsOpen,
 } = storeToRefs(useModalsStore())
 
 const glossaryStore = useGlossaryStore()
@@ -493,14 +496,18 @@ onMounted(async () => {
   window.addEventListener('keydown', (e) => {
     // A viewer (3D selection, measuring) or menu that acted on this key consumed it;
     // one key press does one thing, innermost first (see utils/keyRouting.js).
+    // Keys are named in core/help/shortcuts.js, which the Shortcuts dialog lists.
     if (e.defaultPrevented) return
-    if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
+    if (matches(e, 'app.console')) {
       e.preventDefault()
       consoleOpen.value = !consoleOpen.value
-    } else if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+    } else if (matches(e, 'app.consolePrompt')) {
       e.preventDefault()
       focusConsole()
-    } else if (e.key === 'Escape') {
+    } else if (matches(e, 'app.shortcuts') && viewerMayHandleKey(e)) {
+      e.preventDefault()
+      shortcutsOpen.value = true
+    } else if (matches(e, 'app.escape')) {
       if (!closeTopModal()) {
         // Nothing modal to dismiss — Escape exits mask/GCP-edit mode on the active tab.
         const tab = activeTab.value

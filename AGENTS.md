@@ -25,6 +25,10 @@ Rules that are easy to miss:
 - A dialog that runs a processing step shows its settings as numbered `SettingsStep`s
   in run order, each with a live effect line from `src/core/stepEffects/`
   ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Dialogs of a processing step*).
+- Keyboard shortcuts live in `src/core/help/shortcuts.js`: a handler tests
+  `matches(e, id)` and a tooltip shows `keyLabel(id)`; never compare `e.key` or type
+  "(Ctrl+Z)" by hand ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Keep the in-app help in
+  step*, item 4).
 - Run `npm test` and `npm run typecheck` before calling a change done.
 - In the final summary, say which help files (`src/guide/`, `src/glossary/`) were
   updated, or that none needed it.

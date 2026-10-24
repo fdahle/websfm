@@ -757,6 +757,7 @@ export const TABS = [
         commands: [
           { id: 'open-glossary', label: 'Glossary', icon: 'book' },
           { id: 'open-guide', label: 'Guide', icon: 'book' },
+          { id: 'open-shortcuts', label: 'Shortcuts', icon: 'keyboard' },
           // Appearance lives in Settings ▸ Display (and the command palette's
           // `theme`) — deliberately not duplicated as a ribbon button.
           { id: 'open-settings', label: 'Settings', icon: 'settings' },

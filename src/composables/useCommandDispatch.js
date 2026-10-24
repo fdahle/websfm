@@ -108,6 +108,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     projectSettingsOpen,
     aboutOpen,
     systemInfoOpen,
+    shortcutsOpen,
     debugSummaryOpen,
     filterCloudPreset,
     toolModal,
@@ -184,6 +185,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     'open-project-settings': projectSettingsOpen,
     'open-about': aboutOpen,
     'open-system-info': systemInfoOpen,
+    'open-shortcuts': shortcutsOpen,
     'open-debug-summary': debugSummaryOpen,
   }
 

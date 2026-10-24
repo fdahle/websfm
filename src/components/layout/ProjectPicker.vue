@@ -7,6 +7,7 @@ import { version as appVersion } from '../../../package.json'
 import Icon from '../Icon.vue'
 import { useInlineRename } from '../../composables/useInlineRename.js'
 import { confirmDialog, confirmOpen } from '../../composables/useConfirmations.js'
+import { matches } from '../../core/help/shortcuts.js'
 
 const props = defineProps({
   projects: { type: Array, required: true },
@@ -107,7 +108,7 @@ function formatDate(iso) {
 // whatever modal sits under the picker (or exit the active tool mode).
 function onKey(e) {
   // A confirm asked from here sits on top and answers its own Escape.
-  if (e.key !== 'Escape' || confirmOpen.value) return
+  if (!matches(e, 'app.escape') || confirmOpen.value) return
   if (menu.value) closeMenu()
   else if (renamingId.value) cancelRename()
   else if (props.dismissible) emit('close')

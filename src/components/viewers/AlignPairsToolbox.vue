@@ -58,7 +58,8 @@ const summary = computed(() => {
     id="align-pairs"
     title="Align by point pairs"
     :width="300"
-    close-title="Cancel point-pair alignment (Esc)"
+    close-title="Cancel point-pair alignment"
+    close-key="app.escape"
     @close="emit('close')"
   >
     <label class="tb-field">

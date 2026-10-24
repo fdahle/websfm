@@ -97,6 +97,12 @@ adds, removes or renames a setting, operation or user-visible feature:
      entry that explains that exact concept.
 3. A new concept gets a new glossary entry. Keep aliases specific: a generic alias
    such as "projection" or "3D point" links in the wrong places.
+4. A keyboard shortcut or modifier gesture is an entry in `src/core/help/shortcuts.js`.
+   The handler tests `matches(e, 'group.name')`, never `e.key` directly, and a tooltip
+   names the key with `keyLabel('group.name')` instead of typing "(Ctrl+Z)". The
+   Shortcuts dialog lists the table, and a unit test fails on an entry no handler
+   matches. Plain control behaviour (Enter or Esc in a field, arrows in a menu) is not
+   a shortcut.
 
 ## Dialogs of a processing step
 

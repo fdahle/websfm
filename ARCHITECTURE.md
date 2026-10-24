@@ -103,6 +103,7 @@ to the algorithm; the other steps differ only in file names.
 | add or change a setting | the `*_DEFAULTS` in `core/defaults.user.js` and the dialog in `components/modals/` | the guide section in `src/guide/` (see [CONTRIBUTING](CONTRIBUTING.md#keep-the-in-app-help-in-step)) |
 | tune an internal threshold | `core/tuning.js` | the test that pins it |
 | add a ribbon command | `core/help/ribbonTabs.js` | `composables/useCommandDispatch.js`; it becomes a console command automatically (`core/help/commands.js`) |
+| add or change a keyboard shortcut | its entry in `core/help/shortcuts.js` | the handler asks `matches(e, id)`, a tooltip shows `keyLabel(id)` (`utils/shortcutLabels.js`); the Shortcuts dialog lists it by itself |
 | add an import format | a reader in `core/io/` | `composables/useImportRouting.js` (and `core/io/importKind.js` for dropped files) |
 | add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/products/ExportModal.vue`, `workers/ops/export.js` |
 | add per-project state | a store in `stores/` | register it with `registerProjectStore` (`stores/projectStores.js`) so it saves and reopens with the project |
@@ -128,6 +129,9 @@ to the algorithm; the other steps differ only in file names.
   The dialogs and the core code read the same objects.
 - **The Ribbon chooses; a floating toolbox runs.** Ribbon commands open a dialog or
   start a tool. The controls for a running tool live in its toolbox over the view.
+- **Keyboard shortcuts have one home.** `core/help/shortcuts.js` names every key and
+  modifier gesture. Handlers test `matches(e, id)` rather than `e.key`, tooltips show
+  `keyLabel(id)`, and the Shortcuts dialog (`?`) lists the table, so the three agree.
 - **Heavy CPU work uses every core.** `workers/computeClient.js` runs a pool of up to
   eight workers. A stage made of independent items spreads them over the pool (matching
   by pair, detection by image, depth maps and the ortho by chunks, each worker with its

@@ -3,6 +3,7 @@ import { invertMaskPixels, anyExcluded, maskStorageSize } from '../core/mask.js'
 import { maskFromFile } from '../workers/computeClient.js'
 import { createRevision } from '../utils/revision.js'
 import { viewerMayHandleKey } from '../utils/keyRouting.js'
+import { matches } from '../core/help/shortcuts.js'
 import { useSmartSelect } from './useSmartSelect.js'
 
 // The image viewer's mask editor (components/viewers/ViewerImage.vue): the
@@ -445,7 +446,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   }
 
   // ── Keyboard ─────────────────────────────────────────────────────────────────
-  // Mask-edit shortcuts. Instances are kept alive per tab via v-show, so gate on
+  // Mask-edit shortcuts (core/help/shortcuts.js ▸ mask). Instances are kept alive per tab via v-show, so gate on
   // being the *visible* one and on edit mode. The app-wide key rule
   // (utils/keyRouting.js) decides the rest: no key while a modal dialog is open,
   // typed into a field, or already consumed — and every key acted on here is
@@ -455,40 +456,38 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   function onKeydown(e) {
     if (!maskEdit() || !wholeMaskOk() || !isVisible()) return
     if (!viewerMayHandleKey(e)) return
-    const k = e.key.toLowerCase()
     // A large scan's reduced canvas: no painting tools, only the whole-mask keys.
-    if (!editable.value && !(k === 'i' || ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')))) return
-    if ((e.ctrlKey || e.metaKey) && k === 'z') {
+    if (!editable.value && !['mask.invert', 'mask.undo', 'mask.redo'].some((id) => matches(e, id))) return
+    if (matches(e, 'mask.undo')) {
       e.preventDefault()
-      e.shiftKey ? redoMask() : undoMask()
+      undoMask()
       return
     }
-    if ((e.ctrlKey || e.metaKey) && k === 'y') {
+    if (matches(e, 'mask.redo')) {
       e.preventDefault()
       redoMask()
       return
     }
     // Smart Select: Enter commits the previewed segment, Del/Backspace discards it.
     if (tool.value === 'smart') {
-      if (e.key === 'Enter') {
+      if (matches(e, 'mask.smartAdd')) {
         e.preventDefault()
         if (smartHasPreview.value) commitSmart()
         return
       }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (matches(e, 'mask.smartDiscard')) {
         e.preventDefault()
         discardSmart()
         return
       }
     }
-    if (e.ctrlKey || e.metaKey || e.altKey) return
-    if (k === 'b') tool.value = 'brush'
-    else if (k === 'e') tool.value = 'erase'
-    else if (k === 'r') tool.value = 'rect'
-    else if (k === 's') tool.value = 'smart'
-    else if (k === 'i') invertMask()
-    else if (e.key === '[') brushRadius.value = Math.max(4, brushRadius.value - 4)
-    else if (e.key === ']') brushRadius.value = Math.min(80, brushRadius.value + 4)
+    if (matches(e, 'mask.brush')) tool.value = 'brush'
+    else if (matches(e, 'mask.erase')) tool.value = 'erase'
+    else if (matches(e, 'mask.rect')) tool.value = 'rect'
+    else if (matches(e, 'mask.smart')) tool.value = 'smart'
+    else if (matches(e, 'mask.invert')) invertMask()
+    else if (matches(e, 'mask.smaller')) brushRadius.value = Math.max(4, brushRadius.value - 4)
+    else if (matches(e, 'mask.larger')) brushRadius.value = Math.min(80, brushRadius.value + 4)
     else return
     e.preventDefault()
     drawOverlay()

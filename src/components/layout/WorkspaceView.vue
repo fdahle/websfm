@@ -22,6 +22,7 @@ import ViewerGcp from '../viewers/ViewerGcp.vue'
 import RegionToolbox from '../viewers/RegionToolbox.vue'
 import OrientToolbox from '../viewers/OrientToolbox.vue'
 import AlignPairsToolbox from '../viewers/AlignPairsToolbox.vue'
+import { matches } from '../../core/help/shortcuts.js'
 const ProductViewer = defineAsyncComponent(() => import('../viewers/ProductViewer.vue'))
 const ViewerMap = defineAsyncComponent(() => import('../viewers/ViewerMap.vue'))
 const Viewer3D = defineAsyncComponent(() => import('../viewers/Viewer3D.vue'))
@@ -251,7 +252,7 @@ watch(activeTabId, (id) => {
 // and mount before this, so a bubbling listener would let them clear a selection
 // on the same press that only meant to close the menu.
 function onKeydown(e) {
-  if (e.key === 'Escape' && tabCtx.value) {
+  if (matches(e, 'app.escape') && tabCtx.value) {
     closeTabCtx()
     e.preventDefault()
     e.stopImmediatePropagation()

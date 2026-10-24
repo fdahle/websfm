@@ -249,6 +249,9 @@ export const icons = {
     <path d="M6 3.5h8l4 4v13H6z" />
     <path d="M14 3.5v4h4" />
     <path d="M9 17v-3.5M12 17v-6M15 17v-2.5" />`,
+  'keyboard': `
+    <rect x="3" y="6" width="18" height="12" rx="2" />
+    <path d="M7 10h.01M10 10h.01M13 10h.01M16 10h.01M7 13h.01M17 13h.01M9.5 15h5" />`,
   'book': `
     <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H12v15H5.5A1.5 1.5 0 0 0 4 20.5z" />
     <path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H12v15h6.5a1.5 1.5 0 0 1 1.5 1.5z" />`,

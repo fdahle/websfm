@@ -4,6 +4,7 @@ import { getGuideDoc, getParam } from '../core/help/guide.js'
 import { useGlossaryStore } from '../stores/useGlossaryStore.js'
 import { useGuideStore } from '../stores/useGuideStore.js'
 import { loadHelpRenderer } from './useHelpHtml.js'
+import { matches } from '../core/help/shortcuts.js'
 
 // The one stack of hover help popups (Crusader-Kings-style nested tooltips).
 // Hovering a help word on the page (GlossaryTerm, FieldHelp, a link in the
@@ -89,7 +90,7 @@ function onDocMouseDown(e) {
 }
 
 function onKeydown(e) {
-  if (e.key !== 'Escape') return
+  if (!matches(e, 'app.escape')) return
   // Only this popup layer, not the action modal underneath.
   e.stopPropagation()
   truncate(helpStack.length - 1)

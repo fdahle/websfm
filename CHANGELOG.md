@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Keyboard shortcuts in one list.** Press **?** (or Other → Shortcuts) to see every
+  shortcut and modifier gesture, grouped by where it works and filterable by action or
+  key. Tooltips spell keys for the platform (⌘Z on a Mac). Plain mask-editing letters
+  no longer fire with Shift held, and Ctrl+Alt+Z no longer undoes a mask.
 - **Find GCPs aligns historical film with a satellite image.** The coarse look is now a
   learned matcher (DISK, or SuperPoint when installed, with LightGlue; SIFT stays
   selectable), with both rasters read at the same ground resolution and the

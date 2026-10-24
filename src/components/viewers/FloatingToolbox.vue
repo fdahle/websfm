@@ -7,13 +7,15 @@ const positions = new Map()
 
 <script setup>
 import { ref, computed, onBeforeUnmount } from 'vue'
+import { keyLabel } from '../../utils/shortcutLabels.js'
 
 // The shell every interactive tool's floating toolbox uses (mask editing, point
 // editing, 3D selection, raster measuring, …). THE RULE: the ribbon *chooses* a
 // tool; what you do inside the running tool lives here, over the view, and goes
 // away with the tool. The shell owns the chrome only — title bar, drag, close (×).
 // Keyboard shortcuts (Esc to exit, Delete, …) stay with the owning viewer, which
-// already orders them by priority (e.g. Esc clears a selection before leaving).
+// already orders them by priority (e.g. Esc clears a selection before leaving);
+// `closeKey` only names the one that closes it, for the × tooltip.
 //
 // Drag by the title bar (left button) or with the middle button anywhere on the
 // card. Events are stopped at the card so the view underneath never pans, zooms
@@ -27,11 +29,16 @@ const props = defineProps({
   // Starting position when nothing is remembered: 'top-left' or 'top-center'.
   anchor: { type: String, default: 'top-left' },
   width: { type: Number, default: null },
-  closeTitle: { type: String, default: 'Close (Esc)' },
+  closeTitle: { type: String, default: 'Close' },
+  // The shortcut (core/help/shortcuts.js) that also closes it, added to the tooltip.
+  closeKey: { type: String, default: null },
   // False hides the × (a toolbox whose tool is left via the ribbon only).
   closable: { type: Boolean, default: true },
 })
 const emit = defineEmits(['close'])
+const closeHint = computed(() =>
+  props.closeKey ? `${props.closeTitle} (${keyLabel(props.closeKey)})` : props.closeTitle,
+)
 
 const card = ref(null)
 const pos = ref(positions.get(props.id) ?? null)
@@ -110,7 +117,7 @@ onBeforeUnmount(onDragUp)
     <div class="ft-header" @mousedown.prevent="onHeaderDown">
       <span class="ft-title">{{ title }}</span>
       <slot name="header" />
-      <button v-if="closable" class="ft-close" :title="closeTitle" :aria-label="closeTitle" @click="emit('close')">
+      <button v-if="closable" class="ft-close" :title="closeHint" :aria-label="closeHint" @click="emit('close')">
         ×
       </button>
     </div>

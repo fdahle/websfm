@@ -13,6 +13,7 @@ import FolderReconnectModal from './project/FolderReconnectModal.vue'
 import NewProjectModal from './project/NewProjectModal.vue'
 import ProgressModal from './app/ProgressModal.vue'
 import ProjectPicker from '../layout/ProjectPicker.vue'
+import ShortcutsModal from './app/ShortcutsModal.vue'
 import ProjectSettingsModal from './project/ProjectSettingsModal.vue'
 import SaveProjectModal from './project/SaveProjectModal.vue'
 import SettingsModal from './app/SettingsModal.vue'
@@ -51,6 +52,7 @@ const {
   projectSettingsOpen,
   saveProjectOpen,
   settingsOpen,
+  shortcutsOpen,
   systemInfoOpen,
   workflowBuilderOpen,
 } = storeToRefs(useModalsStore())
@@ -288,6 +290,7 @@ const progressSpotlight = computed(() =>
   <Teleport to="body">
     <AboutModal v-if="aboutOpen" @close="aboutOpen = false" />
     <SystemInfoModal v-if="systemInfoOpen" @close="systemInfoOpen = false" />
+    <ShortcutsModal v-if="shortcutsOpen" @close="shortcutsOpen = false" />
   </Teleport>
 
   <Teleport to="body">
