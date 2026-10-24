@@ -27,7 +27,9 @@ concurrency:
   group: verify-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  test:
+  # Three jobs start together, and the browser tests are split over three runners
+  # (Playwright --shard): a push waits for the slowest of them, not their sum.
+  checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -42,14 +44,50 @@ jobs:
       - run: npm test
       - run: npm run check:wasm
       - run: npm run test:wasm
-      - run: cargo test --manifest-path crates/Cargo.toml --workspace --release --locked
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
+
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # Most of cargo test's time is compiling the dependencies; cached between runs.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+      - run: cargo test --manifest-path crates/Cargo.toml --workspace --release --locked
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Chromium is cached per lockfile (it follows the Playwright version); the system
+      # libraries it needs are installed either way.
+      - id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      # The tests run against the dev server (playwright.config.js), so no build here.
+      - run: npm run test:browser -- --shard=${{ matrix.shard }}/3
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: browser-test-results
+          name: browser-test-results-${{ matrix.shard }}
           path: test-results/
           retention-days: 7
 
@@ -58,7 +96,7 @@ jobs:
   # The R2 files (models, ORT's WebGPU wasm) are not uploaded here: run
   # `deploy-cloudflare.mjs --upload` by hand after a model or ORT change.
   deploy:
-    needs: test
+    needs: [checks, rust, browser]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
