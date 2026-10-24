@@ -6,6 +6,9 @@ describe('gradualSelectionEffects', () => {
     expect(gradualSelectionEffects({ metric: 'error', threshold: 3 }).select).toMatch(/^Computing/)
     const e = gradualSelectionEffects({ metric: 'track', threshold: 3 }, { selected: 100, total: 1000 })
     expect(e.select).toBe('100 points seen in fewer than 3 views are selected; 900 remain.')
+    expect(gradualSelectionEffects({ metric: 'error', threshold: 3 }, { selected: 1, total: 30 }).select).toBe(
+      '1 point with a reprojection error above 3 px is selected; 29 remain.',
+    )
     expect(gradualSelectionEffects({ metric: 'angle', threshold: 2 }, { selected: 998, total: 1000 }).refine).toMatch(
       /^Too few points/,
     )

@@ -184,7 +184,7 @@ test('sparse gradual selection refines through real WASM and invalidates derived
     recon.summary = { selfCalDistortion: [{ sensorId: 'sensor', k1: 0.01 }], fiducialTransforms: [] }
   })
   await page.getByRole('button', { name: 'Gradual selection', exact: true }).click()
-  await expect(page.getByText('1 selected · 29 remaining')).toBeVisible()
+  await expect(page.getByText('1 point with a reprojection error above 3 px is selected; 29 remain.')).toBeVisible()
   await page.getByRole('button', { name: 'Delete selected + refine' }).click()
   await expect(page.locator('#edited')).toHaveText('29')
   expect(

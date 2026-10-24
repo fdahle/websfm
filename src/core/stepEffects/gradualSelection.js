@@ -1,7 +1,7 @@
 // What each step of Sparse gradual selection does (GradualSelectionModal.vue): select
 // tie points by a quality criterion, then delete them and re-adjust
 // (core/sfm/gradualSelection.js).
-import { fmtCount } from './format.js'
+import { fmtCount, plural } from './format.js'
 
 const CRITERION = {
   error: (t) => `with a reprojection error above ${t} px`,
@@ -15,7 +15,8 @@ export function gradualSelectionEffects(s, { selected = null, total = 0, error =
     ? error
     : selected === null
       ? 'Computing point statistics…'
-      : `${fmtCount(selected)} points ${(CRITERION[s.metric] ?? CRITERION.error)(s.threshold)} are selected; ` +
+      : `${plural(selected, 'point')} ${(CRITERION[s.metric] ?? CRITERION.error)(s.threshold)} ` +
+        `${selected === 1 ? 'is' : 'are'} selected; ` +
         `${fmtCount(total - selected)} remain.`
   const refine =
     selected && total - selected < 6
