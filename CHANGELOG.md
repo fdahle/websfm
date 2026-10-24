@@ -109,6 +109,9 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **The app is called WebSfM** in its interface, messages, help and the name it installs
+  under, and in the LAS files it writes. Links, the `.websfm` project files and saved
+  settings are unchanged.
 - **DEMs take each cell's median height by default** (was the maximum). In a cell on a
   slope the maximum is the cell's highest corner: on Rachel Glacier's rock at 20 m cells
   it stood 14 m above the reference DEM (NMAD 8.2 m), the median 0.7 m (5.9 m). On flat

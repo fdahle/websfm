@@ -8,7 +8,7 @@ in [docs/development.md](docs/development.md).
 
 ## The big picture
 
-websfm is a static web app with no server. A Vue 3 front end drives a pool of web
+WebSfM is a static web app with no server. A Vue 3 front end drives a pool of web
 workers, and the workers run the numerical work in Rust compiled to WebAssembly.
 Projects are stored in the browser's Origin Private File System (OPFS) or, in
 Chromium, in a folder on disk that the user picks.

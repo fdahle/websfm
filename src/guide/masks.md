@@ -152,7 +152,7 @@ An imported file is stretched to the image's size and read one of two ways:
 - **A file with transparency** (a PNG with an alpha channel and at least one
   transparent pixel): **transparent dark pixels are kept; opaque or bright pixels
   are masked**. Draw it transparent where the image is used and white or any opaque
-  colour where it is masked. The masks websfm itself stores (red on transparent)
+  colour where it is masked. The masks WebSfM itself stores (red on transparent)
   are of this kind and import back unchanged.
 - **A file without transparency** (a JPEG, or a plain black-and-white PNG): by
   brightness, **black is masked and white is kept**, with mid-grey as the cut-off.

@@ -26,7 +26,7 @@ The flight crossed the park in parallel lines, so every spot on the ground is in
 several photos. That overlap is what makes 3D possible.
 
 ## 2 · Detect features
-**Reconstruct ▸ Detect Features**, keep **Balanced**, and press **Run**. websfm
+**Reconstruct ▸ Detect Features**, keep **Balanced**, and press **Run**. WebSfM
 finds thousands of distinctive points in every photo (corners, edges of paths,
 patches of texture), using [SIFT](help:sift). It takes about half a minute. Open a photo
 and press **Keypoints** in the **Picture** tab of the ribbon to see them.
@@ -43,7 +43,7 @@ as a graph: photos taken next to each other should be linked.
 See [Match Features](guide:match-features).
 
 ## 4 · Build the sparse model
-**Reconstruct ▸ Sparse Model**, **Run**. websfm works out where each camera was and
+**Reconstruct ▸ Sparse Model**, **Run**. WebSfM works out where each camera was and
 how it was turned, together with a cloud of about 15,000 3D points, in about 20
 seconds. You can watch the model grow in the 3D view. Expect all 42 cameras to
 register, with a median
@@ -62,7 +62,7 @@ stage and points out weak spots, such as images with few matches. See
 [Quality Report](guide:quality-report).
 
 ## 5 · Compute depth maps
-**Reconstruct ▸ Depth Maps**, keep **Medium**, **Run**. For every photo, websfm now
+**Reconstruct ▸ Depth Maps**, keep **Medium**, **Run**. For every photo, WebSfM now
 estimates the distance to every pixel, using its neighbours ([depth map](help:depth-map)).
 This is the slowest step. With a graphics card (WebGPU, available in current Chrome
 and Edge) it takes under a minute. Without one it runs on the processor's cores, and the
@@ -90,7 +90,7 @@ about 330 × 240 m with cells of 18 cm, built in a second or two.
 
 Then **Reconstruct ▸ Ortho**, **Run**. The [orthophoto](help:orthophoto) is a map
 made from the photos: every pixel is seen from straight above, at true scale, so you
-can measure on it. websfm picks the best photo for each area and hides the seams
+can measure on it. WebSfM picks the best photo for each area and hides the seams
 between them, in about 15 seconds. Compare it with the basemap in the **2D** tab: paths and buildings
 should line up to within a few metres.
 

@@ -25,7 +25,7 @@ scale factor k it divided out; near the poles this removes metres of error.
 Georeferenced products are the exception: a DEM or orthophoto in the project CRS
 needs a projected CRS, because the model cannot be fitted to degrees. New projects
 start in WGS 84 (EPSG:4326). When the project CRS is geographic and the cameras have
-positions (EXIF GPS or imported), websfm suggests a projected CRS: the UTM zone of
+positions (EXIF GPS or imported), WebSfM suggests a projected CRS: the UTM zone of
 the median camera position, or polar stereographic beyond UTM's range (EPSG:3031 in
 the far south, EPSG:3413 in the far north). The log names the suggestion when the
 GPS positions are read. **Project Settings** and the Build DEM / Build Orthophoto
@@ -256,7 +256,7 @@ What aligns the whole orthophoto with the reference at first.
 - **DISK + LightGlue** and **SuperPoint + LightGlue** are learned. They match an
   orthophoto from historical film to a modern satellite image, where little texture
   survives but the shapes do. The weights download on first use, with your consent;
-  SuperPoint's licence does not let websfm ship them, so you supply that file.
+  SuperPoint's licence does not let WebSfM ship them, so you supply that file.
 - **SIFT** is quickest and needs no download. It aligns photos taken with similar
   light and a similar sensor: a recent drone survey against a recent orthophoto.
 - **Terrain (reference DEM, ICP)** matches shape instead of appearance: the sparse

@@ -96,7 +96,7 @@ function onBodyClick(e) {
   <ModalShell title="What's new" width="780px" height="82vh" @close="emit('close')">
     <div class="wn-bar">
       <span v-if="newOnOpen" class="wn-new-count"><Icon name="sparkles" /> {{ newOnOpen }} new</span>
-      <span v-else class="wn-hint">Every change to websfm, newest first.</span>
+      <span v-else class="wn-hint">Every change to WebSfM, newest first.</span>
       <span class="wn-spacer"></span>
       <button class="link-btn" type="button" @click="toggleAll">{{ allOpen ? 'Collapse all' : 'Expand all' }}</button>
       <SegmentedControl v-model="mode" :options="MODES" />

@@ -71,7 +71,7 @@ function onDrop(item, ev) {
           <p v-if="item.ready" class="mdl-ok">✓ File received</p>
           <template v-else>
             <p class="mdl-byo-text">
-              These weights carry a non-commercial license, so websfm does not ship them. If your use qualifies, get the
+              These weights carry a non-commercial license, so WebSfM does not ship them. If your use qualifies, get the
               file yourself — once per browser:
             </p>
             <ol class="mdl-steps">

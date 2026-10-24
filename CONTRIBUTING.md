@@ -8,14 +8,14 @@ pull requests are all welcome.
 - **Bugs:** use the bug report form, or the 🐞 button in the app. A log export
   (the developer console's **Save TXT**) and a description of the dataset (number of
   images, camera, aerial or close-range) help most.
-- **Results on real data:** reports of how websfm did on a dataset, good or bad,
+- **Results on real data:** reports of how WebSfM did on a dataset, good or bad,
   are just as useful as bug reports, especially with reference data (GCPs, RTK).
 - **Larger changes:** please open an issue to discuss the idea before you write a
   big pull request.
 
 ## Finding your way around
 
-websfm is large (a photogrammetry pipeline is), but every part follows the same
+WebSfM is large (a photogrammetry pipeline is), but every part follows the same
 pattern, so you only need to understand the part you change.
 
 1. Run it: `npm install`, `npm run fetch:examples`, `npm run dev`, then open the

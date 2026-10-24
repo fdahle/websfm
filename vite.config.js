@@ -95,8 +95,8 @@ export default defineConfig(({ mode }) => {
         // The glob below already precaches the icons (the plugin adds the manifest).
         includeManifestIcons: false,
         manifest: {
-          name: 'websfm — photogrammetry in your browser',
-          short_name: 'websfm',
+          name: 'WebSfM — photogrammetry in your browser',
+          short_name: 'WebSfM',
           description: 'Structure-from-Motion and photogrammetry, entirely in the browser.',
           theme_color: '#171a21',
           background_color: '#1e1e1e',

@@ -68,10 +68,10 @@ export function buildManifest({ project, appVersion = null, includeDerived = tru
 // → { ok, manifest, error }. The error strings are user-facing.
 export function validateManifest(raw) {
   if (!raw || typeof raw !== 'object') {
-    return { ok: false, error: 'not a websfm project file (no manifest)' }
+    return { ok: false, error: 'not a WebSfM project file (no manifest)' }
   }
   if (raw.format !== PROJECT_ARCHIVE_FORMAT) {
-    return { ok: false, error: `not a websfm project file (format "${raw.format ?? '—'}")` }
+    return { ok: false, error: `not a WebSfM project file (format "${raw.format ?? '—'}")` }
   }
   const version = Number(raw.version)
   if (!Number.isFinite(version) || version < 1) {
@@ -81,7 +81,7 @@ export function validateManifest(raw) {
     return {
       ok: false,
       error:
-        `project file was written by a newer version of websfm ` +
+        `project file was written by a newer version of WebSfM ` +
         `(format v${version}, this app reads up to v${PROJECT_ARCHIVE_VERSION})`,
     }
   }

@@ -1,6 +1,6 @@
 # Development
 
-How to run, test and build websfm from source. [ARCHITECTURE.md](../ARCHITECTURE.md)
+How to run, test and build WebSfM from source. [ARCHITECTURE.md](../ARCHITECTURE.md)
 explains how the code is organised, [METHODS.md](METHODS.md) the algorithms, and
 [CONTRIBUTING.md](../CONTRIBUTING.md) what a pull request needs.
 

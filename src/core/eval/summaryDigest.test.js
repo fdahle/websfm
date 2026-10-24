@@ -80,7 +80,7 @@ describe('digestToMarkdown', () => {
   const md = digestToMarkdown(buildProjectDigest(INPUT))
 
   it('leads with project, status and health', () => {
-    expect(md).toContain('# websfm project summary — Antarctica_1972')
+    expect(md).toContain('# WebSfM project summary — Antarctica_1972')
     expect(md).toContain('STATUS: **warn** — 2 ok · 1 warn · 0 bad · 1 n/a')
     expect(md).toContain('[warn]')
   })

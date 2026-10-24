@@ -58,7 +58,7 @@ export function folderOpenPlan({ entry, handle = null, permission = null } = {})
 export function adoptFolderVerdict({ hasProjectJson, isEmpty }) {
   if (hasProjectJson) return { ok: true }
   if (isEmpty) return { ok: false, error: 'that folder is empty — create a new project in it instead' }
-  return { ok: false, error: 'that folder does not contain a websfm project (no project.json)' }
+  return { ok: false, error: 'that folder does not contain a WebSfM project (no project.json)' }
 }
 
 // A folder chosen for a NEW project must be empty, or the user must have
@@ -66,7 +66,7 @@ export function adoptFolderVerdict({ hasProjectJson, isEmpty }) {
 // so sharing it with unrelated files is not safe. → { ok, needsConfirm, error }
 export function newFolderVerdict({ isEmpty, hasProjectJson, confirmed = false }) {
   if (hasProjectJson) {
-    return { ok: false, error: 'that folder already holds a websfm project — open it instead of creating a new one' }
+    return { ok: false, error: 'that folder already holds a WebSfM project — open it instead of creating a new one' }
   }
   if (isEmpty) return { ok: true, needsConfirm: false }
   if (confirmed) return { ok: true, needsConfirm: false }

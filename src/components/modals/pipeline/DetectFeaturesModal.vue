@@ -351,7 +351,7 @@ function onShellClose() {
     <WarnBox v-if="restrictedModel">
       {{ learnedLabel }}'s pretrained weights are licensed for
       <strong>non-commercial research only</strong>
-      (<a :href="restrictedModel.licenseUrl" target="_blank" rel="noopener">license</a>), so websfm does not ship them —
+      (<a :href="restrictedModel.licenseUrl" target="_blank" rel="noopener">license</a>), so WebSfM does not ship them —
       you supply the file once when you first run it. ALIKED and DISK are freely licensed alternatives.
     </WarnBox>
 
@@ -473,7 +473,7 @@ function onShellClose() {
           v-if="activeSettings.tiling === 'manual'"
           label-for="tileSize"
           unit="px"
-          hint="Upper limit; websfm uses the fewest tiles that fit."
+          hint="Upper limit; WebSfM uses the fewest tiles that fit."
         >
           <template #label
             ><FieldHelp

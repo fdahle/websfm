@@ -501,7 +501,7 @@ function diagnosticsLines(d) {
 // A compact markdown string — the human/LLM-readable form.
 export function digestToMarkdown(digest) {
   const L = []
-  L.push(`# websfm project summary — ${digest.project}`)
+  L.push(`# WebSfM project summary — ${digest.project}`)
   L.push(`${digest.date} · CRS unit: ${digest.crsUnit}`)
   L.push(`STATUS: **${digest.status.overall}** — ${statusLine(digest.status)}`)
   L.push('')

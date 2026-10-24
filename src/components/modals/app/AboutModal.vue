@@ -27,7 +27,7 @@ const tabs = [
     <div class="hero">
       <div class="hero-mark"><Icon name="cube" /></div>
       <div class="hero-text">
-        <div class="hero-name">websfm</div>
+        <div class="hero-name">WebSfM</div>
         <div class="hero-tag">Browser-based Structure&nbsp;from&nbsp;Motion · v{{ appVersion }}</div>
       </div>
     </div>
@@ -54,7 +54,7 @@ const tabs = [
 
     <!-- Acknowledgments (courtesy) -->
     <div v-show="tab === 'credits'" class="pane">
-      <p class="lede">websfm stands on decades of open research and software. Its methods draw on:</p>
+      <p class="lede">WebSfM stands on decades of open research and software. Its methods draw on:</p>
       <ul class="ack-list">
         <li v-for="a in ACKNOWLEDGMENTS" :key="a.name" class="ack-item">
           <a :href="a.url" target="_blank" rel="noopener" class="ack-name">{{ a.name }}</a>

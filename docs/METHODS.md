@@ -1,4 +1,4 @@
-# websfm — methods & algorithms
+# WebSfM — methods & algorithms
 
 The *science* companion to [ARCHITECTURE.md](../ARCHITECTURE.md). ARCHITECTURE answers
 "where does the code live"; this file answers "**what method is it, and why that
@@ -20,7 +20,7 @@ the manual verification register.
 
 ## 0. One-paragraph summary (for the "so what does it do" question)
 
-websfm is an **incremental** (sequential) Structure-from-Motion pipeline followed
+WebSfM is an **incremental** (sequential) Structure-from-Motion pipeline followed
 by **PatchMatch multi-view stereo** densification and raster product generation
 (DEM, orthophoto), running entirely client-side in the browser (Rust→WASM for the
 heavy math). It is a from-scratch implementation in the COLMAP tradition — SIFT
@@ -126,7 +126,7 @@ would split the point into two tracks the merge step refuses to join.
 
 **Descriptor normalisation — RootSIFT** (Arandjelović & Zisserman 2012; COLMAP's
 default `L1_ROOT`; since 2026-10-05). The crate emits classic SIFT (L2-normalise, clamp
-at 0.2, re-normalise). websfm stores and matches each vector as `sqrt(d / ‖d‖₁)`.
+at 0.2, re-normalise). WebSfM stores and matches each vector as `sqrt(d / ‖d‖₁)`.
 Euclidean distance between RootSIFT vectors is the Hellinger kernel between the
 underlying gradient histograms, which damps the few dominant bins that make plain SIFT
 confuse similar-looking texture. The result is still unit-L2, so the ratio test, the
@@ -141,7 +141,7 @@ Node bench on an 8-image South Building strip: +2.1 % ≥3-image tracks at 2400 
 the budget with fine-scale texture: at native South Building size, 85 % of a
 response-ranked 25k set has σ < 4 px. That texture is the first to stop matching under
 viewpoint change, and on brick or foliage it is repetitive, which the ratio test rejects.
-websfm now keeps the largest scales first, with response as the tie-break inside the
+WebSfM now keeps the largest scales first, with response as the tie-break inside the
 octave the cap cuts through (`core/features/keypointCap.js`,
 `DETECT_TUNING.siftCapRule`). COLMAP keeps whole octaves, so its 8192 is a soft limit;
 ours stays an exact budget, because brute-force matching is O(Na·Nb). The cap runs after
@@ -1453,7 +1453,7 @@ CPU) retains per-image fallback and a first-image A/B validation
   the second pass would add **completeness** on weakly-textured surfaces, at ~2× Stage A
   cost. Deliberate deferral, not an oversight.
 - Neither COLMAP nor Metashape does **sky segmentation**; both compute depth everywhere
-  and discard. Metashape additionally offers manual masking, which websfm supports
+  and discard. Metashape additionally offers manual masking, which WebSfM supports
   (masked pixels are excluded as ZNCC source texels, not merely zeroed). Automatic sky
   detection by a blue/brightness prior is actively unsafe for polar imagery, where
   snow/ice vs sky is genuinely ambiguous.
@@ -1858,7 +1858,7 @@ EXIF altitudes stay `unknown` (EXIF says "above sea level", DJI varies by model)
 
 ## 10. How our choices map to the literature / other software
 
-| Stage | websfm | COLMAP | Notes |
+| Stage | WebSfM | COLMAP | Notes |
 |---|---|---|---|
 | Features | SIFT (+ SuperPoint opt) | SIFT | + duplicate-blob suppression |
 | Matching | ratio + cross-check + F-RANSAC + **spread gate** | ratio + F/E RANSAC | spread gate is extra |

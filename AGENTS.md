@@ -1,6 +1,6 @@
 # Notes for AI coding agents
 
-websfm is a browser photogrammetry app: Vue 3 + Pinia UI, a web-worker pool, and
+WebSfM is a browser photogrammetry app: Vue 3 + Pinia UI, a web-worker pool, and
 Rust compiled to WebAssembly. Read these before changing code:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the layers, and which files a change touches.
@@ -35,6 +35,9 @@ Rules that are easy to miss:
   by hand; `npm run release` cuts a release.
 - Pushing deploys: `main` goes to dev.websfm.app, a `v*` tag to websfm.app (CI ▸
   `deploy`). Don't push, and never push a tag, unless asked.
+- The name is **WebSfM** in anything people read (UI text, messages, docs, help).
+  Lowercase `websfm` stays only in identifiers: URLs, the repo and npm package, the
+  `.websfm` extension, storage, cache and lock keys, file names.
 - Run `npm test` and `npm run typecheck` before calling a change done.
 - In the final summary, say which help files (`src/guide/`, `src/glossary/`) were
   updated, or that none needed it.

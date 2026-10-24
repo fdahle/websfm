@@ -39,7 +39,7 @@ The detector decides which [keypoint](help:keypoint)s are found in each image an
 each one's surroundings are encoded as a [descriptor](help:descriptor), which is what
 matching compares. **SIFT** is the dependable default and works entirely in WASM.
 **ALIKED**, **DISK** and **SuperPoint** are learned detectors meant to be paired with
-LightGlue matching; each has its own LightGlue, and websfm picks the right one
+LightGlue matching; each has its own LightGlue, and WebSfM picks the right one
 automatically. Do not mix detectors in one project—use **Overwrite** when switching
 detector.
 
@@ -56,7 +56,7 @@ permission and cached in the browser. It detects at a lower resolution than
 SuperPoint (1024 px by default), because it needs much more memory per pixel.
 
 **SuperPoint**'s pretrained weights are licensed for **non-commercial research only**,
-so websfm does not ship them. The first time you run it, the download dialog shows the
+so WebSfM does not ship them. The first time you run it, the download dialog shows the
 license and a direct link: download `superpoint.onnx` from its publisher, then choose
 or drop that file in the dialog. It is cached like any other model, and detection
 continues on its own. Use ALIKED or DISK if your work is commercial.
@@ -137,7 +137,7 @@ largest tile that fits the GPU's memory. **Manual** uses the *Max tile size* you
 
 ## Max tile size
 <!-- param: tileSize  default: 1024 -->
-Shown with **Manual** tiling. It is an upper limit: websfm uses the fewest tiles that fit
+Shown with **Manual** tiling. It is an upper limit: WebSfM uses the fewest tiles that fit
 the resized image, shrunk to the smallest size that still keeps the requested overlap.
 Smaller tiles use less memory per pass but mean more passes and more overlap work; lower
 it only if a learned detector still runs out of GPU memory at the Auto size.

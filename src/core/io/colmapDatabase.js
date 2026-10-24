@@ -205,7 +205,7 @@ export function buildColmapDatabaseManifest(summary, sourceName = 'database.db')
   const warnings = []
   if (summary.unsupportedCameras) warnings.push(`${pluralize(summary.unsupportedCameras, 'unsupported camera model')}`)
   if (summary.rigs || summary.frames)
-    warnings.push('Camera rigs/frames are inspected but websfm does not yet preserve rig constraints')
+    warnings.push('Camera rigs/frames are inspected but WebSfM does not yet preserve rig constraints')
   return {
     format: 'colmap-database',
     version: summary.userVersion || null,

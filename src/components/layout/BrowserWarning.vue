@@ -25,7 +25,7 @@ function close() {
     <div class="bw-body">
       <div class="bw-title">This browser may not be fully supported</div>
       <p class="bw-text">
-        websfm works best in a Chromium-based browser (Chrome, Edge). Some features — notably GPU-accelerated depth maps
+        WebSfM works best in a Chromium-based browser (Chrome, Edge). Some features — notably GPU-accelerated depth maps
         (WebGPU) — may be slower or unavailable here.
       </p>
       <label class="bw-check">

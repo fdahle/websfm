@@ -1,4 +1,4 @@
-# websfm
+# WebSfM
 
 **Structure-from-Motion and photogrammetry, entirely in your browser.**
 
@@ -9,7 +9,7 @@
 <!-- Turntable video: open this file in GitHub's web editor and drag the .mp4 onto
      this line; GitHub uploads it and puts its link here, which plays inline. -->
 
-websfm turns overlapping photographs into 3D reconstructions — sparse and dense
+WebSfM turns overlapping photographs into 3D reconstructions — sparse and dense
 point clouds, meshes, digital elevation models and orthophotos — without
 installing anything and **without uploading your images anywhere**. All the
 computation runs locally: the heavy numerical work (feature detection, matching,
@@ -25,7 +25,7 @@ control are first-class throughout.
 your machine and keeps your projects in your browser.
 
 > [!NOTE]
-> **Beta.** websfm is at version 0.x: the pipeline is complete, but not every path has
+> **Beta.** WebSfM is at version 0.x: the pipeline is complete, but not every path has
 > been checked on real data yet ([what has been](#how-its-tested)). Please report
 > anything that breaks or looks wrong with the **🐞 button** in the app, or as an
 > [issue](https://github.com/fdahle/websfm/issues). What changed in each release is
@@ -139,7 +139,7 @@ Latest results (October 2026):
 | Historical Antarctic aerial film (USGS, 97 MP scans) | 5 / 5 | Self-calibrated, median reprojection error 1.48 px | – |
 
 The ETH3D figures come from an approximation of the official scorer, so they compare
-websfm with COLMAP rather than with the public leaderboard.
+WebSfM with COLMAP rather than with the public leaderboard.
 
 Known gaps: without GCPs or camera priors, nadir blocks bend into a dome of about
 0.5–0.7 m (COLMAP's dome is larger on the same images). COLMAP keeps 40–260 % more
@@ -190,7 +190,7 @@ issue for something missing.
 
 ## How it is developed
 
-websfm is developed with substantial help from AI coding tools, mainly
+WebSfM is developed with substantial help from AI coding tools, mainly
 [Claude Code](https://claude.com/claude-code); commits written with AI assistance
 are marked as such in the git history. The direction, the choice of photogrammetric
 methods and the review of every change rest with the maintainer: the tools speed up
@@ -219,7 +219,7 @@ through [SECURITY.md](SECURITY.md), not public issues.
 
 ## License
 
-websfm is released under the [MIT License](LICENSE). Bundled third-party code and
+WebSfM is released under the [MIT License](LICENSE). Bundled third-party code and
 the downloadable model weights keep their own licenses, listed in the app under
 **About**. Note that the SuperPoint weights are licensed for non-commercial research
 only and are not distributed with websfm.

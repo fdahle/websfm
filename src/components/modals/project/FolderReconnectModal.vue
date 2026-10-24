@@ -27,9 +27,9 @@ const emit = defineEmits(['connect', 'repick', 'cancel'])
         >)</template
       >.
       <template v-if="mode === 'repick'">
-        websfm can no longer reach it — the folder may have been moved, renamed or removed.
+        WebSfM can no longer reach it — the folder may have been moved, renamed or removed.
       </template>
-      <template v-else> Your browser needs your permission before websfm can read it again. </template>
+      <template v-else> Your browser needs your permission before WebSfM can read it again. </template>
     </p>
 
     <WarnBox v-if="error">{{ error }}</WarnBox>

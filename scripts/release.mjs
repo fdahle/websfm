@@ -71,6 +71,6 @@ if (lock.packages?.['']) lock.packages[''].version = version
 await writeFile(lockUrl, `${JSON.stringify(lock, null, 2)}\n`)
 
 git('commit', '--quiet', '-m', `release: ${tag}`, '--', ...FILES)
-git('tag', '-a', tag, '-m', `websfm ${version}`)
+git('tag', '-a', tag, '-m', `WebSfM ${version}`)
 console.log(`Committed and tagged ${tag}. Push with: git push && git push origin ${tag}`)
 console.log('Pushing the tag deploys websfm.app (GitHub Actions ▸ deploy).')

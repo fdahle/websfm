@@ -1,4 +1,4 @@
-# websfm
+# WebSfM
 
 @AGENTS.md
 @CONTRIBUTING.md

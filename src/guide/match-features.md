@@ -110,7 +110,7 @@ all its pairs, and with fewer than two footprints the run matches exhaustively.
 **Brute-force** compares [descriptor](help:descriptor)s directly, keeps each match that
 passes the [ratio test](help:lowe-ratio-test), and works with every detector.
 **LightGlue** is a learned matcher. It needs every image detected with the same
-learned detector (ALIKED, DISK or SuperPoint), and websfm loads the LightGlue weights trained
+learned detector (ALIKED, DISK or SuperPoint), and WebSfM loads the LightGlue weights trained
 for that detector, downloading them on first use. If some images were detected with
 another detector, matching stops and names them; re-detect those images with
 **Overwrite**. Both are followed by the same geometric verification.
@@ -253,7 +253,7 @@ masquerade as inliers.
 The unit is **detection pixels** — pixels at the resolution the detector actually
 ran at, which is capped by the detection step's *Detection resolution*. You do not need to
 loosen this by hand for large images: keypoints are reported in full-resolution
-coordinates, so websfm multiplies your value by the downscaling factor before use
+coordinates, so WebSfM multiplies your value by the downscaling factor before use
 and logs the result. A 10000 px scan detected at 2400 px gets a gate about 4×
 wider in image pixels, because that is how coarsely its keypoints were measured in
 the first place. Images detected at full resolution are unaffected.

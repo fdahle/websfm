@@ -251,7 +251,7 @@ onMounted(refreshStorage)
             <span class="setting-label">Keep the screen on during a run</span>
             <span class="setting-desc"
               >Stop the display, and on most systems the computer, from going to sleep while a stage or workflow runs.
-              Applies while the websfm tab is visible.</span
+              Applies while the WebSfM tab is visible.</span
             >
           </div>
           <label class="switch">
@@ -265,7 +265,7 @@ onMounted(refreshStorage)
             <span class="setting-label">Notify when a run ends</span>
             <span class="setting-desc">{{
               notifyRefusal ||
-              'A desktop notification when a run of 30 seconds or more ends, or a workflow needs you, while the websfm tab is in the background.'
+              'A desktop notification when a run of 30 seconds or more ends, or a workflow needs you, while the WebSfM tab is in the background.'
             }}</span>
           </div>
           <label class="switch">
@@ -293,7 +293,7 @@ onMounted(refreshStorage)
           <div class="setting-info">
             <span class="setting-label">Warn on mobile devices</span>
             <span class="setting-desc"
-              >Show the notice that websfm is a desktop application and mobile layout is unsupported.</span
+              >Show the notice that WebSfM is a desktop application and mobile layout is unsupported.</span
             >
           </div>
           <label class="switch">

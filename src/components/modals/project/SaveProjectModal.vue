@@ -51,7 +51,7 @@ const tooLarge = computed(() => estimate.value != null && !archiveSizeVerdict(es
 
     <SettingsField
       hint="Transcoded image previews, depth maps and DEM/ortho products. Excluding them
-            makes a much smaller file; websfm rebuilds them on demand."
+            makes a much smaller file; WebSfM rebuilds them on demand."
     >
       <label class="check-row">
         <input v-model="includeDerived" type="checkbox" />

@@ -291,7 +291,7 @@ mesh as GLB and OBJ.
 
 `hist/` scores film and satellite frame blocks (the Grenoble benchmark layout:
 `preprocessed_images/`, `image_mask.tif`, `gcp.csv`, `camera_model_intrinsics.csv`,
-reference DEMs) the same way for websfm, COLMAP and Metashape:
+reference DEMs) the same way for WebSfM, COLMAP and Metashape:
 
 - config key `hist` (`hist/histSetup.mjs`): the certificate focal + scan pitch on one
   sensor, the static mask on every image (or `hist.masks`, a folder of per-image masks

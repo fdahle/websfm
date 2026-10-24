@@ -5,7 +5,7 @@ summary: The shortest reliable route from a folder of overlapping photos to a ch
 category: Start here
 order: 1
 ---
-websfm runs the whole photogrammetry pipeline locally in your browser. Your source
+WebSfM runs the whole photogrammetry pipeline locally in your browser. Your source
 images are not uploaded. Start with the balanced defaults, inspect the result after
 each major stage, and only tune a setting when the evidence tells you why.
 
@@ -20,7 +20,7 @@ appropriate to the site before importing control data.
 
 Browser storage is automatic and private to this browser profile. On Chromium you
 can instead keep the project in a normal folder. See [Projects & storage](guide:projects-storage)
-before clearing browser data or moving machines. websfm also starts without a
+before clearing browser data or moving machines. WebSfM also starts without a
 connection once it has been opened online; see [Working Offline](guide:offline).
 
 ## 2 · Import good images
@@ -31,7 +31,7 @@ regions when they dominate the image.
 
 **Duplicates.** A picked or dropped image whose file name and size match one already
 in the project (such as a copy of it from another folder) is caught before it is
-added. websfm asks once per batch: **Skip duplicates** (the default) leaves those
+added. WebSfM asks once per batch: **Skip duplicates** (the default) leaves those
 out and adds the rest; **Add anyway** adds them as separate images, labelled
 "name (2).JPG" and so on.
 
@@ -55,7 +55,7 @@ is treated as a separate image. Remove frames taken on the ground before takeoff
 
 **Very large scans.** A TIFF more than 30,000 pixels on a side, or over 200
 megapixels (a full-resolution KH-9 mapping-camera scan is about 65,700 × 32,900), is
-larger than the browser can hold as one picture. websfm then reads the file in strips
+larger than the browser can hold as one picture. WebSfM then reads the file in strips
 and stores it as a *tiled pyramid*: tiles at full resolution plus successive halvings.
 The log notes *Large TIFF … building a tiled pyramid* and then the number of levels
 and tiles. Such scans are imported one at a time and take a while; the pyramid is
@@ -121,7 +121,7 @@ Clean, align, compare and measure the results with the **Tools** tab's
 Dense clouds and fine orthophotos can take hours. While a stage or a workflow runs, the
 tab's title shows the stage and its percentage, and the screen is kept on so the
 computer does not go to sleep mid-run (Settings ▸ General ▸ **Keep the screen on during
-a run**). The browser only allows this while the websfm tab is visible. In another tab
+a run**). The browser only allows this while the WebSfM tab is visible. In another tab
 or a minimised window, your system's sleep settings decide, so leave the tab in front
 or change those settings for a long run. Turn on **Notify when a run ends** in the same
 place to get a desktop notification when a run ends, or a workflow stops to ask you

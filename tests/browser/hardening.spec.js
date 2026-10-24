@@ -264,7 +264,7 @@ test('the full application creates and reopens a project without runtime errors'
   await projectButton.click()
   await expect(page.locator('.project-picker')).toBeVisible()
   const version = (await page.locator('.app-version').textContent()).match(/v(.+)$/)[1]
-  await expect(page.locator('.project-version')).toHaveText(`Created with websfm v${version}`)
+  await expect(page.locator('.project-version')).toHaveText(`Created with WebSfM v${version}`)
   expect(
     await page.evaluate(async () => {
       const opfs = await import('/src/utils/opfs.js')

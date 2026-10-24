@@ -98,7 +98,7 @@ export async function registerServiceWorker() {
       // Replaces the plugin's unconditional reload when the new worker takes control.
       onNeedReload: app.onNeedReload,
       onOfflineReady() {
-        showToast('websfm is ready to work offline', { ms: 5000 })
+        showToast('WebSfM is ready to work offline', { ms: 5000 })
       },
       onRegisteredSW(_url, registration) {
         if (registration)

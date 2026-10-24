@@ -239,8 +239,8 @@ export function writeLasHeader({
   // 4 fileSourceId u16 = 0, 6 globalEncoding u16 = 0, 8–23 GUID = 0 (already zeroed)
   out[24] = 1
   out[25] = 2 // version 1.2
-  asciiField(out, 26, 'websfm', 32) // system identifier
-  asciiField(out, 58, 'websfm', 32) // generating software
+  asciiField(out, 26, 'WebSfM', 32) // system identifier
+  asciiField(out, 58, 'WebSfM', 32) // generating software
   const now = new Date()
   const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000)
   dv.setUint16(90, dayOfYear, true)
@@ -429,7 +429,7 @@ export function extraBytesVlr(extra) {
     const o = k * EXTRA_BYTES_DESCRIPTOR_SIZE
     data[o + 2] = e.dataType
     asciiField(data, o + 4, e.name, EXTRA_NAME_BYTES)
-    asciiField(data, o + 160, `websfm ${e.source}`, 32)
+    asciiField(data, o + 160, `WebSfM ${e.source}`, 32)
   })
   return { userId: 'LASF_Spec', recordId: 4, description: 'Extra bytes', data }
 }

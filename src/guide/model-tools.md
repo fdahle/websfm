@@ -53,7 +53,7 @@ drawn grey and ignored, and the dense log says so, until you fit and apply it ag
 Imported clouds are never cut by it.
 
 ## Orient model
-A project without a georeference has no natural "up". websfm then guesses it from the
+A project without a georeference has no natural "up". WebSfM then guesses it from the
 camera viewing directions, which is right for a nadir aerial block and wrong for a
 turntable object or a façade. **Tools → Model ▾ → Orient model** sets it yourself:
 

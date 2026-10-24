@@ -36,7 +36,7 @@ const detail = computed(() => {
   <Teleport to="body">
     <div v-if="updateReady" class="update-prompt" role="status" data-modal-exempt>
       <div class="up-text">
-        <span class="up-title">A new version of websfm is available</span>
+        <span class="up-title">A new version of WebSfM is available</span>
         <span class="up-detail">{{ detail }}</span>
       </div>
       <div class="up-actions">

@@ -1,4 +1,4 @@
-# Deploying websfm
+# Deploying WebSfM
 
 ```bash
 npm ci
@@ -112,7 +112,7 @@ directly; the host must serve its own copy. The files are:
 
 The two SAM2 files need their internal `value_info` entries removed before ONNX
 Runtime accepts them (see [`src/core/segment/README.md`](../src/core/segment/README.md)). The two ALIKED files are
-websfm's own export (fabio-sim ships ALIKED only fused with its matcher); the script's
+WebSfM's own export (fabio-sim ships ALIKED only fused with its matcher); the script's
 header says how to reproduce them and checks them against the PyTorch models.
 
 **SuperPoint is not distributed.** Its pretrained weights carry Magic Leap's

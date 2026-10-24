@@ -260,7 +260,7 @@ function step(cmd, dir) {
         {{ currentProjectName || '—' }}
         <span class="project-caret">▾</span>
       </button>
-      <span v-else class="brand">websfm</span>
+      <span v-else class="brand">WebSfM</span>
 
       <button
         v-for="tab in TABS"

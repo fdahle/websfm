@@ -15,7 +15,7 @@ const { shouldWarn, acknowledge } = useMobileWarning()
   <div v-if="shouldWarn" class="mobile-gate" role="alertdialog" aria-modal="true" aria-labelledby="mobile-gate-title">
     <div class="mg-panel">
       <div class="mg-icon">📱</div>
-      <h2 id="mobile-gate-title" class="mg-title">websfm is not designed for mobile</h2>
+      <h2 id="mobile-gate-title" class="mg-title">WebSfM is not designed for mobile</h2>
       <p class="mg-text">
         This is a desktop photogrammetry application. It runs feature detection, bundle adjustment and dense
         reconstruction directly in your browser, and it expects a large window, a mouse and plenty of memory.
@@ -24,7 +24,7 @@ const { shouldWarn, acknowledge } = useMobileWarning()
         <strong>Mobile layout is not supported.</strong> On a phone or tablet the interface will be cramped or unusable,
         processing may be very slow, and larger projects are likely to run out of memory and fail.
       </p>
-      <p class="mg-text">For real work, please open websfm on a desktop or laptop in a Chromium-based browser.</p>
+      <p class="mg-text">For real work, please open WebSfM on a desktop or laptop in a Chromium-based browser.</p>
       <button class="btn btn-primary mg-ok" type="button" autofocus @click="acknowledge">
         I understand — continue anyway
       </button>

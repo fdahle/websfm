@@ -1,6 +1,6 @@
 # Security policy
 
-websfm runs entirely in your browser. There is no websfm server and no account, and
+WebSfM runs entirely in your browser. There is no WebSfM server and no account, and
 your images and projects never leave your machine. Security issues are still
 possible, most likely in how the app reads files you open: project archives
 (`.websfm`), images and TIFFs, point clouds (PLY, LAS/LAZ), COLMAP models, CSV
@@ -22,4 +22,4 @@ for a fix before disclosing the issue publicly.
 
 ## Supported versions
 
-websfm is in beta. Fixes go into the latest version on `main` only.
+WebSfM is in beta. Fixes go into the latest version on `main` only.

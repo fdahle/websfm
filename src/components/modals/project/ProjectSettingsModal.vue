@@ -119,11 +119,11 @@ onMounted(measure)
         </div>
         <div class="readout-row">
           <span>Created with</span>
-          <strong>{{ project.createdWithVersion ? `websfm v${project.createdWithVersion}` : 'Unknown' }}</strong>
+          <strong>{{ project.createdWithVersion ? `WebSfM v${project.createdWithVersion}` : 'Unknown' }}</strong>
         </div>
         <div class="readout-row">
           <span>Current app</span>
-          <strong>websfm v{{ appVersion }}</strong>
+          <strong>WebSfM v{{ appVersion }}</strong>
         </div>
       </section>
 

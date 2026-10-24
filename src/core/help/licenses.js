@@ -171,7 +171,7 @@ export const THIRD_PARTY = [
       name: `${e.title} photos — ${e.credit} (${e.dataset})`,
       license: e.licenseId,
       url: e.sourceUrl,
-      notice: `Thank you to ${e.credit} for sharing these photos. websfm uses ${e.changes}.`,
+      notice: `Thank you to ${e.credit} for sharing these photos. WebSfM uses ${e.changes}.`,
     })),
   },
 ]

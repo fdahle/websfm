@@ -14,7 +14,7 @@ Along the strip, film position measures the scan angle (arc length = focal lengt
 angle), not the distance from a centre. A [frame camera](help:camera-intrinsics)'s
 pinhole model therefore fits only a small part of a strip. A few degrees of it,
 though, can be resampled exactly into a pinhole image of the camera turned to that
-angle, which is how websfm reconstructs panoramic strips: as segments, each a frame
+angle, which is how WebSfM reconstructs panoramic strips: as segments, each a frame
 camera of its own (see [Split Panoramic Strips](guide:panoramic)).
 
 The satellite also moves while the lens sweeps, several kilometres in one scan, so

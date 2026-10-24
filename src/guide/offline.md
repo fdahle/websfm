@@ -1,19 +1,19 @@
 ---
 id: offline
 title: Working Offline
-summary: Install websfm, start it without a connection, and know which parts still need the network.
+summary: Install WebSfM, start it without a connection, and know which parts still need the network.
 category: Start here
 order: 4
 ---
-websfm computes everything in the browser and keeps projects in local storage (see
+WebSfM computes everything in the browser and keeps projects in local storage (see
 [Projects & Storage](guide:projects-storage)), so a connection is needed only to fetch
 the app itself and a few outside resources. After the first visit the browser keeps a
-copy of the app; a short message, *websfm is ready to work offline*, says when it is
-complete. From then on websfm starts without a connection, in a tab at the same
+copy of the app; a short message, *WebSfM is ready to work offline*, says when it is
+complete. From then on WebSfM starts without a connection, in a tab at the same
 address or as an installed app.
 
 ## Install the app
-Browsers that support it offer to install websfm, usually with an install icon in the
+Browsers that support it offer to install WebSfM, usually with an install icon in the
 address bar or an **Install** item in the browser menu. The installed app opens in
 its own window, without the browser's toolbars, and starts from the desktop or
 start menu like any program. It is the same app at the same address: projects in
@@ -21,18 +21,18 @@ browser storage, settings and downloaded models are shared with the browser tab.
 Installing is optional; a tab works offline just as well.
 
 ## Updates
-websfm checks for a new version when it starts and then once an hour, and downloads
+WebSfM checks for a new version when it starts and then once an hour, and downloads
 it in the background. It never switches until you ask: a box at the bottom left says
-*A new version of websfm is available*.
+*A new version of WebSfM is available*.
 
 - **Reload** switches to the new version now. While a task is running (a pipeline
   step, opening or saving a project, importing images) the button is disabled and
   the box says you can reload once the task has finished, so an update never cuts a
   run short.
 - **Later** hides the box for this session. The new version is used the next time
-  websfm starts after all its tabs and windows were closed.
+  WebSfM starts after all its tabs and windows were closed.
 
-With websfm open in several tabs, **Reload** in one switches all of them: an idle
+With WebSfM open in several tabs, **Reload** in one switches all of them: an idle
 tab reloads at once, and a tab still running a task keeps the box up and reloads by
 itself once the task has finished. Once another tab has switched, **Later** is no
 longer offered, since that tab's old code no longer matches the new version.

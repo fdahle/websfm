@@ -79,7 +79,7 @@ async function confirmDelete(project) {
   const ok = await confirmDialog({
     title: folder ? 'Remove project?' : 'Delete project?',
     message: folder
-      ? `Remove "${project.name}" from websfm? Its folder on disk is left untouched.`
+      ? `Remove "${project.name}" from WebSfM? Its folder on disk is left untouched.`
       : `Delete "${project.name}"? This cannot be undone.`,
     confirmLabel: folder ? 'Remove' : 'Delete',
   })
@@ -173,7 +173,7 @@ onBeforeUnmount(() => {
             >
               {{
                 project.createdWithVersion
-                  ? `Created with websfm v${project.createdWithVersion}`
+                  ? `Created with WebSfM v${project.createdWithVersion}`
                   : 'Creation version unknown'
               }}
             </span>
@@ -184,7 +184,7 @@ onBeforeUnmount(() => {
     </ul>
 
     <div class="picker-footer">
-      <div class="app-version">Current websfm v{{ appVersion }}</div>
+      <div class="app-version">Current WebSfM v{{ appVersion }}</div>
       <button class="primary-btn" @click="emit('new')">+ New project</button>
 
       <!-- File vs folder is the one thing users cannot infer from the labels, so
@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
         </template>
         <div class="menu-sep"></div>
         <button class="menu-item danger" @click="runMenu(() => confirmDelete(menu.project))">
-          {{ isFolderProject(menu.project) ? 'Remove from websfm…' : 'Delete…' }}
+          {{ isFolderProject(menu.project) ? 'Remove from WebSfM…' : 'Delete…' }}
         </button>
       </div>
     </Teleport>

@@ -22,6 +22,6 @@ weighted least squares, with weights that are high for matches close to the mode
 fade to zero at the maximum, and the refit is repeated while the loss improves.
 No hard boundary decides which matches shape the fit.
 
-In websfm the threshold you set is the maximum. The matches kept for a pair are
+In WebSfM the threshold you set is the maximum. The matches kept for a pair are
 still those within it of the final model, so inlier counts mean the same with
 either estimator.

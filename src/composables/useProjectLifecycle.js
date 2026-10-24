@@ -516,7 +516,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
         title: 'Move into browser storage?',
         message:
           'Copy this project into browser storage? The folder on disk is left in place, ' +
-          'and websfm will stop writing to it.',
+          'and WebSfM will stop writing to it.',
         confirmLabel: 'Copy',
       }))
     )
