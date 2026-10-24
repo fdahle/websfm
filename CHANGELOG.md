@@ -356,6 +356,11 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **DEMs take each cell's median height by default** (was the maximum). In a cell on a
+  slope the maximum is the cell's highest corner: on Rachel Glacier's rock at 20 m cells
+  it stood 14 m above the reference DEM (NMAD 8.2 m), the median 0.7 m (5.9 m). On flat
+  Casa Grande the two agree within 0.1 m, so Max remains for small cells over roofs and
+  canopy. A cloud too big for the median's buffer takes the mean, and the log says so.
 - **Reference DEMs past 2 GB are read over the project.** A DEM too large for one buffer
   (a REMA 2 m tile, 25,100² cells) is no longer refused when the project's images have
   positions or it has GCPs: only the window over them (half their extent around them, at

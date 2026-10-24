@@ -204,8 +204,8 @@ const effects = computed(() => {
       <SettingsField label-for="dem-agg" hint="How multiple points in one cell collapse to a single height.">
         <template #label><FieldHelp op="dem" param="aggregate">Surface aggregation</FieldHelp></template>
         <select id="dem-agg" v-model="settings.aggregate" class="field-input field-select">
-          <option value="max">Max (DSM — top surface)</option>
-          <option value="median">Median (robust)</option>
+          <option value="median">Median (the cell's surface)</option>
+          <option value="max">Max (top surface: roofs, canopy)</option>
           <option value="mean">Mean</option>
           <option value="min">Min (ground-ish)</option>
         </select>

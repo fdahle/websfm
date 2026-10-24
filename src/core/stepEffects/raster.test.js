@@ -20,7 +20,7 @@ describe('demEffects', () => {
   it('names the points, the points per cell and what the fill does', () => {
     const e = demEffects(DEM_DEFAULTS, { source, estimate, unit: 'm/px', frame })
     expect(e.points).toMatch(/^6,000,000 points of the dense cloud "Dense cloud" go into the grid: every point/)
-    expect(e.cell).toMatch(/^About 3 points per cell; each cell takes the highest/)
+    expect(e.cell).toMatch(/^About 3 points per cell; each cell takes the median/)
     expect(e.fill).toMatch(/within 2 cells of a measured one are filled by inverse distance/)
     const sparse = demEffects(DEM_DEFAULTS, { source: { ...source, count: 1000 }, estimate, unit: 'm/px', frame })
     expect(sparse.cell).toMatch(/^About one point per 2,000 cells, so most cells are filled in step 4/)

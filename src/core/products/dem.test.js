@@ -411,3 +411,15 @@ describe('DEM support', () => {
     ])
   })
 })
+
+describe('rasterizeDem aggregate', () => {
+  const pts = Array.from({ length: 400 }, (_, i) => ({ x: (i % 20) + 0.5, y: Math.floor(i / 20) + 0.5, z: i % 7 }))
+  it('reports the aggregate it used', () => {
+    expect(rasterizeDem(pts, { gsd: 1, aggregate: 'median' }).aggregate).toBe('median')
+  })
+  it('takes the mean when the median buffer would not fit the budget', () => {
+    // 400 cells × 24 B fit; the median's extra 400 × 4 + 400 × 8 B do not.
+    const g = rasterizeDem(pts, { gsd: 1, aggregate: 'median', memBudgetBytes: 400 * 24 + 1000 })
+    expect(g.aggregate).toBe('mean')
+  })
+})

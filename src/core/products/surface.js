@@ -84,9 +84,9 @@ function suggestGsdFor(minX, minY, maxX, maxY, n) {
 // straight above). `mesh`: { pos: Float32Array(3·nVerts) in FRAME coords,
 // idx: Uint32Array(3·nTris) }.
 //   opts: { gsd (0 = auto from vertex density), maxGrid, bounds }
-// Overlapping triangles collapse by MAX height — the same top-surface (DSM)
-// convention as the DEM's default aggregate, so an overhang never shadows the
-// roof above it.
+// Overlapping triangles collapse by MAX height — the top-surface (DSM) convention,
+// so an overhang never shadows the roof above it. (Each cell samples the surface at
+// its centre, so unlike a DEM cell's max of points this does not pick a slope's top.)
 // Returns a grid { width, height, gsd, originX, originY, data, mask, zMin, zMax,
 // count, filled, triangles } or null.
 export function meshSurface(mesh, opts = {}, onProgress = () => {}) {

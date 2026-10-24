@@ -150,7 +150,7 @@ export const WORKFLOW_BLOCKS = [
     { key: 'crs', label: 'Frame', type: 'select', options: ['local', 'project'] },
     { key: 'gsd', label: 'GSD (0 = auto)', type: 'number', min: 0 },
     { key: 'longSide', label: 'Long side px (when GSD is 0; 0 = auto)', type: 'number', min: 0 },
-    { key: 'aggregate', label: 'Surface', type: 'select', options: ['max', 'mean', 'median'] },
+    { key: 'aggregate', label: 'Surface', type: 'select', options: ['median', 'max', 'mean', 'min'] },
   ]),
   automated('gen-ortho', 'Build Orthophoto', 'Products', ['surface', 'depthMaps'], ['ortho'], { ...ORTHO_DEFAULTS }, [
     { key: 'surface', label: 'Surface', type: 'select', options: ['dem', 'mesh', 'plane'] },

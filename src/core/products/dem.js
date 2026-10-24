@@ -259,11 +259,13 @@ export function demGeometry(allPoints, opts = {}) {
 // Returns { width, height, gsd, originX, originY, data:Float32Array (NaN=nodata),
 //           mask:Uint8Array (1=has data, incl. filled), support:Uint8Array (255 = a
 //           cell points landed in, 0 = filled by interpolation or empty), zMin, zMax,
-//           count, filled, holesFilled (of `filled`, the cells `fillHoles` interpolated) }.
+//           count, filled, holesFilled (of `filled`, the cells `fillHoles` interpolated),
+//           aggregate (the one used: a median past the budget becomes the mean) }.
 //     fillHoles  — after the radius fill, also interpolate every enclosed nodata
 //                  area (fillEnclosedGaps): the ground under removed buildings
 export function rasterizeDem(allPoints, opts = {}) {
-  const { aggregate = 'max', fillMethod = 'idw', fillRadius = 2, fillHoles = false } = opts
+  const { fillMethod = 'idw', fillRadius = 2, fillHoles = false } = opts
+  let { aggregate = 'max' } = opts
   const geom = demGeometry(allPoints, opts)
   if (!geom) return null
   const { points, width, height, gsd, originX, originY } = geom
@@ -271,10 +273,11 @@ export function rasterizeDem(allPoints, opts = {}) {
   // Grid planes (data, measured, mask, the mean path's sum + count) ≈ 24 B/cell;
   // median adds a cell-offset table and one Float64 per point.
   const budget = Number.isFinite(opts.memBudgetBytes) ? opts.memBudgetBytes : DEFAULT_BUDGET_BYTES
-  const need =
-    cells * 24 +
-    (aggregate === 'median' ? cells * 4 + points.length * 8 : 0) +
-    (fillHoles ? cells * ENCLOSED_FILL_BYTES_PER_CELL : 0)
+  const base = cells * 24 + (fillHoles ? cells * ENCLOSED_FILL_BYTES_PER_CELL : 0)
+  // Median is the default; a cloud too big for its per-point buffer takes the mean,
+  // which is as unbiased on slopes and needs none (the caller reports the swap).
+  if (aggregate === 'median' && base + cells * 4 + points.length * 8 > budget && base <= budget) aggregate = 'mean'
+  const need = base + (aggregate === 'median' ? cells * 4 + points.length * 8 : 0)
   if (!Number.isSafeInteger(cells) || need > budget) {
     throw new Error(
       `DEM raster (${width}×${height}) needs ${formatBytes(need)}, over the ` +
@@ -309,7 +312,22 @@ export function rasterizeDem(allPoints, opts = {}) {
     zMax = 0
   }
 
-  return { width, height, gsd, originX, originY, data, mask, support, zMin, zMax, count, filled, holesFilled }
+  return {
+    width,
+    height,
+    gsd,
+    originX,
+    originY,
+    data,
+    mask,
+    support,
+    zMin,
+    zMax,
+    count,
+    filled,
+    holesFilled,
+    aggregate,
+  }
 }
 
 // The support plane of a tiled DEM's overview: each overview cell gets the share of

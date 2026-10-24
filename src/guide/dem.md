@@ -92,14 +92,20 @@ the cell size. Past 4,096 the DEM is built block by block, as a set cell size is
 above).
 
 ## Surface aggregation
-<!-- param: aggregate default: Max -->
+<!-- param: aggregate default: Median -->
 How the heights of all points that land in one cell become that cell's single
-height. **Max** (default) keeps the top surface: a DSM with roofs and canopy.
-**Min** takes the lowest point, which is only "ground-ish": it drops some points on
-low vegetation, but it is not a terrain model, and under trees or roofs there is no
-ground in the cloud to find. For a terrain model, use Points ▸ Ground only. **Median** resists stray points above and
-below the surface; **Mean** gives a smooth average where many points share a cell,
-but one outlier pulls it. Median needs about 8 extra bytes per point (see Memory).
+height. **Median** (default) gives the surface at the cell, unmoved by stray points
+above and below it. **Max** keeps the top surface: roofs and the tops of trees where a
+cell straddles their edge. But in a cell on a slope it takes the cell's highest
+corner: on Rachel Glacier's rock at 20 m cells the max surface stood 14 m above the
+reference DEM, the median 0.7 m. On flat ground (Casa Grande) all of them agree within
+0.1 m, so choose Max for small cells over buildings or canopy. **Mean** gives a smooth
+average where many points share a cell, but one outlier pulls it. **Min** takes the
+lowest point, which is only "ground-ish": it drops some points on low vegetation, but
+it is not a terrain model, and under trees or roofs there is no ground in the cloud to
+find. For a terrain model, use Points ▸ Ground only. Median needs about 8 extra bytes
+per point (see Memory); a cloud too big for that takes the mean instead, and the log
+says so.
 
 ## Gap interpolation
 <!-- param: fillMethod default: Inverse distance -->

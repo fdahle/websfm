@@ -1207,6 +1207,13 @@ metres over 10 km. With 90 candidates (84 control): median +0.7 m, NMAD 5.9 m. h
 6.4 m, median −2.8 m. Fusion settings (strict, min 4 views, 0.5 % depth tolerance)
 changed NMAD by ≤ 0.2 m; DEM `max` aggregation added +11 m bias.
 
+**Cell aggregation** (default `median` since 2026-10-24, was `max`). Rachel, 20 m cells,
+aligned control: median +0.7 m / NMAD 5.9, mean +0.6 / 6.0, 75th percentile +4.9 / 6.0,
+90th +8.3 / 6.4, max +13.8 / 8.2. Casa Grande (1978 film, lidar reference, 8 m cells,
+mostly flat): all within 0.1 m of each other (stable NMAD 0.55–0.56 m). The max bias is
+the slope across a cell (±8 m in a 20 m cell on 40°), not just noise. A median whose
+per-point buffer exceeds the budget falls back to the mean.
+
 ---
 
 ### Reference-orthophoto control candidates (coarse to fine, 2026-10-19)

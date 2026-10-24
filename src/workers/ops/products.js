@@ -271,6 +271,12 @@ export function makeProductsOps({ rasterize } = {}) {
     }
     const grid = rasterizeDem(framed, { ...settings, bounds, memBudgetBytes: budget })
     if (!grid) throw new Error(`${label}: could not rasterise (need a denser cloud or a smaller GSD)`)
+    if (settings.aggregate && grid.aggregate !== settings.aggregate)
+      emit?.('log', [
+        `${label}: each cell takes the mean, not the median: the median's per-point buffer does not fit in memory`,
+        'warn',
+        'Products',
+      ])
 
     // A rebuild keeps the previous DEM's symbology (an automatic range follows the new
     // heights; a manual one is the user's and stays).

@@ -302,7 +302,10 @@ export const DEM_DEFAULTS = {
   sizeBy: 'gsd', // 'gsd' | 'px'
   gsd: 0, // ground sample distance; 0 = auto (√(area/n))
   longSide: 0, // cells on the longer side; 0 = auto
-  aggregate: 'max', // 'max' (DSM top surface) | 'mean' | 'median'
+  // 'median' | 'max' (top surface) | 'mean' | 'min'. Median by default: in a cell on a
+  // slope `max` takes the cell's top edge — +14 m on Rachel Glacier's rock at 20 m
+  // cells (NMAD 8.2 vs 5.9 m) — while on flat Casa Grande all four agree within 0.1 m.
+  aggregate: 'median',
   fillMethod: 'idw', // 'none' | 'nearest' | 'idw'
   fillRadius: 2, // IDW hole-fill radius (cells); 0 = none
   extent: 'core', // 'core' = the cloud's dense footprint (dem.js coreExtent) | 'all' = raw min/max

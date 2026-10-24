@@ -42,7 +42,7 @@ export function demEffects(s, { source = null, estimate = null, unit, frame } = 
 
   const AGG = {
     max: 'the highest (the top surface)',
-    median: 'the median (robust to outliers)',
+    median: 'the median (the surface at the cell, robust to outliers)',
     mean: 'the mean',
     min: 'the lowest (towards the ground)',
   }
