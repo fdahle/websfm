@@ -4,9 +4,11 @@ import ModalShell from '../ui/ModalShell.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsField from '../ui/SettingsField.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import { sparseMetrics } from '../../../workers/computeClient.js'
 import { packSparseCloud } from '../../../core/sfm/resultCodec.js'
 import { selectedSparseIndices } from '../../../core/sfm/gradualSelection.js'
+import { gradualSelectionEffects } from '../../../core/stepEffects/gradualSelection.js'
 const props = defineProps({ cloud: { type: Object, required: true } })
 const emit = defineEmits(['close', 'run'])
 const metric = ref('error'),
@@ -21,6 +23,13 @@ const selected = computed(() =>
 const max = computed(() => (metric.value === 'error' ? 20 : metric.value === 'angle' ? 30 : 20))
 const units = computed(() =>
   metric.value === 'error' ? 'px RMS, above' : metric.value === 'track' ? 'views, below' : 'degrees, below',
+)
+// What each step does to the model (core/stepEffects/gradualSelection.js).
+const effects = computed(() =>
+  gradualSelectionEffects(
+    { metric: metric.value, threshold: threshold.value },
+    { selected: metrics.value ? selected.value : null, total: props.cloud.points.length, error: error.value },
+  ),
 )
 onMounted(async () => {
   try {
@@ -39,17 +48,12 @@ function run() {
 </script>
 <template>
   <ModalShell title="Sparse gradual selection" @close="emit('close')">
-    <WarnBox
-      >This replaces the main sparse model after successful bundle adjustment. Depth maps, computed dense cloud/mesh,
-      DEM, orthophoto, scale and georeference must then be rebuilt or refitted. Cancel or a failed refinement keeps the
-      original model.</WarnBox
-    >
     <SettingsGroup title="Source">
       <p class="source-line">
         <strong>{{ cloud.name }}</strong> · {{ cloud.points.length.toLocaleString() }} points
       </p>
     </SettingsGroup>
-    <SettingsGroup title="Selection">
+    <SettingsStep step="1" title="Select tie points" :effect="effects.select">
       <SettingsField label="Criterion" label-for="gs-metric">
         <select id="gs-metric" v-model="metric" class="field-select">
           <option value="error">Reprojection error</option>
@@ -77,12 +81,13 @@ function run() {
         :step="metric === 'track' ? 1 : 0.1"
         class="field-input range"
       />
-      <p v-if="error" role="alert" class="field-hint error">{{ error }}</p>
-      <p v-else-if="!metrics" class="field-hint">Computing point statistics…</p>
-      <p v-else class="selection-line">
-        {{ selected.toLocaleString() }} selected · {{ (cloud.points.length - selected).toLocaleString() }} remaining
-      </p>
-    </SettingsGroup>
+    </SettingsStep>
+    <SettingsStep step="2" title="Delete and refine" :effect="effects.refine" />
+    <WarnBox
+      >This replaces the main sparse model after successful bundle adjustment. Depth maps, computed dense cloud/mesh,
+      DEM, orthophoto, scale and georeference must then be rebuilt or refitted. Cancel or a failed refinement keeps the
+      original model.</WarnBox
+    >
     <template #footer
       ><button class="btn" @click="emit('close')">Cancel</button>
       <button
@@ -100,13 +105,5 @@ function run() {
 .source-line {
   font-size: 13px;
   color: var(--text);
-}
-.selection-line {
-  font-size: 13px;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.field-hint.error {
-  color: var(--danger);
 }
 </style>

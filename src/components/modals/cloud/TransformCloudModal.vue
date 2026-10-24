@@ -3,10 +3,12 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
+import { transformCloudEffects } from '../../../core/stepEffects/transformCloud.js'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
 import { transformFromEuler, parseMatrixText, matrixFromTransform } from '../../../core/products/cloudAlign.js'
 import { cloudBounds } from '../../../core/products/cloudEdit.js'
@@ -57,6 +59,8 @@ const parsed = computed(() => {
     return { error: err.message }
   }
 })
+// What each step does (core/stepEffects/transformCloud.js).
+const effects = computed(() => transformCloudEffects(p.value, { mode: mode.value, parsed: parsed.value }))
 
 function run() {
   emit('run', {
@@ -84,33 +88,36 @@ function run() {
         </SettingsField>
       </SettingsGroup>
 
-      <SettingsGroup v-if="mode === 'params'" title="Transform">
-        <SettingsField label="Move (X, Y, Z)" hint="In the cloud's own coordinates.">
-          <div class="input-row">
-            <input v-model.number="p.tx" type="number" step="any" class="field-input" aria-label="Move X" />
-            <input v-model.number="p.ty" type="number" step="any" class="field-input" aria-label="Move Y" />
-            <input v-model.number="p.tz" type="number" step="any" class="field-input" aria-label="Move Z" />
-          </div>
-        </SettingsField>
-        <SettingsField label="Rotate (X, Y, Z)" unit="°" hint="About fixed world axes, X first, then Y, then Z.">
-          <div class="input-row">
-            <input v-model.number="p.rx" type="number" step="any" class="field-input" aria-label="Rotate X" />
-            <input v-model.number="p.ry" type="number" step="any" class="field-input" aria-label="Rotate Y" />
-            <input v-model.number="p.rz" type="number" step="any" class="field-input" aria-label="Rotate Z" />
-          </div>
-        </SettingsField>
-        <SettingsField label="Scale" label-for="tf-scale" unit="×">
-          <input id="tf-scale" v-model.number="p.scale" type="number" min="0.000001" step="any" class="field-input" />
-        </SettingsField>
-        <SettingsField label="Rotate and scale about" label-for="tf-pivot">
-          <select id="tf-pivot" v-model="p.pivot" class="field-select">
-            <option value="centre">The cloud's centre</option>
-            <option value="origin">The coordinate origin</option>
-          </select>
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup v-else title="Matrix">
+      <template v-if="mode === 'params'">
+        <SettingsStep step="1" title="Rotate and scale" :effect="effects.rotate">
+          <SettingsField label="Rotate (X, Y, Z)" unit="°" hint="About fixed world axes, X first, then Y, then Z.">
+            <div class="input-row">
+              <input v-model.number="p.rx" type="number" step="any" class="field-input" aria-label="Rotate X" />
+              <input v-model.number="p.ry" type="number" step="any" class="field-input" aria-label="Rotate Y" />
+              <input v-model.number="p.rz" type="number" step="any" class="field-input" aria-label="Rotate Z" />
+            </div>
+          </SettingsField>
+          <SettingsField label="Scale" label-for="tf-scale" unit="×">
+            <input id="tf-scale" v-model.number="p.scale" type="number" min="0.000001" step="any" class="field-input" />
+          </SettingsField>
+          <SettingsField label="About" label-for="tf-pivot">
+            <select id="tf-pivot" v-model="p.pivot" class="field-select">
+              <option value="centre">The cloud's centre</option>
+              <option value="origin">The coordinate origin</option>
+            </select>
+          </SettingsField>
+        </SettingsStep>
+        <SettingsStep step="2" title="Move" :effect="effects.move">
+          <SettingsField label="Move (X, Y, Z)" hint="In the cloud's own coordinates.">
+            <div class="input-row">
+              <input v-model.number="p.tx" type="number" step="any" class="field-input" aria-label="Move X" />
+              <input v-model.number="p.ty" type="number" step="any" class="field-input" aria-label="Move Y" />
+              <input v-model.number="p.tz" type="number" step="any" class="field-input" aria-label="Move Z" />
+            </div>
+          </SettingsField>
+        </SettingsStep>
+      </template>
+      <SettingsStep v-else step="1" title="Apply the matrix" :effect="effects.matrix">
         <SettingsField
           label="Row-major 4×4 (or 3×4)"
           label-for="tf-matrix"
@@ -118,10 +125,8 @@ function run() {
         >
           <textarea id="tf-matrix" v-model="matrixText" rows="4" class="field-input mono" spellcheck="false" />
         </SettingsField>
-      </SettingsGroup>
-
-      <WarnBox v-if="parsed.error">{{ parsed.error }}</WarnBox>
-      <p v-else-if="parsed.note" class="field-hint">{{ parsed.note }}</p>
+      </SettingsStep>
+      <WarnBox v-if="mode === 'params' && parsed.error">{{ parsed.error }}</WarnBox>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

@@ -109,6 +109,14 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Tool dialogs read like the Reconstruct ones.** The Tools dialogs that run on a
+  cloud, mesh, DEM or the model (Filter, Crop, Transform, Merge, Estimate normals,
+  Classify ground, Align to reference, Distance to reference, Clean, Smooth, Decimate,
+  Sample, Contours, Slope/aspect/hillshade, Clip to polygon, Optimize cameras, Gradual
+  selection, Detect fiducials) now show their settings as numbered steps in run order,
+  each with a live line saying what it will do to your data. A step that is switched
+  off is dimmed. Drop-down lists are drawn like the other fields and are only as wide
+  as their longest choice, and File name is a wider field without a help link.
 - **The app is called WebSfM** in its interface, messages, help and the name it installs
   under, and in the LAS files it writes. Links, the `.websfm` project files and saved
   settings are unchanged.

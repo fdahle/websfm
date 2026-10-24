@@ -3,11 +3,13 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, referenceOptionLabel } from '../../../composables/useSourcePick.js'
 import { DISTANCE_DEFAULTS } from '../../../core/defaults.user.js'
+import { cloudDistanceEffects } from '../../../core/stepEffects/cloudDistance.js'
 
 // Distance to Reference (Tools ▸ Point Cloud ▾) — per-point distance from a cloud to
 // another cloud (nearest point) or to a mesh (exact, to the nearest triangle)
@@ -32,6 +34,15 @@ const {
 } = useSourcePick(() => props.references, { exclude: sourceId })
 const unitLabel = computed(() => (source.value?.imported ? 'file units' : 'model units'))
 const signable = computed(() => reference.value && (reference.value.kind === 'mesh' || !!reference.value.nrm))
+// What each step does (core/stepEffects/cloudDistance.js).
+const effects = computed(() =>
+  cloudDistanceEffects(settings.value, {
+    count: source.value?.count ?? 0,
+    mesh: reference.value?.kind === 'mesh',
+    signable: !!signable.value,
+    unit: unitLabel.value,
+  }),
+)
 
 function run() {
   const s = settings.value
@@ -49,7 +60,7 @@ function run() {
       >Needs a dense cloud and another cloud or a mesh to measure against.</WarnBox
     >
     <template v-else>
-      <SettingsGroup title="Clouds">
+      <SettingsGroup title="Source">
         <SourcePicker
           id="dist-src"
           v-model="sourceId"
@@ -66,25 +77,8 @@ function run() {
           hint="A mesh gives exact surface distances; a cloud gives distance to its nearest point."
         />
       </SettingsGroup>
-      <SettingsGroup title="Distance">
-        <SettingsField
-          :hint="
-            signable
-              ? 'Positive above the reference surface, negative below — what change detection needs.'
-              : 'Unsigned: the reference cloud has no normals. Estimate normals on it, or use a mesh, for a signed distance.'
-          "
-        >
-          <label class="checkbox-row"
-            ><input v-model="settings.signed" type="checkbox" class="checkbox" :disabled="!signable" />
-            <GlossaryTerm id="cloud-distance">Signed</GlossaryTerm> (above / below)</label
-          >
-        </SettingsField>
-        <SettingsField
-          label="Ignore beyond"
-          label-for="dist-max"
-          :unit="unitLabel"
-          hint="Farther points get no value (shown grey). 0 = no limit."
-        >
+      <SettingsStep step="1" title="Find the nearest" :effect="effects.nearest">
+        <SettingsField label="Ignore beyond" label-for="dist-max" :unit="unitLabel" hint="0 = no limit.">
           <input
             id="dist-max"
             v-model.number="settings.maxDistance"
@@ -94,7 +88,13 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
+      <SettingsStep step="2" title="Sign" :effect="effects.sign" :inactive="!signable">
+        <label class="checkbox-row"
+          ><input v-model="settings.signed" type="checkbox" class="checkbox" :disabled="!signable" />
+          <GlossaryTerm id="cloud-distance">Signed</GlossaryTerm> (above / below)</label
+        >
+      </SettingsStep>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

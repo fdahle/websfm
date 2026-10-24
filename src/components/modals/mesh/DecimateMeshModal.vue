@@ -3,12 +3,14 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { DECIMATE_MESH_DEFAULTS } from '../../../core/defaults.user.js'
+import { decimateMeshEffects } from '../../../core/stepEffects/decimateMesh.js'
 
 // Decimate Mesh (Tools ▸ Mesh ▾) — quadric edge collapse (Garland–Heckbert,
 // core/products/meshDecimate.js): fewer triangles where the surface is flat, detail
@@ -35,6 +37,10 @@ const target = computed(() => {
     : Math.min(n, Math.max(0, Math.round(s.targetTriangles || 0)))
 })
 const valid = computed(() => source.value && target.value >= 4 && target.value < source.value.count)
+// What the step does to this mesh (core/stepEffects/decimateMesh.js).
+const effects = computed(() =>
+  decimateMeshEffects(settings.value, { triangles: source.value?.count ?? 0, target: target.value }),
+)
 
 function run() {
   const s = settings.value
@@ -63,7 +69,7 @@ function run() {
           hint="The result is a new mesh; this one is left untouched."
         />
       </SettingsGroup>
-      <SettingsGroup title="Target">
+      <SettingsStep step="1" title="Collapse edges" :effect="effects.collapse">
         <SettingsField>
           <template #label><GlossaryTerm id="mesh-decimation">Reduce to</GlossaryTerm></template>
           <SegmentedControl v-model="settings.targetMode" :options="MODES" />
@@ -99,13 +105,9 @@ function run() {
             ><input v-model="settings.preserveBoundary" type="checkbox" class="checkbox" /> Preserve the boundary</label
           >
         </SettingsField>
-      </SettingsGroup>
-      <p v-if="source" class="field-hint">
-        {{ source.count.toLocaleString() }} → about {{ target.toLocaleString() }} triangles. A few million triangles
-        take several seconds.
-        <template v-if="source?.texture"
-          ><br />This mesh is textured; the decimated copy is not. Decimate first, then texture.</template
-        >
+      </SettingsStep>
+      <p v-if="source?.texture" class="field-hint">
+        This mesh is textured; the decimated copy is not. Decimate first, then texture.
       </p>
     </template>
     <template #footer>

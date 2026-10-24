@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import WarnBox from '../ui/WarnBox.vue'
@@ -10,6 +11,7 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import { useSourcePick, cloudOptionLabel } from '../../../composables/useSourcePick.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { GROUND_DEFAULTS } from '../../../core/defaults.user.js'
+import { classifyGroundEffects } from '../../../core/stepEffects/classifyGround.js'
 import { cloudUnits } from '../../../core/products/cloudUnits.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
@@ -46,6 +48,8 @@ const numbers = computed(() =>
     classThreshold: { label: 'Ground tolerance', min: 0.01, max: 10 },
   }),
 )
+// What each step does to this cloud (core/stepEffects/classifyGround.js).
+const effects = computed(() => classifyGroundEffects(settings.value, { noScale: noScale.value }))
 
 function run() {
   emit('run', {
@@ -81,7 +85,7 @@ function run() {
           metres.
         </p>
       </SettingsGroup>
-      <SettingsGroup title="Cloth">
+      <SettingsStep step="1" title="Drop the cloth" :effect="effects.cloth" :inactive="noScale">
         <SettingsField label-for="gnd-res" unit="m" hint="Coarser spans wider roofs; finer follows steeper ground.">
           <template #label>
             <FieldHelp
@@ -125,8 +129,8 @@ function run() {
             ><input v-model="settings.slopeSmoothing" type="checkbox" class="checkbox" /> Enabled</label
           >
         </SettingsField>
-      </SettingsGroup>
-      <SettingsGroup title="Classes">
+      </SettingsStep>
+      <SettingsStep step="2" title="Label the points" :effect="effects.label" :inactive="noScale">
         <SettingsField label-for="gnd-thr" unit="m" hint="Points this close to the cloth are ground.">
           <template #label>
             <FieldHelp
@@ -155,7 +159,7 @@ function run() {
             <option value="all">All points</option>
           </select>
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
@@ -172,8 +176,3 @@ function run() {
 </template>
 
 <style scoped src="../ui/modal.css"></style>
-<style scoped>
-.field-select {
-  width: 100%;
-}
-</style>

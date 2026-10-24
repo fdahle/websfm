@@ -3,10 +3,13 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
+import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { CLEAN_MESH_DEFAULTS } from '../../../core/defaults.user.js'
+import { cleanMeshEffects } from '../../../core/stepEffects/cleanMesh.js'
 
 // Clean Mesh (Tools ▸ Mesh ▾) — the post-Poisson cleanup chain from
 // core/products/meshEdit.js `cleanMesh`. Non-destructive: adds a NEW mesh.
@@ -19,20 +22,16 @@ const emit = defineEmits(['close', 'run'])
 const settings = ref({ ...CLEAN_MESH_DEFAULTS, methods: [...CLEAN_MESH_DEFAULTS.methods] })
 const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
 
-// Steps run in this order whatever is ticked (cleanMesh fixes it), so the list
-// order IS the pipeline order.
-const STEPS = [
-  { id: 'weld', label: 'Weld duplicate vertices' },
-  { id: 'components', label: 'Remove small pieces' },
-  { id: 'longEdges', label: 'Remove long-edge bridges' },
-  { id: 'holes', label: 'Fill holes' },
-  { id: 'compact', label: 'Drop unused vertices and degenerate triangles' },
-]
+// Steps run in this order whatever is ticked (cleanMesh fixes it), so the numbered
+// steps ARE the pipeline order.
 const has = (id) => settings.value.methods.includes(id)
+const ORDER = CLEAN_MESH_DEFAULTS.methods
 function toggle(id) {
   const on = has(id)
-  settings.value.methods = STEPS.filter((s) => (s.id === id ? !on : has(s.id))).map((s) => s.id)
+  settings.value.methods = ORDER.filter((m) => (m === id ? !on : has(m)))
 }
+// What each step does to this mesh (core/stepEffects/cleanMesh.js).
+const effects = computed(() => cleanMeshEffects(settings.value, { textured: !!source.value?.texture }))
 // 0 = every loop, which closes an open surface's outer rim too.
 const fillAll = computed({
   get: () => !(settings.value.maxHoleEdges > 0),
@@ -72,84 +71,110 @@ function run() {
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Steps">
-        <SettingsField hint="Ticked steps run top to bottom, each on the previous one's result.">
-          <label v-for="s in STEPS" :key="s.id" class="checkbox-row">
-            <input type="checkbox" class="checkbox" :checked="has(s.id)" @change="toggle(s.id)" /> {{ s.label }}
-          </label>
-        </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup v-if="has('components')" title="Small pieces">
-        <SettingsField
-          label="Smaller than"
-          label-for="clean-frac"
-          unit="× largest piece"
-          hint="A piece is removed when it has fewer triangles than this share of the largest piece."
+      <SettingsStep step="1" title="Weld duplicate vertices" :effect="effects.weld" :inactive="!has('weld')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('weld')" @change="toggle('weld')" /> Enabled</label
         >
-          <input
-            id="clean-frac"
-            v-model.number="settings.minFraction"
-            type="number"
-            min="0"
-            max="1"
-            step="0.005"
-            class="field-input"
-          />
-        </SettingsField>
-        <SettingsField label="Or fewer than" label-for="clean-min" unit="triangles">
-          <input
-            id="clean-min"
-            v-model.number="settings.minTriangles"
-            type="number"
-            min="0"
-            step="1"
-            class="field-input"
-          />
-        </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
 
-      <SettingsGroup v-if="has('longEdges')" title="Long-edge bridges">
-        <SettingsField
-          label="Longer than"
-          label-for="clean-edge"
-          unit="× median edge"
-          hint="Poisson stretches long thin triangles across gaps in the data. Lower removes more."
+      <SettingsStep step="2" title="Remove small pieces" :effect="effects.pieces" :inactive="!has('components')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('components')" @change="toggle('components')" />
+          Enabled</label
         >
-          <input
-            id="clean-edge"
-            v-model.number="settings.maxEdgeFactor"
-            type="number"
-            min="1.5"
-            step="0.5"
-            class="field-input"
-          />
-        </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
 
-      <SettingsGroup v-if="has('holes')" title="Holes">
-        <SettingsField
-          hint="Watertight closes every opening, including an open surface's outer rim — for objects to 3D-print or measure volume, not for terrain."
+      <SettingsStep step="3" title="Remove long-edge bridges" :effect="effects.bridges" :inactive="!has('longEdges')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('longEdges')" @change="toggle('longEdges')" />
+          Enabled</label
         >
-          <label class="checkbox-row"
-            ><input v-model="fillAll" type="checkbox" class="checkbox" /> Close all holes (watertight)</label
+      </SettingsStep>
+
+      <SettingsStep step="4" title="Fill holes" :effect="effects.holes" :inactive="!has('holes')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('holes')" @change="toggle('holes')" /> Enabled</label
+        >
+        <template v-if="has('holes')">
+          <SettingsField
+            hint="Closes every opening, including an open surface's outer rim — for objects to 3D-print or measure volume, not for terrain."
           >
-        </SettingsField>
-        <SettingsField v-if="!fillAll" label="Up to" label-for="clean-hole" unit="edges around the hole">
-          <input
-            id="clean-hole"
-            v-model.number="settings.maxHoleEdges"
-            type="number"
-            min="3"
-            step="1"
-            class="field-input"
-          />
-        </SettingsField>
-        <p v-if="source?.texture" class="field-hint">
-          This mesh is textured: if holes are filled, the result has no texture (no photo covers the patches). Untick
-          Fill holes to keep it.
-        </p>
-      </SettingsGroup>
+            <label class="checkbox-row"
+              ><input v-model="fillAll" type="checkbox" class="checkbox" /> Close all holes (watertight)</label
+            >
+          </SettingsField>
+        </template>
+      </SettingsStep>
+
+      <SettingsStep
+        step="5"
+        title="Drop unused vertices and flat triangles"
+        :effect="effects.compact"
+        :inactive="!has('compact')"
+      >
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('compact')" @change="toggle('compact')" />
+          Enabled</label
+        >
+      </SettingsStep>
+
+      <AdvancedDisclosure
+        v-if="has('components') || has('longEdges') || (has('holes') && !fillAll)"
+        label="Advanced settings"
+      >
+        <SettingsStep v-if="has('components')" step="2" title="Remove small pieces — advanced">
+          <SettingsField label="Smaller than" label-for="clean-frac" unit="× largest piece">
+            <input
+              id="clean-frac"
+              v-model.number="settings.minFraction"
+              type="number"
+              min="0"
+              max="1"
+              step="0.005"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField label="Or fewer than" label-for="clean-min" unit="triangles">
+            <input
+              id="clean-min"
+              v-model.number="settings.minTriangles"
+              type="number"
+              min="0"
+              step="1"
+              class="field-input"
+            />
+          </SettingsField>
+        </SettingsStep>
+        <SettingsStep v-if="has('longEdges')" step="3" title="Remove long-edge bridges — advanced">
+          <SettingsField
+            label="Longer than"
+            label-for="clean-edge"
+            unit="× median edge"
+            hint="Poisson stretches long thin triangles across gaps in the data. Lower removes more."
+          >
+            <input
+              id="clean-edge"
+              v-model.number="settings.maxEdgeFactor"
+              type="number"
+              min="1.5"
+              step="0.5"
+              class="field-input"
+            />
+          </SettingsField>
+        </SettingsStep>
+        <SettingsStep v-if="has('holes') && !fillAll" step="4" title="Fill holes — advanced">
+          <SettingsField label="Up to" label-for="clean-hole" unit="edges around the hole">
+            <input
+              id="clean-hole"
+              v-model.number="settings.maxHoleEdges"
+              type="number"
+              min="3"
+              step="1"
+              class="field-input"
+            />
+          </SettingsField>
+        </SettingsStep>
+      </AdvancedDisclosure>
     </template>
 
     <template #footer>

@@ -99,7 +99,8 @@
 
 /* `.field-select` carries the whole control look on its own, so a select written
    with only that class (as most tool dialogs do) is styled like one written
-   `field-input field-select`. */
+   `field-input field-select`. One line-height gives a text field and a select the
+   same 28 px height, so they line up in a row. */
 .field-input,
 .field-select {
   background: var(--bg);
@@ -108,10 +109,16 @@
   color: var(--text);
   font: inherit;
   font-size: 13px;
+  line-height: 18px;
   padding: 4px 8px;
 }
 .field-input {
   width: 100px;
+}
+/* A free-text field (a file name, a label) is as wide as what it holds. */
+.field-input.wide {
+  width: 100%;
+  max-width: 340px;
 }
 .field-input:focus,
 .field-select:focus {
@@ -123,10 +130,30 @@
 .field-input[aria-invalid='true'] {
   border-color: #e0533d;
 }
-.field-select {
+/* A select is drawn by us, not the platform: the same box as a text field with our
+   own chevron (#888 reads on both themes). It is as wide as its longest option, not
+   the dialog — a field's width hints at what it holds, and a short choice stretched
+   across 560 px reads as a text box. */
+.field-select,
+select.field-input {
+  appearance: none;
   width: auto;
-  min-width: 180px;
+  min-width: 160px;
+  max-width: 100%;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  text-overflow: ellipsis;
   cursor: pointer;
+}
+.field-select:hover:not(:disabled):not(:focus),
+select.field-input:hover:not(:disabled):not(:focus) {
+  border-color: var(--text-dim);
+}
+.field > .field-select,
+.field > select.field-input {
+  align-self: flex-start;
 }
 .field-select:disabled,
 .field-input:disabled {

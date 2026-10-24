@@ -3,12 +3,14 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { SMOOTH_MESH_DEFAULTS } from '../../../core/defaults.user.js'
+import { smoothMeshEffects } from '../../../core/stepEffects/smoothMesh.js'
 
 // Smooth Mesh (Tools ▸ Mesh ▾) — Taubin λ/μ smoothing (core/products/meshEdit.js
 // `taubinSmooth`). Unlike repeated Laplacian smoothing it does not shrink the
@@ -25,6 +27,8 @@ const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initi
 const valid = computed(
   () => settings.value.iterations >= 1 && settings.value.lambda > 0 && settings.value.mu < -settings.value.lambda,
 )
+// What the step does to this mesh (core/stepEffects/smoothMesh.js).
+const effects = computed(() => smoothMeshEffects(settings.value, { triangles: source.value?.count ?? 0 }))
 
 function run() {
   const s = settings.value
@@ -50,7 +54,7 @@ function run() {
           hint="The result is a new mesh; this one is left untouched."
         />
       </SettingsGroup>
-      <SettingsGroup title="Smoothing">
+      <SettingsStep step="1" title="Smooth" :effect="effects.smooth">
         <SettingsField
           label="Iterations"
           label-for="smooth-it"
@@ -71,9 +75,9 @@ function run() {
             ><input v-model="settings.fixBoundary" type="checkbox" class="checkbox" /> Keep the boundary fixed</label
           >
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
       <AdvancedDisclosure label="Advanced settings">
-        <SettingsGroup title="Taubin weights">
+        <SettingsStep step="1" title="Smooth — advanced">
           <SettingsField label-for="smooth-l">
             <template #label><GlossaryTerm id="mesh-smoothing">λ (smooth)</GlossaryTerm></template>
             <input
@@ -93,7 +97,7 @@ function run() {
           >
             <input id="smooth-m" v-model.number="settings.mu" type="number" max="0" step="0.01" class="field-input" />
           </SettingsField>
-        </SettingsGroup>
+        </SettingsStep>
       </AdvancedDisclosure>
     </template>
     <template #footer>

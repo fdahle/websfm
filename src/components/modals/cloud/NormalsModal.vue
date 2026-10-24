@@ -3,11 +3,13 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, cloudOptionLabel } from '../../../composables/useSourcePick.js'
 import { NORMALS_DEFAULTS } from '../../../core/defaults.user.js'
+import { normalsEffects } from '../../../core/stepEffects/normals.js'
 import { cameraCenter } from '../../../core/sfm/geometry.js'
 
 // Estimate Normals (Tools ▸ Point Cloud ▾) — per-point normals from a local plane
@@ -35,6 +37,10 @@ const resolvedOrient = computed(() => {
   if (o !== 'auto') return o
   return !source.value?.imported && hasCameras.value ? 'cameras' : 'up'
 })
+// What each step does to this cloud (core/stepEffects/normals.js).
+const effects = computed(() =>
+  normalsEffects(settings.value, { count: source.value?.count ?? 0, orient: resolvedOrient.value }),
+)
 
 function run() {
   const kind = resolvedOrient.value
@@ -68,25 +74,18 @@ function run() {
           hint="Adds a new cloud with normals; this one is left untouched."
         />
       </SettingsGroup>
-      <SettingsGroup title="Estimation">
+      <SettingsStep step="1" title="Fit local planes" :effect="effects.fit">
         <SettingsField
           label="Neighbours"
           label-for="nrm-k"
-          hint="Points in each local plane fit. More is smoother and slower; fewer keeps sharp edges."
+          hint="More is smoother and slower; fewer keeps sharp edges."
         >
           <input id="nrm-k" v-model.number="settings.k" type="number" min="6" max="64" step="1" class="field-input" />
         </SettingsField>
-        <SettingsField
-          label-for="nrm-orient"
-          :hint="
-            resolvedOrient === 'cameras'
-              ? 'Each normal faces the nearest camera — right for walls and overhangs.'
-              : resolvedOrient === 'up'
-                ? 'Each normal faces upward (+Z) — right for terrain from above.'
-                : 'Keeps the side the existing normals face, re-estimating only their direction.'
-          "
-        >
-          <template #label><GlossaryTerm id="surface-normal">Point normals</GlossaryTerm></template>
+      </SettingsStep>
+      <SettingsStep step="2" title="Orient" :effect="effects.orient">
+        <SettingsField label-for="nrm-orient">
+          <template #label><GlossaryTerm id="surface-normal">Point normals</GlossaryTerm> face</template>
           <select id="nrm-orient" v-model="settings.orient" class="field-select">
             <option value="auto">Automatic</option>
             <option value="cameras" :disabled="!hasCameras">Towards the cameras</option>
@@ -94,7 +93,7 @@ function run() {
             <option value="existing" :disabled="!source?.nrm">Keep existing side</option>
           </select>
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

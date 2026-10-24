@@ -1,10 +1,11 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
-import { pluralize } from '../../../core/textFormat.js'
+import { optimizeCamerasEffects } from '../../../core/stepEffects/optimizeCameras.js'
 
 // Optimize Cameras (Tools ▸ Model ▾) — re-run bundle adjustment on the finished
 // sparse model with the focal length (and optionally the principal point) free,
@@ -20,6 +21,13 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const refine = ref('f')
+// What the step does to the model (core/stepEffects/optimizeCameras.js).
+const effects = computed(() =>
+  optimizeCamerasEffects(
+    { refine: refine.value },
+    { cameras: props.cloud?.cameras.size ?? 0, points: props.cloud?.points?.length ?? 0, gcps: props.gcpCount },
+  ),
+)
 
 function run() {
   emit('run', {
@@ -33,25 +41,23 @@ function run() {
   <ModalShell title="Optimize Cameras" @close="emit('close')">
     <WarnBox v-if="!cloud">Build the sparse model first.</WarnBox>
     <template v-else>
-      <SettingsGroup title="Model">
-        <SettingsField
-          :hint="`${cloud.cameras.size.toLocaleString()} cameras, ${(cloud.points?.length ?? 0).toLocaleString()} points${gcpCount ? ` · held to ${pluralize(gcpCount, 'control point')} where they qualify` : ''}.`"
-        >
+      <SettingsGroup title="Source">
+        <p class="source-line">
           <strong>{{ cloud.name }}</strong>
-        </SettingsField>
+        </p>
       </SettingsGroup>
-      <SettingsGroup title="Refine">
+      <SettingsStep step="1" title="Re-adjust the cameras" :effect="effects.refine">
         <SettingsField
-          label="Camera parameters"
+          label="Free parameters"
           label-for="opt-refine"
-          hint="Shared by every image of a sensor. The principal point needs a well-spread, strongly overlapping block."
+          hint="The principal point needs a well-spread, strongly overlapping block."
         >
           <select id="opt-refine" v-model="refine" class="field-select">
             <option value="f">Focal length</option>
             <option value="f,cxcy">Focal length + principal point</option>
           </select>
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
       <WarnBox>
         The model is replaced in place, so everything computed from it is cleared as after a new reconstruction: depth
         maps, the dense cloud and mesh, DEM and orthophoto, and the georeference and scale fit (both refit on demand).
@@ -66,3 +72,9 @@ function run() {
 </template>
 
 <style scoped src="../ui/modal.css"></style>
+<style scoped>
+.source-line {
+  font-size: 13px;
+  color: var(--text);
+}
+</style>

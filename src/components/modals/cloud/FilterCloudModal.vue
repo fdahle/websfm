@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import WarnBox from '../ui/WarnBox.vue'
@@ -11,6 +12,7 @@ import { useSourcePick } from '../../../composables/useSourcePick.js'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META } from '../../../core/defaults.user.js'
+import { filterCloudEffects } from '../../../core/stepEffects/filterCloud.js'
 
 // Filter Cloud — remove noise from a dense cloud. Non-destructive: the run adds a
 // NEW cloud. Defaults are the single source of truth in core/defaults.user.js;
@@ -36,18 +38,13 @@ const settings = ref({
 })
 const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 
-// Methods run in the listed order, so the checkbox order IS the pipeline order:
-// cheap linear rejections first, the neighbour sweep last over the smallest cloud.
-const METHODS = [
-  { id: 'range', label: 'Elevation / brightness range' },
-  { id: 'voxel', label: 'Voxel downsample' },
-  { id: 'isolated', label: 'Isolated clusters' },
-  { id: 'sor', label: 'Statistical outliers' },
-]
+// Methods run in this order, so the numbered steps ARE the pipeline order: cheap
+// linear rejections first, the neighbour sweep last over the smallest cloud.
+const METHODS = ['range', 'voxel', 'isolated', 'sor']
 const has = (id) => settings.value.methods.includes(id)
 function toggle(id) {
   const on = has(id)
-  settings.value.methods = METHODS.filter((m) => (m.id === id ? !on : has(m.id))).map((m) => m.id)
+  settings.value.methods = METHODS.filter((m) => (m === id ? !on : has(m)))
 }
 
 // A card (and Reset) restores every filter setting; any edit reads as "· modified".
@@ -62,6 +59,8 @@ const { baseId, activePreset, selectPreset } = usePresetSettings({
 // 0 ⇒ auto. Voxel auto uses the dense merge cell when we know it; the core module
 // falls back to its own estimate otherwise.
 const voxelAuto = computed(() => (settings.value.voxelCell > 0 ? settings.value.voxelCell : props.mergeCell))
+// What each step does to this cloud (core/stepEffects/filterCloud.js).
+const effects = computed(() => filterCloudEffects(settings.value, { mergeCell: props.mergeCell }))
 
 function run() {
   const s = settings.value
@@ -112,53 +111,69 @@ function run() {
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Filters">
-        <SettingsField hint="Enabled filters run top to bottom, each on the previous one's output.">
-          <label v-for="m in METHODS" :key="m.id" class="checkbox-row">
-            <input type="checkbox" class="checkbox" :checked="has(m.id)" @change="toggle(m.id)" />
-            <GlossaryTerm v-if="m.id === 'sor'" id="statistical-outlier-removal">{{ m.label }}</GlossaryTerm>
-            <template v-else>{{ m.label }}</template>
-          </label>
-        </SettingsField>
-      </SettingsGroup>
-
-      <AdvancedDisclosure label="Advanced settings" :default-open="!!startMethod">
-        <SettingsGroup v-if="has('sor')" title="Statistical outliers">
-          <SettingsField
-            label="Neighbours"
-            label-for="filter-sor-k"
-            hint="How many nearest neighbours the per-point mean distance averages over."
-          >
-            <input
-              id="filter-sor-k"
-              v-model.number="settings.sorK"
-              type="number"
-              min="3"
-              max="64"
-              step="1"
-              class="field-input"
-            />
+      <SettingsStep step="1" title="Elevation / brightness range" :effect="effects.range" :inactive="!has('range')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('range')" @change="toggle('range')" /> Enabled</label
+        >
+        <template v-if="has('range')">
+          <SettingsField label="Elevation (Z)" hint="Leave empty for unbounded.">
+            <div class="input-row">
+              <input v-model.number="settings.zMin" type="number" step="any" class="field-input" placeholder="min" />
+              <input v-model.number="settings.zMax" type="number" step="any" class="field-input" placeholder="max" />
+            </div>
           </SettingsField>
-          <SettingsField
-            label-for="filter-sor-std"
-            unit="σ"
-            hint="Drop points above mean + ratio × σ. Lower is more aggressive."
-          >
-            <template #label><GlossaryTerm id="statistical-outlier-removal">Std-dev ratio</GlossaryTerm></template>
-            <input
-              id="filter-sor-std"
-              v-model.number="settings.sorStdRatio"
-              type="number"
-              min="0.1"
-              max="10"
-              step="0.1"
-              class="field-input"
-            />
+          <SettingsField label="Brightness" unit="0–255" hint="Rec. 709 luma. Ignored on a cloud with no colour.">
+            <div class="input-row">
+              <input
+                v-model.number="settings.lumaMin"
+                type="number"
+                min="0"
+                max="255"
+                step="1"
+                class="field-input"
+                placeholder="min"
+              />
+              <input
+                v-model.number="settings.lumaMax"
+                type="number"
+                min="0"
+                max="255"
+                step="1"
+                class="field-input"
+                placeholder="max"
+              />
+            </div>
           </SettingsField>
-        </SettingsGroup>
+        </template>
+      </SettingsStep>
 
-        <SettingsGroup v-if="has('voxel')" title="Voxel downsample">
+      <SettingsStep step="2" title="Voxel downsample" :effect="effects.voxel" :inactive="!has('voxel')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('voxel')" @change="toggle('voxel')" /> Enabled</label
+        >
+      </SettingsStep>
+
+      <SettingsStep step="3" title="Isolated clusters" :effect="effects.isolated" :inactive="!has('isolated')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('isolated')" @change="toggle('isolated')" />
+          Enabled</label
+        >
+      </SettingsStep>
+
+      <SettingsStep step="4" title="Statistical outliers" :effect="effects.sor" :inactive="!has('sor')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('sor')" @change="toggle('sor')" /> Enabled</label
+        >
+      </SettingsStep>
+
+      <AdvancedDisclosure
+        v-if="has('voxel') || has('isolated') || has('sor')"
+        label="Advanced settings"
+        :default-open="!!startMethod"
+      >
+        <SettingsStep v-if="has('voxel')" step="2" title="Voxel downsample — advanced">
           <SettingsField
+            label="Cell size"
             label-for="filter-voxel"
             unit="units"
             :hint="
@@ -167,7 +182,6 @@ function run() {
                 : '0 = auto (about one point spacing)'
             "
           >
-            <template #label> One averaged point per cell </template>
             <input
               id="filter-voxel"
               v-model.number="settings.voxelCell"
@@ -177,9 +191,9 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-        </SettingsGroup>
+        </SettingsStep>
 
-        <SettingsGroup v-if="has('isolated')" title="Isolated clusters">
+        <SettingsStep v-if="has('isolated')" step="3" title="Isolated clusters — advanced">
           <SettingsField
             label="Cell size"
             label-for="filter-iso-cell"
@@ -226,38 +240,41 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-        </SettingsGroup>
+        </SettingsStep>
 
-        <SettingsGroup v-if="has('range')" title="Elevation / brightness range">
-          <SettingsField label="Elevation (Z)" hint="Leave empty for unbounded.">
-            <div class="input-row">
-              <input v-model.number="settings.zMin" type="number" step="any" class="field-input" placeholder="min" />
-              <input v-model.number="settings.zMax" type="number" step="any" class="field-input" placeholder="max" />
-            </div>
+        <SettingsStep v-if="has('sor')" step="4" title="Statistical outliers — advanced">
+          <SettingsField
+            label="Neighbours"
+            label-for="filter-sor-k"
+            hint="How many nearest neighbours the per-point mean distance averages over."
+          >
+            <input
+              id="filter-sor-k"
+              v-model.number="settings.sorK"
+              type="number"
+              min="3"
+              max="64"
+              step="1"
+              class="field-input"
+            />
           </SettingsField>
-          <SettingsField label="Brightness" unit="0–255" hint="Rec. 709 luma. Ignored on a cloud with no colour.">
-            <div class="input-row">
-              <input
-                v-model.number="settings.lumaMin"
-                type="number"
-                min="0"
-                max="255"
-                step="1"
-                class="field-input"
-                placeholder="min"
-              />
-              <input
-                v-model.number="settings.lumaMax"
-                type="number"
-                min="0"
-                max="255"
-                step="1"
-                class="field-input"
-                placeholder="max"
-              />
-            </div>
+          <SettingsField
+            label-for="filter-sor-std"
+            unit="σ"
+            hint="Drop points above mean + ratio × σ. Lower is more aggressive."
+          >
+            <template #label><GlossaryTerm id="statistical-outlier-removal">Std-dev ratio</GlossaryTerm></template>
+            <input
+              id="filter-sor-std"
+              v-model.number="settings.sorStdRatio"
+              type="number"
+              min="0.1"
+              max="10"
+              step="0.1"
+              class="field-input"
+            />
           </SettingsField>
-        </SettingsGroup>
+        </SettingsStep>
       </AdvancedDisclosure>
     </template>
 

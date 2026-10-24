@@ -115,9 +115,13 @@ adds, removes or renames a setting, operation or user-visible feature:
 
 ## Dialogs of a processing step
 
-A dialog that runs a processing step (Detect and Match Features, Sparse Model, Depth
-Maps, Dense Cloud, DEM, Orthophoto, Mesh, Texture, and any new one) lays out its settings
-as numbered steps, in the order the run applies them:
+A dialog that runs a processing step lays out its settings as numbered steps, in the
+order the run applies them. That covers every Reconstruct dialog (Detect and Match
+Features, Sparse Model, Depth Maps, Dense Cloud, DEM, Orthophoto, Mesh), every Tools
+dialog that takes settings and has a Run button (Filter, Crop, Clean mesh, Texture,
+Contours, Optimize cameras, Detect fiducials …), and any new one. A dialog built around a
+live preview, a result table or a readout (Auto mask, Reseau, Section, Mesh area &
+volume) is a workbench: it uses the same fields but no numbered steps.
 
 1. Each stage is a `<SettingsStep step="n" title="…" :effect="…">` holding the
    settings that act there. Presets, the source and mode choices may sit above the
@@ -130,6 +134,14 @@ as numbered steps, in the order the run applies them:
 3. A step that cannot matter in the current configuration is `inactive` (dimmed), and
    its effect says why.
 4. The guide article lists its setting sections in the same order as the steps.
+5. **Basic or Advanced:** a setting goes under Advanced only when its default suits
+   almost every project. A filter or cleanup chain shows each stage's on/off switch
+   in its step and keeps the stage's tuning under Advanced. A dialog with only a few
+   settings has no Advanced part.
+6. **Fields:** what the source is (cloud, mesh, model) sits above the steps as a
+   *Source* group. A select is `class="field-select"`: it is as wide as its longest
+   option, not the dialog, like a number field is as wide as its number. A free-text
+   field (a file name) is `field-input wide`.
 
 Adding or moving a setting means updating its step's effect and its test too.
 

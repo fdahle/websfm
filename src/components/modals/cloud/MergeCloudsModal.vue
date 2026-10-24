@@ -2,9 +2,10 @@
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
-import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import { MERGE_CLOUDS_DEFAULTS } from '../../../core/defaults.user.js'
+import { mergeCloudsEffects } from '../../../core/stepEffects/mergeClouds.js'
 
 // Merge Clouds — concatenate two or more dense clouds into a new one. Coordinates
 // are taken verbatim: merge assumes the inputs already share a frame, exactly as
@@ -27,10 +28,11 @@ function toggle(id) {
 }
 
 const chosen = computed(() => props.clouds.filter((c) => selected.value.includes(c.id)))
-const total = computed(() => chosen.value.reduce((s, c) => s + (c.count || 0), 0))
 // Normals survive only if every input has them (a partial normal field would
 // mislead Poisson, which reads normals as oriented evidence).
 const losesNormals = computed(() => chosen.value.some((c) => c.nrm) && !chosen.value.every((c) => c.nrm))
+// What each step does (core/stepEffects/mergeClouds.js).
+const effects = computed(() => mergeCloudsEffects(settings.value, { chosen: chosen.value, mergeCell: props.mergeCell }))
 
 function run() {
   emit('run', {
@@ -49,38 +51,25 @@ function run() {
     </WarnBox>
 
     <template v-else>
-      <SettingsGroup title="Clouds">
-        <SettingsField
-          hint="Merged in this order. Coordinates are taken as-is — the clouds must already share a frame."
-        >
+      <SettingsStep step="1" title="Join the clouds" :effect="effects.join">
+        <SettingsField hint="The clouds must already share a frame: nothing is reprojected.">
           <label v-for="c in clouds" :key="c.id" class="checkbox-row">
             <input type="checkbox" class="checkbox" :checked="selected.includes(c.id)" @change="toggle(c.id)" />
             {{ c.name }} — {{ (c.count || 0).toLocaleString() }} points
           </label>
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
 
-      <SettingsGroup title="Overlap">
-        <SettingsField
-          label="Dedupe cell"
-          label-for="merge-cell"
-          unit="units"
-          :hint="
-            mergeCell > 0
-              ? `Collapse the double-density seam to one point per cell. 0 = plain concatenation; the dense run used ${mergeCell.toPrecision(3)}.`
-              : 'Collapse the double-density seam to one point per cell. 0 = plain concatenation.'
-          "
-        >
+      <SettingsStep step="2" title="Remove the overlap" :effect="effects.overlap" :inactive="!(settings.cell > 0)">
+        <SettingsField label="Dedupe cell" label-for="merge-cell" unit="units" hint="0 = plain concatenation.">
           <input id="merge-cell" v-model.number="settings.cell" type="number" min="0" step="any" class="field-input" />
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
 
       <WarnBox v-if="losesNormals">
         Some of the selected clouds have per-point normals and some do not, so the merged cloud will have none — meaning
         it cannot be meshed until you re-run Densify.
       </WarnBox>
-
-      <p class="field-hint">{{ chosen.length }} selected · {{ total.toLocaleString() }} points before dedupe.</p>
     </template>
 
     <template #footer>

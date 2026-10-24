@@ -22,8 +22,9 @@ Rules that are easy to miss:
   inner loops on the threaded WASM build (rayon, `src/wasm/reconstruction-mt`). One
   worker is right only where it is measured to be faster (a GPU path; fusion, which is
   bound by reads): say so in a comment. Log how many workers a run used.
-- A dialog that runs a processing step shows its settings as numbered `SettingsStep`s
-  in run order, each with a live effect line from `src/core/stepEffects/`
+- A dialog that runs a processing step (Reconstruct, and every Tools dialog with
+  settings and a Run button) shows its settings as numbered `SettingsStep`s in run
+  order, each with a live effect line from `src/core/stepEffects/`
   ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Dialogs of a processing step*).
 - Keyboard shortcuts live in `src/core/help/shortcuts.js`: a handler tests
   `matches(e, id)` and a tooltip shows `keyLabel(id)`; never compare `e.key` or type

@@ -2,11 +2,12 @@
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
-import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { CONTOUR_DEFAULTS } from '../../../core/defaults.user.js'
 import { contourLevels, MAX_CONTOUR_LEVELS } from '../../../core/products/contours.js'
+import { contoursEffects } from '../../../core/stepEffects/contours.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import FileNameField from '../ui/FileNameField.vue'
 import { defaultExportName } from '../../../core/exportNames.js'
@@ -60,6 +61,18 @@ const numbers = computed(() =>
 const fileName = ref('')
 const projects = useProjectsStore()
 const defaultName = computed(() => defaultExportName('contours', { base: projects.currentProjectName || 'project' }))
+// What each step does with this DEM (core/stepEffects/contours.js).
+const effects = computed(() =>
+  contoursEffects(settings.value, {
+    interval: interval.value,
+    levels: levelCount.value,
+    max: MAX_CONTOUR_LEVELS,
+    zMin: props.dem?.zMin ?? 0,
+    zMax: props.dem?.zMax ?? 0,
+    unit: unit.value,
+    onMap: onMap.value,
+  }),
+)
 
 function run() {
   const s = settings.value
@@ -78,13 +91,8 @@ function run() {
   <ModalShell title="Contour Lines" @close="emit('close')">
     <WarnBox v-if="!dem">Build a DEM first (<strong>Reconstruct ▸ DEM</strong>).</WarnBox>
     <template v-else>
-      <SettingsGroup title="Levels">
-        <SettingsField
-          label="Interval"
-          label-for="ct-int"
-          :unit="unit"
-          :hint="`0 = auto (${autoInterval} ${unit}). Heights run ${dem.zMin.toPrecision(5)} – ${dem.zMax.toPrecision(5)} ${unit}.`"
-        >
+      <SettingsStep step="1" title="Pick the levels" :effect="effects.levels">
+        <SettingsField label="Interval" label-for="ct-int" :unit="unit" :hint="`0 = auto (${autoInterval} ${unit}).`">
           <input
             id="ct-int"
             v-model.number="settings.interval"
@@ -111,8 +119,8 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsGroup>
-      <SettingsGroup title="Shape">
+      </SettingsStep>
+      <SettingsStep step="2" title="Trace and shape" :effect="effects.shape">
         <SettingsField label="Smoothing" label-for="ct-smooth" unit="passes" hint="0 keeps the exact grid crossings.">
           <input
             id="ct-smooth"
@@ -140,15 +148,8 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsGroup>
-      <SettingsGroup title="Result">
-        <p class="field-hint">
-          {{
-            onMap
-              ? 'The lines go on the 2D map as a layer, listed under Products in the sidebar; its right-click menu downloads them as GeoJSON later.'
-              : 'This DEM has no coordinate system, so the lines cannot go on the map: they are downloaded.'
-          }}
-        </p>
+      </SettingsStep>
+      <SettingsStep step="3" title="Place and save" :effect="effects.result">
         <SettingsField label="Download" label-for="ct-fmt">
           <select id="ct-fmt" v-model="settings.format" class="field-select">
             <option v-if="onMap" value="none">No download</option>
@@ -157,9 +158,7 @@ function run() {
           </select>
         </SettingsField>
         <FileNameField v-if="settings.format !== 'none'" v-model="fileName" :default-name="defaultName" />
-      </SettingsGroup>
-      <WarnBox v-if="levelCount > MAX_CONTOUR_LEVELS">That interval gives too many levels — use a larger one.</WarnBox>
-      <p v-else class="field-hint">{{ levelCount.toLocaleString() }} levels every {{ interval }} {{ unit }}.</p>
+      </SettingsStep>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

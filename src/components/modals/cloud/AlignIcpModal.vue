@@ -3,12 +3,14 @@ import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, referenceOptionLabel } from '../../../composables/useSourcePick.js'
 import { ICP_DEFAULTS } from '../../../core/defaults.user.js'
+import { alignIcpEffects } from '../../../core/stepEffects/alignIcp.js'
 import { cloudBounds, estimateSpacing } from '../../../core/products/cloudEdit.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
@@ -52,6 +54,15 @@ const numbers = computed(() =>
     sampleCount: { label: 'Sample points', min: 1000, integer: true },
   }),
 )
+// What each step does (core/stepEffects/alignIcp.js).
+const effects = computed(() =>
+  alignIcpEffects(settings.value, {
+    sourceName: source.value?.name,
+    autoRadius: autoRadius.value,
+    unit: unitLabel.value,
+    planar: reference.value?.kind === 'mesh' || !!reference.value?.nrm,
+  }),
+)
 
 function run() {
   const s = settings.value
@@ -76,7 +87,7 @@ function run() {
       >ICP needs a dense cloud to move and another cloud or a mesh to align it to.</WarnBox
     >
     <template v-else>
-      <SettingsGroup title="Clouds">
+      <SettingsGroup title="Source">
         <SourcePicker
           id="icp-src"
           v-model="sourceId"
@@ -93,12 +104,12 @@ function run() {
           hint="The reference stays where it is."
         />
       </SettingsGroup>
-      <SettingsGroup title="Matching">
+      <SettingsStep step="1" title="Pair up points" :effect="effects.pair">
         <SettingsField
           label="Search radius"
           label-for="icp-radius"
           :unit="unitLabel"
-          :hint="`Pairs farther apart are ignored. 0 = auto (${autoRadius.toPrecision(3)}, ten point spacings). Must exceed the current misalignment.`"
+          :hint="`0 = auto (${autoRadius.toPrecision(3)}, ten point spacings). Must exceed the current misalignment.`"
         >
           <input
             id="icp-radius"
@@ -110,6 +121,8 @@ function run() {
             class="field-input"
           />
         </SettingsField>
+      </SettingsStep>
+      <SettingsStep step="2" title="Solve the motion" :effect="effects.solve">
         <SettingsField
           hint="For clouds from different sensors or reconstructions with a scale mismatch. Point-to-point constrains scale better on flat scenes."
         >
@@ -117,9 +130,22 @@ function run() {
             ><input v-model="settings.estimateScale" type="checkbox" class="checkbox" /> Also fit scale</label
           >
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
       <AdvancedDisclosure label="Advanced settings">
-        <SettingsGroup title="Solver">
+        <SettingsStep step="1" title="Pair up points — advanced">
+          <SettingsField label="Sample points" label-for="icp-n" hint="Points of the moving cloud used per iteration.">
+            <input
+              id="icp-n"
+              v-model.number="settings.sampleCount"
+              :aria-invalid="numbers.bad.sampleCount"
+              type="number"
+              min="1000"
+              step="10000"
+              class="field-input"
+            />
+          </SettingsField>
+        </SettingsStep>
+        <SettingsStep step="2" title="Solve the motion — advanced">
           <SettingsField label="Iterations" label-for="icp-it">
             <input
               id="icp-it"
@@ -132,24 +158,13 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-          <SettingsField label="Sample points" label-for="icp-n" hint="Points of the moving cloud used per iteration.">
-            <input
-              id="icp-n"
-              v-model.number="settings.sampleCount"
-              :aria-invalid="numbers.bad.sampleCount"
-              type="number"
-              min="1000"
-              step="10000"
-              class="field-input"
-            />
-          </SettingsField>
           <SettingsField>
             <label class="checkbox-row"
               ><input v-model="settings.pointToPlane" type="checkbox" class="checkbox" />
               <GlossaryTerm id="icp">Point-to-plane</GlossaryTerm> (when the reference has normals)</label
             >
           </SettingsField>
-        </SettingsGroup>
+        </SettingsStep>
       </AdvancedDisclosure>
       <p v-if="pointToPlaneNote" class="field-hint">{{ pointToPlaneNote }}</p>
     </template>

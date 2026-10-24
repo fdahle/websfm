@@ -2,10 +2,11 @@
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
-import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { TERRAIN_DEFAULTS } from '../../../core/defaults.user.js'
+import { terrainEffects } from '../../../core/stepEffects/terrain.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import FileNameField from '../ui/FileNameField.vue'
 import { defaultExportName } from '../../../core/exportNames.js'
@@ -22,15 +23,11 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...TERRAIN_DEFAULTS, products: [...TERRAIN_DEFAULTS.products], compression: 'deflate' })
-const PRODUCTS = [
-  { id: 'slope', label: 'Slope' },
-  { id: 'aspect', label: 'Aspect (degrees clockwise from north)' },
-  { id: 'hillshade', label: 'Hillshade' },
-]
+const PRODUCTS = ['slope', 'aspect', 'hillshade']
 const has = (id) => settings.value.products.includes(id)
 function toggle(id) {
   const on = has(id)
-  settings.value.products = PRODUCTS.filter((p) => (p.id === id ? !on : has(p.id))).map((p) => p.id)
+  settings.value.products = PRODUCTS.filter((p) => (p === id ? !on : has(p)))
 }
 const geographic = computed(() => /longlat|EPSG:4326\b/i.test(props.dem?.crs || ''))
 // Export stays disabled while a sun angle is blank or out of range (rules = the
@@ -46,6 +43,8 @@ const numbers = computed(() =>
 const fileName = ref('')
 const projects = useProjectsStore()
 const defaultName = computed(() => defaultExportName('terrain', { base: projects.currentProjectName || 'project' }))
+// What each step does with this DEM (core/stepEffects/terrain.js).
+const effects = computed(() => terrainEffects(settings.value))
 
 function run() {
   const s = settings.value
@@ -69,59 +68,67 @@ function run() {
       projected CRS for slope and aspect.</WarnBox
     >
     <template v-else>
-      <SettingsGroup title="Rasters">
-        <SettingsField hint="Each is a separate GeoTIFF on the DEM's grid and CRS.">
-          <label v-for="p in PRODUCTS" :key="p.id" class="checkbox-row">
-            <input type="checkbox" class="checkbox" :checked="has(p.id)" @change="toggle(p.id)" />
-            <GlossaryTerm id="terrain-derivatives">{{ p.label }}</GlossaryTerm>
-          </label>
-        </SettingsField>
-      </SettingsGroup>
-      <SettingsGroup v-if="has('slope')" title="Slope">
-        <SettingsField label="Units" label-for="tr-units">
+      <SettingsStep step="1" title="Slope" :effect="effects.slope" :inactive="!has('slope')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('slope')" @change="toggle('slope')" /> Make a
+          <GlossaryTerm id="terrain-derivatives">slope</GlossaryTerm> raster</label
+        >
+        <SettingsField v-if="has('slope')" label="Units" label-for="tr-units">
           <select id="tr-units" v-model="settings.slopeUnits" class="field-select">
             <option value="degrees">Degrees</option>
             <option value="percent">Percent (rise / run × 100)</option>
           </select>
         </SettingsField>
-      </SettingsGroup>
-      <SettingsGroup v-if="has('hillshade')" title="Hillshade">
-        <SettingsField
-          label="Sun azimuth"
-          label-for="tr-az"
-          unit="°"
-          hint="315 = from the north-west, the cartographic convention."
+      </SettingsStep>
+      <SettingsStep step="2" title="Aspect" :effect="effects.aspect" :inactive="!has('aspect')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('aspect')" @change="toggle('aspect')" /> Make an
+          <GlossaryTerm id="terrain-derivatives">aspect</GlossaryTerm> raster</label
         >
-          <input
-            id="tr-az"
-            v-model.number="settings.azimuth"
-            :aria-invalid="numbers.bad.azimuth"
-            type="number"
-            min="0"
-            max="360"
-            step="5"
-            class="field-input"
-          />
-        </SettingsField>
-        <SettingsField label="Sun altitude" label-for="tr-alt" unit="°">
-          <input
-            id="tr-alt"
-            v-model.number="settings.altitude"
-            :aria-invalid="numbers.bad.altitude"
-            type="number"
-            min="1"
-            max="90"
-            step="5"
-            class="field-input"
-          />
-        </SettingsField>
-        <SettingsField hint="Blends four sun directions, so no slope disappears into shadow.">
-          <label class="checkbox-row"
-            ><input v-model="settings.multidirectional" type="checkbox" class="checkbox" /> Multidirectional</label
+      </SettingsStep>
+      <SettingsStep step="3" title="Hillshade" :effect="effects.hillshade" :inactive="!has('hillshade')">
+        <label class="checkbox-row"
+          ><input type="checkbox" class="checkbox" :checked="has('hillshade')" @change="toggle('hillshade')" /> Make a
+          <GlossaryTerm id="terrain-derivatives">hillshade</GlossaryTerm></label
+        >
+        <template v-if="has('hillshade')">
+          <SettingsField
+            label="Sun azimuth"
+            label-for="tr-az"
+            unit="°"
+            hint="315 = from the north-west, the cartographic convention."
           >
-        </SettingsField>
-      </SettingsGroup>
-      <SettingsGroup title="File">
+            <input
+              id="tr-az"
+              v-model.number="settings.azimuth"
+              :aria-invalid="numbers.bad.azimuth"
+              type="number"
+              min="0"
+              max="360"
+              step="5"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField label="Sun altitude" label-for="tr-alt" unit="°">
+            <input
+              id="tr-alt"
+              v-model.number="settings.altitude"
+              :aria-invalid="numbers.bad.altitude"
+              type="number"
+              min="1"
+              max="90"
+              step="5"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField hint="Blends four sun directions, so no slope disappears into shadow.">
+            <label class="checkbox-row"
+              ><input v-model="settings.multidirectional" type="checkbox" class="checkbox" /> Multidirectional</label
+            >
+          </SettingsField>
+        </template>
+      </SettingsStep>
+      <SettingsStep step="4" title="Save" :effect="effects.save" :inactive="!settings.products.length">
         <SettingsField label="Compression" label-for="tr-comp">
           <select id="tr-comp" v-model="settings.compression" class="field-select">
             <option value="deflate">DEFLATE</option>
@@ -129,7 +136,7 @@ function run() {
           </select>
         </SettingsField>
         <FileNameField v-model="fileName" :default-name="defaultName" />
-      </SettingsGroup>
+      </SettingsStep>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

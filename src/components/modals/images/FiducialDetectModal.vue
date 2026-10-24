@@ -3,6 +3,7 @@ import { ref, computed, onBeforeUnmount } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import ChoiceCards from '../ui/ChoiceCards.vue'
@@ -12,6 +13,7 @@ import WarnBox from '../ui/WarnBox.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import FiducialFamilyGlyph from './FiducialFamilyGlyph.vue'
 import { FIDUCIAL_SPOT_DEFAULTS } from '../../../core/defaults.user.js'
+import { fiducialDetectEffects } from '../../../core/stepEffects/fiducialDetect.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 
 const props = defineProps({
@@ -58,6 +60,9 @@ const POLARITY_OPTIONS = [
   { id: 'dark', label: 'Dark marks' },
   { id: 'light', label: 'Light marks' },
 ]
+
+// What each step does to this sensor's images (core/stepEffects/fiducialDetect.js).
+const effects = computed(() => fiducialDetectEffects(settings.value, { images: props.images.length }))
 
 const existingCount = computed(() => props.images.reduce((n, i) => n + (i.fiducialDetections?.length ?? 0), 0))
 
@@ -221,16 +226,12 @@ function rejectDraft(draft) {
       </ChoiceCards>
     </SettingsField>
 
-    <SettingsGroup title="Search">
+    <SettingsStep step="1" title="Search the film frame" :effect="effects.search">
       <SettingsField hint="Where marks are expected relative to the detected film frame.">
         <template #label>Fiducial positions</template>
         <SegmentedControl v-model="settings.positions" :options="POSITION_OPTIONS" />
       </SettingsField>
-      <SettingsField
-        label="Tolerance"
-        label-for="fidTolerance"
-        :hint="`${Math.round(settings.tolerance * 100)}% — higher values send weaker candidates to review instead of dropping them.`"
-      >
+      <SettingsField label="Tolerance" label-for="fidTolerance" :hint="`${Math.round(settings.tolerance * 100)}%`">
         <input
           id="fidTolerance"
           v-model.number="settings.tolerance"
@@ -242,23 +243,20 @@ function rejectDraft(draft) {
           :disabled="running"
         />
       </SettingsField>
-      <span class="field-hint">
-        {{ images.length }} image{{ images.length === 1 ? '' : 's' }} will be searched. Calibration is not required.
-      </span>
-    </SettingsGroup>
+    </SettingsStep>
 
     <AdvancedDisclosure label="Advanced settings">
-      <SettingsGroup title="Matching">
+      <SettingsStep step="2" title="Match the template" :effect="effects.match" :inactive="settings.family === 'frame'">
         <SettingsField
           label="Polarity"
           hint="Whether marks are darker or lighter than the surrounding film. Auto tries both."
         >
           <SegmentedControl v-model="settings.polarity" :options="POLARITY_OPTIONS" />
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
 
-      <SettingsGroup title="Output">
-        <SettingsField hint="Existing accepted detections are preserved when disabled.">
+      <SettingsStep step="3" title="Store the marks" :effect="effects.store">
+        <SettingsField>
           <template #label>Overwrite existing detections</template>
           <label class="checkbox-row">
             <input v-model="settings.overwrite" type="checkbox" class="checkbox" :disabled="running" /> Enabled
@@ -272,7 +270,7 @@ function rejectDraft(draft) {
             <input v-model="settings.generateMasks" type="checkbox" class="checkbox" :disabled="running" /> Enabled
           </label>
         </SettingsField>
-      </SettingsGroup>
+      </SettingsStep>
     </AdvancedDisclosure>
 
     <div v-if="running" class="fid-progress">

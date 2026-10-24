@@ -3,11 +3,13 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import { useSourcePick, cloudOptionLabel, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { CROP_CLOUD_DEFAULTS } from '../../../core/defaults.user.js'
+import { cropCloudEffects } from '../../../core/stepEffects/cropCloud.js'
 import { cloudBounds, cloudCount } from '../../../core/products/cloudEdit.js'
 
 // Crop Cloud — keep the points inside (or outside) an axis-aligned box. Editing is
@@ -111,6 +113,16 @@ watch(
 onBeforeUnmount(() => clearTimeout(timer))
 
 const sourceCount = computed(() => cloudCount(source.value))
+// What each step does to this cloud or mesh (core/stepEffects/cropCloud.js).
+const effects = computed(() =>
+  cropCloudEffects(settings.value, {
+    kept: liveKept.value,
+    total: sourceCount.value,
+    noun: noun.value,
+    mesh: props.mesh,
+    streamed: streamed.value,
+  }),
+)
 
 function run() {
   const s = settings.value
@@ -151,7 +163,7 @@ function run() {
         />
       </SettingsGroup>
 
-      <SettingsGroup title="Bounds">
+      <SettingsStep step="1" title="Set the box" :effect="effects.box">
         <SettingsField
           v-for="a in AXES"
           :key="a.key"
@@ -163,36 +175,15 @@ function run() {
             <input v-model.number="settings[a.max]" type="number" step="any" class="field-input" placeholder="max" />
           </div>
         </SettingsField>
-
-        <SettingsField hint="Reset the box to the full extent of the source cloud.">
+        <SettingsField hint="Reset the box to the full extent of the source.">
           <button type="button" class="btn" @click="fillFromBounds">Use full extent</button>
         </SettingsField>
-      </SettingsGroup>
-
-      <SettingsGroup title="Mode">
-        <SettingsField hint="Keep what falls outside the box instead of inside it.">
-          <template #label>Invert</template>
-          <label class="checkbox-row">
-            <input v-model="settings.invert" type="checkbox" class="checkbox" /> Keep outside the box
-          </label>
-        </SettingsField>
-      </SettingsGroup>
-
-      <p class="field-hint">
-        <template v-if="streamed && settings.invert">
-          A streamed cloud: the points outside the box go into a new streamed cloud, at full detail.
-        </template>
-        <template v-else-if="streamed">
-          A streamed cloud: the points inside the box are copied out of its octree into a new cloud that every tool can
-          use. Past 25 million points the copy is thinned evenly; crop a smaller box for full detail.
-        </template>
-        <template v-else-if="liveKept !== null">
-          Keeps {{ liveKept.toLocaleString() }} of {{ sourceCount.toLocaleString() }} {{ noun }}.
-        </template>
-        <template v-else>
-          {{ sourceCount.toLocaleString() }} {{ noun }} — too many to count live; run to see the result.
-        </template>
-      </p>
+      </SettingsStep>
+      <SettingsStep step="2" title="Keep" :effect="effects.keep">
+        <label class="checkbox-row">
+          <input v-model="settings.invert" type="checkbox" class="checkbox" /> Keep outside the box instead
+        </label>
+      </SettingsStep>
     </template>
 
     <template #footer>

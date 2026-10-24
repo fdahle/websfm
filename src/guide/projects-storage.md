@@ -67,7 +67,6 @@ preview after opening can therefore take a moment. An image whose keypoint file 
 missing shows an error status as soon as the project opens; detect it again.
 
 ## File name
-<!-- param: fileName  default: the project's name and what is exported -->
 Exports are downloads: the browser saves them in its downloads folder, or asks where
 when it is set to. Each export dialog has an optional **File name**. Left empty, the
 file is named after the project and what it holds (for example *Aukerman-ortho.tif*,

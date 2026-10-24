@@ -3,10 +3,12 @@ import { ref, computed, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
 import { polygonsFromGeoJSON } from '../../../core/products/rasterClip.js'
 import { pluralize } from '../../../core/textFormat.js'
+import { clipRasterEffects } from '../../../core/stepEffects/clipRaster.js'
 import FileNameField from '../ui/FileNameField.vue'
 import { defaultExportName } from '../../../core/exportNames.js'
 import { useProjectsStore } from '../../../stores/useProjectsStore.js'
@@ -72,6 +74,18 @@ const projects = useProjectsStore()
 const defaultName = computed(() =>
   defaultExportName('clip', { base: projects.currentProjectName || 'project', product: kind.value }),
 )
+// What each step does (core/stepEffects/clipRaster.js).
+const effects = computed(() =>
+  clipRasterEffects(
+    { compression: compression.value },
+    {
+      product: kind.value,
+      mode: sourceMode.value,
+      measurement: candidates.value.find((c) => c.id === measurementId.value)?.name ?? null,
+      polygons: polygons.value?.length ?? 0,
+    },
+  ),
+)
 
 function run() {
   emit('run', {
@@ -87,7 +101,7 @@ function run() {
   <ModalShell title="Clip to Polygon" @close="emit('close')">
     <WarnBox v-if="!dem && !ortho">Build a DEM or orthophoto first.</WarnBox>
     <template v-else>
-      <SettingsGroup title="Raster">
+      <SettingsGroup title="Source">
         <SettingsField label="Product" label-for="clip-kind">
           <select id="clip-kind" v-model="kind" class="field-select">
             <option value="dem" :disabled="!dem">DEM</option>
@@ -95,7 +109,7 @@ function run() {
           </select>
         </SettingsField>
       </SettingsGroup>
-      <SettingsGroup title="Polygon">
+      <SettingsStep step="1" title="Polygon" :effect="effects.polygon">
         <SettingsField>
           <label class="checkbox-row"
             ><input
@@ -127,8 +141,8 @@ function run() {
         >
           <input type="file" accept=".geojson,.json,application/geo+json" class="field-input" @change="onFile" />
         </SettingsField>
-      </SettingsGroup>
-      <SettingsGroup title="File">
+      </SettingsStep>
+      <SettingsStep step="2" title="Save" :effect="effects.save">
         <SettingsField label="Compression" label-for="clip-comp">
           <select id="clip-comp" v-model="compression" class="field-select">
             <option value="deflate">DEFLATE</option>
@@ -136,7 +150,7 @@ function run() {
           </select>
         </SettingsField>
         <FileNameField v-model="fileName" :default-name="defaultName" />
-      </SettingsGroup>
+      </SettingsStep>
       <p v-if="product?.crs && product.crs !== 'local'" class="field-hint">Coordinates in {{ product.crs }}.</p>
     </template>
     <template #footer>

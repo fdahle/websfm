@@ -1,6 +1,5 @@
 <script setup>
 import SettingsField from './SettingsField.vue'
-import FieldHelp from '../../guide/FieldHelp.vue'
 import { fileSafe } from '../../../core/exportNames.js'
 
 // The optional File name of an export dialog: empty keeps the default name, shown as
@@ -14,6 +13,7 @@ defineProps({
 
 <template>
   <SettingsField
+    label="File name"
     label-for="export-file-name"
     :hint="
       model && fileSafe(model) !== model.trim()
@@ -21,12 +21,11 @@ defineProps({
         : 'Optional. The extension is added; a world file or .prj beside it takes the same name.'
     "
   >
-    <template #label><FieldHelp op="projects-storage" param="fileName">File name</FieldHelp></template>
     <input
       id="export-file-name"
       v-model="model"
       type="text"
-      class="field-input"
+      class="field-input wide"
       :placeholder="defaultName"
       spellcheck="false"
       autocomplete="off"
