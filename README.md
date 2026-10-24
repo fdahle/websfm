@@ -6,8 +6,7 @@
 [![Verify](https://github.com/fdahle/websfm/actions/workflows/verify.yml/badge.svg)](https://github.com/fdahle/websfm/actions/workflows/verify.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-<!-- Turntable video: open this file in GitHub's web editor and drag the .mp4 onto
-     this line; GitHub uploads it and puts its link here, which plays inline. -->
+https://github.com/user-attachments/assets/4462ade2-6796-4ae4-812a-9f00b34e333b
 
 WebSfM turns overlapping photographs into 3D reconstructions — sparse and dense
 point clouds, meshes, digital elevation models and orthophotos — without
