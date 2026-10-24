@@ -1,7 +1,26 @@
 name: Verify
+# Files that are not part of the app don't run the tests (nor deploy dev). CHANGELOG.md,
+# src/guide/ and src/glossary/ are built into the app, so they still do. A version tag
+# always runs: path filters do not apply to tag pushes.
 on:
   push:
+    paths-ignore:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'ARCHITECTURE.md'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'SECURITY.md'
+      - 'docs/**'
   pull_request:
+    paths-ignore:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'ARCHITECTURE.md'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'SECURITY.md'
+      - 'docs/**'
 permissions:
   contents: read
 concurrency:
