@@ -97,7 +97,7 @@ const ctxOpenLabel = computed(() =>
         :title="`${r.name} — reading and classifying GeoTIFF`"
         aria-busy="true"
       >
-        <span class="raster-spinner" aria-hidden="true"></span>
+        <span class="raster-spinner busy-motion" aria-hidden="true"></span>
         <span class="item-name">{{ r.name }}</span>
         <span class="load-tag">Reading…</span>
       </li>

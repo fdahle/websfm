@@ -198,6 +198,10 @@ Notable changes to websfm. The format follows
   and cost: 22 → 7.8 min, the same cloud for the planning change.
 
 ### Fixed
+- **Spinners keep turning with reduced motion.** With reduced motion on (Settings, or
+  the system: remote desktop sessions often ask for it), the loading spinners and the
+  indeterminate progress bar stopped and looked like a hang; they now keep moving,
+  while decorative motion still stops.
 - **Importing masks of large scans no longer knocks out the GPU.** Each imported mask
   was drawn into a GPU-backed canvas before it was saved; three 10,000-pixel scan masks
   at once ran Chrome's GPU process out of memory, and after three crashes the tab fell

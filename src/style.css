@@ -68,9 +68,12 @@ body {
 }
 
 /* Explicit accessibility override. The default continues to follow the user's
-   operating-system preference; Settings can force the reduced-motion variant. */
+   operating-system preference; Settings can force the reduced-motion variant.
+   Busy indicators (class `busy-motion`: spinners, an indeterminate progress bar)
+   keep turning: stopped, they look like a hang. Remote desktop sessions often
+   report reduced motion. */
 @media (prefers-reduced-motion: reduce) {
-  *,
+  *:not(.busy-motion),
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
@@ -80,7 +83,7 @@ body {
   }
 }
 
-html[data-reduce-motion] *,
+html[data-reduce-motion] *:not(.busy-motion),
 html[data-reduce-motion] *::before,
 html[data-reduce-motion] *::after {
   animation-duration: 0.001ms !important;

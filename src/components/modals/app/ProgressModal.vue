@@ -341,7 +341,11 @@ onBeforeUnmount(() => {
       <div class="modal-title">{{ title }}</div>
       <div class="progress-row">
         <div class="progress-track">
-          <div v-if="indeterminate && !complete" class="progress-fill indeterminate" :class="{ cancelling }"></div>
+          <div
+            v-if="indeterminate && !complete"
+            class="progress-fill indeterminate busy-motion"
+            :class="{ cancelling }"
+          ></div>
           <div v-else class="progress-fill" :class="{ cancelling, complete }" :style="{ width: pct + '%' }"></div>
         </div>
         <span class="progress-pct">{{ indeterminate && !complete ? '' : pct + '%' }}</span>

@@ -122,7 +122,7 @@ const progressSpotlight = computed(() =>
 
   <div v-if="projectLoading" class="loading-overlay">
     <div class="loading-card">
-      <div class="loading-spinner" />
+      <div class="loading-spinner busy-motion" />
       <div class="loading-text">
         <span>{{ projectLoadingLabel }}</span>
         <template v-if="projectLoadingProgress">

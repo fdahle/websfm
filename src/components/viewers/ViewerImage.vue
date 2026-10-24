@@ -657,7 +657,7 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         {{ image.previewFailReason === 'source-lost' ? 'Image file no longer available' : 'Preview unavailable' }}
       </div>
       <div v-else class="image-pending" title="Decoding image…">
-        <span class="spinner" />
+        <span class="spinner busy-motion" />
       </div>
 
       <canvas ref="overlayCanvas" class="overlay-canvas" />

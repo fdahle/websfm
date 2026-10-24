@@ -196,7 +196,7 @@ function onFocusout(event) {
         @input="onInput"
         @keydown="onKeydown"
       />
-      <span v-if="loading || applying" class="crs-spinner" aria-hidden="true"></span>
+      <span v-if="loading || applying" class="crs-spinner busy-motion" aria-hidden="true"></span>
 
       <Teleport to="body">
         <!-- data-modal-exempt: teleported out of its dialog, so the modal focus trap
