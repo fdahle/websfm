@@ -344,7 +344,12 @@ for (const demDatum of [null, 'ellipsoidal'])
       .getByRole('button', { name: /DEM vs\s*Reference/ })
       .click()
     const report = page.getByRole('dialog', { name: 'Quality Report', exact: true })
-    const tile = (label) => report.locator('.tile').filter({ hasText: label }).locator('.tile-value')
+    // By the exact label: "NMAD" must not also find "NMAD after shift".
+    const tile = (label) =>
+      report
+        .locator('.tile')
+        .filter({ has: page.locator('.tile-label').getByText(label, { exact: true }) })
+        .locator('.tile-value')
     if (!demDatum) {
       await expect(tile('Median ΔZ')).toContainText('+0.500')
     } else {

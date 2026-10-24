@@ -300,6 +300,9 @@ test('Find GCPs matches real pixels and imports only explicitly reviewed candida
     await external.setRasterAccuracy(dem.id, { verticalDatum: 'orthometric', verticalAccuracy: 1.5 })
   })
   await page.getByRole('button', { name: 'Find GCPs', exact: true }).click()
+  // SIFT: the learned matchers (the default) need model files CI does not have, and
+  // this tests the search around them, not the models.
+  await page.getByRole('combobox', { name: /Coarse matcher/ }).selectOption('sift')
   await page.getByRole('button', { name: 'Find candidates', exact: true }).click()
   const accept = page.getByRole('checkbox')
   await expect(accept.first()).toBeVisible({ timeout: 20000 })
@@ -530,6 +533,8 @@ for (const SIZE of [3000, 6000])
       return points.map((p) => toRef(p.x, p.y))
     }, SIZE)
     await page.getByRole('button', { name: 'Find GCPs', exact: true }).click()
+    // SIFT, as above: no model files in CI.
+    await page.getByRole('combobox', { name: /Coarse matcher/ }).selectOption('sift')
     await page.getByRole('button', { name: 'Find candidates', exact: true }).click()
     await expect(page.getByRole('checkbox').first()).toBeVisible({ timeout: 160000 })
     await expect(page.getByRole('status').filter({ hasText: 'verified matches' })).toContainText('in 4 fine tiles')
