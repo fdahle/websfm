@@ -24,7 +24,11 @@ Notable changes to websfm. The format follows
   height from the reference DEM and refits. On Rachel Glacier, whose Find GCPs control
   took positions from Sentinel-2 and heights from REMA, the DEM sat 11.7 m north of
   REMA; after the move, NMAD on stable rock fell from 8.8 m to 5.4 m (hist-sfm's DEM:
-  6.4 m), with medium-quality depth maps. A +3 m median bias remains after the refit.
+  6.4 m), with medium-quality depth maps. With 90 Find GCPs candidates (the new default)
+  instead of 30 the median bias after the move is +0.7 m instead of +2.8 m.
+- **Find GCPs ▸ Candidates** sets how many candidates are proposed (default 90, was a
+  fixed 30). Their heights pin the georeference's tilt: on Rachel Glacier 30 left the
+  DEM 2.8 m high after moving the control onto REMA, 90 left it 0.7 m high.
 - **Find GCPs by terrain.** Coarse matcher ▸ Terrain fits the sparse cloud to a
   reference DEM by ICP, with scale, starting from the same prior (footprints, GPS, a
   georeferenced orthophoto), and proposes tracks on the aligned surface. For when no

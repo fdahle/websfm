@@ -1406,6 +1406,7 @@ window.bench = {
     reference,
     band = 1,
     matcher = 'auto',
+    limit = undefined,
     stable = null,
     dem,
     datum = 'ellipsoidal',
@@ -1454,6 +1455,7 @@ window.bench = {
       referenceId: ref.id,
       band,
       matcher,
+      limit,
       demId: refDem.id,
       onLog: (m, level, ctx) => useLog().log(m, level, ctx),
       stableSetId: stableSet?.id ?? null,
@@ -1533,6 +1535,15 @@ window.bench = {
     const cmp = await qr.demReferenceComparison(ref.id, { stableSetId: stableSet?.id ?? null })
     const out = { stats: cmp?.stats ?? null, compared: cmp?.compared ?? 0, coreg: cmp?.coreg ?? null }
     if (align && cmp?.coreg) out.aligned = await qr.alignControlToReference(ref.id, cmp.coreg)
+    // Each ground point: its coordinates and the fit's residual (triangulated − GCP).
+    if (!recon.validGeoref) await recon.georeference()
+    const rows = new Map((await recon.gcpAccuracyReport()).map((r) => [r.name, r]))
+    out.gcps = gcpsStore.gcps
+      .filter((g) => g.role !== 'marker')
+      .map((g) => {
+        const r = rows.get(g.name)
+        return { name: g.name, role: g.role, x: g.x, y: g.y, z: g.z, dx: r?.dx, dy: r?.dy, dz: r?.dz }
+      })
     return out
   },
   // Control and checkpoint residuals against the current georeference.

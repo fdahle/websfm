@@ -207,9 +207,9 @@ it at full resolution.
 The numbered overlays and table show candidate locations. Each candidate is an
 existing sparse track measured in at least two source photos, lying within 2
 working pixels of a verified match. Its reference coordinate is that matched
-feature moved by the track's offset, using the tile's own homography. Up to 30 are
-kept, spread over the block: the best one in each cell of a 5 × 5 grid first, then
-the next best anywhere. The message gives how many of 16 cells they cover and the
+feature moved by the track's offset, using the tile's own homography. Up to
+**Candidates** (90) are kept, spread over the block: the best one in each cell of a
+√n × √n grid first, then the next best anywhere. The message gives how many of 16 cells they cover and the
 share of the block inside their outline. Control bunched in one corner fits that
 corner only.
 
@@ -275,6 +275,16 @@ On Rachel Glacier (1960s film against Sentinel-2), DISK and SuperPoint found 100
 agreeing matches at under a reference pixel; SIFT found too few to align it. With
 DISK, the candidates on Rachel, Stubb and Pequod lay a median 6–7 m from where an
 independent Metashape solution of each block puts them.
+
+## Candidates
+<!-- param: candidates  default: 90 -->
+How many candidates to propose, spread over the block: the best in each cell of a
+√n × √n grid first, then the next best anywhere. Their heights pin the
+georeference's tilt, and a height read off a reference DEM on steep rock is a few
+metres off, so more, better spread candidates give a level model. On Rachel Glacier
+30 candidates left the DEM 2.8 m high after **Move the control onto the reference**
+(see Quality Report), 90 only 0.7 m. Fewer suit a block with little stable ground,
+where the extra candidates would only repeat the same patches.
 
 ## Stable ground
 <!-- param: stableArea  default: Anywhere -->

@@ -14,6 +14,7 @@ import { learnedDetector } from '../core/features/learnedDetectors.js'
 import { isModelCached } from '../core/models/modelCache.js'
 import { modelUrl } from '../core/models/registry.js'
 import { useModelsStore } from '../stores/useModelsStore.js'
+import { FIND_GCPS_DEFAULTS } from '../core/defaults.user.js'
 import { polygonAreaTest } from '../core/products/vectorLayers.js'
 import { gpsSearchOutline, searchRegion, footprintSearchPoints } from '../core/sfm/referenceMatch.js'
 import { worldToPixel } from '../core/io/rasterSample.js'
@@ -198,9 +199,10 @@ async function resolveMatcher(matcher) {
 export async function findGcpCandidates({
   referenceId,
   band = 1,
-  matcher = 'auto',
+  matcher = FIND_GCPS_DEFAULTS.matcher,
   demId = null,
   stableSetId = null,
+  limit = FIND_GCPS_DEFAULTS.candidates,
   onLog,
 } = {}) {
   const external = useExternalStore(),
@@ -269,7 +271,7 @@ export async function findGcpCandidates({
     }
   }
   const { found, result: matched } = terrain
-    ? await terrainSearch({ ortho, cloud, dem: refRaster, file, prior, images: sourceImages, accept, onLog })
+    ? await terrainSearch({ ortho, cloud, dem: refRaster, file, prior, images: sourceImages, accept, limit, onLog })
     : {
         found: referenceGcpCandidates({
           points: cloud.points,
@@ -277,6 +279,7 @@ export async function findGcpCandidates({
           ortho,
           reference: refRaster,
           accept,
+          limit,
           ...result,
         }),
         result,
@@ -313,7 +316,7 @@ export async function findGcpCandidates({
 // the prior (core/sfm/terrainControl.js), then tracks on the aligned surface as
 // candidates. Returns them with a result shaped like the image matcher's, so the
 // dialog shows it the same way (one coarse "tile", no matches).
-async function terrainSearch({ ortho, cloud, dem, file, prior, images, accept, onLog }) {
+async function terrainSearch({ ortho, cloud, dem, file, prior, images, accept, limit, onLog }) {
   const frame = orthoFrame(ortho)
   const n = cloud.points.length,
     points = new Float64Array(3 * n)
@@ -357,6 +360,7 @@ async function terrainSearch({ ortho, cloud, dem, file, prior, images, accept, o
     accept,
     width: ortho.width,
     height: ortho.height,
+    limit,
   })
   onLog?.(
     `Terrain: ICP RMS ${t.rms.toFixed(1)} m with ${(100 * t.inlierFraction).toFixed(0)} % of the points in range; ${found.length} candidates on the aligned surface`,

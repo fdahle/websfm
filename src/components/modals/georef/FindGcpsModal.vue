@@ -12,6 +12,7 @@ import { useLog } from '../../../composables/useLog.js'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { candidateCoverage } from '../../../core/sfm/referenceGcps.js'
 import { findGcpCandidates, stableAreaLayers } from '../../../composables/useFindGcps.js'
+import { FIND_GCPS_DEFAULTS } from '../../../core/defaults.user.js'
 
 const props = defineProps({ hasRelativeOrtho: Boolean, referenceOrthos: { type: Array, default: () => [] } })
 const emit = defineEmits(['close'])
@@ -23,7 +24,8 @@ const gcps = useGcpsStore(),
 const { log } = useLog()
 const selectedReferenceId = ref(props.referenceOrthos[0]?.id ?? ''),
   band = ref(1),
-  matcher = ref('auto'),
+  matcher = ref(FIND_GCPS_DEFAULTS.matcher),
+  candidateLimit = ref(FIND_GCPS_DEFAULTS.candidates),
   stableSetId = ref('')
 const stableLayers = computed(() => stableAreaLayers())
 const reference = computed(() => external.rasterById(selectedReferenceId.value))
@@ -94,6 +96,7 @@ watch(
     selectedReferenceId,
     band,
     matcher,
+    candidateLimit,
     stableSetId,
     () => recon.ortho,
     () => recon.mainSparseCloud,
@@ -126,6 +129,7 @@ async function find() {
       matcher: matcher.value,
       demId: demId.value || null,
       stableSetId: stableSetId.value || null,
+      limit: candidateLimit.value,
       onLog: (m, level, ctx) => log(m, level, ctx),
     })
     if (token !== generation) return
@@ -273,6 +277,16 @@ const k = (side) => (side === 'local' ? preview.value.kl : preview.value.kr)
         <option value="terrain">Terrain (reference DEM, ICP)</option>
       </select></label
     >
+    <label
+      ><FieldHelp
+        op="georeferencing"
+        param="candidates"
+        :value="candidateLimit"
+        :default-value="FIND_GCPS_DEFAULTS.candidates"
+        >Candidates</FieldHelp
+      >
+      <input v-model.number="candidateLimit" type="number" min="4" max="300" step="1" :disabled="busy"
+    /></label>
     <label v-if="matcher === 'terrain'"
       >Reference DEM
       <select v-model="demId" :disabled="busy">
@@ -435,7 +449,16 @@ const k = (side) => (side === 'local' ? preview.value.kl : preview.value.kr)
     <p v-if="invalid" role="alert">Enter a finite elevation and positive accuracies, or leave unknown values blank.</p>
     <template #footer
       ><button class="btn" @click="emit('close')">Close</button>
-      <button class="btn" :disabled="!ready || busy || (matcher === 'terrain' ? !demId : !bandValid)" @click="find">
+      <button
+        class="btn"
+        :disabled="
+          !ready ||
+          busy ||
+          !(Number.isInteger(candidateLimit) && candidateLimit >= 4) ||
+          (matcher === 'terrain' ? !demId : !bandValid)
+        "
+        @click="find"
+      >
         Find candidates
       </button>
       <button class="btn btn-primary" :disabled="busy || !reviewed.length || invalid" @click="add">

@@ -285,6 +285,15 @@ export const DENSE_FUSE_DEFAULTS = {
   removeIsolated: true, // drop low-support voxel cells with too few occupied neighbours
 }
 
+// Reconstruct ▸ Find GCPs (composables/useFindGcps.js, FindGcpsModal.vue).
+export const FIND_GCPS_DEFAULTS = {
+  matcher: 'auto', // 'auto' (SuperPoint if installed, else DISK) | 'disk' | 'superpoint' | 'sift' | 'terrain'
+  // Candidates proposed, spread over the block (a √n × √n grid first). The georeference's
+  // tilt is pinned by the candidates' heights, each a few metres off on steep rock: on
+  // Rachel Glacier 30 left the DEM 2.8 m high after moving the control onto REMA, 90 0.7 m.
+  candidates: 90,
+}
+
 // DEM (core/products/dem.js). Mirrored by DemModal.vue; gsd 0 ⇒ worker auto-suggests.
 export const DEM_DEFAULTS = {
   crs: 'local', // 'local' | 'project'

@@ -1199,7 +1199,11 @@ against a GDAL implementation on Rachel (0.5, 11.0 m vs 0.8, 11.2 m).
 every control and check point moves by −shift in the DEM's CRS, its height is refilled
 from that reference DEM, and the georeference refits. Rachel (Find GCPs control, medium
 depth maps, 20 m DEM): offset (1.9, 11.7) m; NMAD on eroded stable rock 8.8 → 5.4 m,
-30–45° slopes 9.2 → 5.3 m; median −1.5 → +2.8 m (unexplained). hist-sfm, same scoring:
+30–45° slopes 9.2 → 5.3 m; median −1.5 → +2.8 m. The bias is the fit's tilt, not the
+move: at the control points DEM − control height has a median of −0.8 m, while rock
+inside the control hull sits +2.1 m and 2–5 km out +4.4 m. 27 heights each a few metres
+off (fit residuals −17 to +8 m), bunched in 30 % of the block, pin the tilt to a few
+metres over 10 km. With 90 candidates (84 control): median +0.7 m, NMAD 5.9 m. hist-sfm, same scoring:
 6.4 m, median −2.8 m. Fusion settings (strict, min 4 views, 0.5 % depth tolerance)
 changed NMAD by ≤ 0.2 m; DEM `max` aggregation added +11 m bias.
 
