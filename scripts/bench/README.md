@@ -83,6 +83,9 @@ project:
   prints what the page holds per item (keypoints, match tuples, clouds, depth maps) and
   its memory: the **V8 heap** and the ArrayBuffers apart (DevTools `Runtime.getHeapUsage`),
   plus `performance.memory`, which counts both together.
+- `gcpz`: GCP ▸ Fill Z (overwrite) and Check Z against the imported reference DEM
+  (after an `importraster:<tag>` stage); the summary gives the fill counts and Check Z's
+  mean / RMS / median / max |Δ|.
 - `procTrace: <seconds>` (Linux): the resident memory (VmRSS) of the bench's Chrome
   renderer processes every so often, and its peak (`procPeakGB` in the summary). Unlike
   `memTrace` it counts WebAssembly memory, where fusion keeps its accumulators.

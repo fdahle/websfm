@@ -1641,6 +1641,30 @@ window.bench = {
 
   // Import ▸ Reference raster of the file on #bench-raster-file, as the import modal
   // does, then the background display conversion (flushPendingWork).
+  // GCP ▸ Fill Z and Check Z against the imported reference DEM (useGcpEditing.js does
+  // the same): Fill Z with overwrite, which refuses a DEM without a declared vertical
+  // accuracy, then Check Z's residuals.
+  async gcpZ() {
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    const ext = useExternalStore()
+    const g = useGcpsStore()
+    const fill = await g.fillZFromReferenceDem(ext.sampleReferenceDem, { overwrite: true })
+    const rows = await g.checkZAgainstReferenceDem(ext.sampleReferenceDem)
+    const dz = rows.map((r) => r.dz).filter((v) => v != null)
+    const mean = dz.reduce((a, v) => a + v, 0) / (dz.length || 1)
+    const rms = Math.sqrt(dz.reduce((a, v) => a + v * v, 0) / (dz.length || 1))
+    const sorted = [...dz].sort((a, b) => a - b)
+    return {
+      fill,
+      checked: rows.length,
+      withDz: dz.length,
+      meanDz: mean,
+      rmsDz: rms,
+      medianDz: sorted[sorted.length >> 1] ?? null,
+      maxAbsDz: Math.max(0, ...dz.map(Math.abs)),
+    }
+  },
+
   async importRasterFile() {
     const { useExternalStore } = await import('/src/stores/useExternalStore.js')
     const ext = useExternalStore()

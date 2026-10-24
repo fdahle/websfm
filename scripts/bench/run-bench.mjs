@@ -529,6 +529,7 @@ try {
     findgcps: 'findGcps',
     rastersample: 'rasterSample',
     rasterstyle: 'rasterRestyle',
+    gcpz: 'gcpZ',
     meshtools: 'meshTools',
     reseau: 'reseau',
     reseauhalves: 'reseauHalves',
