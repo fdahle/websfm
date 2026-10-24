@@ -554,6 +554,7 @@ try {
     aligncheck: 'alignCheck',
     georef: 'georef',
     findgcps: 'findGcps',
+    demref: 'demVsReference',
     rastersample: 'rasterSample',
     rasterstyle: 'rasterRestyle',
     gcpz: 'gcpZ',

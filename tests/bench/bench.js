@@ -1520,6 +1520,21 @@ window.bench = {
     app.use(pinia).mount(host)
     findGcpsUi = { app, host }
   },
+  // Quality Report ▸ DEM vs reference DEM on the current DEM (config stage `demref`):
+  // the reference raster named `dem`, limited to the polygon layer `stable`; with
+  // `align`, then Move the control onto the reference (its offset, refilled heights,
+  // a refit). → the statistics, the co-registration and the move.
+  async demVsReference({ dem, stable = null, align = false } = {}) {
+    const { useQualityReport } = await import('/src/composables/useQualityReport.js')
+    const qr = useQualityReport()
+    const ref = useExternalStore().rasters.find((r) => r.name === dem || r.name.startsWith(dem))
+    if (!ref) return { error: `reference DEM ${dem} not imported` }
+    const stableSet = stable ? useFootprintsStore().sets.find((s) => s.name === stable) : null
+    const cmp = await qr.demReferenceComparison(ref.id, { stableSetId: stableSet?.id ?? null })
+    const out = { stats: cmp?.stats ?? null, compared: cmp?.compared ?? 0, coreg: cmp?.coreg ?? null }
+    if (align && cmp?.coreg) out.aligned = await qr.alignControlToReference(ref.id, cmp.coreg)
+    return out
+  },
   // Control and checkpoint residuals against the current georeference.
   async gcpReport() {
     if (!recon.validGeoref) await recon.georeference()

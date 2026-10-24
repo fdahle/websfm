@@ -18,7 +18,12 @@
 // median and NMAD describe the bulk while mean/RMSE are kept for comparison with
 // reports that quote them.
 
+import { coregisterNuthKaab } from './demCoregister.js'
+
 const NMAD_K = 1.4826 // NMAD = 1.4826 · median |ΔZ − median|; equals σ for a normal
+// Co-registration (demCoregister.js) on at most this many of the compared cells: each
+// costs about a dozen reference samples, and 20,000 pin a metre-scale shift.
+const COREG_MAX_POINTS = 20000
 
 // dem: { width, height, gsd, originX, originY, data:Float32(NaN = nodata), mask?,
 //        support?:Uint8Array (the share of the cell measured, 0–255: 255 = points
@@ -34,12 +39,14 @@ const NMAD_K = 1.4826 // NMAD = 1.4826 · median |ΔZ − median|; equals σ for
 //     that also had a reference height. With `dem.support`, `bySupport` is
 //     { direct, interpolated }: the statistics of the cells at least half measured
 //     and of the rest, apart (null
-//     without a support layer). Async only to yield to the UI every ~`sliceMs`;
+//     without a support layer). With `coregister`, `coreg` is the Nuth & Kääb shift of
+//     the DEM against the reference (demCoregister.js; null when the cells give no
+//     fit). Async only to yield to the UI every ~`sliceMs`;
 //     `signal.aborted` stops it (returns null).
 export async function compareDemToReference(
   dem,
   sampleRef,
-  { maxSide = 512, sliceMs = 30, signal = null, include = null } = {},
+  { maxSide = 512, sliceMs = 30, signal = null, include = null, coregister = false } = {},
 ) {
   const { width: w, height: h, gsd, originX, originY, data, mask, support } = dem
   const step = Math.max(1, Math.ceil(Math.max(w, h) / maxSide))
@@ -96,6 +103,22 @@ export async function compareDemToReference(
     for (let i = 0; i < diff.length; i++) if (!Number.isNaN(diff[i])) split[direct[i]].push(diff[i])
     bySupport = { direct: summarizeDifferences(split[1]), interpolated: summarizeDifferences(split[0]) }
   }
+  let coreg = null
+  if (coregister && compared) {
+    const every = Math.max(1, Math.ceil(compared / COREG_MAX_POINTS))
+    const points = []
+    let seen = 0
+    for (let gr = 0; gr < gh; gr++)
+      for (let gc = 0; gc < gw; gc++) {
+        if (Number.isNaN(diff[gr * gw + gc]) || seen++ % every) continue
+        const r = Math.min(h - 1, gr * step + half),
+          c = Math.min(w - 1, gc * step + half)
+        points.push({ x: originX + (c + 0.5) * gsd, y: originY - (r + 0.5) * gsd, z: data[r * w + c] })
+      }
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    if (signal?.aborted) return null
+    coreg = coregisterNuthKaab(points, sampleRef, { cell: step * gsd })
+  }
   return {
     step,
     width: gw,
@@ -107,6 +130,7 @@ export async function compareDemToReference(
     excluded,
     stats: summarizeDifferences(values),
     bySupport,
+    coreg,
   }
 }
 

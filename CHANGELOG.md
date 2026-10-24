@@ -17,6 +17,14 @@ Notable changes to websfm. The format follows
   align and the 30 candidates lie a median 7 m (at most 24 m) from where an
   independent Metashape solution of the block (hist-sfm) puts them; on Stubb 6 m
   (14 m), on Pequod 6 m (22 m).
+- **DEM vs reference: co-registration, and moving the control onto the reference.**
+  Quality Report ▸ Products now co-registers a DEM in a CRS to the reference DEM (Nuth &
+  Kääb): the horizontal offset, and the NMAD once it is removed. **Move the control onto
+  the reference** shifts every control and check point by that offset, refills its
+  height from the reference DEM and refits. On Rachel Glacier, whose Find GCPs control
+  took positions from Sentinel-2 and heights from REMA, the DEM sat 11.7 m north of
+  REMA; after the move, NMAD on stable rock fell from 8.8 m to 5.4 m (hist-sfm's DEM:
+  6.4 m), with medium-quality depth maps. A +3 m median bias remains after the refit.
 - **Find GCPs by terrain.** Coarse matcher ▸ Terrain fits the sparse cloud to a
   reference DEM by ICP, with scale, starting from the same prior (footprints, GPS, a
   georeferenced orthophoto), and proposes tracks on the aligned surface. For when no

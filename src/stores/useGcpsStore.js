@@ -495,6 +495,27 @@ export const useGcpsStore = registerProjectStore(
       return true
     }
 
+    // Move ground points by `move(x, y) → [x, y]` (project CRS), for Quality Report ▸
+    // Move the control onto the reference DEM: the caller computes the shift and then
+    // refills the heights at the new positions. → how many moved.
+    function moveGcps(move, { ids = null, reason = '' } = {}) {
+      let moved = 0
+      for (const g of gcps.value) {
+        if (g.role === 'marker' || (ids && !ids.includes(g.id))) continue
+        if (!Number.isFinite(g.x) || !Number.isFinite(g.y)) continue
+        const [x, y] = move(g.x, g.y)
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+        g.x = x
+        g.y = y
+        moved++
+      }
+      if (moved) {
+        log(`Moved ${pluralize(moved, 'ground point')}${reason ? ` ${reason}` : ''}`, 'info', 'GCP')
+        save()
+      }
+      return moved
+    }
+
     // ── Reference DEM: fill / check GCP elevations ──────────────────────────────
     //
     // The payoff of the external-reference-data feature: a GCP placed on a map has
@@ -853,6 +874,7 @@ export const useGcpsStore = registerProjectStore(
       setObservationAccuracy,
       removeObservation,
       removeGcp,
+      moveGcps,
       fillZFromReferenceDem,
       convertGcpHeights,
       setGcpFromReference,

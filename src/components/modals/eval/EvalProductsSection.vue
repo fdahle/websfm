@@ -17,7 +17,7 @@ import { rdBuColor } from '../../../core/products/colormap.js'
 // exported report carries the same ones.
 const recon = useReconstructionStore()
 const external = useExternalStore()
-const { demReferenceComparison, demReferenceTiles } = useQualityReport()
+const { demReferenceComparison, demReferenceTiles, alignControlToReference } = useQualityReport()
 
 const refs = computed(() => external.demRasters)
 const refId = ref(external.defaultDem?.id ?? refs.value[0]?.id ?? null)
@@ -66,6 +66,32 @@ watch(
 )
 
 const tiles = computed(() => demReferenceTiles(result.value))
+
+// The co-registration offset, removed at its source: the control moves onto the
+// reference and the georeference refits; the DEM is then stale until rebuilt.
+const aligning = ref(false),
+  alignMessage = ref('')
+const canAlign = computed(
+  () =>
+    !!result.value?.coreg &&
+    !!recon.dem?.crs &&
+    recon.dem.crs !== 'local' &&
+    Math.hypot(...result.value.coreg.shift) > 0.5,
+)
+async function alignControl() {
+  aligning.value = true
+  alignMessage.value = ''
+  try {
+    const { moved, filled } = await alignControlToReference(refId.value, result.value.coreg)
+    alignMessage.value =
+      `Moved ${moved} ground points and refilled ${filled.filled} heights; the georeference was refitted. ` +
+      'Rebuild the DEM (and orthophoto) to see the effect.'
+  } catch (err) {
+    alignMessage.value = err?.message ?? String(err)
+  } finally {
+    aligning.value = false
+  }
+}
 const unit = computed(() => result.value?.demUnit ?? '')
 const range = computed(() => differenceRange(result.value?.stats))
 const fmt = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toPrecision(3)}`
@@ -157,6 +183,10 @@ const hist = computed(() => {
     <template v-else-if="result">
       <StatTiles :tiles="tiles" />
       <WarnBox v-for="w in result.warnings" :key="w">{{ w }}</WarnBox>
+      <p v-if="canAlign" class="align-row">
+        <button class="btn" :disabled="aligning" @click="alignControl">Move the control onto the reference</button>
+        <span v-if="alignMessage" role="status">{{ alignMessage }}</span>
+      </p>
 
       <div class="viz">
         <figure class="viz-map">

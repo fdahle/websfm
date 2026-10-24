@@ -198,7 +198,12 @@ export function useQualityReport() {
         datum: dem.verticalDatum ?? null,
       })
       const include = await demLayerTest(dem, [stable, area])
-      const cmp = await compareDemToReference(dem, sample, { include })
+      // A DEM in a CRS is also co-registered (Nuth & Kääb): a horizontal offset against
+      // the reference reads as height error on every slope.
+      const cmp = await compareDemToReference(dem, sample, {
+        include,
+        coregister: !!dem.crs && dem.crs !== 'local',
+      })
       const demUnit = rasterUnits(dem).vertical
       const refUnit = rasterUnits(meta).vertical
       const warnings = []
@@ -304,6 +309,26 @@ export function useQualityReport() {
         tone: overlap != null && overlap < 50 ? 'warn' : undefined,
         hint: `${(cmp?.compared ?? 0).toLocaleString()} of ${(cmp?.demCells ?? 0).toLocaleString()} DEM cells`,
       },
+      // Nuth & Kääb: where the DEM sits against the reference, and its spread once
+      // moved there. A large offset with a much smaller NMAD after it is a
+      // georeferencing offset (control from another reference), not a noisy surface.
+      ...(cmp?.coreg
+        ? [
+            {
+              label: 'Horizontal offset',
+              value: `E ${signed(cmp.coreg.shift[0])}, N ${signed(cmp.coreg.shift[1])}`,
+              unit: u,
+              tone: Math.hypot(...cmp.coreg.shift) > Math.max(s?.nmad ?? 0, sigma ?? 0) ? 'warn' : undefined,
+              hint: 'DEM relative to the reference (Nuth & Kääb co-registration)',
+            },
+            {
+              label: 'NMAD after shift',
+              value: f(cmp.coreg.nmadAfter),
+              unit: u,
+              hint: `slopes 5–45°: ${f(cmp.coreg.nmadBefore)} before; bias ${signed(cmp.coreg.bias)} after`,
+            },
+          ]
+        : []),
       // A DEM with a support layer: the error where points landed against where the
       // gaps were interpolated, which is usually where the large errors are.
       ...(cmp?.bySupport
@@ -631,7 +656,36 @@ export function useQualityReport() {
     return { digest, markdown: digestToMarkdown(digest), json: digestToJson(digest) }
   }
 
+  // Move the control onto the reference DEM: shift every control and check point by the
+  // co-registration offset (in the DEM's CRS), refill its height from that DEM at the new
+  // position, and refit. For control whose positions came from another reference than
+  // its heights (Find GCPs: a satellite image and a DEM), which the DEM then inherits as
+  // an offset. → { moved, filled }.
+  async function alignControlToReference(refId, coreg) {
+    const dem = recon.dem,
+      crs = projects.currentCrs
+    if (!dem?.crs || dem.crs === 'local' || !coreg) throw new Error('Needs a co-registered DEM in a CRS')
+    await Promise.all([ensureProjection(crs), ensureProjection(dem.crs)])
+    const [dx, dy] = coreg.shift
+    const move = (x, y) => {
+      const [u, v] = transform([x, y], crs, dem.crs)
+      return transform([u - dx, v - dy], dem.crs, crs)
+    }
+    const ids = gcpsStore.gcps.filter((g) => g.role !== 'marker').map((g) => g.id)
+    const moved = gcpsStore.moveGcps(move, {
+      ids,
+      reason: `by E ${(-dx).toFixed(2)}, N ${(-dy).toFixed(2)} onto the reference DEM`,
+    })
+    const filled = await gcpsStore.fillZFromReferenceDem(
+      (x, y, o) => external.sampleReferenceDem(x, y, { ...o, rasterId: refId }),
+      { ids, overwrite: true },
+    )
+    await recon.georeference()
+    return { moved, filled }
+  }
+
   return {
+    alignControlToReference,
     cameras,
     points,
     imageIds,

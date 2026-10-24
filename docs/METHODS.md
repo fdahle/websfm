@@ -1184,6 +1184,27 @@ project CRS merely because coordinates are in metres.
 
 ---
 
+### DEM co-registration to a reference DEM (Nuth & Kääb, 2026-10-24)
+
+`core/eval/demCoregister.js`, run by `demCompare.js` for a DEM in a CRS (Quality Report
+▸ DEM vs reference). On at most 20,000 compared cells on 5–45° slopes, with the
+reference's slope α and downhill aspect ψ from central differences at the comparison
+spacing: Δh = DEM(p) − ref(p − t); Δh/tan α = δ_N·cos ψ + δ_E·sin ψ + c, fitted by
+least squares over cells within 3 NMAD of the median; t += (δ_E, δ_N) until the step
+is under 5 % of a cell (≤ 8 passes). `shift` = where the DEM sits against the
+reference. Checked against a planted (3, 11) m shift with −2 m bias and noise, and
+against a GDAL implementation on Rachel (0.5, 11.0 m vs 0.8, 11.2 m).
+
+**Move the control onto the reference** (`useQualityReport.alignControlToReference`):
+every control and check point moves by −shift in the DEM's CRS, its height is refilled
+from that reference DEM, and the georeference refits. Rachel (Find GCPs control, medium
+depth maps, 20 m DEM): offset (1.9, 11.7) m; NMAD on eroded stable rock 8.8 → 5.4 m,
+30–45° slopes 9.2 → 5.3 m; median −1.5 → +2.8 m (unexplained). hist-sfm, same scoring:
+6.4 m, median −2.8 m. Fusion settings (strict, min 4 views, 0.5 % depth tolerance)
+changed NMAD by ≤ 0.2 m; DEM `max` aggregation added +11 m bias.
+
+---
+
 ### Reference-orthophoto control candidates (coarse to fine, 2026-10-19)
 
 `workers/ops/referenceGcps.js` + `core/sfm/referenceMatch.js`. All coordinates are

@@ -47,6 +47,22 @@ which cells were interpolated (see [DEM ▸ Gap interpolation](guide:dem)), a ti
 gives the RMSE of the cells with points and of the interpolated cells apart; the
 interpolated ones usually carry most of the large errors.
 
+A DEM in a CRS is also co-registered to the reference (Nuth & Kääb): **Horizontal
+offset** says where the DEM sits relative to it, east and north, and **NMAD after
+shift** what the spread would be once that offset is gone (slopes 5–45°, where an
+offset shows). A large offset with a much smaller NMAD after it means the DEM is a
+good surface in the wrong place, not a noisy one: on a slope, a sideways shift reads
+as height error. It happens when the control's positions and heights come from
+different references, as with Find GCPs (a satellite image for the position, a DEM
+for the height). On Rachel Glacier the DEM sat 11 m north of REMA, and its NMAD on
+stable rock went from 8.7 m to 5.3 m once shifted.
+
+**Move the control onto the reference** removes such an offset at its source. It moves
+every control and check point by the offset (worked out in the DEM's CRS), refills its
+height from this reference DEM at the new position, and refits the georeference.
+Rebuild the DEM and orthophoto afterwards. Use it when the reference DEM is the
+better-located of your references, and do not use it on surveyed control.
+
 ## Stable ground
 <!-- param: stableArea  default: All cells -->
 A polygon layer of ground that has not changed between the two DEMs, such as rock
