@@ -51,8 +51,11 @@ const warmedUp = new Set()
 // image. These detectors are fully convolutional and run early layers at full
 // input resolution, so a large image can exhaust GPU memory (std::bad_alloc
 // from ORT's WebGPU EP) where a smaller one fits — which is why the pin is
-// size-aware: a 10000px full-frame failure must not condemn 1024px tiles.
+// size-aware: a 10000px full-frame failure must not condemn 1024px tiles. An
+// operator the WebGPU EP lacks (DISK's MaxPool with indices: "not supported yet")
+// fails at every size, so it records 0 and every input stays on CPU.
 const gpuFailedAtPx = new Map() // modelKey → smallest failed npix
+const unsupportedOp = (err) => /not (yet )?supported|not implemented/i.test(err?.message || String(err))
 
 // Resolve which backend to *try* for this model + input size: WASM if the GPU
 // path already failed at this size or smaller (see gpuFailedAtPx), or if the
@@ -64,7 +67,9 @@ async function chooseBackend(modelKey, npix) {
   if (failedAt !== undefined && npix >= failedAt) {
     return {
       backend: 'wasm',
-      reason: `WebGPU failed earlier at ${failedAt} px — inputs that size or larger stay on CPU`,
+      reason: failedAt
+        ? `WebGPU failed earlier at ${failedAt} px — inputs that size or larger stay on CPU`
+        : 'its WebGPU path lacks an operator — every input stays on CPU',
     }
   }
   const backend = await resolveBackend()
@@ -172,7 +177,8 @@ export async function detectLearned(spec, pixels, w, h, opts = {}) {
     )
     const npix = w * h
     const prev = gpuFailedAtPx.get(modelKey)
-    gpuFailedAtPx.set(modelKey, prev === undefined ? npix : Math.min(prev, npix))
+    const at = unsupportedOp(err) ? 0 : npix
+    gpuFailedAtPx.set(modelKey, prev === undefined ? at : Math.min(prev, at))
     sessions.delete(`${modelKey}:webgpu`)
     backend = 'wasm'
     session = await getSession(label, model, modelKey, 'wasm', onLog)
