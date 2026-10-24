@@ -72,3 +72,18 @@ it('needs a 2D, thin, signable plane', () => {
   // Fewer than four cameras: refused.
   expect(planeUpOverride(stNazaire().slice(0, 3), [0, 0.8, 0.6])).toBeNull()
 })
+
+it('a TMA block with unbalanced left and right obliques is levelled by its verticals', () => {
+  // Rachel's mix: 30 verticals and 12 left and 16 right obliques 60° off nadir from
+  // two lines whose obliques both look south-ish, all at one altitude. The plain
+  // viewing-direction mean leans 20° south, under the camera-plane threshold.
+  const cams = []
+  for (let i = 0; i < 30; i++) cams.push(gimbalCam([(i % 3) * 4000, Math.floor(i / 3) * 1500, 5800], 0, -89.9))
+  for (let i = 0; i < 12; i++) cams.push(gimbalCam([-3000, i * 2000, 5800 + 20 * Math.sin(i)], 230, -30))
+  for (let i = 0; i < 16; i++) cams.push(gimbalCam([11000, i * 1500, 5800 + 20 * Math.cos(i)], 130, -30))
+  const plain = cams.reduce((s, c) => s.map((v, k) => v - c.R[2][k]), [0, 0, 0])
+  expect(tiltDeg(plain)).toBeGreaterThan(15) // what the mean alone gave
+  expect(tiltDeg(sceneUpFromCameras(cams).up)).toBeLessThan(0.5)
+  expect(tiltDeg(estimateUpFromCameras(cams))).toBeLessThan(0.5)
+  expect(tiltDeg(buildLocalFrame(cams, []).up)).toBeLessThan(0.5)
+})

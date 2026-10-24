@@ -1410,7 +1410,9 @@ CPU) retains per-image fallback and a first-image A/B validation
 **Up.** Without a georeference, the vertical is estimated from the cameras. Three
 readings exist, and each fails somewhere:
 - the reversed **mean viewing direction** is right for a nadir survey and tilts with
-  the gimbal on an oblique one;
+  the gimbal on an oblique one. It is a trimmed mean (`geometry.js`
+  `trimmedViewDirection`): passes keep the cameras within 40°, 30°, then 25° of the
+  current mean, so a block that mixes verticals with obliques uses its verticals;
 - the mean **image-up axis** is right for hand-held terrestrial photos and horizontal
   on a nadir survey;
 - the normal of the **camera-centre plane** is right whenever the cameras share one
@@ -1429,6 +1431,15 @@ tilted by that much; the camera plane (0.06 m thick against 6–18 m of spread) 
 to well under a degree. Two known blind spots: an oblique set shallower than 25° keeps
 the old tilted reading, and a vertical camera grid in front of a facade looks like a
 nadir block turned 90° and cannot be told apart from camera geometry alone.
+
+The trim came from a historical (TMA) block, Rachel Glacier: 30 vertical frames with 12
+left and 16 right obliques about 60° off nadir. The obliques do not balance, so the
+plain mean was 21° off vertical (against the surveyed camera positions), under the 25°
+gate. The local DEM and ortho were projected onto that tilted plane, which shears the
+relief by hundreds of metres, and Find GCPs could not align either with a map. The
+trimmed mean keeps the 30 verticals and is 0.3° off. A nadir block, a nadir block with
+obliques all round, and a single oblique look (St Nazaire's two pitches are 24° apart)
+keep their plain mean.
 
 **Extent.** A product covers the cloud's **dense core** by default (`dem.js`
 `coreExtent`), not its raw min/max. An oblique capture sees almost to the horizon, and

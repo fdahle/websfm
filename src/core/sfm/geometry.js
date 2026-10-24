@@ -105,6 +105,7 @@ export function estimateUpFromCameras(cameras) {
     vy = 0,
     vz = 0 // Σ viewing directions
   let n = 0
+  const dirs = []
   for (const cam of list) {
     const R = cam?.R
     if (!R) continue
@@ -114,6 +115,7 @@ export function estimateUpFromCameras(cameras) {
     vx += R[2][0]
     vy += R[2][1]
     vz += R[2][2]
+    dirs.push(unit([R[2][0], R[2][1], R[2][2]]))
     n++
   }
   if (!n) return null
@@ -121,7 +123,9 @@ export function estimateUpFromCameras(cameras) {
   const axisUp = unit([ax, ay, az])
   // |mean viewing dir| ≪ 1 ⇒ the directions largely cancel (convergent rig): no
   // coherent nadir reading, so there is nothing to weigh against the image axes.
-  const viewUp = Math.hypot(vx, vy, vz) / n >= 0.3 ? unit([-vx, -vy, -vz]) : null
+  // Trimmed to the block's main look (trimmedViewDirection: TMA obliques).
+  const down = Math.hypot(vx, vy, vz) / n >= 0.3 ? trimmedViewDirection(dirs) : null
+  const viewUp = down && [-down[0], -down[1], -down[2]]
   // A level camera plane seen obliquely outranks both readings (planeUpOverride).
   const plane = planeUpOverride(list, viewUp, axisUp)
   if (plane) return plane.up
@@ -217,6 +221,29 @@ export function planeUpOverride(cameras, viewUp = null, axisUp = null) {
 }
 
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+// ── The viewing-direction mean, trimmed to the block's main look ─────────────
+// A historical (TMA) block mixes vertical frames with left and right obliques that
+// look ~60° off nadir. On Rachel (30 V, 12 L, 16 R) the obliques do not balance and
+// the plain mean sits 21° off vertical, under PLANE_UP_OBLIQUE_DEG, so the camera
+// plane did not take over and every local DEM and ortho came out tilted 21°, their
+// relief sheared by hundreds of metres. Each pass keeps the cameras within the next
+// angle of the current mean and re-averages: there the 30 verticals remain, 0.3° off.
+// A nadir block, nadir with obliques all round, or one oblique look (St Nazaire's two
+// pitches 24° apart) keeps the plain mean; a pass that would keep fewer than 3
+// cameras stops. `dirs`: unit viewing directions. → the trimmed mean (unit) or null.
+const VIEW_TRIM_DEG = [40, 30, 25, 25, 25]
+export function trimmedViewDirection(dirs) {
+  let m = unit(dirs.reduce((s, d) => [s[0] + d[0], s[1] + d[1], s[2] + d[2]], [0, 0, 0]))
+  for (const deg of VIEW_TRIM_DEG) {
+    if (!m) return null
+    const cos = Math.cos((deg * Math.PI) / 180)
+    const keep = dirs.filter((d) => dot3(d, m) >= cos)
+    if (keep.length < 3) break
+    m = unit(keep.reduce((s, d) => [s[0] + d[0], s[1] + d[1], s[2] + d[2]], [0, 0, 0]))
+  }
+  return m
+}
 
 function unit(v) {
   const n = Math.hypot(v[0], v[1], v[2])

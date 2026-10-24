@@ -18,7 +18,7 @@
 // Conventions match geometry.js: rotation R is row-major [[…],[…],[…]] mapping
 // world→camera (x_cam = R·x_world + t); t is [x,y,z].
 
-import { planeUpOverride } from '../sfm/geometry.js'
+import { planeUpOverride, trimmedViewDirection } from '../sfm/geometry.js'
 
 // ── small vector helpers ─────────────────────────────────────────────────────
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -64,8 +64,10 @@ export function estimateUpFromViewingDirs(cameras) {
     sy = 0,
     sz = 0,
     n = 0
+  const dirs = []
   for (const cam of cameras) {
     const d = viewingDir(cam)
+    dirs.push(d)
     sx += d[0]
     sy += d[1]
     sz += d[2]
@@ -75,7 +77,10 @@ export function estimateUpFromViewingDirs(cameras) {
   const mean = [sx / n, sy / n, sz / n]
   // |mean| ≪ 1 ⇒ viewing directions largely cancel (not a coherent nadir set).
   if (norm(mean) < 0.3) return null
-  return normalize([-mean[0], -mean[1], -mean[2]])
+  // Trimmed to the block's main look: a TMA block's unbalanced obliques would
+  // otherwise tilt it (geometry.js trimmedViewDirection).
+  const down = trimmedViewDirection(dirs)
+  return down ? scale(down, -1) : normalize([-mean[0], -mean[1], -mean[2]])
 }
 
 // The cameras' reading of "up" for products and the aerial auto-orient: a level

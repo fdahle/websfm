@@ -49,8 +49,8 @@ fit and produces real-world coordinates. Once the project has a georeference,
 Project CRS is preselected, so the orthophoto lands on the map's CRS view with the
 basemap and GCPs. Local levels the model from the cameras: when the camera positions
 share one height (a drone flight plan) and the photos are oblique, that level plane
-sets the vertical; a nadir survey uses its viewing direction, and the log names which
-one was used. Project CRS needs a projected CRS; in a geographic one (WGS 84) the
+sets the vertical; a nadir survey uses its viewing direction, a mix of verticals and
+obliques (historical film) its verticals, and the log names which one was used. Project CRS needs a projected CRS; in a geographic one (WGS 84) the
 field suggests one from the camera positions.
 
 ## Extent

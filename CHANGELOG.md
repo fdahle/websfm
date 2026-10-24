@@ -550,6 +550,11 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- **Local products of a historical block are level.** A block that mixes vertical
+  photos with unbalanced left and right obliques (TMA film) took its vertical from the
+  mean viewing direction, 21° off on Rachel Glacier, so the local DEM and ortho were
+  projected onto a tilted plane and Find GCPs could not align them with a map. The
+  viewing directions are now a trimmed mean that keeps the block's verticals (0.3° off).
 - **High-quality depth maps on big blocks no longer run the tab out of memory.** A
   worker now waits while more than two of its finished maps are still being saved (a
   slow disk queued 0.6 GB per map on the page), the cross-view filter starts on a

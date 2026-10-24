@@ -29,7 +29,8 @@ with the basemap and GCPs. For an object with
 a scale bar, Local is metric but still has no CRS.
 Local levels the model from the cameras. When the camera positions share one height
 (a drone flight plan) and the photos are oblique, that level plane sets the vertical;
-a nadir survey uses its viewing direction. The log names which one was used.
+a nadir survey uses its viewing direction. A block that mixes vertical photos with
+obliques (historical film) levels on its verticals. The log names which one was used.
 The option names why it is unavailable. "Geographic CRS" means the project is still
 in degrees (WGS 84): use the projected CRS suggested under the field, or choose one in
 Project Settings; the frame switches to it once the fit is possible. "Needs ≥3 camera
