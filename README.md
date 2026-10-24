@@ -2,6 +2,13 @@
 
 **Structure-from-Motion and photogrammetry, entirely in your browser.**
 
+[![Try it](https://img.shields.io/badge/try_it-websfm.app-2b7de9)](https://websfm.app)
+[![Verify](https://github.com/fdahle/websfm/actions/workflows/verify.yml/badge.svg)](https://github.com/fdahle/websfm/actions/workflows/verify.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+<!-- Turntable video: open this file in GitHub's web editor and drag the .mp4 onto
+     this line; GitHub uploads it and puts its link here, which plays inline. -->
+
 websfm turns overlapping photographs into 3D reconstructions — sparse and dense
 point clouds, meshes, digital elevation models and orthophotos — without
 installing anything and **without uploading your images anywhere**. All the
@@ -14,14 +21,15 @@ It is built with a focus on **polar / non-WGS84 projects** (e.g. historical
 aerial imagery of Antarctica), so coordinate-reference-system handling and ground
 control are first-class throughout.
 
-**Try it at [websfm.fdahle.de](https://websfm.fdahle.de).** Nothing to install; the
-app runs on your machine and keeps your projects in your browser.
+**Try it at [websfm.app](https://websfm.app).** Nothing to install; the app runs on
+your machine and keeps your projects in your browser.
 
-> ⚠️ **Early test release.** This is a first public build put out to gather
-> feedback. Expect rough edges. Please report anything that breaks or feels wrong
-> using the **🐞 button** in the bottom-right corner of the app, or open an issue
-> directly at
-> [github.com/fdahle/websfm/issues](https://github.com/fdahle/websfm/issues).
+> [!NOTE]
+> **Beta.** websfm is at version 0.x: the pipeline is complete, but not every path has
+> been checked on real data yet ([what has been](#how-its-tested)). Please report
+> anything that breaks or looks wrong with the **🐞 button** in the app, or as an
+> [issue](https://github.com/fdahle/websfm/issues). What changed in each release is
+> under **Other ▸ What's New** in the app and in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -84,7 +92,7 @@ LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
 | The algorithms and why they were chosen | [docs/METHODS.md](docs/METHODS.md) |
 | Hosting your own copy | [docs/deployment.md](docs/deployment.md) |
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| What changed | [CHANGELOG.md](CHANGELOG.md) |
+| What changed | [CHANGELOG.md](CHANGELOG.md), or **Other ▸ What's New** in the app |
 
 Quick start from source, with [Node.js](https://nodejs.org/) 22 (20.19 or later works;
 CI uses 22). No Rust is needed: the compiled WASM is committed.
@@ -166,30 +174,27 @@ half-frame scans), and multi-threaded bundle adjustment.
 Priorities follow real use: if something here matters to you, or something is
 missing, please open an issue to discuss it.
 
-## Development & AI assistance
+## How it is developed
 
-I want to be upfront about how this is built. websfm is developed with substantial
-help from AI coding tools (primarily [Claude Code](https://claude.com/claude-code);
-AI-assisted commits are marked as such in the git history). The **direction, the
-photogrammetry/SfM methods, and the review of every change are mine** — the tools
-accelerate implementation, they don't decide what the software should do or vouch
-for whether it's correct.
+websfm is developed with substantial help from AI coding tools, mainly
+[Claude Code](https://claude.com/claude-code); commits written with AI assistance
+are marked as such in the git history. The direction, the choice of photogrammetric
+methods and the review of every change rest with the maintainer: the tools speed up
+implementation, they do not decide what the software does or vouch for its
+correctness.
 
-What that means for you:
+In practice:
 
-- Treat outputs as you would from any early research tool: **verify reconstructions
-  and measurements** before relying on them, and sanity-check georeferenced results
-  against known control.
-- Not all code paths have been exercised on real data yet; bug reports are genuinely
-  useful and very welcome.
-- The methods behind each stage are explained in the in-app glossary
-  (**Other ▸ Glossary**, source in [`src/glossary/`](src/glossary/)), so you can see
-  *what* the algorithms do and judge them on their merits, independent of how the
-  code was written. [How it's tested](#how-its-tested) lists what has been checked
-  against independent reference data, and what hasn't yet.
+- **Verify before relying on results.** As with any research tool in beta, check
+  reconstructions and measurements, and compare georeferenced results against known
+  control.
+- **Every method is documented.** The in-app glossary (**Other ▸ Glossary**, source
+  in [`src/glossary/`](src/glossary/)) and [docs/METHODS.md](docs/METHODS.md)
+  explain what each stage does, so the algorithms can be judged on their merits.
+- **Testing is stated openly.** [How it's tested](#how-its-tested) lists what has
+  been checked against independent reference data, and what has not yet.
 
-If this approach affects whether you'd use or trust the tool, I'd rather you know
-than guess.
+Bug reports are especially valuable while not every code path has met real data.
 
 ## Feedback
 

@@ -41,7 +41,9 @@ const FIDUCIAL_SLOTS = {
   midside_bottom: 'side-bottom',
   midside_left: 'side-left',
 }
-const PY_DEFAULT = '/home/fdahle/miniconda3/envs/hist_env3/bin/python'
+// The Python with the scoring packages: $HIST_PYTHON (e.g. a conda env's bin/python),
+// else python3 on PATH. A config's `python` overrides both.
+const PY_DEFAULT = process.env.HIST_PYTHON || 'python3'
 
 function csvRows(text) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim())

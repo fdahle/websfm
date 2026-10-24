@@ -27,7 +27,8 @@ from pathlib import Path
 
 import numpy as np
 
-COLMAP_DEFAULT = "/home/fdahle/miniconda3/envs/colmap_env/bin/colmap"
+# The COLMAP binary: $COLMAP (e.g. a conda env's bin/colmap), else `colmap` on PATH.
+COLMAP_DEFAULT = os.environ.get("COLMAP", "colmap")
 HERE = Path(__file__).resolve().parent
 
 
