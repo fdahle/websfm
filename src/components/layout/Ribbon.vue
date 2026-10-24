@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import Icon from '../Icon.vue'
 import RibbonMenu from './RibbonMenu.vue'
+import { newCount } from '../../composables/useWhatsNew.js'
 import { commandReason } from '../../core/help/commands.js'
 import {
   TABS,
@@ -138,6 +139,11 @@ const VIEW_KEYS = new Set([
   'turntable',
 ])
 
+// A count on the button (What's New: entries shipped since it was last opened), and
+// a dot on the tab that holds it, so it is seen without opening that tab.
+const badgeCount = (cmd) => (cmd.badge === 'whatsNew' ? newCount.value : 0)
+const tabHasBadge = (tab) => tab.groups?.some((g) => g.commands?.some((c) => badgeCount(c) > 0))
+
 function isActive(cmd) {
   // A disabled toggle never renders as "on": its state refers to data that isn't
   // there yet (an empty project's Footprints toggle defaults to showFootprints
@@ -263,7 +269,7 @@ function step(cmd, dir) {
         :class="{ active: tab.id === activeTab }"
         @click="activeTab = tab.id"
       >
-        {{ tab.label }}
+        {{ tab.label }}<span v-if="tabHasBadge(tab)" class="tab-dot" aria-label="new"></span>
       </button>
 
       <template v-if="activeImageId">
@@ -344,6 +350,7 @@ function step(cmd, dir) {
               >
                 <Icon :name="item.icon" class="cmd-icon" />
                 <span class="cmd-label">{{ cmdLabel(item) }}</span>
+                <span v-if="badgeCount(item)" class="cmd-badge">{{ badgeCount(item) }}</span>
               </button>
             </template>
           </div>
@@ -425,6 +432,31 @@ function step(cmd, dir) {
   color: var(--text);
 }
 
+.tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  vertical-align: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.cmd-badge {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
 .tab.active {
   color: var(--text);
   border-bottom-color: var(--accent);
@@ -474,6 +506,7 @@ function step(cmd, dir) {
 }
 
 .cmd {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;

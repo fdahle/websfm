@@ -115,4 +115,24 @@ of the exported value when reimported.
   exportable as `.websfm` archives.
 - **Build/test:** Vite, Vitest, Playwright.
 
-What changed between versions is in [CHANGELOG.md](../CHANGELOG.md).
+## Releases
+
+What changed between versions is in [CHANGELOG.md](../CHANGELOG.md), which the app
+shows as Help ▸ What's New. Every deploy is a release: before the release build, cut
+one with
+
+```bash
+npm run release -- --dry-run   # what would happen
+npm run release                # 0.4.0 → 0.5.0; or `-- patch`, `-- major`, `-- 1.0.0`
+git push && git push origin v0.5.0
+```
+
+It lists the `feat` / `fix` / `perf` commits since the last tag (add an entry for any
+user-visible one it is missing first), moves `[Unreleased]` under the new version with
+today's date, sets the version in `package.json`, commits and tags `v<version>`.
+Users who return after a deploy see a count of the new entries on **What's New**. A
+test checks that `package.json` names the newest release in the changelog.
+
+Releases up to 0.4.0 were split after the fact, by the date each entry entered the
+changelog; 0.2.0 holds everything from 0.1.0-beta.1 until the changelog began on
+2026-10-12.

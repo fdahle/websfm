@@ -58,6 +58,7 @@ import * as opfs from './utils/opfs.js'
 import { useSfmInterop } from './composables/useSfmInterop.js'
 import HelpPopupStack from './components/glossary/HelpPopupStack.vue'
 import { matches } from './core/help/shortcuts.js'
+import { loadChangelog } from './composables/useWhatsNew.js'
 import { viewerMayHandleKey } from './utils/keyRouting.js'
 
 // These dialogs pull in large reports, Markdown/KaTeX, or diagnostic code and are
@@ -519,6 +520,9 @@ onMounted(async () => {
       }
     }
   })
+
+  // What's New's badge, once the page has settled (the changelog is its own chunk).
+  setTimeout(loadChangelog, 3000)
 
   const available = await opfs.isAvailable()
   if (!available) {

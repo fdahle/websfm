@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **What's New.** Other → What's New lists every release, newest first, with a badge
+  counting the changes since you last opened it. Changes shows each entry's headline
+  and first sentence, Full the whole entry. websfm now has numbered releases (0.2.0 to
+  0.4.0 so far), cut with `npm run release`.
 - **Keyboard shortcuts in one list.** Press **?** (or Other → Shortcuts) to see every
   shortcut and modifier gesture, grouped by where it works and filterable by action or
   key. Tooltips spell keys for the platform (⌘Z on a Mac). Plain mask-editing letters
@@ -73,12 +77,6 @@ Notable changes to websfm. The format follows
   before importing, can replace or merge with existing masks, and decodes the files on
   every worker. TIFF masks now import everywhere (1-bit CCITT Group 4 included), and a
   0/1 file reads 1 as kept.
-- **Turntable (View ▸ Camera ▸ Turntable).** The 3D view turns the model slowly about
-  its up direction, for presenting a result or checking a dense cloud; dragging steers
-  it, and it carries on when you let go. Its toolbox sets the seconds per turn and
-  **Record one turn** saves exactly one turn of the view as a looping video (WebM, or
-  MP4 in Safari). A new guide article, **The 3D View**, covers navigation, the view
-  presets and the turntable.
 - **DEM of difference against the background terrain.** The Volume tool's base can be
   the global terrain the Terrain basemap shades (Mapzen Terrain Tiles, about 30 m
   cells, EGM96 converted to the DEM's datum where it can be), so a DEM in a CRS can be
@@ -109,6 +107,136 @@ Notable changes to websfm. The format follows
   the empty pixels take a **NODATA value** (0–255), which a GeoTIFF records as GDAL
   NODATA. A real pixel equal to it moves one level, so it never reads as a hole. A JPEG
   uses the value for its empty pixels, which were always black before.
+
+### Changed
+- **DEMs take each cell's median height by default** (was the maximum). In a cell on a
+  slope the maximum is the cell's highest corner: on Rachel Glacier's rock at 20 m cells
+  it stood 14 m above the reference DEM (NMAD 8.2 m), the median 0.7 m (5.9 m). On flat
+  Casa Grande the two agree within 0.1 m, so Max remains for small cells over roofs and
+  canopy. A cloud too big for the median's buffer takes the mean, and the log says so.
+- **Reference DEMs past 2 GB are read over the project.** A DEM too large for one buffer
+  (a REMA 2 m tile, 25,100² cells) is no longer refused when the project's images have
+  positions or it has GCPs: only the window over them (half their extent around them, at
+  least 1 km) is read, at a coarser cell size if even that does not fit (Casa Grande's
+  30,000 × 36,990 reference at 2 m instead of 1 m), and the map still draws the whole
+  file.
+- **Fusion on all workers.** Over saved depth maps, fusion spreads its slabs over up
+  to 8 workers, as many as the memory budget holds; the finished slabs wait in
+  WebAssembly memory, outside the tab's buffers. Quarry, 347 maps: 478 → 308 s at
+  Medium, 922 → 200 s at half the merge cell (208 M points), the same cloud.
+- **Text clouds past 89 million points.** XYZ and ASCII PLY imports past the browser's
+  2 GB buffer cap continue in WebAssembly memory, up to about 715 million points.
+- **WebAssembly memories are shared out.** A tab holds only about 125 of them (Chrome
+  reserves address space for each), so arrays made together share one, and an
+  allocation the browser refuses falls back to an ordinary buffer where it fits.
+- **Dense clouds past the browser's buffer limits.** Fusion keeps its merge cells, and
+  a finished cloud past 2 GB, in WebAssembly memory, which Chrome's 2 GB per-buffer cap
+  and 16 GB of buffers per tab do not apply to. One piece of fusion holds up to about
+  1.07 billion merge cells (was 134 million) and a cloud up to about 1.4 billion points
+  (was 178 million); such a cloud saves, reopens and gets its octree like any other, and
+  is drawn through the octree. The merge cells no longer count against the tab's
+  buffers, so fusion may use the whole memory budget.
+- **Meshes past 4 GB.** A Poisson solve too large for a 32-bit WebAssembly heap (4 GB)
+  runs on a 64-bit build of the solver (16 GB) in browsers with 64-bit WebAssembly
+  memory, and a 32-bit solve that runs out is retried there. The 64-bit build gives the
+  same mesh and is about a sixth slower, so it runs only when needed; the log says
+  which one ran. A dense cloud past 178 million points can be meshed (quarry, 208 M
+  points, depth 9: 586 k triangles in 3.6 min). A solve past 16 GB stops with a message
+  that says so, instead of a bare "unreachable".
+- **The memory budget follows the machine.** Settings ▸ Compute ▸ Memory safety limit is
+  half the memory the browser reports by default and can be raised to all of it; it
+  stopped at 6 GB by default and 12 GB by hand, written when Chrome reported at most
+  8 GB (Chrome 156 reports up to 32). Runs keep at most 12 GB of it in buffers, as
+  before; fusion may use the rest. A saved manual limit is kept.
+- **Layers panel: the layers on the map, as in a GIS.** View ▸ Map ▸ Layers opens a
+  small panel over the 2D map listing the layers on it (imported reference rasters
+  and polygon files, the DEM, the orthophoto and contour lines) in one stack, top
+  first. The sidebar holds everything; a layer goes into the panel with its sidebar
+  checkbox or In Layers on its ribbon tab (formerly On Map), and a newly built DEM,
+  orthophoto or contour set goes there by itself. In the panel, drag a row or use
+  ▲ ▼ to change what draws on top, untick it to hide it without taking it off, or
+  take it off with ✕. Each row is one line; the selected one's opacity slider and
+  Zoom to sit in a strip below the list, and the basemap is the last row. The order
+  and what is hidden are saved with the project; a layer added later goes on top.
+  Before, the order was fixed (reference rasters, then the DEM, then the orthophoto).
+- **Footprints are an overlay; the Shapefiles section is gone.** The image footprints
+  from Footprints from poses are drawn above every layer, and View ▸ Map ▸ Footprints
+  shows and hides only them (it hid contour lines and imported polygons too). They
+  have no sidebar row: an image's expanded row says whether it has one, and a
+  right-click on a footprint or Export ▸ Footprints downloads them as GeoJSON or
+  removes them. Contour lines are listed in Products and imported polygon files in
+  Reference Data, each a layer with its own checkbox and opacity.
+- **GCPs toggle on the map.** View ▸ Map ▸ GCPs shows or hides the GCP and marker
+  symbols, as Cameras does for the camera positions. Editing GCPs always shows them.
+- **Every processing dialog reads in steps.** Sparse Model, Depth Maps, Dense Cloud,
+  DEM, Orthophoto, Mesh and Texture now show their settings as numbered steps in the
+  order the run applies them, like Detect and Match Features, each with a line on what
+  it does to this project with the current values (for example "42 depth maps at up
+  to 1,500 px" or "About 3 points per cell"). A step that cannot matter is dimmed and
+  says why. Depth Maps had its groups in reverse order, and DEM and Orthophoto had none.
+  The guide articles follow the same order.
+- **Map layers have a checkbox in the sidebar.** DEM, orthophoto, reference rasters,
+  contour lines and polygon files go on the 2D map (into its Layers panel) with a
+  checkbox on their row, like a cloud's 3D checkbox, instead of the ◉ marker and the
+  right-click menu alone (which stays, as Add to / Remove from Layers). A layer the
+  map cannot place yet (a product to rebuild, a raster without a CRS) has it greyed,
+  with the reason as its tooltip.
+
+### Performance
+- **Sparse reconstruction outside bundle adjustment.** The model's reprojection
+  statistics, the self-calibration fit and guided track extension stopped allocating per
+  observation, and guided extension only tries the cameras that can see a point. Quarry
+  (347 images): 82 → 77 s, the identical model.
+- **Depth maps on large scans, and the cross-view filter.** On a block of 58 film
+  scans (97 MP) at High: masks and grey planes are built once per image instead of for
+  every map they serve, the speckle filter is 5.7× faster (same output), previews are
+  at most 2,048 px, greyscale scans are cached as one channel, and the next map's
+  images are prepared while the current one matches. The cross-view filter checks each
+  map against at most 12 overlapping views with enough parallax, and sizes its workers
+  by memory: 30 → 4.4 min. Depth maps and filter together: 54 → 26 min. Fusion
+  compares each map with at most 12 views too, and its planning passes read only depth
+  and cost: 22 → 7.8 min, the same cloud for the planning change.
+
+### Fixed
+- **Importing masks of large scans no longer knocks out the GPU.** Each imported mask
+  was drawn into a GPU-backed canvas before it was saved; three 10,000-pixel scan masks
+  at once ran Chrome's GPU process out of memory, and after three crashes the tab fell
+  back to software rendering: matching and depth maps then ran on the CPU emulation,
+  many times slower, with no error. Workers now draw such pixels on the CPU.
+- **DISK no longer retries WebGPU on every tile.** Its WebGPU path lacks an operator;
+  the first failure now keeps every later input on the CPU instead of only larger ones.
+- **Local products of a historical block are level.** A block that mixes vertical
+  photos with unbalanced left and right obliques (TMA film) took its vertical from the
+  mean viewing direction, 21° off on Rachel Glacier, so the local DEM and ortho were
+  projected onto a tilted plane and Find GCPs could not align them with a map. The
+  viewing directions are now a trimmed mean that keeps the block's verticals (0.3° off).
+- **High-quality depth maps on big blocks no longer run the tab out of memory.** A
+  worker now waits while more than two of its finished maps are still being saved (a
+  slow disk queued 0.6 GB per map on the page), the cross-view filter starts on a
+  fresh pool and splits by memory, not by map count.
+- **Film scans in dense, orthophoto and exports.** Depth maps and orthophotos of a
+  film block failed at once with "could not be cloned": the fiducial transforms
+  reached the workers as Vue proxies.
+- **A DEM from a large georeferenced cloud read only the top of its octree** (the cell
+  size was compared in metres against model units): 8,270 of 60 M points.
+- **16-bit WhiteIsZero TIFFs no longer import as negatives.** The native decoder
+  inverted them twice; it now matches the JavaScript fallback bit for bit. 1-bit
+  (bilevel) TIFF scans, CCITT Group 4 included, now import through the native decoder.
+- **The map legend matches the map.** It listed one purple camera triangle while camera
+  positions from EXIF draw as blue triangles, and drew GCPs as diamonds while the map
+  drew squares. The legend now lists exactly the symbols on the map, cameras by the
+  source of their position (EXIF, imported, model), control and check points apart,
+  and leaves out what a ribbon toggle hides; GCPs draw as diamonds on the map too.
+
+## [0.4.0] — 2026-10-21
+
+### Added
+- **Turntable (View ▸ Camera ▸ Turntable).** The 3D view turns the model slowly about
+  its up direction, for presenting a result or checking a dense cloud; dragging steers
+  it, and it carries on when you let go. Its toolbox sets the seconds per turn and
+  **Record one turn** saves exactly one turn of the view as a looping video (WebM, or
+  MP4 in Safari). A new guide article, **The 3D View**, covers navigation, the view
+  presets and the turntable.
 - **Example project and tutorial.** New users without photos of their own can open an
   example from the New Project dialog (**New here? Open the example project**) or the
   project picker (**Try an example**): 42 drone photos of Aukerman Park, Ohio, from
@@ -197,12 +325,6 @@ Notable changes to websfm. The format follows
 - **Accuracy & datum…** on each Reference Data row declares a raster's horizontal
   accuracy and, for a DEM, its vertical datum, accuracy and offset. Before, only a
   low-confidence import asked for these, so Fill Z could refuse with no way to fix it.
-- **Find GCPs** matches the orthophoto to a georeferenced reference coarse to fine.
-  It tolerates rotation and a different resolution, finds a small block inside a
-  regional reference, and starts from the photos' GPS when the orthophoto is not yet
-  georeferenced. Each candidate shows a confidence, a residual and an accuracy taken
-  from the reference's pixel size. Candidates are spread over the block, and none is
-  added until you tick it.
 - **Quality gates and editable recipes in the Workflow Builder**: a Quality Gate
   block checks a Quality Report metric (registered images, reprojection error, track
   length, dense coverage …) after a stage and, when it fails, pauses, stops or jumps
@@ -220,6 +342,82 @@ Notable changes to websfm. The format follows
   read node by node from its own octree, so a 93 million-point survey opens in seconds
   instead of minutes. The 3D view, crop, DEM, exports and 3D Tiles work on it as on any
   other large cloud.
+
+### Changed
+- **Sparse Reconstruction uses every core for its bundle adjustment.** Where the page
+  can share memory with its workers (it can when served as the app is: Chrome,
+  cross-origin isolated), the bundle adjustment runs on up to 16 threads, and gives the
+  same result as on one, bit for bit. On 1,600 synthetic cameras it took 20–36 s instead
+  of 62–120 s; on the 347-image quarry set 43 s instead of 92 s.
+- **Orthophotos build on several workers, and faster on one.** Over saved depth maps,
+  the blocks are shared among the compute workers: as many as the build predicts to be
+  fastest, since each extra worker keeps a smaller cache of maps and photos. A worker
+  that finishes early takes over blocks from a busier one. Photos are decoded a few at
+  a time ahead of when they are needed and kept without their unused alpha channel,
+  depth maps are read without their normals, and the per-cell passes do less work. The
+  orthophoto is the same, pixel for pixel. Quarry at 12,000 pixels across: 18 minutes
+  on one worker before, now 14 on one and under 6 on six.
+- **Imported images stop depending on the original files.** Once an image's copy is
+  written to the project, websfm reads the copy, so moving, renaming or deleting the
+  originals afterwards (or a cloud-sync folder freeing them) no longer breaks images in
+  the open session.
+- **Workflow Match blocks pick their pairing per project.** A new Match Features block
+  starts on **auto** pairing: Preselect when images have camera positions, Sequential
+  for video frames, otherwise Exhaustive, the same as the Match Features dialog. A
+  workflow used to match a video set exhaustively.
+- **A long orthophoto or DEM reports its progress.** The progress bar names the block
+  or group being built, and the log says how far the run has got (blocks done, or map
+  visits while a group of blocks is still open) and roughly how long is left: after half
+  a minute, then after 1, 2 and 4 minutes, then every 5, so a long run does not fill the
+  log. A fine orthophoto used to stay silent until the end.
+- **Counts read as English.** Log lines, reports and dialogs say "1 image" and
+  "3 images" instead of "image(s)", and the verb agrees where it follows.
+- **Georeferencing moved to the Reconstruct tab**, between Sparse and Dense, where it
+  belongs in the pipeline: Find GCPs, Georeference and Scale Bars. Edit GCPs is a mode,
+  so it stays a tool, now in Tools ▸ Images ▾ next to Edit mask. Every Tools group is
+  now a menu.
+- **Orthophoto seams**: the mosaic now chooses where seams run by graph cut, so they
+  avoid roofs and tree crowns, and hides them by multiband blending, which keeps each
+  photo's detail instead of averaging two photos across the seam band. Both are
+  settings in Build Orthophoto (Seamlines, Seam blending); the old nearest-nadir seams
+  and feathering are still offered. Colour balance may now correct a photo by up to
+  ±2 stops (was ±1), for flights whose auto-exposure drifted.
+- **Fisheye lenses: k4 in Auto self-calibration**: a four-term fisheye now gets its k4
+  refined last, after k1–k3. If that fit would fold the lens curve, the pass is solved
+  again without k4 rather than discarded.
+- **Console `select`** now selects an image by name; the 3D lasso is `lasso`.
+
+### Fixed
+- An orthophoto over a DEM or mesh in a projected CRS was up to ten times slower than
+  one in the model's local frame: the georeferenced frame is not exactly affine, so
+  every cell took the full transform and no part of a photo was skipped as out of view.
+  It now uses local fits checked against the exact frame. Quarry at 4,096 pixels across
+  took 4 minutes instead of 14.
+- Fusing a very large dense cloud (about 100 million points) failed near its end:
+  Chrome holds at most 2 GB in one buffer and 16 GB for a tab, whatever the machine
+  has. Fusion now finishes each slab straight into the cloud, splits a piece too large
+  for one buffer, caps the memory budget at 12 GB and starts on fresh workers. Quarry
+  at Medium, step 1, fuses 98 M points in under 10 minutes. Planning shows its
+  progress, and the consistency check stops comparing once every pixel is settled.
+- An orthophoto run no longer fails when the open project's clouds fill the tab:
+  the photo cache leaves room for them and shrinks if the browser refuses memory.
+  Orthophotos also decode fewer photos. On quarry the colour balance and seamline
+  survey dropped from about 4 minutes to 1.5.
+- A GeoTIFF nodata value of three characters or fewer ("255", "0") was read back as
+  a different value by other programs.
+- An orthophoto over very large scans (satellite frames past one canvas) refused to
+  run, or fell back to depth-map colour: it reserved memory for each photo at its native
+  size, and read photos at twice the resolution it asked for.
+- In a floating-point Cloud-Optimized GeoTIFF with NaN as nodata, an empty cell
+  turned the overview cells above it empty too, and partial edge tiles were padded with
+  0 instead of nodata.
+- After moving a project into a folder, its images, masks and products could no longer
+  be read until it was reopened by hand. A moved project now reopens from its new
+  location by itself, in both directions.
+
+## [0.3.0] — 2026-10-18
+
+### Added
 - **Command console**: every ribbon command can be typed (by a short name, its id, or
   its id as words), taken from the ribbon itself, with per-command usage (`help
   <command>`, `help <tab>`). New commands: `run detect match sparse` and `run workflow
@@ -294,26 +492,11 @@ Notable changes to websfm. The format follows
   lower detail, and the map says when it is offline instead of looking broken.
 - **New app icon**: two cameras triangulating a point. The browser-tab icon has a
   transparent background and follows the browser's light or dark theme.
-- **Workflow Builder**: arrange pipeline steps as blocks, choose per step whether to
-  reuse or rerun existing results, and save recipes and run history with the project.
-- **Tools menus with floating toolboxes**, plus many new tools:
-  - point clouds: normals, transform, point-pair alignment, ICP, cloud-to-cloud and
-    cloud-to-mesh distance, sections;
-  - meshes: clean, smooth, decimate, crop, sample to points, area and volume;
-  - DEMs: contours (GeoJSON/DXF), slope, aspect, hillshade, clip to polygon;
-  - model: optimize cameras, region of interest, orient model;
-  - images: image quality.
 - **Ground classification and terrain models (DTM)**: Tools ▸ Point Cloud ▸ Classify
   ground labels every point as ground, above ground or low noise (standard LAS
   classes, kept in LAS/LAZ/PLY exports) with a cloth simulation filter. Build DEM ▸
   Points ▸ Ground only then makes a bare-earth DTM, and the new Fill enclosed gaps
   option interpolates the ground under removed buildings.
-- **Measurements** on DEMs, orthophotos and the 2D map: ruler, area, elevation
-  profile (CSV export) and cut/fill volume. Measurements are named and saved.
-- **Scale bars**: give an object capture real-world units from known distances. New
-  "marker" points carry image marks but no surveyed position.
-- **Rectangle and lasso selection** in the 3D viewer, to delete or keep points.
-- **Gradual selection**: remove weak tie points from the sparse model and re-adjust.
 - **DEM vs reference DEM** in the Quality Report (Evaluate ▸ DEM vs Reference):
   bias, NMAD, RMSE, LE90 and overlap against an imported reference DEM, with a
   difference map and histogram, also in the exported report.
@@ -326,25 +509,10 @@ Notable changes to websfm. The format follows
 - The **DEM / Orthophoto ribbon tab** offers the same actions for a computed and an
   imported raster: a computed one gains Symbology… and Remove, an imported one
   Download.
-- **Find GCPs**: match photos against a reference orthophoto to propose
-  control-point candidates for review.
-- **WebGPU feature matching**, with automatic fallback to the CPU.
-- **DISK** learned detector, with its own LightGlue matcher.
-- Computed DEMs and orthophotos can be shown on the 2D map. Projects without a CRS
-  get a top-down map in the model's own frame.
-- Orthophotos can be projected onto a DEM, the mesh or a fitted plane, at their own
-  resolution.
 - **Orthophotos at the photos' own ground resolution**: no longer capped at 4,096
   pixels — up to about 28,000 pixels square. They are built in blocks and stored as a
   tiled Cloud-Optimized GeoTIFF, and the orthophoto tab and the 2D map draw them at
   full resolution as you zoom in.
-- One-click suggestion of a projected CRS (UTM or polar stereographic) for
-  geotagged projects.
-- Image groups (folders) in the sidebar, a per-sensor GNSS antenna offset, and film
-  width (mm) as the scale field for film scans.
-- Extra point attributes (such as intensity and GPS time) survive import and are
-  written to PLY and LAS exports.
-- The theme can follow the operating system.
 - **Fiducial import and export** for film scans (Import / Export ▸ Image Fiducials
   and Camera Fiducials): each image's marks in pixels, and the camera's calibrated
   marks in mm with their slots, focal length and principal point, as CSV that
@@ -360,120 +528,6 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
-- **DEMs take each cell's median height by default** (was the maximum). In a cell on a
-  slope the maximum is the cell's highest corner: on Rachel Glacier's rock at 20 m cells
-  it stood 14 m above the reference DEM (NMAD 8.2 m), the median 0.7 m (5.9 m). On flat
-  Casa Grande the two agree within 0.1 m, so Max remains for small cells over roofs and
-  canopy. A cloud too big for the median's buffer takes the mean, and the log says so.
-- **Reference DEMs past 2 GB are read over the project.** A DEM too large for one buffer
-  (a REMA 2 m tile, 25,100² cells) is no longer refused when the project's images have
-  positions or it has GCPs: only the window over them (half their extent around them, at
-  least 1 km) is read, at a coarser cell size if even that does not fit (Casa Grande's
-  30,000 × 36,990 reference at 2 m instead of 1 m), and the map still draws the whole
-  file.
-- **Fusion on all workers.** Over saved depth maps, fusion spreads its slabs over up
-  to 8 workers, as many as the memory budget holds; the finished slabs wait in
-  WebAssembly memory, outside the tab's buffers. Quarry, 347 maps: 478 → 308 s at
-  Medium, 922 → 200 s at half the merge cell (208 M points), the same cloud.
-- **Text clouds past 89 million points.** XYZ and ASCII PLY imports past the browser's
-  2 GB buffer cap continue in WebAssembly memory, up to about 715 million points.
-- **WebAssembly memories are shared out.** A tab holds only about 125 of them (Chrome
-  reserves address space for each), so arrays made together share one, and an
-  allocation the browser refuses falls back to an ordinary buffer where it fits.
-- **Dense clouds past the browser's buffer limits.** Fusion keeps its merge cells, and
-  a finished cloud past 2 GB, in WebAssembly memory, which Chrome's 2 GB per-buffer cap
-  and 16 GB of buffers per tab do not apply to. One piece of fusion holds up to about
-  1.07 billion merge cells (was 134 million) and a cloud up to about 1.4 billion points
-  (was 178 million); such a cloud saves, reopens and gets its octree like any other, and
-  is drawn through the octree. The merge cells no longer count against the tab's
-  buffers, so fusion may use the whole memory budget.
-- **Meshes past 4 GB.** A Poisson solve too large for a 32-bit WebAssembly heap (4 GB)
-  runs on a 64-bit build of the solver (16 GB) in browsers with 64-bit WebAssembly
-  memory, and a 32-bit solve that runs out is retried there. The 64-bit build gives the
-  same mesh and is about a sixth slower, so it runs only when needed; the log says
-  which one ran. A dense cloud past 178 million points can be meshed (quarry, 208 M
-  points, depth 9: 586 k triangles in 3.6 min). A solve past 16 GB stops with a message
-  that says so, instead of a bare "unreachable".
-- **The memory budget follows the machine.** Settings ▸ Compute ▸ Memory safety limit is
-  half the memory the browser reports by default and can be raised to all of it; it
-  stopped at 6 GB by default and 12 GB by hand, written when Chrome reported at most
-  8 GB (Chrome 156 reports up to 32). Runs keep at most 12 GB of it in buffers, as
-  before; fusion may use the rest. A saved manual limit is kept.
-- **Layers panel: the layers on the map, as in a GIS.** View ▸ Map ▸ Layers opens a
-  small panel over the 2D map listing the layers on it (imported reference rasters
-  and polygon files, the DEM, the orthophoto and contour lines) in one stack, top
-  first. The sidebar holds everything; a layer goes into the panel with its sidebar
-  checkbox or In Layers on its ribbon tab (formerly On Map), and a newly built DEM,
-  orthophoto or contour set goes there by itself. In the panel, drag a row or use
-  ▲ ▼ to change what draws on top, untick it to hide it without taking it off, or
-  take it off with ✕. Each row is one line; the selected one's opacity slider and
-  Zoom to sit in a strip below the list, and the basemap is the last row. The order
-  and what is hidden are saved with the project; a layer added later goes on top.
-  Before, the order was fixed (reference rasters, then the DEM, then the orthophoto).
-- **Footprints are an overlay; the Shapefiles section is gone.** The image footprints
-  from Footprints from poses are drawn above every layer, and View ▸ Map ▸ Footprints
-  shows and hides only them (it hid contour lines and imported polygons too). They
-  have no sidebar row: an image's expanded row says whether it has one, and a
-  right-click on a footprint or Export ▸ Footprints downloads them as GeoJSON or
-  removes them. Contour lines are listed in Products and imported polygon files in
-  Reference Data, each a layer with its own checkbox and opacity.
-- **GCPs toggle on the map.** View ▸ Map ▸ GCPs shows or hides the GCP and marker
-  symbols, as Cameras does for the camera positions. Editing GCPs always shows them.
-- **Every processing dialog reads in steps.** Sparse Model, Depth Maps, Dense Cloud,
-  DEM, Orthophoto, Mesh and Texture now show their settings as numbered steps in the
-  order the run applies them, like Detect and Match Features, each with a line on what
-  it does to this project with the current values (for example "42 depth maps at up
-  to 1,500 px" or "About 3 points per cell"). A step that cannot matter is dimmed and
-  says why. Depth Maps had its groups in reverse order, and DEM and Orthophoto had none.
-  The guide articles follow the same order.
-- **Map layers have a checkbox in the sidebar.** DEM, orthophoto, reference rasters,
-  contour lines and polygon files go on the 2D map (into its Layers panel) with a
-  checkbox on their row, like a cloud's 3D checkbox, instead of the ◉ marker and the
-  right-click menu alone (which stays, as Add to / Remove from Layers). A layer the
-  map cannot place yet (a product to rebuild, a raster without a CRS) has it greyed,
-  with the reason as its tooltip.
-- **Sparse Reconstruction uses every core for its bundle adjustment.** Where the page
-  can share memory with its workers (it can when served as the app is: Chrome,
-  cross-origin isolated), the bundle adjustment runs on up to 16 threads, and gives the
-  same result as on one, bit for bit. On 1,600 synthetic cameras it took 20–36 s instead
-  of 62–120 s; on the 347-image quarry set 43 s instead of 92 s.
-- **Orthophotos build on several workers, and faster on one.** Over saved depth maps,
-  the blocks are shared among the compute workers: as many as the build predicts to be
-  fastest, since each extra worker keeps a smaller cache of maps and photos. A worker
-  that finishes early takes over blocks from a busier one. Photos are decoded a few at
-  a time ahead of when they are needed and kept without their unused alpha channel,
-  depth maps are read without their normals, and the per-cell passes do less work. The
-  orthophoto is the same, pixel for pixel. Quarry at 12,000 pixels across: 18 minutes
-  on one worker before, now 14 on one and under 6 on six.
-- **Imported images stop depending on the original files.** Once an image's copy is
-  written to the project, websfm reads the copy, so moving, renaming or deleting the
-  originals afterwards (or a cloud-sync folder freeing them) no longer breaks images in
-  the open session.
-- **Workflow Match blocks pick their pairing per project.** A new Match Features block
-  starts on **auto** pairing: Preselect when images have camera positions, Sequential
-  for video frames, otherwise Exhaustive, the same as the Match Features dialog. A
-  workflow used to match a video set exhaustively.
-- **A long orthophoto or DEM reports its progress.** The progress bar names the block
-  or group being built, and the log says how far the run has got (blocks done, or map
-  visits while a group of blocks is still open) and roughly how long is left: after half
-  a minute, then after 1, 2 and 4 minutes, then every 5, so a long run does not fill the
-  log. A fine orthophoto used to stay silent until the end.
-- **Counts read as English.** Log lines, reports and dialogs say "1 image" and
-  "3 images" instead of "image(s)", and the verb agrees where it follows.
-- **Georeferencing moved to the Reconstruct tab**, between Sparse and Dense, where it
-  belongs in the pipeline: Find GCPs, Georeference and Scale Bars. Edit GCPs is a mode,
-  so it stays a tool, now in Tools ▸ Images ▾ next to Edit mask. Every Tools group is
-  now a menu.
-- **Orthophoto seams**: the mosaic now chooses where seams run by graph cut, so they
-  avoid roofs and tree crowns, and hides them by multiband blending, which keeps each
-  photo's detail instead of averaging two photos across the seam band. Both are
-  settings in Build Orthophoto (Seamlines, Seam blending); the old nearest-nadir seams
-  and feathering are still offered. Colour balance may now correct a photo by up to
-  ±2 stops (was ±1), for flights whose auto-exposure drifted.
-- **Fisheye lenses: k4 in Auto self-calibration**: a four-term fisheye now gets its k4
-  refined last, after k1–k3. If that fit would fold the lens curve, the pass is solved
-  again without k4 rather than discarded.
-- **Console `select`** now selects an image by name; the 3D lasso is `lasso`.
 - **Region box handles**: while the Region toolbox is open, the box has drag handles
   in the 3D view: one per face moves that face, the centre one moves the whole box.
   The number fields follow, and Apply stores it as before.
@@ -519,48 +573,12 @@ Notable changes to websfm. The format follows
   changed). The Cloud-Optimized GeoTIFF export is now the stored file itself (always
   DEFLATE). PNG and JPEG exports are full resolution and offered up to 8,192 × 8,192
   pixels. Orthophoto builds follow the memory budget in Settings ▸ Compute.
-- Feature matching is reproducible: the same images now give the same matches in
-  every project, where before a few percent of image pairs varied slightly.
-- Sharper orthophotos: colour now comes from the original photos at full resolution
-  instead of the lower-resolution depth maps.
 - Orthophotos are now mosaicked by default: each area comes from the photo looking
   most straight down on it, exposure is balanced between photos, and seams are
   cross-faded. The previous per-pixel "Best match" and "Average" modes remain
   available.
-- Dense clouds are more complete: fusion's matching-cost gate is now a fixed, looser
-  default (0.8) instead of one adapted to each dataset, which was discarding real
-  surface. On the ETH3D benchmark this closes the gap to COLMAP at 2 cm with no loss of
-  accuracy.
-- Camera positions from EXIF GPS now constrain bundle adjustment automatically.
-- WebGPU is used automatically for dense depth maps when the browser supports it.
-- SIFT uses RootSIFT descriptors and keeps coarse-scale keypoints first, which gives
-  more multi-view tracks. Older projects are converted when matching runs.
-- The default matching ratio changed from 0.75 to 0.8.
-- Detection and matching settings are shown in the order they run, each with a live
-  preview of its effect. A setting that would have no effect is greyed out with the
-  reason.
-- DEMs and orthophotos cover the dense core of the cloud by default. Choose
-  "All points" to cover everything.
-- Much larger projects fit in browser memory. A 347-image project now runs dense
-  reconstruction at Medium quality where it was refused before, and fusion splits a
-  cloud that does not fit in memory at once (tested at 69 M points).
-- SuperPoint weights are no longer served by the app because of their
-  non-commercial license. You can supply the file yourself.
 
 ### Performance
-- **Sparse reconstruction outside bundle adjustment.** The model's reprojection
-  statistics, the self-calibration fit and guided track extension stopped allocating per
-  observation, and guided extension only tries the cameras that can see a point. Quarry
-  (347 images): 82 → 77 s, the identical model.
-- **Depth maps on large scans, and the cross-view filter.** On a block of 58 film
-  scans (97 MP) at High: masks and grey planes are built once per image instead of for
-  every map they serve, the speckle filter is 5.7× faster (same output), previews are
-  at most 2,048 px, greyscale scans are cached as one channel, and the next map's
-  images are prepared while the current one matches. The cross-view filter checks each
-  map against at most 12 overlapping views with enough parallax, and sizes its workers
-  by memory: 30 → 4.4 min. Depth maps and filter together: 54 → 26 min. Fusion
-  compares each map with at most 12 views too, and its planning passes read only depth
-  and cost: 22 → 7.8 min, the same cloud for the planning change.
 - **SfM on big blocks**: bundle adjustment solves its camera system exactly with a
   sparse Cholesky factorisation instead of a capped iterative solve, wherever the
   block has more than about 100 cameras. Registration scans only the image pairs a new
@@ -575,74 +593,8 @@ Notable changes to websfm. The format follows
   the bounding box's volume, so on a surface each point compared against thousands of
   candidates; the grid now follows the occupancy, and the neighbour search is exact
   (results unchanged to 0.01 %).
-- Feature detection runs more images in parallel: its memory limit now follows the
-  machine budget in Settings ▸ Compute instead of a fixed 1 GB.
-- Project opening: the slowest step went from 11.6 s to 0.18 s on a 300 k-point
-  model. Keypoints and matches now load on demand, and a progress bar names each
-  loading step.
-- Bundle adjustment stops once it has converged (608 → 205 s on one dataset), and
-  sparse reconstruction is a further 14–50 % faster.
-- Meshing is 7.4× faster end to end, and the solve itself 15× faster.
-- The dense cross-view filter runs in parallel and is about 3× faster
-  (444 → 101 s). Fusion is about 2× faster on large sets.
-- Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
-- **Importing masks of large scans no longer knocks out the GPU.** Each imported mask
-  was drawn into a GPU-backed canvas before it was saved; three 10,000-pixel scan masks
-  at once ran Chrome's GPU process out of memory, and after three crashes the tab fell
-  back to software rendering: matching and depth maps then ran on the CPU emulation,
-  many times slower, with no error. Workers now draw such pixels on the CPU.
-- **DISK no longer retries WebGPU on every tile.** Its WebGPU path lacks an operator;
-  the first failure now keeps every later input on the CPU instead of only larger ones.
-- **Local products of a historical block are level.** A block that mixes vertical
-  photos with unbalanced left and right obliques (TMA film) took its vertical from the
-  mean viewing direction, 21° off on Rachel Glacier, so the local DEM and ortho were
-  projected onto a tilted plane and Find GCPs could not align them with a map. The
-  viewing directions are now a trimmed mean that keeps the block's verticals (0.3° off).
-- **High-quality depth maps on big blocks no longer run the tab out of memory.** A
-  worker now waits while more than two of its finished maps are still being saved (a
-  slow disk queued 0.6 GB per map on the page), the cross-view filter starts on a
-  fresh pool and splits by memory, not by map count.
-- **Film scans in dense, orthophoto and exports.** Depth maps and orthophotos of a
-  film block failed at once with "could not be cloned": the fiducial transforms
-  reached the workers as Vue proxies.
-- **A DEM from a large georeferenced cloud read only the top of its octree** (the cell
-  size was compared in metres against model units): 8,270 of 60 M points.
-- **16-bit WhiteIsZero TIFFs no longer import as negatives.** The native decoder
-  inverted them twice; it now matches the JavaScript fallback bit for bit. 1-bit
-  (bilevel) TIFF scans, CCITT Group 4 included, now import through the native decoder.
-- **The map legend matches the map.** It listed one purple camera triangle while camera
-  positions from EXIF draw as blue triangles, and drew GCPs as diamonds while the map
-  drew squares. The legend now lists exactly the symbols on the map, cameras by the
-  source of their position (EXIF, imported, model), control and check points apart,
-  and leaves out what a ribbon toggle hides; GCPs draw as diamonds on the map too.
-- An orthophoto over a DEM or mesh in a projected CRS was up to ten times slower than
-  one in the model's local frame: the georeferenced frame is not exactly affine, so
-  every cell took the full transform and no part of a photo was skipped as out of view.
-  It now uses local fits checked against the exact frame. Quarry at 4,096 pixels across
-  took 4 minutes instead of 14.
-- Fusing a very large dense cloud (about 100 million points) failed near its end:
-  Chrome holds at most 2 GB in one buffer and 16 GB for a tab, whatever the machine
-  has. Fusion now finishes each slab straight into the cloud, splits a piece too large
-  for one buffer, caps the memory budget at 12 GB and starts on fresh workers. Quarry
-  at Medium, step 1, fuses 98 M points in under 10 minutes. Planning shows its
-  progress, and the consistency check stops comparing once every pixel is settled.
-- An orthophoto run no longer fails when the open project's clouds fill the tab:
-  the photo cache leaves room for them and shrinks if the browser refuses memory.
-  Orthophotos also decode fewer photos. On quarry the colour balance and seamline
-  survey dropped from about 4 minutes to 1.5.
-- A GeoTIFF nodata value of three characters or fewer ("255", "0") was read back as
-  a different value by other programs.
-- An orthophoto over very large scans (satellite frames past one canvas) refused to
-  run, or fell back to depth-map colour: it reserved memory for each photo at its native
-  size, and read photos at twice the resolution it asked for.
-- In a floating-point Cloud-Optimized GeoTIFF with NaN as nodata, an empty cell
-  turned the overview cells above it empty too, and partial edge tiles were padded with
-  0 instead of nodata.
-- After moving a project into a folder, its images, masks and products could no longer
-  be read until it was reopened by hand. A moved project now reopens from its new
-  location by itself, in both directions.
 - Picking a CRS from the search list by clicking it did nothing in Project Settings
   and the import dialogs; the field went back to the old CRS.
 - Calibration and camera-position imports no longer assign unrecognised columns by
@@ -679,6 +631,98 @@ Notable changes to websfm. The format follows
   refused it and the model-frame map could not place it.
 - An imported orthophoto's tab showed "no data" under the cursor; it now reads the
   pixel's band values.
+- Images without a focal length in their metadata (no EXIF) reconstructed on a guessed
+  field of view that could be far off, which broke scenes or left most cameras out.
+  The focal length is now estimated from the matched image pairs first (ETH3D
+  playground and terrace: from broken to 34 of 38 and 23 of 23 cameras).
+- A camera could be registered in the wrong place and stay there. After the
+  reconstruction, each camera is now checked against the matches with its strongest
+  partner images; cameras that disagree are taken out and registered again, or left
+  out if they still disagree.
+- COLMAP database import dropped the k4–k6 terms of `FULL_OPENCV` cameras without a
+  warning.
+- The same matches could reconstruct slightly differently in different sessions (the
+  solver's input order followed random image ids); it now follows image names.
+
+## [0.2.0] — 2026-10-12
+
+### Added
+- **Find GCPs** matches the orthophoto to a georeferenced reference coarse to fine.
+  It tolerates rotation and a different resolution, finds a small block inside a
+  regional reference, and starts from the photos' GPS when the orthophoto is not yet
+  georeferenced. Each candidate shows a confidence, a residual and an accuracy taken
+  from the reference's pixel size. Candidates are spread over the block, and none is
+  added until you tick it.
+- **Workflow Builder**: arrange pipeline steps as blocks, choose per step whether to
+  reuse or rerun existing results, and save recipes and run history with the project.
+- **Tools menus with floating toolboxes**, plus many new tools:
+  - point clouds: normals, transform, point-pair alignment, ICP, cloud-to-cloud and
+    cloud-to-mesh distance, sections;
+  - meshes: clean, smooth, decimate, crop, sample to points, area and volume;
+  - DEMs: contours (GeoJSON/DXF), slope, aspect, hillshade, clip to polygon;
+  - model: optimize cameras, region of interest, orient model;
+  - images: image quality.
+- **Measurements** on DEMs, orthophotos and the 2D map: ruler, area, elevation
+  profile (CSV export) and cut/fill volume. Measurements are named and saved.
+- **Scale bars**: give an object capture real-world units from known distances. New
+  "marker" points carry image marks but no surveyed position.
+- **Rectangle and lasso selection** in the 3D viewer, to delete or keep points.
+- **Gradual selection**: remove weak tie points from the sparse model and re-adjust.
+- **Find GCPs**: match photos against a reference orthophoto to propose
+  control-point candidates for review.
+- **WebGPU feature matching**, with automatic fallback to the CPU.
+- **DISK** learned detector, with its own LightGlue matcher.
+- Computed DEMs and orthophotos can be shown on the 2D map. Projects without a CRS
+  get a top-down map in the model's own frame.
+- Orthophotos can be projected onto a DEM, the mesh or a fitted plane, at their own
+  resolution.
+- One-click suggestion of a projected CRS (UTM or polar stereographic) for
+  geotagged projects.
+- Image groups (folders) in the sidebar, a per-sensor GNSS antenna offset, and film
+  width (mm) as the scale field for film scans.
+- Extra point attributes (such as intensity and GPS time) survive import and are
+  written to PLY and LAS exports.
+- The theme can follow the operating system.
+
+### Changed
+- Feature matching is reproducible: the same images now give the same matches in
+  every project, where before a few percent of image pairs varied slightly.
+- Sharper orthophotos: colour now comes from the original photos at full resolution
+  instead of the lower-resolution depth maps.
+- Dense clouds are more complete: fusion's matching-cost gate is now a fixed, looser
+  default (0.8) instead of one adapted to each dataset, which was discarding real
+  surface. On the ETH3D benchmark this closes the gap to COLMAP at 2 cm with no loss of
+  accuracy.
+- Camera positions from EXIF GPS now constrain bundle adjustment automatically.
+- WebGPU is used automatically for dense depth maps when the browser supports it.
+- SIFT uses RootSIFT descriptors and keeps coarse-scale keypoints first, which gives
+  more multi-view tracks. Older projects are converted when matching runs.
+- The default matching ratio changed from 0.75 to 0.8.
+- Detection and matching settings are shown in the order they run, each with a live
+  preview of its effect. A setting that would have no effect is greyed out with the
+  reason.
+- DEMs and orthophotos cover the dense core of the cloud by default. Choose
+  "All points" to cover everything.
+- Much larger projects fit in browser memory. A 347-image project now runs dense
+  reconstruction at Medium quality where it was refused before, and fusion splits a
+  cloud that does not fit in memory at once (tested at 69 M points).
+- SuperPoint weights are no longer served by the app because of their
+  non-commercial license. You can supply the file yourself.
+
+### Performance
+- Feature detection runs more images in parallel: its memory limit now follows the
+  machine budget in Settings ▸ Compute instead of a fixed 1 GB.
+- Project opening: the slowest step went from 11.6 s to 0.18 s on a 300 k-point
+  model. Keypoints and matches now load on demand, and a progress bar names each
+  loading step.
+- Bundle adjustment stops once it has converged (608 → 205 s on one dataset), and
+  sparse reconstruction is a further 14–50 % faster.
+- Meshing is 7.4× faster end to end, and the solve itself 15× faster.
+- The dense cross-view filter runs in parallel and is about 3× faster
+  (444 → 101 s). Fusion is about 2× faster on large sets.
+- Saving after a 3D edit writes only the clouds that changed.
+
+### Fixed
 - Building a mesh from a large dense cloud (around 17 million points or more) failed
   with "Map maximum size exceeded" after the surface was solved.
 - Georeferencing in polar regions was off by metres. Error-free control at 80°S now
@@ -691,14 +735,6 @@ Notable changes to websfm. The format follows
 - Oblique drone captures are levelled, so DEMs and orthophotos are no longer tilted.
 - Datasets that start with near-stationary bursts now reconstruct fully (one
   dataset: 7 → 127 of 127 cameras).
-- Images without a focal length in their metadata (no EXIF) reconstructed on a guessed
-  field of view that could be far off, which broke scenes or left most cameras out.
-  The focal length is now estimated from the matched image pairs first (ETH3D
-  playground and terrace: from broken to 34 of 38 and 23 of 23 cameras).
-- A camera could be registered in the wrong place and stay there. After the
-  reconstruction, each camera is now checked against the matches with its strongest
-  partner images; cameras that disagree are taken out and registered again, or left
-  out if they still disagree.
 - 16-bit TIFFs had low contrast and gave few keypoints. Large TIFF batches used
   excessive memory.
 - Tiled detection created duplicate keypoints, which cost matches.
@@ -711,10 +747,6 @@ Notable changes to websfm. The format follows
   project copy.
 - Some LAS files with 8-bit colour imported black, and some LAZ files failed to load.
 - Cancelling GPU matching did not stop the run.
-- COLMAP database import dropped the k4–k6 terms of `FULL_OPENCV` cameras without a
-  warning.
-- The same matches could reconstruct slightly differently in different sessions (the
-  solver's input order followed random image ids); it now follows image names.
 
 ## [0.1.0-beta.1] — 2026-08-10
 

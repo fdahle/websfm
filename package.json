@@ -1,7 +1,7 @@
 {
   "name": "websfm",
   "private": true,
-  "version": "0.1.0-beta.1",
+  "version": "0.4.0",
   "description": "Structure-from-Motion and photogrammetry, entirely in the browser",
   "license": "MIT",
   "repository": {
@@ -21,6 +21,7 @@
     "build": "vite build",
     "build:release": "npm run build && npm run check:release",
     "check:release": "node scripts/check-release.mjs",
+    "release": "node scripts/release.mjs",
     "fetch:models": "node scripts/fetch-models.mjs",
     "fetch:examples": "node scripts/fetch-examples.mjs",
     "preview": "vite preview",

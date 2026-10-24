@@ -141,6 +141,8 @@ point-pair alignment) act on the view in front and open a small floating toolbox
 it; while one runs, its menu button stays lit. You can drag the toolbox by its title,
 and close it with × or Esc. Hovering a button shows its keyboard shortcut, if it has
 one; **?** (or Other → **Shortcuts**) lists them all, grouped by where they work.
+Other → **What's New** lists what changed in each version; after an update, its badge
+counts the changes since you last looked.
 
 ## If something goes wrong
 When a stage logs an error, a red note at the bottom right says so; click it to open

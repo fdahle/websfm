@@ -61,8 +61,17 @@ npm run typecheck
   reviewed faster, and a bisect can find what broke.
 - **Rust changes:** run `npm run build:wasm` and commit the regenerated `src/wasm/`
   files with the source change. CI checks that they match.
-- **User-visible changes:** update the in-app help (below) and add a line to the
-  `[Unreleased]` section of [CHANGELOG.md](CHANGELOG.md).
+- **User-visible changes:** update the in-app help (below) and add an entry to the
+  `[Unreleased]` section of [CHANGELOG.md](CHANGELOG.md), under Added, Changed,
+  Performance or Fixed. The app shows it in Help ▸ What's New, whose short view keeps
+  only the bold headline and the first sentence, so write it in that order:
+  - **a bold headline:** what a user can now do (`**Meshes in tiles.**`);
+  - **one sentence:** how it works, in the user's terms and the app's labels;
+  - **then the detail and the evidence**, such as bench numbers, which only the Full
+    view shows.
+
+  Leave released sections alone; `npm run release` moves `[Unreleased]` under a new
+  version (see [docs/development.md](docs/development.md#releases)).
 - **Method changes:** update the matching section of [docs/METHODS.md](docs/METHODS.md).
 - **Browser-only behaviour** (WebGPU, storage, dialogs) isn't covered by the unit
   tests. Say in the pull request what you checked by hand, and in which browser.

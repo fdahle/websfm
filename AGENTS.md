@@ -29,6 +29,10 @@ Rules that are easy to miss:
   `matches(e, id)` and a tooltip shows `keyLabel(id)`; never compare `e.key` or type
   "(Ctrl+Z)" by hand ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Keep the in-app help in
   step*, item 4).
+- A user-visible change gets a CHANGELOG.md entry under `[Unreleased]`: a bold
+  headline, then one sentence in user terms, then any detail and evidence (Help ▸
+  What's New shows the first two alone). Never edit a released section or the version
+  by hand; `npm run release` cuts a release.
 - Run `npm test` and `npm run typecheck` before calling a change done.
 - In the final summary, say which help files (`src/guide/`, `src/glossary/`) were
   updated, or that none needed it.

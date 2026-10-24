@@ -19,6 +19,7 @@ import SaveProjectModal from './project/SaveProjectModal.vue'
 import SettingsModal from './app/SettingsModal.vue'
 const DebugSummaryModal = defineAsyncComponent(() => import('./app/DebugSummaryModal.vue'))
 const SystemInfoModal = defineAsyncComponent(() => import('./app/SystemInfoModal.vue'))
+const WhatsNewModal = defineAsyncComponent(() => import('./app/WhatsNewModal.vue'))
 const WorkflowBuilderModal = defineAsyncComponent(() => import('./pipeline/WorkflowBuilderModal.vue'))
 
 // The project-level dialogs, lifted out of App.vue: the project picker and its
@@ -54,6 +55,7 @@ const {
   settingsOpen,
   shortcutsOpen,
   systemInfoOpen,
+  whatsNewOpen,
   workflowBuilderOpen,
 } = storeToRefs(useModalsStore())
 const { setTheme, theme, themePreference } = useTheme()
@@ -291,6 +293,7 @@ const progressSpotlight = computed(() =>
     <AboutModal v-if="aboutOpen" @close="aboutOpen = false" />
     <SystemInfoModal v-if="systemInfoOpen" @close="systemInfoOpen = false" />
     <ShortcutsModal v-if="shortcutsOpen" @close="shortcutsOpen = false" />
+    <WhatsNewModal v-if="whatsNewOpen" @close="whatsNewOpen = false" />
   </Teleport>
 
   <Teleport to="body">

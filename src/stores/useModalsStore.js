@@ -14,6 +14,7 @@ export const useModalsStore = defineStore('modals', () => {
   const aboutOpen = ref(false)
   const systemInfoOpen = ref(false)
   const shortcutsOpen = ref(false) // Help ▸ Shortcuts, or ?
+  const whatsNewOpen = ref(false)
   const projectPickerOpen = ref(false)
   const newProjectOpen = ref(false)
   const newProjectCanCancel = ref(true)
@@ -109,6 +110,7 @@ export const useModalsStore = defineStore('modals', () => {
     aboutOpen,
     systemInfoOpen,
     shortcutsOpen,
+    whatsNewOpen,
     projectPickerOpen,
     newProjectOpen,
     newProjectCanCancel,
