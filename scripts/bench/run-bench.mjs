@@ -997,6 +997,43 @@ try {
         await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
         continue
       }
+      if (entry === 'ui:findgcps') {
+        // Reconstruct ▸ Find GCPs through the dialog itself, as a user runs it: open it,
+        // read the defaults it shows, pick cfg['ui:findgcps'].reference (a raster name)
+        // and matcher, click Find candidates and wait for the result line. Screenshots
+        // of the dialog before and after: <out>.ui-findgcps-{open,result}.png.
+        const ui = cfg['ui:findgcps'] ?? {}
+        const t0 = Date.now()
+        await page.evaluate(() => window.bench.openFindGcps(true))
+        const dlg = page.getByRole('dialog', { name: 'Find GCPs' })
+        await dlg.waitFor()
+        if (ui.reference) {
+          const select = dlg.getByLabel('Reference orthophoto')
+          const label = await select.evaluate(
+            (el, name) => [...el.options].find((o) => o.text.startsWith(name))?.text,
+            ui.reference,
+          )
+          if (!label) throw new Error(`ui:findgcps: no reference raster ${ui.reference} in the dialog`)
+          await select.selectOption({ label })
+        }
+        if (ui.matcher) await dlg.getByLabel('Coarse matcher').selectOption(ui.matcher)
+        const shown = {
+          band: await dlg.getByLabel('Reference band').evaluate((el) => el.selectedOptions[0]?.text),
+          bands: await dlg.getByLabel('Reference band').evaluate((el) => [...el.options].map((o) => o.text)),
+          matcher: await dlg.getByLabel('Coarse matcher').evaluate((el) => el.selectedOptions[0]?.text),
+        }
+        await dlg.screenshot({ path: `${outPrefix}.ui-findgcps-open.png` })
+        await dlg.getByRole('button', { name: 'Find candidates' }).click()
+        const done = dlg.locator('[role="status"]', { hasText: 'verified matches' }).or(dlg.locator('[role="alert"]'))
+        await done.first().waitFor({ timeout: (ui.timeoutMinutes ?? 30) * 60_000 })
+        const message = await done.first().innerText()
+        const rows = await dlg.locator('tbody tr').count()
+        await dlg.screenshot({ path: `${outPrefix}.ui-findgcps-result.png` })
+        result.stages['ui:findgcps'] = { seconds: (Date.now() - t0) / 1000, shown, message, rows }
+        console.log(`== ui:findgcps: ${JSON.stringify(result.stages['ui:findgcps'])}`)
+        await page.evaluate(() => window.bench.openFindGcps(false))
+        continue
+      }
       if (entry === 'layers') {
         // `layers`: polygon files (stable ground, outlines) as map layers, cfg.layers =
         // [{ path, name }]; a stage, so it can follow `reopen`.

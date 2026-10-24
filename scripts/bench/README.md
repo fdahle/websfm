@@ -86,6 +86,17 @@ project:
 - `gcpz`: GCP ▸ Fill Z (overwrite) and Check Z against the imported reference DEM
   (after an `importraster:<tag>` stage); the summary gives the fill counts and Check Z's
   mean / RMS / median / max |Δ|.
+- `findgcps`: Reconstruct ▸ Find GCPs without the dialog. Config `findgcps` =
+  `{ reference, band (a number, or "rgb" for the mean of bands 1–3), matcher (auto, disk,
+  superpoint, sift), stable, dem, datum, demSigma, refSigma, holdout }` (rasters and the
+  stable layer by name; `layers` and `importraster:<tag>` stages bring them in). It first
+  removes the FG… points an earlier run added, and when the project has imported camera
+  poses it fits a georeference from them as truth: `vsPoses` gives each candidate's
+  distance from where that puts its own sparse point (median, p90, max, the mean
+  offset, and the scatter about it).
+- `ui:findgcps`: the same through the dialog itself. It opens Find GCPs, records the
+  band and matcher it shows, picks `ui:findgcps.reference` (and `.matcher`), clicks
+  Find candidates and waits for the result line; `<out>.ui-findgcps-{open,result}.png`.
 - `procTrace: <seconds>` (Linux): the resident memory (VmRSS) of the bench's Chrome
   renderer processes every so often, and its peak (`procPeakGB` in the summary). Unlike
   `memTrace` it counts WebAssembly memory, where fusion keeps its accumulators.

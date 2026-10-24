@@ -7,6 +7,9 @@
 // delta if one is named) with the caller's overrides last. A bench must not quietly run
 // different settings from the app, or its numbers stop meaning anything.
 import { createPinia, setActivePinia } from 'pinia'
+import { createApp, h } from 'vue'
+import FindGcpsModal from '/src/components/modals/georef/FindGcpsModal.vue'
+import '/src/style.css'
 import { useLog } from '/src/composables/useLog.js'
 import { useProjectsStore } from '/src/stores/useProjectsStore.js'
 import { useImagesStore } from '/src/stores/useImagesStore.js'
@@ -15,7 +18,7 @@ import { useMatchesStore } from '/src/stores/useMatchesStore.js'
 import { useReconstructionStore } from '/src/stores/useReconstructionStore.js'
 import { usePosesStore } from '/src/stores/usePosesStore.js'
 // Every other registered project store, so a reopen restores what the app restores.
-import '/src/stores/useExternalStore.js'
+import { useExternalStore } from '/src/stores/useExternalStore.js'
 import { useFootprintsStore } from '/src/stores/useFootprintsStore.js'
 import { parseGeoJson, geoJsonToFootprints, guessNameKey } from '/src/core/io/geojson.js'
 import { useGcpsStore } from '/src/stores/useGcpsStore.js'
@@ -46,7 +49,7 @@ import { LOD_MIN_POINTS } from '/src/core/lod/build.js'
 import { DENSE_TUNING } from '/src/core/tuning.js'
 import { MODEL_CACHE_NAME, modelUrl } from '/src/core/models/registry.js'
 import { cameraPositionCheck, gcpCheck } from '/src/core/eval/positionCheck.js'
-import { applySimilarity } from '/src/core/products/georef.js'
+import { applySimilarity, frameFromSimilarity } from '/src/core/products/georef.js'
 import { frameFromSpec } from '/src/core/products/frameSpec.js'
 import { makeFrameModelResolver, gcpsInPinholeFrame } from '/src/core/sfm/displayFrame.js'
 import { triangulateGcp } from '/src/core/sfm/gcpTriangulation.js'
@@ -83,7 +86,8 @@ Worker.prototype.postMessage = function (message, ...rest) {
   return postMessage.call(this, message, ...rest)
 }
 
-setActivePinia(createPinia())
+const pinia = createPinia()
+setActivePinia(pinia)
 const { onLog, takePending, log } = useLog()
 onLog(() => {
   for (const e of takePending()) console.log('@@LOG ' + JSON.stringify(e))
@@ -207,6 +211,30 @@ const until = async (pred, ms = 100) => {
 // so the run would wait on a dialog nobody sees. Do what the consent does: put the
 // served file (public/models/, copied into the frozen build) into the cache under the
 // URL the app resolves, so ensureReady finds it and loads it unchanged.
+// How far Find GCPs candidates sit from where the pose georeference puts their own
+// sparse points: the median/p90/max distance and the mean offset (a shared shift
+// is the reference's or the poses' datum, not the matcher's scatter).
+function candidateTruth(candidates, points, frame, poseRms) {
+  const d = candidates.map((c) => {
+    const [x, y] = frame.fromSfm(points.xyz(c.pointIndex))
+    return [c.x - x, c.y - y]
+  })
+  if (!d.length) return { n: 0 }
+  const r = d.map(([dx, dy]) => Math.hypot(dx, dy)).sort((a, b) => a - b)
+  const mean = [0, 1].map((k) => d.reduce((s, v) => s + v[k], 0) / d.length)
+  const rest = d.map(([dx, dy]) => Math.hypot(dx - mean[0], dy - mean[1])).sort((a, b) => a - b)
+  return {
+    n: d.length,
+    median: r[r.length >> 1],
+    p90: r[Math.floor(r.length * 0.9)],
+    max: r.at(-1),
+    meanOffset: mean,
+    scatterMedian: rest[rest.length >> 1],
+    over100: r.filter((v) => v > 100).length,
+    poseFitRms: poseRms,
+  }
+}
+
 async function provideModels(ids) {
   const cache = await caches.open(MODEL_CACHE_NAME)
   for (const id of ids) {
@@ -229,6 +257,8 @@ async function liveHeap() {
   }
   return performance.memory?.usedJSHeapSize ?? null
 }
+
+let findGcpsUi = null
 
 window.bench = {
   // What the page holds per item, after a GC: the counts that scale the renderer's
@@ -1364,7 +1394,6 @@ window.bench = {
     return out
   },
 
-  // Control and checkpoint residuals against the current georeference.
   // Reconstruct ▸ Find GCPs without the dialog (config stage `findgcps`): candidates
   // from the orthophoto against the reference raster named `reference` (band `band`, or
   // 'rgb' for the mean of bands 1–3; coarse look by `matcher`: auto, disk, superpoint, sift),
@@ -1396,6 +1425,16 @@ window.bench = {
     // A one-band image (a single Sentinel-2 band) imports as a DEM; read it as an
     // orthophoto, as the raster's kind menu does.
     if (ref.kind !== 'ortho') await ext.setRasterKind(ref.id, 'ortho')
+    // A rerun on the same profile replaces the points an earlier run added (FG1…), so
+    // the report scores this run's control only and no name collides.
+    const stale = gcpsStore.gcps.filter((g) => /^FG\d+$/.test(g.name)).map((g) => g.id)
+    for (const id of stale) gcpsStore.removeGcp(id)
+    // The surveyed camera poses (cameras.csv) as truth: a georeference from them,
+    // fitted before they are turned off, places each candidate's own sparse point.
+    // (An earlier run on this profile may have left them off: they go on for the fit.)
+    for (const p of poses.poses) p.enabled = true
+    const truth = poses.poses.length ? await recon.georeference() : null
+    const truthFrame = truth?.method === 'poses' ? frameFromSimilarity(truth.sim, truth.crs) : null
     if (disablePoses) for (const p of poses.poses) p.enabled = false
     await ext.setRasterAccuracy(refDem.id, { verticalDatum: datum, verticalAccuracy: demSigma })
     if (refSigma) await ext.setRasterAccuracy(ref.id, { horizontalAccuracy: refSigma })
@@ -1414,6 +1453,7 @@ window.bench = {
       referenceId: ref.id,
       band,
       matcher,
+      demId: refDem.id,
       onLog: (m, level, ctx) => useLog().log(m, level, ctx),
       stableSetId: stableSet?.id ?? null,
     })
@@ -1442,6 +1482,9 @@ window.bench = {
       prior: prior && { source: prior.source, rotationDeg: prior.rotationDeg, scale: prior.scale, rms: prior.rms },
       coarse: result.coarse,
       found: candidates.map((c) => ({ local: c.local, x: c.x, y: c.y, confidence: c.confidence, tile: c.tile })),
+      terrain: result.terrain ?? null,
+      // Candidate − pose-georeferenced sparse point, in project units (metres here).
+      vsPoses: truthFrame && candidateTruth(candidates, recon.mainSparseCloud.points, truthFrame, truth.rms),
       matches: result.matches.length,
       fineTiles: result.tiles.length,
       refined: !!result.refined,
@@ -1450,12 +1493,33 @@ window.bench = {
       chosen: chosen.length,
       heights: filled,
       added,
+      replaced: stale.length,
       control: report.control,
       check: report.check,
       georef: report.georef,
       rows: report.rows,
     }
   },
+  // Mount or unmount the Find GCPs dialog on this page (it has no app shell) with the
+  // props PipelineModals gives it, for run-bench `ui:findgcps` to drive.
+  openFindGcps(open) {
+    findGcpsUi?.app.unmount()
+    findGcpsUi?.host.remove()
+    findGcpsUi = null
+    if (!open) return
+    const host = document.body.appendChild(document.createElement('div'))
+    const app = createApp({
+      render: () =>
+        h(FindGcpsModal, {
+          hasRelativeOrtho: !!recon.ortho,
+          referenceOrthos: useExternalStore().orthoRasters,
+          onClose: () => window.bench.openFindGcps(false),
+        }),
+    })
+    app.use(pinia).mount(host)
+    findGcpsUi = { app, host }
+  },
+  // Control and checkpoint residuals against the current georeference.
   async gcpReport() {
     if (!recon.validGeoref) await recon.georeference()
     const rows = await recon.gcpAccuracyReport()
