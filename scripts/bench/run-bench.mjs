@@ -396,6 +396,22 @@ try {
         })
   await page.goto(benchUrl)
   await page.waitForFunction(() => window.benchReady === true, null, { timeout: 120_000 })
+  // A headed run that asks for the GPU must get it: a Chrome that came up on
+  // SwiftShader (it happens now and then in a long desktop session) matches and builds
+  // depth maps in software, hours instead of minutes, with nothing failing. Stop at
+  // once instead; a rerun usually gets the GPU (else log in again or reboot).
+  // `requireGpu: false` lets such a run go on.
+  if (cfg.headed && (cfg.chromeArgs ?? []).includes('--enable-unsafe-webgpu') && cfg.requireGpu !== false) {
+    const adapter = await page.evaluate(async () => {
+      const a = await navigator.gpu?.requestAdapter()
+      return a ? `${a.info?.vendor ?? ''} ${a.info?.architecture ?? ''}`.trim() || 'unknown' : null
+    })
+    console.log(`== gpu: ${adapter ?? 'no adapter'}`)
+    if (!adapter || /swiftshader/i.test(adapter))
+      throw new Error(
+        `GPU run without the GPU (WebGPU adapter: ${adapter ?? 'none'}) — rerun; if it persists, log in again or reboot`,
+      )
+  }
 
   const t0 = Date.now()
   const reuse = !!cfg.profile && stages[0] === 'reopen'
