@@ -6,7 +6,13 @@ import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { findReferenceMatches } from '../workers/computeClient.js'
-import { referenceGcpCandidates, referencePick } from '../core/sfm/referenceGcps.js'
+import { referenceGcpCandidates, referencePick, orthoFrame } from '../core/sfm/referenceGcps.js'
+import { fitSimilarity2d } from '../core/sfm/referenceLook.js'
+import { cameraCenter } from '../core/sfm/geometry.js'
+import { learnedDetector } from '../core/features/learnedDetectors.js'
+import { isModelCached } from '../core/models/modelCache.js'
+import { modelUrl } from '../core/models/registry.js'
+import { useModelsStore } from '../stores/useModelsStore.js'
 import { polygonAreaTest } from '../core/products/vectorLayers.js'
 import { gpsSearchOutline, searchRegion, footprintSearchPoints } from '../core/sfm/referenceMatch.js'
 import { worldToPixel } from '../core/io/rasterSample.js'
@@ -72,13 +78,122 @@ async function searchArea(ortho, cloud, refRaster) {
   return { region: null, source: null }
 }
 
+// A camera counts as vertical within this angle of straight down: its footprint's
+// centre is then where it stands. An oblique's footprint lies kilometres off.
+const VERTICAL_DEG = 20
+
+/**
+ * A similarity from orthophoto native px to reference native px, for the learned
+ * coarse look: { a, b, tx, ty, scale, rotationDeg, rms, used, source } or null.
+ * A georeferenced orthophoto gives it exactly; otherwise the registered cameras' GPS
+ * positions, else the footprint centres of the near-vertical photos, are paired
+ * with their camera centres in the orthophoto.
+ */
+async function orthoPrior(ortho, cloud, refRaster) {
+  const toRef = async (pts, crs) => {
+    await ensureProjection(crs)
+    return pts.map((p) => {
+      const [x, y] = transform(p, crs, refRaster.crs)
+      const px = worldToPixel(refRaster, x, y)
+      return px ? [px.col, px.row] : [NaN, NaN]
+    })
+  }
+  const fit = (pairs, source) => {
+    const m = fitSimilarity2d(pairs)
+    return m && m.scale > 0 ? { ...m, source } : null
+  }
+  if (ortho.crs && ortho.crs !== 'local') {
+    const grid = []
+    for (const u of [0, 0.5, 1]) for (const v of [0, 0.5, 1]) grid.push([u * ortho.width, v * ortho.height])
+    const world = grid.map(([u, v]) => [ortho.originX + u * ortho.gsd, ortho.originY - v * ortho.gsd])
+    const q = await toRef(world, ortho.crs)
+    return fit(
+      grid.map((p, i) => ({ p, q: q[i] })),
+      'the georeferenced orthophoto',
+    )
+  }
+  let frame
+  try {
+    frame = orthoFrame(ortho)
+  } catch {
+    return null
+  }
+  const imagesStore = useImagesStore()
+  const registered = imagesStore.images.filter((im) => cloud.cameras.get(im.uuid))
+  const orthoPx = (cam) => {
+    const [x, y] = frame.fromSfm(cameraCenter(cam))
+    return [(x - ortho.originX) / ortho.gsd, (ortho.originY - y) / ortho.gsd]
+  }
+  const withGps = registered.filter(
+    (im) => Number.isFinite(Number(im.meta?.gpsLon)) && Number.isFinite(Number(im.meta?.gpsLat)),
+  )
+  if (withGps.length >= 3) {
+    const q = await toRef(
+      withGps.map((im) => [Number(im.meta.gpsLon), Number(im.meta.gpsLat)]),
+      'EPSG:4326',
+    )
+    const m = fit(
+      withGps.map((im, i) => ({ p: orthoPx(cloud.cameras.get(im.uuid)), q: q[i] })),
+      "the photos' GPS positions",
+    )
+    if (m) return m
+  }
+  const crs = useProjectsStore().currentCrs
+  if (!crs || crs === 'local') return null
+  const centre = new Map()
+  for (const set of useFootprintsStore().sets) {
+    if (set.kind === 'lines') continue
+    for (const fp of set.footprints || []) {
+      const ring = (fp.rings?.[0] || []).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]))
+      const open =
+        ring.length > 1 && ring[0][0] === ring.at(-1)[0] && ring[0][1] === ring.at(-1)[1] ? ring.slice(0, -1) : ring
+      if (fp.imageId == null || open.length < 3 || centre.has(fp.imageId)) continue
+      centre.set(fp.imageId, [
+        open.reduce((s, p) => s + p[0], 0) / open.length,
+        open.reduce((s, p) => s + p[1], 0) / open.length,
+      ])
+    }
+  }
+  const cos = Math.cos((VERTICAL_DEG * Math.PI) / 180)
+  const vertical = registered.filter((im) => {
+    const cam = cloud.cameras.get(im.uuid)
+    if (!centre.has(im.id)) return false
+    const c = cameraCenter(cam),
+      d = cam.R[2]
+    const a = frame.fromSfm(c),
+      b = frame.fromSfm([c[0] + d[0], c[1] + d[1], c[2] + d[2]])
+    const v = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
+    return -v[2] / Math.hypot(...v) >= cos
+  })
+  if (vertical.length < 3) return null
+  const q = await toRef(
+    vertical.map((im) => centre.get(im.id)),
+    crs,
+  )
+  return fit(
+    vertical.map((im, i) => ({ p: orthoPx(cloud.cameras.get(im.uuid)), q: q[i] })),
+    'the vertical photos’ footprints',
+  )
+}
+
+// The coarse matcher: 'auto' is SuperPoint when its (user-supplied) weights are
+// installed, else DISK, which websfm ships. Learned weights are fetched with consent.
+async function resolveMatcher(matcher) {
+  let id = matcher
+  if (id === 'auto') id = (await isModelCached(modelUrl('superpoint'))) ? 'superpoint' : 'disk'
+  const spec = learnedDetector(id)
+  if (spec && !(await useModelsStore().ensureReady([spec.modelId, spec.matcherModelId])))
+    throw new Error(`${spec.label} and its LightGlue weights are needed for the coarse look`)
+  return id
+}
+
 /**
  * Find candidate controls. `stableSetId` names a polygon layer (stableAreaLayers):
  * only candidates whose reference position lies inside one of its polygons are
  * kept, before they are spread over the block.
  * → { candidates, result, area, stable: { name, rejected } | null }
  */
-export async function findGcpCandidates({ referenceId, band = 1, stableSetId = null, onLog } = {}) {
+export async function findGcpCandidates({ referenceId, band = 1, matcher = 'auto', stableSetId = null, onLog } = {}) {
   const external = useExternalStore(),
     recon = useReconstructionStore(),
     images = useImagesStore(),
@@ -92,6 +207,9 @@ export async function findGcpCandidates({ referenceId, band = 1, stableSetId = n
   if (!file) throw new Error('The original reference raster is unavailable — re-import it')
   await Promise.all([ensureProjection(refRaster.crs), ensureProjection(projects.currentCrs)])
   const area = await searchArea(ortho, cloud, refRaster)
+  const used = await resolveMatcher(matcher)
+  const prior = learnedDetector(used) ? await orthoPrior(ortho, cloud, refRaster) : null
+  const rgb = band === 'rgb'
   const result = await findReferenceMatches(
     {
       local: { cog: ortho.cog ?? null, previewUrl: ortho.previewUrl, width: ortho.width, height: ortho.height },
@@ -99,9 +217,12 @@ export async function findGcpCandidates({ referenceId, band = 1, stableSetId = n
         file,
         width: refRaster.width,
         height: refRaster.height,
-        band: band - 1,
+        band: rgb ? 0 : band - 1,
+        rgb,
         region: area.region,
       },
+      matcher: used,
+      prior,
     },
     { onLog },
   )
@@ -160,5 +281,5 @@ export async function findGcpCandidates({ referenceId, band = 1, stableSetId = n
       verticalDatum: 'unknown',
     }
   })
-  return { candidates, result, area, stable }
+  return { candidates, result, area, stable, matcher: used, prior }
 }

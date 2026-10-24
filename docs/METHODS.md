@@ -1193,7 +1193,27 @@ reference pixels whatever resolution either was read at (overview reads included
 
 1. **Search region**: the georeferenced ortho's footprint, else the registered photos'
    GPS box padded by half its span and ≥ 300 m, else the whole reference.
-2. **Coarse**: SIFT (contrast 0.01, ≤ 2 orientations) on a 1,536-px look at the whole
+2. **Coarse, learned** (default, 2026-10-24; `core/sfm/referenceLook.js`): DISK, or
+   SuperPoint when installed, with LightGlue. Neither is scale- or rotation-invariant
+   (on Rachel DISK held ×0.8–1.25 of the true scale and SuperPoint ×0.8–1.56, both
+   ±15° of the true rotation), so each look reads the reference rect at ≤ 2,000
+   samples and the ortho at the same metres per sample, turns the ortho to the
+   hypothesised rotation (bilinear, into a bounding canvas), detects in 1,024-px tiles
+   (≤ 2,048 strongest keypoints per side), matches with LightGlue and fits a homography
+   (RANSAC 3 working px, 5,000 iterations, ≥ 20 inliers — hist-sfm's minimum; wrong
+   rotations gave ≤ 8). Hypotheses come from a prior similarity ortho px → reference px
+   (`fitSimilarity2d`, refit without pairs > 3× the median residual; refused when the
+   targets do not spread or misfit > ⅓ of their spread): the georeferenced ortho's own
+   grid, else camera centres ↔ GPS, else camera centres of photos within 20° of
+   nadir ↔ their footprint centroids (an oblique footprint lies kilometres from its
+   camera). The prior's rotation, ±15°, then every 30° at its scale, in its predicted
+   footprint padded by ¼ and 3× its misfit. Without a prior (or when it fails): the
+   search region and the ortho assumed to cover the same ground (hist-sfm's rule),
+   × {1, √2, 1/√2, 2, ½}, each at every 30°. A hit is retried ±10°. The reference is the
+   mean of bands 1–3 when it has three or more (film is panchromatic). Rachel (1960s
+   film vs Sentinel-2 RGB): prior 199° (true 199.1°), 130 inliers on the first look;
+   SIFT at the same scale 8 inliers, 11 of 105 matches true.
+   **Coarse, SIFT** (`matcher: 'sift'`): SIFT (contrast 0.01, ≤ 2 orientations) on a 1,536-px look at the whole
    ortho and the search region; mutual ratio 0.75; homography RANSAC (3 px, 2,000
    iterations; ≥ 10 inliers and ≥ 25 %). On failure, 3×3 half-size then 5×5
    quarter-size overlapping windows: any footprint ≤ ¼ (or 1/16) of the region lies
@@ -1204,7 +1224,9 @@ reference pixels whatever resolution either was read at (overview reads included
    Matches gated to ≤ max(32 working px, 3 × coarse p95) of the coarse prediction;
    per-tile homography (2 working px); a tile is kept with ≥ 10 inliers, ≥ 30 %, and
    an inlier bounding box spanning ≥ 20 % of the tile both ways (repeated texture
-   matches itself in a tight cluster). Per-tile models follow relief and doming.
+   matches itself in a tight cluster). Per-tile models follow relief and doming. With
+   a learned coarse look the tiles match the same way, the ortho tile turned to the
+   coarse homography's rotation: SIFT aligned 0 of Rachel's 17 tiles, LightGlue 13.
 4. **Candidates**: sparse tracks with ≥ 2 photo observations within 2 working px of an
    accepted match; reference position = matched feature + the tile homography's
    displacement to the track. Spread: best per cell of a √30 grid, then the next best

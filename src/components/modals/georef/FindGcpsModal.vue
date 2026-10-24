@@ -23,9 +23,22 @@ const gcps = useGcpsStore(),
 const { log } = useLog()
 const selectedReferenceId = ref(props.referenceOrthos[0]?.id ?? ''),
   band = ref(1),
+  matcher = ref('auto'),
   stableSetId = ref('')
 const stableLayers = computed(() => stableAreaLayers())
 const reference = computed(() => external.rasterById(selectedReferenceId.value))
+// A reference with three or more bands is read as their mean (RGB → gray), as film is.
+const bandCount = computed(() => reference.value?.bands || 1)
+watch(
+  selectedReferenceId,
+  () => {
+    band.value = bandCount.value >= 3 ? 'rgb' : 1
+  },
+  { immediate: true },
+)
+const bandValid = computed(
+  () => (band.value === 'rgb' && bandCount.value >= 3) || (band.value >= 1 && band.value <= bandCount.value),
+)
 const ready = computed(
   () =>
     props.hasRelativeOrtho &&
@@ -81,6 +94,7 @@ watch(
   [
     selectedReferenceId,
     band,
+    matcher,
     stableSetId,
     () => recon.ortho,
     () => recon.mainSparseCloud,
@@ -110,6 +124,7 @@ async function find() {
     } = await findGcpCandidates({
       referenceId: selectedReferenceId.value,
       band: band.value,
+      matcher: matcher.value,
       stableSetId: stableSetId.value || null,
       onLog: (m, level, ctx) => log(m, level, ctx),
     })
@@ -228,9 +243,9 @@ const k = (side) => (side === 'local' ? preview.value.kl : preview.value.kr)
 <template>
   <ModalShell title="Find GCPs" @close="emit('close')">
     <p>
-      Match the current orthophoto to a georeferenced reference band, coarse to fine: SIFT on the whole of both, then
-      tiles at the coarser of the two resolutions, each with its own robust alignment. Review candidates below; only
-      selected rows are added.
+      Match the current orthophoto to a georeferenced reference, coarse to fine: a learned matcher (or SIFT) on the
+      whole of both at the same ground resolution, then tiles at the coarser of the two resolutions, each with its own
+      robust alignment. Review candidates below; only selected rows are added.
     </p>
     <label
       >Reference orthophoto
@@ -240,8 +255,21 @@ const k = (side) => (side === 'local' ? preview.value.kl : preview.value.kr)
       </select></label
     >
     <label
-      >Reference band <input v-model.number="band" type="number" min="1" :max="reference?.bands || 1" :disabled="busy"
-    /></label>
+      ><FieldHelp op="georeferencing" param="referenceBand">Reference band</FieldHelp>
+      <select v-model="band" :disabled="busy">
+        <option v-if="bandCount >= 3" value="rgb">Mean of bands 1–3 (RGB)</option>
+        <option v-for="b in bandCount" :key="b" :value="b">Band {{ b }}</option>
+      </select></label
+    >
+    <label
+      ><FieldHelp op="georeferencing" param="coarseMatcher">Coarse matcher</FieldHelp>
+      <select v-model="matcher" :disabled="busy">
+        <option value="auto">Auto (SuperPoint if installed, else DISK)</option>
+        <option value="disk">DISK + LightGlue</option>
+        <option value="superpoint">SuperPoint + LightGlue</option>
+        <option value="sift">SIFT</option>
+      </select></label
+    >
     <label
       ><FieldHelp op="georeferencing" param="stableArea">Stable ground</FieldHelp>
       <select v-model="stableSetId" :disabled="busy">
@@ -397,13 +425,7 @@ const k = (side) => (side === 'local' ? preview.value.kl : preview.value.kr)
     <p v-if="invalid" role="alert">Enter a finite elevation and positive accuracies, or leave unknown values blank.</p>
     <template #footer
       ><button class="btn" @click="emit('close')">Close</button>
-      <button
-        class="btn"
-        :disabled="!ready || busy || !Number.isInteger(band) || band < 1 || band > (reference?.bands || 1)"
-        @click="find"
-      >
-        Find candidates
-      </button>
+      <button class="btn" :disabled="!ready || busy || !bandValid" @click="find">Find candidates</button>
       <button class="btn btn-primary" :disabled="busy || !reviewed.length || invalid" @click="add">
         Add {{ reviewed.length }} reviewed candidates
       </button>

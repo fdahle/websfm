@@ -161,8 +161,8 @@ a confident one needs this dialog.
 
 ## Find candidate GCPs from a reference orthophoto
 Build an orthophoto, import a georeferenced reference raster, then open **Reconstruct →
-Find GCPs**. Choose a reference band and select **Find candidates**. The matcher
-works [coarse to fine](help:coarse-to-fine):
+Find GCPs**. Choose the reference band and the coarse matcher, and select **Find
+candidates**. The matcher works [coarse to fine](help:coarse-to-fine):
 
 1. **Where to look.** If the orthophoto is already georeferenced, the search starts
    from its footprint in the reference. Otherwise it starts from the registered
@@ -173,12 +173,22 @@ works [coarse to fine](help:coarse-to-fine):
    photos' GPS positions, padded by half their spread and at least 300 m. Without
    any of these, it searches the whole reference. A footprint that misses the
    reference stops the search with that message.
-2. **Coarse.** SIFT runs on a 1,536-pixel look at the whole orthophoto and at the
-   search area, and one RANSAC [homography](help:homography) aligns them. If that
-   fails, the search area is tried again as 3 × 3 overlapping windows of half its
-   size, then 5 × 5 windows of a quarter. A block that is only a few dozen pixels
-   of a regional tile then gets two or four times as many pixels to match on.
-   Each success is refined by a second look at just the predicted footprint.
+2. **Coarse.** With a learned matcher (the default), both rasters are read at the
+   same ground resolution, up to 2,000 pixels a side, the orthophoto is turned to
+   a guessed rotation, and LightGlue matches the detector's features; one RANSAC
+   [homography](help:homography) with at least 20 agreeing matches aligns them.
+   Learned features tolerate neither a large scale difference nor more than about
+   15° of rotation, so the guesses matter. They come from a prior: the
+   orthophoto's own georeference, else the photos' GPS positions, else the
+   footprint centres of the near-vertical photos (within 20° of straight down),
+   each paired with its camera in the orthophoto. The prior's rotation is tried,
+   then 15° either side, then every 30°. Without a prior, the search area and the
+   orthophoto are assumed to cover about the same ground, and each of five scales
+   (×1, ×1.4, ×0.7, ×2, ×0.5) is tried at every 30°. A hit is then tried 10° either
+   side. With **SIFT**, a 1,536-pixel look at the whole orthophoto and at the search
+   area; if that fails, the search area is tried again as 3 × 3 overlapping windows
+   of half its size, then 5 × 5 windows of a quarter. Either way, each success is
+   refined by a second look at just the predicted footprint.
 3. **Fine.** Tiles of up to 512 pixels are laid over the orthophoto, up to 6 × 6
    of them. Both sides are read at the coarser of the two native resolutions,
    because neither raster can place a feature better than that. A tile keeps its
@@ -228,6 +238,30 @@ Choose **Checkpoint** to reserve a point for checking rather than fitting.
 **Add reviewed candidates** imports only checked rows. Unknown elevation and
 accuracy stay unknown; incomplete controls cannot constrain adjustment. Photo
 marks can still be refined later in Control & Markers.
+
+## Reference band
+<!-- param: referenceBand  default: Mean of bands 1–3 (RGB) -->
+Which band of the reference is matched. A reference with three or more bands is read
+as the mean of bands 1–3 by default; for a Sentinel-2 or other true-colour image,
+that is blue, green and red. Film is panchromatic, so its grey values follow the
+mean of the visible bands more closely than any one band. A single band (red, or
+near-infrared for vegetation) can still match better where the photos were taken
+on infrared film.
+
+## Coarse matcher
+<!-- param: coarseMatcher  default: Auto -->
+What aligns the whole orthophoto with the reference at first.
+
+- **Auto** uses SuperPoint when its weights are installed, otherwise DISK.
+- **DISK + LightGlue** and **SuperPoint + LightGlue** are learned. They match an
+  orthophoto from historical film to a modern satellite image, where little texture
+  survives but the shapes do. The weights download on first use, with your consent;
+  SuperPoint's licence does not let websfm ship them, so you supply that file.
+- **SIFT** is quickest and needs no download. It aligns photos taken with similar
+  light and a similar sensor: a recent drone survey against a recent orthophoto.
+
+On Rachel Glacier (1960s film against Sentinel-2), DISK and SuperPoint found 100–150
+agreeing matches at under a reference pixel; SIFT found too few to align it.
 
 ## Stable ground
 <!-- param: stableArea  default: Anywhere -->

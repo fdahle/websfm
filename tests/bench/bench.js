@@ -1366,7 +1366,8 @@ window.bench = {
 
   // Control and checkpoint residuals against the current georeference.
   // Reconstruct ▸ Find GCPs without the dialog (config stage `findgcps`): candidates
-  // from the orthophoto against the reference raster named `reference` (band `band`),
+  // from the orthophoto against the reference raster named `reference` (band `band`, or
+  // 'rgb' for the mean of bands 1–3; coarse look by `matcher`: auto, disk, superpoint, sift),
   // kept to the polygon layer named `stable`; heights from the reference DEM named
   // `dem` (declared `datum`, σ `demSigma`), then added as GCPs and the model
   // georeferenced. `holdout: 'tma'` marks the hist_sfm2 paper's withheld blocks as
@@ -1375,6 +1376,7 @@ window.bench = {
   async findGcps({
     reference,
     band = 1,
+    matcher = 'auto',
     stable = null,
     dem,
     datum = 'ellipsoidal',
@@ -1398,15 +1400,21 @@ window.bench = {
     await ext.setRasterAccuracy(refDem.id, { verticalDatum: datum, verticalAccuracy: demSigma })
     if (refSigma) await ext.setRasterAccuracy(ref.id, { horizontalAccuracy: refSigma })
     const stableSet = stable ? useFootprintsStore().sets.find((s) => s.name === stable) : null
+    const spec = learnedDetector(matcher === 'auto' ? 'disk' : matcher)
+    if (spec) await provideModels([spec.modelId, spec.matcherModelId])
     const t0 = performance.now()
     const {
       candidates,
       result,
       area,
       stable: kept,
+      matcher: used,
+      prior,
     } = await findGcpCandidates({
       referenceId: ref.id,
       band,
+      matcher,
+      onLog: (m, level, ctx) => useLog().log(m, level, ctx),
       stableSetId: stableSet?.id ?? null,
     })
     const chosen = candidates.filter((c) => c.confidence >= minConfidence)
@@ -1430,6 +1438,10 @@ window.bench = {
     return {
       seconds: (performance.now() - t0) / 1000,
       searched: area.source,
+      matcher: used,
+      prior: prior && { source: prior.source, rotationDeg: prior.rotationDeg, scale: prior.scale, rms: prior.rms },
+      coarse: result.coarse,
+      found: candidates.map((c) => ({ local: c.local, x: c.x, y: c.y, confidence: c.confidence, tile: c.tile })),
       matches: result.matches.length,
       fineTiles: result.tiles.length,
       refined: !!result.refined,

@@ -5,7 +5,8 @@ import { pixelToWorld } from '../io/rasterSample.js'
 import { centreToMarkPx } from './displayFrame.js'
 import { matchConfidence } from './referenceMatch.js'
 
-function orthoFrame(ortho) {
+// The orthophoto's coordinate frame (SfM ↔ its map coordinates), from its record.
+export function orthoFrame(ortho) {
   const spec = ortho.frame
   if (!spec) throw new Error('Rebuild the orthophoto to record its coordinate frame')
   let frame

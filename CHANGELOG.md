@@ -6,6 +6,15 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Find GCPs aligns historical film with a satellite image.** The coarse look is now a
+  learned matcher (DISK, or SuperPoint when installed, with LightGlue; SIFT stays
+  selectable), with both rasters read at the same ground resolution and the
+  orthophoto turned to the expected rotation. Scale and rotation come from the
+  orthophoto's georeference, the photos' GPS, or the footprints of the near-vertical
+  photos, else a sweep. The fine tiles match the same way. A reference with three or
+  more bands is read as the mean of bands 1–3 (Reference band). On Rachel Glacier
+  (1960s film against Sentinel-2 RGB), where SIFT found no alignment, 13 of 17 tiles
+  align and all 30 candidates lie within 33 m of the surveyed camera solution.
 - **Meshes in tiles.** Build Mesh ▸ Advanced ▸ Tiles (Auto by default): a scene whose
   Poisson solve would not fit in memory is solved in tiles on the scene's own octree
   grid and welded along the grid edges the tiles share; every tile trims against the
@@ -550,6 +559,8 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- **DISK no longer retries WebGPU on every tile.** Its WebGPU path lacks an operator;
+  the first failure now keeps every later input on the CPU instead of only larger ones.
 - **Local products of a historical block are level.** A block that mixes vertical
   photos with unbalanced left and right obliques (TMA film) took its vertical from the
   mean viewing direction, 21° off on Rachel Glacier, so the local DEM and ortho were
