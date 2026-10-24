@@ -281,6 +281,9 @@ const browser = await chromium.launchPersistentContext(profileDir, {
   downloadsPath: `${outPrefix}.downloads`,
 })
 const result = { name, config: cfg, files: files.length, startedAt: new Date().toISOString(), stages: {} }
+// A headed run with the WebGPU flags needs the real GPU (checked at start and mid-run).
+const gpuRequired =
+  !!cfg.headed && (cfg.chromeArgs ?? []).includes('--enable-unsafe-webgpu') && cfg.requireGpu !== false
 let heap = null // worker heap sampler (workerHeap.mjs), started with the page
 try {
   const page = browser.pages()[0] ?? (await browser.newPage())
@@ -361,6 +364,7 @@ try {
       watchdog.timers.push(t)
     })
   watchdog.timers = []
+  let gpuLost = false
   page.on('console', (msg) => {
     const text = msg.text()
     if (text.startsWith('@@LOG ')) {
@@ -374,6 +378,13 @@ try {
       }
       logOut.write(fmt(e) + '\n')
       if (!quiet.test(e.message) && e.level !== 'debug') console.log(fmt(e))
+      // A GPU stage that reports SwiftShader means Chrome lost the GPU mid-run (its GPU
+      // process crashed): stop now, as the startup check does, not hours later.
+      if (gpuRequired && !gpuLost && /backend = WebGPU \(google swiftshader\)/.test(e.message)) {
+        gpuLost = true
+        console.error(`GPU run without the GPU (lost mid-run: ${e.message.slice(0, 80)}) — rerun`)
+        browser.close().catch(() => {})
+      }
     } else if (msg.type() === 'error') {
       logOut.write(`[page error] ${text}\n`)
       console.error('[page error]', text)
@@ -401,7 +412,7 @@ try {
   // depth maps in software, hours instead of minutes, with nothing failing. Stop at
   // once instead; a rerun usually gets the GPU (else log in again or reboot).
   // `requireGpu: false` lets such a run go on.
-  if (cfg.headed && (cfg.chromeArgs ?? []).includes('--enable-unsafe-webgpu') && cfg.requireGpu !== false) {
+  if (gpuRequired) {
     const adapter = await page.evaluate(async () => {
       const a = await navigator.gpu?.requestAdapter()
       return a ? `${a.info?.vendor ?? ''} ${a.info?.architecture ?? ''}`.trim() || 'unknown' : null
