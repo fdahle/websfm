@@ -259,9 +259,22 @@ What aligns the whole orthophoto with the reference at first.
   SuperPoint's licence does not let websfm ship them, so you supply that file.
 - **SIFT** is quickest and needs no download. It aligns photos taken with similar
   light and a similar sensor: a recent drone survey against a recent orthophoto.
+- **Terrain (reference DEM, ICP)** matches shape instead of appearance: the sparse
+  cloud is fitted to a reference DEM you choose under it by
+  [ICP](help:icp), with scale, in four passes that narrow from 600 m to 60 m. Use
+  it where no reference image shows the same thing: snow, cloud, or a DEM as the only
+  reference. It needs a start within a few hundred metres and a degree or so, which
+  the prior gives (the orthophoto's georeference, GPS, or vertical photos'
+  footprints); without one it stops and says so. Candidates are tracks seen in at
+  least two photos whose aligned position lies within three times the fit's RMS of
+  the DEM, and their σ XY is that RMS. On Rachel Glacier the fit's RMS was 9.5 m and
+  its candidates lay a median 13 m from the surveyed camera solution, against 7 m for
+  DISK + LightGlue: prefer an image matcher when a reference image works.
 
 On Rachel Glacier (1960s film against Sentinel-2), DISK and SuperPoint found 100–150
-agreeing matches at under a reference pixel; SIFT found too few to align it.
+agreeing matches at under a reference pixel; SIFT found too few to align it. With
+DISK, the candidates on Rachel, Stubb and Pequod lay a median 6–7 m from the
+surveyed camera solution.
 
 ## Stable ground
 <!-- param: stableArea  default: Anywhere -->

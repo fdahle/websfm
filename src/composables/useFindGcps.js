@@ -5,8 +5,9 @@ import { useImagesStore } from '../stores/useImagesStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
-import { findReferenceMatches } from '../workers/computeClient.js'
-import { referenceGcpCandidates, referencePick, orthoFrame } from '../core/sfm/referenceGcps.js'
+import { findReferenceMatches, alignTerrain } from '../workers/computeClient.js'
+import { referenceGcpCandidates, referencePick, orthoFrame, trackObservations } from '../core/sfm/referenceGcps.js'
+import { terrainInitial, terrainCandidates } from '../core/sfm/terrainControl.js'
 import { fitSimilarity2d } from '../core/sfm/referenceLook.js'
 import { cameraCenter } from '../core/sfm/geometry.js'
 import { learnedDetector } from '../core/features/learnedDetectors.js'
@@ -179,6 +180,7 @@ async function orthoPrior(ortho, cloud, refRaster) {
 // The coarse matcher: 'auto' is SuperPoint when its (user-supplied) weights are
 // installed, else DISK, which websfm ships. Learned weights are fetched with consent.
 async function resolveMatcher(matcher) {
+  if (matcher === 'terrain') return 'terrain'
   let id = matcher
   if (id === 'auto') id = (await isModelCached(modelUrl('superpoint'))) ? 'superpoint' : 'disk'
   const spec = learnedDetector(id)
@@ -193,39 +195,57 @@ async function resolveMatcher(matcher) {
  * kept, before they are spread over the block.
  * → { candidates, result, area, stable: { name, rejected } | null }
  */
-export async function findGcpCandidates({ referenceId, band = 1, matcher = 'auto', stableSetId = null, onLog } = {}) {
+export async function findGcpCandidates({
+  referenceId,
+  band = 1,
+  matcher = 'auto',
+  demId = null,
+  stableSetId = null,
+  onLog,
+} = {}) {
   const external = useExternalStore(),
     recon = useReconstructionStore(),
     images = useImagesStore(),
     sensors = useSensorsStore(),
     projects = useProjectsStore()
+  const terrain = matcher === 'terrain'
+  // Terrain matches against the reference DEM; every other matcher against the image.
   const ortho = recon.ortho,
     cloud = recon.mainSparseCloud,
-    refRaster = external.rasterById(referenceId)
-  if (!ortho || !cloud || !refRaster) throw new Error('Build an orthophoto and choose a reference raster first')
+    refRaster = external.rasterById(terrain ? demId : referenceId)
+  if (!ortho || !cloud || !refRaster)
+    throw new Error(`Build an orthophoto and choose a reference ${terrain ? 'DEM' : 'raster'} first`)
   const file = await external.originalFile(refRaster.id)
   if (!file) throw new Error('The original reference raster is unavailable — re-import it')
   await Promise.all([ensureProjection(refRaster.crs), ensureProjection(projects.currentCrs)])
-  const area = await searchArea(ortho, cloud, refRaster)
+  if (terrain && isGeographic(refRaster.crs))
+    throw new Error('Terrain matching needs a reference DEM in a projected (metric) CRS')
+  const area = terrain ? { region: null, source: null } : await searchArea(ortho, cloud, refRaster)
   const used = await resolveMatcher(matcher)
-  const prior = learnedDetector(used) ? await orthoPrior(ortho, cloud, refRaster) : null
+  const prior = terrain || learnedDetector(used) ? await orthoPrior(ortho, cloud, refRaster) : null
+  if (terrain && !prior)
+    throw new Error(
+      'Terrain matching needs a starting position: footprints of near-vertical photos, GPS, or a georeferenced orthophoto',
+    )
   const rgb = band === 'rgb'
-  const result = await findReferenceMatches(
-    {
-      local: { cog: ortho.cog ?? null, previewUrl: ortho.previewUrl, width: ortho.width, height: ortho.height },
-      reference: {
-        file,
-        width: refRaster.width,
-        height: refRaster.height,
-        band: rgb ? 0 : band - 1,
-        rgb,
-        region: area.region,
-      },
-      matcher: used,
-      prior,
-    },
-    { onLog },
-  )
+  const result = terrain
+    ? null
+    : await findReferenceMatches(
+        {
+          local: { cog: ortho.cog ?? null, previewUrl: ortho.previewUrl, width: ortho.width, height: ortho.height },
+          reference: {
+            file,
+            width: refRaster.width,
+            height: refRaster.height,
+            band: rgb ? 0 : band - 1,
+            rgb,
+            region: area.region,
+          },
+          matcher: used,
+          prior,
+        },
+        { onLog },
+      )
   const frameModel = makeFrameModelResolver({ summary: toRaw(recon.summary), sensors: sensors.sensors })
   const sourceImages = images.images.flatMap((image) => {
     const camera = cloud.cameras.get(image.uuid)
@@ -248,14 +268,19 @@ export async function findGcpCandidates({ referenceId, band = 1, matcher = 'auto
       return ok
     }
   }
-  const found = referenceGcpCandidates({
-    points: cloud.points,
-    images: sourceImages,
-    ortho,
-    reference: refRaster,
-    accept,
-    ...result,
-  })
+  const { found, result: matched } = terrain
+    ? await terrainSearch({ ortho, cloud, dem: refRaster, file, prior, images: sourceImages, accept, onLog })
+    : {
+        found: referenceGcpCandidates({
+          points: cloud.points,
+          images: sourceImages,
+          ortho,
+          reference: refRaster,
+          accept,
+          ...result,
+        }),
+        result,
+      }
   const geographic = isGeographic(projects.currentCrs),
     declared = metresToCrsUnits(refRaster.horizontalAccuracy, projects.currentCrs)
   const candidates = found.map((c) => {
@@ -281,5 +306,74 @@ export async function findGcpCandidates({ referenceId, band = 1, matcher = 'auto
       verticalDatum: 'unknown',
     }
   })
-  return { candidates, result, area, stable, matcher: used, prior }
+  return { candidates, result: matched, area, stable, matcher: used, prior }
+}
+
+// Coarse matcher ▸ Terrain: the sparse cloud aligned to the reference DEM by ICP from
+// the prior (core/sfm/terrainControl.js), then tracks on the aligned surface as
+// candidates. Returns them with a result shaped like the image matcher's, so the
+// dialog shows it the same way (one coarse "tile", no matches).
+async function terrainSearch({ ortho, cloud, dem, file, prior, images, accept, onLog }) {
+  const frame = orthoFrame(ortho)
+  const n = cloud.points.length,
+    points = new Float64Array(3 * n)
+  for (let i = 0; i < n; i++) points.set(frame.fromSfm(cloud.points.xyz(i)), 3 * i)
+  const local = Array.from({ length: n }, (_, i) => [
+    (points[3 * i] - ortho.originX) / ortho.gsd,
+    (ortho.originY - points[3 * i + 1]) / ortho.gsd,
+  ])
+  const initial = terrainInitial(prior, ortho, dem.geoTransform)
+  const t = await alignTerrain(
+    {
+      points,
+      dem: { file, width: dem.width, height: dem.height, geoTransform: { ...dem.geoTransform } },
+      initial,
+      misfit: prior.rms * Math.abs(dem.geoTransform.scaleX),
+    },
+    { onLog },
+  )
+  const gate = 3 * Math.max(t.rms, t.pixel)
+  const imageByUuid = new Map(images.map((image) => [image.uuid, image]))
+  const items = []
+  for (let i = 0; i < n; i++) {
+    const [u, v] = local[i]
+    if (!(Math.abs(t.residual[i]) <= gate) || u < 0 || v < 0 || u >= ortho.width || v >= ortho.height) continue
+    const x = t.positions[3 * i],
+      y = t.positions[3 * i + 1]
+    const px = worldToPixel(dem, x, y)
+    items.push({
+      pointIndex: i,
+      local: [u, v],
+      x,
+      y,
+      reference: [px.col, px.row],
+      residual: t.residual[i],
+      observations: trackObservations(cloud.points, i, imageByUuid),
+    })
+  }
+  const found = terrainCandidates(items, {
+    rms: t.rms,
+    pixel: t.pixel,
+    accept,
+    width: ortho.width,
+    height: ortho.height,
+  })
+  onLog?.(
+    `Terrain: ICP RMS ${t.rms.toFixed(1)} m with ${(100 * t.inlierFraction).toFixed(0)} % of the points in range; ${found.length} candidates on the aligned surface`,
+    'info',
+    'Find GCPs',
+  )
+  return {
+    found,
+    result: {
+      matches: [],
+      tiles: [{ H: null, inliers: 0, ratio: 1, local: null, reference: null }],
+      kl: ortho.width / 1536,
+      kr: 1,
+      refined: false,
+      coarse: null,
+      terrain: { rms: t.rms, inlierFraction: t.inlierFraction, passes: t.passes, dz: t.dz },
+      referencePreview: t.referencePreview,
+    },
+  }
 }

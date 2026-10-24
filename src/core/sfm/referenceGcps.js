@@ -85,16 +85,7 @@ export function referenceGcpCandidates({
         }
       }
     if (!nearest) continue
-    const observations = []
-    points.forEachPixel(nearest.index, (uuid, mx, my) => {
-      const image = imageByUuid.get(uuid)
-      if (!image || !Number.isFinite(my)) return
-      // A candidate becomes a mark: back to the click convention (displayFrame.js
-      // makePinholeToMark; without a mapper, just the half-pixel shift).
-      const pixel = image.toScan ? image.toScan(mx, my) : { x: centreToMarkPx(mx), y: centreToMarkPx(my) }
-      if (!Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) return
-      observations.push({ imageName: image.name, px: pixel.x, py: pixel.y })
-    })
+    const observations = trackObservations(points, nearest.index, imageByUuid)
     if (observations.length < 2) continue
     const tile = tiles[match.tile]
     const mapped = applyHomography(tile.H, nearest.u, nearest.v),
@@ -133,6 +124,21 @@ export function referenceGcpCandidates({
     })
   }
   return spreadCandidates(pool, ortho.width, ortho.height, { limit, minSeparation: 24 * kl })
+}
+
+// A sparse track's photo measurements as marks ({ imageName, px, py }): back to the
+// click convention (displayFrame.js makePinholeToMark; without a mapper, just the
+// half-pixel shift). `imageByUuid`: uuid → { name, toScan? }.
+export function trackObservations(points, index, imageByUuid) {
+  const observations = []
+  points.forEachPixel(index, (uuid, mx, my) => {
+    const image = imageByUuid.get(uuid)
+    if (!image || !Number.isFinite(my)) return
+    const pixel = image.toScan ? image.toScan(mx, my) : { x: centreToMarkPx(mx), y: centreToMarkPx(my) }
+    if (!Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) return
+    observations.push({ imageName: image.name, px: pixel.x, py: pixel.y })
+  })
+  return observations
 }
 
 export function spreadCandidates(pool, width, height, { limit = 30, minSeparation = 24 } = {}) {

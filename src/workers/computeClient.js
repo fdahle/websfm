@@ -304,6 +304,17 @@ export const findReferenceMatches = (request, { onLog } = {}) =>
         }
       : undefined,
   })
+// Find GCPs ▸ Terrain (workers/ops/referenceGcps.js alignTerrain): the sparse points
+// aligned to a reference DEM by ICP; the DEM's original File goes over as a handle.
+export const alignTerrain = (request, { onLog } = {}) =>
+  call('alignTerrain', [request], {
+    transfer: [request.points.buffer],
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
+  })
 
 // SAM2 smart-mask selection (F12). All three ops pin worker 0 so the heavy ORT
 // encoder/decoder sessions load once AND the per-uuid embedding cache (held in

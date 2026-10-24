@@ -21,6 +21,8 @@ import { matchLightGlue } from '../../core/features/lightglue.js'
 import { keypointsFromObjects } from '../../core/features/keypoints.js'
 import { planTiles, tileOwns } from '../../core/features/tiling.js'
 import { paddedRect } from '../../core/sfm/referenceMatch.js'
+import { icpAlign, applyTransform } from '../../core/products/cloudAlign.js'
+import { median, terrainPasses } from '../../core/sfm/terrainControl.js'
 import {
   coarseHypotheses,
   refineRotations,
@@ -615,7 +617,123 @@ export function makeReferenceGcpOps({ rasterize }) {
       },
     }
   }
-  return { findReferenceMatches }
+  // Coarse matcher ▸ Terrain: the sparse points (orthophoto frame, Float64Array xyz)
+  // aligned to the reference DEM by ICP from `initial` (core/sfm/terrainControl.js
+  // terrainInitial), its height offset set from the DEM first. → { transform, rms,
+  // inlierFraction, passes, positions (DEM CRS), residual (m, point − DEM, NaN off
+  // it), pixel (m), referencePreview (hillshade) }.
+  async function alignTerrain([{ points, dem, initial, misfit = 0 }], { emit }) {
+    const log = (m, level = 'info') => emit?.('log', [m, level, 'Find GCPs'])
+    const n = points.length / 3,
+      g = dem.geoTransform
+    const at = (tf, i) => applyTransform(tf, [points[3 * i], points[3 * i + 1], points[3 * i + 2]])
+    // The DEM window the prior predicts, padded by 3 km and three times its misfit.
+    const px = []
+    for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 4000))) {
+      const [x, y] = at(initial, i)
+      px.push([(x - g.originX) / g.scaleX, (y - g.originY) / g.scaleY])
+    }
+    const pad = (3000 + 3 * misfit) / Math.abs(g.scaleX)
+    const rect = paddedRect(px, dem.width, dem.height, { pad: 0, minPad: pad })
+    if (!rect) throw new Error('The reference DEM does not cover the expected position of the block')
+    const raw = await readWindowFromFile(dem.file, { rect, maxDim: 2048, bands: [0], overviews: true })
+    const z = raw.channels[0],
+      W = raw.width,
+      H = raw.height
+    const ok = (v) => Number.isFinite(v) && v !== raw.nodata && v > -1e4
+    const c0 = raw.centreX0 ?? raw.col + 0.5,
+      r0 = raw.centreY0 ?? raw.row + 0.5
+    const stepX = raw.scaleX * Math.abs(g.scaleX),
+      stepY = raw.scaleY * Math.abs(g.scaleY)
+    // DEM height at a CRS point (nearest sample), NaN off the window or on nodata.
+    const heightAt = (x, y) => {
+      const j = Math.round(((x - g.originX) / g.scaleX - c0) / raw.scaleX),
+        k = Math.round(((y - g.originY) / g.scaleY - r0) / raw.scaleY)
+      if (j < 0 || k < 0 || j >= W || k >= H) return NaN
+      const v = z[k * W + j]
+      return ok(v) ? v : NaN
+    }
+    const tf0 = { ...initial, t: [...initial.t] }
+    const dz = median(
+      Array.from({ length: n }, (_, i) => {
+        const p = at(tf0, i)
+        return heightAt(p[0], p[1]) - p[2]
+      }),
+    )
+    if (!Number.isFinite(dz)) throw new Error('No sparse point falls on the reference DEM at the expected position')
+    tf0.t[2] += dz
+    // The reference: every valid DEM sample, with its surface normal.
+    const pos = [],
+      nrm = []
+    for (let k = 1; k < H - 1; k++)
+      for (let j = 1; j < W - 1; j++) {
+        const i = k * W + j
+        if (!ok(z[i]) || !ok(z[i - 1]) || !ok(z[i + 1]) || !ok(z[i - W]) || !ok(z[i + W])) continue
+        const gx = (z[i + 1] - z[i - 1]) / (2 * stepX),
+          gy = (z[i - W] - z[i + W]) / (2 * stepY) // rows run south
+        const l = Math.hypot(gx, gy, 1)
+        pos.push(g.originX + (c0 + j * raw.scaleX) * g.scaleX, g.originY + (r0 + k * raw.scaleY) * g.scaleY, z[i])
+        nrm.push(-gx / l, -gy / l, 1 / l)
+      }
+    const reference = { count: pos.length / 3, pos: new Float64Array(pos), nrm: new Float32Array(nrm) }
+    log(
+      `Terrain: ${pluralize(n, 'sparse point')} against ${pluralize(reference.count, 'DEM sample')} at ${stepX.toFixed(0)} m; height offset ${dz.toFixed(0)} m`,
+    )
+    let tf = tf0,
+      last = null
+    const passes = []
+    for (const pass of terrainPasses(misfit)) {
+      last = icpAlign(
+        { count: n, pos: points },
+        reference,
+        { ...pass, estimateScale: true, initial: tf, maxIterations: 60, trim: 0.8, sampleCount: 40000 },
+        (m, level) => log(m, level === 'warn' ? 'warn' : 'debug'),
+      )
+      tf = last.transform
+      passes.push({ ...pass, rms: last.rms, inliers: last.inlierFraction, iterations: last.iterations })
+      log(
+        `Terrain ICP ≤ ${pass.maxDistance} m (${pass.pointToPlane ? 'point-to-plane' : 'point-to-point'}): RMS ${last.rms.toFixed(1)} m, ${(100 * last.inlierFraction).toFixed(0)} % in range`,
+      )
+    }
+    const positions = new Float64Array(3 * n),
+      residual = new Float32Array(n)
+    for (let i = 0; i < n; i++) {
+      const p = at(tf, i)
+      positions.set(p, 3 * i)
+      residual[i] = p[2] - heightAt(p[0], p[1])
+    }
+    // A hillshade of the window as the dialog's reference overview.
+    const shade = new Uint8ClampedArray(W * H * 4)
+    const sun = [-Math.SQRT1_2 * Math.SQRT1_2, Math.SQRT1_2 * Math.SQRT1_2, Math.SQRT1_2] // NW, 45° up
+    for (let k = 0; k < H; k++)
+      for (let j = 0; j < W; j++) {
+        const i = k * W + j
+        let v = 128
+        if (j > 0 && k > 0 && j < W - 1 && k < H - 1 && ok(z[i - 1]) && ok(z[i + 1]) && ok(z[i - W]) && ok(z[i + W])) {
+          const gx = (z[i + 1] - z[i - 1]) / (2 * stepX),
+            gy = (z[i - W] - z[i + W]) / (2 * stepY)
+          const l = Math.hypot(gx, gy, 1)
+          v = 255 * Math.max(0, (-gx * sun[0] - gy * sun[1] + sun[2]) / l)
+        }
+        shade[i * 4] = shade[i * 4 + 1] = shade[i * 4 + 2] = v
+        shade[i * 4 + 3] = 255
+      }
+    return {
+      result: {
+        transform: tf,
+        rms: last.rms,
+        inlierFraction: last.inlierFraction,
+        passes,
+        dz,
+        positions,
+        residual,
+        pixel: Math.abs(g.scaleX),
+        referencePreview: { url: await rasterToDataUrl(shade, W, H), ...imagePlacement(raw) },
+      },
+      transfer: [positions.buffer, residual.buffer],
+    }
+  }
+  return { findReferenceMatches, alignTerrain }
 }
 
 // Where a read's image sits in native pixel-edge coordinates (for an SVG <image>).

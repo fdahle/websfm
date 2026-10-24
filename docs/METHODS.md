@@ -1212,7 +1212,21 @@ reference pixels whatever resolution either was read at (overview reads included
    × {1, √2, 1/√2, 2, ½}, each at every 30°. A hit is retried ±10°. The reference is the
    mean of bands 1–3 when it has three or more (film is panchromatic). Rachel (1960s
    film vs Sentinel-2 RGB): prior 199° (true 199.1°), 130 inliers on the first look;
-   SIFT at the same scale 8 inliers, 11 of 105 matches true.
+   SIFT at the same scale 8 inliers, 11 of 105 matches true. Candidates against a
+   georeference from the surveyed camera positions (bench `vsPoses`): Rachel median
+   7.1 m / max 23.5 m, Stubb 5.6 / 13.6 m, Pequod 5.8 / 22.4 m; none over 100 m.
+   **Terrain** (`matcher: 'terrain'`, `core/sfm/terrainControl.js` + `alignTerrain`):
+   no image matching. The prior, turned into a 3D similarity frame → DEM CRS
+   (`terrainInitial`; height offset = median DEM − point), seeds `icpAlign` of every
+   sparse point against the DEM window it predicts (± 3 km, read at ≤ 2,048 samples,
+   normals from central differences), with scale: point-to-point at 600 m (or 3× the
+   prior's misfit) and 300 m, then point-to-plane at 150 and 60 m, trim 0.8.
+   Candidates: tracks with ≥ 2 photos whose aligned point lies within 3 × max(RMS, DEM
+   pixel) of the DEM, on stable ground, spread as below; σ XY = the RMS. Measured on
+   Rachel (sparse points vs REMA at 16 m, offline): from 390 m and 1° off to 14 m
+   RMS, the same end point as from the truth; from 1.9 km and 3° it does not
+   converge. In the app (REMA 4 m read at ≤ 2,048 samples): RMS 9.5 m, candidates a
+   median 13 m from the surveyed camera solution (DISK + LightGlue: 7 m).
    **Coarse, SIFT** (`matcher: 'sift'`): SIFT (contrast 0.01, ≤ 2 orientations) on a 1,536-px look at the whole
    ortho and the search region; mutual ratio 0.75; homography RANSAC (3 px, 2,000
    iterations; ≥ 10 inliers and ≥ 25 %). On failure, 3×3 half-size then 5×5

@@ -14,7 +14,14 @@ Notable changes to websfm. The format follows
   photos, else a sweep. The fine tiles match the same way. A reference with three or
   more bands is read as the mean of bands 1–3 (Reference band). On Rachel Glacier
   (1960s film against Sentinel-2 RGB), where SIFT found no alignment, 13 of 17 tiles
-  align and all 30 candidates lie within 33 m of the surveyed camera solution.
+  align and the 30 candidates lie a median 7 m (at most 24 m) from where the surveyed
+  camera positions put them; on Stubb 6 m (14 m), on Pequod 6 m (22 m).
+- **Find GCPs by terrain.** Coarse matcher ▸ Terrain fits the sparse cloud to a
+  reference DEM by ICP, with scale, starting from the same prior (footprints, GPS, a
+  georeferenced orthophoto), and proposes tracks on the aligned surface. For when no
+  reference image shows what the photos do: snow, cloud, or a DEM as the only
+  reference. On Rachel Glacier against REMA: RMS 9.5 m in under a minute, candidates a
+  median 13 m (at most 28 m) from the surveyed camera solution.
 - **Meshes in tiles.** Build Mesh ▸ Advanced ▸ Tiles (Auto by default): a scene whose
   Poisson solve would not fit in memory is solved in tiles on the scene's own octree
   grid and welded along the grid edges the tiles share; every tile trims against the

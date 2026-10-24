@@ -42,8 +42,7 @@ const bandValid = computed(
 const ready = computed(
   () =>
     props.hasRelativeOrtho &&
-    reference.value?.crs &&
-    !reference.value.crsUnresolved &&
+    (matcher.value === 'terrain' || (reference.value?.crs && !reference.value.crsUnresolved)) &&
     recon.mainSparseCloud &&
     !recon.productFrameStatus(recon.ortho).stale,
 )
@@ -125,6 +124,7 @@ async function find() {
       referenceId: selectedReferenceId.value,
       band: band.value,
       matcher: matcher.value,
+      demId: demId.value || null,
       stableSetId: stableSetId.value || null,
       onLog: (m, level, ctx) => log(m, level, ctx),
     })
@@ -152,10 +152,12 @@ async function find() {
     }
     const cover = candidateCoverage(candidates.value, ortho.width, ortho.height)
     message.value =
-      `${result.matches.length} verified matches` +
-      (result.refined
-        ? ` in ${result.tiles.length} fine tiles (single-plane p95 ${result.fine.p95.toFixed(2)} working px)`
-        : ` (coarse alignment only${ortho.cog ? ': no fine tile aligned' : ''})`) +
+      (result.terrain
+        ? `Terrain alignment: ICP RMS ${result.terrain.rms.toFixed(1)} m, ${(100 * result.terrain.inlierFraction).toFixed(0)} % of the sparse points in range`
+        : `${result.matches.length} verified matches` +
+          (result.refined
+            ? ` in ${result.tiles.length} fine tiles (single-plane p95 ${result.fine.p95.toFixed(2)} working px)`
+            : ` (coarse alignment only${ortho.cog ? ': no fine tile aligned' : ''})`)) +
       `; ${candidates.value.length} candidates with measured photo tracks, covering ${cover.cells} of ${cover.of} cells of the block (hull ${(100 * cover.hull).toFixed(0)} %).` +
       (area.source ? ` Searched around ${area.source}.` : '') +
       (stable ? ` ${stable.rejected} matches off the stable ground of "${stable.name}" left out.` : '')
@@ -268,6 +270,14 @@ const k = (side) => (side === 'local' ? preview.value.kl : preview.value.kr)
         <option value="disk">DISK + LightGlue</option>
         <option value="superpoint">SuperPoint + LightGlue</option>
         <option value="sift">SIFT</option>
+        <option value="terrain">Terrain (reference DEM, ICP)</option>
+      </select></label
+    >
+    <label v-if="matcher === 'terrain'"
+      >Reference DEM
+      <select v-model="demId" :disabled="busy">
+        <option value="">Choose DEM</option>
+        <option v-for="r in dems" :key="r.id" :value="r.id">{{ r.name }}</option>
       </select></label
     >
     <label
@@ -425,7 +435,9 @@ const k = (side) => (side === 'local' ? preview.value.kl : preview.value.kr)
     <p v-if="invalid" role="alert">Enter a finite elevation and positive accuracies, or leave unknown values blank.</p>
     <template #footer
       ><button class="btn" @click="emit('close')">Close</button>
-      <button class="btn" :disabled="!ready || busy || !bandValid" @click="find">Find candidates</button>
+      <button class="btn" :disabled="!ready || busy || (matcher === 'terrain' ? !demId : !bandValid)" @click="find">
+        Find candidates
+      </button>
       <button class="btn btn-primary" :disabled="busy || !reviewed.length || invalid" @click="add">
         Add {{ reviewed.length }} reviewed candidates
       </button>
