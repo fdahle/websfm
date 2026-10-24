@@ -33,3 +33,46 @@ jobs:
           name: browser-test-results
           path: test-results/
           retention-days: 7
+
+  # After the tests pass: a push to main deploys dev.websfm.app, a version tag (v0.5.0,
+  # from `npm run release`) deploys websfm.app (docs/deployment.md ▸ Cloudflare).
+  # The R2 files (models, ORT's WebGPU wasm) are not uploaded here: run
+  # `deploy-cloudflare.mjs --upload` by hand after a model or ORT change.
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'dev' }}
+      url: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://websfm.app' || 'https://dev.websfm.app' }}
+    # One deploy per site at a time; a newer push waits rather than cancels it.
+    concurrency:
+      group: deploy-${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'dev' }}
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: The tag is the version in package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
+      # build:release checks every redistributable model is in dist/ (the large ones
+      # are then served from R2), so the weights are fetched; cached between runs.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            public/models
+            public/examples
+          key: deploy-assets-${{ hashFiles('src/core/models/registry.js', 'scripts/fetch-models.mjs', 'src/core/examples.js', 'scripts/fetch-examples.mjs') }}
+      - run: npm run fetch:models && npm run fetch:examples && npm run build:release
+      - name: Deploy
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then node scripts/deploy-cloudflare.mjs
+          else node scripts/deploy-cloudflare.mjs --env dev; fi

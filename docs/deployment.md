@@ -124,3 +124,96 @@ the build leaves it out, and `npm run check:release` fails if a build contains i
 Place them wherever `VITE_MODEL_BASE_URL` (or the default `public/models/`)
 points. The first time a user runs a learned backend, a modal asks to download
 the required file(s) and shows progress; nothing is fetched until they agree.
+
+## Cloudflare (websfm.app)
+
+websfm.app runs on Cloudflare Workers: static assets serve `dist/`, and an R2 bucket
+holds what static assets refuse (files over 25 MiB: the model weights and ORT's
+WebGPU wasm). [`deploy/cloudflare/worker.js`](../deploy/cloudflare/worker.js) serves
+those under their usual paths on the same origin, so the build needs no
+`VITE_MODEL_BASE_URL`. [`public/_headers`](../public/_headers) sets the
+cross-origin isolation and caching headers for the static assets.
+
+Two sites, from one Worker config ([`wrangler.jsonc`](../deploy/cloudflare/wrangler.jsonc)):
+
+| Site | Shows | Deployed when |
+| --- | --- | --- |
+| websfm.app | released versions | a version tag (`v0.5.0`) is pushed |
+| dev.websfm.app | the latest `main`, behind a login | `main` is pushed |
+
+GitHub Actions deploys both (the `deploy` job in
+[`.github/workflows/verify.yml`](../.github/workflows/verify.yml)), after the tests
+pass. A release is then:
+
+```bash
+npm run release                       # 0.4.0 → 0.5.0: changelog, package.json, commit + tag
+git push && git push origin v0.5.0    # main → dev.websfm.app, the tag → websfm.app
+```
+
+The production job refuses a tag that is not the version in `package.json`. Each run
+shows under the repository's **Actions** tab, and the last deploy of each site under
+**Environments** (`dev`, `production`).
+
+### Once: Cloudflare and GitHub
+
+1. **R2** → create the bucket `websfm-data`.
+2. **API token** (My Profile → API Tokens → Create Token): the **Edit Cloudflare
+   Workers** template, limited to your account and the `websfm.app` zone.
+3. **GitHub** → the repository's Settings → Secrets and variables → Actions → New
+   repository secret, twice: `CLOUDFLARE_API_TOKEN` (the token) and
+   `CLOUDFLARE_ACCOUNT_ID` (Workers & Pages → the account ID on the right, or
+   `npx wrangler@4 whoami`).
+4. The first deploy, and every model or ONNX Runtime change, uploads the large files
+   to R2 by hand. Log Wrangler in once (`npx wrangler@4 login`), then:
+
+   ```bash
+   npm run fetch:models && npm run fetch:examples && npm run build:release
+   node scripts/deploy-cloudflare.mjs --upload
+   ```
+
+   Both sites share the bucket. The first deploy creates the custom domains
+   `websfm.app` and `dev.websfm.app`.
+
+### Deploying by hand
+
+The same commands the workflow runs, for when GitHub is not an option:
+
+```bash
+npm run fetch:models && npm run fetch:examples && npm run build:release
+node scripts/deploy-cloudflare.mjs --dry-run         # check only
+node scripts/deploy-cloudflare.mjs                   # websfm.app
+node scripts/deploy-cloudflare.mjs --env dev         # dev.websfm.app
+```
+
+### dev.websfm.app behind a login
+
+Cloudflare Access puts a login page in front of the site; only the email addresses
+in its policy get through, with a one-time code sent to them.
+
+1. Cloudflare dashboard → **Zero Trust**. The first time, choose a team name and the
+   Free plan (up to 50 users).
+2. **Access → Applications → Add an application → Self-hosted.** Name `websfm dev`,
+   domain: subdomain `dev`, domain `websfm.app`. Session duration: as long as you like
+   to stay logged in (24 hours, a month).
+3. **Policy:** name `only me`, action **Allow**, include **Emails** → your address.
+   To let a tester in, add theirs here.
+4. **Login methods:** keep **One-time PIN**.
+5. Check in a private window: dev.websfm.app shows the Cloudflare login, and
+   websfm.app does not.
+
+The Workers have no `*.workers.dev` or preview URL (`wrangler.jsonc`), so the login
+cannot be bypassed. The dev origin has its own projects, model cache and service
+worker: projects from websfm.app do not show there.
+
+**Moving from another host.** Projects (OPFS) and downloaded models belong to an
+origin: export each project as a `.websfm` file on the old address and import it on
+the new one. Then redirect the old address (a Cloudflare Redirect Rule, 301 to
+`https://websfm.app/${1}`).
+
+Check the live headers as above, with the R2 paths among them:
+
+```bash
+curl -I https://websfm.app/
+curl -I https://websfm.app/models/disk.onnx
+curl -I https://websfm.app/ort/1.27.0/ort-wasm-simd-threaded.jsep.wasm
+```

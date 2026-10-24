@@ -1,0 +1,12 @@
+# Response headers for Cloudflare static assets (deploy/cloudflare/). Other hosts
+# ignore this file; deploy/nginx.conf sets the same for nginx.
+
+# Cross-origin isolation → multi-threaded ONNX Runtime (see vite.config.js).
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+
+# Content-hashed build output. Everything else keeps Cloudflare's default
+# (max-age=0, must-revalidate), which index.html, sw.js and the manifest need.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -1,0 +1,41 @@
+// Cloudflare Workers config for websfm.app (and dev.websfm.app with --env dev).
+// Deploy with `node scripts/deploy-cloudflare.mjs [--env dev] [--upload]`, not with
+// wrangler directly: the script checks the build and writes dist/.assetsignore first.
+//
+// Static assets serve dist/, but refuse any file over 25 MiB: the model weights and
+// ORT's WebGPU wasm (ort/<version>/ort-wasm-simd-threaded.jsep.wasm). Those live in
+// the R2 bucket under the same paths, and worker.js serves them on the same origin
+// (no CORS, no VITE_MODEL_BASE_URL). Paths here are relative to this file.
+{
+  "name": "websfm",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  // Only the custom domain: a *.workers.dev URL would bypass Cloudflare Access on dev.
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "../../dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/models/*", "/ort/*"],
+  },
+  "r2_buckets": [{ "binding": "LARGE_FILES", "bucket_name": "websfm-data" }],
+  "routes": [{ "pattern": "websfm.app", "custom_domain": true }],
+
+  "env": {
+    // Worker `websfm-dev`. Put it behind Cloudflare Access (docs/deployment.md).
+    // Bindings and routes are not inherited, so they are repeated; the bucket is shared.
+    "dev": {
+      "workers_dev": false,
+      "preview_urls": false,
+      "assets": {
+        "directory": "../../dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/models/*", "/ort/*"],
+      },
+      "r2_buckets": [{ "binding": "LARGE_FILES", "bucket_name": "websfm-data" }],
+      "routes": [{ "pattern": "dev.websfm.app", "custom_domain": true }],
+    },
+  },
+}

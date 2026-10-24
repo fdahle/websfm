@@ -33,6 +33,8 @@ Rules that are easy to miss:
   headline, then one sentence in user terms, then any detail and evidence (Help ▸
   What's New shows the first two alone). Never edit a released section or the version
   by hand; `npm run release` cuts a release.
+- Pushing deploys: `main` goes to dev.websfm.app, a `v*` tag to websfm.app (CI ▸
+  `deploy`). Don't push, and never push a tag, unless asked.
 - Run `npm test` and `npm run typecheck` before calling a change done.
 - In the final summary, say which help files (`src/guide/`, `src/glossary/`) were
   updated, or that none needed it.

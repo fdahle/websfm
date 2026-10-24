@@ -1,8 +1,9 @@
 // Cut a release: move CHANGELOG.md's [Unreleased] entries under a new version with
 // today's date, set that version in package.json (and package-lock.json), commit
-// those files and tag the commit `v<version>`. Nothing is pushed. Run it before the
-// release build of every deploy (docs/development.md ▸ Releases), so the version
-// in About and the dates in Help ▸ What's New match what is live.
+// those files and tag the commit `v<version>`. Nothing is pushed. Run it for every
+// release of websfm.app (docs/development.md ▸ Releases), so the version
+// in About and the dates in Help ▸ What's New match what is live. Pushing the tag
+// deploys websfm.app (.github/workflows/verify.yml ▸ deploy).
 //
 //   npm run release                 # 0.4.0 → 0.5.0
 //   npm run release -- patch        # 0.4.0 → 0.4.1  (also: major, or an exact 1.0.0)
@@ -72,3 +73,4 @@ await writeFile(lockUrl, `${JSON.stringify(lock, null, 2)}\n`)
 git('commit', '--quiet', '-m', `release: ${tag}`, '--', ...FILES)
 git('tag', '-a', tag, '-m', `websfm ${version}`)
 console.log(`Committed and tagged ${tag}. Push with: git push && git push origin ${tag}`)
+console.log('Pushing the tag deploys websfm.app (GitHub Actions ▸ deploy).')

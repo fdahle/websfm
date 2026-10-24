@@ -118,13 +118,13 @@ of the exported value when reimported.
 ## Releases
 
 What changed between versions is in [CHANGELOG.md](../CHANGELOG.md), which the app
-shows as Help ▸ What's New. Every deploy is a release: before the release build, cut
-one with
+shows as Help ▸ What's New. Every push to `main` goes to dev.websfm.app; a release goes
+to websfm.app, when its tag is pushed ([deployment.md](deployment.md#cloudflare-websfmapp)):
 
 ```bash
 npm run release -- --dry-run   # what would happen
 npm run release                # 0.4.0 → 0.5.0; or `-- patch`, `-- major`, `-- 1.0.0`
-git push && git push origin v0.5.0
+git push && git push origin v0.5.0   # the tag deploys websfm.app
 ```
 
 It lists the `feat` / `fix` / `perf` commits since the last tag (add an entry for any
