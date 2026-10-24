@@ -4,6 +4,7 @@ vi.mock('../../utils/opfs.js', () => ({
   beginDepthPlanes: vi.fn(async () => {}),
   saveDepthPlane: vi.fn(),
   commitDepthIndex: vi.fn(async () => {}),
+  loadDepthIndex: vi.fn(async () => null),
 }))
 const opfs = await import('../../utils/opfs.js')
 const { createDepthMapCache } = await import('./depthMapCache.js')
@@ -71,5 +72,31 @@ describe('streamed depth maps', () => {
     expect(opfs.commitDepthIndex).toHaveBeenCalledTimes(1)
     expect(opfs.commitDepthIndex.mock.calls[0][1].maps.map((m) => m.uuid)).toEqual(['a', 'b'])
     expect(c.depthMapsMeta.value.length).toBe(2)
+  })
+})
+
+describe('forgetDepthMap (an image removed)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("drops only that image's map, in memory and in the saved index", async () => {
+    const c = cache()
+    c.depthMapsMeta.value = [{ uuid: 'a' }, { uuid: 'b' }, { uuid: 'c' }]
+    c.depthMaps.value = new Map([
+      ['a', map('a')],
+      ['b', map('b')],
+    ])
+    opfs.loadDepthIndex.mockResolvedValue({ version: 3, maps: [{ uuid: 'a' }, { uuid: 'b' }, { uuid: 'c' }] })
+    await c.forgetDepthMap('b')
+    expect(c.depthMapsMeta.value.map((m) => m.uuid)).toEqual(['a', 'c'])
+    expect([...c.depthMaps.value.keys()]).toEqual(['a'])
+    expect(opfs.commitDepthIndex).toHaveBeenCalledWith('p', { version: 3, maps: [{ uuid: 'a' }, { uuid: 'c' }] })
+  })
+
+  it('leaves the index alone for an image without a map', async () => {
+    const c = cache()
+    c.depthMapsMeta.value = [{ uuid: 'a' }]
+    await c.forgetDepthMap('x')
+    expect(c.depthMapsMeta.value).toEqual([{ uuid: 'a' }])
+    expect(opfs.commitDepthIndex).not.toHaveBeenCalled()
   })
 })
