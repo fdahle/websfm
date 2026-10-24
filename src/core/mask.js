@@ -225,8 +225,11 @@ export async function maskFromSource(source, nativeW, nativeH, { base = null } =
   const id = await rasterizeAt(source, w, h)
   normalizeMaskPixels(id.data)
   if (base) unionMaskPixels(id.data, (await rasterizeAt(base, w, h)).data)
+  // A CPU canvas: a GPU-backed one uploads the whole mask as one image, and a few
+  // 10,000-px scan masks on parallel workers ran Chrome's GPU process out of memory
+  // (Skia OOM, three GPU-process crashes, then the tab was on SwiftShader).
   const canvas = new OffscreenCanvas(w, h)
-  canvas.getContext('2d').putImageData(id, 0, 0)
+  canvas.getContext('2d', { willReadFrequently: true }).putImageData(id, 0, 0)
   return canvas.convertToBlob({ type: 'image/png' })
 }
 

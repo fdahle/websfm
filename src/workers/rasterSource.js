@@ -170,12 +170,13 @@ export async function buildPyramidFromTiff(
 async function encodeLevel(desc, k, type, quality, maxLong = Infinity) {
   const L = desc.index.levels[k]
   const r = readLevelRect(await openPyramid(desc), k, { x0: 0, y0: 0, x1: L.width, y1: L.height })
+  // CPU canvases (as core/mask.js maskFromSource): pixels in, an encode out.
   let canvas = new OffscreenCanvas(r.width, r.height)
-  canvas.getContext('2d').putImageData(new ImageData(r.data, r.width, r.height), 0, 0)
+  canvas.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(r.data, r.width, r.height), 0, 0)
   if (Math.max(r.width, r.height) > maxLong) {
     const s = maxLong / Math.max(r.width, r.height)
     const small = new OffscreenCanvas(Math.max(1, Math.round(r.width * s)), Math.max(1, Math.round(r.height * s)))
-    small.getContext('2d').drawImage(canvas, 0, 0, small.width, small.height)
+    small.getContext('2d', { willReadFrequently: true }).drawImage(canvas, 0, 0, small.width, small.height)
     canvas = small
   }
   return canvas.convertToBlob({ type, quality })
@@ -305,7 +306,7 @@ export function rasterizePyramidTo(src, width, height) {
   let data = lvl.data
   if (width !== L.width || height !== L.height) {
     const from = new OffscreenCanvas(L.width, L.height)
-    from.getContext('2d').putImageData(new ImageData(lvl.data, L.width, L.height), 0, 0)
+    from.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(lvl.data, L.width, L.height), 0, 0)
     const dst = new OffscreenCanvas(width, height)
     const ctx = dst.getContext('2d', { willReadFrequently: true })
     ctx.imageSmoothingQuality = 'high'

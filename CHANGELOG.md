@@ -566,6 +566,11 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- **Importing masks of large scans no longer knocks out the GPU.** Each imported mask
+  was drawn into a GPU-backed canvas before it was saved; three 10,000-pixel scan masks
+  at once ran Chrome's GPU process out of memory, and after three crashes the tab fell
+  back to software rendering: matching and depth maps then ran on the CPU emulation,
+  many times slower, with no error. Workers now draw such pixels on the CPU.
 - **DISK no longer retries WebGPU on every tile.** Its WebGPU path lacks an operator;
   the first failure now keeps every later input on the CPU instead of only larger ones.
 - **Local products of a historical block are level.** A block that mixes vertical

@@ -236,7 +236,7 @@ export function makeExportOps({ lazCodec = null } = {}) {
     // JPEG has no alpha, so its uncovered cells always take the NODATA value.
     if (!alpha || format === 'jpeg') fillUncovered(rgba, nodataByte)
     const canvas = new OffscreenCanvas(width, height)
-    canvas.getContext('2d').putImageData(new ImageData(rgba, width, height), 0, 0)
+    canvas.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(rgba, width, height), 0, 0)
     const blob = await canvas.convertToBlob({ type: format === 'jpeg' ? 'image/jpeg' : 'image/png', quality })
     emit('log', [
       `Ortho ${format.toUpperCase()}: ${width}×${height}, ${(blob.size / 1024 ** 2).toFixed(1)} MB ` +

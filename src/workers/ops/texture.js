@@ -253,7 +253,7 @@ export function makeTextureOps({ rasterize } = {}) {
     const blobs = []
     for (const p of out.pages) {
       const canvas = new OffscreenCanvas(p.width, p.height)
-      canvas.getContext('2d').putImageData(new ImageData(p.data, p.width, p.height), 0, 0)
+      canvas.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(p.data, p.width, p.height), 0, 0)
       blobs.push(await canvas.convertToBlob({ type: 'image/jpeg', quality }))
       p.data = null
     }

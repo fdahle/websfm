@@ -264,7 +264,7 @@ export function makeDenseOps({ rasterize }) {
       }
     }
     const canvas = new OffscreenCanvas(pw, ph)
-    canvas.getContext('2d').putImageData(img, 0, 0)
+    canvas.getContext('2d', { willReadFrequently: true }).putImageData(img, 0, 0)
     return canvas.convertToBlob({ type: 'image/png' })
   }
 

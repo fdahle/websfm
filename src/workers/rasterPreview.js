@@ -8,7 +8,9 @@
 // previews) and the io ops (imported reference-raster previews).
 export async function rasterToPng(rgba, w, h) {
   const canvas = new OffscreenCanvas(w, h)
-  canvas.getContext('2d').putImageData(rgba instanceof ImageData ? rgba : new ImageData(rgba, w, h), 0, 0)
+  canvas
+    .getContext('2d', { willReadFrequently: true })
+    .putImageData(rgba instanceof ImageData ? rgba : new ImageData(rgba, w, h), 0, 0)
   return canvas.convertToBlob({ type: 'image/png' })
 }
 

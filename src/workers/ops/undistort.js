@@ -69,7 +69,9 @@ export function makeUndistortOps({ rasterize }) {
 
     const mime = format === 'png' ? 'image/png' : 'image/jpeg'
     const canvas = new OffscreenCanvas(rect.width, rect.height)
-    canvas.getContext('2d').putImageData(new ImageData(data, rect.width, rect.height), 0, 0)
+    canvas
+      .getContext('2d', { willReadFrequently: true })
+      .putImageData(new ImageData(data, rect.width, rect.height), 0, 0)
     const blob = await canvas.convertToBlob(mime === 'image/png' ? { type: mime } : { type: mime, quality })
     const bytes = await blob.arrayBuffer()
 
