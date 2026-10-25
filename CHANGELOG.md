@@ -194,6 +194,13 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Bundle adjustment of small blocks on every core.** A block under about 128 cameras now
+  builds and reduces its bundle-adjustment system on all cores instead of one, in
+  fixed point chunks, so every browser gets the same result. A 42-image block: SfM
+  18.7 → 12.1 s (bundle adjustment 12.4 → 6.1 s); quarry (347 images, whose interim
+  solves are small): 72.2 → 66.5 s. The sums are added in a different order, so the
+  last digits differ; on a synthetic block with known cameras the error to the truth is
+  the same (5.014 → 5.009), and the RTK camera check is unchanged.
 - **Fewer stalls while long runs work.** Bookkeeping the page did itself while the workers
   computed — converting descriptors before SfM, per-pair match checks, each saved depth
   map's statistics — now takes a fraction of the time. On quarry (347 images): before

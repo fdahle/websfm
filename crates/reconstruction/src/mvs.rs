@@ -97,6 +97,8 @@ fn mean_best_costs(costs: impl Iterator<Item = f64>, best_k: usize) -> f64 {
 // degenerate plane or a flat source patch (bad hypothesis) scores the max cost
 // 2.0; when the source provides no measurement (warp OOB / masked / <4 px /
 // textureless reference patch) it returns the INVALID sentinel so `agg_cost` can exclude it rather than average it in.
+// The reference agg_cost is checked against (tests); the kernel runs window_cost.
+#[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn plane_cost(
     refimg: &[u8], rw: usize, rh: usize,

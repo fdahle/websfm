@@ -1214,8 +1214,22 @@ pub fn bundle_adjust(
     let cost_before = rms(&cams, &pts, &gpar);
     let mut lambda = 1e-3f64;              // LM damping
     let mut trace: Vec<f64> = Vec::new();  // RMS after each accepted iteration
-    let mut el: Vec<EBlock> = Vec::new();  // one point's coupling blocks (reused)
-    let mut ms_buf: Vec<[[f64; 3]; BLK_MAX]> = Vec::new(); // their E·C⁻¹ (reused)
+    // The full-matrix paths (no RangePlan: the dense and PCG solves, below ~128 cameras)
+    // split the assembly and the Schur step over points instead: `point_chunks`
+    // contiguous chunks, each summing into its own share of S and the right-hand side,
+    // the shares added in chunk order after. The count follows the problem's size (2,048
+    // points a chunk, at most 16, the shares at most 128 MB together), never the thread
+    // count, so both builds give the same bits. One loop had kept these blocks on one
+    // thread in the threaded build too (Aukerman, 42 cameras: BA 13.6 of SfM's 20 s).
+    let point_chunks = if range_plan.is_some() { 1 } else {
+        let share = (pattern.n_vals + n) * 8;
+        let mut c = n_pts.div_ceil(2048).clamp(1, 16);
+        while c > 1 && c * share > 128 << 20 { c -= 1; }
+        c
+    };
+    let chunk_range = |c: usize| (c * n_pts / point_chunks)..((c + 1) * n_pts / point_chunks);
+    let mut share_s: Vec<Vec<f64>> = if range_plan.is_some() { Vec::new() } else { (0..point_chunks).map(|_| vec![0f64; pattern.n_vals]).collect() };
+    let mut share_r: Vec<Vec<f64>> = if range_plan.is_some() { Vec::new() } else { (0..point_chunks).map(|_| vec![0f64; n]).collect() };
 
     for _outer in 0..max_iters {
         prof::start();
@@ -1371,43 +1385,57 @@ pub fn bundle_adjust(
                 }
             }
         } else {
-            for pi in 0..n_pts {
-                for q in pt_start[pi]..pt_start[pi + 1] {
-                    let Some(Jac { ci, ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv }) = jac(pt_obs[q as usize] as usize, &cams, &pts, &gpar, dh)
-                        else { continue };
-                    let sc = slot[ci];
-                    let free = sc != FIXED;
-                    let coff = if free { 6 * sc } else { 0 };
-                    if free {
-                        let dc = pattern.diag_at[sc];
-                        for a in 0..6 {
-                            gr[coff + a] += wu*ju[a]*ru + wv*jv[a]*rv;
-                            for b in 0..6 { smat[dc + a*6 + b] += wu*ju[a]*ju[b] + wv*jv[a]*jv[b]; }
+            // Point chunks (`point_chunks`): a chunk's camera and group terms go to its own
+            // shares, its points' C and gp straight to them (a point is in one chunk).
+            for v in share_s.iter_mut() { v.fill(0.0); }
+            for v in share_r.iter_mut() { v.fill(0.0); }
+            let sm_ps: Vec<SyncPtr<f64>> = share_s.iter_mut().map(|v| SyncPtr::of(v)).collect();
+            let gr_ps: Vec<SyncPtr<f64>> = share_r.iter_mut().map(|v| SyncPtr::of(v)).collect();
+            let (cm_p, gp_p) = (SyncPtr::of(&mut cmat), SyncPtr::of(&mut gpv));
+            for_each_index(point_chunks, |c| {
+                let (sm_p, gr_p) = (sm_ps[c], gr_ps[c]);
+                for pi in chunk_range(c) {
+                    // SAFETY (all writes below): chunk c alone writes its shares and its points.
+                    let (gp, cm) = unsafe { (gp_p.at(pi), cm_p.at(pi)) };
+                    for q in pt_start[pi]..pt_start[pi + 1] {
+                        let Some(Jac { ci, ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv }) = jac(pt_obs[q as usize] as usize, &cams, &pts, &gpar, dh)
+                            else { continue };
+                        let sc = slot[ci];
+                        let free = sc != FIXED;
+                        let coff = if free { 6 * sc } else { 0 };
+                        if free {
+                            let dc = pattern.diag_at[sc];
+                            for a in 0..6 {
+                                unsafe { *gr_p.at(coff + a) += wu*ju[a]*ru + wv*jv[a]*rv; }
+                                for b in 0..6 { unsafe { *sm_p.at(dc + a*6 + b) += wu*ju[a]*ju[b] + wv*jv[a]*jv[b]; } }
+                            }
                         }
-                    }
-                    if refine {
-                        let g = grp[ci];
-                        let goff = group_off + g * kdim;
-                        let dg = pattern.diag_at[n_free + g];
-                        let (gc, cg) = if free { (pattern.at(n_free + g, sc), pattern.at(sc, n_free + g)) } else { (0, 0) };
-                        for a in 0..kdim {
-                            gr[goff + a] += wu*jku[a]*ru + wv*jkv[a]*rv;
-                            for b in 0..kdim { smat[dg + a*kdim + b] += wu*jku[a]*jku[b] + wv*jkv[a]*jkv[b]; }
-                            // Cross term camera(coff) ↔ group(goff), both triangles.
-                            if free { for b in 0..6 {
-                                let v = wu*jku[a]*ju[b] + wv*jkv[a]*jv[b];
-                                smat[gc + a*6 + b] += v;
-                                smat[cg + b*kdim + a] += v;
-                            } }
+                        if refine {
+                            let g = grp[ci];
+                            let goff = group_off + g * kdim;
+                            let dg = pattern.diag_at[n_free + g];
+                            let (gc, cg) = if free { (pattern.at(n_free + g, sc), pattern.at(sc, n_free + g)) } else { (0, 0) };
+                            for a in 0..kdim {
+                                unsafe { *gr_p.at(goff + a) += wu*jku[a]*ru + wv*jkv[a]*rv; }
+                                for b in 0..kdim { unsafe { *sm_p.at(dg + a*kdim + b) += wu*jku[a]*jku[b] + wv*jkv[a]*jkv[b]; } }
+                                // Cross term camera(coff) ↔ group(goff), both triangles.
+                                if free { for b in 0..6 {
+                                    let v = wu*jku[a]*ju[b] + wv*jkv[a]*jv[b];
+                                    unsafe { *sm_p.at(gc + a*6 + b) += v; *sm_p.at(cg + b*kdim + a) += v; }
+                                } }
+                            }
                         }
-                    }
-                    for a in 0..3 {
-                        gpv[pi][a] += wu*jpu[a]*ru + wv*jpv[a]*rv;
-                        for b in 0..3 { cmat[pi][a][b] += wu*jpu[a]*jpu[b] + wv*jpv[a]*jpv[b]; }
+                        for a in 0..3 {
+                            gp[a] += wu*jpu[a]*ru + wv*jpv[a]*rv;
+                            for b in 0..3 { cm[a][b] += wu*jpu[a]*jpu[b] + wv*jpv[a]*jpv[b]; }
+                        }
                     }
                 }
+            });
+            for c in 0..point_chunks {
+                for (x, v) in smat.iter_mut().zip(&share_s[c]) { *x += v; }
+                for (x, v) in gr.iter_mut().zip(&share_r[c]) { *x += v; }
             }
-
         }
 
         // A k slot the group's lens does not have has no Jacobian: pin it (unit
@@ -1438,7 +1466,7 @@ pub fn bundle_adjust(
 
             let mut cinv_store: Vec<Option<M3>> = vec![None; n_pts];
             let mut tmp_store: Vec<V3> = vec![[0.0; 3]; n_pts];
-            let mut ok = true;
+            let ok;
             if let Some(rp) = range_plan.as_ref() {
                 // Range by range, on the thread pool when there is one (RangePlan: every
                 // element has one writer, and gets its terms in Schur order).
@@ -1516,59 +1544,78 @@ pub fn bundle_adjust(
                     for i in 0..rp.group_rows { rhs[rp.group_off + i] += part[rp.gg_len + i]; }
                 }
             } else {
-                for &pi in &schur_order {
-                    eblocks(pi, &cams, &pts, &gpar, dh, &mut el);
-                    // An anchored point with no camera coupling (edge case: every
-                    // observing camera failed cheirality) still needs its C⁻¹·gp
-                    // computed so the back-substitution below moves it toward the anchor.
-                    if el.is_empty() && !anchored[pi] { continue; }
-                    let mut cp = cmat[pi];
-                    for i in 0..3 { cp[i][i] = cp[i][i] * (1.0 + lambda) + 1e-12; }
-                    let cinv = match inv3(&cp) { Some(m) => m, None => { ok = false; break; } };
-                    let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
-                    cinv_store[pi] = Some(cinv);
-                    tmp_store[pi] = tmp;
-                    for eb in &el {
-                        for a in 0..eb.dim {
-                            rhs[eb.off + a] += eb.rows[a][0]*tmp[0] + eb.rows[a][1]*tmp[1] + eb.rows[a][2]*tmp[2];
+                // Point chunks (`point_chunks`; schur_order is the index order here): each
+                // chunk subtracts into its own shares of S and adds into its share of the
+                // right-hand side, added in chunk order after.
+                for v in share_s.iter_mut() { v.fill(0.0); }
+                for v in share_r.iter_mut() { v.fill(0.0); }
+                let failed = std::sync::atomic::AtomicBool::new(false);
+                let s_ps: Vec<SyncPtr<f64>> = share_s.iter_mut().map(|v| SyncPtr::of(v)).collect();
+                let r_ps: Vec<SyncPtr<f64>> = share_r.iter_mut().map(|v| SyncPtr::of(v)).collect();
+                let (ci_p, tmp_p) = (SyncPtr::of(&mut cinv_store), SyncPtr::of(&mut tmp_store));
+                for_each_index(point_chunks, |c| {
+                    let (s_p, r_p) = (s_ps[c], r_ps[c]);
+                    let mut el: Vec<EBlock> = Vec::new();
+                    let mut ms: Vec<[[f64; 3]; BLK_MAX]> = Vec::new();
+                    for pi in chunk_range(c) {
+                        if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
+                        eblocks(pi, &cams, &pts, &gpar, dh, &mut el);
+                        // An anchored point with no camera coupling (edge case: every
+                        // observing camera failed cheirality) still needs its C⁻¹·gp
+                        // computed so the back-substitution below moves it toward the anchor.
+                        if el.is_empty() && !anchored[pi] { continue; }
+                        let mut cp = cmat[pi];
+                        for i in 0..3 { cp[i][i] = cp[i][i] * (1.0 + lambda) + 1e-12; }
+                        let cinv = match inv3(&cp) { Some(m) => m, None => { failed.store(true, std::sync::atomic::Ordering::Relaxed); return; } };
+                        let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
+                        // SAFETY (all writes below): chunk c alone writes its shares and its points.
+                        unsafe { *ci_p.at(pi) = Some(cinv); *tmp_p.at(pi) = tmp; }
+                        for eb in &el {
+                            for a in 0..eb.dim {
+                                unsafe { *r_p.at(eb.off + a) += eb.rows[a][0]*tmp[0] + eb.rows[a][1]*tmp[1] + eb.rows[a][2]*tmp[2]; }
+                            }
+                        }
+                        // M_v = E_v·C⁻¹ (dim×3); then S -= Σ_{v1,v2} M_{v1}·E_{v2}ᵀ.
+                        ms.clear();
+                        ms.extend(el.iter().map(|eb| {
+                            let mut m = [[0f64; 3]; BLK_MAX];
+                            for a in 0..eb.dim {
+                                for k in 0..3 {
+                                    m[a][k] = eb.rows[a][0]*cinv[0][k] + eb.rows[a][1]*cinv[1][k] + eb.rows[a][2]*cinv[2][k];
+                                }
+                            }
+                            m
+                        }));
+                        for (i1, eb1) in el.iter().enumerate() {
+                            let m = &ms[i1];
+                            for eb2 in &el {
+                                if lower_only && eb2.blk > eb1.blk { continue; }
+                                let base = pattern.at(eb1.blk, eb2.blk);
+                                if eb1.dim == 6 && eb2.dim == 6 {
+                                    // Camera × camera, fixed size (the same sums as below).
+                                    for a in 0..6 {
+                                        for b in 0..6 {
+                                            let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                            unsafe { *s_p.at(base + a*6 + b) -= v; }
+                                        }
+                                    }
+                                } else {
+                                    for a in 0..eb1.dim {
+                                        for b in 0..eb2.dim {
+                                            let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                            unsafe { *s_p.at(base + a*eb2.dim + b) -= v; }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                    // M_v = E_v·C⁻¹ (dim×3); then S -= Σ_{v1,v2} M_{v1}·E_{v2}ᵀ. The sparse direct
-                    // solve reads only the lower triangle (block row ≥ block column), so with it
-                    // the upper pairs are skipped: half of the Schur elimination, the largest
-                    // part of a big BA (1,600 cameras: 4.1 of 7.8 s).
-                    ms_buf.clear();
-                    ms_buf.extend(el.iter().map(|eb| {
-                        let mut m = [[0f64; 3]; BLK_MAX];
-                        for a in 0..eb.dim {
-                            for k in 0..3 {
-                                m[a][k] = eb.rows[a][0]*cinv[0][k] + eb.rows[a][1]*cinv[1][k] + eb.rows[a][2]*cinv[2][k];
-                            }
-                        }
-                        m
-                    }));
-                    for (i1, eb1) in el.iter().enumerate() {
-                        let m = &ms_buf[i1];
-                        for eb2 in &el {
-                            if lower_only && eb2.blk > eb1.blk { continue; }
-                            let base = pattern.at(eb1.blk, eb2.blk);
-                            if eb1.dim == 6 && eb2.dim == 6 {
-                                // Camera × camera, fixed size (the same sums as below).
-                                for a in 0..6 {
-                                    for b in 0..6 {
-                                        let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
-                                        s[base + a*6 + b] -= v;
-                                    }
-                                }
-                            } else {
-                                for a in 0..eb1.dim {
-                                    for b in 0..eb2.dim {
-                                        let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
-                                        s[base + a*eb2.dim + b] -= v;
-                                    }
-                                }
-                            }
-                        }
+                });
+                ok = !failed.load(std::sync::atomic::Ordering::Relaxed);
+                if ok {
+                    for c in 0..point_chunks {
+                        for (x, v) in s.iter_mut().zip(&share_s[c]) { *x += v; }
+                        for (x, v) in rhs.iter_mut().zip(&share_r[c]) { *x += v; }
                     }
                 }
             }
