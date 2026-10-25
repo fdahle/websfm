@@ -961,42 +961,46 @@ window.bench = {
       progress: null,
       effectiveFrameSpec: recon.effectiveFrameSpec,
     })
-    if (kind === 'project') {
-      // Save as .websfm. Without showSaveFilePicker (removed here, as on Firefox and
-      // Safari) the archive goes out as a buffered download, which the runner keeps.
-      const had = Object.getOwnPropertyDescriptor(window, 'showSaveFilePicker')
-      Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true, writable: true })
-      const t0 = performance.now()
-      try {
+    // Without showSaveFilePicker (removed here, as on Firefox and Safari) a .websfm or a
+    // large cloud or mesh goes out as a download, which the runner keeps; headless
+    // Chromium answers the save dialog with a cancel.
+    const had = Object.getOwnPropertyDescriptor(window, 'showSaveFilePicker')
+    Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true, writable: true })
+    try {
+      return await runExport()
+    } finally {
+      if (had) Object.defineProperty(window, 'showSaveFilePicker', had)
+      else delete window.showSaveFilePicker
+    }
+    async function runExport() {
+      if (kind === 'project') {
+        const t0 = performance.now()
         const r = await projects.exportProject(projects.currentProjectId, {
           includeDerived: settings.includeDerived ?? true,
           onLog: (m, l, c) => useLog().log(m, l, c),
         })
         return { seconds: (performance.now() - t0) / 1000, ...r }
-      } finally {
-        if (had) Object.defineProperty(window, 'showSaveFilePicker', had)
-        else delete window.showSaveFilePicker
       }
-    }
-    if (kind === 'keypoints' || kind === 'matches') {
-      // The sidebar's Keypoints / Matches JSON downloads (exports/tabular.js).
+      if (kind === 'keypoints' || kind === 'matches') {
+        // The sidebar's Keypoints / Matches JSON downloads (exports/tabular.js).
+        const t0 = performance.now()
+        await (kind === 'keypoints' ? ex.exportKeypoints() : ex.exportMatches())
+        return { seconds: (performance.now() - t0) / 1000 }
+      }
+      const target = cloud
+        ? recon.clouds.find((c) => c.kind === cloud && (cloudName ? c.name === cloudName : !c.imported && !c.derived))
+        : null
+      if (cloud && !target) throw new Error(`exportRun: no ${cloud} cloud`)
+      // 3D Tiles writes the selected mesh or cloud: the named one is selected first.
+      if (target && kind === 'tiles3d') {
+        recon.selectedCloudId = target.id
+        ex.exportKind.value = kind
+      } else if (target) ex.openCloudExport(target.id)
+      else ex.exportKind.value = kind
       const t0 = performance.now()
-      await (kind === 'keypoints' ? ex.exportKeypoints() : ex.exportMatches())
+      await ex.onExportRun(settings)
       return { seconds: (performance.now() - t0) / 1000 }
     }
-    const target = cloud
-      ? recon.clouds.find((c) => c.kind === cloud && (cloudName ? c.name === cloudName : !c.imported && !c.derived))
-      : null
-    if (cloud && !target) throw new Error(`exportRun: no ${cloud} cloud`)
-    // 3D Tiles writes the selected mesh or cloud: the named one is selected first.
-    if (target && kind === 'tiles3d') {
-      recon.selectedCloudId = target.id
-      ex.exportKind.value = kind
-    } else if (target) ex.openCloudExport(target.id)
-    else ex.exportKind.value = kind
-    const t0 = performance.now()
-    await ex.onExportRun(settings)
-    return { seconds: (performance.now() - t0) / 1000 }
   },
 
   // A COLMAP model from the files the runner put on #bench-colmap-files, read as bytes

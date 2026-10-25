@@ -109,6 +109,10 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Large cloud and mesh exports ask where to save first.** In Chrome and Edge, an export
+  over about 256 MB opens the save dialog when you start it and writes the file there
+  when it is done, instead of a download at the end. A 552 MB PLY download could be
+  cancelled by the browser the first time; Firefox and Safari still download.
 - **Tool dialogs read like the Reconstruct ones.** The Tools dialogs that run on a
   cloud, mesh, DEM or the model (Filter, Crop, Transform, Merge, Estimate normals,
   Classify ground, Align to reference, Distance to reference, Clean, Smooth, Decimate,

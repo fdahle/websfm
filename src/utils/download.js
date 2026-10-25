@@ -16,6 +16,39 @@ export function downloadBlob(filename, data, mime = 'application/octet-stream') 
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+// Ask where to save a file before the work that writes it, while the click that started
+// it still counts as a user gesture (the save dialog needs one, and an export can run for
+// minutes). Chrome and Edge then write the finished Blob straight to that file;
+// Firefox and Safari have no save dialog, and a dialog refused for want of a gesture
+// (the bench drives exports without a click) falls back to a download. `types` are the
+// dialog's file types, [{ description, accept: { mime: ['.ext'] } }].
+// → { save(blob), picked } or null when the user cancelled the dialog.
+export async function pickSaveTarget(suggestedName, types) {
+  let handle = null
+  if (typeof window !== 'undefined' && window.showSaveFilePicker) {
+    try {
+      handle = await window.showSaveFilePicker({ suggestedName, types })
+    } catch (err) {
+      if (err?.name === 'AbortError') return null
+    }
+  }
+  return {
+    picked: !!handle,
+    async save(blob, filename = suggestedName) {
+      if (!handle) return downloadBlob(filename, blob)
+      // Like projectFile.js: a file the user just picked, written once and closed.
+      const writable = await handle.createWritable()
+      try {
+        await writable.write(blob)
+        await writable.close()
+      } catch (err) {
+        await writable.abort?.().catch(() => {})
+        throw err
+      }
+    },
+  }
+}
+
 // Convert a data: URL (e.g. an OffscreenCanvas PNG) to a Blob for download.
 export async function dataUrlToBlob(dataUrl) {
   return (await fetch(dataUrl)).blob()

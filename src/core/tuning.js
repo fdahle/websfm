@@ -498,3 +498,10 @@ export const TURNTABLE_TUNING = {
   minSecondsPerTurn: 5,
   maxSecondsPerTurn: 600,
 }
+
+// Cloud and mesh exports (composables/exports/clouds.js): from this estimated size on,
+// Chrome and Edge ask where to save before the export runs and write the file there
+// (core/io/exportSize.js), instead of a download of the finished file.
+export const EXPORT_TUNING = {
+  savePickerMinMiB: 256,
+}

@@ -7,7 +7,7 @@ import {
   exportPointTiles as workerExportPointTiles,
   exportMeshTiles as workerExportMeshTiles,
 } from '../../workers/computeClient.js'
-import { downloadBlob } from '../../utils/download.js'
+import { downloadBlob, pickSaveTarget } from '../../utils/download.js'
 import { buildTransformsJson } from '../../core/io/transforms.js'
 import {
   reconstructionToJson,
@@ -29,6 +29,8 @@ import {
 } from '../../core/products/tiles3d.js'
 import { exportOrigin, lasEpsg } from '../../core/lod/tiles3d.js'
 import { EXPORT_DEFAULTS } from '../../core/defaults.user.js'
+import { EXPORT_TUNING } from '../../core/tuning.js'
+import { estimateExportBytes } from '../../core/io/exportSize.js'
 import { ensureProjection, transformAsync, metresPerCrsUnit } from '../../core/crs.js'
 import { zipParts } from '../../utils/zip.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
@@ -158,10 +160,32 @@ export function createCloudExports({
     return cloud ? cloudFileBase(cloud, target) : projectBase()
   }
 
+  // Where the export goes: a large one asks for its file first (pickSaveTarget, before
+  // any await), and a small one, or a browser without the dialog, downloads.
+  // → { save(blob) } or null when the user cancelled.
+  async function saveTarget(filename, estimate, mime) {
+    if (estimateExportBytes(estimate) < EXPORT_TUNING.savePickerMinMiB * 1024 ** 2) {
+      return { save: (blob) => downloadBlob(filename, blob) }
+    }
+    const ext = filename.slice(filename.lastIndexOf('.'))
+    const target = await pickSaveTarget(filename, [
+      { description: `${ext.slice(1).toUpperCase()} file`, accept: { [mime]: [ext] } },
+    ])
+    if (!target) log(`Export of ${filename} cancelled`, 'info', 'Export')
+    return target
+  }
+
   async function doExportCloud({ format, includeColor, applyGeoref, downsampleCell, fileName }, target = null) {
     const cloud = exportCloudOf(target)
     if (!cloud) return
     const name = exportFileName(fileName, cloudFileBase(cloud, target))
+    const ext = format === 'las' || format === 'laz' || format === 'xyz' ? format : 'ply'
+    const out = await saveTarget(
+      `${name}.${ext}`,
+      { kind: 'cloud', format, points: cloud.count },
+      format === 'xyz' || format === 'ply-ascii' ? 'text/plain' : 'application/octet-stream',
+    )
+    if (!out) return
     // A streamed cloud (core/lod/streamed.js) is written from its octree, node by node,
     // in its own coordinates (an imported LAS's own quantisation and projection).
     if (isStreamed(cloud)) {
@@ -174,7 +198,7 @@ export function createCloudExports({
         )
       }
       const { blob } = await useReconstructionStore().exportCloudLod(cloud, { format, color: includeColor })
-      downloadBlob(`${name}.${format === 'ply-ascii' ? 'ply' : format}`, blob)
+      await out.save(blob)
       return
     }
     // Attributes (a computed distance, imported intensity/classification) ride along:
@@ -207,8 +231,7 @@ export function createCloudExports({
       },
       { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') },
     )
-    const ext = format === 'las' || format === 'laz' || format === 'xyz' ? format : 'ply'
-    downloadBlob(`${name}.${ext}`, blob)
+    await out.save(blob)
   }
 
   // Mesh (screened Poisson) → PLY (faces) / GLB / OBJ / STL, in the export worker.
@@ -216,9 +239,25 @@ export function createCloudExports({
   async function doExportMesh({ format, includeColor, includeTexture = true, applyGeoref, fileName }, target = null) {
     const cloud = exportMeshOf(target)
     if (!cloud) return
+    const textured = includeTexture && !!(cloud.uv && cloud.texture)
+    // The worker's extension rule (workers/ops/export.js exportMesh): a textured OBJ is a
+    // zip of the .obj, its .mtl and the atlas pages.
+    const ext =
+      format === 'obj' && textured && cloud.texture.pages?.length
+        ? 'zip'
+        : ['glb', 'obj', 'stl'].includes(format)
+          ? format
+          : 'ply'
+    const base = exportFileName(fileName, cloudExportBase('mesh', target))
+    const out = await saveTarget(
+      `${base}.${ext}`,
+      { kind: 'mesh', format, vertices: cloud.nVerts, triangles: cloud.count },
+      { zip: 'application/zip', glb: 'model/gltf-binary', stl: 'model/stl' }[ext] ??
+        (format === 'obj' || format === 'ply-ascii' ? 'text/plain' : 'application/octet-stream'),
+    )
+    if (!out) return
     const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
     logExportFrame('Mesh', frame)
-    const textured = includeTexture && !!(cloud.uv && cloud.texture)
     const mesh = {
       nVerts: cloud.nVerts,
       count: cloud.count,
@@ -234,12 +273,11 @@ export function createCloudExports({
           groups: cloud.texture.groups.map((g) => ({ ...g })),
         }
       : null
-    const base = exportFileName(fileName, cloudExportBase('mesh', target))
-    const { blob, ext } = await exportMeshFile(
+    const { blob } = await exportMeshFile(
       { mesh, format, color: includeColor, sim: frame.sim, texture, name: base },
       { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') },
     )
-    downloadBlob(`${base}.${ext}`, blob)
+    await out.save(blob)
   }
 
   // SfM cameras → websfm JSON (cameras + optional tracks), or a NeRF/3DGS

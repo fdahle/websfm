@@ -114,8 +114,9 @@ A **voxel downsample** in the export dialog keeps one real point per cell, with 
 own colour and attribute values. Averaging would give class numbers and timestamps
 that no point had. Without attributes the cell average is written, as before.
 
-Cloud and mesh files are written in the background and streamed into the download,
-so the app stays responsive and size is not limited by the format: an ASCII PLY or
+Cloud and mesh files are written in the background and streamed into the download
+(a large one, in Chrome and Edge, into the file you pick when you start it), so the app
+stays responsive and size is not limited by the format: an ASCII PLY or
 XYZ of tens of millions of points works the same as a binary one, only larger.
 Importing works the same way: XYZ, ASCII PLY and LAS files are read in pieces, so a
 multi-gigabyte text cloud does not have to fit in memory as text. Its points do: past

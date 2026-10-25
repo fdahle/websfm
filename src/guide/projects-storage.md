@@ -68,7 +68,9 @@ missing shows an error status as soon as the project opens; detect it again.
 
 ## File name
 Exports are downloads: the browser saves them in its downloads folder, or asks where
-when it is set to. Each export dialog has an optional **File name**. Left empty, the
+when it is set to. A point cloud or mesh export of more than about 256 MB asks where to
+save it first in Chrome and Edge, and writes the file straight there when it is done;
+Firefox and Safari download it. Each export dialog has an optional **File name**. Left empty, the
 file is named after the project and what it holds (for example *Aukerman-ortho.tif*,
 shown greyed in the field). A typed name replaces that for every file the export
 writes: the extension is the format's, a world file (.wld) or projection file (.prj)
