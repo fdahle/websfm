@@ -194,6 +194,9 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Feature detection on every worker.** SIFT now detects as many images at once as the
+  worker pool and the memory budget allow, instead of at most four. Quarry (347 images,
+  8 workers): 161 → 86 s; a 42-image block 23 → 19 s; the same keypoints.
 - **Faster meshes.** The surface solve's screening terms skip the products that are
   always zero, the same mesh in less time. A 42-image block (61 k samples, depth 8):
   Build Mesh 22.5 → 18.0 s; a 1 M-sample depth-10 terrain: solve 384 → 244 s, its

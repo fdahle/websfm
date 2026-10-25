@@ -158,8 +158,8 @@ all keypoints and invalidates results that depend on them. Use Overwrite after c
 detector, or when you need a clean comparison of detection settings.
 
 ## Batch throughput
-SIFT batches use up to four workers, bounded by your configured worker count and
-a conservative estimate of image decode and pyramid memory, which together must fit
+SIFT batches use every worker of the pool, as many as your configured worker count and
+a conservative estimate of image decode and pyramid memory allow; together they must fit
 the memory budget in Settings ▸ Compute (the same one dense reconstruction uses).
 Large scans or images with unknown dimensions run one at a time. The learned detectors stay
 serial to share their model session. The console reports concurrency and batch wall time; Cancel stops

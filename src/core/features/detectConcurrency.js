@@ -10,7 +10,10 @@ const fallbackBudget = (deviceMemoryGB) => Math.min(1024, deviceMemoryGB > 0 ? d
 
 // `settings.memBudgetBytes` is the machine compute budget (Settings ▸ Compute, the one
 // dense and DEM size themselves to), injected at run() like theirs; the jobs together
-// must fit it. Each job runs in its own worker, so they never share wasm memory.
+// must fit it. Each job runs in its own worker, so they never share wasm memory. Within
+// the budget every worker of the pool takes a job: a fixed cap of four (from when the
+// budget was at most 1 GB) left half of an 8-worker pool idle, quarry 347 detected in
+// 161 s instead of 86 s.
 export function detectionConcurrency(images, settings, poolSize, deviceMemoryGB = null) {
   if (isLearnedDetector(settings.detector) || !images.length) return 1
   const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : fallbackBudget(deviceMemoryGB)
@@ -23,7 +26,7 @@ export function detectionConcurrency(images, settings, poolSize, deviceMemoryGB 
     const scale = Math.min(1, maxDim > 0 ? maxDim / Math.max(w, h) : 1)
     largest = Math.max(largest, w * h * (8 + 80 * scale * scale))
   }
-  return Math.max(1, Math.min(4, poolSize, images.length, Math.floor(budget / largest)))
+  return Math.max(1, Math.min(poolSize, images.length, Math.floor(budget / largest)))
 }
 
 // Fiducial detection decodes every scan at full resolution (the native refine
