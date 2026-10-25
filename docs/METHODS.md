@@ -1323,6 +1323,14 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   views (best-K aggregation over neighbours). Optional `filterDepthMap`
   (median/speckle cleanup).
 
+  **Sources and sweeps**: up to 10 neighbours per reference and 5 sweeps at the finest
+  level (each coarser level one more). Measured on the six ETH3D high-res scenes from the
+  ground-truth cameras (F1 at 2 cm, an approximation of ETH3D's evaluator): 6 sources and
+  3 sweeps 50.1, 10 sources 51.6, 5 sweeps 51.1, both 52.6 (no scene worse; the gain is
+  completeness, e.g. office 35.8 → 40.9). An 11×11 window scored lower (courtyard 58.2 →
+  55.6), and averaging four of six sources instead of three changed nothing: the larger
+  candidate pool, not the aggregation, is what fills the surface.
+
   **Refinement schedule** (`core/dense/refineSchedule.js`): each sweep proposes a
   random normal, a depth-only step and a joint step at scale `s = s₀·0.5^it`; the depth
   step is `±0.5·s·min(d, d_max − d_min)`. Relative to the pixel's **own** depth `d`, as

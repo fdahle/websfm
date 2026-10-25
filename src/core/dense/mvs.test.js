@@ -162,7 +162,13 @@ describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
 
   it('runs coarsest → finest with the working res as the final level', async () => {
     const { fn, calls } = makeMock()
-    const out = await depthMapForImage(ref, sources, packSparseForDense(points).pos, { coarseLong: 10 }, fn)
+    const out = await depthMapForImage(
+      ref,
+      sources,
+      packSparseForDense(points).pos,
+      { coarseLong: 10, iterations: 3 },
+      fn,
+    )
     // 40 → 20 → 10 ⇒ 3 levels.
     expect(calls.map((c) => c.w)).toEqual([10, 20, 40])
     // Refinement continues across levels (5 / 4 / 3 sweeps) instead of restarting.

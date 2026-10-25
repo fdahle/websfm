@@ -109,6 +109,13 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Fuller dense clouds.** Depth maps now compare each image with up to 10 neighbours
+  instead of 6 and run 5 refinement sweeps instead of 3, so more of the surface gets a
+  depth. On six ETH3D scenes (dense from the true cameras, against the laser scans) the
+  F1 score at 2 cm rises from 50.1 to 52.6 on average, with no scene worse (office 35.8 →
+  40.9, playground 34.9 → 40.4). Depth maps take about 9 % longer on the GPU and about
+  2.2× as long without one (a 42-image block: 211 → 465 s); both values stay adjustable in
+  the Depth Maps dialog.
 - **More features on faint images.** An image that finds fewer than half the keypoint
   cap is detected again at half the contrast threshold, so plain walls, interiors and
   uniform fields get enough matches to register. On ETH3D (six scenes, camera centres

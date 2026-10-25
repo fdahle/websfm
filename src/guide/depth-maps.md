@@ -34,10 +34,12 @@ stops before it starts. Use it to reproduce an earlier run exactly, or to pick a
 resolution between two quality steps.
 
 ## Source views per image
-<!-- param: maxSources  default: 6 -->
+<!-- param: maxSources  default: 10 -->
 How many neighbouring cameras may support each reference image. More sources improve
 the chance of finding useful baselines but cost more. Very oblique, distant, or
-non-overlapping sources add little.
+non-overlapping sources add little. Ten fill noticeably more of the surface than six on
+close-range scenes with many viewpoints; on a nadir block most images have that many
+neighbours anyway.
 
 ## Sources aggregated (best-K)
 <!-- param: bestK  default: auto -->
@@ -55,11 +57,12 @@ A larger window is steadier on weak texture but smooths small detail and costs m
 time per pixel. A smaller one keeps sharp edges but is noisier on plain surfaces.
 
 ## Iterations (per level)
-<!-- param: iterations  default: 3 -->
+<!-- param: iterations  default: 5 -->
 How many propagation and refinement sweeps [PatchMatch](help:patchmatch) runs at the
 finest resolution level; each coarser level gets one more. More iterations let good
 depths spread further and improve weakly textured areas, at a roughly linear time
-cost. The default three is a good first pass.
+cost. Five sweeps fill more of the weakly textured areas than three; lower it for a
+quick first look.
 
 ## Speckle / median filter
 <!-- param: speckleFilter  default: on -->

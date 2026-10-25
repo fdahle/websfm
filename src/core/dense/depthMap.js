@@ -26,7 +26,11 @@ import { filterSettings } from './geomFilter.js'
 // Walks only the points the reference sees: O(its observations), not O(points).
 export function selectSourceViews(cameras, sparse, refUuid, opts = {}, index = viewIndex(sparse)) {
   // maxSources is user-facing (DEPTHMAP_DEFAULTS); the angle window is internal (tuning.js).
-  const { maxSources = 6, minAngleDeg = DENSE_TUNING.minAngleDeg, maxAngleDeg = DENSE_TUNING.maxAngleDeg } = opts
+  const {
+    maxSources = DEPTHMAP_DEFAULTS.maxSources,
+    minAngleDeg = DENSE_TUNING.minAngleDeg,
+    maxAngleDeg = DENSE_TUNING.maxAngleDeg,
+  } = opts
   const refCam = cameras.get(refUuid)
   if (!refCam) return []
   const Cref = cameraCenter(refCam)
