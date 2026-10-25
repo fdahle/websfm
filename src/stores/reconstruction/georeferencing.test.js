@@ -7,7 +7,7 @@ const R = [
   [0, 0, 1],
 ]
 
-it.each(['pose', 'control', 'model', 'camera'])(
+it.each(['pose', 'control', 'model', 'camera', 'stale fit'])(
   'invalidates a fitted georeference after %s evidence changes',
   async (field) => {
     const scope = effectScope()
@@ -51,6 +51,8 @@ it.each(['pose', 'control', 'model', 'camera'])(
     if (field === 'control') controls.value.push({ id: 'control', x: 1, y: 2, z: 3 })
     if (field === 'model') model.value = 'replacement'
     if (field === 'camera') cameras.value.get('b').t[0] = -2
+    // A fit for other evidence put in place (an older one restored), the evidence unchanged.
+    if (field === 'stale fit') georef.value = { ...fitted, evidenceKey: 'other evidence' }
     expect(georef.value).toBeNull()
     expect(api.poseResidualReport()).toEqual([])
     scope.stop()

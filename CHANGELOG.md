@@ -194,6 +194,10 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Large projects open faster.** A check that a georeference still fits its evidence
+  re-serialised every camera, image and pose each time one of them was restored, even
+  with no georeference to check; it now runs only when there is one. Quarry (347
+  images, a dense cloud and a mesh): reopen 9.7 → 1.2 s.
 - **Fusion plans on every worker.** Over saved depth maps, fusion's planning passes (cost
   statistics, scene bounds, the cloud-size estimate, slab outlines) are now shared out
   over the workers that fuse the slabs, with the same plan and cloud. Quarry (347 maps

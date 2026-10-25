@@ -120,8 +120,11 @@ export function createGeoreferencing({
     })
   })
   const validGeoref = computed(() => (georef.value?.evidenceKey === evidenceKey.value ? georef.value : null))
+  // Only while there is a fit to invalidate: the key serialises every camera, image,
+  // GCP and pose, and a sync watch re-ran it on each one restored or imported (a
+  // 347-image reopen spent 3 s of main thread here with no fit to check).
   watch(
-    [evidenceKey, () => georef.value],
+    [() => (georef.value ? evidenceKey.value : null), () => georef.value],
     () => {
       if (georef.value && !validGeoref.value) georef.value = null
     },
