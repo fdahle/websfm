@@ -18,7 +18,7 @@ import { keypointSetFrom, keypointSetTransfer } from '../../core/sfm/keypointSet
 import { useMatchesStore } from '../useMatchesStore.js'
 import { packMatchPairs, inNameOrder } from '../../core/sfm/matchCodec.js'
 import * as opfs from '../../utils/opfs.js'
-import { toMatchSpace } from '../../core/features/siftDescriptors.js'
+import { toMatchSpace, rootSiftToU8 } from '../../core/features/siftDescriptors.js'
 import { unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
 import { aerialUpRotation, rotateReconstruction, sceneUpFromCameras } from '../../core/products/projection.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -480,8 +480,7 @@ export function createSparseRun({
             : img.descriptors
           const d = toMatchSpace(raw, img, 128)
           if (!d || d.length !== img.kpCount * 128) continue
-          const u8 = new Uint8Array(d.length)
-          for (let k = 0; k < d.length; k++) u8[k] = Math.min(255, Math.round(d[k] * 512))
+          const u8 = rootSiftToU8(d)
           input.images[i].descU8 = u8
           reconstructionTransfers.push(u8.buffer)
           bytes += u8.length

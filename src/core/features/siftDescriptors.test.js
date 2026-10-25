@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { SIFT_DESC_NORM, rootSiftInPlace, siftDescNorm, toMatchSpace } from './siftDescriptors.js'
+import { SIFT_DESC_NORM, rootSiftInPlace, siftDescNorm, toMatchSpace, rootSiftToU8 } from './siftDescriptors.js'
 
 // A classic SIFT row as the crate emits it: non-negative, L2-normalised.
 function siftRow(seed, dim = 128) {
@@ -77,5 +77,19 @@ describe('toMatchSpace', () => {
     expect(toMatchSpace(d, { detector: 'sift', descNorm: 'root' })).toBe(d)
     expect(toMatchSpace(d, { detector: 'superpoint' })).toBe(d)
     expect(toMatchSpace(null, { detector: 'sift' })).toBeNull()
+  })
+})
+
+describe('rootSiftToU8', () => {
+  it('gives Math.min(255, Math.round(v × 512)) for every value', () => {
+    const vals = [0, -0, NaN, 1, 0.75, -0.25, 0.5 / 512, 1.5 / 512, 254.5 / 512, 255.5 / 512, 1e-9, 2]
+    let s = 3
+    for (let i = 0; i < 20000; i++) vals.push((s = (Math.imul(s, 1103515245) + 12345) >>> 0) / 2 ** 32)
+    for (const T of [Float32Array, Float64Array]) {
+      const d = T.from(vals)
+      const want = new Uint8Array(d.length)
+      for (let k = 0; k < d.length; k++) want[k] = Math.min(255, Math.round(d[k] * 512))
+      expect(Array.from(rootSiftToU8(d))).toEqual(Array.from(want))
+    }
   })
 })

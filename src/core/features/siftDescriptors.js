@@ -66,3 +66,25 @@ export function toMatchSpace(desc, img, dim = 128) {
   if (!desc || siftDescNorm(img) !== SIFT_DESC_NORM.L2) return desc
   return rootSiftInPlace(desc.slice(), dim)
 }
+
+/**
+ * RootSIFT as COLMAP-style uint8 (× 512, clamped at 255): what guided track extension
+ * gets (stores/reconstruction/sparseRun.js), Math.min(255, Math.round(v · 512)) per
+ * value. For a Float32Array, v · 512 + 0.5 is exact in a double (a power-of-two scale
+ * of a 24-bit value under 2¹⁰), so the truncation is Math.round's result for every
+ * non-negative value and NaN (0 either way); ~4× faster, which on a 347-image block was
+ * seconds of the page's main thread before SfM started. Other arrays take Math.round.
+ *
+ * @param {Float32Array|Float64Array|number[]} d
+ * @returns {Uint8Array}
+ */
+export function rootSiftToU8(d) {
+  const u8 = new Uint8Array(d.length)
+  if (d instanceof Float32Array) {
+    for (let k = 0; k < d.length; k++) {
+      const v = d[k] >= 0 ? (d[k] * 512 + 0.5) | 0 : Math.round(d[k] * 512)
+      u8[k] = v > 255 ? 255 : v
+    }
+  } else for (let k = 0; k < d.length; k++) u8[k] = Math.min(255, Math.round(d[k] * 512))
+  return u8
+}
