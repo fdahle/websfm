@@ -900,7 +900,26 @@ try {
     })().catch((err) => console.log(`== worker CPU profile failed: ${err?.message ?? err}`))
     return { stop, done }
   }
+  // `profilePage: <stage key>`: a CPU profile of the page's main thread during that stage,
+  // written to <prefix>.<stage>.page.cpuprofile (what the store does around the workers:
+  // marshalling, conversions, reactive work that blocks the UI).
   const runStage = async (stage, settings, key = stage) => {
+    const pageCdp = cfg.profilePage === key ? await page.context().newCDPSession(page) : null
+    if (pageCdp) {
+      await pageCdp.send('Profiler.enable')
+      await pageCdp.send('Profiler.setSamplingInterval', { interval: 500 })
+      await pageCdp.send('Profiler.start')
+    }
+    try {
+      return await runStageInner(stage, settings, key)
+    } finally {
+      if (pageCdp) {
+        const { profile } = await pageCdp.send('Profiler.stop')
+        await writeFile(`${outPrefix}.${key.replace(/[^a-z0-9]+/gi, '_')}.page.cpuprofile`, JSON.stringify(profile))
+      }
+    }
+  }
+  const runStageInner = async (stage, settings, key) => {
     const prof = profileDuring(key)
     const s = stage === 'recon' && lidarCfg ? { ...settings, exportPoints: true } : settings
     lastLogAt = Date.now()

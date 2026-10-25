@@ -100,6 +100,8 @@ project:
 - `procTrace: <seconds>` (Linux): the resident memory (VmRSS) of the bench's Chrome
   renderer processes every so often, and its peak (`procPeakGB` in the summary). Unlike
   `memTrace` it counts WebAssembly memory, where fusion keeps its accumulators.
+- `profilePage: <stage>`: a CPU profile of the page's main thread during that stage, saved
+  as `<out>.<stage>.page.cpuprofile` (the store's own work around the workers).
 - `profileReopen: true`: a CPU profile of the `reopen` restore, saved as
   `<out>.reopen.cpuprofile` (load it in DevTools) with its top self-time functions on the
   console.
