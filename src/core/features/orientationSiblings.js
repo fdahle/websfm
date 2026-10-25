@@ -24,12 +24,48 @@
 export function siblingCanonicalMap(keypoints) {
   const n = keypoints?.length ?? 0
   if (!n) return null
+  // Sorted by (x, y, scale, index), not keyed by a string per keypoint (~9 ms an image
+  // on the page's main thread, once per image a matching run loads): equal triples are
+  // adjacent, their lowest index first. Numeric equality is the strings' (−0 is "0"),
+  // except NaN, which a string matches and a comparison does not: that rare image keeps
+  // the string keys.
+  const xs = new Float64Array(n),
+    ys = new Float64Array(n),
+    ss = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    const sc = keypoints.scale(i)
+    if (!(sc > 0)) return null // no scale (a learned detector, an import) ⇒ not SIFT ⇒ no siblings
+    xs[i] = keypoints.x(i)
+    ys[i] = keypoints.y(i)
+    ss[i] = sc
+    // eslint-disable-next-line no-self-compare
+    if (xs[i] !== xs[i] || ys[i] !== ys[i]) return siblingCanonicalByString(keypoints)
+  }
+  const order = new Int32Array(n)
+  for (let i = 0; i < n; i++) order[i] = i
+  order.sort((a, b) => xs[a] - xs[b] || ys[a] - ys[b] || ss[a] - ss[b] || a - b)
+  let canon = null,
+    head = order[0]
+  for (let k = 1; k < n; k++) {
+    const i = order[k]
+    if (xs[i] === xs[head] && ys[i] === ys[head] && ss[i] === ss[head]) {
+      if (!canon) {
+        canon = new Int32Array(n)
+        for (let j = 0; j < n; j++) canon[j] = j
+      }
+      canon[i] = head
+    } else head = i
+  }
+  return canon
+}
+
+// siblingCanonicalMap by string keys: for an image with a NaN coordinate.
+function siblingCanonicalByString(keypoints) {
+  const n = keypoints.length
   const firstAt = new Map()
   let canon = null
   for (let i = 0; i < n; i++) {
-    const s = keypoints.scale(i)
-    if (!(s > 0)) return null // no scale (a learned detector, an import) ⇒ not SIFT ⇒ no siblings
-    const key = `${keypoints.x(i)},${keypoints.y(i)},${s}`
+    const key = `${keypoints.x(i)},${keypoints.y(i)},${keypoints.scale(i)}`
     const first = firstAt.get(key)
     if (first === undefined) {
       firstAt.set(key, i)
