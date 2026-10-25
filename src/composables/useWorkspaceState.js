@@ -37,12 +37,30 @@ export function useWorkspaceState() {
   // assigned image (or, with no images, on their own) — i.e. no usable calibration.
   // Surfaced with a ⚠ in the sidebar so an uncalibrated/incomplete sensor is visible
   // before reconstruction (same test SensorTable uses for its warn badge).
+  // It re-runs whenever any image's metadata arrives, so an import re-tested every image
+  // each time (0.8 µs a resolveK: seconds of main thread over a 5,000-image import). An
+  // image's metadata is replaced, never edited in place, so the verdict is kept per
+  // metadata object and sensor values, and only new pairs are resolved.
+  const fovGuess = new WeakMap() // meta → Map(sensor values as JSON → falls back to the FOV guess)
+  const usesFovGuess = (meta, s, sensorKey) => {
+    if (!meta) return resolveK(meta, s).source.startsWith('default FOV')
+    let bySensor = fovGuess.get(meta)
+    if (!bySensor) fovGuess.set(meta, (bySensor = new Map()))
+    let v = bySensor.get(sensorKey)
+    if (v === undefined) bySensor.set(sensorKey, (v = resolveK(meta, s).source.startsWith('default FOV')))
+    return v
+  }
   const incompleteSensorIds = computed(() => {
     const bad = new Set()
+    const bySensor = new Map()
+    for (const img of images.value) {
+      if (!bySensor.has(img.sensorId)) bySensor.set(img.sensorId, [])
+      bySensor.get(img.sensorId).push(img)
+    }
     for (const s of sensors.value) {
-      const imgs = images.value.filter((i) => i.sensorId === s.id)
-      const probe = imgs.length ? imgs : [{ meta: null }]
-      if (probe.some((img) => resolveK(img.meta, s).source.startsWith('default FOV'))) bad.add(s.id)
+      const key = JSON.stringify(s)
+      const imgs = bySensor.get(s.id) ?? [{ meta: null }]
+      if (imgs.some((img) => usesFovGuess(img.meta, s, key))) bad.add(s.id)
     }
     return bad
   })
