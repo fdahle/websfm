@@ -194,6 +194,11 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Fewer stalls while long runs work.** Bookkeeping the page did itself while the workers
+  computed — converting descriptors before SfM, per-pair match checks, each saved depth
+  map's statistics — now takes a fraction of the time. On quarry (347 images): before
+  SfM 4.9 → 1.8 s of a blocked page, during matching about 5 s less; on a 42-image
+  block's depth maps 5.3 → 1.3 s. Results are unchanged.
 - **Large projects open faster.** A check that a georeference still fits its evidence
   re-serialised every camera, image and pose each time one of them was restored, even
   with no georeference to check; it now runs only when there is one. Quarry (347
