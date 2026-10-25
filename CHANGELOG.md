@@ -199,9 +199,10 @@ Notable changes to websfm. The format follows
   same pixels. The graph-cut seamlines also price each seam edge once per change
   instead of once per move. A 1,401 × 1,722 ortho of a 42-image block: 16.0 → 13.3 s
   (the seam cut 3.5 → 3.0 s).
-- **Depth maps without a GPU, a little faster.** Each depth hypothesis now prepares its
-  reference window once instead of once per source photo. A 42-image block at Medium on
-  the CPU: 277 → 246 s, the same depth maps.
+- **Depth maps without a GPU, faster.** Each depth hypothesis now prepares its
+  reference window once instead of once per source photo, and a pixel no longer re-scores
+  a plane it has already scored. A 42-image block at Medium on the CPU: 277 → 216 s, the
+  same depth maps.
 - **Feature detection on every worker.** SIFT now detects as many images at once as the
   worker pool and the memory budget allow, instead of at most four. Quarry (347 images,
   8 workers): 161 → 86 s; a 42-image block 23 → 19 s; the same keypoints.

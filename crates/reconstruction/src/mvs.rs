@@ -405,6 +405,14 @@ pub fn compute_depth_map(
                         (u.wrapping_sub(1), v), (u + 1, v),
                         (u, v.wrapping_sub(1)), (u, v + 1),
                     ];
+                    // The planes tried so far for this pixel (its own first), as bits: a
+                    // plane already scored scores the same again, and a strict `<` keeps
+                    // the first, so it is not scored twice (converged regions hand one
+                    // plane around).
+                    let key = |d: f64, n: &V3| [d.to_bits(), n[0].to_bits(), n[1].to_bits(), n[2].to_bits()];
+                    let mut tried = [[0u64; 4]; 5];
+                    tried[0] = key(best_d, &best_n);
+                    let mut n_tried = 1;
                     for (nu, nv) in neigh {
                         if nu >= rw || nv >= rh { continue; }
                         let j = nv * rw + nu;
@@ -416,6 +424,10 @@ pub fn compute_depth_map(
                         if denom.abs() < 1e-9 { continue; }
                         let cand_d = d_plane / denom;
                         if cand_d <= dmin || cand_d >= dmax { continue; } // ≤0 / out of range
+                        let k = key(cand_d, &cand_n);
+                        if tried[..n_tried].contains(&k) { continue; }
+                        tried[n_tried] = k;
+                        n_tried += 1;
                         let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, cand_d, &cand_n, radius);
                         if c < best_c { best_c = c; best_d = cand_d; best_n = cand_n; }
                     }
@@ -467,6 +479,8 @@ pub fn compute_depth_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DEPTH_DIGEST: u64 = 0x2f10_a543_287c_c088;
 
     #[test]
     fn mean_best_costs_keeps_only_lowest_valid_k_without_allocation() {
@@ -534,6 +548,33 @@ mod tests {
         let nrm = normalize3(&[1.0, 0.0, 0.0]);
         let (u, v) = (20usize, 15usize); // on the axis: the ray is (0, 0, 1)
         assert_eq!(agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, 2, u, v, 3.0, &nrm, 2), 2.0);
+    }
+
+    // A whole depth map on a textured plane seen by three views, pinned to the bits the
+    // kernel gave before it skipped already-scored planes (2026-10-25): skipping a plane
+    // whose cost is known must not change any map.
+    #[test]
+    fn depth_map_bits_are_pinned() {
+        let (w, h) = (48usize, 36usize);
+        let tex = |x: f64, y: f64| (128.0 + 90.0 * (x * 0.31).sin() * (y * 0.27).cos() + 30.0 * (x * 0.9 + y * 0.4).sin()) as u8;
+        let refg: Vec<u8> = (0..w * h).map(|i| tex((i % w) as f64, (i / w) as f64)).collect();
+        let (f, cx, cy) = (40.0f32, 24.0f32, 18.0f32);
+        let mut src = Vec::new();
+        let mut dims = Vec::new();
+        let mut ks = Vec::new();
+        let mut rel = Vec::new();
+        for (k, tx) in [0.25f32, -0.3, 0.45].iter().enumerate() {
+            // A fronto-parallel plane at depth 4: the source sees the texture shifted.
+            let shift = (f * tx / 4.0) as f64;
+            src.extend((0..w * h).map(|i| tex((i % w) as f64 + shift, (i / w) as f64 + 0.1 * k as f64)));
+            dims.extend([w as u32, h as u32]);
+            ks.extend([f, f, cx, cy]);
+            rel.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, *tx, 0.0, 0.0]);
+        }
+        let out = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[], 2.0, 8.0, 2, 3, 2, 7, 1.0);
+        let digest = out.iter().fold(0u64, |a, v| a.wrapping_mul(1_000_003).wrapping_add(v.to_bits() as u64));
+        assert_eq!(out.len(), w * h * 5);
+        assert_eq!(digest, DEPTH_DIGEST, "depth map bits changed: {digest:#x}");
     }
 
     #[test]
