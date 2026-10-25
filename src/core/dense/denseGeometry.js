@@ -54,6 +54,66 @@ export function unprojectPixel(m, u, v, depth) {
   }
 }
 
+// unprojectPixel for a per-pixel loop: map `m`'s constants read once, the point written
+// into `out` ({ x, y, z }, reused) instead of a new object for every pixel (fusion's plan
+// and pass unprojected ~400 M pixels on quarry, each into a fresh object). The same
+// arithmetic in the same order, so the same bits.
+export function pixelUnprojector(m) {
+  const { cx, cy, fx, fy } = m.K
+  const t0 = m.t[0],
+    t1 = m.t[1],
+    t2 = m.t[2]
+  const [r0, r1, r2] = m.R
+  const r00 = r0[0],
+    r01 = r0[1],
+    r02 = r0[2],
+    r10 = r1[0],
+    r11 = r1[1],
+    r12 = r1[2],
+    r20 = r2[0],
+    r21 = r2[1],
+    r22 = r2[2]
+  return (u, v, depth, out) => {
+    const ax = ((u - cx) / fx) * depth - t0,
+      ay = ((v - cy) / fy) * depth - t1,
+      az = depth - t2
+    out.x = r00 * ax + r10 * ay + r20 * az
+    out.y = r01 * ax + r11 * ay + r21 * az
+    out.z = r02 * ax + r12 * ay + r22 * az
+    return out
+  }
+}
+
+// `project` (sfm/geometry.js projectWithDepth) for a per-pixel loop, the same way:
+// camera `cam`'s constants read once, { u, v, depth } written into `out`; null behind
+// the camera, as there. Same arithmetic, same bits.
+export function pixelProjector(cam) {
+  const { R, t, K } = cam
+  const r00 = R[0][0],
+    r01 = R[0][1],
+    r02 = R[0][2],
+    r10 = R[1][0],
+    r11 = R[1][1],
+    r12 = R[1][2],
+    r20 = R[2][0],
+    r21 = R[2][1],
+    r22 = R[2][2]
+  const t0 = t[0],
+    t1 = t[1],
+    t2 = t[2]
+  const { fx, fy, cx, cy } = K
+  return (x, y, z, out) => {
+    const zc = r20 * x + r21 * y + r22 * z + t2
+    if (!(zc > 1e-9)) return null
+    const xc = r00 * x + r01 * y + r02 * z + t0
+    const yc = r10 * x + r11 * y + r12 * z + t1
+    out.u = fx * (xc / zc) + cx
+    out.v = fy * (yc / zc) + cy
+    out.depth = zc
+    return out
+  }
+}
+
 // ── Frustum-slice cull ──────────────────────────────────────────────────────────
 // The exactness argument (and why the cull is per map, then per block) is spelled out
 // in geomFilter.js ▸ "Candidate views". sliceCorners: the 8 world-space corners of the

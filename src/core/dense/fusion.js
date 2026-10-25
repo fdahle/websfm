@@ -8,7 +8,7 @@ import { DENSE_TUNING } from '../tuning.js'
 import { regionContains } from '../products/region.js'
 import { formatBytes } from './memBudget.js'
 import { cameraCenter, triangulationAngle } from '../sfm/geometry.js'
-import { project, unprojectPixel, sliceMisses } from './denseGeometry.js'
+import { project, pixelProjector, pixelUnprojector, sliceMisses } from './denseGeometry.js'
 import { createVoxelAccumulator } from './voxelAccumulator.js'
 import { runWithMaps, fusionPlanSteps } from './fusionPlan.js'
 import { nounFor, pluralize } from '../textFormat.js'
@@ -194,12 +194,18 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
         compared++
         t = now()
         const otherC = cameraCenter(other)
+        // One point and one projection, reused over the pixels (denseGeometry.js).
+        const projectOther = pixelProjector(other),
+          P = { x: 0, y: 0, z: 0 },
+          proj = { u: 0, v: 0, depth: 0 }
         let kept = 0
         for (let j = 0; j < nOpen; j++) {
           const e = open[j],
             idx = elig[e]
-          const P = { x: wp[3 * e], y: wp[3 * e + 1], z: wp[3 * e + 2] }
-          const p = project(other, P.x, P.y, P.z)
+          P.x = wp[3 * e]
+          P.y = wp[3 * e + 1]
+          P.z = wp[3 * e + 2]
+          const p = projectOther(P.x, P.y, P.z, proj)
           if (!p) {
             open[kept++] = e
             continue
@@ -263,8 +269,10 @@ export function streamedEligible(m, { step, maxCost, slab = null }) {
   const W = m.width,
     H = m.height,
     { depth, cost } = m
+  const unproject = pixelUnprojector(m),
+    P = { x: 0, y: 0, z: 0 }
   const inSlab = (u, v, d) => {
-    const ca = Math.floor(unprojectPixel(m, u, v, d)[slab.key] * slab.inv)
+    const ca = Math.floor(unproject(u, v, d, P)[slab.key] * slab.inv)
     return ca >= slab.lo && ca < slab.hi
   }
   let n = 0
@@ -283,7 +291,7 @@ export function streamedEligible(m, { step, maxCost, slab = null }) {
       const i = v * W + u,
         d = depth[i]
       if (!(d > 0) || cost[i] > maxCost) continue
-      const P = unprojectPixel(m, u, v, d)
+      unproject(u, v, d, P)
       if (slab) {
         const ca = Math.floor(P[slab.key] * slab.inv)
         if (ca < slab.lo || ca >= slab.hi) continue
@@ -366,7 +374,6 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
   const { onProgress } = hooks
   const inv = 1 / mergeCell,
     axKey = 'xyz'[axis]
-  const unproject = unprojectPixel
   // Cameras for reprojection consistency checks.
   const cams = maps.map((m) => ({ R: m.R, t: m.t, K: m.K, m }))
   // Precompute each camera centre for the triangulation-angle check (WS4).
@@ -378,11 +385,14 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
 
   // Rotate a camera-frame direction to world: n_world = Rᵀ · n_cam (same convention
   // as unproject's rotation block; no translation for a direction).
-  const rotToWorld = (m, nx_, ny_, nz_) => ({
-    x: m.R[0][0] * nx_ + m.R[1][0] * ny_ + m.R[2][0] * nz_,
-    y: m.R[0][1] * nx_ + m.R[1][1] * ny_ + m.R[2][1] * nz_,
-    z: m.R[0][2] * nx_ + m.R[1][2] * ny_ + m.R[2][2] * nz_,
-  })
+  // Into `out` (reused per pixel), as pixelUnprojector does for the point.
+  const rotToWorld = (m, nx_, ny_, nz_, out) => {
+    out.x = m.R[0][0] * nx_ + m.R[1][0] * ny_ + m.R[2][0] * nz_
+    out.y = m.R[0][1] * nx_ + m.R[1][1] * ny_ + m.R[2][1] * nz_
+    out.z = m.R[0][2] * nx_ + m.R[1][2] * ny_ + m.R[2][2] * nz_
+    return out
+  }
+  const NW = { x: 0, y: 0, z: 0 }
   const counters = zeroFusionCounters()
   const parts = []
   const nT = slabs.length,
@@ -398,6 +408,9 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
     for (const mi of visits[ti]) {
       const firstVisit = firstSlab[mi] === ti
       const m = yield mi
+      // This map's pixels unprojected into one reused point (denseGeometry.js).
+      const unproject = pixelUnprojector(m),
+        P = { x: 0, y: 0, z: 0 }
       // Streamed: a check request ↔ { agree, angle } (protocol: fusionPlan.js runWithMaps).
       const checks = hooks.streaming
         ? yield {
@@ -418,7 +431,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
       const { width: w, height: h, depth, cost, rgb, normals } = m
       if (!normals && firstVisit) counters.noNormalMaps++
       // Camera centre C = −Rᵀt, for the view-direction normal fallback (stale caches).
-      const C = rotToWorld(m, -m.t[0], -m.t[1], -m.t[2])
+      const C = rotToWorld(m, -m.t[0], -m.t[1], -m.t[2], { x: 0, y: 0, z: 0 })
       let mapKept = 0,
         mapConsidered = 0
       const tPass = now()
@@ -459,7 +472,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
             }
             continue
           }
-          const P = unproject(m, u, v, d)
+          unproject(u, v, d, P)
           let own = true
           if (tiled) {
             const ca = Math.floor(P[axKey] * inv)
@@ -534,7 +547,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
           let nwx, nwy, nwz
           if (normals) {
             const no = idx * 3
-            const nw = rotToWorld(m, normals[no], normals[no + 1], normals[no + 2])
+            const nw = rotToWorld(m, normals[no], normals[no + 1], normals[no + 2], NW)
             nwx = nw.x
             nwy = nw.y
             nwz = nw.z

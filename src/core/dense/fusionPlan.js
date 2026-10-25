@@ -19,7 +19,7 @@ import {
   accumulatorCellLimit,
   cloudPointLimit,
 } from './memBudget.js'
-import { unprojectPixel, sliceCorners, sliceMisses } from './denseGeometry.js'
+import { unprojectPixel, pixelUnprojector, sliceCorners, sliceMisses } from './denseGeometry.js'
 import { cameraCenter } from '../sfm/geometry.js'
 import { mix32, clampCellForBounds } from './voxelAccumulator.js'
 import { numOpt, boolOpt } from './denseOptions.js'
@@ -185,6 +185,8 @@ function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap
   for (let mi = 0; mi < maps.length; mi++) {
     const m = yield { light: mi }
     const { width: w, height: h, depth, cost } = m
+    const unproject = pixelUnprojector(m),
+      P = { x: 0, y: 0, z: 0 }
     let lo = Infinity,
       hi = -Infinity
     for (let v = 0; v < h; v += step) {
@@ -192,7 +194,7 @@ function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap
         const idx = v * w + u,
           d = depth[idx]
         if (!(d > 0) || cost[idx] > maxCost) continue
-        const P = unprojectPixel(m, u, v, d)
+        unproject(u, v, d, P)
         const ia = k ? Math.floor(P[k] * inv) : 0
         if (ia < lo) lo = ia
         if (ia > hi) hi = ia
@@ -392,11 +394,13 @@ function* planSteps(maps, opts, onLog, hooks) {
       if (g != null) gsds.push(g)
     }
     const { width: w, height: h, depth } = m
+    const unproject = pixelUnprojector(m),
+      P = { x: 0, y: 0, z: 0 }
     for (let v = 0; v < h; v += bboxStride) {
       for (let u = 0; u < w; u += bboxStride) {
         const d = depth[v * w + u]
         if (!(d > 0)) continue
-        const P = unprojectPixel(m, u, v, d)
+        unproject(u, v, d, P)
         if (P.x < bounds.minX) bounds.minX = P.x
         if (P.x > bounds.maxX) bounds.maxX = P.x
         if (P.y < bounds.minY) bounds.minY = P.y
@@ -656,13 +660,15 @@ function* planSteps(maps, opts, onLog, hooks) {
       if (!(est.mapLo[mi] <= est.mapHi[mi])) continue
       const m = yield { light: mi }
       const { width: w, height: h, depth, cost } = m
+      const unproject = pixelUnprojector(m),
+        P = { x: 0, y: 0, z: 0 }
       const box = slabs.map(() => [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity]) // u0 u1 v0 v1 d0 d1
       for (let v = 0; v < h; v += step) {
         for (let u = 0; u < w; u += step) {
           const idx = v * w + u,
             d = depth[idx]
           if (!(d > 0) || cost[idx] > maxCost) continue
-          const ca = Math.floor(unprojectPixel(m, u, v, d)[k] * inv)
+          const ca = Math.floor(unproject(u, v, d, P)[k] * inv)
           for (let ti = 0; ti < slabs.length; ti++) {
             if (ca < slabs[ti].lo - halo || ca >= slabs[ti].hi + halo) continue
             const b = box[ti]
