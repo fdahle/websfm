@@ -869,14 +869,22 @@ try {
   // `profileWorkers: { stage, afterSeconds, seconds }`: during that stage (its config key,
   // e.g. "ortho:small"), CPU-profile every worker for `seconds` from `afterSeconds` in;
   // the top functions by self time go to the console, the profiles to
-  // <prefix>.<stage>.worker<k>.cpuprofile (DevTools ▸ Performance loads them).
+  // <prefix>.<stage>.worker<k>.cpuprofile (DevTools ▸ Performance loads them). A stage
+  // that ends sooner ends the profile with it (`stop()`; the stage awaits `done`): one
+  // still running when the last stage closed the browser was lost without a word.
   const profileDuring = (key) => {
     const pw = cfg.profileWorkers
     if (!pw || pw.stage !== key || !heap) return null
     const NL = String.fromCharCode(10)
-    return (async () => {
-      await new Promise((r) => setTimeout(r, (pw.afterSeconds ?? 60) * 1000))
-      const out = await heap.profile(pw.seconds ?? 60)
+    let stop
+    const stopped = new Promise((r) => (stop = r))
+    const done = (async () => {
+      const early = await Promise.race([
+        new Promise((r) => setTimeout(() => r(false), (pw.afterSeconds ?? 60) * 1000)),
+        stopped.then(() => true),
+      ])
+      if (early) return console.log(`== worker CPU profile ${key}: the stage ended before afterSeconds`)
+      const out = await heap.profile(pw.seconds ?? 60, { until: stopped })
       for (const [k, w] of out.entries()) {
         if (!w.totalMs) continue
         await writeFile(
@@ -890,9 +898,10 @@ try {
         )
       }
     })().catch((err) => console.log(`== worker CPU profile failed: ${err?.message ?? err}`))
+    return { stop, done }
   }
   const runStage = async (stage, settings, key = stage) => {
-    profileDuring(key)
+    const prof = profileDuring(key)
     const s = stage === 'recon' && lidarCfg ? { ...settings, exportPoints: true } : settings
     lastLogAt = Date.now()
     heap.mark('(before stage)')
@@ -909,6 +918,10 @@ try {
       throw err
     } finally {
       for (const t of watchdog.timers.splice(0)) clearInterval(t)
+      if (prof) {
+        prof.stop()
+        await prof.done
+      }
     }
     if (stage === 'recon' && lidarCfg) {
       if (r.pointsEnu?.length && r.enuOrigin) {

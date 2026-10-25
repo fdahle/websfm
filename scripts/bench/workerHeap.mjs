@@ -19,10 +19,16 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
   const workers = new Map() // sessionId → { url, peak }
   const pending = new Map()
   let nextId = 1
-  const send = (sessionId, method, params = {}) =>
+  // `timeoutMs`: give up (null) on a worker that does not answer in time, so one stuck
+  // worker cannot hold up the samples or a profile of the others.
+  const send = (sessionId, method, params = {}, timeoutMs = 0) =>
     new Promise((resolve) => {
       const id = nextId++
       pending.set(id, resolve)
+      if (timeoutMs > 0)
+        setTimeout(() => {
+          if (pending.delete(id)) resolve(null)
+        }, timeoutMs).unref?.()
       cdp
         .send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) })
         .catch(() => {
@@ -38,10 +44,12 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
       done(m.result ?? null)
     }
   })
+  let onAttach = null // set while a CPU profile runs (profile below)
   cdp.on('Target.attachedToTarget', ({ sessionId, targetInfo, waitingForDebugger }) => {
     if (targetInfo.type !== 'worker') return
     workers.set(sessionId, { url: targetInfo.url, peak: 0, peakWithBuffers: 0 })
     if (waitingForDebugger) send(sessionId, 'Runtime.runIfWaitingForDebugger')
+    onAttach?.(sessionId)
   })
   cdp.on('Target.detachedFromTarget', ({ sessionId }) => workers.delete(sessionId))
   // Non-flat sessions: commands travel through sendMessageToTarget, so this works over
@@ -59,7 +67,7 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
     try {
       await Promise.all(
         [...workers].map(async ([sessionId, w]) => {
-          const r = await send(sessionId, 'Runtime.getHeapUsage')
+          const r = await send(sessionId, 'Runtime.getHeapUsage', {}, 4 * intervalMs)
           if (!r) return
           const withBuf = r.usedSize + (r.backingStorageSize ?? 0)
           w.last = { heap: r.usedSize, buffers: r.backingStorageSize ?? 0 }
@@ -97,19 +105,25 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
     },
     // CPU profiles of every worker for `seconds` (Profiler over the same sessions): each
     // worker's top functions by self time, and the raw profiles for DevTools.
-    async profile(seconds, { interval = 1000 } = {}) {
-      const ids = [...workers.keys()]
-      await Promise.all(
-        ids.map(async (sid) => {
-          await send(sid, 'Profiler.enable')
-          await send(sid, 'Profiler.setSamplingInterval', { interval })
-          await send(sid, 'Profiler.start')
-        }),
-      )
-      await new Promise((r) => setTimeout(r, seconds * 1000))
+    // A worker that does not answer within a few seconds is left out. `until`: a promise that ends the profile early (the stage finished first).
+    async profile(seconds, { interval = 1000, until = null } = {}) {
+      // A worker that starts during the profile is profiled from then on: after a page
+      // reload (the bench's `reopen`) the pool is created only when the stage's work
+      // reaches it, and a profile that took only the workers alive at its start was empty.
+      const T = 5000
+      const ids = []
+      const start = async (sid) => {
+        if (!(await send(sid, 'Profiler.enable', {}, T))) return
+        await send(sid, 'Profiler.setSamplingInterval', { interval }, T)
+        if (await send(sid, 'Profiler.start', {}, T)) ids.push(sid)
+      }
+      onAttach = (sid) => void start(sid)
+      await Promise.all([...workers.keys()].map(start))
+      await Promise.race([new Promise((r) => setTimeout(r, seconds * 1000)), until].filter(Boolean))
+      onAttach = null
       return Promise.all(
         ids.map(async (sid) => {
-          const r = await send(sid, 'Profiler.stop')
+          const r = await send(sid, 'Profiler.stop', {}, 30_000)
           const profile = r?.profile
           const self = new Map()
           if (profile) {
