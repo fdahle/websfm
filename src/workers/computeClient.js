@@ -424,6 +424,12 @@ function streamingOp(op) {
 // with resultCodec after ownership of the buffers reaches the main thread.
 export const reconstruct = streamingOp('reconstruct')
 
+// The parts of a split fusion plan's pre-pass `token`, back to the plan's worker
+// (workers/ops/dense.js fusePlanAnswer). Pinned to that worker.
+export function fusePlanAnswer(token, parts, worker) {
+  return call('fusePlanAnswer', [token, parts], { worker })
+}
+
 // A streamed depth map of run `token` was saved: the worker computing it may go on
 // (workers/ops/dense.js backpressure). Pinned to that worker.
 export function depthAck(token, worker) {

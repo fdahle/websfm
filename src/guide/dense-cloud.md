@@ -133,8 +133,10 @@ Streaming may trade repeated disk reads for a lower memory peak.
 
 Fusion starts by planning: a few quick passes over every depth map for the cost
 statistics, the scene's extent and the merge cell, shown in the progress bar as
-"Planning fusion (1/4)" and so on. On a few hundred saved maps this takes a minute or
-two. The last planning pass comes before the slow consistency check: it counts how many merged points the cloud can have at most (pixels that fail the
+"Planning fusion (1/3)" and so on. Over saved depth maps each pass is shared out over
+the same workers as the slabs below, with the same plan as on one; on a few hundred
+saved maps it takes seconds to a minute. The last planning pass comes before the slow
+consistency check: it counts how many merged points the cloud can have at most (pixels that fail the
 cost gate or lie outside the Region don't count). The log line "Fusion: measured …
 projected peak …" shows that count and the memory it implies. If building the cloud
 in one piece would exceed the memory budget (Settings ▸ Compute), fusion builds it in

@@ -51,7 +51,13 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
   // most 1 GiB, and counted in the fusion preflight's input term.
   const cacheBytes =
     opts.cacheBytes ?? Math.min(1024 ** 3, (opts.memBudgetBytes > 0 ? opts.memBudgetBytes : 4 * 1024 ** 3) / 8)
-  const iterator = fusionSteps(metas, { ...opts, cacheBytes }, onLog, { ...hooks, streaming: true })
+  // hooks.runBatch(request) → the parts: the plan's pre-passes, each split over the pool
+  // (fusionPlan.js fusionPrepassSteps; workers/ops/dense.js runs the shares).
+  const iterator = fusionSteps(metas, { ...opts, cacheBytes }, onLog, {
+    ...hooks,
+    streaming: true,
+    batches: !!hooks.runBatch,
+  })
   // ci → { map, next }: `next` is the position in the request sequence where the
   // plane is wanted again. The whole sequence is known before the pass (each slab's
   // visit list and every reference's frustum cull), so eviction is Belady's MIN: drop
@@ -112,7 +118,9 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
   let next = iterator.next()
   while (!next.done) {
     const request = next.value
-    if (typeof request === 'number' || request.light !== undefined) {
+    if (request.batch) {
+      next = iterator.next(await hooks.runBatch(request))
+    } else if (typeof request === 'number' || request.light !== undefined) {
       const light = typeof request !== 'number'
       const t = now(),
         map = light ? await (hooks.loadLight ?? loadMap)(request.light) : await loadMap(request)

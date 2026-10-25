@@ -194,6 +194,11 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Fusion plans on every worker.** Over saved depth maps, fusion's planning passes (cost
+  statistics, scene bounds, the cloud-size estimate, slab outlines) are now shared out
+  over the workers that fuse the slabs, with the same plan and cloud. Quarry (347 maps
+  at Low, 8 workers): fusion 58 → 37.5 s, the same 21,442,726 points. Fusion's
+  per-pixel loops also stopped allocating a point per pixel (60.6 → 58.0 s before that).
 - **Small orthophotos on several workers.** An orthophoto that fits in one or two
   2,048-pixel blocks is now cut into 1,024-pixel blocks, so more workers share it; the
   same pixels. The graph-cut seamlines also price each seam edge once per change

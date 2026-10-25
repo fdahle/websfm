@@ -18,6 +18,7 @@ import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparse
 import {
   computeDepthMaps as workerComputeDepthMaps,
   depthAck as workerDepthAck,
+  fusePlanAnswer as workerFusePlanAnswer,
   depthBackend as workerDepthBackend,
   POOL_SIZE,
   terminateAll,
@@ -562,9 +563,32 @@ export function createDense({
     const PLAN_SHARE = FUSION_PLAN_SHARE
     const onLog = (m, l, c) => log(m, l, c)
     onProgress?.(0, 1, 'Planning fusion…', 0, 'plan')
+    // The plan's pre-passes over the pool (core/dense/fusionPlan.js fusionPrepassSteps):
+    // worker 0 asks for each pass as a batch, the maps go in contiguous runs to the
+    // fusion's `workers` slots (worker 0 too: its plan call waits meanwhile), and the parts
+    // go back to it. On quarry the plan's passes were most of fusion on one worker.
+    const onPlanEvent = (ev, [token, request]) => {
+      if (ev !== 'batch') return
+      const shares = contiguousChunks(mapsInput.length, Math.max(1, Math.min(workers, mapsInput.length)))
+      Promise.all(
+        shares.map((refs, w) =>
+          workerDensify(
+            { maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'prepass', batch: request, refs },
+            { worker: w },
+          ),
+        ),
+      )
+        .then((parts) => workerFusePlanAnswer(token, parts, 0))
+        .catch((err) => workerFusePlanAnswer(token, { error: String(err?.message ?? err) }, 0))
+    }
     const { plan, refused } = await workerDensify(
-      { maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'plan' },
-      { onLog, worker: 0, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, PLAN_SHARE * (f ?? 0), 'plan') },
+      { maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'plan', splitPlan: workers > 1 },
+      {
+        onLog,
+        worker: 0,
+        onEvent: onPlanEvent,
+        onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, PLAN_SHARE * (f ?? 0), 'plan'),
+      },
     )
     if (refused || !plan || !stillCurrent()) return null
     if (plan.workers <= 1) {

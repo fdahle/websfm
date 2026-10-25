@@ -16,7 +16,7 @@ import {
   depthMapSettings,
 } from '../../core/dense/mvs.js'
 import { depthCoverage } from '../../core/dense/depthMapCodec.js'
-import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
+import { FUSION_PLAN_SHARE, fusionPrepassSteps } from '../../core/dense/fusionPlan.js'
 import { viewIndex } from '../../core/dense/sparseInput.js'
 import { buildMaskLookup } from '../../core/mask.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
@@ -1025,6 +1025,17 @@ export function makeDenseOps({ rasterize }) {
   // pre-passes and returns the slab plan; `mode: 'slab'` fuses one slab of `plan` and
   // returns it in the cloud's layout with its counters. Without a mode, one call does
   // it all (with `settings.plan`, it skips the pre-passes).
+  // A split plan's pre-passes (`splitPlan`): the plan asks for each one as a batch, which
+  // goes to the page as a 'batch' event; the page runs it over the pool (`mode:
+  // 'prepass'`, this worker included — its plan call is waiting meanwhile) and hands the
+  // parts back through fusePlanAnswer.
+  const planBatches = new Map() // token → resolve
+  let planBatchSeq = 0
+  function fusePlanAnswer([token, parts]) {
+    planBatches.get(token)?.(parts)
+    planBatches.delete(token)
+    return { result: true }
+  }
   async function densify([input], { emit }) {
     const { maps, streamed = false, settings = {}, mode = null, plan = null, slab = null } = input
     if (mode) {
@@ -1032,10 +1043,29 @@ export function makeDenseOps({ rasterize }) {
       const load = (i) => readDepthFiles(maps[i])
       const loadDepth = (i) => readDepthOnly(maps[i])
       const loadLight = (i) => readDepthCostMap(maps[i])
+      if (mode === 'prepass') {
+        // One share of a pre-pass: its maps' light planes, one at a time.
+        const { batch, refs } = input
+        const it = fusionPrepassSteps(maps, refs, batch.batch, batch.params)
+        let r = it.next()
+        while (!r.done) r = it.next(await loadLight(r.value.light))
+        return { result: r.value, transfer: [] }
+      }
       if (mode === 'plan') {
+        const runBatch = input.splitPlan
+          ? (request) =>
+              new Promise((resolve, reject) => {
+                const token = `${++planBatchSeq}`
+                planBatches.set(token, (parts) =>
+                  parts?.error ? reject(new Error(`fusion plan: ${parts.error}`)) : resolve(parts),
+                )
+                emit('batch', [token, request])
+              })
+          : undefined
         const res = await fuseDepthMapsStreamed(maps, load, { ...settings, planOnly: true }, log, {
           loadDepth,
           loadLight,
+          runBatch,
           onPlanProgress: (d, t, lbl, f) => emit('progress', [d, t, lbl, f, 'plan']),
         })
         return {
@@ -1136,5 +1166,5 @@ export function makeDenseOps({ rasterize }) {
     return out
   }
 
-  return { depthBackend, computeDepthMaps, depthAck, filterDepthMaps, densify }
+  return { depthBackend, computeDepthMaps, depthAck, filterDepthMaps, densify, fusePlanAnswer }
 }

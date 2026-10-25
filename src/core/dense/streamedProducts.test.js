@@ -7,6 +7,7 @@ import { resampleSurface, resampledGeometry } from '../products/surface.js'
 import { orthoStats } from '../eval/orthoStats.js'
 import { serializeDepthMap } from './depthMapCodec.js'
 import { readDepthFiles, readDepthOnly, readDepthCostMap } from './depthFileReader.js'
+import { fusionPrepassSteps } from './fusionPlan.js'
 
 function maps() {
   return Array.from({ length: 4 }, (_, j) => {
@@ -52,6 +53,47 @@ describe('bounded map loading', () => {
       expect(actual.summary).toEqual(expected.summary)
     },
   )
+  // The plan's pre-passes split over workers (hooks.runBatch, workers/ops/dense.js
+  // `mode: 'prepass'`): each share run on its own, the parts merged in map order, give
+  // the plan — and so the cloud — of the single run, untiled and in slabs.
+  it.each([1, 2, 3])('a plan whose pre-passes are split %i ways fuses the identical cloud', async (ways) => {
+    const ms = [...maps(), ...maps().map((m, j) => ({ ...m, uuid: `far${j}`, t: [m.t[0] - 30, 0, 10] }))]
+    const entries = files(ms)
+    const load = (i) => readDepthFiles(entries[i])
+    const hooks = { loadDepth: (i) => readDepthOnly(entries[i]), loadLight: (i) => readDepthCostMap(entries[i]) }
+    let batches = 0
+    const runBatch = async ({ batch, params }) => {
+      batches++
+      const parts = []
+      for (let w = 0; w < ways; w++) {
+        const refs = []
+        for (let mi = Math.floor((w * ms.length) / ways); mi < Math.floor(((w + 1) * ms.length) / ways); mi++)
+          refs.push(mi)
+        const it = fusionPrepassSteps(entries, refs, batch, structuredClone(params))
+        let r = it.next()
+        while (!r.done) r = it.next(await readDepthCostMap(entries[r.value.light]))
+        parts.push(structuredClone(r.value))
+      }
+      return parts
+    }
+    for (const opts of [{}, { minViews: 1, minTriAngleDeg: 0, step: 2 }]) {
+      const one = await fuseDepthMapsStreamed(entries, load, opts, () => {}, hooks)
+      const split = await fuseDepthMapsStreamed(entries, load, opts, () => {}, { ...hooks, runBatch })
+      expect([...split]).toEqual([...one])
+      expect(split.summary).toEqual(one.summary)
+      const refused = (await fuseDepthMapsStreamed(entries, load, { ...opts, memBudgetBytes: 1, autoStep: false }))
+        .refused
+      const tightOpts = { ...opts, planOnly: true, memBudgetBytes: slabBudget(refused, 5) }
+      const p1 = await fuseDepthMapsStreamed(entries, load, tightOpts, () => {}, hooks)
+      const p2 = await fuseDepthMapsStreamed(entries, load, tightOpts, () => {}, { ...hooks, runBatch })
+      expect(p1.slabs.length).toBeGreaterThan(1) // tiled: the outlines pass runs too
+      expect(p1.slabCorners).not.toBeNull()
+      // (`stream` holds the run's read timings)
+      expect({ ...p2, stream: null }).toEqual({ ...p1, stream: null })
+    }
+    expect(batches).toBeGreaterThan(4)
+  })
+
   it('reads only depth and cost for the pre-passes, and fuses the identical cloud', async () => {
     const ms = maps(),
       entries = files(ms),
@@ -67,7 +109,7 @@ describe('bounded map loading', () => {
     )
     expect([...actual]).toEqual([...expected])
     expect(actual.summary).toEqual(expected.summary)
-    expect(light).toBeGreaterThanOrEqual(3 * entries.length) // every pre-pass (saved maps skip the count)
+    expect(light).toBeGreaterThanOrEqual(2 * entries.length) // every pre-pass (saved maps skip the count)
     expect(full).toBe(entries.length) // the fusion pass: each reference once
   })
 

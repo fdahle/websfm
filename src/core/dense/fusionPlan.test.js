@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { fuseDepthMaps } from './mvs.js'
+import { fusionPrepassSteps, mergeCellEstimates, runWithMaps } from './fusionPlan.js'
 
 // Maps of varied depth (odd and even valid counts, holes), so the median's rank matters.
 function maps(n = 5) {
@@ -48,13 +49,41 @@ describe('fusion plan', () => {
     const ms = maps(),
       calls = []
     fuseDepthMaps(ms, { planOnly: true }, () => {}, { onPlanProgress: (...a) => calls.push(a) })
-    // Resident maps: cost count, cost samples, bounds, cell estimate.
-    expect(calls).toHaveLength(4 * ms.length)
-    expect(calls[0]).toEqual([1, ms.length, 'Planning fusion (1/4): cost statistics', 1 / (4 * ms.length)])
+    // Resident maps: valid counts, cost samples with the bounds (one read), cell estimate.
+    expect(calls).toHaveLength(3 * ms.length)
+    expect(calls[0]).toEqual([1, ms.length, 'Planning fusion (1/3): counting valid pixels', 1 / (3 * ms.length)])
     expect(calls.at(-1)[0]).toBe(ms.length)
-    expect(calls.at(-1)[2]).toMatch(/^Planning fusion \(4\/4\)/)
+    expect(calls.at(-1)[2]).toMatch(/^Planning fusion \(3\/3\)/)
     const f = calls.map((c) => c[3])
     expect(f.every((x, i) => i === 0 || x > f[i - 1])).toBe(true)
     expect(f.at(-1)).toBeLessThan(1)
+  })
+})
+
+// The cell estimate split over workers: each share's hash sample (at its own level) merged
+// must be the single pass's — here with a cap low enough that the sample is thinned
+// several levels, the case where the order cells arrive in could have mattered.
+describe('mergeCellEstimates', () => {
+  it('merges any split of the maps into the single pass, thinned levels included', () => {
+    const ms = maps(9)
+    const params = {
+      cell: 0.004,
+      step: 1,
+      maxCost: 0.4,
+      region: null,
+      sampleCap: 40,
+      tile: { axis: 0 },
+      withCorners: true,
+    }
+    const opts = { sampleCap: params.sampleCap, tile: params.tile, withCorners: true }
+    const part = (refs) => runWithMaps(fusionPrepassSteps(ms, refs, 'estimate', params), ms)
+    const all = ms.map((_, i) => i)
+    const one = mergeCellEstimates([part(all)], ms.length, opts)
+    expect(one.level).toBeGreaterThan(2)
+    for (const cuts of [[4], [1, 2], [3, 6, 8], [1, 2, 3, 4, 5, 6, 7, 8]]) {
+      const bounds = [0, ...cuts, ms.length]
+      const parts = bounds.slice(0, -1).map((a, k) => part(all.slice(a, bounds[k + 1])))
+      expect(mergeCellEstimates(parts, ms.length, opts)).toEqual(one)
+    }
   })
 })

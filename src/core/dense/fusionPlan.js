@@ -172,18 +172,22 @@ function selectRank(a, n, k) {
 // With `withCorners` it also keeps each map's depth-slice corners (`corners`, the
 // frustum the streamed consistency check culls with), so the streamed runner knows
 // every reference's comparison list before the pass starts.
-function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap, tile = null, withCorners = false }) {
+function* fusionCellEstimateSteps(
+  maps,
+  refs,
+  { cell, step, maxCost, region, sampleCap, tile = null, withCorners = false },
+) {
   const inv = 1 / cell
   let level = 0,
     mask = 0,
     candidates = 0
   const seen = new Map() // sampled cell hash → its cell index along the tile axis
   const k = tile ? 'xyz'[tile.axis] : null
-  const mapLo = new Float64Array(maps.length).fill(Infinity),
-    mapHi = new Float64Array(maps.length).fill(-Infinity)
-  const corners = withCorners ? new Array(maps.length).fill(null) : null
-  for (let mi = 0; mi < maps.length; mi++) {
-    const m = yield { light: mi }
+  const mapLo = new Float64Array(refs.length).fill(Infinity),
+    mapHi = new Float64Array(refs.length).fill(-Infinity)
+  const corners = withCorners ? new Array(refs.length).fill(null) : null
+  for (let r = 0; r < refs.length; r++) {
+    const m = yield { light: refs[r], pass: 'estimate' }
     const { width: w, height: h, depth, cost } = m
     const unproject = pixelUnprojector(m),
       P = { x: 0, y: 0, z: 0 }
@@ -215,10 +219,55 @@ function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap
         }
       }
     }
-    mapLo[mi] = lo
-    mapHi[mi] = hi
-    if (corners) corners[mi] = sliceCorners(m, 0, w, 0, h)
+    mapLo[r] = lo
+    mapHi[r] = hi
+    if (corners) corners[r] = sliceCorners(m, 0, w, 0, h)
   }
+  return {
+    refs: Int32Array.from(refs),
+    candidates,
+    level,
+    keys: Float64Array.from(seen.keys()),
+    ias: Float64Array.from(seen.values()),
+    mapLo,
+    mapHi,
+    corners,
+  }
+}
+
+// The estimate of all maps from the parts of fusionCellEstimateSteps (each over some of
+// them, in any split). A cell is in a part's sample when its hash passes that part's
+// level; the whole pass's sample is every observed cell passing the lowest level at
+// which the sample fits `sampleCap` — which level that is does not depend on the order
+// the cells came in (a level is left as soon as its sample passes the cap, and the
+// sample only grows within a level). So: the parts' samples at the highest part level,
+// raised until they fit, is the single pass's sample, and so are its cells and hist.
+export function mergeCellEstimates(parts, nMaps, { sampleCap, tile = null, withCorners = false }) {
+  let level = 0,
+    candidates = 0
+  for (const p of parts) {
+    level = Math.max(level, p.level)
+    candidates += p.candidates
+  }
+  let mask = (2 ** level - 1) | 0
+  const seen = new Map()
+  for (const p of parts)
+    for (let i = 0; i < p.keys.length; i++)
+      if ((Math.floor(p.keys[i] / 2097152) & mask) === 0) seen.set(p.keys[i], p.ias[i])
+  while (seen.size > sampleCap) {
+    level++
+    mask = (2 ** level - 1) | 0
+    for (const sk of seen.keys()) if ((Math.floor(sk / 2097152) & mask) !== 0) seen.delete(sk)
+  }
+  const mapLo = new Float64Array(nMaps).fill(Infinity),
+    mapHi = new Float64Array(nMaps).fill(-Infinity)
+  const corners = withCorners ? new Array(nMaps).fill(null) : null
+  for (const p of parts)
+    p.refs.forEach((mi, r) => {
+      mapLo[mi] = p.mapLo[r]
+      mapHi[mi] = p.mapHi[r]
+      if (corners) corners[mi] = p.corners[r]
+    })
   const cells = Math.min(candidates, Math.ceil(seen.size * 2 ** level))
   let hist = null
   if (tile) {
@@ -226,6 +275,105 @@ function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap
     for (const ia of seen.values()) hist.set(ia, (hist.get(ia) ?? 0) + 2 ** level)
   }
   return { cells, candidates, level, sampled: seen.size, hist, mapLo, mapHi, corners }
+}
+
+// The cost samples and the scene-bounds grid of `refs`, in one read of each map (the
+// plan's first pass). Cost: every valid pixel whose index among all maps' valid pixels
+// (from `starts[mi]`, the valid pixels of the maps before mi) is a multiple of
+// `stride`. Bounds: the coarse grid's min / max, and the map's GSD when `gsd`.
+function* fusionCostBoundsSteps(maps, refs, { stride, starts, bboxStride, gsd }) {
+  const out = refs.map(() => null)
+  const scratch = { buf: new Float32Array(0) }
+  for (let r = 0; r < refs.length; r++) {
+    const mi = refs[r]
+    const m = yield { light: mi, pass: 'costBounds' }
+    const { width: w, height: h, depth, cost } = m
+    let samples = null,
+      valid = 0
+    if (stride > 0) {
+      const v0 = starts[mi]
+      const buf = new Float32Array(Math.ceil((starts[mi + 1] - v0) / stride) + 1)
+      let s = 0
+      for (let i = 0; i < depth.length; i++) {
+        if (depth[i] > 0) {
+          if ((v0 + valid) % stride === 0 && s < buf.length) buf[s++] = cost[i]
+          valid++
+        }
+      }
+      samples = buf.slice(0, s)
+    }
+    const b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
+    const unproject = pixelUnprojector(m),
+      P = { x: 0, y: 0, z: 0 }
+    for (let v = 0; v < h; v += bboxStride) {
+      for (let u = 0; u < w; u += bboxStride) {
+        const d = depth[v * w + u]
+        if (!(d > 0)) continue
+        unproject(u, v, d, P)
+        if (P.x < b[0]) b[0] = P.x
+        if (P.x > b[3]) b[3] = P.x
+        if (P.y < b[1]) b[1] = P.y
+        if (P.y > b[4]) b[4] = P.y
+        if (P.z < b[2]) b[2] = P.z
+        if (P.z > b[5]) b[5] = P.z
+      }
+    }
+    out[r] = { samples, valid, bounds: b, gsd: gsd ? mapGsd(m, scratch) : null }
+  }
+  return { refs: Int32Array.from(refs), maps: out }
+}
+
+// Each slab's frustum corners of `refs` over just the pixels that land in it (+ halo):
+// [per ref: [per slab: corners | null] | null (no pixel past the gate)].
+function* fusionSlabOutlineSteps(maps, refs, { slabs, halo, step, maxCost, cell, axis, mapLo, mapHi }) {
+  const inv = 1 / cell,
+    k = 'xyz'[axis]
+  const out = refs.map(() => null)
+  for (let r = 0; r < refs.length; r++) {
+    const mi = refs[r]
+    if (!(mapLo[mi] <= mapHi[mi])) continue
+    const m = yield { light: mi, pass: 'outlines' }
+    const { width: w, height: h, depth, cost } = m
+    const unproject = pixelUnprojector(m),
+      P = { x: 0, y: 0, z: 0 }
+    const box = slabs.map(() => [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity]) // u0 u1 v0 v1 d0 d1
+    for (let v = 0; v < h; v += step) {
+      for (let u = 0; u < w; u += step) {
+        const idx = v * w + u,
+          d = depth[idx]
+        if (!(d > 0) || cost[idx] > maxCost) continue
+        const ca = Math.floor(unproject(u, v, d, P)[k] * inv)
+        for (let ti = 0; ti < slabs.length; ti++) {
+          if (ca < slabs[ti].lo - halo || ca >= slabs[ti].hi + halo) continue
+          const bx = box[ti]
+          if (u < bx[0]) bx[0] = u
+          if (u > bx[1]) bx[1] = u
+          if (v < bx[2]) bx[2] = v
+          if (v > bx[3]) bx[3] = v
+          if (d < bx[4]) bx[4] = d
+          if (d > bx[5]) bx[5] = d
+        }
+      }
+    }
+    out[r] = box.map((bx) => {
+      if (!(bx[5] > 0)) return null
+      const cs = []
+      for (const d of [bx[4], bx[5]])
+        for (const u of [bx[0], bx[1]]) for (const v of [bx[2], bx[3]]) cs.push(unprojectPixel(m, u, v, d))
+      return cs
+    })
+  }
+  return { refs: Int32Array.from(refs), maps: out }
+}
+
+// One pre-pass over `refs` (a share of the maps, in order), for a worker of a split
+// plan (workers/ops/dense.js `mode: 'prepass'`); the plan merges the shares in map
+// order. `kind`: 'costBounds' | 'estimate' | 'outlines', with that pass's parameters.
+export function* fusionPrepassSteps(maps, refs, kind, params) {
+  if (kind === 'costBounds') return yield* fusionCostBoundsSteps(maps, refs, params)
+  if (kind === 'estimate') return yield* fusionCellEstimateSteps(maps, refs, params)
+  if (kind === 'outlines') return yield* fusionSlabOutlineSteps(maps, refs, params)
+  throw new Error(`fusion pre-pass: unknown kind ${kind}`)
 }
 
 // Slabs along the tile axis, each holding at most `cap` estimated cells (one cell
@@ -304,36 +452,41 @@ export function fusionGates(opts = {}) {
 // The plan's share of a fusion progress bar: on quarry (347 saved maps) the pre-passes
 // are roughly a quarter of Stage B once the merge-cell pass stopped sorting boxed depths.
 export const FUSION_PLAN_SHARE = 0.25
-const PLAN_PASS_LABELS = [
-  'cost statistics',
-  'cost statistics',
-  'scene bounds',
-  'measuring the cloud size',
-  'slab outlines',
-]
+const PLAN_PASS_LABELS = {
+  count: 'counting valid pixels',
+  costBounds: 'cost statistics and scene bounds',
+  estimate: 'measuring the cloud size',
+  outlines: 'slab outlines',
+}
 export function* fusionPlanSteps(maps, opts, onLog, hooks = {}) {
   const report = hooks.onPlanProgress,
     n = maps.length
   const steps = planSteps(maps, opts, onLog, hooks)
   if (!report || !n) return yield* steps
-  // The first cost pass is skipped when the maps record their valid counts.
-  const skip = knownValidCounts(maps) ? 1 : 0
-  const passes = (hooks.streaming ? 5 : 4) - skip
-  let reads = 0,
+  // Each map read names its pass; a pass split over the pool is one batch request, whose
+  // runner reports its own progress.
+  const order = [...(knownValidCounts(maps) ? [] : ['count']), 'costBounds', 'estimate']
+  if (hooks.streaming) order.push('outlines')
+  let pass = null,
+    done = 0,
     r = steps.next()
   while (!r.done) {
-    const map = yield r.value
-    if (typeof r.value === 'number' || r.value?.light !== undefined) {
-      const pass = (Math.floor(reads / n) % passes) + skip
-      reads++
-      report(
-        ((reads - 1) % n) + 1,
-        n,
-        `Planning fusion (${pass + 1 - skip}/${passes}): ${PLAN_PASS_LABELS[pass]}`,
-        Math.min(0.99, reads / (n * passes)),
-      )
+    const q = r.value
+    const kind = q?.batch ?? q?.pass
+    if (kind) {
+      if (kind !== pass) {
+        pass = kind
+        done = 0
+      }
+      const k = Math.max(0, order.indexOf(kind))
+      const label = `Planning fusion (${k + 1}/${order.length}): ${PLAN_PASS_LABELS[kind]}`
+      if (q.batch) report(0, n, label, k / order.length)
+      else {
+        done++
+        report(done, n, label, Math.min(0.99, (k + done / n) / order.length))
+      }
     }
-    r = steps.next(map)
+    r = steps.next(yield q)
   }
   return r.value
 }
@@ -342,8 +495,80 @@ function* planSteps(maps, opts, onLog, hooks) {
   const gates = fusionGates(opts)
   const { consistencyPx, depthTolRel, step, removeIsolated } = gates
 
-  // Cost histogram (sampled, one sort): the summary median and the weak-signal check.
-  const costStats = yield* fusionCostSteps(maps)
+  // Every pre-pass is one read of every map, split over the pool's workers when the
+  // runner can (hooks.batches: it answers a { batch, params } request with the shares'
+  // parts, in map order — fusion.js fuseDepthMapsStreamed), else run here as one part.
+  // Either way the parts merge to the same plan (fusionPrepassSteps).
+  const all = maps.map((_, i) => i)
+  function* prepass(kind, params) {
+    if (hooks.batches) return yield { batch: kind, params }
+    return [yield* fusionPrepassSteps(maps, all, kind, params)]
+  }
+  const perMap = (parts) => {
+    const out = new Array(maps.length)
+    for (const p of parts) p.refs.forEach((mi, r) => (out[mi] = p.maps[r]))
+    return out
+  }
+
+  // Cost samples (sampled, one sort: the summary median and the weak-signal check) and
+  // the scene bounds, in one read of each map. The samples are every valid pixel whose
+  // index among all maps' valid pixels is a multiple of the stride, the stride capping
+  // them at DENSE_TUNING.fuseCostMaxSamples; saved maps record their valid counts
+  // (validPx), resident ones are counted first.
+  // Scene bounds from a coarse valid-depth grid (fuseBboxStride-th row/col of each
+  // map) — enough to size the voxel-key packing without a full unprojection pass.
+  // The same read gives each map's GSD when the merge cell is automatic (mapGsd).
+  // mergeCell: null ⇒ auto (median GSD); ≤0 ⇒ "disabled" — streamed as a tiny cell so
+  // the flat output ≈ raw count but never a per-point object list (a true no-merge
+  // would resurrect the OOM).
+  const mergeOpt = numOpt(opts.mergeCell, null) // blank / non-finite ⇒ auto
+  const bboxStride = DENSE_TUNING.fuseBboxStride
+  const counts = []
+  if (knownValidCounts(maps)) for (const m of maps) counts.push(m.validPx)
+  else
+    for (let mi = 0; mi < maps.length; mi++) {
+      const { depth } = yield { light: mi, pass: 'count' }
+      let c = 0
+      for (let i = 0; i < depth.length; i++) if (depth[i] > 0) c++
+      counts.push(c)
+    }
+  const startsOf = (cs) => {
+    const st = [0]
+    for (const c of cs) st.push(st[st.length - 1] + c)
+    return st
+  }
+  let starts = startsOf(counts)
+  const totalValid = starts[maps.length]
+  const stride = totalValid ? Math.max(1, Math.floor(totalValid / DENSE_TUNING.fuseCostMaxSamples)) : 0
+  const abParams = { stride, bboxStride, gsd: !(mergeOpt > 0) }
+  let ab = perMap(yield* prepass('costBounds', { ...abParams, starts }))
+  // A recorded count that is not the map's own (a map rewritten since) moves every later
+  // sample: sample again from the counts the read found, as one pass over the actual
+  // pixels would have.
+  if (stride && ab.some((x, mi) => x.valid !== counts[mi])) {
+    starts = startsOf(ab.map((x) => x.valid))
+    ab = perMap(yield* prepass('costBounds', { ...abParams, starts }))
+  }
+  let costStats = { n: 0, p70: 0, median: 0 }
+  if (totalValid) {
+    const cap = Math.ceil(totalValid / stride) + 1
+    const arr = new Float32Array(
+      Math.min(
+        cap,
+        ab.reduce((n, x) => n + x.samples.length, 0),
+      ),
+    )
+    let o = 0
+    for (const x of ab) {
+      const take = Math.min(x.samples.length, arr.length - o)
+      arr.set(x.samples.subarray(0, take), o)
+      o += take
+    }
+    arr.sort() // TypedArray.sort is numeric ascending
+    const n = arr.length
+    const at = (q) => arr[Math.min(n - 1, Math.max(0, Math.round(q * (n - 1))))]
+    costStats = { n: totalValid, p70: at(0.7), median: at(0.5) }
+  }
 
   // Defaults when the user hasn't overridden them (null, or blank / out of range): minViews
   // = min(2, nMaps−1) so a 2-image project can still fuse (needs 1 agreeing view); maxCost
@@ -376,39 +601,16 @@ function* planSteps(maps, opts, onLog, hooks) {
     'Dense',
   )
 
-  // Scene bounds from a coarse valid-depth grid (fuseBboxStride-th row/col of each
-  // map) — enough to size the voxel-key packing without a full unprojection pass.
-  // The same read gives each map's GSD when the merge cell is automatic (mapGsd).
-  // mergeCell: null ⇒ auto (median GSD); ≤0 ⇒ "disabled" — streamed as a tiny cell so
-  // the flat output ≈ raw count but never a per-point object list (a true no-merge
-  // would resurrect the OOM).
-  const mergeOpt = numOpt(opts.mergeCell, null) // blank / non-finite ⇒ auto
-  const gsds = mergeOpt > 0 ? null : [],
-    gsdScratch = { buf: new Float32Array(0) }
+  const gsds = mergeOpt > 0 ? null : []
   const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
-  const bboxStride = DENSE_TUNING.fuseBboxStride
-  for (let mi = 0; mi < maps.length; mi++) {
-    const m = yield { light: mi }
-    if (gsds) {
-      const g = mapGsd(m, gsdScratch)
-      if (g != null) gsds.push(g)
-    }
-    const { width: w, height: h, depth } = m
-    const unproject = pixelUnprojector(m),
-      P = { x: 0, y: 0, z: 0 }
-    for (let v = 0; v < h; v += bboxStride) {
-      for (let u = 0; u < w; u += bboxStride) {
-        const d = depth[v * w + u]
-        if (!(d > 0)) continue
-        unproject(u, v, d, P)
-        if (P.x < bounds.minX) bounds.minX = P.x
-        if (P.x > bounds.maxX) bounds.maxX = P.x
-        if (P.y < bounds.minY) bounds.minY = P.y
-        if (P.y > bounds.maxY) bounds.maxY = P.y
-        if (P.z < bounds.minZ) bounds.minZ = P.z
-        if (P.z > bounds.maxZ) bounds.maxZ = P.z
-      }
-    }
+  for (const { bounds: b, gsd } of ab) {
+    if (gsds && gsd != null) gsds.push(gsd)
+    if (b[0] < bounds.minX) bounds.minX = b[0]
+    if (b[1] < bounds.minY) bounds.minY = b[1]
+    if (b[2] < bounds.minZ) bounds.minZ = b[2]
+    if (b[3] > bounds.maxX) bounds.maxX = b[3]
+    if (b[4] > bounds.maxY) bounds.maxY = b[4]
+    if (b[5] > bounds.maxZ) bounds.maxZ = b[5]
   }
   const hasBounds = Number.isFinite(bounds.minX)
   if (!hasBounds) {
@@ -443,15 +645,16 @@ function* planSteps(maps, opts, onLog, hooks) {
   // throw), so the caller still gets transferred buffers home.
   const maxViews = numOpt(opts.maxViews, DENSE_TUNING.fuseMaxViews, { int: true, min: 0 })
   const capViews = maxViews > 0 && maps.length - 1 > maxViews
-  const est = yield* fusionCellEstimateSteps(maps, {
-    cell: mergeCell,
-    step,
-    maxCost,
-    region,
+  const estOpts = {
     sampleCap: DENSE_TUNING.fuseEstimateSampleCap,
     tile: { axis },
     withCorners: !!hooks.streaming || capViews,
-  })
+  }
+  const est = mergeCellEstimates(
+    yield* prepass('estimate', { cell: mergeCell, step, maxCost, region, ...estOpts }),
+    maps.length,
+    estOpts,
+  )
   const views = capViews
     ? fusionViews(maps, est.corners, {
         maxViews,
@@ -653,42 +856,19 @@ function* planSteps(maps, opts, onLog, hooks) {
   // considers. One more read of every map, only when tiled.
   let slabCorners = null
   if (tiled && hooks.streaming) {
-    const inv = 1 / mergeCell,
-      k = 'xyz'[axis]
-    slabCorners = slabs.map(() => new Array(nM).fill(null))
-    for (let mi = 0; mi < nM; mi++) {
-      if (!(est.mapLo[mi] <= est.mapHi[mi])) continue
-      const m = yield { light: mi }
-      const { width: w, height: h, depth, cost } = m
-      const unproject = pixelUnprojector(m),
-        P = { x: 0, y: 0, z: 0 }
-      const box = slabs.map(() => [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity]) // u0 u1 v0 v1 d0 d1
-      for (let v = 0; v < h; v += step) {
-        for (let u = 0; u < w; u += step) {
-          const idx = v * w + u,
-            d = depth[idx]
-          if (!(d > 0) || cost[idx] > maxCost) continue
-          const ca = Math.floor(unproject(u, v, d, P)[k] * inv)
-          for (let ti = 0; ti < slabs.length; ti++) {
-            if (ca < slabs[ti].lo - halo || ca >= slabs[ti].hi + halo) continue
-            const b = box[ti]
-            if (u < b[0]) b[0] = u
-            if (u > b[1]) b[1] = u
-            if (v < b[2]) b[2] = v
-            if (v > b[3]) b[3] = v
-            if (d < b[4]) b[4] = d
-            if (d > b[5]) b[5] = d
-          }
-        }
-      }
-      box.forEach((b, ti) => {
-        if (!(b[5] > 0)) return
-        const cs = []
-        for (const d of [b[4], b[5]])
-          for (const u of [b[0], b[1]]) for (const v of [b[2], b[3]]) cs.push(unprojectPixel(m, u, v, d))
-        slabCorners[ti][mi] = cs
-      })
-    }
+    const outlines = perMap(
+      yield* prepass('outlines', {
+        slabs,
+        halo,
+        step,
+        maxCost,
+        cell: mergeCell,
+        axis,
+        mapLo: est.mapLo,
+        mapHi: est.mapHi,
+      }),
+    )
+    slabCorners = slabs.map((_, ti) => outlines.map((o) => o?.[ti] ?? null))
   }
   return {
     nMaps: nM,
