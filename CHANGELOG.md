@@ -109,6 +109,14 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **More features on faint images.** An image that finds fewer than half the keypoint
+  cap is detected again at half the contrast threshold, so plain walls, interiors and
+  uniform fields get enough matches to register. On ETH3D (six scenes, camera centres
+  vs the ground-truth cameras) every scene registers as many cameras or more (office
+  18 → 20 of 26, playground 34 → 35 of 38) and five are more accurate (delivery_area
+  4.0 → 2.9 mm, playground 3.6 → 1.3 mm median); quarry (53 of 347 images retried):
+  14 % more sparse points and 0.766 → 0.738 m against RTK without priors, for 31 % more
+  matching time; South Building (6 of 128 retried) is unchanged.
 - **Large cloud and mesh exports ask where to save first.** In Chrome and Edge, an export
   over about 256 MB opens the save dialog when you start it and writes the file there
   when it is done, instead of a download at the end. A 552 MB PLY download could be

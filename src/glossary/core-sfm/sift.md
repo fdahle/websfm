@@ -29,6 +29,7 @@ pixels, so near-duplicate positions are suppressed at detection time.
 
 The tunable that matters most in practice is the **contrast threshold**: lower it
 to get more keypoints on flat, low-texture surfaces such as snow and ice, raise
-it to keep only strong, well-localised features. Detection resolution is the
+it to keep only strong, well-localised features. An image that finds fewer than half
+the keypoint cap is detected again at half the threshold automatically. Detection resolution is the
 other lever — SIFT cost scales with pixel count, and downscaling large scans
 before detection is usually the cheapest speed-up available.

@@ -36,6 +36,13 @@ export const DETECT_TUNING = {
   // 3072 px / 10k, where it binds hard. Response-ranked native 10k scored BELOW 2400 px
   // 10k: fine-scale texture filled the budget. It matters most where the cap binds.
   siftCapRule: 'coarse-first',
+  // A faint image — fewer keypoints than this share of the cap at the set contrast —
+  // is detected again at siftFaintRetryContrast × that contrast (core/features/
+  // faintRetry.js, which has the measurements). Untiled SIFT only. Off = the detector
+  // before 2026-10-25 exactly. Its cost is in matching: quarry 347 exhaustive +31 %.
+  siftFaintRetry: true,
+  siftFaintRetryShare: 0.5,
+  siftFaintRetryContrast: 0.5,
   spMaxUntiledInputPx: 16_000_000, // ≈4000×4000; above this (tiling off) → prompt / clean fail
   // DISK's U-Net holds 128 float channels at FULL input resolution (SuperPoint
   // downsamples 8× first), i.e. 512 B per input pixel in one tensor, so ORT's int32

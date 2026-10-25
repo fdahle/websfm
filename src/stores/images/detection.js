@@ -143,6 +143,9 @@ export function createDetection({
           // The cap this image ran with: auto mode scales it with the detected area.
           maxKeypointsEffective: kp0.maxKeypoints ?? null,
           contrastThreshold: settings.contrastThreshold ?? null,
+          // The lower threshold a faint image was detected again at (core/features/
+          // faintRetry.js), or null: detected once at contrastThreshold.
+          faintRetryContrast: res.diag?.faintRetry?.contrast ?? null,
           tiling: settings.tiling ?? null,
           // Absent on images detected before 2026-10 ⇒ unknown (they ran with 1).
           maxOrientations,
@@ -176,7 +179,9 @@ export function createDetection({
             )
           } else {
             log(
-              `${tag} ${found.name} — ${d.rawFound} found → ${d.capped}` +
+              `${tag} ${found.name} — ` +
+                `${d.faintRetry ? `faint (${d.faintRetry.before} keypoints, under ${d.faintRetry.floor}): detected again at contrast ${d.faintRetry.contrast}, ` : ''}` +
+                `${d.rawFound} found → ${d.capped}` +
                 `${
                   !d.capHit
                     ? ' (under cap)'

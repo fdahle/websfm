@@ -98,6 +98,10 @@ scans; higher values keep fewer, stronger features. On textured images the keypo
 binds first and the threshold changes little; on low-texture ones (interiors, large
 aerial frames detected at reduced resolution) it decides how many features exist. If
 raising the keypoint cap changes nothing, the contrast threshold is the limiting gate.
+An image that finds fewer than half the keypoint cap at this threshold is detected
+again at half the threshold and keeps the larger set; its log line says *faint …
+detected again*. This only adds features where they are missing (interiors, plain
+walls, uniform fields), so a textured set is detected once, as before.
 
 ## Max keypoints
 <!-- param: maxKeypoints default: 10000 (SIFT) · 2048 (SuperPoint, DISK, ALIKED) -->

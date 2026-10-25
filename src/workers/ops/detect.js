@@ -30,6 +30,8 @@ import {
   nativeRefinePlan,
 } from '../../core/sfm/fiducialDetection.js'
 import { pluralize } from '../../core/textFormat.js'
+import { DETECT_TUNING } from '../../core/tuning.js'
+import { faintRetry } from '../../core/features/faintRetry.js'
 
 // Detection ops (SIFT / learned: SuperPoint, DISK, ALIKED). `rasterize` (OffscreenCanvas pixel decode)
 // stays in the worker and is injected; the STRIDE parse + shared feature-bundle
@@ -116,6 +118,28 @@ export function makeDetectOps({ rasterize }) {
         respP95: percentile(keptResp, 0.95),
       },
     }
+  }
+
+  // SIFT on one raster, capped; a faint image is detected again at a lower contrast
+  // threshold (core/features/faintRetry.js) and keeps the second set if it is larger.
+  async function siftWithRetry(
+    data,
+    width,
+    height,
+    { contrastThreshold, maxOrientations, faintRetry: enabled, ...cap },
+  ) {
+    const opts = { ...cap, width, height }
+    const first = capSift(await runSift(data, width, height, { contrastThreshold, maxOrientations }), opts)
+    const retry = faintRetry(first.count, { contrastThreshold, maxKeypoints: cap.maxKeypoints, enabled })
+    if (!retry) return first
+    const second = capSift(
+      await runSift(data, width, height, { contrastThreshold: retry.contrast, maxOrientations }),
+      opts,
+    )
+    if (second.count <= first.count) return first
+    second.ms += first.ms
+    second.diag = { ...second.diag, faintRetry: { ...retry, before: first.count } }
+    return second
   }
 
   // Learned detector (ONNX via core/features/learnedDetect.js) → the same feature
@@ -322,6 +346,7 @@ export function makeDetectOps({ rasterize }) {
       tiling = 'off',
       tileSize = 0,
       overlap = 64,
+      faintRetry = DETECT_TUNING.siftFaintRetry,
     } = options
     const raster = await rasterize(url, maxDim)
     const { data, width, height, scale, natW, natH } = raster
@@ -354,12 +379,13 @@ export function makeDetectOps({ rasterize }) {
         })
       : spec
         ? await runLearned(spec, data, width, height, { maxKeypoints, onLog })
-        : capSift(await runSift(data, width, height, { contrastThreshold, maxOrientations }), {
+        : await siftWithRetry(data, width, height, {
+            contrastThreshold,
+            maxOrientations,
             maxKeypoints,
             capRule,
             maskLut,
-            width,
-            height,
+            faintRetry,
           })
 
     // Keypoints leave as the typed layout the store keeps (core/features/keypoints.js),
