@@ -116,6 +116,27 @@ describe('verifyMatches (F + H-vs-F degeneracy)', () => {
 })
 
 describe('inlierSpread (positional degeneracy)', () => {
+  it('counts the unique rounded positions the string keys counted', () => {
+    let st = 4
+    const r = () => (st = (Math.imul(st, 1103515245) + 12345) >>> 0) / 2 ** 32
+    const pts = (n) =>
+      Array.from({ length: n }, () => ({ x: Math.floor(r() * 30) - 10.4 + r(), y: Math.floor(r() * 20) - 0.6 }))
+    const a = pts(300),
+      b = pts(300)
+    const matches = a.map((_, i) => ({ ia: i, ib: (i * 7) % 300 }))
+    const mask = Float32Array.from(matches, (_, i) => (i % 3 ? 1 : 0))
+    for (const roundPx of [1, 2.5, 0.25]) {
+      const keys = (ps, side) =>
+        new Set(
+          matches
+            .filter((_, i) => mask[i] > 0.5)
+            .map((m) => ps[side === 'a' ? m.ia : m.ib])
+            .map((p) => `${Math.round(p.x / roundPx)},${Math.round(p.y / roundPx)}`),
+        ).size
+      const s = inlierSpread(K(a), K(b), matches, mask, roundPx)
+      expect([s.uniqueA, s.uniqueB]).toEqual([keys(a, 'a'), keys(b, 'b')])
+    }
+  })
   const all = (n) => new Float32Array(n).fill(1) // every putative an inlier
 
   it('reports full spread for well-distributed correspondences', () => {

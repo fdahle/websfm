@@ -99,6 +99,13 @@ export async function verifyPointPairs(ptsA, ptsB, options = {}) {
  * `extentB`). The caller rejects either signature. `matches[i]` must align with
  * `inlierMask[i]` (i.e. the same putative list handed to `verifyMatches`).
  */
+// A rounded position as one Set key: an exact number while both cells are under 2²⁵ in
+// magnitude (a Set counts −0 and 0 as one, as their strings are), else the string. One
+// string per inlier was most of this function on the page's main thread.
+const CELL_SPAN = 2 ** 26
+const cellKey = (cx, cy) =>
+  Math.abs(cx) < CELL_SPAN / 2 && Math.abs(cy) < CELL_SPAN / 2 ? cx * CELL_SPAN + cy : `${cx},${cy}`
+
 export function inlierSpread(kpsA, kpsB, matches, inlierMask, roundPx = 1) {
   const seenA = new Set(),
     seenB = new Set()
@@ -118,8 +125,8 @@ export function inlierSpread(kpsA, kpsB, matches, inlierMask, roundPx = 1) {
     const bx = kpsB.x(matches[i].ib),
       by = kpsB.y(matches[i].ib)
     count++
-    seenA.add(`${Math.round(ax / roundPx)},${Math.round(ay / roundPx)}`)
-    seenB.add(`${Math.round(bx / roundPx)},${Math.round(by / roundPx)}`)
+    seenA.add(cellKey(Math.round(ax / roundPx), Math.round(ay / roundPx)))
+    seenB.add(cellKey(Math.round(bx / roundPx), Math.round(by / roundPx)))
     if (ax < minAx) minAx = ax
     if (ax > maxAx) maxAx = ax
     if (ay < minAy) minAy = ay
