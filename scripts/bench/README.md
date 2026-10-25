@@ -139,6 +139,14 @@ change can be judged as more correct rather than merely larger. Run it with
 `posePriors: false`. Otherwise bundle adjustment has already been pulled towards the same
 positions, and the check is no longer independent.
 
+## Accuracy: reference cameras (`camera-check.mjs`)
+
+Without GNSS, a run's camera centres can be scored against a reference model in COLMAP's
+`images.txt`: ETH3D's `dslr_calibration_undistorted` (ground truth) or a COLMAP model of
+the same images. `node scripts/bench/camera-check.mjs <out>.json <images.txt | ETH3D scene>`
+fits a similarity, drops cameras beyond 5× the median and prints the registered count,
+the median / p90 / max centre error in reference units and the cameras that are off.
+
 ## Accuracy: LiDAR surface (`lidarCheck`)
 
 With `reference.lidar` (`dir`, `crs`, `cell`, `flatRangeM`; see `lidar.mjs`), the strips
