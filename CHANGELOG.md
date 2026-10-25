@@ -225,6 +225,9 @@ Notable changes to websfm. The format follows
   and cost: 22 → 7.8 min, the same cloud for the planning change.
 
 ### Fixed
+- **One backend line per depth-map run.** Depth maps split over the worker pool printed
+  "backend = WASM (CPU)" (and, without a GPU, its warning) once per worker; the console
+  now shows it once.
 - **Spinners keep turning with reduced motion.** With reduced motion on (Settings, or
   the system: remote desktop sessions often ask for it), the loading spinners and the
   indeterminate progress bar stopped and looked like a hang; they now keep moving,

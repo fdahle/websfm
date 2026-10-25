@@ -39,6 +39,10 @@ import { pluralize } from '../../core/textFormat.js'
 import { isSharedArray, postableCopy, shareableArray } from '../../core/bigArray.js'
 import { poissonHeapBytes } from '../../core/products/mesh.js'
 
+// The backend lines of a depth run split over the pool (workers/ops/dense.js), the same
+// from every worker.
+const SAME_ON_EVERY_WORKER = /^Depth maps: (backend = |GPU requested but no adapter)/
+
 // The dense pipeline, split out of useReconstructionStore: Stage A depth maps
 // (PatchMatch MVS in the workers, persisted per image), the saved-map filter,
 // fusion into the dense cloud (streamed over the worker pool when the maps are on
@@ -354,6 +358,8 @@ export function createDense({
       'Dense',
     )
     const chunks = contiguousChunks(images.length, workers)
+    // Every worker picks its backend the same way: the first says which, not every one.
+    const onLogOf = (w) => (w === 0 ? onLog : (m, l, c) => SAME_ON_EVERY_WORKER.test(m) || onLog(m, l, c))
     const counts = new Array(workers).fill(0),
       fractions = new Array(workers).fill(0)
     const t0 = performance.now()
@@ -364,7 +370,7 @@ export function createDense({
           { images, sparse, refs, settings: withAck({ ...settings, memBudgetBytes: budget / workers }, w) },
           {
             worker: w,
-            onLog,
+            onLog: onLogOf(w),
             onEvent: onEventFor(w),
             onProgress: (d, t, lbl, f) => {
               counts[w] = d
