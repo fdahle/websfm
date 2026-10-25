@@ -6,6 +6,7 @@ import {
   buildDepthIndex,
   isDepthIndexStale,
   depthMapBytes,
+  depthCoverage,
 } from './depthMapCodec.js'
 
 // A 2×3 depth map with distinct values per plane so a mix-up is visible.
@@ -170,5 +171,21 @@ describe('depthMapBytes', () => {
   it('excludes normals when the run produced none', () => {
     const index = buildDepthIndex([makeMap({ normals: null })], { sparseCloud: { id: 'c', createdAt: 1 } })
     expect(depthMapBytes(index.maps)).toBe(66)
+  })
+})
+
+describe('depthCoverage', () => {
+  it('gives the count, span and median the boxed sort gave', () => {
+    let st = 6
+    const r = () => (st = (Math.imul(st, 1103515245) + 12345) >>> 0) / 2 ** 32
+    for (const n of [1, 2, 7, 1000, 4097]) {
+      const depth = Float32Array.from({ length: n }, (_, i) => (i % 5 === 0 ? 0 : i % 11 === 0 ? NaN : 1 + r() * 9))
+      const vals = [...depth].filter((d) => d > 0).sort((a, b) => a - b)
+      expect(depthCoverage(depth)).toEqual(
+        vals.length
+          ? { validPx: vals.length, depthMin: vals[0], depthMax: vals.at(-1), depthMedian: vals[vals.length >> 1] }
+          : { validPx: 0, depthMin: null, depthMax: null, depthMedian: null },
+      )
+    }
   })
 })

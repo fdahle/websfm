@@ -38,23 +38,27 @@ function bufferOf(ta) {
 export function depthCoverage(depth) {
   if (!depth || !depth.length) return { validPx: 0, depthMin: null, depthMax: null, depthMedian: null }
   let min = Infinity,
-    max = -Infinity
-  const vals = []
+    max = -Infinity,
+    n = 0
+  // The valid depths in a typed array, sorted natively: a boxed JS array and a comparator
+  // sort took ~0.1 s for a 600 × 450 map on the page's main thread, where saved maps are
+  // written. A double holds every depth exactly, so the same median.
+  const vals = new Float64Array(depth.length)
   for (let i = 0; i < depth.length; i++) {
     const d = depth[i]
     if (d > 0) {
-      vals.push(d)
+      vals[n++] = d
       if (d < min) min = d
       if (d > max) max = d
     }
   }
-  if (!vals.length) return { validPx: 0, depthMin: null, depthMax: null, depthMedian: null }
-  vals.sort((a, b) => a - b)
+  if (!n) return { validPx: 0, depthMin: null, depthMax: null, depthMedian: null }
+  const sorted = vals.subarray(0, n).sort()
   return {
-    validPx: vals.length,
+    validPx: n,
     depthMin: min,
     depthMax: max,
-    depthMedian: vals[vals.length >> 1],
+    depthMedian: sorted[n >> 1],
   }
 }
 
