@@ -196,8 +196,11 @@ Notable changes to websfm. The format follows
 ### Performance
 - **Sparse reconstruction outside bundle adjustment.** The model's reprojection
   statistics, the self-calibration fit and guided track extension stopped allocating per
-  observation, and guided extension only tries the cameras that can see a point. Quarry
-  (347 images): 82 → 77 s, the identical model.
+  observation, and guided extension only tries the cameras that can see a point. Each
+  self-calibrating solve now moves the keypoints on all cores (in WebAssembly), and the
+  composed lens for dense is fitted once, at the end. Guided extension searches camera
+  by camera. Quarry (347 images): 82 → 77 s, then 84 → 73 s (SfM stages 70 → 60 s;
+  the ten keypoint folds 8.9 → 2.2 s, guided extension 5.6 → 3.7 s), the identical model.
 - **Depth maps on large scans, and the cross-view filter.** On a block of 58 film
   scans (97 MP) at High: masks and grey planes are built once per image instead of for
   every map they serve, the speckle filter is 5.7× faster (same output), previews are

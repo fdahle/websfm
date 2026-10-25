@@ -125,24 +125,25 @@ export function parseDistortionModelName(text) {
 }
 
 // ── Brown–Conrady / rational ─────────────────────────────────────────────────
-// Radial factor R(r²) = (1 + k1·r² + k2·r⁴ + k3·r⁶) / (1 + k4·r² + k5·r⁴ + k6·r⁶)
-// and its slope dR/d(r²). k4…k6 absent ⇒ the denominator is 1: plain Brown.
-function radialAndSlope(r2, k1, k2, k3, k4, k5, k6) {
-  const num = 1 + r2 * (k1 + r2 * (k2 + r2 * k3))
-  const den = 1 + r2 * (k4 + r2 * (k5 + r2 * k6))
-  const dNum = k1 + r2 * (2 * k2 + 3 * k3 * r2)
-  const dDen = k4 + r2 * (2 * k5 + 3 * k6 * r2)
-  return [num / den, (dNum * den - num * dDen) / (den * den)]
-}
-
+// Radial factor R(r²) = (1 + k1·r² + k2·r⁴ + k3·r⁶) / (1 + k4·r² + k5·r⁴ + k6·r⁶).
+// k4…k6 absent ⇒ the denominator is 1: plain Brown.
 function distortBrown(x, y, d) {
   const { k1 = 0, k2 = 0, k3 = 0, k4 = 0, k5 = 0, k6 = 0, p1 = 0, p2 = 0 } = d
+  brownForward(x, y, k1, k2, k3, k4, k5, k6, p1, p2)
+  return [fwdX, fwdY]
+}
+
+// The forward model on scalars, written to fwdX / fwdY: the hot loops (the self-cal
+// fold undistorts every keypoint of a group, several times a run) must not allocate
+// per point.
+let fwdX = 0,
+  fwdY = 0
+function brownForward(x, y, k1, k2, k3, k4, k5, k6, p1, p2) {
   const r2 = x * x + y * y
-  const [radial] = radialAndSlope(r2, k1, k2, k3, k4, k5, k6)
+  const radial = (1 + r2 * (k1 + r2 * (k2 + r2 * k3))) / (1 + r2 * (k4 + r2 * (k5 + r2 * k6)))
   const xy = x * y
-  const xd = x * radial + 2 * p1 * xy + p2 * (r2 + 2 * x * x)
-  const yd = y * radial + p1 * (r2 + 2 * y * y) + 2 * p2 * xy
-  return [xd, yd]
+  fwdX = x * radial + 2 * p1 * xy + p2 * (r2 + 2 * x * x)
+  fwdY = y * radial + p1 * (r2 + 2 * y * y) + 2 * p2 * xy
 }
 
 // Newton on the exact forward model, with backtracking, to a tolerance — not a
@@ -155,17 +156,21 @@ function distortBrown(x, y, d) {
 // which r·(1+k1r²+…) turns back) no inverse exists and the best point is returned.
 function undistortBrown(xd, yd, d, iters) {
   const { k1 = 0, k2 = 0, k3 = 0, k4 = 0, k5 = 0, k6 = 0, p1 = 0, p2 = 0 } = d
-  const residual = (x, y) => {
-    const [fx, fy] = distortBrown(x, y, d)
-    return [fx - xd, fy - yd]
-  }
   let x = xd,
     y = yd
-  let [ex, ey] = residual(x, y)
+  brownForward(x, y, k1, k2, k3, k4, k5, k6, p1, p2)
+  let ex = fwdX - xd,
+    ey = fwdY - yd
   let err = ex * ex + ey * ey
   for (let i = 0; i < iters && err > 1e-26; i++) {
     const r2 = x * x + y * y
-    const [radial, g] = radialAndSlope(r2, k1, k2, k3, k4, k5, k6) // g = d radial / d r²
+    // R(r²) and its slope g = dR/d(r²)
+    const num = 1 + r2 * (k1 + r2 * (k2 + r2 * k3))
+    const den = 1 + r2 * (k4 + r2 * (k5 + r2 * k6))
+    const dNum = k1 + r2 * (2 * k2 + 3 * k3 * r2)
+    const dDen = k4 + r2 * (2 * k5 + 3 * k6 * r2)
+    const radial = num / den
+    const g = (dNum * den - num * dDen) / (den * den)
     const a = radial + 2 * x * x * g + 2 * p1 * y + 6 * p2 * x
     const b = 2 * x * y * g + 2 * p1 * x + 2 * p2 * y
     const c = b
@@ -181,7 +186,9 @@ function undistortBrown(xd, yd, d, iters) {
     for (let h = 0; h < 8; h++, t *= 0.5) {
       const nx = x - t * sx,
         ny = y - t * sy
-      const [rx, ry] = residual(nx, ny)
+      brownForward(nx, ny, k1, k2, k3, k4, k5, k6, p1, p2)
+      const rx = fwdX - xd,
+        ry = fwdY - yd
       const nerr = rx * rx + ry * ry
       if (nerr < err) {
         x = nx

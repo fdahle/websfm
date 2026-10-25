@@ -103,8 +103,9 @@ function fitComposed(forEachPair, K, active) {
       pyn = (py - cy) / fy // distorted (pristine) normalised
     const r2 = fxn * fxn + fyn * fyn
     for (let a = 0; a < m; a++) {
-      basisX[a] = fxn * r2 ** pow[a]
-      basisY[a] = fyn * r2 ** pow[a]
+      const rp = r2 ** pow[a]
+      basisX[a] = fxn * rp
+      basisY[a] = fyn * rp
     }
     const tx = pxn - fxn,
       ty = pyn - fyn // forward-distortion displacement

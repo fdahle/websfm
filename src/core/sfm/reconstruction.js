@@ -4,6 +4,7 @@ import init, {
   solve_pnp,
   bundle_adjust,
   compute_depth_map,
+  undistort_brown_pixels,
 } from '../../wasm/reconstruction/reconstruction.js'
 import { isObservationList } from './baObservations.js'
 import { SFM_TUNING } from '../tuning.js'
@@ -14,10 +15,17 @@ import { isFisheyeModel } from './distortion.js'
 export { isKnownAerialFilmWidth }
 
 let initPromise = null
+let wasmReady = false
 function ensureWasm() {
-  if (!initPromise) initPromise = init()
+  if (!initPromise)
+    initPromise = init().then((m) => {
+      wasmReady = true
+      return m
+    })
   return initPromise
 }
+// Load the single-threaded build ahead of a synchronous call (undistortBrownPixels).
+export const loadReconstructionWasm = ensureWasm
 
 // The threaded build of the same crate (src/wasm/reconstruction-mt, crates/README.md ▸
 // Threads): the bundle adjustment's Schur step, cost and back-substitution on a pool of
@@ -45,6 +53,7 @@ function threadedWasm(cap) {
           const threads = Math.max(1, Math.min(cap, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1))
           await mt.initThreadPool(threads)
           threadedThreads = threads
+          threadedModule = mt
           return mt
         } catch (err) {
           console.warn(`Bundle adjustment: the threaded build did not start (${err?.message ?? err}); using one thread`)
@@ -54,6 +63,22 @@ function threadedWasm(cap) {
   return threadedPromise
 }
 let threadedThreads = 0
+let threadedModule = null
+
+// Undistort the keypoints of several images through one Brown bag in the crate
+// (crates/reconstruction/src/distort.rs): the same bits as distortion.js undistortPixel,
+// on the thread pool once the bundle adjustment has started it. Synchronous, for the
+// self-calibration fold, which runs between awaited solves; null while no build is
+// loaded yet, and the caller then takes the JS path.
+//   xy: Float64Array of every image's points, image after image; starts: Uint32Array,
+//   each image's first point plus the total; k: Float64Array [fx, fy, cx, cy] per image;
+//   d: the bag ({k1…k6, p1, p2}, absent terms 0).
+export function undistortBrownPixels(xy, starts, k, d, iters = 20) {
+  const run = threadedModule?.undistort_brown_pixels ?? (wasmReady ? undistort_brown_pixels : null)
+  if (!run) return null
+  const bag = Float64Array.of(d.k1 ?? 0, d.k2 ?? 0, d.k3 ?? 0, d.k4 ?? 0, d.k5 ?? 0, d.k6 ?? 0, d.p1 ?? 0, d.p2 ?? 0)
+  return run(xy, starts, k, bag, iters)
+}
 
 // Common sensor widths (mm), matched as lowercased substrings of "make model".
 // Last-resort fallback when EXIF carries a real focal length but no 35mm

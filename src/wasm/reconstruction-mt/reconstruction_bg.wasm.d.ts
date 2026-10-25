@@ -5,6 +5,7 @@ export const compute_depth_map: (a: number, b: number, c: number, d: number, e: 
 export const recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
 export const solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
 export const triangulate_dlt: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
+export const undistort_brown_pixels: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
 export const __wbg_wbg_rayon_poolbuilder_free: (a: number, b: number) => void;
 export const initThreadPool: (a: number) => any;
 export const wbg_rayon_poolbuilder_build: (a: number) => void;

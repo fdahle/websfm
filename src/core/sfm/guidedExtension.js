@@ -28,6 +28,33 @@ function dist2(a, ao, b, bo) {
   return s
 }
 
+// The largest keypoint grid one camera's search builds (guidedExtendTracks), in cells.
+const GRID_MAX_CELLS = 1 << 22
+
+// Order of two keypoints by their gate-sized cell (column, then row), then index.
+function gateCellOrder(xy, a, b, gatePx) {
+  return (
+    Math.floor(xy[2 * a] / gatePx) - Math.floor(xy[2 * b] / gatePx) ||
+    Math.floor(xy[2 * a + 1] / gatePx) - Math.floor(xy[2 * b + 1] / gatePx) ||
+    a - b
+  )
+}
+
+// dist2, but it stops once the sum passes `bound` and returns that partial sum (still
+// above the bound). The sums are of integers, exact in any order, so a caller that
+// only asks "is it below the bound, and by how much" gets the same answers.
+function dist2Below(a, ao, b, bo, bound) {
+  let s = 0
+  for (let i = 0; i < DIM; i += 16) {
+    for (let j = i; j < i + 16; j++) {
+      const d = a[ao + j] - b[bo + j]
+      s += d * d
+    }
+    if (s > bound) return s
+  }
+  return s
+}
+
 /**
  * The squared-distance acceptance threshold, measured: the `quantile` of distances
  * between two observations of the same point over tracks with ≥3 views (verified,
@@ -74,7 +101,8 @@ export function trackDistanceThreshold(tracks, descOf, { quantile = 0.9, maxSamp
 // it and project past one side of its keypoint bounds (by a margin for rounding): every
 // point of the cell, a convex combination of the corners, then projects past that side
 // too (perspective division keeps convex combinations, with positive weights, in front
-// of the camera). Returns (x, y, z) → indices. Quarry: 126 k points × 347 cameras.
+// of the camera). Returns { cellOf(x, y, z) → cell key, camsOfCell(key) → indices }.
+// Quarry: 126 k points × 347 cameras.
 const CULL_CELLS = 16
 function frustumCells(tracks, camList) {
   const lo = [Infinity, Infinity, Infinity],
@@ -87,7 +115,7 @@ function frustumCells(tracks, camList) {
     }
   })
   const all = camList.map((c, i) => i).filter((i) => camList[i].grid)
-  if (!(hi[0] >= lo[0])) return () => all
+  if (!(hi[0] >= lo[0])) return { cellOf: () => 0, camsOfCell: () => all }
   const G = CULL_CELLS
   const size = [0, 1, 2].map((k) => Math.max((hi[k] - lo[k]) / G, 1e-9) * (1 + 1e-9))
   const cellOf = (x, y, z) => {
@@ -133,7 +161,7 @@ function frustumCells(tracks, camList) {
     }
     lists.set(cell, list)
   }
-  return (x, y, z) => lists.get(cellOf(x, y, z)) ?? all
+  return { cellOf, camsOfCell: (cell) => lists.get(cell) ?? all }
 }
 
 /**
@@ -173,12 +201,14 @@ export function guidedExtendTracks({
     lifted: 0,
     pointsExtended: 0,
   }
-  if (tau2 == null) return stats
+  // No gate, no window: a zero gate (a residual p90 of exactly 0) finds nothing to add.
+  if (tau2 == null || !(gatePx > 0)) return stats
   const r2 = gatePx * gatePx
   const ratio2 = ratio * ratio
 
-  // Per-camera keypoint grid (cell = gate) and keypoint bounds, in camera order.
-  const camList = [] // { img, cam, grid }
+  // Per-camera keypoint bounds, in camera order (the keypoint grid is built per camera
+  // in the search below).
+  const camList = [] // { img, cam, P, grid: { xy, n, minX, minY, maxX, maxY } | null }
   for (const [uuid, cam] of cameras) {
     const img = ids.img(uuid)
     const kps = keypointsAt(img)
@@ -186,7 +216,6 @@ export function guidedExtendTracks({
       camList.push({ img, cam, grid: null })
       continue
     }
-    const cells = new Map()
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
@@ -199,10 +228,6 @@ export function guidedExtendTracks({
       if (y < minY) minY = y
       if (x > maxX) maxX = x
       if (y > maxY) maxY = y
-      const key = Math.floor(x / gatePx) * 1e6 + Math.floor(y / gatePx)
-      const c = cells.get(key)
-      if (c) c.push(i)
-      else cells.set(key, [i])
     }
     // The pose and K flat, for the projection inlined below.
     const P = Float64Array.of(
@@ -223,16 +248,14 @@ export function guidedExtendTracks({
       cam.K.cx,
       cam.K.cy,
     )
-    camList.push({ img, cam, P, grid: { xy, cells, minX, minY, maxX, maxY } })
+    camList.push({ img, cam, P, grid: { xy, n: kps.n, minX, minY, maxX, maxY } })
   }
 
-  const proposals = []
-  const refs = []
-  // Every point is tried against every camera: project first, and ask whether the camera
-  // already observes it only for a projection inside the image (viewKp scans the point's
-  // views, and 44 M point × camera pairs on quarry mostly land outside). `projections`
-  // counts the pairs tried, as before: the cameras with keypoints less the point's views
-  // in them.
+  // Every point is tried against every camera that can see it (frustumCells): project
+  // first, and ask whether the camera already observes it only for a projection inside
+  // the image (viewKp scans the point's views, and most of the 12.8 M point × camera pairs
+  // on quarry land outside). `projections` counts the pairs tried, as before: the cameras
+  // with keypoints less the point's views in them.
   const withGrid = new Uint8Array(camList.reduce((n, c) => Math.max(n, c.img + 1), 0))
   let nWithGrid = 0
   for (const c of camList)
@@ -240,71 +263,153 @@ export function guidedExtendTracks({
       withGrid[c.img] = 1
       nWithGrid++
     }
-  const camsOf = frustumCells(tracks, camList)
+  const cull = frustumCells(tracks, camList)
+  // The points with reference descriptors, in order, grouped by cull cell.
+  const ptId = [],
+    ptRefs = [],
+    ptPos = []
+  const ptsOfCell = new Map() // cull cell → [j, …] ascending
   tracks.forEachPoint((p) => {
-    refs.length = 0
+    const refs = []
     tracks.someView(p, (img, k) => {
       const d = descOf(img, k)
       if (d) refs.push(d)
       return refs.length >= refObs
     })
     if (!refs.length) return
-    const px = tracks.x(p),
-      py = tracks.y(p),
-      pz = tracks.z(p)
     let seen = 0
     tracks.forEachView(p, (img) => {
       if (withGrid[img]) seen++
     })
     stats.projections += nWithGrid - seen
-    for (const ci of camsOf(px, py, pz)) {
-      const { img, P, grid: g } = camList[ci]
-      // projectWithDepth, inlined (every point × every camera: 100 M calls at 1,600
-      // cameras, and each allocated its result). Same arithmetic, same order.
-      const zc = P[6] * px + P[7] * py + P[8] * pz + P[11]
-      if (!(zc > 1e-9)) continue
-      const u = P[12] * ((P[0] * px + P[1] * py + P[2] * pz + P[9]) / zc) + P[14]
-      const v = P[13] * ((P[3] * px + P[4] * py + P[5] * pz + P[10]) / zc) + P[15]
-      if (u < g.minX || u > g.maxX || v < g.minY || v > g.maxY) continue
-      if (tracks.viewKp(p, img) >= 0) continue
-      const pr = { u, v }
-      const cx = Math.floor(pr.u / gatePx),
-        cy = Math.floor(pr.v / gatePx)
-      let best = Infinity,
-        second = Infinity,
-        bestKp = -1,
-        any = false
-      for (let gx = cx - 1; gx <= cx + 1; gx++) {
-        for (let gy = cy - 1; gy <= cy + 1; gy++) {
-          const cell = g.cells.get(gx * 1e6 + gy)
-          if (!cell) continue
-          for (const i of cell) {
-            if ((g.xy[2 * i] - pr.u) ** 2 + (g.xy[2 * i + 1] - pr.v) ** 2 > r2) continue
-            if (tracks.pointAt(img, i) >= 0) continue
-            const cd = descOf(img, i)
-            if (!cd) continue
-            any = true
-            let d = Infinity
-            for (const ref of refs) d = Math.min(d, dist2(ref.arr, ref.off, cd.arr, cd.off))
-            if (d < best) {
-              second = best
-              best = d
-              bestKp = i
-            } else if (d < second) second = d
+    const x = tracks.x(p),
+      y = tracks.y(p),
+      z = tracks.z(p)
+    const cell = cull.cellOf(x, y, z)
+    let list = ptsOfCell.get(cell)
+    if (!list) ptsOfCell.set(cell, (list = []))
+    list.push(ptId.length)
+    ptId.push(p)
+    ptRefs.push(refs)
+    ptPos.push(x, y, z)
+  })
+  const cellsOfCam = camList.map(() => [])
+  for (const cell of ptsOfCell.keys()) for (const ci of cull.camsOfCell(cell)) cellsOfCam[ci].push(cell)
+
+  // Camera by camera (one keypoint grid in memory at a time, and its keypoints stay in
+  // cache): the grid is dense, in cells of `gatePx` (or a whole multiple of it, so a small
+  // gate on a big image stays within GRID_MAX_CELLS). A keypoint within the gate of a
+  // projection lies in the 3 × 3 gate-sized cells around it; the candidates are visited
+  // in that order (cell column, cell row, keypoint index), which decides between equal
+  // descriptor distances, and the proposals are sorted by (distance, point, camera): the
+  // same proposals in the same order as trying the cameras point by point.
+  const proposals = []
+  let cellStart = new Int32Array(0),
+    cellKp = new Int32Array(0)
+  const cand = [] // candidate keypoint indices of one window
+  for (let ci = 0; ci < camList.length; ci++) {
+    const { img, P, grid: g } = camList[ci]
+    if (!g || !cellsOfCam[ci].length || !(g.maxX >= g.minX && g.maxY >= g.minY)) continue
+    const xy = g.xy
+    const gx0 = Math.floor(g.minX / gatePx),
+      gy0 = Math.floor(g.minY / gatePx)
+    const ngx = Math.floor(g.maxX / gatePx) - gx0 + 1,
+      ngy = Math.floor(g.maxY / gatePx) - gy0 + 1
+    const f = Math.max(1, Math.ceil(Math.sqrt((ngx * ngy) / GRID_MAX_CELLS)))
+    const nx = Math.floor((ngx - 1) / f) + 1,
+      ny = Math.floor((ngy - 1) / f) + 1
+    if (cellStart.length < nx * ny + 1) cellStart = new Int32Array(nx * ny + 1)
+    else cellStart.fill(0, 0, nx * ny + 1)
+    if (cellKp.length < g.n) cellKp = new Int32Array(g.n)
+    // Counting sort by cell: keypoints stay in index order within a cell.
+    const cellOfKp = (i) => {
+      const x = xy[2 * i],
+        y = xy[2 * i + 1]
+      // eslint-disable-next-line no-self-compare
+      if (x !== x || y !== y) return -1 // a missing keypoint
+      return Math.floor((Math.floor(x / gatePx) - gx0) / f) * ny + Math.floor((Math.floor(y / gatePx) - gy0) / f)
+    }
+    for (let i = 0; i < g.n; i++) {
+      const c = cellOfKp(i)
+      if (c >= 0) cellStart[c + 1]++
+    }
+    for (let c = 0; c < nx * ny; c++) cellStart[c + 1] += cellStart[c]
+    const fillAt = cellStart.slice(0, nx * ny)
+    for (let i = 0; i < g.n; i++) {
+      const c = cellOfKp(i)
+      if (c >= 0) cellKp[fillAt[c]++] = i
+    }
+    for (const cell of cellsOfCam[ci]) {
+      for (const j of ptsOfCell.get(cell)) {
+        const px = ptPos[3 * j],
+          py = ptPos[3 * j + 1],
+          pz = ptPos[3 * j + 2]
+        // projectWithDepth, inlined (every point × every camera: 100 M calls at 1,600
+        // cameras, and each allocated its result). Same arithmetic, same order.
+        const zc = P[6] * px + P[7] * py + P[8] * pz + P[11]
+        if (!(zc > 1e-9)) continue
+        const u = P[12] * ((P[0] * px + P[1] * py + P[2] * pz + P[9]) / zc) + P[14]
+        const v = P[13] * ((P[3] * px + P[4] * py + P[5] * pz + P[10]) / zc) + P[15]
+        if (u < g.minX || u > g.maxX || v < g.minY || v > g.maxY) continue
+        const p = ptId[j]
+        if (tracks.viewKp(p, img) >= 0) continue
+        const cx = Math.floor(u / gatePx),
+          cy = Math.floor(v / gatePx)
+        cand.length = 0
+        const x0 = Math.max(0, Math.floor((cx - 1 - gx0) / f)),
+          x1 = Math.min(nx - 1, Math.floor((cx + 1 - gx0) / f)),
+          y0 = Math.max(0, Math.floor((cy - 1 - gy0) / f)),
+          y1 = Math.min(ny - 1, Math.floor((cy + 1 - gy0) / f))
+        for (let bx = x0; bx <= x1; bx++) {
+          for (let by = y0; by <= y1; by++) {
+            for (let s = cellStart[bx * ny + by], e = cellStart[bx * ny + by + 1]; s < e; s++) {
+              const i = cellKp[s]
+              const kx = xy[2 * i],
+                ky = xy[2 * i + 1]
+              const gx = Math.floor(kx / gatePx),
+                gy = Math.floor(ky / gatePx)
+              if (gx < cx - 1 || gx > cx + 1 || gy < cy - 1 || gy > cy + 1) continue
+              if ((kx - u) ** 2 + (ky - v) ** 2 > r2) continue
+              cand.push(i)
+            }
           }
         }
-      }
-      if (!any) continue
-      stats.windows++
-      if (best <= tau2 && (second === Infinity || best <= ratio2 * second)) {
-        proposals.push({ p, img, kp: bestKp, d2: best })
+        if (!cand.length) continue
+        // A coarse cell holds several gate cells: put the candidates in gate-cell order.
+        if (f > 1 && cand.length > 1) cand.sort((a, b) => gateCellOrder(xy, a, b, gatePx))
+        const refs = ptRefs[j]
+        let best = Infinity,
+          second = Infinity,
+          bestKp = -1,
+          any = false
+        for (const i of cand) {
+          if (tracks.pointAt(img, i) >= 0) continue
+          const cd = descOf(img, i)
+          if (!cd) continue
+          any = true
+          // A candidate whose distance passes the runner-up's cannot change the best or
+          // the runner-up, so each reference stops once it is past both (dist2Below):
+          // `best` and `second` come out exact, and so does every proposal.
+          let d = Infinity
+          for (const ref of refs) d = Math.min(d, dist2Below(ref.arr, ref.off, cd.arr, cd.off, Math.min(d, second)))
+          if (d < best) {
+            second = best
+            best = d
+            bestKp = i
+          } else if (d < second) second = d
+        }
+        if (!any) continue
+        stats.windows++
+        if (best <= tau2 && (second === Infinity || best <= ratio2 * second)) {
+          proposals.push({ p, ci, img, kp: bestKp, d2: best })
+        }
       }
     }
-  })
+  }
   stats.proposals = proposals.length
 
   // Resolve best-first: a keypoint joins one point, a point gains one view per camera.
-  proposals.sort((a, b) => a.d2 - b.d2)
+  proposals.sort((a, b) => a.d2 - b.d2 || a.p - b.p || a.ci - b.ci)
   const claimed = new Map() // img → Set<kp>
   const extended = new Set()
   for (const pr of proposals) {
@@ -348,7 +453,10 @@ export function auditGuidedAdditions(additions, forEachObservation) {
   })
   const q = (arr, f) => {
     if (!arr.length) return null
-    const a = [...arr].sort((x, y) => x - y)
+    // A typed array sorts numerically and natively (a comparator sort of ~1 M residuals
+    // was a second on quarry), in the same order unless a residual is NaN.
+    let a = Float64Array.from(arr)
+    a = a.some(Number.isNaN) ? [...arr].sort((x, y) => x - y) : a.sort()
     return a[Math.min(a.length - 1, Math.floor(f * a.length))]
   }
   return {

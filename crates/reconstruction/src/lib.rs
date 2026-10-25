@@ -4,6 +4,7 @@
 //
 //   linalg  — math/geometry primitives        pose    — P3P / PnP / two-view pose
 //   bundle  — bundle adjustment               mvs     — dense PatchMatch stereo
+//   distort — Brown undistortion of many keypoints (the self-calibration fold)
 
 mod linalg;
 mod pose;
@@ -11,6 +12,7 @@ mod bundle;
 mod sparse_chol;
 mod mvs;
 mod par;
+mod distort;
 
 // The threaded build's pool (feature `threads`): JS awaits initThreadPool(n) once, before
 // the first call that uses it (src/core/sfm/reconstruction.js).
@@ -21,6 +23,7 @@ pub use wasm_bindgen_rayon::init_thread_pool;
 #[allow(unused_imports)] pub(crate) use pose::*;
 #[allow(unused_imports)] pub(crate) use bundle::*;
 #[allow(unused_imports)] pub(crate) use mvs::*;
+#[allow(unused_imports)] pub(crate) use distort::*;
 
 #[cfg(test)]
 mod tests {

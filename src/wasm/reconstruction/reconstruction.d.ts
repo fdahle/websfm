@@ -138,6 +138,17 @@ export function solve_pnp(pts_3d: Float32Array, pts_2d: Float32Array, fx: number
  */
 export function triangulate_dlt(pts_a: Float32Array, pts_b: Float32Array, p_a: Float32Array, p_b: Float32Array): Float32Array;
 
+/**
+ * Undistort the pixels of several images through one Brown bag.
+ *
+ * `xy`: every image's keypoints, [x0, y0, x1, y1, …], image after image; `starts`: the
+ * first point of each image, plus the total (n_images + 1 entries); `k`: [fx, fy, cx, cy]
+ * per image, the K each image's pixels are normalised about; `d`: [k1, k2, k3, k4, k5,
+ * k6, p1, p2]; `iters`: the Newton step cap. A point whose x is NaN (a missing
+ * keypoint) stays NaN. The images run on the thread pool in the threaded build.
+ */
+export function undistort_brown_pixels(xy: Float64Array, starts: Uint32Array, k: Float64Array, d: Float64Array, iters: number): Float64Array;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -147,6 +158,7 @@ export interface InitOutput {
     readonly recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly triangulate_dlt: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
+    readonly undistort_brown_pixels: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

@@ -279,6 +279,36 @@ export function triangulate_dlt(pts_a, pts_b, p_a, p_b) {
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v5;
 }
+
+/**
+ * Undistort the pixels of several images through one Brown bag.
+ *
+ * `xy`: every image's keypoints, [x0, y0, x1, y1, …], image after image; `starts`: the
+ * first point of each image, plus the total (n_images + 1 entries); `k`: [fx, fy, cx, cy]
+ * per image, the K each image's pixels are normalised about; `d`: [k1, k2, k3, k4, k5,
+ * k6, p1, p2]; `iters`: the Newton step cap. A point whose x is NaN (a missing
+ * keypoint) stays NaN. The images run on the thread pool in the threaded build.
+ * @param {Float64Array} xy
+ * @param {Uint32Array} starts
+ * @param {Float64Array} k
+ * @param {Float64Array} d
+ * @param {number} iters
+ * @returns {Float64Array}
+ */
+export function undistort_brown_pixels(xy, starts, k, d, iters) {
+    const ptr0 = passArrayF64ToWasm0(xy, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray32ToWasm0(starts, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF64ToWasm0(k, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArrayF64ToWasm0(d, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.undistort_brown_pixels(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, iters);
+    var v5 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+    return v5;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -301,6 +331,11 @@ function __wbg_get_imports() {
 function getArrayF32FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
+function getArrayF64FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
 }
 
 let cachedFloat32ArrayMemory0 = null;

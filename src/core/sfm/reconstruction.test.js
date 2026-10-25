@@ -13,7 +13,10 @@ import {
   resolveK,
   refineModeMask,
   baSolverFlat,
+  undistortBrownPixels,
+  loadReconstructionWasm,
 } from './reconstruction.js'
+import { undistortPixel } from './distortion.js'
 
 // The wasm glue defaults to fetch()ing its .wasm via a URL, which Node can't do.
 // Load the bytes ourselves and hand them to init(); the module-level `wasm` is a
@@ -741,5 +744,51 @@ describe('bundleAdjust', () => {
     expect(res.costBefore).toBeGreaterThan(1) // the unmodelled distortion really hurt
     for (const k of res.intrinsics) expect(Math.abs(k.k1 - k1True)).toBeLessThan(0.02)
     expect(res.costAfter).toBeLessThan(0.5)
+  })
+})
+
+describe('undistortBrownPixels', () => {
+  // The self-calibration fold takes either path (selfCalFold.js): the crate's result
+  // must be the JS undistortPixel's, bit for bit, or the run would depend on load order.
+  it('gives the bits of undistortPixel, image by image, and keeps missing points', async () => {
+    await loadReconstructionWasm()
+    const Ks = [
+      { fx: 3000, fy: 3010, cx: 2000, cy: 1500 },
+      { fx: 2400, fy: 2400, cx: 1990.5, cy: 1503.25 },
+    ]
+    const bags = [
+      { k1: -0.2, k2: 0.05, k3: -0.01 },
+      { k1: 0.12, k2: -0.03, k3: 0.004, p1: 1e-3, p2: -5e-4 },
+      { k1: -0.05, k2: 0.01, k3: 0, k4: 0.02, k5: -0.003, k6: 1e-4, p1: 0, p2: 2e-4 },
+    ]
+    let seed = 7
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
+    const counts = [500, 0, 333]
+    const total = counts.reduce((a, b) => a + b, 0)
+    const xy = new Float64Array(2 * total)
+    for (let i = 0; i < total; i++) {
+      xy[2 * i] = rnd() * 4000
+      xy[2 * i + 1] = rnd() * 3000
+    }
+    xy[2 * 10] = NaN
+    xy[2 * 10 + 1] = NaN
+    const starts = Uint32Array.of(0, counts[0], counts[0] + counts[1], total)
+    const imgK = [Ks[0], Ks[1], Ks[1]]
+    const k = Float64Array.from(imgK.flatMap(({ fx, fy, cx, cy }) => [fx, fy, cx, cy]))
+    for (const bag of bags) {
+      const out = undistortBrownPixels(xy, starts, k, bag)
+      expect(out).toBeInstanceOf(Float64Array)
+      expect(out.length).toBe(xy.length)
+      for (let im = 0; im < 3; im++) {
+        for (let i = starts[im]; i < starts[im + 1]; i++) {
+          if (Number.isNaN(xy[2 * i])) {
+            expect(Number.isNaN(out[2 * i]) && Number.isNaN(out[2 * i + 1])).toBe(true)
+            continue
+          }
+          const u = undistortPixel(xy[2 * i], xy[2 * i + 1], imgK[im], bag)
+          expect(Object.is(out[2 * i], u.x) && Object.is(out[2 * i + 1], u.y), `point ${i}`).toBe(true)
+        }
+      }
+    }
   })
 })
