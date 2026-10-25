@@ -10,8 +10,9 @@ maps for visibility. It therefore needs both depth maps and a DEM or mesh (a fit
 plane is available for genuinely flat scenes). Colour is read from the original photos
 at full resolution, so the orthophoto can be as sharp as the photos even when the depth
 maps were computed at a lower quality. The orthophoto is built in blocks of 2,048 ×
-2,048 pixels, each from only the photos that see it; photos are kept in memory across
-neighbouring blocks within the memory budget (Settings ▸ Compute). When they don't all
+2,048 pixels (1,024 for one too small to give every worker a block), each from only the
+photos that see it; photos are kept in memory across neighbouring blocks within the
+memory budget (Settings ▸ Compute). When they don't all
 fit, neighbouring blocks are built together in groups, so each photo is read once per
 pass for the whole group instead of once per block; the log names the groups and the
 reads it predicted. A very fine orthophoto may still decode some photos more than once.
