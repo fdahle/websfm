@@ -196,7 +196,9 @@ Notable changes to websfm. The format follows
 ### Performance
 - **Small orthophotos on several workers.** An orthophoto that fits in one or two
   2,048-pixel blocks is now cut into 1,024-pixel blocks, so more workers share it; the
-  same pixels. A 1,401 × 1,722 ortho of a 42-image block: 16.0 → 13.5 s.
+  same pixels. The graph-cut seamlines also price each seam edge once per change
+  instead of once per move. A 1,401 × 1,722 ortho of a 42-image block: 16.0 → 13.3 s
+  (the seam cut 3.5 → 3.0 s).
 - **Depth maps without a GPU, a little faster.** Each depth hypothesis now prepares its
   reference window once instead of once per source photo. A 42-image block at Medium on
   the CPU: 277 → 246 s, the same depth maps.

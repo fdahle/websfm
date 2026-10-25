@@ -129,6 +129,72 @@ describe('solveSeams', () => {
       }
     return sv
   }
+  // Many overlapping views in random rectangles: the energy reported for the labels
+  // must be the energy of those labels, priced here from the survey alone (the solver
+  // keeps per-edge costs across moves; a stale one would show up as a mismatch or as a
+  // move that raised the energy), and the moves must not end above the nadir labelling.
+  it('reports the true energy of its labels on many-view surveys', () => {
+    let st = 2024
+    const rand = () => (st = (st * 16807) % 2147483647) / 2147483647
+    let digest = 0,
+      moves = 0
+    for (let t = 0; t < 12; t++) {
+      const cw = 30 + Math.floor(rand() * 30),
+        ch = 20 + Math.floor(rand() * 30),
+        nL = 4 + Math.floor(rand() * 20)
+      const sv = createSeamSurvey({ f: 1, cw, ch })
+      const views = Array.from({ length: nL }, () => ({
+        x0: rand() * cw * 0.8,
+        y0: rand() * ch * 0.8,
+        w: 6 + rand() * cw * 0.6,
+        h: 6 + rand() * ch * 0.6,
+        cx: rand() * cw,
+        cy: rand() * ch,
+        c: [rand() * 225, rand() * 225, rand() * 225],
+      }))
+      for (let p = 0; p < cw * ch; p++) {
+        const c = p % cw,
+          r = (p - c) / cw
+        views.forEach((v, mi) => {
+          if (c < v.x0 || r < v.y0 || c > v.x0 + v.w || r > v.y0 + v.h) return
+          const [R, G, B] = v.c.map((x) => (x + rand() * 30) | 0)
+          addSeamCandidate(sv, p, mi, 1 + Math.hypot(c - v.cx, r - v.cy) / 40, R, G, B)
+        })
+      }
+      const { labels, summary } = solveSeams(sv)
+      const slot = (p, l) => {
+        for (let k = 0; k < sv.count[p]; k++) if (sv.img[p * sv.K + k] === l) return p * sv.K + k
+        return -1
+      }
+      const diff = (a, b) =>
+        a < 0 || b < 0 ? 150 : [0, 1, 2].reduce((s, i) => s + Math.abs(sv.rgb[3 * a + i] - sv.rgb[3 * b + i]), 0)
+      const V = (p, q, a, b) =>
+        a === b || a === NO_LABEL || b === NO_LABEL
+          ? 0
+          : 6 + diff(slot(p, a), slot(p, b)) + diff(slot(q, a), slot(q, b))
+      const D = (p, l) => {
+        const s0 = sv.score[p * sv.K]
+        const s = slot(p, l)
+        return s === p * sv.K ? 0 : Math.round(600 * (sv.score[s] / s0 - 1))
+      }
+      let e = 0
+      for (let p = 0; p < cw * ch; p++) {
+        if (labels[p] === NO_LABEL) continue
+        e += D(p, labels[p])
+        if ((p % cw) + 1 < cw) e += V(p, p + 1, labels[p], labels[p + 1])
+        if (p + cw < cw * ch) e += V(p, p + cw, labels[p], labels[p + cw])
+      }
+      expect(summary.energy).toBe(e)
+      expect(summary.energy).toBeLessThanOrEqual(summary.energyNadir)
+      moves += summary.accepted
+      for (let p = 0; p < labels.length; p++) digest = (Math.imul(digest, 31) + labels[p]) | 0
+    }
+    // The labels of the solver before it kept per-edge costs (2026-10-25): the moves
+    // must be the same, not only as good.
+    expect(moves).toBeGreaterThan(30)
+    expect(digest).toBe(-1782383168)
+  })
+
   it('keeps the nadir partition where the photos agree', () => {
     const w = 20,
       h = 6,

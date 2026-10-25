@@ -136,6 +136,9 @@ export function solveSeams(sv, gains = null, weights = {}) {
     if (a === b || a === NO_LABEL || b === NO_LABEL) return 0
     return step + diff(slotOf(p, a), slotOf(p, b)) + diff(slotOf(q, a), slotOf(q, b))
   }
+  // V from slots already looked up: the slots of a and b at p, then at q.
+  const Vs = (a, b, pa, pb, qa, qb) =>
+    a === b || a === NO_LABEL || b === NO_LABEL ? 0 : step + diff(pa, pb) + diff(qa, qb)
   const D = (p, l) => data[slotOf(p, l)]
 
   const labels = new Uint16Array(n).fill(NO_LABEL)
@@ -145,6 +148,24 @@ export function solveSeams(sv, gains = null, weights = {}) {
     for (let k = 0; k < count[p]; k++) nLabels = Math.max(nLabels, img[p * K + k] + 1)
   }
   const init = labels.slice()
+  // The expansions below re-price the same edges under unchanged labels again and again:
+  // each cell's slot of its own label, and each edge's V under the current labels
+  // (`edgeV`, NaN once a move changes an end), are kept instead of looked up. The costs
+  // are integers, so taking them from here changes no sum.
+  const curSlot = new Int32Array(n).fill(-1)
+  for (let p = 0; p < n; p++) if (count[p]) curSlot[p] = p * K
+  const edgeV = new Float64Array(2 * n).fill(NaN) // 2p: p ↔ p + 1, 2p + 1: p ↔ p + cw
+  const edgeOf = (p, q) => (q === p + 1 ? 2 * p : q === p - 1 ? 2 * q : q > p ? 2 * p + 1 : 2 * q + 1)
+  // `fp`, `fq`: the labels the edge is priced under — the current ones, which during a
+  // tentative move (below) are the ones from before it, as are curSlot's.
+  const Vcur = (p, q, fp = labels[p], fq = labels[q]) => {
+    const e = edgeOf(p, q)
+    let v = edgeV[e]
+    // eslint-disable-next-line no-self-compare
+    if (v !== v) v = edgeV[e] = Vs(fp, fq, curSlot[p], slotOf(p, fq), slotOf(q, fp), curSlot[q])
+    return v
+  }
+  const slotA = new Int32Array(n).fill(-1) // the expanding label's slot, inside its box
   // Each label's candidate bounding box.
   const box = new Int32Array(4 * nLabels)
   for (let l = 0; l < nLabels; l++) box.set([cw, ch, -1, -1], 4 * l)
@@ -200,7 +221,9 @@ export function solveSeams(sv, gains = null, weights = {}) {
       for (let r = y0; r <= y1; r++)
         for (let c = x0; c <= x1; c++) {
           const p = r * cw + c
-          const v = labels[p] !== a && slotOf(p, a) >= 0
+          const sa = slotOf(p, a)
+          slotA[p] = sa
+          const v = labels[p] !== a && sa >= 0
           isVar[p] = v ? 1 : 0
           if (v) nVar++
         }
@@ -213,7 +236,9 @@ export function solveSeams(sv, gains = null, weights = {}) {
           if (!isVar[p]) continue
           const fp = labels[p],
             i = gridNode(g, c - x0, r - y0)
-          let t = D(p, a) - D(p, fp) // E(1) − E(0): source minus sink
+          const pa = slotA[p],
+            pf = curSlot[p]
+          let t = data[pa] - data[pf] // D(p, a) − D(p, fp) = E(1) − E(0): source minus sink
           // Right and down neighbours pair with p here; left and up ones, where they are
           // variables too, already paired with p as their right / down neighbour.
           for (let d = 0; d < 4; d++) {
@@ -222,16 +247,20 @@ export function solveSeams(sv, gains = null, weights = {}) {
             if (qc < 0 || qr < 0 || qc >= cw || qr >= ch) continue
             const q = qr * cw + qc,
               fq = labels[q]
-            const qVar = qc >= x0 && qc <= x1 && qr >= y0 && qr <= y1 && isVar[q]
+            const inBox = qc >= x0 && qc <= x1 && qr >= y0 && qr <= y1
+            const qVar = inBox && isVar[q]
+            // A cell outside a's box has no candidate a.
+            const qa = inBox ? slotA[q] : -1
+            const Caq = Vs(a, fq, pa, slotOf(p, fq), qa, curSlot[q]) // V(p, q, a, fq)
             if (!qVar) {
-              t += V(p, q, a, fq) - V(p, q, fp, fq)
+              t += Caq - Vcur(p, q)
               continue
             }
             if (d === 1 || d === 3) continue
             // E(x_p, x_q): A = E(0,0), B = E(0,1), C = E(1,0), D = E(1,1) = 0.
-            let A = V(p, q, fp, fq)
-            const B = V(p, q, fp, a),
-              C = V(p, q, a, fq)
+            let A = Vcur(p, q)
+            const B = Vs(fp, a, pf, pa, slotOf(q, fp), qa), // V(p, q, fp, a)
+              C = Caq
             if (A > B + C) A = B + C // not submodular here: truncate (checked below)
             t += C - A
             tr[gridNode(g, qc - x0, qr - y0)] -= C
@@ -253,7 +282,7 @@ export function solveSeams(sv, gains = null, weights = {}) {
         }
       for (let k = 0; k < nCh; k++) {
         const p = changed[k]
-        dE += D(p, a) - D(p, oldLab[p])
+        dE += data[slotA[p]] - data[curSlot[p]] // D(p, a) − D(p, old label)
         labels[p] = a
       }
       for (let k = 0; k < nCh; k++) {
@@ -265,15 +294,27 @@ export function solveSeams(sv, gains = null, weights = {}) {
             qr = r + (d === 2 ? 1 : d === 3 ? -1 : 0)
           if (qc < 0 || qr < 0 || qc >= cw || qr >= ch) continue
           const q = qr * cw + qc
-          const qChanged = labels[q] === a && isVar[q] && qc >= x0 && qc <= x1 && qr >= y0 && qr <= y1
+          const inBox = qc >= x0 && qc <= x1 && qr >= y0 && qr <= y1
+          const qChanged = labels[q] === a && isVar[q] && inBox
           if (qChanged && q < p) continue // counted from q
+          // V(p, q, a, labels[q]): 0 when q moved to a too; the old edge's V from before the
+          // move (no edge is re-priced until a move is kept).
           const oq = qChanged ? oldLab[q] : labels[q]
-          dE += V(p, q, a, labels[q]) - V(p, q, oldLab[p], oq)
+          const now = qChanged ? 0 : Vs(a, labels[q], slotA[p], slotOf(p, labels[q]), inBox ? slotA[q] : -1, curSlot[q])
+          dE += now - Vcur(p, q, oldLab[p], oq)
         }
       }
       if (nCh && dE < 0) {
         accepted++
         moved = true
+        for (let k = 0; k < nCh; k++) {
+          const p = changed[k],
+            c = p % cw
+          curSlot[p] = slotA[p]
+          edgeV[2 * p] = edgeV[2 * p + 1] = NaN
+          if (c > 0) edgeV[2 * (p - 1)] = NaN
+          if (p >= cw) edgeV[2 * (p - cw) + 1] = NaN
+        }
       } else {
         if (nCh) rejected++
         for (let k = 0; k < nCh; k++) labels[changed[k]] = oldLab[changed[k]]
