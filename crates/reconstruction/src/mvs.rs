@@ -192,11 +192,89 @@ pub(crate) fn agg_cost(
     u: usize, v: usize, depth: f64, n: &V3, radius: i32,
 ) -> f64 {
     if depth <= 0.0 { return 2.0; }
+    // What plane_cost computes before it reads the source — the plane, and per window
+    // sample the reference ray, n·ray and the reference value — is the same for every
+    // source, so it is computed once here, in the same expressions, and each source
+    // runs plane_cost's per-sample loop on it (window_cost): the same costs, bit for bit
+    // (plane_cost stays as the reference the tests compare against).
+    let pu = (u as f64 - rcx) / rfx;
+    let pv = (v as f64 - rcy) / rfy;
+    let p = [pu * depth, pv * depth, depth];
+    let d = dot3(n, &p);
+    // plane_cost's degenerate plane: every source scores 2.0, so the mean of the best is 2.0.
+    if d.abs() < 1e-9 { return 2.0; }
+    let mut win = [WinSample::default(); 121];
+    let mut m = 0usize;
+    let mut y = -radius;
+    while y <= radius {
+        let mut x = -radius;
+        while x <= radius {
+            let xi = u as f64 + x as f64;
+            let yi = v as f64 + y as f64;
+            if !(xi < 0.0 || yi < 0.0 || xi >= rw as f64 || yi >= rh as f64) {
+                let ray = [(xi - rcx) / rfx, (yi - rcy) / rfy, 1.0];
+                let nr = dot3(n, &ray);
+                win[m] = WinSample { ray, nr, r0: refimg[yi as usize * rw + xi as usize] as f64 };
+                m += 1;
+            }
+            x += 1;
+        }
+        y += 1;
+    }
+    let win = &win[..m];
     // Retain only the lowest requested K costs as we visit the sources. K is at
     // most MAX_SOURCES by the public worker contract; unlike collect()+sort(), this
     // performs no allocation in the innermost PatchMatch scoring loop.
-    mean_best_costs(srcs.iter().map(|src|
-        plane_cost(refimg, rw, rh, rfx, rfy, rcx, rcy, src, u, v, depth, n, radius)), best_k)
+    mean_best_costs(srcs.iter().map(|src| window_cost(src, win, d)), best_k)
+}
+
+// One reference window sample, as plane_cost forms it: the ray, n·ray, the value.
+#[derive(Clone, Copy, Default)]
+struct WinSample { ray: V3, nr: f64, r0: f64 }
+
+// plane_cost's per-sample loop over a precomputed window (agg_cost), same arithmetic.
+fn window_cost(src: &SrcView, win: &[WinSample], d: f64) -> f64 {
+    let mut sum_r = 0.0; let mut sum_s = 0.0;
+    let mut sum_rr = 0.0; let mut sum_ss = 0.0; let mut sum_rs = 0.0;
+    let mut cnt = 0.0;
+    let mut k_r = 0.0; let mut k_s = 0.0;
+    for w in win {
+        let (ray, nr) = (&w.ray, w.nr);
+        let xs = [
+            src.r[0][0]*ray[0] + src.r[0][1]*ray[1] + src.r[0][2]*ray[2] + src.t[0]*nr/d,
+            src.r[1][0]*ray[0] + src.r[1][1]*ray[1] + src.r[1][2]*ray[2] + src.t[1]*nr/d,
+            src.r[2][0]*ray[0] + src.r[2][1]*ray[1] + src.r[2][2]*ray[2] + src.t[2]*nr/d,
+        ];
+        if xs[2].abs() < 1e-9 { continue; }
+        let su = src.fx * (xs[0] / xs[2]) + src.cx;
+        let sv_ = src.fy * (xs[1] / xs[2]) + src.cy;
+        if su < 0.0 || sv_ < 0.0 || su >= src.w as f64 || sv_ >= src.h as f64 {
+            return INVALID;
+        }
+        if !src.mask.is_empty() {
+            let mi = sv_ as usize * src.w + su as usize;
+            if mi < src.mask.len() && src.mask[mi] != 0 { return INVALID; }
+        }
+        let r0 = w.r0;
+        let s0 = sample_gray(src.gray, src.w, src.h, su, sv_);
+        if cnt == 0.0 { k_r = r0; k_s = s0; }
+        let rval = r0 - k_r;
+        let sval = s0 - k_s;
+        sum_r += rval; sum_s += sval;
+        sum_rr += rval*rval; sum_ss += sval*sval; sum_rs += rval*sval;
+        cnt += 1.0;
+    }
+    if cnt < 4.0 { return INVALID; }
+    let mean_r = sum_r / cnt;
+    let mean_s = sum_s / cnt;
+    let var_r = sum_rr / cnt - mean_r*mean_r;
+    let var_s = sum_ss / cnt - mean_s*mean_s;
+    let cov = sum_rs / cnt - mean_r*mean_s;
+    if var_r < VAR_FLOOR { return INVALID; }
+    if var_s < VAR_FLOOR { return 2.0; }
+    let denom = (var_r * var_s).sqrt();
+    let ncc = (cov / denom).clamp(-1.0, 1.0);
+    1.0 - ncc
 }
 
 // Depth-proposal half-span as a fraction of the current depth at refinement scale 1
@@ -413,6 +491,49 @@ mod tests {
 
     fn ramp() -> Vec<u8> {
         (0..256).map(|i| (((i % 16) * 7 + (i / 16) * 13) % 256) as u8).collect()
+    }
+
+    // agg_cost precomputes the window once per hypothesis; it must give exactly what
+    // scoring each source with plane_cost gives, out-of-bounds warps, masks, flat
+    // patches and degenerate planes included.
+    #[test]
+    fn agg_cost_is_plane_cost_per_source_bit_for_bit() {
+        let mut st = 0x9E3779B9u32;
+        let mut rnd = move || { st ^= st << 13; st ^= st >> 17; st ^= st << 5; st as f64 / u32::MAX as f64 };
+        let (w, h) = (40usize, 30usize);
+        let imgs: Vec<Vec<u8>> = (0..4).map(|k| (0..w * h).map(|i| {
+            let (x, y) = ((i % w) as f64, (i / w) as f64);
+            (128.0 + 100.0 * (x * 0.37 + k as f64).sin() * (y * 0.23).cos()) as u8
+        }).collect()).collect();
+        let flat = vec![200u8; w * h];
+        let mask: Vec<u8> = (0..w * h).map(|i| (i % w < 3) as u8).collect();
+        let rot = |a: f64| [[a.cos(), 0.0, a.sin()], [0.0, 1.0, 0.0], [-a.sin(), 0.0, a.cos()]];
+        let srcs = vec![
+            SrcView { gray: &imgs[1], mask: &[], w, h, fx: 30.0, fy: 31.0, cx: 20.0, cy: 15.0, r: rot(0.05), t: [0.3, 0.0, 0.02] },
+            SrcView { gray: &imgs[2], mask: &mask, w, h, fx: 29.0, fy: 29.0, cx: 19.5, cy: 15.5, r: rot(-0.08), t: [-0.4, 0.1, 0.0] },
+            SrcView { gray: &flat, mask: &[], w, h, fx: 30.0, fy: 30.0, cx: 20.0, cy: 15.0, r: rot(0.0), t: [0.1, 0.0, 0.0] },
+            SrcView { gray: &imgs[3], mask: &[], w, h, fx: 30.0, fy: 30.0, cx: 20.0, cy: 15.0, r: rot(0.3), t: [2.0, 0.0, 0.5] },
+        ];
+        let refimg = &imgs[0];
+        let mut n_valid = 0;
+        for _ in 0..4000 {
+            let (u, v) = ((rnd() * w as f64) as usize, (rnd() * h as f64) as usize);
+            let depth = 0.5 + rnd() * 8.0;
+            let nrm = normalize3(&[rnd() - 0.5, rnd() - 0.5, -0.2 - rnd()]);
+            let radius = 1 + (rnd() * 4.99) as i32;
+            for bk in [1usize, 2, 3] {
+                let got = agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, bk, u, v, depth, &nrm, radius);
+                let want = mean_best_costs(srcs.iter().map(|s|
+                    plane_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, s, u, v, depth, &nrm, radius)), bk);
+                assert_eq!(got.to_bits(), want.to_bits(), "u {u} v {v} depth {depth} n {nrm:?} r {radius} k {bk}");
+                if got < 2.0 { n_valid += 1; }
+            }
+        }
+        assert!(n_valid > 1000, "the scene must exercise real correlations ({n_valid})");
+        // The degenerate plane (n ⟂ the pixel's ray).
+        let nrm = normalize3(&[1.0, 0.0, 0.0]);
+        let (u, v) = (20usize, 15usize); // on the axis: the ray is (0, 0, 1)
+        assert_eq!(agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, 2, u, v, 3.0, &nrm, 2), 2.0);
     }
 
     #[test]
