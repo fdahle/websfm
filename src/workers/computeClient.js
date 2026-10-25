@@ -3,7 +3,7 @@
 // return shapes — so the stores only had to swap their import. The heavy work now
 // runs off the main thread, keeping the UI responsive during detect/match runs.
 //
-// A worker pool is provisioned (round-robin dispatch). `matchAll` now dispatches
+// A worker pool is provisioned (each call to the least busy worker). `matchAll` now dispatches
 // up to POOL_SIZE pairs concurrently (the match store is concurrency-safe — it
 // mutates in place + triggerRefs rather than swapping the whole Map). The big
 // single-call ops (reconstruct/dense/products) still use one worker at a time.
@@ -115,18 +115,32 @@ export function configureWorkerPoolSize(value) {
   return true
 }
 
+// The pool slot for an unpinned call: the worker with the fewest calls in flight, the
+// first such from the round-robin position on (so an idle pool still takes turns),
+// skipping `avoid` when any other worker is there. Round-robin alone sent a call to a
+// worker still busy with a long one while another stood idle: quarry's 1,909 CPU match
+// pairs kept the pool's 8 workers busy only 61 % of the time.
+function leastLoadedSlot(pool, avoid) {
+  const inFlight = new Map(pool.map((w) => [w, 0]))
+  for (const { worker } of pending.values()) if (inFlight.has(worker)) inFlight.set(worker, inFlight.get(worker) + 1)
+  const skip = avoid != null && pool.length > 1 ? avoid % pool.length : -1
+  const from = rr++ % pool.length
+  let best = -1
+  for (let k = 0; k < pool.length; k++) {
+    const slot = (from + k) % pool.length
+    if (slot === skip) continue
+    if (best < 0 || inFlight.get(pool[slot]) < inFlight.get(pool[best])) best = slot
+  }
+  return best
+}
+
 function call(op, args, { transfer = [], onEvent, onTiming, worker: pinned, avoid } = {}) {
   const pool = getPool()
   // `pinned` forces a specific worker (learned backends load a heavy per-worker
-  // runtime once — see detectKeypoints); otherwise round-robin across the pool,
-  // skipping `avoid` (a worker busy with pinned work, e.g. GPU matching) when there
-  // is any other worker to use.
-  let slot
-  if (pinned != null) slot = pinned % pool.length
-  else {
-    slot = rr++ % pool.length
-    if (avoid != null && pool.length > 1 && slot === avoid % pool.length) slot = rr++ % pool.length
-  }
+  // runtime once — see detectKeypoints); otherwise the least busy worker, skipping
+  // `avoid` (a worker busy with pinned work, e.g. GPU matching) when there is any
+  // other worker to use.
+  const slot = pinned != null ? pinned % pool.length : leastLoadedSlot(pool, avoid)
   const worker = pool[slot]
   const id = nextId++
   return new Promise((resolve, reject) => {
@@ -163,13 +177,13 @@ export function detectKeypoints(url, options = {}, { onLog } = {}) {
 }
 
 // Image sharpness/exposure score for one image (Tools ▸ Images ▾ ▸ Image quality).
-// Round-robin across the pool; `mask` is the stored mask dataUrl or null.
+// Spread across the pool; `mask` is the stored mask dataUrl or null.
 export function imageQuality(url, options = {}) {
   return call('imageQuality', [url, { ...options }])
 }
 
 // Cut ZNCC templates out of the reference film scan (F4 auto-measurement). Once
-// per run; round-robin is fine (no heavy per-worker runtime to warm up).
+// per run; any worker will do (no heavy per-worker runtime to warm up).
 export function prepareFiducialTemplates(url, obs, options = {}, { onLog } = {}) {
   return call('prepareFiducialTemplates', [url, obs, options], {
     onEvent: onLog
@@ -247,8 +261,8 @@ export function matchDescriptors(descA, descB, options = {}, { onTiming, avoidWo
 
 // WebGPU brute-force matching (workers/gpu/matchGpu.js). All three ops pin ONE
 // worker: WebGPU gives every worker its own device, and the per-run descriptor
-// cache lives in that device's memory — round-robin would hold POOL_SIZE copies of
-// it (~0.5 GB each on a 128-image run). Other work passes `avoidWorker` to keep off
+// cache lives in that device's memory — spread over the pool, it would be held in
+// POOL_SIZE copies (~0.5 GB each on a 128-image run). Other work passes `avoidWorker` to keep off
 // this slot while a GPU run is active. No transfer: descriptors are cloned so the
 // caller's per-run cache stays usable for a resend or a WASM fallback.
 export const GPU_MATCH_WORKER = 0
@@ -353,7 +367,7 @@ export function segmentForget(uuid = null) {
 }
 
 // TIFF decode + re-encode (geotiff, ~seconds for a large raster) — dispatched
-// round-robin like detect/match so a batch of TIFFs transcodes in parallel
+// over the pool like detect/match so a batch of TIFFs transcodes in parallel
 // across the pool instead of blocking the main thread one file at a time.
 // `onThumbnail(blob, width, height)` fires once decode finishes, well before
 // the full-res result resolves, so callers can show a preview early.

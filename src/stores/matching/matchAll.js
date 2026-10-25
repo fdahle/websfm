@@ -354,7 +354,7 @@ export function createMatchAll({
     // concurrent session.run() on one wasm session deadlock — the old 7-way freeze).
     // Parallel drain loops would all pile onto worker 0 and wedge it, so dispatch
     // LightGlue serially; serial also keeps the progress bar honest. Brute-force
-    // keeps the full pool (each matchPair issues its own round-robin worker calls).
+    // keeps the full pool (each matchPair issues its own pool worker calls).
     const concurrency = settings.matcher === 'lightglue' ? 1 : Math.max(1, Math.min(POOL_SIZE, pairs.length))
     // Log the descriptor-matching knobs so a run's settings are auditable — in
     // particular whether cross-check (mutual nearest neighbour) is active, which
@@ -464,7 +464,7 @@ export function createMatchAll({
     const descCache = createDescriptorCache({ pairs, budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20 })
     // Concurrency-limited dispatch: `concurrency` drain loops pull from a shared
     // cursor so up to POOL_SIZE pairs are matched at once (each matchPair issues its
-    // own round-robin worker calls). Cancellation is cooperative — stop pulling.
+    // own pool worker calls). Cancellation is cooperative — stop pulling.
     let cursor = 0
     let cancelled = false
     const drain = async () => {

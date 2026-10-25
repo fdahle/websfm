@@ -194,6 +194,9 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Matching without a GPU uses the whole worker pool.** Each image pair now goes to an
+  idle worker instead of the next one in turn, which could still be busy with a slower
+  pair. Quarry (347 images, 1,909 pairs, WASM matcher): 429 → 297 s, the same matches.
 - **Sparse reconstruction outside bundle adjustment.** The model's reprojection
   statistics, the self-calibration fit and guided track extension stopped allocating per
   observation, and guided extension only tries the cameras that can see a point. Each
