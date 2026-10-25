@@ -479,6 +479,19 @@ describe('blocks in groups (P6)', () => {
     })
   }
 
+  // A split ortho may halve its block side (ortho.js orthoBlockSize): the same ortho.
+  for (const v of variants) {
+    it(`computes the same ortho in smaller blocks (${v.blend}${v.seamBlend ? ` · ${v.seamBlend}` : ''})`, async () => {
+      const surface = plane(40, 24)
+      const one = await run(surface, views(), { ...v, blockSize: 64, fillRadius: 1 }, { loadImage: photos(views()) })
+      for (const B of [8, 12, 20]) {
+        const small = await run(surface, views(), { ...v, blockSize: B, fillRadius: 1 }, { loadImage: photos(views()) })
+        expect(Buffer.from(small.rgba).equals(Buffer.from(one.rgba))).toBe(true)
+        expect(Buffer.from(small.labels).equals(Buffer.from(one.labels))).toBe(true)
+      }
+    })
+  }
+
   // Photos packed to RGB (the products worker's loader): the same ortho as from RGBA.
   for (const v of variants) {
     it(`computes the same ortho from packed RGB photos (${v.blend}${v.seamBlend ? ` · ${v.seamBlend}` : ''})`, async () => {

@@ -12,7 +12,12 @@ import {
   fillEnclosedGaps,
   createSupportOverview,
 } from '../../core/products/dem.js'
-import { orthorectifyTiled, orthoTiledWorkingBytes, orthoMapPxPerCell, ORTHO_BLOCK } from '../../core/products/ortho.js'
+import {
+  orthorectifyTiled,
+  orthoTiledWorkingBytes,
+  orthoMapPxPerCell,
+  orthoBlockSize,
+} from '../../core/products/ortho.js'
 import { orthoCacheLog } from '../../core/products/orthoPlan.js'
 import { MAX_SEAM_CELLS } from '../../core/products/orthoMosaic.js'
 import { GAIN_MIN, GAIN_MAX } from '../../core/products/colourGains.js'
@@ -569,7 +574,11 @@ export function makeProductsOps({ rasterize } = {}) {
   // memory plan, the loaders. `shares`: how many workers split the blocks (each gets
   // that share of the budget for its block planes, cache and photos in flight).
   // `quiet`: no log lines (a share repeats what the plan said).
-  async function orthoSetup(input, emit, { shares = 1, quiet = false } = {}) {
+  async function orthoSetup(
+    input,
+    emit,
+    { shares = 1, quiet = false, blockSize: fixedBlock = null, splitInto = 1 } = {},
+  ) {
     const say = quiet ? () => {} : (m, l = 'info') => emit('log', [m, l, 'Products'])
     const { surface, maps, streamed = false, settings = {} } = input
     // A block-built DEM surface (SAT-3) is read from its COG, as fine as the memory
@@ -615,9 +624,13 @@ export function makeProductsOps({ rasterize } = {}) {
     // overview level and preview, and at least one map with its decoded photo. What
     // the budget leaves after the first two is the map/photo cache.
     const { width, height } = geom
+    // The plan picks the block side for the workers it may split over (`splitInto`); a
+    // share runs with the plan's (`blockSize`).
+    const blockSize = fixedBlock ?? orthoBlockSize(width, height, splitInto)
     const blockBytes = orthoTiledWorkingBytes({
       width,
       height,
+      blockSize,
       blend: settings.blend,
       fillRadius: settings.fillRadius ?? 2,
       seamWidth: settings.seamWidth ?? 0,
@@ -651,7 +664,7 @@ export function makeProductsOps({ rasterize } = {}) {
     const fixed = blockBytes + pyramidBytes
     if (fixed + maxEntry > budget) {
       throw new Error(
-        `the orthophoto needs ~${formatBytes(fixed + maxEntry)} at once (one ${ORTHO_BLOCK}² block ` +
+        `the orthophoto needs ~${formatBytes(fixed + maxEntry)} at once (one ${blockSize}² block ` +
           `${formatBytes(blockBytes)}, overviews ${formatBytes(pyramidBytes)}, one depth map + photo ${formatBytes(maxEntry)}) ` +
           `and the memory budget is ${formatBytes(budget)} — raise it in Settings ▸ Compute, or build at a coarser GSD`,
       )
@@ -704,6 +717,7 @@ export function makeProductsOps({ rasterize } = {}) {
       geom,
       width,
       height,
+      blockSize,
       blockBytes,
       pyramidBytes,
       maxCacheEntry,
@@ -723,7 +737,7 @@ export function makeProductsOps({ rasterize } = {}) {
   // working planes from the cache.
   const orthoTiledOpts = (ctx) => ({
     ...ctx.settings,
-    blockSize: ORTHO_BLOCK,
+    blockSize: ctx.blockSize,
     cacheBytes: ctx.cacheBytes,
     mapsResident: !ctx.streamed,
     photoPrefetch: ctx.photoPrefetch,
@@ -752,7 +766,7 @@ export function makeProductsOps({ rasterize } = {}) {
         tiepoint: [0, 0, 0, ctx.geom.originX, ctx.geom.originY, 0],
         geoKeys: geoKeysForEpsg(tags.code, tags.geographic),
       },
-      { blockSize: ORTHO_BLOCK, compress: deflateTile, previewMaxDim: PREVIEW_MAX },
+      { blockSize: ctx.blockSize, compress: deflateTile, previewMaxDim: PREVIEW_MAX },
     )
   }
   const addOrthoBlock = async (builder, settings, b) => {
@@ -788,10 +802,10 @@ export function makeProductsOps({ rasterize } = {}) {
         'Products',
       ])
     }
-    const blocksX = Math.ceil(width / ORTHO_BLOCK),
-      blocksY = Math.ceil(height / ORTHO_BLOCK)
+    const blocksX = Math.ceil(width / ctx.blockSize),
+      blocksY = Math.ceil(height / ctx.blockSize)
     emit('log', [
-      `Ortho: ${pluralize(res.blocks, 'block')} of ${ORTHO_BLOCK}² (${blocksX}×${blocksY}), ${pluralize(res.visits, 'map visit')} ` +
+      `Ortho: ${pluralize(res.blocks, 'block')} of ${ctx.blockSize}² (${blocksX}×${blocksY}), ${pluralize(res.visits, 'map visit')} ` +
         `after culling (of ${res.blocks * maps.length}); ${pluralize(res.mapLoads, 'map read')}, ${pluralize(res.photoLoads, 'photo decode')}, ` +
         `${pluralize(res.cacheHits, 'cache hit')} in a ${Number.isFinite(res.grouping?.cacheBytes) ? formatBytes(res.grouping.cacheBytes) : 'default'} cache` +
         `${workers > 1 ? ` per worker, ${workers} workers` : ''}`,
@@ -1025,7 +1039,10 @@ export function makeProductsOps({ rasterize } = {}) {
   // pass: fewer workers then, each with more.
   const ORTHO_SHARE_MIN_ENTRIES = 6
   async function orthoPlan([input], { emit }) {
-    const ctx = await orthoSetup(input, emit, { quiet: false })
+    const ctx = await orthoSetup(input, emit, {
+      quiet: false,
+      splitInto: Math.max(1, input.settings?.orthoShares ?? 1),
+    })
     // Every worker count that leaves each its minimum cache; the plan picks the one with
     // the least predicted time (ortho.js planShares).
     const most = Math.max(1, input.settings?.orthoShares ?? 1)
@@ -1085,6 +1102,8 @@ export function makeProductsOps({ rasterize } = {}) {
       'Products',
     ])
     // Fewer groups than workers: as many shares as groups.
+    // The shares build the plan's blocks: they set up with its block side.
+    plan.blockSize = ctx.blockSize
     return { result: { plan, shares, workers: want, width: ctx.width, height: ctx.height, cacheBytes: ctx.cacheBytes } }
   }
 
@@ -1094,7 +1113,7 @@ export function makeProductsOps({ rasterize } = {}) {
   // `claims`: the run's claim table (shared memory, one slot per group), when the page
   // can share memory: a group of this list that another worker claimed first is skipped.
   async function orthoShare([input, plan, groupIndices, shares, claims = null], { emit }) {
-    const ctx = await orthoSetup(input, emit, { shares, quiet: true })
+    const ctx = await orthoSetup(input, emit, { shares, quiet: true, blockSize: plan.blockSize })
     const res = await orthorectifyTiled(
       ctx.built.grid,
       ctx.geom,

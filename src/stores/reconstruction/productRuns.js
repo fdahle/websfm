@@ -509,7 +509,8 @@ export function createProductRuns({
       { ...input, settings: { ...input.settings, orthoShares: want } },
       { onLog, worker: 0, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, PLAN * (f ?? 0), 'plan') },
     )
-    const nBlocks = Math.ceil(width / ORTHO_BLOCK) * Math.ceil(height / ORTHO_BLOCK)
+    const block = plan.blockSize ?? ORTHO_BLOCK
+    const nBlocks = Math.ceil(width / block) * Math.ceil(height / block)
     // The log's progress lines, as one worker's run gives them (utils/blockProgress.js).
     const pacer = createLogPacer()
     const heartbeat = createStepProgress({ prefix: 'Ortho: ', unit: 'map visit', pacer })

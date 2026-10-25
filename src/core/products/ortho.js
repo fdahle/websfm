@@ -522,6 +522,18 @@ function countColoured(rgba, w, cx, cy, cw, ch) {
 // ahead (the streamed-fusion precedent). Only the policy may change; the visit order
 // may not, or 'average' sums would add in another order.
 export const ORTHO_BLOCK = 2048
+// A split ortho's block side (workers/ops/products.js orthoPlan): ORTHO_BLOCK, halved
+// while the grid has fewer blocks than workers that could take them, down to
+// ORTHO_BLOCK_MIN. The workers share out blocks, so a small ortho in one 2,048² block ran
+// on one of them. Every block computes the cells it would in a larger one (its halo
+// holds what its seams and fills read), so the ortho is the same bits at any block size
+// (orthoMosaic.test.js); a smaller block costs more halo and more map visits.
+export const ORTHO_BLOCK_MIN = 1024
+export function orthoBlockSize(width, height, shares = 1) {
+  let b = ORTHO_BLOCK
+  while (b > ORTHO_BLOCK_MIN && Math.ceil(width / b) * Math.ceil(height / b) < shares) b /= 2
+  return b
+}
 
 // The largest block window: core + halo on both sides, plus up to align − 1 cells per
 // side where a multiband window rounds out to its pyramid lattice.

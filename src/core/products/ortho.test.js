@@ -6,6 +6,8 @@ import {
   orthorectifyStreamed,
   affineToSfm,
   orthoCostCeiling,
+  orthoBlockSize,
+  ORTHO_BLOCK,
 } from './ortho.js'
 import { NO_LABEL } from './orthoWindow.js'
 import { filterDepthMapsGeometric } from '../dense/geomFilter.js'
@@ -330,5 +332,14 @@ describe('orthoCostCeiling', () => {
     for (const P of pts) {
       expect(sampleOrtho(P, [m], { maxCost: ceiling })).toEqual(sampleOrtho(P, [m], { maxCost: Infinity }))
     }
+  })
+})
+
+describe('orthoBlockSize', () => {
+  it('halves the block while a split has more workers than blocks, down to the floor', () => {
+    expect(orthoBlockSize(1401, 1722, 1)).toBe(ORTHO_BLOCK)
+    expect(orthoBlockSize(1401, 1722, 7)).toBe(1024) // 4 blocks, the floor
+    expect(orthoBlockSize(5000, 5000, 7)).toBe(ORTHO_BLOCK) // 9 blocks already
+    expect(orthoBlockSize(3000, 1500, 4)).toBe(1024) // 2 → 6
   })
 })
