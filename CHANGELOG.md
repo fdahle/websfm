@@ -194,6 +194,10 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Faster meshes.** The surface solve's screening terms skip the products that are
+  always zero, the same mesh in less time. A 42-image block (61 k samples, depth 8):
+  Build Mesh 22.5 → 18.0 s; a 1 M-sample depth-10 terrain: solve 384 → 244 s, its
+  coarsest levels 32 → 4.7 s each. The solver's coefficients are bit for bit the same.
 - **Matching without a GPU uses the whole worker pool.** Each image pair now goes to an
   idle worker instead of the next one in turn, which could still be busy with a slower
   pair. Quarry (347 images, 1,909 pairs, WASM matcher): 429 → 297 s, the same matches.

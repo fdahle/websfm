@@ -271,24 +271,45 @@ impl PoissonLayer {
                 }
             }
 
+            // The screening sums of all 125 stencil entries in one pass over the points
+            // (vendored patch). A point lies inside the support of at most 3 of the 5
+            // stencil offsets per axis, so at most 27 of its 125 products are non-zero;
+            // the others were added as +0.0, which changes nothing (every factor is ≥ 0),
+            // so they are skipped. Each entry still takes its points in stencil order,
+            // with the same products: the same sums. On coarse layers, where a node's
+            // neighbourhood holds most of the cloud, this was most of the assembly.
+            let mut entry = convolution.laplacian;
+            for p in &screen_stencil {
+                let f = screen_factor * p.at_node;
+                for ii in 0..5 {
+                    if p.bx[ii] == 0.0 {
+                        continue;
+                    }
+                    for jj in 0..5 {
+                        if p.by[jj] == 0.0 {
+                            continue;
+                        }
+                        let bxy = p.bx[ii] * p.by[jj];
+                        for kk in 0..5 {
+                            if p.bz[kk] != 0.0 {
+                                entry[ii][jj][kk] += f * (bxy * p.bz[kk]);
+                            }
+                        }
+                    }
+                }
+            }
+            // An entry no point touched took +0.0 terms before, which turn a −0.0 into
+            // +0.0; keep that.
+            let touched = !screen_stencil.is_empty();
             for i in -2..=2 {
                 for j in -2..=2 {
                     for k in -2..=2 {
                         let other_node = node + vector![i, j, k];
 
                         if let Some(other_nid) = my_layer.grid_node_idx.get(&other_node) {
-                            let ii = (i + 2) as usize;
-                            let jj = (j + 2) as usize;
-                            let kk = (k + 2) as usize;
-
-                            let mut laplacian = convolution.laplacian[ii][jj][kk];
-
-                            for p in &screen_stencil {
-                                laplacian +=
-                                    screen_factor * p.at_node * (p.bx[ii] * p.by[jj] * p.bz[kk]);
-                            }
-
-                            row.push((*other_nid, laplacian));
+                            let (ii, jj, kk) = ((i + 2) as usize, (j + 2) as usize, (k + 2) as usize);
+                            let v = entry[ii][jj][kk];
+                            row.push((*other_nid, if touched && v == 0.0 { 0.0 } else { v }));
                         }
                     }
                 }
