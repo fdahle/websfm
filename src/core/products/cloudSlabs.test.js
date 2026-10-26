@@ -4,7 +4,7 @@ import { statisticalOutlierFilter, sorNeighbourMeans, cloudBounds, estimateSpaci
 
 function terrain(n, seed = 3) {
   let s = seed
-  const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff
   const pos = new Float64Array(3 * n)
   for (let i = 0; i < n; i++) {
     const x = rnd() * 100,
