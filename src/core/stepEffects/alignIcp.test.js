@@ -9,6 +9,7 @@ describe('alignIcpEffects', () => {
     expect(e.solve).toMatch(/^Rotation, translation are solved point-to-plane, up to 100 iterations/)
     const s = { ...ICP_DEFAULTS, maxDistance: 2, estimateScale: true }
     expect(alignIcpEffects(s, { unit: 'm' }).pair).toMatch(/within 2 m;/)
-    expect(alignIcpEffects(s).solve).toMatch(/and scale are solved point-to-point/)
+    expect(alignIcpEffects(s).solve).toMatch(/and scale are solved point-to-plane \(the reference's normals estimated/)
+    expect(alignIcpEffects({ ...s, pointToPlane: false }).solve).toMatch(/and scale are solved point-to-point/)
   })
 })

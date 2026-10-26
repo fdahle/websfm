@@ -559,6 +559,7 @@ try {
     rasterstyle: 'rasterRestyle',
     gcpz: 'gcpZ',
     meshtools: 'meshTools',
+    cloudtools: 'cloudTools',
     reseau: 'reseau',
     reseauhalves: 'reseauHalves',
     panosplit: 'panoramicSplit',

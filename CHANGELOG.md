@@ -6,6 +6,11 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Align to and measure against a survey too large to load.** An imported LAS/LAZ that
+  is streamed from its octree can now be the reference of Align to reference (ICP) and
+  Cloud distance, and Transform moves it as a whole. The reference is read around the
+  source, at full detail up to 12 M points; a transformed cloud gets a new octree,
+  quantised for its new coordinates.
 - **Sources for every method.** Each glossary entry now lists the papers behind the
   method it explains, About ▸ References lists every method WebSfM implements, and the
   exported Quality Report ends with the methods this project used and their references,
@@ -119,6 +124,11 @@ Notable changes to websfm. The format follows
   DSM the lines went from 31,436 (96 % of them under 20 cells long) to 733, with the
   terrain and tree crowns kept. Both are settings; 0 gives the exact trace. Drop lines
   shorter than is now in cells of the DEM.
+- **ICP aligns to a reference without normals as well as to one with them.** Align to
+  reference (ICP) estimates the reference's normals where it is matched, so an imported
+  survey cloud gets point-to-plane matching without running Estimate normals first. On
+  the Aukerman dense cloud it converges in 34–40 iterations to 0.5 mm, where
+  point-to-point had not converged after 100.
 - **More accurate, more complete depth maps on a GPU (Method: Full).** Depth Maps ▸
   Advanced ▸ Method: Full runs three passes, ACMH view selection, planar priors that span
   textureless areas, and a pass that makes each map agree with its neighbours; Fast is the
@@ -248,6 +258,10 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Remove outliers and Estimate normals use every core.** From a million points the cloud
+  is split into slabs over the worker pool, each with a margin wide enough that the
+  outlier filter keeps exactly the points one worker would. On the Aukerman dense cloud
+  (2.1 M points, 6 workers): outliers 7.4 → 4.0 s, normals 7.6 → 3.2 s.
 - **Depth maps without a GPU use every core for each map.** Each depth map now runs on all
   cores at once instead of one core per map, so the run no longer depends on how many maps
   fit the memory budget side by side. A 42-image block on the CPU: 465 → 263 s, the same

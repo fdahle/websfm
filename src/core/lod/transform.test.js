@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildLod } from './build.js'
 import { openLodReader } from './reader.js'
-import { streamedEditSource, planTiles, inCore } from './transform.js'
+import { streamedEditSource, planTiles, inCore, transformedBounds } from './transform.js'
 import { screenSelectMask } from '../products/screenSelect.js'
 import { classifyCloudGround } from '../products/groundFilter.js'
 import { filterCloud } from '../products/cloudEdit.js'
@@ -149,6 +149,36 @@ describe('editing a streamed cloud', () => {
       if (c.pos[3 * i] >= 1050 && c.pos[3 * i] <= 1100 && c.pos[3 * i + 1] <= 2100) inside++
     const r = await edited(reader, lod, 'crop', { min: [1050, null, null], max: [1100, 2100, null] })
     expect(r.lod.points).toBe(c.count - inside)
+  })
+
+  it('moves every point, into an octree quantised where the points now are', async () => {
+    const { c, lod, reader } = await sceneLod()
+    // A quarter turn about z and a shift to UTM-sized coordinates: far beyond what the
+    // source's offset and 1 mm steps could store in 32-bit integers.
+    const matrix = [0, -1, 0, 500000, 1, 0, 0, 4000000, 0, 0, 1, 100, 0, 0, 0, 1]
+    const source = streamedEditSource(reader, lod, 'transform', { matrix })
+    const want = transformedBounds(lod.bounds, matrix)
+    expect(source.bounds.min[0]).toBeCloseTo(500000 - lod.bounds.max[1], 6)
+    expect(source.bounds.min[1]).toBeCloseTo(4000000 + lod.bounds.min[0], 6)
+    const r = await build(source, {})
+    expect(r.lod.points).toBe(c.count)
+    const got = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }
+    for (const p of await allPoints(r.reader))
+      for (let i = 0; i < p.count; i++)
+        for (let k = 0; k < 3; k++) {
+          got.min[k] = Math.min(got.min[k], p.pos[3 * i + k])
+          got.max[k] = Math.max(got.max[k], p.pos[3 * i + k])
+        }
+    // The points' own extent, moved: inside the moved box, and its x/y sides exact.
+    const b = boundsOf(c)
+    expect(got.min[0]).toBeCloseTo(500000 - b.max[1], 2)
+    expect(got.max[0]).toBeCloseTo(500000 - b.min[1], 2)
+    expect(got.min[1]).toBeCloseTo(4000000 + b.min[0], 2)
+    expect(got.max[2]).toBeCloseTo(100 + b.max[2], 2)
+    for (let k = 0; k < 3; k++) {
+      expect(got.min[k]).toBeGreaterThanOrEqual(want.min[k] - 1e-3)
+      expect(got.max[k]).toBeLessThanOrEqual(want.max[k] + 1e-3)
+    }
   })
 
   it('tiles cover every point once', () => {

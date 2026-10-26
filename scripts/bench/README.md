@@ -221,6 +221,9 @@ stage again with config key `dense:loose`.
   e.g. after `reopen` on a project saved before the bench persisted it (2026-10-19).
 - `georef`: Georeferencing ▸ Georeference, from GCPs or the camera positions, into the
   project CRS (top-level `crs`). Then `dem: { "crs": "project" }` builds in that CRS.
+- `cloudtools`: Remove outliers and Estimate normals on the computed dense cloud, as
+  their dialogs send them, split over the worker pool and on one worker; reports each
+  run's seconds and point count, and the share of points whose two normals differ.
 - `meshtools`: TOOL-03 on the computed mesh: Clean → Decimate 25 % → Smooth 10 → Clean
   with every hole closed → Area & volume. Each step is a named copy (`TOOL03 cleaned`,
   `… decimated`, `… smoothed`, `… closed`) for `cloudName` exports.

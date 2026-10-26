@@ -10,7 +10,11 @@ export function alignIcpEffects(s, { sourceName = 'the cloud', autoRadius = 0, u
   const pair =
     `${fmtCount(s.sampleCount)} points of "${sourceName}" are paired with the nearest reference point within ` +
     `${r > 0 ? fmtLength(r, unit) : 'ten point spacings'}${s.maxDistance > 0 ? '' : ' (auto)'}; farther pairs are ignored.`
-  const how = s.pointToPlane && planar ? 'point-to-plane' : 'point-to-point'
+  const how = !s.pointToPlane
+    ? 'point-to-point'
+    : planar
+      ? 'point-to-plane'
+      : "point-to-plane (the reference's normals estimated where it is matched)"
   const solve =
     `Rotation, translation${s.estimateScale ? ' and scale' : ''} are solved ${how}, up to ${s.maxIterations} ` +
     `iterations; a converged run stops early.`

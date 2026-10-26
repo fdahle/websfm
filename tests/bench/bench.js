@@ -1848,6 +1848,39 @@ window.bench = {
   // Tools ▸ Mesh ▾ on the computed mesh, as TOOL-03 runs it: Clean (defaults) →
   // Decimate to 25 % → Smooth 10 → Clean with every hole closed → Area & volume.
   // Each step makes a named copy (export them with `cloudName`).
+  // Tools ▸ Point Cloud ▾: Remove outliers and Estimate normals on the computed dense
+  // cloud, as their dialogs send them, split over the pool and on one worker (`split`).
+  // → per run { mode, split, seconds, points, normalsDiffer? }
+  async cloudTools({ splits = [true, false] } = {}) {
+    const { FILTER_CLOUD_DEFAULTS: F, NORMALS_DEFAULTS: N } = await import('/src/core/defaults.user.js')
+    const src = recon.clouds.find((c) => c.kind === 'dense' && !c.imported && !c.derived)
+    if (!src?.pos) throw new Error('cloudTools: no resident computed dense cloud')
+    const out = []
+    const results = {}
+    for (const split of splits) {
+      for (const mode of ['filter', 'normals']) {
+        const settings =
+          mode === 'filter'
+            ? { methods: ['sor'], sor: { k: F.sorK, stdRatio: F.sorStdRatio }, split }
+            : { k: N.k, orient: { kind: 'up' }, split }
+        const t0 = performance.now()
+        const c = await recon.editClouds({ mode, sourceIds: [src.id], settings, name: `${mode} ${split}` }, report)
+        out.push({ mode, split, seconds: (performance.now() - t0) / 1000, points: c?.count ?? 0 })
+        results[`${mode}-${split}`] = c
+      }
+    }
+    // The split normals against one worker's: the share of points whose normal differs.
+    const a = results['normals-true']?.nrm,
+      b = results['normals-false']?.nrm
+    if (a && b) {
+      let differ = 0
+      for (let i = 0; i < a.length; i += 3)
+        if (Math.abs(a[i] * b[i] + a[i + 1] * b[i + 1] + a[i + 2] * b[i + 2]) < 0.9999) differ++
+      out.push({ normalsDiffer: differ / (a.length / 3) })
+    }
+    return { source: { name: src.name, points: src.count }, runs: out }
+  },
+
   async meshTools() {
     const { CLEAN_MESH_DEFAULTS, SMOOTH_MESH_DEFAULTS, DECIMATE_MESH_DEFAULTS } =
       await import('/src/core/defaults.user.js')

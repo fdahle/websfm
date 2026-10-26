@@ -6,6 +6,7 @@ import {
   maskCloud,
   classifySelection,
   cloudCount,
+  sorNeighbourMeans,
 } from '../../core/products/cloudEdit.js'
 import { cleanMesh, taubinSmooth, cropMesh, sampleMesh } from '../../core/products/meshEdit.js'
 import { sectionCloud } from '../../core/products/cloudSection.js'
@@ -169,6 +170,17 @@ export function makeCloudOps() {
         extra: stats,
       }
     },
+    // One slab of a split run (core/products/cloudSlabs.js; the store joins the slabs):
+    // the outlier filter's neighbour means, and normals. The results ride home as
+    // attributes so their buffers are transferred.
+    'part-sor': ([c], s) => {
+      const { mean, lonely } = sorNeighbourMeans(c, { k: s.k, cell: s.cell ?? 0, reach: s.reach })
+      return { out: { count: c.count, pos: c.pos, attributes: { mean, lonely } } }
+    },
+    'part-normals': ([c], s, log, progress) => {
+      const { nrm } = estimateNormals(c, s, null, (f) => progress(f, 'Estimating normals…'))
+      return { out: { count: c.count, pos: c.pos, nrm } }
+    },
     'section': ([c], s, log) => {
       const { cloud } = sectionCloud(c, s, log)
       return { out: cloud }
@@ -212,12 +224,14 @@ export function makeCloudOps() {
       const unit = isMesh ? 'triangles' : 'points'
       const size = isMesh ? out.count : cloudCount(out)
       const before = clouds[0].kind === 'mesh' ? clouds[0].count : clouds.reduce((s, c) => s + cloudCount(c), 0)
-      log(
-        `${mode[0].toUpperCase()}${mode.slice(1)}: ${size.toLocaleString()} ${unit} ` +
-          `from ${before.toLocaleString()} in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
-        size ? 'success' : 'warn',
-        'Products',
-      )
+      // A slab of a split run reports through the store, once for the whole run.
+      if (!mode.startsWith('part-'))
+        log(
+          `${mode[0].toUpperCase()}${mode.slice(1)}: ${size.toLocaleString()} ${unit} ` +
+            `from ${before.toLocaleString()} in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+          size ? 'success' : 'warn',
+          'Products',
+        )
       emit('progress', [1, 1, 'Done'])
       outward(out, transfer)
     } catch (err) {

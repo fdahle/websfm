@@ -40,11 +40,6 @@ const unitLabel = computed(() => (source.value?.imported ? 'file units' : 'model
 const autoRadius = computed(() =>
   source.value ? 10 * (estimateSpacing(cloudBounds(source.value), source.value.count) || 1) : 0,
 )
-const pointToPlaneNote = computed(() =>
-  reference.value && reference.value.kind !== 'mesh' && !reference.value.nrm
-    ? 'The reference has no normals, so ICP runs point-to-point (slower to converge). Estimate normals on it first for point-to-plane.'
-    : '',
-)
 // Align stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step). A radius of 0 is auto; blank is not.
 const numbers = computed(() =>
@@ -166,7 +161,6 @@ function run() {
           </SettingsField>
         </SettingsStep>
       </AdvancedDisclosure>
-      <p v-if="pointToPlaneNote" class="field-hint">{{ pointToPlaneNote }}</p>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

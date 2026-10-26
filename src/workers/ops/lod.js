@@ -381,7 +381,11 @@ export function makeLodOps({ lazCodec = null } = {}) {
       hierarchyFile = `${name}.hier`
     const out = await dataWriter(dir, dataFile)
     try {
-      const res = await runBuild(source, tmp, out, { layout: { offset: lod.layout.offset, scale: lod.layout.scale } })
+      // A moved cloud gets a quantisation for where it now is (the old offset may lie
+      // farther from the new points than the stored integers reach); any other edit
+      // keeps the source's, so an imported LAS's exact scale survives.
+      const layout = mode === 'transform' ? {} : { offset: lod.layout.offset, scale: lod.layout.scale }
+      const res = await runBuild(source, tmp, out, { layout })
       await out.close()
       const hw = await (await dir.getFileHandle(hierarchyFile, { create: true })).createWritable()
       await hw.write(res.hierarchy)

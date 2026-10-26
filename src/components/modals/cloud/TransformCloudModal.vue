@@ -33,6 +33,9 @@ const p = ref({ tx: 0, ty: 0, tz: 0, rx: 0, ry: 0, rz: 0, scale: 1, pivot: 'cent
 const matrixText = ref('1 0 0 0\n0 1 0 0\n0 0 1 0\n0 0 0 1')
 
 const centre = computed(() => {
+  // A streamed cloud (no resident points) has its octree's bounds.
+  const lb = !source.value?.pos ? source.value?.lod?.bounds : null
+  if (lb) return [0, 1, 2].map((k) => (lb.min[k] + lb.max[k]) / 2)
   const b = source.value ? cloudBounds(source.value) : null
   return b ? [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2] : [0, 0, 0]
 })

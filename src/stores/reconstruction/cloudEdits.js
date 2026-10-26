@@ -9,13 +9,23 @@ import {
   refineSparse as workerRefineSparse,
   optimizeSparse as workerOptimizeSparse,
   editCloud as workerEditCloud,
+  POOL_SIZE,
 } from '../../workers/computeClient.js'
 import { pluralize } from '../../core/textFormat.js'
+import { planCloudSlabs, gatherPoints } from '../../core/products/cloudSlabs.js'
+import { cloudBounds, estimateSpacing } from '../../core/products/cloudEdit.js'
 
 // A crop of a streamed cloud becomes a resident one: at most this many points.
 const STREAMED_CROP_MAX_POINTS = 25_000_000
 // Edits a streamed cloud takes as it is (core/lod/transform.js); the rest need a crop.
-const STREAMED_EDIT_MODES = new Set(['crop', 'mask', 'classify', 'filter', 'classify-ground'])
+const STREAMED_EDIT_MODES = new Set(['crop', 'mask', 'classify', 'filter', 'classify-ground', 'transform'])
+// From this many points the outlier filter and normals split the cloud into slabs over
+// the worker pool (each slab with a margin); below it one worker is as quick.
+const SPLIT_MIN_POINTS = 1_000_000
+const SPLIT_POINTS_PER_WORKER = 400_000
+// A streamed REFERENCE (alignment, distance) is read where the source is, at full
+// detail up to this many points, coarser beyond (the log says so).
+const STREAMED_REFERENCE_MAX_POINTS = 12_000_000
 
 // Tools-tab edits (`editClouds` modes, dispatched by workers/ops/cloud.js):
 // Mesh ▾ tools read a mesh (mesh-sample turns it into a dense cloud) …
@@ -322,6 +332,205 @@ export function createCloudEdits({
     }
   }
 
+  // The points of a streamed reference within the source's box, grown by the search
+  // radius (or 10 % of the box), as a plain resident cloud { kind: 'dense', count, pos,
+  // col } for one alignment or distance run. Not added to the project.
+  async function streamedReference(reference, source, settings, onProgress) {
+    const b = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }
+    for (let i = 0; i < source.count; i++)
+      for (let k = 0; k < 3; k++) {
+        const v = source.pos[3 * i + k]
+        if (v < b.min[k]) b.min[k] = v
+        if (v > b.max[k]) b.max[k] = v
+      }
+    const size = Math.max(...[0, 1, 2].map((k) => b.max[k] - b.min[k]))
+    const grow = settings.maxDistance > 0 ? settings.maxDistance : 0.1 * size
+    const box = { min: b.min.map((v) => v - grow), max: b.max.map((v) => v + grow) }
+    try {
+      const { cloud: flat, plan } = await extractCloudPoints(
+        reference,
+        { box, maxPoints: STREAMED_REFERENCE_MAX_POINTS },
+        onProgress,
+      )
+      if (!flat.count) {
+        log(`Cloud edit: the reference "${reference.name}" has no point where the source is`, 'warn', 'Products')
+        return null
+      }
+      log(
+        `Cloud edit: read ${flat.count.toLocaleString()} points of the streamed reference "${reference.name}" around the source` +
+          (plan.complete ? '' : ` (thinned to ${plan.spacing.toPrecision(3)}-unit spacing)`),
+        plan.complete ? 'info' : 'warn',
+        'Products',
+      )
+      return { ...flat, id: reference.id, name: reference.name, kind: 'dense' }
+    } catch (err) {
+      log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+      return null
+    }
+  }
+
+  // One slab-split run over the pool (core/products/cloudSlabs.js): `mode` runs on every
+  // slab + margin in its own worker; `take(part, result)` keeps each slab's own points'
+  // results. Progress is the slabs' mean.
+  async function runOverSlabs(cloud, { mode, settings, halo, withNormals = false }, take, onProgress) {
+    const workers = Math.max(2, Math.min(POOL_SIZE, Math.ceil(cloud.count / SPLIT_POINTS_PER_WORKER)))
+    const { parts } = planCloudSlabs(cloud.pos, cloud.count, { slabs: workers, halo })
+    const fractions = new Array(parts.length).fill(0)
+    await Promise.all(
+      parts.map(async (part, w) => {
+        const slab = gatherPoints(cloud, part.idx, { withNormals })
+        const transfer = [slab.pos.buffer, ...(slab.nrm ? [slab.nrm.buffer] : [])]
+        const { cloud: out, error } = await workerEditCloud(
+          { mode, clouds: [{ id: `part-${w}`, kind: 'dense', ...slab }], settings },
+          {
+            worker: w,
+            transfer,
+            onLog: (m, l, c) => log(m, l, c),
+            onProgress: (d, t, lbl, f) => {
+              fractions[w] = f ?? d / Math.max(1, t)
+              onProgress?.(
+                fractions.reduce((a, b) => a + b, 0),
+                parts.length,
+                lbl,
+                fractions.reduce((a, b) => a + b, 0) / parts.length,
+              )
+            },
+          },
+        )
+        if (error) throw new Error(error)
+        take(part, out)
+      }),
+    )
+    return parts.length
+  }
+
+  // The dense cloud's buffers as the cloud-edit worker takes them (copies, transferred).
+  function editPayload(c, transfer) {
+    const pos = c.pos.slice(),
+      col = c.col?.slice() || null,
+      nrm = c.nrm?.slice() || null
+    transfer.push(pos.buffer, ...(col ? [col.buffer] : []), ...(nrm ? [nrm.buffer] : []))
+    const attributes = Object.fromEntries(
+      Object.entries(c.attributes || {}).map(([key, values]) => {
+        const copy = values.slice()
+        transfer.push(copy.buffer)
+        return [key, copy]
+      }),
+    )
+    return { id: c.id, kind: 'dense', count: c.count, pos, col, nrm, attributes }
+  }
+
+  // The outlier filter (Filter with `sor` last) and Estimate normals of a large resident
+  // cloud, split over the pool. The outlier filter is exact: a slab's margin is the
+  // filter's own neighbour reach (nothing farther counts), and the limit is the whole
+  // cloud's mean + ratio·σ. Normals take a margin of six point spacings. → the new cloud,
+  // or undefined when the run is not one to split.
+  async function splitEdit(source, mode, settings, name, onProgress) {
+    const methods = settings.methods ?? []
+    const sorLast = mode === 'filter' && methods[methods.length - 1] === 'sor'
+    // `split: false` keeps one worker (the bench compares the two).
+    if (settings.split === false) return undefined
+    if (!(sorLast || mode === 'normals') || POOL_SIZE < 2 || source.count < SPLIT_MIN_POINTS) return undefined
+    const t0 = performance.now()
+    let result
+    if (mode === 'normals') {
+      const nrm = new Float32Array(source.count * 3)
+      const halo = 6 * (estimateSpacing(cloudBounds(source), source.count) || 1)
+      const used = await runOverSlabs(
+        source,
+        { mode: 'part-normals', settings, halo, withNormals: settings.orient?.kind === 'existing' },
+        (part, out) => {
+          for (let j = 0; j < part.own; j++) {
+            const i = part.idx[j] * 3
+            nrm[i] = out.nrm[j * 3]
+            nrm[i + 1] = out.nrm[j * 3 + 1]
+            nrm[i + 2] = out.nrm[j * 3 + 2]
+          }
+        },
+        onProgress,
+      )
+      const t = []
+      const copy = editPayload(source, t)
+      result = { count: source.count, pos: copy.pos, col: copy.col, nrm, attributes: copy.attributes }
+      log(
+        `Normals: ${source.count.toLocaleString()} points on ${pluralize(used, 'worker')} in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+        'success',
+        'Products',
+      )
+    } else {
+      // The filters before the outlier filter (cheap, linear) on one worker, then the
+      // outlier filter's neighbour means over the pool, then the cut.
+      let cloud = source
+      const before = methods.slice(0, -1)
+      if (before.length) {
+        const transfer = []
+        const { cloud: pre, error } = await workerEditCloud(
+          { mode: 'filter', clouds: [editPayload(source, transfer)], settings: { ...settings, methods: before } },
+          { transfer, onLog: (m, l, c) => log(m, l, c) },
+        )
+        if (error) throw new Error(error)
+        cloud = pre
+      }
+      if (!cloud?.count) return null
+      const sor = settings.sor ?? {}
+      const reach = sor.reach > 0 ? sor.reach : 4 * estimateSpacing(cloudBounds(cloud), cloud.count)
+      const mean = new Float64Array(cloud.count),
+        lonely = new Uint8Array(cloud.count)
+      const used = await runOverSlabs(
+        cloud,
+        { mode: 'part-sor', settings: { k: sor.k ?? 12, cell: sor.cell ?? 0, reach }, halo: reach },
+        (part, out) => {
+          for (let j = 0; j < part.own; j++) {
+            mean[part.idx[j]] = out.attributes.mean[j]
+            lonely[part.idx[j]] = out.attributes.lonely[j]
+          }
+        },
+        onProgress,
+      )
+      let cnt = 0,
+        s1 = 0,
+        s2 = 0
+      for (let i = 0; i < cloud.count; i++) {
+        if (lonely[i]) continue
+        cnt++
+        s1 += mean[i]
+        s2 += mean[i] * mean[i]
+      }
+      const mu = cnt ? s1 / cnt : 0
+      const sigma = cnt ? Math.sqrt(Math.max(s2 / cnt - mu * mu, 0)) : 0
+      const limit = mu + (sor.stdRatio ?? 1.5) * sigma
+      const keep = new Uint8Array(cloud.count)
+      let kept = 0
+      for (let i = 0; i < cloud.count; i++)
+        if (!lonely[i] && mean[i] <= limit) {
+          keep[i] = 1
+          kept++
+        }
+      log(
+        `Filter (outlier): mean neighbour distance ${mu.toFixed(4)} ±${sigma.toFixed(4)}, limit ${limit.toFixed(4)} → ` +
+          `kept ${kept.toLocaleString()} of ${cloud.count.toLocaleString()}, on ${pluralize(used, 'worker')} ` +
+          `in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+        'info',
+        'Products',
+      )
+      const transfer = [keep.buffer]
+      const { cloud: out, error } = await workerEditCloud(
+        { mode: 'mask', clouds: [editPayload(cloud, transfer)], settings: { mask: keep, keepSelected: true } },
+        { transfer, onLog: () => {} },
+      )
+      if (error) throw new Error(error)
+      result = out
+    }
+    if (!result?.count) return null
+    const cloud = addDerivedCloud(result, {
+      name: name || `${source.name} (${mode})`,
+      imported: !!source.imported,
+    })
+    if (REPLACES_SOURCE_VIEW.has(mode)) source.visible = false
+    log(`Cloud edit: added "${cloud.name}" — ${cloud.count.toLocaleString()} points`, 'success', 'Products')
+    return cloud
+  }
+
   async function editClouds({ mode, sourceIds = [], settings = {}, name, style = null } = {}, onProgress) {
     // Model edits (Tools ▸ Model ▾): one shared commit path, refineMainSparse.
     if (mode === 'sparse') {
@@ -356,7 +565,14 @@ export function createCloudEdits({
     // alignment or a distance may be a dense cloud or a mesh; everything else is
     // dense-only (a sparse cloud's points carry view-tracks — never edited here).
     const meshSource = MESH_EDIT_MODES.has(mode)
-    const resolved = sourceIds.map((id) => clouds.value.find((c) => c.id === id) ?? null)
+    let resolved = sourceIds.map((id) => clouds.value.find((c) => c.id === id) ?? null)
+    // A streamed reference (an imported survey too large to hold): only the part around
+    // the source matters, read from its octree as a resident cloud for this run.
+    if (REFERENCE_MODES.has(mode) && isStreamed(resolved[1]) && resolved[0]?.pos && extractCloudPoints) {
+      const ref = await streamedReference(resolved[1], resolved[0], settings, onProgress)
+      if (!ref) return null
+      resolved = [resolved[0], ref]
+    }
     const okKind = (c, slot) =>
       c &&
       c.count > 0 &&
@@ -387,6 +603,7 @@ export function createCloudEdits({
           'classify': 'reclassified',
           'filter': 'filtered',
           'classify-ground': 'ground',
+          'transform': 'transformed',
         }[mode]
         const selection = mode === 'mask' || mode === 'classify'
         // A selection edit of a derived cloud refines it (as for a resident cloud): the
@@ -424,6 +641,22 @@ export function createCloudEdits({
     if (!sources.length || sources.length !== resolved.length) {
       log(`Cloud edit: no usable ${meshSource ? 'mesh' : 'dense cloud'} for this tool`, 'warn', 'Products')
       return null
+    }
+    if (sources.length === 1 && (mode === 'filter' || mode === 'normals')) {
+      reconStatus.value = 'running'
+      try {
+        const cloud = await splitEdit(sources[0], mode, settings, name, onProgress)
+        if (cloud !== undefined) {
+          reconStatus.value = 'done'
+          if (cloud) await save()
+          else log('Cloud edit: the result is empty — nothing was added', 'warn', 'Products')
+          return cloud
+        }
+      } catch (err) {
+        log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+        reconStatus.value = 'error'
+        return null
+      }
     }
     if (mode === 'merge' && sources.length < 2) {
       log('Cloud edit: merge needs at least two dense clouds', 'warn', 'Products')

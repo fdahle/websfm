@@ -11,9 +11,27 @@
 import { screenSelectMask } from '../products/screenSelect.js'
 import { filterCloud, sorNeighbourMeans, estimateSpacing } from '../products/cloudEdit.js'
 import { classifyCloudGround } from '../products/groundFilter.js'
+import { transformCloud, applyTransform } from '../products/cloudAlign.js'
 import { planExtract, extractPoints } from './extract.js'
 import { nodeCube } from './octree.js'
 import { pluralize } from '../textFormat.js'
+
+// The box around a moved box: its eight corners, transformed.
+export function transformedBounds(bounds, tf) {
+  const min = [Infinity, Infinity, Infinity],
+    max = [-Infinity, -Infinity, -Infinity]
+  for (let c = 0; c < 8; c++) {
+    const p = applyTransform(
+      tf,
+      [0, 1, 2].map((k) => ((c >> k) & 1 ? bounds.max[k] : bounds.min[k])),
+    )
+    for (let k = 0; k < 3; k++) {
+      if (p[k] < min[k]) min[k] = p[k]
+      if (p[k] > max[k]) max[k] = p[k]
+    }
+  }
+  return { min, max }
+}
 
 /**
  * Tiles over the cloud's XY extent, each with about `tilePoints` points in its tile +
@@ -205,8 +223,9 @@ export function subsetPoints(p, keep) {
 /**
  * The edited points of a streamed cloud as a build source (core/lod/build.js):
  * mode 'crop' (settings { min, max }: keeps what lies outside), 'mask' ({ selection,
- * keepSelected }), 'classify' ({ selection, classValue }), 'filter' (filterCloud's
- * settings) or 'classify-ground' (classifyCloudGround's, in metres).
+ * keepSelected }), 'classify' ({ selection, classValue }), 'transform' ({ matrix } or
+ * { transform }: any form cloudAlign.js accepts), 'filter' (filterCloud's settings) or
+ * 'classify-ground' (classifyCloudGround's, in metres).
  */
 export function streamedEditSource(reader, lod, mode, settings = {}, { log = () => {}, progress = null } = {}) {
   const attrs = lod.layout.attributes.map((a) => ({ ...a }))
@@ -221,13 +240,16 @@ export function streamedEditSource(reader, lod, mode, settings = {}, { log = () 
     progress?.(done, total, label)
   }
 
+  const tf = mode === 'transform' ? (settings.matrix ?? settings.transform) : null
   async function* pointwise() {
     const lo = settings.min ?? [],
       hi = settings.max ?? []
     for (const node of reader.nodes.values()) {
       if (!node.count) continue
       const pts = withClass(await reader.read(node, { as: 'absolute' }))
-      if (mode === 'crop') {
+      if (mode === 'transform') {
+        yield { ...pts, pos: transformCloud(pts, tf).pos }
+      } else if (mode === 'crop') {
         const inBox = (i) =>
           [0, 1, 2].every(
             (k) => pts.pos[3 * i + k] >= (lo[k] ?? -Infinity) && pts.pos[3 * i + k] <= (hi[k] ?? Infinity),
@@ -360,7 +382,7 @@ export function streamedEditSource(reader, lod, mode, settings = {}, { log = () 
 
   return {
     count: lod.points,
-    bounds: lod.bounds,
+    bounds: mode === 'transform' ? transformedBounds(lod.bounds, tf) : lod.bounds,
     colour: lod.layout.colour,
     attributes: attrs,
     batches: () => rebatch(mode === 'filter' || mode === 'classify-ground' ? tiled() : pointwise()),

@@ -389,7 +389,7 @@ const measurementsStore = useMeasurementsStore()
     />
     <TransformCloudModal
       v-else-if="toolModal === 'transform-cloud'"
-      :clouds="editableClouds"
+      :clouds="croppableClouds"
       :initial-id="toolInitialId"
       @close="toolModal = null"
       @run="onToolEditRun"
@@ -397,7 +397,7 @@ const measurementsStore = useMeasurementsStore()
     <AlignIcpModal
       v-else-if="toolModal === 'align-icp'"
       :clouds="editableClouds"
-      :references="[...editableClouds, ...meshClouds]"
+      :references="[...croppableClouds, ...meshClouds]"
       :initial-id="toolInitialId"
       @close="toolModal = null"
       @run="onToolEditRun"
@@ -405,7 +405,7 @@ const measurementsStore = useMeasurementsStore()
     <CloudDistanceModal
       v-else-if="toolModal === 'cloud-distance'"
       :clouds="editableClouds"
-      :references="[...editableClouds, ...meshClouds]"
+      :references="[...croppableClouds, ...meshClouds]"
       :initial-id="toolInitialId"
       @close="toolModal = null"
       @run="onToolEditRun"

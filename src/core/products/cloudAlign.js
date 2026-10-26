@@ -36,6 +36,7 @@
 
 import { fitSimilarity } from './georef.js'
 import { buildKnnIndex, knnQuery } from './knn.js'
+import { eigenSym3 } from './cloudNormals.js'
 import { buildMeshClosest } from './cloudDistance.js'
 
 // ── Small linear-algebra helpers (3×3 row-major arrays) ──────────────────────
@@ -819,14 +820,69 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
   const ref = vertexCount(reference) ? referenceGeometry(reference) : null
   if (!ref) throw new Error('ICP: the reference is empty.')
   const trimFrac = Math.min(1, Math.max(0.05, Number(trim) || 0.9))
-  let usePlane = !!pointToPlane
-  if (usePlane && !ref.nrm && !ref.isMesh) {
-    usePlane = false
-    log('ICP: the reference has no normals — using point-to-point (estimate normals first for point-to-plane)', 'warn')
-  }
+  const usePlane = !!pointToPlane
+  // A reference cloud without normals (an imported survey, a thinned streamed one): each
+  // reference point ICP matches gets its normal from its 16 nearest neighbours, once,
+  // when first matched. Point-to-point instead needed 100+ iterations on a real dense
+  // cloud and still had not converged; this costs a few thousand normals per iteration.
+  const lazyNormals = usePlane && !ref.nrm && !ref.isMesh
+  if (lazyNormals) log('ICP: the reference has no normals — estimating them at the matched points')
   const method = usePlane ? 'point-to-plane' : 'point-to-point'
   const t0 = Date.now()
   const index = ref.isMesh ? null : buildKnnIndex({ count: ref.count, pos: ref.pos })
+  let normalAt = null
+  if (lazyNormals) {
+    const have = new Uint8Array(ref.count),
+      lazy = new Float64Array(ref.count * 3)
+    const nb = new Int32Array(16),
+      nd = new Float64Array(16),
+      eig = new Float64Array(12)
+    ref.nrm = lazy
+    normalAt = (r) => {
+      if (have[r]) return
+      have[r] = 1
+      const px = ref.pos[r * 3],
+        py = ref.pos[r * 3 + 1],
+        pz = ref.pos[r * 3 + 2]
+      const found = knnQuery(index, px, py, pz, 16, nb, nd, r)
+      let sx = 0,
+        sy = 0,
+        sz = 0
+      for (let j = 0; j < found; j++) {
+        sx += ref.pos[nb[j] * 3] - px
+        sy += ref.pos[nb[j] * 3 + 1] - py
+        sz += ref.pos[nb[j] * 3 + 2] - pz
+      }
+      const m = found + 1,
+        cx = sx / m,
+        cy = sy / m,
+        cz = sz / m
+      let xx = cx * cx,
+        xy = cx * cy,
+        xz = cx * cz,
+        yy = cy * cy,
+        yz = cy * cz,
+        zz = cz * cz
+      for (let j = 0; j < found; j++) {
+        const dx = ref.pos[nb[j] * 3] - px - cx,
+          dy = ref.pos[nb[j] * 3 + 1] - py - cy,
+          dz = ref.pos[nb[j] * 3 + 2] - pz - cz
+        xx += dx * dx
+        xy += dx * dy
+        xz += dx * dz
+        yy += dy * dy
+        yz += dy * dz
+        zz += dz * dz
+      }
+      const tr = xx + yy + zz
+      if (found < 3 || !(tr > 0)) return // no plane: the zero normal adds no constraint
+      eigenSym3(xx / tr, xy / tr, xz / tr, yy / tr, yz / tr, zz / tr, eig)
+      // The sign does not matter: a point-to-plane residual is squared.
+      lazy[r * 3] = eig[3]
+      lazy[r * 3 + 1] = eig[4]
+      lazy[r * 3 + 2] = eig[5]
+    }
+  }
 
   // Sample in the local frame; non-finite source points are dropped.
   const pick = sampleIndices(nSrc, Math.max(1, Math.floor(sampleCount)), seed)
@@ -911,6 +967,7 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
         pairD2[found] = ref.surface.distance ** 2
         found++
       } else if (knnQuery(index, qx, qy, qz, 1, nnI, nnD, -1, maxD2)) {
+        if (normalAt) normalAt(nnI[0])
         const r = nnI[0] * 3
         tp[k * 3] = ref.pos[r]
         tp[k * 3 + 1] = ref.pos[r + 1]

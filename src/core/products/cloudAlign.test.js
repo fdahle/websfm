@@ -299,15 +299,28 @@ describe('icpAlign', () => {
     expect(logs.some(([m]) => /ICP: converged/.test(m))).toBe(true)
   })
 
-  it('point-to-point (reference without normals) also recovers it, and says so', () => {
+  it('a reference without normals gets them where it is matched, and says so', () => {
     const logs = []
     const refNoN = { count: N, pos: reference.pos }
     const res = icpAlign(source, refNoN, { maxDistance: 5, maxIterations: 100 }, (m, l) => logs.push([m, l]))
-    expect(res.method).toBe('point-to-point')
-    expect(logs.some(([m, l]) => l === 'warn' && /point-to-point/.test(m))).toBe(true)
+    expect(res.method).toBe('point-to-plane')
+    expect(logs.some(([m]) => /estimating them at the matched points/.test(m))).toBe(true)
     expect(rotErrDeg(res.transform.R, truth.R)).toBeLessThan(0.005)
     expect(shiftErr(res.transform)).toBeLessThan(0.01)
     expect(res.rms).toBeLessThan(3 * SIGMA)
+    // The caller's reference is not given normals.
+    expect(refNoN.nrm).toBeUndefined()
+  })
+
+  it('point-to-point when asked also recovers it', () => {
+    const res = icpAlign(
+      source,
+      { count: N, pos: reference.pos },
+      { maxDistance: 5, maxIterations: 100, pointToPlane: false },
+    )
+    expect(res.method).toBe('point-to-point')
+    expect(rotErrDeg(res.transform.R, truth.R)).toBeLessThan(0.005)
+    expect(shiftErr(res.transform)).toBeLessThan(0.01)
   })
 
   it('estimates scale in point-to-point mode', () => {

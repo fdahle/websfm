@@ -47,10 +47,11 @@ imported one. The dialogs show what that means for the current project.
   **Apply** adds the aligned copy.
 - **Align to reference (ICP)…** refines an alignment automatically. It only refines:
   the clouds must already overlap within the **search radius**, so align roughly first
-  (point pairs, Transform or georeferencing). With a reference that has normals (a
-  mesh, or a cloud after *Estimate normals*) it uses point-to-plane matching, which
+  (point pairs, Transform or georeferencing). It uses point-to-plane matching, which
   needs far fewer iterations than point-to-point: a few tens on a dense photogrammetry
-  cloud, against a hundred or more. Against a mesh each point is paired with the
+  cloud, against a hundred or more. A reference cloud without normals (an imported
+  survey) gets them where it is matched, from each matched point's 16 nearest
+  neighbours, so *Estimate normals* is not needed first. Against a mesh each point is paired with the
   closest point on its surface, not with a vertex, so a coarse mesh still aligns to the
   cloud's noise level. It stops when the cloud no longer moves, or after 100
   iterations; the log reports the RMS, the rotation and the shift, and warns when the
@@ -176,7 +177,15 @@ measure on it. Tools read it from its octree:
   order than in the source file. **Export ▸ 3D Tiles…** writes one tile per octree
   node, placed in the CRS the file names (see [Export 3D Tiles](guide:export-3d-tiles)).
 
-Other edits (normals, transform, alignment, distances, merge) work on a crop of it.
+- **Transform** moves, turns or scales it node by node into a new streamed cloud,
+  whose coordinates are stored at a precision chosen for where the points now are.
+- **Align to reference (ICP)** and **Cloud distance** take it as the **reference**:
+  the part around the source cloud is read (the source's extent grown by the search
+  radius), at full detail up to 12 million points and evenly thinned beyond, and the
+  log says which. Its normals are estimated where the alignment matches it.
+
+Other edits (normals, merge, and a streamed cloud as the *source* of an alignment or
+a distance) work on a crop of it.
 
 ## COPC files
 A [COPC](help:copc) file (`.copc.laz`) is a LAZ file whose points are already sorted
