@@ -237,8 +237,8 @@ export const DEPTHMAP_DEFAULTS = {
   quality: 'medium', // low = ⅛, medium = ¼, high = ½, ultra = full native
   maxDim: null, // advanced override; null ⇒ derive from quality
   // Source views per image and PatchMatch sweeps: 6 → 10 and 3 → 5 on 2026-10-25. ETH3D
-  // (six scenes, from the ground-truth cameras) mean F1 @2 cm 50.1 → 52.6, none worse,
-  // mostly completeness (office 35.8 → 40.9, playground 34.9 → 40.4); the 11×11 window
+  // (six scenes, from the ground-truth cameras, ETH3D's own evaluator) mean F1 @2 cm
+  // 53.6 → 56.4, every scene better (office 37.8 → 43.0); the 11×11 window
   // and a larger best-K did not help. Depth time: GPU +9 % (Aukerman 42), CPU 2.2×.
   maxSources: 10, // source views per image
   window: 3, // ZNCC half-window (7×7)

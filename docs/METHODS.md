@@ -1325,9 +1325,11 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
 
   **Sources and sweeps**: up to 10 neighbours per reference and 5 sweeps at the finest
   level (each coarser level one more). Measured on the six ETH3D high-res scenes from the
-  ground-truth cameras (F1 at 2 cm, an approximation of ETH3D's evaluator): 6 sources and
-  3 sweeps 50.1, 10 sources 51.6, 5 sweeps 51.1, both 52.6 (no scene worse; the gain is
-  completeness, e.g. office 35.8 → 40.9). An 11×11 window scored lower (courtyard 58.2 →
+  ground-truth cameras, F1 at 2 cm by ETH3D's own evaluator (`multi-view-evaluation`):
+  6 sources and 3 sweeps 53.6, both raised 56.4, better on every scene (office 37.8 →
+  43.0, playground 36.0 → 41.8). With our earlier approximate scorer, which counts points
+  in space the laser never saw as wrong: 6 + 3 50.1, 10 sources 51.6, 5 sweeps 51.1, both
+  52.6. An 11×11 window scored lower (courtyard 58.2 →
   55.6), and averaging four of six sources instead of three changed nothing: the larger
   candidate pool, not the aggregation, is what fills the surface.
 
@@ -1348,9 +1350,10 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   COLMAP: each window sample counts with `exp(−d²/2σs² − Δ²/2σc²)`, `d` its distance
   from the centre (px), `Δ` its grey difference from the centre pixel, σs = the window
   radius and σc = 25 grey levels (COLMAP: 0.2 of the range, 51). Measured on ETH3D (six
-  scenes, from the ground-truth cameras, F1 @2 cm): plain 52.6, σc 51 53.2, **25 53.5**,
-  12 53.3, 6 52.3 — narrower bands keep trading completeness for accuracy; 25 is better
-  than plain on every scene (playground accuracy 75.5 → 79.7 %). It costs no measurable
+  scenes, from the ground-truth cameras, F1 @2 cm, approximate scorer): plain 52.6, σc 51
+  53.2, **25 53.5**, 12 53.3, 6 52.3 — narrower bands keep trading completeness for
+  accuracy. ETH3D's own evaluator, plain vs σc 25: 56.4 → 57.1, five scenes better and
+  terrace equal. It costs no measurable
   time; an 11×11 window stayed worse than 7×7 with the weighting too. Best-K averages only
   sources that *measured* the pixel: a warp leaving the source, a masked texel or
   <4 overlapping samples returns a no-measurement sentinel and is excluded. A flat

@@ -116,14 +116,14 @@ Notable changes to websfm. The format follows
 - **Sharper depth at object edges.** Depth maps compare image patches with each pixel
   weighted by how close it is to the patch centre and how similar its grey value is (as
   COLMAP does), so the far side of an edge no longer pulls a depth across it. On six
-  ETH3D scenes the F1 score at 2 cm rises from 52.6 to 53.5, better on every scene
-  (playground accuracy 75.5 → 79.7 %); an aerial block is unchanged. No extra time on the
+  ETH3D scenes (scored by ETH3D's own evaluator) the F1 score at 2 cm rises from 56.4 to
+  57.1, better on five scenes and equal on the sixth; an aerial block is unchanged. No extra time on the
   GPU, about 10 % without one.
 - **Fuller dense clouds.** Depth maps now compare each image with up to 10 neighbours
   instead of 6 and run 5 refinement sweeps instead of 3, so more of the surface gets a
-  depth. On six ETH3D scenes (dense from the true cameras, against the laser scans) the
-  F1 score at 2 cm rises from 50.1 to 52.6 on average, with no scene worse (office 35.8 →
-  40.9, playground 34.9 → 40.4). Depth maps take about 9 % longer on the GPU and about
+  depth. On six ETH3D scenes (dense from the true cameras, scored by ETH3D's own
+  evaluator) the F1 score at 2 cm rises from 53.6 to 56.4 on average, better on every
+  scene (office 37.8 → 43.0, playground 36.0 → 41.8). Depth maps take about 9 % longer on the GPU and about
   2.2× as long without one (a 42-image block: 211 → 465 s); both values stay adjustable in
   the Depth Maps dialog.
 - **More features on faint images.** An image that finds fewer than half the keypoint
