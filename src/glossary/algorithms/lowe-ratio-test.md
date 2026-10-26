@@ -3,6 +3,7 @@ id: lowe-ratio-test
 title: Lowe Ratio Test
 aliases: ratio test, ratio threshold, nearest-neighbour ratio, cross-check, mutual nearest neighbour
 summary: Accept a descriptor match only if the best candidate is clearly better than the second best — a distinctiveness test, not a similarity test.
+refs: lowe2004
 ---
 The **Lowe ratio test** is the standard filter applied to descriptor matching. For
 a [keypoint](help:keypoint) in image A, find the two nearest

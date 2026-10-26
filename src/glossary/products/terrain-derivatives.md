@@ -3,6 +3,7 @@ id: terrain-derivatives
 title: Terrain Derivatives
 aliases: terrain derivative, hillshade, hillshading, slope and aspect
 summary: Slope, aspect and hillshade, rasters computed from the DEM's local height gradient. They show how steep the ground is, which way it faces, and how it looks lit by a low sun.
+refs: horn1981, mark1992
 ---
 A [DEM](help:digital-elevation-model) stores height, but most questions about terrain
 are about how height *changes*. Three classic rasters are derived from the local

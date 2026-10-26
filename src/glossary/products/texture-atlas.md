@@ -3,6 +3,7 @@ id: texture-atlas
 title: Texture Atlas
 aliases: texture atlas, texture atlases, atlas page, atlas pages, UV coordinates, textured mesh, textured meshes
 summary: The images that hold a mesh's texture, with every triangle's corners pinned to a spot on them by UV coordinates.
+refs: waechter2014
 ---
 A textured [mesh](help:mesh) carries its colour in images rather than in its
 vertices. Each triangle corner gets two extra numbers, its **UV coordinates**, which say

@@ -27,6 +27,9 @@ import { projectHealth } from '../core/eval/health.js'
 import { estimatedIntrinsics } from '../core/sfm/cameraEstimated.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import { buildReportHtml } from '../core/products/report.js'
+import { methodsUsed } from '../core/help/methodsUsed.js'
+import { citeShort, formatReference } from '../core/help/references.js'
+import { isFisheyeModel } from '../core/sfm/distortion.js'
 import { buildProjectDigest, digestToMarkdown, digestToJson } from '../core/eval/summaryDigest.js'
 import { buildVerdict } from '../core/sfm/verdict.js'
 import {
@@ -499,6 +502,42 @@ export function useQualityReport() {
       } catch (err) {
         sections.push({ title: 'DEM vs reference DEM', note: `Not compared: ${err?.message ?? err}` })
       }
+    }
+
+    // Methods and references: what this project's run used, with the papers it follows
+    // (core/help/methodsUsed.js) — the part of a methods section a paper would cite.
+    const methods = methodsUsed({
+      detector: imagesStore.images.find((im) => im.kpStatus === 'done')?.detector ?? null,
+      matcher: matchesStore.matchRun?.matcher ?? null,
+      verifier: matchesStore.matchRun?.settings?.verifier ?? null,
+      sparse: cameras.value.size > 0,
+      fisheye:
+        sensorsStore.sensors.some((x) => isFisheyeModel(x.distortionModel)) ||
+        (recon.summary?.selfCalDistortion ?? []).some((d) => d.fisheye),
+      georef: !!recon.georef,
+      dense: recon.clouds.some((c) => c.kind === 'dense' && !c.imported),
+      mesh: recon.clouds.some((c) => c.kind === 'mesh' && !c.imported),
+      textured: recon.clouds.some((c) => c.kind === 'mesh' && !c.imported && c.texture),
+      dem: !!recon.dem,
+      demFill: recon.dem?.fillMethod ?? null,
+      ortho: recon.ortho ? (recon.ortho.method ?? {}) : null,
+    })
+    if (methods.length) {
+      const keys = [...new Set(methods.flatMap((m) => m.refs))]
+      sections.push({
+        title: 'Methods and references',
+        columns: [
+          { key: 'step', label: 'Step' },
+          { key: 'method', label: 'Method' },
+          { key: 'refs', label: 'After' },
+        ],
+        rows: methods.map((m) => ({ step: m.step, method: m.method, refs: m.refs.map(citeShort).join('; ') })),
+      })
+      sections.push({
+        title: 'References',
+        columns: [{ key: 'ref', label: 'Reference' }],
+        rows: keys.map((k) => ({ ref: formatReference(k) })).sort((a, b) => a.ref.localeCompare(b.ref)),
+      })
     }
 
     return buildReportHtml({

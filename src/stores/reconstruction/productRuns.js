@@ -22,6 +22,7 @@ import { createBlockProgress, createStepProgress, createLogPacer } from '../../u
 import { pluralize } from '../../core/textFormat.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import * as opfs from '../../utils/opfs.js'
+import { DEM_DEFAULTS, ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 
 // Generating the computed rasters, split out of useReconstructionStore: the DEM
 // from the densest cloud and the orthophoto over a DEM or mesh surface, each in
@@ -206,6 +207,8 @@ export function createProductRuns({
         ...grid,
         createdAt: Date.now(),
         points: groundOnly ? 'ground' : 'all',
+        // How gaps were filled, for the Quality Report's methods (core/help/methodsUsed.js).
+        fillMethod: settings.fillMethod ?? DEM_DEFAULTS.fillMethod,
         name: dem.value?.name || 'DEM',
         frameStamp: frameStampOf(resolved),
         // Heights are in the georeference's vertical datum (georeferencing.js).
@@ -470,6 +473,13 @@ export function createProductRuns({
         ...res,
         createdAt: Date.now(),
         name: ortho.value?.name || 'Orthophoto',
+        // The mosaic's method, for the Quality Report (core/help/methodsUsed.js).
+        method: {
+          blend: settings.blend ?? ORTHO_DEFAULTS.blend,
+          seamline: settings.seamline ?? ORTHO_DEFAULTS.seamline,
+          seamBlend: settings.seamBlend ?? ORTHO_DEFAULTS.seamBlend,
+          colourBalance: settings.colourBalance ?? ORTHO_DEFAULTS.colourBalance,
+        },
         // Symbology survives a rebuild, like the name (display only).
         ...(ortho.value?.style && { style: ortho.value.style }),
         frameStamp:

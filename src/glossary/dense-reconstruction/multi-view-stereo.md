@@ -3,6 +3,7 @@ id: multi-view-stereo
 title: Multi-View Stereo
 aliases: MVS, dense reconstruction, densification
 summary: Estimating depth for nearly every pixel across overlapping views to turn a sparse reconstruction into a dense point cloud.
+refs: schonberger2016b, galliani2015
 ---
 **Multi-View Stereo (MVS)** is the stage that turns the sparse skeleton of a
 reconstruction into dense geometry. Where standard SfM only recovers 3D

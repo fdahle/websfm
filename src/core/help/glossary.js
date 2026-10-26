@@ -5,6 +5,8 @@
 // then autoLinkHtml below) lives in helpMarkdown.js, a separate chunk loaded on
 // demand. See src/glossary/core-sfm/reprojection-error.md for the schema.
 
+import { parseRefKeys } from './references.js'
+
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
 
 // Strip a leading HTML comment (used to document the schema in-file) plus any
@@ -91,6 +93,9 @@ export function parseGlossaryEntry(raw, sourcePath = '<string>') {
     summary: meta.summary || '',
     aliases: [...aliases],
     topic: topicOf(sourcePath),
+    // refs: comma-separated keys of core/help/references.js — the published methods
+    // this entry describes, shown as its "Sources".
+    refs: parseRefKeys(meta.refs),
     body: body.trim(),
   }
 }

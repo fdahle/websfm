@@ -3,6 +3,7 @@ id: icp
 title: ICP (Iterative Closest Point)
 aliases: ICP, iterative closest point, point-to-plane, point-to-plane ICP, point-to-point ICP
 summary: Refines the alignment of one point cloud onto another by pairing each point with its nearest neighbour, solving for the transform that brings the pairs together, and repeating.
+refs: besl1992, chen1992
 ---
 **Iterative Closest Point** aligns two overlapping scans of the same scene without
 knowing which point corresponds to which. It guesses: pair every point of the

@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Sources for every method.** Each glossary entry now lists the papers behind the
+  method it explains, About ▸ References lists every method WebSfM implements, and the
+  exported Quality Report ends with the methods this project used and their references,
+  ready for a paper's methods section. WebSfM itself is citable via `CITATION.cff`.
 - **What's New.** Other → What's New lists every release, newest first, with a badge
   counting the changes since you last opened it. Changes shows each entry's headline
   and first sentence, Full the whole entry. websfm now has numbered releases (0.2.0 to

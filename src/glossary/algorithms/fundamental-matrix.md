@@ -3,6 +3,7 @@ id: fundamental-matrix
 title: Fundamental Matrix
 aliases: F matrix, fundamental matrices
 summary: The 3×3 matrix encoding the epipolar geometry between two uncalibrated images; maps a point in one image to its epipolar line in the other.
+refs: hartley1997, hartley2004
 ---
 The **fundamental matrix** $F$ is the algebraic form of
 [epipolar geometry](help:epipolar-geometry) for two **uncalibrated** views. For

@@ -6,6 +6,7 @@
   title: Display Title    # required, shown as the tab/tooltip heading; also an auto-link alias
   summary: One or two sentences shown in the hover tooltip. Keep it short.
   aliases: extra phrase, another one   # optional; extra words that auto-link to this entry
+  refs: lowe2004, nister2004          # optional; keys of src/core/help/references.js, shown as "Sources"
   ---
   Markdown body shown in the full modal tab when the term is opened.
   - Link explicitly with [label](help:other-entry-id) — opens/focuses that tab.

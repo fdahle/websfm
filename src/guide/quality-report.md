@@ -84,3 +84,9 @@ whole DEM. The exported report names both layers.
 Export produces a self-contained HTML report with no external assets or scripts. Open
 it in a browser and print to PDF if needed. It captures the current state, so export it
 after the final reconstruction and alignment.
+
+The report ends with **Methods and references**: each step this project ran (features,
+matching, SfM, dense, mesh, DEM, orthophoto, …), how WebSfM did it, and the papers it
+follows, with a full reference list. It is meant for the methods section of a paper or
+report. Every method WebSfM implements is listed under About ▸ References, and each
+glossary entry names its own under *Sources*.

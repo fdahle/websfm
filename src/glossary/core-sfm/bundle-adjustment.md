@@ -2,6 +2,7 @@
 id: bundle-adjustment
 title: Bundle Adjustment
 summary: A joint, nonlinear refinement of every camera pose and 3D point together, minimizing total reprojection error across the whole reconstruction.
+refs: triggs2000, agarwal2010
 aliases: BA
 ---
 

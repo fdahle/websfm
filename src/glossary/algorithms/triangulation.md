@@ -3,6 +3,7 @@ id: triangulation
 title: Triangulation
 aliases: triangulate, triangulated, triangulating
 summary: Intersecting the viewing rays of two or more posed cameras to recover the 3D position of the feature they both saw.
+refs: hartley2004
 ---
 **Triangulation** recovers a 3D point from its 2D observations once the cameras
 are posed. Each observation back-projects to a ray from that camera centre

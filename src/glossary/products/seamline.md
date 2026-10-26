@@ -3,6 +3,7 @@ id: seamline
 title: Seamline
 aliases: seamlines, seam line, seam lines, colour balance, color balance, feathering, seam blending
 summary: The border in an orthomosaic where the colour switches from one source photo to the next. Mosaicking decides where the seams run, then hides them with colour balance and seam blending.
+refs: boykov2001, boykov2004
 ---
 Most ground in an aerial survey is seen by several photos, so an
 [orthophoto](help:orthophoto) is a **mosaic**: each area has to come from one of

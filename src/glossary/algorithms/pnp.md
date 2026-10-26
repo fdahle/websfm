@@ -3,6 +3,7 @@ id: pnp
 title: PnP (Resection)
 aliases: PnP, perspective-n-point, resection, P3P, space resection
 summary: Solving one camera's pose from known 3D points and where they appear in its image — how each new photo is added to a reconstruction.
+refs: persson2018
 ---
 **Perspective-n-Point (PnP)** — *space resection* in photogrammetry — answers:
 given a set of 3D points whose positions are already known, and the pixels they

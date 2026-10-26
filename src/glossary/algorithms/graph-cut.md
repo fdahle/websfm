@@ -3,6 +3,7 @@ id: graph-cut
 title: Graph Cut
 aliases: graph cuts, graph-cut, min cut, minimum cut, min-cut, alpha-expansion, alpha expansion
 summary: Choosing a label for every pixel at once by cutting a graph at its cheapest point, so that each pixel's own preference and the cost of disagreeing with its neighbours are traded off together.
+refs: boykov2001, boykov2004
 ---
 Many image problems ask for one **label** per pixel: which photo colours this part of
 an [orthophoto](help:orthophoto), which side of an object a pixel is on. Each pixel

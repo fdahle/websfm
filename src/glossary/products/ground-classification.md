@@ -3,6 +3,7 @@ id: ground-classification
 title: Ground Classification
 aliases: ground classification, ground filter, cloth simulation filter, CSF, digital terrain model, DTM, bare-earth
 summary: Separating the points on the terrain from those on buildings, vegetation and objects, so a terrain model (DTM) can be built from the ground alone. WebSfM uses a cloth simulation filter.
+refs: zhang2016
 ---
 A point cloud of a landscape mixes the terrain with everything standing on it. A
 [DEM](help:digital-elevation-model) of all points is a **digital surface model

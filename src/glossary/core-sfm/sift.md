@@ -3,6 +3,7 @@ id: sift
 title: SIFT
 aliases: scale-invariant feature transform
 summary: Scale-Invariant Feature Transform — the detector/descriptor that finds keypoints and their 128-d descriptors.
+refs: lowe2004, arandjelovic2012
 ---
 **SIFT** (Scale-Invariant Feature Transform) is the classic feature detector and
 descriptor, and WebSfM's default. Its defining property is in the name: it finds

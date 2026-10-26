@@ -3,6 +3,7 @@ id: photometric-consistency
 title: Photometric Consistency
 aliases: NCC, ZNCC, matching cost, photo-consistency, photometric cost
 summary: How well a candidate surface patch, warped into neighbouring views, actually looks the same in all of them — the score dense stereo optimises.
+refs: schonberger2016b
 ---
 **Photometric consistency** is the test at the heart of dense stereo. A candidate
 depth at a pixel implies a small surface patch in 3D; warp that patch into each

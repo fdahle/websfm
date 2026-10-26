@@ -3,6 +3,7 @@ id: magsac
 title: MAGSAC++
 aliases: MAGSAC, sigma-consensus
 summary: A RANSAC variant that does not trust one inlier threshold: it scores a model by a loss averaged over every noise level up to a maximum, and polishes it by weighted least squares.
+refs: barath2020
 ---
 **MAGSAC++** (Barath et al., 2020) is a robust estimator in the
 [RANSAC](help:ransac) family. It draws the same random minimal samples, but judges

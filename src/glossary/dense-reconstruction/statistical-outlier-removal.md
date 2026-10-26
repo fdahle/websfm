@@ -3,6 +3,7 @@ id: statistical-outlier-removal
 title: Statistical Outlier Removal
 aliases: SOR, statistical outliers, statistical outlier filter, remove outliers
 summary: Drops points whose mean distance to their nearest neighbours is unusually large for this cloud. These are the floating specks fusion leaves around a surface.
+refs: rusu2008
 ---
 A dense [point cloud](help:point-cloud) nearly always carries a thin haze of
 **flyers**: single points floating in front of or behind the surface, left by depth

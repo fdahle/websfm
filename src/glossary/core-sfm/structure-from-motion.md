@@ -3,6 +3,7 @@ id: structure-from-motion
 title: Structure from Motion
 aliases: SfM, structure-from-motion, sparse reconstruction, incremental SfM
 summary: Recovering camera poses and 3D scene structure simultaneously from a set of overlapping photos, with nothing but the photos as input.
+refs: schonberger2016
 ---
 **Structure from Motion (SfM)** solves for two unknowns at once from overlapping
 photographs: the *structure* (where things are in 3D) and the *motion* (where

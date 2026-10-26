@@ -3,6 +3,7 @@ id: fisheye-lens
 title: Fisheye Lens
 aliases: fisheye, fisheye lenses, fisheye camera, Kannala-Brandt, Kannala–Brandt, equidistant projection
 summary: An ultra-wide lens that maps the angle of a ray, not its tangent, to image radius — so it can see far wider than any pinhole camera.
+refs: kannala2006
 ---
 A **fisheye lens** records a ray that arrives at angle $\theta$ off the optical axis
 at an image radius proportional to $\theta$ itself, where a

@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: 'If you use WebSfM in your work, please cite it as below. The methods it implements are listed in docs/METHODS.md (References) and in the app (About ▸ References).'
+title: 'WebSfM: Structure-from-Motion and photogrammetry, entirely in the browser'
+type: software
+authors:
+  - family-names: Dahle
+    given-names: Felix
+version: 0.4.0
+date-released: '2026-10-21'
+license: MIT
+repository-code: 'https://github.com/fdahle/websfm'
+url: 'https://websfm.app'
+keywords:
+  - photogrammetry
+  - structure from motion
+  - multi-view stereo
+  - WebAssembly
+  - WebGPU

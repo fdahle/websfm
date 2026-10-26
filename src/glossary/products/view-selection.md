@@ -3,6 +3,7 @@ id: view-selection
 title: View Selection
 aliases: view selection
 summary: Choosing, for every triangle of a mesh, the one photo its texture comes from, trading sharpness against the number of seams.
+refs: waechter2014
 ---
 Most surface in a photogrammetry project is seen by several photos, so texturing a
 mesh starts with a choice: which photo should each triangle show? Taking the best photo

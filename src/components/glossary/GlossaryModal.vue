@@ -7,6 +7,7 @@ import { useHelpLinkPreview } from '../../composables/useHelpLinkPreview.js'
 import { helpLinkFrom, followLink } from '../../composables/useHelpStack.js'
 import { getGlossaryEntry, getGlossaryEntriesByTopic, searchGlossary } from '../../core/help/glossary.js'
 import { renderHelpMarkdown } from '../../core/help/helpMarkdown.js'
+import { formatReference, referenceUrl } from '../../core/help/references.js'
 
 // Single centered modal holding the glossary. A Home/index tab plus one tab per
 // opened term (unlimited, closeable). Cross-links inside a term open more tabs.
@@ -31,6 +32,15 @@ const results = computed(() => (query.value.trim() ? searchGlossary(query.value)
 const activeEntry = computed(() => (activeId.value === 'home' ? null : getGlossaryEntry(activeId.value)))
 const activeHtml = computed(() =>
   activeEntry.value ? renderHelpMarkdown(activeEntry.value.body, { selfId: activeEntry.value.id }) : '',
+)
+
+// The published methods the entry describes (its `refs:`), as full citations.
+const activeRefs = computed(() =>
+  (activeEntry.value?.refs ?? []).map((key) => ({
+    key,
+    text: formatReference(key, { link: false }),
+    url: referenceUrl(key),
+  })),
 )
 
 const tabEntries = computed(() => tabs.value.map((id) => ({ id, entry: getGlossaryEntry(id) })))
@@ -167,7 +177,18 @@ function onBodyClick(e) {
               @mouseover="onPreviewOver"
               @mouseout="onPreviewOut"
             ></div>
-            <p v-else class="empty">No glossary entry found for “{{ activeId }}”.</p>
+            <div v-if="activeEntry && activeRefs.length" class="term-sources">
+              <div class="term-sources-title">Sources</div>
+              <ol>
+                <li v-for="r in activeRefs" :key="r.key">
+                  {{ r.text }}
+                  <a v-if="r.url" :href="r.url" target="_blank" rel="noopener">{{
+                    r.url.replace(/^https:\/\//, '')
+                  }}</a>
+                </li>
+              </ol>
+            </div>
+            <p v-else-if="!activeEntry" class="empty">No glossary entry found for “{{ activeId }}”.</p>
           </template>
         </div>
       </div>
@@ -430,6 +451,29 @@ function onBodyClick(e) {
   line-height: 1.4;
 }
 
+.term-sources {
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.term-sources-title {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.term-sources ol {
+  margin: 0;
+  padding-left: 18px;
+}
+.term-sources li {
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+.term-sources a {
+  color: var(--accent);
+}
 .term-body :deep(a.glossary-link) {
   color: var(--accent);
   cursor: pointer;

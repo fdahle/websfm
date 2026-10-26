@@ -3,6 +3,7 @@ id: georeferencing
 title: Georeferencing
 aliases: georeference, georeferenced, geo-referencing, absolute orientation, similarity transform
 summary: Placing the reconstruction into real-world coordinates by fitting the 7-parameter similarity transform that photographs alone cannot determine.
+refs: horn1987
 ---
 **Georeferencing** (*absolute orientation* in photogrammetry) moves a
 reconstruction from its own arbitrary coordinate frame into real-world

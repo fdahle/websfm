@@ -2,6 +2,7 @@
 id: epipolar-geometry
 title: Epipolar Geometry
 summary: The projective geometry between two views — a point in one image constrains its match in the other to lie on a line.
+refs: hartley2004
 aliases: epipolar geometry, epipolar constraint, epipolar line
 ---
 

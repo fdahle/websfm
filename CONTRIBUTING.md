@@ -112,6 +112,13 @@ adds, removes or renames a setting, operation or user-visible feature:
    Shortcuts dialog lists the table, and a unit test fails on an entry no handler
    matches. Plain control behaviour (Enter or Esc in a field, arrows in a menu) is not
    a shortcut.
+5. Code that implements a published method cites it: add the paper to
+   `src/core/help/references.js` (key, authors, year, title, venue, DOI), list its key
+   under `refs:` in the glossary entry that explains the method, add it to
+   `src/core/help/methodsUsed.js` when it is a pipeline step the Quality Report should
+   name, and add the same line to the References section of
+   [docs/METHODS.md](docs/METHODS.md). The unit tests fail on a key that does not
+   resolve, an entry nothing cites, or one missing from METHODS.md.
 
 ## Dialogs of a processing step
 

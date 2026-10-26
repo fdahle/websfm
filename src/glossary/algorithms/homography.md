@@ -3,6 +3,7 @@ id: homography
 title: Homography
 aliases: homographies, H matrix, planar homography
 summary: A 3×3 projective map between two images that holds when the scene is planar or the camera only rotated — and a warning sign when it explains a pair too well.
+refs: hartley2004
 ---
 A **homography** $H$ is a 3×3 projective transformation mapping every point of
 one image directly to a point in another: $x' \sim H x$. Unlike the

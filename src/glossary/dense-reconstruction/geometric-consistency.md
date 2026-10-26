@@ -3,6 +3,7 @@ id: geometric-consistency
 title: Geometric Consistency
 aliases: cross-view consistency, cross-view geometric consistency, cross-view check, geometric consistency filter, forward-backward reprojection
 summary: The check that other views confirm a pixel's depth. Project the pixel into a neighbour, read that view's own depth, project back, and see whether you land where you started.
+refs: schonberger2016b
 ---
 A depth that only one image believes is a guess. **Geometric consistency** asks the
 other cameras to confirm it. It does not compare colours, which

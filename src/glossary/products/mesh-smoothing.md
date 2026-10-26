@@ -3,6 +3,7 @@ id: mesh-smoothing
 title: Mesh Smoothing
 aliases: Taubin smoothing, Laplacian smoothing, smooth mesh
 summary: Moves each vertex of a mesh towards the average of its neighbours to remove small bumps. Taubin's variant alternates a shrinking and an inflating step, so the surface keeps its size.
+refs: taubin1995
 ---
 A reconstructed [mesh](help:mesh) carries fine noise: small bumps and ripples from
 depth noise in the points it was built from. **Laplacian smoothing** removes it by

@@ -3,6 +3,7 @@ id: mesh-decimation
 title: Mesh Decimation
 aliases: decimation, decimate, quadric edge collapse, quadric error metrics, mesh simplification
 summary: Reduces a mesh's triangle count by collapsing edges where the surface is flat, keeping triangles where it bends.
+refs: garland1997
 ---
 A Poisson [mesh](help:mesh) comes out with millions of triangles, far more than a
 viewer, a GLB export or a web page wants, and most of them sit on flat surface a

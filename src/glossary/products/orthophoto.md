@@ -3,6 +3,7 @@ id: orthophoto
 title: Orthophoto
 aliases: orthophotos, orthomosaic, orthoimage, ortho
 summary: A photo corrected so every pixel is viewed straight down at a constant scale, giving a map-accurate, measurable image.
+refs: burt1983, brown2007, boykov2001
 ---
 An **orthophoto** is an aerial image that has been geometrically corrected so
 that it reads like a map: every pixel appears as if viewed from directly above,

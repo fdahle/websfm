@@ -2,6 +2,7 @@
 id: essential-matrix
 title: Essential Matrix
 summary: A 3×3 matrix encoding the relative rotation and translation between two calibrated views — the algebraic core of epipolar geometry.
+refs: nister2004, stewenius2006
 aliases: essential matrix, E matrix
 ---
 

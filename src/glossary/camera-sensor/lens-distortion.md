@@ -3,6 +3,7 @@ id: lens-distortion
 title: Lens Distortion
 aliases: distortion, radial distortion, barrel distortion, pincushion distortion, brown-conrady
 summary: The way a real lens bends straight lines into curves, breaking the ideal pinhole model — corrected before reconstruction.
+refs: brown1966
 ---
 **Lens distortion** is the deviation of a real lens from the ideal
 [pinhole](help:camera-intrinsics) projection. Instead of mapping straight lines

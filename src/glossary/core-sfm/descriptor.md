@@ -3,6 +3,7 @@ id: descriptor
 title: Descriptor
 aliases: descriptors, feature descriptor, SIFT descriptor
 summary: A fixed-length vector summarising the image patch around a keypoint, compared across images to find matches.
+refs: lowe2004, arandjelovic2012
 ---
 A **descriptor** is the numeric fingerprint of the pixels surrounding a
 [Keypoint](help:keypoint). Detection answers *where* an interesting point is;

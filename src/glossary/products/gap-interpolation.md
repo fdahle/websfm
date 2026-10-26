@@ -3,6 +3,7 @@ id: gap-interpolation
 title: Gap Interpolation
 aliases: gap filling, hole filling, nodata cells, IDW, inverse distance weighting, inverse-distance weighting
 summary: Filling raster cells that received no measurement (nodata) from measured cells nearby. Inverse distance weighting blends them; nearest neighbour copies the closest one.
+refs: shepard1968
 ---
 A DEM or an orthophoto is a regular grid, and the points and photos it is made from
 are not. Some cells receive nothing: no point fell into a DEM cell, or no photo

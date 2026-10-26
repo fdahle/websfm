@@ -3,6 +3,7 @@ id: multiband-blending
 title: Multiband Blending
 aliases: multiband blending, multi-band blending, Laplacian pyramid, Laplacian pyramid blending
 summary: Joining two images at a seam band by band, fine detail over a short distance and brightness over a long one, so the seam shows neither a step nor a double image.
+refs: burt1983
 ---
 Where two photos meet in a mosaic, a plain cross-fade has to choose one width for
 everything. A narrow fade leaves a visible step wherever the photos differ in

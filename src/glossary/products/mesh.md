@@ -3,6 +3,7 @@ id: mesh
 title: Mesh
 aliases: meshes, triangle mesh, surface reconstruction, poisson reconstruction, screened poisson
 summary: A connected triangulated surface fitted through the dense cloud — the step from a scatter of points to a watertight, renderable object.
+refs: kazhdan2013
 ---
 A **mesh** turns the dense [point cloud](help:point-cloud) into an actual
 surface: vertices joined into triangles, with a defined inside and outside. Points

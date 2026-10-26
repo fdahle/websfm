@@ -3,6 +3,7 @@ id: seam-levelling
 title: Seam Levelling
 aliases: seam levelling, seam leveling
 summary: Brightening or darkening each texture chart smoothly so that the two sides of every seam between photos meet.
+refs: waechter2014
 ---
 In a [textured mesh](help:texture-atlas), each chart is cut from a different photo,
 and where two charts meet the photos rarely agree exactly. Light falls differently,

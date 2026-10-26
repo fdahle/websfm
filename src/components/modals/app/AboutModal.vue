@@ -8,15 +8,22 @@ import { ref } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import Icon from '../../Icon.vue'
 import { ACKNOWLEDGMENTS, THIRD_PARTY } from '../../../core/help/licenses.js'
+import { REFERENCES, formatReference, referenceUrl } from '../../../core/help/references.js'
 import { version as appVersion } from '../../../../package.json'
 
 const emit = defineEmits(['close'])
 const licenseUrl = `${import.meta.env.BASE_URL}LICENSE`
 
+// Every published method WebSfM implements (core/help/references.js), by first author.
+const references = Object.keys(REFERENCES)
+  .map((key) => ({ key, text: formatReference(key, { link: false }), url: referenceUrl(key) }))
+  .sort((a, b) => a.text.localeCompare(b.text))
+
 const tab = ref('about')
 const tabs = [
   { id: 'about', label: 'About' },
   { id: 'credits', label: 'Acknowledgments' },
+  { id: 'references', label: 'References' },
   { id: 'licenses', label: 'Licenses' },
 ]
 </script>
@@ -63,6 +70,20 @@ const tabs = [
       </ul>
     </div>
 
+    <!-- References (the papers behind the methods) -->
+    <div v-show="tab === 'references'" class="pane">
+      <p class="lede">
+        The published methods WebSfM implements. Each glossary entry lists the ones it describes under
+        <em>Sources</em>; the Quality Report lists those a project's run used.
+      </p>
+      <ol class="ref-list">
+        <li v-for="r in references" :key="r.key">
+          {{ r.text }}
+          <a v-if="r.url" :href="r.url" target="_blank" rel="noopener">{{ r.url.replace(/^https:\/\//, '') }}</a>
+        </li>
+      </ol>
+    </div>
+
     <!-- Third-party licenses (obligation) -->
     <div v-show="tab === 'licenses'" class="pane">
       <p class="lede">Bundled third-party software, models and example data, with their licenses:</p>
@@ -87,6 +108,19 @@ const tabs = [
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
+.ref-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.ref-list li {
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+.ref-list a {
+  color: var(--accent);
+}
 /* Brand hero */
 .hero {
   display: flex;

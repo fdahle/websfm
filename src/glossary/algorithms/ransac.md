@@ -3,6 +3,7 @@ id: ransac
 title: RANSAC
 aliases: random sample consensus, MSAC
 summary: A robust algorithm that fits a geometric model to data full of outliers by finding the model the most points agree with.
+refs: fischler1981
 ---
 **RANSAC** (Random Sample Consensus) is a robust estimation algorithm used
 throughout WebSfM to fit a clean geometric model to data that is contaminated

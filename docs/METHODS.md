@@ -1974,3 +1974,47 @@ as CPU previews (the index colour ramp is sampled into 33 interpolation stops).
 *In-app glossary*: many of these terms also have cross-linked explanations under
 `src/glossary/**` (loader/renderer in `src/core/help/`), surfaced in the UI — that
 content is user-facing; this file is the developer/colleague-facing method reference.
+
+## 13. References
+
+The published methods WebSfM implements, from `src/core/help/references.js` — the same
+list the app shows (About ▸ References, each glossary entry's *Sources*, the Quality
+Report's *Methods and references*). A unit test keeps this section in step with that file.
+
+- Agarwal, S., Snavely, N., Seitz, S. M. & Szeliski, R. (2010). Bundle adjustment in the large. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-642-15552-9_3
+- Arandjelović, R. & Zisserman, A. (2012). Three things everyone should know to improve object retrieval. IEEE Conference on Computer Vision and Pattern Recognition (CVPR). https://doi.org/10.1109/CVPR.2012.6248018
+- Barath, D., Noskova, J., Ivashechkin, M. & Matas, J. (2020). MAGSAC++, a fast, reliable and accurate robust estimator. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). https://arxiv.org/abs/1912.05909
+- Besl, P. J. & McKay, N. D. (1992). A method for registration of 3-D shapes. IEEE Transactions on Pattern Analysis and Machine Intelligence 14(2), 239–256. https://doi.org/10.1109/34.121791
+- Bleyer, M., Rhemann, C. & Rother, C. (2011). PatchMatch stereo — stereo matching with slanted support windows. British Machine Vision Conference (BMVC). https://doi.org/10.5244/C.25.14
+- Boykov, Y. & Kolmogorov, V. (2004). An experimental comparison of min-cut/max-flow algorithms for energy minimization in vision. IEEE Transactions on Pattern Analysis and Machine Intelligence 26(9), 1124–1137. https://doi.org/10.1109/TPAMI.2004.60
+- Boykov, Y., Veksler, O. & Zabih, R. (2001). Fast approximate energy minimization via graph cuts. IEEE Transactions on Pattern Analysis and Machine Intelligence 23(11), 1222–1239. https://doi.org/10.1109/34.969114
+- Brown, D. C. (1966). Decentering distortion of lenses. Photogrammetric Engineering 32(3), 444–462.
+- Brown, M. & Lowe, D. G. (2007). Automatic panoramic image stitching using invariant features. International Journal of Computer Vision 74(1), 59–73. https://doi.org/10.1007/s11263-006-0002-3
+- Burt, P. J. & Adelson, E. H. (1983). A multiresolution spline with application to image mosaics. ACM Transactions on Graphics 2(4), 217–236. https://doi.org/10.1145/245.247
+- Chen, Y. & Medioni, G. (1992). Object modelling by registration of multiple range images. Image and Vision Computing 10(3), 145–155. https://doi.org/10.1016/0262-8856(92)90066-C
+- DeTone, D., Malisiewicz, T. & Rabinovich, A. (2018). SuperPoint: self-supervised interest point detection and description. CVPR Workshops. https://arxiv.org/abs/1712.07629
+- Fischler, M. A. & Bolles, R. C. (1981). Random sample consensus: a paradigm for model fitting with applications to image analysis and automated cartography. Communications of the ACM 24(6), 381–395. https://doi.org/10.1145/358669.358692
+- Galliani, S., Lasinger, K. & Schindler, K. (2015). Massively parallel multiview stereopsis by surface normal diffusion. IEEE International Conference on Computer Vision (ICCV). https://doi.org/10.1109/ICCV.2015.106
+- Garland, M. & Heckbert, P. S. (1997). Surface simplification using quadric error metrics. SIGGRAPH 97, 209–216. https://doi.org/10.1145/258734.258849
+- Hartley, R. & Zisserman, A. (2004). Multiple View Geometry in Computer Vision (2nd edition). Cambridge University Press. https://doi.org/10.1017/CBO9780511811685
+- Hartley, R. I. (1997). In defense of the eight-point algorithm. IEEE Transactions on Pattern Analysis and Machine Intelligence 19(6), 580–593. https://doi.org/10.1109/34.601246
+- Horn, B. K. P. (1981). Hill shading and the reflectance map. Proceedings of the IEEE 69(1), 14–47. https://doi.org/10.1109/PROC.1981.11918
+- Horn, B. K. P. (1987). Closed-form solution of absolute orientation using unit quaternions. Journal of the Optical Society of America A 4(4), 629–642. https://doi.org/10.1364/JOSAA.4.000629
+- Kannala, J. & Brandt, S. S. (2006). A generic camera model and calibration method for conventional, wide-angle, and fish-eye lenses. IEEE Transactions on Pattern Analysis and Machine Intelligence 28(8), 1335–1340. https://doi.org/10.1109/TPAMI.2006.153
+- Kazhdan, M. & Hoppe, H. (2013). Screened Poisson surface reconstruction. ACM Transactions on Graphics 32(3), 29. https://doi.org/10.1145/2487228.2487237
+- Lindenberger, P., Sarlin, P.-E. & Pollefeys, M. (2023). LightGlue: local feature matching at light speed. IEEE/CVF International Conference on Computer Vision (ICCV). https://arxiv.org/abs/2306.13643
+- Lowe, D. G. (2004). Distinctive image features from scale-invariant keypoints. International Journal of Computer Vision 60(2), 91–110. https://doi.org/10.1023/B:VISI.0000029664.99615.94
+- Mark, R. K. (1992). Multidirectional, oblique-weighted, shaded-relief image of the Island of Hawaii. U.S. Geological Survey Open-File Report 92-422. https://pubs.usgs.gov/of/1992/of92-422/
+- Nistér, D. (2004). An efficient solution to the five-point relative pose problem. IEEE Transactions on Pattern Analysis and Machine Intelligence 26(6), 756–770. https://doi.org/10.1109/TPAMI.2004.17
+- Persson, M. & Nordberg, K. (2018). Lambda Twist: an accurate fast robust perspective three point (P3P) solver. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-030-01225-0_20
+- Rusu, R. B., Marton, Z. C., Blodow, N., Dolha, M. & Beetz, M. (2008). Towards 3D point cloud based object maps for household environments. Robotics and Autonomous Systems 56(11), 927–941. https://doi.org/10.1016/j.robot.2008.08.005
+- Schönberger, J. L. & Frahm, J.-M. (2016). Structure-from-motion revisited. IEEE Conference on Computer Vision and Pattern Recognition (CVPR). https://doi.org/10.1109/CVPR.2016.445
+- Schönberger, J. L., Zheng, E., Frahm, J.-M. & Pollefeys, M. (2016). Pixelwise view selection for unstructured multi-view stereo. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-319-46487-9_31
+- Shepard, D. (1968). A two-dimensional interpolation function for irregularly-spaced data. Proceedings of the 23rd ACM National Conference, 517–524. https://doi.org/10.1145/800186.810616
+- Stewénius, H., Engels, C. & Nistér, D. (2006). Recent developments on direct relative orientation. ISPRS Journal of Photogrammetry and Remote Sensing 60(4), 284–294. https://doi.org/10.1016/j.isprsjprs.2006.03.005
+- Taubin, G. (1995). A signal processing approach to fair surface design. SIGGRAPH 95, 351–358. https://doi.org/10.1145/218380.218473
+- Triggs, B., McLauchlan, P. F., Hartley, R. I. & Fitzgibbon, A. W. (2000). Bundle adjustment — a modern synthesis. Vision Algorithms: Theory and Practice, LNCS 1883, 298–372. https://doi.org/10.1007/3-540-44480-7_21
+- Tyszkiewicz, M. J., Fua, P. & Trulls, E. (2020). DISK: learning local features with policy gradient. Advances in Neural Information Processing Systems (NeurIPS) 33. https://arxiv.org/abs/2006.13566
+- Waechter, M., Moehrle, N. & Goesele, M. (2014). Let there be color! Large-scale texturing of 3D reconstructions. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-319-10602-1_54
+- Zhang, W., Qi, J., Wan, P., Wang, H., Xie, D., Wang, X. & Yan, G. (2016). An easy-to-use airborne LiDAR data filtering method based on cloth simulation. Remote Sensing 8(6), 501. https://doi.org/10.3390/rs8060501
+- Zhao, X., Wu, X., Chen, W., Chen, P. C. Y., Xu, Q. & Li, Z. (2023). ALIKED: a lighter keypoint and descriptor extraction network via deformable transformation. IEEE Transactions on Instrumentation and Measurement 72. https://arxiv.org/abs/2304.03608
