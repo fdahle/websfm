@@ -38,9 +38,9 @@ export const DETECT_TUNING = {
   siftCapRule: 'coarse-first',
   // A faint image — fewer keypoints than this share of the cap at the set contrast —
   // is detected again at siftFaintRetryContrast × that contrast (core/features/
-  // faintRetry.js, which has the measurements). Untiled SIFT only. Off = the detector
-  // before 2026-10-25 exactly. Its cost is in matching: quarry 347 exhaustive +31 %.
-  siftFaintRetry: true,
+  // faintRetry.js, which has the measurements). Untiled SIFT only. On or off is the
+  // user's (DETECT_SIFT_DEFAULTS.faintRetry): its cost is in matching, quarry 347
+  // exhaustive +31 %.
   siftFaintRetryShare: 0.5,
   siftFaintRetryContrast: 0.5,
   spMaxUntiledInputPx: 16_000_000, // ≈4000×4000; above this (tiling off) → prompt / clean fail

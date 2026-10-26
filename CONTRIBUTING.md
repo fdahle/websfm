@@ -120,6 +120,23 @@ adds, removes or renames a setting, operation or user-visible feature:
    [docs/METHODS.md](docs/METHODS.md). The unit tests fail on a key that does not
    resolve, an entry nothing cites, or one missing from METHODS.md.
 
+## An option or not
+
+A change that makes a step faster or better either becomes a setting or doesn't:
+
+- **A pure win is not an option.** When the change is better or equal on every project
+  measured, at no real cost in time or memory, it simply replaces the old behaviour.
+- **A trade-off is an option.** When it costs something a user may care about (time,
+  memory, completeness against accuracy) or helps one kind of project and hurts another,
+  it gets a setting, with the default that suits most projects. An Auto default may
+  decide by what it can see (GPU or not, aerial or object), and its effect line says what
+  it chose.
+- **Trade-offs that only make sense together are one setting**, a preset such as Depth
+  Maps ▸ Method (Full or Fast), not a checkbox per part.
+
+Say in the CHANGELOG entry what the measurement was, so the next person can tell which
+case it is.
+
 ## Dialogs of a processing step
 
 A dialog that runs a processing step lays out its settings as numbered steps, in the

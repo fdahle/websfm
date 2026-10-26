@@ -13,6 +13,7 @@
 // points +14 %, exhaustive matching 781 → 1,020 s.
 
 import { DETECT_TUNING } from '../tuning.js'
+import { DETECT_SIFT_DEFAULTS } from '../defaults.user.js'
 
 /**
  * The contrast threshold to detect a faint image again at, or null to keep the first
@@ -21,7 +22,7 @@ import { DETECT_TUNING } from '../tuning.js'
  * @param {{ contrastThreshold: number, maxKeypoints: number, enabled?: boolean }} o
  * @returns {{ contrast: number, floor: number } | null}
  */
-export function faintRetry(count, { contrastThreshold, maxKeypoints, enabled = DETECT_TUNING.siftFaintRetry }) {
+export function faintRetry(count, { contrastThreshold, maxKeypoints, enabled = DETECT_SIFT_DEFAULTS.faintRetry }) {
   if (!enabled || !(maxKeypoints > 0) || !(contrastThreshold > 0)) return null
   const floor = Math.round(DETECT_TUNING.siftFaintRetryShare * maxKeypoints)
   if (count >= floor) return null

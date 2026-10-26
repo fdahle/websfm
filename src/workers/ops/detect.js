@@ -31,6 +31,7 @@ import {
 } from '../../core/sfm/fiducialDetection.js'
 import { pluralize } from '../../core/textFormat.js'
 import { DETECT_TUNING } from '../../core/tuning.js'
+import { DETECT_SIFT_DEFAULTS } from '../../core/defaults.user.js'
 import { faintRetry } from '../../core/features/faintRetry.js'
 
 // Detection ops (SIFT / learned: SuperPoint, DISK, ALIKED). `rasterize` (OffscreenCanvas pixel decode)
@@ -346,7 +347,7 @@ export function makeDetectOps({ rasterize }) {
       tiling = 'off',
       tileSize = 0,
       overlap = 64,
-      faintRetry = DETECT_TUNING.siftFaintRetry,
+      faintRetry = DETECT_SIFT_DEFAULTS.faintRetry,
     } = options
     const raster = await rasterize(url, maxDim)
     const { data, width, height, scale, natW, natH } = raster

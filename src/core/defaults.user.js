@@ -31,6 +31,11 @@ export const DETECT_SIFT_DEFAULTS = {
   // cost +40–70 % matching time.
   contrastThreshold: 0.01,
   maxKeypoints: 10000, // per-image cap (strongest kept)
+  // Detect a faint image (under half the cap) again at half the contrast threshold
+  // (core/features/faintRetry.js). More cameras and smaller errors on interiors and
+  // plain surfaces (ETH3D office 18 → 20 of 26 cameras), for more matching time where
+  // it triggers (quarry, 53 of 347 images: +31 % exhaustive). Off = one detection.
+  faintRetry: true,
   tiling: 'off', // 'off' | 'on' — tiled detection for very large images
   tileSize: 1024, // max tile edge (px) when tiling is on
   overlap: 64, // min tile overlap (px); kept keypoints sit ≥ overlap/2 from a cut

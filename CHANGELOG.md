@@ -151,7 +151,8 @@ Notable changes to websfm. The format follows
   18 → 20 of 26, playground 34 → 35 of 38) and five are more accurate (delivery_area
   4.0 → 2.9 mm, playground 3.6 → 1.3 mm median); quarry (53 of 347 images retried):
   14 % more sparse points and 0.766 → 0.738 m against RTK without priors, for 31 % more
-  matching time; South Building (6 of 128 retried) is unchanged.
+  matching time; South Building (6 of 128 retried) is unchanged. Detect Features ▸
+  Advanced ▸ Retry faint images turns it off.
 - **Large cloud and mesh exports ask where to save first.** In Chrome and Edge, an export
   over about 256 MB opens the save dialog when you start it and writes the file there
   when it is done, instead of a download at the end. A 552 MB PLY download could be

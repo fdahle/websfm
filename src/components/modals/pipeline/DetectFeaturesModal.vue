@@ -279,7 +279,9 @@ const tileEffect = computed(() => {
 const detectEffect = computed(() =>
   isLearned.value
     ? `${learnedLabel.value} uses its learned score threshold — nothing to tune here.`
-    : 'SIFT keeps blobs whose contrast clears the threshold.',
+    : siftSettings.value.faintRetry && !tilingOn.value
+      ? 'SIFT keeps blobs whose contrast clears the threshold; an image with fewer than half the keypoint cap is detected again at half the threshold.'
+      : 'SIFT keeps blobs whose contrast clears the threshold, once per image.',
 )
 const keepEffect = computed(() => {
   const k = fmt(activeSettings.value.maxKeypoints)
@@ -549,6 +551,16 @@ function onShellClose() {
             step="0.0001"
             class="field-input"
           />
+        </SettingsField>
+        <SettingsField
+          v-if="!isLearned"
+          label-for="faintRetry"
+          hint="More features on plain walls, interiors and uniform fields; more matching time where it triggers."
+        >
+          <template #label>
+            <FieldHelp op="detect-features" param="faintRetry">Retry faint images</FieldHelp>
+          </template>
+          <input id="faintRetry" v-model="siftSettings.faintRetry" type="checkbox" />
         </SettingsField>
       </SettingsStep>
 
