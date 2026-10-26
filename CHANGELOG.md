@@ -113,6 +113,13 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Much fuller dense clouds of objects and interiors.** In an object-capture project the
+  depth filter now keeps a pixel that one other view confirms (aerial projects still need
+  two), so plain walls, floors and edges seen in only two photos stay in the cloud. On
+  six ETH3D scenes, scored by ETH3D's own evaluator, the F1 score at 2 cm rises from 57.1
+  to 62.0, with every scene better (office 43.2 → 55.2); at Medium quality that is above
+  COLMAP's 58.4 at a higher resolution. The Consistent views field is blank (auto) by
+  default; a number there still applies to any project.
 - **Sharper depth at object edges.** Depth maps compare image patches with each pixel
   weighted by how close it is to the patch centre and how similar its grey value is (as
   COLMAP does), so the far side of an edge no longer pulls a depth across it. On six

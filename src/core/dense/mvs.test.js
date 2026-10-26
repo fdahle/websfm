@@ -1243,10 +1243,13 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
     const want = {
       minNcc: DEPTHMAP_DEFAULTS.minNcc,
       maxGeomCost: DEPTHMAP_DEFAULTS.maxGeomCost,
-      minConsistent: DEPTHMAP_DEFAULTS.minConsistent,
+      minConsistent: 2, // blank = auto; an unknown scene type gets the aerial value
       minGeomAngleDeg: DEPTHMAP_DEFAULTS.minGeomAngleDeg,
     }
     expect(filterSettings(blank)).toEqual(want)
+    expect(filterSettings({ ...blank, sceneType: 'object' }).minConsistent).toBe(1)
+    expect(filterSettings({ ...blank, sceneType: 'aerial' }).minConsistent).toBe(2)
+    expect(filterSettings({ minConsistent: 3, sceneType: 'object' }).minConsistent).toBe(3)
     expect(filterConfig(blank)).toEqual(filterConfig({}))
     expect(filterConfig({ maxGeomCost: 0, minConsistent: -1, minNcc: 2, minGeomAngleDeg: -5 })).toEqual(
       filterConfig({}),
@@ -1276,7 +1279,7 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
       geomConsistency: true,
       streamMaps: false,
       maxGeomCost: DEPTHMAP_DEFAULTS.maxGeomCost,
-      minConsistent: DEPTHMAP_DEFAULTS.minConsistent,
+      minConsistent: 2, // blank = auto, aerial for an unknown scene type
       minNcc: DEPTHMAP_DEFAULTS.minNcc,
       minGeomAngleDeg: DEPTHMAP_DEFAULTS.minGeomAngleDeg,
     })

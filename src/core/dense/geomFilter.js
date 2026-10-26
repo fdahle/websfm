@@ -5,7 +5,7 @@
 // Stage A progress split (geomFilterLoopShare).
 
 import { DENSE_TUNING } from '../tuning.js'
-import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
+import { DEPTHMAP_DEFAULTS, DEPTHMAP_MIN_CONSISTENT_AUTO } from '../defaults.user.js'
 import { formatBytes } from './memBudget.js'
 import { cameraCenter } from '../sfm/geometry.js'
 import { sliceCorners, sliceMisses } from './denseGeometry.js'
@@ -357,13 +357,20 @@ function packBits(mask) {
   return out
 }
 
+// The consistent views "auto" (a blank field) means for a project's scene type:
+// DEPTHMAP_MIN_CONSISTENT_AUTO, the aerial value for an unknown type.
+export function autoMinConsistent(sceneType) {
+  return DEPTHMAP_MIN_CONSISTENT_AUTO[sceneType] ?? DEPTHMAP_MIN_CONSISTENT_AUTO.aerial
+}
+
 // The cross-view filter's knobs from the depth-map settings (DEPTHMAP_DEFAULTS for the
 // unset, blank or out-of-range ones) — shared by the worker op and the store that merges
-// a split run. minConsistent 0 is the documented "off" (NCC floor only).
+// a split run. minConsistent 0 is the documented "off" (NCC floor only); blank is auto,
+// by `settings.sceneType` (autoMinConsistent).
 export function filterSettings(settings = {}) {
   return {
     maxGeomCost: numOpt(settings.maxGeomCost, DEPTHMAP_DEFAULTS.maxGeomCost, { positive: true }),
-    minConsistent: numOpt(settings.minConsistent, DEPTHMAP_DEFAULTS.minConsistent, { int: true, min: 0 }),
+    minConsistent: numOpt(settings.minConsistent, autoMinConsistent(settings.sceneType), { int: true, min: 0 }),
     minNcc: numOpt(settings.minNcc, DEPTHMAP_DEFAULTS.minNcc, { min: -1, max: 1 }),
     minGeomAngleDeg: numOpt(settings.minGeomAngleDeg, DEPTHMAP_DEFAULTS.minGeomAngleDeg, { min: 0, max: 90 }),
   }

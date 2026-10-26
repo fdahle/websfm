@@ -49,7 +49,7 @@ const FindGcpsModal = defineAsyncComponent(() => import('./georef/FindGcpsModal.
 
 // The pipeline and Tools-tab dialogs, lifted out of App.vue: each opens from a
 // command (useCommandDispatch) and hands its settings to useDialogRuns on Run.
-const { currentCrs } = storeToRefs(useProjectsStore())
+const { currentCrs, currentSceneType } = storeToRefs(useProjectsStore())
 const reconstructionStore = useReconstructionStore()
 const {
   canGeoreference,
@@ -282,6 +282,7 @@ const measurementsStore = useMeasurementsStore()
       v-if="depthMapsOpen"
       :images="images"
       :registered="reconstructionStore.mainSparseCloud?.cameras?.size ?? 0"
+      :scene-type="currentSceneType"
       @close="depthMapsOpen = false"
       @run="onDepthMapsRun"
     />

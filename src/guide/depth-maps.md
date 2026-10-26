@@ -106,10 +106,14 @@ and the check removes most of every map; the
 [reprojection error](help:reprojection-error) of the sparse model is a guide.
 
 ## Consistent views
-<!-- param: minConsistent  default: 2 -->
-How many other views must agree before a pixel is kept. With the default 2, a surface
-has to be seen in at least three images, which removes anything only a single
-neighbour happens to confirm. An image that overlaps fewer other images than this,
+<!-- param: minConsistent  default: auto (1 object capture, 2 aerial / mapping) -->
+How many other views must agree before a pixel is kept. Left blank it follows the
+project type. For an **object capture** it is 1: a surface seen in two images is kept,
+which fills far more of walls, floors and plain surfaces (on the ETH3D benchmark the
+F1 score at 2 cm rose from 57.1 to 62.0, with every scene better, at a small cost in
+accuracy). For **aerial / mapping** it is 2: a surface has to be seen in at least three
+images, which removes anything only a single neighbour happens to confirm, such as
+glints on water and isolated points in the sky. An image that overlaps fewer other images than this,
 such as either photo of a two-image project, is checked against the views it has
 instead (at least one), so it never comes out empty for lack of witnesses; the log
 says how many maps this applied to. Images with enough overlapping views keep the

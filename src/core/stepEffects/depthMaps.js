@@ -3,13 +3,15 @@
 // (stores/reconstruction/dense.js resolves Quality with qualityToMaxDim over the
 // largest original image).
 import { qualityToMaxDim } from '../dense/depthMap.js'
+import { autoMinConsistent } from '../dense/geomFilter.js'
 import { DEPTHMAP_QUALITY_META } from '../defaults.user.js'
 import { fmtCount, plural } from './format.js'
 
 const FRACTION = { low: '⅛', medium: '¼', high: '½', ultra: 'all' }
 
-// project: { registered (images with a pose), nativeLong (largest original long side, px) }
-export function depthMapEffects(s, { registered = 0, nativeLong = 0 } = {}) {
+// project: { registered (images with a pose), nativeLong (largest original long side, px),
+//            sceneType (what a blank "Consistent views" resolves to) }
+export function depthMapEffects(s, { registered = 0, nativeLong = 0, sceneType = null } = {}) {
   const override = s.maxDim > 0
   const maxDim = override ? s.maxDim : qualityToMaxDim(s.quality, nativeLong)
   const label = DEPTHMAP_QUALITY_META.find((q) => q.id === s.quality)?.label ?? s.quality
@@ -37,8 +39,13 @@ export function depthMapEffects(s, { registered = 0, nativeLong = 0 } = {}) {
     : 'Off: each depth map goes on as PatchMatch left it.'
 
   const angle = s.minGeomAngleDeg > 0 ? `, seen at least ${s.minGeomAngleDeg}° apart,` : ''
+  const auto = !(s.minConsistent > 0)
+  const views = auto ? autoMinConsistent(sceneType) : s.minConsistent
+  const autoNote = auto
+    ? ` (auto for ${sceneType === 'object' ? 'an object capture' : 'an aerial / mapping'} project)`
+    : ''
   const crossView = s.geomConsistency
-    ? `A pixel stays only if at least ${plural(s.minConsistent, 'other view')} agree on its depth within ` +
+    ? `A pixel stays only if at least ${plural(views, 'other view')}${autoNote} agree${views === 1 ? 's' : ''} on its depth within ` +
       `${s.maxGeomCost} px${angle} and its match scores an NCC of ${s.minNcc} or more. Runs once all maps exist.`
     : 'Off: no pixel is checked against other views, so sky and vegetation freckles reach the dense cloud.'
 

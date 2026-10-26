@@ -20,7 +20,12 @@ describe('depthMapEffects', () => {
     const e = depthMapEffects(DEPTHMAP_DEFAULTS, project)
     expect(e.patchMatch).toMatch(/^A 7×7 px correlation window; 5 propagation sweeps/)
     expect(e.speckle).toMatch(/more than 10 %/)
-    expect(e.crossView).toMatch(/at least 2 other views agree/)
+    expect(e.crossView).toMatch(/at least 2 other views \(auto for an aerial \/ mapping project\) agree on/)
+    const obj = depthMapEffects(DEPTHMAP_DEFAULTS, { ...project, sceneType: 'object' })
+    expect(obj.crossView).toMatch(/at least 1 other view \(auto for an object capture project\) agrees on/)
+    expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, minConsistent: 3 }, project).crossView).toMatch(
+      /at least 3 other views agree on/,
+    )
     const off = depthMapEffects({ ...DEPTHMAP_DEFAULTS, speckleFilter: false, geomConsistency: false }, project)
     expect(off.speckle).toMatch(/^Off/)
     expect(off.crossView).toMatch(/^Off/)

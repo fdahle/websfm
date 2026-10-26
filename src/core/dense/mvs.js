@@ -44,6 +44,7 @@ export {
   logFilterCache,
   applyPackedMask,
   filterSettings,
+  autoMinConsistent,
   filterConfig,
   logFilterTotals,
   requiredConsistentViews,

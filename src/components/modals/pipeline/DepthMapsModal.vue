@@ -18,6 +18,8 @@ const props = defineProps({
   // pose in the sparse model (one depth map each), for the steps' effect lines.
   images: { type: Array, default: () => [] },
   registered: { type: Number, default: 0 },
+  // The project's scene type: what a blank "Consistent views" (auto) resolves to.
+  sceneType: { type: String, default: null },
 })
 const emit = defineEmits(['close', 'run'])
 
@@ -40,7 +42,14 @@ const numbers = computed(() => {
   return checkNumberFields(s, {
     filterRelTol: { label: 'Speckle tolerance', min: 1, max: 50, integer: true, when: s.speckleFilter },
     maxGeomCost: { label: 'Agreement tolerance', min: 0.1, max: 10, when: s.geomConsistency },
-    minConsistent: { label: 'Consistent views', min: 1, max: 8, integer: true, when: s.geomConsistency },
+    minConsistent: {
+      label: 'Consistent views',
+      min: 1,
+      max: 8,
+      integer: true,
+      optional: true,
+      when: s.geomConsistency,
+    },
     minGeomAngleDeg: { label: 'Minimum parallax', min: 0, max: 20, when: s.geomConsistency },
     minNcc: { label: 'Minimum NCC', min: 0, max: 0.9, when: s.geomConsistency },
     maxDim: { label: 'Working resolution override', min: 200, integer: true, optional: true },
@@ -82,7 +91,11 @@ const nativeLong = computed(() =>
   props.images.reduce((m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0),
 )
 const effects = computed(() =>
-  depthMapEffects(settings.value, { registered: props.registered, nativeLong: nativeLong.value }),
+  depthMapEffects(settings.value, {
+    registered: props.registered,
+    nativeLong: nativeLong.value,
+    sceneType: props.sceneType,
+  }),
 )
 
 function run() {
@@ -341,14 +354,14 @@ function run() {
         <SettingsField
           v-if="settings.geomConsistency"
           label-for="minConsistent"
-          hint="Minimum other views that must agree. Raise for cleaner but sparser clouds."
+          hint="Minimum other views that must agree. Blank = auto: 1 for object capture, 2 for aerial / mapping."
         >
           <template #label
             ><FieldHelp
               op="depth-maps"
               param="minConsistent"
-              :value="settings.minConsistent"
-              :default-value="DEPTHMAP_DEFAULTS.minConsistent"
+              :value="settings.minConsistent || 'auto'"
+              :default-value="DEPTHMAP_DEFAULTS.minConsistent || 'auto'"
               >Consistent views</FieldHelp
             ></template
           >
@@ -360,6 +373,7 @@ function run() {
             min="1"
             max="8"
             step="1"
+            placeholder="auto"
             class="field-input"
           />
         </SettingsField>

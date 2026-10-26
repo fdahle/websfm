@@ -6,6 +6,7 @@ import {
   fitDepthQuality,
   filterConfig,
   filterSettings,
+  autoMinConsistent,
   logFilterCache,
   logFilterTotals,
   emptyFilterTotals,
@@ -223,6 +224,17 @@ export function createDense({
       // quality whose projected peak exceeds the memory budget steps down (High →
       // Medium → Low) with a warning, rather than the worker refusing to start.
       const resolved = { ...settings }
+      // A blank "Consistent views" follows the project's scene type (geomFilter.js
+      // autoMinConsistent), resolved where the filter reads it.
+      resolved.sceneType = projects.currentSceneType ?? null
+      if (resolved.geomConsistency !== false && (settings.minConsistent == null || settings.minConsistent === '')) {
+        log(
+          `Dense: consistent views auto → ${autoMinConsistent(resolved.sceneType)} ` +
+            `(${resolved.sceneType === 'object' ? 'object capture' : 'aerial / mapping'} project)`,
+          'info',
+          'Dense',
+        )
+      }
       if (resolved.quality && !(resolved.maxDim > 0)) {
         const nativeLong = images.value.reduce((m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0)
         resolved.maxDim = qualityToMaxDim(resolved.quality, nativeLong)

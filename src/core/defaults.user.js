@@ -253,11 +253,20 @@ export const DEPTHMAP_DEFAULTS = {
   // freckles — the photometric gates below cannot: a bush has genuinely high NCC.
   geomConsistency: true, // enable the cross-view check
   maxGeomCost: 1.0, // max forward–backward reprojection error (px) to call a view consistent
-  minConsistent: 2, // min consistent views to keep a pixel
+  // Min other views that must agree to keep a pixel; null = auto by the project's scene
+  // type (DEPTHMAP_MIN_CONSISTENT_AUTO). One view on close range: ETH3D (six scenes, ETH3D's
+  // own evaluator, F1 @2 cm) 57.1 → 62.0, every scene better (office 43.2 → 55.2), the
+  // clouds far more complete for −1…−11 pt accuracy. Two on aerial blocks: on a 42-image
+  // block one view let ~12 % of the extra points sit far off the surface (no aerial
+  // ground truth to settle it, 2026-10-26).
+  minConsistent: null,
   minGeomAngleDeg: 3.0, // a view only counts if it sees the point at ≥ this parallax (COLMAP's
   // filter_min_triangulation_angle) — near-duplicate views can't vouch for sky
   minNcc: 0.1, // absolute per-pixel ZNCC floor (drops cost > 1 − minNcc)
 }
+// "auto" consistent views (DEPTHMAP_DEFAULTS.minConsistent null) by project scene type.
+export const DEPTHMAP_MIN_CONSISTENT_AUTO = { object: 1, aerial: 2 }
+
 // Depth-map quality cards. Unlike the other presets these are NOT deltas — `quality` is
 // itself a first-class setting the store resolves to a working resolution; the cards are
 // a nicer picker over its four values (there is no "custom" quality).
