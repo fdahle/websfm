@@ -516,6 +516,7 @@ export function useQualityReport() {
         (recon.summary?.selfCalDistortion ?? []).some((d) => d.fisheye),
       georef: !!recon.georef,
       dense: recon.clouds.some((c) => c.kind === 'dense' && !c.imported),
+      denseViewSelection: recon.depthSummary?.settings?.viewSelection ?? null,
       mesh: recon.clouds.some((c) => c.kind === 'mesh' && !c.imported),
       textured: recon.clouds.some((c) => c.kind === 'mesh' && !c.imported && c.texture),
       dem: !!recon.dem,

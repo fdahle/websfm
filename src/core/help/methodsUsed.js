@@ -16,6 +16,7 @@ const DETECTORS = {
  * @param {{
  *   detector?: string|null, matcher?: string|null, verifier?: string|null,
  *   sparse?: boolean, fisheye?: boolean, georef?: boolean, dense?: boolean,
+ *   denseViewSelection?: string|null,
  *   mesh?: boolean, textured?: boolean, dem?: boolean, demFill?: string|null,
  *   ortho?: { blend?: string, seamline?: string, seamBlend?: string, colourBalance?: boolean }|null,
  *   groundClassified?: boolean,
@@ -70,9 +71,12 @@ export function methodsUsed(f = {}) {
     out.push({
       step: 'Depth maps and fusion',
       method:
-        'Slanted-plane PatchMatch with bilateral-weighted NCC, checkerboard propagation, ' +
+        'Slanted-plane PatchMatch with bilateral-weighted NCC, ' +
+        (f.denseViewSelection === 'acmh'
+          ? 'adaptive checkerboard sampling and multi-hypothesis joint view selection (ACMH), '
+          : 'checkerboard propagation, ') +
         'cross-view geometric filtering and fusion',
-      refs: ['bleyer2011', 'galliani2015', 'schonberger2016b'],
+      refs: ['bleyer2011', 'galliani2015', 'schonberger2016b', ...(f.denseViewSelection === 'acmh' ? ['xu2019'] : [])],
     })
   }
   if (f.groundClassified)

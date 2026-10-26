@@ -78,7 +78,11 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     // Bilateral-weighted NCC (mvs.rs Bilateral): σs px, σc grey levels; σc ≤ 0 = off.
     sigmaSpatial = 0,
     sigmaColor = 0,
+    // 'acmh': adaptive checkerboard sampling + multi-hypothesis joint view selection
+    // (patchmatch.wgsl acmhSweep); else best-K. PROTOTYPE, GPU only.
+    viewSelection = 'bestk',
   } = opts
+  const acmh = viewSelection === 'acmh'
   // Mirror mvs.rs's depth-range guards (dmin ≥ 1e-4, dmax ≥ dmin·1.001) so the GPU
   // and WASM backends init PatchMatch over the same interval — a zero/degenerate
   // range would otherwise make the two diverge (and trip the A/B validation).
@@ -173,6 +177,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   pv.setFloat32(64, bilOn ? 0.5 / (sigmaSpatial * sigmaSpatial) : 0, true)
   pv.setFloat32(68, bilOn ? 0.5 / (sigmaColor * sigmaColor) : 0, true)
   pv.setUint32(72, bilOn ? 1 : 0, true)
+  pv.setUint32(76, acmh ? 1 : 0, true)
   const paramsBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(paramsBuf, 0, pbuf)
 
@@ -224,6 +229,8 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   }
 
   const stateBuf = device.createBuffer({ size: stateBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC })
+  // ACMH's per-pixel temporal view prior (patchmatch.wgsl selView); a dummy otherwise.
+  const selViewBuf = device.createBuffer({ size: acmh ? npix * 4 : 4, usage: GPUBufferUsage.STORAGE })
   const costBuf = device.createBuffer({ size: costBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC })
 
   const bindGroup = device.createBindGroup({
@@ -239,6 +246,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
       { binding: 7, resource: srcArrTex.createView({ dimension: '2d-array' }) },
       { binding: 8, resource: { buffer: ctrlBuf } },
       { binding: 9, resource: srcMaskTex.createView({ dimension: '2d-array' }) },
+      { binding: 10, resource: { buffer: selViewBuf } },
     ],
   })
 
@@ -287,6 +295,11 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     dispatch()
   }
 
+  if (acmh) {
+    writeCtrl(2, 0, 0)
+    dispatch()
+  }
+
   // ── Readback ───────────────────────────────────────────────────────────────
   const stateRead = device.createBuffer({ size: stateBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
   const costRead = device.createBuffer({ size: costBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
@@ -319,6 +332,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     ctrlBuf,
     seedBuf,
     stateBuf,
+    selViewBuf,
     costBuf,
     stateRead,
     costRead,

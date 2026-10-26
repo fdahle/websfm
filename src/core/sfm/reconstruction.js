@@ -699,6 +699,9 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     // Bilateral-weighted NCC (mvs.rs Bilateral): σs px, σc grey levels; σc ≤ 0 = off.
     sigmaSpatial = 0,
     sigmaColor = 0,
+    // 'acmh': adaptive checkerboard sampling + multi-hypothesis joint view selection
+    // (mvs.rs ACMH_*, the same steps as patchmatch.wgsl acmhSweep); else best-K.
+    viewSelection = 'bestk',
   } = opts
   const n = sources.length
   if (n === 0 || refW * refH === 0) return null
@@ -747,6 +750,7 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     perturbStart,
     sigmaSpatial,
     sigmaColor,
+    viewSelection === 'acmh' ? 1 : 0,
   )
   const npix = refW * refH
   if (!raw || raw.length < npix * 5) return null

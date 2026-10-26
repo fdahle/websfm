@@ -222,17 +222,33 @@ pub(crate) fn agg_cost(
     u: usize, v: usize, depth: f64, n: &V3, radius: i32, bil: Bilateral,
 ) -> f64 {
     if depth <= 0.0 { return 2.0; }
-    // What plane_cost computes before it reads the source — the plane, and per window
-    // sample the reference ray, n·ray and the reference value — is the same for every
-    // source, so it is computed once here, in the same expressions, and each source
-    // runs plane_cost's per-sample loop on it (window_cost): the same costs, bit for bit
-    // (plane_cost stays as the reference the tests compare against).
+    // plane_cost's degenerate plane: every source scores 2.0, so the mean of the best is 2.0.
+    let Some((win, m, d)) = plane_window(refimg, rw, rh, rfx, rfy, rcx, rcy, u, v, depth, n, radius, bil) else {
+        return 2.0;
+    };
+    // Retain only the lowest requested K costs as we visit the sources. K is at
+    // most MAX_SOURCES by the public worker contract; unlike collect()+sort(), this
+    // performs no allocation in the innermost PatchMatch scoring loop.
+    mean_best_costs(srcs.iter().map(|src| window_cost(src, &win[..m], d)), best_k)
+}
+
+// What plane_cost computes before it reads the source — the plane, and per window
+// sample the reference ray, n·ray and the reference value — is the same for every
+// source, so it is computed once per hypothesis, in the same expressions, and each
+// source runs plane_cost's per-sample loop on it (window_cost): the same costs, bit for
+// bit (plane_cost stays as the reference the tests compare against). None for a
+// degenerate plane (n ⟂ the pixel's ray).
+#[allow(clippy::too_many_arguments)]
+fn plane_window(
+    refimg: &[u8], rw: usize, rh: usize,
+    rfx: f64, rfy: f64, rcx: f64, rcy: f64,
+    u: usize, v: usize, depth: f64, n: &V3, radius: i32, bil: Bilateral,
+) -> Option<([WinSample; 121], usize, f64)> {
     let pu = (u as f64 - rcx) / rfx;
     let pv = (v as f64 - rcy) / rfy;
     let p = [pu * depth, pv * depth, depth];
     let d = dot3(n, &p);
-    // plane_cost's degenerate plane: every source scores 2.0, so the mean of the best is 2.0.
-    if d.abs() < 1e-9 { return 2.0; }
+    if d.abs() < 1e-9 { return None; }
     let mut win = [WinSample::default(); 121];
     let mut m = 0usize;
     let rc = refimg[v * rw + u] as f64;
@@ -253,11 +269,64 @@ pub(crate) fn agg_cost(
         }
         y += 1;
     }
-    let win = &win[..m];
-    // Retain only the lowest requested K costs as we visit the sources. K is at
-    // most MAX_SOURCES by the public worker contract; unlike collect()+sort(), this
-    // performs no allocation in the innermost PatchMatch scoring loop.
-    mean_best_costs(srcs.iter().map(|src| window_cost(src, win, d)), best_k)
+    Some((win, m, d))
+}
+
+// Per-source photometric costs of one hypothesis, a source without a measurement at
+// the max cost 2 (ACMH's cost matrix; patchmatch.wgsl sourceCosts).
+#[allow(clippy::too_many_arguments)]
+fn source_costs(
+    refimg: &[u8], rw: usize, rh: usize,
+    rfx: f64, rfy: f64, rcx: f64, rcy: f64,
+    srcs: &[SrcView], u: usize, v: usize, depth: f64, n: &V3, radius: i32, bil: Bilateral,
+) -> [f64; MAX_SOURCES] {
+    let mut out = [2.0; MAX_SOURCES];
+    if depth <= 0.0 { return out; }
+    let Some((win, m, d)) = plane_window(refimg, rw, rh, rfx, rfy, rcx, rcy, u, v, depth, n, radius, bil) else {
+        return out;
+    };
+    for (k, src) in srcs.iter().take(MAX_SOURCES).enumerate() {
+        let c = window_cost(src, &win[..m], d);
+        out[k] = if c >= INVALID_THRESH { 2.0 } else { c };
+    }
+    out
+}
+
+fn weighted_cost(c: &[f64; MAX_SOURCES], w: &[f64; MAX_SOURCES], ns: usize) -> f64 {
+    let (mut sw, mut sc) = (0.0, 0.0);
+    for s in 0..ns { sw += w[s]; sc += w[s] * c[s]; }
+    if sw > 0.0 { sc / sw } else { 2.0 }
+}
+
+// ACMH (Xu & Tao, CVPR 2019): adaptive checkerboard sampling and multi-hypothesis joint
+// view selection, the paper's {τ0, τ1, α, β, n1, n2} = {0.8, 1.2, 90, 0.3, 2, 3}. Same
+// steps as patchmatch.wgsl acmhSweep (see there); the random draws differ by backend.
+const ACMH_TAU0: f64 = 0.8;
+const ACMH_ALPHA: f64 = 90.0;
+const ACMH_BAD: f64 = 1.2;
+const ACMH_N1: usize = 2;
+const ACMH_N2: usize = 3;
+const ACMH_BETA: f64 = 0.3;
+
+// The k-th sample offset of region r (0..3 near V up/down/left/right, 7 samples; 4..7
+// far strips, 11 samples out to 23 px); every offset is on the other checkerboard colour.
+fn acmh_region_size(r: usize) -> usize { if r < 4 { 7 } else { 11 } }
+fn acmh_region_offset(r: usize, k: usize) -> (i64, i64) {
+    let (mut ox, mut oy) = if r < 4 {
+        let kk = k as i64;
+        let row = (kk + 1) / 2;
+        let side = if kk & 1 == 1 { 1 } else { -1 };
+        (if kk == 0 { 0 } else { side * row }, -(row + 1))
+    } else {
+        (0, -(3 + 2 * k as i64))
+    };
+    match r % 4 {
+        1 => { ox = -ox; oy = -oy; }
+        2 => { let t = ox; ox = oy; oy = t; }
+        3 => { let t = ox; ox = -oy; oy = -t; }
+        _ => {}
+    }
+    (ox, oy)
 }
 
 // One reference window sample, as plane_cost forms it: the ray, n·ray, the value.
@@ -325,6 +394,8 @@ pub fn compute_depth_map(
     perturb_start: f32,
     // Bilateral-weighted NCC (see Bilateral): σs in px, σc in grey levels; σc ≤ 0 = off.
     sigma_spatial: f32, sigma_color: f32,
+    // View selection: 0 = best-K, 1 = ACMH (acmh_region_offset, ACMH_*).
+    view_selection: u32,
 ) -> Vec<f32> {
     let rw = ref_w as usize;
     let rh = ref_h as usize;
@@ -371,6 +442,10 @@ pub fn compute_depth_map(
 
     let bk = best_k.max(1) as usize;
     let bil = Bilateral::new(sigma_spatial as f64, sigma_color as f64);
+    let acmh = view_selection == 1;
+    // ACMH: each pixel's most important view of the previous sweep (u32::MAX = none).
+    let mut sel_view = if acmh { vec![u32::MAX; npix] } else { Vec::new() };
+    let ns = n_src.min(MAX_SOURCES);
     let mut rng = Xorshift(seed | 1);
     // Random f64 in [0,1).
     let randf = |r: &mut Xorshift| (r.next() as f64) / (u32::MAX as f64 + 1.0);
@@ -421,6 +496,106 @@ pub fn compute_depth_map(
                 for u in 0..rw {
                     if ((u + v) as u32 & 1) != parity { continue; }
                     let i = v * rw + u;
+                    if acmh {
+                        // 1. Hypotheses: the own plane, then the cheapest sample of each
+                        // region, transferred onto this pixel's ray.
+                        let mut hd = [0.0f64; 9];
+                        let mut hn = [[0.0f64; 3]; 9];
+                        hd[0] = depth[i];
+                        hn[0] = [nx[i], ny[i], nz[i]];
+                        let mut nh = 1usize;
+                        let rx_i = (u as f64 - rcx) / rfx;
+                        let ry_i = (v as f64 - rcy) / rfy;
+                        for r in 0..8 {
+                            let mut best = f64::INFINITY;
+                            let mut bj = usize::MAX;
+                            for k in 0..acmh_region_size(r) {
+                                let (ox, oy) = acmh_region_offset(r, k);
+                                let (nu, nv) = (u as i64 + ox, v as i64 + oy);
+                                if nu < 0 || nv < 0 || nu >= rw as i64 || nv >= rh as i64 { continue; }
+                                let j = nv as usize * rw + nu as usize;
+                                if cost[j] < best { best = cost[j]; bj = j; }
+                            }
+                            if bj == usize::MAX { continue; }
+                            let cand_n = [nx[bj], ny[bj], nz[bj]];
+                            let (ju, jv) = ((bj % rw) as f64, (bj / rw) as f64);
+                            let d_plane = depth[bj] * (cand_n[0] * (ju - rcx) / rfx + cand_n[1] * (jv - rcy) / rfy + cand_n[2]);
+                            let denom = cand_n[0] * rx_i + cand_n[1] * ry_i + cand_n[2];
+                            if denom.abs() < 1e-9 { continue; }
+                            let cand_d = d_plane / denom;
+                            if cand_d <= dmin || cand_d >= dmax { continue; }
+                            hd[nh] = cand_d;
+                            hn[nh] = cand_n;
+                            nh += 1;
+                        }
+                        // 2. The cost matrix and the view weights (paper eqs. 2–5).
+                        let mut cm = [[2.0f64; MAX_SOURCES]; 9];
+                        for h in 0..nh {
+                            cm[h] = source_costs(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, u, v, hd[h], &hn[h], radius, bil);
+                        }
+                        let t = it as f64;
+                        let tau = ACMH_TAU0 * (-t * t / ACMH_ALPHA).exp();
+                        let prev = sel_view[i];
+                        let mut w = [0.0f64; MAX_SOURCES];
+                        let mut any_sel = false;
+                        for s in 0..ns {
+                            let (mut good, mut bad, mut sum_imp) = (0usize, 0usize, 0.0f64);
+                            for row in cm.iter().take(nh).skip(1) {
+                                let c = row[s];
+                                if c < tau { good += 1; sum_imp += (-c * c / (2.0 * ACMH_BETA * ACMH_BETA)).exp(); }
+                                if c > ACMH_BAD { bad += 1; }
+                            }
+                            let is_prev = if s as u32 == prev { 1.0 } else { 0.0 };
+                            if good > ACMH_N1 && bad < ACMH_N2 {
+                                w[s] = (is_prev + 1.0) * sum_imp / good as f64;
+                                any_sel = true;
+                            } else {
+                                w[s] = 0.2 * is_prev;
+                            }
+                        }
+                        if !any_sel {
+                            // No view passes the vote (early sweeps, weak texture): weigh each
+                            // by its best match among the hypotheses, the remembered view still
+                            // doubled, rather than score the pixel on that one view alone.
+                            for s in 0..ns {
+                                let m = cm.iter().take(nh).map(|row| row[s]).fold(2.0f64, f64::min);
+                                let is_prev = if s as u32 == prev { 1.0 } else { 0.0 };
+                                w[s] = (is_prev + 1.0) * (-m * m / (2.0 * ACMH_BETA * ACMH_BETA)).exp();
+                            }
+                        }
+                        let mut top = u32::MAX;
+                        let mut top_w = 0.0;
+                        for s in 0..ns { if w[s] > top_w { top_w = w[s]; top = s as u32; } }
+                        sel_view[i] = top;
+                        // 3. The cheapest hypothesis under those weights (eq. 6).
+                        let mut best_h = 0;
+                        let mut best_c = weighted_cost(&cm[0], &w, ns);
+                        for h in 1..nh {
+                            let c = weighted_cost(&cm[h], &w, ns);
+                            if c < best_c { best_c = c; best_h = h; }
+                        }
+                        let (mut best_d, mut best_n) = (hd[best_h], hn[best_h]);
+                        // 4. Refinement (§4.4): random and perturbed depth and normal,
+                        // the 6 combinations with the current ones.
+                        let dspan = best_d.min(dmax - dmin) * DEPTH_PERTURB_REL * shrink;
+                        let d_rand = dmin + randf(&mut rng) * (dmax - dmin);
+                        let n_rand = rand_normal(&mut rng);
+                        let d_pert = (best_d + (randf(&mut rng) * 2.0 - 1.0) * dspan).clamp(dmin, dmax);
+                        let n_pert = normalize3(&[
+                            best_n[0] + (randf(&mut rng) * 2.0 - 1.0) * 0.5 * shrink,
+                            best_n[1] + (randf(&mut rng) * 2.0 - 1.0) * 0.5 * shrink,
+                            (best_n[2] - randf(&mut rng) * 0.3 * shrink).min(-0.1),
+                        ]);
+                        let (d0, n0) = (best_d, best_n);
+                        for (dk, nk) in [(d_rand, n0), (d0, n_rand), (d_rand, n_rand), (d_pert, n0), (d0, n_pert), (d_pert, n_pert)] {
+                            let c = weighted_cost(
+                                &source_costs(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, u, v, dk, &nk, radius, bil), &w, ns);
+                            if c < best_c { best_c = c; best_d = dk; best_n = nk; }
+                        }
+                        depth[i] = best_d; nx[i] = best_n[0]; ny[i] = best_n[1]; nz[i] = best_n[2];
+                        cost[i] = best_c;
+                        continue;
+                    }
                     let mut best_d = depth[i];
                     let mut best_n = [nx[i], ny[i], nz[i]];
                     let mut best_c = cost[i];
@@ -494,6 +669,15 @@ pub fn compute_depth_map(
                     cost[i] = best_c;
                 }
             }
+        }
+    }
+
+    // ACMH searched on view-weighted costs; what it hands on is the best-K photometric cost
+    // of the plane it found, as the best-K kernel would report it (patchmatch.wgsl mode 2).
+    if acmh {
+        for i in 0..npix {
+            let n = [nx[i], ny[i], nz[i]];
+            cost[i] = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, i % rw, i / rw, depth[i], &n, radius, bil);
         }
     }
 
@@ -609,7 +793,7 @@ mod tests {
             ks.extend([f, f, cx, cy]);
             rel.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, *tx, 0.0, 0.0]);
         }
-        let out = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[], 2.0, 8.0, 2, 3, 2, 7, 1.0, 0.0, 0.0);
+        let out = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[], 2.0, 8.0, 2, 3, 2, 7, 1.0, 0.0, 0.0, 0);
         let digest = out.iter().fold(0u64, |a, v| a.wrapping_mul(1_000_003).wrapping_add(v.to_bits() as u64));
         assert_eq!(out.len(), w * h * 5);
         assert_eq!(digest, DEPTH_DIGEST, "depth map bits changed: {digest:#x}");
@@ -626,6 +810,81 @@ mod tests {
         assert!((on.weight(5, 0, 0.0) - (-0.5f64).exp()).abs() < 1e-12);
         assert!((on.weight(0, 0, 51.0) - (-0.5f64).exp()).abs() < 1e-12);
         assert!(on.weight(1, 1, 120.0) < 0.1);
+    }
+
+    // The 8 ACMH regions: 4 V-shapes of 7 near samples, 4 strips of 11 out to 23 px, every
+    // sample on the other checkerboard colour, each region pointing its own way.
+    #[test]
+    fn acmh_regions_sample_the_other_colour() {
+        let mut seen = std::collections::HashSet::new();
+        for r in 0..8 {
+            assert_eq!(acmh_region_size(r), if r < 4 { 7 } else { 11 });
+            for k in 0..acmh_region_size(r) {
+                let (ox, oy) = acmh_region_offset(r, k);
+                assert_eq!((ox + oy).rem_euclid(2), 1, "region {r} sample {k} ({ox},{oy}) is the same colour");
+                assert!(ox.abs().max(oy.abs()) <= 23);
+                assert!(seen.insert((ox, oy)), "({ox},{oy}) sampled twice");
+            }
+        }
+        assert_eq!(acmh_region_offset(0, 0), (0, -1));
+        assert_eq!(acmh_region_offset(1, 0), (0, 1));
+        assert_eq!(acmh_region_offset(2, 0), (-1, 0));
+        assert_eq!(acmh_region_offset(3, 0), (1, 0));
+        assert_eq!(acmh_region_offset(4, 10), (0, -23));
+    }
+
+    // ACMH on a textured fronto-parallel plane: it converges onto the plane faster and
+    // further than best-K, and reports the best-K photometric cost of what it found.
+    #[test]
+    fn acmh_converges_on_a_textured_plane() {
+        let (w, h) = (48usize, 36usize);
+        // Smoothed value noise: textured like a photo, not periodic (a sum of sines lets a
+        // wrong depth match single views as well as the true one).
+        let hash = |x: i64, y: i64| { let mut h = (x * 374761393 + y * 668265263) as u64; h = (h ^ (h >> 13)).wrapping_mul(1274126177); ((h >> 16) & 255) as f64 };
+        let tex = |x: f64, y: f64| {
+            let (x0, y0) = (x.floor(), y.floor());
+            let (fx, fy) = (x - x0, y - y0);
+            let (xi, yi) = (x0 as i64, y0 as i64);
+            let a = hash(xi, yi) * (1.0 - fx) + hash(xi + 1, yi) * fx;
+            let b = hash(xi, yi + 1) * (1.0 - fx) + hash(xi + 1, yi + 1) * fx;
+            (a * (1.0 - fy) + b * fy) as u8
+        };
+        let refg: Vec<u8> = (0..w * h).map(|i| tex((i % w) as f64, (i / w) as f64)).collect();
+        let (f, cx, cy) = (40.0f32, 24.0f32, 18.0f32);
+        let (mut src, mut dims, mut ks, mut rel) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        // A fronto-parallel plane at depth 4 seen by sources translated by tx: a point at
+        // reference pixel u lands on source pixel u + f·tx/4, so the source shows
+        // tex(x − f·tx/4).
+        for tx in [0.25f32, -0.3, 0.45] {
+            let shift = (f * tx / 4.0) as f64;
+            src.extend((0..w * h).map(|i| tex((i % w) as f64 - shift, (i / w) as f64)));
+            dims.extend([w as u32, h as u32]);
+            ks.extend([f, f, cx, cy]);
+            rel.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, tx, 0.0, 0.0]);
+        }
+        let run_it = |vs: u32, it: u32| compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[],
+            2.0, 8.0, 2, it, 2, 7, 1.0, 0.0, 0.0, vs);
+        let run = |vs: u32| run_it(vs, 5);
+        let npix = w * h;
+        let within = |o: &[f32]| (8..h - 8).flat_map(|v| (8..w - 8).map(move |u| v * w + u))
+            .filter(|&i| (o[i] - 4.0).abs() < 0.04).count() as f64 / ((w - 16) * (h - 16)) as f64;
+        let (bk, ac) = (run(0), run(1));
+        // Measured: within 1 % after 2 / 5 / 12 sweeps, best-K 0.51 / 0.71 / 0.78, ACMH
+        // 0.71 / 0.78 / 0.91 — the 8 regions spread a good plane faster.
+        assert!(within(&ac) > 0.75, "ACMH within 1 %: {}", within(&ac));
+        assert!(within(&ac) > within(&bk), "ACMH {} vs best-K {}", within(&ac), within(&bk));
+        assert!(within(&run_it(1, 2)) > within(&run_it(0, 2)) + 0.1);
+        // The reported cost is the best-K photometric cost of the final plane.
+        let i = 18 * w + 24;
+        let n = [ac[2 * npix + 3 * i] as f64, ac[2 * npix + 3 * i + 1] as f64, ac[2 * npix + 3 * i + 2] as f64];
+        let srcs: Vec<SrcView> = (0..3).map(|k| SrcView {
+            gray: &src[k * npix..(k + 1) * npix], mask: &[], w, h,
+            fx: f as f64, fy: f as f64, cx: cx as f64, cy: cy as f64,
+            r: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            t: [rel[12 * k + 9] as f64, 0.0, 0.0],
+        }).collect();
+        let want = agg_cost(&refg, w, h, f as f64, f as f64, cx as f64, cy as f64, &srcs, 2, 24, 18, ac[i] as f64, &n, 2, Bilateral::new(0.0, 0.0));
+        assert!((ac[npix + i] as f64 - want).abs() < 1e-6);
     }
 
     #[test]

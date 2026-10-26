@@ -5,6 +5,7 @@ import {
   qualityToMaxDim,
   fitDepthQuality,
   autoBestK,
+  resolveViewSelection,
   fusionCostStats,
   fuseDepthMaps,
   mergePointsSpatial,
@@ -229,6 +230,14 @@ describe('quality presets & derived params (Step 3)', () => {
   it('qualityToMaxDim floors at 200px and defaults unknown presets to medium', () => {
     expect(qualityToMaxDim('low', 400)).toBe(200) // 50 → floored to 200
     expect(qualityToMaxDim('bogus', 8000)).toBe(2000) // unknown → medium (¼)
+  })
+
+  it('resolveViewSelection: auto is ACMH on the GPU, best-K on the CPU; a choice stands', () => {
+    expect(resolveViewSelection('auto', true)).toBe('acmh')
+    expect(resolveViewSelection('auto', false)).toBe('bestk')
+    expect(resolveViewSelection(undefined, true)).toBe('acmh')
+    expect(resolveViewSelection('acmh', false)).toBe('acmh')
+    expect(resolveViewSelection('bestk', true)).toBe('bestk')
   })
 
   it('autoBestK is ceil(nSources/2) clamped to [1,4]', () => {

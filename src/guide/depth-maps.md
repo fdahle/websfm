@@ -49,6 +49,19 @@ point does not drag the score down. A larger K averages more evidence and is les
 noisy where every source sees the surface. Blank picks about half of each image's sources, between 1 and
 4; set it only when diagnosing occlusion artefacts or noise.
 
+## View selection
+<!-- param: viewSelection  default: Auto -->
+Which neighbouring views decide whether a depth fits a pixel. **ACMH** (adaptive
+checkerboard sampling and multi-hypothesis joint view selection, after Xu & Tao 2019)
+takes candidate depths from eight regions around the pixel, from right next to it to
+23 pixels away. It then lets the views in which most of those candidates match well do
+the scoring. Good depths spread across a surface faster, and a view that sees something
+else at that pixel, such as an occluding object, is left out. **Best-K** scores each
+candidate on its K best-matching views. On the ETH3D benchmark ACMH gave a more accurate
+and more complete cloud on every scene (F1 at 2 cm 62.0 → 63.4). It takes about 40 %
+longer on a GPU and several times longer without one, so **Auto** uses ACMH on the GPU
+and best-K on the CPU.
+
 ## Patch window radius
 <!-- param: window  default: 3 -->
 Half-size of the patch PatchMatch compares between images (its

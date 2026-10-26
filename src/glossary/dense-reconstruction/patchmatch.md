@@ -3,7 +3,7 @@ id: patchmatch
 title: PatchMatch
 aliases: patch match, patchmatch stereo, slanted plane
 summary: The dense-stereo search that guesses a small oriented surface patch per pixel, then lets good guesses spread to their neighbours instead of testing every depth.
-refs: bleyer2011, galliani2015, schonberger2016b
+refs: bleyer2011, galliani2015, schonberger2016b, xu2019
 ---
 **PatchMatch** is how WebSfM builds a [depth map](help:depth-map) without
 exhaustively testing every possible depth at every pixel. It rests on one

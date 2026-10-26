@@ -293,6 +293,7 @@ export async function depthMapForImage(
       perturbStart: perturbStarts[li],
       sigmaSpatial,
       sigmaColor,
+      viewSelection: settings.viewSelection === 'acmh' ? 'acmh' : 'bestk',
     })
     if (!dm) return null
     prevDepth = dm.depth
@@ -468,6 +469,13 @@ export function fitDepthQuality({
     if (proj.total <= budget) return { quality: q, maxDim, proj, steps: k - start }
   }
   return null
+}
+
+// The view selection a run uses: the setting, with 'auto' (or blank) = ACMH on the GPU,
+// best-K on the CPU, where ACMH costs several times the time (DEPTHMAP_DEFAULTS).
+export function resolveViewSelection(setting, onGpu) {
+  if (setting === 'acmh' || setting === 'bestk') return setting
+  return onGpu ? 'acmh' : 'bestk'
 }
 
 // Per-image best-K from the number of available source views: average roughly the

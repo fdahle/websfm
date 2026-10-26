@@ -693,7 +693,7 @@ mod tests {
             &src_gray, &src_dims, &src_k, &src_rel, &[],
             &seed, 3.0, 8.0,
             3, 8, 1, 12345, 1.0,
-            0.0, 0.0,
+            0.0, 0.0, 0,
         );
         assert_eq!(out.len(), npix * 5, "output must be depth+cost+3·normals");
 

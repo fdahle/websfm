@@ -2,7 +2,7 @@
 // one-line effects under its numbered steps, from the same rules the run applies
 // (stores/reconstruction/dense.js resolves Quality with qualityToMaxDim over the
 // largest original image).
-import { qualityToMaxDim } from '../dense/depthMap.js'
+import { qualityToMaxDim, resolveViewSelection } from '../dense/depthMap.js'
 import { autoMinConsistent } from '../dense/geomFilter.js'
 import { DEPTHMAP_QUALITY_META } from '../defaults.user.js'
 import { fmtCount, plural } from './format.js'
@@ -10,8 +10,9 @@ import { fmtCount, plural } from './format.js'
 const FRACTION = { low: '⅛', medium: '¼', high: '½', ultra: 'all' }
 
 // project: { registered (images with a pose), nativeLong (largest original long side, px),
-//            sceneType (what a blank "Consistent views" resolves to) }
-export function depthMapEffects(s, { registered = 0, nativeLong = 0, sceneType = null } = {}) {
+//            sceneType (what a blank "Consistent views" resolves to), gpu (Settings ▸ Compute
+//            asks for the GPU: what "auto" view selection resolves to) }
+export function depthMapEffects(s, { registered = 0, nativeLong = 0, sceneType = null, gpu = false } = {}) {
   const override = s.maxDim > 0
   const maxDim = override ? s.maxDim : qualityToMaxDim(s.quality, nativeLong)
   const label = DEPTHMAP_QUALITY_META.find((q) => q.id === s.quality)?.label ?? s.quality
@@ -29,9 +30,15 @@ export function depthMapEffects(s, { registered = 0, nativeLong = 0, sceneType =
       'run steps down a quality and says so.'
 
   const d = 2 * s.window + 1
+  const acmh = resolveViewSelection(s.viewSelection, gpu) === 'acmh'
+  const autoVs = (s.viewSelection ?? 'auto') === 'auto'
+  const viewSel = acmh
+    ? `ACMH view selection${autoVs ? ' (auto, on the GPU)' : ''}: candidates from 8 regions around each pixel, the ` +
+      'views most of them match well do the scoring.'
+    : `Best-K view selection${autoVs ? ' (auto, without a GPU)' : ''}: each candidate is scored on its best-matching views.`
   const patchMatch =
     `A ${d}×${d} px correlation window; ${plural(s.iterations, 'propagation sweep')} at the finest level, ` +
-    'more at the coarser ones.'
+    `more at the coarser ones. ${viewSel}`
 
   const speckle = s.speckleFilter
     ? `Pixels more than ${s.filterRelTol} % from the median depth around them are dropped, and the rest ` +

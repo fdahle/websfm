@@ -172,6 +172,13 @@ export const REFERENCES = {
     venue: 'European Conference on Computer Vision (ECCV)',
     doi: '10.1007/978-3-319-46487-9_31',
   },
+  xu2019: {
+    authors: ['Qingshan Xu', 'Wenbing Tao'],
+    year: 2019,
+    title: 'Multi-scale geometric consistency guided multi-view stereo',
+    venue: 'IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)',
+    url: 'https://arxiv.org/abs/1904.08103',
+  },
   rusu2008: {
     authors: ['Radu Bogdan Rusu', 'Zoltan Csaba Marton', 'Nico Blodow', 'Mihai Dolha', 'Michael Beetz'],
     year: 2008,

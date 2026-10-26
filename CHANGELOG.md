@@ -113,6 +113,12 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **ACMH view selection for depth maps.** On a GPU, PatchMatch now takes candidate depths
+  from eight regions around each pixel and scores them on the views most of them match well
+  (ACMH, Xu & Tao 2019), so good depths spread further and occluded views drop out. On six
+  ETH3D scenes (ETH3D's own evaluator) the F1 score at 2 cm rises from 62.0 to 63.4, better
+  on every scene, for about 40 % more depth-map time. Without a GPU it stays off (it costs
+  several times the time there); Depth Maps ▸ Advanced ▸ View selection turns it on or off.
 - **Much fuller dense clouds of objects and interiors.** In an object-capture project the
   depth filter now keeps a pixel that one other view confirms (aerial projects still need
   two), so plain walls, floors and edges seen in only two photos stay in the cloud. On

@@ -95,6 +95,7 @@ const effects = computed(() =>
     registered: props.registered,
     nativeLong: nativeLong.value,
     sceneType: props.sceneType,
+    gpu: useGpu.value,
   }),
 )
 
@@ -207,6 +208,20 @@ function run() {
       </SettingsStep>
 
       <SettingsStep step="2" title="PatchMatch" :effect="effects.patchMatch">
+        <SettingsField
+          label-for="viewSelection"
+          hint="Which neighbouring views score each pixel. ACMH is more accurate and complete, but slower — several times so without a GPU."
+        >
+          <template #label>
+            <FieldHelp op="depth-maps" param="viewSelection">View selection</FieldHelp>
+          </template>
+          <select id="viewSelection" v-model="settings.viewSelection" class="field-select">
+            <option value="auto">Auto (ACMH on the GPU, best-K without one)</option>
+            <option value="acmh">ACMH</option>
+            <option value="bestk">Best-K</option>
+          </select>
+        </SettingsField>
+
         <SettingsField
           label-for="window"
           unit="px"

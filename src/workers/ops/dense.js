@@ -4,6 +4,7 @@ import {
   scaleK,
   rgbaToGray,
   depthMapForImage,
+  resolveViewSelection,
   fuseDepthMaps,
   fuseDepthMapsStreamed,
   filterDepthMap,
@@ -386,6 +387,15 @@ export function makeDenseOps({ rasterize }) {
       }
     }
     if (!backend) emit('log', ['Depth maps: backend = WASM (CPU)', 'info', 'Dense'])
+    {
+      const vs = resolveViewSelection(settings.viewSelection, !!backend)
+      emit('log', [
+        `Depth maps: view selection ${vs === 'acmh' ? 'ACMH (adaptive checkerboard, joint view selection)' : 'best-K'}` +
+          `${(settings.viewSelection ?? 'auto') === 'auto' ? ' (auto for this backend)' : ''}`,
+        'info',
+        'Dense',
+      ])
+    }
     // Stage A run record. `backend` above can flip to WASM mid-run on a GPU error, so
     // the record tracks what was *requested*, what it started on, and how many images
     // fell back — "all 86 maps remained on GPU" is a target in TODO ▸ SB and is
@@ -641,6 +651,7 @@ export function makeDenseOps({ rasterize }) {
             region: settings.region ?? null,
             bilateralSigmaColor: settings.bilateralSigmaColor,
             bilateralSigmaSpatial: settings.bilateralSigmaSpatial,
+            viewSelection: resolveViewSelection(settings.viewSelection, !!backend),
           },
           backend,
           hooks,
@@ -670,6 +681,7 @@ export function makeDenseOps({ rasterize }) {
               region: settings.region ?? null,
               bilateralSigmaColor: settings.bilateralSigmaColor,
               bilateralSigmaSpatial: settings.bilateralSigmaSpatial,
+              viewSelection: resolveViewSelection(settings.viewSelection, !!backend),
             },
             backend,
             { onLog: hooks.onLog, onProgress: hooks.onProgress },
@@ -891,6 +903,7 @@ export function makeDenseOps({ rasterize }) {
         window,
         iterations,
         bestK: autoBestKMode ? 'auto' : bestK,
+        viewSelection: resolveViewSelection(settings.viewSelection, startedOnGpu),
         speckleFilter: !!speckleFilter,
         geomConsistency: !!geomConsistency,
         maxGeomCost: geomConsistency ? maxGeomCost : null,

@@ -1333,6 +1333,25 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   55.6), and averaging four of six sources instead of three changed nothing: the larger
   candidate pool, not the aggregation, is what fills the surface.
 
+  **View selection** (`viewSelection`, default *auto*): **ACMH** (Xu & Tao 2019,
+  `patchmatch.wgsl` `acmhSweep`, `mvs.rs` `ACMH_*`) on the GPU, best-K on the CPU. Each
+  sweep a pixel takes candidate planes from 8 regions of the other checkerboard colour —
+  4 V-shapes of 7 samples next to it, 4 strips of 11 out to 23 px — the cheapest of each
+  transferred onto its ray. The 8 candidates' per-view costs vote: a view counts when more
+  than 2 match it below τ(t) = 0.8·e^(−t²/90) and fewer than 3 above 1.2, weighted by the
+  mean of e^(−c²/2·0.3²) over its good costs; the pixel's most important view of the last
+  sweep is doubled (0.2 when not selected). The cost is the weighted mean; refinement tests
+  6 combinations of a random and a perturbed depth and normal with the current ones. When
+  no view passes the vote, every view is weighed by its best match (the paper is silent
+  here). The map hands on the best-K photometric cost of its planes. ETH3D (six scenes,
+  ETH3D's own evaluator, Medium, F1 @2 cm, object defaults): best-K 62.0, ACMH **63.4**,
+  every scene better, accuracy and completeness both up (pipes accuracy 84.7 → 89.4 %).
+  On a smooth-noise synthetic plane it is within 1 % on 0.71 / 0.91 of pixels after 2 / 12
+  sweeps, best-K 0.51 / 0.78; on a periodic texture best-K is better (a wrong depth matches
+  single views of a repetitive pattern). The WASM kernel scores the same (pipes 48.6 vs GPU
+  48.7). Time: GPU +40 %; CPU pipes (14 maps, 3 workers) 6,516 s against the GPU's 44 s —
+  hence auto = best-K without a GPU.
+
   **Refinement schedule** (`core/dense/refineSchedule.js`): each sweep proposes a
   random normal, a depth-only step and a joint step at scale `s = s₀·0.5^it`; the depth
   step is `±0.5·s·min(d, d_max − d_min)`. Relative to the pixel's **own** depth `d`, as
@@ -2019,5 +2038,6 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Triggs, B., McLauchlan, P. F., Hartley, R. I. & Fitzgibbon, A. W. (2000). Bundle adjustment — a modern synthesis. Vision Algorithms: Theory and Practice, LNCS 1883, 298–372. https://doi.org/10.1007/3-540-44480-7_21
 - Tyszkiewicz, M. J., Fua, P. & Trulls, E. (2020). DISK: learning local features with policy gradient. Advances in Neural Information Processing Systems (NeurIPS) 33. https://arxiv.org/abs/2006.13566
 - Waechter, M., Moehrle, N. & Goesele, M. (2014). Let there be color! Large-scale texturing of 3D reconstructions. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-319-10602-1_54
+- Xu, Q. & Tao, W. (2019). Multi-scale geometric consistency guided multi-view stereo. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). https://arxiv.org/abs/1904.08103
 - Zhang, W., Qi, J., Wan, P., Wang, H., Xie, D., Wang, X. & Yan, G. (2016). An easy-to-use airborne LiDAR data filtering method based on cloth simulation. Remote Sensing 8(6), 501. https://doi.org/10.3390/rs8060501
 - Zhao, X., Wu, X., Chen, W., Chen, P. C. Y., Xu, Q. & Li, Z. (2023). ALIKED: a lighter keypoint and descriptor extraction network via deformable transformation. IEEE Transactions on Instrumentation and Measurement 72. https://arxiv.org/abs/2304.03608

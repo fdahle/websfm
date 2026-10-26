@@ -30,6 +30,7 @@ export {
   selectSourceViews,
   seedDepthFromSparse,
   depthMapForImage,
+  resolveViewSelection,
   filterDepthMap,
   qualityToMaxDim,
   fitDepthQuality,
