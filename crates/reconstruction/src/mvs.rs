@@ -51,6 +51,9 @@ pub(crate) struct SrcView<'a> {
     fx: f64, fy: f64, cx: f64, cy: f64,
     r: M3,
     t: V3,
+    // The source's first-pass depth plane, same dims as `gray`, for the geometric pass
+    // (see Geom); empty = photometric only.
+    depth: &'a [f32],
 }
 
 // Sentinel: a source that provides no measurement (warp OOB / masked / <4 px /
@@ -79,11 +82,58 @@ const VAR_FLOOR: f64 = 1e-6;
 // for the cost of a smaller one; the centre row and column are kept), and the bilateral
 // weights. Same in planeCost.js and patchmatch.wgsl.
 #[derive(Clone, Copy)]
-pub(crate) struct Patch { radius: i32, step: i32, bil: Bilateral }
+pub(crate) struct Patch { radius: i32, step: i32, bil: Bilateral, geom: Option<Geom> }
+
+// The geometric-consistency pass (ACMP's last stage; COLMAP's geom_consistency): a source
+// with a first-pass depth adds weight · min(e, max) to its cost, e the forward–backward
+// reprojection error (reference px) of the hypothesis through that depth. ACMP: weight
+// 0.1, max 5 px. Same in patchmatch.wgsl geomError.
+#[derive(Clone, Copy)]
+pub(crate) struct Geom { weight: f64, max: f64 }
+
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn geom_error(src: &SrcView, rfx: f64, rfy: f64, rcx: f64, rcy: f64, u: f64, v: f64, depth: f64, max: f64) -> f64 {
+    let x = [(u - rcx) / rfx * depth, (v - rcy) / rfy * depth, depth];
+    let xs = [
+        src.r[0][0]*x[0] + src.r[0][1]*x[1] + src.r[0][2]*x[2] + src.t[0],
+        src.r[1][0]*x[0] + src.r[1][1]*x[1] + src.r[1][2]*x[2] + src.t[1],
+        src.r[2][0]*x[0] + src.r[2][1]*x[1] + src.r[2][2]*x[2] + src.t[2],
+    ];
+    if xs[2] <= 1e-9 { return max; }
+    let su = src.fx * (xs[0] / xs[2]) + src.cx;
+    let sv = src.fy * (xs[1] / xs[2]) + src.cy;
+    if su < 0.0 || sv < 0.0 || su >= src.w as f64 || sv >= src.h as f64 { return max; }
+    let xi = ((su + 0.5) as usize).min(src.w - 1);
+    let yi = ((sv + 0.5) as usize).min(src.h - 1);
+    let ds = src.depth[yi * src.w + xi] as f64;
+    if !(ds > 0.0) { return max; }
+    // Back into the reference frame: X = Rᵀ(Xs − t), then projected.
+    let a = [(su - src.cx) / src.fx * ds - src.t[0], (sv - src.cy) / src.fy * ds - src.t[1], ds - src.t[2]];
+    let x2 = [
+        src.r[0][0]*a[0] + src.r[1][0]*a[1] + src.r[2][0]*a[2],
+        src.r[0][1]*a[0] + src.r[1][1]*a[1] + src.r[2][1]*a[2],
+        src.r[0][2]*a[0] + src.r[1][2]*a[1] + src.r[2][2]*a[2],
+    ];
+    if x2[2] <= 1e-9 { return max; }
+    let u2 = rfx * (x2[0] / x2[2]) + rcx;
+    let v2 = rfy * (x2[1] / x2[2]) + rcy;
+    ((u2 - u) * (u2 - u) + (v2 - v) * (v2 - v)).sqrt().min(max)
+}
 
 impl Patch {
     pub(crate) fn new(radius: i32, step: i32, bil: Bilateral) -> Self {
-        Patch { radius, step: step.max(1), bil }
+        Patch { radius, step: step.max(1), bil, geom: None }
+    }
+    // A source's photometric cost c of a hypothesis, plus the geometric term when on.
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    fn with_geom(&self, c: f64, src: &SrcView, rfx: f64, rfy: f64, rcx: f64, rcy: f64, u: usize, v: usize, depth: f64) -> f64 {
+        match self.geom {
+            Some(g) if c < INVALID_THRESH && !src.depth.is_empty() =>
+                c + g.weight * geom_error(src, rfx, rfy, rcx, rcy, u as f64, v as f64, depth, g.max),
+            _ => c,
+        }
     }
     // The window offsets along one axis: −r, −r + step, …, kept symmetric about 0 so
     // the centre is a sample whatever the step.
@@ -248,7 +298,7 @@ pub(crate) fn agg_cost(
     // Retain only the lowest requested K costs as we visit the sources. K is at
     // most MAX_SOURCES by the public worker contract; unlike collect()+sort(), this
     // performs no allocation in the innermost PatchMatch scoring loop.
-    mean_best_costs(srcs.iter().map(|src| window_cost(src, &win[..m], d)), best_k)
+    mean_best_costs(srcs.iter().map(|src| patch.with_geom(window_cost(src, &win[..m], d), src, rfx, rfy, rcx, rcy, u, v, depth)), best_k)
 }
 
 // What plane_cost computes before it reads the source — the plane, and per window
@@ -307,7 +357,7 @@ fn source_costs(
     };
     for (k, src) in srcs.iter().take(MAX_SOURCES).enumerate() {
         let c = window_cost(src, &win[..m], d);
-        out[k] = if c >= INVALID_THRESH { 2.0 } else { c };
+        out[k] = if c >= INVALID_THRESH { 2.0 } else { patch.with_geom(c, src, rfx, rfy, rcx, rcy, u, v, depth) };
     }
     out
 }
@@ -418,6 +468,17 @@ pub fn compute_depth_map(
     view_selection: u32,
     // Step between window samples (see Patch); 0 or 1 = every pixel.
     window_step: u32,
+    // Start from a previous pass (ACMP's prior-assisted pass): the reference's normals, 3 per
+    // pixel (empty = random), with its depths in `seed_depth`.
+    seed_normals: &[f32],
+    // ACMP planar prior (Xu & Tao 2020; core/dense/planarPrior.js): 4 per pixel, depth (0 =
+    // none) and normal, camera frame; empty = none. A hypothesis (d, n) at a pixel with a
+    // prior (d_p, n_p) is compared on c²/α − ln(γ + e^(−(d−d_p)²/2σ_d²)·e^(−θ²/2σ_n²)), θ the
+    // angle between n and n_p — the paper's α 0.18, γ 0.5, σ_d = range / 64, σ_n = 5°.
+    prior: &[f32], prior_alpha: f32, prior_gamma: f32, prior_sig_d: f32, prior_sig_n: f32,
+    // The geometric pass (see Geom): the sources' first-pass depth planes, concatenated like
+    // `src_gray` (empty = off), and the term's weight and cap (px).
+    src_depth: &[f32], geom_weight: f32, geom_max: f32,
 ) -> Vec<f32> {
     let rw = ref_w as usize;
     let rh = ref_h as usize;
@@ -453,18 +514,38 @@ pub fn compute_depth_map(
         // Mask is optional: use the matching slice only when src_mask covers all
         // sources (same concatenated layout as src_gray), else treat as unmasked.
         let mask: &[u8] = if src_mask.len() >= src_gray.len() { &src_mask[off..off+len] } else { &[] };
+        let sdepth: &[f32] = if src_depth.len() >= src_gray.len() { &src_depth[off..off+len] } else { &[] };
         srcs.push(SrcView {
             gray: &src_gray[off..off+len], mask, w, h,
             fx: src_k[s*4] as f64, fy: src_k[s*4+1] as f64,
             cx: src_k[s*4+2] as f64, cy: src_k[s*4+3] as f64,
             r, t: [src_rel[s*12+9] as f64, src_rel[s*12+10] as f64, src_rel[s*12+11] as f64],
+            depth: sdepth,
         });
         off += len;
     }
 
     let bk = best_k.max(1) as usize;
     let bil = Bilateral::new(sigma_spatial as f64, sigma_color as f64);
-    let patch = Patch::new(radius, window_step.max(1) as i32, bil);
+    let mut patch = Patch::new(radius, window_step.max(1) as i32, bil);
+    let geom_on = src_depth.len() >= src_gray.len() && !src_depth.is_empty() && geom_weight > 0.0;
+    if geom_on { patch.geom = Some(Geom { weight: geom_weight as f64, max: (geom_max as f64).max(1e-6) }); }
+    // The handed-on cost is photometric: the geometric term only steers the search.
+    let photo_patch = Patch { geom: None, ..patch };
+    let have_normals = seed_normals.len() >= npix * 3;
+    let prior_on = prior.len() >= npix * 4 && prior_alpha > 0.0;
+    let (p_alpha, p_gamma) = (prior_alpha as f64, prior_gamma as f64);
+    let (p_isd, p_isn) = (0.5 / (prior_sig_d as f64).powi(2).max(1e-30), 0.5 / (prior_sig_n as f64).powi(2).max(1e-30));
+    // The cost a hypothesis is compared on at pixel i: photometric, or with the prior.
+    let prior_cost = |i: usize, c: f64, d: f64, n: &V3| -> f64 {
+        if !prior_on { return c; }
+        let dp = prior[4 * i] as f64;
+        if !(dp > 0.0) { return c; }
+        let cos = (n[0] * prior[4 * i + 1] as f64 + n[1] * prior[4 * i + 2] as f64 + n[2] * prior[4 * i + 3] as f64).clamp(-1.0, 1.0);
+        let th = cos.acos();
+        let dd = d - dp;
+        c * c / p_alpha - (p_gamma + (-dd * dd * p_isd).exp() * (-th * th * p_isn).exp()).ln()
+    };
     let acmh = view_selection == 1;
     // ACMH: each pixel's most important view of the previous sweep (u32::MAX = none).
     let mut sel_view = if acmh { vec![u32::MAX; npix] } else { Vec::new() };
@@ -513,9 +594,14 @@ pub fn compute_depth_map(
         let seeded = if have_seed { seed_depth[i] as f64 } else { 0.0 };
         let d0 = if seeded > 0.0 { seeded.clamp(dmin, dmax) }
                  else { dmin + randf(&mut rng) * (dmax - dmin) };
-        let n0 = rand_normal(&mut rng);
+        let mut n0 = rand_normal(&mut rng);
+        if have_normals {
+            // The previous pass's plane, when it is one (a hole keeps the random draw).
+            let sn = [seed_normals[3 * i] as f64, seed_normals[3 * i + 1] as f64, seed_normals[3 * i + 2] as f64];
+            if sn[2] < 0.0 && dot3(&sn, &sn) > 0.5 { n0 = normalize3(&sn); }
+        }
         wr(pd, i, d0); wr(pnx, i, n0[0]); wr(pny, i, n0[1]); wr(pnz, i, n0[2]);
-        wr(pc, i, agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, d0, &n0, patch));
+        wr(pc, i, prior_cost(i, agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, d0, &n0, patch), d0, &n0));
     });
 
     // Red-black checkerboard PatchMatch sweeps.
@@ -611,9 +697,9 @@ pub fn compute_depth_map(
                         wr(psel, i, top);
                         // 3. The cheapest hypothesis under those weights (eq. 6).
                         let mut best_h = 0;
-                        let mut best_c = weighted_cost(&cm[0], &w, ns);
+                        let mut best_c = prior_cost(i, weighted_cost(&cm[0], &w, ns), hd[0], &hn[0]);
                         for h in 1..nh {
-                            let c = weighted_cost(&cm[h], &w, ns);
+                            let c = prior_cost(i, weighted_cost(&cm[h], &w, ns), hd[h], &hn[h]);
                             if c < best_c { best_c = c; best_h = h; }
                         }
                         let (mut best_d, mut best_n) = (hd[best_h], hn[best_h]);
@@ -630,8 +716,8 @@ pub fn compute_depth_map(
                         ]);
                         let (d0, n0) = (best_d, best_n);
                         for (dk, nk) in [(d_rand, n0), (d0, n_rand), (d_rand, n_rand), (d_pert, n0), (d0, n_pert), (d_pert, n_pert)] {
-                            let c = weighted_cost(
-                                &source_costs(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, u, v, dk, &nk, patch), &w, ns);
+                            let c = prior_cost(i, weighted_cost(
+                                &source_costs(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, u, v, dk, &nk, patch), &w, ns), dk, &nk);
                             if c < best_c { best_c = c; best_d = dk; best_n = nk; }
                         }
                         wr(pd, i, best_d); wr(pnx, i, best_n[0]); wr(pny, i, best_n[1]); wr(pnz, i, best_n[2]);
@@ -680,7 +766,7 @@ pub fn compute_depth_map(
                         if tried[..n_tried].contains(&k) { continue; }
                         tried[n_tried] = k;
                         n_tried += 1;
-                        let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, cand_d, &cand_n, patch);
+                        let c = prior_cost(i, agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, cand_d, &cand_n, patch), cand_d, &cand_n);
                         if c < best_c { best_c = c; best_d = cand_d; best_n = cand_n; }
                     }
 
@@ -691,11 +777,11 @@ pub fn compute_depth_map(
                     let dspan = best_d.min(dmax - dmin) * DEPTH_PERTURB_REL * shrink;
                     // (a) current depth + random new normal.
                     let rand_n = rand_normal(&mut rng);
-                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, best_d, &rand_n, patch);
+                    let c = prior_cost(i, agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, best_d, &rand_n, patch), best_d, &rand_n);
                     if c < best_c { best_c = c; best_n = rand_n; }
                     // (b) current normal + perturbed depth.
                     let pert_d_only = (best_d + (randf(&mut rng) * 2.0 - 1.0) * dspan).clamp(dmin, dmax);
-                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d_only, &best_n, patch);
+                    let c = prior_cost(i, agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d_only, &best_n, patch), pert_d_only, &best_n);
                     if c < best_c { best_c = c; best_d = pert_d_only; }
                     // (c) joint perturbation (kept — helps escape coupled local minima).
                     let pert_d = (best_d + (randf(&mut rng) * 2.0 - 1.0) * dspan).clamp(dmin, dmax);
@@ -704,7 +790,7 @@ pub fn compute_depth_map(
                         best_n[1] + (randf(&mut rng) * 2.0 - 1.0) * 0.5 * shrink,
                         (best_n[2] - randf(&mut rng) * 0.3 * shrink).min(-0.1),
                     ]);
-                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d, &pert_n, patch);
+                    let c = prior_cost(i, agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d, &pert_n, patch), pert_d, &pert_n);
                     if c < best_c { best_c = c; best_d = pert_d; best_n = pert_n; }
 
                     wr(pd, i, best_d); wr(pnx, i, best_n[0]); wr(pny, i, best_n[1]); wr(pnz, i, best_n[2]);
@@ -714,12 +800,13 @@ pub fn compute_depth_map(
         }
     }
 
-    // ACMH searched on view-weighted costs; what it hands on is the best-K photometric cost
-    // of the plane it found, as the best-K kernel would report it (patchmatch.wgsl mode 2).
-    if acmh {
+    // ACMH searched on view-weighted costs, a prior pass on prior-weighted ones; what either
+    // hands on is the best-K photometric cost of the plane it found, as the best-K kernel
+    // would report it (patchmatch.wgsl mode 2).
+    if acmh || prior_on || geom_on {
         for i in 0..npix {
             let n = [nx[i], ny[i], nz[i]];
-            cost[i] = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, i % rw, i / rw, depth[i], &n, patch);
+            cost[i] = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, i % rw, i / rw, depth[i], &n, photo_patch);
         }
     }
 
@@ -761,6 +848,7 @@ mod tests {
             fx: 20.0, fy: 20.0, cx: 8.0, cy: 8.0,
             r: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
             t: [0.0, 0.0, 0.0],
+            depth: &[],
         };
         plane_cost(refimg, w, h, 20.0, 20.0, 8.0, 8.0, &src, 8, 8, 5.0, &[0.0, 0.0, -1.0], Patch::new(2, 1, Bilateral::new(0.0, 0.0)))
     }
@@ -785,10 +873,10 @@ mod tests {
         let mask: Vec<u8> = (0..w * h).map(|i| (i % w < 3) as u8).collect();
         let rot = |a: f64| [[a.cos(), 0.0, a.sin()], [0.0, 1.0, 0.0], [-a.sin(), 0.0, a.cos()]];
         let srcs = vec![
-            SrcView { gray: &imgs[1], mask: &[], w, h, fx: 30.0, fy: 31.0, cx: 20.0, cy: 15.0, r: rot(0.05), t: [0.3, 0.0, 0.02] },
-            SrcView { gray: &imgs[2], mask: &mask, w, h, fx: 29.0, fy: 29.0, cx: 19.5, cy: 15.5, r: rot(-0.08), t: [-0.4, 0.1, 0.0] },
-            SrcView { gray: &flat, mask: &[], w, h, fx: 30.0, fy: 30.0, cx: 20.0, cy: 15.0, r: rot(0.0), t: [0.1, 0.0, 0.0] },
-            SrcView { gray: &imgs[3], mask: &[], w, h, fx: 30.0, fy: 30.0, cx: 20.0, cy: 15.0, r: rot(0.3), t: [2.0, 0.0, 0.5] },
+            SrcView { gray: &imgs[1], mask: &[], w, h, fx: 30.0, fy: 31.0, cx: 20.0, cy: 15.0, r: rot(0.05), t: [0.3, 0.0, 0.02], depth: &[] },
+            SrcView { gray: &imgs[2], mask: &mask, w, h, fx: 29.0, fy: 29.0, cx: 19.5, cy: 15.5, r: rot(-0.08), t: [-0.4, 0.1, 0.0], depth: &[] },
+            SrcView { gray: &flat, mask: &[], w, h, fx: 30.0, fy: 30.0, cx: 20.0, cy: 15.0, r: rot(0.0), t: [0.1, 0.0, 0.0], depth: &[] },
+            SrcView { gray: &imgs[3], mask: &[], w, h, fx: 30.0, fy: 30.0, cx: 20.0, cy: 15.0, r: rot(0.3), t: [2.0, 0.0, 0.5], depth: &[] },
         ];
         let refimg = &imgs[0];
         let mut n_valid = 0;
@@ -843,7 +931,7 @@ mod tests {
             rel.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, *tx, 0.0, 0.0]);
         }
         let digest_of = |vs: u32| {
-            let out = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[], 2.0, 8.0, 2, 3, 2, 7, 1.0, 0.0, 0.0, vs, 1);
+            let out = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[], 2.0, 8.0, 2, 3, 2, 7, 1.0, 0.0, 0.0, vs, 1, &[], &[], 0.0, 0.0, 0.0, 0.0, &[], 0.0, 0.0);
             assert_eq!(out.len(), w * h * 5);
             out.iter().fold(0u64, |a, v| a.wrapping_mul(1_000_003).wrapping_add(v.to_bits() as u64))
         };
@@ -916,7 +1004,7 @@ mod tests {
             rel.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, tx, 0.0, 0.0]);
         }
         let run_it = |vs: u32, it: u32| compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[],
-            2.0, 8.0, 2, it, 2, 7, 1.0, 0.0, 0.0, vs, 1);
+            2.0, 8.0, 2, it, 2, 7, 1.0, 0.0, 0.0, vs, 1, &[], &[], 0.0, 0.0, 0.0, 0.0, &[], 0.0, 0.0);
         let run = |vs: u32| run_it(vs, 5);
         let npix = w * h;
         let within = |o: &[f32]| (8..h - 8).flat_map(|v| (8..w - 8).map(move |u| v * w + u))
@@ -934,10 +1022,73 @@ mod tests {
             gray: &src[k * npix..(k + 1) * npix], mask: &[], w, h,
             fx: f as f64, fy: f as f64, cx: cx as f64, cy: cy as f64,
             r: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            t: [rel[12 * k + 9] as f64, 0.0, 0.0],
+            t: [rel[12 * k + 9] as f64, 0.0, 0.0], depth: &[],
         }).collect();
         let want = agg_cost(&refg, w, h, f as f64, f as f64, cx as f64, cy as f64, &srcs, 2, 24, 18, ac[i] as f64, &n, Patch::new(2, 1, Bilateral::new(0.0, 0.0)));
         assert!((ac[npix + i] as f64 - want).abs() < 1e-6);
+    }
+
+    // ACMP's prior on a plane whose middle is textureless (flat grey: no photometric
+    // evidence at all): with a prior plane there (as planarPrior.js builds from the textured
+    // border), the second pass puts the middle on it; without, the middle stays a guess.
+    #[test]
+    fn planar_prior_fills_a_textureless_middle() {
+        let (w, h) = (48usize, 36usize);
+        let hash = |x: i64, y: i64| { let mut h = (x * 374761393 + y * 668265263) as u64; h = (h ^ (h >> 13)).wrapping_mul(1274126177); ((h >> 16) & 255) as f64 };
+        let tex = |x: f64, y: f64| {
+            if (14.0..34.0).contains(&x) && (10.0..26.0).contains(&y) { return 128u8; }
+            let (x0, y0) = (x.floor(), y.floor());
+            let (fx, fy) = (x - x0, y - y0);
+            let (xi, yi) = (x0 as i64, y0 as i64);
+            let a = hash(xi, yi) * (1.0 - fx) + hash(xi + 1, yi) * fx;
+            let b = hash(xi, yi + 1) * (1.0 - fx) + hash(xi + 1, yi + 1) * fx;
+            (a * (1.0 - fy) + b * fy) as u8
+        };
+        let refg: Vec<u8> = (0..w * h).map(|i| tex((i % w) as f64, (i / w) as f64)).collect();
+        let (f, cx, cy) = (40.0f32, 24.0f32, 18.0f32);
+        let (mut src, mut dims, mut ks, mut rel) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for tx in [0.25f32, -0.3, 0.45] {
+            let shift = (f * tx / 4.0) as f64;
+            // The flat patch moves with the surface: it is at reference x 14..34 at depth 4.
+            src.extend((0..w * h).map(|i| tex((i % w) as f64 - shift, (i / w) as f64)));
+            dims.extend([w as u32, h as u32]);
+            ks.extend([f, f, cx, cy]);
+            rel.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, tx, 0.0, 0.0]);
+        }
+        let npix = w * h;
+        let photo = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[],
+            2.0, 8.0, 2, 5, 2, 7, 1.0, 0.0, 0.0, 0, 1, &[], &[], 0.0, 0.0, 0.0, 0.0, &[], 0.0, 0.0);
+        let prior: Vec<f32> = (0..npix).flat_map(|_| [4.0f32, 0.0, 0.0, -1.0]).collect();
+        let pass = |pr: &[f32], alpha: f32| compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[],
+            &photo[..npix], 2.0, 8.0, 2, 3, 2, 9, 0.125, 0.0, 0.0, 0, 1, &photo[2 * npix..], pr, alpha, 0.5, 6.0 / 64.0, 5f32.to_radians(), &[], 0.0, 0.0);
+        let middle = |o: &[f32]| (12..24).flat_map(|v| (16..32).map(move |u| v * w + u))
+            .filter(|&i| (o[i] - 4.0).abs() < 0.04).count() as f64 / (12.0 * 16.0);
+        let (without, with) = (pass(&[], 0.0), pass(&prior, 0.18));
+        assert!(middle(&with) > 0.9, "with the prior: {}", middle(&with));
+        assert!(middle(&with) > middle(&without) + 0.3, "with {} without {}", middle(&with), middle(&without));
+    }
+
+    // The geometric term: zero where the hypothesis agrees with the source's own depth,
+    // growing with the disagreement, capped, and the cap where the source has no depth.
+    #[test]
+    fn geom_error_is_the_forward_backward_reprojection() {
+        let (w, h) = (40usize, 30usize);
+        let gray = vec![0u8; w * h];
+        let plane = vec![4.0f32; w * h];
+        let mut holed = plane.clone();
+        for v in holed.iter_mut().take(w * h / 2) { *v = 0.0; }
+        let mk = |depth: &'static [f32]| SrcView {
+            gray: Box::leak(gray.clone().into_boxed_slice()), mask: &[], w, h,
+            fx: 30.0, fy: 30.0, cx: 20.0, cy: 15.0,
+            r: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], t: [0.5, 0.0, 0.0], depth,
+        };
+        let src = mk(Box::leak(plane.into_boxed_slice()));
+        let at = |d: f64| geom_error(&src, 30.0, 30.0, 20.0, 15.0, 20.0, 15.0, d, 5.0);
+        assert!(at(4.0) < 0.1, "true depth: {}", at(4.0));
+        assert!(at(4.4) > 0.3 && at(4.4) < 5.0, "10 % off: {}", at(4.4));
+        assert_eq!(at(1.0), 5.0, "far off: capped");
+        let src = mk(Box::leak(holed.into_boxed_slice()));
+        assert_eq!(geom_error(&src, 30.0, 30.0, 20.0, 15.0, 20.0, 2.0, 4.0, 5.0), 5.0);
     }
 
     #[test]

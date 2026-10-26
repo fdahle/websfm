@@ -113,12 +113,17 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
-- **ACMH view selection for depth maps.** On a GPU, PatchMatch now takes candidate depths
-  from eight regions around each pixel and scores them on the views most of them match well
-  (ACMH, Xu & Tao 2019), so good depths spread further and occluded views drop out. On six
-  ETH3D scenes (ETH3D's own evaluator) the F1 score at 2 cm rises from 62.0 to 63.4, better
-  on every scene, for about 40 % more depth-map time. Without a GPU it stays off (it costs
-  several times the time there); Depth Maps ▸ Advanced ▸ View selection turns it on or off.
+- **More accurate, more complete depth maps on a GPU (Method: Full).** Depth Maps ▸
+  Advanced ▸ Method: Full runs three passes, ACMH view selection, planar priors that span
+  textureless areas, and a pass that makes each map agree with its neighbours; Fast is the
+  former single best-K pass. Auto, the default, uses Full on a GPU and Fast without one.
+  On six ETH3D scenes (ETH3D's own evaluator) the F1 score at 2 cm rises from 62.0 to 66.2,
+  better on every scene (ACMH +1.4, planar priors +0.7, geometric pass +2.0), against
+  COLMAP's 58.4. Depth maps take about 2–4× as long: ETH3D 2.2–3×, the 347-image quarry
+  block 7 → 26 min. The geometric pass works from the saved first-pass maps, so memory
+  stays flat (quarry: 1.9 GB projected). On aerial blocks the surface is smoother (median
+  height noise −20 to −29 %) with about 10 % fewer points. Methods after Xu & Tao (ACMH
+  2019, ACMP 2020).
 - **Much fuller dense clouds of objects and interiors.** In an object-capture project the
   depth filter now keeps a pixel that one other view confirms (aerial projects still need
   two), so plain walls, floors and edges seen in only two photos stay in the cloud. On

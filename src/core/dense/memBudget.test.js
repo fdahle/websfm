@@ -139,10 +139,20 @@ describe('projectDensePeakBytes', () => {
     const npix = 1000 * 1000
     const p = projectDensePeakBytes({ nImages: 5, maxDim: 1000 })
     expect(p.filter).toBe(5 * npix) // in-memory filter: every map's mask at once
-    expect(p.total).toBe(p.store + p.raster + p.gpu + p.filter)
+    expect(p.total).toBe(p.store + p.raster + p.gpu + p.filter + p.method)
     // Streamed maps are filtered by a separate pass over the saved maps; off is off.
     expect(projectDensePeakBytes({ nImages: 5, maxDim: 1000, retainedMaps: 1, filterMaps: 0 }).filter).toBe(0)
     expect(projectDensePeakBytes({ nImages: 5, maxDim: 1000, filterMaps: 3 }).filter).toBe(3 * npix)
+  })
+
+  it("charges the Full method's prior planes and the geometric pass's depth cache", () => {
+    const npix = 1000 * 1000
+    const base = { nImages: 5, maxDim: 1000, nSources: 10 }
+    expect(projectDensePeakBytes(base).method).toBe(0)
+    expect(projectDensePeakBytes({ ...base, planarPrior: true }).method).toBe(16 * npix)
+    expect(projectDensePeakBytes({ ...base, geomPass: true, geomCacheMaps: 24 }).method).toBe(24 * 4 * npix)
+    const gpu = projectDensePeakBytes({ ...base, backend: 'gpu', planarPrior: true, geomPass: true, geomCacheMaps: 24 })
+    expect(gpu.method).toBe(32 * npix + (24 + 10) * 4 * npix)
   })
 
   it('a lower rasterBytesPerPx (gray-only cache) reduces the raster term', () => {

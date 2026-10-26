@@ -2,7 +2,7 @@
 // one-line effects under its numbered steps, from the same rules the run applies
 // (stores/reconstruction/dense.js resolves Quality with qualityToMaxDim over the
 // largest original image).
-import { qualityToMaxDim, resolveViewSelection } from '../dense/depthMap.js'
+import { qualityToMaxDim, resolveDepthMethod } from '../dense/depthMap.js'
 import { autoMinConsistent } from '../dense/geomFilter.js'
 import { DEPTHMAP_QUALITY_META } from '../defaults.user.js'
 import { fmtCount, plural } from './format.js'
@@ -30,12 +30,12 @@ export function depthMapEffects(s, { registered = 0, nativeLong = 0, sceneType =
       'run steps down a quality and says so.'
 
   const d = 2 * s.window + 1
-  const acmh = resolveViewSelection(s.viewSelection, gpu) === 'acmh'
-  const autoVs = (s.viewSelection ?? 'auto') === 'auto'
-  const viewSel = acmh
-    ? `ACMH view selection${autoVs ? ' (auto, on the GPU)' : ''}: candidates from 8 regions around each pixel, the ` +
-      'views most of them match well do the scoring.'
-    : `Best-K view selection${autoVs ? ' (auto, without a GPU)' : ''}: each candidate is scored on its best-matching views.`
+  const full = resolveDepthMethod(s.method, gpu) === 'full'
+  const autoM = (s.method ?? 'auto') === 'auto'
+  const viewSel = full
+    ? `Full method${autoM ? ' (auto, on the GPU)' : ''}: ACMH view selection, then a pass with planar priors ` +
+      'spanning textureless areas, then one that makes each map agree with its neighbours.'
+    : `Fast method${autoM ? ' (auto, without a GPU)' : ''}: best-K view selection, one pass.`
   const patchMatch =
     `A ${d}×${d} px correlation window; ${plural(s.iterations, 'propagation sweep')} at the finest level, ` +
     `more at the coarser ones. ${viewSel}`

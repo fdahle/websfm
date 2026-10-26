@@ -93,6 +93,13 @@ export const THIRD_PARTY = [
       { name: 'exifr', version: '7.1.3', license: 'MIT', url: 'https://github.com/MikeKovarik/exifr' },
       { name: 'fflate', version: '0.8.3', license: 'MIT', url: 'https://github.com/101arrowz/fflate' },
       { name: 'SQLite Wasm', version: '3.53.0', license: 'Apache-2.0', url: 'https://github.com/sqlite/sqlite-wasm' },
+      { name: 'Delaunator', version: '5.0.1', license: 'ISC', url: 'https://github.com/mapbox/delaunator' },
+      {
+        name: 'robust-predicates',
+        version: '3.0.3',
+        license: 'Unlicense',
+        url: 'https://github.com/mourner/robust-predicates',
+      },
     ],
   },
   {

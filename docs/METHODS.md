@@ -1341,8 +1341,17 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   **Window step** (`DENSE_TUNING.windowStep`, 1): every other row and column of a larger
   window, as COLMAP and ACMM sample, cost 1.4–1.5 F1 on ETH3D for ~30 % less time.
 
-  **View selection** (`viewSelection`, default *auto*): **ACMH** (Xu & Tao 2019,
-  `patchmatch.wgsl` `acmhSweep`, `mvs.rs` `ACMH_*`) on the GPU, best-K on the CPU. Each
+  **Method** (`method`, default *auto*: Full on the GPU, Fast on the CPU; resolved in the
+  store, `resolveDepthMethod`). **Fast** is best-K view selection in one pass. **Full** is
+  ACMH view selection, then a planar-prior pass, then a geometric-consistency pass, as
+  below. ETH3D (official evaluator, Medium, GPU, object defaults, F1 @2 cm, court / deliv /
+  office / pipes / playg / terr · mean): Fast 71.7/68.7/55.2/46.5/50.7/79.1 · 62.0; + ACMH
+  63.4; + planar prior 72.9/71.0/59.0/49.4/53.2/79.4 · 64.1; + geometric pass
+  **74.3/71.9/62.4/53.7/54.3/80.4 · 66.2** (COLMAP at 2,000 px: 58.4). Depth time ~2.2–3×
+  Fast's on the GPU (courtyard 66 → 158 → 202 s).
+
+  **ACMH view selection** (Xu & Tao 2019, `patchmatch.wgsl` `acmhSweep`, `mvs.rs`
+  `ACMH_*`). Each
   sweep a pixel takes candidate planes from 8 regions of the other checkerboard colour —
   4 V-shapes of 7 samples next to it, 4 strips of 11 out to 23 px — the cheapest of each
   transferred onto its ray. The 8 candidates' per-view costs vote: a view counts when more
@@ -1358,7 +1367,29 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   sweeps, best-K 0.51 / 0.78; on a periodic texture best-K is better (a wrong depth matches
   single views of a repetitive pattern). The WASM kernel scores the same (pipes 48.6 vs GPU
   48.7). Time: GPU +40 %; CPU pipes (14 maps, 3 workers) 6,516 s against the GPU's 44 s —
-  hence auto = best-K without a GPU.
+  hence auto = Fast without a GPU.
+
+  **Planar priors** (ACMP, Xu & Tao 2020; `core/dense/planarPrior.js`, `prior_cost` in
+  `mvs.rs`, `priorCost` in `patchmatch.wgsl`). After the photometric sweeps, the cheapest
+  pixel of each 5-px cell whose cost is below 0.1 becomes a support point; the support
+  points are Delaunay-triangulated in the image (`delaunator`), and every pixel inside a
+  triangle gets the depth and normal of the triangle's plane (planes meeting the ray at
+  |cos| < 0.1 are dropped). A second run of 3 sweeps, seeded with the first map, scores
+  a hypothesis by c′ = c²/α − ln(γ + e^(−Δd²/2σd²)·e^(−θ²/2σn²)) with α 0.18, γ 0.5,
+  σd = range/64, σn = 5° (Δd the depth difference to the prior, θ the normal angle);
+  pixels without a prior keep the plain cost. A textureless wall between textured edges
+  gets the plane its edges span. ETH3D +0.7 F1 (3 sweeps; 5 sweeps +0.8, not worth it).
+
+  **Geometric-consistency pass** (λ 0.1, cap 5 px, 2 sweeps; `geom_error` / `geomError`).
+  Every source view's first-pass depth map (after the prior) enters the cost: a candidate
+  depth is projected into the source, the source's depth there projected back, and the
+  forward–backward reprojection error e (px, capped at 5) adds λ·e to that view's cost —
+  as in COLMAP's geometric PatchMatch and ACMM. The finalize step still hands on the
+  photometric cost, which the downstream NCC gates read. The pass is staged: the first-pass
+  maps are saved as usual, the pass reads its sources' depth from them (an LRU of 24
+  depth-only planes per worker) and writes `<uuid>.g.<key>.bin`, which replaces the first
+  pass only once every map is done (`promoteStagedDepthPlanes`), so memory does not grow
+  with the image count. On Fast (best-K) maps it lost F1; on ACMH + prior maps it adds 2.0.
 
   **Refinement schedule** (`core/dense/refineSchedule.js`): each sweep proposes a
   random normal, a depth-only step and a joint step at scale `s = s₀·0.5^it`; the depth
@@ -2047,5 +2078,6 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Tyszkiewicz, M. J., Fua, P. & Trulls, E. (2020). DISK: learning local features with policy gradient. Advances in Neural Information Processing Systems (NeurIPS) 33. https://arxiv.org/abs/2006.13566
 - Waechter, M., Moehrle, N. & Goesele, M. (2014). Let there be color! Large-scale texturing of 3D reconstructions. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-319-10602-1_54
 - Xu, Q. & Tao, W. (2019). Multi-scale geometric consistency guided multi-view stereo. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). https://arxiv.org/abs/1904.08103
+- Xu, Q. & Tao, W. (2020). Planar prior assisted PatchMatch multi-view stereo. AAAI Conference on Artificial Intelligence 34(07), 12516–12523. https://doi.org/10.1609/aaai.v34i07.6940
 - Zhang, W., Qi, J., Wan, P., Wang, H., Xie, D., Wang, X. & Yan, G. (2016). An easy-to-use airborne LiDAR data filtering method based on cloth simulation. Remote Sensing 8(6), 501. https://doi.org/10.3390/rs8060501
 - Zhao, X., Wu, X., Chen, W., Chen, P. C. Y., Xu, Q. & Li, Z. (2023). ALIKED: a lighter keypoint and descriptor extraction network via deformable transformation. IEEE Transactions on Instrumentation and Measurement 72. https://arxiv.org/abs/2304.03608

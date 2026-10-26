@@ -6,6 +6,7 @@ import {
   fitDepthQuality,
   autoBestK,
   resolveViewSelection,
+  resolveDepthMethod,
   fusionCostStats,
   fuseDepthMaps,
   mergePointsSpatial,
@@ -238,6 +239,13 @@ describe('quality presets & derived params (Step 3)', () => {
     expect(resolveViewSelection(undefined, true)).toBe('acmh')
     expect(resolveViewSelection('acmh', false)).toBe('acmh')
     expect(resolveViewSelection('bestk', true)).toBe('bestk')
+  })
+
+  it('resolveDepthMethod: auto is Full on the GPU, Fast on the CPU; a choice stands', () => {
+    expect(resolveDepthMethod('auto', true)).toBe('full')
+    expect(resolveDepthMethod(undefined, false)).toBe('fast')
+    expect(resolveDepthMethod('full', false)).toBe('full')
+    expect(resolveDepthMethod('fast', true)).toBe('fast')
   })
 
   it('autoBestK is ceil(nSources/2) clamped to [1,4]', () => {

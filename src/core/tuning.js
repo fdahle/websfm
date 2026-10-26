@@ -325,6 +325,27 @@ export const DENSE_TUNING = {
   // (mvs.rs sweeps over rows; the same bits as one thread). 640×480, 6 sources, natively:
   // best-K 91.8 → 8.9 s, ACMH 246 → 22.1 s on 20 cores (2026-10-26).
   cpuDepthThreads: true,
+  // ACMP planar priors (core/dense/planarPrior.js, depthMapForImage): support points one
+  // per priorGrid² cell below priorMaxCost, then priorIterations sweeps from the finished
+  // map with the prior in the cost (the paper's α, γ, σ_n; σ_d = range / 64). ETH3D +0.7
+  // F1 (3 sweeps; 5 gave +0.8). On or off is the Method's (DEPTHMAP_DEFAULTS.method, the
+  // store resolves it); `planarPrior` here is only the fallback of a call that names none.
+  planarPrior: false,
+  priorGrid: 5,
+  priorMaxCost: 0.1,
+  priorAlpha: 0.18,
+  priorGamma: 0.5,
+  priorSigNDeg: 5,
+  priorIterations: 3,
+  priorPerturbStart: 0.125,
+  // The geometric-consistency pass (depthMap.js geomDepthMapForImage; mvs.rs Geom): ACMP's
+  // λ 0.1, cap 5 px, 2 sweeps from the saved first-pass maps (ETH3D +2.0 F1 on ACMH +
+  // prior maps); the worker keeps the last geomDepthCache neighbour depth planes it read.
+  geomDepthCache: 24,
+  geomWeight: 0.1,
+  geomMaxPx: 5,
+  geomIterations: 2,
+  geomPerturbStart: 0.0625,
   // Step between PatchMatch window samples (mvs.rs Patch): 1 = every pixel, 2 = every other
   // row and column (COLMAP / ACMM). Measured 2026-10-26 (ETH3D six scenes, official
   // evaluator, GPU, ACMH): 7×7 step 1 63.4; radius 5 step 2 61.9, radius 4 step 2 62.1,

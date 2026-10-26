@@ -16,7 +16,7 @@ const DETECTORS = {
  * @param {{
  *   detector?: string|null, matcher?: string|null, verifier?: string|null,
  *   sparse?: boolean, fisheye?: boolean, georef?: boolean, dense?: boolean,
- *   denseViewSelection?: string|null,
+ *   denseViewSelection?: string|null, densePlanarPrior?: boolean, denseGeomPass?: boolean,
  *   mesh?: boolean, textured?: boolean, dem?: boolean, demFill?: string|null,
  *   ortho?: { blend?: string, seamline?: string, seamBlend?: string, colourBalance?: boolean }|null,
  *   groundClassified?: boolean,
@@ -68,15 +68,24 @@ export function methodsUsed(f = {}) {
   if (f.georef)
     out.push({ step: 'Georeferencing', method: 'Similarity from control (unit quaternions)', refs: ['horn1987'] })
   if (f.dense) {
+    const acmh = f.denseViewSelection === 'acmh'
     out.push({
       step: 'Depth maps and fusion',
       method:
         'Slanted-plane PatchMatch with bilateral-weighted NCC, ' +
-        (f.denseViewSelection === 'acmh'
+        (acmh
           ? 'adaptive checkerboard sampling and multi-hypothesis joint view selection (ACMH), '
           : 'checkerboard propagation, ') +
+        (f.densePlanarPrior ? 'planar priors from triangulated support points (ACMP), ' : '') +
+        (f.denseGeomPass ? 'a geometric-consistency pass, ' : '') +
         'cross-view geometric filtering and fusion',
-      refs: ['bleyer2011', 'galliani2015', 'schonberger2016b', ...(f.denseViewSelection === 'acmh' ? ['xu2019'] : [])],
+      refs: [
+        'bleyer2011',
+        'galliani2015',
+        'schonberger2016b',
+        ...(acmh ? ['xu2019'] : []),
+        ...(f.densePlanarPrior ? ['xu2020'] : []),
+      ],
     })
   }
   if (f.groundClassified)

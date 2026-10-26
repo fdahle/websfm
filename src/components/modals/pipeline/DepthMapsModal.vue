@@ -209,16 +209,16 @@ function run() {
 
       <SettingsStep step="2" title="PatchMatch" :effect="effects.patchMatch">
         <SettingsField
-          label-for="viewSelection"
-          hint="Which neighbouring views score each pixel. ACMH is more accurate and complete, but slower — several times so without a GPU."
+          label-for="method"
+          hint="Full is more accurate and complete; it takes about 2–3× as long on a GPU and several times longer without one."
         >
           <template #label>
-            <FieldHelp op="depth-maps" param="viewSelection">View selection</FieldHelp>
+            <FieldHelp op="depth-maps" param="method">Method</FieldHelp>
           </template>
-          <select id="viewSelection" v-model="settings.viewSelection" class="field-select">
-            <option value="auto">Auto (ACMH on the GPU, best-K without one)</option>
-            <option value="acmh">ACMH</option>
-            <option value="bestk">Best-K</option>
+          <select id="method" v-model="settings.method" class="field-select">
+            <option value="auto">Auto (Full on the GPU, Fast without one)</option>
+            <option value="full">Full (ACMH, planar prior, geometric pass)</option>
+            <option value="fast">Fast (best-K, one pass)</option>
           </select>
         </SettingsField>
 

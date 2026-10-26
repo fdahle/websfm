@@ -145,8 +145,13 @@ export function createMemLedger() {
 //     off or runs as its own streamed pass over the saved maps; the default assumes it
 //     runs over every retained map. Charged on top of the raster term (already the
 //     batch-long upper bound), so the projection still over-counts.
+//   • Full method (`planarPrior`, `geomPass`) — the prior's depth + normal planes for the
+//     image in flight (16 B/px, again on the GPU), and the geometric pass's cache of
+//     `geomCacheMaps` neighbour depth planes (4 B/px each) plus, on the GPU, one depth
+//     buffer per source (4 B/px × nSources). The two passes run one after the other;
+//     both are charged.
 // Working dims are the maxDim² upper bound (longest side = maxDim, other ≤ it).
-// Returns a byte breakdown { store, raster, gpu, filter, total }.
+// Returns a byte breakdown { store, raster, gpu, filter, method, total }.
 export function projectDensePeakBytes({
   nImages,
   maxDim,
@@ -156,6 +161,9 @@ export function projectDensePeakBytes({
   retainedMaps = nImages,
   filterMaps = retainedMaps,
   pixels = null,
+  planarPrior = false,
+  geomPass = false,
+  geomCacheMaps = 24,
 }) {
   // Per-image working pixels when the sizes are known (workingPixels); else the
   // maxDim² upper bound, which counts a 2 : 1 frame at twice its size (the KH-9
@@ -169,7 +177,11 @@ export function projectDensePeakBytes({
   const raster = rasterBytesPerPx * sum
   const gpu = backend === 'gpu' ? 48 * largest + nSources * 4 * largest : 0
   const filter = some(filterMaps)
-  return { store, raster, gpu, filter, total: store + raster + gpu + filter }
+  const onGpu = backend === 'gpu'
+  const method =
+    (planarPrior ? (onGpu ? 32 : 16) * largest : 0) +
+    (geomPass ? 4 * largest * (geomCacheMaps + (onGpu ? nSources : 0)) : 0)
+  return { store, raster, gpu, filter, method, total: store + raster + gpu + filter + method }
 }
 
 // Working pixels of one image when its long side is brought to ≤ maxDim (the dense

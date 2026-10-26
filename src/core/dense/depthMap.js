@@ -15,6 +15,7 @@ import { relativePose, project } from './denseGeometry.js'
 import { numOpt, boolOpt } from './denseOptions.js'
 import { projectDensePeakBytes, workingPixels } from './memBudget.js'
 import { filterSettings } from './geomFilter.js'
+import { buildPlanarPrior } from './planarPrior.js'
 
 // ── Stage A helpers ──────────────────────────────────────────────────────────
 
@@ -307,6 +308,56 @@ export async function depthMapForImage(
     hooks.onProgress?.(doneWeight / totalWeight)
   }
 
+  // ACMP (Xu & Tao 2020): the credible pixels of the finished map, triangulated in the image,
+  // give every pixel inside a triangle a planar prior (planarPrior.js), and PatchMatch runs
+  // again at the working resolution from this map with that prior in its cost (mvs.rs
+  // prior_cost). The paper's α 0.18, γ 0.5, σ_d = range / 64, σ_n = 5°.
+  if (boolOpt(settings.planarPrior, DENSE_TUNING.planarPrior)) {
+    const L = levels[levels.length - 1]
+    const pp = buildPlanarPrior({ depth: dm.depth, cost: dm.cost, width: L.w, height: L.h }, L.K, {
+      grid: DENSE_TUNING.priorGrid,
+      maxCost: numOpt(settings.priorMaxCost, DENSE_TUNING.priorMaxCost, { positive: true }),
+    })
+    hooks.onLog?.(
+      `planar prior: ${pp.support} support points, ${pp.triangles} triangles, ` +
+        `${((100 * pp.covered) / (L.w * L.h)).toFixed(0)} % of pixels covered`,
+      'debug',
+      'Dense',
+    )
+    if (pp.covered > 0) {
+      const npix = L.w * L.h
+      const prior = new Float32Array(4 * npix)
+      for (let i = 0; i < npix; i++) {
+        prior[4 * i] = pp.depth[i]
+        prior[4 * i + 1] = pp.normal[3 * i]
+        prior[4 * i + 2] = pp.normal[3 * i + 1]
+        prior[4 * i + 3] = pp.normal[3 * i + 2]
+      }
+      const next = await computeDepthMapFn(L.gray, L.w, L.h, L.K, L.srcs, {
+        depthMin,
+        depthMax,
+        seedDepth: dm.depth,
+        seedNormals: dm.normals ?? null,
+        prior,
+        priorAlpha: DENSE_TUNING.priorAlpha,
+        priorGamma: DENSE_TUNING.priorGamma,
+        priorSigD: (depthMax - depthMin) / 64,
+        priorSigN: (DENSE_TUNING.priorSigNDeg * Math.PI) / 180,
+        window,
+        iterations: numOpt(settings.priorIterations, DENSE_TUNING.priorIterations, { int: true, min: 1 }),
+        bestK,
+        seed: (baseSeed ^ 0x2545f491) >>> 0,
+        perturbStart: DENSE_TUNING.priorPerturbStart,
+        sigmaSpatial,
+        sigmaColor,
+        viewSelection: settings.viewSelection === 'acmh' ? 'acmh' : 'bestk',
+        windowStep,
+        threads: numOpt(settings.threads, 0, { int: true, min: 0 }),
+      })
+      if (next) dm = next
+    }
+  }
+
   // GPU↔CPU validation (WebGPU port). Two checks against the first source:
   //   1. cost consistency — recompute the plane cost on the CPU reference at the
   //      GPU's own final (depth, normal); should match to ~e-3 (f32 + hardware
@@ -367,6 +418,59 @@ export async function depthMapForImage(
 
   // Carry the seeding diagnostics through so the caller can log them.
   return { ...dm, depthMin, depthMax, seeded }
+}
+
+// The geometric-consistency pass for one image (ACMP's last stage, Xu & Tao 2020; COLMAP's
+// geom_consistency): PatchMatch again at the working resolution from the image's finished
+// map, each source's cost raised by the forward–backward reprojection error through that
+// source's own finished depth (mvs.rs Geom). It needs every map of the run first.
+// `photo`: { depth, normals } of the reference; `srcDepth`: the sources' depth planes, in
+// `sources` order (null where missing). The depth range and seeding are depthMapForImage's.
+export async function geomDepthMapForImage(
+  ref,
+  sources,
+  pos,
+  photo,
+  srcDepth,
+  settings = {},
+  computeDepthMapFn = computeDepthMap,
+) {
+  const window = numOpt(settings.window, DEPTHMAP_DEFAULTS.window, { int: true, min: 1 })
+  const bestK = numOpt(settings.bestK, 3, { int: true, min: 1 })
+  const region = normalizeRegion(settings.region)
+  const seedPos = region ? positionsInRegion(pos, region) : pos
+  const { depthMin, depthMax, seeded } = seedDepthFromSparse(
+    { R: ref.cam.R, t: ref.cam.t, K: ref.K },
+    seedPos,
+    ref.width,
+    ref.height,
+  )
+  if (!(depthMax > depthMin)) return null
+  const srcs = sources.map((s) => {
+    const { R, t } = relativePose(ref.cam, s.cam)
+    return { gray: s.gray, w: s.w, h: s.h, K: s.K, R, t, mask: s.mask ?? null }
+  })
+  const sigmaColor = numOpt(settings.bilateralSigmaColor, DENSE_TUNING.bilateralSigmaColor, { min: 0 })
+  const dm = await computeDepthMapFn(ref.gray, ref.width, ref.height, ref.K, srcs, {
+    depthMin,
+    depthMax,
+    seedDepth: photo.depth,
+    seedNormals: photo.normals ?? null,
+    srcDepth,
+    geomWeight: numOpt(settings.geomWeight, DENSE_TUNING.geomWeight, { min: 0 }),
+    geomMax: numOpt(settings.geomMax, DENSE_TUNING.geomMaxPx, { positive: true }),
+    window,
+    iterations: numOpt(settings.geomIterations, DENSE_TUNING.geomIterations, { int: true, min: 1 }),
+    bestK,
+    seed: ((ref.width * 73856093) ^ (ref.height * 19349663) ^ 0x5bd1e995) >>> 0,
+    perturbStart: DENSE_TUNING.geomPerturbStart,
+    sigmaSpatial: numOpt(settings.bilateralSigmaSpatial, Math.min(5, Math.max(1, window)), { positive: true }),
+    sigmaColor,
+    viewSelection: settings.viewSelection === 'acmh' ? 'acmh' : 'bestk',
+    windowStep: numOpt(settings.windowStep, DENSE_TUNING.windowStep, { int: true, min: 1, max: 2 }),
+    threads: numOpt(settings.threads, 0, { int: true, min: 0 }),
+  })
+  return dm ? { ...dm, depthMin, depthMax, seeded } : null
 }
 
 // Post-process one depth plane to suppress the noise the per-image photometric
@@ -457,6 +561,7 @@ export function fitDepthQuality({
   nSources = 6,
   streamMaps = true,
   geomConsistency = true,
+  full = false,
 }) {
   const nativeLong = sizes.reduce((m, s) => Math.max(m, s.width || 0, s.height || 0), 0)
   const start = Math.max(0, DEPTH_QUALITY_ORDER.indexOf(quality))
@@ -471,14 +576,24 @@ export function fitDepthQuality({
       pixels: sizes.map((s) => workingPixels(s.width, s.height, maxDim)),
       retainedMaps: streamMaps ? 1 : sizes.length,
       filterMaps: geomConsistency && !streamMaps ? sizes.length : 0,
+      planarPrior: full,
+      geomPass: full,
+      geomCacheMaps: DENSE_TUNING.geomDepthCache,
     })
     if (proj.total <= budget) return { quality: q, maxDim, proj, steps: k - start }
   }
   return null
 }
 
-// The view selection a run uses: the setting, with 'auto' (or blank) = ACMH on the GPU,
-// best-K on the CPU, where ACMH costs several times the time (DEPTHMAP_DEFAULTS).
+// The method a run uses (DEPTHMAP_DEFAULTS.method): 'full' or 'fast', 'auto' (or blank) =
+// full on the GPU, fast on the CPU, where the full chain costs several times the time.
+export function resolveDepthMethod(setting, onGpu) {
+  if (setting === 'full' || setting === 'fast') return setting
+  return onGpu ? 'full' : 'fast'
+}
+
+// The view selection a call uses when the store did not set it: ACMH on the GPU, best-K on
+// the CPU (the Auto method's choice).
 export function resolveViewSelection(setting, onGpu) {
   if (setting === 'acmh' || setting === 'bestk') return setting
   return onGpu ? 'acmh' : 'bestk'

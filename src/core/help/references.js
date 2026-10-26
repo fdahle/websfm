@@ -179,6 +179,13 @@ export const REFERENCES = {
     venue: 'IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)',
     url: 'https://arxiv.org/abs/1904.08103',
   },
+  xu2020: {
+    authors: ['Qingshan Xu', 'Wenbing Tao'],
+    year: 2020,
+    title: 'Planar prior assisted PatchMatch multi-view stereo',
+    venue: 'AAAI Conference on Artificial Intelligence 34(07), 12516–12523',
+    doi: '10.1609/aaai.v34i07.6940',
+  },
   rusu2008: {
     authors: ['Radu Bogdan Rusu', 'Zoltan Csaba Marton', 'Nico Blodow', 'Mihai Dolha', 'Michael Beetz'],
     year: 2008,

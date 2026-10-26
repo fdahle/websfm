@@ -49,18 +49,24 @@ point does not drag the score down. A larger K averages more evidence and is les
 noisy where every source sees the surface. Blank picks about half of each image's sources, between 1 and
 4; set it only when diagnosing occlusion artefacts or noise.
 
-## View selection
-<!-- param: viewSelection  default: Auto -->
-Which neighbouring views decide whether a depth fits a pixel. **ACMH** (adaptive
-checkerboard sampling and multi-hypothesis joint view selection, after Xu & Tao 2019)
-takes candidate depths from eight regions around the pixel, from right next to it to
-23 pixels away. It then lets the views in which most of those candidates match well do
-the scoring. Good depths spread across a surface faster, and a view that sees something
-else at that pixel, such as an occluding object, is left out. **Best-K** scores each
-candidate on its K best-matching views. On the ETH3D benchmark ACMH gave a more accurate
-and more complete cloud on every scene (F1 at 2 cm 62.0 → 63.4). It takes about 40 %
-longer on a GPU and several times longer without one, so **Auto** uses ACMH on the GPU
-and best-K on the CPU.
+## Method
+<!-- param: method  default: Auto -->
+**Full** runs three stages, after Xu & Tao (2019, 2020):
+
+1. **ACMH view selection:** candidate depths come from eight regions around each pixel,
+   from right next to it to 23 pixels away, and are scored on the views in which most of
+   them match well. Good depths spread across a surface faster, and a view that sees
+   something else there, such as an occluding object, is left out.
+2. **Planar priors:** the confident pixels of each map are joined into triangles, and a
+   second pass is pulled towards each triangle's plane. A plain wall between textured
+   edges gets the plane its edges define.
+3. **Geometric consistency:** a last pass prefers depths that agree with the neighbouring
+   maps.
+
+**Fast** scores each candidate on its K best-matching views, in one pass. On the ETH3D
+benchmark Full gave a more accurate and more complete cloud on every scene (F1 at 2 cm
+62.0 → 66.2), for about 2–3× the depth-map time on a GPU and several times that without
+one. **Auto** uses Full on the GPU and Fast on the CPU.
 
 ## Patch window radius
 <!-- param: window  default: 3 -->

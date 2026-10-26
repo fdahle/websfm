@@ -707,6 +707,19 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     // Threads for the sweeps (the threaded build, see threadedWasm): its pool size cap;
     // 0 = the single-threaded build. The same map either way (mvs.rs pixel_rng).
     threads = 0,
+    // A prior-assisted pass (mvs.rs prior_cost): the previous pass's normals and the ACMP
+    // planar prior (4 per pixel: depth, normal) with its α, γ, σ_d, σ_n (radians).
+    seedNormals = null,
+    prior = null,
+    priorAlpha = 0.18,
+    priorGamma = 0.5,
+    priorSigD = 1,
+    priorSigN = 0.087,
+    // The geometric pass (mvs.rs Geom): per source its first-pass depth plane (srcDepth[k],
+    // its w×h), the term's weight and cap (px).
+    srcDepth = null,
+    geomWeight = 0,
+    geomMax = 5,
   } = opts
   const n = sources.length
   if (n === 0 || refW * refH === 0) return null
@@ -719,9 +732,12 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
   const srcDims = new Uint32Array(n * 2)
   const srcK = new Float32Array(n * 4)
   const srcRel = new Float32Array(n * 12)
+  const geomOn = geomWeight > 0 && Array.isArray(srcDepth) && srcDepth.length >= n
+  const srcDepthAll = geomOn ? new Float32Array(total) : new Float32Array(0)
   let off = 0
   sources.forEach((s, i) => {
     srcGray.set(s.gray, off)
+    if (geomOn && srcDepth[i]) srcDepthAll.set(srcDepth[i].subarray(0, s.w * s.h), off)
     if (s.mask) srcMask.set(s.mask.subarray(0, s.w * s.h), off)
     off += s.w * s.h
     srcDims[i * 2] = s.w
@@ -758,6 +774,15 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     sigmaColor,
     viewSelection === 'acmh' ? 1 : 0,
     Math.max(1, windowStep | 0),
+    seedNormals && seedNormals.length >= refW * refH * 3 ? seedNormals : new Float32Array(0),
+    prior && prior.length >= refW * refH * 4 ? prior : new Float32Array(0),
+    prior ? priorAlpha : 0,
+    priorGamma,
+    priorSigD,
+    priorSigN,
+    srcDepthAll,
+    geomOn ? geomWeight : 0,
+    geomMax,
   )
   const npix = refW * refH
   if (!raw || raw.length < npix * 5) return null

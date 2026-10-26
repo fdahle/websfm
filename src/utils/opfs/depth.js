@@ -69,6 +69,42 @@ export async function saveDepthPlane(projectId, uuid, buffers) {
   })
 }
 
+// The geometric-consistency pass (stores/reconstruction/dense.js) writes a map's new planes
+// beside its first-pass ones, as `<uuid>.g.<key>.bin`: later maps of the same pass still
+// read the first-pass planes (and a File read after its file was rewritten fails). An
+// interrupted run leaves only `<uuid>.g` names, which commitDepthIndex's stale sweep drops.
+export async function saveStagedDepthPlane(projectId, uuid, buffers) {
+  return saveDepthPlane(projectId, `${uuid}.g`, buffers)
+}
+
+// Once every map of the pass is written: each staged plane replaces its first-pass one
+// (a rename where OPFS has FileSystemFileHandle.move, else a copy).
+export async function promoteStagedDepthPlanes(projectId, uuids) {
+  return trackPersistence('promoteStagedDepthPlanes:' + String(projectId), async () => {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    for (const uuid of uuids) {
+      for (const key of DEPTH_BIN_KEYS) {
+        const staged = `${uuid}.g.${key}.bin`,
+          name = `${uuid}.${key}.bin`
+        let handle
+        try {
+          handle = await dir.getFileHandle(staged)
+        } catch (error) {
+          ignoreMissing(error)
+          continue
+        }
+        await dir.removeEntry(name).catch(ignoreMissing)
+        if (typeof handle.move === 'function') {
+          await handle.move(name)
+        } else {
+          await writeBin(dir, name, await (await handle.getFile()).arrayBuffer())
+          await dir.removeEntry(staged).catch(ignoreMissing)
+        }
+      }
+    }
+  })
+}
+
 // Commit a streamed set: the index, then drop planes of images it does not list.
 export async function commitDepthIndex(projectId, index) {
   return trackPersistence('commitDepthIndex:' + String(projectId), async () => {

@@ -517,6 +517,8 @@ export function useQualityReport() {
       georef: !!recon.georef,
       dense: recon.clouds.some((c) => c.kind === 'dense' && !c.imported),
       denseViewSelection: recon.depthSummary?.settings?.viewSelection ?? null,
+      densePlanarPrior: !!recon.depthSummary?.settings?.planarPrior,
+      denseGeomPass: !!recon.depthSummary?.settings?.geomPass,
       mesh: recon.clouds.some((c) => c.kind === 'mesh' && !c.imported),
       textured: recon.clouds.some((c) => c.kind === 'mesh' && !c.imported && c.texture),
       dem: !!recon.dem,

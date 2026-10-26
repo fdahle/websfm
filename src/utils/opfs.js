@@ -68,6 +68,8 @@ export {
   loadDepthIndex,
   saveDepthPlane,
   saveDepthPlanes,
+  saveStagedDepthPlane,
+  promoteStagedDepthPlanes,
 } from './opfs/depth.js'
 export {
   deleteExternalAll,

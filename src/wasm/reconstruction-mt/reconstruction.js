@@ -154,9 +154,18 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index
  * @param {number} sigma_color
  * @param {number} view_selection
  * @param {number} window_step
+ * @param {Float32Array} seed_normals
+ * @param {Float32Array} prior
+ * @param {number} prior_alpha
+ * @param {number} prior_gamma
+ * @param {number} prior_sig_d
+ * @param {number} prior_sig_n
+ * @param {Float32Array} src_depth
+ * @param {number} geom_weight
+ * @param {number} geom_max
  * @returns {Float32Array}
  */
-export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_dims, src_k, src_rel, src_mask, seed_depth, depth_min, depth_max, window, iterations, best_k, seed, perturb_start, sigma_spatial, sigma_color, view_selection, window_step) {
+export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_dims, src_k, src_rel, src_mask, seed_depth, depth_min, depth_max, window, iterations, best_k, seed, perturb_start, sigma_spatial, sigma_color, view_selection, window_step, seed_normals, prior, prior_alpha, prior_gamma, prior_sig_d, prior_sig_n, src_depth, geom_weight, geom_max) {
     const ptr0 = passArray8ToWasm0(ref_gray, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(ref_k, wasm.__wbindgen_malloc);
@@ -173,10 +182,16 @@ export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_d
     const len6 = WASM_VECTOR_LEN;
     const ptr7 = passArrayF32ToWasm0(seed_depth, wasm.__wbindgen_malloc);
     const len7 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_depth_map(ptr0, len0, ref_w, ref_h, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, depth_min, depth_max, window, iterations, best_k, seed, perturb_start, sigma_spatial, sigma_color, view_selection, window_step);
-    var v9 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    const ptr8 = passArrayF32ToWasm0(seed_normals, wasm.__wbindgen_malloc);
+    const len8 = WASM_VECTOR_LEN;
+    const ptr9 = passArrayF32ToWasm0(prior, wasm.__wbindgen_malloc);
+    const len9 = WASM_VECTOR_LEN;
+    const ptr10 = passArrayF32ToWasm0(src_depth, wasm.__wbindgen_malloc);
+    const len10 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_depth_map(ptr0, len0, ref_w, ref_h, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, depth_min, depth_max, window, iterations, best_k, seed, perturb_start, sigma_spatial, sigma_color, view_selection, window_step, ptr8, len8, ptr9, len9, prior_alpha, prior_gamma, prior_sig_d, prior_sig_n, ptr10, len10, geom_weight, geom_max);
+    var v12 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v9;
+    return v12;
 }
 
 /**

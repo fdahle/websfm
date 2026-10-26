@@ -83,6 +83,19 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     viewSelection = 'bestk',
     // Step between window samples (mvs.rs Patch): 1 = every pixel, 2 = every other one.
     windowStep = 1,
+    // A prior-assisted pass (mvs.rs prior_cost): the previous pass's normals and the ACMP
+    // planar prior (4 per pixel: depth, normal) with its α, γ, σ_d, σ_n (radians).
+    seedNormals = null,
+    prior = null,
+    priorAlpha = 0.18,
+    priorGamma = 0.5,
+    priorSigD = 1,
+    priorSigN = 0.087,
+    // The geometric pass (mvs.rs Geom): per source its first-pass depth plane (srcDepth[k],
+    // its w×h), the term's weight and cap (px).
+    srcDepth = null,
+    geomWeight = 0,
+    geomMax = 5,
   } = opts
   const acmh = viewSelection === 'acmh'
   // Mirror mvs.rs's depth-range guards (dmin ≥ 1e-4, dmax ≥ dmin·1.001) so the GPU
@@ -158,7 +171,10 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
 
   const bilOn = sigmaColor > 0 && sigmaSpatial > 0
   // ── Params uniform (80 bytes) ──────────────────────────────────────────────
-  const pbuf = new ArrayBuffer(96)
+  const hasSeedN = !!(seedNormals && seedNormals.length >= npix * 3)
+  const hasPrior = !!(prior && prior.length >= npix * 4)
+  const geomOn = geomWeight > 0 && Array.isArray(srcDepth) && srcDepth.length >= nSrc
+  const pbuf = new ArrayBuffer(128)
   const pv = new DataView(pbuf)
   pv.setUint32(0, refW, true)
   pv.setUint32(4, refH, true)
@@ -181,7 +197,43 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   pv.setUint32(72, bilOn ? 1 : 0, true)
   pv.setUint32(76, acmh ? 1 : 0, true)
   pv.setInt32(80, Math.max(1, windowStep | 0), true)
-  const paramsBuf = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  pv.setUint32(84, hasSeedN ? 1 : 0, true)
+  pv.setUint32(88, hasPrior ? 1 : 0, true)
+  pv.setFloat32(96, priorAlpha, true)
+  pv.setFloat32(100, priorGamma, true)
+  pv.setFloat32(104, 0.5 / Math.max(1e-30, priorSigD * priorSigD), true)
+  pv.setFloat32(108, 0.5 / Math.max(1e-30, priorSigN * priorSigN), true)
+  pv.setFloat32(112, geomOn ? geomWeight : 0, true)
+  pv.setFloat32(116, geomMax, true)
+  const paramsBuf = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const storageOf = (arr) => {
+    const b = device.createBuffer({
+      size: Math.max(16, arr.byteLength),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    })
+    device.queue.writeBuffer(b, 0, arr)
+    return b
+  }
+  const seedNBuf = storageOf(hasSeedN ? seedNormals : new Float32Array(4))
+  const priorBuf = storageOf(hasPrior ? prior : new Float32Array(4))
+  // The sources' first-pass depths, one maxW×maxH layer each (the srcArrTex layout).
+  let srcDepthArr = new Float32Array(4)
+  if (geomOn) {
+    const layer = maxW * maxH
+    srcDepthArr = new Float32Array(layer * nSrc)
+    srcList.forEach((s, l) => {
+      const d = srcDepth[l]
+      if (d) for (let y = 0; y < s.h; y++) srcDepthArr.set(d.subarray(y * s.w, (y + 1) * s.w), l * layer + y * maxW)
+    })
+    const cap = Math.min(device.limits.maxStorageBufferBindingSize ?? Infinity, device.limits.maxBufferSize ?? Infinity)
+    if (srcDepthArr.byteLength > cap) {
+      throw new Error(
+        `source depth planes ${Math.round(srcDepthArr.byteLength / 2 ** 20)} MB exceed the GPU limit ` +
+          `${Math.round(cap / 2 ** 20)} MB — lower maxDim or the source count`,
+      )
+    }
+  }
+  const srcDepthBuf = storageOf(srcDepthArr)
   device.queue.writeBuffer(paramsBuf, 0, pbuf)
 
   // ── Per-source pose storage buffer (array<Src>, 96 bytes each) ─────────────
@@ -250,6 +302,9 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
       { binding: 8, resource: { buffer: ctrlBuf } },
       { binding: 9, resource: srcMaskTex.createView({ dimension: '2d-array' }) },
       { binding: 10, resource: { buffer: selViewBuf } },
+      { binding: 11, resource: { buffer: seedNBuf } },
+      { binding: 12, resource: { buffer: priorBuf } },
+      { binding: 13, resource: { buffer: srcDepthBuf } },
     ],
   })
 
@@ -298,7 +353,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     dispatch()
   }
 
-  if (acmh) {
+  if (acmh || hasPrior || geomOn) {
     writeCtrl(2, 0, 0)
     dispatch()
   }
@@ -336,6 +391,9 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     seedBuf,
     stateBuf,
     selViewBuf,
+    seedNBuf,
+    priorBuf,
+    srcDepthBuf,
     costBuf,
     stateRead,
     costRead,

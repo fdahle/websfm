@@ -39,7 +39,11 @@ struct Params {
   acmh : u32,
   // Step between window samples (mvs.rs Patch): 1 = every pixel, 2 = every other row
   // and column; the offsets stay symmetric about the centre.
-  wstep : i32, _q0 : u32, _q1 : u32, _q2 : u32,
+  wstep : i32, hasSeedN : u32, hasPrior : u32, _q2 : u32,
+  // ACMP planar prior (mvs.rs prior_cost): α, γ, 1/(2σ_d²), 1/(2σ_n²).
+  priorAlpha : f32, priorGamma : f32, priorIsd : f32, priorIsn : f32,
+  // The geometric pass (mvs.rs Geom): weight 0 = off, cap in px.
+  geomW : f32, geomMax : f32, _r0 : u32, _r1 : u32,
 };
 
 struct Src {
@@ -70,6 +74,25 @@ const DEPTH_PERTURB_REL : f32 = 0.5;
 // ACMH: each pixel's most important source view of the previous sweep (its temporal
 // prior), 0xFFFFFFFF = none yet. Written by mode 0 and the ACMH sweeps only.
 @group(0) @binding(10) var<storage, read_write> selView : array<u32>;
+// A previous pass's normals (3 per pixel) to start from, when hasSeedN; one dummy otherwise.
+@group(0) @binding(11) var<storage, read> seedNormal : array<f32>;
+// ACMP planar prior per pixel: (depth, normal), depth 0 = none; one dummy unless hasPrior.
+@group(0) @binding(12) var<storage, read> priorBuf : array<vec4<f32>>;
+// The sources' first-pass depth planes (geometric pass), layer l at l·maxW·maxH, rows
+// maxW apart; one dummy value when off.
+@group(0) @binding(13) var<storage, read> srcDepth : array<f32>;
+
+// The cost a hypothesis is compared on at pixel i: photometric, or, under a planar prior
+// (d_p, n_p), c²/α − ln(γ + e^(−(d−d_p)²/2σ_d²)·e^(−θ²/2σ_n²)) (mvs.rs prior_cost).
+fn priorCost(i : u32, c : f32, d : f32, n : vec3<f32>) -> f32 {
+  if (params.hasPrior != 1u) { return c; }
+  let p = priorBuf[i];
+  if (!(p.x > 0.0)) { return c; }
+  let th = acos(clamp(dot(n, p.yzw), -1.0, 1.0));
+  let dd = d - p.x;
+  return c * c / params.priorAlpha
+    - log(params.priorGamma + exp(-dd * dd * params.priorIsd) * exp(-th * th * params.priorIsn));
+}
 
 fn pcg(s : ptr<function, u32>) -> u32 {
   let x = (*s) * 747796405u + 2891336453u;
@@ -160,18 +183,47 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
   return 1.0 - clamp(cov / denom, -1.0, 1.0);
 }
 
+// Forward–backward reprojection error (reference px) of the hypothesis through source
+// `si`'s first-pass depth, capped at geomMax (mvs.rs geom_error, same steps).
+fn geomError(si : u32, u : u32, v : u32, depth : f32) -> f32 {
+  let s = srcs[si];
+  let gmax = params.geomMax;
+  let X = vec3<f32>((f32(u) - params.rcx) / params.rfx * depth, (f32(v) - params.rcy) / params.rfy * depth, depth);
+  let R0 = s.r0.xyz; let R1 = s.r1.xyz; let R2 = s.r2.xyz; let T = s.t.xyz;
+  let xs = vec3<f32>(dot(R0, X) + T.x, dot(R1, X) + T.y, dot(R2, X) + T.z);
+  if (xs.z <= 1e-9) { return gmax; }
+  let su = s.fx * (xs.x / xs.z) + s.cx;
+  let sv = s.fy * (xs.y / xs.z) + s.cy;
+  if (su < 0.0 || sv < 0.0 || su >= f32(s.w) || sv >= f32(s.h)) { return gmax; }
+  let xi = min(u32(su + 0.5), s.w - 1u);
+  let yi = min(u32(sv + 0.5), s.h - 1u);
+  let ds = srcDepth[si * params.maxW * params.maxH + yi * params.maxW + xi];
+  if (!(ds > 0.0)) { return gmax; }
+  let a = vec3<f32>((su - s.cx) / s.fx * ds - T.x, (sv - s.cy) / s.fy * ds - T.y, ds - T.z);
+  let x2 = vec3<f32>(R0.x * a.x + R1.x * a.y + R2.x * a.z,
+                     R0.y * a.x + R1.y * a.y + R2.y * a.z,
+                     R0.z * a.x + R1.z * a.y + R2.z * a.z);
+  if (x2.z <= 1e-9) { return gmax; }
+  let u2 = params.rfx * (x2.x / x2.z) + params.rcx;
+  let v2 = params.rfy * (x2.y / x2.z) + params.rcy;
+  return min(length(vec2<f32>(u2 - f32(u), v2 - f32(v))), gmax);
+}
+
 // Aggregate cost over the best-K *valid* source views (robust to occlusion).
 // No-measurement sources (INVALID sentinel) are compacted out before selection,
 // so a source whose footprint doesn't cover the pixel can't floor the cost.
-fn aggCost(u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
+fn aggCost(u : u32, v : u32, depth : f32, n : vec3<f32>, useGeom : bool) -> f32 {
   if (depth <= 0.0) { return 2.0; }
   let ns = min(params.nSrc, MAX_SRC);
   if (ns == 0u) { return 2.0; }
   var costs : array<f32, 16>;
   var nv = 0u;
   for (var s = 0u; s < ns; s = s + 1u) {
-    let c = planeCost(s, u, v, depth, n);
-    if (c < INVALID_THRESH) { costs[nv] = c; nv = nv + 1u; }
+    var c = planeCost(s, u, v, depth, n);
+    if (c < INVALID_THRESH) {
+      if (useGeom && params.geomW > 0.0) { c = c + params.geomW * geomError(s, u, v, depth); }
+      costs[nv] = c; nv = nv + 1u;
+    }
   }
   if (nv == 0u) { return 2.0; } // no source measured this pixel
 
@@ -239,6 +291,7 @@ fn sourceCosts(u : u32, v : u32, depth : f32, n : vec3<f32>, out : ptr<function,
     if (depth > 0.0) {
       c = planeCost(s, u, v, depth, n);
       if (c >= INVALID_THRESH) { c = 2.0; }
+      else if (params.geomW > 0.0) { c = c + params.geomW * geomError(s, u, v, depth); }
     }
     (*out)[s] = c;
   }
@@ -331,10 +384,10 @@ fn acmhSweep(u : u32, v : u32, i : u32) {
   // 3. The cheapest hypothesis under those weights (eq. 6).
   var bestH = 0u;
   var row0 = C[0];
-  var bestC = weightedCost(&row0, &w);
+  var bestC = priorCost(i, weightedCost(&row0, &w), hD[0], hN[0]);
   for (var h = 1u; h < nh; h = h + 1u) {
     var rowh = C[h];
-    let c = weightedCost(&rowh, &w);
+    let c = priorCost(i, weightedCost(&rowh, &w), hD[h], hN[h]);
     if (c < bestC) { bestC = c; bestH = h; }
   }
   var bestD = hD[bestH];
@@ -360,7 +413,7 @@ fn acmhSweep(u : u32, v : u32, i : u32) {
     let dk = select(pD[k], d0, k == 1u || k == 4u);
     let nk = select(pN[k], n0, k == 0u || k == 3u);
     sourceCosts(u, v, dk, nk, &cr);
-    let c = weightedCost(&cr, &w);
+    let c = priorCost(i, weightedCost(&cr, &w), dk, nk);
     if (c < bestC) { bestC = c; bestD = dk; bestN = nk; }
   }
 
@@ -381,17 +434,22 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     var d0 : f32;
     if (seeded > 0.0) { d0 = clamp(seeded, params.depthMin, params.depthMax); }
     else { d0 = params.depthMin + randf(&rng) * (params.depthMax - params.depthMin); }
-    let n0 = randNormal(&rng);
+    var n0 = randNormal(&rng);
+    if (params.hasSeedN == 1u) {
+      // The previous pass's plane, when it is one (a hole keeps the random draw).
+      let sn = vec3<f32>(seedNormal[i * 3u], seedNormal[i * 3u + 1u], seedNormal[i * 3u + 2u]);
+      if (sn.z < 0.0 && dot(sn, sn) > 0.5) { n0 = normalize(sn); }
+    }
     state[i]   = vec4<f32>(d0, n0.x, n0.y, n0.z);
-    costBuf[i] = aggCost(u, v, d0, n0);
+    costBuf[i] = priorCost(i, aggCost(u, v, d0, n0, true), d0, n0);
     if (params.acmh == 1u) { selView[i] = 0xFFFFFFFFu; }
     return;
   }
 
-  // mode 2 (ACMH, after the last sweep): the best-K photometric cost of the final plane,
+  // mode 2 (ACMH or a prior pass, after the last sweep): the best-K photometric cost of the final plane,
   // the cost every later gate and the CPU validation are denominated in.
   if (ctrl.mode == 2u) {
-    costBuf[i] = aggCost(u, v, state[i].x, state[i].yzw);
+    costBuf[i] = aggCost(u, v, state[i].x, state[i].yzw, false);
     return;
   }
 
@@ -428,7 +486,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     if (abs(denom) < 1e-9) { continue; }
     let candD = dPlane / denom;
     if (candD <= params.depthMin || candD >= params.depthMax) { continue; }
-    let c = aggCost(u, v, candD, candN);
+    let c = priorCost(i, aggCost(u, v, candD, candN, true), candD, candN);
     if (c < bestC) { bestC = c; bestD = candD; bestN = candN; }
   }
 
@@ -440,11 +498,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let dspan = min(bestD, params.depthMax - params.depthMin) * DEPTH_PERTURB_REL * shrink;
   // (a) current depth + random new normal.
   let randN = randNormal(&rng);
-  let ca = aggCost(u, v, bestD, randN);
+  let ca = priorCost(i, aggCost(u, v, bestD, randN, true), bestD, randN);
   if (ca < bestC) { bestC = ca; bestN = randN; }
   // (b) current normal + perturbed depth.
   let pertDonly = clamp(bestD + (randf(&rng) * 2.0 - 1.0) * dspan, params.depthMin, params.depthMax);
-  let cb = aggCost(u, v, pertDonly, bestN);
+  let cb = priorCost(i, aggCost(u, v, pertDonly, bestN, true), pertDonly, bestN);
   if (cb < bestC) { bestC = cb; bestD = pertDonly; }
   // (c) joint perturbation.
   let pertD = clamp(bestD + (randf(&rng) * 2.0 - 1.0) * dspan, params.depthMin, params.depthMax);
@@ -452,7 +510,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     bestN.x + (randf(&rng) * 2.0 - 1.0) * 0.5 * shrink,
     bestN.y + (randf(&rng) * 2.0 - 1.0) * 0.5 * shrink,
     min(bestN.z - randf(&rng) * 0.3 * shrink, -0.1)));
-  let pc = aggCost(u, v, pertD, pertN);
+  let pc = priorCost(i, aggCost(u, v, pertD, pertN, true), pertD, pertN);
   if (pc < bestC) { bestC = pc; bestD = pertD; bestN = pertN; }
 
   state[i]   = vec4<f32>(bestD, bestN.x, bestN.y, bestN.z);

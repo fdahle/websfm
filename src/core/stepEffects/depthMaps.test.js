@@ -33,13 +33,13 @@ describe('depthMapEffects', () => {
 
   it('names the view selection, auto resolved by the backend', () => {
     expect(depthMapEffects(DEPTHMAP_DEFAULTS, { ...project, gpu: true }).patchMatch).toMatch(
-      /ACMH view selection \(auto, on the GPU\)/,
+      /Full method \(auto, on the GPU\)/,
     )
     expect(depthMapEffects(DEPTHMAP_DEFAULTS, { ...project, gpu: false }).patchMatch).toMatch(
-      /Best-K view selection \(auto, without a GPU\)/,
+      /Fast method \(auto, without a GPU\)/,
     )
-    expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, viewSelection: 'acmh' }, project).patchMatch).toMatch(
-      /ACMH view selection: candidates/,
+    expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, method: 'full' }, project).patchMatch).toMatch(
+      /Full method: ACMH view selection/,
     )
   })
 })

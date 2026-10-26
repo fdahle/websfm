@@ -7,6 +7,7 @@ import {
   filterConfig,
   filterSettings,
   autoMinConsistent,
+  resolveDepthMethod,
   logFilterCache,
   logFilterTotals,
   emptyFilterTotals,
@@ -32,6 +33,7 @@ import {
   meshFinish as workerMeshFinish,
 } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
+import { serializeDepthMap } from '../../core/dense/depthMapCodec.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes, projectDensePeakBytes, workingPixels } from '../../core/dense/memBudget.js'
 import { contiguousChunks, depthWorkerCount, mergeDepthSummaries } from '../../core/dense/depthSplit.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
@@ -235,6 +237,19 @@ export function createDense({
           'Dense',
         )
       }
+      // The method (Full: ACMH + planar prior + geometric pass; Fast: best-K, one pass). An
+      // explicit low-level choice (bench, console) still wins.
+      const onGpu = !!settings.useGpu && (await workerDepthBackend(0)).gpu
+      const method = resolveDepthMethod(settings.method, onGpu)
+      resolved.viewSelection = settings.viewSelection ?? (method === 'full' ? 'acmh' : 'bestk')
+      resolved.planarPrior = settings.planarPrior ?? method === 'full'
+      resolved.geomPass = settings.geomPass ?? method === 'full'
+      log(
+        `Dense: method ${method === 'full' ? 'Full (ACMH, planar prior, geometric pass)' : 'Fast (best-K, one pass)'}` +
+          `${(settings.method ?? 'auto') === 'auto' ? ` — auto, ${onGpu ? 'on the GPU' : 'without a GPU'}` : ''}`,
+        'info',
+        'Dense',
+      )
       if (resolved.quality && !(resolved.maxDim > 0)) {
         const nativeLong = images.value.reduce((m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0)
         resolved.maxDim = qualityToMaxDim(resolved.quality, nativeLong)
@@ -248,6 +263,7 @@ export function createDense({
             nSources: Math.min(16, settings.maxSources ?? 6),
             streamMaps: !!run,
             geomConsistency: settings.geomConsistency !== false,
+            full: resolved.planarPrior || resolved.geomPass,
           })
         const fit = plan(resolved.quality, budget)
         if (fit?.steps > 0) {
@@ -288,6 +304,40 @@ export function createDense({
       let stageSummary = aSummary ?? null
       if (run) {
         await run.settled()
+        // Full method, last stage (ACMP): the geometric-consistency pass over the saved first
+        // pass. Its maps are written staged and promoted once all exist (utils/opfs/depth.js).
+        if (settings.geomPass && run.metas.length > 1) {
+          const entries = await opfs.loadDepthFiles(run.projectId, run.metas)
+          const at = new Map(run.metas.map((m, k) => [m.uuid, k]))
+          const staged = []
+          let stageFailure = null
+          await runDepthMaps(
+            inputImages,
+            sparse,
+            withRegion({ ...settings, streamMaps: true }),
+            onProgress,
+            (m, ack) => {
+              takePreview(m)
+              const { meta, buffers } = serializeDepthMap(m)
+              if (at.has(m.uuid)) run.metas[at.get(m.uuid)] = meta
+              staged.push(
+                opfs
+                  .saveStagedDepthPlane(run.projectId, m.uuid, buffers)
+                  .catch((err) => {
+                    stageFailure ??= err
+                  })
+                  .finally(ack),
+              )
+            },
+            { geomFrom: entries },
+          )
+          await Promise.all(staged)
+          if (stageFailure) throw stageFailure
+          await opfs.promoteStagedDepthPlanes(
+            run.projectId,
+            run.metas.map((m) => m.uuid),
+          )
+        }
         // A split run's maps arrive in finishing order. Keep the input order, so the
         // filter and fusion (which keeps the first point per cell) see the maps as one
         // worker would have written them, and the result does not depend on the split.
@@ -327,7 +377,7 @@ export function createDense({
   // unsaved and waits for the acks beyond that: a disk slower than the maps (the last
   // maps of a film block at High, raster cache warm) otherwise queued 0.6 GB per map
   // on the page until the tab's buffer pool ran out.
-  async function runDepthMaps(images, sparse, settings, onProgress, onMap) {
+  async function runDepthMaps(images, sparse, settings, onProgress, onMap, extra = {}) {
     const onLog = (m, l, c) => log(m, l, c)
     const runToken = crypto.randomUUID()
     const onEventFor =
@@ -361,10 +411,12 @@ export function createDense({
     }
     if (workers === 1) {
       return workerComputeDepthMaps(
-        { images, sparse, settings: withAck(settings, 0) },
+        { images, sparse, settings: withAck(settings, 0), ...extra },
         {
           worker: 0,
-          transfer: sparseInputTransfer(sparse),
+          // The first of the Full method's passes keeps the sparse inputs: the geometric
+          // pass (extra.geomFrom) sends them again, and that last run may transfer them.
+          transfer: settings.geomPass && !extra.geomFrom ? [] : sparseInputTransfer(sparse),
           onLog,
           onEvent: onEventFor(0),
           onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
@@ -387,7 +439,7 @@ export function createDense({
     const parts = await Promise.all(
       chunks.map((refs, w) =>
         workerComputeDepthMaps(
-          { images, sparse, refs, settings: withAck({ ...settings, memBudgetBytes: budget / workers }, w) },
+          { images, sparse, refs, settings: withAck({ ...settings, memBudgetBytes: budget / workers }, w), ...extra },
           {
             worker: w,
             onLog: onLogOf(w),

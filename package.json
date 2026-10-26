@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
+    "delaunator": "5.0.1",
     "epsg-index": "^2.0.0",
     "exifr": "^7.1.3",
     "fflate": "^0.8.3",

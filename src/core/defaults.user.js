@@ -243,12 +243,13 @@ export const DEPTHMAP_DEFAULTS = {
   maxSources: 10, // source views per image
   window: 3, // ZNCC half-window (7×7)
   iterations: 5, // PatchMatch sweeps
-  // How PatchMatch picks the source views each pixel is scored on: 'acmh' (Xu & Tao 2019:
-  // candidates from 8 regions, joint view selection over them), 'bestk' (the K cheapest
-  // sources per hypothesis) or 'auto' = ACMH on the GPU, best-K on the CPU. ETH3D (six
-  // scenes, ETH3D's own evaluator, F1 @2 cm, object defaults) 62.0 → 63.4 with ACMH, every
-  // scene better; depth time GPU +40 %, CPU several times (2026-10-26).
-  viewSelection: 'auto',
+  // The PatchMatch method: 'full' = ACMH view selection, then ACMP's planar prior and
+  // geometric-consistency pass (Xu & Tao 2019, 2020); 'fast' = best-K, one pass; 'auto' =
+  // full on the GPU, fast on the CPU (core/dense/depthMap.js resolveDepthMethod). ETH3D
+  // (six scenes, ETH3D's own evaluator, Medium, F1 @2 cm, object defaults): fast 62.0,
+  // full 66.2, every scene better; depth time ~2.2–3× on the GPU, more on the CPU
+  // (2026-10-26).
+  method: 'auto',
   bestK: null, // advanced override; null ⇒ auto per image
   speckleFilter: true, // median/speckle cleanup on each depth map
   filterRelTol: 10, // speckle relative tolerance, % (÷100 on run)
