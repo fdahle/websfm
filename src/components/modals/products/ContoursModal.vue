@@ -53,7 +53,8 @@ const numbers = computed(() =>
     interval: { label: 'Interval', min: 0 },
     indexEvery: { label: 'Index contour every', min: 1, integer: true },
     smooth: { label: 'Smoothing', min: 0, max: 10, integer: true },
-    minLength: { label: 'Drop lines shorter than', min: 0 },
+    generalize: { label: 'Smooth the DEM first', min: 0, max: 20 },
+    minCells: { label: 'Drop lines shorter than', min: 0 },
   }),
 )
 
@@ -71,6 +72,7 @@ const effects = computed(() =>
     zMax: props.dem?.zMax ?? 0,
     unit: unit.value,
     onMap: onMap.value,
+    gsd: props.dem?.gsd ?? 0,
   }),
 )
 
@@ -80,7 +82,8 @@ function run() {
     interval: interval.value,
     indexEvery: s.indexEvery,
     smooth: s.smooth,
-    minLength: s.minLength,
+    generalize: s.generalize,
+    minCells: s.minCells,
     format: s.format,
     fileName: fileName.value,
   })
@@ -121,6 +124,23 @@ function run() {
         </SettingsField>
       </SettingsStep>
       <SettingsStep step="2" title="Trace and shape" :effect="effects.shape">
+        <SettingsField
+          label="Smooth the DEM first"
+          label-for="ct-gen"
+          unit="cells"
+          hint="Gaussian σ. Removes the noise rings of a photogrammetric DEM; 0 traces the heights as they are."
+        >
+          <input
+            id="ct-gen"
+            v-model.number="settings.generalize"
+            :aria-invalid="numbers.bad.generalize"
+            type="number"
+            min="0"
+            max="20"
+            step="0.5"
+            class="field-input"
+          />
+        </SettingsField>
         <SettingsField label="Smoothing" label-for="ct-smooth" unit="passes" hint="0 keeps the exact grid crossings.">
           <input
             id="ct-smooth"
@@ -133,18 +153,14 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-        <SettingsField
-          label="Drop lines shorter than"
-          label-for="ct-min"
-          :unit="dem.crs && dem.crs !== 'local' ? 'map units' : unit"
-        >
+        <SettingsField label="Drop lines shorter than" label-for="ct-min" unit="cells" hint="0 keeps every line.">
           <input
             id="ct-min"
-            v-model.number="settings.minLength"
-            :aria-invalid="numbers.bad.minLength"
+            v-model.number="settings.minCells"
+            :aria-invalid="numbers.bad.minCells"
             type="number"
             min="0"
-            step="any"
+            step="1"
             class="field-input"
           />
         </SettingsField>

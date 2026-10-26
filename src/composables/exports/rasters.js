@@ -295,7 +295,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
   // Contours go on the map as a line layer (listed in Products) when the DEM has a CRS, and
   // are downloaded in `format` unless it is 'none'. A DEM in the local frame has no
   // place on the map's layers, so it is always downloaded (ContoursModal).
-  async function exportContours({ interval, indexEvery, smooth, minLength, format, fileName }) {
+  async function exportContours({ interval, indexEvery, smooth, generalize, minCells, format, fileName }) {
     const grid = dem.value
     if (!grid) return
     const { input, transfer } = demToolInput(grid)
@@ -305,7 +305,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       {
         tool: 'contours',
         ...input,
-        settings: { interval, indexEvery, smooth, minLength },
+        settings: { interval, indexEvery, smooth, generalize, minCells },
         format: download,
         crs: info.crs,
       },

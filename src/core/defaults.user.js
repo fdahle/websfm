@@ -631,7 +631,11 @@ export const CONTOUR_DEFAULTS = {
   interval: 0, // 0 ⇒ auto (≈ 25 levels over the DEM's height range)
   indexEvery: 5,
   smooth: 1,
-  minLength: 0,
+  // Smooth the heights first (Gaussian σ, cells) and drop lines shorter than minCells:
+  // a photogrammetric DEM's noise otherwise traces as thousands of tiny rings (Aukerman
+  // DSM: 31,436 lines → 733). 0 turns either off.
+  generalize: 2,
+  minCells: 20,
   // The lines always go on the map (when the DEM has a CRS); this is the download too:
   // 'none' | 'geojson' | 'dxf'. A DEM without a CRS is always downloaded.
   format: 'none',

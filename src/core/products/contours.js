@@ -28,6 +28,13 @@
 //
 // Work is O(Σ quads × levels crossing that quad): each quad's min/max selects
 // the levels it can carry, so a fine interval on a mostly flat DEM stays cheap.
+//
+// Generalisation. A photogrammetric DEM carries centimetre noise, and at a fine
+// interval every noise bump on flat ground becomes its own tiny ring: on Aukerman's
+// DSM 96 % of 31,436 lines were under 20 cells long. `generalize` (a Gaussian σ in
+// cells) smooths the heights before tracing, as cartographic contouring does, and
+// `minCells` drops what is left under that length: 733 lines, terrain and tree crowns
+// kept. Both are off at 0.
 
 import { cellCenter } from './dem.js'
 import { writeDxf } from './dxf.js'
@@ -63,6 +70,37 @@ function isIndexLevel(level, base, interval, indexEvery) {
   const k = Math.round((level - base) / interval)
   const n = Math.round(indexEvery)
   return ((k % n) + n) % n === 0
+}
+
+// The heights Gaussian-smoothed with σ = `sigma` cells (truncated at 3σ), separably,
+// over valid cells only: a nodata cell stays nodata and gives no weight, so a hole's
+// edge is not pulled towards zero. One copy of the grid, smoothed row by row and then
+// column by column in place.
+export function smoothHeights(data, valid, W, H, sigma) {
+  const r = Math.max(1, Math.ceil(3 * sigma))
+  const k = new Float64Array(2 * r + 1)
+  for (let i = -r; i <= r; i++) k[i + r] = Math.exp(-(i * i) / (2 * sigma * sigma))
+  const out = new Float32Array(W * H)
+  for (let i = 0; i < W * H; i++) out[i] = valid(i) ? data[i] : NaN
+  const line = new Float64Array(Math.max(W, H))
+  const pass = (n, at) => {
+    for (let j = 0; j < n; j++) line[j] = out[at(j)]
+    for (let j = 0; j < n; j++) {
+      if (Number.isNaN(line[j])) continue
+      let s = 0,
+        w = 0
+      for (let d = Math.max(-r, -j); d <= r && j + d < n; d++) {
+        const v = line[j + d]
+        if (Number.isNaN(v)) continue
+        s += v * k[d + r]
+        w += k[d + r]
+      }
+      out[at(j)] = s / w
+    }
+  }
+  for (let y = 0; y < H; y++) pass(W, (x) => y * W + x)
+  for (let x = 0; x < W; x++) pass(H, (y) => y * W + x)
+  return out
 }
 
 function lineLength(pts, closed) {
@@ -103,12 +141,17 @@ function smoothLine(pts, closed, iterations) {
 // Trace contours.
 //   opts: interval (required, grid z units), base = 0, indexEvery = 5 (0 ⇒ no
 //         index lines), minLength = 0 (world units; shorter lines dropped),
-//         smooth = 0 (moving-average iterations)
+//         minCells = 0 (the same in grid cells; the larger of the two applies),
+//         generalize = 0 (Gaussian σ in cells applied to the heights first),
+//         smooth = 0 (moving-average iterations on the traced lines)
 // Returns { levels, lines: [{ level, index, points: Float64Array (x,y pairs),
 //           closed }] }. A closed ring does NOT repeat its first vertex.
 export function traceContours(grid, opts = {}, onLog) {
-  const { interval, base = 0, indexEvery = 5, minLength = 0, smooth = 0 } = opts
-  const { width: W, height: H, data, mask } = grid
+  const { interval, base = 0, indexEvery = 5, smooth = 0, minCells = 0, generalize = 0 } = opts
+  const { width: W, height: H, mask } = grid
+  const minLength = Math.max(opts.minLength || 0, minCells > 0 ? minCells * (grid.gsd || 1) : 0)
+  const isValid = (i) => Number.isFinite(grid.data[i]) && (!mask || mask[i] !== 0)
+  const data = generalize > 0 ? smoothHeights(grid.data, isValid, W, H, generalize) : grid.data
   const valid = (i) => Number.isFinite(data[i]) && (!mask || mask[i] !== 0)
 
   let min = Infinity,
@@ -304,6 +347,7 @@ export function traceContours(grid, opts = {}, onLog) {
       `${saddles} saddle cells, ${skippedQuads} nodata cells skipped` +
       (dropped ? `, ${dropped} shorter than ${minLength} dropped` : '') +
       (degenerate ? `, ${degenerate} zero-length (level on a sample) dropped` : '') +
+      (generalize > 0 ? `, heights smoothed (σ ${generalize} cells)` : '') +
       (smooth > 0 ? `, smoothed ×${Math.round(smooth)}` : ''),
     'info',
     'Products',

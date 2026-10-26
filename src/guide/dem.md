@@ -366,8 +366,13 @@ orthophoto. None of them changes the stored product.
   right-click menu zooms to it or downloads it as GeoJSON. **Download** also saves them straight away as **GeoJSON** (GIS) or
   **DXF** (CAD, with index contours on their own layer). A DEM without a coordinate
   system cannot go on the map's layers, so its contours are always downloaded. Lines
-  stop at nodata holes rather than cutting across them. Smoothing passes round the
-  corners of the grid crossings; *0* keeps them exact.
+  stop at nodata holes rather than cutting across them. **Smooth the DEM first**
+  (default 2 cells) blurs the heights before tracing: a photogrammetric DEM carries a
+  few centimetres of noise, and traced as it is every noise bump on flat ground becomes
+  its own little ring (on the Aukerman example, 31,436 lines, 96 % of them under 20
+  cells long; smoothed, 733). **Drop lines shorter than** (default 20 cells) removes
+  what is left. Set both to *0* for the exact trace. Smoothing passes round the corners
+  of the grid crossings; *0* keeps them exact.
 - **Slope, aspect, hillshade…** writes each as a GeoTIFF on the DEM's grid and CRS
   (Horn's method, as in GDAL). Slope is in degrees or percent, aspect in degrees
   clockwise from north. In a projected CRS the grid spacing carries the projection's

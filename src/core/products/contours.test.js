@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { contourLevels, traceContours, contoursToGeoJSON, contoursToDxf, MAX_CONTOUR_LEVELS } from './contours.js'
+import {
+  contourLevels,
+  traceContours,
+  contoursToGeoJSON,
+  contoursToDxf,
+  smoothHeights,
+  MAX_CONTOUR_LEVELS,
+} from './contours.js'
 import { cellCenter } from './dem.js'
 
 // Build a DEM grid from z = f(x, y) evaluated at cell centres.
@@ -185,6 +192,43 @@ describe('traceContours', () => {
       expect([b[0], b[1]]).toEqual([a[0], a[1]])
       expect([b[b.length - 2], b[b.length - 1]]).toEqual([a[a.length - 2], a[a.length - 1]])
     }
+  })
+
+  it('generalize smooths noise rings away; minCells drops short lines; the input is kept', () => {
+    // A tilted plane with ±0.4 noise, a level every 1: the raw trace breaks into rings.
+    let s = 7
+    const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff - 0.5) * 0.8
+    const grid = makeGrid(120, 120, (x) => x * 0.05 + rnd())
+    grid.gsd = 0.5
+    const before = Float32Array.from(grid.data)
+    const raw = traceContours(grid, { interval: 1 })
+    const gen = traceContours(grid, { interval: 1, generalize: 3, minCells: 20 })
+    expect(raw.lines.length).toBeGreaterThan(50)
+    // One line per level crossing the plane (x·0.05 spans 0…6).
+    expect(gen.lines.length).toBeLessThanOrEqual(7)
+    expect(gen.lines.length).toBeGreaterThanOrEqual(5)
+    expect(grid.data).toEqual(before)
+    // minCells is in cells of the grid: 20 cells of 0.5 = 10 units.
+    const short = traceContours(grid, { interval: 1, minCells: 20 })
+    const len = (l) => {
+      let t = 0
+      for (let i = 2; i < l.points.length; i += 2)
+        t += Math.hypot(l.points[i] - l.points[i - 2], l.points[i + 1] - l.points[i - 1])
+      return t
+    }
+    expect(short.lines.every((l) => len(l) >= 10 - 1e-9 || l.closed)).toBe(true)
+  })
+
+  it('smoothHeights keeps nodata and ignores it', () => {
+    const W = 5,
+      H = 1
+    const data = new Float32Array([1, 1, NaN, 9, 9])
+    const out = smoothHeights(data, (i) => Number.isFinite(data[i]), W, H, 1)
+    expect(Number.isNaN(out[2])).toBe(true)
+    // The hole gives no weight (a zero-filled blur would pull out[1] towards 0): the
+    // weighted mean of the valid cells within 3σ.
+    const g = (d) => Math.exp(-(d * d) / 2)
+    expect(out[1]).toBeCloseTo((1 * g(1) + 1 * g(0) + 9 * g(2) + 9 * g(3)) / (g(1) + g(0) + g(2) + g(3)), 5)
   })
 
   it('handles an all-nodata grid and does not mutate the input', () => {

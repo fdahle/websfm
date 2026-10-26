@@ -113,6 +113,12 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Clean contour lines from a photogrammetric DEM.** Contours smooths the DEM's heights
+  before tracing (Smooth the DEM first, 2 cells) and drops lines shorter than 20 cells,
+  so surface noise no longer traces as thousands of tiny rings. On the Aukerman example's
+  DSM the lines went from 31,436 (96 % of them under 20 cells long) to 733, with the
+  terrain and tree crowns kept. Both are settings; 0 gives the exact trace. Drop lines
+  shorter than is now in cells of the DEM.
 - **More accurate, more complete depth maps on a GPU (Method: Full).** Depth Maps ▸
   Advanced ▸ Method: Full runs three passes, ACMH view selection, planar priors that span
   textureless areas, and a pass that makes each map agree with its neighbours; Fast is the
