@@ -400,6 +400,14 @@ export function makeDenseOps({ rasterize }) {
     // the record tracks what was *requested*, what it started on, and how many images
     // fell back — "all 86 maps remained on GPU" is a target in TODO ▸ SB and is
     // unanswerable from a summary that only reports the final value.
+    // The CPU path runs each map on the threaded build's pool (all cores but one) when the
+    // store gave this run one worker for it (DENSE_TUNING.cpuDepthThreads); a split run
+    // keeps one thread per worker.
+    const cpuThreads =
+      !input.refs && (settings.cpuDepthThreads ?? DENSE_TUNING.cpuDepthThreads)
+        ? Math.max(1, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1)
+        : 0
+    if (!backend && cpuThreads) emit('log', [`Depth maps: up to ${cpuThreads} threads per map`, 'info', 'Dense'])
     const startedOnGpu = !!backend
     let gpuFallbacks = 0
     const perImage = [] // { ms, coveragePct, costMedian }
@@ -652,6 +660,8 @@ export function makeDenseOps({ rasterize }) {
             bilateralSigmaColor: settings.bilateralSigmaColor,
             bilateralSigmaSpatial: settings.bilateralSigmaSpatial,
             viewSelection: resolveViewSelection(settings.viewSelection, !!backend),
+            windowStep: settings.windowStep,
+            threads: backend ? 0 : cpuThreads,
           },
           backend,
           hooks,
@@ -682,6 +692,8 @@ export function makeDenseOps({ rasterize }) {
               bilateralSigmaColor: settings.bilateralSigmaColor,
               bilateralSigmaSpatial: settings.bilateralSigmaSpatial,
               viewSelection: resolveViewSelection(settings.viewSelection, !!backend),
+              windowStep: settings.windowStep,
+              threads: backend ? 0 : cpuThreads,
             },
             backend,
             { onLog: hooks.onLog, onProgress: hooks.onProgress },

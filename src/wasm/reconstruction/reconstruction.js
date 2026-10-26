@@ -151,9 +151,10 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index
  * @param {number} sigma_spatial
  * @param {number} sigma_color
  * @param {number} view_selection
+ * @param {number} window_step
  * @returns {Float32Array}
  */
-export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_dims, src_k, src_rel, src_mask, seed_depth, depth_min, depth_max, window, iterations, best_k, seed, perturb_start, sigma_spatial, sigma_color, view_selection) {
+export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_dims, src_k, src_rel, src_mask, seed_depth, depth_min, depth_max, window, iterations, best_k, seed, perturb_start, sigma_spatial, sigma_color, view_selection, window_step) {
     const ptr0 = passArray8ToWasm0(ref_gray, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(ref_k, wasm.__wbindgen_malloc);
@@ -170,7 +171,7 @@ export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_d
     const len6 = WASM_VECTOR_LEN;
     const ptr7 = passArrayF32ToWasm0(seed_depth, wasm.__wbindgen_malloc);
     const len7 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_depth_map(ptr0, len0, ref_w, ref_h, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, depth_min, depth_max, window, iterations, best_k, seed, perturb_start, sigma_spatial, sigma_color, view_selection);
+    const ret = wasm.compute_depth_map(ptr0, len0, ref_w, ref_h, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, depth_min, depth_max, window, iterations, best_k, seed, perturb_start, sigma_spatial, sigma_color, view_selection, window_step);
     var v9 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v9;

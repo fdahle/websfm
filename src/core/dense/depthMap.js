@@ -198,6 +198,8 @@ export async function depthMapForImage(
   // Bilateral-weighted NCC (mvs.rs Bilateral): σc in grey levels (0 = plain NCC), σs in
   // px, by default the window radius (COLMAP's). The same at every pyramid level.
   const sigmaColor = numOpt(settings.bilateralSigmaColor, DENSE_TUNING.bilateralSigmaColor, { min: 0 })
+  // Every other window row and column (mvs.rs Patch) when 2.
+  const windowStep = numOpt(settings.windowStep, DENSE_TUNING.windowStep, { int: true, min: 1, max: 2 })
   const sigmaSpatial = numOpt(settings.bilateralSigmaSpatial, Math.min(5, Math.max(1, window)), { positive: true })
   const refCamScaled = { R: ref.cam.R, t: ref.cam.t, K: ref.K }
   // Depth range is view-space (resolution-invariant): derive it once from the
@@ -294,6 +296,8 @@ export async function depthMapForImage(
       sigmaSpatial,
       sigmaColor,
       viewSelection: settings.viewSelection === 'acmh' ? 'acmh' : 'bestk',
+      windowStep,
+      threads: numOpt(settings.threads, 0, { int: true, min: 0 }),
     })
     if (!dm) return null
     prevDepth = dm.depth
@@ -329,7 +333,9 @@ export async function depthMapForImage(
     // sources (INVALID sentinel) instead of averaging their max cost in.
     const aggRef = (u, v, depth, n) => {
       if (depth <= 0) return 2
-      const cs = srcCs.map((sc) => planeCostRef(refC, sc, u, v, depth, n, radius, { sigmaSpatial, sigmaColor }))
+      const cs = srcCs.map((sc) =>
+        planeCostRef(refC, sc, u, v, depth, n, radius, { sigmaSpatial, sigmaColor }, windowStep),
+      )
       return aggregateValidCosts(cs, bestK)
     }
     const stride = Math.max(1, Math.floor(dm.depth.length / 4000))

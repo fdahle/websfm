@@ -66,7 +66,8 @@ function sampleGrayBilinear(img, w, h, x, y) {
 //   n:   [nx, ny, nz] unit normal;  radius: half window
 //   bil: { sigmaSpatial, sigmaColor } for bilateral-weighted NCC (mvs.rs Bilateral), or
 //        null — every weight 1.
-export function planeCostRef(ref, src, u, v, depth, n, radius, bil = null) {
+//   step: between window samples (mvs.rs Patch), 1 = every pixel, 2 = every other one.
+export function planeCostRef(ref, src, u, v, depth, n, radius, bil = null, step = 1) {
   const bilOn = !!(bil && bil.sigmaColor > 0 && bil.sigmaSpatial > 0)
   const inv2s2 = bilOn ? 0.5 / (bil.sigmaSpatial * bil.sigmaSpatial) : 0
   const inv2c2 = bilOn ? 0.5 / (bil.sigmaColor * bil.sigmaColor) : 0
@@ -88,8 +89,10 @@ export function planeCostRef(ref, src, u, v, depth, n, radius, bil = null) {
   let kR = 0,
     kS = 0 // shift = first contributing sample (keeps sums small)
   const rc = ref.gray[v * ref.w + u]
-  for (let y = -radius; y <= radius; y++) {
-    for (let x = -radius; x <= radius; x++) {
+  const st = Math.max(1, step | 0),
+    w0 = -Math.trunc(radius / st) * st
+  for (let y = w0; y <= radius; y += st) {
+    for (let x = w0; x <= radius; x += st) {
       const xi = u + x,
         yi = v + y
       if (xi < 0 || yi < 0 || xi >= ref.w || yi >= ref.h) continue

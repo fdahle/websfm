@@ -1333,6 +1333,14 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   55.6), and averaging four of six sources instead of three changed nothing: the larger
   candidate pool, not the aggregation, is what fills the surface.
 
+  **Threads** (CPU): a map's red–black half-sweep runs its rows on the threaded build's
+  pool (`DENSE_TUNING.cpuDepthThreads`, one worker for the run). Every pixel draws from its
+  own random stream, seeded by (seed, pixel, sweep, colour), and reads only the other
+  colour, so the map is the same bits on any number of threads (`depth_map_bits_are_pinned`,
+  both builds). Aukerman 42 on the CPU: 465 s (8 single-thread workers) → 263 s.
+  **Window step** (`DENSE_TUNING.windowStep`, 1): every other row and column of a larger
+  window, as COLMAP and ACMM sample, cost 1.4–1.5 F1 on ETH3D for ~30 % less time.
+
   **View selection** (`viewSelection`, default *auto*): **ACMH** (Xu & Tao 2019,
   `patchmatch.wgsl` `acmhSweep`, `mvs.rs` `ACMH_*`) on the GPU, best-K on the CPU. Each
   sweep a pixel takes candidate planes from 8 regions of the other checkerboard colour —

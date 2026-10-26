@@ -702,6 +702,11 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     // 'acmh': adaptive checkerboard sampling + multi-hypothesis joint view selection
     // (mvs.rs ACMH_*, the same steps as patchmatch.wgsl acmhSweep); else best-K.
     viewSelection = 'bestk',
+    // Step between window samples (mvs.rs Patch): 1 = every pixel, 2 = every other one.
+    windowStep = 1,
+    // Threads for the sweeps (the threaded build, see threadedWasm): its pool size cap;
+    // 0 = the single-threaded build. The same map either way (mvs.rs pixel_rng).
+    threads = 0,
   } = opts
   const n = sources.length
   if (n === 0 || refW * refH === 0) return null
@@ -730,7 +735,8 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
   })
 
   const refKArr = new Float32Array([refK.fx, refK.fy, refK.cx, refK.cy])
-  const raw = compute_depth_map(
+  const mt = await threadedWasm(threads)
+  const raw = (mt ? mt.compute_depth_map : compute_depth_map)(
     refGray,
     refW,
     refH,
@@ -751,6 +757,7 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     sigmaSpatial,
     sigmaColor,
     viewSelection === 'acmh' ? 1 : 0,
+    Math.max(1, windowStep | 0),
   )
   const npix = refW * refH
   if (!raw || raw.length < npix * 5) return null

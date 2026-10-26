@@ -37,6 +37,9 @@ struct Params {
   // View selection: 0 = best-K over each hypothesis' cheapest sources; 1 = ACMH (Xu &
   // Tao 2019): adaptive checkerboard sampling + multi-hypothesis joint view selection.
   acmh : u32,
+  // Step between window samples (mvs.rs Patch): 1 = every pixel, 2 = every other row
+  // and column; the offsets stay symmetric about the centre.
+  wstep : i32, _q0 : u32, _q1 : u32, _q2 : u32,
 };
 
 struct Src {
@@ -107,8 +110,9 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
   var sumW = 0.0;
   let rc = textureLoad(refTex, vec2<i32>(i32(u), i32(v)), 0).r * 255.0;
 
-  for (var y = -params.radius; y <= params.radius; y = y + 1) {
-    for (var x = -params.radius; x <= params.radius; x = x + 1) {
+  let w0 = -((params.radius / params.wstep) * params.wstep);
+  for (var y = w0; y <= params.radius; y = y + params.wstep) {
+    for (var x = w0; x <= params.radius; x = x + params.wstep) {
       let xi = i32(u) + x;
       let yi = i32(v) + y;
       if (xi < 0 || yi < 0 || xi >= i32(params.refW) || yi >= i32(params.refH)) { continue; }

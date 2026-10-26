@@ -2,6 +2,7 @@
 // hypotheses, red-black propagation, plane-induced-homography ZNCC).
 use wasm_bindgen::prelude::*;
 use crate::linalg::*;
+use crate::par::{for_each_index, SyncPtr};
 
 // ── Dense reconstruction: PatchMatch multi-view stereo ──────────────────────────
 // Estimate a per-pixel depth map for one reference image from N neighbouring
@@ -73,6 +74,23 @@ const VAR_FLOOR: f64 = 1e-6;
 // levels (DENSE_TUNING.bilateralSigmaColor, measured on ETH3D). `color` ≤ 0 = off: every
 // weight exactly 1.0, so every sum is the unweighted one bit for bit. Same in
 // planeCost.js and patchmatch.wgsl.
+// The patch a hypothesis is scored on: its half-size, the step between its samples (1 =
+// every pixel; 2 = every other row and column, as COLMAP and ACMM sample a larger window
+// for the cost of a smaller one; the centre row and column are kept), and the bilateral
+// weights. Same in planeCost.js and patchmatch.wgsl.
+#[derive(Clone, Copy)]
+pub(crate) struct Patch { radius: i32, step: i32, bil: Bilateral }
+
+impl Patch {
+    pub(crate) fn new(radius: i32, step: i32, bil: Bilateral) -> Self {
+        Patch { radius, step: step.max(1), bil }
+    }
+    // The window offsets along one axis: −r, −r + step, …, kept symmetric about 0 so
+    // the centre is a sample whatever the step.
+    #[inline(always)]
+    fn first(&self) -> i32 { -((self.radius / self.step) * self.step) }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct Bilateral { inv2s2: f64, inv2c2: f64, on: bool }
 
@@ -130,7 +148,7 @@ pub(crate) fn plane_cost(
     refimg: &[u8], rw: usize, rh: usize,
     rfx: f64, rfy: f64, rcx: f64, rcy: f64,
     src: &SrcView,
-    u: usize, v: usize, depth: f64, n: &V3, radius: i32, bil: Bilateral,
+    u: usize, v: usize, depth: f64, n: &V3, patch: Patch,
 ) -> f64 {
     // Plane in reference camera frame: n·X = d, through the back-projected point
     // P = depth · K_r⁻¹ [u,v,1]. d = n·P.
@@ -157,16 +175,17 @@ pub(crate) fn plane_cost(
     let mut cnt = 0.0; let mut sum_w = 0.0;
     let mut k_r = 0.0; let mut k_s = 0.0;
     let rc = refimg[v * rw + u] as f64;
-    let mut y = -radius;
+    let (radius, step) = (patch.radius, patch.step);
+    let mut y = patch.first();
     while y <= radius {
-        let mut x = -radius;
+        let mut x = patch.first();
         while x <= radius {
             let xi = u as f64 + x as f64;
             let yi = v as f64 + y as f64;
             if xi < 0.0 || yi < 0.0 || xi >= rw as f64 || yi >= rh as f64 {
-                x += 1; continue;
+                x += step; continue;
             }
-            let wt = bil.weight(x, y, refimg[yi as usize * rw + xi as usize] as f64 - rc);
+            let wt = patch.bil.weight(x, y, refimg[yi as usize * rw + xi as usize] as f64 - rc);
             let ray = [(xi - rcx) / rfx, (yi - rcy) / rfy, 1.0];
             let nr = dot3(n, &ray);
             // X_src direction = R·ray − t·(n·ray)/d  (up to the plane scale).
@@ -175,7 +194,7 @@ pub(crate) fn plane_cost(
                 src.r[1][0]*ray[0] + src.r[1][1]*ray[1] + src.r[1][2]*ray[2] + src.t[1]*nr/d,
                 src.r[2][0]*ray[0] + src.r[2][1]*ray[1] + src.r[2][2]*ray[2] + src.t[2]*nr/d,
             ];
-            if xs[2].abs() < 1e-9 { x += 1; continue; }
+            if xs[2].abs() < 1e-9 { x += step; continue; }
             let su = src.fx * (xs[0] / xs[2]) + src.cx;
             let sv_ = src.fy * (xs[1] / xs[2]) + src.cy;
             if su < 0.0 || sv_ < 0.0 || su >= src.w as f64 || sv_ >= src.h as f64 {
@@ -195,9 +214,9 @@ pub(crate) fn plane_cost(
             sum_r += wt*rval; sum_s += wt*sval;
             sum_rr += wt*rval*rval; sum_ss += wt*sval*sval; sum_rs += wt*rval*sval;
             cnt += 1.0; sum_w += wt;
-            x += 1;
+            x += step;
         }
-        y += 1;
+        y += step;
     }
     if cnt < 4.0 { return INVALID; } // too little overlap — no measurement
     let mean_r = sum_r / sum_w;
@@ -219,11 +238,11 @@ pub(crate) fn agg_cost(
     refimg: &[u8], rw: usize, rh: usize,
     rfx: f64, rfy: f64, rcx: f64, rcy: f64,
     srcs: &[SrcView], best_k: usize,
-    u: usize, v: usize, depth: f64, n: &V3, radius: i32, bil: Bilateral,
+    u: usize, v: usize, depth: f64, n: &V3, patch: Patch,
 ) -> f64 {
     if depth <= 0.0 { return 2.0; }
     // plane_cost's degenerate plane: every source scores 2.0, so the mean of the best is 2.0.
-    let Some((win, m, d)) = plane_window(refimg, rw, rh, rfx, rfy, rcx, rcy, u, v, depth, n, radius, bil) else {
+    let Some((win, m, d)) = plane_window(refimg, rw, rh, rfx, rfy, rcx, rcy, u, v, depth, n, patch) else {
         return 2.0;
     };
     // Retain only the lowest requested K costs as we visit the sources. K is at
@@ -242,7 +261,7 @@ pub(crate) fn agg_cost(
 fn plane_window(
     refimg: &[u8], rw: usize, rh: usize,
     rfx: f64, rfy: f64, rcx: f64, rcy: f64,
-    u: usize, v: usize, depth: f64, n: &V3, radius: i32, bil: Bilateral,
+    u: usize, v: usize, depth: f64, n: &V3, patch: Patch,
 ) -> Option<([WinSample; 121], usize, f64)> {
     let pu = (u as f64 - rcx) / rfx;
     let pv = (v as f64 - rcy) / rfy;
@@ -252,9 +271,10 @@ fn plane_window(
     let mut win = [WinSample::default(); 121];
     let mut m = 0usize;
     let rc = refimg[v * rw + u] as f64;
-    let mut y = -radius;
+    let (radius, step) = (patch.radius, patch.step);
+    let mut y = patch.first();
     while y <= radius {
-        let mut x = -radius;
+        let mut x = patch.first();
         while x <= radius {
             let xi = u as f64 + x as f64;
             let yi = v as f64 + y as f64;
@@ -262,12 +282,12 @@ fn plane_window(
                 let ray = [(xi - rcx) / rfx, (yi - rcy) / rfy, 1.0];
                 let nr = dot3(n, &ray);
                 let r0 = refimg[yi as usize * rw + xi as usize] as f64;
-                win[m] = WinSample { ray, nr, r0, wt: bil.weight(x, y, r0 - rc) };
+                win[m] = WinSample { ray, nr, r0, wt: patch.bil.weight(x, y, r0 - rc) };
                 m += 1;
             }
-            x += 1;
+            x += step;
         }
-        y += 1;
+        y += step;
     }
     Some((win, m, d))
 }
@@ -278,11 +298,11 @@ fn plane_window(
 fn source_costs(
     refimg: &[u8], rw: usize, rh: usize,
     rfx: f64, rfy: f64, rcx: f64, rcy: f64,
-    srcs: &[SrcView], u: usize, v: usize, depth: f64, n: &V3, radius: i32, bil: Bilateral,
+    srcs: &[SrcView], u: usize, v: usize, depth: f64, n: &V3, patch: Patch,
 ) -> [f64; MAX_SOURCES] {
     let mut out = [2.0; MAX_SOURCES];
     if depth <= 0.0 { return out; }
-    let Some((win, m, d)) = plane_window(refimg, rw, rh, rfx, rfy, rcx, rcy, u, v, depth, n, radius, bil) else {
+    let Some((win, m, d)) = plane_window(refimg, rw, rh, rfx, rfy, rcx, rcy, u, v, depth, n, patch) else {
         return out;
     };
     for (k, src) in srcs.iter().take(MAX_SOURCES).enumerate() {
@@ -396,6 +416,8 @@ pub fn compute_depth_map(
     sigma_spatial: f32, sigma_color: f32,
     // View selection: 0 = best-K, 1 = ACMH (acmh_region_offset, ACMH_*).
     view_selection: u32,
+    // Step between window samples (see Patch); 0 or 1 = every pixel.
+    window_step: u32,
 ) -> Vec<f32> {
     let rw = ref_w as usize;
     let rh = ref_h as usize;
@@ -442,11 +464,20 @@ pub fn compute_depth_map(
 
     let bk = best_k.max(1) as usize;
     let bil = Bilateral::new(sigma_spatial as f64, sigma_color as f64);
+    let patch = Patch::new(radius, window_step.max(1) as i32, bil);
     let acmh = view_selection == 1;
     // ACMH: each pixel's most important view of the previous sweep (u32::MAX = none).
     let mut sel_view = if acmh { vec![u32::MAX; npix] } else { Vec::new() };
     let ns = n_src.min(MAX_SOURCES);
-    let mut rng = Xorshift(seed | 1);
+    // One random stream per pixel and sweep half, seeded from (seed, pixel, sweep, colour),
+    // as patchmatch.wgsl seeds its own: a pixel's draws do not depend on which thread
+    // ran it or in what order, so the threaded build gives the same map.
+    let pixel_rng = |i: usize, it: u32, parity: u32| {
+        let mut h = (seed as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (i as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+        h ^= ((it as u64) << 32 | parity as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
+        h ^= h >> 29; h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9); h ^= h >> 32;
+        Xorshift((h as u32) | 1)
+    };
     // Random f64 in [0,1).
     let randf = |r: &mut Xorshift| (r.next() as f64) / (u32::MAX as f64 + 1.0);
 
@@ -456,6 +487,14 @@ pub fn compute_depth_map(
     let mut ny = vec![0.0f64; npix];
     let mut nz = vec![1.0f64; npix];
     let mut cost = vec![2.0f64; npix];
+    // The sweeps write a pixel only from its own task and read the other checkerboard
+    // colour, which no task of the same half-sweep writes: shared through raw pointers.
+    let (pd, pnx, pny, pnz, pc) =
+        (SyncPtr::of(&mut depth), SyncPtr::of(&mut nx), SyncPtr::of(&mut ny), SyncPtr::of(&mut nz), SyncPtr::of(&mut cost));
+    let psel = SyncPtr::of(&mut sel_view);
+    // SAFETY (rd / wr): in bounds; see above for who writes what when.
+    #[inline(always)] fn rd<T: Copy>(p: SyncPtr<T>, i: usize) -> T { unsafe { *p.0.add(i) } }
+    #[inline(always)] fn wr<T>(p: SyncPtr<T>, i: usize, v: T) { unsafe { *p.at(i) = v } }
 
     // A reasonable random unit normal facing the camera (nz < 0 in camera frame
     // means facing the camera; we keep nz negative so planes face the viewer).
@@ -468,15 +507,16 @@ pub fn compute_depth_map(
 
     // Init: seeded depth where the sparse cloud projected, else random in range.
     let have_seed = seed_depth.len() >= npix;
-    for i in 0..npix {
+    for_each_index(rh, |v| for u in 0..rw {
+        let i = v * rw + u;
+        let mut rng = pixel_rng(i, 0, 2);
         let seeded = if have_seed { seed_depth[i] as f64 } else { 0.0 };
         let d0 = if seeded > 0.0 { seeded.clamp(dmin, dmax) }
                  else { dmin + randf(&mut rng) * (dmax - dmin) };
         let n0 = rand_normal(&mut rng);
-        depth[i] = d0; nx[i] = n0[0]; ny[i] = n0[1]; nz[i] = n0[2];
-        let u = i % rw; let v = i / rw;
-        cost[i] = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, d0, &n0, radius, bil);
-    }
+        wr(pd, i, d0); wr(pnx, i, n0[0]); wr(pny, i, n0[1]); wr(pnz, i, n0[2]);
+        wr(pc, i, agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, d0, &n0, patch));
+    });
 
     // Red-black checkerboard PatchMatch sweeps.
     // Refinement scale s = perturb_start · 0.5^it. Depth proposals span
@@ -492,17 +532,18 @@ pub fn compute_depth_map(
     for it in 0..iters {
         let shrink = s0 * 0.5f64.powi(it as i32); // refinement magnitude decays
         for parity in 0..2u32 {
-            for v in 0..rh {
+            for_each_index(rh, |v| {
                 for u in 0..rw {
                     if ((u + v) as u32 & 1) != parity { continue; }
                     let i = v * rw + u;
+                    let mut rng = pixel_rng(i, it + 1, parity);
                     if acmh {
                         // 1. Hypotheses: the own plane, then the cheapest sample of each
                         // region, transferred onto this pixel's ray.
                         let mut hd = [0.0f64; 9];
                         let mut hn = [[0.0f64; 3]; 9];
-                        hd[0] = depth[i];
-                        hn[0] = [nx[i], ny[i], nz[i]];
+                        hd[0] = rd(pd, i);
+                        hn[0] = [rd(pnx, i), rd(pny, i), rd(pnz, i)];
                         let mut nh = 1usize;
                         let rx_i = (u as f64 - rcx) / rfx;
                         let ry_i = (v as f64 - rcy) / rfy;
@@ -514,12 +555,13 @@ pub fn compute_depth_map(
                                 let (nu, nv) = (u as i64 + ox, v as i64 + oy);
                                 if nu < 0 || nv < 0 || nu >= rw as i64 || nv >= rh as i64 { continue; }
                                 let j = nv as usize * rw + nu as usize;
-                                if cost[j] < best { best = cost[j]; bj = j; }
+                                let cj = rd(pc, j);
+                                if cj < best { best = cj; bj = j; }
                             }
                             if bj == usize::MAX { continue; }
-                            let cand_n = [nx[bj], ny[bj], nz[bj]];
+                            let cand_n = [rd(pnx, bj), rd(pny, bj), rd(pnz, bj)];
                             let (ju, jv) = ((bj % rw) as f64, (bj / rw) as f64);
-                            let d_plane = depth[bj] * (cand_n[0] * (ju - rcx) / rfx + cand_n[1] * (jv - rcy) / rfy + cand_n[2]);
+                            let d_plane = rd(pd, bj) * (cand_n[0] * (ju - rcx) / rfx + cand_n[1] * (jv - rcy) / rfy + cand_n[2]);
                             let denom = cand_n[0] * rx_i + cand_n[1] * ry_i + cand_n[2];
                             if denom.abs() < 1e-9 { continue; }
                             let cand_d = d_plane / denom;
@@ -531,11 +573,11 @@ pub fn compute_depth_map(
                         // 2. The cost matrix and the view weights (paper eqs. 2–5).
                         let mut cm = [[2.0f64; MAX_SOURCES]; 9];
                         for h in 0..nh {
-                            cm[h] = source_costs(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, u, v, hd[h], &hn[h], radius, bil);
+                            cm[h] = source_costs(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, u, v, hd[h], &hn[h], patch);
                         }
                         let t = it as f64;
                         let tau = ACMH_TAU0 * (-t * t / ACMH_ALPHA).exp();
-                        let prev = sel_view[i];
+                        let prev = rd(psel, i);
                         let mut w = [0.0f64; MAX_SOURCES];
                         let mut any_sel = false;
                         for s in 0..ns {
@@ -566,7 +608,7 @@ pub fn compute_depth_map(
                         let mut top = u32::MAX;
                         let mut top_w = 0.0;
                         for s in 0..ns { if w[s] > top_w { top_w = w[s]; top = s as u32; } }
-                        sel_view[i] = top;
+                        wr(psel, i, top);
                         // 3. The cheapest hypothesis under those weights (eq. 6).
                         let mut best_h = 0;
                         let mut best_c = weighted_cost(&cm[0], &w, ns);
@@ -589,16 +631,16 @@ pub fn compute_depth_map(
                         let (d0, n0) = (best_d, best_n);
                         for (dk, nk) in [(d_rand, n0), (d0, n_rand), (d_rand, n_rand), (d_pert, n0), (d0, n_pert), (d_pert, n_pert)] {
                             let c = weighted_cost(
-                                &source_costs(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, u, v, dk, &nk, radius, bil), &w, ns);
+                                &source_costs(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, u, v, dk, &nk, patch), &w, ns);
                             if c < best_c { best_c = c; best_d = dk; best_n = nk; }
                         }
-                        depth[i] = best_d; nx[i] = best_n[0]; ny[i] = best_n[1]; nz[i] = best_n[2];
-                        cost[i] = best_c;
+                        wr(pd, i, best_d); wr(pnx, i, best_n[0]); wr(pny, i, best_n[1]); wr(pnz, i, best_n[2]);
+                        wr(pc, i, best_c);
                         continue;
                     }
-                    let mut best_d = depth[i];
-                    let mut best_n = [nx[i], ny[i], nz[i]];
-                    let mut best_c = cost[i];
+                    let mut best_d = rd(pd, i);
+                    let mut best_n = [rd(pnx, i), rd(pny, i), rd(pnz, i)];
+                    let mut best_c = rd(pc, i);
 
                     // 1. Spatial propagation from the 4-neighbours' PLANES. The
                     // neighbour holds a plane (its depth + normal); the correct
@@ -626,10 +668,10 @@ pub fn compute_depth_map(
                     for (nu, nv) in neigh {
                         if nu >= rw || nv >= rh { continue; }
                         let j = nv * rw + nu;
-                        let cand_n = [nx[j], ny[j], nz[j]];
+                        let cand_n = [rd(pnx, j), rd(pny, j), rd(pnz, j)];
                         let rx_j = (nu as f64 - rcx) / rfx;
                         let ry_j = (nv as f64 - rcy) / rfy;
-                        let d_plane = depth[j] * (cand_n[0] * rx_j + cand_n[1] * ry_j + cand_n[2]);
+                        let d_plane = rd(pd, j) * (cand_n[0] * rx_j + cand_n[1] * ry_j + cand_n[2]);
                         let denom = cand_n[0] * rx_i + cand_n[1] * ry_i + cand_n[2];
                         if denom.abs() < 1e-9 { continue; }
                         let cand_d = d_plane / denom;
@@ -638,7 +680,7 @@ pub fn compute_depth_map(
                         if tried[..n_tried].contains(&k) { continue; }
                         tried[n_tried] = k;
                         n_tried += 1;
-                        let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, cand_d, &cand_n, radius, bil);
+                        let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, cand_d, &cand_n, patch);
                         if c < best_c { best_c = c; best_d = cand_d; best_n = cand_n; }
                     }
 
@@ -649,11 +691,11 @@ pub fn compute_depth_map(
                     let dspan = best_d.min(dmax - dmin) * DEPTH_PERTURB_REL * shrink;
                     // (a) current depth + random new normal.
                     let rand_n = rand_normal(&mut rng);
-                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, best_d, &rand_n, radius, bil);
+                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, best_d, &rand_n, patch);
                     if c < best_c { best_c = c; best_n = rand_n; }
                     // (b) current normal + perturbed depth.
                     let pert_d_only = (best_d + (randf(&mut rng) * 2.0 - 1.0) * dspan).clamp(dmin, dmax);
-                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d_only, &best_n, radius, bil);
+                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d_only, &best_n, patch);
                     if c < best_c { best_c = c; best_d = pert_d_only; }
                     // (c) joint perturbation (kept — helps escape coupled local minima).
                     let pert_d = (best_d + (randf(&mut rng) * 2.0 - 1.0) * dspan).clamp(dmin, dmax);
@@ -662,13 +704,13 @@ pub fn compute_depth_map(
                         best_n[1] + (randf(&mut rng) * 2.0 - 1.0) * 0.5 * shrink,
                         (best_n[2] - randf(&mut rng) * 0.3 * shrink).min(-0.1),
                     ]);
-                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d, &pert_n, radius, bil);
+                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d, &pert_n, patch);
                     if c < best_c { best_c = c; best_d = pert_d; best_n = pert_n; }
 
-                    depth[i] = best_d; nx[i] = best_n[0]; ny[i] = best_n[1]; nz[i] = best_n[2];
-                    cost[i] = best_c;
+                    wr(pd, i, best_d); wr(pnx, i, best_n[0]); wr(pny, i, best_n[1]); wr(pnz, i, best_n[2]);
+                    wr(pc, i, best_c);
                 }
-            }
+            });
         }
     }
 
@@ -677,7 +719,7 @@ pub fn compute_depth_map(
     if acmh {
         for i in 0..npix {
             let n = [nx[i], ny[i], nz[i]];
-            cost[i] = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, i % rw, i / rw, depth[i], &n, radius, bil);
+            cost[i] = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, i % rw, i / rw, depth[i], &n, patch);
         }
     }
 
@@ -699,7 +741,8 @@ pub fn compute_depth_map(
 mod tests {
     use super::*;
 
-    const DEPTH_DIGEST: u64 = 0x2f10_a543_287c_c088;
+    const DEPTH_DIGEST: u64 = 0x4b86_7c84_e1da_957f;
+    const DEPTH_DIGEST_ACMH: u64 = 0x29d9_e732_9d02_906f;
 
     #[test]
     fn mean_best_costs_keeps_only_lowest_valid_k_without_allocation() {
@@ -719,7 +762,7 @@ mod tests {
             r: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
             t: [0.0, 0.0, 0.0],
         };
-        plane_cost(refimg, w, h, 20.0, 20.0, 8.0, 8.0, &src, 8, 8, 5.0, &[0.0, 0.0, -1.0], 2, Bilateral::new(0.0, 0.0))
+        plane_cost(refimg, w, h, 20.0, 20.0, 8.0, 8.0, &src, 8, 8, 5.0, &[0.0, 0.0, -1.0], Patch::new(2, 1, Bilateral::new(0.0, 0.0)))
     }
 
     fn ramp() -> Vec<u8> {
@@ -754,12 +797,16 @@ mod tests {
             let depth = 0.5 + rnd() * 8.0;
             let nrm = normalize3(&[rnd() - 0.5, rnd() - 0.5, -0.2 - rnd()]);
             let radius = 1 + (rnd() * 4.99) as i32;
-            // Plain and bilateral-weighted NCC (Bilateral).
-            for bil in [Bilateral::new(0.0, 0.0), Bilateral::new(radius as f64, 51.0)] {
+            // Plain and bilateral-weighted NCC (Bilateral), every pixel and every other one.
+            for patch in [
+                Patch::new(radius, 1, Bilateral::new(0.0, 0.0)),
+                Patch::new(radius, 1, Bilateral::new(radius as f64, 51.0)),
+                Patch::new(radius, 2, Bilateral::new(radius as f64, 51.0)),
+            ] {
             for bk in [1usize, 2, 3] {
-                let got = agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, bk, u, v, depth, &nrm, radius, bil);
+                let got = agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, bk, u, v, depth, &nrm, patch);
                 let want = mean_best_costs(srcs.iter().map(|s|
-                    plane_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, s, u, v, depth, &nrm, radius, bil)), bk);
+                    plane_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, s, u, v, depth, &nrm, patch)), bk);
                 assert_eq!(got.to_bits(), want.to_bits(), "u {u} v {v} depth {depth} n {nrm:?} r {radius} k {bk}");
                 if got < 2.0 { n_valid += 1; }
             }
@@ -769,12 +816,14 @@ mod tests {
         // The degenerate plane (n ⟂ the pixel's ray).
         let nrm = normalize3(&[1.0, 0.0, 0.0]);
         let (u, v) = (20usize, 15usize); // on the axis: the ray is (0, 0, 1)
-        assert_eq!(agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, 2, u, v, 3.0, &nrm, 2, Bilateral::new(0.0, 0.0)), 2.0);
+        assert_eq!(agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, 2, u, v, 3.0, &nrm, Patch::new(2, 1, Bilateral::new(0.0, 0.0))), 2.0);
     }
 
-    // A whole depth map on a textured plane seen by three views, pinned to the bits the
-    // kernel gave before it skipped already-scored planes (2026-10-25): skipping a plane
-    // whose cost is known must not change any map.
+    // A whole depth map on a textured plane seen by three views, pinned (best-K and ACMH).
+    // The same bits in the single-threaded and the threaded build (`cargo test --features
+    // threads`): every pixel draws from its own random stream, seeded by pixel and sweep,
+    // and reads only the other checkerboard colour. Re-pinned 2026-10-26 when the stream
+    // became per pixel; before that, a skip of already-scored planes left it unchanged.
     #[test]
     fn depth_map_bits_are_pinned() {
         let (w, h) = (48usize, 36usize);
@@ -793,10 +842,14 @@ mod tests {
             ks.extend([f, f, cx, cy]);
             rel.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, *tx, 0.0, 0.0]);
         }
-        let out = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[], 2.0, 8.0, 2, 3, 2, 7, 1.0, 0.0, 0.0, 0);
-        let digest = out.iter().fold(0u64, |a, v| a.wrapping_mul(1_000_003).wrapping_add(v.to_bits() as u64));
-        assert_eq!(out.len(), w * h * 5);
-        assert_eq!(digest, DEPTH_DIGEST, "depth map bits changed: {digest:#x}");
+        let digest_of = |vs: u32| {
+            let out = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[], 2.0, 8.0, 2, 3, 2, 7, 1.0, 0.0, 0.0, vs, 1);
+            assert_eq!(out.len(), w * h * 5);
+            out.iter().fold(0u64, |a, v| a.wrapping_mul(1_000_003).wrapping_add(v.to_bits() as u64))
+        };
+        let (bk, acmh) = (digest_of(0), digest_of(1));
+        assert_eq!(bk, DEPTH_DIGEST, "depth map bits changed: {bk:#x}");
+        assert_eq!(acmh, DEPTH_DIGEST_ACMH, "ACMH depth map bits changed: {acmh:#x}");
     }
 
     // Bilateral off is every weight 1.0 exactly; on, a sample of another colour than the
@@ -863,7 +916,7 @@ mod tests {
             rel.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, tx, 0.0, 0.0]);
         }
         let run_it = |vs: u32, it: u32| compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[],
-            2.0, 8.0, 2, it, 2, 7, 1.0, 0.0, 0.0, vs);
+            2.0, 8.0, 2, it, 2, 7, 1.0, 0.0, 0.0, vs, 1);
         let run = |vs: u32| run_it(vs, 5);
         let npix = w * h;
         let within = |o: &[f32]| (8..h - 8).flat_map(|v| (8..w - 8).map(move |u| v * w + u))
@@ -883,7 +936,7 @@ mod tests {
             r: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
             t: [rel[12 * k + 9] as f64, 0.0, 0.0],
         }).collect();
-        let want = agg_cost(&refg, w, h, f as f64, f as f64, cx as f64, cy as f64, &srcs, 2, 24, 18, ac[i] as f64, &n, 2, Bilateral::new(0.0, 0.0));
+        let want = agg_cost(&refg, w, h, f as f64, f as f64, cx as f64, cy as f64, &srcs, 2, 24, 18, ac[i] as f64, &n, Patch::new(2, 1, Bilateral::new(0.0, 0.0)));
         assert!((ac[npix + i] as f64 - want).abs() < 1e-6);
     }
 

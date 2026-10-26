@@ -81,6 +81,8 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     // 'acmh': adaptive checkerboard sampling + multi-hypothesis joint view selection
     // (patchmatch.wgsl acmhSweep); else best-K. PROTOTYPE, GPU only.
     viewSelection = 'bestk',
+    // Step between window samples (mvs.rs Patch): 1 = every pixel, 2 = every other one.
+    windowStep = 1,
   } = opts
   const acmh = viewSelection === 'acmh'
   // Mirror mvs.rs's depth-range guards (dmin ≥ 1e-4, dmax ≥ dmin·1.001) so the GPU
@@ -156,7 +158,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
 
   const bilOn = sigmaColor > 0 && sigmaSpatial > 0
   // ── Params uniform (80 bytes) ──────────────────────────────────────────────
-  const pbuf = new ArrayBuffer(80)
+  const pbuf = new ArrayBuffer(96)
   const pv = new DataView(pbuf)
   pv.setUint32(0, refW, true)
   pv.setUint32(4, refH, true)
@@ -178,7 +180,8 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   pv.setFloat32(68, bilOn ? 0.5 / (sigmaColor * sigmaColor) : 0, true)
   pv.setUint32(72, bilOn ? 1 : 0, true)
   pv.setUint32(76, acmh ? 1 : 0, true)
-  const paramsBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  pv.setInt32(80, Math.max(1, windowStep | 0), true)
+  const paramsBuf = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(paramsBuf, 0, pbuf)
 
   // ── Per-source pose storage buffer (array<Src>, 96 bytes each) ─────────────

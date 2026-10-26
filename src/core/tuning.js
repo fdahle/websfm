@@ -321,6 +321,15 @@ export const DENSE_TUNING = {
   // plain on every scene. Aukerman 42 unchanged (roughness, points −0.4 %); GPU time
   // unchanged, CPU +10 % (2026-10-26, docs/METHODS.md ▸ Stage A).
   bilateralSigmaColor: 25,
+  // Depth maps on the CPU: each map on the threaded build's pool, one worker for the run
+  // (mvs.rs sweeps over rows; the same bits as one thread). 640×480, 6 sources, natively:
+  // best-K 91.8 → 8.9 s, ACMH 246 → 22.1 s on 20 cores (2026-10-26).
+  cpuDepthThreads: true,
+  // Step between PatchMatch window samples (mvs.rs Patch): 1 = every pixel, 2 = every other
+  // row and column (COLMAP / ACMM). Measured 2026-10-26 (ETH3D six scenes, official
+  // evaluator, GPU, ACMH): 7×7 step 1 63.4; radius 5 step 2 61.9, radius 4 step 2 62.1,
+  // both ~30 % faster — a speed knob, not a default.
+  windowStep: 1,
   minAngleDeg: 3, // source-view triangulation angle floor (too small = degenerate)
   maxAngleDeg: 60, // …and ceiling (too wide = poor photo-consistency)
   consistencyPx: 2, // fusion reprojection agreement threshold (px)

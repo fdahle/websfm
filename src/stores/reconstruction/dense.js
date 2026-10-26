@@ -338,7 +338,14 @@ export function createDense({
     const withAck = (s, w) => (onMap ? { ...s, ackToken: `${runToken}:${w}` } : s)
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     let workers = 1
-    if (onMap && images.length > 1 && !(settings.useGpu && (await workerDepthBackend(0)).gpu)) {
+    // On the CPU with threads (shared memory: a cross-origin isolated page), one worker runs
+    // every map on all cores (workers/ops/dense.js cpuThreads): several workers would each
+    // start a pool that size. Without threads the maps split over the pool.
+    const cpuThreads =
+      DENSE_TUNING.cpuDepthThreads &&
+      globalThis.crossOriginIsolated === true &&
+      typeof SharedArrayBuffer !== 'undefined'
+    if (onMap && images.length > 1 && !cpuThreads && !(settings.useGpu && (await workerDepthBackend(0)).gpu)) {
       const nSources = Math.min(16, settings.maxSources ?? 6)
       // One worker's peak: its raster cache plus the run's shared inputs (counted whole).
       const perWorkerBytes = projectDensePeakBytes({

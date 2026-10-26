@@ -236,6 +236,10 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Depth maps without a GPU use every core for each map.** Each depth map now runs on all
+  cores at once instead of one core per map, so the run no longer depends on how many maps
+  fit the memory budget side by side. A 42-image block on the CPU: 465 → 263 s, the same
+  maps whatever the number of cores.
 - **Bundle adjustment of small blocks on every core.** A block under about 128 cameras now
   builds and reduces its bundle-adjustment system on all cores instead of one, in
   fixed point chunks, so every browser gets the same result. A 42-image block: SfM
