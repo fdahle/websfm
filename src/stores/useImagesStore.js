@@ -813,10 +813,16 @@ export const useImagesStore = defineStore('images', () => {
     const wanted = ids ? new Set(ids) : null
     const targets = images.value.filter((img) => !wanted || wanted.has(img.id))
     if (!targets.length) return 0
-    log(`Image quality: scoring ${pluralize(targets.length, 'image')}`, 'info', 'Images')
+    // One image per worker: each decodes and scores its own (a 2,048-px read, a few MB).
+    const workers = Math.max(1, Math.min(POOL_SIZE, targets.length))
+    log(
+      `Image quality: scoring ${pluralize(targets.length, 'image')} on ${pluralize(workers, 'worker')}`,
+      'info',
+      'Images',
+    )
     let done = 0,
       failed = 0
-    await mapConcurrent(targets, Math.max(1, Math.min(4, POOL_SIZE)), async (img) => {
+    await mapConcurrent(targets, workers, async (img) => {
       try {
         await whenComputeReady(img)
         const q = await imageQualityWorker(computeSourceOf(img), { mask: img.mask?.blob ?? null })

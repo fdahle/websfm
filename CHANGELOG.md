@@ -262,6 +262,8 @@ Notable changes to websfm. The format follows
   is split into slabs over the worker pool, each with a margin wide enough that the
   outlier filter keeps exactly the points one worker would. On the Aukerman dense cloud
   (2.1 M points, 6 workers): outliers 7.4 → 4.0 s, normals 7.6 → 3.2 s.
+- **Slope, aspect and hillshade about 40 % faster.** The DEM's nodata test runs once per
+  cell instead of nine times: a 64-million-cell DEM 9.9 → about 6 s.
 - **Depth maps without a GPU use every core for each map.** Each depth map now runs on all
   cores at once instead of one core per map, so the run no longer depends on how many maps
   fit the memory budget side by side. A 42-image block on the CPU: 465 → 263 s, the same

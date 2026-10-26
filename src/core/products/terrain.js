@@ -67,31 +67,61 @@ function hornGradient(grid, k, zFactor, visit) {
   const { width: w, height: h, data, mask } = grid
   const nodata = grid.nodata
   const hasNodata = typeof nodata === 'number' && Number.isFinite(nodata)
-  const valid = (i) => (!mask || mask[i] !== 0) && Number.isFinite(data[i]) && !(hasNodata && data[i] === nodata)
+  // Validity once per cell (not nine times per cell, as each neighbour is read).
+  const ok = new Uint8Array(w * h)
+  for (let i = 0; i < w * h; i++)
+    ok[i] = (!mask || mask[i] !== 0) && Number.isFinite(data[i]) && !(hasNodata && data[i] === nodata) ? 1 : 0
   // Δz per true horizontal unit: zFactor·Δz / (8·gsd/k).
   const s = (zFactor * k) / (8 * grid.gsd)
   // Neighbour height, or the centre value when it is off-grid / nodata.
   const at = (c, r, z) => {
     if (c < 0 || r < 0 || c >= w || r >= h) return z
     const i = r * w + c
-    return valid(i) ? data[i] : z
+    return ok[i] ? data[i] : z
   }
   for (let r = 0; r < h; r++) {
+    const inner = r > 0 && r < h - 1
     for (let c = 0; c < w; c++) {
       const i = r * w + c
-      if (!valid(i)) {
+      if (!ok[i]) {
         visit(i, NaN, NaN)
         continue
       }
       const z = data[i]
-      const a = at(c - 1, r - 1, z),
-        b = at(c, r - 1, z),
+      let a = 0,
+        b = 0,
+        cc = 0,
+        d = 0,
+        f = 0,
+        g = 0,
+        hh = 0,
+        ii = 0
+      // Inside the grid with all eight neighbours valid (almost every cell): read them
+      // directly. Otherwise substitute the centre for the missing ones (`at`).
+      if (
+        inner &&
+        c > 0 &&
+        c < w - 1 &&
+        ok[i - w - 1] & ok[i - w] & ok[i - w + 1] & ok[i - 1] & ok[i + 1] & ok[i + w - 1] & ok[i + w] & ok[i + w + 1]
+      ) {
+        a = data[i - w - 1]
+        b = data[i - w]
+        cc = data[i - w + 1]
+        d = data[i - 1]
+        f = data[i + 1]
+        g = data[i + w - 1]
+        hh = data[i + w]
+        ii = data[i + w + 1]
+      } else {
+        a = at(c - 1, r - 1, z)
+        b = at(c, r - 1, z)
         cc = at(c + 1, r - 1, z)
-      const d = at(c - 1, r, z),
+        d = at(c - 1, r, z)
         f = at(c + 1, r, z)
-      const g = at(c - 1, r + 1, z),
-        hh = at(c, r + 1, z),
+        g = at(c - 1, r + 1, z)
+        hh = at(c, r + 1, z)
         ii = at(c + 1, r + 1, z)
+      }
       const p = (cc + 2 * f + ii - (a + 2 * d + g)) * s
       const q = (a + 2 * b + cc - (g + 2 * hh + ii)) * s
       visit(i, p, q)
@@ -190,7 +220,7 @@ export function terrainProducts(grid, opts = {}) {
     }
     mask[i] = 1
     valid++
-    const tan = Math.hypot(p, q)
+    const tan = Math.sqrt(p * p + q * q) // not Math.hypot: several times slower in V8
     if (slopeData) slopeData[i] = percent ? 100 * tan : Math.atan(tan) * DEG
     if (aspectData) {
       if (tan <= flatSlope) aspectData[i] = flatValue
