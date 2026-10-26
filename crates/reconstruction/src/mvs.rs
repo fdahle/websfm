@@ -64,6 +64,32 @@ const INVALID_THRESH: f64 = 1e8;
 // wrong depth win on the one remaining source's chance correlation.
 // Identical in planeCost.js and patchmatch.wgsl (VAR_FLOOR).
 const VAR_FLOOR: f64 = 1e-6;
+
+// Bilateral-weighted NCC (COLMAP's patch cost): each window sample counts with
+// exp(−d²/2σs² − Δ²/2σc²), d its distance from the centre (px), Δ its grey difference
+// from the centre pixel (0..255) — at a depth edge the other side of the edge, a
+// different colour, barely counts, so the window does not smear the edge. COLMAP:
+// σs = the window radius, σc = 0.2 of the intensity range; WebSfM's default σc is 25 grey
+// levels (DENSE_TUNING.bilateralSigmaColor, measured on ETH3D). `color` ≤ 0 = off: every
+// weight exactly 1.0, so every sum is the unweighted one bit for bit. Same in
+// planeCost.js and patchmatch.wgsl.
+#[derive(Clone, Copy)]
+pub(crate) struct Bilateral { inv2s2: f64, inv2c2: f64, on: bool }
+
+impl Bilateral {
+    pub(crate) fn new(spatial: f64, color: f64) -> Self {
+        if color > 0.0 && spatial > 0.0 {
+            Bilateral { inv2s2: 0.5 / (spatial * spatial), inv2c2: 0.5 / (color * color), on: true }
+        } else {
+            Bilateral { inv2s2: 0.0, inv2c2: 0.0, on: false }
+        }
+    }
+    #[inline(always)]
+    fn weight(&self, x: i32, y: i32, dc: f64) -> f64 {
+        if !self.on { return 1.0; }
+        (-((x * x + y * y) as f64) * self.inv2s2 - dc * dc * self.inv2c2).exp()
+    }
+}
 // The worker and WebGPU kernel share this source-view ceiling. Keeping the robust
 // best-K candidates in a stack array avoids a heap allocation + full sort for every
 // PatchMatch hypothesis (many times per pixel on the CPU/WASM backend).
@@ -104,7 +130,7 @@ pub(crate) fn plane_cost(
     refimg: &[u8], rw: usize, rh: usize,
     rfx: f64, rfy: f64, rcx: f64, rcy: f64,
     src: &SrcView,
-    u: usize, v: usize, depth: f64, n: &V3, radius: i32,
+    u: usize, v: usize, depth: f64, n: &V3, radius: i32, bil: Bilateral,
 ) -> f64 {
     // Plane in reference camera frame: n·X = d, through the back-projected point
     // P = depth · K_r⁻¹ [u,v,1]. d = n·P.
@@ -128,8 +154,9 @@ pub(crate) fn plane_cost(
     // here so the three kernels are the same math.
     let mut sum_r = 0.0; let mut sum_s = 0.0;
     let mut sum_rr = 0.0; let mut sum_ss = 0.0; let mut sum_rs = 0.0;
-    let mut cnt = 0.0;
+    let mut cnt = 0.0; let mut sum_w = 0.0;
     let mut k_r = 0.0; let mut k_s = 0.0;
+    let rc = refimg[v * rw + u] as f64;
     let mut y = -radius;
     while y <= radius {
         let mut x = -radius;
@@ -139,6 +166,7 @@ pub(crate) fn plane_cost(
             if xi < 0.0 || yi < 0.0 || xi >= rw as f64 || yi >= rh as f64 {
                 x += 1; continue;
             }
+            let wt = bil.weight(x, y, refimg[yi as usize * rw + xi as usize] as f64 - rc);
             let ray = [(xi - rcx) / rfx, (yi - rcy) / rfy, 1.0];
             let nr = dot3(n, &ray);
             // X_src direction = R·ray − t·(n·ray)/d  (up to the plane scale).
@@ -164,19 +192,19 @@ pub(crate) fn plane_cost(
             if cnt == 0.0 { k_r = r0; k_s = s0; }
             let rval = r0 - k_r;
             let sval = s0 - k_s;
-            sum_r += rval; sum_s += sval;
-            sum_rr += rval*rval; sum_ss += sval*sval; sum_rs += rval*sval;
-            cnt += 1.0;
+            sum_r += wt*rval; sum_s += wt*sval;
+            sum_rr += wt*rval*rval; sum_ss += wt*sval*sval; sum_rs += wt*rval*sval;
+            cnt += 1.0; sum_w += wt;
             x += 1;
         }
         y += 1;
     }
     if cnt < 4.0 { return INVALID; } // too little overlap — no measurement
-    let mean_r = sum_r / cnt;
-    let mean_s = sum_s / cnt;
-    let var_r = sum_rr / cnt - mean_r*mean_r;
-    let var_s = sum_ss / cnt - mean_s*mean_s;
-    let cov = sum_rs / cnt - mean_r*mean_s;
+    let mean_r = sum_r / sum_w;
+    let mean_s = sum_s / sum_w;
+    let var_r = sum_rr / sum_w - mean_r*mean_r;
+    let var_s = sum_ss / sum_w - mean_s*mean_s;
+    let cov = sum_rs / sum_w - mean_r*mean_s;
     if var_r < VAR_FLOOR { return INVALID; } // textureless REFERENCE patch — no measurement
     if var_s < VAR_FLOOR { return 2.0; }     // textured ref onto flat source — bad hypothesis
     let denom = (var_r * var_s).sqrt();
@@ -191,7 +219,7 @@ pub(crate) fn agg_cost(
     refimg: &[u8], rw: usize, rh: usize,
     rfx: f64, rfy: f64, rcx: f64, rcy: f64,
     srcs: &[SrcView], best_k: usize,
-    u: usize, v: usize, depth: f64, n: &V3, radius: i32,
+    u: usize, v: usize, depth: f64, n: &V3, radius: i32, bil: Bilateral,
 ) -> f64 {
     if depth <= 0.0 { return 2.0; }
     // What plane_cost computes before it reads the source — the plane, and per window
@@ -207,6 +235,7 @@ pub(crate) fn agg_cost(
     if d.abs() < 1e-9 { return 2.0; }
     let mut win = [WinSample::default(); 121];
     let mut m = 0usize;
+    let rc = refimg[v * rw + u] as f64;
     let mut y = -radius;
     while y <= radius {
         let mut x = -radius;
@@ -216,7 +245,8 @@ pub(crate) fn agg_cost(
             if !(xi < 0.0 || yi < 0.0 || xi >= rw as f64 || yi >= rh as f64) {
                 let ray = [(xi - rcx) / rfx, (yi - rcy) / rfy, 1.0];
                 let nr = dot3(n, &ray);
-                win[m] = WinSample { ray, nr, r0: refimg[yi as usize * rw + xi as usize] as f64 };
+                let r0 = refimg[yi as usize * rw + xi as usize] as f64;
+                win[m] = WinSample { ray, nr, r0, wt: bil.weight(x, y, r0 - rc) };
                 m += 1;
             }
             x += 1;
@@ -232,13 +262,13 @@ pub(crate) fn agg_cost(
 
 // One reference window sample, as plane_cost forms it: the ray, n·ray, the value.
 #[derive(Clone, Copy, Default)]
-struct WinSample { ray: V3, nr: f64, r0: f64 }
+struct WinSample { ray: V3, nr: f64, r0: f64, wt: f64 }
 
 // plane_cost's per-sample loop over a precomputed window (agg_cost), same arithmetic.
 fn window_cost(src: &SrcView, win: &[WinSample], d: f64) -> f64 {
     let mut sum_r = 0.0; let mut sum_s = 0.0;
     let mut sum_rr = 0.0; let mut sum_ss = 0.0; let mut sum_rs = 0.0;
-    let mut cnt = 0.0;
+    let mut cnt = 0.0; let mut sum_w = 0.0;
     let mut k_r = 0.0; let mut k_s = 0.0;
     for w in win {
         let (ray, nr) = (&w.ray, w.nr);
@@ -257,21 +287,21 @@ fn window_cost(src: &SrcView, win: &[WinSample], d: f64) -> f64 {
             let mi = sv_ as usize * src.w + su as usize;
             if mi < src.mask.len() && src.mask[mi] != 0 { return INVALID; }
         }
-        let r0 = w.r0;
+        let (r0, wt) = (w.r0, w.wt);
         let s0 = sample_gray(src.gray, src.w, src.h, su, sv_);
         if cnt == 0.0 { k_r = r0; k_s = s0; }
         let rval = r0 - k_r;
         let sval = s0 - k_s;
-        sum_r += rval; sum_s += sval;
-        sum_rr += rval*rval; sum_ss += sval*sval; sum_rs += rval*sval;
-        cnt += 1.0;
+        sum_r += wt*rval; sum_s += wt*sval;
+        sum_rr += wt*rval*rval; sum_ss += wt*sval*sval; sum_rs += wt*rval*sval;
+        cnt += 1.0; sum_w += wt;
     }
     if cnt < 4.0 { return INVALID; }
-    let mean_r = sum_r / cnt;
-    let mean_s = sum_s / cnt;
-    let var_r = sum_rr / cnt - mean_r*mean_r;
-    let var_s = sum_ss / cnt - mean_s*mean_s;
-    let cov = sum_rs / cnt - mean_r*mean_s;
+    let mean_r = sum_r / sum_w;
+    let mean_s = sum_s / sum_w;
+    let var_r = sum_rr / sum_w - mean_r*mean_r;
+    let var_s = sum_ss / sum_w - mean_s*mean_s;
+    let cov = sum_rs / sum_w - mean_r*mean_s;
     if var_r < VAR_FLOOR { return INVALID; }
     if var_s < VAR_FLOOR { return 2.0; }
     let denom = (var_r * var_s).sqrt();
@@ -293,6 +323,8 @@ pub fn compute_depth_map(
     window: u32, iterations: u32, best_k: u32,
     seed: u32,
     perturb_start: f32,
+    // Bilateral-weighted NCC (see Bilateral): σs in px, σc in grey levels; σc ≤ 0 = off.
+    sigma_spatial: f32, sigma_color: f32,
 ) -> Vec<f32> {
     let rw = ref_w as usize;
     let rh = ref_h as usize;
@@ -338,6 +370,7 @@ pub fn compute_depth_map(
     }
 
     let bk = best_k.max(1) as usize;
+    let bil = Bilateral::new(sigma_spatial as f64, sigma_color as f64);
     let mut rng = Xorshift(seed | 1);
     // Random f64 in [0,1).
     let randf = |r: &mut Xorshift| (r.next() as f64) / (u32::MAX as f64 + 1.0);
@@ -367,7 +400,7 @@ pub fn compute_depth_map(
         let n0 = rand_normal(&mut rng);
         depth[i] = d0; nx[i] = n0[0]; ny[i] = n0[1]; nz[i] = n0[2];
         let u = i % rw; let v = i / rw;
-        cost[i] = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, d0, &n0, radius);
+        cost[i] = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, d0, &n0, radius, bil);
     }
 
     // Red-black checkerboard PatchMatch sweeps.
@@ -430,7 +463,7 @@ pub fn compute_depth_map(
                         if tried[..n_tried].contains(&k) { continue; }
                         tried[n_tried] = k;
                         n_tried += 1;
-                        let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, cand_d, &cand_n, radius);
+                        let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, cand_d, &cand_n, radius, bil);
                         if c < best_c { best_c = c; best_d = cand_d; best_n = cand_n; }
                     }
 
@@ -441,11 +474,11 @@ pub fn compute_depth_map(
                     let dspan = best_d.min(dmax - dmin) * DEPTH_PERTURB_REL * shrink;
                     // (a) current depth + random new normal.
                     let rand_n = rand_normal(&mut rng);
-                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, best_d, &rand_n, radius);
+                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, best_d, &rand_n, radius, bil);
                     if c < best_c { best_c = c; best_n = rand_n; }
                     // (b) current normal + perturbed depth.
                     let pert_d_only = (best_d + (randf(&mut rng) * 2.0 - 1.0) * dspan).clamp(dmin, dmax);
-                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d_only, &best_n, radius);
+                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d_only, &best_n, radius, bil);
                     if c < best_c { best_c = c; best_d = pert_d_only; }
                     // (c) joint perturbation (kept — helps escape coupled local minima).
                     let pert_d = (best_d + (randf(&mut rng) * 2.0 - 1.0) * dspan).clamp(dmin, dmax);
@@ -454,7 +487,7 @@ pub fn compute_depth_map(
                         best_n[1] + (randf(&mut rng) * 2.0 - 1.0) * 0.5 * shrink,
                         (best_n[2] - randf(&mut rng) * 0.3 * shrink).min(-0.1),
                     ]);
-                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d, &pert_n, radius);
+                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d, &pert_n, radius, bil);
                     if c < best_c { best_c = c; best_d = pert_d; best_n = pert_n; }
 
                     depth[i] = best_d; nx[i] = best_n[0]; ny[i] = best_n[1]; nz[i] = best_n[2];
@@ -502,7 +535,7 @@ mod tests {
             r: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
             t: [0.0, 0.0, 0.0],
         };
-        plane_cost(refimg, w, h, 20.0, 20.0, 8.0, 8.0, &src, 8, 8, 5.0, &[0.0, 0.0, -1.0], 2)
+        plane_cost(refimg, w, h, 20.0, 20.0, 8.0, 8.0, &src, 8, 8, 5.0, &[0.0, 0.0, -1.0], 2, Bilateral::new(0.0, 0.0))
     }
 
     fn ramp() -> Vec<u8> {
@@ -537,19 +570,22 @@ mod tests {
             let depth = 0.5 + rnd() * 8.0;
             let nrm = normalize3(&[rnd() - 0.5, rnd() - 0.5, -0.2 - rnd()]);
             let radius = 1 + (rnd() * 4.99) as i32;
+            // Plain and bilateral-weighted NCC (Bilateral).
+            for bil in [Bilateral::new(0.0, 0.0), Bilateral::new(radius as f64, 51.0)] {
             for bk in [1usize, 2, 3] {
-                let got = agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, bk, u, v, depth, &nrm, radius);
+                let got = agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, bk, u, v, depth, &nrm, radius, bil);
                 let want = mean_best_costs(srcs.iter().map(|s|
-                    plane_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, s, u, v, depth, &nrm, radius)), bk);
+                    plane_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, s, u, v, depth, &nrm, radius, bil)), bk);
                 assert_eq!(got.to_bits(), want.to_bits(), "u {u} v {v} depth {depth} n {nrm:?} r {radius} k {bk}");
                 if got < 2.0 { n_valid += 1; }
+            }
             }
         }
         assert!(n_valid > 1000, "the scene must exercise real correlations ({n_valid})");
         // The degenerate plane (n ⟂ the pixel's ray).
         let nrm = normalize3(&[1.0, 0.0, 0.0]);
         let (u, v) = (20usize, 15usize); // on the axis: the ray is (0, 0, 1)
-        assert_eq!(agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, 2, u, v, 3.0, &nrm, 2), 2.0);
+        assert_eq!(agg_cost(refimg, w, h, 30.0, 30.0, 20.0, 15.0, &srcs, 2, u, v, 3.0, &nrm, 2, Bilateral::new(0.0, 0.0)), 2.0);
     }
 
     // A whole depth map on a textured plane seen by three views, pinned to the bits the
@@ -573,10 +609,23 @@ mod tests {
             ks.extend([f, f, cx, cy]);
             rel.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, *tx, 0.0, 0.0]);
         }
-        let out = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[], 2.0, 8.0, 2, 3, 2, 7, 1.0);
+        let out = compute_depth_map(&refg, w as u32, h as u32, &[f, f, cx, cy], &src, &dims, &ks, &rel, &[], &[], 2.0, 8.0, 2, 3, 2, 7, 1.0, 0.0, 0.0);
         let digest = out.iter().fold(0u64, |a, v| a.wrapping_mul(1_000_003).wrapping_add(v.to_bits() as u64));
         assert_eq!(out.len(), w * h * 5);
         assert_eq!(digest, DEPTH_DIGEST, "depth map bits changed: {digest:#x}");
+    }
+
+    // Bilateral off is every weight 1.0 exactly; on, a sample of another colour than the
+    // centre, or far from it, counts less.
+    #[test]
+    fn bilateral_weights() {
+        let off = Bilateral::new(0.0, 0.0);
+        assert_eq!(off.weight(3, -2, 80.0), 1.0);
+        let on = Bilateral::new(5.0, 51.0);
+        assert_eq!(on.weight(0, 0, 0.0), 1.0);
+        assert!((on.weight(5, 0, 0.0) - (-0.5f64).exp()).abs() < 1e-12);
+        assert!((on.weight(0, 0, 51.0) - (-0.5f64).exp()).abs() < 1e-12);
+        assert!(on.weight(1, 1, 120.0) < 0.1);
     }
 
     #[test]

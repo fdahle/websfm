@@ -109,6 +109,12 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Sharper depth at object edges.** Depth maps compare image patches with each pixel
+  weighted by how close it is to the patch centre and how similar its grey value is (as
+  COLMAP does), so the far side of an edge no longer pulls a depth across it. On six
+  ETH3D scenes the F1 score at 2 cm rises from 52.6 to 53.5, better on every scene
+  (playground accuracy 75.5 → 79.7 %); an aerial block is unchanged. No extra time on the
+  GPU, about 10 % without one.
 - **Fuller dense clouds.** Depth maps now compare each image with up to 10 neighbours
   instead of 6 and run 5 refinement sweeps instead of 3, so more of the surface gets a
   depth. On six ETH3D scenes (dense from the true cameras, against the laser scans) the

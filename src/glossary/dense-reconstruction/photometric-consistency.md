@@ -18,6 +18,11 @@ matter a great deal across a flight line where exposure and viewing angle both
 change. The result runs from +1 (identical) to −1, and it is converted to a cost
 that [PatchMatch](help:patchmatch) minimises.
 
+The window is **bilaterally weighted**, as in COLMAP: a pixel counts less the further it
+is from the window's centre and the more its grey value differs from the centre pixel's.
+At the edge of an object, the other side of the edge usually has another colour, so it
+barely counts and does not drag the depth across the edge.
+
 <!-- TODO(image): assets/photometric-cost.svg - a pixel's viewing ray with three candidate depths, each warping a patch into two source views; beside it a cost-versus-depth curve with a sharp minimum for textured surface, and a second flat curve for a textureless region annotated as ambiguous. -->
 
 **Its blind spots define the rest of the pipeline.** ZNCC has nothing to say

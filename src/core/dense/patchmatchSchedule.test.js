@@ -101,10 +101,15 @@ function score(dm, gt, W, H) {
 describe('PatchMatch refinement on a deep scene (real WASM kernel)', () => {
   const run = async (settings, plane = []) => {
     const s = planeScene(...plane)
+    // The schedule on plain NCC: bilateral weighting (the default since 2026-10-26)
+    // narrows the effective window, and on this smooth synthetic texture the shallow
+    // plane's share within 0.2 % drops 0.44 → 0.43 — a property of the cost, not the
+    // schedule (on ETH3D and Aukerman it is neutral or better, docs/METHODS.md).
     const dm = await depthMapForImage(s.ref, s.sources, packSparseForDense(s.points).pos, {
       window: 3,
       iterations: 3,
       bestK: 2,
+      bilateralSigmaColor: 0,
       ...settings,
     })
     return score(dm, s.gt, s.W, s.H)

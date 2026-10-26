@@ -54,7 +54,10 @@ noisy where every source sees the surface. Blank picks about half of each image'
 Half-size of the patch PatchMatch compares between images (its
 [photometric consistency](help:photometric-consistency) score): radius 3 compares 7×7 pixels.
 A larger window is steadier on weak texture but smooths small detail and costs more
-time per pixel. A smaller one keeps sharp edges but is noisier on plain surfaces.
+time per pixel. A smaller one keeps sharp edges but is noisier on plain surfaces. The
+pixels in the window are weighted by how close they are to its centre and how similar
+their grey value is, so the far side of an object's edge counts little. On the ETH3D
+benchmark a larger window still scored lower than the default.
 
 ## Iterations (per level)
 <!-- param: iterations  default: 5 -->

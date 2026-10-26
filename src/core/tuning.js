@@ -314,6 +314,12 @@ export const MATCH_TUNING = {
 // (DEPTHMAP_DEFAULTS / DENSE_FUSE_DEFAULTS). `settings`/`opts` from the caller override.
 export const DENSE_TUNING = {
   coarseLong: 600, // longest-side px at the coarsest pyramid level (sets level count)
+  // Bilateral-weighted NCC in PatchMatch (mvs.rs Bilateral), σc in grey levels; 0 = plain
+  // NCC. COLMAP uses 0.2 of the range (51). ETH3D six scenes, F1 @2 cm: plain 52.6, 51 53.2,
+  // 25 53.5, 12 53.3, 6 52.3 (narrower: more accuracy, less completeness); 25 better than
+  // plain on every scene. Aukerman 42 unchanged (roughness, points −0.4 %); GPU time
+  // unchanged, CPU +10 % (2026-10-26, docs/METHODS.md ▸ Stage A).
+  bilateralSigmaColor: 25,
   minAngleDeg: 3, // source-view triangulation angle floor (too small = degenerate)
   maxAngleDeg: 60, // …and ceiling (too wide = poor photo-consistency)
   consistencyPx: 2, // fusion reprojection agreement threshold (px)

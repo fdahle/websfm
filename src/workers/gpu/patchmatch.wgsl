@@ -32,6 +32,8 @@ struct Params {
   rfx : f32, rfy : f32, rcx : f32, rcy : f32,
   depthMin : f32, depthMax : f32, seed : u32, iters : u32,
   nSrc : u32, bestK : u32, maxW : u32, maxH : u32,
+  // Bilateral-weighted NCC (mvs.rs Bilateral): 1/(2σs²), 1/(2σc²); bilOn 0 = every weight 1.
+  bilS : f32, bilC : f32, bilOn : u32, _p : u32,
 };
 
 struct Src {
@@ -96,6 +98,8 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
   // shift-invariant, but raw f32 sums (Σx² up to 255²·121 ≈ 7.9e6) minus n·mean²
   // cancel catastrophically on bright low-contrast patches. Same in mvs.rs/planeCost.js.
   var kR = 0.0; var kS = 0.0;
+  var sumW = 0.0;
+  let rc = textureLoad(refTex, vec2<i32>(i32(u), i32(v)), 0).r * 255.0;
 
   for (var y = -params.radius; y <= params.radius; y = y + 1) {
     for (var x = -params.radius; x <= params.radius; x = x + 1) {
@@ -123,18 +127,23 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
       let r0 = textureLoad(refTex, vec2<i32>(xi, yi), 0).r * 255.0;
       let s0 = textureSampleLevel(srcTexArr, samp,
                  vec2<f32>((cu + 0.5) / mw, (cv + 0.5) / mh), layer, 0.0).r * 255.0;
+      var wt = 1.0;
+      if (params.bilOn == 1u) {
+        let dc = r0 - rc;
+        wt = exp(-f32(x * x + y * y) * params.bilS - dc * dc * params.bilC);
+      }
       if (cnt == 0.0) { kR = r0; kS = s0; }
       let rval = r0 - kR;
       let sval = s0 - kS;
-      sumR += rval; sumS += sval;
-      sumRR += rval * rval; sumSS += sval * sval; sumRS += rval * sval;
-      cnt += 1.0;
+      sumR += wt * rval; sumS += wt * sval;
+      sumRR += wt * rval * rval; sumSS += wt * sval * sval; sumRS += wt * rval * sval;
+      cnt += 1.0; sumW += wt;
     }
   }
   if (cnt < 4.0) { return INVALID; } // too little overlap → no measurement
-  let mr = sumR / cnt; let ms = sumS / cnt;
-  let vr = sumRR / cnt - mr * mr; let vs = sumSS / cnt - ms * ms;
-  let cov = sumRS / cnt - mr * ms;
+  let mr = sumR / sumW; let ms = sumS / sumW;
+  let vr = sumRR / sumW - mr * mr; let vs = sumSS / sumW - ms * ms;
+  let cov = sumRS / sumW - mr * ms;
   if (vr < VAR_FLOOR) { return INVALID; } // textureless REFERENCE patch → no measurement
   if (vs < VAR_FLOOR) { return 2.0; }     // textured ref onto flat source → bad hypothesis
   let denom = sqrt(vr * vs);

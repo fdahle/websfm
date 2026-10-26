@@ -64,7 +64,12 @@ function sampleGrayBilinear(img, w, h, x, y) {
 //        frame / fiducials): a patch warping onto a masked source texel is rejected
 //        like an out-of-bounds warp, so the source can't match against its border.
 //   n:   [nx, ny, nz] unit normal;  radius: half window
-export function planeCostRef(ref, src, u, v, depth, n, radius) {
+//   bil: { sigmaSpatial, sigmaColor } for bilateral-weighted NCC (mvs.rs Bilateral), or
+//        null — every weight 1.
+export function planeCostRef(ref, src, u, v, depth, n, radius, bil = null) {
+  const bilOn = !!(bil && bil.sigmaColor > 0 && bil.sigmaSpatial > 0)
+  const inv2s2 = bilOn ? 0.5 / (bil.sigmaSpatial * bil.sigmaSpatial) : 0
+  const inv2c2 = bilOn ? 0.5 / (bil.sigmaColor * bil.sigmaColor) : 0
   const pu = (u - ref.cx) / ref.fx
   const pv = (v - ref.cy) / ref.fy
   const P = [pu * depth, pv * depth, depth]
@@ -78,9 +83,11 @@ export function planeCostRef(ref, src, u, v, depth, n, radius) {
     sumRR = 0,
     sumSS = 0,
     sumRS = 0,
-    cnt = 0
+    cnt = 0,
+    sumW = 0
   let kR = 0,
     kS = 0 // shift = first contributing sample (keeps sums small)
+  const rc = ref.gray[v * ref.w + u]
   for (let y = -radius; y <= radius; y++) {
     for (let x = -radius; x <= radius; x++) {
       const xi = u + x,
@@ -110,20 +117,22 @@ export function planeCostRef(ref, src, u, v, depth, n, radius) {
       }
       const rval = r0 - kR,
         sval = s0 - kS
-      sumR += rval
-      sumS += sval
-      sumRR += rval * rval
-      sumSS += sval * sval
-      sumRS += rval * sval
+      const wt = bilOn ? Math.exp(-(x * x + y * y) * inv2s2 - (r0 - rc) * (r0 - rc) * inv2c2) : 1
+      sumR += wt * rval
+      sumS += wt * sval
+      sumRR += wt * rval * rval
+      sumSS += wt * sval * sval
+      sumRS += wt * rval * sval
       cnt++
+      sumW += wt
     }
   }
   if (cnt < 4) return INVALID // too little overlap → no measurement
-  const mr = sumR / cnt,
-    ms = sumS / cnt
-  const vr = sumRR / cnt - mr * mr,
-    vs = sumSS / cnt - ms * ms
-  const cov = sumRS / cnt - mr * ms
+  const mr = sumR / sumW,
+    ms = sumS / sumW
+  const vr = sumRR / sumW - mr * mr,
+    vs = sumSS / sumW - ms * ms
+  const cov = sumRS / sumW - mr * ms
   if (vr < VAR_FLOOR) return INVALID // textureless REFERENCE patch → no measurement
   if (vs < VAR_FLOOR) return 2.0 // textured ref onto flat source → bad hypothesis
   const denom = Math.sqrt(vr * vs)

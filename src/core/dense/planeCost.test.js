@@ -410,3 +410,48 @@ describe('ZNCC f32 precision (shifted accumulation, GPU emulation)', () => {
     expect(Math.abs(c - cost64(rv, sv))).toBeLessThan(1e-9)
   })
 })
+
+describe('planeCostRef — bilateral weighting', () => {
+  // An object edge: the left half is the object, on the hypothesised plane, the right
+  // half a background of another colour that the source sees shifted (parallax).
+  const W = 32,
+    H = 32
+  const tex = (x, y) => 60 + 40 * Math.sin(x * 0.9) * Math.cos(y * 0.7)
+  const bg = (x, y) => 200 + 30 * Math.sin(x * 1.3) * Math.cos(y * 0.9)
+  const refGray = new Uint8Array(W * H).map((_, i) => {
+    const x = i % W,
+      y = (i / W) | 0
+    return x < 16 ? tex(x, y) : bg(x, y)
+  })
+  const srcGray = new Uint8Array(W * H).map((_, i) => {
+    const x = i % W,
+      y = (i / W) | 0
+    return x < 16 ? tex(x, y) : bg(x + 3, y)
+  })
+  const cam = { w: W, h: H, fx: 30, fy: 30, cx: 16, cy: 16 }
+  const ref = { gray: refGray, ...cam }
+  const src = {
+    gray: srcGray,
+    ...cam,
+    R: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    t: [0, 0, 0],
+  }
+  const n = [0, 0, -1]
+
+  it('off is the plain cost exactly', () => {
+    expect(planeCostRef(ref, src, 13, 16, 5, n, 3, { sigmaSpatial: 3, sigmaColor: 0 })).toBe(
+      planeCostRef(ref, src, 13, 16, 5, n, 3),
+    )
+  })
+
+  it('on, the other side of the edge barely counts', () => {
+    const plain = planeCostRef(ref, src, 13, 16, 5, n, 3)
+    const bil = planeCostRef(ref, src, 13, 16, 5, n, 3, { sigmaSpatial: 3, sigmaColor: 25 })
+    expect(plain).toBeGreaterThan(0.01) // the shifted background costs the plain window
+    expect(bil).toBeLessThan(plain / 10)
+  })
+})

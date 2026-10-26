@@ -696,6 +696,9 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     bestK = 3,
     seed = 1,
     perturbStart = 1,
+    // Bilateral-weighted NCC (mvs.rs Bilateral): σs px, σc grey levels; σc ≤ 0 = off.
+    sigmaSpatial = 0,
+    sigmaColor = 0,
   } = opts
   const n = sources.length
   if (n === 0 || refW * refH === 0) return null
@@ -742,6 +745,8 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     bestK,
     seed >>> 0,
     perturbStart,
+    sigmaSpatial,
+    sigmaColor,
   )
   const npix = refW * refH
   if (!raw || raw.length < npix * 5) return null

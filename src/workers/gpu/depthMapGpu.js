@@ -75,6 +75,9 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     bestK = 3,
     seed = 1,
     perturbStart = 1,
+    // Bilateral-weighted NCC (mvs.rs Bilateral): σs px, σc grey levels; σc ≤ 0 = off.
+    sigmaSpatial = 0,
+    sigmaColor = 0,
   } = opts
   // Mirror mvs.rs's depth-range guards (dmin ≥ 1e-4, dmax ≥ dmin·1.001) so the GPU
   // and WASM backends init PatchMatch over the same interval — a zero/degenerate
@@ -147,8 +150,9 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     )
   })
 
-  // ── Params uniform (64 bytes) ──────────────────────────────────────────────
-  const pbuf = new ArrayBuffer(64)
+  const bilOn = sigmaColor > 0 && sigmaSpatial > 0
+  // ── Params uniform (80 bytes) ──────────────────────────────────────────────
+  const pbuf = new ArrayBuffer(80)
   const pv = new DataView(pbuf)
   pv.setUint32(0, refW, true)
   pv.setUint32(4, refH, true)
@@ -166,7 +170,10 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   pv.setUint32(52, Math.max(1, bestK), true)
   pv.setUint32(56, maxW, true)
   pv.setUint32(60, maxH, true)
-  const paramsBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  pv.setFloat32(64, bilOn ? 0.5 / (sigmaSpatial * sigmaSpatial) : 0, true)
+  pv.setFloat32(68, bilOn ? 0.5 / (sigmaColor * sigmaColor) : 0, true)
+  pv.setUint32(72, bilOn ? 1 : 0, true)
+  const paramsBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(paramsBuf, 0, pbuf)
 
   // ── Per-source pose storage buffer (array<Src>, 96 bytes each) ─────────────

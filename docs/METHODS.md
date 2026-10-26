@@ -1344,7 +1344,14 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   near-nadir plane is unchanged at a single level and slightly better through the
   pyramid (`patchmatchSchedule.test.js`).
 
-  Per source the cost is ZNCC (`1 − ncc`, in [0, 2]). Best-K averages only
+  Per source the cost is **bilaterally weighted** ZNCC (`1 − ncc`, in [0, 2]), as in
+  COLMAP: each window sample counts with `exp(−d²/2σs² − Δ²/2σc²)`, `d` its distance
+  from the centre (px), `Δ` its grey difference from the centre pixel, σs = the window
+  radius and σc = 25 grey levels (COLMAP: 0.2 of the range, 51). Measured on ETH3D (six
+  scenes, from the ground-truth cameras, F1 @2 cm): plain 52.6, σc 51 53.2, **25 53.5**,
+  12 53.3, 6 52.3 — narrower bands keep trading completeness for accuracy; 25 is better
+  than plain on every scene (playground accuracy 75.5 → 79.7 %). It costs no measurable
+  time; an 11×11 window stayed worse than 7×7 with the weighting too. Best-K averages only
   sources that *measured* the pixel: a warp leaving the source, a masked texel or
   <4 overlapping samples returns a no-measurement sentinel and is excluded. A flat
   patch is split by side (variance floor 1e-6 on the 0..255 scale, identical in

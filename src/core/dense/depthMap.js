@@ -195,6 +195,10 @@ export async function depthMapForImage(
   const iterations = numOpt(settings.iterations, DEPTHMAP_DEFAULTS.iterations, { int: true, min: 1 })
   const bestK = numOpt(settings.bestK, 3, { int: true, min: 1 })
   const coarseLong = numOpt(settings.coarseLong, DENSE_TUNING.coarseLong, { int: true, min: 1 })
+  // Bilateral-weighted NCC (mvs.rs Bilateral): σc in grey levels (0 = plain NCC), σs in
+  // px, by default the window radius (COLMAP's). The same at every pyramid level.
+  const sigmaColor = numOpt(settings.bilateralSigmaColor, DENSE_TUNING.bilateralSigmaColor, { min: 0 })
+  const sigmaSpatial = numOpt(settings.bilateralSigmaSpatial, Math.min(5, Math.max(1, window)), { positive: true })
   const refCamScaled = { R: ref.cam.R, t: ref.cam.t, K: ref.K }
   // Depth range is view-space (resolution-invariant): derive it once from the
   // working-res projection (most sparse points visible → tightest percentiles).
@@ -287,6 +291,8 @@ export async function depthMapForImage(
       bestK,
       seed: (baseSeed ^ (li * 0x9e3779b1)) >>> 0,
       perturbStart: perturbStarts[li],
+      sigmaSpatial,
+      sigmaColor,
     })
     if (!dm) return null
     prevDepth = dm.depth
@@ -322,7 +328,7 @@ export async function depthMapForImage(
     // sources (INVALID sentinel) instead of averaging their max cost in.
     const aggRef = (u, v, depth, n) => {
       if (depth <= 0) return 2
-      const cs = srcCs.map((sc) => planeCostRef(refC, sc, u, v, depth, n, radius))
+      const cs = srcCs.map((sc) => planeCostRef(refC, sc, u, v, depth, n, radius, { sigmaSpatial, sigmaColor }))
       return aggregateValidCosts(cs, bestK)
     }
     const stride = Math.max(1, Math.floor(dm.depth.length / 4000))

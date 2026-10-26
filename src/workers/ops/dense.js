@@ -633,7 +633,15 @@ export function makeDenseOps({ rasterize }) {
           ref,
           sources,
           sparse.pos,
-          { window, iterations, bestK: imgBestK, coarseLong, region: settings.region ?? null },
+          {
+            window,
+            iterations,
+            bestK: imgBestK,
+            coarseLong,
+            region: settings.region ?? null,
+            bilateralSigmaColor: settings.bilateralSigmaColor,
+            bilateralSigmaSpatial: settings.bilateralSigmaSpatial,
+          },
           backend,
           hooks,
         )
@@ -654,7 +662,15 @@ export function makeDenseOps({ rasterize }) {
             ref,
             sources,
             sparse.pos,
-            { window, iterations, bestK: imgBestK, coarseLong, region: settings.region ?? null },
+            {
+              window,
+              iterations,
+              bestK: imgBestK,
+              coarseLong,
+              region: settings.region ?? null,
+              bilateralSigmaColor: settings.bilateralSigmaColor,
+              bilateralSigmaSpatial: settings.bilateralSigmaSpatial,
+            },
             backend,
             { onLog: hooks.onLog, onProgress: hooks.onProgress },
           )
