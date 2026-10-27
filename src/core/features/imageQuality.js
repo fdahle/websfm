@@ -21,24 +21,12 @@
 //      (`relativeQuality`), not against an absolute threshold.
 
 import { rgbaToGray } from '../sfm/geometry.js'
+import { IMAGE_QUALITY_TUNING } from '../tuning.js'
+import { IMAGE_QUALITY_DEFAULTS } from '../defaults.user.js'
 
-export const IMAGE_QUALITY_DEFAULTS = Object.freeze({
-  analysisMaxDim: 1024,
-  tiles: 4,
-  /** Luma at or above this (of 255) counts as clipped highlight. */
-  overexposedLevel: 250,
-  /** Luma at or below this (of 255) counts as crushed shadow. */
-  underexposedLevel: 5,
-  /** A tile needs this many valid Laplacian samples to report a variance. */
-  minTileSamples: 16,
-})
-
-export const QUALITY_VERDICT_DEFAULTS = Object.freeze({
-  /** Blurry when sharpness / batch median falls below this. */
-  minRelative: 0.5,
-  /** Over/underexposed when that share of valid pixels exceeds this. */
-  maxClipped: 0.25,
-})
+// The analysis knobs are IMAGE_QUALITY_TUNING (tuning.js); the blur threshold the dialog
+// shows is IMAGE_QUALITY_DEFAULTS.minRelative (defaults.user.js).
+const T = IMAGE_QUALITY_TUNING
 
 /**
  * Area-resampling taps for one axis, `nSrc` → `nDst` (nDst ≤ nSrc).
@@ -166,11 +154,7 @@ function percentile(values, p) {
  */
 export function analyzeImageQuality(raster, opts = {}) {
   const { width: w, height: h, data, channels = 4 } = raster
-  const {
-    analysisMaxDim = IMAGE_QUALITY_DEFAULTS.analysisMaxDim,
-    mask = null,
-    tiles = IMAGE_QUALITY_DEFAULTS.tiles,
-  } = opts
+  const { analysisMaxDim = T.analysisMaxDim, mask = null, tiles = T.tiles } = opts
   if (!(w > 0 && h > 0)) throw new Error('analyzeImageQuality: empty raster')
   if (channels !== 1 && channels !== 4) throw new Error(`analyzeImageQuality: channels must be 1 or 4, got ${channels}`)
   if (data.length < w * h * channels) throw new Error('analyzeImageQuality: data shorter than width·height·channels')
@@ -202,8 +186,8 @@ export function analyzeImageQuality(raster, opts = {}) {
   }
 
   // Exposure over valid analysis pixels.
-  const hiLevel = IMAGE_QUALITY_DEFAULTS.overexposedLevel / 255
-  const loLevel = IMAGE_QUALITY_DEFAULTS.underexposedLevel / 255
+  const hiLevel = T.overexposedLevel / 255
+  const loLevel = T.underexposedLevel / 255
   let nValid = 0
   let sumLuma = 0
   let nOver = 0
@@ -261,7 +245,7 @@ export function analyzeImageQuality(raster, opts = {}) {
   const variance = (sum, sq, n) => Math.max(0, sq / n - (sum / n) ** 2)
   const tileVars = []
   for (let t = 0; t < nT * nT; t++) {
-    if (tN[t] >= IMAGE_QUALITY_DEFAULTS.minTileSamples) tileVars.push(variance(tSum[t], tSq[t], tN[t]))
+    if (tN[t] >= T.minTileSamples) tileVars.push(variance(tSum[t], tSq[t], tN[t]))
   }
 
   return {
@@ -313,7 +297,7 @@ export function relativeQuality(scores) {
  * @returns {Array<{ id:any, relative:number|null, flags:Array<'blurry'|'overexposed'|'underexposed'>, ok:boolean }>}
  */
 export function qualityVerdicts(results, opts = {}) {
-  const { minRelative = QUALITY_VERDICT_DEFAULTS.minRelative, maxClipped = QUALITY_VERDICT_DEFAULTS.maxClipped } = opts
+  const { minRelative = IMAGE_QUALITY_DEFAULTS.minRelative, maxClipped = T.maxClipped } = opts
   const rel = relativeQuality(results.map((r) => r.sharpness))
   return results.map((r, i) => {
     const flags = []

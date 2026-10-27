@@ -549,3 +549,20 @@ export const TURNTABLE_TUNING = {
 export const EXPORT_TUNING = {
   savePickerMinMiB: 256,
 }
+
+// Tools ▸ Images ▸ Image quality (core/features/imageQuality.js). The sharpness score is
+// the Laplacian variance of the image resampled to `analysisMaxDim` (a fixed unit across
+// cameras), over a `tiles`×`tiles` grid. The blur threshold is a user setting
+// (defaults.user.js IMAGE_QUALITY_DEFAULTS.minRelative).
+export const IMAGE_QUALITY_TUNING = {
+  analysisMaxDim: 1024,
+  tiles: 4,
+  // Luma at or above this (of 255) counts as clipped highlight, at or below
+  // `underexposedLevel` as crushed shadow.
+  overexposedLevel: 250,
+  underexposedLevel: 5,
+  // A tile needs this many valid Laplacian samples to report a variance.
+  minTileSamples: 16,
+  // Over- or underexposed when that share of valid pixels is clipped.
+  maxClipped: 0.25,
+}

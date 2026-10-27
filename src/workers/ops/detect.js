@@ -13,7 +13,7 @@ import {
 import { capOrder, capBoundary } from '../../core/features/keypointCap.js'
 import { SIFT_DESC_NORM, rootSiftInPlace } from '../../core/features/siftDescriptors.js'
 import { buildMaskLookup } from '../../core/mask.js'
-import { analyzeImageQuality, IMAGE_QUALITY_DEFAULTS } from '../../core/features/imageQuality.js'
+import { analyzeImageQuality } from '../../core/features/imageQuality.js'
 import { fromScaledPx } from '../../core/sfm/geometry.js'
 import { KP_STRIDE } from '../../core/features/keypoints.js'
 import { isPyramid, openPyramid, rasterizePyramidTo, readNativeRect } from '../rasterSource.js'
@@ -30,7 +30,7 @@ import {
   nativeRefinePlan,
 } from '../../core/sfm/fiducialDetection.js'
 import { pluralize } from '../../core/textFormat.js'
-import { DETECT_TUNING } from '../../core/tuning.js'
+import { DETECT_TUNING, IMAGE_QUALITY_TUNING } from '../../core/tuning.js'
 import { DETECT_SIFT_DEFAULTS } from '../../core/defaults.user.js'
 import { faintRetry } from '../../core/features/faintRetry.js'
 
@@ -1088,7 +1088,7 @@ export function makeDetectOps({ rasterize }) {
   // fixed-size grid every image is scored on. A mask (1 = masked) excludes sky or
   // the operator's legs from the score, exactly as it does from detection.
   async function imageQuality([url, options = {}]) {
-    const analysisMaxDim = options.analysisMaxDim ?? IMAGE_QUALITY_DEFAULTS.analysisMaxDim
+    const analysisMaxDim = options.analysisMaxDim ?? IMAGE_QUALITY_TUNING.analysisMaxDim
     const raster = await rasterize(url, analysisMaxDim * 2)
     let usable = null
     if (options.mask) {
