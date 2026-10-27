@@ -6,6 +6,13 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Sentinel-2 as a Find GCPs reference.** Find GCPs ▸ **Sentinel-2…** lists the
+  Sentinel-2 scenes over the search area and fetches the one you choose as a reference
+  orthophoto, with no file to download and no account. Only the window over the area is
+  read from the 10 m red, green and blue bands on AWS Open Data, stretched from its own
+  reflectances so that snow and ice keep their texture, and imported in the scene's UTM
+  zone with σ XY 8 m (Sentinel-2's geolocation is about 11–12.5 m CE95). The scenes
+  cover Antarctica too: 21 under 20 % cloud over Neko Harbour.
 - **Find GCPs: a search area, and footprints on offer.** Find GCPs ▸ Search area takes a
   polygon layer to search inside, and under it a line says where Auto will look: the
   georeferenced orthophoto, the photos' footprints, their GPS, or the whole reference.

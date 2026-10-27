@@ -243,6 +243,31 @@ Choose **Checkpoint** to reserve a point for checking rather than fitting.
 accuracy stay unknown; incomplete controls cannot constrain adjustment. Photo
 marks can still be refined later in Control & Markers.
 
+## Sentinel-2 reference
+Without a reference raster of your own, **Sentinel-2…** beside the reference fetches a
+[Sentinel-2](help:sentinel-2) image of the search area and selects it. It needs a
+search area (see below): the photos' footprints, their GPS, a georeferenced orthophoto,
+or a polygon layer you choose.
+
+**Search scenes** lists the scenes over the area, best first: those that cover all of
+it, then the least cloud, then the fewest empty pixels, then the newest. Each row gives
+the date, the 110 km tile, and the scene's share of cloud and of snow and ice. Click a
+row to choose it, and **Fetch** reads the area plus a quarter on each side (at least
+1 km, at most 60 km across) from the red, green and blue bands. It is imported as a
+reference orthophoto in the scene's UTM zone, named after the date and tile, with σ XY
+8 m.
+
+Pick a scene from the same season as the photos where you can: snow lines and
+shadows that match make matching easier. A scene that covers only part of the area
+leaves the rest of the window empty.
+
+## Max cloud
+<!-- param: sentinel2Cloud  default: 20 -->
+The most cloud a Sentinel-2 scene may have to be listed, in percent of the whole
+110 km tile, as the catalogue states it. Cloud elsewhere on the tile does not matter,
+so a scene with some cloud can still show the area clearly; raise it when no scene is
+listed. **From** and **To** limit the dates.
+
 ## Search area
 <!-- param: searchArea  default: Auto -->
 Where in the reference to look for the photos. **Auto** uses the best that the project

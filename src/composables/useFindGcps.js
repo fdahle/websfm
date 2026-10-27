@@ -75,55 +75,59 @@ export function searchAreaPlan(searchSetId = null) {
   return { source, set, ...counts, registered, gps }
 }
 
-// Where in the reference to look, as searchAreaPlan says, in reference pixels:
-// → { region, source } (region null: the whole reference).
-async function searchArea(ortho, refRaster, searchSetId) {
-  const projects = useProjectsStore()
+// The search area's outline as searchAreaPlan says, in world coordinates:
+// → { points, crs, source } (source words it for the log), or null (no area known).
+export async function searchAreaPoints(searchSetId = null) {
+  const crs = useProjectsStore().currentCrs,
+    ortho = useReconstructionStore().ortho
   const plan = searchAreaPlan(searchSetId)
-  const toPixels = (pts, crs) =>
-    pts
-      .map((p) => transform(p, crs, refRaster.crs))
-      .map(([x, y]) => {
-        const px = worldToPixel(refRaster, x, y)
-        return [px.col, px.row]
-      })
-  const region = (pts, crs) => searchRegion(toPixels(pts, crs), refRaster.width, refRaster.height)
-  const crs = projects.currentCrs
+  let out = null
   switch (plan.source) {
     case 'manual':
-      await ensureProjection(crs)
-      return { region: region(polygonSetPoints(plan.set), crs), source: `the polygons of "${plan.set.name}"` }
+      out = { points: polygonSetPoints(plan.set), crs, source: `the polygons of "${plan.set.name}"` }
+      break
     case 'ortho': {
-      await ensureProjection(ortho.crs)
       const x1 = ortho.originX + ortho.width * ortho.gsd,
         y1 = ortho.originY - ortho.height * ortho.gsd
-      const pts = [
+      const points = [
         [ortho.originX, ortho.originY],
         [x1, ortho.originY],
         [x1, y1],
         [ortho.originX, y1],
       ]
-      return { region: region(pts, ortho.crs), source: 'the georeferenced orthophoto' }
+      out = { points, crs: ortho.crs, source: 'the georeferenced orthophoto' }
+      break
     }
     case 'footprints':
-      await ensureProjection(crs)
-      return {
-        region: region(
-          footprintSearchPoints(useFootprintsStore().sets, new Set(plan.registered.map((im) => im.id))),
-          crs,
-        ),
+      out = {
+        points: footprintSearchPoints(useFootprintsStore().sets, new Set(plan.registered.map((im) => im.id))),
+        crs,
         source: "the photos' footprints",
       }
+      break
     case 'gps':
-      return {
-        region: region(
-          gpsSearchOutline(plan.gps.map((im) => [Number(im.meta.gpsLon), Number(im.meta.gpsLat)])),
-          'EPSG:4326',
-        ),
+      out = {
+        points: gpsSearchOutline(plan.gps.map((im) => [Number(im.meta.gpsLon), Number(im.meta.gpsLat)])),
+        crs: 'EPSG:4326',
         source: "the photos' GPS positions",
       }
   }
-  return { region: null, source: null }
+  if (out) await ensureProjection(out.crs)
+  return out
+}
+
+// Where in the reference to look, in reference pixels: → { region, source } (region
+// null: the whole reference).
+async function searchArea(refRaster, searchSetId) {
+  const area = await searchAreaPoints(searchSetId)
+  if (!area) return { region: null, source: null }
+  const pixels = area.points
+    .map((p) => transform(p, area.crs, refRaster.crs))
+    .map(([x, y]) => {
+      const px = worldToPixel(refRaster, x, y)
+      return [px.col, px.row]
+    })
+  return { region: searchRegion(pixels, refRaster.width, refRaster.height), source: area.source }
 }
 
 // A camera counts as vertical within this angle of straight down: its footprint's
@@ -270,7 +274,7 @@ export async function findGcpCandidates({
   await Promise.all([ensureProjection(refRaster.crs), ensureProjection(projects.currentCrs)])
   if (terrain && isGeographic(refRaster.crs))
     throw new Error('Terrain matching needs a reference DEM in a projected (metric) CRS')
-  const area = terrain ? { region: null, source: null } : await searchArea(ortho, refRaster, searchSetId)
+  const area = terrain ? { region: null, source: null } : await searchArea(refRaster, searchSetId)
   const used = await resolveMatcher(matcher)
   const prior = terrain || learnedDetector(used) ? await orthoPrior(ortho, cloud, refRaster) : null
   if (terrain && !prior)

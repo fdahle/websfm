@@ -1203,3 +1203,144 @@ test("footprints from poses follow the terrain tiles, in the cameras' vertical d
   await page.getByRole('button', { name: 'Compute Footprints' }).click()
   await expect(page.locator('#footprints')).toHaveText('1')
 })
+
+// Find GCPs ▸ Sentinel-2: the catalogue and the band COGs are served here (with HTTP
+// ranges, as S3 answers), so the test runs offline; the worker reads them over fetch.
+// The fixture is built in Node: the GeoTIFF writer is pure.
+test('Find GCPs fetches a Sentinel-2 window over the search area as a reference orthophoto', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(60000)
+  const { writeCog, geoKeysForEpsg } = await import('../../src/core/products/geotiff.js')
+  const { default: proj4 } = await import('proj4')
+  const utm = '+proj=utm +zone=20 +south +datum=WGS84 +units=m +no_defs'
+  // The search area: a 4 km box at Neko Harbour. The scene: 1,200 px of 10 m, its
+  // corner 6 km west and north of the box's centre; a strip on the west edge is empty.
+  const [cx, cy] = proj4('EPSG:4326', utm, [-62.55, -64.84]).map(Math.round)
+  const N = 1200,
+    x0 = cx - 6000,
+    y0 = cy + 6000
+  const files = {}
+  for (const [k, name] of ['B04', 'B03', 'B02'].entries()) {
+    const data = new Uint16Array(N * N)
+    for (let r = 0; r < N; r++)
+      for (let c = 0; c < N; c++) data[r * N + c] = c < 50 ? 0 : 1000 + ((r * 7 + c * 3 + k * 500) % 12000)
+    files[name] = Buffer.from(
+      writeCog({
+        width: N,
+        height: N,
+        samples: [{ bits: 16, format: 1 }],
+        photometric: 1,
+        data,
+        pixelScale: [10, 10, 0],
+        tiepoint: [0, 0, 0, x0, y0, 0],
+        geoKeys: geoKeysForEpsg(32720, false),
+        tileSize: 256,
+      }),
+    )
+  }
+  const [sw, ne] = [
+    [x0, y0 - N * 10],
+    [x0 + N * 10, y0],
+  ].map((p) => proj4(utm, 'EPSG:4326', p))
+  const asset = (b) => ({
+    'href': `https://sentinel-cogs.test/T20DNP/${b}.tif`,
+    'proj:shape': [N, N],
+    'proj:transform': [10, 0, x0, 0, -10, y0],
+  })
+  const scene = (id, cloud, date) => ({
+    id,
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [sw[0], sw[1]],
+          [ne[0], sw[1]],
+          [ne[0], ne[1]],
+          [sw[0], ne[1]],
+          [sw[0], sw[1]],
+        ],
+      ],
+    },
+    properties: {
+      'datetime': `${date}T13:20:36Z`,
+      'grid:code': 'MGRS-20DNP',
+      'proj:epsg': 32720,
+      'eo:cloud_cover': cloud,
+      's2:snow_ice_percentage': 44,
+      's2:nodata_pixel_percentage': 0,
+    },
+    assets: { red: asset('B04'), green: asset('B03'), blue: asset('B02') },
+  })
+  const collection = {
+    type: 'FeatureCollection',
+    features: [scene('cloudy', 15, '2024-02-01'), scene('clear', 2, '2025-03-23')],
+  }
+
+  await page.goto(harness)
+  await page.evaluate(
+    async ([cx, cy]) => {
+      const { projects, footprints } = window.workflowTools
+      projects.projects = [{ id: 's2', crs: 'EPSG:3031' }]
+      projects.currentProjectId = 's2'
+      const box = [
+        [cx - 2000, cy - 2000],
+        [cx + 2000, cy - 2000],
+        [cx + 2000, cy + 2000],
+        [cx - 2000, cy + 2000],
+        [cx - 2000, cy - 2000],
+      ]
+      await footprints.addFootprints([{ name: 'Neko', rings: [box] }], 'EPSG:32720', 'Neko box')
+    },
+    [cx, cy],
+  )
+  let searched = null
+  await context.route('https://earth-search.aws.element84.com/v1/search', async (route) => {
+    searched = route.request().postDataJSON()
+    await route.fulfill({ json: collection, headers: { 'Access-Control-Allow-Origin': '*' } })
+  })
+  await context.route('https://sentinel-cogs.test/**', async (route) => {
+    const body =
+      files[
+        route
+          .request()
+          .url()
+          .match(/(B0\d)\.tif$/)[1]
+      ]
+    const cors = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'Content-Range, Content-Length',
+    }
+    if (route.request().method() === 'OPTIONS')
+      return route.fulfill({ status: 204, headers: { ...cors, 'Access-Control-Allow-Headers': 'range' } })
+    const m = /bytes=(\d+)-(\d*)/.exec((await route.request().allHeaders()).range ?? '')
+    if (!m) return route.fulfill({ body, headers: cors })
+    const a = Number(m[1]),
+      b = Math.min(body.length - 1, m[2] ? Number(m[2]) : body.length - 1)
+    await route.fulfill({
+      status: 206,
+      body: body.subarray(a, b + 1),
+      headers: { ...cors, 'Content-Range': `bytes ${a}-${b}/${body.length}`, 'Accept-Ranges': 'bytes' },
+    })
+  })
+
+  await page.getByRole('button', { name: 'Find GCPs', exact: true }).click()
+  await page.getByRole('combobox', { name: /Search area/ }).selectOption({ label: 'Neko box' })
+  await page.getByRole('button', { name: 'Sentinel-2…' }).click()
+  await expect(page.getByText(/Around the polygons of "Neko box": 4\.0 × 4\.0 km/)).toBeVisible()
+  await page.getByRole('button', { name: 'Search scenes' }).click()
+  // The clearer scene first, and chosen.
+  await expect(page.getByRole('button', { name: 'Fetch 2025-03-23' })).toBeEnabled()
+  expect(searched).toMatchObject({ collections: ['sentinel-2-l2a'], query: { 'eo:cloud_cover': { lt: 20 } } })
+  await page.getByRole('button', { name: 'Fetch 2025-03-23' }).click()
+  await expect(page.getByRole('combobox', { name: 'Reference orthophoto' })).toHaveValue(/.+/, { timeout: 30000 })
+  const raster = await page.evaluate(() => {
+    const r = window.workflowTools.external.rasters[0]
+    return { name: r.name, crs: r.crs, width: r.width, height: r.height, bands: r.bands, sigma: r.horizontalAccuracy }
+  })
+  // The 4 km box plus 1 km each side: 600 px of 10 m, and a pixel more where the box's
+  // round trip through the project CRS and lon/lat rounds outward.
+  expect(raster).toMatchObject({ name: 'Sentinel-2 2025-03-23 20DNP.tif', crs: 'EPSG:32720', bands: 3, sigma: 8 })
+  for (const side of [raster.width, raster.height]) expect(side >= 600 && side <= 602).toBe(true)
+})

@@ -1,6 +1,7 @@
-import { assembleCog, geoKeysForEpsg } from '../../core/products/geotiff.js'
+import { assembleCog, geoKeysForEpsg, writeCogDeflate } from '../../core/products/geotiff.js'
 import { attributeBuffers } from '../../core/io/cloudAttributes.js'
-import { GeoTIFF, fromArrayBuffer, fromBlob } from 'geotiff'
+import { GeoTIFF, fromArrayBuffer, fromBlob, fromUrl } from 'geotiff'
+import { stretchBands } from '../../core/sentinel2.js'
 import { rasterWindow, overviewLayout } from '../../core/io/rasterWindow.js'
 import { edgeOriginFromTags, nodataForSampleType } from '../../core/io/rasterSample.js'
 import { parseCloudSource, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
@@ -46,6 +47,40 @@ export function makeIoOps({ lazCodec = null } = {}) {
       previewBytes -= previewBands.get(oldest).bytes
       previewBands.delete(oldest)
     }
+  }
+  // Find GCPs ▸ Sentinel-2 (core/sentinel2.js): one window of a scene's 10 m red,
+  // green and blue COGs, read over HTTP ranges, stretched together to 8-bit RGB and
+  // written as a tiled, deflated GeoTIFF in the scene's UTM CRS, ready to import.
+  // One worker: the three reads run at once and are bound by the network, and the
+  // stretch is one pass over the window.
+  // args: [{ hrefs: { red, green, blue }, window: sceneWindow(), epsg, loQ, hiQ }]
+  //   → { bytes: ArrayBuffer, lo, hi } (the stretch's reflectance range, ×10⁴)
+  async function fetchSentinel2Window([{ hrefs, window: w, epsg, loQ, hiQ }]) {
+    const box = [w.x, w.y, w.x + w.width, w.y + w.height]
+    const bands = await Promise.all(
+      ['red', 'green', 'blue'].map(async (k) => {
+        const image = await (await fromUrl(hrefs[k])).getImage()
+        return (await image.readRasters({ window: box, samples: [0] }))[0]
+      }),
+    )
+    const { rgb, lo, hi } = stretchBands(bands, { loQ, hiQ })
+    const bytes = await writeCogDeflate(
+      {
+        width: w.width,
+        height: w.height,
+        samples: [0, 1, 2].map(() => ({ bits: 8, format: 1 })),
+        photometric: 2,
+        data: rgb,
+        pixelScale: [w.res, w.res, 0],
+        tiepoint: [0, 0, 0, w.originX, w.originY, 0],
+        geoKeys: geoKeysForEpsg(epsg, false),
+        gdalNoData: '0',
+        tileSize: 256,
+      },
+      deflateBytes,
+    )
+    const buffer = bytes.buffer.byteLength === bytes.byteLength ? bytes.buffer : bytes.slice().buffer
+    return { result: { bytes: buffer, lo, hi }, transfer: [buffer] }
   }
   async function readRasterWindow([options]) {
     const result = await readWindowFromFile(options.file, options)
@@ -529,10 +564,18 @@ export function makeIoOps({ lazCodec = null } = {}) {
     return { result: { file: new Blob(parts, { type: 'image/tiff' }), reused: false, ms: performance.now() - started } }
   }
 
-  return { parseCloud, parseRaster, restyleRasterPreview, readRasterWindow, prepareRasterCog }
+  return { parseCloud, parseRaster, restyleRasterPreview, readRasterWindow, prepareRasterCog, fetchSentinel2Window }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+async function deflateBytes(bytes) {
+  const cs = new CompressionStream('deflate')
+  const writer = cs.writable.getWriter()
+  writer.write(bytes)
+  writer.close()
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer())
+}
 
 // A bounded raw read of a GeoTIFF window (rasterWindow.js). `overviews` lets a
 // downsampled read come from the coarsest reduced-resolution IFD that still has

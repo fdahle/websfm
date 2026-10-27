@@ -9,6 +9,7 @@ import SegmentedControl from '../ui/SegmentedControl.vue'
 import StatTiles from '../ui/StatTiles.vue'
 import DataTable from '../ui/DataTable.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
+import Sentinel2Modal from './Sentinel2Modal.vue'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
@@ -43,6 +44,7 @@ const selectedReferenceId = ref(props.referenceOrthos[0]?.id ?? ''),
   stableSetId = ref(''),
   searchSetId = ref('')
 const stableLayers = computed(() => stableAreaLayers())
+const s2Open = ref(false)
 // Where the reference will be searched, and what is known about where the photos are.
 const plan = computed(() => searchAreaPlan(searchSetId.value || null))
 const reference = computed(() => external.rasterById(selectedReferenceId.value))
@@ -71,7 +73,7 @@ const notReady = computed(() => {
   if (!props.hasRelativeOrtho) return 'Build an orthophoto first: Find GCPs matches it to the reference.'
   if (!recon.mainSparseCloud) return 'Find GCPs needs a sparse model.'
   if (recon.productFrameStatus(recon.ortho).stale) return 'The orthophoto is out of date with the model: rebuild it.'
-  return 'Import a reference orthophoto with a resolved CRS (Accuracy & datum… on the raster).'
+  return 'Choose a reference orthophoto with a resolved CRS: import one, or fetch Sentinel-2.'
 })
 const busy = ref(false),
   error = ref(''),
@@ -397,15 +399,18 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
     <WarnBox v-if="notReady">{{ notReady }}</WarnBox>
 
     <SettingsGroup title="Source">
-      <SettingsField
-        label="Reference orthophoto"
-        label-for="fg-ref"
-        hint="A georeferenced raster of the same ground: a satellite image, an older orthophoto."
-      >
-        <select id="fg-ref" v-model="selectedReferenceId" class="field-select" :disabled="busy">
-          <option value="" disabled>Select a reference</option>
-          <option v-for="r in referenceOrthos" :key="r.id" :value="r.id">{{ r.name }}</option>
-        </select>
+      <SettingsField label="Reference orthophoto" label-for="fg-ref">
+        <div class="fg-ref">
+          <select id="fg-ref" v-model="selectedReferenceId" class="field-select" :disabled="busy">
+            <option value="" disabled>Select a reference</option>
+            <option v-for="r in referenceOrthos" :key="r.id" :value="r.id">{{ r.name }}</option>
+          </select>
+          <button class="btn" :disabled="busy || matcher === 'terrain'" @click="s2Open = true">Sentinel-2…</button>
+        </div>
+        <template #hint
+          >A georeferenced raster of the same ground: an imported satellite image or older orthophoto, or a Sentinel-2
+          image of the search area fetched online.</template
+        >
       </SettingsField>
       <SettingsField label-for="fg-area">
         <template #label><FieldHelp op="georeferencing" param="searchArea">Search area</FieldHelp></template>
@@ -695,6 +700,20 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
       Enter a finite height and positive accuracies, or leave unknown values blank.
     </p>
 
+    <Teleport to="body">
+      <Sentinel2Modal
+        v-if="s2Open"
+        :search-set-id="searchSetId"
+        @close="s2Open = false"
+        @fetched="
+          (meta) => {
+            s2Open = false
+            selectedReferenceId = meta.id
+          }
+        "
+      />
+    </Teleport>
+
     <template #footer>
       <button class="btn" @click="emit('close')">Close</button>
       <button
@@ -724,6 +743,11 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-dim);
+}
+.fg-ref {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 .fg-footprints {
   margin-left: 6px;

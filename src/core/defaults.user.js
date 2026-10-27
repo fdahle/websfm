@@ -319,6 +319,17 @@ export const FIND_GCPS_DEFAULTS = {
   candidates: 90,
 }
 
+// Find GCPs ▸ Sentinel-2 (Sentinel2Modal.vue, core/sentinel2.js).
+export const SENTINEL2_DEFAULTS = {
+  maxCloud: 20, // % cloud over the whole scene, as the catalogue states it
+  from: '', // ISO date or '' (any)
+  to: '',
+  // σ XY declared on the fetched raster, metres: Sentinel-2's geolocation is about
+  // 11–12.5 m CE95 (σ ≈ 5 m) before refinement against ESA's Global Reference Image,
+  // plus a fraction of a 10 m pixel of matching error.
+  horizontalAccuracy: 8,
+}
+
 // DEM (core/products/dem.js). Mirrored by DemModal.vue; gsd 0 ⇒ worker auto-suggests.
 export const DEM_DEFAULTS = {
   crs: 'local', // 'local' | 'project'

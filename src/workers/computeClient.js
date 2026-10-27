@@ -308,6 +308,9 @@ export const refineSparse = (packed, settings, constraints = {}) =>
 export const optimizeSparse = (packed, settings, constraints = {}) =>
   call('optimizeSparse', [packed, settings, constraints])
 export const readRasterWindow = (file, options = {}) => call('readRasterWindow', [{ file, ...options }])
+// Find GCPs ▸ Sentinel-2 (workers/ops/io.js): a scene window read over HTTP ranges,
+// back as GeoTIFF bytes.
+export const fetchSentinel2Window = (request) => call('fetchSentinel2Window', [request])
 // Find GCPs (workers/ops/referenceGcps.js): the ortho's COG / preview and the
 // reference's original File go over as handles; the worker reads windows itself.
 export const findReferenceMatches = (request, { onLog } = {}) =>

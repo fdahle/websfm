@@ -566,3 +566,17 @@ export const IMAGE_QUALITY_TUNING = {
   // Over- or underexposed when that share of valid pixels is clipped.
   maxClipped: 0.25,
 }
+
+// Find GCPs ▸ Sentinel-2 (core/sentinel2.js, workers/ops/io.js fetchSentinel2Window).
+export const SENTINEL2_TUNING = {
+  searchLimit: 50, // scenes asked of the catalogue
+  // The window read around the search area: a quarter of its larger side, at least
+  // `minPad` m, and at most `maxPx` 10 m pixels a side (60 km: 3 × 6,000² 16-bit
+  // reads, about 200 MB).
+  padFraction: 0.25,
+  minPad: 1000,
+  maxPx: 6000,
+  // The stretch to 8 bits: these quantiles of the valid reflectances.
+  loQ: 0.005,
+  hiQ: 0.995,
+}
