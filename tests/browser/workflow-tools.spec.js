@@ -309,13 +309,13 @@ test('Find GCPs matches real pixels and imports only explicitly reviewed candida
   expect(await page.evaluate(() => window.workflowTools.gcps.gcps.length)).toBe(0)
   await accept.first().check()
   await expect(page.getByLabel('Candidate close-up')).toHaveCount(2)
-  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('check')
-  await page.getByLabel('σ X (project units, 1σ)').fill('2')
-  await page.getByLabel('σ Y (project units, 1σ)').fill('3')
+  await page.getByRole('button', { name: 'Checkpoint', exact: true }).click()
+  await page.getByLabel('σ X (1σ)').fill('2')
+  await page.getByLabel('σ Y (1σ)').fill('3')
   await page.getByRole('combobox', { name: 'Reference DEM', exact: true }).selectOption({ label: 'height.tif' })
   await page.getByRole('button', { name: 'Fill selected heights' }).click()
-  await expect(page.getByLabel('Elevation', { exact: true })).toHaveValue('42')
-  await page.getByRole('button', { name: 'Add 1 reviewed candidates' }).click()
+  await expect(page.getByLabel('Height', { exact: true })).toHaveValue('42')
+  await page.getByRole('button', { name: 'Add 1 candidate', exact: true }).click()
   expect(
     await page.evaluate(() =>
       window.workflowTools.gcps.gcps.map((g) => ({
@@ -537,10 +537,10 @@ for (const SIZE of [3000, 6000])
     await page.getByRole('combobox', { name: /Coarse matcher/ }).selectOption('sift')
     await page.getByRole('button', { name: 'Find candidates', exact: true }).click()
     await expect(page.getByRole('checkbox').first()).toBeVisible({ timeout: 160000 })
-    await expect(page.getByRole('status').filter({ hasText: 'verified matches' })).toContainText('in 4 fine tiles')
+    await expect(page.locator('.tile', { hasText: 'Fine tiles' }).locator('.tile-value')).toHaveText('4')
     expect(await page.evaluate(() => window.workflowTools.gcps.gcps.length)).toBe(0)
     await page.getByRole('button', { name: 'Select confidence ≥ 50 %' }).click()
-    await page.getByRole('button', { name: /^Add \d+ reviewed candidates$/ }).click()
+    await page.getByRole('button', { name: /^Add \d+ candidates$/ }).click()
     const added = await page.evaluate(() =>
       window.workflowTools.gcps.gcps.map((g) => ({
         index: Number(g.name.split('-').pop()),

@@ -161,8 +161,8 @@ a confident one needs this dialog.
 
 ## Find candidate GCPs from a reference orthophoto
 Build an orthophoto, import a georeferenced reference raster, then open **Reconstruct →
-Find GCPs**. Choose the reference band and the coarse matcher, and select **Find
-candidates**. The matcher works [coarse to fine](help:coarse-to-fine):
+Find GCPs**. Choose the reference, the coarse matcher and the band (step 1), how many
+candidates to keep and where (step 2), and select **Find candidates**. The matcher works [coarse to fine](help:coarse-to-fine):
 
 1. **Where to look.** If the orthophoto is already georeferenced, the search starts
    from its footprint in the reference. Otherwise it starts from the registered
@@ -204,7 +204,8 @@ uses the coarse alignment only, and the message says so. Large rasters are read
 from their overviews, so a coarse look at a 30,000-pixel orthophoto does not decode
 it at full resolution.
 
-The numbered overlays and table show candidate locations. Each candidate is an
+Step 3 shows the run's numbers (verified matches, fine tiles, candidates, and how much of
+the block they cover), the numbered candidates on both images, and a table of them. Each candidate is an
 existing sparse track measured in at least two source photos, lying within 2
 working pixels of a verified match. Its reference coordinate is that matched
 feature moved by the track's offset, using the tile's own homography. Up to
@@ -226,27 +227,19 @@ For each candidate the table shows:
   accuracy (**Accuracy & datum…**), σ is that accuracy and the residual combined in quadrature.
   Edit it if you know better.
 
-Choose **Review** for side-by-side project/reference close-ups, cut from the
-candidate's fine tile at working resolution, and the source-photo marks. Check
-only candidates that identify the same stable feature.
+Click a row, or a number on either image, for side-by-side project/reference
+close-ups, cut from the candidate's fine tile at working resolution, and the
+source-photo marks; ‹ and › step through the candidates. Select only candidates that
+identify the same stable feature.
 
-In the same dialog, enter elevation and coordinate accuracies (positive 1σ values
-in project units), or select a reference DEM and **Fill selected heights**. DEM
+Below the close-ups, enter the height and coordinate accuracies (positive 1σ values
+in project units), or in step 4 select a reference DEM and **Fill selected heights**. DEM
 filling copies its declared vertical accuracy and datum; nodata, out-of-bounds
 locations, and DEMs without declared accuracy leave the candidate unchanged.
 Choose **Checkpoint** to reserve a point for checking rather than fitting.
-**Add reviewed candidates** imports only checked rows. Unknown elevation and
+**Add candidates** imports only the selected rows. Unknown elevation and
 accuracy stay unknown; incomplete controls cannot constrain adjustment. Photo
 marks can still be refined later in Control & Markers.
-
-## Reference band
-<!-- param: referenceBand  default: Mean of bands 1–3 (RGB) -->
-Which band of the reference is matched. A reference with three or more bands is read
-as the mean of bands 1–3 by default; for a Sentinel-2 or other true-colour image,
-that is blue, green and red. Film is panchromatic, so its grey values follow the
-mean of the visible bands more closely than any one band. A single band (red, or
-near-infrared for vegetation) can still match better where the photos were taken
-on infrared film.
 
 ## Coarse matcher
 <!-- param: coarseMatcher  default: Auto -->
@@ -275,6 +268,15 @@ On Rachel Glacier (1960s film against Sentinel-2), DISK and SuperPoint found 100
 agreeing matches at under a reference pixel; SIFT found too few to align it. With
 DISK, the candidates on Rachel, Stubb and Pequod lay a median 6–7 m from where an
 independent Metashape solution of each block puts them.
+
+## Reference band
+<!-- param: referenceBand  default: Mean of bands 1–3 (RGB) -->
+Which band of the reference is matched. A reference with three or more bands is read
+as the mean of bands 1–3 by default; for a Sentinel-2 or other true-colour image,
+that is blue, green and red. Film is panchromatic, so its grey values follow the
+mean of the visible bands more closely than any one band. A single band (red, or
+near-infrared for vegetation) can still match better where the photos were taken
+on infrared film.
 
 ## Candidates
 <!-- param: candidates  default: 90 -->

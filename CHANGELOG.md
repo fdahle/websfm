@@ -120,6 +120,11 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Find GCPs reads like the other tool dialogs.** Its settings are numbered steps
+  (Match, Pick candidates) with a line on what each does, and the results are steps 3 and
+  4: the run's numbers as tiles, the candidates on both images, a sortable table, and the
+  candidate under review with its close-ups and fields. Click a row or a number on an
+  image to review it, and ‹ › to step through them.
 - **Merge thins only where the clouds overlap.** With a Dedupe cell, a cell holding
   points of two or more clouds keeps only the first cloud's (in the order listed), and
   every other cell keeps all its points. It used to resample the whole merged cloud to

@@ -21,6 +21,8 @@ const props = defineProps({
   sortKey: { type: String, default: null },
   sortDir: { type: String, default: 'desc' }, // 'asc' | 'desc'
   emptyText: { type: String, default: 'Nothing to show.' },
+  // Extra classes per row, e.g. the one under review: (row) => ({ active: … }).
+  rowClass: { type: Function, default: null },
 })
 const emit = defineEmits(['row-click', 'sort'])
 const slots = useSlots()
@@ -115,7 +117,7 @@ function fmt(col, row) {
           <tr
             data-vrow
             class="dt-row"
-            :class="{ expandable: !!slots.expanded }"
+            :class="[{ expandable: !!slots.expanded }, rowClass?.(row)]"
             @click="slots.expanded ? toggleExpand(row) : emit('row-click', row)"
           >
             <td v-for="col in columns" :key="col.key" :class="col.align ? `align-${col.align}` : ''">

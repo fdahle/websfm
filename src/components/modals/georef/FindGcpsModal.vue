@@ -2,6 +2,12 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import WarnBox from '../ui/WarnBox.vue'
+import SettingsField from '../ui/SettingsField.vue'
+import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
+import SegmentedControl from '../ui/SegmentedControl.vue'
+import StatTiles from '../ui/StatTiles.vue'
+import DataTable from '../ui/DataTable.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
@@ -13,6 +19,13 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import { candidateCoverage } from '../../../core/sfm/referenceGcps.js'
 import { findGcpCandidates, stableAreaLayers } from '../../../composables/useFindGcps.js'
 import { FIND_GCPS_DEFAULTS } from '../../../core/defaults.user.js'
+import { findGcpsEffects } from '../../../core/stepEffects/findGcps.js'
+import { checkNumberFields } from '../../../utils/numberFields.js'
+import { isGeographic, linearCrsUnit } from '../../../core/crs.js'
+
+// Reconstruct ▸ Find GCPs: match the orthophoto to a georeferenced reference (or fit
+// the sparse cloud to a reference DEM), propose sparse tracks near the matches as
+// control, and review them before they are added (composables/useFindGcps.js).
 
 const props = defineProps({ hasRelativeOrtho: Boolean, referenceOrthos: { type: Array, default: () => [] } })
 const emit = defineEmits(['close'])
@@ -48,9 +61,18 @@ const ready = computed(
     recon.mainSparseCloud &&
     !recon.productFrameStatus(recon.ortho).stale,
 )
+// Why Find candidates is unavailable, in the order the user has to fix it.
+const notReady = computed(() => {
+  if (ready.value) return ''
+  if (!props.hasRelativeOrtho) return 'Build an orthophoto first: Find GCPs matches it to the reference.'
+  if (!recon.mainSparseCloud) return 'Find GCPs needs a sparse model.'
+  if (recon.productFrameStatus(recon.ortho).stale) return 'The orthophoto is out of date with the model: rebuild it.'
+  return 'Import a reference orthophoto with a resolved CRS (Accuracy & datum… on the raster).'
+})
 const busy = ref(false),
   error = ref(''),
   message = ref(''),
+  summary = ref(null),
   candidates = ref([]),
   preview = ref(null)
 const activeIndex = ref(0),
@@ -87,6 +109,7 @@ function reset() {
   preview.value = null
   error.value = ''
   message.value = ''
+  summary.value = null
   busy.value = false
   dropTileUrls()
 }
@@ -115,6 +138,7 @@ async function find() {
   busy.value = true
   error.value = ''
   message.value = ''
+  summary.value = null
   candidates.value = []
   dropTileUrls()
   try {
@@ -155,19 +179,36 @@ async function find() {
       kr: result.kr,
     }
     const cover = candidateCoverage(candidates.value, ortho.width, ortho.height)
-    message.value =
-      (result.terrain
-        ? `Terrain alignment: ICP RMS ${result.terrain.rms.toFixed(1)} m, ${(100 * result.terrain.inlierFraction).toFixed(0)} % of the sparse points in range`
-        : `${result.matches.length} verified matches` +
-          (result.refined
-            ? ` in ${result.tiles.length} fine tiles (single-plane p95 ${result.fine.p95.toFixed(2)} working px)`
-            : ` (coarse alignment only${ortho.cog ? ': no fine tile aligned' : ''})`)) +
-      `; ${candidates.value.length} candidates with measured photo tracks, covering ${cover.cells} of ${cover.of} cells of the block (hull ${(100 * cover.hull).toFixed(0)} %).` +
-      (area.source ? ` Searched around ${area.source}.` : '') +
-      (stable ? ` ${stable.rejected} matches off the stable ground of "${stable.name}" left out.` : '')
+    const pct = (f) => (100 * f).toFixed(0)
+    const stats = result.terrain
+      ? [
+          { label: 'ICP RMS', value: result.terrain.rms.toFixed(1), unit: 'm' },
+          { label: 'Sparse points in range', value: pct(result.terrain.inlierFraction), unit: '%' },
+        ]
+      : [
+          { label: 'Verified matches', value: result.matches.length.toLocaleString('en-US') },
+          result.refined
+            ? { label: 'Fine tiles', value: result.tiles.length, hint: `p95 ${result.fine.p95.toFixed(2)} working px` }
+            : { label: 'Fine tiles', value: '—', hint: 'coarse alignment only', tone: 'warn' },
+        ]
+    stats.push(
+      { label: 'Candidates', value: candidates.value.length, tone: candidates.value.length ? undefined : 'bad' },
+      {
+        label: 'Block covered',
+        value: `${cover.cells}/${cover.of}`,
+        unit: 'cells',
+        hint: `hull ${pct(cover.hull)} %`,
+        tone: cover.cells < 4 ? 'warn' : undefined,
+      },
+    )
+    const notes = []
+    if (area.source) notes.push(`Searched around ${area.source}.`)
+    if (!result.terrain && !result.refined && ortho.cog) notes.push('No fine tile aligned.')
+    if (stable) notes.push(`${stable.rejected} matches off the stable ground of "${stable.name}" left out.`)
     if (!candidates.value.length)
-      message.value += ' No nearby sparse tracks were suitable; try another reference band or mark control manually.'
-    else if (cover.cells < 4) message.value += ' The candidates are bunched: control there fits that area only.'
+      notes.push('No nearby sparse tracks were suitable; try another reference band or mark control manually.')
+    else if (cover.cells < 4) notes.push('The candidates are bunched: control there fits that area only.')
+    summary.value = { tiles: stats, notes }
   } catch (err) {
     if (token === generation) error.value = err.message
   } finally {
@@ -176,6 +217,13 @@ async function find() {
 }
 function selectConfident() {
   for (const c of candidates.value) c.selected = c.confidence >= 0.5
+}
+function selectNone() {
+  for (const c of candidates.value) c.selected = false
+}
+function step(d) {
+  const n = candidates.value.length
+  if (n) activeIndex.value = (activeIndex.value + d + n) % n
 }
 async function fillHeights() {
   const token = generation
@@ -192,7 +240,7 @@ async function fillHeights() {
       c.verticalDatum = hit.datum
       filled++
     }
-    message.value = `Filled ${filled} heights. Points outside the DEM, on nodata, or without declared DEM accuracy were left unchanged.`
+    message.value = `Filled ${filled} ${filled === 1 ? 'height' : 'heights'}. Points outside the DEM, on nodata, or without declared DEM accuracy were left unchanged.`
   } catch (err) {
     if (token === generation) error.value = err.message
   } finally {
@@ -216,9 +264,10 @@ async function add() {
       { rememberDefaults: false },
     )
     if (token !== generation) return
-    message.value = `Added ${count} reviewed points. Checkpoints are excluded from fitting; incomplete control points still need elevation and accuracy before use.`
+    message.value = `Added ${count} ${count === 1 ? 'point' : 'points'}. Checkpoints are excluded from fitting; incomplete control points still need elevation and accuracy before use.`
     candidates.value = []
     preview.value = null
+    summary.value = null
     dropTileUrls()
   } catch (err) {
     if (token === generation) error.value = err.message
@@ -244,252 +293,572 @@ const markR = (p) => Math.max(p.width, p.height) / 120
 const localBox = () => ({ width: preview.value.localWidth, height: preview.value.localHeight })
 // Native pixels per working pixel on each side of the close-ups.
 const k = (side) => (side === 'local' ? preview.value.kl : preview.value.kr)
+const numbers = computed(() =>
+  checkNumberFields(
+    { candidateLimit: candidateLimit.value },
+    {
+      candidateLimit: { label: 'Candidates', min: 4, max: 300, integer: true },
+    },
+  ),
+)
+const canFind = computed(
+  () =>
+    ready.value &&
+    !busy.value &&
+    numbers.value.valid &&
+    (matcher.value === 'terrain' ? !!demId.value : bandValid.value),
+)
+const hasZ = (c) => c.z != null && c.z !== ''
+// What each step does (core/stepEffects/findGcps.js).
+const effects = computed(() => {
+  const stable = stableLayers.value.find((s) => s.id === stableSetId.value)
+  const sel = reviewed.value
+  return findGcpsEffects(
+    { matcher: matcher.value, band: band.value, candidates: candidateLimit.value },
+    {
+      referenceName: reference.value?.name,
+      bandCount: bandCount.value,
+      demName: dems.value.find((r) => r.id === demId.value)?.name,
+      sparsePoints: recon.mainSparseCloud?.points.length ?? 0,
+      stableName: stable?.name,
+      stablePolygons: stable?.footprints?.length ?? 0,
+      found: summary.value && {
+        total: candidates.value.length,
+        selected: sel.length,
+        control: sel.filter((c) => c.role !== 'check').length,
+        check: sel.filter((c) => c.role === 'check').length,
+        withoutZ: sel.filter((c) => !hasZ(c)).length,
+      },
+    },
+  )
+})
+const ROLES = [
+  { id: 'control', label: 'Control point' },
+  { id: 'check', label: 'Checkpoint' },
+]
+const COLUMNS = [
+  { key: 'selected', label: '', sortable: false },
+  { key: 'n', label: '#', align: 'right' },
+  { key: 'confidence', label: 'Confidence', align: 'right', format: (v) => `${(100 * v).toFixed(0)} %` },
+  { key: 'residual', label: 'Residual (px)', align: 'right', format: (v) => v.toFixed(2) },
+  { key: 'accuracyX', label: 'σ XY', align: 'right', format: (v) => (v == null || v === '' ? '—' : String(v)) },
+  { key: 'photos', label: 'Photos', align: 'right' },
+  { key: 'role', label: 'Role', format: (v) => (v === 'check' ? 'Checkpoint' : 'Control') },
+  { key: 'z', label: 'Height', align: 'right', format: (v) => (v == null || v === '' ? '—' : Number(v).toFixed(2)) },
+]
+const rows = computed(() =>
+  candidates.value.map((c, i) => ({
+    id: i,
+    n: i + 1,
+    selected: c.selected,
+    confidence: c.confidence,
+    residual: c.residual,
+    accuracyX: c.accuracyX,
+    photos: c.observations.length,
+    role: c.role,
+    z: c.z,
+  })),
+)
+const rowClass = (row) => ({ 'fg-active': row.id === activeIndex.value })
+// Heights and accuracies are in the project CRS's unit (feet in a US-feet CRS).
+const unit = computed(() => {
+  const crs = projects.currentCrs
+  return crs && crs !== 'local' && !isGeographic(crs) ? linearCrsUnit(crs) : 'project units'
+})
+const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
 </script>
 
 <template>
-  <ModalShell title="Find GCPs" @close="emit('close')">
-    <p>
-      Match the current orthophoto to a georeferenced reference, coarse to fine: a learned matcher (or SIFT) on the
-      whole of both at the same ground resolution, then tiles at the coarser of the two resolutions, each with its own
-      robust alignment. Review candidates below; only selected rows are added.
+  <ModalShell title="Find GCPs" width="880px" @close="emit('close')">
+    <p class="fg-intro">
+      Match the orthophoto to a georeferenced reference, then review the sparse tracks found next to the matches. Only
+      the candidates you select are added as control.
     </p>
-    <label
-      >Reference orthophoto
-      <select v-model="selectedReferenceId" :disabled="busy">
-        <option value="" disabled>Select a reference</option>
-        <option v-for="r in referenceOrthos" :key="r.id" :value="r.id">{{ r.name }}</option>
-      </select></label
-    >
-    <label
-      ><FieldHelp op="georeferencing" param="referenceBand">Reference band</FieldHelp>
-      <select v-model="band" :disabled="busy">
-        <option v-if="bandCount >= 3" value="rgb">Mean of bands 1–3 (RGB)</option>
-        <option v-for="b in bandCount" :key="b" :value="b">Band {{ b }}</option>
-      </select></label
-    >
-    <label
-      ><FieldHelp op="georeferencing" param="coarseMatcher">Coarse matcher</FieldHelp>
-      <select v-model="matcher" :disabled="busy">
-        <option value="auto">Auto (SuperPoint if installed, else DISK)</option>
-        <option value="disk">DISK + LightGlue</option>
-        <option value="superpoint">SuperPoint + LightGlue</option>
-        <option value="sift">SIFT</option>
-        <option value="terrain">Terrain (reference DEM, ICP)</option>
-      </select></label
-    >
-    <label
-      ><FieldHelp
-        op="georeferencing"
-        param="candidates"
-        :value="candidateLimit"
-        :default-value="FIND_GCPS_DEFAULTS.candidates"
-        >Candidates</FieldHelp
+    <WarnBox v-if="notReady">{{ notReady }}</WarnBox>
+
+    <SettingsGroup title="Source">
+      <SettingsField
+        label="Reference orthophoto"
+        label-for="fg-ref"
+        hint="A georeferenced raster of the same ground: a satellite image, an older orthophoto."
       >
-      <input v-model.number="candidateLimit" type="number" min="4" max="300" step="1" :disabled="busy"
-    /></label>
-    <label v-if="matcher === 'terrain'"
-      >Reference DEM
-      <select v-model="demId" :disabled="busy">
-        <option value="">Choose DEM</option>
-        <option v-for="r in dems" :key="r.id" :value="r.id">{{ r.name }}</option>
-      </select></label
-    >
-    <label
-      ><FieldHelp op="georeferencing" param="stableArea">Stable ground</FieldHelp>
-      <select v-model="stableSetId" :disabled="busy">
-        <option value="">Anywhere</option>
-        <option v-for="s in stableLayers" :key="s.id" :value="s.id">{{ s.name }}</option>
-      </select></label
-    >
-    <WarnBox v-if="!ready">Build a current orthophoto and import a reference raster with a resolved CRS first.</WarnBox>
-    <WarnBox
-      >Reference locations are estimated near verified matches, using sparse tracks observed in at least two photos.
-      Historical changes and relief can produce false matches. Planimetric σ is prefilled from the reference pixel size;
-      elevation is unknown until you fill or enter it. These candidates do not constrain the solution until you add
-      them.</WarnBox
-    >
-    <p v-if="busy" role="status">Processing reference matches… Closing this dialog discards pending results.</p>
-    <p v-if="error" role="alert">{{ error }}</p>
-    <p v-if="message" role="status">{{ message }}</p>
-    <div v-if="preview && candidates.length" class="previews">
-      <figure>
-        <figcaption>Project orthophoto</figcaption>
-        <svg :viewBox="`0 0 ${preview.localWidth} ${preview.localHeight}`">
-          <image
-            :href="preview.localUrl"
-            :width="preview.localWidth"
-            :height="preview.localHeight"
-            preserveAspectRatio="none"
+        <select id="fg-ref" v-model="selectedReferenceId" class="field-select" :disabled="busy">
+          <option value="" disabled>Select a reference</option>
+          <option v-for="r in referenceOrthos" :key="r.id" :value="r.id">{{ r.name }}</option>
+        </select>
+      </SettingsField>
+    </SettingsGroup>
+
+    <SettingsStep step="1" title="Match" :effect="effects.match">
+      <SettingsField label-for="fg-matcher">
+        <template #label><FieldHelp op="georeferencing" param="coarseMatcher">Coarse matcher</FieldHelp></template>
+        <select id="fg-matcher" v-model="matcher" class="field-select" :disabled="busy">
+          <option value="auto">Auto (SuperPoint if installed, else DISK)</option>
+          <option value="disk">DISK + LightGlue</option>
+          <option value="superpoint">SuperPoint + LightGlue</option>
+          <option value="sift">SIFT</option>
+          <option value="terrain">Terrain (reference DEM, ICP)</option>
+        </select>
+      </SettingsField>
+      <SettingsField v-if="matcher === 'terrain'" label="Reference DEM" label-for="fg-dem-fit">
+        <select id="fg-dem-fit" v-model="demId" class="field-select" :disabled="busy">
+          <option value="">Choose DEM</option>
+          <option v-for="r in dems" :key="r.id" :value="r.id">{{ r.name }}</option>
+        </select>
+      </SettingsField>
+      <SettingsField v-else-if="bandCount > 1" label-for="fg-band">
+        <template #label><FieldHelp op="georeferencing" param="referenceBand">Reference band</FieldHelp></template>
+        <select id="fg-band" v-model="band" class="field-select" :disabled="busy">
+          <option v-if="bandCount >= 3" value="rgb">Mean of bands 1–3 (RGB)</option>
+          <option v-for="b in bandCount" :key="b" :value="b">Band {{ b }}</option>
+        </select>
+      </SettingsField>
+    </SettingsStep>
+
+    <SettingsStep step="2" title="Pick candidates" :effect="effects.pick">
+      <div class="fg-row">
+        <SettingsField label-for="fg-n">
+          <template #label
+            ><FieldHelp
+              op="georeferencing"
+              param="candidates"
+              :value="candidateLimit"
+              :default-value="FIND_GCPS_DEFAULTS.candidates"
+              >Candidates</FieldHelp
+            ></template
+          >
+          <input
+            id="fg-n"
+            v-model.number="candidateLimit"
+            :aria-invalid="numbers.bad.candidateLimit"
+            class="field-input"
+            type="number"
+            min="4"
+            max="300"
+            step="1"
+            :disabled="busy"
           />
-          <g v-for="(c, i) in candidates" :key="i" :transform="`translate(${c.local[0]},${c.local[1]})`">
-            <circle :r="markR(localBox())" fill="none" stroke="yellow" :stroke-width="markR(localBox()) / 3" />
-            <text :x="markR(localBox()) * 1.3" fill="yellow" :font-size="markR(localBox()) * 3">{{ i + 1 }}</text>
-          </g>
-        </svg>
-      </figure>
-      <figure>
-        <figcaption>Reference band</figcaption>
-        <svg :viewBox="overviewBox(preview.reference)">
-          <image
-            :href="preview.reference.url"
-            v-bind="{
-              x: preview.reference.x,
-              y: preview.reference.y,
-              width: preview.reference.width,
-              height: preview.reference.height,
-            }"
-            preserveAspectRatio="none"
-          />
-          <g v-for="(c, i) in candidates" :key="i" :transform="`translate(${c.reference[0]},${c.reference[1]})`">
-            <circle
-              :r="markR(preview.reference)"
-              fill="none"
-              stroke="yellow"
-              :stroke-width="markR(preview.reference) / 3"
-            />
-            <text :x="markR(preview.reference) * 1.3" fill="yellow" :font-size="markR(preview.reference) * 3">
-              {{ i + 1 }}
-            </text>
-          </g>
-        </svg>
-      </figure>
-    </div>
-    <fieldset v-if="active && preview" :disabled="busy">
-      <legend>
-        Review candidate {{ activeIndex + 1 }} · coordinates in {{ projects.currentCrs }} · confidence
-        {{ (100 * active.confidence).toFixed(0) }} %
-      </legend>
-      <div class="previews">
-        <figure v-for="side in ['local', 'reference']" :key="side">
-          <figcaption>{{ side === 'local' ? 'Project close-up' : 'Reference close-up' }}</figcaption>
-          <svg :viewBox="closeup(active[side], k(side))" aria-label="Candidate close-up">
+        </SettingsField>
+        <SettingsField label-for="fg-stable">
+          <template #label><FieldHelp op="georeferencing" param="stableArea">Stable ground</FieldHelp></template>
+          <select id="fg-stable" v-model="stableSetId" class="field-select" :disabled="busy">
+            <option value="">Anywhere</option>
+            <option v-for="s in stableLayers" :key="s.id" :value="s.id">{{ s.name }}</option>
+          </select>
+        </SettingsField>
+      </div>
+    </SettingsStep>
+
+    <SettingsStep step="3" title="Review" :effect="effects.review" :inactive="!candidates.length">
+      <p v-if="busy" class="fg-status" role="status">
+        <span class="fg-spinner busy-motion" aria-hidden="true"></span>Matching the reference… Closing this dialog
+        discards the results.
+      </p>
+      <p v-if="error" class="fg-error" role="alert">{{ error }}</p>
+      <template v-if="summary">
+        <StatTiles :tiles="summary.tiles" />
+        <p v-if="summary.notes.length" class="fg-notes">{{ summary.notes.join(' ') }}</p>
+      </template>
+
+      <div v-if="preview && candidates.length" class="fg-pair fg-overview">
+        <figure>
+          <figcaption>Project orthophoto</figcaption>
+          <svg :viewBox="`0 0 ${preview.localWidth} ${preview.localHeight}`">
             <image
-              :href="closeupImage(side).url"
+              :href="preview.localUrl"
+              :width="preview.localWidth"
+              :height="preview.localHeight"
+              preserveAspectRatio="none"
+            />
+            <g
+              v-for="(c, i) in candidates"
+              :key="i"
+              class="fg-mark"
+              :class="{ selected: c.selected, active: i === activeIndex }"
+              :transform="`translate(${c.local[0]},${c.local[1]})`"
+              @click="activeIndex = i"
+            >
+              <circle :r="markR(localBox())" vector-effect="non-scaling-stroke" />
+              <text :x="markR(localBox()) * 1.3" :font-size="markR(localBox()) * 3">{{ i + 1 }}</text>
+            </g>
+          </svg>
+        </figure>
+        <figure>
+          <figcaption>Reference</figcaption>
+          <svg :viewBox="overviewBox(preview.reference)">
+            <image
+              :href="preview.reference.url"
               v-bind="{
-                x: closeupImage(side).x,
-                y: closeupImage(side).y,
-                width: closeupImage(side).width,
-                height: closeupImage(side).height,
+                x: preview.reference.x,
+                y: preview.reference.y,
+                width: preview.reference.width,
+                height: preview.reference.height,
               }"
               preserveAspectRatio="none"
             />
-            <path
-              :d="`M${active[side][0] - 5 * k(side)},${active[side][1]}h${10 * k(side)} M${active[side][0]},${active[side][1] - 5 * k(side)}v${10 * k(side)}`"
-              stroke="yellow"
-              :stroke-width="0.5 * k(side)"
+            <g
+              v-for="(c, i) in candidates"
+              :key="i"
+              class="fg-mark"
+              :class="{ selected: c.selected, active: i === activeIndex }"
+              :transform="`translate(${c.reference[0]},${c.reference[1]})`"
+              @click="activeIndex = i"
+            >
+              <circle :r="markR(preview.reference)" vector-effect="non-scaling-stroke" />
+              <text :x="markR(preview.reference) * 1.3" :font-size="markR(preview.reference) * 3">{{ i + 1 }}</text>
+            </g>
+          </svg>
+        </figure>
+      </div>
+
+      <template v-if="candidates.length">
+        <div class="fg-toolbar">
+          <button class="link-btn" :disabled="busy" @click="selectConfident">Select confidence ≥ 50 %</button>
+          <button class="link-btn" :disabled="busy || !reviewed.length" @click="selectNone">Select none</button>
+        </div>
+        <DataTable
+          class="fg-table"
+          :columns="COLUMNS"
+          :rows="rows"
+          :row-class="rowClass"
+          @row-click="(row) => (activeIndex = row.id)"
+        >
+          <template #cell-selected="{ row }">
+            <input
+              v-model="candidates[row.id].selected"
+              type="checkbox"
+              class="checkbox"
+              :aria-label="`Select candidate ${row.n}`"
+              :disabled="busy"
+              @click.stop
             />
-          </svg>
-        </figure>
+          </template>
+        </DataTable>
+      </template>
+
+      <section v-if="active && preview" class="fg-review" :aria-busy="busy">
+        <header class="fg-review-head">
+          <button class="btn fg-nav" :disabled="busy" aria-label="Previous candidate" @click="step(-1)">‹</button>
+          <div class="fg-review-title">
+            <strong>Candidate {{ activeIndex + 1 }}</strong>
+            <span>
+              {{ (100 * active.confidence).toFixed(0) }} % confidence · E {{ fmtXY(active.x) }} · N
+              {{ fmtXY(active.y) }} ({{ projects.currentCrs }})</span
+            >
+          </div>
+          <label class="checkbox-row"
+            ><input v-model="active.selected" type="checkbox" class="checkbox" :disabled="busy" /> Selected</label
+          >
+          <button class="btn fg-nav" :disabled="busy" aria-label="Next candidate" @click="step(1)">›</button>
+        </header>
+        <div class="fg-pair">
+          <figure v-for="side in ['local', 'reference']" :key="side">
+            <figcaption>{{ side === 'local' ? 'Project close-up' : 'Reference close-up' }}</figcaption>
+            <svg :viewBox="closeup(active[side], k(side))" aria-label="Candidate close-up">
+              <image
+                :href="closeupImage(side).url"
+                v-bind="{
+                  x: closeupImage(side).x,
+                  y: closeupImage(side).y,
+                  width: closeupImage(side).width,
+                  height: closeupImage(side).height,
+                }"
+                preserveAspectRatio="none"
+              />
+              <path
+                class="fg-cross"
+                :d="`M${active[side][0] - 5 * k(side)},${active[side][1]}h${10 * k(side)} M${active[side][0]},${active[side][1] - 5 * k(side)}v${10 * k(side)}`"
+                vector-effect="non-scaling-stroke"
+              />
+            </svg>
+          </figure>
+        </div>
+        <div v-if="photoPreviews.length" class="fg-photos">
+          <figure v-for="photo in photoPreviews" :key="photo.imageName">
+            <svg :viewBox="closeup([photo.px, photo.py], 1)">
+              <image :href="photo.url" :width="photo.width" :height="photo.height" />
+              <circle class="fg-cross" :cx="photo.px" :cy="photo.py" r="2" vector-effect="non-scaling-stroke" />
+            </svg>
+            <figcaption :title="photo.imageName">{{ photo.imageName }}</figcaption>
+          </figure>
+        </div>
+        <p class="field-hint">
+          Accept only a candidate that shows the same stable feature in both close-ups: change since the reference and
+          relief make false matches. σ XY comes from the reference's pixel size; edit it if you know better.
+        </p>
+        <fieldset class="fg-fields" :disabled="busy">
+          <SettingsField>
+            <template #label><GlossaryTerm id="ground-control-point">Role</GlossaryTerm></template>
+            <SegmentedControl v-model="active.role" :options="ROLES" />
+          </SettingsField>
+          <div class="fg-row">
+            <SettingsField label="Height" label-for="fg-z" :unit="unit">
+              <input
+                id="fg-z"
+                v-model.number="active.z"
+                class="field-input"
+                type="number"
+                step="any"
+                placeholder="Unknown"
+              />
+            </SettingsField>
+            <SettingsField
+              v-for="axis in ['X', 'Y', 'Z']"
+              :key="axis"
+              :label="`σ ${axis} (1σ)`"
+              :label-for="`fg-s${axis}`"
+              :unit="unit"
+            >
+              <input
+                :id="`fg-s${axis}`"
+                v-model.number="active['accuracy' + axis]"
+                class="field-input"
+                type="number"
+                min="0"
+                step="any"
+                placeholder="Unknown"
+              />
+            </SettingsField>
+            <SettingsField label="Vertical datum" label-for="fg-datum">
+              <input id="fg-datum" v-model="active.verticalDatum" class="field-input" placeholder="Unknown" />
+            </SettingsField>
+          </div>
+        </fieldset>
+      </section>
+    </SettingsStep>
+
+    <SettingsStep step="4" title="Heights" :effect="effects.heights" :inactive="!candidates.length">
+      <div v-if="candidates.length" class="fg-row fg-fill">
+        <SettingsField label="Reference DEM" label-for="fg-dem">
+          <select id="fg-dem" v-model="demId" class="field-select" :disabled="busy">
+            <option value="">Choose DEM</option>
+            <option v-for="r in dems" :key="r.id" :value="r.id">{{ r.name }}</option>
+          </select>
+        </SettingsField>
+        <button class="btn" :disabled="busy || !demId || !reviewed.length" @click="fillHeights">
+          Fill selected heights
+        </button>
       </div>
-      <div v-if="photoPreviews.length" class="previews">
-        <figure v-for="photo in photoPreviews" :key="photo.imageName">
-          <figcaption>{{ photo.imageName }} · measured photo mark</figcaption>
-          <svg :viewBox="closeup([photo.px, photo.py], 1)">
-            <image :href="photo.url" :width="photo.width" :height="photo.height" />
-            <circle :cx="photo.px" :cy="photo.py" r="2" stroke="yellow" stroke-width="0.5" fill="none" />
-          </svg>
-        </figure>
-      </div>
-      <label
-        ><GlossaryTerm id="ground-control-point">Role</GlossaryTerm>
-        <select v-model="active.role">
-          <option value="control">Control point</option>
-          <option value="check">Checkpoint (excluded from fit)</option>
-        </select></label
-      >
-      <label>Elevation <input v-model.number="active.z" type="number" step="any" placeholder="Unknown" /></label>
-      <label v-for="axis in ['X', 'Y', 'Z']" :key="axis"
-        >σ {{ axis }} (project units, 1σ)
-        <input v-model.number="active['accuracy' + axis]" type="number" min="0" step="any" placeholder="Unknown"
-      /></label>
-      <label>Vertical datum <input v-model="active.verticalDatum" /></label>
-    </fieldset>
-    <div v-if="candidates.length">
-      <button :disabled="busy" @click="selectConfident">Select confidence ≥ 50 %</button>
-      <label
-        >Reference DEM
-        <select v-model="demId" :disabled="busy">
-          <option value="">Choose DEM</option>
-          <option v-for="r in dems" :key="r.id" :value="r.id">{{ r.name }}</option>
-        </select></label
-      >
-      <button :disabled="busy || !demId || !reviewed.length" @click="fillHeights">Fill selected heights</button>
-    </div>
-    <table v-if="candidates.length">
-      <thead>
-        <tr>
-          <th>Accept</th>
-          <th>Review</th>
-          <th>X</th>
-          <th>Y</th>
-          <th>σ XY</th>
-          <th>Photos</th>
-          <th>Confidence</th>
-          <th>Residual (working px)</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(c, i) in candidates" :key="i">
-          <td>
-            <label><input v-model="c.selected" type="checkbox" :disabled="busy" /> {{ i + 1 }}</label>
-          </td>
-          <td>
-            <button :disabled="busy" @click="activeIndex = i">Review {{ i + 1 }}</button> {{ c.role
-            }}{{ c.z == null ? ' · no Z' : '' }}
-          </td>
-          <td>{{ c.x.toFixed(3) }}</td>
-          <td>{{ c.y.toFixed(3) }}</td>
-          <td>{{ c.accuracyX ?? '—' }}</td>
-          <td>{{ c.observations.length }}</td>
-          <td>{{ (100 * c.confidence).toFixed(0) }} %</td>
-          <td>{{ c.residual.toFixed(2) }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-if="invalid" role="alert">Enter a finite elevation and positive accuracies, or leave unknown values blank.</p>
-    <template #footer
-      ><button class="btn" @click="emit('close')">Close</button>
+    </SettingsStep>
+
+    <p v-if="message" class="fg-message" role="status">{{ message }}</p>
+    <p v-if="invalid" class="fg-error" role="alert">
+      Enter a finite height and positive accuracies, or leave unknown values blank.
+    </p>
+
+    <template #footer>
+      <button class="btn" @click="emit('close')">Close</button>
       <button
         class="btn"
-        :disabled="
-          !ready ||
-          busy ||
-          !(Number.isInteger(candidateLimit) && candidateLimit >= 4) ||
-          (matcher === 'terrain' ? !demId : !bandValid)
-        "
+        :class="{ 'btn-primary': !candidates.length }"
+        :disabled="!canFind"
+        :title="numbers.reason"
         @click="find"
       >
-        Find candidates
+        {{ candidates.length ? 'Find again' : 'Find candidates' }}
       </button>
-      <button class="btn btn-primary" :disabled="busy || !reviewed.length || invalid" @click="add">
-        Add {{ reviewed.length }} reviewed candidates
+      <button
+        v-if="candidates.length"
+        class="btn btn-primary"
+        :disabled="busy || !reviewed.length || invalid"
+        @click="add"
+      >
+        Add {{ reviewed.length }} {{ reviewed.length === 1 ? 'candidate' : 'candidates' }}
       </button>
     </template>
   </ModalShell>
 </template>
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.previews {
+.fg-intro {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.fg-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: flex-start;
+}
+.fg-fill {
+  align-items: flex-end;
+}
+.fg-status,
+.fg-notes,
+.fg-message {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.fg-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+.fg-spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 2px solid var(--panel-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: fg-spin 0.8s linear infinite;
+}
+@keyframes fg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.fg-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* Two images side by side: the overviews, then the close-ups. */
+.fg-pair {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
 }
 figure {
   margin: 0;
   min-width: 0;
 }
+figcaption {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
 figure svg {
+  display: block;
   width: 100%;
   max-height: 300px;
   background: #111;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
 }
-table {
-  width: 100%;
-  font-size: 12px;
+/* Close-ups are square crops; the overviews keep their rasters' shape. */
+.fg-pair:not(.fg-overview) figure svg {
+  aspect-ratio: 1;
 }
-td,
-th {
-  text-align: left;
-  padding: 4px;
+.fg-mark {
+  cursor: pointer;
+}
+.fg-mark circle {
+  fill: none;
+  stroke: #ffd400;
+  stroke-width: 1.5;
+}
+.fg-mark text {
+  fill: #ffd400;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.7);
+  stroke-width: 0.15em;
+}
+.fg-mark.selected circle {
+  fill: rgba(255, 212, 0, 0.35);
+}
+.fg-mark.active circle {
+  stroke: #33d6ff;
+  stroke-width: 3;
+}
+.fg-mark.active text {
+  fill: #33d6ff;
+}
+.fg-cross {
+  fill: none;
+  stroke: #ffd400;
+  stroke-width: 1.5;
+}
+
+.fg-toolbar {
+  display: flex;
+  gap: 16px;
+}
+/* DataTable's root is its .dt-wrap: scroll the rows under a sticky header. */
+.fg-table {
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+.fg-table :deep(.dt-row) {
+  cursor: pointer;
+}
+.fg-table :deep(.dt-row.fg-active) {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.fg-table :deep(.dt tbody td) {
+  padding: 5px 10px;
+}
+
+/* The candidate under review. */
+.fg-review {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--hover-bg);
+}
+.fg-review-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fg-review-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+}
+.fg-review-title span {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.fg-nav {
+  padding: 2px 10px;
+  font-size: 16px;
+  line-height: 1.2;
+}
+.fg-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+.fg-photos svg {
+  aspect-ratio: 1;
+}
+.fg-photos figcaption {
+  margin: 3px 0 0;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fg-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fg-fields .field-input {
+  width: 110px;
 }
 </style>
