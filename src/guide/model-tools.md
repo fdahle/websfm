@@ -39,7 +39,9 @@ of field) may still be flagged; check it before removing it.
 - **Mesh** and **DEM** only use the points inside the box.
 
 The toolbox opens with the saved box, or a box fitted around the sparse points. Use
-**Fit to sparse** or **Fit to dense** (both ignore the farthest 2 % of points), type
+**Fit to sparse** or **Fit to dense** (both leave out stray points: past the
+farthest 2 % on each side, the box only follows points that continue without a gap, so
+a tower or a tree line stays in and a lone stray does not), type
 the bounds, or drag the box in the 3D view, then **Apply**. The box is drawn in orange.
 While the toolbox is open it has handles: drag a coloured square on a face (red for X,
 green for Y, blue for Z) to move that face, or the orange square in the middle to move

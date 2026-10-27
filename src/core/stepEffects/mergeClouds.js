@@ -12,7 +12,8 @@ export function mergeCloudsEffects(s, { chosen = [], mergeCell = 0 } = {}) {
       : `${plural(chosen.length, 'cloud')}, ${fmtCount(total)} points, are joined in this order, coordinates as they are.`
   const overlap =
     s.cell > 0
-      ? `Where the clouds overlap, one point is kept per cell of ${fmtLength(s.cell, 'units')}.`
+      ? `In a cell of ${fmtLength(s.cell, 'units')} with points of two or more clouds, only the first cloud's are kept; ` +
+        'every other cell keeps all its points.'
       : `Off (0): the overlap stays double-density${mergeCell > 0 ? `; the dense run used cells of ${fmtLength(mergeCell, 'units')}` : ''}.`
   return { join, overlap }
 }

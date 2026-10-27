@@ -6,7 +6,9 @@ describe('mergeCloudsEffects', () => {
     const chosen = [{ count: 1000 }, { count: 2500 }]
     expect(mergeCloudsEffects({ cell: 0 }, { chosen }).join).toMatch(/^2 clouds, 3,500 points/)
     expect(mergeCloudsEffects({ cell: 0 }, { chosen, mergeCell: 0.05 }).overlap).toMatch(/^Off \(0\).*0\.05 units/)
-    expect(mergeCloudsEffects({ cell: 0.1 }, { chosen }).overlap).toMatch(/per cell of 0\.1 units/)
+    expect(mergeCloudsEffects({ cell: 0.1 }, { chosen }).overlap).toMatch(
+      /^In a cell of 0\.1 units with points of two or more clouds, only the first cloud's are kept/,
+    )
     expect(mergeCloudsEffects({ cell: 0 }, { chosen: [{ count: 1 }] }).join).toMatch(/^Pick at least two/)
   })
 })

@@ -194,6 +194,20 @@ export function estimateSpacing(bounds, n) {
   return Math.pow(vol / n, 1 / dims.length)
 }
 
+/**
+ * The point spacing of a cloud that is a surface (terrain, a façade): from the area of
+ * its box's two largest sides, not its volume. On a 1 km × 1 km × 50 m survey of 10 M
+ * points it is 0.32, where estimateSpacing (the volume) gives 1.7.
+ */
+export function estimateSurfaceSpacing(bounds, n) {
+  if (!(n > 1)) return 0
+  const [a, b] = [bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, bounds.maxZ - bounds.minZ]
+    .map((e) => Math.max(e, 0))
+    .sort((x, y) => y - x)
+  if (!(a > 0)) return 0
+  return b > 0 ? Math.sqrt((a * b) / n) : a / n
+}
+
 // ── Crop ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -683,10 +697,13 @@ export function filterCloud(cloud, opts = {}, onLog) {
 // ── Merge ────────────────────────────────────────────────────────────────────
 
 /**
- * Concatenate flat clouds into one, optionally voxel-deduping the result (the
- * principled way to handle the double-density seam where two overlapping clouds
- * meet). Coordinates are taken verbatim — merge assumes the inputs already share a
- * frame, exactly as `importCloud` does; there is no CRS reprojection here.
+ * Concatenate flat clouds into one, optionally de-duplicating where they overlap
+ * (`cell` > 0): on a grid of that cell, a cell holding points of two or more inputs
+ * keeps only those of the first of them (in the given order), so the seam where two
+ * clouds meet is not double-density; a cell of one input keeps every point, so the rest
+ * of each cloud stays at its own resolution. Coordinates are taken verbatim — merge
+ * assumes the inputs already share a frame, exactly as `importCloud` does; there is no
+ * CRS reprojection here.
  *
  * Colour is emitted when ANY input has it (missing inputs fill neutral grey);
  * normals only when EVERY input has them — a partial normal field would silently
@@ -739,5 +756,37 @@ export function mergeClouds(clouds, { cell = 0 } = {}, onLog) {
     ...(nrm ? { nrm } : {}),
     ...(shared.length ? { attributes } : {}),
   }
-  return cell > 0 ? voxelDownsample(merged, { cell }, onLog) : merged
+  if (!(cell > 0) || list.length < 2) return merged
+  // Per cell the first input that has a point in it; a point is kept where that is its own.
+  const b = cloudBounds(merged)
+  const c = clampGridCell(b, cell)
+  const x0 = Math.floor(b.minX / c),
+    y0 = Math.floor(b.minY / c),
+    z0 = Math.floor(b.minZ / c)
+  const ny = Math.floor(b.maxY / c) - y0 + 1,
+    nz = Math.floor(b.maxZ / c) - z0 + 1
+  const key = (i) =>
+    ((Math.floor(pos[3 * i] / c) - x0) * ny + (Math.floor(pos[3 * i + 1] / c) - y0)) * nz +
+    (Math.floor(pos[3 * i + 2] / c) - z0)
+  const first = bigMap(total)
+  const from = new Uint16Array(total)
+  for (let s = 0, i = 0; s < list.length; s++)
+    for (let k = cloudCount(list[s]); k > 0; k--, i++) {
+      from[i] = s
+      const kk = key(i)
+      if (!first.has(kk)) first.set(kk, s)
+    }
+  const keep = new Uint8Array(total)
+  let kept = 0
+  for (let i = 0; i < total; i++)
+    if (first.get(key(i)) === from[i]) {
+      keep[i] = 1
+      kept++
+    }
+  onLog?.(
+    `Merge: ${(total - kept).toLocaleString()} points dropped where the clouds overlap (cells of ${c}), ${kept.toLocaleString()} kept`,
+    'info',
+    'Products',
+  )
+  return selectPoints(merged, keep, kept)
 }

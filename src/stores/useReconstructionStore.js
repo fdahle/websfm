@@ -195,6 +195,23 @@ export const useReconstructionStore = registerProjectStore(
       save()
       return true
     }
+    // An edit of the model (Optimize cameras, Gradual selection) keeps its frame: the
+    // region and orientation drawn on it carry over to the edited model, rather than
+    // going stale as they do on a rebuild. → the names of what carried over
+    function carryFrameStamps(before, after) {
+      const was = (s) => s && s.id === before.id && (s.createdAt ?? null) === (before.createdAt ?? null)
+      const now = { id: after.id, createdAt: after.createdAt ?? null }
+      const carried = []
+      if (was(region.value?.sourceStamp)) {
+        region.value = { ...region.value, sourceStamp: now }
+        carried.push('region')
+      }
+      if (was(orientation.value?.sourceStamp)) {
+        orientation.value = { ...orientation.value, sourceStamp: now }
+        carried.push('orientation')
+      }
+      return carried
+    }
     function clearOrientation() {
       if (!orientation.value) return
       orientation.value = null
@@ -861,6 +878,7 @@ export const useReconstructionStore = registerProjectStore(
       editStreamedCloud,
       // Created below with the sparse run; resolved when an edit runs.
       surveyConstraintInput: (opts) => surveyConstraintInput(opts),
+      carryFrameStamps,
     })
 
     // ── Georeferencing + products (DEM / orthophoto) ─────────────────────────────

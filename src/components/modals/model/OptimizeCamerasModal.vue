@@ -1,4 +1,5 @@
 <script setup>
+import { OPTIMIZE_CAMERAS_DEFAULTS } from '../../../core/defaults.user.js'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -20,7 +21,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'run'])
 
-const refine = ref('f')
+const refine = ref(OPTIMIZE_CAMERAS_DEFAULTS.refine)
 // What the step does to the model (core/stepEffects/optimizeCameras.js).
 const effects = computed(() =>
   optimizeCamerasEffects(

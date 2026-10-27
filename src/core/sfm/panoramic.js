@@ -12,7 +12,8 @@
 //
 // Coordinates. A strip pixel (u, v) is pixel-edge: pixel (i, j) spans [i, i+1) × [j, j+1).
 // The scan runs along the strip's long side ('x' when wider than high): film arc length
-// s = (u − u0)·p along the scan, t = (v − v0)·p across it (both mm, t down), u0 / v0 the
+// s = (u − u0)·p along the scan, t = (v − v0)·p across it (both mm, t down; a portrait
+// strip, 'y', is the same turned a quarter: s = (v − v0)·p, t = (u0 − u)·p), u0 / v0 the
 // scan centre (θ = 0) and the cylinder's mid-height, by default the strip's centre. The
 // scan angle is θ = s / f and the ray (camera x along the scan, y down, z forward at
 // θ = 0) is (sin θ, t / f, cos θ). Segment k looks along θk: its axes are
@@ -78,8 +79,9 @@ export function segmentToStrip(seg, layout, strip, a, b) {
   const theta = Math.atan2(rx, rz)
   const t = (f * ry) / Math.hypot(rx, rz)
   const along = (layout.axis === 'x' ? layout.u0 : layout.v0) + (f * theta) / p
-  const acr = (layout.axis === 'x' ? layout.v0 : layout.u0) + t / p
-  return layout.axis === 'x' ? { u: along, v: acr } : { u: acr, v: along }
+  // A portrait strip is the landscape one turned a quarter: across the scan runs
+  // leftwards (−u), or the segment would be its mirror image (a transpose).
+  return layout.axis === 'x' ? { u: along, v: layout.v0 + t / p } : { u: layout.u0 - t / p, v: along }
 }
 
 // A strip pixel (pixel-edge u, v) → the segment pixel (pixel-edge a, b) that shows it, or
@@ -88,7 +90,7 @@ export function stripToSegment(seg, layout, strip, u, v) {
   const p = strip.pitchMm,
     f = strip.focalMm
   const along = layout.axis === 'x' ? u - layout.u0 : v - layout.v0
-  const acr = layout.axis === 'x' ? v - layout.v0 : u - layout.u0
+  const acr = layout.axis === 'x' ? v - layout.v0 : layout.u0 - u
   const theta = (along * p) / f,
     t = acr * p
   const dx = Math.sin(theta),

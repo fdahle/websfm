@@ -5,6 +5,7 @@ import {
   clipDem,
   clipOrtho,
   polygonsFromGeoJSON,
+  geojsonCrs,
   normalizePolygons,
   polygonPixelWindow,
   windowGeometry,
@@ -390,5 +391,28 @@ describe('polygonPixelWindow (clipping a file-backed ortho)', () => {
         ],
       ]),
     ).toBeNull()
+  })
+})
+
+describe('geojsonCrs', () => {
+  const sq = (x, y, d) => [
+    [
+      [x, y],
+      [x + d, y],
+      [x + d, y + d],
+      [x, y + d],
+      [x, y],
+    ],
+  ]
+  it('reads a named CRS, else takes lon/lat-range coordinates as WGS84', () => {
+    const named = {
+      type: 'FeatureCollection',
+      crs: { type: 'name', properties: { name: 'urn:ogc:def:crs:EPSG::32633' } },
+    }
+    expect(geojsonCrs(named, [sq(500000, 4e6, 10)])).toBe('EPSG:32633')
+    const crs84 = { crs: { properties: { name: 'urn:ogc:def:crs:OGC:1.3:CRS84' } } }
+    expect(geojsonCrs(crs84, [sq(10, 50, 0.1)])).toBe('EPSG:4326')
+    expect(geojsonCrs({}, [sq(10.5, 47.2, 0.01)])).toBe('EPSG:4326')
+    expect(geojsonCrs({}, [sq(500000, 4e6, 10)])).toBe(null)
   })
 })

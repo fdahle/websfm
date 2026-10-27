@@ -596,6 +596,11 @@ export const NORMALS_DEFAULTS = {
 }
 // Classify ground (core/products/groundFilter.js, cloth simulation). Lengths in
 // metres; a project without metric scale is refused. Mirrored by ClassifyGroundModal.vue.
+// Tools ▸ Model ▾ ▸ Optimize cameras (OptimizeCamerasModal.vue): which intrinsics the
+// re-solve frees: 'f' (focal length) | 'f,cxcy' (and the principal point).
+export const OPTIMIZE_CAMERAS_DEFAULTS = {
+  refine: 'f',
+}
 export const GROUND_DEFAULTS = {
   // Cloth particle spacing. 1 m spans roofs up to ~40 m and follows slopes up to
   // ~30 %; a large hall needs 2 m, steep mountain terrain 0.5 m.

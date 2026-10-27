@@ -28,7 +28,7 @@ describe('computeFootprints', () => {
     ]
     await store.addLineSet([{ path: ring, level: 100, index: true }], 'EPSG:32632', 'Contours')
 
-    await store.computeFootprints()
+    await store.computeFootprints({ ground: 'absolute' })
 
     expect(store.sets.map((s) => s.name)).toEqual(['Imported', 'Contours'])
   })

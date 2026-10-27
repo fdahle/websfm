@@ -1,7 +1,15 @@
 import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
-import { ensureProjection, transform, transformer, isGeographic, localMetricFrame } from '../core/crs.js'
+import { FOOTPRINT_DEFAULTS } from '../core/defaults.user.js'
+import {
+  ensureProjection,
+  transform,
+  transformer,
+  isGeographic,
+  localMetricFrame,
+  metresToCrsUnits,
+} from '../core/crs.js'
 import { projectFootprint, projectFootprintOnTerrain } from '../core/footprint.js'
 import { terrainSampler, terrainZoom, TERRAIN_DATUM } from '../core/terrainHeights.js'
 import { heightShifter, datumLabel, shiftRange } from '../core/verticalDatum.js'
@@ -236,12 +244,12 @@ export const useFootprintsStore = registerProjectStore(
     //                calibrated sensor (e.g. poses imported without their images)
     // Returns a summary { computed, skipped, reasons:{...}, setId }.
     async function computeFootprints({
-      ground = 'absolute',
-      groundElev = 0,
-      agl = 0,
-      demSource = 'terrain',
-      poseDatum = 'unknown',
-      assumeNadir = true,
+      ground = FOOTPRINT_DEFAULTS.ground,
+      groundElev = FOOTPRINT_DEFAULTS.groundElev,
+      agl = FOOTPRINT_DEFAULTS.agl,
+      demSource = FOOTPRINT_DEFAULTS.demSource,
+      poseDatum = FOOTPRINT_DEFAULTS.poseDatum,
+      assumeNadir = FOOTPRINT_DEFAULTS.assumeNadir,
       intrinsics = null,
     } = {}) {
       const reasons = { noPose: 0, noElevation: 0, noAngles: 0, noSensor: 0, belowPlane: 0, diverges: 0, offTerrain: 0 }
@@ -443,14 +451,17 @@ export const useFootprintsStore = registerProjectStore(
       }
       const range = { min: Infinity, max: -Infinity }
       return {
+        // In the camera heights' unit: the terrain is in metres, a pose's z in the CRS's
+        // (feet in a US-feet CRS; metres in a geographic one).
         async heightAt(x, y) {
           const [lon, lat] = toLonLat(x, y)
           const h = await sampler.heightAt(lon, lat)
-          if (h == null || !shiftAt) return h
+          if (h == null) return h
+          if (!shiftAt) return metresToCrsUnits(h, crs)
           const shift = shiftAt(lon, lat)
           if (shift < range.min) range.min = shift
           if (shift > range.max) range.max = shift
-          return h + shift
+          return metresToCrsUnits(h + shift, crs)
         },
         describe: () =>
           `the global terrain (level ${sampler.zoom}, ${sampler.tileCount} tiles)` +

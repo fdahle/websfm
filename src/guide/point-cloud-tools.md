@@ -39,7 +39,10 @@ imported one. The dialogs show what that means for the current project.
   so survey coordinates are not rounded.
 
 ## Combine
-- **Merge…** concatenates clouds, optionally de-duplicating the seam.
+- **Merge…** concatenates clouds, optionally de-duplicating the seam: with a
+  **Dedupe cell**, a cell that holds points of two or more clouds keeps only those of
+  the first (in the order listed), so the overlap is not double-density; every other
+  cell keeps all its points.
 - **Align by point pairs** opens a toolbox over the 3D view. Choose the cloud to
   move and the reference, then click a point in the cloud to move (orange) and the same
   feature in the reference (blue), at least three times, well spread. The fit and its

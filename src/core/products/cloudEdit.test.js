@@ -9,6 +9,7 @@ import {
   voxelDownsample,
   filterCloud,
   mergeClouds,
+  estimateSurfaceSpacing,
   estimateSpacing,
   clampGridCell,
   maskCloud,
@@ -370,6 +371,20 @@ describe('mergeClouds', () => {
     expect(mergeClouds([a, b], { cell: 0.5 }).count).toBe(2)
   })
 
+  it('thins only the overlap: the first cloud keeps its cells, the rest stays whole', () => {
+    // A: x 0..2 every 0.1; B: x 1.5..4 every 0.1 (overlap 1.5..2).
+    const row = (x0, x1) =>
+      makeCloud(Array.from({ length: Math.round((x1 - x0) / 0.1) + 1 }, (_, i) => [x0 + i * 0.1, 0, 0]))
+    const a = row(0, 2),
+      b = row(1.5, 4)
+    const out = mergeClouds([a, b], { cell: 0.5 })
+    const xs = xyzOf(out).map(([x]) => x)
+    // Every point of A stays; B loses the points in cells A has (x < 2 and its cell 2..2.5).
+    expect(xs.filter((x) => x <= 2 + 1e-9).length).toBe(a.count)
+    expect(xs.filter((x) => x > 2 + 1e-9).every((x) => x >= 2.5 - 1e-9)).toBe(true)
+    expect(xs.filter((x) => x >= 2.5 - 1e-9).length).toBe(16) // B's 2.5..4 untouched
+  })
+
   it('skips empty inputs and survives an all-empty list', () => {
     expect(mergeClouds([{ count: 0, pos: new Float32Array(0) }]).count).toBe(0)
     expect(mergeClouds([]).count).toBe(0)
@@ -387,6 +402,14 @@ describe('grid sizing helpers', () => {
   it('falls back through the non-zero extents of a planar cloud', () => {
     const planar = { minX: 0, minY: 0, minZ: 5, maxX: 10, maxY: 10, maxZ: 5 }
     expect(estimateSpacing(planar, 100)).toBeCloseTo(1, 6)
+  })
+
+  it('takes a surface spacing from the two largest sides', () => {
+    const survey = { minX: 0, minY: 0, minZ: 0, maxX: 1000, maxY: 1000, maxZ: 50 }
+    expect(estimateSurfaceSpacing(survey, 10_000_000)).toBeCloseTo(0.316, 3)
+    expect(estimateSpacing(survey, 10_000_000)).toBeCloseTo(1.71, 2)
+    const facade = { minX: 0, minY: 0, minZ: 0, maxX: 40, maxY: 2, maxZ: 20 }
+    expect(estimateSurfaceSpacing(facade, 80_000)).toBeCloseTo(0.1, 6)
   })
 
   it('returns 0 spacing for a degenerate (single-location) cloud', () => {

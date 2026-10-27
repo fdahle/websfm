@@ -16,7 +16,7 @@
 import { writeDxf } from './dxf.js'
 
 // sectionCloud(cloud, { a:[x,y], b:[x,y], thickness, extend = false }, onLog)
-//   → { cloud: { count, pos:Float64Array(3M), col:Uint8Array(3M)|null },
+//   → { cloud: { count, pos:Float64Array(3M), col:Uint8Array(3M)|null, nrm?, attributes? },
 //       profile: { station, z, offset: Float64Array(M) }, length }
 export function sectionCloud(cloud, { a, b, thickness, extend = false } = {}, onLog) {
   if (!a || !b) throw new Error('Section needs two line points a and b')
@@ -65,6 +65,9 @@ export function sectionCloud(cloud, { a, b, thickness, extend = false } = {}, on
 
   const outPos = new Float64Array(3 * m)
   const outCol = cloud?.col ? new Uint8Array(3 * m) : null
+  const outNrm = cloud?.nrm ? new Float32Array(3 * m) : null
+  // Scalar fields (classification, distance …) travel with their points.
+  const fields = Object.entries(cloud?.attributes ?? {}).map(([name, a]) => [name, a, new a.constructor(m)])
   const station = new Float64Array(m),
     z = new Float64Array(m),
     offset = new Float64Array(m)
@@ -79,6 +82,12 @@ export function sectionCloud(cloud, { a, b, thickness, extend = false } = {}, on
       outCol[3 * k + 1] = cloud.col[3 * i + 1]
       outCol[3 * k + 2] = cloud.col[3 * i + 2]
     }
+    if (outNrm) {
+      outNrm[3 * k] = cloud.nrm[3 * i]
+      outNrm[3 * k + 1] = cloud.nrm[3 * i + 1]
+      outNrm[3 * k + 2] = cloud.nrm[3 * i + 2]
+    }
+    for (const [, src, dst] of fields) dst[k] = src[i]
     station[k] = st[slot]
     z[k] = pos[3 * i + 2]
     offset[k] = of[slot]
@@ -90,7 +99,18 @@ export function sectionCloud(cloud, { a, b, thickness, extend = false } = {}, on
     m ? 'info' : 'warn',
     'Products',
   )
-  return { cloud: { count: m, pos: outPos, col: outCol }, profile: { station, z, offset }, length }
+  const attributes = Object.fromEntries(fields.map(([name, , dst]) => [name, dst]))
+  return {
+    cloud: {
+      count: m,
+      pos: outPos,
+      col: outCol,
+      ...(outNrm ? { nrm: outNrm } : {}),
+      ...(fields.length ? { attributes } : {}),
+    },
+    profile: { station, z, offset },
+    length,
+  }
 }
 
 // CSV: header `station,z,offset,x,y`, one row per point in station order.

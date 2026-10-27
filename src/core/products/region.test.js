@@ -43,7 +43,19 @@ describe('region', () => {
     pos.set([1e6, 1e6, 1e6], 0) // one far stray
     const r = regionFromPositions(pos, { quantile: 0.01, margin: 0 })
     expect(r.max[0]).toBeLessThan(100)
-    expect(r.min[0]).toBeGreaterThanOrEqual(0)
+    expect(r.min[0]).toBeGreaterThanOrEqual(-1e-6)
     expect(r.max[2]).toBeLessThan(1)
+  })
+
+  it('keeps a tower above the 98th percentile of heights, not a lone stray', () => {
+    // Ground 100 × 100 at z ≈ 0, a 60 m tower of 3 % of the points, one stray at 400.
+    const pts = []
+    for (let i = 0; i < 9700; i++) pts.push((i % 100) + 0.5, Math.floor(i / 100) + 0.5, (i % 7) * 0.01)
+    for (let i = 0; i < 300; i++) pts.push(50, 50, (60 * i) / 299)
+    pts.push(50, 50, 400)
+    const r = regionFromPositions(Float64Array.from(pts), { margin: 0 })
+    expect(r.max[2]).toBeCloseTo(60, 6)
+    expect(r.min[0]).toBeLessThan(1)
+    expect(r.max[0]).toBeGreaterThan(99)
   })
 })

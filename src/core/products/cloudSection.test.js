@@ -55,6 +55,24 @@ describe('sectionCloud', () => {
     }
   })
 
+  it('carries normals and scalar fields with their points', () => {
+    const cloud = planeCloud()
+    const cls = Uint8Array.from({ length: cloud.count }, (_, i) => i % 7)
+    const nrm = Float32Array.from({ length: 3 * cloud.count }, (_, j) => (j % 3 === 2 ? 1 : (j / 3) % 1))
+    const s = sectionCloud(
+      { ...cloud, nrm, attributes: { classification: cls } },
+      { a: [1000, 2000], b: [1020, 2000], thickness: 0.5 },
+    )
+    expect(s.cloud.count).toBeGreaterThan(0)
+    for (let k = 0; k < s.cloud.count; k++) {
+      let src = -1
+      for (let i = 0; i < cloud.count; i++)
+        if (cloud.pos[3 * i] === s.cloud.pos[3 * k] && cloud.pos[3 * i + 1] === s.cloud.pos[3 * k + 1]) src = i
+      expect(s.cloud.attributes.classification[k]).toBe(cls[src])
+      expect(s.cloud.nrm[3 * k + 2]).toBe(1)
+    }
+  })
+
   it('thickness widens the slab symmetrically', () => {
     const cloud = planeCloud()
     const s = sectionCloud(cloud, { a: [1000, 2000], b: [1020, 2000], thickness: 4.2 })

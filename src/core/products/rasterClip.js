@@ -443,3 +443,26 @@ export function clipOrtho(ortho, polygons, { crop = true, allTouched = false, on
     },
   }
 }
+
+/**
+ * The CRS a GeoJSON's polygons are in: its (pre-RFC 7946) `crs` member when it names an
+ * EPSG code or CRS84, else EPSG:4326 when every coordinate lies in longitude/latitude
+ * range (RFC 7946 GeoJSON is WGS84 lon/lat, what QGIS writes by default), else null
+ * (taken as the raster's own CRS). `polygons` as polygonsFromGeoJSON returns them.
+ */
+export function geojsonCrs(geojson, polygons) {
+  const name = geojson?.crs?.properties?.name
+  if (typeof name === 'string') {
+    if (/CRS84$/i.test(name)) return 'EPSG:4326'
+    const code = /EPSG:{1,2}(\d+)$/i.exec(name)?.[1]
+    if (code) return `EPSG:${code}`
+  }
+  let any = false
+  for (const poly of polygons)
+    for (const ring of poly)
+      for (const [x, y] of ring) {
+        if (!(Math.abs(x) <= 180 && Math.abs(y) <= 90)) return null
+        any = true
+      }
+  return any ? 'EPSG:4326' : null
+}

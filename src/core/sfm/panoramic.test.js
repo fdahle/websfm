@@ -91,7 +91,26 @@ describe('panoramic strips as frame-camera segments', () => {
     const theta = Math.atan2(P[0], P[2]),
       t = (tall.focalMm * P[1]) / Math.hypot(P[0], P[2])
     expect(got.v).toBeCloseTo(tall.height / 2 + (tall.focalMm * theta) / tall.pitchMm, 6)
-    expect(got.u).toBeCloseTo(tall.width / 2 + t / tall.pitchMm, 6)
+    // Turned a quarter, so across the scan runs leftwards.
+    expect(got.u).toBeCloseTo(tall.width / 2 - t / tall.pitchMm, 6)
+    const back = stripToSegment(seg, layout, tall, got.u, got.v)
+    expect(back.a).toBeCloseTo(at.a, 6)
+    expect(back.b).toBeCloseTo(at.b, 6)
+  })
+
+  it('turns a portrait strip, never mirrors it', () => {
+    // The sign of the segment → strip map's Jacobian: + for a turn, − for a mirror.
+    const orientation = (s0) => {
+      const layout = panoramicSegments(s0, { segments: 5 })
+      const seg = layout.segments[2]
+      const at = (a, b) => segmentToStrip(seg, layout, s0, a, b)
+      const o = at(seg.width / 2, seg.height / 2),
+        da = at(seg.width / 2 + 1, seg.height / 2),
+        db = at(seg.width / 2, seg.height / 2 + 1)
+      return Math.sign((da.u - o.u) * (db.v - o.v) - (db.u - o.u) * (da.v - o.v))
+    }
+    expect(orientation(strip)).toBe(1)
+    expect(orientation({ ...strip, width: strip.height, height: strip.width })).toBe(1)
   })
 
   it('names segments after their strip, in scan order', () => {

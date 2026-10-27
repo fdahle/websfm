@@ -382,5 +382,6 @@ orthophoto. None of them changes the stored product.
 - **Clip to polygon…** exports the DEM or orthophoto with everything outside a
   polygon set to nodata (transparent for the orthophoto), cropped to the polygon. The
   polygon is a saved **Area** or **Volume** measurement on that product, or a GeoJSON
-  file already in the product's coordinates. A file in another CRS is not reprojected
-  and would clip the wrong place.
+  file. A file that names its CRS, or one in longitude/latitude (standard GeoJSON, what
+  QGIS writes by default), is reprojected into the product's CRS; one in neither is
+  taken to be in the product's coordinates. The dialog says which it assumed.

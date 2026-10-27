@@ -118,6 +118,17 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Merge thins only where the clouds overlap.** With a Dedupe cell, a cell holding
+  points of two or more clouds keeps only the first cloud's (in the order listed), and
+  every other cell keeps all its points. It used to resample the whole merged cloud to
+  one point per cell, thinning far more than the seam.
+- **Region keeps towers and tree lines.** Fit to sparse / Fit to dense still leaves out
+  stray points, but past the outermost 2 % on each side the box now follows points that
+  continue without a gap, so tall structures above the 98th percentile of heights are no
+  longer cut off.
+- **The Region and the orientation survive Optimize cameras and Gradual selection.**
+  Both edits keep the model's frame, so the box and the up direction drawn on it carry
+  over (the log says so) instead of being set aside as drawn on an older model.
 - **Clean contour lines from a photogrammetric DEM.** Contours smooths the DEM's heights
   before tracing (Smooth the DEM first, 2 cells) and drops lines shorter than 20 cells,
   so surface noise no longer traces as thousands of tiny rings. On the Aukerman example's
@@ -326,6 +337,18 @@ Notable changes to websfm. The format follows
   and cost: 22 → 7.8 min, the same cloud for the planning change.
 
 ### Fixed
+- **Panoramic split of a portrait strip.** A strip scanned upright (taller than wide)
+  was cut into segments that were mirror images, so the model came out mirrored and no
+  georeference could fit it; the segments are now the strip turned a quarter.
+- **Section keeps classes, other scalar fields and normals,** and its automatic slice
+  thickness comes from the point spacing on the surface: on terrain it was several times
+  too thick (the spacing was taken from the box's volume).
+- **Footprints in a feet CRS.** With the global terrain as the ground, terrain heights in
+  metres were compared with camera heights in feet; they are now converted, and the
+  Ground elevation and Flying height fields are labelled in the project's unit.
+- **Clip to polygon reprojects a GeoJSON file.** A file in longitude/latitude (standard
+  GeoJSON, as QGIS writes it) or one that names its CRS is moved into the raster's CRS;
+  it used to be taken as it was and reported as not overlapping.
 - **One backend line per depth-map run.** Depth maps split over the worker pool printed
   "backend = WASM (CPU)" (and, without a GPU, its warning) once per worker; the console
   now shows it once.

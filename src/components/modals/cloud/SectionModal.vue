@@ -7,7 +7,7 @@ import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
 import { SECTION_DEFAULTS } from '../../../core/defaults.user.js'
-import { cloudBounds, estimateSpacing } from '../../../core/products/cloudEdit.js'
+import { cloudBounds, estimateSurfaceSpacing } from '../../../core/products/cloudEdit.js'
 import { cloudUnits } from '../../../core/products/cloudUnits.js'
 import FileNameField from '../ui/FileNameField.vue'
 import { defaultExportName } from '../../../core/exportNames.js'
@@ -49,7 +49,9 @@ function fillDefaultLine() {
       ? { ax: r(b.minX), ay: r(midY), bx: r(b.maxX), by: r(midY) }
       : { ax: r(midX), ay: r(b.minY), bx: r(midX), by: r(b.maxY) },
   )
-  spacing.value = estimateSpacing(b, c.count)
+  // A section cuts a surface: its spacing from the area, not the box's volume (several
+  // times too large on terrain).
+  spacing.value = estimateSurfaceSpacing(b, c.count)
 }
 watch(source, fillDefaultLine, { immediate: true })
 

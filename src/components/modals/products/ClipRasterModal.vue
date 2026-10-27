@@ -6,7 +6,7 @@ import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
-import { polygonsFromGeoJSON } from '../../../core/products/rasterClip.js'
+import { polygonsFromGeoJSON, geojsonCrs } from '../../../core/products/rasterClip.js'
 import { pluralize } from '../../../core/textFormat.js'
 import { clipRasterEffects } from '../../../core/stepEffects/clipRaster.js'
 import FileNameField from '../ui/FileNameField.vue'
@@ -43,6 +43,8 @@ watch(kind, () => {
   sourceMode.value = candidates.value.length ? 'measurement' : 'file'
 })
 const filePolygons = ref(null)
+// The file's CRS when it names one or is lon/lat (rasterClip.js geojsonCrs); null = the raster's.
+const fileCrs = ref(null)
 const fileNote = ref('')
 const compression = ref('deflate')
 
@@ -51,10 +53,13 @@ async function onFile(e) {
   e.target.value = ''
   if (!file) return
   try {
-    const { polygons, ignored } = polygonsFromGeoJSON(JSON.parse(await file.text()))
+    const json = JSON.parse(await file.text())
+    const { polygons, ignored } = polygonsFromGeoJSON(json)
     filePolygons.value = polygons.length ? polygons : null
+    fileCrs.value = polygons.length ? geojsonCrs(json, polygons) : null
     fileNote.value = polygons.length
-      ? `${file.name}: ${pluralize(polygons.length, 'polygon')}${ignored ? `, ${pluralize(ignored, 'other feature')} ignored` : ''}`
+      ? `${file.name}: ${pluralize(polygons.length, 'polygon')}${ignored ? `, ${pluralize(ignored, 'other feature')} ignored` : ''}` +
+        (fileCrs.value ? `, in ${fileCrs.value} (reprojected to the raster's CRS)` : `, in the raster's CRS`)
       : `${file.name}: no polygons found`
   } catch (err) {
     filePolygons.value = null
@@ -92,6 +97,7 @@ function run() {
     fileName: fileName.value,
     kind: kind.value,
     polygons: JSON.parse(JSON.stringify(polygons.value)),
+    polygonsCrs: sourceMode.value === 'file' ? fileCrs.value : null,
     compression: compression.value,
   })
 }

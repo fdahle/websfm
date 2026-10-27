@@ -6,7 +6,7 @@ import WarnBox from '../ui/WarnBox.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { focalPx } from '../../../core/footprint.js'
-import { isGeographic } from '../../../core/crs.js'
+import { isGeographic, linearCrsUnit } from '../../../core/crs.js'
 import { VERTICAL_DATUMS, datumLabel } from '../../../core/verticalDatum.js'
 import { TERRAIN_DATUM } from '../../../core/terrainHeights.js'
 import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
@@ -23,6 +23,9 @@ const props = defineProps({
 // A geographic (lat/lon) project CRS is fine — the store ray-casts in a local
 // metric frame and maps the result back. Just note it so the units aren't a surprise.
 const geographicCrs = computed(() => isGeographic(props.projectCrs))
+// Heights are in the project's vertical unit, as the camera heights are (feet in a
+// US-feet CRS; metres in a geographic one).
+const heightUnit = computed(() => (props.projectCrs && !geographicCrs.value ? linearCrsUnit(props.projectCrs) : 'm'))
 const emit = defineEmits(['close', 'run'])
 
 const { resolveIntrinsics } = useFootprintsStore()
@@ -155,7 +158,7 @@ function run() {
         </select>
       </SettingsField>
     </template>
-    <SettingsField v-else-if="settings.ground === 'absolute'" label-for="fp-elev" unit="m (project CRS)">
+    <SettingsField v-else-if="settings.ground === 'absolute'" label-for="fp-elev" :unit="`${heightUnit} (project CRS)`">
       <template #label>
         <FieldHelp
           op="footprints-from-poses"
@@ -167,7 +170,7 @@ function run() {
       </template>
       <input id="fp-elev" v-model.number="settings.groundElev" type="number" step="any" class="field-input" />
     </SettingsField>
-    <SettingsField v-else label-for="fp-agl" unit="m below each camera">
+    <SettingsField v-else label-for="fp-agl" :unit="`${heightUnit} below each camera`">
       <template #label>
         <FieldHelp op="footprints-from-poses" param="agl" :value="settings.agl" :default-value="FOOTPRINT_DEFAULTS.agl"
           >Flying height</FieldHelp

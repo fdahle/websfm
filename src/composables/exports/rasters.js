@@ -17,7 +17,7 @@ import {
   demAscii as workerDemAscii,
   warpRaster as workerWarpRaster,
 } from '../../workers/computeClient.js'
-import { ensureProjection, projDefinition, isGeographic } from '../../core/crs.js'
+import { ensureProjection, projDefinition, isGeographic, transformer } from '../../core/crs.js'
 import { rasterGroundScale, rasterUnits } from '../../core/products/rasterUnits.js'
 import { productDescriptor } from '../../core/io/rasterSource.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -366,10 +366,30 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     log(`Terrain: exported ${products.join(', ')} as GeoTIFF`, 'success', 'Export')
   }
 
-  async function exportClipped({ kind, polygons, compression, fileName }) {
+  async function exportClipped({ kind, polygons, polygonsCrs = null, compression, fileName }) {
     const product = kind === 'ortho' ? ortho.value : dem.value
     if (!product || !polygons?.length || (kind === 'ortho' && !product.cog)) return
     const geo = product
+    // A GeoJSON in another CRS (lon/lat, as RFC 7946 has it) is moved into the raster's.
+    const rasterCrs = crsInfo(geo).crs
+    // Polygons that already overlap the raster as they are stay as they are (a local CRS
+    // whose small numbers only look like lon/lat).
+    const overlapsAsIs = () => {
+      if (![geo.originX, geo.originY, geo.gsd, geo.width, geo.height].every(Number.isFinite)) return false
+      const x0 = geo.originX,
+        x1 = geo.originX + geo.width * geo.gsd,
+        y1 = geo.originY,
+        y0 = geo.originY - geo.height * geo.gsd
+      return polygons.some((poly) => poly[0].some(([x, y]) => x >= x0 && x <= x1 && y >= y0 && y <= y1))
+    }
+    if (polygonsCrs && rasterCrs && polygonsCrs !== rasterCrs && !overlapsAsIs()) {
+      await ensureProjection(polygonsCrs)
+      await ensureProjection(rasterCrs)
+      const to = transformer(polygonsCrs, rasterCrs)
+      polygons = polygons.map((poly) => poly.map((ring) => ring.map(([x, y]) => to(x, y))))
+      log(`Clip: the polygons were reprojected from ${polygonsCrs} to ${rasterCrs}`, 'info', 'Export')
+    } else if (polygonsCrs && !rasterCrs)
+      log(`Clip: the polygons are in ${polygonsCrs} but the raster has no CRS — taken as they are`, 'warn', 'Export')
     // An ortho is clipped from a window of its COG, read in the worker (no plane here).
     const input =
       kind === 'ortho'

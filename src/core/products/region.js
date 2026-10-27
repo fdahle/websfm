@@ -61,12 +61,18 @@ export function regionMask(pos, count, r) {
 }
 
 /**
- * A robust box around a set of positions: the per-axis [q, 1−q] quantiles, grown
- * by `margin` × the extent — so a handful of stray sparse points does not set the
- * region, the way a plain min/max would.
+ * A robust box around a set of positions: the per-axis [q, 1−q] quantiles, each side
+ * then carried on over the points beyond it as long as they follow on without a gap
+ * wider than `gap` × the quantile extent, and grown by `margin` × the extent. A handful
+ * of stray sparse points (each behind a gap) does not set the region, the way a plain
+ * min/max would; a tower or a tree line above the 98th percentile of heights (points
+ * all the way up) is not cut.
  * `positions` is a flat [x,y,z,…] array or typed array.
  */
-export function regionFromPositions(positions, { quantile = 0.02, margin = 0.05, maxSamples = 200_000 } = {}) {
+export function regionFromPositions(
+  positions,
+  { quantile = 0.02, margin = 0.05, gap = 0.02, maxSamples = 200_000 } = {},
+) {
   const n = Math.floor(positions.length / 3)
   if (n < 2) return null
   const stride = Math.max(1, Math.floor(n / maxSamples))
@@ -82,9 +88,13 @@ export function regionFromPositions(positions, { quantile = 0.02, margin = 0.05,
     max = []
   for (const a of axes) {
     const v = a.subarray(0, k).sort()
-    const at = (q) => v[Math.min(k - 1, Math.max(0, Math.round(q * (k - 1))))]
-    const lo = at(quantile),
-      hi = at(1 - quantile)
+    let i0 = Math.min(k - 1, Math.max(0, Math.round(quantile * (k - 1)))),
+      i1 = Math.min(k - 1, Math.max(0, Math.round((1 - quantile) * (k - 1))))
+    const step = Math.max((v[i1] - v[i0]) * gap, 1e-12)
+    while (i1 + 1 < k && v[i1 + 1] - v[i1] <= step) i1++
+    while (i0 > 0 && v[i0] - v[i0 - 1] <= step) i0--
+    const lo = v[i0],
+      hi = v[i1]
     const grow = Math.max((hi - lo) * margin, 1e-9)
     min.push(lo - grow)
     max.push(hi + grow)

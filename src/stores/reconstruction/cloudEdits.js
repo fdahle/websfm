@@ -69,6 +69,7 @@ export function createCloudEdits({
   upsertSparseCloud,
   sensors,
   extractCloudPoints = null,
+  carryFrameStamps = null,
   editStreamedCloud = null,
 }) {
   // ── Cloud editing (crop / filter / merge) ────────────────────────────────────
@@ -226,6 +227,10 @@ export function createCloudEdits({
       const edited = mainSparseCloud.value
       if (edited && original.style !== undefined) edited.style = original.style
       if (edited && original.visible !== undefined) edited.visible = original.visible
+      // Same frame: the region and orientation drawn on the model stay with it.
+      const carried = edited && carryFrameStamps ? carryFrameStamps(original, edited) : []
+      if (carried.length)
+        log(`${label}: the ${carried.join(' and ')} carried over to the edited model`, 'info', 'Reconstruction')
       await invalidateSparseDependents()
       // Calibration defines the canonical observation frame and must survive
       // a re-solve (neither tool frees a radial term). Old run statistics must not
