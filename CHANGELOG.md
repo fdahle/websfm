@@ -364,6 +364,11 @@ Notable changes to websfm. The format follows
   and cost: 22 → 7.8 min, the same cloud for the planning change.
 
 ### Fixed
+- **The mobile warning fits a phone's screen.** On a phone the page no longer pans
+  sideways and the warning no longer runs past the screen's edge. The ribbon is wider
+  than a phone, and mobile Chrome widened the whole page to fit it; the app now clips it.
+- **Lists in the glossary and help boxes are indented.** Their bullets and numbers sat
+  left of the text's margin.
 - **Panoramic split of a portrait strip.** A strip scanned upright (taller than wide)
   was cut into segments that were mirror images, so the model came out mirrored and no
   georeference could fit it; the segments are now the strip turned a quarter.

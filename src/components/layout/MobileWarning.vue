@@ -39,10 +39,9 @@ const { shouldWarn, acknowledge } = useMobileWarning()
   z-index: 9500;
   background: rgba(0, 0, 0, 0.72);
   display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 16px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .mg-panel {
   background: var(--panel);
@@ -53,6 +52,9 @@ const { shouldWarn, acknowledge } = useMobileWarning()
   color: var(--text);
   width: 420px;
   max-width: 100%;
+  /* Centred by auto margins, not align-items: a panel taller than the screen
+     then scrolls from its top instead of losing it above the fold. */
+  margin: auto;
   padding: 20px;
   text-align: center;
 }

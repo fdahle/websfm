@@ -56,6 +56,12 @@ body,
   width: 100%;
 }
 
+/* The app clips what overflows it (a ribbon wider than a phone): mobile Chrome
+   otherwise widens the layout viewport to fit, and the page pans sideways. */
+#app {
+  overflow: hidden;
+}
+
 body {
   font-family:
     system-ui,

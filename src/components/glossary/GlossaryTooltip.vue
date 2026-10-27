@@ -133,6 +133,11 @@ watch(
 .tt-summary :deep(p + p) {
   margin-top: 5px;
 }
+.tt-summary :deep(ul),
+.tt-summary :deep(ol) {
+  margin: 5px 0;
+  padding-left: 17px;
+}
 .tt-summary :deep(a.glossary-link),
 .tt-summary :deep(a.guide-link) {
   color: var(--accent);

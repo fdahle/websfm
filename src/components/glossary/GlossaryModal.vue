@@ -485,6 +485,14 @@ function onBodyClick(e) {
 .term-body :deep(p) {
   margin: 0 0 10px;
 }
+.term-body :deep(ul),
+.term-body :deep(ol) {
+  margin: 5px 0 12px;
+  padding-left: 21px;
+}
+.term-body :deep(li) {
+  margin: 3px 0;
+}
 .term-body :deep(h1),
 .term-body :deep(h2),
 .term-body :deep(h3) {

@@ -27,7 +27,7 @@ onMounted(() => nextTick(() => search.value?.focus()))
         placeholder="Filter by action or key…"
         aria-label="Filter shortcuts"
       />
-      <span class="sc-note">{{ IS_MAC ? '⌘ is Command, ⌥ Option, ⇧ Shift.' : 'On a Mac, Ctrl is ⌘.' }}</span>
+      <span v-if="IS_MAC" class="sc-note">⌘ is Command, ⌥ Option, ⇧ Shift.</span>
     </div>
 
     <div v-if="sections.length" class="sc-groups">
