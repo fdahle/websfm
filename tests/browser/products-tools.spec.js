@@ -171,8 +171,9 @@ test('contours of a georeferenced DEM go on the map as a line layer', async ({ p
   })
   expect(layer.name).toBe('Contours 5 m')
   expect(layer.kind).toBe('lines')
-  // The cone runs from 30 m down to −11.7 m in its corners.
-  expect(layer.levels).toEqual([-10, -5, 0, 5, 10, 15, 20, 25])
+  // The cone runs from 30 m down to −11.7 m in its corners; there the −10 and −5 m lines
+  // are corner arcs under 20 cells long, which the default minimum length drops.
+  expect(layer.levels).toEqual([0, 5, 10, 15, 20, 25])
   expect([...new Set(layer.index)].sort((a, b) => a - b)).toEqual([0, 25])
   expect(layer.minX).toBeGreaterThan(500000)
   expect(layer.onMap).toBe(true)
@@ -185,7 +186,7 @@ test('contours of a georeferenced DEM go on the map as a line layer', async ({ p
   const geo = await download(page, () => page.getByRole('button', { name: 'Download GeoJSON' }).click())
   const fc = JSON.parse(geo.bytes.toString('utf8'))
   expect(fc.features[0].geometry.type).toBe('LineString')
-  expect(new Set(fc.features.map((f) => f.properties.elevation)).size).toBe(8)
+  expect(new Set(fc.features.map((f) => f.properties.elevation)).size).toBe(6)
   expect(errors).toEqual([])
 })
 

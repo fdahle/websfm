@@ -41,7 +41,11 @@ test('a dense cloud builds its octree in the worker, and it survives a reload', 
   })
   expect(built.meta.points).toBe(1_200_000)
   expect(built.meta.nodeCount).toBeGreaterThan(8)
-  expect(built.labels).toEqual(['Sorting points into chunks', 'Building the octree'])
+  // On a pool of more than one worker the chunks are joined at the end.
+  expect(built.labels.filter((l) => l !== 'Joining the octree')).toEqual([
+    'Sorting points into chunks',
+    'Building the octree',
+  ])
 
   const check = () =>
     page.evaluate(async () => {
