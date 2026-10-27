@@ -258,6 +258,33 @@ export function gpsSearchOutline(lonLats, { minPadMetres = 300, perEdge = 8 } = 
   return out
 }
 
+// Where Find GCPs looks in the reference, in order of authority: a polygon layer the
+// user chose ('manual'), the orthophoto's own footprint once it is georeferenced
+// ('ortho'), the registered photos' footprints ('footprints', which need a project
+// CRS), their GPS positions ('gps', at least two); null searches the whole reference.
+export function searchAreaSource({
+  manual = false,
+  orthoGeoreferenced = false,
+  footprintImages = 0,
+  gpsImages = 0,
+  hasCrs = true,
+} = {}) {
+  if (manual) return 'manual'
+  if (orthoGeoreferenced) return 'ortho'
+  if (hasCrs && footprintImages > 0) return 'footprints'
+  if (gpsImages >= 2) return 'gps'
+  return null
+}
+
+// The outer-ring vertices of every polygon in a vector set, whatever image (if
+// any) it belongs to: a search area the user drew or imported.
+export function polygonSetPoints(set) {
+  const out = []
+  for (const fp of set?.footprints || [])
+    for (const p of fp.rings?.[0] || []) if (Number.isFinite(p[0]) && Number.isFinite(p[1])) out.push(p)
+  return out
+}
+
 // The outer-ring vertices of the footprint polygons linked to `imageIds` (any
 // vector set that holds image footprints: computed from poses or imported), in
 // the sets' own CRS (the project CRS). An archive's approximate footprints say

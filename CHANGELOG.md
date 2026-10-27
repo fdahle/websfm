@@ -6,6 +6,11 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Find GCPs: a search area, and footprints on offer.** Find GCPs ▸ Search area takes a
+  polygon layer to search inside, and under it a line says where Auto will look: the
+  georeferenced orthophoto, the photos' footprints, their GPS, or the whole reference.
+  With only GPS or camera poses, **Compute footprints…** opens Footprints from poses
+  over the dialog; with nothing at all, a warning asks for a search area.
 - **Align to and measure against a survey too large to load.** An imported LAS/LAZ that
   is streamed from its octree can now be the reference of Align to reference (ICP) and
   Cloud distance, and Transform moves it as a whole. The reference is read around the

@@ -13,8 +13,9 @@ const MATCHERS = {
 
 // s: { matcher, band ('rgb' | 1-based index), candidates (the limit) }
 // project: { referenceName, bandCount, demName, sparsePoints, stableName,
-//   stablePolygons, found: null before a run, else { total, selected, control,
-//   check, withoutZ (selected rows without a height) } }
+//   stablePolygons, area: { source (searchAreaSource), name, polygons,
+//   footprintImages, gpsImages, poses }, found: null before a run, else { total,
+//   selected, control, check, withoutZ (selected rows without a height) } }
 export function findGcpsEffects(
   s,
   {
@@ -24,10 +25,14 @@ export function findGcpsEffects(
     sparsePoints = 0,
     stableName = '',
     stablePolygons = 0,
+    area = {},
     found = null,
   } = {},
 ) {
   const terrain = s.matcher === 'terrain'
+  const where = terrain
+    ? "Terrain starts from the orthophoto's georeference, GPS or vertical photos' footprints; the search area is not used."
+    : searchAreaLine(area)
   let match
   if (terrain)
     match = demName
@@ -70,5 +75,25 @@ export function findGcpsEffects(
         : `${fmtCount(found.withoutZ)} of the ${fmtCount(found.selected)} selected have no height; ` +
           `without one a candidate cannot constrain the adjustment.`
   }
-  return { match, pick, review, heights }
+  return { area: where, match, pick, review, heights }
+}
+
+// Where the reference is searched (useFindGcps.js searchArea).
+function searchAreaLine({ source = null, name = '', polygons = 0, footprintImages = 0, gpsImages = 0, poses = 0 }) {
+  switch (source) {
+    case 'manual':
+      return `The reference is searched within the ${plural(polygons, 'polygon')} of "${name}", padded by a quarter.`
+    case 'ortho':
+      return "The reference is searched around the georeferenced orthophoto's footprint."
+    case 'footprints':
+      return `The reference is searched around the footprints of ${plural(footprintImages, 'photo')}, padded by a quarter.`
+    case 'gps':
+      return (
+        `The reference is searched around the GPS positions of ${plural(gpsImages, 'photo')}, padded by half their ` +
+        "spread. The photos' footprints would give a tighter area, and the matcher their rotation."
+      )
+  }
+  return poses
+    ? `Nothing yet says where the photos are, so the whole reference is searched. Compute the footprints from the ${plural(poses, 'camera pose')}, or choose a polygon layer as the search area.`
+    : 'Nothing says where the photos are, so the whole reference is searched. Import a polygon layer (GeoJSON) around them and choose it as the search area.'
 }

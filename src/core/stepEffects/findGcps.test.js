@@ -46,4 +46,17 @@ describe('findGcpsEffects', () => {
     expect(findGcpsEffects(S, { found: { ...found, selected: 0 } }).heights).toMatch(/^Select candidates/)
     expect(findGcpsEffects(S, { found: { total: 0 } }).review).toBe('No candidates were found.')
   })
+
+  it('says where the reference is searched, and what would narrow it', () => {
+    const area = (a, m = S) => findGcpsEffects(m, { area: a }).area
+    expect(area({ source: 'manual', name: 'Box', polygons: 1 })).toMatch(/within the 1 polygon of "Box"/)
+    expect(area({ source: 'ortho' })).toMatch(/georeferenced orthophoto's footprint/)
+    expect(area({ source: 'footprints', footprintImages: 12 })).toMatch(/footprints of 12 photos/)
+    expect(area({ source: 'gps', gpsImages: 40 })).toMatch(/GPS positions of 40 photos.*footprints would give/)
+    expect(area({ source: null, poses: 40 })).toMatch(
+      /whole reference .* Compute the footprints from the 40 camera poses/,
+    )
+    expect(area({})).toMatch(/whole reference .* Import a polygon layer/)
+    expect(area({ source: 'gps' }, { ...S, matcher: 'terrain' })).toMatch(/search area is not used/)
+  })
 })

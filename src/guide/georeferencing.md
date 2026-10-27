@@ -164,7 +164,8 @@ Build an orthophoto, import a georeferenced reference raster, then open **Recons
 Find GCPs**. Choose the reference, the coarse matcher and the band (step 1), how many
 candidates to keep and where (step 2), and select **Find candidates**. The matcher works [coarse to fine](help:coarse-to-fine):
 
-1. **Where to look.** If the orthophoto is already georeferenced, the search starts
+1. **Where to look.** A polygon layer chosen as the **Search area** is searched,
+   padded by a quarter. Otherwise, if the orthophoto is already georeferenced, the search starts
    from its footprint in the reference. Otherwise it starts from the registered
    photos' image footprints, imported (**Import**, a polygon file with image names,
    as archives such as USGS EarthExplorer supply them) or computed from poses,
@@ -172,7 +173,8 @@ candidates to keep and where (step 2), and select **Find candidates**. The match
    which its camera position does not. Without footprints it starts from the
    photos' GPS positions, padded by half their spread and at least 300 m. Without
    any of these, it searches the whole reference. A footprint that misses the
-   reference stops the search with that message.
+   reference stops the search with that message. The line under **Search area** says
+   which of these applies before you run.
 2. **Coarse.** With a learned matcher (the default), both rasters are read at the
    same ground resolution, up to 2,000 pixels a side, the orthophoto is turned to
    a guessed rotation, and LightGlue matches the detector's features; one RANSAC
@@ -240,6 +242,23 @@ Choose **Checkpoint** to reserve a point for checking rather than fitting.
 **Add candidates** imports only the selected rows. Unknown elevation and
 accuracy stay unknown; incomplete controls cannot constrain adjustment. Photo
 marks can still be refined later in Control & Markers.
+
+## Search area
+<!-- param: searchArea  default: Auto -->
+Where in the reference to look for the photos. **Auto** uses the best that the project
+knows, in this order: the orthophoto's footprint once it is georeferenced, the
+registered photos' footprints, their GPS positions, else the whole reference. The line
+under the field says which one it is.
+
+Footprints matter most: they say where each photo looks, and the footprints of the
+near-vertical photos also give the learned matchers the block's rotation. When only GPS
+or camera poses are known, **Compute footprints…** opens
+[Footprints from poses](guide:footprints-from-poses) (Tools → Model ▾) over this dialog.
+
+Choose a polygon layer to search inside its polygons instead, padded by a quarter: a
+box drawn in a GIS around where you expect the block, imported as GeoJSON (**Import**).
+Use it when nothing else locates the photos, or when the reference is much larger than
+the block. The **Terrain** matcher does not use it; it starts from the prior.
 
 ## Coarse matcher
 <!-- param: coarseMatcher  default: Auto -->

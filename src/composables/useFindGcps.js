@@ -5,6 +5,7 @@ import { useImagesStore } from '../stores/useImagesStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
+import { usePosesStore } from '../stores/usePosesStore.js'
 import { findReferenceMatches, alignTerrain } from '../workers/computeClient.js'
 import { referenceGcpCandidates, referencePick, orthoFrame, trackObservations } from '../core/sfm/referenceGcps.js'
 import { terrainInitial, terrainCandidates } from '../core/sfm/terrainControl.js'
@@ -16,7 +17,13 @@ import { modelUrl } from '../core/models/registry.js'
 import { useModelsStore } from '../stores/useModelsStore.js'
 import { FIND_GCPS_DEFAULTS } from '../core/defaults.user.js'
 import { polygonAreaTest } from '../core/products/vectorLayers.js'
-import { gpsSearchOutline, searchRegion, footprintSearchPoints } from '../core/sfm/referenceMatch.js'
+import {
+  gpsSearchOutline,
+  searchRegion,
+  footprintSearchPoints,
+  searchAreaSource,
+  polygonSetPoints,
+} from '../core/sfm/referenceMatch.js'
 import { worldToPixel } from '../core/io/rasterSample.js'
 import { makePinholeToMark, makeFrameModelResolver } from '../core/sfm/displayFrame.js'
 import { ensureProjection, transform, isGeographic, metresToCrsUnits } from '../core/crs.js'
@@ -30,12 +37,49 @@ export function stableAreaLayers() {
   return useFootprintsStore().sets.filter((s) => s.kind !== 'lines')
 }
 
-// Where in the reference to look: the ortho's own footprint when it is already
-// georeferenced, else the registered photos' footprints, else their GPS positions,
-// else everywhere. → { region, source }
-async function searchArea(ortho, cloud, refRaster) {
-  const images = useImagesStore(),
-    projects = useProjectsStore()
+// What the search area would be now (core/sfm/referenceMatch.js searchAreaSource),
+// with the counts behind it, for the dialog and for the search itself.
+// → { source: 'manual' | 'ortho' | 'footprints' | 'gps' | null, set, footprintImages,
+//     gpsImages, poses (enabled poses with a position, which footprints can be computed from) }
+export function searchAreaPlan(searchSetId = null) {
+  const recon = useReconstructionStore(),
+    images = useImagesStore(),
+    projects = useProjectsStore(),
+    footprints = useFootprintsStore(),
+    poses = usePosesStore()
+  const ortho = recon.ortho,
+    cloud = recon.mainSparseCloud
+  const set = searchSetId ? (stableAreaLayers().find((s) => s.id === searchSetId) ?? null) : null
+  const registered = cloud ? images.images.filter((im) => cloud.cameras.get(im.uuid)) : []
+  const ids = new Set(registered.map((im) => im.id))
+  const withFootprint = new Set()
+  for (const fs of footprints.sets)
+    if (fs.kind !== 'lines')
+      for (const fp of fs.footprints || [])
+        if (ids.has(fp.imageId) && fp.rings?.[0]?.length) withFootprint.add(fp.imageId)
+  const gps = registered.filter(
+    (im) => Number.isFinite(Number(im.meta?.gpsLon)) && Number.isFinite(Number(im.meta?.gpsLat)),
+  )
+  const crs = projects.currentCrs
+  const counts = {
+    footprintImages: withFootprint.size,
+    gpsImages: gps.length,
+    poses: poses.poses.filter((p) => p.enabled !== false && p.x != null && p.y != null).length,
+  }
+  const source = searchAreaSource({
+    manual: !!set && polygonSetPoints(set).length >= 3,
+    orthoGeoreferenced: !!(ortho?.crs && ortho.crs !== 'local'),
+    hasCrs: !!(crs && crs !== 'local'),
+    ...counts,
+  })
+  return { source, set, ...counts, registered, gps }
+}
+
+// Where in the reference to look, as searchAreaPlan says, in reference pixels:
+// → { region, source } (region null: the whole reference).
+async function searchArea(ortho, refRaster, searchSetId) {
+  const projects = useProjectsStore()
+  const plan = searchAreaPlan(searchSetId)
   const toPixels = (pts, crs) =>
     pts
       .map((p) => transform(p, crs, refRaster.crs))
@@ -43,40 +87,42 @@ async function searchArea(ortho, cloud, refRaster) {
         const px = worldToPixel(refRaster, x, y)
         return [px.col, px.row]
       })
-  if (ortho.crs && ortho.crs !== 'local') {
-    await ensureProjection(ortho.crs)
-    const x1 = ortho.originX + ortho.width * ortho.gsd,
-      y1 = ortho.originY - ortho.height * ortho.gsd
-    const pts = [
-      [ortho.originX, ortho.originY],
-      [x1, ortho.originY],
-      [x1, y1],
-      [ortho.originX, y1],
-    ]
-    return {
-      region: searchRegion(toPixels(pts, ortho.crs), refRaster.width, refRaster.height),
-      source: 'the georeferenced orthophoto',
-    }
-  }
-  const registered = images.images.filter((im) => cloud.cameras.get(im.uuid))
+  const region = (pts, crs) => searchRegion(toPixels(pts, crs), refRaster.width, refRaster.height)
   const crs = projects.currentCrs
-  if (crs && crs !== 'local') {
-    const ids = new Set(registered.map((im) => im.id))
-    const pts = footprintSearchPoints(useFootprintsStore().sets, ids)
-    if (pts.length >= 3) {
+  switch (plan.source) {
+    case 'manual':
+      await ensureProjection(crs)
+      return { region: region(polygonSetPoints(plan.set), crs), source: `the polygons of "${plan.set.name}"` }
+    case 'ortho': {
+      await ensureProjection(ortho.crs)
+      const x1 = ortho.originX + ortho.width * ortho.gsd,
+        y1 = ortho.originY - ortho.height * ortho.gsd
+      const pts = [
+        [ortho.originX, ortho.originY],
+        [x1, ortho.originY],
+        [x1, y1],
+        [ortho.originX, y1],
+      ]
+      return { region: region(pts, ortho.crs), source: 'the georeferenced orthophoto' }
+    }
+    case 'footprints':
       await ensureProjection(crs)
       return {
-        region: searchRegion(toPixels(pts, crs), refRaster.width, refRaster.height),
+        region: region(
+          footprintSearchPoints(useFootprintsStore().sets, new Set(plan.registered.map((im) => im.id))),
+          crs,
+        ),
         source: "the photos' footprints",
       }
-    }
+    case 'gps':
+      return {
+        region: region(
+          gpsSearchOutline(plan.gps.map((im) => [Number(im.meta.gpsLon), Number(im.meta.gpsLat)])),
+          'EPSG:4326',
+        ),
+        source: "the photos' GPS positions",
+      }
   }
-  const outline = gpsSearchOutline(registered.map((im) => [Number(im.meta?.gpsLon), Number(im.meta?.gpsLat)]))
-  if (outline)
-    return {
-      region: searchRegion(toPixels(outline, 'EPSG:4326'), refRaster.width, refRaster.height),
-      source: "the photos' GPS positions",
-    }
   return { region: null, source: null }
 }
 
@@ -193,7 +239,8 @@ async function resolveMatcher(matcher) {
 /**
  * Find candidate controls. `stableSetId` names a polygon layer (stableAreaLayers):
  * only candidates whose reference position lies inside one of its polygons are
- * kept, before they are spread over the block.
+ * kept, before they are spread over the block. `searchSetId` names a polygon layer
+ * whose extent is searched instead of the automatic area (searchAreaPlan).
  * → { candidates, result, area, stable: { name, rejected } | null }
  */
 export async function findGcpCandidates({
@@ -202,6 +249,7 @@ export async function findGcpCandidates({
   matcher = FIND_GCPS_DEFAULTS.matcher,
   demId = null,
   stableSetId = null,
+  searchSetId = null,
   limit = FIND_GCPS_DEFAULTS.candidates,
   onLog,
 } = {}) {
@@ -222,7 +270,7 @@ export async function findGcpCandidates({
   await Promise.all([ensureProjection(refRaster.crs), ensureProjection(projects.currentCrs)])
   if (terrain && isGeographic(refRaster.crs))
     throw new Error('Terrain matching needs a reference DEM in a projected (metric) CRS')
-  const area = terrain ? { region: null, source: null } : await searchArea(ortho, cloud, refRaster)
+  const area = terrain ? { region: null, source: null } : await searchArea(ortho, refRaster, searchSetId)
   const used = await resolveMatcher(matcher)
   const prior = terrain || learnedDetector(used) ? await orthoPrior(ortho, cloud, refRaster) : null
   if (terrain && !prior)

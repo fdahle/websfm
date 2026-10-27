@@ -385,159 +385,193 @@ test('a DEM of difference against the background terrain', async ({ page }) => {
 
 // 3000 m: the first whole-reference look aligns. 6000 m: the block is 1/10 of the
 // reference side, 8× smaller than the ortho's own look, and is found by the
-// sub-window search.
-for (const SIZE of [3000, 6000])
-  test(`Find GCPs aligns a rotated, finer block inside a ${SIZE} m regional reference, coarse to fine`, async ({
+// sub-window search, or straight away inside a polygon layer chosen as the search area.
+for (const [SIZE, box] of [
+  [3000, false],
+  [6000, false],
+  [6000, true],
+])
+  test(`Find GCPs aligns a rotated, finer block inside a ${SIZE} m regional reference, coarse to fine${box ? ', within a search area' : ''}`, async ({
     page,
   }) => {
     test.setTimeout(180000)
     await page.goto(harness)
-    const truth = await page.evaluate(async (SIZE) => {
-      const { writeGeoTiff, writeCog, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
-      const { detectKeypoints } = await import('/src/workers/computeClient.js')
-      const { asKeypoints } = await import('/src/core/features/keypoints.js')
-      const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
-      // The block: 600 m square at 0.5 m in its own frame. The reference: 3000 m at
-      // 1 m in EPSG:3031, the block rotated 25° and placed at (2200, 3100) in it.
-      const th = (25 * Math.PI) / 180,
-        c = Math.cos(th),
-        s = Math.sin(th),
-        X0 = 1000,
-        Y0 = 2000,
-        TX = 2200,
-        TY = 3100
-      const toRef = (x, y) => [TX + c * x - s * y, TY + s * x + c * y]
-      const toLocal = (X, Y) => [c * (X - TX) + s * (Y - TY), -s * (X - TX) + c * (Y - TY)]
-      let seed = 99
-      const random = () => {
-        seed = (1664525 * seed + 1013904223) >>> 0
-        return seed / 4294967296
-      }
-      const blobs = Array.from({ length: 60000 * (SIZE / 3000) ** 2 }, () => ({
-        X: X0 + SIZE * random(),
-        Y: Y0 + SIZE * random(),
-        r: 1.5 + 4.5 * random(),
-        g: Math.floor(256 * random()),
-      }))
-      const draw = (size, toPx) => {
-        const canvas = new OffscreenCanvas(size, size),
-          ctx = canvas.getContext('2d')
-        ctx.fillStyle = '#808080'
-        ctx.fillRect(0, 0, size, size)
-        for (const b of blobs) {
-          const [u, v, r] = toPx(b)
-          if (u < -20 || v < -20 || u > size + 20 || v > size + 20) continue
-          ctx.fillStyle = `rgb(${b.g},${b.g},${b.g})`
-          ctx.beginPath()
-          ctx.arc(u, v, r, 0, Math.PI * 2)
-          ctx.fill()
+    const truth = await page.evaluate(
+      async ([SIZE, box]) => {
+        const { writeGeoTiff, writeCog, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
+        const { detectKeypoints } = await import('/src/workers/computeClient.js')
+        const { asKeypoints } = await import('/src/core/features/keypoints.js')
+        const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
+        // The block: 600 m square at 0.5 m in its own frame. The reference: 3000 m at
+        // 1 m in EPSG:3031, the block rotated 25° and placed at (2200, 3100) in it.
+        const th = (25 * Math.PI) / 180,
+          c = Math.cos(th),
+          s = Math.sin(th),
+          X0 = 1000,
+          Y0 = 2000,
+          TX = 2200,
+          TY = 3100
+        const toRef = (x, y) => [TX + c * x - s * y, TY + s * x + c * y]
+        const toLocal = (X, Y) => [c * (X - TX) + s * (Y - TY), -s * (X - TX) + c * (Y - TY)]
+        let seed = 99
+        const random = () => {
+          seed = (1664525 * seed + 1013904223) >>> 0
+          return seed / 4294967296
         }
-        return ctx.getImageData(0, 0, size, size).data
-      }
-      const ref = draw(SIZE, (b) => [b.X - X0, Y0 + SIZE - b.Y, b.r])
-      const local = draw(1200, (b) => {
-        const [x, y] = toLocal(b.X, b.Y)
-        return [x / 0.5, (600 - y) / 0.5, b.r / 0.5]
-      })
-      // The ortho does not cover its lower-left corner.
-      for (let v = 0; v < 1200; v++)
-        for (let u = 0; u < 1200; u++) if (u + (1200 - v) < 300) local[(v * 1200 + u) * 4 + 3] = 0
-      const gray = new Uint8Array(SIZE * SIZE)
-      for (let i = 0; i < gray.length; i++) gray[i] = ref[i * 4]
-      const canvas = new OffscreenCanvas(1200, 1200)
-      canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(local), 1200, 1200), 0, 0)
-      const url = URL.createObjectURL(await canvas.convertToBlob({ type: 'image/png' }))
-      const cog = new Blob([
-        writeCog({
+        const blobs = Array.from({ length: 60000 * (SIZE / 3000) ** 2 }, () => ({
+          X: X0 + SIZE * random(),
+          Y: Y0 + SIZE * random(),
+          r: 1.5 + 4.5 * random(),
+          g: Math.floor(256 * random()),
+        }))
+        const draw = (size, toPx) => {
+          const canvas = new OffscreenCanvas(size, size),
+            ctx = canvas.getContext('2d')
+          ctx.fillStyle = '#808080'
+          ctx.fillRect(0, 0, size, size)
+          for (const b of blobs) {
+            const [u, v, r] = toPx(b)
+            if (u < -20 || v < -20 || u > size + 20 || v > size + 20) continue
+            ctx.fillStyle = `rgb(${b.g},${b.g},${b.g})`
+            ctx.beginPath()
+            ctx.arc(u, v, r, 0, Math.PI * 2)
+            ctx.fill()
+          }
+          return ctx.getImageData(0, 0, size, size).data
+        }
+        const ref = draw(SIZE, (b) => [b.X - X0, Y0 + SIZE - b.Y, b.r])
+        const local = draw(1200, (b) => {
+          const [x, y] = toLocal(b.X, b.Y)
+          return [x / 0.5, (600 - y) / 0.5, b.r / 0.5]
+        })
+        // The ortho does not cover its lower-left corner.
+        for (let v = 0; v < 1200; v++)
+          for (let u = 0; u < 1200; u++) if (u + (1200 - v) < 300) local[(v * 1200 + u) * 4 + 3] = 0
+        const gray = new Uint8Array(SIZE * SIZE)
+        for (let i = 0; i < gray.length; i++) gray[i] = ref[i * 4]
+        const canvas = new OffscreenCanvas(1200, 1200)
+        canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(local), 1200, 1200), 0, 0)
+        const url = URL.createObjectURL(await canvas.convertToBlob({ type: 'image/png' }))
+        const cog = new Blob([
+          writeCog({
+            width: 1200,
+            height: 1200,
+            samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
+            photometric: 2,
+            extraSamples: [2],
+            data: new Uint8Array(local.buffer),
+            pixelScale: [0.5, 0.5, 0],
+            tiepoint: [0, 0, 0, 0, 600, 0],
+            geoKeys: [],
+            tileSize: 256,
+          }),
+        ])
+        const { recon, external, images, projects } = window.workflowTools
+        projects.projects = [{ id: 'c2f', crs: 'EPSG:3031' }]
+        projects.currentProjectId = 'c2f'
+        images.images = [
+          { id: 'a', uuid: 'a', name: 'a.jpg' },
+          { id: 'b', uuid: 'b', name: 'b.jpg' },
+        ]
+        const R = [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+          ],
+          K = { fx: 100, fy: 100, cx: 0, cy: 0 }
+        const kps = asKeypoints((await detectKeypoints(url, { maxDim: 1200, maxKeypoints: 3000 })).keypoints)
+        const points = Array.from({ length: kps.length }, (_, i) => ({
+          x: (kps.x(i) + 0.5) * 0.5,
+          y: 600 - (kps.y(i) + 0.5) * 0.5,
+          z: 10,
+          views: new Map([
+            ['a', i],
+            ['b', i],
+          ]),
+          viewsPx: new Map([
+            ['a', [kps.x(i), kps.y(i)]],
+            ['b', [kps.x(i) + 1, kps.y(i)]],
+          ]),
+        }))
+        recon.clouds = [
+          {
+            id: 's',
+            kind: 'sparse',
+            name: 'Sparse',
+            createdAt: 1,
+            cameras: new Map([
+              ['a', { R, t: [0, 0, 0], K }],
+              ['b', { R, t: [-1, 0, 0], K }],
+            ]),
+            points: SparsePoints.fromRecords(points),
+          },
+        ]
+        recon.mainSparseId = 's'
+        recon.ortho = {
           width: 1200,
           height: 1200,
-          samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
-          photometric: 2,
-          extraSamples: [2],
-          data: new Uint8Array(local.buffer),
-          pixelScale: [0.5, 0.5, 0],
-          tiepoint: [0, 0, 0, 0, 600, 0],
-          geoKeys: [],
-          tileSize: 256,
-        }),
-      ])
-      const { recon, external, images, projects } = window.workflowTools
-      projects.projects = [{ id: 'c2f', crs: 'EPSG:3031' }]
-      projects.currentProjectId = 'c2f'
-      images.images = [
-        { id: 'a', uuid: 'a', name: 'a.jpg' },
-        { id: 'b', uuid: 'b', name: 'b.jpg' },
-      ]
-      const R = [
-          [1, 0, 0],
-          [0, 1, 0],
-          [0, 0, 1],
-        ],
-        K = { fx: 100, fy: 100, cx: 0, cy: 0 }
-      const kps = asKeypoints((await detectKeypoints(url, { maxDim: 1200, maxKeypoints: 3000 })).keypoints)
-      const points = Array.from({ length: kps.length }, (_, i) => ({
-        x: (kps.x(i) + 0.5) * 0.5,
-        y: 600 - (kps.y(i) + 0.5) * 0.5,
-        z: 10,
-        views: new Map([
-          ['a', i],
-          ['b', i],
-        ]),
-        viewsPx: new Map([
-          ['a', [kps.x(i), kps.y(i)]],
-          ['b', [kps.x(i) + 1, kps.y(i)]],
-        ]),
-      }))
-      recon.clouds = [
-        {
-          id: 's',
-          kind: 'sparse',
-          name: 'Sparse',
-          createdAt: 1,
-          cameras: new Map([
-            ['a', { R, t: [0, 0, 0], K }],
-            ['b', { R, t: [-1, 0, 0], K }],
-          ]),
-          points: SparsePoints.fromRecords(points),
-        },
-      ]
-      recon.mainSparseId = 's'
-      recon.ortho = {
-        width: 1200,
-        height: 1200,
-        originX: 0,
-        originY: 600,
-        gsd: 0.5,
-        previewUrl: url,
-        cog,
-        frame: { kind: 'local', origin: [0, 0, 0], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1] },
-      }
-      await external.importRaster(
-        new File(
-          [
-            writeGeoTiff({
-              width: SIZE,
-              height: SIZE,
-              samples: [{ bits: 8, format: 1 }],
-              photometric: 1,
-              data: gray,
-              pixelScale: [1, 1, 0],
-              tiepoint: [0, 0, 0, X0, Y0 + SIZE, 0],
-              geoKeys: geoKeysForEpsg(3031, false),
-            }),
-          ],
-          'regional.tif',
-        ),
-        { forceKind: 'ortho' },
-      )
-      return points.map((p) => toRef(p.x, p.y))
-    }, SIZE)
+          originX: 0,
+          originY: 600,
+          gsd: 0.5,
+          previewUrl: url,
+          cog,
+          frame: { kind: 'local', origin: [0, 0, 0], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1] },
+        }
+        await external.importRaster(
+          new File(
+            [
+              writeGeoTiff({
+                width: SIZE,
+                height: SIZE,
+                samples: [{ bits: 8, format: 1 }],
+                photometric: 1,
+                data: gray,
+                pixelScale: [1, 1, 0],
+                tiepoint: [0, 0, 0, X0, Y0 + SIZE, 0],
+                geoKeys: geoKeysForEpsg(3031, false),
+              }),
+            ],
+            'regional.tif',
+          ),
+          { forceKind: 'ortho' },
+        )
+        // A box around the block (it spans about 1,950–2,750 E, 3,100–3,900 N).
+        if (box)
+          await window.workflowTools.footprints.addFootprints(
+            [
+              {
+                name: 'Block',
+                rings: [
+                  [
+                    [1800, 3000],
+                    [2900, 3000],
+                    [2900, 4000],
+                    [1800, 4000],
+                    [1800, 3000],
+                  ],
+                ],
+              },
+            ],
+            'EPSG:3031',
+            'Search box',
+          )
+        return points.map((p) => toRef(p.x, p.y))
+      },
+      [SIZE, box],
+    )
     await page.getByRole('button', { name: 'Find GCPs', exact: true }).click()
+    // Nothing locates these photos (no GPS, footprints or georeference) until a
+    // search area is chosen.
+    if (box) {
+      await page.getByRole('combobox', { name: /Search area/ }).selectOption({ label: 'Search box' })
+      await expect(page.getByText(/searched within the 1 polygon of "Search box"/)).toBeVisible()
+    } else await expect(page.getByText(/the whole reference is searched/)).toBeVisible()
     // SIFT, as above: no model files in CI.
     await page.getByRole('combobox', { name: /Coarse matcher/ }).selectOption('sift')
     await page.getByRole('button', { name: 'Find candidates', exact: true }).click()
     await expect(page.getByRole('checkbox').first()).toBeVisible({ timeout: 160000 })
     await expect(page.locator('.tile', { hasText: 'Fine tiles' }).locator('.tile-value')).toHaveText('4')
+    if (box) await expect(page.getByText(/Searched around the polygons of "Search box"/)).toBeVisible()
     expect(await page.evaluate(() => window.workflowTools.gcps.gcps.length)).toBe(0)
     await page.getByRole('button', { name: 'Select confidence ≥ 50 %' }).click()
     await page.getByRole('button', { name: /^Add \d+ candidates$/ }).click()

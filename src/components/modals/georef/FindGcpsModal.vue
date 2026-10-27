@@ -17,7 +17,7 @@ import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 import { useLog } from '../../../composables/useLog.js'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { candidateCoverage } from '../../../core/sfm/referenceGcps.js'
-import { findGcpCandidates, stableAreaLayers } from '../../../composables/useFindGcps.js'
+import { findGcpCandidates, searchAreaPlan, stableAreaLayers } from '../../../composables/useFindGcps.js'
 import { FIND_GCPS_DEFAULTS } from '../../../core/defaults.user.js'
 import { findGcpsEffects } from '../../../core/stepEffects/findGcps.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
@@ -28,7 +28,8 @@ import { isGeographic, linearCrsUnit } from '../../../core/crs.js'
 // control, and review them before they are added (composables/useFindGcps.js).
 
 const props = defineProps({ hasRelativeOrtho: Boolean, referenceOrthos: { type: Array, default: () => [] } })
-const emit = defineEmits(['close'])
+// compute-footprints: open Compute footprints over this dialog (PipelineModals).
+const emit = defineEmits(['close', 'compute-footprints'])
 const external = useExternalStore(),
   recon = useReconstructionStore(),
   images = useImagesStore()
@@ -39,8 +40,11 @@ const selectedReferenceId = ref(props.referenceOrthos[0]?.id ?? ''),
   band = ref(1),
   matcher = ref(FIND_GCPS_DEFAULTS.matcher),
   candidateLimit = ref(FIND_GCPS_DEFAULTS.candidates),
-  stableSetId = ref('')
+  stableSetId = ref(''),
+  searchSetId = ref('')
 const stableLayers = computed(() => stableAreaLayers())
+// Where the reference will be searched, and what is known about where the photos are.
+const plan = computed(() => searchAreaPlan(searchSetId.value || null))
 const reference = computed(() => external.rasterById(selectedReferenceId.value))
 // A reference with three or more bands is read as their mean (RGB → gray), as film is.
 const bandCount = computed(() => reference.value?.bands || 1)
@@ -121,6 +125,7 @@ watch(
     matcher,
     candidateLimit,
     stableSetId,
+    searchSetId,
     () => recon.ortho,
     () => recon.mainSparseCloud,
     () => projects.currentProjectId,
@@ -153,6 +158,7 @@ async function find() {
       matcher: matcher.value,
       demId: demId.value || null,
       stableSetId: stableSetId.value || null,
+      searchSetId: searchSetId.value || null,
       limit: candidateLimit.value,
       onLog: (m, level, ctx) => log(m, level, ctx),
     })
@@ -322,6 +328,14 @@ const effects = computed(() => {
       sparsePoints: recon.mainSparseCloud?.points.length ?? 0,
       stableName: stable?.name,
       stablePolygons: stable?.footprints?.length ?? 0,
+      area: {
+        source: plan.value.source,
+        name: plan.value.set?.name,
+        polygons: plan.value.set?.footprints?.length ?? 0,
+        footprintImages: plan.value.footprintImages,
+        gpsImages: plan.value.gpsImages,
+        poses: plan.value.poses,
+      },
       found: summary.value && {
         total: candidates.value.length,
         selected: sel.length,
@@ -332,6 +346,12 @@ const effects = computed(() => {
     },
   )
 })
+// Footprints narrow the search and give the learned matchers their rotation: offer to
+// compute them when the search would otherwise rest on GPS alone, or on nothing.
+const areaUnknown = computed(() => matcher.value !== 'terrain' && !plan.value.source)
+const offerFootprints = computed(
+  () => matcher.value !== 'terrain' && plan.value.poses > 0 && [null, 'gps'].includes(plan.value.source),
+)
 const ROLES = [
   { id: 'control', label: 'Control point' },
   { id: 'check', label: 'Checkpoint' },
@@ -387,6 +407,35 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
           <option v-for="r in referenceOrthos" :key="r.id" :value="r.id">{{ r.name }}</option>
         </select>
       </SettingsField>
+      <SettingsField label-for="fg-area">
+        <template #label><FieldHelp op="georeferencing" param="searchArea">Search area</FieldHelp></template>
+        <select id="fg-area" v-model="searchSetId" class="field-select" :disabled="busy || matcher === 'terrain'">
+          <option value="">Auto</option>
+          <option v-for="s in stableLayers" :key="s.id" :value="s.id">{{ s.name }}</option>
+        </select>
+        <template v-if="!areaUnknown" #hint
+          >{{ effects.area }}
+          <button
+            v-if="offerFootprints"
+            class="link-btn fg-footprints"
+            :disabled="busy"
+            @click="emit('compute-footprints')"
+          >
+            Compute footprints…
+          </button></template
+        >
+      </SettingsField>
+      <WarnBox v-if="areaUnknown"
+        >{{ effects.area }}
+        <button
+          v-if="offerFootprints"
+          class="link-btn fg-footprints"
+          :disabled="busy"
+          @click="emit('compute-footprints')"
+        >
+          Compute footprints…
+        </button></WarnBox
+      >
     </SettingsGroup>
 
     <SettingsStep step="1" title="Match" :effect="effects.match">
@@ -675,6 +724,9 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-dim);
+}
+.fg-footprints {
+  margin-left: 6px;
 }
 .fg-row {
   display: flex;

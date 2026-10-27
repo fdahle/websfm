@@ -103,6 +103,7 @@ const {
   filterCloudOpen,
   filterCloudPreset,
   findGcpsOpen,
+  footprintFromPosesOpen,
   georeferenceOpen,
   matchFeaturesOpen,
   mergeCloudsOpen,
@@ -222,6 +223,7 @@ const measurementsStore = useMeasurementsStore()
       :has-relative-ortho="!!ortho"
       :reference-orthos="referenceOrthos"
       @close="findGcpsOpen = false"
+      @compute-footprints="footprintFromPosesOpen = true"
     />
   </Teleport>
 

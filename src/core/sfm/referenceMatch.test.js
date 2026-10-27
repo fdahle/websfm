@@ -12,6 +12,8 @@ import {
   searchRegion,
   matchConfidence,
   footprintSearchPoints,
+  searchAreaSource,
+  polygonSetPoints,
 } from './referenceMatch.js'
 
 // Rotation by 30°, scale 0.25 (the reference is 4× coarser), translation.
@@ -199,4 +201,47 @@ it("footprintSearchPoints takes the outer rings of the registered images' footpr
     [1, 1],
     [5, 5],
   ])
+})
+
+it('searchAreaSource takes a chosen layer, then the georeferenced ortho, footprints, GPS, else nothing', () => {
+  expect(searchAreaSource({ manual: true, orthoGeoreferenced: true })).toBe('manual')
+  expect(searchAreaSource({ orthoGeoreferenced: true, footprintImages: 5 })).toBe('ortho')
+  expect(searchAreaSource({ footprintImages: 1, gpsImages: 9 })).toBe('footprints')
+  expect(searchAreaSource({ footprintImages: 5, gpsImages: 9, hasCrs: false })).toBe('gps')
+  expect(searchAreaSource({ gpsImages: 1 })).toBe(null)
+  expect(searchAreaSource()).toBe(null)
+})
+
+it('polygonSetPoints takes every outer ring, linked to an image or not', () => {
+  const set = {
+    footprints: [
+      {
+        imageId: null,
+        rings: [
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+          ],
+          [[0.2, 0.2]],
+        ],
+      },
+      {
+        imageId: 3,
+        rings: [
+          [
+            [5, 5],
+            [NaN, 6],
+          ],
+        ],
+      },
+    ],
+  }
+  expect(polygonSetPoints(set)).toEqual([
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [5, 5],
+  ])
+  expect(polygonSetPoints(null)).toEqual([])
 })
