@@ -10,7 +10,9 @@ Notable changes to websfm. The format follows
   is streamed from its octree can now be the reference of Align to reference (ICP) and
   Cloud distance, and Transform moves it as a whole. The reference is read around the
   source, at full detail up to 12 M points; a transformed cloud gets a new octree,
-  quantised for its new coordinates.
+  quantised for its new coordinates. Align to reference also takes a streamed cloud as
+  the source: the alignment is found on a sample of up to 2 M of its points, and every
+  point then moves into a new streamed cloud.
 - **Sources for every method.** Each glossary entry now lists the papers behind the
   method it explains, About ▸ References lists every method WebSfM implements, and the
   exported Quality Report ends with the methods this project used and their references,
@@ -129,6 +131,10 @@ Notable changes to websfm. The format follows
 - **The Region and the orientation survive Optimize cameras and Gradual selection.**
   Both edits keep the model's frame, so the box and the up direction drawn on it carry
   over (the log says so) instead of being set aside as drawn on an older model.
+- **Classify ground shows the cloth's size.** The dialog's cloth line says how many cloth
+  points the cloud needs at the chosen resolution, and for a cloud in memory the coarser
+  resolution it will use past 4 million. On a streamed cloud, the log now says how many
+  tiles used a coarser cloth than asked.
 - **Clean contour lines from a photogrammetric DEM.** Contours smooths the DEM's heights
   before tracing (Smooth the DEM first, 2 cells) and drops lines shorter than 20 cells,
   so surface noise no longer traces as thousands of tiny rings. On the Aukerman example's
@@ -269,6 +275,27 @@ Notable changes to websfm. The format follows
   with the reason as its tooltip.
 
 ### Performance
+- **Remove outliers up to 4× faster.** The outlier filter finds each point's neighbours
+  with the k-d tree the other cloud tools use, instead of a grid whose dense cells held
+  hundreds of candidates; it keeps exactly the same points. ETH3D dense clouds: pipes
+  (3.5 M points) 45 → 11 s, terrace (9.1 M) 58 → 26 s, courtyard (10.1 M) 51 → 32 s.
+- **Filter and Classify ground on a streamed cloud use every core.** The tiles go to all
+  workers at once, each with its share of the memory limit, and the outlier filter reads
+  every tile once instead of twice. Rachel Glacier (51 M points, 8 workers): Filter
+  332 → 62 s, the same 48,469,854 points kept.
+- **Octrees build on every worker.** A large LAS/LAZ import, a streamed edit and the
+  octree of a dense cloud past 4 M points sort the points into chunks once, then build
+  the chunks on all workers. Rachel Glacier: import 77 → about 60 s (the LAZ decoding is
+  most of what is left), a filtered cloud's octree 52 → 35 s.
+- **Decimate splits a large mesh over the workers.** From half a million triangles the
+  mesh is decimated in blocks, one per worker, with their shared vertices held in place,
+  then once more across the seams. A 4.5 M triangle terrain: 26 → 7.7 s on 8 workers.
+  The error is the same or slightly smaller than one pass over the whole mesh (RMS and
+  largest distance of the input's vertices, on 2 M and 3.9 M triangle terrains and a 2 M
+  triangle sphere).
+- **Classify ground's cloth 1.4× faster.** Its springs skip the bounds tests away from
+  the edges; the result is identical. Rachel Glacier streamed, 8 workers: 1,382 →
+  1,088 s, the same 13,761,563 ground points.
 - **Remove outliers and Estimate normals use every core.** From a million points the cloud
   is split into slabs over the worker pool, each with a margin wide enough that the
   outlier filter keeps exactly the points one worker would. On the Aukerman dense cloud
@@ -346,6 +373,9 @@ Notable changes to websfm. The format follows
 - **Footprints in a feet CRS.** With the global terrain as the ground, terrain heights in
   metres were compared with camera heights in feet; they are now converted, and the
   Ground elevation and Flying height fields are labelled in the project's unit.
+- **No false "points outside the extent" warning on a cloud's octree.** A point within
+  half a millimetre of the cloud's edge could round past it when stored, and the build
+  then warned about a broken file header, even for a computed cloud.
 - **Clip to polygon reprojects a GeoJSON file.** A file in longitude/latitude (standard
   GeoJSON, as QGIS writes it) or one that names its CRS is moved into the raster's CRS;
   it used to be taken as it was and reported as not overlapping.

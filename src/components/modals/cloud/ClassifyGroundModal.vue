@@ -13,6 +13,7 @@ import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { GROUND_DEFAULTS } from '../../../core/defaults.user.js'
 import { classifyGroundEffects } from '../../../core/stepEffects/classifyGround.js'
 import { cloudUnits } from '../../../core/products/cloudUnits.js'
+import { anyCloudBounds, isStreamed } from '../../../core/lod/streamed.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
 // Classify Ground (Tools ▸ Point Cloud ▾ ▸ Attributes) — labels every point of a
@@ -49,7 +50,21 @@ const numbers = computed(() =>
   }),
 )
 // What each step does to this cloud (core/stepEffects/classifyGround.js).
-const effects = computed(() => classifyGroundEffects(settings.value, { noScale: noScale.value }))
+// The cloth's size from the source's box: its two longest sides, in metres, as the
+// horizontal (the product frame is resolved at Run; this is the cost, roughly).
+const extent = computed(() => {
+  const b = anyCloudBounds(source.value)
+  if (!b || noScale.value) return null
+  const sides = [b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ].sort((a, c) => c - a)
+  return [sides[0] * units.value.scale, sides[1] * units.value.scale]
+})
+const effects = computed(() =>
+  classifyGroundEffects(settings.value, {
+    noScale: noScale.value,
+    extent: extent.value,
+    streamed: isStreamed(source.value),
+  }),
+)
 
 function run() {
   emit('run', {

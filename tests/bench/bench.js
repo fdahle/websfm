@@ -1881,10 +1881,130 @@ window.bench = {
     return { source: { name: src.name, points: src.count }, runs: out }
   },
 
-  async meshTools() {
+  // Tools ▸ Point Cloud ▾ on the last streamed cloud (an `importfile:` LAS too large to
+  // hold): Remove outliers and Classify ground with the dialogs' defaults, their tiles
+  // over the pool and on one worker (`split`), and Align to Reference of it (`icp`).
+  // → { runs: per run { mode, split, seconds, points, ground? }, icp }
+  async streamedTools({ splits = [true, false], modes = ['filter', 'classify-ground', 'icp'] } = {}) {
+    const { FILTER_CLOUD_DEFAULTS: F, GROUND_DEFAULTS: G } = await import('/src/core/defaults.user.js')
+    const { isStreamed } = await import('/src/core/lod/streamed.js')
+    const src = recon.clouds.findLast((c) => isStreamed(c) && !c.derived)
+    if (!src) throw new Error('streamedTools: no streamed cloud (import a large LAS first)')
+    // First (the quickest): Align to Reference with the streamed cloud as the source: moved by a known offset,
+    // aligned back onto a resident crop of itself; the aligned cloud's box should sit
+    // where the original's does (`residual`, per axis).
+    let icp = null
+    if (modes.includes('icp')) {
+      const { ICP_DEFAULTS } = await import('/src/core/defaults.user.js')
+      const b = src.lod.bounds
+      const mid = [0, 1].map((k) => (b.min[k] + b.max[k]) / 2)
+      const half = [0, 1].map((k) => (b.max[k] - b.min[k]) * 0.15)
+      const crop = await recon.editClouds(
+        {
+          mode: 'crop',
+          sourceIds: [src.id],
+          settings: {
+            min: [mid[0] - half[0], mid[1] - half[1], null],
+            max: [mid[0] + half[0], mid[1] + half[1], null],
+          },
+          name: 'icp reference',
+        },
+        report,
+      )
+      const offset = [0.8, -0.5, 0.3]
+      const moved = await recon.editClouds(
+        {
+          mode: 'transform',
+          sourceIds: [src.id],
+          settings: {
+            transform: {
+              scale: 1,
+              R: [
+                [1, 0, 0],
+                [0, 1, 0],
+                [0, 0, 1],
+              ],
+              t: offset,
+            },
+          },
+          name: 'moved',
+        },
+        report,
+      )
+      const t0 = performance.now()
+      const aligned = await recon.editClouds(
+        { mode: 'icp', sourceIds: [moved.id, crop.id], settings: { ...ICP_DEFAULTS, maxDistance: 2 }, name: 'aligned' },
+        report,
+      )
+      icp = {
+        cropPoints: crop?.count ?? 0,
+        offset,
+        seconds: (performance.now() - t0) / 1000,
+        streamed: !aligned?.pos && !!aligned?.lod,
+        points: aligned?.count ?? 0,
+        residual: aligned?.lod ? [0, 1, 2].map((k) => aligned.lod.bounds.min[k] - b.min[k]) : null,
+      }
+    }
+    const runs = []
+    for (const split of splits) {
+      for (const mode of modes.filter((m) => m !== 'icp')) {
+        const settings =
+          mode === 'filter'
+            ? { methods: ['sor'], sor: { k: F.sorK, stdRatio: F.sorStdRatio }, split }
+            : { ...G, frame: null, metresPerUnit: 1, unitLabel: 'm', cameras: [], split }
+        const t0 = performance.now()
+        const c = await recon.editClouds({ mode, sourceIds: [src.id], settings, name: `${mode} ${split}` }, report)
+        runs.push({
+          mode,
+          split,
+          seconds: (performance.now() - t0) / 1000,
+          points: c?.count ?? 0,
+          ...(mode === 'classify-ground' ? { ground: c?.lod?.stats?.classes?.[2] ?? null } : {}),
+        })
+        // One edit's octree at a time on disk.
+        if (c) recon.clouds.splice(recon.clouds.indexOf(c), 1)
+        src.visible = true
+      }
+    }
+    return { source: { name: src.name, points: src.count }, runs, icp }
+  },
+
+  // `decimateOnly`: just Decimate with the defaults, split over the pool and on one
+  // worker (`splits`), on the computed mesh or else the last imported one.
+  async meshTools({ decimateOnly = false, splits = [true, false] } = {}) {
     const { CLEAN_MESH_DEFAULTS, SMOOTH_MESH_DEFAULTS, DECIMATE_MESH_DEFAULTS } =
       await import('/src/core/defaults.user.js')
     const { meshMeasure } = await import('/src/core/products/meshEdit.js')
+    if (decimateOnly) {
+      const m =
+        recon.clouds.find((c) => c.kind === 'mesh' && !c.imported && !c.derived) ??
+        recon.clouds.findLast((c) => c.kind === 'mesh' && !c.derived)
+      if (!m) throw new Error('meshTools: no mesh')
+      const runs = []
+      for (const split of splits) {
+        const t0 = performance.now()
+        const out = await recon.editClouds(
+          {
+            mode: 'mesh-decimate',
+            sourceIds: [m.id],
+            settings: {
+              targetRatio: DECIMATE_MESH_DEFAULTS.targetRatio,
+              preserveBoundary: DECIMATE_MESH_DEFAULTS.preserveBoundary,
+              split,
+            },
+            name: `decimated ${split}`,
+          },
+          report,
+        )
+        runs.push({
+          split,
+          seconds: (performance.now() - t0) / 1000,
+          triangles: out?.count ?? 0,
+          vertices: out?.nVerts,
+        })
+      }
+      return { source: { name: m.name, triangles: m.count, vertices: m.nVerts }, runs }
+    }
     const src = recon.clouds.find((c) => c.kind === 'mesh' && !c.imported && !c.derived)
     if (!src) throw new Error('meshTools: no computed mesh')
     const steps = []

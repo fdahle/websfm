@@ -1,10 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import { buildLod } from './build.js'
 import { openLodReader } from './reader.js'
-import { streamedEditSource, planTiles, inCore, transformedBounds } from './transform.js'
+import {
+  streamedEditSource,
+  planTiles,
+  inCore,
+  transformedBounds,
+  planTiledEdit,
+  readTile,
+  editTile,
+  packTile,
+  tileOutputsSource,
+} from './transform.js'
 import { screenSelectMask } from '../products/screenSelect.js'
 import { classifyCloudGround } from '../products/groundFilter.js'
-import { filterCloud } from '../products/cloudEdit.js'
+import { filterCloud, outlierLimit } from '../products/cloudEdit.js'
 
 function stores() {
   const files = new Map(),
@@ -333,5 +343,66 @@ describe('editing a streamed cloud', () => {
     const chain = { methods: ['isolated', 'sor'], isolated: {}, sor: { k: 12, stdRatio: 2 } }
     const r2 = await edited(reader, lod, 'filter', { ...chain, tilePoints: 60_000 })
     expect(r2.lod.points).toBe(filterCloud(c, chain).count)
+  }, 60_000)
+
+  // The pool's way (stores/reconstruction/cloudLod.js): every tile on its own (a
+  // worker each), its output through a temporary file, the outlier cut at the build.
+  async function pooled(reader, lod, mode, settings) {
+    const plan = planTiledEdit(lod, reader.nodes, mode, settings)
+    const files = [],
+      stats = []
+    for (const tile of plan.tiles) {
+      const t = editTile(await readTile(reader, lod, plan, tile), plan, tile)
+      if (t.stats) stats.push(t.stats)
+      files.push(packTile(t, tileOutputsSource(lod, plan, null).attributes))
+    }
+    const limit = plan.sor ? outlierLimit(stats, plan.sor.stdRatio).limit : null
+    const source = tileOutputsSource(lod, plan, async (i) => files[i], { limit })
+    return { plan, ...(await build(source, { offset: lod.layout.offset, scale: lod.layout.scale })) }
+  }
+
+  it('filters tile by tile on the pool as one worker does', async () => {
+    const { lod, reader } = await sceneLod()
+    // The octree's own points: millimetre-quantised, as every tile reads them (the
+    // scene's raw z can round across a voxel boundary).
+    const parts = await allPoints(reader)
+    const n = parts.reduce((a, p) => a + p.count, 0)
+    const pos = new Float64Array(3 * n),
+      cls = new Uint8Array(n)
+    let o = 0
+    for (const p of parts) {
+      pos.set(p.pos.subarray(0, 3 * p.count), 3 * o)
+      cls.set(p.attributes.classification, o)
+      o += p.count
+    }
+    const c = { count: n, pos, attributes: { classification: cls } }
+    for (const settings of [
+      { methods: ['sor'], sor: { k: 12, stdRatio: 2 } },
+      { methods: ['isolated', 'sor'], isolated: {}, sor: { k: 12, stdRatio: 2 } },
+      { methods: ['voxel'], voxel: { cell: 1 } },
+    ]) {
+      const r = await pooled(reader, lod, 'filter', { ...settings, tilePoints: 60_000 })
+      expect(r.plan.tiles.length).toBeGreaterThan(2)
+      expect(r.lod.points).toBe(filterCloud(c, settings).count)
+    }
+  }, 60_000)
+
+  it('classifies the ground on the pool as one worker does', async () => {
+    const { lod, reader } = await sceneLod()
+    const settings = { clothResolution: 1, rigidness: 2, classThreshold: 0.5, slopeSmoothing: true, tilePoints: 60_000 }
+    const classes = async (r) => {
+      const m = new Map()
+      for (const p of await allPoints(r.reader))
+        for (let k = 0; k < p.count; k++)
+          m.set(
+            `${p.pos[3 * k].toFixed(3)},${p.pos[3 * k + 1].toFixed(3)},${p.pos[3 * k + 2].toFixed(3)}`,
+            p.attributes.classification[k],
+          )
+      return m
+    }
+    const a = await classes(await pooled(reader, lod, 'classify-ground', settings))
+    const b = await classes(await edited(reader, lod, 'classify-ground', settings))
+    expect(a.size).toBe(b.size)
+    for (const [k, v] of b) expect(a.get(k)).toBe(v)
   }, 60_000)
 })

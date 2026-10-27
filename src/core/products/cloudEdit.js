@@ -18,6 +18,7 @@
 
 import { createVoxelAccumulator } from '../dense/voxelAccumulator.js'
 import { bigSet, bigMap } from '../bigCollections.js'
+import { buildKnnIndex, knnQuery } from './knn.js'
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -317,51 +318,27 @@ export function classifySelection(cloud, { mask, classValue } = {}, onLog) {
 // ── Filters ──────────────────────────────────────────────────────────────────
 
 /**
- * A grid for k-nearest searches whose occupied cells hold about `perCell` points. The
- * spacing from the bounding box's volume (estimateSpacing) is right for a cloud that
- * fills its box; a surface (terrain, a façade) is far denser on the surface than that,
- * and a cell sized from it held thousands of points (a 3-D survey tile: ~7,000
- * candidates per point, minutes per million). So the cell is shrunk until the
- * occupancy is right, a few rebuilds at most.
- */
-function occupancyGrid(cloud, bounds, perCell) {
-  const n = cloudCount(cloud)
-  let c = Math.max(estimateSpacing(bounds, n) * 2, 1e-9)
-  let grid = buildSpatialGrid(cloud, bounds, c)
-  for (let pass = 0; pass < 3; pass++) {
-    const occupancy = n / grid.cellCount
-    if (occupancy <= perCell * 2) break
-    // Points per cell grow with the cell's area on a surface, its volume in a solid:
-    // the square root errs on the side of cells too large (more candidates, exact).
-    c = Math.max(c * Math.sqrt(perCell / occupancy), 1e-9)
-    grid = buildSpatialGrid(cloud, bounds, c)
-  }
-  return grid
-}
-
-/**
  * Statistical outlier removal. For each point, take the mean distance to its `k`
  * nearest neighbours; drop points whose mean exceeds `mean + stdRatio·σ` over the
  * whole cloud. The classic PCL filter, and the right tool for the sparse haze of
  * flyers a fusion leaves behind — a real surface point sits in a dense neighbourhood,
  * a flyer does not.
  *
- * Neighbours come from a uniform grid whose occupied cells hold about (k+1)/2
- * points (occupancyGrid), so the 27-cell gather usually holds well over k
- * candidates. A point that finds NO neighbour at all is dropped outright (it cannot contribute a distance to the
+ * Neighbours come from the k-d tree of core/products/knn.js. A point that finds NO
+ * neighbour at all is dropped outright (it cannot contribute a distance to the
  * statistics, and it is by definition the most isolated thing in the cloud).
  *
- * opts: { k = 12, stdRatio = 1.5, cell = 0 (auto), reach (see sorNeighbourMeans),
+ * opts: { k = 12, stdRatio = 1.5, reach (see sorNeighbourMeans),
  *         limit (instead of the cloud's own mean + stdRatio·σ) }
  */
 export function statisticalOutlierFilter(
   cloud,
-  { k = 12, stdRatio = 1.5, cell = 0, reach = 0, limit: given = null } = {},
+  { k = 12, stdRatio = 1.5, reach = 0, limit: given = null } = {},
   onLog,
 ) {
   const n = cloudCount(cloud)
   if (n < 3) return selectPoints(cloud, new Uint8Array(n).fill(1), n)
-  const { mean, lonely } = sorNeighbourMeans(cloud, { k, cell, reach })
+  const { mean, lonely } = sorNeighbourMeans(cloud, { k, reach })
 
   // Cloud-wide mean/σ over the points that had neighbours (or the caller's limit: a
   // tiled run takes the whole cloud's, core/lod/transform.js).
@@ -400,82 +377,61 @@ export function statisticalOutlierFilter(
  * The statistical outlier filter's first half: each point's mean distance to its `k`
  * nearest neighbours (exact), and whether it has none within `reach` (default 4×
  * estimateSpacing: as far as this filter has always looked). → { mean, lonely }
+ *
+ * A neighbour lies within `reach`: beyond it a point is lonely; nearer, a flyer still
+ * finds the other flyers, and their large distances still widen σ. A distance, not a
+ * number of grid cells, so a tiled run (core/lod/transform.js) or a split one
+ * (core/products/cloudSlabs.js) sees the same neighbours as a whole one.
+ *
+ * The k-d tree, not the uniform grid of the other filters: a dense cloud is lumpy
+ * (fused points pile up where many views agree), and a grid sized for the average
+ * cell holds hundreds of candidates in the dense ones (1.4× slower on ETH3D clouds,
+ * same neighbours). The points are queried in the tree's order, so consecutive
+ * queries walk the same leaves.
  */
-export function sorNeighbourMeans(cloud, { k = 12, cell = 0, reach = 0 } = {}) {
+export function sorNeighbourMeans(cloud, { k = 12, reach = 0 } = {}) {
   const n = cloudCount(cloud)
-  const bounds = cloudBounds(cloud)
   const kk = Math.max(1, Math.floor(k))
-  const grid = cell > 0 ? buildSpatialGrid(cloud, bounds, cell) : occupancyGrid(cloud, bounds, (kk + 1) / 2)
-  const { pos } = cloud
-  const { start, order, keyAt, idOfKey, gx, gy, gz } = grid
-
-  const best = new Float64Array(kk) // k smallest squared distances, ascending
   const mean = new Float64Array(n)
   const lonely = new Uint8Array(n)
-
-  // Exact k nearest: the cells within `r` of the point's own are searched shell by
-  // shell until the k-th distance is no farther than r cells (nothing outside the
-  // searched block can be closer), so the result does not depend on the cell size.
-  const cs = grid.cell
-  // Neighbours lie within `reach`: by default about as far as this filter always
-  // looked (its 27-cell gather on a grid of 2× estimateSpacing). Beyond that a point is
-  // lonely; nearer, a flyer still finds the other flyers, and their large distances
-  // still widen σ as they always did. A distance, not a number of cells, so the
-  // result does not depend on the grid (a tiled run sees the same neighbours).
-  const far = reach > 0 ? reach : 4 * estimateSpacing(bounds, n)
-  const far2 = far * far // candidates farther than this are not neighbours, whatever the grid
-  const maxRing = Math.min(64, Math.max(1, Math.ceil(far / cs)))
-  const visit = (i, x, y, z, cx, cy, cz) => {
-    const id = idOfKey.get(keyAt(cx, cy, cz))
-    if (id === undefined) return 0
-    let added = 0
-    for (let s = start[id]; s < start[id + 1]; s++) {
-      const j = order[s]
-      if (j === i) continue
-      const ddx = pos[j * 3] - x,
-        ddy = pos[j * 3 + 1] - y,
-        ddz = pos[j * 3 + 2] - z
-      const d2 = ddx * ddx + ddy * ddy + ddz * ddz
-      if (d2 > far2) continue
-      added++
-      if (d2 >= best[kk - 1]) continue
-      // Insertion into the ascending k-list (kk is small; a heap is not worth it).
-      let p = kk - 1
-      while (p > 0 && best[p - 1] > d2) {
-        best[p] = best[p - 1]
-        p--
-      }
-      best[p] = d2
-    }
-    return added
-  }
-  for (let i = 0; i < n; i++) {
-    let found = 0
-    best.fill(Infinity)
-    const x = pos[i * 3],
-      y = pos[i * 3 + 1],
-      z = pos[i * 3 + 2]
-    for (let r = 0; r <= maxRing; r++) {
-      for (let dx = -r; dx <= r; dx++) {
-        for (let dy = -r; dy <= r; dy++) {
-          for (let dz = -r; dz <= r; dz++) {
-            if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) !== r) continue // this shell only
-            found += visit(i, x, y, z, gx[i] + dx, gy[i] + dy, gz[i] + dz)
-          }
-        }
-      }
-      if (r >= 1 && found >= kk && best[kk - 1] <= (r * cs) ** 2) break
-    }
+  if (!n) return { mean, lonely }
+  const far = reach > 0 ? reach : 4 * estimateSpacing(cloudBounds(cloud), n)
+  const index = buildKnnIndex({ count: n, pos: cloud.pos })
+  const { perm, tpos } = index
+  const outIdx = new Int32Array(kk),
+    outD2 = new Float64Array(kk)
+  const far2 = far * far
+  for (let s = 0; s < n; s++) {
+    const i = perm[s]
+    const found = knnQuery(index, tpos[3 * s], tpos[3 * s + 1], tpos[3 * s + 2], kk, outIdx, outD2, i, far2)
     if (!found) {
       lonely[i] = 1
       continue
     }
-    const m = Math.min(found, kk)
     let sum = 0
-    for (let p = 0; p < m; p++) sum += Math.sqrt(best[p])
-    mean[i] = sum / m
+    for (let p = 0; p < found; p++) sum += Math.sqrt(outD2[p])
+    mean[i] = sum / found
   }
   return { mean, lonely }
+}
+
+/**
+ * The outlier filter's limit from the statistics of a cloud's parts ({ cnt, s1, s2 }
+ * each: the count, sum and sum of squares of its points' neighbour means), as one run
+ * over the whole cloud sets it (core/lod/transform.js editTile, a tile each).
+ */
+export function outlierLimit(stats, stdRatio) {
+  let cnt = 0,
+    s1 = 0,
+    s2 = 0
+  for (const s of stats) {
+    cnt += s.cnt
+    s1 += s.s1
+    s2 += s.s2
+  }
+  const mu = cnt ? s1 / cnt : 0,
+    sigma = cnt ? Math.sqrt(Math.max(s2 / cnt - mu * mu, 0)) : 0
+  return { mu, sigma, limit: mu + stdRatio * sigma }
 }
 
 /**

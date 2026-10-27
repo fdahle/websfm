@@ -30,8 +30,9 @@ a coarser cloth bridges wider roofs, and a finer one follows steeper and smaller
 ground forms. At 1 m it bridges roofs up to about 40 m across and follows slopes
 up to about 30 %. Use 2 m for large halls or warehouses, and 0.5 m for steep mountain
 terrain. A finer cloth costs more time: about 5–10 s per km² at 1 m, four times
-that at 0.5 m. Above 4 million cloth points the resolution is coarsened, and the log
-says so.
+that at 0.5 m, and gains nothing once it is finer than the points are spaced. Above 4
+million cloth points the resolution is coarsened, and the log says so (a streamed
+cloud: per tile, below).
 
 ## Terrain
 <!-- param: rigidness default: Rolling relief -->
@@ -66,7 +67,12 @@ classifies the whole cloud, which makes the cloth larger.
 A *streamed* cloud (a survey too large for memory, see
 [Point Cloud Tools](guide:point-cloud-tools)) is classified tile by tile, always over
 all of its points. Each tile is read with a margin of 40 cloth cells (at least 30 m)
-around it, so a building on a tile edge is still spanned. The result is a new streamed
+around it, so a building on a tile edge is still spanned. A tile whose cloth (with its
+margin) would need more than 4 million points uses a coarser one, and the log says how
+many tiles did; neighbouring tiles at different resolutions can then classify the
+ground slightly differently along their edge, so on a sparse survey a cloth resolution
+about the point spacing keeps every tile alike (the dialog shows how many cloth points
+the cloud needs). The tiles run on every worker at once. The result is a new streamed
 cloud.
 
 ## Correcting the result by hand

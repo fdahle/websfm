@@ -181,6 +181,8 @@ const SPRINGS = [
   [2, -2],
   [-2, 2],
 ]
+const SPRING_DC = Int8Array.from(SPRINGS, ([dc]) => dc)
+const SPRING_DR = Int8Array.from(SPRINGS, ([, dr]) => dr)
 
 // Run the cloth. Mutates nothing it was given; returns the particle heights and
 // how the run ended.
@@ -193,6 +195,7 @@ function simulateCloth(H, width, height, opts, onProgress) {
   const z = new Float64Array(n).fill(hMin - START_DEPTH / metresPerUnit)
   const zOld = Float64Array.from(z)
   const pinned = new Uint8Array(n)
+  const offsets = Int32Array.from({ length: 16 }, (_, k) => SPRING_DR[k] * width + SPRING_DC[k])
   const moveBoth = 0.5 * (1 - 0.4 ** rigidness)
   const moveOne = 1 - 0.7 ** rigidness
   let iterations = 0,
@@ -211,14 +214,22 @@ function simulateCloth(H, width, height, opts, onProgress) {
     // Springs, visited from both ends like the reference implementation, in a
     // fixed row-major order so a run is reproducible.
     for (let r = 0; r < height; r++) {
+      const innerRow = r >= 2 && r < height - 2
       for (let c = 0; c < width; c++) {
         const a = r * width + c
         const pa = pinned[a]
+        // Two cells from every edge, all 16 neighbours exist: no bounds tests (the
+        // same springs in the same order, so the same cloth).
+        const inner = innerRow && c >= 2 && c < width - 2
         for (let s = 0; s < 16; s++) {
-          const cc = c + SPRINGS[s][0],
-            rr = r + SPRINGS[s][1]
-          if (cc < 0 || cc >= width || rr < 0 || rr >= height) continue
-          const b = rr * width + cc
+          let b
+          if (inner) b = a + offsets[s]
+          else {
+            const cc = c + SPRING_DC[s],
+              rr = r + SPRING_DR[s]
+            if (cc < 0 || cc >= width || rr < 0 || rr >= height) continue
+            b = rr * width + cc
+          }
           const pb = pinned[b]
           if (pa && pb) continue
           const d = z[b] - z[a]

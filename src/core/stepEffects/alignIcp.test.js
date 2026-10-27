@@ -12,4 +12,10 @@ describe('alignIcpEffects', () => {
     expect(alignIcpEffects(s).solve).toMatch(/and scale are solved point-to-plane \(the reference's normals estimated/)
     expect(alignIcpEffects({ ...s, pointToPlane: false }).solve).toMatch(/and scale are solved point-to-point/)
   })
+
+  it('says a streamed source is aligned on a sample and moved whole', () => {
+    const e = alignIcpEffects(ICP_DEFAULTS, { sourceName: 'Survey', streamedPoints: 51_000_000 })
+    expect(e.pair).toMatch(/from a sample of up to 2,000,000 of its points, and all 51,000,000 move/)
+    expect(alignIcpEffects(ICP_DEFAULTS).pair).not.toMatch(/streamed/)
+  })
 })

@@ -19,6 +19,9 @@ const TYPES = {
 }
 const pad4 = (n) => (n + 3) & ~3
 
+/** The typed array class of an attribute type name. */
+export const arrayOfType = (type) => TYPES[type]
+
 /** The attribute type name of a typed array (for the layout). */
 export function typeName(arr) {
   for (const [name, T] of Object.entries(TYPES)) if (arr instanceof T) return name

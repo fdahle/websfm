@@ -9,11 +9,13 @@
 //   comes out once and sees its neighbours across the tile's edge.
 
 import { screenSelectMask } from '../products/screenSelect.js'
-import { filterCloud, sorNeighbourMeans, estimateSpacing } from '../products/cloudEdit.js'
+import { filterCloud, sorNeighbourMeans, estimateSpacing, outlierLimit } from '../products/cloudEdit.js'
 import { classifyCloudGround } from '../products/groundFilter.js'
 import { transformCloud, applyTransform } from '../products/cloudAlign.js'
 import { planExtract, extractPoints } from './extract.js'
 import { nodeCube } from './octree.js'
+import { arrayOfType } from './nodeCodec.js'
+import { clothNote } from './clothNote.js'
 import { pluralize } from '../textFormat.js'
 
 // The box around a moved box: its eight corners, transformed.
@@ -220,6 +222,203 @@ export function subsetPoints(p, keep) {
   return { count: n, pos, col, attributes }
 }
 
+// The attributes an edit writes: the source's, plus a classification when it classifies
+// a cloud that had none.
+function editAttributes(lod, mode) {
+  const attrs = lod.layout.attributes.map((a) => ({ ...a }))
+  const addClass =
+    (mode === 'classify' || mode === 'classify-ground') && !attrs.some((a) => a.name === 'classification')
+  if (addClass) attrs.push({ name: 'classification', type: 'uint8' })
+  return { attrs, addClass }
+}
+
+/**
+ * A neighbourhood edit ('filter': filterCloud's settings; 'classify-ground':
+ * classifyCloudGround's, in metres) planned tile by tile: the tiles, their margin and
+ * the settings every tile runs with. Plain data, so the tiles can go to the worker pool
+ * one at a time (editTile) and their outputs on to the octree build
+ * (tileOutputsSource). `tilePoints`: points per tile with its margin.
+ * → { mode, label, tiles, halo, run, sor: { k, reach, stdRatio, last } | null, addClass }
+ */
+export function planTiledEdit(lod, nodes, mode, settings = {}, { tilePoints = settings.tilePoints ?? 6_000_000 } = {}) {
+  const b = lod.bounds
+  const box3 = { minX: b.min[0], minY: b.min[1], minZ: b.min[2], maxX: b.max[0], maxY: b.max[1], maxZ: b.max[2] }
+  // The mean point spacing of a 2.5D cloud, for the filters' margin.
+  const spacing = Math.sqrt(((b.max[0] - b.min[0]) * (b.max[1] - b.min[1])) / Math.max(1, lod.points))
+  const methods = mode === 'filter' ? (settings.methods ?? []) : []
+  // What each filter sees around a point, from the WHOLE cloud, so every tile filters
+  // alike and a point's result does not depend on where the tile edges fall:
+  //   voxel     its cell (the tiles' inner edges sit on its grid);
+  //   isolated  the cell's neighbours, up to 2 cells off (an automatic cell is the
+  //             whole cloud's 4× spacing, not each tile's own);
+  //   outlier   neighbours within `reach` (4× the whole cloud's spacing, as a
+  //             resident run's own bounds give it).
+  // The margin holds them all one after another (a filter's input near the margin's
+  // edge is what the one before it left).
+  const voxel = methods.includes('voxel') ? (settings.voxel?.cell ?? 0) : 0
+  const isoCell = methods.includes('isolated')
+    ? settings.isolated?.cell > 0
+      ? settings.isolated.cell
+      : Math.max(4 * estimateSpacing(box3, lod.points), 1e-9)
+    : 0
+  const reach = methods.includes('sor') ? 4 * estimateSpacing(box3, lod.points) : 0
+  const halo =
+    mode === 'classify-ground'
+      ? Math.max(30, 40 * (settings.clothResolution ?? 1)) / (settings.metresPerUnit ?? 1)
+      : Math.max(20 * spacing, voxel + 3 * isoCell + reach)
+  const run = isoCell ? { ...settings, isolated: { ...settings.isolated, cell: isoCell } } : settings
+  const tiles = planTiles(lod, { tilePoints, halo, align: voxel, nodes })
+  return {
+    mode,
+    label: mode === 'filter' ? 'Filter' : 'Ground filter',
+    tiles,
+    halo,
+    run,
+    sor: methods.includes('sor')
+      ? { k: settings.sor?.k ?? 12, stdRatio: settings.sor?.stdRatio ?? 1.5, reach, last: methods.at(-1) === 'sor' }
+      : null,
+    addClass: editAttributes(lod, mode).addClass,
+  }
+}
+
+/**
+ * A tile of a planned edit read whole, with its margin: every level of the octree. One
+ * too dense to split further would come back thinned (the read stops at a coarser
+ * level to stay within one buffer), and so would the edit's output, silently: refused.
+ */
+export async function readTile(reader, lod, plan, tile) {
+  const ex = planExtract(reader.nodes, lod, { box: tile.box })
+  if (!ex.complete) {
+    throw new Error(
+      `${plan.label}: one tile holds about ${(ex.estimate / 1e6).toFixed(0)} M points at its finest level read ` +
+        `(of ${(tile.estimate / 1e6).toFixed(0)} M estimated), more than one read can hold; the cloud is too dense in one place ` +
+        'to edit tile by tile — crop that part out first',
+    )
+  }
+  const pts = await extractPoints(reader, ex, lod, { box: tile.box })
+  return plan.addClass ? { ...pts, attributes: { ...pts.attributes, classification: new Uint8Array(pts.count) } } : pts
+}
+
+const quiet = () => {}
+const ownPoints = (tile, p) => (i) => inCore(tile, p.pos[3 * i], p.pos[3 * i + 1])
+
+/**
+ * One tile of a planned edit, from its points read with the margin (readTile): its OWN
+ * points after the edit. The outlier filter compares each point with the WHOLE
+ * cloud's statistics, so with it the tile stops short of the cut: the filters before
+ * it have run, and every point carries its neighbour mean and loneliness (`mean`,
+ * `lonely`; `stats` { cnt, s1, s2 } is the tile's share of the statistics), for
+ * outlierCut once every tile is done. Needs the outlier filter last in the chain.
+ * → { points, mean?, lonely?, stats?, ground?, cloth? (the ground filter's cloth resolution,
+ *   in the cloud's units) }
+ */
+export function editTile(cloud, plan, tile) {
+  if (plan.mode === 'classify-ground') {
+    const r = cloud.count ? classifyCloudGround(cloud, null, { ...plan.run, extent: 'all', onLog: quiet }) : null
+    const out = r ? { ...cloud, attributes: { ...cloud.attributes, classification: r.classes } } : cloud
+    const points = subsetPoints(out, ownPoints(tile, out))
+    let ground = 0
+    for (const c of points.attributes.classification ?? []) if (c === 2) ground++
+    // The cloth's resolution in this tile (coarser than asked past the particle cap).
+    return { points, ground, cloth: r?.cloth?.res ?? null }
+  }
+  if (!plan.sor) {
+    const out = cloud.count ? filterCloud(cloud, plan.run, quiet) : cloud
+    return { points: subsetPoints({ ...out, attributes: out.attributes ?? {} }, ownPoints(tile, out)) }
+  }
+  if (!plan.sor.last) throw new Error('editTile: the outlier filter must be the last of the chain')
+  const methods = plan.run.methods.slice(0, -1)
+  const pre = methods.length && cloud.count ? filterCloud(cloud, { ...plan.run, methods }, quiet) : cloud
+  const pts = { ...pre, attributes: pre.attributes ?? {} }
+  const own = new Uint8Array(pts.count)
+  for (let i = 0; i < pts.count; i++) own[i] = inCore(tile, pts.pos[3 * i], pts.pos[3 * i + 1]) ? 1 : 0
+  const { mean: m, lonely: l } =
+    pts.count >= 3
+      ? sorNeighbourMeans(pts, { k: plan.sor.k, reach: plan.sor.reach })
+      : { mean: new Float64Array(pts.count), lonely: new Uint8Array(pts.count).fill(1) }
+  const points = subsetPoints(pts, own)
+  const mean = new Float64Array(points.count),
+    lonely = new Uint8Array(points.count)
+  const stats = { cnt: 0, s1: 0, s2: 0 }
+  for (let i = 0, o = 0; i < pts.count; i++) {
+    if (!own[i]) continue
+    mean[o] = m[i]
+    lonely[o] = l[i]
+    if (!l[i]) {
+      stats.cnt++
+      stats.s1 += m[i]
+      stats.s2 += m[i] * m[i]
+    }
+    o++
+  }
+  return { points, mean, lonely, stats }
+}
+
+/** A tile's points that pass the outlier cut. */
+export const outlierCut = (t, limit) => subsetPoints(t.points, (i) => !t.lonely[i] && t.mean[i] <= limit)
+
+// A tile's output as bytes, for a temporary file between the worker that edited it
+// and the octree build: a header (count, flags), then 8-byte aligned sections.
+const align8 = (n) => (n + 7) & ~7
+export function packTile(t, attrs) {
+  const n = t.points.count
+  const withSor = !!t.mean
+  const parts = [t.points.pos.subarray(0, 3 * n)]
+  if (withSor) parts.push(t.mean, t.lonely)
+  for (const a of attrs) parts.push(t.points.attributes[a.name] ?? new (arrayOfType(a.type))(n))
+  if (t.points.col) parts.push(t.points.col.subarray(0, 3 * n))
+  let size = 8
+  for (const p of parts) size += align8(p.byteLength)
+  const out = new Uint8Array(size)
+  new Uint32Array(out.buffer, 0, 2).set([n, (t.points.col ? 1 : 0) | (withSor ? 2 : 0)])
+  let o = 8
+  for (const p of parts) {
+    out.set(new Uint8Array(p.buffer, p.byteOffset, p.byteLength), o)
+    o += align8(p.byteLength)
+  }
+  return out
+}
+
+export function unpackTile(u8, attrs) {
+  const buf = u8.byteOffset % 8 ? u8.slice() : u8
+  const [n, flags] = new Uint32Array(buf.buffer, buf.byteOffset, 2)
+  let o = buf.byteOffset + 8
+  const take = (T, len) => {
+    const a = new T(buf.buffer, o, len)
+    o += align8(a.byteLength)
+    return a
+  }
+  const pos = take(Float64Array, 3 * n)
+  const mean = flags & 2 ? take(Float64Array, n) : null
+  const lonely = flags & 2 ? take(Uint8Array, n) : null
+  const attributes = Object.fromEntries(attrs.map((a) => [a.name, take(arrayOfType(a.type), n)]))
+  const col = flags & 1 ? take(Uint8Array, 3 * n) : null
+  return { points: { count: n, pos, col, attributes }, mean, lonely }
+}
+
+/**
+ * The outputs of a planned edit's tiles (packTile bytes, read in tile order by
+ * `readTile(i)`) as a build source (core/lod/build.js), cut at the outlier limit when
+ * the plan has the outlier filter.
+ */
+export function tileOutputsSource(lod, plan, readTileOutput, { limit = null, progress = null } = {}) {
+  const { attrs } = editAttributes(lod, plan.mode)
+  async function* parts() {
+    for (let i = 0; i < plan.tiles.length; i++) {
+      const t = unpackTile(await readTileOutput(i), attrs)
+      yield t.mean ? outlierCut(t, limit) : t.points
+      progress?.(i + 1, plan.tiles.length, 'Reading the edited tiles')
+    }
+  }
+  return {
+    count: lod.points,
+    bounds: lod.bounds,
+    colour: lod.layout.colour,
+    attributes: attrs,
+    batches: () => rebatch(parts()),
+  }
+}
+
 /**
  * The edited points of a streamed cloud as a build source (core/lod/build.js):
  * mode 'crop' (settings { min, max }: keeps what lies outside), 'mask' ({ selection,
@@ -228,10 +427,7 @@ export function subsetPoints(p, keep) {
  * 'classify-ground' (classifyCloudGround's, in metres).
  */
 export function streamedEditSource(reader, lod, mode, settings = {}, { log = () => {}, progress = null } = {}) {
-  const attrs = lod.layout.attributes.map((a) => ({ ...a }))
-  const addClass =
-    (mode === 'classify' || mode === 'classify-ground') && !attrs.some((a) => a.name === 'classification')
-  if (addClass) attrs.push({ name: 'classification', type: 'uint8' })
+  const { attrs, addClass } = editAttributes(lod, mode)
   const withClass = (p) =>
     addClass ? { ...p, attributes: { ...p.attributes, classification: new Uint8Array(p.count) } } : p
   let done = 0
@@ -268,116 +464,60 @@ export function streamedEditSource(reader, lod, mode, settings = {}, { log = () 
     }
   }
 
+  // Tile after tile in this worker (the store spreads them over the pool instead:
+  // planTiledEdit, editTile, tileOutputsSource). The outlier filter's statistics come
+  // from a first pass over every tile; the second filters with the whole cloud's limit.
   async function* tiled() {
-    const b = lod.bounds
-    const box3 = { minX: b.min[0], minY: b.min[1], minZ: b.min[2], maxX: b.max[0], maxY: b.max[1], maxZ: b.max[2] }
-    // The mean point spacing of a 2.5D cloud, for the filters' margin.
-    const spacing = Math.sqrt(((b.max[0] - b.min[0]) * (b.max[1] - b.min[1])) / Math.max(1, lod.points))
-    const methods = mode === 'filter' ? (settings.methods ?? []) : []
-    // What each filter sees around a point, from the WHOLE cloud, so every tile filters
-    // alike and a point's result does not depend on where the tile edges fall:
-    //   voxel     its cell (the tiles' inner edges sit on its grid);
-    //   isolated  the cell's neighbours, up to 2 cells off (an automatic cell is the
-    //             whole cloud's 4× spacing, not each tile's own);
-    //   outlier   neighbours within `reach` (4× the whole cloud's spacing, as a
-    //             resident run's own bounds give it).
-    // The margin holds them all one after another (a filter's input near the margin's
-    // edge is what the one before it left).
-    const voxel = methods.includes('voxel') ? (settings.voxel?.cell ?? 0) : 0
-    const isoCell = methods.includes('isolated')
-      ? settings.isolated?.cell > 0
-        ? settings.isolated.cell
-        : Math.max(4 * estimateSpacing(box3, lod.points), 1e-9)
-      : 0
-    const reach = methods.includes('sor') ? 4 * estimateSpacing(box3, lod.points) : 0
-    const halo =
-      mode === 'classify-ground'
-        ? Math.max(30, 40 * (settings.clothResolution ?? 1)) / (settings.metresPerUnit ?? 1)
-        : Math.max(20 * spacing, voxel + 3 * isoCell + Math.max(reach, 3 * (settings.sor?.cell ?? 0)))
-    let run = isoCell ? { ...settings, isolated: { ...settings.isolated, cell: isoCell } } : settings
-    const label = mode === 'filter' ? 'Filter' : 'Ground filter'
-    const tiles = planTiles(lod, {
-      tilePoints: settings.tilePoints ?? 6_000_000,
-      halo,
-      align: voxel,
-      nodes: reader.nodes,
-    })
-    log(`${label}: ${pluralize(tiles.length, 'tile')} with a ${halo.toPrecision(3)}-unit margin`)
-    const quiet = () => {}
-    // A tile is read whole: every level of the octree. One too dense to split further
-    // would come back thinned (the read stops at a coarser level to stay within one
-    // buffer), and so would the edit's output, silently. Refuse instead.
-    const readTile = async (tile) => {
-      const plan = planExtract(reader.nodes, lod, { box: tile.box })
-      if (!plan.complete) {
-        throw new Error(
-          `${label}: one tile holds about ${(plan.estimate / 1e6).toFixed(0)} M points at its finest level read ` +
-            `(of ${(tile.estimate / 1e6).toFixed(0)} M estimated), more than one read can hold; the cloud is too dense in one place ` +
-            'to edit tile by tile — crop that part out first',
-        )
-      }
-      return withClass(await extractPoints(reader, plan, lod, { box: tile.box }))
-    }
-    // The outlier filter compares each point with the WHOLE cloud's statistics: a
-    // first pass gathers them over every tile's own points (with the filters before it
-    // applied), and the reach comes from the whole cloud, so the tiles filter alike.
-    if (methods.includes('sor')) {
-      const before = { ...run, methods: methods.slice(0, methods.indexOf('sor')) }
-      let cnt = 0,
-        s1 = 0,
-        s2 = 0
+    const plan = planTiledEdit(lod, reader.nodes, mode, settings)
+    const { tiles, label } = plan
+    log(`${label}: ${pluralize(tiles.length, 'tile')} with a ${plan.halo.toPrecision(3)}-unit margin`)
+    let run = plan.run
+    const passes = plan.sor ? 2 : 1
+    if (plan.sor) {
+      const stats = []
       for (const tile of tiles) {
-        const cloud = await readTile(tile)
-        const pre = before.methods.length && cloud.count ? filterCloud(cloud, before, quiet) : cloud
+        const cloud = await readTile(reader, lod, plan, tile)
+        const methods = run.methods.slice(0, run.methods.indexOf('sor'))
+        const pre = methods.length && cloud.count ? filterCloud(cloud, { ...run, methods }, quiet) : cloud
         if (pre.count >= 3) {
-          const { mean, lonely } = sorNeighbourMeans(pre, {
-            k: settings.sor?.k ?? 12,
-            cell: settings.sor?.cell ?? 0,
-            reach,
-          })
+          const { mean, lonely } = sorNeighbourMeans(pre, { k: plan.sor.k, reach: plan.sor.reach })
+          const s = { cnt: 0, s1: 0, s2: 0 }
           for (let i = 0; i < pre.count; i++) {
             if (lonely[i] || !inCore(tile, pre.pos[3 * i], pre.pos[3 * i + 1])) continue
-            cnt++
-            s1 += mean[i]
-            s2 += mean[i] * mean[i]
+            s.cnt++
+            s.s1 += mean[i]
+            s.s2 += mean[i] * mean[i]
           }
+          stats.push(s)
         }
         step(1, 2 * tiles.length, 'Measuring neighbour distances')
       }
-      const mu = cnt ? s1 / cnt : 0,
-        sigma = cnt ? Math.sqrt(Math.max(s2 / cnt - mu * mu, 0)) : 0
-      const limit = mu + (settings.sor?.stdRatio ?? 1.5) * sigma
+      const { mu, sigma, limit } = outlierLimit(stats, plan.sor.stdRatio)
       log(
         `Filter (outlier): mean neighbour distance ${mu.toFixed(4)} ±${sigma.toFixed(4)} over the whole cloud, limit ${limit.toFixed(4)}`,
       )
-      run = { ...run, sor: { ...settings.sor, reach, limit } }
+      run = { ...run, sor: { ...settings.sor, reach: plan.sor.reach, limit } }
     }
     let ground = 0
+    const cloths = []
     for (const tile of tiles) {
-      const cloud = await readTile(tile)
-      if (cloud.count) {
-        let out
-        if (mode === 'filter') out = filterCloud(cloud, run, quiet)
-        else {
-          const r = classifyCloudGround(cloud, null, { ...settings, extent: 'all', onLog: quiet })
-          out = {
-            ...cloud,
-            attributes: { ...cloud.attributes, classification: r ? r.classes : cloud.attributes.classification },
-          }
-        }
-        const kept = subsetPoints({ ...out, attributes: out.attributes ?? {} }, (i) =>
-          inCore(tile, out.pos[3 * i], out.pos[3 * i + 1]),
-        )
-        if (mode === 'classify-ground') for (const c of kept.attributes.classification) if (c === 2) ground++
-        yield kept
+      const cloud = await readTile(reader, lod, plan, tile)
+      if (mode === 'classify-ground') {
+        const r = editTile(cloud, plan, tile)
+        ground += r.ground
+        cloths.push(r.cloth)
+        if (r.points.count) yield r.points
+      } else {
+        const r = editTile(cloud, { ...plan, run, sor: null }, tile)
+        if (r.points.count) yield r.points
       }
-      step(
-        1,
-        methods.includes('sor') ? 2 * tiles.length : tiles.length,
-        mode === 'filter' ? 'Filtering tiles' : 'Classifying tiles',
-      )
+      step(1, passes * tiles.length, mode === 'filter' ? 'Filtering tiles' : 'Classifying tiles')
     }
-    if (mode === 'classify-ground') log(`Ground filter: ${ground.toLocaleString()} ground points`)
+    if (mode === 'classify-ground') {
+      log(`Ground filter: ${ground.toLocaleString()} ground points`)
+      const note = clothNote(cloths, settings.clothResolution ?? 1, settings.metresPerUnit ?? 1)
+      if (note) log(note, 'warn')
+    }
   }
 
   return {

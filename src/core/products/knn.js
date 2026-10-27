@@ -1,11 +1,13 @@
 // Nearest-neighbour queries over a flat point cloud — the ONE index behind normal
 // estimation, cloud-to-cloud distance and ICP. Pure, no Vue/Pinia/OPFS/DOM.
 //
-// A static k-d tree, not a uniform grid. The outlier filters' grid
-// (core/products/cloudEdit.js `buildSpatialGrid`) answers "who is near me" for a
+// A static k-d tree, not a uniform grid. A grid (core/products/cloudEdit.js
+// `buildSpatialGrid`, behind the voxel and isolated filters) answers "which cell" for a
 // point OF the cloud; these tools also query points that are far from it — another
 // epoch's cloud, a flyer, the unaligned start of an ICP — and a grid shell-walk
 // costs the volume it crosses, while the tree costs O(log n) wherever the query is.
+// It is also the faster k-nearest search on a lumpy dense cloud, whose dense cells
+// hold hundreds of candidates (the outlier filter's sorNeighbourMeans uses it).
 //
 // Layout is implicit and typed-array only (dense-scale rule: never an object per
 // point): a permutation of point indices, and per tree node a split axis + value in

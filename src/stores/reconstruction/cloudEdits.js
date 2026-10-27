@@ -1,4 +1,4 @@
-import { isStreamed, streamedRefusal } from '../../core/lod/streamed.js'
+import { isStreamed, streamedRefusal, anyCloudBounds, STREAMED_ICP_SAMPLE_POINTS } from '../../core/lod/streamed.js'
 import { markRaw, toRaw } from 'vue'
 import { rawTexture } from './meshTexture.js'
 import { facePages, regroupByPage } from '../../core/products/texture/carry.js'
@@ -13,6 +13,7 @@ import {
 } from '../../workers/computeClient.js'
 import { pluralize } from '../../core/textFormat.js'
 import { planCloudSlabs, gatherPoints } from '../../core/products/cloudSlabs.js'
+import { planMeshBlocks, blockMesh, joinBlocks, BLOCK_HEADROOM } from '../../core/products/meshBlocks.js'
 import { cloudBounds, estimateSpacing } from '../../core/products/cloudEdit.js'
 
 // A crop of a streamed cloud becomes a resident one: at most this many points.
@@ -23,6 +24,10 @@ const STREAMED_EDIT_MODES = new Set(['crop', 'mask', 'classify', 'filter', 'clas
 // the worker pool (each slab with a margin); below it one worker is as quick.
 const SPLIT_MIN_POINTS = 1_000_000
 const SPLIT_POINTS_PER_WORKER = 400_000
+// From this many triangles Decimate splits an untextured mesh into blocks over the pool
+// (core/products/meshBlocks.js), each worker taking at least SPLIT_TRIANGLES_PER_WORKER.
+const DECIMATE_SPLIT_MIN_TRIANGLES = 500_000
+const SPLIT_TRIANGLES_PER_WORKER = 250_000
 // A streamed REFERENCE (alignment, distance) is read where the source is, at full
 // detail up to this many points, coarser beyond (the log says so).
 const STREAMED_REFERENCE_MAX_POINTS = 12_000_000
@@ -483,7 +488,7 @@ export function createCloudEdits({
         lonely = new Uint8Array(cloud.count)
       const used = await runOverSlabs(
         cloud,
-        { mode: 'part-sor', settings: { k: sor.k ?? 12, cell: sor.cell ?? 0, reach }, halo: reach },
+        { mode: 'part-sor', settings: { k: sor.k ?? 12, reach }, halo: reach },
         (part, out) => {
           for (let j = 0; j < part.own; j++) {
             mean[part.idx[j]] = out.attributes.mean[j]
@@ -536,6 +541,97 @@ export function createCloudEdits({
     return cloud
   }
 
+  // Decimate of a large untextured mesh over the pool (core/products/meshBlocks.js): the
+  // blocks decimated apart with their shared vertices locked, to BLOCK_HEADROOM above
+  // the target, then one pass over the joined mesh to the target, across the seams.
+  // → the new mesh, or undefined where one worker does it (`settings.split === false`,
+  // a small or textured mesh, one worker).
+  async function splitDecimate(source, settings, name, onProgress) {
+    if (settings.split === false || POOL_SIZE < 2 || source.uv || source.count < DECIMATE_SPLIT_MIN_TRIANGLES)
+      return undefined
+    const t0 = performance.now()
+    const target =
+      settings.targetTriangles != null
+        ? Math.max(0, Math.floor(settings.targetTriangles))
+        : Math.round(source.count * Math.min(1, Math.max(0, Number(settings.targetRatio) || 0)))
+    const { targetTriangles: _t, targetRatio: _r, split: _s, ...opts } = settings
+    const workers = Math.max(2, Math.min(POOL_SIZE, Math.floor(source.count / SPLIT_TRIANGLES_PER_WORKER)))
+    const { parts, shared } = planMeshBlocks(source, workers)
+    const ratio = Math.min(1, (target / Math.max(1, source.count)) * (1 + BLOCK_HEADROOM))
+    const fractions = new Array(parts.length).fill(0)
+    const blocks = await Promise.all(
+      parts.map(async (part, w) => {
+        const b = blockMesh(source, part.tris, shared)
+        const transfer = [b.mesh.pos.buffer, b.mesh.idx.buffer, ...(b.mesh.col ? [b.mesh.col.buffer] : [])]
+        const {
+          cloud: out,
+          error,
+          extra,
+        } = await workerEditCloud(
+          {
+            mode: 'part-decimate',
+            clouds: [{ id: `block-${w}`, kind: 'mesh', ...b.mesh }],
+            settings: {
+              ...opts,
+              targetTriangles: Math.round(part.tris.length * ratio),
+              locked: b.locked,
+              vertex: b.vertex,
+            },
+          },
+          {
+            worker: w,
+            transfer,
+            onLog: (m, l, c) => log(m, l, c),
+            onProgress: (d, t, lbl, f) => {
+              fractions[w] = f ?? d / Math.max(1, t)
+              const sum = fractions.reduce((a, c) => a + c, 0)
+              onProgress?.(sum, parts.length + 1, 'Decimating blocks', sum / (parts.length + 1))
+            },
+          },
+        )
+        if (error) throw new Error(error)
+        return { mesh: out, vertex: extra.vertex }
+      }),
+    )
+    const joined = joinBlocks(blocks, shared)
+    const transfer = [joined.pos.buffer, joined.idx.buffer, ...(joined.col ? [joined.col.buffer] : [])]
+    const {
+      cloud: out,
+      error,
+      extra: stats,
+    } = await workerEditCloud(
+      {
+        mode: 'part-decimate',
+        clouds: [{ id: 'joined', kind: 'mesh', ...joined }],
+        settings: { ...opts, targetTriangles: target },
+      },
+      {
+        transfer,
+        onLog: (m, l, c) => log(m, l, c),
+        onProgress: (d, t, lbl, f) =>
+          onProgress?.(
+            parts.length + (f ?? 0),
+            parts.length + 1,
+            'Decimating across the seams',
+            (parts.length + (f ?? 0)) / (parts.length + 1),
+          ),
+      },
+    )
+    if (error) throw new Error(error)
+    if (!out?.count) return null
+    log(
+      `Decimate: ${out.count.toLocaleString()} triangles from ${source.count.toLocaleString()}, ` +
+        `${pluralize(parts.length, 'block')} on ${pluralize(parts.length, 'worker')} ` +
+        `(${joined.count.toLocaleString()} joined, then across the seams), largest error ` +
+        `${(stats?.maxError ?? 0).toPrecision(3)}, in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+      'success',
+      'Products',
+    )
+    const mesh = addDerivedMesh(out, { name: name || `${source.name} (mesh-decimate)`, imported: !!source.imported })
+    if (REPLACES_SOURCE_VIEW.has('mesh-decimate')) source.visible = false
+    return mesh
+  }
+
   async function editClouds({ mode, sourceIds = [], settings = {}, name, style = null } = {}, onProgress) {
     // Model edits (Tools ▸ Model ▾): one shared commit path, refineMainSparse.
     if (mode === 'sparse') {
@@ -571,6 +667,44 @@ export function createCloudEdits({
     // dense-only (a sparse cloud's points carry view-tracks — never edited here).
     const meshSource = MESH_EDIT_MODES.has(mode)
     let resolved = sourceIds.map((id) => clouds.value.find((c) => c.id === id) ?? null)
+    // A streamed source of an alignment: found on a sample of it, then applied to all of
+    // it by the streamed Transform (below, once the worker has the transform).
+    const streamedSource = mode === 'icp' && isStreamed(resolved[0]) && editStreamedCloud ? resolved[0] : null
+    if (streamedSource) {
+      if (!extractCloudPoints || !resolved[1] || resolved[1].id === streamedSource.id) {
+        log('Cloud edit: choose a reference other than the source', 'warn', 'Products')
+        return null
+      }
+      try {
+        const { cloud: flat, plan } = await extractCloudPoints(
+          streamedSource,
+          { maxPoints: STREAMED_ICP_SAMPLE_POINTS },
+          onProgress,
+        )
+        if (!flat.count) return null
+        log(
+          `ICP: aligning on ${flat.count.toLocaleString()} points of the streamed source "${streamedSource.name}"` +
+            (plan.complete ? '' : ` (${plan.spacing.toPrecision(3)}-unit spacing)`) +
+            `, then moving all ${streamedSource.count.toLocaleString()}`,
+          'info',
+          'Products',
+        )
+        resolved = [
+          { ...flat, id: `${streamedSource.id}:sample`, name: streamedSource.name, kind: 'dense' },
+          resolved[1],
+        ]
+        // The automatic search radius is the whole cloud's (10× its spacing), not the
+        // thinned sample's.
+        if (!(settings.maxDistance > 0))
+          settings = {
+            ...settings,
+            maxDistance: 10 * (estimateSpacing(anyCloudBounds(streamedSource), streamedSource.count) || 1),
+          }
+      } catch (err) {
+        log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+        return null
+      }
+    }
     // A streamed reference (an imported survey too large to hold): only the part around
     // the source matters, read from its octree as a resident cloud for this run.
     if (REFERENCE_MODES.has(mode) && isStreamed(resolved[1]) && resolved[0]?.pos && extractCloudPoints) {
@@ -647,10 +781,13 @@ export function createCloudEdits({
       log(`Cloud edit: no usable ${meshSource ? 'mesh' : 'dense cloud'} for this tool`, 'warn', 'Products')
       return null
     }
-    if (sources.length === 1 && (mode === 'filter' || mode === 'normals')) {
+    if (sources.length === 1 && (mode === 'filter' || mode === 'normals' || mode === 'mesh-decimate')) {
       reconStatus.value = 'running'
       try {
-        const cloud = await splitEdit(sources[0], mode, settings, name, onProgress)
+        const cloud =
+          mode === 'mesh-decimate'
+            ? await splitDecimate(sources[0], settings, name, onProgress)
+            : await splitEdit(sources[0], mode, settings, name, onProgress)
         if (cloud !== undefined) {
           reconStatus.value = 'done'
           if (cloud) await save()
@@ -730,6 +867,22 @@ export function createCloudEdits({
         log('Cloud edit: the result is empty — nothing was added', 'warn', 'Products')
         reconStatus.value = 'done'
         return null
+      }
+      if (streamedSource) {
+        const cloud = await editStreamedCloud(
+          streamedSource,
+          { mode: 'transform', settings: { transform: extra.transform }, name: name || `${streamedSource.name} (icp)` },
+          onProgress,
+        )
+        if (cloud) streamedSource.visible = false
+        reconStatus.value = cloud ? 'done' : 'error'
+        if (cloud)
+          log(
+            `Cloud edit: added "${cloud.name}" (${cloud.count.toLocaleString()} points, streamed)`,
+            'success',
+            'Products',
+          )
+        return cloud
       }
       let cloud
       if ((mode === 'mask' || mode === 'classify') && sources[0].derived) {

@@ -141,7 +141,9 @@ every run.
 - **Decimate…** reduces the triangle count to a share or a number, removing
   triangles where the surface is flat and keeping them where it bends (quadric edge
   collapse). Boundaries are preserved, so a terrain edge or a cut does not erode. A
-  few million triangles take several seconds.
+  mesh of half a million triangles or more is cut into blocks, one per worker, then
+  joined and decimated once more across the seams; a few million triangles take a
+  few seconds.
 - **Crop…** keeps the triangles whose three corners lie inside a box.
 - **Sample to points…** turns the surface into a dense cloud of evenly spread points
   with normals and colour, so the point-cloud tools and the DEM can use a mesh.

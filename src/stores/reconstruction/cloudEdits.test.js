@@ -6,7 +6,21 @@ vi.mock('../../workers/computeClient.js', () => ({
   editCloud: async (input) => {
     editCalls.push(input)
     const src = input.clouds[0]
-    return { cloud: { count: src.count, pos: src.pos }, extra: { rms: 0 } }
+    return {
+      cloud: { count: src.count, pos: src.pos },
+      extra: {
+        rms: 0,
+        transform: {
+          scale: 1,
+          R: [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+          ],
+          t: [1, 2, 3],
+        },
+      },
+    }
   },
   optimizeSparse: async () => ({}),
 }))
@@ -69,5 +83,69 @@ describe('an alignment against a streamed reference', () => {
     expect(asked[0].opts.box).toEqual({ min: [-2, -2, -2], max: [12, 22, 7] })
     expect(editCalls[0].clouds[1].count).toBe(3)
     expect(logs.some(([m]) => /read 3 points of the streamed reference "LiDAR"/.test(m))).toBe(true)
+  })
+})
+
+describe('an alignment of a streamed source', () => {
+  it('aligns a sample of it, then moves every point by the streamed Transform', async () => {
+    const survey = {
+      id: 's',
+      name: 'LiDAR',
+      kind: 'dense',
+      count: 9e7,
+      pos: null,
+      lod: { points: 9e7, bounds: { min: [0, 0, 0], max: [900, 1000, 50] } },
+    }
+    const target = { id: 'r', name: 'Dense', kind: 'dense', count: 2, pos: Float32Array.from([0, 0, 0, 10, 20, 5]) }
+    const clouds = ref([survey, target])
+    const asked = []
+    const extractCloudPoints = async (cloud, opts) => {
+      asked.push({ cloud, opts })
+      return {
+        cloud: { count: 3, pos: Float64Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]), col: null, attributes: {} },
+        plan: { complete: false, spacing: 0.5 },
+      }
+    }
+    const streamedEdits = []
+    const editStreamedCloud = async (source, edit) => {
+      streamedEdits.push({ source, edit })
+      return { id: 'moved', name: edit.name, kind: 'dense', count: source.count, pos: null, lod: {} }
+    }
+    const logs = []
+    const { editClouds } = createCloudEdits({
+      clouds,
+      selectedCloudId: ref(null),
+      reconStatus: ref('idle'),
+      log: (m, l) => logs.push([m, l]),
+      makeCloudId: () => 'new',
+      save: async () => {},
+      extractCloudPoints,
+      editStreamedCloud,
+    })
+    editCalls.length = 0
+    const out = await editClouds({ mode: 'icp', sourceIds: ['s', 'r'], settings: { maxDistance: 0 }, name: 'aligned' })
+    expect(asked[0].cloud.id).toBe('s')
+    expect(asked[0].opts.maxPoints).toBe(2_000_000)
+    // The sample is aligned, with the whole cloud's automatic radius (10× its spacing).
+    expect(editCalls[0].clouds[0].count).toBe(3)
+    expect(editCalls[0].settings.maxDistance).toBeCloseTo(10 * Math.cbrt((900 * 1000 * 50) / 9e7))
+    expect(streamedEdits[0].source.id).toBe('s')
+    expect(streamedEdits[0].edit).toEqual({
+      mode: 'transform',
+      settings: {
+        transform: {
+          scale: 1,
+          R: [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+          ],
+          t: [1, 2, 3],
+        },
+      },
+      name: 'aligned',
+    })
+    expect(out.id).toBe('moved')
+    expect(clouds.value[0].visible).toBe(false)
   })
 })

@@ -550,6 +550,15 @@ export const exportMeshTiles = streamingOp('exportMeshTiles')
 // An edit of a streamed cloud into a new octree (core/lod/transform.js):
 // { lod, data, hierarchy, dir, name, mode, settings } → the new octree's metadata.
 export const transformLod = streamingOp('transformLod')
+// The same edit's tiles on the pool (workers/ops/lod.js): plan, one tile into a
+// temporary file, and dropping the octree a worker kept open for its tiles.
+export const planLodEdit = streamingOp('planLodEdit')
+export const editLodTile = streamingOp('editLodTile')
+export const releaseLodSource = (worker) => call('releaseLodSource', [], { worker })
+// An octree build on the pool (workers/ops/lod.js): buildLod / transformLod with `pool`
+// sort the points into chunks; then each chunk's subtree on any worker, and the join.
+export const buildLodChunk = streamingOp('buildLodChunk')
+export const finishLodPool = streamingOp('finishLodPool')
 
 // A COPC file imported as it is (core/lod/copc.js): { file, dir, name } → the cloud's
 // `lod` metadata (format 'copc'); the file is copied into `dir` as `${name}.copc.laz`.

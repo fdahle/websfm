@@ -171,10 +171,13 @@ measure on it. Tools read it from its octree:
   every chosen filter looks at (its voxel, two isolated-filter cells, the outlier
   filter's neighbour reach), and an automatic cell size is the whole cloud's, so where
   the tile edges fall does not change the result. The ground filter's margin is 40
-  times the cloth resolution (at least 30 m). The outlier filter reads the cloud twice:
-  first for the whole cloud's neighbour-distance statistics, then to filter every tile
-  against them. A place too dense to read as one tile stops the run with a message
-  rather than writing a thinned result; crop that part out first.
+  times the cloth resolution (at least 30 m). The tiles are spread over every worker,
+  each holding one tile at a time with its share of the memory limit (Settings), so
+  the more workers, the smaller the tiles. Each tile's result waits in a temporary file
+  until the new octree is built from them. The outlier filter needs the whole cloud's
+  neighbour-distance statistics: every tile keeps its points' distances, and the cut
+  is made as the octree is built. A place too dense to read as one tile stops the run
+  with a message rather than writing a thinned result; crop that part out first.
 - **Export** writes LAS, LAZ, PLY or XYZ node by node. LAS and LAZ keep the file's own
   coordinate quantisation and its projection records; the points come in a different
   order than in the source file. **Export ▸ 3D Tiles…** writes one tile per octree
@@ -186,9 +189,13 @@ measure on it. Tools read it from its octree:
   the part around the source cloud is read (the source's extent grown by the search
   radius), at full detail up to 12 million points and evenly thinned beyond, and the
   log says which. Its normals are estimated where the alignment matches it.
+- **Align to reference (ICP)** also takes it as the **source**: the alignment is found
+  on a sample of up to 2 million of its points spread over the whole cloud (ICP pairs
+  only its *Sample points* anyway), and every point is then moved by it, node by node,
+  into a new streamed cloud. The automatic search radius is the whole cloud's.
 
-Other edits (normals, merge, and a streamed cloud as the *source* of an alignment or
-a distance) work on a crop of it.
+Other edits (normals, merge, and a streamed cloud as the *source* of a distance) work
+on a crop of it.
 
 ## COPC files
 A [COPC](help:copc) file (`.copc.laz`) is a LAZ file whose points are already sorted

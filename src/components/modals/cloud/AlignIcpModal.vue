@@ -11,7 +11,8 @@ import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, referenceOptionLabel } from '../../../composables/useSourcePick.js'
 import { ICP_DEFAULTS } from '../../../core/defaults.user.js'
 import { alignIcpEffects } from '../../../core/stepEffects/alignIcp.js'
-import { cloudBounds, estimateSpacing } from '../../../core/products/cloudEdit.js'
+import { estimateSpacing } from '../../../core/products/cloudEdit.js'
+import { anyCloudBounds, isStreamed } from '../../../core/lod/streamed.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
 // Align to Reference (Tools ▸ Point Cloud ▾) — ICP, point-to-plane where the
@@ -37,8 +38,10 @@ const {
   options: refChoices,
 } = useSourcePick(() => props.references, { exclude: sourceId })
 const unitLabel = computed(() => (source.value?.imported ? 'file units' : 'model units'))
+// A streamed source's from its octree's box (it is aligned on a sample, but the
+// radius stays the whole cloud's, as the store sets it).
 const autoRadius = computed(() =>
-  source.value ? 10 * (estimateSpacing(cloudBounds(source.value), source.value.count) || 1) : 0,
+  source.value ? 10 * (estimateSpacing(anyCloudBounds(source.value), source.value.count) || 1) : 0,
 )
 // Align stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step). A radius of 0 is auto; blank is not.
@@ -56,6 +59,7 @@ const effects = computed(() =>
     autoRadius: autoRadius.value,
     unit: unitLabel.value,
     planar: reference.value?.kind === 'mesh' || !!reference.value?.nrm,
+    streamedPoints: isStreamed(source.value) ? source.value.count : 0,
   }),
 )
 

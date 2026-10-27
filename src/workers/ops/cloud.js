@@ -138,6 +138,7 @@ export function makeCloudOps() {
           inlierFraction: result.inlierFraction,
           iterations: result.iterations,
           converged: result.converged,
+          transform: result.transform,
         },
       }
     },
@@ -174,7 +175,7 @@ export function makeCloudOps() {
     // the outlier filter's neighbour means, and normals. The results ride home as
     // attributes so their buffers are transferred.
     'part-sor': ([c], s) => {
-      const { mean, lonely } = sorNeighbourMeans(c, { k: s.k, cell: s.cell ?? 0, reach: s.reach })
+      const { mean, lonely } = sorNeighbourMeans(c, { k: s.k, reach: s.reach })
       return { out: { count: c.count, pos: c.pos, attributes: { mean, lonely } } }
     },
     'part-normals': ([c], s, log, progress) => {
@@ -191,6 +192,16 @@ export function makeCloudOps() {
     'mesh-decimate': ([m], s, log) => {
       const { mesh, stats } = decimateMesh(m, s, log)
       return { out: mesh, extra: stats }
+    },
+    // A split Decimate (core/products/meshBlocks.js): one block, its shared vertices
+    // locked (`extra.vertex`: each output vertex's index in the whole mesh), or, without
+    // `vertex`, the last pass over the joined blocks.
+    'part-decimate': ([m], s) => {
+      const { mesh, sourceVertex, stats } = decimateMesh(m, s)
+      if (!s.vertex) return { out: mesh, extra: stats }
+      const vertex = new Uint32Array(sourceVertex.length)
+      for (let i = 0; i < vertex.length; i++) vertex[i] = s.vertex[sourceVertex[i]]
+      return { out: mesh, extra: { vertex } }
     },
     // A textured mesh samples its colour from the atlas: decode the JPEG pages first.
     'mesh-sample': async ([m], s, log) => ({
@@ -234,6 +245,7 @@ export function makeCloudOps() {
         )
       emit('progress', [1, 1, 'Done'])
       outward(out, transfer)
+      if (extra?.vertex?.buffer) transfer.push(extra.vertex.buffer)
     } catch (err) {
       out = null
       error = err?.message ?? String(err)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildLod, chooseLayout, chunkLevelFor } from './build.js'
+import { buildLod, chooseLayout, chunkLevelFor, distributeLod, buildChunks, finishLod } from './build.js'
 import { decodeHierarchy, childrenOf } from './hierarchy.js'
 import { decodeNode } from './nodeCodec.js'
 import { nodeCube, keyString, GRID } from './octree.js'
@@ -173,6 +173,63 @@ describe('buildLod (out of core)', () => {
     expect(res.levels).toBeGreaterThan(chunkLevelFor(n, 40000) + 2)
     // The chunk files never held much more than the cloud itself (one copy, quantised).
     expect(tmp.peak).toBeLessThan(n * 20 * 1.5)
+  })
+
+  it('builds the chunks apart (the pool) into the same octree', async () => {
+    const n = 200000,
+      c = cloud(n)
+    const opts = { chunkMax: 30000, leafMax: 8000 }
+    const one = memoryStores()
+    const whole = await buildLod(sourceOf(c), one.tmp, one.out, opts)
+    // As the pool runs it: sort once, each chunk into a part of its own, then the join
+    // (the parts copied into the data file, their offsets moved by where they landed).
+    const { tmp, out } = memoryStores()
+    const state = await distributeLod(sourceOf(c), tmp, opts)
+    expect(state.chunks.length).toBeGreaterThan(3)
+    const parts = []
+    for (const chunk of state.chunks) {
+      const part = memoryStores().out
+      const r = await buildChunks([chunk], tmp, part, state, opts)
+      parts.push({ ...r, bytes: part.bytes() })
+    }
+    for (const p of parts) p.base = await out.write(p.bytes)
+    const joined = await finishLod(state, parts, out, opts)
+    expect(tmp.files.size).toBe(0)
+    expect(joined.points).toBe(n)
+    expect(joined.nodeCount).toBe(whole.nodeCount)
+    expect(joined.dataBytes).toBe(whole.dataBytes)
+    // Node by node the same points (the data file is ordered differently).
+    const nodes = (res, bytes) => {
+      const m = new Map()
+      for (const node of decodeHierarchy(res.hierarchy).values()) {
+        if (!node.count) continue
+        const pts = decodeNode(bytes.subarray(node.offset, node.offset + node.length), node.count, res.layout, {
+          as: 'absolute',
+        })
+        m.set(keyString(node.key), Array.from(pts.col).join(','))
+      }
+      return m
+    }
+    const a = nodes(whole, one.out.bytes()),
+      b = nodes(joined, out.bytes())
+    expect(b.size).toBe(a.size)
+    for (const [k, v] of a) expect(b.get(k)).toBe(v)
+  })
+
+  it('counts no point outside the extent that only quantised past it', async () => {
+    // Coordinates off the 1 mm grid: the lowest rounds down below the measured minimum.
+    const n = 2000
+    const pos = new Float64Array(3 * n)
+    for (let i = 0; i < n; i++) {
+      pos[3 * i] = 0.0004 + (i % 50) * 0.37
+      pos[3 * i + 1] = 0.0004 + Math.floor(i / 50) * 0.29
+      pos[3 * i + 2] = 0.0004 + (i % 7) * 0.11
+    }
+    const src = sourceOf({ pos, col: new Uint8Array(3 * n), cls: new Uint8Array(n) })
+    const { tmp, out } = memoryStores()
+    const res = await buildLod(src, tmp, out, { layout: { offset: [0, 0, 0], scale: [0.001, 0.001, 0.001] } })
+    expect(res.points).toBe(n)
+    expect(res.outside).toBeUndefined()
   })
 
   it('a LAS layout is kept as given', () => {

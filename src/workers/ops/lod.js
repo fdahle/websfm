@@ -1,4 +1,4 @@
-import { buildLod as runBuild } from '../../core/lod/build.js'
+import { distributeLod, buildChunks, finishLod } from '../../core/lod/build.js'
 import { typeName } from '../../core/lod/nodeCodec.js'
 import { openLasStream } from '../../core/io/lasStream.js'
 import { blobSource, blobChunks } from '../../utils/blobParts.js'
@@ -6,7 +6,14 @@ import { openCloudSource, isCopcLod } from '../../core/lod/cloudSource.js'
 import { readCopcMeta } from '../../core/lod/copc.js'
 import { planExtract, extractPoints } from '../../core/lod/extract.js'
 import { lodToLas, lodToText, lasPlanFor } from '../../core/lod/exportStream.js'
-import { streamedEditSource } from '../../core/lod/transform.js'
+import {
+  streamedEditSource,
+  planTiledEdit,
+  readTile,
+  editTile,
+  packTile,
+  tileOutputsSource,
+} from '../../core/lod/transform.js'
 
 // Level-of-detail octree build (dev/planning/plan-lod.md ▸ L2). The core
 // (core/lod/build.js) is pure; this side supplies the files:
@@ -59,6 +66,12 @@ async function tmpStore(dirName) {
       open.delete(name)
       await dir.removeEntry(name).catch(() => {})
     },
+    // Every handle closed, the files kept: another worker opens them next (a sync
+    // access handle is exclusive).
+    closeAll() {
+      for (const h of open.values()) h.close()
+      open.clear()
+    },
     async dispose() {
       for (const h of open.values()) h.close()
       open.clear()
@@ -66,6 +79,15 @@ async function tmpStore(dirName) {
     },
   }
 }
+
+// The temporary folder of one edit's tile outputs (planTiledEdit ▸ editLodTile), in
+// OPFS like the chunk files; pruned with them when no build runs (opfs pruneLodFiles).
+async function tmpRootDir() {
+  const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('websfm', { create: true })
+  return root.getDirectoryHandle('tmp', { create: true })
+}
+const tileDir = async (name, { create = false } = {}) => (await tmpRootDir()).getDirectoryHandle(name, { create })
+const removeTileDir = async (name) => (await tmpRootDir()).removeEntry(name, { recursive: true }).catch(() => {})
 
 async function dataWriter(dir, name) {
   const writable = await (await dir.getFileHandle(name, { create: true })).createWritable()
@@ -151,6 +173,179 @@ export async function openWorkerCloudSource(lod, files, lazCodec) {
 export function makeLodOps({ lazCodec = null } = {}) {
   const openSource = (lod, files) => openWorkerCloudSource(lod, files, lazCodec)
 
+  // The octree of `source` into `dir`: `<name>.lod` and `<name>.hier`. With `pool`
+  // ({ tmpDir, chunkMax }) and more than one chunk, it stops once the points are sorted
+  // into chunk files (kept in OPFS tmp/<tmpDir>) and returns { pooled: state }: the store
+  // builds the chunks over the pool (buildLodChunk) and joins them (finishLodPool).
+  // → { res } (core/lod/build.js finishLod's result) or { pooled }
+  async function writeOctree(source, { dir, name, layout, pool = null, onProgress }) {
+    const tmp = await tmpStore(pool?.tmpDir ?? `lod-${name}`)
+    let keep = false
+    try {
+      const state = await distributeLod(source, tmp, { layout, chunkMax: pool?.chunkMax, onProgress }).catch((err) => {
+        throw new Error(`sorting points into chunks: ${err?.message ?? err}`)
+      })
+      if (pool && state.chunks.length > 1) {
+        keep = true
+        return { pooled: state }
+      }
+      const dataFile = `${name}.lod`
+      const out = await dataWriter(dir, dataFile)
+      try {
+        const part = await buildChunks(state.chunks, tmp, out, state, { onProgress })
+        const res = await finishLod(state, [part], out)
+        await out.close()
+        await writeHierarchy(dir, name, res.hierarchy)
+        return { res }
+      } catch (err) {
+        await out.abort()
+        await dir.removeEntry(dataFile).catch(() => {})
+        throw err
+      }
+    } finally {
+      if (keep) tmp.closeAll()
+      else await tmp.dispose()
+    }
+  }
+  async function writeHierarchy(dir, name, hierarchy) {
+    const hw = await (await dir.getFileHandle(`${name}.hier`, { create: true })).createWritable()
+    await hw.write(hierarchy)
+    await hw.close()
+  }
+  // The metadata a cloud keeps of its octree.
+  const octreeMeta = (res, name, extra = {}) => {
+    const { hierarchy, ...meta } = res
+    return {
+      ...meta,
+      name,
+      dataFile: `${name}.lod`,
+      hierarchyFile: `${name}.hier`,
+      hierarchyBytes: hierarchy.length,
+      ...extra,
+    }
+  }
+
+  // The log of a finished octree: a build or import, or an edit (`sourcePoints`).
+  function reportOctree(emit, meta, { kind, seconds, sourcePoints = 0, workers = 1 }) {
+    const on = workers > 1 ? `, ${workers} workers` : ''
+    if (kind === 'edit') {
+      emit('log', [
+        `Edit: ${meta.points.toLocaleString()} of ${sourcePoints.toLocaleString()} points into a new octree in ${seconds.toFixed(1)} s${on}`,
+        'info',
+        'Products',
+      ])
+      return
+    }
+    emit('log', [
+      `Level of detail: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, ` +
+        `${meta.levels} levels, ${seconds.toFixed(1)} s${on}`,
+      'info',
+      'Products',
+    ])
+    if (meta.outside) {
+      // The octree's cube came from the file header's extent, before any point was read.
+      emit('log', [
+        `Level of detail: ${meta.outside.toLocaleString()} points lie outside the extent ${kind === 'import' ? 'the file header gives' : 'measured'} ` +
+          '— they are kept, but the view and box reads (crop, DEM) can miss them; fix the header (e.g. pdal translate / lasinfo -repair) and import again',
+        'warn',
+        kind === 'import' ? 'Import' : 'Products',
+      ])
+    }
+  }
+
+  // One chunk of a pooled build (writeOctree ▸ pooled): its subtree into the part file
+  // `part-<index>.bin` beside the chunk files. input { tmpDir, state, chunk, index }
+  // → { entries (offsets in the part), roots } (the chunk root's points transferred)
+  async function buildLodChunk([input]) {
+    const { tmpDir, state, chunk, index } = input
+    const tmp = await tmpStore(tmpDir)
+    const part = `part-${index}.bin`
+    try {
+      return await buildOneChunk(tmp, part, chunk, state)
+    } catch (err) {
+      throw new Error(`octree chunk ${chunk.key.join('-')}: ${err?.message ?? err}`)
+    } finally {
+      tmp.closeAll()
+    }
+  }
+  async function buildOneChunk(tmp, part, chunk, state) {
+    const out = {
+      async write(u8) {
+        const at = await tmp.size(part)
+        await tmp.append(part, u8)
+        return at
+      },
+    }
+    const r = await buildChunks([chunk], tmp, out, state)
+    const transfer = []
+    for (const root of r.roots) {
+      const p = root.points
+      transfer.push(p.pos.buffer, ...(p.col ? [p.col.buffer] : []), ...Object.values(p.attributes).map((a) => a.buffer))
+    }
+    return { result: r, transfer }
+  }
+
+  // A pooled build joined: the parts into `<name>.lod` in order, the levels above the
+  // chunks lifted, the hierarchy written, the temporary folder removed.
+  // input { tmpDir, state, parts: [{ index, entries, roots }], dir, name, extra, report }
+  // → the octree's metadata (as buildLod's)
+  async function finishLodPool([input], { emit }) {
+    const { tmpDir, state, parts, dir, name, extra = {}, report = null } = input
+    const dataFile = `${name}.lod`
+    const out = await dataWriter(dir, dataFile)
+    const folder = await tileDir(tmpDir)
+    try {
+      const placed = []
+      let done = 0
+      for (const p of parts) {
+        // A chunk that is its own root only (a few points) wrote no node: no part file.
+        if (!p.entries.length) {
+          placed.push({ ...p, base: 0 })
+          continue
+        }
+        const file = await (await folder.getFileHandle(`part-${p.index}.bin`)).getFile()
+        let base = null
+        for (let o = 0; o < file.size; o += 32 << 20) {
+          const at = await out.write(new Uint8Array(await file.slice(o, o + (32 << 20)).arrayBuffer()))
+          if (base == null) base = at
+        }
+        placed.push({ ...p, base: base ?? 0 })
+        emit('progress', [++done, parts.length, 'Joining the octree', done / parts.length])
+      }
+      const res = await finishLod(state, placed, out)
+      await out.close()
+      await writeHierarchy(dir, name, res.hierarchy)
+      const meta = octreeMeta(res, name, extra)
+      // `report.startedAt`: Date.now() when the store started the build (another thread).
+      if (report) reportOctree(emit, meta, { ...report, seconds: (Date.now() - report.startedAt) / 1000 })
+      return { result: meta }
+    } catch (err) {
+      await out.abort()
+      await dir.removeEntry(dataFile).catch(() => {})
+      throw new Error(`joining the octree: ${err?.message ?? err}`)
+    } finally {
+      await removeTileDir(tmpDir)
+    }
+  }
+
+  // The octree the tile calls of one edit read: opened once per worker, not per tile
+  // (a COPC file's hierarchy is read page by page). Dropped by releaseLodSource.
+  let shared = null
+  async function sharedSource(lod, files) {
+    const key = `${lod.dataFile}:${files.data.size}:${files.data.lastModified}`
+    if (shared?.key !== key) {
+      shared?.reader.close()
+      shared = null
+      shared = { key, reader: await openSource(lod, files) }
+    }
+    return shared.reader
+  }
+  async function releaseLodSource() {
+    shared?.reader.close()
+    shared = null
+    return { result: true }
+  }
+
   // A COPC file imported as it is (core/lod/copc.js): its octree is read from the file,
   // which is copied into the project's lod/ folder; nothing is decoded but the top
   // levels (styling statistics). input { file, dir, name } → the cloud's `lod` metadata
@@ -223,52 +418,18 @@ export function makeLodOps({ lazCodec = null } = {}) {
         }))
       fileInfo = { version: `${h.versionMajor}.${h.versionMinor}`, format: h.format, laz: h.isLaz, projection }
     } else source = arraySource(cloud)
-    const tmp = await tmpStore(`lod-${name}`)
-    const dataFile = `${name}.lod`,
-      hierarchyFile = `${name}.hier`
-    const out = await dataWriter(dir, dataFile)
-    try {
-      const res = await runBuild(source, tmp, out, {
-        layout,
-        onProgress: (done, total, label) => emit('progress', [done, total, label, done / total]),
-      })
-      await out.close()
-      const hw = await (await dir.getFileHandle(hierarchyFile, { create: true })).createWritable()
-      await hw.write(res.hierarchy)
-      await hw.close()
-      const { hierarchy, ...meta } = res
-      emit('log', [
-        `Level of detail: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, ` +
-          `${meta.levels} levels, ${((performance.now() - t0) / 1000).toFixed(1)} s`,
-        'info',
-        'Products',
-      ])
-      if (meta.outside) {
-        // The octree's cube came from the file header's extent, before any point was read.
-        emit('log', [
-          `Level of detail: ${meta.outside.toLocaleString()} points lie outside the extent ${file ? 'the file header gives' : 'measured'} ` +
-            '— they are kept, but the view and box reads (crop, DEM) can miss them; fix the header (e.g. pdal translate / lasinfo -repair) and import again',
-          'warn',
-          file ? 'Import' : 'Products',
-        ])
-      }
-      return {
-        result: {
-          ...meta,
-          name,
-          dataFile,
-          hierarchyFile,
-          hierarchyBytes: hierarchy.length,
-          ...(fileInfo ? { file: fileInfo } : {}),
-        },
-      }
-    } catch (err) {
-      await out.abort()
-      await dir.removeEntry(dataFile).catch(() => {})
-      throw err
-    } finally {
-      await tmp.dispose()
-    }
+    const r = await writeOctree(source, {
+      dir,
+      name,
+      layout,
+      pool: input.pool ?? null,
+      onProgress: (done, total, label) => emit('progress', [done, total, label, done / total]),
+    })
+    const extra = fileInfo ? { file: fileInfo } : {}
+    if (r.pooled) return { result: { pooled: r.pooled, extra } }
+    const meta = octreeMeta(r.res, name, extra)
+    reportOctree(emit, meta, { kind: file ? 'import' : 'build', seconds: (performance.now() - t0) / 1000 })
+    return { result: meta }
   }
 
   // Points of an octree into memory (core/lod/extract.js): a box, a budget, classes.
@@ -363,56 +524,92 @@ export function makeLodOps({ lazCodec = null } = {}) {
     return { result: { blob, count: lod.points } }
   }
 
+  // A neighbourhood edit of a streamed cloud planned tile by tile (core/lod/transform.js
+  // planTiledEdit), for the store to spread the tiles over the pool.
+  // input { lod, data, hierarchy, mode, settings, tilePoints } → the plan
+  async function planLodEdit([input]) {
+    const { lod, data, hierarchy, mode, settings = {}, tilePoints } = input
+    const reader = await sharedSource(lod, { data, hierarchy })
+    return { result: planTiledEdit(lod, reader.nodes, mode, settings, { tilePoints }) }
+  }
+
+  // One tile of a planned edit (editTile), its output written to `<dir>/<tile>.bin` in
+  // OPFS tmp for the octree build (transformLod `tiles`).
+  // input { lod, data, hierarchy, plan, tile, dir } → { count, stats?, ground?, cloth? }
+  async function editLodTile([input]) {
+    const { lod, data, hierarchy, plan, tile: i, dir } = input
+    const reader = await sharedSource(lod, { data, hierarchy })
+    const tile = plan.tiles[i]
+    const out = editTile(await readTile(reader, lod, plan, tile), plan, tile)
+    const bytes = packTile(out, tileOutputsSource(lod, plan, null).attributes)
+    const fh = await (await tileDir(dir, { create: true })).getFileHandle(`${i}.bin`, { create: true })
+    const h = await fh.createSyncAccessHandle()
+    try {
+      h.truncate(0)
+      h.write(bytes, { at: 0 })
+      h.flush()
+    } finally {
+      h.close()
+    }
+    return {
+      result: { count: out.points.count, stats: out.stats ?? null, ground: out.ground ?? 0, cloth: out.cloth ?? null },
+    }
+  }
+
   // An edit of a streamed cloud into a new octree (core/lod/transform.js): never all
   // in memory. Point-wise modes run node by node, neighbourhood modes tile by tile.
   // input { lod, data, hierarchy, dir, name, mode: 'crop' (invert) | 'mask' | 'classify'
-  //         | 'filter' | 'classify-ground', settings } → the new octree's metadata
+  //         | 'filter' | 'classify-ground', settings, tiles?: { dir, plan, limit } }
+  // → the new octree's metadata. With `tiles` the edit already ran on the pool
+  // (editLodTile): the octree is built from the tiles' outputs, which are then removed.
   async function transformLod([input], { emit }) {
-    const { lod, data, hierarchy, dir, name, mode, settings = {} } = input
+    const { lod, data, hierarchy, dir, name, mode, settings = {}, tiles = null } = input
     const t0 = performance.now()
-    const reader = await openSource(lod, { data, hierarchy })
+    const reader = tiles ? null : await openSource(lod, { data, hierarchy })
     const log = (m, l = 'info') => emit('log', [m, l, 'Products'])
-    const source = streamedEditSource(reader, lod, mode, settings, {
-      log,
-      progress: (done, total, label) => emit('progress', [done, total, label, done / Math.max(1, total)]),
-    })
-    const tmp = await tmpStore(`lod-${name}`)
-    const dataFile = `${name}.lod`,
-      hierarchyFile = `${name}.hier`
-    const out = await dataWriter(dir, dataFile)
+    const progress = (done, total, label) => emit('progress', [done, total, label, done / Math.max(1, total)])
+    let source
+    if (tiles) {
+      const folder = await tileDir(tiles.dir)
+      source = tileOutputsSource(
+        lod,
+        tiles.plan,
+        async (i) => {
+          const fh = await folder.getFileHandle(`${i}.bin`)
+          const bytes = new Uint8Array(await (await fh.getFile()).arrayBuffer())
+          await folder.removeEntry(`${i}.bin`).catch(() => {})
+          return bytes
+        },
+        { limit: tiles.limit, progress },
+      )
+    } else source = streamedEditSource(reader, lod, mode, settings, { log, progress })
     try {
       // A moved cloud gets a quantisation for where it now is (the old offset may lie
       // farther from the new points than the stored integers reach); any other edit
       // keeps the source's, so an imported LAS's exact scale survives.
       const layout = mode === 'transform' ? {} : { offset: lod.layout.offset, scale: lod.layout.scale }
-      const res = await runBuild(source, tmp, out, { layout })
-      await out.close()
-      const hw = await (await dir.getFileHandle(hierarchyFile, { create: true })).createWritable()
-      await hw.write(res.hierarchy)
-      await hw.close()
-      const { hierarchy: h, ...meta } = res
-      log(
-        `Edit: ${meta.points.toLocaleString()} of ${lod.points.toLocaleString()} points into a new octree in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
-      )
-      return {
-        result: {
-          ...meta,
-          name,
-          dataFile,
-          hierarchyFile,
-          hierarchyBytes: h.length,
-          ...(lod.file ? { file: lod.file } : {}),
-        },
-      }
-    } catch (err) {
-      await out.abort()
-      await dir.removeEntry(dataFile).catch(() => {})
-      throw err
+      const r = await writeOctree(source, { dir, name, layout, pool: input.pool ?? null })
+      const extra = lod.file ? { file: lod.file } : {}
+      if (r.pooled) return { result: { pooled: r.pooled, extra } }
+      const meta = octreeMeta(r.res, name, extra)
+      reportOctree(emit, meta, { kind: 'edit', seconds: (performance.now() - t0) / 1000, sourcePoints: lod.points })
+      return { result: meta }
     } finally {
-      await tmp.dispose()
-      reader.close()
+      reader?.close()
+      if (tiles) await removeTileDir(tiles.dir)
     }
   }
 
-  return { buildLod, extractLod, exportLod, transformLod, importCopc }
+  return {
+    buildLod,
+    extractLod,
+    exportLod,
+    transformLod,
+    importCopc,
+    planLodEdit,
+    editLodTile,
+    releaseLodSource,
+    buildLodChunk,
+    finishLodPool,
+  }
 }

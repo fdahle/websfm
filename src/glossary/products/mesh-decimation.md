@@ -34,6 +34,13 @@ make an edge shared by more than two triangles is refused. **Preserve the bounda
 or a cut is not eaten away. The merged vertex takes the colour interpolated along
 the collapsed edge, and the result is a new mesh. See [Build a Mesh](guide:mesh).
 
+A large mesh is decimated in **blocks**, one per worker: each block with the vertices
+it shares with another block locked (never moved or removed), so the blocks still meet
+when joined. The blocks stop a fifth above the target, and one last pass over the
+joined mesh takes the cheapest collapses left, which include the seams the locks kept
+dense. On the meshes measured this was 4× faster than one pass over the whole mesh, at
+the same or a slightly smaller error.
+
 **Export ▸ 3D Tiles…** decimates too, to build the coarser levels of a
 [3D Tiles](help:3d-tiles) tileset: there the vertices on a tile's border are locked,
 never moved or removed, so neighbouring tiles decimated apart still meet.

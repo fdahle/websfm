@@ -224,9 +224,17 @@ stage again with config key `dense:loose`.
 - `cloudtools`: Remove outliers and Estimate normals on the computed dense cloud, as
   their dialogs send them, split over the worker pool and on one worker; reports each
   run's seconds and point count, and the share of points whose two normals differ.
+- `streamedtools`: on the last streamed cloud (an `importfile:` LAS too large to hold):
+  Remove outliers and Classify ground with the dialogs' defaults, their tiles over the
+  worker pool and on one worker (`{ "splits": [true, false] }`), reporting seconds,
+  points and ground points; then Align to Reference of it (`"modes"` may leave out
+  `icp`): moved by a known offset and aligned back onto a crop of itself, reporting
+  the aligned cloud's leftover offset (`residual`).
 - `meshtools`: TOOL-03 on the computed mesh: Clean → Decimate 25 % → Smooth 10 → Clean
   with every hole closed → Area & volume. Each step is a named copy (`TOOL03 cleaned`,
-  `… decimated`, `… smoothed`, `… closed`) for `cloudName` exports.
+  `… decimated`, `… smoothed`, `… closed`) for `cloudName` exports. With
+  `{ "decimateOnly": true }` it runs Decimate alone, split into blocks over the pool and
+  on one worker (`"splits"`), on the computed mesh or else the last imported one.
 - `importraster:<tag>`: Import ▸ Reference raster of `cfg[tag].path`, then the
   background display conversion. `rastersample:<tag>` samples the last reference DEM at
   `points` given in the project CRS (reports the raster-CRS point, z, and whether its

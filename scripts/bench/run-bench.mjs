@@ -560,6 +560,7 @@ try {
     gcpz: 'gcpZ',
     meshtools: 'meshTools',
     cloudtools: 'cloudTools',
+    streamedtools: 'streamedTools',
     reseau: 'reseau',
     reseauhalves: 'reseauHalves',
     panosplit: 'panoramicSplit',

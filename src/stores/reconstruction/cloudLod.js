@@ -5,13 +5,37 @@ import {
   extractLod as workerExtractLod,
   exportLod as workerExportLod,
   transformLod as workerTransformLod,
+  planLodEdit as workerPlanLodEdit,
+  editLodTile as workerEditLodTile,
+  releaseLodSource as workerReleaseLodSource,
+  buildLodChunk as workerBuildLodChunk,
+  finishLodPool as workerFinishLodPool,
+  POOL_SIZE,
   exportPointTiles as workerExportPointTiles,
   importCopc as workerImportCopc,
 } from '../../workers/computeClient.js'
 import { readCopcNode } from '../../workers/copcNodeClient.js'
 import { openCloudSource, isCopcLod, lodFileNames } from '../../core/lod/cloudSource.js'
-import { LOD_MIN_POINTS } from '../../core/lod/build.js'
+import { LOD_MIN_POINTS, CHUNK_MAX } from '../../core/lod/build.js'
 import { postableCopy } from '../../core/bigArray.js'
+import { outlierLimit } from '../../core/products/cloudEdit.js'
+import { clothNote } from '../../core/lod/clothNote.js'
+import { DEFAULT_BUDGET_BYTES } from '../../core/dense/memBudget.js'
+import { pluralize } from '../../core/textFormat.js'
+
+// A neighbourhood edit of a streamed cloud (Filter, Classify ground) runs tile by tile;
+// with more than one tile the tiles go to the whole pool. Each worker holds one tile at
+// a time and gets its share of the memory budget, so the tiles are smaller the more
+// workers there are: a tile's edit peaks at about this many bytes per point (read, the
+// outlier filter's tree and neighbour means, the output; ~100 B measured, plus the read).
+const TILE_BYTES_PER_POINT = 160
+const MIN_TILE_POINTS = 1_000_000
+const MAX_TILE_POINTS = 6_000_000
+// An octree build sorts the points into chunks (one worker: one pass over the source),
+// then builds each chunk's subtree on any worker, one chunk at a time each, so a chunk
+// holds at most its worker's share of the memory budget: about this many bytes per point
+// (the chunk's columns, its subtree's index lists, the encoded nodes).
+const CHUNK_BYTES_PER_POINT = 150
 
 // Level-of-detail octrees of dense clouds (dev/planning/plan-lod.md). The octree is
 // built in the compute worker straight into the project's lod/ folder; the cloud keeps
@@ -61,6 +85,51 @@ export function createCloudLod({
     for (const f of lodFileNames(meta)) await dir.removeEntry(f).catch(() => {})
   }
 
+  // An octree build over the pool. `first(pool)` runs the op that reads the source
+  // (buildLod or transformLod, with `pool` when the pool has more than one worker); when
+  // it comes back with chunks, every worker builds the next one until none is left, and
+  // one worker joins them into the data file. `report`: the log line's kind, as the op
+  // writes it (workers/ops/lod.js reportOctree). → the octree's metadata
+  async function buildOnPool(first, { dir, name, report }, onProgress) {
+    if (POOL_SIZE < 2) return first(null)
+    const startedAt = Date.now()
+    const tmpDir = `build-${name}`
+    const chunkMax = Math.max(
+      1_000_000,
+      Math.min(CHUNK_MAX, Math.floor(DEFAULT_BUDGET_BYTES / POOL_SIZE / CHUNK_BYTES_PER_POINT)),
+    )
+    const r = await first({ tmpDir, chunkMax })
+    if (!r?.pooled) return r
+    const { chunks, ...state } = r.pooled
+    const n = chunks.length
+    const workers = Math.min(POOL_SIZE, n)
+    const total = chunks.reduce((a, c) => a + c.count, 0)
+    const parts = new Array(n)
+    let next = 0,
+      built = 0,
+      failed = false
+    await Promise.all(
+      Array.from({ length: workers }, async (_, w) => {
+        try {
+          while (!failed && next < n) {
+            const index = next++
+            const part = await workerBuildLodChunk({ tmpDir, state, chunk: chunks[index], index }, { worker: w })
+            parts[index] = { index, ...part }
+            built += chunks[index].count
+            onProgress?.(built, total, 'Building the octree', built / total)
+          }
+        } catch (err) {
+          failed = true
+          throw err
+        }
+      }),
+    )
+    return workerFinishLodPool(
+      { tmpDir, state, parts, dir, name, extra: r.extra, report: { ...report, startedAt, workers } },
+      { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+    )
+  }
+
   // → the cloud's new `lod` metadata, or null (refused, failed).
   async function buildCloudLod(cloudId, onProgress) {
     const cloud = clouds.value.find((c) => c.id === cloudId)
@@ -77,9 +146,14 @@ export function createCloudLod({
     building.add(name)
     try {
       const dir = await opfs.lodDir(pid)
-      const meta = await workerBuildLod(
-        { cloud: { count: cloud.count, pos, col, attributes }, dir, name },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
+      const meta = await buildOnPool(
+        (pool) =>
+          workerBuildLod(
+            { cloud: { count: cloud.count, pos, col, attributes }, dir, name, pool },
+            { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
+          ),
+        { dir, name, report: { kind: 'build' } },
+        onProgress,
       )
       // The cloud may have been replaced or removed meanwhile, or its project closed:
       // then the files go.
@@ -125,9 +199,14 @@ export function createCloudLod({
         'info',
         'Import',
       )
-      const meta = await workerBuildLod(
-        { file, dir, name },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+      const meta = await buildOnPool(
+        (pool) =>
+          workerBuildLod(
+            { file, dir, name, pool },
+            { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+          ),
+        { dir, name, report: { kind: 'import' } },
+        onProgress,
       )
       if (projectId() !== pid) {
         await discard(dir, meta)
@@ -340,6 +419,101 @@ export function createCloudLod({
     )
   }
 
+  // A neighbourhood edit's tiles on the pool (core/lod/transform.js planTiledEdit): each
+  // worker takes the next tile until none is left, and writes its output to a temporary
+  // file; the outlier filter's limit comes from every tile's statistics; one worker
+  // builds the octree from the files. → the octree's metadata, or undefined where one
+  // worker does it all (one tile, one worker, an outlier filter that is not last, or
+  // `settings.split === false`).
+  async function editTilesOnPool(input, onProgress) {
+    const { mode, settings } = input
+    const methods = settings.methods ?? []
+    if (POOL_SIZE < 2 || settings.split === false || (mode !== 'filter' && mode !== 'classify-ground')) return undefined
+    if (mode === 'filter' && methods.includes('sor') && methods.at(-1) !== 'sor') return undefined
+    const t0 = performance.now()
+    const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+    const tilePoints = Math.max(
+      MIN_TILE_POINTS,
+      Math.min(settings.tilePoints ?? MAX_TILE_POINTS, Math.floor(budget / POOL_SIZE / TILE_BYTES_PER_POINT)),
+    )
+    const files = { lod: input.lod, data: input.data, hierarchy: input.hierarchy }
+    const plan = await workerPlanLodEdit({ ...files, mode, settings, tilePoints }, { worker: 0 })
+    const n = plan.tiles.length
+    const workers = Math.min(POOL_SIZE, n)
+    if (workers < 2) {
+      await workerReleaseLodSource(0)
+      return undefined
+    }
+    log(
+      `${plan.label}: ${pluralize(n, 'tile')} of up to ${(tilePoints / 1e6).toFixed(1)} M points with a ` +
+        `${plan.halo.toPrecision(3)}-unit margin, on ${pluralize(workers, 'worker')}`,
+      'info',
+      'Products',
+    )
+    const dir = `edit-${input.name}`
+    const results = new Array(n)
+    let next = 0,
+      done = 0,
+      failed = false
+    try {
+      await Promise.all(
+        Array.from({ length: workers }, async (_, w) => {
+          try {
+            while (!failed && next < n) {
+              const tile = next++
+              results[tile] = await workerEditLodTile({ ...files, plan, tile, dir }, { worker: w })
+              done++
+              onProgress?.(done, n + 1, mode === 'filter' ? 'Filtering tiles' : 'Classifying tiles', done / (n + 1))
+            }
+          } catch (err) {
+            failed = true
+            throw err
+          }
+        }),
+      )
+    } finally {
+      await Promise.all(Array.from({ length: workers }, (_, w) => workerReleaseLodSource(w).catch(() => {})))
+    }
+    let limit = null
+    if (plan.sor) {
+      const s = outlierLimit(results.map((r) => r.stats).filter(Boolean), plan.sor.stdRatio)
+      limit = s.limit
+      log(
+        `Filter (outlier): mean neighbour distance ${s.mu.toFixed(4)} ±${s.sigma.toFixed(4)} over the whole cloud, limit ${limit.toFixed(4)}`,
+        'info',
+        'Products',
+      )
+    }
+    if (mode === 'classify-ground') {
+      const ground = results.reduce((a, r) => a + r.ground, 0)
+      log(`Ground filter: ${ground.toLocaleString()} ground points`, 'info', 'Products')
+      const note = clothNote(
+        results.map((r) => r.cloth),
+        settings.clothResolution ?? 1,
+        settings.metresPerUnit ?? 1,
+      )
+      if (note) log(note, 'warn', 'Products')
+    }
+    log(
+      `${plan.label}: ${pluralize(n, 'tile')} on ${pluralize(workers, 'worker')} in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
+      'info',
+      'Products',
+    )
+    return buildOnPool(
+      (pool) =>
+        workerTransformLod(
+          { ...input, tiles: { dir, plan, limit }, pool },
+          {
+            onLog: (m, l, c) => log(m, l, c),
+            onProgress: (d, t) =>
+              onProgress?.(n + d / Math.max(1, t), n + 1, 'Sorting the octree', (n + d / t) / (n + 1)),
+          },
+        ),
+      { dir: input.dir, name: input.name, report: { kind: 'edit', sourcePoints: input.lod.points } },
+      onProgress,
+    )
+  }
+
   // An edit of a streamed cloud (core/lod/transform.js): its points go through the
   // edit into a new octree, and so a NEW streamed cloud, as every edit is non-destructive.
   // mode 'crop' (invert) | 'mask' | 'classify' | 'filter' | 'classify-ground'. → the cloud, or null
@@ -352,18 +526,26 @@ export function createCloudLod({
     try {
       const { data, hierarchy } = await lodFiles(pid, source.lod)
       const dir = await opfs.lodDir(pid)
-      const meta = await workerTransformLod(
-        {
-          lod: JSON.parse(JSON.stringify(source.lod)),
-          data,
-          hierarchy,
-          dir,
-          name: fileName,
-          mode,
-          settings: JSON.parse(JSON.stringify(settings)),
-        },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
-      )
+      const input = {
+        lod: JSON.parse(JSON.stringify(source.lod)),
+        data,
+        hierarchy,
+        dir,
+        name: fileName,
+        mode,
+        settings: JSON.parse(JSON.stringify(settings)),
+      }
+      const meta =
+        (await editTilesOnPool(input, onProgress)) ??
+        (await buildOnPool(
+          (pool) =>
+            workerTransformLod(
+              { ...input, pool },
+              { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+            ),
+          { dir, name: fileName, report: { kind: 'edit', sourcePoints: source.lod.points } },
+          onProgress,
+        ))
       if (projectId() !== pid) {
         await discard(dir, meta)
         log(`Cloud edit: "${name}" was not added — its project was closed while the edit ran`, 'warn', 'Products')

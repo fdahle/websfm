@@ -155,22 +155,41 @@ function groupByCube(pts, root, level) {
 }
 
 /**
- * Build the octree of `source` into `out` (data) using `tmp` (chunk files).
+ * Build the octree of `source` into `out` (data) using `tmp` (chunk files): the three
+ * phases below one after another. The store can run the middle one on the pool instead
+ * (each worker a share of the chunks, into a part file of its own: finishLod joins them).
  * opts { chunkMax, leafMax, grid, layout: { offset, scale } (LAS), onProgress(done, total, label) }
  * → { root, layout, spacing, hierarchy: Uint8Array, bounds (of the points written), stats: {
  *   ranges: { attribute: { min, max } }, classes: { value: count } }, nodeCount, dataBytes,
  *   points, levels, outside? (points beyond `source.bounds`' cube, kept in its edge nodes) }
  */
 export async function buildLod(source, tmp, out, opts = {}) {
-  const { chunkMax = CHUNK_MAX, grid = GRID, onProgress = () => {} } = opts
+  const state = await distributeLod(source, tmp, opts)
+  const part = await buildChunks(state.chunks, tmp, out, state, opts)
+  return finishLod(state, [part], out, opts)
+}
+
+/**
+ * 1 + 2. Every point of `source` into the chunk file of its cube; a chunk of more than
+ * `chunkMax` points re-split into its children's files until every chunk fits in memory.
+ * → the build's state (plain data): { layout, root, chunks: [{ key, count }], ranges,
+ *   classes, lo, hi, outside, total }
+ */
+export async function distributeLod(source, tmp, opts = {}) {
+  const { chunkMax = CHUNK_MAX, onProgress = () => {} } = opts
   const layout = chooseLayout({ ...source, ...(opts.layout ?? {}) })
-  const root = rootCube(source.bounds.min, source.bounds.max)
   const [ox, oy, oz] = layout.offset,
     [sx, sy, sz] = layout.scale
+  // A quantisation step around the extent: a point quantises to its nearest step, which
+  // may lie just past the extent measured from the unquantised points.
+  const root = rootCube(
+    source.bounds.min.map((v, k) => v - layout.scale[k]),
+    source.bounds.max.map((v, k) => v + layout.scale[k]),
+  )
   const total = source.count
 
-  // 1. Distribute. Each point goes by its quantised position, so the chunk it lands
-  //    in is the one its stored coordinates say.
+  // Each point goes by its quantised position, so the chunk it lands in is the one its
+  // stored coordinates say.
   const level0 = chunkLevelFor(total, chunkMax)
   const chunks = new Map() // name → { key, count }
   // Whole-cloud statistics for styling nodes alike (ranges, class counts).
@@ -219,30 +238,48 @@ export async function buildLod(source, tmp, out, opts = {}) {
     onProgress(done, total, 'Sorting points into chunks')
   }
 
-  // 2 + 3. One chunk at a time: re-split it, or build it.
-  const entries = [] // { key, count, offset, length }
-  const roots = new Map()
-  const kept = columns(layout, 1 << 16)
+  // A chunk too big for memory: streamed into its children's files.
   const queue = [...chunks.values()]
-  let built = 0
+  const ready = []
   while (queue.length) {
     const chunk = queue.pop()
-    const name = chunkName(chunk.key)
-    if (chunk.count > chunkMax && chunk.key[0] < MAX_CHUNK_LEVEL) {
-      // Too big for memory: stream it into its children's files.
-      const children = new Map()
-      for await (const pts of readBlocks(tmp, name, layout)) {
-        for (const g of groupByCube(pts, root, chunk.key[0] + 1)) {
-          const cn = chunkName(g.key)
-          await tmp.append(cn, block(encodeNode(pts, g.idx, layout), g.idx.length))
-          const c = children.get(cn) ?? children.set(cn, { key: g.key, count: 0 }).get(cn)
-          c.count += g.idx.length
-        }
-      }
-      await tmp.remove(name)
-      queue.push(...children.values())
+    if (!(chunk.count > chunkMax && chunk.key[0] < MAX_CHUNK_LEVEL)) {
+      ready.push(chunk)
       continue
     }
+    const name = chunkName(chunk.key)
+    const children = new Map()
+    for await (const pts of readBlocks(tmp, name, layout)) {
+      for (const g of groupByCube(pts, root, chunk.key[0] + 1)) {
+        const cn = chunkName(g.key)
+        await tmp.append(cn, block(encodeNode(pts, g.idx, layout), g.idx.length))
+        const c = children.get(cn) ?? children.set(cn, { key: g.key, count: 0 }).get(cn)
+        c.count += g.idx.length
+      }
+    }
+    await tmp.remove(name)
+    queue.push(...children.values())
+  }
+  // Largest first: a pool's last chunk is a small one.
+  ready.sort((a, b) => b.count - a.count)
+  return { layout, root, chunks: ready, ranges, classes, lo, hi, outside, total }
+}
+
+/**
+ * 3. Chunks of a distributed build (distributeLod's `chunks`, or a share of them): each
+ * read, its subtree built in memory, every node below the chunk root written to `out`.
+ * → { entries: [{ key, count, offset (in `out`), length }], roots: [{ key, hasChildren,
+ *   points: { count, pos, col, attributes } (the chunk root's: a grid subsample) }] }
+ */
+export async function buildChunks(chunks, tmp, out, state, opts = {}) {
+  const { grid = GRID, onProgress = () => {} } = opts
+  const { layout, root } = state
+  const entries = [],
+    roots = []
+  const total = chunks.reduce((a, c) => a + c.count, 0)
+  let built = 0
+  for (const chunk of chunks) {
+    const name = chunkName(chunk.key)
     const pts = columns(layout, chunk.count)
     for await (const part of readBlocks(tmp, name, layout)) pts.push(part)
     await tmp.remove(name)
@@ -254,18 +291,43 @@ export async function buildLod(source, tmp, out, opts = {}) {
       entries.push({ key: n.key, count: n.idx.length, offset: await out.write(bytes), length: bytes.length })
     }
     // The chunk root's points stay for the lift; its children are known now.
-    const start = kept.count
+    const kept = columns(layout, sub[0].idx.length)
     kept.push(pts, sub[0].idx)
-    roots.set(keyString(chunk.key), {
+    roots.push({
       key: chunk.key,
-      idx: Uint32Array.from({ length: kept.count - start }, (_, i) => start + i),
       hasChildren: sub.length > 1,
+      points: { count: kept.count, pos: kept.pos, col: kept.col, attributes: kept.attributes },
     })
     built += chunk.count
     onProgress(built, total, 'Building the octree')
   }
+  return { entries, roots }
+}
 
-  // 4. The levels above the chunks.
+/**
+ * 4. The levels above the chunks, lifted from the chunk roots of every part
+ * (buildChunks' results, their node bytes already in `out` at `base` + their offsets),
+ * written to `out`; then the hierarchy. → buildLod's result
+ */
+export async function finishLod(state, parts, out, opts = {}) {
+  const { grid = GRID } = opts
+  const { layout, root, ranges, classes, lo, hi, outside } = state
+  const entries = []
+  const kept = columns(layout, 1 << 16)
+  const roots = new Map()
+  for (const part of parts) {
+    const base = part.base ?? 0
+    for (const e of part.entries) entries.push(base ? { ...e, offset: e.offset + base } : e)
+    for (const r of part.roots) {
+      const start = kept.count
+      kept.push(r.points)
+      roots.set(keyString(r.key), {
+        key: r.key,
+        idx: Uint32Array.from({ length: kept.count - start }, (_, i) => start + i),
+        hasChildren: r.hasChildren,
+      })
+    }
+  }
   const keptPts = { count: kept.count, pos: kept.pos, col: kept.col, attributes: kept.attributes }
   liftLevels(keptPts, roots, root, { grid })
   for (const n of roots.values()) {
@@ -295,7 +357,7 @@ export async function buildLod(source, tmp, out, opts = {}) {
       r.min = 0
       r.max = 1
     }
-  const bounds = points ? { min: lo, max: hi } : { min: [...source.bounds.min], max: [...source.bounds.max] }
+  const bounds = points ? { min: lo, max: hi } : { min: [...root.min], max: root.min.map((v) => v + root.size) }
   return {
     root,
     layout,

@@ -86,7 +86,8 @@ const matchedLinks = computed(() => {
 })
 // Crop, filter and classify ground also take a streamed cloud (core/lod/streamed.js):
 // crop copies a box out of the octree into a resident cloud (or, inverted, rewrites the
-// octree); filter and classify run tile by tile into a new streamed cloud.
+// octree); filter and classify run tile by tile into a new streamed cloud; Align to
+// Reference aligns a sample of it and moves every point into a new streamed cloud.
 const croppableClouds = computed(() =>
   clouds.value.filter((c) => c.kind === 'dense' && c.count > 0 && (c.pos || c.lod)),
 )
@@ -396,7 +397,7 @@ const measurementsStore = useMeasurementsStore()
     />
     <AlignIcpModal
       v-else-if="toolModal === 'align-icp'"
-      :clouds="editableClouds"
+      :clouds="croppableClouds"
       :references="[...croppableClouds, ...meshClouds]"
       :initial-id="toolInitialId"
       @close="toolModal = null"
