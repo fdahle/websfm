@@ -66,6 +66,12 @@ the match preview, a matching or reconstruction run, an export. The first overla
 preview after opening can therefore take a moment. An image whose keypoint file is
 missing shows an error status as soon as the project opens; detect it again.
 
+WebSfM is in beta, marked by the **Beta** badge beside its name, and the way it saves a
+project can still change between versions. Each project records the format it was saved
+in. A project this version can no longer read, or one saved by a newer version, does
+not open; the message says which and what to do. Keep the source images of a project
+you care about, so you can build it again.
+
 ## File name
 Exports are downloads: the browser saves them in its downloads folder, or asks where
 when it is set to. A point cloud or mesh export of more than about 256 MB asks where to

@@ -2,6 +2,7 @@
 // whole-project walk, binary documents and directory-handle utilities.
 import { trackPersistence, persistenceLock, ignoreMissing } from '../persistence.js'
 import { getProjectDir, getRoot, projectRoots, readJson, writeFileIn, writeJson } from './base.js'
+import { PROJECT_FORMAT_VERSION } from '../../core/projectFormat.js'
 
 // ── Availability ─────────────────────────────────────────────────────────────
 
@@ -96,11 +97,13 @@ export async function readProject(projectId) {
 // and the projects store changes the name or CRS. One lock per project serialises
 // them, and updateProject reads inside it, so a rename never writes back an image
 // list that a concurrent sync has already replaced.
+// A document without `formatVersion` is stamped with the current one (core/projectFormat.js);
+// a copied one (a connected folder, an imported .websfm) keeps the version it has.
 export async function writeProject(projectId, data) {
   return trackPersistence('writeProject:' + String(projectId), () =>
     persistenceLock(`project:${projectId}`, async () => {
       const dir = await getProjectDir(projectId, true)
-      await writeJson(dir, 'project.json', data)
+      await writeJson(dir, 'project.json', { ...data, formatVersion: data.formatVersion ?? PROJECT_FORMAT_VERSION })
     }),
   )
 }

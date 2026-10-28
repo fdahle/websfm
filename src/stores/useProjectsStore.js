@@ -19,6 +19,7 @@ import {
 import { saveProjectHandle, loadProjectHandle, deleteProjectHandle } from '../utils/handleStore.js'
 import { useLog } from '../composables/useLog.js'
 import { version as appVersion } from '../../package.json'
+import { projectFormatProblem } from '../core/projectFormat.js'
 
 // The project index: which projects exist, which one is open, and its metadata
 // (name, scene type, working CRS). Foundational store — most other stores read
@@ -174,6 +175,9 @@ export const useProjectsStore = defineStore('projects', () => {
     let data
     try {
       data = await opfs.readProject(id)
+      // A project in a format this version cannot read fails here, with the reason.
+      const problem = data && projectFormatProblem(data)
+      if (problem) throw new Error(problem)
     } catch (error) {
       newLease?.()
       throw error
@@ -484,9 +488,10 @@ export const useProjectsStore = defineStore('projects', () => {
     }
 
     const data = await opfs.readProject(id)
-    if (!data) {
+    const problem = data ? projectFormatProblem(data) : 'project file is missing project.json'
+    if (problem) {
       await opfs.deleteProject(id).catch(() => {})
-      throw new Error('project file is missing project.json')
+      throw new Error(problem)
     }
 
     const name = importedProjectName(

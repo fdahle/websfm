@@ -7,6 +7,7 @@
 import { ref } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import Icon from '../../Icon.vue'
+import BetaBadge from '../../layout/BetaBadge.vue'
 import { ACKNOWLEDGMENTS, THIRD_PARTY } from '../../../core/help/licenses.js'
 import { REFERENCES, formatReference, referenceUrl } from '../../../core/help/references.js'
 import { version as appVersion } from '../../../../package.json'
@@ -34,7 +35,7 @@ const tabs = [
     <div class="hero">
       <div class="hero-mark"><Icon name="cube" /></div>
       <div class="hero-text">
-        <div class="hero-name">WebSfM</div>
+        <div class="hero-name">WebSfM <BetaBadge /></div>
         <div class="hero-tag">Browser-based Structure&nbsp;from&nbsp;Motion · v{{ appVersion }}</div>
       </div>
     </div>

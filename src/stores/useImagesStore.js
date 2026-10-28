@@ -21,6 +21,7 @@ import { mapConcurrent } from '../utils/concurrency.js'
 import { normalizeImageGroups } from '../utils/imageGroups.js'
 import { createImageThumbnails } from './images/thumbnails.js'
 import { pluralize } from '../core/textFormat.js'
+import { PROJECT_FORMAT_VERSION } from '../core/projectFormat.js'
 
 // Reading one byte forces the browser to validate the file behind a blob (a File
 // handle is re-checked on every read), so a moved or deleted file shows up here.
@@ -187,6 +188,8 @@ export const useImagesStore = defineStore('images', () => {
     if (!proj) return null
     return {
       ...proj,
+      // Written from memory, so in this version's format (core/projectFormat.js).
+      formatVersion: PROJECT_FORMAT_VERSION,
       lastModified: new Date().toISOString(),
       imageGroups: imageGroups.value.map((g) => ({ id: g.id, name: g.name, collapsed: !!g.collapsed })),
       images: images.value.map((img) => {

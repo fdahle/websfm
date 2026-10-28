@@ -104,6 +104,13 @@ export function compareVersions(a, b) {
   return x.pre.localeCompare(y.pre, 'en', { numeric: true })
 }
 
+// A 0.x version or a pre-release: features and the project format still change between
+// versions, so the app shows a Beta badge (BetaBadge.vue).
+export function isBetaVersion(v) {
+  const { nums, pre } = parseVersion(v)
+  return nums[0] === 0 || pre != null
+}
+
 // The next version: 'major' | 'minor' | 'patch', or an explicit x.y.z.
 export function bumpVersion(current, kind = 'minor') {
   if (!['major', 'minor', 'patch'].includes(kind)) {

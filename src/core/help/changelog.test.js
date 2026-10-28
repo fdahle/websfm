@@ -5,6 +5,7 @@ import {
   firstSentence,
   compareVersions,
   bumpVersion,
+  isBetaVersion,
   latestRelease,
   countNewEntries,
   cutRelease,
@@ -90,6 +91,11 @@ describe('versions', () => {
     expect(bumpVersion('0.1.0-beta.1', 'minor')).toBe('0.2.0')
     expect(bumpVersion('0.4.0', '1.0.0')).toBe('1.0.0')
     expect(() => bumpVersion('0.4.0', '0.3.0')).toThrow(/not newer/)
+  })
+  it('calls 0.x and pre-releases beta', () => {
+    expect(isBetaVersion('0.5.0')).toBe(true)
+    expect(isBetaVersion('1.0.0-rc.1')).toBe(true)
+    expect(isBetaVersion('1.0.0')).toBe(false)
   })
   it('counts entries released after the version a user last saw', () => {
     const rel = parseChangelog(SAMPLE)

@@ -263,7 +263,7 @@ test('the full application creates and reopens a project without runtime errors'
   await expect(projectButton).toBeVisible()
   await projectButton.click()
   await expect(page.locator('.project-picker')).toBeVisible()
-  const version = (await page.locator('.app-version').textContent()).match(/v(.+)$/)[1]
+  const version = (await page.locator('.app-version').textContent()).match(/v(\d+\.\d+\.\d+\S*)/)[1] // the Beta badge follows
   await expect(page.locator('.project-version')).toHaveText(`Created with WebSfM v${version}`)
   expect(
     await page.evaluate(async () => {

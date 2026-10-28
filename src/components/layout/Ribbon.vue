@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import Icon from '../Icon.vue'
 import RibbonMenu from './RibbonMenu.vue'
+import BetaBadge from './BetaBadge.vue'
 import { newCount } from '../../composables/useWhatsNew.js'
 import { commandReason } from '../../core/help/commands.js'
 import {
@@ -261,6 +262,7 @@ function step(cmd, dir) {
         <span class="project-caret">▾</span>
       </button>
       <span v-else class="brand">WebSfM</span>
+      <BetaBadge class="ribbon-beta" />
 
       <button
         v-for="tab in TABS"
@@ -377,6 +379,10 @@ function step(cmd, dir) {
   gap: 2px;
   padding: 0 10px;
   border-bottom: 1px solid var(--panel-border);
+}
+
+.ribbon-beta {
+  margin-right: 10px;
 }
 
 .brand {

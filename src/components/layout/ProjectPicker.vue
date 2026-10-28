@@ -3,6 +3,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { isFolderProject, folderLabel } from '../../core/io/folderProject.js'
 import { EXAMPLES } from '../../core/examples.js'
 import { formatBytes } from '../../core/formatBytes.js'
+import BetaBadge from './BetaBadge.vue'
 import { version as appVersion } from '../../../package.json'
 import Icon from '../Icon.vue'
 import { useInlineRename } from '../../composables/useInlineRename.js'
@@ -184,7 +185,7 @@ onBeforeUnmount(() => {
     </ul>
 
     <div class="picker-footer">
-      <div class="app-version">Current WebSfM v{{ appVersion }}</div>
+      <div class="app-version">Current WebSfM v{{ appVersion }} <BetaBadge /></div>
       <button class="primary-btn" @click="emit('new')">+ New project</button>
 
       <!-- File vs folder is the one thing users cannot infer from the labels, so

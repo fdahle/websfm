@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **A Beta badge, and projects that say why they cannot open.** A **Beta** badge beside
+  the name (ribbon, project picker, About) says that features and the project format
+  still change between versions. Each project now records the format it was saved in,
+  and one this version cannot read, or one saved by a newer version, stops with a
+  message that says so, both when opened and when imported from a `.websfm` file.
+  Projects saved before count as the first format. The badge goes away at 1.0.
 - **Show information on products.** Right-click a sparse cloud, dense cloud, mesh, DEM
   or orthophoto in the sidebar and choose **Show information** for its facts: cameras,
   tie-points, mean track length and reprojection error for a sparse cloud; points,

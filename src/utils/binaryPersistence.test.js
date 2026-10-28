@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, it, expect } from 'vitest'
 import * as opfs from './opfs.js'
 import { retryPersistence } from './persistence.js'
+import { PROJECT_FORMAT_VERSION } from '../core/projectFormat.js'
 
 function memoryDirectory(control) {
   const files = new Map(),
@@ -230,5 +231,16 @@ it('a project.json update starts from a whole-document write already queued', as
   const write = opfs.writeProject('binary-test', { name: 'a', images: [{ id: 1 }] })
   const rename = opfs.updateProject('binary-test', (data) => ({ ...data, name: 'b' }))
   await Promise.all([write, rename])
-  expect(await opfs.readProject('binary-test')).toEqual({ name: 'b', images: [{ id: 1 }] })
+  expect(await opfs.readProject('binary-test')).toEqual({
+    name: 'b',
+    images: [{ id: 1 }],
+    formatVersion: PROJECT_FORMAT_VERSION,
+  })
+})
+
+it('a project.json write is stamped with the format version, a copied one keeps its own', async () => {
+  await opfs.writeProject('binary-test', { name: 'a' })
+  expect((await opfs.readProject('binary-test')).formatVersion).toBe(PROJECT_FORMAT_VERSION)
+  await opfs.writeProject('binary-test', { name: 'a', formatVersion: 7 })
+  expect((await opfs.readProject('binary-test')).formatVersion).toBe(7)
 })

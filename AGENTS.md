@@ -34,6 +34,9 @@ Rules that are easy to miss:
   headline, then one sentence in user terms, then any detail and evidence (Help ▸
   What's New shows the first two alone). Never edit a released section or the version
   by hand; `npm run release` cuts a release.
+- Saved projects carry a format version (`src/core/projectFormat.js`). A change that
+  older projects cannot satisfy raises `PROJECT_FORMAT_VERSION`, and `PROJECT_FORMAT_MIN`
+  when they can no longer be read; there are no migrations while WebSfM is in beta.
 - Pushing deploys: `main` goes to dev.websfm.app, a `v*` tag to websfm.app (CI ▸
   `deploy`). Don't push, and never push a tag, unless asked.
 - The name is **WebSfM** in anything people read (UI text, messages, docs, help).
