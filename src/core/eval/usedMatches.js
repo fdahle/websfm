@@ -59,3 +59,40 @@ export function usedKeysForPair(points, pairId) {
   })
   return keys
 }
+
+/**
+ * The sidebar's summary of the match store. `verified` counts the usable pairs: a
+ * user-excluded pair is still verified but feeds no reconstruction, and a weak pair
+ * (valid F below the accept gate) is a PnP-only bridge, so both are counted apart.
+ * `used` is how many of the verified pairs share at least one tie-point in the model
+ * (null without one). Not `usedCounts.size`: that is every co-visible image pair, and
+ * a track over A, B and C makes A–C co-visible though A–C was never matched, so it
+ * could exceed the number of pairs.
+ * @param {Map<string, { status: string, inlierCount?: number, enabled?: boolean, weak?: boolean }>} matchStore
+ * @param {Map<string, number> | null} usedCounts usedPairCounts of the main model, or null
+ * @returns {{ total: number, verified: number, running: number, error: number,
+ *   used: number | null, excluded: number, weak: number }}
+ */
+export function matchPairStats(matchStore, usedCounts) {
+  let total = 0
+  let verified = 0
+  let running = 0
+  let error = 0
+  let excluded = 0
+  let weak = 0
+  let used = 0
+  for (const [pid, entry] of matchStore) {
+    total++
+    if (entry.status === 'running') running++
+    else if (entry.status === 'error') error++
+    else if (entry.status === 'done' && entry.inlierCount > 0) {
+      if (entry.enabled === false) excluded++
+      else if (entry.weak) weak++
+      else {
+        verified++
+        if (usedCounts?.get(pid) > 0) used++
+      }
+    }
+  }
+  return { total, verified, running, error, used: usedCounts ? used : null, excluded, weak }
+}

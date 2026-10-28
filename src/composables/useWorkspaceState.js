@@ -7,7 +7,7 @@ import { usePosesStore } from '../stores/usePosesStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
-import { usedKeysForPair, usedPairCounts } from '../core/eval/usedMatches.js'
+import { matchPairStats, usedKeysForPair, usedPairCounts } from '../core/eval/usedMatches.js'
 
 // State derived from the project stores alone, lifted out of App.vue: what the
 // workspace is ready for (the ribbon, console and workflow guards), the match
@@ -177,35 +177,9 @@ export function useWorkspaceState() {
     return out
   })
 
-  // Sidebar summary of the pairwise match store: verified/total/running/failed counts.
-  // `verified` mirrors matchSummaries.length (done + inliers), but we walk the store
-  // once here to also surface in-flight and failed pairs at a glance.
-  const matchStats = computed(() => {
-    let total = 0,
-      verified = 0,
-      running = 0,
-      error = 0,
-      excluded = 0,
-      weak = 0
-    for (const [, entry] of matchStore.value) {
-      total++
-      if (entry.status === 'running') running++
-      else if (entry.status === 'error') error++
-      else if (entry.status === 'done' && entry.inlierCount > 0) {
-        // A user-excluded pair is still geometrically verified, but it won't feed
-        // reconstruction — count it separately so "verified" reflects usable pairs.
-        // A weak pair (valid F below the accept gate) is a PnP-only bridge, not
-        // verified geometry — counted apart too.
-        if (entry.enabled === false) excluded++
-        else if (entry.weak) weak++
-        else verified++
-      }
-    }
-    // Pairs that contributed at least one tie-point to the sparse model (0 until
-    // reconstruction has run).
-    const used = hasSparse.value ? usedCountsByPair.value.size : null
-    return { total, verified, running, error, used, excluded, weak }
-  })
+  // Sidebar summary of the pairwise match store (core/eval/usedMatches.js). The used
+  // counts walk every track, so they are read only once a model exists.
+  const matchStats = computed(() => matchPairStats(matchStore.value, hasSparse.value ? usedCountsByPair.value : null))
 
   return {
     detectedMaxKeypoints,

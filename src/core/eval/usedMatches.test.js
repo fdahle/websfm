@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { usedKeysForPair, usedPairCounts } from './usedMatches.js'
+import { matchPairStats, usedKeysForPair, usedPairCounts } from './usedMatches.js'
 import { makePackedPoints } from '../sfm/resultCodec.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
 
@@ -90,5 +90,51 @@ describe('usedKeysForPair', () => {
       expect(usedKeysForPair(packed, pid)).toEqual(set)
     }
     expect(usedKeysForPair(built, 'nope').size).toBe(0)
+  })
+})
+
+describe('matchPairStats', () => {
+  const done = (extra = {}) => ({ status: 'done', inlierCount: 50, ...extra })
+  const store = new Map([
+    ['a--b', done()],
+    ['b--c', done()],
+    ['c--d', done()],
+    ['a--d', done({ enabled: false })],
+    ['b--d', done({ weak: true })],
+    ['a--e', { status: 'done', inlierCount: 0 }],
+    ['d--e', { status: 'running' }],
+    ['c--e', { status: 'error' }],
+  ])
+
+  it('counts each state once', () => {
+    expect(matchPairStats(store, null)).toEqual({
+      total: 8,
+      verified: 3,
+      running: 1,
+      error: 1,
+      used: null,
+      excluded: 1,
+      weak: 1,
+    })
+  })
+
+  it('counts used pairs among the verified ones only', () => {
+    // One track over a, b, c and d makes all six of their pairs co-visible, though
+    // only a–b, b–c and c–d are verified matches (a–c was never matched).
+    const views = new Map([
+      ['a', 0],
+      ['b', 0],
+      ['c', 0],
+      ['d', 0],
+    ])
+    const model = pack([{ x: 0, y: 0, z: 0, views }], ['a', 'b', 'c', 'd'])
+    const counts = usedPairCounts(model)
+    expect(counts.size).toBe(6)
+    expect(matchPairStats(store, counts).used).toBe(3)
+  })
+
+  it('leaves out a verified pair that no tie-point joins', () => {
+    const counts = new Map([['a--b', 4]])
+    expect(matchPairStats(store, counts).used).toBe(1)
   })
 })

@@ -381,6 +381,10 @@ Notable changes to websfm. The format follows
   and cost: 22 → 7.8 min, the same cloud for the planning change.
 
 ### Fixed
+- **Matches ▸ Used in model counts matched pairs.** It counted every pair of images
+  that share a tie-point, and a track seen in three images joins a pair that was never
+  matched, so it could exceed the number of pairs (546 of 232). It now counts the
+  verified pairs that share at least one tie-point in the model.
 - **The mobile warning fits a phone's screen.** On a phone the page no longer pans
   sideways and the warning no longer runs past the screen's edge. The ribbon is wider
   than a phone, and mobile Chrome widened the whole page to fit it; the app now clips it.
