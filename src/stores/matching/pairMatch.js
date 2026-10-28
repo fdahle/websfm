@@ -460,9 +460,9 @@ export function createPairMatcher({
       holdMatches(pid, entry, matches)
       entry.status = 'done'
 
-      // Every pair carrying inlier matches persists — accepted AND weak (a weak bridge
-      // must survive a reload or the graph re-severs on restore): packMatchDocument
-      // keeps any done pair with matches.
+      // Every done pair persists — accepted, weak (a weak bridge must survive a reload
+      // or the graph re-severs on restore) and rejected (packMatchDocument keeps any
+      // done pair, so a reload counts it and matching does not try it again).
       markHeavy()
 
       const label = `${imgA.name} ↔ ${imgB.name}`

@@ -48,8 +48,9 @@ const entries = () =>
         weak: true,
       },
     ],
-    // Not persisted: running, or no matches.
+    // Persisted with no matches: a rejected pair (tried, so a reload still counts it).
     ['b--c', { idA: 'b', idB: 'c', rawCount: 5, inlierCount: 0, F: null, matches: new Uint32Array(0), status: 'done' }],
+    // Not persisted: running.
     [
       'c--d',
       { idA: 'c', idB: 'd', rawCount: 5, inlierCount: 2, F: null, matches: toMatchArray([[1, 1]]), status: 'running' },
@@ -66,12 +67,12 @@ const slice = (col, e) => {
 describe('match document', () => {
   it('round-trips the persisted pairs: an index without matches, then per-pair byte ranges', () => {
     const doc = packMatchDocument(entries())
-    expect(doc.meta.count).toBe(2)
+    expect(doc.meta.count).toBe(3)
     expect(doc.meta.images).toEqual(['a', 'b', 'c'])
     expect(doc.buffers.matches).toBeUndefined() // the index never carries the matches
     const col = column(doc)
     const back = new Map(unpackMatchIndex(doc.meta, doc.buffers, { matchBytes: col.byteLength }))
-    expect([...back.keys()]).toEqual(['a--b', 'a--c'])
+    expect([...back.keys()]).toEqual(['a--b', 'a--c', 'b--c'])
     const ab = back.get('a--b')
     expect(ab).toMatchObject({
       rawCount: 40,
@@ -87,9 +88,11 @@ describe('match document', () => {
     const ac = back.get('a--c')
     expect(ac).toMatchObject({ F: null, enabled: false, weak: true, nMatches: 1, off: 6 })
     expect([...slice(col, ac)]).toEqual([7, 8])
+    expect(back.get('b--c')).toMatchObject({ rawCount: 5, inlierCount: 0, nMatches: 0, off: 8, status: 'done' })
     expect(doc.layout.map(({ pairId, off, n }) => [pairId, off, n])).toEqual([
       ['a--b', 0, 3],
       ['a--c', 6, 1],
+      ['b--c', 8, 0],
     ])
   })
 

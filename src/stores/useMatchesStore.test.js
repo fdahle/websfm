@@ -56,9 +56,17 @@ it.each(['rejected', 'cancelled', 'missing'])('does not resurrect old matches af
   else match.mockResolvedValue({ matches: [] })
   const store = useMatchesStore()
   await store.matchPair(image('a'), image('b'), { subsetGate: false })
-  expect(disk.meta.count).toBe(0) // the superseded pair is gone from disk at once
-  await store.restore({ projectId: 'match-test' })
-  expect(store.getMatch('a', 'b')).toBeNull()
+  if (outcome === 'rejected') {
+    // A rejected pair is kept, as tried, with no matches: the old ones are gone from disk at once.
+    expect(disk.meta.count).toBe(1)
+    expect([...new Uint32Array(disk.buffers.counts)]).toEqual([0, 0, 0])
+    await store.restore({ projectId: 'match-test' })
+    expect(store.getMatch('a', 'b')).toMatchObject({ status: 'done', inlierCount: 0, nMatches: 0 })
+  } else {
+    expect(disk.meta.count).toBe(0) // the superseded pair is gone from disk at once
+    await store.restore({ projectId: 'match-test' })
+    expect(store.getMatch('a', 'b')).toBeNull()
+  }
 })
 
 it("posts only the putatives' packed coordinates to verification", async () => {

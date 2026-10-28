@@ -50,11 +50,18 @@ export const matchCount = (m) => (m ? m.length >>> 1 : 0)
 // (their matches may not be resident); a plain entry (tests, imports) carries them.
 const countOf = (e) => (Number.isInteger(e.nMatches) ? e.nMatches : matchCount(toMatchArray(e.matches)))
 
-/** The entries a document persists: done, with at least one match. */
-export const isPersistedMatchEntry = (e) => e.status === 'done' && countOf(e) > 0
+/**
+ * The entries a document persists: every done pair, a rejected one (no matches) too,
+ * so a reopened project counts the pairs it tried, as the session did, and matching
+ * does not try them again.
+ */
+export const isPersistedMatchEntry = (e) => e.status === 'done'
+
+/** A done pair with at least one match (what an export lists). */
+export const hasPairMatches = (e) => e.status === 'done' && countOf(e) > 0
 
 /**
- * Pack the pairs worth keeping (done, with matches) into the document.
+ * Pack the done pairs into the document (isPersistedMatchEntry).
  * @param entries iterable of [pairId, { idA, idB, rawCount, inlierCount, F, nMatches?, matches?, enabled, weak }]
  * @param matchesOf (pairId, entry) → that pair's matches as a part: a Uint32Array of
  *   2·count elements, or anything the caller's writer concatenates (a Blob slice of

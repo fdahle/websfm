@@ -260,6 +260,7 @@ export const useMatchesStore = registerProjectStore(
     // A pair's matches for a full rewrite: the resident copy, else a slice of the
     // committed matches column (a Blob part — referenced, not read into memory).
     const documentPart = (pid, e) => {
+      if (!(e.nMatches > 0)) return EMPTY_MATCHES // a rejected pair: kept, with no matches
       const hit = residentFor(pid, e, false)
       if (hit) return hit
       if (!e.src) throw unavailable(pid)

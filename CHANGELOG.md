@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **A reopened project counts every match pair it tried.** Pairs that matching rejected
+  are now saved too, so **Total pairs** in the sidebar is the same after a reopen, and
+  matching does not try those pairs again. The JSON match export still lists only the
+  pairs with matches.
 - **Photos taken from the ground no longer show upside down.** In an Object capture
   project, the 3D view and Orient model take which way is up from the photos' own
   up direction when the cameras look up at their subject, as at a building from the
