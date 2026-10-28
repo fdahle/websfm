@@ -30,6 +30,15 @@ blown white.
 Rescore after changing [masks](guide:masks). A frame that is sharp only in one corner (shallow depth
 of field) may still be flagged; check it before removing it.
 
+## Blurry below
+<!-- param: minRelative  default: 0.5 -->
+The [sharpness](help:image-sharpness) under which an image is flagged, as a share of
+the batch's median: 0.5 flags images half as sharp as the typical one. The flags only
+mark images for you to look at; nothing is removed until you choose to. Raise it (0.6–0.7)
+for a flight where a few soft frames among many sharp ones are worth catching. Lower it
+(0.3) when the scene varies a lot from frame to frame, such as part water and part
+land, because a frame of open water scores low without being blurred.
+
 ## Region
 **Tools → Model ▾ → Region** sets a box that bounds the dense stages:
 

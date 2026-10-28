@@ -74,6 +74,22 @@ named by its slot keeps it, and any other id (`1`, `F2`) is placed by its positi
 the scan. When two marks of one image land in the same slot, it says so; the last one
 in the file is kept.
 
+## Detection type
+<!-- param: family  default: Generic -->
+The shape of the marks the detector looks for. Pick the card that looks like the marks
+in your scans:
+- **Generic** tries dot, crosshair and ring templates at several sizes. Start here
+  when you are not sure what the marks look like.
+- **Right angle** looks for two strokes that meet at a right angle, as on cameras with
+  corner notches. All four orientations are tried.
+- **45° cut** looks for a diagonal notch across the corner with a small dot beside it.
+- **Frame** uses no template. It measures the corner of the film frame itself, for
+  scans whose marks are missing, cropped or unreadable. Step 2 (template matching) is
+  then skipped.
+
+A type that does not fit the marks finds weak or wrong hits, which the checks then
+send to review. If many marks need review, try another type.
+
 ## Review uncertain marks
 Marks that were weak, ambiguous, or rejected by a check are listed under **Needs
 review**; they are not stored until you accept them. Open the image to look before

@@ -18,6 +18,10 @@ import { openHelp, leaveHelp, dropHelp, paramSpec } from '../../composables/useH
 // code. Leave both out for selects, whose raw values are ids, not labels; the
 // Guide marker's default text shows instead. Missing entry or inline help off in
 // Settings → plain label text.
+//
+// The cue is a small "?" after the label, not an underline: a dotted underline
+// means a glossary concept (GlossaryTerm, `help:` links in prose), a "?" means
+// advice on this setting. The whole label stays the hover target.
 const props = defineProps({
   op: { type: String, required: true },
   param: { type: String, required: true },
@@ -53,24 +57,41 @@ onBeforeUnmount(() => dropHelp(anchorEl.value))
     @mouseleave="onLeave"
     @focus="show"
     @blur="onLeave"
-    ><slot
-  /></span>
+    ><slot /><span v-if="active" class="field-help-icon" aria-hidden="true">?</span></span
+  >
 </template>
 
 <style scoped>
-/* Same affordance as GlossaryTerm: one dashed underline per hoverable label. */
+/* A "?" marks setting advice; a dotted underline (GlossaryTerm) marks a concept. */
 .field-help {
-  border-bottom: 1px dashed var(--text-dim);
   cursor: help;
+}
+.field-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3em;
+  height: 1.3em;
+  margin-left: 0.3em;
+  border: 1px solid var(--text-dim);
+  border-radius: 50%;
+  color: var(--text-dim);
+  font-size: 0.72em;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: 0.15em;
 }
 .field-help:hover,
 .field-help:focus-visible {
   color: var(--accent);
-  border-color: var(--accent);
   outline: none;
 }
+.field-help:hover .field-help-icon,
+.field-help:focus-visible .field-help-icon {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .field-help-plain {
-  border-bottom: none;
   cursor: inherit;
   color: inherit;
 }

@@ -10,7 +10,7 @@ import ChoiceCards from '../ui/ChoiceCards.vue'
 import DataTable from '../ui/DataTable.vue'
 import StatTiles from '../ui/StatTiles.vue'
 import WarnBox from '../ui/WarnBox.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
+import FieldHelp from '../../guide/FieldHelp.vue'
 import FiducialFamilyGlyph from './FiducialFamilyGlyph.vue'
 import { FIDUCIAL_SPOT_DEFAULTS } from '../../../core/defaults.user.js'
 import { fiducialDetectEffects } from '../../../core/stepEffects/fiducialDetect.js'
@@ -219,7 +219,7 @@ function rejectDraft(draft) {
 
     <SettingsField :hint="familyHint">
       <template #label>
-        <GlossaryTerm id="fiducial-marks">Detection type</GlossaryTerm>
+        <FieldHelp op="film-fiducials" param="family">Detection type</FieldHelp>
       </template>
       <ChoiceCards v-model="settings.family" :options="FAMILIES">
         <template #visual="{ option }"><FiducialFamilyGlyph :family="option.id" /></template>

@@ -8,7 +8,6 @@ import SettingsStep from '../ui/SettingsStep.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import StatTiles from '../ui/StatTiles.vue'
 import DataTable from '../ui/DataTable.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import Sentinel2Modal from './Sentinel2Modal.vue'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
@@ -642,7 +641,7 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
         </p>
         <fieldset class="fg-fields" :disabled="busy">
           <SettingsField>
-            <template #label><GlossaryTerm id="ground-control-point">Role</GlossaryTerm></template>
+            <template #label><FieldHelp op="georeferencing" param="role">Role</FieldHelp></template>
             <SegmentedControl v-model="active.role" :options="ROLES" />
           </SettingsField>
           <div class="fg-row">

@@ -39,17 +39,20 @@ onBeforeUnmount(() => dropHelp(anchorEl.value))
 </template>
 
 <style scoped>
+/* A dotted underline marks a concept, as `help:` links do in prose; a setting's
+   advice is a FieldHelp with a "?" instead. */
 .glossary-term {
-  border-bottom: 1px dashed var(--text-dim);
+  text-decoration: underline dotted var(--text-dim);
+  text-underline-offset: 0.2em;
   cursor: help;
 }
 .glossary-term:hover {
   color: var(--accent);
-  border-color: var(--accent);
+  text-decoration-color: var(--accent);
 }
 /* Disabled feature or missing entry: render as ordinary text. */
 .glossary-term-plain {
-  border-bottom: none;
+  text-decoration: none;
   cursor: inherit;
   color: inherit;
 }

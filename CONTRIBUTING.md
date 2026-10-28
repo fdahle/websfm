@@ -104,6 +104,11 @@ adds, removes or renames a setting, operation or user-visible feature:
      `[text](help:id)`), so it opens as a nested box.
    - Labels without a guide section may use `<GlossaryTerm id="…">`, pointing at the
      entry that explains that exact concept.
+   - The two look different on purpose: a `FieldHelp` label gets a small **?** after
+     it (advice on this setting), a `GlossaryTerm` a **dotted underline** (what a word
+     means), as `help:` links in help text do. Don't restyle one like the other. A
+     setting in a dialog whose operation has a guide article gets a guide section and
+     a `FieldHelp`, not a `GlossaryTerm`.
 3. A new concept gets a new glossary entry. Keep aliases specific: a generic alias
    such as "projection" or "3D point" links in the wrong places.
 4. A keyboard shortcut or modifier gesture is an entry in `src/core/help/shortcuts.js`.

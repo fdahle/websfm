@@ -20,8 +20,8 @@ Each GCP carries three things:
   zero is a perfectly valid sea-level height and must never double as "missing".
 - **Observations** — the pixel where the point appears, marked by hand per image,
   each with its own image-space accuracy.
-- An **enabled** flag. Every enabled GCP is used; WebSfM does not split them into
-  control and check points.
+- An **enabled** flag and a **role**. A control point takes part in the fit; a
+  checkpoint is left out of it, and its error then measures the model's accuracy.
 
 <!-- TODO(image): assets/gcp-marking.svg - the same surveyed target seen in three overlapping photos with its marked pixel in each, rays converging to one triangulated point, and that point paired by an arrow to its surveyed coordinate in the project CRS, with the residual between them labelled. -->
 

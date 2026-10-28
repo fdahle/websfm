@@ -346,6 +346,15 @@ are wrong. Import the outlines as a polygon file (**Import**, GeoJSON) in any CR
 they are converted to the project CRS. The result line says how many matches fell
 outside.
 
+## Role
+<!-- param: role  default: Control point -->
+What the selected candidate is used for once it is added. A **Control point** takes
+part in the fit: its coordinates pull the model into place. A **Checkpoint** is left
+out of the fit, and the Quality Report measures the model's error at it. A control
+point's residual shows only how well the fit agrees with itself, so checkpoints are
+the honest accuracy test. Keep a few well-spread candidates as checkpoints when you
+have enough of them, for example one in five.
+
 Some scenes defeat this matcher: a heavily changed historical scene, a reference
 whose radiometry differs strongly (film against a multispectral band), or a block
 too small to find in a regional reference without GPS. In the last case, crop the

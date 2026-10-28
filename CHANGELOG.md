@@ -138,6 +138,11 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Setting help and word explanations look different.** A setting label with advice
+  in the Guide now has a small **?** after it, and a word with a glossary entry a
+  dotted underline, as in the help text; both still open on hover. Before, both had
+  the same dashed underline. Image Quality ▸ **Blurry below**, Detect Fiducials ▸
+  **Detection type** and Find GCPs ▸ **Role** now have Guide sections of their own.
 - **A rebuild adds a product instead of replacing it.** Building a dense cloud, mesh,
   DEM or orthophoto again adds a new one ("DEM 2") beside the old ones and makes it the
   main one, the input the next step uses; the build dialogs' new **Output ▸ Replace the

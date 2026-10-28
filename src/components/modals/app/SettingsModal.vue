@@ -207,7 +207,8 @@ onMounted(refreshStorage)
           <div class="setting-info">
             <span class="setting-label">Glossary terms</span>
             <span class="setting-desc"
-              >Highlight explained keywords; hover for a definition and a link to the full entry.</span
+              >Underline explained words and put a ? after settings with advice; hover for the explanation and a link to
+              the full entry.</span
             >
           </div>
           <label class="switch">

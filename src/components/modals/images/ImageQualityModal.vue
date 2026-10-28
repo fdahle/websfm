@@ -5,7 +5,7 @@ import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import DataTable from '../ui/DataTable.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { IMAGE_QUALITY_DEFAULTS } from '../../../core/defaults.user.js'
 import { qualityVerdicts } from '../../../core/features/imageQuality.js'
 import { pluralize } from '../../../core/textFormat.js'
@@ -91,7 +91,15 @@ function groupFlagged() {
           unit="× median sharpness"
           hint="Relative to this batch: 0.5 flags images half as sharp as the typical one."
         >
-          <template #label><GlossaryTerm id="image-sharpness">Blurry below</GlossaryTerm></template>
+          <template #label
+            ><FieldHelp
+              op="model-tools"
+              param="minRelative"
+              :value="minRelative"
+              :default-value="IMAGE_QUALITY_DEFAULTS.minRelative"
+              >Blurry below</FieldHelp
+            ></template
+          >
           <input
             id="iq-min"
             v-model.number="minRelative"
