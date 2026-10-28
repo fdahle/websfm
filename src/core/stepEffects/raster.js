@@ -27,7 +27,8 @@ export function gridEffect({ estimate, unit, frame, extent }) {
 
 const FILL = { idw: 'inverse distance', nearest: 'the nearest measured cell' }
 
-// Build DEM. `source`: { kind, name, count, streamed } of the cloud the run reads.
+// Build DEM. `source`: { kind, name, count, streamed, outdated } of the cloud the run
+// reads (`outdated`: built on an input that has changed since, productSet.js).
 export function demEffects(s, { source = null, estimate = null, unit, frame } = {}) {
   const ground = s.points === 'ground'
   const points = !source
@@ -35,7 +36,8 @@ export function demEffects(s, { source = null, estimate = null, unit, frame } = 
       ? 'No classified cloud yet: Tools ▸ Point Cloud ▸ Classify ground makes one.'
       : 'No point cloud yet: build one first.'
     : `${plural(source.count, 'point')} of the ${source.kind === 'dense' ? 'dense' : 'sparse'} cloud` +
-      `${source.name ? ` "${source.name}"` : ''}${source.streamed ? ' (streamed)' : ''} go into the grid: ` +
+      `${source.name ? ` "${source.name}"` : ''}${source.streamed ? ' (streamed)' : ''}` +
+      `${source.outdated ? ', which is outdated,' : ''} go into the grid: ` +
       (ground ? 'the ground class only, for a bare-earth DTM.' : 'every point, so the top surface (a DSM).')
 
   const grid = gridEffect({ estimate, unit, frame, extent: s.extent })

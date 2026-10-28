@@ -1,4 +1,4 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
@@ -26,7 +26,7 @@ export function useRasterTabs({ tabs, openRasterImport }) {
   const { imageById, addImages, removeImage } = imagesStore
   const reconstructionStore = useReconstructionStore()
   const { dem, ortho, productLayers } = storeToRefs(reconstructionStore)
-  const { removeProduct, renameProduct } = reconstructionStore
+  const { removeProduct, renameProduct, productById } = reconstructionStore
   const externalStore = useExternalStore()
   const { rasterById, renameRaster, removeRaster, setRasterStyle } = externalStore
   const { importRasterOpen, importRasterData, rasterStyleId } = storeToRefs(useModalsStore())
@@ -40,8 +40,18 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     openProductTab(kind, computedProductName(kind))
   }
 
-  function renameProductFromSidebar({ kind, name }) {
-    if (renameProduct(kind, name)) setTabTitle(`product:${kind}`, computedProductName(kind))
+  // The product tab shows the MAIN DEM / ortho, so its title follows that one: a
+  // rename, Set as main, or a new build.
+  watch(
+    () => [computedProductName('dem'), computedProductName('ortho')],
+    ([demName, orthoName]) => {
+      setTabTitle('product:dem', demName)
+      setTabTitle('product:ortho', orthoName)
+    },
+  )
+
+  function renameProductFromSidebar({ id, name }) {
+    renameProduct(id, name)
   }
 
   async function renameRasterFromSidebar({ id, name }) {
@@ -50,14 +60,17 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     setTabTitle(`raster:${id}`, trimmed)
   }
 
-  function confirmRemoveProduct(kind) {
-    const name = computedProductName(kind)
+  function confirmRemoveProduct(id) {
+    const product = productById(id)
+    if (!product) return
+    const { kind } = product
     askConfirm({
       title: `Remove ${kind === 'ortho' ? 'orthophoto' : 'DEM'}?`,
-      message: `Remove “${name}”? The product can be rebuilt, but this can't be undone.`,
+      message: `Remove “${product.name || computedProductName(kind)}”? The product can be rebuilt, but this can't be undone.`,
       onConfirm: async () => {
-        closeTab(`product:${kind}`)
-        await removeProduct(kind)
+        await removeProduct(id)
+        // The tab shows the main one of the kind; it goes with the last of them.
+        if (!(kind === 'ortho' ? ortho.value : dem.value)) closeTab(`product:${kind}`)
       },
     })
   }

@@ -308,6 +308,9 @@ export const DENSE_FUSE_DEFAULTS = {
   maxIncidenceDeg: 80, // max angle between the surface normal and the viewing ray —
   // thins edge-on vegetation shells (0/90 disables; fallback normals inert)
   removeIsolated: true, // drop low-support voxel cells with too few occupied neighbours
+  // Output: add the new product beside the others as the main one (false), or put it
+  // in place of the main one (true). Off, so a rebuild never loses a result by default.
+  replaceMain: false,
 }
 
 // Reconstruct ▸ Find GCPs (composables/useFindGcps.js, FindGcpsModal.vue).
@@ -347,6 +350,9 @@ export const DEM_DEFAULTS = {
   extent: 'core', // 'core' = the cloud's dense footprint (dem.js coreExtent) | 'all' = raw min/max
   points: 'all', // 'all' (DSM) | 'ground' = only LAS class 2 of a classified cloud (DTM)
   fillHoles: false, // also interpolate every enclosed nodata area (under removed buildings)
+  // Output: add the new product beside the others as the main one (false), or put it
+  // in place of the main one (true). Off, so a rebuild never loses a result by default.
+  replaceMain: false,
 }
 
 // Reseau crosses (Tools ▸ Images ▾ ▸ Detect reseau, SAT-5): the KH-9 mapping camera's
@@ -391,6 +397,9 @@ export const ORTHO_DEFAULTS = {
   fillMethod: 'idw', // colour interpolation: 'none' | 'nearest' | 'idw'
   fillRadius: 2, // fill unsampled pixels inside the chosen surface (cells)
   extent: 'core', // mesh/plane surface extent, as DEM_DEFAULTS.extent; 'dem' follows the DEM grid
+  // Output: add the new product beside the others as the main one (false), or put it
+  // in place of the main one (true). Off, so a rebuild never loses a result by default.
+  replaceMain: false,
 }
 
 // Product export (core/products/exporters.js + geotiff.js). Mirrored by ExportModal.vue.
@@ -476,6 +485,9 @@ export const MESH_DEFAULTS = {
   distanceTrim: 0, // proximity trim radius in input-sample cells; 0 = off
   colorize: true, // transfer dense-cloud colour onto the mesh vertices
   tiles: 'auto', // 'auto' | 'off' — solve in tiles when one solve would not fit (meshTiles.js)
+  // Output: add the new product beside the others as the main one (false), or put it
+  // in place of the main one (true). Off, so a rebuild never loses a result by default.
+  replaceMain: false,
 }
 // Mesh quality presets — octree depth is the detail/cost lever (deltas; medium ≡ defaults).
 export const MESH_PRESETS = {

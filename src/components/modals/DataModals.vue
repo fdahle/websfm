@@ -34,6 +34,7 @@ import InteropImportModal from './import/InteropImportModal.vue'
 import InteropSourceModal from './import/InteropSourceModal.vue'
 import MaskManagerModal from './inspect/MaskManagerModal.vue'
 import MatchListModal from './inspect/MatchListModal.vue'
+import ProductInfoModal from './inspect/ProductInfoModal.vue'
 import ProductSymbologyModal from './products/ProductSymbologyModal.vue'
 import RasterStyleModal from './products/RasterStyleModal.vue'
 import SensorTableModal from './inspect/SensorTableModal.vue'
@@ -88,6 +89,7 @@ const {
   importRasterOpen,
   importVideoFile,
   infoImageId,
+  infoProduct,
   maskManagerOpen,
   matchListOpen,
   poseTableOpen,
@@ -264,7 +266,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :kind="symbologyProductKind"
       :product="symbologyProduct"
       @close="symbologyProductKind = null"
-      @apply="({ kind, style }) => setProductStyle(kind, style)"
+      @apply="({ style }) => setProductStyle(symbologyProduct.id, style)"
     />
     <CloudSymbologyModal
       v-if="symbologyCloud"
@@ -492,5 +494,6 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
 
   <Teleport to="body">
     <ImageInfoModal v-if="infoImage" :image="infoImage" @close="infoImageId = null" />
+    <ProductInfoModal v-if="infoProduct" :target="infoProduct" @close="infoProduct = null" />
   </Teleport>
 </template>

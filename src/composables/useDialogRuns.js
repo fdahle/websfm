@@ -18,9 +18,9 @@ import { defaultExportName, exportFileName } from '../core/exportNames.js'
 // download a section profile).
 //
 // Injected: `pipeline` (usePipeline's runners + its progress contract as
-// `exportProgress`), `closeProductTabs` / `openImageTab` (useTabs),
-// `refreshGcpReport` (useGcpEditing), `requestRemoveImages` (useConfirmations).
-export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refreshGcpReport, requestRemoveImages }) {
+// `exportProgress`), `openImageTab` (useTabs), `refreshGcpReport` (useGcpEditing),
+// `requestRemoveImages` (useConfirmations).
+export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, requestRemoveImages }) {
   const {
     runDetect,
     runMatch,
@@ -85,11 +85,7 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
       await georeference()
       await refreshGcpReport()
     }
-    if (reconStatus.value === 'done') {
-      // The store retired products tied to the previous camera solution; do not leave
-      // tabs open with a null backing raster.
-      closeProductTabs()
-    }
+    // The products of the previous model stay (marked outdated), so their tabs stay too.
   }
 
   async function onGeoreferenceRun({ mode }) {
@@ -142,14 +138,11 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
     filterCloudPreset.value = null
     await runEditClouds({ ...req, mode: 'filter' })
   }
-  // Sparse gradual selection (Tools ▸ Model ▾): retires the model's computed
-  // dependents, so their open product tabs close with it.
+  // Sparse gradual selection (Tools ▸ Model ▾): the products built on the model stay,
+  // marked outdated.
   async function onGradualSelectionRun(req) {
     toolModal.value = null
-    const result = await runEditClouds({ ...req, mode: 'sparse' })
-    if (result.ok) {
-      closeProductTabs()
-    }
+    await runEditClouds({ ...req, mode: 'sparse' })
   }
   async function onMergeCloudsRun(req) {
     mergeCloudsOpen.value = false
@@ -173,10 +166,7 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
 
   async function onOptimizeCamerasRun(req) {
     toolModal.value = null
-    const result = await runEditClouds({ ...req, mode: 'optimize' })
-    if (result.ok) {
-      closeProductTabs()
-    }
+    await runEditClouds({ ...req, mode: 'optimize' })
   }
 
   // Image quality: scoring runs behind the shared progress bar; the dialog stays open

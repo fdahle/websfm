@@ -698,7 +698,6 @@ const {
     runTextureMesh,
     exportProgress,
   },
-  closeProductTabs,
   openImageTab,
   refreshGcpReport,
   requestRemoveImages: (ids) => requestRemoveImages(ids),

@@ -22,6 +22,7 @@ import { outlierLimit } from '../../core/products/cloudEdit.js'
 import { clothNote } from '../../core/lod/clothNote.js'
 import { DEFAULT_BUDGET_BYTES } from '../../core/dense/memBudget.js'
 import { pluralize } from '../../core/textFormat.js'
+import { stampOf } from '../../core/products/productSet.js'
 
 // A neighbourhood edit of a streamed cloud (Filter, Classify ground) runs tile by tile;
 // with more than one tile the tiles go to the whole pool. Each worker holds one tile at
@@ -557,6 +558,7 @@ export function createCloudLod({
         kind: 'dense',
         createdAt: Date.now(),
         derived: true,
+        basedOn: [stampOf(source)],
         ...(source.imported ? { imported: true } : {}),
         cameras: markRaw(new Map()),
         count: meta.points,

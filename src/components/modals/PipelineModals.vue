@@ -295,6 +295,7 @@ const measurementsStore = useMeasurementsStore()
     <DenseModal
       v-if="denseOpen"
       :maps="reconstructionStore.depthMapCount"
+      :output="reconstructionStore.outputPlan('dense')"
       @close="denseOpen = false"
       @run="onDenseRun"
     />
@@ -312,6 +313,7 @@ const measurementsStore = useMeasurementsStore()
       :source="demSource"
       :ground-source="groundSource"
       :estimate-size="(s) => reconstructionStore.estimateRasterSize('dem', s)"
+      :output="reconstructionStore.outputPlan('dem')"
       @close="demOpen = false"
       @run="onDemRun"
     />
@@ -330,6 +332,7 @@ const measurementsStore = useMeasurementsStore()
       @apply-crs-suggestion="applyCrsSuggestion"
       :project-crs="currentCrs"
       :estimate-size="(s) => reconstructionStore.estimateRasterSize('ortho', s)"
+      :output="reconstructionStore.outputPlan('ortho')"
       @close="orthoOpen = false"
       @run="onOrthoRun"
     />
@@ -341,6 +344,7 @@ const measurementsStore = useMeasurementsStore()
       :has-dense="clouds.some((c) => c.kind === 'dense' && c.count > 0)"
       :sources="meshSources"
       :default-source-id="meshSource?.id ?? null"
+      :output="reconstructionStore.outputPlan('mesh')"
       @close="meshOpen = false"
       @run="onMeshRun"
     />

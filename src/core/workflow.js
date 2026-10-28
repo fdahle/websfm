@@ -144,6 +144,7 @@ export const WORKFLOW_BLOCKS = [
     { key: 'auto', label: 'Automatic thresholds', type: 'boolean' },
     { key: 'minViews', label: 'Minimum views', type: 'number', min: 1 },
     { key: 'removeIsolated', label: 'Remove isolated points', type: 'boolean' },
+    { key: 'replaceMain', label: 'Replace the main dense cloud', type: 'boolean' },
   ]),
 
   automated('gen-dem', 'Build DEM', 'Products', ['cloud'], ['dem'], { ...DEM_DEFAULTS }, [
@@ -151,6 +152,7 @@ export const WORKFLOW_BLOCKS = [
     { key: 'gsd', label: 'GSD (0 = auto)', type: 'number', min: 0 },
     { key: 'longSide', label: 'Long side px (when GSD is 0; 0 = auto)', type: 'number', min: 0 },
     { key: 'aggregate', label: 'Surface', type: 'select', options: ['median', 'max', 'mean', 'min'] },
+    { key: 'replaceMain', label: 'Replace the main DEM', type: 'boolean' },
   ]),
   automated('gen-ortho', 'Build Orthophoto', 'Products', ['surface', 'depthMaps'], ['ortho'], { ...ORTHO_DEFAULTS }, [
     { key: 'surface', label: 'Surface', type: 'select', options: ['dem', 'mesh', 'plane'] },
@@ -159,6 +161,7 @@ export const WORKFLOW_BLOCKS = [
     { key: 'blend', label: 'Blending', type: 'select', options: ['mosaic', 'best', 'average'] },
     { key: 'seamline', label: 'Seamlines', type: 'select', options: ['graphcut', 'nadir'] },
     { key: 'seamBlend', label: 'Seam blending', type: 'select', options: ['multiband', 'feather'] },
+    { key: 'replaceMain', label: 'Replace the main orthophoto', type: 'boolean' },
   ]),
   automated('gen-mesh', 'Build Mesh', 'Products', ['dense'], ['mesh'], { preset: 'medium', ...MESH_DEFAULTS }, [
     { key: 'preset', label: 'Preset', type: 'select', options: PRESETS },
@@ -166,6 +169,7 @@ export const WORKFLOW_BLOCKS = [
     { key: 'trim', label: 'Surface trimming', type: 'select', options: ['off', 'gentle', 'strong'] },
     { key: 'fillHoles', label: 'Fill small holes', type: 'boolean' },
     { key: 'removeFloaters', label: 'Remove floating pieces', type: 'boolean' },
+    { key: 'replaceMain', label: 'Replace the main mesh', type: 'boolean' },
   ]),
 
   // Textures the newest computed mesh (Build Mesh's), optionally decimated first: a

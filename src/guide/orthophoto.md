@@ -38,7 +38,9 @@ throughout and names the group.
 <!-- param: surface default: DEM -->
 Use a **DEM** for terrain and overhead mapping, a **mesh** for complex or vertical 3D
 shape, and a **plane** only when the scene is truly flat. Surface errors become image
-displacement, double edges, or holes in the orthophoto.
+displacement, double edges, or holes in the orthophoto. With several DEMs or meshes,
+the [main](help:main-product) one is the surface; right-click another ▸ **Set as
+main** to use that one.
 
 ## Coordinate frame
 <!-- param: crs default: Local -->
@@ -220,6 +222,13 @@ while a large radius smears colour across ground no camera saw. Large holes usua
 mean missing coverage, a bad surface, or an Occlusion tolerance that is too tight.
 Because it counts pixels, the same radius covers less ground at a finer ground sample
 distance.
+
+## Replace the main orthophoto
+<!-- param: replaceMain default: Off -->
+Where the new orthophoto goes. Off, it is added beside the others under a name of its own
+("Orthophoto 2") and becomes the [main orthophoto](help:main-product), the one the next step
+uses; the older ones stay until you remove them. On, it takes the main orthophoto's place
+and name. Either way, products built on the old one are kept and marked outdated.
 
 ## Export
 The orthophoto is stored as a Cloud-Optimized GeoTIFF (tiled, with overviews and

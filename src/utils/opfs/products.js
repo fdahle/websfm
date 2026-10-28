@@ -6,7 +6,9 @@ import { getProjectDir, getSubDir, readBin, readJson, writeBin, writeJson } from
 
 // ── Products (DEM / orthophoto rasters) ──────────────────────────────────────
 // Recomputable but expensive, so persisted like other project data. Metadata
-// (dimensions, geotransform, CRS) goes in products/{kind}.json; the binary parts
+// (dimensions, geotransform, CRS) goes in products/{id}.json, one document per
+// product (a project may hold several DEMs and orthophotos; the record's `id`, or its
+// kind for a record without one); the binary parts
 // are generation files of that document (binaryDocument.js), the preview PNG among
 // them. DEM: Float32 heights (`data`) + Uint8 validity (`mask`), read at open (≤ 4,096²),
 // and Uint8 direct support (`support`, 0–255 measured share; absent on older DEMs);
@@ -39,9 +41,10 @@ function validateProduct(kind, product) {
 
 // → the committed { key: { name, bytes } } files (the store records the ortho's cog).
 export async function saveProduct(projectId, kind, product) {
-  return trackPersistence('saveProduct:' + String(projectId) + ':' + String(kind), async () => {
+  const stem = product.id ?? kind
+  return trackPersistence('saveProduct:' + String(projectId) + ':' + String(stem), async () => {
     validateProduct(kind, product)
-    return persistenceLock(`product:${projectId}:${kind}`, async () => {
+    return persistenceLock(`product:${projectId}:${stem}`, async () => {
       const dir = await getSubDir(projectId, 'products')
       // The preview PNG is a sidecar file (a Blob, written as is), never a string in
       // the JSON: a 4096² preview was ~100 MB of base64 parsed back at every open.
@@ -53,10 +56,10 @@ export async function saveProduct(projectId, kind, product) {
           ? { data, mask, ...(support ? { support } : {}), ...(cogPart ? { cog: cogPart } : {}) }
           : { cog: cogPart }
       buffers.preview = previewBlob ?? null
-      let res = await writeBinaryDocument(dir, `${kind}.json`, meta, buffers, { writeJson, writeBin })
+      let res = await writeBinaryDocument(dir, `${stem}.json`, meta, buffers, { writeJson, writeBin })
       // The reused file went missing (another tab's save collected it): write it out.
       if (res.stale && cog instanceof Blob) {
-        res = await writeBinaryDocument(dir, `${kind}.json`, meta, { ...buffers, cog }, { writeJson, writeBin })
+        res = await writeBinaryDocument(dir, `${stem}.json`, meta, { ...buffers, cog }, { writeJson, writeBin })
       }
       if (res.stale) throw new Error(`Saved ${kind === 'dem' ? 'DEM' : 'orthophoto'} file is missing`)
       if (kind === 'dem' && !cogPart) return {}
@@ -79,11 +82,12 @@ async function productFile(dir, meta, key) {
 
 // → the product, null, or { outdated: true } for an ortho saved before orthophotos
 // were stored as a COG (beta: its whole-plane RGBA shape is no longer read; rebuild).
-export async function loadProduct(projectId, kind) {
-  return persistenceLock(`product:${projectId}:${kind}`, async () => {
+// `stem`: the document's name, the product's id (its kind for one saved without).
+export async function loadProduct(projectId, kind, stem = kind) {
+  return persistenceLock(`product:${projectId}:${stem}`, async () => {
     try {
       const dir = await getSubDir(projectId, 'products')
-      const meta = await readJson(dir, `${kind}.json`)
+      const meta = await readJson(dir, `${stem}.json`)
       if (!meta) return null
       if (kind !== 'dem') {
         const cog = await productFile(dir, meta, 'cog')
@@ -128,21 +132,46 @@ export async function loadProduct(projectId, kind) {
   })
 }
 
-export async function deleteProduct(projectId, kind) {
-  return trackPersistence('deleteProduct:' + String(projectId) + ':' + String(kind), () =>
-    persistenceLock(`product:${projectId}:${kind}`, async () => {
+// `stem`: the product's id, as for loadProduct.
+export async function deleteProduct(projectId, stem) {
+  return trackPersistence('deleteProduct:' + String(projectId) + ':' + String(stem), () =>
+    persistenceLock(`product:${projectId}:${stem}`, async () => {
       const dir = await getSubDir(projectId, 'products')
-      await dir.removeEntry(`${kind}.json`).catch(ignoreMissing)
+      await dir.removeEntry(`${stem}.json`).catch(ignoreMissing)
       for (const suffix of ['_data.bin', '_mask.bin', '_rgba.bin']) {
-        await dir.removeEntry(`${kind}${suffix}`).catch(ignoreMissing)
+        await dir.removeEntry(`${stem}${suffix}`).catch(ignoreMissing)
       }
       if (dir.keys)
         for await (const name of dir.keys()) {
-          if (name.startsWith(`${kind}.json.`) && name.endsWith('.bin'))
+          if (name.startsWith(`${stem}.json.`) && name.endsWith('.bin'))
             await dir.removeEntry(name).catch(ignoreMissing)
         }
     }),
   )
+}
+
+// Every saved product, oldest first: [{ stem, product }], `product` being what
+// loadProduct returns for it ({ outdated: true } for an ortho in the old format).
+// The kind is the record's own, or the stem's for a document saved before records
+// carried one ('dem.json', 'ortho.json').
+export async function loadProducts(projectId) {
+  let stems = []
+  try {
+    const dir = await getSubDir(projectId, 'products')
+    if (dir.keys)
+      for await (const name of dir.keys()) {
+        if (name.endsWith('.json') && !name.includes('.json.')) stems.push(name.slice(0, -'.json'.length))
+      }
+  } catch {
+    return []
+  }
+  const kindOf = (stem) => (stem === 'ortho' || stem.startsWith('ortho-') ? 'ortho' : 'dem')
+  const out = []
+  for (const stem of stems) {
+    const product = await loadProduct(projectId, kindOf(stem), stem)
+    if (product) out.push({ stem, product })
+  }
+  return out.sort((a, b) => (a.product.createdAt ?? 0) - (b.product.createdAt ?? 0))
 }
 
 export async function deleteProducts(projectId) {

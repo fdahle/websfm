@@ -113,9 +113,11 @@ control and camera positions as the original solve, so it cannot undo a GCP
 correction; the log states how many GCP anchors and camera positions constrained it. It refuses a disconnected camera
 network, fewer than six surviving observations in any camera, or missing stored
 photo measurements. Cancel or solver failure preserves the original model. A
-successful edit replaces the main sparse model and invalidates depth maps, computed
-dense/mesh output, DEM, orthophoto, scale and georeference; rebuild/refit those next.
-Save a project copy first if you want to retain the previous solution.
+successful edit replaces the main sparse model and retires the depth maps, scale and
+georeference; rebuild/refit those next. The dense clouds, meshes, DEMs and
+orthophotos built on the previous model are kept, marked
+[outdated](help:main-product). Save a project copy first if you want to retain the
+previous solution.
 
 ## Optimize cameras
 **Tools → Model ▾ → Optimize cameras** re-runs bundle adjustment on the finished
@@ -133,5 +135,5 @@ dense stage warps by. Re-run the reconstruction with self-calibration to change 
 [Fisheye](help:fisheye-lens) cameras are solved in the pixels their lens recorded, with
 the lens the reconstruction ended with, and their stored observations are re-derived for
 the new focal length.
-Like gradual selection, a successful run replaces the main model in place and clears
-its dense, mesh, DEM, orthophoto, scale and georeference results.
+Like gradual selection, a successful run replaces the main model in place and retires
+its depth maps, scale and georeference; the products built on it stay, marked outdated.

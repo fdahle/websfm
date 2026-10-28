@@ -1,6 +1,15 @@
-import { describe, it, expect } from 'vitest'
-import { ref } from 'vue'
+import { beforeEach, describe, it, expect } from 'vitest'
+import { markRaw, ref } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
+import { useProjectsStore } from '../stores/useProjectsStore.js'
+import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useSourcePick, cloudOptionLabel, meshOptionLabel, referenceOptionLabel } from './useSourcePick.js'
+
+// The labels and the default pick read the reconstruction store (main / outdated).
+beforeEach(() => {
+  setActivePinia(createPinia())
+  useProjectsStore().persistenceAvailable = false
+})
 
 const A = { id: 'a', name: 'A', count: 1200 }
 const B = { id: 'b', name: 'B', count: 3 }
@@ -69,5 +78,40 @@ describe('option labels', () => {
     expect(meshOptionLabel(M)).toBe('M — 10 triangles')
     expect(referenceOptionLabel(M)).toBe('M (mesh)')
     expect(referenceOptionLabel(A)).toBe('A')
+  })
+})
+
+describe('main and outdated products', () => {
+  const dense = (id, name, extra = {}) => ({
+    id,
+    name,
+    kind: 'dense',
+    count: 5,
+    createdAt: 1,
+    cameras: markRaw(new Map()),
+    pos: new Float32Array(15),
+    ...extra,
+  })
+
+  it('starts on the main one and names it, and an outdated one', () => {
+    const recon = useReconstructionStore()
+    const sparse = { id: 's', name: 'Sparse', kind: 'sparse', createdAt: 9, cameras: new Map(), points: [] }
+    // Built on an earlier version of the model (createdAt 1, now 9).
+    const old = dense('d1', 'Dense cloud', { basedOn: [{ id: 's', kind: 'sparse', createdAt: 1 }] })
+    const fresh = dense('d2', 'Dense cloud 2', { basedOn: [{ id: 's', kind: 'sparse', createdAt: 9 }] })
+    recon.clouds = [sparse, old, fresh]
+    recon.mainSparseId = 's'
+    recon.mainProductIds = { dense: 'd2' }
+    const pick = useSourcePick(() => recon.clouds.filter((c) => c.kind === 'dense'))
+    expect(pick.id.value).toBe('d2')
+    expect(cloudOptionLabel(recon.clouds[2])).toBe('Dense cloud 2 — 5 points · main')
+    expect(cloudOptionLabel(recon.clouds[1])).toBe('Dense cloud — 5 points · outdated')
+    // Set as main moves the default; the user's own pick stays.
+    recon.setMainProduct('d1')
+    expect(pick.id.value).toBe('d1')
+    pick.id.value = 'd2'
+    recon.setMainProduct('d2')
+    recon.setMainProduct('d1')
+    expect(pick.id.value).toBe('d2')
   })
 })

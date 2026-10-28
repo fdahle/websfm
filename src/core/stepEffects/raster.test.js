@@ -28,6 +28,10 @@ describe('demEffects', () => {
     expect(even.cell).toMatch(/^About 1 point per cell/)
     const ground = demEffects({ ...DEM_DEFAULTS, points: 'ground', fillMethod: 'none', fillHoles: true }, { source })
     expect(ground.points).toMatch(/ground class only/)
+    const old = demEffects(DEM_DEFAULTS, { source: { ...source, outdated: true } })
+    expect(old.points).toMatch(
+      /^6,000,000 points of the dense cloud "Dense cloud", which is outdated, go into the grid/,
+    )
     expect(ground.fill).toMatch(/^Off: .*except the enclosed gaps/)
   })
 })

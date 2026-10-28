@@ -456,3 +456,43 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* Marks the main product of its kind: the input the next step uses (and for a DEM or
+   ortho, the one the map and the product tab show). */
+.main-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent, #4a9eff);
+  border: 1px solid var(--accent, #4a9eff);
+  padding: 0 5px;
+  border-radius: 8px;
+  line-height: 15px;
+}
+
+/* Provenance chip on an imported cloud (muted — it's information, not a role). */
+.imported-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim, #8a8a8a);
+  border: 1px solid var(--panel-border, #3a3a3a);
+  padding: 0 5px;
+  border-radius: 8px;
+  line-height: 15px;
+}
+
+/* A product built on an input that has changed since (core/products/productSet.js). */
+.outdated-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--warn, #d9a441);
+  border: 1px solid var(--warn, #d9a441);
+  padding: 0 5px;
+  border-radius: 8px;
+  line-height: 15px;
+}

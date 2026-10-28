@@ -45,6 +45,7 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
       posType: 'f64',
       imported: !!c.imported,
       derived: !!c.derived,
+      ...(c.basedOn ? { basedOn: c.basedOn } : {}),
       secondary: !!c.secondary,
       cameras: [],
       pointCount: N,
@@ -62,6 +63,8 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
     posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
     imported: !!c.imported,
     derived: !!c.derived,
+    // What it was built from (core/products/productSet.js); absent on an import.
+    ...(c.basedOn ? { basedOn: c.basedOn } : {}),
     secondary: !!c.secondary,
     cameras: [],
     pointCount: N,
@@ -105,6 +108,8 @@ export function serializeMeshCloud(c, { buffers = true } = {}) {
     posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
     imported: !!c.imported,
     derived: !!c.derived,
+    // What it was built from (core/products/productSet.js); absent on an import.
+    ...(c.basedOn ? { basedOn: c.basedOn } : {}),
     secondary: !!c.secondary,
     cameras: [],
     pointCount: nVerts,
@@ -202,6 +207,7 @@ function deserializeCloudData(c, makeCloudId) {
       cameras: markRaw(new Map()),
       ...(c.imported ? { imported: true } : {}),
       ...(c.derived ? { derived: true } : {}),
+      ...(Array.isArray(c.basedOn) ? { basedOn: c.basedOn } : {}),
       count: N,
       pos: null,
       col: null,
@@ -221,6 +227,7 @@ function deserializeCloudData(c, makeCloudId) {
       ...(c.imported ? { imported: true } : {}),
       // Absent on projects saved before cloud editing existed ⇒ not derived.
       ...(c.derived ? { derived: true } : {}),
+      ...(Array.isArray(c.basedOn) ? { basedOn: c.basedOn } : {}),
       count: N,
       pos: markRaw(posF),
       col: col ? markRaw(col) : null,
@@ -242,6 +249,7 @@ function deserializeCloudData(c, makeCloudId) {
       // A Mesh ▾ tool output; a re-mesh must never replace it. Absent on meshes
       // saved before mesh editing existed ⇒ not derived.
       ...(c.derived ? { derived: true } : {}),
+      ...(Array.isArray(c.basedOn) ? { basedOn: c.basedOn } : {}),
       count: c.triCount ?? idx.length / 3,
       nVerts,
       pos: markRaw(posF),

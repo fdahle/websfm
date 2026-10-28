@@ -21,7 +21,7 @@ import { ORTHO_BLOCK } from '../../core/products/ortho.js'
 import { createBlockProgress, createStepProgress, createLogPacer } from '../../utils/blockProgress.js'
 import { pluralize } from '../../core/textFormat.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
-import * as opfs from '../../utils/opfs.js'
+import { stampOf } from '../../core/products/productSet.js'
 import { DEM_DEFAULTS, ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 
 // Generating the computed rasters, split out of useReconstructionStore: the DEM
@@ -32,6 +32,7 @@ import { DEM_DEFAULTS, ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createProductRuns({
   activeRegion,
+  putRasterProduct,
   dem,
   demSource,
   depthMapInput,
@@ -203,24 +204,26 @@ export function createProductRuns({
           onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
         },
       )
-      dem.value = withPreviewUrl({
-        ...grid,
-        createdAt: Date.now(),
-        points: groundOnly ? 'ground' : 'all',
-        // How gaps were filled, for the Quality Report's methods (core/help/methodsUsed.js).
-        fillMethod: settings.fillMethod ?? DEM_DEFAULTS.fillMethod,
-        name: dem.value?.name || 'DEM',
-        frameStamp: frameStampOf(resolved),
-        // Heights are in the georeference's vertical datum (georeferencing.js).
-        ...(resolved.source === 'georef' ? { verticalDatum: resolved.verticalDatum } : {}),
-      })
-      // A new DEM invalidates an ortho BUILT ON IT — but not one built over the
-      // mesh/plane surface, which this run didn't touch. (An ortho with no
-      // recorded surface predates the choice, so it was a DEM ortho.)
-      const orthoWasDem = ortho.value && (ortho.value.surface ?? 'DEM') === 'DEM'
-      if (orthoWasDem) ortho.value = null
-      saveProductRecord('dem', dem.value)
-      if (isPersisting() && orthoWasDem) opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
+      // A new DEM is the main one; DEM ▸ Replace the main DEM puts it in that one's
+      // place. Either way an ortho built on the old DEM stays, marked outdated.
+      const record = putRasterProduct(
+        withPreviewUrl({
+          ...grid,
+          kind: 'dem',
+          createdAt: Date.now(),
+          points: groundOnly ? 'ground' : 'all',
+          // The cloud it was built from: Show information, and what makes it outdated.
+          source: { id: src.id ?? null, name: source.name ?? null, kind: source.kind },
+          ...(src.id ? { basedOn: [stampOf(src)] } : {}),
+          // How gaps were filled, for the Quality Report's methods (core/help/methodsUsed.js).
+          fillMethod: settings.fillMethod ?? DEM_DEFAULTS.fillMethod,
+          frameStamp: frameStampOf(resolved),
+          // Heights are in the georeference's vertical datum (georeferencing.js).
+          ...(resolved.source === 'georef' ? { verticalDatum: resolved.verticalDatum } : {}),
+        }),
+        { replaceId: settings.replaceMain ? (dem.value?.id ?? null) : null },
+      )
+      saveProductRecord(record)
       reconStatus.value = 'done'
     } catch (err) {
       log(
@@ -469,25 +472,38 @@ export function createProductRuns({
       // An ortho built ON the DEM inherits the DEM's recorded frame — its cells are
       // that grid's cells, so claiming today's frame would be a claim about a raster
       // this run never re-projected.
-      ortho.value = withPreviewUrl({
-        ...res,
-        createdAt: Date.now(),
-        name: ortho.value?.name || 'Orthophoto',
-        // The mosaic's method, for the Quality Report (core/help/methodsUsed.js).
-        method: {
-          blend: settings.blend ?? ORTHO_DEFAULTS.blend,
-          seamline: settings.seamline ?? ORTHO_DEFAULTS.seamline,
-          seamBlend: settings.seamBlend ?? ORTHO_DEFAULTS.seamBlend,
-          colourBalance: settings.colourBalance ?? ORTHO_DEFAULTS.colourBalance,
-        },
-        // Symbology survives a rebuild, like the name (display only).
-        ...(ortho.value?.style && { style: ortho.value.style }),
-        frameStamp:
-          (settings.surface ?? 'dem') === 'dem'
-            ? (dem.value?.frameStamp ?? frameStampOf(resolved))
-            : frameStampOf(resolved),
-      })
-      saveProductRecord('ortho', ortho.value)
+      // What the ortho was built from: its surface (the main DEM or mesh, or the cloud a
+      // plane was fitted to) and the model whose photos coloured it — what makes it
+      // outdated when one of them is rebuilt.
+      const surfaceId = settings.surface ?? 'dem'
+      const surfaceRecord =
+        surfaceId === 'dem' ? dem.value : surfaceId === 'mesh' ? meshCloud.value : (demSource.value?.cloud ?? null)
+      const basedOn = [surfaceRecord, sparse].filter((r) => r?.id).map(stampOf)
+      // A new ortho is the main one; Orthophoto ▸ Replace the main orthophoto puts it
+      // in that one's place.
+      const record = putRasterProduct(
+        withPreviewUrl({
+          ...res,
+          kind: 'ortho',
+          createdAt: Date.now(),
+          basedOn,
+          // The mosaic's method, for the Quality Report (core/help/methodsUsed.js).
+          method: {
+            blend: settings.blend ?? ORTHO_DEFAULTS.blend,
+            seamline: settings.seamline ?? ORTHO_DEFAULTS.seamline,
+            seamBlend: settings.seamBlend ?? ORTHO_DEFAULTS.seamBlend,
+            colourBalance: settings.colourBalance ?? ORTHO_DEFAULTS.colourBalance,
+          },
+          // Symbology carries over from the main ortho, like a GIS layer style (display only).
+          ...(ortho.value?.style && { style: ortho.value.style }),
+          frameStamp:
+            (settings.surface ?? 'dem') === 'dem'
+              ? (dem.value?.frameStamp ?? frameStampOf(resolved))
+              : frameStampOf(resolved),
+        }),
+        { replaceId: settings.replaceMain ? (ortho.value?.id ?? null) : null },
+      )
+      saveProductRecord(record)
       reconStatus.value = 'done'
     } catch (err) {
       if (!stillCurrent()) return

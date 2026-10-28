@@ -138,6 +138,15 @@ the grid are the edge of the survey and stay nodata. The filled heights are an
 estimate, not a measurement: a building on a slope gets the slope continued under
 it. On by default for Ground only, off otherwise.
 
+## Replace the main DEM
+<!-- param: replaceMain default: Off -->
+Where the new DEM goes. Off, it is added beside the others under a name of its own
+("DEM 2") and becomes the [main DEM](help:main-product), the one the next step
+uses; the older ones stay until you remove them. On, it takes the main DEM's place
+and name. Either way, products built on the old one are kept and marked outdated.
+A rebuilt DEM no longer removes the orthophoto built on it: that one is marked
+outdated instead.
+
 ## Support layer
 <!-- param: supportExport default: — -->
 Every DEM records which of its cells points landed in and which the gap

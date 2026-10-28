@@ -259,8 +259,7 @@ export function createSparseRun({
           terminateAll('preparing a clean sparse-reconstruction rerun')
           log(
             `Released the loaded reconstruction before rerun (${released.cameraCount} cameras, ` +
-              `${released.pointCount.toLocaleString()} points` +
-              `${released.dependentClouds ? `, ${pluralize(released.dependentClouds, 'computed dependent cloud')}` : ''}). ` +
+              `${released.pointCount.toLocaleString()} points). ` +
               'The saved model remains recoverable by reloading until the replacement succeeds.',
             'info',
             'Compute',

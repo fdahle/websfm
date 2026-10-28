@@ -7,6 +7,7 @@ import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
 import RasterSizeField from '../ui/RasterSizeField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import OutputStep from '../ui/OutputStep.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { ORTHO_DEFAULTS } from '../../../core/defaults.user.js'
 import { orthoCostCeiling } from '../../../core/products/ortho.js'
@@ -37,6 +38,8 @@ const props = defineProps({
   depthSettings: { type: Object, default: null },
   // The store's estimateRasterSize('ortho', settings): the size readout.
   estimateSize: { type: Function, default: null },
+  // The store's outputPlan('ortho'): what step 6 (Output) adds or replaces.
+  output: { type: Object, default: null },
 })
 
 const emit = defineEmits(['close', 'run', 'apply-crs-suggestion'])
@@ -432,6 +435,15 @@ const effects = computed(() =>
         />
       </SettingsField>
     </SettingsStep>
+
+    <OutputStep
+      v-model="settings.replaceMain"
+      step="6"
+      op="orthophoto"
+      noun="orthophoto"
+      :plan="output"
+      :default-value="ORTHO_DEFAULTS.replaceMain"
+    />
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

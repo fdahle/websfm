@@ -99,6 +99,7 @@ export function createMeshTexture({
         {
           name: name || `${source.name} (textured)`,
           imported: !!source.imported,
+          from: [source],
         },
       )
       cloud.textureSummary = { ...res.summary, sourceId: source.id, sourceName: source.name, settings }

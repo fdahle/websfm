@@ -80,6 +80,15 @@ sky or vegetation that slipped through the other gates. Well-supported points ar
 never tested, so the filter rarely touches real surface; turn it off only if a sparse,
 thin structure (a wire or mast) loses points.
 
+## Replace the main dense cloud
+<!-- param: replaceMain default: Off -->
+Where the new dense cloud goes. Off, it is added beside the others under a name of its own
+("Dense cloud 2") and becomes the [main dense cloud](help:main-product), the one the next step
+uses; the older ones stay until you remove them. On, it takes the main dense cloud's place
+and name. Either way, products built on the old one are kept and marked outdated.
+An imported or edited cloud is never replaced; with this on and one of those as the
+main one, the new cloud is added instead.
+
 ## Cleaning the cloud
 Use the 3D viewer to inspect floating clusters, edge shells, holes, and over-smoothed
 areas. A cloud of 4 million points or more is drawn level of detail: right after it is

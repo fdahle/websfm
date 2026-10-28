@@ -117,4 +117,4 @@ export {
   pruneLodFiles,
   saveReconstruction,
 } from './opfs/reconstruction.js'
-export { deleteProduct, deleteProducts, loadProduct, saveProduct } from './opfs/products.js'
+export { deleteProduct, deleteProducts, loadProduct, loadProducts, saveProduct } from './opfs/products.js'

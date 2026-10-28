@@ -89,6 +89,8 @@ export const useModalsStore = defineStore('modals', () => {
   // Import ▸ SfM project: choose files or a folder before the import session opens.
   const sfmSourceOpen = ref(false)
   const infoImageId = ref(null)
+  // Show information on a product: { cloudId } (sparse, dense, mesh) or { productId } (a DEM / ortho).
+  const infoProduct = ref(null)
   // Automatic fiducial measurement on film scans. Holds the sensor id, not the
   // record — the modal reads the live sensor back out of the sensors store.
   const fiducialDetectOpen = ref(false)
@@ -165,6 +167,7 @@ export const useModalsStore = defineStore('modals', () => {
     symbologyCloudId,
     sfmSourceOpen,
     infoImageId,
+    infoProduct,
     fiducialDetectOpen,
     reseauOpen,
     panoramicOpen,

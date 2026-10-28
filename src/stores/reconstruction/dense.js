@@ -846,7 +846,7 @@ export function createDense({
           if (!done) reconStatus.value = 'error'
           return
         }
-        upsertDenseCloud(done.cloud)
+        upsertDenseCloud(done.cloud, { replace: !!settings.replaceMain })
         denseSummary.value = done.summary
         reconStatus.value = 'done'
         await save()
@@ -891,7 +891,7 @@ export function createDense({
       }
       // The worker returns the cloud already split (Float32 pos, Uint8 col, Float32
       // world-space normals for the Poisson mesh), assembled from its fusion slabs.
-      upsertDenseCloud(cloud)
+      upsertDenseCloud(cloud, { replace: !!settings.replaceMain })
       denseSummary.value = dSummary ?? null
       reconStatus.value = 'done'
       await save()
@@ -922,7 +922,8 @@ export function createDense({
   // genuinely non-destructive: terminating a worker cannot strand detached
   // source buffers. Upserts a single kind:'mesh' cloud.
   async function generateMesh(settings = {}, onProgress) {
-    const { sourceId, ...meshSettings } = settings
+    // replaceMain: Mesh ▸ Replace the main mesh (where the mesh goes, not how it is built).
+    const { sourceId, replaceMain, ...meshSettings } = settings
     const pick = sourceId != null ? meshSources.value.find((s) => s.id === sourceId) : meshSource.value
     const dense = pick ? clouds.value.find((c) => c.id === pick.id) : null
     if (!dense?.count) {
@@ -984,7 +985,12 @@ export function createDense({
         reconStatus.value = 'done'
         return
       }
-      upsertMeshCloud(mesh, { sourceId: dense.id, sourceName: dense.name ?? null, settings: meshSettings })
+      upsertMeshCloud(mesh, {
+        sourceId: dense.id,
+        sourceName: dense.name ?? null,
+        settings: meshSettings,
+        replace: !!replaceMain,
+      })
       reconStatus.value = 'done'
       await save()
     } catch (err) {

@@ -46,8 +46,21 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   const { images } = storeToRefs(imagesStore)
   const { matchRun, usableMatchCount } = storeToRefs(useMatchesStore())
   const { currentSceneType } = storeToRefs(useProjectsStore())
-  const { clouds, mainSparseCloud, depthMaps, depthMapCount, dem, ortho, denseSummary, meshSources } =
-    storeToRefs(useReconstructionStore())
+  const {
+    clouds,
+    mainSparseCloud,
+    mainDenseCloud,
+    mainMeshCloud,
+    depthMaps,
+    depthMapCount,
+    dem,
+    ortho,
+    denseSummary,
+    meshSources,
+  } = storeToRefs(useReconstructionStore())
+  // The main dense cloud / mesh when the pipeline built it: what Dense Model and Build
+  // Mesh produced last (a build makes its output the main one).
+  const builtMain = (main) => (main.value && !main.value.imported && !main.value.derived ? main.value : null)
   const { computeHealth } = useQualityReport()
   const workflowsStore = useWorkflowsStore()
   const { addWorkflow, updateWorkflow, recordRun: recordWorkflowRun } = workflowsStore
@@ -146,12 +159,13 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   }
 
   // The chain a run's tool blocks work along: the cloud / mesh the previous block of
-  // this run produced, else Dense Model's cloud / Build Mesh's mesh, else the newest
-  // one. Never the viewer selection, so a replayed chain does not depend on clicks.
+  // this run produced, else the main one, else the newest one. Never the viewer
+  // selection, so a replayed chain does not depend on clicks.
   function chainSource(kind, context) {
     const list = clouds.value.filter((c) => c.kind === kind && c.count > 0)
     const id = kind === 'mesh' ? context.meshId : context.cloudId
-    return list.find((c) => c.id === id) ?? list.find((c) => !c.imported && !c.derived) ?? list[list.length - 1] ?? null
+    const main = (kind === 'mesh' ? mainMeshCloud : mainDenseCloud).value
+    return list.find((c) => c.id === id) ?? list.find((c) => c.id === main?.id) ?? list[list.length - 1] ?? null
   }
   // Build Mesh meshes the chain's cloud when a cleanup block produced one (and it
   // still has normals); otherwise the dialog's own default source.
@@ -264,13 +278,13 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     return gateMetricValue(metric, { rows, ...counts })
   }
 
-  // Texture Mesh: the chain's mesh (a cleanup block's output), else Build Mesh's mesh
+  // Texture Mesh: the chain's mesh (a cleanup block's output), else the main mesh
   // (else the newest untextured one), decimated first when asked and larger than the target.
   async function runTextureBlock({ decimateTo, ...settings }, context = {}) {
     const meshes = clouds.value.filter((c) => c.kind === 'mesh' && c.count > 0 && !c.texture)
     let source =
       meshes.find((c) => c.id === context.meshId) ??
-      meshes.find((c) => !c.imported && !c.derived) ??
+      meshes.find((c) => c.id === mainMeshCloud.value?.id) ??
       meshes[meshes.length - 1]
     if (!source) return { ok: false, cancelled: false, reason: 'Texture Mesh: no mesh to texture' }
     if (decimateTo > 0 && source.count > decimateTo) {
@@ -291,10 +305,10 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     if (type === 'match-features') return matchRun.value
     if (type === 'reconstruct') return mainSparseCloud.value
     if (type === 'compute-depth') return depthMaps.value
-    if (type === 'dense') return clouds.value.find((c) => c.kind === 'dense' && !c.imported && !c.derived) ?? null
+    if (type === 'dense') return builtMain(mainDenseCloud)
     if (type === 'gen-dem') return dem.value
     if (type === 'gen-ortho') return ortho.value
-    if (type === 'gen-mesh') return clouds.value.find((c) => c.kind === 'mesh' && !c.imported && !c.derived) ?? null
+    if (type === 'gen-mesh') return builtMain(mainMeshCloud)
     if (type === 'texture-mesh') return [...clouds.value].reverse().find((c) => c.kind === 'mesh' && c.texture) ?? null
     return null
   }

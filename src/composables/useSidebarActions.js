@@ -54,7 +54,7 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     selectCloud,
     setCloudVisible,
     renameCloud,
-    setMainSparse,
+    setMainProduct,
     setProductVisible,
     setProductOpacity,
     setMapLayerHidden,
@@ -70,6 +70,7 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   const { setRasterKind, setRasterVisible, setRasterOpacity, rasterById } = useExternalStore()
   const {
     infoImageId,
+    infoProduct,
     sensorTableOpen,
     matchListOpen,
     symbologyCloudId,
@@ -164,6 +165,10 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     showInfo: (id) => {
       infoImageId.value = id
     },
+    // Show information on a cloud ({ cloudId }) or a DEM/ortho ({ productId }).
+    showProductInfo: (target) => {
+      infoProduct.value = target
+    },
     zoomToImage: zoomToImagePosition,
     deleteKeypoints: confirmClearKeypoints,
     removeImage: requestRemoveImages,
@@ -204,10 +209,13 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     cloudVisibility: ({ id, visible }) => setCloudVisible(id, visible),
     removeCloud: confirmRemoveCloud,
     renameCloud: ({ id, name }) => renameCloud(id, name),
-    setMainCloud: setMainSparse,
+    // Set as main, for a sparse model, a dense cloud or a mesh.
+    setMainCloud: setMainProduct,
     zoomToCloud,
     downloadCloud: openCloudExport,
-    // Computed products
+    // Computed products. The tab, the map layer, symbology and download act on the
+    // main DEM / ortho (by kind); rename, Set as main and remove on any one (by id).
+    setMainProduct,
     openProduct: openComputedProductTab,
     removeProduct: confirmRemoveProduct,
     renameProduct: renameProductFromSidebar,

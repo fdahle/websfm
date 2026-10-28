@@ -33,17 +33,27 @@ it('puts a computed product on the map unless it has no preview, whatever its fr
   setActivePinia(createPinia())
   useProjectsStore().persistenceAvailable = false
   const store = useReconstructionStore()
-  const base = { width: 2, height: 2, gsd: 1, originX: 0, originY: 2, data: new Float32Array(4), previewUrl: 'data:x' }
-  store.dem = { ...base, crs: 'local', previewUrl: null }
+  const base = {
+    id: 'd1',
+    kind: 'dem',
+    width: 2,
+    height: 2,
+    gsd: 1,
+    originX: 0,
+    originY: 2,
+    data: new Float32Array(4),
+    previewUrl: 'data:x',
+  }
+  store.rasterProducts = [{ ...base, crs: 'local', previewUrl: null }]
   expect(store.setProductVisible('dem', true)).toBe(false)
   expect(store.productLayers.dem).toBeUndefined()
   // A local-frame product may be requested: the model-frame map can place it.
-  store.dem = { ...base, crs: 'local' }
+  store.rasterProducts = [{ ...base, crs: 'local' }]
   expect(store.setProductVisible('dem', true)).toBe(true)
   store.setProductOpacity('dem', 0.3)
   expect(store.productLayers.dem).toEqual({ visible: true, opacity: 0.3 })
   // Hiding is always allowed, even once the product could no longer be placed.
-  store.dem = { ...base, crs: 'local', previewUrl: null }
+  store.rasterProducts = [{ ...base, crs: 'local', previewUrl: null }]
   expect(store.setProductVisible('dem', false)).toBe(true)
   expect(store.productLayers.dem.visible).toBe(false)
 })
@@ -53,6 +63,8 @@ it('puts a first-built product on the map, and a rebuild after removal again', a
   useProjectsStore().persistenceAvailable = false
   const store = useReconstructionStore()
   const dem = {
+    id: 'd1',
+    kind: 'dem',
     width: 2,
     height: 2,
     gsd: 1,
@@ -62,20 +74,47 @@ it('puts a first-built product on the map, and a rebuild after removal again', a
     previewUrl: 'data:x',
     crs: 'local',
   }
-  store.dem = dem
+  store.rasterProducts = [dem]
   await nextTick()
   expect(store.productLayers.dem).toEqual({ visible: true, opacity: 1 })
   // Taken off the map, a rebuild keeps it off.
   store.setProductVisible('dem', false)
-  store.dem = { ...dem }
+  store.rasterProducts = [{ ...dem }]
   await nextTick()
   expect(store.productLayers.dem.visible).toBe(false)
   // Removed, its layer state goes with it, and the next build is on the map again.
-  expect(await store.removeProduct('dem')).toBe(true)
+  expect(await store.removeProduct('d1')).toBe(true)
   expect(store.productLayers.dem).toBeUndefined()
-  store.dem = { ...dem }
+  store.rasterProducts = [{ ...dem }]
   await nextTick()
   expect(store.productLayers.dem).toEqual({ visible: true, opacity: 1 })
+})
+
+it('adds a rebuilt DEM beside the old one as the main one, or replaces the main one', async () => {
+  setActivePinia(createPinia())
+  useProjectsStore().persistenceAvailable = false
+  const store = useReconstructionStore()
+  store.importCloud({ count: 2, pos: new Float64Array([0, 0, 1, 1, 1, 2]) }, 'survey.las')
+  const generate = vi
+    .spyOn(workers, 'generateDem')
+    .mockResolvedValue({ width: 1, height: 1, data: new Float32Array([1]), mask: new Uint8Array([1]) })
+  await store.generateDem({ crs: 'local' })
+  await store.generateDem({ crs: 'local' })
+  expect(store.rasterProducts.map((p) => p.name)).toEqual(['DEM', 'DEM 2'])
+  expect(store.dem.name).toBe('DEM 2')
+  // Built on the imported cloud, which has not changed: neither is outdated.
+  expect(store.productStatus(store.rasterProducts[0]).outdated).toBe(false)
+  store.setMainProduct(store.rasterProducts[0].id)
+  expect(store.dem.name).toBe('DEM')
+  // Replace puts the new one in the main one's place, under its name and id.
+  const id = store.dem.id
+  await store.generateDem({ crs: 'local', replaceMain: true })
+  expect(store.rasterProducts.map((p) => p.name)).toEqual(['DEM', 'DEM 2'])
+  expect(store.dem.id).toBe(id)
+  // Removing the main one hands the role to the newest one left.
+  await store.removeProduct(id)
+  expect(store.dem.name).toBe('DEM 2')
+  generate.mockRestore()
 })
 
 it('remembers which listed layers the Layers panel hides', () => {
@@ -98,7 +137,7 @@ it('keeps an unreadable saved model on disk instead of saving an empty one over 
   const store = useReconstructionStore()
   const spies = [
     vi.spyOn(opfs, 'loadReconstruction').mockRejectedValue(new Error('Incomplete saved reconstruction')),
-    vi.spyOn(opfs, 'loadProduct').mockResolvedValue(null),
+    vi.spyOn(opfs, 'loadProducts').mockResolvedValue([]),
     vi.spyOn(opfs, 'loadDepthIndex').mockResolvedValue(null),
   ]
   const save = vi.spyOn(opfs, 'saveReconstruction').mockResolvedValue({ ok: true, files: {} })

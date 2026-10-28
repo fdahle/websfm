@@ -89,6 +89,7 @@ export function useModalEscape({
     qualityOpen,
     debugSummaryOpen,
     infoImageId,
+    infoProduct,
   } = storeToRefs(useModalsStore())
 
   // Most-transient (stacked-on-top) first; Escape dismisses the first that's open.
@@ -209,6 +210,12 @@ export function useModalEscape({
         infoImageId.value,
         () => {
           infoImageId.value = null
+        },
+      ],
+      [
+        infoProduct.value,
+        () => {
+          infoProduct.value = null
         },
       ],
       // Consume Escape while a workflow is running; closing its builder would hide

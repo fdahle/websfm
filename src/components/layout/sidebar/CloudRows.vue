@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
@@ -14,12 +15,31 @@ import { pluralize } from '../../../core/textFormat.js'
 // (Products also lists DEM/ortho rasters). The section owns the header, the
 // empty state and *which* clouds it passes; this owns row rendering, inline
 // rename and the right-click menu.
-defineProps({
+const props = defineProps({
   clouds: { type: Array, default: () => [] },
 })
 const sidebar = useSidebar()
-// mainSparseId: the sparse cloud downstream stages consume.
-const { selectedCloudId, mainSparseId } = storeToRefs(useReconstructionStore())
+const recon = useReconstructionStore()
+const { selectedCloudId, clouds: allClouds } = storeToRefs(recon)
+
+// The main one of each kind is what the next step uses (mainSparseId for the model,
+// mainProductIds for dense and mesh). Its badge only tells products apart: a sparse
+// model always shows it (it was always there), a dense cloud or mesh once there are two.
+const rowState = computed(() => {
+  const out = new Map()
+  for (const cloud of props.clouds) {
+    const main = recon.isMainProduct(cloud)
+    const many = cloud.kind === 'sparse' || allClouds.value.filter((c) => c.kind === cloud.kind).length > 1
+    const status = recon.productStatus(cloud)
+    out.set(cloud.id, { main, showMain: main && many, outdated: status.outdated ? status.reason : null })
+  }
+  return out
+})
+const MAIN_TITLE = {
+  sparse: 'Main sparse cloud — used for dense / DEM / ortho / export',
+  dense: 'Main dense cloud — the next DEM, mesh or ortho uses this one',
+  mesh: 'Main mesh — a mesh-surface orthophoto uses this one',
+}
 
 const { isExpanded: isCloudExpanded, toggle: toggleCloudExpand } = useExpandedSet()
 
@@ -105,11 +125,12 @@ function fromMenu(fn) {
         @blur="commitRename"
       />
       <span v-else class="item-name">{{ cloud.name }}</span>
+      <span v-if="rowState.get(cloud.id)?.showMain" class="main-badge" :title="MAIN_TITLE[cloud.kind]">main</span>
       <span
-        v-if="cloud.id === mainSparseId"
-        class="main-badge"
-        title="Main sparse cloud — used for dense / DEM / ortho / export"
-        >main</span
+        v-if="rowState.get(cloud.id)?.outdated"
+        class="outdated-badge"
+        :title="`Outdated: ${rowState.get(cloud.id).outdated}`"
+        >outdated</span
       >
       <!-- Provenance chip: which of these you brought in is exactly the thing you
            forget three weeks later, and it's the difference between re-fusable
@@ -171,12 +192,15 @@ function fromMenu(fn) {
       <!-- Groups: go there → change it → destructive. Same order as the image and
            reference-raster menus. -->
       <button class="ctx-item" @click="fromMenu((c) => sidebar.zoomToCloud(c.id))">Zoom to</button>
+      <button class="ctx-item" @click="fromMenu((c) => sidebar.showProductInfo({ cloudId: c.id }))">
+        Show information
+      </button>
       <button class="ctx-item" @click="fromMenu((c) => sidebar.cloudSymbology(c.id))">Symbology…</button>
       <!-- The export dialog (format, georeference, …) aimed at this cloud. -->
       <button class="ctx-item" @click="fromMenu((c) => sidebar.downloadCloud(c.id))">Download…</button>
       <div class="ctx-sep"></div>
       <button
-        v-if="menu.cloud.kind === 'sparse' && menu.cloud.id !== mainSparseId"
+        v-if="!rowState.get(menu.cloud.id)?.main"
         class="ctx-item"
         @click="fromMenu((c) => sidebar.setMainCloud(c.id))"
       >
@@ -195,30 +219,5 @@ function fromMenu(fn) {
   flex-shrink: 0;
   margin: 0 6px 0 0;
   accent-color: var(--accent);
-}
-/* Marks the sparse cloud downstream stages consume (MC). */
-.main-badge {
-  flex-shrink: 0;
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--accent, #4a9eff);
-  border: 1px solid var(--accent, #4a9eff);
-  padding: 0 5px;
-  border-radius: 8px;
-  line-height: 15px;
-}
-
-/* Provenance chip on an imported cloud (muted — it's information, not a role). */
-.imported-badge {
-  flex-shrink: 0;
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--text-dim, #8a8a8a);
-  border: 1px solid var(--panel-border, #3a3a3a);
-  padding: 0 5px;
-  border-radius: 8px;
-  line-height: 15px;
 }
 </style>

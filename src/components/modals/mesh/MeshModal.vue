@@ -8,13 +8,14 @@ import PresetCards from '../ui/PresetCards.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
-import { useSourcePick } from '../../../composables/useSourcePick.js'
+import { useSourcePick, statusTags } from '../../../composables/useSourcePick.js'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META } from '../../../core/defaults.user.js'
 import { recommendMeshDepth } from '../../../core/products/mesh.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { meshEffects } from '../../../core/stepEffects/mesh.js'
+import OutputStep from '../ui/OutputStep.vue'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 
 // Build Mesh (screened Poisson over a dense cloud). Defaults are the single source of
@@ -27,13 +28,18 @@ const props = defineProps({
   sources: { type: Array, default: () => [] },
   defaultSourceId: { type: String, default: null },
   hasDense: { type: Boolean, default: false },
+  // The store's outputPlan('mesh'): what step 6 (Output) adds or replaces.
+  output: { type: Object, default: null },
 })
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...MESH_DEFAULTS })
 const { id: sourceId, item: source } = useSourcePick(() => props.sources, { initialId: props.defaultSourceId })
 const sourceLabel = (s) =>
-  `${s.name} — ${s.count.toLocaleString()} points` + (s.derived ? ' · edited' : '') + (s.imported ? ' · imported' : '')
+  `${s.name} — ${s.count.toLocaleString()} points` +
+  (s.derived ? ' · edited' : '') +
+  (s.imported ? ' · imported' : '') +
+  statusTags(s)
 
 // Quality presets set the octree depth (detail/cost lever; deltas over defaults) —
 // only the depth: trimming, hole filling, floaters and colour are the user's.
@@ -279,6 +285,15 @@ function run() {
         </SettingsField>
       </SettingsStep>
     </AdvancedDisclosure>
+
+    <OutputStep
+      v-model="settings.replaceMain"
+      step="6"
+      op="mesh"
+      noun="mesh"
+      :plan="output"
+      :default-value="MESH_DEFAULTS.replaceMain"
+    />
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

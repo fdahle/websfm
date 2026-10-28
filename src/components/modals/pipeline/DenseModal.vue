@@ -9,9 +9,11 @@ import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { DENSE_FUSE_DEFAULTS } from '../../../core/defaults.user.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { denseEffects } from '../../../core/stepEffects/dense.js'
+import OutputStep from '../ui/OutputStep.vue'
 
-// The depth maps fusion reads, for the steps' effect lines.
-const props = defineProps({ maps: { type: Number, default: 0 } })
+// The depth maps fusion reads, for the steps' effect lines; `output` is the store's
+// outputPlan('dense'), what step 5 (Output) adds or replaces.
+const props = defineProps({ maps: { type: Number, default: 0 }, output: { type: Object, default: null } })
 const emit = defineEmits(['close', 'run'])
 
 // Memory budget for the fusion pre-flight is machine-level (Settings ▸ Compute).
@@ -42,7 +44,8 @@ const numbers = computed(() =>
 const effects = computed(() => denseEffects(settings.value, { maps: props.maps }))
 
 function run() {
-  const { auto, minViews, depthTolPct, maxCost, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated } = settings.value
+  const { auto, minViews, depthTolPct, maxCost, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated, replaceMain } =
+    settings.value
   emit('run', {
     minViews: auto ? null : minViews,
     maxCost: auto ? null : maxCost,
@@ -51,6 +54,7 @@ function run() {
     minTriAngleDeg,
     maxIncidenceDeg,
     removeIsolated,
+    replaceMain,
     memBudgetBytes: memBudgetBytes.value,
     ramBudgetBytes: memBudgetRamBytes.value,
   })
@@ -250,6 +254,15 @@ function run() {
         </SettingsField>
       </SettingsStep>
     </AdvancedDisclosure>
+
+    <OutputStep
+      v-model="settings.replaceMain"
+      step="5"
+      op="dense-cloud"
+      noun="dense cloud"
+      :plan="output"
+      :default-value="DENSE_FUSE_DEFAULTS.replaceMain"
+    />
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

@@ -38,6 +38,7 @@ import { useGcpsStore } from './useGcpsStore.js'
 import { useScaleBarsStore } from './useScaleBarsStore.js'
 import { makeFrameModelResolver } from '../core/sfm/displayFrame.js'
 import { pluralize } from '../core/textFormat.js'
+import { mainOf, nextProductName, outdatedReasons, stampOf } from '../core/products/productSet.js'
 
 // Project-scoped store: the sparse model (camera poses + 3D points) from
 // incremental SfM. Reads the image list and match graph from their stores;
@@ -250,11 +251,13 @@ export const useReconstructionStore = registerProjectStore(
     // per open and re-runs when this moves, so pruning a bad GCP updates the overview.
     const healthDirty = ref(0)
 
-    // Products (DEM + orthophoto) — shallowRef so the planes stay PLAIN. Persisted by
-    // opfs.saveProduct.
-    //   dem:   { width, height, gsd, originX, originY, data, mask, zMin, zMax,
+    // Raster products (DEMs + orthophotos), oldest first — shallowRef so the planes
+    // stay PLAIN. Each is persisted on its own by opfs.saveProduct. A rebuild adds a
+    // new one unless its dialog's Replace option is on (core/products/productSet.js).
+    //   dem:   { id, kind: 'dem', name, createdAt, basedOn, width, height, gsd, originX, originY, data, mask, zMin, zMax,
     //            crs, unit, previewBlob, previewUrl }
-    //   ortho: { width, height, gsd, originX, originY, frame, crs, unit, covered, stats,
+    //   ortho: { id, kind: 'ortho', name, createdAt, basedOn, width, height, gsd,
+    //            originX, originY, frame, crs, unit, covered, stats,
     //            cog, cogSaved?, tileSize, previewBlob, previewUrl }
     //          NO pixel plane: `cog` (a Blob/File) is a tiled, overviewed RGBA GeoTIFF
     //          of any size, read a window at a time (viewer tiles, hover, clip, export).
@@ -262,18 +265,47 @@ export const useReconstructionStore = registerProjectStore(
     // The preview is a PNG Blob (off the V8 heap; a 4096² preview was ~100 MB as a
     // base64 string) plus its blob: URL for the viewer and the map layer, made here
     // when a product enters the store and revoked when its record is replaced.
-    const dem = shallowRef(null)
-    const ortho = shallowRef(null)
+    const rasterProducts = shallowRef([])
+    // The main product of each kind ({ dense, mesh, dem, ortho } → id): what the next
+    // step uses as its input, and the DEM / ortho the map and the product tab show.
+    // A missing or stale id means the newest one (mainOf). Persisted in
+    // reconstruction.json; the sparse model's is mainSparseId.
+    const mainProductIds = ref({})
+    const dem = computed(() => mainOf(rasterProducts.value, 'dem', mainProductIds.value.dem))
+    const ortho = computed(() => mainOf(rasterProducts.value, 'ortho', mainProductIds.value.ortho))
+    let productSeq = 0
+    const makeProductId = (kind) => `${kind}-${Date.now().toString(36)}-${productSeq++}`
+    // Add a built DEM/ortho as the main one of its kind, or put it in place of the
+    // record `replaceId` names (keeping that one's id and name). → the stored record.
+    function putRasterProduct(record, { replaceId = null } = {}) {
+      const list = rasterProducts.value
+      const prev = replaceId ? list.find((p) => p.id === replaceId && p.kind === record.kind) : null
+      const fallback = record.kind === 'ortho' ? 'Orthophoto' : 'DEM'
+      const next = {
+        ...record,
+        id: prev?.id ?? makeProductId(record.kind),
+        name:
+          prev?.name ??
+          nextProductName(
+            fallback,
+            list.filter((p) => p.kind === record.kind).map((p) => p.name),
+          ),
+      }
+      rasterProducts.value = prev ? list.map((p) => (p === prev ? next : p)) : [...list, next]
+      mainProductIds.value = { ...mainProductIds.value, [record.kind]: next.id }
+      save()
+      return next
+    }
     // The model a running sparse reconstruction has built so far, { cameras, points },
     // for the live 3D view; null when none is running. Never persisted.
     const liveSparse = shallowRef(null)
     const withPreviewUrl = (p) =>
       p?.previewBlob && !p.previewUrl ? { ...p, previewUrl: URL.createObjectURL(p.previewBlob) } : p
-    for (const product of [dem, ortho]) {
-      watch(product, (now, before) => {
-        if (before?.previewUrl && before.previewUrl !== now?.previewUrl) URL.revokeObjectURL(before.previewUrl)
-      })
-    }
+    // A preview URL no record holds any more (replaced, removed, cleared) is revoked.
+    watch(rasterProducts, (now, before) => {
+      const live = new Set(now.map((p) => p.previewUrl).filter(Boolean))
+      for (const p of before ?? []) if (p.previewUrl && !live.has(p.previewUrl)) URL.revokeObjectURL(p.previewUrl)
+    })
     // Map-layer view state per computed product ({ dem: { visible, opacity }, … };
     // core/products/productLayers.js). Kept in reconstruction.json, NOT on the
     // product record: saving a product rewrites its raster buffers, and a map
@@ -347,6 +379,10 @@ export const useReconstructionStore = registerProjectStore(
 
     const sparseCameras = computed(() => mainSparseCloud.value?.cameras ?? new Map())
 
+    // The main dense cloud and mesh (mainProductIds): the inputs the next step uses.
+    const mainDenseCloud = computed(() => mainOf(clouds.value, 'dense', mainProductIds.value.dense))
+    const mainMeshCloud = computed(() => mainOf(clouds.value, 'mesh', mainProductIds.value.mesh))
+
     // The cloud a DEM run would rasterise: the densest one available. Exposed as a
     // getter (rather than re-derived in DemModal) so the modal's "Source:" line and
     // generateDem() below can never disagree about what is about to be built —
@@ -355,9 +391,14 @@ export const useReconstructionStore = registerProjectStore(
     // imported COLMAP model, and the fastest orientation/scale sanity check before
     // committing to dense) — the modal warns, it does not gate.
     const demSource = computed(() => {
-      // A resident dense cloud first; else a streamed one (core/lod/streamed.js), which
-      // generateDem reads from its octree at the spacing the grid needs.
-      const dense = clouds.value.find((c) => c.kind === 'dense' && c.pos) ?? clouds.value.find((c) => isStreamed(c))
+      // The main dense cloud; else a resident one, else a streamed one
+      // (core/lod/streamed.js), which generateDem reads from its octree at the spacing
+      // the grid needs.
+      const usable = (c) => c?.kind === 'dense' && c.count > 0 && (c.pos || isStreamed(c))
+      const main = mainDenseCloud.value
+      const dense = usable(main)
+        ? main
+        : (clouds.value.find((c) => c.kind === 'dense' && c.pos) ?? clouds.value.find((c) => isStreamed(c)))
       if (dense?.count) return { cloud: dense, kind: 'dense', count: dense.count, name: dense.name ?? null }
       const sparse = mainSparseCloud.value
       const n = sparse?.points?.length ?? 0
@@ -378,7 +419,10 @@ export const useReconstructionStore = registerProjectStore(
           (c.attributes?.classification?.length === c.count || (isStreamed(c) && (c.lod.stats?.classes?.[2] ?? 0) > 0)),
       )
       if (!list.length) return null
-      const pick = list.find((c) => c.id === selectedCloudId.value) ?? list[list.length - 1]
+      const pick =
+        list.find((c) => c.id === mainDenseCloud.value?.id) ??
+        list.find((c) => c.id === selectedCloudId.value) ??
+        list[list.length - 1]
       return { cloud: pick, kind: 'dense', count: pick.count, name: pick.name ?? null }
     })
 
@@ -403,14 +447,22 @@ export const useReconstructionStore = registerProjectStore(
     const meshSource = computed(() => {
       const list = meshSources.value
       if (!list.length) return null
+      // The main dense cloud first: it is the one the user set.
+      const main = list.find((s) => s.id === mainDenseCloud.value?.id)
+      if (main) return main
       const selected = list.find((s) => s.id === selectedCloudId.value)
       if (selected) return selected
       const derived = list.filter((s) => s.derived)
       return derived.length ? derived[derived.length - 1] : list[0]
     })
 
-    // The mesh a mesh-surface ortho would rasterise (the first non-empty one).
-    const meshCloud = computed(() => clouds.value.find((c) => c.kind === 'mesh' && c.count > 0) ?? null)
+    // The mesh a mesh-surface ortho would rasterise: the main one, else the first
+    // non-empty one.
+    const meshCloud = computed(() =>
+      mainMeshCloud.value?.count > 0
+        ? mainMeshCloud.value
+        : (clouds.value.find((c) => c.kind === 'mesh' && c.count > 0) ?? null),
+    )
 
     // Which surfaces an ortho run could use for its height-per-cell. Same contract
     // as demSource: the modal RENDERS this list and generateOrtho() CONSUMES it, so
@@ -425,17 +477,21 @@ export const useReconstructionStore = registerProjectStore(
           label: 'DEM',
           available: !!dem.value,
           detail: dem.value
-            ? `${dem.value.width}×${dem.value.height} · ${dem.value.crs === 'local' || !dem.value.crs ? 'local frame' : dem.value.crs}`
+            ? `"${dem.value.name}" · ${dem.value.width}×${dem.value.height} · ${dem.value.crs === 'local' || !dem.value.crs ? 'local frame' : dem.value.crs}` +
+              (productStatus(dem.value).outdated ? ' · outdated' : '')
             : null,
           hint: dem.value
-            ? 'Reuses the built DEM and its frame. Cells the DEM has no height for stay transparent.'
+            ? 'Uses the main DEM and its frame. Cells the DEM has no height for stay transparent.'
             : 'Build a DEM first.',
         },
         {
           id: 'mesh',
           label: 'Mesh',
           available: !!meshCloud.value,
-          detail: meshCloud.value ? `${meshCloud.value.count.toLocaleString()} triangles` : null,
+          detail: meshCloud.value
+            ? `"${meshCloud.value.name}" · ${meshCloud.value.count.toLocaleString()} triangles` +
+              (productStatus(meshCloud.value).outdated ? ' · outdated' : '')
+            : null,
           hint: meshCloud.value
             ? 'Rasterises the mesh from above. Watertight, so there are no surface holes — the fix for a patchy ortho.'
             : 'Build a mesh first (Products ▸ Mesh).',
@@ -514,17 +570,71 @@ export const useReconstructionStore = registerProjectStore(
     }
 
     // The DEM / orthophoto records (reconstruction/products.js).
-    const { renameProduct, setProductStyle, saveProductRecord, setProductVisible, setProductOpacity, removeProduct } =
-      createProducts({
-        dem,
-        isPersisting,
-        log,
-        ortho,
-        save,
-        productLayers,
-        projects,
-        withPreviewUrl,
+    const {
+      productById,
+      renameProduct,
+      setMainProduct: setMainRaster,
+      setProductStyle,
+      saveProductRecord,
+      setProductVisible,
+      setProductOpacity,
+      removeProduct,
+    } = createProducts({
+      rasterProducts,
+      mainProductIds,
+      dem,
+      isPersisting,
+      log,
+      ortho,
+      save,
+      productLayers,
+      projects,
+      withPreviewUrl,
+    })
+
+    // Right-click ▸ Set as main, for any product: a sparse model, a dense cloud or mesh
+    // (what the next step uses), a DEM or orthophoto (also what the map shows).
+    function setMainProduct(id) {
+      const cloud = clouds.value.find((c) => c.id === id)
+      if (!cloud) return setMainRaster(id)
+      if (cloud.kind === 'sparse') return setMainSparse(id)
+      if (mainOf(clouds.value, cloud.kind, mainProductIds.value[cloud.kind])?.id === id) return false
+      mainProductIds.value = { ...mainProductIds.value, [cloud.kind]: id }
+      log(`Main ${cloud.kind === 'mesh' ? 'mesh' : 'dense cloud'} → "${cloud.name}"`, 'info', 'Reconstruction', {
+        channel: 'activity',
       })
+      save()
+      return true
+    }
+    const isMainProduct = (record) =>
+      !!record &&
+      (record.kind === 'sparse'
+        ? record.id === mainSparseCloud.value?.id
+        : record.kind === 'dense'
+          ? record.id === mainDenseCloud.value?.id
+          : record.kind === 'mesh'
+            ? record.id === mainMeshCloud.value?.id
+            : record.id === (record.kind === 'dem' ? dem.value : ortho.value)?.id)
+
+    // Why each product is outdated (core/products/productSet.js): an input it was built
+    // from changed since. Clouds and rasters together, so a DEM of an outdated dense
+    // cloud is outdated too.
+    const outdatedById = computed(() =>
+      outdatedReasons([...clouds.value, ...rasterProducts.value], { mainSparseId: mainSparseCloud.value?.id ?? null }),
+    )
+    // → { outdated, reason } for a cloud or a raster product. A DEM/ortho is also
+    // outdated when the frame it records is no longer the project's (productFrameStatus:
+    // a refitted georeference or scale).
+    function productStatus(record) {
+      if (!record) return { outdated: false, reason: null }
+      const reason = outdatedById.value.get(record.id)
+      if (reason) return { outdated: true, reason }
+      if (record.kind === 'dem' || record.kind === 'ortho') {
+        const frame = productFrameStatus(record)
+        if (frame.stale) return { outdated: true, reason: frame.reason }
+      }
+      return { outdated: false, reason: null }
+    }
 
     // Serialise every cloud to the on-disk shape (metadata + binary buffers).
     // Committed sidecar files per unchanged dense/mesh cloud (savedCloudFiles.js).
@@ -541,6 +651,8 @@ export const useReconstructionStore = registerProjectStore(
         // Which sparse cloud downstream stages consume (MC). Absent in legacy docs ⇒
         // restore falls back to the first sparse cloud.
         mainSparseId: mainSparseId.value,
+        // The main dense cloud, mesh, DEM and ortho (the rasters are saved apart).
+        mainProductIds: mainProductIds.value,
         // Small + reusable across sessions; the DEM/ortho rasters themselves are
         // recomputable and stay out of the persisted doc.
         georef: georef.value,
@@ -639,26 +751,21 @@ export const useReconstructionStore = registerProjectStore(
     // make the memory preflight reject a run that fits comfortably from a clean state.
     // Replace it with a lightweight placeholder only when headroom is insufficient.
     // Nothing is persisted here: if the new solve fails, reloading restores the previous
-    // saved reconstruction. Imported/derived comparison clouds remain untouched.
+    // saved reconstruction. The dense clouds, meshes, DEMs and orthophotos stay: they
+    // outlive the rebuild (marked outdated), so dropping them here would lose them at
+    // the next save.
     function releaseReplaceableModelForRerun() {
       const main = mainSparseCloud.value
       const replaceId = main?.id ?? null
       const pointCount = main?.points?.length ?? 0
       const cameraCount = main?.cameras?.size ?? 0
-      let dependentClouds = 0
 
       clouds.value = clouds.value.flatMap((cloud) => {
         if (cloud.kind === 'sparse' && cloud.secondary) return []
-        if ((cloud.kind === 'dense' || cloud.kind === 'mesh') && !cloud.imported && !cloud.derived) {
-          dependentClouds++
-          return []
-        }
         if (cloud.id !== replaceId || cloud.kind !== 'sparse') return [cloud]
         return [{ ...cloud, cameras: markRaw(new Map()), points: markRaw(SparsePoints.empty()), count: 0 }]
       })
       clearDepthMaps()
-      dem.value = null
-      ortho.value = null
       georef.value = null
       scaleFit.value = null
       summary.value = null
@@ -670,39 +777,23 @@ export const useReconstructionStore = registerProjectStore(
       if (selectedCloudId.value && !clouds.value.some((c) => c.id === selectedCloudId.value))
         selectedCloudId.value = replaceId
 
-      return {
-        released: pointCount > 0 || cameraCount > 0 || dependentClouds > 0,
-        pointCount,
-        cameraCount,
-        dependentClouds,
-      }
+      return { released: pointCount > 0 || cameraCount > 0, pointCount, cameraCount }
     }
 
-    // A sparse rebuild changes the coordinate frame and camera solution consumed by
-    // every computed downstream stage. Retire those artifacts together so an old
-    // local ortho/depth set can never masquerade as belonging to the adjusted model.
-    // Imported and user-derived clouds are independent records and remain available;
-    // only the pipeline's replaceable dense/mesh slots are removed.
+    // A sparse rebuild changes the coordinate frame and camera solution. The depth maps
+    // (built from those cameras, and only ever read for the next dense step) and the
+    // georeference are retired with it. The products built on the old model stay,
+    // marked outdated (productStatus): a user may still want them, and they are
+    // still offered as inputs, named so.
     async function invalidateSparseDependents() {
-      const removedIds = new Set(
-        clouds.value
-          .filter((c) => (c.kind === 'dense' || c.kind === 'mesh') && !c.imported && !c.derived)
-          .map((c) => c.id),
-      )
       const depthPreviewImages = images.value.filter((im) => !!im.depth)
-      const hadDerived =
-        depthMapCount.value > 0 ||
-        depthPreviewImages.length > 0 ||
-        !!dem.value ||
-        !!ortho.value ||
-        !!georef.value ||
-        removedIds.size > 0
+      const hadDepth = depthMapCount.value > 0 || depthPreviewImages.length > 0
+      const hadGeoref = !!georef.value
+      const products =
+        clouds.value.filter((c) => (c.kind === 'dense' || c.kind === 'mesh') && c.basedOn?.length).length +
+        rasterProducts.value.length
 
-      clouds.value = clouds.value.filter((c) => !removedIds.has(c.id))
-      if (removedIds.has(selectedCloudId.value)) selectedCloudId.value = mainSparseId.value
       clearDepthMaps()
-      dem.value = null
-      ortho.value = null
       georef.value = null
       scaleFit.value = null
       denseSummary.value = null
@@ -713,15 +804,16 @@ export const useReconstructionStore = registerProjectStore(
 
       if (isPersisting()) {
         if (depthPreviewImages.length) imagesStore.save()
-        await Promise.all([
-          opfs.deleteDepthPlanes(projects.currentProjectId).catch(() => {}),
-          opfs.deleteProducts(projects.currentProjectId).catch(() => {}),
-        ])
+        await opfs.deleteDepthPlanes(projects.currentProjectId).catch(() => {})
       }
-      if (hadDerived) {
+      const retired = [hadDepth && 'depth maps', hadGeoref && 'georeference'].filter(Boolean)
+      if (retired.length || products) {
         log(
-          'Sparse model changed — depth maps, computed dense/mesh, DEM, orthophoto and ' +
-            'georeference were retired; rebuild them from the adjusted model.',
+          'Sparse model changed' +
+            (retired.length ? ` — the ${retired.join(' and ')} were retired; rebuild from the adjusted model` : '') +
+            (products
+              ? `. ${pluralize(products, 'product')} built on the earlier model ${products === 1 ? 'is' : 'are'} kept, marked outdated.`
+              : '.'),
           'info',
           'Reconstruction',
         )
@@ -741,71 +833,111 @@ export const useReconstructionStore = registerProjectStore(
       upsertSparseCloud,
     })
 
-    // Insert the fused dense model, replacing any existing dense cloud (carries the
-    // previous name/id forward so a rename survives a re-fuse). Dense clouds have no
-    // cameras of their own — the viewer renders their points. Unlike sparse clouds
-    // (arrays of {x,y,z,color,views} objects — they carry per-point tracks), a dense
-    // cloud is stored **flat**: { count, pos:Float32Array(3N), col:Uint8Array(3N) }.
+    // The cloud a dense/mesh build replaces when its Replace option is on: the main
+    // one of the kind, if the pipeline built it. An imported or derived (crop, filter,
+    // merge, Mesh ▾ tool output) cloud is the user's own and is never replaced.
+    function replaceableCloud(kind) {
+      const main = mainOf(clouds.value, kind, mainProductIds.value[kind])
+      return main && !main.imported && !main.derived ? main : null
+    }
+    // Put a built dense cloud or mesh in the list as the main one of its kind: in place
+    // of the replaceable main one (keeping its id and name, so a rename survives) when
+    // `replace` is set, else as a new cloud named apart ("Dense cloud 2").
+    function putBuiltCloud(cloud, base, replace) {
+      const prev = replace ? replaceableCloud(cloud.kind) : null
+      const taken = clouds.value.filter((c) => c.kind === cloud.kind).map((c) => c.name)
+      const next = { ...cloud, id: prev?.id ?? makeCloudId(), name: prev?.name ?? nextProductName(base, taken) }
+      const idx = prev ? clouds.value.indexOf(prev) : -1
+      if (idx >= 0) clouds.value.splice(idx, 1, next)
+      else clouds.value.push(next)
+      mainProductIds.value = { ...mainProductIds.value, [cloud.kind]: next.id }
+      selectedCloudId.value = next.id
+      return next
+    }
+
+    // What a build dialog's Output step shows (core/stepEffects/output.js): the main
+    // product of the kind, whether its Replace option may replace it, and the name a
+    // new one would get. → { main: name|null, replaceable, newName }
+    function outputPlan(kind) {
+      const fallback = { dense: 'Dense cloud', mesh: 'Mesh', dem: 'DEM', ortho: 'Orthophoto' }[kind]
+      const isCloud = kind === 'dense' || kind === 'mesh'
+      const list = isCloud ? clouds.value : rasterProducts.value
+      const main = isCloud
+        ? mainOf(clouds.value, kind, mainProductIds.value[kind])
+        : kind === 'dem'
+          ? dem.value
+          : ortho.value
+      return {
+        main: main?.name ?? null,
+        replaceable: isCloud ? !!replaceableCloud(kind) : !!main,
+        newName: nextProductName(
+          fallback,
+          list.filter((r) => r.kind === kind).map((r) => r.name),
+        ),
+      }
+    }
+
+    // Insert a fused dense model (see putBuiltCloud). Dense clouds have no cameras of
+    // their own — the viewer renders their points. Unlike sparse clouds (arrays of
+    // {x,y,z,color,views} objects — they carry per-point tracks), a dense cloud is
+    // stored **flat**: { count, pos:Float32Array(3N), col:Uint8Array(3N) }.
     // Millions of fused points as JS objects were ~110 B each (hundreds of MB, the
     // fusion OOM's main-thread tail); the flat buffers are ~15 B/point and feed the
     // viewer / PLY / DEM directly with no per-point object churn.
-    function upsertDenseCloud({ count, pos, col, nrm }) {
-      // Never replace an *imported* or *derived* (crop/filter/merge output) cloud — a
-      // re-fuse targets the densify stage's own slot only.
-      const idx = clouds.value.findIndex((c) => c.kind === 'dense' && !c.imported && !c.derived)
-      const prev = idx >= 0 ? clouds.value[idx] : null
-      const cloud = {
-        id: prev?.id ?? makeCloudId(),
-        name: prev?.name ?? 'Dense cloud',
-        kind: 'dense',
-        createdAt: Date.now(),
-        cameras: markRaw(new Map()),
-        count,
-        pos: markRaw(pos),
-        col: markRaw(col),
-        // World-space per-point unit normals (3N Float32), when the dense run produced
-        // them (Poisson mesh input). Undefined on legacy/normal-less runs.
-        ...(nrm ? { nrm: markRaw(nrm) } : {}),
-      }
-      if (idx >= 0) clouds.value.splice(idx, 1, cloud)
-      else clouds.value.push(cloud)
-      selectedCloudId.value = cloud.id
+    // `replace`: Dense Cloud ▸ Replace the main dense cloud.
+    function upsertDenseCloud({ count, pos, col, nrm }, { replace = false } = {}) {
+      const sparse = mainSparseCloud.value
+      return putBuiltCloud(
+        {
+          kind: 'dense',
+          createdAt: Date.now(),
+          // Fused from depth maps of the main sparse model.
+          ...(sparse ? { basedOn: [stampOf(sparse)] } : {}),
+          cameras: markRaw(new Map()),
+          count,
+          pos: markRaw(pos),
+          col: markRaw(col),
+          // World-space per-point unit normals (3N Float32), when the dense run produced
+          // them (Poisson mesh input). Undefined on legacy/normal-less runs.
+          ...(nrm ? { nrm: markRaw(nrm) } : {}),
+        },
+        'Dense cloud',
+        replace,
+      )
     }
 
-    // Insert/replace the single mesh cloud (kind:'mesh'). Flat like the dense cloud:
+    // Insert a built mesh (kind:'mesh', see putBuiltCloud). Flat like the dense cloud:
     // per-vertex pos/col + triangle idx, no per-vertex objects. count = triangles.
+    // `run.replace`: Mesh ▸ Replace the main mesh.
     function upsertMeshCloud({ nVerts, count, pos, idx: triIdx, col, summary }, run = {}) {
-      // As with dense: a re-mesh replaces the computed mesh, never an imported one or
-      // a derived (Mesh ▾ tool output) one — those are the user's own work.
-      const i = clouds.value.findIndex((c) => c.kind === 'mesh' && !c.imported && !c.derived)
-      const prev = i >= 0 ? clouds.value[i] : null
-      const cloud = {
-        id: prev?.id ?? makeCloudId(),
-        name: prev?.name ?? 'Mesh',
-        kind: 'mesh',
-        createdAt: Date.now(),
-        cameras: markRaw(new Map()),
-        count,
-        nVerts,
-        pos: markRaw(pos),
-        idx: markRaw(triIdx),
-        col: markRaw(col),
-        // The run record (core/products/mesh.js `summary` + what was asked and of which
-        // cloud). Persisted; absent on older meshes ⇒ unknown.
-        ...(summary
-          ? {
-              meshSummary: {
-                ...summary,
-                sourceId: run.sourceId ?? null,
-                sourceName: run.sourceName ?? null,
-                settings: run.settings ?? null,
-              },
-            }
-          : {}),
-      }
-      if (i >= 0) clouds.value.splice(i, 1, cloud)
-      else clouds.value.push(cloud)
-      selectedCloudId.value = cloud.id
+      const source = run.sourceId ? clouds.value.find((c) => c.id === run.sourceId) : null
+      return putBuiltCloud(
+        {
+          kind: 'mesh',
+          createdAt: Date.now(),
+          ...(source ? { basedOn: [stampOf(source)] } : {}),
+          cameras: markRaw(new Map()),
+          count,
+          nVerts,
+          pos: markRaw(pos),
+          idx: markRaw(triIdx),
+          col: markRaw(col),
+          // The run record (core/products/mesh.js `summary` + what was asked and of which
+          // cloud). Persisted; absent on older meshes ⇒ unknown.
+          ...(summary
+            ? {
+                meshSummary: {
+                  ...summary,
+                  sourceId: run.sourceId ?? null,
+                  sourceName: run.sourceName ?? null,
+                  settings: run.settings ?? null,
+                },
+              }
+            : {}),
+        },
+        'Mesh',
+        !!run.replace,
+      )
     }
 
     // Depth maps, fusion and meshing (reconstruction/dense.js).
@@ -956,6 +1088,7 @@ export const useReconstructionStore = registerProjectStore(
     // DEM and orthophoto generation (reconstruction/productRuns.js).
     const { generateDem, generateOrtho, estimateRasterSize } = createProductRuns({
       activeRegion,
+      putRasterProduct,
       dem,
       demSource,
       depthMapInput,
@@ -1020,8 +1153,8 @@ export const useReconstructionStore = registerProjectStore(
       mainSparseId.value = null
       reconStatus.value = 'idle'
       clearDepthMaps()
-      dem.value = null
-      ortho.value = null
+      rasterProducts.value = []
+      mainProductIds.value = {}
       georef.value = null
       scaleFit.value = null
       region.value = null
@@ -1045,8 +1178,9 @@ export const useReconstructionStore = registerProjectStore(
     // recomputable depth-map and raster-product caches from memory and storage.
     async function clearDerived() {
       clearDepthMaps()
-      dem.value = null
-      ortho.value = null
+      rasterProducts.value = []
+      const { dem: _dem, ortho: _ortho, ...cloudMains } = mainProductIds.value
+      mainProductIds.value = cloudMains
       if (isPersisting()) await opfs.deleteProjectDerived(projects.currentProjectId)
       log('Cleared cached image transcodes, depth maps, and raster products.', 'success', 'Project')
     }
@@ -1077,7 +1211,7 @@ export const useReconstructionStore = registerProjectStore(
       // The model, the raster products and the depth index are independent files:
       // read them concurrently so project open waits for the slowest, not the sum.
       report('Reading the model files…')
-      const productsRead = Promise.all([opfs.loadProduct(projectId, 'dem'), opfs.loadProduct(projectId, 'ortho')])
+      const productsRead = opfs.loadProducts(projectId).catch(() => [])
       const depthIndexRead = opfs.loadDepthIndex(projectId).catch(() => null)
       let data
       try {
@@ -1154,6 +1288,8 @@ export const useReconstructionStore = registerProjectStore(
       selectedCloudId.value = clouds.value[0]?.id ?? null
       mainSparseId.value = data.mainSparseId ?? null
       ensureMainSparse() // legacy docs (no mainSparseId) → first sparse cloud
+      // A stale or missing id means the newest of the kind (mainOf).
+      mainProductIds.value = data.mainProductIds && typeof data.mainProductIds === 'object' ? data.mainProductIds : {}
       georef.value = data.georef ?? null
       scaleFit.value = data.scaleFit ?? null // absent in older projects ⇒ no scale
       region.value = normalizeRegion(data.region) ?? null
@@ -1171,25 +1307,33 @@ export const useReconstructionStore = registerProjectStore(
       await nextTick()
       lap('first render')
 
-      // Restore persisted raster products (DEM / ortho), if any.
-      report('Reading the DEM / orthophoto…')
-      let [savedDem, savedOrtho] = await productsRead
+      // Restore persisted raster products (DEMs / orthos), if any. A record keeps the
+      // name of the document it was read from as its id, so its saves go back there.
+      report('Reading the DEMs / orthophotos…')
+      const saved = await productsRead
       if (!isCurrentRestore()) return
-      if (savedOrtho?.outdated) {
-        // Saved before orthophotos were stored as tiled GeoTIFFs; that shape is not read.
-        log(
-          'The saved orthophoto uses an older storage format and was removed — rebuild it (Products ▸ Orthophoto)',
-          'warn',
-          'Products',
-        )
-        savedOrtho = null
-        opfs.deleteProduct(projectId, 'ortho').catch(() => {})
+      const restoredProducts = []
+      for (const { stem, product } of saved) {
+        if (product.outdated) {
+          // Saved before orthophotos were stored as tiled GeoTIFFs; that shape is not read.
+          log(
+            'A saved orthophoto uses an older storage format and was removed — rebuild it (Products ▸ Orthophoto)',
+            'warn',
+            'Products',
+          )
+          opfs.deleteProduct(projectId, stem).catch(() => {})
+          continue
+        }
+        const kind = product.kind ?? (stem.startsWith('ortho') ? 'ortho' : 'dem')
+        restoredProducts.push(withPreviewUrl({ ...product, id: stem, kind }))
       }
-      dem.value = withPreviewUrl(savedDem)
-      ortho.value = withPreviewUrl(savedOrtho)
-      if (savedDem || savedOrtho) {
+      rasterProducts.value = restoredProducts
+      if (restoredProducts.length) {
+        const n = (kind) => restoredProducts.filter((p) => p.kind === kind).length
         log(
-          `Products restored: ${[savedDem && 'DEM', savedOrtho && 'ortho'].filter(Boolean).join(' + ')}`,
+          `Products restored: ${[n('dem') && pluralize(n('dem'), 'DEM'), n('ortho') && pluralize(n('ortho'), 'ortho')]
+            .filter(Boolean)
+            .join(' + ')}`,
           'success',
           'Products',
         )
@@ -1238,6 +1382,15 @@ export const useReconstructionStore = registerProjectStore(
       mainSparseId,
       mainSparseCloud,
       setMainSparse,
+      mainDenseCloud,
+      mainMeshCloud,
+      mainProductIds,
+      setMainProduct,
+      isMainProduct,
+      outputPlan,
+      productStatus,
+      rasterProducts,
+      productById,
       cameras,
       sparseCameras,
       points3d,

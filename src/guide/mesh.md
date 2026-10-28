@@ -110,6 +110,14 @@ point nearby, such as one in a filled hole, falls back to grey. Switch it off fo
 geometry-only uses such as STL export; a cloud without colour leaves the mesh
 uncoloured either way.
 
+## Replace the main mesh
+<!-- param: replaceMain default: Off -->
+Where the new mesh goes. Off, it is added beside the others under a name of its own
+("Mesh 2") and becomes the [main mesh](help:main-product), the one the next step
+uses; the older ones stay until you remove them. On, it takes the main mesh's place
+and name. Either way, products built on the old one are kept and marked outdated.
+An edited mesh (a Mesh ▾ tool's output) or an imported one is never replaced.
+
 ## Export choice
 OBJ preserves vertex colour only in applications that support the extension; STL is
 geometry-only. A textured mesh keeps its texture in GLB and OBJ (see
@@ -119,7 +127,7 @@ choosing a format.
 ## Cleaning, simplifying and measuring
 The **Tools → Mesh ▾** menu works on any mesh, built or imported. Like the point-cloud
 tools, each adds a new mesh and leaves the source alone; a later **Build Mesh** never
-replaces these copies. Clean, Smooth and Decimate are also
+replaces these copies, even with Replace on. Clean, Smooth and Decimate are also
 [Workflow Builder](guide:workflow-builder) blocks, to replay a cleanup chain after
 every run.
 

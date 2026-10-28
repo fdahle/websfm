@@ -12,6 +12,7 @@ import {
   POOL_SIZE,
 } from '../../workers/computeClient.js'
 import { pluralize } from '../../core/textFormat.js'
+import { stampOf } from '../../core/products/productSet.js'
 import { planCloudSlabs, gatherPoints } from '../../core/products/cloudSlabs.js'
 import { planMeshBlocks, blockMesh, joinBlocks, BLOCK_HEADROOM } from '../../core/products/meshBlocks.js'
 import { cloudBounds, estimateSpacing } from '../../core/products/cloudEdit.js'
@@ -86,13 +87,15 @@ export function createCloudEdits({
   // the same reason: neither is the densify stage's own slot). `imported` is
   // INHERITED from the source, because that flag is what sorts the sidebar into
   // Products vs Reference Data — a crop of imported evidence is still evidence.
-  function addDerivedCloud(flat, { name, imported = false }) {
+  // `from`: the clouds it was made from (basedOn: it is outdated once one is rebuilt).
+  function addDerivedCloud(flat, { name, imported = false, from = [] }) {
     const cloud = {
       id: makeCloudId(),
       name,
       kind: 'dense',
       createdAt: Date.now(),
       derived: true,
+      ...(from.length ? { basedOn: from.map(stampOf) } : {}),
       ...(imported ? { imported: true } : {}),
       cameras: markRaw(new Map()),
       count: flat.count,
@@ -108,13 +111,14 @@ export function createCloudEdits({
 
   // A Mesh ▾ tool's output: like addDerivedCloud, a NEW mesh flagged `derived`, so
   // upsertMeshCloud (a re-mesh) never replaces it.
-  function addDerivedMesh(flat, { name, imported = false }) {
+  function addDerivedMesh(flat, { name, imported = false, from = [] }) {
     const cloud = {
       id: makeCloudId(),
       name,
       kind: 'mesh',
       createdAt: Date.now(),
       derived: true,
+      ...(from.length ? { basedOn: from.map(stampOf) } : {}),
       ...(imported ? { imported: true } : {}),
       cameras: markRaw(new Map()),
       count: flat.count,
@@ -321,7 +325,11 @@ export function createCloudEdits({
         reconStatus.value = 'done'
         return null
       }
-      const cloud = addDerivedCloud(flat, { name: name || `${source.name} (cropped)`, imported: !!source.imported })
+      const cloud = addDerivedCloud(flat, {
+        name: name || `${source.name} (cropped)`,
+        imported: !!source.imported,
+        from: [source],
+      })
       if (source.style) cloud.style = JSON.parse(JSON.stringify(source.style))
       log(
         `Crop: copied ${flat.count.toLocaleString()} points of the streamed cloud into "${cloud.name}"` +
@@ -535,6 +543,7 @@ export function createCloudEdits({
     const cloud = addDerivedCloud(result, {
       name: name || `${source.name} (${mode})`,
       imported: !!source.imported,
+      from: [source],
     })
     if (REPLACES_SOURCE_VIEW.has(mode)) source.visible = false
     log(`Cloud edit: added "${cloud.name}" — ${cloud.count.toLocaleString()} points`, 'success', 'Products')
@@ -627,7 +636,11 @@ export function createCloudEdits({
       'success',
       'Products',
     )
-    const mesh = addDerivedMesh(out, { name: name || `${source.name} (mesh-decimate)`, imported: !!source.imported })
+    const mesh = addDerivedMesh(out, {
+      name: name || `${source.name} (mesh-decimate)`,
+      imported: !!source.imported,
+      from: [source],
+    })
     if (REPLACES_SOURCE_VIEW.has('mesh-decimate')) source.visible = false
     return mesh
   }
@@ -912,6 +925,7 @@ export function createCloudEdits({
             name || `${sources[0].name} (${mode === 'mask' ? 'edited' : mode === 'classify' ? 'classified' : mode})`,
           // Provenance follows the SOURCE (slot 0) — a reference only informs the edit.
           imported: REFERENCE_MODES.has(mode) ? !!sources[0].imported : sources.every((c) => c.imported),
+          from: REFERENCE_MODES.has(mode) ? [sources[0]] : sources,
         }
         cloud = edited.idx
           ? addDerivedMesh(carryTexture(sources[0], edited, mode), opts)

@@ -7,11 +7,13 @@ import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
 import RasterSizeField from '../ui/RasterSizeField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import OutputStep from '../ui/OutputStep.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { DEM_DEFAULTS } from '../../../core/defaults.user.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { demEffects, frameText } from '../../../core/stepEffects/raster.js'
+import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 
 // Build DEM (Digital Surface Model). Rasterises the point cloud into a height
 // grid in the chosen frame. Defaults are the single source of truth in
@@ -34,9 +36,13 @@ const props = defineProps({
   groundSource: { type: Object, default: null },
   // The store's estimateRasterSize('dem', settings): the size readout under the cell size.
   estimateSize: { type: Function, default: null },
+  // The store's outputPlan('dem'): what step 5 (Output) adds or replaces.
+  output: { type: Object, default: null },
 })
 
 const emit = defineEmits(['close', 'run', 'apply-crs-suggestion'])
+// Whether the source cloud is outdated, for step 1's effect line.
+const recon = useReconstructionStore()
 
 // A georeferenced project defaults to the project CRS: a local-frame product has no
 // map position (core/products/productLayers.js), so 'local' there would be a trap.
@@ -125,7 +131,13 @@ const effects = computed(() => {
   const s = activeSource.value
   return demEffects(settings.value, {
     // A streamed cloud is read from its octree, as finely as the cell size needs.
-    source: s && { kind: s.kind, name: s.name, count: s.count, streamed: !!(s.cloud && !s.cloud.pos && s.cloud.lod) },
+    source: s && {
+      kind: s.kind,
+      name: s.name,
+      count: s.count,
+      streamed: !!(s.cloud && !s.cloud.pos && s.cloud.lod),
+      outdated: !!s.cloud && recon.productStatus(s.cloud).outdated,
+    },
     estimate: estimate.value,
     unit: cellUnit.value,
     frame: frameText(settings.value.crs, { projectCrs: props.projectCrs, hasScale: props.hasScale }),
@@ -267,6 +279,15 @@ const effects = computed(() => {
         >
       </SettingsField>
     </SettingsStep>
+
+    <OutputStep
+      v-model="settings.replaceMain"
+      step="5"
+      op="dem"
+      noun="DEM"
+      :plan="output"
+      :default-value="DEM_DEFAULTS.replaceMain"
+    />
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

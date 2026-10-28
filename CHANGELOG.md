@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Show information on products.** Right-click a sparse cloud, dense cloud, mesh, DEM
+  or orthophoto in the sidebar and choose **Show information** for its facts: cameras,
+  tie-points, mean track length and reprojection error for a sparse cloud; points,
+  normals and storage for a dense cloud; size, GSD, extent, frame and elevation range
+  for a DEM, with the cloud it was built from (DEMs built from now on); surface,
+  coverage and blend for an orthophoto.
 - **Sentinel-2 as a Find GCPs reference.** Find GCPs ▸ **Sentinel-2…** lists the
   Sentinel-2 scenes over the search area and fetches the one you choose as a reference
   orthophoto, with no file to download and no account. Only the window over the area is
@@ -132,6 +138,19 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **A rebuild adds a product instead of replacing it.** Building a dense cloud, mesh,
+  DEM or orthophoto again adds a new one ("DEM 2") beside the old ones and makes it the
+  main one, the input the next step uses; the build dialogs' new **Output ▸ Replace the
+  main …** (off by default) replaces the main one instead. Right-click a product ▸
+  **Set as main** to use another one; the map and the product tab show the main DEM and
+  orthophoto. A sparse rebuild or edit (Optimize cameras, Gradual selection) no longer
+  removes the products built on the old model, and a new DEM no longer removes the
+  orthophoto built on the old one: they are kept and marked **outdated**, with the
+  reason in the tooltip and in Show information, and the tools still offer them as
+  inputs, named so. It is an option, not a pure win, because every kept product costs
+  storage, and memory for a cloud. The depth maps and the georeference are still
+  retired with the model they belong to. Each DEM and orthophoto is now saved in a file
+  of its own.
 - **Clearing the console asks first.** The developer console's **Clear** button asks
   before it deletes the project's log, saved copy included, since a cleared log cannot
   be brought back. The typed `clear` command still only empties the view.

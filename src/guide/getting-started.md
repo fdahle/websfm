@@ -100,8 +100,9 @@ To save and repeat a sequence of commands, use the
 Camera positions or ground control can place an aerial reconstruction in the project
 CRS. For an object, add a scale bar between two points whose real distance is known.
 Both are in the Reconstruct tab, under **Georeferencing**, between Sparse and Dense.
-Do this before creating final products, because a ground-control adjustment invalidates
-depth maps and downstream products. An object project can also be levelled and given
+Do this before creating final products: a ground-control adjustment retires the depth
+maps, and the products built before it are kept but marked
+[outdated](help:main-product). An object project can also be levelled and given
 an origin with **Tools → Model ▾ → Orient model**.
 
 ## 5 · Make the result
@@ -116,6 +117,9 @@ then choose the output you need:
 Clean, align, compare and measure the results with the **Tools** tab's
 [Point Cloud](guide:point-cloud-tools), Mesh and Products menus. A
 **Region** (Tools → Model ▾) keeps depth maps and fusion to the area you care about.
+Right-click a cloud, mesh, DEM or orthophoto in the sidebar and choose **Show
+information** for what it holds and how it was built: its cameras and tie-points, its
+size, ground resolution and frame, and the cloud or surface it came from.
 
 ## Leaving a long run
 Dense clouds and fine orthophotos can take hours. While a stage or a workflow runs, the
