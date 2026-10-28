@@ -108,6 +108,23 @@ LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | What changed | [CHANGELOG.md](CHANGELOG.md), or **Other ▸ What's New** in the app |
 
+### What's in this repository
+
+| Folder | Holds |
+| --- | --- |
+| [`src/`](src/) | the app: Vue components, Pinia stores, the web workers, and [`src/core/`](src/core/), the pure computation that also runs in the tests |
+| [`src/guide/`](src/guide/), [`src/glossary/`](src/glossary/) | the in-app help, as Markdown |
+| [`crates/`](crates/) | the Rust code (SIFT, matching, reconstruction, dense, mesh, codecs), compiled to WebAssembly in [`src/wasm/`](src/wasm/) |
+| [`tests/`](tests/) | browser tests (Playwright) and the headless pipeline bench; unit tests sit beside their code as `*.test.js` |
+| [`scripts/`](scripts/) | developer tools: the bench, model and example downloads, WASM builds, releases, deploys |
+| [`public/`](public/) | static files served as they are: icons, geoid grids, hosting headers |
+| [`deploy/`](deploy/) | hosting configs: the Cloudflare Worker of websfm.app, an nginx config for your own server |
+| [`docs/`](docs/) | the documentation above, and the README's images |
+
+At the top level, `Dockerfile` builds an image for hosting your own copy, `AGENTS.md`
+and `CLAUDE.md` are notes for AI coding tools, and the other files configure the build,
+tests and formatting.
+
 Quick start from source, with [Node.js](https://nodejs.org/) 22 (20.19 or later works;
 CI uses 22). No Rust is needed: the compiled WASM is committed.
 

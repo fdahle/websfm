@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Ask a question or share your results
+    url: https://github.com/fdahle/websfm/discussions
+    about: Questions, and how WebSfM did on your data, go to Discussions.
   - name: Report a security vulnerability
     url: https://github.com/fdahle/websfm/security/advisories/new
     about: Please report security issues privately, not as a public issue.

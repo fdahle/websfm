@@ -10,6 +10,8 @@ pull requests are all welcome.
   images, camera, aerial or close-range) help most.
 - **Results on real data:** reports of how WebSfM did on a dataset, good or bad,
   are just as useful as bug reports, especially with reference data (GCPs, RTK).
+  Post them in [Discussions ▸ Show and tell](https://github.com/fdahle/websfm/discussions/categories/show-and-tell),
+  and questions in [Q&A](https://github.com/fdahle/websfm/discussions/categories/q-a).
 - **Larger changes:** please open an issue to discuss the idea before you write a
   big pull request.
 
