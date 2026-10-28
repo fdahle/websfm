@@ -46,8 +46,9 @@ which they share as public domain (CC0 1.0). Many thanks to OpenDroneMap and its
 contributors for making real survey data free to use.
 
 With your own photos: create a project, drop the images onto the sidebar, and
-follow **Other ▸ Guide ▸ Getting Started**. Hover a setting's underlined label for what
-it does, and the glossary explains the methods behind each stage.
+follow **Other ▸ Guide ▸ Getting Started**. Hover a setting's label with a **?** for what
+it does, or a dotted-underlined term for what it means; the glossary explains the
+methods behind each stage.
 
 ## What it does
 

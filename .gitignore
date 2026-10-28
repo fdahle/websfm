@@ -63,3 +63,7 @@ CLAUDE.local.md
 # Python (scripts/bench, scripts/examples)
 __pycache__/
 .venv/
+
+# Claude Code's local state (worktrees, personal settings)
+.claude/worktrees/
+.claude/settings.local.json
