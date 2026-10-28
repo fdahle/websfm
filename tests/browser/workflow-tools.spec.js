@@ -143,7 +143,7 @@ test('raw uint16 GeoTIFF windows survive styling and cached restyles avoid band 
   })
 })
 
-test('sparse gradual selection refines through real WASM and invalidates derived products', async ({ page }) => {
+test('sparse gradual selection refines through real WASM and marks derived products outdated', async ({ page }) => {
   await page.goto(harness)
   await page.evaluate(async () => {
     const { SparsePoints } = await import('/src/core/sfm/sparsePoints.js')
@@ -180,7 +180,14 @@ test('sparse gradual selection refines through real WASM and invalidates derived
       { id: 's', kind: 'sparse', name: 'Sparse', createdAt: 1, cameras, points: SparsePoints.fromRecords(points) },
     ]
     recon.mainSparseId = 's'
-    recon.dem = { width: 1, height: 1, data: new Float32Array([1]), unit: 'model' }
+    // Built on the sparse model: a refine keeps it and marks it outdated (productSet.js).
+    recon.dem = {
+      width: 1,
+      height: 1,
+      data: new Float32Array([1]),
+      unit: 'model',
+      basedOn: [{ id: 's', kind: 'sparse', createdAt: 1 }],
+    }
     recon.summary = { selfCalDistortion: [{ sensorId: 'sensor', k1: 0.01 }], fiducialTransforms: [] }
   })
   await page.getByRole('button', { name: 'Gradual selection', exact: true }).click()
@@ -188,11 +195,15 @@ test('sparse gradual selection refines through real WASM and invalidates derived
   await page.getByRole('button', { name: 'Delete selected + refine' }).click()
   await expect(page.locator('#edited')).toHaveText('29')
   expect(
-    await page.evaluate(() => ({
-      dem: window.workflowTools.recon.dem,
-      cal: window.workflowTools.recon.summary.selfCalDistortion[0].k1,
-    })),
-  ).toEqual({ dem: null, cal: 0.01 })
+    await page.evaluate(() => {
+      const recon = window.workflowTools.recon
+      return {
+        dem: recon.dem?.name,
+        outdated: recon.productStatus(recon.dem).outdated,
+        cal: recon.summary.selfCalDistortion[0].k1,
+      }
+    }),
+  ).toEqual({ dem: 'DEM', outdated: true, cal: 0.01 })
 })
 
 test('Find GCPs matches real pixels and imports only explicitly reviewed candidates', async ({ page }) => {

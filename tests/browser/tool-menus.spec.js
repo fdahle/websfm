@@ -67,7 +67,8 @@ test('Point Cloud ▾ and Mesh ▾ tools add derived results through the worker'
   // Distance to the mesh: the copy carries a distance attribute and opens coloured by it.
   await openTool(page, 'Measure', /Distance to reference/)
   const dist = page.getByRole('dialog', { name: 'Distance to Reference' })
-  await dist.getByLabel('To', { exact: true }).selectOption({ label: 'Imported (surface.ply) (mesh)' })
+  // The only mesh is the main one, and its option says so (useSourcePick statusTags).
+  await dist.getByLabel('To', { exact: true }).selectOption({ label: 'Imported (surface.ply) (mesh) · main' })
   await dist.getByRole('button', { name: 'Compute', exact: true }).click()
   await expect
     .poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(distance)'))?.style)
@@ -148,7 +149,8 @@ test('Classify ground labels a cloud and Build DEM ▸ Ground only makes a DTM u
   })
   const dialog = page.getByRole('dialog', { name: 'Build DEM' })
   await dialog.getByLabel('Points').selectOption('ground')
-  await expect(dialog.getByRole('checkbox')).toBeChecked()
+  // Fill holes, on for a DTM; the Output step's Replace the main DEM follows it.
+  await expect(dialog.getByRole('checkbox').first()).toBeChecked()
   await dialog.getByRole('button', { name: 'Build DTM', exact: true }).click()
   // Every cell inside the grid has a height: the hole under the roof is filled.
   // Empty cells on the grid border are the survey's edge and stay nodata.

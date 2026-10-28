@@ -271,10 +271,33 @@ export const useReconstructionStore = registerProjectStore(
     // A missing or stale id means the newest one (mainOf). Persisted in
     // reconstruction.json; the sparse model's is mainSparseId.
     const mainProductIds = ref({})
-    const dem = computed(() => mainOf(rasterProducts.value, 'dem', mainProductIds.value.dem))
-    const ortho = computed(() => mainOf(rasterProducts.value, 'ortho', mainProductIds.value.ortho))
     let productSeq = 0
     const makeProductId = (kind) => `${kind}-${Date.now().toString(36)}-${productSeq++}`
+    // `store.dem = record` replaces the main DEM (or adds one when there is none), and
+    // null removes it, as when there was a single DEM; it does not save. The builds go
+    // through putRasterProduct; this keeps the plain assignment the browser tests use.
+    const mainRaster = (kind) =>
+      computed({
+        get: () => mainOf(rasterProducts.value, kind, mainProductIds.value[kind]),
+        set: (record) => {
+          const list = rasterProducts.value
+          const main = mainOf(list, kind, mainProductIds.value[kind])
+          if (!record) {
+            rasterProducts.value = list.filter((p) => p !== main)
+            return
+          }
+          const next = {
+            ...record,
+            kind,
+            id: record.id ?? main?.id ?? makeProductId(kind),
+            name: record.name ?? main?.name ?? (kind === 'ortho' ? 'Orthophoto' : 'DEM'),
+          }
+          rasterProducts.value = main ? list.map((p) => (p === main ? next : p)) : [...list, next]
+          mainProductIds.value = { ...mainProductIds.value, [kind]: next.id }
+        },
+      })
+    const dem = mainRaster('dem')
+    const ortho = mainRaster('ortho')
     // Add a built DEM/ortho as the main one of its kind, or put it in place of the
     // record `replaceId` names (keeping that one's id and name). → the stored record.
     function putRasterProduct(record, { replaceId = null } = {}) {

@@ -4,7 +4,12 @@ import Icon from '../Icon.vue'
 import FloatingToolbox from './FloatingToolbox.vue'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { useExternalStore } from '../../stores/useExternalStore.js'
-import { measurementSource, measurementStamp, measurementStale } from '../../core/products/measurementRecord.js'
+import {
+  isReferenceRaster,
+  measurementSource,
+  measurementStamp,
+  measurementStale,
+} from '../../core/products/measurementRecord.js'
 import { pixelToWorld, worldToPixel } from '../../core/io/rasterSample.js'
 import {
   polylineLength,
@@ -199,13 +204,18 @@ const profile = computed(
 // once a record is open. Errors are surfaced as text, never as a zero volume.
 const baseKind = ref('plane')
 const baseHeight = ref(null)
-// DEM of difference: the computed DEM (no `id`; a reference raster has one) in a CRS
+// DEM of difference: a computed DEM (not a reference raster: isReferenceRaster) in a CRS
 // against an imported reference DEM, sampled through the external store's
 // reprojected query in the DEM's own CRS (base value `ref:<rasterId>`), or against the
 // background terrain under it (base 'terrain', core/terrainSurface.js: ~30 m tiles).
 const external = useExternalStore()
 const differenceOk = computed(
-  () => props.kind === 'dem' && !props.product?.id && !!props.product?.crs && props.product.crs !== 'local',
+  () =>
+    props.kind === 'dem' &&
+    !!props.product &&
+    !isReferenceRaster(props.product) &&
+    !!props.product.crs &&
+    props.product.crs !== 'local',
 )
 const referenceBases = computed(() => (differenceOk.value ? external.demRasters : []))
 const isSurfaceBase = (kind) => kind.startsWith('ref:') || kind === 'terrain'

@@ -2,7 +2,7 @@ import { computed } from 'vue'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
-import { measurementStale } from '../../core/products/measurementRecord.js'
+import { isReferenceRaster, measurementStale } from '../../core/products/measurementRecord.js'
 import {
   describeMeasurement,
   geoJsonMode,
@@ -52,7 +52,7 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
       return !cloud || (record.cloudStamp != null && cloud.createdAt !== record.cloudStamp)
     }
     const p = productOf(record)
-    return measurementStale(record, p, p && !p.id ? recon.productFrameStatus(p) : null)
+    return measurementStale(record, p, p && !isReferenceRaster(p) ? recon.productFrameStatus(p) : null)
   }
   const isImported3d = (record) => {
     const cloud = cloudOf(record)

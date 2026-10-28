@@ -1,7 +1,12 @@
 // Preserve the source identity, numeric frame and units; display styling never
 // invalidates a measurement. Coordinates and sampled heights are snapshots.
+// An imported reference raster (useExternalStore) carries a geoTransform; a computed DEM
+// or orthophoto (useReconstructionStore) its originX/originY/gsd. Not the id: since a
+// project may hold several of each, computed products have ids too.
+export const isReferenceRaster = (p) => !!p?.geoTransform
+
 export function measurementSource(kind, p) {
-  return p?.id ? `reference:${p.id}` : `product:${kind}`
+  return isReferenceRaster(p) ? `reference:${p.id}` : `product:${kind}`
 }
 export function measurementStamp(p) {
   if (!p) return null
