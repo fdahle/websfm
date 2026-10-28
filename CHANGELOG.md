@@ -132,6 +132,9 @@ Notable changes to websfm. The format follows
   uses the value for its empty pixels, which were always black before.
 
 ### Changed
+- **Clearing the console asks first.** The developer console's **Clear** button asks
+  before it deletes the project's log, saved copy included, since a cleared log cannot
+  be brought back. The typed `clear` command still only empties the view.
 - **Find GCPs reads like the other tool dialogs.** Its settings are numbered steps
   (Match, Pick candidates) with a line on what each does, and the results are steps 3 and
   4: the run's numbers as tiles, the candidates on both images, a sortable table, and the

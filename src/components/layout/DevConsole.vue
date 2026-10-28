@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useLog, stripSourcePrefix } from '../../composables/useLog.js'
 import { useLogStore } from '../../stores/useLogStore.js'
+import { askConfirm } from '../../composables/useConfirmations.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useCommands } from '../../composables/useCommands.js'
 import { commonPrefix } from '../../core/help/commands.js'
@@ -321,10 +322,20 @@ function onKeyDown(e) {
   }
 }
 
-// Wipe the console — both the display and the on-disk stream for this project.
-async function onClear() {
-  resetEarlier()
-  await logStore.clearConsole()
+// Wipe the console — both the display and the on-disk stream for this project — once
+// the user confirms: the log is the record a bug report or a comparison of runs needs,
+// and it cannot be brought back. (The typed `clear` command only empties the view.)
+function onClear() {
+  askConfirm({
+    title: 'Clear the console?',
+    message:
+      "Delete every line of this project's log, the saved copy included? Save TXT keeps a copy first. This can't be undone.",
+    confirmLabel: 'Clear',
+    onConfirm: async () => {
+      resetEarlier()
+      await logStore.clearConsole()
+    },
+  })
 }
 
 // Export options. The default export is the clean process record: pipeline lines
@@ -429,7 +440,7 @@ async function saveTxt() {
             </label>
           </div>
         </div>
-        <button class="btn-clear" title="Clear" @click="onClear">Clear</button>
+        <button class="btn-clear" title="Clear the log, after asking" @click="onClear">Clear</button>
       </div>
     </div>
     <div class="console-main">
