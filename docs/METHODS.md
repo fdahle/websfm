@@ -1586,6 +1586,18 @@ trimmed mean keeps the 30 verticals and is 0.3° off. A nadir block, a nadir blo
 obliques all round, and a single oblique look (St Nazaire's two pitches are 24° apart)
 keep their plain mean.
 
+**Sign.** The plane's normal and the viewing direction say which way is vertical but
+take their side from the viewing direction, which assumes the cameras look down. Photos
+taken from the ground look up at their subject: South Building (128 frames walking
+around a building, the trimmed viewing mean 26° off the plane normal) showed upside down
+in the 3D view. Outside an aerial project the mean image-up axis decides the sign when
+it lies within 60° of the answer's line, since an unrolled camera's image-up axis
+leans up whether it looks up or down (`estimateUpFromCameras`, option
+`aerial`). An aerial project keeps the viewing direction's sign, because a scanned frame
+can be stored rotated and its image axes then say nothing. The aerial auto-orient
+therefore still turns a ground-level set over when it is run as aerial; it warns
+instead (`products/projection.js` `camerasLookUp`).
+
 **Extent.** A product covers the cloud's **dense core** by default (`dem.js`
 `coreExtent`), not its raw min/max. An oblique capture sees almost to the horizon, and
 a thin far field of points would otherwise set the raster size, coarsen the automatic

@@ -193,7 +193,7 @@ function canonicalToScanFor(img, cam) {
 const viewerSceneUp = computed(() =>
   reconstructionStore.orientationState.active
     ? normalizeOrientation(reconstructionStore.orientation).up
-    : estimateUpFromCameras(sparseCameras.value),
+    : estimateUpFromCameras(sparseCameras.value, { aerial: currentSceneType.value === 'aerial' }),
 )
 
 // Queue layer changes while the 3D tab is hidden. Each cloud has its own GPU

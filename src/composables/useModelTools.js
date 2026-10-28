@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
+import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { normalizeRegion, regionFromPositions } from '../core/products/region.js'
 import { normalizeOrientation, upFromPlane } from '../core/products/orientation.js'
 import { planeFromThreePoints } from '../core/products/screenPick.js'
@@ -18,6 +19,7 @@ import { useLog } from './useLog.js'
 export function useModelTools({ activateTab, editableClouds, meshClouds, runEditClouds }) {
   const { log } = useLog()
   const reconstructionStore = useReconstructionStore()
+  const projects = useProjectsStore()
   const { sparseCameras, selectedCloudId } = storeToRefs(reconstructionStore)
 
   // Tools ▸ Model ▾ ▸ Region: the toolbox edits a draft; Apply stores it.
@@ -74,13 +76,17 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
   }
   const cameraCentres = () =>
     [...(reconstructionStore.mainSparseCloud?.cameras?.values() ?? [])].map((c) => cameraCenter(c))
+  // Up as the cameras read it (estimateUpFromCameras), +Z when they cannot say.
+  const camerasUp = () => [
+    ...(estimateUpFromCameras(sparseCameras.value, { aerial: projects.currentSceneType === 'aerial' }) ?? [0, 0, 1]),
+  ]
   function openOrientTool() {
     activateTab('viewer')
     const saved = normalizeOrientation(reconstructionStore.orientation)
     orientDraft.value =
       saved && reconstructionStore.orientationState.active
         ? { up: [...saved.up], origin: [...saved.origin], headingDeg: saved.headingDeg }
-        : { up: [...(estimateUpFromCameras(sparseCameras.value) ?? [0, 0, 1])], origin: sparseCentre(), headingDeg: 0 }
+        : { up: camerasUp(), origin: sparseCentre(), headingDeg: 0 }
     orientPicking.value = null
     orientPlanePicks.value = []
     orientEdit.value = true
@@ -189,7 +195,7 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
     orientPlanePicks.value = []
   }
   function orientAutoUp() {
-    orientDraft.value = { ...orientDraft.value, up: [...(estimateUpFromCameras(sparseCameras.value) ?? [0, 0, 1])] }
+    orientDraft.value = { ...orientDraft.value, up: camerasUp() }
   }
   function orientCentreOrigin() {
     orientDraft.value = { ...orientDraft.value, origin: sparseCentre() }

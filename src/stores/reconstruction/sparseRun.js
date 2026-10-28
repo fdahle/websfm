@@ -20,7 +20,12 @@ import { packMatchPairs, inNameOrder } from '../../core/sfm/matchCodec.js'
 import * as opfs from '../../utils/opfs.js'
 import { toMatchSpace, rootSiftToU8 } from '../../core/features/siftDescriptors.js'
 import { unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
-import { aerialUpRotation, rotateReconstruction, sceneUpFromCameras } from '../../core/products/projection.js'
+import {
+  aerialUpRotation,
+  camerasLookUp,
+  rotateReconstruction,
+  sceneUpFromCameras,
+} from '../../core/products/projection.js'
 import { pluralize } from '../../core/textFormat.js'
 import { SparsePoints } from '../../core/sfm/sparsePoints.js'
 import { markRaw } from 'vue'
@@ -562,6 +567,14 @@ export function createSparseRun({
               'info',
               'Reconstruction',
             )
+            // Photos taken from the ground look up, so "cameras look down" turned
+            // the model over: say so, the scene type (fixed at creation) is likely wrong.
+            if (camerasLookUp([...camMap.values()], [0, 0, 1]))
+              log(
+                'The photos look up at their subject, as from the ground, so the aerial orientation has probably put the model upside down. If these are not aerial photos, make a new project with the scene type Object capture.',
+                'warn',
+                'Reconstruction',
+              )
           }
         }
         upsertSparseCloud(camMap, pts)

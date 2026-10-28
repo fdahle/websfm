@@ -5,6 +5,15 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Photos taken from the ground no longer show upside down.** In an Object capture
+  project, the 3D view and Orient model take which way is up from the photos' own
+  up direction when the cameras look up at their subject, as at a building from the
+  street. On South Building (128 frames) the view's up was 180° off before and is
+  right now. An aerial project still assumes the cameras look down; when the photos
+  look up instead, the sparse run warns that the scene type is probably wrong, since
+  its automatic orientation then turns the model over.
+
 ## [0.5.0] — 2026-10-28
 
 ### Added

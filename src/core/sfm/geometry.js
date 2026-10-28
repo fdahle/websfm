@@ -94,7 +94,9 @@ export function medianTriangulationAngle(camA, camB, pts) {
 //
 // Returns null with < 2 cameras or a degenerate mean (e.g. a pure pano spin), so
 // callers fall back to world +Z. Accepts a Map<*, {R,t}> or an array of { R, t }.
-export function estimateUpFromCameras(cameras) {
+// `aerial`: the project is an aerial survey (the sign then follows the cameras'
+// viewing direction, see `signed` below).
+export function estimateUpFromCameras(cameras, { aerial = false } = {}) {
   const list = cameras && typeof cameras.values === 'function' ? [...cameras.values()] : cameras || []
   if (list.length < 2) return null
 
@@ -126,9 +128,17 @@ export function estimateUpFromCameras(cameras) {
   // Trimmed to the block's main look (trimmedViewDirection: TMA obliques).
   const down = Math.hypot(vx, vy, vz) / n >= 0.3 ? trimmedViewDirection(dirs) : null
   const viewUp = down && [-down[0], -down[1], -down[2]]
+  // Outside an aerial project the image-up axes have the last word on the SIGN.
+  // Cameras that look UP at their subject (a facade shot from the street) have a
+  // viewing-direction "up" that points at the ground, and the camera plane took
+  // its sign from it: South Building (128 frames, ~60° up) showed upside down. An
+  // unrolled camera's image-up axis leans up whether it looks up or down, so where
+  // it leans clearly along the answer it is right. Not in aerial sets: a scanned
+  // frame can be stored rotated, and there the cameras look down by definition.
+  const signed = (u) => (!aerial && axisUp && dot3(u, axisUp) < -IMAGE_UP_SIGN_COS ? [-u[0], -u[1], -u[2]] : u)
   // A level camera plane seen obliquely outranks both readings (planeUpOverride).
   const plane = planeUpOverride(list, viewUp, axisUp)
-  if (plane) return plane.up
+  if (plane) return signed(plane.up)
   if (!viewUp) return axisUp
   if (!axisUp) return viewUp
 
@@ -136,7 +146,7 @@ export function estimateUpFromCameras(cameras) {
   if (!b) return axisUp
   const score = (c) => (b.thin ? Math.abs(dot3(c, b.thin)) : 0) - (b.travel ? Math.abs(dot3(c, b.travel)) : 0)
   // Only switch on a clear margin, so an ambiguous rig keeps the historical answer.
-  return score(viewUp) - score(axisUp) > 0.3 ? viewUp : axisUp
+  return score(viewUp) - score(axisUp) > 0.3 ? signed(viewUp) : axisUp
 }
 
 // ── Up from the camera-centre PLANE ──────────────────────────────────────────
@@ -158,6 +168,9 @@ export function estimateUpFromCameras(cameras) {
 // facade is planar with cameras looking along the normal, exactly like a nadir
 // block turned 90°; nothing here can tell them apart.
 export const PLANE_UP_OBLIQUE_DEG = 25
+// How clearly the image-up axes must lean against an estimated up (cos 60°) to
+// overrule its sign: estimateUpFromCameras, and the aerial check camerasLookUp.
+export const IMAGE_UP_SIGN_COS = 0.5
 const PLANE_THIN_RATIO = 0.05 // thinnest std ≤ 5% of the middle one ⇒ planar
 const PLANE_SPREAD_RATIO = 0.2 // middle std ≥ 20% of the largest ⇒ not a single strip
 

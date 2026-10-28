@@ -18,7 +18,7 @@
 // Conventions match geometry.js: rotation R is row-major [[…],[…],[…]] mapping
 // world→camera (x_cam = R·x_world + t); t is [x,y,z].
 
-import { planeUpOverride, trimmedViewDirection } from '../sfm/geometry.js'
+import { planeUpOverride, trimmedViewDirection, IMAGE_UP_SIGN_COS } from '../sfm/geometry.js'
 
 // ── small vector helpers ─────────────────────────────────────────────────────
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -93,6 +93,20 @@ export function sceneUpFromCameras(cams) {
   const plane = planeUpOverride(cams, view, null)
   if (plane) return { up: plane.up, source: 'camera-plane', viewTiltDeg: plane.viewTiltDeg }
   return { up: view, source: view ? 'cameras' : null, viewTiltDeg: null }
+}
+
+// Whether cameras oriented by `up` look UP at their subject: their image-up axes
+// (the negated 2nd row of R) point clearly against it, as for photos taken from the
+// ground (South Building, ~60° up at the facade). The aerial auto-orient assumes the
+// cameras look down, so such a set comes out upside down. Only a warning, never a
+// flip: a scanned historical frame can be stored rotated, so in an aerial set the
+// image axes are no authority on up. → true | false
+export function camerasLookUp(cams, up) {
+  if (!up) return false
+  let s = [0, 0, 0]
+  for (const { R } of cams) s = sub(s, R[1])
+  const axisUp = normalize(s)
+  return norm(axisUp) > 0 && dot(axisUp, normalize(up)) < -IMAGE_UP_SIGN_COS
 }
 
 // Estimate "up" from the point cloud: the ground is the dominant plane, so the

@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest'
 import { estimateUpFromCameras, planeUpOverride } from './geometry.js'
-import { sceneUpFromCameras, buildLocalFrame, aerialUpRotation } from '../products/projection.js'
+import { sceneUpFromCameras, buildLocalFrame, aerialUpRotation, camerasLookUp } from '../products/projection.js'
 
 // World = ENU (z up). A gimbal camera at centre C with yaw (deg clockwise from
 // north) and pitch (deg, negative = down), no roll, in websfm's OpenCV convention:
@@ -86,4 +86,22 @@ it('a TMA block with unbalanced left and right obliques is levelled by its verti
   expect(tiltDeg(sceneUpFromCameras(cams).up)).toBeLessThan(0.5)
   expect(tiltDeg(estimateUpFromCameras(cams))).toBeLessThan(0.5)
   expect(tiltDeg(buildLocalFrame(cams, []).up)).toBeLessThan(0.5)
+})
+
+it('photos taken from the ground, looking up at a building, are shown the right way up', () => {
+  // South Building's geometry: a walk along two sides of a building at eye height,
+  // every frame looking 25–45° up at the facade. The camera plane is level, and its
+  // viewing-direction "up" points at the ground: the viewer showed it upside down.
+  const cams = []
+  for (let i = 0; i < 64; i++) cams.push(gimbalCam([i * 0.8, 0, 1.6 + 0.02 * Math.sin(i)], 0, 25 + (i % 5) * 5))
+  for (let i = 0; i < 64; i++) cams.push(gimbalCam([60, i * 0.8, 1.6 + 0.02 * Math.cos(i)], 270, 25 + (i % 5) * 5))
+  expect(tiltDeg(estimateUpFromCameras(cams))).toBeLessThan(0.5)
+  // An aerial project keeps the viewing direction's sign: its cameras look down.
+  expect(tiltDeg(estimateUpFromCameras(cams, { aerial: true }))).toBeGreaterThan(179.5)
+  // The aerial auto-orient trusts it too (it turns this model over) and warns.
+  const aerialUp = sceneUpFromCameras(cams).up
+  expect(tiltDeg(aerialUp)).toBeGreaterThan(179.5)
+  expect(camerasLookUp(cams, aerialUp)).toBe(true)
+  // A real aerial block is not flagged.
+  expect(camerasLookUp(stNazaire(), sceneUpFromCameras(stNazaire()).up)).toBe(false)
 })
