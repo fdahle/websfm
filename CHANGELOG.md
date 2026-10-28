@@ -5,6 +5,8 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-28
+
 ### Added
 - **A Beta badge, and projects that say why they cannot open.** A **Beta** badge beside
   the name (ribbon, project picker, About) says that features and the project format

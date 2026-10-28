@@ -1,7 +1,7 @@
 {
   "name": "websfm",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Structure-from-Motion and photogrammetry, entirely in the browser",
   "license": "MIT",
   "repository": {
