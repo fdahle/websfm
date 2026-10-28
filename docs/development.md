@@ -130,7 +130,9 @@ git push && git push origin v0.5.0   # the tag deploys websfm.app
 It lists the `feat` / `fix` / `perf` commits since the last tag (add an entry for any
 user-visible one it is missing first), moves `[Unreleased]` under the new version with
 today's date, sets the version in `package.json`, commits and tags `v<version>`.
-Users who return after a deploy see a count of the new entries on **What's New**. A
+Once websfm.app is live, the same CI run publishes the tag's GitHub release, with the
+version's CHANGELOG section as its notes (`scripts/release-notes.mjs`). Users who return
+after a deploy see a count of the new entries on **What's New**. A
 test checks that `package.json` names the newest release in the changelog.
 
 Releases up to 0.4.0 were split after the fact, by the date each entry entered the

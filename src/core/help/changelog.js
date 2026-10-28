@@ -56,6 +56,21 @@ export function parseChangelog(md) {
   return releases
 }
 
+// One release's part of the changelog as it is written (its sections and entries,
+// without the `## [x.y.z]` heading): the body of the GitHub release for its tag
+// (scripts/release-notes.mjs). Null when the version has no section.
+export function releaseSection(md, version) {
+  const lines = md.split(/\r?\n/)
+  const start = lines.findIndex((l) => RELEASE_RE.exec(l)?.[1] === version)
+  if (start < 0) return null
+  let end = start + 1
+  while (end < lines.length && !RELEASE_RE.test(lines[end])) end++
+  return lines
+    .slice(start + 1, end)
+    .join('\n')
+    .trim()
+}
+
 // The first sentence of `text`: up to a . ! or ? followed by a space and a capital,
 // a bracket, a backtick or bold, and not inside brackets, bold or code (so "(**New
 // here? Open …**)" does not end one). Abbreviations such as "e.g. the" do not either.

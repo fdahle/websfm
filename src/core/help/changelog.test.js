@@ -6,6 +6,7 @@ import {
   compareVersions,
   bumpVersion,
   isBetaVersion,
+  releaseSection,
   latestRelease,
   countNewEntries,
   cutRelease,
@@ -140,5 +141,15 @@ describe('CHANGELOG.md', () => {
   it('uses only the Keep a Changelog section names', () => {
     const known = new Set(['Added', 'Changed', 'Performance', 'Fixed', 'Removed', 'Deprecated', 'Security', null])
     for (const r of rel) for (const s of r.sections) expect(known.has(s.title), `${r.version}: ${s.title}`).toBe(true)
+  })
+})
+
+describe('releaseSection', () => {
+  it("returns one release's sections as written, without its heading", () => {
+    const md =
+      '# Changelog\n\n## [Unreleased]\n\n## [0.2.0] — 2026-10-02\n\n### Added\n- **A.** One.\n\n## [0.1.0] — 2026-10-01\n- **B.** Two.\n'
+    expect(releaseSection(md, '0.2.0')).toBe('### Added\n- **A.** One.')
+    expect(releaseSection(md, '0.1.0')).toBe('- **B.** Two.')
+    expect(releaseSection(md, '9.9.9')).toBeNull()
   })
 })

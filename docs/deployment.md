@@ -150,7 +150,8 @@ npm run release                       # 0.4.0 → 0.5.0: changelog, package.json
 git push && git push origin v0.5.0    # main → dev.websfm.app, the tag → websfm.app
 ```
 
-The production job refuses a tag that is not the version in `package.json`. Each run
+The production job refuses a tag that is not the version in `package.json`, and after
+the deploy publishes the tag's GitHub release from its CHANGELOG section. Each run
 shows under the repository's **Actions** tab, and the last deploy of each site under
 **Environments** (`dev`, `production`).
 

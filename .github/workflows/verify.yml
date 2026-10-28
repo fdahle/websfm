@@ -107,6 +107,9 @@ jobs:
     concurrency:
       group: deploy-${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'dev' }}
       cancel-in-progress: false
+    # contents: write lets a tag's run publish its GitHub release (the last step).
+    permissions:
+      contents: write
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -133,3 +136,13 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then node scripts/deploy-cloudflare.mjs
           else node scripts/deploy-cloudflare.mjs --env dev; fi
+      # After websfm.app is live: the GitHub release of the tag, its notes the version's
+      # CHANGELOG section (scripts/release-notes.mjs), marked as the latest release.
+      - name: GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-notes.mjs "$GITHUB_REF_NAME" > release-notes.md
+          gh release create "$GITHUB_REF_NAME" --verify-tag --latest \
+            --title "WebSfM ${GITHUB_REF_NAME#v}" --notes-file release-notes.md
