@@ -165,7 +165,7 @@ function openRow(row) {
             >main</span
           >
           <span v-if="row.outdated" class="outdated-badge" :title="`Outdated: ${row.outdated}`">outdated</span>
-          <span class="obs-badge" :title="`${row.product.width}×${row.product.height} px`">
+          <span class="obs-badge product-size" :title="`${row.product.width}×${row.product.height} px`">
             {{ row.product.width }}×{{ row.product.height }}
           </span>
         </li>

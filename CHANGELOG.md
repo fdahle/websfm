@@ -10,6 +10,9 @@ Notable changes to websfm. The format follows
   are now saved too, so **Total pairs** in the sidebar is the same after a reopen, and
   matching does not try those pairs again. The JSON match export still lists only the
   pairs with matches.
+- **Product names stay readable in a narrow sidebar.** An outdated DEM or orthophoto
+  squeezed its name to nothing; the name now keeps its room, the pixel size is left out
+  below 320 px, and **outdated** becomes a **!** (with the same tooltip) below 260 px.
 - **Photos taken from the ground no longer show upside down.** In an Object capture
   project, the 3D view and Orient model take which way is up from the photos' own
   up direction when the cameras look up at their subject, as at a building from the

@@ -89,6 +89,8 @@
   list-style: none;
   padding: 2px 0 6px;
   user-select: none;
+  /* Rows fit their badges to the sidebar's width (the @container rules below). */
+  container-type: inline-size;
 }
 
 .list-item {
@@ -140,6 +142,9 @@
 
 .item-name {
   flex: 1;
+  /* The badges beside it do not shrink: without a floor a narrow sidebar squeezed the
+     name of an outdated DEM or orthophoto to nothing. */
+  min-width: 3em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -495,4 +500,27 @@
   padding: 0 5px;
   border-radius: 8px;
   line-height: 15px;
+}
+
+/* A narrow sidebar keeps the names readable: a product's pixel size goes (it is in the
+   row's details), and below that "outdated" becomes a "!" chip with the
+   same tooltip. */
+@container (max-width: 320px) {
+  .obs-badge.product-size {
+    display: none;
+  }
+}
+@container (max-width: 260px) {
+  .outdated-badge {
+    font-size: 0;
+    letter-spacing: 0;
+    padding: 0;
+    width: 15px;
+    text-align: center;
+  }
+  .outdated-badge::before {
+    content: '!';
+    font-size: 10px;
+    font-weight: 700;
+  }
 }
