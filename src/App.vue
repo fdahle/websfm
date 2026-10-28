@@ -1117,8 +1117,11 @@ provideSidebar(sidebarContext)
 <template>
   <div class="app">
     <div v-if="persistenceFailures.length" role="alert" class="persistence-error">
-      Unsaved changes: {{ persistenceFailures[0].error?.message || 'Storage write failed' }}
-      <button :disabled="pendingPersistence > 0" @click="retryPersistence().catch(() => {})">Retry saving</button>
+      <span class="persistence-title">Unsaved changes</span>
+      <span class="persistence-detail">{{ persistenceFailures[0].error?.message || 'Storage write failed' }}</span>
+      <button class="btn" :disabled="pendingPersistence > 0" @click="retryPersistence().catch(() => {})">
+        Retry saving
+      </button>
     </div>
     <MobileWarning />
     <BrowserWarning />
@@ -1260,18 +1263,35 @@ provideSidebar(sidebarContext)
 </style>
 
 <style scoped>
+/* Styled as an error toast (layout/ToastStack.vue), but it stays until the writes
+   succeed, and sits bottom-left so the toasts on the right stay readable. */
 .persistence-error {
   position: fixed;
-  bottom: 12px;
-  left: 12px;
-  right: 12px;
+  bottom: 16px;
+  left: 16px;
   z-index: 500;
-  background: #70271f;
-  color: white;
-  padding: 12px;
+  max-width: 440px;
+  padding: 9px 12px;
   border-radius: 6px;
+  border: 1px solid #c05252;
+  background: color-mix(in srgb, #c05252 16%, var(--panel));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
-.persistence-error button {
-  margin-left: 12px;
+.persistence-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.persistence-detail {
+  color: var(--text-dim);
+}
+.persistence-error .btn {
+  margin-top: 4px;
+  font-size: 12px;
+  padding: 3px 12px;
 }
 </style>

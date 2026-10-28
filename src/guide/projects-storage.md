@@ -32,6 +32,11 @@ browser storage** copies it back and leaves the folder on disk untouched. Either
 open project is reopened from its new location, so everything it shows is read from
 there.
 
+When browser storage runs full while depth maps are being built (a private window
+allows little), the run pauses and offers to move the project to a folder. Choose one,
+and the run continues there; the browser copy is removed and the project reopened once
+the run has ended. Stop instead, and the run ends and has to start again.
+
 ## Save project as .websfm
 A `.websfm` file is a portable archive containing source images, features, matches,
 reconstruction, and control. Including cached and derived data makes reopening faster

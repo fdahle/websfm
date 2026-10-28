@@ -385,7 +385,14 @@ export const useProjectsStore = defineStore('projects', () => {
   // when the source is OPFS. Files on the user's own disk are never deleted;
   // "move into browser storage" copies and detaches, leaving the folder in place.
 
-  async function moveProjectToFolder(id, dirHandle, { confirmed = false, onProgress = null } = {}) {
+  // `keepBrowserCopy`: a move during a run (browser storage full) leaves the OPFS tree
+  // in place, because the run still reads files from it; dropBrowserCopy deletes it
+  // once the run has ended, or at the next open if the tab closed first.
+  async function moveProjectToFolder(
+    id,
+    dirHandle,
+    { confirmed = false, onProgress = null, keepBrowserCopy = false } = {},
+  ) {
     const entry = projectEntry(id)
     if (!entry) return { ok: false, error: 'project not found' }
     if (isFolderProject(entry)) return { ok: false, error: 'that project is already in a folder' }
@@ -409,9 +416,19 @@ export const useProjectsStore = defineStore('projects', () => {
     entry.storage = STORAGE_FOLDER
     entry.folderName = dirHandle.name
     entry.lastModified = new Date().toISOString()
+    if (keepBrowserCopy) entry.browserCopyLeft = true
     await saveIndex()
-    await opfs.deleteOpfsProjectTree(id) // safe: verified, and the tree is ours
+    if (!keepBrowserCopy) await opfs.deleteOpfsProjectTree(id) // safe: verified, and the tree is ours
     return { ok: true, ...copied }
+  }
+
+  // Delete the browser copy a move during a run left behind (moveProjectToFolder).
+  async function dropBrowserCopy(id) {
+    const entry = projectEntry(id)
+    if (!entry?.browserCopyLeft || !isFolderProject(entry)) return
+    await opfs.deleteOpfsProjectTree(id)
+    delete entry.browserCopyLeft
+    await saveIndex()
   }
 
   async function moveProjectToBrowser(id, { onProgress = null } = {}) {
@@ -545,6 +562,7 @@ export const useProjectsStore = defineStore('projects', () => {
     createFolderProject,
     adoptFolderProject,
     moveProjectToFolder,
+    dropBrowserCopy,
     moveProjectToBrowser,
     exportProject,
     importProject,

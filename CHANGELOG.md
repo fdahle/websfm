@@ -5,6 +5,14 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **A full browser storage no longer ends a depth-map run.** When browser storage runs
+  full while depth maps are built, the run pauses and offers to move the project to a
+  folder on disk, then carries on there; stopping ends it, as before. The browser copy
+  is removed and the project reopened from the folder once the run has ended.
+  **Move to folder…** now also works while some changes could not be saved, and saves
+  them in the folder.
+
 ### Fixed
 - **A reopened project counts every match pair it tried.** Pairs that matching rejected
   are now saved too, so **Total pairs** in the sidebar is the same after a reopen, and
@@ -13,6 +21,9 @@ Notable changes to websfm. The format follows
 - **Product names stay readable in a narrow sidebar.** An outdated DEM or orthophoto
   squeezed its name to nothing; the name now keeps its room, the pixel size is left out
   below 320 px, and **outdated** becomes a **!** (with the same tooltip) below 260 px.
+- **The "Unsaved changes" message matches the rest of the app.** It is a card in the
+  lower left, styled like an error notification, instead of a dark red bar across
+  the window.
 - **Photos taken from the ground no longer show upside down.** In an Object capture
   project, the 3D view and Orient model take which way is up from the photos' own
   up direction when the cameras look up at their subject, as at a building from the

@@ -321,8 +321,8 @@ export function createDense({
               const { meta, buffers } = serializeDepthMap(m)
               if (at.has(m.uuid)) run.metas[at.get(m.uuid)] = meta
               staged.push(
-                opfs
-                  .saveStagedDepthPlane(run.projectId, m.uuid, buffers)
+                run
+                  .saveOrMove(() => opfs.saveStagedDepthPlane(run.projectId, m.uuid, buffers))
                   .catch((err) => {
                     stageFailure ??= err
                   })
@@ -333,9 +333,12 @@ export function createDense({
           )
           await Promise.all(staged)
           if (stageFailure) throw stageFailure
-          await opfs.promoteStagedDepthPlanes(
-            run.projectId,
-            run.metas.map((m) => m.uuid),
+          // Idempotent (a promoted plane has no staged file left), so it can be retried.
+          await run.saveOrMove(() =>
+            opfs.promoteStagedDepthPlanes(
+              run.projectId,
+              run.metas.map((m) => m.uuid),
+            ),
           )
         }
         // A split run's maps arrive in finishing order. Keep the input order, so the
@@ -488,11 +491,13 @@ export function createDense({
       const meta = metaByUuid.get(f.uuid)
       if (meta) Object.assign(meta, f.coverage)
       writes.push(
-        opfs.saveDepthPlane(run.projectId, f.uuid, { depth: f.depth }).catch((err) => {
-          if (writeFailure) return
-          writeFailure = err
-          terminateAll(err.message)
-        }),
+        run
+          .saveOrMove(() => opfs.saveDepthPlane(run.projectId, f.uuid, { depth: f.depth }))
+          .catch((err) => {
+            if (writeFailure) return
+            writeFailure = err
+            terminateAll(err.message)
+          }),
       )
     }
     // References are judged independently against the unfiltered planes, so the maps

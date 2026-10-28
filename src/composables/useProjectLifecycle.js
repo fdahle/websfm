@@ -1,5 +1,5 @@
-import { flushPersistence } from '../utils/persistence.js'
-import { computed, nextTick, ref } from 'vue'
+import { flushPersistence, retryPersistence } from '../utils/persistence.js'
+import { computed, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { crsInfo, ensureProjection } from '../core/crs.js'
 import { formatBytes } from '../core/formatBytes.js'
@@ -18,6 +18,8 @@ import { usePosesStore } from '../stores/usePosesStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useLog } from './useLog.js'
 import { showToast } from './useToasts.js'
+import { setStorageFullHandler } from '../utils/storageFull.js'
+import { isFolderProject } from '../core/io/folderProject.js'
 import { confirmDialog } from './useConfirmations.js'
 import { rememberNewProjectDraft } from './newProjectDraft.js'
 import { pluralize } from '../core/textFormat.js'
@@ -55,6 +57,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     createFolderProject,
     adoptFolderProject,
     moveProjectToFolder,
+    dropBrowserCopy,
     moveProjectToBrowser,
     setProjectCrs,
   } = projectsStore
@@ -180,6 +183,8 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       folderPrompt.value = { id, action: plan.action, error: '' }
       return
     }
+    // A move during a run whose tab closed before the run ended left its browser copy.
+    await dropBrowserCopy(id).catch(() => {})
     let projectData
     try {
       projectData = await switchProject(id)
@@ -471,42 +476,101 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   // reference rasters, the match document): a move to a folder deletes the tree they
   // point at, and a move back stops writing to it. The copies have the same names, and
   // the open path is the one place that fetches all of them.
+  // Writes that failed before the move (browser storage full) are retried first: they
+  // now land in the new root, and an open refuses to leave unsaved changes behind.
   async function reopenMoved(id) {
     if (id !== currentProjectId.value) return
+    await retryPersistence().catch((err) => log(err?.message ?? String(err), 'warn', 'Project'))
     log('Reopening the project from its new location', 'info', 'Project')
-    await openProject(id)
+    await openProject(id).catch((err) =>
+      log(`Could not reopen the project: ${err?.message ?? err}`, 'error', 'Project'),
+    )
+  }
+
+  // The move behind the overlay, said in the log and a toast. A folder that is not
+  // empty is asked about between two attempts, outside the overlay, which would
+  // otherwise cover the question. → true when the project moved.
+  async function moveToFolder(id, dirHandle, opts = {}) {
+    const attempt = (confirmed) =>
+      withLoadingOverlay('Moving project to folder…', () =>
+        moveProjectToFolder(id, dirHandle, { ...opts, confirmed, onProgress: fileProgress }),
+      )
+    let res = await attempt(false)
+    if (
+      !res.ok &&
+      res.needsConfirm &&
+      (await confirmDialog({
+        title: 'Folder not empty',
+        message: `"${dirHandle.name}" is not empty. Move the project into it anyway?`,
+        confirmLabel: 'Move',
+      }))
+    ) {
+      res = await attempt(true)
+    }
+    if (res.ok) {
+      log(`Project moved to folder "${dirHandle.name}" (${res.files} files)`, 'info', 'Project')
+      showToast('Project moved to folder', { detail: dirHandle.name })
+    } else if (!res.needsConfirm) {
+      log(`Move to folder failed: ${res.error}`, 'error', 'Project')
+      showToast('Could not move project', { detail: res.error, kind: 'error', ms: 6000 })
+    }
+    return res.ok
   }
 
   async function moveCurrentProjectToFolder(id = currentProjectId.value) {
     if (!id || refuseWhileBusy('Move project')) return
-    await flushProjectWork()
+    // Failed writes do not stop a move (a full browser storage is the reason to move):
+    // the copy holds what was saved, and reopenMoved retries the rest in the folder.
+    await flushProjectWork().catch(() => {})
     const dirHandle = await pickDirectory()
     if (!dirHandle) return
-    let moved = false
-    await withLoadingOverlay('Moving project to folder…', async () => {
-      let res = await moveProjectToFolder(id, dirHandle, { onProgress: fileProgress })
-      if (
-        !res.ok &&
-        res.needsConfirm &&
-        (await confirmDialog({
-          title: 'Folder not empty',
-          message: `"${dirHandle.name}" is not empty. Move the project into it anyway?`,
-          confirmLabel: 'Move',
-        }))
-      ) {
-        res = await moveProjectToFolder(id, dirHandle, { confirmed: true })
-      }
-      if (res.ok) {
-        moved = true
-        log(`Project moved to folder "${dirHandle.name}" (${res.files} files)`, 'info', 'Project')
-        showToast('Project moved to folder', { detail: dirHandle.name })
-      } else {
-        log(`Move to folder failed: ${res.error}`, 'error', 'Project')
-        showToast('Could not move project', { detail: res.error, kind: 'error', ms: 6000 })
-      }
-    })
-    if (moved) await reopenMoved(id)
+    if (await moveToFolder(id, dirHandle)) await reopenMoved(id)
   }
+
+  // ── Browser storage full during a run ──────────────────────────────────────
+  // A run whose write finds browser storage full asks here (utils/storageFull.js; the
+  // depth-map run): move the project to a folder on disk and the run carries on
+  // there. The browser copy stays until the run has ended, because the run still
+  // reads its files; then it goes, and the project reopens from the folder as after
+  // any move. A tab closed before that drops it at the next open (openProject).
+  let movedDuringRun = null
+  async function offerMoveOnStorageFull({ projectId }) {
+    const entry = projects.value.find((p) => p.id === projectId)
+    if (!entry || projectId !== currentProjectId.value || isFolderProject(entry)) return false
+    if (typeof window.showDirectoryPicker !== 'function') return false
+    for (;;) {
+      const move = await confirmDialog({
+        title: 'Browser storage is full',
+        message:
+          'The browser has no room left for this project. Move it to a folder on your disk, ' +
+          'and the run continues there. If you stop, the run ends and has to start again.',
+        confirmLabel: 'Choose a folder…',
+        cancelLabel: 'Stop the run',
+        danger: false,
+      })
+      if (!move) {
+        log('Browser storage full: the run was stopped instead of moving the project to a folder', 'warn', 'Project')
+        return false
+      }
+      const dirHandle = await pickDirectory()
+      if (dirHandle && (await moveToFolder(projectId, dirHandle, { keepBrowserCopy: true }))) {
+        movedDuringRun = projectId
+        log('The run continues with the project in its folder', 'info', 'Project')
+        return true
+      }
+      // No folder picked, or the move failed: ask again, so stopping stays a choice.
+    }
+  }
+  setStorageFullHandler(offerMoveOnStorageFull)
+  watch(isBusy, async (busy) => {
+    if (busy || !movedDuringRun) return
+    const id = movedDuringRun
+    movedDuringRun = null
+    await dropBrowserCopy(id).catch((err) =>
+      log(`Could not delete the browser copy of the moved project: ${err?.message ?? err}`, 'warn', 'Project'),
+    )
+    await reopenMoved(id)
+  })
 
   async function moveCurrentProjectToBrowser(id = currentProjectId.value) {
     if (!id || refuseWhileBusy('Move project')) return

@@ -8,6 +8,7 @@ vi.mock('../../utils/opfs.js', () => ({
 }))
 const opfs = await import('../../utils/opfs.js')
 const { createDepthMapCache } = await import('./depthMapCache.js')
+const { setStorageFullHandler } = await import('../../utils/storageFull.js')
 
 const map = (uuid) => ({
   uuid,
@@ -58,6 +59,30 @@ describe('streamed depth maps', () => {
     expect(opfs.commitDepthIndex).not.toHaveBeenCalled()
     process.off('unhandledRejection', unhandled)
     expect(unhandled).not.toHaveBeenCalled()
+  })
+
+  it('waits while the project moves to a folder, then saves there and commits', async () => {
+    const full = Object.assign(new Error('Storage is full'), { storageFull: true })
+    let moved = false
+    opfs.saveDepthPlane.mockImplementation(async (_p, uuid) => {
+      if (uuid !== 'a' && !moved) throw full
+    })
+    const handler = vi.fn(async () => (moved = true))
+    setStorageFullHandler(handler)
+    try {
+      const onWriteFailure = vi.fn()
+      const run = await cache().beginStreamedDepthMaps({ onWriteFailure })
+      run.add(map('a'))
+      run.add(map('b'))
+      run.add(map('c'))
+      await run.commit({})
+      expect(handler).toHaveBeenCalledTimes(1) // one question for the run
+      expect(onWriteFailure).not.toHaveBeenCalled()
+      expect(opfs.saveDepthPlane).toHaveBeenCalledTimes(5) // b and c twice
+      expect(opfs.commitDepthIndex).toHaveBeenCalledTimes(1)
+    } finally {
+      setStorageFullHandler(null)
+    }
   })
 
   it('commits the index when every map was saved', async () => {

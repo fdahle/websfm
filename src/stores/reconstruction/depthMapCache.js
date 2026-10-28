@@ -2,6 +2,7 @@ import { computed, shallowRef } from 'vue'
 import { serializeDepthMap, buildDepthIndex, isDepthIndexStale, depthMapBytes } from '../../core/dense/depthMapCodec.js'
 import { formatBytes } from '../../core/dense/memBudget.js'
 import * as opfs from '../../utils/opfs.js'
+import { storageFullRetry } from '../../utils/storageFull.js'
 import { pluralize } from '../../core/textFormat.js'
 
 // Persist expensive Stage A maps, then evict their resident planes. Restore reads
@@ -58,6 +59,11 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
   // full disk), so the caller can stop computing maps it cannot keep. Every write is
   // handled as it is queued: a failure must not surface as an unhandled rejection
   // minutes before `settled()` is awaited.
+  // Browser storage full: the write waits while the user is asked to move the project
+  // to a folder (utils/storageFull.js), then goes there. The run waits with it: the
+  // workers hold their next maps until the unsaved ones are acknowledged. `run.retry`
+  // `run.saveOrMove(write)` gives the run's other writes (the filter pass, the commit)
+  // the same way out.
   async function beginStreamedDepthMaps({ onWriteFailure = null } = {}) {
     if (!isPersisting()) return null
     const projectId = currentProjectId()
@@ -66,7 +72,17 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
     depthMapsMeta.value = [] // the old set is gone; the new one is advertised on commit
     const metas = [],
       writes = []
+    const inFlight = new Set()
     let failure = null
+    const retry = storageFullRetry({ projectId, settleFirst: () => [...inFlight] })
+    // A write's first attempt, tracked until it settles (see storageFullRetry).
+    const attempt = (write) => {
+      const p = write()
+      inFlight.add(p)
+      p.finally(() => inFlight.delete(p)).catch(() => {})
+      return p
+    }
+    const saveOrMove = (write) => attempt(write).catch((err) => retry(err, write))
     const settled = async () => {
       await Promise.all(writes)
       if (failure) throw failure
@@ -78,7 +94,7 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
       add(m) {
         const { meta, buffers } = serializeDepthMap(m)
         metas.push(meta)
-        const write = opfs.saveDepthPlane(projectId, m.uuid, buffers).catch((err) => {
+        const write = saveOrMove(() => opfs.saveDepthPlane(projectId, m.uuid, buffers)).catch((err) => {
           if (failure) return
           failure = err
           onWriteFailure?.(err)
@@ -87,10 +103,11 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
         return write
       },
       settled,
+      saveOrMove,
       async commit(settings) {
         await settled()
         const index = { ...buildDepthIndex([], { sparseCloud: mainSparseCloud(), settings }), maps: metas }
-        await opfs.commitDepthIndex(projectId, index)
+        await saveOrMove(() => opfs.commitDepthIndex(projectId, index))
         if (currentProjectId() === projectId) depthMapsMeta.value = metas
         log(
           `Dense: ${pluralize(metas.length, 'depth map')} saved (${formatBytes(depthMapBytes(metas))}) as they finished ` +
