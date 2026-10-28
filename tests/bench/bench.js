@@ -604,7 +604,7 @@ window.bench = {
   },
   regionCheck() {
     const r = recon.region,
-      d = recon.clouds.find((c) => c.kind === 'dense')
+      d = recon.mainDenseCloud
     if (!r || !d) return { error: 'no region or dense cloud' }
     let outside = 0
     for (let i = 0; i < d.count; i++) {
@@ -697,8 +697,8 @@ window.bench = {
     } finally {
       DENSE_TUNING.fuseWorkers = fuseWorkers0
     }
-    const dense = recon.clouds.filter((c) => c.kind === 'dense')
-    return { settings, seconds: (performance.now() - t0) / 1000, points: dense.reduce((n, c) => n + (c.count ?? 0), 0) }
+    // The cloud this run built (the main one), not the sum: a rebuild adds one beside the old.
+    return { settings, seconds: (performance.now() - t0) / 1000, points: recon.mainDenseCloud?.count ?? 0 }
   },
 
   // DEM, settings resolved exactly as DemModal.run() does.
@@ -1038,11 +1038,11 @@ window.bench = {
   // The fused dense cloud's positions, `n` points from `start`, as base64 Float32 xyz —
   // the runner pulls it in chunks for a node-side comparison (scripts/bench/eth3d.mjs).
   denseInfo() {
-    const c = recon.clouds.find((x) => x.kind === 'dense' && !x.imported)
+    const c = recon.mainDenseCloud
     return c ? { count: c.count, posType: c.pos.constructor.name } : null
   },
   denseChunk(start, n) {
-    const c = recon.clouds.find((x) => x.kind === 'dense' && !x.imported)
+    const c = recon.mainDenseCloud
     const f = new Float32Array(c.pos.subarray(3 * start, 3 * Math.min(c.count, start + n)))
     const u8 = new Uint8Array(f.buffer)
     let s = ''
@@ -1050,11 +1050,12 @@ window.bench = {
     return btoa(s)
   },
 
-  // The fused dense cloud in the last reconstruction's positionCheck ENU frame, every
+  // The main fused dense cloud (the newest build: a rebuild adds one beside the old) in
+  // the last reconstruction's positionCheck ENU frame, every
   // `stride`-th point so at most `maxPoints` come back (base64 Float32 e,n,u), for the
   // node-side LiDAR check (scripts/bench/lidar.mjs). Null without a GPS fit.
   densePointsEnu(maxPoints = 1_000_000) {
-    const c = recon.clouds.find((x) => x.kind === 'dense' && !x.imported)
+    const c = recon.mainDenseCloud
     const pc = lastPositionCheck
     if (!c || !pc) return null
     const stride = Math.max(1, Math.ceil(c.count / maxPoints))
@@ -1081,7 +1082,7 @@ window.bench = {
     if (resolved.source !== 'georef') return null
     const frame = frameFromSpec(resolved.frameSpec)
     const sparse = recon.clouds.find((x) => x.kind === 'sparse' && !x.imported)
-    const c = kind === 'sparse' ? sparse : recon.clouds.find((x) => x.kind === 'dense' && !x.imported)
+    const c = kind === 'sparse' ? sparse : recon.mainDenseCloud
     if (!c) return null
     const n = kind === 'sparse' ? c.points.length : c.count
     const stride = Math.max(1, Math.ceil(n / maxPoints))

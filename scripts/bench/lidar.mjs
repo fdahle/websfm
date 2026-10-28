@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import proj4 from 'proj4'
 import initLaz, { decompress_points } from '../../src/wasm/lazcodec/lazcodec.js'
 import { decompressLazRecords } from '../../src/core/io/laz.js'
+import { readLasHeader } from '../../src/core/io/las.js'
 
 const repo = fileURLToPath(new URL('../../', import.meta.url))
 const DEFS = {
@@ -97,7 +98,14 @@ export async function loadLidarGrid(cfg, log = console.log) {
     // neighbouring strips overlap it. (The same cap stops the app importing it.)
     const recLen = new DataView(bytes.buffer).getUint16(105, true)
     const maxPoints = Math.floor((512 * 1024 * 1024) / recLen)
-    const { header: h, records } = decompressLazRecords(bytes, { decompress: decompress_points, maxPoints })
+    // Uncompressed LAS: the records are the bytes after the header (no codec, no cap).
+    const las = readLasHeader(bytes)
+    const { header: h, records } = las.isLaz
+      ? decompressLazRecords(bytes, { decompress: decompress_points, maxPoints })
+      : {
+          header: las,
+          records: bytes.subarray(las.offsetToPoints, las.offsetToPoints + las.count * las.recordLength),
+        }
     if (h.truncatedFrom)
       log(`lidar: ${f} decoded ${h.count.toLocaleString()} of ${h.truncatedFrom.toLocaleString()} points (codec limit)`)
     const dv = new DataView(records.buffer, records.byteOffset, records.byteLength)
