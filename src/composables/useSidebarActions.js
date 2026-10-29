@@ -28,13 +28,12 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     convertImageToRaster,
     confirmRemoveSensor,
     confirmRemoveMatches,
-    exportMatches,
     confirmRemoveGcp,
     selectGcp,
     jumpToImage,
     openGcpView,
     confirmRemoveVectorSet,
-    downloadVectorSet,
+    openVectorExport,
     confirmRemoveCloud,
     openCloudExport,
     openComputedProductTab,
@@ -187,7 +186,9 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
       matchListOpen.value = true
     },
     removeMatches: confirmRemoveMatches,
-    downloadMatches: exportMatches,
+    downloadMatches: () => {
+      exportKind.value = 'matches'
+    },
     // GCPs
     removeGcp: confirmRemoveGcp,
     selectGcp,
@@ -202,7 +203,7 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     },
     setVectorOpacity: ({ id, opacity }) => setSetOpacity(id, opacity),
     zoomToVectorSet,
-    downloadVectorSet,
+    downloadVectorSet: openVectorExport,
     // Clouds (Reconstruction, Products and Reference rows)
     selectCloud: showCloud,
     cloudSymbology: openCloudSymbology,

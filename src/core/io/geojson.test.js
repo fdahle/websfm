@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   parseGeoJson,
   polygonSetToGeoJson,
+  posesToGeoJson,
   looksLikeGeoJson,
   guessNameKey,
   geoJsonToGcps,
@@ -355,5 +356,48 @@ describe('polygonSetToGeoJson', () => {
 
   it('leaves out a CRS that is not an EPSG code', () => {
     expect(polygonSetToGeoJson(set, { crs: '+proj=utm +zone=32' }).crs).toBeUndefined()
+  })
+
+  it('writes WGS 84 with no crs member when reprojected', () => {
+    const fc = polygonSetToGeoJson(set, { crs: 'EPSG:32632', reproject: ([x, y]) => [x + 10, y + 50] })
+    expect(fc.crs).toBeUndefined()
+    expect(fc.features[0].geometry.coordinates[0][2]).toEqual([12, 52])
+  })
+})
+
+describe('posesToGeoJson', () => {
+  const poses = [
+    { imageName: 'a.jpg', x: 1, y: 2, z: 3, omega: 4, phi: 5, kappa: 6, accuracyX: 0.1, accXYZ: 5, accAngle: 2 },
+  ]
+
+  it('writes one 3D point per camera with its angles and accuracies', () => {
+    const fc = posesToGeoJson(poses, { crs: 'EPSG:32632' })
+    expect(fc.crs.properties.name).toBe('EPSG:32632')
+    expect(fc.features[0].geometry).toEqual({ type: 'Point', coordinates: [1, 2, 3] })
+    expect(fc.features[0].properties).toEqual({
+      name: 'a.jpg',
+      omega: 4,
+      phi: 5,
+      kappa: 6,
+      accuracy_x: 0.1,
+      accuracy_y: 5,
+      accuracy_z: 5,
+      accuracy_omega: 2,
+      accuracy_phi: 2,
+      accuracy_kappa: 2,
+    })
+  })
+
+  it('leaves out what is turned off, and keeps the height as a property in WGS 84', () => {
+    const fc = posesToGeoJson(poses, { reproject: () => [7, 51], orientation: false, accuracy: false })
+    expect(fc.crs).toBeUndefined()
+    expect(fc.features[0].geometry.coordinates).toEqual([7, 51])
+    expect(fc.features[0].properties).toEqual({ name: 'a.jpg', Z: 3 })
+  })
+
+  it('reads back as GCP-style points named by image', () => {
+    const parsed = parseGeoJson(JSON.stringify(posesToGeoJson(poses, { crs: 'EPSG:32632' })))
+    expect(parsed.sourceCrs).toBe('EPSG:32632')
+    expect(guessNameKey(Object.keys(parsed.features[0].properties))).toBe('name')
   })
 })

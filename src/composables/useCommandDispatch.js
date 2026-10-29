@@ -54,18 +54,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     refreshGcpReport,
     openQuality,
   } = tools
-  const {
-    exportKind,
-    exportPoses,
-    exportSensors,
-    exportCameraFiducials,
-    exportImageFiducials,
-    exportKeypoints,
-    exportMatches,
-    downloadRasterOriginal,
-    downloadFootprints,
-    openMeasurementExport,
-  } = exports
+  const { exportKind, downloadRasterOriginal, openFootprintExport, openMeasurementExport } = exports
   const { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages, confirmRemoveFootprints } = removals
   const {
     cameraPickMode,
@@ -347,16 +336,16 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         pickFiles(FILE_PICKERS.raster, onRasterPick)
         break
       case 'export-cameras':
-        exportPoses()
+        exportKind.value = 'poses'
         break
       case 'export-sensors':
-        exportSensors()
+        exportKind.value = 'sensors'
         break
       case 'export-camera-fiducials':
-        exportCameraFiducials()
+        exportKind.value = 'cameraFiducials'
         break
       case 'export-image-fiducials':
-        exportImageFiducials()
+        exportKind.value = 'imageFiducials'
         break
       case 'export-cloud':
         exportKind.value = 'cloud'
@@ -383,13 +372,13 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         exportKind.value = 'ortho'
         break
       case 'export-keypoints':
-        exportKeypoints()
+        exportKind.value = 'keypoints'
         break
       case 'export-matches':
-        exportMatches()
+        exportKind.value = 'matches'
         break
       case 'export-footprints':
-        downloadFootprints()
+        openFootprintExport()
         break
       // The map's right-click on a footprint (not a ribbon command).
       case 'remove-footprints':

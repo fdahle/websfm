@@ -684,10 +684,12 @@ export const TABS = [
       // Keep the same data-oriented vocabulary and pipeline order as Import,
       // Reconstruct, and Evaluate. Interchange models are reconstruction data;
       // point clouds and meshes are geometry; DEM/ortho are mapping products.
+      // Every export opens its dialog (ExportModal.vue), so no label here needs the
+      // "…" that marks a command asking for more before it acts.
       {
         label: 'Cameras',
         commands: [
-          { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera-pose', needs: ['poses'] },
+          { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera-pose', needs: ['posesOrSparse'] },
           { id: 'export-sensors', label: 'Calibration', icon: 'calibration', needs: ['sensors'] },
           { id: 'export-camera-fiducials', label: 'Camera\nFiducials', icon: 'camera', needs: ['fiducialMarks'] },
           // The image footprints as GeoJSON (they have no sidebar row to download from).
@@ -719,15 +721,15 @@ export const TABS = [
           EXPORT_DEM,
           EXPORT_ORTHO,
           // Saved ruler / area / profile / volume / 3D measurements as CSV or GeoJSON.
-          { id: 'export-measurements', label: 'Measure-\nments…', icon: 'ruler', needs: ['measurements'] },
+          { id: 'export-measurements', label: 'Measure-\nments', icon: 'ruler', needs: ['measurements'] },
         ],
       },
       {
         label: 'Interoperability',
         commands: [
-          { id: 'export-colmap', label: 'SfM\nProject…', icon: 'cube', needs: ['sparse'] },
-          { id: 'export-undistorted', label: 'Undistorted\nImages…', icon: 'image', needs: ['sparse'] },
-          { id: 'export-tiles3d', label: '3D Tiles…', icon: 'layers', needs: ['cloud'] },
+          { id: 'export-colmap', label: 'SfM\nProject', icon: 'cube', needs: ['sparse'] },
+          { id: 'export-undistorted', label: 'Undistorted\nImages', icon: 'image', needs: ['sparse'] },
+          { id: 'export-tiles3d', label: '3D Tiles', icon: 'layers', needs: ['cloud'] },
         ],
       },
     ],

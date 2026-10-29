@@ -11,6 +11,7 @@ import { useModalsStore } from '../../stores/useModalsStore.js'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { useMatchesStore } from '../../stores/useMatchesStore.js'
 import { useSensorsStore } from '../../stores/useSensorsStore.js'
+import { useFootprintsStore } from '../../stores/useFootprintsStore.js'
 import { useAppContext } from '../../appContext.js'
 import { tilesSubject } from '../../core/products/tiles3d.js'
 import AlignIcpModal from './cloud/AlignIcpModal.vue'
@@ -125,6 +126,7 @@ const {
   exportMeasurementScope,
   exportNameBase,
   exportTargetCloud,
+  exportTargetVectorSet,
   exportTerrain,
   footprintImageCount,
   georeferenceAfterReconstruct,
@@ -181,6 +183,17 @@ const exportTilesSubject = computed(() => {
   return s ? { kind: s.kind, count: s.count, streamed: s.streamed, textured: s.textured } : null
 })
 const measurementsStore = useMeasurementsStore()
+// Camera poses / calibration: how many cameras each source of the export has.
+const exportSources = computed(() => {
+  const estimated = reconstructionStore.mainSparseCloud?.cameras?.size ?? 0
+  if (exportKind.value === 'poses') return { imported: poses.value.length, estimated }
+  if (exportKind.value === 'sensors') return { entered: sensors.value.length, estimated }
+  return {}
+})
+const footprintsStore = useFootprintsStore()
+const exportingFootprints = computed(
+  () => !!exportTargetVectorSet.value && exportTargetVectorSet.value.id === footprintsStore.footprintSet?.id,
+)
 </script>
 
 <template>
@@ -265,7 +278,12 @@ const measurementsStore = useMeasurementsStore()
       :has-scale="scaleFitValid || georef?.crs === currentCrs"
       :has-orientation="reconstructionStore.orientationState.active"
       :ortho-cells="reconstructionStore.ortho ? reconstructionStore.ortho.width * reconstructionStore.ortho.height : 0"
-      :subject="exportTargetCloud?.name ?? exportMeasurementScope?.label ?? ''"
+      :subject="
+        exportTargetCloud?.name ??
+        (exportingFootprints ? null : exportTargetVectorSet?.name) ??
+        exportMeasurementScope?.label ??
+        ''
+      "
       :textured="!!exportMeshCloud?.texture"
       :measurement-crs="
         exportKind === 'measurements'
@@ -275,6 +293,9 @@ const measurementsStore = useMeasurementsStore()
       :raster-crs="exportKind === 'dem' ? rasterCrsOf(dem) : exportKind === 'ortho' ? rasterCrsOf(ortho) : ''"
       :tiles-subject="exportTilesSubject"
       :name-base="exportNameBase"
+      :sources="exportSources"
+      :project-crs="currentCrs && currentCrs !== 'local' ? currentCrs : ''"
+      :footprints="exportingFootprints"
       @close="exportKind = null"
       @run="onExportRun"
     />

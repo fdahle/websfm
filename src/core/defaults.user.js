@@ -438,6 +438,16 @@ export const EXPORT_DEFAULTS = {
   undistortFormat: 'jpeg', // 'jpeg' | 'png' (png = lossless, much larger)
   undistortQuality: 0.92, // JPEG quality; above the ortho default since these feed MVS
   undistortMaxDim: 0,
+  // Camera poses (Export ▸ Camera Poses): the omega/phi/kappa columns, and the
+  // accuracy columns (imported poses only; estimated ones have none).
+  poseOrientation: true,
+  poseAccuracy: true,
+  // Camera poses and vector layers as GeoJSON: 'project' = the project CRS in the
+  // legacy `crs` member; 'wgs84' = longitude/latitude (RFC 7946).
+  geoJsonCoords: 'project',
+  // Matches: 'matches' = every pair with its keypoint index pairs; 'pairs' = the pair
+  // list with its counts alone.
+  matchContent: 'matches',
 }
 
 // Point-cloud / mesh import (ImportCloudModal.vue → useReconstructionStore.importCloud).

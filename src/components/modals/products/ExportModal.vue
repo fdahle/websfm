@@ -9,6 +9,7 @@ import { MAX_ORTHO_IMAGE_CELLS } from '../../../core/products/exporters.js'
 import { defaultTiling, singleTileFits } from '../../../core/products/tiles3d.js'
 import { defaultExportName } from '../../../core/exportNames.js'
 import FileNameField from '../ui/FileNameField.vue'
+import { pluralize } from '../../../core/textFormat.js'
 
 // One reusable export dialog, parameterised by `kind`. It collects a format + a
 // few settings and emits them on run; App.vue maps the result to the right
@@ -43,8 +44,17 @@ const props = defineProps({
   // 'mesh' | 'cloud', count, streamed, textured }, or null. Sets the tiling default.
   tilesSubject: { type: Object, default: null },
   // What the default file name starts from (useExports exportNameBase): the cloud's
-  // or mesh's own export name, else the project's.
+  // or mesh's own export name, a vector layer's, else the project's.
   nameBase: { type: String, default: 'project' },
+  // Camera poses / calibration: how many cameras each source has ({ imported,
+  // estimated } for poses, { entered, estimated } for calibration). A source with none
+  // is offered greyed; the estimated one is the default when the sparse model has any.
+  sources: { type: Object, default: () => ({}) },
+  // The project CRS ('' for a local frame): poses and vector layers can be converted
+  // from it to WGS 84 (GeoJSON, KML).
+  projectCrs: { type: String, default: '' },
+  // A vector layer export: the image footprints (titled so), not another layer.
+  footprints: { type: Boolean, default: false },
 })
 
 const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
@@ -57,6 +67,9 @@ const frameLabel = computed(() => {
 })
 const emit = defineEmits(['close', 'run'])
 
+// Per kind: the title, the formats ({ value, label, hint? }) and a `hint` for every
+// format. The Format field shows the chosen format's hint, else the kind's: what the
+// file holds, which the label alone does not say.
 const CONFIG = {
   cloud: {
     title: 'Export Point Cloud',
@@ -82,11 +95,19 @@ const CONFIG = {
     title: 'Export Model',
     formats: [
       { value: 'json', label: 'JSON — cameras + tracks' },
-      { value: 'transforms', label: 'transforms.json — NeRF / 3DGS' },
+      {
+        value: 'transforms',
+        label: 'transforms.json — NeRF / 3DGS',
+        hint: 'Camera-to-world poses (OpenGL convention) + intrinsics for nerfstudio, instant-ngp and 3D Gaussian Splatting. Local SfM frame; pinhole.',
+      },
     ],
   },
   colmap: {
     title: 'Export SfM Project',
+    hint:
+      'Exchange a complete COLMAP workspace, its feature database, a sparse model, or camera transforms for NeRF / ' +
+      'Gaussian-Splatting tools. Unsupported descriptor encodings are omitted while keypoints and verified matches ' +
+      'are retained.',
     formats: [
       { value: 'workspace', label: 'COLMAP workspace — database + sparse model' },
       { value: 'database', label: 'COLMAP database.db — cameras + features + matches' },
@@ -99,10 +120,17 @@ const CONFIG = {
   },
   tiles3d: {
     title: 'Export 3D Tiles',
+    hint:
+      'For globe viewers (Cesium, and anything else reading 3D Tiles 1.1). The model is placed by a transform ' +
+      'measured from the project CRS, so it lands correctly even at polar latitudes.',
     formats: [{ value: 'tileset', label: 'Cesium 3D Tiles 1.1 — tileset.json + glTF tiles (.zip)' }],
   },
   undistorted: {
     title: 'Export Undistorted Images',
+    hint:
+      "Pinhole images + a PINHOLE sparse model, the handoff COLMAP's image_undistorter produces (for OpenMVS, MVE " +
+      'and MVS-Texturing), and a transforms.json for NeRF / 3D Gaussian Splatting tools. Lens distortion and ' +
+      'film-scan geometry are already folded out of the model, so only the pixels are resampled.',
     formats: [
       { value: 'jpeg', label: 'JPEG — compact (recommended for MVS)' },
       { value: 'png', label: 'PNG — lossless (much larger)' },
@@ -112,7 +140,13 @@ const CONFIG = {
     title: 'Export DEM',
     formats: [
       { value: 'geotiff', label: 'GeoTIFF (.tif) — georeferenced' },
-      { value: 'cog', label: 'Cloud-Optimized GeoTIFF — tiled + overviews' },
+      {
+        value: 'cog',
+        label: 'Cloud-Optimized GeoTIFF — tiled + overviews',
+        hint:
+          'Internally tiled with halving overviews, so a viewer can fetch a preview or one window with a few range ' +
+          'requests instead of the whole file. Readable anywhere a normal GeoTIFF is.',
+      },
       { value: 'asc', label: 'ESRI ASCII grid (.asc)' },
       { value: 'png', label: 'Hillshade PNG + world file' },
       { value: 'support', label: 'Support layer GeoTIFF (.tif) — % of each cell measured' },
@@ -129,9 +163,77 @@ const CONFIG = {
     title: 'Export Orthophoto',
     formats: [
       { value: 'geotiff', label: 'GeoTIFF (.tif) — georeferenced' },
-      { value: 'cog', label: 'Cloud-Optimized GeoTIFF — tiled + overviews' },
+      {
+        value: 'cog',
+        label: 'Cloud-Optimized GeoTIFF — tiled + overviews',
+        hint:
+          'Internally tiled with halving overviews and DEFLATE compression: the orthophoto exactly as it is stored, ' +
+          'for web/GIS delivery. Readable anywhere a normal GeoTIFF is.',
+      },
       { value: 'png', label: 'PNG + world file (.wld)' },
       { value: 'jpeg', label: 'JPEG + world file' },
+    ],
+  },
+  poses: {
+    title: 'Export Camera Poses',
+    formats: [
+      { value: 'csv', label: 'CSV — one row per camera' },
+      { value: 'txt', label: 'Text (.txt) — tab-separated' },
+      { value: 'geojson', label: 'GeoJSON — one point per camera, for GIS' },
+    ],
+  },
+  sensors: {
+    title: 'Export Calibration',
+    hint: 'Import ▸ Calibration reads it back: one row per camera group, or per image.',
+    formats: [
+      { value: 'csv', label: 'CSV' },
+      { value: 'txt', label: 'Text (.txt) — tab-separated' },
+    ],
+  },
+  cameraFiducials: {
+    title: 'Export Camera Fiducials',
+    hint: "Each film camera's calibrated marks in millimetres, one row per mark. Import ▸ Camera Fiducials reads it back.",
+    formats: [
+      { value: 'csv', label: 'CSV' },
+      { value: 'txt', label: 'Text (.txt) — tab-separated' },
+    ],
+  },
+  imageFiducials: {
+    title: 'Export Image Fiducials',
+    hint: "Each scan's detected or marked fiducials in pixels, one row per mark. Import ▸ Image Fiducials reads it back.",
+    formats: [
+      { value: 'csv', label: 'CSV' },
+      { value: 'txt', label: 'Text (.txt) — tab-separated' },
+    ],
+  },
+  keypoints: {
+    title: 'Export Keypoints',
+    formats: [
+      {
+        value: 'json',
+        label: 'JSON — one entry per image',
+        hint: 'Position (pixels), scale and response of each keypoint.',
+      },
+      {
+        value: 'csv',
+        label: 'CSV — one row per keypoint',
+        hint: 'image, x, y, scale, response: one row per keypoint, for a spreadsheet or pandas.',
+      },
+    ],
+  },
+  matches: {
+    title: 'Export Matches',
+    hint: 'The pairs whose matches passed geometric verification; a rejected pair has none to list.',
+    formats: [
+      { value: 'json', label: 'JSON — one entry per pair' },
+      { value: 'csv', label: 'CSV — one row per match' },
+    ],
+  },
+  vectors: {
+    title: 'Export Vector Layer',
+    formats: [
+      { value: 'geojson', label: 'GeoJSON (.geojson)' },
+      { value: 'kml', label: 'KML (.kml) — Google Earth, WGS 84' },
     ],
   },
 }
@@ -139,6 +241,17 @@ const CONFIG = {
 const imageTooLarge = computed(() => props.kind === 'ortho' && props.orthoCells > MAX_ORTHO_IMAGE_CELLS)
 const cfg = computed(() => {
   const c = CONFIG[props.kind]
+  if (props.kind === 'vectors') {
+    return {
+      ...c,
+      title: props.footprints ? 'Export Footprints' : c.title,
+      formats: c.formats.map((f) =>
+        f.value === 'kml' && !props.projectCrs
+          ? { ...f, label: f.label + ' — needs a project CRS', disabled: true }
+          : f,
+      ),
+    }
+  }
   if (!imageTooLarge.value) return c
   const why = ` — too large (at most ${Math.sqrt(MAX_ORTHO_IMAGE_CELLS).toLocaleString()}² px); use a GeoTIFF`
   return {
@@ -159,6 +272,30 @@ const settings = ref({
   ...EXPORT_DEFAULTS,
   // 3D Tiles: a hierarchy for a big model, one tile for a small one (defaultTiling).
   tiling: EXPORT_DEFAULTS.tiling ?? defaultTiling(props.tilesSubject),
+  // Camera poses and calibration: the estimated ones when the sparse model has any.
+  poseSource: props.sources.estimated ? 'estimated' : 'imported',
+  sensorSource: props.sources.estimated ? 'estimated' : 'entered',
+})
+const estimatedPoses = computed(() => props.kind === 'poses' && settings.value.poseSource === 'estimated')
+// Estimated poses are in the export frame (georeferenced, scaled or oriented) with
+// Apply ticked, else in the model frame; imported ones in the project CRS.
+const posesCrs = computed(() =>
+  !estimatedPoses.value || (props.hasGeoref && settings.value.applyGeoref) ? props.projectCrs : '',
+)
+const posesFrameHint = computed(() => {
+  if (posesCrs.value) return `Positions in ${posesCrs.value}.`
+  if (!estimatedPoses.value) return 'Positions as imported (the project has no CRS).'
+  if (hasFrame.value && settings.value.applyGeoref)
+    return props.hasScale ? 'Positions in metres, no CRS.' : 'Positions in model units, in your orientation.'
+  return 'Positions in the model frame (model units, no CRS).'
+})
+// GeoJSON can be written in WGS 84 when the coordinates are in a CRS.
+const wgs84Offered = computed(
+  () => settings.value.format === 'geojson' && (props.kind === 'vectors' ? !!props.projectCrs : !!posesCrs.value),
+)
+const formatHint = computed(() => {
+  const f = cfg.value.formats.find((x) => x.value === settings.value.format)
+  return f?.hint ?? cfg.value.hint ?? ''
 })
 const tilesMesh = computed(() => props.tilesSubject?.kind === 'mesh')
 // One tile cannot hold a streamed cloud or one past the buffer wall.
@@ -178,6 +315,26 @@ watch(isCog, (cog) => {
 })
 
 function run() {
+  const { format, fileName } = settings.value
+  const own = {
+    poses: () => ({
+      source: settings.value.poseSource,
+      orientation: settings.value.poseOrientation,
+      accuracy: settings.value.poseAccuracy,
+      applyGeoref: settings.value.applyGeoref,
+      coords: wgs84Offered.value ? settings.value.geoJsonCoords : 'project',
+    }),
+    sensors: () => ({ source: settings.value.sensorSource }),
+    matches: () => ({ content: settings.value.matchContent }),
+    vectors: () => ({ coords: wgs84Offered.value ? settings.value.geoJsonCoords : 'project' }),
+    cameraFiducials: () => ({}),
+    imageFiducials: () => ({}),
+    keypoints: () => ({}),
+  }[props.kind]
+  if (own) {
+    emit('run', { format, fileName, ...own() })
+    return
+  }
   // The undistorted exporter takes plain names; the persisted defaults are
   // namespaced so they can't collide with the other kinds' knobs. Mapping here
   // (rather than store-side) keeps one home for the values — see the modal-unit
@@ -217,6 +374,8 @@ const defaultName = computed(() =>
     format: settings.value.format,
     base: props.nameBase,
     crs: reprojecting.value && outputCrs.value !== props.rasterCrs ? outputCrs.value : null,
+    source: props.kind === 'poses' ? settings.value.poseSource : settings.value.sensorSource,
+    content: settings.value.matchContent,
   }),
 )
 // The ortho's empty pixels: a GeoTIFF or PNG may keep the alpha band; a JPEG has none.
@@ -234,16 +393,49 @@ const orthoNodataApplies = computed(
 </script>
 
 <template>
+  <!-- Every export reads the same way: what is exported, where it comes from (Source),
+       the Format with what its file holds, the File name, the kind's own settings, notes. -->
   <ModalShell :title="cfg.title" @close="emit('close')">
     <p v-if="subject" class="subject">
       Exporting <strong>{{ subject }}</strong>
     </p>
+    <SettingsField v-if="kind === 'poses'" label-for="psrc">
+      <template #label><FieldHelp op="export-camera-poses" param="source">Source</FieldHelp></template>
+      <select id="psrc" v-model="settings.poseSource" class="field-input field-select">
+        <option value="estimated" :disabled="!sources.estimated">
+          Estimated by the reconstruction ({{ pluralize(sources.estimated ?? 0, 'camera') }})
+        </option>
+        <option value="imported" :disabled="!sources.imported">
+          Imported poses ({{ pluralize(sources.imported ?? 0, 'pose') }})
+        </option>
+      </select>
+    </SettingsField>
+    <SettingsField v-else-if="kind === 'sensors'" label-for="ssrc">
+      <template #label><FieldHelp op="export-calibration" param="source">Source</FieldHelp></template>
+      <select id="ssrc" v-model="settings.sensorSource" class="field-input field-select">
+        <option value="estimated" :disabled="!sources.estimated">
+          Estimated by the reconstruction, one row per camera group
+        </option>
+        <option value="estimatedPerImage" :disabled="!sources.estimated">
+          Estimated by the reconstruction, one row per image ({{ pluralize(sources.estimated ?? 0, 'camera') }})
+        </option>
+        <option value="entered" :disabled="!sources.entered">
+          As entered ({{ pluralize(sources.entered ?? 0, 'camera group') }})
+        </option>
+      </select>
+    </SettingsField>
     <SettingsField label="Format" label-for="fmt">
       <select id="fmt" v-model="settings.format" class="field-input field-select">
         <option v-for="f in cfg.formats" :key="f.value" :value="f.value" :disabled="f.disabled">
           {{ f.label }}
         </option>
       </select>
+      <template v-if="kind === 'dem' && settings.format === 'support'" #hint>
+        <FieldHelp op="dem" param="supportExport">Support layer</FieldHelp>: for each DEM cell, the percentage that
+        points landed in (0 = filled by interpolation), 255 where the DEM is empty. On the DEM's grid, or its overview
+        for a DEM too large for one plane.
+      </template>
+      <template v-else-if="formatHint" #hint>{{ formatHint }}</template>
     </SettingsField>
     <FileNameField v-model="settings.fileName" :default-name="defaultName" />
 
@@ -306,19 +498,10 @@ const orthoNodataApplies = computed(
         <input type="checkbox" v-model="settings.includeTracks" class="checkbox" /> Include point tracks (image
         observations)
       </label>
-      <p v-else class="field-hint">
-        Camera-to-world poses (OpenGL convention) + intrinsics for nerfstudio, instant-ngp and 3D Gaussian Splatting.
-        Local SfM frame; pinhole.
-      </p>
     </template>
 
     <!-- COLMAP model -->
     <template v-else-if="kind === 'colmap'">
-      <p class="field-hint">
-        Exchange a complete COLMAP workspace, its feature database, a sparse model, or camera transforms for NeRF /
-        Gaussian-Splatting tools. Unsupported descriptor encodings are omitted while keypoints and verified matches are
-        retained.
-      </p>
       <label v-if="settings.format === 'workspace'" class="checkbox-row">
         <input type="checkbox" v-model="settings.includeImages" class="checkbox" /> Include original source images
         (larger ZIP)
@@ -327,10 +510,6 @@ const orthoNodataApplies = computed(
 
     <!-- 3D Tiles -->
     <template v-else-if="kind === 'tiles3d'">
-      <p class="field-hint">
-        For globe viewers (Cesium, and anything else reading 3D Tiles 1.1). The model is placed by a transform measured
-        from the project CRS, so it lands correctly even at polar latitudes.
-      </p>
       <SettingsField
         label-for="tiling"
         :hint="
@@ -389,12 +568,6 @@ const orthoNodataApplies = computed(
 
     <!-- Undistorted images -->
     <template v-else-if="kind === 'undistorted'">
-      <p class="field-hint">
-        Pinhole images + a PINHOLE sparse model, the handoff COLMAP's
-        <code>image_undistorter</code> produces — for OpenMVS, MVE and MVS-Texturing — and a
-        <code>transforms.json</code> for NeRF / 3D Gaussian Splatting tools. Lens distortion and film-scan geometry are
-        already folded out of the model, so only the pixels are resampled.
-      </p>
       <SettingsField
         label="Border"
         label-for="umode"
@@ -431,15 +604,6 @@ const orthoNodataApplies = computed(
 
     <!-- DEM -->
     <template v-else-if="kind === 'dem'">
-      <p v-if="isCog" class="field-hint">
-        Internally tiled with halving overviews, so a viewer can fetch a preview or one window with a few range requests
-        instead of the whole file. Readable anywhere a normal GeoTIFF is.
-      </p>
-      <p v-if="settings.format === 'support'" class="field-hint">
-        <FieldHelp op="dem" param="supportExport">Support layer</FieldHelp>: for each DEM cell, the percentage that
-        points landed in (0 = filled by interpolation), 255 where the DEM is empty. On the DEM's grid, or its overview
-        for a DEM too large for one plane.
-      </p>
       <!-- The hillshade PNG is a rendered preview, the support layer a percentage: no elevation cells to flag. -->
       <SettingsField
         v-if="settings.format !== 'png' && settings.format !== 'support' && !reprojecting"
@@ -482,10 +646,6 @@ const orthoNodataApplies = computed(
 
     <!-- Ortho -->
     <template v-else-if="kind === 'ortho'">
-      <p v-if="isCog" class="field-hint">
-        Internally tiled with halving overviews and DEFLATE compression — the orthophoto exactly as it is stored, for
-        web/GIS delivery. Readable anywhere a normal GeoTIFF is.
-      </p>
       <!-- The COG export is the stored file itself, always DEFLATE. -->
       <SettingsField v-if="isTiff && !isCog && !reprojecting" label="Compression" label-for="ocomp">
         <select id="ocomp" v-model="settings.compression" class="field-input field-select">
@@ -533,6 +693,68 @@ const orthoNodataApplies = computed(
           class="field-input range"
         />
       </SettingsField>
+    </template>
+
+    <!-- Camera poses -->
+    <template v-else-if="kind === 'poses'">
+      <label class="checkbox-row">
+        <input type="checkbox" v-model="settings.poseOrientation" class="checkbox" />
+        <FieldHelp op="export-camera-poses" param="poseOrientation">Orientation (omega, phi, kappa)</FieldHelp>
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" v-model="settings.poseAccuracy" :disabled="estimatedPoses" class="checkbox" />
+        Accuracies{{ estimatedPoses ? ' (imported poses only)' : '' }}
+      </label>
+      <label v-if="estimatedPoses && hasFrame" class="checkbox-row">
+        <input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}
+      </label>
+      <SettingsField v-if="wgs84Offered" label-for="pcoords">
+        <template #label><FieldHelp op="export-camera-poses" param="geoJsonCoords">Coordinates</FieldHelp></template>
+        <select id="pcoords" v-model="settings.geoJsonCoords" class="field-input field-select">
+          <option value="project">Project CRS ({{ posesCrs }}), heights kept</option>
+          <option value="wgs84">WGS 84 longitude/latitude (RFC 7946), height as a property</option>
+        </select>
+      </SettingsField>
+      <p class="field-hint">
+        {{ posesFrameHint }}
+        {{
+          estimatedPoses
+            ? 'Import ▸ Camera Poses reads the file back as pose priors with the same angles.'
+            : 'The poses as imported, with their accuracies.'
+        }}
+      </p>
+    </template>
+
+    <!-- Calibration -->
+    <template v-else-if="kind === 'sensors'">
+      <p v-if="settings.sensorSource !== 'entered'" class="field-hint">
+        Focal length and principal point as bundle adjustment ended, in pixels (a film scan's in its fiducial frame);
+        the lens model each group was corrected with, and any radial terms self-calibration fitted on top of it
+        (selfcal_k1…k3).
+      </p>
+    </template>
+
+    <!-- Matches -->
+    <template v-else-if="kind === 'matches'">
+      <SettingsField label="Content" label-for="mcontent">
+        <select id="mcontent" v-model="settings.matchContent" class="field-input field-select">
+          <option value="matches">Every pair with its matches (keypoint indices)</option>
+          <option value="pairs">The pair list only, with match counts</option>
+        </select>
+      </SettingsField>
+    </template>
+
+    <!-- Vector layer (footprints, contours, imported polygons) -->
+    <template v-else-if="kind === 'vectors'">
+      <SettingsField v-if="wgs84Offered" label="Coordinates" label-for="vcoords">
+        <select id="vcoords" v-model="settings.geoJsonCoords" class="field-input field-select">
+          <option value="project">Project CRS ({{ projectCrs }})</option>
+          <option value="wgs84">WGS 84 longitude/latitude (RFC 7946)</option>
+        </select>
+      </SettingsField>
+      <p v-if="!projectCrs" class="field-hint">
+        The project has no CRS, so the layer is written in its own coordinates.
+      </p>
     </template>
 
     <!-- DEM / ortho GeoTIFF in another CRS: warped block by block in the export worker. -->
@@ -594,8 +816,5 @@ const orthoNodataApplies = computed(
 .field-input.range {
   width: 100%;
   padding: 0;
-}
-code {
-  font-size: 11px;
 }
 </style>

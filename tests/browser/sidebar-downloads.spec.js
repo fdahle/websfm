@@ -103,13 +103,34 @@ test('sidebar context menus download clouds, products and polygon layers', async
 
   // A polygon file (in Reference Data, open already) as GeoJSON in the project CRS.
   await page.locator('.list-item').filter({ hasText: 'Site outline' }).click({ button: 'right' })
-  const gj = await download(page, () =>
-    page.locator('.ctx-menu').getByRole('button', { name: 'Download GeoJSON' }).click(),
-  )
+  await page.locator('.ctx-menu').getByRole('button', { name: 'Download…' }).click()
+  const vecDialog = page.getByRole('dialog', { name: 'Export Vector Layer' })
+  await expect(vecDialog.getByLabel('File name')).toHaveAttribute('placeholder', 'Site_outline')
+  const gj = await download(page, () => vecDialog.getByRole('button', { name: 'Export', exact: true }).click())
   expect(gj.name).toBe('Site_outline.geojson')
   const fc = JSON.parse(gj.bytes.toString())
   expect(fc.crs.properties.name).toBe('EPSG:32632')
   expect(fc.features[0].geometry.coordinates[0]).toHaveLength(4)
+
+  // The same layer in WGS 84 for a web map, and as KML.
+  await page.locator('.list-item').filter({ hasText: 'Site outline' }).click({ button: 'right' })
+  await page.locator('.ctx-menu').getByRole('button', { name: 'Download…' }).click()
+  await vecDialog.getByLabel('Coordinates').selectOption('wgs84')
+  const wgs = await download(page, () => vecDialog.getByRole('button', { name: 'Export', exact: true }).click())
+  const fcWgs = JSON.parse(wgs.bytes.toString())
+  expect(fcWgs.crs).toBeUndefined()
+  const [lon, lat] = fcWgs.features[0].geometry.coordinates[0][0]
+  expect(lon).toBeGreaterThan(5)
+  expect(lon).toBeLessThan(15)
+  // UTM 32N at northing 7,000,000: about 63°N, 9°E.
+  expect(lat).toBeGreaterThan(62)
+  expect(lat).toBeLessThan(64)
+  await page.locator('.list-item').filter({ hasText: 'Site outline' }).click({ button: 'right' })
+  await page.locator('.ctx-menu').getByRole('button', { name: 'Download…' }).click()
+  await vecDialog.getByLabel('Format').selectOption('kml')
+  const kml = await download(page, () => vecDialog.getByRole('button', { name: 'Export', exact: true }).click())
+  expect(kml.name).toBe('Site_outline.kml')
+  expect(kml.bytes.toString()).toContain('<Polygon><outerBoundaryIs>')
 
   expect(errors).toEqual([])
 })

@@ -32,6 +32,6 @@ file too large to hold in memory goes straight into an octree as it is read: a
 [Point Cloud Tools](guide:point-cloud-tools)). A large COPC file needs no octree of
 ours: it has its own, and is read in place.
 
-The same octree is what **Export ▸ 3D Tiles…** writes for a globe viewer, one
+The same octree is what **Export ▸ 3D Tiles** writes for a globe viewer, one
 [3D Tiles](help:3d-tiles) tile per node, so CesiumJS streams the cloud the way the
 3D view does (see [Export 3D Tiles](guide:export-3d-tiles)).

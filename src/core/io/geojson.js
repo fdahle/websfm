@@ -165,7 +165,10 @@ export function geoJsonToFootprints(features, nameKey) {
 // the contour download does.
 // Coordinates are the stored ones (the project CRS), named in the legacy `crs`
 // member as the contour export does — the import reads it to seed its CRS picker.
-export function polygonSetToGeoJson(set, { crs = null } = {}) {
+// With `reproject` ([x, y] → [longitude, latitude]) they are WGS 84 instead, as
+// RFC 7946 has them, with no `crs` member.
+export function polygonSetToGeoJson(set, { crs = null, reproject = null } = {}) {
+  const xy = reproject ?? ((c) => [c[0], c[1]])
   const close = (ring) => {
     const [a, b] = [ring[0], ring[ring.length - 1]]
     return a && b && (a[0] !== b[0] || a[1] !== b[1]) ? [...ring, [a[0], a[1]]] : ring
@@ -176,7 +179,7 @@ export function polygonSetToGeoJson(set, { crs = null } = {}) {
       fp.lines.map((path) => ({
         type: 'Feature',
         properties: { elevation: fp.level ?? null, index: !!fp.index },
-        geometry: { type: 'LineString', coordinates: path.map((c) => [c[0], c[1]]) },
+        geometry: { type: 'LineString', coordinates: path.map(xy) },
       })),
     )
   const polygonFeatures = (set?.footprints ?? [])
@@ -184,9 +187,41 @@ export function polygonSetToGeoJson(set, { crs = null } = {}) {
     .map((fp) => ({
       type: 'Feature',
       properties: { name: fp.imageName ?? fp.name ?? null },
-      geometry: { type: 'Polygon', coordinates: fp.rings.map((ring) => close(ring.map((c) => [c[0], c[1]]))) },
+      geometry: { type: 'Polygon', coordinates: fp.rings.map((ring) => close(ring.map(xy))) },
     }))
   const fc = { type: 'FeatureCollection', name: set?.name ?? null, features: [...polygonFeatures, ...lineFeatures] }
-  if (crs && /^EPSG:\d+$/i.test(crs)) fc.crs = { type: 'name', properties: { name: crs.toUpperCase() } }
+  if (!reproject && crs && /^EPSG:\d+$/i.test(crs)) fc.crs = { type: 'name', properties: { name: crs.toUpperCase() } }
+  return fc
+}
+
+// Camera poses (usePosesStore records, or core/sfm/cameraEstimated.js estimatedPose
+// with an `imageName`) → one Point feature per camera, named by its image, with its
+// angles and accuracies as properties when `orientation` / `accuracy` keep them.
+// In `crs` the point is [X, Y, Z]; with `reproject` ([x, y] → [lon, lat], RFC 7946)
+// it is [lon, lat] and the height stays a property, since it is in the project's
+// vertical datum, not above the WGS 84 ellipsoid.
+export function posesToGeoJson(poses, { crs = null, reproject = null, orientation = true, accuracy = true } = {}) {
+  const features = poses.map((p) => {
+    const props = { name: p.imageName ?? null }
+    if (reproject) props.Z = p.z ?? null
+    if (orientation) Object.assign(props, { omega: p.omega ?? null, phi: p.phi ?? null, kappa: p.kappa ?? null })
+    if (accuracy) {
+      Object.assign(props, {
+        accuracy_x: p.accuracyX ?? p.accXYZ ?? null,
+        accuracy_y: p.accuracyY ?? p.accXYZ ?? null,
+        accuracy_z: p.accuracyZ ?? p.accXYZ ?? null,
+      })
+      if (orientation)
+        Object.assign(props, {
+          accuracy_omega: p.accuracyOmega ?? p.accAngle ?? null,
+          accuracy_phi: p.accuracyPhi ?? p.accAngle ?? null,
+          accuracy_kappa: p.accuracyKappa ?? p.accAngle ?? null,
+        })
+    }
+    const coordinates = reproject ? reproject([p.x, p.y]) : [p.x, p.y, p.z]
+    return { type: 'Feature', properties: props, geometry: { type: 'Point', coordinates } }
+  })
+  const fc = { type: 'FeatureCollection', name: 'camera poses', features }
+  if (!reproject && crs && /^EPSG:\d+$/i.test(crs)) fc.crs = { type: 'name', properties: { name: crs.toUpperCase() } }
   return fc
 }

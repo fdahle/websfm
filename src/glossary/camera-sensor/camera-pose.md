@@ -35,3 +35,9 @@ from a flight log or GNSS/INS record; imported poses are not used as ground trut
 for the solve, but they are valuable twice over — to preselect which image pairs
 are worth matching, and afterwards as the reference for
 [georeferencing](help:georeferencing) the finished reconstruction.
+
+Exported poses (**Export ▸ Camera Poses**, either kind) and imported ones use the
+photogrammetric convention instead: the camera position X, Y, Z, and omega, phi and
+kappa for a rotation $R_x(\omega)\,R_y(\varphi)\,R_z(\kappa)$ from the ground into a
+photo whose y axis points up and whose camera looks down −z. The export does the
+conversion, so an estimated pose written out and imported again is the same pose.

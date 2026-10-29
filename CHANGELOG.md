@@ -5,6 +5,28 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Every export opens a dialog.** Camera Poses, Calibration, Camera Fiducials, Image
+  Fiducials, Footprints, Keypoints and Matches now ask for a format and a file name
+  before they download, like the other exports, and the sidebar's **Download…** on a
+  vector layer or on the matches opens the same dialog. New formats: tab-separated
+  text for the camera and fiducial tables, GeoJSON points for camera poses, CSV for
+  keypoints and matches (or the matched pair list alone), and KML or WGS 84 GeoJSON
+  for footprints and other vector layers. Keypoint and match files are named after
+  the project instead of the time of export, and the calibration file is
+  `<project>-calibration` instead of `-sensors`. Every export dialog shows what the
+  chosen format holds under **Format**. The Export tab's buttons no longer end in
+  "…", since all of them open a dialog.
+- **Export the poses and calibration the reconstruction estimated.** Export ▸ Camera
+  Poses offers **Source ▸ Estimated by the reconstruction**: the poses bundle
+  adjustment ended with, in the project CRS when the model is georeferenced (scaled or
+  oriented like a point cloud export otherwise). Before, it wrote only imported poses
+  and was greyed out without any. Export ▸ Calibration likewise writes the refined
+  focal length and principal point, per camera group or per image. Estimated poses use
+  the omega/phi/kappa convention of the pose import: a unit test turns an imported pose
+  into the solver's camera and back, and gets the same position and angles to 1e-9°.
+  The dialog can also leave out the angles or the accuracies.
+
 ### Changed
 - **Self-calibrated distortion stays exact when the principal point moves.** When
   bundle adjustment moves a camera's principal point, the tie points are corrected for

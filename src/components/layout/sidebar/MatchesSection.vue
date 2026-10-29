@@ -91,7 +91,7 @@ function ctxRemoveMatches() {
     <!-- Match context menu -->
     <ContextMenu :menu="matchesCtx">
       <button class="ctx-item" @click="fromMenu(() => sidebar.openMatches())">Open match list</button>
-      <button class="ctx-item" @click="fromMenu(() => sidebar.downloadMatches())">Download JSON</button>
+      <button class="ctx-item" @click="fromMenu(() => sidebar.downloadMatches())">Download…</button>
       <div class="ctx-sep"></div>
       <button
         class="ctx-item danger"

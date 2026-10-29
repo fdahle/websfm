@@ -24,8 +24,13 @@ export function exportFileName(typed, fallback) {
 // The default name of an export of `kind` in `format`. `base` is the project's name,
 // or for a cloud or mesh the name its own export uses (exports/clouds.js). `crs` is the
 // CRS of a reprojected DEM / orthophoto (null when written as built); `product` the
-// raster a clip is cut from ('dem' | 'ortho').
-export function defaultExportName(kind, { format = null, base, crs = null, product = null } = {}) {
+// raster a clip is cut from ('dem' | 'ortho'); `source` whether camera poses or
+// calibration are the imported or the estimated ones; `content` whether a match export
+// lists the matches or only the pairs.
+export function defaultExportName(
+  kind,
+  { format = null, base, crs = null, product = null, source = null, content = null } = {},
+) {
   const tag = crs ? String(crs).replace(/[^A-Za-z0-9]+/g, '') : ''
   switch (kind) {
     case 'cloud':
@@ -62,6 +67,18 @@ export function defaultExportName(kind, { format = null, base, crs = null, produ
       return `${base}-${product === 'ortho' ? 'ortho' : 'dem'}-clipped`
     case 'section':
       return `${base}-section`
+    case 'poses':
+      return `${base}-poses${source === 'estimated' ? '-estimated' : ''}`
+    case 'sensors':
+      return `${base}-calibration${source === 'entered' ? '' : '-estimated'}`
+    case 'cameraFiducials':
+      return `${base}-camera-fiducials`
+    case 'imageFiducials':
+      return `${base}-image-fiducials`
+    case 'keypoints':
+      return `${base}-keypoints`
+    case 'matches':
+      return `${base}-${content === 'pairs' ? 'pairs' : 'matches'}`
     default:
       return base
   }

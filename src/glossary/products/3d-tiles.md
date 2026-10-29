@@ -25,7 +25,7 @@ one) or *add* to it (a point cloud: more points between the coarse ones). The ti
 root carries the transform that places its local coordinates on the Earth
 (earth-centred, earth-fixed metres), so the tiles themselves can keep small numbers.
 
-In WebSfM, **Export ▸ 3D Tiles…** writes a point cloud from its
+In WebSfM, **Export ▸ 3D Tiles** writes a point cloud from its
 [level-of-detail](help:level-of-detail) octree, or a mesh split into tiles and
 [decimated](help:mesh-decimation) per level. See
 [Export 3D Tiles](guide:export-3d-tiles).

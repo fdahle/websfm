@@ -332,7 +332,7 @@ height instead, so holes don't spread.
 
 ## Export measurements
 <!-- param: measurementCoords default: Project CRS -->
-**Export ▸ Measurements…** writes every saved measurement of the project (rulers,
+**Export ▸ Measurements** writes every saved measurement of the project (rulers,
 areas, profiles, volumes and the 3D measurements) to one file; the **Export…** button
 of a saved-measurements list writes just that list. **CSV** has one row per
 measurement. Each value column has its unit in a `*_unit` column next to its group

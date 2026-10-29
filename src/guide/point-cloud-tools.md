@@ -75,7 +75,7 @@ These are in **Tools → Measure ▾**, with the raster and mesh measurements.
   on an imported layer. **Save** keeps a measurement with the project; saved ones are
   drawn while the tool is open and listed in its toolbox, whose **Export…** writes
   them as CSV or GeoJSON (see [Build a DEM ▸ Export measurements](guide:dem)).
-  **Export ▸ Measurements…** writes them together with the raster measurements.
+  **Export ▸ Measurements** writes them together with the raster measurements.
 - **Distance to reference…** gives every point its distance to another cloud (to its
   nearest point) or to a mesh (exactly, to the surface). With a mesh, or a reference
   cloud with normals, the distance is **signed**: positive above the reference,
@@ -132,7 +132,7 @@ which streams (below). A LAS field that is
 zero for every point (no intensity, never classified, no GPS time), or return numbers that
 are all "1 of 1", is not kept, so it takes no memory and is not offered for styling.
 Exporting writes the same value back, as the file had.
-**Export ▸ 3D Tiles…** as a single tile takes at most the same 89 million points; a
+**Export ▸ 3D Tiles** as a single tile takes at most the same 89 million points; a
 larger cloud is written as a hierarchy of tiles from its level-of-detail octree (see
 [Export 3D Tiles](guide:export-3d-tiles)).
 
@@ -180,7 +180,7 @@ measure on it. Tools read it from its octree:
   with a message rather than writing a thinned result; crop that part out first.
 - **Export** writes LAS, LAZ, PLY or XYZ node by node. LAS and LAZ keep the file's own
   coordinate quantisation and its projection records; the points come in a different
-  order than in the source file. **Export ▸ 3D Tiles…** writes one tile per octree
+  order than in the source file. **Export ▸ 3D Tiles** writes one tile per octree
   node, placed in the CRS the file names (see [Export 3D Tiles](guide:export-3d-tiles)).
 
 - **Transform** moves, turns or scales it node by node into a new streamed cloud,

@@ -49,6 +49,11 @@ export const NEED_CHECKS = {
   ortho: { ok: (s) => s.orthoReady, reason: 'Build an orthophoto first' },
   products: { ok: (s) => s.productReady, reason: 'Build a DEM or orthophoto first' },
   poses: { ok: (s) => s.poseCount > 0, reason: 'Import camera poses first' },
+  // Export ▸ Camera Poses writes the imported poses or the estimated ones.
+  posesOrSparse: {
+    ok: (s) => s.poseCount > 0 || s.sparseReady,
+    reason: 'Import camera poses or build the sparse model first',
+  },
   measurements: { ok: (s) => s.measurementCount > 0, reason: 'Save a measurement first (Tools ▸ Measure)' },
   footprints: {
     ok: (s) => s.footprintCount > 0,

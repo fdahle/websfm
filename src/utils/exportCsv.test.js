@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildPosesCsv, buildFiducialObsCsv, buildFiducialMarksCsv } from './exportCsv.js'
+import { buildPosesCsv, buildSensorsCsv, buildFiducialObsCsv, buildFiducialMarksCsv } from './exportCsv.js'
+import { sniffDelimiter, parseRows, guessMapping, buildSensors } from '../core/io/sensor.js'
 import { parseFiducialObs } from '../core/io/fiducialObs.js'
 import { parseFiducialMarks } from '../core/io/fiducialMarks.js'
 import { detectFileKind } from '../core/io/importKind.js'
@@ -108,5 +109,58 @@ describe('fiducial CSVs round-trip through their importers', () => {
       { id: 'F2', xMm: 106, yMm: -106, slot: 'corner-tr' },
     ])
     expect(groups[1].marks).toEqual([{ id: '1', xMm: -110, yMm: 110, slot: null }])
+  })
+})
+
+describe('export options', () => {
+  const pose = { imageName: 'a b.jpg', x: 1, y: 2, z: 3, omega: 4, phi: 5, kappa: 6, accXYZ: 0.5, accAngle: 1 }
+
+  it('drops the angle and accuracy columns that are turned off', () => {
+    expect(buildPosesCsv([pose], 'EPSG:32632', { orientation: false })).toBe(
+      'image,X,Y,Z,accuracy_x,accuracy_y,accuracy_z,crs\r\na b.jpg,1,2,3,0.5,0.5,0.5,EPSG:32632\r\n',
+    )
+    expect(buildPosesCsv([pose], '', { accuracy: false })).toBe(
+      'image,X,Y,Z,omega,phi,kappa,crs\r\na b.jpg,1,2,3,4,5,6,\r\n',
+    )
+  })
+
+  it('writes tab-separated text that sniffs back as tabs', () => {
+    const txt = buildPosesCsv([{ ...pose, imageName: 'with\ttab.jpg' }], 'EPSG:32632', { delimiter: '\t' })
+    expect(txt.split('\r\n')[0]).toBe(
+      'image\tX\tY\tZ\tomega\tphi\tkappa\t' +
+        'accuracy_x\taccuracy_y\taccuracy_z\taccuracy_omega\taccuracy_phi\taccuracy_kappa\tcrs',
+    )
+    expect(txt).toContain('"with\ttab.jpg"\t1\t2')
+    expect(sniffDelimiter(txt)).toBe('tab')
+  })
+
+  it('writes an estimated calibration the sensor import reads back, per image', () => {
+    const csv = buildSensorsCsv([
+      {
+        image: 'a.jpg',
+        label: 'Body',
+        width: 4000,
+        height: 3000,
+        focal: 3005.5,
+        focalY: 3006,
+        focalUnit: 'px',
+        cx: 2001,
+        cy: 1499,
+        distortionModel: 'brown',
+        k1: -0.1,
+        source: 'estimated',
+        cameras: 1,
+        selfcalK1: 0.002,
+      },
+    ])
+    const [header, ...rows] = parseRows(csv, sniffDelimiter(csv))
+    expect(header.slice(0, 2)).toEqual(['image', 'label'])
+    expect(header.slice(-5)).toEqual(['focal_y', 'cameras', 'selfcal_k1', 'selfcal_k2', 'selfcal_k3'])
+    const mapping = guessMapping(header, header.length, true)
+    expect(mapping.image).toBe(0)
+    // The self-calibrated terms are not read as the lens's own k1.
+    expect(header[mapping.k1]).toBe('k1')
+    const { sensors } = buildSensors(rows, mapping)
+    expect(sensors[0]).toMatchObject({ focal: 3005.5, cx: 2001, cy: 1499, k1: -0.1 })
   })
 })

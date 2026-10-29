@@ -8,6 +8,7 @@
 
 import { opkFromMatrix } from '../footprint.js'
 import { applySimilarity } from '../products/georef.js'
+import { DISTORTION_COEFFS, isFisheyeModel } from './distortion.js'
 
 export function estimatedIntrinsics(cam) {
   if (!cam?.K) return null
@@ -46,4 +47,52 @@ export function estimatedPose(cam, sim = null) {
   const R = sim ? cam.R.map((row) => sim.R.map((s) => row[0] * s[0] + row[1] * s[1] + row[2] * s[2])) : cam.R
   const opk = opkFromMatrix([R[0], R[1].map((v) => -v), R[2].map((v) => -v)])
   return { x, y, z, omega: opk?.omega ?? null, phi: opk?.phi ?? null, kappa: opk?.kappa ?? null }
+}
+
+// The calibration bundle adjustment ended with, as sensor records for the CSV export
+// (utils/exportCsv.js buildSensorsCsv): per camera group the mean focal length and
+// principal point of its registered cameras, or with `perImage` each camera's own, in
+// pixels of the frame the cameras were solved in (a film scan's fiducial frame). The
+// lens is the one the run corrected (displayFrame.js makeFrameModelResolver,
+// `frameModel`): the group's own model, or a self-calibrated fisheye in its place, and
+// any radial terms self-calibration fitted on top of it as selfcalK1…selfcalK3.
+export function estimatedCalibration({ cameras, images, sensors = [], frameModel = null, perImage = false }) {
+  const sensorById = new Map(sensors.map((s) => [s.id, s]))
+  const groups = new Map()
+  for (const img of images) {
+    const K = estimatedIntrinsics(cameras?.get(img.uuid))
+    if (!K) continue
+    const key = perImage || img.sensorId == null ? `image:${img.uuid}` : img.sensorId
+    if (!groups.has(key)) groups.set(key, { img, sensor: sensorById.get(img.sensorId) ?? null, Ks: [] })
+    groups.get(key).Ks.push(K)
+  }
+  const mean = (Ks, k) => {
+    const xs = Ks.map((K) => K[k]).filter((v) => v != null)
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null
+  }
+  return [...groups.values()].map(({ img, sensor, Ks }) => {
+    const fm = frameModel?.(img) ?? null
+    const fisheye = fm?.dist?.fisheye && !isFisheyeModel(sensor?.distortionModel)
+    const lens = fisheye
+      ? { distortionModel: 'fisheye', ...Object.fromEntries(['k1', 'k2', 'k3', 'k4'].map((k) => [k, fm.dist[k]])) }
+      : Object.fromEntries(['distortionModel', ...DISTORTION_COEFFS].map((k) => [k, sensor?.[k] ?? null]))
+    return {
+      ...(perImage ? { image: img.name } : {}),
+      label: sensor?.label ?? img.name,
+      width: sensor?.width ?? img.meta?.width ?? null,
+      height: sensor?.height ?? img.meta?.height ?? null,
+      focal: mean(Ks, 'focal'),
+      focalY: mean(Ks, 'focalY'),
+      focalUnit: 'px',
+      cx: mean(Ks, 'cx'),
+      cy: mean(Ks, 'cy'),
+      ...lens,
+      pixelSize: sensor?.pixelSize ?? null,
+      source: 'estimated',
+      cameras: Ks.length,
+      selfcalK1: fm?.selfCal?.k1 ?? null,
+      selfcalK2: fm?.selfCal?.k2 ?? null,
+      selfcalK3: fm?.selfCal?.k3 ?? null,
+    }
+  })
 }

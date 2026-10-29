@@ -6,7 +6,7 @@ vi.mock('../../utils/download.js', () => ({ downloadBlob: (name, blob) => saved.
 
 const { createTabularExports } = await import('./tabular.js')
 
-describe('exportMatches', () => {
+describe('doExportMatches', () => {
   it('writes the pairs the project keeps, not the rejected ones', async () => {
     const entries = [
       {
@@ -33,8 +33,9 @@ describe('exportMatches', () => {
       { uuid: 'b', name: 'B.jpg' },
       { uuid: 'c', name: 'C.jpg' },
     ])
-    const ex = createTabularExports({ images, matchStore, matchesStore, log: () => {} })
-    await ex.exportMatches()
+    const ex = createTabularExports({ images, matchStore, matchesStore, log: () => {}, projectBase: () => 'site' })
+    await ex.doExportMatches({ format: 'json' })
+    expect(saved.at(-1).name).toBe('site-matches.json')
     const out = JSON.parse(await saved.at(-1).blob.text())
     expect(out).toEqual([
       {
@@ -48,5 +49,15 @@ describe('exportMatches', () => {
         ],
       },
     ])
+
+    await ex.doExportMatches({ format: 'csv' })
+    expect(saved.at(-1).name).toBe('site-matches.csv')
+    expect(await saved.at(-1).blob.text()).toBe(
+      'image_a,image_b,index_a,index_b\r\nA.jpg,B.jpg,0,1\r\nA.jpg,B.jpg,2,3\r\n',
+    )
+
+    await ex.doExportMatches({ format: 'csv', content: 'pairs', fileName: 'my pairs' })
+    expect(saved.at(-1).name).toBe('my_pairs.csv')
+    expect(await saved.at(-1).blob.text()).toBe('image_a,image_b,raw_count,inlier_count\r\nA.jpg,B.jpg,9,2\r\n')
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { estimatedIntrinsics, estimatedCenter, estimatedPose } from './cameraEstimated.js'
+import { estimatedIntrinsics, estimatedCenter, estimatedPose, estimatedCalibration } from './cameraEstimated.js'
 import { orientationPriorInSfm } from './cameraPriors.js'
 
 const mulM3 = (A, B) => A.map((row) => B[0].map((_, c) => row.reduce((s, v, k) => s + v * B[k][c], 0)))
@@ -95,5 +95,63 @@ describe('estimatedPose', () => {
   it('returns null without a pose', () => {
     expect(estimatedPose({})).toBeNull()
     expect(estimatedPose(null)).toBeNull()
+  })
+})
+
+describe('estimatedCalibration', () => {
+  const sensors = [
+    { id: 's1', label: 'Body A', width: 4000, height: 3000, distortionModel: 'brown', k1: -0.1, p1: 0.001 },
+  ]
+  const images = [
+    { uuid: 'a', name: 'a.jpg', sensorId: 's1' },
+    { uuid: 'b', name: 'b.jpg', sensorId: 's1' },
+    { uuid: 'c', name: 'c.jpg', sensorId: 's1' }, // not registered
+    { uuid: 'd', name: 'd.jpg', sensorId: null, meta: { width: 640, height: 480 } },
+  ]
+  const cam = (fx, cx) => ({ R: I3, t: [0, 0, 0], K: { fx, fy: fx + 1, cx, cy: 1500 } })
+  const cameras = new Map([
+    ['a', cam(3000, 1990)],
+    ['b', cam(3010, 2010)],
+    ['d', cam(500, 320)],
+  ])
+
+  it('averages each camera group and keeps its lens model', () => {
+    const rows = estimatedCalibration({ cameras, images, sensors })
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({
+      label: 'Body A',
+      width: 4000,
+      focal: 3005,
+      focalY: 3006,
+      focalUnit: 'px',
+      cx: 2000,
+      distortionModel: 'brown',
+      k1: -0.1,
+      p1: 0.001,
+      cameras: 2,
+      source: 'estimated',
+    })
+    // A sensorless image is its own group, named by the image.
+    expect(rows[1]).toMatchObject({ label: 'd.jpg', width: 640, focal: 500, cameras: 1 })
+    expect(rows[0].image).toBeUndefined()
+  })
+
+  it('writes one row per registered image', () => {
+    const rows = estimatedCalibration({ cameras, images, sensors, perImage: true })
+    expect(rows.map((r) => [r.image, r.focal])).toEqual([
+      ['a.jpg', 3000],
+      ['b.jpg', 3010],
+      ['d.jpg', 500],
+    ])
+  })
+
+  it('writes the lens the run corrected: a self-calibrated fisheye, or radial terms on top', () => {
+    const frameModel = (img) =>
+      img.uuid === 'd'
+        ? { dist: { fisheye: true, k1: 0.01, k2: 0.02, k3: 0, k4: 0 }, selfCal: null }
+        : { dist: null, selfCal: { k1: 0.003, k2: -0.001, k3: 0 } }
+    const rows = estimatedCalibration({ cameras, images, sensors, frameModel })
+    expect(rows[0]).toMatchObject({ distortionModel: 'brown', k1: -0.1, selfcalK1: 0.003, selfcalK2: -0.001 })
+    expect(rows[1]).toMatchObject({ distortionModel: 'fisheye', k1: 0.01, k2: 0.02, selfcalK1: null })
   })
 })

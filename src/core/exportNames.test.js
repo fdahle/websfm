@@ -36,4 +36,14 @@ describe('defaultExportName', () => {
     expect(defaultExportName('model', { format: 'transforms', base })).toBe('proj-transforms')
     expect(defaultExportName('cloud', { format: 'las', base: 'proj-Dense_cloud' })).toBe('proj-Dense_cloud')
   })
+
+  it('names camera and feature tables by what they hold, never by the time', () => {
+    expect(defaultExportName('poses', { base, source: 'imported' })).toBe('proj-poses')
+    expect(defaultExportName('poses', { base, source: 'estimated' })).toBe('proj-poses-estimated')
+    expect(defaultExportName('sensors', { base, source: 'entered' })).toBe('proj-calibration')
+    expect(defaultExportName('sensors', { base, source: 'estimatedPerImage' })).toBe('proj-calibration-estimated')
+    expect(defaultExportName('keypoints', { base })).toBe('proj-keypoints')
+    expect(defaultExportName('matches', { base, content: 'pairs' })).toBe('proj-pairs')
+    expect(defaultExportName('matches', { base, content: 'matches' })).toBe('proj-matches')
+  })
 })

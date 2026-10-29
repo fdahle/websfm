@@ -15,9 +15,11 @@ import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { polygonSetToGeoJson } from '../core/io/geojson.js'
+import { vectorSetToKml } from '../core/io/kml.js'
+import { ensureProjection, transform } from '../core/crs.js'
 import { similarityForExport } from '../core/products/exportFrame.js'
 import { pluralize } from '../core/textFormat.js'
-import { fileSafe } from '../core/exportNames.js'
+import { fileSafe, exportFileName } from '../core/exportNames.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
 // (which export dialog is open); the Ribbon command dispatch sets it and the
@@ -73,39 +75,45 @@ export function useExports({
   async function exportSimilarity() {
     return similarityForExport(await effectiveFrameSpec?.())
   }
-  // Poses, sensors, fiducials, keypoints, matches (exports/tabular.js).
+  // Poses, calibration, fiducials, keypoints, matches (exports/tabular.js).
   const {
-    exportPoses,
-    exportSensors,
-    exportCameraFiducials,
-    exportImageFiducials,
+    doExportPoses,
+    doExportSensors,
+    doExportCameraFiducials,
+    doExportImageFiducials,
     saveJson,
-    exportKeypoints,
-    exportMatches,
+    doExportKeypoints,
+    doExportMatches,
     swapPairs,
   } = createTabularExports({
     currentCrs,
-    currentProjectName,
+    exportSimilarity,
     images,
     imagesStore,
     log,
     matchStore,
     matchesStore,
     poses,
+    projectBase,
     sensors,
+    sparseCloud: () => mainSparseCloud.value,
+    summary,
   })
 
   // Which export dialog is open ('cloud' | 'model' | 'colmap' | 'undistorted' | 'dem' |
-  // 'ortho' | 'measurements' …), or null.
+  // 'ortho' | 'measurements' | 'poses' | 'sensors' | 'vectors' …), or null.
   const exportKind = ref(null)
   // The cloud a sidebar "Download…" opened the dialog for (its id), or null for the
-  // ribbon's "the selected cloud, else the first". Cleared whenever the dialog closes,
-  // so a later ribbon export never inherits it.
+  // ribbon's "the selected cloud, else the first"; for 'vectors', the layer's id.
+  // Cleared whenever the dialog closes, so a later ribbon export never inherits it.
   const exportTarget = ref(null)
   watch(exportKind, (kind) => {
     if (!kind) exportTarget.value = null
   })
   const exportTargetCloud = computed(() => clouds.value.find((c) => c.id === exportTarget.value) ?? null)
+  const exportTargetVectorSet = computed(() =>
+    exportKind.value === 'vectors' ? (footprints.sets.find((s) => s.id === exportTarget.value) ?? null) : null,
+  )
   // Export ▸ Measurements from a saved-measurements list: that list's records
   // ({ ids, label }), or null for every saved measurement. Cleared with the dialog too.
   const exportMeasurementScope = ref(null)
@@ -158,23 +166,46 @@ export function useExports({
     downloadBlob(img.name || `${img.uuid}.jpg`, blob)
   }
 
-  // Download GeoJSON on a vector layer's sidebar row (and Export ▸ Footprints for the
-  // image footprints): its polygons or lines in the project CRS.
-  function downloadVectorSet(id) {
-    const set = footprints.sets.find((s) => s.id === id)
-    if (!set) return
-    const fc = polygonSetToGeoJson(set, { crs: currentCrs.value })
-    downloadBlob(`${fileSafe(set.name) || 'polygons'}.geojson`, JSON.stringify(fc), 'application/geo+json')
-    const noun = set.kind === 'lines' ? 'line' : 'polygon'
-    log(`Exported ${pluralize(set.footprints.length, noun)} of "${set.name}" as GeoJSON`, 'success', 'Export')
+  // Download… on a vector layer's sidebar row, and Export ▸ Footprints for the image
+  // footprints: the export dialog for that layer.
+  function openVectorExport(id) {
+    if (!footprints.sets.some((s) => s.id === id)) return
+    exportKind.value = 'vectors'
+    exportTarget.value = id
   }
-  function downloadFootprints() {
-    if (footprints.footprintSet) downloadVectorSet(footprints.footprintSet.id)
+  function openFootprintExport() {
+    if (footprints.footprintSet) openVectorExport(footprints.footprintSet.id)
+  }
+
+  // A vector layer as GeoJSON (project CRS, or WGS 84 with `coords` 'wgs84') or KML
+  // (always WGS 84), its polygons or lines as stored.
+  async function doExportVectors({ format, coords, fileName }, set) {
+    if (!set) return
+    const crs = currentCrs.value && currentCrs.value !== 'local' ? currentCrs.value : null
+    const wgs84 = crs && (format === 'kml' || coords === 'wgs84')
+    if ((format === 'kml' || coords === 'wgs84') && !crs) throw new Error('the project has no CRS to convert from')
+    if (wgs84) await ensureProjection(crs)
+    const toLonLat = wgs84 ? (c) => transform(c, crs, 'EPSG:4326') : null
+    const name = exportFileName(fileName, fileSafe(set.name) || 'polygons')
+    if (format === 'kml') {
+      downloadBlob(`${name}.kml`, vectorSetToKml(set, { toLonLat }), 'application/vnd.google-earth.kml+xml')
+    } else {
+      const fc = polygonSetToGeoJson(set, { crs, reproject: toLonLat })
+      downloadBlob(`${name}.geojson`, JSON.stringify(fc), 'application/geo+json')
+    }
+    const noun = set.kind === 'lines' ? 'line' : 'polygon'
+    log(
+      `Exported ${pluralize(set.footprints.length, noun)} of "${set.name}" as ${format === 'kml' ? 'KML' : 'GeoJSON'}` +
+        (wgs84 ? ' in WGS 84' : crs ? ` in ${crs}` : ''),
+      'success',
+      'Export',
+    )
   }
 
   async function onExportRun(settings) {
     const kind = exportKind.value,
-      target = exportTargetCloud.value
+      target = exportTargetCloud.value,
+      vectorSet = exportTargetVectorSet.value
     const measurementIds = exportMeasurementScope.value?.ids ?? null
     exportKind.value = null
     try {
@@ -187,6 +218,13 @@ export function useExports({
       else if (kind === 'dem') await doExportDem(settings)
       else if (kind === 'ortho') await doExportOrtho(settings)
       else if (kind === 'measurements') await doExportMeasurements({ ...settings, ids: measurementIds })
+      else if (kind === 'poses') await doExportPoses(settings)
+      else if (kind === 'sensors') doExportSensors(settings)
+      else if (kind === 'cameraFiducials') doExportCameraFiducials(settings)
+      else if (kind === 'imageFiducials') doExportImageFiducials(settings)
+      else if (kind === 'keypoints') await doExportKeypoints(settings)
+      else if (kind === 'matches') await doExportMatches(settings)
+      else if (kind === 'vectors') await doExportVectors(settings, vectorSet)
     } catch (err) {
       const detail = String(err?.message ?? err)
       log(`Export failed: ${detail}`, 'error', 'Export')
@@ -254,6 +292,7 @@ export function useExports({
   const exportNameBase = computed(() => {
     const kind = exportKind.value
     if (kind === 'cloud' || kind === 'mesh') return cloudExportBase(kind, exportTargetCloud.value)
+    if (kind === 'vectors') return fileSafe(exportTargetVectorSet.value?.name) || 'polygons'
     return projectBase()
   })
 
@@ -261,21 +300,16 @@ export function useExports({
     exportKind,
     exportNameBase,
     exportTargetCloud,
+    exportTargetVectorSet,
     exportMeasurementScope,
     openMeasurementExport,
     measurementExportCrs,
-    exportPoses,
-    exportSensors,
-    exportCameraFiducials,
-    exportImageFiducials,
-    exportKeypoints,
-    exportMatches,
     onExportRun,
     openCloudExport,
     downloadRasterOriginal,
     downloadImageOriginal,
-    downloadVectorSet,
-    downloadFootprints,
+    openVectorExport,
+    openFootprintExport,
     exportContours,
     exportTerrain,
     exportClipped,

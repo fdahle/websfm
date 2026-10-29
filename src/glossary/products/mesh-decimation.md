@@ -41,6 +41,6 @@ joined mesh takes the cheapest collapses left, which include the seams the locks
 dense. On the meshes measured this was 4× faster than one pass over the whole mesh, at
 the same or a slightly smaller error.
 
-**Export ▸ 3D Tiles…** decimates too, to build the coarser levels of a
+**Export ▸ 3D Tiles** decimates too, to build the coarser levels of a
 [3D Tiles](help:3d-tiles) tileset: there the vertices on a tile's border are locked,
 never moved or removed, so neighbouring tiles decimated apart still meet.
