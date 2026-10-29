@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 
 // A glossary entry's Sources (its refs: frontmatter) and About ▸ References
-// (core/help/references.js) render their citations.
+// (core/help/references.js) render their citations; each reference says what it is
+// used for (the glossary entries citing it), and a click opens the entry.
 
 test('glossary sources and About references render', async ({ page }) => {
   const errors = []
@@ -24,5 +25,12 @@ test('glossary sources and About references render', async ({ page }) => {
   await expect(page.locator('.ref-list li')).toHaveCount(
     Object.keys((await import('../../src/core/help/references.js')).REFERENCES).length,
   )
+  // Every paper names at least one use.
+  await expect(page.locator('.ref-list li:not(:has(.ref-use))')).toHaveCount(0)
+  const lightglue = page.locator('.ref-list li').filter({ hasText: 'LightGlue' })
+  await expect(lightglue.locator('.ref-use')).toContainText('Used for: Keypoint')
+  await lightglue.locator('.ref-use a', { hasText: 'Keypoint' }).click()
+  await expect(page.getByRole('dialog', { name: 'Glossary' })).toBeVisible()
+  await expect(page.locator('.gtab.active')).toHaveText(/Keypoint/)
   expect(errors).toEqual([])
 })

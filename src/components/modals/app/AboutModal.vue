@@ -10,15 +10,35 @@ import Icon from '../../Icon.vue'
 import BetaBadge from '../../layout/BetaBadge.vue'
 import { ACKNOWLEDGMENTS, THIRD_PARTY } from '../../../core/help/licenses.js'
 import { REFERENCES, formatReference, referenceUrl } from '../../../core/help/references.js'
+import { getAllGlossaryEntries } from '../../../core/help/glossary.js'
+import { followLink, helpLinkFrom } from '../../../composables/useHelpStack.js'
 import { version as appVersion } from '../../../../package.json'
 
 const emit = defineEmits(['close'])
 const licenseUrl = `${import.meta.env.BASE_URL}LICENSE`
 
-// Every published method WebSfM implements (core/help/references.js), by first author.
+// Every published method WebSfM implements (core/help/references.js), by first author,
+// with what it is used for: the glossary entries that cite it (their `refs:`).
+const citedBy = new Map()
+for (const e of getAllGlossaryEntries())
+  for (const key of e.refs) citedBy.set(key, [...(citedBy.get(key) ?? []), { id: e.id, title: e.title }])
 const references = Object.keys(REFERENCES)
-  .map((key) => ({ key, text: formatReference(key, { link: false }), url: referenceUrl(key) }))
+  .map((key) => ({
+    key,
+    text: formatReference(key, { link: false }),
+    url: referenceUrl(key),
+    usedFor: (citedBy.get(key) ?? []).sort((a, b) => a.title.localeCompare(b.title)),
+  }))
   .sort((a, b) => a.text.localeCompare(b.text))
+
+// A "Used for" entry opens its glossary entry.
+function onReferencesClick(e) {
+  const link = helpLinkFrom(e.target)
+  if (link) {
+    e.preventDefault()
+    followLink(link)
+  }
+}
 
 const tab = ref('about')
 const tabs = [
@@ -78,13 +98,19 @@ const tabs = [
     <!-- References (the papers behind the methods) -->
     <div v-show="tab === 'references'" class="pane">
       <p class="lede">
-        The published methods WebSfM implements. Each glossary entry lists the ones it describes under
-        <em>Sources</em>; the Quality Report lists those a project's run used.
+        The published methods WebSfM implements, each with the glossary entries that explain what it is used for. Each
+        glossary entry lists them under <em>Sources</em>; the Quality Report lists those a project's run used.
       </p>
-      <ol class="ref-list">
+      <ol class="ref-list" @click="onReferencesClick">
         <li v-for="r in references" :key="r.key">
           {{ r.text }}
           <a v-if="r.url" :href="r.url" target="_blank" rel="noopener">{{ r.url.replace(/^https:\/\//, '') }}</a>
+          <div v-if="r.usedFor.length" class="ref-use">
+            Used for:
+            <template v-for="(g, i) in r.usedFor" :key="g.id"
+              >{{ i ? ', ' : '' }}<a href="#" class="glossary-link" :data-help-id="g.id">{{ g.title }}</a></template
+            >
+          </div>
         </li>
       </ol>
     </div>
@@ -125,6 +151,10 @@ const tabs = [
 }
 .ref-list a {
   color: var(--accent);
+}
+.ref-use {
+  margin-top: 2px;
+  font-size: 11px;
 }
 /* Brand hero */
 .hero {

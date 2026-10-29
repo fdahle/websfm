@@ -3,7 +3,7 @@ id: keypoint
 title: Keypoint
 aliases: keypoints, feature, features, feature point, interest point
 summary: A distinctive, repeatably-detectable image location (a corner or blob) used as an anchor for matching between photos.
-refs: lowe2004
+refs: lowe2004, detone2018, tyszkiewicz2020, zhao2023, lindenberger2023
 ---
 A **keypoint** is a distinctive point in an image — typically a corner or a
 blob-like region — that can be detected reliably even when the same scene is

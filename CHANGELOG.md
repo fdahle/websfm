@@ -32,6 +32,10 @@ Notable changes to websfm. The format follows
 - **Hide the bug-report button.** Settings ▸ General ▸ Notices ▸ **Bug report button**
   turns off the round button at the bottom right. Other ▸ About ▸ **Report a bug** opens
   the same GitHub page.
+- **References say what each paper is used for.** Other ▸ About ▸ References lists,
+  under each paper, the glossary entries that explain the method it describes; a click
+  opens the entry. The learned detectors and LightGlue are now cited by the Keypoint
+  entry, so every paper names at least one.
 
 ### Changed
 - **Self-calibrated distortion stays exact when the principal point moves.** When
