@@ -13,6 +13,7 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
 import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useExternalStore } from '../stores/useExternalStore.js'
+import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { polygonSetToGeoJson } from '../core/io/geojson.js'
 import { vectorSetToKml } from '../core/io/kml.js'
@@ -56,6 +57,7 @@ export function useExports({
   const imagesStore = useImagesStore()
   const matchesStore = useMatchesStore()
   const external = useExternalStore()
+  const recon = useReconstructionStore()
   const footprints = useFootprintsStore()
 
   // File naming, shared by every exporter.
@@ -111,6 +113,13 @@ export function useExports({
     if (!kind) exportTarget.value = null
   })
   const exportTargetCloud = computed(() => clouds.value.find((c) => c.id === exportTarget.value) ?? null)
+  // For 'dem' / 'ortho': the product a sidebar Download… (or its tab's Export) opened
+  // the dialog for; null for the ribbon's, which exports the main one.
+  const exportTargetProduct = computed(() =>
+    exportKind.value === 'dem' || exportKind.value === 'ortho'
+      ? (recon.rasterProducts.find((p) => p.id === exportTarget.value) ?? null)
+      : null,
+  )
   const exportTargetVectorSet = computed(() =>
     exportKind.value === 'vectors' ? (footprints.sets.find((s) => s.id === exportTarget.value) ?? null) : null,
   )
@@ -131,6 +140,14 @@ export function useExports({
     const cloud = clouds.value.find((c) => c.id === id)
     if (!cloud) return
     exportKind.value = cloud.kind === 'mesh' ? 'mesh' : 'cloud'
+    exportTarget.value = id
+  }
+
+  // Sidebar ▸ Download… on a DEM / orthophoto, main or not: its export dialog.
+  function openProductExport(id) {
+    const product = recon.rasterProducts.find((p) => p.id === id)
+    if (!product) return
+    exportKind.value = product.kind
     exportTarget.value = id
   }
 
@@ -205,6 +222,7 @@ export function useExports({
   async function onExportRun(settings) {
     const kind = exportKind.value,
       target = exportTargetCloud.value,
+      product = exportTargetProduct.value,
       vectorSet = exportTargetVectorSet.value
     const measurementIds = exportMeasurementScope.value?.ids ?? null
     exportKind.value = null
@@ -215,8 +233,8 @@ export function useExports({
       else if (kind === 'colmap') await doExportColmap(settings)
       else if (kind === 'undistorted') await doExportUndistorted(settings)
       else if (kind === 'tiles3d') await doExportTiles3d(settings)
-      else if (kind === 'dem') await doExportDem(settings)
-      else if (kind === 'ortho') await doExportOrtho(settings)
+      else if (kind === 'dem') await doExportDem(settings, product)
+      else if (kind === 'ortho') await doExportOrtho(settings, product)
       else if (kind === 'measurements') await doExportMeasurements({ ...settings, ids: measurementIds })
       else if (kind === 'poses') await doExportPoses(settings)
       else if (kind === 'sensors') doExportSensors(settings)
@@ -300,12 +318,14 @@ export function useExports({
     exportKind,
     exportNameBase,
     exportTargetCloud,
+    exportTargetProduct,
     exportTargetVectorSet,
     exportMeasurementScope,
     openMeasurementExport,
     measurementExportCrs,
     onExportRun,
     openCloudExport,
+    openProductExport,
     downloadRasterOriginal,
     downloadImageOriginal,
     openVectorExport,

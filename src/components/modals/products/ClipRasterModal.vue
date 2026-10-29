@@ -6,6 +6,7 @@ import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
+import { measuredOn } from '../../../core/products/measurementRecord.js'
 import { polygonsFromGeoJSON, geojsonCrs } from '../../../core/products/rasterClip.js'
 import { pluralize } from '../../../core/textFormat.js'
 import { clipRasterEffects } from '../../../core/stepEffects/clipRaster.js'
@@ -31,7 +32,10 @@ const product = computed(() => (kind.value === 'ortho' ? props.ortho : props.dem
 const candidates = computed(() =>
   props.measurements.filter(
     (m) =>
-      (m.kind === 'area' || m.kind === 'volume') && m.source === `product:${kind.value}` && (m.world?.length ?? 0) >= 3,
+      (m.kind === 'area' || m.kind === 'volume') &&
+      // The main product's (a processing tool's input), by id or, saved earlier, its kind.
+      measuredOn(m, kind.value, product.value, true) &&
+      (m.world?.length ?? 0) >= 3,
   ),
 )
 const sourceMode = ref(candidates.value.length ? 'measurement' : 'file')

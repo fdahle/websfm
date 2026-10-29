@@ -79,7 +79,7 @@ export function useModalEscape({
     importRasterData,
     importVideoFile,
     rasterStyleId,
-    symbologyProductKind,
+    symbologyProductId,
     symbologyCloudId,
     sfmSourceOpen,
     fiducialDetectOpen,
@@ -149,9 +149,9 @@ export function useModalEscape({
         },
       ],
       [
-        symbologyProductKind.value,
+        symbologyProductId.value,
         () => {
-          symbologyProductKind.value = null
+          symbologyProductId.value = null
         },
       ],
       [

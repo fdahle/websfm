@@ -25,28 +25,22 @@ export function useRasterTabs({ tabs, openRasterImport }) {
   const imagesStore = useImagesStore()
   const { imageById, addImages, removeImage } = imagesStore
   const reconstructionStore = useReconstructionStore()
-  const { dem, ortho, productLayers } = storeToRefs(reconstructionStore)
+  const { rasterProducts, productLayers } = storeToRefs(reconstructionStore)
   const { removeProduct, renameProduct, productById } = reconstructionStore
   const externalStore = useExternalStore()
   const { rasterById, renameRaster, removeRaster, setRasterStyle } = externalStore
   const { importRasterOpen, importRasterData, rasterStyleId } = storeToRefs(useModalsStore())
 
-  function computedProductName(kind) {
-    const product = kind === 'ortho' ? ortho.value : dem.value
-    return product?.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
+  // Any DEM / orthophoto, main or not, in a tab of its own.
+  function openComputedProductTab(id) {
+    openProductTab(productById(id))
   }
 
-  function openComputedProductTab(kind) {
-    openProductTab(kind, computedProductName(kind))
-  }
-
-  // The product tab shows the MAIN DEM / ortho, so its title follows that one: a
-  // rename, Set as main, or a new build.
+  // A product tab's title follows its product's name.
   watch(
-    () => [computedProductName('dem'), computedProductName('ortho')],
-    ([demName, orthoName]) => {
-      setTabTitle('product:dem', demName)
-      setTabTitle('product:ortho', orthoName)
+    () => rasterProducts.value.map((p) => [p.id, p.name || (p.kind === 'ortho' ? 'Orthophoto' : 'DEM')]),
+    (names) => {
+      for (const [id, name] of names) setTabTitle(`product:${id}`, name)
     },
   )
 
@@ -66,11 +60,10 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     const { kind } = product
     askConfirm({
       title: `Remove ${kind === 'ortho' ? 'orthophoto' : 'DEM'}?`,
-      message: `Remove “${product.name || computedProductName(kind)}”? The product can be rebuilt, but this can't be undone.`,
+      message: `Remove “${product.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')}”? The product can be rebuilt, but this can't be undone.`,
       onConfirm: async () => {
         await removeProduct(id)
-        // The tab shows the main one of the kind; it goes with the last of them.
-        if (!(kind === 'ortho' ? ortho.value : dem.value)) closeTab(`product:${kind}`)
+        closeTab(`product:${id}`)
       },
     })
   }
@@ -206,14 +199,15 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     // through the tab's ProductViewer ref so the Ribbon's Measure group can show it.
     const measure = tab ? (productViewerRefs[tab.id]?.measureState ?? null) : null
     if (tab?.type === 'product') {
-      const product = tab.productKind === 'ortho' ? ortho.value : dem.value
+      const product = productById(tab.productId)
       return {
         tabId: tab.id,
+        productId: tab.productId,
         kind: tab.productKind,
         imported: false,
         name: tab.title,
         measure,
-        visible: !!productLayers.value[tab.productKind]?.visible,
+        visible: !!productLayers.value[tab.productId]?.visible,
         mapBlocked: productMapBlocker(product),
       }
     }

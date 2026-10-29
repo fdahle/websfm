@@ -8,16 +8,17 @@ import { MODEL_MAP_CRS, frameOffset } from './modelMap.js'
 
 export const PRODUCT_KINDS = ['dem', 'ortho']
 
-// The persisted per-product view state: { dem: { visible, opacity }, ortho: … }.
-// Unknown kinds and malformed values are dropped, so an old or hand-edited
-// reconstruction.json can never put a layer on the map by accident.
+// The persisted per-product view state, by product id: { 'dem-…': { visible, opacity }, … }.
+// Malformed values are dropped, so a hand-edited reconstruction.json can never put a
+// layer on the map by accident; the store drops ids no product has (a project saved
+// when this was keyed by kind, `dem` / `ortho`).
 export function normalizeProductLayers(raw) {
   const out = {}
-  for (const kind of PRODUCT_KINDS) {
-    const v = raw?.[kind]
-    if (!v || typeof v !== 'object') continue
+  if (!raw || typeof raw !== 'object') return out
+  for (const [id, v] of Object.entries(raw)) {
+    if (!id || !v || typeof v !== 'object') continue
     const opacity = Number(v.opacity)
-    out[kind] = {
+    out[id] = {
       visible: v.visible === true,
       opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1,
     }
@@ -37,8 +38,11 @@ export function productMapBlocker(product) {
 
 export const productLabel = (kind, product) => product?.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
 
+// The map layer id of a computed product: one layer per product, main or not.
+export const productLayerId = (product) => `product:${product.id}`
+
 // Place an on-map product in the map's current frame.
-//   view: { mode: 'crs' } | { mode: 'model', frame, stale: Set<kind> }
+//   view: { mode: 'crs' } | { mode: 'model', frame, stale: Set<product id> }
 //         — `frame` is the map's local frame (frameSpec.js), `stale` the products
 //           built on an older sparse model (productFrameStatus).
 // → null (not requested) | { reason } (requested, cannot be drawn here) |
@@ -61,7 +65,7 @@ export function placeProductLayer(kind, product, state, view) {
   if (view.mode === 'crs') {
     if (local) return { reason: 'it is in the model frame — turn on Map ▸ Model Frame to see it' }
   } else {
-    if (view.stale?.has(kind)) return { reason: 'it was built on an older sparse model — rebuild it' }
+    if (view.stale?.has(product.id)) return { reason: 'it was built on an older sparse model — rebuild it' }
     const off = frameOffset(product.frame, view.frame)
     if (off.reason) return { reason: off.reason }
     crs = MODEL_MAP_CRS
@@ -75,8 +79,9 @@ export function placeProductLayer(kind, product, state, view) {
   const cog = tiled && !(offset && (offset[0] || offset[1])) ? product.cog : null
   return {
     layer: {
-      id: `product:${kind}`,
+      id: productLayerId(product),
       product: true,
+      productId: product.id,
       kind,
       name: productLabel(kind, product),
       crs,

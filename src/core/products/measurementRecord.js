@@ -6,7 +6,20 @@
 export const isReferenceRaster = (p) => !!p?.geoTransform
 
 export function measurementSource(kind, p) {
-  return isReferenceRaster(p) ? `reference:${p.id}` : `product:${kind}`
+  return isReferenceRaster(p) ? `reference:${p.id}` : `product:${p?.id ?? kind}`
+}
+// Whether a saved record was measured on `p`. One saved before measurements named
+// the product by id names its kind (`product:dem`), and stands for the main one.
+export function measuredOn(record, kind, p, isMain = false) {
+  if (record.source === measurementSource(kind, p)) return true
+  return !!isMain && !isReferenceRaster(p) && record.source === `product:${kind}`
+}
+// The computed product a `product:` source names, or null: by id, or a kind
+// (an older record) for the main one of that kind.
+export function productOfSource(source, { productById, mainOf }) {
+  if (!source?.startsWith('product:')) return null
+  const key = source.slice('product:'.length)
+  return key === 'dem' || key === 'ortho' ? mainOf(key) : productById(key)
 }
 export function measurementStamp(p) {
   if (!p) return null

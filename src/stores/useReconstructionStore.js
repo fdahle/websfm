@@ -329,24 +329,29 @@ export const useReconstructionStore = registerProjectStore(
       const live = new Set(now.map((p) => p.previewUrl).filter(Boolean))
       for (const p of before ?? []) if (p.previewUrl && !live.has(p.previewUrl)) URL.revokeObjectURL(p.previewUrl)
     })
-    // Map-layer view state per computed product ({ dem: { visible, opacity }, … };
-    // core/products/productLayers.js). Kept in reconstruction.json, NOT on the
-    // product record: saving a product rewrites its raster buffers, and a map
-    // toggle must not. It survives a rebuild, so a DEM on the map stays there.
+    // Map-layer view state per computed product, by its id ({ 'dem-…': { visible,
+    // opacity }, … }; core/products/productLayers.js). Kept in reconstruction.json, NOT
+    // on the product record: saving a product rewrites its raster buffers, and a map
+    // toggle must not. A rebuild in place keeps its id, so a DEM on the map stays there.
     const productLayers = ref({})
-    // A product built for the first time goes on the map (into View ▸ Map ▸ Layers),
-    // as a new layer does in a GIS. One taken off the map has an entry, and stays off.
-    for (const [kind, product] of [
-      ['dem', dem],
-      ['ortho', ortho],
-    ]) {
-      watch(product, (now) => {
-        if (!now || productLayers.value[kind] || productMapBlocker(now)) return
-        productLayers.value = { ...productLayers.value, [kind]: { visible: true, opacity: 1 } }
+    // A new main product with no layer state yet (a new build, or Set as main on one
+    // never shown) takes the place of the main one before it: on the map if that one
+    // was, or if it is the first of its kind, as a new layer does in a GIS; the one
+    // before leaves the map. One taken off the map has an entry, and stays off.
+    for (const product of [dem, ortho]) {
+      watch(product, (now, before) => {
+        if (!now || productLayers.value[now.id] || productMapBlocker(now)) return
+        const prev = before && before.id !== now.id ? productLayers.value[before.id] : null
+        const next = {
+          ...productLayers.value,
+          [now.id]: { visible: prev ? prev.visible : true, opacity: prev?.opacity ?? 1 },
+        }
+        if (prev?.visible) next[before.id] = { ...prev, visible: false }
+        productLayers.value = next
       })
     }
     // The 2D map's layer stack, top first (core/products/mapOrder.js): the ids of
-    // reference rasters, `product:dem` / `product:ortho` and `vector:<set id>`. Empty =
+    // reference rasters, `product:<product id>` and `vector:<set id>`. Empty =
     // the default.
     const mapOrder = ref([])
     function setMapOrder(ids) {
@@ -1351,6 +1356,10 @@ export const useReconstructionStore = registerProjectStore(
         restoredProducts.push(withPreviewUrl({ ...product, id: stem, kind }))
       }
       rasterProducts.value = restoredProducts
+      // Layer state of products that are gone (or keyed by kind, as projects saved
+      // before every product could go on the map were): the main ones go on afresh.
+      const productIds = new Set(restoredProducts.map((p) => p.id))
+      productLayers.value = Object.fromEntries(Object.entries(productLayers.value).filter(([id]) => productIds.has(id)))
       if (restoredProducts.length) {
         const n = (kind) => restoredProducts.filter((p) => p.kind === kind).length
         log(

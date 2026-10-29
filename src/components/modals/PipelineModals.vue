@@ -126,6 +126,7 @@ const {
   exportMeasurementScope,
   exportNameBase,
   exportTargetCloud,
+  exportTargetProduct,
   exportTargetVectorSet,
   exportTerrain,
   footprintImageCount,
@@ -163,6 +164,14 @@ const {
 const scaleFitValid = computed(() => reconstructionStore.scaleFitStatus().valid)
 // A DEM / ortho's own CRS for the export's reprojection ('' = the local frame, no CRS).
 const rasterCrsOf = (r) => (r?.crs && r.crs !== 'local' ? r.crs : '')
+// The DEM / ortho a 'dem' / 'ortho' export writes: the one it was opened for, else the main one.
+const exportRaster = computed(() =>
+  exportKind.value === 'dem'
+    ? (exportTargetProduct.value ?? dem.value)
+    : exportKind.value === 'ortho'
+      ? (exportTargetProduct.value ?? ortho.value)
+      : null,
+)
 // A tool dialog starts on the cloud/mesh the user has selected, when it fits.
 const toolInitialId = computed(() => reconstructionStore.selectedCloudId)
 // The mesh a mesh or 3D Tiles export writes: the sidebar's target, else the selected
@@ -277,9 +286,10 @@ const exportingFootprints = computed(
       :has-georef="!!georef"
       :has-scale="scaleFitValid || georef?.crs === currentCrs"
       :has-orientation="reconstructionStore.orientationState.active"
-      :ortho-cells="reconstructionStore.ortho ? reconstructionStore.ortho.width * reconstructionStore.ortho.height : 0"
+      :ortho-cells="exportRaster && exportKind === 'ortho' ? exportRaster.width * exportRaster.height : 0"
       :subject="
         exportTargetCloud?.name ??
+        exportTargetProduct?.name ??
         (exportingFootprints ? null : exportTargetVectorSet?.name) ??
         exportMeasurementScope?.label ??
         ''
@@ -290,7 +300,7 @@ const exportingFootprints = computed(
           ? (measurementExportCrs(exportMeasurementScope?.ids ?? null, georef?.crs === currentCrs) ?? '')
           : ''
       "
-      :raster-crs="exportKind === 'dem' ? rasterCrsOf(dem) : exportKind === 'ortho' ? rasterCrsOf(ortho) : ''"
+      :raster-crs="exportRaster ? rasterCrsOf(exportRaster) : ''"
       :tiles-subject="exportTilesSubject"
       :name-base="exportNameBase"
       :sources="exportSources"

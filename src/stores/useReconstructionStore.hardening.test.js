@@ -45,17 +45,17 @@ it('puts a computed product on the map unless it has no preview, whatever its fr
     previewUrl: 'data:x',
   }
   store.rasterProducts = [{ ...base, crs: 'local', previewUrl: null }]
-  expect(store.setProductVisible('dem', true)).toBe(false)
-  expect(store.productLayers.dem).toBeUndefined()
+  expect(store.setProductVisible('d1', true)).toBe(false)
+  expect(store.productLayers.d1).toBeUndefined()
   // A local-frame product may be requested: the model-frame map can place it.
   store.rasterProducts = [{ ...base, crs: 'local' }]
-  expect(store.setProductVisible('dem', true)).toBe(true)
-  store.setProductOpacity('dem', 0.3)
-  expect(store.productLayers.dem).toEqual({ visible: true, opacity: 0.3 })
+  expect(store.setProductVisible('d1', true)).toBe(true)
+  store.setProductOpacity('d1', 0.3)
+  expect(store.productLayers.d1).toEqual({ visible: true, opacity: 0.3 })
   // Hiding is always allowed, even once the product could no longer be placed.
   store.rasterProducts = [{ ...base, crs: 'local', previewUrl: null }]
-  expect(store.setProductVisible('dem', false)).toBe(true)
-  expect(store.productLayers.dem.visible).toBe(false)
+  expect(store.setProductVisible('d1', false)).toBe(true)
+  expect(store.productLayers.d1.visible).toBe(false)
 })
 
 it('puts a first-built product on the map, and a rebuild after removal again', async () => {
@@ -76,18 +76,50 @@ it('puts a first-built product on the map, and a rebuild after removal again', a
   }
   store.rasterProducts = [dem]
   await nextTick()
-  expect(store.productLayers.dem).toEqual({ visible: true, opacity: 1 })
-  // Taken off the map, a rebuild keeps it off.
-  store.setProductVisible('dem', false)
+  expect(store.productLayers.d1).toEqual({ visible: true, opacity: 1 })
+  // Taken off the map, a rebuild in place keeps it off.
+  store.setProductVisible('d1', false)
   store.rasterProducts = [{ ...dem }]
   await nextTick()
-  expect(store.productLayers.dem.visible).toBe(false)
+  expect(store.productLayers.d1.visible).toBe(false)
   // Removed, its layer state goes with it, and the next build is on the map again.
   expect(await store.removeProduct('d1')).toBe(true)
-  expect(store.productLayers.dem).toBeUndefined()
+  expect(store.productLayers.d1).toBeUndefined()
   store.rasterProducts = [{ ...dem }]
   await nextTick()
-  expect(store.productLayers.dem).toEqual({ visible: true, opacity: 1 })
+  expect(store.productLayers.d1).toEqual({ visible: true, opacity: 1 })
+})
+
+it('a new main DEM takes the map place of the one before, which stays listed', async () => {
+  setActivePinia(createPinia())
+  useProjectsStore().persistenceAvailable = false
+  const store = useReconstructionStore()
+  const dem = {
+    id: 'd1',
+    kind: 'dem',
+    width: 2,
+    height: 2,
+    gsd: 1,
+    originX: 0,
+    originY: 2,
+    data: new Float32Array(4),
+    previewUrl: 'data:x',
+    crs: 'local',
+    createdAt: 1,
+  }
+  store.rasterProducts = [dem]
+  await nextTick()
+  store.setProductOpacity('d1', 0.4)
+  // A second build is the main one: it goes on at the first one's opacity, which leaves.
+  store.rasterProducts = [dem, { ...dem, id: 'd2', createdAt: 2 }]
+  await nextTick()
+  expect(store.dem.id).toBe('d2')
+  expect(store.productLayers.d2).toEqual({ visible: true, opacity: 0.4 })
+  expect(store.productLayers.d1.visible).toBe(false)
+  // Either one can be on the map, main or not.
+  expect(store.setProductVisible('d1', true)).toBe(true)
+  expect(store.productLayers.d1.visible).toBe(true)
+  expect(store.productLayers.d2.visible).toBe(true)
 })
 
 it('adds a rebuilt DEM beside the old one as the main one, or replaces the main one', async () => {

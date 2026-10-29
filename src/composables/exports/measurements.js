@@ -2,7 +2,7 @@ import { computed } from 'vue'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
-import { isReferenceRaster, measurementStale } from '../../core/products/measurementRecord.js'
+import { isReferenceRaster, measurementStale, productOfSource } from '../../core/products/measurementRecord.js'
 import {
   describeMeasurement,
   geoJsonMode,
@@ -30,11 +30,15 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
   const recon = useReconstructionStore()
 
   const cloudOf = (record) => recon.clouds.find((c) => c.id === record.source?.slice('cloud:'.length)) ?? null
-  // `product:dem` / `product:ortho`, or `reference:<raster id>` (measurementRecord.js).
+  // `product:<product id>` (or, saved earlier, a kind for the main one), or
+  // `reference:<raster id>` (measurementRecord.js).
   function productOf(record) {
     const src = record.source ?? ''
-    if (src === 'product:dem') return recon.dem
-    if (src === 'product:ortho') return recon.ortho
+    if (src.startsWith('product:'))
+      return productOfSource(src, {
+        productById: recon.productById,
+        mainOf: (k) => (k === 'dem' ? recon.dem : recon.ortho),
+      })
     if (src.startsWith('reference:'))
       return external.rasters.find((r) => r.id === src.slice('reference:'.length)) ?? null
     return null
@@ -42,8 +46,6 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
   function sourceName(record) {
     if (is3dMeasurement(record)) return cloudOf(record)?.name ?? record.cloudName ?? 'a removed layer'
     const p = productOf(record)
-    if (record.source === 'product:dem') return 'DEM'
-    if (record.source === 'product:ortho') return 'Orthophoto'
     return p?.name ?? record.sourceName ?? 'a removed raster'
   }
   function stale(record) {

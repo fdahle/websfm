@@ -4,8 +4,10 @@ import Icon from '../Icon.vue'
 import FloatingToolbox from './FloatingToolbox.vue'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { useExternalStore } from '../../stores/useExternalStore.js'
+import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import {
   isReferenceRaster,
+  measuredOn,
   measurementSource,
   measurementStamp,
   measurementStale,
@@ -69,8 +71,11 @@ const saved = useMeasurementsStore(),
   name = ref(''),
   selectedId = ref('')
 const showSaved = ref(false)
+const recon = useReconstructionStore()
 const sourceKey = computed(() => measurementSource(props.kind, props.product))
-const records = computed(() => saved.records.filter((r) => r.source === sourceKey.value))
+// A computed product's own, and on the main one those saved when they named the kind.
+const isMain = computed(() => !isReferenceRaster(props.product) && recon.isMainProduct(props.product))
+const records = computed(() => saved.records.filter((r) => measuredOn(r, props.kind, props.product, isMain.value)))
 const selected = computed(() => records.value.find((r) => r.id === selectedId.value))
 const stale = computed(() => selected.value && measurementStale(selected.value, props.product, props.frameStatus))
 const tool = ref('pan')

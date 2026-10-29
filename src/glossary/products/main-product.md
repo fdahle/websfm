@@ -9,9 +9,11 @@ new one beside the old ones rather than replacing it, unless the build dialog's
 **Output ▸ Replace the main …** is on. One of each kind is the **main** one, marked
 *main* in the sidebar once there are two. It is what the next step uses: a DEM is
 built from the main dense cloud, a mesh-surface orthophoto from the main mesh, a
-DEM-surface orthophoto from the main DEM. The 2D map and the product tab show the main
-DEM and the main orthophoto. A new build becomes the main one; right-click another
-product ▸ **Set as main** to use that one instead. The sparse model has its main one
+DEM-surface orthophoto from the main DEM. Being main only decides the input: any DEM
+or orthophoto, main or not, opens in its own tab, goes on the 2D map, takes a
+symbology and downloads. A new build becomes the main one and takes the place of the
+one before on the map; right-click another product ▸ **Set as main** to use that one
+instead. The sparse model has its main one
 too, for the same reason.
 
 A product is **outdated** when something it was built from has changed since: the

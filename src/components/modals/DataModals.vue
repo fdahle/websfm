@@ -44,7 +44,7 @@ const QualityReportModal = defineAsyncComponent(() => import('./eval/QualityRepo
 // pose / match tables, fiducials, symbology and the Quality Report hub.
 const { currentCrs, currentSceneType } = storeToRefs(useProjectsStore())
 const reconstructionStore = useReconstructionStore()
-const { cameras, clouds, dem, ortho, sparseCameras } = storeToRefs(reconstructionStore)
+const { cameras, clouds, rasterProducts, sparseCameras } = storeToRefs(reconstructionStore)
 const { setCloudStyle, setProductStyle } = reconstructionStore
 const imagesStore = useImagesStore()
 const { images, selectedId } = storeToRefs(imagesStore)
@@ -99,7 +99,7 @@ const {
   sensorTableOpen,
   sfmSourceOpen,
   symbologyCloudId,
-  symbologyProductKind,
+  symbologyProductId,
   reseauOpen,
   panoramicOpen,
 } = storeToRefs(useModalsStore())
@@ -144,9 +144,7 @@ const {
   sfmImportSession,
   usedKeysOf,
 } = useAppContext()
-const symbologyProduct = computed(() =>
-  symbologyProductKind.value === 'dem' ? dem.value : symbologyProductKind.value === 'ortho' ? ortho.value : null,
-)
+const symbologyProduct = computed(() => rasterProducts.value.find((p) => p.id === symbologyProductId.value) ?? null)
 const symbologyCloud = computed(() => clouds.value.find((c) => c.id === symbologyCloudId.value) ?? null)
 const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(infoImageId.value) : null))
 </script>
@@ -262,10 +260,10 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
   <Teleport to="body">
     <ProductSymbologyModal
       v-if="symbologyProduct"
-      :key="symbologyProductKind"
-      :kind="symbologyProductKind"
+      :key="symbologyProductId"
+      :kind="symbologyProduct.kind"
       :product="symbologyProduct"
-      @close="symbologyProductKind = null"
+      @close="symbologyProductId = null"
       @apply="({ style }) => setProductStyle(symbologyProduct.id, style)"
     />
     <CloudSymbologyModal

@@ -54,7 +54,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     refreshGcpReport,
     openQuality,
   } = tools
-  const { exportKind, downloadRasterOriginal, openFootprintExport, openMeasurementExport } = exports
+  const { exportKind, downloadRasterOriginal, openFootprintExport, openMeasurementExport, openProductExport } = exports
   const { confirmRemoveRaster, confirmRemoveProduct, requestRemoveImages, confirmRemoveFootprints } = removals
   const {
     cameraPickMode,
@@ -106,7 +106,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     projectPickerOpen,
     rasterStyleId,
     infoImageId,
-    symbologyProductKind,
+    symbologyProductId,
     sfmSourceOpen,
     reseauOpen,
     panoramicOpen,
@@ -114,7 +114,8 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
   const { setRasterVisible } = useExternalStore()
-  const { setProductVisible, setMapLayerHidden } = useReconstructionStore()
+  const reconstructionStore = useReconstructionStore()
+  const { setProductVisible, setMapLayerHidden } = reconstructionStore
   const { cycleTheme } = useTheme()
   const { imageViewPrefs, patchImageView } = useImageViewSettings()
 
@@ -273,9 +274,13 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       setMapBasemap(id.slice('map-basemap:'.length))
       return
     }
-    // DEM of difference: the DEM's Volume tool with a reference DEM as the base.
+    // DEM of difference: the DEM's Volume tool with a reference DEM as the base, on
+    // the DEM whose tab is open, else the main one.
     if (id === 'dem-difference') {
-      openProductTab?.('dem')
+      const r = activeRasterTab.value
+      openProductTab?.(
+        r?.productId && r.kind === 'dem' ? reconstructionStore.productById(r.productId) : reconstructionStore.dem,
+      )
       // The tab's viewer mounts asynchronously; wait for it (≤ 2 s) before starting.
       let tries = 0
       const start = () => {
@@ -365,12 +370,15 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'export-tiles3d':
         exportKind.value = 'tiles3d'
         break
+      // On a product's tab (its Export), that product; elsewhere the main one.
       case 'export-dem':
-        exportKind.value = 'dem'
+      case 'export-ortho': {
+        const kind = id === 'export-dem' ? 'dem' : 'ortho'
+        const r = activeRasterTab.value
+        if (r?.productId && r.kind === kind) openProductExport(r.productId)
+        else exportKind.value = kind
         break
-      case 'export-ortho':
-        exportKind.value = 'ortho'
-        break
+      }
       case 'export-keypoints':
         exportKind.value = 'keypoints'
         break
@@ -517,16 +525,15 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       // In Layers: adds the raster to the map's Layers (ticked there), or takes it off.
       case 'raster-toggle-map': {
         const r = activeRasterTab.value
-        const id = r?.rasterId ?? (r && !r.imported ? `product:${r.kind}` : null)
+        const id = r?.rasterId ?? (r?.productId ? `product:${r.productId}` : null)
         if (!id) break
         if (!r.visible) setMapLayerHidden(id, false)
         if (r.rasterId) setRasterVisible(r.rasterId, !r.visible)
-        else setProductVisible(r.kind, !r.visible)
+        else setProductVisible(r.productId, !r.visible)
         break
       }
       case 'raster-symbology':
-        if (activeRasterTab.value && !activeRasterTab.value.imported)
-          symbologyProductKind.value = activeRasterTab.value.kind
+        if (activeRasterTab.value?.productId) symbologyProductId.value = activeRasterTab.value.productId
         break
       case 'raster-download':
         if (activeRasterTab.value?.rasterId) downloadRasterOriginal(activeRasterTab.value.rasterId)
@@ -534,7 +541,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'raster-remove': {
         const r = activeRasterTab.value
         if (r?.rasterId) confirmRemoveRaster(r.rasterId)
-        else if (r && !r.imported) confirmRemoveProduct(r.kind)
+        else if (r?.productId) confirmRemoveProduct(r.productId)
         break
       }
       case 'img-show-info':

@@ -6,6 +6,15 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Work with every DEM and orthophoto, not only the main one.** Any DEM or orthophoto
+  in the sidebar now opens in a tab of its own, goes on the map, takes a symbology and
+  downloads, where before these were greyed out until it was set as main. Main still
+  decides what the next step uses. Several of a kind can be on the map at once, each a
+  layer of its own in View ▸ Map ▸ Layers; a new build takes the place of the main one
+  before it there. On a product's tab, the ribbon's Export, In Layers, Symbology and
+  Remove act on that product (Remove did nothing on a product tab before). Measurements
+  are kept per product; those saved before stay on the main one. A project saved before
+  shows its main DEM and orthophoto on the map again.
 - **Show information on every sidebar row.** Right-click a vector layer (an imported
   shapefile or contour lines), a reference raster, a sensor, a control point or the
   matches and choose **Show information**, as on clouds and products. A vector layer

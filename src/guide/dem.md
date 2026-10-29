@@ -142,8 +142,9 @@ it. On by default for Ground only, off otherwise.
 <!-- param: replaceMain default: Off -->
 Where the new DEM goes. Off, it is added beside the others under a name of its own
 ("DEM 2") and becomes the [main DEM](help:main-product), the one the next step
-uses; the older ones stay until you remove them. On, it takes the main DEM's place
-and name. Either way, products built on the old one are kept and marked outdated.
+uses; the older ones stay until you remove them, and each still opens in a tab, goes on
+the map and downloads. On the map the new one takes the place of the one before. On,
+it takes the main DEM's place and name. Either way, products built on the old one are kept and marked outdated.
 A rebuilt DEM no longer removes the orthophoto built on it: that one is marked
 outdated instead.
 

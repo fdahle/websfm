@@ -40,7 +40,7 @@ const { sensors } = storeToRefs(useSensorsStore())
 const { footprintPolygons: mapFootprints } = storeToRefs(useFootprintsStore())
 const { currentCrs, currentSceneType } = storeToRefs(useProjectsStore())
 const reconstructionStore = useReconstructionStore()
-const { clouds, sparseCameras, dem, ortho, georef } = storeToRefs(reconstructionStore)
+const { clouds, sparseCameras, georef } = storeToRefs(reconstructionStore)
 const externalStore = useExternalStore()
 const { sources: rasterSources } = storeToRefs(externalStore)
 const { rasterById, ensureRasterLoaded } = externalStore
@@ -474,8 +474,8 @@ onBeforeUnmount(() => {
             }
           "
           :kind="tab.productKind"
-          :product="tab.productKind === 'ortho' ? ortho : dem"
-          :frame-status="reconstructionStore.productFrameStatus(tab.productKind === 'ortho' ? ortho : dem)"
+          :product="reconstructionStore.productById(tab.productId)"
+          :frame-status="reconstructionStore.productFrameStatus(reconstructionStore.productById(tab.productId))"
           @command="handleCommand"
         />
         <!-- Same viewer, imported raster instead of a computed product. -->

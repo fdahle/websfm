@@ -227,8 +227,9 @@ distance.
 <!-- param: replaceMain default: Off -->
 Where the new orthophoto goes. Off, it is added beside the others under a name of its own
 ("Orthophoto 2") and becomes the [main orthophoto](help:main-product), the one the next step
-uses; the older ones stay until you remove them. On, it takes the main orthophoto's place
-and name. Either way, products built on the old one are kept and marked outdated.
+uses; the older ones stay until you remove them, and each still opens in a tab, goes on
+the map and downloads. On the map the new one takes the place of the one before. On,
+it takes the main orthophoto's place and name. Either way, products built on the old one are kept and marked outdated.
 
 ## Export
 The orthophoto is stored as a Cloud-Optimized GeoTIFF (tiled, with overviews and

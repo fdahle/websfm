@@ -83,8 +83,8 @@ export const useModalsStore = defineStore('modals', () => {
   // Band math / stretch for a multi-band raster. Holds the raster id, not the
   // record — the record is replaced wholesale by a restyle's re-decode.
   const rasterStyleId = ref(null)
-  // Symbology for a computed product ('dem' | 'ortho') or a cloud (its id).
-  const symbologyProductKind = ref(null)
+  // Symbology for a computed DEM / ortho or a cloud (its id).
+  const symbologyProductId = ref(null)
   const symbologyCloudId = ref(null)
   // Import ▸ SfM project: choose files or a folder before the import session opens.
   const sfmSourceOpen = ref(false)
@@ -163,7 +163,7 @@ export const useModalsStore = defineStore('modals', () => {
     importRasterData,
     importVideoFile,
     rasterStyleId,
-    symbologyProductKind,
+    symbologyProductId,
     symbologyCloudId,
     sfmSourceOpen,
     infoImageId,

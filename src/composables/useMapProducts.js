@@ -6,7 +6,7 @@ import { useImagesStore } from '../stores/useImagesStore.js'
 import { usePosesStore } from '../stores/usePosesStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
-import { PRODUCT_KINDS, placeProductLayer, productLabel } from '../core/products/productLayers.js'
+import { placeProductLayer, productLabel } from '../core/products/productLayers.js'
 import { MODEL_MAP_CRS, modelMapCameras, modelMapExtent } from '../core/products/modelMap.js'
 import { frameFromSpec } from '../core/products/frameSpec.js'
 import { createProductRasterSource } from '../core/io/rasterSource.js'
@@ -45,7 +45,7 @@ export function useMapProducts() {
   const gcpsStore = useGcpsStore()
   const footprintsStore = useFootprintsStore()
 
-  const productOf = (kind) => (kind === 'dem' ? recon.dem : recon.ortho)
+  const productById = (id) => recon.rasterProducts.find((p) => p.id === id) ?? null
   const hasModel = computed(() => !!recon.mainSparseCloud?.cameras?.size)
 
   // Anything with a CRS position: a georeference, GPS, imported poses, GCPs with
@@ -122,16 +122,22 @@ export function useMapProducts() {
   const view = computed(() => {
     if (mode.value === 'crs') return { mode: 'crs' }
     if (!modelFrame.value) return null
-    const stale = new Set(PRODUCT_KINDS.filter((k) => productOf(k) && recon.productFrameStatus(productOf(k))?.stale))
+    const stale = new Set(recon.rasterProducts.filter((p) => recon.productFrameStatus(p)?.stale).map((p) => p.id))
     return { mode: 'model', frame: modelFrame.value.frame, stale }
   })
 
+  // Every DEM and orthophoto, main or not, DEMs first (the default stack).
   const placements = computed(() =>
     view.value
-      ? PRODUCT_KINDS.map((kind) => ({
-          kind,
-          placed: placeProductLayer(kind, productOf(kind), recon.productLayers[kind], view.value),
-        }))
+      ? ['dem', 'ortho'].flatMap((kind) =>
+          recon.rasterProducts
+            .filter((p) => p.kind === kind)
+            .map((product) => ({
+              kind,
+              product,
+              placed: placeProductLayer(kind, product, recon.productLayers[product.id], view.value),
+            })),
+        )
       : [],
   )
 
@@ -193,7 +199,7 @@ export function useMapProducts() {
   const notes = computed(() => {
     const out = placements.value
       .filter((p) => p.placed?.reason)
-      .map((p) => `${productLabel(p.kind, productOf(p.kind))} is not shown: ${p.placed.reason}.`)
+      .map((p) => `${productLabel(p.kind, p.product)} is not shown: ${p.placed.reason}.`)
     if (mode.value === 'model') {
       out.unshift(
         `Model frame (${modelFrame.value?.unit ?? 'model units'}, no CRS): GCPs, footprints, GPS positions, ` +
@@ -204,10 +210,12 @@ export function useMapProducts() {
   })
 
   // Geometry/value sources for the status-bar probe (it runs per mouse move), so
-  // each is rebuilt only when its product changes.
-  const sources = {
-    dem: computed(() => (recon.dem ? createProductRasterSource('dem', recon.dem) : null)),
-    ortho: computed(() => (recon.ortho ? createProductRasterSource('ortho', recon.ortho) : null)),
+  // each is rebuilt only when its product record changes (a new object on every change).
+  const sourceCache = new WeakMap()
+  function sourceOf(product) {
+    if (!product) return null
+    if (!sourceCache.has(product)) sourceCache.set(product, createProductRasterSource(product.kind, product))
+    return sourceCache.get(product)
   }
 
   // A block-built DEM (SAT-3) answers the probe from its COG: the full-resolution cell
@@ -264,7 +272,8 @@ export function useMapProducts() {
           continue
         }
       }
-      const src = sources[layer.kind].value
+      const product = productById(layer.productId)
+      const src = sourceOf(product)
       const px = src?.worldToPixel(rx, ry)
       if (!px || px.col < 0 || px.row < 0 || px.col >= layer.width || px.row >= layer.height) continue
       const hit = {
@@ -274,7 +283,7 @@ export function useMapProducts() {
         loaded: true,
         value: layer.kind === 'dem' ? src.cellValueAt(rx, ry) : null,
       }
-      if (layer.kind === 'dem' && recon.dem?.cog) return fullResolutionProbe(hit, recon.dem, rx, ry)
+      if (layer.kind === 'dem' && product.cog) return fullResolutionProbe(hit, product, rx, ry)
       return hit
     }
     return mode.value === 'crs' ? external.probeRasterAt(x, y, hidden.value) : null
@@ -307,8 +316,8 @@ export function useMapProducts() {
     if (!layer) return null
     const kind = layer.kind === 'dem' ? 'dem' : 'ortho'
     if (layer.product) {
-      const product = productOf(kind)
-      return { layer, product, source: sources[kind].value, kind, frameStatus: recon.productFrameStatus(product) }
+      const product = productById(layer.productId)
+      return { layer, product, source: sourceOf(product), kind, frameStatus: recon.productFrameStatus(product) }
     }
     return { layer, product: layer, source: external.sources.get(layer.id) ?? null, kind, frameStatus: null }
   })

@@ -9,7 +9,7 @@ import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { useMapSettings } from '../../../composables/useMapSettings.js'
 import { BASEMAPS } from '../../../core/basemaps.js'
-import { productLabel, productMapBlocker } from '../../../core/products/productLayers.js'
+import { productLabel, productLayerId, productMapBlocker } from '../../../core/products/productLayers.js'
 import { mapLayerIds, moveMapLayer } from '../../../core/products/mapOrder.js'
 import { isFootprintSet, vectorKind, vectorLayerId } from '../../../core/products/vectorLayers.js'
 import { IMAGE_LAYER_ID } from '../../../core/products/imageOverlay.js'
@@ -32,7 +32,7 @@ const emit = defineEmits(['close', 'zoom-to'])
 const external = useExternalStore()
 const { rasters } = storeToRefs(external)
 const recon = useReconstructionStore()
-const { dem, ortho, productLayers, mapOrder, mapHidden, imageLayer } = storeToRefs(recon)
+const { rasterProducts, productLayers, mapOrder, mapHidden, imageLayer } = storeToRefs(recon)
 const { selectedId: selectedImageId } = storeToRefs(useImagesStore())
 const vectors = useFootprintsStore()
 const { sets: vectorSets } = storeToRefs(vectors)
@@ -57,23 +57,22 @@ const rowsById = computed(() => {
       fade: (opacity) => external.setRasterOpacity(r.id, opacity),
     })
   }
-  for (const [kind, product] of [
-    ['dem', dem.value],
-    ['ortho', ortho.value],
-  ]) {
-    const layer = productLayers.value[kind]
-    if (!product || !layer?.visible) continue
-    rows.set(`product:${kind}`, {
-      id: `product:${kind}`,
-      name: productLabel(kind, product),
-      icon: kind,
-      kind: kind === 'dem' ? 'DEM' : 'Orthophoto',
-      opacity: layer.opacity ?? 1,
-      blocked: productMapBlocker(product) ?? '',
-      remove: () => recon.setProductVisible(kind, false),
-      fade: (opacity) => recon.setProductOpacity(kind, opacity),
-    })
-  }
+  for (const kind of ['dem', 'ortho'])
+    for (const product of rasterProducts.value) {
+      const layer = productLayers.value[product.id]
+      if (product.kind !== kind || !layer?.visible) continue
+      const id = productLayerId(product)
+      rows.set(id, {
+        id,
+        name: productLabel(kind, product),
+        icon: kind,
+        kind: kind === 'dem' ? 'DEM' : 'Orthophoto',
+        opacity: layer.opacity ?? 1,
+        blocked: productMapBlocker(product) ?? '',
+        remove: () => recon.setProductVisible(product.id, false),
+        fade: (opacity) => recon.setProductOpacity(product.id, opacity),
+      })
+    }
   for (const s of vectorSets.value) {
     if (isFootprintSet(s) || s.visible === false) continue
     const lines = vectorKind(s) === 'lines'

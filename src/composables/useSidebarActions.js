@@ -36,6 +36,7 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     openVectorExport,
     confirmRemoveCloud,
     openCloudExport,
+    openProductExport,
     openComputedProductTab,
     confirmRemoveProduct,
     renameProductFromSidebar,
@@ -73,7 +74,7 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     sensorTableOpen,
     matchListOpen,
     symbologyCloudId,
-    symbologyProductKind,
+    symbologyProductId,
     rasterStyleId,
     importRasterOpen,
     importRasterData,
@@ -215,23 +216,21 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     setMainCloud: setMainProduct,
     zoomToCloud,
     downloadCloud: openCloudExport,
-    // Computed products. The tab, the map layer, symbology and download act on the
-    // main DEM / ortho (by kind); rename, Set as main and remove on any one (by id).
+    // Computed products, each by its id: main or not, any DEM / ortho opens in a tab,
+    // goes on the map, is styled and downloaded. Main is what the next step uses.
     setMainProduct,
     openProduct: openComputedProductTab,
     removeProduct: confirmRemoveProduct,
     renameProduct: renameProductFromSidebar,
-    setProductVisible: ({ kind, visible }) => {
-      unhide(`product:${kind}`, visible)
-      setProductVisible(kind, visible)
+    setProductVisible: ({ id, visible }) => {
+      unhide(`product:${id}`, visible)
+      setProductVisible(id, visible)
     },
-    setProductOpacity: ({ kind, opacity }) => setProductOpacity(kind, opacity),
-    productSymbology: (kind) => {
-      symbologyProductKind.value = kind
+    setProductOpacity: ({ id, opacity }) => setProductOpacity(id, opacity),
+    productSymbology: (id) => {
+      symbologyProductId.value = id
     },
-    downloadProduct: (kind) => {
-      exportKind.value = kind
-    },
+    downloadProduct: openProductExport,
     // Reference rasters
     openRaster: openRasterTab,
     removeRaster: confirmRemoveRaster,

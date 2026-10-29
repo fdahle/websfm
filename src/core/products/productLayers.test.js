@@ -4,6 +4,7 @@ import { MODEL_MAP_CRS } from './modelMap.js'
 
 const basis = { east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1] }
 const dem = {
+  id: 'dem-1',
   width: 4,
   height: 3,
   gsd: 2,
@@ -16,12 +17,12 @@ const dem = {
 const localDem = { ...dem, crs: 'local', frame: { kind: 'local', origin: [10, 20, 5], ...basis } }
 const on = { visible: true, opacity: 0.5 }
 
-it('normalises persisted layer state and drops anything malformed', () => {
+it('normalises persisted layer state, by product id, and drops anything malformed', () => {
   expect(normalizeProductLayers(null)).toEqual({})
   expect(
-    normalizeProductLayers({ dem: { visible: true, opacity: 3 }, ortho: { visible: 'yes' }, mesh: { visible: true } }),
-  ).toEqual({ dem: { visible: true, opacity: 1 }, ortho: { visible: false, opacity: 1 } })
-  expect(normalizeProductLayers({ dem: { visible: true, opacity: 0.4 } }).dem.opacity).toBe(0.4)
+    normalizeProductLayers({ 'dem-1': { visible: true, opacity: 3 }, 'ortho-1': { visible: 'yes' }, 'dem-2': 7 }),
+  ).toEqual({ 'dem-1': { visible: true, opacity: 1 }, 'ortho-1': { visible: false, opacity: 1 } })
+  expect(normalizeProductLayers({ 'dem-1': { visible: true, opacity: 0.4 } })['dem-1'].opacity).toBe(0.4)
 })
 
 it('never blocks the toggle for the frame, only for a missing preview or geometry', () => {
@@ -36,8 +37,9 @@ it('places a CRS product on the CRS map in its own CRS, and explains a local one
   expect(placeProductLayer('dem', dem, { visible: false }, { mode: 'crs' })).toBeNull()
   expect(placeProductLayer('dem', localDem, on, { mode: 'crs' }).reason).toMatch(/Model Frame/)
   expect(placeProductLayer('dem', dem, on, { mode: 'crs' }).layer).toEqual({
-    id: 'product:dem',
+    id: 'product:dem-1',
     product: true,
+    productId: 'dem-1',
     kind: 'dem',
     name: 'Site DEM',
     crs: 'EPSG:32632',
@@ -57,7 +59,7 @@ it('translates a local product into the model map by its origin offset', () => {
   expect(layer.offset).toEqual([3, 2])
   expect(layer.geoTransform).toMatchObject({ originX: 103, originY: 52 })
   expect(placeProductLayer('dem', dem, on, view).reason).toMatch(/project CRS/)
-  expect(placeProductLayer('dem', localDem, on, { ...view, stale: new Set(['dem']) }).reason).toMatch(
+  expect(placeProductLayer('dem', localDem, on, { ...view, stale: new Set(['dem-1']) }).reason).toMatch(
     /older sparse model/,
   )
 })

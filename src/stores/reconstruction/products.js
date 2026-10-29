@@ -13,8 +13,8 @@ import { productMapBlocker } from '../../core/products/productLayers.js'
 // symbology, the main product, their map-layer state, saving and removal. Generating
 // them is reconstruction/productRuns.js.
 //
-// The map layer and the product tab show the MAIN product of a kind, as Metashape
-// shows its default DEM and orthomosaic; `productLayers` is keyed by kind for that.
+// Every product opens in its own tab and can go on the map (`productLayers` is keyed
+// by product id); the MAIN one of a kind is what the next step uses.
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createProducts({
@@ -41,8 +41,7 @@ export function createProducts({
     rasterProducts.value = rasterProducts.value.map((p) => (p.id === next.id ? next : p))
   }
 
-  // Names are labels only: tabs, layers and files key off the id (or, for what the
-  // map and the tab show, the kind's main product).
+  // Names are labels only: tabs, layers and files key off the id.
   function renameProduct(id, name) {
     const product = productById(id)
     const trimmed = name?.trim()
@@ -55,7 +54,7 @@ export function createProducts({
     return true
   }
 
-  // Right-click ▸ Set as main: what the map, the product tab and the next build use.
+  // Right-click ▸ Set as main: what the next build uses.
   function setMainProduct(id) {
     const product = productById(id)
     if (!product || mainProductIds.value[product.kind] === id) return false
@@ -146,46 +145,47 @@ export function createProducts({
       .catch(() => {})
   }
 
-  // Show/hide the main DEM/ortho on the map. Refused (logged, false) when the
-  // product cannot be placed — the ribbon and sidebar grey the toggle for the same
-  // reason, from the same productMapBlocker.
-  function setProductVisible(kind, visible) {
-    const product = productForKind(kind)
+  // Show/hide a DEM/ortho on the map. Refused (logged, false) when the product
+  // cannot be placed — the ribbon and sidebar grey the toggle for the same reason,
+  // from the same productMapBlocker.
+  function setProductVisible(id, visible) {
+    const product = productById(id)
+    if (!product) return false
     const blocker = visible ? productMapBlocker(product) : null
     if (blocker) {
       log(`Map: ${blocker}`, 'warn', 'Products')
       return false
     }
-    const prev = productLayers.value[kind] ?? { visible: false, opacity: 1 }
+    const prev = productLayers.value[id] ?? { visible: false, opacity: 1 }
     if (prev.visible === !!visible) return true
-    productLayers.value = { ...productLayers.value, [kind]: { ...prev, visible: !!visible } }
-    log(`${product?.name || fallbackName(kind)} ${visible ? 'shown on' : 'hidden from'} the map`, 'info', 'Products', {
-      channel: 'activity',
-    })
+    productLayers.value = { ...productLayers.value, [id]: { ...prev, visible: !!visible } }
+    log(
+      `${product.name || fallbackName(product.kind)} ${visible ? 'shown on' : 'hidden from'} the map`,
+      'info',
+      'Products',
+      { channel: 'activity' },
+    )
     save()
     return true
   }
-  function setProductOpacity(kind, opacity) {
-    const prev = productLayers.value[kind] ?? { visible: false, opacity: 1 }
+  function setProductOpacity(id, opacity) {
+    const prev = productLayers.value[id] ?? { visible: false, opacity: 1 }
     const next = Math.min(1, Math.max(0, Number(opacity)))
     if (!Number.isFinite(next) || next === prev.opacity) return
-    productLayers.value = { ...productLayers.value, [kind]: { ...prev, opacity: next } }
+    productLayers.value = { ...productLayers.value, [id]: { ...prev, opacity: next } }
     save()
   }
 
   // Removing the main product makes the newest one left of its kind the main one
-  // (core/products/productSet.js mainOf), which then takes its place on the map.
+  // (core/products/productSet.js mainOf).
   async function removeProduct(id) {
     const product = productById(id)
     if (!product) return false
     const { kind } = product
     const name = product.name || fallbackName(kind)
     rasterProducts.value = rasterProducts.value.filter((p) => p.id !== id)
-    // The last of its kind: one built later starts afresh rather than inheriting
-    // this one's layer state, and goes on the map as a first build does.
-    const lastOfKind = !rasterProducts.value.some((p) => p.kind === kind)
-    if (lastOfKind && productLayers.value[kind]) {
-      const { [kind]: _removed, ...rest } = productLayers.value
+    if (productLayers.value[id]) {
+      const { [id]: _removed, ...rest } = productLayers.value
       productLayers.value = rest
     }
     if (mainProductIds.value[kind] === id) {

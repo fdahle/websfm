@@ -26,7 +26,7 @@ export function useTabs(imageById, showMap) {
 
   // Which tabs are open, by id — so a sidebar "Open in tab" action can say
   // "Switch to tab" instead when the target is already there. Tab ids are built
-  // by the open* helpers below (`img:<uuid>`, `raster:<id>`, `product:<kind>`…),
+  // by the open* helpers below (`img:<uuid>`, `raster:<id>`, `product:<product id>`…),
   // so a caller asks with the same key it would open with.
   const openTabIds = computed(() => new Set(tabs.value.map((t) => t.id)))
 
@@ -100,23 +100,16 @@ export function useTabs(imageById, showMap) {
     activeTabId.value = 'metadata'
   }
 
-  // Open a raster product (DEM / orthophoto) in its own tab, like an image.
-  // One tab per kind; re-opening focuses the existing tab.
-  function openProductTab(kind, title) {
-    // 'dem' | 'ortho'
-    const tabId = `product:${kind}`
+  // Open a raster product (a DEM / orthophoto record, main or not) in its own tab,
+  // like an image. One tab per product; re-opening focuses the existing tab.
+  function openProductTab(product) {
+    if (!product) return
+    const { id, kind } = product
+    const title = product.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
+    const tabId = `product:${id}`
     const existing = tabs.value.find((t) => t.id === tabId)
-    if (existing) {
-      if (title) existing.title = title
-    } else {
-      tabs.value.push({
-        id: tabId,
-        type: 'product',
-        productKind: kind,
-        title: title || (kind === 'ortho' ? 'Orthophoto' : 'DEM'),
-        closable: true,
-      })
-    }
+    if (existing) existing.title = title
+    else tabs.value.push({ id: tabId, type: 'product', productId: id, productKind: kind, title, closable: true })
     activeTabId.value = tabId
   }
 

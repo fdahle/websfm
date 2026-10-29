@@ -14,7 +14,7 @@ export function vectorSection(set) {
   return set.source === 'imported' ? 'reference' : 'products'
 }
 
-/** A set's id in the map's layer stack (mapOrder.js), beside `product:dem` and raster ids. */
+/** A set's id in the map's layer stack (mapOrder.js), beside `product:<product id>` and raster ids. */
 export const vectorLayerId = (setId) => `vector:${setId}`
 
 /** 'lines' (contours) or 'polygons' (an imported file). */
