@@ -42,6 +42,8 @@ Notable changes to websfm. The format follows
   right now. An aerial project still assumes the cameras look down; when the photos
   look up instead, the sparse run warns that the scene type is probably wrong, since
   its automatic orientation then turns the model over.
+- **An orthophoto too large for PNG or JPEG no longer says "coming soon".** The export
+  dialog added "coming soon" to every greyed format, after the reason it was greyed.
 
 ## [0.5.0] — 2026-10-28
 

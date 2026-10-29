@@ -241,7 +241,7 @@ const orthoNodataApplies = computed(
     <SettingsField label="Format" label-for="fmt">
       <select id="fmt" v-model="settings.format" class="field-input field-select">
         <option v-for="f in cfg.formats" :key="f.value" :value="f.value" :disabled="f.disabled">
-          {{ f.label }}{{ f.disabled ? ' — coming soon' : '' }}
+          {{ f.label }}
         </option>
       </select>
     </SettingsField>
