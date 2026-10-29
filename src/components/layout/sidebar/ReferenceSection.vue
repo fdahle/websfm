@@ -260,7 +260,7 @@ const ctxOpenLabel = computed(() =>
           title="For a photo that was taken for a georeferenced raster: move it to the source images"
           @click="fromMenu((r) => sidebar.convertRasterToImage(r.id))"
         >
-          Convert to source image…
+          Convert to source image
         </button>
         <button class="ctx-item" @click="fromMenu((r) => startRename(r.id, r.name))">Rename</button>
 

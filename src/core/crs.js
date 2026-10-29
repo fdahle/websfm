@@ -184,6 +184,26 @@ async function saveDefCache() {
   await writeAppJson(DEF_CACHE_FILE, defCache || {}).catch(() => {})
 }
 
+// A definition that is neither built in nor in the bundled catalog came from epsg.io
+// and lives in this browser's cache only. The open project keeps a copy too
+// (useProjectsStore: project.json `crsDefs`), so it resolves offline wherever the
+// project goes; `rememberCrsDefs` puts a project's copies back.
+let onFetchedDef = null
+export function setFetchedDefListener(fn) {
+  onFetchedDef = fn
+}
+export async function rememberCrsDefs(defs) {
+  if (!defs || typeof defs !== 'object') return
+  const cache = await loadDefCache()
+  let added = false
+  for (const [code, def] of Object.entries(defs)) {
+    if (typeof def !== 'string' || !def.startsWith('+') || cache[code]) continue
+    cache[code] = def
+    added = true
+  }
+  if (added) await saveDefCache()
+}
+
 // Generate a UTM proj4 def from an EPSG code (326xx = north, 327xx = south).
 function utmDef(code) {
   const m = /^EPSG:(326|327)(\d{2})$/.exec(code)
@@ -299,6 +319,7 @@ export async function ensureProjection(code, supplied = null) {
   const cache = await loadDefCache()
   if (cache[code]) {
     applyDef(code, cache[code])
+    onFetchedDef?.(code, cache[code])
     return true
   }
 
@@ -326,6 +347,7 @@ export async function ensureProjection(code, supplied = null) {
   cache[code] = def
   await saveDefCache()
   applyDef(code, def)
+  onFetchedDef?.(code, def)
   return true
 }
 

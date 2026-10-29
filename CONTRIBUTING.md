@@ -127,6 +127,13 @@ adds, removes or renames a setting, operation or user-visible feature:
    [docs/METHODS.md](docs/METHODS.md). The unit tests fail on a key that does not
    resolve, an entry nothing cites, or one missing from METHODS.md.
 
+## Menu labels
+
+A menu item or a small button ends in **…** when it needs more from you before it acts:
+a dialog with settings, a file or folder picker (*Symbology…*, *Download…*, *Move to
+folder…*). One that acts at once, or only asks "are you sure?", has none (*Rename*,
+*Delete*, *Remove*).
+
 ## An option or not
 
 A change that makes a step faster or better either becomes a setting or doesn't:

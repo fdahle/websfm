@@ -7,6 +7,7 @@ export {
   binaryDocumentOf,
   copyTree,
   deleteOpfsProjectTree,
+  clearDirectory,
   deleteProject,
   deleteProjectDerived,
   dirIsEmpty,

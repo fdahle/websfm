@@ -6,6 +6,17 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Open a project file into a folder.** Opening a `.websfm` file now asks whether to
+  keep the project in this browser or in a folder on your disk, where it is unpacked
+  straight away, so a file larger than the browser allows still opens. Only where
+  folders are possible (Chrome, Edge); elsewhere it goes into the browser, as before.
+- **See where each project is saved.** The project list shows a project's folder (its
+  icon and name) or *In this browser* with its size, and at its foot how much WebSfM
+  holds in this browser, with a warning and **Ask the browser to keep it** when the
+  browser may clear that storage. **Project settings ▸ Where it is saved** has **Move
+  to folder…** (or **Move to browser storage**) and **Export project file…**, and says
+  when the project was last exported. A coordinate system looked up on epsg.io is
+  saved in the project, so it opens offline in another browser.
 - **Work with every DEM and orthophoto, not only the main one.** Any DEM or orthophoto
   in the sidebar now opens in a tab of its own, goes on the map, takes a symbology and
   downloads, where before these were greyed out until it was set as main. Main still
@@ -76,6 +87,14 @@ Notable changes to websfm. The format follows
   Safari), how to free space; **Dismiss** forgets changes that cannot be saved, which
   before kept the card up for good. The point-cloud octree a large import builds is
   written by its worker, outside this, and still fails the import when storage is full.
+- **Export project file, not "Save a copy".** **Other ▸ Export Project** and the project
+  list's **Export project file…** write the `.websfm` file, named for what they do: the
+  project stays where it is. Its dialog says what leaving out the derived data costs
+  (depth maps, DEMs and orthophotos have to be built again; it said they rebuild on
+  demand) and no longer mentions a 4 GB limit, which ZIP64 lifted; in Firefox and
+  Safari it warns about a large file. Menu items that only ask "are you sure?" no
+  longer end in "…" (**Delete**, **Remove from WebSfM**, **Convert to source image**),
+  and the project list draws the capture type with the app's icons.
 - **Settings in groups.** The General and Map & 3D tabs of Settings put their settings
   under headings (Appearance, Help and dialogs, During a run, Notices; Map, 3D view)
   instead of one long list of switches.

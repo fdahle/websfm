@@ -741,13 +741,12 @@ export const TABS = [
       {
         // Everything project-*scoped* (new / open / storage migration / delete)
         // lives behind the project button's picker, which is the project's one
-        // home. The ribbon keeps only this: work is autosaved into invisible
-        // browser storage, so writing a portable `.websfm` copy is a frequent,
-        // verb-shaped action — and it is a *copy*, never "the save".
+        // home. The ribbon keeps only this: work is autosaved, so writing a
+        // portable `.websfm` file is an export — the project stays where it is.
         label: 'Project',
         commands: [
           { id: 'open-project-settings', label: 'Project\nSettings', icon: 'settings', needs: ['project'] },
-          { id: 'save-project-file', label: 'Save a\nCopy…', icon: 'save', needs: ['project'] },
+          { id: 'save-project-file', label: 'Export\nProject', icon: 'save', needs: ['project'] },
         ],
       },
       {

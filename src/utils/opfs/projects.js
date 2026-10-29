@@ -135,6 +135,14 @@ export async function deleteProject(projectId) {
   })
 }
 
+// Empty a folder WebSfM filled itself (a project file unpacked into a folder that
+// was empty, whose unpack failed). Never called on a folder that held anything before.
+export async function clearDirectory(dirHandle) {
+  const names = []
+  for await (const name of dirHandle.keys()) names.push(name)
+  for (const name of names) await dirHandle.removeEntry(name, { recursive: true }).catch(ignoreMissing)
+}
+
 // Delete the OPFS tree regardless of any registered folder root — used by the
 // OPFS→folder migration once the copy has been verified, where the source is
 // known to be the OPFS tree even though the root is by then re-registered.

@@ -26,6 +26,7 @@ import { saveProjectHandle, loadProjectHandle, deleteProjectHandle } from '../ut
 import { useLog } from '../composables/useLog.js'
 import { version as appVersion } from '../../package.json'
 import { projectFormatProblem } from '../core/projectFormat.js'
+import { rememberCrsDefs, setFetchedDefListener } from '../core/crs.js'
 
 // The project index: which projects exist, which one is open, and its metadata
 // (name, scene type, working CRS). Foundational store — most other stores read
@@ -47,6 +48,17 @@ export const useProjectsStore = defineStore('projects', () => {
   const currentProjectName = computed(() => currentProject.value?.name || null)
   const currentSceneType = computed(() => currentProject.value?.sceneType || null)
   const currentCrs = computed(() => currentProject.value?.crs || 'EPSG:4326')
+
+  // A coordinate system resolved from epsg.io while a project is open goes into the
+  // project (`crsDefs`, on the entry the project document is written from, and into
+  // project.json at once), so the project carries it to any browser (crs.js).
+  setFetchedDefListener((code, def) => {
+    const p = currentProject.value
+    if (!p || !isPersisting.value || p.crsDefs?.[code] === def) return
+    p.crsDefs = { ...p.crsDefs, [code]: def }
+    const crsDefs = p.crsDefs
+    opfs.updateProject(p.id, (data) => ({ ...data, crsDefs })).catch(() => {})
+  })
 
   // True when there is an open project AND OPFS is usable — the single gate every
   // project-scoped store checks before reading/writing persistence. Hoisted here
@@ -191,6 +203,12 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!data) {
       newLease?.()
       return null
+    }
+    // Coordinate systems this project fetched from epsg.io, put back first, so they
+    // resolve offline in a browser that never fetched them (crs.js rememberCrsDefs).
+    if (data.crsDefs) {
+      p.crsDefs = data.crsDefs
+      await rememberCrsDefs(data.crsDefs).catch(() => {})
     }
     const previousId = currentProjectId.value
     const previousModified = p.lastModified
@@ -495,7 +513,7 @@ export const useProjectsStore = defineStore('projects', () => {
     await flushPersistence()
     const project = projects.value.find((p) => p.id === id)
     if (!project) throw new Error('project not found')
-    return exportProjectArchive({
+    const res = await exportProjectArchive({
       projectId: id,
       manifest: buildManifest({ project, appVersion, includeDerived }),
       fileName: archiveFileName(project.name),
@@ -503,13 +521,24 @@ export const useProjectsStore = defineStore('projects', () => {
       onProgress,
       onLog,
     })
+    // When it was last written to a project file, the backup a browser-stored project
+    // has (Project settings shows it).
+    if (res && !res.cancelled) {
+      project.lastExportedAt = new Date().toISOString()
+      await saveIndex().catch(() => {})
+    }
+    return res
   }
 
   // Unpack into a FRESH project id. Internal image/pair/cloud uuids are
   // project-scoped, so nothing inside needs rewriting — only `project.json`'s own
   // id (and the name, on a clash) are stamped over afterwards.
-  // Returns the new project id; the caller opens it through the normal restore path.
-  async function importProject(file, { onProgress = null, onLog = null } = {}) {
+  // `dirHandle`: unpack into that folder on disk, which then is the project (a folder
+  // project), instead of into browser storage — never through browser storage, so a
+  // file larger than the browser allows still opens. The caller has checked the folder
+  // (newFolderVerdict). Returns the new project id; the caller opens it through the
+  // normal restore path.
+  async function importProject(file, { onProgress = null, onLog = null, dirHandle = null } = {}) {
     if (!persistenceAvailable.value) throw new Error('browser storage is unavailable — cannot import a project')
 
     // Validate before writing a single byte: the manifest is the archive's first
@@ -519,18 +548,28 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!verdict.ok) throw new Error(verdict.error)
 
     const id = crypto.randomUUID()
+    // A folder that held nothing is WebSfM's to empty again if the unpack fails; one
+    // that held files (the user said to go ahead) keeps whatever is in it.
+    const folderWasEmpty = dirHandle ? await opfs.dirIsEmpty(dirHandle) : false
+    if (dirHandle) opfs.setProjectRoot(id, dirHandle)
+    // Never leave a half-written project behind.
+    const discard = async () => {
+      if (!dirHandle) return opfs.deleteProject(id).catch(() => {})
+      opfs.clearProjectRoot(id)
+      if (folderWasEmpty) await opfs.clearDirectory(dirHandle).catch(() => {})
+    }
     let manifest
     try {
       ;({ manifest } = await importProjectArchive({ file, projectId: id, onProgress, onLog }))
     } catch (err) {
-      await opfs.deleteProject(id).catch(() => {}) // never leave a half-written project behind
+      await discard()
       throw err
     }
 
     const data = await opfs.readProject(id)
     const problem = data ? projectFormatProblem(data) : 'project file is missing project.json'
     if (problem) {
-      await opfs.deleteProject(id).catch(() => {})
+      await discard()
       throw new Error(problem)
     }
 
@@ -547,7 +586,9 @@ export const useProjectsStore = defineStore('projects', () => {
       createdAt: data.createdAt || manifest.project?.createdAt || now,
       lastModified: now,
       createdWithVersion: data.createdWithVersion || null,
+      ...(dirHandle ? { storage: STORAGE_FOLDER, folderName: dirHandle.name } : {}),
     }
+    if (dirHandle) await saveProjectHandle(id, dirHandle)
     await opfs.writeProject(id, { ...data, ...entry })
     projects.value.push(entry)
     await saveIndex()

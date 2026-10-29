@@ -9,6 +9,8 @@ import ModalShell from '../ui/ModalShell.vue'
 // cancels; Enter activates whichever button is focused. Esc, the backdrop and ×
 // cancel. `danger` styles the confirm button red. `dontAsk` adds a "Don't ask
 // again" checkbox; its state rides along on `confirm` (cancelling never stores it).
+// `altLabel` adds a second answer between Cancel and confirm, for a choice of two
+// (useConfirmations chooseDialog), emitted as `alt`.
 defineProps({
   title: { type: String, default: 'Are you sure?' },
   message: { type: String, default: '' },
@@ -16,8 +18,9 @@ defineProps({
   cancelLabel: { type: String, default: 'Cancel' },
   danger: { type: Boolean, default: false },
   dontAsk: { type: Boolean, default: false },
+  altLabel: { type: String, default: '' },
 })
-const emit = defineEmits(['confirm', 'cancel'])
+const emit = defineEmits(['confirm', 'cancel', 'alt'])
 const dontAskAgain = ref(false)
 </script>
 
@@ -32,6 +35,7 @@ const dontAskAgain = ref(false)
 
     <template #footer>
       <button class="btn" autofocus @click="emit('cancel')">{{ cancelLabel }}</button>
+      <button v-if="altLabel" class="btn" @click="emit('alt')">{{ altLabel }}</button>
       <button class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" @click="emit('confirm', dontAskAgain)">
         {{ confirmLabel }}
       </button>

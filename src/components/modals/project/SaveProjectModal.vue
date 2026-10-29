@@ -1,19 +1,15 @@
 <script setup>
-// "Save project as…" — the only choice is whether to carry the recomputable-but-
-// expensive caches (transcoded image blobs, depth maps, DEM/ortho products). The
-// live sizes are shown because that is the only number that makes the trade-off
-// decidable, and the 4 GB ZIP ceiling makes it occasionally forced.
+// Export project file — the only choice is whether to carry the recomputable-but-
+// expensive data (transcoded image blobs, depth maps, DEM/ortho products). The live
+// sizes are shown because that is the only number that makes the trade-off decidable.
+// There is no size ceiling (ZIP64 past 4 GB, utils/zip.js); a browser without a save
+// dialog assembles the file before it downloads, which the dialog says.
 import { ref, computed, onMounted } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import * as opfs from '../../../utils/opfs.js'
-import {
-  ARCHIVE_DERIVED_DIRS,
-  shouldArchivePath,
-  archiveSizeVerdict,
-  formatBytes,
-} from '../../../core/io/projectArchive.js'
+import { ARCHIVE_DERIVED_DIRS, shouldArchivePath, formatBytes } from '../../../core/io/projectArchive.js'
 
 const props = defineProps({
   projectId: { type: String, required: true },
@@ -39,23 +35,28 @@ const estimate = computed(() => {
   if (!sizes.value) return null
   return includeDerived.value ? sizes.value.all : sizes.value.all - sizes.value.derived
 })
-const tooLarge = computed(() => estimate.value != null && !archiveSizeVerdict(estimate.value).ok)
+// Firefox and Safari: no save dialog, so the file is gathered before it downloads.
+const buffered = typeof window === 'undefined' || !window.showSaveFilePicker
+// Past this, a gathered file is worth a word of warning: it needs that much room
+// while it is put together (utils/projectFile.js openArchiveSink).
+const BUFFERED_WARN_BYTES = 2 * 1024 ** 3
 </script>
 
 <template>
-  <ModalShell title="Save project as…" @close="emit('close')">
+  <ModalShell title="Export project file" @close="emit('close')">
     <p class="intro">
-      Writes a single <code>.websfm</code> file containing this project — source images, features, matches,
-      reconstruction and ground control. It can be reopened on any machine, in any browser.
+      Writes the whole project into one <code>.websfm</code> file: source images, features, matches, the reconstruction,
+      clouds and meshes, ground control and measurements. Open it on any machine, in any browser, with Open existing ▸
+      Project file. The project itself stays where it is and keeps saving there.
     </p>
 
     <SettingsField
-      hint="Transcoded image previews, depth maps and DEM/ortho products. Excluding them
-            makes a much smaller file; WebSfM rebuilds them on demand."
+      hint="Left out, the file is much smaller. Image previews are made again when needed; depth maps, DEMs and
+            orthophotos are not, and have to be built again."
     >
       <label class="check-row">
         <input v-model="includeDerived" type="checkbox" />
-        <span>Include cached &amp; derived data</span>
+        <span>Include depth maps, DEMs, orthophotos and image previews</span>
       </label>
     </SettingsField>
 
@@ -65,20 +66,21 @@ const tooLarge = computed(() => estimate.value != null && !archiveSizeVerdict(es
         <span
           >Uncompressed size: <strong>{{ formatBytes(estimate) }}</strong></span
         >
-        <span v-if="sizes.derived" class="dim"> (cached &amp; derived data: {{ formatBytes(sizes.derived) }}) </span>
+        <span v-if="sizes.derived" class="dim">
+          (depth maps, DEMs, orthophotos and previews: {{ formatBytes(sizes.derived) }})
+        </span>
       </template>
     </div>
 
-    <WarnBox v-if="tooLarge">
-      This project is too large for a single project file — the ZIP format caps at 4 GB.
-      <template v-if="includeDerived"> Try excluding cached &amp; derived data.</template>
+    <WarnBox v-if="buffered && estimate > BUFFERED_WARN_BYTES">
+      This browser has no save dialog, so the file is put together before it downloads, and needs that much room while
+      it is. For a project this large, leave the depth maps and products out, or use Chrome or Edge, which write the
+      file straight to disk.
     </WarnBox>
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!sizes || tooLarge" @click="emit('run', { includeDerived })">
-        Save…
-      </button>
+      <button class="btn btn-primary" :disabled="!sizes" @click="emit('run', { includeDerived })">Export…</button>
     </template>
   </ModalShell>
 </template>

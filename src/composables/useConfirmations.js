@@ -44,6 +44,25 @@ export function confirmDialog(opts) {
   })
 }
 
+// A choice of two, and Cancel: → 'confirm' | 'alt' | null. `altLabel` names the second
+// answer; the confirm button is the first.
+export function chooseDialog(opts) {
+  return new Promise((resolve) => {
+    askConfirm({
+      ...opts,
+      onConfirm: () => resolve('confirm'),
+      onAlt: () => resolve('alt'),
+      onCancel: () => resolve(null),
+    })
+  })
+}
+
+export function altPendingConfirm() {
+  const onAlt = pendingConfirm.value?.onAlt
+  pendingConfirm.value = null
+  onAlt?.()
+}
+
 export function cancelPendingConfirm() {
   const onCancel = pendingConfirm.value?.onCancel
   pendingConfirm.value = null

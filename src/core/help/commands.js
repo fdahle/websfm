@@ -184,7 +184,7 @@ export const CONSOLE_NAMES = {
   'import-colmap': ['import colmap', 'colmap-import'],
   'eval-overview': ['report', 'quality'],
   'open-project-settings': ['project settings', 'project properties'],
-  'save-project-file': ['save copy'],
+  'save-project-file': ['export project', 'project file', 'save copy'],
   'toggle-console': ['console'],
   'open-settings': ['settings'],
   'open-glossary': ['glossary'],

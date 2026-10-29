@@ -7,6 +7,7 @@ import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { useModalsStore } from '../../stores/useModalsStore.js'
 import { useTheme } from '../../composables/useTheme.js'
 import { useAppContext } from '../../appContext.js'
+import { altPendingConfirm } from '../../composables/useConfirmations.js'
 import AboutModal from './app/AboutModal.vue'
 import ConfirmModal from './app/ConfirmModal.vue'
 import FolderReconnectModal from './project/FolderReconnectModal.vue'
@@ -245,7 +246,9 @@ const progressSpotlight = computed(() =>
       :cancel-label="pendingConfirm.cancelLabel || 'Cancel'"
       :dont-ask="!!pendingConfirm.onDontAsk"
       :danger="pendingConfirm.danger ?? true"
+      :alt-label="pendingConfirm.altLabel || ''"
       @confirm="runPendingConfirm"
+      @alt="altPendingConfirm"
       @cancel="cancelPendingConfirm"
     />
   </Teleport>
@@ -286,6 +289,25 @@ const progressSpotlight = computed(() =>
       :crs-suggestion="crsSuggestion"
       @set-crs="handleSetCrs"
       @apply-crs-suggestion="applyCrsSuggestion"
+      :folder-supported="folderSupported"
+      @move-to-folder="
+        () => {
+          projectSettingsOpen = false
+          moveCurrentProjectToFolder()
+        }
+      "
+      @move-to-browser="
+        () => {
+          projectSettingsOpen = false
+          moveCurrentProjectToBrowser()
+        }
+      "
+      @export-file="
+        () => {
+          projectSettingsOpen = false
+          saveProjectOpen = true
+        }
+      "
     />
   </Teleport>
 

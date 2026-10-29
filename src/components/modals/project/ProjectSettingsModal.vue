@@ -15,8 +15,32 @@ const props = defineProps({
   // Projected CRS derived from the camera positions while the CRS is geographic
   // (reconstruction store `crsSuggestion`); null otherwise.
   crsSuggestion: { type: Object, default: null },
+  // Chromium-only (showDirectoryPicker): moving between browser storage and a folder.
+  folderSupported: { type: Boolean, default: false },
 })
-const emit = defineEmits(['close', 'rename', 'set-crs', 'apply-crs-suggestion'])
+const emit = defineEmits([
+  'close',
+  'rename',
+  'set-crs',
+  'apply-crs-suggestion',
+  'move-to-folder',
+  'move-to-browser',
+  'export-file',
+])
+const inFolder = computed(() => isFolderProject(props.project))
+// The project file it was last written to (useProjectsStore exportProject), its backup.
+const lastExported = computed(() => {
+  const d = props.project.lastExportedAt ? new Date(props.project.lastExportedAt) : null
+  return d && !Number.isNaN(d.getTime())
+    ? d.toLocaleString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null
+})
 
 const name = ref(props.project.name || '')
 const measuring = ref(true)
@@ -114,16 +138,42 @@ onMounted(measure)
           <strong>{{ project.sceneType === 'object' ? 'Object capture' : 'Aerial / mapping' }}</strong>
         </div>
         <div class="readout-row">
-          <span>Location</span>
-          <strong>{{ isFolderProject(project) ? folderLabel(project) : 'Browser storage' }}</strong>
-        </div>
-        <div class="readout-row">
           <span>Created with</span>
           <strong>{{ project.createdWithVersion ? `WebSfM v${project.createdWithVersion}` : 'Unknown' }}</strong>
         </div>
         <div class="readout-row">
           <span>Current app</span>
           <strong>WebSfM v{{ appVersion }}</strong>
+        </div>
+      </section>
+
+      <!-- Where the project is kept, and the ways to change that: the one place a
+           user looks for it, so the move lives here as well as in the ⋯ menu. -->
+      <section class="section">
+        <h3>Where it is saved</h3>
+        <div class="readout-row">
+          <span>Location</span>
+          <strong>{{ inFolder ? folderLabel(project) : 'This browser' }}</strong>
+        </div>
+        <div class="readout-row">
+          <span>Last exported</span>
+          <strong>{{ lastExported ?? 'Never' }}</strong>
+        </div>
+        <p v-if="inFolder">
+          WebSfM saves into this folder on your disk as you work. The folder is the project: back it up as a whole,
+          while the project is closed.
+        </p>
+        <p v-else>
+          WebSfM saves into this browser's private storage as you work. It belongs to this browser profile: clearing the
+          site's data deletes it.
+          <template v-if="folderSupported">Move it to a folder to keep it on your disk.</template>
+        </p>
+        <div class="action-row">
+          <template v-if="folderSupported">
+            <button v-if="!inFolder" class="btn" @click="emit('move-to-folder')">Move to folder…</button>
+            <button v-else class="btn" @click="emit('move-to-browser')">Move to browser storage</button>
+          </template>
+          <button class="btn" @click="emit('export-file')">Export project file…</button>
         </div>
       </section>
 
@@ -269,6 +319,11 @@ p {
 }
 .clear-row {
   margin-top: 12px;
+}
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .clear-row > div > span {
   display: block;

@@ -1,6 +1,11 @@
+<script>
+// Measured project sizes, by `${id}:${lastModified}`, for the session.
+const sizeCache = new Map()
+</script>
+
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { isFolderProject, folderLabel } from '../../core/io/folderProject.js'
+import { isFolderProject } from '../../core/io/folderProject.js'
 import { EXAMPLES } from '../../core/examples.js'
 import { formatBytes } from '../../core/formatBytes.js'
 import BetaBadge from './BetaBadge.vue'
@@ -9,6 +14,7 @@ import Icon from '../Icon.vue'
 import { useInlineRename } from '../../composables/useInlineRename.js'
 import { confirmDialog, confirmOpen } from '../../composables/useConfirmations.js'
 import { matches } from '../../core/help/shortcuts.js'
+import * as opfs from '../../utils/opfs.js'
 
 const props = defineProps({
   projects: { type: Array, required: true },
@@ -19,6 +25,52 @@ const props = defineProps({
   // Chromium-only (showDirectoryPicker). Hidden rather than disabled elsewhere.
   folderSupported: { type: Boolean, default: false },
 })
+
+// What each browser-stored project takes, and the browser storage as a whole: the
+// numbers that say when a project is better off in a folder. A size is measured once
+// per project version (id + lastModified), in the background — walking a large
+// project's tree takes a moment, and the cache outlives the picker, which mounts each
+// time it opens (the plain <script> block below). A folder project's size is its folder's business.
+const sizes = ref(new Map())
+async function measureSizes() {
+  for (const p of props.projects) {
+    if (isFolderProject(p)) continue
+    const key = `${p.id}:${p.lastModified}`
+    if (!sizeCache.has(key)) {
+      try {
+        const dir = await opfs.getOpfsProjectDir(p.id)
+        sizeCache.set(key, (await opfs.measureTree(dir)).bytes)
+      } catch {
+        continue
+      }
+    }
+    sizes.value = new Map(sizes.value).set(p.id, sizeCache.get(key))
+  }
+}
+// { usage, durable } of this browser's storage for the whole site, or null.
+const browserStorage = ref(null)
+const durableNote = ref('')
+async function readBrowserStorage() {
+  try {
+    const estimate = await opfs.getQuota()
+    const durable = navigator.storage?.persisted ? await navigator.storage.persisted() : null
+    browserStorage.value = { usage: estimate.usage ?? 0, durable }
+  } catch {
+    browserStorage.value = null
+  }
+}
+// Chromium decides this silently from how the site is used; only Firefox asks.
+async function keepStorage() {
+  try {
+    const granted = await opfs.requestDurable()
+    browserStorage.value = { ...browserStorage.value, durable: granted }
+    durableNote.value = granted
+      ? ''
+      : 'The browser declined for now. Browsers usually agree once a site is used regularly, bookmarked or installed as an app.'
+  } catch (err) {
+    durableNote.value = `Could not ask: ${err?.message ?? err}`
+  }
+}
 
 const emit = defineEmits([
   'switch',
@@ -37,7 +89,7 @@ const emit = defineEmits([
 
 // Per-project actions live in one row menu rather than a row of icon buttons:
 // this is the single home for project-scoped commands (the ribbon keeps only
-// "Save a copy…"). Saving and migrating storage read/write the whole project
+// "Export Project"). Saving and migrating storage read/write the whole project
 // tree, which needs the project's root registered — so they are offered on the
 // *open* project only, with the reason spelled out rather than hidden.
 const menu = ref(null) // { id, name, x, y } | null
@@ -87,11 +139,11 @@ async function confirmDelete(project) {
   if (ok) emit('delete', project.id)
 }
 
-// A short, glanceable summary line for each project: scene type, then CRS (aerial
-// only — object-capture projects have none), then when it was last touched.
+// A short, glanceable summary line for each project, after where it is stored (the
+// folder icon and name, or "In this browser"): scene type, then CRS (aerial only —
+// object-capture projects have none), then when it was last touched.
 function projectMeta(project) {
   const parts = [project.sceneType === 'object' ? 'Object capture' : 'Aerial']
-  if (isFolderProject(project)) parts.push(folderLabel(project))
   if (project.sceneType !== 'object' && project.crs) parts.push(project.crs)
   const edited = formatDate(project.lastModified)
   if (edited) parts.push(`edited ${edited}`)
@@ -130,6 +182,8 @@ function onOutsideClick(e) {
 onMounted(() => {
   document.addEventListener('mousedown', onOutsideClick)
   document.addEventListener('keydown', onKey)
+  measureSizes()
+  readBrowserStorage()
 })
 
 onBeforeUnmount(() => {
@@ -163,11 +217,23 @@ onBeforeUnmount(() => {
           <span class="check">{{ project.id === currentProjectId ? '✓' : '' }}</span>
           <button type="button" class="project-main" @click="emit('switch', project.id)">
             <div class="project-name-row">
-              <span class="scene-badge">{{ project.sceneType === 'aerial' ? '✈' : '◼' }}</span>
-              <span v-if="isFolderProject(project)" class="storage-badge" title="Stored in a folder on disk">🗀</span>
+              <span class="scene-badge" :title="project.sceneType === 'object' ? 'Object capture' : 'Aerial'">
+                <Icon :name="project.sceneType === 'object' ? 'cube' : 'map-pin'" />
+              </span>
               <span class="project-name">{{ project.name }}</span>
             </div>
-            <span class="project-meta">{{ projectMeta(project) }}</span>
+            <span class="project-meta">
+              <span
+                v-if="isFolderProject(project)"
+                class="storage-place"
+                :title="`Stored in the folder ${project.folderName ?? ''} on disk`"
+              >
+                <span class="storage-icon"><Icon name="folder" /></span>{{ project.folderName ?? 'Folder' }}
+              </span>
+              <span v-else class="storage-place" title="Stored in this browser's private storage">In this browser</span>
+              <template v-if="sizes.has(project.id)"> · {{ formatBytes(sizes.get(project.id)) }}</template>
+              · {{ projectMeta(project) }}
+            </span>
             <span
               class="project-version"
               :class="{ 'different-version': project.createdWithVersion && project.createdWithVersion !== appVersion }"
@@ -186,17 +252,33 @@ onBeforeUnmount(() => {
 
     <div class="picker-footer">
       <div class="app-version">Current WebSfM v{{ appVersion }} <BetaBadge /></div>
+      <!-- The browser's own storage: how much WebSfM holds there, and whether the
+           browser may clear it under disk pressure (best-effort storage). -->
+      <div v-if="browserStorage" class="browser-storage">
+        <span>WebSfM uses {{ formatBytes(browserStorage.usage) }} of this browser's storage.</span>
+        <template v-if="browserStorage.durable === false">
+          <span class="storage-warn">
+            The browser may clear it when the disk runs low on space: keep a project file, or use a folder.
+          </span>
+          <button type="button" class="link-btn" @click="keepStorage">Ask the browser to keep it</button>
+          <span v-if="durableNote" class="storage-note">{{ durableNote }}</span>
+        </template>
+      </div>
       <button class="primary-btn" @click="emit('new')">+ New project</button>
 
       <!-- File vs folder is the one thing users cannot infer from the labels, so
-           each row states it: a .websfm file is *copied in*, a folder is edited
-           in place. -->
+           each row states it: a .websfm file is *unpacked* (into this browser, or a
+           folder where folders are possible: the open asks), a folder is edited in
+           place. -->
       <div class="footer-label">Open existing</div>
       <button class="open-btn" @click="emit('open-file')">
         <span class="open-icon"><Icon name="file" /></span>
         <span class="open-text">
           <span class="open-title">Project file…</span>
-          <span class="open-sub">A <code>.websfm</code> file, copied into this browser</span>
+          <span class="open-sub"
+            >A <code>.websfm</code> file, unpacked into
+            {{ folderSupported ? 'this browser or a folder you choose' : 'this browser' }}</span
+          >
         </span>
       </button>
       <button v-if="folderSupported" class="open-btn" @click="emit('open-folder')">
@@ -242,10 +324,14 @@ onBeforeUnmount(() => {
         <button
           class="menu-item"
           :disabled="menu.id !== currentProjectId"
-          :title="menu.id !== currentProjectId ? 'Open this project first' : 'Write a portable .websfm file'"
+          :title="
+            menu.id !== currentProjectId
+              ? 'Open this project first'
+              : 'Write the whole project into one .websfm file, to keep or to open elsewhere'
+          "
           @click="runMenu(() => emit('save-copy', menu.id))"
         >
-          Save a copy…
+          Export project file…
         </button>
         <template v-if="folderSupported">
           <div class="menu-sep"></div>
@@ -278,7 +364,7 @@ onBeforeUnmount(() => {
         </template>
         <div class="menu-sep"></div>
         <button class="menu-item danger" @click="runMenu(() => confirmDelete(menu.project))">
-          {{ isFolderProject(menu.project) ? 'Remove from WebSfM…' : 'Delete…' }}
+          {{ isFolderProject(menu.project) ? 'Remove from WebSfM' : 'Delete' }}
         </button>
       </div>
     </Teleport>
@@ -374,15 +460,23 @@ onBeforeUnmount(() => {
 }
 
 .scene-badge {
-  font-size: 12px;
+  width: 13px;
+  height: 13px;
   color: var(--text-dim);
   flex-shrink: 0;
 }
 
-.storage-badge {
-  font-size: 11px;
-  color: var(--text-dim);
-  flex-shrink: 0;
+/* Where the project lives, first on the meta line: a folder's icon and name. */
+.storage-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: bottom;
+}
+.storage-icon {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
 }
 
 .project-meta {
@@ -467,6 +561,33 @@ onBeforeUnmount(() => {
 
 .primary-btn:hover {
   filter: brightness(1.12);
+}
+
+.browser-storage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.storage-warn {
+  color: var(--warn, #d9a441);
+}
+.storage-note {
+  font-size: 10px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.link-btn:hover {
+  text-decoration: underline;
 }
 
 .footer-label {

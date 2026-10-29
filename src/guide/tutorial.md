@@ -110,5 +110,5 @@ as LAS, LAZ or PLY.
 - Something looks wrong? The console (**Other ▸ Console**) logs every step, and the
   Quality Report shows where a model is weak. The 🐞 button reports a problem.
 
-The project is saved in your browser as you go. To keep a copy, use
-**Other ▸ Save a Copy…**; to remove it, use the **⋯** menu in the project picker.
+The project is saved in your browser as you go. To keep it in one file, use
+**Other ▸ Export Project**; to remove it, use the **⋯** menu in the project picker.

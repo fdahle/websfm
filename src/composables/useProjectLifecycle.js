@@ -1,4 +1,5 @@
 import { flushPersistence, pendingPersistence, retryPersistence } from '../utils/persistence.js'
+import * as opfs from '../utils/opfs.js'
 import { computed, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { crsInfo, ensureProjection } from '../core/crs.js'
@@ -19,8 +20,8 @@ import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useLog } from './useLog.js'
 import { showToast } from './useToasts.js'
 import { setStorageFullHandler } from '../utils/storageFull.js'
-import { isFolderProject } from '../core/io/folderProject.js'
-import { confirmDialog } from './useConfirmations.js'
+import { isFolderProject, newFolderVerdict } from '../core/io/folderProject.js'
+import { chooseDialog, confirmDialog } from './useConfirmations.js'
 import { rememberNewProjectDraft } from './newProjectDraft.js'
 import { pluralize } from '../core/textFormat.js'
 import { EXAMPLES, downloadExample } from '../core/examples.js'
@@ -628,11 +629,46 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       await flushProjectWork()
       const res = await exportProject(id, { includeDerived, onLog: (m, l, c) => log(m, l, c) })
       if (res?.cancelled) return
-      showToast('Project saved', { detail: `${res.fileName} · ${formatBytes(res.archiveBytes)}` })
+      showToast('Project file written', { detail: `${res.fileName} · ${formatBytes(res.archiveBytes)}` })
     } catch (err) {
       const detail = String(err?.message ?? err)
-      log(`Save project failed: ${detail}`, 'error', 'Project')
-      showToast('Could not save project', { detail, kind: 'error', ms: 6000 })
+      log(`Export project file failed: ${detail}`, 'error', 'Project')
+      showToast('Could not export the project file', { detail, kind: 'error', ms: 6000 })
+    }
+  }
+
+  // Where an opened project file goes, where folders are possible: → a directory
+  // handle (a folder checked to take it), false (browser storage) or null (cancelled).
+  // A ZIP cannot be worked on in place, so it is always unpacked somewhere.
+  async function pickProjectFilePlace(file) {
+    if (!projectsStore.folderSupported) return false
+    for (;;) {
+      const where = await chooseDialog({
+        title: 'Open project file',
+        message:
+          `“${file.name}” (${formatBytes(file.size)}) is unpacked into a new project, which WebSfM then saves into ` +
+          'as you work. Keep it in this browser, or in a folder on your disk?',
+        confirmLabel: 'In a folder…',
+        altLabel: 'In this browser',
+        danger: false,
+      })
+      if (where !== 'confirm') return where === 'alt' ? false : null
+      const dirHandle = await pickDirectory()
+      if (!dirHandle) continue
+      const hasProjectJson = !!(await opfs.readJsonAt(dirHandle, 'project.json'))
+      const verdict = newFolderVerdict({ isEmpty: await opfs.dirIsEmpty(dirHandle), hasProjectJson })
+      if (verdict.ok) return dirHandle
+      if (
+        verdict.needsConfirm &&
+        (await confirmDialog({
+          title: 'Folder not empty',
+          message: `"${dirHandle.name}" is not empty. Unpack the project into it anyway?`,
+          confirmLabel: 'Unpack',
+          danger: false,
+        }))
+      )
+        return dirHandle
+      if (!verdict.needsConfirm) showToast('Pick another folder', { detail: verdict.error, kind: 'error', ms: 6000 })
     }
   }
 
@@ -641,12 +677,15 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   // confirmation: the current project is untouched and still in the picker.
   async function importProjectFile(file) {
     if (!file || refuseWhileBusy('Open project file')) return
+    const dirHandle = await pickProjectFilePlace(file)
+    if (dirHandle === null) return
     await flushProjectWork()
     const id = await withLoadingOverlay('Opening project file…', async () => {
       try {
         return await importProject(file, {
           onLog: (m, l, c) => log(m, l, c),
           onProgress: fileProgress,
+          dirHandle: dirHandle || null,
         })
       } catch (err) {
         const detail = String(err?.message ?? err)
