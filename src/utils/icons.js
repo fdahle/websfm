@@ -141,6 +141,13 @@ export const icons = {
     <path d="M9.5 14.5l5-5" />
     <path d="M10.5 6.5l1-1a3.5 3.5 0 0 1 5 5l-2 2" />
     <path d="M13.5 17.5l-1 1a3.5 3.5 0 0 1-5-5l2-2" />`,
+  // The floating report-a-bug button's glyph (App.vue), for links to the issue tracker.
+  'bug': `
+    <path d="M8 2l1.88 1.88M16 2l-1.88 1.88" />
+    <path d="M9 7.13V6a3 3 0 1 1 6 0v1.13" />
+    <path d="M12 20c-3.31 0-6-2.69-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.31-2.69 6-6 6z" />
+    <path d="M12 10v8" />
+    <path d="M6 13H3M21 13h-3M6 9l-2.5-1M20.5 8L18 9M6 17l-2.5 1M20.5 18L18 17" />`,
   'cube': `
     <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
     <path d="M4 7.5l8 4.5 8-4.5" />

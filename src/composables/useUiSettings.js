@@ -37,6 +37,11 @@ const notifyWhenDone = ref(
   notifySupported && localStorage.getItem(NOTIFY_KEY) === 'true' && Notification.permission === 'granted',
 )
 
+// showBugButton: the floating "report a bug" button at the bottom right (App.vue).
+// Default on; Other ▸ About links to GitHub's issues either way.
+const BUG_BUTTON_KEY = 'websfm.ui.showBugButton'
+const showBugButton = ref(localStorage.getItem(BUG_BUTTON_KEY) !== 'false')
+
 applyUiPreferences()
 
 export function useUiSettings() {
@@ -53,6 +58,10 @@ export function useUiSettings() {
   function setConfirmRemoveMark(v) {
     confirmRemoveMark.value = !!v
     localStorage.setItem(CONFIRM_REMOVE_MARK_KEY, String(!!v))
+  }
+  function setShowBugButton(v) {
+    showBugButton.value = !!v
+    localStorage.setItem(BUG_BUTTON_KEY, String(!!v))
   }
   function setKeepAwake(v) {
     keepAwake.value = !!v
@@ -85,5 +94,7 @@ export function useUiSettings() {
     setMotion,
     confirmRemoveMark,
     setConfirmRemoveMark,
+    showBugButton,
+    setShowBugButton,
   }
 }

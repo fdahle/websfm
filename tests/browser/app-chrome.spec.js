@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
-// The app's own chrome: the Guide's tab strip keeps to one row however many
-// operations are open.
+// The app's own chrome: Settings ▸ General ▸ Notices hides the bug-report button,
+// and the Guide's tab strip keeps to one row however many operations are open.
 
 async function createProject(page) {
   await page.addInitScript(() => localStorage.setItem('consoleOpen', 'false'))
@@ -9,6 +9,31 @@ async function createProject(page) {
   await page.getByRole('button', { name: 'Create project', exact: true }).click()
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
 }
+
+test('Settings hides the bug-report button, and it stays hidden after a reload', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await createProject(page)
+  await expect(page.locator('.bug-report-fab')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Other', exact: true }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+  await expect(settings.locator('.group-head')).toHaveText([
+    'Appearance',
+    'Help and dialogs',
+    'During a run',
+    'Notices',
+  ])
+  const row = settings.locator('.setting-row').filter({ hasText: 'Bug report button' })
+  await row.locator('.slider').click()
+  await expect(page.locator('.bug-report-fab')).toHaveCount(0)
+
+  await page.reload()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await expect(page.locator('.bug-report-fab')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
 
 test('the Guide tab strip scrolls sideways only, with Home fixed', async ({ page }) => {
   const errors = []

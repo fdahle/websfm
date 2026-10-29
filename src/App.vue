@@ -21,6 +21,7 @@ import { useImagesStore } from './stores/useImagesStore.js'
 import { useMatchesStore } from './stores/useMatchesStore.js'
 import { useTabs } from './composables/useTabs.js'
 import { useImageViewSettings } from './composables/useImageViewSettings.js'
+import { useUiSettings } from './composables/useUiSettings.js'
 import { useProjectsStore } from './stores/useProjectsStore.js'
 import { useModalsStore } from './stores/useModalsStore.js'
 import { useGlossaryStore } from './stores/useGlossaryStore.js'
@@ -115,6 +116,9 @@ const {
 // Image-view overlay + edit toggles: one global, persisted preference shared by every
 // image tab (switching images never changes them), not per-tab state.
 const { imageViewPrefs, setImageViewPrefs, patchImageView } = useImageViewSettings()
+
+// The floating bug-report button can be hidden (Settings ▸ General ▸ Notices).
+const { showBugButton } = useUiSettings()
 
 // ── Sidebar resize ──────────────────────────────────────────────────────────────
 const { sidebarWidth, startSidebarResize } = useSidebarResize()
@@ -1153,6 +1157,7 @@ provideSidebar(sidebarContext)
 
     <!-- Floating "report a bug" button → opens a new GitHub issue in a new tab. -->
     <a
+      v-if="showBugButton"
       class="bug-report-fab"
       href="https://github.com/fdahle/websfm/issues/new"
       target="_blank"

@@ -49,6 +49,8 @@ const {
   notifySupported,
   notifyWhenDone,
   setNotifyWhenDone,
+  showBugButton,
+  setShowBugButton,
 } = useUiSettings()
 const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
 // Why the notification switch stayed off, when the browser said no.
@@ -180,6 +182,7 @@ onMounted(refreshStorage)
 
     <div class="settings-body">
       <template v-if="activeTab === 'general'">
+        <h3 class="group-head">Appearance</h3>
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">Theme</span>
@@ -203,6 +206,7 @@ onMounted(refreshStorage)
           </select>
         </div>
 
+        <h3 class="group-head">Help and dialogs</h3>
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">Glossary terms</span>
@@ -247,6 +251,7 @@ onMounted(refreshStorage)
           </label>
         </div>
 
+        <h3 v-if="wakeLockSupported || notifySupported" class="group-head">During a run</h3>
         <div v-if="wakeLockSupported" class="setting-row">
           <div class="setting-info">
             <span class="setting-label">Keep the screen on during a run</span>
@@ -271,6 +276,21 @@ onMounted(refreshStorage)
           </div>
           <label class="switch">
             <input type="checkbox" :checked="notifyWhenDone" @change="onNotifyToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <h3 class="group-head">Notices</h3>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Bug report button</span>
+            <span class="setting-desc"
+              >Show the round button at the bottom right that opens a new GitHub issue. Other ▸ About links there
+              too.</span
+            >
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="showBugButton" @change="setShowBugButton($event.target.checked)" />
             <span class="slider"></span>
           </label>
         </div>
@@ -309,6 +329,7 @@ onMounted(refreshStorage)
       </template>
 
       <template v-else-if="activeTab === 'visualization'">
+        <h3 class="group-head">Map</h3>
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">Map base layer</span>
@@ -360,6 +381,7 @@ onMounted(refreshStorage)
           </div>
         </div>
 
+        <h3 class="group-head">3D view</h3>
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">3D background</span>
@@ -594,6 +616,23 @@ onMounted(refreshStorage)
   padding: 12px 16px;
 }
 .setting-row + .setting-row {
+  border-top: 1px solid var(--panel-border);
+}
+/* A tab's settings in groups of a few, so it isn't one long list of switches. */
+.group-head {
+  margin: 0;
+  padding: 14px 16px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-dim);
+}
+.group-head:first-child {
+  padding-top: 6px;
+}
+.setting-row + .group-head {
+  margin-top: 4px;
   border-top: 1px solid var(--panel-border);
 }
 .setting-row-stacked {

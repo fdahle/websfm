@@ -56,6 +56,10 @@ const tabs = [
         <a class="chip" href="https://github.com/fdahle/websfm" target="_blank" rel="noopener">
           <Icon name="link" /> GitHub
         </a>
+        <!-- Also the bottom-right bug button's target, which Settings can hide. -->
+        <a class="chip" href="https://github.com/fdahle/websfm/issues/new" target="_blank" rel="noopener">
+          <Icon name="bug" /> Report a bug
+        </a>
         <a class="chip" :href="licenseUrl" target="_blank" rel="noopener"> <Icon name="file" /> MIT License </a>
       </div>
     </div>

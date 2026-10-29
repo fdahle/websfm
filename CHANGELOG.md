@@ -26,6 +26,9 @@ Notable changes to websfm. The format follows
   the omega/phi/kappa convention of the pose import: a unit test turns an imported pose
   into the solver's camera and back, and gets the same position and angles to 1e-9°.
   The dialog can also leave out the angles or the accuracies.
+- **Hide the bug-report button.** Settings ▸ General ▸ Notices ▸ **Bug report button**
+  turns off the round button at the bottom right. Other ▸ About ▸ **Report a bug** opens
+  the same GitHub page.
 
 ### Changed
 - **Self-calibrated distortion stays exact when the principal point moves.** When
@@ -45,6 +48,9 @@ Notable changes to websfm. The format follows
   is removed and the project reopened from the folder once the run has ended.
   **Move to folder…** now also works while some changes could not be saved, and saves
   them in the folder.
+- **Settings in groups.** The General and Map & 3D tabs of Settings put their settings
+  under headings (Appearance, Help and dialogs, During a run, Notices; Map, 3D view)
+  instead of one long list of switches.
 
 ### Fixed
 - **A reopened project counts every match pair it tried.** Pairs that matching rejected
