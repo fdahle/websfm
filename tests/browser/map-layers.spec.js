@@ -38,8 +38,8 @@ test('the Map layers list restacks the map and fades a layer', async ({ page }) 
       previewUrl: png('#c84'),
     }
     recon.ortho = { ...base, name: 'Orthophoto', previewUrl: png('#48c') }
-    recon.setProductVisible('dem', true)
-    recon.setProductVisible('ortho', true)
+    recon.setProductVisible(recon.dem.id, true)
+    recon.setProductVisible(recon.ortho.id, true)
   }, W)
   await page.locator('.tab', { hasText: /^2D$/ }).click()
 
@@ -91,9 +91,16 @@ test('the Map layers list restacks the map and fades a layer', async ({ page }) 
   const mapState = () =>
     page.evaluate(async () => {
       const recon = (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore()
-      return { order: recon.mapOrder, hidden: recon.mapHidden, ortho: !!recon.productLayers.ortho?.visible }
+      // Layer ids are `product:<product id>`; named by kind here.
+      const kindOf = (id) =>
+        id === `product:${recon.dem.id}` ? 'dem' : id === `product:${recon.ortho.id}` ? 'ortho' : id
+      return {
+        order: recon.mapOrder.map(kindOf),
+        hidden: recon.mapHidden.map(kindOf),
+        ortho: !!recon.productLayers[recon.ortho.id]?.visible,
+      }
     })
-  expect(await mapState()).toEqual({ order: ['product:dem', 'product:ortho'], hidden: ['product:ortho'], ortho: true })
+  expect(await mapState()).toEqual({ order: ['dem', 'ortho'], hidden: ['ortho'], ortho: true })
 
   // ✕ takes it off the map; the sidebar checkbox puts it back, ticked.
   await list.getByRole('button', { name: 'Remove Orthophoto from the map' }).click()

@@ -82,7 +82,8 @@ test('a computed DEM in the project CRS goes on the map, fits, and probes cell v
   const demOnMap = () =>
     page.evaluate(async () => {
       const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-      return useReconstructionStore().productLayers.dem?.visible
+      const recon = useReconstructionStore()
+      return recon.productLayers[recon.dem?.id]?.visible
     })
   await expect.poll(demOnMap).toBe(true)
   await expect(onMapButton(page)).toHaveClass(/active/)
@@ -213,7 +214,7 @@ test('without CRS content the map shows the model frame, and a local DEM is plac
       previewUrl: canvas.toDataURL(),
       frameStamp: { source: null, cloudId: 'sparse-1', cloudCreatedAt: 42 },
     }
-    s.setProductVisible('dem', true)
+    s.setProductVisible(s.dem.id, true)
   })
 
   await page.locator('.tab', { hasText: /^2D$/ }).click()

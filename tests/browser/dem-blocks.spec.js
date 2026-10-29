@@ -188,7 +188,7 @@ test("the DEM tab reads a block-built DEM's full-resolution height under the cur
       name: 'DEM',
       previewUrl: URL.createObjectURL(result.previewBlob),
     }
-    document.querySelector('#app').__vue_app__._instance.setupState.openProductTab('dem', 'DEM')
+    document.querySelector('#app').__vue_app__._instance.setupState.openProductTab(useReconstructionStore().dem)
   })
   await expect(page.getByText('5000×1200')).toBeVisible()
   const view = page.locator('.product-viewer').first()
@@ -365,7 +365,7 @@ test('a profile across a block-built DEM sees a ridge the overview averages away
       previewUrl: URL.createObjectURL(result.previewBlob),
     }
     const app = document.querySelector('#app').__vue_app__._instance.setupState
-    app.openProductTab('dem', 'DEM')
+    app.openProductTab(useReconstructionStore().dem)
   })
   await expect(page.getByText('5000×1200')).toBeVisible()
   await page.evaluate(() =>

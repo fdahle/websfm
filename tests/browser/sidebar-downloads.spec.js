@@ -83,7 +83,7 @@ test('sidebar context menus download clouds, products and polygon layers', async
   expect(cloud.name).toMatch(/-Imported_south\.xyz$/)
   expect(cloud.bytes.toString().trim().split('\n')).toHaveLength(2)
 
-  // The DEM opens its own export dialog.
+  // The DEM opens its own export dialog, naming the DEM (a project may hold several).
   await page
     .getByRole('button', { name: /Products/ })
     .first()
@@ -91,7 +91,7 @@ test('sidebar context menus download clouds, products and polygon layers', async
   await page.locator('.item-name', { hasText: /^DEM$/ }).click({ button: 'right' })
   await page.locator('.ctx-menu').getByRole('button', { name: 'Download…' }).click()
   const demDialog = page.getByRole('dialog', { name: 'Export DEM' })
-  await expect(demDialog).not.toContainText('Exporting')
+  await expect(demDialog).toContainText('Exporting DEM')
   await demDialog.getByLabel('Format').selectOption('asc')
   await expect(demDialog.getByLabel('File name')).toHaveAttribute('placeholder', /-dem$/)
   await demDialog.getByLabel('Format').selectOption('png')
