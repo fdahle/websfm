@@ -264,7 +264,10 @@ test('the full application creates and reopens a project without runtime errors'
   await projectButton.click()
   await expect(page.locator('.project-picker')).toBeVisible()
   const version = (await page.locator('.app-version').textContent()).match(/v(\d+\.\d+\.\d+\S*)/)[1] // the Beta badge follows
-  await expect(page.locator('.project-version')).toHaveText(`Created with WebSfM v${version}`)
+  // This version made it, so the row shows no version of its own; its tooltip names it.
+  const row = page.locator('.project-main').filter({ hasText: 'Browser smoke project' })
+  await expect(row).toHaveAttribute('title', `Aerial, created with WebSfM v${version}`)
+  await expect(row.locator('.project-version')).toHaveCount(0)
   expect(
     await page.evaluate(async () => {
       const opfs = await import('/src/utils/opfs.js')

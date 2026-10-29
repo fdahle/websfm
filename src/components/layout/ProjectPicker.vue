@@ -140,21 +140,34 @@ async function confirmDelete(project) {
 }
 
 // A short, glanceable summary line for each project, after where it is stored (the
-// folder icon and name, or "In this browser"): scene type, then CRS (aerial only —
-// object-capture projects have none), then when it was last touched.
+// folder icon and name, or "In this browser") and its size: the CRS (aerial only —
+// object-capture projects have none), then when it was last touched. The scene type
+// is the icon before the name.
 function projectMeta(project) {
-  const parts = [project.sceneType === 'object' ? 'Object capture' : 'Aerial']
+  const parts = []
   if (project.sceneType !== 'object' && project.crs) parts.push(project.crs)
   const edited = formatDate(project.lastModified)
   if (edited) parts.push(`edited ${edited}`)
   return parts.join(' · ')
 }
 
+// The year only when it is not this one.
 function formatDate(iso) {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  const sameYear = d.getFullYear() === new Date().getFullYear()
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) })
+}
+
+// The version that made a project is worth a glance only when it is not this one.
+const otherVersion = (project) => !!project.createdWithVersion && project.createdWithVersion !== appVersion
+function rowTitle(project) {
+  const kind = project.sceneType === 'object' ? 'Object capture' : 'Aerial'
+  const made = project.createdWithVersion
+    ? `created with WebSfM v${project.createdWithVersion}`
+    : 'creation version unknown'
+  return `${kind}, ${made}`
 }
 
 // Escape is consumed here: App's window handler would otherwise also close
@@ -194,114 +207,116 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="project-picker" :class="{ centered: !dismissible }">
-    <ul class="project-list">
-      <li
-        v-for="project in projects"
-        :key="project.id"
-        class="project-item"
-        :class="{ current: project.id === currentProjectId }"
-        @contextmenu="openMenu($event, project)"
-      >
-        <template v-if="renamingId === project.id">
-          <input
-            :ref="setRenameInput"
-            v-model="renameValue"
-            class="rename-input"
-            maxlength="80"
-            @keydown.enter="commitRename"
-            @keydown.esc.stop="cancelRename"
-            @blur="commitRename"
-          />
-        </template>
-        <template v-else>
-          <span class="check">{{ project.id === currentProjectId ? '✓' : '' }}</span>
-          <button type="button" class="project-main" @click="emit('switch', project.id)">
-            <div class="project-name-row">
-              <span class="scene-badge" :title="project.sceneType === 'object' ? 'Object capture' : 'Aerial'">
-                <Icon :name="project.sceneType === 'object' ? 'cube' : 'map-pin'" />
-              </span>
-              <span class="project-name">{{ project.name }}</span>
-            </div>
-            <span class="project-meta">
-              <span
-                v-if="isFolderProject(project)"
-                class="storage-place"
-                :title="`Stored in the folder ${project.folderName ?? ''} on disk`"
-              >
-                <span class="storage-icon"><Icon name="folder" /></span>{{ project.folderName ?? 'Folder' }}
-              </span>
-              <span v-else class="storage-place" title="Stored in this browser's private storage">In this browser</span>
-              <template v-if="sizes.has(project.id)"> · {{ formatBytes(sizes.get(project.id)) }}</template>
-              · {{ projectMeta(project) }}
-            </span>
-            <span
-              class="project-version"
-              :class="{ 'different-version': project.createdWithVersion && project.createdWithVersion !== appVersion }"
+    <!-- On the start screen (centered), two columns: one's own projects, and the
+         ways to open or try one. As the dropdown, one column. -->
+    <div class="picker-body">
+      <section class="picker-projects">
+        <div v-if="!dismissible" class="section-label">Projects</div>
+        <ul class="project-list">
+          <li
+            v-for="project in projects"
+            :key="project.id"
+            class="project-item"
+            :class="{ current: project.id === currentProjectId }"
+            @contextmenu="openMenu($event, project)"
+          >
+            <template v-if="renamingId === project.id">
+              <input
+                :ref="setRenameInput"
+                v-model="renameValue"
+                class="rename-input"
+                maxlength="80"
+                @keydown.enter="commitRename"
+                @keydown.esc.stop="cancelRename"
+                @blur="commitRename"
+              />
+            </template>
+            <template v-else>
+              <span class="check">{{ project.id === currentProjectId ? '✓' : '' }}</span>
+              <button type="button" class="project-main" :title="rowTitle(project)" @click="emit('switch', project.id)">
+                <div class="project-name-row">
+                  <span class="scene-badge">
+                    <Icon :name="project.sceneType === 'object' ? 'cube' : 'map-pin'" />
+                  </span>
+                  <span class="project-name">{{ project.name }}</span>
+                  <span v-if="otherVersion(project)" class="project-version">v{{ project.createdWithVersion }}</span>
+                </div>
+                <span class="project-meta">
+                  <span
+                    v-if="isFolderProject(project)"
+                    class="storage-place"
+                    :title="`Stored in the folder ${project.folderName ?? ''} on disk`"
+                  >
+                    <span class="storage-icon"><Icon name="folder" /></span>{{ project.folderName ?? 'Folder' }}
+                  </span>
+                  <span v-else class="storage-place" title="Stored in this browser's private storage"
+                    >In this browser</span
+                  >
+                  <template v-if="sizes.has(project.id)"> · {{ formatBytes(sizes.get(project.id)) }}</template>
+                  <template v-if="projectMeta(project)"> · {{ projectMeta(project) }}</template>
+                </span>
+              </button>
+              <button class="icon-btn" title="Project actions" @click.stop="openMenu($event, project)">⋯</button>
+            </template>
+          </li>
+          <li v-if="!projects.length" class="project-empty">No projects yet.</li>
+        </ul>
+        <button class="primary-btn" @click="emit('new')">+ New project</button>
+      </section>
+
+      <section class="picker-open">
+        <!-- File vs folder is the one thing users cannot infer from the labels, so
+             each row states it: a .websfm file is *unpacked* (into this browser, or a
+             folder where folders are possible: the open asks), a folder is edited in
+             place. -->
+        <div class="section-label">Open existing</div>
+        <button class="open-btn" @click="emit('open-file')">
+          <span class="open-icon"><Icon name="file" /></span>
+          <span class="open-text">
+            <span class="open-title">Project file…</span>
+            <span class="open-sub"
+              >A <code>.websfm</code> file, unpacked into
+              {{ folderSupported ? 'this browser or a folder' : 'this browser' }}</span
             >
-              {{
-                project.createdWithVersion
-                  ? `Created with WebSfM v${project.createdWithVersion}`
-                  : 'Creation version unknown'
-              }}
-            </span>
-          </button>
-          <button class="icon-btn" title="Project actions" @click.stop="openMenu($event, project)">⋯</button>
-        </template>
-      </li>
-    </ul>
-
-    <div class="picker-footer">
-      <div class="app-version">Current WebSfM v{{ appVersion }} <BetaBadge /></div>
-      <!-- The browser's own storage: how much WebSfM holds there, and whether the
-           browser may clear it under disk pressure (best-effort storage). -->
-      <div v-if="browserStorage" class="browser-storage">
-        <span>WebSfM uses {{ formatBytes(browserStorage.usage) }} of this browser's storage.</span>
-        <template v-if="browserStorage.durable === false">
-          <span class="storage-warn">
-            The browser may clear it when the disk runs low on space: keep a project file, or use a folder.
           </span>
-          <button type="button" class="link-btn" @click="keepStorage">Ask the browser to keep it</button>
-          <span v-if="durableNote" class="storage-note">{{ durableNote }}</span>
-        </template>
+        </button>
+        <button v-if="folderSupported" class="open-btn" @click="emit('open-folder')">
+          <span class="open-icon"><Icon name="folder-open" /></span>
+          <span class="open-text">
+            <span class="open-title">Project folder…</span>
+            <span class="open-sub">A folder on your disk, edited in place</span>
+          </span>
+        </button>
+
+        <!-- A ready-made set with a walkthrough (core/examples.js), for a first look
+             at the whole pipeline without photos of one's own. -->
+        <div class="section-label">Try an example</div>
+        <button v-for="(ex, id) in EXAMPLES" :key="id" class="open-btn" @click="emit('example', id)">
+          <span class="open-icon"><Icon :name="ex.sceneType === 'aerial' ? 'map-pin' : 'cube'" /></span>
+          <span class="open-text">
+            <span class="open-title">{{ ex.title }}</span>
+            <span class="open-sub">{{ ex.summary }}</span>
+            <span class="open-sub"
+              >Photos: {{ ex.credit }} ({{ ex.license }}) · {{ formatBytes(ex.approxBytes) }} download</span
+            >
+          </span>
+        </button>
+      </section>
+    </div>
+
+    <!-- The app's version, and the browser's own storage: how much WebSfM holds
+         there, and whether the browser may clear it under disk pressure
+         (best-effort storage). Quiet, at the foot. -->
+    <div class="picker-status">
+      <div class="status-row">
+        <span class="app-version">WebSfM v{{ appVersion }} <BetaBadge /></span>
+        <span v-if="browserStorage">WebSfM uses {{ formatBytes(browserStorage.usage) }} of this browser's storage</span>
       </div>
-      <button class="primary-btn" @click="emit('new')">+ New project</button>
-
-      <!-- File vs folder is the one thing users cannot infer from the labels, so
-           each row states it: a .websfm file is *unpacked* (into this browser, or a
-           folder where folders are possible: the open asks), a folder is edited in
-           place. -->
-      <div class="footer-label">Open existing</div>
-      <button class="open-btn" @click="emit('open-file')">
-        <span class="open-icon"><Icon name="file" /></span>
-        <span class="open-text">
-          <span class="open-title">Project file…</span>
-          <span class="open-sub"
-            >A <code>.websfm</code> file, unpacked into
-            {{ folderSupported ? 'this browser or a folder you choose' : 'this browser' }}</span
-          >
-        </span>
-      </button>
-      <button v-if="folderSupported" class="open-btn" @click="emit('open-folder')">
-        <span class="open-icon"><Icon name="folder-open" /></span>
-        <span class="open-text">
-          <span class="open-title">Project folder…</span>
-          <span class="open-sub">A folder on your disk, edited in place</span>
-        </span>
-      </button>
-
-      <!-- A ready-made set with a walkthrough (core/examples.js), for a first look
-           at the whole pipeline without photos of one's own. -->
-      <div class="footer-label">Try an example</div>
-      <button v-for="(ex, id) in EXAMPLES" :key="id" class="open-btn" @click="emit('example', id)">
-        <span class="open-icon"><Icon :name="ex.sceneType === 'aerial' ? 'map-pin' : 'cube'" /></span>
-        <span class="open-text">
-          <span class="open-title">{{ ex.title }}</span>
-          <span class="open-sub"
-            >{{ ex.summary }} Photos: {{ ex.credit }} ({{ ex.license }}).
-            {{ formatBytes(ex.approxBytes) }} download.</span
-          >
-        </span>
-      </button>
+      <div v-if="browserStorage?.durable === false" class="storage-warn">
+        The browser may clear it when the disk runs low: keep a project file, or use a folder.
+        <button type="button" class="link-btn" @click="keepStorage">Ask the browser to keep it</button>
+      </div>
+      <div v-if="durableNote" class="storage-note">{{ durableNote }}</div>
     </div>
 
     <!-- Teleported: the picker clips (overflow:hidden) and, when centered, sits
@@ -390,6 +405,50 @@ onBeforeUnmount(() => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  width: min(720px, calc(100vw - 32px));
+  max-width: none;
+}
+
+.picker-projects {
+  display: flex;
+  flex-direction: column;
+}
+
+.picker-projects > .section-label {
+  padding-left: 12px;
+}
+
+.picker-projects .primary-btn {
+  margin: 8px 10px 10px;
+  width: auto;
+}
+
+.picker-open {
+  border-top: 1px solid var(--panel-border);
+  padding: 0 10px 8px;
+}
+
+/* The start screen: projects on the left, the ways to open one on the right. */
+.centered .picker-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.centered .picker-open {
+  border-top: 0;
+  border-left: 1px solid var(--panel-border);
+}
+.centered .project-list {
+  flex: 1;
+  max-height: 420px;
+}
+@media (max-width: 640px) {
+  .centered .picker-body {
+    grid-template-columns: 1fr;
+  }
+  .centered .picker-open {
+    border-left: 0;
+    border-top: 1px solid var(--panel-border);
+  }
 }
 
 .project-list {
@@ -398,6 +457,12 @@ onBeforeUnmount(() => {
   padding: 4px 0;
   max-height: 260px;
   overflow-y: auto;
+}
+
+.project-empty {
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--text-dim);
 }
 
 .project-item {
@@ -487,24 +552,11 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-.project-version,
-.app-version {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
+/* Made by another version of WebSfM: after the name. */
 .project-version {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.project-version.different-version {
+  flex-shrink: 0;
+  font-size: 10px;
   color: var(--accent);
-}
-
-.app-version {
-  margin-bottom: 8px;
 }
 
 .icon-btn {
@@ -541,11 +593,6 @@ onBeforeUnmount(() => {
   outline: none;
 }
 
-.picker-footer {
-  border-top: 1px solid var(--panel-border);
-  padding: 10px 10px 8px;
-}
-
 .primary-btn {
   width: 100%;
   background: var(--accent);
@@ -563,19 +610,31 @@ onBeforeUnmount(() => {
   filter: brightness(1.12);
 }
 
-.browser-storage {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  margin-bottom: 8px;
+.picker-status {
+  border-top: 1px solid var(--panel-border);
+  padding: 6px 10px 7px;
   font-size: 11px;
   color: var(--text-dim);
+  line-height: 1.4;
+}
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: 12px;
+}
+.app-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .storage-warn {
+  margin-top: 2px;
   color: var(--warn, #d9a441);
 }
 .storage-note {
+  margin-top: 2px;
   font-size: 10px;
 }
 .link-btn {
@@ -590,7 +649,7 @@ onBeforeUnmount(() => {
   text-decoration: underline;
 }
 
-.footer-label {
+.section-label {
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;

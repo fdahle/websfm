@@ -67,6 +67,12 @@ Notable changes to websfm. The format follows
   entry, so every paper names at least one.
 
 ### Changed
+- **A tidier start screen.** The project picker that opens on start is now two columns,
+  your projects and **+ New project** on the left, **Open existing** and **Try an
+  example** on the right, with the version and the browser storage in a strip along
+  the foot. Each project takes two lines: the scene type is the icon before its name,
+  and the version that created it shows only when it is not this one (hover a project
+  for both). The dropdown from the project name keeps one column, in the same order.
 - **Self-calibrated distortion stays exact when the principal point moves.** When
   bundle adjustment moves a camera's principal point, the tie points are corrected for
   distortion again about the new centre, so the depth maps undistort the images exactly
