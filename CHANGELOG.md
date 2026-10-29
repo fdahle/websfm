@@ -67,12 +67,15 @@ Notable changes to websfm. The format follows
   positions are 2–4× closer to the truth. On real blocks the cameras are unchanged
   within noise (South Building, ETH3D, quarry vs RTK, Casa Grande and Iceland check
   points), and runs take 0–7 % longer.
-- **A full browser storage no longer ends a depth-map run.** When browser storage runs
-  full while depth maps are built, the run pauses and offers to move the project to a
-  folder on disk, then carries on there; stopping ends it, as before. The browser copy
-  is removed and the project reopened from the folder once the run has ended.
-  **Move to folder…** now also works while some changes could not be saved, and saves
-  them in the folder.
+- **A full browser storage no longer loses work.** Whatever finds browser storage full
+  (adding images, a dense cloud, a mesh, a DEM, any save, as well as depth maps) asks to
+  move the project to a folder on disk, then saves there and carries on; during a run,
+  stopping ends it, as before. The browser copy is removed and the project reopened
+  from the folder once nothing runs or waits to be saved. The "Unsaved changes" card
+  says when storage is full, with **Move to folder…**, or, without folders (Firefox,
+  Safari), how to free space; **Dismiss** forgets changes that cannot be saved, which
+  before kept the card up for good. The point-cloud octree a large import builds is
+  written by its worker, outside this, and still fails the import when storage is full.
 - **Settings in groups.** The General and Map & 3D tabs of Settings put their settings
   under headings (Appearance, Help and dialogs, During a run, Notices; Map, 3D view)
   instead of one long list of switches.

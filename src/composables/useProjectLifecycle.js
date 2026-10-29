@@ -1,4 +1,4 @@
-import { flushPersistence, retryPersistence } from '../utils/persistence.js'
+import { flushPersistence, pendingPersistence, retryPersistence } from '../utils/persistence.js'
 import { computed, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { crsInfo, ensureProjection } from '../core/crs.js'
@@ -527,43 +527,58 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     if (await moveToFolder(id, dirHandle)) await reopenMoved(id)
   }
 
-  // ── Browser storage full during a run ──────────────────────────────────────
-  // A run whose write finds browser storage full asks here (utils/storageFull.js; the
-  // depth-map run): move the project to a folder on disk and the run carries on
-  // there. The browser copy stays until the run has ended, because the run still
-  // reads its files; then it goes, and the project reopens from the folder as after
-  // any move. A tab closed before that drops it at the next open (openProject).
+  // ── Browser storage full ─────────────────────────────────────────────────────
+  // Any write that finds browser storage full asks here (utils/storageFull.js, through
+  // utils/persistence.js for every tracked write): move the project to a folder on disk,
+  // and the write — and a run in progress — carries on there. The browser copy stays
+  // until nothing runs or waits to be saved, because a run still reads its files; then
+  // it goes, and the project reopens from the folder as after any move. A tab closed
+  // before that drops it at the next open (openProject).
   let movedDuringRun = null
-  async function offerMoveOnStorageFull({ projectId }) {
+  async function offerMoveOnStorageFull({ projectId = currentProjectId.value } = {}) {
     const entry = projects.value.find((p) => p.id === projectId)
     if (!entry || projectId !== currentProjectId.value || isFolderProject(entry)) return false
     if (typeof window.showDirectoryPicker !== 'function') return false
+    const running = isBusy()
     for (;;) {
       const move = await confirmDialog({
         title: 'Browser storage is full',
-        message:
-          'The browser has no room left for this project. Move it to a folder on your disk, ' +
-          'and the run continues there. If you stop, the run ends and has to start again.',
+        message: running
+          ? 'The browser has no room left for this project. Move it to a folder on your disk, ' +
+            'and the run continues there. If you stop, the run ends and has to start again.'
+          : 'The browser has no room left for this project, so the last changes could not be saved. ' +
+            'Move it to a folder on your disk, and they are saved there.',
         confirmLabel: 'Choose a folder…',
-        cancelLabel: 'Stop the run',
+        cancelLabel: running ? 'Stop the run' : 'Not now',
         danger: false,
       })
       if (!move) {
-        log('Browser storage full: the run was stopped instead of moving the project to a folder', 'warn', 'Project')
+        log(
+          running
+            ? 'Browser storage full: the run was stopped instead of moving the project to a folder'
+            : 'Browser storage full: the project stayed in the browser; the changes are not saved',
+          'warn',
+          'Project',
+        )
         return false
       }
       const dirHandle = await pickDirectory()
       if (dirHandle && (await moveToFolder(projectId, dirHandle, { keepBrowserCopy: true }))) {
         movedDuringRun = projectId
-        log('The run continues with the project in its folder', 'info', 'Project')
+        log(
+          running ? 'The run continues with the project in its folder' : 'The changes are saved in the folder',
+          'info',
+          'Project',
+        )
         return true
       }
       // No folder picked, or the move failed: ask again, so stopping stays a choice.
     }
   }
   setStorageFullHandler(offerMoveOnStorageFull)
-  watch(isBusy, async (busy) => {
-    if (busy || !movedDuringRun) return
+  // Nothing runs and nothing waits to be saved: the moved project's writes have all landed.
+  watch([isBusy, pendingPersistence], async ([busy, pending]) => {
+    if (busy || pending || !movedDuringRun) return
     const id = movedDuringRun
     movedDuringRun = null
     await dropBrowserCopy(id).catch((err) =>

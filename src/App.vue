@@ -1,5 +1,5 @@
 <script setup>
-import { pendingPersistence, persistenceFailures, retryPersistence } from './utils/persistence.js'
+import { pendingPersistence, persistenceFailures } from './utils/persistence.js'
 import { ref, computed, reactive, watch, onMounted, nextTick, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import Ribbon from './components/layout/Ribbon.vue'
@@ -15,6 +15,7 @@ import DevConsole from './components/layout/DevConsole.vue'
 import BrowserWarning from './components/layout/BrowserWarning.vue'
 import MobileWarning from './components/layout/MobileWarning.vue'
 import ToastStack from './components/layout/ToastStack.vue'
+import UnsavedChangesCard from './components/layout/UnsavedChangesCard.vue'
 import UpdatePrompt from './components/layout/UpdatePrompt.vue'
 
 import { useImagesStore } from './stores/useImagesStore.js'
@@ -241,6 +242,7 @@ const { addPoses } = posesStore
 // ── Modals ────────────────────────────────────────────────────────────────────
 const {
   projectPickerOpen,
+  projectSettingsOpen,
   newProjectOpen,
   newProjectCanCancel,
   poseTableOpen,
@@ -1117,13 +1119,10 @@ provideSidebar(sidebarContext)
 
 <template>
   <div class="app">
-    <div v-if="persistenceFailures.length" role="alert" class="persistence-error">
-      <span class="persistence-title">Unsaved changes</span>
-      <span class="persistence-detail">{{ persistenceFailures[0].error?.message || 'Storage write failed' }}</span>
-      <button class="btn" :disabled="pendingPersistence > 0" @click="retryPersistence().catch(() => {})">
-        Retry saving
-      </button>
-    </div>
+    <UnsavedChangesCard
+      :move-to-folder="() => moveCurrentProjectToFolder()"
+      :open-project-settings="() => (projectSettingsOpen = true)"
+    />
     <MobileWarning />
     <BrowserWarning />
     <ToastStack />
@@ -1261,39 +1260,5 @@ provideSidebar(sidebarContext)
 }
 .sidebar-resizer:hover {
   background: var(--accent);
-}
-</style>
-
-<style scoped>
-/* Styled as an error toast (layout/ToastStack.vue), but it stays until the writes
-   succeed, and sits bottom-left so the toasts on the right stay readable. */
-.persistence-error {
-  position: fixed;
-  bottom: 16px;
-  left: 16px;
-  z-index: 500;
-  max-width: 440px;
-  padding: 9px 12px;
-  border-radius: 6px;
-  border: 1px solid #c05252;
-  background: color-mix(in srgb, #c05252 16%, var(--panel));
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-  font-size: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-.persistence-title {
-  font-weight: 600;
-  color: var(--text);
-}
-.persistence-detail {
-  color: var(--text-dim);
-}
-.persistence-error .btn {
-  margin-top: 4px;
-  font-size: 12px;
-  padding: 3px 12px;
 }
 </style>
