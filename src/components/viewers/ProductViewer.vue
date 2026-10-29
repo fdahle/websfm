@@ -6,6 +6,7 @@ import { rasterUnits } from '../../core/products/rasterUnits.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
 import { readRasterWindow } from '../../workers/computeClient.js'
 import RasterMeasurements from './RasterMeasurements.vue'
+import ZoomField from './ZoomField.vue'
 import { orthoAdjustFilter } from '../../utils/orthoFilter.js'
 const GpuRasterCanvas = defineAsyncComponent(() => import('./raster/GpuRasterCanvas.vue'))
 const gpuReady = ref(false)
@@ -426,6 +427,10 @@ function zoomBy(factor) {
   const c = container.value
   if (c) applyZoom(factor, c.clientWidth / 2, c.clientHeight / 2)
 }
+// The status bar's typed zoom: `s` screen px per preview pixel, about the centre.
+function zoomTo(s) {
+  if (scale.value > 0) zoomBy(s / scale.value)
+}
 // Measure group handles: the tool lives in RasterMeasurements; the Ribbon reads
 // `measureState` (via App's activeRasterTab) to render which tool is on.
 const measureState = computed(() => measurements.value?.state ?? null)
@@ -571,9 +576,10 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
           <span class="sep">|</span>
           <span class="meta">{{ product.crs }}</span>
         </template>
-        <!-- Zoom is status; Fit / Zoom in / out are ribbon commands (raster ▸ View). -->
+        <!-- Zoom is status, and takes a typed value; Fit / Zoom in / out are ribbon
+             commands (raster ▸ View). -->
         <span class="sep">|</span>
-        <span class="meta zoom-level" title="Zoom">{{ Math.round(scale * 100) }}%</span>
+        <ZoomField :scale="scale" @set="zoomTo" />
       </template>
     </div>
   </div>

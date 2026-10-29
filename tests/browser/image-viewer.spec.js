@@ -90,3 +90,35 @@ test('the image viewer paints and commits a mask, and marks a control point at t
 
   expect(errors).toEqual([])
 })
+
+test('a zoom typed into the status bar applies, and Esc keeps the old one', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await addTestImage(page)
+  await page
+    .locator('.sidebar')
+    .getByRole('button', { name: /Images/ })
+    .first()
+    .click()
+  await page.locator('.list-item').filter({ hasText: 'test.png' }).dblclick()
+  await expect(page.locator('.image-viewer img.image')).not.toHaveClass(/pending/)
+
+  const readout = page.locator('.image-viewer .status-bar .zoom-level')
+  await readout.click()
+  const field = page.getByLabel('Zoom (%)')
+  await field.fill('250')
+  await field.press('Enter')
+  await expect(readout).toHaveText('250%')
+  const img = page.locator('.image-viewer img.image')
+  // 400 px wide at 250 %.
+  expect(Math.round((await img.boundingBox()).width)).toBe(1000)
+
+  await readout.click()
+  await field.fill('10')
+  await field.press('Escape')
+  await expect(readout).toHaveText('250%')
+  expect(errors).toEqual([])
+})

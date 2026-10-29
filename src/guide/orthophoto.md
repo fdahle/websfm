@@ -245,7 +245,8 @@ The GeoTIFF and COG exports can be written in another
 
 Inspect seams, leaning objects, ghosting, holes, and boundary behaviour at full
 resolution before using the result: the orthophoto's tab draws full-resolution tiles
-as you zoom in, and its status bar reads the colour of the pixel under the cursor.
+as you zoom in, and its status bar reads the colour of the pixel under the cursor. Click
+the zoom percentage there to type one; an image tab's status bar takes one the same way.
 **Clip** reads only the part of the orthophoto the polygons cover, up to 8,192 ×
 8,192 pixels.
 

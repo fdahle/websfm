@@ -104,6 +104,11 @@ export function useImageViewport({ container, imgEl, image, onViewChange, onFram
   function zoomOut() {
     applyZoom(1 / 1.5)
   }
+  // Zoom to `s` screen px per native px about the viewport centre (the status bar's
+  // typed zoom).
+  function zoomTo(s) {
+    if (scale.value > 0) applyZoom(s / scale.value)
+  }
 
   // Event → viewport-relative coords.
   function getViewportCoords(e) {
@@ -180,6 +185,7 @@ export function useImageViewport({ container, imgEl, image, onViewChange, onFram
     zoomAt,
     zoomIn,
     zoomOut,
+    zoomTo,
     getViewportCoords,
     toImagePixel,
     observeResize,

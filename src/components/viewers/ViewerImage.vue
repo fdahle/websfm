@@ -31,6 +31,7 @@ import {
 import MaskToolbar from './MaskToolbar.vue'
 import GcpToolbar from './GcpToolbar.vue'
 import ImageContextMenu from './ImageContextMenu.vue'
+import ZoomField from './ZoomField.vue'
 
 const props = defineProps({
   image: { type: Object, required: true },
@@ -142,6 +143,7 @@ const {
   zoomAt,
   zoomIn,
   zoomOut,
+  zoomTo,
   getViewportCoords,
   toImagePixel,
   observeResize,
@@ -750,9 +752,10 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
           <span class="masked" :class="{ on: hoverPx.masked }">Masked&nbsp;{{ hoverPx.masked ? '✓' : '—' }}</span>
         </template>
       </template>
-      <!-- Zoom is status; Fit / Zoom in / out are ribbon commands (Picture ▸ View). -->
+      <!-- Zoom is status, and takes a typed value; Fit / Zoom in / out are ribbon
+           commands (Picture ▸ View). -->
       <span class="spacer"></span>
-      <span class="zoom-level" title="Zoom">{{ Math.round(scale * 100) }}%</span>
+      <ZoomField :scale="scale" @set="zoomTo" />
     </div>
   </div>
 </template>
@@ -865,11 +868,6 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
 .spacer {
   flex: 1;
 }
-.zoom-level {
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
 .status-bar {
   flex-shrink: 0;
   height: 24px;

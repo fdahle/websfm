@@ -26,6 +26,9 @@ Notable changes to websfm. The format follows
   the omega/phi/kappa convention of the pose import: a unit test turns an imported pose
   into the solver's camera and back, and gets the same position and angles to 1e-9°.
   The dialog can also leave out the angles or the accuracies.
+- **Type a zoom into an image or raster tab.** Click the zoom percentage at the right of
+  the tab's status bar and type a value; Enter or clicking elsewhere applies it, Esc keeps
+  the old zoom.
 - **Hide the bug-report button.** Settings ▸ General ▸ Notices ▸ **Bug report button**
   turns off the round button at the bottom right. Other ▸ About ▸ **Report a bug** opens
   the same GitHub page.
