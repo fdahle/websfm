@@ -104,6 +104,7 @@ LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
 | Running and testing from source | [docs/development.md](docs/development.md) |
 | How the code is organised | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | The algorithms and why they were chosen | [docs/METHODS.md](docs/METHODS.md) |
+| How it compares with COLMAP and Metashape | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) |
 | Hosting your own copy | [docs/deployment.md](docs/deployment.md) |
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | What changed | [CHANGELOG.md](CHANGELOG.md), or **Other ▸ What's New** in the app |
@@ -153,15 +154,17 @@ Latest results (October 2026):
 | Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK: 24.8 cm H / 49.6 cm V | COLMAP: 24.0 / 65.0 cm |
 | Quarry, Pix4D example (RTK in EXIF), pure SfM | 347 / 347 | Cameras vs RTK: 28.7 cm H / 70.2 cm V, ~530 s end to end | COLMAP: 49.5 / 84.7 cm, 1,104 s |
 | COLMAP South Building | 128 / 128 | 60,045 sparse points | COLMAP: 84,954 points |
-| ETH3D high-res, 13 scenes (dense, from ground-truth cameras) | – | Mean F1 52.6 at 2 cm, 76.0 at 10 cm | COLMAP dense: 59.1 / 81.0 |
-| Historical Antarctic aerial film (USGS, 97 MP scans) | 5 / 5 | Self-calibrated, median reprojection error 1.48 px | – |
+| ETH3D high-res, 6 training scenes (dense, from ground-truth cameras, ETH3D's evaluator) | – | Mean F1 66.2 at 2 cm | COLMAP dense: 58.4 |
+| Casa Grande 1978 aerial film (37 scans, 11 GCP checkpoints) | 37 / 37 | DEM vs 1 m reference: RMSE 1.42 m, NMAD 0.73 m | COLMAP: 13.0 / 13.5 m; Metashape defaults: 13 / 37 cameras |
 
-The ETH3D figures come from an approximation of the official scorer, so they compare
-WebSfM with COLMAP rather than with the public leaderboard.
+Every table, with its date, method and the weak results, is in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 Known gaps: without GCPs or camera priors, nadir blocks bend into a dome of about
 0.5–0.7 m (COLMAP's dome is larger on the same images). COLMAP keeps 40–260 % more
-sparse points, and dense accuracy at 2 cm is behind COLMAP.
+sparse points and registers every image of ETH3D's low-texture interiors (WebSfM:
+20 / 26 and 8 / 14), and its dense clouds are more precise at 2 cm, where WebSfM's are
+more complete.
 
 Not yet verified:
 

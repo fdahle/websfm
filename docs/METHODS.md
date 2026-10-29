@@ -12,9 +12,10 @@ new model), update the relevant section here in the same pull request. Code-stru
 changes belong in ARCHITECTURE.md, and user-facing explanations in the in-app guide
 (`src/guide/`) and glossary (`src/glossary/`).
 
-Measurements cited as "benchmark B-…" come from the maintainer's benchmark record,
-run with the headless bench (`scripts/bench/`). Check ids such as `PRD-31` refer to
-the manual verification register.
+Measurements quoted here name their dataset and come from the headless bench
+(`scripts/bench/`). The comparisons against COLMAP, Metashape and reference data are
+collected in [BENCHMARKS.md](BENCHMARKS.md). Check ids such as `PRD-31` refer to the
+maintainer's manual verification register.
 
 ---
 
@@ -37,9 +38,10 @@ rather than afterthoughts.
   `[[…],[…],[…]]`, translation `t=[x,y,z]`, **camera centre `C = −Rᵀt`**.
   Projection matrices are stored flat, 12 elements `[R|t]`, **without K** (K is
   applied separately / points are normalised first).
-- **Distortion**: Brown–Conrady, but **removed once at ingest** — the entire
-  geometric pipeline (init, PnP, triangulation, BA, MVS, ortho) is pure pinhole.
-  See §6.
+- **Distortion**: Brown–Conrady, rational or Kannala–Brandt fisheye, **removed once at
+  ingest** — the geometric pipeline (init, PnP, triangulation, BA, MVS, ortho) works on
+  pinhole keypoints. Self-calibrated distortion is folded into the keypoints too (§4.6);
+  a fisheye camera alone is solved in BA in the pixels its lens recorded. See §5.
 - **Normalised coordinates**: `x = (u − cx)/fx`, `y = (v − cy)/fy`. Distortion
   math and the essential matrix live here.
 - **Units**: reprojection error in **pixels**; parallax/triangulation angles in
@@ -134,7 +136,7 @@ WebGPU path and every distance gate are unchanged. RootSIFT is a pure function o
 stored L2 vector, so pre-switch projects are converted when matching loads them rather
 than re-detected (`core/features/siftDescriptors.js`, stamped as `descNorm` per image).
 Node bench on an 8-image South Building strip: +2.1 % ≥3-image tracks at 2400 px / 10k,
-+2.6 % at native / 10k and +4.8 % at native / 25k (benchmark B-match-gpu).
++2.6 % at native / 10k and +4.8 % at native / 25k.
 
 **Which keypoints survive the cap — coarse first** (COLMAP's rule; since 2026-10-05).
 `maxKeypoints` used to keep the strongest |DoG| response. At high resolution that fills
@@ -157,8 +159,9 @@ With RootSIFT, that native-10k configuration gains +13.5 %.
   within ~2 px. Left in, these poison matching (many-to-one convergence, §3) and
   BA. They are suppressed at detection.
 - **Descriptor width is per-detector, not a constant**: 128 for SIFT, 256 for the
-  optional learned **SuperPoint** detector (ONNX via `onnxruntime-web`). Carried
-  as `descDim`; a wrong dim mis-slices the flat descriptor buffer.
+  optional learned **SuperPoint**, 128 for **DISK** and **ALIKED** (ONNX via
+  `onnxruntime-web`, `core/features/learnedDetectors.js`). Carried as `descDim`; a
+  wrong dim mis-slices the flat descriptor buffer.
 - **Tiled detection** for very large scans: the image is split into an evenly spaced,
   overlapping grid whose origins sit on the coarsest octave's sample grid. Each tile
   keeps only the keypoints in its own *core*, and the cores (cut at each overlap's
@@ -171,8 +174,10 @@ With RootSIFT, that native-10k configuration gains +13.5 %.
 - **Colour** is sampled per keypoint at detection and later median-aggregated per
   track for the coloured sparse cloud.
 
-**Alternatives available**: SIFT (default, classical, rotation+scale invariant) or
-SuperPoint (learned, better on low-texture / repetitive scenes, needs the model).
+**Alternatives available**: SIFT (default, classical, rotation+scale invariant), or
+the learned SuperPoint, DISK or ALIKED (better on low-texture / repetitive scenes,
+none of them scale- or rotation-invariant, each needs its model; matched with
+LightGlue).
 
 ---
 
@@ -327,7 +332,13 @@ A guessed focal therefore gets wide bounds instead: 60% per pass, and anywhere w
 The seed pair is the single best predictor of how the model grows, so we do **not**
 just take the highest inlier count. We probe up to `initCandidates` (default 24)
 pairs with the most inliers and for each:
-- `F → E` (`fundamentalToEssential`, applying `K_A`, `K_B`),
+- `F → E` (`fundamentalToEssential`, applying `K_A`, `K_B`), and beside it a
+  **five-point E under RANSAC** (Nistér, `core/sfm/essential.js`) on the K-normalised
+  matches, each of its alternative solutions a candidate of its own (`initFivePoint`,
+  on by default; inlier threshold 1.5 px). On a near-planar scene the matcher's
+  uncalibrated F is undetermined and its pose is wrong, where the calibrated problem
+  has no planar degeneracy (Casa Grande 1978 aerial film, one pair: 174 px init
+  reprojection via F, 0.61 px via five-point),
 - **pose recovery** by essential-matrix decomposition (`recoverPose`) with
   cheirality (points-in-front) disambiguation of the 4-fold sign ambiguity,
 - **DLT triangulation** of all matches, keep only points passing cheirality in
@@ -382,7 +393,7 @@ between a soft band just above the floor (`minInitAngleDeg × initSoftFloorFacto
 default 2.5°) and a grazing knee at `initAngleTargetDeg × 4` (default 32°), beyond
 which decaying overlap is discounted. A *ranked* parallax term anchored at the floor
 is unstable by construction: small absolute angle differences near the floor become
-large multiplicative ones. On South Building (benchmark B4) it scored a 5.21° seed
+large multiplicative ones. On South Building (128 images) it scored a 5.21° seed
 over a 2.68° one by 4.7×, swamping the latter's combined 1.34× advantage in points,
 reprojection and graph degree — and the seed it picked registered **19/128** cameras
 with a self-calibration that ran away to fx +101%, against **122/128** for the seed
@@ -512,7 +523,8 @@ family as COLMAP's BA; the specifics:
   capped iterate taken as the step. Any CG iterate from x₀ = 0 lowers the quadratic
   model, and LM still accepts a step only if the true cost falls. On three bench sets
   this needed the same number of LM solves and gave identical camera, checkpoint and
-  point results, at 14–50 % less SfM time (benchmark B-parity). Cholesky is n³/3 flops: 5.9 s per solve at 522 cameras against 0.14 s for
+  point results, at 14–50 % less SfM time (GeoScan PUTI −50 %, quarry −24 %, South
+  Building −14 %). Cholesky is n³/3 flops: 5.9 s per solve at 522 cameras against 0.14 s for
   CG with the same answer (2×10⁻¹² apart, native), and BA had taken 2,100 of 2,550 s
   on a 538-image block. The reduced system is stored **block-sparse**: a 6×6 block
   per pair of cameras that share a point (plus the intrinsics-group rows), so memory
@@ -547,7 +559,7 @@ family as COLMAP's BA; the specifics:
   costs from different iterations are not on one scale. Without the tolerance every BA
   ran to its cap: on St Nazaire the late BAs repeated ~4 s iterations (1.45 M
   observations) on a model that had converged in the first one or two, and BA was 91 %
-  of the SfM time (benchmark B-ba-ftol).
+  of the SfM time (St Nazaire, 127 DJI images).
 - **Cost reported**: RMS reprojection error in pixels, before/after, plus a
   per-iteration convergence trace (used to tell "plateaued" from "still
   descending — raise iterations").
@@ -691,7 +703,9 @@ models retain their two-view structure rather than being emptied by this policy.
 
 ## 5. Camera model & lens distortion
 
-**Model**: **Brown–Conrady** — radial `k1,k2,k3` + tangential `p1,p2`.
+**Model**: **Brown–Conrady** — radial `k1,k2,k3` + tangential `p1,p2` — by default;
+OpenCV's **rational** model and the **Kannala–Brandt fisheye** are the alternatives
+below.
 Forward: `x_d = x·(1 + k1·r² + k2·r⁴ + k3·r⁶) + [2·p1·xy + p2·(r²+2x²)]` (and the
 symmetric `y_d`), in normalised coords. Inverse by **Newton's method on the exact
 forward model** with backtracking, to a tolerance (not OpenCV's fixed count of
@@ -699,10 +713,13 @@ fixed-point steps, which was 0.46 px off at a 4000×3000/f=3000 corner for k1=�
 3.4 px at −0.20 — errors the self-cal fold baked into every keypoint). Where the
 forward curve r·(1+k1r²+…) turns back before the observed corner radius no inverse
 exists; the self-cal guard rejects such a bag (`radial-fold`) before it is folded.
-Strong fisheye remains out of scope.
 
 **Selectable distortion models** (`DISTORTION_MODELS`, chosen per sensor):
-`pinhole` (none) · `radial` (k1) · `radial2` (k1,k2) · `brown` (k1,k2,k3,p1,p2).
+`pinhole` (none) · `radial` (k1) · `radial2` (k1,k2) · `brown` (k1,k2,k3,p1,p2) ·
+`rational` (OpenCV's k1–k6, p1, p2: the radial factor is
+`(1 + k1r² + k2r⁴ + k3r⁶) / (1 + k4r² + k5r⁴ + k6r⁶)`) · `fisheye1` / `fisheye2` /
+`fisheye` (Kannala–Brandt with one, two or four terms, as COLMAP's
+`SIMPLE_RADIAL_FISHEYE`, `RADIAL_FISHEYE` and `OPENCV_FISHEYE`).
 `distortionOf` applies **only the active model's** coefficients, so a stale k3 from
 a model switch can't leak. (A sensor with no model set falls back to all five for
 back-compat with pre-model saves.)
@@ -712,8 +729,26 @@ undistorted per-point (`undistortPixel`); dense/ortho rasters are undistorted by
 building an undistorted→distorted sample map (`distortNormalized`, closed-form
 forward). Everything between — F/E, PnP, triangulation, BA, PatchMatch, DEM,
 ortho — is pure pinhole and never has to know about distortion. The only
-approximation is that the pairwise F used to pick the init pair is still a
-distorted-space fit; global BA corrects it.
+approximation is that the F from matching is fitted on keypoints that are still
+distorted when no calibration is known yet; the init pair also tries a five-point E
+(§4.2), and BA with self-calibration corrects the rest.
+
+**Fisheye** (`fisheye*` models, Kannala–Brandt): `θ = atan r`,
+`θd = θ·(1 + k1θ² + k2θ⁴ + k3θ⁶ + k4θ⁸)`, the image point at `θd/r` times the normalised
+ray. Keypoints are still undistorted at ingest into a pinhole frame for matching
+verification, PnP and triangulation, but a ray more than 75° off-axis has no useful
+pinhole image and is dropped there (`FISHEYE_MAX_RAY_DEG`). **BA solves a fisheye camera
+in the pixels its lens recorded** (`crates/reconstruction` `lens_factor`), so
+self-calibration refines the lens terms themselves (k1–k3, then k4 last in Auto, solved
+again without k4 if it would fold the curve) instead of folding a Brown bag; after a
+solve that changes f, the principal point or the lens, its keypoints are re-mapped from
+the recorded pixels. An uncalibrated fisheye starts as the bare equidistant projection
+(all terms zero). Depth maps use the field up to 60° off-axis
+(`FISHEYE_DENSE_MAX_DEG`). On the FIORD MeetingRoom 200° fisheye (106 images), camera
+centres agree with FIORD's model to 0.155 % of the span (median, self-calibrated;
+COLMAP 0.180 %, Metashape 0.175 %), and the three self-calibrated lenses agree to ~1 px
+in f and principal point; WebSfM registers 103–104 of 106 against their 106, with a
+quarter of COLMAP's points at the default keypoint budget.
 
 ### 5.1 Interior orientation for film scans (`core/sfm/fiducials.js`)
 
@@ -883,7 +918,7 @@ corrects k's own variation to second order (for a conformal map that term is fix
 ∇log k), places a point h above its foot at ζ·(1 + h/R) along the tilted normal, and
 restores the curvature drop |ζ|²/2R. The residual is third order (~10 µm over 10 km
 at 85°S); measured fits drop to 0.07 mm (80°S) and 0.3 mm (85°S) on synthetic
-error-free control (benchmark B-georef-polar). The fitted similarity carries the
+error-free control. The fitted similarity carries the
 frame (`sim.local`) and every consumer maps through it back to the grid; GCP
 precision scales by 1/k horizontally. A similarity without `sim.local` (older
 projects, no CRS, geographic) is the plain grid fit, unchanged.
@@ -1309,8 +1344,8 @@ within the survey allowance. Radial terms are deliberately not freed. The model 
 pinhole by invariant (§4.6): distortion was folded out of the observations and the
 composed bag recorded for dense to reproduce, so a new k₁ would have to be folded
 and recomposed or the dense warp would disagree with the sparse model. A focal change
-over 20 % is refused as a runaway, not a refinement. That is the B4 failure mode, where
-the cost falls while f doubles, and a cost gate cannot see it.
+over 20 % is refused as a runaway, not a refinement. That is the failure mode seen on
+South Building, where the cost falls while f doubles, and a cost gate cannot see it.
 
 ## 7. Dense multi-view stereo
 
@@ -1450,7 +1485,7 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   costs (clamped to 0.30–0.45) until 2026-10-12, which by construction dropped ~30 % of
   pixels this floor had already vetted: on ETH3D the fixed gate raised the mean F1 at
   2 cm from 52.6 to 58.9 (COLMAP 59.1) with accuracy unchanged on every scene, and on a
-  LiDAR-checked aerial block it was neutral (benchmark B-parity).
+  LiDAR-checked aerial block it was neutral.
 
   Sampling **one** source pixel is what makes this discriminate. Fusion's own check
   (below) searches a `(2·consistencyPx+1)²` window and accepts if *any* pixel there is
@@ -1671,7 +1706,7 @@ with two departures noted below.
    (Burt–Adelson) blending yet. It would only be needed if feathering ghosts
    misregistration inside the band, and that has not been seen so far.
 
-Measured on quarry-80 (benchmark B-parity ▸ Mosaicked ortho): the seam ratio (colour
+Measured on 80 images of the quarry block: the seam ratio (colour
 step across seams ÷ within one photo) falls from 2.76 (best) to 1.39, and from 5.88 to
 2.18 at the photos' GSD. The detail inside a photo is unchanged. Tenengrad sharpness
 drops, because best's dense switching between misregistered sources reads as gradient.
@@ -1948,14 +1983,14 @@ EXIF altitudes stay `unknown` (EXIF says "above sea level", DJI varies by model)
 
 | Stage | WebSfM | COLMAP | Notes |
 |---|---|---|---|
-| Features | SIFT (+ SuperPoint opt) | SIFT | + duplicate-blob suppression |
-| Matching | ratio + cross-check + F-RANSAC + **spread gate** | ratio + F/E RANSAC | spread gate is extra |
-| Verification | F + H (degeneracy) + inlier-ratio + positional-spread | F/E/H, GRIC | |
+| Features | SIFT (+ SuperPoint, DISK, ALIKED opt) | SIFT | + duplicate-blob suppression |
+| Matching | ratio + cross-check (or LightGlue) + F-RANSAC + **spread gate** | ratio + F/E RANSAC | spread gate is extra |
+| Verification | F (RANSAC, or MAGSAC++ opt) + H (degeneracy) + inlier-ratio + positional-spread | F/E/H, GRIC | no E at match time |
 | SfM type | incremental | incremental | same family |
 | Resection | **P3P Lambda-Twist** + MSAC + GN | P3P + RANSAC | |
 | BA | LM + Schur + adaptive Huber (from scratch) | LM + Schur (Ceres) | no external solver |
 | Self-cal | shared f / cx,cy / k1,k2,k3, staged by model size, folded into the keypoints | full intrinsic groups | bitmask-selected; on by default (`auto`) |
-| Distortion | Brown, removed at ingest | Brown, in BA | we stay pinhole downstream |
+| Distortion | Brown / rational / fisheye, removed at ingest; self-cal folded into keypoints | same models, in BA | pinhole downstream, except fisheye in BA (§5) |
 | Dense | PatchMatch MVS (CPU + WebGPU) | PatchMatch MVS | GPU path is WGSL |
 | Georef | Horn 7-param + camera/GCP-constrained BA | model_aligner / GCP | |
 
@@ -1965,18 +2000,43 @@ film-format handling with sanity checks); and the WebGPU PatchMatch path.
 
 ## 11. Known limitations & honest talking points
 
-- **Incremental** SfM → sequential, drift can accumulate on long strips (mitigated
-  by interleaved BA + loop closures from exhaustive matching, not by a global
-  method).
-- **Dense reduced-camera matrix** in BA → the next scaling ceiling: the solve is
-  iterative above 100 cameras, but the n×n matrix is still assembled densely.
-- **Self-calibration is weakly observed** on flat, single-strip aerial blocks —
-  reported but not auto-applied.
-- **Fisheye** is out of scope (Brown model; Newton inverse, refused past the fold).
-- **Dense quality is intrinsics-limited** — a default-FOV guess visibly distorts
-  depth.
-- Fitting the init F in **distorted space** is a first-order approximation
-  (global BA corrects it).
+- **Incremental SfM.** Cameras are added one at a time, so drift can accumulate on
+  long strips. Interleaved BA, loop closures from exhaustive matching, and camera
+  positions or GCPs inside BA (§6.2) limit it; there is no global (rotation-averaging)
+  method.
+- **Pairwise rotations from matching are unreliable.** Verification fits F with no
+  calibration; the rotations decomposed from it with a nominal K were wrong by a median
+  28.6° on true pairs of one South Building run (§4.0). That is why there is no
+  pre-SfM graph filter, and it would have to change (a five-point E at match time where
+  K is known) before rotation averaging could work. The init pair already tries a
+  five-point E (§4.2).
+- **Sequential matching cannot see a revisit.** A set taken in two laps pairs only
+  neighbours in filename order and splits into two models; there is no image
+  retrieval (vocabulary tree), so such a set needs exhaustive matching.
+- **Doming without control.** With no GCPs or camera positions, a nadir block bends:
+  50 cm (GeoScan PUTI, 444 images) and 70 cm (quarry, 347) vertical RMS against RTK after
+  a similarity fit. It is the block's geometry, not the self-calibration: with
+  Metashape's calibration held fixed PUTI is still 44 cm out, and COLMAP's mapper and
+  GLOMAP on the same images bend more (65–86 cm). With the drone's RTK positions in BA,
+  PUTI is 1.3 cm. Co-registration to a reference DEM afterwards (Nuth & Kääb, §6)
+  removes a shift and tilt, not the bend; BA constrained by a reference DEM is not
+  implemented.
+- **Self-calibration is weakly observed** on flat, single-strip aerial blocks (it needs
+  ≥ 2° of tilt variation for a trustworthy focal). The result is used for the run, folded
+  into the keypoints (§4.6), but never written to the sensor table without the user.
+- **Fisheye** rays more than 75° off-axis are dropped at ingest and depth maps use 60°
+  (§5), so a 200° lens keeps fewer keypoints than COLMAP does (103–104 of 106 FIORD
+  images registered, against 106).
+- **Panoramic satellite cameras** are split into frame segments; the satellite's motion
+  during the scan is not modelled (a synthetic moving block is 48 / 238 m off), and
+  there is no RPC model.
+- **Dense quality is intrinsics-limited**: a default-FOV guess visibly distorts depth.
+  Weakly textured surfaces remain the least complete part of a dense cloud; the Full
+  method's planar priors (§7) target them.
+- **One browser tab.** The reconstruction runs in 32-bit WebAssembly (4 GiB); fusion
+  and the Poisson mesh use 64-bit memories where the browser has them. A tab also
+  caps a single ArrayBuffer at 2 GiB and all of them at ~16 GiB, which bounds dense
+  clouds at about 1.4 G points.
 
 ### 11.1 Quality diagnostics (read-only, Quality Report hub)
 
