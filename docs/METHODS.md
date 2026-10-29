@@ -621,10 +621,59 @@ fitting **one composed `{k1,k2,k3}` bag** that maps pristine → fully-folded vi
 linear least-squares (`core/sfm/selfCalCompose.js`, `fitComposedRadial` — the
 forward radial model is linear in the coeffs given the radius). That single
 composed bag — not a per-pass sum, which is wrong beyond first order — is what
-`summary.selfCalDistortion` carries so the **dense** stage reproduces the exact
-same undistortion (applied as a second bag after any calibrated `dist`). A
-monotonicity guard warns if a higher-order fit runs away. One single source of
-truth for distortion, ingest → dense.
+`summary.selfCalDistortion` carries so the **dense** stage reproduces the same
+undistortion (applied as a second bag after any calibrated `dist`). A monotonicity
+guard warns if a higher-order fit runs away. One single source of truth for
+distortion, ingest → dense.
+
+**Re-folding when the principal point moves** (`selfCalFold.js` `refoldIfMoved`). Each
+fold is centred on the principal point of its pass, and the point is held until the
+model has ten cameras, then may move. A fold about the old centre followed by one about
+the new is no radial map about either. Left as it is, the composed bag (fitted about
+the final centre) misses the folded keypoints, so dense undistorts the rasters
+differently from the sparse model, and the non-radial remainder stays in the keypoints,
+where no later pass can remove it: BA fits a radial bag, and the remainder also pulls
+the principal point and focal estimates off. So once a group's principal point has
+moved more than `selfCalRefoldMovePx` (0.25 px) from the centre its keypoints were
+folded about, the fold fits the composed bag pristine → folded about each image's
+current K and **re-derives the keypoints and GCP marks from the pristine ones** through
+it. Afterwards the keypoints are exactly what the composed bag gives about the current
+centre, and the next pass estimates what is left. A fisheye group never folds (§5), so
+it never re-folds.
+
+Measured on synthetic 24-camera blocks with a known lens and cameras (seeds 7, 11, 13;
+camera-centre median error after a similarity fit, mm):
+
+| true principal point offset · lens | without re-fold | with re-fold |
+| --- | --- | --- |
+| 4.3 px · k1 −0.05, k2 0.008 | 10.6 / 10.7 / 12.5 | 7.9 / 10.1 / 12.8 |
+| 4.3 px · k1 −0.12, k2 0.03 | 10.9 / 11.6 / 17.0 | 8.1 / 10.1 / 13.1 |
+| 28.8 px · k1 −0.05, k2 0.008 | 17.0 / 23.6 / 33.5 | 9.5 / 10.2 / 12.5 |
+| 28.8 px · k1 −0.12, k2 0.03 | 31.2 / 37.4 / 72.0 | 9.7 / 10.6 / 16.2 |
+
+At the 28.8 px offset the old fold left the principal point 3–9 px and the focal length
+up to 1.3 % off; with the re-fold they come within 0.1–0.7 px and 0.06 %, and the
+composed bag reproduces the keypoints to ≤ 0.002 px (0.7–1.5 px before; ≤ 0.016 px at the
+4.3 px offset, where moves under the threshold wait). The composition
+of radial maps about one centre is itself not exactly a degree-6 polynomial; that
+residual is 0.001–0.011 px. The run log gives the fit RMS, how far the principal point
+moved and the re-folds per sensor (`fitRmsPx`, `centreMovedPx` in `selfCalDistortion`),
+and warns above `selfCalComposedWarnPx` (0.25 px). The alternative would be keeping
+distortion in BA's forward model, as COLMAP does, at the cost of the pinhole invariant.
+
+On real blocks, whose principal points sit close to the image centre, the re-fold
+changes the cameras within run-to-run noise; what it removes is the gap between dense and
+sparse. It ran 1–3 times per run (principal-point moves of 0.7–27 px), took the composed
+residual to 0.000 px (South Building 0.18 px before) and cost 0–7 % in time:
+
+| block | reference | without re-fold | with re-fold |
+| --- | --- | --- | --- |
+| South Building, 128 images | COLMAP cameras, median | 0.0047 | 0.0048 |
+| ETH3D, six scenes | ground-truth cameras | — | identical |
+| quarry, 347 images, no priors | RTK, 3D RMS | 0.738 m | 0.732 m |
+| quarry, 347 images, RTK priors | RTK, 3D RMS | 0.236 m | 0.233 m |
+| Casa Grande | check points, H / V RMS | 1.246 / 1.170 m | 1.246 / 1.173 m |
+| Iceland 1980s scans, 125 images | check points, H / V RMS | 1.416 / 1.945 m | 1.416 / 1.946 m |
 
 ### 4.7 Retriangulation, split-track merge, track filtering
 

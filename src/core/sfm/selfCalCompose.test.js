@@ -42,6 +42,26 @@ describe('fitComposedRadial', () => {
     expect(maxErr).toBeLessThan(0.5)
     expect(fit.fitRmsPx).toBeLessThan(0.5)
   })
+
+  // The limit of composing: a first fold about one principal point and a second about a
+  // moved one is no radial map about either, so the residual grows with the move. This
+  // is what selfCalFold.js logs as `centreMovedPx` and warns on (selfCalComposedWarnPx).
+  it('leaves a residual that grows with a principal-point move between folds', () => {
+    const lens = { k1: -0.1, k2: 0, k3: 0 }
+    const rmsAfterMove = (move) => {
+      const K1 = { ...K, cx: K.cx + move, cy: K.cy - move / 2 }
+      const ideal = idealGrid()
+      const pristine = ideal.map((p) => distortPixel(p.x, p.y, K1, lens))
+      const fold1 = pristine.map((p) => undistortPixel(p.x, p.y, K, lens)) // about the old centre
+      const fold2 = fold1.map((p) => undistortPixel(p.x, p.y, K1, { k1: 0.002, k2: 0, k3: 0 }))
+      return fitComposedRadial(pristine, fold2, K1, { k2: true, k3: true }).fitRmsPx
+    }
+    expect(rmsAfterMove(0)).toBeLessThan(0.01)
+    const r10 = rmsAfterMove(10),
+      r30 = rmsAfterMove(30)
+    expect(r10).toBeGreaterThan(0.1)
+    expect(r30 / r10).toBeGreaterThan(2.5) // about linear in the move
+  })
 })
 
 describe('fitComposedRadialSets', () => {

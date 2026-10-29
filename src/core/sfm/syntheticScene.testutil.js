@@ -83,6 +83,7 @@ const NADIR = [
  * @param {boolean} [o.priors]            camera position priors
  * @param {object[]} [o.blocks]           extra blocks [{ rows, cols, offsetX, offsetY }]; no pairs across blocks
  * @param {string} [o.prefix]             uuid prefix
+ * @param {number[]} [o.ppOffset]        true principal point offset from the centre [dx, dy] px
  * @param {boolean} [o.film]              film scans: keypoints in per-image scan space,
  *                                        fiducial detections + a calibrated layout
  */
@@ -103,6 +104,7 @@ export function aerialBlock({
   keepFrac = 0.85,
   outlierFrac = 0.03,
   film = false,
+  ppOffset = [3.5, -2.5],
 }) {
   const rng = mulberry32(seed)
   const gauss = () => {
@@ -113,7 +115,7 @@ export function aerialBlock({
   const meta = { width: 1600, height: 1200, focalLength35: 28 }
   const nominal = resolveK(meta)
   const fxTrue = calibrated ? nominal.fx : nominal.fx / focalError
-  const Ktrue = { fx: fxTrue, fy: fxTrue, cx: meta.width / 2 + 3.5, cy: meta.height / 2 - 2.5 }
+  const Ktrue = { fx: fxTrue, fy: fxTrue, cx: meta.width / 2 + ppOffset[0], cy: meta.height / 2 + ppOffset[1] }
   // Film: a 10 µm canonical frame around four corner marks; the scanner places each
   // frame with its own rotation and offset, which the fiducial fit must remove.
   const PITCH = 0.01

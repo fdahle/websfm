@@ -419,8 +419,10 @@ export function assembleSummary({
     // undistortion so its rasters land in the same pinhole frame), about the final
     // camera K. An image without a sensor self-calibrates alone: its row carries
     // `sensorId: null` and its `imageUuid`. Empty when self-calibration was off.
-    // `fitRmsPx` is the composed-fit residual (a health signal — warn if it drifts
-    // above ~0.05px). Rows from selfCalFold.js ▸ distortionSummary.
+    // `fitRmsPx` is the composed-fit residual (selfCalFold.js warns above
+    // SFM_TUNING.selfCalComposedWarnPx), `centreMovedPx` how far the principal point
+    // moved after the first fold, its main cause. Rows from selfCalFold.js ▸
+    // distortionSummary.
     selfCalDistortion,
     // F4: per-image scan→canonical transform for each film image, so the dense
     // stage reproduces the exact same frame (it must NOT re-fit — the sparse run

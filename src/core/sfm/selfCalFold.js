@@ -9,6 +9,7 @@
 //
 // createSelfCalFold(ctx) — ctx = {
 //   imgs, cameras, Kmap, moveGcpObs, sensorIntByUuid, fiducialTransforms, log,
+//   refoldMovePx?, composedWarnPx?,   (default: SFM_TUNING's; a run's settings override)
 // }
 // Created before registration: the interim BA self-calibrates f,k1 mid-registration
 // (D3), so bundleSession.js's runBundleAdjust folds during the registration call.
@@ -18,12 +19,23 @@ import { fitComposedRadialSets, radialCurveOk } from './selfCalCompose.js'
 import { mapPositions } from './keypointSet.js'
 import { undistortBrownPixels } from './reconstruction.js'
 import { pluralize } from '../textFormat.js'
+import { SFM_TUNING } from '../tuning.js'
 
 const xy = (p) => [p.x, p.y]
 const kChanged = (a, b) => a.fx !== b.fx || a.fy !== b.fy || a.cx !== b.cx || a.cy !== b.cy
 const lensChanged = (a, b) => a.k1 !== b.k1 || a.k2 !== b.k2 || a.k3 !== b.k3 || a.k4 !== b.k4
 
-export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntByUuid, fiducialTransforms, log }) {
+export function createSelfCalFold({
+  imgs,
+  cameras,
+  Kmap,
+  moveGcpObs,
+  sensorIntByUuid,
+  fiducialTransforms,
+  log,
+  refoldMovePx = SFM_TUNING.selfCalRefoldMovePx,
+  composedWarnPx = SFM_TUNING.selfCalComposedWarnPx,
+}) {
   // Self-calibration group of an image: its sensor's (BA shares one focal scale,
   // principal-point offset and radial bag across a sensor), or — with no sensor — the
   // image's own (the crate gives every `sensorOfCam` −1 camera a group of its own).
@@ -77,6 +89,16 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
   // image's current K (selfCalCompose.js), refitted whenever a BA changes that K —
   // replacing the old additive-k1 sum, which was wrong beyond first order.
   const pristineKpByUuid = new Map() // uuid → KeypointSet before the first fold
+  // GCP marks of each image as they were before the first fold, in moveGcpObs order:
+  // a re-fold maps them from here, as it does the keypoints.
+  const pristineMarksByUuid = new Map() // uuid → [[x, y], …]
+  // Where each image's first fold was centred (the summary's `centreMovedPx`), and the
+  // centre its keypoints are currently radial about: a fold about a moved principal
+  // point leaves a composition no one radial bag reproduces, so once the point has moved
+  // past selfCalRefoldMovePx from `foldCentreByUuid` the group is re-folded (refold).
+  const firstFoldCentreByUuid = new Map() // uuid → { cx, cy }
+  const foldCentreByUuid = new Map() // uuid → { cx, cy }
+  const refoldsByGroup = new Map() // group key → re-folds so far
   const foldedTermsByGroup = new Map() // group key → { k2, k3 } ever folded into its keypoints
   const selfCalDistByGroup = new Map() // group key → { sensorId, imageUuid, k1, k2, k3, fitRmsPx }
 
@@ -139,6 +161,7 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
       const bag = lensBefore ? { k1: 0, k2: 0, k3: 0 } : { k1: rk0.k1 || 0, k2: rk0.k2 || 0, k3: rk0.k3 || 0 }
       const folds = !!(bag.k1 || bag.k2 || bag.k3)
       const toFold = [] // { img, Kc }: the group's images whose keypoints take the bag
+      const groupKs = [] // { img, Kc }: every image of the group with its new K
       for (const img of imgsBySelfCalGroup.get(key) ?? []) {
         const ci = camIdxOf.get(img.uuid)
         const k = Kmap.get(img.uuid)
@@ -153,6 +176,7 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
               }
         if (!own) continue
         const Kc = { fx: own.fx, fy: own.fy, cx: own.cx, cy: own.cy }
+        groupKs.push({ img, Kc })
         // Fold EVERY image on a solved group — not just the registered ones. When
         // this runs during registration, the next candidate to resect must already
         // have undistorted keypoints + a pinhole Kmap or its PnP re-applies the
@@ -160,7 +184,17 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
         if (folds && img.kp?.n) {
           // Keep the pristine (post-ingest, pre-first-fold) set once, so the
           // composed fit below always maps pristine → fully-folded.
-          if (!pristineKpByUuid.has(img.uuid)) pristineKpByUuid.set(img.uuid, img.kp)
+          if (!pristineKpByUuid.has(img.uuid)) {
+            pristineKpByUuid.set(img.uuid, img.kp)
+            const marks = []
+            moveGcpObs(img.uuid, (x, y) => {
+              marks.push([x, y])
+              return { x, y }
+            })
+            pristineMarksByUuid.set(img.uuid, marks)
+            firstFoldCentreByUuid.set(img.uuid, { cx: Kc.cx, cy: Kc.cy })
+            foldCentreByUuid.set(img.uuid, { cx: Kc.cx, cy: Kc.cy })
+          }
           toFold.push({ img, Kc })
         }
         // A fisheye image's keypoints are its recorded pixels undistorted about its K
@@ -192,6 +226,7 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
           k3: ever.k3 || (passTerms.k3 && !!bag.k3),
         })
       }
+      if (foldedTermsByGroup.has(key) && !lensBefore) refoldIfMoved(key, groupKs, label)
       if (foldedTermsByGroup.has(key)) composeSelfCalRecord(key, label)
     }
     if (refitFisheye > 0) {
@@ -211,12 +246,82 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
     }
   }
 
+  // Re-fold a group whose principal point moved (SC-FOLD). Its keypoints hold folds about
+  // more than one centre, which no radial bag reproduces: dense would undistort the
+  // rasters differently from the keypoints, and the next BA pass could not remove the
+  // non-radial remainder. So fit the composed bag pristine → folded about each image's
+  // current K, and re-derive the keypoints and GCP marks from the pristine ones through
+  // it: afterwards they are exactly what the composed bag gives, about the current
+  // centre, and the next pass estimates what is left. `groupKs` = [{ img, Kc }].
+  function refoldIfMoved(key, groupKs, label) {
+    const entries = groupKs.filter(({ img }) => pristineKpByUuid.has(img.uuid) && img.kp?.n)
+    let moved = 0
+    for (const { img, Kc } of entries) {
+      const c = foldCentreByUuid.get(img.uuid)
+      moved = Math.max(moved, Math.hypot(Kc.cx - c.cx, Kc.cy - c.cy))
+    }
+    if (!(moved > refoldMovePx)) return
+    const pairs = entries.map(({ img, Kc }) => ({ pristine: pristineKpByUuid.get(img.uuid), folded: img.kp, K: Kc }))
+    const composed = fitComposedRadialSets(pairs, pairs[0].K, foldedTermsByGroup.get(key))
+    const guard = radialCurveOk(composed, groupMaxNormR(entries), pairs[0].K.fx)
+    if (!guard.ok) {
+      log(`${label} self-cal re-fold skipped — ${guard.reason}`, 'warn', 'Reconstruction')
+      return
+    }
+    const before = entries.map(({ img }) => img.kp)
+    for (const { img } of entries) img.kp = pristineKpByUuid.get(img.uuid)
+    foldKeypoints(entries, composed, { shift: 0, n: 0 }, (img, Kc) => {
+      const marks = pristineMarksByUuid.get(img.uuid) ?? []
+      let i = 0
+      moveGcpObs(img.uuid, () => undistortPixel(...marks[i++], Kc, composed))
+    })
+    let sq = 0,
+      n = 0
+    entries.forEach(({ img, Kc }, e) => {
+      const a = before[e].xy,
+        b = img.kp.xy
+      for (let j = 0; j < img.kp.n; j++) {
+        // eslint-disable-next-line no-self-compare
+        if (a[2 * j] !== a[2 * j]) continue // a missing point
+        sq += (b[2 * j] - a[2 * j]) ** 2 + (b[2 * j + 1] - a[2 * j + 1]) ** 2
+        n++
+      }
+      foldCentreByUuid.set(img.uuid, { cx: Kc.cx, cy: Kc.cy })
+    })
+    refoldsByGroup.set(key, (refoldsByGroup.get(key) ?? 0) + 1)
+    log(
+      `${label} re-folded ${pluralize(entries.length, 'image')}' keypoints about the moved principal point ` +
+        `(moved ${moved.toFixed(2)} px; keypoints changed ${Math.sqrt(sq / Math.max(1, n)).toFixed(3)} px RMS)`,
+      'info',
+      'Reconstruction',
+    )
+  }
+
+  // The largest normalised corner radius over `entries` ([{ img, Kc }]): how far out the
+  // radial guard samples a bag.
+  function groupMaxNormR(entries) {
+    let r = 0
+    for (const { img, Kc: K } of entries) {
+      const { width, height } = kFrameDims(img)
+      const w = width || 2 * K.cx,
+        h = height || 2 * K.cy
+      r = Math.max(r, Math.hypot(Math.max(K.cx, w - K.cx) / K.fx, Math.max(K.cy, h - K.cy) / K.fy))
+    }
+    return r
+  }
+
   // Undistort the keypoints and GCP marks of `toFold` ([{ img, Kc }], one group) through
   // `bag`, each about its own K, in place. The whole group goes to the crate in one call
   // (its thread pool in the threaded build); the JS path is the same arithmetic, used
   // before the wasm has loaded. `acc` = { shift, n }: the run's summed keypoint shift (px)
-  // and count so far, returned with this group's points added in order.
-  function foldKeypoints(toFold, bag, acc) {
+  // and count so far, returned with this group's points added in order. `moveMarks(img,
+  // Kc)` moves an image's GCP marks (default: the same undistortion of where they are).
+  function foldKeypoints(
+    toFold,
+    bag,
+    acc,
+    moveMarks = (img, Kc) => moveGcpObs(img.uuid, (x, y) => undistortPixel(x, y, Kc, bag)),
+  ) {
     let shift = acc.shift,
       n = acc.n
     let total = 0
@@ -251,7 +356,7 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
           return u
         })
       }
-      moveGcpObs(img.uuid, (x, y) => undistortPixel(x, y, Kc, bag))
+      moveMarks(img, Kc)
     })
     return { shift, n }
   }
@@ -269,24 +374,23 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
   function composeSelfCalRecord(key, label) {
     const gimgs = imgsBySelfCalGroup.get(key) ?? []
     const setPairs = []
-    let maxNormR = 0
+    let centreMovedPx = 0
     for (const img of gimgs) {
       const pristine = pristineKpByUuid.get(img.uuid)
       const K = cameras.get(img.uuid)?.K ?? Kmap.get(img.uuid)
       if (!pristine || !K) continue
-      setPairs.push({ pristine, folded: img.kp, K: { fx: K.fx, fy: K.fy, cx: K.cx, cy: K.cy } })
-      const { width, height } = kFrameDims(img)
-      const w = width || 2 * K.cx,
-        h = height || 2 * K.cy
-      maxNormR = Math.max(maxNormR, Math.hypot(Math.max(K.cx, w - K.cx) / K.fx, Math.max(K.cy, h - K.cy) / K.fy))
+      setPairs.push({ pristine, folded: img.kp, K: { fx: K.fx, fy: K.fy, cx: K.cx, cy: K.cy }, img })
+      const c0 = firstFoldCentreByUuid.get(img.uuid)
+      if (c0) centreMovedPx = Math.max(centreMovedPx, Math.hypot(K.cx - c0.cx, K.cy - c0.cy))
     }
     if (!setPairs.length) return
-    pendingRecords.set(key, { setPairs, maxNormR, terms: foldedTermsByGroup.get(key), label })
+    const maxNormR = groupMaxNormR(setPairs.map(({ img, K }) => ({ img, Kc: K })))
+    pendingRecords.set(key, { setPairs, maxNormR, centreMovedPx, terms: foldedTermsByGroup.get(key), label })
   }
 
   // Fit the records still pending, in the order the groups were first composed.
   function settleRecords() {
-    for (const [key, { setPairs, maxNormR, terms, label }] of pendingRecords) {
+    for (const [key, { setPairs, maxNormR, centreMovedPx, terms, label }] of pendingRecords) {
       // Pool all group keypoints (each about its own K) for a well-constrained fit.
       const composed = fitComposedRadialSets(setPairs, setPairs[0].K, terms)
       // Guard: sample the composed radial map to the image corner; a non-monotonic
@@ -303,6 +407,24 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
       }
       const gimgs = imgsBySelfCalGroup.get(key)
       const sensorId = gimgs[0].sensorId ?? null
+      const who = gimgs[0].sensor?.label ?? (sensorId == null ? gimgs[0].name : null)
+      const refolds = refoldsByGroup.get(key) ?? 0
+      log(
+        `${label} self-cal composed radial fit${who ? ` (${who})` : ''}: RMS ${composed.fitRmsPx.toFixed(3)} px, ` +
+          `principal point moved ${centreMovedPx.toFixed(1)} px since the first fold` +
+          (refolds ? `, ${pluralize(refolds, 're-fold')}` : ''),
+        'info',
+        'Reconstruction',
+      )
+      if (composed.fitRmsPx > composedWarnPx) {
+        log(
+          `${label} self-cal composed radial fit misses the folded keypoints by ` +
+            `${composed.fitRmsPx.toFixed(2)} px RMS (over ${composedWarnPx} px); dense ` +
+            `undistorts with it, so its depth maps sit that far off the sparse model`,
+          'warn',
+          'Reconstruction',
+        )
+      }
       selfCalDistByGroup.set(key, {
         sensorId,
         imageUuid: sensorId == null ? gimgs[0].uuid : null,
@@ -310,6 +432,7 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
         k2: composed.k2,
         k3: composed.k3,
         fitRmsPx: composed.fitRmsPx,
+        centreMovedPx,
       })
     }
     pendingRecords.clear()
@@ -332,6 +455,7 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
           k2: d.k2,
           k3: d.k3,
           fitRmsPx: d.fitRmsPx,
+          centreMovedPx: d.centreMovedPx,
         })),
       ...[...refinedLensGroups].map((key) => {
         const img = imgsBySelfCalGroup.get(key)[0],

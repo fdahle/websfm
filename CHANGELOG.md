@@ -6,6 +6,17 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Self-calibrated distortion stays exact when the principal point moves.** When
+  bundle adjustment moves a camera's principal point, the tie points are corrected for
+  distortion again about the new centre, so the depth maps undistort the images exactly
+  as the sparse model did. Before, each correction stayed centred where it was made, and
+  dense could differ from sparse by up to 0.18 px (South Building). The reconstruction
+  log now gives, per sensor, how far the principal point moved and how many times the
+  tie points were corrected again, and warns if the two still differ by more than
+  0.25 px. On synthetic blocks with an off-centre principal point (28.8 px), camera
+  positions are 2–4× closer to the truth. On real blocks the cameras are unchanged
+  within noise (South Building, ETH3D, quarry vs RTK, Casa Grande and Iceland check
+  points), and runs take 0–7 % longer.
 - **A full browser storage no longer ends a depth-map run.** When browser storage runs
   full while depth maps are built, the run pauses and offers to move the project to a
   folder on disk, then carries on there; stopping ends it, as before. The browser copy

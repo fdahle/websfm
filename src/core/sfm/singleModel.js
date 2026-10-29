@@ -526,7 +526,17 @@ export async function reconstructSingleModel(input, hooks = {}) {
     // Self-cal groups + distortion fold (selfCalFold.js) and every bundle adjustment
     // (bundleSession.js). Both before registerImages: the interim BA self-calibrates
     // f,k1 mid-registration (D3) and folds during the registration call.
-    const selfCal = createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntByUuid, fiducialTransforms, log })
+    const selfCal = createSelfCalFold({
+      imgs,
+      cameras,
+      Kmap,
+      moveGcpObs,
+      sensorIntByUuid,
+      fiducialTransforms,
+      log,
+      refoldMovePx: cfg.selfCalRefoldMovePx,
+      composedWarnPx: cfg.selfCalComposedWarnPx,
+    })
     const bundles = createBundleSession({
       cfg,
       cameras,

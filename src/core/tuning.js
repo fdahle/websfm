@@ -202,6 +202,18 @@ export const SFM_TUNING = {
   // pre-solve on the CA213732V strip (29.9%), leaving fx at the guess (SFM-12).
   selfCalGuessFocalStepFrac: 0.6,
   selfCalGuessFocalNominalFrac: 0.7,
+  // Each self-cal fold is centred on the principal point of its pass; once the point
+  // moves, no one radial bag about the new centre reproduces the earlier folds (~0.075 px
+  // per px of move for a k1 = −0.1 lens folded before the move, simulated). So when a
+  // group's principal point has moved more than this (px) from the centre its keypoints
+  // were folded about, the fold re-derives them from the pristine keypoints with the
+  // composed bag about the current centre (selfCalFold.js refold). Below it the
+  // remainder is ≤ ~0.02 px; the move accumulates until it crosses.
+  selfCalRefoldMovePx: 0.25,
+  // Warn when the composed self-cal bag misses the folded keypoints by more than this
+  // RMS (px): dense undistorts the rasters with that bag. Before the re-fold, measured
+  // 0.05 (quarry, 12 px move) and 0.11 px (synthetic self-cal, 4 px) on 2026-10-28.
+  selfCalComposedWarnPx: 0.25,
   // ── PnP registration gate ──
   pnpGateScale: 2, // fixed inlier gate = reprjThreshold × min(pnpGateScale, 2)
   minPnpInliers: 15, // absolute PnP-inlier floor to accept a pose
