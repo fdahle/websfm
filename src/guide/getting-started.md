@@ -148,6 +148,23 @@ one; **?** (or Other → **Shortcuts**) lists them all, grouped by where they wo
 Other → **What's New** lists what changed in each version; after an update, its badge
 counts the changes since you last looked.
 
+## Supported browsers
+**Chrome and Edge** have everything WebSfM uses; WebGPU, which runs depth maps and
+matching on the graphics card, depends on the graphics driver. **Firefox** runs the
+whole pipeline (the app's own browser tests run in it), with less:
+
+- depth maps, matching and the learned matchers run on the CPU, which is slower (no
+  WebGPU);
+- the memory safety limit starts at 2 GB, because Firefox does not say how much memory
+  the device has: raise it in **Other ▸ Settings ▸ Compute**;
+- projects are kept in browser storage only, not in a folder on your disk;
+- exports larger than about 256 MB are downloaded rather than written where you
+  choose.
+
+**Safari** has not been tested yet. When something is missing, a note at the bottom
+right lists what it costs in this browser, and **Other ▸ System info ▸ Browser
+support** shows every feature WebSfM looks for.
+
 ## If something goes wrong
 When a stage logs an error, a red note at the bottom right says so; click it to open
 the console. Read the operation log first: it records skipped images, resolved pixel thresholds,

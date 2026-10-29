@@ -12,6 +12,13 @@ Notable changes to websfm. The format follows
   console says what changed. Before, a beta could refuse projects saved by the one
   before it. A small saved project per format version is part of the tests, and each
   must still open with everything it held.
+- **See what your browser lacks, and what it costs.** When WebSfM starts in a browser
+  that is missing something it uses, the note at the bottom right now lists each gap in
+  plain terms ("Depth maps, matching and the learned matchers run on the CPU", "Projects
+  are kept in browser storage only"), in Chrome too when it has no WebGPU, instead of a
+  general warning on every browser but Chrome. **Other ▸ System info ▸ Browser support**
+  shows every feature with what it is for. Firefox now runs the app's browser test suite
+  as well as Chromium (100 of 110 tests passed at first; the fixes are below).
 - **Open a project file into a folder.** Opening a `.websfm` file now asks whether to
   keep the project in this browser or in a folder on your disk, where it is unpacked
   straight away, so a file larger than the browser allows still opens. Only where
@@ -114,6 +121,13 @@ Notable changes to websfm. The format follows
   terms it names, which in a changelog was nearly every line.
 
 ### Fixed
+- **Long ribbon menus can be scrolled.** Scrolling a ▾ menu taller than the window
+  closed it, so its last rows could not be reached on a small screen (or in Firefox,
+  whose rows are taller).
+- **Error notes can be clicked while the browser note is open.** The note at the bottom
+  right that opens the console sat under the browser note in the same corner.
+- **System info shows WASM SIMD correctly.** It said *Not supported* in every browser:
+  its test module was malformed.
 - **Moving a project while it saves.** A move to or from a folder could fail with "copy
   did not verify" when a file was being written meanwhile, such as the console log,
   which the move itself writes to. The copy is now checked without the log, which

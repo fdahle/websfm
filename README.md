@@ -89,7 +89,9 @@ LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
 - A **Chromium-based browser** (Chrome, Edge, Brave, …) is recommended. The app
   uses [OPFS](https://developer.mozilla.org/docs/Web/API/File_System_API/Origin_private_file_system)
   for local project storage; folder-backed projects and WebGPU acceleration are
-  Chromium-only. Firefox and Safari work with reduced acceleration.
+  Chromium-only. **Firefox** runs the whole pipeline on the CPU, and the browser test
+  suite runs in it as well as in Chromium. **Safari** has not been tested. The app
+  lists what a browser lacks, and what it costs, when it starts.
 - The learned backends (ALIKED, DISK, SuperPoint, LightGlue, Smart Select) download their model
   weights on first use — you'll be asked to confirm, and each file is cached
   locally afterwards (see [Model files](docs/deployment.md#model-files)).
@@ -168,7 +170,8 @@ more complete.
 
 Not yet verified:
 
-- Firefox and Safari. So far only Chromium has been exercised.
+- Safari. Firefox runs the browser test suite; real datasets have only been run in
+  Chromium.
 - WebGPU on other GPUs. Every GPU number above comes from one NVIDIA GPU.
 - Exported files in external tools: GeoTIFF/COG in QGIS or GDAL, LAZ in
   CloudCompare, the COLMAP export round trip.

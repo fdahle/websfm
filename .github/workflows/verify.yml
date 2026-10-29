@@ -63,6 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        project: [chromium, firefox]
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
@@ -71,23 +72,23 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # Chromium is cached per lockfile (it follows the Playwright version); the system
-      # libraries it needs are installed either way.
+      # Each browser is cached per lockfile (it follows the Playwright version); the
+      # system libraries it needs are installed either way.
       - id: pw-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ matrix.project }}-${{ hashFiles('package-lock.json') }}
       - if: steps.pw-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps ${{ matrix.project }}
       - if: steps.pw-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
+        run: npx playwright install-deps ${{ matrix.project }}
       # The tests run against the dev server (playwright.config.js), so no build here.
-      - run: npm run test:browser -- --shard=${{ matrix.shard }}/3
+      - run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/3
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: browser-test-results-${{ matrix.shard }}
+          name: browser-test-results-${{ matrix.project }}-${{ matrix.shard }}
           path: test-results/
           retention-days: 7
 

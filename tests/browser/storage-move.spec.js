@@ -29,7 +29,8 @@ async function readable(page) {
   })
 }
 
-test('a project moved to a folder and back still reads its images and masks', async ({ page }) => {
+test('a project moved to a folder and back still reads its images and masks', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'folders on disk are Chromium-only')
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await page.addInitScript(() => {

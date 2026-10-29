@@ -148,7 +148,7 @@ to the algorithm; the other steps differ only in file names.
 ```bash
 npm test             # Vitest: src/core, src/utils, src/stores
 npm run typecheck    # TypeScript, Vue template bindings, ESLint
-npm run test:browser # Playwright, Chromium
+npm run test:browser # Playwright, Chromium (test:browser:firefox for Firefox)
 cargo test           # Rust crates (crates/mesh needs --release)
 ```
 

@@ -20,7 +20,7 @@ import ModalShell from '../ui/ModalShell.vue'
 const props = defineProps({ theme: String, resolvedTheme: String })
 const emit = defineEmits(['close', 'set-theme'])
 
-const { isChromium, warningEnabled, setEnabled: setBrowserWarningEnabled } = useBrowserWarning()
+const { gaps: browserGaps, warningEnabled, setEnabled: setBrowserWarningEnabled } = useBrowserWarning()
 const { isMobile, warningEnabled: mobileWarningEnabled, setEnabled: setMobileWarningEnabled } = useMobileWarning()
 const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
 const {
@@ -295,7 +295,7 @@ onMounted(refreshStorage)
           </label>
         </div>
 
-        <div v-if="!isChromium" class="setting-row">
+        <div v-if="browserGaps.length" class="setting-row">
           <div class="setting-info">
             <span class="setting-label">Warn on unsupported browser</span>
             <span class="setting-desc">Remind me when browser limitations can affect compute or file access.</span>

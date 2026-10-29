@@ -36,8 +36,11 @@ for (const version of versions) {
     await page.evaluate(() => {
       document.querySelector('#app').__vue_app__._instance.setupState.importProjectFile(window.__fixture)
     })
-    const ask = page.getByRole('dialog', { name: 'Open project file' })
-    await ask.getByRole('button', { name: 'In this browser' }).click()
+    // Where folders are possible (Chromium) the open asks where to keep the project.
+    if (await page.evaluate(() => typeof window.showDirectoryPicker === 'function')) {
+      const ask = page.getByRole('dialog', { name: 'Open project file' })
+      await ask.getByRole('button', { name: 'In this browser' }).click()
+    }
     await expect(page.locator('.toast', { hasText: 'Project opened' })).toBeVisible({ timeout: 60_000 })
     await expect(page.locator('.loading-overlay')).toHaveCount(0)
 

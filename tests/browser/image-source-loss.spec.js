@@ -97,7 +97,9 @@ async function loseOriginals(page, paths) {
 
 test('moved originals do not matter once copied, heal before that, and an image with no copy is flagged once', async ({
   page,
+  browserName,
 }) => {
+  test.skip(browserName !== 'chromium', 'uses a Chromium DevTools session')
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   const { dir, paths } = await importFromDisk(page)

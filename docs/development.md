@@ -35,8 +35,9 @@ npm test                # unit and store regression tests (Vitest, Node)
 npm run typecheck       # TypeScript, Vue template bindings, ESLint
 npm run test:wasm       # real LAZ WASM round-trip across compressor chunks
 npm run check:wasm      # Rust source / committed WASM freshness
-npx playwright install chromium
-npm run test:browser    # browser storage, keyboard, import/export and multi-tab tests
+npx playwright install chromium firefox
+npm run test:browser    # browser storage, keyboard, import/export and multi-tab tests (Chromium)
+npm run test:browser:firefox  # the same suite in Firefox (~20 min); Chromium-only tests skip
 cargo test --manifest-path crates/Cargo.toml --workspace --release
 ```
 

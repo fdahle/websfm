@@ -14,7 +14,11 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test('a project file opened into a folder is unpacked there, never into browser storage', async ({ page }) => {
+test('a project file opened into a folder is unpacked there, never into browser storage', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', 'folders on disk are Chromium-only')
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await page.goto('/')

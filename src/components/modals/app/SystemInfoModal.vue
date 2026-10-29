@@ -7,6 +7,8 @@ import { formatBytes } from '../../../core/formatBytes.js'
 import { ref, onMounted } from 'vue'
 import * as opfs from '../../../utils/opfs.js'
 import ModalShell from '../ui/ModalShell.vue'
+import { featureReport } from '../../../core/browserSupport.js'
+import { browserCaps, wasmSimdSupported } from '../../../utils/browserCaps.js'
 
 const emit = defineEmits(['close'])
 
@@ -16,6 +18,8 @@ const memory = ref(navigator.deviceMemory ? `${navigator.deviceMemory} GB` : 'Un
 const webgl2 = ref(false)
 const webgpu = ref(false)
 const wasmSimd = ref(false)
+// What WebSfM needs from the browser, and what a missing piece costs (core/browserSupport.js).
+const support = ref([])
 
 const opfsAvailable = ref(false)
 const opfsDurable = ref(false)
@@ -54,13 +58,8 @@ onMounted(async () => {
     }
   }
 
-  // Minimal WASM module with a SIMD opcode (v128.const) to detect SIMD support.
-  const simdBytes = new Uint8Array([
-    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7b, 0x03, 0x02, 0x01, 0x00,
-    0x0a, 0x0a, 0x01, 0x08, 0x00, 0xfd, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x0b,
-  ])
-  wasmSimd.value = WebAssembly.validate(simdBytes)
+  wasmSimd.value = wasmSimdSupported()
+  support.value = featureReport(await browserCaps())
 
   opfsAvailable.value = await opfs.isAvailable()
   if (opfsAvailable.value) {
@@ -118,6 +117,17 @@ onMounted(async () => {
       </template>
     </div>
 
+    <div class="section-divider" />
+
+    <div class="section-label">Browser support</div>
+    <div class="support-list">
+      <div v-for="f in support" :key="f.id" class="support-row">
+        <span class="info-key">{{ f.label }}</span>
+        <span class="info-val" :class="f.ok ? 'ok' : 'warn'">{{ f.ok ? 'Yes' : 'No' }}</span>
+        <span v-if="!f.ok" class="support-without">{{ f.without }}</span>
+      </div>
+    </div>
+
     <template #footer>
       <button class="btn" @click="emit('close')">Close</button>
     </template>
@@ -130,6 +140,22 @@ onMounted(async () => {
   border: none;
   border-top: 1px solid var(--panel-border);
   margin: 14px 0;
+}
+.support-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.support-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 12px;
+}
+.support-without {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
 }
 .section-label {
   font-size: 11px;

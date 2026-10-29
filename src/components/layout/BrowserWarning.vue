@@ -2,11 +2,10 @@
 import { ref } from 'vue'
 import { useBrowserWarning } from '../../composables/useBrowserWarning.js'
 
-// Many features (WebGPU depth maps, OffscreenCanvas decode paths) work best in
-// Chromium-based browsers. Show a dismissible warning on non-Chromium engines.
-// Detection + the persisted dismissal flag live in the shared composable so the
-// Settings ▸ Display toggle stays in sync.
-const { shouldWarn, dismiss } = useBrowserWarning()
+// What this browser lacks and what each gap costs (core/browserSupport.js), as a
+// dismissible warning. Detection + the persisted dismissal flag live in the shared
+// composable so the Settings ▸ Display toggle stays in sync.
+const { shouldWarn, gaps, isChromium, dismiss } = useBrowserWarning()
 
 // Session-local hide so closing without "don't show again" still dismisses now
 // but reappears next reload.
@@ -23,10 +22,16 @@ function close() {
   <div v-if="shouldWarn && !hidden" class="browser-warning" role="alert">
     <div class="bw-icon">⚠️</div>
     <div class="bw-body">
-      <div class="bw-title">This browser may not be fully supported</div>
+      <div class="bw-title">In this browser</div>
+      <ul class="bw-list">
+        <li v-for="g in gaps" :key="g.id">{{ g.without }}</li>
+      </ul>
       <p class="bw-text">
-        WebSfM works best in a Chromium-based browser (Chrome, Edge). Some features — notably GPU-accelerated depth maps
-        (WebGPU) — may be slower or unavailable here.
+        {{
+          isChromium
+            ? 'Other ▸ System info shows what this browser offers.'
+            : 'Chrome and Edge have all of these (WebGPU where the graphics driver allows it). Other ▸ System info shows what this browser offers.'
+        }}
       </p>
       <label class="bw-check">
         <input type="checkbox" v-model="dontShowAgain" />
@@ -66,6 +71,15 @@ function close() {
 .bw-title {
   font-weight: 600;
   margin-bottom: 4px;
+}
+.bw-list {
+  margin: 0 0 8px;
+  padding-left: 16px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.bw-list li + li {
+  margin-top: 4px;
 }
 .bw-text {
   margin: 0 0 8px;

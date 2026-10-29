@@ -1,7 +1,10 @@
 import { ref, computed } from 'vue'
+import { browserWarnings } from '../core/browserSupport.js'
+import { browserCaps } from '../utils/browserCaps.js'
 
-// Shared state for the non-Chromium browser warning (see BrowserWarning.vue).
-// The warning fires only on non-Chromium engines AND only while not dismissed;
+// Shared state for the browser warning (see BrowserWarning.vue). It lists what this
+// browser lacks (core/browserSupport.js), in any engine: a Chrome without a WebGPU
+// adapter is named too. It shows while something is missing AND it is not dismissed;
 // "Don't show this again" and the Settings ▸ Display toggle write the same
 // localStorage flag through this one shared ref so they can't drift.
 const STORAGE_KEY = 'browserWarningDismissed'
@@ -20,10 +23,14 @@ function detectChromium() {
 
 const dismissed = ref(localStorage.getItem(STORAGE_KEY) === 'true')
 const isChromium = detectChromium()
+// What the warning lists, once the probe has answered.
+const gaps = ref([])
+browserCaps()
+  .then((caps) => (gaps.value = browserWarnings(caps)))
+  .catch(() => {})
 
 export function useBrowserWarning() {
-  // The toast is only ever relevant on a non-Chromium browser.
-  const shouldWarn = computed(() => !isChromium && !dismissed.value)
+  const shouldWarn = computed(() => gaps.value.length > 0 && !dismissed.value)
 
   function dismiss() {
     dismissed.value = true
@@ -37,6 +44,7 @@ export function useBrowserWarning() {
 
   return {
     isChromium,
+    gaps,
     warningEnabled: computed(() => !dismissed.value),
     shouldWarn,
     dismiss,
