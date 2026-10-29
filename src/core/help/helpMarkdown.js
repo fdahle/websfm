@@ -45,9 +45,11 @@ function assetUrl(href) {
   return assetMap.get(href.replace(/^\.?\/?assets\//, '')) || null
 }
 
-export function renderHelpMarkdown(body, { selfId = null } = {}) {
+// `autoLink: false` leaves glossary terms as plain text (What's New, where every
+// entry would be dotted with them); explicit help:/guide: links still render.
+export function renderHelpMarkdown(body, { selfId = null, autoLink = true } = {}) {
   const html = markdown.parse(body)
-  return autoLinkHtml(html, selfId)
+  return autoLink ? autoLinkHtml(html, selfId) : html
 }
 
 // Render a guide markdown fragment (intro or a param body) to auto-linked HTML.

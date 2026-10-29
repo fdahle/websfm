@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 
 // The app's own chrome: Settings ▸ General ▸ Notices hides the bug-report button,
-// and the Guide's tab strip keeps to one row however many operations are open.
+// the Guide's tab strip keeps to one row however many operations are open, and
+// What's New leaves glossary terms unlinked.
 
 async function createProject(page) {
   await page.addInitScript(() => localStorage.setItem('consoleOpen', 'false'))
@@ -59,5 +60,20 @@ test('the Guide tab strip scrolls sideways only, with Home fixed', async ({ page
   expect(m.sh).toBeLessThanOrEqual(m.ch) // but never vertically
   expect(m.left).toBeGreaterThan(0) // the last one opened was scrolled into view
   await expect(page.locator('.tab-strip .gtab-home')).toBeInViewport()
+  expect(errors).toEqual([])
+})
+
+test("What's New does not link glossary terms", async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await createProject(page)
+  await page.evaluate(async () => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    useModalsStore().whatsNewOpen = true
+  })
+  const dialog = page.getByRole('dialog', { name: "What's new" })
+  await expect(dialog.locator('.wn-release').first()).toBeVisible()
+  await expect(dialog.locator('li').first()).toBeVisible()
+  await expect(dialog.locator('a.glossary-link')).toHaveCount(0)
   expect(errors).toEqual([])
 })

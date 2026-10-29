@@ -2,7 +2,8 @@
 // Help ▸ What's New: CHANGELOG.md, newest release first. Releases that shipped
 // since this browser last looked are marked New and open; the rest are folded.
 // Changes shows each entry's headline and first sentence, Full the whole entry
-// (with its evidence). Glossary terms in the text link as in the Guide.
+// (with its evidence). Glossary terms are not auto-linked: a changelog names many of
+// them and the links drowned the text; an explicit help:/guide: link still opens.
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
@@ -72,7 +73,9 @@ function entriesHtml(r) {
       key,
       r.sections.map((s) => ({
         title: s.title,
-        items: s.entries.map((e) => renderHelpMarkdown(mode.value === 'full' ? e.markdown : e.summary)),
+        items: s.entries.map((e) =>
+          renderHelpMarkdown(mode.value === 'full' ? e.markdown : e.summary, { autoLink: false }),
+        ),
       })),
     )
   return htmlCache.get(key)

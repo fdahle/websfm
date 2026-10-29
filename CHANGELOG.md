@@ -54,6 +54,8 @@ Notable changes to websfm. The format follows
 - **Settings in groups.** The General and Map & 3D tabs of Settings put their settings
   under headings (Appearance, Help and dialogs, During a run, Notices; Map, 3D view)
   instead of one long list of switches.
+- **What's New without glossary links.** Its text no longer underlines the glossary
+  terms it names, which in a changelog was nearly every line.
 
 ### Fixed
 - **A reopened project counts every match pair it tried.** Pairs that matching rejected
