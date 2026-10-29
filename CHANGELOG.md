@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Projects keep opening in newer versions.** A project saved by this or a later
+  version of WebSfM opens in every version after it: when the way projects are saved
+  changes, opening an older project brings it up to date where it is saved, and the
+  console says what changed. Before, a beta could refuse projects saved by the one
+  before it. A small saved project per format version is part of the tests, and each
+  must still open with everything it held.
 - **Open a project file into a folder.** Opening a `.websfm` file now asks whether to
   keep the project in this browser or in a folder on your disk, where it is unpacked
   straight away, so a file larger than the browser allows still opens. Only where

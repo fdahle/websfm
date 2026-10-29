@@ -110,6 +110,7 @@ export {
   saveWorkflows,
 } from './opfs/documents.js'
 export { appendLog, deleteLog, readLog, readLogTail, truncateLog } from './opfs/log.js'
+export { migrateProjectFormat } from './opfs/formatMigration.js'
 export {
   deleteReconstruction,
   loadLodFile,

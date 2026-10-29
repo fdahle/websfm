@@ -2,10 +2,11 @@
 // One number for the whole project (project.json, reconstruction.json, matches,
 // products …), checked when a project is opened or imported from a .websfm file.
 //
-// While WebSfM is in beta there are no migrations. A change that older projects cannot
-// satisfy raises PROJECT_FORMAT_VERSION, and also PROJECT_FORMAT_MIN when this version
-// can no longer read the older ones. Such a project then fails with a clear message
-// instead of whatever error its old fields happen to cause.
+// A change that older projects cannot satisfy raises PROJECT_FORMAT_VERSION and adds its
+// step to FORMAT_MIGRATIONS (core/formatMigrations.js); opening an older project then
+// migrates it first (utils/opfs/formatMigration.js). PROJECT_FORMAT_MIN rises only at a
+// release: a project older than that fails with a clear message instead of whatever
+// error its old fields happen to cause. The rules: docs/project-format.md.
 //
 // Projects saved before the version existed (≤ 0.5.0) have no field and count as 1.
 

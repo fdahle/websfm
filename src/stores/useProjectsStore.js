@@ -25,7 +25,7 @@ import {
 import { saveProjectHandle, loadProjectHandle, deleteProjectHandle } from '../utils/handleStore.js'
 import { useLog } from '../composables/useLog.js'
 import { version as appVersion } from '../../package.json'
-import { projectFormatProblem } from '../core/projectFormat.js'
+import { PROJECT_FORMAT_VERSION, projectFormatOf, projectFormatProblem } from '../core/projectFormat.js'
 import { rememberCrsDefs, setFetchedDefListener } from '../core/crs.js'
 
 // The project index: which projects exist, which one is open, and its metadata
@@ -181,6 +181,14 @@ export const useProjectsStore = defineStore('projects', () => {
     await onChanged?.(prevCrs, crs)
   }
 
+  // What the last open's format migration did: { id, notes }.
+  let formatNotes = null
+  function takeFormatNotes(id) {
+    const taken = formatNotes?.id === id ? formatNotes.notes : []
+    formatNotes = null
+    return taken
+  }
+
   // Returns the project.json payload, or null when it could not be read. For a
   // folder project that ALSO means "not connected" — the caller distinguishes
   // the two via `openPlan(id)`, which it must consult first.
@@ -196,6 +204,14 @@ export const useProjectsStore = defineStore('projects', () => {
       // A project in a format this version cannot read fails here, with the reason.
       const problem = data && projectFormatProblem(data)
       if (problem) throw new Error(problem)
+      // An older format is brought up to this one before any store reads it. Its notes
+      // wait for the open sequence (takeFormatNotes), which logs them into this
+      // project's console rather than the one being left.
+      if (data && projectFormatOf(data) < PROJECT_FORMAT_VERSION) {
+        const migrated = await opfs.migrateProjectFormat(id, data)
+        data = migrated.data
+        formatNotes = { id, notes: migrated.notes }
+      }
     } catch (error) {
       newLease?.()
       throw error
@@ -617,6 +633,7 @@ export const useProjectsStore = defineStore('projects', () => {
     createProject,
     setProjectCrs,
     switchProject,
+    takeFormatNotes,
     renameProject,
     deleteProjectById,
     folderSupported,

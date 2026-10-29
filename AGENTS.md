@@ -34,9 +34,12 @@ Rules that are easy to miss:
   headline, then one sentence in user terms, then any detail and evidence (Help ▸
   What's New shows the first two alone). Never edit a released section or the version
   by hand; `npm run release` cuts a release.
-- Saved projects carry a format version (`src/core/projectFormat.js`). A change that
-  older projects cannot satisfy raises `PROJECT_FORMAT_VERSION`, and `PROJECT_FORMAT_MIN`
-  when they can no longer be read; there are no migrations while WebSfM is in beta.
+- A saved project opens in every later version ([docs/project-format.md](docs/project-format.md)).
+  A field added with a safe default changes nothing. Any other change to a saved
+  document raises `PROJECT_FORMAT_VERSION` (`src/core/projectFormat.js`), adds its step
+  to `FORMAT_MIGRATIONS` (`src/core/formatMigrations.js`) with a unit test, and commits
+  a new fixture (`node scripts/fixtures/make-project-fixture.mjs <dir>`), all in one
+  commit. `PROJECT_FORMAT_MIN` rises only at a release.
 - Pushing deploys: `main` goes to dev.websfm.app, a `v*` tag to websfm.app (CI ▸
   `deploy`). Don't push, and never push a tag, unless asked.
 - The name is **WebSfM** in anything people read (UI text, messages, docs, help).

@@ -76,7 +76,8 @@ The per-project directory (`project.json`, `images/`, `matches/`, reconstruction
 files, …) *is* the project format. A `.websfm` file is a streamed zip of that
 directory, and a folder-backed project is the same layout written to a folder the
 user picked. Anything that can be recomputed cheaply is recomputed on open rather
-than stored.
+than stored. [docs/project-format.md](docs/project-format.md) lists every file, and how
+a change to one keeps older projects opening (format migrations).
 
 ## Following one operation through the code
 

@@ -49,6 +49,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   const {
     createProject,
     switchProject,
+    takeFormatNotes,
     deleteProjectById,
     exportProject,
     importProject,
@@ -218,6 +219,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       // The destination is reachable and readable; only now is it safe to tear
       // down the project being left.
       resetInMemoryProject()
+      for (const note of takeFormatNotes(id)) log(`Project upgraded: ${note}`, 'info', 'Project')
       // Let the overlay actually paint before the synchronous restore work runs.
       await nextTick()
       await new Promise((r) => requestAnimationFrame(() => r()))

@@ -106,11 +106,11 @@ the match preview, a matching or reconstruction run, an export. The first overla
 preview after opening can therefore take a moment. An image whose keypoint file is
 missing shows an error status as soon as the project opens; detect it again.
 
-WebSfM is in beta, marked by the **Beta** badge beside its name, and the way it saves a
-project can still change between versions. Each project records the format it was saved
-in. A project this version can no longer read, or one saved by a newer version, does
-not open; the message says which and what to do. Keep the source images of a project
-you care about, so you can build it again.
+Each project records the format it was saved in. A project saved by an older version of
+WebSfM is brought up to this version's format when you open it, in the place it is
+saved, and the console says what changed (*Project upgraded: …*); after that, older
+versions of WebSfM can no longer open it. A project saved by a newer version does not
+open in an older one: reload the page to get the newest version.
 
 ## File name
 Exports are downloads: the browser saves them in its downloads folder, or asks where

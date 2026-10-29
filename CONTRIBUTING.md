@@ -75,6 +75,10 @@ npm run typecheck
   Leave released sections alone; `npm run release` moves `[Unreleased]` under a new
   version (see [docs/development.md](docs/development.md#releases)).
 - **Method changes:** update the matching section of [docs/METHODS.md](docs/METHODS.md).
+- **Saved-project changes:** a project saved by WebSfM opens in every later version.
+  A new field that older projects simply lack needs nothing more than a default where
+  it is read. Any other change to what a project saves needs a format migration and a
+  new test fixture: [docs/project-format.md](docs/project-format.md) says how.
 - **Browser-only behaviour** (WebGPU, storage, dialogs) isn't covered by the unit
   tests. Say in the pull request what you checked by hand, and in which browser.
   For pipeline changes, a before/after run of the headless bench on the example
