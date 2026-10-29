@@ -5,7 +5,13 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
 import { exportProjectArchive, importProjectArchive, peekArchiveManifest } from '../utils/projectFile.js'
-import { buildManifest, validateManifest, archiveFileName, importedProjectName } from '../core/io/projectArchive.js'
+import {
+  ARCHIVE_EXCLUDE,
+  buildManifest,
+  validateManifest,
+  archiveFileName,
+  importedProjectName,
+} from '../core/io/projectArchive.js'
 import {
   STORAGE_FOLDER,
   STORAGE_OPFS,
@@ -385,6 +391,21 @@ export const useProjectsStore = defineStore('projects', () => {
   // when the source is OPFS. Files on the user's own disk are never deleted;
   // "move into browser storage" copies and detaches, leaving the folder in place.
 
+  // The console log is appended to while a move runs (the move logs, so does a run), so
+  // a copy that counted it would never verify: the tree is checked without it, and the
+  // log follows as it is then (copyLogs).
+  const isLogFile = (relPath) => ARCHIVE_EXCLUDE.includes(relPath)
+  async function copyLogs(from, to) {
+    for (const name of ARCHIVE_EXCLUDE) {
+      try {
+        const file = await (await from.getFileHandle(name)).getFile()
+        await opfs.writeFileAt(to, name, file)
+      } catch {
+        /* no log, or it could not be copied: the project does not need it */
+      }
+    }
+  }
+
   // `keepBrowserCopy`: a move during a run (browser storage full) leaves the OPFS tree
   // in place, because the run still reads files from it; dropBrowserCopy deletes it
   // once the run has ended, or at the next open if the tab closed first.
@@ -402,14 +423,15 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!verdict.ok) return verdict
 
     const source = await opfs.getOpfsProjectDir(id)
-    const before = await opfs.measureTree(source)
-    const copied = await opfs.copyTree(source, dirHandle, { onProgress })
+    const before = await opfs.measureTree(source, { skip: isLogFile })
+    const copied = await opfs.copyTree(source, dirHandle, { onProgress, skip: isLogFile })
     if (!copyVerified(before, copied)) {
       return {
         ok: false,
         error: `copy did not verify (${copied.files}/${before.files} files) — the project was left in browser storage`,
       }
     }
+    await copyLogs(source, dirHandle)
 
     opfs.setProjectRoot(id, dirHandle)
     await saveProjectHandle(id, dirHandle)
@@ -440,9 +462,9 @@ export const useProjectsStore = defineStore('projects', () => {
     if (plan.action !== 'open') return { ok: false, error: 'connect to the folder first' }
 
     const source = plan.handle
-    const before = await opfs.measureTree(source)
+    const before = await opfs.measureTree(source, { skip: isLogFile })
     const target = await opfs.getOpfsProjectDir(id, true)
-    const copied = await opfs.copyTree(source, target, { onProgress })
+    const copied = await opfs.copyTree(source, target, { onProgress, skip: isLogFile })
     if (!copyVerified(before, copied)) {
       await opfs.deleteOpfsProjectTree(id)
       return {
@@ -450,6 +472,7 @@ export const useProjectsStore = defineStore('projects', () => {
         error: `copy did not verify (${copied.files}/${before.files} files) — the project was left in its folder`,
       }
     }
+    await copyLogs(source, target)
 
     opfs.clearProjectRoot(id)
     await deleteProjectHandle(id)

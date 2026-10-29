@@ -215,3 +215,30 @@ describe('binary documents as one unit', () => {
     expect(opfs.binaryDocumentOf('reconstruction.json')).toBeNull()
   })
 })
+
+describe('tree walks during writes', () => {
+  const file = (size) => ({ kind: 'file', getFile: async () => ({ size }) })
+  const gone = {
+    kind: 'file',
+    getFile: async () => {
+      throw Object.assign(new Error('A requested file or directory could not be found'), { name: 'NotFoundError' })
+    },
+  }
+  const dir = (entries) => ({
+    kind: 'directory',
+    async *[Symbol.asyncIterator]() {
+      yield* Object.entries(entries)
+    },
+  })
+
+  it("leaves out a write's swap file and a file removed while it walks", async () => {
+    const tree = dir({
+      'project.json': file(10),
+      'log.ndjson.crswap': file(5),
+      'removed.bin': gone,
+      'images': dir({ 'a.jpg': file(100), 'a.jpg.crswap': file(40) }),
+    })
+    expect(await opfs.measureTree(tree)).toEqual({ files: 2, bytes: 110 })
+    expect(await opfs.measureTree(tree, { skip: (p) => p === 'project.json' })).toEqual({ files: 1, bytes: 100 })
+  })
+})

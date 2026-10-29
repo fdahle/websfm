@@ -158,12 +158,26 @@ export async function deleteOpfsProjectTree(projectId) {
 // for both files and directories, so skipping a directory prunes the subtree
 // (that is what makes "exclude derived data" cheap rather than a per-file test).
 
+// Chromium's swap file for a write in progress (`<name>.crswap`, renamed over the
+// file when the write closes): never project data, and gone a moment later. A file
+// removed while the walk runs is skipped too, so a walk during writes neither counts
+// nor copies what is not there.
+const isSwapFile = (name) => name.endsWith('.crswap')
 async function* walkDir(dir, prefix, skip) {
   for await (const [name, handle] of dir) {
     const relPath = prefix ? `${prefix}/${name}` : name
     if (skip?.(relPath, handle.kind)) continue
     if (handle.kind === 'directory') yield* walkDir(handle, relPath, skip)
-    else yield { relPath, file: await handle.getFile(), handle }
+    else if (!isSwapFile(name)) {
+      let file
+      try {
+        file = await handle.getFile()
+      } catch (err) {
+        ignoreMissing(err)
+        continue
+      }
+      yield { relPath, file, handle }
+    }
   }
 }
 
@@ -290,11 +304,11 @@ export async function getOpfsProjectDir(projectId, create = false) {
 // Copy every file under `from` into `to`, preserving the layout. Returns
 // { files, bytes }. Verified by the caller (byte totals) before it deletes the
 // source — a half-copied project must never be the only copy.
-export async function copyTree(from, to, { onProgress = null } = {}) {
+export async function copyTree(from, to, { onProgress = null, skip = null } = {}) {
   return trackPersistence('copyTree:' + String(from), async () => {
     let files = 0
     let bytes = 0
-    for await (const { relPath, file } of walkDir(from, '', null)) {
+    for await (const { relPath, file } of walkDir(from, '', skip)) {
       await writeFileAt(to, relPath, file)
       files++
       bytes += file.size
@@ -305,10 +319,10 @@ export async function copyTree(from, to, { onProgress = null } = {}) {
 }
 
 // Total file count + byte size of a tree, for verifying a copy.
-export async function measureTree(dirHandle) {
+export async function measureTree(dirHandle, { skip = null } = {}) {
   let files = 0
   let bytes = 0
-  for await (const { file } of walkDir(dirHandle, '', null)) {
+  for await (const { file } of walkDir(dirHandle, '', skip)) {
     files++
     bytes += file.size
   }

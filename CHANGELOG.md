@@ -80,6 +80,10 @@ Notable changes to websfm. The format follows
   terms it names, which in a changelog was nearly every line.
 
 ### Fixed
+- **Moving a project while it saves.** A move to or from a folder could fail with "copy
+  did not verify" when a file was being written meanwhile, such as the console log,
+  which the move itself writes to. The copy is now checked without the log, which
+  follows on its own, and a file's half-written temporary copy is never counted.
 - **Convert to source image works after a reopen.** In a reopened project, Reference
   data ▸ right-click ▸ **Convert to source image** removed the raster and then failed
   with "Unsaved changes: A requested file … could not be found", which **Retry saving**
