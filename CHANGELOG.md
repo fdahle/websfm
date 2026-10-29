@@ -6,6 +6,15 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Show information on every sidebar row.** Right-click a vector layer (an imported
+  shapefile or contour lines), a reference raster, a sensor, a control point or the
+  matches and choose **Show information**, as on clouds and products. A vector layer
+  lists its polygons or lines, vertices, image links, contour levels and extent; a
+  reference raster its CRS, size, GSD, bands, accuracy, elevations and vertical datum,
+  and whether it was fetched from Sentinel-2; a sensor its calibration and lens
+  coefficients; a point its position, σ, marks and residual; the matches the pairs
+  tried, verified, excluded and used, their inliers, and how many images are in a pair.
+  Layers imported from now on also show their source CRS and import time.
 - **Every export opens a dialog.** Camera Poses, Calibration, Camera Fiducials, Image
   Fiducials, Footprints, Keypoints and Matches now ask for a format and a file name
   before they download, like the other exports, and the sidebar's **Download…** on a

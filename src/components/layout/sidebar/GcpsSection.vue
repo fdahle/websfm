@@ -45,7 +45,7 @@ function fmtSfm(v) {
 
 const { isExpanded, toggle: toggleGcpExpand } = useExpandedSet()
 
-// Right-click a GCP row → context menu (Remove).
+// Right-click a GCP row → context menu (Show information, Remove).
 const { menu: gcpCtx, open: openGcpCtx, close: closeMenu } = useContextMenu()
 function onGcpRightClick(e, gcp) {
   sidebar.selectGcp(gcp.id)
@@ -186,6 +186,10 @@ function reprojFor(gcpId, imageId) {
 
     <!-- GCP context menu -->
     <ContextMenu :menu="gcpCtx">
+      <button class="ctx-item" @click="fromMenu((g) => sidebar.showProductInfo({ gcpId: g.id }))">
+        Show information
+      </button>
+      <div class="ctx-sep"></div>
       <button class="ctx-item danger" @click="fromMenu((g) => sidebar.removeGcp(g.id))">Remove point</button>
     </ContextMenu>
   </div>

@@ -164,7 +164,8 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     showInfo: (id) => {
       infoImageId.value = id
     },
-    // Show information on a cloud ({ cloudId }) or a DEM/ortho ({ productId }).
+    // Show information on any other row: { cloudId }, { productId }, { rasterId },
+    // { vectorSetId }, { sensorId }, { gcpId } or { matches: true } (ProductInfoModal).
     showProductInfo: (target) => {
       infoProduct.value = target
     },

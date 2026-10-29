@@ -218,6 +218,9 @@ const ctxOpenLabel = computed(() =>
              toggle and styling join the first group, so an unstyleable raster
              never leaves "Add to Layers" alone between two lines. -->
         <button class="ctx-item" @click="fromMenu((r) => sidebar.openRaster(r.id))">{{ ctxOpenLabel }}</button>
+        <button class="ctx-item" @click="fromMenu((r) => sidebar.showProductInfo({ rasterId: r.id }))">
+          Show information
+        </button>
         <!-- The file exactly as imported, not a re-encode. -->
         <button class="ctx-item" @click="fromMenu((r) => sidebar.downloadRaster(r.id))">Download original</button>
         <!-- A toggle, not a one-shot "show": which reference layers are up is

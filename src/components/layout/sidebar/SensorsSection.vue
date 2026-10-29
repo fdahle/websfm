@@ -114,6 +114,10 @@ function fromMenu(fn) {
 
     <!-- Sensor context menu -->
     <ContextMenu :menu="sensorCtx">
+      <button class="ctx-item" @click="fromMenu((s) => sidebar.showProductInfo({ sensorId: s.id }))">
+        Show information
+      </button>
+      <div class="ctx-sep"></div>
       <div v-if="mergeTargets.length" class="ctx-sub-wrap">
         <button class="ctx-item ctx-has-sub">Merge into<span class="ctx-arrow">▸</span></button>
         <div class="ctx-submenu">

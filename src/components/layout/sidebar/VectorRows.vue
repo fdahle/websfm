@@ -128,6 +128,9 @@ function fromMenu(fn) {
       >
         {{ menu.set.visible === false ? 'Add to Layers' : 'Remove from Layers' }}
       </button>
+      <button class="ctx-item" @click="fromMenu((s) => sidebar.showProductInfo({ vectorSetId: s.id }))">
+        Show information
+      </button>
       <button class="ctx-item" @click="fromMenu((s) => sidebar.downloadVectorSet(s.id))">Download…</button>
       <div class="ctx-sep"></div>
       <button class="ctx-item" @click="fromMenu((s) => startRename(s.id, s.name))">Rename</button>

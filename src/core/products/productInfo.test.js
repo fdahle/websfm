@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { cloudInfo, rasterInfo } from './productInfo.js'
+import {
+  cloudInfo,
+  rasterInfo,
+  referenceRasterInfo,
+  vectorSetInfo,
+  sensorInfo,
+  gcpInfo,
+  matchesInfo,
+} from './productInfo.js'
 
 const value = (info, label) => info.rows.find((r) => r.label === label)?.value
 
@@ -125,5 +133,208 @@ describe('rasterInfo', () => {
     const best = rasterInfo('ortho', { ...base, method: { blend: 'best', seamline: 'graphcut' } })
     expect(value(best, 'Blend')).toBe('Best match')
     expect(value(best, 'Seamlines')).toBeUndefined()
+  })
+})
+
+describe('referenceRasterInfo', () => {
+  const dem = {
+    name: 'REMA.tif',
+    kind: 'dem',
+    crs: 'EPSG:3031',
+    width: 400,
+    height: 200,
+    geoTransform: { scaleX: 2, scaleY: -2 },
+    bands: 1,
+    bitsPerSample: [32],
+    zMin: 12.5,
+    zMax: 840.25,
+    verticalDatum: 'unknown',
+    horizontalAccuracy: 1.5,
+    importedAt: Date.UTC(2026, 9, 29),
+  }
+
+  it('lists the grid, the elevations and an unknown datum', () => {
+    const info = referenceRasterInfo(dem)
+    expect(info.title).toBe('REMA.tif')
+    expect(value(info, 'Type')).toBe('Reference DEM')
+    expect(value(info, 'Source')).toBe('Imported file')
+    expect(value(info, 'Size')).toBe('400 × 200 px')
+    expect(value(info, 'Bands')).toBe('1 × 32-bit')
+    expect(value(info, 'Elevation')).toBe('12.500 – 840.25')
+    expect(value(info, 'Vertical datum')).toBe('Unknown')
+    expect(value(info, 'σ horizontal')).toBe('1.50 m')
+    expect(value(info, 'Imported')).toBeTruthy()
+  })
+
+  it('says a Sentinel-2 window was fetched, and has no DEM rows for an ortho', () => {
+    const info = referenceRasterInfo({ ...dem, kind: 'ortho', origin: 'sentinel2' })
+    expect(value(info, 'Type')).toBe('Reference orthophoto')
+    expect(value(info, 'Source')).toBe('Fetched from Sentinel-2 (Find GCPs)')
+    expect(value(info, 'Elevation')).toBeUndefined()
+  })
+})
+
+describe('vectorSetInfo', () => {
+  it('counts polygons, vertices and image links, and spans their extent', () => {
+    const set = {
+      name: 'outlines.shp',
+      source: 'imported',
+      sourceCrs: 'EPSG:4326',
+      footprints: [
+        {
+          imageId: 'a',
+          rings: [
+            [
+              [0, 0],
+              [10, 0],
+              [10, 5],
+              [0, 5],
+            ],
+          ],
+        },
+        {
+          imageId: null,
+          rings: [
+            [
+              [2, 2],
+              [3, 2],
+              [3, 3],
+            ],
+          ],
+        },
+      ],
+    }
+    const info = vectorSetInfo(set, { crs: 'EPSG:4326' })
+    expect(value(info, 'Type')).toBe('Polygons')
+    expect(value(info, 'Source')).toBe('Imported file')
+    expect(value(info, 'Polygons')).toBe('2')
+    expect(value(info, 'Vertices')).toBe('7')
+    expect(value(info, 'Linked to images')).toBe('1 of 2')
+    expect(value(info, 'Extent')).toBe('10.00 ° × 5.000 °')
+    // Imported in the project CRS: no separate "Imported in" row.
+    expect(value(info, 'Imported in')).toBeUndefined()
+  })
+
+  it('names the contour levels of a line layer', () => {
+    const set = {
+      name: 'Contours',
+      source: 'computed',
+      kind: 'lines',
+      footprints: [
+        {
+          level: 100,
+          lines: [
+            [
+              [0, 0],
+              [1, 1],
+            ],
+          ],
+        },
+        {
+          level: 110,
+          lines: [
+            [
+              [0, 1],
+              [1, 2],
+            ],
+          ],
+        },
+        {
+          level: 100,
+          lines: [
+            [
+              [5, 5],
+              [6, 6],
+            ],
+          ],
+        },
+      ],
+    }
+    const info = vectorSetInfo(set, {})
+    expect(value(info, 'Source')).toBe('Contours from the DEM')
+    expect(value(info, 'Lines')).toBe('3')
+    expect(value(info, 'Levels')).toBe('100 – 110 (2 levels)')
+    expect(value(info, 'Linked to images')).toBeUndefined()
+  })
+})
+
+describe('sensorInfo', () => {
+  it('lists the calibration and its non-zero coefficients', () => {
+    const s = { label: 'DJI FC6310', source: 'exif', width: 5472, height: 3648, focal: 8.8, focalUnit: 'mm' }
+    const info = sensorInfo({ ...s, cx: 2736, cy: 1824, k1: -0.012, k2: 0 }, { imageCount: 42, lens: 'Radial (k1)' })
+    expect(info.title).toBe('DJI FC6310')
+    expect(value(info, 'Source')).toBe('EXIF')
+    expect(value(info, 'Images')).toBe('42')
+    expect(value(info, 'Focal length')).toBe('8.8 mm')
+    expect(value(info, 'Lens')).toBe('Radial (k1)')
+    expect(value(info, 'Coefficients')).toBe('k1 -0.0120')
+    expect(value(info, 'Calibration')).toBeUndefined()
+  })
+
+  it('flags an incomplete calibration', () => {
+    const info = sensorInfo({ label: 'Scan', source: 'imported', focal: null }, { incomplete: true })
+    expect(value(info, 'Focal length')).toBe('Not set')
+    expect(value(info, 'Calibration')).toMatch(/Incomplete/)
+  })
+})
+
+describe('gcpInfo', () => {
+  const gcp = {
+    name: 'GCP 1',
+    role: 'check',
+    x: 500123.456,
+    y: 6100456.789,
+    z: 45.2,
+    accuracyX: 0.02,
+    accuracyY: 0.02,
+    accuracyZ: 0.05,
+    observations: [{ imageId: 'a' }, { imageId: 'b' }],
+  }
+
+  it('lists the surveyed position, its σ and the residual', () => {
+    const report = {
+      dx: 0.01,
+      dy: -0.02,
+      dz: 0.03,
+      dTotal: 0.0374,
+      sfm: { x: 1, y: 2, z: 3 },
+      observations: [{ reprojPx: 0.5 }, { reprojPx: 1.5 }],
+    }
+    const info = gcpInfo(gcp, { crs: 'EPSG:25832', report })
+    expect(value(info, 'Type')).toBe('Checkpoint')
+    expect(value(info, 'X')).toBe('500123.46')
+    expect(value(info, 'Z')).toBe('45.200000')
+    expect(value(info, 'Marked images')).toBe('2')
+    expect(value(info, 'Reprojection error')).toBe('1.00 px (mean)')
+    expect(value(info, 'Residual X / Y / Z')).toBe('0.0100 / -0.0200 / 0.0300')
+    expect(value(info, 'Triangulated')).toBe('Yes')
+  })
+
+  it('gives a marker no surveyed rows', () => {
+    const info = gcpInfo({ name: 'M1', role: 'marker', observations: [{}] }, {})
+    expect(value(info, 'Type')).toBe('Marker (scale-bar endpoint)')
+    expect(value(info, 'X')).toBeUndefined()
+    expect(value(info, 'Marked images')).toBe('1 (needs at least 2)')
+    expect(value(info, 'Triangulated')).toBeUndefined()
+  })
+})
+
+describe('matchesInfo', () => {
+  it('sums the inliers of the verified pairs and counts their images', () => {
+    const store = new Map([
+      ['a--b', { status: 'done', inlierCount: 100 }],
+      ['b--c', { status: 'done', inlierCount: 300 }],
+      ['a--c', { status: 'done', inlierCount: 50, enabled: false }],
+      ['c--d', { status: 'done', inlierCount: 0 }],
+    ])
+    const stats = { total: 4, verified: 2, running: 0, error: 0, used: null, excluded: 1, weak: 0 }
+    const info = matchesInfo(store, stats, { imageCount: 5 })
+    expect(value(info, 'Pairs tried')).toBe('4')
+    expect(value(info, 'Verified pairs')).toBe('2')
+    expect(value(info, 'Excluded')).toBe('1')
+    expect(value(info, 'Used in model')).toBeUndefined()
+    expect(value(info, 'Inlier matches')).toBe('400')
+    expect(value(info, 'Median per pair')).toBe('300')
+    expect(value(info, 'Images in a pair')).toBe('3 of 5 images')
   })
 })

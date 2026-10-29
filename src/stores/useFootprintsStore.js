@@ -147,6 +147,9 @@ export const useFootprintsStore = registerProjectStore(
         id: crypto.randomUUID(),
         name: uniqueSetName(name),
         source: 'imported',
+        // For Show information: the rings are stored in the project CRS.
+        sourceCrs,
+        createdAt: Date.now(),
         visible: true,
         footprints,
       })
@@ -182,6 +185,7 @@ export const useFootprintsStore = registerProjectStore(
         name: uniqueSetName(name),
         source: 'computed',
         kind: 'lines',
+        createdAt: Date.now(),
         visible: true,
         footprints,
       }
