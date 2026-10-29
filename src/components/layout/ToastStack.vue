@@ -31,7 +31,9 @@ import { toasts, clickToast } from '../../composables/useToasts.js'
   position: fixed;
   right: 16px;
   bottom: 16px;
-  z-index: 4000; /* above modals — a copy can be triggered from one */
+  /* Above modals (a copy can be triggered from one) and above the browser warning
+     (9000), which sits in the same corner: a toast is short-lived and may be clicked. */
+  z-index: 9100;
   display: flex;
   flex-direction: column;
   align-items: flex-end;

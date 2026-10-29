@@ -46,7 +46,10 @@ function onOutside(e) {
   if (btn.value?.contains(e.target) || menuEl.value?.contains(e.target)) return
   close()
 }
-function onViewportChange() {
+// A resize or a scroll of the page moves the button out from under the menu; the menu's
+// own scrolling (a list taller than the window) must not close it.
+function onViewportChange(e) {
+  if (e?.type === 'scroll' && menuEl.value?.contains(e.target)) return
   close()
 }
 
