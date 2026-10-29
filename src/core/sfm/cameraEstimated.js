@@ -6,6 +6,9 @@
 // NOT in the project CRS unless the model has been georeferenced, so callers
 // should label it accordingly.
 
+import { opkFromMatrix } from '../footprint.js'
+import { applySimilarity } from '../products/georef.js'
+
 export function estimatedIntrinsics(cam) {
   if (!cam?.K) return null
   const { fx, fy, cx, cy } = cam.K
@@ -28,21 +31,19 @@ export function estimatedCenter(cam) {
   return [x, y, z]
 }
 
-// Omega/phi/kappa (degrees) from the rotation matrix, using the common
-// Rz(κ)·Ry(φ)·Rx(ω) photogrammetric convention. Returned for display only.
-export function estimatedAngles(cam) {
-  if (!cam?.R) return null
-  const R = cam.R
-  const deg = (r) => (r * 180) / Math.PI
-  const phi = Math.asin(Math.max(-1, Math.min(1, R[0][2])))
-  let omega, kappa
-  if (Math.abs(R[0][2]) < 0.999999) {
-    omega = Math.atan2(-R[1][2], R[2][2])
-    kappa = Math.atan2(-R[0][1], R[0][0])
-  } else {
-    // Gimbal lock — fall back to a stable decomposition.
-    omega = Math.atan2(R[2][1], R[1][1])
-    kappa = 0
-  }
-  return { omega: deg(omega), phi: deg(phi), kappa: deg(kappa) }
+// A camera's pose as a pose import reads it back (core/io/pose.js, cameraPriors.js):
+// the centre and omega/phi/kappa (degrees, footprint.js opkMatrix) in the frame the
+// similarity `sim` maps the model into ({ scale, R, t, local? }, as
+// products/exportFrame.js gives it), or in the model frame when `sim` is null.
+// The solver's camera looks along +z with y down; a photogrammetric one along −z with
+// y up, hence the flip D = diag(1, −1, −1) of cameraPriors.js orientationPriorInSfm.
+// Angles are null at phi = ±90°.
+export function estimatedPose(cam, sim = null) {
+  const C = estimatedCenter(cam)
+  if (!C) return null
+  const [x, y, z] = sim ? applySimilarity(sim, C) : C
+  // Export frame → camera: R·simRᵀ.
+  const R = sim ? cam.R.map((row) => sim.R.map((s) => row[0] * s[0] + row[1] * s[1] + row[2] * s[2])) : cam.R
+  const opk = opkFromMatrix([R[0], R[1].map((v) => -v), R[2].map((v) => -v)])
+  return { x, y, z, omega: opk?.omega ?? null, phi: opk?.phi ?? null, kappa: opk?.kappa ?? null }
 }

@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import MetadataTable from '../../controls/MetadataTable.vue'
 import ModalShell from '../ui/ModalShell.vue'
 import { useTableSort } from '../../../composables/useTableSort.js'
-import { estimatedIntrinsics, estimatedCenter, estimatedAngles } from '../../../core/sfm/cameraEstimated.js'
+import { estimatedIntrinsics, estimatedPose } from '../../../core/sfm/cameraEstimated.js'
 
 // Per-image inspector with three tabs:
 //   - Metadata   : raw EXIF (incl. GPS)            — MetadataTable
@@ -17,6 +17,9 @@ const props = defineProps({
   poses: { type: Array, default: () => [] },
   cameras: { type: Map, default: () => new Map() }, // uuid → { R, t, K }
   crs: { type: String, default: null },
+  // The model's georeference in `crs` ({ scale, R, t, local? }), or null: estimated
+  // poses are then shown in the CRS, else in the model frame.
+  georefSim: { type: Object, default: null },
   selectedId: { type: String, default: null },
 })
 
@@ -85,9 +88,10 @@ function extrinsics(img) {
   if (mode.value === 'estimated') {
     const cam = props.cameras.get(img.uuid)
     if (!cam) return null
-    const c = estimatedCenter(cam)
-    const a = estimatedAngles(cam)
-    return { x: c?.[0], y: c?.[1], z: c?.[2], omega: a?.omega, phi: a?.phi, kappa: a?.kappa, space: 'model' }
+    // In the same omega/phi/kappa convention as the imported poses (Export ▸ Camera
+    // Poses writes the same values).
+    const p = estimatedPose(cam, props.georefSim)
+    return p && { ...p, space: props.georefSim ? 'crs' : 'model' }
   }
   const p = poseFor(img)
   if (!p) return null
@@ -187,7 +191,9 @@ watch(tab, resetSort)
       <span v-else-if="tab === 'extrinsics'" class="hint">
         {{
           mode === 'estimated'
-            ? 'Bundle-adjusted — model space (not georeferenced)'
+            ? georefSim && crs
+              ? `Bundle-adjusted — positions in ${crs}`
+              : 'Bundle-adjusted — model space (not georeferenced)'
             : crs
               ? `Positions in ${crs}`
               : 'Imported priors'

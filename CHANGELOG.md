@@ -42,6 +42,11 @@ Notable changes to websfm. The format follows
   right now. An aerial project still assumes the cameras look down; when the photos
   look up instead, the sparse run warns that the scene type is probably wrong, since
   its automatic orientation then turns the model over.
+- **The Image Table's estimated angles match the imported ones.** Its Extrinsics ▸
+  Estimated view showed omega, phi and kappa of the solver's camera axes (looking down
+  +z with y down), so a camera looking straight down read 180°. It now uses the
+  convention of the imported poses, and shows positions in the project CRS when the
+  model is georeferenced.
 - **An orthophoto too large for PNG or JPEG no longer says "coming soon".** The export
   dialog added "coming soon" to every greyed format, after the reason it was greyed.
 

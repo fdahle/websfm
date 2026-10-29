@@ -26,6 +26,19 @@ export function opkMatrix(omegaDeg, phiDeg, kappaDeg) {
   ]
 }
 
+// The inverse of opkMatrix: omega/phi/kappa (degrees) of an object → image rotation.
+// Null at phi = ±90°, where omega and kappa turn about the same axis.
+export function opkFromMatrix(M) {
+  const phi = Math.asin(Math.max(-1, Math.min(1, M[0][2])))
+  if (Math.abs(Math.cos(phi)) < 1e-9) return null
+  const d = 180 / Math.PI
+  return {
+    omega: Math.atan2(-M[1][2], M[2][2]) * d,
+    phi: phi * d,
+    kappa: Math.atan2(-M[0][1], M[0][0]) * d,
+  }
+}
+
 // Resolve a sensor's focal length to pixels. Returns null when it can't be
 // determined (focal in mm with no pixel size — e.g. a bare EXIF sensor).
 export function focalPx(sensor) {

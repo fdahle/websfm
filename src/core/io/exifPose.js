@@ -2,24 +2,13 @@
 // then project it on request. Pure: persistence belongs to usePosesStore.
 
 import { isGeographic, metresToCrsUnits, transform } from '../crs.js'
-import { opkMatrix } from '../footprint.js'
+import { opkMatrix, opkFromMatrix } from '../footprint.js'
 
 export const EXIF_GPS_DEFAULT_HORIZONTAL_ACCURACY = 10 // metres
 export const EXIF_GPS_DEFAULT_VERTICAL_ACCURACY = 20 // metres
 export const EXIF_ORIENTATION_DEFAULT_ACCURACY = 5 // degrees
 
 const finite = (v) => v != null && v !== '' && Number.isFinite(Number(v))
-
-function matrixToOpk(R) {
-  const phi = Math.asin(Math.max(-1, Math.min(1, R[0][2])))
-  if (Math.abs(Math.cos(phi)) < 1e-9) return null
-  const d = 180 / Math.PI
-  return {
-    omega: Math.atan2(-R[1][2], R[2][2]) * d,
-    phi: phi * d,
-    kappa: Math.atan2(-R[0][1], R[0][0]) * d,
-  }
-}
 
 // Angle from local east to the projected CRS +X axis representation. EXIF/XMP
 // drone attitudes are referenced to true north; BA and footprint OPK live in the
@@ -42,7 +31,7 @@ function orientationInProject(raw, grid) {
   // Rotate each physical photo-axis direction from ENU components into project
   // grid components. The resulting rows remain an object→photo rotation matrix.
   const projected = M.map(([east, north, up]) => [grid.c * east - grid.s * north, grid.s * east + grid.c * north, up])
-  return matrixToOpk(projected) ?? { omega: null, phi: null, kappa: null }
+  return opkFromMatrix(projected) ?? { omega: null, phi: null, kappa: null }
 }
 
 export function exifPoseFromMetadata(meta = {}) {

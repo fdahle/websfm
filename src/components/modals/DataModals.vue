@@ -339,6 +339,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :poses="poses"
       :cameras="cameras"
       :crs="currentCrs"
+      :georef-sim="reconstructionStore.validGeoref?.crs === currentCrs ? reconstructionStore.validGeoref.sim : null"
       :selected-id="selectedId"
       @close="imageTableOpen = false"
       @select="selectImage"

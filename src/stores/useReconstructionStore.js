@@ -1424,6 +1424,8 @@ export const useReconstructionStore = registerProjectStore(
       forgetDepthMap,
       depthMapCount,
       georef,
+      // The georeference while it still fits the model (the Image Table's estimated poses).
+      validGeoref,
       scaleFit,
       summary,
       denseSummary,
