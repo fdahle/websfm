@@ -50,6 +50,21 @@ const { onMouseOver: onPreviewOver, onMouseOut: onPreviewOut } = useHelpLinkPrev
 
 const bodyEl = ref(null)
 
+// A newly opened tab lands at the right of the strip, possibly past its edge: scroll
+// it into view (scrollLeft, not scrollIntoView, so only the strip moves).
+const tabScroll = ref(null)
+watch([activeId, tabs], async () => {
+  if (!isOpen.value || activeId.value === 'home') return
+  await nextTick()
+  const strip = tabScroll.value
+  const el = strip?.querySelector('.gtab.active')
+  if (!el) return
+  const sr = strip.getBoundingClientRect()
+  const er = el.getBoundingClientRect()
+  if (er.left < sr.left) strip.scrollLeft -= sr.left - er.left
+  else if (er.right > sr.right) strip.scrollLeft += er.right - sr.right
+})
+
 // After the active tab / focus param changes, scroll the requested section into
 // view (or the top for a fresh tab). nextTick so the v-html sections exist.
 watch([activeId, focusParam], async () => {
@@ -86,20 +101,27 @@ function onBodyClick(e) {
         </div>
 
         <div class="tab-strip" role="tablist">
-          <button class="gtab" :class="{ active: activeId === 'home' }" role="tab" @click="guide.setActive('home')">
+          <button
+            class="gtab gtab-home"
+            :class="{ active: activeId === 'home' }"
+            role="tab"
+            @click="guide.setActive('home')"
+          >
             Home
           </button>
-          <button
-            v-for="t in tabDocs"
-            :key="t.id"
-            class="gtab"
-            :class="{ active: activeId === t.id }"
-            role="tab"
-            @click="guide.setActive(t.id)"
-          >
-            {{ t.doc?.title ?? t.id }}
-            <span class="gtab-close" title="Close tab" @click.stop="guide.closeTab(t.id)">×</span>
-          </button>
+          <div ref="tabScroll" class="tab-scroll">
+            <button
+              v-for="t in tabDocs"
+              :key="t.id"
+              class="gtab"
+              :class="{ active: activeId === t.id }"
+              role="tab"
+              @click="guide.setActive(t.id)"
+            >
+              {{ t.doc?.title ?? t.id }}
+              <span class="gtab-close" title="Close tab" @click.stop="guide.closeTab(t.id)">×</span>
+            </button>
+          </div>
         </div>
 
         <div ref="bodyEl" class="modal-body">
@@ -208,13 +230,25 @@ function onBodyClick(e) {
   color: var(--text);
 }
 
+/* As GlossaryModal's: Home sits outside the scroll area (fixed); only the operation
+   tabs scroll. */
 .tab-strip {
   display: flex;
-  gap: 2px;
-  padding: 6px 10px 0;
+  padding: 6px 0 0;
   border-bottom: 1px solid var(--panel-border);
-  overflow-x: auto;
   flex-shrink: 0;
+}
+.tab-scroll {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px 0 8px;
+  overflow-x: auto;
+  /* overflow-x:auto alone makes the browser compute overflow-y to auto too,
+     which adds a stray vertical scrollbar and fights touchpad h-scroll. */
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 .gtab {
   display: inline-flex;
@@ -223,20 +257,26 @@ function onBodyClick(e) {
   white-space: nowrap;
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
   color: var(--text-dim);
   font: inherit;
   font-size: 12.5px;
-  padding: 7px 10px;
-  margin-bottom: -1px;
+  /* Extra bottom padding gives the thin horizontal scrollbar its own lane. The
+     active underline is an inset shadow, not a border with a negative margin, which
+     is what overflowed the strip. */
+  padding: 7px 10px 11px;
   cursor: pointer;
+}
+.gtab-home {
+  flex-shrink: 0;
+  padding-left: 12px;
+  border-right: 1px solid var(--panel-border);
 }
 .gtab:hover:not(.active) {
   color: var(--text);
 }
 .gtab.active {
   color: var(--text);
-  border-bottom-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .gtab-close {
   font-size: 13px;

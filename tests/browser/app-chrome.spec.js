@@ -1,0 +1,38 @@
+import { test, expect } from '@playwright/test'
+
+// The app's own chrome: the Guide's tab strip keeps to one row however many
+// operations are open.
+
+async function createProject(page) {
+  await page.addInitScript(() => localStorage.setItem('consoleOpen', 'false'))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+}
+
+test('the Guide tab strip scrolls sideways only, with Home fixed', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await createProject(page)
+  const ops = ['detect-features', 'match-features', 'sparse-reconstruction', 'depth-maps', 'dense-cloud']
+  ops.push('mesh', 'texture-mesh', 'dem', 'orthophoto', 'georeferencing')
+  const scroll = page.locator('.tab-strip .tab-scroll')
+  // One at a time, as a user opens them: each new tab is scrolled into view.
+  for (const [i, id] of ops.entries()) {
+    await page.evaluate(async (op) => (await import('/src/stores/useGuideStore.js')).useGuideStore().openOp(op), id)
+    await expect(scroll.locator('.gtab')).toHaveCount(i + 1)
+  }
+  await expect(scroll.locator('.gtab.active')).toBeInViewport()
+  const m = await scroll.evaluate((el) => ({
+    sw: el.scrollWidth,
+    cw: el.clientWidth,
+    sh: el.scrollHeight,
+    ch: el.clientHeight,
+    left: el.scrollLeft,
+  }))
+  expect(m.sw).toBeGreaterThan(m.cw) // ten tabs do not fit: the strip scrolls
+  expect(m.sh).toBeLessThanOrEqual(m.ch) // but never vertically
+  expect(m.left).toBeGreaterThan(0) // the last one opened was scrolled into view
+  await expect(page.locator('.tab-strip .gtab-home')).toBeInViewport()
+  expect(errors).toEqual([])
+})

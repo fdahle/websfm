@@ -71,6 +71,9 @@ Notable changes to websfm. The format follows
   model is georeferenced.
 - **An orthophoto too large for PNG or JPEG no longer says "coming soon".** The export
   dialog added "coming soon" to every greyed format, after the reason it was greyed.
+- **The Guide's tab strip no longer overflows.** With operations open, the strip could
+  show a stray scrollbar over the tabs. Home now stays at the left and only the operation
+  tabs scroll, as in the Glossary, and a newly opened tab scrolls into view.
 
 ## [0.5.0] — 2026-10-28
 
