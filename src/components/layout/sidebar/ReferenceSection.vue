@@ -249,13 +249,15 @@ const ctxOpenLabel = computed(() =>
           Treat as {{ menu.raster.kind === 'dem' ? 'orthophoto' : 'DEM' }}
         </button>
         <!-- The mirror of ImagesSection's "Convert to reference data": the ingest
-             geokey sniff called this a raster, but it's really a source photo. -->
+             geokey sniff called this a raster, but it's really a source photo. A
+             raster the app fetched (Sentinel-2) never is. -->
         <button
+          v-if="!menu.raster.origin"
           class="ctx-item"
-          title="This is really a source photo — re-import it as an image"
+          title="For a photo that was taken for a georeferenced raster: move it to the source images"
           @click="fromMenu((r) => sidebar.convertRasterToImage(r.id))"
         >
-          Convert to source image
+          Convert to source image…
         </button>
         <button class="ctx-item" @click="fromMenu((r) => startRename(r.id, r.name))">Rename</button>
 

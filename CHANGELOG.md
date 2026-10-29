@@ -62,6 +62,12 @@ Notable changes to websfm. The format follows
   terms it names, which in a changelog was nearly every line.
 
 ### Fixed
+- **Convert to source image works after a reopen.** In a reopened project, Reference
+  data ▸ right-click ▸ **Convert to source image** removed the raster and then failed
+  with "Unsaved changes: A requested file … could not be found", which **Retry saving**
+  could not clear; the file is now read before the raster is removed. The item now asks
+  first and says what it does, and a Sentinel-2 window fetched by Find GCPs no longer
+  offers it, since it is never a photo.
 - **A reopened project counts every match pair it tried.** Pairs that matching rejected
   are now saved too, so **Total pairs** in the sidebar is the same after a reopen, and
   matching does not try those pairs again. The JSON match export still lists only the

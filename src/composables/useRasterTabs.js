@@ -102,7 +102,17 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     importRasterOpen.value = false
     importRasterData.value = null
     const file = await externalStore.originalFile(id)
-    if (!file) {
+    let bytes = null
+    try {
+      // Into memory before the raster goes: after a reload the original is a File
+      // over OPFS `external/{id}.src`, which removeRaster deletes, and the image
+      // ingest's read and save of it then fail with NotFoundError (and so does every
+      // "Retry saving").
+      bytes = file ? await file.arrayBuffer() : null
+    } catch {
+      /* the warning below */
+    }
+    if (!bytes) {
       log(`Could not re-read "${meta.name}" to import it as an image — re-add the file.`, 'warn', 'Import')
       return
     }
@@ -110,7 +120,22 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     // an open tab — it would otherwise linger showing an empty viewer.
     closeTabForRaster(id)
     await removeRaster(id)
-    addImages([new File([file], meta.name, { type: 'image/tiff' })])
+    addImages([new File([bytes], meta.name, { type: 'image/tiff' })])
+  }
+
+  // Reference Data ▸ right-click ▸ Convert to source image: unlike the import
+  // modal's escape hatch, nothing on screen says what is about to happen.
+  function confirmRasterToImage(id) {
+    const meta = externalStore.rasterById(id)
+    if (!meta) return
+    askConfirm({
+      title: 'Convert to source image?',
+      message:
+        `Re-import “${meta.name}” as a source image, a photo the reconstruction uses? It is removed ` +
+        'from Reference data. Only for a photo that was taken for a georeferenced raster on import.',
+      confirmLabel: 'Convert',
+      onConfirm: () => onRasterImportAsImage({ id }),
+    })
   }
 
   // The mirror of onRasterImportAsImage: a GeoTIFF that the ingest-time geokey
@@ -224,6 +249,7 @@ export function useRasterTabs({ tabs, openRasterImport }) {
     openRasterTab,
     renameRasterFromSidebar,
     onRasterImportAsImage,
+    confirmRasterToImage,
     convertImageToRaster,
     rasterBeingStyled,
     onRasterStyleApply,

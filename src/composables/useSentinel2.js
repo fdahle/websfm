@@ -51,7 +51,7 @@ export async function fetchSentinel2Scene(scene, area, { onLog } = {}) {
   const { bytes } = await fetchSentinel2Window({ hrefs, window, epsg: scene.epsg, loQ, hiQ })
   const external = useExternalStore()
   const file = new File([bytes], s2RasterName(scene), { type: 'image/tiff' })
-  const meta = await external.importRaster(file, { forceKind: 'ortho' })
+  const meta = await external.importRaster(file, { forceKind: 'ortho', origin: 'sentinel2' })
   if (!meta) throw new Error('The fetched Sentinel-2 window could not be imported')
   await external.setRasterAccuracy(meta.id, { horizontalAccuracy: SENTINEL2_DEFAULTS.horizontalAccuracy })
   onLog?.(

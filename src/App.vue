@@ -738,6 +738,7 @@ const {
   openRasterTab,
   renameRasterFromSidebar,
   onRasterImportAsImage,
+  confirmRasterToImage,
   convertImageToRaster,
   rasterBeingStyled,
   onRasterStyleApply,
@@ -1101,7 +1102,7 @@ const { context: sidebarContext, zoomToVectorSet } = useSidebarActions({
     confirmRemoveRaster,
     downloadRasterOriginal,
     renameRasterFromSidebar,
-    onRasterImportAsImage,
+    confirmRasterToImage,
   },
 })
 provideSidebar(sidebarContext)

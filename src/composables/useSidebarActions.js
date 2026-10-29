@@ -44,7 +44,7 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     confirmRemoveRaster,
     downloadRasterOriginal,
     renameRasterFromSidebar,
-    onRasterImportAsImage,
+    confirmRasterToImage,
   } = actions
   const imagesStore = useImagesStore()
   const { imageById, selectImage, renameImage } = imagesStore
@@ -251,7 +251,7 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
       setRasterVisible(id, visible)
     },
     setRasterOpacity: ({ id, opacity }) => setRasterOpacity(id, opacity),
-    convertRasterToImage: (id) => onRasterImportAsImage({ id }),
+    convertRasterToImage: confirmRasterToImage,
   }
 
   return { context, zoomToVectorSet }

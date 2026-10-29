@@ -193,9 +193,11 @@ export const useExternalStore = registerProjectStore(
 
     // ── import ─────────────────────────────────────────────────────────────────
     // Decode + classify off-thread, then commit. `forceKind` comes from the import
-    // modal when the sniff was low-confidence. Returns the new RasterMeta, or null.
-    async function importRaster(file, { forceKind = null } = {}) {
-      const task = importRasterNow(file, { forceKind })
+    // modal when the sniff was low-confidence. `origin` names where a raster the app
+    // fetched itself came from ('sentinel2'); a file the user brought has none.
+    // Returns the new RasterMeta, or null.
+    async function importRaster(file, { forceKind = null, origin = null } = {}) {
+      const task = importRasterNow(file, { forceKind, origin })
       activeImports.add(task)
       pendingWorkCount.value++
       try {
@@ -244,7 +246,7 @@ export const useExternalStore = registerProjectStore(
       })
     }
 
-    async function importRasterNow(file, { forceKind = null } = {}) {
+    async function importRasterNow(file, { forceKind = null, origin = null } = {}) {
       if (!file) return null
       const projectId = projects.currentProjectId
       const id = makeId()
@@ -304,6 +306,9 @@ export const useExternalStore = registerProjectStore(
         ...meta,
         id,
         importedAt: Date.now(),
+        // Fetched by the app (Find GCPs ▸ Sentinel-2), not imported: it cannot be a
+        // misrouted source photo, so the sidebar offers no "Convert to source image".
+        ...(origin ? { origin } : {}),
         // Which style the persisted full-res plane was composed with. A restyle
         // updates `style` but not this, marking the plane stale so it re-decodes
         // lazily — see setRasterStyle / ensureRasterLoaded.
