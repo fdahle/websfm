@@ -168,6 +168,20 @@ compare them on the `dome*` fields. A stage may carry a tag to repeat it with ot
 settings on the same inputs: `"stages": "…,depth,dense,dense:loose"` runs the dense
 stage again with config key `dense:loose`.
 
+## Accuracy: point classes (`classify-score.mjs`)
+
+Classify Points against a labelled cloud, in Node with the app's own code: per-class
+IoU, precision, recall and F1 (ground, building, vegetation as one class and per band,
+other). The PLY needs x, y, z (z up), optional colour and an integer label property.
+
+```bash
+node scripts/bench/classify-score.mjs --ply OCCC_points.ply --preset stpls3d --out occc.json
+node scripts/bench/classify-score.mjs --ply site.ply --label label --map '{"2":2,"6":6,"5":5}'
+```
+
+`--preset stpls3d` maps STPLS3D's labels onto LAS classes; other datasets take `--map`
+(their label → LAS class; unnamed labels count as other above ground).
+
 ## More config keys
 
 - `recursive: true`: walk sub-folders (a MicaSense SET splits captures into 000/001/…).
