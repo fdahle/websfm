@@ -53,9 +53,9 @@ Chrome locally, set `PLAYWRIGHT_CHANNEL=chrome`.
 WebKit on Linux needs a few system libraries: `npx playwright install-deps webkit` installs
 them with root, and `scripts/webkit-libs.sh` puts them beside the browser without it (run it
 again after a Playwright update). Playwright's Linux WebKit stands in for Safari's code
-paths, not its features: it has no WebGPU and no MediaRecorder, and neither it nor Safari
-gets the cross-origin isolation WebSfM asks for (Safari ignores COEP `credentialless`), so
-the bundle adjustment and the learned detectors run on one thread there. Each WebKit test
+paths, not its features: it has no WebGPU and no MediaRecorder. It is cross-origin
+isolated like the others (COEP `require-corp`), so shared memory and threads are tested
+there too. Each WebKit test
 runs in a persistent context (`tests/browser/fixtures.js`), since its usual private
 context has no browser storage.
 

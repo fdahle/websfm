@@ -201,6 +201,14 @@ Notable changes to websfm. The format follows
   terms it names, which in a changelog was nearly every line.
 
 ### Performance
+- **Safari uses every core.** WebSfM now asks for cross-origin isolation with the
+  header Safari understands (COEP `require-corp` instead of `credentialless`), so the
+  bundle adjustment, depth maps and the learned detectors run on threads there as in
+  Chrome and Firefox. Every cross-origin request the app makes (basemap tiles, epsg.io,
+  STAC, models) already goes through CORS, so nothing is blocked: live OpenStreetMap
+  tiles load in Chromium, Firefox and WebKit under the new header, and the shared-memory
+  browser test now runs in WebKit too. A self-hosted copy needs the new header
+  ([docs/deployment.md](docs/deployment.md)).
 - **Sparse Reconstruction spends less time outside the bundle adjustment.** Placing each
   photo now scores its pose hypotheses on every core, guided track extension searches
   every camera on its own core, and the residual statistics that each bundle adjustment

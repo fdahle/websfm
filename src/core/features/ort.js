@@ -8,10 +8,9 @@
 //
 // Threading: multi-threaded when the page is cross-origin isolated, else 1.
 // Multi-threaded ORT wasm needs SharedArrayBuffer → COOP/COEP; vite.config.js
-// sends COOP: same-origin + COEP: credentialless (NOT require-corp, which would
-// block the OpenLayers basemap tiles — credentialless lets no-cors subresources
-// through). Chromium/Firefox isolate and get threads (~3× on LightGlue CPU);
-// Safari ignores `credentialless`, stays un-isolated, and runs single-threaded.
+// sends COOP: same-origin + COEP: require-corp (every cross-origin load is CORS, the
+// basemap tiles included), which Chromium, Firefox and Safari all isolate on, so all
+// get threads (~3× on LightGlue CPU). An un-isolated page runs single-threaded.
 // The production host must send the same two headers to get threads there.
 //
 // The ORT module is dynamic-imported so this file (and its importers) stay

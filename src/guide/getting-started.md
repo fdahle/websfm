@@ -162,10 +162,9 @@ whole pipeline (the app's own browser tests run in it), with less:
   choose.
 
 **Safari** passes WebSfM's browser tests (through WebKit, its engine) but has not been
-tried on real data yet. The bundle adjustment and the learned detectors run on one
-thread there, and projects are kept in browser storage only. When something is
-missing, a note at the bottom right lists what it costs in this browser, and **Other ▸
-System info ▸ Browser support** shows every feature WebSfM looks for.
+tried on real data yet. Projects are kept in browser storage only there. When
+something is missing, a note at the bottom right lists what it costs in this browser,
+and **Other ▸ System info ▸ Browser support** shows every feature WebSfM looks for.
 
 ## If something goes wrong
 When a stage logs an error, a red note at the bottom right says so; click it to open

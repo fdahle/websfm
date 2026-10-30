@@ -80,7 +80,7 @@ const showMixWarning = computed(() => !overwrite.value && staleDetectorImages.va
 
 // A learned detector's GPU path (ONNX Runtime's WebGPU EP) is gated to Chromium in
 // core/features/ort.js (resolveBackend) — on Safari/Firefox it always runs on
-// CPU WASM (and Safari ignores COEP `credentialless`, so single-threaded too).
+// CPU WASM (threaded when the page is cross-origin isolated).
 // Surface that here, before the user commits to a slow run.
 const isChromium = /Chrome\//.test(globalThis.navigator?.userAgent || '')
 

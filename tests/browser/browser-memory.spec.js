@@ -4,13 +4,11 @@ import { test, expect } from './fixtures.js'
 // the page's capabilities, a shared array handed to a worker without a copy, and the
 // Memory64 Poisson build (src/wasm/mesh-64) giving the same mesh as the 32-bit one.
 
+// Shared memory needs cross-origin isolation (COEP require-corp, vite.config.js), which
+// WebKit, Safari's engine, gets as well.
 test('wasm memories: Memory64 and shared memory are there, and a shared array reaches a worker uncopied', async ({
   page,
-  browserName,
 }) => {
-  // Shared memory needs cross-origin isolation, and Safari ignores COEP `credentialless`
-  // (vite.config.js), so WebKit has none: the app takes its single-memory path there.
-  test.skip(browserName === 'webkit', 'no shared memory without cross-origin isolation')
   await page.goto('/tests/browser/harness.html')
   const r = await page.evaluate(async () => {
     const { bigArrayCaps, shareableArray } = await import('/src/core/bigArray.js')

@@ -6,7 +6,7 @@
 
 const ISOLATION = {
   'Cross-Origin-Opener-Policy': 'same-origin',
-  'Cross-Origin-Embedder-Policy': 'credentialless',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
 }
 const TYPES = { onnx: 'application/octet-stream', wasm: 'application/wasm', mjs: 'text/javascript' }
 

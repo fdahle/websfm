@@ -35,11 +35,14 @@ Configure the production host as follows:
 
   ```
   Cross-Origin-Opener-Policy: same-origin
-  Cross-Origin-Embedder-Policy: credentialless
+  Cross-Origin-Embedder-Policy: require-corp
   ```
 
   These are already set for `npm run dev` / `npm run preview`. Without them the
-  app still works, single-threaded (the same graceful path as Safari).
+  app still works, single-threaded. `require-corp` blocks a cross-origin resource
+  loaded without CORS; the app loads none (the basemap tiles, epsg.io, STAC and a
+  separate model host are all CORS requests), so a host that serves models from
+  another origin only needs the `Access-Control-Allow-Origin` above.
 
 - **Static file types.** Serve `.wasm` as `application/wasm` and `.mjs` as
   `text/javascript`. An incorrect WASM type disables streaming compilation and an

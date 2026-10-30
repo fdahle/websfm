@@ -4,7 +4,7 @@
 # Cross-origin isolation → multi-threaded ONNX Runtime (see vite.config.js).
 /*
   Cross-Origin-Opener-Policy: same-origin
-  Cross-Origin-Embedder-Policy: credentialless
+  Cross-Origin-Embedder-Policy: require-corp
 
 # Content-hashed build output. Everything else keeps Cloudflare's default
 # (max-age=0, must-revalidate), which index.html, sw.js and the manifest need.

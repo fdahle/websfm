@@ -153,21 +153,22 @@ export default defineConfig(({ mode }) => {
     },
     // Cross-origin isolation → SharedArrayBuffer → multi-threaded ORT wasm (core/ort.js
     // auto-picks threads when `crossOriginIsolated`; ~3× on LightGlue/SuperPoint CPU).
-    // COEP `credentialless` (NOT `require-corp`) is deliberate: it still permits
-    // cross-origin no-cors subresources like the OpenLayers basemap tiles, just
-    // stripped of credentials. Safari doesn't support `credentialless` and simply
-    // stays un-isolated/single-threaded — the code path degrades gracefully.
+    // COEP `require-corp`, which every browser (Safari too) isolates on: every
+    // cross-origin resource the app loads is fetched in CORS mode (the basemap tiles
+    // with crossOrigin 'anonymous', fetch() for epsg.io, STAC, COGs and models), and
+    // their servers allow it, so none needs `credentialless`'s no-cors pass, which
+    // Safari does not have. A page that is not isolated still works, single-threaded.
     // A production host must send these same two headers to get threads there.
     server: {
       headers: {
         'Cross-Origin-Opener-Policy': 'same-origin',
-        'Cross-Origin-Embedder-Policy': 'credentialless',
+        'Cross-Origin-Embedder-Policy': 'require-corp',
       },
     },
     preview: {
       headers: {
         'Cross-Origin-Opener-Policy': 'same-origin',
-        'Cross-Origin-Embedder-Policy': 'credentialless',
+        'Cross-Origin-Embedder-Policy': 'require-corp',
       },
     },
   }

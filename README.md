@@ -91,10 +91,8 @@ LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
   for local project storage; folder-backed projects and WebGPU acceleration are
   Chromium-only. **Firefox** runs the whole pipeline on the CPU, and the browser test
   suite runs in it as well as in Chromium. The suite also runs in WebKit, Safari's
-  engine; **Safari** itself has not been tried on real data. It does not get the
-  cross-origin isolation WebSfM asks for, so the bundle adjustment and the learned
-  detectors run on one thread there. The app lists what a browser lacks, and what it
-  costs, when it starts.
+  engine; **Safari** itself has not been tried on real data. The app lists what a
+  browser lacks, and what it costs, when it starts.
 - The learned backends (ALIKED, DISK, SuperPoint, LightGlue, Smart Select) download their model
   weights on first use — you'll be asked to confirm, and each file is cached
   locally afterwards (see [Model files](docs/deployment.md#model-files)).
