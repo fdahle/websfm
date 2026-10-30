@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // The image viewer against the full app: open an image tab, paint a mask stroke and
 // commit it, and place a control point from the right-click menu — at the native

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { readFile } from 'node:fs/promises'
 
 // Sidebar ▸ right-click ▸ Download… — a cloud through the export dialog aimed at

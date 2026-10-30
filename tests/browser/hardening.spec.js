@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 const harness = '/tests/browser/harness.html'
 
 test('nested modal Cancel stays safe on Enter, traps focus and restores it', async ({ page }) => {

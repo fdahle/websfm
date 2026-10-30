@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // A project saved as a .websfm file and opened again, on real OPFS with the browser's
 // own CompressionStream / DecompressionStream: deflated JSON and stored binaries come

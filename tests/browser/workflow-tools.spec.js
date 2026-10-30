@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 const harness = '/tests/browser/workflow-tools.html'
 test.beforeEach(async ({ page }) => {
   page.on('pageerror', (error) => console.error('PAGE ERROR', error.message))

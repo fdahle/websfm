@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // The app's own chrome: Settings ▸ General ▸ Notices hides the bug-report button,
 // the Guide's tab strip keeps to one row however many operations are open, and

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Past the ArrayBuffer limits (core/bigArray.js, dev/planning/plan-past-browser-limits.md):
 // the page's capabilities, a shared array handed to a worker without a copy, and the
@@ -6,7 +6,11 @@ import { test, expect } from '@playwright/test'
 
 test('wasm memories: Memory64 and shared memory are there, and a shared array reaches a worker uncopied', async ({
   page,
+  browserName,
 }) => {
+  // Shared memory needs cross-origin isolation, and Safari ignores COEP `credentialless`
+  // (vite.config.js), so WebKit has none: the app takes its single-memory path there.
+  test.skip(browserName === 'webkit', 'no shared memory without cross-origin isolation')
   await page.goto('/tests/browser/harness.html')
   const r = await page.evaluate(async () => {
     const { bigArrayCaps, shareableArray } = await import('/src/core/bigArray.js')

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // View ▸ Map ▸ Layers: a floating panel listing the layers on the map in one stack. The
 // list's top draws on top, a move restacks the map's layer group, the selected row's

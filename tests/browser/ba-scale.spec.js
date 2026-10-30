@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // The bundle adjustment's threads on a synthetic block (opt-in: BA_SCALE=<side>, e.g. 40
 // for 1,600 cameras; BA_SEEDS=5,1). Each seed runs once single-threaded and once on the

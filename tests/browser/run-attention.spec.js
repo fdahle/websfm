@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // A run left alone (useRunAttention): wake lock while running, the state in the tab
 // title, a notification from a hidden tab, and a toast when a stage logged errors.

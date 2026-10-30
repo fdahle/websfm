@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { stat } from 'node:fs/promises'
 
 // View ▸ Camera ▸ Turntable against the real Viewer3D: the camera circles the scene
@@ -50,14 +50,20 @@ test('the turntable turns the view and records one turn', async ({ page }) => {
   const seconds = page.locator('.viewer input[type="number"]')
   await seconds.fill('5')
   await seconds.blur()
-  const download = page.waitForEvent('download', { timeout: 20_000 })
-  await page.getByRole('button', { name: 'Record one turn' }).click()
-  await expect(page.getByText(/Recording \d+ %/)).toBeVisible()
-  const file = await download
-  expect(file.suggestedFilename()).toMatch(/-turntable\.(webm|mp4)$/)
-  expect((await stat(await file.path())).size).toBeGreaterThan(1000)
-  if (process.env.TURNTABLE_OUT) await file.saveAs(process.env.TURNTABLE_OUT)
-  await expect(page.getByRole('button', { name: 'Record one turn' })).toBeVisible()
+  if (await page.evaluate(() => typeof MediaRecorder === 'undefined')) {
+    // A browser without MediaRecorder (Playwright's Linux WebKit; Safari has one) says so.
+    await page.getByRole('button', { name: 'Record one turn' }).click()
+    await expect(page.getByText('This browser cannot record the 3D view.')).toBeVisible()
+  } else {
+    const download = page.waitForEvent('download', { timeout: 20_000 })
+    await page.getByRole('button', { name: 'Record one turn' }).click()
+    await expect(page.getByText(/Recording \d+ %/)).toBeVisible()
+    const file = await download
+    expect(file.suggestedFilename()).toMatch(/-turntable\.(webm|mp4)$/)
+    expect((await stat(await file.path())).size).toBeGreaterThan(1000)
+    if (process.env.TURNTABLE_OUT) await file.saveAs(process.env.TURNTABLE_OUT)
+    await expect(page.getByRole('button', { name: 'Record one turn' })).toBeVisible()
+  }
 
   // The ribbon button turns it off again, and the view stays where it stopped.
   await turntable.click()

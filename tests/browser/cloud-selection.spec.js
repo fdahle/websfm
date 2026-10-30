@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // 3D-viewer rectangle/lasso selection (tool chosen in the ribbon's Tools ▸ Point
 // Cloud ▾, acted on from the floating toolbox) → Delete / Keep only through the

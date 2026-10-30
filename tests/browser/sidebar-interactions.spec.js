@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // The sidebar's shared row primitives against the full app: inline rename
 // (focus, Enter commits, Escape cancels without reaching App's Escape handler),

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { readFile } from 'node:fs/promises'
 
 // Tools ▸ Products ▾ (contours, terrain derivatives, polygon clip), the remaining

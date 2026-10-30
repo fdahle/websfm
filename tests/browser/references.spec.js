@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // A glossary entry's Sources (its refs: frontmatter) and About ▸ References
 // (core/help/references.js) render their citations; each reference says what it is

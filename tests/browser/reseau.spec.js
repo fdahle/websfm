@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Tools ▸ Images ▾ ▸ Detect reseau (SAT-5) through the app's dialog: two scans with a
 // drawn reseau (a 10 mm grid of crosses at 0.1 mm/px, the scan placed 7 px right and

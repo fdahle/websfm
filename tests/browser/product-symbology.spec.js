@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Products ▸ right-click ▸ Symbology… on the computed DEM (re-baked preview) and
 // orthophoto (brightness/contrast/gamma applied at draw time).

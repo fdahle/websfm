@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Tools tab dropdowns (Point Cloud ▾ / Mesh ▾ / Measure ▾) → tool dialogs → the
 // store's non-destructive edit path → the real worker ops, against the full

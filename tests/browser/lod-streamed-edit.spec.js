@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Editing a streamed cloud (dev/planning/plan-lod.md ▸ L5, core/lod/transform.js): a
 // selection drawn on its octree layer, a filter and the ground filter all write a NEW

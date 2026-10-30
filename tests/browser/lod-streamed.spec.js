@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Streamed import (dev/planning/plan-lod.md ▸ L4, L5): a LAS too large to hold in
 // memory goes straight from the file into a level-of-detail octree; the cloud has no

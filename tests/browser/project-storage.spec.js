@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Where a project is kept: a project file opened into a folder, and a save that finds
 // browser storage full. The "folder" is an OPFS subdirectory: a real

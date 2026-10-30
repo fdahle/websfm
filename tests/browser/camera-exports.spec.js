@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { readFile } from 'node:fs/promises'
 
 // Export ▸ Camera Poses and Calibration open their dialogs: the poses the sparse model

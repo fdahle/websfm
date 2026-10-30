@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { readFileSync } from 'node:fs'
 
 // A depth-map run whose tab dies continues where it stopped (core/runJournal.js): the

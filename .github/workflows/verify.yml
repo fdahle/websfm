@@ -70,7 +70,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [chromium, firefox]
+        # WebKit is Safari's engine: Playwright's Linux build has no WebGPU and no
+        # MediaRecorder, so it stands in for Safari's code paths, not for its features.
+        project: [chromium, firefox, webkit]
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4

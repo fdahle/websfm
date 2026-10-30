@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Computed DEM on the 2D map (CLAUDE.md ▸ map raster layers),
 // against the full app: the ribbon's In Layers toggle, Fit View over a raster-only

@@ -35,9 +35,10 @@ npm test                # unit and store regression tests (Vitest, Node)
 npm run typecheck       # TypeScript, Vue template bindings, ESLint
 npm run test:wasm       # real LAZ WASM round-trip across compressor chunks
 npm run check:wasm      # Rust source / committed WASM freshness
-npx playwright install chromium firefox
+npx playwright install chromium firefox webkit
 npm run test:browser    # browser storage, keyboard, import/export and multi-tab tests (Chromium)
 npm run test:browser:firefox  # the same suite in Firefox (~20 min); Chromium-only tests skip
+npm run test:browser:webkit   # and in WebKit, Safari's engine (~15 min)
 cargo test --manifest-path crates/Cargo.toml --workspace --release
 ```
 
@@ -48,6 +49,15 @@ bindings; JavaScript implementations are checked for undefined variables and
 unreachable code. This does not yet provide full static typing of every store.
 GitHub Actions runs all of the above plus a production build. To use an installed
 Chrome locally, set `PLAYWRIGHT_CHANNEL=chrome`.
+
+WebKit on Linux needs a few system libraries: `npx playwright install-deps webkit` installs
+them with root, and `scripts/webkit-libs.sh` puts them beside the browser without it (run it
+again after a Playwright update). Playwright's Linux WebKit stands in for Safari's code
+paths, not its features: it has no WebGPU and no MediaRecorder, and neither it nor Safari
+gets the cross-origin isolation WebSfM asks for (Safari ignores COEP `credentialless`), so
+the bundle adjustment and the learned detectors run on one thread there. Each WebKit test
+runs in a persistent context (`tests/browser/fixtures.js`), since its usual private
+context has no browser storage.
 
 ## Running the whole pipeline headless
 
@@ -129,7 +139,7 @@ git push && git push origin v0.5.0   # the tag deploys websfm.app
 ```
 
 A push to `main` runs the unit, WASM and Rust tests and deploys dev.websfm.app; the
-browser tests (Chromium and Firefox, about 20 min) run only for a version tag, a pull
+browser tests (Chromium, Firefox and WebKit, about 20 min) run only for a version tag, a pull
 request, or by hand. Run them first, so a failure shows before the tag exists:
 **Actions ▸ Verify ▸ Run workflow** on `main` (or `gh workflow run verify.yml --ref
 main`), or `npm run test:browser` locally. A tag whose browser tests fail does not

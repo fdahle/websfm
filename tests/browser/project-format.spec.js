@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { readdirSync, readFileSync } from 'node:fs'
 
 // Every committed saved project (tests/fixtures/projects/v<n>/, made by

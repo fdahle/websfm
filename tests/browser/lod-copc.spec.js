@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // COPC read in place (core/lod/copc.js): a COPC file is a level-of-detail octree
 // already, so its import copies it into the project and reads its nodes from there,

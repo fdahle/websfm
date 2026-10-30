@@ -90,8 +90,11 @@ LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
   uses [OPFS](https://developer.mozilla.org/docs/Web/API/File_System_API/Origin_private_file_system)
   for local project storage; folder-backed projects and WebGPU acceleration are
   Chromium-only. **Firefox** runs the whole pipeline on the CPU, and the browser test
-  suite runs in it as well as in Chromium. **Safari** has not been tested. The app
-  lists what a browser lacks, and what it costs, when it starts.
+  suite runs in it as well as in Chromium. The suite also runs in WebKit, Safari's
+  engine; **Safari** itself has not been tried on real data. It does not get the
+  cross-origin isolation WebSfM asks for, so the bundle adjustment and the learned
+  detectors run on one thread there. The app lists what a browser lacks, and what it
+  costs, when it starts.
 - The learned backends (ALIKED, DISK, SuperPoint, LightGlue, Smart Select) download their model
   weights on first use — you'll be asked to confirm, and each file is cached
   locally afterwards (see [Model files](docs/deployment.md#model-files)).
@@ -170,8 +173,8 @@ more complete.
 
 Not yet verified:
 
-- Safari. Firefox runs the browser test suite; real datasets have only been run in
-  Chromium.
+- Safari on real data. Firefox and WebKit (Safari's engine) run the browser test
+  suite; real datasets have only been run in Chromium.
 - WebGPU on other GPUs. Every GPU number above comes from one NVIDIA GPU.
 - Exported files in external tools: GeoTIFF/COG in QGIS or GDAL, LAZ in
   CloudCompare, the COLMAP export round trip.

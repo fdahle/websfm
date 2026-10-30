@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 const harness = '/tests/browser/harness.html'
 
 // SAT-3 D1: a DEM finer than one plane allows (> 4,096 cells a side) is built block by

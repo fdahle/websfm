@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // The console's command line: Ctrl-K opens and focuses it, ribbon commands and the
 // verbs (help, set, stats, run, pair, select) act through the app's real wiring.

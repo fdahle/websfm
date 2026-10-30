@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // The 2D map says why the basemap is missing (ViewerMap ▸ tileStatus) instead of
 // showing a blank grid that looks broken: a note when tiles fail to load, and an

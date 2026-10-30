@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Export Orthophoto's empty pixels through the real export worker: the alpha band by
 // default, or three bands with a NODATA value (core/products/orthoBands.js).

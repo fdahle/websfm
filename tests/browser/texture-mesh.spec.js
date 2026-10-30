@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // A textured mesh (Tools ▸ Mesh ▸ Texture's output) is drawn with its atlas pages and
 // survives a project reload: UVs, page bytes, page table and face groups.

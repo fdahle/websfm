@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 test('cloud layers, symbology, legend and point attributes survive project reload', async ({ page }) => {
   const errors = []

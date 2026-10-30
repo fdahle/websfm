@@ -12,12 +12,16 @@ export default defineConfig({
     channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
     trace: 'retain-on-failure',
   },
-  // Chromium is where everything runs; Firefox runs the same suite (`npm run
-  // test:browser:firefox`), with the Chromium-only tests skipped. WebKit needs system
-  // libraries Playwright cannot install without root, so it is not here yet.
+  // Chromium is where everything runs; Firefox and WebKit (Safari's engine) run the
+  // same suite (`npm run test:browser:firefox`, `test:browser:webkit`), with the
+  // Chromium-only tests skipped. WebKit on Linux needs a few system libraries:
+  // `npx playwright install-deps webkit` with root, or `scripts/webkit-libs.sh` without.
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
     { name: 'firefox', use: { browserName: 'firefox' }, timeout: 120_000 },
+    // No trace: the persistent context each WebKit test runs in (tests/browser/fixtures.js)
+    // is not one Playwright's tracing can save on close.
+    { name: 'webkit', use: { browserName: 'webkit', trace: 'off' }, timeout: 120_000 },
   ],
   webServer: {
     command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,

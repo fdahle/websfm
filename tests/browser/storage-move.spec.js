@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Moving a project between browser storage and a folder (SC-2). A restored project's
 // stores hold File handles into its root (image copies, masks, products, LOD files,

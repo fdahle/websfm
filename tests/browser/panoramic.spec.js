@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Tools ▸ Images ▾ ▸ Split panoramic strips through the app's dialog: one drawn strip
 // (f = 100 mm, 0.1 mm/px, 1,600 × 200 px: a 92° scan) with a GCP mark, split into

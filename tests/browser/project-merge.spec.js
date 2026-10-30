@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { readFileSync } from 'node:fs'
 
 // Import ▸ Project into this project (composables/useProjectMerge.js): the saved v1

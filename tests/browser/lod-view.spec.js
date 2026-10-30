@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Level-of-detail viewing (dev/planning/plan-lod.md ▸ L3): a dense cloud past the
 // threshold gets its octree in the background and is then drawn through it, within

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Images ▾ ▸ Image quality (decode + score in the worker) and Model ▾ ▸ Optimize
 // cameras (bundle adjustment with the focal free, through the real WASM in the
@@ -35,10 +35,15 @@ test('Image quality scores sharp and blurred images and flags the blurred one', 
           g.fillRect(x, y, 8, 8)
         }
       if (blur) {
+        // Down to an eighth and smoothly back up: a blur in every browser (WebKit has no
+        // canvas `filter`).
+        const small = new OffscreenCanvas(80, 60)
+        small.getContext('2d').drawImage(c, 0, 0, 80, 60)
         const b = new OffscreenCanvas(640, 480),
           bg = b.getContext('2d')
-        bg.filter = 'blur(6px)'
-        bg.drawImage(c, 0, 0)
+        bg.imageSmoothingEnabled = true
+        bg.imageSmoothingQuality = 'high'
+        bg.drawImage(small, 0, 0, 640, 480)
         return new File([await b.convertToBlob({ type: 'image/png' })], name, { type: 'image/png' })
       }
       return new File([await c.convertToBlob({ type: 'image/png' })], name, { type: 'image/png' })

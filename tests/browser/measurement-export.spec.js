@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { readFile } from 'node:fs/promises'
 
 // Export ▸ Measurements: saved measurements as CSV (units in columns) and GeoJSON

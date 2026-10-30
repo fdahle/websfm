@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Measure in 3D: clicks on a mesh pick points on its surface (ray cast, not just
 // corners), and the toolbox reports distance and area in the project's unit.

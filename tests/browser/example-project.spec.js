@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // "Open the example project" (core/examples.js): the images come from the host's
 // examples/ folder, which CI does not have, so the manifest and two small JPEGs are

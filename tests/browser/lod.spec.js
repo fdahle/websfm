@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Level-of-detail octree (dev/planning/plan-lod.md ▸ L2): built in the compute worker
 // into the project's lod/ folder through OPFS chunk files, read back node by node,
