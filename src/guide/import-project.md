@@ -27,6 +27,11 @@ What comes:
 
 What stays behind: the other project's model, depth maps, clouds, meshes and rasters.
 
+The photos come a batch at a time, behind a progress bar. **Cancel** stops after the
+batch under way: the photos already in stay, with their features, the pairs between
+them and their marks, and importing the project again brings the rest (the photos
+already here are recognised and kept once).
+
 ## Joining the photos to the model
 The imported photos are matched among themselves, but not yet with this project's.
 1. **Match Features** with **Match only new pairs** on (it starts on by itself here):

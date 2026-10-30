@@ -44,8 +44,10 @@ export function useProjectMerge() {
     return data
   }
 
-  // → { added, shared, pairs, sensors, gcps, poses } or null when nothing ran.
-  async function importProjectInto(sourceId, onProgress = () => {}) {
+  // → { added, shared, pairs, sensors, gcps, poses, cancelled } or null when nothing ran.
+  // `shouldCancel()` is asked between batches: a cancelled import stops there, and the
+  // photos already in stay with their features, the pairs between them and their marks.
+  async function importProjectInto(sourceId, onProgress = () => {}, shouldCancel = () => false) {
     const targetId = projects.currentProjectId
     if (!targetId || !projects.isPersisting) {
       log('Import project: open a saved project first', 'error', 'Import')
@@ -97,7 +99,13 @@ export function useProjectMerge() {
     const total = plan.added.length
     const missing = []
     const batchSize = PROJECT_IMPORT_TUNING.photosPerBatch
+    let cancelled = false
     for (let i = 0; i < total; i += batchSize) {
+      if (shouldCancel()) {
+        cancelled = true
+        log(`Import project: cancelled after ${pluralize(done, 'photo')} of ${total}`, 'warn', 'Import')
+        break
+      }
       const batch = plan.added.slice(i, i + batchSize)
       const files = [],
         extras = new Map()
@@ -167,7 +175,8 @@ export function useProjectMerge() {
     await imagesStore.save()
 
     const result = {
-      added: total - missing.length,
+      cancelled,
+      added: done - missing.length,
       shared: plan.shared.length,
       pairs,
       sensors: newSensors,

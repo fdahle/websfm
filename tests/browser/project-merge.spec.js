@@ -121,3 +121,62 @@ test('a project imported into another brings photos, features, matches and marks
   expect(cameras).toBe(5)
   expect(errors).toEqual([])
 })
+
+test('a cancelled import keeps the photos already in, with their features and pairs', async ({ page }) => {
+  test.setTimeout(240_000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto('/')
+  await page.waitForFunction(() => document.querySelector('#app')?.__vue_app__?._instance?.setupState)
+  await page.evaluate((b64) => {
+    const bin = atob(b64)
+    const u8 = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i)
+    window.__fixture = new File([u8], 'aukerman-5.websfm')
+  }, readFileSync(fixture).toString('base64'))
+  await page.evaluate(() => {
+    document.querySelector('#app').__vue_app__._instance.setupState.importProjectFile(window.__fixture)
+  })
+  if (await page.evaluate(() => typeof window.showDirectoryPicker === 'function')) {
+    await page
+      .getByRole('dialog', { name: 'Open project file' })
+      .getByRole('button', { name: 'In this browser' })
+      .click()
+  }
+  await expect(page.locator('.toast', { hasText: 'Project opened' })).toBeVisible({ timeout: 60_000 })
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  const sourceId = await page.evaluate(
+    async () => (await import('/src/stores/useProjectsStore.js')).useProjectsStore().currentProjectId,
+  )
+  await page.evaluate(async () => {
+    const app = document.querySelector('#app').__vue_app__._instance.setupState
+    await app.handleCreateProject({ name: 'Merged', sceneType: 'aerial', crs: 'EPSG:32617' })
+  })
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  // One photo per batch, and a cancel once two are in.
+  const r = await page.evaluate(async (sourceId) => {
+    const { PROJECT_IMPORT_TUNING } = await import('/src/core/tuning.js')
+    PROJECT_IMPORT_TUNING.photosPerBatch = 1
+    const { useProjectMerge } = await import('/src/composables/useProjectMerge.js')
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const { useMatchesStore } = await import('/src/stores/useMatchesStore.js')
+    const result = await useProjectMerge().importProjectInto(
+      sourceId,
+      () => {},
+      () => useImagesStore().images.length >= 2,
+    )
+    PROJECT_IMPORT_TUNING.photosPerBatch = 16
+    const images = useImagesStore().images
+    const uuids = new Set(images.map((im) => im.uuid))
+    const pairs = [...useMatchesStore().matchStore.values()]
+    return {
+      cancelled: result.cancelled,
+      images: images.length,
+      done: images.filter((im) => im.kpStatus === 'done').length,
+      pairs: pairs.length,
+      pairsOnImported: pairs.every((e) => uuids.has(e.idA) && uuids.has(e.idB)),
+    }
+  }, sourceId)
+  expect(r).toEqual({ cancelled: true, images: 2, done: 2, pairs: 1, pairsOnImported: true })
+  expect(errors).toEqual([])
+})

@@ -318,10 +318,12 @@ const {
 const { importProjectInto } = useProjectMerge()
 async function onImportProject(sourceId) {
   useModalsStore().importProjectOpen = false
-  exportProgress.open('Importing Project', 0, null, { unit: 'photos' })
+  // Cancel stops between batches (no worker to terminate).
+  exportProgress.open('Importing Project', 0, () => {}, { unit: 'photos' })
   let ok = false
   try {
-    ok = !!(await importProjectInto(sourceId, exportProgress.report))
+    const r = await importProjectInto(sourceId, exportProgress.report, () => exportProgress.aborted.value)
+    ok = !!r && !r.cancelled
   } finally {
     await exportProgress.close(ok)
   }
