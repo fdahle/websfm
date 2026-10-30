@@ -123,7 +123,9 @@ specification you deliver to.
 ## Medium up to
 <!-- param: mediumVegetationMax default: 3 m -->
 Vegetation up to this height is Medium (class 4), shrubs and hedges; above it is High
-vegetation (class 5), trees.
+vegetation (class 5), trees. For a canopy height model, build a DEM of the high
+vegetation (**Build DEM ▸ Points ▸ Classes…**) and a DTM, and take the DEM of difference
+between them.
 
 ## Correcting the result by hand
 Where the filter is wrong, for example a hilltop it lifted off or a low roof it kept

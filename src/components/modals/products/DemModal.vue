@@ -13,6 +13,7 @@ import { DEM_DEFAULTS } from '../../../core/defaults.user.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { demEffects, frameText } from '../../../core/stepEffects/raster.js'
+import { lasClassName } from '../../../core/products/cloudStyle.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 
 // Build DEM (Digital Surface Model). Rasterises the point cloud into a height
@@ -60,7 +61,18 @@ watch(
 )
 
 const groundOnly = computed(() => settings.value.points === 'ground')
-const activeSource = computed(() => (groundOnly.value ? props.groundSource : props.source))
+// Ground only and Classes… both read the classified cloud.
+const classified = computed(() => settings.value.points !== 'all')
+// Points ▸ Classes…: the classes Classify points writes, and Unclassified (other above ground).
+const CLASS_CHOICES = [2, 3, 4, 5, 6, 1].map((code) => ({ code, label: lasClassName(code) }))
+function toggleClass(code, on) {
+  const set = new Set(settings.value.classes)
+  if (on) set.add(code)
+  else set.delete(code)
+  settings.value.classes = [...set].sort((a, b) => a - b)
+}
+const noClasses = computed(() => settings.value.points === 'classes' && !settings.value.classes.length)
+const activeSource = computed(() => (classified.value ? props.groundSource : props.source))
 const isSparseSource = computed(() => activeSource.value?.kind === 'sparse')
 const localUnit = computed(() => (props.hasScale ? 'm/px' : 'model units/px'))
 
@@ -89,7 +101,8 @@ const numbers = computed(() =>
 function runSettings() {
   const { gsd, longSide, ...rest } = settings.value
   const size = rest.sizeBy === 'px' ? (longSide > 1 ? { longSide } : {}) : gsd > 0 ? { gsd } : {}
-  return { ...rest, memBudgetBytes: memBudgetBytes.value, ...size }
+  // A plain array: the reactive one cannot be posted to the worker.
+  return { ...rest, classes: [...rest.classes], memBudgetBytes: memBudgetBytes.value, ...size }
 }
 function run() {
   emit('run', runSettings())
@@ -160,7 +173,22 @@ const effects = computed(() => {
         <select id="dem-points" v-model="settings.points" class="field-input field-select">
           <option value="all">All points (DSM)</option>
           <option value="ground" :disabled="!groundSource">Ground only (DTM)</option>
+          <option value="classes" :disabled="!groundSource">Classes…</option>
         </select>
+      </SettingsField>
+      <SettingsField v-if="settings.points === 'classes'" hint="Only points of these classes go into the grid.">
+        <template #label><FieldHelp op="dem" param="classes">Classes</FieldHelp></template>
+        <div class="class-choices">
+          <label v-for="c in CLASS_CHOICES" :key="c.code" class="checkbox-row">
+            <input
+              type="checkbox"
+              class="checkbox"
+              :checked="settings.classes.includes(c.code)"
+              @change="(e) => toggleClass(c.code, e.target.checked)"
+            />
+            {{ c.label }}
+          </label>
+        </div>
       </SettingsField>
 
       <WarnBox v-if="isSparseSource">
@@ -293,8 +321,14 @@ const effects = computed(() => {
       <button class="btn" @click="emit('close')">Cancel</button>
       <button
         class="btn btn-primary"
-        :disabled="!numbers.valid || (groundOnly && !groundSource)"
-        :title="groundOnly && !groundSource ? 'Classify the ground of a dense cloud first' : numbers.reason"
+        :disabled="!numbers.valid || (classified && !groundSource) || noClasses"
+        :title="
+          classified && !groundSource
+            ? 'Classify the points of a dense cloud first'
+            : noClasses
+              ? 'Choose at least one class'
+              : numbers.reason
+        "
         @click="run"
       >
         {{ groundOnly ? 'Build DTM' : 'Build DEM' }}
@@ -305,6 +339,11 @@ const effects = computed(() => {
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
+.class-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
 /* DEM/aggregation selects read better full-width. */
 .field-select {
   width: 100%;

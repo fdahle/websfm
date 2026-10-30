@@ -13,12 +13,22 @@ cloud is acceptable only for a coarse preview.
 <!-- param: points default: All points -->
 **All points** (default) builds a surface model (DSM) from the whole cloud, roofs and
 canopy included. **Ground only** builds a bare-earth terrain model (DTM) from the
-ground class of a classified cloud: run [Classify Ground](guide:classify-ground)
-first. It uses the cloud selected in the 3D view when that one is classified,
+ground class of a classified cloud: run [Classify Points](guide:classify-ground)
+first. **Classes…** builds the top surface of the classes you tick, from the same
+classified cloud. It uses the cloud selected in the 3D view when that one is classified,
 otherwise the newest classified cloud, and the line under **Points** names it. Choosing
 Ground only turns on Fill enclosed gaps, because the ground under a removed
 building is a hole the radius fill cannot close. A classified LiDAR survey imported
 as a *streamed* cloud (too large for memory) is a ground source too.
+
+## Classes
+<!-- param: classes default: High vegetation -->
+Shown for **Points ▸ Classes…**: the classes whose points go into the grid. High
+vegetation alone gives the canopy's top surface; with a DTM of the same area, a
+[DEM of difference](help:dem-of-difference) between the two is a canopy height model,
+the height of the trees above the ground. Building alone gives the roofs, for building
+heights the same way. Cells without a point of these classes stay empty: turn off Fill
+enclosed gaps to keep the gaps between trees open.
 
 ## Coordinate frame
 <!-- param: crs default: Local -->

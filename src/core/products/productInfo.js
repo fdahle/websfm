@@ -4,6 +4,7 @@
 // label/value rows. Pure: the dialog passes the record and the little project
 // context a row needs.
 
+import { lasClassName } from './cloudStyle.js'
 import { pluralize } from '../textFormat.js'
 import { isGeographic, linearCrsUnit } from '../crs.js'
 
@@ -120,8 +121,13 @@ export function rasterInfo(kind, p, ctx = {}) {
     {
       label: 'Type',
       value:
-        (kind === 'dem' ? (p.points === 'ground' ? 'DTM (ground only)' : 'DEM (surface)') : 'Orthophoto') +
-        (ctx.isMain ? ' (main)' : ''),
+        (kind === 'dem'
+          ? p.points === 'ground'
+            ? 'DTM (ground only)'
+            : p.points === 'classes'
+              ? `DEM (${(p.classes ?? []).map((c) => lasClassName(c).toLowerCase()).join(' + ')})`
+              : 'DEM (surface)'
+          : 'Orthophoto') + (ctx.isMain ? ' (main)' : ''),
     },
     { label: 'Outdated', value: ctx.outdated ? capitalised(ctx.outdated) : null },
     { label: 'Frame', value: frameOf(p) },

@@ -344,6 +344,9 @@ export const SENTINEL2_DEFAULTS = {
 // DEM (core/products/dem.js). Mirrored by DemModal.vue; gsd 0 ⇒ worker auto-suggests.
 export const DEM_DEFAULTS = {
   crs: 'local', // 'local' | 'project'
+  // Points ▸ Classes…: LAS codes; high vegetation alone gives the canopy's top surface,
+  // which minus the DTM is a canopy height model.
+  classes: [5],
   // The raster size: by cell size or by pixels on the longer side (the dialog shows one
   // field); a set gsd wins over longSide, and both 0 = auto (core/products/rasterSize.js).
   sizeBy: 'gsd', // 'gsd' | 'px'
@@ -356,7 +359,7 @@ export const DEM_DEFAULTS = {
   fillMethod: 'idw', // 'none' | 'nearest' | 'idw'
   fillRadius: 2, // IDW hole-fill radius (cells); 0 = none
   extent: 'core', // 'core' = the cloud's dense footprint (dem.js coreExtent) | 'all' = raw min/max
-  points: 'all', // 'all' (DSM) | 'ground' = only LAS class 2 of a classified cloud (DTM)
+  points: 'all', // 'all' (DSM) | 'ground' = only LAS class 2 of a classified cloud (DTM) | 'classes' (above)
   fillHoles: false, // also interpolate every enclosed nodata area (under removed buildings)
   // Output: add the new product beside the others as the main one (false), or put it
   // in place of the main one (true). Off, so a rebuild never loses a result by default.

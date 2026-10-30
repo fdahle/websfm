@@ -1,6 +1,7 @@
 // What each step of Build DEM and Build Orthophoto does to this project (DemModal.vue,
 // OrthoModal.vue): the one-line effects under their numbered steps. The grid line reads
 // the store's size estimate (estimateRasterSize), the same one the run builds.
+import { demPointClasses, lasClassName } from '../products/cloudStyle.js'
 import { fmtCount, plural } from './format.js'
 
 const fmtGsd = (g) => (g >= 100 ? g.toFixed(0) : String(+g.toPrecision(3)))
@@ -31,14 +32,23 @@ const FILL = { idw: 'inverse distance', nearest: 'the nearest measured cell' }
 // reads (`outdated`: built on an input that has changed since, productSet.js).
 export function demEffects(s, { source = null, estimate = null, unit, frame } = {}) {
   const ground = s.points === 'ground'
-  const points = !source
-    ? ground
-      ? 'No classified cloud yet: Tools ▸ Point Cloud ▸ Classify points makes one.'
-      : 'No point cloud yet: build one first.'
-    : `${plural(source.count, 'point')} of the ${source.kind === 'dense' ? 'dense' : 'sparse'} cloud` +
-      `${source.name ? ` "${source.name}"` : ''}${source.streamed ? ' (streamed)' : ''}` +
-      `${source.outdated ? ', which is outdated,' : ''} go into the grid: ` +
-      (ground ? 'the ground class only, for a bare-earth DTM.' : 'every point, so the top surface (a DSM).')
+  const classes = demPointClasses(s)
+  const names = (classes ?? []).map((c) => lasClassName(c).toLowerCase()).join(', ')
+  const points =
+    classes && !classes.length
+      ? 'Choose at least one class.'
+      : !source
+        ? classes
+          ? 'No classified cloud yet: Tools ▸ Point Cloud ▸ Classify points makes one.'
+          : 'No point cloud yet: build one first.'
+        : `${plural(source.count, 'point')} of the ${source.kind === 'dense' ? 'dense' : 'sparse'} cloud` +
+          `${source.name ? ` "${source.name}"` : ''}${source.streamed ? ' (streamed)' : ''}` +
+          `${source.outdated ? ', which is outdated,' : ''} go into the grid: ` +
+          (ground
+            ? 'the ground class only, for a bare-earth DTM.'
+            : classes
+              ? `only ${names}: their top surface (with high vegetation, the canopy; minus the DTM, a canopy height model).`
+              : 'every point, so the top surface (a DSM).')
 
   const grid = gridEffect({ estimate, unit, frame, extent: s.extent })
 

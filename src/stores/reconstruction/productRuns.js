@@ -22,6 +22,7 @@ import { createBlockProgress, createStepProgress, createLogPacer } from '../../u
 import { pluralize } from '../../core/textFormat.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { stampOf } from '../../core/products/productSet.js'
+import { demPointClasses, lasClassName } from '../../core/products/cloudStyle.js'
 import { DEM_DEFAULTS, ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 
 // Generating the computed rasters, split out of useReconstructionStore: the DEM
@@ -62,7 +63,9 @@ export function createProductRuns({
   // large reads its octree too, when it has one: the grid needs no finer level than half
   // its cell, and a 95 M-point copy (2.3 GB) failed to allocate next to the cloud itself
   // (quarry, 2026-10-17). From the octree it reads at most `maxPoints` (half the budget).
-  function demStagePlan(src, settings, groundOnly) {
+  // `classified`: the DEM reads chosen classes (Ground only, Classes…), so an octree
+  // without them cannot serve it.
+  function demStagePlan(src, settings, classified) {
     const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     const octreeHasClasses = src.lod?.layout?.attributes?.some((a) => a.name === 'classification')
     const fromOctree =
@@ -71,23 +74,32 @@ export function createProductRuns({
         !!extractCloudPoints &&
         src.kind === 'dense' &&
         src.count * DEM_STAGE_BYTES_PER_POINT > Math.min(budgetBytes / 4, 2 ** 30) &&
-        (!groundOnly || octreeHasClasses))
+        (!classified || octreeHasClasses))
     return { budgetBytes, fromOctree, maxPoints: Math.floor(budgetBytes / 2 / DEM_STAGE_BYTES_PER_POINT) }
   }
 
   // Build a DEM from the densest available cloud, in the requested frame
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
   // settings.points 'ground' builds a DTM from the ground class (LAS 2) of a
-  // classified cloud instead.
+  // classified cloud instead, and 'classes' a DEM of the chosen classes (a canopy DSM).
   async function generateDem(settings = {}, onProgress) {
     const sparse = mainSparseCloud.value
     const groundOnly = settings.points === 'ground'
+    const classes = demPointClasses(settings)
+    const classSet = classes ? new Set(classes) : null
+    // What the points are, for the log: "ground", "high vegetation", "building + …".
+    const what = classes ? classes.map((c) => lasClassName(c).toLowerCase()).join(' + ') : ''
+    const label = groundOnly ? 'DTM' : 'DEM'
+    if (classes && !classes.length) {
+      log('DEM: choose at least one class under Points', 'warn', 'Products')
+      return
+    }
     // Single source of truth for "which cloud" — the same getter the modal shows.
-    const source = groundOnly ? groundSource.value : demSource.value
+    const source = classes ? groundSource.value : demSource.value
     if (!source) {
       log(
-        groundOnly
-          ? 'DTM: classify the ground of a dense cloud first (Tools ▸ Point Cloud ▸ Classify points)'
+        classes
+          ? `${label}: classify the points of a dense cloud first (Tools ▸ Point Cloud ▸ Classify points)`
           : 'DEM: build a point cloud first',
         'warn',
         'Products',
@@ -120,12 +132,12 @@ export function createProductRuns({
       // Plain copy: cloud state is reactive (Vue proxies can't be cloned), and the
       // worker takes it by transfer. Only in-region points are copied, and the copy
       // is checked against the machine's memory budget (Settings ▸ Compute).
-      const { budgetBytes, fromOctree, maxPoints } = demStagePlan(src, settings, groundOnly)
+      const { budgetBytes, fromOctree, maxPoints } = demStagePlan(src, settings, !!classes)
       const r = src.imported ? null : activeRegion()
       const streamed = isStreamed(src)
-      const cls = groundOnly && !fromOctree ? src.attributes.classification : null
+      const cls = classes && !fromOctree ? src.attributes.classification : null
       const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
-      const inside = cls ? (x, y, z, i) => cls[i] === 2 && (!inRegion || inRegion(x, y, z)) : inRegion
+      const inside = cls ? (x, y, z, i) => classSet.has(cls[i]) && (!inRegion || inRegion(x, y, z)) : inRegion
       let staged
       if (fromOctree) {
         // From the octree (core/lod): down to half the cell size when one is set (finer
@@ -137,7 +149,7 @@ export function createProductRuns({
         const { cloud: flat, plan } = await extractCloudPoints(
           src,
           {
-            classes: groundOnly ? [2] : null,
+            classes,
             fields: 'xyz',
             maxPoints,
             minSpacing: settings.gsd > 0 ? settings.gsd / 2 / unitsPerModel : 0,
@@ -147,7 +159,7 @@ export function createProductRuns({
         )
         staged = { pos: flat.pos, count: flat.count, total: src.count }
         log(
-          `${groundOnly ? 'DTM' : 'DEM'}: read ${flat.count.toLocaleString()} ${groundOnly ? 'ground ' : ''}points ` +
+          `${label}: read ${flat.count.toLocaleString()} ${what ? `${what} ` : ''}points ` +
             `of ${streamed ? 'the streamed cloud' : `the cloud's octree (${src.count.toLocaleString()} points)`} ` +
             (plan.complete ? '(every level of its octree)' : `down to ${plan.spacing.toPrecision(3)}-unit spacing`),
           'info',
@@ -155,8 +167,8 @@ export function createProductRuns({
         )
         if (!flat.count)
           throw new Error(
-            groundOnly
-              ? 'the cloud has no ground points'
+            classes
+              ? `the cloud has no ${what} points`
               : r
                 ? 'no point of the source lies inside the region'
                 : 'the cloud has no points',
@@ -168,7 +180,7 @@ export function createProductRuns({
         })
       if (cls)
         log(
-          `DTM: ${staged.count.toLocaleString()} ground points of ${staged.total.toLocaleString()}`,
+          `${label}: ${staged.count.toLocaleString()} ${what} points of ${staged.total.toLocaleString()}`,
           'info',
           'Products',
         )
@@ -179,7 +191,7 @@ export function createProductRuns({
           'Products',
         )
       if (cls && !staged.count)
-        throw new Error(r ? 'no ground point lies inside the region' : 'the cloud has no ground points')
+        throw new Error(r ? `no ${what} point lies inside the region` : `the cloud has no ${what} points`)
       if (r && !staged.count) throw new Error('no point of the source lies inside the region')
       const points = { pos: staged.pos, count: staged.count }
       const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
@@ -211,7 +223,8 @@ export function createProductRuns({
           ...grid,
           kind: 'dem',
           createdAt: Date.now(),
-          points: groundOnly ? 'ground' : 'all',
+          points: groundOnly ? 'ground' : classes ? 'classes' : 'all',
+          ...(classes && !groundOnly ? { classes } : {}),
           // The cloud it was built from: Show information, and what makes it outdated.
           source: { id: src.id ?? null, name: source.name ?? null, kind: source.kind },
           ...(src.id ? { basedOn: [stampOf(src)] } : {}),
@@ -703,14 +716,15 @@ export function createProductRuns({
   // per those and a cell-size edit re-runs only the grid arithmetic.
   let basisMemo = { key: null, value: null }
   async function sizeBasis(kind, settings, budgetBytes) {
-    const groundOnly = settings.points === 'ground'
-    const src = kind === 'dem' ? (groundOnly ? groundSource.value : demSource.value)?.cloud : demSource.value?.cloud
+    const classes = demPointClasses(settings)
+    const src = kind === 'dem' ? (classes ? groundSource.value : demSource.value)?.cloud : demSource.value?.cloud
     const key = JSON.stringify([
       kind,
       settings.surface ?? null,
       settings.crs ?? null,
       settings.extent ?? null,
       settings.points ?? null,
+      classes,
       settings.surfaceGsd ?? 0,
       kind === 'dem' ? budgetBytes : 0,
       src?.id ?? null,
@@ -722,24 +736,24 @@ export function createProductRuns({
       mainSparseCloud.value?.id ?? null,
     ])
     if (basisMemo.key === key) return basisMemo.value
-    const value = await computeSizeBasis(kind, settings, src, groundOnly)
+    const value = await computeSizeBasis(kind, settings, src, classes)
     basisMemo = { key, value }
     return value
   }
 
-  async function computeSizeBasis(kind, settings, src, groundOnly) {
+  async function computeSizeBasis(kind, settings, src, classes) {
     const resolved = await effectiveFrameSpec({ crs: settings.crs })
     const cameras = [...sparseCameras.value.values()]
     if (kind === 'dem') {
       if (!src) return null
-      const sample = await demSample(src, groundOnly)
+      const sample = await demSample(src, classes)
       if (!sample) return { unavailable: 'shown after the run (the cloud cannot be sampled here)' }
       if (!sample.n) return null
       const frame = frameFromSpec(resolved.frameSpec, cameras, pointView({ pos: sample.pos, count: sample.n }))
       const box = sampleBox(frame, sample.pos, sample.n, settings.extent)
       if (!box) return null
       // The run grids what it staged: every kept point, or from the octree at most maxPoints.
-      const { fromOctree, maxPoints } = demStagePlan(src, settings, groundOnly)
+      const { fromOctree, maxPoints } = demStagePlan(src, settings, !!classes)
       const staged = fromOctree ? Math.min(sample.kept, maxPoints) : sample.kept
       return { box, count: staged * box.share, unit: resolved.unit }
     }
@@ -782,16 +796,16 @@ export function createProductRuns({
     return { pos: out.subarray(0, k * 3), n: k, keptShare: seen ? k / seen : 0 }
   }
 
-  // A sample of what a DEM run stages (region, ground class), in SfM coordinates, and
-  // how many points the run keeps (`kept`). Null when the cloud has no positions here
+  // A sample of what a DEM run stages (region, the chosen classes), in SfM coordinates,
+  // and how many points the run keeps (`kept`). Null when the cloud has no positions here
   // and no octree to read.
-  async function demSample(src, groundOnly) {
+  async function demSample(src, classes) {
     const r = src.imported ? null : activeRegion()
     const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
     if (isStreamed(src)) {
       if (!extractCloudPoints) return null
       const { cloud: flat, plan } = await extractCloudPoints(src, {
-        classes: groundOnly ? [2] : null,
+        classes,
         fields: 'xyz',
         maxPoints: SIZE_SAMPLE,
         ...(r ? { box: { min: [...r.min], max: [...r.max] } } : {}),
@@ -804,8 +818,10 @@ export function createProductRuns({
     const pos = src.kind === 'dense' ? src.pos : src.points?.pos
     const count = src.kind === 'dense' ? src.count : src.points?.length
     if (!pos || !count) return null
-    const cls = groundOnly ? src.attributes?.classification : null
-    const keep = cls || inRegion ? (x, y, z, i) => (!cls || cls[i] === 2) && (!inRegion || inRegion(x, y, z)) : null
+    const cls = classes ? src.attributes?.classification : null
+    const classSet = classes ? new Set(classes) : null
+    const keep =
+      cls || inRegion ? (x, y, z, i) => (!cls || classSet.has(cls[i])) && (!inRegion || inRegion(x, y, z)) : null
     const s = stridedPos(pos, count, keep)
     return { ...s, kept: Math.round(count * s.keptShare) }
   }

@@ -6,6 +6,11 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **DEMs of chosen classes, for canopy and building heights.** Build DEM ▸ **Points ▸
+  Classes…** builds the top surface of the classes you tick in a classified cloud (high
+  vegetation by default); with a DTM and the DEM of difference that is a canopy height
+  model. A browser test builds a DEM of a classified cloud's building class and gets
+  the roof alone.
 - **Detect or match only some images.** Right-click images in the image list ▸ **Detect
   features…** or **Match features…** opens the usual dialog for those images alone: they
   are detected again, or only their pairs are matched, and every other image and pair

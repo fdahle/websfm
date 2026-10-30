@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { buildCloudStyle, styleFields, scalarRange, sharedElevationRange, groupCloudLegends } from './cloudStyle.js'
+import {
+  buildCloudStyle,
+  styleFields,
+  scalarRange,
+  sharedElevationRange,
+  groupCloudLegends,
+  demPointClasses,
+  lasClassName,
+} from './cloudStyle.js'
 import { viewerClipping } from './viewerClipping.js'
 import { cropCloud, mergeClouds, voxelDownsample } from './cloudEdit.js'
 import { serializeCloud, deserializeCloud } from '../../stores/reconstruction/cloudSerde.js'
@@ -185,5 +193,15 @@ describe('texture style', () => {
   })
   it('is not offered without a texture', () => {
     expect(styleFields({ ...textured, texture: null }).some((f) => f.value === 'texture')).toBe(false)
+  })
+})
+
+describe('demPointClasses', () => {
+  it('turns Build DEM ▸ Points into the classes it reads', () => {
+    expect(demPointClasses({ points: 'all' })).toBe(null)
+    expect(demPointClasses({ points: 'ground' })).toEqual([2])
+    expect(demPointClasses({ points: 'classes', classes: [6, 5] })).toEqual([5, 6])
+    expect(lasClassName(5)).toBe('High vegetation')
+    expect(lasClassName(99)).toBe('Class 99')
   })
 })

@@ -174,5 +174,27 @@ test('Classify points labels a cloud and Build DEM ▸ Ground only makes a DTM u
     )
     .toEqual({ points: 'ground', interior: 0, holes: true, roofGone: true })
 
+  // Points ▸ Classes… ▸ Building alone: a DEM of the roof only.
+  await page.evaluate(async () => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    useModalsStore().demOpen = true
+  })
+  await dialog.getByLabel('Points').selectOption('classes')
+  await dialog.getByLabel('High vegetation').uncheck()
+  await dialog.getByLabel('Building').check()
+  await dialog.getByRole('button', { name: 'Build DEM', exact: true }).click()
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+        const d = useReconstructionStore().dem
+        // The roof alone: about 12 m on a side (the local frame levels on these points).
+        return d?.points === 'classes'
+          ? { classes: d.classes, roofOnly: d.width * d.gsd < 14 && d.height * d.gsd < 14 }
+          : null
+      }),
+    )
+    .toEqual({ classes: [6], roofOnly: true })
+
   expect(errors).toEqual([])
 })

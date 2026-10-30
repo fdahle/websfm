@@ -17,6 +17,18 @@ describe('gridEffect', () => {
 
 describe('demEffects', () => {
   const source = { kind: 'dense', name: 'Dense cloud', count: 6_000_000, streamed: false }
+  it('names the classes of a Classes… DEM, and asks for one when none is chosen', () => {
+    const e = demEffects(
+      { ...DEM_DEFAULTS, points: 'classes', classes: [5] },
+      { source, estimate, unit: 'm/px', frame },
+    )
+    expect(e.points).toMatch(
+      /go into the grid: only high vegetation: their top surface \(with high vegetation, the canopy/,
+    )
+    expect(demEffects({ ...DEM_DEFAULTS, points: 'classes', classes: [] }, { source }).points).toBe(
+      'Choose at least one class.',
+    )
+  })
   it('names the points, the points per cell and what the fill does', () => {
     const e = demEffects(DEM_DEFAULTS, { source, estimate, unit: 'm/px', frame })
     expect(e.points).toMatch(/^6,000,000 points of the dense cloud "Dense cloud" go into the grid: every point/)

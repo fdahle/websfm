@@ -43,6 +43,17 @@ const CLASSES = {
   21: ['Snow', '#d9ecf2'],
   22: ['Temporal exclusion', '#ce9aab'],
 }
+/** A LAS class's name ("High vegetation"), or "Class n". */
+export const lasClassName = (code) => CLASSES[code]?.[0] ?? `Class ${code}`
+
+// Build DEM ▸ Points: the classes a DEM is built from — null for every point, [2] for
+// Ground only, the chosen list for Classes… (a canopy DSM: [5]).
+export function demPointClasses(s) {
+  if (s?.points === 'ground') return [2]
+  if (s?.points === 'classes') return [...(s.classes ?? [])].sort((a, b) => a - b)
+  return null
+}
+
 export const countOf = (cloud) => cloud?.nVerts ?? cloud?.count ?? cloud?.points?.length ?? 0
 // A cloud whose points are only in its level-of-detail octree (core/lod/streamed.js):
 // its fields, ranges and classes come from the octree's build statistics.
