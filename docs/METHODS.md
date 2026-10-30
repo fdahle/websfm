@@ -1655,14 +1655,17 @@ CPU) retains per-image fallback and a first-image A/B validation
 ### Keeping valid depth maps (`core/dense/depthReuse.js`, 2026-10-30)
 
 A depth run keeps a saved map when the index's sparse stamp still matches the model (a
-rebuild changes it; Add to the model ▸ Fixed keeps it), the settings that shape a map
-hash to the index's `mapsKey` (machine-only ones such as the memory budget and the GPU
-left out, Auto resolved to the method it runs), and the map's camera as the run hands it
-to the worker (pose, K, lens, self-cal bag, film transform) hashes to its entry in
-`cameraKeys`. Only the other maps run pass 1 and pass 2, with every image a candidate
-source and the kept maps read as pass-2 neighbours; the cross-view filter then runs over
-all maps. The kept maps are not recomputed with new neighbours, which a full run would
-do, so it is a setting (on).
+rebuild changes it; Add to the model ▸ Fixed keeps it), the run's shape hashes to the
+index's `mapsKey` (`depthRunShape`: the settings that shape a map, Auto resolved to the
+method that actually ran, the working resolution after any memory step-down, the scene
+type and the region), and the map's camera as the run hands it to the worker (pose, K,
+lens, self-cal bag, film transform, mask) hashes to its entry in `cameraKeys`. The saved
+index is cut to the kept maps before anything is computed, so a run that stops leaves
+no entry naming an overwritten plane. Only the other maps run pass 1 and pass 2, with
+every image a candidate source and the kept maps read as pass-2 neighbours, and only
+they are judged by the cross-view filter, against every map (the kept ones were
+filtered when they were made). The kept maps are not recomputed with new neighbours,
+which a full run would do, so it is a setting (on).
 
 ## 8. Products (DEM, orthophoto)
 

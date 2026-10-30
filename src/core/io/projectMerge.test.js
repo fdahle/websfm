@@ -71,6 +71,15 @@ describe('planProjectMerge', () => {
     expect(plan.keepPair('b0', 'b1')).toBe(false)
   })
 
+  it('brings a recalibrated sensor of a copied project under a new id', () => {
+    const p = planProjectMerge({
+      target: { images: [], sensors: [{ ...sony, id: 's-sony' }] },
+      source: { images: [photo('NEW.JPG', 'n1')], sensors: [{ ...sony, focal: 4.6 }] },
+    })
+    expect(p.sensors.map.get('s-sony')).toBe('s-sony:2')
+    expect(p.sensors.add).toEqual([{ ...sony, focal: 4.6, id: 's-sony:2' }])
+  })
+
   it('treats a uuid A already holds as the same photo (B was made from A)', () => {
     const p = planProjectMerge({ target, source: { images: [photo('renamed.JPG', 'a2', { meta: {} })] } })
     expect(p.shared[0].target.uuid).toBe('a2')

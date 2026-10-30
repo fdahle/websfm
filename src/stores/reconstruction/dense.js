@@ -41,7 +41,7 @@ import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
 import { canContinue, journalKey, journalWriter, startJournal } from '../../core/runJournal.js'
-import { depthMapsKey, reusableDepthMaps, depthCameraKey } from '../../core/dense/depthReuse.js'
+import { depthMapsKey, depthRunShape, reusableDepthMaps, depthCameraKey } from '../../core/dense/depthReuse.js'
 import { isSharedArray, postableCopy, shareableArray } from '../../core/bigArray.js'
 import { poissonHeapBytes } from '../../core/products/mesh.js'
 
@@ -82,6 +82,7 @@ export function createDense({
   upsertDenseCloud,
   upsertMeshCloud,
   withRegion,
+  activeRegion,
 }) {
   // Dense Stage A — Build Depth Maps. Runs PatchMatch MVS in the worker over the
   // sparse cloud's registered cameras, stores the raw depth maps for fusion, and
@@ -115,6 +116,8 @@ export function createDense({
       dist,
       selfCal,
       fid: fidByUuid.get(uuid) ?? null,
+      // Keep valid depth maps compares the mask too (core/dense/depthReuse.js).
+      maskKey: im.mask?.blob ? im.mask.blob.size : null,
     }
   }
   // uuid → depthCameraKey of every image of the main model: what Keep valid depth maps
@@ -261,41 +264,6 @@ export function createDense({
         if (verdict.ok) journal = structuredClone(resume)
         else log(`Dense: the stopped depth-map run cannot continue (${verdict.why}); starting again`, 'warn', 'Dense')
       }
-      // Keep valid depth maps (core/dense/depthReuse.js): the saved maps whose camera and
-      // settings are unchanged are kept, and only the others are computed. A continued
-      // run has its own list (the journal) and needs no second one.
-      const mapsKey = depthMapsKey(requested)
-      const cameraKeys = Object.fromEntries(inputImages.map((im) => [im.uuid, depthCameraKey(im)]))
-      let kept = []
-      if (!journal && settings.keepMaps !== false && isPersisting()) {
-        const index = await opfs.loadDepthIndex(projects.currentProjectId).catch(() => null)
-        kept = reusableDepthMaps({ index, cloud, key: mapsKey, cameraKeys })
-        if (kept.length === inputImages.length) {
-          log(
-            `Dense: all ${pluralize(kept.length, 'depth map')} kept — their cameras and settings are unchanged, so there is nothing to compute`,
-            'success',
-            'Dense',
-          )
-          reconStatus.value = 'done'
-          return
-        }
-        if (kept.length)
-          log(
-            `Dense: ${pluralize(kept.length, 'depth map')} of ${inputImages.length} kept (cameras and settings unchanged); ` +
-              `computing ${pluralize(inputImages.length - kept.length, 'map')}`,
-            'info',
-            'Dense',
-          )
-      }
-      // A continued run reads them back from its journal (`kept`), for pass 2.
-      const keptUuids = new Set(journal?.kept ?? kept.map((m) => m.uuid))
-      const run = await beginStreamedDepthMaps({
-        onWriteFailure: (err) => {
-          writeFailure = err
-          terminateAll(err.message)
-        },
-        resume: journal ? (journal.phase === 'pass1' ? journal.done : journal.metas) : kept.length ? kept : null,
-      })
       // Resolve a quality preset → working maxDim from the largest native image
       // dimension (Step 3), unless the user set an explicit maxDim in Advanced. A
       // quality whose projected peak exceeds the memory budget steps down (High →
@@ -336,7 +304,7 @@ export function createDense({
             sizes: inputImages.map((im) => ({ width: im.width, height: im.height })),
             backend: settings.useGpu ? 'gpu' : 'wasm',
             nSources: Math.min(16, settings.maxSources ?? 6),
-            streamMaps: !!run,
+            streamMaps: isPersisting(),
             geomConsistency: settings.geomConsistency !== false,
             full: resolved.planarPrior || resolved.geomPass,
           })
@@ -360,6 +328,55 @@ export function createDense({
         )
       }
       settings = resolved
+      // Keep valid depth maps (core/dense/depthReuse.js): the saved maps whose camera and
+      // settings are unchanged are kept, and only the others are computed. A continued
+      // run has its own list (the journal) and needs no second one.
+      const nativeLongNow = images.value.reduce((m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0)
+      const mapsKey = depthMapsKey(
+        depthRunShape(requested, {
+          onGpu,
+          nativeLong: nativeLongNow,
+          sceneType: resolved.sceneType,
+          region: activeRegion(),
+          maxDim: resolved.maxDim ?? null,
+        }),
+      )
+      const cameraKeys = Object.fromEntries(inputImages.map((im) => [im.uuid, depthCameraKey(im)]))
+      let kept = []
+      let savedIndex = null
+      if (!journal && settings.keepMaps !== false && isPersisting()) {
+        savedIndex = await opfs.loadDepthIndex(projects.currentProjectId).catch(() => null)
+        kept = reusableDepthMaps({ index: savedIndex, cloud, key: mapsKey, cameraKeys })
+        if (kept.length === inputImages.length) {
+          log(
+            `Dense: all ${pluralize(kept.length, 'depth map')} kept — their cameras and settings are unchanged, so there is nothing to compute`,
+            'success',
+            'Dense',
+          )
+          reconStatus.value = 'done'
+          return
+        }
+        if (kept.length)
+          log(
+            `Dense: ${pluralize(kept.length, 'depth map')} of ${inputImages.length} kept (cameras and settings unchanged); ` +
+              `computing ${pluralize(inputImages.length - kept.length, 'map')}`,
+            'info',
+            'Dense',
+          )
+      }
+      // A continued run reads them back from its journal (`kept`), for pass 2.
+      const keptUuids = new Set(journal?.kept ?? kept.map((m) => m.uuid))
+      const run = await beginStreamedDepthMaps({
+        onWriteFailure: (err) => {
+          writeFailure = err
+          terminateAll(err.message)
+        },
+        resume: journal ? (journal.phase === 'pass1' ? journal.done : journal.metas) : kept.length ? kept : null,
+      })
+      // The saved index lists only the kept maps from here on: the run overwrites the
+      // planes of the others, and a run that stops must not leave an index naming them.
+      if (run && kept.length && savedIndex && kept.length < savedIndex.maps.length)
+        await run.saveOrMove(() => opfs.commitDepthIndex(run.projectId, { ...savedIndex, maps: kept }))
       // A streamed run keeps a journal while it runs, so a tab that dies (closed, crashed,
       // killed for memory) leaves enough to continue: the maps saved so far and the
       // phase. Phases: pass1 → pass2 (Full method) → promote → filter → promoteFilter.
@@ -504,7 +521,12 @@ export function createDense({
             // The depth workers hold their last rasters until a collection that may not
             // come: start the filter on a fresh pool, so they cannot crowd the tab's buffers.
             releaseIdleWorkers()
-            stageSummary = await filterSavedDepthMaps(run, settings, stageSummary, loopShare, onProgress)
+            // Kept maps were filtered when they were made: only the others are judged,
+            // with every map a neighbour.
+            const judge = keptUuids.size
+              ? new Set(run.metas.filter((m) => !keptUuids.has(m.uuid)).map((m) => m.uuid))
+              : null
+            stageSummary = await filterSavedDepthMaps(run, settings, stageSummary, loopShare, onProgress, judge)
             journal.summary = stageSummary
             await setPhase('promoteFilter')
           }
@@ -653,7 +675,8 @@ export function createDense({
   // demand and returns each filtered depth plane, which is written back over the
   // unfiltered one (the worker has judged every map before the first comes back).
   // Folds the filter's numbers into the Stage A summary, as the in-memory pass does.
-  async function filterSavedDepthMaps(run, settings, stageSummary, from, onProgress) {
+  // `judge` (a Set of uuids, or null for every map): the maps filtered; all are neighbours.
+  async function filterSavedDepthMaps(run, settings, stageSummary, from, onProgress, judge = null) {
     const metaByUuid = new Map(run.metas.map((m) => [m.uuid, m]))
     const nameByUuid = new Map(images.value.map((im) => [im.uuid, im.name]))
     const entries = (await opfs.loadDepthFiles(run.projectId, run.metas)).map((e) => ({
@@ -682,6 +705,7 @@ export function createDense({
     // split over the pool in contiguous chunks (neighbouring captures share candidate
     // views, which keeps each worker's cache warm) give the single run's verdicts.
     const n = entries.length
+    const own = judge ? entries.map((_, i) => i).filter((i) => judge.has(entries[i].uuid)) : null
     // Memory, not only the map count, bounds the split: each reference is judged with
     // all its candidate views resident at once (core/dense/geomFilter.js), up to
     // DENSE_TUNING.filterMaxViews depth planes. 3 workers at High on 58 film maps (27 MP, 108 MB a plane)
@@ -692,7 +716,11 @@ export function createDense({
     const perWorker = Math.max(1, views * planeBytes * 1.25)
     const workers = Math.max(
       1,
-      Math.min(POOL_SIZE, Math.floor(n / (DENSE_TUNING.filterMapsPerWorker ?? 16)), Math.floor(budget / perWorker)),
+      Math.min(
+        POOL_SIZE,
+        Math.floor((own ? own.length : n) / (DENSE_TUNING.filterMapsPerWorker ?? 16)),
+        Math.floor(budget / perWorker),
+      ),
     )
     log(
       `Depth filter: ${pluralize(workers, 'worker')} (up to ${formatBytes(perWorker)} of candidate planes each, ` +
@@ -701,7 +729,8 @@ export function createDense({
       'Dense',
     )
     let stats, ms
-    if (workers === 1) {
+    // Judging a subset goes through the split path (judge, then apply), on one worker too.
+    if (workers === 1 && !own) {
       ;({ stats, ms } = await workerFilterDepthMaps(
         { maps: entries, settings, from },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), onEvent },
@@ -710,7 +739,9 @@ export function createDense({
       const t0 = performance.now()
       const fractions = new Array(workers).fill(from),
         counts = new Array(workers).fill(0)
-      const chunks = contiguousChunks(n, workers)
+      const chunks = own
+        ? contiguousChunks(own.length, workers).map((c) => c.map((k) => own[k]))
+        : contiguousChunks(n, workers)
       const parts = await Promise.all(
         chunks.map((refs, w) =>
           workerFilterDepthMaps(
@@ -724,7 +755,7 @@ export function createDense({
                 counts[w] = d
                 onProgress?.(
                   counts.reduce((x, y) => x + y, 0),
-                  n,
+                  own ? own.length : n,
                   lbl,
                   fractions.reduce((x, y) => x + y, 0) / workers,
                 )
@@ -759,7 +790,9 @@ export function createDense({
       if (n >= 2 && cfg.minConsistent > 0)
         logFilterCache(log, { nMaps: n, nCand, loads, hits, cacheBytes: parts[0].cacheBytes, cull: cfg.cull, workers })
       logFilterTotals(log, totals, n, cfg)
-      const marginal = entries.map((e, i) => ({ e, s: stats[i] })).filter(({ s }) => s.considered > 0 && s.keptPct < 1)
+      const marginal = entries
+        .map((e, i) => ({ e, s: stats[i] }))
+        .filter(({ s }) => s && s.considered > 0 && s.keptPct < 1)
       if (marginal.length) {
         const names = marginal
           .slice(0, 12)
@@ -783,7 +816,7 @@ export function createDense({
     }
     await Promise.all(writes)
     if (writeFailure) throw writeFailure
-    const kept = stats.map((s) => s.keptPct)
+    const kept = stats.filter(Boolean).map((s) => s.keptPct)
     const sorted = [...kept].sort((a, b) => a - b)
     return (
       stageSummary && {

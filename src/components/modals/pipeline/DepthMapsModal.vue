@@ -12,7 +12,7 @@ import { DEPTHMAP_DEFAULTS, DEPTHMAP_QUALITY_META } from '../../../core/defaults
 import { badgePreset } from '../../../core/recommendUi.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { depthMapEffects, keepMapsEffect } from '../../../core/stepEffects/depthMaps.js'
-import { depthMapsKey, reusableDepthMaps } from '../../../core/dense/depthReuse.js'
+import { depthMapsKey, depthRunShape, reusableDepthMaps } from '../../../core/dense/depthReuse.js'
 
 const props = defineProps({
   // Every image (the largest original sets what Quality means) and how many have a
@@ -28,6 +28,8 @@ const props = defineProps({
   savedMapsKey: { type: Object, default: null },
   cameraKeys: { type: Object, default: () => ({}) },
   model: { type: Object, default: null },
+  // The region a run would apply ({ min, max }, or null).
+  region: { type: Object, default: null },
 })
 const emit = defineEmits(['close', 'run'])
 
@@ -134,7 +136,15 @@ const keptMaps = computed(() => {
       cameraKeys: props.savedMapsKey?.cameraKeys,
     },
     cloud: m,
-    key: depthMapsKey(runSettings.value),
+    // As the run resolves it, short of a memory step-down the run alone can judge.
+    key: depthMapsKey(
+      depthRunShape(runSettings.value, {
+        onGpu: useGpu.value,
+        nativeLong: nativeLong.value,
+        sceneType: props.sceneType,
+        region: props.region,
+      }),
+    ),
     cameraKeys: props.cameraKeys,
   }).length
 })

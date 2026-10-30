@@ -29,8 +29,8 @@ export function useStoppedRuns({ runs, isBusy = () => false }) {
       const answer = await chooseDialog({
         title: 'Continue the stopped run?',
         message:
-          `${what} The tab running it closed before it finished. Continue it where it stopped, or ` +
-          'discard what it saved and start again later?',
+          `${what} It did not finish: it was cancelled, or the tab running it closed. Continue it where it ` +
+          'stopped, or discard what it saved and start again later?',
         confirmLabel: 'Continue',
         altLabel: 'Discard',
         danger: false,

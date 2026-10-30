@@ -41,7 +41,17 @@ export function journalKey(parts) {
  */
 export function startJournal({ stage, key, settings, total, phase, now = new Date() }) {
   const at = now.toISOString()
-  return { stage, key, settings: structuredClone(settings ?? {}), startedAt: at, updatedAt: at, total, phase, done: [] }
+  return {
+    stage,
+    key,
+    settings: structuredClone(settings ?? {}),
+    startedAt: at,
+    updatedAt: at,
+    total,
+    phase,
+    firstPhase: phase,
+    done: [],
+  }
 }
 
 /**
@@ -62,10 +72,24 @@ export function canContinue(journal, key) {
  * @param {string} label the stage's name in the UI
  * @param {Date} [now]
  */
+// Past its first phase a run has saved every unit once; `done` then counts a later
+// phase's units (depth maps' second pass), or none (the filter, matching's passes), and
+// an empty count must not read as "stopped at 0".
+const FIRST_PHASES = new Set(['images', 'pairs', 'pass1'])
 export function journalSummary(journal, label, now = new Date()) {
   const ago = agoText(now - new Date(journal.updatedAt ?? journal.startedAt))
+  const total = journal.total > 0 ? journal.total.toLocaleString('en-US') : null
+  const first = journal.firstPhase
+    ? journal.phase === journal.firstPhase
+    : !journal.phase || FIRST_PHASES.has(journal.phase)
   const n = journal.done?.length ?? 0
-  const where = journal.total > 0 ? ` at ${n.toLocaleString('en-US')} of ${journal.total.toLocaleString('en-US')}` : ''
+  const where = !total
+    ? ''
+    : first
+      ? ` at ${n.toLocaleString('en-US')} of ${total}`
+      : n
+        ? ` at ${n.toLocaleString('en-US')} of ${total} in a later step`
+        : ` after all ${total} were saved, in a later step`
   return `${label} stopped${where}${ago ? `, ${ago} ago` : ''}.`
 }
 

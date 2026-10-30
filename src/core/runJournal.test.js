@@ -41,6 +41,17 @@ describe('a journal', () => {
       'Matching stopped at 212 of 347, less than a minute ago.',
     )
   })
+
+  it('says every unit was saved once the run is past its first phase', () => {
+    const j = { ...startJournal({ total: 347, phase: 'pass1', now: new Date('2026-10-30T07:50:00Z') }) }
+    expect(journalSummary({ ...j, phase: 'filter', done: [] }, 'Depth maps', now)).toBe(
+      'Depth maps stopped after all 347 were saved, in a later step, 2 h 10 min ago.',
+    )
+    expect(journalSummary({ total: 10, phase: 'post', done: [] }, 'Matching', now)).toMatch(/after all 10 were saved/)
+    expect(journalSummary({ ...j, phase: 'pass2', done: [1, 2] }, 'Depth maps', now)).toMatch(
+      /^Depth maps stopped at 2 of 347 in a later step/,
+    )
+  })
 })
 
 describe('journalWriter', () => {

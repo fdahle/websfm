@@ -35,9 +35,13 @@ async function hasWebGpu() {
   }
 }
 
+// The probe's context is released at once: a page holds only a few live WebGL contexts,
+// and the 3D view and image tabs need them.
 function hasWebGl2() {
   try {
-    return !!document.createElement('canvas').getContext('webgl2')
+    const gl = document.createElement('canvas').getContext('webgl2')
+    gl?.getExtension('WEBGL_lose_context')?.loseContext()
+    return !!gl
   } catch {
     return false
   }

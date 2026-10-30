@@ -999,6 +999,7 @@ export const useReconstructionStore = registerProjectStore(
       upsertDenseCloud,
       upsertMeshCloud,
       withRegion,
+      activeRegion,
     })
 
     // Level-of-detail octrees of big clouds (reconstruction/cloudLod.js).
@@ -1449,6 +1450,8 @@ export const useReconstructionStore = registerProjectStore(
       depthMapsMeta,
       depthMapsKey,
       depthCameraKeys,
+      // The region a run applies right now, or null (Keep valid depth maps keys on it).
+      activeRegion,
       forgetDepthMap,
       depthMapCount,
       georef,

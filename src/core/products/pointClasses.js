@@ -45,9 +45,6 @@ export const CLASS_MEDIUM_VEGETATION = 4
 export const CLASS_HIGH_VEGETATION = 5
 export const CLASS_BUILDING = 6
 
-// A segment whose mean |normal z| is below this is a wall (steeper than about 60°).
-const WALL_NZ = 0.5
-
 // Excess green of one colour on chromatic coordinates, in [−1, 2].
 export function excessGreen(r, g, b) {
   const s = r + g + b
@@ -73,6 +70,7 @@ export function classifyAboveGround(pos, count, classes, hag, col, opts = {}) {
     minPlanarity = CLASSIFY_TUNING.minPlanarity,
     maxScatter = CLASSIFY_TUNING.maxScatter,
     normalAngleDeg = CLASSIFY_TUNING.normalAngleDeg,
+    wallNormalZ = CLASSIFY_TUNING.wallNormalZ,
     greenExg = CLASSIFY_TUNING.greenExg,
     lowVegetationMax = CLASSIFY_DEFAULTS.lowVegetationMax,
     mediumVegetationMax = CLASSIFY_DEFAULTS.mediumVegetationMax,
@@ -341,7 +339,7 @@ export function classifyAboveGround(pos, count, classes, hag, col, opts = {}) {
       if (highest >= minBuildingHeight && area >= minBuildingArea && !isGreen) {
         // A wall alone (a retaining wall, a noise barrier) is no building: a mostly
         // vertical segment waits to see whether it meets a roof.
-        if (upright / members.length < WALL_NZ) walls.push([...members])
+        if (upright / members.length < wallNormalZ) walls.push([...members])
         else {
           buildingSegments++
           for (const v of members) label[v] = CLASS_BUILDING

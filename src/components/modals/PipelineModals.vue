@@ -99,6 +99,9 @@ const extendState = computed(() => {
     blocker: extensionBlocker(model, newImages),
   }
 })
+// Keep valid depth maps: each camera's key as a depth run would hand it over, computed
+// while the dialog is open and again only when the model, images or frame change.
+const depthCameraKeysNow = computed(() => (depthMapsOpen.value ? reconstructionStore.depthCameraKeys() : {}))
 // Match only new pairs: the pairs with a result, and the images with features in none
 // of them (photos added since the last match).
 const matchedState = computed(() => {
@@ -352,7 +355,8 @@ const exportingFootprints = computed(
       :registered="reconstructionStore.mainSparseCloud?.cameras?.size ?? 0"
       :saved-maps="reconstructionStore.depthMapsMeta"
       :saved-maps-key="reconstructionStore.depthMapsKey"
-      :camera-keys="reconstructionStore.depthCameraKeys()"
+      :camera-keys="depthCameraKeysNow"
+      :region="reconstructionStore.activeRegion()"
       :model="reconstructionStore.mainSparseCloud"
       :scene-type="currentSceneType"
       @close="depthMapsOpen = false"

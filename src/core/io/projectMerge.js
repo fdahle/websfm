@@ -98,17 +98,23 @@ export function planProjectMerge({ target, source }) {
     nameOf.set(img.name, name)
   }
 
-  // Sensors: an identical calibration joins A's; anything else comes in as it is.
+  // Sensors: an identical calibration joins A's; anything else comes in as it is, under
+  // a new id when A uses its id for another calibration (B was copied from A, then
+  // recalibrated).
   const map = new Map(),
     add = []
   const used = new Set(added.map((a) => a.image.sensorId).filter(Boolean))
+  const takenIds = new Set((target.sensors ?? []).map((t) => t.id))
   for (const s of source.sensors ?? []) {
     if (!used.has(s.id)) continue
     const same = (target.sensors ?? []).find((t) => sameCalibration(t, s))
     if (same) map.set(s.id, same.id)
     else {
-      map.set(s.id, s.id)
-      add.push(s)
+      let id = s.id
+      for (let n = 2; takenIds.has(id); n++) id = `${s.id}:${n}`
+      takenIds.add(id)
+      map.set(s.id, id)
+      add.push(id === s.id ? s : { ...s, id })
     }
   }
 

@@ -4,6 +4,7 @@ import { planProjectMerge } from '../core/io/projectMerge.js'
 import { asKeypoints } from '../core/features/keypoints.js'
 import { projectFormatOf, projectFormatProblem, PROJECT_FORMAT_VERSION } from '../core/projectFormat.js'
 import { pluralize } from '../core/textFormat.js'
+import { PROJECT_IMPORT_TUNING } from '../core/tuning.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
@@ -11,9 +12,6 @@ import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
 import { usePosesStore } from '../stores/usePosesStore.js'
 import { useLog } from './useLog.js'
-
-// Photos read and ingested at a time: the page never holds a whole project as blobs.
-const BATCH = 16
 
 // Import ▸ Project into this project: another project's photos, sensors, features,
 // matches, masks, GCP marks and imported camera positions join the open one (the plan:
@@ -98,8 +96,9 @@ export function useProjectMerge() {
     let done = 0
     const total = plan.added.length
     const missing = []
-    for (let i = 0; i < total; i += BATCH) {
-      const batch = plan.added.slice(i, i + BATCH)
+    const batchSize = PROJECT_IMPORT_TUNING.photosPerBatch
+    for (let i = 0; i < total; i += batchSize) {
+      const batch = plan.added.slice(i, i + batchSize)
       const files = [],
         extras = new Map()
       for (const { image, name } of batch) {
@@ -147,7 +146,15 @@ export function useProjectMerge() {
       )
 
     onProgress(total, total, 'Importing matches…')
-    const pairs = await matches.adoptProjectPairs(sourceId, plan.keepPair)
+    // Only pairs whose two photos arrived with their features (a photo that could not be
+    // read, or whose keypoints could not, stayed behind with its pairs).
+    const arrived = new Set(
+      imagesStore.images.filter((im) => im.kpStatus === 'done' && plan.uuidOf.has(im.uuid)).map((im) => im.uuid),
+    )
+    const pairs = await matches.adoptProjectPairs(
+      sourceId,
+      (a, b) => plan.keepPair(a, b) && arrived.has(a) && arrived.has(b),
+    )
 
     // GCP marks (joined by name) and imported positions, from the other project's CRS.
     const crs = gcpDoc?.crs ?? data.crs ?? projects.currentCrs

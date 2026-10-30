@@ -627,4 +627,13 @@ export const CLASSIFY_TUNING = {
   normalAngleDeg: 20,
   // Mean ExG (2g − r − b on chromatic coordinates) above which a voxel is green.
   greenExg: 0.06,
+  // A segment whose mean |normal z| is below this is a wall (steeper than about 60°): a
+  // building only beside a roof.
+  wallNormalZ: 0.5,
+}
+
+// Import ▸ Project into this project (composables/useProjectMerge.js).
+export const PROJECT_IMPORT_TUNING = {
+  // Photos read and ingested at a time: the page never holds a whole project as blobs.
+  photosPerBatch: 16,
 }
