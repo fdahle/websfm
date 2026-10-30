@@ -58,7 +58,11 @@ export const SPARSE_MEMORY_MODEL = {
   solverDenseMaxN: 4096,
   // Average track length turning observations into points (measured 3–4 on the bench sets).
   observationsPerPoint: 3,
-  // Guided track extension: its keypoint grids (heap) on top of the descriptors.
+  // Guided track extension: its keypoint grids (heap) on top of the descriptors. Its
+  // search in the crate (guided.rs) copies the points (≤ 3 reference descriptors and the
+  // views, ~420 B a point) and up to 64 MB of one group of cameras into the solver's
+  // memory: less than the bundle adjustment before it takes there, so solverWasmBytes
+  // covers it.
   guidedHeapPerKeypoint: 24,
 }
 

@@ -306,6 +306,7 @@ export async function refineModel(ctx) {
             const d = images[img]?.descU8
             return d && (k + 1) * 128 <= d.length ? { arr: d, off: k * 128 } : null
           },
+          descriptorsAt: (img) => images[img]?.descU8 ?? null,
         })
         const after = trackHist(tracks)
         guidedRecord = [...(guidedRecord ?? []), { pass: round, ...g, gatePx, before, after }]
@@ -314,7 +315,7 @@ export async function refineModel(ctx) {
           `guided track extension (pass ${round}) +${pluralize(g.added, 'observation')} on ${pluralize(g.pointsExtended, 'point')} — ` +
             `${g.lifted} lifted from 2 to ≥3 views (≤${gatePx.toFixed(1)}px, descriptor ≤ ` +
             `${g.tau?.toFixed(3) ?? '–'} measured from ≥3-view tracks, ratio ${cfg.guidedRatio ?? 0.8}; ${pluralize(g.windows, 'search window')}, ` +
-            `${pluralize(g.proposals, 'proposal')}); track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ` +
+            `${pluralize(g.proposals, 'proposal')}, searched on ${pluralize(g.threads, 'thread')}); track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ` +
             `${after.t2}/${after.t3}/${after.t4}`,
           'info',
           'Reconstruction',

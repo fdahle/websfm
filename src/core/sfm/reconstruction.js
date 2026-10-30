@@ -5,6 +5,7 @@ import init, {
   bundle_adjust,
   compute_depth_map,
   undistort_brown_pixels,
+  GuidedSearch,
 } from '../../wasm/reconstruction/reconstruction.js'
 import { isObservationList } from './baObservations.js'
 import { SFM_TUNING } from '../tuning.js'
@@ -78,6 +79,15 @@ export function undistortBrownPixels(xy, starts, k, d, iters = 20) {
   if (!run) return null
   const bag = Float64Array.of(d.k1 ?? 0, d.k2 ?? 0, d.k3 ?? 0, d.k4 ?? 0, d.k5 ?? 0, d.k6 ?? 0, d.p1 ?? 0, d.p2 ?? 0)
   return run(xy, starts, k, bag, iters)
+}
+
+// Guided track extension's search in the crate (crates/reconstruction/src/guided.rs):
+// the class from the threaded build once the bundle adjustment has started it (cameras
+// on the pool), else from the single-threaded one; null while neither is loaded, and
+// guidedExtendTracks then searches in JS. Both give the JS search's proposals.
+export function guidedSearchClass() {
+  if (threadedModule?.GuidedSearch) return { GuidedSearch: threadedModule.GuidedSearch, threads: threadedThreads }
+  return wasmReady ? { GuidedSearch, threads: 1 } : null
 }
 
 // Common sensor widths (mm), matched as lowercased substrings of "make model".

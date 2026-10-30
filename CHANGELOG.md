@@ -196,11 +196,12 @@ Notable changes to websfm. The format follows
 
 ### Performance
 - **Sparse Reconstruction spends less time outside the bundle adjustment.** Placing each
-  photo now scores its pose hypotheses on every core, and the residual statistics that
-  each bundle adjustment logs are computed without the slow sorts they used; the model
-  is the same to the last bit. Quarry (347 photos): the time outside the bundle
-  adjustment fell from 31.4 to 25.3 s, the whole sparse run from 67.2 to 62.4 s (16
-  threads), with identical camera poses and points.
+  photo now scores its pose hypotheses on every core, guided track extension searches
+  every camera on its own core, and the residual statistics that each bundle adjustment
+  logs are computed without the slow sorts they used; the model is the same to the last
+  bit. Quarry (347 photos): the time outside the bundle adjustment fell from 31.4 to
+  25.3 s, the whole sparse run from 67.2 to 62.4 s (16 threads), with identical camera
+  poses and points. Guided track extension then went from 3.8 to 1.5 s (the run 63.3 → 60.0 s, back to back).
 
 ### Fixed
 - **Depth maps on integrated graphics no longer freeze the screen.** The graphics card

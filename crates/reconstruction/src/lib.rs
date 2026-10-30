@@ -5,6 +5,7 @@
 //   linalg  — math/geometry primitives        pose    — P3P / PnP / two-view pose
 //   bundle  — bundle adjustment               mvs     — dense PatchMatch stereo
 //   distort — Brown undistortion of many keypoints (the self-calibration fold)
+//   guided  — guided track extension's per-camera search
 
 mod linalg;
 mod pose;
@@ -13,6 +14,7 @@ mod sparse_chol;
 mod mvs;
 mod par;
 mod distort;
+mod guided;
 
 // The threaded build's pool (feature `threads`): JS awaits initThreadPool(n) once, before
 // the first call that uses it (src/core/sfm/reconstruction.js).

@@ -1,4 +1,9 @@
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
+
+import initRecon from '../../wasm/reconstruction/reconstruction.js'
+import { loadReconstructionWasm, guidedSearchClass } from './reconstruction.js'
 
 import { guidedExtendTracks, trackDistanceThreshold, auditGuidedAdditions } from './guidedExtension.js'
 import { keypointSetFrom } from './keypointSet.js'
@@ -115,6 +120,89 @@ describe('guidedExtendTracks', () => {
     s.flat.get('c').set(randomDesc(), 33 * 128) // replace the true descriptor with noise
     s.run()
     expect(s.live()[33].views.has('c')).toBe(false)
+  })
+})
+
+describe('guidedExtendTracks in the crate', () => {
+  // The search runs in the crate once its wasm is loaded (crates/reconstruction/src/
+  // guided.rs) and in JS before: both must add the same observations in the same order,
+  // or a run would depend on load order. A busy scene: six cameras, distractors next to
+  // the true keypoints, exact descriptor ties, missing keypoints and a gate so small on
+  // a wide image that the keypoint grid goes coarse (several gate cells per grid cell).
+  it('adds what the JS search adds, in the same order', async () => {
+    const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
+    await initRecon({ module_or_path: await readFile(fileURLToPath(wasmUrl)) })
+    await loadReconstructionWasm()
+    expect(guidedSearchClass()).not.toBeNull()
+    let sd = 11
+    // Its own generator: the shared one would shift the scenes of the tests after it.
+    const r = () => (sd = (sd * 16807) % 2147483647) / 2147483647
+    const noise = () => Uint8Array.from({ length: 128 }, () => Math.floor(r() * 120))
+    const jit = (d, amt) => Uint8Array.from(d, (v) => Math.max(0, Math.min(255, v + Math.round((r() - 0.5) * amt))))
+    const Kw = { fx: 2000, fy: 2000, cx: 2000, cy: 1600 }
+    const uuids = ['a', 'b', 'c', 'd', 'e', 'f']
+    const cameras = new Map(uuids.map((u, i) => [u, { R: I, t: [0.3 * i - 0.75, 0.1 * (i % 2), 0], K: Kw }]))
+    const pr = (cam, p) => ({
+      x: (Kw.fx * (p.x + cam.t[0])) / (p.z + cam.t[2]) + Kw.cx,
+      y: (Kw.fy * (p.y + cam.t[1])) / (p.z + cam.t[2]) + Kw.cy,
+    })
+    const kps = new Map(uuids.map((u) => [u, []]))
+    const descs = new Map(uuids.map((u) => [u, []]))
+    const put = (u, kp, d) => kps.get(u).push(kp) - 1 + (descs.get(u).push(d) && 0)
+    const points = []
+    for (let i = 0; i < 300; i++) {
+      const p = { x: r() * 3 - 1.5, y: r() * 2.4 - 1.2, z: 4 + r() * 2 }
+      const d = Uint8Array.from({ length: 128 }, () => Math.floor(r() * 200))
+      const views = new Map()
+      uuids.forEach((u, ci) => {
+        const at = pr(cameras.get(u), p)
+        const kp = { x: at.x + (r() - 0.5) * 0.8, y: at.y + (r() - 0.5) * 0.8 }
+        const k = put(u, kp, jit(d, 10))
+        // A distractor beside it, sometimes an exact twin (a tie the visiting order breaks).
+        if (r() < 0.4)
+          put(u, { x: kp.x + (r() - 0.5), y: kp.y + (r() - 0.5) }, r() < 0.5 ? descs.get(u)[k] : jit(d, 14))
+        if (ci < 2 || (ci === 2 && i % 3 === 0)) views.set(u, k)
+      })
+      points.push({ ...p, views })
+    }
+    for (const u of uuids) {
+      put(u, { x: 0, y: 0 }, noise()) // spread the bounds: a coarse grid
+      put(u, { x: 4000, y: 3200 }, noise())
+      put(u, { x: NaN, y: NaN }, noise()) // a missing keypoint
+    }
+    const flat = new Map(
+      uuids.map((u) => {
+        const arr = new Uint8Array(descs.get(u).length * 128)
+        descs.get(u).forEach((d, i) => arr.set(d, i * 128))
+        // One camera lacks its last descriptors: those keypoints are not candidates.
+        return [u, u === 'f' ? arr.slice(0, arr.length - 128 * 40) : arr]
+      }),
+    )
+    const runOnce = (native) => {
+      const { tracks, ids } = tracksFrom(points, uuids)
+      const descOf = (img, k) => {
+        const a = flat.get(ids.uuid(img))
+        return a && (k + 1) * 128 <= a.length ? { arr: a, off: k * 128 } : null
+      }
+      const adds = []
+      const stats = guidedExtendTracks({
+        tracks,
+        ids,
+        cameras,
+        keypointsAt: (img) => keypointSetFrom(kps.get(ids.uuid(img))),
+        descOf,
+        descriptorsAt: (img) => flat.get(ids.uuid(img)) ?? null,
+        native,
+        gatePx: 1.2,
+        onAdd: (p, img, kp) => adds.push([p, img, kp]),
+      })
+      return { stats, adds }
+    }
+    const js = runOnce(false)
+    const crate = runOnce(true)
+    expect(js.stats.added).toBeGreaterThan(100)
+    expect(js.stats.windows).toBeGreaterThan(js.stats.proposals)
+    expect(crate).toEqual(js)
   })
 })
 

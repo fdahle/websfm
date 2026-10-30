@@ -3,6 +3,102 @@ import { startWorkers } from './snippets/wasm-bindgen-rayon-38edf6e439f6d70d/src
 
 
 /**
+ * The points every camera may observe, held for the searches of one extension run.
+ */
+export class GuidedSearch {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        GuidedSearchFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_guidedsearch_free(ptr, 0);
+    }
+    /**
+     * `pos`: x, y, z per point; `ref_start`/`refs`: each point's reference descriptors
+     * (128 bytes each; n_points + 1 offsets, in descriptors); `view_start`/`view_img`:
+     * the images that already observe each point; `cell_start`/`cell_pts`: the points
+     * of each cull cell, ascending. `tau2`: the squared distance threshold; `ratio2`:
+     * the squared ratio the best must beat the runner-up by.
+     * @param {Float64Array} pos
+     * @param {Uint32Array} ref_start
+     * @param {Uint8Array} refs
+     * @param {Uint32Array} view_start
+     * @param {Uint32Array} view_img
+     * @param {Uint32Array} cell_start
+     * @param {Uint32Array} cell_pts
+     * @param {number} gate_px
+     * @param {number} tau2
+     * @param {number} ratio2
+     */
+    constructor(pos, ref_start, refs, view_start, view_img, cell_start, cell_pts, gate_px, tau2, ratio2) {
+        const ptr0 = passArrayF64ToWasm0(pos, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray32ToWasm0(ref_start, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(refs, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArray32ToWasm0(view_start, wasm.__wbindgen_malloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passArray32ToWasm0(view_img, wasm.__wbindgen_malloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ptr5 = passArray32ToWasm0(cell_start, wasm.__wbindgen_malloc);
+        const len5 = WASM_VECTOR_LEN;
+        const ptr6 = passArray32ToWasm0(cell_pts, wasm.__wbindgen_malloc);
+        const len6 = WASM_VECTOR_LEN;
+        const ret = wasm.guidedsearch_new(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, gate_px, tau2, ratio2);
+        this.__wbg_ptr = ret;
+        GuidedSearchFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Search a group of cameras. Per camera c: `imgs[c]`, its image index; `p[16c..]`,
+     * R (row-major), t, fx, fy, cx, cy; `kp_start`, its keypoints in `xy` (n_cams + 1
+     * offsets, in keypoints); `desc_start`, its descriptors in `desc` (in bytes; a
+     * keypoint past the camera's share has none); `used`, 1 per keypoint already in a
+     * track; `cc_start`/`cc`, the cull cells it may see. Returns [windows, then
+     * (point, camera, keypoint, squared distance) per proposal], cameras in order.
+     * @param {Uint32Array} imgs
+     * @param {Float64Array} p
+     * @param {Uint32Array} kp_start
+     * @param {Float64Array} xy
+     * @param {Uint32Array} desc_start
+     * @param {Uint8Array} desc
+     * @param {Uint8Array} used
+     * @param {Uint32Array} cc_start
+     * @param {Uint32Array} cc
+     * @returns {Float64Array}
+     */
+    search(imgs, p, kp_start, xy, desc_start, desc, used, cc_start, cc) {
+        const ptr0 = passArray32ToWasm0(imgs, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(p, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray32ToWasm0(kp_start, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArrayF64ToWasm0(xy, wasm.__wbindgen_malloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passArray32ToWasm0(desc_start, wasm.__wbindgen_malloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ptr5 = passArray8ToWasm0(desc, wasm.__wbindgen_malloc);
+        const len5 = WASM_VECTOR_LEN;
+        const ptr6 = passArray8ToWasm0(used, wasm.__wbindgen_malloc);
+        const len6 = WASM_VECTOR_LEN;
+        const ptr7 = passArray32ToWasm0(cc_start, wasm.__wbindgen_malloc);
+        const len7 = WASM_VECTOR_LEN;
+        const ptr8 = passArray32ToWasm0(cc, wasm.__wbindgen_malloc);
+        const len8 = WASM_VECTOR_LEN;
+        const ret = wasm.guidedsearch_search(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8);
+        var v10 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v10;
+    }
+}
+if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.prototype.free;
+
+/**
  * Bundle adjustment by sparse Levenberg–Marquardt with the Schur complement.
  *
  * Jointly refines every camera pose (6-DOF: left-perturbed so(3) rotation +
@@ -448,6 +544,9 @@ function __wbg_get_imports(memory) {
     };
 }
 
+const GuidedSearchFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_guidedsearch_free(ptr, 1));
 const wbg_rayon_PoolBuilderFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wbg_rayon_poolbuilder_free(ptr, 1));

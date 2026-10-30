@@ -721,6 +721,11 @@ Proposals are resolved greedily, best first, so one keypoint joins one point and
 gains one keypoint per image. The following filter and BA then treat the additions like
 any other observation.
 
+The search runs camera by camera on the threaded crate (`crates/reconstruction/src/
+guided.rs`, the same arithmetic as the JS search, which remains for when no wasm is
+loaded); only the best-first resolution is sequential. Quarry: 3.8 → 1.5 s on 16 threads,
+the same additions.
+
 The search radius is the filter gate, capped at 3 × the model's p90 residual. On a
 coarse detection scale the native-pixel gate is far wider than what the model resolves
 (16.9 px on TMA against a 1 px median residual).

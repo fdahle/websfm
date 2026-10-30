@@ -2,6 +2,31 @@
 /* eslint-disable */
 
 /**
+ * The points every camera may observe, held for the searches of one extension run.
+ */
+export class GuidedSearch {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * `pos`: x, y, z per point; `ref_start`/`refs`: each point's reference descriptors
+     * (128 bytes each; n_points + 1 offsets, in descriptors); `view_start`/`view_img`:
+     * the images that already observe each point; `cell_start`/`cell_pts`: the points
+     * of each cull cell, ascending. `tau2`: the squared distance threshold; `ratio2`:
+     * the squared ratio the best must beat the runner-up by.
+     */
+    constructor(pos: Float64Array, ref_start: Uint32Array, refs: Uint8Array, view_start: Uint32Array, view_img: Uint32Array, cell_start: Uint32Array, cell_pts: Uint32Array, gate_px: number, tau2: number, ratio2: number);
+    /**
+     * Search a group of cameras. Per camera c: `imgs[c]`, its image index; `p[16c..]`,
+     * R (row-major), t, fx, fy, cx, cy; `kp_start`, its keypoints in `xy` (n_cams + 1
+     * offsets, in keypoints); `desc_start`, its descriptors in `desc` (in bytes; a
+     * keypoint past the camera's share has none); `used`, 1 per keypoint already in a
+     * track; `cc_start`/`cc`, the cull cells it may see. Returns [windows, then
+     * (point, camera, keypoint, squared distance) per proposal], cameras in order.
+     */
+    search(imgs: Uint32Array, p: Float64Array, kp_start: Uint32Array, xy: Float64Array, desc_start: Uint32Array, desc: Uint8Array, used: Uint8Array, cc_start: Uint32Array, cc: Uint32Array): Float64Array;
+}
+
+/**
  * Bundle adjustment by sparse Levenberg–Marquardt with the Schur complement.
  *
  * Jointly refines every camera pose (6-DOF: left-perturbed so(3) rotation +
@@ -153,8 +178,11 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_guidedsearch_free: (a: number, b: number) => void;
     readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number) => [number, number];
     readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number, c1: number, d1: number, e1: number, f1: number, g1: number, h1: number, i1: number, j1: number, k1: number, l1: number, m1: number, n1: number, o1: number) => [number, number];
+    readonly guidedsearch_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => number;
+    readonly guidedsearch_search: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => [number, number];
     readonly recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly triangulate_dlt: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];

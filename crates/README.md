@@ -46,6 +46,10 @@ subtractions a right-looking factor makes, and a big one is cut into row chunks
 (`sparse_chol.rs`; a test holds it to the old right-looking factor bit for bit).
 Spreading a right-looking supernode's updates over its targets instead was slower.
 
+Besides the bundle adjustment, the pose hypotheses of PnP RANSAC (`pose.rs`), the
+Brown undistortion of the self-calibration fold (`distort.rs`) and guided track
+extension's per-camera search (`guided.rs`) run on the same pool once it has started.
+
 `core/sfm/reconstruction.js` uses the threaded build for `bundleAdjust` only in a
 worker of a cross-origin isolated page (shared memory, and a thread may block in
 `Atomics.wait`, which a page's main thread may not), up to `SFM_TUNING.baSolver.threads`

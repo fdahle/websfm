@@ -17,6 +17,8 @@
 //
 // Descriptors are COLMAP-style uint8 (RootSIFT × 512), 128 per keypoint.
 
+import { guidedSearchClass } from './reconstruction.js'
+
 const DIM = 128
 
 function dist2(a, ao, b, bo) {
@@ -27,6 +29,10 @@ function dist2(a, ao, b, bo) {
   }
   return s
 }
+
+// The cameras searched per crate call hold at most this many descriptor bytes: the
+// copy into the module's memory stays well below the bundle adjustment's own.
+const CRATE_CHUNK_BYTES = 64 * 1024 ** 2
 
 // The largest keypoint grid one camera's search builds (guidedExtendTracks), in cells.
 const GRID_MAX_CELLS = 1 << 22
@@ -164,138 +170,23 @@ function frustumCells(tracks, camList) {
   return { cellOf, camsOfCell: (cell) => lists.get(cell) ?? all }
 }
 
-/**
- * @param {object} o
- * @param {object} o.tracks                  TrackStore (trackStore.js); additions go here
- * @param {object} o.ids                     makeImageIds: uuid ↔ image index
- * @param {Map} o.cameras                    uuid → { R, t, K }
- * @param {(img:number) => {n:number, xy:Float64Array}|null} o.keypointsAt   the image's KeypointSet
- * @param {(img:number, kp:number) => {arr:Uint8Array, off:number}|null} o.descOf
- * @param {number} o.gatePx                  search radius = the reprojection gate
- * @param {number} [o.maxDist2]              squared descriptor threshold (else measured)
- * @param {number} [o.ratio]                 best must beat the runner-up by this ratio
- * @param {number} [o.quantile]              track-distance quantile that sets the threshold
- * @param {number} [o.refObs]                compare against at most this many observations
- * @param {(p:number, img:number, kp:number) => void} [o.onAdd]  called per accepted observation
- */
-export function guidedExtendTracks({
+// The search in JS: the reference for the crate's (crates/reconstruction/src/guided.rs),
+// and the path when its wasm is not loaded.
+function searchJs({
+  camList,
+  cellsOfCam,
+  ptsOfCell,
+  ptId,
+  ptRefs,
+  ptPos,
   tracks,
-  ids,
-  cameras,
-  keypointsAt,
   descOf,
   gatePx,
-  maxDist2 = null,
-  ratio = 0.8,
-  quantile = 0.9,
-  refObs = 3,
-  onAdd = null,
+  tau2,
+  ratio2,
+  stats,
 }) {
-  const tau2 = maxDist2 ?? trackDistanceThreshold(tracks, descOf, { quantile })
-  const stats = {
-    tau: tau2 == null ? null : Math.sqrt(tau2) / 512,
-    projections: 0,
-    windows: 0,
-    proposals: 0,
-    added: 0,
-    lifted: 0,
-    pointsExtended: 0,
-  }
-  // No gate, no window: a zero gate (a residual p90 of exactly 0) finds nothing to add.
-  if (tau2 == null || !(gatePx > 0)) return stats
   const r2 = gatePx * gatePx
-  const ratio2 = ratio * ratio
-
-  // Per-camera keypoint bounds, in camera order (the keypoint grid is built per camera
-  // in the search below).
-  const camList = [] // { img, cam, P, grid: { xy, n, minX, minY, maxX, maxY } | null }
-  for (const [uuid, cam] of cameras) {
-    const img = ids.img(uuid)
-    const kps = keypointsAt(img)
-    if (!kps?.n) {
-      camList.push({ img, cam, grid: null })
-      continue
-    }
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity
-    const xy = kps.xy
-    for (let i = 0; i < kps.n; i++) {
-      const x = xy[2 * i],
-        y = xy[2 * i + 1]
-      if (x < minX) minX = x
-      if (y < minY) minY = y
-      if (x > maxX) maxX = x
-      if (y > maxY) maxY = y
-    }
-    // The pose and K flat, for the projection inlined below.
-    const P = Float64Array.of(
-      cam.R[0][0],
-      cam.R[0][1],
-      cam.R[0][2],
-      cam.R[1][0],
-      cam.R[1][1],
-      cam.R[1][2],
-      cam.R[2][0],
-      cam.R[2][1],
-      cam.R[2][2],
-      cam.t[0],
-      cam.t[1],
-      cam.t[2],
-      cam.K.fx,
-      cam.K.fy,
-      cam.K.cx,
-      cam.K.cy,
-    )
-    camList.push({ img, cam, P, grid: { xy, n: kps.n, minX, minY, maxX, maxY } })
-  }
-
-  // Every point is tried against every camera that can see it (frustumCells): project
-  // first, and ask whether the camera already observes it only for a projection inside
-  // the image (viewKp scans the point's views, and most of the 12.8 M point × camera pairs
-  // on quarry land outside). `projections` counts the pairs tried, as before: the cameras
-  // with keypoints less the point's views in them.
-  const withGrid = new Uint8Array(camList.reduce((n, c) => Math.max(n, c.img + 1), 0))
-  let nWithGrid = 0
-  for (const c of camList)
-    if (c.grid) {
-      withGrid[c.img] = 1
-      nWithGrid++
-    }
-  const cull = frustumCells(tracks, camList)
-  // The points with reference descriptors, in order, grouped by cull cell.
-  const ptId = [],
-    ptRefs = [],
-    ptPos = []
-  const ptsOfCell = new Map() // cull cell → [j, …] ascending
-  tracks.forEachPoint((p) => {
-    const refs = []
-    tracks.someView(p, (img, k) => {
-      const d = descOf(img, k)
-      if (d) refs.push(d)
-      return refs.length >= refObs
-    })
-    if (!refs.length) return
-    let seen = 0
-    tracks.forEachView(p, (img) => {
-      if (withGrid[img]) seen++
-    })
-    stats.projections += nWithGrid - seen
-    const x = tracks.x(p),
-      y = tracks.y(p),
-      z = tracks.z(p)
-    const cell = cull.cellOf(x, y, z)
-    let list = ptsOfCell.get(cell)
-    if (!list) ptsOfCell.set(cell, (list = []))
-    list.push(ptId.length)
-    ptId.push(p)
-    ptRefs.push(refs)
-    ptPos.push(x, y, z)
-  })
-  const cellsOfCam = camList.map(() => [])
-  for (const cell of ptsOfCell.keys()) for (const ci of cull.camsOfCell(cell)) cellsOfCam[ci].push(cell)
-
   // Camera by camera (one keypoint grid in memory at a time, and its keypoints stay in
   // cache): the grid is dense, in cells of `gatePx` (or a whole multiple of it, so a small
   // gate on a big image stays within GRID_MAX_CELLS). A keypoint within the gate of a
@@ -406,7 +297,245 @@ export function guidedExtendTracks({
       }
     }
   }
+  return proposals
+}
+
+// The search in the crate (crates/reconstruction/src/guided.rs), its cameras on the
+// thread pool: the same proposals as searchJs. The points go in once; the cameras with
+// work go in groups of up to CRATE_CHUNK_BYTES of descriptors.
+function searchCrate({ GuidedSearch }, s, descriptorsAt) {
+  const { camList, cellsOfCam, ptsOfCell, ptId, ptRefs, ptPos, tracks, gatePx, tau2, ratio2, stats } = s
+  const nPts = ptId.length
+  const cellIndex = new Map()
+  const cellStart = new Uint32Array(ptsOfCell.size + 1)
+  const cellPts = new Uint32Array(nPts)
+  let at = 0
+  for (const [cell, list] of ptsOfCell) {
+    cellIndex.set(cell, cellIndex.size)
+    cellPts.set(list, at)
+    at += list.length
+    cellStart[cellIndex.size] = at
+  }
+  const refStart = new Uint32Array(nPts + 1)
+  for (let j = 0; j < nPts; j++) refStart[j + 1] = refStart[j] + ptRefs[j].length
+  const refs = new Uint8Array(refStart[nPts] * 128)
+  for (let j = 0, o = 0; j < nPts; j++) {
+    for (const r of ptRefs[j]) {
+      refs.set(r.arr.subarray(r.off, r.off + 128), o)
+      o += 128
+    }
+  }
+  const viewStart = new Uint32Array(nPts + 1)
+  for (let j = 0; j < nPts; j++) viewStart[j + 1] = viewStart[j] + tracks.viewCount(ptId[j])
+  const viewImg = new Uint32Array(viewStart[nPts])
+  for (let j = 0, o = 0; j < nPts; j++) tracks.forEachView(ptId[j], (img) => (viewImg[o++] = img))
+
+  const work = []
+  for (let ci = 0; ci < camList.length; ci++) {
+    const { img, grid } = camList[ci]
+    const desc = grid && cellsOfCam[ci].length ? descriptorsAt(img) : null
+    if (desc?.length) work.push({ ci, desc })
+  }
+  const proposals = []
+  const searcher = new GuidedSearch(
+    Float64Array.from(ptPos),
+    refStart,
+    refs,
+    viewStart,
+    viewImg,
+    cellStart,
+    cellPts,
+    gatePx,
+    tau2,
+    ratio2,
+  )
+  try {
+    for (let w0 = 0; w0 < work.length;) {
+      let w1 = w0 + 1,
+        bytes = work[w0].desc.length
+      while (w1 < work.length && bytes + work[w1].desc.length <= CRATE_CHUNK_BYTES) bytes += work[w1++].desc.length
+      const group = work.slice(w0, w1)
+      w0 = w1
+      const m = group.length
+      const imgs = new Uint32Array(m),
+        P = new Float64Array(16 * m),
+        kpStart = new Uint32Array(m + 1),
+        descStart = new Uint32Array(m + 1),
+        ccStart = new Uint32Array(m + 1)
+      group.forEach(({ ci, desc }, c) => {
+        const { img, P: pm, grid } = camList[ci]
+        imgs[c] = img
+        P.set(pm, 16 * c)
+        kpStart[c + 1] = kpStart[c] + grid.n
+        descStart[c + 1] = descStart[c] + desc.length
+        ccStart[c + 1] = ccStart[c] + cellsOfCam[ci].length
+      })
+      const xy = new Float64Array(2 * kpStart[m]),
+        used = new Uint8Array(kpStart[m]),
+        desc = new Uint8Array(descStart[m]),
+        cc = new Uint32Array(ccStart[m])
+      group.forEach(({ ci, desc: d }, c) => {
+        const { img, grid } = camList[ci]
+        xy.set(grid.xy.subarray(0, 2 * grid.n), 2 * kpStart[c])
+        for (let i = 0; i < grid.n; i++) if (tracks.pointAt(img, i) >= 0) used[kpStart[c] + i] = 1
+        desc.set(d, descStart[c])
+        cellsOfCam[ci].forEach((cell, k) => (cc[ccStart[c] + k] = cellIndex.get(cell)))
+      })
+      const res = searcher.search(imgs, P, kpStart, xy, descStart, desc, used, ccStart, cc)
+      stats.windows += res[0]
+      for (let k = 1; k < res.length; k += 4) {
+        const ci = group[res[k + 1]].ci
+        proposals.push({ p: ptId[res[k]], ci, img: camList[ci].img, kp: res[k + 2], d2: res[k + 3] })
+      }
+    }
+  } finally {
+    searcher.free()
+  }
+  return proposals
+}
+
+/**
+ * @param {object} o
+ * @param {object} o.tracks                  TrackStore (trackStore.js); additions go here
+ * @param {object} o.ids                     makeImageIds: uuid ↔ image index
+ * @param {Map} o.cameras                    uuid → { R, t, K }
+ * @param {(img:number) => {n:number, xy:Float64Array}|null} o.keypointsAt   the image's KeypointSet
+ * @param {(img:number, kp:number) => {arr:Uint8Array, off:number}|null} o.descOf
+ * @param {number} o.gatePx                  search radius = the reprojection gate
+ * @param {number} [o.maxDist2]              squared descriptor threshold (else measured)
+ * @param {number} [o.ratio]                 best must beat the runner-up by this ratio
+ * @param {number} [o.quantile]              track-distance quantile that sets the threshold
+ * @param {number} [o.refObs]                compare against at most this many observations
+ * @param {(p:number, img:number, kp:number) => void} [o.onAdd]  called per accepted observation
+ * @param {(img:number) => Uint8Array|null} [o.descriptorsAt]  the image's descriptors, keypoint k
+ *   at 128·k, as descOf reads them: given, the search runs in the crate when it is loaded
+ * @param {boolean} [o.native]               false: search in JS even then (tests)
+ */
+export function guidedExtendTracks({
+  tracks,
+  ids,
+  cameras,
+  keypointsAt,
+  descOf,
+  gatePx,
+  maxDist2 = null,
+  ratio = 0.8,
+  quantile = 0.9,
+  refObs = 3,
+  onAdd = null,
+  descriptorsAt = null,
+  native = true,
+}) {
+  const tau2 = maxDist2 ?? trackDistanceThreshold(tracks, descOf, { quantile })
+  const stats = {
+    tau: tau2 == null ? null : Math.sqrt(tau2) / 512,
+    projections: 0,
+    windows: 0,
+    proposals: 0,
+    added: 0,
+    lifted: 0,
+    pointsExtended: 0,
+    threads: 1, // the search's
+  }
+  // No gate, no window: a zero gate (a residual p90 of exactly 0) finds nothing to add.
+  if (tau2 == null || !(gatePx > 0)) return stats
+  const ratio2 = ratio * ratio
+
+  // Per-camera keypoint bounds, in camera order (the keypoint grid is built per camera
+  // in the search below).
+  const camList = [] // { img, cam, P, grid: { xy, n, minX, minY, maxX, maxY } | null }
+  for (const [uuid, cam] of cameras) {
+    const img = ids.img(uuid)
+    const kps = keypointsAt(img)
+    if (!kps?.n) {
+      camList.push({ img, cam, grid: null })
+      continue
+    }
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity
+    const xy = kps.xy
+    for (let i = 0; i < kps.n; i++) {
+      const x = xy[2 * i],
+        y = xy[2 * i + 1]
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x > maxX) maxX = x
+      if (y > maxY) maxY = y
+    }
+    // The pose and K flat, for the projection inlined below.
+    const P = Float64Array.of(
+      cam.R[0][0],
+      cam.R[0][1],
+      cam.R[0][2],
+      cam.R[1][0],
+      cam.R[1][1],
+      cam.R[1][2],
+      cam.R[2][0],
+      cam.R[2][1],
+      cam.R[2][2],
+      cam.t[0],
+      cam.t[1],
+      cam.t[2],
+      cam.K.fx,
+      cam.K.fy,
+      cam.K.cx,
+      cam.K.cy,
+    )
+    camList.push({ img, cam, P, grid: { xy, n: kps.n, minX, minY, maxX, maxY } })
+  }
+
+  // Every point is tried against every camera that can see it (frustumCells): project
+  // first, and ask whether the camera already observes it only for a projection inside
+  // the image (viewKp scans the point's views, and most of the 12.8 M point × camera pairs
+  // on quarry land outside). `projections` counts the pairs tried, as before: the cameras
+  // with keypoints less the point's views in them.
+  const withGrid = new Uint8Array(camList.reduce((n, c) => Math.max(n, c.img + 1), 0))
+  let nWithGrid = 0
+  for (const c of camList)
+    if (c.grid) {
+      withGrid[c.img] = 1
+      nWithGrid++
+    }
+  const cull = frustumCells(tracks, camList)
+  // The points with reference descriptors, in order, grouped by cull cell.
+  const ptId = [],
+    ptRefs = [],
+    ptPos = []
+  const ptsOfCell = new Map() // cull cell → [j, …] ascending
+  tracks.forEachPoint((p) => {
+    const refs = []
+    tracks.someView(p, (img, k) => {
+      const d = descOf(img, k)
+      if (d) refs.push(d)
+      return refs.length >= refObs
+    })
+    if (!refs.length) return
+    let seen = 0
+    tracks.forEachView(p, (img) => {
+      if (withGrid[img]) seen++
+    })
+    stats.projections += nWithGrid - seen
+    const x = tracks.x(p),
+      y = tracks.y(p),
+      z = tracks.z(p)
+    const cell = cull.cellOf(x, y, z)
+    let list = ptsOfCell.get(cell)
+    if (!list) ptsOfCell.set(cell, (list = []))
+    list.push(ptId.length)
+    ptId.push(p)
+    ptRefs.push(refs)
+    ptPos.push(x, y, z)
+  })
+  const cellsOfCam = camList.map(() => [])
+  for (const cell of ptsOfCell.keys()) for (const ci of cull.camsOfCell(cell)) cellsOfCam[ci].push(cell)
+
+  const search = { camList, cellsOfCam, ptsOfCell, ptId, ptRefs, ptPos, tracks, descOf, gatePx, tau2, ratio2, stats }
+  const crate = native && descriptorsAt ? guidedSearchClass() : null
+  const proposals = crate ? searchCrate(crate, search, descriptorsAt) : searchJs(search)
   stats.proposals = proposals.length
+  stats.threads = crate ? crate.threads : 1
 
   // Resolve best-first: a keypoint joins one point, a point gains one view per camera.
   proposals.sort((a, b) => a.d2 - b.d2 || a.p - b.p || a.ci - b.ci)
