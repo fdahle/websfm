@@ -111,6 +111,7 @@ export {
 } from './opfs/documents.js'
 export { appendLog, deleteLog, readLog, readLogTail, truncateLog } from './opfs/log.js'
 export { migrateProjectFormat } from './opfs/formatMigration.js'
+export { deleteRunJournal, loadRunJournal, loadRunJournals, saveRunJournal } from './opfs/runs.js'
 export {
   deleteReconstruction,
   loadLodFile,

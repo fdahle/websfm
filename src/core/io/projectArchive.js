@@ -40,6 +40,8 @@ export function shouldArchivePath(relPath, { includeDerived = true } = {}) {
   const top = path.split('/')[0]
   if (ARCHIVE_EXCLUDE.includes(path)) return false
   if (MIGRATION_LEFTOVER.test(path)) return false
+  // A run journal (core/runJournal.js) belongs to the tab that ran it.
+  if (top === 'runs') return false
   if (!includeDerived && ARCHIVE_DERIVED_DIRS.includes(top)) return false
   return true
 }

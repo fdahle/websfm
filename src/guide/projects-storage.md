@@ -112,6 +112,17 @@ saved, and the console says what changed (*Project upgraded: …*); after that, 
 versions of WebSfM can no longer open it. A project saved by a newer version does not
 open in an older one: reload the page to get the newest version.
 
+## When the tab closes during a run
+A browser can close a tab without warning: when the computer runs short of memory, for
+an update, or when the tab is discarded in the background. Depth maps are saved one by
+one as they finish, together with a note of how far the run got. When you open the
+project again, WebSfM asks whether to **Continue** the stopped run or **Discard** it.
+Continue computes only the depth maps that are missing, with the settings the run was
+started with, and the result is the same as a run that was never stopped. It is offered
+only while the sparse model, the images and those settings are unchanged; otherwise the
+run starts again from the beginning. Cancel the question to be asked again the next time
+the project opens.
+
 ## File name
 Exports are downloads: the browser saves them in its downloads folder, or asks where
 when it is set to. A point cloud or mesh export of more than about 256 MB asks where to

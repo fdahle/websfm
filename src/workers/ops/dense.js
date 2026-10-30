@@ -403,9 +403,10 @@ export function makeDenseOps({ rasterize }) {
     // unanswerable from a summary that only reports the final value.
     // The CPU path runs each map on the threaded build's pool (all cores but one) when the
     // store gave this run one worker for it (DENSE_TUNING.cpuDepthThreads); a split run
-    // keeps one thread per worker.
+    // (`split`, its share in `refs`) keeps one thread per worker. A continued run's
+    // `refs` alone, on one worker, keeps the threads.
     const cpuThreads =
-      !input.refs && (settings.cpuDepthThreads ?? DENSE_TUNING.cpuDepthThreads)
+      !input.split && (settings.cpuDepthThreads ?? DENSE_TUNING.cpuDepthThreads)
         ? Math.max(1, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1)
         : 0
     if (!backend && cpuThreads) emit('log', [`Depth maps: up to ${cpuThreads} threads per map`, 'info', 'Dense'])

@@ -62,6 +62,7 @@ cannot be recomputed at all.
 | `measurements.json` | `useMeasurementsStore` | saved measurements | user data |
 | `footprints.json` | `useFootprintsStore` | vector sets: image footprints, contours, imported polygons | a run, or user data (imports) |
 | `workflows.json` | `useWorkflowsStore` | Workflow Builder graphs and their run records | user data |
+| `runs/<stage>.json` | the stage's run (depth maps) | a run journal while the run is under way ([`runJournal.js`](../src/core/runJournal.js)); left behind by a tab that died, it lets the run continue; never archived | — |
 | `log.ndjson` | `useLogStore` | the console, one line per entry; never archived | — |
 | `<name>.v<n>.bak`, `format-migration.json` | format migration | the copies a migration kept, and its progress while it runs; never archived | — |
 

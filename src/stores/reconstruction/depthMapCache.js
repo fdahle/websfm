@@ -64,13 +64,15 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
   // workers hold their next maps until the unsaved ones are acknowledged. `run.retry`
   // `run.saveOrMove(write)` gives the run's other writes (the filter pass, the commit)
   // the same way out.
-  async function beginStreamedDepthMaps({ onWriteFailure = null } = {}) {
+  // `resume` (metas of maps an interrupted run saved, core/runJournal.js) keeps those
+  // planes: the index is already gone, the planes are what the journal lists.
+  async function beginStreamedDepthMaps({ onWriteFailure = null, resume = null } = {}) {
     if (!isPersisting()) return null
     const projectId = currentProjectId()
-    await opfs.beginDepthPlanes(projectId)
+    if (!resume) await opfs.beginDepthPlanes(projectId)
     depthMaps.value = new Map()
     depthMapsMeta.value = [] // the old set is gone; the new one is advertised on commit
-    const metas = [],
+    const metas = resume ? resume.map((m) => ({ ...m })) : [],
       writes = []
     const inFlight = new Set()
     let failure = null
@@ -91,14 +93,18 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
       projectId,
       metas,
       // → the write, settled (never rejects): the run's backpressure waits on it.
-      add(m) {
+      // `onSaved(meta)` runs once the map is on disk (a run journal records it).
+      add(m, onSaved = null) {
         const { meta, buffers } = serializeDepthMap(m)
         metas.push(meta)
-        const write = saveOrMove(() => opfs.saveDepthPlane(projectId, m.uuid, buffers)).catch((err) => {
-          if (failure) return
-          failure = err
-          onWriteFailure?.(err)
-        })
+        const write = saveOrMove(() => opfs.saveDepthPlane(projectId, m.uuid, buffers)).then(
+          () => onSaved?.(meta),
+          (err) => {
+            if (failure) return
+            failure = err
+            onWriteFailure?.(err)
+          },
+        )
         writes.push(write)
         return write
       },

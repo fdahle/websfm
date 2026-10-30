@@ -40,6 +40,7 @@ import { DENSE_TUNING } from '../../core/tuning.js'
 import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
+import { canContinue, journalKey, journalWriter, startJournal } from '../../core/runJournal.js'
 import { isSharedArray, postableCopy, shareableArray } from '../../core/bigArray.js'
 import { poissonHeapBytes } from '../../core/products/mesh.js'
 
@@ -87,7 +88,9 @@ export function createDense({
   // cloud whose points carry view-tracks; these are now persisted, so a restored
   // project works without rebuilding (legacy models saved before this still need
   // a Reconstruct re-run).
-  async function computeDepthMaps(settings = {}, onProgress) {
+  // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt
+  // on open). Its saved maps are kept and only the rest are computed.
+  async function computeDepthMaps(settings = {}, onProgress, { resume = null } = {}) {
     const cloud = mainSparseCloud.value
     if (!cloud || cloud.cameras.size < 2) {
       log('Dense: need a sparse cloud with ≥2 cameras first', 'warn', 'Dense')
@@ -215,11 +218,26 @@ export function createDense({
       // for a project that cannot save) made the preflight refuse ~100+ images.
       // A map that cannot be saved (storage full) stops the run: the rest could not
       // be kept either, and the worker would spend minutes computing them.
+      // The run journal's key: the model, the images and the settings the dialog asked
+      // for. A stopped run continues only on the same three (core/runJournal.js).
+      const requested = structuredClone(toRaw(settings))
+      const key = journalKey({
+        sparse: [cloud.id, cloud.createdAt ?? null],
+        images: inputImages.map((im) => im.uuid),
+        settings: requested,
+      })
+      let journal = null
+      if (resume && isPersisting()) {
+        const verdict = canContinue(resume, key)
+        if (verdict.ok) journal = structuredClone(resume)
+        else log(`Dense: the stopped depth-map run cannot continue (${verdict.why}); starting again`, 'warn', 'Dense')
+      }
       const run = await beginStreamedDepthMaps({
         onWriteFailure: (err) => {
           writeFailure = err
           terminateAll(err.message)
         },
+        resume: journal ? (journal.phase === 'pass1' ? journal.done : journal.metas) : null,
       })
       // Resolve a quality preset → working maxDim from the largest native image
       // dimension (Step 3), unless the user set an explicit maxDim in Advanced. A
@@ -285,54 +303,125 @@ export function createDense({
         )
       }
       settings = resolved
-      const {
-        maps,
-        summary: aSummary,
-        loopShare,
-      } = await runDepthMaps(
-        inputImages,
-        sparse,
-        withRegion({ ...settings, streamMaps: !!run }),
-        onProgress,
-        run
-          ? (m, ack) => {
-              takePreview(m)
-              run.add(m).finally(ack)
-            }
-          : null,
-      )
-      let stageSummary = aSummary ?? null
+      // A streamed run keeps a journal while it runs, so a tab that dies (closed, crashed,
+      // killed for memory) leaves enough to continue: the maps saved so far and the
+      // phase. Phases: pass1 → pass2 (Full method) → promote → filter → promoteFilter.
+      let writer = null
+      if (run) {
+        journal ??= startJournal({
+          stage: 'depth',
+          key,
+          settings: requested,
+          total: inputImages.length,
+          phase: 'pass1',
+        })
+        writer = journalWriter((j) => opfs.saveRunJournal(run.projectId, j), {
+          intervalMs: settings._journalMs ?? DENSE_TUNING.journalIntervalMs,
+        })
+        await writer.flush(journal)
+      }
+      const phase = journal?.phase ?? 'pass1'
+      const order = ['pass1', 'pass2', 'promote', 'filter', 'promoteFilter']
+      const reached = (p) => order.indexOf(phase) > order.indexOf(p)
+      const setPhase = async (next) => {
+        journal.phase = next
+        journal.metas = run.metas.map((m) => ({ ...m }))
+        journal.done = []
+        await writer.flush(journal)
+      }
+      // The maps a run with these refs leaves out: those the journal says are saved.
+      const remaining = (saved) =>
+        saved.size ? inputImages.map((_, i) => i).filter((i) => !saved.has(inputImages[i].uuid)) : null
+      // A continued run's progress counts the maps already saved.
+      const offset = (before) =>
+        before
+          ? (d, t, lbl, f) => onProgress?.(d + before, t + before, lbl, f == null ? f : (before + f * t) / (before + t))
+          : onProgress
+      if (resume && journal) {
+        const n = journal.phase === 'pass1' ? journal.done.length : inputImages.length
+        log(
+          `Dense: continuing the stopped run — ${pluralize(n, 'depth map')} of ${inputImages.length} already saved` +
+            `${journal.phase === 'pass1' ? '' : ` (from step ${journal.phase})`}`,
+          'info',
+          'Dense',
+        )
+      }
+      let pass1 = { maps: [], summary: null, loopShare: journal?.loopShare ?? 0 }
+      const saved1 = new Set(run && phase === 'pass1' ? run.metas.map((m) => m.uuid) : [])
+      const refs1 = remaining(saved1)
+      if (!reached('pass1') && (!refs1 || refs1.length)) {
+        pass1 = await runDepthMaps(
+          inputImages,
+          sparse,
+          withRegion({ ...settings, streamMaps: !!run }),
+          offset(saved1.size),
+          run
+            ? (m, ack) => {
+                takePreview(m)
+                run
+                  .add(m, (meta) => {
+                    journal.done.push(meta)
+                    writer.touch(journal)
+                  })
+                  .finally(ack)
+              }
+            : null,
+          refs1 ? { refs: refs1 } : {},
+        )
+      }
+      const { maps, summary: aSummary, loopShare } = pass1
+      let stageSummary = aSummary ?? journal?.summary ?? null
       if (run) {
         await run.settled()
+        if (!reached('pass1')) {
+          journal.summary = stageSummary
+          journal.loopShare = loopShare
+          await setPhase(settings.geomPass && run.metas.length > 1 ? 'pass2' : 'filter')
+        }
         // Full method, last stage (ACMP): the geometric-consistency pass over the saved first
         // pass. Its maps are written staged and promoted once all exist (utils/opfs/depth.js).
-        if (settings.geomPass && run.metas.length > 1) {
+        if (settings.geomPass && run.metas.length > 1 && !reached('pass2')) {
           const entries = await opfs.loadDepthFiles(run.projectId, run.metas)
           const at = new Map(run.metas.map((m, k) => [m.uuid, k]))
+          // A continued pass 2 keeps the staged maps its journal lists.
+          for (const meta of phase === 'pass2' ? journal.done : []) {
+            if (at.has(meta.uuid)) run.metas[at.get(meta.uuid)] = { ...meta }
+          }
+          const saved2 = new Set(phase === 'pass2' ? journal.done.map((m) => m.uuid) : [])
+          const refs2 = remaining(saved2)
           const staged = []
           let stageFailure = null
-          await runDepthMaps(
-            inputImages,
-            sparse,
-            withRegion({ ...settings, streamMaps: true }),
-            onProgress,
-            (m, ack) => {
-              takePreview(m)
-              const { meta, buffers } = serializeDepthMap(m)
-              if (at.has(m.uuid)) run.metas[at.get(m.uuid)] = meta
-              staged.push(
-                run
-                  .saveOrMove(() => opfs.saveStagedDepthPlane(run.projectId, m.uuid, buffers))
-                  .catch((err) => {
-                    stageFailure ??= err
-                  })
-                  .finally(ack),
-              )
-            },
-            { geomFrom: entries },
-          )
+          if (!refs2 || refs2.length) {
+            await runDepthMaps(
+              inputImages,
+              sparse,
+              withRegion({ ...settings, streamMaps: true }),
+              offset(saved2.size),
+              (m, ack) => {
+                takePreview(m)
+                const { meta, buffers } = serializeDepthMap(m)
+                if (at.has(m.uuid)) run.metas[at.get(m.uuid)] = meta
+                staged.push(
+                  run
+                    .saveOrMove(() => opfs.saveStagedDepthPlane(run.projectId, m.uuid, buffers))
+                    .then(() => {
+                      journal.done.push(meta)
+                      writer.touch(journal)
+                    })
+                    .catch((err) => {
+                      stageFailure ??= err
+                    })
+                    .finally(ack),
+                )
+              },
+              { geomFrom: entries, ...(refs2 ? { refs: refs2 } : {}) },
+            )
+          }
           await Promise.all(staged)
           if (stageFailure) throw stageFailure
+          await setPhase('promote')
+        }
+        if (settings.geomPass && run.metas.length > 1 && !reached('promote')) {
           // Idempotent (a promoted plane has no staged file left), so it can be retried.
           await run.saveOrMove(() =>
             opfs.promoteStagedDepthPlanes(
@@ -340,6 +429,7 @@ export function createDense({
               run.metas.map((m) => m.uuid),
             ),
           )
+          await setPhase('filter')
         }
         // A split run's maps arrive in finishing order. Keep the input order, so the
         // filter and fusion (which keeps the first point per cell) see the maps as one
@@ -347,12 +437,26 @@ export function createDense({
         const at = new Map(inputImages.map((im, k) => [im.uuid, k]))
         run.metas.sort((a, b) => at.get(a.uuid) - at.get(b.uuid))
         if (settings.geomConsistency !== false && run.metas.length) {
-          // The depth workers hold their last rasters until a collection that may not
-          // come: start the filter on a fresh pool, so they cannot crowd the tab's buffers.
-          releaseIdleWorkers()
-          stageSummary = await filterSavedDepthMaps(run, settings, stageSummary, loopShare, onProgress)
+          if (!reached('filter')) {
+            // The depth workers hold their last rasters until a collection that may not
+            // come: start the filter on a fresh pool, so they cannot crowd the tab's buffers.
+            releaseIdleWorkers()
+            stageSummary = await filterSavedDepthMaps(run, settings, stageSummary, loopShare, onProgress)
+            journal.summary = stageSummary
+            await setPhase('promoteFilter')
+          }
+          // The filtered planes were staged (a filter that stops leaves the maps intact).
+          await run.saveOrMove(() =>
+            opfs.promoteStagedDepthPlanes(
+              run.projectId,
+              run.metas.map((m) => m.uuid),
+              'f',
+            ),
+          )
         }
         await run.commit(settings)
+        await writer.settled()
+        await opfs.deleteRunJournal(run.projectId, 'depth')
       } else {
         depthMaps.value = new Map(maps.map((m) => [m.uuid, m]))
         depthMapsMeta.value = [] // the fresh maps supersede any restored index
@@ -380,7 +484,11 @@ export function createDense({
   // unsaved and waits for the acks beyond that: a disk slower than the maps (the last
   // maps of a film block at High, raster cache warm) otherwise queued 0.6 GB per map
   // on the page until the tab's buffer pool ran out.
-  async function runDepthMaps(images, sparse, settings, onProgress, onMap, extra = {}) {
+  // `extra.refs` (indices into `images`) computes only those maps, every image still a
+  // candidate source view: how a run continues after a tab died (core/runJournal.js).
+  async function runDepthMaps(images, sparse, settings, onProgress, onMap, extraIn = {}) {
+    const { refs: only = null, ...extra } = extraIn
+    const n = only ? only.length : images.length
     const onLog = (m, l, c) => log(m, l, c)
     const runToken = crypto.randomUUID()
     const onEventFor =
@@ -398,7 +506,7 @@ export function createDense({
       DENSE_TUNING.cpuDepthThreads &&
       globalThis.crossOriginIsolated === true &&
       typeof SharedArrayBuffer !== 'undefined'
-    if (onMap && images.length > 1 && !cpuThreads && !(settings.useGpu && (await workerDepthBackend(0)).gpu)) {
+    if (onMap && n > 1 && !cpuThreads && !(settings.useGpu && (await workerDepthBackend(0)).gpu)) {
       const nSources = Math.min(16, settings.maxSources ?? 6)
       // One worker's peak: its raster cache plus the run's shared inputs (counted whole).
       const perWorkerBytes = projectDensePeakBytes({
@@ -410,11 +518,11 @@ export function createDense({
         retainedMaps: 1,
         filterMaps: 0,
       }).total
-      workers = depthWorkerCount({ n: images.length, poolSize: POOL_SIZE, budget, perWorkerBytes })
+      workers = depthWorkerCount({ n, poolSize: POOL_SIZE, budget, perWorkerBytes })
     }
     if (workers === 1) {
       return workerComputeDepthMaps(
-        { images, sparse, settings: withAck(settings, 0), ...extra },
+        { images, sparse, ...(only ? { refs: only } : {}), settings: withAck(settings, 0), ...extra },
         {
           worker: 0,
           // The first of the Full method's passes keeps the sparse inputs: the geometric
@@ -432,7 +540,7 @@ export function createDense({
       'info',
       'Dense',
     )
-    const chunks = contiguousChunks(images.length, workers)
+    const chunks = contiguousChunks(n, workers).map((c) => (only ? c.map((k) => only[k]) : c))
     // Every worker picks its backend the same way: the first says which, not every one.
     const onLogOf = (w) => (w === 0 ? onLog : (m, l, c) => SAME_ON_EVERY_WORKER.test(m) || onLog(m, l, c))
     const counts = new Array(workers).fill(0),
@@ -442,7 +550,14 @@ export function createDense({
     const parts = await Promise.all(
       chunks.map((refs, w) =>
         workerComputeDepthMaps(
-          { images, sparse, refs, settings: withAck({ ...settings, memBudgetBytes: budget / workers }, w), ...extra },
+          {
+            images,
+            sparse,
+            refs,
+            split: true,
+            settings: withAck({ ...settings, memBudgetBytes: budget / workers }, w),
+            ...extra,
+          },
           {
             worker: w,
             onLog: onLogOf(w),
@@ -452,7 +567,7 @@ export function createDense({
               fractions[w] = f
               onProgress?.(
                 counts.reduce((x, y) => x + y, 0),
-                images.length,
+                n,
                 lbl,
                 fractions.reduce((x, y) => x + y, 0) / workers,
               )
@@ -466,7 +581,7 @@ export function createDense({
     })
     return {
       maps: [],
-      summary: mergeDepthSummaries(parts, { totalMs: performance.now() - t0, nImages: images.length }),
+      summary: mergeDepthSummaries(parts, { totalMs: performance.now() - t0, nImages: n }),
       loopShare: parts.reduce((x, p) => x + p.loopShare, 0) / workers,
     }
   }
@@ -492,7 +607,7 @@ export function createDense({
       if (meta) Object.assign(meta, f.coverage)
       writes.push(
         run
-          .saveOrMove(() => opfs.saveDepthPlane(run.projectId, f.uuid, { depth: f.depth }))
+          .saveOrMove(() => opfs.saveStagedDepthPlane(run.projectId, f.uuid, { depth: f.depth }, 'f'))
           .catch((err) => {
             if (writeFailure) return
             writeFailure = err

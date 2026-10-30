@@ -13,6 +13,7 @@ import DataModals from './components/modals/DataModals.vue'
 import ModelDownloadModal from './components/modals/app/ModelDownloadModal.vue'
 import DevConsole from './components/layout/DevConsole.vue'
 import BrowserWarning from './components/layout/BrowserWarning.vue'
+import { useStoppedRuns } from './composables/useStoppedRuns.js'
 import MobileWarning from './components/layout/MobileWarning.vue'
 import ToastStack from './components/layout/ToastStack.vue'
 import UnsavedChangesCard from './components/layout/UnsavedChangesCard.vue'
@@ -312,6 +313,11 @@ const {
   editClouds,
   textureMesh,
 })
+// A run a dead tab did not finish: offered again when its project opens.
+const { offerStoppedRuns } = useStoppedRuns({
+  runs: { depth: { label: 'Depth maps', start: (settings, opts) => runComputeDepthMaps(settings, opts) } },
+  isBusy: () => progressOpen.value || workflowRunning.value,
+})
 
 // ── Derived state ──────────────────────────────────────────────────────────────
 // Everything derived from store state alone (workspace readiness, match summaries,
@@ -487,6 +493,7 @@ const {
   resetToViewer,
   clearViewerScene: () => viewerRef.value?.clearReconstructionData(),
   isBusy: () => progressOpen.value || workflowRunning.value,
+  onProjectOpened: (id) => offerStoppedRuns(id),
 })
 
 const consoleOpen = ref(localStorage.getItem('consoleOpen') === 'true')

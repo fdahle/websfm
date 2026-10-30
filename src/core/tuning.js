@@ -325,6 +325,10 @@ export const MATCH_TUNING = {
 // DenseModal — the user-facing dense defaults live in defaults.user.js
 // (DEPTHMAP_DEFAULTS / DENSE_FUSE_DEFAULTS). `settings`/`opts` from the caller override.
 export const DENSE_TUNING = {
+  // How often a depth-map run's journal (core/runJournal.js) is rewritten while maps
+  // finish: what a dead tab's run can lose and recompute on Continue, against one
+  // small JSON write. (A run's `_journalMs` setting overrides it; the tests use 0.)
+  journalIntervalMs: 5000,
   coarseLong: 600, // longest-side px at the coarsest pyramid level (sets level count)
   // Bilateral-weighted NCC in PatchMatch (mvs.rs Bilateral), σc in grey levels; 0 = plain
   // NCC. COLMAP uses 0.2 of the range (51). ETH3D six scenes, F1 @2 cm (approximate

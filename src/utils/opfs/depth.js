@@ -73,18 +73,23 @@ export async function saveDepthPlane(projectId, uuid, buffers) {
 // beside its first-pass ones, as `<uuid>.g.<key>.bin`: later maps of the same pass still
 // read the first-pass planes (and a File read after its file was rewritten fails). An
 // interrupted run leaves only `<uuid>.g` names, which commitDepthIndex's stale sweep drops.
-export async function saveStagedDepthPlane(projectId, uuid, buffers) {
-  return saveDepthPlane(projectId, `${uuid}.g`, buffers)
+// The cross-view filter stages its planes the same way, as `<uuid>.f.<key>.bin`
+// (tag 'f'), so a filter that stops partway leaves every saved map unfiltered and
+// can simply run again.
+export async function saveStagedDepthPlane(projectId, uuid, buffers, tag = 'g') {
+  return saveDepthPlane(projectId, `${uuid}.${tag}`, buffers)
 }
 
 // Once every map of the pass is written: each staged plane replaces its first-pass one
-// (a rename where OPFS has FileSystemFileHandle.move, else a copy).
-export async function promoteStagedDepthPlanes(projectId, uuids) {
+// (a rename where OPFS has FileSystemFileHandle.move, else a copy). Idempotent: a plane
+// already promoted has no staged file left, so a promotion that stopped partway can run
+// again.
+export async function promoteStagedDepthPlanes(projectId, uuids, tag = 'g') {
   return trackPersistence('promoteStagedDepthPlanes:' + String(projectId), async () => {
     const dir = await getSubDir(projectId, 'depthmaps')
     for (const uuid of uuids) {
       for (const key of DEPTH_BIN_KEYS) {
-        const staged = `${uuid}.g.${key}.bin`,
+        const staged = `${uuid}.${tag}.${key}.bin`,
           name = `${uuid}.${key}.bin`
         let handle
         try {

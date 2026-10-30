@@ -42,7 +42,8 @@ import { useGuideStore } from '../stores/useGuideStore.js'
 //   resetToViewer     — from useTabs; drop tabs back to the 3D viewer
 //   clearViewerScene  — blank the Three.js scene (viewerRef.clearReconstructionData)
 //   isBusy            — true while a compute run or workflow is in flight
-export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = () => false }) {
+//   onProjectOpened   — called with the id once a project has opened (useStoppedRuns)
+export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = () => false, onProjectOpened = null }) {
   const { log } = useLog()
   const projectsStore = useProjectsStore()
   const { projects, currentProjectId, currentProjectName } = storeToRefs(projectsStore)
@@ -285,6 +286,9 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       logHeapInventory()
       // restore() sets selectedCloud, which the watcher pushes into the viewer.
     })
+    // Not awaited: what follows the open (the Continue prompt of a stopped run) waits
+    // for the user, and the open itself is done.
+    if (currentProjectId.value === id) onProjectOpened?.(id)
     return true
   }
 

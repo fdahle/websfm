@@ -265,11 +265,12 @@ export function usePipeline({
 
   // Dense Stage A — Build Depth Maps (PatchMatch MVS). Single worker call; cancel
   // by terminating the worker (the store catches the rejection and resets status).
-  async function runComputeDepthMaps(settings) {
+  // `opts.resume`: continue a run a dead tab stopped (useStoppedRuns).
+  async function runComputeDepthMaps(settings, opts = {}) {
     openProgress('Building Depth Maps', images.value.length, () => terminateAll('depth maps cancelled'), {
       unit: 'images',
     })
-    await computeDepthMaps(settings, report)
+    await computeDepthMaps(settings, report, opts)
     return finishRun()
   }
 
