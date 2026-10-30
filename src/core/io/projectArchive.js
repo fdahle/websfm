@@ -121,9 +121,18 @@ export function importedProjectName(name, existingNames = []) {
   const taken = new Set(existingNames)
   const base = String(name || 'Imported project')
   if (!taken.has(base)) return base
-  let candidate = `${base} (imported)`
+  return suffixedName(base, 'imported', taken)
+}
+
+// A duplicate's name: always marked, "Survey (copy)", then "Survey (copy 2)" …
+export function duplicateProjectName(name, existingNames = []) {
+  return suffixedName(String(name || 'Project'), 'copy', new Set(existingNames))
+}
+
+function suffixedName(base, word, taken) {
+  let candidate = `${base} (${word})`
   let n = 2
-  while (taken.has(candidate)) candidate = `${base} (imported ${n++})`
+  while (taken.has(candidate)) candidate = `${base} (${word} ${n++})`
   return candidate
 }
 

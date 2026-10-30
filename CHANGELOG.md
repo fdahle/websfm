@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Duplicate a project.** The project list's **⋯** menu ▸ **Duplicate** copies a
+  project, to try other settings on the copy while the original stays as it is. A
+  browser project is copied into this browser, a folder project into another folder you
+  pick (**Duplicate…**). The copy is checked file by file like a move, gets its own id
+  and the name *… (copy)*, and leaves out an unfinished run's journal. Browser tests in
+  Chromium, Firefox and WebKit open the copy and change it without touching the original.
 - **DEMs of chosen classes, for canopy and building heights.** Build DEM ▸ **Points ▸
   Classes…** builds the top surface of the classes you tick in a classified cloud (high
   vegetation by default); with a DTM and the DEM of difference that is a canopy height

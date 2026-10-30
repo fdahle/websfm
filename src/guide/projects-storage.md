@@ -1,7 +1,7 @@
 ---
 id: projects-storage
 title: Projects & Storage
-summary: Understand autosave, browser storage, folder-backed projects, storage running full, and portable .websfm project files.
+summary: Understand autosave, browser storage, folder-backed projects, storage running full, duplicating a project, and portable .websfm project files.
 category: Start here
 order: 2
 ---
@@ -44,6 +44,15 @@ a project from browser storage into a folder you choose, checks the copy, and th
 removes the browser copy. **Move to browser storage** copies it back and leaves the
 folder on disk untouched. Either way, an open project is reopened from its new
 location, so everything it shows is read from there.
+
+## Duplicate a project
+**Duplicate** in the project list's **⋯** menu copies a project, to try other settings
+on the copy and keep the original as it is. The copy, *Survey (copy)*, appears in the
+list beside it; the open project stays open. A project in this browser is copied into
+this browser; a folder project is copied into another folder you choose
+(**Duplicate…**), and has to be open first so its folder is connected. The copy holds
+everything but a run a closed tab left unfinished, and is a project of its own: what
+you change in one does not reach the other. It needs as much room as the original.
 
 ## When browser storage is full
 Whatever finds browser storage full (adding images, a dense cloud, a mesh, a DEM, any

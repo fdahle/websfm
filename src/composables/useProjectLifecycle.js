@@ -62,6 +62,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     moveProjectToFolder,
     dropBrowserCopy,
     moveProjectToBrowser,
+    duplicateProject,
     setProjectCrs,
   } = projectsStore
   const gcpsStore = useGcpsStore()
@@ -534,6 +535,45 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     if (await moveToFolder(id, dirHandle)) await reopenMoved(id)
   }
 
+  // Duplicate: a browser project's copy goes into browser storage, a folder project's
+  // into a folder the user picks (its data is on disk, often more than the browser
+  // holds). The open project stays open; the copy is in the project list.
+  async function duplicateProjectById(id) {
+    const entry = projects.value.find((p) => p.id === id)
+    if (!entry || refuseWhileBusy('Duplicate project')) return
+    if (id === currentProjectId.value) await flushProjectWork()
+    const dirHandle = isFolderProject(entry) ? await pickDirectory() : null
+    if (isFolderProject(entry) && !dirHandle) return
+    const attempt = (confirmed) =>
+      withLoadingOverlay('Duplicating project…', () =>
+        duplicateProject(id, { dirHandle, confirmed, onProgress: fileProgress }),
+      )
+    let res
+    try {
+      res = await attempt(false)
+      if (
+        !res.ok &&
+        res.needsConfirm &&
+        (await confirmDialog({
+          title: 'Folder not empty',
+          message: `"${dirHandle.name}" is not empty. Put the copy into it anyway?`,
+          confirmLabel: 'Duplicate',
+        }))
+      ) {
+        res = await attempt(true)
+      }
+    } catch (err) {
+      res = { ok: false, error: err?.message ?? String(err) }
+    }
+    if (res.ok) {
+      log(`Project "${entry.name}" duplicated as "${res.name}" (${res.files} files)`, 'info', 'Project')
+      showToast('Project duplicated', { detail: `"${res.name}" is in the project list` })
+    } else if (!res.needsConfirm) {
+      log(`Duplicate project failed: ${res.error}`, 'error', 'Project')
+      showToast('Could not duplicate the project', { detail: res.error, kind: 'error', ms: 6000 })
+    }
+  }
+
   // ── Browser storage full ─────────────────────────────────────────────────────
   // Any write that finds browser storage full asks here (utils/storageFull.js, through
   // utils/persistence.js for every tracked write): move the project to a folder on disk,
@@ -823,6 +863,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     onFolderRepick,
     openProjectFolder,
     moveCurrentProjectToFolder,
+    duplicateProjectById,
     moveCurrentProjectToBrowser,
     onSaveProject,
     importProjectFile,

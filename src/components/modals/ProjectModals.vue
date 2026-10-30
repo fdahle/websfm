@@ -69,6 +69,7 @@ const {
   closeWorkflowBuilder,
   confirmRemoveImages,
   deleteMessage,
+  duplicateProjectById,
   folderPrompt,
   folderPromptProject,
   handleCancelNewProject,
@@ -186,6 +187,7 @@ const progressSpotlight = computed(() =>
         moveCurrentProjectToBrowser(id)
       }
     "
+    @duplicate="duplicateProjectById"
     @settings="
       () => {
         projectPickerOpen = false

@@ -10,6 +10,7 @@ import {
   isProjectArchiveName,
   archiveFileName,
   importedProjectName,
+  duplicateProjectName,
   archiveSizeVerdict,
   isSafeArchiveEntry,
   formatBytes,
@@ -105,6 +106,12 @@ describe('naming', () => {
     expect(importedProjectName('A', ['B'])).toBe('A')
     expect(importedProjectName('A', ['A'])).toBe('A (imported)')
     expect(importedProjectName('A', ['A', 'A (imported)'])).toBe('A (imported 2)')
+  })
+
+  it('always marks a duplicate, and numbers further copies', () => {
+    expect(duplicateProjectName('A', ['A'])).toBe('A (copy)')
+    expect(duplicateProjectName('A', ['A', 'A (copy)'])).toBe('A (copy 2)')
+    expect(duplicateProjectName('', [])).toBe('Project (copy)')
   })
 })
 

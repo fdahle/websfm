@@ -11,6 +11,8 @@ import {
   validateManifest,
   archiveFileName,
   importedProjectName,
+  duplicateProjectName,
+  shouldArchivePath,
 } from '../core/io/projectArchive.js'
 import {
   STORAGE_FOLDER,
@@ -517,6 +519,86 @@ export const useProjectsStore = defineStore('projects', () => {
     return { ok: true, ...copied }
   }
 
+  // ── Duplicate ───────────────────────────────────────────────────────────────
+  // A copy under a fresh id, to try other settings without touching the original: the
+  // same verified tree copy as a move, into browser storage, or into `dirHandle` (a
+  // folder project). Internal uuids are project-scoped, so only project.json's id, name
+  // and dates are stamped over, as on import. A run journal belongs to the tab that ran
+  // it and a format migration's leftovers undo it in the original only, so neither is
+  // copied (shouldArchivePath, as for a project file); the console log follows as it is.
+  // The original is leased meanwhile, so a tab that has it open cannot write into the
+  // copy's source. Returns { ok, id, name, files, bytes } or { ok: false, error,
+  // needsConfirm? } (a folder that is not empty, as for a move).
+  async function duplicateProject(id, { dirHandle = null, confirmed = false, onProgress = null } = {}) {
+    const entry = projectEntry(id)
+    if (!entry) return { ok: false, error: 'project not found' }
+    let source
+    if (isFolderProject(entry)) {
+      const plan = await openPlan(id)
+      if (plan.action !== 'open') return { ok: false, error: 'connect to the folder first' }
+      source = plan.handle
+    } else {
+      source = await opfs.getOpfsProjectDir(id)
+    }
+    if (dirHandle) {
+      const hasProjectJson = !!(await opfs.readJsonAt(dirHandle, 'project.json'))
+      const verdict = newFolderVerdict({ isEmpty: await opfs.dirIsEmpty(dirHandle), hasProjectJson, confirmed })
+      if (!verdict.ok) return verdict
+    }
+    const temporaryLease = leasedId === id ? null : await acquireProjectLease(id)
+    const newId = crypto.randomUUID()
+    const target = dirHandle ?? (await opfs.getOpfsProjectDir(newId, true))
+    const folderWasEmpty = dirHandle ? await opfs.dirIsEmpty(dirHandle) : true
+    // Never leave a half-made copy behind: its tree, or what it put into an empty folder.
+    const discard = async () => {
+      projects.value = projects.value.filter((p) => p.id !== newId)
+      if (!dirHandle) return opfs.deleteOpfsProjectTree(newId).catch(() => {})
+      opfs.clearProjectRoot(newId)
+      await deleteProjectHandle(newId).catch(() => {})
+      if (folderWasEmpty) await opfs.clearDirectory(dirHandle).catch(() => {})
+    }
+    try {
+      if (id === currentProjectId.value) await flushPersistence()
+      const skip = (relPath) => isLogFile(relPath) || !shouldArchivePath(relPath)
+      const before = await opfs.measureTree(source, { skip })
+      const copied = await opfs.copyTree(source, target, { onProgress, skip })
+      if (!copyVerified(before, copied)) {
+        await discard()
+        return { ok: false, error: `copy did not verify (${copied.files}/${before.files} files)` }
+      }
+      await copyLogs(source, target)
+      if (dirHandle) {
+        opfs.setProjectRoot(newId, dirHandle)
+        await saveProjectHandle(newId, dirHandle)
+      }
+      const now = new Date().toISOString()
+      const name = duplicateProjectName(
+        entry.name,
+        projects.value.map((p) => p.name),
+      )
+      const copy = {
+        id: newId,
+        name,
+        sceneType: entry.sceneType,
+        crs: entry.crs ?? null,
+        createdAt: now,
+        lastModified: now,
+        createdWithVersion: entry.createdWithVersion ?? null,
+        ...(dirHandle ? { storage: STORAGE_FOLDER, folderName: dirHandle.name } : {}),
+      }
+      await opfs.updateProject(newId, (data) => ({ ...data, ...copy }))
+      projects.value.push(copy)
+      await saveIndex()
+      return { ok: true, id: newId, name, ...copied }
+    } catch (err) {
+      await discard()
+      discardPersistenceFailure('project-index')
+      throw err
+    } finally {
+      temporaryLease?.()
+    }
+  }
+
   // ── Project file (.websfm) ──────────────────────────────────────────────────
   // Save/load is a zip/unzip of the project's own directory tree — see
   // core/io/projectArchive.js for why there is no separate format. The store's
@@ -645,6 +727,7 @@ export const useProjectsStore = defineStore('projects', () => {
     moveProjectToFolder,
     dropBrowserCopy,
     moveProjectToBrowser,
+    duplicateProject,
     exportProject,
     importProject,
     touchProject,

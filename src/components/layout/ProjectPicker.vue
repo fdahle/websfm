@@ -84,6 +84,7 @@ const emit = defineEmits([
   'save-copy',
   'move-to-folder',
   'move-to-browser',
+  'duplicate',
   'example',
 ])
 
@@ -335,6 +336,22 @@ onBeforeUnmount(() => {
         </button>
         <button class="menu-item" @click="runMenu(() => startRename(menu.project.id, menu.project.name))">
           Rename
+        </button>
+        <!-- A browser project is copied in place; a folder project's copy goes into a
+             folder you pick, so it needs the folder connected (open) and asks for one. -->
+        <button
+          class="menu-item"
+          :disabled="isFolderProject(menu.project) && menu.id !== currentProjectId"
+          :title="
+            isFolderProject(menu.project) && menu.id !== currentProjectId
+              ? 'Open this project first'
+              : isFolderProject(menu.project)
+                ? 'Copy the whole project into another folder, to try other settings on the copy'
+                : 'Copy the whole project, to try other settings on the copy'
+          "
+          @click="runMenu(() => emit('duplicate', menu.id))"
+        >
+          {{ isFolderProject(menu.project) ? 'Duplicate…' : 'Duplicate' }}
         </button>
         <button
           class="menu-item"
