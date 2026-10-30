@@ -375,3 +375,57 @@ test('a depth run keeps the maps whose camera and settings did not change', asyn
   expect(third[moved]).toBeTruthy()
   expect(errors).toEqual([])
 })
+
+// The image list's Detect features… / Match features… on one image: only it is detected
+// again, and only its pairs are matched.
+test('detect and match features on a selection touch only those images', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the run logic')
+  test.setTimeout(240_000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await openFixture(page)
+  const state = () =>
+    page.evaluate(async () => {
+      const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+      const { useMatchesStore } = await import('/src/stores/useMatchesStore.js')
+      return {
+        images: useImagesStore().images.map((im) => ({ id: im.id, uuid: im.uuid, rev: im.kpRev ?? 0 })),
+        pairs: [...useMatchesStore().matchStore.keys()].sort(),
+      }
+    })
+  // The fixture keeps no descriptors: detect every image once, as matching needs them.
+  await page.evaluate(async () => {
+    const app = document.querySelector('#app').__vue_app__._instance.setupState
+    const { DETECT_DEFAULTS_BY_DETECTOR } = await import('/src/core/defaults.user.js')
+    await app.runDetect({ ...DETECT_DEFAULTS_BY_DETECTOR.sift, detector: 'sift', overwrite: true, maxKeypoints: 1500 })
+    const { MATCH_DEFAULTS } = await import('/src/core/defaults.user.js')
+    await app.runMatch({ ...MATCH_DEFAULTS, strategy: 'exhaustive', matcher: 'bruteforce', onlyNewPairs: false })
+  })
+  const before = await state()
+  const one = before.images[0]
+
+  await page.evaluate(async (id) => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    useModalsStore().detectOnlyIds = [id]
+    useModalsStore().detectFeaturesOpen = true
+  }, one.id)
+  const detect = page.getByRole('dialog', { name: 'Detect Features' })
+  await detect.getByRole('button', { name: 'Run on 1 Selected Image' }).click()
+  await expect.poll(async () => (await state()).images.find((im) => im.id === one.id).rev).toBeGreaterThan(one.rev)
+  const afterDetect = await state()
+  for (const im of afterDetect.images.slice(1)) expect(im.rev).toBe(before.images.find((b) => b.id === im.id).rev)
+  // Its pairs went with its old keypoints; the others stay.
+  expect(afterDetect.pairs.filter((p) => p.includes(one.uuid))).toEqual([])
+
+  await page.evaluate(async (id) => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    useModalsStore().matchOnlyIds = [id]
+    useModalsStore().matchFeaturesOpen = true
+  }, one.id)
+  const match = page.getByRole('dialog', { name: 'Match Features' })
+  await expect(match.getByText('Only pairs with one of the 1 selected image')).toBeVisible()
+  await match.getByText('Exhaustive', { exact: true }).click()
+  await match.getByRole('button', { name: 'Run Matching' }).click()
+  await expect.poll(async () => (await state()).pairs, { timeout: 120_000 }).toEqual(before.pairs)
+  expect(errors).toEqual([])
+})

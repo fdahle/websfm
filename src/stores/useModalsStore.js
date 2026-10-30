@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
 // Pure UI state: which modals/dialogs are open and the transient payloads they
@@ -90,6 +90,16 @@ export const useModalsStore = defineStore('modals', () => {
   const sfmSourceOpen = ref(false)
   // Import ▸ Project into this project: choose which other project (useProjectMerge).
   const importProjectOpen = ref(false)
+  // The sidebar's Detect features… / Match features… on a selection: the image ids the
+  // dialog is limited to (null: every image). Cleared when the dialog closes.
+  const detectOnlyIds = ref(null)
+  const matchOnlyIds = ref(null)
+  watch(detectFeaturesOpen, (open) => {
+    if (!open) detectOnlyIds.value = null
+  })
+  watch(matchFeaturesOpen, (open) => {
+    if (!open) matchOnlyIds.value = null
+  })
   const infoImageId = ref(null)
   // Show information on a product: { cloudId } (sparse, dense, mesh) or { productId } (a DEM / ortho).
   const infoProduct = ref(null)
@@ -169,6 +179,8 @@ export const useModalsStore = defineStore('modals', () => {
     symbologyCloudId,
     sfmSourceOpen,
     importProjectOpen,
+    detectOnlyIds,
+    matchOnlyIds,
     infoImageId,
     infoProduct,
     fiducialDetectOpen,

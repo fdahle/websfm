@@ -35,6 +35,12 @@ sparse reconstruction, so a false match here quietly poisons
 [bundle adjustment](help:bundle-adjustment) downstream — which is why the defaults
 lean strict and every pair is checked with [RANSAC](help:ransac) before it counts.
 
+## Only some images
+Right-click images in the image list ▸ **Match features…** matches only the pairs with
+one of them, among the pairs the strategy below chooses: each of them with every other
+image (Exhaustive), or with its neighbours (Preselect, Sequential). Their earlier
+results are replaced; every other pair keeps its own.
+
 ## How the settings fit together
 Matching runs four steps, and the dialog is laid out in that order: **choose image
 pairs** (pairing strategy), **match descriptors** (brute-force or LightGlue), **verify

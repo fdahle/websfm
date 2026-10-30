@@ -4,6 +4,7 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import SettingsGroup from '../ui/SettingsGroup.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import PresetCards from '../ui/PresetCards.vue'
@@ -16,7 +17,12 @@ import { MATCH_DEFAULTS, MATCH_PRESETS, MATCH_PRESET_META } from '../../../core/
 import { initialMatchStrategy } from '../../../core/recommend.js'
 import { MATCH_TUNING } from '../../../core/tuning.js'
 import { estimatePairCount, subsetGateStatus } from '../../../core/features/matchPlan.js'
-import { repairEffect, onlyNewPairsDefault, onlyNewPairsEffect } from '../../../core/stepEffects/match.js'
+import {
+  repairEffect,
+  onlyNewPairsDefault,
+  onlyNewPairsEffect,
+  selectionPairsEffect,
+} from '../../../core/stepEffects/match.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
 const props = defineProps({
@@ -30,7 +36,12 @@ const props = defineProps({
   // For Match only new pairs: the pairs with a result, and the images with features in none.
   matchedPairs: { type: Number, default: 0 },
   unpairedImages: { type: Number, default: 0 },
+  // The sidebar's Match features… on a selection: only pairs with one of these image ids
+  // (null: every pair the strategy chooses); `onlyCount` of them have keypoints.
+  onlyIds: { type: Array, default: null },
+  onlyCount: { type: Number, default: 0 },
 })
+const limited = computed(() => !!props.onlyIds?.length)
 
 const emit = defineEmits(['close', 'run'])
 
@@ -95,7 +106,10 @@ const matchers = [
 // falls back to the same values. Cloned so edits don't mutate the shared constant.
 const settings = ref({
   ...MATCH_DEFAULTS,
-  onlyNewPairs: onlyNewPairsDefault({ matchedPairs: props.matchedPairs, unpairedImages: props.unpairedImages }),
+  // A selection is matched again (its pairs' results are replaced) unless asked otherwise.
+  onlyNewPairs:
+    !props.onlyIds?.length &&
+    onlyNewPairsDefault({ matchedPairs: props.matchedPairs, unpairedImages: props.unpairedImages }),
 })
 
 // Quality presets tune the geometric-verification strictness (deltas over defaults)
@@ -174,6 +188,7 @@ const pairs = computed(() =>
 const pairsEffect = computed(() => {
   const n = props.detectedImageCount
   if (n < 2) return 'Needs at least 2 images with keypoints.'
+  if (limited.value) return selectionPairsEffect(strategy.value, { k: props.onlyCount, n })
   const { count, exact } = pairs.value
   const all = (n * (n - 1)) / 2
   if (count == null) return `${fmt(n)} images: pairs whose footprints overlap enough, out of ${fmt(all)} possible.`
@@ -269,12 +284,24 @@ const numbers = computed(() => {
 })
 
 function run() {
-  emit('run', { strategy: strategy.value, matcher: matcher.value, ...settings.value, useGpu: useGpu.value })
+  emit('run', {
+    strategy: strategy.value,
+    matcher: matcher.value,
+    ...settings.value,
+    ...(limited.value ? { onlyIds: [...props.onlyIds] } : {}),
+    useGpu: useGpu.value,
+  })
 }
 </script>
 
 <template>
   <ModalShell title="Match Features" @close="emit('close')">
+    <SettingsGroup v-if="limited" title="Source">
+      <p class="field-hint">
+        Only pairs with one of the {{ onlyCount }} selected image{{ onlyCount === 1 ? '' : 's' }}, matched with every
+        other image the pairing below allows.
+      </p>
+    </SettingsGroup>
     <PresetCards :model-value="activePreset" :base-id="baseId" :presets="MATCH_PRESET_META" @select="selectPreset" />
 
     <SettingsStep step="1" title="Choose image pairs" :effect="pairsEffect">

@@ -7,6 +7,7 @@ import SettingsStep from '../ui/SettingsStep.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import WarnBox from '../ui/WarnBox.vue'
+import SettingsGroup from '../ui/SettingsGroup.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { useDatasetRecommendations } from '../../../composables/useDatasetRecommendations.js'
 import { useRecommendedPreset } from '../../../composables/useRecommendedPreset.js'
@@ -29,6 +30,10 @@ const props = defineProps({
   // Current image list — used to warn when Append mode would leave a mix of
   // detectors (e.g. some SIFT, some DISK), which breaks LightGlue.
   images: { type: Array, default: () => [] },
+  // The sidebar's Detect features… on a selection: only these image ids, detected again
+  // (null: the Mode decides). And how many of them the sparse model holds.
+  onlyIds: { type: Array, default: null },
+  inModel: { type: Number, default: 0 },
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -36,7 +41,9 @@ const { recommendations } = useDatasetRecommendations()
 // The machine compute budget bounds how many images SIFT runs at once (injected at run()).
 const { memBudgetBytes } = useComputeSettings()
 
-const overwrite = ref(false)
+const limited = computed(() => !!props.onlyIds?.length)
+// A selection is detected again, whatever it holds now.
+const overwrite = ref(!!props.onlyIds?.length)
 const modeOptions = [
   { id: false, label: 'Append' },
   { id: true, label: 'Overwrite' },
@@ -213,7 +220,11 @@ const UNTILED_CEILING_PX = {
 }
 const untiledCeilingPx = computed(() => UNTILED_CEILING_PX[detector.value] ?? DETECT_TUNING.spMaxUntiledInputPx)
 // The images this run will actually touch (Append skips finished ones).
-const runImages = computed(() => props.images.filter((img) => overwrite.value || img.kpStatus !== 'done'))
+const runImages = computed(() =>
+  limited.value
+    ? props.images.filter((img) => props.onlyIds.includes(img.id))
+    : props.images.filter((img) => overwrite.value || img.kpStatus !== 'done'),
+)
 const oversizedSpImages = computed(() => {
   if (!isLearned.value || lp.value.tiling !== 'off') return []
   return runImages.value.filter((img) => {
@@ -301,6 +312,7 @@ function doRun() {
   emit('run', {
     detector: detector.value,
     overwrite: overwrite.value,
+    ...(limited.value ? { onlyIds: [...props.onlyIds] } : {}),
     ...settings.value,
     memBudgetBytes: memBudgetBytes.value,
   })
@@ -334,7 +346,18 @@ function onShellClose() {
       </select>
     </SettingsField>
 
+    <SettingsGroup v-if="limited" title="Source">
+      <p class="field-hint">
+        Only the {{ runImages.length }} selected image{{ runImages.length === 1 ? '' : 's' }}, detected again: their
+        keypoints and the matches on them are replaced.
+      </p>
+      <WarnBox v-if="inModel">
+        {{ inModel }} of them {{ inModel === 1 ? 'is' : 'are' }} in the sparse model. New features no longer match what
+        the model recorded, so Add to the model stops until the model is rebuilt.
+      </WarnBox>
+    </SettingsGroup>
     <SettingsField
+      v-else
       :hint="
         overwrite ? 'Re-detect all images, replacing existing keypoints.' : 'Skip images that already have keypoints.'
       "
@@ -613,7 +636,11 @@ function onShellClose() {
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="attemptRun">
-        Run on All Images
+        {{
+          limited
+            ? `Run on ${runImages.length} Selected Image${runImages.length === 1 ? '' : 's'}`
+            : 'Run on All Images'
+        }}
       </button>
     </template>
   </ModalShell>

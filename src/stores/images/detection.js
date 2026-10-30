@@ -246,7 +246,15 @@ export function createDetection({
     const kept = new Set(
       (journal?.done ?? []).filter((u) => images.value.some((im) => im.uuid === u && im.kpStatus === 'done')),
     )
-    const pending = (settings.overwrite ? images.value : images.value.filter((img) => img.kpStatus !== 'done'))
+    // `onlyIds` (the sidebar's Detect features… on a selection): those images, again.
+    const only = settings.onlyIds?.length ? new Set(settings.onlyIds) : null
+    const pending = (
+      only
+        ? images.value.filter((img) => only.has(img.id))
+        : settings.overwrite
+          ? images.value
+          : images.value.filter((img) => img.kpStatus !== 'done')
+    )
       .filter((img) => img.kpStatus !== 'running')
       .filter((img) => !kept.has(img.uuid))
     const total = pending.length

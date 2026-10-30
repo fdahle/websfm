@@ -172,6 +172,17 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     },
     zoomToImage: zoomToImagePosition,
     deleteKeypoints: confirmClearKeypoints,
+    // Detect features… / Match features… on these images (ids): the dialogs, limited to them.
+    detectImages: (ids) => {
+      const m = useModalsStore()
+      m.detectOnlyIds = [...ids]
+      m.detectFeaturesOpen = true
+    },
+    matchImages: (ids) => {
+      const m = useModalsStore()
+      m.matchOnlyIds = [...ids]
+      m.matchFeaturesOpen = true
+    },
     removeImage: requestRemoveImages,
     renameImage: renameImageFromSidebar,
     downloadImage: downloadImageOriginal,

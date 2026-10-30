@@ -10,6 +10,17 @@ import { plural } from './format.js'
 export const onlyNewPairsDefault = ({ matchedPairs = 0, unpairedImages = 0 } = {}) =>
   matchedPairs > 0 && unpairedImages > 0
 
+// Step 1 when the run is limited to a selection (the sidebar's Match features…): the
+// pairs with one of the `k` selected images among the `n` with keypoints.
+export function selectionPairsEffect(strategy, { k = 0, n = 0 } = {}) {
+  if (!k) return 'None of the selected images has keypoints: detect them first.'
+  if (strategy === 'exhaustive') {
+    const pairs = k * (n - k) + (k * (k - 1)) / 2
+    return `${plural(k, 'selected image')} with every other image: ${plural(pairs, 'pair')}.`
+  }
+  return `${plural(k, 'selected image')}: of the pairs the ${strategy === 'sequential' ? 'capture order' : 'preselection'} chooses, those with one of them.`
+}
+
 // What step 1 adds to its pair count when matched pairs exist.
 export function onlyNewPairsEffect(s, { matchedPairs = 0, unpairedImages = 0 } = {}) {
   if (!matchedPairs) return ''

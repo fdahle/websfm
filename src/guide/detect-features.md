@@ -14,6 +14,14 @@ similar-looking texture apart better. Projects detected before this change keep
 working: their descriptors are converted when matching loads them, so you do not need
 to detect again.
 
+## Only some images
+Right-click images in the image list (or a selection of them) ▸ **Detect features…**
+opens this dialog for those images alone: they are detected again with the settings
+here, their old keypoints and the matches on them are replaced, and every other image
+keeps its own. Use it for a photo whose features came out poorly, or one added later.
+An image the sparse model holds no longer matches what the model recorded once it is
+detected again, so the dialog says so; rebuild the model afterwards.
+
 ## How the settings fit together
 Detection runs four steps in a fixed order, and the dialog's Advanced settings are
 laid out in that order:

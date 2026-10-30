@@ -323,6 +323,17 @@ function fromMenu(fn) {
   closeMenu()
   fn(img)
 }
+// Detect features… / Match features… on the menu's images: the run dialogs, limited to them.
+function ctxDetect() {
+  const ids = ctxTargets.value.map((img) => img.id)
+  closeMenu()
+  sidebar.detectImages(ids)
+}
+function ctxMatch() {
+  const ids = ctxTargets.value.filter((img) => img.kpStatus === 'done').map((img) => img.id)
+  closeMenu()
+  if (ids.length) sidebar.matchImages(ids)
+}
 function ctxDeleteKp() {
   // Pass the whole target set at once so App confirms a batch with a single
   // prompt (matches the remove-image path).
@@ -611,6 +622,17 @@ function revealRow(key) {
             Convert to reference data
           </button>
         </template>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" @click="ctxDetect">Detect features…</button>
+        <button
+          class="ctx-item"
+          :class="{ 'ctx-disabled': !ctxHasKp }"
+          :disabled="!ctxHasKp"
+          title="Match these images with every other image"
+          @click="ctxMatch"
+        >
+          Match features…
+        </button>
         <div class="ctx-sep"></div>
         <button v-if="ctxHasKp" class="ctx-item danger" @click="ctxDeleteKp">Delete keypoints</button>
         <button class="ctx-item danger" @click="ctxRemove">{{ ctxIsMulti ? 'Remove images' : 'Remove image' }}</button>

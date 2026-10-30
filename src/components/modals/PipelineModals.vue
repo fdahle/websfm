@@ -102,6 +102,17 @@ const extendState = computed(() => {
 // Keep valid depth maps: each camera's key as a depth run would hand it over, computed
 // while the dialog is open and again only when the model, images or frame change.
 const depthCameraKeysNow = computed(() => (depthMapsOpen.value ? reconstructionStore.depthCameraKeys() : {}))
+// The sidebar's Detect / Match features… on a selection: how many of the images the
+// sparse model holds, and how many have keypoints to match.
+const detectInModel = computed(() => {
+  const ids = new Set(detectOnlyIds.value ?? [])
+  const cams = reconstructionStore.mainSparseCloud?.cameras
+  return cams ? images.value.filter((im) => ids.has(im.id) && cams.has(im.uuid)).length : 0
+})
+const matchOnlyCount = computed(() => {
+  const ids = new Set(matchOnlyIds.value ?? [])
+  return images.value.filter((im) => ids.has(im.id) && im.kpStatus === 'done').length
+})
 // Match only new pairs: the pairs with a result, and the images with features in none
 // of them (photos added since the last match).
 const matchedState = computed(() => {
@@ -138,6 +149,8 @@ const {
   footprintFromPosesOpen,
   georeferenceOpen,
   matchFeaturesOpen,
+  detectOnlyIds,
+  matchOnlyIds,
   mergeCloudsOpen,
   meshOpen,
   orthoOpen,
@@ -241,6 +254,8 @@ const exportingFootprints = computed(
     <DetectFeaturesModal
       v-if="detectFeaturesOpen"
       :images="images"
+      :only-ids="detectOnlyIds"
+      :in-model="detectInModel"
       @close="detectFeaturesOpen = false"
       @run="onDetectRun"
     />
@@ -255,6 +270,8 @@ const exportingFootprints = computed(
       :footprint-image-count="footprintImageCount"
       :matched-pairs="matchedState.pairs"
       :unpaired-images="matchedState.unpairedImages"
+      :only-ids="matchOnlyIds"
+      :only-count="matchOnlyCount"
       @close="matchFeaturesOpen = false"
       @run="onMatchRun"
     />

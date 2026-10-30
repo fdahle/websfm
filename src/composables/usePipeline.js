@@ -214,7 +214,12 @@ export function usePipeline({
 
   // `opts.resume`: continue a run a dead tab stopped (useStoppedRuns).
   async function runDetect(settings, opts = {}) {
-    const pending = settings.overwrite ? images.value : images.value.filter((img) => img.kpStatus !== 'done')
+    const only = settings.onlyIds?.length ? new Set(settings.onlyIds) : null
+    const pending = only
+      ? images.value.filter((img) => only.has(img.id))
+      : settings.overwrite
+        ? images.value
+        : images.value.filter((img) => img.kpStatus !== 'done')
     if (pending.length === 0) return { ok: true, unchanged: true }
     // Model consent BEFORE openProgress — see ensureModels.
     const learned = learnedDetector(settings.detector)

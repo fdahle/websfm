@@ -320,6 +320,18 @@ export function createMatchAll({
       }
     }
 
+    // `onlyIds` (the sidebar's Match features… on a selection): the pairs with one of
+    // those images, out of what the strategy chose.
+    if (settings.onlyIds?.length) {
+      const only = new Set(settings.onlyIds)
+      const before = pairs.length
+      pairs = pairs.filter(([a, b]) => only.has(a.id) || only.has(b.id))
+      log(
+        `Matching: ${pluralize(pairs.length, 'pair')} of ${before} with one of the ${pluralize(only.size, 'selected image')}`,
+        'info',
+        'Matching',
+      )
+    }
     if (pairs.length === 0) {
       log('Match: no image pairs to process (need at least 2 images with keypoints)', 'warn', 'Matching')
       return

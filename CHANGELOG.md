@@ -6,6 +6,11 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Detect or match only some images.** Right-click images in the image list ▸ **Detect
+  features…** or **Match features…** opens the usual dialog for those images alone: they
+  are detected again, or only their pairs are matched, and every other image and pair
+  keeps its result. A browser test detects one photo of five again and matches back
+  exactly its four pairs.
 - **Adding photos no longer rebuilds every depth map.** Build Depth Maps ▸ **Keep valid
   depth maps** (on) keeps each saved map whose camera and settings are unchanged and
   computes only the others, so after Sparse Reconstruction ▸ Add to the model with
