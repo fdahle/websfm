@@ -8,6 +8,7 @@ import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
 import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import { useInlineRename } from '../../../composables/useInlineRename.js'
+import { isImageEnabled } from '../../../core/imageEnabled.js'
 import { isTiff } from '../../../utils/tiff.js'
 import { groupImageSections } from '../../../utils/imageGroups.js'
 import { useVirtualList } from '../../../composables/useVirtualList.js'
@@ -218,6 +219,7 @@ function rowTitle(img) {
   if (img.previewPending) return `${img.name} — decoding…`
   if (img.previewFailed) return `${img.name} — ${failReason(img)}`
   if (isUnaligned(img)) return `${img.name} — not aligned (no camera in the sparse model)`
+  if (!isImageEnabled(img)) return `${img.name} — disabled: later runs leave it out`
   return img.name
 }
 
@@ -362,6 +364,13 @@ function ctxUngroup() {
   sidebar.imageGroup({ op: 'assign', imageIds: ctxTargets.value.map((img) => img.id), groupId: null })
   closeMenu()
 }
+// Disable / Enable the menu's images (core/imageEnabled.js). Offered as Disable while
+// any of them is on, so a mixed selection ends all disabled.
+const ctxAllDisabled = computed(() => ctxTargets.value.every((img) => !isImageEnabled(img)))
+function ctxToggleEnabled() {
+  sidebar.setImagesEnabled({ ids: ctxTargets.value.map((img) => img.id), enabled: ctxAllDisabled.value })
+  closeMenu()
+}
 function ctxRemove() {
   // Pass the whole target set at once so App can confirm a batch delete
   // with a single prompt.
@@ -449,6 +458,7 @@ function revealRow(key) {
           :class="{
             'selected': selectedSet.has(row.img.id),
             'unaligned': isUnaligned(row.img),
+            'disabled-img': !isImageEnabled(row.img),
             'loading': row.img.previewPending,
             'failed': row.img.previewFailed,
             'in-group': row.groupKey,
@@ -485,6 +495,7 @@ function revealRow(key) {
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ row.img.name }}</span>
+          <span v-if="!isImageEnabled(row.img)" class="off-tag" title="Disabled: later runs leave it out">off</span>
           <span v-if="row.img.previewPending" class="load-tag" title="Decoding image…">decoding…</span>
           <span v-else-if="row.img.previewFailed" class="unaligned-tag failed-tag" :title="failReason(row.img)">⚠</span>
           <span
@@ -623,6 +634,17 @@ function revealRow(key) {
           </button>
         </template>
         <div class="ctx-sep"></div>
+        <button
+          class="ctx-item"
+          :title="
+            ctxAllDisabled
+              ? 'Use in later runs again'
+              : 'Leave out of later runs (alignment, depth maps, dense cloud, orthophoto, texture); its features, matches and pose stay'
+          "
+          @click="ctxToggleEnabled"
+        >
+          {{ ctxAllDisabled ? 'Enable' : 'Disable' }}
+        </button>
         <button class="ctx-item" @click="ctxDetect">Detect features…</button>
         <button
           class="ctx-item"
@@ -689,6 +711,18 @@ function revealRow(key) {
 
 <style scoped src="./sidebar-sections.css"></style>
 <style scoped>
+/* A disabled image: dimmed, with an "off" tag. */
+.list-item.disabled-img .item-name {
+  opacity: 0.5;
+}
+.off-tag {
+  margin-left: auto;
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+}
 /* Image group headers — lighter than a section header, heavier than a row. */
 .group-hd {
   display: flex;

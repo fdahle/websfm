@@ -8,6 +8,7 @@ order: 50
 Depth maps are Stage A of dense reconstruction. PatchMatch compares each registered
 image with selected source views to estimate per-pixel depth. They are cached because
 they are expensive and are also reused as visibility evidence by orthophoto generation.
+A [disabled](guide:getting-started) image gets no depth map and is no source view.
 
 The depth map shown over an image is the one PatchMatch produced (after the speckle
 filter), from before **Cross-view consistency** runs. Its colours stretch from the nearest depth (red) to the farthest

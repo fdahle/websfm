@@ -216,6 +216,8 @@ export const useImagesStore = defineStore('images', () => {
           hasDepth: !!img.depth,
           sensorId: img.sensorId ?? null,
           groupId: img.groupId ?? null,
+          // Disabled: left out of every later run (core/imageEnabled.js); absent ⇒ on.
+          ...(img.enabled === false ? { enabled: false } : {}),
           // Fiducial detections (F4) are spots on the raster — tiny, and persisted
           // inline (independent of keypoint indices).
           fiducialDetections: img.fiducialDetections?.length ? img.fiducialDetections.map((d) => ({ ...d })) : [],
@@ -314,6 +316,28 @@ export const useImagesStore = defineStore('images', () => {
     log(`Renamed image "${previous}" → "${trimmed}"`, 'info', 'Images', { channel: 'activity' })
     if (isPersisting()) save()
     return true
+  }
+
+  // Disable / Enable (core/imageEnabled.js): the flag only; each run reads it.
+  // → how many images changed.
+  function setImagesEnabled(ids, enabled) {
+    const changed = []
+    for (const id of ids) {
+      const img = imageById(id)
+      if (!img || (img.enabled !== false) === !!enabled) continue
+      img.enabled = !!enabled
+      changed.push(img)
+    }
+    if (!changed.length) return 0
+    const what = changed.length === 1 ? `"${changed[0].name}"` : `${changed.length} images`
+    log(
+      enabled ? `Enabled ${what}: later runs use it again` : `Disabled ${what}: later runs leave it out`,
+      'info',
+      'Images',
+      { channel: 'activity' },
+    )
+    if (isPersisting()) save()
+    return changed.length
   }
 
   // Image groups (images/imageGroups.js).
@@ -629,6 +653,7 @@ export const useImagesStore = defineStore('images', () => {
       meta: record.meta,
       sensorId: record.sensorId ?? null,
       groupId: groupIds.has(record.groupId) ? record.groupId : null,
+      enabled: record.enabled !== false,
       loading: true,
       previewPending: true,
       previewFailed: false,
@@ -893,6 +918,7 @@ export const useImagesStore = defineStore('images', () => {
     addImages,
     removeImage,
     renameImage,
+    setImagesEnabled,
     createImageGroup,
     renameImageGroup,
     removeImageGroup,

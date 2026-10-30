@@ -77,6 +77,14 @@ used by sequential matching stays the order the images were imported in. Removin
 group keeps its images. Images that must share one camera calibration belong in the
 same **sensor**, which is a different thing from a group.
 
+**Disable photos.** Right-click images ▸ **Disable** leaves them out of every run
+started afterwards (Sparse Reconstruction, Build Depth Maps, Build Dense Cloud, the
+orthophoto and mesh texture) without deleting anything: their features, matches and
+pose stay, and **Enable** brings them back. The list dims a disabled image and tags it
+*off*. Use it for a blurred frame you may want later, or to try a run without a strip;
+a depth map a disabled photo already has stays out of the dense cloud and the
+orthophoto, and the next depth map run does not compute one for it.
+
 **Thumbnails.** The image table, the mask dialogs and the camera frames in the 3D view
 show a small thumbnail of each image, made once in the background when the image is
 added and stored with the project, so long lists stay quick with thousands of images.

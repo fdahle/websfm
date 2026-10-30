@@ -47,6 +47,7 @@ import SmoothMeshModal from './mesh/SmoothMeshModal.vue'
 import TerrainModal from './products/TerrainModal.vue'
 import TransformCloudModal from './cloud/TransformCloudModal.vue'
 import { extensionBlocker } from '../../core/sfm/extendModel.js'
+import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 const FindGcpsModal = defineAsyncComponent(() => import('./georef/FindGcpsModal.vue'))
 
 // The pipeline and Tools-tab dialogs, lifted out of App.vue: each opens from a
@@ -77,21 +78,41 @@ const { sensors } = storeToRefs(useSensorsStore())
 const { matchStore } = storeToRefs(useMatchesStore())
 const matchedLinks = computed(() => {
   const ids = new Set()
+  const off = disabledUuids(images.value)
   let pairs = 0
   for (const e of matchStore.value.values()) {
     if (e.status !== 'done' || e.enabled === false || !(e.inlierCount > 0)) continue
+    if (off.has(e.idA) || off.has(e.idB)) continue
     pairs++
     ids.add(e.idA)
     ids.add(e.idB)
   }
   return { images: ids.size, pairs }
 })
+// What the depth map, dense and texture runs use: the main model's cameras and the saved
+// depth maps, less those of disabled images (core/imageEnabled.js), as the runs count them.
+const enabledCameras = computed(() => {
+  const cams = reconstructionStore.mainSparseCloud?.cameras
+  const off = disabledUuids(images.value)
+  const total = reconstructionStore.depthMapCount
+  if (!off.size) return { cameras: cams?.size ?? 0, maps: total }
+  let cameras = 0
+  for (const uuid of cams?.keys() ?? []) if (!off.has(uuid)) cameras++
+  // The same source as depthMapCount: the resident maps, else the saved index.
+  const resident = reconstructionStore.depthMaps
+  const uuids = resident.size ? resident.keys() : reconstructionStore.depthMapsMeta.map((m) => m.uuid)
+  let offMaps = 0
+  for (const uuid of uuids) if (off.has(uuid)) offMaps++
+  return { cameras, maps: Math.max(0, total - offMaps) }
+})
 // Sparse Model ▸ Add to the model: the main model, the images with features it lacks,
 // and whether anything was built from its cameras (core/sfm/extendModel.js).
 const extendState = computed(() => {
   const model = reconstructionStore.mainSparseCloud
   const cams = model?.cameras
-  const newImages = images.value.filter((im) => im.kpStatus === 'done' && im.kpCount > 0 && !cams?.has(im.uuid)).length
+  const newImages = images.value.filter(
+    (im) => im.kpStatus === 'done' && im.kpCount > 0 && isImageEnabled(im) && !cams?.has(im.uuid),
+  ).length
   return {
     modelCameras: cams?.size ?? 0,
     newImages,
@@ -371,7 +392,7 @@ const exportingFootprints = computed(
     <DepthMapsModal
       v-if="depthMapsOpen"
       :images="images"
-      :registered="reconstructionStore.mainSparseCloud?.cameras?.size ?? 0"
+      :registered="enabledCameras.cameras"
       :saved-maps="reconstructionStore.depthMapsMeta"
       :saved-maps-key="reconstructionStore.depthMapsKey"
       :camera-keys="depthCameraKeysNow"
@@ -386,7 +407,7 @@ const exportingFootprints = computed(
   <Teleport to="body">
     <DenseModal
       v-if="denseOpen"
-      :maps="reconstructionStore.depthMapCount"
+      :maps="enabledCameras.maps"
       :output="reconstructionStore.outputPlan('dense')"
       @close="denseOpen = false"
       @run="onDenseRun"
@@ -542,7 +563,7 @@ const exportingFootprints = computed(
       v-else-if="toolModal === 'texture-mesh'"
       :meshes="meshClouds"
       :initial-id="toolInitialId"
-      :camera-count="reconstructionStore.mainSparseCloud?.cameras?.size ?? 0"
+      :camera-count="enabledCameras.cameras"
       @close="toolModal = null"
       @run="onToolEditRun"
     />

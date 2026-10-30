@@ -185,6 +185,8 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     },
     removeImage: requestRemoveImages,
     renameImage: renameImageFromSidebar,
+    // Disable / Enable (core/imageEnabled.js): { ids, enabled }.
+    setImagesEnabled: ({ ids, enabled }) => imagesStore.setImagesEnabled(ids, enabled),
     downloadImage: downloadImageOriginal,
     convertImageToRaster,
     imageGroup: onImageGroupAction,

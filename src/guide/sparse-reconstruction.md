@@ -12,7 +12,8 @@ with [PnP](help:pnp), triangulates tracks, and repeatedly runs
 
 ## Before you run
 Inspect the match graph for disconnected groups or isolated images. A reconstruction
-cannot bridge parts of the dataset that have no verified matches. Balanced is the best
+cannot bridge parts of the dataset that have no verified matches. A disabled image
+([Disable photos](guide:getting-started)) and its matches are left out. Balanced is the best
 first run; higher quality spends more iterations polishing a model, but cannot repair
 missing overlap.
 

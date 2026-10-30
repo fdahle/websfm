@@ -1,5 +1,6 @@
 import { toRaw } from 'vue'
 import { computeSourceOf } from '../../utils/image.js'
+import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import {
   qualityToMaxDim,
@@ -132,7 +133,7 @@ export function createDense({
     const out = {}
     for (const [uuid, cam] of cloud.cameras) {
       const im = imgByUuid.get(uuid)
-      if (im) out[uuid] = depthCameraKey(depthCamera(uuid, cam, im, frames))
+      if (im && isImageEnabled(im)) out[uuid] = depthCameraKey(depthCamera(uuid, cam, im, frames))
     }
     return out
   }
@@ -170,9 +171,15 @@ export function createDense({
       const frames = depthFrames()
       const { fidByUuid } = frames
       const inputImages = []
+      let disabled = 0
       for (const [uuid, cam] of cloud.cameras) {
         const im = imgByUuid.get(uuid)
         if (!im) continue
+        // Disabled (core/imageEnabled.js): no map, and no source for the others' maps.
+        if (!isImageEnabled(im)) {
+          disabled++
+          continue
+        }
         // Lens distortion for this image's sensor — the worker undistorts the raster
         // so depth maps / fusion / DEM / ortho all stay pinhole (matches sparse).
         const s = im.sensorId ? sensorById.get(im.sensorId) : null
@@ -219,6 +226,7 @@ export function createDense({
           height: fid?.frame?.height ?? im.meta?.height ?? 0,
         })
       }
+      if (disabled) log(`Dense: ${pluralize(disabled, 'disabled image')} left out of the depth maps`, 'info', 'Dense')
       if (selfCalRows.length) {
         const parts = selfCalRows.map(
           (d) =>
@@ -973,6 +981,21 @@ export function createDense({
   }
 
   // Dense Stage B — fuse the Stage A depth maps into a coloured dense cloud.
+  // The saved maps of the images that are not disabled (core/imageEnabled.js): a
+  // disabled image's map, kept from before, stays out of fusion and the orthophoto.
+  function enabledMaps(maps, category, what) {
+    const off = disabledUuids(images.value)
+    if (!off.size) return maps
+    const kept = maps.filter((m) => !off.has(m.uuid))
+    if (kept.length < maps.length)
+      log(
+        `${category}: ${pluralize(maps.length - kept.length, 'depth map')} of disabled images left out of ${what}`,
+        'info',
+        category,
+      )
+    return kept
+  }
+
   async function densify(settings = {}, onProgress) {
     const projectId = projects.currentProjectId,
       sparse = mainSparseCloud.value
@@ -984,7 +1007,8 @@ export function createDense({
       log(`Dense: ${err.message}`, 'error', 'Dense')
       return
     }
-    const { maps, streamed } = input
+    const { streamed } = input
+    const maps = enabledMaps(input.maps, 'Dense', 'the dense cloud')
     if (!maps.length) {
       log('Dense: compute depth maps before building the dense cloud', 'warn', 'Dense')
       return

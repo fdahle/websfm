@@ -1,5 +1,6 @@
 import { ensureProjection, isGeographic } from '../../core/crs.js'
 import { isGroundControl } from '../../core/io/gcp.js'
+import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 import { precisionFromGcp } from '../../core/gcpAccuracy.js'
 import { surveyFrameFor, gcpToSurveyFrame, normalizeLeverArm, buildCameraPriors } from '../../core/sfm/cameraPriors.js'
 import { gcpsInPinholeFrame } from '../../core/sfm/displayFrame.js'
@@ -178,7 +179,8 @@ export function createSparseRun({
     const base = addToModel ? mainSparseCloud.value : null
     if (addToModel) {
       const fresh = images.value.filter(
-        (img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0 && !base?.cameras?.has(img.uuid),
+        (img) =>
+          img.kpStatus === 'done' && (img.kpCount ?? 0) > 0 && isImageEnabled(img) && !base?.cameras?.has(img.uuid),
       ).length
       const why = extensionBlocker(base, fresh)
       if (why) {
@@ -225,13 +227,18 @@ export function createSparseRun({
       // image by image / pair by pair straight into the worker input.
       // By name, not import order (the file picker's order varies): with inNameOrder below,
       // the same photos and matches always reach the solver in the same order.
+      // A disabled image (core/imageEnabled.js) stays out, and so do its pairs.
+      const off = images.value.filter((img) => !isImageEnabled(img))
+      if (off.length)
+        log(`${pluralize(off.length, 'disabled image')} left out of the reconstruction`, 'info', 'Reconstruction')
       let imgs = images.value
-        .filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
+        .filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0 && isImageEnabled(img))
         .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
       const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
       const reconstructionTransfers = []
+      const offUuids = disabledUuids(off)
       const reconstructionPairs = [...matchStore.value.values()].filter(
-        (e) => e.status === 'done' && e.enabled !== false,
+        (e) => e.status === 'done' && e.enabled !== false && !offUuids.has(e.idA) && !offUuids.has(e.idB),
       )
 
       // Renderer OOM cannot be caught after the fact. Refuse before constructing

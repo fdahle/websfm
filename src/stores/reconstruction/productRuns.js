@@ -1,5 +1,6 @@
 import { computeSourceOf } from '../../utils/image.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
+import { disabledUuids } from '../../core/imageEnabled.js'
 import { stageDemPoints, coreExtent, DEM_STAGE_BYTES_PER_POINT } from '../../core/products/dem.js'
 import { demGridFor, orthoGridFor, orthoDemSurface } from '../../core/products/rasterSize.js'
 import { gridGeometry } from '../../core/products/surface.js'
@@ -421,7 +422,16 @@ export function createProductRuns({
       log(`Ortho: ${err.message}`, 'error', 'Products')
       return
     }
-    const { maps, streamed } = input
+    const { streamed } = input
+    // A disabled image's map (core/imageEnabled.js) gives no colour.
+    const off = disabledUuids(images.value)
+    const maps = off.size ? input.maps.filter((m) => !off.has(m.uuid)) : input.maps
+    if (maps.length < input.maps.length)
+      log(
+        `Ortho: ${pluralize(input.maps.length - maps.length, 'depth map')} of disabled images left out`,
+        'info',
+        'Products',
+      )
     if (!maps.length) {
       log('Ortho: compute depth maps first', 'warn', 'Products')
       return

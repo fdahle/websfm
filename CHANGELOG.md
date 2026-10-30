@@ -6,6 +6,13 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Disable photos.** Right-click images ▸ **Disable** leaves them out of every later
+  run (Sparse Reconstruction, depth maps, the dense cloud, the orthophoto and mesh
+  texture) while their features, matches and pose stay; **Enable** brings them back.
+  The image list dims them and tags them *off*, the run dialogs count without them, and
+  each run logs how many it left out. Saved with the project; older projects open with
+  every photo enabled. A browser test disables a photo of the five-photo fixture, gets
+  four depth maps, and finds it still disabled after a reload.
 - **Duplicate a project.** The project list's **⋯** menu ▸ **Duplicate** copies a
   project, to try other settings on the copy while the original stays as it is. A
   browser project is copied into this browser, a folder project into another folder you

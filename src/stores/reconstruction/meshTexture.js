@@ -1,4 +1,5 @@
 import { markRaw } from 'vue'
+import { isImageEnabled } from '../../core/imageEnabled.js'
 import { textureMesh as workerTextureMesh } from '../../workers/computeClient.js'
 import { computeSourceOf } from '../../utils/image.js'
 import { relativeQuality } from '../../core/features/imageQuality.js'
@@ -34,9 +35,15 @@ export function createMeshTexture({
     const imagesByUuid = new Map(images.value.map((im) => [im.uuid, im]))
     const views = []
     let unready = 0
+    let disabled = 0
     for (const im of images.value) {
       const cam = cameras.get(im.uuid)
       if (!cam) continue
+      // Disabled (core/imageEnabled.js): no colour from it.
+      if (!isImageEnabled(im)) {
+        disabled++
+        continue
+      }
       // A TIFF's lossless compute source may still be encoding right after ingest.
       try {
         await imagesStore.whenComputeReady(im)
@@ -62,6 +69,7 @@ export function createMeshTexture({
       })
     }
     if (unready) log(`Texture: ${pluralize(unready, 'photo')} not readable yet were left out`, 'warn', 'Products')
+    if (disabled) log(`Texture: ${pluralize(disabled, 'disabled photo')} left out`, 'info', 'Products')
     // Sharpness (Tools ▸ Images ▸ Image quality, when it was run): a photo blurrier than
     // the batch's median scores proportionally less, so a sharper one of similar
     // resolution wins its faces. Never below 0.3: blur is not occlusion.

@@ -6,7 +6,7 @@ category: Products and export
 order: 105
 ---
 **Tools ▸ Mesh ▸ Texture…** gives a mesh a photo texture: every triangle shows the
-pixels of one photo that sees it well. The result is a new mesh with a
+pixels of one photo that sees it well (never a [disabled](guide:getting-started) one). The result is a new mesh with a
 [texture atlas](help:texture-atlas); the mesh you start from is left as it is. Vertex
 colour, which [Build Mesh](guide:mesh) transfers from the dense cloud, only has one
 colour per corner, so it blurs anything smaller than a triangle. A texture keeps the
