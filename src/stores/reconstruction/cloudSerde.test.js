@@ -245,6 +245,12 @@ describe('dense cloud round trip', () => {
     expect('derived' in plain).toBe(false)
   })
 
+  it('carries what Classify Points ran on it, and nothing on another cloud', () => {
+    const classifiedBy = { ground: true, vegetation: true, buildings: false }
+    expect(roundTrip(dense({ derived: true, classifiedBy })).classifiedBy).toEqual(classifiedBy)
+    expect('classifiedBy' in roundTrip(dense())).toBe(false)
+  })
+
   it('carries its level-of-detail octree, unless it describes other points', () => {
     const lod = {
       dataFile: 'd1-x.lod',

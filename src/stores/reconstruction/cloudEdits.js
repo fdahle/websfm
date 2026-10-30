@@ -51,6 +51,14 @@ const REPLACES_SOURCE_VIEW = new Set([
   'mesh-decimate',
 ])
 
+// What Classify Points ran on a cloud, for the Quality Report's methods (saved with the
+// cloud; absent on any other cloud, and on clouds classified before it was recorded).
+const classifiedBy = (settings) => ({
+  ground: true,
+  vegetation: !!settings.aboveGround?.vegetation,
+  buildings: !!settings.aboveGround?.buildings,
+})
+
 // Tools-tab cloud and mesh edits, split out of useReconstructionStore: every
 // `editClouds` mode runs in the cloud-edit worker (workers/ops/cloud.js) and adds a
 // derived cloud — non-destructive — except the sparse refinements (gradual
@@ -768,7 +776,10 @@ export function createCloudEdits({
           { mode, settings, name: refine ? streamed.name : name || `${streamed.name} (${label})` },
           onProgress,
         )
-        if (cloud && mode === 'classify-ground') cloud.style = { field: 'attribute:classification' }
+        if (cloud && mode === 'classify-ground') {
+          cloud.style = { field: 'attribute:classification' }
+          cloud.classifiedBy = classifiedBy(settings)
+        }
         if (cloud && refine) {
           clouds.value = clouds.value.filter((c) => c !== streamed)
           await save()
@@ -940,6 +951,7 @@ export function createCloudEdits({
               ? style(extra ?? null)
               : style
         if (startStyle) cloud.style = startStyle
+        if (mode === 'classify-ground') cloud.classifiedBy = classifiedBy(settings)
         // Show the edit in place of its source; the source stays one visibility
         // toggle away for comparison or to start over.
         if (mode === 'mask' || mode === 'classify' || REPLACES_SOURCE_VIEW.has(mode)) sources[0].visible = false

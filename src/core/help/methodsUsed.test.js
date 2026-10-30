@@ -48,6 +48,7 @@ describe('methodsUsed', () => {
       dem: true,
       demFill: 'idw',
       groundClassified: true,
+      aboveGroundClassified: true,
       ortho: { blend: 'mosaic', seamline: 'graphcut', seamBlend: 'multiband', colourBalance: true },
     })
     for (const m of all) for (const k of m.refs) expect(REFERENCES[k], k).toBeTruthy()

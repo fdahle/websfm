@@ -49,7 +49,8 @@ Notable changes to websfm. The format follows
   synthetic site 99.6 % of building points and every tree point land in their class; on
   UseGeo's 16 M-point MVS cloud the run takes 5.9 s against 1.2 s for the ground alone,
   and roofs, crowns and olive rows come out right by eye. Not yet scored against a
-  labelled set.
+  labelled set. The Quality Report's **Methods and references** now names the ground
+  filter and the class rules with their papers when a cloud was classified.
 - **Add photos to an aligned model.** Sparse Reconstruction has a **Mode**, *Add to the
   model* or *Rebuild*: adding registers only the images the model lacks, starting from
   its cameras and points, and with **Existing cameras ▸ Fixed** every camera already in

@@ -46,6 +46,7 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
       imported: !!c.imported,
       derived: !!c.derived,
       ...(c.basedOn ? { basedOn: c.basedOn } : {}),
+      ...(c.classifiedBy ? { classifiedBy: c.classifiedBy } : {}),
       secondary: !!c.secondary,
       cameras: [],
       pointCount: N,
@@ -65,6 +66,8 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
     derived: !!c.derived,
     // What it was built from (core/products/productSet.js); absent on an import.
     ...(c.basedOn ? { basedOn: c.basedOn } : {}),
+    // What Classify Points ran on it (cloudEdits.js); absent on other clouds.
+    ...(c.classifiedBy ? { classifiedBy: c.classifiedBy } : {}),
     secondary: !!c.secondary,
     cameras: [],
     pointCount: N,
@@ -208,6 +211,7 @@ function deserializeCloudData(c, makeCloudId) {
       ...(c.imported ? { imported: true } : {}),
       ...(c.derived ? { derived: true } : {}),
       ...(Array.isArray(c.basedOn) ? { basedOn: c.basedOn } : {}),
+      ...(c.classifiedBy ? { classifiedBy: c.classifiedBy } : {}),
       count: N,
       pos: null,
       col: null,
@@ -228,6 +232,7 @@ function deserializeCloudData(c, makeCloudId) {
       // Absent on projects saved before cloud editing existed ⇒ not derived.
       ...(c.derived ? { derived: true } : {}),
       ...(Array.isArray(c.basedOn) ? { basedOn: c.basedOn } : {}),
+      ...(c.classifiedBy ? { classifiedBy: c.classifiedBy } : {}),
       count: N,
       pos: markRaw(posF),
       col: col ? markRaw(col) : null,

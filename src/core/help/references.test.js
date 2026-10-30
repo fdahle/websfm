@@ -17,6 +17,7 @@ const everyMethod = methodsUsed({
   dem: true,
   demFill: 'idw',
   groundClassified: true,
+  aboveGroundClassified: true,
   ortho: { blend: 'mosaic', seamline: 'graphcut', seamBlend: 'multiband', colourBalance: true },
 })
 const variants = ['superpoint', 'disk', 'aliked'].flatMap((detector) => methodsUsed({ detector }))

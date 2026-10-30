@@ -139,8 +139,17 @@ test('Classify points labels a cloud and Build DEM ▸ Ground only makes a DTM u
     for (const v of c.attributes.classification) n[v]++
     const hag = c.attributes.heightAboveGround
     const roof = [...hag].filter((_, i) => c.attributes.classification[i] === 6).sort((a, b) => a - b)
-    return { ground: n[2], above: n[1], building: n[6], hagCount: hag?.length ?? 0, roofHeight: roof[roof.length >> 1] }
+    return {
+      ground: n[2],
+      above: n[1],
+      building: n[6],
+      hagCount: hag?.length ?? 0,
+      roofHeight: roof[roof.length >> 1],
+      classifiedBy: c.classifiedBy,
+    }
   })
+  // The cloud records what ran on it, for the Quality Report's methods.
+  expect(counts.classifiedBy).toEqual({ ground: true, vegetation: true, buildings: true })
   // Every point carries its height above the ground: the roof stands 6 m up.
   expect(counts.hagCount).toBe(81 * 81)
   expect(counts.roofHeight).toBeCloseTo(6, 0)

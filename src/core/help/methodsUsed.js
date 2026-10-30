@@ -19,7 +19,7 @@ const DETECTORS = {
  *   denseViewSelection?: string|null, densePlanarPrior?: boolean, denseGeomPass?: boolean,
  *   mesh?: boolean, textured?: boolean, dem?: boolean, demFill?: string|null,
  *   ortho?: { blend?: string, seamline?: string, seamBlend?: string, colourBalance?: boolean }|null,
- *   groundClassified?: boolean,
+ *   groundClassified?: boolean, aboveGroundClassified?: boolean,
  * }} f
  * @returns {{ step: string, method: string, refs: string[] }[]}
  */
@@ -90,6 +90,12 @@ export function methodsUsed(f = {}) {
   }
   if (f.groundClassified)
     out.push({ step: 'Ground classification', method: 'Cloth simulation filter', refs: ['zhang2016'] })
+  if (f.aboveGroundClassified)
+    out.push({
+      step: 'Point classes',
+      method: 'Buildings and vegetation from neighbourhood covariance features and excess green',
+      refs: ['weinmann2015', 'woebbecke1995'],
+    })
   if (f.mesh) out.push({ step: 'Mesh', method: 'Screened Poisson surface reconstruction', refs: ['kazhdan2013'] })
   if (f.textured) {
     out.push({

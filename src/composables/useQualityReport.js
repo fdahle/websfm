@@ -524,6 +524,8 @@ export function useQualityReport() {
       dem: !!recon.dem,
       demFill: recon.dem?.fillMethod ?? null,
       ortho: recon.ortho ? (recon.ortho.method ?? {}) : null,
+      groundClassified: recon.clouds.some((c) => c.classifiedBy?.ground),
+      aboveGroundClassified: recon.clouds.some((c) => c.classifiedBy?.vegetation || c.classifiedBy?.buildings),
     })
     if (methods.length) {
       const keys = [...new Set(methods.flatMap((m) => m.refs))]
