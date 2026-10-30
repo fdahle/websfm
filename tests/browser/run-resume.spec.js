@@ -90,8 +90,11 @@ for (const [method, phase, quality] of [
     test.setTimeout(480_000)
     const context = await browser.newContext()
     let page = await context.newPage()
+    // Each page error says which step raised it (one WASM trap was seen once, in a full
+    // suite run, and not again in repeats).
     const errors = []
-    const watch = (p) => p.on('pageerror', (e) => errors.push(e.message))
+    let step = 'reference run'
+    const watch = (p) => p.on('pageerror', (e) => errors.push(`${step}: ${e.message}`))
     watch(page)
     const id = await openFixture(page)
 
@@ -103,6 +106,7 @@ for (const [method, phase, quality] of [
     expect(await journal(page, id)).toBeNull() // a finished run leaves no journal
 
     // The same run again, and the tab dies once some maps of `phase` are saved.
+    step = 'run to be killed'
     await startDepth(page, method, quality)
     await expect
       .poll(
@@ -115,6 +119,7 @@ for (const [method, phase, quality] of [
       .toBe(true)
     const stoppedAt = (await journal(page, id)).done.length
     await page.close()
+    step = 'continued run'
 
     page = await context.newPage()
     watch(page)
@@ -139,3 +144,162 @@ for (const [method, phase, quality] of [
     await context.close()
   })
 }
+
+// Every pair's outcome, as the match store holds it after the run.
+const matchOutcomes = (page) =>
+  page.evaluate(async () => {
+    const { useMatchesStore } = await import('/src/stores/useMatchesStore.js')
+    const out = {}
+    for (const [id, e] of useMatchesStore().matchStore) {
+      out[id] = {
+        status: e.status,
+        inliers: e.inlierCount ?? 0,
+        raw: e.rawCount ?? 0,
+        F: e.F ? [e.F].flat(2).map((v) => +Number(v).toFixed(9)) : null,
+      }
+    }
+    return out
+  })
+
+test('a matching run killed in the pair loop continues where it stopped', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the run logic')
+  test.setTimeout(240_000)
+  const context = await browser.newContext()
+  // One worker: the pairs finish one after another, so the kill lands between two.
+  await context.addInitScript(() => localStorage.setItem('websfm.compute.workerCount', '1'))
+  let page = await context.newPage()
+  const errors = []
+  const watch = (p) => p.on('pageerror', (e) => errors.push(e.message))
+  watch(page)
+  const id = await openFixture(page)
+  const startMatch = () =>
+    page.evaluate(() => {
+      const app = document.querySelector('#app').__vue_app__._instance.setupState
+      window.__matchRun = app.runMatch({ _journalMs: 0 })
+    })
+  const matchJournal = () =>
+    page.evaluate(async (id) => (await import('/src/utils/opfs.js')).loadRunJournal(id, 'match'), id)
+
+  // The fixture leaves out descriptors (only matching reads them): detect again first.
+  await page.evaluate(async () => {
+    const app = document.querySelector('#app').__vue_app__._instance.setupState
+    const { DETECT_DEFAULTS_BY_DETECTOR } = await import('/src/core/defaults.user.js')
+    await app.runDetect({ ...DETECT_DEFAULTS_BY_DETECTOR.sift, overwrite: true, maxKeypoints: 1500 })
+  })
+  await startMatch()
+  await page.evaluate(() => window.__matchRun)
+  const reference = await matchOutcomes(page)
+  expect(Object.values(reference).filter((e) => e.status === 'done' && e.inliers > 0).length).toBeGreaterThan(5)
+  expect(Object.keys(reference)).toHaveLength(10)
+  expect(await matchJournal()).toBeNull()
+
+  await startMatch()
+  await expect
+    .poll(
+      async () => {
+        const j = await matchJournal()
+        return j?.phase === 'pairs' && j.done.length >= 1 && j.done.length < 10
+      },
+      { timeout: 60_000, intervals: [25] },
+    )
+    .toBe(true)
+  const stoppedAt = (await matchJournal()).done.length
+  await page.close()
+
+  page = await context.newPage()
+  watch(page)
+  await page.goto('/')
+  await page.waitForFunction(() => document.querySelector('#app')?.__vue_app__?._instance?.setupState)
+  await page.evaluate(
+    (id) => document.querySelector('#app').__vue_app__._instance.setupState.handleSwitchProject(id),
+    id,
+  )
+  const ask = page.getByRole('dialog', { name: 'Continue the stopped run?' })
+  await expect(ask).toContainText(`Matching stopped at ${stoppedAt} of 10`)
+  await ask.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect
+    .poll(async () => (await matchJournal()) === null && (await matchOutcomes(page)), { timeout: 60_000 })
+    .toEqual(reference)
+  expect(errors).toEqual([])
+  await context.close()
+})
+
+// Each image's keypoint count and a digest of its saved keypoint file.
+const keypointFiles = (page, id) =>
+  page.evaluate(async (id) => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const root = await navigator.storage.getDirectory()
+    const project = await (
+      await (await root.getDirectoryHandle('websfm')).getDirectoryHandle('projects')
+    ).getDirectoryHandle(id)
+    const dir = await project.getDirectoryHandle('keypoints')
+    const out = {}
+    for (const im of useImagesStore().images) {
+      const bytes = new Uint8Array(await (await (await dir.getFileHandle(`${im.uuid}.bin`)).getFile()).arrayBuffer())
+      let h = 2166136261
+      for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 16777619) >>> 0
+      out[im.uuid] = { status: im.kpStatus, count: im.kpCount, file: h.toString(16) }
+    }
+    return out
+  }, id)
+
+test('a detection run killed partway continues where it stopped', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the run logic')
+  test.setTimeout(240_000)
+  const context = await browser.newContext()
+  await context.addInitScript(() => localStorage.setItem('websfm.compute.workerCount', '1'))
+  let page = await context.newPage()
+  const errors = []
+  const watch = (p) => p.on('pageerror', (e) => errors.push(e.message))
+  watch(page)
+  const id = await openFixture(page)
+  const startDetect = () =>
+    page.evaluate(async () => {
+      const app = document.querySelector('#app').__vue_app__._instance.setupState
+      const { DETECT_DEFAULTS_BY_DETECTOR } = await import('/src/core/defaults.user.js')
+      window.__detectRun = app.runDetect({ ...DETECT_DEFAULTS_BY_DETECTOR.sift, overwrite: true, _journalMs: 0 })
+    })
+  const detectJournal = () =>
+    page.evaluate(async (id) => (await import('/src/utils/opfs.js')).loadRunJournal(id, 'detect'), id)
+
+  await startDetect()
+  await page.evaluate(() => window.__detectRun)
+  const reference = await keypointFiles(page, id)
+  expect(Object.values(reference).every((r) => r.status === 'done' && r.count > 0)).toBe(true)
+  expect(await detectJournal()).toBeNull()
+
+  await startDetect()
+  await expect
+    .poll(
+      async () => {
+        const j = await detectJournal()
+        return !!j && j.done.length >= 1 && j.done.length < 5
+      },
+      { timeout: 60_000, intervals: [25] },
+    )
+    .toBe(true)
+  const stoppedAt = (await detectJournal()).done.length
+  await page.close()
+
+  page = await context.newPage()
+  watch(page)
+  await page.goto('/')
+  await page.waitForFunction(() => document.querySelector('#app')?.__vue_app__?._instance?.setupState)
+  await page.evaluate(
+    (id) => document.querySelector('#app').__vue_app__._instance.setupState.handleSwitchProject(id),
+    id,
+  )
+  const ask = page.getByRole('dialog', { name: 'Continue the stopped run?' })
+  await expect(ask).toContainText(`Feature detection stopped at ${stoppedAt} of 5`)
+  await ask.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expect
+    .poll(async () => (await detectJournal()) === null && (await keypointFiles(page, id)), { timeout: 60_000 })
+    .toEqual(reference)
+  const logged = await page.evaluate(async () => {
+    const { useLogStore } = await import('/src/stores/useLogStore.js')
+    return (await useLogStore().readAll()).map((e) => e.message ?? e.msg ?? String(e))
+  })
+  expect(logged.some((m) => /Detection: continuing the stopped run/.test(m))).toBe(true)
+  expect(errors).toEqual([])
+  await context.close()
+})

@@ -19,6 +19,10 @@
 // Conservative: a 5000×4735 (23.7 MP) input was the observed failure; ≈4000×4000 leaves
 // margin, and the worker's rethrow is the true backstop if a larger input slips past.
 export const DETECT_TUNING = {
+  // How often a detection run's journal (core/runJournal.js) is rewritten while images
+  // finish (each image's features are saved as it finishes). `_journalMs` in a run's
+  // settings overrides it; the tests use 0.
+  journalIntervalMs: 5000,
   // SIFT keypoints per scale-space extremum: the dominant orientation plus secondary
   // histogram peaks within 80 % of it (Lowe 2004 §5; COLMAP max_num_orientations = 2).
   // A feature with two near-equal peaks otherwise gets a different orientation in
@@ -249,6 +253,11 @@ export const SFM_TUNING = {
 // MatchFeaturesModal — the user-facing match defaults live in defaults.user.js ▸
 // MATCH_DEFAULTS. `settings` from the caller still overrides.
 export const MATCH_TUNING = {
+  // How often a matching run saves its matches and its journal (core/runJournal.js)
+  // while pairs finish: what a dead tab's run can lose, against one rewrite of the match
+  // document (never more often than ten times that rewrite takes). `_journalMs` in a
+  // run's settings overrides it; the tests use 0.
+  journalIntervalMs: 60_000,
   // WebGPU brute-force: byte budget of the per-run GPU descriptor cache (LRU). 1 GiB
   // holds a whole 128-image SIFT run at ~8.4k kp (≈ 4.3 MB/image); a smaller budget
   // only costs re-uploads (the worker answers a miss and the store resends).

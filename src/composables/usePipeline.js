@@ -212,7 +212,8 @@ export function usePipeline({
     return cancelled ? refused('Cancelled', true) : { ok, cancelled: false, ...(reason ? { reason } : {}) }
   }
 
-  async function runDetect(settings) {
+  // `opts.resume`: continue a run a dead tab stopped (useStoppedRuns).
+  async function runDetect(settings, opts = {}) {
     const pending = settings.overwrite ? images.value : images.value.filter((img) => img.kpStatus !== 'done')
     if (pending.length === 0) return { ok: true, unchanged: true }
     // Model consent BEFORE openProgress — see ensureModels.
@@ -227,12 +228,13 @@ export function usePipeline({
     openProgress('Detecting Features', pending.length, () => terminateAll('detection cancelled'), { unit: 'images' })
     // No per-image overlay callback: the keypoint overlay is a global toggle gated on
     // the image's own kpStatus, so it lights up reactively as each detection lands.
-    await detectAll(settings, null, report, shouldCancel)
+    await detectAll(settings, null, report, shouldCancel, opts)
     const ok = pending.every((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
     return finishRun(ok, ok ? '' : 'Feature detection failed for one or more images')
   }
 
-  async function runMatch(settings) {
+  // `opts.resume`: continue a run a dead tab stopped (useStoppedRuns).
+  async function runMatch(settings, opts = {}) {
     const ready = images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
     if (ready.length < 2) return refused('Matching requires at least two images with keypoints')
     // Model consent BEFORE openProgress — see ensureModels. Gated on the same
@@ -249,7 +251,7 @@ export function usePipeline({
     // loops exit on the aborted flag. Cost: worker 0 drops its cached ORT/LightGlue
     // session (~model reload next run); acceptable for an explicit user cancel.
     openProgress('Matching Features', 0, () => terminateAll('matching cancelled'), { unit: 'pairs' })
-    await matchAll(images.value, settings, report, shouldCancel)
+    await matchAll(images.value, settings, report, shouldCancel, opts)
     return finishRun()
   }
 

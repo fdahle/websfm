@@ -2,7 +2,9 @@
 // footprint), the subset gate, the worker pool and the WebGPU router, progress and
 // one save at the end. Split out of useMatchesStore; `deps` are the store's state
 // and helpers, and `beginBatch` / `endBatch` / `bumpGeneration` its counters.
-import { computed } from 'vue'
+import { computed, toRaw } from 'vue'
+import * as opfs from '../../utils/opfs.js'
+import { canContinue, journalKey, startJournal } from '../../core/runJournal.js'
 import {
   matchDescriptors,
   POOL_SIZE,
@@ -194,7 +196,10 @@ export function createMatchAll({
     return { joined, grew: (after[0]?.length ?? 0) > plan.mainSize && after.length > 1 }
   }
 
-  async function matchAll(images, settings = {}, onProgress, shouldCancel) {
+  // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt on
+  // open). The pairs it lists are kept as saved; only the rest are matched.
+  async function matchAll(images, settings = {}, onProgress, shouldCancel, { resume = null } = {}) {
+    const requested = structuredClone(toRaw(settings))
     bumpGeneration()
     // Same merge as matchPair so this function's own settings reads (and its
     // matchPair calls) all draw from the single source of truth.
@@ -459,9 +464,73 @@ export function createMatchAll({
       )
     }
 
+    // The run journal (core/runJournal.js): during the pair loop the matches are saved
+    // every MATCH_TUNING.journalIntervalMs and the journal lists the pairs that save
+    // holds, so a tab that dies loses at most that much. Keyed by the images and their
+    // features, the dialog's settings and the pairs they selected.
+    const projectId = projects.currentProjectId
+    const key = journalKey({
+      images: ready.map((im) => [im.uuid, im.kpCount, im.detector ?? 'sift']),
+      settings: requested,
+      pairs: journalKey(pairs.map(([a, b]) => pairId(a.uuid, b.uuid))),
+    })
+    let journal = null
+    if (resume && projects.isPersisting) {
+      const verdict = canContinue(resume, key)
+      if (verdict.ok) journal = structuredClone(resume)
+      else log(`Matching: the stopped run cannot continue (${verdict.why}); starting again`, 'warn', 'Matching')
+    }
+    // Pairs a continued run keeps: those its last save held, or all once the loop was done.
+    const kept = new Set(journal ? (journal.phase === 'pairs' ? journal.done : pairs.map((_, i) => i)) : [])
+    if (projects.isPersisting) {
+      journal ??= startJournal({ stage: 'match', key, settings: requested, total: pairs.length, phase: 'pairs' })
+      await opfs.saveRunJournal(projectId, journal).catch(() => {})
+    }
+    if (kept.size) {
+      log(
+        `Matching: continuing the stopped run — ${pluralize(kept.size, 'pair')} of ${pairs.length} already matched`,
+        'info',
+        'Matching',
+      )
+      for (const i of kept) {
+        const [a, b] = pairs[i]
+        const entry = matchStore.value.get(pairId(a.uuid, b.uuid))
+        if (entry) tally(pairId(a.uuid, b.uuid), entry)
+      }
+      done = kept.size
+      onProgress?.(done, pairs.length)
+    }
+    const todo = pairs.map((_, i) => i).filter((i) => !kept.has(i))
+    const finished = [...kept]
+    let lastSaveAt = performance.now(),
+      saveMs = 0,
+      checkpointing = null
+    const intervalMs = settings._journalMs ?? MATCH_TUNING.journalIntervalMs
+    // Save what is matched and record it, at most once per interval (and never more
+    // often than ten times the last save took); an interval of 0 saves after every pair.
+    const checkpoint = () => {
+      if (!journal || checkpointing) return
+      if (intervalMs > 0 && performance.now() - lastSaveAt < Math.max(intervalMs, 10 * saveMs)) return
+      const held = [...finished]
+      const t0 = performance.now()
+      touch()
+      checkpointing = save()
+        .then(() => {
+          saveMs = performance.now() - t0
+          lastSaveAt = performance.now()
+          journal.done = held
+          return opfs.saveRunJournal(projectId, { ...journal, updatedAt: new Date().toISOString() })
+        })
+        .catch(() => {})
+        .finally(() => (checkpointing = null))
+    }
+
     // Each image's descriptors load from OPFS once per run, and are released after its
     // last pair or under a byte budget (stores/matching/descriptorCache.js).
-    const descCache = createDescriptorCache({ pairs, budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20 })
+    const descCache = createDescriptorCache({
+      pairs: todo.map((i) => pairs[i]),
+      budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20,
+    })
     // Concurrency-limited dispatch: `concurrency` drain loops pull from a shared
     // cursor so up to POOL_SIZE pairs are matched at once (each matchPair issues its
     // own pool worker calls). Cancellation is cooperative — stop pulling.
@@ -473,14 +542,17 @@ export function createMatchAll({
           cancelled = true
           return
         }
-        const i = cursor++
-        if (i >= pairs.length) return
+        const k = cursor++
+        if (k >= todo.length) return
+        const i = todo[k]
         const [a, b] = pairs[i]
         await matchPair(a, b, settings, tally, descCache, gpuRun)
         descCache.release(a.uuid)
         descCache.release(b.uuid)
         done++
+        finished.push(i)
         onProgress?.(done, pairs.length)
+        checkpoint()
       }
     }
     const runStarted = performance.now()
@@ -488,6 +560,16 @@ export function createMatchAll({
     beginBatch()
     try {
       await Promise.all(Array.from({ length: concurrency }, drain))
+      // The pair loop is done: save it, so a run that stops in the passes below continues
+      // from here (they work on the loop's result, which is now on disk).
+      if (journal && !cancelled && !shouldCancel?.() && journal.phase === 'pairs') {
+        await checkpointing
+        touch()
+        await save()
+        journal.phase = 'post'
+        journal.done = []
+        await opfs.saveRunJournal(projectId, { ...journal, updatedAt: new Date().toISOString() }).catch(() => {})
+      }
       // Gate rescue. The subset gate's sample count scales with the pair's TRUE match
       // count, so a real pair with a few hundred matches reads as ~0–2 sampled
       // putatives and is vetoed — the side-lap pairs of a film block. Iceland 1980
@@ -594,7 +676,10 @@ export function createMatchAll({
       // computeds after the run sees the final state.
       touch()
       // One save for the whole run (and for a cancelled one, so what matched survives).
+      await checkpointing
       await save()
+      // A finished run leaves no journal; a cancelled one keeps it, to continue later.
+      if (journal && !cancelled && !shouldCancel?.()) await opfs.deleteRunJournal(projectId, 'match').catch(() => {})
       const dc = descCache.stats()
       log(
         `Matching: descriptors loaded ${dc.loads}× for ${pluralize(ready.length, 'image')}, ` +

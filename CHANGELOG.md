@@ -12,13 +12,16 @@ Notable changes to websfm. The format follows
   console says what changed. Before, a beta could refuse projects saved by the one
   before it. A small saved project per format version is part of the tests, and each
   must still open with everything it held.
-- **Continue depth maps after the tab closed.** When a browser tab closes during Build
-  Depth Maps (out of memory, an update, a crash), opening the project again offers to
-  **Continue** the run: only the missing depth maps are computed, with the settings it
-  was started with, or **Discard** it. The run keeps a small journal of the maps it has
-  saved (both passes of the Full method, the filter and the promotions), and a
-  continued run gives the same maps byte for byte as one that never stopped (browser
-  test: killed in pass 1 and in pass 2).
+- **Continue a long run after the tab closed.** When a browser tab closes during Detect
+  Features, Match Features or Build Depth Maps (out of memory, an update, a crash),
+  opening the project again offers to **Continue** the run, doing only the work that is
+  missing with the settings it was started with, or to **Discard** it. Each run keeps a
+  small journal of what it has saved: every image's features, the matched pairs (saved
+  about once a minute while matching), every depth map through both passes of the Full
+  method and the filter (whose writes are now staged, so a filter that stops leaves the
+  maps intact). A continued run gives the same result byte for byte as one that never
+  stopped (browser tests kill the page during detection, the pair loop, and depth pass 1
+  and pass 2).
 - **See what your browser lacks, and what it costs.** When WebSfM starts in a browser
   that is missing something it uses, the note at the bottom right now lists each gap in
   plain terms ("Depth maps, matching and the learned matchers run on the CPU", "Projects

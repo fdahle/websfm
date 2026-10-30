@@ -6,7 +6,8 @@ import { DETECT_TUNING } from '../../core/tuning.js'
 import { detectKeypoints, POOL_SIZE } from '../../workers/computeClient.js'
 import { Keypoints, fillNormalized, asKeypoints } from '../../core/features/keypoints.js'
 import * as opfs from '../../utils/opfs.js'
-import { markRaw } from 'vue'
+import { markRaw, toRaw } from 'vue'
+import { canContinue, journalKey, journalWriter, startJournal } from '../../core/runJournal.js'
 import { useMatchesStore } from '../useMatchesStore.js'
 import { detectionConcurrency } from '../../core/features/detectConcurrency.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -229,11 +230,43 @@ export function createDetection({
     }
   }
 
-  async function detectAll(settings = {}, onDetected, onProgress, shouldCancel) {
-    const pending = (settings.overwrite ? images.value : images.value.filter((img) => img.kpStatus !== 'done')).filter(
-      (img) => img.kpStatus !== 'running',
+  // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt on
+  // open). The images it lists keep their features; only the rest are detected.
+  async function detectAll(settings = {}, onDetected, onProgress, shouldCancel, { resume = null } = {}) {
+    const requested = structuredClone(toRaw(settings))
+    const key = journalKey({ images: images.value.map((im) => im.uuid), settings: requested })
+    let journal = null
+    if (resume && isPersisting()) {
+      const verdict = canContinue(resume, key)
+      if (verdict.ok) journal = structuredClone(resume)
+      else log(`Detection: the stopped run cannot continue (${verdict.why}); starting again`, 'warn', 'Detection')
+    }
+    // An image the journal lists keeps its features, unless they did not survive (its
+    // status is no longer 'done', e.g. a keypoint file that was never written).
+    const kept = new Set(
+      (journal?.done ?? []).filter((u) => images.value.some((im) => im.uuid === u && im.kpStatus === 'done')),
     )
+    const pending = (settings.overwrite ? images.value : images.value.filter((img) => img.kpStatus !== 'done'))
+      .filter((img) => img.kpStatus !== 'running')
+      .filter((img) => !kept.has(img.uuid))
     const total = pending.length
+    let writer = null
+    if (isPersisting()) {
+      const pid = projects.currentProjectId
+      journal ??= startJournal({ stage: 'detect', key, settings: requested, total: total + kept.size, phase: 'images' })
+      journal.done = [...kept]
+      writer = journalWriter((j) => opfs.saveRunJournal(pid, j), {
+        intervalMs: settings._journalMs ?? DETECT_TUNING.journalIntervalMs,
+      })
+      await writer.flush(journal)
+      if (kept.size) {
+        log(
+          `Detection: continuing the stopped run — ${pluralize(kept.size, 'image')} of ${total + kept.size} already detected`,
+          'info',
+          'Detection',
+        )
+      }
+    }
     // Echo the settings actually in effect so the console records what was run.
     const {
       detector = 'sift',
@@ -283,11 +316,21 @@ export function createDetection({
         if (!img) return
         await detectOne(img.id, settings, onDetected, stop)
         if (stop()) return
+        if (writer && img.kpStatus === 'done') {
+          journal.done.push(img.uuid)
+          writer.touch(journal)
+        }
         done++
         onProgress?.(done, total, img.name)
       }
     }
     await Promise.all(Array.from({ length: concurrency }, drain))
+    // A finished run leaves no journal; a cancelled one keeps it, to continue later.
+    if (writer) {
+      await writer.settled()
+      if (stop()) await writer.flush(journal)
+      else await opfs.deleteRunJournal(projects.currentProjectId, 'detect').catch(() => {})
+    }
     const seconds = (performance.now() - started) / 1000
     log(
       `${batchTag} ${stop() ? 'cancelled' : 'batch complete'} — ${done}/${total} processed in ${seconds.toFixed(2)} s` +

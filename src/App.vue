@@ -315,7 +315,11 @@ const {
 })
 // A run a dead tab did not finish: offered again when its project opens.
 const { offerStoppedRuns } = useStoppedRuns({
-  runs: { depth: { label: 'Depth maps', start: (settings, opts) => runComputeDepthMaps(settings, opts) } },
+  runs: {
+    detect: { label: 'Feature detection', start: (settings, opts) => runDetect(settings, opts) },
+    match: { label: 'Matching', start: (settings, opts) => runMatch(settings, opts) },
+    depth: { label: 'Depth maps', start: (settings, opts) => runComputeDepthMaps(settings, opts) },
+  },
   isBusy: () => progressOpen.value || workflowRunning.value,
 })
 

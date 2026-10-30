@@ -456,7 +456,7 @@ export function createDense({
         }
         await run.commit(settings)
         await writer.settled()
-        await opfs.deleteRunJournal(run.projectId, 'depth')
+        await opfs.deleteRunJournal(run.projectId, 'depth').catch(() => {})
       } else {
         depthMaps.value = new Map(maps.map((m) => [m.uuid, m]))
         depthMapsMeta.value = [] // the fresh maps supersede any restored index

@@ -114,14 +114,16 @@ open in an older one: reload the page to get the newest version.
 
 ## When the tab closes during a run
 A browser can close a tab without warning: when the computer runs short of memory, for
-an update, or when the tab is discarded in the background. Depth maps are saved one by
-one as they finish, together with a note of how far the run got. When you open the
-project again, WebSfM asks whether to **Continue** the stopped run or **Discard** it.
-Continue computes only the depth maps that are missing, with the settings the run was
-started with, and the result is the same as a run that was never stopped. It is offered
-only while the sparse model, the images and those settings are unchanged; otherwise the
-run starts again from the beginning. Cancel the question to be asked again the next time
-the project opens.
+an update, or when the tab is discarded in the background. Detect Features, Match
+Features and Build Depth Maps save their results as they go (each image's features,
+the matched pairs about once a minute, each depth map), together with a note of how far
+the run got. When you open the project again, WebSfM asks whether to **Continue** the
+stopped run or **Discard** it. Continue does only the work that is missing, with the
+settings the run was started with, and the result is the same as a run that was never
+stopped. It is offered only while the inputs are unchanged (the images, their features,
+the sparse model for depth maps) and otherwise starts again from the beginning. A run you
+cancel is offered the same way. Cancel the question to be asked again the next time the
+project opens.
 
 ## File name
 Exports are downloads: the browser saves them in its downloads folder, or asks where
