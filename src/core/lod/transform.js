@@ -15,7 +15,7 @@ import { transformCloud, applyTransform } from '../products/cloudAlign.js'
 import { planExtract, extractPoints } from './extract.js'
 import { nodeCube } from './octree.js'
 import { arrayOfType } from './nodeCodec.js'
-import { clothNote } from './clothNote.js'
+import { clothNote, countClasses, classCountsLine } from './clothNote.js'
 import { pluralize } from '../textFormat.js'
 
 // The box around a moved box: its eight corners, transformed.
@@ -300,6 +300,7 @@ export async function readTile(reader, lod, plan, tile) {
 }
 
 const quiet = () => {}
+
 const ownPoints = (tile, p) => (i) => inCore(tile, p.pos[3 * i], p.pos[3 * i + 1])
 
 /**
@@ -317,10 +318,9 @@ export function editTile(cloud, plan, tile) {
     const r = cloud.count ? classifyCloudGround(cloud, null, { ...plan.run, extent: 'all', onLog: quiet }) : null
     const out = r ? { ...cloud, attributes: { ...cloud.attributes, classification: r.classes } } : cloud
     const points = subsetPoints(out, ownPoints(tile, out))
-    let ground = 0
-    for (const c of points.attributes.classification ?? []) if (c === 2) ground++
+    const counts = countClasses(points.attributes.classification)
     // The cloth's resolution in this tile (coarser than asked past the particle cap).
-    return { points, ground, cloth: r?.cloth?.res ?? null }
+    return { points, ground: counts.ground, counts, cloth: r?.cloth?.res ?? null }
   }
   if (!plan.sor) {
     const out = cloud.count ? filterCloud(cloud, plan.run, quiet) : cloud
@@ -498,13 +498,13 @@ export function streamedEditSource(reader, lod, mode, settings = {}, { log = () 
       )
       run = { ...run, sor: { ...settings.sor, reach: plan.sor.reach, limit } }
     }
-    let ground = 0
+    const classCounts = []
     const cloths = []
     for (const tile of tiles) {
       const cloud = await readTile(reader, lod, plan, tile)
       if (mode === 'classify-ground') {
         const r = editTile(cloud, plan, tile)
-        ground += r.ground
+        classCounts.push(r.counts)
         cloths.push(r.cloth)
         if (r.points.count) yield r.points
       } else {
@@ -514,7 +514,7 @@ export function streamedEditSource(reader, lod, mode, settings = {}, { log = () 
       step(1, passes * tiles.length, mode === 'filter' ? 'Filtering tiles' : 'Classifying tiles')
     }
     if (mode === 'classify-ground') {
-      log(`Ground filter: ${ground.toLocaleString()} ground points`)
+      log(classCountsLine(classCounts))
       const note = clothNote(cloths, settings.clothResolution ?? 1, settings.metresPerUnit ?? 1)
       if (note) log(note, 'warn')
     }

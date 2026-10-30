@@ -33,7 +33,7 @@ export function demEffects(s, { source = null, estimate = null, unit, frame } = 
   const ground = s.points === 'ground'
   const points = !source
     ? ground
-      ? 'No classified cloud yet: Tools ▸ Point Cloud ▸ Classify ground makes one.'
+      ? 'No classified cloud yet: Tools ▸ Point Cloud ▸ Classify points makes one.'
       : 'No point cloud yet: build one first.'
     : `${plural(source.count, 'point')} of the ${source.kind === 'dense' ? 'dense' : 'sparse'} cloud` +
       `${source.name ? ` "${source.name}"` : ''}${source.streamed ? ' (streamed)' : ''}` +

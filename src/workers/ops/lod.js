@@ -552,7 +552,13 @@ export function makeLodOps({ lazCodec = null } = {}) {
       h.close()
     }
     return {
-      result: { count: out.points.count, stats: out.stats ?? null, ground: out.ground ?? 0, cloth: out.cloth ?? null },
+      result: {
+        count: out.points.count,
+        stats: out.stats ?? null,
+        ground: out.ground ?? 0,
+        counts: out.counts ?? null,
+        cloth: out.cloth ?? null,
+      },
     }
   }
 

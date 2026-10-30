@@ -1995,6 +1995,33 @@ cloud or mesh; nothing here feeds back into the solve.
   metres converted to frame units, the simulation constants included. Measured on
   synthetics: 1 m cloth spans 30 m roofs, not 80 m (12 % of roof points ground);
   2 m spans 80 m. Default 1 m because steep (polar) terrain is the common case here.
+- **Buildings and vegetation** (`pointClasses.js`, Classify Points steps 3–4, 2026-10-30):
+  rules on the points the cloth left above ground, with their height above it. The
+  points fall into 0.25 m voxels (centroid, mean colour, highest height above ground),
+  doubled up to 1 m while an occupied voxel holds fewer than two points (a sparse
+  survey's surfaces would otherwise leave their voxels apart), with the radius at least
+  2.5 voxels (at exactly 2 a tilted plane's lattice neighbours count along one axis
+  only). Each voxel's covariance over the voxel centroids within 1 m gives
+  λ1 ≥ λ2 ≥ λ3, planarity (λ2 − λ3)/λ1, scatter λ3/λ1 and a normal (Weinmann et al.
+  2015). Planar voxels (planarity ≥ 0.5, scatter ≤ 0.06) grow into segments over
+  26-adjacency with normals within 20°. A segment reaching 2.5 m above the cloth with a
+  surface of 10 m² (voxel count × voxel²) is building, unless its mean ExG (2g − r − b
+  on chromatic coordinates, Woebbecke et al. 1995) is above 0.06; a mostly vertical one
+  (mean |n_z| < 0.5) only when it lies within a radius of a roof, so a retaining wall
+  alone is not a building. Building segments then take the non-green voxels within 1 m
+  (their edges and corners, which see two planes and so scatter). Vegetation is a voxel
+  that is green, or that scatters more than 0.06 and lies more than 1 m from any planar
+  voxel (scatter beside a plane is the edge of something built), never one clearly not
+  green (ExG < −0.06), banded by its height above ground at 1 and 3 m. Each point takes
+  its voxel's class. A streamed cloud runs per tile with the ground filter's 30 m
+  margin. On a synthetic site at drone density (building, five trees, four shrubs, a
+  car): buildings 99.6 % recall, trees 100 % high vegetation, shrubs 100 % vegetation,
+  the car 90 % unclassified, with and without colour. UseGeo's MVS cloud (150 × 150 m,
+  16 M points, Sardinia): 5.9 s against 1.2 s for the ground alone on one thread; by eye
+  roofs, crowns, the olive rows and the retaining walls are right, and a sloped concrete
+  canal bank reads as roof. Not yet scored on labelled data. Known limit: on a sparse
+  cloud without colour (voxels at 0.5–1 m), small boxy objects such as cars scatter at
+  that scale and can come out as vegetation.
 - **Enclosed gaps in a DEM** (`dem.js` `fillEnclosedGaps`, Build DEM ▸ Fill enclosed
   gaps, on for Ground only): nodata not connected to the grid border (BFS) is filled
   by pull–push (Gortler et al. 1996): a pyramid of 2×2 weighted means with weight
@@ -2232,5 +2259,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Waechter, M., Moehrle, N. & Goesele, M. (2014). Let there be color! Large-scale texturing of 3D reconstructions. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-319-10602-1_54
 - Xu, Q. & Tao, W. (2019). Multi-scale geometric consistency guided multi-view stereo. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). https://arxiv.org/abs/1904.08103
 - Xu, Q. & Tao, W. (2020). Planar prior assisted PatchMatch multi-view stereo. AAAI Conference on Artificial Intelligence 34(07), 12516–12523. https://doi.org/10.1609/aaai.v34i07.6940
+- Weinmann, M., Jutzi, B., Hinz, S. & Mallet, C. (2015). Semantic point cloud interpretation based on optimal neighborhoods, relevant features and efficient classifiers. ISPRS Journal of Photogrammetry and Remote Sensing 105, 286–304. https://doi.org/10.1016/j.isprsjprs.2015.01.016
+- Woebbecke, D. M., Meyer, G. E., Von Bargen, K. & Mortensen, D. A. (1995). Color indices for weed identification under various soil, residue, and lighting conditions. Transactions of the ASAE 38(1), 259–269. https://doi.org/10.13031/2013.27838
 - Zhang, W., Qi, J., Wan, P., Wang, H., Xie, D., Wang, X. & Yan, G. (2016). An easy-to-use airborne LiDAR data filtering method based on cloth simulation. Remote Sensing 8(6), 501. https://doi.org/10.3390/rs8060501
 - Zhao, X., Wu, X., Chen, W., Chen, P. C. Y., Xu, Q. & Li, Z. (2023). ALIKED: a lighter keypoint and descriptor extraction network via deformable transformation. IEEE Transactions on Instrumentation and Measurement 72. https://arxiv.org/abs/2304.03608

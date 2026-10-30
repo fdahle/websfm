@@ -516,10 +516,10 @@ export const TABS = [
               },
               {
                 id: 'classify-ground',
-                label: 'Classify ground…',
+                label: 'Classify points…',
                 icon: 'dem',
                 needs: ['dense'],
-                blurb: 'Bare-earth classification for a DTM',
+                blurb: 'Ground for a DTM, then buildings and vegetation',
               },
             ],
           },

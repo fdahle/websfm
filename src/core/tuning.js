@@ -611,3 +611,20 @@ export const SENTINEL2_TUNING = {
   loQ: 0.005,
   hiQ: 0.995,
 }
+
+// Classify Points ▸ vegetation and buildings (core/products/pointClasses.js). Lengths
+// in metres. The features are computed on voxel centroids: `voxel` sets the cost (a
+// dense cloud's points collapse to a few per voxel), `radius` the neighbourhood the
+// covariance sees (a roof plane is flat over a metre; a canopy is not).
+export const CLASSIFY_TUNING = {
+  voxel: 0.25,
+  radius: 1,
+  // A plane: (λ2 − λ3)/λ1 at least this, λ3/λ1 at most `maxScatter`. Above that
+  // scatter a voxel reads as vegetation.
+  minPlanarity: 0.5,
+  maxScatter: 0.06,
+  // Neighbouring plane voxels join one segment when their normals agree within this.
+  normalAngleDeg: 20,
+  // Mean ExG (2g − r − b on chromatic coordinates) above which a voxel is green.
+  greenExg: 0.06,
+}

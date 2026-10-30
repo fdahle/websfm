@@ -44,6 +44,9 @@
 // plus O(particles · iterations) for the cloth (16 springs per particle).
 
 import { coreExtent } from './dem.js'
+import { classifyAboveGround } from './pointClasses.js'
+import { CLASSIFY_DEFAULTS } from '../defaults.user.js'
+import { CLASSIFY_TUNING } from '../tuning.js'
 
 export const CLASS_NEVER = 0
 export const CLASS_UNCLASSIFIED = 1
@@ -317,10 +320,11 @@ function snapSlopes(z, pinned, H, measured, width, height, threshold) {
 //     despikeThreshold — (m) raise single-cell dips deeper than this; 0 = off
 //     bounds          — { minX, minY, maxX, maxY }: classify only inside (the
 //                       DEM's dense core); points outside stay class 0
+//     heights         — also return each point's height above the cloth (`hag`)
 // Returns { classes: Uint8Array(count), counts: { ground, unclassified, low,
 //   never }, cloth: { width, height, originX, originY, res, z: Float32Array },
-//   iterations, converged, pinned, snapped, despiked }, or null when no point
-//   lies in the bounds.
+//   iterations, converged, pinned, snapped, despiked, hag? (Float32Array, NaN outside
+//   the classified extent) }, or null when no point lies in the bounds.
 export function classifyGround(pos, count, opts = {}) {
   const {
     clothResolution = 1,
@@ -332,6 +336,7 @@ export function classifyGround(pos, count, opts = {}) {
     convergence = 0.005,
     despikeThreshold = 1,
     bounds = null,
+    heights = false,
     maxParticles = GROUND_FILTER_LIMITS.maxParticles,
     metresPerUnit = 1,
     unitLabel = 'm',
@@ -420,6 +425,7 @@ export function classifyGround(pos, count, opts = {}) {
   // Classify against the cloth, bilinear between particle centres.
   const z = sim.z
   const classes = new Uint8Array(count)
+  const hag = heights ? new Float32Array(count).fill(NaN) : null
   let ground = 0,
     unclassified = 0,
     low = 0
@@ -437,6 +443,7 @@ export function classifyGround(pos, count, opts = {}) {
     const top = z[r0 * width + c0] * (1 - tx) + z[r0 * width + c1] * tx
     const bot = z[r1 * width + c0] * (1 - tx) + z[r1 * width + c1] * tx
     const d = pos[i * 3 + 2] - (top * (1 - ty) + bot * ty)
+    if (hag) hag[i] = d
     if (d > classThreshold) {
       classes[i] = CLASS_UNCLASSIFIED
       unclassified++
@@ -469,6 +476,7 @@ export function classifyGround(pos, count, opts = {}) {
     pinned,
     snapped,
     despiked,
+    ...(hag ? { hag } : {}),
   }
 }
 
@@ -480,9 +488,13 @@ export function classifyGround(pos, count, opts = {}) {
 //     metresPerUnit — metres per frame unit (a georeference in US feet: 0.3048)
 //     extent        — 'core' (the DEM's dense core, dem.js coreExtent) | 'all'
 //     budgetBytes   — memory budget for the staged frame positions (24 B/point)
-// Returns classifyGround's result (null when no point is usable).
+//     aboveGround   — vegetation and buildings among the points above the cloth
+//                     (pointClasses.js classifyAboveGround's options, lengths in
+//                     metres), or null for ground only
+// Returns classifyGround's result (null when no point is usable), with
+// `aboveGround` (classifyAboveGround's result) when it ran.
 export function classifyCloudGround(cloud, frame, opts = {}) {
-  const { metresPerUnit = 1, extent = 'core', budgetBytes = Infinity, onLog = null, ...rest } = opts
+  const { metresPerUnit = 1, extent = 'core', budgetBytes = Infinity, onLog = null, aboveGround = null, ...rest } = opts
   if (!(metresPerUnit > 0)) throw new Error('metresPerUnit must be > 0')
   const { count, pos } = cloud
   const bytes = count * 24
@@ -519,7 +531,8 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
   // Lengths are set in metres and the simulation runs in frame units.
   const toUnits = (m) => m / metresPerUnit
   const unitLabel = metresPerUnit === 1 ? 'm' : (rest.unitLabel ?? 'units')
-  return classifyGround(framed, count, {
+  const classesAbove = !!(aboveGround && (aboveGround.vegetation || aboveGround.buildings))
+  const result = classifyGround(framed, count, {
     ...rest,
     clothResolution: toUnits(rest.clothResolution ?? 1),
     classThreshold: toUnits(rest.classThreshold ?? 0.5),
@@ -530,5 +543,32 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
     unitLabel,
     bounds,
     onLog,
+    heights: classesAbove,
   })
+  if (!result || !classesAbove) return result
+  // Lengths in metres; the run converts them to frame units.
+  const a = { ...CLASSIFY_TUNING, ...CLASSIFY_DEFAULTS, ...aboveGround }
+  const above = classifyAboveGround(framed, count, result.classes, result.hag, cloud.col ?? null, {
+    ...a,
+    voxel: toUnits(a.voxel),
+    radius: toUnits(a.radius),
+    lowVegetationMax: toUnits(a.lowVegetationMax),
+    mediumVegetationMax: toUnits(a.mediumVegetationMax),
+    minBuildingHeight: toUnits(a.minBuildingHeight),
+    minBuildingArea: a.minBuildingArea / (metresPerUnit * metresPerUnit),
+    onProgress: null,
+  })
+  const c = above.counts
+  onLog?.(
+    `Classify points: ${above.voxels.toLocaleString()} voxels above ground` +
+      (aboveGround.buildings
+        ? `; ${above.buildingSegments.toLocaleString()} of ${above.segments.toLocaleString()} planar segments are buildings (${c.building.toLocaleString()} points)`
+        : '') +
+      (aboveGround.vegetation
+        ? `; vegetation ${c.low.toLocaleString()} low, ${c.medium.toLocaleString()} medium, ${c.high.toLocaleString()} high` +
+          (above.colour ? '' : ' (no colour: geometry only)')
+        : ''),
+  )
+  delete result.hag
+  return { ...result, aboveGround: above }
 }

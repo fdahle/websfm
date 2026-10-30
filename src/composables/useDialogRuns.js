@@ -219,7 +219,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     if (mode === 'classify-ground') req = await groundRequest(req)
     if (mode && req) await runEditClouds({ ...req, mode })
   }
-  // Classify ground works in metres along the product vertical, so it needs the
+  // Classify points works in metres along the product vertical, so it needs the
   // frame a DEM would be built in (THE resolver: georeference > scale bars). A
   // computed cloud in model units is refused: the cloth's lengths would mean
   // nothing. An imported cloud is classified as it is (its own z is up, in its
@@ -241,7 +241,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
       if (resolved.unit === 'model') {
         const why = 'the model has no real-world scale — georeference it or add scale bars first'
         log(`Ground filter: ${why}`, 'error', 'Products')
-        showToast('Classify ground needs metres', { detail: why, kind: 'error', ms: 6000 })
+        showToast('Classify points needs metres', { detail: why, kind: 'error', ms: 6000 })
         return null
       }
       frame = resolved.frameSpec

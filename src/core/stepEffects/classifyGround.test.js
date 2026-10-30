@@ -1,8 +1,26 @@
 import { describe, it, expect } from 'vitest'
 import { classifyGroundEffects } from './classifyGround.js'
-import { GROUND_DEFAULTS } from '../defaults.user.js'
+import { GROUND_DEFAULTS, CLASSIFY_DEFAULTS } from '../defaults.user.js'
 
 describe('classifyGroundEffects', () => {
+  const all = { ...GROUND_DEFAULTS, ...CLASSIFY_DEFAULTS }
+  it('words buildings and vegetation, with and without colour, and off', () => {
+    const e = classifyGroundEffects(all)
+    expect(e.buildings).toBe(
+      'Flat surfaces, roofs and walls, that reach 2.5 m above the cloth and cover 10 m² are buildings, with their ' +
+        'edges, unless they are green; smaller ones (a car, a low wall) stay unclassified.',
+    )
+    expect(e.vegetation).toBe(
+      'What is green, or what scatters rather than forming a surface, is vegetation: low up to 1 m above the cloth, ' +
+        'medium up to 3 m, high above.',
+    )
+    expect(classifyGroundEffects(all, { colour: false }).vegetation).toMatch(/^This cloud has no colour/)
+    expect(classifyGroundEffects({ ...all, buildings: false, vegetation: false })).toMatchObject({
+      buildings: expect.stringMatching(/^Off/),
+      vegetation: expect.stringMatching(/^Off/),
+    })
+    expect(classifyGroundEffects(all, { noScale: true }).vegetation).toMatch(/^Needs real-world scale/)
+  })
   it('words the cloth and the labels', () => {
     const e = classifyGroundEffects(GROUND_DEFAULTS)
     expect(e.cloth).toMatch(/^A cloth of 1 m cells, medium for rolling relief, .*slope smoothing/)

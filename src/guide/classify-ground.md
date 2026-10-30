@@ -1,20 +1,24 @@
 ---
 id: classify-ground
-title: Classify Ground
-summary: Labels every point of a dense cloud as ground, above ground or low noise, so a bare-earth DTM can be built from the ground alone.
+title: Classify Points
+summary: Labels every point of a dense cloud as ground, building, low, medium or high vegetation, or low noise, so a bare-earth DTM can be built from the ground alone.
 category: Products and export
 order: 66
 ---
 A [DEM](help:digital-elevation-model) built from every point is a surface model: it
-follows roofs and tree tops. **Tools ▸ Point Cloud ▸ Classify ground…** finds the
-points that lie on the terrain with a [cloth simulation filter](help:ground-classification).
-Then **Build DEM ▸ Points ▸ Ground only** makes a bare-earth terrain model (DTM)
-from them.
+follows roofs and tree tops. **Tools ▸ Point Cloud ▸ Classify points…** (called
+Classify ground before 0.6) finds the points that lie on the terrain with a
+[cloth simulation filter](help:ground-classification). Then **Build DEM ▸ Points ▸
+Ground only** makes a bare-earth terrain model (DTM) from them. Among the points above
+the ground it then finds [buildings and vegetation](help:point-classes) from the
+shape of each point's neighbourhood and, where the cloud has colour, how green it is.
 
 The result is a new cloud, coloured by class; the source stays as it was. Each point
-gets a standard LAS class: **Ground** (2), **Unclassified** (1) for everything above
-the ground, **Low point** (7) for noise below it, and **Never classified** (0) for
-points outside the classified extent. The classes are saved with the project and
+gets a standard LAS class: **Ground** (2), **Building** (6), **Low**, **Medium** and
+**High vegetation** (3, 4, 5), **Unclassified** (1) for everything else above the
+ground (cars, fences, poles), **Low point** (7) for noise below it, and **Never
+classified** (0) for points outside the classified extent. With Buildings and
+Vegetation off it does what Classify ground did: ground, unclassified and low points. The classes are saved with the project and
 written to LAS, LAZ and PLY exports. The cloud's symbology dialog can hide a class
 or recolour it.
 
@@ -74,6 +78,47 @@ ground slightly differently along their edge, so on a sparse survey a cloth reso
 about the point spacing keeps every tile alike (the dialog shows how many cloth points
 the cloud needs). The tiles run on every worker at once. The result is a new streamed
 cloud.
+
+## Find buildings
+<!-- param: buildings default: On -->
+Finds roofs and walls: flat surfaces above the ground, large and high enough to be a
+building (the next two settings). Each surface grows from the points around it whose
+neighbourhood is a plane, and takes the roof edges and corners with it, which see two
+planes at once. A flat surface that is green, such as a clipped hedge, is not a
+building when the cloud has colour. Off, roofs and walls stay Unclassified.
+
+## Minimum height
+<!-- param: minBuildingHeight default: 2.5 m -->
+How high above the ground a surface must reach, at its highest point, to be a
+building. A garden shed is about 2.5 m; raise it to leave sheds and carports out,
+lower it for low farm buildings. A car (about 1.5 m) stays below it.
+
+## Minimum area
+<!-- param: minBuildingArea default: 10 m² -->
+How large one roof or wall surface must be. It counts the surface itself, so a
+pitched roof's two faces count apart. Smaller flat things, such as a car roof (about
+4 m²), a sign or a low wall, stay Unclassified. Raise it on a noisy cloud where small
+flat patches appear in tree crowns.
+
+## Find vegetation
+<!-- param: vegetation default: On -->
+Finds trees, shrubs and low plants among the rest: points whose neighbourhood
+scatters in every direction instead of forming a surface, and, where the cloud has
+colour, points that are green. Scatter right beside a flat surface is the edge of
+something built, so it counts only when it is green. A cloud without colour, such as
+one from film scans, is classified by shape alone. Each point takes its class from
+how high its part of the plant reaches above the ground (the next two settings).
+
+## Low up to
+<!-- param: lowVegetationMax default: 1 m -->
+Vegetation up to this height above the ground is Low vegetation (class 3): grass,
+crops, low plants. The LAS standard leaves the heights to the user; match a
+specification you deliver to.
+
+## Medium up to
+<!-- param: mediumVegetationMax default: 3 m -->
+Vegetation up to this height is Medium (class 4), shrubs and hedges; above it is High
+vegetation (class 5), trees.
 
 ## Correcting the result by hand
 Where the filter is wrong, for example a hilltop it lifted off or a low roof it kept

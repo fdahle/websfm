@@ -101,7 +101,7 @@ test('Point Cloud ▾ and Mesh ▾ tools add derived results through the worker'
   expect(errors).toEqual([])
 })
 
-test('Classify ground labels a cloud and Build DEM ▸ Ground only makes a DTM under the roof', async ({ page }) => {
+test('Classify points labels a cloud and Build DEM ▸ Ground only makes a DTM under the roof', async ({ page }) => {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await page.goto('/')
@@ -124,23 +124,24 @@ test('Classify ground labels a cloud and Build DEM ▸ Ground only makes a DTM u
     )
   })
 
-  await openTool(page, /Point\s*Cloud/, /Classify ground/)
+  await openTool(page, /Point\s*Cloud/, /Classify points/)
   await page
-    .getByRole('dialog', { name: 'Classify Ground' })
+    .getByRole('dialog', { name: 'Classify Points' })
     .getByRole('button', { name: 'Classify', exact: true })
     .click()
   await expect
-    .poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(ground)'))?.style)
+    .poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(classified)'))?.style)
     .toBe('attribute:classification')
   const counts = await page.evaluate(async () => {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-    const c = useReconstructionStore().clouds.find((x) => x.name.endsWith('(ground)'))
+    const c = useReconstructionStore().clouds.find((x) => x.name.endsWith('(classified)'))
     const n = [0, 0, 0, 0, 0, 0, 0, 0]
     for (const v of c.attributes.classification) n[v]++
-    return { ground: n[2], above: n[1] }
+    return { ground: n[2], above: n[1], building: n[6] }
   })
-  // 25×25 roof points (12 m at 0.5 m) are above ground; everything else is ground.
-  expect(counts.above).toBe(25 * 25)
+  // The 25×25 roof points (12 m at 0.5 m) are a building; everything else is ground.
+  expect(counts.building).toBe(25 * 25)
+  expect(counts.above).toBe(0)
   expect(counts.ground).toBe(81 * 81 - 25 * 25)
 
   await page.evaluate(async () => {

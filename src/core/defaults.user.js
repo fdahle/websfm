@@ -653,6 +653,20 @@ export const GROUND_DEFAULTS = {
   slopeSmoothing: true, // spread the cloth onto continuous steep ground
   extent: 'core', // 'core' = the DEM's dense core (outside → class 0) | 'all'
 }
+// Classify Points ▸ steps 3 and 4, on the points above the cloth (core/products/
+// pointClasses.js). Heights are above the cloth, in metres; an area in m².
+export const CLASSIFY_DEFAULTS = {
+  vegetation: true,
+  // ASPRS leaves the bands to the user; under a metre is grass and low crops, up to
+  // 3 m shrubs and hedges, above that trees.
+  lowVegetationMax: 1,
+  mediumVegetationMax: 3,
+  buildings: true,
+  // A plane this high and this large: a garden shed is about 2.5 m and 6–10 m², a car
+  // roof 1.5 m and 4 m², which stays unclassified.
+  minBuildingHeight: 2.5,
+  minBuildingArea: 10,
+}
 export const ICP_DEFAULTS = {
   // A real dense cloud (noisy normals) needs tens: South Building, 2° start, 40–71 in
   // point-to-plane; at 30 it stopped 1.9 cm off. A converged run stops early.

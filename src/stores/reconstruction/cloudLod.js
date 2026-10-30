@@ -19,7 +19,7 @@ import { openCloudSource, isCopcLod, lodFileNames } from '../../core/lod/cloudSo
 import { LOD_MIN_POINTS, CHUNK_MAX } from '../../core/lod/build.js'
 import { postableCopy } from '../../core/bigArray.js'
 import { outlierLimit } from '../../core/products/cloudEdit.js'
-import { clothNote } from '../../core/lod/clothNote.js'
+import { clothNote, classCountsLine } from '../../core/lod/clothNote.js'
 import { DEFAULT_BUDGET_BYTES } from '../../core/dense/memBudget.js'
 import { pluralize } from '../../core/textFormat.js'
 import { stampOf } from '../../core/products/productSet.js'
@@ -486,8 +486,7 @@ export function createCloudLod({
       )
     }
     if (mode === 'classify-ground') {
-      const ground = results.reduce((a, r) => a + r.ground, 0)
-      log(`Ground filter: ${ground.toLocaleString()} ground points`, 'info', 'Products')
+      log(classCountsLine(results.map((r) => r.counts)), 'info', 'Products')
       const note = clothNote(
         results.map((r) => r.cloth),
         settings.clothResolution ?? 1,

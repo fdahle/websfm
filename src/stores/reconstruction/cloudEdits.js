@@ -754,7 +754,8 @@ export function createCloudEdits({
           'mask': 'edited',
           'classify': 'reclassified',
           'filter': 'filtered',
-          'classify-ground': 'ground',
+          'classify-ground':
+            settings.aboveGround?.vegetation || settings.aboveGround?.buildings ? 'classified' : 'ground',
           'transform': 'transformed',
         }[mode]
         const selection = mode === 'mask' || mode === 'classify'

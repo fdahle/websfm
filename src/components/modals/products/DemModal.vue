@@ -153,7 +153,7 @@ const effects = computed(() => {
         :hint="
           groundSource
             ? 'Ground only rasterises the ground class of a classified cloud: a bare-earth DTM.'
-            : 'Ground only needs a classified cloud: Tools ▸ Point Cloud ▸ Classify ground.'
+            : 'Ground only needs a classified cloud: Tools ▸ Point Cloud ▸ Classify points.'
         "
       >
         <template #label><FieldHelp op="dem" param="points">Points</FieldHelp></template>

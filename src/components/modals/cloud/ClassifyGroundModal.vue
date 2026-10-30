@@ -4,22 +4,25 @@ import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { useSourcePick, cloudOptionLabel } from '../../../composables/useSourcePick.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
-import { GROUND_DEFAULTS } from '../../../core/defaults.user.js'
+import { GROUND_DEFAULTS, CLASSIFY_DEFAULTS } from '../../../core/defaults.user.js'
 import { classifyGroundEffects } from '../../../core/stepEffects/classifyGround.js'
 import { cloudUnits } from '../../../core/products/cloudUnits.js'
 import { anyCloudBounds, isStreamed } from '../../../core/lod/streamed.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
-// Classify Ground (Tools ▸ Point Cloud ▾ ▸ Attributes) — labels every point of a
+// Classify Points (Tools ▸ Point Cloud ▾ ▸ Attributes) — labels every point of a
 // dense cloud ground / above ground / low noise with a cloth simulation
 // (core/products/groundFilter.js), so Build DEM ▸ Points ▸ Ground only can make a
-// DTM. Adds a NEW cloud carrying a LAS `classification` attribute, coloured by it.
+// DTM, then buildings and low / medium / high vegetation among the points above it
+// (core/products/pointClasses.js). Adds a NEW cloud carrying a LAS `classification`
+// attribute, coloured by it. The operation keeps its id, classify-ground.
 // The lengths are metres along the product vertical: the run handler resolves the
 // frame (useDialogRuns groundRequest); a computed cloud without real-world scale
 // is refused there, and this dialog says so before Run.
@@ -31,7 +34,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'run'])
 
-const settings = ref({ ...GROUND_DEFAULTS })
+const settings = ref({ ...GROUND_DEFAULTS, ...CLASSIFY_DEFAULTS })
 const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 // A streamed cloud's classes are in its octree's layout (it has no resident attributes).
 const classified = (c) =>
@@ -43,10 +46,22 @@ const units = computed(() => cloudUnits(source.value, props.frameSignature))
 const noScale = computed(() => units.value.unit === 'model')
 const { memBudgetBytes } = useComputeSettings()
 
+// Colour lets vegetation be found by being green (pointClasses.js); a streamed cloud
+// says so in its octree's layout.
+const colour = computed(() => !!source.value?.col || !!source.value?.lod?.layout?.colour)
 const numbers = computed(() =>
   checkNumberFields(settings.value, {
     clothResolution: { label: 'Cloth resolution', min: 0.05, max: 50 },
     classThreshold: { label: 'Ground tolerance', min: 0.01, max: 10 },
+    minBuildingHeight: { label: 'Minimum height', min: 0.5, max: 100, when: settings.value.buildings },
+    minBuildingArea: { label: 'Minimum area', min: 1, max: 10000, when: settings.value.buildings },
+    lowVegetationMax: { label: 'Low up to', min: 0.1, max: 50, when: settings.value.vegetation },
+    mediumVegetationMax: {
+      label: 'Medium up to',
+      min: Math.max(0.2, settings.value.lowVegetationMax || 0),
+      max: 100,
+      when: settings.value.vegetation,
+    },
   }),
 )
 // What each step does to this cloud (core/stepEffects/classifyGround.js).
@@ -63,20 +78,34 @@ const effects = computed(() =>
     noScale: noScale.value,
     extent: extent.value,
     streamed: isStreamed(source.value),
+    colour: colour.value,
   }),
 )
 
 function run() {
+  const {
+    vegetation,
+    buildings,
+    lowVegetationMax,
+    mediumVegetationMax,
+    minBuildingHeight,
+    minBuildingArea,
+    ...ground
+  } = settings.value
   emit('run', {
     sourceIds: [sourceId.value],
-    settings: { ...settings.value, memBudgetBytes: memBudgetBytes.value },
-    name: `${source.value?.name ?? 'Cloud'} (ground)`,
+    settings: {
+      ...ground,
+      aboveGround: { vegetation, buildings, lowVegetationMax, mediumVegetationMax, minBuildingHeight, minBuildingArea },
+      memBudgetBytes: memBudgetBytes.value,
+    },
+    name: `${source.value?.name ?? 'Cloud'} (${vegetation || buildings ? 'classified' : 'ground'})`,
   })
 }
 </script>
 
 <template>
-  <ModalShell title="Classify Ground" @close="emit('close')">
+  <ModalShell title="Classify Points" @close="emit('close')">
     <NoSourceWarn v-if="!clouds.length" kind="cloud" />
     <template v-else>
       <SettingsGroup title="Source">
@@ -174,6 +203,131 @@ function run() {
             <option value="all">All points</option>
           </select>
         </SettingsField>
+      </SettingsStep>
+      <SettingsStep step="3" title="Buildings" :effect="effects.buildings" :inactive="noScale || !settings.buildings">
+        <SettingsField hint="Roofs and walls large and high enough to be a building.">
+          <template #label>
+            <FieldHelp
+              op="classify-ground"
+              param="buildings"
+              :value="settings.buildings"
+              :default-value="CLASSIFY_DEFAULTS.buildings"
+              >Find buildings</FieldHelp
+            >
+          </template>
+          <label class="checkbox-row"
+            ><input v-model="settings.buildings" type="checkbox" class="checkbox" /> Enabled</label
+          >
+        </SettingsField>
+        <AdvancedDisclosure v-if="settings.buildings" label="3 · Buildings — advanced">
+          <SettingsField label-for="cls-bh" unit="m" hint="Above the cloth, at the surface's highest point.">
+            <template #label>
+              <FieldHelp
+                op="classify-ground"
+                param="minBuildingHeight"
+                :value="settings.minBuildingHeight"
+                :default-value="CLASSIFY_DEFAULTS.minBuildingHeight"
+                >Minimum height</FieldHelp
+              >
+            </template>
+            <input
+              id="cls-bh"
+              v-model.number="settings.minBuildingHeight"
+              :aria-invalid="numbers.bad.minBuildingHeight"
+              type="number"
+              min="0.5"
+              max="100"
+              step="0.5"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField label-for="cls-ba" unit="m²" hint="The surface of one roof or wall plane.">
+            <template #label>
+              <FieldHelp
+                op="classify-ground"
+                param="minBuildingArea"
+                :value="settings.minBuildingArea"
+                :default-value="CLASSIFY_DEFAULTS.minBuildingArea"
+                >Minimum area</FieldHelp
+              >
+            </template>
+            <input
+              id="cls-ba"
+              v-model.number="settings.minBuildingArea"
+              :aria-invalid="numbers.bad.minBuildingArea"
+              type="number"
+              min="1"
+              max="10000"
+              step="5"
+              class="field-input"
+            />
+          </SettingsField>
+        </AdvancedDisclosure>
+      </SettingsStep>
+      <SettingsStep
+        step="4"
+        title="Vegetation"
+        :effect="effects.vegetation"
+        :inactive="noScale || !settings.vegetation"
+      >
+        <SettingsField hint="Trees, shrubs and low plants, by their height above the cloth.">
+          <template #label>
+            <FieldHelp
+              op="classify-ground"
+              param="vegetation"
+              :value="settings.vegetation"
+              :default-value="CLASSIFY_DEFAULTS.vegetation"
+              >Find vegetation</FieldHelp
+            >
+          </template>
+          <label class="checkbox-row"
+            ><input v-model="settings.vegetation" type="checkbox" class="checkbox" /> Enabled</label
+          >
+        </SettingsField>
+        <AdvancedDisclosure v-if="settings.vegetation" label="4 · Vegetation — advanced">
+          <SettingsField label-for="cls-low" unit="m" hint="Low vegetation reaches at most this far above the cloth.">
+            <template #label>
+              <FieldHelp
+                op="classify-ground"
+                param="lowVegetationMax"
+                :value="settings.lowVegetationMax"
+                :default-value="CLASSIFY_DEFAULTS.lowVegetationMax"
+                >Low up to</FieldHelp
+              >
+            </template>
+            <input
+              id="cls-low"
+              v-model.number="settings.lowVegetationMax"
+              :aria-invalid="numbers.bad.lowVegetationMax"
+              type="number"
+              min="0.1"
+              max="50"
+              step="0.5"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField label-for="cls-med" unit="m" hint="Medium vegetation up to this; higher is high vegetation.">
+            <template #label>
+              <FieldHelp
+                op="classify-ground"
+                param="mediumVegetationMax"
+                :value="settings.mediumVegetationMax"
+                :default-value="CLASSIFY_DEFAULTS.mediumVegetationMax"
+                >Medium up to</FieldHelp
+              >
+            </template>
+            <input
+              id="cls-med"
+              v-model.number="settings.mediumVegetationMax"
+              :aria-invalid="numbers.bad.mediumVegetationMax"
+              type="number"
+              min="0.2"
+              max="100"
+              step="0.5"
+              class="field-input"
+            />
+          </SettingsField>
+        </AdvancedDisclosure>
       </SettingsStep>
     </template>
     <template #footer>

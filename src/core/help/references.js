@@ -260,6 +260,21 @@ export const REFERENCES = {
     venue: 'Remote Sensing 8(6), 501',
     doi: '10.3390/rs8060501',
   },
+  weinmann2015: {
+    authors: ['Martin Weinmann', 'Boris Jutzi', 'Stefan Hinz', 'Clément Mallet'],
+    year: 2015,
+    title:
+      'Semantic point cloud interpretation based on optimal neighborhoods, relevant features and efficient classifiers',
+    venue: 'ISPRS Journal of Photogrammetry and Remote Sensing 105, 286–304',
+    doi: '10.1016/j.isprsjprs.2015.01.016',
+  },
+  woebbecke1995: {
+    authors: ['David M. Woebbecke', 'George E. Meyer', 'Von Bargen, Kenneth', 'David A. Mortensen'],
+    year: 1995,
+    title: 'Color indices for weed identification under various soil, residue, and lighting conditions',
+    venue: 'Transactions of the ASAE 38(1), 259–269',
+    doi: '10.13031/2013.27838',
+  },
   horn1981: {
     authors: ['Berthold K. P. Horn'],
     year: 1981,
@@ -297,7 +312,22 @@ export const REFERENCES = {
   },
 }
 
-const surname = (name) => name.trim().split(/\s+/).at(-1)
+// An author is "Given names Surname", or "Surname, Given names" when the surname has
+// more than one word ("Von Bargen, Kenneth").
+const splitName = (name) => {
+  const comma = name.indexOf(',')
+  if (comma >= 0)
+    return {
+      last: name.slice(0, comma).trim(),
+      given: name
+        .slice(comma + 1)
+        .trim()
+        .split(/\s+/),
+    }
+  const parts = name.trim().split(/\s+/)
+  return { last: parts.pop(), given: parts }
+}
+const surname = (name) => splitName(name).last
 
 /** "Lowe 2004", "Kazhdan & Hoppe 2013", "Bleyer et al. 2011". */
 export function citeShort(key) {
@@ -322,9 +352,9 @@ export function formatReference(key, { link = true } = {}) {
   const r = REFERENCES[key]
   if (!r) return key
   const initials = (name) => {
-    const parts = name.trim().split(/\s+/)
-    const last = parts.pop()
-    const ini = parts
+    const { last, given } = splitName(name)
+    const ini = given
+      .filter(Boolean)
       .map((p) =>
         p
           .split('-')

@@ -1,8 +1,10 @@
-// What each step of Classify Ground does (ClassifyGroundModal.vue): drop a cloth onto
-// the upside-down cloud, then label the points by their distance to it
-// (core/products/groundFilter.js).
+// What each step of Classify Points does (ClassifyGroundModal.vue): drop a cloth onto
+// the upside-down cloud, label the points by their distance to it
+// (core/products/groundFilter.js), then find buildings and vegetation among the points
+// above it (core/products/pointClasses.js).
 import { fmtLength, fmtCount } from './format.js'
 import { GROUND_FILTER_LIMITS } from '../products/groundFilter.js'
+import { CLASSIFY_DEFAULTS } from '../defaults.user.js'
 
 const TERRAIN = { 1: 'soft for steep slopes', 2: 'medium for rolling relief', 3: 'stiff for flat ground' }
 
@@ -24,11 +26,12 @@ function clothSize(res, [w, h], streamed) {
 }
 
 // project: { noScale, extent: [w, h] the cloud's horizontal extent in metres (null when
-//   unknown), streamed }
-export function classifyGroundEffects(s, { noScale = false, extent = null, streamed = false } = {}) {
+//   unknown), streamed, colour (the cloud has colours) }
+export function classifyGroundEffects(s, { noScale = false, extent = null, streamed = false, colour = true } = {}) {
+  s = { ...CLASSIFY_DEFAULTS, ...s }
   if (noScale) {
     const why = 'Needs real-world scale: georeference the model or add scale bars first.'
-    return { cloth: why, label: why }
+    return { cloth: why, label: why, buildings: why, vegetation: why }
   }
   const cloth =
     `A cloth of ${fmtLength(s.clothResolution, 'm')} cells, ${TERRAIN[s.rigidness] ?? TERRAIN[2]}, settles onto the cloud seen from below` +
@@ -37,5 +40,17 @@ export function classifyGroundEffects(s, { noScale = false, extent = null, strea
   const label =
     `Points within ${fmtLength(s.classThreshold, 'm')} of the cloth are ground, the rest above ground` +
     `${s.extent === 'core' ? '; outside the dense core points stay unclassified' : ', over the whole cloud'}.`
-  return { cloth, label }
+  const buildings =
+    s.buildings === false
+      ? 'Off: roofs and walls stay above ground, unclassified.'
+      : `Flat surfaces, roofs and walls, that reach ${fmtLength(s.minBuildingHeight, 'm')} above the cloth and cover ` +
+        `${fmtLength(s.minBuildingArea, 'm²')} are buildings, with their edges` +
+        `${colour ? ', unless they are green' : ''}; smaller ones (a car, a low wall) stay unclassified.`
+  const vegetation =
+    s.vegetation === false
+      ? 'Off: trees and shrubs stay above ground, unclassified.'
+      : `${colour ? 'What is green, or ' : 'This cloud has no colour, so vegetation is found by its shape alone: '}` +
+        `what scatters rather than forming a surface, is vegetation: low up to ${fmtLength(s.lowVegetationMax, 'm')} ` +
+        `above the cloth, medium up to ${fmtLength(s.mediumVegetationMax, 'm')}, high above.`
+  return { cloth, label, buildings, vegetation }
 }

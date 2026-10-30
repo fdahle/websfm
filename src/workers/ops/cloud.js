@@ -78,8 +78,11 @@ export function makeCloudOps() {
       const { nrm } = estimateNormals(c, s, log, (f) => progress(f, 'Estimating normals…'))
       return { out: { count: c.count, pos: c.pos, col: c.col, nrm, attributes: c.attributes } }
     },
-    // Ground classification: the same points with a LAS `classification` attribute
-    // (2 ground, 1 above, 7 low, 0 outside the extent), replacing any earlier one.
+    // Classify Points: the same points with a LAS `classification` attribute (2 ground,
+    // 6 building, 3/4/5 vegetation, 1 other above ground, 7 low, 0 outside the extent),
+    // replacing any earlier one. One worker: the cloth is one simulation over the whole
+    // cloud, and the class rules after it add 4.7 s per 16 M points (UseGeo, 2026-10-30).
+    // A streamed cloud runs tile by tile on every worker (cloudLod.js).
     // `frame` is the product frame spec the store resolved (null: the cloud's own
     // z is up, an imported survey cloud); `cameras` lets a local spec derive up.
     'classify-ground': ([c], s, log, progress) => {

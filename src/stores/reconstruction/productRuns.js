@@ -87,7 +87,7 @@ export function createProductRuns({
     if (!source) {
       log(
         groundOnly
-          ? 'DTM: classify the ground of a dense cloud first (Tools ▸ Point Cloud ▸ Classify ground)'
+          ? 'DTM: classify the ground of a dense cloud first (Tools ▸ Point Cloud ▸ Classify points)'
           : 'DEM: build a point cloud first',
         'warn',
         'Products',
