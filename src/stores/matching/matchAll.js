@@ -482,16 +482,34 @@ export function createMatchAll({
     }
     // Pairs a continued run keeps: those its last save held, or all once the loop was done.
     const kept = new Set(journal ? (journal.phase === 'pairs' ? journal.done : pairs.map((_, i) => i)) : [])
+    // Match only new pairs: a pair with a result keeps it (re-detecting an image removes
+    // its pairs' results, so a kept one belongs to the current features).
+    let keptAsMatched = 0
+    if (settings.onlyNewPairs) {
+      pairs.forEach(([a, b], i) => {
+        if (!kept.has(i) && matchStore.value.get(pairId(a.uuid, b.uuid))?.status === 'done') {
+          kept.add(i)
+          keptAsMatched++
+        }
+      })
+      log(
+        `Matching: only new pairs — ${pluralize(keptAsMatched, 'pair')} already matched keep their result, ` +
+          `${pluralize(pairs.length - kept.size, 'pair')} to match`,
+        'info',
+        'Matching',
+      )
+    }
     if (projects.isPersisting) {
       journal ??= startJournal({ stage: 'match', key, settings: requested, total: pairs.length, phase: 'pairs' })
       await opfs.saveRunJournal(projectId, journal).catch(() => {})
     }
     if (kept.size) {
-      log(
-        `Matching: continuing the stopped run — ${pluralize(kept.size, 'pair')} of ${pairs.length} already matched`,
-        'info',
-        'Matching',
-      )
+      if (kept.size > keptAsMatched)
+        log(
+          `Matching: continuing the stopped run — ${pluralize(kept.size - keptAsMatched, 'pair')} of ${pairs.length} already matched`,
+          'info',
+          'Matching',
+        )
       for (const i of kept) {
         const [a, b] = pairs[i]
         const entry = matchStore.value.get(pairId(a.uuid, b.uuid))

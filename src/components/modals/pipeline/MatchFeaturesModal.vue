@@ -16,7 +16,7 @@ import { MATCH_DEFAULTS, MATCH_PRESETS, MATCH_PRESET_META } from '../../../core/
 import { initialMatchStrategy } from '../../../core/recommend.js'
 import { MATCH_TUNING } from '../../../core/tuning.js'
 import { estimatePairCount, subsetGateStatus } from '../../../core/features/matchPlan.js'
-import { repairEffect } from '../../../core/stepEffects/match.js'
+import { repairEffect, onlyNewPairsDefault, onlyNewPairsEffect } from '../../../core/stepEffects/match.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
 const props = defineProps({
@@ -27,6 +27,9 @@ const props = defineProps({
   // How many images can drive each preselect method (gates the method choice).
   posedImageCount: { type: Number, default: 0 },
   footprintImageCount: { type: Number, default: 0 },
+  // For Match only new pairs: the pairs with a result, and the images with features in none.
+  matchedPairs: { type: Number, default: 0 },
+  unpairedImages: { type: Number, default: 0 },
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -90,7 +93,10 @@ const matchers = [
 
 // Prefill from the single source of truth (core/defaults.user.js); useMatchesStore
 // falls back to the same values. Cloned so edits don't mutate the shared constant.
-const settings = ref({ ...MATCH_DEFAULTS })
+const settings = ref({
+  ...MATCH_DEFAULTS,
+  onlyNewPairs: onlyNewPairsDefault({ matchedPairs: props.matchedPairs, unpairedImages: props.unpairedImages }),
+})
 
 // Quality presets tune the geometric-verification strictness (deltas over defaults)
 // and own only the keys they patch (ratio, inlier ratio, RANSAC iterations): a card
@@ -172,7 +178,8 @@ const pairsEffect = computed(() => {
   const all = (n * (n - 1)) / 2
   if (count == null) return `${fmt(n)} images: pairs whose footprints overlap enough, out of ${fmt(all)} possible.`
   const share = all > 0 && count < all ? ` (${Math.round((100 * count) / all)} % of all ${fmt(all)})` : ''
-  return `${fmt(n)} images → ${exact ? '' : 'at most '}${fmt(count)} pairs${share}.`
+  const kept = onlyNewPairsEffect(settings.value, props)
+  return `${fmt(n)} images → ${exact ? '' : 'at most '}${fmt(count)} pairs${share}.${kept ? ` ${kept}` : ''}`
 })
 // Subset gate: the store bypasses it for an overlap-prefiltered pair set or a
 // small one; say so here instead of offering a knob that will be ignored.
@@ -388,6 +395,16 @@ function run() {
           />
         </SettingsField>
       </template>
+
+      <SettingsField
+        v-if="props.matchedPairs > 0"
+        hint="Pairs that already have a result keep it, and only the others are matched: for photos added since the last run. Off matches every pair again, as the settings above say."
+      >
+        <template #label><FieldHelp op="match-features" param="onlyNewPairs">Match only new pairs</FieldHelp></template>
+        <label class="checkbox-row"
+          ><input v-model="settings.onlyNewPairs" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
     </SettingsStep>
 
     <SettingsStep step="2" title="Match descriptors" :effect="descriptorEffect">

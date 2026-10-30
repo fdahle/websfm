@@ -25,6 +25,34 @@ view's corner. A selection, measuring or model tool left open is closed when the
 starts. Big models are thinned for this picture. The finished model replaces it, together with the clouds
 shown before the run.
 
+## Mode
+<!-- param: addToModel  default: Add to the model when the model can take the new images, otherwise Rebuild -->
+Shown once there is a sparse model. **Add to the model** registers the images with
+features that the model does not hold yet (photos added to the project since, or images
+an earlier run could not place) and leaves the model as it is around them. Match them
+first: [Match only new pairs](guide:match-features) matches each new photo with the
+others without matching the whole block again. The model's points are the starting point,
+so a new image joins as soon as enough of its matches see them. The model's calibration
+stays as it is, and Self-calibration is off for the run. An image that cannot be placed
+stays out, and the console names it. **Rebuild** builds a new model from every image, as
+the first run did.
+
+Adding needs the model's observations: an imported model has none, and an image whose
+features were detected again since the model was built no longer matches what the model
+recorded, so the run stops and asks for a rebuild. A fisheye camera cannot be added to a
+model yet.
+
+## Existing cameras
+<!-- param: existingCameras  default: Auto -->
+What happens to the cameras already in the model. **Fixed** keeps every one of them
+exactly where it is, and the new cameras are placed against them, so depth maps, clouds,
+meshes, DEMs, orthophotos and the georeference built from the model stay current. Build
+the depth maps again to cover the new images. **Refined** then runs
+**Optimize cameras** (Tools ▸ Model ▾) on the whole model, so every camera may move
+with the new ones; what was built from the model is marked outdated, as after a rebuild.
+**Auto** chooses Fixed when something was built from the model, and Refined when nothing
+was; the line under Mode says which.
+
 ## Min correspondences
 <!-- param: minMatchesForRegistration default: 20 -->
 The minimum 3D–2D evidence needed to attempt registering another camera with PnP. Lowering it

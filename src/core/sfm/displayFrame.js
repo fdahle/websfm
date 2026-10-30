@@ -125,11 +125,19 @@ export const centreToMarkPx = (x) => x + 0.5
 // off by the whole lens distortion — and on a film scan by the entire scan→canonical
 // affine. Never the identity (the half-pixel convention shift always applies).
 export function makeScanToPinhole({ K, dist = null, selfCal = null, fiducial = null } = {}) {
+  const toPinhole = makeScanCentreToPinhole({ K, dist, selfCal, fiducial })
+  return (px, py) => toPinhole(markToCentrePx(px), markToCentrePx(py))
+}
+
+// The same chain for a position already in the pixel-centre convention: a keypoint as
+// detection stored it. Extending a saved model (extendModel.js) moves an image's
+// keypoints into the model's frame with it.
+export function makeScanCentreToPinhole({ K, dist = null, selfCal = null, fiducial = null } = {}) {
   const undoDist = !!K && hasDistortion(dist),
     undoSelf = !!K && hasDistortion(selfCal)
   return (px, py) => {
-    let x = markToCentrePx(px),
-      y = markToCentrePx(py)
+    let x = px,
+      y = py
     if (fiducial) {
       const c = scanToCanonical(x, y, fiducial.transform ?? fiducial.A, fiducial.frame)
       x = c.x

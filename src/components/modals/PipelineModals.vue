@@ -46,6 +46,7 @@ import SectionModal from './cloud/SectionModal.vue'
 import SmoothMeshModal from './mesh/SmoothMeshModal.vue'
 import TerrainModal from './products/TerrainModal.vue'
 import TransformCloudModal from './cloud/TransformCloudModal.vue'
+import { extensionBlocker } from '../../core/sfm/extendModel.js'
 const FindGcpsModal = defineAsyncComponent(() => import('./georef/FindGcpsModal.vue'))
 
 // The pipeline and Tools-tab dialogs, lifted out of App.vue: each opens from a
@@ -84,6 +85,33 @@ const matchedLinks = computed(() => {
     ids.add(e.idB)
   }
   return { images: ids.size, pairs }
+})
+// Sparse Model ▸ Add to the model: the main model, the images with features it lacks,
+// and whether anything was built from its cameras (core/sfm/extendModel.js).
+const extendState = computed(() => {
+  const model = reconstructionStore.mainSparseCloud
+  const cams = model?.cameras
+  const newImages = images.value.filter((im) => im.kpStatus === 'done' && im.kpCount > 0 && !cams?.has(im.uuid)).length
+  return {
+    modelCameras: cams?.size ?? 0,
+    newImages,
+    hasProducts: reconstructionStore.hasSparseProducts(),
+    blocker: extensionBlocker(model, newImages),
+  }
+})
+// Match only new pairs: the pairs with a result, and the images with features in none
+// of them (photos added since the last match).
+const matchedState = computed(() => {
+  const inPair = new Set()
+  let pairs = 0
+  for (const e of matchStore.value.values()) {
+    if (e.status !== 'done') continue
+    pairs++
+    inPair.add(e.idA)
+    inPair.add(e.idB)
+  }
+  const unpaired = images.value.filter((im) => im.kpStatus === 'done' && im.kpCount > 0 && !inPair.has(im.uuid))
+  return { pairs, unpairedImages: unpaired.length }
 })
 // Crop, filter and classify ground also take a streamed cloud (core/lod/streamed.js):
 // crop copies a box out of the octree into a resident cloud (or, inverted, rewrites the
@@ -222,6 +250,8 @@ const exportingFootprints = computed(
       :detected-image-count="detectedImageCount"
       :posed-image-count="posedImageCount"
       :footprint-image-count="footprintImageCount"
+      :matched-pairs="matchedState.pairs"
+      :unpaired-images="matchedState.unpairedImages"
       @close="matchFeaturesOpen = false"
       @run="onMatchRun"
     />
@@ -234,6 +264,10 @@ const exportingFootprints = computed(
       :linked-images="matchedLinks.images"
       :pairs="matchedLinks.pairs"
       :sensors="sensors.length"
+      :model-cameras="extendState.modelCameras"
+      :new-images="extendState.newImages"
+      :has-products="extendState.hasProducts"
+      :extend-blocker="extendState.blocker"
       @close="closeReconstructModal"
       @run="onReconstructRun"
     />

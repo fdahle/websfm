@@ -1,7 +1,23 @@
 // What the steps of Detect and Match Features do to this project
-// (MatchFeaturesModal.vue). Only the split-graph repair is here so far; the other
-// steps' lines are still computed in the dialog.
+// (MatchFeaturesModal.vue). The split-graph repair and Match only new pairs are here so
+// far; the other steps' lines are still computed in the dialog.
 import { MATCH_TUNING } from '../tuning.js'
+import { plural } from './format.js'
+
+// Match only new pairs starts on when the project has matched pairs and images with
+// features that are in none of them: photos added since the last run.
+//   project: { matchedPairs, unpairedImages }
+export const onlyNewPairsDefault = ({ matchedPairs = 0, unpairedImages = 0 } = {}) =>
+  matchedPairs > 0 && unpairedImages > 0
+
+// What step 1 adds to its pair count when matched pairs exist.
+export function onlyNewPairsEffect(s, { matchedPairs = 0, unpairedImages = 0 } = {}) {
+  if (!matchedPairs) return ''
+  const added = unpairedImages ? ` (${plural(unpairedImages, 'image')} in no pair yet)` : ''
+  return s.onlyNewPairs
+    ? `The ${plural(matchedPairs, 'pair')} already matched keep their result; only the others are matched${added}.`
+    : `The ${plural(matchedPairs, 'pair')} already matched are matched again${added}.`
+}
 
 // The effect line of step 5, Repair a split graph.
 export function repairEffect(s, tuning = MATCH_TUNING) {

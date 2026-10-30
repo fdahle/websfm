@@ -20,7 +20,11 @@
 // also depth, dense, dem, ortho, and reopen = reload the page and restore the project),
 // detect / match / recon (settings objects; `preset` selects a preset delta), port, headed,
 // variants ([{ label, match?, recon? }]: one detection, then a match + reconstruct per
-// variant, so SfM-only experiments reuse the same keypoints and matches).
+// variant, so SfM-only experiments reuse the same keypoints and matches), holdBack (leave
+// the last N images out of the ingest; the stage `ingestRest` adds them later, as photos
+// added to a project are: "detect,match,recon,ingestRest,detect:new,match:new,recon:add"
+// with `detect:new` { overwrite: false }, `match:new` { onlyNewPairs: true } and
+// `recon:add` { addToModel: true }).
 import { chromium } from 'playwright'
 import { startWorkerHeapSampler } from './workerHeap.mjs'
 import { loadReference } from './reference.mjs'
@@ -90,6 +94,7 @@ for (const k of [
   'profile',
   'project',
   'exportOrthoCog',
+  'holdBack',
 ])
   if (args[k] !== undefined) cfg[k] = args[k]
 for (const k of ['detect', 'match', 'recon', 'videoImport'])
@@ -436,6 +441,8 @@ try {
   // In batches, so the page never holds the whole dataset as blobs at once.
   let added = 0
   const list = files.map((f) => ({ url: `${base}/__bench_data/${encodeURIComponent(f)}`, name: baseName(f) }))
+  // `holdBack`: the last N images wait for the `ingestRest` stage.
+  let heldBack = cfg.holdBack > 0 ? list.splice(Math.max(0, list.length - cfg.holdBack)) : []
   // Under the same crash/stall watchdog as the stages: a renderer that dies mid-ingest
   // (Iceland 1980, 125 × 130 MP scans under a memory cap) left the run waiting forever.
   let video = null
@@ -1132,6 +1139,17 @@ try {
         result.stages[entry] = r
         console.log(`== ${entry}: ${JSON.stringify(r)}`)
         await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+        continue
+      }
+      if (entry === 'ingestRest') {
+        // `ingestRest`: the images `holdBack` kept out of the ingest, added now.
+        const t1 = Date.now()
+        let n = 0
+        for (let i = 0; i < heldBack.length; i += 32)
+          n = await page.evaluate((l) => window.bench.addImages(l), heldBack.slice(i, i + 32))
+        result.stages[entry] = { added: heldBack.length, images: n, seconds: (Date.now() - t1) / 1000 }
+        console.log(`== ${entry}: ${JSON.stringify(result.stages[entry])}`)
+        heldBack = []
         continue
       }
       if (entry === 'sensor') {

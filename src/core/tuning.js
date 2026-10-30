@@ -218,6 +218,12 @@ export const SFM_TUNING = {
   // RMS (px): dense undistorts the rasters with that bag. Before the re-fold, measured
   // 0.05 (quarry, 12 px move) and 0.11 px (synthetic self-cal, 4 px) on 2026-10-28.
   selfCalComposedWarnPx: 0.25,
+  // Adding images to a saved model (extendModel.js) rebuilds the old images' keypoints in
+  // the model's frame and compares them with the pixels the model saved: above this
+  // median gap (px) they are not the keypoints the model was solved from (re-detected
+  // features) and the run stops. A self-calibrated model's composed bag stays well
+  // under it (selfCalComposedWarnPx).
+  extendFrameMaxMedianPx: 0.5,
   // ── PnP registration gate ──
   pnpGateScale: 2, // fixed inlier gate = reprjThreshold × min(pnpGateScale, 2)
   minPnpInliers: 15, // absolute PnP-inlier floor to accept a pose

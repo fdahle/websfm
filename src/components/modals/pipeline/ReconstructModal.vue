@@ -4,13 +4,20 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import SettingsGroup from '../ui/SettingsGroup.vue'
+import SegmentedControl from '../ui/SegmentedControl.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import { useDatasetRecommendations } from '../../../composables/useDatasetRecommendations.js'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
-import { RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, RECONSTRUCT_PRESET_META } from '../../../core/defaults.user.js'
+import {
+  RECONSTRUCT_DEFAULTS,
+  RECONSTRUCT_PRESETS,
+  RECONSTRUCT_PRESET_META,
+  EXTEND_DEFAULTS,
+} from '../../../core/defaults.user.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
-import { sparseEffects } from '../../../core/stepEffects/sparse.js'
+import { sparseEffects, sparseModeEffect } from '../../../core/stepEffects/sparse.js'
 
 const props = defineProps({
   // Set when Georeference hands off here for its GCP-constrained adjustment path.
@@ -20,6 +27,12 @@ const props = defineProps({
   linkedImages: { type: Number, default: 0 },
   pairs: { type: Number, default: 0 },
   sensors: { type: Number, default: 0 },
+  // Add to the model: the main model's cameras, the images with features it lacks,
+  // whether anything was built from it, and why it cannot take more (or null).
+  modelCameras: { type: Number, default: 0 },
+  newImages: { type: Number, default: 0 },
+  hasProducts: { type: Boolean, default: false },
+  extendBlocker: { type: String, default: null },
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -30,6 +43,28 @@ const { recommendations } = useDatasetRecommendations()
 const settings = ref({ ...RECONSTRUCT_DEFAULTS })
 // Run stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step).
+// Add to the model or Rebuild: offered once a model exists, and Add is the start when it
+// can take the images it lacks. Not a preset key: a card never changes the mode.
+const canExtend = computed(() => props.modelCameras > 0 && !props.extendBlocker)
+const mode = ref(canExtend.value && !props.groundControlAdjustment ? 'add' : 'rebuild')
+const modes = [
+  { id: 'add', label: 'Add to the model' },
+  { id: 'rebuild', label: 'Rebuild' },
+]
+const existingCameras = ref(EXTEND_DEFAULTS.existingCameras)
+const modeSettings = computed(() => ({
+  ...settings.value,
+  addToModel: mode.value === 'add',
+  existingCameras: existingCameras.value,
+}))
+const modeEffect = computed(() =>
+  sparseModeEffect(modeSettings.value, {
+    modelCameras: props.modelCameras,
+    newImages: props.newImages,
+    hasProducts: props.hasProducts,
+    blocker: props.extendBlocker,
+  }),
+)
 const numbers = computed(() =>
   checkNumberFields(settings.value, {
     minMatchesForRegistration: { label: 'Min correspondences', min: 6, max: 500, integer: true },
@@ -70,16 +105,20 @@ const SELF_CAL_HINTS = {
 // nothing to override for self-calibration — `auto` resolves per project inside
 // core/sfm/sfm.js — but it knows WHICH branch this project takes, so the step says it.
 const effects = computed(() =>
-  sparseEffects(settings.value, {
+  sparseEffects(modeSettings.value, {
     linkedImages: props.linkedImages,
     pairs: props.pairs,
     sensors: props.sensors,
     autoReason: recommendations.value.sfm?.refineIntrinsics?.reason ?? null,
+    modelCameras: props.modelCameras,
+    newImages: props.newImages,
   }),
 )
+const adding = computed(() => mode.value === 'add')
+const blocked = computed(() => adding.value && !!props.extendBlocker)
 
 function run() {
-  emit('run', { ...settings.value })
+  emit('run', adding.value ? { ...modeSettings.value } : { ...settings.value })
 }
 </script>
 
@@ -92,6 +131,24 @@ function run() {
       Rebuild the sparse model with the eligible GCPs included in bundle adjustment. When it succeeds, the model will
       automatically be fitted to the project CRS.
     </p>
+    <SettingsGroup v-if="props.modelCameras > 0 && !props.groundControlAdjustment" title="Model">
+      <SettingsField>
+        <template #label><FieldHelp op="sparse-reconstruction" param="addToModel">Mode</FieldHelp></template>
+        <SegmentedControl v-model="mode" :options="modes" />
+        <template #hint>{{ modeEffect }}</template>
+      </SettingsField>
+      <SettingsField v-if="adding" label-for="existingCameras">
+        <template #label
+          ><FieldHelp op="sparse-reconstruction" param="existingCameras">Existing cameras</FieldHelp></template
+        >
+        <select id="existingCameras" v-model="existingCameras" class="field-input field-select" :disabled="blocked">
+          <option value="auto">Auto (recommended)</option>
+          <option value="fixed">Fixed</option>
+          <option value="refined">Refined</option>
+        </select>
+      </SettingsField>
+    </SettingsGroup>
+
     <PresetCards
       :model-value="activePreset"
       :base-id="baseId"
@@ -186,7 +243,7 @@ function run() {
         step="3"
         title="Self-calibration"
         :effect="effects.calibration"
-        :inactive="!(settings.baIterations > 0) || settings.refineIntrinsics === 'none'"
+        :inactive="adding || !(settings.baIterations > 0) || settings.refineIntrinsics === 'none'"
       >
         <SettingsField label-for="refineIntr">
           <template #label>
@@ -197,7 +254,7 @@ function run() {
             id="refineIntr"
             v-model="settings.refineIntrinsics"
             class="field-input field-select"
-            :disabled="!(settings.baIterations > 0)"
+            :disabled="adding || !(settings.baIterations > 0)"
           >
             <option value="auto">Auto (recommended)</option>
             <option value="none">Off — use sensor table</option>
@@ -214,8 +271,13 @@ function run() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="run">
-        {{ props.groundControlAdjustment ? 'Adjust & Georeference' : 'Run Reconstruction' }}
+      <button
+        class="btn btn-primary"
+        :disabled="!numbers.valid || blocked"
+        :title="blocked ? modeEffect : numbers.reason"
+        @click="run"
+      >
+        {{ props.groundControlAdjustment ? 'Adjust & Georeference' : adding ? 'Add Images' : 'Run Reconstruction' }}
       </button>
     </template>
   </ModalShell>

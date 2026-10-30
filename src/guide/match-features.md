@@ -105,6 +105,18 @@ marginal pairs and match faster. Footprints are approximate, so a value close to
 real overlap can drop pairs that would have matched. An image without a footprint keeps
 all its pairs, and with fewer than two footprints the run matches exhaustively.
 
+## Match only new pairs
+<!-- param: onlyNewPairs  default: on when some images with features are in no pair yet, otherwise off -->
+Shown once the project has matched pairs. A pair that already has a result keeps it,
+and only the pairs the strategy above chooses that have none are matched: after you add
+photos, that is each new photo with the others, not the whole block again. It starts on
+when some images with features are in no pair yet. Results kept this way were made with
+the settings of the run that made them; turn it off to match every pair again with the
+settings here. Detecting an image's features again removes its pairs' results, so a kept
+result always belongs to the features the image has now. To add the new photos to an
+existing model, run [Sparse Reconstruction](guide:sparse-reconstruction) next with
+**Add to the model**.
+
 ## Matcher
 <!-- param: matcher  default: Brute-force + RANSAC -->
 **Brute-force** compares [descriptor](help:descriptor)s directly, keeps each match that

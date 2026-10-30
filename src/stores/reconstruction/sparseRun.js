@@ -28,7 +28,10 @@ import {
 } from '../../core/products/projection.js'
 import { pluralize } from '../../core/textFormat.js'
 import { SparsePoints } from '../../core/sfm/sparsePoints.js'
-import { markRaw } from 'vue'
+import { extensionBlocker, resolveExistingCameras } from '../../core/sfm/extendModel.js'
+import { packSparseCloud } from '../../core/sfm/resultCodec.js'
+import { OPTIMIZE_CAMERAS_DEFAULTS } from '../../core/defaults.user.js'
+import { markRaw, toRaw } from 'vue'
 
 // The sparse reconstruction run, split out of useReconstructionStore: packing the
 // keypoints, matches and survey constraints for the SfM worker, the memory
@@ -62,6 +65,9 @@ export function createSparseRun({
   supersedeRestore,
   upsertSparseCloud,
   liveSparse,
+  mainSparseCloud,
+  editClouds,
+  hasSparseProducts,
 }) {
   // The external 3D evidence a bundle adjustment is held to — enabled ground
   // control and camera priors — as worker-ready plain data, in ONE Cartesian survey
@@ -160,9 +166,28 @@ export function createSparseRun({
   // the usual hooks, then writes the returned model into reactive state and
   // persists it. (The model now lands all at once at the end rather than building
   // up live in the viewer — a fair trade for never freezing the UI.)
+  //
+  // `addToModel`: add the images with features the main model lacks to it, instead of
+  // building a new one (core/sfm/extendModel.js). `existingCameras` ('auto' | 'fixed' |
+  // 'refined', resolveExistingCameras): fixed keeps the model's cameras and stamp, so
+  // everything built from them stays current; refined then runs Optimize cameras.
   async function reconstruct(settings = {}, onProgress) {
+    const { addToModel = false, existingCameras = 'auto', ...solverSettings } = settings
     // The console's session overrides of SFM_TUNING knobs (stores/tuningOverrides.js).
-    settings = applyTuningOverrides('sfm', settings, (msg) => log(msg, 'warn', 'Reconstruction'))
+    settings = applyTuningOverrides('sfm', solverSettings, (msg) => log(msg, 'warn', 'Reconstruction'))
+    const base = addToModel ? mainSparseCloud.value : null
+    if (addToModel) {
+      const fresh = images.value.filter(
+        (img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0 && !base?.cameras?.has(img.uuid),
+      ).length
+      const why = extensionBlocker(base, fresh)
+      if (why) {
+        log(`Add to the model: ${why}`, 'error', 'Reconstruction')
+        return
+      }
+    }
+    const extendMode = base ? resolveExistingCameras(existingCameras, { hasProducts: hasSparseProducts() }) : null
+    liveInModelFrame = !!base
     supersedeRestore()
     reconStatus.value = 'running'
     let stopMemoryWatchdog = () => {}
@@ -258,7 +283,8 @@ export function createSparseRun({
       // not create renderer headroom. If the only thing preventing a rerun is the
       // replaceable current result, unload it in memory (the saved copy stays on disk),
       // discard idle worker heaps, yield for collection, and measure again.
-      if (!plan.decisions.renderer.safe) {
+      // An extension builds on the loaded model, so it is never released.
+      if (!plan.decisions.renderer.safe && !base) {
         const released = releaseReplaceableModelForRerun()
         if (released.released) {
           terminateAll('preparing a clean sparse-reconstruction rerun')
@@ -462,6 +488,22 @@ export function createSparseRun({
         gcps: survey.gcps,
         cameraPriors: survey.cameraPriors,
         settings,
+        // The model to add to: its points are the live cloud's buffers, so they are
+        // cloned into the worker, never transferred. The summary carries its frame.
+        ...(base
+          ? {
+              base: {
+                packed: packSparseCloud(base).result,
+                summary: JSON.parse(
+                  JSON.stringify({
+                    selfCalDistortion: toRaw(summary.value)?.selfCalDistortion ?? [],
+                    fiducialTransforms: toRaw(summary.value)?.fiducialTransforms ?? [],
+                    initPair: toRaw(summary.value)?.initPair ?? null,
+                  }),
+                ),
+              },
+            }
+          : {}),
       }
 
       // Each pair's packed matches (a swapped pair's are a new buffer) are transferred.
@@ -551,7 +593,8 @@ export function createSparseRun({
         // Aerial auto-orient: SfM leaves the model in an arbitrary frame (it can
         // come out upside-down). For aerial surveys the cameras look down, so we
         // rotate the whole model Z-up — cameras above the ground — before storing.
-        if (projects.currentSceneType === 'aerial') {
+        // An extension is in the model's frame already.
+        if (!base && projects.currentSceneType === 'aerial') {
           const R = aerialUpRotation(camMap)
           if (R) {
             const oriented = rotateReconstruction(camMap, pts, R, { inPlace: true })
@@ -577,39 +620,65 @@ export function createSparseRun({
               )
           }
         }
-        upsertSparseCloud(camMap, pts)
-        // A secondary component that could not satisfy the conservative shared-camera
-        // alignment gates is still a valid reconstruction. Preserve it as a separate
-        // sparse cloud rather than discarding it or forcing it into the primary frame.
-        clouds.value = clouds.value.filter((c) => !(c.kind === 'sparse' && c.secondary))
-        for (const [si, model] of (result.secondaryModels || []).entries()) {
-          let secondaryCameras = model.cameras
-          let secondaryPoints = model.points
-          if (projects.currentSceneType === 'aerial') {
-            const R = aerialUpRotation(secondaryCameras)
-            if (R)
-              ({ cameras: secondaryCameras, points: secondaryPoints } = rotateReconstruction(
-                secondaryCameras,
-                secondaryPoints,
-                R,
-                { inPlace: true },
-              ))
-          }
-          upsertSparseCloud(secondaryCameras, secondaryPoints, {
-            replaceId: null,
-            asMain: false,
-            select: false,
-            secondary: true,
-            name: model.name || `Secondary sparse ${si + 1}`,
+        if (base) {
+          // The same model with more cameras: its name, display and stamp carry over, so
+          // what was built from its cameras (which did not move) stays current.
+          upsertSparseCloud(camMap, pts, {
+            replaceId: base.id,
+            asMain: true,
+            name: base.name,
+            keepStamp: true,
           })
+          const grown = mainSparseCloud.value
+          if (grown && base.style !== undefined) grown.style = base.style
+          if (grown && base.visible !== undefined) grown.visible = base.visible
+        } else {
+          upsertSparseCloud(camMap, pts)
+          // A secondary component that could not satisfy the conservative shared-camera
+          // alignment gates is still a valid reconstruction. Preserve it as a separate
+          // sparse cloud rather than discarding it or forcing it into the primary frame.
+          clouds.value = clouds.value.filter((c) => !(c.kind === 'sparse' && c.secondary))
+          for (const [si, model] of (result.secondaryModels || []).entries()) {
+            let secondaryCameras = model.cameras
+            let secondaryPoints = model.points
+            if (projects.currentSceneType === 'aerial') {
+              const R = aerialUpRotation(secondaryCameras)
+              if (R)
+                ({ cameras: secondaryCameras, points: secondaryPoints } = rotateReconstruction(
+                  secondaryCameras,
+                  secondaryPoints,
+                  R,
+                  { inPlace: true },
+                ))
+            }
+            upsertSparseCloud(secondaryCameras, secondaryPoints, {
+              replaceId: null,
+              asMain: false,
+              select: false,
+              secondary: true,
+              name: model.name || `Secondary sparse ${si + 1}`,
+            })
+          }
         }
-        await invalidateSparseDependents()
+        if (!base) await invalidateSparseDependents()
+        // Which images each extension added, kept across them for the Quality Report.
+        const extensions = base
+          ? [
+              ...(summary.value?.extensions ?? []),
+              {
+                date: result.summary?.date ?? new Date().toISOString(),
+                existingCameras: extendMode,
+                added: result.summary?.extension?.addedNames ?? [],
+                notAdded: result.summary?.extension?.notAdded ?? [],
+              },
+            ]
+          : null
         // Retire the outgoing summary into the run history before overwriting it, so
         // "vs previous run" compares against what was on screen a moment ago (WS5).
         if (summary.value) {
           summaryHistory.value = [...summaryHistory.value, summary.value].slice(-SUMMARY_HISTORY_MAX)
         }
-        summary.value = result.summary ?? null
+        summary.value = result.summary ? { ...result.summary, ...(extensions ? { extensions } : {}) } : null
         healthDirty.value++
         reconStatus.value = 'done'
         const saved = await save()
@@ -620,6 +689,34 @@ export function createSparseRun({
           saved ? 'success' : 'warn',
           'Project',
         )
+        if (base) {
+          const ext = result.summary?.extension ?? {}
+          log(
+            `Added ${pluralize(ext.added ?? 0, 'image')} to the model; its ${pluralize(ext.modelCameras ?? 0, 'camera')} stayed where they were` +
+              (extendMode === 'fixed' && hasSparseProducts()
+                ? '. Depth maps, clouds and rasters built from them stay current; build depth maps again to cover the new images.'
+                : '.'),
+            'success',
+            'Reconstruction',
+          )
+          if (ext.notAdded?.length)
+            log(
+              `${pluralize(ext.notAdded.length, 'image')} could not be added: ${ext.notAdded.slice(0, 8).join(', ')}` +
+                `${ext.notAdded.length > 8 ? ', …' : ''} (too few matches to the model, or a pose that did not fit)`,
+              'warn',
+              'Reconstruction',
+            )
+          // Refined: every camera may move now that the new ones are in (Optimize cameras).
+          if (extendMode === 'refined' && mainSparseCloud.value) {
+            const grown = mainSparseCloud.value
+            await editClouds({
+              mode: 'optimize',
+              sourceIds: [grown.id],
+              settings: { createdAt: grown.createdAt, refine: OPTIMIZE_CAMERAS_DEFAULTS.refine },
+            })
+            if (summary.value && !summary.value.extensions) summary.value = { ...summary.value, extensions }
+          }
+        }
       } else {
         reconStatus.value = result.status === 'error' ? 'error' : 'idle'
       }
@@ -634,7 +731,8 @@ export function createSparseRun({
 
   // A worker snapshot (core/sfm/liveSnapshot.js) as a cloud the 3D view can draw. An
   // aerial model is turned Z-up as the finished one will be, so the view does not
-  // flip at the end.
+  // flip at the end; an extension is in the model's frame already.
+  let liveInModelFrame = false
   function showLive({ cameras: list, pos, col }) {
     const n = pos.length / 3
     let cameras = new Map(list.map(({ uuid, R, t, K }) => [uuid, { R, t, K }]))
@@ -645,7 +743,7 @@ export function createSparseRun({
       vcam: new Uint32Array(0),
       vkp: new Uint32Array(0),
     })
-    if (projects.currentSceneType === 'aerial' && cameras.size >= 2) {
+    if (!liveInModelFrame && projects.currentSceneType === 'aerial' && cameras.size >= 2) {
       const R = aerialUpRotation(cameras)
       if (R) ({ cameras, points } = rotateReconstruction(cameras, points, R, { inPlace: true }))
     }

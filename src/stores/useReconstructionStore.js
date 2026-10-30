@@ -750,6 +750,9 @@ export const useReconstructionStore = registerProjectStore(
         imported = false,
         secondary = false,
         select = true,
+        // The same camera solution with more in it (adding images, extendModel.js): the
+        // stamp products and the region were built against stays.
+        keepStamp = false,
       } = opts
       const idx = replaceId ? clouds.value.findIndex((c) => c.id === replaceId && c.kind === 'sparse') : -1
       const prev = idx >= 0 ? clouds.value[idx] : null
@@ -757,7 +760,7 @@ export const useReconstructionStore = registerProjectStore(
         id: prev?.id ?? makeCloudId(),
         name: name ?? prev?.name ?? 'Sparse cloud',
         kind: 'sparse',
-        createdAt: Date.now(),
+        createdAt: keepStamp && prev ? prev.createdAt : Date.now(),
         // Provenance, not a role: a COLMAP-imported sparse cloud still lives in the
         // Reconstruction section (it IS the model) but carries the chip. NOT
         // inherited from `prev` — a reconstruct that replaces an imported cloud
@@ -1142,6 +1145,16 @@ export const useReconstructionStore = registerProjectStore(
       clouds,
     })
 
+    // Anything built from the main model's cameras: what Add to the model ▸ Existing
+    // cameras ▸ Auto keeps fixed (core/sfm/extendModel.js resolveExistingCameras).
+    function hasSparseProducts() {
+      return (
+        depthMapCount.value > 0 ||
+        rasterProducts.value.length > 0 ||
+        clouds.value.some((c) => (c.kind === 'dense' || c.kind === 'mesh') && c.basedOn?.length)
+      )
+    }
+
     // Reconstruct and the survey constraints it shares with gradual selection
     // (reconstruction/sparseRun.js).
     const { surveyConstraintInput, reconstruct } = createSparseRun({
@@ -1169,6 +1182,9 @@ export const useReconstructionStore = registerProjectStore(
       supersedeRestore,
       upsertSparseCloud,
       liveSparse,
+      mainSparseCloud,
+      editClouds,
+      hasSparseProducts,
     })
 
     // Reset the in-memory clouds. Pass { purge: true } to also delete the persisted
@@ -1472,6 +1488,7 @@ export const useReconstructionStore = registerProjectStore(
       estimateRasterSize,
       generateMesh,
       reconstruct,
+      hasSparseProducts,
       importColmapModel,
       importInteropModel,
       importCloud,

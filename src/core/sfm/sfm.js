@@ -18,6 +18,8 @@
 //   pairs:    [{ idA, idB, F: number[3][3], matches: [[ia,ib], …], inlierCount, status }]
 //             (only 'done' pairs are used; the store passes those)
 //   settings: tuning knobs (resolved in singleModel.js; defaults.user.js + tuning.js)
+//   base:     optional saved model to add the other images to (extendModel.js):
+//             { cameras, points: SparsePoints, summary }
 // Output:
 //   { status: 'idle' | 'done' | 'error',
 //     cameras: [{ uuid, R, t, K }],
@@ -121,6 +123,18 @@ export async function reconstruct(input, hooks = {}) {
   // consecutive slices of one overall bar. Without this, seed retries and secondary
   // models each drove the bar 0→100% again — the "finishes several times" bug.
   const [primaryStart, primaryEnd] = RUN_BUDGET.primary
+  // Adding images to a saved model (extendModel.js): one run from that model. Seed
+  // retries and secondary models belong to a run that chooses its own start. The
+  // model is shared, not cloned: the run only reads it.
+  if (input.base) {
+    const { base, ...rest } = input
+    return withRunRecord(
+      await reconstructSingleModel(
+        { ...clone(rest), base },
+        { ...hooks, progressRange: { start: primaryStart, end: RUN_BUDGET.recovery[1] } },
+      ),
+    )
+  }
   let primary = await reconstructSingleModel(clone(input), {
     ...hooks,
     progressRange: { start: primaryStart, end: primaryEnd },

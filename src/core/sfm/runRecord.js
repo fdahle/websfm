@@ -356,6 +356,8 @@ export function assembleSummary({
   remainingComponents,
   selfCalDistortion,
   fiducialTransforms,
+  // An extension has no seed pair of its own: the model's record, as it was.
+  initPairRecord,
 }) {
   return {
     date: new Date().toISOString(),
@@ -364,33 +366,36 @@ export function assembleSummary({
     pct3plusViewTracks,
     preBaP95px: preBaStats.p95,
     postBaMedianPx: finalStats.median,
-    initPair: {
-      idA: bestPair.idA,
-      idB: bestPair.idB,
-      nameA: imgA.name,
-      nameB: imgB.name,
-      // The seed record IS the SB acceptance test (TODO ▸ SB): which pair won, on
-      // what evidence, and how close the runner-up was.
-      angleDeg: best.angle,
-      inliers: best.inliers,
-      points: seedPointCount,
-      score: best.score ?? null,
-      // Graph degree + PnP-ready third views come from the candidate table (the
-      // scorer computes them there); they are the two signals the 2026-07-22
-      // heuristic changes turn on, so a run is not reviewable without them.
-      ...(() => {
-        const rows = perPairInitReproj || []
-        const sel = rows.find((p) => p.selected)
-        const others = rows.filter((p) => !p.selected && p.score != null)
-        const up = others.length ? others.reduce((a, b) => (b.score > a.score ? b : a)) : null
-        return {
-          degree: sel?.degree ?? null,
-          readyViews: sel?.growthViews ?? null,
-          candidatesScored: rows.length,
-          runnerUp: up ? { pair: up.pair, score: up.score, parallaxDeg: up.parallaxDeg } : null,
-        }
-      })(),
-    },
+    initPair:
+      initPairRecord !== undefined
+        ? initPairRecord
+        : {
+            idA: bestPair.idA,
+            idB: bestPair.idB,
+            nameA: imgA.name,
+            nameB: imgB.name,
+            // The seed record IS the SB acceptance test (TODO ▸ SB): which pair won, on
+            // what evidence, and how close the runner-up was.
+            angleDeg: best.angle,
+            inliers: best.inliers,
+            points: seedPointCount,
+            score: best.score ?? null,
+            // Graph degree + PnP-ready third views come from the candidate table (the
+            // scorer computes them there); they are the two signals the 2026-07-22
+            // heuristic changes turn on, so a run is not reviewable without them.
+            ...(() => {
+              const rows = perPairInitReproj || []
+              const sel = rows.find((p) => p.selected)
+              const others = rows.filter((p) => !p.selected && p.score != null)
+              const up = others.length ? others.reduce((a, b) => (b.score > a.score ? b : a)) : null
+              return {
+                degree: sel?.degree ?? null,
+                readyViews: sel?.growthViews ?? null,
+                candidatesScored: rows.length,
+                runnerUp: up ? { pair: up.pair, score: up.score, parallaxDeg: up.parallaxDeg } : null,
+              }
+            })(),
+          },
     // Run record (baseline bookkeeping) — see captureRunConfig above.
     config: runConfig,
     gates: gateRecord,

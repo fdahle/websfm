@@ -11,6 +11,11 @@ export function makeSfmOps() {
   // final model.
   async function reconstruct([input], { emit }) {
     wrapPackedMatches(input.pairs)
+    // Adding images to a saved model: the model arrives packed (packSparseCloud).
+    if (input.base) {
+      const model = unpackReconstructionResult(input.base.packed)
+      input.base = { cameras: model.cameras, points: model.points, summary: input.base.summary }
+    }
     const result = await sfmReconstruct(input, {
       onLog: (message, level, category) => emit('log', [message, level, category]),
       // `fraction` is the phase-weighted 0..1 bar value (core/sfm/progressPlan.js);

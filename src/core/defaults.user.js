@@ -185,6 +185,10 @@ export const MATCH_DEFAULTS = {
   // each piece and the main block again with looser gates (core/features/bridgeRepair.js;
   // limits in tuning.js ▸ bridge*).
   repairSplits: true,
+  // Keep the result of every pair already matched and match only the others: what adding
+  // photos to a matched project needs. The dialog turns it on by itself when some images
+  // with features are in no pair yet (stepEffects/match.js onlyNewPairsDefault).
+  onlyNewPairs: false,
 }
 // Matching quality presets — tune the geometric-verification strictness (deltas over
 // the defaults; medium ≡ defaults). Strategy/matcher are separate primary choices, not
@@ -633,6 +637,12 @@ export const NORMALS_DEFAULTS = {
 // re-solve frees: 'f' (focal length) | 'f,cxcy' (and the principal point).
 export const OPTIMIZE_CAMERAS_DEFAULTS = {
   refine: 'f',
+}
+// Sparse Model ▸ Add to the model (core/sfm/extendModel.js). Existing cameras: 'auto'
+// keeps them fixed when depth maps, clouds or rasters were built from them (those stay
+// current), and lets them move with the new ones (Optimize cameras) when nothing was.
+export const EXTEND_DEFAULTS = {
+  existingCameras: 'auto',
 }
 export const GROUND_DEFAULTS = {
   // Cloth particle spacing. 1 m spans roofs up to ~40 m and follows slopes up to

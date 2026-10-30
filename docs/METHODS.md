@@ -748,6 +748,38 @@ that slide along an epipolar line: they can have low two-image reprojection erro
 have no independent observation confirming their depth. Tiny and genuinely two-camera
 models retain their two-view structure rather than being emptied by this policy.
 
+### 4.8 Adding images to a saved model (`core/sfm/extendModel.js`, 2026-10-30)
+
+Sparse Reconstruction ▸ *Add to the model* runs the incremental pipeline from the saved
+model in place of a seed pair: its cameras and points become the starting state, and
+registration (4.3), the refinement (4.4–4.7) and the registration check work on the
+images it lacks. Two things make that sound.
+
+- **The same pinhole frame.** The pipeline works on keypoints with the lens removed
+  (ingest's calibrated bag, then the self-calibration fold). The saved model keeps what
+  the dense stage needs to reproduce that frame (the composed self-cal bag and the film
+  transforms, `summary.selfCalDistortion` / `fiducialTransforms`), and every image is
+  moved into it through that chain (`displayFrame.js makeScanCentreToPinhole`) about its
+  group's solved K. A new image on a lens the model knows lands in the same frame as a
+  depth map of it would; one on a new lens takes ingest's frame, as in a new run. The
+  model also saved each observation's BA-frame pixel; the old images' rebuilt keypoints
+  are compared with those (median 0.00002 px on the synthetic block, with and without
+  self-calibration) and then take them exactly. A median gap above
+  `SFM_TUNING.extendFrameMaxMedianPx` (0.5 px) means the features are not the ones the
+  model was solved from (detected again), and the run stops.
+- **Fixed cameras.** Self-calibration is off for the run, and every bundle adjustment
+  holds the model's cameras fixed (`bundle.rs fixed_cam`) and takes only the points a
+  new camera sees, with the fixed cameras that see them: a local adjustment around the
+  new block, so its cost grows with the extension, not with the model. The camera-prior
+  and GCP solves do not run; the fixed cameras already carry them. The cameras' stamp is
+  kept, so what was built from them stays current. *Existing cameras ▸ Refined* then runs
+  Optimize cameras (the same solve as Tools ▸ Model ▾) over the grown model, and what was
+  built from it becomes outdated.
+
+On the synthetic 4 × 6 block, a model of the first four columns extended by the other
+two places the new cameras 0.11–0.13 % of the camera spacing from the truth, where a
+run of all 24 images gives 0.06–0.09 %; the model's cameras are bit-identical.
+
 ---
 
 ## 5. Camera model & lens distortion

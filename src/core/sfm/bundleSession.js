@@ -10,6 +10,9 @@
 //   cfg, cameras, tracks, ids, keypointsAt, imageByUuid, sensorIntByUuid,
 //   intrinsicsRecord, selfCalRecord, selfCal (createSelfCalFold), cameraPriors, gcps,
 //   modelReprojStats, log,
+//   fixedCameras?,  Set of uuids no solve may move (extending a saved model,
+//                   extendModel.js); a solve then holds K too, and takes only the points
+//                   a free camera sees, with the fixed cameras that see them
 // }
 // Created before registration: register.js runs the interleaved (R3) and local
 // solves through it. `cfg` must already carry the resolved gates and refineIntrinsics.
@@ -43,7 +46,9 @@ export function createBundleSession(ctx) {
     gcps,
     modelReprojStats,
     log,
+    fixedCameras = null,
   } = ctx
+  const isFixed = (uuid) => !!fixedCameras?.has(uuid)
   // Defaults + rationale for these live in defaults.user.js (baIterations,
   // refineIntrinsics); `cfg` already merged them.
   const { baIterations, refineIntrinsics } = cfg
@@ -152,6 +157,7 @@ export function createBundleSession(ctx) {
     const free = [
       uuid,
       ...[...shared]
+        .filter(([u]) => !isFixed(u))
         .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
         .slice(0, window - 1)
         .map(([u]) => u),
@@ -256,12 +262,33 @@ export function createBundleSession(ctx) {
       )
       return
     }
-    const uuidList = [...cameras.keys()]
+    // With fixed cameras: the points a free camera sees, and the fixed cameras that see
+    // them (the rest of the model is already solved and cannot move).
+    let ptIds = tracks.liveIds()
+    let uuidList = [...cameras.keys()]
+    if (fixedCameras?.size) {
+      refineMode = 'none'
+      const freeImg = new Set(uuidList.filter((u) => !isFixed(u)).map((u) => ids.img(u)))
+      const seen = new Set()
+      ptIds = ptIds.filter((p) => {
+        let free = false
+        tracks.forEachView(p, (vi) => {
+          if (freeImg.has(vi)) free = true
+        })
+        if (free) tracks.forEachView(p, (vi) => seen.add(ids.uuid(vi)))
+        return free
+      })
+      uuidList = [...uuidList.filter((u) => !isFixed(u)), ...uuidList.filter((u) => isFixed(u) && seen.has(u))]
+      if (!freeImg.size || ptIds.length < 10) {
+        log(`${label} skipped (no free camera with points)`, 'debug', 'Reconstruction')
+        return
+      }
+    }
     const camList = uuidList.map((u) => cameras.get(u))
     const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
+    const fixedCams = fixedCameras?.size ? uuidList.flatMap((u, i) => (isFixed(u) ? [i] : [])) : null
     // Point rank in this solve → point id; the solve's point i is ptIds[i].
-    const ptIds = tracks.liveIds()
     const tieObs = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt)
     // kList / observations in the solve's frame: a fisheye camera's in recorded pixels
     // with its lens on K (lensFrame). Everything below — the diagnostic, the robust
@@ -335,6 +362,7 @@ export function createBundleSession(ctx) {
       sensorOfCam,
       solver: warm ? { ...cfg.baSolver, warm: true } : cfg.baSolver,
       flatPoints: true,
+      ...(fixedCams?.length ? { fixedCams } : {}),
       ...(cameraPriors ? { cameraPriors } : {}),
       ...(gcp ? { gcpAnchors: gcp.anchors } : {}),
     })
@@ -482,7 +510,7 @@ export function createBundleSession(ctx) {
       // Only the pinhole K lands on the camera; a fisheye's lens lives in the
       // self-cal state (selfCalFold.js lensOf) and Brown terms fold into the keypoints.
       const K = rk ? { ...old.K, fx: rk.fx, fy: rk.fy, cx: rk.cx, cy: rk.cy, k1: 0, k2: 0, k3: 0 } : old.K
-      cameras.set(uuid, { ...old, ...result.cameras[ci], K })
+      if (!isFixed(uuid)) cameras.set(uuid, { ...old, ...result.cameras[ci], K })
     })
     setTrackPositions(ptIds, result.pos)
 

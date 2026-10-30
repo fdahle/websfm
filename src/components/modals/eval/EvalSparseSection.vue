@@ -27,6 +27,16 @@ const byUuid = computed(() => new Map(imagesStore.images.map((im) => [im.uuid, i
 const maxBin = computed(() => Math.max(1, ...histogram.value.map((b) => b.count)))
 
 const fmt = (v, d = 2) => (v == null ? '—' : v.toFixed(d))
+// Sparse Model ▸ Add to the model: which images each extension added (sparseRun.js).
+const extensions = computed(() =>
+  (recon.summary?.extensions ?? []).map((e, i) => ({
+    key: `${e.date}-${i}`,
+    when: e.date ? new Date(e.date).toLocaleString() : '—',
+    how: e.existingCameras === 'refined' ? 'then every camera refined' : 'model cameras fixed',
+    added: e.added ?? [],
+    notAdded: e.notAdded ?? [],
+  })),
+)
 
 const thr = EVAL_THRESHOLDS.reprojMedianPx
 const tiles = computed(() => {
@@ -114,6 +124,21 @@ function onRow(row) {
       <div class="run-sum-title">Run summary <span class="run-sum-note">(from the last reconstruction)</span></div>
       <StatTiles :tiles="summaryTiles" />
     </div>
+
+    <details v-for="e in extensions" :key="e.key" class="unreg">
+      <summary>
+        Images added {{ e.when }} — {{ e.added.length }} added{{
+          e.notAdded.length ? `, ${e.notAdded.length} not placed` : ''
+        }}
+        ({{ e.how }})
+      </summary>
+      <div class="unreg-list">
+        <span v-for="name in e.added" :key="name" class="unreg-item">{{ name }}</span>
+        <span v-for="name in e.notAdded" :key="`x-${name}`" class="unreg-item"
+          >{{ name }}<span class="unreg-reason"> — not placed</span></span
+        >
+      </div>
+    </details>
 
     <div class="hist">
       <div class="hist-title">Track-length distribution</div>

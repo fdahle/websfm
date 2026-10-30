@@ -22,7 +22,9 @@ inliers and a connected capture network matter.
 ## Sparse and coverage
 Registration rate, track length, and reprojection error describe different failure
 modes. Long tracks seen in several views are stronger than many two-view points. The
-coverage map reveals areas where tie points cluster or disappear.
+coverage map reveals areas where tie points cluster or disappear. When images were
+added to the model ([Sparse Reconstruction](guide:sparse-reconstruction) ▸ Add to the
+model), each run is listed with the images it added and those it could not place.
 
 ## Calibration
 Inspect focal-length change, principal point, and radial distortion. Large drift or

@@ -6,6 +6,23 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Add photos to an aligned model.** Sparse Reconstruction has a **Mode**, *Add to the
+  model* or *Rebuild*: adding registers only the images the model lacks, starting from
+  its cameras and points, and with **Existing cameras ▸ Fixed** every camera already in
+  it stays exactly where it was, so depth maps, clouds, meshes, DEMs, orthophotos and the
+  georeference built from it stay current. *Refined* then lets every camera move with
+  the new ones (Optimize cameras); *Auto* keeps them fixed when something was built from
+  them. Match Features gets **Match only new pairs**, on by itself when some images are in
+  no pair yet, so only each new photo's pairs are matched. The model's frame is rebuilt
+  from the detected keypoints and checked against the pixels the model saved (0.00002 px
+  apart on the synthetic tests, with and without self-calibration), and a project whose
+  features were detected again is told to rebuild. On the synthetic block, cameras added
+  to a model of two thirds of it land 0.1 % of the camera spacing from the truth, where
+  a run of every image puts them at 0.06–0.09 %. On the Aukerman example (32 images
+  built, depth maps made, then 10 more added), adding took 3.7 s against 10.6 s for a
+  rebuild of all 42, matching the new pairs 44 s against 84 s, all 10 images joined, the
+  32 depth maps stayed, and the cameras sit 1.23 m RMS from their GPS positions against
+  1.26 m for the rebuild (1.09 m with Refined).
 - **Projects keep opening in newer versions.** A project saved by this or a later
   version of WebSfM opens in every version after it: when the way projects are saved
   changes, opening an older project brings it up to date where it is saved, and the
