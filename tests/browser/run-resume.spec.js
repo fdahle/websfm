@@ -44,6 +44,7 @@ const startDepth = (page, method, quality) =>
           method,
           useGpu: false,
           _journalMs: 0, // every saved map in the journal at once, so the test sees each
+          keepMaps: false, // a full run each time: the kept maps would leave nothing to kill
         })
       })
     },
@@ -94,7 +95,11 @@ for (const [method, phase, quality] of [
     // suite run, and not again in repeats).
     const errors = []
     let step = 'reference run'
-    const watch = (p) => p.on('pageerror', (e) => errors.push(`${step}: ${e.message}`))
+    // With the stack's first frames: a trap's frames say which module and function.
+    const watch = (p) =>
+      p.on('pageerror', (e) =>
+        errors.push(`${step}: ${e.message}${e.stack ? `\n${e.stack.split('\n').slice(0, 8).join('\n')}` : ''}`),
+      )
     watch(page)
     const id = await openFixture(page)
 

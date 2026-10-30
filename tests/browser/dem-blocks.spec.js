@@ -4,6 +4,13 @@ const harness = '/tests/browser/harness.html'
 // SAT-3 D1: a DEM finer than one plane allows (> 4,096 cells a side) is built block by
 // block into a Float32 COG; the record's plane is the COG's overview. Run through the
 // worker op itself (makeProductsOps), on a known surface, and read back with geotiff.js.
+// The "In this browser" note sits over the lower right of the view until it is closed;
+// in Firefox it lists more and covers the point these tests hover and click.
+async function closeBrowserNote(page) {
+  const note = page.getByRole('alert').filter({ hasText: 'In this browser' })
+  if (await note.isVisible().catch(() => false)) await note.getByRole('button', { name: '✕' }).click()
+}
+
 test('a DEM past 4,096 cells is a full-resolution COG with an overview plane', async ({ page }) => {
   test.setTimeout(120_000)
   await page.goto(harness)
@@ -193,6 +200,7 @@ test("the DEM tab reads a block-built DEM's full-resolution height under the cur
   await expect(page.getByText('5000×1200')).toBeVisible()
   const view = page.locator('.product-viewer').first()
   const box = await view.boundingBox()
+  await closeBrowserNote(page)
   await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5)
   const readout = async () => (await page.locator('.coord, .value').allTextContents()).join(' ').replace(/\s+/g, ' ')
   await expect.poll(readout).toMatch(/Z [\d.]+ m/)
@@ -372,6 +380,7 @@ test('a profile across a block-built DEM sees a ridge the overview averages away
     document.querySelector('#app').__vue_app__._instance.setupState.handleCommand('measure-profile'),
   )
   const box = await page.locator('.product-viewer').first().boundingBox()
+  await closeBrowserNote(page)
   await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.5)
   await page.mouse.click(box.x + box.width * 0.8, box.y + box.height * 0.5)
   const panel = page.locator('.result-panel')
