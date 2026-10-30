@@ -116,8 +116,10 @@ export function createDense({
       dist,
       selfCal,
       fid: fidByUuid.get(uuid) ?? null,
-      // Keep valid depth maps compares the mask too (core/dense/depthReuse.js).
-      maskKey: im.mask?.blob ? im.mask.blob.size : null,
+      // Keep valid depth maps compares the mask too (core/dense/depthReuse.js): its content
+      // hash, known from the image record before the mask loads; a mask from before the
+      // hash existed keys as present until it is next set.
+      maskKey: im.maskHash ?? (im.mask || im.hasMaskRecord ? 'mask' : null),
     }
   }
   // uuid → depthCameraKey of every image of the main model: what Keep valid depth maps

@@ -178,10 +178,11 @@ memory budget; the log says how many. The maps are the same either way.
 
 The graphics card gets its work in short pieces, so a laptop's integrated graphics,
 which also draw the screen, keep it responsive, and the system does not reset the card
-for a long command. When the first map takes long on the card (over 8 s), the next one
-is computed on the processor to compare, and the run goes on with whichever was faster;
-the log says which. On such a laptop the processor is often the faster: **Method ▸ Fast**
-then saves most of the time. The
+for a long command. When a map takes long on the card (over 8 s; the first is not
+judged, as it also prepares the card), the next one is computed on the processor to
+compare, and the run goes on with whichever was faster; the log says which, and the
+choice holds until the page is reloaded. On such a laptop the processor is often the
+faster: **Method ▸ Fast** then saves most of the time. The
 memory a run needs is estimated before it starts. If the chosen **Quality** would
 exceed the memory budget (Settings → Compute), the run steps down to the highest
 quality that fits (High → Medium → Low) and the log gives both estimates. A

@@ -164,14 +164,30 @@ export function useProjectMerge() {
       (a, b) => plan.keepPair(a, b) && arrived.has(a) && arrived.has(b),
     )
 
-    // GCP marks (joined by name) and imported positions, from the other project's CRS.
+    // GCP marks (joined by name) and imported positions, from the other project's CRS, on
+    // the photos that are here: those that arrived, and those both projects hold. A
+    // cancelled import leaves the rest's for the next import of the project.
+    const here = new Set([
+      ...plan.added.filter(({ image }) => arrived.has(image.uuid)).map(({ name }) => name),
+      ...plan.shared.map(({ target }) => target.name),
+    ])
+    const gcpsHere = plan.gcps
+      .map((g) => ({ ...g, observations: g.observations.filter((o) => here.has(o.imageName)) }))
+      .filter((g) => g.observations.length || (g.x != null && g.y != null))
+    const posesHere = plan.poses.filter((p) => here.has(p.imageName))
     const crs = gcpDoc?.crs ?? data.crs ?? projects.currentCrs
     let gcpCount = 0
-    if (plan.gcps.length && crs)
-      gcpCount = await gcps.addGcps(plan.gcps, crs, {}, { rememberDefaults: false, unit: 'project' })
+    if (gcpsHere.length && crs)
+      gcpCount = await gcps.addGcps(gcpsHere, crs, {}, { rememberDefaults: false, unit: 'project' })
     let poseCount = 0
-    if (plan.poses.length && (poseDoc?.crs ?? data.crs))
-      poseCount = await poses.addPoses(plan.poses, poseDoc?.crs ?? data.crs)
+    if (posesHere.length && (poseDoc?.crs ?? data.crs))
+      poseCount = await poses.addPoses(posesHere, poseDoc?.crs ?? data.crs)
+    // Sensors brought for photos that did not come: none of this project's images uses them.
+    if (cancelled || missing.length) {
+      const used = new Set(imagesStore.images.map((im) => im.sensorId).filter(Boolean))
+      // The added sensors carry their final id (a renamed one too).
+      for (const s of plan.sensors.add) if (!used.has(s.id)) sensors.removeSensor(s.id)
+    }
     await imagesStore.save()
 
     const result = {

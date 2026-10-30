@@ -6,6 +6,7 @@ import {
   sharedElevationRange,
   groupCloudLegends,
   demPointClasses,
+  demClassesLabel,
   lasClassName,
 } from './cloudStyle.js'
 import { viewerClipping } from './viewerClipping.js'
@@ -203,5 +204,7 @@ describe('demPointClasses', () => {
     expect(demPointClasses({ points: 'classes', classes: [6, 5] })).toEqual([5, 6])
     expect(lasClassName(5)).toBe('High vegetation')
     expect(lasClassName(99)).toBe('Class 99')
+    expect(demClassesLabel([5])).toBe('high vegetation')
+    expect(demClassesLabel([2, 6, 5])).toBe('ground, building and high vegetation')
   })
 })

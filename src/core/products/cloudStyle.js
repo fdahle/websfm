@@ -46,6 +46,12 @@ const CLASSES = {
 /** A LAS class's name ("High vegetation"), or "Class n". */
 export const lasClassName = (code) => CLASSES[code]?.[0] ?? `Class ${code}`
 
+/** "high vegetation", "building and high vegetation", "ground, building and …": a class list in prose. */
+export function demClassesLabel(classes) {
+  const names = (classes ?? []).map((c) => lasClassName(c).toLowerCase())
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : (names[0] ?? '')
+}
+
 // Build DEM ▸ Points: the classes a DEM is built from — null for every point, [2] for
 // Ground only, the chosen list for Classes… (a canopy DSM: [5]).
 export function demPointClasses(s) {

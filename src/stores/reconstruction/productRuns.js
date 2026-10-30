@@ -22,7 +22,7 @@ import { createBlockProgress, createStepProgress, createLogPacer } from '../../u
 import { pluralize } from '../../core/textFormat.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { stampOf } from '../../core/products/productSet.js'
-import { demPointClasses, lasClassName } from '../../core/products/cloudStyle.js'
+import { demPointClasses, demClassesLabel } from '../../core/products/cloudStyle.js'
 import { DEM_DEFAULTS, ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 
 // Generating the computed rasters, split out of useReconstructionStore: the DEM
@@ -88,7 +88,7 @@ export function createProductRuns({
     const classes = demPointClasses(settings)
     const classSet = classes ? new Set(classes) : null
     // What the points are, for the log: "ground", "high vegetation", "building + …".
-    const what = classes ? classes.map((c) => lasClassName(c).toLowerCase()).join(' + ') : ''
+    const what = classes ? demClassesLabel(classes) : ''
     const label = groundOnly ? 'DTM' : 'DEM'
     if (classes && !classes.length) {
       log('DEM: choose at least one class under Points', 'warn', 'Products')

@@ -12,9 +12,10 @@ import { ensureDevice } from './device.js'
 import { refineScale } from '../../core/dense/refineSchedule.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
 
-// Learned GPU speed per device and kind of pass (ms per workgroup row: 8 image rows),
-// so every map after the first starts its bands at the right size.
-const rowCost = new WeakMap() // GPUDevice → Map(mode → ms per workgroup row)
+// Learned GPU speed per device and kind of pass, in ms per workgroup (8×8 pixels) per
+// source view: a row's cost grows with the image's width and its sources, so the unit
+// carries over from a coarse pyramid level to the full one, and from map to map.
+const workCost = new WeakMap() // GPUDevice → Map(mode → ms per workgroup per source)
 import shaderSrc from './patchmatch.wgsl?raw'
 
 const pipelineCache = new WeakMap()
@@ -321,8 +322,10 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // dedicated GPU soon runs whole passes, several before a wait; a slow integrated one
   // gets short commands, and the screen (which it also draws) and the OS's GPU watchdog
   // get their turn between them. The speed is learned per device and pass kind.
-  const costs = rowCost.get(device) ?? new Map()
-  rowCost.set(device, costs)
+  const costs = workCost.get(device) ?? new Map()
+  workCost.set(device, costs)
+  // One workgroup row's work in the cost unit: its workgroups times the sources it reads.
+  const rowUnits = gx * Math.max(1, nSrc)
   const targetMs = DENSE_TUNING.gpuBandMs
   // The work submitted since the last wait: one kind of pass, its rows, its start.
   let batchRows = 0,
@@ -332,10 +335,10 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   const settle = async () => {
     if (!batchRows) return
     await device.queue.onSubmittedWorkDone()
-    const perRow = (performance.now() - batchStart) / batchRows
+    const perUnit = (performance.now() - batchStart) / (batchRows * rowUnits)
     const known = costs.get(batchMode)
     // A moving estimate: one slow batch (a busy screen) does not halve the next band.
-    costs.set(batchMode, known ? 0.5 * known + 0.5 * perRow : perRow)
+    costs.set(batchMode, known ? 0.5 * known + 0.5 * perUnit : perUnit)
     batchRows = 0
     queuedMs = 0
   }
@@ -343,8 +346,9 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     if (batchMode !== mode) await settle()
     for (let row = 0; row < gy;) {
       const known = costs.get(mode)
+      const perRow = known ? known * rowUnits : null
       // Unknown speed: an eighth of the image first, so even the first command is short.
-      const rows = Math.max(1, Math.min(gy - row, known ? Math.floor(targetMs / known) : Math.ceil(gy / 8)))
+      const rows = Math.max(1, Math.min(gy - row, perRow ? Math.floor(targetMs / perRow) : Math.ceil(gy / 8)))
       writeCtrl(mode, parity, iter, row * 8)
       const enc = device.createCommandEncoder()
       const pass = enc.beginComputePass()
@@ -356,7 +360,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
       device.queue.submit([enc.finish()])
       batchRows += rows
       batchMode = mode
-      queuedMs += known ? known * rows : Infinity
+      queuedMs += perRow ? perRow * rows : Infinity
       if (queuedMs >= targetMs) await settle()
       row += rows
     }

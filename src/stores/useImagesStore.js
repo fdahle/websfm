@@ -211,6 +211,8 @@ export const useImagesStore = defineStore('images', () => {
           // Tools ▸ Images ▾ ▸ Image quality; absent ⇒ never measured.
           quality: img.quality ?? null,
           hasMask: !!img.mask,
+          // The mask's content hash (Keep valid depth maps keys on it); absent ⇒ not known.
+          maskHash: img.mask ? (img.maskHash ?? null) : null,
           hasDepth: !!img.depth,
           sensorId: img.sensorId ?? null,
           groupId: img.groupId ?? null,
@@ -488,6 +490,21 @@ export const useImagesStore = defineStore('images', () => {
     if (!img) return
     releasePreview(img.mask)
     img.mask = previewOf(source)
+    img.hasMaskRecord = !!img.mask
+    img.maskHash = null
+    // The new mask's content hash, for Keep valid depth maps (stores/reconstruction/
+    // dense.js depthCamera): a mask edited to the same file size is still a new mask.
+    if (img.mask) {
+      const blob = img.mask.blob
+      blob.arrayBuffer().then((buf) => {
+        if (img.mask?.blob !== blob) return
+        const bytes = new Uint8Array(buf)
+        let h = 2166136261
+        for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 16777619) >>> 0
+        img.maskHash = h.toString(16)
+        if (persist && isPersisting()) save()
+      })
+    }
     if (!persist) return
     const set = !!img.mask
     if (!isPersisting()) {
@@ -628,6 +645,9 @@ export const useImagesStore = defineStore('images', () => {
       detectSettings: record.detectSettings ?? null,
       quality: record.quality ?? null,
       mask: null,
+      // Known before the mask itself loads: what a depth run keys the mask by.
+      hasMaskRecord: !!record.hasMask,
+      maskHash: record.maskHash ?? null,
       depth: null,
       // Filled on demand (a row in view) from images-derived/{uuid}.thumb — never at open.
       thumb: null,

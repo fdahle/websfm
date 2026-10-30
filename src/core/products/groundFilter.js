@@ -498,7 +498,8 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
   const { metresPerUnit = 1, extent = 'core', budgetBytes = Infinity, onLog = null, aboveGround = null, ...rest } = opts
   if (!(metresPerUnit > 0)) throw new Error('metresPerUnit must be > 0')
   const { count, pos } = cloud
-  const bytes = count * 24
+  // The staged frame positions (24 B a point) and the heights above ground (4 B).
+  const bytes = count * 28
   if (bytes > budgetBytes) {
     throw new Error(
       `Ground filter needs ${Math.ceil(bytes / 2 ** 20).toLocaleString()} MiB for ${count.toLocaleString()} ` +
@@ -547,18 +548,20 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
     heights: true,
   })
   if (!result) return result
-  // Height above ground in metres, whatever the frame's unit: a point attribute.
+  // Height above ground in metres, whatever the frame's unit: a point attribute. The
+  // class rules read it first, in frame units; then the one array is scaled in place.
   const heightAboveGround = result.hag
-  if (metresPerUnit !== 1) for (let i = 0; i < count; i++) heightAboveGround[i] *= metresPerUnit
+  delete result.hag
+  const toMetres = () => {
+    if (metresPerUnit !== 1) for (let i = 0; i < count; i++) heightAboveGround[i] *= metresPerUnit
+  }
   if (!classesAbove) {
-    delete result.hag
+    toMetres()
     return { ...result, heightAboveGround }
   }
   // Lengths in metres; the run converts them to frame units.
   const a = { ...CLASSIFY_TUNING, ...CLASSIFY_DEFAULTS, ...aboveGround }
-  // The rules work in frame units: heights back in them (the attribute stays in metres).
-  const hagUnits = metresPerUnit === 1 ? heightAboveGround : heightAboveGround.map((v) => v / metresPerUnit)
-  const above = classifyAboveGround(framed, count, result.classes, hagUnits, cloud.col ?? null, {
+  const above = classifyAboveGround(framed, count, result.classes, heightAboveGround, cloud.col ?? null, {
     ...a,
     voxel: toUnits(a.voxel),
     radius: toUnits(a.radius),
@@ -579,6 +582,6 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
           (above.colour ? '' : ' (no colour: geometry only)')
         : ''),
   )
-  delete result.hag
+  toMetres()
   return { ...result, heightAboveGround, aboveGround: above }
 }

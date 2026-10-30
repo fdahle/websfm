@@ -7,6 +7,7 @@ import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
+import { browserCaps } from '../../../utils/browserCaps.js'
 import { useDatasetRecommendations } from '../../../composables/useDatasetRecommendations.js'
 import { DEPTHMAP_DEFAULTS, DEPTHMAP_QUALITY_META } from '../../../core/defaults.user.js'
 import { badgePreset } from '../../../core/recommendUi.js'
@@ -35,6 +36,11 @@ const emit = defineEmits(['close', 'run'])
 
 // Memory budget + GPU are machine-level (Settings ▸ Compute); read here, apply on run.
 const { memBudgetBytes, useGpu } = useComputeSettings()
+// The GPU a run would use: asked for in Settings ▸ Compute, and present here (an adapter
+// this browser offers; utils/browserCaps.js). Auto resolves its method on this.
+const gpuPresent = ref(null)
+browserCaps().then((c) => (gpuPresent.value = c.webgpu))
+const gpuOn = computed(() => useGpu.value && gpuPresent.value !== false)
 const { recommendations } = useDatasetRecommendations()
 
 // Stage A — Build Depth Maps (PatchMatch MVS). Quality is the primary control
@@ -105,7 +111,7 @@ const effects = computed(() =>
     registered: props.registered,
     nativeLong: nativeLong.value,
     sceneType: props.sceneType,
-    gpu: useGpu.value,
+    gpu: gpuOn.value,
   }),
 )
 
@@ -139,7 +145,7 @@ const keptMaps = computed(() => {
     // As the run resolves it, short of a memory step-down the run alone can judge.
     key: depthMapsKey(
       depthRunShape(runSettings.value, {
-        onGpu: useGpu.value,
+        onGpu: gpuOn.value,
         nativeLong: nativeLong.value,
         sceneType: props.sceneType,
         region: props.region,

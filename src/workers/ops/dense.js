@@ -50,6 +50,11 @@ import { shareableArray } from '../../core/bigArray.js'
 // pixel decode) is injected; the raster-space helpers (undistortion, RGB packing,
 // depth-map colourising) live here next to the two dense handlers. The GPU backend
 // swap + first-image GPU↔CPU A/B validation live inside computeDepthMaps.
+// Depth maps: GPU or CPU, as measured on a slow GPU (the probe in depthMaps below), per
+// device for the life of this worker: a Full run's second pass and later runs start on
+// the faster. GPUDevice → 'cpu' | 'gpu'.
+const gpuVerdict = new WeakMap()
+
 export function makeDenseOps({ rasterize }) {
   // Saved-map acks per streamed run (`settings.ackToken`), from the page's depthAck:
   // { acked, wake } — the run waits while too many of its maps are unsaved.
@@ -370,10 +375,18 @@ export function makeDenseOps({ rasterize }) {
     // anything that prevents it (no WebGPU, no adapter) silently keeps the WASM path.
     // `backend = undefined` ⇒ depthMapForImage uses its WASM default.
     let backend
+    let gpuDevice = null
     if (settings.useGpu && isGpuAvailable()) {
       const state = await ensureDevice()
-      if (state) {
+      if (state && gpuVerdict.get(state.device) === 'cpu') {
+        emit('log', [
+          'Depth maps: the CPU was measured faster than this GPU earlier in this session — running on the CPU',
+          'info',
+          'Dense',
+        ])
+      } else if (state) {
         backend = computeDepthMapGPU
+        gpuDevice = state.device
         const id = [
           ...new Set([state.info?.vendor, state.info?.architecture || state.info?.description].filter(Boolean)),
         ].join(' ')
@@ -623,10 +636,17 @@ export function makeDenseOps({ rasterize }) {
       return d
     }
     {
-      // A slow GPU (an integrated one): the first map took over DENSE_TUNING.gpuProbeMs, so
-      // the second is computed on the CPU to compare, and the run goes on with the faster.
-      // `probe`: { gpuMsPerPx, gpu } while the CPU map is under way.
-      let probe = null
+      // A slow GPU (an integrated one): its second map (the first pays the shader's
+      // compilation and the band sizing) took over DENSE_TUNING.gpuProbeMs, so the next is
+      // computed on the CPU to compare, per pixel and source view, and the run goes on with
+      // the faster; the verdict holds for this device for the rest of the session. Only
+      // where the CPU path has its threads (a cross-origin isolated page): on one core it
+      // would rarely win, and the bands keep a slow GPU from freezing the screen anyway.
+      // `probe`: { gpuMsPerUnit, gpu } while the CPU map is under way.
+      let probe = null,
+        gpuMaps = 0
+      const canProbe =
+        cpuThreads > 1 && globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined'
       for (let k = 0; k < total; k++) {
         const i = order[k]
         const img = images[i]
@@ -746,26 +766,39 @@ export function makeDenseOps({ rasterize }) {
           }
         const imgMs = performance.now() - tImg
         {
-          const px = ref.width * ref.height
+          // Time per pixel and source view: the two maps compared see different images.
+          const nSrcHere = Math.max(1, srcUuids.length)
+          const units = ref.width * ref.height * nSrcHere
+          const perMp = (msPerUnit) => ((msPerUnit * 1e6 * nSrcHere) / 1000).toFixed(1)
           if (probe) {
-            const cpuMsPerPx = imgMs / px
-            const cpuWins = cpuMsPerPx < probe.gpuMsPerPx
+            const cpuMsPerUnit = imgMs / units
+            const cpuWins = cpuMsPerUnit < probe.gpuMsPerUnit
             emit('log', [
-              `Depth maps: the GPU took ${((probe.gpuMsPerPx * 1e6) / 1000).toFixed(1)} s per megapixel, the CPU ` +
-                `${((cpuMsPerPx * 1e6) / 1000).toFixed(1)} s — ${cpuWins ? 'the rest run on the CPU' : 'the rest stay on the GPU'}`,
+              `Depth maps: the GPU took ${perMp(probe.gpuMsPerUnit)} s per megapixel, the CPU ${perMp(cpuMsPerUnit)} s — ` +
+                `${cpuWins ? 'the rest run on the CPU' : 'the rest stay on the GPU'}`,
               cpuWins ? 'warn' : 'info',
               'Dense',
             ])
             if (cpuWins) gpuFallbacks++
             else backend = probe.gpu
+            if (gpuDevice) gpuVerdict.set(gpuDevice, cpuWins ? 'cpu' : 'gpu')
             probe = null
-          } else if (backend && k === 0 && total > 2 && imgMs > (settings.gpuProbeMs ?? DENSE_TUNING.gpuProbeMs)) {
-            emit('log', [
-              `Depth maps: the first map took ${(imgMs / 1000).toFixed(1)} s on the GPU — the next is computed on the CPU to compare`,
-              'info',
-              'Dense',
-            ])
-            probe = { gpuMsPerPx: imgMs / px, gpu: backend }
+          } else if (backend) {
+            gpuMaps++
+            if (
+              canProbe &&
+              gpuMaps === 2 &&
+              !gpuVerdict.has(gpuDevice) &&
+              total - k > 2 &&
+              imgMs > (settings.gpuProbeMs ?? DENSE_TUNING.gpuProbeMs)
+            ) {
+              emit('log', [
+                `Depth maps: a map took ${(imgMs / 1000).toFixed(1)} s on the GPU — the next is computed on the CPU to compare`,
+                'info',
+                'Dense',
+              ])
+              probe = { gpuMsPerUnit: imgMs / units, gpu: backend }
+            }
           }
         }
         const tPost = performance.now()

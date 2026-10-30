@@ -1,7 +1,7 @@
 // What each step of Build DEM and Build Orthophoto does to this project (DemModal.vue,
 // OrthoModal.vue): the one-line effects under their numbered steps. The grid line reads
 // the store's size estimate (estimateRasterSize), the same one the run builds.
-import { demPointClasses, lasClassName } from '../products/cloudStyle.js'
+import { demPointClasses, demClassesLabel } from '../products/cloudStyle.js'
 import { fmtCount, plural } from './format.js'
 
 const fmtGsd = (g) => (g >= 100 ? g.toFixed(0) : String(+g.toPrecision(3)))
@@ -33,7 +33,7 @@ const FILL = { idw: 'inverse distance', nearest: 'the nearest measured cell' }
 export function demEffects(s, { source = null, estimate = null, unit, frame } = {}) {
   const ground = s.points === 'ground'
   const classes = demPointClasses(s)
-  const names = (classes ?? []).map((c) => lasClassName(c).toLowerCase()).join(', ')
+  const names = demClassesLabel(classes)
   const points =
     classes && !classes.length
       ? 'Choose at least one class.'

@@ -48,7 +48,26 @@ const modeOptions = [
   { id: false, label: 'Append' },
   { id: true, label: 'Overwrite' },
 ]
-const detector = ref('sift')
+// A selection detected again starts on the detector the other images use, so their
+// descriptors stay one kind (LightGlue needs one learned detector across all images).
+const otherDetectors = computed(() =>
+  props.onlyIds?.length
+    ? props.images
+        .filter((img) => img.kpStatus === 'done' && !props.onlyIds.includes(img.id))
+        .map((img) => img.detector ?? 'sift')
+    : [],
+)
+const mostUsed = (list) => {
+  const n = new Map()
+  for (const d of list) n.set(d, (n.get(d) ?? 0) + 1)
+  return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+}
+const detector = ref(mostUsed(otherDetectors.value) ?? 'sift')
+// The other images' detector, when the selection would get another one.
+const selectionMix = computed(() => {
+  const other = mostUsed(otherDetectors.value)
+  return limited.value && other && other !== detector.value ? other : null
+})
 
 // Images already detected with a *different* detector than the one selected. In
 // Append mode these are skipped (kpStatus === 'done'), so their old descriptors
@@ -351,6 +370,11 @@ function onShellClose() {
         Only the {{ runImages.length }} selected image{{ runImages.length === 1 ? '' : 's' }}, detected again: their
         keypoints and the matches on them are replaced.
       </p>
+      <WarnBox v-if="selectionMix">
+        The other images were detected with <strong>{{ selectionMix }}</strong
+        >: with <strong>{{ detector }}</strong> these would not match them (descriptors of different kinds). Choose
+        {{ selectionMix }}, or detect every image again.
+      </WarnBox>
       <WarnBox v-if="inModel">
         {{ inModel }} of them {{ inModel === 1 ? 'is' : 'are' }} in the sparse model. New features no longer match what
         the model recorded, so Add to the model stops until the model is rebuilt.
