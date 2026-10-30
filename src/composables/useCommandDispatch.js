@@ -108,6 +108,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     infoImageId,
     symbologyProductId,
     sfmSourceOpen,
+    importProjectOpen,
     reseauOpen,
     panoramicOpen,
   } = storeToRefs(useModalsStore())
@@ -333,6 +334,9 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         break
       case 'import-colmap':
         sfmSourceOpen.value = true
+        break
+      case 'import-project':
+        importProjectOpen.value = true
         break
       case 'import-cloud':
         pickFiles(FILE_PICKERS.cloud, onCloudPick)

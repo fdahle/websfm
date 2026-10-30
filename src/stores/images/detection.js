@@ -343,7 +343,9 @@ export function createDetection({
   // Attach an external feature index to existing images in one batch. The caller
   // has already resolved external names to uuids and coordinated replacement of
   // dependent matches. Keeping this as a store action preserves markRaw + OPFS
-  // invariants and avoids a modal mutating reactive records directly.
+  // invariants and avoids a modal mutating reactive records directly. An entry's
+  // `record` (Import ▸ Project into this project: the photo's record in the other
+  // project) carries the detection's own fields, which the reprojection gates read.
   async function importFeatures(entries, { invalidateMatches = true } = {}) {
     const pid = projects.currentProjectId
     let imported = 0
@@ -363,12 +365,15 @@ export function createDetection({
       img.descriptors = entry.descriptors ? markRaw(entry.descriptors) : null
       img.kpStatus = 'done'
       img.kpCount = kps.length
-      img.kpMs = 0
-      img.detector = entry.detector ?? 'sift'
-      img.descDim = entry.descDim ?? 128
-      img.descNorm = entry.descNorm ?? null
-      img.detectScale = 1
-      img.detectSettings = { source: entry.source ?? 'external' }
+      const r = entry.record ?? null
+      img.kpMs = r?.kpMs ?? 0
+      img.detector = r?.detector ?? entry.detector ?? 'sift'
+      img.descDim = r?.descDim ?? entry.descDim ?? 128
+      img.descNorm = r ? (r.descNorm ?? null) : (entry.descNorm ?? null)
+      img.detectScale = r?.detectScale ?? 1
+      img.detectSettings = r?.detectSettings ?? { source: entry.source ?? 'external' }
+      if (r?.quality !== undefined) img.quality = r.quality
+      if (r?.fiducialDetections?.length) img.fiducialDetections = structuredClone(r.fiducialDetections)
       imported++
       if (isPersisting() && img.descriptors) writes.push(opfs.saveDescriptors(pid, img.uuid, img.descriptors))
     }

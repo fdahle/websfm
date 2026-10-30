@@ -88,6 +88,8 @@ export const useModalsStore = defineStore('modals', () => {
   const symbologyCloudId = ref(null)
   // Import ▸ SfM project: choose files or a folder before the import session opens.
   const sfmSourceOpen = ref(false)
+  // Import ▸ Project into this project: choose which other project (useProjectMerge).
+  const importProjectOpen = ref(false)
   const infoImageId = ref(null)
   // Show information on a product: { cloudId } (sparse, dense, mesh) or { productId } (a DEM / ortho).
   const infoProduct = ref(null)
@@ -166,6 +168,7 @@ export const useModalsStore = defineStore('modals', () => {
     symbologyProductId,
     symbologyCloudId,
     sfmSourceOpen,
+    importProjectOpen,
     infoImageId,
     infoProduct,
     fiducialDetectOpen,

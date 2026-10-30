@@ -221,7 +221,12 @@ export const TABS = [
       },
       {
         label: 'Interoperability',
-        commands: [{ id: 'import-colmap', label: 'SfM\nProject…', icon: 'cube' }],
+        commands: [
+          // Another WebSfM project's photos, features and matches, into this one
+          // (composables/useProjectMerge.js); then Add to the model joins them.
+          { id: 'import-project', label: 'WebSfM\nProject…', icon: 'folder', needs: ['project'] },
+          { id: 'import-colmap', label: 'SfM\nProject…', icon: 'cube' },
+        ],
       },
     ],
   },

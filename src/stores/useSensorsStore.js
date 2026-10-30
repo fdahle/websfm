@@ -519,6 +519,22 @@ export const useSensorsStore = defineStore('sensors', () => {
     return applied
   }
 
+  // Import ▸ Project into this project (stores/projectMerge.js): another project's
+  // sensors as they are, ids included (random, so they do not collide); one whose id
+  // is already here is skipped. → the number added.
+  async function addSensors(list) {
+    const have = new Set(sensors.value.map((s) => s.id))
+    let added = 0
+    for (const s of list || []) {
+      if (!s?.id || have.has(s.id)) continue
+      sensors.value.push(structuredClone(s))
+      have.add(s.id)
+      added++
+    }
+    if (added) await save()
+    return added
+  }
+
   function assignSensor(imageId, sensorId) {
     const img = images.value.find((i) => i.id === imageId)
     if (!img) return
@@ -605,6 +621,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     setFiducialMarks,
     setFiducialCalibration,
     importFiducialMarks,
+    addSensors,
     assignSensor,
     mergeSensors,
     removeSensor,

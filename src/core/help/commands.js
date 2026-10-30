@@ -182,6 +182,7 @@ export const CONSOLE_NAMES = {
   'import-images': ['import'],
   'import-video': ['import video', 'video'],
   'import-colmap': ['import colmap', 'colmap-import'],
+  'import-project': ['import project', 'merge projects', 'merge blocks'],
   'eval-overview': ['report', 'quality'],
   'open-project-settings': ['project settings', 'project properties'],
   'save-project-file': ['export project', 'project file', 'save copy'],

@@ -6,6 +6,15 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Join two projects.** **Import ▸ WebSfM Project…** brings another project's photos
+  into this one with their features, the matches between them, their sensors, GCP marks
+  and camera positions, so two flights, two days or a colleague's block need no new
+  detection or matching; Match only new pairs then matches across the blocks, and
+  Sparse Reconstruction ▸ Add to the model places them in this model. A photo both
+  projects hold is kept once, a sensor with the same calibration is shared, and a GCP
+  already here keeps its position. The other project's model and products stay behind.
+  A browser test imports the 5-photo test project into an empty one (Chromium and
+  Firefox) and builds the same 5-camera model from what came.
 - **Buildings and vegetation in a classified cloud.** Classify ground is now **Classify
   points** (Tools ▸ Point Cloud): after the ground it labels **Building** and **Low**,
   **Medium** and **High vegetation** (LAS 6, 3, 4, 5) among the points above it, as two

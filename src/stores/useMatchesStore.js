@@ -523,6 +523,38 @@ export const useMatchesStore = registerProjectStore(
       return { imported, skipped }
     }
 
+    // Import ▸ Project into this project (stores/projectMerge.js): the pairs of another
+    // project that `keep(idA, idB)` admits, as they are. Each entry points into that
+    // project's matches file (`src`), and the save after it streams those slices into
+    // this project's document, so no pair's matches are read into memory. A pair this
+    // project already has keeps its own. → the number adopted.
+    async function adoptProjectPairs(projectId, keep) {
+      let doc
+      try {
+        doc = await opfs.loadMatchIndex(projectId, MATCH_INDEX_KEYS)
+      } catch {
+        doc = null
+      }
+      if (!doc) return 0
+      const entries = unpackMatchIndex(doc.meta, doc.buffers, { matchBytes: doc.matchesFile?.size ?? 0 })
+      let adopted = 0
+      for (const [pid, e] of entries) {
+        if (!keep(e.idA, e.idB) || matchStore.value.has(pid)) {
+          continue
+        }
+        e.src = doc.matchesFile ? { file: doc.matchesFile, off: e.off } : null
+        delete e.off
+        matchStore.value.set(pid, e)
+        adopted++
+      }
+      if (adopted) {
+        touch()
+        markHeavy()
+        await save()
+      }
+      return adopted
+    }
+
     function transpose3(m) {
       return [
         [m[0][0], m[1][0], m[2][0]],
@@ -623,6 +655,7 @@ export const useMatchesStore = registerProjectStore(
       matchPair,
       matchAll,
       importMatches,
+      adoptProjectPairs,
       removeMatchesForImage,
       setPairEnabled,
       restore,

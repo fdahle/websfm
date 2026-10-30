@@ -14,6 +14,7 @@ import ModelDownloadModal from './components/modals/app/ModelDownloadModal.vue'
 import DevConsole from './components/layout/DevConsole.vue'
 import BrowserWarning from './components/layout/BrowserWarning.vue'
 import { useStoppedRuns } from './composables/useStoppedRuns.js'
+import { useProjectMerge } from './composables/useProjectMerge.js'
 import MobileWarning from './components/layout/MobileWarning.vue'
 import ToastStack from './components/layout/ToastStack.vue'
 import UnsavedChangesCard from './components/layout/UnsavedChangesCard.vue'
@@ -313,6 +314,19 @@ const {
   editClouds,
   textureMesh,
 })
+// Import ▸ Project into this project (useProjectMerge), behind the run progress bar.
+const { importProjectInto } = useProjectMerge()
+async function onImportProject(sourceId) {
+  useModalsStore().importProjectOpen = false
+  exportProgress.open('Importing Project', 0, null, { unit: 'photos' })
+  let ok = false
+  try {
+    ok = !!(await importProjectInto(sourceId, exportProgress.report))
+  } finally {
+    await exportProgress.close(ok)
+  }
+}
+
 // A run a dead tab did not finish: offered again when its project opens.
 const { offerStoppedRuns } = useStoppedRuns({
   runs: {
@@ -1013,6 +1027,7 @@ provideAppContext({
   onSectionRun,
   onToolEditRun,
   onVideoImport,
+  onImportProject,
   onViewerPick,
   onWorkflowRun,
   onWorkflowUpdate,

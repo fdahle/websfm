@@ -131,6 +131,11 @@ export function createIngest({
     const takenLabels = allowDuplicates ? new Set(images.value.map((img) => img.name)) : null
     for (const file of files) {
       const item = createImage(file)
+      // Import ▸ Project into this project (stores/projectMerge.js): the photo keeps its
+      // uuid, sensor and label from the other project, so its features, matches and
+      // marks need no renumbering.
+      const given = extras?.get(file) ?? null
+      if (given?.uuid) item.uuid = given.uuid
       // Keep the immutable source filename separate from the user-editable label.
       // TIFF decoding must not depend on whether a user keeps the .tif extension
       // in the label they choose later.
@@ -139,8 +144,9 @@ export function createIngest({
       if (allowDuplicates) {
         const base = item.id
         for (let n = 2; knownIds.has(item.id); n++) item.id = `${base}#${n}`
-        item.name = uniqueImageLabel(item.name, takenLabels)
+        item.name = uniqueImageLabel(given?.name ?? item.name, takenLabels)
         takenLabels.add(item.name)
+        if (given?.sensorId) item.sensorId = given.sensorId
       } else if (knownIds.has(item.id)) {
         URL.revokeObjectURL(item.url)
         log(`Skip duplicate: ${file.name}`, 'warn', 'Images')

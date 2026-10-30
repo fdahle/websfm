@@ -28,6 +28,7 @@ import ImageInfoModal from './inspect/ImageInfoModal.vue'
 import ImageTableModal from './inspect/ImageTableModal.vue'
 import ImportCloudModal from './import/ImportCloudModal.vue'
 import ImportKindModal from './import/ImportKindModal.vue'
+import ImportProjectModal from './import/ImportProjectModal.vue'
 import ImportRasterModal from './import/ImportRasterModal.vue'
 import ImportVideoModal from './import/ImportVideoModal.vue'
 import InteropImportModal from './import/InteropImportModal.vue'
@@ -42,7 +43,9 @@ const QualityReportModal = defineAsyncComponent(() => import('./eval/QualityRepo
 
 // The data dialogs, lifted out of App.vue: imports, the image / sensor / GCP /
 // pose / match tables, fiducials, symbology and the Quality Report hub.
-const { currentCrs, currentSceneType } = storeToRefs(useProjectsStore())
+const { currentCrs, currentSceneType, projects, currentProjectId } = storeToRefs(useProjectsStore())
+// Import ▸ Project into this project chooses among the others.
+const otherProjects = computed(() => projects.value.filter((p) => p.id !== currentProjectId.value))
 const reconstructionStore = useReconstructionStore()
 const { cameras, clouds, rasterProducts, sparseCameras } = storeToRefs(reconstructionStore)
 const { setCloudStyle, setProductStyle } = reconstructionStore
@@ -98,6 +101,7 @@ const {
   rasterStyleId,
   sensorTableOpen,
   sfmSourceOpen,
+  importProjectOpen,
   symbologyCloudId,
   symbologyProductId,
   reseauOpen,
@@ -133,6 +137,7 @@ const {
   onRasterImportAsImage,
   onRasterStyleApply,
   onVideoImport,
+  onImportProject,
   openImageTab,
   openImageWithResiduals,
   pickSfmFiles,
@@ -156,6 +161,15 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       @close="sfmSourceOpen = false"
       @files="pickSfmFiles"
       @folder="pickSfmFolder"
+    />
+  </Teleport>
+
+  <Teleport to="body">
+    <ImportProjectModal
+      v-if="importProjectOpen"
+      :projects="otherProjects"
+      @close="importProjectOpen = false"
+      @run="onImportProject"
     />
   </Teleport>
 

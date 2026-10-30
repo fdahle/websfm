@@ -82,6 +82,7 @@ export function useModalEscape({
     symbologyProductId,
     symbologyCloudId,
     sfmSourceOpen,
+    importProjectOpen,
     fiducialDetectOpen,
     fiducialDetectSensorId,
     fiducialCalibrateOpen,
@@ -165,6 +166,12 @@ export function useModalEscape({
         sfmSourceOpen.value,
         () => {
           sfmSourceOpen.value = false
+        },
+      ],
+      [
+        importProjectOpen.value,
+        () => {
+          importProjectOpen.value = false
         },
       ],
       [

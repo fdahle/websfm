@@ -28,8 +28,9 @@ shown before the run.
 ## Mode
 <!-- param: addToModel  default: Add to the model when the model can take the new images, otherwise Rebuild -->
 Shown once there is a sparse model. **Add to the model** registers the images with
-features that the model does not hold yet (photos added to the project since, or images
-an earlier run could not place) and leaves the model as it is around them. Match them
+features that the model does not hold yet (photos added to the project since, another
+project's block brought in with [Import a Project](guide:import-project), or images an
+earlier run could not place) and leaves the model as it is around them. Match them
 first: [Match only new pairs](guide:match-features) matches each new photo with the
 others without matching the whole block again. The model's points are the starting point,
 so a new image joins as soon as enough of its matches see them. The model's calibration
