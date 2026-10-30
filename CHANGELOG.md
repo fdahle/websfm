@@ -31,7 +31,10 @@ Notable changes to websfm. The format follows
   Sparse Reconstruction ▸ Add to the model places them in this model. A photo both
   projects hold is kept once, a sensor with the same calibration is shared, and a GCP
   already here keeps its position. The other project's model and products stay behind.
-  Cancel stops between batches and keeps the photos already in.
+  Cancel stops between batches and keeps the photos already in. On the 77-photo Aukerman
+  survey, lap 2 (44 photos) joined to a model of lap 1 (33) placed 43 of them (the one
+  left out fails in a rebuild too) with the cameras 1.07 m RMS from their GPS positions,
+  against 1.14 m for a rebuild of all 77, in 45 s against 85 s.
   A browser test imports the 5-photo test project into an empty one (Chromium and
   Firefox) and builds the same 5-camera model from what came.
 - **Buildings and vegetation in a classified cloud.** Classify ground is now **Classify
