@@ -303,3 +303,70 @@ test('a detection run killed partway continues where it stopped', async ({ brows
   expect(errors).toEqual([])
   await context.close()
 })
+
+// Keep valid depth maps (core/dense/depthReuse.js): a second run with the same settings
+// keeps every map and computes nothing; after one camera moves (the model's stamp kept,
+// as Add to the model ▸ Fixed keeps it), only that camera's map is computed.
+test('a depth run keeps the maps whose camera and settings did not change', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'reads OPFS through the Chromium layout helper')
+  test.setTimeout(300_000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  const id = await openFixture(page)
+  const run = () =>
+    page.evaluate(async () => {
+      const app = document.querySelector('#app').__vue_app__._instance.setupState
+      const { DEPTHMAP_DEFAULTS } = await import('/src/core/defaults.user.js')
+      // As the dialog sends them (DepthMapsModal runSettings): the key compares these.
+      const { filterRelTol, maxDim, bestK, ...rest } = DEPTHMAP_DEFAULTS
+      await app.runComputeDepthMaps({
+        ...rest,
+        filterRelTol: filterRelTol / 100,
+        quality: 'low',
+        method: 'fast',
+        useGpu: false,
+      })
+    })
+  const lastDense = () =>
+    page.evaluate(async () => {
+      const { useLog } = await import('/src/composables/useLog.js')
+      return useLog()
+        .entries.value.filter((e) => /depth maps? (of \d+ )?kept|nothing to compute/.test(e.message))
+        .map((e) => e.message)
+        .at(-1)
+    })
+
+  await run() // the fixture's index predates the key: every map is computed once
+  const first = await savedMaps(page, id)
+  expect(Object.keys(first)).toHaveLength(5)
+
+  await run()
+  expect(await lastDense()).toMatch(/^Dense: all 5 depth maps kept/)
+  expect(await savedMaps(page, id)).toEqual(first)
+  // The dialog says so before Run, from the same rule (with the run's own settings).
+  await page.evaluate(async () => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    useModalsStore().depthMapsOpen = true
+  })
+  const dialog = page.getByRole('dialog', { name: 'Build Depth Maps' })
+  await dialog.getByText('Advanced settings').click()
+  await dialog.getByText('Low', { exact: true }).first().click()
+  await dialog.getByLabel('Method').selectOption('fast')
+  await expect(dialog.getByText(/All 5 saved depth maps are kept/)).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  // One camera moves by a hair; the stamp stays, as after a Fixed extension.
+  const moved = await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const cloud = useReconstructionStore().mainSparseCloud
+    const [uuid, cam] = [...cloud.cameras][0]
+    cloud.cameras.set(uuid, { ...cam, t: [cam.t[0] + 1e-6, cam.t[1], cam.t[2]] })
+    return uuid
+  })
+  await run()
+  expect(await lastDense()).toMatch(/^Dense: 4 depth maps of 5 kept .*computing 1 map/)
+  const third = await savedMaps(page, id)
+  expect(Object.keys(third).sort()).toEqual(Object.keys(first).sort())
+  expect(third[moved]).toBeTruthy()
+  expect(errors).toEqual([])
+})

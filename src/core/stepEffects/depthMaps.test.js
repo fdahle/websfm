@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { depthMapEffects } from './depthMaps.js'
+import { depthMapEffects, keepMapsEffect } from './depthMaps.js'
 import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
 
 const project = { registered: 42, nativeLong: 6000 }
@@ -41,5 +41,18 @@ describe('depthMapEffects', () => {
     expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, method: 'full' }, project).patchMatch).toMatch(
       /Full method: ACMH view selection/,
     )
+  })
+})
+
+describe('keepMapsEffect', () => {
+  const on = { keepMaps: true }
+  it('says how many maps are kept and computed', () => {
+    expect(keepMapsEffect(on, { registered: 42, kept: 32 })).toBe(
+      '32 of 42 depth maps are kept (camera and settings unchanged); 10 maps are computed, and the check across ' +
+        'views runs over all of them.',
+    )
+    expect(keepMapsEffect(on, { registered: 42, kept: 42 })).toMatch(/^All 42 saved depth maps are kept/)
+    expect(keepMapsEffect(on, { registered: 42, kept: 0 })).toMatch(/all 42 are computed\.$/)
+    expect(keepMapsEffect({ keepMaps: false }, { registered: 42, kept: 32 })).toMatch(/^Off/)
   })
 })

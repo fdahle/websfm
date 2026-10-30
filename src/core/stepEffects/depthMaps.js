@@ -12,6 +12,20 @@ const FRACTION = { low: '⅛', medium: '¼', high: '½', ultra: 'all' }
 // project: { registered (images with a pose), nativeLong (largest original long side, px),
 //            sceneType (what a blank "Consistent views" resolves to), gpu (Settings ▸ Compute
 //            asks for the GPU: what "auto" view selection resolves to) }
+// What Keep valid depth maps does here. kept: the saved maps a run with these settings
+// keeps (core/dense/depthReuse.js reusableDepthMaps).
+export function keepMapsEffect(s, { registered = 0, kept = 0 } = {}) {
+  if (s.keepMaps === false) return 'Off: every depth map is computed again.'
+  if (!kept)
+    return `No saved depth map can be kept (none yet, or their cameras or settings changed): all ${fmtCount(registered)} are computed.`
+  if (kept >= registered)
+    return `All ${plural(kept, 'saved depth map')} are kept: their cameras and settings are unchanged, so nothing is computed.`
+  return (
+    `${fmtCount(kept)} of ${plural(registered, 'depth map')} are kept (camera and settings unchanged); ` +
+    `${plural(registered - kept, 'map')} are computed, and the check across views runs over all of them.`
+  )
+}
+
 export function depthMapEffects(s, { registered = 0, nativeLong = 0, sceneType = null, gpu = false } = {}) {
   const override = s.maxDim > 0
   const maxDim = override ? s.maxDim : qualityToMaxDim(s.quality, nativeLong)

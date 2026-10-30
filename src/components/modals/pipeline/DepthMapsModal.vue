@@ -11,7 +11,8 @@ import { useDatasetRecommendations } from '../../../composables/useDatasetRecomm
 import { DEPTHMAP_DEFAULTS, DEPTHMAP_QUALITY_META } from '../../../core/defaults.user.js'
 import { badgePreset } from '../../../core/recommendUi.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
-import { depthMapEffects } from '../../../core/stepEffects/depthMaps.js'
+import { depthMapEffects, keepMapsEffect } from '../../../core/stepEffects/depthMaps.js'
+import { depthMapsKey, reusableDepthMaps } from '../../../core/dense/depthReuse.js'
 
 const props = defineProps({
   // Every image (the largest original sets what Quality means) and how many have a
@@ -20,6 +21,13 @@ const props = defineProps({
   registered: { type: Number, default: 0 },
   // The project's scene type: what a blank "Consistent views" (auto) resolves to.
   sceneType: { type: String, default: null },
+  // Keep valid depth maps: the saved maps, their settings key and the model they
+  // belong to (core/dense/depthReuse.js), to say how many a run keeps.
+  savedMaps: { type: Array, default: () => [] },
+  // { mapsKey, cameraKeys } of the saved index, and uuid → depthCameraKey of the model now.
+  savedMapsKey: { type: Object, default: null },
+  cameraKeys: { type: Object, default: () => ({}) },
+  model: { type: Object, default: null },
 })
 const emit = defineEmits(['close', 'run'])
 
@@ -99,7 +107,8 @@ const effects = computed(() =>
   }),
 )
 
-function run() {
+// What the run receives: the store keys kept maps on exactly this (depthReuse.js).
+const runSettings = computed(() => {
   const { filterRelTol, maxDim, bestK, ...rest } = settings.value
   const out = {
     ...rest,
@@ -111,7 +120,30 @@ function run() {
   // store/worker derive them (maxDim from quality, bestK per image).
   if (maxDim > 0) out.maxDim = maxDim
   if (bestK > 0) out.bestK = bestK
-  emit('run', out)
+  return out
+})
+const keptMaps = computed(() => {
+  const m = props.model
+  if (!m || !props.savedMaps.length) return 0
+  return reusableDepthMaps({
+    index: {
+      maps: props.savedMaps,
+      sparseCloudId: m.id,
+      sparseCreatedAt: m.createdAt,
+      mapsKey: props.savedMapsKey?.mapsKey,
+      cameraKeys: props.savedMapsKey?.cameraKeys,
+    },
+    cloud: m,
+    key: depthMapsKey(runSettings.value),
+    cameraKeys: props.cameraKeys,
+  }).length
+})
+const keepEffect = computed(() =>
+  keepMapsEffect(settings.value, { registered: props.registered, kept: keptMaps.value }),
+)
+
+function run() {
+  emit('run', { ...runSettings.value })
 }
 </script>
 
@@ -204,6 +236,21 @@ function run() {
             placeholder="auto"
             class="field-input"
           />
+        </SettingsField>
+        <SettingsField v-if="props.savedMaps.length">
+          <template #label>
+            <FieldHelp
+              op="depth-maps"
+              param="keepMaps"
+              :value="settings.keepMaps"
+              :default-value="DEPTHMAP_DEFAULTS.keepMaps"
+              >Keep valid depth maps</FieldHelp
+            >
+          </template>
+          <label class="checkbox-row"
+            ><input v-model="settings.keepMaps" type="checkbox" class="checkbox" /> Enabled</label
+          >
+          <template #hint>{{ keepEffect }}</template>
         </SettingsField>
       </SettingsStep>
 

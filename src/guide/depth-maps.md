@@ -49,6 +49,17 @@ point does not drag the score down. A larger K averages more evidence and is les
 noisy where every source sees the surface. Blank picks about half of each image's sources, between 1 and
 4; set it only when diagnosing occlusion artefacts or noise.
 
+## Keep valid depth maps
+<!-- param: keepMaps  default: on -->
+Shown once depth maps are saved. A saved map is kept when its camera has not moved and
+the settings that shape a map (quality, method, views, filters) are the ones it was made
+with; only the others are computed. After [Add to the model](guide:sparse-reconstruction)
+with Existing cameras ▸ Fixed, that is the new images' maps alone, so adding ten photos
+to a large block costs ten maps. The check across views then runs over every map, so the
+kept ones are checked against the new ones too, but they are not computed again with the
+new images as neighbours, which a full run would do: turn it off for that. A rebuilt
+model moves every camera, so nothing can be kept after one.
+
 ## Method
 <!-- param: method  default: Auto -->
 **Full** runs three stages, after Xu & Tao (2019, 2020):

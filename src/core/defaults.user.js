@@ -279,6 +279,10 @@ export const DEPTHMAP_DEFAULTS = {
   minGeomAngleDeg: 3.0, // a view only counts if it sees the point at ≥ this parallax (COLMAP's
   // filter_min_triangulation_angle) — near-duplicate views can't vouch for sky
   minNcc: 0.1, // absolute per-pixel ZNCC floor (drops cost > 1 − minNcc)
+  // Keep a saved depth map whose camera and settings are unchanged (core/dense/
+  // depthReuse.js): after Add to the model ▸ Fixed only the new images' maps are
+  // computed, and the check across views runs over all of them. Off computes every map.
+  keepMaps: true,
 }
 // "auto" consistent views (DEPTHMAP_DEFAULTS.minConsistent null) by project scene type.
 export const DEPTHMAP_MIN_CONSISTENT_AUTO = { object: 1, aerial: 2 }

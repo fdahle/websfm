@@ -41,6 +41,7 @@ import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
 import { canContinue, journalKey, journalWriter, startJournal } from '../../core/runJournal.js'
+import { depthMapsKey, reusableDepthMaps, depthCameraKey } from '../../core/dense/depthReuse.js'
 import { isSharedArray, postableCopy, shareableArray } from '../../core/bigArray.js'
 import { poissonHeapBytes } from '../../core/products/mesh.js'
 
@@ -90,6 +91,47 @@ export function createDense({
   // a Reconstruct re-run).
   // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt
   // on open). Its saved maps are kept and only the rest are computed.
+  // The frame lookups a depth run needs: each image's lens and composed self-cal bag
+  // (core/sfm/displayFrame.js), and its film transform from the sparse run. Copied out
+  // of the raw rows: the summary is reactive state, and its nested A / frame read
+  // through it are Proxies the worker cannot receive.
+  function depthFrames() {
+    const frameModel = makeFrameModelResolver({ summary: toRaw(summary.value), sensors: sensors.value })
+    const fidByUuid = new Map(
+      (toRaw(summary.value)?.fiducialTransforms ?? []).map((t) => [
+        t.uuid,
+        structuredClone({ A: t.A, transform: t.transform ?? null, frame: t.frame }),
+      ]),
+    )
+    return { frameModel, fidByUuid }
+  }
+  // One image's camera as the run hands it to the worker (plain arrays and objects).
+  function depthCamera(uuid, cam, im, { frameModel, fidByUuid }) {
+    const { dist, selfCal } = frameModel(im)
+    return {
+      R: cam.R.map((row) => [...row]),
+      t: [...cam.t],
+      K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
+      dist,
+      selfCal,
+      fid: fidByUuid.get(uuid) ?? null,
+    }
+  }
+  // uuid → depthCameraKey of every image of the main model: what Keep valid depth maps
+  // compares with the saved index (the depth dialog's effect line).
+  function depthCameraKeys() {
+    const cloud = mainSparseCloud.value
+    if (!cloud) return {}
+    const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+    const frames = depthFrames()
+    const out = {}
+    for (const [uuid, cam] of cloud.cameras) {
+      const im = imgByUuid.get(uuid)
+      if (im) out[uuid] = depthCameraKey(depthCamera(uuid, cam, im, frames))
+    }
+    return out
+  }
+
   async function computeDepthMaps(settings = {}, onProgress, { resume = null } = {}) {
     const cloud = mainSparseCloud.value
     if (!cloud || cloud.cameras.size < 2) {
@@ -116,19 +158,12 @@ export function createDense({
       // reproduces the same pinhole frame as the sparse cloud. The one lookup that
       // knows both row kinds is the frame-model resolver (core/sfm/displayFrame.js).
       const selfCalRows = summary.value?.selfCalDistortion ?? []
-      const frameModel = makeFrameModelResolver({ summary: toRaw(summary.value), sensors: sensors.value })
       // F4: per-image scan→canonical transform from the sparse run. The dense
       // stage reproduces that exact frame (it must NOT re-fit) — the sparse run
       // defines it. Fail loudly if a film image is in the cloud but its transform
       // is missing (a stale/partial summary would silently mis-warp its raster).
-      // Copied out of the raw rows: the summary is reactive state, and its nested
-      // A / frame read through it are Proxies the worker cannot receive.
-      const fidByUuid = new Map(
-        (toRaw(summary.value)?.fiducialTransforms ?? []).map((t) => [
-          t.uuid,
-          structuredClone({ A: t.A, transform: t.transform ?? null, frame: t.frame }),
-        ]),
-      )
+      const frames = depthFrames()
+      const { fidByUuid } = frames
       const inputImages = []
       for (const [uuid, cam] of cloud.cameras) {
         const im = imgByUuid.get(uuid)
@@ -163,22 +198,16 @@ export function createDense({
         // wait for it (rejects if its transcode failed) so dense reads the PNG,
         // never the lossy display JPEG — see the computeUrl invariant.
         await imagesStore.whenComputeReady(im)
-        // The lens (the sensor's, or the run's self-calibrated fisheye) and the composed
-        // self-cal bag applied after it — null when self-cal was off for it.
-        const { dist, selfCal } = frameModel(im)
         inputImages.push({
           uuid,
           name: im.name,
           url: computeSourceOf(im),
           // Per-image mask (if any) so masked regions are excluded from the dense cloud.
           mask: im.mask?.blob ?? null,
-          R: cam.R.map((row) => [...row]),
-          t: [...cam.t],
-          K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
-          dist,
-          selfCal,
-          // Film scan→canonical warp (plain data; the frame is already a plain object).
-          fid,
+          // Pose, K, the lens (the sensor's, or the run's self-calibrated fisheye), the
+          // composed self-cal bag applied after it (null when self-cal was off for it) and
+          // the film scan→canonical warp.
+          ...depthCamera(uuid, cam, im, frames),
           // The working grid's basis (the canonical frame for a film scan), so the
           // worker's memory pre-flight counts real pixels, not maxDim².
           width: fid?.frame?.width ?? im.meta?.width ?? 0,
@@ -232,12 +261,40 @@ export function createDense({
         if (verdict.ok) journal = structuredClone(resume)
         else log(`Dense: the stopped depth-map run cannot continue (${verdict.why}); starting again`, 'warn', 'Dense')
       }
+      // Keep valid depth maps (core/dense/depthReuse.js): the saved maps whose camera and
+      // settings are unchanged are kept, and only the others are computed. A continued
+      // run has its own list (the journal) and needs no second one.
+      const mapsKey = depthMapsKey(requested)
+      const cameraKeys = Object.fromEntries(inputImages.map((im) => [im.uuid, depthCameraKey(im)]))
+      let kept = []
+      if (!journal && settings.keepMaps !== false && isPersisting()) {
+        const index = await opfs.loadDepthIndex(projects.currentProjectId).catch(() => null)
+        kept = reusableDepthMaps({ index, cloud, key: mapsKey, cameraKeys })
+        if (kept.length === inputImages.length) {
+          log(
+            `Dense: all ${pluralize(kept.length, 'depth map')} kept — their cameras and settings are unchanged, so there is nothing to compute`,
+            'success',
+            'Dense',
+          )
+          reconStatus.value = 'done'
+          return
+        }
+        if (kept.length)
+          log(
+            `Dense: ${pluralize(kept.length, 'depth map')} of ${inputImages.length} kept (cameras and settings unchanged); ` +
+              `computing ${pluralize(inputImages.length - kept.length, 'map')}`,
+            'info',
+            'Dense',
+          )
+      }
+      // A continued run reads them back from its journal (`kept`), for pass 2.
+      const keptUuids = new Set(journal?.kept ?? kept.map((m) => m.uuid))
       const run = await beginStreamedDepthMaps({
         onWriteFailure: (err) => {
           writeFailure = err
           terminateAll(err.message)
         },
-        resume: journal ? (journal.phase === 'pass1' ? journal.done : journal.metas) : null,
+        resume: journal ? (journal.phase === 'pass1' ? journal.done : journal.metas) : kept.length ? kept : null,
       })
       // Resolve a quality preset → working maxDim from the largest native image
       // dimension (Step 3), unless the user set an explicit maxDim in Advanced. A
@@ -308,13 +365,18 @@ export function createDense({
       // phase. Phases: pass1 → pass2 (Full method) → promote → filter → promoteFilter.
       let writer = null
       if (run) {
-        journal ??= startJournal({
-          stage: 'depth',
-          key,
-          settings: requested,
-          total: inputImages.length,
-          phase: 'pass1',
-        })
+        if (!journal) {
+          journal = startJournal({
+            stage: 'depth',
+            key,
+            settings: requested,
+            total: inputImages.length,
+            phase: 'pass1',
+          })
+          // Kept maps are saved maps: a run that stops after this continues with them.
+          journal.done = kept.map((m) => ({ ...m }))
+          journal.kept = kept.map((m) => m.uuid)
+        }
         writer = journalWriter((j) => opfs.saveRunJournal(run.projectId, j), {
           intervalMs: settings._journalMs ?? DENSE_TUNING.journalIntervalMs,
         })
@@ -387,7 +449,8 @@ export function createDense({
           for (const meta of phase === 'pass2' ? journal.done : []) {
             if (at.has(meta.uuid)) run.metas[at.get(meta.uuid)] = { ...meta }
           }
-          const saved2 = new Set(phase === 'pass2' ? journal.done.map((m) => m.uuid) : [])
+          // Kept maps are final: pass 2 reads them as neighbours and leaves them as they are.
+          const saved2 = new Set([...keptUuids, ...(phase === 'pass2' ? journal.done.map((m) => m.uuid) : [])])
           const refs2 = remaining(saved2)
           const staged = []
           let stageFailure = null
@@ -454,7 +517,7 @@ export function createDense({
             ),
           )
         }
-        await run.commit(settings)
+        await run.commit(settings, { mapsKey, cameraKeys })
         await writer.settled()
         await opfs.deleteRunJournal(run.projectId, 'depth').catch(() => {})
       } else {
@@ -1175,6 +1238,7 @@ export function createDense({
 
   return {
     computeDepthMaps,
+    depthCameraKeys,
     filterSavedDepthMaps,
     densifyParallel,
     densify,

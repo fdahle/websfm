@@ -6,6 +6,14 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Adding photos no longer rebuilds every depth map.** Build Depth Maps ▸ **Keep valid
+  depth maps** (on) keeps each saved map whose camera and settings are unchanged and
+  computes only the others, so after Sparse Reconstruction ▸ Add to the model with
+  Existing cameras ▸ Fixed only the new photos' maps are made; the step's line says how
+  many are kept. The check across views still runs over every map. It is a setting
+  because a full run would also rebuild the kept maps with the new photos as neighbours;
+  turn it off for that. A browser test keeps all five maps of an unchanged run byte for
+  byte, and after one camera moves computes that map alone.
 - **Join two projects.** **Import ▸ WebSfM Project…** brings another project's photos
   into this one with their features, the matches between them, their sensors, GCP marks
   and camera positions, so two flights, two days or a colleague's block need no new

@@ -15,6 +15,9 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
   const depthMaps = shallowRef(new Map())
   // Index entries for saved planes; retained while workers stream their files.
   const depthMapsMeta = shallowRef([])
+  // The saved index's settings and camera keys (core/dense/depthReuse.js), with its maps:
+  // the depth dialog says from them how many maps a run would keep. { mapsKey, cameraKeys }
+  const depthMapsKey = shallowRef(null)
 
   // How many depth maps this project has, hydrated or merely on disk. The ribbon /
   // command guards for Densify + Ortho read this, so it must count the restored-but-
@@ -110,11 +113,19 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
       },
       settled,
       saveOrMove,
-      async commit(settings) {
+      // `mapsKey` (core/dense/depthReuse.js): what a later run compares to keep these maps.
+      async commit(settings, { mapsKey = null, cameraKeys = null } = {}) {
         await settled()
-        const index = { ...buildDepthIndex([], { sparseCloud: mainSparseCloud(), settings }), maps: metas }
+        const index = {
+          ...buildDepthIndex([], { sparseCloud: mainSparseCloud(), settings }),
+          ...(mapsKey ? { mapsKey, cameraKeys } : {}),
+          maps: metas,
+        }
         await saveOrMove(() => opfs.commitDepthIndex(projectId, index))
-        if (currentProjectId() === projectId) depthMapsMeta.value = metas
+        if (currentProjectId() === projectId) {
+          depthMapsMeta.value = metas
+          depthMapsKey.value = mapsKey ? { mapsKey, cameraKeys } : null
+        }
         log(
           `Dense: ${pluralize(metas.length, 'depth map')} saved (${formatBytes(depthMapBytes(metas))}) as they finished ` +
             `— reopening this project will not need a Stage A re-run`,
@@ -165,6 +176,7 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
       return false
     }
     depthMapsMeta.value = index.maps
+    depthMapsKey.value = index.mapsKey ? { mapsKey: index.mapsKey, cameraKeys: index.cameraKeys ?? {} } : null
     return true
   }
 
@@ -192,11 +204,13 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
   function clearDepthMaps() {
     depthMaps.value = new Map()
     depthMapsMeta.value = []
+    depthMapsKey.value = null
   }
 
   return {
     depthMaps,
     depthMapsMeta,
+    depthMapsKey,
     depthMapCount,
     persistDepthMaps,
     beginStreamedDepthMaps,
