@@ -108,7 +108,11 @@ export function makeCloudOps() {
           pos: c.pos,
           col: c.col,
           nrm: c.nrm ?? null,
-          attributes: { ...(c.attributes || {}), classification: result.classes },
+          attributes: {
+            ...(c.attributes || {}),
+            classification: result.classes,
+            heightAboveGround: result.heightAboveGround,
+          },
         },
         extra: result.counts,
       }

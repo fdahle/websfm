@@ -18,7 +18,12 @@ gets a standard LAS class: **Ground** (2), **Building** (6), **Low**, **Medium**
 **High vegetation** (3, 4, 5), **Unclassified** (1) for everything else above the
 ground (cars, fences, poles), **Low point** (7) for noise below it, and **Never
 classified** (0) for points outside the classified extent. With Buildings and
-Vegetation off it does what Classify ground did: ground, unclassified and low points. The classes are saved with the project and
+Vegetation off it does what Classify ground did: ground, unclassified and low points.
+
+Every point also gets its **height above the ground** in metres (the attribute
+`heightAboveGround`; empty outside the classified extent). Colour the cloud by it in
+**Symbology…** to see tree and roof heights, or measure clearances; LAS and LAZ exports
+write it as an extra field, PLY as a property. The classes are saved with the project and
 written to LAS, LAZ and PLY exports. The cloud's symbology dialog can hide a class
 or recolour it.
 

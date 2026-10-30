@@ -223,12 +223,14 @@ export function subsetPoints(p, keep) {
 }
 
 // The attributes an edit writes: the source's, plus a classification when it classifies
-// a cloud that had none.
+// a cloud that had none, and Classify Points' height above ground.
 function editAttributes(lod, mode) {
   const attrs = lod.layout.attributes.map((a) => ({ ...a }))
   const addClass =
     (mode === 'classify' || mode === 'classify-ground') && !attrs.some((a) => a.name === 'classification')
   if (addClass) attrs.push({ name: 'classification', type: 'uint8' })
+  if (mode === 'classify-ground' && !attrs.some((a) => a.name === 'heightAboveGround'))
+    attrs.push({ name: 'heightAboveGround', type: 'float32' })
   return { attrs, addClass }
 }
 
@@ -316,7 +318,16 @@ const ownPoints = (tile, p) => (i) => inCore(tile, p.pos[3 * i], p.pos[3 * i + 1
 export function editTile(cloud, plan, tile) {
   if (plan.mode === 'classify-ground') {
     const r = cloud.count ? classifyCloudGround(cloud, null, { ...plan.run, extent: 'all', onLog: quiet }) : null
-    const out = r ? { ...cloud, attributes: { ...cloud.attributes, classification: r.classes } } : cloud
+    // Every tile carries both attributes the octree's layout names, even one with no
+    // usable point (its heights are NaN).
+    const out = {
+      ...cloud,
+      attributes: {
+        ...cloud.attributes,
+        ...(r ? { classification: r.classes } : {}),
+        heightAboveGround: r ? r.heightAboveGround : new Float32Array(cloud.count).fill(NaN),
+      },
+    }
     const points = subsetPoints(out, ownPoints(tile, out))
     const counts = countClasses(points.attributes.classification)
     // The cloth's resolution in this tile (coarser than asked past the particle cap).

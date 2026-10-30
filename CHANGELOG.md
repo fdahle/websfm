@@ -29,7 +29,9 @@ Notable changes to websfm. The format follows
   more steps that can each be turned off, so the cloud exports with the classes GIS
   tools expect. Roofs and walls are found as large flat surfaces high enough above the
   ground (a wall alone, such as a retaining wall, is not a building), vegetation as what
-  scatters or is green, banded by height at 1 and 3 m; a car stays unclassified. On a
+  scatters or is green, banded by height at 1 and 3 m; a car stays unclassified. Every
+  point also gets its height above the ground (`heightAboveGround`, metres), to colour
+  by in Symbology and exported to LAS/LAZ and PLY. On a
   synthetic site 99.6 % of building points and every tree point land in their class; on
   UseGeo's 16 M-point MVS cloud the run takes 5.9 s against 1.2 s for the ground alone,
   and roofs, crowns and olive rows come out right by eye. Not yet scored against a

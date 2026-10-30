@@ -158,6 +158,12 @@ describe('classifyAboveGround (Classify Points ▸ vegetation and buildings)', (
     })
     expect(r.aboveGround.voxel).toBe(1)
     expect(r.classes.filter((c) => c === 6).length).toBe(25 * 25)
+    // Every point's height above the cloth, in metres: the roof stands 6 m up.
+    const roofHeights = [...r.heightAboveGround].filter((_, i) => r.classes[i] === 6).sort((a, b) => a - b)
+    expect(roofHeights[roofHeights.length >> 1]).toBeCloseTo(6, 1)
+    // Ground only still gives the heights.
+    const groundOnly = classifyCloudGround({ count, pos: Float64Array.from(xyz), col: null }, null, { extent: 'all' })
+    expect(groundOnly.heightAboveGround).toHaveLength(count)
     expect(r.classes.filter((c) => c === 2).length).toBe(81 * 81 - 25 * 25)
   })
 

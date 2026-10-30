@@ -137,8 +137,13 @@ test('Classify points labels a cloud and Build DEM ▸ Ground only makes a DTM u
     const c = useReconstructionStore().clouds.find((x) => x.name.endsWith('(classified)'))
     const n = [0, 0, 0, 0, 0, 0, 0, 0]
     for (const v of c.attributes.classification) n[v]++
-    return { ground: n[2], above: n[1], building: n[6] }
+    const hag = c.attributes.heightAboveGround
+    const roof = [...hag].filter((_, i) => c.attributes.classification[i] === 6).sort((a, b) => a - b)
+    return { ground: n[2], above: n[1], building: n[6], hagCount: hag?.length ?? 0, roofHeight: roof[roof.length >> 1] }
   })
+  // Every point carries its height above the ground: the roof stands 6 m up.
+  expect(counts.hagCount).toBe(81 * 81)
+  expect(counts.roofHeight).toBeCloseTo(6, 0)
   // The 25×25 roof points (12 m at 0.5 m) are a building; everything else is ground.
   expect(counts.building).toBe(25 * 25)
   expect(counts.above).toBe(0)

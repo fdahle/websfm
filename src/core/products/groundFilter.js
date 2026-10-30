@@ -492,7 +492,8 @@ export function classifyGround(pos, count, opts = {}) {
 //                     (pointClasses.js classifyAboveGround's options, lengths in
 //                     metres), or null for ground only
 // Returns classifyGround's result (null when no point is usable), with
-// `aboveGround` (classifyAboveGround's result) when it ran.
+// `heightAboveGround` (Float32Array, metres above the cloth per point, NaN outside the
+// classified extent) and `aboveGround` (classifyAboveGround's result) when it ran.
 export function classifyCloudGround(cloud, frame, opts = {}) {
   const { metresPerUnit = 1, extent = 'core', budgetBytes = Infinity, onLog = null, aboveGround = null, ...rest } = opts
   if (!(metresPerUnit > 0)) throw new Error('metresPerUnit must be > 0')
@@ -543,12 +544,21 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
     unitLabel,
     bounds,
     onLog,
-    heights: classesAbove,
+    heights: true,
   })
-  if (!result || !classesAbove) return result
+  if (!result) return result
+  // Height above ground in metres, whatever the frame's unit: a point attribute.
+  const heightAboveGround = result.hag
+  if (metresPerUnit !== 1) for (let i = 0; i < count; i++) heightAboveGround[i] *= metresPerUnit
+  if (!classesAbove) {
+    delete result.hag
+    return { ...result, heightAboveGround }
+  }
   // Lengths in metres; the run converts them to frame units.
   const a = { ...CLASSIFY_TUNING, ...CLASSIFY_DEFAULTS, ...aboveGround }
-  const above = classifyAboveGround(framed, count, result.classes, result.hag, cloud.col ?? null, {
+  // The rules work in frame units: heights back in them (the attribute stays in metres).
+  const hagUnits = metresPerUnit === 1 ? heightAboveGround : heightAboveGround.map((v) => v / metresPerUnit)
+  const above = classifyAboveGround(framed, count, result.classes, hagUnits, cloud.col ?? null, {
     ...a,
     voxel: toUnits(a.voxel),
     radius: toUnits(a.radius),
@@ -570,5 +580,5 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
         : ''),
   )
   delete result.hag
-  return { ...result, aboveGround: above }
+  return { ...result, heightAboveGround, aboveGround: above }
 }
