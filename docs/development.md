@@ -128,6 +128,13 @@ npm run release                # 0.4.0 → 0.5.0; or `-- patch`, `-- major`, `--
 git push && git push origin v0.5.0   # the tag deploys websfm.app
 ```
 
+A push to `main` runs the unit, WASM and Rust tests and deploys dev.websfm.app; the
+browser tests (Chromium and Firefox, about 20 min) run only for a version tag, a pull
+request, or by hand. Run them first, so a failure shows before the tag exists:
+**Actions ▸ Verify ▸ Run workflow** on `main` (or `gh workflow run verify.yml --ref
+main`), or `npm run test:browser` locally. A tag whose browser tests fail does not
+deploy.
+
 It lists the `feat` / `fix` / `perf` commits since the last tag (add an entry for any
 user-visible one it is missing first), moves `[Unreleased]` under the new version with
 today's date, sets the version in `package.json`, commits and tags `v<version>`.

@@ -2,7 +2,13 @@ name: Verify
 # Files that are not part of the app don't run the tests (nor deploy dev). CHANGELOG.md,
 # src/guide/ and src/glossary/ are built into the app, so they still do. A version tag
 # always runs: path filters do not apply to tag pushes.
+#
+# The browser tests (about 20 min) run for a version tag, a pull request, and by hand
+# (Actions ▸ Verify ▸ Run workflow), not for a push to main: dev.websfm.app is deployed
+# as soon as the fast checks pass, and a release is held to the full suite. Run it by
+# hand on main before `npm run release`, so a failure shows before the tag exists.
 on:
+  workflow_dispatch:
   push:
     paths-ignore:
       - 'README.md'
@@ -27,8 +33,8 @@ concurrency:
   group: verify-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  # Three jobs start together, and the browser tests are split over three runners
-  # (Playwright --shard): a push waits for the slowest of them, not their sum.
+  # The jobs start together, and the browser tests are split over three runners per
+  # browser (Playwright --shard): a run waits for the slowest of them, not their sum.
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -58,6 +64,7 @@ jobs:
       - run: cargo test --manifest-path crates/Cargo.toml --workspace --release --locked
 
   browser:
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -92,13 +99,20 @@ jobs:
           path: test-results/
           retention-days: 7
 
-  # After the tests pass: a push to main deploys dev.websfm.app, a version tag (v0.5.0,
-  # from `npm run release`) deploys websfm.app (docs/deployment.md ▸ Cloudflare).
+  # After the tests pass: a push to main deploys dev.websfm.app (after checks and rust;
+  # the browser job is skipped there), a version tag (v0.5.0, from `npm run release`)
+  # deploys websfm.app after all three (docs/deployment.md ▸ Cloudflare).
   # The R2 files (models, ORT's WebGPU wasm) are not uploaded here: run
   # `deploy-cloudflare.mjs --upload` by hand after a model or ORT change.
   deploy:
     needs: [checks, rust, browser]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    # A skipped job would skip this one too, so the results are tested by hand: a tag
+    # needs the browser tests to have passed, main only that they did not fail.
+    if: >-
+      !cancelled() && github.event_name == 'push' &&
+      needs.checks.result == 'success' && needs.rust.result == 'success' &&
+      ((github.ref == 'refs/heads/main' && needs.browser.result == 'skipped') ||
+       (startsWith(github.ref, 'refs/tags/v') && needs.browser.result == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
