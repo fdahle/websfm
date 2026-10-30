@@ -2,8 +2,6 @@
 // the stages it wires): residual summaries, the per-observation reprojection residuals
 // and the track-length histogram. Pure — every input is passed in; nothing is mutated.
 
-import { hasKp, kpX, kpY } from './keypointSet.js'
-
 // Summary statistics for an array of numbers (e.g. reprojection residuals, px).
 // Returns { mean, median, p95, max, count }; all zero when empty.
 export function numStats(arr) {
@@ -37,9 +35,18 @@ export function fmtStats(s) {
 export function modelResiduals({ tracks, cameras, ids, images }) {
   const residuals = []
   const camAt = new Array(images.length).fill(null)
+  // Each image's keypoint coordinates and count, so the per-observation test below is
+  // hasKp's (in range, and not NaN = missing) without a call per observation.
+  const kpXy = new Array(images.length).fill(null)
+  const kpN = new Int32Array(images.length)
   for (let img = 0; img < images.length; img++) {
     const cam = images[img] ? cameras.get(ids.uuid(img)) : null
     if (!cam || !cam.K) continue
+    const set = images[img].kp
+    if (set) {
+      kpXy[img] = set.xy
+      kpN[img] = set.n
+    }
     const { R, t, K } = cam
     camAt[img] = [
       R[0][0],
@@ -67,15 +74,17 @@ export function modelResiduals({ tracks, cameras, ids, images }) {
     tracks.forEachView(p, (img, kpIdx) => {
       const c = camAt[img]
       if (!c) return
-      const set = images[img].kp
-      if (!hasKp(set, kpIdx)) return
+      const xy = kpXy[img]
+      if (!xy || !(kpIdx < kpN[img])) return
+      const u = xy[2 * kpIdx],
+        v = xy[2 * kpIdx + 1]
+      // eslint-disable-next-line no-self-compare
+      if (u !== u) return
       const xc = c[0] * x + c[1] * y + c[2] * z + c[9]
       const yc = c[3] * x + c[4] * y + c[5] * z + c[10]
       const zc = c[6] * x + c[7] * y + c[8] * z + c[11]
       if (!isFinite(zc) || Math.abs(zc) < 1e-9) return
-      residuals.push(
-        Math.hypot(c[12] * (xc / zc) + c[14] - kpX(set, kpIdx), c[13] * (yc / zc) + c[15] - kpY(set, kpIdx)),
-      )
+      residuals.push(Math.hypot(c[12] * (xc / zc) + c[14] - u, c[13] * (yc / zc) + c[15] - v))
     })
   })
   return residuals

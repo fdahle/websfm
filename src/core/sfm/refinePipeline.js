@@ -289,7 +289,7 @@ export async function refineModel(ctx) {
         // what the model actually resolves — tuning.js guidedRadiusP90Mult).
         let gatePx = filterMaxReprojPx
         if (cfg.guidedRadiusP90Mult > 0) {
-          const res = modelResiduals().sort((a, b) => a - b)
+          const res = Float64Array.from(modelResiduals()).sort()
           const p90 = res.length ? res[Math.floor(0.9 * (res.length - 1))] : Infinity
           gatePx = Math.min(filterMaxReprojPx, cfg.guidedRadiusP90Mult * p90)
         }

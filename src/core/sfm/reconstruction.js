@@ -374,7 +374,10 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
     flat2[i * 2 + 1] = pts2d[i].y
   }
 
-  const raw = solve_pnp(flat3, flat2, K.fx, K.fy, K.cx, K.cy, ransacThreshPx, maxIters)
+  // The RANSAC hypotheses are scored on the thread pool once the bundle adjustment has
+  // started it (the same pose bits either way, crates/reconstruction/src/pose.rs).
+  const run = threadedModule?.solve_pnp ?? solve_pnp
+  const raw = run(flat3, flat2, K.fx, K.fy, K.cx, K.cy, ransacThreshPx, maxIters)
   if (!raw || raw.length < 12 + n) return null
 
   return {

@@ -194,6 +194,14 @@ Notable changes to websfm. The format follows
 - **What's New without glossary links.** Its text no longer underlines the glossary
   terms it names, which in a changelog was nearly every line.
 
+### Performance
+- **Sparse Reconstruction spends less time outside the bundle adjustment.** Placing each
+  photo now scores its pose hypotheses on every core, and the residual statistics that
+  each bundle adjustment logs are computed without the slow sorts they used; the model
+  is the same to the last bit. Quarry (347 photos): the time outside the bundle
+  adjustment fell from 31.4 to 25.3 s, the whole sparse run from 67.2 to 62.4 s (16
+  threads), with identical camera poses and points.
+
 ### Fixed
 - **Depth maps on integrated graphics no longer freeze the screen.** The graphics card
   now gets each pass in short pieces (about 30 ms each), so a laptop's integrated GPU,

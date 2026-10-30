@@ -312,7 +312,7 @@ export function createBundleSession(ctx) {
     // by the observed point's track length (2 = freshly triangulated, ≥3 = extended).
     {
       const { cam: oCam, pt: oPt, x: oX, y: oY } = observations
-      const errs = new Array(observations.n)
+      const errs = new Float64Array(observations.n)
       for (let i = 0; i < observations.n; i++) {
         const j = oPt[i]
         const q = projectFullXYZ(
@@ -324,7 +324,9 @@ export function createBundleSession(ctx) {
         )
         errs[i] = q ? Math.hypot(q.x - oX[i], q.y - oY[i]) : Infinity
       }
-      const sorted = errs.filter(Number.isFinite).sort((a, b) => a - b)
+      // A typed array sorts numerically and natively (a comparator sort of ~10⁶
+      // residuals was seconds a run, every BA logs this): the same order, the same median.
+      const sorted = errs.filter(Number.isFinite).sort()
       const med = sorted[Math.floor(sorted.length / 2)] ?? 0
       const gross = Math.max(50, 20 * med)
       const byCam = new Map()

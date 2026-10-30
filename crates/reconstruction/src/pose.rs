@@ -3,6 +3,7 @@
 // triangulate_dlt and solve_pnp.
 use wasm_bindgen::prelude::*;
 use crate::linalg::*;
+use crate::par::{for_each_index, SyncPtr};
 
 // ── P3P (Lambda-Twist) ────────────────────────────────────────────────────────
 // Minimal 3-point pose solver. Given three world points and three *unit* bearing
@@ -419,30 +420,53 @@ pub fn solve_pnp(
         reprj_err2(r, t, fx64, fy64, cx64, cy64, &pts3[i], pts2[i][0], pts2[i][1])
     };
 
+    // The minimal sets are drawn first, in order, from the one generator; the hypotheses
+    // are then scored on the thread pool (par.rs), each sample's own MSAC sums in point
+    // order. Taking the first lowest cost in (sample, solution) order is what the plain
+    // loop took, so the pose is the same bits on any number of threads.
+    let iters = max_iters.max(1) as usize;
     let mut rng = Xorshift(n as u32 * 1000 + 7);
-    let mut best_cost = f64::INFINITY; // MSAC: Σ min(e², τ²) — lower is better
-    let mut best_count = 0usize;
-    let mut best_r = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-    let mut best_t = [0.0f64; 3];
-
-    let iters = max_iters.max(1);
-    for _ in 0..iters {
-        let idx = rng.sample_k(n, 3);
+    let samples: Vec<Vec<usize>> = (0..iters).map(|_| rng.sample_k(n, 3)).collect();
+    // Per sample: its lowest-cost solution (cost, inlier count, R, t); cost ∞ when none.
+    type Hypothesis = (f64, usize, M3, V3);
+    let identity: M3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut per_sample: Vec<Hypothesis> = vec![(f64::INFINITY, 0, identity, [0.0; 3]); iters];
+    let out_ptr = SyncPtr::of(&mut per_sample);
+    let score = |s: usize| -> Hypothesis {
+        let idx = &samples[s];
         let world = [pts3[idx[0]], pts3[idx[1]], pts3[idx[2]]];
         let brs = [bearings[idx[0]], bearings[idx[1]], bearings[idx[2]]];
+        let mut best: Hypothesis = (f64::INFINITY, 0, identity, [0.0; 3]);
         for (r, t) in p3p_lambda_twist(&world, &brs) {
-            let mut cost = 0.0;
+            let mut cost = 0.0; // MSAC: Σ min(e², τ²) — lower is better
             let mut count = 0usize;
             for i in 0..n {
                 let e2 = chei_err2(&r, &t, i);
                 if e2 < thresh2 { count += 1; cost += e2; } else { cost += thresh2; }
             }
-            if cost < best_cost {
-                best_cost = cost;
-                best_count = count;
-                best_r = r;
-                best_t = t;
-            }
+            if cost < best.0 { best = (cost, count, r, t); }
+        }
+        best
+    };
+    // A sample costs O(n), so a task takes a few: enough work per task to hide the
+    // pool's overhead on the few hundred correspondences of a typical image.
+    const SAMPLES_PER_TASK: usize = 8;
+    for_each_index(iters.div_ceil(SAMPLES_PER_TASK), |k| {
+        for s in k * SAMPLES_PER_TASK..((k + 1) * SAMPLES_PER_TASK).min(iters) {
+            // SAFETY: task k alone writes samples k·8 … k·8 + 7.
+            unsafe { *out_ptr.at(s) = score(s); }
+        }
+    });
+    let mut best_cost = f64::INFINITY;
+    let mut best_count = 0usize;
+    let mut best_r = identity;
+    let mut best_t = [0.0f64; 3];
+    for &(cost, count, r, t) in &per_sample {
+        if cost < best_cost {
+            best_cost = cost;
+            best_count = count;
+            best_r = r;
+            best_t = t;
         }
     }
 
