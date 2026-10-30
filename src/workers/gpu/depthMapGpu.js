@@ -10,6 +10,11 @@
 
 import { ensureDevice } from './device.js'
 import { refineScale } from '../../core/dense/refineSchedule.js'
+import { DENSE_TUNING } from '../../core/tuning.js'
+
+// Learned GPU speed per device and kind of pass (ms per workgroup row: 8 image rows),
+// so every map after the first starts its bands at the right size.
+const rowCost = new WeakMap() // GPUDevice → Map(mode → ms per workgroup row)
 import shaderSrc from './patchmatch.wgsl?raw'
 
 const pipelineCache = new WeakMap()
@@ -243,17 +248,18 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   const srcBuf = device.createBuffer({ size: 96 * nSrc, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(srcBuf, 0, sbuf)
 
-  // ── Control uniform (16 bytes), rewritten before each dispatch ─────────────
-  const ctrlBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  // ── Control uniform (32 bytes), rewritten before each dispatch ─────────────
+  const ctrlBuf = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   // `scale` = the sweep's refinement scale (refineSchedule.js), the value mvs.rs
-  // derives from the same perturbStart and iteration.
-  const writeCtrl = (mode, parity, iter) => {
-    const b = new ArrayBuffer(16)
+  // derives from the same perturbStart and iteration; `rowOffset` the band's first row.
+  const writeCtrl = (mode, parity, iter, rowOffset = 0) => {
+    const b = new ArrayBuffer(32)
     const d = new DataView(b)
     d.setUint32(0, mode, true)
     d.setUint32(4, parity, true)
     d.setUint32(8, iter, true)
     d.setFloat32(12, refineScale(perturbStart, iter), true)
+    d.setUint32(16, rowOffset, true)
     device.queue.writeBuffer(ctrlBuf, 0, b)
   }
 
@@ -310,20 +316,55 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
 
   const gx = Math.ceil(refW / 8),
     gy = Math.ceil(refH / 8)
-  const dispatch = () => {
-    const enc = device.createCommandEncoder()
-    const pass = enc.beginComputePass()
-    pass.setPipeline(pipeline)
-    pass.setBindGroup(0, bindGroup)
-    pass.dispatchWorkgroups(gx, gy)
-    pass.end()
-    device.queue.submit([enc.finish()])
+  // A pass goes out in bands of workgroup rows, timed: the next band is sized to take
+  // DENSE_TUNING.gpuBandMs, and the queue is waited on once that much work is in it. A
+  // dedicated GPU soon runs whole passes, several before a wait; a slow integrated one
+  // gets short commands, and the screen (which it also draws) and the OS's GPU watchdog
+  // get their turn between them. The speed is learned per device and pass kind.
+  const costs = rowCost.get(device) ?? new Map()
+  rowCost.set(device, costs)
+  const targetMs = DENSE_TUNING.gpuBandMs
+  // The work submitted since the last wait: one kind of pass, its rows, its start.
+  let batchRows = 0,
+    batchStart = 0,
+    batchMode = null,
+    queuedMs = 0
+  const settle = async () => {
+    if (!batchRows) return
+    await device.queue.onSubmittedWorkDone()
+    const perRow = (performance.now() - batchStart) / batchRows
+    const known = costs.get(batchMode)
+    // A moving estimate: one slow batch (a busy screen) does not halve the next band.
+    costs.set(batchMode, known ? 0.5 * known + 0.5 * perRow : perRow)
+    batchRows = 0
+    queuedMs = 0
+  }
+  const runPass = async (mode, parity, iter) => {
+    if (batchMode !== mode) await settle()
+    for (let row = 0; row < gy;) {
+      const known = costs.get(mode)
+      // Unknown speed: an eighth of the image first, so even the first command is short.
+      const rows = Math.max(1, Math.min(gy - row, known ? Math.floor(targetMs / known) : Math.ceil(gy / 8)))
+      writeCtrl(mode, parity, iter, row * 8)
+      const enc = device.createCommandEncoder()
+      const pass = enc.beginComputePass()
+      pass.setPipeline(pipeline)
+      pass.setBindGroup(0, bindGroup)
+      pass.dispatchWorkgroups(gx, rows)
+      pass.end()
+      if (!batchRows) batchStart = performance.now()
+      device.queue.submit([enc.finish()])
+      batchRows += rows
+      batchMode = mode
+      queuedMs += known ? known * rows : Infinity
+      if (queuedMs >= targetMs) await settle()
+      row += rows
+    }
   }
 
   // Init, then iterations × {parity 0, parity 1}. Each writeCtrl is ordered before
   // its dispatch's submit, so the GPU runs them in sequence on the queue.
-  writeCtrl(0, 0, 0)
-  dispatch()
+  await runPass(0, 0, 0)
 
   // Resolve the error scopes now that every resource exists and the init pass has
   // been submitted. Throwing here (worker → WASM fallback) beats an opaque readback
@@ -347,16 +388,12 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   }
 
   for (let it = 0; it < iters; it++) {
-    writeCtrl(1, 0, it)
-    dispatch()
-    writeCtrl(1, 1, it)
-    dispatch()
+    await runPass(1, 0, it)
+    await runPass(1, 1, it)
   }
 
-  if (acmh || hasPrior || geomOn) {
-    writeCtrl(2, 0, 0)
-    dispatch()
-  }
+  if (acmh || hasPrior || geomOn) await runPass(2, 0, 0)
+  await settle()
 
   // ── Readback ───────────────────────────────────────────────────────────────
   const stateRead = device.createBuffer({ size: stateBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })

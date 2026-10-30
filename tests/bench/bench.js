@@ -666,7 +666,25 @@ window.bench = {
     } finally {
       DENSE_TUNING.filterMapsPerWorker = perWorker0
     }
-    return { settings, seconds: (performance.now() - t0) / 1000, depthMaps: recon.depthMapCount }
+    // A digest of every saved depth plane (FNV-1a over the bytes, in uuid order): two runs'
+    // maps compare at a glance (the GPU path's banding must not change a byte).
+    let digest = null
+    try {
+      const opfs = await import('/src/utils/opfs.js')
+      const entries = await opfs.loadDepthFiles(
+        useProjectsStore().currentProjectId,
+        [...recon.depthMapsMeta].sort((a, b) => (a.uuid < b.uuid ? -1 : 1)),
+      )
+      let h = 2166136261
+      for (const e of entries) {
+        const bytes = new Uint8Array(await e.files.depth.arrayBuffer())
+        for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 16777619) >>> 0
+      }
+      digest = h.toString(16)
+    } catch {
+      // no saved maps (a project that cannot save): no digest
+    }
+    return { settings, seconds: (performance.now() - t0) / 1000, depthMaps: recon.depthMapCount, digest }
   },
 
   // Dense Stage B, settings resolved exactly as DenseModal.run() does.

@@ -174,7 +174,14 @@ cross-view vote does.
 WebGPU acceleration is experimental and configured under Settings → Compute. With it,
 one worker feeds the graphics card. Without it, the depth maps run on the processor,
 spread over the parallel workers (Settings → Compute), each with its share of the
-memory budget; the log says how many. The maps are the same either way. The
+memory budget; the log says how many. The maps are the same either way.
+
+The graphics card gets its work in short pieces, so a laptop's integrated graphics,
+which also draw the screen, keep it responsive, and the system does not reset the card
+for a long command. When the first map takes long on the card (over 8 s), the next one
+is computed on the processor to compare, and the run goes on with whichever was faster;
+the log says which. On such a laptop the processor is often the faster: **Method ▸ Fast**
+then saves most of the time. The
 memory a run needs is estimated before it starts. If the chosen **Quality** would
 exceed the memory budget (Settings → Compute), the run steps down to the highest
 quality that fits (High → Medium → Low) and the log gives both estimates. A

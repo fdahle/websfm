@@ -194,6 +194,13 @@ Notable changes to websfm. The format follows
   terms it names, which in a changelog was nearly every line.
 
 ### Fixed
+- **Depth maps on integrated graphics no longer freeze the screen.** The graphics card
+  now gets each pass in short pieces (about 30 ms each), so a laptop's integrated GPU,
+  which also draws the screen, stays responsive and is not reset by the system for a
+  long command; when the first map is slow on the card, the next is computed on the
+  processor to compare, and the run continues on the faster. On a dedicated NVIDIA card
+  the maps are unchanged (identical filter counts over 42 maps; the GPU path varies in
+  the last bits between runs anyway) and the run takes about 5 % longer.
 - **Long ribbon menus can be scrolled.** Scrolling a ▾ menu taller than the window
   closed it, so its last rows could not be reached on a small screen (or in Firefox,
   whose rows are taller).

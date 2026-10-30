@@ -340,6 +340,14 @@ export const MATCH_TUNING = {
 // DenseModal — the user-facing dense defaults live in defaults.user.js
 // (DEPTHMAP_DEFAULTS / DENSE_FUSE_DEFAULTS). `settings`/`opts` from the caller override.
 export const DENSE_TUNING = {
+  // GPU depth maps: how long one GPU command (a band of rows of one pass) may take, in ms.
+  // An integrated GPU also draws the screen, and the OS resets one that runs a single
+  // command for about 2 s (Windows TDR): long commands froze the display on Intel
+  // laptops. A dedicated GPU runs a whole pass within this and is not slowed.
+  gpuBandMs: 30,
+  // A first GPU map slower than this (ms) has the second map computed on the CPU to
+  // compare, and the run continues on the faster of the two (workers/ops/dense.js).
+  gpuProbeMs: 8000,
   // How often a depth-map run's journal (core/runJournal.js) is rewritten while maps
   // finish: what a dead tab's run can lose and recompute on Continue, against one
   // small JSON write. (A run's `_journalMs` setting overrides it; the tests use 0.)

@@ -54,7 +54,11 @@ struct Src {
 
 // `scale` is the refinement scale for this sweep, perturbStart·0.5^iter, computed on
 // the CPU (depthMapGpu.js) exactly as mvs.rs computes it.
-struct Ctrl { mode : u32, parity : u32, iter : u32, scale : f32 };
+// `rowOffset`: the first image row of this dispatch. A pass goes out in bands of rows
+// (depthMapGpu.js), so no single command runs long enough to stall the screen an
+// integrated GPU also draws, or to trip the OS's GPU watchdog. A sweep updates one
+// checkerboard colour and reads only the other, so the bands give the same result.
+struct Ctrl { mode : u32, parity : u32, iter : u32, scale : f32, rowOffset : u32, pad0 : u32, pad1 : u32, pad2 : u32 };
 
 // Depth-proposal half-span as a fraction of the current depth at scale 1 (mvs.rs).
 const DEPTH_PERTURB_REL : f32 = 0.5;
@@ -424,7 +428,7 @@ fn acmhSweep(u : u32, v : u32, i : u32) {
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let u = gid.x;
-  let v = gid.y;
+  let v = gid.y + ctrl.rowOffset;
   if (u >= params.refW || v >= params.refH) { return; }
   let i = v * params.refW + u;
 

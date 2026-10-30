@@ -623,6 +623,10 @@ export function makeDenseOps({ rasterize }) {
       return d
     }
     {
+      // A slow GPU (an integrated one): the first map took over DENSE_TUNING.gpuProbeMs, so
+      // the second is computed on the CPU to compare, and the run goes on with the faster.
+      // `probe`: { gpuMsPerPx, gpu } while the CPU map is under way.
+      let probe = null
       for (let k = 0; k < total; k++) {
         const i = order[k]
         const img = images[i]
@@ -668,6 +672,7 @@ export function makeDenseOps({ rasterize }) {
 
         // The next map's images decode and warp while this one matches.
         prefetch(k + 1)
+        if (probe) backend = undefined
         const tImg = performance.now()
         // Always stream depthMapForImage's own log (coarse-to-fine plan, debug level);
         // validate the GPU cost kernel against the CPU reference on the first image only.
@@ -740,6 +745,29 @@ export function makeDenseOps({ rasterize }) {
             }
           }
         const imgMs = performance.now() - tImg
+        {
+          const px = ref.width * ref.height
+          if (probe) {
+            const cpuMsPerPx = imgMs / px
+            const cpuWins = cpuMsPerPx < probe.gpuMsPerPx
+            emit('log', [
+              `Depth maps: the GPU took ${((probe.gpuMsPerPx * 1e6) / 1000).toFixed(1)} s per megapixel, the CPU ` +
+                `${((cpuMsPerPx * 1e6) / 1000).toFixed(1)} s — ${cpuWins ? 'the rest run on the CPU' : 'the rest stay on the GPU'}`,
+              cpuWins ? 'warn' : 'info',
+              'Dense',
+            ])
+            if (cpuWins) gpuFallbacks++
+            else backend = probe.gpu
+            probe = null
+          } else if (backend && k === 0 && total > 2 && imgMs > (settings.gpuProbeMs ?? DENSE_TUNING.gpuProbeMs)) {
+            emit('log', [
+              `Depth maps: the first map took ${(imgMs / 1000).toFixed(1)} s on the GPU — the next is computed on the CPU to compare`,
+              'info',
+              'Dense',
+            ])
+            probe = { gpuMsPerPx: imgMs / px, gpu: backend }
+          }
+        }
         const tPost = performance.now()
         if (!dm) {
           emit('log', [`Depth maps: ${img.name} skipped (no sparse depth support)`, 'warn', 'Dense'])
