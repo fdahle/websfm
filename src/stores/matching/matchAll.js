@@ -548,6 +548,11 @@ export function createMatchAll({
         .then(() => {
           saveMs = performance.now() - t0
           lastSaveAt = performance.now()
+          log(
+            `Matching: checkpoint saved ${pluralize(held.length, 'pair')} in ${(saveMs / 1000).toFixed(2)} s`,
+            'debug',
+            'Matching',
+          )
           journal.done = held
           return opfs.saveRunJournal(projectId, { ...journal, updatedAt: new Date().toISOString() })
         })
