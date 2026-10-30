@@ -94,6 +94,12 @@ export const useModalsStore = defineStore('modals', () => {
   // dialog is limited to (null: every image). Cleared when the dialog closes.
   const detectOnlyIds = ref(null)
   const matchOnlyIds = ref(null)
+  // Settings the Sparse Reconstruction dialog opens with (Quality Report ▸ Images added ▸
+  // Try again…: Add to the model with looser gates). Cleared when it closes.
+  const reconstructPrefill = ref(null)
+  watch(reconstructOpen, (open) => {
+    if (!open) reconstructPrefill.value = null
+  })
   watch(detectFeaturesOpen, (open) => {
     if (!open) detectOnlyIds.value = null
   })
@@ -181,6 +187,7 @@ export const useModalsStore = defineStore('modals', () => {
     importProjectOpen,
     detectOnlyIds,
     matchOnlyIds,
+    reconstructPrefill,
     infoImageId,
     infoProduct,
     fiducialDetectOpen,

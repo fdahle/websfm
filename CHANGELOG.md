@@ -53,7 +53,9 @@ Notable changes to websfm. The format follows
   georeference built from it stay current. *Refined* then lets every camera move with
   the new ones (Optimize cameras); *Auto* keeps them fixed when something was built from
   them. Match Features gets **Match only new pairs**, on by itself when some images are in
-  no pair yet, so only each new photo's pairs are matched. The model's frame is rebuilt
+  no pair yet, so only each new photo's pairs are matched. Photos a run could not place
+  get **Try again…** in Quality Report ▸ Sparse, which reopens the dialog with looser
+  registration gates. The model's frame is rebuilt
   from the detected keypoints and checked against the pixels the model saved (0.00002 px
   apart on the synthetic tests, with and without self-calibration), and a project whose
   features were detected again is told to rebuild. On the synthetic block, cameras added

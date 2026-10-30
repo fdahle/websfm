@@ -33,6 +33,8 @@ const props = defineProps({
   newImages: { type: Number, default: 0 },
   hasProducts: { type: Boolean, default: false },
   extendBlocker: { type: String, default: null },
+  // Settings to open with (Quality Report ▸ Try again…), or null.
+  prefill: { type: Object, default: null },
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -40,13 +42,16 @@ const { recommendations } = useDatasetRecommendations()
 
 // Prefill from the single source of truth (core/sfm/sfm.js falls back to the same
 // values). Clone so edits don't mutate the shared constant.
-const settings = ref({ ...RECONSTRUCT_DEFAULTS })
+const { addToModel: prefillAdd = null, ...prefillSettings } = props.prefill ?? {}
+const settings = ref({ ...RECONSTRUCT_DEFAULTS, ...prefillSettings })
 // Run stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step).
 // Add to the model or Rebuild: offered once a model exists, and Add is the start when it
 // can take the images it lacks. Not a preset key: a card never changes the mode.
 const canExtend = computed(() => props.modelCameras > 0 && !props.extendBlocker)
-const mode = ref(canExtend.value && !props.groundControlAdjustment ? 'add' : 'rebuild')
+const mode = ref(
+  prefillAdd === false ? 'rebuild' : canExtend.value && !props.groundControlAdjustment ? 'add' : 'rebuild',
+)
 const modes = [
   { id: 'add', label: 'Add to the model' },
   { id: 'rebuild', label: 'Rebuild' },

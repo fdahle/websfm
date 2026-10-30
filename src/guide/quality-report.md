@@ -25,6 +25,9 @@ modes. Long tracks seen in several views are stronger than many two-view points.
 coverage map reveals areas where tie points cluster or disappear. When images were
 added to the model ([Sparse Reconstruction](guide:sparse-reconstruction) ▸ Add to the
 model), each run is listed with the images it added and those it could not place.
+**Try again…** under the last one opens Sparse Reconstruction to add the photos still
+out once more, with looser registration gates filled in (fewer correspondences, a
+wider reprojection threshold); check what they place before relying on them.
 
 ## Calibration
 Inspect focal-length change, principal point, and radial distortion. Large drift or

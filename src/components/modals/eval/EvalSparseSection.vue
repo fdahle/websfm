@@ -7,6 +7,8 @@ import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { useQualityReport } from '../../../composables/useQualityReport.js'
 import { unregisteredReason } from '../../../core/eval/imageStats.js'
 import { EVAL_THRESHOLDS, classify, thresholdHint } from '../../../core/eval/health.js'
+import { useModalsStore } from '../../../stores/useModalsStore.js'
+import { EXTEND_DEFAULTS } from '../../../core/defaults.user.js'
 
 // Quality Report ▸ Sparse (WS2.1 + WS2.2): Recon Report and Image Errors merged into
 // one section. Tiles are ALWAYS derived from the cloud (one consistent set — the old
@@ -37,6 +39,23 @@ const extensions = computed(() =>
     notAdded: e.notAdded ?? [],
   })),
 )
+// Photos an extension could not place that the model still lacks.
+const stillOut = computed(() => {
+  const inModel = new Set(
+    [...(recon.mainSparseCloud?.cameras?.keys() ?? [])].map(
+      (u) => imagesStore.images.find((im) => im.uuid === u)?.name,
+    ),
+  )
+  const last = extensions.value.at(-1)
+  return last ? last.notAdded.filter((name) => !inModel.has(name)) : []
+})
+// Try again…: Sparse Reconstruction, Add to the model with looser registration gates.
+function retryAdd() {
+  const m = useModalsStore()
+  m.reconstructPrefill = { addToModel: true, ...EXTEND_DEFAULTS.retryGates }
+  m.qualityOpen = false
+  m.reconstructOpen = true
+}
 
 const thr = EVAL_THRESHOLDS.reprojMedianPx
 const tiles = computed(() => {
@@ -138,6 +157,12 @@ function onRow(row) {
           >{{ name }}<span class="unreg-reason"> — not placed</span></span
         >
       </div>
+      <p v-if="e === extensions.at(-1) && stillOut.length" class="eval-note">
+        <button class="btn" @click="retryAdd">Try again…</button>
+        Opens Sparse Reconstruction to add the {{ stillOut.length }} photo{{ stillOut.length === 1 ? '' : 's' }} again
+        with looser registration gates ({{ EXTEND_DEFAULTS.retryGates.minMatchesForRegistration }} correspondences,
+        {{ EXTEND_DEFAULTS.retryGates.reprjThreshold }} px).
+      </p>
     </details>
 
     <div class="hist">

@@ -429,3 +429,27 @@ test('detect and match features on a selection touch only those images', async (
   await expect.poll(async () => (await state()).pairs, { timeout: 120_000 }).toEqual(before.pairs)
   expect(errors).toEqual([])
 })
+
+// Quality Report ▸ Images added ▸ Try again… opens Sparse Reconstruction with looser gates.
+test('Sparse Reconstruction opens with the settings it is handed', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the dialog logic')
+  await openFixture(page)
+  await page.evaluate(async () => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    const { EXTEND_DEFAULTS } = await import('/src/core/defaults.user.js')
+    useModalsStore().reconstructPrefill = { addToModel: true, ...EXTEND_DEFAULTS.retryGates }
+    useModalsStore().reconstructOpen = true
+  })
+  const dialog = page.getByRole('dialog', { name: 'Sparse Reconstruction' })
+  await dialog.getByText('Advanced settings').click()
+  await expect(dialog.locator('#minMatches')).toHaveValue('12')
+  await expect(dialog.locator('#reprj')).toHaveValue('6')
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  // Closed, it forgets them: the next opening starts from the defaults.
+  await page.evaluate(async () => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    useModalsStore().reconstructOpen = true
+  })
+  await dialog.getByText('Advanced settings').click()
+  await expect(dialog.locator('#minMatches')).toHaveValue('20')
+})

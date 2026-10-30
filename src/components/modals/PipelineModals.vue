@@ -151,6 +151,7 @@ const {
   matchFeaturesOpen,
   detectOnlyIds,
   matchOnlyIds,
+  reconstructPrefill,
   mergeCloudsOpen,
   meshOpen,
   orthoOpen,
@@ -288,6 +289,7 @@ const exportingFootprints = computed(
       :new-images="extendState.newImages"
       :has-products="extendState.hasProducts"
       :extend-blocker="extendState.blocker"
+      :prefill="reconstructPrefill"
       @close="closeReconstructModal"
       @run="onReconstructRun"
     />

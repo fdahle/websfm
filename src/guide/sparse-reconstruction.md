@@ -35,7 +35,8 @@ first: [Match only new pairs](guide:match-features) matches each new photo with 
 others without matching the whole block again. The model's points are the starting point,
 so a new image joins as soon as enough of its matches see them. The model's calibration
 stays as it is, and Self-calibration is off for the run. An image that cannot be placed
-stays out, and the console names it. **Rebuild** builds a new model from every image, as
+stays out, and the console names it; Quality Report ▸ Sparse ▸ **Try again…** adds it
+again with looser registration gates. **Rebuild** builds a new model from every image, as
 the first run did.
 
 Adding needs the model's observations: an imported model has none, and an image whose

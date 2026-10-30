@@ -650,6 +650,9 @@ export const OPTIMIZE_CAMERAS_DEFAULTS = {
 // current), and lets them move with the new ones (Optimize cameras) when nothing was.
 export const EXTEND_DEFAULTS = {
   existingCameras: 'auto',
+  // Quality Report ▸ Images added ▸ Try again…: the registration gates the dialog opens
+  // with for the photos a run could not place (the defaults: 20 and 4 px).
+  retryGates: { minMatchesForRegistration: 12, reprjThreshold: 6 },
 }
 export const GROUND_DEFAULTS = {
   // Cloth particle spacing. 1 m spans roofs up to ~40 m and follows slopes up to
