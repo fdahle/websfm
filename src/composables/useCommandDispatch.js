@@ -219,6 +219,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     'clip-raster',
     // Images ▾
     'image-quality',
+    'reduce-overlap',
     // Model ▾
     'optimize-cameras',
   ])

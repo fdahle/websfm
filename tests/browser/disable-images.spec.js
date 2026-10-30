@@ -2,7 +2,8 @@ import { test, expect } from './fixtures.js'
 import { readFileSync } from 'node:fs'
 
 // Disable in the image list (core/imageEnabled.js): the photo keeps its pose, the next
-// depth map run leaves it out, and the flag is saved. The project is the format fixture
+// depth map run leaves it out, and the flag is saved. Tools ▸ Images ▾ ▸ Reduce overlap
+// disables the photos it does not need the same way. The project is the format fixture
 // (tests/fixtures/projects/v1: five photos with a sparse model), as in run-resume.spec.js.
 const fixture = readFileSync(new URL('../fixtures/projects/v1/aukerman-5.websfm', import.meta.url))
 
@@ -95,5 +96,32 @@ test('a disabled photo keeps its pose, is left out of depth maps, and stays disa
   await row.click({ button: 'right' })
   await page.getByRole('button', { name: 'Enable', exact: true }).click()
   await expect(row.locator('.off-tag')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('Reduce overlap counts as the settings change and disables the photos it does not need', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await openFixture(page)
+  await page.getByRole('button', { name: 'Tools', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'Images' }).click()
+  await page.getByRole('menuitem', { name: /Reduce overlap/ }).click()
+  const dialog = page.locator('.modal', { hasText: 'Reduce Overlap' })
+  await expect(dialog).toContainText('sparse points stand in for the surface')
+
+  // One photo per point: the five-photo block needs fewer than five.
+  await dialog.locator('#ro-coverage').fill('1')
+  await expect(dialog).toContainText(/Keeps \d of the 5 enabled photos/)
+  const label = await dialog.getByRole('button', { name: /^Disable \d+ photos?$/ }).textContent()
+  const n = Number(label.match(/\d+/)[0])
+  expect(n).toBeGreaterThan(0)
+  expect(n).toBeLessThan(5)
+  await dialog.getByRole('button', { name: /^Disable \d+ photos?$/ }).click()
+  await expect(dialog).toHaveCount(0)
+  const disabled = await page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    return useImagesStore().images.filter((im) => im.enabled === false).length
+  })
+  expect(disabled).toBe(n)
   expect(errors).toEqual([])
 })

@@ -31,6 +31,7 @@ import FilterCloudModal from './cloud/FilterCloudModal.vue'
 import GeoreferenceModal from './georef/GeoreferenceModal.vue'
 import GradualSelectionModal from './model/GradualSelectionModal.vue'
 import ImageQualityModal from './images/ImageQualityModal.vue'
+import ReduceOverlapModal from './images/ReduceOverlapModal.vue'
 import MatchFeaturesModal from './pipeline/MatchFeaturesModal.vue'
 import MergeCloudsModal from './cloud/MergeCloudsModal.vue'
 import MeshMeasureModal from './mesh/MeshMeasureModal.vue'
@@ -47,6 +48,8 @@ import SmoothMeshModal from './mesh/SmoothMeshModal.vue'
 import TerrainModal from './products/TerrainModal.vue'
 import TransformCloudModal from './cloud/TransformCloudModal.vue'
 import { extensionBlocker } from '../../core/sfm/extendModel.js'
+import { pluralize } from '../../core/textFormat.js'
+import { useLog } from '../../composables/useLog.js'
 import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 const FindGcpsModal = defineAsyncComponent(() => import('./georef/FindGcpsModal.vue'))
 
@@ -71,7 +74,20 @@ const {
   ortho,
   orthoSurfaces,
 } = storeToRefs(reconstructionStore)
-const { images } = storeToRefs(useImagesStore())
+const imagesStore = useImagesStore()
+const { images } = storeToRefs(imagesStore)
+const { log } = useLog()
+// Tools ▸ Images ▾ ▸ Reduce overlap: the dialog chose the photos; disable them.
+function onReduceOverlapRun({ disableIds, kept, enabled, coverage }) {
+  toolModal.value = null
+  imagesStore.setImagesEnabled(disableIds, false)
+  log(
+    `Reduce overlap: kept ${kept} of ${pluralize(enabled, 'enabled photo')}, every sparse point in at least ` +
+      `${pluralize(coverage, 'photo')} (or all that see it); ${pluralize(disableIds.length, 'photo')} disabled`,
+    'success',
+    'Images',
+  )
+}
 const { sensors } = storeToRefs(useSensorsStore())
 // What Sparse Reconstruction can build on: the usable matched pairs and the images
 // they link (the same filter as the store's usableMatchCount).
@@ -607,6 +623,13 @@ const exportingFootprints = computed(
       :gcp-count="gcps.length"
       @close="toolModal = null"
       @run="onOptimizeCamerasRun"
+    />
+    <ReduceOverlapModal
+      v-else-if="toolModal === 'reduce-overlap'"
+      :cloud="reconstructionStore.mainSparseCloud"
+      :images="images"
+      @close="toolModal = null"
+      @run="onReduceOverlapRun"
     />
     <ImageQualityModal
       v-else-if="toolModal === 'image-quality'"

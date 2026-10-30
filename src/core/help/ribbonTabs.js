@@ -313,6 +313,13 @@ export const TABS = [
                 blurb: 'Score sharpness and exposure; exclude blurry images',
               },
               {
+                id: 'reduce-overlap',
+                label: 'Reduce overlap…',
+                icon: 'image',
+                needs: ['sparse'],
+                blurb: 'Disable the photos a dense block does not need for depth maps',
+              },
+              {
                 id: 'auto-mask',
                 label: 'Auto mask…',
                 icon: 'mask',

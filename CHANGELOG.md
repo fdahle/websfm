@@ -6,6 +6,14 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Reduce overlap.** Tools ▸ Images ▾ ▸ **Reduce overlap…** disables the photos of a
+  heavily overlapping block that the depth maps do not need, keeping every part of the
+  surface in at least **Photos per point** photos (3), so the dense stages run on fewer.
+  It counts which photos see each sparse point from the camera geometry (in frame, and
+  within a **Viewing angle** of the side the point's own photos see it from), not from
+  the tracks, which name only the photos that matched it; the dialog shows the result as
+  you change a setting. Quarry (347 photos, a median of 29 seeing each point): it keeps
+  87 photos at 3 per point, 122 at 5 and 145 at 6, in about 0.15 s.
 - **Disable photos.** Right-click images ▸ **Disable** leaves them out of every later
   run (Sparse Reconstruction, depth maps, the dense cloud, the orthophoto and mesh
   texture) while their features, matches and pose stay; **Enable** brings them back.

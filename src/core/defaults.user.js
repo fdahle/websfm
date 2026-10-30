@@ -726,6 +726,16 @@ export const IMAGE_QUALITY_DEFAULTS = {
   minRelative: 0.5,
 }
 
+// Tools ▸ Images ▾ ▸ Reduce overlap (core/sfm/reduceOverlap.js).
+export const REDUCE_OVERLAP_DEFAULTS = {
+  // A photo counts as seeing a point within this angle of the point's mean viewing
+  // direction (degrees): the surface's likely facing, so the far side of an object
+  // does not count.
+  maxAngle: 60,
+  // Every surface point keeps at least this many photos (all it has when fewer see it).
+  coverage: 3,
+}
+
 // Footprints from imported poses (core/footprint.js). Mirrored by
 // FootprintFromPosesModal.vue's `settings` ref (the intrinsics override is seeded
 // from sensor data, not a static default).
