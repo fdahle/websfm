@@ -28,6 +28,7 @@ import '/src/stores/useScaleBarsStore.js'
 import '/src/stores/useWorkflowsStore.js'
 import { restoreProjectStores } from '/src/stores/projectStores.js'
 import * as opfs from '/src/utils/opfs.js'
+import { flushPersistence } from '/src/utils/persistence.js'
 import { useComputeSettings } from '/src/composables/useComputeSettings.js'
 import {
   DETECT_DEFAULTS_BY_DETECTOR,
@@ -64,6 +65,7 @@ import {
 } from '/src/core/sfm/fiducialCalibration.js'
 import { RESEAU_DEFAULTS, PANORAMIC_DEFAULTS } from '/src/core/defaults.user.js'
 import { buildBorderMask } from '/src/core/mask.js'
+import { overlapVisibility, chooseOverlapSubset } from '/src/core/sfm/reduceOverlap.js'
 import { FIDUCIAL_SPOT_DEFAULTS, VIDEO_IMPORT_DEFAULTS } from '/src/core/defaults.user.js'
 import { analysisTimes, intervalTimes, selectKeyframes } from '/src/core/io/videoFrames.js'
 import { openVideoSource, analyzeVideo, extractVideoFrames } from '/src/utils/videoSource.js'
@@ -685,6 +687,40 @@ window.bench = {
       // no saved maps (a project that cannot save): no digest
     }
     return { settings, seconds: (performance.now() - t0) / 1000, depthMaps: recon.depthMapCount, digest }
+  },
+
+  // Tools ▸ Images ▾ ▸ Reduce overlap, as ReduceOverlapModal runs it: every posed image
+  // is enabled first (a profile's project keeps the flags), then the photos the choice
+  // leaves out are disabled. `coverage: 0` only enables them all.
+  async reduceOverlap({ coverage = 3, maxAngle = 60 } = {}) {
+    const imagesStore = useImagesStore()
+    const cams = recon.mainSparseCloud?.cameras
+    if (!cams) throw new Error('reduceOverlap: no sparse model')
+    const posed = imagesStore.images.filter((im) => cams.has(im.uuid))
+    imagesStore.setImagesEnabled(
+      posed.map((im) => im.id),
+      true,
+    )
+    if (!(coverage > 0)) return { enabled: posed.length, kept: posed.length }
+    const cameras = posed.map((im) => {
+      const c = cams.get(im.uuid)
+      return {
+        id: im.id,
+        uuid: im.uuid,
+        R: c.R,
+        t: c.t,
+        K: c.K,
+        width: im.meta?.width || Math.round(2 * (c.K.cx + 0.5)),
+        height: im.meta?.height || Math.round(2 * (c.K.cy + 0.5)),
+      }
+    })
+    const t0 = performance.now()
+    const vis = overlapVisibility(recon.mainSparseCloud.points, cameras, { maxAngle, maxPoints: 10000 })
+    const keep = chooseOverlapSubset(vis, cameras.length, { coverage })
+    const off = cameras.filter((c, i) => !keep[i]).map((c) => c.id)
+    imagesStore.setImagesEnabled(off, false)
+    await flushPersistence()
+    return { enabled: cameras.length, kept: cameras.length - off.length, ms: performance.now() - t0 }
   },
 
   // Dense Stage B, settings resolved exactly as DenseModal.run() does.

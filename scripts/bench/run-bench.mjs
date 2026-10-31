@@ -543,6 +543,7 @@ try {
     detect: 'detect',
     match: 'match',
     recon: 'reconstruct',
+    reduceoverlap: 'reduceOverlap',
     depth: 'depth',
     dense: 'dense',
     dem: 'dem',

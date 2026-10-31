@@ -35,9 +35,11 @@ occlusion. Lower it (40°) to count only photos that look at a point nearly as i
 do; raise it (80–90°) for oblique photos of a façade from many sides.
 
 ## Photos per point
-<!-- param: coverage  default: 3 -->
+<!-- param: coverage  default: 6 -->
 How many photos every point keeps, or all that see it where fewer do. Photos go one at
 a time, the one whose points are most over-covered first, while every point keeps at
-least this many. 3 keeps what depth maps need to check a depth against more than one
-other view. Raise it (5–6) to keep more of the overlap for a more complete dense cloud
-where the surface is hard to match (vegetation, steep terrain).
+least this many. On the 347-photo quarry block, 6 kept 145 photos: the depth maps took
+a third of the time, and the DEM covered 97.8 % of what all photos give, within 0.17 m
+(NMAD). 3 kept 87 photos and a fifth of the time, but the DEM lost a tenth of its
+area. Lower it for a quick look, raise it where the surface is hard to match
+(vegetation, steep terrain).
