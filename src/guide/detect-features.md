@@ -61,7 +61,8 @@ building set at the defaults, DISK put all 128 photos into one model, while ALIK
 
 **DISK** is freely licensed (Apache-2.0). Its model is downloaded once with your
 permission and cached in the browser. It detects at a lower resolution than
-SuperPoint (1024 px by default), because it needs much more memory per pixel.
+SuperPoint (1024 px by default), because it needs much more memory per pixel. It always
+runs on the CPU: the GPU runtime WebSfM uses lacks one of the operations DISK needs.
 
 **SuperPoint**'s pretrained weights are licensed for **non-commercial research only**,
 so WebSfM does not ship them. The first time you run it, the download dialog shows the

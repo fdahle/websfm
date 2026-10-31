@@ -52,8 +52,9 @@ const warmedUp = new Set()
 // input resolution, so a large image can exhaust GPU memory (std::bad_alloc
 // from ORT's WebGPU EP) where a smaller one fits — which is why the pin is
 // size-aware: a 10000px full-frame failure must not condemn 1024px tiles. An
-// operator the WebGPU EP lacks (DISK's MaxPool with indices: "not supported yet")
-// fails at every size, so it records 0 and every input stays on CPU.
+// operator the WebGPU EP lacks fails at every size, so it records 0 and every
+// input stays on CPU. (A detector known to need one, DISK, says `webgpu: false`
+// in its spec and never tries.)
 const gpuFailedAtPx = new Map() // modelKey → smallest failed npix
 const unsupportedOp = (err) => /not (yet )?supported|not implemented/i.test(err?.message || String(err))
 
@@ -62,7 +63,9 @@ const unsupportedOp = (err) => /not (yet )?supported|not implemented/i.test(err?
 // machine has no usable WebGPU adapter (resolveBackend gates that to Chromium +
 // adapter); else WebGPU. Returns { backend, reason } so the caller can log an
 // honest explanation instead of the generic "Chromium-only" line.
-async function chooseBackend(modelKey, npix) {
+async function chooseBackend(spec, modelKey, npix) {
+  if (spec.webgpu === false)
+    return { backend: 'wasm', reason: `ONNX Runtime's WebGPU path lacks an operator ${spec.label} needs` }
   const failedAt = gpuFailedAtPx.get(modelKey)
   if (failedAt !== undefined && npix >= failedAt) {
     return {
@@ -143,7 +146,7 @@ export function classifyOutputs(results, outputNames, dim) {
 export async function detectLearned(spec, pixels, w, h, opts = {}) {
   const { label, descDim: dim, channels } = spec
   const { maxKeypoints = 5000, model = modelUrl(spec.modelId), modelKey = spec.modelId, onLog } = opts
-  let { backend, reason } = await chooseBackend(modelKey, w * h)
+  let { backend, reason } = await chooseBackend(spec, modelKey, w * h)
   let session = await getSession(label, model, modelKey, backend, onLog, reason)
 
   // Tensor data is consumed by run(); build fresh copies so the WASM re-run after

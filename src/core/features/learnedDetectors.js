@@ -31,6 +31,10 @@ export const LEARNED_DETECTORS = {
     descDim: 128,
     channels: 3,
     tileAlign: 16,
+    // CPU only: its NMS reads MaxPool's Indices output, which ORT's WebGPU EP
+    // (1.27) cannot produce ("The Indices output is not supported yet"), so a
+    // WebGPU session fails on its first run every time.
+    webgpu: false,
   },
   aliked: {
     id: 'aliked',

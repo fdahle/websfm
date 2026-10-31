@@ -5,6 +5,13 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **DISK without a GPU error.** Detect Features and Find GCPs now run DISK on the CPU
+  from the start, instead of first trying the GPU, logging an ONNX Runtime error
+  ("MaxPool … The Indices output is not supported yet") and then falling back to the CPU.
+  DISK's keypoint step reads MaxPool's indices, which ONNX Runtime's WebGPU path cannot
+  produce, so the GPU attempt failed every time; the keypoints are unchanged.
+
 ## [0.6.1] — 2026-10-31
 
 ### Changed
