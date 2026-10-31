@@ -5,6 +5,8 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-31
+
 ### Added
 - **Reduce overlap.** Tools ▸ Images ▾ ▸ **Reduce overlap…** disables the photos of a
   heavily overlapping block that the depth maps do not need, keeping every part of the
