@@ -100,7 +100,9 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
         visible: c.visible !== false,
       }))
     })
-  await expect.poll(async () => (await clouds()).length).toBe(2)
+  // The first edit starts the cloud-edit worker: 2–5 s on the dev server, longer in
+  // Firefox or on a busy machine, so the poll waits longer than its 5 s default.
+  await expect.poll(async () => (await clouds()).length, { timeout: 30_000 }).toBe(2)
   let list = await clouds()
   expect(list[0]).toMatchObject({ count: 100, derived: false, visible: false })
   expect(list[1]).toMatchObject({ count: 60, derived: true, visible: true })
@@ -131,7 +133,7 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
   await page.mouse.up()
   await expect(page.getByRole('toolbar', { name: 'Select points' })).toContainText('6 points selected')
   await page.getByRole('button', { name: 'Keep only', exact: true }).click()
-  await expect.poll(async () => (await clouds()).find((c) => c.id === editedId)?.count).toBe(6)
+  await expect.poll(async () => (await clouds()).find((c) => c.id === editedId)?.count, { timeout: 30_000 }).toBe(6)
   list = await clouds()
   expect(list).toHaveLength(2) // refined in place, no third copy
 
@@ -226,7 +228,7 @@ test('a selection can be reclassified', async ({ page }) => {
         n6: c.attributes?.classification ? c.attributes.classification.filter((v) => v === 6).length : 0,
       }))
     })
-  await expect.poll(async () => (await state()).length).toBe(2)
+  await expect.poll(async () => (await state()).length, { timeout: 30_000 }).toBe(2)
   const s = await state()
   expect(s[1]).toMatchObject({
     derived: true,
