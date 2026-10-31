@@ -109,3 +109,17 @@ test('a save that finds browser storage full offers a folder, and is saved there
   )
   expect(storage).toBe('folder')
 })
+
+test('without folder access, the folder choices are shown disabled with the browsers they need', async ({ page }) => {
+  // As in Firefox and Safari, in every engine: runs after the stub above.
+  await page.addInitScript(() => {
+    window.showDirectoryPicker = undefined
+  })
+  await page.goto('/')
+  const card = page.getByRole('button', { name: /In a folder…/ })
+  await expect(card).toBeDisabled()
+  await expect(card).toContainText('Needs Chrome, Edge or another Chromium-based browser')
+  await expect(page.getByRole('button', { name: /In this browser/ })).toBeEnabled()
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+})

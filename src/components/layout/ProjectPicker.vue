@@ -5,7 +5,7 @@ const sizeCache = new Map()
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { isFolderProject } from '../../core/io/folderProject.js'
+import { FOLDER_BROWSERS, isFolderProject } from '../../core/io/folderProject.js'
 import { EXAMPLES } from '../../core/examples.js'
 import { formatBytes } from '../../core/formatBytes.js'
 import BetaBadge from './BetaBadge.vue'
@@ -22,7 +22,8 @@ const props = defineProps({
   // When false (e.g. on startup with no project open), the picker cannot be
   // dismissed — the user must select or create a project.
   dismissible: { type: Boolean, default: true },
-  // Chromium-only (showDirectoryPicker). Hidden rather than disabled elsewhere.
+  // Chromium-only (showDirectoryPicker). Elsewhere the Open existing row is shown
+  // disabled with the browsers it needs, and the ⋯ menu's folder items are hidden.
   folderSupported: { type: Boolean, default: false },
 })
 
@@ -281,11 +282,20 @@ onBeforeUnmount(() => {
             >
           </span>
         </button>
-        <button v-if="folderSupported" class="open-btn" @click="emit('open-folder')">
+        <button
+          class="open-btn"
+          :disabled="!folderSupported"
+          :title="folderSupported ? undefined : `Needs ${FOLDER_BROWSERS}`"
+          @click="emit('open-folder')"
+        >
           <span class="open-icon"><Icon name="folder-open" /></span>
           <span class="open-text">
             <span class="open-title">Project folder…</span>
-            <span class="open-sub">A folder on your disk, edited in place</span>
+            <span class="open-sub">{{
+              folderSupported
+                ? 'A folder on your disk, edited in place'
+                : `A folder on your disk. Needs ${FOLDER_BROWSERS}.`
+            }}</span>
           </span>
         </button>
 
@@ -314,7 +324,9 @@ onBeforeUnmount(() => {
         <span v-if="browserStorage">WebSfM uses {{ formatBytes(browserStorage.usage) }} of this browser's storage</span>
       </div>
       <div v-if="browserStorage?.durable === false" class="storage-warn">
-        The browser may clear it when the disk runs low: keep a project file, or use a folder.
+        The browser may clear it when the disk runs low: keep a project file{{
+          folderSupported ? ', or use a folder' : ''
+        }}.
         <button type="button" class="link-btn" @click="keepStorage">Ask the browser to keep it</button>
       </div>
       <div v-if="durableNote" class="storage-note">{{ durableNote }}</div>
@@ -689,9 +701,19 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.open-btn:hover {
+.open-btn:hover:not(:disabled) {
   background: var(--hover-bg);
   border-color: var(--panel-border);
+}
+
+.open-btn:disabled {
+  cursor: default;
+  color: var(--text-dim);
+}
+
+.open-btn:disabled .open-icon,
+.open-btn:disabled .open-title {
+  color: var(--text-dim);
 }
 
 .open-icon {

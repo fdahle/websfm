@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import CrsPicker from '../../controls/CrsPicker.vue'
 import Icon from '../../Icon.vue'
 import ModalShell from '../ui/ModalShell.vue'
-import { folderStorageSupported } from '../../../core/io/folderProject.js'
+import { FOLDER_BROWSERS, folderStorageSupported } from '../../../core/io/folderProject.js'
 import { takeNewProjectDraft } from '../../../composables/newProjectDraft.js'
 import { EXAMPLES } from '../../../core/examples.js'
 import { formatBytes } from '../../../core/formatBytes.js'
@@ -25,8 +25,8 @@ const sceneType = ref(initial.sceneType)
 const crs = ref(initial.crs)
 
 // Storage backend. OPFS ('browser') is the default everywhere; the folder option
-// needs showDirectoryPicker, which is Chromium-only — hidden, not disabled,
-// elsewhere, so the choice never looks broken.
+// needs showDirectoryPicker, which is Chromium-only. Elsewhere its card is shown
+// disabled and says what it needs, so the choice exists in every browser.
 const canUseFolder = folderStorageSupported()
 const storage = ref(canUseFolder && initial.dirHandle ? 'folder' : 'browser')
 // Picked here rather than at submit time: the directory picker itself needs a
@@ -91,29 +91,34 @@ function submit() {
         </button>
       </div>
 
-      <template v-if="canUseFolder">
-        <label class="field-label" style="margin-top: 20px">Where to keep the files</label>
-        <div class="scene-cards">
-          <button class="scene-card" :class="{ active: storage === 'browser' }" @click="storage = 'browser'">
-            <span class="scene-icon"><Icon name="browser" /></span>
-            <span class="scene-name">In this browser</span>
-            <span class="scene-desc"
-              >Private browser storage. Nothing to manage — save a <code>.websfm</code> file when you want a copy.</span
+      <label class="field-label" style="margin-top: 20px">Where to keep the files</label>
+      <div class="scene-cards">
+        <button class="scene-card" :class="{ active: storage === 'browser' }" @click="storage = 'browser'">
+          <span class="scene-icon"><Icon name="browser" /></span>
+          <span class="scene-name">In this browser</span>
+          <span class="scene-desc"
+            >Private browser storage. Nothing to manage — save a <code>.websfm</code> file when you want a copy.</span
+          >
+        </button>
+        <button
+          class="scene-card"
+          :class="{ active: storage === 'folder' }"
+          :disabled="!canUseFolder"
+          :title="canUseFolder ? undefined : `Needs ${FOLDER_BROWSERS}`"
+          @click="pickFolder"
+        >
+          <span class="scene-icon"><Icon name="folder" /></span>
+          <span class="scene-name">In a folder…</span>
+          <span class="scene-desc">
+            <template v-if="folderHandle"
+              >Chosen: <code>{{ folderHandle.name }}</code></template
             >
-          </button>
-          <button class="scene-card" :class="{ active: storage === 'folder' }" @click="pickFolder">
-            <span class="scene-icon"><Icon name="folder" /></span>
-            <span class="scene-name">In a folder…</span>
-            <span class="scene-desc">
-              <template v-if="folderHandle"
-                >Chosen: <code>{{ folderHandle.name }}</code></template
-              >
-              <template v-else>A folder on this computer, so the project lives with your other files.</template>
-            </span>
-          </button>
-        </div>
-        <span v-if="folderError" class="crs-hint error">{{ folderError }}</span>
-      </template>
+            <template v-else>A folder on this computer, so the project lives with your other files.</template>
+            <span v-if="!canUseFolder" class="scene-needs">Needs {{ FOLDER_BROWSERS }}.</span>
+          </span>
+        </button>
+      </div>
+      <span v-if="folderError" class="crs-hint error">{{ folderError }}</span>
 
       <label class="field-label" style="margin-top: 20px">Coordinate system</label>
       <CrsPicker v-model="crs" :disabled="sceneType === 'object'" />
@@ -224,8 +229,19 @@ function submit() {
   transition: border-color 0.1s;
 }
 
-.scene-card:hover {
+.scene-card:hover:not(:disabled) {
   border-color: var(--text-dim);
+}
+
+.scene-card:disabled {
+  cursor: default;
+  color: var(--text-dim);
+}
+
+.scene-needs {
+  display: block;
+  margin-top: 4px;
+  font-style: italic;
 }
 
 .scene-card.active {
@@ -243,7 +259,7 @@ function submit() {
 }
 
 .scene-card.active .scene-icon,
-.scene-card:hover .scene-icon {
+.scene-card:hover:not(:disabled) .scene-icon {
   color: var(--accent);
 }
 

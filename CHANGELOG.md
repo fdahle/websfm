@@ -5,6 +5,12 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Folder choices shown in Firefox and Safari.** New project ▸ **In a folder…** and the
+  project list's **Project folder…** now appear greyed out in browsers that cannot keep
+  a project in a folder on disk, and say that it needs Chrome, Edge or another
+  Chromium-based browser, instead of being hidden.
+
 ## [0.6.0] — 2026-10-31
 
 ### Added

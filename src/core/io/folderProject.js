@@ -21,8 +21,12 @@ export function isFolderProject(entry) {
 }
 
 // `showDirectoryPicker` is Chromium-only (Chrome/Edge/Opera — not Firefox, not
-// Safari). Everything else keeps OPFS, which is why OPFS stays the default and
-// the option is hidden rather than shown-and-broken elsewhere.
+// Safari). Everything else keeps OPFS, which is why OPFS stays the default. Where
+// a user chooses where a project lives, the folder option is shown disabled with
+// the browsers it needs (FOLDER_BROWSERS), so
+// users learn it exists; elsewhere (menus) it is hidden.
+export const FOLDER_BROWSERS = 'Chrome, Edge or another Chromium-based browser'
+
 export function folderStorageSupported(win = typeof window !== 'undefined' ? window : null) {
   return !!win && typeof win.showDirectoryPicker === 'function'
 }

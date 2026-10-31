@@ -34,8 +34,11 @@ epsg.io (one newer than the built-in catalog) is saved in the project too, so th
 project opens offline in a browser that never looked it up.
 
 ## In a folder
-On supported Chromium browsers, a new project can live in a normal folder. The folder
-is the project: do not rename, move, or edit its internal files while it is open.
+On Chrome, Edge and other Chromium-based browsers, a new project can live in a normal
+folder. Firefox and Safari cannot reach folders on disk: there the folder choices
+(**In a folder…** for a new project, **Project folder…** in the project list) are shown
+greyed out, with the browsers they need. The folder is the project: do not rename,
+move, or edit its internal files while it is open.
 The browser may ask you to reconnect the folder after restart because access permission
 is not always retained.
 

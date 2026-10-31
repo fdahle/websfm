@@ -4,7 +4,7 @@ import CrsPicker from '../../controls/CrsPicker.vue'
 import CrsSuggestion from '../ui/CrsSuggestion.vue'
 import ModalShell from '../ui/ModalShell.vue'
 import { formatBytes, ARCHIVE_DERIVED_DIRS } from '../../../core/io/projectArchive.js'
-import { folderLabel, isFolderProject } from '../../../core/io/folderProject.js'
+import { FOLDER_BROWSERS, folderLabel, isFolderProject } from '../../../core/io/folderProject.js'
 import * as opfs from '../../../utils/opfs.js'
 import { confirmDialog } from '../../../composables/useConfirmations.js'
 import { version as appVersion } from '../../../../package.json'
@@ -167,6 +167,7 @@ onMounted(measure)
           WebSfM saves into this browser's private storage as you work. It belongs to this browser profile: clearing the
           site's data deletes it.
           <template v-if="folderSupported">Move it to a folder to keep it on your disk.</template>
+          <template v-else>{{ FOLDER_BROWSERS }} can keep it in a folder on your disk instead.</template>
         </p>
         <div class="action-row">
           <template v-if="folderSupported">
