@@ -22,6 +22,7 @@ import {
   footprintOverlap,
 } from '../../core/features/preselect.js'
 import { planBridgeRepair, bridgeKey } from '../../core/features/bridgeRepair.js'
+import { laterPassSpan, pairPassEnd, spanFraction } from '../../core/features/matchProgress.js'
 import { graphHealth } from '../../core/eval/matchGraph.js'
 import { sequentialPairs } from '../../core/features/sequentialPairs.js'
 import { lightGlueModelFor } from '../../core/features/learnedDetectors.js'
@@ -169,7 +170,9 @@ export function createMatchAll({
     }
     const cache = createDescriptorCache({ pairs: work, budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20 })
     let cursor = 0
-    let joined = 0
+    let joined = 0,
+      finished = 0
+    onPair(0, work.length)
     const drain = async () => {
       while (cursor < work.length) {
         if (isCancelled()) return
@@ -179,7 +182,7 @@ export function createMatchAll({
         cache.release(b.uuid)
         const e = matchStore.value.get(pairId(a.uuid, b.uuid))
         if (e?.status === 'done' && e.inlierCount > 0 && !e.weak) joined++
-        onPair()
+        onPair(++finished, work.length)
       }
     }
     await Promise.all(Array.from({ length: Math.min(concurrency, work.length) }, drain))
@@ -401,6 +404,21 @@ export function createMatchAll({
       }
     }
     let done = 0
+    // The gate rescue and bridge repair that may follow the pair pass each get a part of
+    // the bar of their own, so it keeps moving and the dialog keeps its time estimate
+    // through them (core/features/matchProgress.js).
+    const canRescue =
+      (settings.subsetGateRescueDegree ?? 0) > 0 &&
+      settings.subsetGate !== false &&
+      !lightglue &&
+      !settings._skipSubsetGate
+    const bridgeRounds = settings.repairSplits === false ? 0 : (settings.bridgeRounds ?? 1)
+    const pairSpan = [0, pairPassEnd({ rescue: canRescue, bridgeRounds, postShare: settings.progressPostShare })]
+    let barAt = 0
+    const progress = (k, n, span, label, phase) => {
+      barAt = Math.max(barAt, spanFraction(span, k, n))
+      onProgress?.(k, n, label, barAt, phase)
+    }
     // Tally this run's outcomes for the completion summary. Skipped = too few raw
     // matches to bother verifying; rejected = verified but failed the count/ratio
     // gate; matched = kept (with ≥1 inlier).
@@ -528,7 +546,7 @@ export function createMatchAll({
         if (entry) tally(pairId(a.uuid, b.uuid), entry)
       }
       done = kept.size
-      onProgress?.(done, pairs.length)
+      progress(done, pairs.length, pairSpan)
     }
     const todo = pairs.map((_, i) => i).filter((i) => !kept.has(i))
     const finished = [...kept]
@@ -586,7 +604,7 @@ export function createMatchAll({
         descCache.release(b.uuid)
         done++
         finished.push(i)
-        onProgress?.(done, pairs.length)
+        progress(done, pairs.length, pairSpan)
         checkpoint()
       }
     }
@@ -614,14 +632,7 @@ export function createMatchAll({
       // subsetGateRescueDegree accepted pairs re-test their gated pairs on a
       // subsetGateRescueScale× larger sample; those that pass get the full match.
       const rescueDegree = settings.subsetGateRescueDegree ?? 0
-      if (
-        !cancelled &&
-        !shouldCancel?.() &&
-        rescueDegree > 0 &&
-        settings.subsetGate !== false &&
-        !lightglue &&
-        !settings._skipSubsetGate
-      ) {
+      if (!cancelled && !shouldCancel?.() && canRescue) {
         const degree = new Map()
         const bump = (u) => degree.set(u, (degree.get(u) ?? 0) + 1)
         for (const [a, b] of pairs) {
@@ -655,8 +666,18 @@ export function createMatchAll({
             pairs: rescue,
             budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20,
           })
-          let rc = 0
-          const total = pairs.length + rescue.length
+          let rc = 0,
+            rescued = 0
+          const span = laterPassSpan(barAt, bridgeRounds === 0, 0.8)
+          const rescueProgress = () =>
+            progress(
+              rescued,
+              rescue.length,
+              span,
+              'Gate rescue: re-testing the pairs of weakly connected images',
+              'rescue',
+            )
+          rescueProgress()
           const drainRescue = async () => {
             while (true) {
               if (cancelled || shouldCancel?.()) {
@@ -670,7 +691,8 @@ export function createMatchAll({
               rescueCache.release(a.uuid)
               rescueCache.release(b.uuid)
               done++
-              onProgress?.(done, total)
+              rescued++
+              rescueProgress()
             }
           }
           await Promise.all(Array.from({ length: concurrency }, drainRescue))
@@ -687,8 +709,10 @@ export function createMatchAll({
       // without the subset gate and with looser gates. F-RANSAC still verifies them.
       // Rounds repeat while the main block grows; no pair is tried twice.
       const tried = new Set()
-      for (let round = 1; round <= (settings.bridgeRounds ?? 1); round++) {
-        if (cancelled || shouldCancel?.() || settings.repairSplits === false) break
+      for (let round = 1; round <= bridgeRounds; round++) {
+        if (cancelled || shouldCancel?.()) break
+        const span = laterPassSpan(barAt, round === bridgeRounds)
+        const label = `Bridge repair${round > 1 ? ` round ${round}` : ''}: matching the pieces of the match graph again`
         const repaired = await repairSplits(ready, pairs, settings, {
           round,
           tried,
@@ -697,9 +721,9 @@ export function createMatchAll({
           gpuRun,
           concurrency,
           isCancelled: () => cancelled || !!shouldCancel?.(),
-          onPair: () => {
-            done++
-            onProgress?.(done, Math.max(done, pairs.length))
+          onPair: (k, n) => {
+            if (k) done++
+            progress(k, n, span, label, `bridge-${round}`)
           },
         })
         if (repaired.cancelled) cancelled = true

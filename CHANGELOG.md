@@ -15,6 +15,10 @@ Notable changes to websfm. The format follows
   detected, the dialog now says that **Append** would skip them all and keeps **Run**
   disabled until you choose **Overwrite**, instead of closing without detecting anything.
   When only some images lack keypoints, the button says how many it will detect.
+- **Time left through the whole matching run.** The Matching Features progress bar now
+  keeps moving, with its time estimate, while the gate rescue and bridge repair run after
+  the last pair, and names the pass it is on. Before, the bar sat at 99% with no estimate
+  through both; the pair pass now fills the bar to 90% when either can follow.
 
 ## [0.6.1] — 2026-10-31
 

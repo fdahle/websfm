@@ -334,6 +334,9 @@ export const MATCH_TUNING = {
   bridgeMinInlierRatio: 0.08,
   bridgeVerifier: 'magsac',
   bridgeLgKeypointScale: 2,
+  // Share of the progress bar kept for the gate rescue and bridge repair, which follow
+  // the pair pass when they can run (core/features/matchProgress.js).
+  progressPostShare: 0.1,
 }
 
 // Dense MVS knobs read in core/dense/mvs.js but NOT exposed in DepthMapsModal /
