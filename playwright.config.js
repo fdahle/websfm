@@ -20,7 +20,14 @@ export default defineConfig({
   // from the dev server's unbundled modules alone takes about 5 s in Firefox.
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
-    { name: 'firefox', use: { browserName: 'firefox' }, timeout: 120_000, expect: { timeout: 15_000 } },
+    // On a runner without a GPU, Firefox refuses WebGL with its software renderer
+    // ("AllowWebgl2:false restricts context creation"), so the 3D view could not start.
+    {
+      name: 'firefox',
+      use: { browserName: 'firefox', launchOptions: { firefoxUserPrefs: { 'webgl.force-enabled': true } } },
+      timeout: 120_000,
+      expect: { timeout: 15_000 },
+    },
     // No trace: the persistent context each WebKit test runs in (tests/browser/fixtures.js)
     // is not one Playwright's tracing can save on close.
     {
