@@ -5,6 +5,8 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-31
+
 ### Changed
 - **Folder choices shown in Firefox and Safari.** New project ▸ **In a folder…** and the
   project list's **Project folder…** now appear greyed out in browsers that cannot keep
