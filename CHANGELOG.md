@@ -11,6 +11,10 @@ Notable changes to websfm. The format follows
   ("MaxPool … The Indices output is not supported yet") and then falling back to the CPU.
   DISK's keypoint step reads MaxPool's indices, which ONNX Runtime's WebGPU path cannot
   produce, so the GPU attempt failed every time; the keypoints are unchanged.
+- **Detect Features says when Append has nothing to do.** With every image already
+  detected, the dialog now says that **Append** would skip them all and keeps **Run**
+  disabled until you choose **Overwrite**, instead of closing without detecting anything.
+  When only some images lack keypoints, the button says how many it will detect.
 
 ## [0.6.1] — 2026-10-31
 

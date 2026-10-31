@@ -76,7 +76,11 @@ const selectionMix = computed(() => {
 const staleDetectorImages = computed(() =>
   props.images.filter((img) => img.kpStatus === 'done' && (img.detector ?? 'sift') !== detector.value),
 )
-const showMixWarning = computed(() => !overwrite.value && staleDetectorImages.value.length > 0)
+const showMixWarning = computed(
+  () => !overwrite.value && staleDetectorImages.value.length > 0 && !nothingToDetect.value,
+)
+// Append on a project whose every image already has keypoints: the run would skip them all.
+const nothingToDetect = computed(() => !limited.value && props.images.length > 0 && runImages.value.length === 0)
 
 // A learned detector's GPU path (ONNX Runtime's WebGPU EP) is gated to Chromium in
 // core/features/ort.js (resolveBackend) — on Safari/Firefox it always runs on
@@ -396,6 +400,12 @@ function onShellClose() {
       matching needs every image to use one learned detector — switch to <strong>Overwrite</strong> to make them
       consistent.
     </WarnBox>
+    <WarnBox v-if="nothingToDetect">
+      Every image already has keypoints, so <strong>Append</strong> has nothing to detect. Choose
+      <strong>Overwrite</strong> to detect them again{{
+        staleDetectorImages.length ? ` with ${learnedSpec ? learnedLabel : 'SIFT'}` : ''
+      }}.
+    </WarnBox>
 
     <WarnBox v-if="restrictedModel">
       {{ learnedLabel }}'s pretrained weights are licensed for
@@ -659,11 +669,18 @@ function onShellClose() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="attemptRun">
+      <button
+        class="btn btn-primary"
+        :disabled="!numbers.valid || nothingToDetect"
+        :title="nothingToDetect ? 'Every image already has keypoints — choose Overwrite' : numbers.reason"
+        @click="attemptRun"
+      >
         {{
           limited
             ? `Run on ${runImages.length} Selected Image${runImages.length === 1 ? '' : 's'}`
-            : 'Run on All Images'
+            : runImages.length < images.length
+              ? `Run on ${runImages.length} Image${runImages.length === 1 ? '' : 's'} Without Keypoints`
+              : 'Run on All Images'
         }}
       </button>
     </template>

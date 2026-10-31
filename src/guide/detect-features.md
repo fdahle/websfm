@@ -176,7 +176,9 @@ time.
 <!-- param: overwrite  default: Append -->
 **Append** skips images that already have completed detection. **Overwrite** replaces
 all keypoints and invalidates results that depend on them. Use Overwrite after changing
-detector, or when you need a clean comparison of detection settings.
+detector, or when you need a clean comparison of detection settings. When every image already
+has keypoints, Append has nothing to detect: the dialog says so and **Run** stays
+disabled until you choose Overwrite.
 
 ## Batch throughput
 SIFT batches use every worker of the pool, as many as your configured worker count and

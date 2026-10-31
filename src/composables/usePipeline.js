@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { terminateAll } from '../workers/computeClient.js'
 import { useModelsStore } from '../stores/useModelsStore.js'
+import { useLog } from './useLog.js'
 import { learnedDetector, lightGlueModelFor } from '../core/features/learnedDetectors.js'
 
 // images:           Ref<Array>    — current image list, used to count pending work
@@ -220,7 +221,14 @@ export function usePipeline({
       : settings.overwrite
         ? images.value
         : images.value.filter((img) => img.kpStatus !== 'done')
-    if (pending.length === 0) return { ok: true, unchanged: true }
+    if (pending.length === 0) {
+      useLog().log(
+        'Detection: every image already has keypoints — nothing to detect in Append mode',
+        'info',
+        'Detection',
+      )
+      return { ok: true, unchanged: true }
+    }
     // Model consent BEFORE openProgress — see ensureModels.
     const learned = learnedDetector(settings.detector)
     if (learned && !(await ensureModels([learned.modelId]))) {
