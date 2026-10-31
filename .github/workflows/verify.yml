@@ -92,6 +92,10 @@ jobs:
         run: npx playwright install --with-deps ${{ matrix.project }}
       - if: steps.pw-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps ${{ matrix.project }}
+      # Firefox has no WebGL of its own without a GPU: it needs Mesa's EGL and software
+      # GL driver (llvmpipe), which the runner image and install-deps leave out.
+      - if: matrix.project == 'firefox'
+        run: sudo apt-get install -y --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri
       # The tests run against the dev server (playwright.config.js), so no build here.
       - run: npx playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/3
       - uses: actions/upload-artifact@v4
