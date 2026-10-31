@@ -39,6 +39,10 @@ folder. Firefox and Safari cannot reach folders on disk: there the folder choice
 (**In a folder…** for a new project, **Project folder…** in the project list) are shown
 greyed out, with the browsers they need. The folder is the project: do not rename,
 move, or edit its internal files while it is open.
+
+The photos are in its `images` folder, named by an internal id rather than their own
+name, because two photos can share a name. `images/index.csv` lists which file is which
+photo: its name in WebSfM and the file name it was imported with.
 The browser may ask you to reconnect the folder after restart because access permission
 is not always retained.
 

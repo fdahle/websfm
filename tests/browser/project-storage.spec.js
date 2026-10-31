@@ -123,3 +123,42 @@ test('without folder access, the folder choices are shown disabled with the brow
   await page.getByRole('button', { name: 'Create project', exact: true }).click()
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
 })
+
+test('images/index.csv names each stored photo, and follows a rename', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+
+  const readIndex = () =>
+    page.evaluate(async () => {
+      const { flushPersistence } = await import('/src/utils/persistence.js')
+      const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+      await flushPersistence()
+      const root = await navigator.storage.getDirectory()
+      const projects = await (await root.getDirectoryHandle('websfm')).getDirectoryHandle('projects')
+      const project = await projects.getDirectoryHandle(useProjectsStore().currentProjectId)
+      const images = await project.getDirectoryHandle('images')
+      return (await (await images.getFileHandle('index.csv')).getFile()).text()
+    })
+  const uuids = await page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const png = async (name) => {
+      const c = new OffscreenCanvas(64, 48)
+      c.getContext('2d').fillRect(0, 0, 8, 8)
+      return new File([await c.convertToBlob({ type: 'image/png' })], name, { type: 'image/png' })
+    }
+    const images = useImagesStore()
+    await images.addImages([await png('DSC_0001.png'), await png('north, east.png')])
+    return images.images.map((img) => img.uuid)
+  })
+  expect(await readIndex()).toBe(
+    `file,name,original_name\n${uuids[0]},DSC_0001.png,DSC_0001.png\n${uuids[1]},"north, east.png","north, east.png"\n`,
+  )
+
+  await page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const images = useImagesStore()
+    images.renameImage(images.images[0].id, 'first')
+  })
+  expect((await readIndex()).split('\n')[1]).toBe(`${uuids[0]},first,DSC_0001.png`)
+})

@@ -10,6 +10,11 @@ Notable changes to websfm. The format follows
   project list's **Project folder…** now appear greyed out in browsers that cannot keep
   a project in a folder on disk, and say that it needs Chrome, Edge or another
   Chromium-based browser, instead of being hidden.
+- **Photo names in a project folder.** A project's `images` folder now holds an
+  `index.csv` that says which stored file is which photo, by its name in WebSfM and the
+  file name it was imported with. The photos are stored under an internal id, since two
+  can share a name; the list is kept up to date as photos are added, renamed or removed,
+  and written when an older project is opened.
 
 ## [0.6.0] — 2026-10-31
 

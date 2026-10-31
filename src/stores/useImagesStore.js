@@ -22,6 +22,7 @@ import { normalizeImageGroups } from '../utils/imageGroups.js'
 import { createImageThumbnails } from './images/thumbnails.js'
 import { pluralize } from '../core/textFormat.js'
 import { PROJECT_FORMAT_VERSION } from '../core/projectFormat.js'
+import { imageIndexCsv } from '../core/io/imageIndex.js'
 
 // Reading one byte forces the browser to validate the file behind a blob (a File
 // handle is re-checked on every read), so a moved or deleted file shows up here.
@@ -173,8 +174,29 @@ export const useImagesStore = defineStore('images', () => {
     currentProjectId: () => projects.currentProjectId,
     isPersisting,
     build: () => projectDocument(projects.currentProjectId),
-    write: (pid, doc) => doc && opfs.writeProject(pid, doc),
+    write: async (pid, doc) => {
+      if (!doc) return
+      await opfs.writeProject(pid, doc)
+      await writeImageIndex(pid, doc.images)
+    },
   })
+
+  // images/index.csv (core/io/imageIndex.js) follows the document, and is written on
+  // open for a project saved before it existed. Rewritten only when the files and
+  // names changed since this tab last wrote it; chained, so writes land in call order.
+  let indexChain = Promise.resolve()
+  let writtenIndex = { pid: null, text: '' }
+  function writeImageIndex(pid, list) {
+    const text = imageIndexCsv(list)
+    indexChain = indexChain
+      .then(async () => {
+        if (writtenIndex.pid === pid && writtenIndex.text === text) return
+        await opfs.writeImageIndex(pid, text)
+        writtenIndex = { pid, text }
+      })
+      .catch((err) => log(`Could not write images/index.csv: ${err?.message ?? err}`, 'warn', 'Project'))
+    return indexChain
+  }
   function save(expectedProjectId = projects.currentProjectId) {
     if (!isPersisting() || projects.currentProjectId !== expectedProjectId) return Promise.resolve()
     pendingWorkCount.value++
@@ -641,6 +663,7 @@ export const useImagesStore = defineStore('images', () => {
     // still have a keypoint file, so a lost sidecar is flagged now, not later.
     const kpFiles = records.some((r) => r.kpStatus === 'done') ? await opfs.listKeypointFiles(projectId) : new Set()
     if (generation !== restoreGeneration) return
+    if (isPersisting()) writeImageIndex(projectId, records)
     const missingKp = []
     const restored = records.map((record) => ({
       id: record.id,

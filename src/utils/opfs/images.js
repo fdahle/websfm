@@ -2,6 +2,7 @@
 // masks and depth-map previews.
 import { trackPersistence, ignoreMissing } from '../persistence.js'
 import { DEPTH_BIN_KEYS } from '../../core/dense/depthMapCodec.js'
+import { IMAGE_INDEX_FILE } from '../../core/io/imageIndex.js'
 import { getSubDir, writeFileIn } from './base.js'
 
 // ── Images ────────────────────────────────────────────────────────────────────
@@ -28,6 +29,14 @@ export async function loadImageBlob(projectId, uuid, dirs = null) {
   const dir = dirs?.images ?? (await getSubDir(projectId, 'images'))
   const fh = await dir.getFileHandle(uuid)
   return fh.getFile()
+}
+
+// The readable list of which file is which photo (core/io/imageIndex.js).
+export async function writeImageIndex(projectId, text) {
+  return trackPersistence('writeImageIndex:' + String(projectId), async () => {
+    const dir = await getSubDir(projectId, 'images')
+    await writeFileIn(dir, IMAGE_INDEX_FILE, text)
+  })
 }
 
 export async function deleteImage(projectId, uuid) {

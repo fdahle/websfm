@@ -45,6 +45,7 @@ export {
   saveImage,
   saveImageDerived,
   saveMask,
+  writeImageIndex,
 } from './opfs/images.js'
 export {
   clearAllMatches,

@@ -47,6 +47,7 @@ cannot be recomputed at all.
 | `project.json` | `useImagesStore`, `useProjectsStore` | name, scene type, CRS (and fetched CRS definitions), the image list with each image's metadata and status, image groups, `formatVersion` | user data |
 | `sensors.json` | `useSensorsStore` | cameras: size, pixel size, focal length, principal point, distortion, fiducial or reseau calibration | user data |
 | `images/<uuid>` | `useImagesStore` (ingest) | the original photos, as imported | user data |
+| `images/index.csv` | `useImagesStore` (with `project.json`, and on open) | which file under `images/` is which photo: `file,name,original_name` ([`imageIndex.js`](../src/core/io/imageIndex.js)); for people browsing the folder, never read back | cheap |
 | `masks/<uuid>.png` | `useImagesStore` (masks) | image masks | user data, or a run (Auto mask) |
 | `images-derived/` | `useImagesStore` (thumbnails) | thumbnails and transcoded previews | cheap |
 | `keypoints/<uuid>.bin`, `keypoint_colors/`, `descriptors/` | `useImagesStore` (detection) | features per image | a run (Detect) |
