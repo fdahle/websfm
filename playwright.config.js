@@ -21,10 +21,15 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
     // On a runner without a GPU, Firefox refuses WebGL with its software renderer
-    // ("AllowWebgl2:false restricts context creation"), so the 3D view could not start.
+    // ("AllowWebgl2:false restricts context creation"), and headless it finds no GL
+    // driver at all, so CI runs it headed in Xvfb (PW_HEADED, verify.yml).
     {
       name: 'firefox',
-      use: { browserName: 'firefox', launchOptions: { firefoxUserPrefs: { 'webgl.force-enabled': true } } },
+      use: {
+        browserName: 'firefox',
+        headless: !process.env.PW_HEADED,
+        launchOptions: { firefoxUserPrefs: { 'webgl.force-enabled': true } },
+      },
       timeout: 120_000,
       expect: { timeout: 15_000 },
     },
