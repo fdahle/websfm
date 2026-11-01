@@ -31,7 +31,10 @@ Notable changes to websfm. The format follows
   the roll whose marks fit at 171 µm against 21 µm; the sparse cameras then lie 13.3 m RMS
   (median 6.0 m) from the reference positions instead of 28.0 m (12.6 m), as close as
   Metashape's 9 groups by focal length and size (13.0 m). Grouping by focal length alone,
-  as a calibration import does, made it worse (32.8 m).
+  as a calibration import does, made it worse (32.8 m). The DEM (depth maps at Medium)
+  lies 7.0 m NMAD from REMA on stable rock instead of 8.2 m (Metashape 5.0 m), and its
+  warped outer flight lines are mostly gone: after one 10 m shift north, 5.2 m instead
+  of 7.1 m, against Metashape's 5.5 m.
 
 ### Performance
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps

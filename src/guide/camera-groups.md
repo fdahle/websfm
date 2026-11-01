@@ -17,7 +17,8 @@ EXIF, so they are grouped by size alone, and a calibration file you import group
 by the values it gives. Two cameras of the same size, or rolls of one survey flown with
 different lenses, can end up in one group. On the Melville Glacier scans (173 photos
 from 20 rolls), groups by camera position alone put the cameras 28 m RMS off the
-reference; split as WebSfM suggests, by scan size, 13 m.
+reference; split as WebSfM suggests, by scan size, 13 m, and the DEM's error against the
+reference fell from 8.2 to 7.0 m.
 
 ## When WebSfM suggests a split
 A group that may hold photos of more than one camera gets a **⑂** in the Sensors list,
