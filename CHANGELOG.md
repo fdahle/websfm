@@ -19,6 +19,19 @@ Notable changes to websfm. The format follows
   17 minutes and left 2 apart, and the sparse model posed 161 photos instead of 125
   (detection and matching 25 min instead of 6; detecting all 171 at full size poses 163
   in 48 min).
+- **Camera groups that mix cameras are pointed out.** A sensor whose photos come in
+  several scan formats, or whose film rolls fit its fiducial layout badly, gets a ⑂ in the
+  Sensors list and a warning in Sparse Reconstruction, and right-click ▸ **Split camera
+  group…** splits it, by the suggestion, by scan format or by roll. A scan batch has one
+  exact size, so sizes a few pixels apart count as other cameras, unless every frame was
+  cropped to its own size; a roll misfits when its fiducial residual is three times the
+  rest's and over half a scan pixel. A fiducial layout estimated from the photos is
+  estimated again per group. On the Melville glacier scans (173 photos, 20 rolls) grouped
+  by camera position, the suggestion splits L and V into 6 groups by scan size and finds
+  the roll whose marks fit at 171 µm against 21 µm; the sparse cameras then lie 13.3 m RMS
+  (median 6.0 m) from the reference positions instead of 28.0 m (12.6 m), as close as
+  Metashape's 9 groups by focal length and size (13.0 m). Grouping by focal length alone,
+  as a calibration import does, made it worse (32.8 m).
 
 ### Fixed
 - **DISK without a GPU error.** Detect Features and Find GCPs now run DISK on the CPU

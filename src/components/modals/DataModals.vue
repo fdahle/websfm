@@ -39,6 +39,7 @@ import ProductInfoModal from './inspect/ProductInfoModal.vue'
 import ProductSymbologyModal from './products/ProductSymbologyModal.vue'
 import RasterStyleModal from './products/RasterStyleModal.vue'
 import SensorTableModal from './inspect/SensorTableModal.vue'
+import SplitSensorModal from './inspect/SplitSensorModal.vue'
 const QualityReportModal = defineAsyncComponent(() => import('./eval/QualityReportModal.vue'))
 
 // The data dialogs, lifted out of App.vue: imports, the image / sensor / GCP /
@@ -56,7 +57,8 @@ const { importDefaults: gcpImportDefaults, gcps } = storeToRefs(useGcpsStore())
 const { addPoint, setGcpAccuracy, setGcpName, setGcpPosition, setGcpVerticalDatum, setObservationAccuracy } =
   useGcpsStore()
 const { sensors } = storeToRefs(useSensorsStore())
-const { applyFilmFormat, assignSensor, setFiducialMarks, toggleSensorFixed, updateSensor } = useSensorsStore()
+const { applyFilmFormat, assignSensor, setFiducialMarks, splitSensor, toggleSensorFixed, updateSensor } =
+  useSensorsStore()
 const { poses } = storeToRefs(usePosesStore())
 const { matchStore } = storeToRefs(useMatchesStore())
 const { setPairEnabled } = useMatchesStore()
@@ -100,6 +102,7 @@ const {
   qualitySection,
   rasterStyleId,
   sensorTableOpen,
+  splitSensorId,
   sfmSourceOpen,
   importProjectOpen,
   symbologyCloudId,
@@ -146,9 +149,11 @@ const {
   refreshGcpReport,
   selectGcp,
   selectedGcpId,
+  sensorSplits,
   sfmImportSession,
   usedKeysOf,
 } = useAppContext()
+const splitSensorTarget = computed(() => sensors.value.find((s) => s.id === splitSensorId.value) ?? null)
 const symbologyProduct = computed(() => rasterProducts.value.find((p) => p.id === symbologyProductId.value) ?? null)
 const symbologyCloud = computed(() => clouds.value.find((c) => c.id === symbologyCloudId.value) ?? null)
 const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(infoImageId.value) : null))
@@ -377,6 +382,19 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
   </Teleport>
 
   <Teleport to="body">
+    <SplitSensorModal
+      v-if="splitSensorTarget"
+      :sensor="splitSensorTarget"
+      :images="images"
+      :suggestion="sensorSplits.get(splitSensorTarget.id) ?? null"
+      @close="splitSensorId = null"
+      @split="
+        (groups) => {
+          splitSensor(splitSensorTarget.id, groups)
+          splitSensorId = null
+        }
+      "
+    />
     <SensorTableModal
       v-if="sensorTableOpen"
       :sensors="sensors"

@@ -1,4 +1,4 @@
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, toRaw } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { exifSignature, sensorFromExif } from '../core/io/sensor.js'
@@ -8,6 +8,7 @@ import { createDocumentSaver } from '../utils/documentSaver.js'
 import { useImagesStore } from './useImagesStore.js'
 import { emptyFiducialCalibration, isFiducialCalibrated } from '../core/sfm/fiducialModel.js'
 import { applyFiducialMarks, planFiducialMarkTargets } from '../core/io/fiducialMarks.js'
+import { estimateBatchFiducialLayout } from '../core/sfm/fiducialCalibration.js'
 import { normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { pluralize } from '../core/textFormat.js'
@@ -555,6 +556,45 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (isPersisting()) imagesStore.save()
   }
 
+  // Split a camera group (Sidebar ▸ Sensors ▸ Split camera group…): `groups` =
+  // [{ label, imageIds }] (core/sensors/splitSuggestions.js). The first keeps the sensor,
+  // each other becomes a copy of it holding its images. A fiducial layout estimated from
+  // the photos is estimated again per group; a certificate's applies to every group.
+  // Merge undoes it. Returns the ids of the groups, the first being `id`.
+  function splitSensor(id, groups) {
+    const s = sensors.value.find((x) => x.id === id)
+    if (!s || !groups?.length) return []
+    const ids = []
+    groups.forEach((g, i) => {
+      const sensor = i === 0 ? s : { ...structuredClone(toRaw(s)), id: crypto.randomUUID(), signature: null }
+      if (g.label) sensor.label = g.label
+      if (i > 0) sensors.value.push(sensor)
+      const members = new Set(g.imageIds)
+      for (const img of images.value) if (members.has(img.id)) img.sensorId = sensor.id
+      const cal = sensor.fiducialCalibration
+      if (cal?.method === 'batch' && cal.scanPitchMm > 0) {
+        const layout = estimateBatchFiducialLayout(
+          images.value.filter((img) => members.has(img.id)),
+          cal.scanPitchMm,
+          cal,
+        )
+        if (layout) sensor.fiducialCalibration = layout
+      }
+      ids.push(sensor.id)
+    })
+    log(
+      `Sensor ${groups[0].label ?? s.label}: split into ${groups.length} camera groups — ` +
+        groups
+          .map((g, i) => `${g.label ?? sensors.value.find((x) => x.id === ids[i])?.label} (${g.imageIds.length})`)
+          .join(', '),
+      'success',
+      'Sensor',
+    )
+    save()
+    if (isPersisting()) imagesStore.save()
+    return ids
+  }
+
   function removeSensor(id) {
     const idx = sensors.value.findIndex((s) => s.id === id)
     if (idx === -1) return false
@@ -624,6 +664,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     addSensors,
     assignSensor,
     mergeSensors,
+    splitSensor,
     removeSensor,
     clearSensors,
     restoreSensors,

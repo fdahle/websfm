@@ -11,6 +11,8 @@
 //     "maskExisting": "merge",                           with "mask" too: add each file to the static mask
 //     "footprints": ".../footprints.geojson",            approximate image footprints (polygons named by image)
 //     "sensors": ".../sensors.csv",                      image, role, focal_mm: one sensor per role
+//     "groupBy": "role,focal",                           which columns make a sensor (default "role";
+//                                                         "role,focal" is what Import ▸ Calibration makes)
 //     "fiducials": { "csv": …, "batchPitchMm": 0.025 }   no certificate: each sensor's layout estimated
 //                                                         from its scans at that pitch (no intrinsics needed)
 //     "gcps": ".../gcp.csv",                             gcp_label, image_file_name, x, y (pixel-edge),
@@ -118,11 +120,15 @@ export async function histSetup(h, imageNames) {
   // y up) and the per-image marks from detected_fiducial_markers.csv.
   if (h.sensors) {
     const rows = csvRows(await readFile(h.sensors, 'utf8'))
-    out.sensorGroups = rows.map((r) => ({ name: r.image, group: r.role }))
+    const by = (h.groupBy ?? 'role').split(',').map((c) => (c.trim() === 'focal' ? 'focal_mm' : c.trim()))
+    const groupOf = (r) => by.map((c) => r[c]).join('-')
+    out.sensorGroups = rows.map((r) => ({ name: r.image, group: groupOf(r) }))
     // Each group's focal: the median of its images' values.
     const byGroup = new Map()
-    for (const r of rows)
-      if (Number(r.focal_mm) > 0) (byGroup.get(r.role) ?? byGroup.set(r.role, []).get(r.role)).push(Number(r.focal_mm))
+    for (const r of rows) {
+      const g = groupOf(r)
+      if (Number(r.focal_mm) > 0) (byGroup.get(g) ?? byGroup.set(g, []).get(g)).push(Number(r.focal_mm))
+    }
     out.groupFocalMm = Object.fromEntries(
       [...byGroup].map(([g, v]) => [`Camera ${g}`, v.sort((a, b) => a - b)[v.length >> 1]]),
     )

@@ -12,7 +12,7 @@ itself and takes App.vue's handlers from `useAppContext()` (`src/appContext.js`)
 | `app/` | settings, about, system info, debug summary, model download, and the shared confirm and progress dialogs |
 | `project/` | new project, project settings, export a project file, reconnect a folder |
 | `import/` | everything under **Import**: images by kind, cameras, GCPs, footprints, fiducials, rasters, clouds, video, SfM projects |
-| `inspect/` | the tables under **View ▸ Inspect**: images, sensors, camera poses, control points, matches, masks, image info |
+| `inspect/` | the tables under **View ▸ Inspect**: images, sensors, camera poses, control points, matches, masks, image info; and splitting a camera group (Sidebar ▸ Sensors) |
 | `images/` | **Tools ▸ Images**: auto mask, image quality, film fiducials, reseau, panoramic strips |
 | `pipeline/` | the **Reconstruct** steps: detect, match, sparse, depth maps, dense, and the workflow builder |
 | `georef/` | **Reconstruct ▸ Georeferencing**: georeference, find GCPs, scale bars |

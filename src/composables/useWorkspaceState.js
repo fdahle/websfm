@@ -8,6 +8,7 @@ import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import { matchPairStats, usedKeysForPair, usedPairCounts } from '../core/eval/usedMatches.js'
+import { suggestSensorSplits } from '../core/sensors/splitSuggestions.js'
 
 // State derived from the project stores alone, lifted out of App.vue: what the
 // workspace is ready for (the ribbon, console and workflow guards), the match
@@ -64,6 +65,12 @@ export function useWorkspaceState() {
     }
     return bad
   })
+
+  // Camera groups that may hold photos of more than one camera (sensorId → suggestion,
+  // core/sensors/splitSuggestions.js): the sidebar hints at them, Sparse warns.
+  const sensorSplits = computed(
+    () => new Map(suggestSensorSplits({ sensors: sensors.value, images: images.value }).map((x) => [x.sensorId, x])),
+  )
 
   // Distinct current images that carry each preselect evidence source — the Match
   // modal gates its "Preselect by" methods on these (poses link by image.id, as do
@@ -188,6 +195,7 @@ export function useWorkspaceState() {
     posedImageCount,
     footprintImageCount,
     incompleteSensorIds,
+    sensorSplits,
     sparseReady,
     cloudReady,
     denseReady,

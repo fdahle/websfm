@@ -24,6 +24,30 @@ describe('sparseEffects', () => {
     )
   })
 
+  it('warns of a camera group that may hold photos of more than one camera', () => {
+    const one = sparseEffects(
+      { ...RECONSTRUCT_DEFAULTS, refineIntrinsics: 'f' },
+      {
+        ...project,
+        splits: [{ label: 'Camera L', groups: 2 }],
+      },
+    )
+    expect(one.calibration).toBe('Solved for each sensor (1 sensor): the focal length.')
+    expect(one.splits).toBe(
+      'Camera L may hold photos of 2 cameras, which would share one calibration: split it in Sensors first ' +
+        '(right-click ▸ Split camera group…).',
+    )
+    const two = sparseEffects(RECONSTRUCT_DEFAULTS, {
+      ...project,
+      splits: [
+        { label: 'Camera L', groups: 2 },
+        { label: 'Camera V', groups: 3 },
+      ],
+    })
+    expect(two.splits).toMatch(/^Camera L and 1 other camera group may each hold .* split them in Sensors first/)
+    expect(sparseEffects(RECONSTRUCT_DEFAULTS, project).splits).toBe('')
+  })
+
   it('describes adding images to the model', () => {
     const add = { ...RECONSTRUCT_DEFAULTS, addToModel: true }
     const e = sparseEffects(add, { ...project, modelCameras: 412, newImages: 38 })

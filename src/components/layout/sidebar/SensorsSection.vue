@@ -34,6 +34,16 @@ function fmtDims(s) {
 const lensLabel = (s) =>
   distortionOf(s) ? (DISTORTION_MODELS.find((m) => m.id === s.distortionModel)?.label ?? 'Brown') : null
 
+// The tooltip of a group that may hold photos of more than one camera
+// (core/sensors/splitSuggestions.js, via sidebar.sensorSplits).
+function splitHint(x) {
+  const why = [
+    x.formats.length ? `${x.formats.length} scan formats` : '',
+    ...x.misfits.map((m) => `${m.roll} fits the fiducial layout badly`),
+  ].filter(Boolean)
+  return `May hold photos of ${x.groups.length} cameras (${why.join('; ')}). Right-click ▸ Split camera group…`
+}
+
 // Sensor context menu (right-click). { x, y, sensor }
 const { menu: sensorCtx, open: openSensorCtx, close: closeMenu } = useContextMenu()
 // Other sensors a right-clicked sensor can be merged into.
@@ -77,6 +87,12 @@ function fromMenu(fn) {
             title="No usable calibration — intrinsics fall back to a default field-of-view guess, which distorts SfM and depth maps. Set a focal length in the sensor table."
             >⚠</span
           >
+          <span
+            v-if="sidebar.sensorSplits.has(sensor.id)"
+            class="unaligned-tag"
+            :title="splitHint(sidebar.sensorSplits.get(sensor.id))"
+            >⑂</span
+          >
           <span class="obs-badge" :title="`${pluralize(sidebar.sensorImageCount(sensor.id), 'image')}`">{{
             sidebar.sensorImageCount(sensor.id)
           }}</span>
@@ -117,6 +133,7 @@ function fromMenu(fn) {
       <button class="ctx-item" @click="fromMenu((s) => sidebar.showProductInfo({ sensorId: s.id }))">
         Show information
       </button>
+      <button class="ctx-item" @click="fromMenu((s) => sidebar.splitSensor(s.id))">Split camera group…</button>
       <div class="ctx-sep"></div>
       <div v-if="mergeTargets.length" class="ctx-sub-wrap">
         <button class="ctx-item ctx-has-sub">Merge into<span class="ctx-arrow">▸</span></button>

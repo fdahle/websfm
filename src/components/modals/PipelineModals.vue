@@ -51,6 +51,7 @@ import { extensionBlocker } from '../../core/sfm/extendModel.js'
 import { pluralize } from '../../core/textFormat.js'
 import { useLog } from '../../composables/useLog.js'
 import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
+import { smallDetection } from '../../core/stepEffects/match.js'
 const FindGcpsModal = defineAsyncComponent(() => import('./georef/FindGcpsModal.vue'))
 
 // The pipeline and Tools-tab dialogs, lifted out of App.vue: each opens from a
@@ -150,6 +151,8 @@ const matchOnlyCount = computed(() => {
   const ids = new Set(matchOnlyIds.value ?? [])
   return images.value.filter((im) => ids.has(im.id) && im.kpStatus === 'done').length
 })
+// Detect gaps again at full size: the images it could act on (stepEffects/match.js).
+const matchSmallDetection = computed(() => (matchFeaturesOpen.value ? smallDetection(images.value) : undefined))
 // Match only new pairs: the pairs with a result, and the images with features in none
 // of them (photos added since the last match).
 const matchedState = computed(() => {
@@ -238,6 +241,7 @@ const {
   onSectionRun,
   onToolEditRun,
   posedImageCount,
+  sensorSplits,
   startMarkingPoint,
 } = useAppContext()
 // Is the fitted scale still describing the current model + measurements? Read at
@@ -310,6 +314,7 @@ const exportingFootprints = computed(
       :unpaired-images="matchedState.unpairedImages"
       :only-ids="matchOnlyIds"
       :only-count="matchOnlyCount"
+      :small-detection="matchSmallDetection"
       @close="matchFeaturesOpen = false"
       @run="onMatchRun"
     />
@@ -322,6 +327,7 @@ const exportingFootprints = computed(
       :linked-images="matchedLinks.images"
       :pairs="matchedLinks.pairs"
       :sensors="sensors.length"
+      :sensor-splits="[...sensorSplits.values()].map((x) => ({ label: x.label, groups: x.groups.length }))"
       :model-cameras="extendState.modelCameras"
       :new-images="extendState.newImages"
       :has-products="extendState.hasProducts"

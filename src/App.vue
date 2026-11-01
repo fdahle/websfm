@@ -349,6 +349,7 @@ const {
   posedImageCount,
   footprintImageCount,
   incompleteSensorIds,
+  sensorSplits,
   sparseReady,
   cloudReady,
   denseReady,
@@ -977,6 +978,7 @@ provideAppContext({
   hasSparse,
   imageViewerRefs,
   incompleteSensorIds,
+  sensorSplits,
   jumpToImage,
   mapFrame,
   mapGcpEdit,
@@ -1114,7 +1116,16 @@ provideAppContext({
 const { context: sidebarContext, zoomToVectorSet } = useSidebarActions({
   tabs: { tabs, activateTab, openImageTab, setTabTitle },
   viewers: { viewerRef, mapViewerRef },
-  state: { gcpReport, selectedGcpId, matchStats, incompleteSensorIds, alignedUuids, hasSparse, openTabIds },
+  state: {
+    gcpReport,
+    selectedGcpId,
+    matchStats,
+    incompleteSensorIds,
+    sensorSplits,
+    alignedUuids,
+    hasSparse,
+    openTabIds,
+  },
   actions: {
     addImagesRouted,
     openDroppedImport,

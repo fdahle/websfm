@@ -664,3 +664,21 @@ export const PROJECT_IMPORT_TUNING = {
   // Photos read and ingested at a time: the page never holds a whole project as blobs.
   photosPerBatch: 16,
 }
+
+// Sidebar ▸ Sensors: which camera groups may hold photos of more than one camera
+// (core/sensors/splitSuggestions.js).
+export const SENSOR_TUNING = {
+  // A new group with fewer photos than this is marked small: self-calibration frees the
+  // principal point only from 10 cameras on (core/sfm/selfCalSchedule.js cxcyMinCams).
+  splitMinImages: 10,
+  // A scan batch has one exact size (Melville: 10137, 10140 and 10141 px wide were three
+  // cameras). Exact sizes count when at least exactShare of the photos share theirs with
+  // exactMinPhotos or more; otherwise the frames were cropped one by one, and sizes that
+  // differ by less than formatTolFrac in both dimensions are one format.
+  exactMinPhotos: 3,
+  exactShare: 0.9,
+  formatTolFrac: 0.01,
+  // A roll whose median fiducial residual is this many times the rest's, and over half a
+  // scan pixel, fits the group's mark layout badly (Melville: 171 µm against about 30).
+  fiducialMisfitFactor: 3,
+}

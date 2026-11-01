@@ -46,6 +46,7 @@ export function useModalEscape({
     maskManagerOpen,
     autoMaskOpen,
     sensorTableOpen,
+    splitSensorId,
     gcpTableOpen,
     matchListOpen,
     reconstructOpen,
@@ -373,6 +374,12 @@ export function useModalEscape({
         autoMaskOpen.value,
         () => {
           autoMaskOpen.value = false
+        },
+      ],
+      [
+        splitSensorId.value != null,
+        () => {
+          splitSensorId.value = null
         },
       ],
       [

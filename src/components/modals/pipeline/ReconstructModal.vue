@@ -4,6 +4,7 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import WarnBox from '../ui/WarnBox.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
@@ -27,6 +28,8 @@ const props = defineProps({
   linkedImages: { type: Number, default: 0 },
   pairs: { type: Number, default: 0 },
   sensors: { type: Number, default: 0 },
+  // Camera groups that may hold photos of more than one camera: [{ label, groups }].
+  sensorSplits: { type: Array, default: () => [] },
   // Add to the model: the main model's cameras, the images with features it lacks,
   // whether anything was built from it, and why it cannot take more (or null).
   modelCameras: { type: Number, default: 0 },
@@ -114,6 +117,7 @@ const effects = computed(() =>
     linkedImages: props.linkedImages,
     pairs: props.pairs,
     sensors: props.sensors,
+    splits: props.sensorSplits,
     autoReason: recommendations.value.sfm?.refineIntrinsics?.reason ?? null,
     modelCameras: props.modelCameras,
     newImages: props.newImages,
@@ -153,6 +157,9 @@ function run() {
         </select>
       </SettingsField>
     </SettingsGroup>
+
+    <!-- Not behind Advanced: no setting here helps, only a split in Sensors does. -->
+    <WarnBox v-if="effects.splits">{{ effects.splits }}</WarnBox>
 
     <PresetCards
       :model-value="activePreset"

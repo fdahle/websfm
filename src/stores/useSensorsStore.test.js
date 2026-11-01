@@ -2,6 +2,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useSensorsStore } from './useSensorsStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
+import { useImagesStore } from './useImagesStore.js'
+import { estimateBatchFiducialLayout } from '../core/sfm/fiducialCalibration.js'
 
 describe('film sensor fiducial record', () => {
   beforeEach(() => {
@@ -100,5 +102,64 @@ describe('film sensor fiducial record', () => {
       ],
     })
     expect(store.sensors[0].fiducials).toBeUndefined()
+  })
+})
+
+describe('splitSensor', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const projects = useProjectsStore()
+    projects.persistenceAvailable = false
+    projects.projects = [{ id: 'project-1', name: 'test', sceneType: 'aerial', crs: 'EPSG:32632' }]
+    projects.currentProjectId = 'project-1'
+  })
+
+  // Four marks in scan pixels, 0.025 mm apart; `spread` sets how far apart they are.
+  const scan = (id, spread) => ({
+    id,
+    name: `${id}.tif`,
+    sensorId: 's1',
+    fiducialDetections: [
+      { slot: 'corner_top_left', px: 5000 - spread, py: 5000 - spread },
+      { slot: 'corner_top_right', px: 5000 + spread, py: 5000 - spread },
+      { slot: 'corner_bottom_right', px: 5000 + spread, py: 5000 + spread },
+      { slot: 'corner_bottom_left', px: 5000 - spread, py: 5000 + spread },
+    ],
+  })
+
+  function setup(method) {
+    const images = useImagesStore()
+    images.images = [scan('a1', 4000), scan('a2', 4000), scan('b1', 4400)]
+    const store = useSensorsStore()
+    const cal = estimateBatchFiducialLayout(images.images, 0.025, { focalMm: 153.5 })
+    store.sensors = [
+      { id: 's1', label: 'Camera L', kind: 'film', signature: 'sig', fiducialCalibration: { ...cal, method } },
+    ]
+    return { images, store }
+  }
+
+  it('moves each group to its own sensor and estimates a batch layout per group', () => {
+    const { images, store } = setup('batch')
+    const ids = store.splitSensor('s1', [
+      { label: 'Camera L · A', imageIds: ['a1', 'a2'] },
+      { label: 'Camera L · B', imageIds: ['b1'] },
+    ])
+    expect(ids[0]).toBe('s1')
+    expect(store.sensors.map((s) => s.label)).toEqual(['Camera L · A', 'Camera L · B'])
+    expect(images.images.map((i) => i.sensorId)).toEqual(['s1', 's1', ids[1]])
+    expect(store.sensors[1]).toMatchObject({ kind: 'film', signature: null })
+    // 4000 px × 0.025 mm = 100 mm from the centre, 4400 px = 110 mm.
+    const corner = (s) => s.fiducialCalibration.marks.find((m) => m.id === 'corner_top_right').xMm
+    expect(corner(store.sensors[0])).toBeCloseTo(100, 6)
+    expect(corner(store.sensors[1])).toBeCloseTo(110, 6)
+    expect(store.sensors[1].fiducialCalibration.focalMm).toBe(153.5)
+  })
+
+  it('copies a certificate layout to every group', () => {
+    const { store } = setup('certificate')
+    const before = store.sensors[0].fiducialCalibration.marks
+    store.splitSensor('s1', [{ imageIds: ['a1', 'a2'] }, { label: 'Camera L · B', imageIds: ['b1'] }])
+    expect(store.sensors.map((s) => s.label)).toEqual(['Camera L', 'Camera L · B'])
+    expect(store.sensors[1].fiducialCalibration.marks).toEqual(before)
   })
 })

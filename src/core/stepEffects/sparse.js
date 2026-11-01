@@ -12,12 +12,15 @@ const TERMS = {
 }
 
 // project: { linkedImages (images in a usable matched pair), pairs (usable pairs),
-// sensors, autoReason (why `auto` self-calibrates as it does here, or null) }
+// sensors, autoReason (why `auto` self-calibrates as it does here, or null),
+// splits (the camera groups that may hold photos of more than one camera:
+// [{ label, groups }], from core/sensors/splitSuggestions.js) }
+// `splits` is the warning above the steps, '' when there is none.
 // With `s.addToModel` (Add to the model), project also has { modelCameras, newImages,
 // hasProducts }, and the effects describe adding the new images to the model.
 export function sparseEffects(
   s,
-  { linkedImages = 0, pairs = 0, sensors = 0, autoReason = null, modelCameras = 0, newImages = 0 } = {},
+  { linkedImages = 0, pairs = 0, sensors = 0, autoReason = null, modelCameras = 0, newImages = 0, splits = [] } = {},
 ) {
   if (s.addToModel) {
     return {
@@ -56,7 +59,18 @@ export function sparseEffects(
           ? `This project${per}: ${autoReason}`
           : `Staged as the model grows${per}, unless a sensor already has a calibrated model.`
         : `Solved for each sensor${per}: ${TERMS[v] ?? v}.`
-  return { register, ba, calibration }
+  return { register, ba, calibration, splits: splitWarning(splits) }
+}
+
+// A camera group with photos of more than one camera gets one calibration for all of
+// them, whatever self-calibration does.
+function splitWarning(splits) {
+  if (!splits.length) return ''
+  const [first, ...rest] = splits
+  const which = rest.length
+    ? `${first.label} and ${plural(rest.length, 'other camera group')} may each hold photos of more than one camera`
+    : `${first.label} may hold photos of ${first.groups} cameras`
+  return `${which}, which would share one calibration: split ${rest.length ? 'them' : 'it'} in Sensors first (right-click ▸ Split camera group…).`
 }
 
 // The mode line above the steps: what Add to the model or Rebuild does to this project.

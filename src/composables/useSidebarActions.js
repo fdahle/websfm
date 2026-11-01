@@ -72,6 +72,7 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     infoImageId,
     infoProduct,
     sensorTableOpen,
+    splitSensorId,
     matchListOpen,
     symbologyCloudId,
     symbologyProductId,
@@ -193,6 +194,9 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     // Sensors
     removeSensor: confirmRemoveSensor,
     mergeSensors: ({ target, source }) => mergeSensors(target, source),
+    splitSensor: (id) => {
+      splitSensorId.value = id
+    },
     openSensor: () => {
       sensorTableOpen.value = true
     },
