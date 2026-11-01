@@ -33,6 +33,15 @@ Notable changes to websfm. The format follows
   Metashape's 9 groups by focal length and size (13.0 m). Grouping by focal length alone,
   as a calibration import does, made it worse (32.8 m).
 
+### Performance
+- **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps
+  still computes one map on the CPU to compare, but now gives up on it as soon as the CPU
+  is clearly slower, and goes on with the GPU. It decides after each pyramid level: it
+  gives up once the CPU has taken as long as the GPU would for the whole map, or is on
+  course for twice that. On the Melville glacier scans at High, the comparison map took
+  78 minutes against 94 s on the GPU. On the example project at 2,400 px it gave up
+  after 42 s, when it was on course for 648 s (GPU 14 s).
+
 ### Fixed
 - **DISK without a GPU error.** Detect Features and Find GCPs now run DISK on the CPU
   from the start, instead of first trying the GPU, logging an ONNX Runtime error

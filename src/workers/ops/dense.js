@@ -19,6 +19,7 @@ import {
 } from '../../core/dense/mvs.js'
 import { depthCoverage } from '../../core/dense/depthMapCodec.js'
 import { FUSION_PLAN_SHARE, fusionPrepassSteps } from '../../core/dense/fusionPlan.js'
+import { probeGivesUp } from '../../core/dense/gpuProbe.js'
 import { viewIndex } from '../../core/dense/sparseInput.js'
 import { buildMaskLookup } from '../../core/mask.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
@@ -54,6 +55,8 @@ import { shareableArray } from '../../core/bigArray.js'
 // device for the life of this worker: a Full run's second pass and later runs start on
 // the faster. GPUDevice → 'cpu' | 'gpu'.
 const gpuVerdict = new WeakMap()
+// Thrown by the GPU-or-CPU comparison's CPU map when it cannot win (the probe in depthMaps).
+const PROBE_LOST = Symbol('probe lost')
 
 export function makeDenseOps({ rasterize }) {
   // Saved-map acks per streamed run (`settings.ackToken`), from the page's depthAck:
@@ -694,6 +697,20 @@ export function makeDenseOps({ rasterize }) {
         prefetch(k + 1)
         if (probe) backend = undefined
         const tImg = performance.now()
+        // The probe's CPU map gives up after a pyramid level once it cannot win
+        // (core/dense/gpuProbe.js) against what the GPU would take for this map, from its
+        // time per pixel and source view.
+        const gpuMapMs = probe ? probe.gpuMsPerUnit * ref.width * ref.height * Math.max(1, srcUuids.length) : 0
+        let probeCourseMs = 0
+        const probeHooks = (h) => ({
+          ...h,
+          onProgress: (f) => {
+            const ms = performance.now() - tImg
+            probeCourseMs = ms / Math.max(f, 1e-6)
+            if (probeGivesUp(ms, f, gpuMapMs, settings.gpuProbeGiveUp)) throw PROBE_LOST
+            h.onProgress?.(f)
+          },
+        })
         // Always stream depthMapForImage's own log (coarse-to-fine plan, debug level);
         // validate the GPU cost kernel against the CPU reference on the first image only.
         const hooks = {
@@ -741,11 +758,24 @@ export function makeDenseOps({ rasterize }) {
           }
         } else
           try {
-            dm = await depthMapForImage(ref, sources, sparse.pos, ds, backend, hooks)
+            dm = await depthMapForImage(ref, sources, sparse.pos, ds, backend, probe ? probeHooks(hooks) : hooks)
           } catch (err) {
-            // A GPU failure mid-run must not abort the whole batch: log it, drop to WASM
-            // for this image and every image after, and retry once on the CPU path.
-            if (backend) {
+            if (err === PROBE_LOST) {
+              // The CPU cannot win: this map, and the rest, on the GPU.
+              emit('log', [
+                `Depth maps: the CPU was on course to take ${(probeCourseMs / 1000).toFixed(0)} s for this map, ` +
+                  `the GPU ${(gpuMapMs / 1000).toFixed(1)} s — the rest stay on the GPU`,
+                'info',
+                'Dense',
+              ])
+              backend = probe.gpu
+              if (gpuDevice) gpuVerdict.set(gpuDevice, 'gpu')
+              probe = null
+              ds = settingsFor()
+              dm = await depthMapForImage(ref, sources, sparse.pos, ds, backend, hooks)
+            } else if (backend) {
+              // A GPU failure mid-run must not abort the whole batch: log it, drop to WASM
+              // for this image and every image after, and retry once on the CPU path.
               emit('log', [
                 `Depth maps: GPU error on ${img.name} (${err?.message ?? err}) — falling back to WASM`,
                 'warn',

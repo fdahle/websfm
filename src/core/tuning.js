@@ -367,6 +367,10 @@ export const DENSE_TUNING = {
   // A first GPU map slower than this (ms) has the second map computed on the CPU to
   // compare, and the run continues on the faster of the two (workers/ops/dense.js).
   gpuProbeMs: 8000,
+  // The CPU map of that comparison gives up after a pyramid level once it is on course
+  // to take gpuProbeGiveUp× the GPU's time for it (core/dense/gpuProbe.js). Melville,
+  // 10,500 px film scans at High: the GPU map 94 s, the CPU map 78 min.
+  gpuProbeGiveUp: 2,
   // How often a depth-map run's journal (core/runJournal.js) is rewritten while maps
   // finish: what a dead tab's run can lose and recompute on Continue, against one
   // small JSON write. (A run's `_journalMs` setting overrides it; the tests use 0.)
