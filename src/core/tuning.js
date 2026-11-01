@@ -325,8 +325,13 @@ export const MATCH_TUNING = {
   // block matched again, without the subset gate and with these looser gates. F-RANSAC
   // still verifies every pair; LightGlue gets bridgeLgKeypointScale× the keypoints.
   // Pairs rejected with at least bridgeRetryMinRaw putatives are tried first.
+  // A piece hanging on the main block by a thread is repaired too: one apart from it
+  // without the pairs of fewer than bridgeWeakInliers inliers, and joined to it by fewer
+  // than bridgeWeakCut inliers in all (Starbuck, Jorum: TMA flight lines SfM leaves out).
   bridgeRounds: 3, // again while the main block grows, each round with fresh pairs
   bridgeMinComponent: 2,
+  bridgeWeakInliers: 30,
+  bridgeWeakCut: 100,
   bridgeMaxPairs: 48,
   bridgePerComponent: 12,
   bridgeRetryMinRaw: 8,
@@ -334,6 +339,17 @@ export const MATCH_TUNING = {
   bridgeMinInlierRatio: 0.08,
   bridgeVerifier: 'magsac',
   bridgeLgKeypointScale: 2,
+  // Detecting gaps again (MATCH_DEFAULTS.gapRedetect; core/features/gapRedetect.js): the
+  // SIFT photos of the pieces still apart after bridge repair, detected at under
+  // gapMaxScale of their size, are detected again at full size with ≤gapMaxKeypoints
+  // (their cap scaled with the area), together with gapPartnerShare as many photos of
+  // the main block, those with candidate pairs to most of them. Not when they would be
+  // more than gapMaxShare of the photos: detecting everything at full size is then the
+  // better run. Starbuck subset, 46 gap photos + 30 partners at 10,400 px: 32 posed.
+  gapMaxScale: 0.8,
+  gapMaxKeypoints: 40000,
+  gapPartnerShare: 0.65,
+  gapMaxShare: 0.5,
   // Share of the progress bar kept for the gate rescue and bridge repair, which follow
   // the pair pass when they can run (core/features/matchProgress.js).
   progressPostShare: 0.1,

@@ -45,6 +45,40 @@ describe('planBridgeRepair', () => {
     const pieceOf = (p) => (p.idB.startsWith('p') ? 'p' : 'q')
     expect(r.pairs.map(pieceOf).sort()).toEqual(['p', 'p', 'q'])
   })
+  it('repairs a piece that hangs on the main block by a thread', () => {
+    // a–b–c hold together; x–y join them through one 20-inlier pair; c–x near-missed.
+    const entries = [ok('a', 'b', 300), ok('b', 'c', 300), ok('x', 'y', 300), ok('a', 'x', 20), rejected('c', 'x', 25)]
+    const opts = { weakInliers: 30, weakCut: 100 }
+    const r = planBridgeRepair({ imageIds: ['a', 'b', 'c', 'x', 'y'], entries, opts })
+    expect(r).toMatchObject({ components: 1, pieces: 0, weakPieces: 1, weakImages: 2 })
+    expect(r.pairs.map((p) => p.idA + p.idB)).toEqual(['cx'])
+    // Off by default, and a piece held by enough weak pairs is not hanging by a thread.
+    expect(planBridgeRepair({ imageIds: ['a', 'b', 'c', 'x', 'y'], entries }).pairs).toEqual([])
+    const held = [...entries, ok('b', 'y', 25), ok('c', 'y', 29), ok('b', 'x', 28)]
+    expect(planBridgeRepair({ imageIds: ['a', 'b', 'c', 'x', 'y'], entries: held, opts })).toMatchObject({
+      weakPieces: 0,
+      pairs: [],
+    })
+  })
+
+  it('matches a split piece against the whole main block and a weak one against its core', () => {
+    // Main a–b–c with w–v hanging on c by a thread; a split piece x–y.
+    const ids = ['a', 'b', 'c', 'w', 'v', 'x', 'y']
+    const entries = [
+      ok('a', 'b', 300),
+      ok('b', 'c', 300),
+      ok('w', 'v', 300),
+      ok('c', 'w', 20),
+      ok('x', 'y', 300),
+      rejected('w', 'x', 30), // a split-piece pair into the weak piece: inside the main block
+      rejected('v', 'a', 20),
+      rejected('w', 'v', 40), // inside a piece: never
+    ]
+    const r = planBridgeRepair({ imageIds: ids, entries, opts: { weakInliers: 30, weakCut: 100 } })
+    expect(r).toMatchObject({ components: 2, pieces: 1, weakPieces: 1, weakImages: 2 })
+    expect(r.pairs.map((p) => p.idA + p.idB).sort()).toEqual(['va', 'wx'])
+  })
+
   it('leaves out pairs an earlier round tried', () => {
     const entries = [...base, rejected('a', 'x', 30), rejected('c', 'x', 12)]
     const r = planBridgeRepair({ imageIds, entries, tried: new Set([bridgeKey('x', 'a')]) })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { repairEffect, onlyNewPairsEffect, onlyNewPairsDefault, selectionPairsEffect } from './match.js'
+import { repairEffect, onlyNewPairsEffect, onlyNewPairsDefault, selectionPairsEffect, smallDetection } from './match.js'
 import { MATCH_DEFAULTS } from '../defaults.user.js'
 import { MATCH_TUNING } from '../tuning.js'
 
@@ -8,6 +8,32 @@ describe('repairEffect', () => {
     expect(repairEffect(MATCH_DEFAULTS)).toContain(`up to ${MATCH_TUNING.bridgePerComponent} pairs`)
     expect(repairEffect(MATCH_DEFAULTS)).toContain(`(${MATCH_TUNING.bridgeMaxPairs} in all)`)
     expect(repairEffect({ ...MATCH_DEFAULTS, repairSplits: false })).toMatch(/^Off: .* stays in pieces/)
+  })
+
+  it('says whether pieces still apart are detected again at full size', () => {
+    const small = { images: 171, scale: 0.385, nativeMax: 10400 }
+    expect(repairEffect(MATCH_DEFAULTS, MATCH_TUNING, small)).toContain(
+      'detected again at full size (171 images were detected at 0.39× of up to 10,400 px), with about 65 % as many',
+    )
+    expect(repairEffect(MATCH_DEFAULTS)).toContain('nothing to detect again')
+    expect(repairEffect({ ...MATCH_DEFAULTS, gapRedetect: false }, MATCH_TUNING, small)).toContain(
+      'keep the features they were detected with',
+    )
+  })
+
+  it('counts the SIFT images detected well under their size', () => {
+    const im = (detectScale, detector = 'sift', kpStatus = 'done') => ({
+      kpStatus,
+      detector,
+      detectScale,
+      meta: { width: 10400, height: 10200 },
+    })
+    expect(smallDetection([im(0.385), im(0.4), im(0.39), im(1), im(0.3, 'disk'), im(0.3, 'sift', null)])).toEqual({
+      images: 3,
+      scale: 0.39,
+      nativeMax: 10400,
+    })
+    expect(smallDetection([im(1)])).toEqual({ images: 0, scale: null, nativeMax: 0 })
   })
 })
 

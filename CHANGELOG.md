@@ -5,6 +5,21 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Photos left out of a large survey get a pose.** When matching leaves photos apart from
+  the main block, or hanging on it by a few weak pairs, Match Features now detects them
+  again at full size together with the photos of the main block they share most pairs
+  with, and matches their pairs again (Match ▸ Repair a split graph ▸ **Detect gaps again
+  at full size**, on by default). It acts only on SIFT photos detected at under 0.8× of
+  their size, and not when the gap is more than half the block. Bridge repair now also
+  finds pieces that hang on the main block by pairs of fewer than 30 inliers (100 in
+  all), which it used to count as joined. On the Starbuck glacier survey (171 film scans
+  of 10,400 px, detected at 0.38× by the automatic resolution), 43 photos in two flight
+  lines hung on the block by 3 weak pairs; detecting them and 28 partners again took
+  17 minutes and left 2 apart, and the sparse model posed 161 photos instead of 125
+  (detection and matching 25 min instead of 6; detecting all 171 at full size poses 163
+  in 48 min).
+
 ### Fixed
 - **DISK without a GPU error.** Detect Features and Find GCPs now run DISK on the CPU
   from the start, instead of first trying the GPU, logging an ONNX Runtime error

@@ -30,12 +30,39 @@ export function onlyNewPairsEffect(s, { matchedPairs = 0, unpairedImages = 0 } =
     : `The ${plural(matchedPairs, 'pair')} already matched are matched again${added}.`
 }
 
-// The effect line of step 5, Repair a split graph.
-export function repairEffect(s, tuning = MATCH_TUNING) {
+// The effect line of step 5, Repair a split graph, with Detect gaps again at full size.
+//   small: the SIFT images detected at under tuning.gapMaxScale of their size
+//   ({ images, scale: their median detection scale, nativeMax: the largest native side })
+export function repairEffect(s, tuning = MATCH_TUNING, small = { images: 0 }) {
   if (s.repairSplits === false)
     return 'Off: a block that matching leaves in pieces stays in pieces, and SfM can only place them apart.'
-  return (
-    `If matching leaves the block in pieces, up to ${tuning.bridgePerComponent} pairs between each piece and the ` +
-    `main block (${tuning.bridgeMaxPairs} in all) are matched again with looser gates; F-RANSAC still verifies them.`
+  const repair =
+    `If matching leaves the block in pieces, or a piece hangs on it by a few weak pairs, up to ` +
+    `${tuning.bridgePerComponent} pairs between each piece and the main block (${tuning.bridgeMaxPairs} in all) are ` +
+    `matched again with looser gates; F-RANSAC still verifies them.`
+  let gap
+  if (s.gapRedetect === false) gap = 'Pieces still apart then keep the features they were detected with.'
+  else if (!small.images)
+    gap = 'Every image was detected at full size or by a learned detector: nothing to detect again.'
+  else
+    gap =
+      `Pieces still apart then are detected again at full size (${plural(small.images, 'image')} were detected at ` +
+      `${small.scale.toFixed(2)}× of up to ${small.nativeMax.toLocaleString('en-US')} px), with about ` +
+      `${Math.round(100 * tuning.gapPartnerShare)} % as many images of the main block, and their pairs matched again.`
+  return `${repair} ${gap}`
+}
+
+// The images Detect gaps again at full size could act on (repairEffect's `small`).
+//   images: [{ kpStatus, detector?, detectScale?, meta: { width, height } }]
+export function smallDetection(images, tuning = MATCH_TUNING) {
+  const small = images.filter(
+    (im) => im.kpStatus === 'done' && (im.detector ?? 'sift') === 'sift' && (im.detectScale ?? 1) < tuning.gapMaxScale,
   )
+  if (!small.length) return { images: 0, scale: null, nativeMax: 0 }
+  const scales = small.map((im) => im.detectScale).sort((a, b) => a - b)
+  return {
+    images: small.length,
+    scale: scales[scales.length >> 1],
+    nativeMax: Math.max(...small.map((im) => Math.max(im.meta?.width || 0, im.meta?.height || 0))),
+  }
 }

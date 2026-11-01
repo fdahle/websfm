@@ -21,9 +21,9 @@ import {
   preselectByFootprintOverlap,
   footprintOverlap,
 } from '../../core/features/preselect.js'
-import { planBridgeRepair, bridgeKey } from '../../core/features/bridgeRepair.js'
+import { planBridgeRepair, bridgeKey, graphPieces } from '../../core/features/bridgeRepair.js'
+import { gapDetectSettings, planGapRedetect } from '../../core/features/gapRedetect.js'
 import { laterPassSpan, pairPassEnd, spanFraction } from '../../core/features/matchProgress.js'
-import { graphHealth } from '../../core/eval/matchGraph.js'
 import { sequentialPairs } from '../../core/features/sequentialPairs.js'
 import { lightGlueModelFor } from '../../core/features/learnedDetectors.js'
 import { MATCH_DEFAULTS } from '../../core/defaults.user.js'
@@ -31,6 +31,7 @@ import { MATCH_TUNING } from '../../core/tuning.js'
 import { applyTuningOverrides } from '../tuningOverrides.js'
 import { buildScaleContext, describeScaleContext, resolveScaledPx } from '../../core/scaleContext.js'
 import { useFootprintsStore } from '../useFootprintsStore.js'
+import { useImagesStore } from '../useImagesStore.js'
 import { useModelsStore } from '../useModelsStore.js'
 import { nounFor, pluralize } from '../../core/textFormat.js'
 
@@ -108,6 +109,7 @@ export function createMatchAll({
 
   // Match again the pairs planBridgeRepair proposes, then log whether the pieces
   // joined. Pairs never matched before join `pairs`, so the run's totals include them.
+  // `grew`: fewer images outside the main block or hanging on it by a thread.
   async function repairSplits(
     ready,
     pairs,
@@ -120,23 +122,38 @@ export function createMatchAll({
       [...matchStore.value.values()]
         .filter((e) => byUuid.has(e.idA) && byUuid.has(e.idB))
         .map((e) => ({ ...e, disabled: e.enabled === false }))
+    const planOpts = {
+      minComponent: settings.bridgeMinComponent,
+      maxPairs: settings.bridgeMaxPairs,
+      perComponent: settings.bridgePerComponent,
+      retryMinRaw: settings.bridgeRetryMinRaw,
+      weakInliers: settings.bridgeWeakInliers,
+      weakCut: settings.bridgeWeakCut,
+    }
     const plan = planBridgeRepair({
       imageIds: ids,
       entries: entriesOf(),
       scoreUnmatched: unmatchedPairScore(ready),
       tried,
-      opts: {
-        minComponent: settings.bridgeMinComponent,
-        maxPairs: settings.bridgeMaxPairs,
-        perComponent: settings.bridgePerComponent,
-        retryMinRaw: settings.bridgeRetryMinRaw,
-      },
+      opts: planOpts,
     })
-    if (plan.components < 2) return {}
+    if (plan.components < 2 && !plan.weakPieces) return {}
+    const split =
+      plan.components > 1 ? `in ${plan.components} pieces (largest ${plan.mainSize}/${ids.length} images` : ''
+    const thread = plan.weakPieces
+      ? `${pluralize(plan.weakImages, 'image')} in ${pluralize(plan.weakPieces, 'piece')} ` +
+        `${plan.weakPieces === 1 ? 'hangs' : 'hang'} on the main block by pairs of fewer than ` +
+        `${settings.bridgeWeakInliers} inliers (${settings.bridgeWeakCut} in all)`
+      : ''
     if (!plan.pairs.length) {
       log(
-        `Matching: the match graph is in ${plan.components} pieces (largest ${plan.mainSize}/${ids.length} images)` +
-          (plan.pieces ? '; no pair between them is worth matching again' : '; only single images are cut off'),
+        `Matching: ` +
+          (split ? `the match graph is ${split})` : '') +
+          (split && thread ? '; ' : '') +
+          thread +
+          (plan.pieces || plan.weakPieces
+            ? '; no pair between them is worth matching again'
+            : '; only single images are cut off'),
         'info',
         'Matching',
       )
@@ -145,10 +162,13 @@ export function createMatchAll({
     const nNew = plan.pairs.filter((p) => p.source === 'new').length
     for (const p of plan.pairs) tried.add(bridgeKey(p.idA, p.idB))
     log(
-      `Matching: the match graph is in ${plan.components} pieces (largest ${plan.mainSize}/${ids.length} images, ` +
-        `${plan.detached} outside). Bridge repair${round > 1 ? ` round ${round}` : ''}: matching ` +
+      `Matching: ` +
+        (split ? `the match graph is ${split}, ${plan.detached} outside)` : '') +
+        (split && thread ? '; ' : '') +
+        thread +
+        `. Bridge repair${round > 1 ? ` round ${round}` : ''}: matching ` +
         `${pluralize(plan.pairs.length, 'pair')} between the main block ` +
-        `and ${pluralize(plan.pieces, 'piece')} again (${plan.pairs.length - nNew} retried, ${nNew} not tried before), ` +
+        `and ${pluralize(plan.pieces + plan.weakPieces, 'piece')} again (${plan.pairs.length - nNew} retried, ${nNew} not tried before), ` +
         `without the subset gate, ratio ${settings.bridgeRatioThreshold}, min inlier ratio ${settings.bridgeMinInlierRatio}, ` +
         `${settings.bridgeVerifier === 'magsac' ? 'MAGSAC++' : 'RANSAC'}`,
       'info',
@@ -187,16 +207,119 @@ export function createMatchAll({
     }
     await Promise.all(Array.from({ length: Math.min(concurrency, work.length) }, drain))
     if (isCancelled()) return { cancelled: true }
-    const accepted = entriesOf().filter((e) => e.status === 'done' && e.inlierCount > 0 && !e.weak && !e.disabled)
-    const after = graphHealth(accepted, ids).components
+    const after = planBridgeRepair({ imageIds: ids, entries: entriesOf(), opts: { ...planOpts, maxPairs: 0 } })
+    const loose = (p) => p.detached + p.weakImages
     log(
       `Matching: bridge repair accepted ${joined}/${pluralize(work.length, 'pair')}; the graph is now in ` +
-        `${pluralize(after.length, 'piece')}, the largest ${after[0]?.length ?? 0}/${ids.length} images ` +
-        `(was ${plan.mainSize})`,
-      after[0]?.length > plan.mainSize ? 'success' : 'info',
+        `${pluralize(after.components, 'piece')}, the largest ${after.mainSize}/${ids.length} images ` +
+        `(was ${plan.mainSize})` +
+        (plan.weakPieces || after.weakPieces
+          ? `; ${pluralize(after.weakImages, 'image')} still ${after.weakImages === 1 ? 'hangs' : 'hang'} by a thread (was ${plan.weakImages})`
+          : ''),
+      loose(after) < loose(plan) ? 'success' : 'info',
       'Matching',
     )
-    return { joined, grew: (after[0]?.length ?? 0) > plan.mainSize && after.length > 1 }
+    return { joined, grew: loose(after) < loose(plan) && loose(after) > 0 }
+  }
+
+  // Detect again at full size the photos of the pieces bridge repair left apart, with
+  // their partners in the main block (core/features/gapRedetect.js), and match their
+  // pairs again: a run of matchAll on them. → the summary kept on the run record, or
+  // null when nothing was apart. `span`: the part of the bar this step fills.
+  async function redetectGaps(images, ready, settings, requested, { onProgress, shouldCancel, span }) {
+    const byUuid = new Map(ready.map((im) => [im.uuid, im]))
+    const ids = [...byUuid.keys()]
+    const entriesOf = () =>
+      [...matchStore.value.values()]
+        .filter((e) => byUuid.has(e.idA) && byUuid.has(e.idB))
+        .map((e) => ({ ...e, disabled: e.enabled === false }))
+    const pieceOpts = {
+      minComponent: settings.bridgeMinComponent,
+      weakInliers: settings.bridgeWeakInliers,
+      weakCut: settings.bridgeWeakCut,
+    }
+    const apartNow = () => graphPieces({ imageIds: ids, entries: entriesOf(), opts: pieceOpts })
+    const before = apartNow()
+    const plan = planGapRedetect({
+      pieces: before.pieces,
+      entries: entriesOf(),
+      images: new Map(ready.map((im) => [im.uuid, { detector: im.detector, detectScale: im.detectScale }])),
+      imageCount: ready.length,
+      opts: { maxScale: settings.gapMaxScale, partnerShare: settings.gapPartnerShare, maxShare: settings.gapMaxShare },
+    })
+    if (plan.skipped === 'none') return null
+    const apart = `${pluralize(plan.apart, 'image')} ${plan.apart === 1 ? 'is' : 'are'} still apart after bridge repair`
+    if (plan.skipped) {
+      log(
+        `Matching: ${apart}; ` +
+          {
+            native: 'they were detected at full size already, so detecting them again adds nothing',
+            learned: 'their features are from a learned detector, which is not detected again at full size',
+            many: `they are more than ${Math.round(100 * settings.gapMaxShare)} % of the block: detect every image at full size instead`,
+          }[plan.skipped],
+        'info',
+        'Matching',
+      )
+      return { skipped: plan.skipped, apart: plan.apart }
+    }
+    const chosen = [...plan.loose, ...plan.partners].map((u) => byUuid.get(u))
+    const detect = {
+      ...gapDetectSettings(chosen, { maxKeypoints: settings.gapMaxKeypoints }),
+      onlyIds: chosen.map((im) => im.id),
+      _matchAgain: true, // its pairs are matched again below: no "re-match these" per image
+      ...(settings.memBudgetBytes > 0 ? { memBudgetBytes: settings.memBudgetBytes } : {}),
+    }
+    log(
+      `Matching: ${apart}, detected at ${plan.scale.toFixed(2)}× of their size — detecting ` +
+        `${pluralize(plan.loose.length, 'image')} again at full size (≤${detect.maxDim} px, tiled, ` +
+        `≤${detect.maxKeypoints.toLocaleString('en-US')} keypoints) with ` +
+        `${pluralize(plan.partners.length, 'image')} of the main block they share most pairs with, ` +
+        `then matching their pairs again`,
+      'info',
+      'Matching',
+    )
+    const t0 = performance.now()
+    // Detection is the long part (Starbuck: 18 of 24 minutes); the matching gets the rest.
+    const mid = span[0] + 0.7 * (span[1] - span[0])
+    await useImagesStore().detectAll(
+      detect,
+      null,
+      (k, n, name) =>
+        onProgress?.(k, n, `Detecting ${name} again at full size`, spanFraction([span[0], mid], k, n), 'gap-detect'),
+      shouldCancel,
+    )
+    if (shouldCancel?.()) return { cancelled: true }
+    const record = matchRun.value
+    await matchAll(
+      images,
+      { ...requested, onlyIds: detect.onlyIds, gapRedetect: false, onlyNewPairs: false },
+      (k, n, label, f) => onProgress?.(k, n, label, mid + (span[1] - mid) * (f ?? 0), 'gap-match'),
+      shouldCancel,
+    )
+    const pairsAgain = matchRun.value === record ? 0 : (matchRun.value?.nPairs ?? 0)
+    matchRun.value = record
+    if (shouldCancel?.()) return { cancelled: true }
+    const after = apartNow()
+    const left = after.pieces.reduce((n, p) => n + p.ids.length, 0)
+    const seconds = (performance.now() - t0) / 1000
+    log(
+      `Matching: after detecting ${pluralize(chosen.length, 'image')} again at full size and matching ` +
+        `${pluralize(pairsAgain, 'pair')} again, ${pluralize(left, 'image')} ${left === 1 ? 'is' : 'are'} still apart ` +
+        `(was ${plan.apart}); ${(seconds / 60).toFixed(1)} min`,
+      left < plan.apart ? 'success' : 'info',
+      'Matching',
+    )
+    return {
+      apart: plan.apart,
+      redetected: plan.loose.length,
+      partners: plan.partners.length,
+      scale: plan.scale,
+      maxDim: detect.maxDim,
+      maxKeypoints: detect.maxKeypoints,
+      pairs: pairsAgain,
+      left,
+      seconds,
+    }
   }
 
   // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt on
@@ -413,6 +536,15 @@ export function createMatchAll({
       !lightglue &&
       !settings._skipSubsetGate
     const bridgeRounds = settings.repairSplits === false ? 0 : (settings.bridgeRounds ?? 1)
+    // Whether detecting the gaps again at full size can follow bridge repair: some SIFT
+    // images were detected under gapMaxScale of their size. A run on a selection never
+    // starts one (that run is how it matches its photos again).
+    const gapPossible =
+      settings.gapRedetect !== false &&
+      bridgeRounds > 0 &&
+      !settings.onlyIds?.length &&
+      !lightglue &&
+      ready.some((im) => (im.detector ?? 'sift') === 'sift' && (im.detectScale ?? 1) < settings.gapMaxScale)
     const pairSpan = [0, pairPassEnd({ rescue: canRescue, bridgeRounds, postShare: settings.progressPostShare })]
     let barAt = 0
     const progress = (k, n, span, label, phase) => {
@@ -711,7 +843,7 @@ export function createMatchAll({
       const tried = new Set()
       for (let round = 1; round <= bridgeRounds; round++) {
         if (cancelled || shouldCancel?.()) break
-        const span = laterPassSpan(barAt, round === bridgeRounds)
+        const span = laterPassSpan(barAt, round === bridgeRounds && !gapPossible)
         const label = `Bridge repair${round > 1 ? ` round ${round}` : ''}: matching the pieces of the match graph again`
         const repaired = await repairSplits(ready, pairs, settings, {
           round,
@@ -846,6 +978,14 @@ export function createMatchAll({
         sequentialLoopClosure: strategy === 'sequential' ? settings.sequentialLoopClosure : null,
         lgTiled: settings.matcher === 'lightglue' ? settings.lgTiled : null,
       },
+    }
+    if (gapPossible) {
+      const gap = await redetectGaps(images, ready, settings, requested, {
+        onProgress,
+        shouldCancel,
+        span: [barAt, 1],
+      })
+      if (gap) matchRun.value = { ...matchRun.value, gapRedetect: gap }
     }
   }
 

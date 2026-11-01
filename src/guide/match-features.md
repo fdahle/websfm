@@ -315,11 +315,17 @@ Images taken from very different directions match poorly with each other: the
 vertical and oblique cameras of an aerial mapping flight, a facade and the roof above
 it, two strips flown at different heights. One matching pass can then leave the block
 in pieces that are connected inside but not to each other, and
-[sparse reconstruction](guide:sparse-reconstruction) can only place them apart.
+[sparse reconstruction](guide:sparse-reconstruction) can only place them apart. Or a
+piece is joined to the rest by a thread: one or two pairs of a few dozen matches, too
+few for sparse reconstruction to place its images, so they stay without a pose (a
+flight line of a historical survey flown beside the others, for instance).
 
 With this on, matching checks the [match graph](help:match-graph) when it has run. For
 each piece of at least two images it takes the most promising pairs between that piece
-and the largest one, and matches them again:
+and the largest one, and matches them again. A piece counts as hanging by a thread when
+it stands apart once the pairs of fewer than 30 inliers are left out, and all its pairs
+to the rest hold fewer than 100 inliers together; it is matched against the part of the
+main block that holds together without those weak pairs. The pairs, in this order:
 
 1. pairs that were rejected with at least 8 putative matches, the closest misses first;
 2. pairs never tried, because preselection left them out, whose footprints overlap
@@ -331,10 +337,31 @@ a ratio test of 0.9 instead of 0.8, a minimum inlier ratio of 8 %, and the MAGSA
 estimator; LightGlue gets twice the keypoints. F-RANSAC still verifies every pair, so a
 pair is accepted only when its matches fit one epipolar geometry. While the main block
 keeps growing this repeats, up to three rounds, each with pairs not tried before. The
-log says how many pieces there were, how many pairs each round tried, and how large the
-main block is afterwards.
+log says how many pieces there were, how many images hung by a thread, how many pairs
+each round tried, and how large the main block is afterwards.
 A pair you excluded is never tried. Single images that match nothing are left alone:
 they are usually blurred or show no overlapping ground.
+
+## Detect gaps again at full size
+<!-- param: gapRedetect  default: on -->
+Matching again cannot find what detection never saw. Large scans are detected well
+under their size by the automatic resolution of
+[Detect Features](guide:detect-features) (a 10,400 px aerial film scan at about 0.4×),
+and the fine detail that would join two flight lines can be lost there. With this on,
+when pieces are still apart after the repair, their images are detected again at full
+size: tiled, with the keypoint limit raised with the area up to 40,000. With them go
+about two images of the main block for every three in the gap, those with candidate
+pairs to the most of them, and every pair of these images is matched again. An image
+of the main block that was detected at full size already keeps its features.
+
+It runs only for SIFT images detected at under 0.8× of their size, and not when the
+gap holds more than half the images: detecting every image at full size is then the
+better run. On the Starbuck glacier survey (171 scans of 10,400 px), 43 images in two
+flight lines hung on the block by three weak pairs at the automatic resolution. Detecting
+them and 28 images of the main block again took 17 minutes, and sparse reconstruction
+then placed 161 of the 171 images instead of 125. The log says how many images were detected
+again, how many pairs were matched again, and how many images are still apart
+afterwards.
 
 ## GPU acceleration
 With **Use GPU** on (Settings → Compute; on by default when the browser offers

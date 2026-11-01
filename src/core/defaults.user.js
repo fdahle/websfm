@@ -185,6 +185,10 @@ export const MATCH_DEFAULTS = {
   // each piece and the main block again with looser gates (core/features/bridgeRepair.js;
   // limits in tuning.js ▸ bridge*).
   repairSplits: true,
+  // When pieces are still apart after that, detect their photos again at full size with
+  // their partners in the main block, and match their pairs again: only for SIFT photos
+  // detected well under their size (core/features/gapRedetect.js; tuning.js ▸ gap*).
+  gapRedetect: true,
   // Keep the result of every pair already matched and match only the others: what adding
   // photos to a matched project needs. The dialog turns it on by itself when some images
   // with features are in no pair yet (stepEffects/match.js onlyNewPairsDefault).

@@ -40,13 +40,16 @@ const props = defineProps({
   // (null: every pair the strategy chooses); `onlyCount` of them have keypoints.
   onlyIds: { type: Array, default: null },
   onlyCount: { type: Number, default: 0 },
+  // The SIFT images detected well under their size, which Detect gaps again at full size
+  // can act on (core/stepEffects/match.js smallDetection).
+  smallDetection: { type: Object, default: () => ({ images: 0, scale: null, nativeMax: 0 }) },
 })
 const limited = computed(() => !!props.onlyIds?.length)
 
 const emit = defineEmits(['close', 'run'])
 
 // GPU is a machine-level preference now (Settings ▸ Compute), injected on run.
-const { useGpu } = useComputeSettings()
+const { useGpu, memBudgetBytes } = useComputeSettings()
 const { recommendations, profile } = useDatasetRecommendations()
 const { log } = useLog()
 
@@ -219,7 +222,7 @@ const verifyEffect = computed(() =>
     ? `Matches that do not fit one epipolar geometry (within ${settings.value.ransacThreshPx} px at detection resolution) are discarded.`
     : 'Off — every putative match is kept, including the wrong ones.',
 )
-const repairLine = computed(() => repairEffect(settings.value))
+const repairLine = computed(() => repairEffect(settings.value, MATCH_TUNING, props.smallDetection))
 const acceptFloor = computed(() => Math.min(MATCH_TUNING.rawSkipFloor, settings.value.minMatches))
 const acceptEffect = computed(() =>
   settings.value.geometricVerification
@@ -290,6 +293,8 @@ function run() {
     ...settings.value,
     ...(limited.value ? { onlyIds: [...props.onlyIds] } : {}),
     useGpu: useGpu.value,
+    // Detecting gaps again plans its concurrency from it, as Detect Features does.
+    memBudgetBytes: memBudgetBytes.value,
   })
 }
 </script>
@@ -835,6 +840,23 @@ function run() {
           >
           <label class="checkbox-row"
             ><input v-model="settings.repairSplits" type="checkbox" class="checkbox" /> Enabled</label
+          >
+        </SettingsField>
+        <SettingsField
+          v-if="settings.repairSplits"
+          hint="Detect the images of pieces still apart again at full size, with their partners, and match their pairs again."
+        >
+          <template #label
+            ><FieldHelp
+              op="match-features"
+              param="gapRedetect"
+              :value="settings.gapRedetect"
+              :default-value="MATCH_DEFAULTS.gapRedetect"
+              >Detect gaps again at full size</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.gapRedetect" type="checkbox" class="checkbox" /> Enabled</label
           >
         </SettingsField>
       </SettingsStep>

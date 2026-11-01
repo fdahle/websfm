@@ -2257,6 +2257,8 @@ window.bench = {
       matcher: 'bruteforce',
       useGpu: true,
       ...withPreset(MATCH_DEFAULTS, MATCH_PRESETS, preset),
+      // As MatchFeaturesModal passes it: Detect gaps again plans its concurrency from it.
+      memBudgetBytes: useComputeSettings().memBudgetBytes.value,
       ...overrides,
     }
     if (settings.matcher === 'lightglue') {
@@ -2294,6 +2296,8 @@ window.bench = {
       inliers,
       pairDigest: h.toString(16),
       perPair,
+      // Detect gaps again at full size (stores/matching/matchAll.js redetectGaps), if it ran.
+      gapRedetect: matches.matchRun?.gapRedetect ?? null,
     }
   },
 

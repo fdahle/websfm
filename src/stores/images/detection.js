@@ -153,7 +153,8 @@ export function createDetection({
           // Absent before 2026-10 ⇒ unknown (they ran with 'response').
           capRule,
         }
-        if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid)
+        // `_matchAgain`: the caller matches this image's pairs again (matchAll's Detect gaps again).
+        if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid, { quiet: !!settings._matchAgain })
         log(`${tag} done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', 'Detection')
         // Detailed diagnostics (debug level): the working resolution actually
         // used, how many features the cap discarded, mask drops, and the response

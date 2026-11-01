@@ -444,7 +444,9 @@ export const useMatchesStore = registerProjectStore(
     // keypoints) renumbers its keypoint indices, so any stored match referencing
     // the old indices is now wrong — invalidate them rather than let stale indices
     // corrupt a later match/reconstruct run.
-    function removeMatchesForImage(uuid) {
+    // `quiet`: the caller matches the pairs again itself (Detect gaps again), so the
+    // warning would ask for what is already happening.
+    function removeMatchesForImage(uuid, { quiet = false } = {}) {
       restoreGeneration++
       let removed = 0
       for (const [pid, e] of matchStore.value) {
@@ -458,11 +460,12 @@ export const useMatchesStore = registerProjectStore(
         markHeavy()
         save()
         touch()
-        log(
-          `Matches invalidated: ${pluralize(removed, 'pair')} — keypoints changed, re-match these`,
-          'warn',
-          'Matching',
-        )
+        if (!quiet)
+          log(
+            `Matches invalidated: ${pluralize(removed, 'pair')} — keypoints changed, re-match these`,
+            'warn',
+            'Matching',
+          )
       }
       return removed
     }
