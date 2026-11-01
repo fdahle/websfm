@@ -94,6 +94,11 @@ project:
   poses it fits a georeference from them as truth: `vsPoses` gives each candidate's
   distance from where that puts its own sparse point (median, p90, max, the mean
   offset, and the scatter about it).
+- `coreg`: Tools ▸ Products ▸ Co-register DEM… on the main DEM. Config `coreg` =
+  `{ reference, stable?, horizontal?, vertical?, tilt?, applyTo? }` (a reference DEM
+  and a polygon layer by name; the steps default to COREG_DEFAULTS). With `applyTo:
+  "dem"` the co-registered DEM becomes the main one, which `exportDem` writes; with
+  `"georeference"`, put a `dem:…` stage after it.
 - `ui:findgcps`: the same through the dialog itself. It opens Find GCPs, records the
   band and matcher it shows, picks `ui:findgcps.reference` (and `.matcher`), clicks
   Find candidates and waits for the result line; `<out>.ui-findgcps-{open,result}.png`.

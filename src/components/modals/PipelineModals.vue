@@ -19,6 +19,7 @@ import CleanMeshModal from './mesh/CleanMeshModal.vue'
 import ClipRasterModal from './products/ClipRasterModal.vue'
 import CloudDistanceModal from './cloud/CloudDistanceModal.vue'
 import ContoursModal from './products/ContoursModal.vue'
+import CoregisterDemModal from './products/CoregisterDemModal.vue'
 import CropCloudModal from './cloud/CropCloudModal.vue'
 import DecimateMeshModal from './mesh/DecimateMeshModal.vue'
 import TextureMeshModal from './mesh/TextureMeshModal.vue'
@@ -50,6 +51,7 @@ import TransformCloudModal from './cloud/TransformCloudModal.vue'
 import { extensionBlocker } from '../../core/sfm/extendModel.js'
 import { pluralize } from '../../core/textFormat.js'
 import { useLog } from '../../composables/useLog.js'
+import { useDemCoregistration } from '../../composables/useDemCoregistration.js'
 import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 import { smallDetection } from '../../core/stepEffects/match.js'
 const FindGcpsModal = defineAsyncComponent(() => import('./georef/FindGcpsModal.vue'))
@@ -198,6 +200,7 @@ const {
   reconstructOpen,
   scaleBarsOpen,
   toolModal,
+  coregisterInitial,
 } = storeToRefs(useModalsStore())
 const {
   applyCrsSuggestion,
@@ -237,6 +240,7 @@ const {
   onOptimizeCamerasRun,
   onOrthoRun,
   onProductToolRun,
+  onCoregisterRun,
   onReconstructRun,
   onSectionRun,
   onToolEditRun,
@@ -286,6 +290,15 @@ const exportSources = computed(() => {
   return {}
 })
 const footprintsStore = useFootprintsStore()
+// Co-register DEM: the DEMs (the main one first), the reference DEMs, the polygon
+// layers that can mark stable ground.
+const { demRasters: referenceDems } = storeToRefs(useExternalStore())
+const demProducts = computed(() => {
+  const all = reconstructionStore.rasterProducts.filter((p) => p.kind === 'dem')
+  return [...all.filter((p) => p.id === dem.value?.id), ...all.filter((p) => p.id !== dem.value?.id)]
+})
+const polygonLayers = computed(() => footprintsStore.sets.filter((s) => s.kind !== 'lines'))
+const { chainsOnto, removeFromGeoreference } = useDemCoregistration()
 const exportingFootprints = computed(
   () => !!exportTargetVectorSet.value && exportTargetVectorSet.value.id === footprintsStore.footprintSet?.id,
 )
@@ -616,6 +629,24 @@ const exportingFootprints = computed(
       :dem="dem"
       @close="toolModal = null"
       @run="(s) => onProductToolRun(exportContours, s)"
+    />
+    <CoregisterDemModal
+      v-else-if="toolModal === 'coregister-dem'"
+      :dems="demProducts"
+      :references="referenceDems"
+      :layers="polygonLayers"
+      :initial="coregisterInitial"
+      :georef-crs="reconstructionStore.georef?.crs ?? null"
+      :current="reconstructionStore.coregistration"
+      :chains-onto="chainsOnto"
+      @close="
+        () => {
+          toolModal = null
+          coregisterInitial = null
+        }
+      "
+      @remove="removeFromGeoreference"
+      @run="onCoregisterRun"
     />
     <TerrainModal
       v-else-if="toolModal === 'dem-derivatives'"

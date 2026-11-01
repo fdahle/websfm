@@ -716,6 +716,18 @@ export const CONTOUR_DEFAULTS = {
   // 'none' | 'geojson' | 'dxf'. A DEM without a CRS is always downloaded.
   format: 'none',
 }
+// Co-register DEM… (core/products/demCoregistration.js): the steps xDEM chains, each
+// optional. Melville (Find GCPs control, 20 m DEM, rock vs REMA): NMAD 6.9 m as built,
+// 5.2 with the shifts, 5.0 with a plane, 4.9 with a quadratic. The tilt stays off by
+// default: fitted on stable ground in one corner, it extrapolates over the rest.
+export const COREG_DEFAULTS = {
+  horizontal: true, // Nuth & Kääb
+  vertical: true, // the median height difference
+  tilt: 'off', // 'off' | 'plane' | 'quadratic'
+  // 'dem': a co-registered copy of the DEM (as xDEM), 'georeference': the georeference
+  // moves onto the reference, and the products are rebuilt.
+  applyTo: 'dem',
+}
 export const TERRAIN_DEFAULTS = {
   products: ['slope', 'hillshade'],
   slopeUnits: 'degrees', // 'degrees' | 'percent'

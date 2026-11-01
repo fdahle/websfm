@@ -328,8 +328,8 @@ How many candidates to propose, spread over the block: the best in each cell of 
 √n × √n grid first, then the next best anywhere. Their heights pin the
 georeference's tilt, and a height read off a reference DEM on steep rock is a few
 metres off, so more, better spread candidates give a level model. On Rachel Glacier
-30 candidates left the DEM 2.8 m high after **Move the control onto the reference**
-(see Quality Report), 90 only 0.7 m. Fewer suit a block with little stable ground,
+30 candidates left the DEM 2.8 m high once the control was moved onto REMA (what
+[Co-register a DEM](guide:coregister-dem) now does to the georeference), 90 only 0.7 m. Fewer suit a block with little stable ground,
 where the extra candidates would only repeat the same patches.
 
 ## Stable ground

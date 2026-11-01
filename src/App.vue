@@ -716,6 +716,7 @@ const {
   onToolEditRun,
   onSectionRun,
   onProductToolRun,
+  onCoregisterRun,
 } = useDialogRuns({
   pipeline: {
     runDetect,
@@ -1026,6 +1027,7 @@ provideAppContext({
   onOptimizeCamerasRun,
   onOrthoRun,
   onProductToolRun,
+  onCoregisterRun,
   onRasterImportAsImage,
   onRasterStyleApply,
   onReconstructRun,

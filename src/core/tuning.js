@@ -669,6 +669,25 @@ export const PROJECT_IMPORT_TUNING = {
   photosPerBatch: 16,
 }
 
+// Tools ▸ Products ▸ Co-register DEM… (core/products/demCoregistration.js).
+export const COREG_TUNING = {
+  // DEM cells used, on a regular sub-grid: each costs about a dozen reference samples,
+  // and 20,000 pin a metre-scale shift (as Quality Report ▸ DEM vs reference).
+  maxPoints: 20000,
+  // Fewer cells with a reference height than this: no co-registration.
+  minPoints: 200,
+  // Nuth & Kääb on slopes in this range (flat ground shows no shift, cliffs are noise),
+  // until the step is under `tolerance` of a cell, at most maxIterations passes.
+  minSlopeDeg: 5,
+  maxSlopeDeg: 45,
+  maxIterations: 8,
+  tolerance: 0.05,
+  // The tilt fit keeps cells within this many NMAD of the median, then of the first fit.
+  trimNmad: 3,
+  // Points kept with a co-registered georeference, to compose it again after a refit.
+  anchors: 200,
+}
+
 // Sidebar ▸ Sensors: which camera groups may hold photos of more than one camera
 // (core/sensors/splitSuggestions.js).
 export const SENSOR_TUNING = {

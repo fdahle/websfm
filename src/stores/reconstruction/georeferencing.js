@@ -1,5 +1,12 @@
-import { computed, watch } from 'vue'
-import { fitGeoreference, applySimilarity, similarityPrecision } from '../../core/products/georef.js'
+import { computed, ref, watch } from 'vue'
+import {
+  fitGeoreference,
+  applySimilarity,
+  similarityPrecision,
+  frameFromSimilarity,
+} from '../../core/products/georef.js'
+import { coregisteredSimilarity } from '../../core/products/demCoregistration.js'
+import { describeCoregistration } from '../../core/stepEffects/coregister.js'
 import { buildMetricFrame } from '../../core/products/localFrame.js'
 import { cameraCenter } from '../../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../../core/sfm/gcpTriangulation.js'
@@ -47,13 +54,14 @@ const inverseVariance3d = (p) => {
 //    misclick must not drag the aiming guide in every other image.)
 //
 // Deps are getters/refs so the store keeps ownership of the state:
-//   sparseCameras, images, georef, healthDirty — refs/computeds
+//   sparseCameras, images, georef, coregistration, healthDirty — refs/computeds
 //   poses(), gcps(), currentCrs() — snapshot getters over the other stores
 //   save(), log() — store side effects
 export function createGeoreferencing({
   sparseCameras,
   images,
   georef,
+  coregistration = ref(null),
   healthDirty,
   poses,
   gcps,
@@ -318,7 +326,7 @@ export function createGeoreferencing({
       log('Georeference: fit failed (degenerate configuration)', 'warn', 'Products')
       return null
     }
-    georef.value = {
+    georef.value = withCoregistration({
       evidenceKey: evidenceAtStart,
       sim: { scale: fit.scale, R: fit.R, t: fit.t, ...(local ? { local } : {}) },
       crs: currentCrs(),
@@ -326,7 +334,7 @@ export function createGeoreferencing({
       count: fit.count,
       method: usingGcps ? 'gcps' : 'poses',
       verticalDatum,
-    }
+    })
     log(
       `Georeference: ${fit.count} ${usingGcps ? 'GCPs' : 'poses'} → ${currentCrs()}, ` +
         `scale ${fit.scale.toPrecision(4)}, weighted RMS ${fit.rms.toPrecision(3)}` +
@@ -337,7 +345,48 @@ export function createGeoreferencing({
       'success',
       'Products',
     )
+    if (georef.value.coregistered)
+      log(
+        `Georeference: co-registered to ${describeCoregistration(coregistration.value)}, kept from Co-register DEM`,
+        'info',
+        'Products',
+      )
     healthDirty.value++ // GCP prune / refit → the hub overview must recompute
+    save()
+    return georef.value
+  }
+
+  // A fit `g` composed with the co-registration (core/products/demCoregistration.js):
+  // `sim` is then the moved similarity and `fitSim` the fit's own. A co-registration
+  // in another CRS than the fit's is not applied.
+  function withCoregistration(g) {
+    const base = g.fitSim ?? g.sim
+    const { fitSim: _f, coregistered: _c, ...plain } = g
+    const c = coregistration.value
+    if (!c || c.crs !== g.crs) return { ...plain, sim: base }
+    const frame = frameFromSimilarity(base, g.crs)
+    const moved = coregisteredSimilarity(c.pairs, {
+      toSfm: frame.toSfm,
+      fit: (pairs) => fitGeoreference(pairs, base.local ?? null),
+    })
+    if (!moved) return { ...plain, sim: base }
+    const { scale, R, t } = moved.sim
+    return {
+      ...plain,
+      sim: { scale, R, t, ...(base.local ? { local: base.local } : {}) },
+      fitSim: base,
+      coregistered: true,
+    }
+  }
+
+  // Set (or, with null, remove) the georeference's co-registration and move the current
+  // fit by it at once. → the georeference, or null without one.
+  function setCoregistration(record) {
+    coregistration.value = record
+    if (georef.value) {
+      georef.value = withCoregistration(georef.value)
+      healthDirty.value++
+    }
     save()
     return georef.value
   }
@@ -573,6 +622,7 @@ export function createGeoreferencing({
     georeferenceBlocker,
     crsSuggestion,
     georeference,
+    setCoregistration,
     poseResidualReport,
     gcpAccuracyReport,
     gcpGuides,

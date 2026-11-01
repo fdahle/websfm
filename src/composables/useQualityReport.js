@@ -1,4 +1,4 @@
-import { linearCrsUnit, ensureProjection, transform } from '../core/crs.js'
+import { linearCrsUnit } from '../core/crs.js'
 import { shiftRange } from '../core/verticalDatum.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 // Shared assembly for the Quality Report hub (PLAN-eval-quality-hub). Marshals the
@@ -15,7 +15,7 @@ import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
-import { polygonAreaTest } from '../core/products/vectorLayers.js'
+import { demLayerTest } from './demLayerTest.js'
 import { sparseModelStats } from '../core/eval/sparseStats.js'
 import { completedMatchGraphHealth } from '../core/eval/matchGraph.js'
 import { perImageResiduals, unregisteredReason } from '../core/eval/imageStats.js'
@@ -200,7 +200,7 @@ export function useQualityReport() {
         strict: true,
         datum: dem.verticalDatum ?? null,
       })
-      const include = await demLayerTest(dem, [stable, area])
+      const include = await demLayerTest(dem, [stable, area], projects.currentCrs)
       // A DEM in a CRS is also co-registered (Nuth & Kääb): a horizontal offset against
       // the reference reads as height error on every slope.
       const cmp = await compareDemToReference(dem, sample, {
@@ -256,24 +256,6 @@ export function useQualityReport() {
       if (demRefCache?.promise === promise) demRefCache = null
     })
     return promise
-  }
-
-  // A cell test for the comparison: inside every given polygon layer (null entries
-  // skipped). Layers are stored in the project CRS; the DEM may be in another one.
-  async function demLayerTest(dem, layers) {
-    const tests = []
-    const crs = projects.currentCrs
-    for (const set of layers) {
-      if (!set) continue
-      if (!dem.crs || dem.crs === 'local') throw new Error('Limiting the comparison to a layer needs a DEM in a CRS')
-      let polygons = set.footprints.map((f) => f.rings)
-      if (crs && dem.crs !== crs) {
-        await Promise.all([ensureProjection(crs), ensureProjection(dem.crs)])
-        polygons = polygons.map((rings) => rings.map((ring) => ring.map((p) => transform(p, crs, dem.crs))))
-      }
-      tests.push(polygonAreaTest(polygons))
-    }
-    return tests.length ? (x, y) => tests.every((t) => t(x, y)) : null
   }
 
   // The headline tiles for a comparison — the hub section and the export share them.
@@ -523,6 +505,9 @@ export function useQualityReport() {
       textured: recon.clouds.some((c) => c.kind === 'mesh' && !c.imported && c.texture),
       dem: !!recon.dem,
       demFill: recon.dem?.fillMethod ?? null,
+      // The main DEM's own co-registration, else the georeference's.
+      coregistration:
+        recon.dem?.coregistration?.steps ?? (recon.georef?.coregistered ? recon.coregistration?.steps : null) ?? null,
       ortho: recon.ortho ? (recon.ortho.method ?? {}) : null,
       groundClassified: recon.clouds.some((c) => c.classifiedBy?.ground),
       aboveGroundClassified: recon.clouds.some((c) => c.classifiedBy?.vegetation || c.classifiedBy?.buildings),
@@ -700,36 +685,7 @@ export function useQualityReport() {
     return { digest, markdown: digestToMarkdown(digest), json: digestToJson(digest) }
   }
 
-  // Move the control onto the reference DEM: shift every control and check point by the
-  // co-registration offset (in the DEM's CRS), refill its height from that DEM at the new
-  // position, and refit. For control whose positions came from another reference than
-  // its heights (Find GCPs: a satellite image and a DEM), which the DEM then inherits as
-  // an offset. → { moved, filled }.
-  async function alignControlToReference(refId, coreg) {
-    const dem = recon.dem,
-      crs = projects.currentCrs
-    if (!dem?.crs || dem.crs === 'local' || !coreg) throw new Error('Needs a co-registered DEM in a CRS')
-    await Promise.all([ensureProjection(crs), ensureProjection(dem.crs)])
-    const [dx, dy] = coreg.shift
-    const move = (x, y) => {
-      const [u, v] = transform([x, y], crs, dem.crs)
-      return transform([u - dx, v - dy], dem.crs, crs)
-    }
-    const ids = gcpsStore.gcps.filter((g) => g.role !== 'marker').map((g) => g.id)
-    const moved = gcpsStore.moveGcps(move, {
-      ids,
-      reason: `by E ${(-dx).toFixed(2)}, N ${(-dy).toFixed(2)} onto the reference DEM`,
-    })
-    const filled = await gcpsStore.fillZFromReferenceDem(
-      (x, y, o) => external.sampleReferenceDem(x, y, { ...o, rasterId: refId }),
-      { ids, overwrite: true },
-    )
-    await recon.georeference()
-    return { moved, filled }
-  }
-
   return {
-    alignControlToReference,
     cameras,
     points,
     imageIds,

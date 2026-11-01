@@ -9,6 +9,7 @@ import { downloadBlob } from '../utils/download.js'
 import { terminateAll } from '../workers/computeClient.js'
 import { useImageViewSettings } from './useImageViewSettings.js'
 import { useLog } from './useLog.js'
+import { useDemCoregistration } from './useDemCoregistration.js'
 import { showToast } from './useToasts.js'
 import { defaultExportName, exportFileName } from '../core/exportNames.js'
 
@@ -57,7 +58,9 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     filterCloudPreset,
     mergeCloudsOpen,
     toolModal,
+    coregisterInitial,
   } = storeToRefs(useModalsStore())
+  const demCoregistration = useDemCoregistration()
   const { imageViewPrefs, patchImageView } = useImageViewSettings()
 
   function onDetectRun(settings) {
@@ -293,7 +296,27 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     }
   }
 
+  // Co-register DEM: close the dialog, co-register, and say how far the DEM moved.
+  async function onCoregisterRun(settings) {
+    toolModal.value = null
+    coregisterInitial.value = null
+    try {
+      const { result, record, unit } = await demCoregistration.run(settings)
+      const u = (v) => `${v.toFixed(2)}${unit ? ` ${unit}` : ''}`
+      showToast(record ? `Added "${record.name}"` : 'Georeference co-registered', {
+        detail:
+          `NMAD on ${settings.stableSetId ? 'stable ground' : 'all cells'} ${u(result.before.nmad)} → ${u(result.after.nmad)}` +
+          (record ? '' : '. Rebuild the DEM and orthophoto.'),
+        ms: 8000,
+      })
+    } catch (err) {
+      log(`${err?.message ?? err}`, 'error', 'Products')
+      showToast('Co-registration failed', { detail: String(err?.message ?? err), kind: 'error', ms: 6000 })
+    }
+  }
+
   return {
+    onCoregisterRun,
     onDetectRun,
     onMatchRun,
     georeferenceAfterReconstruct,

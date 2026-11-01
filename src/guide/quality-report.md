@@ -62,11 +62,9 @@ different references, as with Find GCPs (a satellite image for the position, a D
 for the height). On Rachel Glacier the DEM sat 11 m north of REMA, and its NMAD on
 stable rock went from 8.7 m to 5.3 m once shifted.
 
-**Move the control onto the reference** removes such an offset at its source. It moves
-every control and check point by the offset (worked out in the DEM's CRS), refills its
-height from this reference DEM at the new position, and refits the georeference.
-Rebuild the DEM and orthophoto afterwards. Use it when the reference DEM is the
-better-located of your references, and do not use it on surveyed control.
+**Co-register DEM…** removes such an offset: it opens
+[Co-register a DEM](guide:coregister-dem) with this reference and stable ground, which
+moves a copy of the DEM, or the georeference, onto the reference.
 
 ## Stable ground
 <!-- param: stableArea  default: All cells -->

@@ -162,3 +162,67 @@ it('records the vertical datum the control shares, and unknown when it is mixed'
   expect(await fit(['ellipsoidal', 'geoid:EGM96', 'ellipsoidal'])).toBe('unknown')
   expect(await fit([undefined, undefined, undefined])).toBe('unknown')
 })
+
+it('moves the georeference by a co-registration, keeps it through a refit, and removes it', async () => {
+  const scope = effectScope()
+  const poses = ref([
+    { imageId: 'a', x: 1000, y: 2000, z: 0 },
+    { imageId: 'b', x: 1002, y: 2000, z: 0 },
+    { imageId: 'c', x: 1000, y: 2002, z: 0 },
+  ])
+  const cameras = ref(
+    new Map([
+      ['a', { R, t: [0, 0, 0] }],
+      ['b', { R, t: [-1, 0, 0] }],
+      ['c', { R, t: [0, -1, 0] }],
+    ]),
+  )
+  const georef = ref(null),
+    coregistration = ref(null)
+  const log = vi.fn()
+  const api = scope.run(() =>
+    createGeoreferencing({
+      sparseCameras: cameras,
+      images: ref(['a', 'b', 'c'].map((id) => ({ id, uuid: id }))),
+      georef,
+      coregistration,
+      healthDirty: ref(0),
+      poses: () => poses.value,
+      gcps: () => [],
+      currentCrs: () => 'EPSG:3031',
+      modelStamp: () => 'model',
+      save: vi.fn(),
+      log,
+    }),
+  )
+  const { applySimilarity } = await import('../../core/products/georef.js')
+  const at = (p) => applySimilarity(georef.value.sim, p)
+  await api.georeference()
+  const before = at([0, 0, 0])
+  // The DEM sat 10 m west, 5 m north and 1 m low of the reference: move it by (+10, −5, +1).
+  const from = [
+    [1000, 2000, 0],
+    [1002, 2000, 0],
+    [1000, 2002, 0],
+    [1002, 2002, 1],
+  ]
+  const pairs = { from, to: from.map(([x, y, z]) => [x + 10, y - 5, z + 1]) }
+  api.setCoregistration({ reference: 'rema', crs: 'EPSG:3031', pairs, move: [10, -5, 1], tilt: false })
+  expect(georef.value.coregistered).toBe(true)
+  const moved = at([0, 0, 0])
+  expect(moved[0] - before[0]).toBeCloseTo(10, 3)
+  expect(moved[1] - before[1]).toBeCloseTo(-5, 3)
+  expect(moved[2] - before[2]).toBeCloseTo(1, 3)
+  // A refit (new evidence) composes it again.
+  poses.value = poses.value.map((p) => ({ ...p }))
+  await api.georeference()
+  expect(at([0, 0, 0])[0] - before[0]).toBeCloseTo(10, 3)
+  expect(log.mock.calls.some(([m]) => /co-registered to "rema"/.test(m))).toBe(true)
+  // A co-registration in another CRS than the fit's does not apply.
+  api.setCoregistration({ reference: 'rema', crs: 'EPSG:32633', pairs, move: [10, -5, 1], tilt: false })
+  expect(georef.value.coregistered).toBeUndefined()
+  api.setCoregistration(null)
+  expect(at([0, 0, 0])[0]).toBeCloseTo(before[0], 6)
+  expect(georef.value.fitSim).toBeUndefined()
+  scope.stop()
+})

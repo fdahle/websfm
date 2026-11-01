@@ -51,6 +51,9 @@ export const useModalsStore = defineStore('modals', () => {
   // share ONE slot: the open tool's ribbon command id, or null. Tools are one-at-a-
   // time dialogs, and a slot per tool would add a flag + an Escape entry per tool.
   const toolModal = ref(null)
+  // Co-register DEM opened from Quality Report ▸ DEM vs reference: { referenceId,
+  // stableSetId } to start from, or null (the dialog's own defaults).
+  const coregisterInitial = ref(null)
   const gcpImportOpen = ref(false)
   const gcpImportText = ref('')
   const gcpImportName = ref('')
@@ -162,6 +165,7 @@ export const useModalsStore = defineStore('modals', () => {
     mergeCloudsOpen,
     filterCloudPreset,
     toolModal,
+    coregisterInitial,
     gcpImportOpen,
     gcpImportText,
     gcpImportName,

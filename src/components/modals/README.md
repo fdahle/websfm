@@ -19,7 +19,7 @@ itself and takes App.vue's handlers from `useAppContext()` (`src/appContext.js`)
 | `model/` | **Tools ▸ Model**: optimize cameras, gradual selection, footprints from poses |
 | `cloud/` | **Tools ▸ Point Cloud**: filter, crop, transform, merge, align, normals, ground classification, distance, section, symbology |
 | `mesh/` | building a mesh, and **Tools ▸ Mesh**: clean, smooth, decimate, sample, texture, measure |
-| `products/` | DEM, orthophoto, terrain, contours, clipping, raster styles, and **Export** |
+| `products/` | DEM, orthophoto, terrain, contours, DEM co-registration, clipping, raster styles, and **Export** |
 | `eval/` | the Quality Report and its sections |
 | `ui/` | the building blocks every dialog uses: `ModalShell`, settings fields, preset cards, tables, warnings |
 

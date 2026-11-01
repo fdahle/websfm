@@ -1,6 +1,8 @@
 <script setup>
 import { shiftRange } from '../../../core/verticalDatum.js'
 import { ref, computed, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useModalsStore } from '../../../stores/useModalsStore.js'
 import StatTiles from '../ui/StatTiles.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
@@ -17,7 +19,8 @@ import { rdBuColor } from '../../../core/products/colormap.js'
 // exported report carries the same ones.
 const recon = useReconstructionStore()
 const external = useExternalStore()
-const { demReferenceComparison, demReferenceTiles, alignControlToReference } = useQualityReport()
+const { demReferenceComparison, demReferenceTiles } = useQualityReport()
+const { toolModal, coregisterInitial, qualityOpen } = storeToRefs(useModalsStore())
 
 const refs = computed(() => external.demRasters)
 const refId = ref(external.defaultDem?.id ?? refs.value[0]?.id ?? null)
@@ -67,30 +70,23 @@ watch(
 
 const tiles = computed(() => demReferenceTiles(result.value))
 
-// The co-registration offset, removed at its source: the control moves onto the
-// reference and the georeference refits; the DEM is then stale until rebuilt.
-const aligning = ref(false),
-  alignMessage = ref('')
-const canAlign = computed(
+// The co-registration offset, removed: Co-register DEM (Tools ▸ Products) on this
+// reference and stable ground, which moves the DEM or the georeference onto it.
+const canCoregister = computed(
   () =>
     !!result.value?.coreg &&
     !!recon.dem?.crs &&
     recon.dem.crs !== 'local' &&
     Math.hypot(...result.value.coreg.shift) > 0.5,
 )
-async function alignControl() {
-  aligning.value = true
-  alignMessage.value = ''
-  try {
-    const { moved, filled } = await alignControlToReference(refId.value, result.value.coreg)
-    alignMessage.value =
-      `Moved ${moved} ground points and refilled ${filled.filled} heights; the georeference was refitted. ` +
-      'Rebuild the DEM (and orthophoto) to see the effect.'
-  } catch (err) {
-    alignMessage.value = err?.message ?? String(err)
-  } finally {
-    aligning.value = false
+function openCoregister() {
+  coregisterInitial.value = {
+    demId: recon.dem?.id ?? null,
+    referenceId: refId.value,
+    stableSetId: stableSetId.value || '',
   }
+  qualityOpen.value = false
+  toolModal.value = 'coregister-dem'
 }
 const unit = computed(() => result.value?.demUnit ?? '')
 const range = computed(() => differenceRange(result.value?.stats))
@@ -183,9 +179,8 @@ const hist = computed(() => {
     <template v-else-if="result">
       <StatTiles :tiles="tiles" />
       <WarnBox v-for="w in result.warnings" :key="w">{{ w }}</WarnBox>
-      <p v-if="canAlign" class="align-row">
-        <button class="btn" :disabled="aligning" @click="alignControl">Move the control onto the reference</button>
-        <span v-if="alignMessage" role="status">{{ alignMessage }}</span>
+      <p v-if="canCoregister" class="align-row">
+        <button class="btn" @click="openCoregister">Co-register DEM…</button>
       </p>
 
       <div class="viz">

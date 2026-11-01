@@ -20,6 +20,7 @@ import { productMapBlocker } from '../../core/products/productLayers.js'
 export function createProducts({
   rasterProducts,
   mainProductIds,
+  putRasterProduct,
   dem,
   ortho,
   isPersisting,
@@ -198,9 +199,37 @@ export function createProducts({
     return true
   }
 
+  // Co-register DEM… applied to the DEM: a copy of `source` with the co-registered
+  // origin and heights (core/products/demCoregistration.js coregisterDemGrid), added as
+  // the main DEM beside it, its preview in the source's symbology. `coregistration`
+  // records what moved it (Show information). → the new record.
+  async function addCoregisteredDem(source, grid, coregistration) {
+    const style = resolveDemStyle(source.style)
+    const { previewBlob } = await workerDemPreview({
+      style,
+      grid: {
+        width: source.width,
+        height: source.height,
+        data: grid.data,
+        mask: source.mask,
+        gsd: source.gsd,
+        zMin: grid.zMin,
+        zMax: grid.zMax,
+      },
+    })
+    const { id: _id, name: _name, previewUrl: _url, ...rest } = source
+    const record = putRasterProduct(
+      withPreviewUrl({ ...rest, ...grid, previewBlob, createdAt: Date.now(), coregistration }),
+      { name: `${source.name || fallbackName('dem')} (co-registered)` },
+    )
+    saveProductRecord(record)
+    return record
+  }
+
   return {
     productById,
     productForKind,
+    addCoregisteredDem,
     renameProduct,
     setMainProduct,
     setProductStyle,

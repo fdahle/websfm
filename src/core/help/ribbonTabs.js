@@ -622,6 +622,14 @@ export const TABS = [
                 aerialOnly: true,
                 blurb: 'Terrain derivative rasters as GeoTIFF',
               },
+              {
+                id: 'coregister-dem',
+                label: 'Co-register DEM…',
+                icon: 'dem',
+                needs: ['dem', 'referenceDem'],
+                aerialOnly: true,
+                blurb: 'Shift and tilt the DEM, or the georeference, onto a reference DEM',
+              },
               { section: 'Export' },
               {
                 id: 'clip-raster',

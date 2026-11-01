@@ -123,6 +123,11 @@ export const useReconstructionStore = registerProjectStore(
     // invalidate the depth-map staleness stamp and contradict every recorded
     // summary number.
     const scaleFit = ref(null)
+    // The georeference's co-registration to a reference DEM (Tools ▸ Products ▸
+    // Co-register DEM…, core/products/demCoregistration.js), or null: the shift and tilt
+    // every georeference fit is composed with, so a refit keeps it. Kept apart from
+    // `georef`, which is cleared whenever its evidence changes. Absent in older projects.
+    const coregistration = ref(null)
 
     // The reconstruction REGION (Tools ▸ Model ▾ ▸ Region, core/products/region.js):
     // a model-frame box that bounds depth maps, fusion, mesh and DEM input. Stamped
@@ -300,8 +305,9 @@ export const useReconstructionStore = registerProjectStore(
     const dem = mainRaster('dem')
     const ortho = mainRaster('ortho')
     // Add a built DEM/ortho as the main one of its kind, or put it in place of the
-    // record `replaceId` names (keeping that one's id and name). → the stored record.
-    function putRasterProduct(record, { replaceId = null } = {}) {
+    // record `replaceId` names (keeping that one's id and name). A new one is called
+    // `name`, made unique, else the kind's next free name. → the stored record.
+    function putRasterProduct(record, { replaceId = null, name = null } = {}) {
       const list = rasterProducts.value
       const prev = replaceId ? list.find((p) => p.id === replaceId && p.kind === record.kind) : null
       const fallback = record.kind === 'ortho' ? 'Orthophoto' : 'DEM'
@@ -311,7 +317,7 @@ export const useReconstructionStore = registerProjectStore(
         name:
           prev?.name ??
           nextProductName(
-            fallback,
+            name ?? fallback,
             list.filter((p) => p.kind === record.kind).map((p) => p.name),
           ),
       }
@@ -605,12 +611,14 @@ export const useReconstructionStore = registerProjectStore(
       setMainProduct: setMainRaster,
       setProductStyle,
       saveProductRecord,
+      addCoregisteredDem,
       setProductVisible,
       setProductOpacity,
       removeProduct,
     } = createProducts({
       rasterProducts,
       mainProductIds,
+      putRasterProduct,
       dem,
       isPersisting,
       log,
@@ -687,6 +695,7 @@ export const useReconstructionStore = registerProjectStore(
         georef: georef.value,
         // Derived, not evidence — the bars live in scalebars.json (see D11).
         scaleFit: scaleFit.value,
+        coregistration: coregistration.value,
         region: region.value,
         orientation: orientation.value,
         productLayers: productLayers.value,
@@ -800,6 +809,7 @@ export const useReconstructionStore = registerProjectStore(
       clearDepthMaps()
       georef.value = null
       scaleFit.value = null
+      coregistration.value = null
       summary.value = null
       denseSummary.value = null
       depthSummary.value = null
@@ -828,6 +838,8 @@ export const useReconstructionStore = registerProjectStore(
       clearDepthMaps()
       georef.value = null
       scaleFit.value = null
+      // Measured on the old model's DEM: the next one is co-registered again.
+      coregistration.value = null
       denseSummary.value = null
       depthSummary.value = null
       // Through updateDepth so each preview's blob URL is revoked and its PNG deleted;
@@ -1062,6 +1074,7 @@ export const useReconstructionStore = registerProjectStore(
       georeferenceBlocker,
       crsSuggestion,
       georeference,
+      setCoregistration,
       validGeoref,
       poseResidualReport,
       gcpAccuracyReport,
@@ -1071,6 +1084,7 @@ export const useReconstructionStore = registerProjectStore(
       sparseCameras,
       images,
       georef,
+      coregistration,
       healthDirty,
       modelStamp: () => (mainSparseCloud.value ? [mainSparseCloud.value.id, mainSparseCloud.value.createdAt] : null),
       poses: () => posesStore.poses,
@@ -1203,6 +1217,7 @@ export const useReconstructionStore = registerProjectStore(
       mainProductIds.value = {}
       georef.value = null
       scaleFit.value = null
+      coregistration.value = null
       region.value = null
       orientation.value = null
       productLayers.value = {}
@@ -1338,6 +1353,7 @@ export const useReconstructionStore = registerProjectStore(
       mainProductIds.value = data.mainProductIds && typeof data.mainProductIds === 'object' ? data.mainProductIds : {}
       georef.value = data.georef ?? null
       scaleFit.value = data.scaleFit ?? null // absent in older projects ⇒ no scale
+      coregistration.value = data.coregistration ?? null // absent ⇒ none
       region.value = normalizeRegion(data.region) ?? null
       orientation.value = normalizeOrientation(data.orientation) ?? null
       productLayers.value = normalizeProductLayers(data.productLayers) // absent ⇒ nothing on the map
@@ -1458,6 +1474,7 @@ export const useReconstructionStore = registerProjectStore(
       // The georeference while it still fits the model (the Image Table's estimated poses).
       validGeoref,
       scaleFit,
+      coregistration,
       summary,
       denseSummary,
       depthSummary,
@@ -1475,6 +1492,7 @@ export const useReconstructionStore = registerProjectStore(
       crsSuggestion,
       canGeoreferenceGcps,
       georeference,
+      setCoregistration,
       // Scale constraints (F11). `effectiveFrameSpec` is THE resolver — product
       // builders, readouts, reports and exports must all ask it rather than
       // choosing a scale independently.
@@ -1529,6 +1547,7 @@ export const useReconstructionStore = registerProjectStore(
       removeProduct,
       renameProduct,
       setProductStyle,
+      addCoregisteredDem,
       productLayers,
       setProductVisible,
       setProductOpacity,

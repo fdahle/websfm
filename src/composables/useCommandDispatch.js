@@ -216,6 +216,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     // Products ▾
     'dem-contours',
     'dem-derivatives',
+    'coregister-dem',
     'clip-raster',
     // Images ▾
     'image-quality',

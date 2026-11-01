@@ -63,7 +63,8 @@ import {
   estimateBatchFiducialLayout,
   validateFiducialCalibration,
 } from '/src/core/sfm/fiducialCalibration.js'
-import { RESEAU_DEFAULTS, PANORAMIC_DEFAULTS } from '/src/core/defaults.user.js'
+import { RESEAU_DEFAULTS, PANORAMIC_DEFAULTS, COREG_DEFAULTS } from '/src/core/defaults.user.js'
+import { useDemCoregistration } from '/src/composables/useDemCoregistration.js'
 import { buildBorderMask } from '/src/core/mask.js'
 import { overlapVisibility, chooseOverlapSubset } from '/src/core/sfm/reduceOverlap.js'
 import { FIDUCIAL_SPOT_DEFAULTS, VIDEO_IMPORT_DEFAULTS } from '/src/core/defaults.user.js'
@@ -1582,10 +1583,9 @@ window.bench = {
     findGcpsUi = { app, host }
   },
   // Quality Report ▸ DEM vs reference DEM on the current DEM (config stage `demref`):
-  // the reference raster named `dem`, limited to the polygon layer `stable`; with
-  // `align`, then Move the control onto the reference (its offset, refilled heights,
-  // a refit). → the statistics, the co-registration and the move.
-  async demVsReference({ dem, stable = null, align = false } = {}) {
+  // the reference raster named `dem`, limited to the polygon layer `stable`.
+  // → the statistics and the co-registration.
+  async demVsReference({ dem, stable = null } = {}) {
     const { useQualityReport } = await import('/src/composables/useQualityReport.js')
     const qr = useQualityReport()
     const ref = useExternalStore().rasters.find((r) => r.name === dem || r.name.startsWith(dem))
@@ -1593,7 +1593,6 @@ window.bench = {
     const stableSet = stable ? useFootprintsStore().sets.find((s) => s.name === stable) : null
     const cmp = await qr.demReferenceComparison(ref.id, { stableSetId: stableSet?.id ?? null })
     const out = { stats: cmp?.stats ?? null, compared: cmp?.compared ?? 0, coreg: cmp?.coreg ?? null }
-    if (align && cmp?.coreg) out.aligned = await qr.alignControlToReference(ref.id, cmp.coreg)
     // Each ground point: its coordinates and the fit's residual (triangulated − GCP).
     if (!recon.validGeoref) await recon.georeference()
     const rows = new Map((await recon.gcpAccuracyReport()).map((r) => [r.name, r]))
@@ -1604,6 +1603,38 @@ window.bench = {
         return { name: g.name, role: g.role, x: g.x, y: g.y, z: g.z, dx: r?.dx, dy: r?.dy, dz: r?.dz }
       })
     return out
+  },
+  // Tools ▸ Products ▸ Co-register DEM… on the main DEM (config stage `coreg`): the
+  // reference raster named `reference`, stable ground the polygon layer `stable`, the
+  // steps as the dialog's settings over COREG_DEFAULTS (horizontal, vertical, tilt,
+  // applyTo). Applied to the DEM, the co-registered DEM is the main one after (what a
+  // later `demref` compares and `exportDem` writes); to the georeference, a `dem`
+  // stage after it builds in the moved one. → the result and where it went.
+  async coregisterDem({ reference, stable = null, ...steps } = {}) {
+    const ref = useExternalStore().rasters.find(
+      (r) => r.kind === 'dem' && (r.name === reference || r.name.startsWith(reference)),
+    )
+    if (!ref) return { error: `reference DEM ${reference} not imported` }
+    const stableSet = stable ? useFootprintsStore().sets.find((s) => s.name === stable) : null
+    if (stable && !stableSet) return { error: `layer ${stable} not imported` }
+    const t0 = performance.now()
+    const { result, record } = await useDemCoregistration().run({
+      demId: recon.dem?.id,
+      referenceId: ref.id,
+      stableSetId: stableSet?.id ?? null,
+      ...COREG_DEFAULTS,
+      ...steps,
+    })
+    return {
+      seconds: (performance.now() - t0) / 1000,
+      shift: result.shift,
+      vertical: result.vertical,
+      tilt: result.tilt,
+      before: result.before,
+      after: result.after,
+      dem: record?.name ?? null,
+      georefMove: recon.georef?.coregistered ? recon.coregistration.move : null,
+    }
   },
   // Control and checkpoint residuals against the current georeference.
   async gcpReport() {

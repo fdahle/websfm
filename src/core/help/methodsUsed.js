@@ -18,6 +18,7 @@ const DETECTORS = {
  *   sparse?: boolean, fisheye?: boolean, georef?: boolean, dense?: boolean,
  *   denseViewSelection?: string|null, densePlanarPrior?: boolean, denseGeomPass?: boolean,
  *   mesh?: boolean, textured?: boolean, dem?: boolean, demFill?: string|null,
+ *   coregistration?: { horizontal?: boolean, vertical?: boolean, tilt?: string }|null,
  *   ortho?: { blend?: string, seamline?: string, seamBlend?: string, colourBalance?: boolean }|null,
  *   groundClassified?: boolean, aboveGroundClassified?: boolean,
  * }} f
@@ -106,6 +107,19 @@ export function methodsUsed(f = {}) {
   }
   if (f.dem && f.demFill === 'idw') {
     out.push({ step: 'DEM', method: 'Gaps filled by inverse-distance weighting', refs: ['shepard1968'] })
+  }
+  if (f.coregistration) {
+    const c = f.coregistration
+    const parts = [
+      c.horizontal && 'horizontal shift (Nuth & Kääb)',
+      c.vertical && 'vertical shift',
+      c.tilt && c.tilt !== 'off' && (c.tilt === 'plane' ? 'tilt plane' : 'quadratic surface'),
+    ].filter(Boolean)
+    out.push({
+      step: 'DEM co-registration',
+      method: `To a reference DEM on stable ground, as xDEM chains them: ${parts.join(', ')}`,
+      refs: [...(c.horizontal ? ['nuth2011'] : []), 'xdem2026'],
+    })
   }
   if (f.ortho) {
     const o = f.ortho

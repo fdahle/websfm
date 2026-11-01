@@ -289,6 +289,24 @@ export const REFERENCES = {
     venue: 'U.S. Geological Survey Open-File Report 92-422',
     url: 'https://pubs.usgs.gov/of/1992/of92-422/',
   },
+  nuth2011: {
+    authors: ['Christopher Nuth', 'Andreas Kääb'],
+    year: 2011,
+    title:
+      'Co-registration and bias corrections of satellite elevation data sets for quantifying glacier thickness change',
+    venue: 'The Cryosphere 5(1), 271–290',
+    doi: '10.5194/tc-5-271-2011',
+  },
+  // Software: its docs ask for the Zenodo DOI of all versions, besides each method's
+  // paper. A group author keeps its trailing comma, so it formats as one name. 2026:
+  // v0.2.0, the version whose chain Co-register DEM follows.
+  xdem2026: {
+    authors: ['xDEM contributors,'],
+    year: 2026,
+    title: 'xDEM: analysis of digital elevation models for geosciences',
+    venue: 'Software, Zenodo',
+    doi: '10.5281/zenodo.4809697',
+  },
   shepard1968: {
     authors: ['Donald Shepard'],
     year: 1968,

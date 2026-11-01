@@ -35,6 +35,18 @@ Notable changes to websfm. The format follows
   lies 7.0 m NMAD from REMA on stable rock instead of 8.2 m (Metashape 5.0 m), and its
   warped outer flight lines are mostly gone: after one 10 m shift north, 5.2 m instead
   of 7.1 m, against Metashape's 5.5 m.
+- **Co-register a DEM onto a reference DEM.** Tools ▸ Products ▸ **Co-register DEM…**
+  compares a DEM with an imported reference DEM on stable ground and removes the offset,
+  either from a co-registered copy of the DEM or from the georeference, so every product
+  built after it lands on the reference. Its steps follow xDEM, each optional: a horizontal
+  shift (Nuth & Kääb), the median vertical shift, and a tilt (a plane, or for the DEM a
+  quadratic surface). Moved, the georeference keeps the move through every refit until
+  you remove it. Quality Report ▸ DEM vs reference opens it in place of *Move the control
+  onto the reference*, which edited the control points. Nuth & Kääb (2011) and xDEM are
+  now cited (About ▸ References, the Quality Report's methods). On Melville (Find GCPs
+  control, 20 m DEM) the DEM lay 1.1 m east and 7.9 m north of REMA; its NMAD on stable
+  rock went from 6.9 m to 5.2 m with both shifts, 5.0 m with a plane, 4.9 m with a
+  quadratic surface, against 5.0–5.5 m for Metashape's DEM by the same scoring.
 
 ### Performance
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps

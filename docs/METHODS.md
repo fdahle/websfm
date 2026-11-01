@@ -1305,22 +1305,41 @@ project CRS merely because coordinates are in metres.
 
 ---
 
-### DEM co-registration to a reference DEM (Nuth & Kääb, 2026-10-24)
+### DEM co-registration to a reference DEM (Nuth & Kääb, 2026-10-24; Co-register DEM, 2026-11-01)
 
-`core/eval/demCoregister.js`, run by `demCompare.js` for a DEM in a CRS (Quality Report
-▸ DEM vs reference). On at most 20,000 compared cells on 5–45° slopes, with the
-reference's slope α and downhill aspect ψ from central differences at the comparison
-spacing: Δh = DEM(p) − ref(p − t); Δh/tan α = δ_N·cos ψ + δ_E·sin ψ + c, fitted by
-least squares over cells within 3 NMAD of the median; t += (δ_E, δ_N) until the step
-is under 5 % of a cell (≤ 8 passes). `shift` = where the DEM sits against the
-reference. Checked against a planted (3, 11) m shift with −2 m bias and noise, and
-against a GDAL implementation on Rachel (0.5, 11.0 m vs 0.8, 11.2 m).
+`core/eval/demCoregister.js` (Nuth & Kääb 2011), run by `demCompare.js` for a DEM in a CRS
+(Quality Report ▸ DEM vs reference). On at most 20,000 compared cells on 5–45° slopes, with the
+reference's slope α and downhill aspect ψ from central differences: Δh = DEM(p) − ref(p − t);
+Δh/tan α = δ_N·cos ψ + δ_E·sin ψ + c, fitted by least squares over cells within 3 NMAD of the
+median; t += (δ_E, δ_N) until the step is under 5 % of a cell (≤ 8 passes). `shift` = where the
+DEM sits against the reference. Checked against a planted (3, 11) m shift with −2 m bias and
+noise, and against a GDAL implementation on Rachel (0.5, 11.0 m vs 0.8, 11.2 m).
 
-**Move the control onto the reference** (`useQualityReport.alignControlToReference`):
-every control and check point moves by −shift in the DEM's CRS, its height is refilled
-from that reference DEM, and the georeference refits. Rachel (Find GCPs control, medium
-depth maps, 20 m DEM): offset (1.9, 11.7) m; NMAD on eroded stable rock 8.8 → 5.4 m,
-30–45° slopes 9.2 → 5.3 m; median −1.5 → +2.8 m. The bias is the fit's tilt, not the
+**Co-register DEM** (Tools ▸ Products, `core/products/demCoregistration.js`) applies it, in the
+order xDEM chains its steps (NuthKaab, VerticalShift, Deramp), each optional: on ≤ 20,000 DEM
+cells inside a stable-ground layer (a sub-grid made finer when the layer keeps few: Melville's
+rock is 5 % of the DEM), the slopes taken at the DEM's own cell size; then the median Δh after
+the shift; then a polynomial of order 1 or 2 in the centred, scaled position, by least squares
+on the cells within 3 NMAD of the median and again of the first fit, with a constant term.
+Applied to the DEM, the copy's origin moves by −shift and each cell loses vertical + tilt where it
+lands. Applied to the georeference, 200 of the cells are kept as pairs (where the fit puts them,
+where the correction puts them), and the similarity refitted to the pairs (Horn, in the fit's
+local frame) replaces the fit's; every refit is composed again, a sparse rebuild drops it, and a
+second run on a DEM built in the moved frame moves the targets on. A plane is a shear, which a
+similarity takes up as a small rotation (2 mrad for 2 m/km, residual under 0.5 m over 6 km); a
+quadratic surface cannot be, and is refused for the georeference.
+
+Melville (Find GCPs control, 7 camera groups, Medium depth maps, 20 m DEM; eroded rock vs REMA,
+slopes ≤ 45°, 148,000 cells): NMAD 6.90 m as built; horizontal + vertical 5.19 m (shift E 1.1,
+N 7.9 m, vertical −0.8 m, 2 iterations); + plane 5.00 m; + quadratic 4.93 m; vertical alone
+6.90 m. Metashape's DEM by the same scoring: 5.0–5.5 m. The brute-force best shift (10 m steps)
+was N 10 m, 5.2 m.
+
+The Quality Report's **Move the control onto the reference** (2026-10-24 – 11-01) moved every
+control point by −shift and refilled its height from the reference before refitting; Co-register
+DEM ▸ Apply to the georeference replaces it, without editing the control. Rachel with it (Find
+GCPs control, medium depth maps, 20 m DEM): offset (1.9, 11.7) m; NMAD on eroded stable rock
+8.8 → 5.4 m, 30–45° slopes 9.2 → 5.3 m; median −1.5 → +2.8 m. The bias is the fit's tilt, not the
 move: at the control points DEM − control height has a median of −0.8 m, while rock
 inside the control hull sits +2.1 m and 2–5 km out +4.4 m. 27 heights each a few metres
 off (fit residuals −17 to +8 m), bunched in 30 % of the block, pin the tilt to a few
@@ -2271,6 +2290,8 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Rusu, R. B., Marton, Z. C., Blodow, N., Dolha, M. & Beetz, M. (2008). Towards 3D point cloud based object maps for household environments. Robotics and Autonomous Systems 56(11), 927–941. https://doi.org/10.1016/j.robot.2008.08.005
 - Schönberger, J. L. & Frahm, J.-M. (2016). Structure-from-motion revisited. IEEE Conference on Computer Vision and Pattern Recognition (CVPR). https://doi.org/10.1109/CVPR.2016.445
 - Schönberger, J. L., Zheng, E., Frahm, J.-M. & Pollefeys, M. (2016). Pixelwise view selection for unstructured multi-view stereo. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-319-46487-9_31
+- Nuth, C. & Kääb, A. (2011). Co-registration and bias corrections of satellite elevation data sets for quantifying glacier thickness change. The Cryosphere 5(1), 271–290. https://doi.org/10.5194/tc-5-271-2011
+- xDEM contributors (2026). xDEM: analysis of digital elevation models for geosciences. Software, Zenodo. https://doi.org/10.5281/zenodo.4809697
 - Shepard, D. (1968). A two-dimensional interpolation function for irregularly-spaced data. Proceedings of the 23rd ACM National Conference, 517–524. https://doi.org/10.1145/800186.810616
 - Stewénius, H., Engels, C. & Nistér, D. (2006). Recent developments on direct relative orientation. ISPRS Journal of Photogrammetry and Remote Sensing 60(4), 284–294. https://doi.org/10.1016/j.isprsjprs.2006.03.005
 - Taubin, G. (1995). A signal processing approach to fair surface design. SIGGRAPH 95, 351–358. https://doi.org/10.1145/218380.218473

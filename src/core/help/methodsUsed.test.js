@@ -32,6 +32,16 @@ describe('methodsUsed', () => {
     expect(f.refs).toEqual([])
   })
 
+  it('names the co-registration steps that ran', () => {
+    const [c] = methodsUsed({ coregistration: { horizontal: true, vertical: true, tilt: 'plane' } })
+    expect(c.step).toBe('DEM co-registration')
+    expect(c.method).toBe(
+      'To a reference DEM on stable ground, as xDEM chains them: horizontal shift (Nuth & Kääb), vertical shift, tilt plane',
+    )
+    expect(c.refs).toEqual(['nuth2011', 'xdem2026'])
+    expect(methodsUsed({ coregistration: { vertical: true, tilt: 'off' } })[0].refs).toEqual(['xdem2026'])
+  })
+
   it('cites only keys the bibliography has', () => {
     const all = methodsUsed({
       detector: 'sift',

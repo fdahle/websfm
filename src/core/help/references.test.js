@@ -16,6 +16,7 @@ const everyMethod = methodsUsed({
   textured: true,
   dem: true,
   demFill: 'idw',
+  coregistration: { horizontal: true, vertical: true, tilt: 'plane' },
   groundClassified: true,
   aboveGroundClassified: true,
   ortho: { blend: 'mosaic', seamline: 'graphcut', seamBlend: 'multiband', colourBalance: true },

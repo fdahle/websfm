@@ -563,6 +563,7 @@ try {
     georef: 'georef',
     findgcps: 'findGcps',
     demref: 'demVsReference',
+    coreg: 'coregisterDem',
     rastersample: 'rasterSample',
     rasterstyle: 'rasterRestyle',
     gcpz: 'gcpZ',
