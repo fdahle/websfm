@@ -15,6 +15,7 @@ import { useInlineRename } from '../../composables/useInlineRename.js'
 import { confirmDialog, confirmOpen } from '../../composables/useConfirmations.js'
 import { matches } from '../../core/help/shortcuts.js'
 import * as opfs from '../../utils/opfs.js'
+import { loadProjectHandle } from '../../utils/handleStore.js'
 
 const props = defineProps({
   projects: { type: Array, required: true },
@@ -27,19 +28,27 @@ const props = defineProps({
   folderSupported: { type: Boolean, default: false },
 })
 
-// What each browser-stored project takes, and the browser storage as a whole: the
-// numbers that say when a project is better off in a folder. A size is measured once
-// per project version (id + lastModified), in the background — walking a large
-// project's tree takes a moment, and the cache outlives the picker, which mounts each
-// time it opens (the plain <script> block below). A folder project's size is its folder's business.
+// What each project takes, and the browser storage as a whole: the numbers that say
+// when a project is better off in a folder. A size is measured once per project
+// version (id + lastModified), in the background — walking a large project's tree
+// takes a moment, and the cache outlives the picker, which mounts each time it opens
+// (the plain <script> block below). A folder project is measured only when the browser
+// still lets WebSfM read its folder; asking for permission here would be a prompt per
+// row, so without it the size is left out.
 const sizes = ref(new Map())
+async function projectDir(p) {
+  if (!isFolderProject(p)) return opfs.getOpfsProjectDir(p.id)
+  const handle = await loadProjectHandle(p.id)
+  if (!handle || (await handle.queryPermission?.({ mode: 'read' })) !== 'granted') return null
+  return handle
+}
 async function measureSizes() {
   for (const p of props.projects) {
-    if (isFolderProject(p)) continue
     const key = `${p.id}:${p.lastModified}`
     if (!sizeCache.has(key)) {
       try {
-        const dir = await opfs.getOpfsProjectDir(p.id)
+        const dir = await projectDir(p)
+        if (!dir) continue
         sizeCache.set(key, (await opfs.measureTree(dir)).bytes)
       } catch {
         continue
@@ -141,17 +150,21 @@ async function confirmDelete(project) {
   if (ok) emit('delete', project.id)
 }
 
-// A short, glanceable summary line for each project, after where it is stored (the
-// folder icon and name, or "In this browser") and its size: the CRS (aerial only —
-// object-capture projects have none), then when it was last touched. The scene type
-// is the icon before the name.
-function projectMeta(project) {
-  const parts = []
-  if (project.sceneType !== 'object' && project.crs) parts.push(project.crs)
-  const edited = formatDate(project.lastModified)
-  if (edited) parts.push(`edited ${edited}`)
-  return parts.join(' · ')
-}
+// A short, glanceable summary line for each project, the same columns on every row:
+// where it is stored (a folder or browser icon, the folder's name in its tooltip),
+// the CRS ("Local" without one: object captures, or aerial before it is set), the
+// size, then when it was last touched. The CRS and size sit in fixed-width slots so
+// the rows line up; EPSG codes are four or five digits, so no one width fits all. The
+// scene type is the icon before the name.
+const crsLabel = (project) => (project.sceneType !== 'object' && project.crs) || 'Local'
+const crsTitle = (project) =>
+  project.sceneType !== 'object' && project.crs
+    ? `Coordinate system ${project.crs}`
+    : 'No coordinate system: the model is in a local frame'
+const storageTitle = (project) =>
+  isFolderProject(project)
+    ? `Stored in the folder ${project.folderName ?? ''} on disk`
+    : "Stored in this browser's private storage"
 
 // The year only when it is not this one.
 function formatDate(iso) {
@@ -244,18 +257,12 @@ onBeforeUnmount(() => {
                   <span v-if="otherVersion(project)" class="project-version">v{{ project.createdWithVersion }}</span>
                 </div>
                 <span class="project-meta">
-                  <span
-                    v-if="isFolderProject(project)"
-                    class="storage-place"
-                    :title="`Stored in the folder ${project.folderName ?? ''} on disk`"
-                  >
-                    <span class="storage-icon"><Icon name="folder" /></span>{{ project.folderName ?? 'Folder' }}
-                  </span>
-                  <span v-else class="storage-place" title="Stored in this browser's private storage"
-                    >In this browser</span
-                  >
-                  <template v-if="sizes.has(project.id)"> · {{ formatBytes(sizes.get(project.id)) }}</template>
-                  <template v-if="projectMeta(project)"> · {{ projectMeta(project) }}</template>
+                  <span class="storage-icon" :title="storageTitle(project)"
+                    ><Icon :name="isFolderProject(project) ? 'folder' : 'browser'"
+                  /></span>
+                  <span class="meta-crs" :title="crsTitle(project)">{{ crsLabel(project) }}</span>
+                  <span class="meta-size">{{ sizes.has(project.id) ? formatBytes(sizes.get(project.id)) : '' }}</span>
+                  <span v-if="formatDate(project.lastModified)">edited {{ formatDate(project.lastModified) }}</span>
                 </span>
               </button>
               <button class="icon-btn" title="Project actions" @click.stop="openMenu($event, project)">⋯</button>
@@ -560,25 +567,35 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-/* Where the project lives, first on the meta line: a folder's icon and name. */
-.storage-place {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  vertical-align: bottom;
-}
+/* Where the project lives, first on the meta line: a folder or browser icon. */
 .storage-icon {
   display: inline-block;
+  flex-shrink: 0;
   width: 11px;
   height: 11px;
 }
 
+/* Fixed columns, so CRS, size and date line up from row to row. */
 .project-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
+}
+.meta-crs {
+  flex-shrink: 0;
+  width: 10ch;
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+.meta-size {
+  flex-shrink: 0;
+  width: 7ch;
+  text-align: right;
 }
 
 /* Made by another version of WebSfM: after the name. */

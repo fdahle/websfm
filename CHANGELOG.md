@@ -51,6 +51,13 @@ Notable changes to websfm. The format follows
   same photos is at 5.0 m as built and 4.5 m once co-registered the same way, so the
   step closes most of the gap, not all of it.
 
+### Changed
+- **Every project on the start screen gets the same line.** Under each project's name
+  come, in fixed columns, an icon for where it is stored (a folder on disk or this
+  browser, the folder's name on hover), its CRS (**Local** without one), its size and
+  when it was last edited. A folder project now shows its size too, whenever the browser
+  can still read the folder without asking.
+
 ### Performance
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps
   still computes one map on the CPU to compare, but now gives up on it as soon as the CPU
