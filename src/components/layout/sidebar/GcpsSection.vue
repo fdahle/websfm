@@ -171,6 +171,12 @@ function reprojFor(gcpId, imageId) {
                 :title="`${obs.imageName} — not loaded yet; add this image to enable its link`"
                 >{{ obs.imageName }}</span
               >
+              <span
+                v-if="obs.source === 'detected'"
+                class="obs-detected"
+                title="Placed by Detect targets (score); check it, and move it if it is off — then it counts as yours"
+                >detected {{ obs.score?.toFixed(2) }}</span
+              >
               <span v-if="reprojFor(gcp.id, obs.imageId) != null" class="obs-reproj" title="Reprojection error (px)">
                 {{ reprojFor(gcp.id, obs.imageId).toFixed(1) }}px
               </span>
@@ -267,6 +273,11 @@ function reprojFor(gcpId, imageId) {
 .obs-reproj {
   font-size: 10px;
   color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.obs-detected {
+  font-size: 10px;
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
 .obs-empty {

@@ -55,6 +55,7 @@ const panels = computed(() => {
       px: obs.px,
       py: obs.py,
       reprojPx: reprojFor(obs.imageId),
+      detected: obs.source === 'detected' ? (obs.score ?? 0) : null,
     })
   }
   return out
@@ -128,6 +129,12 @@ function fmtCoord(v) {
           <button class="panel-open" :title="`Open ${p.name}`" @click="emit('jump-to-image', { imageId: p.imageId })">
             {{ p.name }}
           </button>
+          <span
+            v-if="p.detected != null"
+            class="panel-detected"
+            title="Placed by Detect targets (score); move it if it is off — then it counts as yours"
+            >detected {{ p.detected.toFixed(2) }}</span
+          >
           <span v-if="p.reprojPx != null" class="panel-reproj" title="Reprojection error (px)"
             >{{ p.reprojPx.toFixed(1) }}px</span
           >
@@ -315,6 +322,12 @@ function fmtCoord(v) {
 }
 .panel-open:hover {
   text-decoration: underline;
+}
+.panel-detected {
+  flex: none;
+  font-size: 10px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
 }
 .panel-reproj {
   flex: none;

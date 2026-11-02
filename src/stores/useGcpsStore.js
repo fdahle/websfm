@@ -753,9 +753,10 @@ export const useGcpsStore = registerProjectStore(
 
     // Upsert a pixel observation for `imageId` on a GCP (replacing any existing
     // observation for that image) — used by interactive click-to-mark.
-    // `detected`: { source: 'detected', score } for a mark Detect targets placed; a mark
-    // placed or moved by hand drops both.
-    function setObservation(gcpId, imageId, imageName, px, py, detected = null) {
+    // `detected`: { score } for a mark Detect targets placed (flagged { source:
+    // 'detected', score }); null for a mark placed or moved by hand, which drops the
+    // flag; left out (a re-mapped mark, film-scan geometry) keeps what the mark had.
+    function setObservation(gcpId, imageId, imageName, px, py, detected = undefined) {
       const g = gcps.value.find((x) => x.id === gcpId)
       if (!g) return
       let o = g.observations.find((x) => x.imageId === imageId)
@@ -768,7 +769,7 @@ export const useGcpsStore = registerProjectStore(
         g.observations.push(o)
       }
       if (detected) Object.assign(o, { source: 'detected', score: detected.score })
-      else {
+      else if (detected === null) {
         delete o.source
         delete o.score
       }

@@ -184,7 +184,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // so the mark itself stays instant.
   function assignGcpObservation(imageId, imageName, { gcpId, px, py }) {
     const guide = activeImageGcpGuides.value.find((g) => g.gcpId === gcpId)
-    setObservation(gcpId, imageId, imageName, px, py)
+    setObservation(gcpId, imageId, imageName, px, py, null) // by hand: no longer a detection
     selectedGcpId.value = gcpId
     ensureGcpsVisible()
     refreshGcpReport()
@@ -202,7 +202,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // and re-roling it (see useGcpsStore.addPoint).
   function addGcpAtObservation(imageId, imageName, { px, py, role = 'control' }) {
     const id = addPoint({ role })
-    setObservation(id, imageId, imageName, px, py)
+    setObservation(id, imageId, imageName, px, py, null)
     selectedGcpId.value = id
     ensureGcpsVisible()
     refreshGcpReport()
