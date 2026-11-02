@@ -77,6 +77,11 @@ Notable changes to websfm. The format follows
   after 42 s, when it was on course for 648 s (GPU 14 s).
 
 ### Fixed
+- **Cancelling Project folder… keeps the project list.** On the start screen, cancelling
+  the folder dialog of **Project folder…** left an empty workspace with a nameless
+  project; the list now stays open until a folder has opened. **Move to folder…** and
+  **Move to browser storage** from the list's ⋯ menu also keep it open while no project
+  is open.
 - **Gradual selection no longer reports unsaved changes.** On a project with depth maps,
   Tools ▸ Model ▸ **Gradual selection…** showed *Unsaved changes: Failed to execute
   'removeEntry' … modifications are not allowed*. Retiring the depth maps deleted each

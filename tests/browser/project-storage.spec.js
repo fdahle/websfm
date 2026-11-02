@@ -110,6 +110,23 @@ test('a save that finds browser storage full offers a folder, and is saved there
   expect(storage).toBe('folder')
 })
 
+test('cancelling Project folder… on the start screen leaves the project list open', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  // Reloaded, the app opens on the project list with no project open.
+  await page.reload()
+  await expect(page.locator('.project-picker')).toBeVisible()
+  await page.evaluate(() => {
+    window.showDirectoryPicker = async () => {
+      throw new DOMException('The user aborted a request.', 'AbortError')
+    }
+  })
+  await page.getByRole('button', { name: /Project folder…/ }).click()
+  await expect(page.locator('.project-picker')).toBeVisible()
+  await expect(page.locator('.project-backdrop')).toBeVisible()
+})
+
 test('without folder access, the folder choices are shown disabled with the browsers they need', async ({ page }) => {
   // As in Firefox and Safari, in every engine: runs after the stub above.
   await page.addInitScript(() => {

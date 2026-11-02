@@ -148,6 +148,9 @@ const progressSpotlight = computed(() =>
     </div>
   </div>
 
+  <!-- The list closes for an action only once there is a project behind it: on the
+       start screen (no project open) it stays, so a cancelled folder dialog, or a
+       move of a project that is not open, never leaves an empty workspace. -->
   <ProjectPicker
     v-if="projectPickerOpen"
     :projects="projects"
@@ -165,12 +168,7 @@ const progressSpotlight = computed(() =>
       }
     "
     @open-file="pickProjectFile"
-    @open-folder="
-      () => {
-        projectPickerOpen = false
-        openProjectFolder()
-      }
-    "
+    @open-folder="openProjectFolder"
     @save-copy="
       () => {
         projectPickerOpen = false
@@ -179,13 +177,13 @@ const progressSpotlight = computed(() =>
     "
     @move-to-folder="
       (id) => {
-        projectPickerOpen = false
+        if (currentProjectId) projectPickerOpen = false
         moveCurrentProjectToFolder(id)
       }
     "
     @move-to-browser="
       (id) => {
-        projectPickerOpen = false
+        if (currentProjectId) projectPickerOpen = false
         moveCurrentProjectToBrowser(id)
       }
     "
