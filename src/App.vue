@@ -343,7 +343,9 @@ async function onDetectTargetsRun({ settings, plan }) {
     showToast(r.found ? `${r.found} target marks placed` : 'No target found', {
       detail: r.found
         ? 'Check them in Edit GCPs, then georeference again.'
-        : 'Try a larger search radius or a lower minimum score.',
+        : settings.kind === 'apriltag'
+          ? 'No tag36h11 tag was read: a tag needs about 2 px per cell and its white border.'
+          : 'Try a larger search radius or a lower minimum score.',
       kind: r.found ? 'success' : 'warn',
     })
   } finally {

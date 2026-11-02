@@ -715,3 +715,17 @@ export const SENSOR_TUNING = {
   // scan pixel, fits the group's mark layout badly (Melville: 171 µm against about 30).
   fiducialMisfitFactor: 3,
 }
+
+// Tools ▸ Images ▸ Detect targets ▸ AprilTag (core/sfm/tagDetect.js, workers/ops/detect.js
+// detectTagsInPhoto).
+export const TAG_DETECT_TUNING = {
+  // The photo is searched in native tiles of `tile` px overlapping by `overlap`: a tag up
+  // to `overlap` px across lies whole in the tile whose core holds its centre, and a
+  // worker holds a few tile-sized buffers instead of the whole photo's.
+  tile: 2048,
+  overlap: 400,
+  // Larger tags are found in the photo downscaled to `tile` px.
+  minSide: 16,
+  // Wrong bits a tag may have (tag36h11 tells codes apart by 11; 2 keeps false tags out).
+  maxHamming: 2,
+}

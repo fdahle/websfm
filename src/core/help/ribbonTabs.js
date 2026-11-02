@@ -319,8 +319,8 @@ export const TABS = [
                 id: 'detect-targets',
                 label: 'Detect targets…',
                 icon: 'target',
-                needs: ['sparse', 'gcps'],
-                blurb: 'Mark checkerboard GCP mats where the model expects them',
+                needs: ['images', 'imagesReady'],
+                blurb: 'Mark GCP targets: checker mats where the model expects them, or AprilTags',
               },
               {
                 id: 'reduce-overlap',

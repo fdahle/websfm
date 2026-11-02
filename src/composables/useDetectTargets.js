@@ -12,16 +12,21 @@ import {
   centreToMarkPx,
 } from '../core/sfm/displayFrame.js'
 import { targetPredictions, quadRadiusFor, modelFromProject } from '../core/sfm/targetPredict.js'
-import { detectTargets as workerDetectTargets } from '../workers/computeClient.js'
+import { tagNumber } from '../core/sfm/tagDetect.js'
+import { detectTargets as workerDetectTargets, detectTagsInPhoto, POOL_SIZE } from '../workers/computeClient.js'
 import { computeSourceOf } from '../utils/image.js'
+import { mapConcurrent } from '../utils/concurrency.js'
 import { pluralize } from '../core/textFormat.js'
 
 // Tools ▸ Images ▸ Detect targets (core/sfm/targetPredict.js, targetDetect.js): plan where
 // every GCP's checker mat should appear in every registered photo, then find its centre
 // there in the workers and place the GCP's mark, flagged { source: 'detected', score }.
+// AprilTags (core/sfm/tagDetect.js) need no plan: every enabled photo is searched whole,
+// and tag N is the GCP with N in its name, or a new marker "Tag N".
 //
 // plan(settings) → { photos: [{ img, predictions }], counts } — what the dialog's effect
-//   lines count; run(settings, plan, onProgress) places the marks it finds.
+//   lines count; run(settings, plan, onProgress) places the marks it finds. A photo per
+//   worker, over the whole pool.
 export function useDetectTargets() {
   const gcpsStore = useGcpsStore()
   const imagesStore = useImagesStore()
@@ -30,6 +35,7 @@ export function useDetectTargets() {
   const { log } = useLog()
 
   async function plan(settings) {
+    if (settings.kind === 'apriltag') return planTags()
     const cams = recon.mainSparseCloud?.cameras
     if (!cams?.size) return { photos: [], counts: { predictions: 0, photos: 0, gcps: 0, unplaced: 0, halfPx: null } }
     const frameModel = makeFrameModelResolver({ summary: toRaw(recon.summary), sensors: sensors.sensors })
@@ -94,12 +100,79 @@ export function useDetectTargets() {
     }
   }
 
-  async function run(settings, planned, onProgress) {
+  function planTags() {
+    const photos = imagesStore.images.filter((im) => im.enabled !== false).map((img) => ({ img }))
+    return {
+      photos,
+      counts: {
+        photos: photos.length,
+        gcps: gcpsStore.gcps.length,
+        tagged: gcpsStore.gcps.filter((g) => tagNumber(g.name) != null).length,
+      },
+    }
+  }
+
+  // The GCP standing for tag `id`: an enabled one first.
+  function gcpForTag(id) {
+    const named = gcpsStore.gcps.filter((g) => tagNumber(g.name) === id)
+    return named.find((g) => g.enabled !== false) ?? named[0] ?? null
+  }
+
+  async function runTags(settings, planned, onProgress) {
+    const n = planned.photos.length
+    const workers = Math.max(1, Math.min(POOL_SIZE, n))
     let found = 0,
-      tried = 0
+      done = 0
+    const added = [],
+      unknown = new Set()
     const t0 = performance.now()
-    for (const [k, { img, predictions }] of planned.photos.entries()) {
-      onProgress?.(k, planned.photos.length, `Looking for targets in ${img.name}…`)
+    onProgress?.(0, n, `Looking for AprilTags in ${pluralize(n, 'photo')}…`)
+    await mapConcurrent(planned.photos, workers, async ({ img }) => {
+      await imagesStore.whenComputeReady(img)
+      const { tags } = await detectTagsInPhoto(computeSourceOf(img))
+      for (const t of tags) {
+        let g = gcpForTag(t.id)
+        if (!g && !settings.addMarkers) {
+          unknown.add(t.id)
+          continue
+        }
+        if (!g) {
+          const id = gcpsStore.addPoint({ role: 'marker', name: `Tag ${t.id}` })
+          g = gcpsStore.gcps.find((x) => x.id === id)
+          added.push(g.name)
+        }
+        const o = g.observations.find((x) => x.imageId === img.id)
+        if (o && !(settings.replaceDetected && o.source === 'detected')) continue
+        gcpsStore.setObservation(g.id, img.id, img.name, centreToMarkPx(t.x), centreToMarkPx(t.y), {
+          source: 'detected',
+          score: t.score,
+        })
+        found++
+      }
+      onProgress?.(++done, n, `Looking for AprilTags… ${done} of ${n}`)
+    })
+    log(
+      `Detect targets: ${pluralize(found, 'AprilTag mark')} placed in ${pluralize(n, 'photo')} on ` +
+        `${pluralize(workers, 'worker')} in ${((performance.now() - t0) / 1000).toFixed(1)} s` +
+        (added.length ? `; new markers ${added.join(', ')}` : '') +
+        (unknown.size ? `; tags no GCP is named after: ${[...unknown].sort((a, b) => a - b).join(', ')}` : '') +
+        '; check them in Edit GCPs',
+      found ? 'success' : 'warn',
+      'GCP',
+    )
+    return { found, tried: n }
+  }
+
+  async function run(settings, planned, onProgress) {
+    if (settings.kind === 'apriltag') return runTags(settings, planned, onProgress)
+    let found = 0,
+      tried = 0,
+      done = 0
+    const n = planned.photos.length
+    const workers = Math.max(1, Math.min(POOL_SIZE, n))
+    const t0 = performance.now()
+    onProgress?.(0, n, `Looking for targets in ${pluralize(n, 'photo')}…`)
+    await mapConcurrent(planned.photos, workers, async ({ img, predictions }) => {
       await imagesStore.whenComputeReady(img)
       const { results } = await workerDetectTargets(
         computeSourceOf(img),
@@ -120,11 +193,11 @@ export function useDetectTargets() {
         })
         found++
       }
-    }
-    onProgress?.(planned.photos.length, planned.photos.length, 'Targets detected')
+      onProgress?.(++done, n, `Looking for targets… ${done} of ${n}`)
+    })
     log(
       `Detect targets: ${pluralize(found, 'mark')} placed, ${pluralize(tried, 'place')} searched in ` +
-        `${pluralize(planned.photos.length, 'photo')} (score ≥ ${settings.minScore}) in ` +
+        `${pluralize(n, 'photo')} on ${pluralize(workers, 'worker')} (score ≥ ${settings.minScore}) in ` +
         `${((performance.now() - t0) / 1000).toFixed(1)} s; check them in Edit GCPs`,
       found ? 'success' : 'warn',
       'GCP',

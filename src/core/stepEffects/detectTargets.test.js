@@ -20,4 +20,17 @@ describe('detectTargetsEffects', () => {
     expect(e.targets).toMatch(/no scale/)
     expect(e.marks).toMatch(/and so do earlier detections\.$/)
   })
+  it('describes an AprilTag run', () => {
+    const e = detectTargetsEffects({ ...s, kind: 'apriltag', addMarkers: true }, { photos: 30, gcps: 6, tagged: 5 })
+    expect(e.targets).toBe(
+      'AprilTag 36h11 tags: a GCP stands for the tag with the number in its name (5 of 6 GCPs have one).',
+    )
+    expect(e.search).toBe('Every tag in each of 30 photos, the whole frame at full resolution; no model needed.')
+    expect(e.marks).toBe(
+      'Marks you placed stay, earlier detections are replaced; a tag no GCP is named after becomes a marker "Tag N".',
+    )
+    const off = detectTargetsEffects({ ...s, kind: 'apriltag', addMarkers: false }, { photos: 1, gcps: 0 })
+    expect(off.targets).toMatch(/no GCPs yet/)
+    expect(off.marks).toMatch(/is left out\.$/)
+  })
 })

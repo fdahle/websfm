@@ -30,10 +30,11 @@ import {
   nativeRefinePlan,
 } from '../../core/sfm/fiducialDetection.js'
 import { pluralize } from '../../core/textFormat.js'
-import { DETECT_TUNING, IMAGE_QUALITY_TUNING } from '../../core/tuning.js'
+import { DETECT_TUNING, IMAGE_QUALITY_TUNING, TAG_DETECT_TUNING } from '../../core/tuning.js'
 import { DETECT_SIFT_DEFAULTS } from '../../core/defaults.user.js'
 import { faintRetry } from '../../core/features/faintRetry.js'
 import { findCheckerCorner } from '../../core/sfm/targetDetect.js'
+import { detectTags, tagTiles, mergeTags } from '../../core/sfm/tagDetect.js'
 
 // Detection ops (SIFT / learned: SuperPoint, DISK, ALIKED). `rasterize` (OffscreenCanvas pixel decode)
 // stays in the worker and is injected; the STRIDE parse + shared feature-bundle
@@ -1126,6 +1127,49 @@ export function makeDetectOps({ rasterize }) {
     }
   }
 
+  // AprilTag tag36h11 targets anywhere in one photo (core/sfm/tagDetect.js): native tiles
+  // for every tag up to the tiles' overlap, then the photo downscaled to one tile for the
+  // larger ones. → { tags: [{ id, hamming, score, x, y (pixel centres), contrast }] }.
+  async function detectTagsInPhoto([url]) {
+    const cfg = TAG_DETECT_TUNING
+    const bmp = await decodeBitmap(url)
+    try {
+      const found = []
+      const maxSide = 0.6 * cfg.overlap
+      for (const t of tagTiles(bmp.width, bmp.height, cfg)) {
+        const win = cropGray(bmp, t.x0, t.y0, t.w, t.h)
+        for (const tag of detectTags(win, { minSide: cfg.minSide, maxSide, maxHamming: cfg.maxHamming })) {
+          const x = tag.center.x + win.originX,
+            y = tag.center.y + win.originY
+          if (x >= t.core.x0 && x < t.core.x1 && y >= t.core.y0 && y < t.core.y1)
+            found.push({ id: tag.id, hamming: tag.hamming, score: tag.score, x, y, contrast: tag.contrast })
+        }
+      }
+      const long = Math.max(bmp.width, bmp.height)
+      if (long > cfg.tile) {
+        const small = downscaleBitmap(bmp, cfg.tile)
+        const sx = small.width / bmp.width,
+          sy = small.height / bmp.height
+        const gray = grayFromRgba(small.data, small.width, small.height)
+        const minSide = Math.max(cfg.minSide, maxSide * Math.min(sx, sy))
+        const native = new Set(found.map((t) => t.id))
+        for (const tag of detectTags(gray, { minSide, maxHamming: cfg.maxHamming }))
+          if (!native.has(tag.id))
+            found.push({
+              id: tag.id,
+              hamming: tag.hamming,
+              score: tag.score,
+              x: fromScaledPx(tag.center.x, sx),
+              y: fromScaledPx(tag.center.y, sy),
+              contrast: tag.contrast,
+            })
+      }
+      return { result: { tags: mergeTags(found) } }
+    } finally {
+      bmp.close()
+    }
+  }
+
   return {
     detect,
     prepareFiducialTemplates,
@@ -1138,5 +1182,6 @@ export function makeDetectOps({ rasterize }) {
     splitPanoramicStrip,
     imageQuality,
     detectTargets,
+    detectTagsInPhoto,
   }
 }

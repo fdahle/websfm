@@ -142,7 +142,7 @@ export const CONSOLE_NAMES = {
   'detect-reseau': ['reseau', 'detect reseau'],
   'split-panoramic': ['panoramic', 'split panoramic'],
   'image-quality': ['image quality', 'blur', 'sharpness'],
-  'detect-targets': ['detect targets', 'gcp targets', 'checker'],
+  'detect-targets': ['detect targets', 'gcp targets', 'checker', 'apriltag', 'coded targets'],
   'reduce-overlap': ['reduce overlap', 'disable photos', 'redundant'],
   'optimize-cameras': ['optimize'],
   'gradual-selection': ['gradual'],

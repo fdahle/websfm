@@ -4,8 +4,11 @@ import { plural } from './format.js'
 
 // project: { halfPx (median half-size of the target in the photos, null without a
 // scale), predictions, photos, gcps (how many places, in how many photos, for how many
-// GCPs the search will look), unplaced (GCPs with nothing to place them by) }
-export function detectTargetsEffects(s, { halfPx = null, predictions = 0, photos = 0, gcps = 0, unplaced = 0 } = {}) {
+// GCPs the search will look), unplaced (GCPs with nothing to place them by) }; for
+// AprilTags { photos (enabled), gcps, tagged (GCPs with a number in their name) }.
+export function detectTargetsEffects(s, project = {}) {
+  if (s.kind === 'apriltag') return tagEffects(s, project)
+  const { halfPx = null, predictions = 0, photos = 0, gcps = 0, unplaced = 0 } = project
   const targets =
     halfPx > 0
       ? `Checker mats of ${s.sizeM} m, about ${Math.round(2 * halfPx)} px across in these photos.`
@@ -18,5 +21,23 @@ export function detectTargetsEffects(s, { halfPx = null, predictions = 0, photos
   const marks =
     `A detection needs a score of ${s.minScore} or more; marks you placed stay` +
     (s.replaceDetected ? ', earlier detections are replaced.' : ', and so do earlier detections.')
+  return { targets, search, marks }
+}
+
+function tagEffects(s, { photos = 0, gcps = 0, tagged = 0 }) {
+  const targets = !gcps
+    ? 'AprilTag 36h11 tags; no GCPs yet, ' +
+      (s.addMarkers ? 'so each tag found becomes a marker.' : 'and new markers are off: nothing will be placed.')
+    : `AprilTag 36h11 tags: a GCP stands for the tag with the number in its name ` +
+      `(${tagged} of ${plural(gcps, 'GCP')} ${tagged === 1 ? 'has' : 'have'} one).`
+  const search = photos
+    ? `Every tag in each of ${plural(photos, 'photo')}, the whole frame at full resolution; no model needed.`
+    : 'No photos to search.'
+  const marks =
+    'Marks you placed stay' +
+    (s.replaceDetected ? ', earlier detections are replaced' : ', and so do earlier detections') +
+    (s.addMarkers
+      ? '; a tag no GCP is named after becomes a marker "Tag N".'
+      : '; a tag no GCP is named after is left out.')
   return { targets, search, marks }
 }

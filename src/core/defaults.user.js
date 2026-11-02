@@ -752,10 +752,12 @@ export const IMAGE_QUALITY_DEFAULTS = {
 
 // Tools ▸ Images ▾ ▸ Detect targets (core/sfm/targetDetect.js, composables/useDetectTargets.js).
 export const TARGET_DEFAULTS = {
+  kind: 'checker', // 'checker' (mats found where the model expects them) | 'apriltag' (tag36h11, found anywhere)
   sizeM: 0.6, // side of the checker mat, metres (common survey mats are 0.5–1 m)
   searchPx: 30, // how far from the predicted place the centre may be, photo pixels
   minScore: 0.4, // quadrant contrast (0–1) a detection needs
   replaceDetected: true, // a new run replaces earlier detections (never marks placed by hand)
+  addMarkers: true, // AprilTag: a tag no GCP is named after becomes a marker "Tag N"
 }
 
 // Tools ▸ Images ▾ ▸ Reduce overlap (core/sfm/reduceOverlap.js).

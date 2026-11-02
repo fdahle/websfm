@@ -9,8 +9,9 @@ import { detectTargetsEffects } from '../../../core/stepEffects/detectTargets.js
 import { useDetectTargets } from '../../../composables/useDetectTargets.js'
 
 // Detect Targets (Tools ▸ Images ▾): place the marks of GCPs with checkerboard mats where
-// the model expects them (composables/useDetectTargets.js). The plan (which GCP is looked
-// for in which photo) is made here, live, so the effect lines count the run.
+// the model expects them, or of AprilTags anywhere (composables/useDetectTargets.js). The
+// plan (which GCP is looked for in which photo) is made here, live, so the effect lines
+// count the run.
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...TARGET_DEFAULTS })
@@ -18,7 +19,7 @@ const { plan } = useDetectTargets()
 const planned = ref(null)
 let seq = 0
 watch(
-  () => [settings.value.sizeM, settings.value.searchPx, settings.value.replaceDetected],
+  () => [settings.value.kind, settings.value.sizeM, settings.value.searchPx, settings.value.replaceDetected],
   async () => {
     const id = ++seq
     const p = await plan(settings.value)
@@ -27,13 +28,16 @@ watch(
   { immediate: true },
 )
 const effects = computed(() => detectTargetsEffects(settings.value, planned.value?.counts ?? {}))
+const tags = computed(() => settings.value.kind === 'apriltag')
 const valid = computed(
   () =>
-    settings.value.sizeM > 0 &&
-    settings.value.searchPx >= 5 &&
-    settings.value.minScore >= 0 &&
-    settings.value.minScore <= 1,
+    tags.value ||
+    (settings.value.sizeM > 0 &&
+      settings.value.searchPx >= 5 &&
+      settings.value.minScore >= 0 &&
+      settings.value.minScore <= 1),
 )
+const runnable = computed(() => (tags.value ? planned.value?.counts.photos : planned.value?.counts.predictions) > 0)
 
 function run() {
   emit('run', { settings: { ...settings.value }, plan: planned.value })
@@ -43,11 +47,18 @@ function run() {
 <template>
   <ModalShell title="Detect Targets" @close="emit('close')">
     <p class="field-hint">
-      Finds the centre of each GCP's black-and-white checker mat in the photos where the model expects it, and places
-      the GCP's mark there, marked as detected. Check them in <b>Edit GCPs</b>, then georeference again.
+      Finds the centre of each GCP's target in the photos and places the GCP's mark there, marked as detected. Check
+      them in <b>Edit GCPs</b>, then georeference again.
     </p>
     <SettingsStep step="1" title="Targets" :effect="effects.targets">
-      <SettingsField label-for="dt-size" unit="m">
+      <SettingsField label-for="dt-kind">
+        <template #label><FieldHelp op="detect-targets" param="kind">Target type</FieldHelp></template>
+        <select id="dt-kind" v-model="settings.kind" class="field-select">
+          <option value="checker">Checker mat</option>
+          <option value="apriltag">AprilTag 36h11</option>
+        </select>
+      </SettingsField>
+      <SettingsField v-if="!tags" label-for="dt-size" unit="m">
         <template #label
           ><FieldHelp op="detect-targets" param="sizeM" :value="settings.sizeM" :default-value="TARGET_DEFAULTS.sizeM"
             >Target size</FieldHelp
@@ -65,7 +76,7 @@ function run() {
       </SettingsField>
     </SettingsStep>
     <SettingsStep step="2" title="Where to look" :effect="effects.search">
-      <SettingsField label-for="dt-search" unit="px">
+      <SettingsField v-if="!tags" label-for="dt-search" unit="px">
         <template #label
           ><FieldHelp
             op="detect-targets"
@@ -87,7 +98,7 @@ function run() {
       </SettingsField>
     </SettingsStep>
     <SettingsStep step="3" title="Marks" :effect="effects.marks">
-      <SettingsField label-for="dt-score">
+      <SettingsField v-if="!tags" label-for="dt-score">
         <template #label
           ><FieldHelp
             op="detect-targets"
@@ -107,6 +118,10 @@ function run() {
           class="field-input"
         />
       </SettingsField>
+      <label v-if="tags" class="checkbox-row">
+        <input v-model="settings.addMarkers" type="checkbox" class="checkbox" />
+        <FieldHelp op="detect-targets" param="addMarkers">Add markers for other tags</FieldHelp>
+      </label>
       <label class="checkbox-row">
         <input v-model="settings.replaceDetected" type="checkbox" class="checkbox" />
         <FieldHelp op="detect-targets" param="replaceDetected">Replace earlier detections</FieldHelp>
@@ -114,9 +129,7 @@ function run() {
     </SettingsStep>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!valid || !planned?.counts.predictions" @click="run">
-        Detect targets
-      </button>
+      <button class="btn btn-primary" :disabled="!valid || !runnable" @click="run">Detect targets</button>
     </template>
   </ModalShell>
 </template>

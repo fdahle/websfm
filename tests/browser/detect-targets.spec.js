@@ -93,3 +93,74 @@ test('plans where each GCP should be and searches there', async ({ page, browser
   for (const m of marks) expect(m.score).toBeGreaterThanOrEqual(0.4)
   expect(errors).toEqual([])
 })
+
+// AprilTags in the worker (workers/ops/detect.js detectTagsInPhoto) on a 4,600 × 3,000
+// photo drawn here: a small tag across a tile seam, a turned one, and one too large for
+// a tile, which the downscaled pass finds. Then the dialog's AprilTag mode on the
+// project, whose photos hold no tags: it searches all five and places nothing.
+test('reads AprilTags anywhere in a photo, and runs from the dialog', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough')
+  test.setTimeout(120_000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await openFixture(page)
+  const tags = await page.evaluate(async () => {
+    const TAG = await import('/src/core/sfm/tags/tag36h11.js')
+    const { detectTagsInPhoto } = await import('/src/workers/computeClient.js')
+    const W = 4600,
+      H = 3000
+    const c = new OffscreenCanvas(W, H)
+    const ctx = c.getContext('2d')
+    ctx.fillStyle = 'rgb(120,120,120)'
+    ctx.fillRect(0, 0, W, H)
+    // Tag `id` with its 10-cell square centred at (cx, cy), `cell` px a cell, turned by `a`.
+    const draw = (id, cx, cy, cell, a) => {
+      ctx.setTransform(Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), cx, cy)
+      const code = TAG.CODES[id]
+      for (let y = 0; y < 10; y++)
+        for (let x = 0; x < 10; x++) {
+          let white = x === 0 || y === 0 || x === 9 || y === 9
+          const i = [...Array(TAG.NBITS).keys()].find((k) => TAG.BIT_X[k] + 1 === x && TAG.BIT_Y[k] + 1 === y)
+          if (i !== undefined) white = Math.floor(code / 2 ** (TAG.NBITS - 1 - i)) % 2 === 1
+          ctx.fillStyle = white ? 'rgb(235,235,235)' : 'rgb(15,15,15)'
+          ctx.fillRect((x - 5) * cell, (y - 5) * cell, cell + 0.5, cell + 0.5)
+        }
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+    }
+    // Pixel edges at integers on the canvas: the tag's centre pixel-centre is c − 0.5.
+    draw(5, 1850, 1300, 5, 0.3) // across the seam of the first two tile columns (1,850 ± 25 px)
+    draw(77, 3000.25, 700.75, 8, -1.1)
+    draw(400, 2200, 2300, 70, 0.2) // 700 px across
+    const url = URL.createObjectURL(await c.convertToBlob({ type: 'image/png' }))
+    const { tags } = await detectTagsInPhoto(url)
+    URL.revokeObjectURL(url)
+    return tags
+  })
+  const at = Object.fromEntries(tags.map((t) => [t.id, t]))
+  expect(tags.map((t) => t.id)).toEqual([5, 77, 400])
+  expect(Math.hypot(at[5].x - 1849.5, at[5].y - 1299.5)).toBeLessThan(0.3)
+  expect(Math.hypot(at[77].x - 2999.75, at[77].y - 700.25)).toBeLessThan(0.3)
+  expect(Math.hypot(at[400].x - 2199.5, at[400].y - 2299.5)).toBeLessThan(2)
+  expect(at[5].score).toBe(1)
+
+  await page.getByRole('button', { name: 'Tools', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'Images', exact: true }).click()
+  await page.getByRole('menuitem', { name: /Detect targets/ }).click()
+  const dialog = page.getByRole('dialog', { name: 'Detect Targets' })
+  await dialog.getByLabel('Target type').selectOption('apriltag')
+  await expect(dialog).toContainText('Every tag in each of 5 photos')
+  await expect(dialog).toContainText('(0 of 2 GCPs have one)')
+  await dialog.getByRole('button', { name: 'Detect targets', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const { useLog } = await import('/src/composables/useLog.js')
+          return useLog().entries.value.find((e) => /^Detect targets:/.test(e.message))?.message ?? null
+        }),
+      { timeout: 60_000 },
+    )
+    .toMatch(/^Detect targets: 0 AprilTag marks placed in 5 photos on \d+ workers?/)
+  expect(errors).toEqual([])
+})

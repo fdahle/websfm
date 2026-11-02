@@ -1214,6 +1214,51 @@ pixels against the canonical K. A point guide maps exactly; an epipolar line is 
 line only in the pinhole frame and is drawn as the chord through two mapped points
 (exact for a film affine, a first-order approximation under lens distortion).
 
+### 6.4b Detecting GCP targets (`core/sfm/targetDetect.js`, `tagDetect.js`, 2026-11-03)
+
+Tools ▸ Images ▸ Detect targets places marks for two kinds of target.
+
+**Checker mats** carry no identity, so they are looked for only where a GCP is
+expected: triangulated from two or more marks (§6.5, robust), or placed from its
+coordinates through the inverse georeference, then projected into each registered
+photo and mapped through the lens to raw photo pixels. Around that place the detector
+takes the saddle response (−det of the Hessian of a blurred window), keeps maxima whose
+four quadrants alternate dark and light at the expected half-size (from the mat's size,
+the depth and the focal length), and refines the best one to sub-pixel the way
+OpenCV's `cornerSubPix` does (the gradient at every pixel is orthogonal to the vector
+from the corner). The score is the quadrants' contrast.
+
+**AprilTags** (tag36h11; Olson 2011, Wang & Olson 2016) carry their number, so the whole
+photo is searched without a model. The detector follows AprilTag 2 in outline but not
+in every step:
+
+1. An adaptive threshold against the local mean (integral image, a window of half the
+   smallest tag), then 4-connected dark components of a tag's size whose dark share
+   is that of a ring.
+2. Each component's convex hull; its quadrilateral is the farthest pair of hull points
+   and the farthest point on either side of that diagonal.
+3. Each side refined to sub-pixel: across it, at samples along its middle 70 %, the
+   strongest brightness step within about half a cell (so neither the ring's inner
+   edge nor anything outside the white border is taken), located by a parabola
+   through the central differences; a total-least-squares line through the samples,
+   refitted up to twice without those more than 3 × the median residual (at least
+   0.3 px) off. The corners are where neighbouring lines meet.
+4. A homography from the 8-cell box to the corners. The ring (cells 0 and 7) and the
+   white border outside it give the threshold; the ring must read black; the 36 data
+   cells, in each of the four rotations, are matched to the nearest of the family's 587
+   codes. At most 2 wrong bits are accepted (the family separates codes by 11, so
+   up to 5 could be corrected; 2 keeps random patterns out). The score is the share of
+   that margin left, (11 − 2·errors)/11.
+
+The centre is the homography's image of the box centre, where the diagonals cross,
+which under perspective is not the corners' mean. A photo is read in 2048-px native
+tiles overlapping by 400 px, so a worker holds a tile's buffers instead of the
+photo's; a tag counts in the tile whose core holds its centre. Tags over about 240 px
+are found in the photo downscaled to 2048 px. A tag becomes a mark of the GCP whose
+name holds that number and no other, or of a new marker "Tag N". On rendered tags
+(turned, in perspective, blurred by σ 0.8 px, noise up to 8 grey levels, 2 bits
+flipped) the centre is found to within 0.1–0.3 px from a tag 26 px across up.
+
 ### 6.5 GCP triangulation (N-view, optionally robust)
 
 `gcpTriangulation.js` places a GCP's pixel marks into the current SfM frame. It
@@ -2320,12 +2365,14 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Lowe, D. G. (2004). Distinctive image features from scale-invariant keypoints. International Journal of Computer Vision 60(2), 91–110. https://doi.org/10.1023/B:VISI.0000029664.99615.94
 - Mark, R. K. (1992). Multidirectional, oblique-weighted, shaded-relief image of the Island of Hawaii. U.S. Geological Survey Open-File Report 92-422. https://pubs.usgs.gov/of/1992/of92-422/
 - Nistér, D. (2004). An efficient solution to the five-point relative pose problem. IEEE Transactions on Pattern Analysis and Machine Intelligence 26(6), 756–770. https://doi.org/10.1109/TPAMI.2004.17
+- Olson, E. (2011). AprilTag: A robust and flexible visual fiducial system. IEEE International Conference on Robotics and Automation (ICRA), 3400–3407. https://doi.org/10.1109/ICRA.2011.5979561
 - Persson, M. & Nordberg, K. (2018). Lambda Twist: an accurate fast robust perspective three point (P3P) solver. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-030-01225-0_20
 - Rusu, R. B., Marton, Z. C., Blodow, N., Dolha, M. & Beetz, M. (2008). Towards 3D point cloud based object maps for household environments. Robotics and Autonomous Systems 56(11), 927–941. https://doi.org/10.1016/j.robot.2008.08.005
 - Schönberger, J. L. & Frahm, J.-M. (2016). Structure-from-motion revisited. IEEE Conference on Computer Vision and Pattern Recognition (CVPR). https://doi.org/10.1109/CVPR.2016.445
 - Schönberger, J. L., Zheng, E., Frahm, J.-M. & Pollefeys, M. (2016). Pixelwise view selection for unstructured multi-view stereo. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-319-46487-9_31
 - Nuth, C. & Kääb, A. (2011). Co-registration and bias corrections of satellite elevation data sets for quantifying glacier thickness change. The Cryosphere 5(1), 271–290. https://doi.org/10.5194/tc-5-271-2011
 - Vautherin, J., Rutishauser, S., Schneider-Zapp, K., Choi, H. F., Chovancova, V., Glass, A. & Strecha, C. (2016). Photogrammetric accuracy and modeling of rolling shutter cameras. ISPRS Annals of the Photogrammetry, Remote Sensing and Spatial Information Sciences III-3, 139–146. https://doi.org/10.5194/isprs-annals-III-3-139-2016
+- Wang, J. & Olson, E. (2016). AprilTag 2: Efficient and robust fiducial detection. IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), 4193–4198. https://doi.org/10.1109/IROS.2016.7759617
 - xDEM contributors (2026). xDEM: analysis of digital elevation models for geosciences. Software, Zenodo. https://doi.org/10.5281/zenodo.4809697
 - Shepard, D. (1968). A two-dimensional interpolation function for irregularly-spaced data. Proceedings of the 23rd ACM National Conference, 517–524. https://doi.org/10.1145/800186.810616
 - Stewénius, H., Engels, C. & Nistér, D. (2006). Recent developments on direct relative orientation. ISPRS Journal of Photogrammetry and Remote Sensing 60(4), 284–294. https://doi.org/10.1016/j.isprsjprs.2006.03.005

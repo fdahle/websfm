@@ -246,6 +246,12 @@ export function detectTargets(url, predictions) {
   return call('detectTargets', [url, predictions.map((p) => ({ ...p }))])
 }
 
+// AprilTag tag36h11 targets anywhere in one photo (workers/ops/detect.js
+// detectTagsInPhoto) → { tags: [{ id, hamming, score, x, y, contrast }] }.
+export function detectTagsInPhoto(url) {
+  return call('detectTagsInPhoto', [url])
+}
+
 export function detectFiducialSpots(url, options = {}, { onLog } = {}) {
   // Modal settings are commonly a Vue reactive Proxy. Proxies are not supported
   // by the browser's structured-clone algorithm, so materialize the small,

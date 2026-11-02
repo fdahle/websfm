@@ -130,6 +130,20 @@ export const REFERENCES = {
     venue: 'ISPRS Annals of the Photogrammetry, Remote Sensing and Spatial Information Sciences III-3, 139–146',
     doi: '10.5194/isprs-annals-III-3-139-2016',
   },
+  olson2011: {
+    authors: ['Edwin Olson'],
+    year: 2011,
+    title: 'AprilTag: A robust and flexible visual fiducial system',
+    venue: 'IEEE International Conference on Robotics and Automation (ICRA), 3400–3407',
+    doi: '10.1109/ICRA.2011.5979561',
+  },
+  wang2016: {
+    authors: ['John Wang', 'Edwin Olson'],
+    year: 2016,
+    title: 'AprilTag 2: Efficient and robust fiducial detection',
+    venue: 'IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), 4193–4198',
+    doi: '10.1109/IROS.2016.7759617',
+  },
   agarwal2010: {
     authors: ['Sameer Agarwal', 'Noah Snavely', 'Steven M. Seitz', 'Richard Szeliski'],
     year: 2010,
