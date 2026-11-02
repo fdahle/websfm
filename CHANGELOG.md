@@ -62,6 +62,10 @@ Notable changes to websfm. The format follows
   rest of the app is dimmed only lightly. The card used to start in the middle, move to
   the corner with the first cameras and come back for the last steps, and the earlier
   clouds flashed up before the finished model replaced the live one.
+- **Guide and Glossary tabs move and close like the main tabs.** Drag a tab in the
+  Guide or the Glossary to put it elsewhere in the strip, and right-click it for
+  **Close**, **Close others**, **Close to the left**, **Close to the right** and **Close
+  all**, as on the tabs of images and products.
 - **A shorter guide.** Every guide article now says what a setting does and when to
   change it, in a few sentences; the hover help of a setting is the same short text.
   Test results and the history of each setting are gone from the app (they stay in this

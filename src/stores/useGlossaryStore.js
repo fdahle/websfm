@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
+import { helpTabActions } from './helpTabs.js'
 
 // State for the single glossary modal: a home/index tab plus an unlimited set
 // of term tabs. Clicking a glossary term's "Read more" or a cross-link inside
@@ -41,5 +42,8 @@ export const useGlossaryStore = defineStore('glossary', () => {
     isOpen.value = false
   }
 
-  return { isOpen, tabs, activeId, openHome, openTerm, setActive, closeTab, close }
+  // Reorder and the strip's right-click menu (Close others / to the left / …).
+  const tabActions = helpTabActions({ tabs, activeId, setActive })
+
+  return { isOpen, tabs, activeId, openHome, openTerm, setActive, closeTab, close, ...tabActions }
 })

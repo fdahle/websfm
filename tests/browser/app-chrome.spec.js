@@ -63,6 +63,40 @@ test('the Guide tab strip scrolls sideways only, with Home fixed', async ({ page
   expect(errors).toEqual([])
 })
 
+// The Guide's tabs (and the Glossary's, the same HelpTabStrip) move and close as the
+// workspace's do: drag a tab, or right-click for the close menu.
+test('Guide tabs reorder by dragging and close from their right-click menu', async ({ page }) => {
+  await createProject(page)
+  for (const id of ['detect-features', 'match-features', 'sparse-reconstruction'])
+    await page.evaluate(async (op) => (await import('/src/stores/useGuideStore.js')).useGuideStore().openOp(op), id)
+  const dialog = page.getByRole('dialog', { name: 'Guide' })
+  const tabs = dialog.locator('.tab-scroll .gtab')
+  const titles = () => tabs.evaluateAll((els) => els.map((e) => e.textContent.replace('×', '').trim()))
+  await expect.poll(titles).toEqual(['Detect Features', 'Match Features', 'Sparse Reconstruction'])
+
+  // Dropped onto a tab to its right, a tab lands after it.
+  await tabs.nth(0).dragTo(tabs.nth(2))
+  await expect.poll(titles).toEqual(['Match Features', 'Sparse Reconstruction', 'Detect Features'])
+
+  const menu = page.locator('.tab-ctx-menu')
+  await tabs.nth(1).click({ button: 'right' })
+  await menu.getByRole('button', { name: 'Close others' }).click()
+  await expect.poll(titles).toEqual(['Sparse Reconstruction'])
+  await expect(menu).toHaveCount(0)
+
+  // Escape closes the menu, not the Guide behind it.
+  await tabs.nth(0).click({ button: 'right' })
+  await expect(menu).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(dialog).toBeVisible()
+
+  await tabs.nth(0).click({ button: 'right' })
+  await menu.getByRole('button', { name: 'Close all' }).click()
+  await expect(tabs).toHaveCount(0)
+  await expect(dialog.getByRole('tab', { name: 'Home' })).toHaveClass(/active/)
+})
+
 test("What's New does not link glossary terms", async ({ page }) => {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))

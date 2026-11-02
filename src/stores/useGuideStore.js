@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
+import { helpTabActions } from './helpTabs.js'
 
 // State for the single Guide modal: a home/index tab plus one tab per opened
 // operation. Mirrors useGlossaryStore, but tabs are operation ids and it carries
@@ -46,5 +47,8 @@ export const useGuideStore = defineStore('guide', () => {
     isOpen.value = false
   }
 
-  return { isOpen, tabs, activeId, focusParam, openHome, openOp, setActive, closeTab, close }
+  // Reorder and the strip's right-click menu (Close others / to the left / …).
+  const tabActions = helpTabActions({ tabs, activeId, setActive })
+
+  return { isOpen, tabs, activeId, focusParam, openHome, openOp, setActive, closeTab, close, ...tabActions }
 })

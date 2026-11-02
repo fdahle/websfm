@@ -7,6 +7,7 @@ import { useHelpLinkPreview } from '../../composables/useHelpLinkPreview.js'
 import { helpLinkFrom, followLink } from '../../composables/useHelpStack.js'
 import { getGuideDoc, getAllGuideDocs, searchGuide } from '../../core/help/guide.js'
 import { renderGuide } from '../../core/help/helpMarkdown.js'
+import HelpTabStrip from '../glossary/HelpTabStrip.vue'
 
 // Single centered modal holding the Guide. A Home/index tab lists every pipeline
 // operation; each opened operation gets a closeable tab showing its intro plus one
@@ -44,26 +45,11 @@ const sections = computed(() =>
     : [],
 )
 
-const tabDocs = computed(() => tabs.value.map((id) => ({ id, doc: getGuideDoc(id) })))
+const stripTabs = computed(() => tabs.value.map((id) => ({ id, title: getGuideDoc(id)?.title ?? id })))
 
 const { onMouseOver: onPreviewOver, onMouseOut: onPreviewOut } = useHelpLinkPreview()
 
 const bodyEl = ref(null)
-
-// A newly opened tab lands at the right of the strip, possibly past its edge: scroll
-// it into view (scrollLeft, not scrollIntoView, so only the strip moves).
-const tabScroll = ref(null)
-watch([activeId, tabs], async () => {
-  if (!isOpen.value || activeId.value === 'home') return
-  await nextTick()
-  const strip = tabScroll.value
-  const el = strip?.querySelector('.gtab.active')
-  if (!el) return
-  const sr = strip.getBoundingClientRect()
-  const er = el.getBoundingClientRect()
-  if (er.left < sr.left) strip.scrollLeft -= sr.left - er.left
-  else if (er.right > sr.right) strip.scrollLeft += er.right - sr.right
-})
 
 // After the active tab / focus param changes, scroll the requested section into
 // view (or the top for a fresh tab). nextTick so the v-html sections exist.
@@ -100,29 +86,17 @@ function onBodyClick(e) {
           <button class="modal-close" title="Close" @click="guide.close()">×</button>
         </div>
 
-        <div class="tab-strip" role="tablist">
-          <button
-            class="gtab gtab-home"
-            :class="{ active: activeId === 'home' }"
-            role="tab"
-            @click="guide.setActive('home')"
-          >
-            Home
-          </button>
-          <div ref="tabScroll" class="tab-scroll">
-            <button
-              v-for="t in tabDocs"
-              :key="t.id"
-              class="gtab"
-              :class="{ active: activeId === t.id }"
-              role="tab"
-              @click="guide.setActive(t.id)"
-            >
-              {{ t.doc?.title ?? t.id }}
-              <span class="gtab-close" title="Close tab" @click.stop="guide.closeTab(t.id)">×</span>
-            </button>
-          </div>
-        </div>
+        <HelpTabStrip
+          :tabs="stripTabs"
+          :active-id="activeId"
+          @activate="guide.setActive"
+          @close="guide.closeTab"
+          @move="guide.moveTab"
+          @close-others="guide.closeOtherTabs"
+          @close-left="guide.closeTabsToLeft"
+          @close-right="guide.closeTabsToRight"
+          @close-all="guide.closeAllTabs"
+        />
 
         <div ref="bodyEl" class="modal-body">
           <!-- Home / index + search -->
@@ -226,66 +200,6 @@ function onBodyClick(e) {
   border-radius: 4px;
 }
 .modal-close:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-/* As GlossaryModal's: Home sits outside the scroll area (fixed); only the operation
-   tabs scroll. */
-.tab-strip {
-  display: flex;
-  padding: 6px 0 0;
-  border-bottom: 1px solid var(--panel-border);
-  flex-shrink: 0;
-}
-.tab-scroll {
-  display: flex;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-  padding: 0 10px 0 8px;
-  overflow-x: auto;
-  /* overflow-x:auto alone makes the browser compute overflow-y to auto too,
-     which adds a stray vertical scrollbar and fights touchpad h-scroll. */
-  overflow-y: hidden;
-  scrollbar-width: thin;
-}
-.gtab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12.5px;
-  /* Extra bottom padding gives the thin horizontal scrollbar its own lane. The
-     active underline is an inset shadow, not a border with a negative margin, which
-     is what overflowed the strip. */
-  padding: 7px 10px 11px;
-  cursor: pointer;
-}
-.gtab-home {
-  flex-shrink: 0;
-  padding-left: 12px;
-  border-right: 1px solid var(--panel-border);
-}
-.gtab:hover:not(.active) {
-  color: var(--text);
-}
-.gtab.active {
-  color: var(--text);
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
-.gtab-close {
-  font-size: 13px;
-  line-height: 1;
-  color: var(--text-dim);
-  border-radius: 3px;
-  padding: 0 2px;
-}
-.gtab-close:hover {
   background: var(--hover-bg);
   color: var(--text);
 }

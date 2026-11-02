@@ -1,6 +1,6 @@
 <script setup>
 import 'katex/dist/katex.min.css'
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
 import { useHelpLinkPreview } from '../../composables/useHelpLinkPreview.js'
@@ -8,6 +8,7 @@ import { helpLinkFrom, followLink } from '../../composables/useHelpStack.js'
 import { getGlossaryEntry, getGlossaryEntriesByTopic, searchGlossary } from '../../core/help/glossary.js'
 import { renderHelpMarkdown } from '../../core/help/helpMarkdown.js'
 import { formatReference, referenceUrl } from '../../core/help/references.js'
+import HelpTabStrip from './HelpTabStrip.vue'
 
 // Single centered modal holding the glossary. A Home/index tab plus one tab per
 // opened term (unlimited, closeable). Cross-links inside a term open more tabs.
@@ -43,25 +44,9 @@ const activeRefs = computed(() =>
   })),
 )
 
-const tabEntries = computed(() => tabs.value.map((id) => ({ id, entry: getGlossaryEntry(id) })))
+const stripTabs = computed(() => tabs.value.map((id) => ({ id, title: getGlossaryEntry(id)?.title ?? id })))
 
 const { onMouseOver: onPreviewOver, onMouseOut: onPreviewOut } = useHelpLinkPreview()
-
-// A newly opened tab is appended at the right of the strip and can land past
-// the visible edge — scroll it into view so the user sees where it went.
-// Manual scrollLeft (not scrollIntoView) so only this strip ever moves.
-const tabScroll = ref(null)
-watch([activeId, tabs], async () => {
-  if (!isOpen.value || activeId.value === 'home') return
-  await nextTick()
-  const strip = tabScroll.value
-  const el = strip?.querySelector('.gtab.active')
-  if (!el) return
-  const sr = strip.getBoundingClientRect()
-  const er = el.getBoundingClientRect()
-  if (er.left < sr.left) strip.scrollLeft -= sr.left - er.left
-  else if (er.right > sr.right) strip.scrollLeft += er.right - sr.right
-})
 
 // Internal [label](help:id) / auto-links open (or focus) a tab.
 function onBodyClick(e) {
@@ -83,29 +68,17 @@ function onBodyClick(e) {
           <button class="modal-close" title="Close" @click="glossary.close()">×</button>
         </div>
 
-        <div class="tab-strip" role="tablist">
-          <button
-            class="gtab gtab-home"
-            :class="{ active: activeId === 'home' }"
-            role="tab"
-            @click="glossary.setActive('home')"
-          >
-            Home
-          </button>
-          <div ref="tabScroll" class="tab-scroll">
-            <button
-              v-for="t in tabEntries"
-              :key="t.id"
-              class="gtab"
-              :class="{ active: activeId === t.id }"
-              role="tab"
-              @click="glossary.setActive(t.id)"
-            >
-              {{ t.entry?.title ?? t.id }}
-              <span class="gtab-close" title="Close tab" @click.stop="glossary.closeTab(t.id)">×</span>
-            </button>
-          </div>
-        </div>
+        <HelpTabStrip
+          :tabs="stripTabs"
+          :active-id="activeId"
+          @activate="glossary.setActive"
+          @close="glossary.closeTab"
+          @move="glossary.moveTab"
+          @close-others="glossary.closeOtherTabs"
+          @close-left="glossary.closeTabsToLeft"
+          @close-right="glossary.closeTabsToRight"
+          @close-all="glossary.closeAllTabs"
+        />
 
         <div class="modal-body">
           <!-- Home / index + search results -->
@@ -254,66 +227,6 @@ function onBodyClick(e) {
   border-radius: 4px;
 }
 .modal-close:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-/* Home sits outside the scroll area (fixed); only the term tabs scroll. */
-.tab-strip {
-  display: flex;
-  padding: 6px 0 0;
-  border-bottom: 1px solid var(--panel-border);
-  flex-shrink: 0;
-}
-.tab-scroll {
-  display: flex;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-  padding: 0 10px 0 8px;
-  overflow-x: auto;
-  /* overflow-x:auto alone makes the browser compute overflow-y to auto too,
-     which adds a stray vertical scrollbar and fights touchpad h-scroll. */
-  overflow-y: hidden;
-  scrollbar-width: thin;
-}
-.gtab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12.5px;
-  /* Extra bottom padding gives the thin horizontal scrollbar its own lane so it
-     doesn't crowd the tab text. Active underline is an inset shadow (not a
-     border) so it survives overflow-y:hidden without a negative-margin trick. */
-  padding: 7px 10px 11px;
-  cursor: pointer;
-}
-/* Home is fixed at the left, divided from the scrolling tabs by a thin rule. */
-.gtab-home {
-  flex-shrink: 0;
-  padding-left: 12px;
-  border-right: 1px solid var(--panel-border);
-}
-.gtab:hover:not(.active) {
-  color: var(--text);
-}
-.gtab.active {
-  color: var(--text);
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
-.gtab-close {
-  font-size: 13px;
-  line-height: 1;
-  color: var(--text-dim);
-  border-radius: 3px;
-  padding: 0 2px;
-}
-.gtab-close:hover {
   background: var(--hover-bg);
   color: var(--text);
 }

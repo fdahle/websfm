@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useFootprintsStore } from '../../stores/useFootprintsStore.js'
@@ -22,7 +22,7 @@ import ViewerGcp from '../viewers/ViewerGcp.vue'
 import RegionToolbox from '../viewers/RegionToolbox.vue'
 import OrientToolbox from '../viewers/OrientToolbox.vue'
 import AlignPairsToolbox from '../viewers/AlignPairsToolbox.vue'
-import { matches } from '../../core/help/shortcuts.js'
+import TabContextMenu from './TabContextMenu.vue'
 const ProductViewer = defineAsyncComponent(() => import('../viewers/ProductViewer.vue'))
 const ViewerMap = defineAsyncComponent(() => import('../viewers/ViewerMap.vue'))
 const Viewer3D = defineAsyncComponent(() => import('../viewers/Viewer3D.vue'))
@@ -245,29 +245,6 @@ watch(
 )
 watch(activeTabId, (id) => {
   if (id === 'viewer') flushScene()
-})
-
-// The tab menu answers Escape and outside clicks before anything else sees them.
-// Capture phase: the viewers below (3D selection, measuring) also listen on window
-// and mount before this, so a bubbling listener would let them clear a selection
-// on the same press that only meant to close the menu.
-function onKeydown(e) {
-  if (matches(e, 'app.escape') && tabCtx.value) {
-    closeTabCtx()
-    e.preventDefault()
-    e.stopImmediatePropagation()
-  }
-}
-function onDocumentClick() {
-  if (tabCtx.value) closeTabCtx()
-}
-onMounted(() => {
-  window.addEventListener('keydown', onKeydown, true)
-  document.addEventListener('click', onDocumentClick)
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKeydown, true)
-  document.removeEventListener('click', onDocumentClick)
 })
 </script>
 
@@ -500,69 +477,20 @@ onBeforeUnmount(() => {
   </main>
 
   <!-- Tab context menu (closable tabs only) -->
-  <Teleport to="body">
-    <div v-if="tabCtx" class="tab-ctx-menu" :style="{ left: tabCtx.x + 'px', top: tabCtx.y + 'px' }" @click.stop>
-      <button
-        class="tab-ctx-item"
-        @click="
-          () => {
-            closeTab(tabCtx.id)
-            closeTabCtx()
-          }
-        "
-      >
-        Close
-      </button>
-      <button
-        class="tab-ctx-item"
-        :disabled="!tabCtxHasOthers"
-        @click="
-          () => {
-            closeOtherTabs(tabCtx.id)
-            closeTabCtx()
-          }
-        "
-      >
-        Close others
-      </button>
-      <button
-        class="tab-ctx-item"
-        :disabled="!tabCtxHasLeft"
-        @click="
-          () => {
-            closeTabsToLeft(tabCtx.id)
-            closeTabCtx()
-          }
-        "
-      >
-        Close to the left
-      </button>
-      <button
-        class="tab-ctx-item"
-        :disabled="!tabCtxHasRight"
-        @click="
-          () => {
-            closeTabsToRight(tabCtx.id)
-            closeTabCtx()
-          }
-        "
-      >
-        Close to the right
-      </button>
-      <div class="tab-ctx-sep" />
-      <button
-        class="tab-ctx-item"
-        @click="
-          () => {
-            closeAllTabs()
-            closeTabCtx()
-          }
-        "
-      >
-        Close all
-      </button>
-    </div>
-  </Teleport>
+  <TabContextMenu
+    v-if="tabCtx"
+    :x="tabCtx.x"
+    :y="tabCtx.y"
+    :has-others="tabCtxHasOthers"
+    :has-left="tabCtxHasLeft"
+    :has-right="tabCtxHasRight"
+    @close="closeTab(tabCtx.id)"
+    @close-others="closeOtherTabs(tabCtx.id)"
+    @close-left="closeTabsToLeft(tabCtx.id)"
+    @close-right="closeTabsToRight(tabCtx.id)"
+    @close-all="closeAllTabs()"
+    @dismiss="closeTabCtx"
+  />
 </template>
 
 <style scoped>
@@ -629,41 +557,5 @@ onBeforeUnmount(() => {
   flex: 1;
   position: relative;
   min-height: 0;
-}
-/* Tab context menu */
-.tab-ctx-menu {
-  position: fixed;
-  z-index: 300;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 4px;
-  min-width: 140px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-.tab-ctx-item {
-  display: block;
-  width: 100%;
-  padding: 6px 10px;
-  background: none;
-  border: none;
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-.tab-ctx-item:hover:not(:disabled) {
-  background: var(--hover-bg);
-}
-.tab-ctx-item:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-.tab-ctx-sep {
-  height: 1px;
-  background: var(--panel-border);
-  margin: 4px 0;
 }
 </style>
