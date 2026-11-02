@@ -25,6 +25,7 @@ import { defaultExportName, exportFileName } from '../../core/exportNames.js'
 // Deps are useExports' injected refs and shared helpers.
 export function createSfmProjectExports({
   doExportModel,
+  doExportMetashape,
   images,
   imagesStore,
   log,
@@ -42,6 +43,7 @@ export function createSfmProjectExports({
   async function doExportColmap({ format, includeImages = false, fileName } = {}) {
     const cloud = sparseCloud()
     if (!cloud) return
+    if (format === 'metashape') return doExportMetashape({ fileName })
     if (format === 'transforms') {
       doExportModel({ format: 'transforms', fileName })
       return

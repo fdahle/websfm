@@ -116,6 +116,13 @@ const CONFIG = {
       { value: 'transforms', label: 'transforms.json — NeRF / 3DGS' },
       { value: 'openmvg', label: 'OpenMVG sfm_data.json' },
       { value: 'nvm', label: 'VisualSFM NVM v3' },
+      {
+        value: 'metashape',
+        label: 'Metashape XML — cameras, calibration, markers',
+        hint:
+          'For File ▸ Import ▸ Import Cameras, then Import Markers, in Agisoft Metashape: the registered cameras ' +
+          'with their calibration, and the GCPs with their marks. In WGS 84 when the project is georeferenced.',
+      },
     ],
   },
   tiles3d: {

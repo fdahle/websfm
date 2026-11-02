@@ -6,14 +6,18 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
-- **Bring a Metashape project's cameras and markers in.** Import ▸ **Metashape Cameras**
+- **Metashape interchange, both ways.** Import ▸ **Metashape Cameras**
   reads the XML of Metashape's Export Cameras or Export Markers and takes, as you choose,
   the calibration of each camera, the positions and orientations of the aligned cameras
   as priors in the project's coordinate system, and the markers with the marks placed in
   Metashape (a disabled marker as a check point). A calibration made at another photo
   size is scaled to the project's photos; terms WebSfM has no place for (k4, b1, b2) are
-  named with how far they move a corner. On the Aukerman example the cameras land where
-  Metashape 2.2's own Omega Phi Kappa export puts them, to 1e-6 m and 1e-8 in rotation.
+  named with how far they move a corner. Export ▸ SfM Project ▸ **Metashape XML** writes
+  the registered cameras, their calibration and the GCPs with their marks back, for
+  Metashape's Import Cameras and Import Markers. On the Aukerman example the imported
+  cameras land where Metashape 2.2's own Omega Phi Kappa export puts them (1e-6 m, 1e-8
+  in rotation), and Metashape 2.2 projects points through the exported cameras to within
+  0.0001 px of WebSfM.
 - **Photos left out of a large survey get a pose.** When matching leaves photos apart from
   the main block, or hanging on it by a few weak pairs, Match Features now detects them
   again at full size together with the photos of the main block they share most pairs

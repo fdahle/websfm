@@ -27,3 +27,14 @@ You choose what comes:
   marks anyone placed, so they stay behind.
 
 Scale bars are not read: add them again in **Scale bars**.
+
+## Back to Metashape
+
+**Export ▸ SfM Project ▸ Metashape XML** writes the registered cameras, their
+calibration and the GCPs with their marks, for **File ▸ Import ▸ Import Cameras** and
+then **Import Markers** in Metashape (the same file for both). A georeferenced project
+goes out in WGS 84 with ellipsoidal heights, converted from EGM96 or EGM2008 where
+the georeference uses one; otherwise the cameras stay in a local frame. Each camera
+group's lens, including what self-calibration added on top, is fitted to Metashape's
+model; the log names a group the fit misses by more than 0.05 px. Film scans are left
+out.

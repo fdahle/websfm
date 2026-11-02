@@ -1,6 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import { createRasterExports } from './exports/rasters.js'
 import { createSfmProjectExports } from './exports/sfmProject.js'
+import { createMetashapeExport } from './exports/metashape.js'
 import { createCloudExports } from './exports/clouds.js'
 import { createTabularExports } from './exports/tabular.js'
 import { createMeasurementExports } from './exports/measurements.js'
@@ -15,6 +16,8 @@ import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
+import { useGcpsStore } from '../stores/useGcpsStore.js'
+import { storeToRefs } from 'pinia'
 import { polygonSetToGeoJson } from '../core/io/geojson.js'
 import { vectorSetToKml } from '../core/io/kml.js'
 import { ensureProjection, transform } from '../core/crs.js'
@@ -269,8 +272,20 @@ export function useExports({
     })
 
   // COLMAP / interchange projects and undistorted images (exports/sfmProject.js).
+  const { doExportMetashape } = createMetashapeExport({
+    currentCrs,
+    images,
+    sensors,
+    sparseCloud,
+    summary,
+    gcps: storeToRefs(useGcpsStore()).gcps,
+    effectiveFrameSpec,
+    log,
+    projectBase,
+  })
   const { doExportColmap, doExportUndistorted } = createSfmProjectExports({
     doExportModel,
+    doExportMetashape,
     images,
     imagesStore,
     log,

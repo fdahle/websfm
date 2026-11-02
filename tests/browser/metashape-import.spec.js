@@ -1,17 +1,17 @@
 import { test, expect } from './fixtures.js'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { readMetashapeXml, metashapeChunkToImport, ellipsoidOf } from '../../src/core/io/metashapeXml.js'
+import proj4 from 'proj4'
 
-// Import ▸ Metashape Cameras on the saved five-photo Aukerman project: the Metashape
+// Metashape interchange on the saved five-photo Aukerman project. Import: the Metashape
 // 2.2 export of the same photos (tests/fixtures/metashape) brings its calibration, the
-// poses of those five photos and the three markers with their marks.
+// poses of those five photos and the three markers with their marks. Export: what
+// Export ▸ SfM Project ▸ Metashape XML writes reads back to WebSfM's own poses.
 const PROJECT = new URL('../fixtures/projects/v2/aukerman-5.websfm', import.meta.url)
 const METASHAPE = fileURLToPath(new URL('../fixtures/metashape/aukerman-markers.xml', import.meta.url))
 
-test('imports calibration, poses and markers from a Metashape export', async ({ page }) => {
-  test.setTimeout(120_000)
-  const errors = []
-  page.on('pageerror', (e) => errors.push(e.message))
+async function openFixture(page) {
   await page.goto('/')
   await page.waitForFunction(() => document.querySelector('#app')?.__vue_app__?._instance?.setupState)
   await page.evaluate((b64) => {
@@ -38,6 +38,13 @@ test('imports calibration, poses and markers from a Metashape export', async ({ 
     const { useModalsStore } = await import('/src/stores/useModalsStore.js')
     useModalsStore().newProjectOpen = false
   })
+}
+
+test('imports calibration, poses and markers from a Metashape export', async ({ page }) => {
+  test.setTimeout(120_000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await openFixture(page)
 
   await page.getByRole('button', { name: 'Import', exact: true }).click()
   const chooser = page.waitForEvent('filechooser')
@@ -82,5 +89,59 @@ test('imports calibration, poses and markers from a Metashape export', async ({ 
     ['GCP2', 'control'],
     ['GCP3', 'check'],
   ])
+  expect(errors).toEqual([])
+})
+
+test('exports the cameras, calibration and markers for Metashape', async ({ page }) => {
+  test.setTimeout(120_000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await openFixture(page)
+
+  await page.getByRole('button', { name: 'Export', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'SfM Project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Export SfM Project' })
+  await dialog.locator('#fmt').selectOption('metashape')
+  const download = page.waitForEvent('download')
+  await dialog.getByRole('button', { name: 'Export', exact: true }).click()
+  const file = await (await download).path()
+  const xml = readFileSync(file, 'utf8')
+
+  // The cameras as WebSfM's own pose export places them, in the project CRS.
+  const expected = await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const { similarityForExport } = await import('/src/core/products/exportFrame.js')
+    const { estimatedPose } = await import('/src/core/sfm/cameraEstimated.js')
+    const recon = useReconstructionStore()
+    const { sim, crs } = similarityForExport(await recon.effectiveFrameSpec())
+    const cams = recon.mainSparseCloud.cameras
+    return {
+      crs,
+      poses: useImagesStore().images.map((im) => ({ name: im.name, ...estimatedPose(cams.get(im.uuid), sim) })),
+    }
+  })
+  expect(expected.crs).toBe('EPSG:32617')
+  const chunk = readMetashapeXml(xml).chunks[0]
+  expect(chunk.crs.epsg).toBe('EPSG:4326')
+  expect(chunk.markers.map((m) => [m.label, m.locations.length])).toEqual([
+    ['Bar end A', 4],
+    ['Bar end B', 4],
+  ])
+  const utm = '+proj=utm +zone=17 +datum=WGS84 +units=m +no_defs'
+  const toUtm = proj4('+proj=longlat +datum=WGS84 +no_defs', utm)
+  const back = metashapeChunkToImport(chunk, {
+    ellipsoid: ellipsoidOf(utm),
+    toTarget: (lon, lat) => toUtm.forward([lon, lat]),
+    fromChunk: (x, y) => toUtm.forward([x, y]),
+  })
+  expect(back.poses).toHaveLength(5)
+  for (const p of back.poses) {
+    const q = expected.poses.find((e) => e.name.startsWith(p.imageName))
+    expect(Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z)).toBeLessThan(1e-4)
+    // Metashape takes the angles against grid north at each camera; WebSfM's pose export
+    // against grid north at the georeference's origin (TODO ▸ A07 ▸ MX follow-up).
+    for (const k of ['omega', 'phi', 'kappa']) expect(Math.abs(p[k] - q[k])).toBeLessThan(1e-3)
+  }
   expect(errors).toEqual([])
 })

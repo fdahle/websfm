@@ -41,6 +41,7 @@ export function defaultExportName(
     case 'colmap':
       if (format === 'nvm') return base
       if (format === 'openmvg') return `${base}-sfm_data`
+      if (format === 'metashape') return `${base}-metashape`
       if (format === 'transforms') return `${base}-transforms`
       if (format === 'database') return `${base}-database`
       if (format === 'workspace') return `${base}-colmap-workspace`

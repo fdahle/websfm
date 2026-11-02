@@ -10,8 +10,14 @@ import {
   geographicDefOf,
   geocentricToGeodetic,
   scaleSensorTo,
+  fitMetashapeFrame,
+  metashapeCameraFrames,
+  buildMetashapeXml,
+  WGS84_WKT,
 } from './metashapeXml.js'
 import { opkMatrix } from '../footprint.js'
+import { makePinholeToMark } from '../sfm/displayFrame.js'
+import { distortionOf } from '../sfm/distortion.js'
 
 const fixture = (name) => readFileSync(new URL(`../../../tests/fixtures/metashape/${name}`, import.meta.url), 'utf8')
 const UTM17 = '+proj=utm +zone=17 +datum=WGS84 +units=m +no_defs'
@@ -194,5 +200,110 @@ describe('scaleSensorTo', () => {
   })
   it('refuses a different aspect', () => {
     expect(scaleSensorTo(s, 1800, 1800)).toBeNull()
+  })
+})
+
+describe('writing Metashape XML', () => {
+  const chunk = readMetashapeXml(fixture('aukerman-markers.xml')).chunks[0]
+  const msCal = chunk.sensors[0].calibration
+
+  it("fits back Metashape's own calibration through WebSfM's lens chain", () => {
+    // Metashape → WebSfM sensor → the camera's pinhole-to-mark mapping → Metashape again.
+    const { sensor } = metashapeSensor(chunk.sensors[0])
+    const K = { fx: sensor.focal, fy: sensor.focal, cx: sensor.cx, cy: sensor.cy }
+    const toMark = makePinholeToMark({ K, dist: distortionOf(sensor) })
+    const { calibration: c, rmsPx } = fitMetashapeFrame(toMark, K, 2400, 1800)
+    expect(rmsPx).toBeLessThan(1e-6)
+    expect(c.f).toBeCloseTo(msCal.f, 6)
+    expect(c.cx).toBeCloseTo(msCal.cx, 6)
+    expect(c.cy).toBeCloseTo(msCal.cy, 6)
+    for (const k of ['k1', 'k2', 'k3', 'p1', 'p2']) expect(c[k]).toBeCloseTo(msCal[k], 8)
+  })
+
+  it('writes cameras and markers that read back to the same poses and marks', () => {
+    const toUtm = proj4(WGS84, UTM17)
+    const opts = {
+      ellipsoid: ellipsoidOf(UTM17),
+      toTarget: (lon, lat) => toUtm.forward([lon, lat]),
+      fromChunk: (x, y) => toUtm.forward([x, y]),
+    }
+    const before = metashapeChunkToImport(chunk, opts)
+    // Solver cameras in a UTM model frame: R = D·opkMatrixᵀ, t = −R·C.
+    const cams = before.poses.map((p) => {
+      const M = opkMatrix(p.omega, p.phi, p.kappa)
+      const R = [0, 1, 2].map((i) => [M[0][i], M[1][i], M[2][i]].map((v) => (i ? -v : v)))
+      const C = [p.x, p.y, p.z]
+      return { R, t: R.map((r) => -(r[0] * C[0] + r[1] * C[1] + r[2] * C[2])) }
+    })
+    const geo = {
+      toGeodetic: ([x, y, z]) => [...toUtm.inverse([x, y]), z],
+      enuToFrame: (lon, lat) => {
+        const [x, y] = toUtm.forward([lon, lat]),
+          [x2, y2] = toUtm.forward([lon, lat + 1e-5])
+        const g = -Math.atan2(x2 - x, y2 - y)
+        return [
+          [Math.cos(g), -Math.sin(g), 0],
+          [Math.sin(g), Math.cos(g), 0],
+          [0, 0, 1],
+        ]
+      },
+    }
+    const frames = metashapeCameraFrames(cams, null, null, geo)
+    const xml = buildMetashapeXml({
+      sensors: [{ id: 0, label: 'Cam', type: 'frame', width: 2400, height: 1800, calibration: msCal }],
+      cameras: before.poses.map((p, i) => ({
+        id: i,
+        label: p.imageName,
+        sensorId: 0,
+        transform: frames.transforms[i],
+      })),
+      markers: chunk.markers.map((m, i) => ({
+        id: i,
+        label: m.label,
+        reference: { ...m.reference, sxy: m.reference.sx, sz: m.reference.sz },
+        locations: m.locations.map((l) => ({
+          cameraId: before.poses.findIndex((p) => p.imageName === chunk.cameras.find((c) => c.id === l.cameraId).label),
+          x: l.x,
+          y: l.y,
+        })),
+      })),
+      chunk: frames.chunk,
+      wkt: WGS84_WKT,
+    })
+    const again = readMetashapeXml(xml).chunks[0]
+    expect(again.crs.epsg).toBe('EPSG:4326')
+    expect(again.sensors[0].calibration).toMatchObject({ f: msCal.f, p1: msCal.p1, p2: msCal.p2 })
+    const after = metashapeChunkToImport(again, opts)
+    let dPos = 0,
+      dRot = 0
+    after.poses.forEach((p, i) => {
+      const q = before.poses[i]
+      expect(p.imageName).toBe(q.imageName)
+      dPos = Math.max(dPos, Math.abs(p.x - q.x), Math.abs(p.y - q.y), Math.abs(p.z - q.z))
+      const A = opkMatrix(p.omega, p.phi, p.kappa),
+        B = opkMatrix(q.omega, q.phi, q.kappa)
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) dRot = Math.max(dRot, Math.abs(A[a][b] - B[a][b]))
+    })
+    expect(dPos).toBeLessThan(1e-6)
+    expect(dRot).toBeLessThan(1e-9)
+    expect(after.gcps.map((g) => [g.name, g.role, g.observations.length])).toEqual(
+      before.gcps.map((g) => [g.name, g.role, g.observations.length]),
+    )
+    expect(after.gcps[0].observations[0]).toEqual(before.gcps[0].observations[0])
+  })
+
+  it('writes a local chunk with the cameras in the export frame', () => {
+    const I = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ]
+    const { chunk: c, transforms } = metashapeCameraFrames([{ R: I, t: [-1, -2, -3] }], null, null, null)
+    expect(c).toBeNull()
+    expect(transforms[0]).toEqual([1, 0, 0, 1, 0, 1, 0, 2, 0, 0, 1, 3, 0, 0, 0, 1])
+    const xml = buildMetashapeXml({ cameras: [{ id: 0, label: 'a&b', sensorId: 0, transform: transforms[0] }] })
+    const back = readMetashapeXml(xml).chunks[0]
+    expect(back.crs.local).toBe(true)
+    expect(back.cameras[0]).toMatchObject({ label: 'a&b', transform: transforms[0] })
   })
 })

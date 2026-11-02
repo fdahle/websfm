@@ -498,3 +498,260 @@ export function scaleSensorTo(sensor, width, height) {
     pixelSize: sensor.pixelSize != null ? sensor.pixelSize / sx : null,
   }
 }
+
+// ── Writing ───────────────────────────────────────────────────────────────────
+
+// Metashape's frame model u = W/2 + cx + x'·f, v = H/2 + cy + y'·f (pixel edges),
+// with its k1–k3 and p1/p2 (core of the reader above), at normalised point (x, y).
+function metashapeProject(c, x, y, W, H) {
+  const r2 = x * x + y * y
+  const rad = 1 + r2 * (c.k1 + r2 * (c.k2 + r2 * c.k3))
+  const xd = x * rad + c.p1 * (r2 + 2 * x * x) + 2 * c.p2 * x * y
+  const yd = y * rad + c.p2 * (r2 + 2 * y * y) + 2 * c.p1 * x * y
+  return [W / 2 + c.cx + xd * c.f, H / 2 + c.cy + yd * c.f]
+}
+
+const FRAME_TERMS = ['f', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2']
+
+// One Metashape frame calibration for a WebSfM camera: K (pinhole, pixel centres)
+// and `toMark`, the camera's pixel → photo mark pixel (pixel edges) through its whole
+// lens (displayFrame.js makePinholeToMark: the group's own model, any self-calibrated
+// terms on top, which no single model holds exactly). Fitted over a grid that covers
+// the photo; → { calibration, rmsPx, maxPx } with the misfit in photo pixels.
+export function fitMetashapeFrame(toMark, K, width, height, { grid = 24 } = {}) {
+  const pts = []
+  for (let i = 0; i <= grid; i++) {
+    for (let j = 0; j <= grid; j++) {
+      const u = -0.5 + (width * i) / grid,
+        v = -0.5 + (height * j) / grid
+      const m = toMark(u, v)
+      if (!Number.isFinite(m?.x) || !Number.isFinite(m?.y)) continue
+      if (m.x < -0.05 * width || m.x > 1.05 * width || m.y < -0.05 * height || m.y > 1.05 * height) continue
+      pts.push({ x: (u - K.cx) / K.fx, y: (v - K.cy) / K.fy, mx: m.x, my: m.y })
+    }
+  }
+  const c = { f: K.fy, cx: K.cx + 0.5 - width / 2, cy: K.cy + 0.5 - height / 2, k1: 0, k2: 0, k3: 0, p1: 0, p2: 0 }
+  const residuals = (p) =>
+    pts.flatMap((q) => {
+      const [u, v] = metashapeProject(p, q.x, q.y, width, height)
+      return [u - q.mx, v - q.my]
+    })
+  // Gauss–Newton with a numeric Jacobian: eight terms, a few hundred points.
+  for (let it = 0; it < 20; it++) {
+    const r0 = residuals(c)
+    const J = FRAME_TERMS.map((k) => {
+      const h = k === 'f' || k === 'cx' || k === 'cy' ? 1e-4 : 1e-7
+      const r1 = residuals({ ...c, [k]: c[k] + h })
+      return r1.map((v, i) => (v - r0[i]) / h)
+    })
+    const n = FRAME_TERMS.length
+    const A = Array.from({ length: n }, (_, a) => Array.from({ length: n }, (_, b) => dot(J[a], J[b])))
+    const g = J.map((col) => dot(col, r0))
+    const step = solve(A, g)
+    if (!step) break
+    FRAME_TERMS.forEach((k, i) => (c[k] -= step[i]))
+    if (Math.max(...step.map(Math.abs)) < 1e-12) break
+  }
+  const r = residuals(c)
+  let sum = 0,
+    max = 0
+  for (let i = 0; i < r.length; i += 2) {
+    const d = Math.hypot(r[i], r[i + 1])
+    sum += d * d
+    max = Math.max(max, d)
+  }
+  return { calibration: c, rmsPx: pts.length ? Math.sqrt(sum / pts.length) : 0, maxPx: max }
+}
+
+const dot = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0)
+
+// Gaussian elimination with partial pivoting; null when singular.
+function solve(A, b) {
+  const n = b.length
+  const M = A.map((row, i) => [...row, b[i]])
+  for (let c = 0; c < n; c++) {
+    let p = c
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r
+    if (!(Math.abs(M[p][c]) > 1e-300)) return null
+    ;[M[c], M[p]] = [M[p], M[c]]
+    for (let r = 0; r < n; r++) {
+      if (r === c) continue
+      const f = M[r][c] / M[c][c]
+      for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]
+    }
+  }
+  return M.map((row, i) => row[n] / row[i])
+}
+
+// Geodetic (lon°, lat°, ellipsoidal h) → geocentric X/Y/Z on { a, f }.
+export function geodeticToGeocentric([lonDeg, latDeg, h], { a, f }) {
+  const e2 = f * (2 - f),
+    la = (latDeg * Math.PI) / 180,
+    lo = (lonDeg * Math.PI) / 180
+  const N = a / Math.sqrt(1 - e2 * Math.sin(la) ** 2)
+  return [
+    (N + h) * Math.cos(la) * Math.cos(lo),
+    (N + h) * Math.cos(la) * Math.sin(lo),
+    (N * (1 - e2) + h) * Math.sin(la),
+  ]
+}
+
+const WGS84 = { a: 6378137, f: 1 / 298.257223563 }
+// As Metashape 2.2 writes it.
+export const WGS84_WKT =
+  'GEOGCS["WGS 84",DATUM["World Geodetic System 1984 ensemble",' +
+  'SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],TOWGS84[0,0,0,0,0,0,0],' +
+  'AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],' +
+  'UNIT["degree",0.01745329251994328,AUTHORITY["EPSG","9102"]],AUTHORITY["EPSG","4326"]]'
+export const LOCAL_WKT =
+  'LOCAL_CS["Local Coordinates (m)",LOCAL_DATUM["Local Datum",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]]]'
+
+// The 4×4 camera → chunk transforms (row-major) of solver cameras { R, t } (world →
+// camera, pixel axes), and the chunk transform. Without `geo` the chunk is the export
+// frame itself (sim applied, a local frame). With `geo` the chunk is WGS 84 geocentric
+// shifted to the block's centroid:
+//   geo = { toGeodetic([x, y, z]) → [lon, lat, h ellipsoidal] (export frame → WGS 84),
+//           enuToFrame(lon, lat) → 3×3 rotation from east/north/up at that place into
+//           the export frame's axes (the grid's convergence there, or a local frame's
+//           fixed one) }
+// `sim` maps the model into the export frame; `applySim(sim, p)` applies it.
+export function metashapeCameraFrames(cameras, sim, applySim, geo = null) {
+  const rot = sim
+    ? sim.R
+    : [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ]
+  const placed = cameras.map(({ R, t }) => {
+    const C = [0, 1, 2].map((j) => -(R[0][j] * t[0] + R[1][j] * t[1] + R[2][j] * t[2]))
+    // Camera axes (columns) in the export frame: sim.R · Rᵀ.
+    const axes = mul(rot, T(R))
+    return { C: sim ? applySim(sim, C) : C, axes }
+  })
+  if (!geo) {
+    return {
+      chunk: null,
+      transforms: placed.map(({ C, axes }) => matrix4(axes, C)),
+    }
+  }
+  const ecef = placed.map(({ C, axes }) => {
+    const [lon, lat, h] = geo.toGeodetic(C)
+    const toEcef = mul(T(enuBasis(lon, lat)), T(geo.enuToFrame(lon, lat)))
+    return { X: geodeticToGeocentric([lon, lat, h], WGS84), axes: mul(toEcef, axes) }
+  })
+  const t = [0, 1, 2].map((i) => ecef.reduce((s, e) => s + e.X[i], 0) / Math.max(1, ecef.length))
+  return {
+    chunk: {
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t,
+      s: 1,
+    },
+    transforms: ecef.map(({ X, axes }) =>
+      matrix4(
+        axes,
+        X.map((v, i) => v - t[i]),
+      ),
+    ),
+  }
+}
+
+const matrix4 = (A, c) => [...A[0], c[0], ...A[1], c[1], ...A[2], c[2], 0, 0, 0, 1]
+
+const esc = (s) =>
+  String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c])
+// Element text needs only these; Metashape writes a WKT's quotes as they are.
+const escText = (s) => String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c])
+const n17 = (v) => (Number.isFinite(v) ? String(Number(v.toPrecision(17))) : '0')
+// A fitted term that is only round-off is written as none.
+const term = (v) => (Math.abs(v ?? 0) < 1e-12 ? 0 : v)
+
+// The Metashape XML document: what Export Markers writes, so Metashape's File ▸ Import ▸
+// Import Cameras reads the calibration and cameras from it, and Import Markers the
+// markers. Pixel coordinates are pixel edges, Metashape's and WebSfM's mark convention.
+//   sensors  [{ id, label, type: 'frame' | 'fisheye', width, height, pixelSize?, calibration }]
+//            (calibration: Metashape's terms: f, cx, cy from W/2, k1–k4, p1, p2)
+//   cameras  [{ id, label, sensorId, enabled, transform (16 numbers) }]
+//   markers  [{ id, label, reference: { x, y, z, sxy, sz, enabled } | null,
+//              locations: [{ cameraId, x, y }] }]
+//   chunk    { R, t, s } | null, wkt (the chunk's CRS)
+export function buildMetashapeXml({
+  sensors = [],
+  cameras = [],
+  markers = [],
+  chunk = null,
+  wkt = LOCAL_WKT,
+  label = 'WebSfM',
+}) {
+  const L = ['<?xml version="1.0" encoding="UTF-8"?>', '<document version="2.0.0">']
+  L.push(`  <chunk label="${esc(label)}" enabled="true">`)
+  L.push(`    <sensors next_id="${sensors.length}">`)
+  for (const s of sensors) {
+    const c = s.calibration
+    L.push(`      <sensor id="${s.id}" label="${esc(s.label)}" type="${s.type ?? 'frame'}">`)
+    L.push(`        <resolution width="${s.width}" height="${s.height}"/>`)
+    if (s.pixelSize > 0) {
+      L.push(`        <property name="pixel_width" value="${n17(s.pixelSize)}"/>`)
+      L.push(`        <property name="pixel_height" value="${n17(s.pixelSize)}"/>`)
+      L.push(`        <property name="focal_length" value="${n17(c.f * s.pixelSize)}"/>`)
+    }
+    L.push(`        <calibration type="${s.type ?? 'frame'}" class="adjusted">`)
+    L.push(`          <resolution width="${s.width}" height="${s.height}"/>`)
+    for (const k of ['f', 'cx', 'cy', 'k1', 'k2', 'k3', 'k4', 'p1', 'p2']) {
+      if (k === 'f' || k === 'cx' || k === 'cy' || term(c[k])) L.push(`          <${k}>${n17(term(c[k]))}</${k}>`)
+    }
+    L.push('        </calibration>')
+    L.push('      </sensor>')
+  }
+  L.push('    </sensors>')
+  L.push(`    <cameras next_id="${cameras.length}" next_group_id="0">`)
+  for (const c of cameras) {
+    L.push(
+      `      <camera id="${c.id}" sensor_id="${c.sensorId}" label="${esc(c.label)}"${c.enabled === false ? ' enabled="false"' : ''}>`,
+    )
+    if (c.transform) L.push(`        <transform>${c.transform.map(n17).join(' ')}</transform>`)
+    L.push('      </camera>')
+  }
+  L.push('    </cameras>')
+  L.push(`    <markers next_id="${markers.length}" next_group_id="0">`)
+  for (const m of markers) {
+    const r = m.reference
+    L.push(`      <marker id="${m.id}" label="${esc(m.label)}">`)
+    if (r) {
+      const acc = [r.sxy != null ? ` sxy="${n17(r.sxy)}"` : '', r.sz != null ? ` sz="${n17(r.sz)}"` : ''].join('')
+      L.push(
+        `        <reference x="${n17(r.x)}" y="${n17(r.y)}" z="${n17(r.z ?? 0)}"${acc} enabled="${r.enabled ? 'true' : 'false'}"/>`,
+      )
+    }
+    L.push('      </marker>')
+  }
+  L.push('    </markers>')
+  if (chunk) {
+    L.push('    <transform>')
+    L.push(`      <rotation locked="true">${chunk.R.flat().map(n17).join(' ')}</rotation>`)
+    L.push(`      <translation locked="true">${chunk.t.map(n17).join(' ')}</translation>`)
+    L.push(`      <scale locked="true">${n17(chunk.s)}</scale>`)
+    L.push('    </transform>')
+  }
+  L.push(`    <reference>${escText(wkt)}</reference>`)
+  L.push('    <frames next_id="1">')
+  L.push('      <frame id="0">')
+  L.push('        <markers>')
+  for (const m of markers) {
+    if (!m.locations.length) continue
+    L.push(`          <marker marker_id="${m.id}">`)
+    for (const l of m.locations)
+      L.push(`            <location camera_id="${l.cameraId}" pinned="true" x="${n17(l.x)}" y="${n17(l.y)}"/>`)
+    L.push('          </marker>')
+  }
+  L.push('        </markers>')
+  L.push('      </frame>')
+  L.push('    </frames>')
+  L.push('  </chunk>')
+  L.push('</document>')
+  return L.join('\n') + '\n'
+}
