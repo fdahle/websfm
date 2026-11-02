@@ -2,10 +2,13 @@ import { test, expect } from './fixtures.js'
 
 // Tools ▸ Products ▸ Co-register DEM… (core/products/demCoregistration.js): a DEM 6 m
 // east and 2 m above a reference DEM of the same ridged terrain is moved back onto it,
-// as a co-registered copy, on the stable ground a polygon layer marks.
-test('co-registers a DEM onto a reference DEM as a copy', async ({ page, browserName }) => {
-  test.skip(browserName !== 'chromium', 'one browser is enough for the dialog logic')
-  test.setTimeout(120_000)
+// on the stable ground a polygon layer marks, as a co-registered copy or by moving the
+// georeference.
+
+// A project in EPSG:32633 with a reference DEM of ridged terrain (10 m cells over 4 km),
+// a DEM of the same terrain 6 m east and 2 m high inside it (20 m cells), and a polygon
+// layer "rock" over its western two thirds. → { errors, ox, oy }
+async function setupTerrain(page) {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await page.goto('/')
@@ -96,6 +99,13 @@ test('co-registers a DEM onto a reference DEM as a copy', async ({ page, browser
     )
     return { ox, oy }
   })
+  return { errors, ...setup }
+}
+
+test('co-registers a DEM onto a reference DEM as a copy', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the dialog logic')
+  test.setTimeout(120_000)
+  const { errors, ...setup } = await setupTerrain(page)
 
   await page.evaluate(async () => {
     const { useModalsStore } = await import('/src/stores/useModalsStore.js')
@@ -140,5 +150,111 @@ test('co-registers a DEM onto a reference DEM as a copy', async ({ page, browser
   expect(after.steps).toEqual({ horizontal: true, vertical: true, tilt: 'off' })
   expect(after.nmad[1]).toBeLessThan(after.nmad[0] / 4)
   expect(after.hasPreview).toBe(true)
+  expect(errors).toEqual([])
+})
+
+// Applied to the georeference: a DEM built in an earlier georeference cannot move it; one
+// built in the current fit moves the fit by (−6, 0, −2) m, stays usable for a new move in
+// place of that one, and Remove puts the fit back.
+test('co-registers the georeference by a DEM built in it', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough for the dialog logic')
+  test.setTimeout(120_000)
+  const { errors } = await setupTerrain(page)
+
+  // An identity georeference, valid for this (empty) model: its evidence key is the
+  // one georeferencing.js computes, and the DEM stamped as built in an earlier one.
+  const fit = await page.evaluate(async () => {
+    const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
+    const { usePosesStore } = await import('/src/stores/usePosesStore.js')
+    const recon = useReconstructionStore()
+    const crs = useProjectsStore().currentCrs
+    const evidenceKey = JSON.stringify({
+      crs,
+      model: null,
+      cameras: [],
+      images: useImagesStore().images.map((im) => [im.id, im.uuid]),
+      gcps: useGcpsStore().gcps,
+      poses: usePosesStore().poses,
+    })
+    const I = [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ]
+    recon.georef = { evidenceKey, sim: { scale: 1, R: I, t: [0, 0, 0] }, crs, rms: 0, count: 3, method: 'gcps' }
+    await new Promise((r) => setTimeout(r, 0))
+    // What the store's frameStampOf records for a product built now.
+    const r = await recon.effectiveFrameSpec()
+    const stamp = { source: r.source, scale: r.scale, crs: r.crs, unit: r.unit, frameKey: JSON.stringify(r.frameSpec) }
+    const old = JSON.parse(stamp.frameKey)
+    old.t = [5, 0, 0]
+    recon.dem = { ...recon.dem, frameStamp: { ...stamp, frameKey: JSON.stringify(old) } }
+    return { valid: !!recon.georef, stamp }
+  })
+  expect(fit.valid).toBe(true)
+
+  const open = () =>
+    page.evaluate(async () => {
+      const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+      useModalsStore().toolModal = 'coregister-dem'
+    })
+  await open()
+  const dialog = page.getByRole('dialog', { name: 'Co-register DEM' })
+  await dialog.locator('#coreg-stable').selectOption({ label: 'rock' })
+  await dialog.getByRole('button', { name: 'The georeference' }).click()
+  await expect(dialog.locator('.warn-box')).toContainText('was built before the georeference last changed')
+  await expect(dialog.getByRole('button', { name: 'Co-register', exact: true })).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  // Built in the current fit: it moves the georeference.
+  await page.evaluate(async (stamp) => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const recon = useReconstructionStore()
+    recon.dem = { ...recon.dem, frameStamp: stamp }
+  }, fit.stamp)
+  await open()
+  await dialog.locator('#coreg-stable').selectOption({ label: 'rock' })
+  await dialog.getByRole('button', { name: 'The georeference' }).click()
+  await expect(dialog).toContainText('The georeference moves onto "reference.tif": the DEMs and orthophotos')
+  await dialog.getByRole('button', { name: 'Co-register', exact: true }).click()
+  await expect(page.locator('.toast', { hasText: 'Georeference co-registered' })).toBeVisible({ timeout: 30_000 })
+
+  const moved = await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const recon = useReconstructionStore()
+    return {
+      coregistered: !!recon.georef?.coregistered,
+      t: recon.georef?.sim.t,
+      move: recon.coregistration?.move,
+      demStale: recon.productFrameStatus(recon.dem).stale,
+      dems: recon.rasterProducts.filter((p) => p.kind === 'dem').length,
+    }
+  })
+  expect(moved.coregistered).toBe(true)
+  expect(moved.move[0]).toBeCloseTo(-6, 0)
+  expect(Math.abs(moved.move[1])).toBeLessThan(0.5)
+  expect(moved.move[2]).toBeCloseTo(-2, 0)
+  expect(moved.t[0]).toBeCloseTo(-6, 0)
+  expect(moved.t[2]).toBeCloseTo(-2, 0)
+  expect(moved.demStale).toBe(true) // built before the move: outdated, but in the fit
+  expect(moved.dems).toBe(1) // no copy
+
+  // The DEM was built in the fit: a new move replaces the current one; Remove undoes it.
+  await open()
+  await expect(dialog).toContainText('The georeference is co-registered to "reference.tif" (moved E −6')
+  await dialog.locator('#coreg-stable').selectOption({ label: 'rock' })
+  await dialog.getByRole('button', { name: 'The georeference' }).click()
+  await expect(dialog).toContainText('in place of the current move')
+  await expect(dialog.getByRole('button', { name: 'Co-register', exact: true })).toBeEnabled()
+  await dialog.getByRole('button', { name: 'Remove' }).click()
+  const removed = await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const recon = useReconstructionStore()
+    return { coregistered: !!recon.georef?.coregistered, t: recon.georef?.sim.t, c: recon.coregistration }
+  })
+  expect(removed).toEqual({ coregistered: false, t: [0, 0, 0], c: null })
   expect(errors).toEqual([])
 })
