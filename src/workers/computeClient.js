@@ -311,6 +311,9 @@ export const readRasterWindow = (file, options = {}) => call('readRasterWindow',
 // Find GCPs ▸ Sentinel-2 (workers/ops/io.js): a scene window read over HTTP ranges,
 // back as GeoTIFF bytes.
 export const fetchSentinel2Window = (request) => call('fetchSentinel2Window', [request])
+// Co-register DEM ▸ Copernicus DEM (workers/ops/io.js): the 1° tiles over a box, joined,
+// back as GeoTIFF bytes.
+export const fetchCopDemMosaic = (request) => call('fetchCopDemMosaic', [request])
 // Find GCPs (workers/ops/referenceGcps.js): the ortho's COG / preview and the
 // reference's original File go over as handles; the worker reads windows itself.
 export const findReferenceMatches = (request, { onLog } = {}) =>

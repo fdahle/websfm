@@ -643,6 +643,16 @@ export const SENTINEL2_TUNING = {
   hiQ: 0.995,
 }
 
+// Co-register DEM ▸ Copernicus DEM (core/copernicusDem.js, workers/ops/io.js
+// fetchCopDemMosaic). The box read around the DEM: a tenth of its larger side, at least
+// `minPadDeg` (about 1 km), so a DEM that is shifted still lies on the reference; at most
+// `maxPx` 1″ cells a side (about 180 km, a 140 MB Float32 grid).
+export const COP_DEM_TUNING = {
+  pad: 0.1,
+  minPadDeg: 0.01,
+  maxPx: 6000,
+}
+
 // Classify Points ▸ vegetation and buildings (core/products/pointClasses.js). Lengths
 // in metres. The features are computed on voxel centroids: `voxel` sets the cost (a
 // dense cloud's points collapse to a few per voxel), `radius` the neighbourhood the

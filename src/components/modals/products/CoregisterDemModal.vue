@@ -9,6 +9,8 @@ import WarnBox from '../ui/WarnBox.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { COREG_DEFAULTS } from '../../../core/defaults.user.js'
 import { coregisterEffects } from '../../../core/stepEffects/coregister.js'
+import { fetchCopernicusDem } from '../../../composables/useCopernicusDem.js'
+import { useLog } from '../../../composables/useLog.js'
 
 // Co-register DEM (Tools ▸ Products ▾): a DEM against a reference DEM on stable ground,
 // the steps xDEM chains — Nuth & Kääb's horizontal shift, the vertical shift, a tilt —
@@ -63,6 +65,25 @@ const effects = computed(() =>
   }),
 )
 
+// Without a reference DEM of one's own: the Copernicus DEM over this DEM, fetched and
+// imported as one (composables/useCopernicusDem.js), then chosen here.
+const { log } = useLog()
+const fetching = ref(false),
+  fetchError = ref('')
+const demInCrs = computed(() => !!dem.value?.crs && dem.value.crs !== 'local')
+async function fetchCopDem() {
+  fetching.value = true
+  fetchError.value = ''
+  try {
+    const meta = await fetchCopernicusDem(dem.value, { onLog: log })
+    referenceId.value = meta.id
+  } catch (err) {
+    fetchError.value = err.message
+  } finally {
+    fetching.value = false
+  }
+}
+
 function run() {
   emit('run', {
     demId: demId.value,
@@ -94,6 +115,18 @@ function run() {
             <option v-for="r in references" :key="r.id" :value="r.id">{{ r.name }}</option>
           </select>
         </SettingsField>
+        <SettingsField
+          :hint="
+            demInCrs
+              ? 'Or fetch the free global Copernicus DEM (from TanDEM-X) over this DEM and use it as the reference.'
+              : 'The DEM has no coordinate system, so no global DEM can be fetched for it.'
+          "
+        >
+          <button class="btn" type="button" :disabled="!demInCrs || fetching" @click="fetchCopDem">
+            {{ fetching ? 'Fetching the Copernicus DEM…' : 'Copernicus DEM (30 m)' }}
+          </button>
+        </SettingsField>
+        <p v-if="fetchError" class="coreg-error" role="alert">{{ fetchError }}</p>
       </SettingsGroup>
 
       <SettingsStep step="1" title="Stable ground" :effect="effects.stable">
@@ -165,6 +198,11 @@ function run() {
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
+.coreg-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
 .current-row {
   display: flex;
   align-items: center;

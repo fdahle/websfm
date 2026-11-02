@@ -2,6 +2,7 @@ import { assembleCog, geoKeysForEpsg, writeCogDeflate } from '../../core/product
 import { attributeBuffers } from '../../core/io/cloudAttributes.js'
 import { GeoTIFF, fromArrayBuffer, fromBlob, fromUrl } from 'geotiff'
 import { stretchBands } from '../../core/sentinel2.js'
+import { mosaicDem, mosaicGrid, tileWindow } from '../../core/copernicusDem.js'
 import { rasterWindow, overviewLayout } from '../../core/io/rasterWindow.js'
 import { edgeOriginFromTags, nodataForSampleType } from '../../core/io/rasterSample.js'
 import { parseCloudSource, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
@@ -81,6 +82,67 @@ export function makeIoOps({ lazCodec = null } = {}) {
     )
     const buffer = bytes.buffer.byteLength === bytes.byteLength ? bytes.buffer : bytes.slice().buffer
     return { result: { bytes: buffer, lo, hi }, transfer: [buffer] }
+  }
+  // Co-register DEM ▸ Copernicus DEM (core/copernicusDem.js): the 1° tiles over a box,
+  // each read over HTTP ranges for its window only, joined on the finest tile grid and
+  // written as a tiled, deflated Float32 GeoTIFF in WGS 84 (EPSG:4326, NaN no data),
+  // ready to import as a reference DEM. One worker: the reads run at once and are bound
+  // by the network, and the join is one pass over the grid.
+  // args: [{ hrefs: string[] (signed), bbox: [w, s, e, n], maxPx }]
+  //   → { bytes: ArrayBuffer, width, height, tiles, min, max }
+  async function fetchCopDemMosaic([{ hrefs, bbox, maxPx }]) {
+    const windows = (
+      await Promise.all(
+        hrefs.map(async (href) => {
+          const image = await (await fromUrl(href)).getImage()
+          const [west, south, east, north] = image.getBoundingBox()
+          const width = image.getWidth(),
+            height = image.getHeight()
+          const tile = { west, north, dx: (east - west) / width, dy: (north - south) / height, width, height }
+          const win = tileWindow(tile, bbox)
+          if (!win) return null
+          const [data] = await image.readRasters({ window: [win.x0, win.y0, win.x1, win.y1], samples: [0] })
+          return {
+            west: west + win.x0 * tile.dx,
+            north: north - win.y0 * tile.dy,
+            dx: tile.dx,
+            dy: tile.dy,
+            width: win.x1 - win.x0,
+            height: win.y1 - win.y0,
+            data: data instanceof Float32Array ? data : Float32Array.from(data),
+          }
+        }),
+      )
+    ).filter(Boolean)
+    const grid = mosaicGrid(windows, bbox, { maxPx })
+    const data = mosaicDem(windows, grid)
+    let min = Infinity,
+      max = -Infinity
+    for (const v of data) {
+      if (v < min) min = v
+      if (v > max) max = v
+    }
+    if (!(max >= min)) throw new Error('The Copernicus DEM has no heights over this area')
+    const bytes = await writeCogDeflate(
+      {
+        width: grid.width,
+        height: grid.height,
+        samples: [{ bits: 32, format: 3 }],
+        photometric: 1,
+        data,
+        pixelScale: [grid.dx, grid.dy, 0],
+        tiepoint: [0, 0, 0, grid.west, grid.north, 0],
+        geoKeys: geoKeysForEpsg(4326, true),
+        gdalNoData: 'nan',
+        tileSize: 256,
+      },
+      deflateBytes,
+    )
+    const buffer = bytes.buffer.byteLength === bytes.byteLength ? bytes.buffer : bytes.slice().buffer
+    return {
+      result: { bytes: buffer, width: grid.width, height: grid.height, tiles: windows.length, min, max },
+      transfer: [buffer],
+    }
   }
   async function readRasterWindow([options]) {
     const result = await readWindowFromFile(options.file, options)
@@ -564,7 +626,15 @@ export function makeIoOps({ lazCodec = null } = {}) {
     return { result: { file: new Blob(parts, { type: 'image/tiff' }), reused: false, ms: performance.now() - started } }
   }
 
-  return { parseCloud, parseRaster, restyleRasterPreview, readRasterWindow, prepareRasterCog, fetchSentinel2Window }
+  return {
+    parseCloud,
+    parseRaster,
+    restyleRasterPreview,
+    readRasterWindow,
+    prepareRasterCog,
+    fetchSentinel2Window,
+    fetchCopDemMosaic,
+  }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

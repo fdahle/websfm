@@ -20,7 +20,9 @@ DEM…** opens this dialog with the same reference and stable ground.
 <!-- param: reference  default: The first imported -->
 The DEM to move onto (**Import ▸ Reference DEM / Ortho**): a lidar survey or a global
 DEM. Its [vertical datum](help:vertical-datum) is converted when both DEMs declare one;
-declare it, or the vertical shift absorbs the datum difference.
+declare it, or the vertical shift absorbs the datum difference. Without one of your own,
+**Copernicus DEM (30 m)** fetches the free global [Copernicus DEM](help:copernicus-dem)
+over the DEM and chooses it: a few metres accurate, enough to find a larger offset.
 
 ## Stable ground
 <!-- param: stableArea  default: All cells -->

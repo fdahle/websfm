@@ -51,6 +51,17 @@ Notable changes to websfm. The format follows
   same photos is at 5.0 m as built and 4.5 m once co-registered the same way, so the
   step closes most of the gap, not all of it.
 
+- **Co-register a DEM without a reference of your own.** In Tools ▸ Products ▸
+  **Co-register DEM…**, **Copernicus DEM (30 m)** fetches the free global Copernicus DEM
+  (made from TanDEM-X) over the DEM and uses it as the reference DEM. Only the part of
+  the 1° tiles under the DEM is read, from Microsoft's Planetary Computer, which needs no
+  account; the reference is imported with its datum (EGM2008) and its stated accuracy
+  (σ 2.8 m horizontal, 2.4 m vertical). TanDEM-X itself needs a DLR login, and the AWS
+  copy of the Copernicus DEM cannot be read from a browser (no CORS).
+- **A preview of each Sentinel-2 scene.** Find GCPs ▸ **Sentinel-2…** shows the chosen
+  scene's whole tile beside the list, with a box on the window that will be read, so
+  cloud over the area shows before you fetch it. The preview is the catalogue's own
+  343 px quicklook, about 45 KB a scene.
 ### Changed
 - **Every project on the start screen gets the same line.** Under each project's name
   come, in fixed columns, an icon for where it is stored (a folder on disk or this
@@ -92,6 +103,14 @@ Notable changes to websfm. The format follows
   depth file twice at once, once with the image's preview and once in the sweep of all
   maps, and the browser refuses one of two overlapping deletes of the same file (22 of
   400 in a test). Deletes of one file now wait their turn, as its writes already did.
+- **Retry faint images shows its checkbox again.** In Detect Features ▸ Advanced ▸
+  *3 · Detect (SIFT)*, the checkbox sat alone in the middle of the dialog, away from
+  its label; it is now an **Enabled** checkbox under it, like the others. It is on by
+  default.
+- **Setting help stays on screen.** A setting's help box that fits neither below nor
+  above its label (*Repair a split graph* in Match Features) now moves up until all of
+  it, **Read more** included, is in the window, and scrolls when it is taller than the
+  window.
 - **DISK without a GPU error.** Detect Features and Find GCPs now run DISK on the CPU
   from the start, instead of first trying the GPU, logging an ONNX Runtime error
   ("MaxPool … The Indices output is not supported yet") and then falling back to the CPU.
