@@ -66,6 +66,7 @@ export function createSparseRun({
   supersedeRestore,
   upsertSparseCloud,
   liveSparse,
+  sparseRunning,
   mainSparseCloud,
   editClouds,
   hasSparseProducts,
@@ -192,6 +193,7 @@ export function createSparseRun({
     liveInModelFrame = !!base
     supersedeRestore()
     reconStatus.value = 'running'
+    sparseRunning.value = true
     let stopMemoryWatchdog = () => {}
     const runProjectId = projects.currentProjectId
 
@@ -582,7 +584,8 @@ export function createSparseRun({
         },
         transfer: reconstructionTransfers,
       })
-      liveSparse.value = null
+      // The last snapshot stays on screen until the run ends (finally), so the view
+      // goes from the live model to the finished one without the earlier clouds between.
       stopMemoryWatchdog()
       stopMemoryWatchdog = () => {}
       const result = unpackReconstructionResult(packedResult)
@@ -733,6 +736,7 @@ export function createSparseRun({
     } finally {
       stopMemoryWatchdog()
       liveSparse.value = null
+      sparseRunning.value = false
     }
   }
 

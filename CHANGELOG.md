@@ -57,6 +57,11 @@ Notable changes to websfm. The format follows
   browser, the folder's name on hover), its CRS (**Local** without one), its size and
   when it was last edited. A folder project now shows its size too, whenever the browser
   can still read the folder without asking.
+- **The live sparse view stays put.** While Sparse Reconstruction runs with the 3D view
+  in front, the progress card stays in the view's corner from start to end, and the
+  rest of the app is dimmed only lightly. The card used to start in the middle, move to
+  the corner with the first cameras and come back for the last steps, and the earlier
+  clouds flashed up before the finished model replaced the live one.
 
 ### Performance
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps

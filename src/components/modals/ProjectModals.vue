@@ -44,7 +44,7 @@ const {
   setActive: setActiveWorkflow,
 } = useWorkflowsStore()
 const reconstructionStore = useReconstructionStore()
-const { crsSuggestion, liveSparse } = storeToRefs(reconstructionStore)
+const { crsSuggestion, sparseRunning } = storeToRefs(reconstructionStore)
 const {
   aboutOpen,
   debugSummaryOpen,
@@ -113,9 +113,11 @@ const {
   activeTabId,
 } = useAppContext()
 // A sparse run draws its model as it grows (liveSparse): over the 3D view, that view
-// stays lit and orbitable, the rest is dimmed and locked, and the bar docks in its corner.
+// stays lit and orbitable, the rest is dimmed and locked, and the bar docks in its
+// corner. For the whole run (sparseRunning), not only while a model shows: the card
+// would otherwise start centred, dock with the first cameras and go back for the end.
 const progressSpotlight = computed(() =>
-  liveSparse.value && activeTabId.value === 'viewer' ? '[data-run-spotlight]' : '',
+  sparseRunning.value && activeTabId.value === 'viewer' ? '[data-run-spotlight]' : '',
 )
 </script>
 

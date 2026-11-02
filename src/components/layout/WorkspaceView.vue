@@ -233,7 +233,7 @@ watch(viewerRef, () => {
 // The live view stays usable during the run (ProgressModal's spotlight), for looking
 // only: a tool left open would put its toolbox, and its Delete or Export, within reach.
 watch(
-  () => !!reconstructionStore.liveSparse,
+  () => reconstructionStore.sparseRunning,
   (live) => {
     if (!live) return
     viewerRef.value?.exitTools?.()

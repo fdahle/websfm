@@ -68,21 +68,30 @@ const elapsed = computed(() => formatClock((now.value - startedAt.value) / 1000)
 
 // ── Spotlight: dim and lock everything but one element ───────────────────────
 // A transparent click-blocker over a fully visible app read as "the bar is just
-// sitting there, go ahead and click" — then nothing answered. The scrim now says
-// "locked" everywhere except the lit element, whose own input (orbit, zoom) passes
+// sitting there, go ahead and click" — then nothing answered; a dark one turned the
+// whole app grey around the view. The scrim now dims lightly and says "locked"
+// (cursor, title) everywhere except the lit element, whose own input (orbit, zoom) passes
 // straight through: clip-path also clips hit-testing, so the hole is genuinely open.
 const hole = ref(null) // { x, y, w, h } in viewport px
 let holeObserver = null
+// Once docked, the card stays docked until it closes: the run's last moment (the bar
+// filled, `complete`) comes after the store has said the run is over, and undocking
+// then would send the card to the middle just before it goes.
+let docked = ''
+const spotlightSelector = () => props.spotlight || docked
 function measureHole() {
-  const el = props.spotlight ? document.querySelector(props.spotlight) : null
+  const sel = spotlightSelector()
+  const el = sel ? document.querySelector(sel) : null
   const r = el?.getBoundingClientRect()
   hole.value = r && r.width > 0 && r.height > 0 ? { x: r.left, y: r.top, w: r.width, h: r.height } : null
+  if (hole.value && props.spotlight) docked = props.spotlight
 }
 function watchHole() {
   holeObserver?.disconnect()
   holeObserver = null
   measureHole()
-  const el = props.spotlight ? document.querySelector(props.spotlight) : null
+  const sel = spotlightSelector()
+  const el = sel ? document.querySelector(sel) : null
   if (el && typeof ResizeObserver !== 'undefined') {
     holeObserver = new ResizeObserver(measureHole)
     holeObserver.observe(el)
@@ -337,7 +346,13 @@ onBeforeUnmount(() => {
   <!-- Exempt from the dialog's inert sweep: it is the blocker, and says so on hover. -->
   <div v-if="hole" class="scrim" :style="scrimStyle" data-modal-exempt title="Available when the run finishes"></div>
   <div class="overlay" :class="{ docked: !!hole }">
-    <div class="modal" role="dialog" aria-modal="true" :data-modal-keep="hole ? spotlight : null" :style="cardStyle">
+    <div
+      class="modal"
+      role="dialog"
+      aria-modal="true"
+      :data-modal-keep="hole ? spotlightSelector() : null"
+      :style="cardStyle"
+    >
       <div class="modal-title">{{ title }}</div>
       <div class="progress-row">
         <div class="progress-track">
@@ -394,10 +409,12 @@ onBeforeUnmount(() => {
   z-index: 300;
 }
 
+/* Light: the panels stay readable during the run; the not-allowed cursor and the
+   card's hint say they are locked. */
 .scrim {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.16);
   z-index: 300;
   cursor: not-allowed;
 }

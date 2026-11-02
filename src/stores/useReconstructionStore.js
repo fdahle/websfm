@@ -329,6 +329,10 @@ export const useReconstructionStore = registerProjectStore(
     // The model a running sparse reconstruction has built so far, { cameras, points },
     // for the live 3D view; null when none is running. Never persisted.
     const liveSparse = shallowRef(null)
+    // True from the start of a sparse reconstruction to its end, before the first
+    // cameras and after the last snapshot too: the progress card docks in the 3D
+    // view's corner for the whole run (ProjectModals.vue), not only while a model shows.
+    const sparseRunning = shallowRef(false)
     const withPreviewUrl = (p) =>
       p?.previewBlob && !p.previewUrl ? { ...p, previewUrl: URL.createObjectURL(p.previewBlob) } : p
     // A preview URL no record holds any more (replaced, removed, cleared) is revoked.
@@ -1198,6 +1202,7 @@ export const useReconstructionStore = registerProjectStore(
       supersedeRestore,
       upsertSparseCloud,
       liveSparse,
+      sparseRunning,
       mainSparseCloud,
       editClouds,
       hasSparseProducts,
@@ -1462,6 +1467,7 @@ export const useReconstructionStore = registerProjectStore(
       points3d,
       reconStatus,
       liveSparse,
+      sparseRunning,
       depthMaps,
       depthMapsMeta,
       depthMapsKey,
