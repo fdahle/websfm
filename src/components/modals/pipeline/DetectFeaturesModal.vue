@@ -617,7 +617,9 @@ function onShellClose() {
           <template #label>
             <FieldHelp op="detect-features" param="faintRetry">Retry faint images</FieldHelp>
           </template>
-          <input id="faintRetry" v-model="siftSettings.faintRetry" type="checkbox" />
+          <label class="checkbox-row"
+            ><input id="faintRetry" v-model="siftSettings.faintRetry" type="checkbox" class="checkbox" /> Enabled</label
+          >
         </SettingsField>
       </SettingsStep>
 
